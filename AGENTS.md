@@ -80,12 +80,14 @@ Then append a terse entry to `log/devlog.md` (what landed, numbers, what's still
 
 ## 7. Where things are tracked
 
+
 - `docs/roadmap.md`: milestones M0–M12, status and the current focus.
 - `docs/parity.md`: generated Photoshop menu coverage.
 - `docs/releasing.md`: cutting a release (`cargo xtask version`, the `release` branch), signing secrets, packaging scripts in `packaging/`.
 - `../craftrules/release/playbook.md`: how every storytold app builds signed release binaries (the canonical recipe; `docs/release-playbook.md` just points there); `docs/releasing.md` is PhotoCraft's specifics.
 - `plan/` (local, gitignored): research, parity plan, execution plan, estimates.
 - `log/` (local, gitignored): the dev log.
+- 
 
 ## 8. Keeping the native format complete
 
