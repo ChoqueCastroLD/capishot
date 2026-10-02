@@ -76,6 +76,9 @@ pub struct DocM {
     pub last_applied_comp: Option<u32>,
     #[serde(default)]
     pub last_document_state: Option<LayerCompM>,
+    /// Image › Variables and Data Sets.
+    #[serde(default)]
+    pub variables: photocraft_doc::Variables,
     /// Image › Analysis: measurement scale, count groups, ruler.
     #[serde(default)]
     pub measurement: photocraft_doc::Measurement,

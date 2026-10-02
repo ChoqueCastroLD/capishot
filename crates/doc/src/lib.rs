@@ -14,6 +14,7 @@ pub mod effects;
 pub mod mode;
 pub mod pattern;
 pub mod slices;
+pub mod variables;
 pub mod text;
 pub mod text_styles;
 pub mod vector;
@@ -33,6 +34,7 @@ pub use photocraft_geom::{Affine, Rect, Size};
 pub use photocraft_raster::Surface;
 pub use mode::{ColorTable, Duotone, DuotoneInk, StackMode};
 pub use pattern::Pattern;
+pub use variables::{DataSet, DataValue, PixelAlign, PixelMethod, VarKind, VariableDef, Variables};
 pub use slices::{Slice, SliceKind, SliceOrigin, Slices};
 pub use text_styles::TextStyles;
 pub use vector::{
@@ -609,6 +611,8 @@ pub struct Document {
     pub text_styles: TextStyles,
     /// Web slices (Slice tool, layer-based slices; PSD resource 1050). Auto slices are derived.
     pub slices: Slices,
+    /// Image › Variables and Data Sets (data-driven graphics).
+    pub variables: Variables,
 }
 
 /// Where a layer lives in the tree: indices from the root down.
@@ -644,6 +648,7 @@ impl Document {
             notes: Vec::new(),
             text_styles: TextStyles::default(),
             slices: Slices::default(),
+            variables: Variables::default(),
         }
     }
 
