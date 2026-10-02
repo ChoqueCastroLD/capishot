@@ -4,7 +4,9 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started. Updated 2026-10-
 
 **Parity metric:** `cargo xtask parity` measures how much of Photoshop's menu tree is live and
 writes [`parity.md`](parity.md). It is the headline number for "how close are we", next to the PSD
-composite oracle and the test count.
+composite oracle and the test count. For the weighted feature-parity estimate (~82% overall) and the
+remaining Opus 5.5 effort (~25–40 wall-clock hours to a 95%, ships-for-most state), see
+[`parity-estimate.md`](parity-estimate.md).
 
 | M | Status | Where we are |
 |---|---|---|
