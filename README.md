@@ -318,3 +318,6 @@ Every artwork shown is in the public domain (Wikimedia Commons, NASA, U.S. Natio
   <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
   <sub>Made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
 </p>
+
+
+ArtCraft
