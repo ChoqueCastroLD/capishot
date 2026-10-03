@@ -159,13 +159,13 @@ fn apply_to_doc(doc: &mut Document, vars: &Variables, set: &DataSet) -> Result<(
                 }
             }
             (VarKind::TextReplacement, VarValue::Text(text)) => {
-                if let Some(l) = doc.layer_mut(def.layer) {
-                    if let LayerContent::Text(t) = &mut l.content {
-                        t.text = text.clone();
-                        t.cache = None; // force re-render
-                        t.runs.clear(); // re-flow as one run from the summary style
-                        t.paragraphs.clear();
-                    }
+                if let Some(l) = doc.layer_mut(def.layer)
+                    && let LayerContent::Text(t) = &mut l.content
+                {
+                    t.text = text.clone();
+                    t.cache = None; // force re-render
+                    t.runs.clear(); // re-flow as one run from the summary style
+                    t.paragraphs.clear();
                 }
             }
             (VarKind::PixelReplacement { method, align, clip }, VarValue::Pixels(path)) => {
@@ -222,10 +222,10 @@ fn replace_pixels(doc: &mut Document, layer: LayerId, path: &str, method: PixelM
     let dy = (target.y0 as f64 + (th - sh) * fy).round() as i32;
     let placed = translate_surface(&scaled, dx, dy);
     let placed = if clip { photocraft_algo::resample::crop_surface(&placed, target) } else { placed };
-    if let Some(l) = doc.layer_mut(layer) {
-        if let LayerContent::Raster(sfc) = &mut l.content {
-            *sfc = placed;
-        }
+    if let Some(l) = doc.layer_mut(layer)
+        && let LayerContent::Raster(sfc) = &mut l.content
+    {
+        *sfc = placed;
     }
     Ok(())
 }
@@ -384,19 +384,19 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         spec!("image.variables.define", "Define…", &["Image", "Variables"],
             "{defs:[{name, layer:id, type:visibility|textReplacement|pixelReplacement, method?:fit|fill|asIs|conform, align?, clip?}]} → {defs,dataSets,active}",
-            |s, p| define(s, &p)),
+            |s, p| define(s, p)),
         spec!("image.variables.dataSets", "Data Sets…", &["Image", "Variables"],
             "{dataSets:[{name, values:[{variable, kind:visibility|text|pixels, value}]}], append?} → {defs,dataSets,active}",
-            |s, p| data_sets(s, &p)),
+            |s, p| data_sets(s, p)),
         spec!("image.applyDataSet", "Apply Data Set…", &["Image"],
             "{name|index} → {applied, index}: sets layer visibility/text/pixels from the data set (one history step)",
-            |s, p| apply_data_set(s, &p)),
+            |s, p| apply_data_set(s, p)),
         spec!("file.import.variableDataSets", "Variable Data Sets…", &["File", "Import"],
             "{path, delimiter?} → {imported}: CSV header = variable names, each row a data set (first column may be the data-set name)",
-            |s, p| import_data_sets(s, &p)),
+            |s, p| import_data_sets(s, p)),
         spec!("file.export.dataSetsAsFiles", "Data Sets as Files…", &["File", "Export"],
             "{dir, format?:png, dataSets?[names]} → {files,count}: apply each data set and export the flattened document",
-            |s, p| export_as_files(s, &p)),
+            |s, p| export_as_files(s, p)),
         CommandSpec { id: "variables.list", label: "List Variables", menu: &[], shortcut: None, journal: false,
             params: "{} → {defs,dataSets,active}", enabled: has_doc, run: |s, _| list(s) },
     ]

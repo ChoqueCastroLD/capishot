@@ -136,6 +136,18 @@ pub(crate) fn par_rows<T: Send + Sync>(buf: &mut [T], w: usize, ch: usize, f: im
     buf.chunks_mut(stride).enumerate().for_each(|(y, row)| f(y, row));
 }
 
+/// Like [`par_rows`] but over two row-aligned buffers in lockstep (e.g. index + pixels).
+pub(crate) fn par_rows2<A: Send, B: Send>(a: &mut [A], b: &mut [B], w: usize, f: impl Fn(usize, &mut [A], &mut [B]) + Sync + Send) {
+    let s = w.max(1);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        a.par_chunks_mut(s).zip(b.par_chunks_mut(s)).enumerate().for_each(|(y, (ar, br))| f(y, ar, br));
+    }
+    #[cfg(target_arch = "wasm32")]
+    a.chunks_mut(s).zip(b.chunks_mut(s)).enumerate().for_each(|(y, (ar, br))| f(y, ar, br));
+}
+
 /// Maps `f` over `0..n` (in parallel on native targets), keeping order.
 pub(crate) fn par_map<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync + Send) -> Vec<T> {
     #[cfg(not(target_arch = "wasm32"))]

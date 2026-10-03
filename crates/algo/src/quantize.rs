@@ -5,7 +5,6 @@
 //! Buffers are straight RGBA in 0..=1, row-major. Median cut follows Heckbert (1982); k-means
 //! refinement is Lloyd's algorithm; error diffusion is Floyd & Steinberg (1976).
 
-use rayon::prelude::*;
 use photocraft_color::convert::srgb_to_lab;
 use serde::{Deserialize, Serialize};
 
@@ -419,30 +418,31 @@ pub fn quantize(
     // None / Pattern / Noise dither have no cross-pixel dependency: map every pixel in parallel.
     // (Diffusion propagates error between pixels, so it stays serial below.)
     if dither != Dither::Diffusion {
-        idx.par_iter_mut().zip(px.par_iter_mut()).enumerate().for_each(|(i, (ip, p))| {
-            let (x, y) = (i % w, i / w);
-            let pv = *p;
-            if pv[3] < 0.5 {
-                if let Some(t) = transparent {
-                    *ip = t as u8;
-                    *p = [0.0, 0.0, 0.0, 0.0];
-                    return;
+        crate::photo_util::par_rows2(&mut idx, px, w, |y, idxrow, pxrow| {
+            for (x, (ip, p)) in idxrow.iter_mut().zip(pxrow.iter_mut()).enumerate() {
+                let pv = *p;
+                if pv[3] < 0.5 {
+                    if let Some(t) = transparent {
+                        *ip = t as u8;
+                        *p = [0.0, 0.0, 0.0, 0.0];
+                        continue;
+                    }
+                    if pv[3] <= 0.0 {
+                        continue;
+                    }
                 }
-                if pv[3] <= 0.0 {
-                    return;
+                let mut c = [pv[0], pv[1], pv[2]];
+                match dither {
+                    Dither::Pattern => c = c.map(|v| v + bayer8(x, y) * spread),
+                    Dither::Noise => c = c.map(|v| v + (hash01(x, y, 7) - 0.5) * spread),
+                    _ => {}
                 }
+                let c = c.map(|v| v.clamp(0.0, 1.0));
+                let k = nearest(pal, c);
+                *ip = k as u8;
+                let e = pal[k].map(|v| f32::from(v) / 255.0);
+                *p = [e[0], e[1], e[2], if transparent.is_some() { 1.0 } else { pv[3] }];
             }
-            let mut c = [pv[0], pv[1], pv[2]];
-            match dither {
-                Dither::Pattern => c = c.map(|v| v + bayer8(x, y) * spread),
-                Dither::Noise => c = c.map(|v| v + (hash01(x, y, 7) - 0.5) * spread),
-                _ => {}
-            }
-            let c = c.map(|v| v.clamp(0.0, 1.0));
-            let k = nearest(pal, c);
-            *ip = k as u8;
-            let e = pal[k].map(|v| f32::from(v) / 255.0);
-            *p = [e[0], e[1], e[2], if transparent.is_some() { 1.0 } else { pv[3] }];
         });
         return idx;
     }

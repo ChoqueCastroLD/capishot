@@ -22,7 +22,7 @@ fn has_layer(s: &Session) -> std::result::Result<(), String> {
 /// A reveal mask that is on inside `rect` and off (hidden) everywhere else.
 fn clip_mask(rect: Rect) -> LayerMask {
     let mut mask = LayerMask::hide_all();
-    let (w, h) = (rect.width().max(0) as usize, rect.height().max(0) as usize);
+    let (w, h) = (rect.width() as usize, rect.height() as usize);
     if w > 0 && h > 0 {
         mask.surface.write_region(rect, &vec![1.0f32; w * h]);
         mask.surface.prune();
@@ -68,7 +68,7 @@ pub fn specs() -> Vec<CommandSpec> {
         params: r#"{"name":str?} → {layer, frame:[x,y,w,h]}: groups the selected layers and clips them to a frame rect"#,
         enabled: has_layer,
         journal: true,
-        run: |s, p| frame_from_layers(s, &p),
+        run: |s, p| frame_from_layers(s, p),
     }]
 }
 

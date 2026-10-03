@@ -7,10 +7,10 @@
 //! derived from its manual and observation, not from its implementation.
 
 use photocraft_color::convert::{lab_to_srgb, srgb_to_lab};
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::fxutil::gauss_blur_n;
+use crate::photo_util::{par_map, par_rows};
 use crate::other2::{hsl_to_rgb, rgb_to_hsl};
 
 fn luma(c: [f32; 3]) -> f32 {
@@ -85,9 +85,11 @@ pub fn shadows_highlights(px: &mut [[f32; 4]], w: usize, h: usize, p: &ShadowsHi
     );
     let color = p.color / 100.0;
     let mid = p.midtone / 100.0;
-    px.par_iter_mut().enumerate().for_each(|(i, q)| {
+    par_rows(px, w, 1, |y, pxrow| {
+        for (x, q) in pxrow.iter_mut().enumerate() {
+        let i = y * w + x;
         if q[3] <= 0.0 {
-            return;
+            continue;
         }
         let c = [q[0], q[1], q[2]];
         // Mask weights: 1 in deep shadows (resp. bright highlights), fading out at the tonal width.
@@ -116,6 +118,7 @@ pub fn shadows_highlights(px: &mut [[f32; 4]], w: usize, h: usize, p: &ShadowsHi
         q[0] = out[0].clamp(0.0, 1.0);
         q[1] = out[1].clamp(0.0, 1.0);
         q[2] = out[2].clamp(0.0, 1.0);
+        }
     });
     clip_stretch(px, p.black_clip, p.white_clip);
 }
@@ -170,9 +173,9 @@ pub fn replace_color(
     lightness: f32,
 ) -> Vec<f32> {
     let mask = crate::selection::color_range(px, color, fuzziness);
-    px.par_iter_mut().zip(mask.par_iter()).for_each(|(q, &k)| {
+    for (q, &k) in px.iter_mut().zip(&mask) {
         if k <= 0.0 {
-            return;
+            continue;
         }
         let c = [q[0], q[1], q[2]];
         let [hh, ss, ll] = rgb_to_hsl(c);
@@ -194,7 +197,7 @@ pub fn replace_color(
         for i in 0..3 {
             q[i] = (c[i] + (o[i] - c[i]) * k).clamp(0.0, 1.0);
         }
-    });
+    }
     mask
 }
 
@@ -280,7 +283,7 @@ pub fn match_color(
         dst_mean[1] = 0.0;
         dst_mean[2] = 0.0;
     }
-    px.par_iter_mut().filter(|q| q[3] > 0.0).for_each(|q| {
+    for q in px.iter_mut().filter(|q| q[3] > 0.0) {
         let c = [q[0], q[1], q[2]];
         let lab = srgb_to_lab(c);
         let l = ((lab[0] - target.mean[0]) * scale(0) + dst_mean[0]) * lum;
@@ -290,7 +293,7 @@ pub fn match_color(
         for i in 0..3 {
             q[i] = (o[i] + (c[i] - o[i]) * fade).clamp(0.0, 1.0);
         }
-    });
+    }
 }
 
 /// Image › Adjustments › HDR Toning ("Local Adaptation" method) parameters.
@@ -357,10 +360,10 @@ pub fn hdr_toning(px: &mut [[f32; 4]], w: usize, h: usize, p: &HdrToning) {
         return;
     }
     const EPS: f32 = 1e-4;
-    let logl: Vec<f32> = px
-        .par_iter()
-        .map(|q| (luma([q[0], q[1], q[2]]).max(0.0) + EPS).ln())
-        .collect();
+    let logl: Vec<f32> = par_map(px.len(), |i| {
+        let q = px[i];
+        (luma([q[0], q[1], q[2]]).max(0.0) + EPS).ln()
+    });
     let mut base = logl.clone();
     gauss_blur_n(&mut base, w, h, 1, p.radius.max(1.0) / 2.0);
     let n = px.iter().filter(|q| q[3] > 0.0).count().max(1) as f32;
@@ -378,9 +381,11 @@ pub fn hdr_toning(px: &mut [[f32; 4]], w: usize, h: usize, p: &HdrToning) {
     let mut sorted = p.curve.clone();
     sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
     // Per-pixel tone map: embarrassingly parallel (base/logl read by index).
-    px.par_iter_mut().enumerate().for_each(|(i, q)| {
+    par_rows(px, w, 1, |y, row| {
+        for (x, q) in row.iter_mut().enumerate() {
+        let i = y * w + x;
         if q[3] <= 0.0 {
-            return;
+            continue;
         }
         let c = [q[0], q[1], q[2]];
         let l0 = luma(c).max(0.0) + EPS;
@@ -404,6 +409,7 @@ pub fn hdr_toning(px: &mut [[f32; 4]], w: usize, h: usize, p: &HdrToning) {
         q[0] = out[0].clamp(0.0, 1.0);
         q[1] = out[1].clamp(0.0, 1.0);
         q[2] = out[2].clamp(0.0, 1.0);
+        }
     });
 }
 

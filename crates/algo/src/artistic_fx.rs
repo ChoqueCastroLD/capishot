@@ -8,8 +8,9 @@
 // Effects walk several per-pixel planes in lockstep; index loops read clearest.
 #![allow(clippy::needless_range_loop)]
 
-use rayon::prelude::*;
 use std::f32::consts::PI;
+
+use crate::photo_util::{par_rows, par_rows2};
 
 use photocraft_geom::Rect;
 
@@ -120,7 +121,7 @@ fn sobel(p: &[f32], w: usize, h: usize) -> (Vec<f32>, Vec<f32>) {
     let at = |x: isize, y: isize| p[(y.clamp(0, h as isize - 1) as usize) * w + x.clamp(0, w as isize - 1) as usize];
     let mut gx = vec![0.0; w * h];
     let mut gy = vec![0.0; w * h];
-    gx.par_chunks_mut(w).zip(gy.par_chunks_mut(w)).enumerate().for_each(|(y, (gxr, gyr))| {
+    par_rows2(&mut gx, &mut gy, w, |y, gxr, gyr| {
         let y = y as isize;
         for x in 0..w as isize {
             let xi = x as usize;
@@ -203,7 +204,7 @@ fn kuwahara(win: &mut Win, r: usize) {
         let i = ((y.clamp(0, h as isize - 1) as usize) * w + x.clamp(0, w as isize - 1) as usize) * 5;
         &m[i..i + 5]
     };
-    win.c.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+    par_rows(&mut win.c, w, 1, |y, row| {
         let y = y as isize;
         for x in 0..w as isize {
             let mut best = f32::MAX;
