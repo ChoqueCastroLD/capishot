@@ -21,6 +21,7 @@ pub mod color_picker_ui;
 pub mod comps_ui;
 pub mod control;
 pub mod dialogs;
+mod variables_ui;
 pub mod doc_props_ui;
 pub mod enable_rules;
 pub mod export_dialog;

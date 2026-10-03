@@ -120,6 +120,10 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
     if let Some(r) = crate::type_panels_ui::menu(app, id, &params) {
         return r;
     }
+    // Image > Variables (Define / Data Sets), Apply Data Set.
+    if let Some(r) = crate::variables_ui::menu(app, id, &params) {
+        return r;
+    }
     if id == "window.panel.brushes" {
         // Window › Brushes opens the Brush Settings window on its presets tab.
         app.ui.panels.brush_settings = true;
