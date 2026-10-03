@@ -307,9 +307,11 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     brush_preset_chip(ui, b);
                     widgets::vline(ui, 22.0);
                     opt_label(ui, "Mode");
-                    let mut mode = BlendMode::Normal;
+                    let mut mode = b.mode;
                     let opts: Vec<(BlendMode, &str)> = BlendMode::LAYER_MODES.iter().map(|m| (*m, m.label())).collect();
-                    widgets::dropdown(ui, "brush-mode", &mut mode, &opts, 96.0);
+                    if widgets::dropdown(ui, "brush-mode", &mut mode, &opts, 96.0) {
+                        b.mode = mode;
+                    }
                     opt_label(ui, "Opacity");
                     let mut o = b.opacity * 100.0;
                     if widgets::value_field(ui, &mut o, 0.0..=100.0, "%", 62.0).changed() {

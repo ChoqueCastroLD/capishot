@@ -203,3 +203,26 @@ fn works_on_cmyk_and_16_bit() {
     }
 }
 
+
+#[test]
+fn brush_blend_mode_multiply() {
+    // Painting with a blend mode (options-bar "Mode"): blue × yellow = black (Multiply).
+    let fill = |s: &mut Session| {
+        s.edit("bg", |doc, a| {
+            doc.layer_mut(a.unwrap()).unwrap().surface_mut().unwrap().fill_rect(Rect::new(0, 0, 40, 40), &[1.0, 1.0, 0.0, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+    };
+    let mut s = session(40, 40);
+    fill(&mut s);
+    s.execute("paint.stroke", json!({"points": [[5, 20], [35, 20]], "size": 12, "color": "#0000ff", "mode": "multiply", "brush": {"hardness": 1.0}})).unwrap();
+    let c = rgba(&s, 20, 20);
+    assert!(c[0] < 0.1 && c[1] < 0.1 && c[2] < 0.1, "multiply blue×yellow ≈ black: {c:?}");
+    // Normal mode paints opaque blue at the same spot.
+    let mut s2 = session(40, 40);
+    fill(&mut s2);
+    s2.execute("paint.stroke", json!({"points": [[5, 20], [35, 20]], "size": 12, "color": "#0000ff", "brush": {"hardness": 1.0}})).unwrap();
+    let n = rgba(&s2, 20, 20);
+    assert!(n[2] > 0.9 && n[0] < 0.1, "normal paints blue: {n:?}");
+}

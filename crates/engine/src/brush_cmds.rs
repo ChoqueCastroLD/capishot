@@ -179,17 +179,28 @@ fn stroke_with(s: &mut Session, p: &Value, label: &str, brush: BrushSettings, pt
     Ok(damage_json(s, dmg))
 }
 
+/// Applies the options-bar blend `mode` to a brush. `"mode"` accepts any blend-mode name
+/// (normal|multiply|screen|…). The Eraser has no blend mode in Photoshop, so it is forced to Normal.
+fn with_blend_mode(mut b: BrushSettings, p: &Value) -> BrushSettings {
+    if b.erase {
+        b.mode = photocraft_color::BlendMode::Normal;
+    } else if let Some(m) = p.get("mode").and_then(Value::as_str).and_then(crate::commands::blend_from_str) {
+        b.mode = m;
+    }
+    b
+}
+
 /// `paint.stroke`: the Brush (and Eraser) tool.
 pub fn paint_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     let pts = parse_points(p, "paint.stroke")?;
-    let brush = resolve_brush(s, p, "paint.stroke")?;
+    let brush = with_blend_mode(resolve_brush(s, p, "paint.stroke")?, p);
     let label = if brush.erase { "Eraser" } else { "Brush Tool" };
     stroke_with(s, p, label, brush, pts, false)
 }
 
 fn pencil(s: &mut Session, p: &Value) -> Result<Value> {
     let pts = parse_points(p, "paint.pencil")?;
-    let mut brush = resolve_brush(s, p, "paint.pencil")?;
+    let mut brush = with_blend_mode(resolve_brush(s, p, "paint.pencil")?, p);
     brush.aliased = true;
     if num(p, "hardness").is_none() {
         brush.hardness = 1.0;
@@ -423,7 +434,7 @@ macro_rules! spec {
 /// Brush command specs.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("paint.pencil", "Pencil", r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…}?,"preset":name?,"size":px?,"opacity":0..1?,"color":"#rrggbb"?=foreground,"erase":bool?,"autoErase":bool=false,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##, has_paintable, pencil, true),
+        spec!("paint.pencil", "Pencil", r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…}?,"preset":name?,"size":px?,"opacity":0..1?,"color":"#rrggbb"?=foreground,"mode":"normal|multiply|screen|…"="normal","erase":bool?,"autoErase":bool=false,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##, has_paintable, pencil, true),
         spec!("paint.mixerBrush", "Mixer Brush", r##"{"points":[…],"brush":{…}?,"preset":name?,"size":px?,"wet":0..100=50,"load":0..100=50,"mix":0..100=50,"flow":0..100=100,"color":"#rrggbb"?=foreground,"sampleAllLayers":bool=false,"cleanAfterStroke":bool=true,"loadAfterStroke":bool=true,"seed":u64?}"##, has_paintable, mixer_brush, true),
         spec!("paint.colorReplacement", "Color Replacement", r##"{"points":[…],"brush":{…}?,"size":px?,"mode":"hue|saturation|color|luminosity"="color","sampling":"continuous|once|backgroundSwatch"="continuous","limits":"contiguous|discontiguous|findEdges"="contiguous","tolerance":0..100=30,"antiAlias":bool=true,"color":"#rrggbb"?=foreground,"seed":u64?}"##, crate::commands::has_paintable, color_replacement, true),
         spec!("brush.presets.list", "List Brush Presets", r##"{"full":bool=false}"##, always, presets_list, false),

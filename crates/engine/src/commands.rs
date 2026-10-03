@@ -687,7 +687,7 @@ fn build() -> Vec<CommandSpec> {
             destructive_adjust(s, "Desaturate", Adjustment::HueSaturation { hue: 0.0, saturation: -100.0, lightness: 0.0, colorize: false }, &Value::Null)
         }),
         // Paint
-        cmd!("paint.stroke", "Brush Stroke", [], None, r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…BrushSettings}?,"preset":name?,"size":px?,"hardness":0..1?,"opacity":0..1?,"flow":0..1?,"spacing":0..10?,"color":"#rrggbb"?=foreground,"erase":bool?,"smoothing":0..1?,"zoom":number=1,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##, has_paintable, crate::brush_cmds::paint_stroke),
+        cmd!("paint.stroke", "Brush Stroke", [], None, r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…BrushSettings}?,"preset":name?,"size":px?,"hardness":0..1?,"opacity":0..1?,"flow":0..1?,"spacing":0..10?,"color":"#rrggbb"?=foreground,"mode":"normal|multiply|screen|…"="normal","erase":bool?,"smoothing":0..1?,"zoom":number=1,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##, has_paintable, crate::brush_cmds::paint_stroke),
         cmd!("tools.setColors", "Set Colors", [], None, r##"{"foreground":"#rrggbb"?,"background":"#rrggbb"?}"##, always, |s, p| {
             s.tools.foreground = color_param(p, "foreground", s.tools.foreground);
             s.tools.background = color_param(p, "background", s.tools.background);
