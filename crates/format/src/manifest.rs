@@ -163,6 +163,15 @@ pub struct SurfaceM {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VideoDataM {
+    pub frames: Vec<SurfaceM>,
+    pub source: photocraft_doc::VideoSource,
+    pub fps: f32,
+    #[serde(default)]
+    pub show_altered: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MaskM {
     pub surface: SurfaceM,
     pub enabled: bool,
@@ -212,6 +221,8 @@ pub struct LayerM {
     /// Advanced Blending channels left out (bit per colour channel; 0 = all blend).
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub excluded_channels: u32,
+    #[serde(default)]
+    pub video: Option<VideoDataM>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

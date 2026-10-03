@@ -317,3 +317,38 @@ fn channel_restrictions_and_bevel_elements_roundtrip() {
     assert_eq!(back, doc);
     assert_eq!(back.layers[0].excluded_channels, 0b101);
 }
+
+#[test]
+fn video_layer_frames_survive_roundtrip() {
+    use photocraft_doc::{Timeline, VideoData, VideoSource};
+    use photocraft_geom::Rect;
+    let mut doc = Document::new("Vid", photocraft_geom::Size { width: 8, height: 6 }, ColorMode::Rgb, SampleType::U8);
+    doc.timeline = Some(Timeline::new(3, 24.0));
+    let fmt = doc.pixel_format();
+    let mut l = Layer::raster("Clip", fmt);
+    let mut frames = Vec::new();
+    for i in 0..3u8 {
+        let mut s = photocraft_raster::Surface::new(fmt);
+        let v = i as f32 / 2.0;
+        s.fill_rect(Rect::new(0, 0, 8, 6), &photocraft_raster::from_rgba(&fmt, [v, 0.0, 1.0 - v, 1.0]));
+        frames.push(s);
+    }
+    let mut vd = VideoData::new(frames, 24.0);
+    vd.source = VideoSource::File { path: "/tmp/seq".into() };
+    vd.show_altered = false;
+    l.video = Some(vd);
+    doc.layers.push(l);
+
+    let bytes = save_to_bytes(&doc, &SaveOptions::default()).unwrap();
+    let back = load_from_bytes(&bytes).unwrap();
+    let v = back.layers.last().unwrap().video.as_ref().expect("video survived");
+    assert_eq!(v.frames.len(), 3);
+    assert_eq!(v.fps, 24.0);
+    assert!(!v.show_altered);
+    assert_eq!(v.source, VideoSource::File { path: "/tmp/seq".into() });
+    assert_eq!(back.timeline.as_ref().unwrap().duration, 3);
+    // A middle frame's pixel survived.
+    let mut px = [[0.0f32; 4]; 1];
+    v.frames[2].read_rgba_into(Rect::from_xywh(1, 1, 1, 1), &mut px);
+    assert!(px[0][0] > 0.9 && px[0][2] < 0.1, "frame 2 is reddish: {:?}", px[0]);
+}
