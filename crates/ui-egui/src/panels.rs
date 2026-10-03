@@ -453,8 +453,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     opt_label(ui, "Opacity");
                     widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
                     widgets::checkbox(ui, &mut app.ui.tool_options.gradient_reverse, "Reverse");
-                    let mut dither = true;
-                    widgets::checkbox(ui, &mut dither, "Dither");
+                    widgets::checkbox(ui, &mut app.ui.tool_options.gradient_dither, "Dither");
                 }
                 Tool::Crop if t.pro => {
                     let o = &mut app.ui.tool_options;

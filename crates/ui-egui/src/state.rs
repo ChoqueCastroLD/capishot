@@ -275,6 +275,8 @@ pub struct ToolOptions {
     /// linear | radial | angle | reflected | diamond
     pub gradient_style: String,
     pub gradient_reverse: bool,
+    /// Gradient tool: dither to reduce 8-bit banding (Photoshop default on).
+    pub gradient_dither: bool,
     pub fill_opacity: f32,
     /// Paint Bucket fill source: false = Foreground colour, true = Pattern (Patterns panel selection).
     pub bucket_fill_pattern: bool,
@@ -360,6 +362,7 @@ impl Default for ToolOptions {
             feather: 0.0,
             gradient_style: "linear".into(),
             gradient_reverse: false,
+            gradient_dither: true,
             fill_opacity: 100.0,
             bucket_fill_pattern: false,
             type_font: "Inter".into(),

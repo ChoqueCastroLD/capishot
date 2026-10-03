@@ -112,6 +112,16 @@ fn composite_area(
 
 /// Gradient tool over `area` (the selection bounds or canvas).
 #[allow(clippy::too_many_arguments)]
+/// Per-pixel dither noise in [0, 1) from a position hash (decorrelated, no visible pattern).
+fn dither_noise(x: i32, y: i32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    f32::from((h & 0xFFFF) as u16) / 65535.0
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn paint_gradient(
     s: &mut Surface,
     area: Rect,
@@ -122,6 +132,7 @@ pub fn paint_gradient(
     reverse: bool,
     opacity: f32,
     blend_mode: BlendMode,
+    dither: bool,
     selection: Option<&Surface>,
 ) {
     composite_area(
@@ -131,7 +142,15 @@ pub fn paint_gradient(
         |x, y| opacity * selection.map_or(1.0, |m| m.sample_channel(x, y, 0)),
         |x, y| {
             let t = tool_gradient_t(shape, from, to, x as f32 + 0.5, y as f32 + 0.5);
-            sample_stops(stops, if reverse { 1.0 - t } else { t })
+            let mut c = sample_stops(stops, if reverse { 1.0 - t } else { t });
+            if dither {
+                // One quantisation step of monochromatic noise breaks 8-bit banding without speckle.
+                let n = (dither_noise(x, y) - 0.5) / 255.0;
+                for ch in c.iter_mut().take(3) {
+                    *ch = (*ch + n).clamp(0.0, 1.0);
+                }
+            }
+            c
         },
         false,
     );
@@ -202,7 +221,7 @@ mod tests {
         let a = Rect::new(0, 0, 11, 2);
         let mut sel = Surface::new(PixelFormat::GRAY8);
         sel.fill_rect(Rect::new(0, 0, 11, 1), &[1.0]);
-        paint_gradient(&mut s, a, (0.5, 0.0), (10.5, 0.0), GradientShape::Linear, &[(0.0, [0.0, 0.0, 0.0, 1.0]), (1.0, [1.0, 1.0, 1.0, 1.0])], false, 1.0, BlendMode::Normal, Some(&sel));
+        paint_gradient(&mut s, a, (0.5, 0.0), (10.5, 0.0), GradientShape::Linear, &[(0.0, [0.0, 0.0, 0.0, 1.0]), (1.0, [1.0, 1.0, 1.0, 1.0])], false, 1.0, BlendMode::Normal, false, Some(&sel));
         assert!(s.pixel(0, 0)[0] < 0.01 && s.pixel(10, 0)[0] > 0.99);
         assert!((s.pixel(5, 0)[0] - 0.5).abs() < 0.01);
         assert_eq!(s.pixel(5, 1)[3], 0.0, "outside the selection");

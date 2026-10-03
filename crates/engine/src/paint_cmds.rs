@@ -94,11 +94,12 @@ fn gradient(s: &mut Session, p: &Value) -> Result<Value> {
     let reverse = b(p, "reverse", false);
     let opacity = f(p, "opacity", 100.0) / 100.0;
     let blend = p.get("mode").and_then(Value::as_str).and_then(blend_from_str).unwrap_or(photocraft_color::BlendMode::Normal);
+    let dither = b(p, "dither", true); // Photoshop dithers gradients by default (reduces banding).
     s.edit("Gradient", |doc, active| {
         let sel = doc.selection.clone();
         let area = sel.as_ref().map(|m| m.content_bounds()).filter(|r| !r.is_empty()).unwrap_or_else(|| doc.bounds()).intersect(&doc.bounds());
         let (surf, _) = crate::channel_cmds::target_surface(doc, *active, p)?;
-        paint_gradient(surf, area, from, to, shape, &stops, reverse, opacity, blend, sel.as_ref());
+        paint_gradient(surf, area, from, to, shape, &stops, reverse, opacity, blend, dither, sel.as_ref());
         Ok(())
     })?;
     Ok(Value::Null)
@@ -122,7 +123,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Gradient",
             menu: &[],
             shortcut: None,
-            params: r##"{"from":[x,y],"to":[x,y],"style":"linear|radial|angle|reflected|diamond"="linear","colors":["#rrggbb",…]? (evenly spaced),"gradient":preset name?,"stops":[[t,"#rrggbb"|"foreground"|"background"],…]?,"transparency":[[t,0..100],…]? (default: the current gradient, see gradient.presets.select),"reverse":bool=false,"opacity":1..100=100,"mode":"normal|multiply|…"="normal","target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
+            params: r##"{"from":[x,y],"to":[x,y],"style":"linear|radial|angle|reflected|diamond"="linear","colors":["#rrggbb",…]? (evenly spaced),"gradient":preset name?,"stops":[[t,"#rrggbb"|"foreground"|"background"],…]?,"transparency":[[t,0..100],…]? (default: the current gradient, see gradient.presets.select),"reverse":bool=false,"dither":bool=true,"opacity":1..100=100,"mode":"normal|multiply|…"="normal","target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
             enabled: crate::commands::has_paintable,
             run: gradient,
             journal: true,
@@ -190,5 +191,20 @@ mod tests {
         assert_eq!(px(&s, 2, 5)[..3], [1.0, 0.0, 0.0]);
         assert!(px(&s, 10, 5)[1] > 0.4, "outside the selection untouched");
         assert!(s.execute("paint.gradient", json!({"from": [0, 0]})).is_err());
+    }
+
+    #[test]
+    fn gradient_dither_breaks_banding() {
+        // A flat gradient (same colour both ends) is perfectly smooth with dither off, and gains
+        // per-pixel noise with dither on (which breaks 8-bit banding).
+        let run = |dither: bool| {
+            let mut s = session();
+            s.execute("paint.gradient", json!({"from": [0, 0], "to": [19, 0], "colors": [[0.5, 0.5, 0.5, 1.0], [0.5, 0.5, 0.5, 1.0]], "dither": dither})).unwrap();
+            (0..19).map(|x| px(&s, x, 5)[0]).collect::<Vec<f32>>()
+        };
+        let smooth = run(false);
+        assert!(smooth.iter().all(|&v| v == smooth[0]), "no dither: perfectly flat");
+        let noisy = run(true);
+        assert!(noisy.windows(2).any(|w| w[0] != w[1]), "dither: per-pixel variation");
     }
 }
