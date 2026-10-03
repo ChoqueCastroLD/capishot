@@ -55,3 +55,47 @@ fn scrub_keeps_content_a_raster() {
     s.execute("timeline.setFrame", json!({"frame": 1})).unwrap();
     assert!(matches!(s.active().unwrap().doc.layer(id).unwrap().content, LayerContent::Raster(_)));
 }
+
+fn write_png(path: &str, w: u32, h: u32, color: &str) {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": w, "height": h, "background": color})).unwrap();
+    let bytes = photocraft_io::export(&s.active().unwrap().doc, "png", &photocraft_io::ExportOptions::default()).unwrap().bytes;
+    std::fs::write(path, bytes).unwrap();
+}
+
+fn tmpdir(name: &str) -> String {
+    let d = std::env::temp_dir().join(format!("pc-video-{}-{name}", std::process::id()));
+    let _ = std::fs::create_dir_all(&d);
+    d.to_string_lossy().into_owned()
+}
+
+#[test]
+fn new_video_layer_from_image_sequence() {
+    let dir = tmpdir("seq");
+    write_png(&format!("{dir}/f01.png"), 16, 12, "#ff0000");
+    write_png(&format!("{dir}/f02.png"), 16, 12, "#00ff00");
+    write_png(&format!("{dir}/f03.png"), 16, 12, "#0000ff");
+    let mut s = session();
+    let r = s.execute("layer.videoLayers.newVideoLayerFromFile", json!({"path": dir})).unwrap();
+    assert_eq!(r["frames"], 3);
+    let id = LayerId(r["layer"].as_u64().unwrap());
+    assert_eq!(frames(&s, id), 3);
+    assert!(s.active().unwrap().doc.timeline.as_ref().unwrap().duration >= 3);
+}
+
+#[test]
+fn frames_to_layers_and_render_video() {
+    let dir = tmpdir("ftl");
+    write_png(&format!("{dir}/a.png"), 10, 8, "#112233");
+    write_png(&format!("{dir}/b.png"), 10, 8, "#445566");
+    let mut s = session();
+    let r = s.execute("file.import.videoFramesToLayers", json!({"path": dir})).unwrap();
+    assert_eq!(r["layers"], 2);
+    // Build a 2-frame video layer and render.
+    let v = s.execute("layer.videoLayers.newVideoLayerFromFile", json!({"path": dir})).unwrap();
+    assert_eq!(v["frames"], 2);
+    let out = tmpdir("render");
+    let rr = s.execute("file.export.renderVideo", json!({"dir": out, "format": "png"})).unwrap();
+    assert!(rr["frames"].as_u64().unwrap() >= 2);
+    assert!(std::path::Path::new(&out).exists());
+}
