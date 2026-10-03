@@ -454,7 +454,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn copy_paste_between_documents() {
         // Copy in one tab, paste into another: the clipboard is shared across documents.
         let mut s = session(); // doc A (100x100): red rect at (10,10)-(50,30)
@@ -503,6 +502,7 @@ mod tests {
         assert!((cb.width() as i32 - 80).abs() <= 3 && (cb.height() as i32 - 40).abs() <= 3, "size ~ 80x40: {cb:?}");
     }
 
+    #[test]
     fn cut_clears_and_layer_via_copy_cut() {
         let mut s = session();
         s.execute("select.rect", json!({"x": 10, "y": 10, "width": 10, "height": 20})).unwrap();
