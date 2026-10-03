@@ -7,6 +7,7 @@
 //! derived from its manual and observation, not from its implementation.
 
 use photocraft_color::convert::{lab_to_srgb, srgb_to_lab};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::fxutil::gauss_blur_n;
@@ -357,7 +358,7 @@ pub fn hdr_toning(px: &mut [[f32; 4]], w: usize, h: usize, p: &HdrToning) {
     }
     const EPS: f32 = 1e-4;
     let logl: Vec<f32> = px
-        .iter()
+        .par_iter()
         .map(|q| (luma([q[0], q[1], q[2]]).max(0.0) + EPS).ln())
         .collect();
     let mut base = logl.clone();
@@ -376,9 +377,10 @@ pub fn hdr_toning(px: &mut [[f32; 4]], w: usize, h: usize, p: &HdrToning) {
     let gamma = p.gamma.clamp(0.1, 4.0);
     let mut sorted = p.curve.clone();
     sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for (i, q) in px.iter_mut().enumerate() {
+    // Per-pixel tone map: embarrassingly parallel (base/logl read by index).
+    px.par_iter_mut().enumerate().for_each(|(i, q)| {
         if q[3] <= 0.0 {
-            continue;
+            return;
         }
         let c = [q[0], q[1], q[2]];
         let l0 = luma(c).max(0.0) + EPS;
@@ -402,7 +404,7 @@ pub fn hdr_toning(px: &mut [[f32; 4]], w: usize, h: usize, p: &HdrToning) {
         q[0] = out[0].clamp(0.0, 1.0);
         q[1] = out[1].clamp(0.0, 1.0);
         q[2] = out[2].clamp(0.0, 1.0);
-    }
+    });
 }
 
 #[cfg(test)]
