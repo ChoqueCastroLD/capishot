@@ -58,6 +58,7 @@ pub mod automate_cmds;
 mod frame_cmds;
 mod migrate_cmds;
 mod trap_cmds;
+mod timeline_cmds;
 mod variables_cmds;
 pub mod pick_cmds;
 pub mod print_cmds;

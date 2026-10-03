@@ -79,6 +79,9 @@ pub struct DocM {
     /// Image › Variables and Data Sets.
     #[serde(default)]
     pub variables: photocraft_doc::Variables,
+    /// Window › Timeline.
+    #[serde(default)]
+    pub timeline: Option<photocraft_doc::Timeline>,
     /// Image › Analysis: measurement scale, count groups, ruler.
     #[serde(default)]
     pub measurement: photocraft_doc::Measurement,
