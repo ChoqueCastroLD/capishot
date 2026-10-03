@@ -166,7 +166,7 @@ fn can_align(s: &Session) -> std::result::Result<(), String> {
     let d = doc_state(s)?;
     match d.selected_layers().len() {
         0 => Err("no layer selected".into()),
-        1 if d.doc.selection.is_none() => Err("select two or more layers, or make a selection to align to".into()),
+        // Photoshop aligns a single layer to the canvas (or to an active selection); 2+ align to each other.
         _ => Ok(()),
     }
 }
@@ -327,6 +327,8 @@ fn align(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
             "auto" | "layers" => match (&doc.selection, sel.len()) {
                 // Photoshop: one layer plus an active selection aligns to the selection bounds.
                 (Some(m), 1) if to == "auto" => m.content_bounds(),
+                // One layer with no selection aligns to the canvas (otherwise it would align to itself).
+                (None, 1) if to == "auto" => doc.bounds(),
                 _ => items.iter().fold(Rect::EMPTY, |a, (_, b)| a.union(b)),
             },
             other => return Err(bad(&cmd, format!("`to` must be auto|layers|selection|canvas, not `{other}`"))),
@@ -803,7 +805,7 @@ mod tests {
         for depth in [8, 16, 32] {
             let mut s = session(depth);
             let a = rect_layer(&mut s, Rect::new(10, 10, 20, 20));
-            assert!(!s.is_enabled("layer.align.leftEdges"), "one layer without a selection");
+            assert!(s.is_enabled("layer.align.leftEdges"), "one layer aligns to the canvas");
             s.execute("select.rect", json!({"x": 50, "y": 40, "width": 30, "height": 30})).unwrap();
             assert!(s.is_enabled("layer.align.leftEdges"));
             s.execute("layer.align.rightEdges", json!({})).unwrap();
@@ -813,6 +815,20 @@ mod tests {
             s.execute("layer.align.topEdges", json!({"to": "canvas"})).unwrap();
             assert_eq!(bounds(&s, a), Rect::new(70, 0, 80, 10));
         }
+    }
+
+    #[test]
+    fn align_single_layer_to_canvas() {
+        // Photoshop: a single selected layer with no active selection aligns to the canvas.
+        let mut s = session(8); // 100 x 80
+        let a = rect_layer(&mut s, Rect::new(10, 10, 20, 20)); // 10 x 10
+        assert!(s.is_enabled("layer.align.horizontalCenters"));
+        s.execute("layer.align.horizontalCenters", json!({})).unwrap();
+        assert_eq!(bounds(&s, a), Rect::new(45, 10, 55, 20), "centred on the 100px-wide canvas");
+        s.execute("layer.align.verticalCenters", json!({})).unwrap();
+        assert_eq!(bounds(&s, a), Rect::new(45, 35, 55, 45), "centred on the 80px-tall canvas");
+        s.execute("layer.align.leftEdges", json!({})).unwrap();
+        assert_eq!(bounds(&s, a), Rect::new(0, 35, 10, 45), "left edge to the canvas");
     }
 
     #[test]
