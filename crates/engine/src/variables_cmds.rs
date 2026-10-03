@@ -340,12 +340,19 @@ fn export_as_files(s: &mut Session, p: &Value) -> Result<Value> {
     if sets.is_empty() {
         return Err(bad("file.export.dataSetsAsFiles", "no data sets to export"));
     }
+    // Filename template: `{name}` (sanitised data-set name), `{index}` (1-based). Default `{name}`.
+    let template = p.get("naming").and_then(Value::as_str).unwrap_or("{name}");
+    let doc_stem = original.name.rsplit_once('.').map_or(original.name.as_str(), |(a, _)| a).to_string();
     let mut files = Vec::new();
-    for set in &sets {
+    for (n, set) in sets.iter().enumerate() {
         let mut doc = (*original).clone();
         apply_to_doc(&mut doc, &vars, set)?;
         let safe: String = set.name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
-        let path = format!("{dir}/{safe}.{format}");
+        let stem = template
+            .replace("{name}", &safe)
+            .replace("{index}", &format!("{:03}", n + 1))
+            .replace("{document}", &doc_stem);
+        let path = format!("{dir}/{stem}.{format}");
         let opts = photocraft_io::ExportOptions::default();
         let bytes = photocraft_io::export(&doc, format, &opts).map(|r| r.bytes).map_err(|e| EngineError::Other(format!("export `{}`: {e}", set.name)))?;
         std::fs::write(&path, &bytes).map_err(|e| EngineError::Other(format!("write `{path}`: {e}")))?;
@@ -395,7 +402,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "{path, delimiter?} → {imported}: CSV header = variable names, each row a data set (first column may be the data-set name)",
             |s, p| import_data_sets(s, p)),
         spec!("file.export.dataSetsAsFiles", "Data Sets as Files…", &["File", "Export"],
-            "{dir, format?:png, dataSets?[names]} → {files,count}: apply each data set and export the flattened document",
+            "{dir, format?:png, dataSets?[names], naming?:\"{name}|{index}|{document}\"} → {files,count}: apply each data set and export the flattened document",
             |s, p| export_as_files(s, p)),
         CommandSpec { id: "variables.list", label: "List Variables", menu: &[], shortcut: None, journal: false,
             params: "{} → {defs,dataSets,active}", enabled: has_doc, run: |s, _| list(s) },

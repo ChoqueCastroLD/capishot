@@ -121,6 +121,11 @@ fn export_data_sets_as_files() {
     assert_eq!(r["count"], 2);
     assert!(std::path::Path::new(&format!("{dir}/one.png")).exists());
     assert!(std::path::Path::new(&format!("{dir}/two.png")).exists());
+    // Filename template with {index}.
+    let d2 = tmp("tmpl");
+    s.execute("file.export.dataSetsAsFiles", json!({"dir": d2, "format": "png", "naming": "row-{index}"})).unwrap();
+    assert!(std::path::Path::new(&format!("{d2}/row-001.png")).exists());
+    assert!(std::path::Path::new(&format!("{d2}/row-002.png")).exists());
     // Exporting doesn't mutate the live document.
     assert!(doc(&s).layer(badge).unwrap().visible);
     assert_eq!(text_of(&s, title), "Old");
