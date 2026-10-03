@@ -370,7 +370,24 @@ pub fn posterize(v: f32, levels: u32) -> f32 {
 
 pub fn levels(ch: &LevelsChannel, v: f32) -> f32 {
     let range = (ch.in_white - ch.in_black).max(1e-6);
-    let t = ((v - ch.in_black) / range).clamp(0.0, 1.0).powf(1.0 / ch.gamma.max(0.01));
+    let u = ((v - ch.in_black) / range).clamp(0.0, 1.0);
+    let g = ch.gamma.max(0.01);
+    let t = if g > 1.0 {
+        // A midtone gamma > 1 lifts shadows, and a pure `u^(1/g)` has infinite slope at black —
+        // which Photoshop bounds, giving a soft shadow toe (initial slope 2^gamma, verified against
+        // the real app). Soft-min (p-norm) of the power curve with the slope-2^gamma line; reduces
+        // to the exact power curve in the body, so highlights are unchanged. gamma <= 1 is untouched.
+        let power = u.powf(1.0 / g);
+        let line = 2.0f32.powf(g) * u;
+        if power <= 1e-6 || line <= 1e-6 {
+            power.min(line)
+        } else {
+            let p = 1.8 + 8.8 / g; // p-norm sharpness, fit to Photoshop ground truth
+            (power.powf(-p) + line.powf(-p)).powf(-1.0 / p)
+        }
+    } else {
+        u.powf(1.0 / g)
+    };
     ch.out_black + t * (ch.out_white - ch.out_black)
 }
 

@@ -848,3 +848,28 @@ fn modern_brightness_matches_photoshop() {
     assert_eq!(adjust::modern_brightness(0.37, 0.0), 0.37);
     assert_eq!(adjust::modern_contrast(0.37, 0.0), 0.37);
 }
+
+// Levels ground truth from Adobe Photoshop 2026 (adjustLevels on a 0..255 ramp). Verifies our
+// `levels()` matches the real app, including the gamma>1 soft shadow toe (initial slope 2^gamma).
+#[test]
+fn levels_matches_photoshop() {
+    let ident = |g: f32| LevelsChannel { in_black: 0.0, in_white: 1.0, gamma: g, out_black: 0.0, out_white: 1.0 };
+    // gamma 2.0 (lifts shadows): x -> Photoshop out. The deep shadow is the toe-bounded region.
+    let g2: [(usize, u8); 8] = [(1, 4), (8, 30), (16, 55), (32, 90), (64, 128), (128, 181), (192, 221), (224, 239)];
+    for (x, ps) in g2 {
+        let got = (adjust::levels(&ident(2.0), x as f32 / 255.0) * 255.0).round();
+        assert!((got - ps as f32).abs() <= 4.0, "levels gamma 2.0 x={x}: got {got} want {ps}");
+    }
+    // gamma 0.5 (darkens midtones) is exact: out = (x/255)^2.
+    for x in [0usize, 32, 64, 128, 192, 255] {
+        let got = (adjust::levels(&ident(0.5), x as f32 / 255.0) * 255.0).round();
+        let want = ((x as f32 / 255.0).powi(2) * 255.0).round();
+        assert_eq!(got, want, "levels gamma 0.5 x={x}");
+    }
+    // Endpoints pinned; identity is identity. (The gamma>1 toe's soft-min leaves white within a
+    // few parts in 1e5 of 1.0 — invisible at any bit depth; exact at 8-bit.)
+    assert_eq!(adjust::levels(&ident(2.5), 0.0), 0.0);
+    assert_eq!((adjust::levels(&ident(2.5), 1.0) * 255.0).round(), 255.0);
+    assert!((adjust::levels(&ident(2.5), 1.0) - 1.0).abs() < 5e-4);
+    assert!((adjust::levels(&ident(1.0), 0.37) - 0.37).abs() < 1e-6);
+}
