@@ -6,9 +6,15 @@ fidelity is from the PSD oracle (`cargo xtask corpus` / `oracle_diff`).
 
 ## Headline
 
-- **Menu / command breadth:** 600 / 625 Photoshop menu items live = **96%**.
+> **Update 2026-10-03:** menu/command breadth reached **100% (625/625)** — every Photoshop
+> menu item now dispatches a live command (incl. Variables/Data Sets, Trap, the Timeline panel and
+> Layer › Video Layers). Remaining parity work is depth and fidelity, not breadth: PSD oracle
+> (~66%), Camera Raw/video-layer depth, and the AI/Neural tier. See the table below.
+
+
+- **Menu / command breadth:** 625 / 625 Photoshop menu items live = **100%** (every menu item has a live command).
 - **PSD rendering fidelity (oracle):** ~111 / 170 corpus files pixel-match = **~65%**.
-- **Overall functional parity (weighted, mainstream workflows):** **~82%**.
+- **Overall functional parity (weighted, mainstream workflows):** **~86%** (menu breadth complete; depth + fidelity are the remaining gap).
 - **Overall including Adobe's AI / Firefly features:** **~75%** (these are mostly cloud/ML and the
   hardest to reach clean-room).
 
