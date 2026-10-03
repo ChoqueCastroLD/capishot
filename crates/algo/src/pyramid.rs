@@ -18,6 +18,8 @@ pub struct Level {
     pub px: Vec<f32>,
 }
 
+use crate::photo_util::par_rows;
+
 const K: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0];
 
 /// 5-tap binomial filter + decimation by two (Burt & Adelson's REDUCE).
@@ -25,34 +27,34 @@ pub fn reduce(l: &Level, ch: usize) -> Level {
     let (w, h) = (l.w.div_ceil(2), l.h.div_ceil(2));
     // Horizontal pass on even columns, then vertical on even rows.
     let mut tmp = vec![0.0f32; w * l.h * ch];
-    for y in 0..l.h {
+    par_rows(&mut tmp, w, ch, |y, trow| {
         for x in 0..w {
             for (k, wt) in K.iter().enumerate() {
                 let sx = (2 * x as i64 + k as i64 - 2).clamp(0, l.w as i64 - 1) as usize;
                 for c in 0..ch {
-                    tmp[(y * w + x) * ch + c] += wt * l.px[(y * l.w + sx) * ch + c];
+                    trow[x * ch + c] += wt * l.px[(y * l.w + sx) * ch + c];
                 }
             }
         }
-    }
+    });
     let mut px = vec![0.0f32; w * h * ch];
-    for y in 0..h {
+    par_rows(&mut px, w, ch, |y, prow| {
         for (k, wt) in K.iter().enumerate() {
             let sy = (2 * y as i64 + k as i64 - 2).clamp(0, l.h as i64 - 1) as usize;
             for x in 0..w {
                 for c in 0..ch {
-                    px[(y * w + x) * ch + c] += wt * tmp[(sy * w + x) * ch + c];
+                    prow[x * ch + c] += wt * tmp[(sy * w + x) * ch + c];
                 }
             }
         }
-    }
+    });
     Level { w, h, px }
 }
 
 /// Upsample `l` to `w × h` (EXPAND: zero insertion + the same filter, ×4 gain).
 pub fn expand(l: &Level, ch: usize, w: usize, h: usize) -> Vec<f32> {
     let mut tmp = vec![0.0f32; w * l.h * ch];
-    for y in 0..l.h {
+    par_rows(&mut tmp, w, ch, |y, trow| {
         for x in 0..w {
             for (k, wt) in K.iter().enumerate() {
                 let t = x as i64 + k as i64 - 2;
@@ -61,13 +63,13 @@ pub fn expand(l: &Level, ch: usize, w: usize, h: usize) -> Vec<f32> {
                 }
                 let sx = (t / 2).clamp(0, l.w as i64 - 1) as usize;
                 for c in 0..ch {
-                    tmp[(y * w + x) * ch + c] += 2.0 * wt * l.px[(y * l.w + sx) * ch + c];
+                    trow[x * ch + c] += 2.0 * wt * l.px[(y * l.w + sx) * ch + c];
                 }
             }
         }
-    }
+    });
     let mut out = vec![0.0f32; w * h * ch];
-    for y in 0..h {
+    par_rows(&mut out, w, ch, |y, orow| {
         for (k, wt) in K.iter().enumerate() {
             let t = y as i64 + k as i64 - 2;
             if t.rem_euclid(2) != 0 {
@@ -76,11 +78,11 @@ pub fn expand(l: &Level, ch: usize, w: usize, h: usize) -> Vec<f32> {
             let sy = (t / 2).clamp(0, l.h as i64 - 1) as usize;
             for x in 0..w {
                 for c in 0..ch {
-                    out[(y * w + x) * ch + c] += 2.0 * wt * tmp[(sy * w + x) * ch + c];
+                    orow[x * ch + c] += 2.0 * wt * tmp[(sy * w + x) * ch + c];
                 }
             }
         }
-    }
+    });
     out
 }
 
