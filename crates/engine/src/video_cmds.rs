@@ -284,7 +284,37 @@ fn render_video(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let base = (*st.doc).clone();
     let frames = base.timeline.as_ref().map_or(1, |t| t.duration).max(1);
+    let fps = base.timeline.as_ref().map_or(30.0, |t| t.fps).max(1.0);
     let stem = base.name.rsplit_once('.').map_or(base.name.as_str(), |(a, _)| a).to_string();
+    let fmt = base.pixel_format();
+    let bounds = base.bounds();
+    let (w, h) = (bounds.width() as usize, bounds.height() as usize);
+
+    // Animated GIF: one file, every frame quantised to its own palette.
+    if format.eq_ignore_ascii_case("gif") {
+        use photocraft_algo::quantize::{self, Dither, Forced, PaletteKind};
+        let delay = (100.0 / fps).round().clamp(1.0, 65535.0) as u16;
+        let mut gframes = Vec::with_capacity(frames);
+        for f in 0..frames {
+            let mut doc = base.clone();
+            if let Some(t) = &mut doc.timeline {
+                t.current = f;
+            }
+            sync(&mut doc);
+            let surf = crate::file_cmds::flattened(&doc, fmt);
+            let mut px = vec![[0.0f32; 4]; w * h];
+            surf.read_rgba_into(bounds, &mut px);
+            let pal = quantize::build_palette(&px, PaletteKind::Adaptive, 256, Forced::None).map_err(EngineError::Other)?;
+            let idx = quantize::quantize(&mut px, w, &pal, Dither::None, 1.0, None);
+            gframes.push(photocraft_codecs::web::GifFrame { indices: idx, palette: pal, transparent: None, delay_cs: delay });
+        }
+        let gif = photocraft_codecs::web::encode_gif_animated(w as u32, h as u32, &gframes, true).map_err(|e| EngineError::Other(e.to_string()))?;
+        let path = format!("{dir}/{stem}.gif");
+        std::fs::write(&path, &gif).map_err(|e| EngineError::Other(format!("write `{path}`: {e}")))?;
+        return Ok(json!({"frames": frames, "file": path}));
+    }
+
+    // Image sequence.
     let opts = photocraft_io::ExportOptions::default();
     let mut files = Vec::new();
     for f in 0..frames {

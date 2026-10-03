@@ -143,6 +143,68 @@ pub fn encode_gif_indexed(width: u32, height: u32, indices: &[u8], palette: &[[u
     Ok(out)
 }
 
+/// One frame of an animated GIF: palette indices, its (local) palette, an optional transparent
+/// index, and the on-screen delay in centiseconds.
+pub struct GifFrame {
+    pub indices: Vec<u8>,
+    pub palette: Vec<[u8; 3]>,
+    pub transparent: Option<u8>,
+    pub delay_cs: u16,
+}
+
+/// Encode an animated GIF (GIF89a). Each frame carries its own local colour table; `loop_forever`
+/// adds the NETSCAPE2.0 looping extension.
+pub fn encode_gif_animated(width: u32, height: u32, frames: &[GifFrame], loop_forever: bool) -> Result<Vec<u8>, CodecError> {
+    let (w, h) = (width as usize, height as usize);
+    if width == 0 || height == 0 || width > 65535 || height > 65535 {
+        return Err(gif_err("GIF size must be 1..=65535"));
+    }
+    if frames.is_empty() {
+        return Err(gif_err("an animated GIF needs at least one frame"));
+    }
+    let mut out = b"GIF89a".to_vec();
+    out.extend((width as u16).to_le_bytes());
+    out.extend((height as u16).to_le_bytes());
+    out.push(0x70); // no global colour table, 8-bit colour resolution
+    out.push(0); // background colour index
+    out.push(0); // pixel aspect ratio
+    if loop_forever {
+        out.extend([0x21, 0xFF, 0x0B]);
+        out.extend_from_slice(b"NETSCAPE2.0");
+        out.extend([0x03, 0x01, 0x00, 0x00, 0x00]); // loop count 0 = forever
+    }
+    for f in frames {
+        if f.palette.is_empty() || f.palette.len() > 256 || f.indices.len() != w * h || f.indices.iter().any(|&i| usize::from(i) >= f.palette.len()) {
+            return Err(gif_err("every frame's palette must have 1..=256 entries covering its indices"));
+        }
+        let bits = (1..=8u8).find(|b| (1usize << b) >= f.palette.len()).unwrap_or(8);
+        // Graphic Control Extension: disposal 1 (leave), delay, optional transparency.
+        let packed = if f.transparent.is_some() { 0x05 } else { 0x04 };
+        out.extend([0x21, 0xF9, 0x04, packed]);
+        out.extend(f.delay_cs.to_le_bytes());
+        out.push(f.transparent.unwrap_or(0));
+        out.push(0);
+        // Image Descriptor with a Local Colour Table.
+        out.push(0x2C);
+        out.extend([0, 0, 0, 0]);
+        out.extend((width as u16).to_le_bytes());
+        out.extend((height as u16).to_le_bytes());
+        out.push(0x80 | (bits - 1));
+        for i in 0..(1usize << bits) {
+            out.extend(f.palette.get(i).copied().unwrap_or([0, 0, 0]));
+        }
+        let min = bits.max(2);
+        out.push(min);
+        for chunk in lzw_encode(&f.indices, min).chunks(255) {
+            out.push(chunk.len() as u8);
+            out.extend_from_slice(chunk);
+        }
+        out.push(0);
+    }
+    out.push(0x3B);
+    Ok(out)
+}
+
 fn put_multibyte(out: &mut Vec<u8>, v: u32) {
     let mut groups = vec![(v & 0x7f) as u8];
     let mut v = v >> 7;
@@ -353,5 +415,39 @@ mod subsampling_tests {
                 assert!(err < 24, "q{q} progressive={prog} optimized={opt}: max error {err}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod anim_tests {
+    use super::*;
+
+    #[test]
+    fn animated_gif_has_header_and_frames() {
+        let frames: Vec<GifFrame> = (0..3)
+            .map(|i| GifFrame {
+                indices: vec![i as u8; 4],
+                palette: vec![[0, 0, 0], [255, 0, 0], [0, 255, 0]],
+                transparent: None,
+                delay_cs: 4,
+            })
+            .collect();
+        let g = encode_gif_animated(2, 2, &frames, true).unwrap();
+        assert_eq!(&g[..6], b"GIF89a");
+        assert_eq!(*g.last().unwrap(), 0x3B);
+        // Three image descriptors (0x2C) for three frames.
+        assert_eq!(g.iter().filter(|&&b| b == 0x2C).count(), 3);
+        // NETSCAPE loop extension present.
+        assert!(g.windows(11).any(|w| w == b"NETSCAPE2.0"));
+        // First frame still decodes.
+        let img = crate::decode(&g).unwrap();
+        assert_eq!(img.dimensions(), (2, 2));
+    }
+
+    #[test]
+    fn rejects_bad_frames() {
+        assert!(encode_gif_animated(2, 2, &[], false).is_err());
+        let bad = GifFrame { indices: vec![0; 3], palette: vec![[0, 0, 0]], transparent: None, delay_cs: 1 };
+        assert!(encode_gif_animated(2, 2, &[bad], false).is_err());
     }
 }

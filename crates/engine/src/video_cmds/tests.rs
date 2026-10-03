@@ -99,3 +99,19 @@ fn frames_to_layers_and_render_video() {
     assert!(rr["frames"].as_u64().unwrap() >= 2);
     assert!(std::path::Path::new(&out).exists());
 }
+
+#[test]
+fn render_video_to_animated_gif() {
+    let dir = tmpdir("gifsrc");
+    write_png(&format!("{dir}/a.png"), 10, 8, "#ff0000");
+    write_png(&format!("{dir}/b.png"), 10, 8, "#00ff00");
+    write_png(&format!("{dir}/c.png"), 10, 8, "#0000ff");
+    let mut s = session();
+    s.execute("layer.videoLayers.newVideoLayerFromFile", json!({"path": dir})).unwrap();
+    let out = tmpdir("gifout");
+    let r = s.execute("file.export.renderVideo", json!({"dir": out, "format": "gif"})).unwrap();
+    assert_eq!(r["frames"], 3);
+    let gif = std::fs::read(r["file"].as_str().unwrap()).unwrap();
+    assert_eq!(&gif[..6], b"GIF89a");
+    assert_eq!(gif.iter().filter(|&&b| b == 0x2C).count(), 3); // 3 frames
+}
