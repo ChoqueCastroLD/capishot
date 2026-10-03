@@ -151,6 +151,23 @@ pub fn bucket_fill(
     opacity: f32,
     selection: Option<&Surface>,
 ) -> bool {
+    bucket_fill_src(s, area, seed, tolerance, contiguous, anti_alias, opacity, selection, |_, _| color)
+}
+
+/// Like [`bucket_fill`] but the fill colour comes from `src(x, y)` — e.g. a pattern sampled at the
+/// canvas position — so the Paint Bucket can fill with a pattern as well as a solid colour.
+#[allow(clippy::too_many_arguments)]
+pub fn bucket_fill_src(
+    s: &mut Surface,
+    area: Rect,
+    seed: (i32, i32),
+    tolerance: f32,
+    contiguous: bool,
+    anti_alias: bool,
+    opacity: f32,
+    selection: Option<&Surface>,
+    src: impl Fn(i32, i32) -> [f32; 4] + Sync,
+) -> bool {
     if !area.contains(seed.0, seed.1) {
         return false;
     }
@@ -159,7 +176,7 @@ pub fn bucket_fill(
     drop(img);
     // Composite only over the filled region's box.
     let b = region.bbox;
-    composite_area(s, b, BlendMode::Normal, |x, y| region.at(x, y) * opacity * selection.map_or(1.0, |m| m.sample_channel(x, y, 0)), |_, _| color, false);
+    composite_area(s, b, BlendMode::Normal, |x, y| region.at(x, y) * opacity * selection.map_or(1.0, |m| m.sample_channel(x, y, 0)), src, false);
     true
 }
 

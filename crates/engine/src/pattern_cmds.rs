@@ -125,7 +125,7 @@ pub fn resolve(s: &Session, key: &str) -> Option<Pattern> {
     photocraft_doc::pattern::find(&s.patterns.items, key, key).cloned()
 }
 
-fn resolve_param(s: &Session, cmd: &str, p: &Value) -> Result<Pattern> {
+pub(crate) fn resolve_param(s: &Session, cmd: &str, p: &Value) -> Result<Pattern> {
     let key = p.get("pattern").and_then(Value::as_str).unwrap_or("");
     resolve(s, key).ok_or_else(|| bad(cmd, format!("no pattern \"{key}\" (see pattern.list)")))
 }
@@ -289,7 +289,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"path": path, "count": pats.len(), "bytes": bytes.len()}))
 }
 
-fn placement(p: &Value) -> (f32, f32, bool, (f32, f32)) {
+pub(crate) fn placement(p: &Value) -> (f32, f32, bool, (f32, f32)) {
     let num = |k: &str, d: f64| p.get(k).and_then(Value::as_f64).unwrap_or(d) as f32;
     let phase = p.get("phase").and_then(Value::as_array).map_or((0.0, 0.0), |a| {
         (a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)

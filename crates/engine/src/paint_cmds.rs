@@ -1,6 +1,6 @@
 //! Paint helpers: Paint Bucket and Gradient tool.
 
-use photocraft_algo::paint::{GradientShape, bucket_fill, paint_gradient};
+use photocraft_algo::paint::{GradientShape, bucket_fill, bucket_fill_src, paint_gradient};
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, blend_from_str};
@@ -39,11 +39,31 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
     let c = color(p.get("color"), fg);
     let (x, y) = (f(p, "x", 0.0).floor() as i32, f(p, "y", 0.0).floor() as i32);
     let (tol, contiguous, aa, opacity) = (f(p, "tolerance", 32.0), b(p, "contiguous", true), b(p, "antiAlias", true), f(p, "opacity", 100.0) / 100.0);
+    // Fill source: foreground colour (default) or a pattern (the Paint Bucket "Fill" dropdown).
+    let source = p.get("contents").or_else(|| p.get("source")).and_then(Value::as_str).unwrap_or("foreground");
+    let pattern = if source == "pattern" {
+        let pat = crate::pattern_cmds::resolve_param(s, "paint.bucket", p)?;
+        let tile = photocraft_compose::pattern::Tile::new(&pat).ok_or_else(|| EngineError::BadParams { cmd: "paint.bucket".into(), msg: "the pattern is empty".into() })?;
+        let (scale, angle, _, phase) = crate::pattern_cmds::placement(p);
+        Some((tile, scale, angle, phase))
+    } else {
+        None
+    };
     let filled = s.edit("Paint Bucket", |doc, active| {
         let area = doc.bounds();
         let sel = doc.selection.clone();
         let (surf, _) = crate::channel_cmds::target_surface(doc, *active, p)?;
-        let ok = bucket_fill(surf, area, (x, y), tol, contiguous, aa, c, opacity, sel.as_ref());
+        let ok = if let Some((tile, scale, angle, phase)) = &pattern {
+            // Render the pattern over the canvas once, then sample it at each filled pixel.
+            let place = photocraft_compose::pattern::Placement::new(photocraft_geom::Rect::EMPTY, false, *phase, *scale, *angle);
+            let rendered = photocraft_compose::pattern::render(tile, &place, area);
+            let w = area.width() as usize;
+            bucket_fill_src(surf, area, (x, y), tol, contiguous, aa, opacity, sel.as_ref(), |px, py| {
+                rendered[(py - area.y0) as usize * w + (px - area.x0) as usize]
+            })
+        } else {
+            bucket_fill(surf, area, (x, y), tol, contiguous, aa, c, opacity, sel.as_ref())
+        };
         surf.prune();
         Ok(ok)
     })?;
@@ -92,7 +112,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Paint Bucket",
             menu: &[],
             shortcut: None,
-            params: r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"color":"#rrggbb"=foreground,"opacity":1..100=100,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
+            params: r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"contents":"foreground|pattern"="foreground","color":"#rrggbb"=foreground,"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"opacity":1..100=100,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
             enabled: crate::commands::has_paintable,
             run: bucket,
             journal: true,
@@ -139,6 +159,23 @@ mod tests {
         assert_eq!(px(&s, 15, 5), vec![1.0, 1.0, 1.0, 1.0]);
         s.execute("paint.bucket", json!({"x": 2, "y": 2, "color": "#0000ff", "contiguous": false, "antiAlias": false, "tolerance": 0})).unwrap();
         assert_eq!(px(&s, 5, 5), vec![0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn bucket_fills_with_a_pattern() {
+        // Paint Bucket with contents="pattern" flood-fills the region with a pattern, not a colour.
+        let mut s = session();
+        s.edit("wall", |doc, _| {
+            doc.layers[0].surface_mut().unwrap().fill_rect(Rect::new(10, 0, 11, 10), &[0.0, 0.0, 0.0, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("paint.bucket", json!({"x": 2, "y": 2, "contents": "pattern", "pattern": "Diagonal Lines", "antiAlias": false, "tolerance": 0})).unwrap();
+        // The filled region (left of the wall) now carries the pattern's light/dark variation,
+        // while the wall and the region past it are untouched.
+        let left: Vec<[f32; 4]> = (0..10).map(|x| { let p = px(&s, x, 0); [p[0], p[1], p[2], p[3]] }).collect();
+        assert!(left.iter().any(|p| p[0] < 0.3) && left.iter().any(|p| p[0] > 0.9), "pattern varies in the fill: {left:?}");
+        assert_eq!(px(&s, 15, 5), vec![1.0, 1.0, 1.0, 1.0], "region past the wall untouched");
     }
 
     #[test]
