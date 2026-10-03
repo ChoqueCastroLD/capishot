@@ -454,6 +454,55 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn copy_paste_between_documents() {
+        // Copy in one tab, paste into another: the clipboard is shared across documents.
+        let mut s = session(); // doc A (100x100): red rect at (10,10)-(50,30)
+        s.execute("select.rect", json!({"x": 10, "y": 10, "width": 40, "height": 20})).unwrap();
+        s.execute("edit.copy", json!({})).unwrap();
+        // Open a second document (a new tab), which becomes active.
+        s.execute("file.new", json!({"width": 200, "height": 200})).unwrap();
+        assert_eq!(s.active_index().unwrap(), 1, "the new document is the active tab");
+        let before = s.active().unwrap().doc.layers.len();
+        s.execute("edit.paste", json!({})).unwrap();
+        assert_eq!(s.active_index().unwrap(), 1, "paste stays in the second tab");
+        let d = &s.active().unwrap().doc;
+        assert_eq!(d.layers.len(), before + 1, "pasted layer added to the second document");
+        let pasted = d.layers.last().unwrap().surface().unwrap();
+        let cb = pasted.content_bounds();
+        let (cx, cy) = (cb.x0 + cb.width() as i32 / 2, cb.y0 + cb.height() as i32 / 2);
+        let mut px = [[0.0f32; 4]; 1];
+        pasted.read_rgba_into(Rect::new(cx, cy, cx + 1, cy + 1), &mut px);
+        assert!(px[0][0] > 0.9 && px[0][1] < 0.1 && px[0][2] < 0.1, "pasted content is red: {:?}", px[0]);
+    }
+
+    #[test]
+    fn paste_between_different_color_modes() {
+        // Copy from an RGB document, paste into a Grayscale one: the clipboard converts to the
+        // target document's format (a realistic between-tabs case that must not panic).
+        let mut s = session(); // RGB, red rect
+        s.execute("select.rect", json!({"x": 10, "y": 10, "width": 40, "height": 20})).unwrap();
+        s.execute("edit.copy", json!({})).unwrap();
+        s.execute("file.new", json!({"width": 120, "height": 120, "mode": "gray"})).unwrap();
+        s.execute("edit.paste", json!({})).unwrap();
+        let d = &s.active().unwrap().doc;
+        assert_eq!(d.mode, photocraft_doc::ColorMode::Grayscale);
+        let pasted = d.layers.last().unwrap().surface().unwrap();
+        assert_eq!(pasted.format().mode, photocraft_color::ColorMode::Grayscale, "pasted layer is grayscale");
+        assert!(!pasted.content_bounds().is_empty(), "pasted content exists");
+    }
+
+    #[test]
+    fn transform_scale_grows_content() {
+        let mut s = session(); // red rect (10,10)-(50,30): 40x20
+        s.execute("edit.transform", json!({"matrix": [2, 0, 0, 2, 0, 0]})).unwrap();
+        let d = &s.active().unwrap().doc;
+        let cb = d.layers.last().unwrap().surface().unwrap().content_bounds();
+        // Scaled ~2x about the origin (≈ 80x40 at ≈ (20,20)); allow ~1px bilinear edge bleed.
+        assert!((cb.x0 - 20).abs() <= 2 && (cb.y0 - 20).abs() <= 2, "origin ~ (20,20): {cb:?}");
+        assert!((cb.width() as i32 - 80).abs() <= 3 && (cb.height() as i32 - 40).abs() <= 3, "size ~ 80x40: {cb:?}");
+    }
+
     fn cut_clears_and_layer_via_copy_cut() {
         let mut s = session();
         s.execute("select.rect", json!({"x": 10, "y": 10, "width": 10, "height": 20})).unwrap();
