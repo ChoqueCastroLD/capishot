@@ -112,5 +112,13 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId]) -> Value {
             "items": l.effects.items.iter().map(|e| json!({"kind": e.label(), "enabled": e.enabled()})).collect::<Vec<_>>(),
         });
     }
+    // Video layer (Layer › Video Layers): the frame stack behind the displayed content.
+    if let Some(vid) = &l.video {
+        let source = match &vid.source {
+            photocraft_doc::VideoSource::Blank => Value::String("blank".into()),
+            photocraft_doc::VideoSource::File { path } => json!({ "file": path }),
+        };
+        v["video"] = json!({"frames": vid.frames.len(), "fps": vid.fps, "showAltered": vid.show_altered, "source": source});
+    }
     v
 }

@@ -115,3 +115,24 @@ fn render_video_to_animated_gif() {
     assert_eq!(&gif[..6], b"GIF89a");
     assert_eq!(gif.iter().filter(|&&b| b == 0x2C).count(), 3); // 3 frames
 }
+
+#[test]
+fn inspect_reports_video_layer() {
+    let dir = tmpdir("vinsp");
+    write_png(&format!("{dir}/a.png"), 6, 4, "#ff0000");
+    write_png(&format!("{dir}/b.png"), 6, 4, "#00ff00");
+    let mut s = session();
+    s.execute("layer.videoLayers.newVideoLayerFromFile", json!({"path": dir})).unwrap();
+    let r = s.execute("document.inspect", json!({})).unwrap();
+    // Find any layer node carrying a "video" block.
+    fn find_video(v: &serde_json::Value) -> Option<serde_json::Value> {
+        if let Some(vid) = v.get("video") {
+            return Some(vid.clone());
+        }
+        v.get("children").and_then(|c| c.as_array()).and_then(|a| a.iter().find_map(find_video))
+    }
+    let layers = r["layers"].as_array().expect("layers array");
+    let vid = layers.iter().find_map(find_video).expect("a video layer is reported");
+    assert_eq!(vid["frames"], 2);
+    assert_eq!(vid["source"]["file"].as_str(), Some(dir.as_str()));
+}
