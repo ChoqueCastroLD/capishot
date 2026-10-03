@@ -12,6 +12,12 @@ use crate::PhotocraftApp;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TimelineUi {
     pub open: bool,
+    /// Playing back (auto-advancing the playhead at the frame rate).
+    #[serde(default)]
+    pub playing: bool,
+    /// egui time (seconds) of the last auto-advance.
+    #[serde(default, skip)]
+    pub last_time: f64,
 }
 
 /// Menu checkmark for Window › Timeline.
@@ -42,6 +48,8 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let have_doc = app.session.active().is_some();
     let mut act: Option<(&str, Value)> = None;
     let mut close = false;
+    let mut toggle_play = false;
+    let playing = app.ui.timeline.playing;
     let t = Tokens::get(ctx);
 
     crate::analysis_ui::panel_window(app, ctx, "timeline", "Timeline", vec2(0.0, 520.0), 660.0, |ui| {
@@ -72,6 +80,10 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
             Some(tl) => {
                 ui.horizontal(|ui| {
+                    let play_icon = if playing { "pause" } else { "play" };
+                    if crate::icons::button(ui, play_icon, 22.0, playing, if playing { "Pause" } else { "Play" }).clicked() {
+                        toggle_play = true;
+                    }
                     if crate::icons::button(ui, "chevron-left", 22.0, false, "Previous frame").clicked() {
                         act = Some(("timeline.previousFrame", json!({})));
                     }
@@ -108,8 +120,28 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
     if close {
         app.ui.timeline.open = false;
+        app.ui.timeline.playing = false;
+    }
+    if toggle_play {
+        app.ui.timeline.playing = !app.ui.timeline.playing;
+        app.ui.timeline.last_time = ctx.input(|i| i.time);
     }
     if let Some((cmd, p)) = act {
         let _ = app.run(cmd, p);
+    }
+    // Playback: auto-advance the playhead at the frame rate (loops).
+    if app.ui.timeline.playing {
+        if let Some(t) = app.session.active().and_then(|d| d.doc.timeline.clone()) {
+            let now = ctx.input(|i| i.time);
+            let period = 1.0 / f64::from(t.fps.max(1.0));
+            if now - app.ui.timeline.last_time >= period {
+                app.ui.timeline.last_time = now;
+                let next = (t.current + 1) % t.duration.max(1);
+                let _ = app.run("timeline.setFrame", json!({ "frame": next as u64 }));
+            }
+            ctx.request_repaint();
+        } else {
+            app.ui.timeline.playing = false;
+        }
     }
 }
