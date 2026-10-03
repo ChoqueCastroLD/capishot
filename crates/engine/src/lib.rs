@@ -55,6 +55,7 @@ pub mod vp_cmds;
 pub mod artboard_cmds;
 pub mod comps_cmds;
 pub mod automate_cmds;
+mod frame_cmds;
 mod variables_cmds;
 pub mod pick_cmds;
 pub mod print_cmds;
