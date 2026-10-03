@@ -44,6 +44,7 @@ pub mod matting;
 pub mod quantize;
 pub mod stack;
 pub mod tone;
+pub mod trap;
 pub mod transform;
 pub mod warp;
 pub mod liquify;

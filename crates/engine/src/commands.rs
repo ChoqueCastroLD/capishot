@@ -838,6 +838,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::pick_cmds::specs());
     v.extend(crate::frame_cmds::specs());
     v.extend(crate::migrate_cmds::specs());
+    v.extend(crate::trap_cmds::specs());
     v.extend(crate::variables_cmds::specs());
     v
 }
