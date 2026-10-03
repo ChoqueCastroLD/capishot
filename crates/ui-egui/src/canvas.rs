@@ -1268,7 +1268,8 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 }
                 Tool::PaintBucket => {
                     let o = app.ui.tool_options.clone();
-                    let _ = app.run("paint.bucket", json!({"x": x.floor(), "y": y.floor(), "tolerance": o.tolerance, "contiguous": o.contiguous, "antiAlias": o.anti_alias, "opacity": o.fill_opacity, "target": paint_target(app)}));
+                    let contents = if o.bucket_fill_pattern { "pattern" } else { "foreground" };
+                    let _ = app.run("paint.bucket", json!({"x": x.floor(), "y": y.floor(), "tolerance": o.tolerance, "contiguous": o.contiguous, "antiAlias": o.anti_alias, "opacity": o.fill_opacity, "contents": contents, "target": paint_target(app)}));
                     return;
                 }
                 Tool::PolygonLasso => {

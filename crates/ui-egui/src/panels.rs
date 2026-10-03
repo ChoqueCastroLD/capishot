@@ -425,8 +425,10 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
                 Tool::PaintBucket if t.pro => {
                     opt_label(ui, "Fill");
-                    let mut src = 0u8;
-                    widgets::dropdown(ui, "bucket-src", &mut src, &[(0u8, "Foreground"), (1, "Pattern")], 100.0);
+                    let mut src = u8::from(app.ui.tool_options.bucket_fill_pattern);
+                    if widgets::dropdown(ui, "bucket-src", &mut src, &[(0u8, "Foreground"), (1, "Pattern")], 100.0) {
+                        app.ui.tool_options.bucket_fill_pattern = src == 1;
+                    }
                     opt_label(ui, "Opacity");
                     widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
                     opt_label(ui, "Tolerance");

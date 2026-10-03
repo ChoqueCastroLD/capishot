@@ -276,6 +276,8 @@ pub struct ToolOptions {
     pub gradient_style: String,
     pub gradient_reverse: bool,
     pub fill_opacity: f32,
+    /// Paint Bucket fill source: false = Foreground colour, true = Pattern (Patterns panel selection).
+    pub bucket_fill_pattern: bool,
     /// Type tool: family, style name, size (pt), anti-aliasing and paragraph alignment.
     pub type_font: String,
     pub type_style: String,
@@ -359,6 +361,7 @@ impl Default for ToolOptions {
             gradient_style: "linear".into(),
             gradient_reverse: false,
             fill_opacity: 100.0,
+            bucket_fill_pattern: false,
             type_font: "Inter".into(),
             type_style: "Regular".into(),
             type_size: 48.0,
