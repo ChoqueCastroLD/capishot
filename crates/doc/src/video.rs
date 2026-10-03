@@ -4,6 +4,51 @@
 
 use serde::{Deserialize, Serialize};
 
+use photocraft_raster::Surface;
+
+/// Where a video layer's footage came from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum VideoSource {
+    /// Created blank (Layer › Video Layers › New Blank Video Layer).
+    Blank,
+    /// Loaded from a file or image sequence.
+    File { path: String },
+}
+
+/// A video layer's frame stack (Layer › Video Layers). The layer's displayed content surface is a
+/// cache of `frames[timeline.current]`, which the engine keeps in sync as the playhead moves.
+///
+/// Frames are full raster surfaces held in memory. (`.pcraft` persistence of the stack is a
+/// follow-up; a saved document keeps the current frame as the layer's raster content.)
+#[derive(Clone, Debug)]
+pub struct VideoData {
+    pub frames: Vec<Surface>,
+    pub source: VideoSource,
+    pub fps: f32,
+    /// Show the altered (painted) frames rather than the original footage.
+    pub show_altered: bool,
+}
+
+impl VideoData {
+    pub fn new(frames: Vec<Surface>, fps: f32) -> Self {
+        VideoData { frames: if frames.is_empty() { Vec::new() } else { frames }, source: VideoSource::Blank, fps, show_altered: true }
+    }
+    pub fn len(&self) -> usize {
+        self.frames.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+}
+
+// Surfaces aren't `PartialEq` (and pixel comparison would be pointless here), so compare the stack
+// by shape, not contents — enough for change detection.
+impl PartialEq for VideoData {
+    fn eq(&self, o: &Self) -> bool {
+        self.frames.len() == o.frames.len() && self.source == o.source && self.fps == o.fps && self.show_altered == o.show_altered
+    }
+}
+
 /// The document timeline.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Timeline {

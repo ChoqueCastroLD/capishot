@@ -51,7 +51,7 @@ pub fn specs() -> Vec<CommandSpec> {
         params: r#"{width:px>=1=1} → {trapped,width}: spread inks at colour edges (CMYK only)"#,
         enabled,
         journal: true,
-        run: |s, p| trap(s, &p),
+        run: |s, p| trap(s, p),
     }]
 }
 
@@ -92,8 +92,8 @@ mod tests {
         if let LayerContent::Raster(surf) = &st.doc.layer(id).unwrap().content {
             let ch = surf.channels();
             let d = surf.read_region(Rect::new(0, 0, 8, 4));
-            assert!(d[(3) * ch + 1] > 0.5, "magenta trapped into the cyan edge");
-            assert!(d[(4) * ch + 0] > 0.5, "cyan trapped into the magenta edge");
+            assert!(d[3 * ch + 1] > 0.5, "magenta trapped into the cyan edge");
+            assert!(d[4 * ch] > 0.5, "cyan trapped into the magenta edge");
         }
         // One history step.
         assert_eq!(st.history.entries().last().map(|e| e.as_str()), Some("Trap"));

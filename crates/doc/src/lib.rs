@@ -35,7 +35,7 @@ pub use photocraft_geom::{Affine, Rect, Size};
 pub use photocraft_raster::Surface;
 pub use mode::{ColorTable, Duotone, DuotoneInk, StackMode};
 pub use pattern::Pattern;
-pub use video::Timeline;
+pub use video::{Timeline, VideoData, VideoSource};
 pub use variables::{DataSet, DataValue, PixelAlign, PixelMethod, VarKind, VariableDef, Variables};
 pub use slices::{Slice, SliceKind, SliceOrigin, Slices};
 pub use text_styles::TextStyles;
@@ -422,6 +422,8 @@ pub struct Layer {
     /// document's mode (R, G, B / C, M, Y, K / L, a, b / Gray) is left out of blending, so the
     /// backdrop's value is kept there. 0 = every channel blends (the default). PSD `brst`.
     pub excluded_channels: u32,
+    /// Layer › Video Layers frame stack (None for a normal layer).
+    pub video: Option<VideoData>,
 }
 
 impl Layer {
@@ -445,6 +447,7 @@ impl Layer {
             fill_cache: None,
             link_group: None,
             excluded_channels: 0,
+            video: None,
         }
     }
     pub fn raster(name: impl Into<String>, format: PixelFormat) -> Self {

@@ -552,6 +552,7 @@ impl Loader<'_> {
             fill_cache,
             link_group: m.link_group,
             excluded_channels: m.excluded_channels,
+            video: None,
         })
     }
 

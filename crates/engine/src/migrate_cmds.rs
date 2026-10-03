@@ -73,7 +73,7 @@ pub fn specs() -> Vec<crate::commands::CommandSpec> {
         params: r#"{path} → {migrated, added:{gradients,styles,shapes,patternGroups,toolPresets}}: merge a presets/preferences file into the library (appends groups by name)"#,
         enabled: |_s| Ok(()),
         journal: false,
-        run: |s, p| migrate(s, &p),
+        run: |s, p| migrate(s, p),
     }]
 }
 
