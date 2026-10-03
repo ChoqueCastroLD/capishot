@@ -369,7 +369,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     if crate::analysis_ui::handles(id) {
         return true;
     }
-    if crate::preset_panels::handles(id) || crate::type_panels_ui::handles(id) {
+    if crate::preset_panels::handles(id) || crate::type_panels_ui::handles(id) || crate::timeline_ui::handles(id) {
         return true;
     }
     if let Some(e) = crate::view_cmds::is_enabled(app, id) {
@@ -486,7 +486,7 @@ pub struct MenuItem {
 /// Is `id` implemented by the engine or the shell (a live menu item)? Shared by the menus and
 /// the parity report ([`crate::parity`]).
 pub fn is_live(id: &str) -> bool {
-    photocraft_engine::commands::find(id).is_some() || UI_COMMANDS.iter().any(|c| c.0 == id) || panel_alias(id).is_some() || workspace_name(id).is_some() || proof_preset(id).is_some() || id == "view.proofSetup.custom" || crate::view_cmds::handles(id) || crate::analysis_ui::handles(id) || crate::workspace_ui::handles(id) || crate::preset_panels::handles(id) || crate::type_panels_ui::handles(id)
+    photocraft_engine::commands::find(id).is_some() || UI_COMMANDS.iter().any(|c| c.0 == id) || panel_alias(id).is_some() || workspace_name(id).is_some() || proof_preset(id).is_some() || id == "view.proofSetup.custom" || crate::view_cmds::handles(id) || crate::analysis_ui::handles(id) || crate::workspace_ui::handles(id) || crate::preset_panels::handles(id) || crate::type_panels_ui::handles(id) || crate::timeline_ui::handles(id)
 }
 
 pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {

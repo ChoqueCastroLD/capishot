@@ -19,6 +19,11 @@ pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
     (id == "window.panel.timeline").then_some(app.ui.timeline.open)
 }
 
+/// Ids this module owns (for parity / enablement).
+pub fn handles(id: &str) -> bool {
+    id == "window.panel.timeline"
+}
+
 /// Toggle the Timeline panel.
 pub fn menu(app: &mut PhotocraftApp, id: &str, _params: &Value) -> Option<Result<Value, String>> {
     if id == "window.panel.timeline" {
