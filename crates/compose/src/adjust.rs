@@ -73,10 +73,18 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
             map_rgb(buf, |px| px.map(|v| ((v - 0.5) * k + 0.5 + b).clamp(0.0, 1.0)))
         }
         Adjustment::BrightnessContrast { brightness, contrast, .. } => {
-            // brightness in [-150,150], contrast in [-50,100] (Photoshop UI ranges)
-            let b = brightness / 255.0;
-            let k = if *contrast >= 0.0 { 1.0 + contrast / 50.0 } else { 1.0 + contrast / 100.0 };
-            map_rgb(buf, |c| c.map(|v| ((v + b - 0.5) * k + 0.5).clamp(0.0, 1.0)))
+            // Modern (CS3+) Brightness/Contrast, reverse-engineered from Photoshop ground truth
+            // (a 0..255 ramp pushed through the real app; see log/devlog.md). Unlike the legacy
+            // linear scale, both are smooth curves that pin pure black and white:
+            //   • Brightness: a line of slope s = 1.375^(b/50) from the origin that rolls off to
+            //     (1,1) via a `v^P` white-anchor term (P grows as |b| grows).
+            //   • Contrast: a symmetric cubic-Hermite S-curve pivoting at 0.5, with endpoint slope
+            //     1 - c/128 and centre slope 1 + c/128 (near-exact: ≤0.5/255 vs Photoshop).
+            // Applied brightness-then-contrast. Exact at the sliders' zero and extremes still drift
+            // on the brightness side (the real curve is a spline); contrast matches closely.
+            let b = *brightness;
+            let c = *contrast;
+            map_rgb(buf, |px| px.map(|v| modern_contrast(modern_brightness(v, b), c).clamp(0.0, 1.0)))
         }
         Adjustment::Exposure { exposure, offset, gamma } => {
             // In linear light: (lin·2^exposure + offset)^(1/gamma), then back
@@ -320,6 +328,39 @@ fn lut(table: &[f32], v: f32) -> f32 {
 
 /// Photoshop posterize: `n` equal input bins over 0..=255, output levels
 /// `floor(k * 255 / (n - 1))` (exact on the corpus for 3, 7, 13 and 21 levels).
+/// Modern Brightness curve (one channel, `brightness` in [-150, 150]). A line of slope
+/// `s = 1.375^(b/50)` from the origin, rolled off to (1, 1) by a `v^P` white-anchor term. Pins pure
+/// black and white; `b = 0` is the identity. Fit to Photoshop ground truth (see modern B/C above).
+pub fn modern_brightness(v: f32, brightness: f32) -> f32 {
+    if brightness == 0.0 {
+        return v;
+    }
+    let s = 1.375f32.powf(brightness / 50.0);
+    // Exponent of the white-anchor term grows with |b|; shapes the roll-off toward (1,1).
+    let p = if brightness >= 0.0 {
+        (4.5 - 0.013 * brightness).max(2.0)
+    } else {
+        5.0 - 0.072 * brightness
+    };
+    let v = v.clamp(0.0, 1.0);
+    (s * v + (1.0 - s) * v.powf(p)).clamp(0.0, 1.0)
+}
+
+/// Modern Contrast curve (one channel, `contrast` in [-50, 100]). A symmetric cubic-Hermite S-curve
+/// pivoting at 0.5: endpoint slope `1 - c/128`, centre slope `1 + c/128`. Near-exact vs Photoshop
+/// (≤0.5/255). `c = 0` is the identity; pins 0, 0.5 and 1.
+pub fn modern_contrast(v: f32, contrast: f32) -> f32 {
+    if contrast == 0.0 {
+        return v;
+    }
+    let k = contrast / 128.0;
+    let (end, mid) = (1.0 - k, 1.0 + k);
+    // Cubic Hermite on [0, 0.5]: pinned (0,0) slope `end`, (0.5,0.5) slope `mid`. `t` in [0,1].
+    let half = |t: f32| end * 0.5 * (t * t * t - 2.0 * t * t + t) + (-2.0 * t * t * t + 3.0 * t * t) * 0.5 + mid * 0.5 * (t * t * t - t * t);
+    let v = v.clamp(0.0, 1.0);
+    if v <= 0.5 { half(v / 0.5) } else { 1.0 - half((1.0 - v) / 0.5) }
+}
+
 pub fn posterize(v: f32, levels: u32) -> f32 {
     let n = levels.clamp(2, 255) as f32;
     let x = (v.clamp(0.0, 1.0) * 255.0).round();

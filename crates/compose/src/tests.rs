@@ -804,3 +804,47 @@ fn adjustment_results_are_rounded_to_the_document_depth() {
         }
     }
 }
+
+// Ground truth captured from Adobe Photoshop 2026 (27.10.0): a 0..255 ramp pushed through modern
+// (non-legacy) Brightness/Contrast via `executeAction("BrgC", ... useLegacy=false)`. These pin our
+// reverse-engineered curves (see crates/compose/src/adjust.rs modern_* and log/devlog.md).
+#[test]
+fn modern_contrast_matches_photoshop() {
+    // (contrast, [out at x = 0,16,32,64,96,128,160,192,224,255])
+    let cases: [(f32, [u8; 10]); 4] = [
+        (50.0, [0, 11, 23, 52, 87, 128, 169, 204, 233, 255]),
+        (-50.0, [0, 21, 41, 76, 105, 128, 151, 180, 215, 255]),
+        (100.0, [0, 5, 14, 40, 78, 128, 178, 216, 242, 255]),
+        (-25.0, [0, 19, 37, 70, 101, 128, 155, 186, 220, 255]),
+    ];
+    let xs = [0usize, 16, 32, 64, 96, 128, 160, 192, 224, 255];
+    for (c, out) in cases {
+        for (i, &x) in xs.iter().enumerate() {
+            let got = adjust::modern_contrast(x as f32 / 255.0, c) * 255.0;
+            let err = (got - out[i] as f32).abs();
+            assert!(err <= 2.0, "contrast {c} x={x}: got {got:.1} want {} (err {err:.1})", out[i]);
+        }
+    }
+}
+
+#[test]
+fn modern_brightness_matches_photoshop() {
+    let cases: [(f32, [u8; 10]); 2] = [
+        (50.0, [0, 22, 44, 88, 132, 171, 203, 228, 246, 255]),
+        (-50.0, [0, 12, 23, 47, 70, 93, 118, 148, 186, 255]),
+    ];
+    let xs = [0usize, 16, 32, 64, 96, 128, 160, 192, 224, 255];
+    for (b, out) in cases {
+        for (i, &x) in xs.iter().enumerate() {
+            let got = adjust::modern_brightness(x as f32 / 255.0, b) * 255.0;
+            let err = (got - out[i] as f32).abs();
+            // The brightness roll-off is a spline; our fit is close but approximate at the top.
+            assert!(err <= 6.0, "brightness {b} x={x}: got {got:.1} want {} (err {err:.1})", out[i]);
+        }
+    }
+    // Endpoints and the zero slider are exact.
+    assert_eq!(adjust::modern_brightness(0.0, 120.0), 0.0);
+    assert_eq!(adjust::modern_brightness(1.0, -120.0), 1.0);
+    assert_eq!(adjust::modern_brightness(0.37, 0.0), 0.37);
+    assert_eq!(adjust::modern_contrast(0.37, 0.0), 0.37);
+}

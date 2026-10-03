@@ -1152,8 +1152,9 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer) -> Program {
             (4, p, None)
         }
         Adjustment::BrightnessContrast { brightness, contrast, .. } => {
-            let k = if *contrast >= 0.0 { 1.0 + contrast / 50.0 } else { 1.0 + contrast / 100.0 };
-            p[0] = [brightness / 255.0, k, 0.0, 0.0];
+            // Modern B/C: the shader rebuilds the curves from raw slider values (see compose.wgsl
+            // `mbright`/`mcontrast`, mirroring compose::adjust::modern_brightness/modern_contrast).
+            p[0] = [*brightness, *contrast, 0.0, 0.0];
             (5, p, None)
         }
         Adjustment::Exposure { exposure, offset, gamma } => {
