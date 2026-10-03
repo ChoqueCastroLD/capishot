@@ -48,6 +48,11 @@ pub fn document(d: &DocState) -> Value {
         "lastAppliedComp": doc.last_applied_comp,
         "measurement": {"scale": doc.measurement.scale.describe(), "ruler": doc.measurement.ruler.map(|r| json!({"start": r.start, "end": r.end, "protractor": r.protractor})), "count": doc.measurement.count_total(), "countGroups": doc.measurement.count_groups.len()},
         "notes": doc.notes.iter().map(|n| json!({"author": n.author, "text": n.text, "position": n.position})).collect::<Vec<_>>(),
+        "variables": (!doc.variables.is_empty()).then(|| json!({
+            "defs": doc.variables.defs.iter().map(|vd| json!({"name": vd.name, "layer": vd.layer.0})).collect::<Vec<_>>(),
+            "dataSets": doc.variables.data_sets.iter().map(|s| s.name.clone()).collect::<Vec<_>>(),
+            "active": doc.variables.active,
+        })),
     })
 }
 

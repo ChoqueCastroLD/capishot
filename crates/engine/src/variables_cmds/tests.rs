@@ -57,6 +57,11 @@ fn define_apply_visibility_and_text() {
     assert!(doc(&s).layer(badge).unwrap().visible);
     assert_eq!(text_of(&s, title), "Old");
 
+    // document.inspect surfaces the variables for agents.
+    let insp = s.execute("document.inspect", json!({})).unwrap();
+    assert_eq!(insp["variables"]["defs"].as_array().unwrap().len(), 2);
+    assert_eq!(insp["variables"]["dataSets"][0], "A");
+
     let r = s.execute("image.applyDataSet", json!({"name": "A"})).unwrap();
     assert_eq!(r["applied"], "A");
     assert!(!doc(&s).layer(badge).unwrap().visible, "visibility applied");
