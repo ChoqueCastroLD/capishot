@@ -104,7 +104,7 @@ mod tests {
         let (w, h, ch) = (6usize, 3usize, 4usize);
         let mut px = vec![0.0f32; w * h * ch];
         // One cyan pixel in the middle, rest paper.
-        px[(1 * w + 3) * ch] = 1.0;
+        px[(w + 3) * ch] = 1.0;
         let before = px.clone();
         trap(&mut px, w, h, ch, 1);
         // Paper pixels (no ink) stay paper — no ink bleeds into white.

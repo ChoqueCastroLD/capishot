@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn new_and_clamp() {
-        let mut t = Timeline::new(0, 0.0);
+        let t = Timeline::new(0, 0.0);
         assert_eq!(t.duration, 1);
         assert_eq!(t.fps, 30.0);
         let mut t = Timeline::new(24, 24.0);
