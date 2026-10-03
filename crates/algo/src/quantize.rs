@@ -5,6 +5,7 @@
 //! Buffers are straight RGBA in 0..=1, row-major. Median cut follows Heckbert (1982); k-means
 //! refinement is Lloyd's algorithm; error diffusion is Floyd & Steinberg (1976).
 
+use rayon::prelude::*;
 use photocraft_color::convert::srgb_to_lab;
 use serde::{Deserialize, Serialize};
 
@@ -415,14 +416,37 @@ pub fn quantize(
     let mut idx = vec![0u8; px.len()];
     // Typical palette spacing sets the ordered/noise dither amplitude.
     let spread = (1.0 / (pal.len() as f32).cbrt().max(1.0)).min(0.5) * amount.clamp(0.0, 1.0);
-    let mut err = vec![
-        [0.0f32; 3];
-        if dither == Dither::Diffusion {
-            2 * (w + 2)
-        } else {
-            0
-        }
-    ];
+    // None / Pattern / Noise dither have no cross-pixel dependency: map every pixel in parallel.
+    // (Diffusion propagates error between pixels, so it stays serial below.)
+    if dither != Dither::Diffusion {
+        idx.par_iter_mut().zip(px.par_iter_mut()).enumerate().for_each(|(i, (ip, p))| {
+            let (x, y) = (i % w, i / w);
+            let pv = *p;
+            if pv[3] < 0.5 {
+                if let Some(t) = transparent {
+                    *ip = t as u8;
+                    *p = [0.0, 0.0, 0.0, 0.0];
+                    return;
+                }
+                if pv[3] <= 0.0 {
+                    return;
+                }
+            }
+            let mut c = [pv[0], pv[1], pv[2]];
+            match dither {
+                Dither::Pattern => c = c.map(|v| v + bayer8(x, y) * spread),
+                Dither::Noise => c = c.map(|v| v + (hash01(x, y, 7) - 0.5) * spread),
+                _ => {}
+            }
+            let c = c.map(|v| v.clamp(0.0, 1.0));
+            let k = nearest(pal, c);
+            *ip = k as u8;
+            let e = pal[k].map(|v| f32::from(v) / 255.0);
+            *p = [e[0], e[1], e[2], if transparent.is_some() { 1.0 } else { pv[3] }];
+        });
+        return idx;
+    }
+    let mut err = vec![[0.0f32; 3]; 2 * (w + 2)];
     for y in 0..h {
         if dither == Dither::Diffusion {
             // Rows ping-pong: `cur` is row y, `next` row y + 1 (offset by one for x = -1).
