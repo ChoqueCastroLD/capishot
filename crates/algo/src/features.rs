@@ -17,6 +17,7 @@
 //!
 //! Everything is deterministic (fixed-seed RNG). Images are `w × h` luminance in `0..=1`.
 
+use crate::photo_util::par_map;
 use crate::transform::Homography;
 
 /// A detected corner.
@@ -227,17 +228,16 @@ pub fn match_descriptors(a: &[Descriptor], b: &[Descriptor], ratio: f32) -> Vec<
         }
         (first.0 != usize::MAX).then_some((first.0, first.1, second))
     };
-    let mut out = Vec::new();
-    for (i, d) in a.iter().enumerate() {
-        let Some((j, d1, d2)) = best(d, b) else { continue };
+    // Each query descriptor searches b independently (and cross-checks against a): parallel,
+    // order preserved for determinism.
+    let matched = par_map(a.len(), |i| {
+        let (j, d1, d2) = best(&a[i], b)?;
         if d1 > 80 || (d2 != u32::MAX && d1 as f32 > ratio * d2 as f32) {
-            continue;
+            return None;
         }
-        if best(&b[j], a).is_some_and(|(k, _, _)| k == i) {
-            out.push((i, j));
-        }
-    }
-    out
+        best(&b[j], a).is_some_and(|(k, _, _)| k == i).then_some((i, j))
+    });
+    matched.into_iter().flatten().collect()
 }
 
 // ------------------------------------------------------------------ model fitting
