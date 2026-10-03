@@ -22,6 +22,7 @@ pub mod comps_ui;
 pub mod control;
 pub mod dialogs;
 mod variables_ui;
+mod timeline_ui;
 pub mod doc_props_ui;
 pub mod enable_rules;
 pub mod export_dialog;
@@ -545,6 +546,7 @@ impl eframe::App for PhotocraftApp {
         preset_panels::windows(self, &ctx);
         type_panels_ui::windows(self, &ctx);
         analysis_ui::windows(self, &ctx);
+        timeline_ui::windows(self, &ctx);
         workspace_ui::windows(self, &ctx);
         palette::show(self, &ctx);
         dialogs::show(self, &ctx);

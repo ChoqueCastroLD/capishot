@@ -124,6 +124,10 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
     if let Some(r) = crate::variables_ui::menu(app, id, &params) {
         return r;
     }
+    // Window > Timeline panel.
+    if let Some(r) = crate::timeline_ui::menu(app, id, &params) {
+        return r;
+    }
     if id == "window.panel.brushes" {
         // Window › Brushes opens the Brush Settings window on its presets tab.
         app.ui.panels.brush_settings = true;
@@ -402,6 +406,9 @@ fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
         return Some(c);
     }
     if let Some(c) = crate::preset_panels::checked(app, id) {
+        return Some(c);
+    }
+    if let Some(c) = crate::timeline_ui::checked(app, id) {
         return Some(c);
     }
     if let Some(c) = crate::type_panels_ui::checked(app, id) {
