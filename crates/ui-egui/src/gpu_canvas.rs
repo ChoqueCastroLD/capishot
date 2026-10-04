@@ -160,10 +160,21 @@ impl GpuCanvas {
         }
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.get_mut::<Resources>() else { return Err(photocraft_gpu::Unsupported("no GPU canvas".into())) };
-        let mut comp = res
-            .compositor
-            .take()
-            .unwrap_or_else(|| photocraft_gpu::Compositor::new_with_format(device, photocraft_gpu::Compositor::preferred_acc_format(&self.rs.adapter)));
+        // A driver that couldn't build the pipelines once won't later: stay on the CPU compositor.
+        if let Some(e) = &res.compositor_failed {
+            return Err(e.clone());
+        }
+        let mut comp = match res.compositor.take() {
+            Some(c) => c,
+            None => match photocraft_gpu::Compositor::try_new_with_format(device, photocraft_gpu::Compositor::preferred_acc_format(&self.rs.adapter)) {
+                Ok(c) => c,
+                Err(e) => {
+                    log::warn!("{e}; using the CPU compositor");
+                    res.compositor_failed = Some(e.clone());
+                    return Err(e);
+                }
+            },
+        };
         let key = doc.id.0;
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size);
         let region = if fresh { doc.bounds() } else { region.intersect(&doc.bounds()) };
@@ -382,6 +393,8 @@ struct Resources {
     out_linear: bool,
     /// The wgpu layer compositor (created on first use).
     compositor: Option<photocraft_gpu::Compositor>,
+    /// Why the wgpu compositor couldn't be created (then the CPU compositor is used).
+    compositor_failed: Option<photocraft_gpu::Unsupported>,
     encode_bgl: wgpu::BindGroupLayout,
     encode_pipeline: wgpu::RenderPipeline,
     lut_bgl: wgpu::BindGroupLayout,
@@ -632,6 +645,7 @@ impl Resources {
             views: HashMap::new(),
             out_linear: target.is_srgb(),
             compositor: None,
+            compositor_failed: None,
             encode_bgl,
             encode_pipeline,
         }

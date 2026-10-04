@@ -1120,3 +1120,13 @@ fn rgba16f_fallback_path_renders() {
     let f = Compositor::preferred_acc_format(&adapter);
     assert!(matches!(f, wgpu::TextureFormat::Rgba32Float | wgpu::TextureFormat::Rgba16Float));
 }
+
+#[test]
+fn unbuildable_pipelines_are_an_error_not_a_panic() {
+    // The app falls back to the CPU compositor on Err; a panic here would crash it (as FXC once
+    // did on D3D12). A depth format can't be a colour target, so its pipelines fail to build.
+    let Some(g) = gpu() else { return };
+    let e = Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Depth32Float).err().expect("depth target must fail");
+    assert!(e.0.contains("pipelines"), "{e}");
+    assert!(Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Rgba16Float).is_ok());
+}

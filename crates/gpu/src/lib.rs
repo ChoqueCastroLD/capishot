@@ -394,6 +394,25 @@ impl Compositor {
         if feats.allowed_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT) { wgpu::TextureFormat::Rgba32Float } else { wgpu::TextureFormat::Rgba16Float }
     }
 
+    /// [`Compositor::new_with_format`], but a shader or pipeline the driver can't build (e.g. a
+    /// D3D12 shader-compiler failure) is an `Err` instead of a panic, so the caller can fall back
+    /// to the CPU compositor. Where errors only arrive asynchronously (WebGPU), creation is assumed
+    /// to have worked.
+    pub fn try_new_with_format(device: &wgpu::Device, acc_format: wgpu::TextureFormat) -> Result<Self, Unsupported> {
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let comp = Self::new_with_format(device, acc_format);
+        // Pop in reverse order; native wgpu reports errors synchronously, so the futures are ready.
+        let errors = [internal.pop(), validation.pop()];
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        for f in errors {
+            if let std::task::Poll::Ready(Some(e)) = std::pin::pin!(f).poll(&mut cx) {
+                return Err(Unsupported(format!("couldn't build the compositor's pipelines: {e}")));
+            }
+        }
+        Ok(comp)
+    }
+
     /// Create a compositor whose accumulation/render-target format is `acc_format`. Pass
     /// `Rgba16Float` on adapters that can't render to `Rgba32Float` (e.g. some Intel Vulkan drivers),
     /// which otherwise panics at render-pipeline creation. See `Compositor::preferred_acc_format`.

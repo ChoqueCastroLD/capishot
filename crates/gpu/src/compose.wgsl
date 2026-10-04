@@ -402,33 +402,37 @@ fn color_lookup(c: vec3<f32>, n: i32, tetra: bool) -> vec3<f32> {
     return mix(mix(c00, c10, f.y), mix(c01, c11, f.y), f.z);
 }
 
-// compose::adjust::selective_color (ranges × CMYK percentages in LUT row 0)
+// One Selective Color range: its CMYK percentages (LUT row 0, 4 per range) weighted by `w`.
+fn selective_row(r: i32, w: f32, c: vec3<f32>, relative: bool) -> vec3<f32> {
+    let k = lut_at(r * 4 + 3) / 100.0;
+    var d = vec3(lut_at(r * 4), lut_at(r * 4 + 1), lut_at(r * 4 + 2)) / 100.0 + k;
+    if (relative) { d = d * (1.0 - c); }
+    return select(vec3(0.0), d * w, w > 0.0);
+}
+
+// compose::adjust::selective_color (ranges × CMYK percentages in LUT row 0). Written without
+// loops: FXC (D3D12) aborts compiling loops with dynamic indexing inside `adjust`'s switch.
 fn selective_color(c: vec3<f32>, relative: bool) -> vec3<f32> {
     let mx = max(max(c.r, c.g), c.b);
     let mn = min(min(c.r, c.g), c.b);
     let md = c.r + c.g + c.b - mx - mn;
-    var w: array<f32, 9>;
-    w[0] = select(0.0, mx - md, c.r >= mx);
-    w[1] = select(0.0, md - mn, c.b <= mn);
-    w[2] = select(0.0, mx - md, c.g >= mx);
-    w[3] = select(0.0, md - mn, c.r <= mn);
-    w[4] = select(0.0, mx - md, c.b >= mx);
-    w[5] = select(0.0, md - mn, c.g <= mn);
-    w[6] = max((mn - 0.5) * 2.0, 0.0);
-    w[7] = clamp(1.0 - abs(mx - 0.5) - abs(mn - 0.5), 0.0, 1.0);
-    w[8] = max((0.5 - mx) * 2.0, 0.0);
-    var delta = vec3(0.0);
-    for (var r = 0; r < 9; r++) {
-        if (w[r] <= 0.0) { continue; }
-        let k = lut_at(r * 4 + 3) / 100.0;
-        for (var i = 0; i < 3; i++) {
-            let a = lut_at(r * 4 + i) / 100.0;
-            var d = a + k;
-            if (relative) { d = d * (1.0 - c[i]); }
-            delta[i] += d * w[r];
-        }
-    }
+    var delta = selective_row(0, select(0.0, mx - md, c.r >= mx), c, relative);
+    delta += selective_row(1, select(0.0, md - mn, c.b <= mn), c, relative);
+    delta += selective_row(2, select(0.0, mx - md, c.g >= mx), c, relative);
+    delta += selective_row(3, select(0.0, md - mn, c.r <= mn), c, relative);
+    delta += selective_row(4, select(0.0, mx - md, c.b >= mx), c, relative);
+    delta += selective_row(5, select(0.0, md - mn, c.g <= mn), c, relative);
+    delta += selective_row(6, max((mn - 0.5) * 2.0, 0.0), c, relative);
+    delta += selective_row(7, clamp(1.0 - abs(mx - 0.5) - abs(mn - 0.5), 0.0, 1.0), c, relative);
+    delta += selective_row(8, max((0.5 - mx) * 2.0, 0.0), c, relative);
     return clamp(c - delta, vec3(0.0), vec3(1.0));
+}
+
+// Exposure on one channel (p = exposure scale, offset, gamma, transfer gamma). Per channel, not a
+// loop over `c[i]`: FXC aborts on that inside `adjust`'s switch.
+fn exposure(v: f32, p: vec4<f32>) -> f32 {
+    let lin = pow(max(t_decode(v, p.w) * p.x + p.y, 0.0), 1.0 / p.z);
+    return clamp(t_encode(lin, p.w), 0.0, 1.0);
 }
 
 // Modern Brightness curve: line of slope 1.375^(b/50) rolled off to (1,1) by a v^P white anchor.
@@ -472,14 +476,7 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             let b = p0.x; let ct = p0.y;
             return vec3(mcontrast(mbright(c.r, b), ct), mcontrast(mbright(c.g, b), ct), mcontrast(mbright(c.b, b), ct));
         }
-        case 6: {                                                              // Exposure
-            var o: vec3<f32>;
-            for (var i = 0; i < 3; i++) {
-                let lin = pow(max(t_decode(c[i], p0.w) * p0.x + p0.y, 0.0), 1.0 / p0.z);
-                o[i] = clamp(t_encode(lin, p0.w), 0.0, 1.0);
-            }
-            return o;
-        }
+        case 6: { return vec3(exposure(c.r, p0), exposure(c.g, p0), exposure(c.b, p0)); }  // Exposure
         case 7: { return vec3(lut(0, c.r), lut(1, c.g), lut(2, c.b)); }        // Levels / Curves
         case 8: {                                                              // Hue/Saturation
             let hsl = rgb_to_hsl(c);
