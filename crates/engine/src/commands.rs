@@ -39,9 +39,7 @@ fn has_layer(s: &Session) -> std::result::Result<(), String> {
     d.active_layer.filter(|id| d.doc.layer(*id).is_some()).map(|_| ()).ok_or_else(|| "no active layer".into())
 }
 fn has_pixel_layer(s: &Session) -> std::result::Result<(), String> {
-    has_layer(s)?;
-    let d = s.active().unwrap();
-    let l = d.doc.layer(d.active_layer.unwrap()).unwrap();
+    let l = crate::active_layer_of(s)?;
     if matches!(l.content, LayerContent::Raster(_)) { Ok(()) } else { Err(format!("active layer is a {} layer, not a pixel layer", l.content.kind_name())) }
 }
 /// A pixel layer, or a targeted alpha channel / Quick Mask (adjustments and fills apply to it).
@@ -56,9 +54,7 @@ pub(crate) fn has_paintable(s: &Session) -> std::result::Result<(), String> {
     if crate::channel_cmds::edits_channel(s) {
         return Ok(());
     }
-    has_layer(s)?;
-    let d = s.active().unwrap();
-    let l = d.doc.layer(d.active_layer.unwrap()).unwrap();
+    let l = crate::active_layer_of(s)?;
     if matches!(l.content, LayerContent::Raster(_)) || l.mask.is_some() {
         Ok(())
     } else {
@@ -623,17 +619,17 @@ fn build() -> Vec<CommandSpec> {
             let id = layer_param(s, p)?;
             s.edit("Merge Down", |doc, active| {
                 let path = doc.path_of(id).ok_or(EngineError::NoLayer(id))?;
-                let idx = *path.last().unwrap();
+                let Some((&idx, parent)) = path.split_last() else { return Err(EngineError::NoLayer(id)) };
                 if idx == 0 {
                     return Err(EngineError::Other("no layer below to merge into".into()));
                 }
-                let mut below = path.clone();
-                *below.last_mut().unwrap() = idx - 1;
+                let mut below = parent.to_vec();
+                below.push(idx - 1);
                 let lower = doc.layer_at(&below).ok_or(EngineError::NoLayer(id))?.clone();
                 let upper = doc.layer(id).ok_or(EngineError::NoLayer(id))?.clone();
                 let merged = pixels::merge_down(doc.bounds(), &lower, &upper, doc.pixel_format());
                 doc.remove(id);
-                *doc.layer_at_mut(&below).unwrap() = merged;
+                *doc.layer_at_mut(&below).ok_or(EngineError::NoLayer(lower.id))? = merged;
                 *active = Some(lower.id);
                 Ok(())
             })?;
@@ -646,7 +642,7 @@ fn build() -> Vec<CommandSpec> {
                 let data: Vec<f32> = buf.px.iter().flat_map(|p| photocraft_raster::from_rgba(&fmt, *p)).collect();
                 let mut bg = Layer::raster("Background", fmt);
                 bg.locks.transparency = true;
-                bg.surface_mut().unwrap().write_region(doc.bounds(), &data);
+                crate::pixels_mut(&mut bg)?.write_region(doc.bounds(), &data);
                 *active = Some(bg.id);
                 doc.layers = vec![bg];
                 Ok(())
@@ -725,11 +721,13 @@ fn build() -> Vec<CommandSpec> {
                         g.push(layer);
                     }
                     other => {
-                        let (&last, parent) = path.split_last().expect("non-empty path");
+                        let (&last, parent) = path.split_last().ok_or(EngineError::NoLayer(target))?;
                         let sib = if parent.is_empty() {
                             &mut doc.layers
                         } else {
-                            doc.layer_at_mut(parent).and_then(|t| t.children_mut()).expect("parent is a group")
+                            doc.layer_at_mut(parent)
+                                .and_then(|t| t.children_mut())
+                                .ok_or_else(|| EngineError::Other("target's parent is not a group".into()))?
                         };
                         let at = if other == "below" { last } else { last + 1 };
                         sib.insert(at.min(sib.len()), layer);

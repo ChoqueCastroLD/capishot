@@ -417,7 +417,7 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(EngineError::Other("the active layer is not a group".into()));
         };
         let children = group.children.clone();
-        let (&idx, parent) = path.split_last().unwrap();
+        let (&idx, parent) = path.split_last().ok_or(EngineError::NoLayer(id))?;
         let sib = if parent.is_empty() { &mut doc.layers } else { doc.layer_at_mut(parent).and_then(Layer::children_mut).ok_or(EngineError::NoLayer(id))? };
         sib.remove(idx);
         let top = children.last().map(|l| l.id);

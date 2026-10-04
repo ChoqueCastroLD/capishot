@@ -618,8 +618,9 @@ fn quantize_rows(px: &mut [[f32; 4]], w: usize, pal: &[[u8; 3]], dither: Dither,
             .for_each(|(i, (p, out))| out.copy_from_slice(&quantize_band(p, w, i * 64, pal, dither, amount, t)));
         idx
     }
+    // Single-threaded on wasm (the early return above always takes this path there).
     #[cfg(target_arch = "wasm32")]
-    unreachable!()
+    quantize_band(px, w, 0, pal, dither, amount, t)
 }
 
 /// A file-name-safe slice name.
@@ -840,8 +841,19 @@ fn quick_export(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let metadata = serde_json::to_value(prefs.metadata).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
-    let mut q = json!({"metadata": if metadata == "all" { "all" } else if metadata == "none" { "none" } else { "copyright" }, "convertToSrgb": prefs.convert_to_srgb, "transparency": true});
-    let o = q.as_object_mut().unwrap_or_else(|| unreachable!());
+    let mut o = serde_json::Map::new();
+    o.insert(
+        "metadata".into(),
+        json!(if metadata == "all" {
+            "all"
+        } else if metadata == "none" {
+            "none"
+        } else {
+            "copyright"
+        }),
+    );
+    o.insert("convertToSrgb".into(), json!(prefs.convert_to_srgb));
+    o.insert("transparency".into(), json!(true));
     match fmt.as_str() {
         "jpg" => {
             o.insert("format".into(), json!("jpeg"));
@@ -861,6 +873,7 @@ fn quick_export(s: &mut Session, p: &Value) -> Result<Value> {
             o.insert("format".into(), json!("png24"));
         }
     }
+    let q = Value::Object(o);
     let st = WebSettings::from_params(&q, cmd)?;
     let (wdoc, _, _) = web_document(&doc, &json!({}), &st)?;
     let buf = photocraft_compose::flatten(&wdoc);

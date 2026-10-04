@@ -70,6 +70,14 @@ fn kind_json(k: &VarKind) -> Value {
     }
 }
 
+/// `a` with `b`'s fields added (both are JSON objects).
+fn merged(mut a: Value, b: Value) -> Value {
+    if let (Some(ao), Value::Object(bo)) = (a.as_object_mut(), b) {
+        ao.extend(bo);
+    }
+    a
+}
+
 fn value_json(v: &VarValue) -> Value {
     match v {
         VarValue::Visibility(b) => json!({"kind": "visibility", "value": b}),
@@ -355,16 +363,12 @@ fn list(s: &mut Session) -> Result<Value> {
     let v = &s.active().ok_or(EngineError::NoDocument)?.doc.variables;
     Ok(json!({
         "defs": v.defs.iter().map(|d| {
-            let mut o = json!({"name": d.name, "layer": d.layer.0});
-            o.as_object_mut().unwrap().extend(kind_json(&d.kind).as_object().unwrap().clone());
-            o
+            merged(json!({"name": d.name, "layer": d.layer.0}), kind_json(&d.kind))
         }).collect::<Vec<_>>(),
         "dataSets": v.data_sets.iter().map(|ds| json!({
             "name": ds.name,
             "values": ds.values.iter().map(|dv| {
-                let mut o = json!({"variable": dv.variable});
-                o.as_object_mut().unwrap().extend(value_json(&dv.value).as_object().unwrap().clone());
-                o
+                merged(json!({"variable": dv.variable}), value_json(&dv.value))
             }).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
         "active": v.active,

@@ -80,18 +80,18 @@ fn auto_align(s: &mut Session, p: &Value) -> Result<Value> {
     let warped: Vec<(LayerId, Surface, Option<Surface>)> = moves
         .iter()
         .map(|&i| {
-            let pl = al.placements[i].as_ref().expect("placed");
-            let l = doc.layer(ids[i]).expect("exists");
-            let surf = l.surface().expect("raster");
+            let pl = al.placements[i].as_ref().ok_or_else(|| EngineError::Other("Auto-Align lost a layer's placement".into()))?;
+            let l = doc.layer(ids[i]).ok_or(EngineError::NoLayer(ids[i]))?;
+            let surf = l.surface().ok_or(EngineError::NoLayer(ids[i]))?;
             let b = surf.content_bounds();
             let px = if b.is_empty() { surf.clone() } else { warp_placed(surf, b, (0.0, 0.0), pl, (0.0, 0.0), interp) };
             let mask = l.mask.as_ref().map(|m| {
                 let mb = m.surface.content_bounds();
                 if mb.is_empty() { m.surface.clone() } else { warp_placed(&m.surface, mb, (0.0, 0.0), pl, (0.0, 0.0), Interp::Bilinear) }
             });
-            (ids[i], px, mask)
+            Ok((ids[i], px, mask))
         })
-        .collect();
+        .collect::<Result<_>>()?;
     s.edit("Auto-Align Layers", |doc, _| {
         for (id, px, mask) in &warped {
             let l = doc.layer_mut(*id).ok_or(EngineError::NoLayer(*id))?;
@@ -113,9 +113,9 @@ fn auto_align(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let aligned: Vec<Value> = moves
         .iter()
-        .map(|&i| {
-            let pl = al.placements[i].as_ref().expect("placed");
-            json!({"layer": ids[i].0, "model": model, "matches": inliers[i], "matrix": plane_matrix(pl, (0.0, 0.0)).map(|h| h.0.to_vec())})
+        .filter_map(|&i| {
+            let pl = al.placements[i].as_ref()?;
+            Some(json!({"layer": ids[i].0, "model": model, "matches": inliers[i], "matrix": plane_matrix(pl, (0.0, 0.0)).map(|h| h.0.to_vec())}))
         })
         .collect();
     Ok(json!({"reference": reference.0, "layout": al.layout.name(), "focal": al.focal, "rms": al.rms, "aligned": aligned, "failed": failed}))
@@ -191,7 +191,7 @@ fn auto_blend(s: &mut Session, p: &Value) -> Result<Value> {
         let blended = seamless.then(|| b.composite.read_region(area));
         (weights, blended)
     };
-    let top = *ids.last().expect("two or more");
+    let top = *ids.last().ok_or_else(|| EngineError::Other("Auto-Blend needs two or more layers".into()))?;
     let label = "Auto-Blend Layers";
     let new_layer = s.edit(label, |doc, active| {
         for (id, wt) in ids.iter().zip(&weights) {

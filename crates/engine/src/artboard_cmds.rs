@@ -137,7 +137,8 @@ fn fit_canvas(doc: &mut Document) {
 
 fn next_artboard_name(doc: &Document) -> String {
     let names: Vec<&str> = doc.artboards().into_iter().map(|b| b.1).collect();
-    (1..).map(|n| format!("Artboard {n}")).find(|n| !names.contains(&n.as_str())).expect("infinite")
+    // `names.len() + 1` candidates always include a free one.
+    (1..=names.len() + 1).map(|n| format!("Artboard {n}")).find(|n| !names.contains(&n.as_str())).unwrap_or_else(|| "Artboard".into())
 }
 
 fn set_artboard(l: &mut Layer, a: Artboard) {

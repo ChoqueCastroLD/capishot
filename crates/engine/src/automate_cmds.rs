@@ -55,7 +55,7 @@ pub fn parse_script(text: &str) -> Result<Vec<(String, Value)>> {
             Value::Object(o) => {
                 o.get("steps").or_else(|| o.get("action").and_then(|a| a.get("steps").or(Some(a)))).ok_or_else(|| bad(cmd, "script object needs \"steps\""))?
             }
-            _ => unreachable!(),
+            _ => return Err(bad(cmd, "script JSON must be an array of steps or an object")),
         };
         return parse_steps(steps, cmd);
     }

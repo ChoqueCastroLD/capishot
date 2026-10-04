@@ -83,9 +83,8 @@ fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
         let fmt = doc.pixel_format();
         for l in doc.layers.iter_mut() {
             let background = l.name == "Background" && l.locks.position && matches!(l.content, LayerContent::Raster(_));
-            if background {
+            if background && let Some(surf) = l.surface_mut() {
                 // The Background stays a Background: rotated pixels over the background colour.
-                let surf = l.surface_mut().expect("raster");
                 let src = surf.content_bounds();
                 let rotated = photocraft_algo::transform::warp_surface(surf, src, &h, interp);
                 let mut base = Surface::new(fmt);
@@ -146,7 +145,10 @@ fn single_layer(doc: &mut Document, active: &mut Option<LayerId>, mode: ColorMod
         l.locks.transparency = true;
         l.locks.position = true;
     }
-    l.surface_mut().expect("raster").write_region(doc.bounds(), &data);
+    // A new raster layer always has pixels.
+    if let Some(surf) = l.surface_mut() {
+        surf.write_region(doc.bounds(), &data);
+    }
     *active = Some(l.id);
     doc.layers = vec![l];
     for ch in doc.channels.iter_mut() {

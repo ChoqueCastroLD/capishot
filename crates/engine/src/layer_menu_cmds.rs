@@ -606,7 +606,7 @@ fn create_layer(s: &mut Session, p: &Value) -> Result<Value> {
         let n = below.len() + above.len();
         // Insert in order: below layers under the source, clipped layers above it.
         let path = doc.path_of(id).ok_or(EngineError::NoLayer(id))?;
-        let (&at, parent) = path.split_last().expect("non-empty path");
+        let (&at, parent) = path.split_last().ok_or_else(|| other("bad layer path"))?;
         let sib =
             if parent.is_empty() { &mut doc.layers } else { doc.layer_at_mut(parent).and_then(|t| t.children_mut()).ok_or_else(|| other("bad layer path"))? };
         let src = &mut sib[at];

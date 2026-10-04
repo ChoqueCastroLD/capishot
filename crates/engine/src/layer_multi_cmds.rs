@@ -521,7 +521,7 @@ pub fn group_layers(s: &mut Session, p: &Value) -> Result<Value> {
         for id in &ids {
             children.push(doc.remove(*id).ok_or(EngineError::NoLayer(*id))?);
         }
-        *doc.layer_mut(gid).and_then(Layer::children_mut).expect("new group") = children;
+        *doc.layer_mut(gid).and_then(Layer::children_mut).ok_or(EngineError::NoLayer(gid))? = children;
         *active = Some(gid);
         Ok(gid)
     })?;
@@ -536,7 +536,7 @@ fn merge_layers(s: &mut Session) -> Result<Value> {
     }
     let mid = s.edit("Merge Layers", |doc, active| {
         let ids = top_level(doc, &sel);
-        let top_id = *ids.last().expect("two or more");
+        let top_id = *ids.last().ok_or_else(|| EngineError::Other("Merge Layers needs two or more layers".into()))?;
         let top = doc.layer(top_id).ok_or(EngineError::NoLayer(top_id))?.clone();
         let mut solo = doc.clone();
         solo.layers = ids.iter().filter_map(|id| doc.layer(*id)).filter(|l| l.visible).cloned().collect();
@@ -549,7 +549,7 @@ fn merge_layers(s: &mut Session) -> Result<Value> {
         let data: Vec<f32> = buf.px.iter().flat_map(|p| photocraft_raster::from_rgba(&fmt, *p)).collect();
         let mut merged = Layer::raster(top.name.clone(), fmt);
         merged.locks = top.locks;
-        let surf = merged.surface_mut().expect("raster");
+        let surf = crate::pixels_mut(&mut merged)?;
         surf.write_region(doc.bounds(), &data);
         surf.prune();
         let mid = merged.id;

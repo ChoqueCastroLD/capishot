@@ -68,8 +68,10 @@ pub fn parse(src: &str) -> std::result::Result<Path, String> {
             s.closed = closed;
             if closed && s.knots.len() > 1 {
                 let (f, l) = (s.knots[0].anchor, s.knots[s.knots.len() - 1].anchor);
-                if (f.x - l.x).abs() < 1e-9 && (f.y - l.y).abs() < 1e-9 {
-                    let last = s.knots.pop().expect("len > 1");
+                if (f.x - l.x).abs() < 1e-9
+                    && (f.y - l.y).abs() < 1e-9
+                    && let Some(last) = s.knots.pop()
+                {
                     s.knots[0].in_ctrl = last.in_ctrl;
                 }
             }
@@ -99,7 +101,7 @@ pub fn parse(src: &str) -> std::result::Result<Path, String> {
             "C" | "Q" => {
                 let s = cur.as_mut().ok_or("curve before M")?;
                 while is_num(i) {
-                    let last = s.knots.last().expect("M pushed a knot").anchor;
+                    let last = s.knots.last().ok_or("curve before M")?.anchor;
                     let (c1, c2, p) = if t == "C" {
                         let c1 = Point::new(num(&mut i)?, num(&mut i)?);
                         let c2 = Point::new(num(&mut i)?, num(&mut i)?);
@@ -113,7 +115,9 @@ pub fn parse(src: &str) -> std::result::Result<Path, String> {
                             p,
                         )
                     };
-                    s.knots.last_mut().expect("non-empty").out_ctrl = c1;
+                    if let Some(k) = s.knots.last_mut() {
+                        k.out_ctrl = c1;
+                    }
                     s.knots.push(Knot { anchor: p, in_ctrl: c2, out_ctrl: p, smooth: false });
                 }
             }

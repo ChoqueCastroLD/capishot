@@ -439,7 +439,9 @@ fn with_shape<R>(s: &mut Session, id: LayerId, label: &str, f: impl FnOnce(&mut 
         if !matches!(l.content, LayerContent::Shape(_)) {
             return Err(EngineError::Other(format!("layer {} is a {} layer, not a shape layer", id.0, l.content.kind_name())));
         }
-        let LayerContent::Shape(mut sh) = std::mem::replace(&mut l.content, LayerContent::Fill(Fill::Solid(Color::BLACK))) else { unreachable!() };
+        let LayerContent::Shape(mut sh) = std::mem::replace(&mut l.content, LayerContent::Fill(Fill::Solid(Color::BLACK))) else {
+            return Err(EngineError::Other(format!("layer {} is not a shape layer", id.0)));
+        };
         let r = f(&mut sh, l);
         refresh_shape(&snapshot, &mut sh);
         l.content = LayerContent::Shape(sh);

@@ -108,13 +108,12 @@ fn inks_of(doc: &Document) -> Vec<(String, Color, Vec<f32>)> {
             .map(|((n, c), p)| (n.to_string(), c, p))
             .collect(),
         ColorMode::Lab => planes.iter().enumerate().map(|(k, p)| (format!("Alpha {}", k + 1), Color::BLACK, inv(p))).collect(),
-        ColorMode::Duotone if doc.duotone.as_ref().is_some_and(|d| !d.inks.is_empty()) => {
-            let d = doc.duotone.as_ref().expect("checked");
-            d.inks
-                .iter()
-                .map(|ink| (ink.name.clone(), Color::rgb(ink.color[0], ink.color[1], ink.color[2]), planes[0].iter().map(|g| ink.density(1.0 - g)).collect()))
-                .collect()
-        }
+        ColorMode::Duotone if doc.duotone.as_ref().is_some_and(|d| !d.inks.is_empty()) => doc
+            .duotone
+            .iter()
+            .flat_map(|d| d.inks.iter())
+            .map(|ink| (ink.name.clone(), Color::rgb(ink.color[0], ink.color[1], ink.color[2]), planes[0].iter().map(|g| ink.density(1.0 - g)).collect()))
+            .collect(),
         _ => vec![("Black".to_string(), Color::BLACK, inv(&planes[0]))],
     }
 }

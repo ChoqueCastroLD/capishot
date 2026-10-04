@@ -124,7 +124,7 @@ fn paste(s: &mut Session, p: &Value, in_place: bool) -> Result<Value> {
     let surf = if moved.format() == target { moved } else { moved.convert(target) };
     let id = s.edit("Paste", |doc, active| {
         let mut l = Layer::raster(doc.next_layer_name("Layer"), target);
-        *l.surface_mut().expect("raster") = surf;
+        *crate::pixels_mut(&mut l)? = surf;
         let id = doc.insert_above(*active, l);
         *active = Some(id);
         doc.selection = None;
@@ -161,7 +161,7 @@ fn layer_via(s: &mut Session, cut: bool) -> Result<Value> {
             clear_selected(doc, id)?;
         }
         let mut l = Layer::raster(doc.next_layer_name("Layer"), clip.surface.format());
-        *l.surface_mut().expect("raster") = clip.surface;
+        *crate::pixels_mut(&mut l)? = clip.surface;
         let nid = doc.insert_above(Some(id), l);
         *active = Some(nid);
         Ok(nid)
@@ -188,7 +188,7 @@ fn merge_visible(s: &mut Session) -> Result<Value> {
         let data: Vec<f32> = buf.px.iter().flat_map(|p| photocraft_raster::from_rgba(&fmt, *p)).collect();
         let mut merged = Layer::raster(base.name.clone(), fmt);
         merged.locks = base.locks;
-        let surf = merged.surface_mut().expect("raster");
+        let surf = crate::pixels_mut(&mut merged)?;
         surf.write_region(doc.bounds(), &data);
         surf.prune();
         let mid = merged.id;

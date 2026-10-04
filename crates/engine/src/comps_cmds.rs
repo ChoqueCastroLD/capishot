@@ -102,7 +102,8 @@ fn new_comp(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let name = p.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| {
         let names: Vec<&str> = d.doc.layer_comps.iter().map(|c| c.name.as_str()).collect();
-        (1..).map(|n| format!("Layer Comp {n}")).find(|n| !names.contains(&n.as_str())).expect("infinite")
+        // `names.len() + 1` candidates always include a free one.
+        (1..=names.len() + 1).map(|n| format!("Layer Comp {n}")).find(|n| !names.contains(&n.as_str())).unwrap_or_else(|| "Layer Comp".into())
     });
     let comment = p.get("comment").and_then(Value::as_str).unwrap_or_default().to_string();
     let (v, pos, a) = (flag(p, "visibility", true), flag(p, "position", true), flag(p, "appearance", true));

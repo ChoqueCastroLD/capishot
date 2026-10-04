@@ -5,6 +5,7 @@
 //! [`Session::execute`] entry point: the egui UI, the CLI, the remote-control channel and the MCP
 //! server. This is what makes the UI swappable and the app fully scriptable.
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod adjust_cmds;
 pub mod align_cmds;
@@ -96,6 +97,19 @@ pub enum EngineError {
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
+
+/// The pixels of a raster layer (typically one a command just created), as an error instead
+/// of a panic if the layer has none.
+pub(crate) fn pixels_mut(l: &mut photocraft_doc::Layer) -> Result<&mut photocraft_raster::Surface> {
+    let id = l.id;
+    l.surface_mut().ok_or_else(|| EngineError::Other(format!("layer {id:?} has no pixels")))
+}
+
+/// The active document's active layer, for `enabled` predicates.
+pub(crate) fn active_layer_of(s: &Session) -> std::result::Result<&photocraft_doc::Layer, String> {
+    let d = s.active().ok_or("no document open")?;
+    d.active_layer.and_then(|id| d.doc.layer(id)).ok_or_else(|| "no active layer".into())
+}
 
 /// Per-document editing state.
 #[derive(Clone, Debug)]

@@ -408,7 +408,8 @@ pub fn composite_profile(doc: &Document) -> Arc<Profile> {
         ColorSpace::Rgb => document_profile(doc),
         ColorSpace::Gray => {
             let p = document_profile(doc);
-            p.gray_as_rgb().map(Arc::new).unwrap_or_else(|| Arc::new(Builtin::SGray.profile().gray_as_rgb().expect("sGray is a TRC profile")))
+            // sGray is a TRC profile, so its RGB view always exists; sRGB is the last resort.
+            p.gray_as_rgb().or_else(|| Builtin::SGray.profile().gray_as_rgb()).map(Arc::new).unwrap_or_else(|| Arc::new(Builtin::Srgb.profile().clone()))
         }
         _ => Arc::new(Builtin::Srgb.profile().clone()),
     }

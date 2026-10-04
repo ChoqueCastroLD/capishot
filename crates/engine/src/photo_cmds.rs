@@ -227,8 +227,7 @@ pub(crate) fn seam_blend(warped: &[Surface], canvas: Rect, order: &[usize], seam
         }
         for y in 0..roi.h {
             for x in 0..roi.w {
-                let r2 = if vig {
-                    let (pl, sizes) = geo.expect("vignette needs geometry");
+                let r2 = if vig && let Some((pl, sizes)) = geo {
                     pl[i].inverse((roi.x0 + x as i32) as f64 + 0.5, (roi.y0 + y as i32) as f64 + 0.5).map_or(0.0, |(sx, sy)| {
                         let (w, h) = (sizes[i].0 as f64, sizes[i].1 as f64);
                         let (dx, dy) = (sx - w / 2.0, sy - h / 2.0);
@@ -410,11 +409,13 @@ fn photomerge(s: &mut Session, p: &Value) -> Result<Value> {
         .ok_or_else(|| EngineError::Other("Photomerge couldn't find enough matching detail between the images".into()))?;
     let t_reg = t0.ms() / 1000.0;
     let placed: Vec<usize> = (0..srcs.len()).filter(|&i| al.placements[i].is_some()).collect();
+    // Parallel to `placed`.
+    let placements: Vec<&Placement> = placed.iter().filter_map(|&i| al.placements[i].as_ref()).collect();
     let failed: Vec<String> = (0..srcs.len()).filter(|&i| al.placements[i].is_none()).map(|i| srcs[i].name.clone()).collect();
     // Canvas: union of the placed images.
     let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-    for &i in &placed {
-        let b = al.placements[i].as_ref().expect("placed").bounds(srcs[i].w as f64, srcs[i].h as f64);
+    for (&i, pl) in placed.iter().zip(&placements) {
+        let b = pl.bounds(srcs[i].w as f64, srcs[i].h as f64);
         x0 = x0.min(b[0]);
         y0 = y0.min(b[1]);
         x1 = x1.max(b[2]);
@@ -427,18 +428,10 @@ fn photomerge(s: &mut Session, p: &Value) -> Result<Value> {
     let canvas = Rect::new(0, 0, cw as i32, ch as i32);
     let offset = (-x0.floor(), -y0.floor());
     let warped: Vec<Surface> = {
-        let jobs: Vec<usize> = placed.clone();
-        jobs.iter()
-            .map(|&i| {
-                warp_placed(
-                    &srcs[i].surf,
-                    Rect::new(0, 0, srcs[i].w as i32, srcs[i].h as i32),
-                    (0.0, 0.0),
-                    al.placements[i].as_ref().expect("placed"),
-                    offset,
-                    Interp::Bicubic,
-                )
-            })
+        placed
+            .iter()
+            .zip(&placements)
+            .map(|(&i, pl)| warp_placed(&srcs[i].surf, Rect::new(0, 0, srcs[i].w as i32, srcs[i].h as i32), (0.0, 0.0), pl, offset, Interp::Bicubic))
             .collect()
     };
     let t_warp = t0.ms() / 1000.0;
@@ -447,7 +440,7 @@ fn photomerge(s: &mut Session, p: &Value) -> Result<Value> {
     let mut info = json!({});
     let ref_pos = placed.iter().position(|&i| i == al.reference).unwrap_or(0);
     if blend {
-        let pls: Vec<Placement> = placed.iter().map(|&i| al.placements[i].clone().expect("placed")).collect();
+        let pls: Vec<Placement> = placements.iter().map(|p| (*p).clone()).collect();
         let sizes: Vec<(usize, usize)> = placed.iter().map(|&i| (srcs[i].w, srcs[i].h)).collect();
         let order = seam_order(&warped, ref_pos);
         let geo = vignette.then_some((pls.as_slice(), sizes.as_slice(), offset));

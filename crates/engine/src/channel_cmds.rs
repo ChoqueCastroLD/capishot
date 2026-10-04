@@ -165,7 +165,8 @@ pub fn channel_format(doc: &Document) -> PixelFormat {
 
 /// Next free "Alpha N" name.
 fn next_alpha_name(doc: &Document, base: &str) -> String {
-    (1..).map(|n| format!("{base} {n}")).find(|n| !doc.channels.iter().any(|c| &c.name == n)).expect("infinite")
+    // `channels.len() + 1` candidates always include a free one.
+    (1..=doc.channels.len() + 1).map(|n| format!("{base} {n}")).find(|n| !doc.channels.iter().any(|c| &c.name == n)).unwrap_or_else(|| base.to_string())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -339,12 +340,14 @@ fn ref_planes(doc: &Document, layer: Option<LayerId>, active: Option<LayerId>, r
 
 /// One grayscale plane (composites reduce to luminosity, as in Calculations).
 fn gray_plane(doc: &Document, layer: Option<LayerId>, active: Option<LayerId>, r: ChanRef) -> Result<Vec<f32>> {
-    let planes = ref_planes(doc, layer, active, r)?;
-    if planes.len() == 1 {
-        return Ok(planes.into_iter().next().expect("one plane"));
+    let mut planes = ref_planes(doc, layer, active, r)?;
+    if planes.len() == 1
+        && let Some(only) = planes.pop()
+    {
+        return Ok(only);
     }
     let fmt = doc.pixel_format();
-    let n = planes[0].len();
+    let n = planes.first().map_or(0, Vec::len);
     let mut px = vec![0.0f32; fmt.channels()];
     Ok((0..n)
         .map(|i| {
@@ -596,17 +599,12 @@ fn has_selection(s: &Session) -> std::result::Result<(), String> {
     has_doc(s)?;
     if s.active().is_some_and(|d| d.doc.selection.is_some()) { Ok(()) } else { Err("no selection".into()) }
 }
-fn has_layer(s: &Session) -> std::result::Result<(), String> {
-    let d = s.active().ok_or("no document open")?;
-    d.active_layer.filter(|id| d.doc.layer(*id).is_some()).map(|_| ()).ok_or_else(|| "no active layer".into())
-}
 fn has_spot(s: &Session) -> std::result::Result<(), String> {
     has_doc(s)?;
     if s.active().is_some_and(|d| d.doc.channels.iter().any(|c| c.spot.is_some())) { Ok(()) } else { Err("the document has no spot channels".into()) }
 }
 fn can_split(s: &Session) -> std::result::Result<(), String> {
-    has_doc(s)?;
-    let d = s.active().expect("checked");
+    let d = s.active().ok_or("no document open")?;
     if color_count(&d.doc) + d.doc.channels.len() < 2 { Err("only one channel to split".into()) } else { Ok(()) }
 }
 fn can_merge(s: &Session) -> std::result::Result<(), String> {
@@ -691,8 +689,9 @@ fn load_selection(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "missing `channel`"));
     }
     // Composite and colour channels load their luminosity / values, as ⌘-clicking them does.
-    let plane = source(s, p, cmd, true)?.remove(0);
-    let label = match p.get("channel").and_then(|v| parse_ref(v, &s.active().expect("source checked").doc)) {
+    let plane = source(s, p, cmd, true)?.into_iter().next().ok_or_else(|| bad(cmd, "the channel has no pixels"))?;
+    let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+    let label = match p.get("channel").and_then(|v| parse_ref(v, doc)) {
         Some(ChanRef::Transparency) => "Load Transparency",
         Some(ChanRef::LayerMask) => "Load Layer Mask",
         _ => "Load Selection",
@@ -910,7 +909,7 @@ fn delete_channel(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
     let i = match p.get("channel") {
         Some(_) => alpha_index(doc, p, "channel", cmd)?,
-        None => match s.active().expect("checked").channel_view.target {
+        None => match s.active().ok_or(EngineError::NoDocument)?.channel_view.target {
             ChannelTarget::Alpha(i) => i,
             _ => return Err(bad(cmd, "missing `channel`")),
         },
@@ -1050,7 +1049,7 @@ fn set_visible(s: &mut Session, p: &Value) -> Result<Value> {
     let r = p.get("channel").and_then(|v| parse_ref(v, doc)).ok_or_else(|| bad(cmd, "missing or unknown `channel`"))?;
     let colors = color_count(doc);
     let n = doc.channels.len();
-    let st = s.active_mut().expect("checked");
+    let st = s.active_mut().ok_or(EngineError::NoDocument)?;
     let v = &mut st.channel_view;
     let visible = |cur: bool| p.get("visible").and_then(Value::as_bool).unwrap_or(!cur);
     match r {
@@ -1151,7 +1150,7 @@ fn merge_spot(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
     let i = match p.get("channel") {
         Some(_) => alpha_index(doc, p, "channel", cmd)?,
-        None => match s.active().expect("checked").channel_view.target {
+        None => match s.active().ok_or(EngineError::NoDocument)?.channel_view.target {
             ChannelTarget::Alpha(i) => i,
             _ => doc.channels.iter().position(|c| c.spot.is_some()).ok_or_else(|| bad(cmd, "no spot channel"))?,
         },
@@ -1563,9 +1562,8 @@ fn has_apply_target(s: &Session) -> std::result::Result<(), String> {
     if edits_channel(s) {
         return Ok(());
     }
-    has_layer(s)?;
-    let d = s.active().expect("checked");
-    let l = d.doc.layer(d.active_layer.expect("checked")).expect("checked");
+    let d = s.active().ok_or("no document open")?;
+    let l = d.active_layer.and_then(|id| d.doc.layer(id)).ok_or("no active layer")?;
     if matches!(l.content, LayerContent::Raster(_)) {
         Ok(())
     } else {
