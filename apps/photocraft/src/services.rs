@@ -54,13 +54,15 @@ pub fn native() -> Services {
     let savers: Rc<RefCell<HashMap<u64, Autosaver>>> = Rc::default();
     let savers2 = savers.clone();
     Services {
-        import: Some(Box::new(|name: &str, bytes: &[u8]| photocraft_io::import(name, bytes).map(|r| r.document).map_err(|e| e.to_string()))),
+        import: Some(Box::new(|name: &str, bytes: &[u8]| {
+            crate::crash_guard::guard("Open", || photocraft_io::import(name, bytes).map(|r| r.document).map_err(|e| e.to_string()))
+        })),
         export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
             let mut opts = photocraft_io::ExportOptions::default();
             if let Some(q) = settings.jpeg_quality {
                 opts.encode.jpeg_quality = q;
             }
-            photocraft_io::export(doc, path, &opts).map(|r| r.bytes).map_err(|e| e.to_string())
+            crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| r.bytes).map_err(|e| e.to_string()))
         })),
         pick_open: Some(Box::new(|| {
             let path = rfd::FileDialog::new().add_filter("Images", IMAGE_EXTS).pick_file()?;
@@ -168,7 +170,7 @@ pub fn import_flat(name: &str, bytes: &[u8]) -> Result<Document, String> {
     }
     let mut layer = Layer::raster("Background", doc.pixel_format());
     let data = conv.to_normalized();
-    layer.surface_mut().unwrap().write_region(Rect::from_xywh(0, 0, w, h), &data);
+    layer.surface_mut().ok_or("new raster layer has no pixels")?.write_region(Rect::from_xywh(0, 0, w, h), &data);
     doc.layers.push(layer);
     Ok(doc)
 }

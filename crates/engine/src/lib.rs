@@ -294,7 +294,11 @@ impl Session {
         // Pixel commands follow the Channels panel target unless the caller names one.
         let run_params = channel_cmds::inject_target(self, id, commands::inject_kind(id, params.clone()));
         self.color_restrict = channel_cmds::color_restriction(self, id, &run_params);
-        let r = (spec.run)(self, &run_params);
+        // Last-resort guard (AGENTS.md, Never crash): a command that panics anyway fails with an
+        // error instead of taking the app down. `edit` only commits a document after its closure
+        // returns, so the documents are unchanged.
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (spec.run)(self, &run_params)))
+            .unwrap_or_else(|_| Err(EngineError::Other(format!("`{id}` failed with an internal error (logged); the document is unchanged"))));
         self.coalesce_request = None;
         self.color_restrict = None;
         let r = r?;
