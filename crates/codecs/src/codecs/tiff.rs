@@ -58,7 +58,99 @@ fn value_bytes(v: tiff::decoder::ifd::Value) -> Option<Vec<u8>> {
     }
 }
 
+/// TIFF/EP `PhotometricInterpretation` for colour filter array (sensor) data.
+const PHOTOMETRIC_CFA: u32 = 32803;
+/// DNG `PhotometricInterpretation` for demosaiced but undeveloped sensor data.
+const PHOTOMETRIC_LINEAR_RAW: u32 = 34892;
+const TAG_PHOTOMETRIC: u16 = 262;
+const TAG_SUB_IFDS: u16 = 330;
+const TAG_DNG_VERSION: u16 = 50706;
+
+/// Recognizes TIFF-structured camera raw files (TIFF/EP, DNG, CR2 and the
+/// TIFF-based NEF/ARW/PEF… layouts): a CR2 signature, a DNGVersion tag, or
+/// a CFA / LinearRaw image in IFD0, its SubIFDs or the next few IFDs. Their
+/// first IFD is often a reduced preview, so this runs before decoding.
+/// Reads only bounds-checked header bytes; anything malformed is "not raw".
+fn camera_raw(b: &[u8]) -> bool {
+    let le = match b.get(0..4) {
+        Some(b"II*\0") => true,
+        Some(b"MM\0*") => false,
+        _ => return false, // BigTIFF and others: no raw layouts to recognize
+    };
+    let u16_at = |o: usize| {
+        let s = b.get(o..o.checked_add(2)?)?;
+        Some(if le {
+            u16::from_le_bytes([s[0], s[1]])
+        } else {
+            u16::from_be_bytes([s[0], s[1]])
+        })
+    };
+    let u32_at = |o: usize| {
+        let s: [u8; 4] = b.get(o..o.checked_add(4)?)?.try_into().ok()?;
+        Some(if le {
+            u32::from_le_bytes(s)
+        } else {
+            u32::from_be_bytes(s)
+        })
+    };
+    // CR2: "CR" and major version 2 right after the TIFF header.
+    if b.get(8..11) == Some(b"CR\x02") {
+        return true;
+    }
+    // Entry value (count 1) as SHORT or LONG; anything else is ignored.
+    let value = |e: usize| match u16_at(e.saturating_add(2))? {
+        3 => u16_at(e.saturating_add(8)).map(u32::from),
+        4 | 13 => u32_at(e.saturating_add(8)),
+        _ => None,
+    };
+    let mut queue: Vec<u32> = u32_at(4).into_iter().collect();
+    let mut visited = 0;
+    while let Some(ifd) = queue.pop() {
+        // A handful of IFDs is enough for every real layout; also stops loops.
+        visited += 1;
+        if visited > 16 {
+            break;
+        }
+        let ifd = ifd as usize;
+        let Some(n) = u16_at(ifd) else { continue };
+        for i in 0..usize::from(n) {
+            let e = ifd.saturating_add(2 + 12 * i);
+            let (Some(tag), Some(count)) = (u16_at(e), u32_at(e.saturating_add(4))) else {
+                break;
+            };
+            match tag {
+                TAG_DNG_VERSION => return true,
+                TAG_PHOTOMETRIC
+                    if matches!(value(e), Some(PHOTOMETRIC_CFA | PHOTOMETRIC_LINEAR_RAW)) =>
+                {
+                    return true;
+                }
+                TAG_SUB_IFDS if count == 1 => queue.extend(value(e)),
+                TAG_SUB_IFDS => {
+                    // More than one offset: they are stored at the entry's offset.
+                    let at = u32_at(e.saturating_add(8)).unwrap_or(0) as usize;
+                    for k in 0..count.min(8) as usize {
+                        queue.extend(u32_at(at.saturating_add(4 * k)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(next) = u32_at(ifd.saturating_add(2 + 12 * usize::from(n))).filter(|&o| o != 0)
+        {
+            queue.push(next);
+        }
+    }
+    false
+}
+
 pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
+    if camera_raw(bytes) {
+        return Err(CodecError::unsupported(
+            F,
+            "camera raw files (such as CR2, NEF, ARW or DNG) are not supported",
+        ));
+    }
     let tl = {
         let mut l = tiff::decoder::Limits::default();
         l.decoding_buffer_size = limits.alloc_usize();
