@@ -32,7 +32,7 @@ pub fn exists(name: &str) -> bool {
 
 /// An egui image for an icon, tinted.
 pub fn image(name: &str, size: f32, tint: Color32) -> egui::Image<'static> {
-    let bytes = white_icons().get(name).or_else(|| white_icons().get("square")).cloned().expect("square icon present");
+    let bytes = white_icons().get(name).or_else(|| white_icons().get("square")).cloned().unwrap_or_default();
     egui::Image::from_bytes(format!("bytes://icons/{name}.svg"), egui::load::Bytes::Shared(bytes)).fit_to_exact_size(Vec2::splat(size)).tint(tint)
 }
 

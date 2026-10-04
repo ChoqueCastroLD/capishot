@@ -85,12 +85,13 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) -> boo
         let id = LayerId(ed.layer);
         if hit_layer(app, x, y) == Some(id) {
             let off = hit_offset(app, id, x, y);
-            let e = app.ui.text_edit.as_mut().expect("editing");
-            e.caret = off;
-            if !shift {
-                e.anchor = off;
+            if let Some(e) = app.ui.text_edit.as_mut() {
+                e.caret = off;
+                if !shift {
+                    e.anchor = off;
+                }
+                e.dragging = true;
             }
-            e.dragging = true;
             return true;
         }
         commit(app);

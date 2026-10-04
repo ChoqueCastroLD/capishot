@@ -138,7 +138,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, fields: &mut Map<String,
 }
 
 fn define_page(ui: &mut egui::Ui, _t: &Tokens, layers: &[(u64, String, bool)], state: &mut Value) {
-    let defs = state.get_mut("defs").and_then(Value::as_array_mut).unwrap();
+    let Some(defs) = state.get_mut("defs").and_then(Value::as_array_mut) else { return };
     ui.label("Variables bind a layer's visibility, text or pixels to a named data slot.");
     ui.add_space(4.0);
     let mut remove = None;
@@ -199,7 +199,7 @@ fn data_sets_page(ui: &mut egui::Ui, _t: &Tokens, state: &mut Value, fields: &mu
         ui.weak("Define at least one variable first.");
         return;
     }
-    let sets = state.get_mut("dataSets").and_then(Value::as_array_mut).unwrap();
+    let Some(sets) = state.get_mut("dataSets").and_then(Value::as_array_mut) else { return };
     let mut cur = fields.get("__cur").and_then(Value::as_u64).unwrap_or(0) as usize;
 
     ui.horizontal(|ui| {
@@ -233,7 +233,7 @@ fn data_sets_page(ui: &mut egui::Ui, _t: &Tokens, state: &mut Value, fields: &mu
             }
         });
         ui.add_space(4.0);
-        let values = set.get_mut("values").and_then(Value::as_array_mut).unwrap();
+        let Some(values) = set.get_mut("values").and_then(Value::as_array_mut) else { return };
         for (vname, vty) in &def_meta {
             // find or create a value entry for this variable
             let idx = values.iter().position(|v| v.get("variable").and_then(Value::as_str) == Some(vname));

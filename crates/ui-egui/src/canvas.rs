@@ -218,7 +218,7 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
             && last_damage.is_some();
         let t0 = crate::gpu_canvas::now_ms();
         if partial {
-            let r = last_damage.unwrap().intersect(&doc.bounds());
+            let r = last_damage.unwrap_or(DRect::EMPTY).intersect(&doc.bounds());
             if !r.is_empty() {
                 let buf = photocraft_compose::render(&doc, r);
                 let t1 = crate::gpu_canvas::now_ms();
@@ -313,7 +313,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
         }
     }
     if partial && !done {
-        let r = last_damage.unwrap().intersect(&doc.bounds());
+        let r = last_damage.unwrap_or(DRect::EMPTY).intersect(&doc.bounds());
         if r.is_empty() {
             done = true;
         } else {
@@ -331,7 +331,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
         gpu.upload_buffer_full(id.0, &full);
         app.perf.record("full", size[0] as u64 * size[1] as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
     }
-    let cache = app.canvases.get_mut(&id).expect("inserted above");
+    let Some(cache) = app.canvases.get_mut(&id) else { return true };
     cache.revision = revision;
     cache.preview_key = preview_key;
     cache.on_gpu = true;
