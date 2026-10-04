@@ -423,3 +423,73 @@ fn channel_restrictions_round_trip_as_brst() {
     let f = document_to_psd(&cleared);
     assert!(f.layers().iter().find(|r| r.name() == "a").unwrap().block(b"brst").is_none());
 }
+
+#[test]
+fn blend_if_round_trips_as_blending_ranges() {
+    use photocraft_doc::{BlendIf, BlendRange, Document, Layer, Size};
+    let mut d = Document::new("b", Size::new(8, 8), ColorMode::Rgb, SampleType::U8);
+    let mut a = Layer::raster("a", d.pixel_format());
+    a.surface_mut().unwrap().fill_rect(
+        photocraft_geom::Rect::new(0, 0, 4, 4),
+        &[1.0, 1.0, 1.0, 1.0],
+    );
+    let mut bi = BlendIf::default();
+    // Gray › This Layer: hide the whites, fading from 200 to 230.
+    bi.set(
+        0,
+        [
+            BlendRange {
+                black: [0, 0],
+                white: [200, 230],
+            },
+            BlendRange::FULL,
+        ],
+    );
+    // Green › Underlying Layer: show only over values from 64 up.
+    bi.set(
+        2,
+        [
+            BlendRange::FULL,
+            BlendRange {
+                black: [64, 64],
+                white: [255, 255],
+            },
+        ],
+    );
+    a.blend_if = bi.clone();
+    let mut g = Layer::group("g", vec![Layer::raster("c", d.pixel_format())]);
+    g.blend_if.set(
+        1,
+        [
+            BlendRange {
+                black: [1, 2],
+                white: [3, 4],
+            },
+            BlendRange::FULL,
+        ],
+    );
+    let b = Layer::raster("b", d.pixel_format());
+    d.layers = vec![a, b, g];
+    let f = document_to_psd(&d);
+    let rec = f.layers().iter().find(|r| r.name() == "a").unwrap();
+    let full = [0u8, 0, 255, 255, 0, 0, 255, 255];
+    let mut want = Vec::new();
+    want.extend_from_slice(&[0, 0, 200, 230, 0, 0, 255, 255]);
+    want.extend_from_slice(&full);
+    want.extend_from_slice(&[0, 0, 255, 255, 64, 64, 255, 255]);
+    want.extend_from_slice(&full);
+    assert_eq!(rec.blending_ranges.data, want);
+    // Layers without Blend If keep full ranges for gray + R, G, B.
+    let rb = f.layers().iter().find(|r| r.name() == "b").unwrap();
+    assert_eq!(rb.blending_ranges, photocraft_psd::BlendingRanges::full(3));
+    let back = roundtrip(&d);
+    assert_eq!(back.layers[0].blend_if, bi);
+    assert!(back.layers[1].blend_if.is_default());
+    assert_eq!(
+        back.layers[2].blend_if.get(1)[0],
+        BlendRange {
+            black: [1, 2],
+            white: [3, 4]
+        }
+    );
+}

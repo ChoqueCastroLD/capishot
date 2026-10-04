@@ -470,15 +470,97 @@ pub fn transparent_outside(layer: &Layer) -> bool {
     }
 }
 
-/// Composite `layer` (plus its clipping group) onto `backdrop`, honouring its channel restrictions.
-fn composite_layer(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer, cx: &Ctx) {
-    match channel_weights(layer, cx.mode) {
-        Some(w) => {
-            let before = backdrop.clone();
-            composite_layer_any(layer, clipped, backdrop, cx);
-            restore_channels(backdrop, &before, w);
+/// Whether Blending Options › Blend If changes how `layer` composites in a `mode` document.
+/// RGB documents test Gray and R, G, B; grayscale (and duotone) documents their one channel.
+/// Other modes composite in display RGB, where ranges over their own channels have no exact
+/// equivalent, so (like channel restrictions) the setting round-trips but isn't applied there.
+pub fn blend_if_active(layer: &Layer, mode: photocraft_color::ColorMode) -> bool {
+    use photocraft_color::ColorMode as M;
+    matches!(mode, M::Rgb | M::Grayscale | M::Duotone) && !layer.blend_if.is_default()
+}
+
+/// How much of a pixel shows through `layer`'s Blend If ranges, given the layer's own colour
+/// (`this`, `None` where the layer has no content of its own there) and the colour beneath it
+/// (`under`, `None` where nothing is beneath). Every range multiplies in.
+fn blend_if_weight(
+    layer: &Layer,
+    mode: photocraft_color::ColorMode,
+    this: Option<[f32; 4]>,
+    under: Option<[f32; 4]>,
+) -> f32 {
+    use photocraft_color::ColorMode as M;
+    let bi = &layer.blend_if;
+    let mut k = 1.0;
+    for (side, px) in [this, under].into_iter().enumerate() {
+        let Some(p) = px else { continue };
+        let v = |c: usize| p[c].clamp(0.0, 1.0) * 255.0;
+        match mode {
+            // Gray is the colour channels' luma (Rec. 601 weights), then R, G, B.
+            M::Rgb => {
+                let gray = 0.299 * v(0) + 0.587 * v(1) + 0.114 * v(2);
+                k *= bi.get(0)[side].weight(gray);
+                for c in 0..3 {
+                    k *= bi.get(c + 1)[side].weight(v(c));
+                }
+            }
+            // One channel: the PSD spec marks the composite-gray entry irrelevant here, so the
+            // channel's own entry carries the setting; both are honoured.
+            _ => k *= bi.get(0)[side].weight(v(0)) * bi.get(1)[side].weight(v(0)),
         }
-        None => composite_layer_any(layer, clipped, backdrop, cx),
+        if k <= 0.0 {
+            return 0.0;
+        }
+    }
+    k
+}
+
+/// Apply `layer`'s Blend If to a finished composite: `out` (the backdrop with the layer drawn)
+/// is mixed back towards `before` (the backdrop without it) where the ranges hide the layer.
+/// Mixing premultiplied colour by `k` equals compositing the layer at `k` × its alpha, since
+/// every blend mode's source-over result is linear in the source alpha.
+fn apply_blend_if(layer: &Layer, before: &Buffer, out: &mut Buffer, cx: &Ctx) {
+    // "This Layer" is the layer's own colour; adjustment layers (no content of their own) are
+    // judged by their result.
+    let own = if matches!(layer.content, LayerContent::Adjustment(_)) {
+        None
+    } else {
+        render_content(layer, out.rect, cx)
+    };
+    for (i, (p, b)) in out.px.iter_mut().zip(&before.px).enumerate() {
+        let this = match &own {
+            Some(o) => Some(o.px[i]).filter(|q| q[3] > 0.0),
+            None => Some(*p),
+        };
+        let under = Some(*b).filter(|q| q[3] > 0.0);
+        let k = blend_if_weight(layer, cx.mode, this, under);
+        if k >= 1.0 {
+            continue;
+        }
+        let a = b[3] + (p[3] - b[3]) * k;
+        *p = if a > 0.0 {
+            let c =
+                |c: usize| ((b[c] * b[3] + (p[c] * p[3] - b[c] * b[3]) * k) / a).clamp(0.0, 1.0);
+            [c(0), c(1), c(2), a]
+        } else {
+            [0.0; 4]
+        };
+    }
+}
+
+/// Composite `layer` (plus its clipping group) onto `backdrop`, honouring its channel restrictions
+/// and Blend If.
+fn composite_layer(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer, cx: &Ctx) {
+    let w = channel_weights(layer, cx.mode);
+    let blend_if = blend_if_active(layer, cx.mode);
+    let before = (w.is_some() || blend_if).then(|| backdrop.clone());
+    composite_layer_any(layer, clipped, backdrop, cx);
+    if let Some(before) = &before {
+        if let Some(w) = w {
+            restore_channels(backdrop, before, w);
+        }
+        if blend_if {
+            apply_blend_if(layer, before, backdrop, cx);
+        }
     }
 }
 
@@ -808,15 +890,19 @@ fn texture_ctx<'a>(layer: &Layer, region: Rect, cx: &Ctx<'a>) -> effects::Textur
 }
 
 /// Composite `layer` onto `base` restricted to the base's alpha (clipping mask semantics),
-/// honouring its channel restrictions.
+/// honouring its channel restrictions and Blend If.
 fn composite_atop(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
-    match channel_weights(layer, cx.mode) {
-        Some(w) => {
-            let before = base.clone();
-            composite_atop_any(layer, base, cx);
-            restore_channels(base, &before, w);
+    let w = channel_weights(layer, cx.mode);
+    let blend_if = blend_if_active(layer, cx.mode);
+    let before = (w.is_some() || blend_if).then(|| base.clone());
+    composite_atop_any(layer, base, cx);
+    if let Some(before) = &before {
+        if let Some(w) = w {
+            restore_channels(base, before, w);
         }
-        None => composite_atop_any(layer, base, cx),
+        if blend_if {
+            apply_blend_if(layer, before, base, cx);
+        }
     }
 }
 

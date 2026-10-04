@@ -199,7 +199,7 @@ impl Ex {
             flags,
             filler: 0,
             mask,
-            blending_ranges: BlendingRanges::full(self.cc),
+            blending_ranges: crate::blocks::ranges_from_blend_if(&l.blend_if, self.cc),
             name: legacy_name(&l.name),
             blocks,
             extra_trailing: Vec::new(),

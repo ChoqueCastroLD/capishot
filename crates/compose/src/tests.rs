@@ -777,6 +777,161 @@ fn channel_restrictions_keep_the_backdrop() {
     assert_eq!(channel_weights(&d.layers[1], ColorMode::Rgb), Some([1.0, 1.0, 0.0]));
 }
 
+fn range(black: [u8; 2], white: [u8; 2]) -> photocraft_doc::BlendRange {
+    photocraft_doc::BlendRange { black, white }
+}
+
+const FULL: photocraft_doc::BlendRange = photocraft_doc::BlendRange::FULL;
+
+#[test]
+fn blend_if_this_layer_hides_by_the_layers_own_value() {
+    // Mid-grey backdrop; the layer is black on the left, white on the right.
+    let mut d = doc_white(8, 8);
+    d.layers.push(solid_layer(
+        "grey",
+        Rect::new(0, 0, 8, 8),
+        [0.5, 0.5, 0.5, 1.0],
+    ));
+    let mut l = solid_layer("bw", Rect::new(0, 0, 4, 8), [0.0, 0.0, 0.0, 1.0]);
+    l.surface_mut()
+        .unwrap()
+        .fill_rect(Rect::new(4, 0, 8, 8), &[1.0, 1.0, 1.0, 1.0]);
+    // Gray › This Layer: black point at 50 hides the blacks.
+    l.blend_if.set(0, [range([50, 50], [255, 255]), FULL]);
+    d.layers.push(l);
+    assert!(
+        close4(px(&d, 1, 1), [0.5, 0.5, 0.5, 1.0]),
+        "{:?}",
+        px(&d, 1, 1)
+    );
+    assert!(close4(px(&d, 6, 1), [1.0, 1.0, 1.0, 1.0]));
+    // White point at 200 hides the whites as well.
+    d.layers[2]
+        .blend_if
+        .set(0, [range([50, 50], [200, 200]), FULL]);
+    assert!(close4(px(&d, 6, 1), [0.5, 0.5, 0.5, 1.0]));
+    // Back to the defaults: everything shows again.
+    d.layers[2].blend_if.set(0, [FULL, FULL]);
+    assert!(d.layers[2].blend_if.is_default());
+    assert!(close4(px(&d, 1, 1), [0.0, 0.0, 0.0, 1.0]));
+}
+
+#[test]
+fn blend_if_underlying_layer_hides_by_the_backdrop_value() {
+    // Backdrop black on the left, white on the right; a red layer over all of it.
+    let mut d = doc_white(8, 8);
+    d.layers.push(solid_layer(
+        "black",
+        Rect::new(0, 0, 4, 8),
+        [0.0, 0.0, 0.0, 1.0],
+    ));
+    let mut l = solid_layer("red", Rect::new(0, 0, 8, 8), [1.0, 0.0, 0.0, 1.0]);
+    // Gray › Underlying Layer: white point at 128 = only over the darks (sky-replacement style).
+    l.blend_if.set(0, [FULL, range([0, 0], [128, 128])]);
+    d.layers.push(l);
+    assert!(close4(px(&d, 1, 1), [1.0, 0.0, 0.0, 1.0]));
+    assert!(close4(px(&d, 6, 1), [1.0, 1.0, 1.0, 1.0]));
+}
+
+#[test]
+fn blend_if_split_point_fades_like_opacity() {
+    // A split black point (Alt-drag) at 50/150 shows a value-100 layer at half strength, which
+    // is exactly the layer at 50% opacity, also over a semi-transparent backdrop.
+    let v = 100.0 / 255.0;
+    let mut d = doc_white(4, 4);
+    d.layers[0]
+        .surface_mut()
+        .unwrap()
+        .fill_rect(Rect::new(0, 0, 4, 4), &[0.0, 0.2, 1.0, 0.5]);
+    let mut l = solid_layer("v", Rect::new(0, 0, 4, 4), [v, v, v, 1.0]);
+    l.blend = BlendMode::Multiply;
+    let mut half = l.clone();
+    half.opacity = 0.5;
+    l.blend_if.set(0, [range([50, 150], [255, 255]), FULL]);
+    let mut d2 = d.clone();
+    d.layers.push(l);
+    d2.layers.push(half);
+    let (a, b) = (px(&d, 1, 1), px(&d2, 1, 1));
+    assert!(
+        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4),
+        "{a:?} vs {b:?}"
+    );
+}
+
+#[test]
+fn blend_if_per_channel_ranges() {
+    // Blue › This Layer: hide pixels whose blue is above 100.
+    let mut d = doc_white(8, 8);
+    let mut l = solid_layer("c", Rect::new(0, 0, 4, 8), [1.0, 0.0, 0.0, 1.0]);
+    l.surface_mut()
+        .unwrap()
+        .fill_rect(Rect::new(4, 0, 8, 8), &[0.0, 0.0, 1.0, 1.0]);
+    l.blend_if.set(3, [range([0, 0], [100, 100]), FULL]);
+    d.layers.push(l);
+    assert!(close4(px(&d, 1, 1), [1.0, 0.0, 0.0, 1.0]));
+    assert!(close4(px(&d, 6, 1), [1.0, 1.0, 1.0, 1.0]));
+    // Red › Underlying Layer: the backdrop's red (255) is above 254 → hidden everywhere.
+    d.layers[1].blend_if = Default::default();
+    d.layers[1]
+        .blend_if
+        .set(1, [FULL, range([0, 0], [254, 254])]);
+    assert!(close4(px(&d, 1, 1), [1.0; 4]));
+}
+
+#[test]
+fn blend_if_on_adjustment_and_clipped_layers() {
+    let mut d = doc_white(8, 8);
+    d.layers.push(solid_layer(
+        "dark",
+        Rect::new(0, 0, 4, 8),
+        [0.1, 0.1, 0.1, 1.0],
+    ));
+    // Invert, but only where the backdrop is dark (Underlying white point at 128).
+    let mut inv = Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert));
+    inv.blend_if.set(0, [FULL, range([0, 0], [128, 128])]);
+    d.layers.push(inv);
+    assert!(close4(px(&d, 1, 1), [0.9, 0.9, 0.9, 1.0]));
+    assert!(close4(px(&d, 6, 1), [1.0; 4]));
+    // A clipped layer judges "underlying" by its clipping base.
+    let mut d = doc_white(8, 8);
+    let mut base = solid_layer("base", Rect::new(0, 0, 8, 8), [0.0, 0.0, 0.0, 1.0]);
+    base.surface_mut()
+        .unwrap()
+        .fill_rect(Rect::new(4, 0, 8, 8), &[0.9, 0.9, 0.9, 1.0]);
+    let mut clip = solid_layer("clip", Rect::new(0, 0, 8, 8), [0.0, 1.0, 0.0, 1.0]);
+    clip.clipped = true;
+    clip.blend_if.set(0, [FULL, range([128, 128], [255, 255])]);
+    d.layers.push(base);
+    d.layers.push(clip);
+    assert!(close4(px(&d, 1, 1), [0.0, 0.0, 0.0, 1.0]));
+    assert!(close4(px(&d, 6, 1), [0.0, 1.0, 0.0, 1.0]));
+}
+
+#[test]
+fn blend_if_modes() {
+    // Grayscale documents: the single channel's entry (or the gray entry) applies.
+    let mut d = Document::with_background(
+        "g",
+        Size::new(4, 4),
+        ColorMode::Grayscale,
+        SampleType::U8,
+        Color::WHITE,
+    );
+    let mut l = Layer::raster("k", d.pixel_format());
+    l.surface_mut()
+        .unwrap()
+        .fill_rect(Rect::new(0, 0, 4, 4), &[0.0, 1.0]);
+    l.blend_if.set(1, [range([10, 10], [255, 255]), FULL]);
+    d.layers.push(l);
+    assert!(close4(px(&d, 1, 1), [1.0; 4]), "{:?}", px(&d, 1, 1));
+    // CMYK/Lab composite in display RGB: kept for round trip, not applied.
+    assert!(blend_if_active(&d.layers[1], ColorMode::Rgb));
+    assert!(blend_if_active(&d.layers[1], ColorMode::Grayscale));
+    assert!(!blend_if_active(&d.layers[1], ColorMode::Cmyk));
+    assert!(!blend_if_active(&d.layers[1], ColorMode::Lab));
+    assert!(!blend_if_active(&d.layers[0], ColorMode::Rgb));
+}
+
 #[test]
 fn effect_maps_built_inside_parallel_tiles_do_not_deadlock() {
     // A map large enough for the blur to go multi-threaded, built while rayon renders tiles that

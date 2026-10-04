@@ -446,8 +446,20 @@ impl<'a> Planner<'a> {
         Some(MaskUse { layer: layer.id, surface: SurfaceRef::Doc(&m.surface), density: m.density, default: m.surface.default_pixel().first().copied().unwrap_or(1.0) })
     }
 
+    /// Blending Options › Blend If has no GPU pass yet: such documents use the CPU compositor.
+    fn check_blend_if(&self, layer: &Layer) -> Result<(), Unsupported> {
+        if photocraft_compose::blend_if_active(layer, self.cx.mode) {
+            return Err(Unsupported(format!(
+                "Blend If on `{}` (composited on the CPU)",
+                layer.name
+            )));
+        }
+        Ok(())
+    }
+
     /// composite_layer, honouring the layer's channel restrictions.
     fn layer(&mut self, layer: &'a Layer, clipped: &'a [Layer], backdrop: Slot) -> Result<Slot, Unsupported> {
+        self.check_blend_if(layer)?;
         match photocraft_compose::channel_weights(layer, self.cx.mode) {
             Some(w) => {
                 let before = self.retain(backdrop);
@@ -728,6 +740,7 @@ impl<'a> Planner<'a> {
     /// composite_atop: `layer` onto `base`, restricted to the base's alpha, honouring the
     /// layer's channel restrictions.
     fn atop(&mut self, layer: &'a Layer, base: Slot) -> Result<Slot, Unsupported> {
+        self.check_blend_if(layer)?;
         match photocraft_compose::channel_weights(layer, self.cx.mode) {
             Some(w) => {
                 let before = self.retain(base);
@@ -1326,5 +1339,34 @@ mod tests {
         assert_eq!(last.kernel, Kernel::CopyRect);
         assert_eq!(last.dst, p.root);
         assert!(p.slots <= 6, "{} slots", p.slots);
+    }
+
+    #[test]
+    fn blend_if_falls_back_to_the_cpu() {
+        let mut d = Document::with_background(
+            "t",
+            Size::new(8, 8),
+            ColorMode::Rgb,
+            SampleType::U8,
+            Color::WHITE,
+        );
+        let mut l = Layer::raster("bi", d.pixel_format());
+        l.blend_if.set(
+            0,
+            [
+                photocraft_doc::BlendRange {
+                    black: [40, 40],
+                    white: [255, 255],
+                },
+                photocraft_doc::BlendRange::FULL,
+            ],
+        );
+        d.layers.push(l.clone());
+        assert!(plan(&d).unwrap_err().0.contains("Blend If"));
+        // Clipped layers too.
+        l.clipped = true;
+        d.layers[1].blend_if = Default::default();
+        d.layers.push(l);
+        assert!(plan(&d).is_err());
     }
 }

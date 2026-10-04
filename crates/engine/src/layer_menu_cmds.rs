@@ -4,9 +4,10 @@
 //! just the active layer (Quick Export as PNG, Export As).
 
 use photocraft_algo::selection::Region;
-use photocraft_color::BlendMode;
+use photocraft_color::{BlendMode, ColorMode};
 use photocraft_doc::{
-    Document, Effect, Layer, LayerContent, LayerId, LayerMask, SmartSource, StackMode,
+    BlendIf, BlendRange, Document, Effect, Layer, LayerContent, LayerId, LayerMask, SmartSource,
+    StackMode,
 };
 use photocraft_geom::Rect;
 use photocraft_raster::{Surface, from_rgba_into, to_rgba};
@@ -504,6 +505,11 @@ fn blending_options(s: &mut Session, p: &Value) -> Result<Value> {
         .get("fillOpacity")
         .and_then(Value::as_f64)
         .map(|v| (v as f32 / 100.0).clamp(0.0, 1.0));
+    let mode = s.active().ok_or(EngineError::NoDocument)?.doc.mode;
+    let blend_if = match p.get("blendIf") {
+        None => None,
+        Some(v) => Some(blend_if_entries(v, mode)?),
+    };
     s.edit("Blending Options", |doc, _| {
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         if let Some(b) = blend {
@@ -518,9 +524,103 @@ fn blending_options(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(f) = fill {
             l.fill_opacity = f;
         }
+        match &blend_if {
+            // `null`: Blend If back to the defaults.
+            Some(None) => l.blend_if = BlendIf::default(),
+            Some(Some(entries)) => {
+                for (i, this, under) in entries {
+                    let [cur_this, cur_under] = l.blend_if.get(*i);
+                    l.blend_if
+                        .set(*i, [this.unwrap_or(cur_this), under.unwrap_or(cur_under)]);
+                }
+            }
+            None => {}
+        }
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// One `blendIf` entry: (range index, This Layer, Underlying Layer); `None` = keep.
+type BlendIfEntry = (usize, Option<BlendRange>, Option<BlendRange>);
+
+/// Parse `blendIf`: `null` (reset) or one or more `{"channel", "thisLayer"?, "underlying"?}`.
+fn blend_if_entries(v: &Value, mode: ColorMode) -> Result<Option<Vec<BlendIfEntry>>> {
+    const CMD: &str = "layer.layerStyle.blendingOptions";
+    let items: Vec<&Value> = match v {
+        Value::Null => return Ok(None),
+        Value::Array(a) => a.iter().collect(),
+        Value::Object(_) => vec![v],
+        _ => {
+            return Err(bad(
+                CMD,
+                "blendIf: expected an object, a list of objects or null",
+            ));
+        }
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for it in items {
+        let ch = it.get("channel").unwrap_or(&Value::Null);
+        let i = blend_if_channel(ch, mode).ok_or_else(|| {
+            bad(
+                CMD,
+                format!("blendIf: unknown channel {ch} for a {mode:?} document"),
+            )
+        })?;
+        let range = |key: &str| -> Result<Option<BlendRange>> {
+            match it.get(key) {
+                None => Ok(None),
+                Some(r) => blend_range(r).map(Some).ok_or_else(|| {
+                    bad(CMD, format!("blendIf.{key}: expected [black, white] or [blackLow, blackHigh, whiteLow, whiteHigh], 0..255, in increasing order (got {r})"))
+                }),
+            }
+        };
+        out.push((i, range("thisLayer")?, range("underlying")?));
+    }
+    Ok(Some(out))
+}
+
+/// Blend If channel → range index: 0 = Gray, then the mode's colour channels in order. A
+/// grayscale document's Gray is its one channel (the PSD spec marks the composite entry
+/// irrelevant there).
+fn blend_if_channel(v: &Value, mode: ColorMode) -> Option<usize> {
+    let n = mode.color_channels();
+    if let Some(i) = v.as_u64() {
+        return usize::try_from(i).ok().filter(|i| *i <= n);
+    }
+    let name = v.as_str().unwrap_or("gray").to_ascii_lowercase();
+    let names: &[&str] = match mode {
+        ColorMode::Rgb | ColorMode::Indexed => &["red", "green", "blue"],
+        ColorMode::Cmyk => &["cyan", "magenta", "yellow", "black"],
+        ColorMode::Lab => &["lightness", "a", "b"],
+        _ => &[],
+    };
+    if name == "gray" || name == "grey" {
+        return Some(usize::from(n == 1));
+    }
+    names.iter().position(|c| *c == name).map(|i| i + 1)
+}
+
+/// `[black, white]` (unsplit) or `[blackLow, blackHigh, whiteLow, whiteHigh]`, each 0..=255 and
+/// in increasing order (the dialog's sliders can't cross).
+fn blend_range(v: &Value) -> Option<BlendRange> {
+    let a = v.as_array()?;
+    let n: Vec<u8> = a
+        .iter()
+        .map(|x| {
+            x.as_f64()
+                .filter(|f| (0.0..=255.0).contains(f))
+                .map(|f| f.round() as u8)
+        })
+        .collect::<Option<_>>()?;
+    let q = match n.as_slice() {
+        [b, w] => [*b, *b, *w, *w],
+        [a, b, c, d] => [*a, *b, *c, *d],
+        _ => return None,
+    };
+    q.windows(2)
+        .all(|w| w[0] <= w[1])
+        .then(|| BlendRange::from_bytes(q))
 }
 
 fn global_light(s: &mut Session, p: &Value) -> Result<Value> {
@@ -893,7 +993,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "layer.layerStyle.blendingOptions",
             "Blending Options…",
             ["Layer", "Layer Style"],
-            r##"{"layer":id?,"blend":"normal|multiply|…"?,"opacity":0..100?,"fillOpacity":0..100?}"##,
+            r##"{"layer":id?,"blend":"normal|multiply|…"?,"opacity":0..100?,"fillOpacity":0..100?,"blendIf":{"channel":"gray|red|green|blue|cyan|…"|index="gray","thisLayer":[black,white]|[blackLo,blackHi,whiteLo,whiteHi]?,"underlying":[…]?}|[{…},…]|null?} (Blend If values 0..255; split points fade; null resets)"##,
             has_layer,
             blending_options
         ),

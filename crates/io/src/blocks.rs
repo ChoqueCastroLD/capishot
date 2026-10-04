@@ -2,9 +2,10 @@
 //! smart objects, locks and label colors.
 
 use photocraft_color::{Color, ColorMode};
-use photocraft_doc::{Fill, GradientStyle, LabelColor, Locks};
+use photocraft_doc::{BlendIf, BlendRange, Fill, GradientStyle, LabelColor, Locks};
 use photocraft_geom::Affine;
 use photocraft_psd::descriptor::{Descriptor, Id, UnicodeString, Value, VersionedDescriptor};
+use photocraft_psd::layer::BlendingRanges;
 
 /// `brst` (channel blending restrictions): a list of big-endian u32 channel indices left out of
 /// blending → a bit mask (bit `i` = channel `i`; indices above 31 are ignored).
@@ -15,6 +16,47 @@ pub fn parse_brst(data: &[u8]) -> u32 {
 /// Inverse of [`parse_brst`]; `None` when every channel blends (no block).
 pub fn brst_data(mask: u32) -> Option<Vec<u8>> {
     (mask != 0).then(|| (0..32u32).filter(|i| mask & 1 << i != 0).flat_map(u32::to_be_bytes).collect())
+}
+
+/// Layer-record blending ranges (Adobe PSD spec, "Layer blending ranges data": the composite
+/// gray source and destination ranges, then a source and destination range per channel, each
+/// as black low, black high, white low, white high) → Blend If. Full ranges map to the
+/// default, so files without Blend If keep an empty setting.
+pub fn blend_if_from_ranges(r: &BlendingRanges) -> BlendIf {
+    let mut ranges: Vec<[BlendRange; 2]> = r
+        .ranges()
+        .iter()
+        .map(|e| {
+            [
+                BlendRange::from_bytes(e.source),
+                BlendRange::from_bytes(e.dest),
+            ]
+        })
+        .collect();
+    // Trailing full entries carry nothing (export pads them back), so they are dropped, as
+    // `BlendIf::set` does.
+    let keep = ranges
+        .iter()
+        .rposition(|p| !p.iter().all(BlendRange::is_full))
+        .map_or(0, |i| i + 1);
+    ranges.truncate(keep);
+    BlendIf { ranges }
+}
+
+/// Inverse of [`blend_if_from_ranges`] for a document with `channels` colour channels: one
+/// entry for gray plus one per channel (more when the setting stores more), unset entries full.
+pub fn ranges_from_blend_if(b: &BlendIf, channels: usize) -> BlendingRanges {
+    if b.is_default() {
+        return BlendingRanges::full(channels);
+    }
+    let n = b.ranges.len().max(channels + 1);
+    let data = (0..n).flat_map(|i| {
+        let [src, dst] = b.get(i);
+        src.to_bytes().into_iter().chain(dst.to_bytes())
+    });
+    BlendingRanges {
+        data: data.collect(),
+    }
 }
 
 /// `lspf` bits (Adobe spec: bit 0 transparency, 1 composite, 2 position).
@@ -419,6 +461,69 @@ pub fn effects_enabled(lfx2: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn blending_ranges_map_to_blend_if() {
+        use photocraft_doc::{BlendIf, BlendRange};
+        use photocraft_psd::layer::BlendingRanges;
+        // Full ranges (what every layer without Blend If carries) → the default setting.
+        assert_eq!(
+            super::blend_if_from_ranges(&BlendingRanges::full(3)),
+            BlendIf::default()
+        );
+        assert_eq!(
+            super::blend_if_from_ranges(&BlendingRanges::default()),
+            BlendIf::default()
+        );
+        // Gray: This Layer black split 10/40; Blue (entry 3): Underlying white at 200.
+        let mut data = BlendingRanges::full(3).data;
+        data[..4].copy_from_slice(&[10, 40, 255, 255]);
+        data[3 * 8 + 4..3 * 8 + 8].copy_from_slice(&[0, 0, 200, 200]);
+        let b = super::blend_if_from_ranges(&BlendingRanges { data: data.clone() });
+        assert_eq!(
+            b.get(0),
+            [
+                BlendRange {
+                    black: [10, 40],
+                    white: [255, 255]
+                },
+                BlendRange::FULL
+            ]
+        );
+        assert_eq!(
+            b.get(3),
+            [
+                BlendRange::FULL,
+                BlendRange {
+                    black: [0, 0],
+                    white: [200, 200]
+                }
+            ]
+        );
+        assert_eq!(b.ranges.len(), 4);
+        assert_eq!(super::ranges_from_blend_if(&b, 3).data, data);
+        // The default writes full ranges for gray + each channel.
+        assert_eq!(
+            super::ranges_from_blend_if(&BlendIf::default(), 4),
+            BlendingRanges::full(4)
+        );
+        // A trimmed setting is padded to the document's channel count.
+        let mut short = BlendIf::default();
+        short.set(
+            0,
+            [
+                BlendRange {
+                    black: [5, 5],
+                    white: [255, 255],
+                },
+                BlendRange::FULL,
+            ],
+        );
+        let r = super::ranges_from_blend_if(&short, 3);
+        assert_eq!(r.data.len(), 4 * 8);
+        assert_eq!(&r.data[..8], &[5, 5, 255, 255, 0, 0, 255, 255]);
+        assert_eq!(&r.data[8..], &BlendingRanges::full(2).data[..]);
+    }
+
     #[test]
     fn brst_round_trip() {
         assert_eq!(super::parse_brst(&[0, 0, 0, 2]), 0b100);

@@ -196,6 +196,135 @@ fn global_light_blending_options_scale_effects() {
 }
 
 #[test]
+fn blending_options_blend_if() {
+    for depth in DEPTHS {
+        let mut s = session(depth, "rgb");
+        // Black on the left, white on the right.
+        paint(&mut s, |x, _| {
+            if x < 20 {
+                [0.0, 0.0, 0.0, 1.0]
+            } else {
+                [1.0; 4]
+            }
+        });
+        let at = |s: &Session, x: i32| photocraft_compose::flatten(doc(s)).get(x, 5);
+        // Gray › This Layer: black point 50 hides the black half.
+        s.execute(
+            "layer.layerStyle.blendingOptions",
+            json!({"blendIf": {"channel": "gray", "thisLayer": [50, 255]}}),
+        )
+        .unwrap();
+        assert_eq!(at(&s, 5)[3], 0.0, "depth {depth}");
+        assert_eq!(at(&s, 30), [1.0; 4], "depth {depth}");
+        assert_eq!(
+            active(&s).blend_if.get(0),
+            [
+                BlendRange {
+                    black: [50, 50],
+                    white: [255, 255]
+                },
+                BlendRange::FULL
+            ]
+        );
+        // Setting the other slider pair keeps this one; split points are 4 values.
+        s.execute(
+            "layer.layerStyle.blendingOptions",
+            json!({"blendIf": [{"channel": "gray", "underlying": [0, 10, 245, 255]}, {"channel": "blue", "thisLayer": [0, 200]}]}),
+        )
+        .unwrap();
+        let bi = &active(&s).blend_if;
+        assert_eq!(bi.get(0)[0].black, [50, 50]);
+        assert_eq!(
+            bi.get(0)[1],
+            BlendRange {
+                black: [0, 10],
+                white: [245, 255]
+            }
+        );
+        assert_eq!(
+            bi.get(3)[0],
+            BlendRange {
+                black: [0, 0],
+                white: [200, 200]
+            }
+        );
+        let ins = crate::inspect::layer(active(&s));
+        assert_eq!(
+            ins["blendIf"][0],
+            json!({"channel": 0, "thisLayer": [50, 50, 255, 255], "underlying": [0, 10, 245, 255]})
+        );
+        assert_eq!(ins["blendIf"][1]["channel"], 3);
+        // Blending options without `blendIf` (the dialog's blend/opacity/fill) leave it alone.
+        s.execute("layer.layerStyle.blendingOptions", json!({"opacity": 90}))
+            .unwrap();
+        assert!(!active(&s).blend_if.is_default());
+        // One undo step per call.
+        s.execute("edit.undo", json!({})).unwrap();
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(active(&s).blend_if.get(0)[1], BlendRange::FULL);
+        assert_eq!(active(&s).blend_if.get(0)[0].black, [50, 50]);
+        // null resets everything.
+        s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": null}))
+            .unwrap();
+        assert!(active(&s).blend_if.is_default());
+        assert!(crate::inspect::layer(active(&s)).get("blendIf").is_none());
+        assert_eq!(at(&s, 5), [0.0, 0.0, 0.0, 1.0]);
+    }
+}
+
+#[test]
+fn blend_if_rejects_bad_params() {
+    let mut s = session(8, "rgb");
+    paint(&mut s, disc);
+    let steps = s.active().unwrap().history.past_len();
+    for bad in [
+        json!({"channel": "cyan", "thisLayer": [10, 255]}),
+        json!({"channel": 4, "thisLayer": [10, 255]}),
+        json!({"channel": "gray", "thisLayer": [200, 100]}),
+        json!({"channel": "gray", "thisLayer": [0, 300]}),
+        json!({"channel": "gray", "thisLayer": [0, 10, 5, 255]}),
+        json!({"channel": "gray", "underlying": [1, 2, 3]}),
+        json!({"channel": "gray", "underlying": "dark"}),
+        json!("gray"),
+    ] {
+        assert!(
+            s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": bad}))
+                .is_err(),
+            "{bad}"
+        );
+    }
+    assert!(active(&s).blend_if.is_default());
+    assert_eq!(s.active().unwrap().history.past_len(), steps);
+}
+
+#[test]
+fn blend_if_channel_names_follow_the_mode() {
+    let mut s = session(8, "cmyk");
+    s.execute(
+        "layer.layerStyle.blendingOptions",
+        json!({"blendIf": {"channel": "black", "underlying": [0, 128]}}),
+    )
+    .unwrap();
+    assert_eq!(active(&s).blend_if.get(4)[1].white, [128, 128]);
+    assert!(
+        s.execute(
+            "layer.layerStyle.blendingOptions",
+            json!({"blendIf": {"channel": "red", "underlying": [0, 128]}})
+        )
+        .is_err()
+    );
+    // A grayscale document's Gray is its one channel.
+    let mut s = session(16, "grayscale");
+    s.execute(
+        "layer.layerStyle.blendingOptions",
+        json!({"blendIf": {"channel": "gray", "thisLayer": [30, 255]}}),
+    )
+    .unwrap();
+    assert_eq!(active(&s).blend_if.get(1)[0].black, [30, 30]);
+    assert_eq!(active(&s).blend_if.get(0), [BlendRange::FULL; 2]);
+}
+
+#[test]
 fn create_layer_splits_effects_and_keeps_the_look() {
     let mut s = session(8, "rgb");
     s.execute("layer.new.layer", json!({})).unwrap();

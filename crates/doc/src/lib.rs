@@ -9,6 +9,7 @@
 
 pub mod adjust;
 pub mod analysis;
+pub mod blend_if;
 pub mod comps;
 pub mod effects;
 pub mod mode;
@@ -25,6 +26,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use adjust::Adjustment;
 pub use analysis::{CountGroup, Measurement, MeasurementScale, Note, Ruler};
+pub use blend_if::{BlendIf, BlendRange};
 pub use comps::{Artboard, ArtboardBackground, CompAppearance, CompLayerState, LayerComp};
 pub use effects::{
     Bevel, BevelContour, BevelStyle, BevelTechnique, BevelTexture, Contour, Effect, FxCommon, FxPaint, GlobalLight, Glow, GlowSource, GlowTechnique, Gradient,
@@ -422,6 +424,10 @@ pub struct Layer {
     /// document's mode (R, G, B / C, M, Y, K / L, a, b / Gray) is left out of blending, so the
     /// backdrop's value is kept there. 0 = every channel blends (the default). PSD `brst`.
     pub excluded_channels: u32,
+    /// Blending Options › Blend If: value ranges of this layer and of the layers beneath it
+    /// outside which the layer's pixels are hidden. Default = everything blends. PSD layer-record
+    /// blending ranges.
+    pub blend_if: BlendIf,
     /// Layer › Video Layers frame stack (None for a normal layer).
     pub video: Option<VideoData>,
 }
@@ -447,6 +453,7 @@ impl Layer {
             fill_cache: None,
             link_group: None,
             excluded_channels: 0,
+            blend_if: BlendIf::default(),
             video: None,
         }
     }

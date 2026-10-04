@@ -105,6 +105,18 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId]) -> Value {
     if l.excluded_channels != 0 {
         v["channels"] = json!((0..4).map(|i| l.excluded_channels & (1 << i) == 0).collect::<Vec<_>>());
     }
+    // Blending Options › Blend If (only when set): range index (0 = Gray, then the mode's
+    // channels) with This Layer / Underlying Layer as [blackLo, blackHi, whiteLo, whiteHi].
+    if !l.blend_if.is_default() {
+        v["blendIf"] = l
+            .blend_if
+            .ranges
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| !r.iter().all(photocraft_doc::BlendRange::is_full))
+            .map(|(i, [this, under])| json!({"channel": i, "thisLayer": this.to_bytes(), "underlying": under.to_bytes()}))
+            .collect();
+    }
     // Layer styles, so agents can verify what they applied (full settings via the style commands).
     if !l.effects.items.is_empty() {
         v["effects"] = json!({

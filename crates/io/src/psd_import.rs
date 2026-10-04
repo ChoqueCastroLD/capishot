@@ -191,6 +191,8 @@ impl Ctx<'_> {
         if let Some(b) = rec.block(b"brst") {
             l.excluded_channels = crate::blocks::parse_brst(&b.data);
         }
+        // Blend If lives in the layer record's blending ranges.
+        l.blend_if = crate::blocks::blend_if_from_ranges(&rec.blending_ranges);
         l.psd_id = rec.layer_id();
         let name = l.name.clone();
         l.mask = self.record_mask(rec, &name);

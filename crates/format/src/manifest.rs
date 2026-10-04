@@ -221,6 +221,9 @@ pub struct LayerM {
     /// Advanced Blending channels left out (bit per colour channel; 0 = all blend).
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub excluded_channels: u32,
+    /// Blend If ranges (empty = everything blends).
+    #[serde(default, skip_serializing_if = "photocraft_doc::BlendIf::is_default")]
+    pub blend_if: photocraft_doc::BlendIf,
     #[serde(default)]
     pub video: Option<VideoDataM>,
 }

@@ -319,6 +319,39 @@ fn channel_restrictions_and_bevel_elements_roundtrip() {
 }
 
 #[test]
+fn blend_if_roundtrips() {
+    use photocraft_doc::{BlendIf, BlendRange};
+    let mut doc = rich_doc(ColorMode::Rgb, SampleType::U16);
+    let mut bi = BlendIf::default();
+    bi.set(
+        0,
+        [
+            BlendRange {
+                black: [20, 60],
+                white: [255, 255],
+            },
+            BlendRange::FULL,
+        ],
+    );
+    bi.set(
+        3,
+        [
+            BlendRange::FULL,
+            BlendRange {
+                black: [0, 0],
+                white: [180, 220],
+            },
+        ],
+    );
+    doc.layers[0].blend_if = bi.clone();
+    let back = load_from_bytes(&save_to_bytes(&doc, &SaveOptions::default()).unwrap()).unwrap();
+    assert_eq!(back, doc);
+    assert_eq!(back.layers[0].blend_if, bi);
+    // Layers without Blend If keep the default (the field is omitted from the manifest).
+    assert!(back.layers.iter().skip(1).all(|l| l.blend_if.is_default()));
+}
+
+#[test]
 fn video_layer_frames_survive_roundtrip() {
     use photocraft_doc::{Timeline, VideoData, VideoSource};
     use photocraft_geom::Rect;
