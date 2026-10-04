@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use base64::Engine as _;
-use photocraft_automation::PhotocraftMcp;
+use photocraft_automation::{AuthorizedWorkspace, PhotocraftMcp};
 use rmcp::model::{CallToolRequestParams, CallToolResult, ClientConfig};
 use rmcp::service::RunningService;
 use rmcp::{ClientHandler, RoleClient, ServiceExt};
@@ -54,6 +54,22 @@ fn tmp(name: &str) -> std::path::PathBuf {
     d
 }
 
+fn cleanup(path: &std::path::Path) {
+    for _ in 0..20 {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
+    }
+    std::fs::remove_dir_all(path).expect("remove test workspace after server shutdown");
+}
+
+fn headless_in(root: &std::path::Path) -> PhotocraftMcp {
+    let workspace = AuthorizedWorkspace::new(Some(root), Some(root)).expect("test workspace");
+    PhotocraftMcp::headless_with_workspace(workspace)
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn lists_expected_tools() {
     let client = connect(PhotocraftMcp::headless()).await;
@@ -94,7 +110,7 @@ async fn lists_expected_tools() {
 #[tokio::test(flavor = "multi_thread")]
 async fn headless_edit_render_save_roundtrip() {
     let dir = tmp("edit");
-    let client = connect(PhotocraftMcp::headless()).await;
+    let client = connect(headless_in(&dir)).await;
 
     let r = call(&client, "doc_new", json!({"width": 64, "height": 48, "background": "white", "name": "Agent"})).await;
     assert_ne!(r.is_error, Some(true), "{}", text(&r));
@@ -116,18 +132,17 @@ async fn headless_edit_render_save_roundtrip() {
     let decoded = photocraft_codecs::decode(&png).unwrap();
     assert_eq!(decoded.dimensions(), (32, 24));
 
-    let pc = dir.join("agent.pcraft");
-    let r = json_of(&call(&client, "doc_save", json!({"path": pc.to_string_lossy()})).await);
-    assert_eq!(r["path"], pc.to_string_lossy().as_ref());
+    let r = json_of(&call(&client, "doc_save", json!({"path": "agent.pcraft"})).await);
+    assert_eq!(r["path"], "agent.pcraft");
     let png_path = dir.join("agent.png");
-    json_of(&call(&client, "doc_export", json!({"path": png_path.to_string_lossy()})).await);
+    json_of(&call(&client, "doc_export", json!({"path": "agent.png"})).await);
     let jpg_path = dir.join("agent.jpg");
-    json_of(&call(&client, "doc_export", json!({"path": jpg_path.to_string_lossy(), "quality": 70})).await);
+    json_of(&call(&client, "doc_export", json!({"path": "agent.jpg", "quality": 70})).await);
     assert!(photocraft_codecs::decode(&std::fs::read(&png_path).unwrap()).is_ok());
     assert!(std::fs::metadata(&jpg_path).unwrap().len() > 100);
 
     // Re-open the native file: identical layer tree.
-    let o = json_of(&call(&client, "doc_open", json!({"path": pc.to_string_lossy()})).await);
+    let o = json_of(&call(&client, "doc_open", json!({"path": "agent.pcraft"})).await);
     assert_eq!(o["index"], 1);
     let doc2 = json_of(&call(&client, "doc_inspect", json!({"index": 1})).await);
     assert_eq!(doc2["layers"].as_array().unwrap().len(), 2);
@@ -136,7 +151,7 @@ async fn headless_edit_render_save_roundtrip() {
     json_of(&call(&client, "doc_close", json!({"index": 1})).await);
     json_of(&call(&client, "doc_select", json!({"index": 0})).await);
     client.cancel().await.unwrap();
-    std::fs::remove_dir_all(dir).unwrap();
+    cleanup(&dir);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -180,13 +195,47 @@ async fn open_png_and_inspect() {
     let img = photocraft_codecs::Image::from_u8(8, 4, photocraft_codecs::ChannelLayout::Rgb, vec![200; 96]).unwrap();
     let path = dir.join("in.png");
     std::fs::File::create(&path).unwrap().write_all(&photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()).unwrap();
-    let client = connect(PhotocraftMcp::headless()).await;
-    let o = json_of(&call(&client, "doc_open", json!({"path": path.to_string_lossy()})).await);
+    let client = connect(headless_in(&dir)).await;
+    let o = json_of(&call(&client, "doc_open", json!({"path": "in.png"})).await);
     assert_eq!((o["width"].as_u64(), o["height"].as_u64()), (Some(8), Some(4)));
     let px = json_of(&call(&client, "command_run", json!({"id": "document.pixel", "params": {"x": 1, "y": 1}})).await);
     assert!(px.to_string().contains("0.78"), "{px}");
     client.cancel().await.unwrap();
-    std::fs::remove_dir_all(dir).unwrap();
+    cleanup(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn filesystem_policy_rejects_absolute_and_escaping_paths_before_effects() {
+    let base = tmp("filesystem-policy");
+    let root = base.join("workspace");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+
+    let img = photocraft_codecs::Image::from_u8(4, 3, photocraft_codecs::ChannelLayout::Rgb, vec![42; 36]).unwrap();
+    let bytes = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+    std::fs::write(root.join("inside.png"), bytes).unwrap();
+    let client = connect(headless_in(&root)).await;
+
+    assert_ne!(call(&client, "doc_open", json!({"path": "inside.png"})).await.is_error, Some(true));
+    let absolute = outside.join("absolute.png");
+    let response = call(&client, "doc_save", json!({"path": absolute.to_string_lossy()})).await;
+    assert_eq!(response.is_error, Some(true));
+    assert!(text(&response).contains("automation path rejected"), "{}", text(&response));
+    assert!(!absolute.exists());
+
+    for path in ["../outside/traversal.png", "..\\outside\\mixed.png", "C:/outside/prefix.png", ""] {
+        let response = call(&client, "doc_save", json!({"path": path})).await;
+        assert_eq!(response.is_error, Some(true), "path {path:?}: {}", text(&response));
+    }
+    assert!(!outside.join("traversal.png").exists());
+    assert!(!outside.join("mixed.png").exists());
+
+    let response = call(&client, "command_run", json!({"id": "layer.smartObjects.exportContents", "params": {"path": "outside.bin"}})).await;
+    assert_eq!(response.is_error, Some(true));
+    assert!(text(&response).contains("ambient filesystem paths"), "{}", text(&response));
+    client.cancel().await.unwrap();
+    cleanup(&base);
 }
 
 // ---------------------------------------------------------------------------
@@ -224,10 +273,10 @@ async fn fake_app() -> (String, tokio::task::JoinHandle<Vec<Value>>) {
                     json!({"id": id, "ok": true, "result": [{"id": "file.new", "label": "New…", "enabled": true}]})
                 }
                 "ui.screenshot" => {
-                    let path = req["params"]["path"].as_str().unwrap().to_owned();
                     let img = photocraft_codecs::Image::from_u8(40, 20, photocraft_codecs::ChannelLayout::Rgba, vec![9; 3200]).unwrap();
-                    std::fs::write(&path, photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()).unwrap();
-                    json!({"id": id, "ok": true, "result": {"path": path}})
+                    let bytes = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+                    let png = base64::engine::general_purpose::STANDARD.encode(bytes);
+                    json!({"id": id, "ok": true, "result": {"mimeType": "image/png", "base64": png}})
                 }
                 _ => json!({"id": id, "ok": false, "error": format!("unknown tool `{method}`")}),
             };

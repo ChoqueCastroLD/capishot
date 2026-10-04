@@ -429,6 +429,9 @@ psd/src/
   - `session.list`, `doc.open`, `doc.save`, `doc.export`, `doc.inspect` (layer tree as JSON), `doc.render_preview` (PNG).
   - `command.list` and `command.run(id, params)`, both generated from the registry.
   - Stdio for agent CLIs, and optionally loopback TCP with a token so it can attach to a running GUI.
+  - `AuthorizedWorkspace`, which holds independent read and write directory capabilities. Remote
+    paths are validated relative names; engine commands that still require ambient filesystem
+    access fail closed at the automation boundary.
 - **Actions:** recorded `Vec<CommandInvocation>`, replayable in batch (File → Automate → Batch).
 - **Scripting (later):** embed a scripting language over the same registry. Options are Rhai, or Lua via mlua (C). JS via QuickJS is possible if we want Photoshop-script familiarity.
 - **Plugins:** sandboxed WebAssembly filter plug-ins (`photocraft-plugins`, L4) run by `wasmi`, a pure-Rust interpreter, with fuel, memory, stack and wall-time limits and no host imports. They are driven by the `plugin.*` commands and listed under Filter › Plug-ins; the ABI is in [`plugins.md`](plugins.md). Native Photoshop `.8BF`/CEP/UXP hosting is out of scope (it needs unsafe FFI and can't run on the web). Panel plug-ins are later.

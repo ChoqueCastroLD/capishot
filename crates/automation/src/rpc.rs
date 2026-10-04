@@ -100,7 +100,7 @@ impl Headless {
                 let png = self.render_png(index_of(&p), max)?;
                 match str_of(&p, "path") {
                     Some(path) => {
-                        std::fs::write(path, &png).map_err(|e| AutomationError::Io(e.to_string()))?;
+                        self.write_render(&PathBuf::from(path), &png)?;
                         Ok(json!({"path": path, "bytes": png.len()}))
                     }
                     None => Ok(json!({
@@ -263,7 +263,7 @@ mod tests {
     use super::*;
 
     fn session() -> Mutex<Headless> {
-        Mutex::new(Headless::new())
+        Mutex::new(Headless::trusted_local())
     }
 
     #[test]

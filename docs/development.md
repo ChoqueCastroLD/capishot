@@ -9,7 +9,8 @@
 
 ```sh
 cargo run --release -p photocraft -- path/to/image.psd      # desktop app
-cargo run --release -p photocraft -- --control 7878 --control-token-file .private/control.token img.jpg
+cargo run --release -p photocraft -- --control 7878 --control-token-file .private/control.token \
+  --automation-read-root work --automation-write-root work
 cargo test --workspace                                     # everything
 cargo xtask ci                                             # fmt + clippy + tests + layers + wasm
 cargo xtask stats                                          # tests and lines per crate
@@ -25,6 +26,8 @@ Image code is slow at `opt-level 0`, so the workspace profile builds dependencie
 | `PHOTOCRAFT_CONTROL_PORT` | Same as `--control <port>` |
 | `PHOTOCRAFT_CONTROL_TOKEN` | 64-hex bearer token for control TCP (avoid on shared systems where environment inspection is possible) |
 | `PHOTOCRAFT_CONTROL_TOKEN_FILE` | Read, or create for a server, the control bearer-token file |
+| `PHOTOCRAFT_AUTOMATION_READ_ROOT` | Directory capability for automation reads; requests use relative paths |
+| `PHOTOCRAFT_AUTOMATION_WRITE_ROOT` | Separate directory capability for automation writes; requests use relative paths |
 | `PHOTOCRAFT_CPU_CANVAS=1` | Force the CPU canvas path instead of the wgpu shader canvas |
 | `PHOTOCRAFT_GPU_TILE=2048` | Force GPU canvas tiling (tests tile seams) |
 | `PHOTOCRAFT_FX_NOCACHE=1` | Bypass the CPU layer-effect map cache (`compose::effect_maps`) |
@@ -48,7 +51,7 @@ Start the app with a private token file. It then accepts authenticated JSON line
 TOKEN=$(tr -d '\r\n' < .private/control.token)
 printf '%s\n' "{\"id\":\"auth\",\"method\":\"auth\",\"params\":{\"token\":\"$TOKEN\"}}" \
               '{"id":1,"method":"engine.execute","params":{"command":"layer.newAdjustmentLayer.hueSaturation","params":{"hue":30}}}' \
-              '{"id":2,"method":"ui.screenshot","params":{"path":"/tmp/shot.png"}}' | nc 127.0.0.1 7878
+              '{"id":2,"method":"ui.screenshot","params":{"path":"evidence/shot.png"}}' | nc 127.0.0.1 7878
 ```
 
 See `docs/control-protocol.md` for every method. Tips:
@@ -89,8 +92,8 @@ Keep one `PcraftWriter` per open document: re-saving then only compresses and wr
 
 `photocraft-cli mcp` serves MCP on stdio using `crates/automation`, which is built on `rmcp`:
 
-- **Headless:** `photocraft-cli mcp`. It drives an in-process engine session.
-- **Live app:** start `photocraft --control 7878 --control-token-file <private-path>`, then run `photocraft-cli mcp --bridge 127.0.0.1:7878 --control-token-file <private-path>`. See `docs/control-protocol.md#mcp-bridge`.
+- **Headless:** `photocraft-cli mcp --automation-read-root <dir> --automation-write-root <dir>`. It drives an in-process engine session and has no file authority when a root is omitted.
+- **Live app:** start `photocraft --control 7878 --control-token-file <private-path> --automation-read-root <dir> --automation-write-root <dir>`, then run `photocraft-cli mcp --bridge 127.0.0.1:7878 --control-token-file <private-path>`. The desktop process owns the roots. See `docs/control-protocol.md#mcp-bridge`.
 
 Tools:
 
@@ -125,8 +128,8 @@ claude mcp add photocraft -- "$PWD/target/release/photocraft-cli" mcp
 bounds, masks, selection, effects (`effects.items[].kind`), smart filters (`smartFilters[]`), type
 text, adjustment settings, channels and history, so agents can verify what they did without a
 screenshot. `crates/automation/tests/agent_tasks.rs` is the reference: ten realistic edit tasks
-(title card, colour grade, undo/redo, editable smart blur, masks, saved selections, align, layer
-export, resize/crop, CMYK + native save) driven purely over MCP.
+(title card, colour grade, undo/redo, editable smart blur, masks, saved selections, align,
+capability-scoped export, resize/crop, CMYK + native save) driven purely over MCP.
 
 Without MCP, `photocraft-cli serve [--port N]` keeps a headless session open and answers JSON lines
 (see `docs/control-protocol.md#headless-server`).

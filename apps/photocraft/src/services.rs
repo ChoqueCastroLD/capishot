@@ -71,9 +71,24 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
-pub fn native() -> Services {
+pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) -> Services {
     let savers: Rc<RefCell<HashMap<u64, Autosaver>>> = Rc::default();
     let savers2 = savers.clone();
+    let automation_read = automation.clone().map(|workspace| {
+        Box::new(move |path: &str| {
+            let bytes = workspace.read(path).map_err(|error| error.to_string())?;
+            let name = Path::new(path).file_name().and_then(|name| name.to_str()).unwrap_or(path).to_string();
+            Ok((name, bytes))
+        }) as photocraft_ui_egui::AutomationReadFn
+    });
+    let automation_write = automation.clone().map(|workspace| {
+        Box::new(move |path: &str, bytes: &[u8]| workspace.write(path, bytes).map_err(|error| error.to_string())) as photocraft_ui_egui::AutomationWriteFn
+    });
+    let automation_command = automation.map(|_| {
+        Box::new(|id: &str, params: &serde_json::Value| {
+            photocraft_automation::workspace::authorize_desktop_engine_command(id, params).map_err(|error| error.to_string())
+        }) as photocraft_ui_egui::AutomationCommandFn
+    });
     Services {
         import: Some(Box::new(|name: &str, bytes: &[u8]| {
             crate::crash_guard::guard("Open", || photocraft_io::import(name, bytes).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string()))
@@ -102,6 +117,9 @@ pub fn native() -> Services {
             Some(d.save_file()?.to_string_lossy().to_string())
         })),
         write: Some(Box::new(|path: &str, bytes: &[u8]| std::fs::write(path, bytes).map_err(|e| e.to_string()))),
+        automation_read,
+        automation_write,
+        automation_command,
         encode_png: Some(Box::new(|w, h, rgba| {
             let img = Image::from_u8(w, h, ChannelLayout::Rgba, rgba.to_vec()).map_err(|e| e.to_string())?;
             photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())

@@ -11,11 +11,18 @@ Automation is a privilege boundary because requests can cause filesystem access,
 - MCP normally uses stdio and can optionally bridge to loopback control TCP.
 - The bridge and UI request paths use timeouts.
 - Engine commands are expected to reject invalid parameters without panicking.
+- Remote filesystem methods use separately granted read and write directory capabilities.
+- Automation paths must be relative beneath the applicable root. Absolute paths, parent
+  traversal, alternate separators, Windows device names, malformed components, and link escapes
+  are rejected before file effects.
+- Engine commands that still use ambient paths fail closed at the automation boundary. Synthetic
+  UI input reaches the same command policy, and automation-triggered file hooks do not run
+  user-configured script-event paths.
 
 ## Known limitations
 
 - no per-client or per-tool capabilities;
-- no filesystem read/write root restriction;
+- no general per-client or per-tool capability model beyond filesystem read/write authority;
 - no explicit JSON-depth, response-size, render, document-memory, or command-duration budget;
 - one thread per accepted TCP connection;
 - no structured security audit event stream;
@@ -25,15 +32,15 @@ Automation is a privilege boundary because requests can cause filesystem access,
 
 The transport now establishes an authenticated connection from a cryptographically random credential before method discovery. A future security gateway should turn that authenticated connection into a short-lived, capability-scoped session.
 
-Capabilities should be explicit and composable, for example:
+Remaining capabilities should be explicit and composable, for example:
 
 ```text
 DocumentRead
 DocumentWrite
 UiInspect
 UiControl
-FilesystemRead
-FilesystemWrite
+FilesystemRead (implemented as a root capability)
+FilesystemWrite (implemented as a separate root capability)
 PreferencesWrite
 ApplicationControl
 ```
@@ -55,4 +62,7 @@ Limits should fail with stable errors, be applied before expensive work, and be 
 
 ## Deployment guidance today
 
-Prefer stdio, start control TCP only when needed, use a private token file, keep the listener on loopback, use a least-privileged OS account, and isolate untrusted agents from sensitive files. Do not commit or log bearer tokens. Do not tunnel or proxy the unencrypted loopback protocol to another host.
+Prefer stdio, start control TCP only when needed, grant the narrowest read and write roots, use a
+private token file, keep the listener on loopback, use a least-privileged OS account, and isolate
+untrusted agents from sensitive files. Do not commit or log bearer tokens. Do not tunnel or proxy
+the unencrypted loopback protocol to another host.

@@ -6,7 +6,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use photocraft_automation::{Headless, PhotocraftMcp, files, security};
+use photocraft_automation::{AuthorizedWorkspace, Headless, PhotocraftMcp, files, security};
 use photocraft_io::ExportOptions;
 use serde_json::{Value, json};
 
@@ -28,8 +28,10 @@ USAGE:
   photocraft-cli commands [--json] [--filter <text>]
       List the engine command registry.
   photocraft-cli mcp [--bridge <127.0.0.1:port>] [--control-token <64-hex> | --control-token-file <path>]
+      [--automation-read-root <dir>] [--automation-write-root <dir>]
       Run the MCP server on stdio (headless engine, or bridge to a running `photocraft --control <port>`).
   photocraft-cli serve [--port <port>] [--control-token <64-hex> | --control-token-file <path>]
+      [--automation-read-root <dir>] [--automation-write-root <dir>]
       Keep one headless session open and answer JSON lines ({\"id\",\"method\",\"params\"}) on stdio,
       or on 127.0.0.1:<port>. Methods: engine.execute, engine.commands, doc.open/new/save/inspect/render/
       select/close, session.list, batch, methods (docs/control-protocol.md#headless-server).
@@ -54,6 +56,8 @@ const VALUE_FLAGS: &[&str] = &[
     "--port",
     "--control-token",
     "--control-token-file",
+    "--automation-read-root",
+    "--automation-write-root",
 ];
 
 fn parse(args: &[String]) -> Result<Args, String> {
@@ -147,6 +151,11 @@ fn warn_all(err: &mut dyn Write, ws: &[String]) {
     }
 }
 
+fn automation_workspace(args: &Args) -> Result<AuthorizedWorkspace, String> {
+    AuthorizedWorkspace::new(args.get("--automation-read-root").map(Path::new), args.get("--automation-write-root").map(Path::new))
+        .map_err(|error| error.to_string())
+}
+
 fn convert(a: &Args, _out: &mut dyn Write, err: &mut dyn Write) -> R {
     let [input, output] = a.positional.as_slice() else {
         return Err("convert needs <in> <out>".into());
@@ -167,7 +176,7 @@ fn info(a: &Args, out: &mut dyn Write) -> R {
     let [file] = a.positional.as_slice() else {
         return Err("info needs <file>".into());
     };
-    let mut h = Headless::new();
+    let mut h = Headless::trusted_local();
     let opened = h.open(Path::new(file)).map_err(|e| e.to_string())?;
     let mut doc = h.inspect(None).map_err(|e| e.to_string())?;
     doc["warnings"] = opened["warnings"].clone();
@@ -198,7 +207,7 @@ fn command_list(a: &Args) -> Result<Vec<(String, Value)>, String> {
 }
 
 fn run_cmds(a: &Args, out: &mut dyn Write, err: &mut dyn Write) -> R {
-    let mut h = Headless::new();
+    let mut h = Headless::trusted_local();
     match (a.positional.as_slice(), a.get("--new")) {
         ([file], None) => {
             let o = h.open(Path::new(file)).map_err(|e| e.to_string())?;
@@ -267,7 +276,7 @@ fn batch(a: &Args, out: &mut dyn Write, err: &mut dyn Write) -> R {
         let stem = input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let target = out_dir.join(format!("{stem}.{ext}"));
         let r = (|| -> Result<Vec<String>, String> {
-            let mut h = Headless::new();
+            let mut h = Headless::trusted_local();
             h.open(input).map_err(|e| e.to_string())?;
             for (id, p) in &actions {
                 h.command_run(id, p.clone()).map_err(|e| format!("`{id}`: {e}"))?;
@@ -337,7 +346,7 @@ fn commands(a: &Args, out: &mut dyn Write) -> R {
 
 fn serve(a: &Args, err: &mut dyn Write) -> R {
     use std::sync::{Arc, Mutex};
-    let h = Arc::new(Mutex::new(Headless::new()));
+    let h = Arc::new(Mutex::new(Headless::with_workspace(automation_workspace(a)?)));
     match a.get("--port") {
         Some(port) => {
             let port: u16 = port.parse().map_err(|_| format!("bad --port `{port}`"))?;
@@ -368,7 +377,7 @@ fn mcp(a: &Args) -> R {
             let token = security::client_token(supplied.as_deref(), token_file.as_deref()).map_err(|e| e.to_string())?;
             PhotocraftMcp::bridge(addr, &token).map_err(|e| e.to_string())?
         }
-        None => PhotocraftMcp::headless(),
+        None => PhotocraftMcp::headless_with_workspace(automation_workspace(a)?),
     };
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().map_err(|e| e.to_string())?;
     rt.block_on(server.serve_stdio()).map_err(|e| e.to_string())

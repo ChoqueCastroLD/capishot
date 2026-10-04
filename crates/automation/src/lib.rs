@@ -22,10 +22,12 @@ pub mod headless;
 pub mod rpc;
 pub mod security;
 pub mod server;
+pub mod workspace;
 
 pub use bridge::BridgeClient;
 pub use headless::Headless;
 pub use server::{Backend, PhotocraftMcp};
+pub use workspace::AuthorizedWorkspace;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AutomationError {

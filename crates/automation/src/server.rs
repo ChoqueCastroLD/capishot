@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use crate::bridge::BridgeClient;
 use crate::headless::Headless;
 use crate::security::MAX_BATCH_STEPS;
-use crate::{AutomationError, files};
+use crate::{AuthorizedWorkspace, AutomationError, files};
 
 /// Where tools are executed.
 pub enum Backend {
@@ -45,7 +45,7 @@ pub struct DocIndex {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OpenParams {
-    /// Absolute path of the file to open (.pcraft, .psd, .png, .jpg, .tif, .exr, …).
+    /// Forward-slash relative path beneath the configured automation read root.
     pub path: String,
 }
 
@@ -70,7 +70,8 @@ pub struct NewParams {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct SaveParams {
-    /// Target path; the extension selects the format. Omit to save to the document's own path.
+    /// Forward-slash relative target beneath the configured automation write root.
+    /// The extension selects the format. Omit to save to the document's own relative path.
     #[serde(default)]
     pub path: Option<String>,
     /// Format override as an extension (pcraft, psd, png, jpg, tif, webp, exr, …).
@@ -197,6 +198,10 @@ impl PhotocraftMcp {
         Self::with_backend(Backend::Headless(Arc::new(Mutex::new(Headless::new()))))
     }
 
+    pub fn headless_with_workspace(workspace: AuthorizedWorkspace) -> Self {
+        Self::with_backend(Backend::Headless(Arc::new(Mutex::new(Headless::with_workspace(workspace)))))
+    }
+
     pub fn bridge(addr: &str, token: &str) -> Result<Self, AutomationError> {
         Ok(Self::with_backend(Backend::Bridge(Arc::new(BridgeClient::new(addr, token)?))))
     }
@@ -242,15 +247,17 @@ impl PhotocraftMcp {
     }
 
     async fn screenshot(&self, b: &BridgeClient, max_side: Option<u32>) -> Result<CallToolResult, McpError> {
-        let path = std::env::temp_dir().join(format!("photocraft-mcp-shot-{}.png", std::process::id()));
-        if let Err(e) = b.call("ui.screenshot", json!({"path": path.to_string_lossy()})).await {
-            return Ok(fail(e));
-        }
-        let bytes = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(e) => return Ok(fail(format!("screenshot file: {e}"))),
+        let response = match b.call("ui.screenshot", json!({})).await {
+            Ok(response) => response,
+            Err(error) => return Ok(fail(error)),
         };
-        let _ = std::fs::remove_file(&path);
+        let Some(encoded) = response.get("base64").and_then(Value::as_str) else {
+            return Ok(fail("app screenshot response did not contain PNG data"));
+        };
+        let bytes = match base64::engine::general_purpose::STANDARD.decode(encoded) {
+            Ok(bytes) => bytes,
+            Err(error) => return Ok(fail(format!("app screenshot data: {error}"))),
+        };
         let bytes = match max_side {
             Some(m) if m > 0 => downscale_png(&bytes, m).unwrap_or(bytes),
             _ => bytes,

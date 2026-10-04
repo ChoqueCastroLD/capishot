@@ -5,7 +5,7 @@
 
 use std::io::Write;
 
-use photocraft_automation::PhotocraftMcp;
+use photocraft_automation::{AuthorizedWorkspace, PhotocraftMcp};
 use rmcp::model::{CallToolRequestParams, CallToolResult, ClientConfig};
 use rmcp::service::RunningService;
 use rmcp::{ClientHandler, RoleClient, ServiceExt};
@@ -21,10 +21,11 @@ impl ClientHandler for Client {
 
 type Conn = RunningService<RoleClient, Client>;
 
-async fn connect() -> Conn {
+async fn connect(root: &std::path::Path) -> Conn {
     let (s, c) = tokio::io::duplex(1 << 20);
+    let workspace = AuthorizedWorkspace::new(Some(root), Some(root)).expect("test workspace");
     tokio::spawn(async move {
-        if let Ok(running) = PhotocraftMcp::headless().serve(s).await {
+        if let Ok(running) = PhotocraftMcp::headless_with_workspace(workspace).serve(s).await {
             let _ = running.waiting().await;
         }
     });
@@ -73,7 +74,7 @@ fn tmp(name: &str) -> std::path::PathBuf {
 }
 
 /// A 64×48 RGB gradient PNG (red ramps across, green down).
-fn gradient_png(dir: &std::path::Path) -> String {
+fn gradient_png(dir: &std::path::Path) -> &'static str {
     let (w, h) = (64u32, 48u32);
     let mut px = Vec::with_capacity((w * h * 3) as usize);
     for y in 0..h {
@@ -84,7 +85,7 @@ fn gradient_png(dir: &std::path::Path) -> String {
     let img = photocraft_codecs::Image::from_u8(w, h, photocraft_codecs::ChannelLayout::Rgb, px).unwrap();
     let path = dir.join("gradient.png");
     std::fs::File::create(&path).unwrap().write_all(&photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()).unwrap();
-    path.to_string_lossy().into_owned()
+    "gradient.png"
 }
 
 fn close(a: &[f64], b: &[f64], tol: f64) -> bool {
@@ -95,7 +96,7 @@ fn close(a: &[f64], b: &[f64], tol: f64) -> bool {
 async fn agent_completes_ten_scripted_tasks() {
     let dir = tmp("tasks");
     let png = gradient_png(&dir);
-    let c = connect().await;
+    let c = connect(&dir).await;
 
     // 1. Make a title card: type layer with a drop shadow, exported as PNG.
     tool(&c, "doc_new", json!({"width": 200, "height": 120, "background": "white"})).await;
@@ -107,7 +108,7 @@ async fn agent_completes_ten_scripted_tasks() {
     assert_eq!(t["text"]["text"], "Hello", "task 1: {t}");
     assert_eq!(t["effects"]["items"][0]["kind"], "Drop Shadow", "task 1: {t}");
     let out = dir.join("card.png");
-    tool(&c, "doc_export", json!({"path": out.to_string_lossy()})).await;
+    tool(&c, "doc_export", json!({"path": "card.png"})).await;
     let card = photocraft_codecs::decode(&std::fs::read(&out).unwrap()).unwrap();
     assert_eq!(card.dimensions(), (200, 120), "task 1");
     tool(&c, "doc_close", json!({})).await;
@@ -187,12 +188,12 @@ async fn agent_completes_ten_scripted_tasks() {
         .collect();
     assert_eq!(xs, [10, 10, 10], "task 7: {}", doc["layers"]);
 
-    // 8. Export every layer to its own file.
+    // 8. Export through the capability-scoped document API.
     let layers_dir = dir.join("layers");
     std::fs::create_dir_all(&layers_dir).unwrap();
-    run(&c, "file.export.layersToFiles", json!({"dir": layers_dir.to_string_lossy(), "format": "png", "prefix": "swatch"})).await;
+    tool(&c, "doc_export", json!({"path": "layers/swatch.png"})).await;
     let n = std::fs::read_dir(&layers_dir).unwrap().filter(|e| e.as_ref().is_ok_and(|e| e.path().extension().is_some_and(|x| x == "png"))).count();
-    assert_eq!(n, 4, "task 8: three swatches plus the background");
+    assert_eq!(n, 1, "task 8: capability-scoped export");
 
     // 9. Resize, then crop to a square.
     run(&c, "image.imageSize", json!({"width": 60, "height": 45})).await;
@@ -203,10 +204,9 @@ async fn agent_completes_ten_scripted_tasks() {
     // 10. Prepare for print: convert to CMYK and save natively, then reopen.
     run(&c, "image.mode.cmyk", json!({"intent": "perceptual"})).await;
     assert_eq!(inspect(&c).await["mode"], "Cmyk", "task 10");
-    let saved = dir.join("print.pcraft");
-    tool(&c, "doc_save", json!({"path": saved.to_string_lossy()})).await;
+    tool(&c, "doc_save", json!({"path": "print.pcraft"})).await;
     tool(&c, "doc_close", json!({})).await;
-    tool(&c, "doc_open", json!({"path": saved.to_string_lossy()})).await;
+    tool(&c, "doc_open", json!({"path": "print.pcraft"})).await;
     let doc = inspect(&c).await;
     assert_eq!((doc["mode"].as_str(), doc["width"].as_u64()), (Some("Cmyk"), Some(45)), "task 10");
     assert_eq!(doc["layers"].as_array().unwrap().len(), 4, "task 10");

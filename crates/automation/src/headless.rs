@@ -9,19 +9,44 @@ use photocraft_format::PcraftWriter;
 use photocraft_io::ExportOptions;
 use serde_json::{Value, json};
 
-use crate::{AutomationError, files};
+use crate::workspace::authorize_engine_command;
+use crate::{AuthorizedWorkspace, AutomationError, files};
+
+enum Filesystem {
+    Denied,
+    TrustedLocal,
+    Workspace(AuthorizedWorkspace),
+}
 
 /// A headless editing session.
-#[derive(Default)]
 pub struct Headless {
     pub session: Session,
     /// Incremental `.pcraft` writers per document id.
     writers: HashMap<u64, PcraftWriter>,
+    filesystem: Filesystem,
+}
+
+impl Default for Headless {
+    fn default() -> Self {
+        Self { session: Session::new(), writers: HashMap::new(), filesystem: Filesystem::Denied }
+    }
 }
 
 impl Headless {
+    /// Create an automation session with no filesystem authority.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a session for an explicit local CLI invocation. The CLI caller,
+    /// not a remote automation client, supplies these host paths.
+    pub fn trusted_local() -> Self {
+        Self { session: Session::new(), writers: HashMap::new(), filesystem: Filesystem::TrustedLocal }
+    }
+
+    /// Create an automation session with capability-scoped file access.
+    pub fn with_workspace(workspace: AuthorizedWorkspace) -> Self {
+        Self { session: Session::new(), writers: HashMap::new(), filesystem: Filesystem::Workspace(workspace) }
     }
 
     fn doc_index(&self, index: Option<usize>) -> Result<usize, AutomationError> {
@@ -34,8 +59,17 @@ impl Headless {
 
     /// Open a file and make it the active document.
     pub fn open(&mut self, path: &Path) -> Result<Value, AutomationError> {
-        let o = files::open(path)?;
-        let index = self.session.add_document(o.document, Some(path.to_string_lossy().into_owned()));
+        let requested = path.to_str().ok_or_else(|| AutomationError::BadRequest("automation paths must be valid UTF-8".into()))?;
+        let o = match &self.filesystem {
+            Filesystem::Denied => return Err(AutomationError::BadRequest("automation filesystem access is not granted: read authority is absent".into())),
+            Filesystem::TrustedLocal => files::open(path)?,
+            Filesystem::Workspace(workspace) => {
+                let bytes = workspace.read(requested)?;
+                let name = path.file_name().and_then(|name| name.to_str()).unwrap_or(requested);
+                files::open_bytes(name, &bytes)?
+            }
+        };
+        let index = self.session.add_document(o.document, Some(requested.to_string()));
         let d = &self.session.documents()[index];
         Ok(json!({
             "index": index,
@@ -51,17 +85,30 @@ impl Headless {
     /// saves to the document's own path.
     pub fn save(&mut self, index: Option<usize>, path: Option<&Path>, format: Option<&str>, opts: &ExportOptions) -> Result<Value, AutomationError> {
         let i = self.doc_index(index)?;
-        let st = &self.session.documents()[i];
-        let target: PathBuf = match (path, &st.path) {
+        let (stored_path, doc) = {
+            let state = &self.session.documents()[i];
+            (state.path.clone(), state.doc.clone())
+        };
+        let target: PathBuf = match (path, stored_path.as_deref()) {
             (Some(p), _) => p.to_path_buf(),
             (None, Some(p)) => PathBuf::from(p),
             (None, None) => {
                 return Err(AutomationError::BadRequest("document has no path; pass `path`".into()));
             }
         };
-        let doc = st.doc.clone();
-        let writer = self.writers.entry(doc.id.0).or_default();
-        let warnings = files::save(&doc, &target, format, opts, Some(writer))?;
+        let target_text = target.to_str().ok_or_else(|| AutomationError::BadRequest("automation paths must be valid UTF-8".into()))?;
+        let warnings = match &self.filesystem {
+            Filesystem::Denied => return Err(AutomationError::BadRequest("automation filesystem access is not granted: write authority is absent".into())),
+            Filesystem::TrustedLocal => {
+                let writer = self.writers.entry(doc.id.0).or_default();
+                files::save(&doc, &target, format, opts, Some(writer))?
+            }
+            Filesystem::Workspace(workspace) => {
+                let (bytes, warnings) = files::save_bytes(&doc, target_text, format, opts)?;
+                workspace.write(target_text, &bytes)?;
+                warnings
+            }
+        };
         let is_native = format
             .map(|f| f.trim_start_matches('.').eq_ignore_ascii_case("pcraft"))
             .unwrap_or_else(|| target.extension().is_some_and(|e| e.eq_ignore_ascii_case("pcraft")));
@@ -73,6 +120,16 @@ impl Headless {
             }
         }
         Ok(json!({ "path": target.to_string_lossy(), "warnings": warnings }))
+    }
+
+    /// Write rendered bytes through the configured write authority.
+    pub fn write_render(&self, path: &Path, bytes: &[u8]) -> Result<(), AutomationError> {
+        let requested = path.to_str().ok_or_else(|| AutomationError::BadRequest("automation paths must be valid UTF-8".into()))?;
+        match &self.filesystem {
+            Filesystem::Denied => Err(AutomationError::BadRequest("automation filesystem access is not granted: write authority is absent".into())),
+            Filesystem::TrustedLocal => std::fs::write(path, bytes).map_err(|error| AutomationError::Io(format!("{}: {error}", path.display()))),
+            Filesystem::Workspace(workspace) => workspace.write(requested, bytes),
+        }
     }
 
     pub fn inspect(&self, index: Option<usize>) -> Result<Value, AutomationError> {
@@ -121,6 +178,9 @@ impl Headless {
 
     pub fn command_run(&mut self, id: &str, params: Value) -> Result<Value, AutomationError> {
         let params = if params.is_null() { json!({}) } else { params };
+        if !matches!(&self.filesystem, Filesystem::TrustedLocal) {
+            authorize_engine_command(id, &params)?;
+        }
         Ok(self.session.execute(id, params)?)
     }
 }

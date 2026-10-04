@@ -15,6 +15,15 @@ pub struct Opened {
     pub warnings: Vec<String>,
 }
 
+/// Decode a document that was read through a filesystem capability.
+pub fn open_bytes(name: &str, bytes: &[u8]) -> Result<Opened, AutomationError> {
+    if Path::new(name).extension().is_some_and(|extension| extension.eq_ignore_ascii_case(photocraft_format::EXTENSION)) {
+        return Ok(Opened { document: photocraft_format::load_from_bytes(bytes)?, warnings: Vec::new() });
+    }
+    let r = photocraft_io::import(name, bytes)?;
+    Ok(Opened { document: r.document, warnings: r.warnings })
+}
+
 /// Open a document from disk. Directory bundles and `.pcraft` ZIPs load
 /// natively; everything else goes through `photocraft-io` (PSD, PNG, …).
 pub fn open(path: &Path) -> Result<Opened, AutomationError> {
@@ -23,8 +32,7 @@ pub fn open(path: &Path) -> Result<Opened, AutomationError> {
     }
     let bytes = std::fs::read(path).map_err(|e| AutomationError::Io(format!("{}: {e}", path.display())))?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let r = photocraft_io::import(&name, &bytes)?;
-    Ok(Opened { document: r.document, warnings: r.warnings })
+    open_bytes(&name, &bytes)
 }
 
 /// Previews for a `.pcraft` bundle.
@@ -58,6 +66,20 @@ pub fn save(
     }
     std::fs::write(path, &r.bytes).map_err(|e| AutomationError::Io(format!("{}: {e}", path.display())))?;
     Ok(r.warnings)
+}
+
+/// Encode a document for a capability-scoped write. Unlike [`save`], this
+/// never obtains ambient filesystem authority and emits `.pcraft` as a ZIP.
+pub fn save_bytes(doc: &Document, name: &str, format_override: Option<&str>, opts: &ExportOptions) -> Result<(Vec<u8>, Vec<String>), AutomationError> {
+    let ext = format_override
+        .map(|format| format.trim_start_matches('.').to_ascii_lowercase())
+        .or_else(|| Path::new(name).extension().map(|extension| extension.to_string_lossy().to_ascii_lowercase()))
+        .ok_or_else(|| AutomationError::BadRequest(format!("cannot tell the format of `{name}`; pass a format")))?;
+    if ext == photocraft_format::EXTENSION {
+        return Ok((photocraft_format::save_to_bytes(doc, &previews(doc))?, Vec::new()));
+    }
+    let result = photocraft_io::export(doc, &ext, opts)?;
+    Ok((result.bytes, result.warnings))
 }
 
 /// Flattened document as PNG, scaled to fit `max_side` (0 = full size).

@@ -103,6 +103,12 @@ pub type ExportFn = Box<dyn Fn(&Document, &str, &ExportSettings) -> Result<(Vec<
 pub type PickOpenFn = Box<dyn FnMut() -> Option<(String, Vec<u8>)>>;
 pub type PickSaveFn = Box<dyn FnMut(&str) -> Option<String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
+/// Read bytes through the desktop control session's authorized read root.
+pub type AutomationReadFn = Box<dyn FnMut(&str) -> Result<(String, Vec<u8>), String>>;
+/// Write bytes through the desktop control session's authorized write root.
+pub type AutomationWriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
+/// Reject engine commands which still perform ambient filesystem I/O.
+pub type AutomationCommandFn = Box<dyn Fn(&str, &Value) -> Result<(), String>>;
 /// Open a URL in the system browser (native) — reliable cross-platform, unlike `ctx.open_url`.
 pub type OpenUrlFn = Box<dyn Fn(&str) -> Result<(), String>>;
 pub type EncodePngFn = Box<dyn Fn(u32, u32, &[u8]) -> Result<Vec<u8>, String>>;
@@ -141,6 +147,11 @@ pub struct Services {
     pub pick_save: Option<PickSaveFn>,
     /// Write bytes to a path (native) or trigger a download (web).
     pub write: Option<WriteFn>,
+    /// File access used only by control/MCP requests. Interactive dialogs keep
+    /// using `pick_open`, `pick_save` and `write` with the user's authority.
+    pub automation_read: Option<AutomationReadFn>,
+    pub automation_write: Option<AutomationWriteFn>,
+    pub automation_command: Option<AutomationCommandFn>,
     /// Encode an RGBA8 image as PNG (used for screenshots and `ui.render`).
     pub encode_png: Option<EncodePngFn>,
     /// Open a URL in the system browser (native). Falls back to `ctx.open_url` (web) when unset.
@@ -202,6 +213,10 @@ pub struct PhotocraftApp {
     pub(crate) filter_preview: Option<filter_dialog::FilterPreview>,
     /// Synthetic input events queued by automation (`ui.click`, `ui.key`, …), injected next frame.
     pub(crate) synthetic: Vec<egui::Event>,
+    /// True only while a frame is processing synthetic automation input. It
+    /// makes shortcut- and dialog-triggered commands pass the same policy as
+    /// direct control calls.
+    pub(crate) automation_input: bool,
     /// Levels/Curves histogram cache: (document, adjustment layer, revision it is valid for).
     pub(crate) tone_hist: Option<(DocId, photocraft_doc::LayerId, u64, std::sync::Arc<tone::Histograms>)>,
     /// Histogram panel cache: (document, revision, computed at ms, histograms).
@@ -276,6 +291,7 @@ impl PhotocraftApp {
             outline_cache: None,
             filter_preview: None,
             synthetic: Vec::new(),
+            automation_input: false,
             channel_thumbs: None,
             channel_views: HashMap::new(),
             type_layout: None,
@@ -323,6 +339,15 @@ impl PhotocraftApp {
 
     /// Run an engine command, reporting errors in the status bar.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if self.automation_input
+            && let Some(authorize) = self.services.automation_command.as_ref()
+        {
+            authorize(id, &params)?;
+        }
+        let suppress_events = self.automation_input && self.session.prefs().script_events.enabled;
+        if suppress_events {
+            self.session.edit_prefs(|prefs| prefs.script_events.enabled = false);
+        }
         let t0 = gpu_canvas::now_ms();
         if matches!(id, "edit.paste" | "edit.pasteSpecial.pasteInPlace") {
             self.import_os_clipboard();
@@ -345,6 +370,9 @@ impl PhotocraftApp {
                 self.ui.status = e.clone();
                 self.ui.status_error = true;
             }
+        }
+        if suppress_events {
+            self.session.edit_prefs(|prefs| prefs.script_events.enabled = true);
         }
         r
     }
@@ -389,6 +417,53 @@ impl PhotocraftApp {
             prefs_ui::open_mismatch(self, &color);
         }
         Ok(warnings)
+    }
+
+    /// Open bytes supplied by an authenticated automation client without
+    /// invoking user-configured script-event paths outside the granted root.
+    /// Returns the import warnings (also shown to the user). Brush and gradient
+    /// files go to the preset libraries, as for interactive opens.
+    pub fn open_automation_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
+        let events_enabled = self.session.prefs().script_events.enabled;
+        if events_enabled {
+            self.session.edit_prefs(|prefs| prefs.script_events.enabled = false);
+        }
+        let result = match preset_files_ui::open(self, name, bytes) {
+            Some(r) => r.map(|()| Vec::new()),
+            None => self.import_automation_document(name, bytes),
+        };
+        if events_enabled {
+            self.session.edit_prefs(|prefs| prefs.script_events.enabled = true);
+        }
+        result
+    }
+
+    /// The document half of [`open_automation_bytes`](Self::open_automation_bytes): no script
+    /// events and no Color Settings policy (which may read user-configured profile paths).
+    fn import_automation_document(&mut self, name: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
+        let import = self.services.import.as_ref().ok_or("no importer configured")?;
+        let (doc, warnings) = import(name, bytes)?;
+        self.session.add_document(doc, Some(name.to_string()));
+        self.sync_views();
+        self.ui.status = format!("Opened {name}");
+        self.ui.status_error = false;
+        notices::io_warnings(self, &format!("Opened {name}"), &warnings);
+        Ok(warnings)
+    }
+
+    /// Run one engine command on behalf of automation while suppressing
+    /// user-configured script-event file reads. Interactive commands retain
+    /// their normal event behavior.
+    pub fn run_automation(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        let events_enabled = self.session.prefs().script_events.enabled;
+        if events_enabled {
+            self.session.edit_prefs(|prefs| prefs.script_events.enabled = false);
+        }
+        let result = self.run(id, params);
+        if events_enabled {
+            self.session.edit_prefs(|prefs| prefs.script_events.enabled = true);
+        }
+        result
     }
 
     /// File › Open: the platform dialog returns the chosen file's path (native; the web delivers
@@ -436,6 +511,27 @@ impl PhotocraftApp {
         notices::io_warnings(self, &format!("Saved {}", file_open::display_name(&path)), &warnings);
         self.sync_views();
         Ok((path, warnings))
+    }
+
+    /// Save through the control session's capability-scoped writer. No file
+    /// picker or ambient writer is reachable from this path. Returns the path
+    /// written and the export warnings (also shown to the user).
+    pub fn save_automation(&mut self, path: Option<String>) -> Result<(String, Vec<String>), String> {
+        let state = self.session.active().ok_or("no document")?;
+        let target = path.or_else(|| state.path.clone()).ok_or("document has no relative path; pass `path`")?;
+        let export = self.services.export.as_ref().ok_or("no exporter configured")?;
+        let (bytes, warnings) = export(&state.doc, &target, &ExportSettings::default())?;
+        let write = self.services.automation_write.as_mut().ok_or("automation write authority is not configured")?;
+        write(&target, &bytes)?;
+        if let Some(state) = self.session.active_mut() {
+            state.path = Some(target.clone());
+            state.saved_revision = state.revision;
+        }
+        self.ui.status = format!("Saved {target}");
+        self.ui.status_error = false;
+        notices::io_warnings(self, &format!("Saved {}", file_open::display_name(&target)), &warnings);
+        self.sync_views();
+        Ok((target, warnings))
     }
 
     fn drain_control(&mut self, ctx: &egui::Context) {
@@ -564,6 +660,7 @@ impl eframe::App for PhotocraftApp {
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
         if !self.fonts_ready {
             ctx.request_repaint();
+            self.automation_input = false;
             return;
         }
         let t0 = gpu_canvas::now_ms();
@@ -607,6 +704,7 @@ impl eframe::App for PhotocraftApp {
         wide_angle_ui::show(self, &ctx);
         canvas::extra_windows(self, &ctx);
         notices::show(self, &ctx);
+        self.automation_input = false;
         self.perf.frame(gpu_canvas::now_ms() - t0);
         // Synthetic input is injected one press/release step per frame: keep frames coming until
         // the queue is empty, then release control replies waiting on it.
@@ -733,7 +831,11 @@ impl PhotocraftApp {
             .iter()
             .position(|e| matches!(e, egui::Event::PointerButton { pressed: false, .. } | egui::Event::Key { pressed: false, .. }))
             .map_or(self.synthetic.len(), |i| i + 1);
-        self.synthetic.drain(..n).collect()
+        let events: Vec<_> = self.synthetic.drain(..n).collect();
+        if !events.is_empty() {
+            self.automation_input = true;
+        }
+        events
     }
 
     /// Install fonts, image loaders and the theme. Call from the app creator when possible so the

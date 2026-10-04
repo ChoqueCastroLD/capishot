@@ -8,15 +8,15 @@ Automation requests are untrusted input with potential effects beyond the active
 | Stdio transport | **Implemented** for MCP and headless JSON lines |
 | Command-level error handling | **Implemented**, with command-specific tests and `panic_hunt` coverage |
 | Control-channel authentication | **Implemented:** 256-bit bearer token required before TCP method dispatch |
-| MCP capability scopes | **Known limitation:** absent |
-| Allowed read/write roots | **Known limitation:** absent |
-| Symlink-safe capability filesystem | **Known limitation:** absent |
+| MCP capability scopes | **Partial:** filesystem read/write capabilities only; general tool scopes are absent |
+| Allowed read/write roots | **Implemented:** separate launch-time roots, with absent authority failing closed |
+| Symlink-safe capability filesystem | **Implemented:** relative operations use held directory capabilities and reject link escapes |
 | Request-byte and JSON-depth limits | **Partial:** 1 MiB request-line limit; no explicit JSON-depth policy |
 | Batch-step limit | **Implemented:** 256 steps for headless and MCP batches |
 | Connection/worker limit | **Implemented:** 16 active TCP connections; one worker thread per accepted active connection |
 | Security audit events | **Proposed** |
 
-## Proposed gateway
+## Gateway status and remaining work
 
 ```text
 MCP or control client
@@ -24,8 +24,8 @@ MCP or control client
  authenticated session
           v
  security gateway
-   - capabilities
-   - path handles/roots
+   - general method capabilities (proposed)
+   - path handles/read-write roots (implemented)
    - request budgets
    - command policy
    - audit events
@@ -34,4 +34,7 @@ MCP or control client
  command engine / UI shell
 ```
 
-The current token proves possession of a secret but does not limit what that client can do. The remaining design combines the authenticated transport with explicit capabilities, filesystem handles, resource budgets, and command policy. Until those controls land, private token handling, process isolation, and least-privileged execution are practical containment mechanisms.
+The current token proves possession of a secret but does not provide general method authorization.
+Filesystem handles and a defensive command-path policy are implemented; explicit non-filesystem
+capabilities, broader resource budgets, and audit events remain. Private token handling, process
+isolation, and least-privileged execution are still practical containment measures.

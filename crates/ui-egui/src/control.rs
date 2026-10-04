@@ -18,11 +18,12 @@
 //! - `ui.screenshot {path?, focus?}`: capture the main window (PNG). Raises the window first (default)
 //!   because occluded macOS windows stop rendering
 //! - `ui.focus`: bring the main window to the front
-//! - `app.open {path}` / `app.save {path}`: file I/O through the configured services
+//! - `app.open {path}` / `app.save {path}`: relative file I/O under the automation roots; reply with `warnings`
 //! - `app.quit`
 
 use std::sync::mpsc::Sender;
 
+use base64::Engine as _;
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
@@ -76,13 +77,26 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
         "engine.execute" | "ui.menu.invoke" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             let params = p.get("params").cloned().unwrap_or(json!({}));
+            if let Some(authorize) = app.services.automation_command.as_ref()
+                && let Err(error) = authorize(id, &params)
+            {
+                return err(error);
+            }
             // `engine.execute` is programmatic: engine commands run directly with their default
             // params and never open a dialog (an agent would otherwise get a modal instead of a
             // result). `ui.menu.invoke` behaves like a menu click, so it may open the dialog.
             if req.method == "engine.execute" && photocraft_engine::commands::find(id).is_some() {
-                return wrap(app.run(id, params));
+                return wrap(app.run_automation(id, params));
             }
-            wrap(crate::menus::invoke(app, ctx, id, params))
+            let events_enabled = app.session.prefs().script_events.enabled;
+            if events_enabled {
+                app.session.edit_prefs(|prefs| prefs.script_events.enabled = false);
+            }
+            let result = crate::menus::invoke(app, ctx, id, params);
+            if events_enabled {
+                app.session.edit_prefs(|prefs| prefs.script_events.enabled = true);
+            }
+            wrap(result)
         }
         "engine.commands" => wrap(app.run("command.list", json!({}))),
         "ui.menu.list" => ok(serde_json::to_value(crate::menus::menu_items(app)).unwrap_or_default()),
@@ -192,7 +206,26 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             }
         }
         "ui.dialog.confirm" => match u("dialog") {
-            Some(id) => wrap(crate::dialogs::confirm(app, id)),
+            Some(id) => {
+                let command = app.ui.dialogs.iter().find(|dialog| dialog.id == id).and_then(|dialog| {
+                    dialog.fields.get("__command").and_then(Value::as_str).map(|command| (command.to_string(), Value::Object(dialog.fields.clone())))
+                });
+                if let Some((command, params)) = command
+                    && let Some(authorize) = app.services.automation_command.as_ref()
+                    && let Err(error) = authorize(&command, &params)
+                {
+                    return err(error);
+                }
+                let events_enabled = app.session.prefs().script_events.enabled;
+                if events_enabled {
+                    app.session.edit_prefs(|prefs| prefs.script_events.enabled = false);
+                }
+                let result = crate::dialogs::confirm(app, id);
+                if events_enabled {
+                    app.session.edit_prefs(|prefs| prefs.script_events.enabled = true);
+                }
+                wrap(result)
+            }
             None => err("missing `dialog`"),
         },
         "ui.dialog.cancel" => match u("dialog").and_then(|id| app.ui.close_dialog(id)) {
@@ -316,10 +349,26 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             Outcome::Screenshot { token, path: s("path").map(str::to_string) }
         }
         "app.open" => match s("path") {
-            Some(path) => wrap(crate::menus::invoke(app, ctx, "file.open", json!({"path": path}))),
+            Some(path) => {
+                let opened = match app.services.automation_read.as_mut() {
+                    Some(read) => read(path),
+                    None => Err("automation read authority is not configured".into()),
+                };
+                wrap(opened.and_then(|(name, bytes)| {
+                    let warnings = app.open_automation_bytes(&name, &bytes)?;
+                    // Brushes/gradients go to the preset libraries: no document, no Open Recent entry.
+                    if !crate::preset_files_ui::is_preset_file(&name) {
+                        if let Some(state) = app.session.active_mut() {
+                            state.path = Some(path.to_string());
+                        }
+                        app.push_recent(path);
+                    }
+                    Ok(json!({"path": path, "name": name, "warnings": warnings}))
+                }))
+            }
             None => err("missing `path`"),
         },
-        "app.save" => wrap(app.save_as(s("path").map(str::to_string)).map(|(p, w)| json!({"path": p, "warnings": w}))),
+        "app.save" => wrap(app.save_automation(s("path").map(str::to_string)).map(|(p, w)| json!({"path": p, "warnings": w}))),
         "app.quit" => {
             app.allow_close = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -358,18 +407,29 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
 pub fn save_screenshot(app: &mut PhotocraftApp, image: &egui::ColorImage, path: Option<&str>) -> Value {
     let [w, h] = image.size;
     let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
-    let Some(path) = path else {
-        return json!({"ok": true, "result": {"width": w, "height": h}});
-    };
     let png = match app.services.encode_png.as_ref() {
         Some(enc) => enc(w as u32, h as u32, &rgba),
         None => Err("no PNG encoder configured".into()),
     };
-    let r = png.and_then(|bytes| match app.services.write.as_mut() {
-        Some(wr) => wr(path, &bytes),
-        None => Err("no writer configured".into()),
+    let Some(path) = path else {
+        return match png {
+            Ok(bytes) => json!({
+                "ok": true,
+                "result": {
+                    "base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+                    "mime": "image/png",
+                    "width": w,
+                    "height": h,
+                }
+            }),
+            Err(error) => json!({"ok": false, "error": error}),
+        };
+    };
+    let result = png.and_then(|bytes| match app.services.automation_write.as_mut() {
+        Some(write) => write(path, &bytes),
+        None => Err("automation write authority is not configured".into()),
     });
-    match r {
+    match result {
         Ok(()) => json!({"ok": true, "result": {"path": path, "width": w, "height": h}}),
         Err(e) => json!({"ok": false, "error": e}),
     }
@@ -401,5 +461,65 @@ mod tests {
         let r = call(&mut app, &ctx, "ui.menu.invoke", json!({"id": "filter.blur.gaussianBlur"}));
         assert!(r.to_string().contains("dialog"), "ui.menu.invoke should open the dialog: {r}");
         assert_eq!(app.session.active().unwrap().revision, rev, "opening a dialog must not edit the document");
+    }
+
+    #[test]
+    fn synthetic_shortcuts_use_the_automation_command_policy() {
+        let services = crate::Services {
+            automation_command: Some(Box::new(|id, _| if id.starts_with("file.") { Err("filesystem command denied".into()) } else { Ok(()) })),
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        let ctx = egui::Context::default();
+        app.automation_input = true;
+        let error = crate::menus::invoke(&mut app, &ctx, "file.open", json!({})).unwrap_err();
+        assert_eq!(error, "filesystem command denied");
+    }
+
+    #[test]
+    fn automation_open_and_save_use_the_roots_and_reply_with_warnings() {
+        use photocraft_color::{ColorMode, SampleType};
+        use photocraft_doc::Document;
+        use photocraft_geom::Size;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        // Without granted roots both fail closed, even with an exporter and an ambient writer.
+        let services = crate::Services {
+            export: Some(Box::new(|_d: &Document, _p: &str, _s: &crate::ExportSettings| Ok((b"out".to_vec(), Vec::new())))),
+            write: Some(Box::new(|_p: &str, _b: &[u8]| Err("ambient writer used".into()))),
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        let ctx = egui::Context::default();
+        let r = call(&mut app, &ctx, "app.open", json!({"path": "in/warn.psd"}));
+        assert!(r.to_string().contains("automation read authority is not configured"), "{r}");
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let r = call(&mut app, &ctx, "app.save", json!({"path": "out.png"}));
+        assert!(r.to_string().contains("automation write authority is not configured"), "{r}");
+
+        let written: Rc<RefCell<Vec<String>>> = Rc::default();
+        let w = written.clone();
+        let services = crate::Services {
+            import: Some(Box::new(|name: &str, _b: &[u8]| {
+                Ok((Document::new(name, Size::new(4, 4), ColorMode::Rgb, SampleType::U8), vec!["Adjustment layer flattened".to_string()]))
+            })),
+            export: Some(Box::new(|_d: &Document, _p: &str, _s: &crate::ExportSettings| Ok((b"out".to_vec(), vec!["Layers were flattened".to_string()])))),
+            automation_read: Some(Box::new(|path: &str| Ok((path.rsplit('/').next().unwrap_or(path).to_string(), b"x".to_vec())))),
+            automation_write: Some(Box::new(move |path: &str, _b: &[u8]| {
+                w.borrow_mut().push(path.to_string());
+                Ok(())
+            })),
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        let r = call(&mut app, &ctx, "app.open", json!({"path": "in/warn.psd"}));
+        assert_eq!(r["result"]["warnings"], json!(["Adjustment layer flattened"]), "{r}");
+        assert_eq!(r["result"]["name"], "warn.psd");
+        assert_eq!(app.session.active().unwrap().path.as_deref(), Some("in/warn.psd"));
+        assert_eq!(app.ui.recent_files, vec!["in/warn.psd".to_string()]);
+        let r = call(&mut app, &ctx, "app.save", json!({"path": "out.png"}));
+        assert_eq!(r["result"], json!({"path": "out.png", "warnings": ["Layers were flattened"]}), "{r}");
+        assert_eq!(*written.borrow(), vec!["out.png".to_string()]);
     }
 }

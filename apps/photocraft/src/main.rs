@@ -1,7 +1,8 @@
 //! Photocraft desktop app.
 //!
 //! Usage: `photocraft [--control <port>] [--control-token <64-hex> |
-//! --control-token-file <path>] [files…]`
+//! --control-token-file <path>] [--automation-read-root <dir>]
+//! [--automation-write-root <dir>] [files…]`
 //!
 //! `--control <port>` (or `PHOTOCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server.
 //! The first line must authenticate; subsequent request lines get reply lines.
@@ -40,6 +41,8 @@ fn main() -> eframe::Result {
     let mut control_port: Option<u16> = std::env::var("PHOTOCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
     let mut control_token = None;
     let mut control_token_file = None;
+    let mut automation_read_root = std::env::var_os("PHOTOCRAFT_AUTOMATION_READ_ROOT").map(std::path::PathBuf::from);
+    let mut automation_write_root = std::env::var_os("PHOTOCRAFT_AUTOMATION_WRITE_ROOT").map(std::path::PathBuf::from);
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -47,6 +50,8 @@ fn main() -> eframe::Result {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--control-token" => control_token = args.next(),
             "--control-token-file" => control_token_file = args.next().map(std::path::PathBuf::from),
+            "--automation-read-root" => automation_read_root = args.next().map(std::path::PathBuf::from),
+            "--automation-write-root" => automation_write_root = args.next().map(std::path::PathBuf::from),
             "--version" => {
                 println!("photocraft {}", photocraft_engine::build_info::long_version());
                 return Ok(());
@@ -73,7 +78,14 @@ fn main() -> eframe::Result {
         } else {
             eprintln!("photocraft: using supplied control token");
         }
-        Some((port, token))
+        let workspace = match photocraft_automation::AuthorizedWorkspace::new(automation_read_root.as_deref(), automation_write_root.as_deref()) {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                eprintln!("photocraft: cannot configure automation workspace: {error}");
+                return Ok(());
+            }
+        };
+        Some((port, token, workspace))
     } else {
         None
     };
@@ -103,7 +115,8 @@ fn main() -> eframe::Result {
         "Photocraft",
         options,
         Box::new(move |cc| {
-            let mut app = PhotocraftApp::new(Session::new(), services::native());
+            let automation = control.as_ref().map(|(_, _, workspace)| workspace.clone());
+            let mut app = PhotocraftApp::new(Session::new(), services::native(automation));
             app.integrated_titlebar = cfg!(target_os = "macos");
             if let Ok(Some(icc)) = monitor.recv_timeout(std::time::Duration::from_secs(2)) {
                 app.session.color.monitor_profile = Some(std::sync::Arc::new(icc));
@@ -115,7 +128,7 @@ fn main() -> eframe::Result {
             {
                 app.set_wgpu(rs);
             }
-            if let Some((port, token)) = control {
+            if let Some((port, token, _)) = control {
                 let rx = control_server::start(port, token, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }

@@ -3,7 +3,8 @@
 The desktop app listens on `127.0.0.1:<port>` (loopback only). Start it with a token file so the credential is not exposed in the process command line:
 
 ```sh
-photocraft --control 7878 --control-token-file /private/path/photocraft-control.token
+photocraft --control 7878 --control-token-file /private/path/photocraft-control.token \
+  --automation-read-root /work/project --automation-write-root /work/project
 ```
 
 If the file does not exist, PhotoCraft creates it with a fresh 256-bit token. On Unix the new file is mode `0600`; on Windows, protect it with an appropriate user-only ACL. An existing file is reused. If neither a token nor token file is configured, PhotoCraft generates a token for that launch and writes it to standard error. `PHOTOCRAFT_CONTROL_TOKEN` and `PHOTOCRAFT_CONTROL_TOKEN_FILE` are the environment-variable equivalents.
@@ -42,10 +43,11 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 - `ui.key {key, command?, shift?, alt?, ctrl?}` (flags may also be grouped under `modifiers`): press and release a key, e.g. `{"key": "ArrowLeft", "shift": true}`
 - `ui.type {text}`: type text (goes to the focused widget, or to the canvas while the Type tool is editing)
 - `ui.resize {width, height}`: resize the main window
-- `ui.screenshot {path?, focus?}`: capture the main window (PNG). Raises the window first (default)
-  because occluded macOS windows stop rendering
+- `ui.screenshot {path?, focus?}`: capture the main window (PNG). With no path the reply contains
+  base64 PNG data; a path is relative to the automation write root. Raises the window first
+  (default) because occluded macOS windows stop rendering
 - `ui.focus`: bring the main window to the front
-- `app.open {path}` / `app.save {path}`: file I/O through the configured services. Both reply with `warnings` (import/export notes such as "adjustment layer flattened"; `[]` when none), also shown to the user in the status bar and as a notice (`notices` in `ui.inspect`); `app.save` also returns the `path` written. `file.open`, `file.save`, `file.saveAs` and `file.saveACopy` reply the same way
+- `app.open {path}` / `app.save {path}`: relative file I/O through the configured automation roots (`app.open` reads under the read root, `app.save` writes under the write root; absolute paths, `..` and paths escaping the root are refused, and both fail closed when no root was granted). Both reply with `warnings` (import/export notes such as "adjustment layer flattened"; `[]` when none), also shown to the user in the status bar and as a notice (`notices` in `ui.inspect`); `app.open` also returns the `path` and document `name`, `app.save` the `path` written. Automation opens and saves never fire script events. `file.open`, `file.save`, `file.saveAs` and `file.saveACopy` reply with `warnings` the same way
 - `app.quit`
 
 ## Engine commands
@@ -133,7 +135,7 @@ How each MCP tool maps onto control methods in bridge mode:
 | `doc_inspect` | `engine.execute {command: "document.inspect"}` |
 | `doc_open {path}` | `app.open {path}` |
 | `doc_save {path}` / `doc_export {path}` | `app.save {path}` |
-| `doc_render_preview {max_side?}` | `ui.screenshot {path: <temp>}`, returned as PNG image content |
+| `doc_render_preview {max_side?}` | `ui.screenshot`, returned directly as PNG image content |
 | `session_list`, `ui_inspect` | `ui.inspect` |
 | `ui_screenshot {max_side?}` | `ui.screenshot`, returned as PNG image content |
 | `ui_pointer {events, modifiers?}` | `ui.pointer` |
@@ -143,7 +145,22 @@ How each MCP tool maps onto control methods in bridge mode:
 
 `doc_select` and `doc_close` work only in headless mode. The `ui_*` tools and `control_call` work only in bridge mode; in headless mode they return a tool error that explains how to start bridge mode.
 
-**Security note:** TCP control uses a bearer token, not client identity or per-method authorization. A client that possesses the token receives the full exposed control surface, including file operations, UI input, command execution, and application control. Keep token files private, do not commit or log tokens, and do not pass a token directly on a shared system where process command lines are visible. The protocol is unencrypted and must remain on loopback; do not tunnel or proxy it to an untrusted host. Capability scopes and filesystem roots are not yet implemented.
+**Security note:** TCP control uses a bearer token, not client identity or general per-method
+authorization. A client that possesses the token receives the non-filesystem control surface,
+including UI input, command execution, and application control. Keep token files private, do not
+commit or log tokens, and do not pass a token directly on a shared system where process command
+lines are visible. The protocol is unencrypted and must remain on loopback; do not tunnel or proxy
+it to an untrusted host.
+
+Filesystem access fails closed unless launch-time read and/or write roots are granted with
+`--automation-read-root` and `--automation-write-root` (or
+`PHOTOCRAFT_AUTOMATION_READ_ROOT` / `PHOTOCRAFT_AUTOMATION_WRITE_ROOT`). Request paths must be
+non-empty, forward-slash relative paths beneath the applicable root. Absolute paths, parent
+traversal, alternate separators, drive/device/stream prefixes, malformed components, and link
+escapes are rejected before file effects. Read and write authority are independent; the parent of
+a new output file must already exist. Engine commands that still use ambient filesystem paths are
+disabled for automation until they are migrated to the same capability interface. Interactive
+desktop file pickers retain normal user-selected access.
 
 ## Headless server
 
@@ -152,7 +169,9 @@ JSON-lines envelope on stdio, or on `127.0.0.1:<port>` with `--port <port>` (loo
 authenticated connection shares the session). TCP uses the same first-frame `auth` exchange and
 token options as desktop control. Stdio does not require this TCP handshake because access is
 inherited from the process pipe. It is the fastest way for a script or agent to make many edits:
-no MCP framing, no app start-up per command. Implementation: `crates/automation/src/rpc.rs`.
+no MCP framing, no app start-up per command. Configure its file access with the same
+`--automation-read-root` and `--automation-write-root` flags. Implementation:
+`crates/automation/src/rpc.rs`.
 
 | Method | Params |
 |---|---|
@@ -169,9 +188,10 @@ no MCP framing, no app start-up per command. Implementation: `crates/automation/
 
 ```sh
 printf '%s\n' \
-  '{"id":1,"method":"doc.open","params":{"path":"/abs/in.jpg"}}' \
+  '{"id":1,"method":"doc.open","params":{"path":"in.jpg"}}' \
   '{"id":2,"method":"batch","params":{"steps":[{"command":"image.adjustments.invert"},{"command":"filter.blur.gaussianBlur","params":{"radius":3}}]}}' \
-  '{"id":3,"method":"doc.save","params":{"path":"/abs/out.png"}}' | photocraft-cli serve
+  '{"id":3,"method":"doc.save","params":{"path":"out.png"}}' | \
+  photocraft-cli serve --automation-read-root /work/project --automation-write-root /work/project
 ```
 
 The MCP server has the same batching as the `command_batch` tool (`{steps:[{id, params}], stop_on_error}`),
@@ -186,4 +206,6 @@ The desktop and headless TCP listeners currently enforce:
 - a 30-second socket read/write timeout;
 - at most 256 steps in a headless `batch` or MCP `command_batch` request.
 
-An oversized line, excess connection, or unauthenticated request is rejected before command dispatch. These limits do not impose JSON-depth, response-size, render, document-memory, command-duration, filesystem-root, or capability budgets.
+An oversized line, excess connection, unauthenticated request, or unauthorized filesystem path is
+rejected before command dispatch or file effects. These limits do not impose JSON-depth,
+response-size, render, document-memory, command-duration, or general per-method capability budgets.

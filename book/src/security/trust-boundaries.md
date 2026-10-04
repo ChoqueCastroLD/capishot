@@ -40,7 +40,8 @@ TRUSTED INTERNAL STATE
 | Path to filesystem effect | `crates/automation/src/files.rs`, app services | authorized root/handle, link policy, create/replace semantics |
 | Document to GPU work | `crates/gpu`, UI planner | texture limits, buffer sizes, supported-plan validation |
 
-The filesystem and automation rows describe where policy belongs; the workspace-root, symlink, authentication, and capability controls are not yet implemented.
+Authentication and filesystem read/write capabilities are implemented at these boundaries.
+General method capabilities, structured audit events, and broader operation budgets remain open.
 
 ## Agent guidance
 

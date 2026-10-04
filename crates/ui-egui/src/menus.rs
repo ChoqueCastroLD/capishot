@@ -98,6 +98,11 @@ fn workspace_name(id: &str) -> Option<&'static str> {
 
 /// Run a command id from any source (menu, shortcut, palette, automation).
 pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
+    if app.automation_input
+        && let Some(authorize) = app.services.automation_command.as_ref()
+    {
+        authorize(id, &params)?;
+    }
     if crate::discard_ui::intercept(app, id, &params) {
         return Ok(Value::Null);
     }
