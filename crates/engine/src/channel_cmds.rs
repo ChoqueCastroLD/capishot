@@ -373,6 +373,10 @@ fn source(s: &Session, p: &Value, cmd: &str, gray: bool) -> Result<Vec<Vec<f32>>
     let r = p.get("channel").map_or(Some(ChanRef::Composite), |v| parse_ref(v, &st.doc)).ok_or_else(|| bad(cmd, "unknown `channel`"))?;
     let layer = source_layer(p);
     let mut planes = if gray { vec![gray_plane(&st.doc, layer, st.active_layer, r)?] } else { ref_planes(&st.doc, layer, st.active_layer, r)? };
+    // Guard every caller (`.remove(0)` / `src[0]`) against an empty source.
+    if planes.is_empty() {
+        return Err(bad(cmd, "the source has no channels"));
+    }
     if p.get("invert").and_then(Value::as_bool).unwrap_or(false) {
         for pl in &mut planes {
             for v in pl.iter_mut() {

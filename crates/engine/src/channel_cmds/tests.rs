@@ -442,3 +442,23 @@ fn image_size_and_rotate_carry_channels_and_quick_mask() {
     assert_eq!(d.channels[0].surface.format().sample, SampleType::U16);
     assert_eq!(d.quick_mask.as_ref().unwrap().surface.format().sample, SampleType::U16);
 }
+
+#[test]
+fn apply_image_and_calculations_fail_gracefully_never_panic() {
+    // Rule 9: adversarial params must return Err, not panic (guards the empty-source `src[0]` /
+    // `.remove(0)` paths in apply_image/calculations).
+    let mut s = session();
+    for p in [
+        json!({}),
+        json!({"source": {"channel": 999}}),
+        json!({"source": {"channel": "nope"}}),
+        json!({"source": {"document": 999}}),
+        json!({"blending": "bogus", "opacity": -50}),
+    ] {
+        // Must return a Result (Ok or Err) without panicking.
+        let _ = s.execute("image.applyImage", p.clone());
+        let _ = s.execute("image.calculations", p);
+    }
+    // A well-formed self-apply still works.
+    assert!(s.execute("image.applyImage", json!({"source": {"channel": "composite"}})).is_ok());
+}
