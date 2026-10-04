@@ -47,6 +47,7 @@ pub mod palette;
 pub mod panels;
 pub mod parity;
 pub mod perspective_ui;
+pub mod plugin_ui;
 pub mod prefs_ui;
 pub mod preset_panels;
 pub mod proxy;

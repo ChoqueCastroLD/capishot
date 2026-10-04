@@ -43,6 +43,7 @@ pub mod pattern_cmds;
 pub mod photo_cmds;
 pub mod pick_cmds;
 mod pixels;
+pub mod plugin_cmds;
 pub mod prefs;
 pub mod presets;
 pub mod print_cmds;

@@ -149,6 +149,10 @@ pub fn apply_filter_to_surface(
     if let Some(out) = crate::lens_cmds::apply_to_surface(id, params, surf, canvas) {
         return Some(out);
     }
+    // WebAssembly plug-in smart filters (plugin_cmds).
+    if id == crate::plugin_cmds::RUN {
+        return crate::plugin_cmds::apply_to_surface(id, params, surf, selection, canvas);
+    }
     let fp = params_for(id, params)?;
     let sel_bounds = selection.map(photocraft_raster::Surface::content_bounds);
     let content = surf.content_bounds();

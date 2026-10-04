@@ -103,6 +103,7 @@ photocraft/
 │  ├─ io/                      photocraft-io        import/export orchestration; doc ⇄ PSD mapping; PDF/SVG import (features)
 │  │  ── intelligence ──
 │  ├─ ml/                      photocraft-ml        model registry + InferenceBackend trait (ort native / burn|candle web); SAM2, matting, depth, sky
+│  ├─ plugins/                 photocraft-plugins   sandboxed WebAssembly filter plug-ins (wasmi host, limits, ABI v1, registry)
 │  │  ── the façade every frontend talks to ──
 │  ├─ tools/                   photocraft-tools     tool state machines (move, marquee, lasso, brush, clone, gradient, crop, transform, pen, text…)
 │  ├─ engine/                  photocraft-engine    Session: open docs, command registry + dispatch, jobs, events, view-models, preferences
@@ -122,7 +123,7 @@ photocraft/
 └─ plan/                       this directory
 ```
 
-**What exists today.** This layout is the target design. Built so far: `geom`, `cms`, `color`, `raster`, `psd`, `codecs`, `doc`, `ops`, `algo`, `paint`, `text`, `vector`, `compose`, `gpu`, `format`, `raw`, `io`, `engine`, `ui-egui`, `automation`, `testkit`, and the three apps. Not yet split out: `viewport` and `tools` live inside `ui-egui` and `engine`; `platform` services are function hooks injected by each app (`ui_egui::Services`); `adobe-assets` and `ml` are not started.
+**What exists today.** This layout is the target design. Built so far: `geom`, `cms`, `color`, `raster`, `psd`, `codecs`, `doc`, `ops`, `algo`, `paint`, `text`, `vector`, `compose`, `gpu`, `format`, `raw`, `io`, `plugins`, `engine`, `ui-egui`, `automation`, `testkit`, and the three apps. Not yet split out: `viewport` and `tools` live inside `ui-egui` and `engine`; `platform` services are function hooks injected by each app (`ui_egui::Services`); `adobe-assets` and `ml` are not started.
 
 **Crate granularity:** start with the crates above. Split `algo` into `-adjust`, `-filters`, `-select`, `-inpaint` and `-warp` once any module passes about 10k lines, or once compile times hurt. Its internal module boundaries should already follow those lines.
 
@@ -136,7 +137,7 @@ photocraft/
  L7  apps/*                         (binaries: wire everything together)
  L6  ui-egui · automation · platform
  L5  engine
- L4  tools · viewport · io · ml
+ L4  tools · viewport · io · ml · plugins
  L3  compose · gpu · format
  L2  ops · algo · paint · text · vector
  L1  doc
@@ -430,7 +431,7 @@ psd/src/
   - Stdio for agent CLIs, and optionally loopback TCP with a token so it can attach to a running GUI.
 - **Actions:** recorded `Vec<CommandInvocation>`, replayable in batch (File → Automate → Batch).
 - **Scripting (later):** embed a scripting language over the same registry. Options are Rhai, or Lua via mlua (C). JS via QuickJS is possible if we want Photoshop-script familiarity.
-- **Plugins (later):** a WASM component-model plugin API (wasmtime) for filters and panels. It is sandboxed and portable, and fits the command/schema model. Photoshop CEP/UXP/8BF compatibility is explicitly out of scope for v1.
+- **Plugins:** sandboxed WebAssembly filter plug-ins (`photocraft-plugins`, L4) run by `wasmi`, a pure-Rust interpreter, with fuel, memory, stack and wall-time limits and no host imports. They are driven by the `plugin.*` commands and listed under Filter › Plug-ins; the ABI is in [`plugins.md`](plugins.md). Native Photoshop `.8BF`/CEP/UXP hosting is out of scope (it needs unsafe FFI and can't run on the web). Panel plug-ins are later.
 
 ---
 
@@ -535,4 +536,4 @@ Each phase ends with a demoable build and green CI on all targets. Phases 8–10
 3. **Project name.** `photocraft` (the repo name) is assumed.
 4. **PSD crate.** Build our own, or adopt or fork `ag-psd`/`psd`. Decide after the week-1 spike.
 5. **Default working depth and blending.** 8-bit + gamma-space blending matches Photoshop. 16-bit/float + linear is the modern default. The proposal is to follow Photoshop by default and make the other a per-document option.
-6. **Scope of Photoshop plugin compatibility.** Proposed: none in v1.
+6. **Scope of Photoshop plugin compatibility.** Decided: no native `.8BF` hosting; a sandboxed WebAssembly plug-in API instead (see [`plugins.md`](plugins.md)).

@@ -552,6 +552,8 @@ impl GuidesGridAndSlices {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PlugIns {
+    /// Load the WebAssembly plug-ins (`*.wasm`) in `additional_plugins_folder` (native only).
+    pub use_additional_plugins_folder: bool,
     pub additional_plugins_folder: String,
     pub show_extension_panels: bool,
     pub allow_scripts_to_connect: bool,
@@ -560,7 +562,13 @@ pub struct PlugIns {
 
 impl Default for PlugIns {
     fn default() -> Self {
-        Self { additional_plugins_folder: String::new(), show_extension_panels: true, allow_scripts_to_connect: false, generator_enabled: false }
+        Self {
+            use_additional_plugins_folder: false,
+            additional_plugins_folder: String::new(),
+            show_extension_panels: true,
+            allow_scripts_to_connect: false,
+            generator_enabled: false,
+        }
     }
 }
 
@@ -1067,6 +1075,7 @@ impl Session {
             st.history.max_states = n;
         }
         photocraft_compose::set_effect_cache_budget(budget << 20);
+        crate::plugin_cmds::sync_prefs(self);
     }
 
     /// Everything persisted as one JSON document: the preferences plus `colorSettings`.

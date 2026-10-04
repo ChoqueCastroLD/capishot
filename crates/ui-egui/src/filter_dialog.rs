@@ -201,6 +201,28 @@ pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
     Some(id)
 }
 
+/// A filter dialog with live preview for `command` whose parameters follow `spec` (registry
+/// notation) instead of the command's own; `fixed` params (e.g. a plug-in id) are passed through.
+pub fn open_with_spec(app: &mut PhotocraftApp, command: &str, label: &str, spec: &str, fixed: Map<String, Value>) -> u64 {
+    let mut fields = fixed;
+    fields.insert("__command".into(), json!(command));
+    fields.insert("__label".into(), json!(label));
+    fields.insert("__filter".into(), json!(true));
+    fields.insert("__preview".into(), json!(true));
+    fields.insert("__spec".into(), json!(spec));
+    for p in parse_spec(spec) {
+        let v = match &p.kind {
+            Kind::Range { default, .. } => json!(default),
+            Kind::Choice(c) => json!(c.first().cloned().unwrap_or_default()),
+            Kind::Bool(default) => json!(default),
+            Kind::Int { default } => json!(default),
+            _ => continue,
+        };
+        fields.insert(p.key, v);
+    }
+    app.ui.open_dialog(crate::state::DialogKind::Command, fields)
+}
+
 pub(crate) fn label(key: &str) -> String {
     // camelCase → "Camel Case"
     let mut s = String::new();
@@ -225,8 +247,15 @@ fn choice_label(v: &str) -> String {
 pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     let cmd = f.get("__command").and_then(Value::as_str).unwrap_or_default().to_string();
-    let Some(spec) = photocraft_engine::commands::find(&cmd) else { return };
-    for p in parse_spec(spec.params) {
+    // Plug-in dialogs carry their own spec (from the plug-in's manifest).
+    let spec = match f.get("__spec").and_then(Value::as_str) {
+        Some(s) => s.to_string(),
+        None => match photocraft_engine::commands::find(&cmd) {
+            Some(c) => c.params.to_string(),
+            None => return,
+        },
+    };
+    for p in parse_spec(&spec) {
         match p.kind {
             Kind::Range { min, max, default } => {
                 let mut v = f.get(&p.key).and_then(Value::as_f64).unwrap_or(default as f64) as f32;

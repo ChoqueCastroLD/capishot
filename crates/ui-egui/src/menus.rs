@@ -137,6 +137,10 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::timeline_ui::menu(app, id, &params) {
         return r;
     }
+    // Filter › Plug-ins (installed WebAssembly plug-ins, Install Plug-in…).
+    if let Some(r) = crate::plugin_ui::menu(app, id, &params) {
+        return r;
+    }
     if id == "window.panel.brushes" {
         // Window › Brushes opens the Brush Settings window on its presets tab.
         app.ui.panels.brush_settings = true;
@@ -417,6 +421,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     if let Some(e) = crate::view_cmds::is_enabled(app, id) {
         return e;
     }
+    if let Some(e) = crate::plugin_ui::is_enabled(app, id) {
+        return e;
+    }
     match id {
         "file.open" | "file.exit" | "file.clearRecent" | "help.about" | "edit.search" => true,
         i if i.starts_with("file.openRecent.") => true,
@@ -598,6 +605,7 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             items.insert(at, e);
         }
     }
+    crate::plugin_ui::insert_menu_items(app, &mut items);
     // File › Open Recent: a dynamic submenu of recently opened files (inserted after "Open As…").
     if let Some(after) = items.iter().position(|i| i.id == "file.openAs") {
         let rp: Vec<String> = vec!["File".into(), "Open Recent".into()];
