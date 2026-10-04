@@ -8,6 +8,7 @@
 //! Memory is bounded by `max_states` plus an approximate byte budget. Only tiles *not shared*
 //! with the current document count against it.
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
