@@ -114,7 +114,7 @@ fn paste(s: &mut Session, p: &Value, in_place: bool) -> Result<Value> {
     let (dx, dy) = if in_place || (clip.bounds.intersect(&canvas) == clip.bounds && p.get("center").is_none()) {
         (0, 0)
     } else {
-        let c = p.get("center").and_then(Value::as_array).map(|a| (a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0)));
+        let c = p.get("center").and_then(Value::as_array).filter(|a| a.len() >= 2).map(|a| (a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0)));
         let (cx, cy) = c.unwrap_or(((canvas.x0 + canvas.x1) as f64 / 2.0, (canvas.y0 + canvas.y1) as f64 / 2.0));
         let b = clip.bounds;
         ((cx - (b.x0 + b.x1) as f64 / 2.0).round() as i32, (cy - (b.y0 + b.y1) as f64 / 2.0).round() as i32)
@@ -329,7 +329,7 @@ fn transform_again(s: &mut Session) -> Result<Value> {
             let v = |x: &Value| -> Vec<f64> { x.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default() };
             let r = v(&r);
             let q: Vec<Vec<f64>> = q.as_array().map(|a| a.iter().map(v).collect()).unwrap_or_default();
-            if r.len() != 4 || q.len() != 4 {
+            if r.len() != 4 || q.len() != 4 || q.iter().any(|row| row.len() < 2) {
                 return Err(EngineError::Other("the last transform can't be repeated".into()));
             }
             let h = photocraft_algo::transform::Homography::rect_to_quad([r[0], r[1], r[2], r[3]], [[q[0][0], q[0][1]], [q[1][0], q[1][1]], [q[2][0], q[2][1]], [q[3][0], q[3][1]]])
@@ -451,6 +451,18 @@ mod tests {
         s.execute("edit.paste", json!({"center": [70, 70]})).unwrap();
         assert_eq!(active_bounds(&s), Rect::new(60, 60, 80, 80));
         assert_eq!(s.active().unwrap().doc.layers.len(), 4);
+    }
+
+    #[test]
+    fn paste_with_malformed_center_does_not_panic() {
+        // A short/empty `center` array must not panic (Rule 9) — it falls back to the canvas centre.
+        let mut s = session();
+        s.execute("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap();
+        s.execute("edit.copy", json!({})).unwrap();
+        for center in [json!([5]), json!([]), json!("nope"), json!([1, 2, 3])] {
+            // Fresh clipboard each time is unnecessary; copy persists. Must return Ok, never panic.
+            assert!(s.execute("edit.paste", json!({ "center": center })).is_ok(), "center={center}");
+        }
     }
 
     #[test]
