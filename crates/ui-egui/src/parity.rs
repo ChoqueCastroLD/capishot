@@ -62,13 +62,14 @@ pub fn compute() -> Parity {
             continue;
         }
         let top = path.first().copied().unwrap_or("?");
-        let m = match menus.iter().position(|m| m.menu == top) {
-            Some(i) => &mut menus[i],
+        let i = match menus.iter().position(|m| m.menu == top) {
+            Some(i) => i,
             None => {
                 menus.push(MenuParity { menu: top.to_string(), live: 0, total: 0, missing: Vec::new() });
-                menus.last_mut().expect("just pushed")
+                menus.len() - 1
             }
         };
+        let Some(m) = menus.get_mut(i) else { continue };
         m.total += 1;
         if is_live(id) {
             m.live += 1;

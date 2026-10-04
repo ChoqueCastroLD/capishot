@@ -358,8 +358,7 @@ pub fn complete(w: usize, h: usize, ch: usize, img: &[f32], hole: &[bool], p: &C
     let mut levels = vec![Level { w, h, img: img.to_vec(), hole: hole.to_vec() }];
     let mut ext = (bx1 - bx0).max(by1 - by0);
     let mut exts = vec![ext];
-    loop {
-        let l = levels.last().expect("non-empty");
+    while let Some(l) = levels.last() {
         if ext <= 2 * psz || l.w / 2 < 3 * psz || l.h / 2 < 3 * psz {
             break;
         }

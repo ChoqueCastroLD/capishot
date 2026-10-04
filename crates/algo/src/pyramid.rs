@@ -90,7 +90,7 @@ pub fn expand(l: &Level, ch: usize, w: usize, h: usize) -> Vec<f32> {
 pub fn gaussian(w: usize, h: usize, ch: usize, px: &[f32], levels: usize) -> Vec<Level> {
     let mut out = vec![Level { w, h, px: px.to_vec() }];
     while out.len() < levels.max(1) {
-        let last = out.last().expect("non-empty");
+        let Some(last) = out.last() else { break };
         if last.w <= 1 && last.h <= 1 {
             break;
         }
