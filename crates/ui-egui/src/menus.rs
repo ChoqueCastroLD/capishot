@@ -213,8 +213,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 .get("path")
                 .and_then(Value::as_str)
                 .map(str::to_string)
-                .or_else(|| app.session.active().and_then(|d| d.path.clone()).filter(|p| p.ends_with(".psd") || p.ends_with(".psb")));
-            app.save_as(path).map(|p| json!({"path": p}))
+                .or_else(|| app.session.active().and_then(|d| d.path.clone()).filter(|p| saves_in_place(p)));
+            app.save_as(path).map(|(p, w)| json!({"path": p, "warnings": w}))
         }
         "file.exit" => {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -238,7 +238,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 Err("Open Recent is unavailable on the web".to_string())
             }
         }
-        "file.saveAs" => app.save_as(params.get("path").and_then(Value::as_str).map(str::to_string)).map(|p| json!({"path": p})),
+        "file.saveAs" => app.save_as(params.get("path").and_then(Value::as_str).map(str::to_string)).map(|(p, w)| json!({"path": p, "warnings": w})),
         "view.zoomIn" | "view.zoomOut" | "view.fitOnScreen" | "view.actualPixels" => {
             let i = app.session.active_index().ok_or("no document")?;
             let v = &mut app.ui.views[i];
@@ -389,21 +389,15 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn open_path(app: &mut PhotocraftApp, path: &str) -> Result<Value, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(path.to_string());
-    app.open_bytes(&name, &bytes)?;
-    if let Some(st) = app.session.active_mut() {
-        st.path = Some(path.to_string());
-    }
-    app.push_recent(path);
-    Ok(Value::Null)
+    app.open_path(path).map(|w| json!({"warnings": w}))
 }
 
-#[cfg(target_arch = "wasm32")]
-fn open_path(_app: &mut PhotocraftApp, path: &str) -> Result<Value, String> {
-    Err(format!("cannot open paths on the web: {path}"))
+/// File › Save writes back to the document's own file for layered formats (PSD, PSB, .pcraft);
+/// flat files go through Save As, like Photoshop.
+fn saves_in_place(path: &str) -> bool {
+    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "psd" | "psb" | "pcraft")
 }
 
 pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
@@ -959,7 +953,7 @@ mod open_recent_tests {
         use photocraft_color::{ColorMode, SampleType};
         use photocraft_geom::Size;
         let services = crate::Services {
-            import: Some(Box::new(|_n: &str, _b: &[u8]| Ok(photocraft_doc::Document::new("t", Size::new(4, 4), ColorMode::Rgb, SampleType::U8)))),
+            import: Some(Box::new(|_n: &str, _b: &[u8]| Ok((photocraft_doc::Document::new("t", Size::new(4, 4), ColorMode::Rgb, SampleType::U8), Vec::new())))),
             ..Default::default()
         };
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);

@@ -28,14 +28,15 @@ fn main() {
         arg(&args, "--script").map(|s| serde_json::from_str::<Vec<(String, Value)>>(&s).expect("--script must be [[method, params], …]")).unwrap_or_default();
 
     let services = Services {
-        import: Some(Box::new(|name: &str, bytes: &[u8]| photocraft_io::import(name, bytes).map(|r| r.document).map_err(|e| e.to_string()))),
+        import: Some(Box::new(|name: &str, bytes: &[u8]| photocraft_io::import(name, bytes).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string()))),
         export: Some(Box::new(|doc: &photocraft_doc::Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
             let mut opts = photocraft_io::ExportOptions::default();
             if let Some(q) = settings.jpeg_quality {
                 opts.encode.jpeg_quality = q;
             }
-            photocraft_io::export(doc, path, &opts).map(|r| r.bytes).map_err(|e| e.to_string())
+            photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
+        write: Some(Box::new(|path: &str, bytes: &[u8]| std::fs::write(path, bytes).map_err(|e| e.to_string()))),
         ..Default::default()
     };
     let open = arg(&args, "--open");
@@ -47,9 +48,7 @@ fn main() {
                 app.set_wgpu(rs.clone());
             }
             if let Some(path) = &open {
-                let bytes = std::fs::read(path).expect("read --open file");
-                let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                app.open_bytes(&name, &bytes).expect("open file");
+                app.open_path(path).expect("open --open file");
             }
             app
         });

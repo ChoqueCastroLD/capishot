@@ -972,11 +972,13 @@ fn save_a_copy(app: &mut PhotocraftApp) -> Result<Value, String> {
     let path = app.services.pick_save.as_mut().and_then(|f| f(&suggested)).ok_or("cancelled")?;
     let export = app.services.export.as_ref().ok_or("no exporter configured")?;
     let doc = app.session.active().ok_or("no document")?.doc.clone();
-    let bytes = export(&doc, &path, &crate::ExportSettings::default())?;
+    let (bytes, warnings) = export(&doc, &path, &crate::ExportSettings::default())?;
     let write = app.services.write.as_mut().ok_or("no writer configured")?;
     write(&path, &bytes)?;
     app.ui.status = format!("Saved a copy as {path}");
-    Ok(json!({"path": path}))
+    app.ui.status_error = false;
+    crate::notices::io_warnings(app, &format!("Saved a copy as {}", crate::file_open::display_name(&path)), &warnings);
+    Ok(json!({"path": path, "warnings": warnings}))
 }
 
 #[cfg(test)]

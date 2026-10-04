@@ -12,8 +12,26 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-const IMAGE_EXTS: &[&str] =
-    &["psd", "psb", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm"];
+/// Everything File › Open reads: PhotoCraft documents, Photoshop documents and flat images.
+const OPEN_EXTS: &[&str] =
+    &["pcraft", "psd", "psb", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm"];
+
+/// File › Save As formats: (filter name, extensions). The filter matching the suggested name's
+/// extension comes first, so a .pcraft document saves as .pcraft by default and everything else
+/// keeps defaulting to Photoshop.
+const SAVE_FILTERS: &[(&str, &[&str])] =
+    &[("Photoshop", &["psd", "psb"]), ("PhotoCraft", &["pcraft"]), ("PNG", &["png"]), ("JPEG", &["jpg"]), ("TIFF", &["tif"]), ("OpenEXR", &["exr"])];
+
+/// [`SAVE_FILTERS`] with the one for `suggested`'s extension first.
+fn save_filters(suggested: &str) -> Vec<(&'static str, &'static [&'static str])> {
+    let ext = Path::new(suggested).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let mut v = SAVE_FILTERS.to_vec();
+    if let Some(i) = v.iter().position(|(_, exts)| exts.contains(&ext.as_str())) {
+        let f = v.remove(i);
+        v.insert(0, f);
+    }
+    v
+}
 
 /// Per-user settings directory: `PHOTOCRAFT_CONFIG_DIR`, else the platform convention
 /// (macOS `~/Library/Application Support/Photocraft`, Windows `%APPDATA%\Photocraft`, Linux
@@ -55,28 +73,26 @@ pub fn native() -> Services {
     let savers2 = savers.clone();
     Services {
         import: Some(Box::new(|name: &str, bytes: &[u8]| {
-            crate::crash_guard::guard("Open", || photocraft_io::import(name, bytes).map(|r| r.document).map_err(|e| e.to_string()))
+            crate::crash_guard::guard("Open", || photocraft_io::import(name, bytes).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string()))
         })),
         export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
             let mut opts = photocraft_io::ExportOptions::default();
             if let Some(q) = settings.jpeg_quality {
                 opts.encode.jpeg_quality = q;
             }
-            crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| r.bytes).map_err(|e| e.to_string()))
+            crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string()))
         })),
         pick_open: Some(Box::new(|| {
-            let path = rfd::FileDialog::new().add_filter("Images", IMAGE_EXTS).pick_file()?;
+            let path = rfd::FileDialog::new().add_filter("All Formats", OPEN_EXTS).add_filter("PhotoCraft", &["pcraft"]).pick_file()?;
             let bytes = std::fs::read(&path).ok()?;
             Some((path.to_string_lossy().to_string(), bytes))
         })),
         pick_save: Some(Box::new(|suggested: &str| {
             let p = std::path::Path::new(suggested);
-            let mut d = rfd::FileDialog::new()
-                .add_filter("Photoshop", &["psd", "psb"])
-                .add_filter("PNG", &["png"])
-                .add_filter("JPEG", &["jpg"])
-                .add_filter("TIFF", &["tif"])
-                .add_filter("OpenEXR", &["exr"]);
+            let mut d = rfd::FileDialog::new();
+            for (name, exts) in save_filters(suggested) {
+                d = d.add_filter(name, exts);
+            }
             if let Some(name) = p.file_name() {
                 d = d.set_file_name(name.to_string_lossy());
             }
@@ -129,6 +145,8 @@ pub fn native() -> Services {
             let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
             f.write_all(text.as_bytes()).map_err(|e| e.to_string())
         })),
+        // Set by main once the Apple-event handlers are connected (macOS).
+        os_events: None,
     }
 }
 

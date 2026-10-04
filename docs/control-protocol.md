@@ -45,7 +45,7 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 - `ui.screenshot {path?, focus?}`: capture the main window (PNG). Raises the window first (default)
   because occluded macOS windows stop rendering
 - `ui.focus`: bring the main window to the front
-- `app.open {path}` / `app.save {path}`: file I/O through the configured services
+- `app.open {path}` / `app.save {path}`: file I/O through the configured services. Both reply with `warnings` (import/export notes such as "adjustment layer flattened"; `[]` when none), also shown to the user in the status bar and as a notice (`notices` in `ui.inspect`); `app.save` also returns the `path` written. `file.open`, `file.save`, `file.saveAs` and `file.saveACopy` reply the same way
 - `app.quit`
 
 ## Engine commands

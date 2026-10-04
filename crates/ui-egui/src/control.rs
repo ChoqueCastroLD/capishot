@@ -311,7 +311,7 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             Some(path) => wrap(crate::menus::invoke(app, ctx, "file.open", json!({"path": path}))),
             None => err("missing `path`"),
         },
-        "app.save" => wrap(app.save_as(s("path").map(str::to_string)).map(|p| json!({"path": p}))),
+        "app.save" => wrap(app.save_as(s("path").map(str::to_string)).map(|(p, w)| json!({"path": p, "warnings": w}))),
         "app.quit" => {
             app.allow_close = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -336,6 +336,8 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "windows": app.ui.windows,
         "theme": app.ui.theme,
         "status": app.ui.status,
+        "statusError": app.ui.status_error,
+        "notices": app.ui.notices,
         "frame": app.frame,
         "session": photocraft_engine::inspect::session(&app.session),
         "document": app.session.active().map(photocraft_engine::inspect::document),

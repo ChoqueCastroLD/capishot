@@ -12,6 +12,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(target_os = "macos")]
+mod apple_events;
 mod control_server;
 mod crash_guard;
 mod services;
@@ -74,6 +76,12 @@ fn main() -> eframe::Result {
     } else {
         None
     };
+    // Finder / Dock / Open With deliver files as Apple events, not arguments; catch the one that
+    // launched us as well as later ones. Lives until the event loop returns.
+    #[cfg(target_os = "macos")]
+    let apple_events = apple_events::AppleEvents::install();
+    #[cfg(target_os = "macos")]
+    let apple_events = &apple_events;
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -105,19 +113,12 @@ fn main() -> eframe::Result {
                 let rx = control_server::start(port, token, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }
-            for f in files {
-                match std::fs::read(&f) {
-                    Ok(bytes) => {
-                        let name = std::path::Path::new(&f).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(f.clone());
-                        if let Err(e) = app.open_bytes(&name, &bytes) {
-                            eprintln!("photocraft: {f}: {e}");
-                        } else if let Some(st) = app.session.active_mut() {
-                            st.path = Some(f.clone());
-                        }
-                    }
-                    Err(e) => eprintln!("photocraft: {f}: {e}"),
-                }
+            #[cfg(target_os = "macos")]
+            {
+                app.services.os_events = Some(apple_events.connect(&cc.egui_ctx));
             }
+            // Paths on the command line (Linux/Windows file associations, `photocraft a.psd`).
+            app.open_paths(&files);
             Ok(Box::new(app))
         }),
     )

@@ -11,8 +11,9 @@ use wasm_bindgen::JsCast as _;
 
 type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
-const IMAGE_EXTS: &[&str] =
-    &["psd", "psb", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm"];
+/// Everything File › Open reads: PhotoCraft documents, Photoshop documents and flat images.
+const OPEN_EXTS: &[&str] =
+    &["pcraft", "psd", "psb", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm"];
 const CANVAS_ID: &str = "photocraft_canvas";
 
 pub fn start() {
@@ -101,19 +102,19 @@ impl eframe::App for WebShell {
 fn services(inbox: Inbox, ctx: egui::Context) -> Services {
     let open_inbox = inbox.clone();
     Services {
-        import: Some(Box::new(|name: &str, bytes: &[u8]| photocraft_io::import(name, bytes).map(|r| r.document).map_err(|e| e.to_string()))),
+        import: Some(Box::new(|name: &str, bytes: &[u8]| photocraft_io::import(name, bytes).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string()))),
         export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
             let mut opts = photocraft_io::ExportOptions::default();
             if let Some(q) = settings.jpeg_quality {
                 opts.encode.jpeg_quality = q;
             }
-            photocraft_io::export(doc, path, &opts).map(|r| r.bytes).map_err(|e| e.to_string())
+            photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
         pick_open: Some(Box::new(move || {
             let inbox = open_inbox.clone();
             let ctx = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let Some(file) = rfd::AsyncFileDialog::new().add_filter("Images", IMAGE_EXTS).pick_file().await else {
+                let Some(file) = rfd::AsyncFileDialog::new().add_filter("All Formats", OPEN_EXTS).pick_file().await else {
                     return;
                 };
                 let bytes = file.read().await;

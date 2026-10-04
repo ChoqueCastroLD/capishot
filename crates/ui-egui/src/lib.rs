@@ -26,6 +26,7 @@ pub mod distort_ui;
 pub mod doc_props_ui;
 pub mod enable_rules;
 pub mod export_dialog;
+pub mod file_open;
 pub mod file_ui;
 pub mod filter_dialog;
 pub mod gallery_ui;
@@ -40,6 +41,7 @@ pub mod liquify_ui;
 pub mod menu_catalog;
 pub mod menus;
 pub mod new_doc_ui;
+pub mod notices;
 pub mod outline;
 pub mod palette;
 pub mod panels;
@@ -78,9 +80,11 @@ use photocraft_engine::Session;
 use serde_json::Value;
 
 pub use control::{ControlRequest, ControlResponse};
+pub use file_open::OsEvent;
 pub use state::{Tool, UiState};
 
-pub type ImportFn = Box<dyn Fn(&str, &[u8]) -> Result<Document, String>>;
+/// Decode a file: (document, warnings about anything approximated or dropped).
+pub type ImportFn = Box<dyn Fn(&str, &[u8]) -> Result<(Document, Vec<String>), String>>;
 /// Encoder settings chosen in Export As (the file format comes from the name's extension).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ExportSettings {
@@ -88,7 +92,8 @@ pub struct ExportSettings {
     pub jpeg_quality: Option<u8>,
 }
 
-pub type ExportFn = Box<dyn Fn(&Document, &str, &ExportSettings) -> Result<Vec<u8>, String>>;
+/// Encode a document: (file bytes, warnings about anything approximated or dropped).
+pub type ExportFn = Box<dyn Fn(&Document, &str, &ExportSettings) -> Result<(Vec<u8>, Vec<String>), String>>;
 pub type PickOpenFn = Box<dyn FnMut() -> Option<(String, Vec<u8>)>>;
 pub type PickSaveFn = Box<dyn FnMut(&str) -> Option<String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
@@ -113,6 +118,8 @@ pub type DiscardAutosaveFn = Box<dyn FnMut(u64)>;
 pub type RecoverFn = Box<dyn FnMut() -> Vec<(Option<String>, Document)>>;
 /// Append text to a file (History Log).
 pub type AppendTextFn = Box<dyn FnMut(&str, &str) -> Result<(), String>>;
+/// Requests from the operating system since the last call (see [`OsEvent`]).
+pub type OsEventsFn = Box<dyn FnMut() -> Vec<OsEvent>>;
 
 /// Platform services injected by the app binary (file dialogs, codecs), keeping this crate free of
 /// I/O dependencies.
@@ -147,6 +154,8 @@ pub struct Services {
     pub recover: Option<RecoverFn>,
     /// History Log text file output.
     pub append_text: Option<AppendTextFn>,
+    /// OS requests (macOS open-documents / quit Apple events), polled every frame.
+    pub os_events: Option<OsEventsFn>,
 }
 
 pub struct PhotocraftApp {
@@ -347,13 +356,19 @@ impl PhotocraftApp {
         r.truncate(10);
     }
 
-    pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+    /// Open a file's bytes as a new document named `name`; returns the import warnings (also
+    /// shown to the user). Files from disk go through [`open_file`](Self::open_file), which also
+    /// remembers the path.
+    pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
-        let doc = import(name, bytes)?;
+        let (doc, warnings) = import(name, bytes)?;
         // Edit › Color Settings policies apply on open; mismatches can ask what to do.
-        let (_, color) = self.session.open_document(doc, Some(name.to_string()));
+        // No path yet: a bare name isn't a location to save back to (`open_file` sets the path).
+        let (_, color) = self.session.open_document(doc, None);
         self.sync_views();
         self.ui.status = format!("Opened {name}");
+        self.ui.status_error = false;
+        notices::io_warnings(self, &format!("Opened {name}"), &warnings);
         // Script events bound to "Open Document".
         photocraft_engine::automate_cmds::document_opened(&mut self.session);
         self.sync_views();
@@ -361,33 +376,37 @@ impl PhotocraftApp {
         if ask && (color.get("mismatch").and_then(Value::as_bool) == Some(true) || color.get("missing").is_some()) {
             prefs_ui::open_mismatch(self, &color);
         }
-        Ok(())
+        Ok(warnings)
     }
 
+    /// File › Open: the platform dialog returns the chosen file's path (native; the web delivers
+    /// picks through the inbox instead).
     pub fn open_dialog_file(&mut self) {
         let picked = self.services.pick_open.as_mut().and_then(|f| f());
-        if let Some((name, bytes)) = picked {
-            match self.open_bytes(&name, &bytes) {
-                Ok(()) => self.push_recent(&name),
-                Err(e) => self.ui.status = format!("Couldn't open {name}: {e}"),
-            }
+        if let Some((path, bytes)) = picked
+            && let Err(e) = self.open_file(&path, &bytes)
+        {
+            self.open_failed(&file_open::display_name(&path), &e);
         }
     }
 
-    pub fn save_as(&mut self, path: Option<String>) -> Result<String, String> {
+    /// Save the active document to `path` (or a path chosen in the save dialog); returns the path
+    /// and the export warnings (also shown to the user).
+    pub fn save_as(&mut self, path: Option<String>) -> Result<(String, Vec<String>), String> {
         // Edit Contents documents save back into their smart object.
         if path.is_none() && self.session.is_enabled("layer.smartObjects.saveContents") {
             self.run("layer.smartObjects.saveContents", serde_json::json!({}))?;
-            return Ok("smart object".into());
+            return Ok(("smart object".into(), Vec::new()));
         }
         let st = self.session.active().ok_or("no document")?;
-        let suggested = st.path.clone().unwrap_or_else(|| format!("{}.psd", st.doc.name));
+        // Documents are named after their file ("cat.png"): suggest "cat.psd", not "cat.png.psd".
+        let suggested = st.path.clone().unwrap_or_else(|| format!("{}.psd", st.doc.name.rsplit_once('.').map_or(st.doc.name.as_str(), |(stem, _)| stem)));
         let path = match path {
             Some(p) => p,
             None => self.services.pick_save.as_mut().and_then(|f| f(&suggested)).ok_or("cancelled")?,
         };
         let export = self.services.export.as_ref().ok_or("no exporter configured")?;
-        let bytes = export(&st.doc, &path, &ExportSettings::default())?;
+        let (bytes, warnings) = export(&st.doc, &path, &ExportSettings::default())?;
         let write = self.services.write.as_mut().ok_or("no writer configured")?;
         write(&path, &bytes)?;
         if let Some(st) = self.session.active_mut() {
@@ -401,8 +420,10 @@ impl PhotocraftApp {
         {
             self.ui.status = format!("Saved {path}; {} image assets in {}", r["files"].as_array().map_or(0, Vec::len), r["dir"].as_str().unwrap_or(""));
         }
+        self.ui.status_error = false;
+        notices::io_warnings(self, &format!("Saved {}", file_open::display_name(&path)), &warnings);
         self.sync_views();
-        Ok(path)
+        Ok((path, warnings))
     }
 
     fn drain_control(&mut self, ctx: &egui::Context) {
@@ -507,23 +528,13 @@ impl eframe::App for PhotocraftApp {
             self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
         for (name, bytes) in arrived {
             if let Err(e) = self.open_bytes(&name, &bytes) {
-                self.ui.status = format!("Couldn't open {name}: {e}");
-                self.ui.status_error = true;
+                self.open_failed(&name, &e);
             }
         }
-        // Files dropped onto the window open as documents.
-        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
-        for f in dropped {
-            let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped".into());
-            match read_dropped(&*f) {
-                Ok(bytes) => {
-                    if let Err(e) = self.open_bytes(&name, &bytes) {
-                        self.ui.status = format!("Couldn't open {name}: {e}");
-                    }
-                }
-                Err(e) => self.ui.status = format!("Couldn't read {name}: {e}"),
-            }
-        }
+        // Finder double-click / Open With / Dock drops (macOS open-documents events).
+        self.drain_os_events(ctx);
+        // Files dropped onto the window open as documents (with their path, like File › Open).
+        self.open_dropped(ctx.input(|i| i.raw.dropped_files.clone()));
         // The control transport wakes the UI on arrival (ctx.request_repaint); only poll while a
         // screenshot is pending. (Polling every 50 ms here made idle apps render at 20 fps.)
         if !self.pending_screenshots.is_empty() {
@@ -583,6 +594,7 @@ impl eframe::App for PhotocraftApp {
         camera_raw_ui::show(self, &ctx);
         wide_angle_ui::show(self, &ctx);
         canvas::extra_windows(self, &ctx);
+        notices::show(self, &ctx);
         self.perf.frame(gpu_canvas::now_ms() - t0);
         // Synthetic input is injected one press/release step per frame: keep frames coming until
         // the queue is empty, then release control replies waiting on it.

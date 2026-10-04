@@ -575,6 +575,9 @@ pub struct UiState {
     /// The status message is an error (shown in the warning colour).
     #[serde(default)]
     pub status_error: bool,
+    /// Non-blocking notices (import/export warnings, files that couldn't open), newest last.
+    #[serde(default)]
+    pub notices: Vec<crate::notices::Notice>,
     /// Status bar info field, Home screen (see `chrome_ui`).
     #[serde(default)]
     pub chrome: crate::chrome_ui::ChromeState,
@@ -620,6 +623,7 @@ impl Default for UiState {
             next_id: 1,
             status: String::new(),
             status_error: false,
+            notices: Vec::new(),
             chrome: Default::default(),
         }
     }

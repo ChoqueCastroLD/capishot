@@ -103,7 +103,7 @@ fn settings(f: &Map<String, Value>) -> ExportSettings {
 fn estimate(app: &PhotocraftApp, doc: &Document, f: &Map<String, Value>) -> Option<u64> {
     let export = app.services.export.as_ref()?;
     let proxy = export_document(doc, f, Some(512)).ok()?;
-    let bytes = export(&proxy, &format!("estimate.{}", s_fmt(f)), &settings(f)).ok()?;
+    let (bytes, _) = export(&proxy, &format!("estimate.{}", s_fmt(f)), &settings(f)).ok()?;
     let scale = n(f, "scale", 100.0) / 100.0;
     let full = doc.size.width as f64 * scale * doc.size.height as f64 * scale;
     let small = (proxy.size.width as f64 * proxy.size.height as f64).max(1.0);
@@ -191,11 +191,13 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
     let path = app.services.pick_save.as_mut().and_then(|p| p(&suggested)).ok_or("cancelled")?;
     let out = export_document(&doc, f, None)?;
     let export = app.services.export.as_ref().ok_or("no exporter configured")?;
-    let bytes = export(&out, &path, &settings(f))?;
+    let (bytes, warnings) = export(&out, &path, &settings(f))?;
     let write = app.services.write.as_mut().ok_or("no writer configured")?;
     write(&path, &bytes)?;
     app.ui.status = format!("Exported {path} ({})", crate::sizing::human_bytes(bytes.len() as f64));
-    Ok(json!({"path": path, "bytes": bytes.len()}))
+    app.ui.status_error = false;
+    crate::notices::io_warnings(app, &format!("Exported {}", crate::file_open::display_name(&path)), &warnings);
+    Ok(json!({"path": path, "bytes": bytes.len(), "warnings": warnings}))
 }
 
 /// File › Export › Quick Export as PNG: the format, quality, metadata, colour space and location
