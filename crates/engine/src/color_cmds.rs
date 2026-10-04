@@ -326,9 +326,10 @@ impl ColorState {
         }
         let lut = self.display_lut(doc, size)?;
         let mut bytes = lut.to_rgba8();
-        let check = if pv.gamut_warning { Some(GamutCheck::new(&composite_profile(doc), &pv.setup.profile, pv.gamut_threshold).map_err(cms_err)?) } else { None };
+        let check =
+            if pv.gamut_warning { Some(GamutCheck::new(&composite_profile(doc), &pv.setup.profile, pv.gamut_threshold).map_err(cms_err)?) } else { None };
         let s = (size - 1) as f32;
-        for (i, px) in bytes.chunks_exact_mut(4).enumerate() {
+        for (i, px) in bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let rgb = [(i % size) as f32 / s, ((i / size) % size) as f32 / s, (i / (size * size)) as f32 / s];
             px[3] = if check.as_ref().is_some_and(|c| c.out_of_gamut(&rgb)) { 255 } else { 0 };
         }
@@ -618,11 +619,13 @@ pub fn convert_mode(s: &mut Session, mode: ColorMode, p: &Value) -> Result<Value
         Some(spec) => s.color.resolve(spec, Some(doc), Some(mode))?,
         None => s.color.working(mode),
     };
-    if space_mode(dst.color_space) != Some(match mode {
-        ColorMode::Bitmap | ColorMode::Duotone => ColorMode::Grayscale,
-        ColorMode::Indexed | ColorMode::Multichannel => ColorMode::Rgb,
-        m => m,
-    }) {
+    if space_mode(dst.color_space)
+        != Some(match mode {
+            ColorMode::Bitmap | ColorMode::Duotone => ColorMode::Grayscale,
+            ColorMode::Indexed | ColorMode::Multichannel => ColorMode::Rgb,
+            m => m,
+        })
+    {
         return Err(EngineError::Other(format!("profile `{}` is {:?}, not {mode:?}", dst.description, dst.color_space)));
     }
     let intent = intent_or(p, s.color.settings.intent())?;
@@ -665,7 +668,8 @@ fn always(_: &Session) -> std::result::Result<(), String> {
 }
 
 fn assign_profile(s: &mut Session, p: &Value) -> Result<Value> {
-    let spec = p.get("profile").and_then(Value::as_str).ok_or_else(|| EngineError::BadParams { cmd: "edit.assignProfile".into(), msg: "missing `profile`".into() })?;
+    let spec =
+        p.get("profile").and_then(Value::as_str).ok_or_else(|| EngineError::BadParams { cmd: "edit.assignProfile".into(), msg: "missing `profile`".into() })?;
     let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
     let bytes = if spec == "none" {
         None
@@ -688,7 +692,10 @@ fn assign_profile(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn convert_to_profile(s: &mut Session, p: &Value) -> Result<Value> {
-    let spec = p.get("profile").and_then(Value::as_str).ok_or_else(|| EngineError::BadParams { cmd: "edit.convertToProfile".into(), msg: "missing `profile`".into() })?;
+    let spec = p
+        .get("profile")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::BadParams { cmd: "edit.convertToProfile".into(), msg: "missing `profile`".into() })?;
     let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
     let dst = s.color.resolve(spec, Some(doc), None)?;
     let intent = intent_or(p, s.color.settings.intent())?;
@@ -699,10 +706,8 @@ fn convert_to_profile(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn profile_info(s: &mut Session, p: &Value) -> Result<Value> {
-    let builtins: Vec<Value> = Builtin::ALL
-        .iter()
-        .map(|b| json!({ "id": b.id(), "description": b.description(), "colorSpace": format!("{:?}", b.profile().color_space) }))
-        .collect();
+    let builtins: Vec<Value> =
+        Builtin::ALL.iter().map(|b| json!({ "id": b.id(), "description": b.description(), "colorSpace": format!("{:?}", b.profile().color_space) })).collect();
     let doc = s.active().map(|d| d.doc.clone());
     let info = match p.get("profile").and_then(Value::as_str) {
         Some(spec) => {
@@ -724,10 +729,19 @@ fn proof_setup(s: &mut Session, p: &Value) -> Result<Value> {
     let name = p.get("profile").and_then(Value::as_str).unwrap_or("working-cmyk").to_string();
     let profile = s.color.resolve(&name, Some(&doc), Some(ColorMode::Cmyk))?;
     let intent = intent_param(p)?;
-    let setup = ProofSetup { name, profile, intent, bpc: bool_param(p, "bpc", true), simulate_paper: bool_param(p, "simulatePaper", false), kind: crate::proof_sim::ProofKind::Profile };
+    let setup = ProofSetup {
+        name,
+        profile,
+        intent,
+        bpc: bool_param(p, "bpc", true),
+        simulate_paper: bool_param(p, "simulatePaper", false),
+        kind: crate::proof_sim::ProofKind::Profile,
+    };
     let pv = s.color.proof_mut(id);
     pv.setup = setup.clone();
-    Ok(json!({ "profile": setup.profile.description, "intent": setup.intent.id(), "bpc": setup.bpc, "simulatePaper": setup.simulate_paper, "proofColors": pv.enabled }))
+    Ok(
+        json!({ "profile": setup.profile.description, "intent": setup.intent.id(), "bpc": setup.bpc, "simulatePaper": setup.simulate_paper, "proofColors": pv.enabled }),
+    )
 }
 
 fn proof_colors(s: &mut Session, p: &Value) -> Result<Value> {
@@ -777,7 +791,13 @@ fn color_settings(s: &mut Session, p: &Value) -> Result<Value> {
             *slot = Policy::parse(v).ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: format!("`{k}` must be preserve|convert|off") })?;
         }
     }
-    for (k, slot) in [("askOnMismatch", &mut next.ask_on_mismatch), ("askOnPaste", &mut next.ask_on_paste), ("askOnMissing", &mut next.ask_on_missing), ("bpc", &mut next.bpc), ("dither", &mut next.dither)] {
+    for (k, slot) in [
+        ("askOnMismatch", &mut next.ask_on_mismatch),
+        ("askOnPaste", &mut next.ask_on_paste),
+        ("askOnMissing", &mut next.ask_on_missing),
+        ("bpc", &mut next.bpc),
+        ("dither", &mut next.dither),
+    ] {
         if let Some(v) = p.get(k).and_then(Value::as_bool) {
             *slot = v;
         }
@@ -789,7 +809,10 @@ fn color_settings(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Bool(false)) => next.blend_text_gamma = 1.0,
         Some(Value::Bool(true)) => next.blend_text_gamma = photocraft_compose::psblend::TEXT_GAMMA,
         Some(v) => {
-            let g = v.as_f64().filter(|g| (1.0..=2.2).contains(g)).ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: "`blendTextGamma` must be 1.0..2.2 or a bool".into() })?;
+            let g = v
+                .as_f64()
+                .filter(|g| (1.0..=2.2).contains(g))
+                .ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: "`blendTextGamma` must be 1.0..2.2 or a bool".into() })?;
             next.blend_text_gamma = g as f32;
         }
         None => {}
@@ -837,7 +860,10 @@ fn profile_mismatch(s: &mut Session, p: &Value) -> Result<Value> {
             })?;
             Ok(json!({"action": "assigned", "profile": w.description}))
         }
-        other => Err(EngineError::BadParams { cmd: "color.profileMismatch".into(), msg: format!("unknown action `{other}` (preserve|convert|discard|assignWorking)") }),
+        other => Err(EngineError::BadParams {
+            cmd: "color.profileMismatch".into(),
+            msg: format!("unknown action `{other}` (preserve|convert|discard|assignWorking)"),
+        }),
     }
 }
 
@@ -863,8 +889,24 @@ macro_rules! spec {
 /// Colour management command specs.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("edit.assignProfile", "Assign Profile…", ["Edit"], r##"{"profile":"working|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|none" (or a path to an .icc file)}"##, has_doc, assign_profile, true),
-        spec!("edit.convertToProfile", "Convert to Profile…", ["Edit"], r##"{"profile":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|working" (or a path to an .icc file),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##, has_doc, convert_to_profile, true),
+        spec!(
+            "edit.assignProfile",
+            "Assign Profile…",
+            ["Edit"],
+            r##"{"profile":"working|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|none" (or a path to an .icc file)}"##,
+            has_doc,
+            assign_profile,
+            true
+        ),
+        spec!(
+            "edit.convertToProfile",
+            "Convert to Profile…",
+            ["Edit"],
+            r##"{"profile":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|working" (or a path to an .icc file),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##,
+            has_doc,
+            convert_to_profile,
+            true
+        ),
         spec!(
             "edit.colorSettings",
             "Color Settings…",
@@ -875,11 +917,36 @@ pub fn specs() -> Vec<CommandSpec> {
             true,
             "Cmd+Shift+K"
         ),
-        spec!("color.profileMismatch", "Embedded Profile Mismatch", [], r##"{"action":"preserve|convert|discard|assignWorking"}"##, has_doc, profile_mismatch, true),
+        spec!(
+            "color.profileMismatch",
+            "Embedded Profile Mismatch",
+            [],
+            r##"{"action":"preserve|convert|discard|assignWorking"}"##,
+            has_doc,
+            profile_mismatch,
+            true
+        ),
         spec!("edit.profileInfo", "Profile Info", [], r##"{"profile":"<builtin id>|document|/path/to/profile.icc"=document}"##, always, profile_info, false),
-        spec!("view.proofSetup", "Proof Setup…", [], r##"{"profile":"working-cmyk|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk" (or a path to an .icc file)="working-cmyk","intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true,"simulatePaper":bool=false}"##, has_doc, proof_setup, false),
+        spec!(
+            "view.proofSetup",
+            "Proof Setup…",
+            [],
+            r##"{"profile":"working-cmyk|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk" (or a path to an .icc file)="working-cmyk","intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true,"simulatePaper":bool=false}"##,
+            has_doc,
+            proof_setup,
+            false
+        ),
         spec!("view.proofColors", "Proof Colors", ["View"], r##"{"on":bool=toggle}"##, has_doc, proof_colors, false, "Cmd+Y"),
-        spec!("view.gamutWarning", "Gamut Warning", ["View"], r##"{"on":bool=toggle,"threshold":deltaE=4,"profile":"<proof profile override>"}"##, has_doc, gamut_warning, false, "Cmd+Shift+Y"),
+        spec!(
+            "view.gamutWarning",
+            "Gamut Warning",
+            ["View"],
+            r##"{"on":bool=toggle,"threshold":deltaE=4,"profile":"<proof profile override>"}"##,
+            has_doc,
+            gamut_warning,
+            false,
+            "Cmd+Shift+Y"
+        ),
     ]
 }
 
@@ -1060,7 +1127,7 @@ mod tests {
             let surf = doc.layers[0].surface_mut().unwrap();
             let mut bytes = vec![0u8; r.width() as usize * r.height() as usize * 4];
             let mut x = 1u32;
-            for px in bytes.chunks_exact_mut(4) {
+            for px in bytes.as_chunks_mut::<4>().0 {
                 x ^= x << 13;
                 x ^= x >> 17;
                 x ^= x << 5;

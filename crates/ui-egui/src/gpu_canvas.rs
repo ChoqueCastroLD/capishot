@@ -160,7 +160,21 @@ impl GpuCanvas {
         }
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.get_mut::<Resources>() else { return Err(photocraft_gpu::Unsupported("no GPU canvas".into())) };
-        let mut comp = res.compositor.take().unwrap_or_else(|| photocraft_gpu::Compositor::new_with_format(device, photocraft_gpu::Compositor::preferred_acc_format(&self.rs.adapter)));
+        // A driver that couldn't build the pipelines once won't later: stay on the CPU compositor.
+        if let Some(e) = &res.compositor_failed {
+            return Err(e.clone());
+        }
+        let mut comp = match res.compositor.take() {
+            Some(c) => c,
+            None => match photocraft_gpu::Compositor::try_new_with_format(device, photocraft_gpu::Compositor::preferred_acc_format(&self.rs.adapter)) {
+                Ok(c) => c,
+                Err(e) => {
+                    log::warn!("{e}; using the CPU compositor");
+                    res.compositor_failed = Some(e.clone());
+                    return Err(e);
+                }
+            },
+        };
         let key = doc.id.0;
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size);
         let region = if fresh { doc.bounds() } else { region.intersect(&doc.bounds()) };
@@ -182,15 +196,27 @@ impl GpuCanvas {
                     continue;
                 }
                 let offset = [out.rect.x0 - tx, out.rect.y0 - ty, 0, 0];
-                let ubuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("pc_encode"), contents: &offset.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(), usage: wgpu::BufferUsages::UNIFORM });
+                let ubuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("pc_encode"),
+                    contents: &offset.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
                 let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("pc_encode"),
                     layout: bgl,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(out.view) }, wgpu::BindGroupEntry { binding: 1, resource: ubuf.as_entire_binding() }],
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(out.view) },
+                        wgpu::BindGroupEntry { binding: 1, resource: ubuf.as_entire_binding() },
+                    ],
                 });
                 let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("pc_encode"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &t.levels[0], resolve_target: None, depth_slice: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &t.levels[0],
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
@@ -326,7 +352,7 @@ impl Perf {
 /// Straight-alpha f32 RGBA (sRGB-encoded) → premultiplied RGBA8, split across threads on native.
 pub fn premultiply_rgba8(px: &[[f32; 4]]) -> Vec<u8> {
     fn convert(src: &[[f32; 4]], dst: &mut [u8]) {
-        for (o, p) in dst.chunks_exact_mut(4).zip(src) {
+        for (o, p) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src) {
             let a = p[3].clamp(0.0, 1.0);
             o[0] = (p[0].clamp(0.0, 1.0) * a * 255.0 + 0.5) as u8;
             o[1] = (p[1].clamp(0.0, 1.0) * a * 255.0 + 0.5) as u8;
@@ -367,6 +393,8 @@ struct Resources {
     out_linear: bool,
     /// The wgpu layer compositor (created on first use).
     compositor: Option<photocraft_gpu::Compositor>,
+    /// Why the wgpu compositor couldn't be created (then the CPU compositor is used).
+    compositor_failed: Option<photocraft_gpu::Unsupported>,
     encode_bgl: wgpu::BindGroupLayout,
     encode_pipeline: wgpu::RenderPipeline,
     lut_bgl: wgpu::BindGroupLayout,
@@ -415,7 +443,11 @@ fn lut_bind_group(device: &wgpu::Device, queue: &wgpu::Queue, bgl: &wgpu::BindGr
         extent,
     );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("pc_display_lut"), layout: bgl, entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }] })
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("pc_display_lut"),
+        layout: bgl,
+        entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+    })
 }
 
 /// The 2³ identity LUT (unused unless a document has none and `display` is set).
@@ -455,19 +487,36 @@ fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
-        ty: wgpu::BindingType::Texture { multisampled: false, sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2 },
+        ty: wgpu::BindingType::Texture {
+            multisampled: false,
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+        },
         count: None,
     }
 }
 fn sampler_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None }
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        count: None,
+    }
 }
 
 fn f32_bytes(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|f| f.to_ne_bytes()).collect()
 }
 
-fn pipeline(device: &wgpu::Device, label: &str, layout: &wgpu::PipelineLayout, module: &wgpu::ShaderModule, (vs, fs): (&str, &str), format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>) -> wgpu::RenderPipeline {
+fn pipeline(
+    device: &wgpu::Device,
+    label: &str,
+    layout: &wgpu::PipelineLayout,
+    module: &wgpu::ShaderModule,
+    (vs, fs): (&str, &str),
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: Some(layout),
@@ -475,7 +524,12 @@ fn pipeline(device: &wgpu::Device, label: &str, layout: &wgpu::PipelineLayout, m
         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
         depth_stencil: None,
         multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
-        fragment: Some(wgpu::FragmentState { module, entry_point: Some(fs), targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })], compilation_options: Default::default() }),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(fs),
+            targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
+            compilation_options: Default::default(),
+        }),
         multiview_mask: None,
         cache: None,
     })
@@ -483,23 +537,50 @@ fn pipeline(device: &wgpu::Device, label: &str, layout: &wgpu::PipelineLayout, m
 
 impl Resources {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, target: wgpu::TextureFormat) -> Self {
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_canvas"), source: wgpu::ShaderSource::Wgsl(CANVAS_WGSL.into()) });
+        let module =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_canvas"), source: wgpu::ShaderSource::Wgsl(CANVAS_WGSL.into()) });
         let vis = wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT;
-        let view_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pc_canvas_view"), entries: &[uniform_entry(0, VIEW_UNIFORM_SIZE, vis), sampler_entry(1)] });
-        let tile_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pc_canvas_tile"), entries: &[texture_entry(0), uniform_entry(1, TILE_UNIFORM_SIZE, vis)] });
+        let view_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pc_canvas_view"),
+            entries: &[uniform_entry(0, VIEW_UNIFORM_SIZE, vis), sampler_entry(1)],
+        });
+        let tile_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pc_canvas_tile"),
+            entries: &[texture_entry(0), uniform_entry(1, TILE_UNIFORM_SIZE, vis)],
+        });
         let lut_entry = wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture { multisampled: false, sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D3 },
+            ty: wgpu::BindingType::Texture {
+                multisampled: false,
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D3,
+            },
             count: None,
         };
         let lut_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pc_display_lut"), entries: &[lut_entry] });
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_canvas"), bind_group_layouts: &[Some(&view_bgl), Some(&tile_bgl), Some(&lut_bgl)], immediate_size: 0 });
-        let shadow_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_canvas_shadow"), bind_group_layouts: &[Some(&view_bgl)], immediate_size: 0 });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pc_canvas"),
+            bind_group_layouts: &[Some(&view_bgl), Some(&tile_bgl), Some(&lut_bgl)],
+            immediate_size: 0,
+        });
+        let shadow_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pc_canvas_shadow"),
+            bind_group_layouts: &[Some(&view_bgl)],
+            immediate_size: 0,
+        });
         // Premultiplied "over", with egui's alpha rule (keeps a transparent window's alpha sane).
         let blend = wgpu::BlendState {
-            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
-            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::OneMinusDstAlpha, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::OneMinusDstAlpha,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
         };
         let shadow_pipeline = pipeline(device, "pc_canvas_shadow", &shadow_layout, &module, ("vs_shadow", "fs_shadow"), target, Some(blend));
         let tile_pipeline = pipeline(device, "pc_canvas_tile", &layout, &module, ("vs_tile", "fs_tile"), target, Some(blend));
@@ -512,20 +593,39 @@ impl Resources {
         });
 
         let mip_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_mip"), source: wgpu::ShaderSource::Wgsl(MIP_WGSL.into()) });
-        let mip_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pc_mip"), entries: &[texture_entry(0), sampler_entry(1)] });
-        let mip_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_mip"), bind_group_layouts: &[Some(&mip_bgl)], immediate_size: 0 });
+        let mip_bgl =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pc_mip"), entries: &[texture_entry(0), sampler_entry(1)] });
+        let mip_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_mip"), bind_group_layouts: &[Some(&mip_bgl)], immediate_size: 0 });
         let mip_pipeline = pipeline(device, "pc_mip", &mip_layout, &mip_module, ("vs", "fs"), FORMAT, None);
-        let mip_sampler = device.create_sampler(&wgpu::SamplerDescriptor { label: Some("pc_mip"), mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, ..Default::default() });
+        let mip_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("pc_mip"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         // Compositor output (straight RGBA32F chunk) -> premultiplied RGBA8 display tile.
-        let encode_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_encode"), source: wgpu::ShaderSource::Wgsl(ENCODE_WGSL.into()) });
+        let encode_module =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_encode"), source: wgpu::ShaderSource::Wgsl(ENCODE_WGSL.into()) });
         let unfilterable = wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture { multisampled: false, sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2 },
+            ty: wgpu::BindingType::Texture {
+                multisampled: false,
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+            },
             count: None,
         };
-        let encode_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pc_encode"), entries: &[unfilterable, uniform_entry(1, 16, wgpu::ShaderStages::FRAGMENT)] });
-        let encode_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_encode"), bind_group_layouts: &[Some(&encode_bgl)], immediate_size: 0 });
+        let encode_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pc_encode"),
+            entries: &[unfilterable, uniform_entry(1, 16, wgpu::ShaderStages::FRAGMENT)],
+        });
+        let encode_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pc_encode"),
+            bind_group_layouts: &[Some(&encode_bgl)],
+            immediate_size: 0,
+        });
         let encode_pipeline = pipeline(device, "pc_encode", &encode_layout, &encode_module, ("vs", "fs"), FORMAT, None);
         let identity_lut = lut_bind_group(device, queue, &lut_bgl, 2, &identity_lut_bytes());
         Self {
@@ -545,6 +645,7 @@ impl Resources {
             views: HashMap::new(),
             out_linear: target.is_srgb(),
             compositor: None,
+            compositor_failed: None,
             encode_bgl,
             encode_pipeline,
         }
@@ -572,13 +673,22 @@ impl DocTextures {
                     usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
                     view_formats: &[],
                 });
-                let levels = (0..levels_n).map(|l| texture.create_view(&wgpu::TextureViewDescriptor { base_mip_level: l, mip_level_count: Some(1), ..Default::default() })).collect();
+                let levels = (0..levels_n)
+                    .map(|l| texture.create_view(&wgpu::TextureViewDescriptor { base_mip_level: l, mip_level_count: Some(1), ..Default::default() }))
+                    .collect();
                 let full = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("pc_canvas_tile"), contents: &f32_bytes(&[tx as f32, ty as f32, w as f32, h as f32]), usage: wgpu::BufferUsages::UNIFORM });
+                let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("pc_canvas_tile"),
+                    contents: &f32_bytes(&[tx as f32, ty as f32, w as f32, h as f32]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("pc_canvas_tile"),
                     layout: &res.tile_bgl,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&full) }, wgpu::BindGroupEntry { binding: 1, resource: uniform.as_entire_binding() }],
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&full) },
+                        wgpu::BindGroupEntry { binding: 1, resource: uniform.as_entire_binding() },
+                    ],
                 });
                 tiles.push(Tile { rect: [tx, ty, w, h], texture, levels, bind_group, _uniform: uniform });
             }
@@ -598,7 +708,12 @@ impl DocTextures {
             }
             let offset = ((iy0 - y0) as u64 * stride as u64 + (ix0 - x0) as u64) * 4;
             queue.write_texture(
-                wgpu::TexelCopyTextureInfo { texture: &t.texture, mip_level: 0, origin: wgpu::Origin3d { x: ix0 - tx, y: iy0 - ty, z: 0 }, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &t.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: ix0 - tx, y: iy0 - ty, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
                 rgba,
                 wgpu::TexelCopyBufferLayout { offset, bytes_per_row: Some(stride * 4), rows_per_image: Some(iy1 - iy0) },
                 wgpu::Extent3d { width: ix1 - ix0, height: iy1 - iy0, depth_or_array_layers: 1 },
@@ -624,11 +739,19 @@ impl DocTextures {
                 let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("pc_mip"),
                     layout: &res.mip_bgl,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&t.levels[level - 1]) }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&res.mip_sampler) }],
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&t.levels[level - 1]) },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&res.mip_sampler) },
+                    ],
                 });
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("pc_mip"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &t.levels[level], resolve_target: None, depth_slice: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &t.levels[level],
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
@@ -682,28 +805,64 @@ impl CanvasCallback {
         let square = if style.checker_square > 0.0 { (style.checker_square * ppp).round().max(1.0) } else { 0.0 };
         let (l, d, g) = (style.checker_light, style.checker_dark, style.gamut_color);
         [
-            screen[0] as f32, screen[1] as f32, scale, ppp,
-            origin[0], origin[1], p.doc_size[0] as f32, p.doc_size[1] as f32,
-            mode, lod, grid, square,
-            (self.rect.min.x * ppp).round(), (self.rect.min.y * ppp).round(), p.display as f32, if out_linear { 1.0 } else { 0.0 },
-            l[0], l[1], l[2], style.gamut_opacity,
-            d[0], d[1], d[2], 0.0,
-            g[0], g[1], g[2], 0.0,
+            screen[0] as f32,
+            screen[1] as f32,
+            scale,
+            ppp,
+            origin[0],
+            origin[1],
+            p.doc_size[0] as f32,
+            p.doc_size[1] as f32,
+            mode,
+            lod,
+            grid,
+            square,
+            (self.rect.min.x * ppp).round(),
+            (self.rect.min.y * ppp).round(),
+            p.display as f32,
+            if out_linear { 1.0 } else { 0.0 },
+            l[0],
+            l[1],
+            l[2],
+            style.gamut_opacity,
+            d[0],
+            d[1],
+            d[2],
+            0.0,
+            g[0],
+            g[1],
+            g[2],
+            0.0,
         ]
     }
 }
 
 impl CallbackTrait for CanvasCallback {
-    fn prepare(&self, device: &wgpu::Device, queue: &wgpu::Queue, screen: &ScreenDescriptor, _encoder: &mut wgpu::CommandEncoder, resources: &mut CallbackResources) -> Vec<wgpu::CommandBuffer> {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        screen: &ScreenDescriptor,
+        _encoder: &mut wgpu::CommandEncoder,
+        resources: &mut CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
         let Some(res) = resources.get_mut::<Resources>() else { return Vec::new() };
         let data = self.uniforms(screen.size_in_pixels, screen.pixels_per_point, res.out_linear, &res.style);
         let (bgl, sampler) = (&res.view_bgl, &res.sampler);
         let v = res.views.entry(self.params.view_key).or_insert_with(|| {
-            let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("pc_canvas_view"), size: VIEW_UNIFORM_SIZE, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("pc_canvas_view"),
+                size: VIEW_UNIFORM_SIZE,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("pc_canvas_view"),
                 layout: bgl,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) }],
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+                ],
             });
             ViewGpu { buffer, bind_group, frame_data: [f32::NAN; VIEW_FLOATS] }
         });
@@ -955,7 +1114,9 @@ mod tests {
         use wgpu::naga;
         for (name, src) in [("canvas", CANVAS_WGSL), ("mip", MIP_WGSL), ("encode", ENCODE_WGSL)] {
             let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(src)));
-            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("{name}: {e:?}"));
         }
     }
 }

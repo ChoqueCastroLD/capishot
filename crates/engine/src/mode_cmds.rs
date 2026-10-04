@@ -11,9 +11,7 @@ use photocraft_algo::quantize::{self, BitmapMethod, Dither, Forced, HalftoneShap
 use photocraft_algo::transform::{Homography, Interp};
 use photocraft_color::{ColorMode, PixelFormat, SampleType};
 use photocraft_doc::adjust::CurvePoint;
-use photocraft_doc::{
-    ColorTable, Document, Duotone, DuotoneInk, Layer, LayerContent, LayerId, Size,
-};
+use photocraft_doc::{ColorTable, Document, Duotone, DuotoneInk, Layer, LayerContent, LayerId, Size};
 use photocraft_geom::Affine;
 use photocraft_raster::Surface;
 use serde_json::{Value, json};
@@ -22,16 +20,11 @@ use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 
 fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
-    EngineError::BadParams {
-        cmd: cmd.into(),
-        msg: msg.into(),
-    }
+    EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
 }
 
 fn num(p: &Value, key: &str, default: f32) -> f32 {
-    p.get(key)
-        .and_then(Value::as_f64)
-        .map_or(default, |v| v as f32)
+    p.get(key).and_then(Value::as_f64).map_or(default, |v| v as f32)
 }
 
 fn str_or<'a>(p: &'a Value, key: &str, default: &'a str) -> &'a str {
@@ -41,18 +34,12 @@ fn str_or<'a>(p: &'a Value, key: &str, default: &'a str) -> &'a str {
 type Enabled = std::result::Result<(), String>;
 
 fn has_doc(s: &Session) -> Enabled {
-    s.active()
-        .map(|_| ())
-        .ok_or_else(|| "no document open".into())
+    s.active().map(|_| ()).ok_or_else(|| "no document open".into())
 }
 
 fn mode_is(s: &Session, modes: &[ColorMode], what: &str) -> Enabled {
     let d = s.active().ok_or("no document open")?;
-    if modes.contains(&d.doc.mode) {
-        Ok(())
-    } else {
-        Err(format!("{what} (the document is {:?})", d.doc.mode))
-    }
+    if modes.contains(&d.doc.mode) { Ok(()) } else { Err(format!("{what} (the document is {:?})", d.doc.mode)) }
 }
 
 // ---------- Image Rotation › Arbitrary ----------
@@ -78,9 +65,7 @@ fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
         d => return Err(bad(CMD, format!("direction `{d}` (cw|ccw)"))),
     };
     if deg.rem_euclid(360.0).abs() < 1e-9 {
-        return Ok(
-            json!({"width": s.active().map(|d| d.doc.size.width), "height": s.active().map(|d| d.doc.size.height)}),
-        );
+        return Ok(json!({"width": s.active().map(|d| d.doc.size.width), "height": s.active().map(|d| d.doc.size.height)}));
     }
     let bg = s.tools.background;
     let size = s.edit("Rotate Canvas", |doc, _| {
@@ -90,27 +75,14 @@ fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
         let (cx, cy) = (f64::from(old.width) / 2.0, f64::from(old.height) / 2.0);
         let (nx, ny) = (f64::from(new.width) / 2.0, f64::from(new.height) / 2.0);
         // Clockwise on screen (y down): x' = c·x − s·y, y' = s·x + c·y about the centres.
-        let a = Affine {
-            m: [
-                cs,
-                sn,
-                -sn,
-                cs,
-                nx - (cs * cx - sn * cy),
-                ny - (sn * cx + cs * cy),
-            ],
-        };
-        let h = Homography([
-            a.m[0], a.m[2], a.m[4], a.m[1], a.m[3], a.m[5], 0.0, 0.0, 1.0,
-        ]);
+        let a = Affine { m: [cs, sn, -sn, cs, nx - (cs * cx - sn * cy), ny - (sn * cx + cs * cy)] };
+        let h = Homography([a.m[0], a.m[2], a.m[4], a.m[1], a.m[3], a.m[5], 0.0, 0.0, 1.0]);
         let interp = Interp::parse(str_or(p, "interpolation", "bicubic"));
         doc.size = new;
         let canvas = doc.bounds();
         let fmt = doc.pixel_format();
         for l in doc.layers.iter_mut() {
-            let background = l.name == "Background"
-                && l.locks.position
-                && matches!(l.content, LayerContent::Raster(_));
+            let background = l.name == "Background" && l.locks.position && matches!(l.content, LayerContent::Raster(_));
             if background {
                 // The Background stays a Background: rotated pixels over the background colour.
                 let surf = l.surface_mut().expect("raster");
@@ -118,10 +90,7 @@ fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
                 let rotated = photocraft_algo::transform::warp_surface(surf, src, &h, interp);
                 let mut base = Surface::new(fmt);
                 let fill = photocraft_raster::from_rgba(&fmt, bg);
-                base.write_region(
-                    canvas,
-                    &fill.repeat(canvas.width() as usize * canvas.height() as usize),
-                );
+                base.write_region(canvas, &fill.repeat(canvas.width() as usize * canvas.height() as usize));
                 crate::transform_cmds::composite_over(&mut base, &rotated);
                 base.prune();
                 *surf = base;
@@ -141,16 +110,11 @@ fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
             ch.surface = crate::transform_cmds::warp_gray(&ch.surface, &h, interp);
         }
         if let Some(sel) = &doc.selection {
-            doc.selection = Some(crate::transform_cmds::warp_gray(sel, &h, Interp::Bilinear))
-                .filter(|s| !s.content_bounds().is_empty());
+            doc.selection = Some(crate::transform_cmds::warp_gray(sel, &h, Interp::Bilinear)).filter(|s| !s.content_bounds().is_empty());
         }
         // Type and smart objects re-render from their new transforms.
-        let ids: Vec<LayerId> = doc
-            .walk()
-            .iter()
-            .filter(|(_, _, l)| matches!(l.content, LayerContent::Text(_) | LayerContent::Smart(_)))
-            .map(|(_, _, l)| l.id)
-            .collect();
+        let ids: Vec<LayerId> =
+            doc.walk().iter().filter(|(_, _, l)| matches!(l.content, LayerContent::Text(_) | LayerContent::Smart(_))).map(|(_, _, l)| l.id).collect();
         for id in ids {
             let snapshot = doc.clone();
             if let Some(l) = doc.layer_mut(id) {
@@ -168,45 +132,26 @@ fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
 /// The flattened image as straight RGBA (over white when `opaque`).
 fn composite(doc: &Document, opaque: bool) -> Vec<[f32; 4]> {
     let buf = photocraft_compose::flatten(doc);
-    if opaque {
-        buf.over_background([1.0, 1.0, 1.0]).px
-    } else {
-        buf.px
-    }
+    if opaque { buf.over_background([1.0, 1.0, 1.0]).px } else { buf.px }
 }
 
 /// Replace the document's layers by one 8-bit layer holding `px` in `mode`'s storage format.
-fn single_layer(
-    doc: &mut Document,
-    active: &mut Option<LayerId>,
-    mode: ColorMode,
-    px: &[[f32; 4]],
-    name: &str,
-    background: bool,
-) {
+fn single_layer(doc: &mut Document, active: &mut Option<LayerId>, mode: ColorMode, px: &[[f32; 4]], name: &str, background: bool) {
     doc.mode = mode;
     doc.depth = SampleType::U8;
     let fmt = doc.pixel_format();
-    let data: Vec<f32> = px
-        .iter()
-        .flat_map(|q| photocraft_raster::from_rgba(&fmt, *q))
-        .collect();
+    let data: Vec<f32> = px.iter().flat_map(|q| photocraft_raster::from_rgba(&fmt, *q)).collect();
     let mut l = Layer::raster(name, fmt);
     if background {
         l.locks.transparency = true;
         l.locks.position = true;
     }
-    l.surface_mut()
-        .expect("raster")
-        .write_region(doc.bounds(), &data);
+    l.surface_mut().expect("raster").write_region(doc.bounds(), &data);
     *active = Some(l.id);
     doc.layers = vec![l];
     for ch in doc.channels.iter_mut() {
         let f = PixelFormat::new(ColorMode::Grayscale, SampleType::U8, false);
-        ch.surface = ch.surface.convert(PixelFormat {
-            alpha: ch.surface.format().alpha,
-            ..f
-        });
+        ch.surface = ch.surface.convert(PixelFormat { alpha: ch.surface.format().alpha, ..f });
     }
     doc.quick_mask = None;
     doc.color_table = None;
@@ -237,36 +182,17 @@ fn parse_dither(s: &str) -> Option<Dither> {
 
 fn indexed_color(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "image.mode.indexedColor";
-    let kind = PaletteKind::from_id(str_or(p, "palette", "selective")).ok_or_else(|| {
-        bad(
-            CMD,
-            "palette: exact|systemMac|systemWindows|web|uniform|perceptual|selective|adaptive",
-        )
-    })?;
-    let forced = parse_forced(str_or(p, "forced", "blackWhite"))
-        .ok_or_else(|| bad(CMD, "forced: none|blackWhite|primaries|web"))?;
-    let dither = parse_dither(str_or(p, "dither", "diffusion"))
-        .ok_or_else(|| bad(CMD, "dither: none|diffusion|pattern|noise"))?;
+    let kind = PaletteKind::from_id(str_or(p, "palette", "selective"))
+        .ok_or_else(|| bad(CMD, "palette: exact|systemMac|systemWindows|web|uniform|perceptual|selective|adaptive"))?;
+    let forced = parse_forced(str_or(p, "forced", "blackWhite")).ok_or_else(|| bad(CMD, "forced: none|blackWhite|primaries|web"))?;
+    let dither = parse_dither(str_or(p, "dither", "diffusion")).ok_or_else(|| bad(CMD, "dither: none|diffusion|pattern|noise"))?;
     let colors = num(p, "colors", 256.0).clamp(2.0, 256.0) as usize;
     let amount = num(p, "amount", 75.0).clamp(0.0, 100.0) / 100.0;
-    let transparency = p
-        .get("transparency")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    let transparency = p.get("transparency").and_then(Value::as_bool).unwrap_or(true);
     let (pal_len, transparent) = s.edit("Indexed Color", |doc, active| {
         let mut px = composite(doc, !transparency);
         let has_clear = transparency && px.iter().any(|q| q[3] < 0.5);
-        let mut pal = quantize::build_palette(
-            &px,
-            kind,
-            if has_clear {
-                colors.saturating_sub(1).max(2)
-            } else {
-                colors
-            },
-            forced,
-        )
-        .map_err(|e| bad(CMD, e))?;
+        let mut pal = quantize::build_palette(&px, kind, if has_clear { colors.saturating_sub(1).max(2) } else { colors }, forced).map_err(|e| bad(CMD, e))?;
         let transparent = if has_clear && pal.len() < 256 {
             pal.push([255, 255, 255]);
             Some(pal.len() - 1)
@@ -275,22 +201,8 @@ fn indexed_color(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let w = doc.size.width as usize;
         quantize::quantize(&mut px, w, &pal, dither, amount, transparent);
-        single_layer(
-            doc,
-            active,
-            ColorMode::Indexed,
-            &px,
-            if transparent.is_some() {
-                "Index"
-            } else {
-                "Background"
-            },
-            transparent.is_none(),
-        );
-        doc.color_table = Some(ColorTable {
-            colors: pal.clone(),
-            transparent: transparent.map(|t| t as u8),
-        });
+        single_layer(doc, active, ColorMode::Indexed, &px, if transparent.is_some() { "Index" } else { "Background" }, transparent.is_none());
+        doc.color_table = Some(ColorTable { colors: pal.clone(), transparent: transparent.map(|t| t as u8) });
         Ok((pal.len(), transparent))
     })?;
     Ok(json!({"colors": pal_len, "transparentIndex": transparent}))
@@ -317,21 +229,11 @@ fn parse_color(v: &Value) -> Option<[u8; 3]> {
 
 /// Built-in Color Table presets.
 pub fn preset_table(name: &str) -> Option<Vec<[u8; 3]>> {
-    let ramp = |f: &dyn Fn(f32) -> [f32; 3]| {
-        (0..256)
-            .map(|i| f(i as f32 / 255.0).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8))
-            .collect()
-    };
+    let ramp = |f: &dyn Fn(f32) -> [f32; 3]| (0..256).map(|i| f(i as f32 / 255.0).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).collect();
     Some(match name {
         "grayscale" => ramp(&|t| [t; 3]),
         // Black → red → yellow → white, the incandescence scale.
-        "blackBody" => ramp(&|t| {
-            [
-                (t * 3.0).min(1.0),
-                (t * 3.0 - 1.0).clamp(0.0, 1.0),
-                (t * 3.0 - 2.0).clamp(0.0, 1.0),
-            ]
-        }),
+        "blackBody" => ramp(&|t| [(t * 3.0).min(1.0), (t * 3.0 - 1.0).clamp(0.0, 1.0), (t * 3.0 - 2.0).clamp(0.0, 1.0)]),
         "spectrum" => ramp(&|t| {
             let h = t * 300.0 / 60.0;
             let x = 1.0 - (h % 2.0 - 1.0).abs();
@@ -354,20 +256,11 @@ pub fn preset_table(name: &str) -> Option<Vec<[u8; 3]>> {
 /// the table, as in Photoshop) and set the transparent entry. No changes: report the table.
 fn color_table(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "image.mode.colorTable";
-    let cur = s
-        .active()
-        .ok_or(EngineError::NoDocument)?
-        .doc
-        .color_table
-        .clone()
-        .ok_or_else(|| EngineError::Other("the document has no color table".into()))?;
+    let cur = s.active().ok_or(EngineError::NoDocument)?.doc.color_table.clone().ok_or_else(|| EngineError::Other("the document has no color table".into()))?;
     let mut table = cur.clone();
     match str_or(p, "table", "custom") {
         "custom" => {}
-        name => {
-            table.colors =
-                preset_table(name).ok_or_else(|| bad(CMD, format!("unknown table `{name}`")))?
-        }
+        name => table.colors = preset_table(name).ok_or_else(|| bad(CMD, format!("unknown table `{name}`")))?,
     }
     if let Some(a) = p.get("colors").and_then(Value::as_array) {
         let c: Option<Vec<[u8; 3]>> = a.iter().map(parse_color).collect();
@@ -379,31 +272,17 @@ fn color_table(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(e) = p.get("entries").and_then(Value::as_object) {
         for (k, v) in e {
-            let i: usize = k
-                .parse()
-                .map_err(|_| bad(CMD, format!("entry index `{k}`")))?;
+            let i: usize = k.parse().map_err(|_| bad(CMD, format!("entry index `{k}`")))?;
             let c = parse_color(v).ok_or_else(|| bad(CMD, format!("entry {i}: bad colour")))?;
             if i >= table.colors.len() {
-                return Err(bad(
-                    CMD,
-                    format!(
-                        "entry {i} is past the table ({} entries)",
-                        table.colors.len()
-                    ),
-                ));
+                return Err(bad(CMD, format!("entry {i} is past the table ({} entries)", table.colors.len())));
             }
             table.colors[i] = c;
         }
     }
     match p.get("transparent") {
         Some(Value::Null) => table.transparent = None,
-        Some(v) => {
-            table.transparent = v
-                .as_u64()
-                .filter(|&i| (i as usize) < table.colors.len())
-                .map(|i| i as u8)
-                .or(table.transparent)
-        }
+        Some(v) => table.transparent = v.as_u64().filter(|&i| (i as usize) < table.colors.len()).map(|i| i as u8).or(table.transparent),
         None => {}
     }
     let report = |t: &ColorTable| json!({"colors": t.colors.iter().map(|c| hex(*c)).collect::<Vec<_>>(), "transparent": t.transparent});
@@ -427,19 +306,10 @@ fn color_table(s: &mut Session, p: &Value) -> Result<Value> {
                     continue;
                 }
                 let i = old.nearest([c[0], c[1], c[2]]);
-                let alpha = if table.transparent == Some(i as u8) {
-                    0.0
-                } else {
-                    c[3]
-                };
-                let nc = if i < table.colors.len() {
-                    table.rgb(i)
-                } else {
-                    table.rgb(table.nearest([c[0], c[1], c[2]]))
-                };
+                let alpha = if table.transparent == Some(i as u8) { 0.0 } else { c[3] };
+                let nc = if i < table.colors.len() { table.rgb(i) } else { table.rgb(table.nearest([c[0], c[1], c[2]])) };
                 let mut enc = [0.0f32; 8];
-                let m =
-                    photocraft_raster::from_rgba_into(&fmt, [nc[0], nc[1], nc[2], alpha], &mut enc);
+                let m = photocraft_raster::from_rgba_into(&fmt, [nc[0], nc[1], nc[2], alpha], &mut enc);
                 q.copy_from_slice(&enc[..m]);
             }
             surf.write_region(r, &data);
@@ -455,37 +325,22 @@ fn color_table(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn bitmap(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "image.mode.bitmap";
-    let dpi = s
-        .active()
-        .ok_or(EngineError::NoDocument)?
-        .doc
-        .resolution_dpi
-        .max(1.0);
+    let dpi = s.active().ok_or(EngineError::NoDocument)?.doc.resolution_dpi.max(1.0);
     let method = match str_or(p, "method", "diffusion") {
         "threshold" | "threshold50" => BitmapMethod::Threshold,
         "pattern" => BitmapMethod::Pattern,
         "diffusion" => BitmapMethod::Diffusion,
         "halftone" => {
             let freq = num(p, "frequency", 53.0).clamp(1.0, 999.0);
-            BitmapMethod::Halftone {
-                cell: (dpi / freq).max(2.0),
-                angle: num(p, "angle", 45.0),
-                shape: HalftoneShape::from_id(str_or(p, "shape", "round")),
-            }
+            BitmapMethod::Halftone { cell: (dpi / freq).max(2.0), angle: num(p, "angle", 45.0), shape: HalftoneShape::from_id(str_or(p, "shape", "round")) }
         }
         m => {
-            return Err(bad(
-                CMD,
-                format!("method `{m}` (threshold|pattern|diffusion|halftone)"),
-            ));
+            return Err(bad(CMD, format!("method `{m}` (threshold|pattern|diffusion|halftone)")));
         }
     };
     s.edit("Bitmap", |doc, active| {
         let px = composite(doc, true);
-        let mut gray: Vec<f32> = px
-            .iter()
-            .map(|q| photocraft_color::convert::rgb_to_gray([q[0], q[1], q[2]]))
-            .collect();
+        let mut gray: Vec<f32> = px.iter().map(|q| photocraft_color::convert::rgb_to_gray([q[0], q[1], q[2]])).collect();
         quantize::to_bitmap(&mut gray, doc.size.width as usize, method);
         let out: Vec<[f32; 4]> = gray.iter().map(|g| [*g, *g, *g, 1.0]).collect();
         single_layer(doc, active, ColorMode::Bitmap, &out, "Background", true);
@@ -499,32 +354,16 @@ fn bitmap(s: &mut Session, p: &Value) -> Result<Value> {
 /// Default inks per type: black first, then warm brown, gold and slate blue (generic names;
 /// Photoshop ships Pantone presets, which we don't reproduce).
 fn default_inks(n: usize) -> Vec<DuotoneInk> {
-    let all = [
-        ("Black", [0.0, 0.0, 0.0]),
-        ("Warm Brown", [0.62, 0.38, 0.18]),
-        ("Gold", [0.86, 0.68, 0.18]),
-        ("Slate Blue", [0.27, 0.38, 0.58]),
-    ];
-    all.iter()
-        .take(n)
-        .map(|(name, c)| DuotoneInk::new(*name, *c))
-        .collect()
+    let all = [("Black", [0.0, 0.0, 0.0]), ("Warm Brown", [0.62, 0.38, 0.18]), ("Gold", [0.86, 0.68, 0.18]), ("Slate Blue", [0.27, 0.38, 0.58])];
+    all.iter().take(n).map(|(name, c)| DuotoneInk::new(*name, *c)).collect()
 }
 
 fn parse_inks(cmd: &str, v: &Value, n: usize) -> Result<Vec<DuotoneInk>> {
-    let a = v.as_array().ok_or_else(|| {
-        bad(
-            cmd,
-            "inks: [{\"name\",\"color\":\"#rrggbb\",\"curve\":[[in,out],…] (0..100)}, …]",
-        )
-    })?;
+    let a = v.as_array().ok_or_else(|| bad(cmd, "inks: [{\"name\",\"color\":\"#rrggbb\",\"curve\":[[in,out],…] (0..100)}, …]"))?;
     let defaults = default_inks(n.max(a.len()).min(4));
     let mut out = Vec::new();
     for (i, ink) in a.iter().take(4).enumerate() {
-        let mut d = defaults
-            .get(i)
-            .cloned()
-            .unwrap_or_else(|| DuotoneInk::new(format!("Ink {}", i + 1), [0.0; 3]));
+        let mut d = defaults.get(i).cloned().unwrap_or_else(|| DuotoneInk::new(format!("Ink {}", i + 1), [0.0; 3]));
         if let Some(name) = ink.get("name").and_then(Value::as_str) {
             d.name = name.to_string();
         }
@@ -532,15 +371,8 @@ fn parse_inks(cmd: &str, v: &Value, n: usize) -> Result<Vec<DuotoneInk>> {
             d.color = c.map(|v| f32::from(v) / 255.0);
         }
         if let Some(pts) = ink.get("curve").and_then(Value::as_array) {
-            let mut curve: Vec<CurvePoint> = pts
-                .iter()
-                .filter_map(|p| {
-                    Some(CurvePoint {
-                        input: p.get(0)?.as_f64()? as f32 / 100.0,
-                        output: p.get(1)?.as_f64()? as f32 / 100.0,
-                    })
-                })
-                .collect();
+            let mut curve: Vec<CurvePoint> =
+                pts.iter().filter_map(|p| Some(CurvePoint { input: p.get(0)?.as_f64()? as f32 / 100.0, output: p.get(1)?.as_f64()? as f32 / 100.0 })).collect();
             curve.sort_by(|a, b| a.input.total_cmp(&b.input));
             if curve.len() >= 2 {
                 d.curve = curve;
@@ -559,10 +391,7 @@ fn duotone(s: &mut Session, p: &Value) -> Result<Value> {
         "tritone" => 3,
         "quadtone" => 4,
         t => {
-            return Err(bad(
-                CMD,
-                format!("type `{t}` (monotone|duotone|tritone|quadtone)"),
-            ));
+            return Err(bad(CMD, format!("type `{t}` (monotone|duotone|tritone|quadtone)")));
         }
     };
     let mut inks = match p.get("inks") {
@@ -576,10 +405,7 @@ fn duotone(s: &mut Session, p: &Value) -> Result<Value> {
     let names: Vec<String> = inks.iter().map(|i| i.name.clone()).collect();
     s.edit("Duotone", |doc, _| {
         doc.mode = ColorMode::Duotone;
-        doc.duotone = Some(Duotone {
-            inks,
-            psd_raw: None,
-        });
+        doc.duotone = Some(Duotone { inks, psd_raw: None });
         doc.color_table = None;
         Ok(())
     })?;
@@ -609,14 +435,7 @@ pub fn specs() -> Vec<CommandSpec> {
             r##"{"palette":"selective|perceptual|adaptive|exact|systemMac|systemWindows|web|uniform"="selective","colors":2..256=256,"forced":"blackWhite|none|primaries|web"="blackWhite","transparency":bool=true,"dither":"diffusion|none|pattern|noise"="diffusion","amount":0..100=75} (flattens)"##,
             |s| mode_is(
                 s,
-                &[
-                    ColorMode::Rgb,
-                    ColorMode::Grayscale,
-                    ColorMode::Indexed,
-                    ColorMode::Duotone,
-                    ColorMode::Cmyk,
-                    ColorMode::Lab
-                ],
+                &[ColorMode::Rgb, ColorMode::Grayscale, ColorMode::Indexed, ColorMode::Duotone, ColorMode::Cmyk, ColorMode::Lab],
                 "Indexed Color needs an RGB or Grayscale image"
             ),
             indexed_color
@@ -626,11 +445,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Color Table…",
             ["Image", "Mode"],
             r##"{"table":"custom|blackBody|grayscale|spectrum|systemMac|systemWindows|web"="custom","colors":json,"entries":json,"transparent":json} (colors: ["#rrggbb", …]; entries: {"index": "#rrggbb"}; transparent: index|null)"##,
-            |s| mode_is(
-                s,
-                &[ColorMode::Indexed],
-                "Color Table needs an Indexed Color image"
-            ),
+            |s| mode_is(s, &[ColorMode::Indexed], "Color Table needs an Indexed Color image"),
             color_table
         ),
         spec!(
@@ -638,11 +453,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Bitmap…",
             ["Image", "Mode"],
             r##"{"method":"diffusion|threshold|pattern|halftone"="diffusion","frequency":1..999=53,"angle":-180..180=45,"shape":"round|ellipse|line|square|diamond|cross"="round"} (halftone frequency in lines/inch; flattens)"##,
-            |s| mode_is(
-                s,
-                &[ColorMode::Grayscale],
-                "Bitmap needs a Grayscale image (Image › Mode › Grayscale first)"
-            ),
+            |s| mode_is(s, &[ColorMode::Grayscale], "Bitmap needs a Grayscale image (Image › Mode › Grayscale first)"),
             bitmap
         ),
         spec!(
@@ -650,11 +461,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Duotone…",
             ["Image", "Mode"],
             r##"{"type":"duotone|monotone|tritone|quadtone"="duotone","inks":json} (inks: [{"name","color":"#rrggbb","curve":[[in,out],…] in 0..100}, …])"##,
-            |s| mode_is(
-                s,
-                &[ColorMode::Grayscale, ColorMode::Duotone],
-                "Duotone needs a Grayscale image (Image › Mode › Grayscale first)"
-            ),
+            |s| mode_is(s, &[ColorMode::Grayscale, ColorMode::Duotone], "Duotone needs a Grayscale image (Image › Mode › Grayscale first)"),
             duotone
         ),
     ]
@@ -668,10 +475,7 @@ pub fn duotone_display_layer(d: &Duotone) -> Layer {
 /// A copy of `doc` that displays like the printed result (Duotone inks), or None when the
 /// document displays as stored.
 pub fn display_document(doc: &Document) -> Option<Document> {
-    let d = doc
-        .duotone
-        .as_ref()
-        .filter(|_| doc.mode == ColorMode::Duotone)?;
+    let d = doc.duotone.as_ref().filter(|_| doc.mode == ColorMode::Duotone)?;
     let mut out = doc.clone();
     out.layers.push(duotone_display_layer(d));
     Some(out)

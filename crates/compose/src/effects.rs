@@ -18,11 +18,11 @@
 //! use an exact Euclidean distance transform. Soft falloffs are Gaussian blurs.
 
 use photocraft_color::blend::BlendMode;
+use photocraft_doc::Pattern;
 use photocraft_doc::{
     Bevel, BevelStyle, BevelTechnique, Contour, Effect, FxPaint, GlobalLight, Glow, GlowSource, GlowTechnique, Gradient, GradientStyle, Layer, Shadow,
     StrokePosition,
 };
-use photocraft_doc::Pattern;
 use photocraft_geom::Rect;
 
 use crate::pattern::{Placement, Tile};
@@ -271,20 +271,19 @@ fn dist_inside_by(s: &Map, m: Metric) -> Vec<f32> {
         // Partly covered edge pixels (alpha below their neighbourhood's) are seeds starting at
         // their coverage, mirroring `dist_outside`: a 25 % edge column puts the edge 0.25 px in.
         let cov = local_coverage(s);
-        let start = s
-            .v
-            .iter()
-            .zip(&cov.v)
-            .map(|(&a, &c)| {
-                if a <= INSIDE_EPS {
-                    0.0
-                } else if c < 1.0 - INSIDE_EPS {
-                    c
-                } else {
-                    CHAMFER_INF
-                }
-            })
-            .collect();
+        let start =
+            s.v.iter()
+                .zip(&cov.v)
+                .map(|(&a, &c)| {
+                    if a <= INSIDE_EPS {
+                        0.0
+                    } else if c < 1.0 - INSIDE_EPS {
+                        c
+                    } else {
+                        CHAMFER_INF
+                    }
+                })
+                .collect();
         let (d, _) = chamfer_from(start, s.w, s.h);
         return d.iter().zip(&s.v).map(|(d, &a)| if a <= INSIDE_EPS { -0.5 } else { d - 0.5 }).collect();
     }
@@ -372,10 +371,14 @@ pub fn ranged_lut(contour: &Contour, range: f32) -> Option<Vec<f32>> {
         return base;
     }
     let n = 4096;
-    Some((0..n).map(|k| {
-        let v = (k as f32 / (n - 1) as f32 / range).min(1.0);
-        base.as_ref().map_or(v, |l| lut_at(l, v))
-    }).collect())
+    Some(
+        (0..n)
+            .map(|k| {
+                let v = (k as f32 / (n - 1) as f32 / range).min(1.0);
+                base.as_ref().map_or(v, |l| lut_at(l, v))
+            })
+            .collect(),
+    )
 }
 
 fn apply_lut(m: Map, l: Option<Vec<f32>>) -> Map {
@@ -444,11 +447,7 @@ pub fn gradient_t(style: GradientStyle, angle: f32, scale: f32, reverse: bool, o
 /// Samples colour and opacity stops at `t`.
 pub fn sample_gradient(g: &Gradient, t: f32) -> [f32; 4] {
     let color = sample_stops(&g.stops.iter().map(|(p, c)| (*p, rgb(c))).collect::<Vec<_>>(), t);
-    let alpha = if g.opacity_stops.is_empty() {
-        1.0
-    } else {
-        sample_stops(&g.opacity_stops.iter().map(|(p, a)| (*p, [*a; 3])).collect::<Vec<_>>(), t)[0]
-    };
+    let alpha = if g.opacity_stops.is_empty() { 1.0 } else { sample_stops(&g.opacity_stops.iter().map(|(p, a)| (*p, [*a; 3])).collect::<Vec<_>>(), t)[0] };
     [color[0], color[1], color[2], alpha]
 }
 
@@ -674,7 +673,8 @@ fn rows_par(src: &[f32], dst: &mut [f32], w: usize, f: impl Fn(&[f32], &mut [f32
     if w == 0 {
         return;
     }
-    let threads = if cfg!(target_arch = "wasm32") || src.len() < 1 << 16 { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 16) };
+    let threads =
+        if cfg!(target_arch = "wasm32") || src.len() < 1 << 16 { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 16) };
     if threads == 1 {
         dst.chunks_mut(w).zip(src.chunks(w)).for_each(|(d, s)| f(s, d));
         return;
@@ -1166,11 +1166,7 @@ pub fn composite_with_effects(layer: &Layer, content: &Buffer, backdrop: &mut Bu
             let d = vdout.as_ref().unwrap_or(&dout);
             let mut share = vec![0.0f32; w * h];
             for (i, sh) in share.iter_mut().enumerate() {
-                let k = if inside(shape.v[i]) {
-                    if vector_shape { 0.0 } else { 1.0 }
-                } else {
-                    (out_w + 0.5 - d[i]).clamp(0.0, 1.0)
-                };
+                let k = if inside(shape.v[i]) { if vector_shape { 0.0 } else { 1.0 } } else { (out_w + 0.5 - d[i]).clamp(0.0, 1.0) };
                 *sh = k * st.common.opacity * (1.0 - cover[i]);
                 cover[i] += *sh;
             }
@@ -1223,11 +1219,7 @@ pub fn composite_with_effects(layer: &Layer, content: &Buffer, backdrop: &mut Bu
         for x in rect.x0..rect.x1 {
             let i = ((y - rect.y0) as usize) * rect.width() as usize + (x - rect.x0) as usize;
             let a = before.px[i];
-            let b = if x >= big.x0 && x < big.x1 && y >= big.y0 && y < big.y1 {
-                work.px[((y - big.y0) as usize) * w + (x - big.x0) as usize]
-            } else {
-                a
-            };
+            let b = if x >= big.x0 && x < big.x1 && y >= big.y0 && y < big.y1 { work.px[((y - big.y0) as usize) * w + (x - big.x0) as usize] } else { a };
             backdrop.px[i] = mix_premul(a, b, op);
         }
     }
@@ -1459,7 +1451,11 @@ mod tests {
         let (a, _) = bevel_maps(&shape, &plain, &l, &no_tex());
         // A contour reshapes the profile (here a ramp folded at its middle).
         let mut c = plain.clone();
-        let fold = vec![photocraft_doc::adjust::CurvePoint { input: 0.0, output: 0.0 }, photocraft_doc::adjust::CurvePoint { input: 0.5, output: 1.0 }, photocraft_doc::adjust::CurvePoint { input: 1.0, output: 0.0 }];
+        let fold = vec![
+            photocraft_doc::adjust::CurvePoint { input: 0.0, output: 0.0 },
+            photocraft_doc::adjust::CurvePoint { input: 0.5, output: 1.0 },
+            photocraft_doc::adjust::CurvePoint { input: 1.0, output: 0.0 },
+        ];
         c.contour = Some(photocraft_doc::BevelContour { contour: Contour::Custom { name: "fold".into(), points: fold }, range: 1.0, anti_alias: false });
         let (b, _) = bevel_maps(&shape, &c, &l, &no_tex());
         let diff: f32 = a[1].v.iter().zip(&b[1].v).map(|(x, y)| (x - y).abs()).sum();
@@ -1470,7 +1466,15 @@ mod tests {
         sf.fill_rect(Rect::new(0, 2, 4, 4), &[1.0, 1.0, 1.0, 1.0]);
         let pats = [Pattern::new("stripes", sf, 4, 4)];
         let mut t = plain.clone();
-        t.texture = Some(photocraft_doc::BevelTexture { name: "stripes".into(), id: String::new(), scale: 1.0, depth: 1.0, invert: false, link: true, phase: (0.0, 0.0) });
+        t.texture = Some(photocraft_doc::BevelTexture {
+            name: "stripes".into(),
+            id: String::new(),
+            scale: 1.0,
+            depth: 1.0,
+            invert: false,
+            link: true,
+            phase: (0.0, 0.0),
+        });
         let tex = TextureCtx { rect: Rect::new(0, 0, 40, 40), patterns: &pats, anchor: (0.0, 0.0) };
         let (m, _) = bevel_maps(&shape, &t, &l, &tex);
         let mid: f32 = (16..24).map(|y| m[0].v[y * 40 + 20] + m[1].v[y * 40 + 20]).sum();

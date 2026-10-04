@@ -24,9 +24,8 @@ fn main() {
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse::<f32>().ok()?, b.parse::<f32>().ok()?))))
         .unwrap_or((1440.0, 900.0));
     let scale: f32 = arg(&args, "--scale").and_then(|s| s.parse().ok()).unwrap_or(2.0);
-    let script: Vec<(String, Value)> = arg(&args, "--script")
-        .map(|s| serde_json::from_str::<Vec<(String, Value)>>(&s).expect("--script must be [[method, params], …]"))
-        .unwrap_or_default();
+    let script: Vec<(String, Value)> =
+        arg(&args, "--script").map(|s| serde_json::from_str::<Vec<(String, Value)>>(&s).expect("--script must be [[method, params], …]")).unwrap_or_default();
 
     let services = Services {
         import: Some(Box::new(|name: &str, bytes: &[u8]| photocraft_io::import(name, bytes).map(|r| r.document).map_err(|e| e.to_string()))),
@@ -40,19 +39,20 @@ fn main() {
         ..Default::default()
     };
     let open = arg(&args, "--open");
-    let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(w, h)).with_pixels_per_point(scale).with_max_steps(64).wgpu().build_eframe(move |cc| {
-        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
-        if let Some(rs) = cc.wgpu_render_state.as_ref() {
-            app.set_wgpu(rs.clone());
-        }
-        if let Some(path) = &open {
-            let bytes = std::fs::read(path).expect("read --open file");
-            let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            app.open_bytes(&name, &bytes).expect("open file");
-        }
-        app
-    });
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(egui::vec2(w, h)).with_pixels_per_point(scale).with_max_steps(64).wgpu().build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+            if let Some(rs) = cc.wgpu_render_state.as_ref() {
+                app.set_wgpu(rs.clone());
+            }
+            if let Some(path) = &open {
+                let bytes = std::fs::read(path).expect("read --open file");
+                let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                app.open_bytes(&name, &bytes).expect("open file");
+            }
+            app
+        });
     harness.run_steps(4);
     let ctx = harness.ctx.clone();
     let timing = std::env::var_os("SNAPSHOT_TIMING").is_some();

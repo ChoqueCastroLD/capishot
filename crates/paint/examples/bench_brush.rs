@@ -19,7 +19,10 @@ fn run(fmt: PixelFormat, label: &str, brush: &BrushSettings) {
     let pts: Vec<StrokePoint> = (0..500)
         .map(|i| {
             let t = i as f64 / 499.0;
-            StrokePoint { time: i as f64 * 8.0, ..StrokePoint::new(300.0 + t * 5400.0, 3000.0 + (t * 12.0).sin() * 2000.0, 0.6 + 0.4 * (t * 30.0).sin().abs() as f32) }
+            StrokePoint {
+                time: i as f64 * 8.0,
+                ..StrokePoint::new(300.0 + t * 5400.0, 3000.0 + (t * 12.0).sin() * 2000.0, 0.6 + 0.4 * (t * 30.0).sin().abs() as f32)
+            }
         })
         .collect();
     let pre = s.clone();

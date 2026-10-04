@@ -3,9 +3,7 @@
 use std::sync::Arc;
 
 use photocraft_color::{BlendMode, ColorMode, PixelFormat, SampleType};
-use photocraft_doc::{
-    AlphaChannel, Document, Effects, FillCache, Group, Layer, LayerContent, LayerMask, ShapeLayer, SmartObject, SmartSource, TextLayer,
-};
+use photocraft_doc::{AlphaChannel, Document, Effects, FillCache, Group, Layer, LayerContent, LayerMask, ShapeLayer, SmartObject, SmartSource, TextLayer};
 use photocraft_geom::{Rect, Size};
 use photocraft_psd::layer::{CHANNEL_REAL_USER_MASK, CHANNEL_TRANSPARENCY, CHANNEL_USER_MASK};
 use photocraft_psd::resources::ids;
@@ -146,11 +144,7 @@ impl Ctx<'_> {
         l.blend = match BlendMode::from_psd_key(key) {
             Some(b) => b,
             None => {
-                self.warn(format!(
-                    "layer \"{}\": unknown blend mode {:?}; using Normal",
-                    l.name,
-                    String::from_utf8_lossy(&key)
-                ));
+                self.warn(format!("layer \"{}\": unknown blend mode {:?}; using Normal", l.name, String::from_utf8_lossy(&key)));
                 BlendMode::Normal
             }
         };
@@ -212,11 +206,16 @@ impl Ctx<'_> {
         let content = if let Some(k) = adj_key {
             let data = rec.block(k).map(|b| b.data.clone()).unwrap_or_default();
             let cged = rec.block(b"CgEd").map(|b| &b.data[..]);
-            LayerContent::Adjustment(adjust_map::parse(k, &data, cged, match self.fmt.mode {
-                ColorMode::Rgb => adjust_map::Channels::Rgb,
-                ColorMode::Grayscale => adjust_map::Channels::Gray,
-                _ => adjust_map::Channels::Other,
-            }))
+            LayerContent::Adjustment(adjust_map::parse(
+                k,
+                &data,
+                cged,
+                match self.fmt.mode {
+                    ColorMode::Rgb => adjust_map::Channels::Rgb,
+                    ColorMode::Grayscale => adjust_map::Channels::Gray,
+                    _ => adjust_map::Channels::Other,
+                },
+            ))
         } else if rec.block(b"TySh").is_some() {
             // Typed model from TySh/EngineData (photocraft-text); Photoshop's pixels stay the cache.
             let data = rec.block(b"TySh").map(|b| b.data.clone()).unwrap_or_default();
@@ -352,7 +351,7 @@ fn unicode_names(data: &[u8]) -> Vec<String> {
         let n = u32::from_be_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]]) as usize;
         at += 4;
         let Some(b) = data.get(at..at + n * 2) else { break };
-        let units: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = b.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
         out.push(String::from_utf16_lossy(&units).trim_end_matches('\0').to_string());
         at += n * 2;
     }
@@ -410,16 +409,14 @@ pub fn psd_to_document(file: &PsdFile) -> (Document, Vec<String>) {
                     }
                 }
             }
-            id if crate::vector_map::SAVED_PATHS.contains(&id) => {
-                match crate::vector_map::path_from_resource(&r.data, h.width, h.height) {
-                    Some(path) => doc.paths.push(photocraft_doc::NamedPath {
-                        name: String::from_utf8_lossy(&r.name).into_owned(),
-                        path,
-                        psd_raw: Some(Arc::new(r.data.clone())),
-                    }),
-                    None => doc.metadata.psd_resources.push((id, String::from_utf8_lossy(&r.name).into_owned(), Arc::new(r.data.clone()))),
-                }
-            }
+            id if crate::vector_map::SAVED_PATHS.contains(&id) => match crate::vector_map::path_from_resource(&r.data, h.width, h.height) {
+                Some(path) => doc.paths.push(photocraft_doc::NamedPath {
+                    name: String::from_utf8_lossy(&r.name).into_owned(),
+                    path,
+                    psd_raw: Some(Arc::new(r.data.clone())),
+                }),
+                None => doc.metadata.psd_resources.push((id, String::from_utf8_lossy(&r.name).into_owned(), Arc::new(r.data.clone()))),
+            },
             crate::vector_map::WORK_PATH => {
                 doc.work_path = crate::vector_map::path_from_resource(&r.data, h.width, h.height);
             }
@@ -518,11 +515,7 @@ pub fn psd_to_document(file: &PsdFile) -> (Document, Vec<String>) {
         }
     } else {
         if !file.layers().is_empty() {
-            cx.warn(format!(
-                "{:?} documents are imported flattened: {} layer records were not imported",
-                h.color_mode,
-                file.layers().len()
-            ));
+            cx.warn(format!("{:?} documents are imported flattened: {} layer records were not imported", h.color_mode, file.layers().len()));
         } else {
             cx.warn(format!("{:?} {}-bit document converted to {:?} 8-bit for editing", h.color_mode, h.depth, fmt.mode));
         }
@@ -533,7 +526,8 @@ pub fn psd_to_document(file: &PsdFile) -> (Document, Vec<String>) {
             doc.color_table = Some(photocraft_doc::ColorTable { colors, transparent: None });
         } else if h.color_mode == PsdMode::Duotone && !file.color_mode_data.is_empty() {
             // The duotone ink block is undocumented: keep it raw; the image shows as its gray plate.
-            doc.duotone = Some(photocraft_doc::Duotone { inks: vec![photocraft_doc::DuotoneInk::new("Black", [0.0; 3])], psd_raw: Some(file.color_mode_data.clone()) });
+            doc.duotone =
+                Some(photocraft_doc::Duotone { inks: vec![photocraft_doc::DuotoneInk::new("Black", [0.0; 3])], psd_raw: Some(file.color_mode_data.clone()) });
             cx.warn("duotone inks are not interpreted (shown as grayscale)");
         } else if !file.color_mode_data.is_empty() {
             cx.warn("color mode data is not preserved");
@@ -555,7 +549,9 @@ pub fn psd_to_document(file: &PsdFile) -> (Document, Vec<String>) {
             let mut s = Surface::new(fmt);
             let vals: Vec<f32> = img
                 .data
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .flat_map(|p| {
                     let v = photocraft_raster::from_rgba(&fmt, [p[0], p[1], p[2], p[3]].map(|x| f32::from(x) / 255.0));
                     v.into_iter()
@@ -571,10 +567,7 @@ pub fn psd_to_document(file: &PsdFile) -> (Document, Vec<String>) {
     if layered && let Ok(all) = &merged {
         let first = cc + usize::from(file.merged_has_alpha());
         let plane = h.row_bytes() * hh;
-        let names = file
-            .resource(1045)
-            .map(|r| unicode_names(&r.data))
-            .unwrap_or_default();
+        let names = file.resource(1045).map(|r| unicode_names(&r.data)).unwrap_or_default();
         for (k, idx) in (first..usize::from(h.channels)).enumerate() {
             let Some(p) = all.get(idx * plane..(idx + 1) * plane) else { break };
             let mut s = Surface::new(cx.mask_fmt);

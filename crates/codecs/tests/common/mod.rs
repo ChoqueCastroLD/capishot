@@ -30,14 +30,7 @@ impl Rng {
 /// Gradient + noise image with values in [0, 1]. `noise` is the amplitude
 /// of uniform noise added to the gradient. Alpha is a separate gradient
 /// that includes fully transparent and fully opaque regions.
-pub fn synth(
-    w: u32,
-    h: u32,
-    layout: ChannelLayout,
-    sample: SampleType,
-    seed: u64,
-    noise: f32,
-) -> Image {
+pub fn synth(w: u32, h: u32, layout: ChannelLayout, sample: SampleType, seed: u64, noise: f32) -> Image {
     let mut rng = Rng::new(seed);
     let nc = layout.channels();
     let mut v = Vec::with_capacity((w * h) as usize * nc);
@@ -84,19 +77,11 @@ pub fn psnr(a: &Image, b: &Image) -> f64 {
         })
         .sum::<f64>()
         / av.len() as f64;
-    if mse == 0.0 {
-        f64::INFINITY
-    } else {
-        10.0 * (1.0 / mse).log10()
-    }
+    if mse == 0.0 { f64::INFINITY } else { 10.0 * (1.0 / mse).log10() }
 }
 
 pub fn max_abs_diff(a: &Image, b: &Image) -> f32 {
-    a.to_normalized()
-        .iter()
-        .zip(b.to_normalized())
-        .map(|(x, y)| (x - y).abs())
-        .fold(0.0, f32::max)
+    a.to_normalized().iter().zip(b.to_normalized()).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max)
 }
 
 /// Formats that can be written in this build.
@@ -106,10 +91,7 @@ pub fn writable_formats() -> Vec<Format> {
 
 /// Formats that can be written *and* read in this build.
 pub fn rw_formats() -> Vec<Format> {
-    Format::ALL
-        .into_iter()
-        .filter(|f| caps(*f).write && caps(*f).read)
-        .collect()
+    Format::ALL.into_iter().filter(|f| caps(*f).write && caps(*f).read).collect()
 }
 
 /// A minimal valid little-endian TIFF-structured EXIF blob (one IFD with

@@ -70,7 +70,9 @@ pub fn finish_shape(app: &mut PhotocraftApp, tool: Tool, start: [f64; 2], end: [
             return;
         }
         match tool {
-            Tool::Rectangle if o.corner_radius > 0.0 => json!({"kind": "roundedRect", "rect": rect, "radii": vec![o.corner_radius; 4], "fill": fill, "stroke": stroke}),
+            Tool::Rectangle if o.corner_radius > 0.0 => {
+                json!({"kind": "roundedRect", "rect": rect, "radii": vec![o.corner_radius; 4], "fill": fill, "stroke": stroke})
+            }
             Tool::Rectangle => json!({"kind": "rect", "rect": rect, "fill": fill, "stroke": stroke}),
             Tool::EllipseShape => json!({"kind": "ellipse", "rect": rect, "fill": fill, "stroke": stroke}),
             Tool::Triangle => json!({"kind": "polygon", "rect": rect, "sides": 3, "fill": fill, "stroke": stroke}),
@@ -131,7 +133,8 @@ pub fn pen_commit(app: &mut PhotocraftApp, closed: bool) {
     let path = pen_to_json(&pen, closed);
     let r = if app.ui.tool_options.vector_mode == "shape" {
         let fill = if closed && app.ui.tool_options.shape_fill { json!(hex(app.session.tools.foreground)) } else { Value::Null };
-        let stroke = if closed { stroke_param(app) } else { json!({"width": app.ui.tool_options.stroke_width.max(1.0), "color": hex(app.session.tools.foreground)}) };
+        let stroke =
+            if closed { stroke_param(app) } else { json!({"width": app.ui.tool_options.stroke_width.max(1.0), "color": hex(app.session.tools.foreground)}) };
         app.run("shape.create", json!({"kind": "path", "path": path, "fill": fill, "stroke": stroke}))
     } else {
         app.run("path.set", json!({"name": "work", "path": path}))
@@ -191,7 +194,8 @@ fn path_lines(path: &Path, xf: &dyn Fn([f64; 2]) -> Pos2) -> Vec<(Vec<Pos2>, boo
             for i in 0..segs {
                 let (a, b) = (&s.knots[i], &s.knots[(i + 1) % n]);
                 for k in 0..=16 {
-                    let q = bezier([a.anchor.x, a.anchor.y], [a.out_ctrl.x, a.out_ctrl.y], [b.in_ctrl.x, b.in_ctrl.y], [b.anchor.x, b.anchor.y], k as f64 / 16.0);
+                    let q =
+                        bezier([a.anchor.x, a.anchor.y], [a.out_ctrl.x, a.out_ctrl.y], [b.in_ctrl.x, b.in_ctrl.y], [b.anchor.x, b.anchor.y], k as f64 / 16.0);
                     pts.push(xf(q));
                 }
             }
@@ -424,7 +428,11 @@ pub fn shape_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: photocra
         ui.add_space(12.0);
         ui.label(egui::RichText::new("Stroke").color(t.text_dim).size(12.0));
         if let Some(c) = swatch(ui, sh.stroke.as_ref().map(|s| &s.paint), "Set shape stroke type") {
-            edit = Some(if c == "none" { json!({"stroke": null}) } else { json!({"stroke": {"color": c, "width": sh.stroke.as_ref().map_or(3.0, |s| s.width)}, "coalesce": key("stroke")}) });
+            edit = Some(if c == "none" {
+                json!({"stroke": null})
+            } else {
+                json!({"stroke": {"color": c, "width": sh.stroke.as_ref().map_or(3.0, |s| s.width)}, "coalesce": key("stroke")})
+            });
         }
         let mut w = sh.stroke.as_ref().map_or(0.0, |s| s.width);
         if crate::widgets::value_field(ui, &mut w, 0.0..=288.0, "px", 60.0).changed() {
@@ -451,7 +459,9 @@ pub fn shape_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: photocra
             crate::widgets::value_field(ui, v, range, unit, 64.0).changed()
         };
         match live {
-            photocraft_doc::vector::LiveShape::Rect { rect, .. } | photocraft_doc::vector::LiveShape::Ellipse { rect } | photocraft_doc::vector::LiveShape::Polygon { rect, .. } => {
+            photocraft_doc::vector::LiveShape::Rect { rect, .. }
+            | photocraft_doc::vector::LiveShape::Ellipse { rect }
+            | photocraft_doc::vector::LiveShape::Polygon { rect, .. } => {
                 ui.horizontal(|ui| {
                     let (mut w, mut h) = (rect[2] as f32, rect[3] as f32);
                     let cw = num(ui, "W", &mut w, 1.0..=300000.0, "px");

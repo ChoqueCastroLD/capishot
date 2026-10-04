@@ -540,14 +540,35 @@ pub fn specs() -> Vec<CommandSpec> {
         };
     }
     vec![
-        spec!("edit.stroke", "Stroke…", &["Edit"], None, r##"{"width":1..250=1,"color":"#rrggbb|[r,g,b,a]"=foreground,"location":"inside|center|outside"="center","opacity":0..100=100}"##, has_pixels, stroke),
+        spec!(
+            "edit.stroke",
+            "Stroke…",
+            &["Edit"],
+            None,
+            r##"{"width":1..250=1,"color":"#rrggbb|[r,g,b,a]"=foreground,"location":"inside|center|outside"="center","opacity":0..100=100}"##,
+            has_pixels,
+            stroke
+        ),
         spec!("edit.transform.rotate180", "Rotate 180°", &["Edit", "Transform"], None, "{}", has_layer, |s, _| transform_preset(s, "rotate180")),
         spec!("edit.transform.rotate90Cw", "Rotate 90° Clockwise", &["Edit", "Transform"], None, "{}", has_layer, |s, _| transform_preset(s, "rotate90Cw")),
-        spec!("edit.transform.rotate90Ccw", "Rotate 90° Counter Clockwise", &["Edit", "Transform"], None, "{}", has_layer, |s, _| transform_preset(s, "rotate90Ccw")),
+        spec!("edit.transform.rotate90Ccw", "Rotate 90° Counter Clockwise", &["Edit", "Transform"], None, "{}", has_layer, |s, _| transform_preset(
+            s,
+            "rotate90Ccw"
+        )),
         spec!("edit.transform.flipHorizontal", "Flip Horizontal", &["Edit", "Transform"], None, "{}", has_layer, |s, _| transform_preset(s, "flipHorizontal")),
         spec!("edit.transform.flipVertical", "Flip Vertical", &["Edit", "Transform"], None, "{}", has_layer, |s, _| transform_preset(s, "flipVertical")),
-        spec!("edit.pasteSpecial.pasteInto", "Paste Into", &["Edit", "Paste Special"], Some("Cmd+Alt+Shift+V"), r##"{"center":[x,y]?}"##, has_clip_and_selection, |s, p| paste_into(s, p, false)),
-        spec!("edit.pasteSpecial.pasteOutside", "Paste Outside", &["Edit", "Paste Special"], None, r##"{"center":[x,y]?}"##, has_clip_and_selection, |s, p| paste_into(s, p, true)),
+        spec!(
+            "edit.pasteSpecial.pasteInto",
+            "Paste Into",
+            &["Edit", "Paste Special"],
+            Some("Cmd+Alt+Shift+V"),
+            r##"{"center":[x,y]?}"##,
+            has_clip_and_selection,
+            |s, p| paste_into(s, p, false)
+        ),
+        spec!("edit.pasteSpecial.pasteOutside", "Paste Outside", &["Edit", "Paste Special"], None, r##"{"center":[x,y]?}"##, has_clip_and_selection, |s, p| {
+            paste_into(s, p, true)
+        }),
         spec!("select.reselect", "Reselect", &["Select"], Some("Cmd+Shift+D"), "{}", can_reselect, |s, _| {
             let m = reselect_target(s).ok_or(EngineError::Other("there is no selection to restore".into()))?;
             s.edit("Reselect", |doc, _| {
@@ -575,36 +596,81 @@ pub fn specs() -> Vec<CommandSpec> {
             s.style_clipboard = Some(style);
             Ok(Value::Null)
         }),
-        spec!("layer.layerStyle.pasteLayerStyle", "Paste Layer Style", &["Layer", "Layer Style"], None, r##"{"layer":id?}"##, |s| {
-            has_layer(s)?;
-            s.style_clipboard.as_ref().map(|_| ()).ok_or_else(|| "no layer style has been copied".into())
-        }, |s, p| {
-            let id = layer_param(s, p)?;
-            let (fx, blend, fill) = s.style_clipboard.clone().ok_or(EngineError::Other("no layer style has been copied".into()))?;
-            s.edit("Paste Layer Style", |doc, _| {
-                let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-                l.effects = fx;
-                l.blend = blend;
-                l.fill_opacity = fill;
-                Ok(())
-            })?;
-            Ok(Value::Null)
-        }),
+        spec!(
+            "layer.layerStyle.pasteLayerStyle",
+            "Paste Layer Style",
+            &["Layer", "Layer Style"],
+            None,
+            r##"{"layer":id?}"##,
+            |s| {
+                has_layer(s)?;
+                s.style_clipboard.as_ref().map(|_| ()).ok_or_else(|| "no layer style has been copied".into())
+            },
+            |s, p| {
+                let id = layer_param(s, p)?;
+                let (fx, blend, fill) = s.style_clipboard.clone().ok_or(EngineError::Other("no layer style has been copied".into()))?;
+                s.edit("Paste Layer Style", |doc, _| {
+                    let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+                    l.effects = fx;
+                    l.blend = blend;
+                    l.fill_opacity = fill;
+                    Ok(())
+                })?;
+                Ok(Value::Null)
+            }
+        ),
         spec!("layer.layerStyle.hideAllEffects", "Hide All Effects", &["Layer", "Layer Style"], None, "{}", has_doc, |s, _| set_all_effects(s, false)),
         spec!("layer.layerStyle.showAllEffects", "Show All Effects", &[], None, "{}", has_doc, |s, _| set_all_effects(s, true)),
-        spec!("layer.layerMask.enabled", "Disable Layer Mask", &["Layer", "Layer Mask"], None, r##"{"layer":id?,"enabled":bool? (default: toggle)}"##, has_mask, |s, p| toggle_mask(s, p, "enabled")),
-        spec!("layer.layerMask.linked", "Unlink Layer Mask", &["Layer", "Layer Mask"], None, r##"{"layer":id?,"linked":bool? (default: toggle)}"##, has_mask, |s, p| toggle_mask(s, p, "linked")),
+        spec!(
+            "layer.layerMask.enabled",
+            "Disable Layer Mask",
+            &["Layer", "Layer Mask"],
+            None,
+            r##"{"layer":id?,"enabled":bool? (default: toggle)}"##,
+            has_mask,
+            |s, p| toggle_mask(s, p, "enabled")
+        ),
+        spec!(
+            "layer.layerMask.linked",
+            "Unlink Layer Mask",
+            &["Layer", "Layer Mask"],
+            None,
+            r##"{"layer":id?,"linked":bool? (default: toggle)}"##,
+            has_mask,
+            |s, p| toggle_mask(s, p, "linked")
+        ),
         spec!("layer.rasterize.layer", "Layer", &["Layer", "Rasterize"], None, r##"{"layer":id?}"##, has_layer, |s, p| rasterize(s, p, None)),
         spec!("layer.rasterize.allLayers", "All Layers", &["Layer", "Rasterize"], None, "{}", has_doc, |s, _| rasterize_all(s)),
         spec!("layer.rasterize.type", "Type", &["Layer", "Rasterize"], None, r##"{"layer":id?}"##, has_layer, |s, p| rasterize(s, p, Some("type"))),
-        spec!("layer.rasterize.fillContent", "Fill Content", &["Layer", "Rasterize"], None, r##"{"layer":id?}"##, has_layer, |s, p| rasterize(s, p, Some("fill"))),
-        spec!("layer.rasterize.smartObject", "Smart Object", &["Layer", "Rasterize"], None, r##"{"layer":id?}"##, has_layer, |s, p| rasterize(s, p, Some("smart"))),
-        spec!("layer.delete.hiddenLayers", "Hidden Layers", &["Layer", "Delete"], None, "{}", has_doc, |s, _| delete_where(s, "Delete Hidden Layers", |l| !l.visible)),
-        spec!("file.scripts.deleteAllEmptyLayers", "Delete All Empty Layers", &["File", "Scripts"], None, "{}", has_doc, |s, _| delete_where(s, "Delete All Empty Layers", is_empty_layer)),
-        spec!("layer.ungroupLayers", "Ungroup Layers", &["Layer"], Some("Cmd+Shift+G"), r##"{"layer":id?}"##, |s| match active_layer(s)?.is_group() {
-            true => Ok(()),
-            false => Err("the active layer is not a group".into()),
-        }, ungroup),
+        spec!("layer.rasterize.fillContent", "Fill Content", &["Layer", "Rasterize"], None, r##"{"layer":id?}"##, has_layer, |s, p| rasterize(
+            s,
+            p,
+            Some("fill")
+        )),
+        spec!("layer.rasterize.smartObject", "Smart Object", &["Layer", "Rasterize"], None, r##"{"layer":id?}"##, has_layer, |s, p| rasterize(
+            s,
+            p,
+            Some("smart")
+        )),
+        spec!("layer.delete.hiddenLayers", "Hidden Layers", &["Layer", "Delete"], None, "{}", has_doc, |s, _| delete_where(s, "Delete Hidden Layers", |l| !l
+            .visible)),
+        spec!("file.scripts.deleteAllEmptyLayers", "Delete All Empty Layers", &["File", "Scripts"], None, "{}", has_doc, |s, _| delete_where(
+            s,
+            "Delete All Empty Layers",
+            is_empty_layer
+        )),
+        spec!(
+            "layer.ungroupLayers",
+            "Ungroup Layers",
+            &["Layer"],
+            Some("Cmd+Shift+G"),
+            r##"{"layer":id?}"##,
+            |s| match active_layer(s)?.is_group() {
+                true => Ok(()),
+                false => Err("the active layer is not a group".into()),
+            },
+            ungroup
+        ),
         spec!("layer.hideLayers", "Hide Layers", &["Layer"], Some("Cmd+,"), r##"{"layer":id?}"##, has_layer, |s, p| set_visible(s, p, false)),
         spec!("layer.showLayers", "Show Layers", &[], None, r##"{"layer":id?}"##, has_layer, |s, p| set_visible(s, p, true)),
         spec!("filter.blur.average", "Average", &["Filter", "Blur"], None, "{}", has_pixels, |s, _| average(s)),

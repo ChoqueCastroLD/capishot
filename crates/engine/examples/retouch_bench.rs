@@ -24,7 +24,8 @@ fn main() {
             for x in area.x0..area.x1 {
                 let n = ((x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663)) as u32 % 1000) as f32 / 1000.0 * 0.08 - 0.04;
                 let blemish = (x % 400 - 200).abs() < 8 && (y % 400 - 200).abs() < 8;
-                let v = if blemish { [0.05, 0.05, 0.05, 1.0] } else { [0.3 + 0.0002 * x as f32 + n, 0.4 + ((x + y) as f32 * 0.01).sin() * 0.1 + n, 0.5 + n, 1.0] };
+                let v =
+                    if blemish { [0.05, 0.05, 0.05, 1.0] } else { [0.3 + 0.0002 * x as f32 + n, 0.4 + ((x + y) as f32 * 0.01).sin() * 0.1 + n, 0.5 + n, 1.0] };
                 data.extend(photocraft_raster::from_rgba(&fmt, v));
             }
         }

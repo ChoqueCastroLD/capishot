@@ -34,7 +34,21 @@ pub struct Show {
 
 impl Default for Show {
     fn default() -> Self {
-        Self { layer_edges: false, selection_edges: true, target_path: true, pixel_grid: true, smart_guides: true, brush_preview: true, slices: true, notes: true, mesh: false, edit_pins: true, count: true, canvas_guides: true, artboard_guides: true }
+        Self {
+            layer_edges: false,
+            selection_edges: true,
+            target_path: true,
+            pixel_grid: true,
+            smart_guides: true,
+            brush_preview: true,
+            slices: true,
+            notes: true,
+            mesh: false,
+            edit_pins: true,
+            count: true,
+            canvas_guides: true,
+            artboard_guides: true,
+        }
     }
 }
 
@@ -120,7 +134,18 @@ const PIXEL_ASPECTS: [&str; 8] = ["square", "d1DvNtsc", "d1DvPal", "d1DvNtscWide
 const FONT_PREVIEW: [&str; 5] = ["small", "medium", "large", "extraLarge", "huge"];
 const LANGUAGE: [&str; 3] = ["defaultFeatures", "eastAsianFeatures", "middleEasternFeatures"];
 /// Window › Arrange layouts drawn by [`cells`].
-const LAYOUTS: [&str; 10] = ["tileAllVertically", "tileAllHorizontally", "twoUpVertical", "twoUpHorizontal", "threeUpVertical", "threeUpHorizontal", "threeUpStacked", "fourUp", "sixUp", "tile"];
+const LAYOUTS: [&str; 10] = [
+    "tileAllVertically",
+    "tileAllHorizontally",
+    "twoUpVertical",
+    "twoUpHorizontal",
+    "threeUpVertical",
+    "threeUpHorizontal",
+    "threeUpStacked",
+    "fourUp",
+    "sixUp",
+    "tile",
+];
 
 /// Pixel aspect ratio (width / height of a pixel) of a preset id.
 pub fn pixel_aspect_ratio(id: &str) -> f32 {
@@ -184,7 +209,9 @@ fn panel_tab(app: &PhotocraftApp, id: &str) -> Option<(&'static str, usize)> {
         "window.panel.paths" => ("layers", 2),
         "window.panel.layers" => ("layers", 0),
         "window.panel.adjustments" => ("properties", 1),
-        "window.panel.properties" | "window.panel.character" | "window.panel.paragraph" | "type.panels.character" | "type.panels.paragraph" => ("properties", 0),
+        "window.panel.properties" | "window.panel.character" | "window.panel.paragraph" | "type.panels.character" | "type.panels.paragraph" => {
+            ("properties", 0)
+        }
         "window.panel.swatches" => ("color", usize::from(pro)),
         "window.panel.color" => ("color", usize::from(!pro)),
         _ => return None,
@@ -223,7 +250,19 @@ pub fn handles(id: &str) -> bool {
         return LANGUAGE.contains(&k) || k == "middleEasternAndSouthAsianComposer";
     }
     if let Some(k) = id.strip_prefix("window.arrange.") {
-        return LAYOUTS.contains(&k) || matches!(k, "consolidateAllToTabs" | "cascade" | "floatInWindow" | "floatAllInWindows" | "newWindowForDocument" | "matchZoom" | "matchLocation" | "matchRotation" | "matchAll");
+        return LAYOUTS.contains(&k)
+            || matches!(
+                k,
+                "consolidateAllToTabs"
+                    | "cascade"
+                    | "floatInWindow"
+                    | "floatAllInWindows"
+                    | "newWindowForDocument"
+                    | "matchZoom"
+                    | "matchLocation"
+                    | "matchRotation"
+                    | "matchAll"
+            );
     }
     matches!(
         id,
@@ -269,7 +308,10 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
             "consolidateAllToTabs" => true,
             "floatInWindow" | "newWindowForDocument" => doc,
             "matchZoom" | "matchLocation" | "matchRotation" | "matchAll" => app.session.documents().len() > 1 || !app.ui.windows.is_empty(),
-            _ => app.session.documents().len() > 1 || (doc && matches!(&i["window.arrange.".len()..], "floatAllInWindows" | "cascade" | "tile" | "tileAllVertically" | "tileAllHorizontally")),
+            _ => {
+                app.session.documents().len() > 1
+                    || (doc && matches!(&i["window.arrange.".len()..], "floatAllInWindows" | "cascade" | "tile" | "tileAllVertically" | "tileAllHorizontally"))
+            }
         },
         i if wraps(i) => app.session.is_enabled(i),
         _ => true,
@@ -296,7 +338,11 @@ pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
         return FONT_PREVIEW.contains(&k).then(|| o.font_preview_size == k);
     }
     if let Some(k) = id.strip_prefix("type.languageOptions.") {
-        return if k == "middleEasternAndSouthAsianComposer" { Some(o.middle_eastern_composer) } else { LANGUAGE.contains(&k).then(|| o.language_features == k) };
+        return if k == "middleEasternAndSouthAsianComposer" {
+            Some(o.middle_eastern_composer)
+        } else {
+            LANGUAGE.contains(&k).then(|| o.language_features == k)
+        };
     }
     if let Some(k) = id.strip_prefix("window.arrange.")
         && LAYOUTS.contains(&k)
@@ -593,7 +639,9 @@ pub fn cells(layout: &str, rect: egui::Rect, n: usize) -> Option<Vec<egui::Rect>
     }
     let grid = |cols: usize, rows: usize, count: usize| -> Vec<egui::Rect> {
         let (w, h) = (rect.width() / cols as f32, rect.height() / rows as f32);
-        (0..count.min(cols * rows)).map(|i| egui::Rect::from_min_size(rect.min + egui::vec2((i % cols) as f32 * w, (i / cols) as f32 * h), egui::vec2(w, h))).collect()
+        (0..count.min(cols * rows))
+            .map(|i| egui::Rect::from_min_size(rect.min + egui::vec2((i % cols) as f32 * w, (i / cols) as f32 * h), egui::vec2(w, h)))
+            .collect()
     };
     Some(match layout {
         "tileAllVertically" => grid(n, 1, n),
@@ -699,11 +747,7 @@ pub fn form_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
 
 /// Folder the batch dialogs start from: next to the active document, else the working directory.
 fn default_dir(app: &PhotocraftApp) -> String {
-    app.session
-        .active()
-        .and_then(|d| d.path.as_deref())
-        .and_then(|p| p.rfind(['/', '\\']).map(|i| p[..i].to_string()))
-        .unwrap_or_else(|| ".".into())
+    app.session.active().and_then(|d| d.path.as_deref()).and_then(|p| p.rfind(['/', '\\']).map(|i| p[..i].to_string())).unwrap_or_else(|| ".".into())
 }
 
 fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
@@ -765,15 +809,29 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
             let (w, h, _) = doc?;
             dialog(app, json!({"width": w, "height": h, "dontEnlarge": false}), json!({}))
         }
-        "file.automate.conditionalModeChange" => dialog(app, json!({"from": "any", "to": "rgb"}), json!({"from": ["any", "rgb", "grayscale", "cmyk", "lab", "indexed", "bitmap", "duotone", "multichannel"], "to": ["rgb", "grayscale", "cmyk", "lab"]})),
-        "view.newGuideLayout" => dialog(app, json!({"columns": 8, "gutter": 20, "rows": 0, "rowGutter": 0, "margin": 0, "centerColumns": false, "clearExisting": false}), json!({})),
+        "file.automate.conditionalModeChange" => dialog(
+            app,
+            json!({"from": "any", "to": "rgb"}),
+            json!({"from": ["any", "rgb", "grayscale", "cmyk", "lab", "indexed", "bitmap", "duotone", "multichannel"], "to": ["rgb", "grayscale", "cmyk", "lab"]}),
+        ),
+        "view.newGuideLayout" => {
+            dialog(app, json!({"columns": 8, "gutter": 20, "rows": 0, "rowGutter": 0, "margin": 0, "centerColumns": false, "clearExisting": false}), json!({}))
+        }
         "type.warpText" => {
             let styles: Vec<&str> = std::iter::once("none").chain(photocraft_text::warp::STYLES.iter().map(|(_, s)| *s)).collect();
-            dialog(app, json!({"style": "arc", "orientation": "horizontal", "bend": 50.0, "horizontalDistortion": 0.0, "verticalDistortion": 0.0}), json!({"style": styles, "orientation": ["horizontal", "vertical"]}))
+            dialog(
+                app,
+                json!({"style": "arc", "orientation": "horizontal", "bend": 50.0, "horizontalDistortion": 0.0, "verticalDistortion": 0.0}),
+                json!({"style": styles, "orientation": ["horizontal", "vertical"]}),
+            )
         }
         "file.export.layersToFiles" => {
             let (_, _, name) = doc?;
-            dialog(app, json!({"dir": dir, "prefix": name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a), "format": "png", "visibleOnly": true}), json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}))
+            dialog(
+                app,
+                json!({"dir": dir, "prefix": name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a), "format": "png", "visibleOnly": true}),
+                json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}),
+            )
         }
         "file.export.layerCompsToFiles" | "file.export.artboardsToFiles" => {
             let (_, _, name) = doc?;
@@ -793,7 +851,11 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
         "layer.new.artboard" => {
             let (w, h, _) = doc?;
             let presets: Vec<&str> = std::iter::once("").chain(photocraft_engine::artboard_cmds::PRESETS.iter().map(|p| p.0)).collect();
-            dialog(app, json!({"name": "", "preset": "", "width": w, "height": h, "background": "white"}), json!({"preset": presets, "background": ["white", "black", "transparent"]}))
+            dialog(
+                app,
+                json!({"name": "", "preset": "", "width": w, "height": h, "background": "white"}),
+                json!({"preset": presets, "background": ["white", "black", "transparent"]}),
+            )
         }
         "file.export.colorLookupTables" => {
             let (_, _, name) = doc?;
@@ -817,7 +879,11 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
             json!({"input": dir, "output": format!("{dir}/corrected"), "format": "same", "profile": "auto", "correctDistortion": true, "correctVignette": true, "correctCA": true, "autoScale": true, "edge": "transparency"}),
             json!({"format": ["same", "png", "jpg", "psd", "tiff"], "profile": ["auto", "generic", "none"], "edge": ["transparency", "edgeExtension", "black", "white"]}),
         ),
-        "file.scripts.imageProcessor" => dialog(app, json!({"input": dir, "output": format!("{dir}/processed"), "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}), json!({"format": ["jpg", "png", "psd", "tiff"]})),
+        "file.scripts.imageProcessor" => dialog(
+            app,
+            json!({"input": dir, "output": format!("{dir}/processed"), "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}),
+            json!({"format": ["jpg", "png", "psd", "tiff"]}),
+        ),
         "file.automate.batch" => {
             let a = &app.ui.actions;
             let action = a.selected.and_then(|i| a.list.get(i)).or(a.list.first());
@@ -826,7 +892,11 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
             };
             let steps: Vec<Value> = action.steps.iter().map(|(id, p)| json!([id, p])).collect();
             let name = action.name.clone();
-            dialog(app, json!({"action": name, "steps": steps, "input": dir, "output": format!("{dir}/batch"), "format": "same"}), json!({"format": ["same", "png", "jpg", "psd", "tiff"]}))
+            dialog(
+                app,
+                json!({"action": name, "steps": steps, "input": dir, "output": format!("{dir}/batch"), "format": "same"}),
+                json!({"format": ["same", "png", "jpg", "psd", "tiff"]}),
+            )
         }
         // Channel workflow dialogs (see channels_panel.rs for the channel references).
         "select.saveSelection" | "select.loadSelection" | "image.applyImage" | "image.calculations" => {
@@ -839,21 +909,54 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
             }
             chans.extend(d.channels.iter().map(|c| c.name.clone()));
             let alphas: Vec<String> = std::iter::once("new".to_string()).chain(d.channels.iter().map(|c| c.name.clone())).collect();
-            let blends = ["multiply", "screen", "normal", "overlay", "softLight", "hardLight", "darken", "lighten", "colorDodge", "colorBurn", "linearBurn", "linearDodge", "difference", "exclusion", "add", "subtract"];
+            let blends = [
+                "multiply",
+                "screen",
+                "normal",
+                "overlay",
+                "softLight",
+                "hardLight",
+                "darken",
+                "lighten",
+                "colorDodge",
+                "colorBurn",
+                "linearBurn",
+                "linearDodge",
+                "difference",
+                "exclusion",
+                "add",
+                "subtract",
+            ];
             let mut load = chans.clone();
             load.extend(["transparency", "mask", "selection"].map(String::from));
             match id {
-                "select.saveSelection" => dialog(app, json!({"channel": "new", "name": "", "operation": "new"}), json!({"channel": alphas, "operation": ["new", "replace", "add", "subtract", "intersect"]})),
+                "select.saveSelection" => dialog(
+                    app,
+                    json!({"channel": "new", "name": "", "operation": "new"}),
+                    json!({"channel": alphas, "operation": ["new", "replace", "add", "subtract", "intersect"]}),
+                ),
                 "select.loadSelection" => {
                     let first = d.channels.first().map_or_else(|| chans[0].clone(), |c| c.name.clone());
-                    dialog(app, json!({"channel": first, "invert": false, "operation": "new"}), json!({"channel": load, "operation": ["new", "add", "subtract", "intersect"]}))
+                    dialog(
+                        app,
+                        json!({"channel": first, "invert": false, "operation": "new"}),
+                        json!({"channel": load, "operation": ["new", "add", "subtract", "intersect"]}),
+                    )
                 }
                 "image.applyImage" => {
                     let mut masks = vec!["none".to_string()];
                     masks.extend(load.iter().cloned());
-                    dialog(app, json!({"sourceChannel": chans[0], "sourceInvert": false, "blending": "multiply", "opacity": 100.0, "preserveTransparency": false, "maskChannel": "none"}), json!({"sourceChannel": load, "blending": blends, "maskChannel": masks}))
+                    dialog(
+                        app,
+                        json!({"sourceChannel": chans[0], "sourceInvert": false, "blending": "multiply", "opacity": 100.0, "preserveTransparency": false, "maskChannel": "none"}),
+                        json!({"sourceChannel": load, "blending": blends, "maskChannel": masks}),
+                    )
                 }
-                _ => dialog(app, json!({"source1Channel": chans[0], "source1Invert": false, "source2Channel": chans[0], "source2Invert": false, "blending": "multiply", "opacity": 100.0, "result": "newChannel"}), json!({"source1Channel": load.clone(), "source2Channel": load, "blending": blends, "result": ["newChannel", "newDocument", "selection"]})),
+                _ => dialog(
+                    app,
+                    json!({"source1Channel": chans[0], "source1Invert": false, "source2Channel": chans[0], "source2Invert": false, "blending": "multiply", "opacity": 100.0, "result": "newChannel"}),
+                    json!({"source1Channel": load.clone(), "source2Channel": load, "blending": blends, "result": ["newChannel", "newDocument", "selection"]}),
+                ),
             }
         }
         _ => None,

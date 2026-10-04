@@ -369,7 +369,8 @@ impl DabBuilder {
                     let f = (1.0 - sd.size.jitter.clamp(0.0, 1.0) * r(stream::SIZE)).max(min);
                     diameter *= f;
                 }
-                angle += control_angle(sd.angle.control, sd.angle.fade_steps, s) + rand_signed(seed, i, stream::ANGLE) * sd.angle.jitter.clamp(0.0, 1.0) * 180.0;
+                angle +=
+                    control_angle(sd.angle.control, sd.angle.fade_steps, s) + rand_signed(seed, i, stream::ANGLE) * sd.angle.jitter.clamp(0.0, 1.0) * 180.0;
                 roundness = (roundness * scalar(&sd.roundness, s, r(stream::ROUNDNESS))).clamp(0.01, 1.0);
                 if sd.flip_x_jitter && r(stream::FLIP_X) < 0.5 {
                     fx = !fx;
@@ -407,17 +408,14 @@ impl DabBuilder {
             }
             // Colour.
             let color = if b.color_dynamics.enabled {
-                if b.color_dynamics.per_tip {
-                    dynamic_color(b, s, seed, i)
-                } else {
-                    *self.stroke_color.get_or_insert_with(|| dynamic_color(b, s, seed, 0))
-                }
+                if b.color_dynamics.per_tip { dynamic_color(b, s, seed, i) } else { *self.stroke_color.get_or_insert_with(|| dynamic_color(b, s, seed, 0)) }
             } else {
                 b.color
             };
             // Texture depth (per tip).
             let tx = &b.texture;
-            let depth = if tx.enabled && tx.each_tip { tx.depth.clamp(0.0, 1.0) * scalar(&tx.depth_jitter, s, r(stream::DEPTH)) } else { tx.depth.clamp(0.0, 1.0) };
+            let depth =
+                if tx.enabled && tx.each_tip { tx.depth.clamp(0.0, 1.0) * scalar(&tx.depth_jitter, s, r(stream::DEPTH)) } else { tx.depth.clamp(0.0, 1.0) };
             out.push(Dab {
                 center: c,
                 radius,

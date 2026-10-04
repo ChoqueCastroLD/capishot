@@ -321,7 +321,14 @@ fn perf_6016() {
     let t = std::time::Instant::now();
     let lines = flatten_path(&path, 0.04);
     let polys = stroke_polygons(&lines, &st, 0.01);
-    eprintln!("flatten+pieces {:.0} ms: {} polylines {} pts, {} pieces {} verts", t.elapsed().as_secs_f64() * 1000.0, lines.len(), lines.iter().map(|l| l.pts.len()).sum::<usize>(), polys.len(), polys.iter().map(|p| p.len()).sum::<usize>());
+    eprintln!(
+        "flatten+pieces {:.0} ms: {} polylines {} pts, {} pieces {} verts",
+        t.elapsed().as_secs_f64() * 1000.0,
+        lines.len(),
+        lines.iter().map(|l| l.pts.len()).sum::<usize>(),
+        polys.len(),
+        polys.iter().map(|p| p.len()).sum::<usize>()
+    );
     let t = std::time::Instant::now();
     let sr = stroke_rasterizer(&path, &st, DEFAULT_TOLERANCE);
     let sc = sr.render(canvas);

@@ -13,7 +13,11 @@ fn images(dir: &str, n: usize, w: u32, h: u32) -> Vec<String> {
         .map(|i| {
             let mut s = Session::new();
             let v = (i as f32 * 40.0 + 20.0) / 255.0;
-            s.execute("file.new", json!({"width": w, "height": h, "background": format!("#{:02x}{:02x}{:02x}", (v * 255.0) as u8, (v * 255.0) as u8, (v * 255.0) as u8)})).unwrap();
+            s.execute(
+                "file.new",
+                json!({"width": w, "height": h, "background": format!("#{:02x}{:02x}{:02x}", (v * 255.0) as u8, (v * 255.0) as u8, (v * 255.0) as u8)}),
+            )
+            .unwrap();
             let path = format!("{dir}/img{i}.png");
             crate::file_cmds::save_doc(&s.active().unwrap().doc, &path, None).unwrap();
             path
@@ -53,7 +57,9 @@ fn browse_runs_a_script_file() {
 #[test]
 fn script_events_fire_on_new_and_close() {
     let mut s = Session::new();
-    let r = s.execute("file.scripts.scriptEventsManager", json!({"add": {"event": "newDocument", "steps": [["image.imageRotation.90cw", {}]], "name": "Rotate"}})).unwrap();
+    let r = s
+        .execute("file.scripts.scriptEventsManager", json!({"add": {"event": "newDocument", "steps": [["image.imageRotation.90cw", {}]], "name": "Rotate"}}))
+        .unwrap();
     assert_eq!(r["enabled"], true);
     assert_eq!(r["bindings"].as_array().unwrap().len(), 1);
     assert!(s.execute("file.scripts.scriptEventsManager", json!({"add": {"event": "nope", "steps": []}})).is_err());
@@ -82,7 +88,12 @@ fn droplets_are_written_and_run() {
     let inputs = images(&dir, 2, 40, 20);
     let mut s = Session::new();
     let path = format!("{dir}/Rotate");
-    let r = s.execute("file.automate.createDroplet", json!({"path": path, "steps": [["image.imageRotation.90cw", {}]], "format": "png", "output": format!("{dir}/out")})).unwrap();
+    let r = s
+        .execute(
+            "file.automate.createDroplet",
+            json!({"path": path, "steps": [["image.imageRotation.90cw", {}]], "format": "png", "output": format!("{dir}/out")}),
+        )
+        .unwrap();
     let dp = r["path"].as_str().unwrap().to_string();
     assert!(dp.ends_with("Rotate.pcdroplet"));
     let v: Value = serde_json::from_slice(&std::fs::read(&dp).unwrap()).unwrap();
@@ -141,7 +152,12 @@ fn contact_sheet_places_thumbnails_with_captions() {
         let b = thumb.surface().unwrap().content_bounds();
         assert!(b.width() <= 200 && b.height() < 150, "fits its cell: {b:?}");
         // Flattened variant.
-        let r = s.execute("file.automate.contactSheetII", json!({"input": dir, "units": "pixels", "width": 200, "height": 200, "columns": 3, "rows": 2, "caption": false, "flatten": true})).unwrap();
+        let r = s
+            .execute(
+                "file.automate.contactSheetII",
+                json!({"input": dir, "units": "pixels", "width": 200, "height": 200, "columns": 3, "rows": 2, "caption": false, "flatten": true}),
+            )
+            .unwrap();
         let d = &s.documents()[r["documents"][0].as_u64().unwrap() as usize].doc;
         assert_eq!(d.layers.len(), 1);
     }

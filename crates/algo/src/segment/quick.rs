@@ -20,7 +20,7 @@
 use photocraft_geom::Rect;
 
 use super::gmm::Gmm;
-use super::{HARD_FG, FREE, Region, RgbImage, Sampler, contrast_beta, grid_cut, keep_seeded, subsample};
+use super::{FREE, HARD_FG, Region, RgbImage, Sampler, contrast_beta, grid_cut, keep_seeded, subsample};
 
 /// Covariance ridge for the (often tiny) stroke sample: ~6 levels of standard deviation.
 const QREG: f32 = 6e-4;

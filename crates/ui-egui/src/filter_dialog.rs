@@ -13,10 +13,16 @@ use crate::theme::Tokens;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
-    Range { min: f32, max: f32, default: f32 },
+    Range {
+        min: f32,
+        max: f32,
+        default: f32,
+    },
     Choice(Vec<String>),
     Bool(bool),
-    Int { default: i64 },
+    Int {
+        default: i64,
+    },
     /// Free text (e.g. a file path).
     Text,
     /// One of the open documents (stored as its index).
@@ -102,7 +108,23 @@ pub fn parse_spec(spec: &str) -> Vec<Param> {
 
 /// Parameter keys measured in pixels (scaled for proxy previews).
 fn is_pixel_param(key: &str) -> bool {
-    matches!(key, "radius" | "distance" | "cellSize" | "horizontal" | "vertical" | "height" | "wavelengthMin" | "wavelengthMax" | "amplitudeMin" | "amplitudeMax" | "maxRadius" | "size" | "blur" | "speed")
+    matches!(
+        key,
+        "radius"
+            | "distance"
+            | "cellSize"
+            | "horizontal"
+            | "vertical"
+            | "height"
+            | "wavelengthMin"
+            | "wavelengthMax"
+            | "amplitudeMin"
+            | "amplitudeMax"
+            | "maxRadius"
+            | "size"
+            | "blur"
+            | "speed"
+    )
 }
 
 /// Commands outside `filter.*` that get the schema dialog *with* live preview.
@@ -127,7 +149,21 @@ pub fn has_dialog(command: &str) -> bool {
     if command == "filter.filterGallery" {
         return false;
     }
-    (command.starts_with("filter.") || command.starts_with("select.modify.") || PREVIEWED.contains(&command) || matches!(command, "image.trim" | "view.newGuide" | "select.refineEdge" | "edit.assignProfile" | "edit.convertToProfile" | "view.proofSetup" | "layer.layerStyle.globalLight" | "image.mode.colorTable")) && photocraft_engine::commands::find(command).is_some_and(|c| !parse_spec(c.params).is_empty())
+    (command.starts_with("filter.")
+        || command.starts_with("select.modify.")
+        || PREVIEWED.contains(&command)
+        || matches!(
+            command,
+            "image.trim"
+                | "view.newGuide"
+                | "select.refineEdge"
+                | "edit.assignProfile"
+                | "edit.convertToProfile"
+                | "view.proofSetup"
+                | "layer.layerStyle.globalLight"
+                | "image.mode.colorTable"
+        ))
+        && photocraft_engine::commands::find(command).is_some_and(|c| !parse_spec(c.params).is_empty())
 }
 
 pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
@@ -194,7 +230,15 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
         match p.kind {
             Kind::Range { min, max, default } => {
                 let mut v = f.get(&p.key).and_then(Value::as_f64).unwrap_or(default as f64) as f32;
-                let unit = if is_pixel_param(&p.key) { "px" } else if p.key == "angle" { "°" } else if p.key == "amount" && max <= 500.0 { "%" } else { "" };
+                let unit = if is_pixel_param(&p.key) {
+                    "px"
+                } else if p.key == "angle" {
+                    "°"
+                } else if p.key == "amount" && max <= 500.0 {
+                    "%"
+                } else {
+                    ""
+                };
                 let logarithmic = min > 0.0 && max / min > 500.0;
                 if logarithmic {
                     // Scrub the value field directly; add a log-scaled slider for huge ranges.
@@ -238,7 +282,8 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                 }
             }
             Kind::Document => {
-                let names: Vec<String> = f.get("__docs").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+                let names: Vec<String> =
+                    f.get("__docs").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
                 let cur = f.get(&p.key).and_then(Value::as_i64).unwrap_or(-1);
                 let mut sel = cur.to_string();
                 let mut opts: Vec<(String, &str)> = vec![("-1".to_string(), "None")];
@@ -254,7 +299,8 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             }
             Kind::Grid(n) => {
                 let side = (n as f32).sqrt().round().max(1.0) as usize;
-                let mut vals: Vec<f32> = f.get(&p.key).and_then(Value::as_array).map(|a| a.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect()).unwrap_or_default();
+                let mut vals: Vec<f32> =
+                    f.get(&p.key).and_then(Value::as_array).map(|a| a.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect()).unwrap_or_default();
                 vals.resize(n, 0.0);
                 ui.label(egui::RichText::new(label(&p.key)).color(t.text_dim));
                 egui::Grid::new(format!("flt-grid-{cmd}-{}", p.key)).spacing([4.0, 4.0]).show(ui, |ui| {
@@ -340,12 +386,23 @@ mod tests {
         assert!(parse_spec("{}").is_empty());
         let p = parse_spec(r#"{"lighting":bool=true,"kernel":int[25],"pins":json,"points":[[0,0],[1,0]],"mapPath":text,"mapDocument":doc,"scale":1..9999=1}"#);
         let kinds: Vec<&Kind> = p.iter().map(|p| &p.kind).collect();
-        assert_eq!(kinds, [&Kind::Bool(true), &Kind::Grid(25), &Kind::Json, &Kind::Json, &Kind::Text, &Kind::Document, &Kind::Range { min: 1.0, max: 9999.0, default: 1.0 }]);
+        assert_eq!(
+            kinds,
+            [&Kind::Bool(true), &Kind::Grid(25), &Kind::Json, &Kind::Json, &Kind::Text, &Kind::Document, &Kind::Range { min: 1.0, max: 9999.0, default: 1.0 }]
+        );
     }
 
     #[test]
     fn new_filters_have_dialogs_or_run_directly() {
-        for id in ["filter.stylize.oilPaint", "filter.blur.lensBlur", "filter.blurGallery.irisBlur", "filter.other.custom", "filter.distort.displace", "filter.pixelate.mezzotint", "filter.render.lightingEffects"] {
+        for id in [
+            "filter.stylize.oilPaint",
+            "filter.blur.lensBlur",
+            "filter.blurGallery.irisBlur",
+            "filter.other.custom",
+            "filter.distort.displace",
+            "filter.pixelate.mezzotint",
+            "filter.render.lightingEffects",
+        ] {
             assert!(has_dialog(id), "{id}");
         }
         for id in ["filter.pixelate.facet", "filter.pixelate.fragment", "filter.video.ntscColors"] {
@@ -364,7 +421,13 @@ mod tests {
 
     #[test]
     fn preview_runs_engine_command_on_proxy() {
-        let mut doc = Document::with_background("p", photocraft_doc::Size::new(64, 64), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8, photocraft_doc::Color::WHITE);
+        let mut doc = Document::with_background(
+            "p",
+            photocraft_doc::Size::new(64, 64),
+            photocraft_doc::ColorMode::Rgb,
+            photocraft_doc::SampleType::U8,
+            photocraft_doc::Color::WHITE,
+        );
         let bg = doc.layers[0].id;
         doc.layers[0].surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(0, 0, 32, 64), &[0.0, 0.0, 0.0, 1.0]);
         let out = preview_document(&doc, Some(bg), "filter.blur.gaussianBlur", &json!({"radius": 4.0}), 1).unwrap();

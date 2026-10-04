@@ -34,11 +34,22 @@ pub const MODES: &[(ColorMode, &str, &str)] = &[
     (ColorMode::Multichannel, "Multichannel", "image.mode.multichannel"),
 ];
 
-pub const DEPTHS: &[(SampleType, &str, &str)] =
-    &[(SampleType::U8, "8 Bits/Channel", "image.mode.bits8"), (SampleType::U16, "16 Bits/Channel", "image.mode.bits16"), (SampleType::F32, "32 Bits/Channel", "image.mode.bits32")];
+pub const DEPTHS: &[(SampleType, &str, &str)] = &[
+    (SampleType::U8, "8 Bits/Channel", "image.mode.bits8"),
+    (SampleType::U16, "16 Bits/Channel", "image.mode.bits16"),
+    (SampleType::F32, "32 Bits/Channel", "image.mode.bits32"),
+];
 
 /// Ruler units offered in the Rulers & Grids dropdown (`unitsAndRulers.rulers` values).
-pub const UNITS: &[(&str, &str)] = &[("pixels", "Pixels"), ("inches", "Inches"), ("cm", "Centimeters"), ("mm", "Millimeters"), ("points", "Points"), ("picas", "Picas"), ("percent", "Percent")];
+pub const UNITS: &[(&str, &str)] = &[
+    ("pixels", "Pixels"),
+    ("inches", "Inches"),
+    ("cm", "Centimeters"),
+    ("mm", "Millimeters"),
+    ("points", "Points"),
+    ("picas", "Picas"),
+    ("percent", "Percent"),
+];
 
 /// `image.canvasSize` params for a new width/height, keeping the aspect ratio when linked.
 pub fn canvas_resize_params(old: (u32, u32), new_w: Option<f32>, new_h: Option<f32>, linked: bool) -> Option<Value> {
@@ -60,7 +71,13 @@ fn section(ui: &mut egui::Ui, id: &str, title: &str) -> bool {
     let key = egui::Id::new(("doc-props-section", id));
     let mut open = ui.data(|d| d.get_temp::<bool>(key)).unwrap_or(true);
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
-    icons::paint(ui, Rect::from_center_size(pos2(r.left() + 7.0, r.center().y), vec2(12.0, 12.0)), if open { "chevron-down" } else { "chevron-right" }, 11.0, t.text_dim);
+    icons::paint(
+        ui,
+        Rect::from_center_size(pos2(r.left() + 7.0, r.center().y), vec2(12.0, 12.0)),
+        if open { "chevron-down" } else { "chevron-right" },
+        11.0,
+        t.text_dim,
+    );
     ui.painter().text(pos2(r.left() + 18.0, r.center().y), Align2::LEFT_CENTER, title, crate::theme::semibold(12.0), t.text);
     if resp.clicked() {
         open = !open;
@@ -199,7 +216,11 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             ui.add_space(8.0);
             ui.spacing_mut().item_spacing.x = 6.0;
             let pixel_grid = crate::view_cmds::checked(app, "view.show.pixelGrid").unwrap_or(false);
-            for (icon, tip, id, on) in [("ruler", "Rulers  (⌘R)", "view.rulers", app.ui.extras.rulers), ("grid-3x3", "Grid  (⌘')", "view.show.grid", app.ui.extras.grid), ("grid-2x2", "Pixel Grid", "view.show.pixelGrid", pixel_grid)] {
+            for (icon, tip, id, on) in [
+                ("ruler", "Rulers  (⌘R)", "view.rulers", app.ui.extras.rulers),
+                ("grid-3x3", "Grid  (⌘')", "view.show.grid", app.ui.extras.grid),
+                ("grid-2x2", "Pixel Grid", "view.show.pixelGrid", pixel_grid),
+            ] {
                 if icons::button(ui, icon, 26.0, on, tip).clicked() {
                     run.push((id.to_string(), Value::Null));
                 }

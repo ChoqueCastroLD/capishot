@@ -75,7 +75,11 @@ fn sample<V: Copy>(stops: &[(f32, V)], t: f32, mix: impl Fn(V, V, f32) -> V) -> 
 impl GradientPreset {
     pub fn new(name: &str, colors: &[&str]) -> Self {
         let n = colors.len().max(2) - 1;
-        GradientPreset { name: name.into(), stops: colors.iter().enumerate().map(|(i, c)| (i as f32 / n as f32, StopColor::Rgb(hex(c)))).collect(), opacity: Vec::new() }
+        GradientPreset {
+            name: name.into(),
+            stops: colors.iter().enumerate().map(|(i, c)| (i as f32 / n as f32, StopColor::Rgb(hex(c)))).collect(),
+            opacity: Vec::new(),
+        }
     }
     pub fn foreground_to_background() -> Self {
         GradientPreset { name: "Foreground to Background".into(), stops: vec![(0.0, StopColor::Foreground), (1.0, StopColor::Background)], opacity: Vec::new() }
@@ -173,18 +177,128 @@ impl GradientPreset {
 /// Built-in groups, laid out like Photoshop's default Gradients panel (Basics, then folders by
 /// hue). The colours are our own.
 pub fn builtin() -> Vec<Group<GradientPreset>> {
-    let fam = |prefix: &str, sets: &[&[&str]]| -> Vec<GradientPreset> { sets.iter().enumerate().map(|(i, c)| GradientPreset::new(&format!("{prefix} {:02}", i + 1), c)).collect() };
-    let fg_transparent = GradientPreset { name: "Foreground to Transparent".into(), stops: vec![(0.0, StopColor::Foreground), (1.0, StopColor::Foreground)], opacity: vec![(0.0, 1.0), (1.0, 0.0)] };
+    let fam = |prefix: &str, sets: &[&[&str]]| -> Vec<GradientPreset> {
+        sets.iter().enumerate().map(|(i, c)| GradientPreset::new(&format!("{prefix} {:02}", i + 1), c)).collect()
+    };
+    let fg_transparent = GradientPreset {
+        name: "Foreground to Transparent".into(),
+        stops: vec![(0.0, StopColor::Foreground), (1.0, StopColor::Foreground)],
+        opacity: vec![(0.0, 1.0), (1.0, 0.0)],
+    };
     vec![
         Group::new("Basics", vec![GradientPreset::foreground_to_background(), fg_transparent, GradientPreset::new("Black, White", &["#000000", "#ffffff"])]),
-        Group::new("Blues", fam("Blue", &[&["#0b3d91", "#4fa3e0"], &["#1c2a5a", "#3f6fd8", "#a8d4ff"], &["#00b4d8", "#03045e"], &["#5ec8f2", "#e6f6ff"], &["#253b80", "#20b2aa"], &["#89c2ff", "#1d4ed8", "#0a1a40"]])),
-        Group::new("Purples", fam("Purple", &[&["#3c096c", "#c77dff"], &["#5a189a", "#e0aaff"], &["#240046", "#7b2cbf", "#f3d9ff"], &["#9d4edd", "#4361ee"], &["#6a0572", "#ab83a1"], &["#2d0b59", "#ff6fd8"]])),
-        Group::new("Pinks", fam("Pink", &[&["#ff4d8d", "#ffd1e1"], &["#c9184a", "#ff8fab"], &["#ff70a6", "#ffd670"], &["#8e2c5a", "#f7a1c4", "#fff0f5"], &["#ff5fa2", "#a855f7"], &["#ffc2d6", "#ff2e63"]])),
-        Group::new("Reds", fam("Red", &[&["#7f0000", "#ff3b30"], &["#d00000", "#ffba08"], &["#370617", "#9d0208", "#f48c06"], &["#e5383b", "#f5f3f4"], &["#a4161a", "#0b090a"], &["#ff595e", "#ffca3a"]])),
-        Group::new("Oranges", fam("Orange", &[&["#ff6d00", "#ffd60a"], &["#e85d04", "#ffba08"], &["#9c3d0b", "#ff9e40", "#fff1d6"], &["#ff7b00", "#ff0054"], &["#fb8500", "#023047"], &["#ffb703", "#fb5607"]])),
-        Group::new("Greens", fam("Green", &[&["#004b23", "#70e000"], &["#2d6a4f", "#b7e4c7"], &["#1b4332", "#40916c", "#d8f3dc"], &["#38b000", "#ccff33"], &["#0b6e4f", "#08a0a8"], &["#606c38", "#dda15e"]])),
-        Group::new("Browns", fam("Brown", &[&["#3e2412", "#a47148"], &["#6f4518", "#e6ccb2"], &["#2b1708", "#7f5539", "#ddb892"], &["#8b5e34", "#ffd8a8"], &["#582f0e", "#b6ad90"], &["#4a3728", "#c08552", "#f3e9dc"]])),
-        Group::new("Grays", fam("Gray", &[&["#212529", "#f8f9fa"], &["#495057", "#dee2e6"], &["#000000", "#6c757d", "#ffffff"], &["#343a40", "#adb5bd", "#343a40"], &["#8d99ae", "#2b2d42"], &["#e9ecef", "#ced4da", "#868e96"]])),
+        Group::new(
+            "Blues",
+            fam(
+                "Blue",
+                &[
+                    &["#0b3d91", "#4fa3e0"],
+                    &["#1c2a5a", "#3f6fd8", "#a8d4ff"],
+                    &["#00b4d8", "#03045e"],
+                    &["#5ec8f2", "#e6f6ff"],
+                    &["#253b80", "#20b2aa"],
+                    &["#89c2ff", "#1d4ed8", "#0a1a40"],
+                ],
+            ),
+        ),
+        Group::new(
+            "Purples",
+            fam(
+                "Purple",
+                &[
+                    &["#3c096c", "#c77dff"],
+                    &["#5a189a", "#e0aaff"],
+                    &["#240046", "#7b2cbf", "#f3d9ff"],
+                    &["#9d4edd", "#4361ee"],
+                    &["#6a0572", "#ab83a1"],
+                    &["#2d0b59", "#ff6fd8"],
+                ],
+            ),
+        ),
+        Group::new(
+            "Pinks",
+            fam(
+                "Pink",
+                &[
+                    &["#ff4d8d", "#ffd1e1"],
+                    &["#c9184a", "#ff8fab"],
+                    &["#ff70a6", "#ffd670"],
+                    &["#8e2c5a", "#f7a1c4", "#fff0f5"],
+                    &["#ff5fa2", "#a855f7"],
+                    &["#ffc2d6", "#ff2e63"],
+                ],
+            ),
+        ),
+        Group::new(
+            "Reds",
+            fam(
+                "Red",
+                &[
+                    &["#7f0000", "#ff3b30"],
+                    &["#d00000", "#ffba08"],
+                    &["#370617", "#9d0208", "#f48c06"],
+                    &["#e5383b", "#f5f3f4"],
+                    &["#a4161a", "#0b090a"],
+                    &["#ff595e", "#ffca3a"],
+                ],
+            ),
+        ),
+        Group::new(
+            "Oranges",
+            fam(
+                "Orange",
+                &[
+                    &["#ff6d00", "#ffd60a"],
+                    &["#e85d04", "#ffba08"],
+                    &["#9c3d0b", "#ff9e40", "#fff1d6"],
+                    &["#ff7b00", "#ff0054"],
+                    &["#fb8500", "#023047"],
+                    &["#ffb703", "#fb5607"],
+                ],
+            ),
+        ),
+        Group::new(
+            "Greens",
+            fam(
+                "Green",
+                &[
+                    &["#004b23", "#70e000"],
+                    &["#2d6a4f", "#b7e4c7"],
+                    &["#1b4332", "#40916c", "#d8f3dc"],
+                    &["#38b000", "#ccff33"],
+                    &["#0b6e4f", "#08a0a8"],
+                    &["#606c38", "#dda15e"],
+                ],
+            ),
+        ),
+        Group::new(
+            "Browns",
+            fam(
+                "Brown",
+                &[
+                    &["#3e2412", "#a47148"],
+                    &["#6f4518", "#e6ccb2"],
+                    &["#2b1708", "#7f5539", "#ddb892"],
+                    &["#8b5e34", "#ffd8a8"],
+                    &["#582f0e", "#b6ad90"],
+                    &["#4a3728", "#c08552", "#f3e9dc"],
+                ],
+            ),
+        ),
+        Group::new(
+            "Grays",
+            fam(
+                "Gray",
+                &[
+                    &["#212529", "#f8f9fa"],
+                    &["#495057", "#dee2e6"],
+                    &["#000000", "#6c757d", "#ffffff"],
+                    &["#343a40", "#adb5bd", "#343a40"],
+                    &["#8d99ae", "#2b2d42"],
+                    &["#e9ecef", "#ced4da", "#868e96"],
+                ],
+            ),
+        ),
     ]
 }
 
@@ -216,7 +330,8 @@ pub fn tool_stops(s: &Session, p: &Value) -> Result<Option<Stops>> {
 /// The preset named by `"preset"` (else the current gradient), or explicit `"stops"`.
 fn preset_param(s: &Session, p: &Value, cmd: &str) -> Result<GradientPreset> {
     if let Some(name) = str_param(p, "preset") {
-        let (gi, ii) = find(&s.presets.gradients, name, str_param(p, "group")).ok_or_else(|| bad(cmd, format!("no gradient preset \"{name}\" (see gradient.presets.list)")))?;
+        let (gi, ii) = find(&s.presets.gradients, name, str_param(p, "group"))
+            .ok_or_else(|| bad(cmd, format!("no gradient preset \"{name}\" (see gradient.presets.list)")))?;
         return Ok(s.presets.gradients[gi].items[ii].clone());
     }
     if p.get("stops").is_some() {
@@ -226,7 +341,8 @@ fn preset_param(s: &Session, p: &Value, cmd: &str) -> Result<GradientPreset> {
 }
 
 fn list(s: &mut Session, _: &Value) -> Result<Value> {
-    let groups: Vec<Value> = s.presets.gradients.iter().map(|g| json!({"name": g.name, "presets": g.items.iter().map(GradientPreset::to_json).collect::<Vec<_>>()})).collect();
+    let groups: Vec<Value> =
+        s.presets.gradients.iter().map(|g| json!({"name": g.name, "presets": g.items.iter().map(GradientPreset::to_json).collect::<Vec<_>>()})).collect();
     Ok(json!({"groups": groups, "current": s.presets.gradient.to_json()}))
 }
 
@@ -318,13 +434,24 @@ pub fn specs() -> Vec<CommandSpec> {
     let stops = r##""stops":[[t 0..1,"#rrggbb"|"foreground"|"background"],…],"transparency":[[t,opacity 0..100],…]?"##;
     let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
     vec![
-        CommandSpec { id: "gradient.presets.list", label: "Gradient Presets", menu: &[], shortcut: None, params: "{} → {groups:[{name,presets:[{name,stops,transparency}]}],current}", enabled: always, run: list, journal: false },
+        CommandSpec {
+            id: "gradient.presets.list",
+            label: "Gradient Presets",
+            menu: &[],
+            shortcut: None,
+            params: "{} → {groups:[{name,presets:[{name,stops,transparency}]}],current}",
+            enabled: always,
+            run: list,
+            journal: false,
+        },
         CommandSpec {
             id: CMD_SELECT,
             label: "Select Gradient",
             menu: &[],
             shortcut: None,
-            params: leak(format!(r##"{{"preset":name|{stops},"group":name?,"applyToLayer":bool=true (also recolours a selected Gradient Fill layer)}} → {{current,layer?}}. The Gradient tool paints with it."##)),
+            params: leak(format!(
+                r##"{{"preset":name|{stops},"group":name?,"applyToLayer":bool=true (also recolours a selected Gradient Fill layer)}} → {{current,layer?}}. The Gradient tool paints with it."##
+            )),
             enabled: always,
             run: select,
             journal: true,
@@ -334,13 +461,42 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "New Gradient Fill Layer from Preset",
             menu: &[],
             shortcut: None,
-            params: leak(format!(r##"{{"preset":name?=current|{stops},"angle":deg=90,"style":"linear|radial|angle|reflected|diamond"="linear","scale":10..150=100,"reverse":bool}} → {{layer}}"##)),
+            params: leak(format!(
+                r##"{{"preset":name?=current|{stops},"angle":deg=90,"style":"linear|radial|angle|reflected|diamond"="linear","scale":10..150=100,"reverse":bool}} → {{layer}}"##
+            )),
             enabled: super::has_doc,
             run: apply,
             journal: true,
         },
-        CommandSpec { id: "gradient.presets.new", label: "New Gradient Preset", menu: &[], shortcut: None, params: leak(format!(r##"{{"name":str="Custom","group":name?=first,{stops} (default: the current gradient)}}"##)), enabled: always, run: new_preset, journal: true },
-        CommandSpec { id: "gradient.presets.edit", label: "Edit Gradient Presets", menu: &[], shortcut: None, params: super::GROUP_EDIT_PARAMS, enabled: always, run: edit, journal: true },
-        CommandSpec { id: "gradient.presets.reset", label: "Restore Default Gradients", menu: &[], shortcut: None, params: r##"{"append":bool=false}"##, enabled: always, run: reset, journal: true },
+        CommandSpec {
+            id: "gradient.presets.new",
+            label: "New Gradient Preset",
+            menu: &[],
+            shortcut: None,
+            params: leak(format!(r##"{{"name":str="Custom","group":name?=first,{stops} (default: the current gradient)}}"##)),
+            enabled: always,
+            run: new_preset,
+            journal: true,
+        },
+        CommandSpec {
+            id: "gradient.presets.edit",
+            label: "Edit Gradient Presets",
+            menu: &[],
+            shortcut: None,
+            params: super::GROUP_EDIT_PARAMS,
+            enabled: always,
+            run: edit,
+            journal: true,
+        },
+        CommandSpec {
+            id: "gradient.presets.reset",
+            label: "Restore Default Gradients",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"append":bool=false}"##,
+            enabled: always,
+            run: reset,
+            journal: true,
+        },
     ]
 }

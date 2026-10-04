@@ -52,83 +52,104 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     });
     let width = 560.0;
     let mut run: Option<String> = None;
-    egui::Area::new(egui::Id::new("palette")).order(egui::Order::Tooltip).pivot(Align2::CENTER_TOP).fixed_pos(egui::pos2(screen.center().x, screen.top() + 110.0)).show(ctx, |ui| {
-        egui::Frame::NONE
-            .fill(t.card)
-            .stroke(Stroke::new(1.0, t.card_border))
-            .corner_radius(CornerRadius::same(t.radius_lg as u8))
-            .shadow(egui::Shadow { offset: [0, 18], blur: 48, spread: 0, color: t.shadow })
-            .inner_margin(egui::Margin::same(10))
-            .show(ui, |ui| {
-                ui.set_width(width);
-                let qid = egui::Id::new("palette-query");
-                let mut q: String = ui.data_mut(|d| d.get_temp(qid).unwrap_or_default());
-                ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-                    icons::paint(ui, r, "search", 16.0, t.text_dim);
-                    let te = egui::TextEdit::singleline(&mut q).hint_text("Search commands, tools and panels…").frame(egui::Frame::NONE).font(egui::FontId::proportional(15.0)).desired_width(width - 40.0);
-                    let resp = ui.add(te);
-                    resp.request_focus();
+    egui::Area::new(egui::Id::new("palette"))
+        .order(egui::Order::Tooltip)
+        .pivot(Align2::CENTER_TOP)
+        .fixed_pos(egui::pos2(screen.center().x, screen.top() + 110.0))
+        .show(ctx, |ui| {
+            egui::Frame::NONE
+                .fill(t.card)
+                .stroke(Stroke::new(1.0, t.card_border))
+                .corner_radius(CornerRadius::same(t.radius_lg as u8))
+                .shadow(egui::Shadow { offset: [0, 18], blur: 48, spread: 0, color: t.shadow })
+                .inner_margin(egui::Margin::same(10))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    let qid = egui::Id::new("palette-query");
+                    let mut q: String = ui.data_mut(|d| d.get_temp(qid).unwrap_or_default());
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                        icons::paint(ui, r, "search", 16.0, t.text_dim);
+                        let te = egui::TextEdit::singleline(&mut q)
+                            .hint_text("Search commands, tools and panels…")
+                            .frame(egui::Frame::NONE)
+                            .font(egui::FontId::proportional(15.0))
+                            .desired_width(width - 40.0);
+                        let resp = ui.add(te);
+                        resp.request_focus();
+                    });
+                    ui.add_space(6.0);
+                    crate::widgets::hairline(ui);
+                    ui.add_space(6.0);
+                    let mut hits: Vec<(i32, String, String, Option<String>, bool)> = crate::menus::menu_items(app)
+                        .into_iter()
+                        .filter_map(|m| {
+                            let path = m.path.join(" › ");
+                            let s = fuzzy_score(&q, &format!("{} {}", m.label, path))?;
+                            Some((
+                                s,
+                                m.id,
+                                m.label.trim_end_matches('…').to_string(),
+                                Some(path + &m.shortcut.map(|s| format!("   {}", crate::shortcuts::pretty(&s))).unwrap_or_default()),
+                                m.enabled,
+                            ))
+                        })
+                        .collect();
+                    for tool in crate::state::Tool::ALL {
+                        if let Some(s) = fuzzy_score(&q, tool.label()) {
+                            hits.push((s + 2, format!("tool:{tool:?}"), tool.label().into(), Some(format!("Tool   {}", tool.key())), true));
+                        }
+                    }
+                    hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.cmp(&b.2)));
+                    hits.truncate(12);
+                    let sel_id = egui::Id::new("palette-sel");
+                    let mut sel: usize = ui.data_mut(|d| d.get_temp(sel_id).unwrap_or(0));
+                    let (down, up, enter, esc) = ui.input(|i| {
+                        (
+                            i.key_pressed(egui::Key::ArrowDown),
+                            i.key_pressed(egui::Key::ArrowUp),
+                            i.key_pressed(egui::Key::Enter),
+                            i.key_pressed(egui::Key::Escape),
+                        )
+                    });
+                    if down {
+                        sel = (sel + 1).min(hits.len().saturating_sub(1));
+                    }
+                    if up {
+                        sel = sel.saturating_sub(1);
+                    }
+                    sel = sel.min(hits.len().saturating_sub(1));
+                    if hits.is_empty() {
+                        ui.label(RichText::new("No matching commands").color(t.text_faint));
+                    }
+                    for (i, (_, id, label, detail, enabled)) in hits.iter().enumerate() {
+                        let (rect, resp) = ui.allocate_exact_size(vec2(width, 32.0), Sense::click());
+                        if i == sel || resp.hovered() {
+                            ui.painter().rect_filled(rect, t.radius_sm, if i == sel { t.accent_soft } else { t.hover });
+                        }
+                        let color = if *enabled { t.text } else { t.text_faint };
+                        ui.painter().text(rect.left_center() + vec2(12.0, 0.0), Align2::LEFT_CENTER, label, theme::medium(13.0), color);
+                        if let Some(d) = detail {
+                            ui.painter().text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, d, egui::FontId::proportional(11.5), t.text_faint);
+                        }
+                        if resp.clicked() && *enabled {
+                            run = Some(id.clone());
+                        }
+                    }
+                    if enter && let Some(h) = hits.get(sel).filter(|h| h.4) {
+                        run = Some(h.1.clone());
+                    }
+                    if esc {
+                        app.ui.palette_open = false;
+                    }
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("↑↓ navigate   ↵ run   esc close").small().color(t.text_faint));
+                    ui.data_mut(|d| {
+                        d.insert_temp(qid, q);
+                        d.insert_temp(sel_id, sel);
+                    });
                 });
-                ui.add_space(6.0);
-                crate::widgets::hairline(ui);
-                ui.add_space(6.0);
-                let mut hits: Vec<(i32, String, String, Option<String>, bool)> = crate::menus::menu_items(app)
-                    .into_iter()
-                    .filter_map(|m| {
-                        let path = m.path.join(" › ");
-                        let s = fuzzy_score(&q, &format!("{} {}", m.label, path))?;
-                        Some((s, m.id, m.label.trim_end_matches('…').to_string(), Some(path).filter(|_| true).map(|p| p + &m.shortcut.map(|s| format!("   {}", crate::shortcuts::pretty(&s))).unwrap_or_default()), m.enabled))
-                    })
-                    .collect();
-                for tool in crate::state::Tool::ALL {
-                    if let Some(s) = fuzzy_score(&q, tool.label()) {
-                        hits.push((s + 2, format!("tool:{tool:?}"), tool.label().into(), Some(format!("Tool   {}", tool.key())), true));
-                    }
-                }
-                hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.cmp(&b.2)));
-                hits.truncate(12);
-                let sel_id = egui::Id::new("palette-sel");
-                let mut sel: usize = ui.data_mut(|d| d.get_temp(sel_id).unwrap_or(0));
-                let (down, up, enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-                if down {
-                    sel = (sel + 1).min(hits.len().saturating_sub(1));
-                }
-                if up {
-                    sel = sel.saturating_sub(1);
-                }
-                sel = sel.min(hits.len().saturating_sub(1));
-                if hits.is_empty() {
-                    ui.label(RichText::new("No matching commands").color(t.text_faint));
-                }
-                for (i, (_, id, label, detail, enabled)) in hits.iter().enumerate() {
-                    let (rect, resp) = ui.allocate_exact_size(vec2(width, 32.0), Sense::click());
-                    if i == sel || resp.hovered() {
-                        ui.painter().rect_filled(rect, t.radius_sm, if i == sel { t.accent_soft } else { t.hover });
-                    }
-                    let color = if *enabled { t.text } else { t.text_faint };
-                    ui.painter().text(rect.left_center() + vec2(12.0, 0.0), Align2::LEFT_CENTER, label, theme::medium(13.0), color);
-                    if let Some(d) = detail {
-                        ui.painter().text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, d, egui::FontId::proportional(11.5), t.text_faint);
-                    }
-                    if resp.clicked() && *enabled {
-                        run = Some(id.clone());
-                    }
-                }
-                if enter && let Some(h) = hits.get(sel).filter(|h| h.4) {
-                    run = Some(h.1.clone());
-                }
-                if esc {
-                    app.ui.palette_open = false;
-                }
-                ui.add_space(4.0);
-                ui.label(RichText::new("↑↓ navigate   ↵ run   esc close").small().color(t.text_faint));
-                ui.data_mut(|d| {
-                    d.insert_temp(qid, q);
-                    d.insert_temp(sel_id, sel);
-                });
-            });
-    });
+        });
     if let Some(id) = run {
         app.ui.palette_open = false;
         ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-query"), String::new()));

@@ -23,10 +23,10 @@ pub mod psblend;
 pub mod shape_split;
 
 use photocraft_color::blend::BlendMode;
-use psblend as blend;
 use photocraft_doc::{Document, Fill, Layer, LayerContent, Pattern};
 use photocraft_geom::Rect;
 use photocraft_raster::{Rgba8Image, Surface};
+use psblend as blend;
 
 /// Straight-alpha RGBA float buffer covering a rectangle.
 #[derive(Clone, Debug, PartialEq)]
@@ -48,7 +48,7 @@ impl Buffer {
     }
     pub fn to_rgba8(&self) -> Rgba8Image {
         let mut img = Rgba8Image::new(self.rect.width(), self.rect.height());
-        for (o, p) in img.pixels.chunks_exact_mut(4).zip(&self.px) {
+        for (o, p) in img.pixels.as_chunks_mut::<4>().0.iter_mut().zip(&self.px) {
             for (dst, v) in o.iter_mut().zip(p) {
                 *dst = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
             }
@@ -80,7 +80,14 @@ pub fn render(doc: &Document, rect: Rect) -> Buffer {
 
 /// [`render`] with an explicit tile size (tests check tile independence).
 pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
-    let cx = Ctx { canvas: doc.bounds(), transfer: adjust::Transfer::for_mode(doc.mode), light: doc.global_light, patterns: &doc.patterns, mode: doc.mode, depth: doc.depth };
+    let cx = Ctx {
+        canvas: doc.bounds(),
+        transfer: adjust::Transfer::for_mode(doc.mode),
+        light: doc.global_light,
+        patterns: &doc.patterns,
+        mode: doc.mode,
+        depth: doc.depth,
+    };
     // Lab documents mix Normal blending in CIELAB, as Photoshop does (psblend::LAB_MIX).
     let lab = doc.mode == photocraft_color::ColorMode::Lab;
     if rect.width() as i32 <= tile && rect.height() as i32 <= tile {
@@ -134,7 +141,18 @@ pub fn flatten(doc: &Document) -> Buffer {
 /// Render an arbitrary subset: a single layer (e.g. for thumbnails), isolated.
 pub fn render_layer(layer: &Layer, rect: Rect) -> Buffer {
     let mut buf = Buffer::transparent(rect);
-    composite_stack(std::slice::from_ref(layer), &mut buf, &Ctx { canvas: rect, transfer: adjust::Transfer::Srgb, light: photocraft_doc::GlobalLight::default(), patterns: &[], mode: photocraft_color::ColorMode::Rgb, depth: photocraft_color::SampleType::F32 });
+    composite_stack(
+        std::slice::from_ref(layer),
+        &mut buf,
+        &Ctx {
+            canvas: rect,
+            transfer: adjust::Transfer::Srgb,
+            light: photocraft_doc::GlobalLight::default(),
+            patterns: &[],
+            mode: photocraft_color::ColorMode::Rgb,
+            depth: photocraft_color::SampleType::F32,
+        },
+    );
     buf
 }
 
@@ -251,7 +269,13 @@ pub fn layer_bounds(layer: &Layer, canvas: Rect) -> Rect {
         LayerContent::Group(g) if g.artboard.is_some() => g.artboard.as_ref().map_or(Rect::EMPTY, |a| a.rect),
         LayerContent::Group(g) => g.children.iter().filter(|c| c.visible).fold(Rect::EMPTY, |acc, c| {
             let b = layer_bounds(c, canvas);
-            if b.is_empty() { acc } else if acc.is_empty() { b } else { acc.union(&b) }
+            if b.is_empty() {
+                acc
+            } else if acc.is_empty() {
+                b
+            } else {
+                acc.union(&b)
+            }
         }),
         LayerContent::Fill(_) => canvas,
         _ => layer.surface().map_or(Rect::EMPTY, bounds::content_bounds),
@@ -320,7 +344,14 @@ fn render_content(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Buffer> {
 /// The alpha of `layer`'s own content over `rect` (masks applied, row-major): the shape its
 /// effect maps are built from (for the GPU compositor). Zero for adjustment layers.
 pub fn layer_shape(doc: &Document, layer: &Layer, rect: Rect) -> Vec<f32> {
-    let cx = Ctx { canvas: doc.bounds(), transfer: adjust::Transfer::for_mode(doc.mode), light: doc.global_light, patterns: &doc.patterns, mode: doc.mode, depth: doc.depth };
+    let cx = Ctx {
+        canvas: doc.bounds(),
+        transfer: adjust::Transfer::for_mode(doc.mode),
+        light: doc.global_light,
+        patterns: &doc.patterns,
+        mode: doc.mode,
+        depth: doc.depth,
+    };
     render_content(layer, rect, &cx).map(|b| b.px.iter().map(|p| p[3]).collect()).unwrap_or_else(|| vec![0.0; rect.width() as usize * rect.height() as usize])
 }
 
@@ -482,12 +513,7 @@ pub fn blend_if_active(layer: &Layer, mode: photocraft_color::ColorMode) -> bool
 /// How much of a pixel shows through `layer`'s Blend If ranges, given the layer's own colour
 /// (`this`, `None` where the layer has no content of its own there) and the colour beneath it
 /// (`under`, `None` where nothing is beneath). Every range multiplies in.
-fn blend_if_weight(
-    layer: &Layer,
-    mode: photocraft_color::ColorMode,
-    this: Option<[f32; 4]>,
-    under: Option<[f32; 4]>,
-) -> f32 {
+fn blend_if_weight(layer: &Layer, mode: photocraft_color::ColorMode, this: Option<[f32; 4]>, under: Option<[f32; 4]>) -> f32 {
     use photocraft_color::ColorMode as M;
     let bi = &layer.blend_if;
     let mut k = 1.0;
@@ -521,11 +547,7 @@ fn blend_if_weight(
 fn apply_blend_if(layer: &Layer, before: &Buffer, out: &mut Buffer, cx: &Ctx) {
     // "This Layer" is the layer's own colour; adjustment layers (no content of their own) are
     // judged by their result.
-    let own = if matches!(layer.content, LayerContent::Adjustment(_)) {
-        None
-    } else {
-        render_content(layer, out.rect, cx)
-    };
+    let own = if matches!(layer.content, LayerContent::Adjustment(_)) { None } else { render_content(layer, out.rect, cx) };
     for (i, (p, b)) in out.px.iter_mut().zip(&before.px).enumerate() {
         let this = match &own {
             Some(o) => Some(o.px[i]).filter(|q| q[3] > 0.0),
@@ -538,8 +560,7 @@ fn apply_blend_if(layer: &Layer, before: &Buffer, out: &mut Buffer, cx: &Ctx) {
         }
         let a = b[3] + (p[3] - b[3]) * k;
         *p = if a > 0.0 {
-            let c =
-                |c: usize| ((b[c] * b[3] + (p[c] * p[3] - b[c] * b[3]) * k) / a).clamp(0.0, 1.0);
+            let c = |c: usize| ((b[c] * b[3] + (p[c] * p[3] - b[c] * b[3]) * k) / a).clamp(0.0, 1.0);
             [c(0), c(1), c(2), a]
         } else {
             [0.0; 4]
@@ -674,12 +695,7 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
                 let b = before.px[i];
                 let a = adjusted.px[i];
                 let blended = blend::blend_rgb(layer.blend, [b[0], b[1], b[2]], [a[0], a[1], a[2]]);
-                backdrop.px[i] = [
-                    b[0] + (blended[0] - b[0]) * k,
-                    b[1] + (blended[1] - b[1]) * k,
-                    b[2] + (blended[2] - b[2]) * k,
-                    b[3],
-                ];
+                backdrop.px[i] = [b[0] + (blended[0] - b[0]) * k, b[1] + (blended[1] - b[1]) * k, b[2] + (blended[2] - b[2]) * k, b[3]];
             }
         }
         return;
@@ -859,7 +875,9 @@ fn effect_maps(layer: &Layer, cx: &Ctx) -> std::sync::Arc<effects::FxMaps> {
         let shape: Vec<f32> = if region.is_empty() {
             Vec::new()
         } else {
-            render_content(layer, region, cx).map(|b| b.px.iter().map(|p| p[3]).collect()).unwrap_or_else(|| vec![0.0; region.width() as usize * region.height() as usize])
+            render_content(layer, region, cx)
+                .map(|b| b.px.iter().map(|p| p[3]).collect())
+                .unwrap_or_else(|| vec![0.0; region.width() as usize * region.height() as usize])
         };
         let maps = effects::build_maps(layer, shape, region, &cx.light, &texture_ctx(layer, region, cx));
         let bytes = maps.bytes();
@@ -929,7 +947,14 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
         let Some(content) = render_content(layer, big, cx) else { return };
         let mut opaque = Buffer { rect, px: base.px.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() };
         let maps = effect_maps(layer, cx);
-        effects::composite_with_effects(layer, &content, &mut opaque, &maps, paint_bounds(layer).unwrap_or_else(|| layer_bounds(layer, cx.canvas)), cx.patterns);
+        effects::composite_with_effects(
+            layer,
+            &content,
+            &mut opaque,
+            &maps,
+            paint_bounds(layer).unwrap_or_else(|| layer_bounds(layer, cx.canvas)),
+            cx.patterns,
+        );
         for (p, o) in base.px.iter_mut().zip(&opaque.px) {
             if p[3] > 0.0 {
                 *p = [o[0], o[1], o[2], p[3]];

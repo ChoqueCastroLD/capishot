@@ -54,16 +54,7 @@ pub struct Autosaver {
 }
 
 fn sanitize(key: &str) -> String {
-    let s: String = key
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let s: String = key.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     if s.is_empty() { "untitled".into() } else { s }
 }
 
@@ -77,17 +68,8 @@ impl Autosaver {
         let bundle = dir.join(format!("{key}.pcraft"));
         let sidecar = dir.join(format!("{key}.json"));
         let last2 = last.clone();
-        let handle = std::thread::Builder::new()
-            .name(format!("autosave-{key}"))
-            .spawn(move || worker(rx, bundle, sidecar, last2))
-            .ok();
-        Autosaver {
-            dir,
-            key,
-            tx: Some(tx),
-            handle,
-            last,
-        }
+        let handle = std::thread::Builder::new().name(format!("autosave-{key}")).spawn(move || worker(rx, bundle, sidecar, last2)).ok();
+        Autosaver { dir, key, tx: Some(tx), handle, last }
     }
 
     pub fn bundle_path(&self) -> PathBuf {
@@ -95,37 +77,23 @@ impl Autosaver {
     }
 
     /// Queue a snapshot for saving (returns immediately).
-    pub fn request(
-        &self,
-        snapshot: Arc<Document>,
-        revision: u64,
-        original_path: Option<String>,
-        opts: SaveOptions,
-    ) {
+    pub fn request(&self, snapshot: Arc<Document>, revision: u64, original_path: Option<String>, opts: SaveOptions) {
         let info = RecoveryInfo {
             key: self.key.clone(),
             document_name: snapshot.name.clone(),
             original_path,
-            saved_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
+            saved_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
             revision,
         };
         if let Some(tx) = &self.tx {
-            let _ = tx.send(Job {
-                snapshot,
-                info,
-                opts,
-            });
+            let _ = tx.send(Job { snapshot, info, opts });
         }
     }
 
     /// Result of the most recent completed save.
     pub fn last_result(&self) -> Option<std::result::Result<SaveStats, String>> {
         let g = self.last.lock().ok()?;
-        g.as_ref()
-            .map(|r| r.as_ref().map(|s| *s).map_err(|e| e.to_string()))
+        g.as_ref().map(|r| r.as_ref().map(|s| *s).map_err(|e| e.to_string()))
     }
 
     /// Finish pending saves and stop the thread.
@@ -154,12 +122,7 @@ impl Drop for Autosaver {
     }
 }
 
-fn worker(
-    rx: Receiver<Job>,
-    bundle: PathBuf,
-    sidecar: PathBuf,
-    last: Arc<Mutex<Option<Result<SaveStats>>>>,
-) {
+fn worker(rx: Receiver<Job>, bundle: PathBuf, sidecar: PathBuf, last: Arc<Mutex<Option<Result<SaveStats>>>>) {
     let mut writer = PcraftWriter::new();
     while let Ok(mut job) = rx.recv() {
         // Coalesce: skip to the newest queued snapshot.
@@ -196,12 +159,7 @@ pub fn list_recovery(recovery_dir: &Path) -> Vec<RecoveryEntry> {
             }
         }
     }
-    out.sort_by(|a, b| {
-        b.info
-            .saved_at
-            .cmp(&a.info.saved_at)
-            .then(a.info.key.cmp(&b.info.key))
-    });
+    out.sort_by(|a, b| b.info.saved_at.cmp(&a.info.saved_at).then(a.info.key.cmp(&b.info.key)));
     out
 }
 

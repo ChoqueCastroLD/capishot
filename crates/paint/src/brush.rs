@@ -282,7 +282,16 @@ pub struct Pose {
 
 impl Default for Pose {
     fn default() -> Self {
-        Self { enabled: false, tilt_x: 0.0, tilt_y: 0.0, rotation: 0.0, pressure: 1.0, override_tilt: false, override_rotation: false, override_pressure: false }
+        Self {
+            enabled: false,
+            tilt_x: 0.0,
+            tilt_y: 0.0,
+            rotation: 0.0,
+            pressure: 1.0,
+            override_tilt: false,
+            override_rotation: false,
+            override_pressure: false,
+        }
     }
 }
 

@@ -23,9 +23,9 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use photocraft_compose::effects::FieldKind;
 use photocraft_compose::effects::BevelPaint;
-use photocraft_doc::{BevelTechnique, Contour, Pattern, Effect, GlobalLight, GlowSource, GlowTechnique, Layer, LayerContent};
+use photocraft_compose::effects::FieldKind;
+use photocraft_doc::{BevelTechnique, Contour, Effect, GlobalLight, GlowSource, GlowTechnique, Layer, LayerContent, Pattern};
 use photocraft_geom::{Rect, TileCoord};
 use photocraft_raster::{Surface, Tile};
 
@@ -278,7 +278,11 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
                 // dist_outside of the shifted map is the shifted field (integer offsets; shifted-in
                 // pixels are far away for a drop shadow, inside for an inner shadow).
                 let f = b.field(if inner { FieldKind::OutsideInverse } else { FieldKind::Outside }, r);
-                let d = if dx == 0.0 && dy == 0.0 { f } else { b.push(stage(Kernel::MShift, Some(f), None, [dx, dy, if inner { -0.5 } else { 1e10 }, 0.0], dx.abs().max(dy.abs()) as i32)) };
+                let d = if dx == 0.0 && dy == 0.0 {
+                    f
+                } else {
+                    b.push(stage(Kernel::MShift, Some(f), None, [dx, dy, if inner { -0.5 } else { 1e10 }, 0.0], dx.abs().max(dy.abs()) as i32))
+                };
                 m = b.dilate(src, d, r);
             }
             let m = b.blur(m, bw);
@@ -663,7 +667,14 @@ mod tests {
                 shape[y * w + x] = (90.0 - r).clamp(0.0, 1.0) * if (x / 13 + y / 17) % 5 == 0 { 0.6 } else { 1.0 };
             }
         }
-        for kind in [FieldKind::Outside, FieldKind::Inside, FieldKind::OutsideInverse, FieldKind::StrokeOutside, FieldKind::StrokeInside, FieldKind::StrokeOutsideVector] {
+        for kind in [
+            FieldKind::Outside,
+            FieldKind::Inside,
+            FieldKind::OutsideInverse,
+            FieldKind::StrokeOutside,
+            FieldKind::StrokeInside,
+            FieldKind::StrokeOutsideVector,
+        ] {
             let reach = 9;
             let whole = photocraft_compose::effects::distance_field(kind, shape.clone(), w, h);
             let banded = field(kind, reach, &shape, region, region);

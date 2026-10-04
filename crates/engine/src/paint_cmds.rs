@@ -43,7 +43,8 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
     let source = p.get("contents").or_else(|| p.get("source")).and_then(Value::as_str).unwrap_or("foreground");
     let pattern = if source == "pattern" {
         let pat = crate::pattern_cmds::resolve_param(s, "paint.bucket", p)?;
-        let tile = photocraft_compose::pattern::Tile::new(&pat).ok_or_else(|| EngineError::BadParams { cmd: "paint.bucket".into(), msg: "the pattern is empty".into() })?;
+        let tile = photocraft_compose::pattern::Tile::new(&pat)
+            .ok_or_else(|| EngineError::BadParams { cmd: "paint.bucket".into(), msg: "the pattern is empty".into() })?;
         let (scale, angle, _, phase) = crate::pattern_cmds::placement(p);
         Some((tile, scale, angle, phase))
     } else {
@@ -86,7 +87,8 @@ fn gradient(s: &mut Session, p: &Value) -> Result<Value> {
     let stops: Vec<(f32, [f32; 4])> = match crate::presets::gradients::tool_stops(s, p)? {
         Some(st) => st,
         None => {
-            let colors: Vec<[f32; 4]> = p.get("colors").and_then(Value::as_array).map(|a| a.iter().map(|v| color(Some(v), fg)).collect()).unwrap_or_else(|| vec![fg, bg]);
+            let colors: Vec<[f32; 4]> =
+                p.get("colors").and_then(Value::as_array).map(|a| a.iter().map(|v| color(Some(v), fg)).collect()).unwrap_or_else(|| vec![fg, bg]);
             let n = colors.len();
             colors.into_iter().enumerate().map(|(i, c)| (if n > 1 { i as f32 / (n - 1) as f32 } else { 0.0 }, c)).collect()
         }
@@ -174,7 +176,12 @@ mod tests {
         s.execute("paint.bucket", json!({"x": 2, "y": 2, "contents": "pattern", "pattern": "Diagonal Lines", "antiAlias": false, "tolerance": 0})).unwrap();
         // The filled region (left of the wall) now carries the pattern's light/dark variation,
         // while the wall and the region past it are untouched.
-        let left: Vec<[f32; 4]> = (0..10).map(|x| { let p = px(&s, x, 0); [p[0], p[1], p[2], p[3]] }).collect();
+        let left: Vec<[f32; 4]> = (0..10)
+            .map(|x| {
+                let p = px(&s, x, 0);
+                [p[0], p[1], p[2], p[3]]
+            })
+            .collect();
         assert!(left.iter().any(|p| p[0] < 0.3) && left.iter().any(|p| p[0] > 0.9), "pattern varies in the fill: {left:?}");
         assert_eq!(px(&s, 15, 5), vec![1.0, 1.0, 1.0, 1.0], "region past the wall untouched");
     }
@@ -199,7 +206,8 @@ mod tests {
         // per-pixel noise with dither on (which breaks 8-bit banding).
         let run = |dither: bool| {
             let mut s = session();
-            s.execute("paint.gradient", json!({"from": [0, 0], "to": [19, 0], "colors": [[0.5, 0.5, 0.5, 1.0], [0.5, 0.5, 0.5, 1.0]], "dither": dither})).unwrap();
+            s.execute("paint.gradient", json!({"from": [0, 0], "to": [19, 0], "colors": [[0.5, 0.5, 0.5, 1.0], [0.5, 0.5, 0.5, 1.0]], "dither": dither}))
+                .unwrap();
             (0..19).map(|x| px(&s, x, 5)[0]).collect::<Vec<f32>>()
         };
         let smooth = run(false);

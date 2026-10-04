@@ -60,10 +60,7 @@ impl Dictionary {
                 continue;
             }
             words.insert(w.to_string(), level);
-            by_lower
-                .entry(w.to_lowercase())
-                .or_default()
-                .push(w.to_string());
+            by_lower.entry(w.to_lowercase()).or_default().push(w.to_string());
         }
         let mut by_len: Vec<Vec<(String, Vec<char>, u8)>> = Vec::new();
         for (lw, forms) in &by_lower {
@@ -71,22 +68,13 @@ impl Dictionary {
             if by_len.len() <= n {
                 by_len.resize(n + 1, Vec::new());
             }
-            let lvl = forms
-                .iter()
-                .filter_map(|f| words.get(f))
-                .min()
-                .copied()
-                .unwrap_or(50);
+            let lvl = forms.iter().filter_map(|f| words.get(f)).min().copied().unwrap_or(50);
             by_len[n].push((lw.clone(), lw.chars().collect(), lvl));
         }
         for v in &mut by_len {
             v.sort();
         }
-        Dictionary {
-            words,
-            by_lower,
-            by_len,
-        }
+        Dictionary { words, by_lower, by_len }
     }
 
     pub fn len(&self) -> usize {
@@ -102,8 +90,7 @@ impl Dictionary {
         let w = normalize(word);
         let w = w.strip_suffix("'s").filter(|b| !b.is_empty()).unwrap_or(&w);
         let w = w.trim_matches('\'');
-        if w.is_empty() || w.chars().any(|c| c.is_numeric()) || !w.chars().any(char::is_alphabetic)
-        {
+        if w.is_empty() || w.chars().any(|c| c.is_numeric()) || !w.chars().any(char::is_alphabetic) {
             return true;
         }
         let lower = w.to_lowercase();
@@ -113,12 +100,8 @@ impl Dictionary {
         let Some(forms) = self.by_lower.get(&lower) else {
             return false;
         };
-        let all_caps = w
-            .chars()
-            .filter(|c| c.is_alphabetic())
-            .all(char::is_uppercase);
-        let first_cap = w.chars().next().is_some_and(char::is_uppercase)
-            && w.chars().skip(1).all(|c| !c.is_uppercase());
+        let all_caps = w.chars().filter(|c| c.is_alphabetic()).all(char::is_uppercase);
+        let first_cap = w.chars().next().is_some_and(char::is_uppercase) && w.chars().skip(1).all(|c| !c.is_uppercase());
         forms.iter().any(|f| {
             let f_lower = f.chars().all(|c| !c.is_uppercase());
             // "the" → "The"/"THE"; "Paris" → "PARIS"; "NASA" stays as listed (exact match above).
@@ -155,11 +138,7 @@ impl Dictionary {
             }
         }
         found.sort();
-        let all_caps = w
-            .chars()
-            .filter(|c| c.is_alphabetic())
-            .all(char::is_uppercase)
-            && w.chars().filter(|c| c.is_alphabetic()).count() > 1;
+        let all_caps = w.chars().filter(|c| c.is_alphabetic()).all(char::is_uppercase) && w.chars().filter(|c| c.is_alphabetic()).count() > 1;
         let first_cap = w.chars().next().is_some_and(char::is_uppercase);
         let mut out: Vec<String> = Vec::new();
         for (_, _, _, cand) in found {
@@ -191,11 +170,7 @@ impl Dictionary {
         words(text)
             .into_iter()
             .filter(|(a, b)| !self.check(&text[*a..*b], user))
-            .map(|(a, b)| Misspelling {
-                start: a,
-                end: b,
-                word: text[a..b].to_string(),
-            })
+            .map(|(a, b)| Misspelling { start: a, end: b, word: text[a..b].to_string() })
             .collect()
     }
 }
@@ -220,9 +195,7 @@ pub fn words(text: &str) -> Vec<(usize, usize)> {
     let mut start: Option<usize> = None;
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     for (i, &(b, c)) in chars.iter().enumerate() {
-        let inner_apos = is_apos(c)
-            && start.is_some()
-            && chars.get(i + 1).is_some_and(|(_, n)| n.is_alphabetic());
+        let inner_apos = is_apos(c) && start.is_some() && chars.get(i + 1).is_some_and(|(_, n)| n.is_alphabetic());
         if c.is_alphanumeric() || inner_apos {
             start.get_or_insert(b);
         } else if let Some(s) = start.take() {
@@ -289,20 +262,7 @@ mod tests {
     fn bundled_dictionary_loads() {
         let d = Dictionary::english();
         assert!(d.len() > 70_000, "{}", d.len());
-        for w in [
-            "the",
-            "The",
-            "THE",
-            "color",
-            "colors",
-            "running",
-            "don't",
-            "don’t",
-            "Paris",
-            "PARIS",
-            "photographer's",
-            "NASA",
-        ] {
+        for w in ["the", "The", "THE", "color", "colors", "running", "don't", "don’t", "Paris", "PARIS", "photographer's", "NASA"] {
             assert!(d.check(w, &none()), "{w}");
         }
         for w in ["teh", "recieve", "paris", "Photograpy", "zxqv"] {
@@ -319,23 +279,14 @@ mod tests {
         assert!(d.suggest("recieve", 5).contains(&"receive".to_string()));
         assert_eq!(d.suggest("Wrold", 1), vec!["World".to_string()]);
         assert_eq!(d.suggest("brwon", 1), vec!["brown".to_string()]);
-        assert_eq!(
-            d.suggest("HELO", 5)
-                .first()
-                .map(|s| s.chars().all(|c| c.is_uppercase())),
-            Some(true)
-        );
+        assert_eq!(d.suggest("HELO", 5).first().map(|s| s.chars().all(|c| c.is_uppercase())), Some(true));
     }
 
     #[test]
     fn misspellings_and_user_words() {
         let d = Dictionary::from_list("#10\nhello\nworld\nParis\n");
         let text = "Hello wrld, Paris paris photocraft 42x";
-        let m: Vec<String> = d
-            .misspellings(text, &none())
-            .into_iter()
-            .map(|m| m.word)
-            .collect();
+        let m: Vec<String> = d.misspellings(text, &none()).into_iter().map(|m| m.word).collect();
         assert_eq!(m, vec!["wrld", "paris", "photocraft"]);
         let user: HashSet<String> = ["photocraft".to_string()].into();
         assert_eq!(d.misspellings(text, &user).len(), 2);
@@ -351,18 +302,7 @@ mod tests {
         let d = Dictionary::english();
         let load = t.elapsed();
         let t = std::time::Instant::now();
-        for w in [
-            "recieve",
-            "teh",
-            "photograpy",
-            "definately",
-            "seperate",
-            "wierd",
-            "acommodate",
-            "begining",
-            "occurence",
-            "untill",
-        ] {
+        for w in ["recieve", "teh", "photograpy", "definately", "seperate", "wierd", "acommodate", "begining", "occurence", "untill"] {
             let _ = d.suggest(w, 8);
         }
         eprintln!("load {load:?}, suggest {:?}/word", t.elapsed() / 10);

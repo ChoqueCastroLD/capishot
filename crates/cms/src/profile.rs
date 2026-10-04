@@ -525,7 +525,7 @@ fn parse_curve(d: &[u8]) -> Result<(Curve, usize), CmsError> {
                         return Err(CmsError::Invalid("curve too long".into()));
                     }
                     let s = r.slice(12, n * 2)?;
-                    let t = s.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect();
+                    let t = s.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect();
                     Ok((Curve::Table(t), len))
                 }
             }
@@ -585,8 +585,11 @@ fn parse_lut(d: &[u8], a2b: bool) -> Result<Lut, CmsError> {
                 let mut v = Vec::with_capacity(count);
                 for _ in 0..count {
                     let s = r.slice(*off, len * bps)?;
-                    let t: Vec<f32> =
-                        if wide { s.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect() } else { s.iter().map(|b| *b as f32 / 255.0).collect() };
+                    let t: Vec<f32> = if wide {
+                        s.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect()
+                    } else {
+                        s.iter().map(|b| *b as f32 / 255.0).collect()
+                    };
                     *off += len * bps;
                     v.push(Curve::Table(t));
                 }
@@ -599,8 +602,11 @@ fn parse_lut(d: &[u8], a2b: bool) -> Result<Lut, CmsError> {
             }
             let total = nodes as usize * o;
             let s = r.slice(off, total * bps)?;
-            let data: Vec<f32> =
-                if wide { s.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect() } else { s.iter().map(|b| *b as f32 / 255.0).collect() };
+            let data: Vec<f32> = if wide {
+                s.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect()
+            } else {
+                s.iter().map(|b| *b as f32 / 255.0).collect()
+            };
             off += total * bps;
             let out_curves = read_tables(&mut off, o, n_out)?;
             let mut stages = Vec::new();
@@ -647,7 +653,7 @@ fn parse_lut(d: &[u8], a2b: bool) -> Result<Lut, CmsError> {
                 let total = nodes as usize * cout;
                 let data: Vec<f32> = match prec {
                     1 => r.slice(off + 20, total)?.iter().map(|b| *b as f32 / 255.0).collect(),
-                    2 => r.slice(off + 20, total * 2)?.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect(),
+                    2 => r.slice(off + 20, total * 2)?.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect(),
                     _ => return Err(CmsError::Invalid(format!("CLUT precision {prec}"))),
                 };
                 Ok(Stage::Clut(Clut::new(grid, cout, data)))
@@ -724,7 +730,7 @@ fn parse_text(d: &[u8]) -> String {
             }
             let Some((off, len)) = best else { return String::new() };
             let Ok(s) = r.slice(off, len) else { return String::new() };
-            let units: Vec<u16> = s.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+            let units: Vec<u16> = s.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
             String::from_utf16_lossy(&units).trim_end_matches('\0').trim().to_string()
         }
         _ => String::new(),

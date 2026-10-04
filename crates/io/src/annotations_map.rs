@@ -103,7 +103,7 @@ fn color_from(space: u16, c: [u16; 4]) -> Color {
 
 fn decode_text(data: &[u8]) -> String {
     let s = if data.len() >= 2 && data[0] == 0xFE && data[1] == 0xFF {
-        let units: Vec<u16> = data[2..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = data[2..].as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
         String::from_utf16_lossy(&units)
     } else {
         data.iter().map(|&c| c as char).collect()

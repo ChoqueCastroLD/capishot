@@ -358,7 +358,13 @@ fn pcraft_round_trip_keeps_live_smart_objects() {
 #[test]
 fn psd_placed_layer_renders_from_lnk2_data() {
     // A PNG embedded the way Photoshop stores placed files: a global lnk2 block keyed by uuid.
-    let mut inner = Document::with_background("in", Size::new(10, 8), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8, photocraft_color::Color::rgba(0.0, 1.0, 0.0, 1.0));
+    let mut inner = Document::with_background(
+        "in",
+        Size::new(10, 8),
+        photocraft_color::ColorMode::Rgb,
+        photocraft_color::SampleType::U8,
+        photocraft_color::Color::rgba(0.0, 1.0, 0.0, 1.0),
+    );
     inner.layers[0].surface_mut().unwrap().fill_rect(Rect::new(0, 0, 5, 8), &[1.0, 0.0, 0.0, 1.0]);
     let png = photocraft_io::export(&inner, "png", &Default::default()).unwrap().bytes;
     let lnk2 = photocraft_io::linked::encode_linked_file(&photocraft_io::linked::LinkedFile { uuid: "uuid-1".into(), file_name: "in.png".into(), bytes: png });
@@ -400,7 +406,13 @@ fn export_replace_and_linked_contents() {
     s.execute("layer.smartObjects.exportContents", json!({"path": out.to_str().unwrap()})).unwrap();
     assert!(photocraft_format::is_pcraft(&std::fs::read(&out).unwrap()));
     // Replace with a flat PNG.
-    let png_doc = Document::with_background("p", Size::new(4, 4), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8, photocraft_color::Color::rgba(1.0, 1.0, 0.0, 1.0));
+    let png_doc = Document::with_background(
+        "p",
+        Size::new(4, 4),
+        photocraft_color::ColorMode::Rgb,
+        photocraft_color::SampleType::U8,
+        photocraft_color::Color::rgba(1.0, 1.0, 0.0, 1.0),
+    );
     let png = dir.join("yellow.png");
     std::fs::write(&png, photocraft_io::export(&png_doc, "png", &Default::default()).unwrap().bytes).unwrap();
     s.execute("layer.smartObjects.replaceContents", json!({"path": png.to_str().unwrap()})).unwrap();

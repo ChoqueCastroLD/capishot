@@ -77,7 +77,11 @@ impl RefineParams {
     }
     /// How far the refined mask can extend beyond the original.
     pub fn spread(&self) -> i32 {
-        (if self.uses_image() { self.radius.ceil() as i32 } else { 0 }) + (3.0 * self.smooth_sigma()).ceil() as i32 + (3.0 * self.feather_sigma()).ceil() as i32 + self.shift_px().max(0) + 1
+        (if self.uses_image() { self.radius.ceil() as i32 } else { 0 })
+            + (3.0 * self.smooth_sigma()).ceil() as i32
+            + (3.0 * self.feather_sigma()).ceil() as i32
+            + self.shift_px().max(0)
+            + 1
     }
 }
 
@@ -163,7 +167,11 @@ pub fn guided_filter_color(guide: &RgbImage, p: &[f32], r: usize, eps: f32) -> V
         let (a0, a1, a2) = if det.abs() < 1e-30 {
             (0.0, 0.0, 0.0)
         } else {
-            ((i00 * cov[0] + i01 * cov[1] + i02 * cov[2]) / det, (i01 * cov[0] + i11 * cov[1] + i12 * cov[2]) / det, (i02 * cov[0] + i12 * cov[1] + i22 * cov[2]) / det)
+            (
+                (i00 * cov[0] + i01 * cov[1] + i02 * cov[2]) / det,
+                (i01 * cov[0] + i11 * cov[1] + i12 * cov[2]) / det,
+                (i02 * cov[0] + i12 * cov[1] + i22 * cov[2]) / det,
+            )
         };
         av[0][i] = a0 as f32;
         av[1][i] = a1 as f32;
@@ -708,7 +716,13 @@ mod tests {
             s.fill_rect(Rect::new(0, 0, 10, 8), &[1.0, 0.0, 0.0, 1.0]);
             s.fill_rect(Rect::new(10, 0, 20, 8), &[0.5, 0.0, 0.5, 1.0]);
             s.fill_rect(Rect::new(11, 0, 20, 8), &[0.0, 0.0, 1.0, 1.0]);
-            let mask: Vec<u8> = (0..20 * 8).map(|i| match i % 20 { x if x < 10 => 255, 10 => 128, _ => 0 }).collect();
+            let mask: Vec<u8> = (0..20 * 8)
+                .map(|i| match i % 20 {
+                    x if x < 10 => 255,
+                    10 => 128,
+                    _ => 0,
+                })
+                .collect();
             let a = Region { bbox: Rect::new(0, 0, 20, 8), mask };
             let d = decontaminate(&s, &a, 3.0, 100.0);
             let p = d.pixel(10, 4);

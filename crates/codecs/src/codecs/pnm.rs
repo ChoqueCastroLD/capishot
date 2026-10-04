@@ -27,10 +27,7 @@ impl<'a> Reader<'a> {
         while self.pos < self.b.len() {
             let c = self.b[self.pos];
             if c == b'#' {
-                while self.pos < self.b.len()
-                    && self.b[self.pos] != b'\n'
-                    && self.b[self.pos] != b'\r'
-                {
+                while self.pos < self.b.len() && self.b[self.pos] != b'\n' && self.b[self.pos] != b'\r' {
                     self.pos += 1;
                 }
             } else if c.is_ascii_whitespace() {
@@ -44,10 +41,7 @@ impl<'a> Reader<'a> {
     fn token(&mut self) -> Result<&'a [u8], CodecError> {
         self.skip_ws_and_comments();
         let start = self.pos;
-        while self.pos < self.b.len()
-            && !self.b[self.pos].is_ascii_whitespace()
-            && self.b[self.pos] != b'#'
-        {
+        while self.pos < self.b.len() && !self.b[self.pos].is_ascii_whitespace() && self.b[self.pos] != b'#' {
             self.pos += 1;
         }
         if start == self.pos {
@@ -58,10 +52,7 @@ impl<'a> Reader<'a> {
 
     fn uint(&mut self) -> Result<u32, CodecError> {
         let t = self.token()?;
-        std::str::from_utf8(t)
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .ok_or_else(|| err("invalid integer in header"))
+        std::str::from_utf8(t).ok().and_then(|s| s.parse::<u32>().ok()).ok_or_else(|| err("invalid integer in header"))
     }
 
     /// Consume the single whitespace byte that separates header and raster.
@@ -89,45 +80,16 @@ fn sample_for_maxval(maxval: u32) -> Result<SampleType, CodecError> {
 }
 
 /// Build an image from raw integer values in `[0, maxval]`.
-fn from_values(
-    w: u32,
-    h: u32,
-    layout: ChannelLayout,
-    maxval: u32,
-    values: Vec<u32>,
-) -> Result<Image, CodecError> {
+fn from_values(w: u32, h: u32, layout: ChannelLayout, maxval: u32, values: Vec<u32>) -> Result<Image, CodecError> {
     let sample = sample_for_maxval(maxval)?;
     if values.iter().any(|&v| v > maxval) {
         return Err(err("sample exceeds maxval"));
     }
     match (sample, maxval) {
-        (SampleType::U8, 255) => {
-            Image::from_u8(w, h, layout, values.into_iter().map(|v| v as u8).collect())
-        }
-        (SampleType::U16, 65535) => Image::from_u16(
-            w,
-            h,
-            layout,
-            &values.into_iter().map(|v| v as u16).collect::<Vec<_>>(),
-        ),
-        (SampleType::U8, m) => Image::from_u8(
-            w,
-            h,
-            layout,
-            values
-                .into_iter()
-                .map(|v| ((v * 255 + m / 2) / m) as u8)
-                .collect(),
-        ),
-        (_, m) => Image::from_u16(
-            w,
-            h,
-            layout,
-            &values
-                .into_iter()
-                .map(|v| ((v as u64 * 65535 + m as u64 / 2) / m as u64) as u16)
-                .collect::<Vec<_>>(),
-        ),
+        (SampleType::U8, 255) => Image::from_u8(w, h, layout, values.into_iter().map(|v| v as u8).collect()),
+        (SampleType::U16, 65535) => Image::from_u16(w, h, layout, &values.into_iter().map(|v| v as u16).collect::<Vec<_>>()),
+        (SampleType::U8, m) => Image::from_u8(w, h, layout, values.into_iter().map(|v| ((v * 255 + m / 2) / m) as u8).collect()),
+        (_, m) => Image::from_u16(w, h, layout, &values.into_iter().map(|v| ((v as u64 * 65535 + m as u64 / 2) / m as u64) as u16).collect::<Vec<_>>()),
     }
 }
 
@@ -141,10 +103,7 @@ fn read_binary(data: &[u8], n: usize, maxval: u32) -> Result<Vec<u32>, CodecErro
         if data.len() < n * 2 {
             return Err(err("truncated raster"));
         }
-        Ok(data[..n * 2]
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]) as u32)
-            .collect())
+        Ok(data[..n * 2].as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]]) as u32).collect())
     }
 }
 
@@ -189,11 +148,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         }
         b'2' | b'3' | b'5' | b'6' => {
             let (w, h, maxval) = (r.uint()?, r.uint()?, r.uint()?);
-            let layout = if matches!(kind, b'2' | b'5') {
-                ChannelLayout::Gray
-            } else {
-                ChannelLayout::Rgb
-            };
+            let layout = if matches!(kind, b'2' | b'5') { ChannelLayout::Gray } else { ChannelLayout::Rgb };
             limits.check(w, h, layout, sample_for_maxval(maxval)?)?;
             let n = w as usize * h as usize * layout.channels();
             let values = if matches!(kind, b'5' | b'6') {
@@ -210,11 +165,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         }
         b'7' => decode_pam(&mut r, limits),
         b'F' | b'f' => {
-            let layout = if kind == b'F' {
-                ChannelLayout::Rgb
-            } else {
-                ChannelLayout::Gray
-            };
+            let layout = if kind == b'F' { ChannelLayout::Rgb } else { ChannelLayout::Gray };
             let (w, h) = (r.uint()?, r.uint()?);
             let scale: f32 = std::str::from_utf8(r.token()?)
                 .ok()
@@ -237,11 +188,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
                 for i in 0..row {
                     let o = (y * row + i) * 4;
                     let b4 = [data[o], data[o + 1], data[o + 2], data[o + 3]];
-                    out[dst + i] = if le {
-                        f32::from_le_bytes(b4)
-                    } else {
-                        f32::from_be_bytes(b4)
-                    };
+                    out[dst + i] = if le { f32::from_le_bytes(b4) } else { f32::from_be_bytes(b4) };
                 }
             }
             Image::from_f32(w, h, layout, &out)
@@ -284,10 +231,7 @@ fn decode_pam(r: &mut Reader<'_>, limits: &Limits) -> Result<Image, CodecError> 
         ("CMYK", 4) => ChannelLayout::Cmyk,
         ("CMYK_ALPHA", 5) => ChannelLayout::CmykA,
         (t, d) => {
-            return Err(CodecError::unsupported(
-                F,
-                format!("PAM tuple type {t:?} with depth {d}"),
-            ));
+            return Err(CodecError::unsupported(F, format!("PAM tuple type {t:?} with depth {d}")));
         }
     };
     limits.check(w, h, layout, sample_for_maxval(maxval)?)?;
@@ -296,11 +240,7 @@ fn decode_pam(r: &mut Reader<'_>, limits: &Limits) -> Result<Image, CodecError> 
     from_values(w, h, layout, maxval, values)
 }
 
-pub(crate) fn encode(
-    src: &Image,
-    plan: Plan,
-    _opts: &EncodeOptions,
-) -> Result<Vec<u8>, CodecError> {
+pub(crate) fn encode(src: &Image, plan: Plan, _opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
     let img = src.convert(plan.layout, plan.sample);
     let (w, h) = img.dimensions();
     let layout = img.layout();
@@ -324,12 +264,8 @@ pub(crate) fn encode(
         sample @ (SampleType::U8 | SampleType::U16) => {
             let maxval = if sample == SampleType::U8 { 255 } else { 65535 };
             match layout {
-                ChannelLayout::Gray => {
-                    out.extend_from_slice(format!("P5\n{w} {h}\n{maxval}\n").as_bytes())
-                }
-                ChannelLayout::Rgb => {
-                    out.extend_from_slice(format!("P6\n{w} {h}\n{maxval}\n").as_bytes())
-                }
+                ChannelLayout::Gray => out.extend_from_slice(format!("P5\n{w} {h}\n{maxval}\n").as_bytes()),
+                ChannelLayout::Rgb => out.extend_from_slice(format!("P6\n{w} {h}\n{maxval}\n").as_bytes()),
                 l => {
                     let t = match l {
                         ChannelLayout::GrayA => "GRAYSCALE_ALPHA",
@@ -337,13 +273,7 @@ pub(crate) fn encode(
                         ChannelLayout::Cmyk => "CMYK",
                         _ => "CMYK_ALPHA",
                     };
-                    out.extend_from_slice(
-                        format!(
-                            "P7\nWIDTH {w}\nHEIGHT {h}\nDEPTH {}\nMAXVAL {maxval}\nTUPLTYPE {t}\nENDHDR\n",
-                            l.channels()
-                        )
-                        .as_bytes(),
-                    );
+                    out.extend_from_slice(format!("P7\nWIDTH {w}\nHEIGHT {h}\nDEPTH {}\nMAXVAL {maxval}\nTUPLTYPE {t}\nENDHDR\n", l.channels()).as_bytes());
                 }
             }
             if sample == SampleType::U8 {

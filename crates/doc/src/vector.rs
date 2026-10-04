@@ -250,12 +250,25 @@ impl Default for ShapeStroke {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum LiveShape {
     /// Rectangle `[x, y, w, h]` with corner radii `[tl, tr, br, bl]` (all zero = sharp).
-    Rect { rect: [f64; 4], radii: [f64; 4] },
-    Ellipse { rect: [f64; 4] },
+    Rect {
+        rect: [f64; 4],
+        radii: [f64; 4],
+    },
+    Ellipse {
+        rect: [f64; 4],
+    },
     /// Regular polygon or star inscribed in `rect`; `star_ratio` = inner/outer radius (1 = polygon).
-    Polygon { rect: [f64; 4], sides: u32, star_ratio: f64 },
+    Polygon {
+        rect: [f64; 4],
+        sides: u32,
+        star_ratio: f64,
+    },
     /// Line from `from` to `to` drawn as a filled bar `weight` px thick.
-    Line { from: [f64; 2], to: [f64; 2], weight: f64 },
+    Line {
+        from: [f64; 2],
+        to: [f64; 2],
+        weight: f64,
+    },
 }
 
 /// A shape layer: a filled and/or stroked path.

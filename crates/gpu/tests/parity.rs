@@ -25,8 +25,27 @@ fn gpu() -> Option<Gpu> {
         }
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
-    let comp = Compositor::new(&device);
+    // Exact parity needs 32-bit float targets. Adapters without them (e.g. GL software
+    // rasterizers) use the CPU compositor in the app, so there is nothing to compare there.
+    if Compositor::preferred_acc_format(&adapter) != wgpu::TextureFormat::Rgba32Float {
+        eprintln!("skipping GPU parity tests: adapter can't render Rgba32Float");
+        return None;
+    }
+    let comp = match Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("skipping GPU parity tests: {e}");
+            return None;
+        }
+    };
     Some(Gpu { device, queue, comp })
+}
+
+/// Any adapter and device, for the fallback-path tests (which don't need 32-bit float targets).
+fn any_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    let adapter = pollster::block_on(wgpu::Instance::default().request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+    Some((adapter, device, queue))
 }
 
 /// Deterministic pseudo-random values in 0..1.
@@ -116,7 +135,10 @@ fn adjustments() -> Vec<Adjustment> {
         Adjustment::BrightnessContrast { brightness: -20.0, contrast: -30.0, legacy: true },
         Adjustment::Exposure { exposure: 0.7, offset: 0.02, gamma: 1.2 },
         Adjustment::Levels { master: lc(0.1, 0.9, 1.3), per_channel: [lc(0.0, 1.0, 0.8), LevelsChannel::default(), lc(0.2, 0.8, 1.0)] },
-        Adjustment::Curves { master: pts(&[(0.0, 0.1), (0.4, 0.6), (1.0, 0.9)]), per_channel: [pts(&[(0.0, 0.0), (0.5, 0.3), (1.0, 1.0)]), pts(&[(0.0, 0.0), (1.0, 1.0)]), pts(&[(0.0, 0.2), (1.0, 1.0)])] },
+        Adjustment::Curves {
+            master: pts(&[(0.0, 0.1), (0.4, 0.6), (1.0, 0.9)]),
+            per_channel: [pts(&[(0.0, 0.0), (0.5, 0.3), (1.0, 1.0)]), pts(&[(0.0, 0.0), (1.0, 1.0)]), pts(&[(0.0, 0.2), (1.0, 1.0)])],
+        },
         Adjustment::HueSaturation { hue: 40.0, saturation: 30.0, lightness: -10.0, colorize: false },
         Adjustment::HueSaturation { hue: 200.0, saturation: 50.0, lightness: 20.0, colorize: true },
         Adjustment::Vibrance { vibrance: 50.0, saturation: -20.0 },
@@ -327,7 +349,8 @@ fn incremental_updates_follow_the_document() {
 
 use photocraft_doc::adjust::CurvePoint as Cp;
 use photocraft_doc::{
-    Bevel, BevelStyle, BevelTechnique, Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, Pattern, Satin, Shadow, StrokeFx, StrokePosition,
+    Bevel, BevelStyle, BevelTechnique, Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, Pattern, Satin, Shadow, StrokeFx,
+    StrokePosition,
 };
 
 /// An anti-aliased blob (disc plus a soft-edged bar and a hole) with partially transparent parts,
@@ -382,7 +405,19 @@ fn shadow(blend: BlendMode, opacity: f32, angle: f32, distance: f32, size: f32, 
 }
 
 fn glow(paint: FxPaint, technique: GlowTechnique, size: f32, spread: f32, source: GlowSource) -> Glow {
-    Glow { common: FxCommon::new(BlendMode::Screen, 0.8), paint, technique, spread, size, contour: Contour::Linear, anti_alias: false, range: 0.5, jitter: 0.0, noise: 0.0, source }
+    Glow {
+        common: FxCommon::new(BlendMode::Screen, 0.8),
+        paint,
+        technique,
+        spread,
+        size,
+        contour: Contour::Linear,
+        anti_alias: false,
+        range: 0.5,
+        jitter: 0.0,
+        noise: 0.0,
+        source,
+    }
 }
 
 fn gradient() -> Gradient {
@@ -443,8 +478,26 @@ fn effect_cases() -> Vec<(&'static str, Vec<Effect>)> {
     ds_global.use_global_light = true;
     let mut og_contour = glow(FxPaint::Color(Color::rgb(1.0, 0.9, 0.2)), GlowTechnique::Softer, 9.0, 0.0, GlowSource::Edge);
     og_contour.contour = contour();
-    let mut satin_inv = Satin { common: FxCommon::new(BlendMode::Multiply, 0.6), color: Color::rgb(0.3, 0.0, 0.4), angle: 19.0, distance: 7.0, size: 8.0, contour: contour(), anti_alias: false, invert: true };
-    let satin = Satin { common: FxCommon::new(BlendMode::Overlay, 0.7), color: Color::rgb(0.9, 0.4, 0.1), angle: 60.0, distance: 5.0, size: 6.0, contour: Contour::Linear, anti_alias: false, invert: false };
+    let mut satin_inv = Satin {
+        common: FxCommon::new(BlendMode::Multiply, 0.6),
+        color: Color::rgb(0.3, 0.0, 0.4),
+        angle: 19.0,
+        distance: 7.0,
+        size: 8.0,
+        contour: contour(),
+        anti_alias: false,
+        invert: true,
+    };
+    let satin = Satin {
+        common: FxCommon::new(BlendMode::Overlay, 0.7),
+        color: Color::rgb(0.9, 0.4, 0.1),
+        angle: 60.0,
+        distance: 5.0,
+        size: 6.0,
+        contour: Contour::Linear,
+        anti_alias: false,
+        invert: false,
+    };
     satin_inv.common.enabled = true;
     let mut bevel_contour = bevel(BevelStyle::InnerBevel, true, 8.0, 3.0);
     bevel_contour.gloss_contour = contour();
@@ -460,23 +513,55 @@ fn effect_cases() -> Vec<(&'static str, Vec<Effect>)> {
         ("outer glow contour", vec![Effect::OuterGlow(og_contour)]),
         ("outer glow precise gradient", vec![Effect::OuterGlow(glow(FxPaint::Gradient(gradient()), GlowTechnique::Precise, 8.0, 0.25, GlowSource::Edge))]),
         ("inner glow softer edge", vec![Effect::InnerGlow(glow(FxPaint::Color(Color::rgb(0.9, 1.0, 0.8)), GlowTechnique::Softer, 7.0, 0.2, GlowSource::Edge))]),
-        ("inner glow softer center", vec![Effect::InnerGlow(glow(FxPaint::Color(Color::rgb(0.9, 1.0, 0.8)), GlowTechnique::Softer, 6.0, 0.0, GlowSource::Center))]),
-        ("inner glow precise edge", vec![Effect::InnerGlow(glow(FxPaint::Color(Color::rgb(0.2, 1.0, 0.8)), GlowTechnique::Precise, 6.0, 0.3, GlowSource::Edge))]),
+        (
+            "inner glow softer center",
+            vec![Effect::InnerGlow(glow(FxPaint::Color(Color::rgb(0.9, 1.0, 0.8)), GlowTechnique::Softer, 6.0, 0.0, GlowSource::Center))],
+        ),
+        (
+            "inner glow precise edge",
+            vec![Effect::InnerGlow(glow(FxPaint::Color(Color::rgb(0.2, 1.0, 0.8)), GlowTechnique::Precise, 6.0, 0.3, GlowSource::Edge))],
+        ),
         ("inner glow precise center", vec![Effect::InnerGlow(glow(pat_paint.clone(), GlowTechnique::Precise, 5.0, 0.0, GlowSource::Center))]),
         ("bevel inner", vec![Effect::BevelEmboss(bevel(BevelStyle::InnerBevel, true, 7.0, 2.0))]),
         ("bevel outer", vec![Effect::BevelEmboss(bevel(BevelStyle::OuterBevel, true, 6.0, 0.0))]),
         ("bevel emboss down", vec![Effect::BevelEmboss(bevel(BevelStyle::Emboss, false, 8.0, 1.0))]),
         ("bevel pillow", vec![Effect::BevelEmboss(bevel(BevelStyle::PillowEmboss, true, 5.0, 4.0))]),
-        ("bevel inner chisel hard", vec![Effect::BevelEmboss(Bevel { technique: BevelTechnique::ChiselHard, ..bevel(BevelStyle::InnerBevel, true, 9.0, 0.0) })]),
-        ("bevel outer chisel soft", vec![Effect::BevelEmboss(Bevel { technique: BevelTechnique::ChiselSoft, ..bevel(BevelStyle::OuterBevel, false, 7.5, 2.0) })]),
-        ("bevel pillow chisel hard", vec![Effect::BevelEmboss(Bevel { technique: BevelTechnique::ChiselHard, ..bevel(BevelStyle::PillowEmboss, false, 7.0, 0.0) })]),
+        (
+            "bevel inner chisel hard",
+            vec![Effect::BevelEmboss(Bevel { technique: BevelTechnique::ChiselHard, ..bevel(BevelStyle::InnerBevel, true, 9.0, 0.0) })],
+        ),
+        (
+            "bevel outer chisel soft",
+            vec![Effect::BevelEmboss(Bevel { technique: BevelTechnique::ChiselSoft, ..bevel(BevelStyle::OuterBevel, false, 7.5, 2.0) })],
+        ),
+        (
+            "bevel pillow chisel hard",
+            vec![Effect::BevelEmboss(Bevel { technique: BevelTechnique::ChiselHard, ..bevel(BevelStyle::PillowEmboss, false, 7.0, 0.0) })],
+        ),
         ("bevel emboss smooth wide", vec![Effect::BevelEmboss(bevel(BevelStyle::Emboss, true, 21.0, 0.0))]),
         ("bevel stroke emboss", vec![Effect::BevelEmboss(bevel(BevelStyle::StrokeEmboss, true, 6.0, 0.0))]),
-        ("bevel texture", vec![Effect::BevelEmboss(Bevel {
-            texture: Some(photocraft_doc::BevelTexture { name: "checker".into(), id: String::new(), scale: 1.4, depth: -1.5, invert: true, link: true, phase: (2.0, 1.0) }),
-            ..bevel(BevelStyle::InnerBevel, true, 7.0, 1.0)
-        })]),
-        ("bevel contour", vec![Effect::BevelEmboss(Bevel { contour: Some(photocraft_doc::BevelContour { contour: contour(), range: 0.6, anti_alias: false }), ..bevel(BevelStyle::Emboss, true, 9.0, 1.0) })]),
+        (
+            "bevel texture",
+            vec![Effect::BevelEmboss(Bevel {
+                texture: Some(photocraft_doc::BevelTexture {
+                    name: "checker".into(),
+                    id: String::new(),
+                    scale: 1.4,
+                    depth: -1.5,
+                    invert: true,
+                    link: true,
+                    phase: (2.0, 1.0),
+                }),
+                ..bevel(BevelStyle::InnerBevel, true, 7.0, 1.0)
+            })],
+        ),
+        (
+            "bevel contour",
+            vec![Effect::BevelEmboss(Bevel {
+                contour: Some(photocraft_doc::BevelContour { contour: contour(), range: 0.6, anti_alias: false }),
+                ..bevel(BevelStyle::Emboss, true, 9.0, 1.0)
+            })],
+        ),
         ("bevel contour own light", vec![Effect::BevelEmboss(bevel_contour)]),
         ("satin", vec![Effect::Satin(satin)]),
         ("satin inverted contour", vec![Effect::Satin(satin_inv)]),
@@ -484,13 +569,50 @@ fn effect_cases() -> Vec<(&'static str, Vec<Effect>)> {
         ("stroke inside gradient", vec![Effect::Stroke(stroke(3.0, StrokePosition::Inside, FxPaint::Gradient(gradient())))]),
         ("stroke centre pattern", vec![Effect::Stroke(stroke(5.0, StrokePosition::Center, pat_paint.clone()))]),
         ("colour overlay", vec![Effect::ColorOverlay { common: FxCommon::new(BlendMode::Multiply, 0.7), color: Color::rgb(0.2, 0.7, 0.9) }]),
-        ("gradient overlay", vec![Effect::GradientOverlay { common: FxCommon::new(BlendMode::Normal, 0.8), gradient: Gradient { style: GradientStyle::Radial, ..gradient() }, dither: false }]),
-        ("pattern overlay", vec![Effect::PatternOverlay { common: FxCommon::new(BlendMode::Normal, 0.9), name: pat.name.clone(), id: pat.id.clone(), scale: 1.0, angle: 0.0, link: true, phase: (2.0, 1.0) }]),
-        ("pattern overlay scaled rotated", vec![Effect::PatternOverlay { common: FxCommon::new(BlendMode::Screen, 0.8), name: pat.name.clone(), id: pat.id.clone(), scale: 1.7, angle: 30.0, link: false, phase: (0.0, 0.0) }]),
+        (
+            "gradient overlay",
+            vec![Effect::GradientOverlay {
+                common: FxCommon::new(BlendMode::Normal, 0.8),
+                gradient: Gradient { style: GradientStyle::Radial, ..gradient() },
+                dither: false,
+            }],
+        ),
+        (
+            "pattern overlay",
+            vec![Effect::PatternOverlay {
+                common: FxCommon::new(BlendMode::Normal, 0.9),
+                name: pat.name.clone(),
+                id: pat.id.clone(),
+                scale: 1.0,
+                angle: 0.0,
+                link: true,
+                phase: (2.0, 1.0),
+            }],
+        ),
+        (
+            "pattern overlay scaled rotated",
+            vec![Effect::PatternOverlay {
+                common: FxCommon::new(BlendMode::Screen, 0.8),
+                name: pat.name.clone(),
+                id: pat.id.clone(),
+                scale: 1.7,
+                angle: 30.0,
+                link: false,
+                phase: (0.0, 0.0),
+            }],
+        ),
         (
             "missing pattern",
             vec![
-                Effect::PatternOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), name: "nope".into(), id: "nope".into(), scale: 1.0, angle: 0.0, link: true, phase: (0.0, 0.0) },
+                Effect::PatternOverlay {
+                    common: FxCommon::new(BlendMode::Normal, 1.0),
+                    name: "nope".into(),
+                    id: "nope".into(),
+                    scale: 1.0,
+                    angle: 0.0,
+                    link: true,
+                    phase: (0.0, 0.0),
+                },
                 Effect::Stroke(stroke(3.0, StrokePosition::Outside, FxPaint::Pattern { name: "nope".into(), id: "nope".into(), scale: 1.0 })),
                 Effect::Stroke(stroke(6.0, StrokePosition::Outside, FxPaint::Color(Color::rgb(0.0, 0.0, 0.0)))),
             ],
@@ -513,7 +635,16 @@ fn effect_cases() -> Vec<(&'static str, Vec<Effect>)> {
                 Effect::OuterGlow(glow(FxPaint::Color(Color::rgb(1.0, 1.0, 0.6)), GlowTechnique::Softer, 6.0, 0.0, GlowSource::Edge)),
                 Effect::InnerGlow(glow(FxPaint::Color(Color::rgb(1.0, 1.0, 0.6)), GlowTechnique::Softer, 4.0, 0.0, GlowSource::Edge)),
                 Effect::BevelEmboss(bevel(BevelStyle::InnerBevel, true, 5.0, 1.0)),
-                Effect::Satin(Satin { common: FxCommon::new(BlendMode::Multiply, 0.4), color: Color::rgb(0.0, 0.0, 0.0), angle: 19.0, distance: 4.0, size: 5.0, contour: Contour::Linear, anti_alias: false, invert: false }),
+                Effect::Satin(Satin {
+                    common: FxCommon::new(BlendMode::Multiply, 0.4),
+                    color: Color::rgb(0.0, 0.0, 0.0),
+                    angle: 19.0,
+                    distance: 4.0,
+                    size: 5.0,
+                    contour: Contour::Linear,
+                    anti_alias: false,
+                    invert: false,
+                }),
                 Effect::ColorOverlay { common: FxCommon::new(BlendMode::SoftLight, 0.5), color: Color::rgb(0.9, 0.3, 0.2) },
                 Effect::GradientOverlay { common: FxCommon::new(BlendMode::Overlay, 0.4), gradient: gradient(), dither: false },
                 Effect::Stroke(stroke(3.0, StrokePosition::Outside, FxPaint::Color(Color::rgb(0.0, 0.0, 0.0)))),
@@ -572,7 +703,13 @@ fn layer_effects_every_kind() {
 fn layer_effects_opacity_fill_blend_and_off_canvas() {
     let Some(mut g) = gpu() else { return };
     let stack = effect_cases().into_iter().find(|(n, _)| *n == "full stack").unwrap().1;
-    for (opacity, fill, blend) in [(0.7, 1.0, BlendMode::Normal), (1.0, 0.0, BlendMode::Normal), (0.6, 0.35, BlendMode::Multiply), (1.0, 0.5, BlendMode::Screen), (0.8, 1.0, BlendMode::Dissolve)] {
+    for (opacity, fill, blend) in [
+        (0.7, 1.0, BlendMode::Normal),
+        (1.0, 0.0, BlendMode::Normal),
+        (0.6, 0.35, BlendMode::Multiply),
+        (1.0, 0.5, BlendMode::Screen),
+        (0.8, 1.0, BlendMode::Dissolve),
+    ] {
         let mut d = fx_doc(96, 80, SampleType::U8);
         let mut l = blob("fx", d.pixel_format(), 46.0, 40.0, 22.0, [0.2, 0.6, 0.9]);
         l.effects.items = stack.clone();
@@ -797,7 +934,10 @@ fn type_layers_blend_with_text_gamma() {
     // With effects (the merge of the layer onto its exterior effects).
     let mut d = fx_doc(96, 80, SampleType::U8);
     let mut l = as_text(blob("fx", d.pixel_format(), 46.0, 40.0, 22.0, [0.2, 0.1, 0.6]));
-    l.effects.items = vec![Effect::ColorOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), color: Color::rgb(0.0, 0.2, 0.6) }, Effect::DropShadow(shadow(BlendMode::Multiply, 0.6, 90.0, 5.0, 6.0, 0.0))];
+    l.effects.items = vec![
+        Effect::ColorOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), color: Color::rgb(0.0, 0.2, 0.6) },
+        Effect::DropShadow(shadow(BlendMode::Multiply, 0.6, 90.0, 5.0, 6.0, 0.0)),
+    ];
     d.layers.push(l);
     fx_check(&mut g, &d, "text fx");
     // The gamma changes edge pixels against a linear mix.
@@ -873,11 +1013,15 @@ fn stroked_shapes_with_clipped_layers() {
 fn artboards() {
     let Some(mut g) = gpu() else { return };
     use photocraft_doc::{Artboard, ArtboardBackground};
-    let backgrounds = [ArtboardBackground::White, ArtboardBackground::Transparent, ArtboardBackground::Custom({
-        let mut c = Color::rgb(0.2, 0.7, 0.4);
-        c.alpha = 0.5;
-        c
-    })];
+    let backgrounds = [
+        ArtboardBackground::White,
+        ArtboardBackground::Transparent,
+        ArtboardBackground::Custom({
+            let mut c = Color::rgb(0.2, 0.7, 0.4);
+            c.alpha = 0.5;
+            c
+        }),
+    ];
     for bg in backgrounds {
         for blend in [BlendMode::PassThrough, BlendMode::Normal, BlendMode::Multiply] {
             let mut d = base_doc(72, 48);
@@ -931,7 +1075,6 @@ fn pattern_fill_layers() {
     }
 }
 
-
 #[test]
 fn lab_documents_mix_in_lab() {
     let Some(mut g) = gpu() else { return };
@@ -968,14 +1111,11 @@ fn rgba16f_fallback_path_renders() {
     // Rgba16Float. Force that path here (even on a 32f-capable GPU) to prove it works end to end —
     // pipeline creation, the accumulation texture, and the half-float readback — within display
     // tolerance of the CPU reference. This is the path Intel-Vulkan / limited GPUs take.
-    let instance = wgpu::Instance::default();
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
-        return;
+    let Some((adapter, device, queue)) = any_device() else { return };
+    let mut comp = match Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba16Float) {
+        Ok(c) => c,
+        Err(e) => return eprintln!("skipping: {e}"),
     };
-    let Some((device, queue)) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok() else {
-        return;
-    };
-    let mut comp = Compositor::new_with_format(&device, wgpu::TextureFormat::Rgba16Float);
     let mut d = base_doc(48, 32);
     let mut top = noise_layer("top", PixelFormat::RGBA8, Rect::from_xywh(0, 0, 48, 32), 7, 1.0);
     top.blend = BlendMode::Multiply;
@@ -995,4 +1135,18 @@ fn rgba16f_fallback_path_renders() {
     // preferred_acc_format returns a renderable format for this adapter.
     let f = Compositor::preferred_acc_format(&adapter);
     assert!(matches!(f, wgpu::TextureFormat::Rgba32Float | wgpu::TextureFormat::Rgba16Float));
+}
+
+#[test]
+fn unbuildable_pipelines_are_an_error_not_a_panic() {
+    // The app falls back to the CPU compositor on Err; a panic here would crash it (as FXC once
+    // did on D3D12). A depth format can't be a colour target, so its pipelines fail to build.
+    let Some((adapter, device, _)) = any_device() else { return };
+    let e = Compositor::try_new_with_format(&device, wgpu::TextureFormat::Depth32Float).err().expect("depth target must fail");
+    assert!(e.0.contains("pipelines"), "{e}");
+    // The format the app picks builds (effect maps the adapter can't render are left out, not fatal).
+    let f = Compositor::preferred_acc_format(&adapter);
+    if adapter.get_texture_format_features(f).allowed_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT) {
+        assert!(Compositor::try_new_with_format(&device, f).is_ok());
+    }
 }

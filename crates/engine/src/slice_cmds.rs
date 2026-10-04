@@ -62,7 +62,15 @@ pub fn layer_bounds(l: &Layer) -> Rect {
     let own = match &l.content {
         LayerContent::Group(g) => match &g.artboard {
             Some(a) => a.rect,
-            None => g.children.iter().filter(|c| c.visible).map(layer_bounds).fold(Rect::EMPTY, |a, b| if a.is_empty() { b } else if b.is_empty() { a } else { a.union(&b) }),
+            None => g.children.iter().filter(|c| c.visible).map(layer_bounds).fold(Rect::EMPTY, |a, b| {
+                if a.is_empty() {
+                    b
+                } else if b.is_empty() {
+                    a
+                } else {
+                    a.union(&b)
+                }
+            }),
         },
         _ => photocraft_doc::comps::position_bounds(l),
     };
@@ -403,7 +411,16 @@ fn layer_based(s: &mut Session, p: &Value) -> Result<Value> {
     let id = s.edit("New Layer Based Slice", |doc, _| {
         let id = doc.slices.next_id();
         let text = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
-        doc.slices.list.push(Slice { id, origin: SliceOrigin::Layer, layer: Some(layer), rect, name: text("name"), url: text("url"), alt: text("alt"), ..Default::default() });
+        doc.slices.list.push(Slice {
+            id,
+            origin: SliceOrigin::Layer,
+            layer: Some(layer),
+            rect,
+            name: text("name"),
+            url: text("url"),
+            alt: text("alt"),
+            ..Default::default()
+        });
         Ok(id)
     })?;
     Ok(json!({"slice": id, "rect": [rect.x0, rect.y0, rect.width(), rect.height()]}))
@@ -431,14 +448,53 @@ pub fn specs() -> Vec<CommandSpec> {
         };
     }
     vec![
-        spec!("slice.new", "Slice Tool", &[], r##"{"rect":[x,y,w,h] | "x","y","width","height", plus Slice Options ("name","kind":"image|noImage|table","url","target","message","alt","cellText","cellTextIsHtml","background":"none|#rrggbb")?} → {slice, number}"##, unlocked, new_slice),
-        spec!("slice.fromGuides", "Slices From Guides", &[], "{} (replaces every slice by the grid of the canvas guides) → {slices}", unlocked, |s, _| from_guides(s)),
-        spec!("slice.set", "Slice Options…", &[], r##"{"slice":id | "number":n (an auto slice is promoted), "name"?,"kind":"image|noImage|table"?,"url"?,"target"?,"message"?,"alt"?,"cellText"?,"cellTextIsHtml"?,"horizontalAlign":0..4?,"verticalAlign":0..4?,"background":"none|#rrggbb"?,"outsets":[t,l,b,r]? (layer slices),"rect":[x,y,w,h]? (move/resize; a layer slice becomes a user slice)} → the slice"##, unlocked, set_slice),
+        spec!(
+            "slice.new",
+            "Slice Tool",
+            &[],
+            r##"{"rect":[x,y,w,h] | "x","y","width","height", plus Slice Options ("name","kind":"image|noImage|table","url","target","message","alt","cellText","cellTextIsHtml","background":"none|#rrggbb")?} → {slice, number}"##,
+            unlocked,
+            new_slice
+        ),
+        spec!("slice.fromGuides", "Slices From Guides", &[], "{} (replaces every slice by the grid of the canvas guides) → {slices}", unlocked, |s, _| {
+            from_guides(s)
+        }),
+        spec!(
+            "slice.set",
+            "Slice Options…",
+            &[],
+            r##"{"slice":id | "number":n (an auto slice is promoted), "name"?,"kind":"image|noImage|table"?,"url"?,"target"?,"message"?,"alt"?,"cellText"?,"cellTextIsHtml"?,"horizontalAlign":0..4?,"verticalAlign":0..4?,"background":"none|#rrggbb"?,"outsets":[t,l,b,r]? (layer slices),"rect":[x,y,w,h]? (move/resize; a layer slice becomes a user slice)} → the slice"##,
+            unlocked,
+            set_slice
+        ),
         spec!("slice.promote", "Promote", &[], r##"{"slice":id | "number":n} (auto or layer-based → user slice) → {slice}"##, unlocked, promote),
         spec!("slice.delete", "Delete Slice", &[], r##"{"slice":id | "number":n | "slices":[id…]} → {deleted}"##, has_slices, delete),
-        spec!("slice.divide", "Divide Slice…", &[], r##"{"slice":id | "number":n,"horizontal":n=1 (slices down),"vertical":n=1 (slices across)} → {slices}"##, unlocked, divide),
-        CommandSpec { id: "slice.list", label: "List Slices", menu: &[], shortcut: None, params: "{} → {slices:[{number,id,origin:auto|layer|user,name,rect:[x,y,w,h],kind,layer,url,alt,…}], locked}", enabled: has_doc, journal: false, run: |s, _| list(s) },
-        spec!("layer.newLayerBasedSlice", "New Layer Based Slice", &["Layer"], r##"{"layer":id?,"name":str?,"url":str?,"alt":str?} (follows the layer's bounds with effects) → {slice, rect}"##, has_layer_for_slice, layer_based),
+        spec!(
+            "slice.divide",
+            "Divide Slice…",
+            &[],
+            r##"{"slice":id | "number":n,"horizontal":n=1 (slices down),"vertical":n=1 (slices across)} → {slices}"##,
+            unlocked,
+            divide
+        ),
+        CommandSpec {
+            id: "slice.list",
+            label: "List Slices",
+            menu: &[],
+            shortcut: None,
+            params: "{} → {slices:[{number,id,origin:auto|layer|user,name,rect:[x,y,w,h],kind,layer,url,alt,…}], locked}",
+            enabled: has_doc,
+            journal: false,
+            run: |s, _| list(s),
+        },
+        spec!(
+            "layer.newLayerBasedSlice",
+            "New Layer Based Slice",
+            &["Layer"],
+            r##"{"layer":id?,"name":str?,"url":str?,"alt":str?} (follows the layer's bounds with effects) → {slice, rect}"##,
+            has_layer_for_slice,
+            layer_based
+        ),
         spec!("view.lockSlices", "Lock Slices", &["View"], r##"{"on":bool? (default: toggle)} → {locked}"##, has_doc, lock),
         spec!("view.clearSlices", "Clear Slices", &["View"], "{} (deletes every user and layer-based slice) → {cleared}", has_slices, |s, _| clear(s)),
     ]

@@ -481,7 +481,7 @@ mod tests {
         let mut b = BrushSettings { size: 400.0, ..Default::default() };
         let px = preview_pixels(&b, 120, 40, [1.0, 0.0, 0.0, 1.0]);
         assert_eq!(px.len(), 120 * 40 * 4);
-        let covered = px.chunks_exact(4).filter(|p| p[3] > 128).count();
+        let covered = px.as_chunks::<4>().0.iter().filter(|p| p[3] > 128).count();
         assert!(covered > 200 && covered < 120 * 40 / 2, "{covered}");
         // Dynamics change the preview.
         b.scattering.enabled = true;

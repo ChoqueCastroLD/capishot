@@ -321,7 +321,8 @@ fn toggle_last_state(s: &mut Session) -> Result<Value> {
 
 /// Edit › Transform › Again: replay the last `edit.transform` on the active layer.
 fn transform_again(s: &mut Session) -> Result<Value> {
-    let (_, last) = s.journal.iter().rev().find(|(id, _)| id == "edit.transform").cloned().ok_or(EngineError::Other("there is no transform to repeat".into()))?;
+    let (_, last) =
+        s.journal.iter().rev().find(|(id, _)| id == "edit.transform").cloned().ok_or(EngineError::Other("there is no transform to repeat".into()))?;
     let (rect, quad) = (last.get("rect").cloned(), last.get("quad").cloned());
     let mut p = json!({"interpolation": last.get("interpolation").cloned().unwrap_or(json!("bicubic"))});
     match (rect, quad, last.get("matrix").cloned()) {
@@ -332,8 +333,11 @@ fn transform_again(s: &mut Session) -> Result<Value> {
             if r.len() != 4 || q.len() != 4 || q.iter().any(|row| row.len() < 2) {
                 return Err(EngineError::Other("the last transform can't be repeated".into()));
             }
-            let h = photocraft_algo::transform::Homography::rect_to_quad([r[0], r[1], r[2], r[3]], [[q[0][0], q[0][1]], [q[1][0], q[1][1]], [q[2][0], q[2][1]], [q[3][0], q[3][1]]])
-                .ok_or(EngineError::Other("the last transform can't be repeated".into()))?;
+            let h = photocraft_algo::transform::Homography::rect_to_quad(
+                [r[0], r[1], r[2], r[3]],
+                [[q[0][0], q[0][1]], [q[1][0], q[1][1]], [q[2][0], q[2][1]], [q[3][0], q[3][1]]],
+            )
+            .ok_or(EngineError::Other("the last transform can't be repeated".into()))?;
             let d = s.active().ok_or(EngineError::NoDocument)?;
             let l = d.doc.layer(active_id(s)?).ok_or(EngineError::Other("no active layer".into()))?;
             let b = crate::transform_cmds::transform_bounds(&d.doc, l);
@@ -402,7 +406,15 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
         spec!("edit.copy", "Copy", &["Edit"], Some("Cmd+C"), "{}", has_pixels, |s, _| copy(s, false)),
         spec!("edit.copyMerged", "Copy Merged", &["Edit"], Some("Cmd+Shift+C"), "{}", has_doc, |s, _| copy(s, true)),
-        spec!("edit.paste", "Paste", &["Edit"], Some("Cmd+V"), r##"{"center":[x,y]? (view centre; default keeps the position when it overlaps the canvas)}"##, has_clip, |s, p| paste(s, p, false)),
+        spec!(
+            "edit.paste",
+            "Paste",
+            &["Edit"],
+            Some("Cmd+V"),
+            r##"{"center":[x,y]? (view centre; default keeps the position when it overlaps the canvas)}"##,
+            has_clip,
+            |s, p| paste(s, p, false)
+        ),
         spec!("edit.pasteSpecial.pasteInPlace", "Paste in Place", &["Edit", "Paste Special"], Some("Cmd+Shift+V"), "{}", has_clip, |s, p| paste(s, p, true)),
         spec!("layer.new.layerViaCopy", "Layer via Copy", &["Layer", "New"], Some("Cmd+J"), "{}", has_doc, |s, _| layer_via(s, false)),
         spec!("layer.new.layerViaCut", "Layer via Cut", &["Layer", "New"], Some("Cmd+Shift+J"), "{}", has_pixels, |s, _| layer_via(s, true)),
@@ -412,8 +424,12 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("image.autoColor", "Auto Color", &["Image"], Some("Cmd+Shift+B"), "{}", has_pixels, |s, _| auto_adjust(s, "color")),
         spec!("edit.toggleLastState", "Toggle Last State", &["Edit"], Some("Cmd+Alt+Z"), "{}", has_doc, |s, _| toggle_last_state(s)),
         spec!("edit.transform.again", "Again", &["Edit", "Transform"], Some("Cmd+Shift+T"), "{}", has_doc, |s, _| transform_again(s)),
-        spec!("view.newGuide", "New Guide…", &["View"], None, r##"{"orientation":"horizontal|vertical","position":px}"##, has_doc, |s, p| guide_cmd(s, p, "new")),
-        spec!("view.moveGuide", "Move Guide", &[], None, r##"{"orientation":"horizontal|vertical","index":n,"position":px}"##, has_doc, |s, p| guide_cmd(s, p, "move")),
+        spec!("view.newGuide", "New Guide…", &["View"], None, r##"{"orientation":"horizontal|vertical","position":px}"##, has_doc, |s, p| guide_cmd(
+            s, p, "new"
+        )),
+        spec!("view.moveGuide", "Move Guide", &[], None, r##"{"orientation":"horizontal|vertical","index":n,"position":px}"##, has_doc, |s, p| guide_cmd(
+            s, p, "move"
+        )),
         spec!("view.deleteGuide", "Delete Guide", &[], None, r##"{"orientation":"horizontal|vertical","index":n}"##, has_doc, |s, p| guide_cmd(s, p, "delete")),
         spec!("view.clearGuides", "Clear Guides", &["View"], None, "{}", has_doc, |s, p| guide_cmd(s, p, "clear")),
     ]

@@ -71,10 +71,30 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical().max_height((ui.available_height() - footer).max(60.0)).auto_shrink([false, true]).show(ui, |ui| {
         for row in rows {
             let (name, thumb_idx, slot, visible, selected) = match row {
-                Row::Composite => (channel_cmds::composite_name(mode).to_string(), 0, Some(2), view.visible_colors(colors) == colors, view.target == ChannelTarget::Composite && !quick),
-                Row::Color(k) => (channel_cmds::color_names(mode)[k].to_string(), 1 + k, Some(3 + k), view.color_visible(k), (view.target == ChannelTarget::Composite && !quick) || view.target == ChannelTarget::Color(k)),
-                Row::Alpha(i) => (doc.channels[i].name.clone(), 1 + shown_colors + i, Some(3 + shown_colors + i).filter(|s| *s <= 9), view.alpha_shown(i), view.target == ChannelTarget::Alpha(i)),
-                Row::QuickMask => ("Quick Mask".to_string(), 1 + shown_colors + doc.channels.len(), None, !view.quick_mask_hidden, view.target == ChannelTarget::Composite),
+                Row::Composite => (
+                    channel_cmds::composite_name(mode).to_string(),
+                    0,
+                    Some(2),
+                    view.visible_colors(colors) == colors,
+                    view.target == ChannelTarget::Composite && !quick,
+                ),
+                Row::Color(k) => (
+                    channel_cmds::color_names(mode)[k].to_string(),
+                    1 + k,
+                    Some(3 + k),
+                    view.color_visible(k),
+                    (view.target == ChannelTarget::Composite && !quick) || view.target == ChannelTarget::Color(k),
+                ),
+                Row::Alpha(i) => (
+                    doc.channels[i].name.clone(),
+                    1 + shown_colors + i,
+                    Some(3 + shown_colors + i).filter(|s| *s <= 9),
+                    view.alpha_shown(i),
+                    view.target == ChannelTarget::Alpha(i),
+                ),
+                Row::QuickMask => {
+                    ("Quick Mask".to_string(), 1 + shown_colors + doc.channels.len(), None, !view.quick_mask_hidden, view.target == ChannelTarget::Composite)
+                }
             };
             let row_h = if t.pro { 36.0 } else { 40.0 };
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
@@ -115,7 +135,13 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let text_pos = pos2(thumb.right() + 10.0, rect.center().y - galley.size().y / 2.0);
             painter.galley(text_pos, galley, t.text);
             if let Some(slot) = slot {
-                painter.text(pos2(rect.right() - 8.0, rect.center().y), Align2::RIGHT_CENTER, crate::shortcuts::pretty(&format!("Cmd+{slot}")), theme::mono(11.0), t.text_faint);
+                painter.text(
+                    pos2(rect.right() - 8.0, rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    crate::shortcuts::pretty(&format!("Cmd+{slot}")),
+                    theme::mono(11.0),
+                    t.text_faint,
+                );
             }
             let rename_id = egui::Id::new(("chan-rename", doc.id.0, format!("{:?}", row.reference())));
             if resp.clicked() && !eye_resp.clicked() {
@@ -239,7 +265,8 @@ fn indicates_items(ui: &mut egui::Ui, actions: &mut Vec<(String, Value)>, channe
 /// Overlay colour presets (Channel Options › Color) and opacity.
 fn overlay_colors(ui: &mut egui::Ui, actions: &mut Vec<(String, Value)>, channel: Value) {
     ui.menu_button("Overlay Color", |ui| {
-        for (label, hex) in [("Red", "#ff0000"), ("Green", "#00c000"), ("Blue", "#0050ff"), ("Cyan", "#00d0e0"), ("Magenta", "#e000c0"), ("Yellow", "#f0d000")] {
+        for (label, hex) in [("Red", "#ff0000"), ("Green", "#00c000"), ("Blue", "#0050ff"), ("Cyan", "#00d0e0"), ("Magenta", "#e000c0"), ("Yellow", "#f0d000")]
+        {
             if ui.button(label).clicked() {
                 actions.push(("channel.options".into(), json!({ "channel": channel.clone(), "color": hex })));
                 ui.close();

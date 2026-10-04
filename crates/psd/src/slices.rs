@@ -234,7 +234,25 @@ impl SlicesResource {
             let horizontal_align = r.u32()?;
             let vertical_align = r.u32()?;
             let color = [r.u8()?, r.u8()?, r.u8()?, r.u8()?];
-            slices.push(SliceRecord { id, group_id, origin, layer_id, name, kind, rect, url, target, message, alt, cell_text_is_html, cell_text, horizontal_align, vertical_align, color, outsets: [0; 4] });
+            slices.push(SliceRecord {
+                id,
+                group_id,
+                origin,
+                layer_id,
+                name,
+                kind,
+                rect,
+                url,
+                target,
+                message,
+                alt,
+                cell_text_is_html,
+                cell_text,
+                horizontal_align,
+                vertical_align,
+                color,
+                outsets: [0; 4],
+            });
         }
         // Optional trailing descriptor (Photoshop 7+): per-slice extras such as outsets.
         if r.remaining() >= 4
@@ -368,7 +386,24 @@ mod tests {
             group_name: "site".into(),
             slices: vec![
                 SliceRecord { id: 0, origin: 0, kind: 1, rect: [0, 0, 100, 10], ..Default::default() },
-                SliceRecord { id: 1, group_id: 0, origin: 2, name: "logo".into(), kind: 1, rect: [20, 10, 60, 30], url: "https://example.org/".into(), target: "_blank".into(), message: "hi".into(), alt: "Logo".into(), cell_text_is_html: true, cell_text: "<b>x</b>".into(), horizontal_align: 1, vertical_align: 2, color: [255, 10, 20, 30], ..Default::default() },
+                SliceRecord {
+                    id: 1,
+                    group_id: 0,
+                    origin: 2,
+                    name: "logo".into(),
+                    kind: 1,
+                    rect: [20, 10, 60, 30],
+                    url: "https://example.org/".into(),
+                    target: "_blank".into(),
+                    message: "hi".into(),
+                    alt: "Logo".into(),
+                    cell_text_is_html: true,
+                    cell_text: "<b>x</b>".into(),
+                    horizontal_align: 1,
+                    vertical_align: 2,
+                    color: [255, 10, 20, 30],
+                    ..Default::default()
+                },
                 SliceRecord { id: 2, origin: 1, layer_id: Some(7), kind: 0, rect: [5, 40, 25, 70], outsets: [1, 2, 3, 4], ..Default::default() },
             ],
         }

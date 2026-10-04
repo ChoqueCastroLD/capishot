@@ -7,11 +7,7 @@ use photocraft_format::*;
 use proptest::prelude::*;
 
 fn sample() -> Vec<u8> {
-    save_to_bytes(
-        &rich_doc(ColorMode::Rgb, SampleType::U8),
-        &SaveOptions::default(),
-    )
-    .unwrap()
+    save_to_bytes(&rich_doc(ColorMode::Rgb, SampleType::U8), &SaveOptions::default()).unwrap()
 }
 
 fn rebuild(bytes: &[u8], f: impl Fn(&str, Vec<u8>) -> Option<Vec<u8>>) -> Vec<u8> {
@@ -67,12 +63,7 @@ fn missing_manifest_is_error() {
 fn swapped_tile_content_fails_hash_check() {
     let b = sample();
     let r = zip::ZipReader::new(&b).unwrap();
-    let tiles: Vec<_> = r
-        .entries
-        .iter()
-        .filter(|e| e.name.starts_with("tiles/"))
-        .map(|e| e.name.clone())
-        .collect();
+    let tiles: Vec<_> = r.entries.iter().filter(|e| e.name.starts_with("tiles/")).map(|e| e.name.clone()).collect();
     let other = r.read_by_name(&tiles[1], usize::MAX).unwrap();
     let first = tiles[0].clone();
     let b2 = rebuild(&b, |n, d| Some(if n == first { other.clone() } else { d }));
@@ -82,13 +73,7 @@ fn swapped_tile_content_fails_hash_check() {
 
 #[test]
 fn bad_manifest_json() {
-    let b = rebuild(&sample(), |n, d| {
-        Some(if n == "manifest.json" {
-            b"{not json".to_vec()
-        } else {
-            d
-        })
-    });
+    let b = rebuild(&sample(), |n, d| Some(if n == "manifest.json" { b"{not json".to_vec() } else { d }));
     assert!(matches!(load_from_bytes(&b), Err(FormatError::Json(_))));
 }
 
@@ -103,10 +88,7 @@ fn too_new_version_rejected() {
             d
         })
     });
-    assert!(matches!(
-        load_from_bytes(&b),
-        Err(FormatError::TooNew { found: 999, .. })
-    ));
+    assert!(matches!(load_from_bytes(&b), Err(FormatError::TooNew { found: 999, .. })));
 }
 
 #[test]
@@ -128,42 +110,23 @@ fn invalid_hash_strings_rejected() {
 #[test]
 fn manifest_size_limit() {
     let b = sample();
-    let opts = LoadOptions {
-        max_manifest_bytes: 100,
-        ..Default::default()
-    };
-    assert!(matches!(
-        load_from_bytes_with(&b, &opts),
-        Err(FormatError::LimitExceeded(_))
-    ));
+    let opts = LoadOptions { max_manifest_bytes: 100, ..Default::default() };
+    assert!(matches!(load_from_bytes_with(&b, &opts), Err(FormatError::LimitExceeded(_))));
 }
 
 #[test]
 fn total_size_limit() {
     let b = sample();
-    let opts = LoadOptions {
-        max_total_bytes: 1000,
-        ..Default::default()
-    };
-    assert!(matches!(
-        load_from_bytes_with(&b, &opts),
-        Err(FormatError::LimitExceeded(_))
-    ));
+    let opts = LoadOptions { max_total_bytes: 1000, ..Default::default() };
+    assert!(matches!(load_from_bytes_with(&b, &opts), Err(FormatError::LimitExceeded(_))));
 }
 
 #[test]
 fn directory_bundle_tampered_tile() {
     let doc = rich_doc(ColorMode::Rgb, SampleType::U8);
     let dir = temp_dir("tamper");
-    PcraftWriter::new()
-        .save_dir(&doc, &dir, &SaveOptions::default())
-        .unwrap();
-    let tile = std::fs::read_dir(dir.join("tiles"))
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
+    PcraftWriter::new().save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
+    let tile = std::fs::read_dir(dir.join("tiles")).unwrap().next().unwrap().unwrap().path();
     std::fs::write(&tile, b"garbage").unwrap();
     assert!(load_path(&dir).is_err());
     std::fs::remove_dir_all(dir).unwrap();
@@ -179,8 +142,7 @@ fn deflated_zip_entries_are_readable() {
     let mut central = Vec::new();
     for e in &r.entries {
         let data = r.read(e, usize::MAX).unwrap();
-        let mut enc =
-            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut enc = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
         enc.write_all(&data).unwrap();
         let comp = enc.finish().unwrap();
         let crc = zip::crc32(&data);

@@ -137,7 +137,21 @@ impl Tool {
     }
     /// Retouching and painting tools that stroke with the brush (share the brush cursor and chip).
     pub fn is_brushlike(self) -> bool {
-        matches!(self, Tool::Brush | Tool::Eraser | Tool::SpotHealing | Tool::Healing | Tool::CloneStamp | Tool::HistoryBrush | Tool::Blur | Tool::Sharpen | Tool::Smudge | Tool::Dodge | Tool::Burn | Tool::Sponge)
+        matches!(
+            self,
+            Tool::Brush
+                | Tool::Eraser
+                | Tool::SpotHealing
+                | Tool::Healing
+                | Tool::CloneStamp
+                | Tool::HistoryBrush
+                | Tool::Blur
+                | Tool::Sharpen
+                | Tool::Smudge
+                | Tool::Dodge
+                | Tool::Burn
+                | Tool::Sponge
+        )
     }
     /// Photoshop default single-key shortcut (`'\0'` = none, e.g. the Blur group).
     pub fn key(self) -> char {
@@ -210,7 +224,17 @@ pub struct Panels {
 
 impl Default for Panels {
     fn default() -> Self {
-        Self { layers: true, history: false, properties: true, color: true, navigator: false, toolbar: true, options_bar: true, status_bar: true, brush_settings: false }
+        Self {
+            layers: true,
+            history: false,
+            properties: true,
+            color: true,
+            navigator: false,
+            toolbar: true,
+            options_bar: true,
+            status_bar: true,
+            brush_settings: false,
+        }
     }
 }
 

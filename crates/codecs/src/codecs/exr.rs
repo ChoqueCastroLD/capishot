@@ -5,8 +5,7 @@
 use std::io::Cursor;
 
 use exr::prelude::{
-    AnyChannel, AnyChannels, Blocks, Compression, Encoding, FlatSamples, Layer, LayerAttributes,
-    LineOrder, ReadChannels, ReadLayers, WritableImage, read,
+    AnyChannel, AnyChannels, Blocks, Compression, Encoding, FlatSamples, Layer, LayerAttributes, LineOrder, ReadChannels, ReadLayers, WritableImage, read,
 };
 use half::f16;
 
@@ -32,57 +31,35 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
     let meta = exr::meta::MetaData::read_from_buffered(Cursor::new(bytes), false).map_err(err)?;
     for header in meta.headers.iter() {
         let size = header.layer_size;
-        let (w, h) = (
-            u32::try_from(size.0).unwrap_or(u32::MAX),
-            u32::try_from(size.1).unwrap_or(u32::MAX),
-        );
+        let (w, h) = (u32::try_from(size.0).unwrap_or(u32::MAX), u32::try_from(size.1).unwrap_or(u32::MAX));
         let bpp = header.channels.list.len().max(1) as u64 * 4;
         limits.check_bytes(w, h, bpp)?;
     }
 
-    let image = read()
-        .no_deep_data()
-        .largest_resolution_level()
-        .all_channels()
-        .first_valid_layer()
-        .all_attributes()
-        .from_buffered(Cursor::new(bytes))
-        .map_err(err)?;
+    let image =
+        read().no_deep_data().largest_resolution_level().all_channels().first_valid_layer().all_attributes().from_buffered(Cursor::new(bytes)).map_err(err)?;
     let layer = &image.layer_data;
     let (w, h) = (layer.size.0, layer.size.1);
     let channels = &layer.channel_data.list;
-    let find = |n: &str| {
-        channels
-            .iter()
-            .find(|c| base_name(c.name.to_string().as_str()) == n)
-    };
-    let (color, layout): (Vec<_>, ChannelLayout) =
-        if let (Some(r), Some(g), Some(b)) = (find("R"), find("G"), find("B")) {
-            match find("A") {
-                Some(a) => (vec![r, g, b, a], ChannelLayout::Rgba),
-                None => (vec![r, g, b], ChannelLayout::Rgb),
-            }
-        } else if let Some(y) = find("Y").or_else(|| (channels.len() == 1).then(|| &channels[0])) {
-            match find("A") {
-                Some(a) => (vec![y, a], ChannelLayout::GrayA),
-                None => (vec![y], ChannelLayout::Gray),
-            }
-        } else {
-            return Err(CodecError::unsupported(F, "no R/G/B or Y channels"));
-        };
-    let all_f16 = color
-        .iter()
-        .all(|c| matches!(c.sample_data, FlatSamples::F16(_)));
-    let sample = if all_f16 {
-        SampleType::F16
+    let find = |n: &str| channels.iter().find(|c| base_name(c.name.to_string().as_str()) == n);
+    let (color, layout): (Vec<_>, ChannelLayout) = if let (Some(r), Some(g), Some(b)) = (find("R"), find("G"), find("B")) {
+        match find("A") {
+            Some(a) => (vec![r, g, b, a], ChannelLayout::Rgba),
+            None => (vec![r, g, b], ChannelLayout::Rgb),
+        }
+    } else if let Some(y) = find("Y").or_else(|| (channels.len() == 1).then(|| &channels[0])) {
+        match find("A") {
+            Some(a) => (vec![y, a], ChannelLayout::GrayA),
+            None => (vec![y], ChannelLayout::Gray),
+        }
     } else {
-        SampleType::F32
+        return Err(CodecError::unsupported(F, "no R/G/B or Y channels"));
     };
+    let all_f16 = color.iter().all(|c| matches!(c.sample_data, FlatSamples::F16(_)));
+    let sample = if all_f16 { SampleType::F16 } else { SampleType::F32 };
     let npx = w * h;
     if color.iter().any(|c| c.sample_data.len() != npx) {
-        return Err(err(
-            "channel sample count mismatch (subsampled channels are unsupported)",
-        ));
+        return Err(err("channel sample count mismatch (subsampled channels are unsupported)"));
     }
     let nc = color.len();
     let (w32, h32) = (w as u32, h as u32);
@@ -146,18 +123,11 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
         ExrCompression::Zip16 => Compression::ZIP16,
         ExrCompression::Piz => Compression::PIZ,
     };
-    let encoding = Encoding {
-        compression,
-        blocks: Blocks::ScanLines,
-        line_order: LineOrder::Increasing,
-    };
+    let encoding = Encoding { compression, blocks: Blocks::ScanLines, line_order: LineOrder::Increasing };
     let channels = AnyChannels::sort(list.into_iter().collect());
     let layer = Layer::new((w, h), LayerAttributes::default(), encoding, channels);
     let image = exr::image::Image::from_layer(layer);
     let mut cursor = Cursor::new(Vec::new());
-    image
-        .write()
-        .to_buffered(&mut cursor)
-        .map_err(|e| CodecError::encode(F, e))?;
+    image.write().to_buffered(&mut cursor).map_err(|e| CodecError::encode(F, e))?;
     Ok(cursor.into_inner())
 }

@@ -61,7 +61,8 @@ pub fn liquify_params(cmd: &str, p: &Value, canvas: Rect) -> Result<(Vec<Liquify
 /// Puppet Warp params.
 pub fn puppet_params(cmd: &str, p: &Value) -> Result<PuppetWarp> {
     let pins: Vec<PuppetPin> = match p.get("pins") {
-        Some(v) => serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad `pins` (each {{\"src\":[x,y],\"dst\":[x,y],\"rotate\":deg?,\"depth\":n?}}): {e}")))?,
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| bad(cmd, format!("bad `pins` (each {{\"src\":[x,y],\"dst\":[x,y],\"rotate\":deg?,\"depth\":n?}}): {e}")))?,
         None => Vec::new(),
     };
     if pins.iter().any(|q| q.src.iter().chain(&q.dst).any(|v| !v.is_finite()) || q.rotate.is_some_and(|r| !r.is_finite())) {
@@ -229,7 +230,15 @@ fn check_locks(l: &Layer, position: bool) -> Result<()> {
 /// place by `f(surface, selection)`.
 type MaskFn<'a> = Option<&'a dyn Fn(&Surface) -> Surface>;
 
-fn run_on_layer(s: &mut Session, cmd: &str, label: &str, p: &Value, moves: bool, f: &dyn Fn(&Surface, Option<&Surface>, Rect) -> Surface, mask: MaskFn) -> Result<Value> {
+fn run_on_layer(
+    s: &mut Session,
+    cmd: &str,
+    label: &str,
+    p: &Value,
+    moves: bool,
+    f: &dyn Fn(&Surface, Option<&Surface>, Rect) -> Surface,
+    mask: MaskFn,
+) -> Result<Value> {
     let id = target(s, p)?;
     let mut params = p.clone();
     if let Value::Object(m) = &mut params {
@@ -275,13 +284,21 @@ fn liquify(s: &mut Session, p: &Value) -> Result<Value> {
     if field.is_identity() && !smart {
         return Ok(json!({"layer": id.0, "changed": false}));
     }
-    let r = run_on_layer(s, LIQUIFY, "Liquify", p, false, &|surf, sel, _| {
-        let out = apply_liquify(surf, &field);
-        match sel {
-            Some(sel) => mix_by_selection(surf, &out, sel),
-            None => out,
-        }
-    }, None)?;
+    let r = run_on_layer(
+        s,
+        LIQUIFY,
+        "Liquify",
+        p,
+        false,
+        &|surf, sel, _| {
+            let out = apply_liquify(surf, &field);
+            match sel {
+                Some(sel) => mix_by_selection(surf, &out, sel),
+                None => out,
+            }
+        },
+        None,
+    )?;
     let mut r = r;
     r["ms"] = json!(t0.elapsed().as_secs_f64() * 1000.0);
     r["maxDisplacement"] = json!(field.max_displacement());
@@ -331,7 +348,15 @@ fn perspective(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         Some(map) => warp_mesh_gray(m, &|x, y| map.map(x, y), Interp::Bilinear),
         None => m.clone(),
     };
-    let mut r = run_on_layer(s, cmd, "Perspective Warp", p, true, &|surf, sel, _| deform_selected(surf, sel, &|x| perspective_surface(x, &planes, it)), Some(&mask_fn))?;
+    let mut r = run_on_layer(
+        s,
+        cmd,
+        "Perspective Warp",
+        p,
+        true,
+        &|surf, sel, _| deform_selected(surf, sel, &|x| perspective_surface(x, &planes, it)),
+        Some(&mask_fn),
+    )?;
     r["planes"] = json!(planes);
     Ok(r)
 }
@@ -341,11 +366,56 @@ pub fn specs() -> Vec<CommandSpec> {
     const P: &str = r##"{"pins":[{"src":[x,y],"dst":[x,y],"rotate":deg?,"depth":n?}…],"mode":"rigid|normal|distort"="normal","density":"fewer|normal|more"="normal","expansion":px=2,"interpolation":"bicubic|bilinear|nearest","layer":id?} — mesh over the opaque region, as-rigid-as-possible; on a smart object it becomes a smart filter"##;
     const Q: &str = r##"{"planes":[{"src":[[x,y]×4],"dst":[[x,y]×4]}…] (corners clockwise from top-left; corners that coincide in src are linked),"straighten":"horizontal|vertical|auto"?,"interpolation":"bicubic|bilinear|nearest","layer":id?}"##;
     vec![
-        CommandSpec { id: LIQUIFY, label: "Liquify…", menu: &["Filter"], shortcut: Some("Cmd+Shift+X"), params: L, enabled: crate::filters::has_filterable_layer, journal: true, run: liquify },
-        CommandSpec { id: PUPPET, label: "Puppet Warp", menu: &["Edit"], shortcut: None, params: P, enabled: pixel_layer, journal: true, run: |s, p| puppet(s, p, PUPPET) },
-        CommandSpec { id: PUPPET_SMART, label: "Puppet Warp", menu: &["Layer", "Smart Objects"], shortcut: None, params: P, enabled: smart_layer, journal: true, run: |s, p| puppet(s, p, PUPPET_SMART) },
-        CommandSpec { id: PERSPECTIVE, label: "Perspective Warp", menu: &["Edit"], shortcut: None, params: Q, enabled: pixel_layer, journal: true, run: |s, p| perspective(s, p, PERSPECTIVE) },
-        CommandSpec { id: PERSPECTIVE_SMART, label: "Perspective Warp", menu: &["Layer", "Smart Objects"], shortcut: None, params: Q, enabled: smart_layer, journal: true, run: |s, p| perspective(s, p, PERSPECTIVE_SMART) },
+        CommandSpec {
+            id: LIQUIFY,
+            label: "Liquify…",
+            menu: &["Filter"],
+            shortcut: Some("Cmd+Shift+X"),
+            params: L,
+            enabled: crate::filters::has_filterable_layer,
+            journal: true,
+            run: liquify,
+        },
+        CommandSpec {
+            id: PUPPET,
+            label: "Puppet Warp",
+            menu: &["Edit"],
+            shortcut: None,
+            params: P,
+            enabled: pixel_layer,
+            journal: true,
+            run: |s, p| puppet(s, p, PUPPET),
+        },
+        CommandSpec {
+            id: PUPPET_SMART,
+            label: "Puppet Warp",
+            menu: &["Layer", "Smart Objects"],
+            shortcut: None,
+            params: P,
+            enabled: smart_layer,
+            journal: true,
+            run: |s, p| puppet(s, p, PUPPET_SMART),
+        },
+        CommandSpec {
+            id: PERSPECTIVE,
+            label: "Perspective Warp",
+            menu: &["Edit"],
+            shortcut: None,
+            params: Q,
+            enabled: pixel_layer,
+            journal: true,
+            run: |s, p| perspective(s, p, PERSPECTIVE),
+        },
+        CommandSpec {
+            id: PERSPECTIVE_SMART,
+            label: "Perspective Warp",
+            menu: &["Layer", "Smart Objects"],
+            shortcut: None,
+            params: Q,
+            enabled: smart_layer,
+            journal: true,
+            run: |s, p| perspective(s, p, PERSPECTIVE_SMART),
+        },
     ]
 }
 

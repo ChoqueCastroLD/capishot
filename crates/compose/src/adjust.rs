@@ -26,9 +26,7 @@ impl Transfer {
     /// Default transfer for a document colour mode.
     pub fn for_mode(mode: photocraft_color::ColorMode) -> Self {
         match mode {
-            photocraft_color::ColorMode::Grayscale | photocraft_color::ColorMode::Duotone | photocraft_color::ColorMode::Bitmap => {
-                Transfer::Gamma(1.732)
-            }
+            photocraft_color::ColorMode::Grayscale | photocraft_color::ColorMode::Duotone | photocraft_color::ColorMode::Bitmap => Transfer::Gamma(1.732),
             _ => Transfer::Srgb,
         }
     }
@@ -99,9 +97,8 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
             })
         }
         Adjustment::Levels { master, per_channel } => {
-            let luts: [Vec<f32>; 3] = std::array::from_fn(|i| {
-                (0..LUT_SIZE).map(|k| levels(&per_channel[i], levels(master, k as f32 / (LUT_SIZE - 1) as f32))).collect()
-            });
+            let luts: [Vec<f32>; 3] =
+                std::array::from_fn(|i| (0..LUT_SIZE).map(|k| levels(&per_channel[i], levels(master, k as f32 / (LUT_SIZE - 1) as f32))).collect());
             map_rgb(buf, |c| std::array::from_fn(|i| lut(&luts[i], c[i])))
         }
         Adjustment::Curves { master, per_channel } => {
@@ -145,11 +142,7 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
         }
         Adjustment::ChannelMixer { matrix, monochrome } => map_rgb(buf, |c| {
             let mix = |row: &[f32; 4]| (row[0] * c[0] + row[1] * c[1] + row[2] * c[2] + row[3]).clamp(0.0, 1.0);
-            if *monochrome {
-                [mix(&matrix[0]); 3]
-            } else {
-                [mix(&matrix[0]), mix(&matrix[1]), mix(&matrix[2])]
-            }
+            if *monochrome { [mix(&matrix[0]); 3] } else { [mix(&matrix[0]), mix(&matrix[1]), mix(&matrix[2])] }
         }),
         Adjustment::PhotoFilter { color, density, preserve_luminosity } => map_rgb(buf, |c| {
             let filtered: [f32; 3] = std::array::from_fn(|i| c[i] * (1.0 - density) + c[i] * color[i] * density);
@@ -337,11 +330,7 @@ pub fn modern_brightness(v: f32, brightness: f32) -> f32 {
     }
     let s = 1.375f32.powf(brightness / 50.0);
     // Exponent of the white-anchor term grows with |b|; shapes the roll-off toward (1,1).
-    let p = if brightness >= 0.0 {
-        (4.5 - 0.013 * brightness).max(2.0)
-    } else {
-        5.0 - 0.072 * brightness
-    };
+    let p = if brightness >= 0.0 { (4.5 - 0.013 * brightness).max(2.0) } else { 5.0 - 0.072 * brightness };
     let v = v.clamp(0.0, 1.0);
     (s * v + (1.0 - s) * v.powf(p)).clamp(0.0, 1.0)
 }

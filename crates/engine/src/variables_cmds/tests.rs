@@ -44,16 +44,24 @@ fn tmp(name: &str) -> String {
 #[test]
 fn define_apply_visibility_and_text() {
     let (mut s, _photo, badge, title) = session();
-    s.execute("image.variables.define", json!({"defs": [
-        {"name": "showBadge", "layer": badge.0, "type": "visibility"},
-        {"name": "headline", "layer": title.0, "type": "textReplacement"},
-    ]})).unwrap();
-    s.execute("image.variables.dataSets", json!({"dataSets": [
-        {"name": "A", "values": [
-            {"variable": "showBadge", "kind": "visibility", "value": false},
-            {"variable": "headline", "kind": "text", "value": "Hello"},
-        ]},
-    ]})).unwrap();
+    s.execute(
+        "image.variables.define",
+        json!({"defs": [
+            {"name": "showBadge", "layer": badge.0, "type": "visibility"},
+            {"name": "headline", "layer": title.0, "type": "textReplacement"},
+        ]}),
+    )
+    .unwrap();
+    s.execute(
+        "image.variables.dataSets",
+        json!({"dataSets": [
+            {"name": "A", "values": [
+                {"variable": "showBadge", "kind": "visibility", "value": false},
+                {"variable": "headline", "kind": "text", "value": "Hello"},
+            ]},
+        ]}),
+    )
+    .unwrap();
     assert!(doc(&s).layer(badge).unwrap().visible);
     assert_eq!(text_of(&s, title), "Old");
 
@@ -86,10 +94,14 @@ fn bad_params_are_errors() {
 #[test]
 fn csv_import_and_apply() {
     let (mut s, _p, badge, title) = session();
-    s.execute("image.variables.define", json!({"defs": [
-        {"name": "showBadge", "layer": badge.0, "type": "visibility"},
-        {"name": "headline", "layer": title.0, "type": "textReplacement"},
-    ]})).unwrap();
+    s.execute(
+        "image.variables.define",
+        json!({"defs": [
+            {"name": "showBadge", "layer": badge.0, "type": "visibility"},
+            {"name": "headline", "layer": title.0, "type": "textReplacement"},
+        ]}),
+    )
+    .unwrap();
     let dir = tmp("csv");
     let csv = format!("{dir}/sets.csv");
     std::fs::write(&csv, "DataSet,showBadge,headline\nrow-on,true,On Sale\nrow-off,false,Sold Out\n").unwrap();
@@ -108,14 +120,22 @@ fn csv_import_and_apply() {
 #[test]
 fn export_data_sets_as_files() {
     let (mut s, _p, badge, title) = session();
-    s.execute("image.variables.define", json!({"defs": [
-        {"name": "showBadge", "layer": badge.0, "type": "visibility"},
-        {"name": "headline", "layer": title.0, "type": "textReplacement"},
-    ]})).unwrap();
-    s.execute("image.variables.dataSets", json!({"dataSets": [
-        {"name": "one", "values": [{"variable": "headline", "kind": "text", "value": "1"}]},
-        {"name": "two", "values": [{"variable": "showBadge", "kind": "visibility", "value": false}]},
-    ]})).unwrap();
+    s.execute(
+        "image.variables.define",
+        json!({"defs": [
+            {"name": "showBadge", "layer": badge.0, "type": "visibility"},
+            {"name": "headline", "layer": title.0, "type": "textReplacement"},
+        ]}),
+    )
+    .unwrap();
+    s.execute(
+        "image.variables.dataSets",
+        json!({"dataSets": [
+            {"name": "one", "values": [{"variable": "headline", "kind": "text", "value": "1"}]},
+            {"name": "two", "values": [{"variable": "showBadge", "kind": "visibility", "value": false}]},
+        ]}),
+    )
+    .unwrap();
     let dir = tmp("out");
     let r = s.execute("file.export.dataSetsAsFiles", json!({"dir": dir, "format": "png"})).unwrap();
     assert_eq!(r["count"], 2);
@@ -143,12 +163,20 @@ fn pixel_replacement_changes_the_layer() {
         let bytes = photocraft_io::export(&src.active().unwrap().doc, "png", &photocraft_io::ExportOptions::default()).unwrap().bytes;
         std::fs::write(&png, bytes).unwrap();
     }
-    s.execute("image.variables.define", json!({"defs": [
-        {"name": "img", "layer": photo.0, "type": "pixelReplacement", "method": "conform"},
-    ]})).unwrap();
-    s.execute("image.variables.dataSets", json!({"dataSets": [
-        {"name": "blue", "values": [{"variable": "img", "kind": "pixels", "value": png}]},
-    ]})).unwrap();
+    s.execute(
+        "image.variables.define",
+        json!({"defs": [
+            {"name": "img", "layer": photo.0, "type": "pixelReplacement", "method": "conform"},
+        ]}),
+    )
+    .unwrap();
+    s.execute(
+        "image.variables.dataSets",
+        json!({"dataSets": [
+            {"name": "blue", "values": [{"variable": "img", "kind": "pixels", "value": png}]},
+        ]}),
+    )
+    .unwrap();
     // Before: grey.
     let before = s.execute("document.pixel", json!({"x": 32, "y": 24})).unwrap();
     s.execute("image.applyDataSet", json!({"name": "blue"})).unwrap();

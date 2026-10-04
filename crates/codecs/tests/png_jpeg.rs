@@ -10,15 +10,7 @@ use photocraft_codecs::*;
 // ---------------------------------------------------------------------------
 
 fn interlaced(img: &Image) -> Vec<u8> {
-    encode(
-        img,
-        Format::Png,
-        &EncodeOptions {
-            png_interlaced: true,
-            ..Default::default()
-        },
-    )
-    .unwrap()
+    encode(img, Format::Png, &EncodeOptions { png_interlaced: true, ..Default::default() }).unwrap()
 }
 
 fn check_adam7(w: u32, h: u32, layout: ChannelLayout, sample: SampleType) {
@@ -29,39 +21,18 @@ fn check_adam7(w: u32, h: u32, layout: ChannelLayout, sample: SampleType) {
     assert_eq!(b[28], 0);
     let da = decode(&a).unwrap();
     let db = decode(&b).unwrap();
-    assert_eq!(
-        da, db,
-        "{w}x{h} {layout:?} {sample:?}: interlaced != progressive"
-    );
+    assert_eq!(da, db, "{w}x{h} {layout:?} {sample:?}: interlaced != progressive");
     assert_eq!(da.data(), img.data());
     // Oracle: the image crate agrees.
     let o = image::load_from_memory_with_format(&a, image::ImageFormat::Png).unwrap();
-    let ours = da
-        .convert(ChannelLayout::Rgba, SampleType::U16)
-        .to_u16_samples()
-        .unwrap();
+    let ours = da.convert(ChannelLayout::Rgba, SampleType::U16).to_u16_samples().unwrap();
     assert_eq!(o.into_rgba16().into_raw(), ours);
 }
 
 #[test]
 fn adam7_small_sizes_all_layouts() {
-    for (w, h) in [
-        (1, 1),
-        (2, 2),
-        (3, 3),
-        (5, 1),
-        (1, 9),
-        (7, 5),
-        (8, 8),
-        (9, 17),
-        (33, 31),
-    ] {
-        for l in [
-            ChannelLayout::Gray,
-            ChannelLayout::GrayA,
-            ChannelLayout::Rgb,
-            ChannelLayout::Rgba,
-        ] {
+    for (w, h) in [(1, 1), (2, 2), (3, 3), (5, 1), (1, 9), (7, 5), (8, 8), (9, 17), (33, 31)] {
+        for l in [ChannelLayout::Gray, ChannelLayout::GrayA, ChannelLayout::Rgb, ChannelLayout::Rgba] {
             check_adam7(w, h, l, SampleType::U8);
         }
     }
@@ -88,21 +59,8 @@ fn adam7_with_metadata() {
 #[test]
 fn adam7_compressions() {
     let img = test_image(ChannelLayout::Rgba, SampleType::U8);
-    for c in [
-        PngCompression::None,
-        PngCompression::Fast,
-        PngCompression::Best,
-    ] {
-        let b = encode(
-            &img,
-            Format::Png,
-            &EncodeOptions {
-                png_interlaced: true,
-                png_compression: c,
-                ..Default::default()
-            },
-        )
-        .unwrap();
+    for c in [PngCompression::None, PngCompression::Fast, PngCompression::Best] {
+        let b = encode(&img, Format::Png, &EncodeOptions { png_interlaced: true, png_compression: c, ..Default::default() }).unwrap();
         assert_eq!(decode(&b).unwrap().data(), img.data());
     }
 }
@@ -119,10 +77,7 @@ fn png_palette_and_low_bit_depth_expand() {
         w.write_image_data(&[0b00_01_10_11]).unwrap();
     }
     let img = decode(&out).unwrap();
-    assert_eq!(
-        (img.layout(), img.data()),
-        (ChannelLayout::Gray, &[0u8, 85, 170, 255][..])
-    );
+    assert_eq!((img.layout(), img.data()), (ChannelLayout::Gray, &[0u8, 85, 170, 255][..]));
 
     let mut out = Vec::new();
     {
@@ -135,10 +90,7 @@ fn png_palette_and_low_bit_depth_expand() {
         w.write_image_data(&[0, 1]).unwrap();
     }
     let img = decode(&out).unwrap();
-    assert_eq!(
-        (img.layout(), img.data()),
-        (ChannelLayout::Rgba, &[255u8, 0, 0, 128, 0, 0, 255, 255][..])
-    );
+    assert_eq!((img.layout(), img.data()), (ChannelLayout::Rgba, &[255u8, 0, 0, 128, 0, 0, 255, 255][..]));
 }
 
 // ---------------------------------------------------------------------------
@@ -156,19 +108,8 @@ fn jpeg_grayscale_decodes_as_gray() {
 #[test]
 fn jpeg_cmyk_roundtrip_with_adobe_marker() {
     let img = synth(40, 30, ChannelLayout::Cmyk, SampleType::U8, 3, 0.02);
-    let bytes = encode(
-        &img,
-        Format::Jpeg,
-        &EncodeOptions {
-            jpeg_quality: 95,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert!(
-        bytes.windows(5).any(|w| w == b"Adobe"),
-        "APP14 Adobe marker"
-    );
+    let bytes = encode(&img, Format::Jpeg, &EncodeOptions { jpeg_quality: 95, ..Default::default() }).unwrap();
+    assert!(bytes.windows(5).any(|w| w == b"Adobe"), "APP14 Adobe marker");
     let back = decode(&bytes).unwrap();
     assert_eq!(back.layout(), ChannelLayout::Cmyk);
     assert!(psnr(&img, &back) > 35.0, "{}", psnr(&img, &back));
@@ -180,8 +121,7 @@ fn jpeg_ycck_decodes_to_cmyk() {
     let mut bytes = Vec::new();
     let mut enc = jpeg_encoder::Encoder::new(&mut bytes, 95);
     enc.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_4_4);
-    enc.encode(img.data(), 40, 32, jpeg_encoder::ColorType::CmykAsYcck)
-        .unwrap();
+    enc.encode(img.data(), 40, 32, jpeg_encoder::ColorType::CmykAsYcck).unwrap();
     let back = decode(&bytes).unwrap();
     assert_eq!(back.layout(), ChannelLayout::Cmyk);
     assert!(psnr(&img, &back) > 32.0, "{}", psnr(&img, &back));
@@ -189,13 +129,7 @@ fn jpeg_ycck_decodes_to_cmyk() {
 
 #[test]
 fn jpeg_cmyk_flat_colour_exact_ish() {
-    let img = Image::from_u8(
-        16,
-        16,
-        ChannelLayout::Cmyk,
-        [10u8, 100, 200, 50].repeat(256),
-    )
-    .unwrap();
+    let img = Image::from_u8(16, 16, ChannelLayout::Cmyk, [10u8, 100, 200, 50].repeat(256)).unwrap();
     let back = decode(&encode(&img, Format::Jpeg, &EncodeOptions::default()).unwrap()).unwrap();
     for px in back.data().chunks(4) {
         for (a, b) in px.iter().zip([10u8, 100, 200, 50]) {
@@ -209,16 +143,8 @@ fn jpeg_rgb_matches_oracle_decoder() {
     let img = test_image(ChannelLayout::Rgb, SampleType::U8);
     let bytes = encode(&img, Format::Jpeg, &EncodeOptions::default()).unwrap();
     let ours = decode(&bytes).unwrap();
-    let theirs = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg)
-        .unwrap()
-        .into_rgb8();
-    let max = ours
-        .data()
-        .iter()
-        .zip(theirs.as_raw())
-        .map(|(a, b)| (*a as i32 - *b as i32).abs())
-        .max()
-        .unwrap();
+    let theirs = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg).unwrap().into_rgb8();
+    let max = ours.data().iter().zip(theirs.as_raw()).map(|(a, b)| (*a as i32 - *b as i32).abs()).max().unwrap();
     assert!(max <= 1, "max diff {max}");
 }
 
@@ -228,13 +154,7 @@ fn jpeg_progressive_from_other_encoder_decodes() {
     let mut bytes = Vec::new();
     let mut enc = jpeg_encoder::Encoder::new(&mut bytes, 90);
     enc.set_progressive(true);
-    enc.encode(
-        img.data(),
-        img.width() as u16,
-        img.height() as u16,
-        jpeg_encoder::ColorType::Rgb,
-    )
-    .unwrap();
+    enc.encode(img.data(), img.width() as u16, img.height() as u16, jpeg_encoder::ColorType::Rgb).unwrap();
     let back = decode(&bytes).unwrap();
     assert!(psnr(&img, &back) > 25.0);
 }
@@ -245,19 +165,11 @@ fn jpeg_progressive_from_other_encoder_decodes() {
 
 #[test]
 fn png_output_matches_oracle_all_layouts() {
-    for l in [
-        ChannelLayout::Gray,
-        ChannelLayout::GrayA,
-        ChannelLayout::Rgb,
-        ChannelLayout::Rgba,
-    ] {
+    for l in [ChannelLayout::Gray, ChannelLayout::GrayA, ChannelLayout::Rgb, ChannelLayout::Rgba] {
         for s in [SampleType::U8, SampleType::U16] {
             let img = test_image(l, s);
             let b = encode(&img, Format::Png, &EncodeOptions::default()).unwrap();
-            let o = image::load_from_memory(&b)
-                .unwrap()
-                .into_rgba16()
-                .into_raw();
+            let o = image::load_from_memory(&b).unwrap().into_rgba16().into_raw();
             assert_eq!(o, img.to_rgba16(), "{l:?} {s:?}");
         }
     }
@@ -269,10 +181,7 @@ fn tiff_output_matches_oracle() {
         for s in [SampleType::U8, SampleType::U16] {
             let img = test_image(l, s);
             let b = encode(&img, Format::Tiff, &EncodeOptions::default()).unwrap();
-            let o = image::load_from_memory(&b)
-                .unwrap()
-                .into_rgba16()
-                .into_raw();
+            let o = image::load_from_memory(&b).unwrap().into_rgba16().into_raw();
             assert_eq!(o, img.to_rgba16(), "{l:?} {s:?}");
         }
     }
@@ -281,19 +190,8 @@ fn tiff_output_matches_oracle() {
 #[test]
 fn tiff_f32_output_matches_oracle() {
     let img = test_image(ChannelLayout::Rgba, SampleType::F32);
-    let b = encode(
-        &img,
-        Format::Tiff,
-        &EncodeOptions {
-            tiff_compression: TiffCompression::None,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let o = image::load_from_memory(&b)
-        .unwrap()
-        .into_rgba32f()
-        .into_raw();
+    let b = encode(&img, Format::Tiff, &EncodeOptions { tiff_compression: TiffCompression::None, ..Default::default() }).unwrap();
+    let o = image::load_from_memory(&b).unwrap().into_rgba32f().into_raw();
     assert_eq!(o, img.to_f32_samples().unwrap());
 }
 

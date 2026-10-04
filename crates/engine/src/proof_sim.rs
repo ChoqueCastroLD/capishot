@@ -128,7 +128,8 @@ fn srgb_encode(v: f32) -> f32 {
 const RGB_LMS: [[f32; 3]; 3] = [[17.8824, 43.5161, 4.11935], [3.45565, 27.1554, 3.86714], [0.0299566, 0.184309, 1.46709]];
 /// LMS → linear RGB (the paper's values, kept verbatim).
 #[allow(clippy::excessive_precision)]
-const LMS_RGB: [[f32; 3]; 3] = [[0.080_944_45, -0.130_504_41, 0.116_721_07], [-0.010_248_533, 0.054_019_327, -0.113_614_71], [-0.000_365_297, -0.004_121_614_7, 0.693_511_4]];
+const LMS_RGB: [[f32; 3]; 3] =
+    [[0.080_944_45, -0.130_504_41, 0.116_721_07], [-0.010_248_533, 0.054_019_327, -0.113_614_71], [-0.000_365_297, -0.004_121_614_7, 0.693_511_4]];
 
 fn mul(m: &[[f32; 3]; 3], v: [f32; 3]) -> [f32; 3] {
     [0, 1, 2].map(|i| m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2])
@@ -278,7 +279,16 @@ fn preview_32(s: &mut Session, p: &Value) -> Result<Value> {
 
 macro_rules! kind_spec {
     ($id:literal, $label:literal) => {
-        CommandSpec { id: $id, label: $label, menu: &["View", "Proof Setup"], shortcut: None, params: "{} (sets the proof and turns Proof Colors on)", enabled: has_doc, run: |s, _| run_kind(s, $id), journal: false }
+        CommandSpec {
+            id: $id,
+            label: $label,
+            menu: &["View", "Proof Setup"],
+            shortcut: None,
+            params: "{} (sets the proof and turns Proof Colors on)",
+            enabled: has_doc,
+            run: |s, _| run_kind(s, $id),
+            journal: false,
+        }
     };
 }
 
@@ -344,7 +354,14 @@ mod tests {
     fn plates_and_simulations_build_luts() {
         for depth in [8, 16, 32] {
             let mut s = session("rgb", depth);
-            for id in ["view.proofSetup.workingCyanPlate", "view.proofSetup.workingBlackPlate", "view.proofSetup.workingCmyPlate", "view.proofSetup.legacyMacintoshRgb", "view.proofSetup.colorBlindnessProtanopia", "view.proofSetup.colorBlindnessDeuteranopia"] {
+            for id in [
+                "view.proofSetup.workingCyanPlate",
+                "view.proofSetup.workingBlackPlate",
+                "view.proofSetup.workingCmyPlate",
+                "view.proofSetup.legacyMacintoshRgb",
+                "view.proofSetup.colorBlindnessProtanopia",
+                "view.proofSetup.colorBlindnessDeuteranopia",
+            ] {
                 let r = s.execute(id, json!({})).unwrap();
                 assert_eq!(r["proofColors"], true);
                 let d = s.active().unwrap().doc.clone();

@@ -27,22 +27,15 @@ impl Headless {
     fn doc_index(&self, index: Option<usize>) -> Result<usize, AutomationError> {
         match index {
             Some(i) if i < self.session.documents().len() => Ok(i),
-            Some(i) => Err(AutomationError::BadRequest(format!(
-                "no document at index {i}"
-            ))),
-            None => self
-                .session
-                .active_index()
-                .ok_or_else(|| AutomationError::BadRequest("no document open".into())),
+            Some(i) => Err(AutomationError::BadRequest(format!("no document at index {i}"))),
+            None => self.session.active_index().ok_or_else(|| AutomationError::BadRequest("no document open".into())),
         }
     }
 
     /// Open a file and make it the active document.
     pub fn open(&mut self, path: &Path) -> Result<Value, AutomationError> {
         let o = files::open(path)?;
-        let index = self
-            .session
-            .add_document(o.document, Some(path.to_string_lossy().into_owned()));
+        let index = self.session.add_document(o.document, Some(path.to_string_lossy().into_owned()));
         let d = &self.session.documents()[index];
         Ok(json!({
             "index": index,
@@ -56,22 +49,14 @@ impl Headless {
 
     /// Save (`.pcraft` or any export format by extension). With no path,
     /// saves to the document's own path.
-    pub fn save(
-        &mut self,
-        index: Option<usize>,
-        path: Option<&Path>,
-        format: Option<&str>,
-        opts: &ExportOptions,
-    ) -> Result<Value, AutomationError> {
+    pub fn save(&mut self, index: Option<usize>, path: Option<&Path>, format: Option<&str>, opts: &ExportOptions) -> Result<Value, AutomationError> {
         let i = self.doc_index(index)?;
         let st = &self.session.documents()[i];
         let target: PathBuf = match (path, &st.path) {
             (Some(p), _) => p.to_path_buf(),
             (None, Some(p)) => PathBuf::from(p),
             (None, None) => {
-                return Err(AutomationError::BadRequest(
-                    "document has no path; pass `path`".into(),
-                ));
+                return Err(AutomationError::BadRequest("document has no path; pass `path`".into()));
             }
         };
         let doc = st.doc.clone();
@@ -79,11 +64,7 @@ impl Headless {
         let warnings = files::save(&doc, &target, format, opts, Some(writer))?;
         let is_native = format
             .map(|f| f.trim_start_matches('.').eq_ignore_ascii_case("pcraft"))
-            .unwrap_or_else(|| {
-                target
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("pcraft"))
-            });
+            .unwrap_or_else(|| target.extension().is_some_and(|e| e.eq_ignore_ascii_case("pcraft")));
         if is_native {
             self.session.set_active(i);
             if let Some(st) = self.session.active_mut() {
@@ -96,16 +77,10 @@ impl Headless {
 
     pub fn inspect(&self, index: Option<usize>) -> Result<Value, AutomationError> {
         let i = self.doc_index(index)?;
-        Ok(photocraft_engine::inspect::document(
-            &self.session.documents()[i],
-        ))
+        Ok(photocraft_engine::inspect::document(&self.session.documents()[i]))
     }
 
-    pub fn render_png(
-        &self,
-        index: Option<usize>,
-        max_side: u32,
-    ) -> Result<Vec<u8>, AutomationError> {
+    pub fn render_png(&self, index: Option<usize>, max_side: u32) -> Result<Vec<u8>, AutomationError> {
         let i = self.doc_index(index)?;
         files::render_png(&self.session.documents()[i].doc, max_side)
     }
@@ -115,13 +90,7 @@ impl Headless {
     }
 
     pub fn select(&mut self, index: usize) -> Result<Value, AutomationError> {
-        if self.session.set_active(index) {
-            Ok(self.session_list())
-        } else {
-            Err(AutomationError::BadRequest(format!(
-                "no document at index {index}"
-            )))
-        }
+        if self.session.set_active(index) { Ok(self.session_list()) } else { Err(AutomationError::BadRequest(format!("no document at index {index}"))) }
     }
 
     pub fn close(&mut self, index: Option<usize>) -> Result<Value, AutomationError> {

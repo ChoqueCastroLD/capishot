@@ -24,7 +24,11 @@ fn pt(v: &Value) -> Option<[f64; 2]> {
 
 /// Builds the scene from `"planes"`.
 pub fn scene(p: &Value, canvas: Rect) -> Result<Scene> {
-    let planes = p.get("planes").and_then(Value::as_array).filter(|a| !a.is_empty()).ok_or_else(|| bad("pass `planes`: [{\"corners\":[[x,y]×4]}, {\"from\":0,\"edge\":\"top\",\"angle\":90}]"))?;
+    let planes = p
+        .get("planes")
+        .and_then(Value::as_array)
+        .filter(|a| !a.is_empty())
+        .ok_or_else(|| bad("pass `planes`: [{\"corners\":[[x,y]×4]}, {\"from\":0,\"edge\":\"top\",\"angle\":90}]"))?;
     let center = [(canvas.x0 + canvas.x1) as f64 / 2.0, (canvas.y0 + canvas.y1) as f64 / 2.0];
     let corners = |v: &Value| -> Option<[[f64; 2]; 4]> {
         let a = v.get("corners")?.as_array()?;
@@ -38,7 +42,12 @@ pub fn scene(p: &Value, canvas: Rect) -> Result<Scene> {
             sc.planes.push(VpPlane { corners: c });
             continue;
         }
-        let from = pl.get("from").and_then(Value::as_u64).map(|v| v as usize).filter(|f| *f < sc.planes.len()).ok_or_else(|| bad(format!("plane {i}: `corners` or `from` (an earlier plane)")))?;
+        let from = pl
+            .get("from")
+            .and_then(Value::as_u64)
+            .map(|v| v as usize)
+            .filter(|f| *f < sc.planes.len())
+            .ok_or_else(|| bad(format!("plane {i}: `corners` or `from` (an earlier plane)")))?;
         let edge = match pl.get("edge").and_then(Value::as_str).unwrap_or("top") {
             "top" => Edge::Top,
             "right" => Edge::Right,
@@ -173,10 +182,15 @@ fn vanishing_point(s: &mut Session, p: &Value) -> Result<Value> {
         surf.prune();
         Ok(id)
     })?;
-    let planes: Vec<Value> = sc.planes.iter().enumerate().map(|(i, pl)| {
-        let (lu, lv) = sc.lifted(i).lengths();
-        json!({"corners": pl.corners, "aspect": lu / lv})
-    }).collect();
+    let planes: Vec<Value> = sc
+        .planes
+        .iter()
+        .enumerate()
+        .map(|(i, pl)| {
+            let (lu, lv) = sc.lifted(i).lengths();
+            json!({"corners": pl.corners, "aspect": lu / lv})
+        })
+        .collect();
     Ok(json!({"layer": target.0, "focal": sc.focal, "planes": planes, "pasted": pastes.len(), "dabs": dabs}))
 }
 
@@ -231,7 +245,9 @@ mod tests {
         })
         .unwrap();
         s.execute("layer.select", json!({"layer": floor.0})).unwrap();
-        let r = s.execute(VP, json!({"planes": planes, "clone": [{"source": [200, 257], "points": [[200, 160], [205, 160]], "size": 12, "hardness": 80}]})).unwrap();
+        let r = s
+            .execute(VP, json!({"planes": planes, "clone": [{"source": [200, 257], "points": [[200, 160], [205, 160]], "size": 12, "hardness": 80}]}))
+            .unwrap();
         assert!(r["dabs"].as_u64().unwrap() >= 1, "{r}");
         let l = s.active().unwrap().doc.layer(floor).unwrap().surface().unwrap();
         assert!(l.rgba(200, 160)[1] > 0.8, "{:?}", l.rgba(200, 160));

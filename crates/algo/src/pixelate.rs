@@ -72,7 +72,11 @@ pub(crate) fn color_halftone(src: &Image, out: Rect, ctx: &Ctx, max_radius: f32,
                     let ink = if sub && !rgb { raw } else { 1.0 - raw };
                     // Dot area tracks ink: πr² = ink·cell² until dots touch, then grow to cover the corners.
                     let touch = std::f32::consts::FRAC_PI_4;
-                    let r = if ink <= touch { cell * (ink / std::f32::consts::PI).sqrt() } else { cell * (0.5 + (ink - touch) / (1.0 - touch) * (std::f32::consts::FRAC_1_SQRT_2 - 0.5)) };
+                    let r = if ink <= touch {
+                        cell * (ink / std::f32::consts::PI).sqrt()
+                    } else {
+                        cell * (0.5 + (ink - touch) / (1.0 - touch) * (std::f32::consts::FRAC_1_SQRT_2 - 0.5))
+                    };
                     // Tiny dots cannot cover more than their own area.
                     cov = cov.max((r - d + 0.5).clamp(0.0, 1.0).min(std::f32::consts::PI * r * r));
                 }
@@ -116,9 +120,14 @@ pub(crate) fn crystallize(src: &Image, out: Rect, ctx: &Ctx, cell_size: f32, see
         best.1
     };
     let mut acc = vec![0.0f32; gw * gh * (n + 1)];
-    let win = Rect::new(b.x0 + (c0.0 as f32 * cell).floor() as i32, b.y0 + (c0.1 as f32 * cell).floor() as i32, b.x0 + ((c1.0 + 1) as f32 * cell).ceil() as i32, b.y0 + ((c1.1 + 1) as f32 * cell).ceil() as i32)
-        .intersect(&src.rect)
-        .intersect(&b);
+    let win = Rect::new(
+        b.x0 + (c0.0 as f32 * cell).floor() as i32,
+        b.y0 + (c0.1 as f32 * cell).floor() as i32,
+        b.x0 + ((c1.0 + 1) as f32 * cell).ceil() as i32,
+        b.y0 + ((c1.1 + 1) as f32 * cell).ceil() as i32,
+    )
+    .intersect(&src.rect)
+    .intersect(&b);
     let mut owners = vec![(0i32, 0i32); out.width() as usize * out.height() as usize];
     for y in win.y0..win.y1 {
         for x in win.x0..win.x1 {

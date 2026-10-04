@@ -162,16 +162,7 @@ impl Affine {
     pub fn mul(&self, o: &Affine) -> Affine {
         let [a, b, c, d, e, f] = self.m;
         let [oa, ob, oc, od, oe, of] = o.m;
-        Affine {
-            m: [
-                a * oa + c * ob,
-                b * oa + d * ob,
-                a * oc + c * od,
-                b * oc + d * od,
-                a * oe + c * of + e,
-                b * oe + d * of + f,
-            ],
-        }
+        Affine { m: [a * oa + c * ob, b * oa + d * ob, a * oc + c * od, b * oc + d * od, a * oe + c * of + e, b * oe + d * of + f] }
     }
     pub fn apply(&self, p: Point) -> Point {
         let [a, b, c, d, e, f] = self.m;
@@ -187,9 +178,7 @@ impl Affine {
         }
         let [a, b, c, d, e, f] = self.m;
         let inv = 1.0 / det;
-        Some(Affine {
-            m: [d * inv, -b * inv, -c * inv, a * inv, (c * f - d * e) * inv, (b * e - a * f) * inv],
-        })
+        Some(Affine { m: [d * inv, -b * inv, -c * inv, a * inv, (c * f - d * e) * inv, (b * e - a * f) * inv] })
     }
 }
 

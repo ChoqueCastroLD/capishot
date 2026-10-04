@@ -10,8 +10,8 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use parley::{
-    Alignment, AlignmentOptions, FontData, FontFamily, FontFeatures, FontStyle, FontVariations,
-    FontWeight, IndentOptions, Layout, LayoutContext, PositionedLayoutItem, StyleProperty,
+    Alignment, AlignmentOptions, FontData, FontFamily, FontFeatures, FontStyle, FontVariations, FontWeight, IndentOptions, Layout, LayoutContext,
+    PositionedLayoutItem, StyleProperty,
 };
 use photocraft_doc::TextLayer;
 use photocraft_doc::text::{Caps, CharStyle, Kerning, TextAlign, TextDirection, TextShape};
@@ -100,12 +100,7 @@ impl TextLayout {
             let r = [l.x0, l.baseline - l.ascent, l.x1, l.baseline + l.descent];
             Some(match acc {
                 None => r,
-                Some(a) => [
-                    a[0].min(r[0]),
-                    a[1].min(r[1]),
-                    a[2].max(r[2]),
-                    a[3].max(r[3]),
-                ],
+                Some(a) => [a[0].min(r[0]), a[1].min(r[1]), a[2].max(r[2]), a[3].max(r[3])],
             })
         })
     }
@@ -129,16 +124,8 @@ impl TextLayout {
         let mut best = (f32::MAX, line.range.end);
         for c in self.clusters.iter().filter(|c| c.line == li) {
             let mid = c.x + c.advance / 2.0;
-            let (before, after) = if c.rtl {
-                (c.range.end, c.range.start)
-            } else {
-                (c.range.start, c.range.end)
-            };
-            let (dist, off) = if x < mid {
-                ((x - c.x).abs(), before)
-            } else {
-                ((x - c.x - c.advance).abs(), after)
-            };
+            let (before, after) = if c.rtl { (c.range.end, c.range.start) } else { (c.range.start, c.range.end) };
+            let (dist, off) = if x < mid { ((x - c.x).abs(), before) } else { ((x - c.x - c.advance).abs(), after) };
             if dist < best.0 {
                 best = (dist, off);
             }
@@ -156,11 +143,7 @@ impl TextLayout {
             }
         }
         // End of a line (or empty line): after the last cluster of the line containing it.
-        let li = self
-            .lines
-            .iter()
-            .position(|l| offset >= l.range.start && offset <= l.range.end)
-            .unwrap_or(self.lines.len().saturating_sub(1));
+        let li = self.lines.iter().position(|l| offset >= l.range.start && offset <= l.range.end).unwrap_or(self.lines.len().saturating_sub(1));
         match self.lines.get(li) {
             Some(l) => {
                 let x = self
@@ -186,19 +169,14 @@ pub(crate) struct Layouter {
 
 impl Layouter {
     pub fn new() -> Self {
-        Self {
-            lcx: LayoutContext::new(),
-        }
+        Self { lcx: LayoutContext::new() }
     }
 
     pub fn layout(&mut self, fonts: &mut FontDb, t: &TextLayer, dpi: f32) -> TextLayout {
         let k = if dpi > 0.0 { dpi / 72.0 } else { 1.0 };
         let runs = t.char_runs();
         let paras = t.paragraph_runs();
-        let mut out = TextLayout {
-            px_per_pt: k,
-            ..Default::default()
-        };
+        let mut out = TextLayout { px_per_pt: k, ..Default::default() };
         // Resolve families (PostScript names from PSDs, unknown families).
         for r in &runs {
             let mut s = r.style.clone();
@@ -230,17 +208,11 @@ impl Layouter {
                 Some(s)
             })
             .collect();
-        let para_style_at =
-            |off: usize| &paras[para_starts.iter().rposition(|&s| s <= off).unwrap_or(0)].style;
+        let para_style_at = |off: usize| &paras[para_starts.iter().rposition(|&s| s <= off).unwrap_or(0)].style;
 
         let text = &t.text;
         let (box_rect, is_box) = match t.shape {
-            TextShape::Box {
-                x,
-                y,
-                width,
-                height,
-            } => ((x, y, width, height), true),
+            TextShape::Box { x, y, width, height } => ((x, y, width, height), true),
             TextShape::Point => ((0.0, 0.0, 0.0, 0.0), false),
         };
         let mut prev_baseline: Option<f32> = None;
@@ -288,8 +260,7 @@ impl Layouter {
                     if a >= z {
                         continue;
                     }
-                    let range =
-                        (a - prange.start + prefix.len())..(z - prange.start + prefix.len());
+                    let range = (a - prange.start + prefix.len())..(z - prange.start + prefix.len());
                     for p in style_props(st, k, &fallback, ri as u32) {
                         b.push(p, range.clone());
                     }
@@ -301,11 +272,7 @@ impl Layouter {
             if ps.first_line_indent_pt != 0.0 {
                 layout.set_text_indent(ps.first_line_indent_pt * k, IndentOptions::default());
             }
-            let avail = if is_box {
-                Some((box_rect.2 - indent_start - indent_end).max(1.0))
-            } else {
-                None
-            };
+            let avail = if is_box { Some((box_rect.2 - indent_start - indent_end).max(1.0)) } else { None };
             layout.break_all_lines(avail);
             let alignment = if is_box {
                 match ps.align {
@@ -317,12 +284,7 @@ impl Layouter {
             } else {
                 Alignment::Left
             };
-            layout.align(
-                alignment,
-                AlignmentOptions {
-                    align_when_overflowing: !is_box,
-                },
-            );
+            layout.align(alignment, AlignmentOptions { align_when_overflowing: !is_box });
 
             // Stack lines.
             if prev_baseline.is_some() {
@@ -337,21 +299,14 @@ impl Layouter {
                     if let PositionedLayoutItem::GlyphRun(gr) = item {
                         let st = &out.styles[gr.style().brush.0 as usize];
                         let px = gr.run().font_size();
-                        leading =
-                            leading.max(st.leading_pt.map_or(ps.auto_leading * px, |l| l * k));
+                        leading = leading.max(st.leading_pt.map_or(ps.auto_leading * px, |l| l * k));
                     }
                 }
                 if leading == 0.0 {
                     let st = &out.styles[style_at(prange.start)];
-                    leading = st
-                        .leading_pt
-                        .map_or(ps.auto_leading * st.size_pt * k, |l| l * k);
+                    leading = st.leading_pt.map_or(ps.auto_leading * st.size_pt * k, |l| l * k);
                 }
-                let (ascent, descent) = if m.ascent > 0.0 || m.descent > 0.0 {
-                    (m.ascent, m.descent)
-                } else {
-                    (first_px * 0.8, first_px * 0.2)
-                };
+                let (ascent, descent) = if m.ascent > 0.0 || m.descent > 0.0 { (m.ascent, m.descent) } else { (first_px * 0.8, first_px * 0.2) };
                 let baseline = match prev_baseline {
                     // Photoshop's "first baseline: ascent": the top of the tallest ascender
                     // (height of 'd') touches the box top, not the font's hhea ascent.
@@ -389,8 +344,7 @@ impl Layouter {
                 };
                 let justify_all = is_box && last_line && ps.align == TextAlign::JustifyAll;
                 let line_index = out.lines.len();
-                let map =
-                    |o: usize| (prange.start + o.saturating_sub(prefix.len())).min(content_end);
+                let map = |o: usize| (prange.start + o.saturating_sub(prefix.len())).min(content_end);
                 let lr = line.text_range();
                 let g0 = out.glyphs.len();
                 let c0 = out.clusters.len();
@@ -403,11 +357,7 @@ impl Layouter {
                     let run = gr.run();
                     let si = gr.style().brush.0;
                     let st = &out.styles[si as usize];
-                    let hs = if st.horizontal_scale > 0.0 {
-                        st.horizontal_scale
-                    } else {
-                        1.0
-                    };
+                    let hs = if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 };
                     let synth = run.synthesis();
                     let face = out.faces.len() as u32;
                     out.faces.push(GlyphFace {
@@ -425,26 +375,14 @@ impl Layouter {
                             let a = c.advance() * hs;
                             let r = c.text_range();
                             if r.end > prefix.len() || prefix.is_empty() {
-                                out.clusters.push(ClusterInfo {
-                                    range: map(r.start)..map(r.end),
-                                    x: cx,
-                                    advance: a,
-                                    line: line_index,
-                                    rtl: c.is_rtl(),
-                                });
+                                out.clusters.push(ClusterInfo { range: map(r.start)..map(r.end), x: cx, advance: a, line: line_index, rtl: c.is_rtl() });
                             }
                             cx += a;
                         }
                     }
                     let mut pen = gr.offset();
                     for g in gr.glyphs() {
-                        out.glyphs.push(PlacedGlyph {
-                            face,
-                            id: g.id,
-                            x: dx + pen + g.x + extra,
-                            y: baseline + g.y,
-                            style: si,
-                        });
+                        out.glyphs.push(PlacedGlyph { face, id: g.id, x: dx + pen + g.x + extra, y: baseline + g.y, style: si });
                         extra += g.advance * (hs - 1.0);
                         pen += g.advance;
                     }
@@ -453,23 +391,11 @@ impl Layouter {
                     let shift = st.baseline_shift_pt * k;
                     if gr.style().underline.is_some() {
                         let y0 = baseline - rm.underline_offset - shift;
-                        out.decorations.push(DecorationRect {
-                            x0: run_x0,
-                            y0,
-                            x1: run_x1,
-                            y1: y0 + rm.underline_size.max(1.0),
-                            style: si,
-                        });
+                        out.decorations.push(DecorationRect { x0: run_x0, y0, x1: run_x1, y1: y0 + rm.underline_size.max(1.0), style: si });
                     }
                     if gr.style().strikethrough.is_some() {
                         let y0 = baseline - rm.strikethrough_offset - shift;
-                        out.decorations.push(DecorationRect {
-                            x0: run_x0,
-                            y0,
-                            x1: run_x1,
-                            y1: y0 + rm.strikethrough_size.max(1.0),
-                            style: si,
-                        });
+                        out.decorations.push(DecorationRect { x0: run_x0, y0, x1: run_x1, y1: y0 + rm.strikethrough_size.max(1.0), style: si });
                     }
                 }
                 if justify_all {
@@ -515,11 +441,7 @@ pub fn split_paragraphs(text: &str) -> Vec<Range<usize>> {
     while i < b.len() {
         match b[i] {
             b'\r' => {
-                let end = if b.get(i + 1) == Some(&b'\n') {
-                    i + 2
-                } else {
-                    i + 1
-                };
+                let end = if b.get(i + 1) == Some(&b'\n') { i + 2 } else { i + 1 };
                 v.push(start..end);
                 start = end;
                 i = end;
@@ -545,12 +467,7 @@ fn quote(s: &str) -> String {
     format!("\"{}\"", s.replace(['\\', '"'], ""))
 }
 
-fn style_props(
-    st: &CharStyle,
-    k: f32,
-    fallback: &[String],
-    idx: u32,
-) -> Vec<StyleProperty<'static, RunBrush>> {
+fn style_props(st: &CharStyle, k: f32, fallback: &[String], idx: u32) -> Vec<StyleProperty<'static, RunBrush>> {
     let px = (st.size_pt * k).max(0.01);
     let mut fam: Vec<String> = Vec::new();
     if !st.font_family.is_empty() {
@@ -577,32 +494,19 @@ fn style_props(
             feats.push(format!("\"{}\" {}", f.tag, f.value));
         }
     }
-    let vars: Vec<String> = st
-        .variations
-        .iter()
-        .filter(|v| v.axis.len() == 4 && v.axis.is_ascii())
-        .map(|v| format!("\"{}\" {}", v.axis, v.value))
-        .collect();
+    let vars: Vec<String> = st.variations.iter().filter(|v| v.axis.len() == 4 && v.axis.is_ascii()).map(|v| format!("\"{}\" {}", v.axis, v.value)).collect();
     vec![
         StyleProperty::FontFamily(FontFamily::Source(Cow::Owned(fam.join(", ")))),
         StyleProperty::FontSize(px),
         StyleProperty::FontWeight(FontWeight::new(st.weight.clamp(1, 1000) as f32)),
-        StyleProperty::FontStyle(if st.italic {
-            FontStyle::Italic
-        } else {
-            FontStyle::Normal
-        }),
+        StyleProperty::FontStyle(if st.italic { FontStyle::Italic } else { FontStyle::Normal }),
         StyleProperty::FontFeatures(FontFeatures::Source(Cow::Owned(feats.join(", ")))),
         StyleProperty::FontVariations(FontVariations::Source(Cow::Owned(vars.join(", ")))),
         StyleProperty::LetterSpacing(st.tracking / 1000.0 * px),
         StyleProperty::Underline(st.underline),
         StyleProperty::Strikethrough(st.strikethrough),
         StyleProperty::Brush(RunBrush(idx)),
-        StyleProperty::Locale(
-            st.language
-                .as_deref()
-                .and_then(|l| parley::fontique::Language::parse(l).ok()),
-        ),
+        StyleProperty::Locale(st.language.as_deref().and_then(|l| parley::fontique::Language::parse(l).ok())),
     ]
 }
 
@@ -615,22 +519,13 @@ fn first_ascent(line: &parley::Line<'_, RunBrush>) -> Option<f32> {
         let Ok(font) = skrifa::FontRef::from_index(fd.data.as_ref(), fd.index) else {
             continue;
         };
-        let coords: Vec<skrifa::instance::NormalizedCoord> = run
-            .normalized_coords()
-            .iter()
-            .map(|&c| skrifa::instance::NormalizedCoord::from_bits(c))
-            .collect();
+        let coords: Vec<skrifa::instance::NormalizedCoord> = run.normalized_coords().iter().map(|&c| skrifa::instance::NormalizedCoord::from_bits(c)).collect();
         let loc = skrifa::instance::LocationRef::new(&coords);
         let size = skrifa::instance::Size::new(run.font_size());
-        let h = font
-            .charmap()
-            .map('d')
-            .and_then(|g| font.glyph_metrics(size, loc).bounds(g))
-            .map(|b| b.y_max)
-            .or_else(|| {
-                let m = font.metrics(size, loc);
-                m.cap_height.or(Some(m.ascent * 0.75))
-            });
+        let h = font.charmap().map('d').and_then(|g| font.glyph_metrics(size, loc).bounds(g)).map(|b| b.y_max).or_else(|| {
+            let m = font.metrics(size, loc);
+            m.cap_height.or(Some(m.ascent * 0.75))
+        });
         if let Some(h) = h {
             best = Some(best.map_or(h, |b: f32| b.max(h)));
         }

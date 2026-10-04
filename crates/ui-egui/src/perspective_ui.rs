@@ -26,9 +26,15 @@ pub enum PerspMode {
 }
 
 enum Drag {
-    NewPlane { start: [f64; 2], cur: [f64; 2] },
+    NewPlane {
+        start: [f64; 2],
+        cur: [f64; 2],
+    },
     /// Linked corners being moved, and the pointer offset from the corner.
-    Corner { group: Vec<(usize, usize)>, offset: [f64; 2] },
+    Corner {
+        group: Vec<(usize, usize)>,
+        offset: [f64; 2],
+    },
 }
 
 pub struct PerspSession {
@@ -122,7 +128,19 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context, command: &str) -> Res
     let preview_doc = crate::distort_ui::without_layer(&st.doc, layer);
     let key = app.ui.alloc_id();
     let texture = ctx.load_texture(format!("persp-{key}"), crate::distort_ui::surface_image(&surface, bounds, 2048), egui::TextureOptions::LINEAR);
-    let mut s = PerspSession { key, layer, command: command.to_string(), bounds, planes: Vec::new(), mode: PerspMode::Layout, drag: None, texture, opacity, preview_doc, grid: Vec::new() };
+    let mut s = PerspSession {
+        key,
+        layer,
+        command: command.to_string(),
+        bounds,
+        planes: Vec::new(),
+        mode: PerspMode::Layout,
+        drag: None,
+        texture,
+        opacity,
+        preview_doc,
+        grid: Vec::new(),
+    };
     s.update_grid();
     app.distort.perspective = Some(s);
     app.ui.status = "Perspective Warp: draw planes along the image's perspective, then switch to Warp".into();
@@ -283,7 +301,11 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     crate::widgets::vline(ui, 22.0);
     if s.mode == PerspMode::Warp {
-        for (label, tip, m) in [("Straighten", "Automatically straighten near-vertical line segments", Straighten::Vertical), ("Level", "Automatically level near-horizontal line segments", Straighten::Horizontal), ("Both", "Automatically straighten and level", Straighten::Auto)] {
+        for (label, tip, m) in [
+            ("Straighten", "Automatically straighten near-vertical line segments", Straighten::Vertical),
+            ("Level", "Automatically level near-horizontal line segments", Straighten::Horizontal),
+            ("Both", "Automatically straighten and level", Straighten::Auto),
+        ] {
             if ui.button(label).on_hover_text(tip).clicked() {
                 straighten(&mut s.planes, m);
                 s.update_grid();

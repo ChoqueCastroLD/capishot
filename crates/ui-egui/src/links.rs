@@ -13,13 +13,8 @@ pub const GITHUB: &str = "https://github.com/storytold/photocraft";
 pub const ISSUES: &str = "https://github.com/storytold/photocraft/issues";
 
 /// Help-menu link commands: (id, url). Labels live in `menus::UI_COMMANDS`.
-pub const COMMANDS: &[(&str, &str)] = &[
-    ("help.discord", DISCORD),
-    ("help.website", APP_PAGE),
-    ("help.artcraftWebsite", ARTCRAFT_WEBSITE),
-    ("help.github", GITHUB),
-    ("help.reportIssue", ISSUES),
-];
+pub const COMMANDS: &[(&str, &str)] =
+    &[("help.discord", DISCORD), ("help.website", APP_PAGE), ("help.artcraftWebsite", ARTCRAFT_WEBSITE), ("help.github", GITHUB), ("help.reportIssue", ISSUES)];
 
 pub fn url_for(id: &str) -> Option<&'static str> {
     COMMANDS.iter().find(|c| c.0 == id).map(|c| c.1)
@@ -116,7 +111,11 @@ mod tests {
     fn link_commands_open_their_urls() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         let ctx = egui::Context::default();
-        for (id, url) in [("help.discord", "https://discord.gg/artcraft"), ("help.website", "https://getartcraft.com/apps/photocraft"), ("help.github", "https://github.com/storytold/photocraft")] {
+        for (id, url) in [
+            ("help.discord", "https://discord.gg/artcraft"),
+            ("help.website", "https://getartcraft.com/apps/photocraft"),
+            ("help.github", "https://github.com/storytold/photocraft"),
+        ] {
             let r = crate::menus::invoke(&mut app, &ctx, id, serde_json::json!({})).unwrap();
             assert_eq!(r["url"], url);
             assert_eq!(app.ui.status, format!("Opened {url}"));

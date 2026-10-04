@@ -96,7 +96,8 @@ fn paragraph_styles_and_basic_paragraph() {
     // A fresh layer is Basic Paragraph with no paragraph override.
     let cur = s.execute("type.paragraphStyle.list", json!({"layer": id})).unwrap()["current"].clone();
     assert_eq!((cur["paragraph"].as_u64(), cur["paragraphOverride"].as_bool()), (Some(0), Some(false)));
-    let r = s.execute("type.paragraphStyle.new", json!({"name": "Head", "fromSelection": false, "attrs": {"align": "center", "size": 24, "weight": 700}})).unwrap();
+    let r =
+        s.execute("type.paragraphStyle.new", json!({"name": "Head", "fromSelection": false, "attrs": {"align": "center", "size": 24, "weight": 700}})).unwrap();
     let ps = r["id"].as_u64().unwrap() as u32;
     s.execute("type.paragraphStyle.apply", json!({"id": ps, "layer": id, "range": [0, 1]})).unwrap();
     let t = layer(&s, id);

@@ -228,7 +228,15 @@ pub struct Workspace {
 
 impl Default for Workspace {
     fn default() -> Self {
-        Self { auto_collapse_icon_panels: false, auto_show_hidden_panels: true, open_documents_as_tabs: true, enable_floating_document_window_docking: true, large_tabs: false, enable_narrow_options_bar: false, remember_workspace_changes: true }
+        Self {
+            auto_collapse_icon_panels: false,
+            auto_show_hidden_panels: true,
+            open_documents_as_tabs: true,
+            enable_floating_document_window_docking: true,
+            large_tabs: false,
+            enable_narrow_options_bar: false,
+            remember_workspace_changes: true,
+        }
     }
 }
 
@@ -330,7 +338,13 @@ pub struct Export {
 
 impl Default for Export {
     fn default() -> Self {
-        Self { quick_export_format: QuickExportFormat::Png, quick_export_location: ExportLocation::Ask, jpeg_quality: 85, metadata: ExportMetadata::Copyright, convert_to_srgb: true }
+        Self {
+            quick_export_format: QuickExportFormat::Png,
+            quick_export_location: ExportLocation::Ask,
+            jpeg_quality: 85,
+            metadata: ExportMetadata::Copyright,
+            convert_to_srgb: true,
+        }
     }
 }
 
@@ -354,7 +368,15 @@ pub struct Performance {
 
 impl Default for Performance {
     fn default() -> Self {
-        Self { memory_usage_mb: 8192, history_states: 50, cache_levels: 4, cache_tile_size: 8192, use_gpu: true, effect_cache_mb: 768, legacy_compositing: false }
+        Self {
+            memory_usage_mb: 8192,
+            history_states: 50,
+            cache_levels: 4,
+            cache_tile_size: 8192,
+            use_gpu: true,
+            effect_cache_mb: 768,
+            legacy_compositing: false,
+        }
     }
 }
 
@@ -391,7 +413,13 @@ pub struct Cursors {
 
 impl Default for Cursors {
     fn default() -> Self {
-        Self { painting: PaintingCursor::NormalTip, show_crosshair_in_brush_tip: false, show_only_crosshair_while_painting: false, other: OtherCursor::Standard, brush_preview_color: "#ff0000".into() }
+        Self {
+            painting: PaintingCursor::NormalTip,
+            show_crosshair_in_brush_tip: false,
+            show_only_crosshair_while_painting: false,
+            other: OtherCursor::Standard,
+            brush_preview_color: "#ff0000".into(),
+        }
     }
 }
 
@@ -410,7 +438,14 @@ pub struct TransparencyAndGamut {
 
 impl Default for TransparencyAndGamut {
     fn default() -> Self {
-        Self { grid_size: CheckerSize::Medium, grid_colors: CheckerColors::Light, custom_light: "#ffffff".into(), custom_dark: "#cccccc".into(), gamut_warning_color: "#808080".into(), gamut_warning_opacity: 100 }
+        Self {
+            grid_size: CheckerSize::Medium,
+            grid_colors: CheckerColors::Light,
+            custom_light: "#ffffff".into(),
+            custom_dark: "#cccccc".into(),
+            gamut_warning_color: "#808080".into(),
+            gamut_warning_opacity: 100,
+        }
     }
 }
 
@@ -454,7 +489,15 @@ pub struct UnitsAndRulers {
 
 impl Default for UnitsAndRulers {
     fn default() -> Self {
-        Self { rulers: Unit::Pixels, type_units: TypeUnit::Points, column_width: 180.0, gutter: 12.0, print_resolution: 300.0, screen_resolution: 72.0, point_size: PointSize::PostScript }
+        Self {
+            rulers: Unit::Pixels,
+            type_units: TypeUnit::Points,
+            column_width: 180.0,
+            gutter: 12.0,
+            print_resolution: 300.0,
+            screen_resolution: 72.0,
+            point_size: PointSize::PostScript,
+        }
     }
 }
 
@@ -536,7 +579,16 @@ pub struct TypePrefs {
 
 impl Default for TypePrefs {
     fn default() -> Self {
-        Self { smart_quotes: true, missing_glyph_protection: true, show_font_names_in_english: true, use_esc_to_commit: true, text_engine: TextEngine::WorldReady, font_preview: FontPreview::Medium, fill_new_type_layers_with_placeholder: true, recent_fonts: 10 }
+        Self {
+            smart_quotes: true,
+            missing_glyph_protection: true,
+            show_font_names_in_english: true,
+            use_esc_to_commit: true,
+            text_engine: TextEngine::WorldReady,
+            font_preview: FontPreview::Medium,
+            fill_new_type_layers_with_placeholder: true,
+            recent_fonts: 10,
+        }
     }
 }
 
@@ -568,7 +620,14 @@ pub struct RawDefaults {
 
 impl Default for RawDefaults {
     fn default() -> Self {
-        Self { color_space: RawColorSpace::AdobeRgb, bit_depth: RawDepth::Sixteen, resolution: 300.0, sharpen_for: RawSharpen::None, open_as_smart_object: false, apply_auto_tone: false }
+        Self {
+            color_space: RawColorSpace::AdobeRgb,
+            bit_depth: RawDepth::Sixteen,
+            resolution: 300.0,
+            sharpen_for: RawSharpen::None,
+            open_as_smart_object: false,
+            apply_auto_tone: false,
+        }
     }
 }
 
@@ -725,7 +784,18 @@ pub fn is_color(path: &str) -> bool {
         return false;
     }
     let leaf = path.rsplit('.').next().unwrap_or(path);
-    matches!(leaf, "guideColor" | "smartGuideColor" | "gridColor" | "sliceColor" | "canvasCustomColor" | "brushPreviewColor" | "gamutWarningColor" | "customLight" | "customDark")
+    matches!(
+        leaf,
+        "guideColor"
+            | "smartGuideColor"
+            | "gridColor"
+            | "sliceColor"
+            | "canvasCustomColor"
+            | "brushPreviewColor"
+            | "gamutWarningColor"
+            | "customLight"
+            | "customDark"
+    )
 }
 
 pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
@@ -930,7 +1000,11 @@ fn capitalize(s: &str) -> String {
         Some(f) if f.is_ascii_alphabetic() => {
             let rest: String = c.collect();
             // Function keys stay upper-case (F1…F24); named keys are Title case.
-            if f.eq_ignore_ascii_case(&'f') && rest.chars().all(|c| c.is_ascii_digit()) && !rest.is_empty() { format!("F{rest}") } else { format!("{}{}", f.to_ascii_uppercase(), rest.to_ascii_lowercase()) }
+            if f.eq_ignore_ascii_case(&'f') && rest.chars().all(|c| c.is_ascii_digit()) && !rest.is_empty() {
+                format!("F{rest}")
+            } else {
+                format!("{}{}", f.to_ascii_uppercase(), rest.to_ascii_lowercase())
+            }
         }
         _ => s.to_string(),
     }
@@ -1195,7 +1269,9 @@ fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Edit › Menus: hide/show items and give them colours.
 fn menus(s: &mut Session, p: &Value) -> Result<Value> {
-    let ids = |k: &str| -> Vec<String> { p.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default() };
+    let ids = |k: &str| -> Vec<String> {
+        p.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()
+    };
     const COLORS: [&str; 8] = ["none", "red", "orange", "yellow", "green", "blue", "violet", "gray"];
     if let Some(m) = p.get("color").and_then(Value::as_object) {
         for v in m.values() {
@@ -1267,8 +1343,24 @@ fn section_of(id: &str) -> &str {
 /// Preference command specs.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("prefs.get", "Get Preferences", [], None, r##"{"path":"section.key"?=everything (e.g. "performance.historyStates", "colorSettings.workingRgb")}"##, prefs_get, false),
-        spec!("prefs.set", "Set Preferences", [], None, r##"{"path":"section.key","value":json} or {"values":{"section.key":json,…}} (validated; all or nothing)"##, prefs_set, false),
+        spec!(
+            "prefs.get",
+            "Get Preferences",
+            [],
+            None,
+            r##"{"path":"section.key"?=everything (e.g. "performance.historyStates", "colorSettings.workingRgb")}"##,
+            prefs_get,
+            false
+        ),
+        spec!(
+            "prefs.set",
+            "Set Preferences",
+            [],
+            None,
+            r##"{"path":"section.key","value":json} or {"values":{"section.key":json,…}} (validated; all or nothing)"##,
+            prefs_set,
+            false
+        ),
         spec!("prefs.reset", "Reset Preferences", [], None, r##"{"path":"section|section.key"?=everything}"##, prefs_reset, false),
         section!("edit.preferences.general", "General…"),
         section!("edit.preferences.interface", "Interface…"),
@@ -1297,7 +1389,15 @@ pub fn specs() -> Vec<CommandSpec> {
             keyboard_shortcuts,
             true
         ),
-        spec!("edit.menus", "Menus…", ["Edit"], Some("Cmd+Alt+Shift+M"), r##"{"hide":["<id>",…]?,"show":["<id>",…]?,"color":{"<id>":"red|orange|yellow|green|blue|violet|gray|none"}?,"reset":bool=false}"##, menus, true),
+        spec!(
+            "edit.menus",
+            "Menus…",
+            ["Edit"],
+            Some("Cmd+Alt+Shift+M"),
+            r##"{"hide":["<id>",…]?,"show":["<id>",…]?,"color":{"<id>":"red|orange|yellow|green|blue|violet|gray|none"}?,"reset":bool=false}"##,
+            menus,
+            true
+        ),
         spec!("edit.toolbar", "Toolbar…", ["Edit"], None, r##"{"hidden":["<tool>",…]?,"order":["<tool>",…]?,"reset":bool=false}"##, toolbar, true),
     ]
 }

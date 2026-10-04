@@ -414,10 +414,13 @@ mod tests {
         let c = contours(&v, Rect::new(0, 0, w as i32, h as i32), 0.0);
         assert_eq!(c.len(), 1);
         // Inside on the left in y-down screen space = counter-clockwise = negative shoelace area.
-        let a: f64 = (0..c[0].len()).map(|i| {
-            let (p, q) = (c[0][i], c[0][(i + 1) % c[0].len()]);
-            p.0 * q.1 - q.0 * p.1
-        }).sum::<f64>() * 0.5;
+        let a: f64 = (0..c[0].len())
+            .map(|i| {
+                let (p, q) = (c[0][i], c[0][(i + 1) % c[0].len()]);
+                p.0 * q.1 - q.0 * p.1
+            })
+            .sum::<f64>()
+            * 0.5;
         assert!(a < 0.0, "area {a}");
         let a = -a;
         // Pixels 1..5 x 1..4 → contour through their outer half-pixel boundary (4×3 area with

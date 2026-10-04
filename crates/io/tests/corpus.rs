@@ -88,11 +88,7 @@ fn corpus_import_flatten_oracle() {
         };
         let ours = photocraft_compose::flatten(doc).px;
         let m = common::max_diff(&ours, &merged);
-        let bad = ours
-            .iter()
-            .zip(&merged)
-            .filter(|(a, b)| (0..4).any(|c| (a[c] * a[3] - b[c] * b[3]).abs() > PASS_TOL))
-            .count();
+        let bad = ours.iter().zip(&merged).filter(|(a, b)| (0..4).any(|c| (a[c] * a[3] - b[c] * b[3]).abs() > PASS_TOL)).count();
         let pct = 100.0 * bad as f32 / ours.len().max(1) as f32;
         let status = if m <= PASS_TOL {
             pass += 1;
@@ -104,10 +100,7 @@ fn corpus_import_flatten_oracle() {
         let notes: Vec<&str> = imp.warnings.iter().map(String::as_str).take(2).collect();
         eprintln!("{name:<60} {layers:>6} {:>9.4} {:>7.2}%  {status} {}", m, pct, notes.join(" | "));
     }
-    eprintln!(
-        "io corpus: {} files: {pass} pass (<= 2/255), {diff} differ, {skipped} skipped, {errors} errors",
-        files.len()
-    );
+    eprintln!("io corpus: {} files: {pass} pass (<= 2/255), {diff} differ, {skipped} skipped, {errors} errors", files.len());
     if std::env::var_os("PHOTOCRAFT_CORPUS_STRICT").is_some() {
         assert_eq!(errors, 0);
     }

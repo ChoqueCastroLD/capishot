@@ -107,7 +107,11 @@ pub fn parse(src: &str) -> std::result::Result<Path, String> {
                     } else {
                         let q = Point::new(num(&mut i)?, num(&mut i)?);
                         let p = Point::new(num(&mut i)?, num(&mut i)?);
-                        (Point::new(last.x + (q.x - last.x) * 2.0 / 3.0, last.y + (q.y - last.y) * 2.0 / 3.0), Point::new(p.x + (q.x - p.x) * 2.0 / 3.0, p.y + (q.y - p.y) * 2.0 / 3.0), p)
+                        (
+                            Point::new(last.x + (q.x - last.x) * 2.0 / 3.0, last.y + (q.y - last.y) * 2.0 / 3.0),
+                            Point::new(p.x + (q.x - p.x) * 2.0 / 3.0, p.y + (q.y - p.y) * 2.0 / 3.0),
+                            p,
+                        )
                     };
                     s.knots.last_mut().expect("non-empty").out_ctrl = c1;
                     s.knots.push(Knot { anchor: p, in_ctrl: c2, out_ctrl: p, smooth: false });
@@ -176,7 +180,9 @@ fn shout() -> String {
 
 /// Built-in groups (our own drawings).
 pub fn builtin() -> Vec<Group<ShapePreset>> {
-    let mk = |list: Vec<(&str, String)>| -> Vec<ShapePreset> { list.into_iter().filter_map(|(n, src)| parse(&src).ok().map(|path| ShapePreset { name: n.into(), path })).collect() };
+    let mk = |list: Vec<(&str, String)>| -> Vec<ShapePreset> {
+        list.into_iter().filter_map(|(n, src)| parse(&src).ok().map(|path| ShapePreset { name: n.into(), path })).collect()
+    };
     let s = |x: &str| x.to_string();
     vec![
         Group::new(
@@ -209,7 +215,12 @@ pub fn builtin() -> Vec<Group<ShapePreset>> {
         Group::new(
             "Speech Bubbles",
             mk(vec![
-                ("Speech Bubble", s("M 15 5 L 85 5 C 93 5 100 12 100 20 L 100 60 C 100 68 93 75 85 75 L 45 75 L 20 98 L 25 75 L 15 75 C 7 75 0 68 0 60 L 0 20 C 0 12 7 5 15 5 Z")),
+                (
+                    "Speech Bubble",
+                    s(
+                        "M 15 5 L 85 5 C 93 5 100 12 100 20 L 100 60 C 100 68 93 75 85 75 L 45 75 L 20 98 L 25 75 L 15 75 C 7 75 0 68 0 60 L 0 20 C 0 12 7 5 15 5 Z",
+                    ),
+                ),
                 ("Round Bubble", s("M 50 5 C 78 5 100 22 100 42 C 100 62 78 79 50 79 C 44 79 38 78 33 77 L 12 95 L 18 72 C 7 65 0 54 0 42 C 0 22 22 5 50 5 Z")),
                 ("Thought Bubble", s("M 50 5 C 78 5 100 20 100 38 C 100 56 78 71 50 71 C 22 71 0 56 0 38 C 0 20 22 5 50 5 Z O 22 82 8 O 9 95 5")),
                 ("Shout Bubble", shout()),
@@ -218,10 +229,18 @@ pub fn builtin() -> Vec<Group<ShapePreset>> {
         Group::new(
             "Nature",
             mk(vec![
-                ("Leaf", s("M 50 0 C 80 20 95 50 80 75 C 72 88 60 92 53 92 L 53 100 L 47 100 L 47 92 C 40 92 28 88 20 75 C 5 50 20 20 50 0 Z ! M 48.5 22 L 51.5 22 L 51.5 88 L 48.5 88 Z")),
+                (
+                    "Leaf",
+                    s(
+                        "M 50 0 C 80 20 95 50 80 75 C 72 88 60 92 53 92 L 53 100 L 47 100 L 47 92 C 40 92 28 88 20 75 C 5 50 20 20 50 0 Z ! M 48.5 22 L 51.5 22 L 51.5 88 L 48.5 88 Z",
+                    ),
+                ),
                 ("Sun", sun()),
                 ("Crescent Moon", s("O 45 50 45 ! O 66 40 38")),
-                ("Cloud", s("M 25 80 C 10 80 0 70 0 58 C 0 46 10 37 22 37 C 24 20 38 10 54 10 C 70 10 82 20 85 34 C 95 35 100 45 100 57 C 100 70 90 80 78 80 Z")),
+                (
+                    "Cloud",
+                    s("M 25 80 C 10 80 0 70 0 58 C 0 46 10 37 22 37 C 24 20 38 10 54 10 C 70 10 82 20 85 34 C 95 35 100 45 100 57 C 100 70 90 80 78 80 Z"),
+                ),
                 ("Raindrop", s("M 50 0 C 60 25 85 45 85 68 C 85 87 69 100 50 100 C 31 100 15 87 15 68 C 15 45 40 25 50 0 Z")),
                 ("Flower", flower()),
                 ("Tree", s("M 50 0 L 85 45 L 68 45 L 92 75 L 56 75 L 56 100 L 44 100 L 44 75 L 8 75 L 32 45 L 15 45 Z")),
@@ -233,8 +252,18 @@ pub fn builtin() -> Vec<Group<ShapePreset>> {
                 ("Fish", s("M 0 50 C 15 25 45 15 70 32 L 96 12 L 88 50 L 96 88 L 70 68 C 45 85 15 75 0 50 Z ! O 20 45 4")),
                 ("Cat", s("M 15 10 L 35 30 C 45 27 55 27 65 30 L 85 10 L 88 50 C 92 75 72 95 50 95 C 28 95 8 75 12 50 Z ! O 36 58 6 ! O 64 58 6")),
                 ("Bird", s("M 0 40 C 15 30 35 32 50 50 C 65 32 85 30 100 40 C 85 40 65 48 50 70 C 35 48 15 40 0 40 Z")),
-                ("Butterfly", s("M 50 30 C 40 5 5 0 5 25 C 5 45 30 50 45 50 C 25 55 10 75 25 90 C 38 100 48 80 50 65 C 52 80 62 100 75 90 C 90 75 75 55 55 50 C 70 50 95 45 95 25 C 95 0 60 5 50 30 Z")),
-                ("Paw Print", s("M 50 50 C 68 50 82 66 82 80 C 82 92 70 96 60 94 C 55 93 52 91 50 91 C 48 91 45 93 40 94 C 30 96 18 92 18 80 C 18 66 32 50 50 50 Z O 18 42 10 O 37 22 11 O 63 22 11 O 82 42 10")),
+                (
+                    "Butterfly",
+                    s(
+                        "M 50 30 C 40 5 5 0 5 25 C 5 45 30 50 45 50 C 25 55 10 75 25 90 C 38 100 48 80 50 65 C 52 80 62 100 75 90 C 90 75 75 55 55 50 C 70 50 95 45 95 25 C 95 0 60 5 50 30 Z",
+                    ),
+                ),
+                (
+                    "Paw Print",
+                    s(
+                        "M 50 50 C 68 50 82 66 82 80 C 82 92 70 96 60 94 C 55 93 52 91 50 91 C 48 91 45 93 40 94 C 30 96 18 92 18 80 C 18 66 32 50 50 50 Z O 18 42 10 O 37 22 11 O 63 22 11 O 82 42 10",
+                    ),
+                ),
                 ("Rabbit", s("O 50 72 26 M 34 52 C 22 30 24 2 34 2 C 44 2 46 30 44 50 Z M 66 52 C 78 30 76 2 66 2 C 56 2 54 30 56 50 Z")),
             ]),
         ),
@@ -334,7 +363,8 @@ fn new_preset(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(src)) if src.trim_start().starts_with(['M', 'O', '!']) => parse(src).map_err(|e| bad(CMD, e))?,
         other => {
             let d = s.active().ok_or_else(|| bad(CMD, "no document (pass `path`)"))?;
-            crate::edit_menu_cmds::current_path(&d.doc, d.active_layer, other.and_then(Value::as_str)).ok_or_else(|| bad(CMD, "select a path or shape layer first"))?
+            crate::edit_menu_cmds::current_path(&d.doc, d.active_layer, other.and_then(Value::as_str))
+                .ok_or_else(|| bad(CMD, "select a path or shape layer first"))?
         }
     };
     if path.is_empty() {
@@ -354,7 +384,11 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "shape.presets.edit";
     let action = req_str(p, "action", CMD)?.to_string();
     // Define Custom Shape results live in the edit state; rename/delete them there.
-    let custom = |s: &Session, n: &str| str_param(p, "group").is_none_or(|g| g == CUSTOM_GROUP) && find(&s.presets.shapes, n, None).is_none() && s.edit_state.custom_shapes.iter().any(|c| c.name == n);
+    let custom = |s: &Session, n: &str| {
+        str_param(p, "group").is_none_or(|g| g == CUSTOM_GROUP)
+            && find(&s.presets.shapes, n, None).is_none()
+            && s.edit_state.custom_shapes.iter().any(|c| c.name == n)
+    };
     let r = match action.as_str() {
         "rename" if custom(s, req_str(p, "preset", CMD)?) => {
             let (n, to) = (req_str(p, "preset", CMD)?, req_str(p, "name", CMD)?);
@@ -390,7 +424,16 @@ fn reset(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec { id: "shape.presets.list", label: "Shape Presets", menu: &[], shortcut: None, params: "{} → {groups:[{name,shapes:[{name,subpaths}]}]}", enabled: always, run: list, journal: false },
+        CommandSpec {
+            id: "shape.presets.list",
+            label: "Shape Presets",
+            menu: &[],
+            shortcut: None,
+            params: "{} → {groups:[{name,shapes:[{name,subpaths}]}]}",
+            enabled: always,
+            run: list,
+            journal: false,
+        },
         CommandSpec {
             id: "shape.presets.place",
             label: "Place Custom Shape",
@@ -411,7 +454,25 @@ pub fn specs() -> Vec<CommandSpec> {
             run: new_preset,
             journal: true,
         },
-        CommandSpec { id: "shape.presets.edit", label: "Edit Shape Presets", menu: &[], shortcut: None, params: super::GROUP_EDIT_PARAMS, enabled: always, run: edit, journal: true },
-        CommandSpec { id: "shape.presets.reset", label: "Restore Default Shapes", menu: &[], shortcut: None, params: r##"{"append":bool=false}"##, enabled: always, run: reset, journal: true },
+        CommandSpec {
+            id: "shape.presets.edit",
+            label: "Edit Shape Presets",
+            menu: &[],
+            shortcut: None,
+            params: super::GROUP_EDIT_PARAMS,
+            enabled: always,
+            run: edit,
+            journal: true,
+        },
+        CommandSpec {
+            id: "shape.presets.reset",
+            label: "Restore Default Shapes",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"append":bool=false}"##,
+            enabled: always,
+            run: reset,
+            journal: true,
+        },
     ]
 }

@@ -67,7 +67,11 @@ pub enum FxPaint {
     Color(Color),
     Gradient(Gradient),
     /// Pattern by name/id (rendered once pattern data is available).
-    Pattern { name: String, id: String, scale: f32 },
+    Pattern {
+        name: String,
+        id: String,
+        scale: f32,
+    },
 }
 
 /// Blend mode + opacity + enabled, shared by every effect.
@@ -243,8 +247,15 @@ pub enum Effect {
     OuterGlow(Glow),
     InnerGlow(Glow),
     Stroke(StrokeFx),
-    ColorOverlay { common: FxCommon, color: Color },
-    GradientOverlay { common: FxCommon, gradient: Gradient, dither: bool },
+    ColorOverlay {
+        common: FxCommon,
+        color: Color,
+    },
+    GradientOverlay {
+        common: FxCommon,
+        gradient: Gradient,
+        dither: bool,
+    },
     PatternOverlay {
         common: FxCommon,
         name: String,
@@ -271,9 +282,7 @@ impl Effect {
             Effect::DropShadow(s) | Effect::InnerShadow(s) => s.common.enabled,
             Effect::OuterGlow(g) | Effect::InnerGlow(g) => g.common.enabled,
             Effect::Stroke(s) => s.common.enabled,
-            Effect::ColorOverlay { common, .. } | Effect::GradientOverlay { common, .. } | Effect::PatternOverlay { common, .. } => {
-                common.enabled
-            }
+            Effect::ColorOverlay { common, .. } | Effect::GradientOverlay { common, .. } | Effect::PatternOverlay { common, .. } => common.enabled,
             Effect::Satin(s) => s.common.enabled,
             Effect::BevelEmboss(b) => b.enabled,
         }

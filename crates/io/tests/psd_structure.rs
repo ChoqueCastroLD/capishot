@@ -14,9 +14,7 @@ fn sample(f: &PsdFile, li: usize, id: i16, x: i32, y: i32, cache: &mut std::coll
         let default = if id == -2 { rec.layer_mask().map_or(0, |m| m.default_color) } else { 0 };
         return if default == 0 || bps != 1 { vec![0; bps] } else { vec![default] };
     }
-    let plane = cache
-        .entry((li, id))
-        .or_insert_with(|| rec.decode_channel(id, f.header.depth, f.header.version).unwrap_or_default());
+    let plane = cache.entry((li, id)).or_insert_with(|| rec.decode_channel(id, f.header.depth, f.header.version).unwrap_or_default());
     let w = (r.right - r.left) as usize;
     let i = ((y - r.top) as usize * w + (x - r.left) as usize) * bps;
     plane.get(i..i + bps).map(<[u8]>::to_vec).unwrap_or(vec![0; bps])
@@ -58,11 +56,7 @@ fn assert_structurally_equal(a: &PsdFile, b: &PsdFile) {
         let (ra, rb) = (&a.layers()[ia], &b.layers()[ib]);
         let n = ra.name();
         assert_eq!(n, rb.name());
-        let blend = if matches!(ra.blend_mode, photocraft_psd::BlendMode::Unknown(_)) {
-            photocraft_psd::BlendMode::Normal
-        } else {
-            ra.blend_mode
-        };
+        let blend = if matches!(ra.blend_mode, photocraft_psd::BlendMode::Unknown(_)) { photocraft_psd::BlendMode::Normal } else { ra.blend_mode };
         if ra.section_type().is_folder() {
             assert_eq!(ra.section_divider().and_then(|s| s.blend_mode), rb.section_divider().and_then(|s| s.blend_mode), "{n}");
         } else {
@@ -77,9 +71,7 @@ fn assert_structurally_equal(a: &PsdFile, b: &PsdFile) {
             continue;
         }
         // Pixels: compare every channel over the union of both rects.
-        let u = |r: photocraft_psd::Rect, s: photocraft_psd::Rect| {
-            (r.left.min(s.left), r.top.min(s.top), r.right.max(s.right), r.bottom.max(s.bottom))
-        };
+        let u = |r: photocraft_psd::Rect, s: photocraft_psd::Rect| (r.left.min(s.left), r.top.min(s.top), r.right.max(s.right), r.bottom.max(s.bottom));
         let mut ids: Vec<i16> = (-1..cc).collect();
         if ra.layer_mask().is_some() && (ra.channel(-2).is_some() || ra.channel(-3).is_some()) {
             ids.push(-2);
@@ -296,7 +288,9 @@ fn adjustment_and_fill_layers_from_psd() {
     use photocraft_doc::{Adjustment, Fill};
     assert!(matches!(d.layers[n - 4].content, LayerContent::Adjustment(Adjustment::Invert)));
     assert!(matches!(d.layers[n - 3].content, LayerContent::Adjustment(Adjustment::Posterize { levels: 4 })));
-    assert!(matches!(&d.layers[n - 2].content, LayerContent::Adjustment(Adjustment::Unsupported { psd_key, raw }) if psd_key == "selc" && raw == &vec![1, 2, 3]));
+    assert!(
+        matches!(&d.layers[n - 2].content, LayerContent::Adjustment(Adjustment::Unsupported { psd_key, raw }) if psd_key == "selc" && raw == &vec![1, 2, 3])
+    );
     assert!(matches!(&d.layers[n - 1].content, LayerContent::Fill(Fill::Solid(c)) if c.c[0] == 1.0));
 }
 
@@ -376,7 +370,11 @@ fn guides_and_alpha_names_roundtrip() {
     for name in ["Spot \u{e9}", "Alpha 2"] {
         d.channels.push(photocraft_doc::AlphaChannel::new(
             name,
-            photocraft_raster::Surface::new(photocraft_color::PixelFormat::new(photocraft_color::ColorMode::Grayscale, photocraft_color::SampleType::U8, false)),
+            photocraft_raster::Surface::new(photocraft_color::PixelFormat::new(
+                photocraft_color::ColorMode::Grayscale,
+                photocraft_color::SampleType::U8,
+                false,
+            )),
         ));
     }
     let f = document_to_psd(&d);

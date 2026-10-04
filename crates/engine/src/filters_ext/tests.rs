@@ -158,7 +158,7 @@ fn colour_filters_use_and_record_tool_colours() {
     let r = s.execute("filter.render.fibers", json!({"seed": 1})).unwrap();
     assert_eq!(r["filter"]["foreground"], json!([1.0, 0.0, 0.0, 1.0]));
     let px = pixels(&s);
-    for p in px.chunks_exact(4) {
+    for p in px.as_chunks::<4>().0 {
         assert!(p[1] < 1e-2 && (p[0] + p[2] - 1.0).abs() < 2e-2, "{p:?}");
     }
 }
@@ -201,8 +201,13 @@ fn lens_blur_uses_the_layer_mask_as_depth() {
 #[test]
 fn params_map_to_algorithm_units() {
     assert_eq!(params_for("filter.pixelate.crystallize", &json!({"cellSize": 1})), Some(FilterParams::Crystallize { cell_size: 3.0, seed: 0 }));
-    assert_eq!(params_for("filter.stylize.traceContour", &json!({"level": 300, "edge": "upper"})), Some(FilterParams::TraceContour { level: 255.0, upper: true }));
-    let Some(FilterParams::IrisBlur { pins }) = params_for("filter.blurGallery.irisBlur", &json!({"pins": [{"x": 0.2, "blur": 30}, {"x": 0.8}]})) else { panic!() };
+    assert_eq!(
+        params_for("filter.stylize.traceContour", &json!({"level": 300, "edge": "upper"})),
+        Some(FilterParams::TraceContour { level: 255.0, upper: true })
+    );
+    let Some(FilterParams::IrisBlur { pins }) = params_for("filter.blurGallery.irisBlur", &json!({"pins": [{"x": 0.2, "blur": 30}, {"x": 0.8}]})) else {
+        panic!()
+    };
     assert_eq!(pins.len(), 2);
     assert_eq!(pins[0].blur, 30.0);
     assert_eq!(pins[1].blur, IrisPin::default().blur);

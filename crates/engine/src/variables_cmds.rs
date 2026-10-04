@@ -7,11 +7,8 @@
 use std::sync::Arc;
 
 use photocraft_algo::resample::{Resample, resize_surface, translate_surface};
-use photocraft_doc::{
-    DataSet, DataValue, Document, LayerContent, LayerId, PixelAlign, PixelMethod, VarKind, VariableDef,
-    Variables,
-};
 use photocraft_doc::variables::Value as VarValue;
+use photocraft_doc::{DataSet, DataValue, Document, LayerContent, LayerId, PixelAlign, PixelMethod, VarKind, VariableDef, Variables};
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
@@ -201,11 +198,7 @@ fn replace_pixels(doc: &mut Document, layer: LayerId, path: &str, method: PixelM
         PixelMethod::Conform => (tw / iw, th / ih),
         PixelMethod::AsIs => (1.0, 1.0),
     };
-    let scaled = if (sx - 1.0).abs() > 1e-9 || (sy - 1.0).abs() > 1e-9 {
-        resize_surface(&img, sx, sy, Resample::Bicubic)
-    } else {
-        img
-    };
+    let scaled = if (sx - 1.0).abs() > 1e-9 || (sy - 1.0).abs() > 1e-9 { resize_surface(&img, sx, sy, Resample::Bicubic) } else { img };
     let (sw, sh) = (iw * sx, ih * sy);
     // Aligned placement within the target rect.
     let fx = match align {
@@ -348,10 +341,7 @@ fn export_as_files(s: &mut Session, p: &Value) -> Result<Value> {
         let mut doc = (*original).clone();
         apply_to_doc(&mut doc, &vars, set)?;
         let safe: String = set.name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
-        let stem = template
-            .replace("{name}", &safe)
-            .replace("{index}", &format!("{:03}", n + 1))
-            .replace("{document}", &doc_stem);
+        let stem = template.replace("{name}", &safe).replace("{index}", &format!("{:03}", n + 1)).replace("{document}", &doc_stem);
         let path = format!("{dir}/{stem}.{format}");
         let opts = photocraft_io::ExportOptions::default();
         let bytes = photocraft_io::export(&doc, format, &opts).map(|r| r.bytes).map_err(|e| EngineError::Other(format!("export `{}`: {e}", set.name)))?;
@@ -389,23 +379,51 @@ macro_rules! spec {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("image.variables.define", "Define…", &["Image", "Variables"],
+        spec!(
+            "image.variables.define",
+            "Define…",
+            &["Image", "Variables"],
             "{defs:[{name, layer:id, type:visibility|textReplacement|pixelReplacement, method?:fit|fill|asIs|conform, align?, clip?}]} → {defs,dataSets,active}",
-            |s, p| define(s, p)),
-        spec!("image.variables.dataSets", "Data Sets…", &["Image", "Variables"],
+            |s, p| define(s, p)
+        ),
+        spec!(
+            "image.variables.dataSets",
+            "Data Sets…",
+            &["Image", "Variables"],
             "{dataSets:[{name, values:[{variable, kind:visibility|text|pixels, value}]}], append?} → {defs,dataSets,active}",
-            |s, p| data_sets(s, p)),
-        spec!("image.applyDataSet", "Apply Data Set…", &["Image"],
+            |s, p| data_sets(s, p)
+        ),
+        spec!(
+            "image.applyDataSet",
+            "Apply Data Set…",
+            &["Image"],
             "{name|index} → {applied, index}: sets layer visibility/text/pixels from the data set (one history step)",
-            |s, p| apply_data_set(s, p)),
-        spec!("file.import.variableDataSets", "Variable Data Sets…", &["File", "Import"],
+            |s, p| apply_data_set(s, p)
+        ),
+        spec!(
+            "file.import.variableDataSets",
+            "Variable Data Sets…",
+            &["File", "Import"],
             "{path, delimiter?} → {imported}: CSV header = variable names, each row a data set (first column may be the data-set name)",
-            |s, p| import_data_sets(s, p)),
-        spec!("file.export.dataSetsAsFiles", "Data Sets as Files…", &["File", "Export"],
+            |s, p| import_data_sets(s, p)
+        ),
+        spec!(
+            "file.export.dataSetsAsFiles",
+            "Data Sets as Files…",
+            &["File", "Export"],
             "{dir, format?:png, dataSets?[names], naming?:\"{name}|{index}|{document}\"} → {files,count}: apply each data set and export the flattened document",
-            |s, p| export_as_files(s, p)),
-        CommandSpec { id: "variables.list", label: "List Variables", menu: &[], shortcut: None, journal: false,
-            params: "{} → {defs,dataSets,active}", enabled: has_doc, run: |s, _| list(s) },
+            |s, p| export_as_files(s, p)
+        ),
+        CommandSpec {
+            id: "variables.list",
+            label: "List Variables",
+            menu: &[],
+            shortcut: None,
+            journal: false,
+            params: "{} → {defs,dataSets,active}",
+            enabled: has_doc,
+            run: |s, _| list(s),
+        },
     ]
 }
 

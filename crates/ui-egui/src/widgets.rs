@@ -69,7 +69,13 @@ fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, body: i
         } else if resp.hovered() {
             ui.painter().rect_filled(r, 0.0, t.hover.gamma_multiply(0.4));
         }
-        let color = if active { t.text } else if resp.hovered() { t.text_dim } else { t.text_faint };
+        let color = if active {
+            t.text
+        } else if resp.hovered() {
+            t.text_dim
+        } else {
+            t.text_faint
+        };
         ui.painter().galley_with_override_text_color(r.center() - galley.size() / 2.0, galley, color);
         if resp.clicked() {
             *selected = i;
@@ -85,10 +91,14 @@ fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, body: i
         ui.painter().line_segment([pos2(menu.center().x - 5.0, y), pos2(menu.center().x + 5.0, y)], Stroke::new(1.0, c));
     }
     // Body.
-    egui::Frame::NONE.fill(t.card).corner_radius(CornerRadius { nw: 0, ne: 0, sw: 3, se: 3 }).inner_margin(egui::Margin { left: 8, right: 8, top: 8, bottom: 8 }).show(ui, |ui| {
-        ui.set_width(width - 16.0);
-        body(ui, *selected);
-    });
+    egui::Frame::NONE
+        .fill(t.card)
+        .corner_radius(CornerRadius { nw: 0, ne: 0, sw: 3, se: 3 })
+        .inner_margin(egui::Margin { left: 8, right: 8, top: 8, bottom: 8 })
+        .show(ui, |ui| {
+            ui.set_width(width - 16.0);
+            body(ui, *selected);
+        });
     ui.add_space(2.0);
 }
 
@@ -135,7 +145,13 @@ pub fn value_field(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive
             ui.style_mut().visuals.widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
             ui.style_mut().override_font_id = Some(theme::mono(12.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_sized(field.size(), egui::DragValue::new(value).range(range).speed(if fine { 0.01 } else { 0.5 }).custom_formatter(|v, _| if fine { fmt_num2(v) } else { fmt_num(v) }))
+                ui.add_sized(
+                    field.size(),
+                    egui::DragValue::new(value)
+                        .range(range)
+                        .speed(if fine { 0.01 } else { 0.5 })
+                        .custom_formatter(|v, _| if fine { fmt_num2(v) } else { fmt_num(v) }),
+                )
             })
             .inner
         }
@@ -279,7 +295,13 @@ fn button_impl(ui: &mut Ui, label: &str, min_width: f32, bg: Color32, fg: Color3
         let down = resp.is_pointer_button_down_on();
         let r = h / 2.0;
         if primary {
-            let fill = if down { bg.gamma_multiply(0.8) } else if resp.hovered() { bg.gamma_multiply(0.9) } else { bg };
+            let fill = if down {
+                bg.gamma_multiply(0.8)
+            } else if resp.hovered() {
+                bg.gamma_multiply(0.9)
+            } else {
+                bg
+            };
             ui.painter().rect_filled(rect, r, fill);
         } else {
             if resp.hovered() || down {

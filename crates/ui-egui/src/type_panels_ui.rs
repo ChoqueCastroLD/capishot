@@ -50,7 +50,14 @@ pub struct SpellDialog {
     pub message: String,
 }
 
-const IDS: [&str; 6] = ["type.panels.characterStyles", "window.panel.characterStyles", "type.panels.paragraphStyles", "window.panel.paragraphStyles", "type.panels.glyphs", "window.panel.glyphs"];
+const IDS: [&str; 6] = [
+    "type.panels.characterStyles",
+    "window.panel.characterStyles",
+    "type.panels.paragraphStyles",
+    "window.panel.paragraphStyles",
+    "type.panels.glyphs",
+    "window.panel.glyphs",
+];
 
 /// Menu ids handled here (live menu items).
 pub fn handles(id: &str) -> bool {
@@ -214,7 +221,11 @@ pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui, paragraph: bool)
     let Ok(list) = app.session.execute(&format!("{prefix}.list"), tgt.clone()) else { return };
     let styles = list["styles"].as_array().cloned().unwrap_or_default();
     let cur = &list["current"];
-    let (cur_id, over) = if paragraph { (cur["paragraph"].as_u64(), cur["paragraphOverride"].as_bool().unwrap_or(false)) } else { (cur["character"].as_u64(), cur["characterOverride"].as_bool().unwrap_or(false)) };
+    let (cur_id, over) = if paragraph {
+        (cur["paragraph"].as_u64(), cur["paragraphOverride"].as_bool().unwrap_or(false))
+    } else {
+        (cur["character"].as_u64(), cur["characterOverride"].as_bool().unwrap_or(false))
+    };
     let has_target = !cur.is_null();
     let selected = app.ui.type_panels.options.filter(|o| o.0 == paragraph).map(|o| u64::from(o.1)).or(cur_id);
     let mut action: Option<(String, Value)> = None;
@@ -254,7 +265,11 @@ pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui, paragraph: bool)
                     app.ui.type_panels.options = Some((paragraph, id as u32));
                 }
             }
-            resp.on_hover_text(if id == 0 && !paragraph { "No character style" } else { "Click to apply, ⌥-click to clear overrides, double-click for Style Options" });
+            resp.on_hover_text(if id == 0 && !paragraph {
+                "No character style"
+            } else {
+                "Click to apply, ⌥-click to clear overrides, double-click for Style Options"
+            });
         }
     });
     ui.add_space(4.0);
@@ -266,7 +281,10 @@ pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui, paragraph: bool)
         if crate::icons::button(ui, "ban", 22.0, false, "Clear Override").clicked() && has_target && over {
             action = Some((format!("{prefix}.clearOverride"), tgt.clone()));
         }
-        if crate::icons::button(ui, "check", 22.0, false, "Redefine style by current selection").clicked() && has_target && cur_id.is_some_and(|i| i != 0 || paragraph) {
+        if crate::icons::button(ui, "check", 22.0, false, "Redefine style by current selection").clicked()
+            && has_target
+            && cur_id.is_some_and(|i| i != 0 || paragraph)
+        {
             action = Some((format!("{prefix}.redefine"), tgt.clone()));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -411,7 +429,15 @@ fn options_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, paragraph: bool, s
             }
         }
         if paragraph {
-            let rows: &[(&str, &str, &str)] = &[("Align", "align", "align"), ("Indent First", "first_line_indent_pt", "pt"), ("Indent Left", "start_indent_pt", "pt"), ("Indent Right", "end_indent_pt", "pt"), ("Space Before", "space_before_pt", "pt"), ("Space After", "space_after_pt", "pt"), ("Hyphenate", "hyphenate", "bool")];
+            let rows: &[(&str, &str, &str)] = &[
+                ("Align", "align", "align"),
+                ("Indent First", "first_line_indent_pt", "pt"),
+                ("Indent Left", "start_indent_pt", "pt"),
+                ("Indent Right", "end_indent_pt", "pt"),
+                ("Space Before", "space_before_pt", "pt"),
+                ("Space After", "space_after_pt", "pt"),
+                ("Hyphenate", "hyphenate", "bool"),
+            ];
             for &(label, key, kind) in rows {
                 let mut on = defined(&para_attrs, key);
                 let was = on;
@@ -657,7 +683,11 @@ pub fn glyphs_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // Footer: family name, size slider.
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        let info = selected.as_deref().and_then(|s| s.chars().next()).map(|c| format!("U+{:04X}  ·  {} glyphs", c as u32, chars.len())).unwrap_or_else(|| format!("{} glyphs", chars.len()));
+        let info = selected
+            .as_deref()
+            .and_then(|s| s.chars().next())
+            .map(|c| format!("U+{:04X}  ·  {} glyphs", c as u32, chars.len()))
+            .unwrap_or_else(|| format!("{} glyphs", chars.len()));
         ui.label(RichText::new(info).color(t.text_faint).size(10.5));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let mut s = size;
@@ -724,7 +754,13 @@ fn spelling_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     ui.set_width(250.0);
                     ui.label(RichText::new("Not in Dictionary:").color(t.text_dim).size(11.5));
                     let word = item.as_ref().and_then(|i| i["word"].as_str()).unwrap_or("");
-                    let shown = if item.is_some() { word.to_string() } else if d.items.is_empty() || d.index >= d.items.len() { "".into() } else { String::new() };
+                    let shown = if item.is_some() {
+                        word.to_string()
+                    } else if d.items.is_empty() || d.index >= d.items.len() {
+                        "".into()
+                    } else {
+                        String::new()
+                    };
                     ui.add_enabled(false, egui::TextEdit::singleline(&mut shown.clone()).desired_width(240.0));
                     ui.add_space(4.0);
                     ui.label(RichText::new("Change To:").color(t.text_dim).size(11.5));
@@ -763,7 +799,8 @@ fn spelling_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     }
                     ui.add_space(6.0);
                     ui.add_enabled_ui(item.is_some(), |ui| {
-                        for (label, a) in [("Ignore", "ignore"), ("Ignore All", "ignoreAll"), ("Change", "change"), ("Change All", "changeAll"), ("Add", "add")] {
+                        for (label, a) in [("Ignore", "ignore"), ("Ignore All", "ignoreAll"), ("Change", "change"), ("Change All", "changeAll"), ("Add", "add")]
+                        {
                             if crate::widgets::secondary_button(ui, label, 100.0).clicked() {
                                 act = Some(a);
                             }

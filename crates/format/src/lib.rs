@@ -44,9 +44,7 @@ pub enum FormatError {
     Corrupt(String),
     #[error("unsupported .pcraft feature: {0}")]
     Unsupported(String),
-    #[error(
-        "bundle written by a newer version (format {found}, this build reads up to {supported})"
-    )]
+    #[error("bundle written by a newer version (format {found}, this build reads up to {supported})")]
     TooNew { found: u32, supported: u32 },
     #[error("limit exceeded: {0}")]
     LimitExceeded(String),
@@ -88,12 +86,7 @@ pub struct LoadOptions {
 
 impl Default for LoadOptions {
     fn default() -> Self {
-        LoadOptions {
-            max_manifest_bytes: 256 << 20,
-            max_blob_bytes: 1 << 30,
-            max_total_bytes: 16 << 30,
-            preserve_ids: true,
-        }
+        LoadOptions { max_manifest_bytes: 256 << 20, max_blob_bytes: 1 << 30, max_total_bytes: 16 << 30, preserve_ids: true }
     }
 }
 
@@ -129,12 +122,7 @@ pub fn load_path(path: &Path) -> Result<Document> {
 
 pub fn load_path_with(path: &Path, opts: &LoadOptions) -> Result<Document> {
     if path.is_dir() {
-        store::load(
-            &store::DirSource {
-                root: path.to_path_buf(),
-            },
-            opts,
-        )
+        store::load(&store::DirSource { root: path.to_path_buf() }, opts)
     } else {
         let bytes = std::fs::read(path)?;
         load_from_bytes_with(&bytes, opts)

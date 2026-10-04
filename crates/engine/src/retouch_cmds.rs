@@ -80,12 +80,7 @@ fn parse_brush(s: &Session, p: &Value, cmd: &str) -> Result<(Stroke, LayerId)> {
 
 /// Run `f` on the target layer's surface inside one undoable step. `f` gets the pre-stroke document
 /// (a cheap copy-on-write snapshot), the surface, the selection and the transparency lock.
-fn run_stroke(
-    s: &mut Session,
-    label: &str,
-    id: LayerId,
-    f: impl FnOnce(&Document, &mut Surface, Option<&Surface>, bool) -> Result<Rect>,
-) -> Result<Rect> {
+fn run_stroke(s: &mut Session, label: &str, id: LayerId, f: impl FnOnce(&Document, &mut Surface, Option<&Surface>, bool) -> Result<Rect>) -> Result<Rect> {
     let dmg = s.edit(label, |doc, _| {
         let pre = doc.clone();
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
@@ -387,7 +382,8 @@ fn spot_heal_surface(surf: &mut Surface, area: Rect, stroke: &Stroke, kind: Spot
     // membrane corrects (otherwise the Dirichlet data would be all zero and the blend a no-op).
     let domain = dilate(w, h, &hole, 2);
     let heal_mask = dilate(w, h, &hole, 1);
-    let content_aware = |img: &[f32]| inpaint::complete(w, h, ch, img, &domain, &CompleteParams::default()).unwrap_or_else(|| poisson::membrane_fill(w, h, ch, img, &domain));
+    let content_aware =
+        |img: &[f32]| inpaint::complete(w, h, ch, img, &domain, &CompleteParams::default()).unwrap_or_else(|| poisson::membrane_fill(w, h, ch, img, &domain));
     let filled = match kind {
         SpotType::ContentAware => content_aware(&img.data),
         SpotType::CreateTexture => inpaint::synthesize(w, h, ch, &img.data, &domain, (size / 4.0).clamp(6.0, 32.0) as usize, 0x5eed),
@@ -584,7 +580,9 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Clone Stamp",
             menu: &[],
             shortcut: None,
-            params: brush_params!(r#","source":[sx,sy] (sampled under the first point) | "offset":[dx,dy],"aligned":bool=true,"sampleLayer":"current|currentAndBelow|all"="current","mode":"normal|multiply|…"="normal" → {"damage","offset","aligned","nextSource"}"#),
+            params: brush_params!(
+                r#","source":[sx,sy] (sampled under the first point) | "offset":[dx,dy],"aligned":bool=true,"sampleLayer":"current|currentAndBelow|all"="current","mode":"normal|multiply|…"="normal" → {"damage","offset","aligned","nextSource"}"#
+            ),
             enabled: has_pixel_layer,
             run: clone_stamp,
             journal: true,
@@ -594,7 +592,9 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Healing Brush",
             menu: &[],
             shortcut: None,
-            params: brush_params!(r#","source":[sx,sy] | "offset":[dx,dy],"aligned":bool=true,"sampleLayer":"current|currentAndBelow|all"="current","mode":"normal|…"="normal" → {"damage","offset","aligned","nextSource"}"#),
+            params: brush_params!(
+                r#","source":[sx,sy] | "offset":[dx,dy],"aligned":bool=true,"sampleLayer":"current|currentAndBelow|all"="current","mode":"normal|…"="normal" → {"damage","offset","aligned","nextSource"}"#
+            ),
             enabled: has_pixel_layer,
             run: healing_brush,
             journal: true,

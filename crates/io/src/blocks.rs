@@ -10,7 +10,7 @@ use photocraft_psd::layer::BlendingRanges;
 /// `brst` (channel blending restrictions): a list of big-endian u32 channel indices left out of
 /// blending → a bit mask (bit `i` = channel `i`; indices above 31 are ignored).
 pub fn parse_brst(data: &[u8]) -> u32 {
-    data.chunks_exact(4).map(|c| u32::from_be_bytes([c[0], c[1], c[2], c[3]])).filter(|&i| i < 32).fold(0, |m, i| m | 1 << i)
+    data.as_chunks::<4>().0.iter().map(|c| u32::from_be_bytes([c[0], c[1], c[2], c[3]])).filter(|&i| i < 32).fold(0, |m, i| m | 1 << i)
 }
 
 /// Inverse of [`parse_brst`]; `None` when every channel blends (no block).
@@ -23,22 +23,10 @@ pub fn brst_data(mask: u32) -> Option<Vec<u8>> {
 /// as black low, black high, white low, white high) → Blend If. Full ranges map to the
 /// default, so files without Blend If keep an empty setting.
 pub fn blend_if_from_ranges(r: &BlendingRanges) -> BlendIf {
-    let mut ranges: Vec<[BlendRange; 2]> = r
-        .ranges()
-        .iter()
-        .map(|e| {
-            [
-                BlendRange::from_bytes(e.source),
-                BlendRange::from_bytes(e.dest),
-            ]
-        })
-        .collect();
+    let mut ranges: Vec<[BlendRange; 2]> = r.ranges().iter().map(|e| [BlendRange::from_bytes(e.source), BlendRange::from_bytes(e.dest)]).collect();
     // Trailing full entries carry nothing (export pads them back), so they are dropped, as
     // `BlendIf::set` does.
-    let keep = ranges
-        .iter()
-        .rposition(|p| !p.iter().all(BlendRange::is_full))
-        .map_or(0, |i| i + 1);
+    let keep = ranges.iter().rposition(|p| !p.iter().all(BlendRange::is_full)).map_or(0, |i| i + 1);
     ranges.truncate(keep);
     BlendIf { ranges }
 }
@@ -54,31 +42,19 @@ pub fn ranges_from_blend_if(b: &BlendIf, channels: usize) -> BlendingRanges {
         let [src, dst] = b.get(i);
         src.to_bytes().into_iter().chain(dst.to_bytes())
     });
-    BlendingRanges {
-        data: data.collect(),
-    }
+    BlendingRanges { data: data.collect() }
 }
 
 /// `lspf` bits (Adobe spec: bit 0 transparency, 1 composite, 2 position).
 /// Artboard (bit 3... here `0x10` as observed by ag-psd) and "all" (bit 31)
 /// are undocumented.
 pub fn locks_from_lspf(v: u32) -> Locks {
-    Locks {
-        transparency: v & 1 != 0,
-        pixels: v & 2 != 0,
-        position: v & 4 != 0,
-        artboard: v & 0x10 != 0,
-        all: v & 0x8000_0000 != 0,
-    }
+    Locks { transparency: v & 1 != 0, pixels: v & 2 != 0, position: v & 4 != 0, artboard: v & 0x10 != 0, all: v & 0x8000_0000 != 0 }
 }
 
 /// Inverse of [`locks_from_lspf`].
 pub fn lspf_from_locks(l: &Locks) -> u32 {
-    u32::from(l.transparency)
-        | u32::from(l.pixels) << 1
-        | u32::from(l.position) << 2
-        | u32::from(l.artboard) << 4
-        | u32::from(l.all) << 31
+    u32::from(l.transparency) | u32::from(l.pixels) << 1 | u32::from(l.position) << 2 | u32::from(l.artboard) << 4 | u32::from(l.all) << 31
 }
 
 /// `lclr` index → label.
@@ -126,11 +102,7 @@ pub fn color_from_desc(d: &Descriptor) -> Option<Color> {
         // Newer Photoshop writes 0..1 floats (`RGBC` with redFloat / greenFloat / blueFloat).
         b"RGBC" if d.get("redFloat").is_some() => Color::rgb(g("redFloat")?, g("greenFloat")?, g("blueFloat")?),
         b"RGBC" => Color::rgb(g("Rd  ")? / 255.0, g("Grn ")? / 255.0, g("Bl  ")? / 255.0),
-        b"CMYC" => Color {
-            mode: ColorMode::Cmyk,
-            c: [g("Cyn ")? / 100.0, g("Mgnt")? / 100.0, g("Ylw ")? / 100.0, g("Blck")? / 100.0],
-            alpha: 1.0,
-        },
+        b"CMYC" => Color { mode: ColorMode::Cmyk, c: [g("Cyn ")? / 100.0, g("Mgnt")? / 100.0, g("Ylw ")? / 100.0, g("Blck")? / 100.0], alpha: 1.0 },
         b"Grsc" => Color::gray(1.0 - g("Gry ")? / 100.0),
         // Newer Photoshop writes 0..1 floats.
         _ if d.get("redFloat").is_some() => Color::rgb(g("redFloat")?, g("greenFloat")?, g("blueFloat")?),
@@ -363,8 +335,10 @@ pub(crate) fn with_pattern_placement(mut d: Descriptor, angle: f32, link: bool, 
     if angle != 0.0 {
         d = d.with("Angl", Value::UnitFloat { unit: *b"#Ang", value: f64::from(angle) });
     }
-    d.with("Algn", Value::Boolean(link))
-        .with("phase", Value::Descriptor(Descriptor::new("Pnt ").with("Hrzn", Value::Double(f64::from(phase.0))).with("Vrtc", Value::Double(f64::from(phase.1)))))
+    d.with("Algn", Value::Boolean(link)).with(
+        "phase",
+        Value::Descriptor(Descriptor::new("Pnt ").with("Hrzn", Value::Double(f64::from(phase.0))).with("Vrtc", Value::Double(f64::from(phase.1)))),
+    )
 }
 
 /// The warp of a placed layer (`SoLd`/`SoLE` `warp` descriptor): style, bend, distortions,
@@ -427,11 +401,7 @@ pub(crate) fn parse_prefix_versioned(data: &[u8]) -> Option<Descriptor> {
 /// Smart object identifier and transform from `SoLd`/`PlLd` (best effort).
 pub fn parse_smart(key: &[u8; 4], data: &[u8]) -> (String, Affine) {
     // SoLd: 'soLD' + version(4) + versioned descriptor.
-    let desc = if key == b"SoLd" || key == b"SoLE" {
-        data.get(8..).and_then(parse_prefix_versioned)
-    } else {
-        None
-    };
+    let desc = if key == b"SoLd" || key == b"SoLE" { data.get(8..).and_then(parse_prefix_versioned) } else { None };
     let Some(d) = desc else { return (String::new(), Affine::IDENTITY) };
     let id = match d.get("Idnt") {
         Some(Value::Text(t)) => t.to_string_lossy(),
@@ -466,58 +436,22 @@ mod tests {
         use photocraft_doc::{BlendIf, BlendRange};
         use photocraft_psd::layer::BlendingRanges;
         // Full ranges (what every layer without Blend If carries) → the default setting.
-        assert_eq!(
-            super::blend_if_from_ranges(&BlendingRanges::full(3)),
-            BlendIf::default()
-        );
-        assert_eq!(
-            super::blend_if_from_ranges(&BlendingRanges::default()),
-            BlendIf::default()
-        );
+        assert_eq!(super::blend_if_from_ranges(&BlendingRanges::full(3)), BlendIf::default());
+        assert_eq!(super::blend_if_from_ranges(&BlendingRanges::default()), BlendIf::default());
         // Gray: This Layer black split 10/40; Blue (entry 3): Underlying white at 200.
         let mut data = BlendingRanges::full(3).data;
         data[..4].copy_from_slice(&[10, 40, 255, 255]);
         data[3 * 8 + 4..3 * 8 + 8].copy_from_slice(&[0, 0, 200, 200]);
         let b = super::blend_if_from_ranges(&BlendingRanges { data: data.clone() });
-        assert_eq!(
-            b.get(0),
-            [
-                BlendRange {
-                    black: [10, 40],
-                    white: [255, 255]
-                },
-                BlendRange::FULL
-            ]
-        );
-        assert_eq!(
-            b.get(3),
-            [
-                BlendRange::FULL,
-                BlendRange {
-                    black: [0, 0],
-                    white: [200, 200]
-                }
-            ]
-        );
+        assert_eq!(b.get(0), [BlendRange { black: [10, 40], white: [255, 255] }, BlendRange::FULL]);
+        assert_eq!(b.get(3), [BlendRange::FULL, BlendRange { black: [0, 0], white: [200, 200] }]);
         assert_eq!(b.ranges.len(), 4);
         assert_eq!(super::ranges_from_blend_if(&b, 3).data, data);
         // The default writes full ranges for gray + each channel.
-        assert_eq!(
-            super::ranges_from_blend_if(&BlendIf::default(), 4),
-            BlendingRanges::full(4)
-        );
+        assert_eq!(super::ranges_from_blend_if(&BlendIf::default(), 4), BlendingRanges::full(4));
         // A trimmed setting is padded to the document's channel count.
         let mut short = BlendIf::default();
-        short.set(
-            0,
-            [
-                BlendRange {
-                    black: [5, 5],
-                    white: [255, 255],
-                },
-                BlendRange::FULL,
-            ],
-        );
+        short.set(0, [BlendRange { black: [5, 5], white: [255, 255] }, BlendRange::FULL]);
         let r = super::ranges_from_blend_if(&short, 3);
         assert_eq!(r.data.len(), 4 * 8);
         assert_eq!(&r.data[..8], &[5, 5, 255, 255, 0, 0, 255, 255]);
@@ -569,10 +503,10 @@ mod tests {
         let mesh = Descriptor::new("null")
             .with("Hrzn", Value::UnitFloats { unit: *b"#Pxl", values: xs })
             .with("Vrtc", Value::UnitFloats { unit: *b"#Pxl", values: ys });
-        let custom = Descriptor::new("warp")
-            .with("warpStyle", e("warpStyle", "warpCustom"))
-            .with("bounds", Value::Descriptor(bounds))
-            .with("customEnvelopeWarp", Value::Descriptor(Descriptor::new("customEnvelopeWarp").with("meshPoints", Value::ObjectArray(ObjectArray { prefix: 16, body: mesh }))));
+        let custom = Descriptor::new("warp").with("warpStyle", e("warpStyle", "warpCustom")).with("bounds", Value::Descriptor(bounds)).with(
+            "customEnvelopeWarp",
+            Value::Descriptor(Descriptor::new("customEnvelopeWarp").with("meshPoints", Value::ObjectArray(ObjectArray { prefix: 16, body: mesh }))),
+        );
         let w = parse_placed_warp(b"SoLd", &sold(custom)).unwrap();
         assert_eq!(w.style, WarpStyle::Custom);
         assert_eq!(w.mesh.as_ref().unwrap().points[15], [67.0, 30.0]);
@@ -595,7 +529,13 @@ mod tests {
             Fill::Solid(Color::rgb(1.0, 0.5, 0.0)),
             Fill::Solid(Color { mode: ColorMode::Cmyk, c: [0.1, 0.2, 0.3, 0.4], alpha: 1.0 }),
             Fill::Solid(Color::gray(0.25)),
-            Fill::Gradient { stops: vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))], angle: 45.0, scale: 1.0, style: GradientStyle::Reflected, reverse: true },
+            Fill::Gradient {
+                stops: vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))],
+                angle: 45.0,
+                scale: 1.0,
+                style: GradientStyle::Reflected,
+                reverse: true,
+            },
             Fill::Pattern { name: "Bubbles".into(), scale: 0.5, id: "abc".into(), angle: 30.0, link: false, phase: (3.0, -2.0) },
         ] {
             let (k, d) = write_fill(&f);

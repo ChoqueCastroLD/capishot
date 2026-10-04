@@ -19,14 +19,14 @@
 
 mod adjust_map;
 pub mod annotations_map;
+pub mod blocks;
 mod channel_map;
 pub mod comps_map;
 pub mod effects_map;
-pub mod blocks;
-mod gradient_bake;
 mod flat;
-mod multichannel_map;
+mod gradient_bake;
 pub mod linked;
+mod multichannel_map;
 pub mod pattern_map;
 mod pixels;
 mod psd_export;
@@ -148,7 +148,9 @@ pub fn merged_composite(file: &PsdFile) -> Result<Vec<[f32; 4]>, IoError> {
         let unmatte = file.merged_has_alpha();
         return Ok(img
             .data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|p| {
                 let mut v: [f32; 4] = std::array::from_fn(|i| f32::from(p[i]) / 255.0);
                 if unmatte {

@@ -118,10 +118,13 @@ fn slices_export_with_html_table() {
     assert!(html.contains("images/spacer.gif"));
     assert!(std::path::Path::new(&format!("{dir}/images/spacer.gif")).is_file());
     // Total area of the exported slices plus the text cell is the canvas.
-    let area: u64 = files.iter().map(|f| {
-        let (w, h) = decode(f).dimensions();
-        u64::from(w) * u64::from(h)
-    }).sum();
+    let area: u64 = files
+        .iter()
+        .map(|f| {
+            let (w, h) = decode(f).dimensions();
+            u64::from(w) * u64::from(h)
+        })
+        .sum();
     assert_eq!(area + 24 * 20, 64 * 48);
     // Scaled export scales slices.
     let dir2 = tmp("slices2");
@@ -166,7 +169,13 @@ fn generator_naming_grammar() {
     assert!(parse_asset_name("notes.txt", 72.0).is_empty());
     assert!(parse_asset_name("x.jpgq", 72.0).is_empty());
     let d = parse_defaults("default 50% low/ + 200% @2x", 72.0).unwrap();
-    assert_eq!(d, vec![AssetDefault { scale: Some(0.5), folder: "low/".into(), ..Default::default() }, AssetDefault { scale: Some(2.0), suffix: "@2x".into(), ..Default::default() }]);
+    assert_eq!(
+        d,
+        vec![
+            AssetDefault { scale: Some(0.5), folder: "low/".into(), ..Default::default() },
+            AssetDefault { scale: Some(2.0), suffix: "@2x".into(), ..Default::default() }
+        ]
+    );
     assert!(parse_defaults("defaults are nice", 72.0).is_none());
 }
 

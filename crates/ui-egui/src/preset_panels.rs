@@ -48,7 +48,8 @@ impl PresetUi {
     }
 }
 
-const PANELS: [&str; 6] = ["window.panel.gradients", "window.panel.patterns", "window.panel.styles", "window.panel.shapes", "window.panel.toolPresets", "window.panel.cloneSource"];
+const PANELS: [&str; 6] =
+    ["window.panel.gradients", "window.panel.patterns", "window.panel.styles", "window.panel.shapes", "window.panel.toolPresets", "window.panel.cloneSource"];
 const MIN_THUMB: f32 = 20.0;
 
 /// Window-menu ids handled here.
@@ -237,7 +238,14 @@ struct Place<'a> {
     new_tip: &'a str,
 }
 
-fn browser(ui: &mut egui::Ui, st: &mut PresetUi, panel: &str, groups: &[GroupView], place: Place, thumb: &mut dyn FnMut(&egui::Ui, Rect, usize, usize)) -> Vec<Ev> {
+fn browser(
+    ui: &mut egui::Ui,
+    st: &mut PresetUi,
+    panel: &str,
+    groups: &[GroupView],
+    place: Place,
+    thumb: &mut dyn FnMut(&egui::Ui, Rect, usize, usize),
+) -> Vec<Ev> {
     let t = Tokens::get(ui.ctx());
     let Place { canvas, max_h, new_tip } = place;
     let mut ev = Vec::new();
@@ -305,7 +313,9 @@ fn browser(ui: &mut egui::Ui, st: &mut PresetUi, panel: &str, groups: &[GroupVie
                 continue;
             }
             let w = ui.available_width();
-            let (cell, cols) = if list { (vec2(w, 24.0), 1) } else {
+            let (cell, cols) = if list {
+                (vec2(w, 24.0), 1)
+            } else {
                 let cols = ((w - 8.0 + 4.0) / (size + 4.0)).floor().max(1.0) as usize;
                 (vec2(size, size), cols)
             };
@@ -329,7 +339,13 @@ fn browser(ui: &mut egui::Ui, st: &mut PresetUi, panel: &str, groups: &[GroupVie
                     ui.painter().text(pos2(tr.right() + 8.0, r.center().y), Align2::LEFT_CENTER, &it.name, FontId::proportional(11.5), t.text);
                 } else {
                     thumb(ui, r, gi, ii);
-                    let (stroke, kind) = if is_sel { (Stroke::new(2.0, t.accent), egui::StrokeKind::Outside) } else if resp.hovered() { (Stroke::new(1.0, t.text_dim), egui::StrokeKind::Outside) } else { (Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside) };
+                    let (stroke, kind) = if is_sel {
+                        (Stroke::new(2.0, t.accent), egui::StrokeKind::Outside)
+                    } else if resp.hovered() {
+                        (Stroke::new(1.0, t.text_dim), egui::StrokeKind::Outside)
+                    } else {
+                        (Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside)
+                    };
                     ui.painter().rect_stroke(r, CornerRadius::same(2), stroke, kind);
                 }
                 let resp = if list { resp } else { resp.on_hover_text(&it.name) };
@@ -470,7 +486,10 @@ pub fn gradients_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     paint_gradient(ui, r, &cur.resolve(fg, bg));
     ui.painter().rect_stroke(r, 2.0, Stroke::new(1.0, Tokens::get(ui.ctx()).card_border), egui::StrokeKind::Inside);
     ui.add_space(4.0);
-    let groups: Vec<GroupView> = groups_src.iter().map(|g| GroupView { name: g.name.clone(), items: g.items.iter().map(|i| ItemView { key: i.name.clone(), name: i.name.clone() }).collect() }).collect();
+    let groups: Vec<GroupView> = groups_src
+        .iter()
+        .map(|g| GroupView { name: g.name.clone(), items: g.items.iter().map(|i| ItemView { key: i.name.clone(), name: i.name.clone() }).collect() })
+        .collect();
     let canvas = app.last_canvas_rect;
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let max_h = (ui.available_height() - 40.0).clamp(90.0, 260.0);
@@ -506,9 +525,18 @@ pub fn patterns_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .presets
         .pattern_groups
         .iter()
-        .map(|g| GroupView { name: g.name.clone(), items: g.items.iter().filter_map(|id| lib.iter().find(|p| &p.id == id)).map(|p| ItemView { key: p.id.clone(), name: p.display_name().to_string() }).collect() })
+        .map(|g| GroupView {
+            name: g.name.clone(),
+            items: g
+                .items
+                .iter()
+                .filter_map(|id| lib.iter().find(|p| &p.id == id))
+                .map(|p| ItemView { key: p.id.clone(), name: p.display_name().to_string() })
+                .collect(),
+        })
         .collect();
-    let pats: Vec<Vec<photocraft_doc::Pattern>> = app.session.presets.pattern_groups.iter().map(|g| g.items.iter().filter_map(|id| lib.iter().find(|p| &p.id == id).cloned()).collect()).collect();
+    let pats: Vec<Vec<photocraft_doc::Pattern>> =
+        app.session.presets.pattern_groups.iter().map(|g| g.items.iter().filter_map(|id| lib.iter().find(|p| &p.id == id).cloned()).collect()).collect();
     let canvas = app.last_canvas_rect;
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let max_h = (ui.available_height() - 40.0).clamp(90.0, 280.0);
@@ -537,7 +565,15 @@ pub fn patterns_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 // ------------------------------------------------------------------ floating panels
 
-fn float_window(app: &mut PhotocraftApp, ctx: &egui::Context, key: &str, title: &str, width: f32, offset: f32, body: impl FnOnce(&mut PhotocraftApp, &mut egui::Ui)) -> bool {
+fn float_window(
+    app: &mut PhotocraftApp,
+    ctx: &egui::Context,
+    key: &str,
+    title: &str,
+    width: f32,
+    offset: f32,
+    body: impl FnOnce(&mut PhotocraftApp, &mut egui::Ui),
+) -> bool {
     let t = Tokens::get(ctx);
     let frame = egui::Frame::NONE
         .fill(t.card)
@@ -592,7 +628,10 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let src = app.session.presets.styles.clone();
-    let groups: Vec<GroupView> = src.iter().map(|g| GroupView { name: g.name.clone(), items: g.items.iter().map(|i| ItemView { key: i.name.clone(), name: i.name.clone() }).collect() }).collect();
+    let groups: Vec<GroupView> = src
+        .iter()
+        .map(|g| GroupView { name: g.name.clone(), items: g.items.iter().map(|i| ItemView { key: i.name.clone(), name: i.name.clone() }).collect() })
+        .collect();
     let canvas = app.last_canvas_rect;
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let ctx = ui.ctx().clone();
@@ -601,10 +640,11 @@ pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     for g in &src {
         texes.push(g.items.iter().map(|s| style_texture(app, &ctx, s)).collect());
     }
-    let events = browser(ui, &mut st, "styles", &groups, Place { canvas, max_h: 300.0, new_tip: "Create new style from the selected layer" }, &mut |ui, r, gi, ii| {
-        ui.painter().rect_filled(r, 2.0, t.field);
-        ui.painter().image(texes[gi][ii].id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
-    });
+    let events =
+        browser(ui, &mut st, "styles", &groups, Place { canvas, max_h: 300.0, new_tip: "Create new style from the selected layer" }, &mut |ui, r, gi, ii| {
+            ui.painter().rect_filled(r, 2.0, t.field);
+            ui.painter().image(texes[gi][ii].id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+        });
     app.ui.presets_ui = st;
     let shift = ui.input(|i| i.modifiers.shift);
     for e in events {
@@ -630,15 +670,19 @@ pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 pub fn shapes_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let src = photocraft_engine::presets::shapes::all_groups(&app.session);
-    let groups: Vec<GroupView> = src.iter().map(|g| GroupView { name: g.name.clone(), items: g.items.iter().map(|i| ItemView { key: i.name.clone(), name: i.name.clone() }).collect() }).collect();
+    let groups: Vec<GroupView> = src
+        .iter()
+        .map(|g| GroupView { name: g.name.clone(), items: g.items.iter().map(|i| ItemView { key: i.name.clone(), name: i.name.clone() }).collect() })
+        .collect();
     let canvas = app.last_canvas_rect;
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let ctx = ui.ctx().clone();
     let t = Tokens::get(&ctx);
-    let events = browser(ui, &mut st, "shapes", &groups, Place { canvas, max_h: 300.0, new_tip: "Create new shape from the current path" }, &mut |ui, r, gi, ii| {
-        let tex = shape_texture(&ctx, &src[gi].items[ii]);
-        ui.painter().image(tex.id(), r.shrink(2.0), Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.text);
-    });
+    let events =
+        browser(ui, &mut st, "shapes", &groups, Place { canvas, max_h: 300.0, new_tip: "Create new shape from the current path" }, &mut |ui, r, gi, ii| {
+            let tex = shape_texture(&ctx, &src[gi].items[ii]);
+            ui.painter().image(tex.id(), r.shrink(2.0), Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.text);
+        });
     app.ui.presets_ui = st;
     let fill = shape_fill(app);
     for e in events {
@@ -687,7 +731,12 @@ pub fn shape_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.painter().rect_stroke(r, 3.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
     if let Some(sh) = groups.iter().flat_map(|g| g.items.iter()).find(|s| s.name == cur) {
         let tex = shape_texture(&ctx, sh);
-        ui.painter().image(tex.id(), Rect::from_center_size(r.center() - vec2(5.0, 0.0), vec2(18.0, 18.0)), Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.text);
+        ui.painter().image(
+            tex.id(),
+            Rect::from_center_size(r.center() - vec2(5.0, 0.0), vec2(18.0, 18.0)),
+            Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+            t.text,
+        );
     }
     crate::icons::paint(ui, Rect::from_center_size(pos2(r.right() - 8.0, r.center().y), vec2(10.0, 10.0)), "chevron-down", 9.0, t.text_dim);
     let resp = resp.on_hover_text(&cur);
@@ -701,7 +750,17 @@ pub fn shape_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     for sh in &g.items {
                         let (cr, cresp) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
                         let on = sh.name == cur;
-                        ui.painter().rect_filled(cr, 2.0, if on { t.accent_soft } else if cresp.hovered() { t.hover } else { t.field });
+                        ui.painter().rect_filled(
+                            cr,
+                            2.0,
+                            if on {
+                                t.accent_soft
+                            } else if cresp.hovered() {
+                                t.hover
+                            } else {
+                                t.field
+                            },
+                        );
                         let tex = shape_texture(&ctx, sh);
                         ui.painter().image(tex.id(), cr.shrink(4.0), Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.text);
                         if cresp.on_hover_text(&sh.name).clicked() {
@@ -755,7 +814,8 @@ pub fn tool_presets_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let only = app.ui.presets_ui.current_tool_only;
     let cur = app.ui.tool;
-    let items: Vec<(String, String)> = app.session.presets.tool_presets.iter().filter(|p| !only || Tool::from_name(&p.tool) == Some(cur)).map(|p| (p.name.clone(), p.tool.clone())).collect();
+    let items: Vec<(String, String)> =
+        app.session.presets.tool_presets.iter().filter(|p| !only || Tool::from_name(&p.tool) == Some(cur)).map(|p| (p.name.clone(), p.tool.clone())).collect();
     let selected = app.ui.presets_ui.selected.get("toolPresets").cloned();
     let mut action: Option<(String, Value)> = None;
     let mut pick: Option<String> = None;
@@ -867,11 +927,12 @@ pub fn clone_source_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
     });
     ui.add_space(4.0);
-    let src_line = match (slot.source, slot.layer.and_then(|l| app.session.active().and_then(|d| d.doc.layer(photocraft_doc::LayerId(l)).map(|x| x.name.clone())))) {
-        (Some(_), Some(l)) => format!("Source: {} : {l}", app.session.active().map(|d| d.doc.name.clone()).unwrap_or_default()),
-        (Some(_), None) => "Source: set".to_string(),
-        _ => "Source: not set (⌥-click with Clone Stamp)".to_string(),
-    };
+    let src_line =
+        match (slot.source, slot.layer.and_then(|l| app.session.active().and_then(|d| d.doc.layer(photocraft_doc::LayerId(l)).map(|x| x.name.clone())))) {
+            (Some(_), Some(l)) => format!("Source: {} : {l}", app.session.active().map(|d| d.doc.name.clone()).unwrap_or_default()),
+            (Some(_), None) => "Source: set".to_string(),
+            _ => "Source: not set (⌥-click with Clone Stamp)".to_string(),
+        };
     ui.label(egui::RichText::new(src_line).color(t.text_dim).size(11.0));
     ui.add_space(4.0);
     let lbl = |ui: &mut egui::Ui, s: &str| {
@@ -933,7 +994,8 @@ pub fn clone_source_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.add_space(18.0);
         ui.label(egui::RichText::new("Opacity:").color(t.text_dim).size(11.5));
         crate::widgets::value_field(ui, &mut o.opacity, 0.0..=100.0, "%", 56.0);
-        let opts = [("normal".to_string(), "Normal"), ("darken".to_string(), "Darken"), ("lighten".to_string(), "Lighten"), ("difference".to_string(), "Difference")];
+        let opts =
+            [("normal".to_string(), "Normal"), ("darken".to_string(), "Darken"), ("lighten".to_string(), "Lighten"), ("difference".to_string(), "Difference")];
         crate::widgets::dropdown(ui, "clone-overlay-mode", &mut o.blend, &opts, 90.0);
     });
     ui.horizontal(|ui| {
@@ -943,7 +1005,11 @@ pub fn clone_source_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         crate::widgets::checkbox(ui, &mut o.invert, "Invert");
     });
     if o != before {
-        run(app, "cloneSource.overlay", json!({"show": o.show, "opacity": o.opacity, "clipped": o.clipped, "autoHide": o.auto_hide, "invert": o.invert, "blend": o.blend}));
+        run(
+            app,
+            "cloneSource.overlay",
+            json!({"show": o.show, "opacity": o.opacity, "clipped": o.clipped, "autoHide": o.auto_hide, "invert": o.invert, "blend": o.blend}),
+        );
     }
 }
 

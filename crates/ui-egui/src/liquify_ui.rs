@@ -43,7 +43,19 @@ pub struct LiquifyOpts {
 
 impl Default for LiquifyOpts {
     fn default() -> Self {
-        LiquifyOpts { tool: LiquifyTool::ForwardWarp, size: 100.0, density: 50.0, pressure: 100.0, rate: 80.0, show_mesh: false, mesh_size: 1, show_mask: true, show_backdrop: false, backdrop_opacity: 50.0, reconstruct_amount: 100.0 }
+        LiquifyOpts {
+            tool: LiquifyTool::ForwardWarp,
+            size: 100.0,
+            density: 50.0,
+            pressure: 100.0,
+            rate: 80.0,
+            show_mesh: false,
+            mesh_size: 1,
+            show_mask: true,
+            show_backdrop: false,
+            backdrop_opacity: 50.0,
+            reconstruct_amount: 100.0,
+        }
     }
 }
 
@@ -100,7 +112,15 @@ impl LiquifyDialog {
 
     fn template(&self) -> LiquifyStroke {
         let o = &self.opts;
-        LiquifyStroke { tool: o.tool, size: f64::from(o.size), density: f64::from(o.density), pressure: f64::from(o.pressure), rate: f64::from(o.rate), points: Vec::new(), amount: None }
+        LiquifyStroke {
+            tool: o.tool,
+            size: f64::from(o.size),
+            density: f64::from(o.density),
+            pressure: f64::from(o.pressure),
+            rate: f64::from(o.rate),
+            points: Vec::new(),
+            amount: None,
+        }
     }
 
     fn mark(&mut self, doc_rect: Rect, mask: bool) {
@@ -200,7 +220,10 @@ impl LiquifyDialog {
         if self.mask_dirty || self.mask_tex.is_none() {
             self.mask_dirty = false;
             let f = &self.field;
-            let img = egui::ColorImage::new([f.w, f.h], f.freeze.iter().map(|v| Color32::from_rgba_unmultiplied(230, 40, 40, (v.clamp(0.0, 1.0) * 140.0) as u8)).collect());
+            let img = egui::ColorImage::new(
+                [f.w, f.h],
+                f.freeze.iter().map(|v| Color32::from_rgba_unmultiplied(230, 40, 40, (v.clamp(0.0, 1.0) * 140.0) as u8)).collect(),
+            );
             match &mut self.mask_tex {
                 Some(t) => t.set(img, egui::TextureOptions::LINEAR),
                 None => self.mask_tex = Some(ctx.load_texture("liquify-mask", img, egui::TextureOptions::LINEAR)),
@@ -354,7 +377,17 @@ pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::CloseBracket)) {
         d.opts.size = (d.opts.size * 1.1).min(15000.0);
     }
-    let tools = [(egui::Key::W, LiquifyTool::ForwardWarp), (egui::Key::R, LiquifyTool::Reconstruct), (egui::Key::E, LiquifyTool::Smooth), (egui::Key::C, LiquifyTool::TwirlCw), (egui::Key::S, LiquifyTool::Pucker), (egui::Key::B, LiquifyTool::Bloat), (egui::Key::O, LiquifyTool::PushLeft), (egui::Key::F, LiquifyTool::Freeze), (egui::Key::D, LiquifyTool::Thaw)];
+    let tools = [
+        (egui::Key::W, LiquifyTool::ForwardWarp),
+        (egui::Key::R, LiquifyTool::Reconstruct),
+        (egui::Key::E, LiquifyTool::Smooth),
+        (egui::Key::C, LiquifyTool::TwirlCw),
+        (egui::Key::S, LiquifyTool::Pucker),
+        (egui::Key::B, LiquifyTool::Bloat),
+        (egui::Key::O, LiquifyTool::PushLeft),
+        (egui::Key::F, LiquifyTool::Freeze),
+        (egui::Key::D, LiquifyTool::Thaw),
+    ];
     for (k, t) in tools {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, k)) {
             d.opts.tool = t;
@@ -493,7 +526,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 widgets::slider_row(ui, "Opacity", &mut d.opts.backdrop_opacity, 0.0..=100.0, "", None);
             }
             widgets::hairline(ui);
-            ui.label(egui::RichText::new(format!("{} stroke(s) · field {} px/node · dab {:.2} ms", d.strokes.len(), d.cell, d.dab_ms)).color(t.text_faint).size(11.0));
+            ui.label(
+                egui::RichText::new(format!("{} stroke(s) · field {} px/node · dab {:.2} ms", d.strokes.len(), d.cell, d.dab_ms))
+                    .color(t.text_faint)
+                    .size(11.0),
+            );
         });
         // Footer buttons.
         let foot = ERect::from_min_size(pos2(right.left() + 14.0, right.bottom() - 48.0), vec2(RIGHT_W - 28.0, 32.0));
@@ -525,7 +562,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 d.center = [d.center[0] + before[0] - after[0], d.center[1] + before[1] - after[1]];
             }
         }
-        let img = ERect::from_min_max(to_screen(d, area, [f64::from(d.canvas.x0), f64::from(d.canvas.y0)]), to_screen(d, area, [f64::from(d.canvas.x1), f64::from(d.canvas.y1)]));
+        let img = ERect::from_min_max(
+            to_screen(d, area, [f64::from(d.canvas.x0), f64::from(d.canvas.y0)]),
+            to_screen(d, area, [f64::from(d.canvas.x1), f64::from(d.canvas.y1)]),
+        );
         let clip = painter.with_clip_rect(area);
         widgets::checker(&clip, img.intersect(area), 8.0);
         let uv = ERect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
@@ -535,7 +575,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             clip.image(b.id(), img, uv, Color32::from_white_alpha((d.opts.backdrop_opacity / 100.0 * 255.0) as u8));
         }
         // The proxy covers whole proxy pixels, a little past the canvas edge.
-        let pr = ERect::from_min_max(img.min, img.min + vec2(d.proxy.w as f32 * d.proxy.scale as f32 * d.zoom, d.proxy.h as f32 * d.proxy.scale as f32 * d.zoom));
+        let pr =
+            ERect::from_min_max(img.min, img.min + vec2(d.proxy.w as f32 * d.proxy.scale as f32 * d.zoom, d.proxy.h as f32 * d.proxy.scale as f32 * d.zoom));
         if let Some(tex) = &d.tex {
             clip.image(tex.id(), pr, uv, Color32::WHITE);
         }
@@ -543,7 +584,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             && let Some(m) = &d.mask_tex
         {
             let f = &d.field;
-            let mr = ERect::from_min_size(img.min - vec2(0.5, 0.5) * d.zoom * f.cell as f32 + vec2(0.5, 0.5) * d.zoom, vec2(f.w as f32, f.h as f32) * f.cell as f32 * d.zoom);
+            let mr = ERect::from_min_size(
+                img.min - vec2(0.5, 0.5) * d.zoom * f.cell as f32 + vec2(0.5, 0.5) * d.zoom,
+                vec2(f.w as f32, f.h as f32) * f.cell as f32 * d.zoom,
+            );
             clip.image(m.id(), mr, uv, Color32::WHITE);
         }
         if d.opts.show_mesh {
@@ -642,7 +686,7 @@ fn draw_mesh(d: &LiquifyDialog, painter: &egui::Painter, area: ERect) {
                             pts.push([pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t]);
                         }
                     }
-                    for seg in pts.chunks_exact(2) {
+                    for seg in pts.as_chunks::<2>().0 {
                         painter.line_segment([to_screen(d, area, seg[0]), to_screen(d, area, seg[1])], stroke);
                     }
                     k += 1;
@@ -682,11 +726,17 @@ mod tests {
         let mut app = app_with_layer();
         open(&mut app, &ctx).unwrap();
         control(&mut app, &json!({"tool": "forwardWarp", "size": 40})).unwrap();
-        for ev in [ToolEvent::Down { x: 40.0, y: 40.0, pressure: 1.0 }, ToolEvent::Move { x: 48.0, y: 41.0, pressure: 1.0 }, ToolEvent::Move { x: 56.0, y: 40.0, pressure: 1.0 }, ToolEvent::Up { x: 56.0, y: 40.0 }] {
+        for ev in [
+            ToolEvent::Down { x: 40.0, y: 40.0, pressure: 1.0 },
+            ToolEvent::Move { x: 48.0, y: 41.0, pressure: 1.0 },
+            ToolEvent::Move { x: 56.0, y: 40.0, pressure: 1.0 },
+            ToolEvent::Up { x: 56.0, y: 40.0 },
+        ] {
             pointer(&mut app, ev, egui::Modifiers::NONE);
         }
         control(&mut app, &json!({"tool": "bloat"})).unwrap();
-        for ev in [ToolEvent::Down { x: 80.0, y: 40.0, pressure: 1.0 }, ToolEvent::Move { x: 80.0, y: 40.0, pressure: 1.0 }, ToolEvent::Up { x: 80.0, y: 40.0 }] {
+        for ev in [ToolEvent::Down { x: 80.0, y: 40.0, pressure: 1.0 }, ToolEvent::Move { x: 80.0, y: 40.0, pressure: 1.0 }, ToolEvent::Up { x: 80.0, y: 40.0 }]
+        {
             pointer(&mut app, ev, egui::Modifiers::NONE);
         }
         let d = app.distort.liquify.as_ref().unwrap();

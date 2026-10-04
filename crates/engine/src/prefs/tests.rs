@@ -80,7 +80,8 @@ fn whole_section_set_merges_keys() {
 #[test]
 fn json_round_trip_tolerates_unknown_and_missing_keys() {
     let mut s = session();
-    s.execute("prefs.set", json!({"values": {"interface.theme": "studioLight", "fileHandling.autosaveMinutes": 5, "shortcuts.edit.fill": "Cmd+Shift+F"}})).unwrap();
+    s.execute("prefs.set", json!({"values": {"interface.theme": "studioLight", "fileHandling.autosaveMinutes": 5, "shortcuts.edit.fill": "Cmd+Shift+F"}}))
+        .unwrap();
     s.execute("edit.colorSettings", json!({"workingRgb": "display-p3", "policyRgb": "convert"})).unwrap();
     let text = s.prefs_to_json();
     let mut t = Session::new();

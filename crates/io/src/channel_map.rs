@@ -42,7 +42,7 @@ pub(crate) fn display_info(channels: &[&AlphaChannel]) -> Vec<u8> {
 /// Applies a DisplayInfo resource (`versioned` = 1077) to the imported channels in order.
 pub(crate) fn apply_display_info(data: &[u8], versioned: bool, channels: &mut [AlphaChannel]) {
     let body = if versioned { data.get(4..).unwrap_or(&[]) } else { data };
-    for (c, rec) in channels.iter_mut().zip(body.chunks_exact(14)) {
+    for (c, rec) in channels.iter_mut().zip(body.as_chunks::<14>().0) {
         let u = |i: usize| u16::from_be_bytes([rec[i], rec[i + 1]]);
         let comps = [u(2), u(4), u(6), u(8)];
         let color = decode_color(u(0), comps);

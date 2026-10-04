@@ -46,18 +46,12 @@ impl Default for TextEngine {
 impl TextEngine {
     /// Bundled fonts only: deterministic output (tests, web).
     pub fn new() -> Self {
-        Self {
-            fonts: FontDb::new(),
-            layouter: layout::Layouter::new(),
-        }
+        Self { fonts: FontDb::new(), layouter: layout::Layouter::new() }
     }
 
     /// Bundled plus installed system fonts (native desktop).
     pub fn with_system_fonts() -> Self {
-        Self {
-            fonts: FontDb::with_system_fonts(),
-            layouter: layout::Layouter::new(),
-        }
+        Self { fonts: FontDb::with_system_fonts(), layouter: layout::Layouter::new() }
     }
 
     /// Lays out a text layer (text space: pixels, before `layer.transform`).
@@ -66,26 +60,15 @@ impl TextEngine {
     }
 
     /// Lays out and rasterizes a text layer into document space.
-    pub fn render(
-        &mut self,
-        layer: &TextLayer,
-        dpi: f32,
-        format: PixelFormat,
-    ) -> (TextLayout, Rendered) {
+    pub fn render(&mut self, layer: &TextLayer, dpi: f32, format: PixelFormat) -> (TextLayout, Rendered) {
         let l = self.layout(layer, dpi);
         let warp = render::layout_warp(&l, layer.warp.as_ref());
-        let r =
-            render::rasterize_warped(&l, &layer.transform, format, layer.antialias, warp.as_ref());
+        let r = render::rasterize_warped(&l, &layer.transform, format, layer.antialias, warp.as_ref());
         (l, r)
     }
 
     /// Re-renders `layer.cache` from its model. Returns the document-space rectangle drawn.
-    pub fn render_layer(
-        &mut self,
-        layer: &mut TextLayer,
-        dpi: f32,
-        format: PixelFormat,
-    ) -> photocraft_geom::Rect {
+    pub fn render_layer(&mut self, layer: &mut TextLayer, dpi: f32, format: PixelFormat) -> photocraft_geom::Rect {
         let (_, r) = self.render(layer, dpi, format);
         layer.cache = Some(r.surface);
         r.rect
@@ -97,14 +80,8 @@ impl TextEngine {
 pub fn shared() -> &'static std::sync::Mutex<TextEngine> {
     static ENGINE: std::sync::OnceLock<std::sync::Mutex<TextEngine>> = std::sync::OnceLock::new();
     ENGINE.get_or_init(|| {
-        let use_system = cfg!(not(target_arch = "wasm32"))
-            && !cfg!(test)
-            && std::env::var_os("PHOTOCRAFT_NO_SYSTEM_FONTS").is_none();
-        std::sync::Mutex::new(if use_system {
-            TextEngine::with_system_fonts()
-        } else {
-            TextEngine::new()
-        })
+        let use_system = cfg!(not(target_arch = "wasm32")) && !cfg!(test) && std::env::var_os("PHOTOCRAFT_NO_SYSTEM_FONTS").is_none();
+        std::sync::Mutex::new(if use_system { TextEngine::with_system_fonts() } else { TextEngine::new() })
     })
 }
 

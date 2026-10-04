@@ -12,9 +12,7 @@ use crate::descriptor::{Descriptor, Id, UnicodeString, Value, VersionedDescripto
 use crate::file::{GlobalLayerMask, LayerInfoPlacement, PsdFile};
 use crate::header::{ColorMode, Header, Version, row_bytes};
 use crate::image_data::ImageData;
-use crate::layer::{
-    BlendingRanges, ChannelData, LayerFlags, LayerInfo, LayerMask, LayerRecord, MaskData, MaskParameters, RealMask, Rect,
-};
+use crate::layer::{BlendingRanges, ChannelData, LayerFlags, LayerInfo, LayerMask, LayerRecord, MaskData, MaskParameters, RealMask, Rect};
 use crate::resources::{ImageResource, ResolutionInfo, ids, version_info_resource};
 use crate::tagged::{SectionType, TaggedBlock};
 
@@ -81,16 +79,8 @@ pub fn mode_depths(mode: ColorMode) -> &'static [u16] {
 }
 
 /// All color modes covered.
-pub const MODES: [ColorMode; 8] = [
-    ColorMode::Bitmap,
-    ColorMode::Grayscale,
-    ColorMode::Indexed,
-    ColorMode::Rgb,
-    ColorMode::Cmyk,
-    ColorMode::Lab,
-    ColorMode::Multichannel,
-    ColorMode::Duotone,
-];
+pub const MODES: [ColorMode; 8] =
+    [ColorMode::Bitmap, ColorMode::Grayscale, ColorMode::Indexed, ColorMode::Rgb, ColorMode::Cmyk, ColorMode::Lab, ColorMode::Multichannel, ColorMode::Duotone];
 
 fn color_mode_data(mode: ColorMode) -> Vec<u8> {
     match mode {
@@ -162,16 +152,10 @@ fn raster_layer(g: LayerGen<'_>) -> LayerRecord {
     let mut mask_data = MaskData::None;
     if let Some(m) = g.mask {
         let (mw, mh) = m.rect.size().unwrap_or((0, 0));
-        channels.push(
-            ChannelData::encode(-2, g.compression, &pattern_plane(mw, mh, depth, g.seed + 99), mw, mh, depth, v)
-                .expect("encode"),
-        );
+        channels.push(ChannelData::encode(-2, g.compression, &pattern_plane(mw, mh, depth, g.seed + 99), mw, mh, depth, v).expect("encode"));
         if let Some(real) = m.real {
             let (rw, rh) = real.rect.size().unwrap_or((0, 0));
-            channels.push(
-                ChannelData::encode(-3, g.compression, &pattern_plane(rw, rh, depth, g.seed + 7), rw, rh, depth, v)
-                    .expect("encode"),
-            );
+            channels.push(ChannelData::encode(-3, g.compression, &pattern_plane(rw, rh, depth, g.seed + 7), rw, rh, depth, v).expect("encode"));
         }
         mask_data = MaskData::Mask(m);
     }
@@ -195,9 +179,7 @@ fn raster_layer(g: LayerGen<'_>) -> LayerRecord {
 
 fn group_record(header: &Header, name: &str, kind: SectionType, blend: BlendMode, id: u32) -> LayerRecord {
     let cc = mode_channels(header.color_mode) as i16;
-    let channels = (-1..cc)
-        .map(|c| ChannelData { id: c, compression: Some(Compression::Raw), data: Vec::new() })
-        .collect();
+    let channels = (-1..cc).map(|c| ChannelData { id: c, compression: Some(Compression::Raw), data: Vec::new() }).collect();
     let lsct = if kind == SectionType::BoundingDivider {
         TaggedBlock::section_divider(kind, None, None)
     } else {
@@ -296,13 +278,7 @@ pub fn layered(version: Version, mode: ColorMode, depth: u16, compression: Compr
         rect: Rect::from_xywh(1, 1, 4, 3),
         default_color: 255,
         flags: LayerMask::FLAG_PARAMETERS,
-        parameters: Some(MaskParameters {
-            flags: 0b0011,
-            user_density: Some(200),
-            user_feather: Some(1.5),
-            vector_density: None,
-            vector_feather: None,
-        }),
+        parameters: Some(MaskParameters { flags: 0b0011, user_density: Some(200), user_feather: Some(1.5), vector_density: None, vector_feather: None }),
         real: Some(RealMask { flags: 0, background: 255, rect: Rect::from_xywh(0, 0, 3, 3) }),
         trailing: Vec::new(),
     };
@@ -324,18 +300,10 @@ pub fn layered(version: Version, mode: ColorMode, depth: u16, compression: Compr
     let layer_info = LayerInfo { merged_alpha: true, layers, padding: None };
     let (placement, blocks) = match depth {
         16 | 32 => (
-            LayerInfoPlacement::GlobalBlock {
-                index: 1,
-                signature: *b"8BIM",
-                key: if depth == 16 { *b"Lr16" } else { *b"Lr32" },
-                padding: None,
-            },
+            LayerInfoPlacement::GlobalBlock { index: 1, signature: *b"8BIM", key: if depth == 16 { *b"Lr16" } else { *b"Lr32" }, padding: None },
             vec![TaggedBlock::new(*b"Patt", vec![]), TaggedBlock::new(*b"Txt2", vec![0, 1, 2, 3])],
         ),
-        _ => (
-            LayerInfoPlacement::Section,
-            vec![TaggedBlock::new(*b"Patt", vec![]), TaggedBlock::new(*b"FMsk", vec![0; 10])],
-        ),
+        _ => (LayerInfoPlacement::Section, vec![TaggedBlock::new(*b"Patt", vec![]), TaggedBlock::new(*b"FMsk", vec![0; 10])]),
     };
     PsdFile {
         header,
@@ -365,15 +333,7 @@ pub fn small(version: Version, compression: Compression) -> PsdFile {
             seed: 1,
         }),
         group_record(&header, "</Layer group>", SectionType::BoundingDivider, BlendMode::Normal, 9),
-        raster_layer(LayerGen {
-            header: &header,
-            compression,
-            rect: Rect::from_xywh(-1, 1, 2, 2),
-            name: "b",
-            blend: BlendMode::Screen,
-            mask: None,
-            seed: 2,
-        }),
+        raster_layer(LayerGen { header: &header, compression, rect: Rect::from_xywh(-1, 1, 2, 2), name: "b", blend: BlendMode::Screen, mask: None, seed: 2 }),
         group_record(&header, "g", SectionType::OpenFolder, BlendMode::PassThrough, 10),
     ];
     let mut planes = Vec::new();
@@ -400,30 +360,21 @@ pub fn all_cases() -> Vec<Case> {
         for mode in MODES {
             for &depth in mode_depths(mode) {
                 for c in Compression::ALL {
-                    v.push(Case {
-                        name: format!("merged {version:?} {mode:?} {depth}bit {c:?}"),
-                        file: merged_only(version, mode, depth, c, 13, 7),
-                    });
+                    v.push(Case { name: format!("merged {version:?} {mode:?} {depth}bit {c:?}"), file: merged_only(version, mode, depth, c, 13, 7) });
                 }
             }
         }
         for mode in [ColorMode::Grayscale, ColorMode::Rgb, ColorMode::Cmyk, ColorMode::Lab] {
             for &depth in mode_depths(mode).iter().filter(|&&d| d >= 8) {
                 for c in Compression::ALL {
-                    v.push(Case {
-                        name: format!("layered {version:?} {mode:?} {depth}bit {c:?}"),
-                        file: layered(version, mode, depth, c),
-                    });
+                    v.push(Case { name: format!("layered {version:?} {mode:?} {depth}bit {c:?}"), file: layered(version, mode, depth, c) });
                 }
             }
         }
         for c in Compression::ALL {
             v.push(Case { name: format!("small {version:?} {c:?}"), file: small(version, c) });
         }
-        v.push(Case {
-            name: format!("empty canvas {version:?}"),
-            file: merged_only(version, ColorMode::Rgb, 8, Compression::Rle, 0, 0),
-        });
+        v.push(Case { name: format!("empty canvas {version:?}"), file: merged_only(version, ColorMode::Rgb, 8, Compression::Rle, 0, 0) });
     }
     v
 }

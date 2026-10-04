@@ -313,7 +313,13 @@ impl Placement {
     pub fn scaled(&self, k: f64) -> Placement {
         let s = Homography([k, 0.0, 0.0, 0.0, k, 0.0, 0.0, 0.0, 1.0]);
         let si = Homography([1.0 / k, 0.0, 0.0, 0.0, 1.0 / k, 0.0, 0.0, 0.0, 1.0]);
-        Placement { projection: self.projection, focal: self.focal * k, center: [self.center[0] * k, self.center[1] * k], k1: self.k1, h: s.mul(&self.h).mul(&si) }
+        Placement {
+            projection: self.projection,
+            focal: self.focal * k,
+            center: [self.center[0] * k, self.center[1] * k],
+            k1: self.k1,
+            h: s.mul(&self.h).mul(&si),
+        }
     }
 
     /// Shifted in the panorama.
@@ -1337,7 +1343,8 @@ mod tests {
     #[test]
     fn placement_round_trips_all_projections() {
         for projection in [Projection::Plane, Projection::Cylinder, Projection::Sphere] {
-            let p = Placement { projection, focal: 400.0, center: [200.0, 150.0], k1: 0.05, h: Homography([0.98, -0.1, 30.0, 0.1, 0.98, -12.0, 0.0, 0.0, 1.0]) };
+            let p =
+                Placement { projection, focal: 400.0, center: [200.0, 150.0], k1: 0.05, h: Homography([0.98, -0.1, 30.0, 0.1, 0.98, -12.0, 0.0, 0.0, 1.0]) };
             for (x, y) in [(0.0, 0.0), (390.0, 20.0), (123.0, 280.0)] {
                 let (u, v) = p.forward(x, y);
                 let (bx, by) = p.inverse(u, v).unwrap();
@@ -1365,7 +1372,13 @@ mod tests {
                 }
             }
             imgs.push(RoiImage { x0, y0: 0, w, h, ch: 1, px, alpha: vec![1.0; w * h] });
-            pls.push(Placement { projection: Projection::Plane, focal: 200.0, center: [100.0, 50.0], k1: 0.0, h: Homography([1.0, 0.0, 100.0 + x0 as f64, 0.0, 1.0, 50.0, 0.0, 0.0, 1.0]) });
+            pls.push(Placement {
+                projection: Projection::Plane,
+                focal: 200.0,
+                center: [100.0, 50.0],
+                k1: 0.0,
+                h: Homography([1.0, 0.0, 100.0 + x0 as f64, 0.0, 1.0, 50.0, 0.0, 0.0, 1.0]),
+            });
             let _ = k;
         }
         let ph = photometric(&imgs, Some((&pls, &[(w, h), (w, h)])), true, false);
@@ -1399,7 +1412,16 @@ mod tests {
         // Multi-band blend of two flat images at different levels joins smoothly.
         let mk = |x0: i32, v: f32| RoiImage { x0, y0: 0, w: 80, h, ch: 1, px: vec![v; 80 * h], alpha: vec![1.0; 80 * h] };
         let imgs = [mk(0, 0.3), mk(40, 0.7)];
-        let wts: Vec<Vec<f32>> = (0..2).map(|k| (0..80 * h).map(|i| { let x = (i % 80) as i32 + imgs[k].x0; if (x < 60) == (k == 0) { 1.0 } else { 0.0 } }).collect()).collect();
+        let wts: Vec<Vec<f32>> = (0..2)
+            .map(|k| {
+                (0..80 * h)
+                    .map(|i| {
+                        let x = (i % 80) as i32 + imgs[k].x0;
+                        if (x < 60) == (k == 0) { 1.0 } else { 0.0 }
+                    })
+                    .collect()
+            })
+            .collect();
         let (out, cov) = multiband(w, h, &imgs, &wts, 4);
         let row: Vec<f32> = (0..w).map(|x| out[20 * w + x]).collect();
         assert!((row[2] - 0.3).abs() < 0.02 && (row[w - 3] - 0.7).abs() < 0.02, "{row:?}");

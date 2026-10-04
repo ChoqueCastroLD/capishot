@@ -120,12 +120,7 @@ impl Interp {
 fn catmull_rom(t: f64) -> [f64; 4] {
     let t2 = t * t;
     let t3 = t2 * t;
-    [
-        -0.5 * t3 + t2 - 0.5 * t,
-        1.5 * t3 - 2.5 * t2 + 1.0,
-        -1.5 * t3 + 2.0 * t2 + 0.5 * t,
-        0.5 * t3 - 0.5 * t2,
-    ]
+    [-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2]
 }
 
 /// Warp `src` (its content inside `src_rect`) by `h` (source → destination document space).
@@ -160,7 +155,8 @@ pub fn warp_surface(src: &Surface, src_rect: Rect, h: &Homography, interp: Inter
     }
     let Some(inv) = h.inverse() else { return out };
     // Destination bounds: the warped corners (plus a pixel for filter support).
-    let corners = [(src_rect.x0, src_rect.y0), (src_rect.x1, src_rect.y0), (src_rect.x1, src_rect.y1), (src_rect.x0, src_rect.y1)].map(|(x, y)| h.apply(x as f64, y as f64));
+    let corners = [(src_rect.x0, src_rect.y0), (src_rect.x1, src_rect.y0), (src_rect.x1, src_rect.y1), (src_rect.x0, src_rect.y1)]
+        .map(|(x, y)| h.apply(x as f64, y as f64));
     if corners.iter().any(|c| !c.0.is_finite() || !c.1.is_finite()) {
         return out;
     }
@@ -314,7 +310,12 @@ mod tests {
         let mut s = rgba();
         s.fill_rect(Rect::new(0, 0, 40, 20), &[0.2, 0.4, 0.6, 1.0]);
         let r = s.content_bounds();
-        let up = warp_surface(&s, r, &Homography::rect_to_quad([0.0, 0.0, 40.0, 20.0], [[0.0, 0.0], [80.0, 0.0], [80.0, 40.0], [0.0, 40.0]]).unwrap(), Interp::Bicubic);
+        let up = warp_surface(
+            &s,
+            r,
+            &Homography::rect_to_quad([0.0, 0.0, 40.0, 20.0], [[0.0, 0.0], [80.0, 0.0], [80.0, 40.0], [0.0, 40.0]]).unwrap(),
+            Interp::Bicubic,
+        );
         let b = up.content_bounds();
         assert!(b.width() >= 80 && b.width() <= 82 && b.height() >= 40 && b.height() <= 42, "{b:?}");
         // 90° rotation about (20, 10): a 40×20 box becomes 20×40.

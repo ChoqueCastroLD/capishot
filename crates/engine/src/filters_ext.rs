@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use photocraft_algo::{
-    self as algo, BlurPath, BlurQuality, BlurShape, DepthSource, DiffuseMode, Distribution, ExtrudeType, FieldPin, FilterParams, HsbModel, IrisPin, LensType, Light, LightKind, MezzotintType, SmartBlurMode, SpinPin,
-    TextureChannel, TileFill, UndefinedAreas, WindMethod, ZigZagStyle,
+    self as algo, BlurPath, BlurQuality, BlurShape, DepthSource, DiffuseMode, Distribution, ExtrudeType, FieldPin, FilterParams, HsbModel, IrisPin, LensType,
+    Light, LightKind, MezzotintType, SmartBlurMode, SpinPin, TextureChannel, TileFill, UndefinedAreas, WindMethod, ZigZagStyle,
 };
 use photocraft_doc::{Document, Layer};
 use photocraft_geom::Rect;
@@ -93,7 +93,9 @@ pub fn params_for(id: &str, p: &Value) -> Option<FilterParams> {
             },
             seed: seed(p),
         },
-        "filter.pixelate.pointillize" => FilterParams::Pointillize { cell_size: f(p, "cellSize", 5.0).clamp(3.0, 300.0), seed: seed(p), background: colour(p, "background", WHITE) },
+        "filter.pixelate.pointillize" => {
+            FilterParams::Pointillize { cell_size: f(p, "cellSize", 5.0).clamp(3.0, 300.0), seed: seed(p), background: colour(p, "background", WHITE) }
+        }
         // ---- Stylize ----
         "filter.stylize.diffuse" => FilterParams::Diffuse {
             mode: match s(p, "mode", "normal") {
@@ -203,7 +205,10 @@ pub fn params_for(id: &str, p: &Value) -> Option<FilterParams> {
                     target_y: f(p, "targetY", 0.55),
                     angle: f(p, "angle", 135.0),
                     elevation: f(p, "elevation", 45.0).clamp(0.0, 90.0),
-                    color: { let c = colour(p, "color", WHITE); [c[0], c[1], c[2]] },
+                    color: {
+                        let c = colour(p, "color", WHITE);
+                        [c[0], c[1], c[2]]
+                    },
                     intensity: f(p, "intensity", 75.0).clamp(-100.0, 100.0),
                     cone: f(p, "cone", 45.0).clamp(1.0, 89.0),
                     hotspot: f(p, "hotspot", 50.0).clamp(0.0, 100.0),
@@ -355,7 +360,10 @@ pub fn params_for(id: &str, p: &Value) -> Option<FilterParams> {
             FilterParams::HsbHsl { input: m("inputMode", "rgb"), output: m("rowOrder", "hsb") }
         }
         // ---- Video ----
-        "filter.video.deInterlace" => FilterParams::DeInterlace { eliminate_even: s(p, "eliminate", "oddFields") == "evenFields", interpolate: s(p, "createBy", "interpolation") != "duplication" },
+        "filter.video.deInterlace" => FilterParams::DeInterlace {
+            eliminate_even: s(p, "eliminate", "oddFields") == "evenFields",
+            interpolate: s(p, "createBy", "interpolation") != "duplication",
+        },
         "filter.video.ntscColors" => FilterParams::NtscColors,
         _ => return crate::gallery_cmds::params_for(id, p),
     })
@@ -447,26 +455,71 @@ macro_rules! cmd {
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         // Pixelate
-        cmd!("filter.pixelate.colorHalftone", "Color Halftone…", ["Filter", "Pixelate"], r##"{"maxRadius":4..127=8,"channel1":-360..360=108,"channel2":-360..360=162,"channel3":-360..360=90,"channel4":-360..360=45}"##),
+        cmd!(
+            "filter.pixelate.colorHalftone",
+            "Color Halftone…",
+            ["Filter", "Pixelate"],
+            r##"{"maxRadius":4..127=8,"channel1":-360..360=108,"channel2":-360..360=162,"channel3":-360..360=90,"channel4":-360..360=45}"##
+        ),
         cmd!("filter.pixelate.crystallize", "Crystallize…", ["Filter", "Pixelate"], r##"{"cellSize":3..300=10,"seed":u32=0}"##),
         cmd!("filter.pixelate.facet", "Facet", ["Filter", "Pixelate"], "{}"),
         cmd!("filter.pixelate.fragment", "Fragment", ["Filter", "Pixelate"], "{}"),
-        cmd!("filter.pixelate.mezzotint", "Mezzotint…", ["Filter", "Pixelate"], r##"{"type":"fineDots|mediumDots|grainyDots|coarseDots|shortLines|mediumLines|longLines|shortStrokes|mediumStrokes|longStrokes","seed":u32=0}"##),
+        cmd!(
+            "filter.pixelate.mezzotint",
+            "Mezzotint…",
+            ["Filter", "Pixelate"],
+            r##"{"type":"fineDots|mediumDots|grainyDots|coarseDots|shortLines|mediumLines|longLines|shortStrokes|mediumStrokes|longStrokes","seed":u32=0}"##
+        ),
         cmd!("filter.pixelate.pointillize", "Pointillize…", ["Filter", "Pixelate"], r##"{"cellSize":3..300=5,"seed":u32=0,"background":json}"##),
         // Stylize
         cmd!("filter.stylize.diffuse", "Diffuse…", ["Filter", "Stylize"], r##"{"mode":"normal|darkenOnly|lightenOnly|anisotropic","seed":u32=0}"##),
-        cmd!("filter.stylize.extrude", "Extrude…", ["Filter", "Stylize"], r##"{"type":"blocks|pyramids","size":2..255=30,"depth":1..255=30,"depthMode":"random|levelBased","solidFrontFaces":bool,"maskIncompleteBlocks":bool,"seed":u32=0}"##),
-        cmd!("filter.stylize.oilPaint", "Oil Paint…", ["Filter", "Stylize"], r##"{"stylization":0.1..10=4,"cleanliness":0..10=5,"scale":0.1..10=1,"bristleDetail":0..10=5,"lighting":bool=true,"angle":-180..180=-60,"shine":0..10=1}"##),
-        cmd!("filter.stylize.tiles", "Tiles…", ["Filter", "Stylize"], r##"{"count":1..99=10,"maxOffset":1..99=10,"fill":"background|foreground|inverse|unaltered","seed":u32=0,"foreground":json,"background":json}"##),
+        cmd!(
+            "filter.stylize.extrude",
+            "Extrude…",
+            ["Filter", "Stylize"],
+            r##"{"type":"blocks|pyramids","size":2..255=30,"depth":1..255=30,"depthMode":"random|levelBased","solidFrontFaces":bool,"maskIncompleteBlocks":bool,"seed":u32=0}"##
+        ),
+        cmd!(
+            "filter.stylize.oilPaint",
+            "Oil Paint…",
+            ["Filter", "Stylize"],
+            r##"{"stylization":0.1..10=4,"cleanliness":0..10=5,"scale":0.1..10=1,"bristleDetail":0..10=5,"lighting":bool=true,"angle":-180..180=-60,"shine":0..10=1}"##
+        ),
+        cmd!(
+            "filter.stylize.tiles",
+            "Tiles…",
+            ["Filter", "Stylize"],
+            r##"{"count":1..99=10,"maxOffset":1..99=10,"fill":"background|foreground|inverse|unaltered","seed":u32=0,"foreground":json,"background":json}"##
+        ),
         cmd!("filter.stylize.traceContour", "Trace Contour…", ["Filter", "Stylize"], r##"{"level":0..255=128,"edge":"lower|upper"}"##),
         cmd!("filter.stylize.wind", "Wind…", ["Filter", "Stylize"], r##"{"method":"wind|blast|stagger","direction":"fromRight|fromLeft","seed":u32=0}"##),
         // Distort
-        cmd!("filter.distort.displace", "Displace…", ["Filter", "Distort"], r##"{"horizontal":-999..999=10,"vertical":-999..999=10,"fit":"stretch|tile","undefinedAreas":"repeat|wrap","mapDocument":doc,"mapPath":text,"mapLayer":json}"##),
+        cmd!(
+            "filter.distort.displace",
+            "Displace…",
+            ["Filter", "Distort"],
+            r##"{"horizontal":-999..999=10,"vertical":-999..999=10,"fit":"stretch|tile","undefinedAreas":"repeat|wrap","mapDocument":doc,"mapPath":text,"mapLayer":json}"##
+        ),
         cmd!("filter.distort.shear", "Shear…", ["Filter", "Distort"], r##"{"amount":-100..100=0,"undefinedAreas":"wrap|repeat","points":json}"##),
-        cmd!("filter.distort.zigZag", "ZigZag…", ["Filter", "Distort"], r##"{"amount":-100..100=10,"ridges":0..20=5,"style":"pondRipples|outFromCenter|aroundCenter"}"##),
+        cmd!(
+            "filter.distort.zigZag",
+            "ZigZag…",
+            ["Filter", "Distort"],
+            r##"{"amount":-100..100=10,"ridges":0..20=5,"style":"pondRipples|outFromCenter|aroundCenter"}"##
+        ),
         // Render
-        cmd!("filter.render.fibers", "Fibers…", ["Filter", "Render"], r##"{"variance":1..64=16,"strength":1..64=4,"seed":u32=0,"foreground":json,"background":json}"##),
-        cmd!("filter.render.lensFlare", "Lens Flare…", ["Filter", "Render"], r##"{"brightness":10..300=100,"centerX":0..1=0.5,"centerY":0..1=0.5,"lens":"zoom|prime35|prime105|moviePrime"}"##),
+        cmd!(
+            "filter.render.fibers",
+            "Fibers…",
+            ["Filter", "Render"],
+            r##"{"variance":1..64=16,"strength":1..64=4,"seed":u32=0,"foreground":json,"background":json}"##
+        ),
+        cmd!(
+            "filter.render.lensFlare",
+            "Lens Flare…",
+            ["Filter", "Render"],
+            r##"{"brightness":10..300=100,"centerX":0..1=0.5,"centerY":0..1=0.5,"lens":"zoom|prime35|prime105|moviePrime"}"##
+        ),
         cmd!(
             "filter.render.lightingEffects",
             "Lighting Effects…",
@@ -474,27 +527,72 @@ pub fn specs() -> Vec<CommandSpec> {
             r##"{"lightType":"spot|point|infinite","intensity":-100..100=75,"lightX":0..1=0.25,"lightY":0..1=0.2,"lightZ":0..2=0.6,"targetX":0..1=0.5,"targetY":0..1=0.55,"cone":1..89=45,"hotspot":0..100=50,"angle":-180..180=135,"elevation":0..90=45,"gloss":-100..100=0,"metallic":-100..100=0,"exposure":-100..100=0,"ambience":-100..100=8,"texture":"none|red|green|blue|alpha|luminance","height":0..100=50,"whiteIsHigh":bool=true,"lights":json}"##
         ),
         // Noise
-        cmd!("filter.noise.reduceNoise", "Reduce Noise…", ["Filter", "Noise"], r##"{"strength":0..10=6,"preserveDetails":0..100=60,"reduceColorNoise":0..100=45,"sharpenDetails":0..100=25,"removeJpegArtifact":bool}"##),
+        cmd!(
+            "filter.noise.reduceNoise",
+            "Reduce Noise…",
+            ["Filter", "Noise"],
+            r##"{"strength":0..10=6,"preserveDetails":0..100=60,"reduceColorNoise":0..100=45,"sharpenDetails":0..100=25,"removeJpegArtifact":bool}"##
+        ),
         // Blur
-        cmd!("filter.blur.smartBlur", "Smart Blur…", ["Filter", "Blur"], r##"{"radius":0.1..100=3,"threshold":0.1..100=25,"quality":"high|medium|low","mode":"normal|edgeOnly|overlayEdge"}"##),
+        cmd!(
+            "filter.blur.smartBlur",
+            "Smart Blur…",
+            ["Filter", "Blur"],
+            r##"{"radius":0.1..100=3,"threshold":0.1..100=25,"quality":"high|medium|low","mode":"normal|edgeOnly|overlayEdge"}"##
+        ),
         cmd!(
             "filter.blur.lensBlur",
             "Lens Blur…",
             ["Filter", "Blur"],
             r##"{"radius":0..100=15,"shape":"hexagon|triangle|square|pentagon|heptagon|octagon","bladeCurvature":0..100=0,"rotation":0..360=0,"depthMap":"none|transparency|layerMask","focalDistance":0..255=0,"invert":bool,"brightness":0..100=0,"threshold":0..255=255,"noise":0..100=0,"distribution":"uniform|gaussian","monochromatic":bool,"seed":u32=0}"##
         ),
-        cmd!("filter.blur.shapeBlur", "Shape Blur…", ["Filter", "Blur"], r##"{"radius":5..1000=10,"shape":"circle|ring|square|diamond|triangle|hexagon|star|heart|cross"}"##),
+        cmd!(
+            "filter.blur.shapeBlur",
+            "Shape Blur…",
+            ["Filter", "Blur"],
+            r##"{"radius":5..1000=10,"shape":"circle|ring|square|diamond|triangle|hexagon|star|heart|cross"}"##
+        ),
         // Blur Gallery
-        cmd!("filter.blurGallery.tiltShift", "Tilt-Shift…", ["Filter", "Blur Gallery"], r##"{"blur":0..500=15,"centerX":0..1=0.5,"centerY":0..1=0.5,"angle":-90..90=0,"focus":0..1=0.1,"transition":0.01..1=0.15}"##),
-        cmd!("filter.blurGallery.irisBlur", "Iris Blur…", ["Filter", "Blur Gallery"], r##"{"blur":0..500=15,"centerX":0..1=0.5,"centerY":0..1=0.5,"radiusX":0.01..1=0.35,"radiusY":0.01..1=0.25,"angle":-180..180=0,"roundness":0..100=0,"feather":0..0.99=0.5,"pins":json}"##),
-        cmd!("filter.blurGallery.fieldBlur", "Field Blur…", ["Filter", "Blur Gallery"], r##"{"blur":0..500=15,"centerX":0..1=0.5,"centerY":0..1=0.5,"pins":json}"##),
-        cmd!("filter.blurGallery.spinBlur", "Spin Blur…", ["Filter", "Blur Gallery"], r##"{"blurAngle":0..360=15,"centerX":0..1=0.5,"centerY":0..1=0.5,"radiusX":0.01..1=0.3,"radiusY":0.01..1=0.3,"angle":-180..180=0,"pins":json}"##),
-        cmd!("filter.blurGallery.pathBlur", "Path Blur…", ["Filter", "Blur Gallery"], r##"{"speed":0..500=50,"taper":0..100=0,"startX":0..1=0.2,"startY":0..1=0.5,"endX":0..1=0.8,"endY":0..1=0.5,"paths":json}"##),
+        cmd!(
+            "filter.blurGallery.tiltShift",
+            "Tilt-Shift…",
+            ["Filter", "Blur Gallery"],
+            r##"{"blur":0..500=15,"centerX":0..1=0.5,"centerY":0..1=0.5,"angle":-90..90=0,"focus":0..1=0.1,"transition":0.01..1=0.15}"##
+        ),
+        cmd!(
+            "filter.blurGallery.irisBlur",
+            "Iris Blur…",
+            ["Filter", "Blur Gallery"],
+            r##"{"blur":0..500=15,"centerX":0..1=0.5,"centerY":0..1=0.5,"radiusX":0.01..1=0.35,"radiusY":0.01..1=0.25,"angle":-180..180=0,"roundness":0..100=0,"feather":0..0.99=0.5,"pins":json}"##
+        ),
+        cmd!(
+            "filter.blurGallery.fieldBlur",
+            "Field Blur…",
+            ["Filter", "Blur Gallery"],
+            r##"{"blur":0..500=15,"centerX":0..1=0.5,"centerY":0..1=0.5,"pins":json}"##
+        ),
+        cmd!(
+            "filter.blurGallery.spinBlur",
+            "Spin Blur…",
+            ["Filter", "Blur Gallery"],
+            r##"{"blurAngle":0..360=15,"centerX":0..1=0.5,"centerY":0..1=0.5,"radiusX":0.01..1=0.3,"radiusY":0.01..1=0.3,"angle":-180..180=0,"pins":json}"##
+        ),
+        cmd!(
+            "filter.blurGallery.pathBlur",
+            "Path Blur…",
+            ["Filter", "Blur Gallery"],
+            r##"{"speed":0..500=50,"taper":0..100=0,"startX":0..1=0.2,"startY":0..1=0.5,"endX":0..1=0.8,"endY":0..1=0.5,"paths":json}"##
+        ),
         // Other
         cmd!("filter.other.custom", "Custom…", ["Filter", "Other"], r##"{"kernel":int[25],"scale":1..9999=1,"offset":-9999..9999=0}"##),
         cmd!("filter.other.hsbHsl", "HSB/HSL", ["Filter", "Other"], r##"{"inputMode":"rgb|hsb|hsl","rowOrder":"hsb|hsl|rgb"}"##),
         // Video
-        cmd!("filter.video.deInterlace", "De-Interlace…", ["Filter", "Video"], r##"{"eliminate":"oddFields|evenFields","createBy":"interpolation|duplication"}"##),
+        cmd!(
+            "filter.video.deInterlace",
+            "De-Interlace…",
+            ["Filter", "Video"],
+            r##"{"eliminate":"oddFields|evenFields","createBy":"interpolation|duplication"}"##
+        ),
         cmd!("filter.video.ntscColors", "NTSC Colors", ["Filter", "Video"], "{}"),
     ]
 }

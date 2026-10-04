@@ -277,24 +277,24 @@ pub fn merge(w: usize, h: usize, imgs: &[&[[f32; 4]]], opts: &MergeOptions) -> M
     if opts.remove_ghosts && p > 1 {
         // Weighted variance of per-exposure log radiance (luminance).
         let score: Vec<f32> = crate::photo_util::par_map(w * h, |i| {
-                let (mut s, mut s2, mut sw) = (0.0f64, 0.0f64, 0.0f64);
-                for j in 0..p {
-                    let q = imgs[j][i];
-                    let l = luma(q);
-                    let wt = hat(l as f64 * 255.0);
-                    if wt < 20.0 {
-                        continue;
-                    }
-                    let lr = (0..3).map(|c| 0.33 * (g_at(&response[c], q[c]) - log_dt[j])).sum::<f64>();
-                    s += wt * lr;
-                    s2 += wt * lr * lr;
-                    sw += wt;
+            let (mut s, mut s2, mut sw) = (0.0f64, 0.0f64, 0.0f64);
+            for j in 0..p {
+                let q = imgs[j][i];
+                let l = luma(q);
+                let wt = hat(l as f64 * 255.0);
+                if wt < 20.0 {
+                    continue;
                 }
-                if sw <= 0.0 {
-                    return 0.0;
-                }
-                let m = s / sw;
-                ((s2 / sw - m * m).max(0.0)).sqrt() as f32
+                let lr = (0..3).map(|c| 0.33 * (g_at(&response[c], q[c]) - log_dt[j])).sum::<f64>();
+                s += wt * lr;
+                s2 += wt * lr * lr;
+                sw += wt;
+            }
+            if sw <= 0.0 {
+                return 0.0;
+            }
+            let m = s / sw;
+            ((s2 / sw - m * m).max(0.0)).sqrt() as f32
         });
         for i in 0..w * h {
             ghost[i] = if score[i] > 0.35 { 1.0 } else { 0.0 };
@@ -459,7 +459,8 @@ mod tests {
             let r = est[k] / est[k - 1];
             assert!((2.0..8.0).contains(&r), "ratio {r} ({est:?})");
         }
-        let m = merge(w, h, &refs, &MergeOptions { exposures: dts.iter().map(|d| *d as f64).collect(), remove_ghosts: false, ghost_base: None, response: None });
+        let m =
+            merge(w, h, &refs, &MergeOptions { exposures: dts.iter().map(|d| *d as f64).collect(), remove_ghosts: false, ghost_base: None, response: None });
         // Radiance proportional to the scene: check log-ratios across the 12-stop ramp.
         let probe = |x: usize| m.px[(h / 2) * w + x][1] as f64 / sc[(h / 2) * w + x][1] as f64;
         let k0 = probe(w / 2);
@@ -498,7 +499,12 @@ mod tests {
     #[test]
     fn mtb_finds_shifts() {
         let (w, h) = (128usize, 96usize);
-        let img: Vec<f32> = (0..w * h).map(|i| { let (x, y) = ((i % w) as f32, (i / w) as f32); 0.5 + 0.4 * ((x * 0.21).sin() * (y * 0.17).cos()) }).collect();
+        let img: Vec<f32> = (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f32, (i / w) as f32);
+                0.5 + 0.4 * ((x * 0.21).sin() * (y * 0.17).cos())
+            })
+            .collect();
         let (dx, dy) = (5i32, -3i32);
         let shifted: Vec<f32> = (0..w * h)
             .map(|i| {
@@ -515,7 +521,12 @@ mod tests {
     fn tone_mapping_methods_produce_display_range() {
         let (w, h) = (96usize, 32usize);
         let sc = scene(w, h);
-        for method in [ToneMethod::LocalAdaptation(HdrToning { radius: 7.0, strength: 0.52, ..Default::default() }), ToneMethod::ExposureGamma { exposure: 0.0, gamma: 1.0 }, ToneMethod::HighlightCompression, ToneMethod::EqualizeHistogram] {
+        for method in [
+            ToneMethod::LocalAdaptation(HdrToning { radius: 7.0, strength: 0.52, ..Default::default() }),
+            ToneMethod::ExposureGamma { exposure: 0.0, gamma: 1.0 },
+            ToneMethod::HighlightCompression,
+            ToneMethod::EqualizeHistogram,
+        ] {
             let mut px: Vec<[f32; 4]> = sc.iter().map(|r| [r[0], r[1], r[2], 1.0]).collect();
             tone_map(&mut px, w, h, &method);
             assert!(px.iter().all(|q| q[..3].iter().all(|v| (0.0..=1.0).contains(v))));

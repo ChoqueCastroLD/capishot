@@ -21,53 +21,53 @@ mod artistic;
 mod artistic_fx;
 mod blur;
 mod blur2;
+pub mod camera_raw;
+pub mod content_aware;
 mod denoise;
 mod distort;
 mod distort2;
+pub mod exif;
+pub mod features;
 mod fxutil;
 mod gallery;
+pub mod hdr;
 mod image;
+pub mod inpaint;
+pub mod lens;
+pub mod liquify;
+pub mod matting;
+mod noise;
 mod oil;
+mod other;
 mod other2;
+pub mod paint;
+pub mod panorama;
+pub mod perspective;
+mod photo_util;
 mod pixelate;
+pub mod poisson;
+pub mod puppet;
+pub mod pyramid;
+pub mod quantize;
 mod render;
 pub mod render2;
-mod stylize2;
-mod video;
-mod noise;
-mod other;
-pub mod paint;
 pub mod resample;
-pub mod selection;
-pub mod segment;
-pub mod matting;
-pub mod quantize;
-pub mod stack;
-pub mod tone;
-pub mod trap;
-pub mod transform;
-pub mod warp;
-pub mod liquify;
-pub mod puppet;
-pub mod perspective;
-pub mod poisson;
-pub mod inpaint;
 pub mod retouch;
-pub mod seam;
-pub mod content_aware;
-pub mod features;
-pub mod pyramid;
-pub mod panorama;
-pub mod hdr;
-pub mod exif;
-pub mod lens;
-pub mod wideangle;
 pub mod scancrop;
-pub mod camera_raw;
-pub mod vanishing;
-mod photo_util;
+pub mod seam;
+pub mod segment;
+pub mod selection;
 mod sharpen;
+pub mod stack;
 mod stylize;
+mod stylize2;
+pub mod tone;
+pub mod transform;
+pub mod trap;
+pub mod vanishing;
+mod video;
+pub mod warp;
+pub mod wideangle;
 
 pub use artistic::{GALLERY_CATEGORIES, GalleryEffect, GalleryFilter, GalleryParam, GalleryParamKind};
 pub use image::{Edge, Image};
@@ -173,23 +173,58 @@ pub enum PolarMode {
 #[serde(tag = "filter", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum FilterParams {
     /// Radius = Gaussian standard deviation in pixels (0.1–1000).
-    GaussianBlur { radius: f32 },
+    GaussianBlur {
+        radius: f32,
+    },
     /// Box of `2·radius + 1` pixels.
-    BoxBlur { radius: f32 },
-    MotionBlur { angle: f32, distance: f32 },
+    BoxBlur {
+        radius: f32,
+    },
+    MotionBlur {
+        angle: f32,
+        distance: f32,
+    },
     /// Amount 1–100; centre as a fraction of the bounds (0.5, 0.5 = centre).
-    RadialBlur { amount: f32, method: RadialMethod, center_x: f32, center_y: f32 },
+    RadialBlur {
+        amount: f32,
+        method: RadialMethod,
+        center_x: f32,
+        center_y: f32,
+    },
     /// Radius px, threshold in levels.
-    SurfaceBlur { radius: f32, threshold: f32 },
+    SurfaceBlur {
+        radius: f32,
+        threshold: f32,
+    },
     /// Amount %, radius px, threshold levels.
-    UnsharpMask { amount: f32, radius: f32, threshold: f32 },
+    UnsharpMask {
+        amount: f32,
+        radius: f32,
+        threshold: f32,
+    },
     /// Amount %, radius px, noise reduction % (basic: Gaussian unsharp).
-    SmartSharpen { amount: f32, radius: f32, reduce_noise: f32 },
-    HighPass { radius: f32 },
+    SmartSharpen {
+        amount: f32,
+        radius: f32,
+        reduce_noise: f32,
+    },
+    HighPass {
+        radius: f32,
+    },
     /// Amount 0–400 %.
-    AddNoise { amount: f32, distribution: Distribution, monochromatic: bool, seed: u32 },
-    Median { radius: f32 },
-    DustAndScratches { radius: f32, threshold: f32 },
+    AddNoise {
+        amount: f32,
+        distribution: Distribution,
+        monochromatic: bool,
+        seed: u32,
+    },
+    Median {
+        radius: f32,
+    },
+    DustAndScratches {
+        radius: f32,
+        threshold: f32,
+    },
     /// Radius px; `preserve` is the dialog's Preserve (older params default to Squareness).
     Minimum {
         radius: f32,
@@ -201,20 +236,37 @@ pub enum FilterParams {
         #[serde(default)]
         preserve: Preserve,
     },
-    Offset { horizontal: i32, vertical: i32, undefined: UndefinedAreas },
-    Mosaic { cell_size: f32 },
+    Offset {
+        horizontal: i32,
+        vertical: i32,
+        undefined: UndefinedAreas,
+    },
+    Mosaic {
+        cell_size: f32,
+    },
     /// Angle degrees, height px, amount %.
-    Emboss { angle: f32, height: f32, amount: f32 },
+    Emboss {
+        angle: f32,
+        height: f32,
+        amount: f32,
+    },
     FindEdges,
     Solarize,
     Invert,
     Desaturate,
     /// Angle −999…999 degrees.
-    Twirl { angle: f32 },
+    Twirl {
+        angle: f32,
+    },
     /// Amount −100…100 %.
-    Pinch { amount: f32 },
+    Pinch {
+        amount: f32,
+    },
     /// Amount −100…100 %.
-    Spherize { amount: f32, mode: SpherizeMode },
+    Spherize {
+        amount: f32,
+        mode: SpherizeMode,
+    },
     Wave {
         generators: u32,
         wavelength_min: f32,
@@ -226,32 +278,83 @@ pub enum FilterParams {
         seed: u32,
     },
     /// Amount −999…999 %.
-    Ripple { amount: f32, size: RippleSize },
-    PolarCoordinates { mode: PolarMode },
+    Ripple {
+        amount: f32,
+        size: RippleSize,
+    },
+    PolarCoordinates {
+        mode: PolarMode,
+    },
 
     // ---- Pixelate ----
     /// Max dot radius px (4–127); screen angles per channel in degrees.
-    ColorHalftone { max_radius: f32, angles: [f32; 4] },
+    ColorHalftone {
+        max_radius: f32,
+        angles: [f32; 4],
+    },
     /// Cell size px (3–300).
-    Crystallize { cell_size: f32, seed: u32 },
+    Crystallize {
+        cell_size: f32,
+        seed: u32,
+    },
     Facet,
     Fragment,
-    Mezzotint { kind: MezzotintType, seed: u32 },
+    Mezzotint {
+        kind: MezzotintType,
+        seed: u32,
+    },
     /// Cell size px (3–300); `background` is straight sRGB RGBA.
-    Pointillize { cell_size: f32, seed: u32, background: [f32; 4] },
+    Pointillize {
+        cell_size: f32,
+        seed: u32,
+        background: [f32; 4],
+    },
 
     // ---- Stylize ----
-    Diffuse { mode: DiffuseMode, seed: u32 },
+    Diffuse {
+        mode: DiffuseMode,
+        seed: u32,
+    },
     /// Size px (2–255), depth (1–255).
-    Extrude { kind: ExtrudeType, size: f32, depth: f32, level_based: bool, solid_front: bool, mask_incomplete: bool, seed: u32 },
+    Extrude {
+        kind: ExtrudeType,
+        size: f32,
+        depth: f32,
+        level_based: bool,
+        solid_front: bool,
+        mask_incomplete: bool,
+        seed: u32,
+    },
     /// Photoshop's Oil Paint units: stylization 0.1–10, cleanliness 0–10, scale 0.1–10,
     /// bristle detail 0–10, lighting angle degrees, shine 0–10.
-    OilPaint { stylization: f32, cleanliness: f32, scale: f32, bristle_detail: f32, lighting: bool, angle: f32, shine: f32 },
+    OilPaint {
+        stylization: f32,
+        cleanliness: f32,
+        scale: f32,
+        bristle_detail: f32,
+        lighting: bool,
+        angle: f32,
+        shine: f32,
+    },
     /// Tiles along the shorter side (1–99), max offset % (1–99).
-    Tiles { count: u32, max_offset: f32, fill: TileFill, foreground: [f32; 4], background: [f32; 4], seed: u32 },
+    Tiles {
+        count: u32,
+        max_offset: f32,
+        fill: TileFill,
+        foreground: [f32; 4],
+        background: [f32; 4],
+        seed: u32,
+    },
     /// Level 0–255; `upper` traces the side above the level.
-    TraceContour { level: f32, upper: bool },
-    Wind { method: WindMethod, from_right: bool, seed: u32 },
+    TraceContour {
+        level: f32,
+        upper: bool,
+    },
+    Wind {
+        method: WindMethod,
+        from_right: bool,
+        seed: u32,
+    },
 
     // ---- Distort ----
     /// Scales in % (−999…999; 100 % = 128 px at full map contrast). The map is
@@ -265,25 +368,63 @@ pub enum FilterParams {
         map: Option<std::sync::Arc<Image>>,
     },
     /// Curve points `[t, offset]`: t 0–1 top→bottom, offset −1…1 of half the width.
-    Shear { points: Vec<[f32; 2]>, undefined: UndefinedAreas },
+    Shear {
+        points: Vec<[f32; 2]>,
+        undefined: UndefinedAreas,
+    },
     /// Amount −100…100, ridges 0–20.
-    ZigZag { amount: f32, ridges: f32, style: ZigZagStyle },
+    ZigZag {
+        amount: f32,
+        ridges: f32,
+        style: ZigZagStyle,
+    },
 
     // ---- Render ----
     /// Variance 1–64, strength 1–64; colours straight sRGB RGBA.
-    Fibers { variance: f32, strength: f32, seed: u32, foreground: [f32; 4], background: [f32; 4] },
+    Fibers {
+        variance: f32,
+        strength: f32,
+        seed: u32,
+        foreground: [f32; 4],
+        background: [f32; 4],
+    },
     /// Brightness 10–300 %, centre as a fraction of the bounds.
-    LensFlare { brightness: f32, center_x: f32, center_y: f32, lens: LensType },
+    LensFlare {
+        brightness: f32,
+        center_x: f32,
+        center_y: f32,
+        lens: LensType,
+    },
     /// Gloss/metallic/exposure/ambience −100…100; bump height 0–100.
-    LightingEffects { lights: Vec<Light>, gloss: f32, metallic: f32, exposure: f32, ambience: f32, texture: TextureChannel, height: f32, white_is_high: bool },
+    LightingEffects {
+        lights: Vec<Light>,
+        gloss: f32,
+        metallic: f32,
+        exposure: f32,
+        ambience: f32,
+        texture: TextureChannel,
+        height: f32,
+        white_is_high: bool,
+    },
 
     // ---- Noise ----
     /// Strength 0–10, the rest 0–100 %.
-    ReduceNoise { strength: f32, preserve_details: f32, reduce_color_noise: f32, sharpen_details: f32, remove_jpeg_artifact: bool },
+    ReduceNoise {
+        strength: f32,
+        preserve_details: f32,
+        reduce_color_noise: f32,
+        sharpen_details: f32,
+        remove_jpeg_artifact: bool,
+    },
 
     // ---- Blur ----
     /// Radius 0.1–100 px, threshold 0.1–100 levels.
-    SmartBlur { radius: f32, threshold: f32, quality: BlurQuality, mode: SmartBlurMode },
+    SmartBlur {
+        radius: f32,
+        threshold: f32,
+        quality: BlurQuality,
+        mode: SmartBlurMode,
+    },
     /// Iris radius 0–100 px, `blades` 3–8, curvature 0–100, rotation degrees;
     /// focal distance 0–255; specular brightness 0–100 / threshold 0–255; noise 0–100.
     LensBlur {
@@ -305,27 +446,57 @@ pub enum FilterParams {
         depth_map: Option<std::sync::Arc<Image>>,
     },
     /// Radius 5–1000 px.
-    ShapeBlur { radius: f32, shape: BlurShape },
+    ShapeBlur {
+        radius: f32,
+        shape: BlurShape,
+    },
 
     // ---- Blur Gallery ----
     /// Centre fractions, angle degrees, focus/transition as fractions of the bounds' shorter side.
-    TiltShift { blur: f32, center_x: f32, center_y: f32, angle: f32, focus: f32, transition: f32 },
-    IrisBlur { pins: Vec<IrisPin> },
-    FieldBlur { pins: Vec<FieldPin> },
-    SpinBlur { pins: Vec<SpinPin> },
-    PathBlur { paths: Vec<BlurPath> },
+    TiltShift {
+        blur: f32,
+        center_x: f32,
+        center_y: f32,
+        angle: f32,
+        focus: f32,
+        transition: f32,
+    },
+    IrisBlur {
+        pins: Vec<IrisPin>,
+    },
+    FieldBlur {
+        pins: Vec<FieldPin>,
+    },
+    SpinBlur {
+        pins: Vec<SpinPin>,
+    },
+    PathBlur {
+        paths: Vec<BlurPath>,
+    },
 
     // ---- Other ----
     /// 5×5 kernel (row-major, centre = index 12), divided by `scale`, plus `offset` levels.
-    Custom { kernel: Vec<f32>, scale: f32, offset: f32 },
-    HsbHsl { input: HsbModel, output: HsbModel },
+    Custom {
+        kernel: Vec<f32>,
+        scale: f32,
+        offset: f32,
+    },
+    HsbHsl {
+        input: HsbModel,
+        output: HsbModel,
+    },
 
     // ---- Video ----
     /// Removes the even (or odd) lines and rebuilds them by interpolation (or duplication).
-    DeInterlace { eliminate_even: bool, interpolate: bool },
+    DeInterlace {
+        eliminate_even: bool,
+        interpolate: bool,
+    },
     NtscColors,
     /// Filter Gallery: a stack of gallery effects applied in order.
-    FilterGallery { effects: Vec<GalleryEffect> },
+    FilterGallery {
+        effects: Vec<GalleryEffect>,
+    },
 }
 
 impl FilterParams {
@@ -528,37 +699,92 @@ pub fn kernel(params: &FilterParams, src: &Image, out: Rect, ctx: &Ctx) -> Vec<f
         FilterParams::Mezzotint { kind, seed } => pixelate::mezzotint(src, out, ctx, *kind, *seed),
         FilterParams::Pointillize { cell_size, seed, background } => pixelate::pointillize(src, out, ctx, *cell_size, *seed, *background),
         FilterParams::Diffuse { mode, seed } => stylize2::diffuse(src, out, ctx, *mode, *seed),
-        FilterParams::Extrude { kind, size, depth, level_based, solid_front, mask_incomplete, seed } => {
-            stylize2::extrude(src, out, ctx, &stylize2::ExtrudeSpec { kind: *kind, size: *size, depth: *depth, level_based: *level_based, solid_front: *solid_front, mask_incomplete: *mask_incomplete, seed: *seed })
-        }
+        FilterParams::Extrude { kind, size, depth, level_based, solid_front, mask_incomplete, seed } => stylize2::extrude(
+            src,
+            out,
+            ctx,
+            &stylize2::ExtrudeSpec {
+                kind: *kind,
+                size: *size,
+                depth: *depth,
+                level_based: *level_based,
+                solid_front: *solid_front,
+                mask_incomplete: *mask_incomplete,
+                seed: *seed,
+            },
+        ),
         FilterParams::OilPaint { stylization, cleanliness, scale, bristle_detail, lighting, angle, shine } => oil::oil_paint(
             src,
             out,
             ctx,
-            &oil::OilSpec { stylization: *stylization, cleanliness: *cleanliness, scale: *scale, bristle_detail: *bristle_detail, lighting: *lighting, angle: *angle, shine: *shine },
+            &oil::OilSpec {
+                stylization: *stylization,
+                cleanliness: *cleanliness,
+                scale: *scale,
+                bristle_detail: *bristle_detail,
+                lighting: *lighting,
+                angle: *angle,
+                shine: *shine,
+            },
         ),
-        FilterParams::Tiles { count, max_offset, fill, foreground, background, seed } => stylize2::tiles(src, out, ctx, *count, *max_offset, *fill, (*foreground, *background), *seed),
+        FilterParams::Tiles { count, max_offset, fill, foreground, background, seed } => {
+            stylize2::tiles(src, out, ctx, *count, *max_offset, *fill, (*foreground, *background), *seed)
+        }
         FilterParams::TraceContour { level, upper } => stylize2::trace_contour(src, out, ctx, *level, *upper),
         FilterParams::Wind { method, from_right, seed } => stylize2::wind(src, out, ctx, *method, *from_right, *seed),
-        FilterParams::Displace { horizontal, vertical, stretch, undefined, map } => distort2::displace(src, out, ctx, (*horizontal, *vertical), *stretch, *undefined, map.as_deref()),
+        FilterParams::Displace { horizontal, vertical, stretch, undefined, map } => {
+            distort2::displace(src, out, ctx, (*horizontal, *vertical), *stretch, *undefined, map.as_deref())
+        }
         FilterParams::Shear { points, undefined } => distort2::shear(src, out, ctx, points, *undefined),
         FilterParams::ZigZag { amount, ridges, style } => distort2::zigzag(src, out, ctx, *amount, *ridges, *style),
-        FilterParams::Fibers { variance, strength, seed, foreground, background } => render::fibers(src, out, ctx, *variance, *strength, *seed, (*foreground, *background)),
+        FilterParams::Fibers { variance, strength, seed, foreground, background } => {
+            render::fibers(src, out, ctx, *variance, *strength, *seed, (*foreground, *background))
+        }
         FilterParams::LensFlare { brightness, center_x, center_y, lens } => render::lens_flare(src, out, ctx, *brightness, (*center_x, *center_y), *lens),
         FilterParams::LightingEffects { lights, gloss, metallic, exposure, ambience, texture, height, white_is_high } => render::lighting(
             src,
             out,
             ctx,
-            &render::LightingSpec { lights, gloss: *gloss, metallic: *metallic, exposure: *exposure, ambience: *ambience, texture: *texture, height: *height, white_is_high: *white_is_high },
+            &render::LightingSpec {
+                lights,
+                gloss: *gloss,
+                metallic: *metallic,
+                exposure: *exposure,
+                ambience: *ambience,
+                texture: *texture,
+                height: *height,
+                white_is_high: *white_is_high,
+            },
         ),
         FilterParams::ReduceNoise { strength, preserve_details, reduce_color_noise, sharpen_details, remove_jpeg_artifact } => denoise::reduce_noise(
             src,
             out,
             ctx,
-            &denoise::DenoiseSpec { strength: *strength, preserve: *preserve_details, color: *reduce_color_noise, sharpen: *sharpen_details, jpeg: *remove_jpeg_artifact },
+            &denoise::DenoiseSpec {
+                strength: *strength,
+                preserve: *preserve_details,
+                color: *reduce_color_noise,
+                sharpen: *sharpen_details,
+                jpeg: *remove_jpeg_artifact,
+            },
         ),
         FilterParams::SmartBlur { radius, threshold, quality, mode } => blur2::smart_blur(src, out, ctx, *radius, *threshold, *quality, *mode),
-        FilterParams::LensBlur { radius, blades, curvature, rotation, depth, focal_distance, invert_depth, brightness, threshold, noise, distribution, monochromatic, seed, depth_map } => blur2::lens_blur(
+        FilterParams::LensBlur {
+            radius,
+            blades,
+            curvature,
+            rotation,
+            depth,
+            focal_distance,
+            invert_depth,
+            brightness,
+            threshold,
+            noise,
+            distribution,
+            monochromatic,
+            seed,
+            depth_map,
+        } => blur2::lens_blur(
             src,
             out,
             ctx,
@@ -580,7 +806,9 @@ pub fn kernel(params: &FilterParams, src: &Image, out: Rect, ctx: &Ctx) -> Vec<f
             },
         ),
         FilterParams::ShapeBlur { radius, shape } => blur2::shape_blur(src, out, ctx, *radius, *shape),
-        FilterParams::TiltShift { blur, center_x, center_y, angle, focus, transition } => gallery::tilt_shift(src, out, ctx, *blur, (*center_x, *center_y), *angle, *focus, *transition),
+        FilterParams::TiltShift { blur, center_x, center_y, angle, focus, transition } => {
+            gallery::tilt_shift(src, out, ctx, *blur, (*center_x, *center_y), *angle, *focus, *transition)
+        }
         FilterParams::IrisBlur { pins } => gallery::iris(src, out, ctx, pins),
         FilterParams::FieldBlur { pins } => gallery::field(src, out, ctx, pins),
         FilterParams::SpinBlur { pins } => gallery::spin(src, out, ctx, pins),
@@ -640,7 +868,15 @@ fn auto_tile(params: &FilterParams) -> i32 {
 }
 
 /// [`apply`] / [`apply_in`] with an explicit tile size (tests use it to check tile independence).
-pub fn apply_tiled(surface: &Surface, params: &FilterParams, area: Rect, bounds: Rect, selection: Option<&Surface>, tile: i32, extent: Option<Rect>) -> Surface {
+pub fn apply_tiled(
+    surface: &Surface,
+    params: &FilterParams,
+    area: Rect,
+    bounds: Rect,
+    selection: Option<&Surface>,
+    tile: i32,
+    extent: Option<Rect>,
+) -> Surface {
     let mut out = surface.clone();
     if area.is_empty() {
         return out;

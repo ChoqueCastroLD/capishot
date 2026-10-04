@@ -17,7 +17,12 @@ pub enum Stage {
     /// Per-channel inverse curves.
     InvCurves(Vec<Curve>),
     /// `out[r] = Σ m[r][c]·in[c] + offset[r]`, `rows × cols`.
-    Matrix { rows: usize, cols: usize, m: Vec<f64>, offset: Vec<f64> },
+    Matrix {
+        rows: usize,
+        cols: usize,
+        m: Vec<f64>,
+        offset: Vec<f64>,
+    },
     Clut(Clut),
     /// Float CIE Lab (L 0–100) → XYZ (D50, Y = 1).
     LabToXyz,
@@ -185,8 +190,7 @@ impl Pipeline {
             let noop = match &s {
                 Stage::Curves(c) | Stage::InvCurves(c) => c.iter().all(Curve::is_identity),
                 Stage::Matrix { rows: 3, cols: 3, m, offset } => {
-                    offset.iter().all(|o| o.abs() < 1e-12)
-                        && m.iter().enumerate().all(|(i, v)| (v - if i % 4 == 0 { 1.0 } else { 0.0 }).abs() < 1e-12)
+                    offset.iter().all(|o| o.abs() < 1e-12) && m.iter().enumerate().all(|(i, v)| (v - if i % 4 == 0 { 1.0 } else { 0.0 }).abs() < 1e-12)
                 }
                 _ => false,
             };

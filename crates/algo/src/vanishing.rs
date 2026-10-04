@@ -99,11 +99,7 @@ impl VpPlane {
         // Vanishing directions (or the edge directions when they're parallel in the image).
         let dir = |a: [f64; 2], b: [f64; 2], cc: [f64; 2], d: [f64; 2]| -> V3 {
             let v = meet(a, b, cc, d);
-            if v[2].abs() < 1e-9 * (v[0].abs() + v[1].abs()).max(1.0) {
-                norm([v[0], v[1], 0.0])
-            } else {
-                norm(ray([v[0] / v[2], v[1] / v[2]]))
-            }
+            if v[2].abs() < 1e-9 * (v[0].abs() + v[1].abs()).max(1.0) { norm([v[0], v[1], 0.0]) } else { norm(ray([v[0] / v[2], v[1] / v[2]])) }
         };
         let d1 = dir(q[0], q[1], q[3], q[2]);
         let d2 = dir(q[0], q[3], q[1], q[2]);

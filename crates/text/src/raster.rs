@@ -15,14 +15,7 @@ impl Xform {
     pub fn mul(&self, o: &Xform) -> Xform {
         let [a, b, c, d, e, f] = self.0;
         let [oa, ob, oc, od, oe, of] = o.0;
-        Xform([
-            a * oa + c * ob,
-            b * oa + d * ob,
-            a * oc + c * od,
-            b * oc + d * od,
-            a * oe + c * of + e,
-            b * oe + d * of + f,
-        ])
+        Xform([a * oa + c * ob, b * oa + d * ob, a * oc + c * od, b * oc + d * od, a * oe + c * of + e, b * oe + d * of + f])
     }
     /// Largest scale factor (for flattening tolerance).
     pub fn max_scale(&self) -> f64 {
@@ -69,12 +62,7 @@ impl LineSink for Coverage {
 
 /// Adds a transformed axis-aligned rectangle.
 pub fn rect_to(sink: &mut impl LineSink, xf: &Xform, x0: f64, y0: f64, x1: f64, y1: f64) {
-    let p = [
-        xf.apply(x0, y0),
-        xf.apply(x1, y0),
-        xf.apply(x1, y1),
-        xf.apply(x0, y1),
-    ];
+    let p = [xf.apply(x0, y0), xf.apply(x1, y0), xf.apply(x1, y1), xf.apply(x0, y1)];
     for i in 0..4 {
         sink.line(p[i], p[(i + 1) % 4]);
     }
@@ -89,26 +77,16 @@ pub struct Coverage {
 
 impl Coverage {
     pub fn new(width: usize, height: usize) -> Self {
-        Self {
-            width,
-            height,
-            acc: vec![0.0; width * height + 2],
-        }
+        Self { width, height, acc: vec![0.0; width * height + 2] }
     }
 
     /// Adds a line segment (pixel coordinates, y down).
     pub fn line(&mut self, p0: (f64, f64), p1: (f64, f64)) {
         let (w, h) = (self.width as f32, self.height as f32);
-        if p0.1 == p1.1
-            || !(p0.0.is_finite() && p0.1.is_finite() && p1.0.is_finite() && p1.1.is_finite())
-        {
+        if p0.1 == p1.1 || !(p0.0.is_finite() && p0.1.is_finite() && p1.0.is_finite() && p1.1.is_finite()) {
             return;
         }
-        let (dir, (x0, y0), (x1, y1)) = if p0.1 < p1.1 {
-            (1.0f32, p0, p1)
-        } else {
-            (-1.0f32, p1, p0)
-        };
+        let (dir, (x0, y0), (x1, y1)) = if p0.1 < p1.1 { (1.0f32, p0, p1) } else { (-1.0f32, p1, p0) };
         let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
         if y1 <= 0.0 || y0 >= h {
             return;
@@ -190,13 +168,7 @@ pub struct Pen<'a, S: LineSink> {
 
 impl<'a, S: LineSink> Pen<'a, S> {
     pub fn new(cov: &'a mut S, xf: Xform) -> Self {
-        Pen {
-            cov,
-            xf,
-            start: (0.0, 0.0),
-            last: (0.0, 0.0),
-            tol: 0.03,
-        }
+        Pen { cov, xf, start: (0.0, 0.0), last: (0.0, 0.0), tol: 0.03 }
     }
     fn to(&mut self, p: (f64, f64)) {
         self.cov.line(self.last, p);
@@ -228,10 +200,7 @@ impl<S: LineSink> skrifa::outline::OutlinePen for Pen<'_, S> {
         for i in 1..=n {
             let t = i as f64 / n as f64;
             let mt = 1.0 - t;
-            let p = (
-                mt * mt * a.0 + 2.0 * mt * t * b.0 + t * t * c.0,
-                mt * mt * a.1 + 2.0 * mt * t * b.1 + t * t * c.1,
-            );
+            let p = (mt * mt * a.0 + 2.0 * mt * t * b.0 + t * t * c.0, mt * mt * a.1 + 2.0 * mt * t * b.1 + t * t * c.1);
             self.to(p);
         }
     }
@@ -245,10 +214,7 @@ impl<S: LineSink> skrifa::outline::OutlinePen for Pen<'_, S> {
             let t = i as f64 / n as f64;
             let mt = 1.0 - t;
             let (k0, k1, k2, k3) = (mt * mt * mt, 3.0 * mt * mt * t, 3.0 * mt * t * t, t * t * t);
-            let p = (
-                k0 * a.0 + k1 * b.0 + k2 * c.0 + k3 * d.0,
-                k0 * a.1 + k1 * b.1 + k2 * c.1 + k3 * d.1,
-            );
+            let p = (k0 * a.0 + k1 * b.0 + k2 * c.0 + k3 * d.0, k0 * a.1 + k1 * b.1 + k2 * c.1 + k3 * d.1);
             self.to(p);
         }
     }

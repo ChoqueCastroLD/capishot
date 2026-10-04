@@ -43,9 +43,7 @@ impl ImageData {
     pub fn decode_channel(&self, header: &Header, index: usize) -> Result<Vec<u8>> {
         let all = self.decode(header)?;
         let plane = header.row_bytes() * header.height as usize;
-        all.get(index * plane..(index + 1) * plane)
-            .map(<[u8]>::to_vec)
-            .ok_or_else(|| crate::error::PsdError::invalid(format!("no merged channel {index}")))
+        all.get(index * plane..(index + 1) * plane).map(<[u8]>::to_vec).ok_or_else(|| crate::error::PsdError::invalid(format!("no merged channel {index}")))
     }
 
     pub(crate) fn read(r: &mut Reader<'_>, header: &Header) -> Result<Self> {

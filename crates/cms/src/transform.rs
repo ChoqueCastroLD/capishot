@@ -326,12 +326,7 @@ impl Transform {
                 let s0 = s1 * c.grid[1];
                 for (sp, dp) in s.chunks_exact(ss).zip(d.chunks_exact_mut(ds)) {
                     let (a, b, cc) = (g0[sp[0] as usize], g1[sp[1] as usize], g2[sp[2] as usize]);
-                    c.tetra_pub(
-                        (a.0 + b.0 + cc.0) as usize,
-                        [s0, s1, c.outputs],
-                        [a.1, b.1, cc.1],
-                        &mut mid,
-                    );
+                    c.tetra_pub((a.0 + b.0 + cc.0) as usize, [s0, s1, c.outputs], [a.1, b.1, cc.1], &mut mid);
                     self.finish(&mid, &mut out);
                     for k in 0..self.outputs {
                         dp[k] = q(out[k]);
@@ -434,18 +429,18 @@ impl Transform {
         let run = |(s, d): (&[u8], &mut [u8])| match sample {
             SampleKind::U8 => self.run_u8(s, src_stride, d, dst_stride, extra),
             SampleKind::U16 => {
-                let a: Vec<u16> = s.chunks_exact(2).map(|b| u16::from_ne_bytes([b[0], b[1]])).collect();
-                let mut o: Vec<u16> = d.chunks_exact(2).map(|b| u16::from_ne_bytes([b[0], b[1]])).collect();
+                let a: Vec<u16> = s.as_chunks::<2>().0.iter().map(|b| u16::from_ne_bytes([b[0], b[1]])).collect();
+                let mut o: Vec<u16> = d.as_chunks::<2>().0.iter().map(|b| u16::from_ne_bytes([b[0], b[1]])).collect();
                 self.run_u16(&a, src_stride, &mut o, dst_stride, extra);
-                for (b, v) in d.chunks_exact_mut(2).zip(o) {
+                for (b, v) in d.as_chunks_mut::<2>().0.iter_mut().zip(o) {
                     b.copy_from_slice(&v.to_ne_bytes());
                 }
             }
             SampleKind::F32 => {
-                let a: Vec<f32> = s.chunks_exact(4).map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])).collect();
-                let mut o: Vec<f32> = d.chunks_exact(4).map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])).collect();
+                let a: Vec<f32> = s.as_chunks::<4>().0.iter().map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])).collect();
+                let mut o: Vec<f32> = d.as_chunks::<4>().0.iter().map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])).collect();
                 self.run_f32(&a, src_stride, &mut o, dst_stride, extra);
-                for (b, v) in d.chunks_exact_mut(4).zip(o) {
+                for (b, v) in d.as_chunks_mut::<4>().0.iter_mut().zip(o) {
                     b.copy_from_slice(&v.to_ne_bytes());
                 }
             }
@@ -566,12 +561,7 @@ pub(crate) fn link_stages(src: &Profile, dst: &Profile, intent: Intent, bpc: boo
             if s_pcs == Pcs::Lab {
                 stages.push(Stage::LabToXyz);
             }
-            stages.push(Stage::Matrix {
-                rows: 3,
-                cols: 3,
-                m: vec![scale[0], 0.0, 0.0, 0.0, scale[1], 0.0, 0.0, 0.0, scale[2]],
-                offset: offset.to_vec(),
-            });
+            stages.push(Stage::Matrix { rows: 3, cols: 3, m: vec![scale[0], 0.0, 0.0, 0.0, scale[1], 0.0, 0.0, 0.0, scale[2]], offset: offset.to_vec() });
             if d_pcs == Pcs::Lab {
                 stages.push(Stage::XyzToLab);
             }

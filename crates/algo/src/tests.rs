@@ -127,7 +127,7 @@ fn blur_preserves_flat_colour_and_mass() {
     for p in [FilterParams::GaussianBlur { radius: 2.0 }, FilterParams::BoxBlur { radius: 3.0 }] {
         let out = run(&small, &p);
         let big = Rect::new(-10, -10, 40, 40);
-        let sum: f32 = out.read_region(big).chunks_exact(4).map(|px| px[3]).sum();
+        let sum: f32 = out.read_region(big).as_chunks::<4>().0.iter().map(|px| px[3]).sum();
         assert!((sum - 100.0).abs() < 0.01, "{}: {sum}", p.label());
         // No colour bleeding from transparent pixels.
         let edge = out.pixel(9, 15);
@@ -176,7 +176,7 @@ fn unsharp_threshold_and_contrast() {
     let sharp = run(&s, &FilterParams::UnsharpMask { amount: 200.0, radius: 2.0, threshold: 0.0 });
     let var = |surf: &Surface| {
         let v = surf.read_region(Rect::new(5, 5, 35, 25));
-        let reds: Vec<f32> = v.chunks_exact(4).map(|p| p[0]).collect();
+        let reds: Vec<f32> = v.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
         let m = reds.iter().sum::<f32>() / reds.len() as f32;
         reds.iter().map(|r| (r - m).powi(2)).sum::<f32>()
     };
@@ -198,7 +198,7 @@ fn noise_is_deterministic_monochrome_and_centred() {
     assert_eq!(a, run(&s, &p));
     let v = a.read_region(R);
     let mut mean = 0.0;
-    for px in v.chunks_exact(4) {
+    for px in v.as_chunks::<4>().0 {
         assert_eq!(px[0], px[1]);
         assert_eq!(px[1], px[2]);
         assert!((px[0] - 0.5).abs() <= 0.25 + 1e-6);
@@ -240,35 +240,15 @@ fn maximum_roundness_grows_a_point_into_a_disc() {
         let mut s = flat(depth, R, [0.0, 0.0, 0.0, 1.0]);
         s.write_pixel(20, 15, &[1.0, 1.0, 1.0, 1.0]);
         for radius in [1.0f32, 2.0, 3.5, 6.0] {
-            let round = run(
-                &s,
-                &FilterParams::Maximum {
-                    radius,
-                    preserve: Preserve::Roundness,
-                },
-            );
-            let square = run(
-                &s,
-                &FilterParams::Maximum {
-                    radius,
-                    preserve: Preserve::Squareness,
-                },
-            );
+            let round = run(&s, &FilterParams::Maximum { radius, preserve: Preserve::Roundness });
+            let square = run(&s, &FilterParams::Maximum { radius, preserve: Preserve::Squareness });
             let rs = radius.round() as i32;
             for y in R.y0..R.y1 {
                 for x in R.x0..R.x1 {
                     let (dx, dy) = (x - 20, y - 15);
                     let in_disc = (dx * dx + dy * dy) as f32 <= radius * radius;
-                    assert_eq!(
-                        round.pixel(x, y)[0] > 0.5,
-                        in_disc,
-                        "{depth:?} r {radius} at {dx},{dy}"
-                    );
-                    assert_eq!(
-                        square.pixel(x, y)[0] > 0.5,
-                        dx.abs() <= rs && dy.abs() <= rs,
-                        "{depth:?} r {radius} at {dx},{dy}"
-                    );
+                    assert_eq!(round.pixel(x, y)[0] > 0.5, in_disc, "{depth:?} r {radius} at {dx},{dy}");
+                    assert_eq!(square.pixel(x, y)[0] > 0.5, dx.abs() <= rs && dy.abs() <= rs, "{depth:?} r {radius} at {dx},{dy}");
                 }
             }
         }
@@ -276,13 +256,7 @@ fn maximum_roundness_grows_a_point_into_a_disc() {
     // Radius 1: the four neighbours, not the diagonals (a 3×3 square would take them).
     let mut s = flat(SampleType::U8, R, [0.0, 0.0, 0.0, 1.0]);
     s.write_pixel(20, 15, &[1.0, 1.0, 1.0, 1.0]);
-    let r1 = run(
-        &s,
-        &FilterParams::Maximum {
-            radius: 1.0,
-            preserve: Preserve::Roundness,
-        },
-    );
+    let r1 = run(&s, &FilterParams::Maximum { radius: 1.0, preserve: Preserve::Roundness });
     assert_eq!(r1.pixel(21, 15)[0], 1.0);
     assert_eq!(r1.pixel(21, 16)[0], 0.0);
 }
@@ -292,23 +266,14 @@ fn minimum_maximum_roundness_match_brute_force() {
     // Exhaustive disc search on a textured image, both operators, a few radii (incl. fractional).
     let s = pattern(SampleType::F32, R);
     let img = s.read_region(R);
-    let at = |x: i32, y: i32, c: usize| -> Option<f32> {
-        R.contains(x, y)
-            .then(|| img[((y * 40 + x) * 4) as usize + c])
-    };
+    let at = |x: i32, y: i32, c: usize| -> Option<f32> { R.contains(x, y).then(|| img[((y * 40 + x) * 4) as usize + c]) };
     for radius in [1.0f32, 1.5, 2.9, 4.0] {
         let ri = radius.floor() as i32;
         for max in [false, true] {
             let p = if max {
-                FilterParams::Maximum {
-                    radius,
-                    preserve: Preserve::Roundness,
-                }
+                FilterParams::Maximum { radius, preserve: Preserve::Roundness }
             } else {
-                FilterParams::Minimum {
-                    radius,
-                    preserve: Preserve::Roundness,
-                }
+                FilterParams::Minimum { radius, preserve: Preserve::Roundness }
             };
             let got = run(&s, &p);
             for y in R.y0 + ri..R.y1 - ri {
@@ -324,10 +289,7 @@ fn minimum_maximum_roundness_match_brute_force() {
                                 }
                             }
                         }
-                        assert!(
-                            (got.pixel(x, y)[c] - want).abs() < 1e-6,
-                            "r {radius} max {max} at {x},{y} c{c}"
-                        );
+                        assert!((got.pixel(x, y)[c] - want).abs() < 1e-6, "r {radius} max {max} at {x},{y} c{c}");
                     }
                 }
             }
@@ -342,16 +304,8 @@ fn running_extreme_windows() {
     for k in 1..=v.len() {
         for max in [false, true] {
             crate::other::running_extreme(&v, k, max, &mut out);
-            let want: Vec<f32> = v
-                .windows(k)
-                .map(|w| {
-                    w.iter()
-                        .copied()
-                        .fold(if max { f32::MIN } else { f32::MAX }, |a, b| {
-                            if max { a.max(b) } else { a.min(b) }
-                        })
-                })
-                .collect();
+            let want: Vec<f32> =
+                v.windows(k).map(|w| w.iter().copied().fold(if max { f32::MIN } else { f32::MAX }, |a, b| if max { a.max(b) } else { a.min(b) })).collect();
             assert_eq!(out, want, "k {k} max {max}");
         }
     }
@@ -360,22 +314,9 @@ fn running_extreme_windows() {
 #[test]
 fn minimum_maximum_old_params_default_to_squareness() {
     let p: FilterParams = serde_json::from_str(r#"{"filter":"minimum","radius":3}"#).unwrap();
-    assert_eq!(
-        p,
-        FilterParams::Minimum {
-            radius: 3.0,
-            preserve: Preserve::Squareness
-        }
-    );
-    let p: FilterParams =
-        serde_json::from_str(r#"{"filter":"maximum","radius":2,"preserve":"roundness"}"#).unwrap();
-    assert_eq!(
-        p,
-        FilterParams::Maximum {
-            radius: 2.0,
-            preserve: Preserve::Roundness
-        }
-    );
+    assert_eq!(p, FilterParams::Minimum { radius: 3.0, preserve: Preserve::Squareness });
+    let p: FilterParams = serde_json::from_str(r#"{"filter":"maximum","radius":2,"preserve":"roundness"}"#).unwrap();
+    assert_eq!(p, FilterParams::Maximum { radius: 2.0, preserve: Preserve::Roundness });
 }
 
 #[test]
@@ -475,7 +416,12 @@ fn other_colour_modes_work() {
         let mut s = Surface::new(f);
         let px: Vec<f32> = vec![0.4; f.channels() - 1].into_iter().chain([1.0]).collect();
         s.fill_rect(R, &px);
-        for p in [FilterParams::GaussianBlur { radius: 1.0 }, FilterParams::Desaturate, FilterParams::Emboss { angle: 0.0, height: 1.0, amount: 100.0 }, FilterParams::Twirl { angle: 50.0 }] {
+        for p in [
+            FilterParams::GaussianBlur { radius: 1.0 },
+            FilterParams::Desaturate,
+            FilterParams::Emboss { angle: 0.0, height: 1.0, amount: 100.0 },
+            FilterParams::Twirl { angle: 50.0 },
+        ] {
             let out = run(&s, &p);
             assert_eq!(out.format(), f);
         }

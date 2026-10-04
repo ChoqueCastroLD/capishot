@@ -22,12 +22,12 @@
 //! The model is plausible for coated offset, not a measured characterisation: use a real
 //! profile from your print provider for production print.
 
+use crate::Intent;
 use crate::clut::Clut;
 use crate::curve::Curve;
 use crate::math;
 use crate::pipeline::Stage;
 use crate::profile::{ColorSpace, Lut, LutKind, Pcs, Profile, ProfileClass};
-use crate::Intent;
 
 pub const DESCRIPTION: &str = "Photocraft Coated CMYK (synthetic, 300% TAC, medium GCR)";
 
@@ -84,14 +84,14 @@ impl CmykModel {
         // ISO 12647-2 (coated, paper type 1/2) Lab aims, D50/2°; CMY overprint estimated.
         let w = lab(95.0, 0.0, -2.0);
         let base: [[f64; 3]; 8] = [
-            w,                        // paper
-            lab(55.0, -37.0, -50.0),  // C
-            lab(48.0, 74.0, -3.0),    // M
-            lab(24.0, 22.0, -46.0),   // C+M (blue)
-            lab(89.0, -5.0, 93.0),    // Y
-            lab(50.0, -65.0, 27.0),   // C+Y (green)
-            lab(47.0, 68.0, 48.0),    // M+Y (red)
-            lab(23.0, 0.0, 0.0),      // C+M+Y
+            w,                       // paper
+            lab(55.0, -37.0, -50.0), // C
+            lab(48.0, 74.0, -3.0),   // M
+            lab(24.0, 22.0, -46.0),  // C+M (blue)
+            lab(89.0, -5.0, 93.0),   // Y
+            lab(50.0, -65.0, 27.0),  // C+Y (green)
+            lab(47.0, 68.0, 48.0),   // M+Y (red)
+            lab(23.0, 0.0, 0.0),     // C+M+Y
         ];
         let k = lab(16.0, 0.0, 0.0);
         // Overprints with black: multiplicative in reflectance above a first-surface floor.

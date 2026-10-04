@@ -6,9 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parley::FontContext;
-use parley::fontique::{
-    Blob, Collection, CollectionOptions, FontStyle, GenericFamily, SourceCache,
-};
+use parley::fontique::{Blob, Collection, CollectionOptions, FontStyle, GenericFamily, SourceCache};
 use skrifa::raw::FileRef;
 use skrifa::{MetadataProvider, string::StringId};
 
@@ -19,22 +17,10 @@ pub const MONO_FAMILY: &str = "JetBrains Mono";
 
 /// Fonts shipped with Photocraft (OFL; licences in `assets/fonts`).
 pub const BUNDLED: &[(&str, &[u8])] = &[
-    (
-        "Inter-Regular.ttf",
-        include_bytes!("../../../assets/fonts/Inter-Regular.ttf"),
-    ),
-    (
-        "Inter-Medium.ttf",
-        include_bytes!("../../../assets/fonts/Inter-Medium.ttf"),
-    ),
-    (
-        "Inter-SemiBold.ttf",
-        include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf"),
-    ),
-    (
-        "JetBrainsMono-Regular.ttf",
-        include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf"),
-    ),
+    ("Inter-Regular.ttf", include_bytes!("../../../assets/fonts/Inter-Regular.ttf")),
+    ("Inter-Medium.ttf", include_bytes!("../../../assets/fonts/Inter-Medium.ttf")),
+    ("Inter-SemiBold.ttf", include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf")),
+    ("JetBrainsMono-Regular.ttf", include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf")),
 ];
 
 /// Families tried (if installed) after the requested one, for missing glyphs.
@@ -93,15 +79,9 @@ impl Default for FontDb {
 impl FontDb {
     /// Bundled fonts only (deterministic: used by tests and the web build).
     pub fn new() -> Self {
-        let collection = Collection::new(CollectionOptions {
-            shared: false,
-            system_fonts: false,
-        });
+        let collection = Collection::new(CollectionOptions { shared: false, system_fonts: false });
         let mut db = FontDb {
-            fcx: FontContext {
-                collection,
-                source_cache: SourceCache::default(),
-            },
+            fcx: FontContext { collection, source_cache: SourceCache::default() },
             system_loaded: false,
             ps_cache: HashMap::new(),
             fallbacks: Vec::new(),
@@ -144,10 +124,7 @@ impl FontDb {
 
     /// Registers font data (TTF/OTF, or every face of a TTC/OTC). Returns the family names added.
     pub fn register_font_data(&mut self, bytes: Vec<u8>) -> Vec<String> {
-        let added = self
-            .fcx
-            .collection
-            .register_fonts(Blob::new(Arc::new(bytes)), None);
+        let added = self.fcx.collection.register_fonts(Blob::new(Arc::new(bytes)), None);
         let mut names = Vec::new();
         for (id, _) in added {
             if let Some(n) = self.fcx.collection.family_name(id)
@@ -164,12 +141,7 @@ impl FontDb {
     fn refresh_generics(&mut self) {
         let c = &mut self.fcx.collection;
         if let Some(inter) = c.family_id(DEFAULT_FAMILY) {
-            for g in [
-                GenericFamily::SansSerif,
-                GenericFamily::Serif,
-                GenericFamily::SystemUi,
-                GenericFamily::UiSansSerif,
-            ] {
+            for g in [GenericFamily::SansSerif, GenericFamily::Serif, GenericFamily::SystemUi, GenericFamily::UiSansSerif] {
                 if c.generic_families(g).next().is_none() {
                     c.set_generic_families(g, std::iter::once(inter));
                 }
@@ -182,11 +154,7 @@ impl FontDb {
                 }
             }
         }
-        self.fallbacks = FALLBACK_CANDIDATES
-            .iter()
-            .filter(|f| c.family_id(f).is_some())
-            .map(|s| s.to_string())
-            .collect();
+        self.fallbacks = FALLBACK_CANDIDATES.iter().filter(|f| c.family_id(f).is_some()).map(|s| s.to_string()).collect();
     }
 
     /// Families available after the requested one (bundled default + installed coverage fonts).
@@ -196,12 +164,7 @@ impl FontDb {
 
     /// All family names, sorted.
     pub fn families(&mut self) -> Vec<String> {
-        let mut v: Vec<String> = self
-            .fcx
-            .collection
-            .family_names()
-            .map(str::to_string)
-            .collect();
+        let mut v: Vec<String> = self.fcx.collection.family_names().map(str::to_string).collect();
         v.sort_by_key(|s| s.to_lowercase());
         v.dedup();
         v
@@ -222,11 +185,7 @@ impl FontDb {
                 family: info.name().to_string(),
                 weight: f.weight().value(),
                 italic: !matches!(f.style(), FontStyle::Normal),
-                axes: f
-                    .axes()
-                    .iter()
-                    .map(|a| (a.tag.to_string(), a.min, a.default, a.max))
-                    .collect(),
+                axes: f.axes().iter().map(|a| (a.tag.to_string(), a.min, a.default, a.max)).collect(),
             })
             .collect()
     }
@@ -243,10 +202,7 @@ impl FontDb {
             // Keep the guessed family only if we have it; otherwise let fallback pick.
             let mut g = guess.clone();
             if !self.has_family(&g.family)
-                && let Some(f) = self.families().into_iter().find(|f| {
-                    f.replace(' ', "")
-                        .eq_ignore_ascii_case(&g.family.replace(' ', ""))
-                })
+                && let Some(f) = self.families().into_iter().find(|f| f.replace(' ', "").eq_ignore_ascii_case(&g.family.replace(' ', "")))
             {
                 g.family = f;
             }
@@ -257,16 +213,8 @@ impl FontDb {
     }
 
     fn find_exact(&mut self, ps: &str, family_guess: &str) -> Option<ResolvedFont> {
-        let first_word = family_guess
-            .split(' ')
-            .next()
-            .unwrap_or(family_guess)
-            .to_lowercase();
-        let candidates: Vec<String> = self
-            .families()
-            .into_iter()
-            .filter(|f| f.to_lowercase().replace(' ', "").starts_with(&first_word))
-            .collect();
+        let first_word = family_guess.split(' ').next().unwrap_or(family_guess).to_lowercase();
+        let candidates: Vec<String> = self.families().into_iter().filter(|f| f.to_lowercase().replace(' ', "").starts_with(&first_word)).collect();
         for fam in candidates {
             let Some(info) = self.fcx.collection.family_by_name(&fam) else {
                 continue;
@@ -278,10 +226,7 @@ impl FontDb {
                 let Ok(fr) = skrifa::FontRef::from_index(blob.as_ref(), font.index()) else {
                     continue;
                 };
-                let name = fr
-                    .localized_strings(StringId::POSTSCRIPT_NAME)
-                    .english_or_first()
-                    .map(|s| s.to_string());
+                let name = fr.localized_strings(StringId::POSTSCRIPT_NAME).english_or_first().map(|s| s.to_string());
                 if name.as_deref() == Some(ps) {
                     return Some(ResolvedFont {
                         family: info.name().to_string(),
@@ -308,11 +253,7 @@ pub fn face_count(bytes: &[u8]) -> usize {
 /// Heuristic PostScript-name split: `MyriadPro-BoldIt` → ("Myriad Pro", 700, italic).
 pub fn guess_from_postscript(ps: &str) -> ResolvedFont {
     let (fam, style) = ps.split_once('-').unwrap_or((ps, ""));
-    let fam = fam
-        .trim_end_matches("MT")
-        .trim_end_matches("PS")
-        .trim_end_matches("Std")
-        .trim_end_matches("Pro");
+    let fam = fam.trim_end_matches("MT").trim_end_matches("PS").trim_end_matches("Std").trim_end_matches("Pro");
     let pro = ps.split_once('-').map_or(ps, |p| p.0);
     let suffix = if pro.ends_with("Pro") {
         " Pro"
@@ -325,12 +266,7 @@ pub fn guess_from_postscript(ps: &str) -> ResolvedFont {
     let mut family = String::new();
     let chars: Vec<char> = fam.chars().collect();
     for (i, &c) in chars.iter().enumerate() {
-        if i > 0
-            && c.is_uppercase()
-            && (chars[i - 1].is_lowercase()
-                || chars.get(i + 1).is_some_and(|n| n.is_lowercase())
-                    && chars[i - 1].is_uppercase())
-        {
+        if i > 0 && c.is_uppercase() && (chars[i - 1].is_lowercase() || chars.get(i + 1).is_some_and(|n| n.is_lowercase()) && chars[i - 1].is_uppercase()) {
             family.push(' ');
         }
         family.push(c);
@@ -357,12 +293,7 @@ pub fn guess_from_postscript(ps: &str) -> ResolvedFont {
         400
     };
     let italic = s.contains("italic") || s.ends_with("it") || s.contains("oblique");
-    ResolvedFont {
-        family: family.trim().to_string(),
-        weight,
-        italic,
-        exact: false,
-    }
+    ResolvedFont { family: family.trim().to_string(), weight, italic, exact: false }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -376,12 +307,7 @@ fn collect_font_files(dir: &std::path::Path, depth: u32, out: &mut Vec<std::path
             if depth < 8 {
                 collect_font_files(&p, depth + 1, out);
             }
-        } else if p.extension().and_then(|x| x.to_str()).is_some_and(|x| {
-            matches!(
-                x.to_ascii_lowercase().as_str(),
-                "ttf" | "otf" | "ttc" | "otc"
-            )
-        }) {
+        } else if p.extension().and_then(|x| x.to_str()).is_some_and(|x| matches!(x.to_ascii_lowercase().as_str(), "ttf" | "otf" | "ttc" | "otc")) {
             out.push(p);
         }
     }
@@ -399,8 +325,7 @@ fn system_font_dirs() -> Vec<std::path::PathBuf> {
             v.push(h.join("Library/Fonts"));
         }
     } else if cfg!(target_os = "windows") {
-        let windir =
-            std::env::var_os("WINDIR").map_or_else(|| PathBuf::from("C:\\Windows"), PathBuf::from);
+        let windir = std::env::var_os("WINDIR").map_or_else(|| PathBuf::from("C:\\Windows"), PathBuf::from);
         v.push(windir.join("Fonts"));
         if let Some(l) = std::env::var_os("LOCALAPPDATA") {
             v.push(PathBuf::from(l).join("Microsoft\\Windows\\Fonts"));

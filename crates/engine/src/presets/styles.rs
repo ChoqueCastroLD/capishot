@@ -39,7 +39,10 @@ impl Named for StylePreset {
 impl StylePreset {
     /// From `[[kind, params], …]` in `layer.layerStyle.<kind>` form.
     fn from_spec(name: &str, fx: Value, fill: Option<f32>) -> Self {
-        let effects = fx.as_array().map(|a| a.iter().filter_map(|e| effect_from_params(e.get(0)?.as_str()?, e.get(1).unwrap_or(&Value::Null))).collect()).unwrap_or_default();
+        let effects = fx
+            .as_array()
+            .map(|a| a.iter().filter_map(|e| effect_from_params(e.get(0)?.as_str()?, e.get(1).unwrap_or(&Value::Null))).collect())
+            .unwrap_or_default();
         StylePreset { name: name.into(), effects, blend: None, fill_opacity: fill }
     }
 
@@ -73,24 +76,68 @@ pub fn builtin() -> Vec<Group<StylePreset>> {
         Group::new(
             "Text Effects",
             vec![
-                s("Neon Blue", json!([["colorOverlay", {"color": "#d8f4ff"}], ["innerGlow", {"color": "#3fb6ff", "size": 6, "opacity": 90, "blend": "normal"}], ["outerGlow", {"color": "#1e90ff", "size": 22, "opacity": 90}]]), None),
-                s("Neon Pink", json!([["colorOverlay", {"color": "#ffe1f3"}], ["innerGlow", {"color": "#ff4fb4", "size": 6, "opacity": 90, "blend": "normal"}], ["outerGlow", {"color": "#ff2d95", "size": 22, "opacity": 90}]]), None),
-                s("Chrome", json!([["gradientOverlay", {"from": "#3a3f47", "to": "#f4f6f8", "angle": 90}], ["bevelEmboss", {"style": "inner", "size": 6, "depth": 250, "soften": 1}], ["stroke", {"size": 1, "color": "#2a2d33", "position": "outside"}]]), None),
-                s("Gold", json!([["gradientOverlay", {"from": "#8a5a12", "to": "#ffe08a", "angle": 90}], ["bevelEmboss", {"style": "inner", "size": 5, "depth": 180}], ["dropShadow", {"distance": 3, "size": 5, "opacity": 50}]]), None),
-                s("Comic Outline", json!([["colorOverlay", {"color": "#ffd23f"}], ["stroke", {"size": 4, "color": "#111111", "position": "outside"}], ["dropShadow", {"distance": 6, "size": 0, "opacity": 100, "angle": 135}]]), None),
-                s("Letterpress", json!([["colorOverlay", {"color": "#5b6168"}], ["innerShadow", {"distance": 2, "size": 2, "opacity": 70}], ["dropShadow", {"distance": 1, "size": 0, "color": "#ffffff", "opacity": 60, "blend": "screen", "angle": 90}]]), None),
+                s(
+                    "Neon Blue",
+                    json!([["colorOverlay", {"color": "#d8f4ff"}], ["innerGlow", {"color": "#3fb6ff", "size": 6, "opacity": 90, "blend": "normal"}], ["outerGlow", {"color": "#1e90ff", "size": 22, "opacity": 90}]]),
+                    None,
+                ),
+                s(
+                    "Neon Pink",
+                    json!([["colorOverlay", {"color": "#ffe1f3"}], ["innerGlow", {"color": "#ff4fb4", "size": 6, "opacity": 90, "blend": "normal"}], ["outerGlow", {"color": "#ff2d95", "size": 22, "opacity": 90}]]),
+                    None,
+                ),
+                s(
+                    "Chrome",
+                    json!([["gradientOverlay", {"from": "#3a3f47", "to": "#f4f6f8", "angle": 90}], ["bevelEmboss", {"style": "inner", "size": 6, "depth": 250, "soften": 1}], ["stroke", {"size": 1, "color": "#2a2d33", "position": "outside"}]]),
+                    None,
+                ),
+                s(
+                    "Gold",
+                    json!([["gradientOverlay", {"from": "#8a5a12", "to": "#ffe08a", "angle": 90}], ["bevelEmboss", {"style": "inner", "size": 5, "depth": 180}], ["dropShadow", {"distance": 3, "size": 5, "opacity": 50}]]),
+                    None,
+                ),
+                s(
+                    "Comic Outline",
+                    json!([["colorOverlay", {"color": "#ffd23f"}], ["stroke", {"size": 4, "color": "#111111", "position": "outside"}], ["dropShadow", {"distance": 6, "size": 0, "opacity": 100, "angle": 135}]]),
+                    None,
+                ),
+                s(
+                    "Letterpress",
+                    json!([["colorOverlay", {"color": "#5b6168"}], ["innerShadow", {"distance": 2, "size": 2, "opacity": 70}], ["dropShadow", {"distance": 1, "size": 0, "color": "#ffffff", "opacity": 60, "blend": "screen", "angle": 90}]]),
+                    None,
+                ),
                 s("Hollow", json!([["stroke", {"size": 2, "color": "#222222", "position": "inside"}]]), Some(0.0)),
             ],
         ),
         Group::new(
             "Buttons",
             vec![
-                s("Glass", json!([["gradientOverlay", {"from": "#2b6cb0", "to": "#90cdf4", "angle": 90}], ["innerGlow", {"color": "#ffffff", "size": 6, "opacity": 45, "blend": "screen"}], ["bevelEmboss", {"style": "inner", "size": 8, "depth": 100, "soften": 4}], ["dropShadow", {"distance": 3, "size": 8, "opacity": 40}]]), None),
-                s("Gel Green", json!([["gradientOverlay", {"from": "#1f7a3a", "to": "#7be495", "angle": 90}], ["innerShadow", {"distance": 2, "size": 5, "opacity": 35}], ["bevelEmboss", {"style": "inner", "size": 10, "depth": 150, "soften": 6}]]), None),
-                s("Pressed", json!([["colorOverlay", {"color": "#d7dbe0"}], ["innerShadow", {"distance": 3, "size": 6, "opacity": 60}], ["stroke", {"size": 1, "color": "#9aa1a9", "position": "inside"}]]), None),
-                s("Pill Red", json!([["gradientOverlay", {"from": "#9b1c1c", "to": "#f87171", "angle": 90}], ["bevelEmboss", {"style": "pillow", "size": 6, "depth": 120}], ["dropShadow", {"distance": 2, "size": 4, "opacity": 45}]]), None),
+                s(
+                    "Glass",
+                    json!([["gradientOverlay", {"from": "#2b6cb0", "to": "#90cdf4", "angle": 90}], ["innerGlow", {"color": "#ffffff", "size": 6, "opacity": 45, "blend": "screen"}], ["bevelEmboss", {"style": "inner", "size": 8, "depth": 100, "soften": 4}], ["dropShadow", {"distance": 3, "size": 8, "opacity": 40}]]),
+                    None,
+                ),
+                s(
+                    "Gel Green",
+                    json!([["gradientOverlay", {"from": "#1f7a3a", "to": "#7be495", "angle": 90}], ["innerShadow", {"distance": 2, "size": 5, "opacity": 35}], ["bevelEmboss", {"style": "inner", "size": 10, "depth": 150, "soften": 6}]]),
+                    None,
+                ),
+                s(
+                    "Pressed",
+                    json!([["colorOverlay", {"color": "#d7dbe0"}], ["innerShadow", {"distance": 3, "size": 6, "opacity": 60}], ["stroke", {"size": 1, "color": "#9aa1a9", "position": "inside"}]]),
+                    None,
+                ),
+                s(
+                    "Pill Red",
+                    json!([["gradientOverlay", {"from": "#9b1c1c", "to": "#f87171", "angle": 90}], ["bevelEmboss", {"style": "pillow", "size": 6, "depth": 120}], ["dropShadow", {"distance": 2, "size": 4, "opacity": 45}]]),
+                    None,
+                ),
                 s("Flat Shadow", json!([["colorOverlay", {"color": "#3b82f6"}], ["dropShadow", {"distance": 5, "size": 0, "opacity": 35, "angle": 90}]]), None),
-                s("Satin Plum", json!([["colorOverlay", {"color": "#7e3a8c"}], ["satin", {"color": "#1b0420", "opacity": 55, "size": 18, "distance": 14}], ["bevelEmboss", {"style": "inner", "size": 4, "depth": 80}]]), None),
+                s(
+                    "Satin Plum",
+                    json!([["colorOverlay", {"color": "#7e3a8c"}], ["satin", {"color": "#1b0420", "opacity": 55, "size": 18, "distance": 14}], ["bevelEmboss", {"style": "inner", "size": 4, "depth": 80}]]),
+                    None,
+                ),
             ],
         ),
     ]
@@ -103,7 +150,8 @@ fn find_style<'a>(s: &'a Session, p: &Value, cmd: &str) -> Result<&'a StylePrese
 }
 
 fn list(s: &mut Session, _: &Value) -> Result<Value> {
-    let groups: Vec<Value> = s.presets.styles.iter().map(|g| json!({"name": g.name, "presets": g.items.iter().map(StylePreset::to_json).collect::<Vec<_>>()})).collect();
+    let groups: Vec<Value> =
+        s.presets.styles.iter().map(|g| json!({"name": g.name, "presets": g.items.iter().map(StylePreset::to_json).collect::<Vec<_>>()})).collect();
     Ok(json!({"groups": groups}))
 }
 
@@ -261,7 +309,16 @@ pub fn thumbnail(s: &Session, style: &StylePreset, size: u32) -> Vec<u8> {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec { id: "style.presets.list", label: "Style Presets", menu: &[], shortcut: None, params: "{} → {groups:[{name,presets:[{name,effects,blend,fillOpacity}]}]}", enabled: always, run: list, journal: false },
+        CommandSpec {
+            id: "style.presets.list",
+            label: "Style Presets",
+            menu: &[],
+            shortcut: None,
+            params: "{} → {groups:[{name,presets:[{name,effects,blend,fillOpacity}]}]}",
+            enabled: always,
+            run: list,
+            journal: false,
+        },
         CommandSpec {
             id: "style.presets.apply",
             label: "Apply Style",
@@ -272,8 +329,35 @@ pub fn specs() -> Vec<CommandSpec> {
             run: apply,
             journal: true,
         },
-        CommandSpec { id: "style.presets.new", label: "New Style…", menu: &[], shortcut: None, params: r##"{"name":str="Style","group":name?,"layer":id?,"includeEffects":bool=true,"includeBlending":bool=true} (from the layer's effects)"##, enabled: has_layer, run: new_preset, journal: true },
-        CommandSpec { id: "style.presets.edit", label: "Edit Style Presets", menu: &[], shortcut: None, params: super::GROUP_EDIT_PARAMS, enabled: always, run: edit, journal: true },
-        CommandSpec { id: "style.presets.reset", label: "Restore Default Styles", menu: &[], shortcut: None, params: r##"{"append":bool=false}"##, enabled: always, run: reset, journal: true },
+        CommandSpec {
+            id: "style.presets.new",
+            label: "New Style…",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"name":str="Style","group":name?,"layer":id?,"includeEffects":bool=true,"includeBlending":bool=true} (from the layer's effects)"##,
+            enabled: has_layer,
+            run: new_preset,
+            journal: true,
+        },
+        CommandSpec {
+            id: "style.presets.edit",
+            label: "Edit Style Presets",
+            menu: &[],
+            shortcut: None,
+            params: super::GROUP_EDIT_PARAMS,
+            enabled: always,
+            run: edit,
+            journal: true,
+        },
+        CommandSpec {
+            id: "style.presets.reset",
+            label: "Restore Default Styles",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"append":bool=false}"##,
+            enabled: always,
+            run: reset,
+            journal: true,
+        },
     ]
 }

@@ -57,10 +57,7 @@ fn main() -> ExitCode {
 
 /// Workspace root (parent of the xtask crate).
 pub fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("xtask has a parent dir")
-        .to_path_buf()
+    Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("xtask has a parent dir").to_path_buf()
 }
 
 pub fn cargo() -> Command {
@@ -71,26 +68,14 @@ pub fn cargo() -> Command {
 
 fn run(mut cmd: Command, what: &str) -> Result<(), String> {
     eprintln!("$ {what}");
-    let status = cmd
-        .status()
-        .map_err(|e| format!("{what}: failed to spawn: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("{what}: exited with {status}"))
-    }
+    let status = cmd.status().map_err(|e| format!("{what}: failed to spawn: {e}"))?;
+    if status.success() { Ok(()) } else { Err(format!("{what}: exited with {status}")) }
 }
 
 pub fn metadata() -> Result<serde_json::Value, String> {
-    let out = cargo()
-        .args(["metadata", "--format-version", "1", "--no-deps"])
-        .output()
-        .map_err(|e| format!("cargo metadata: {e}"))?;
+    let out = cargo().args(["metadata", "--format-version", "1", "--no-deps"]).output().map_err(|e| format!("cargo metadata: {e}"))?;
     if !out.status.success() {
-        return Err(format!(
-            "cargo metadata failed:\n{}",
-            String::from_utf8_lossy(&out.stderr)
-        ));
+        return Err(format!("cargo metadata failed:\n{}", String::from_utf8_lossy(&out.stderr)));
     }
     serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata: bad JSON: {e}"))
 }
@@ -113,12 +98,7 @@ fn cmd_layers() -> Result<(), String> {
                 format!("{}{k}", layers::short_name(&d.name))
             })
             .collect();
-        println!(
-            "{:<28} {:<14} {}",
-            c.name,
-            layers::describe(layers::classify(&c.name)),
-            ws.join(", ")
-        );
+        println!("{:<28} {:<14} {}", c.name, layers::describe(layers::classify(&c.name)), ws.join(", "));
     }
     let violations = layers::check(&crates);
     println!();
@@ -155,11 +135,7 @@ fn cmd_wasm() -> Result<(), String> {
     for pkg in &set {
         let mut c = cargo();
         c.args(["check", "--target", "wasm32-unknown-unknown", "-p", pkg]);
-        let ok = run(
-            c,
-            &format!("cargo check --target wasm32-unknown-unknown -p {pkg}"),
-        )
-        .is_ok();
+        let ok = run(c, &format!("cargo check --target wasm32-unknown-unknown -p {pkg}")).is_ok();
         results.push((pkg.clone(), ok));
     }
     println!("\nwasm32-unknown-unknown check:");
@@ -167,11 +143,7 @@ fn cmd_wasm() -> Result<(), String> {
         println!("  {:<6} {p}", if *ok { "ok" } else { "FAIL" });
     }
     let failed = results.iter().filter(|r| !r.1).count();
-    if failed == 0 {
-        Ok(())
-    } else {
-        Err(format!("{failed} crate(s) failed the wasm check"))
-    }
+    if failed == 0 { Ok(()) } else { Err(format!("{failed} crate(s) failed the wasm check")) }
 }
 
 fn cmd_parity() -> Result<(), String> {
@@ -195,14 +167,7 @@ fn cmd_ci() -> Result<(), String> {
             "clippy",
             Box::new(|| {
                 let mut c = cargo();
-                c.args([
-                    "clippy",
-                    "--workspace",
-                    "--all-targets",
-                    "--",
-                    "-D",
-                    "warnings",
-                ]);
+                c.args(["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]);
                 run(c, "cargo clippy --workspace --all-targets -- -D warnings")
             }),
         ),
@@ -233,11 +198,7 @@ fn cmd_ci() -> Result<(), String> {
         }
         done.push(*name);
     }
-    println!(
-        "\nCI summary: all {} steps passed ({})",
-        done.len(),
-        done.join(", ")
-    );
+    println!("\nCI summary: all {} steps passed ({})", done.len(), done.join(", "));
     Ok(())
 }
 
@@ -272,17 +233,7 @@ Tests that use a corpus skip cleanly when it is absent.
     tar.arg("-xzf").arg(&tgz).arg("-C").arg(&dest);
     run(tar, "tar -xzf PngSuite-2017jul19.tgz")?;
     let _ = std::fs::remove_file(&tgz);
-    let n = std::fs::read_dir(&dest)
-        .map(|d| {
-            d.flatten()
-                .filter(|e| e.path().extension().is_some_and(|x| x == "png"))
-                .count()
-        })
-        .unwrap_or(0);
+    let n = std::fs::read_dir(&dest).map(|d| d.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "png")).count()).unwrap_or(0);
     println!("PngSuite: {n} PNG files in {}", dest.display());
-    if n == 0 {
-        Err("no PNG files extracted".into())
-    } else {
-        Ok(())
-    }
+    if n == 0 { Err("no PNG files extracted".into()) } else { Ok(()) }
 }

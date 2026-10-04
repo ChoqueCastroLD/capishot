@@ -175,82 +175,21 @@ pub fn caps(format: Format) -> FormatCaps {
         lossy: false,
     };
     match format {
-        Format::Png => FormatCaps {
-            depths: &[S::U8, S::U16],
-            layouts: RGB_GRAY,
-            icc: true,
-            exif: true,
-            xmp: true,
-            dpi: true,
-            text: true,
-            animation: true,
-            ..base
-        },
-        Format::Jpeg => FormatCaps {
-            layouts: &[L::Gray, L::Rgb, L::Cmyk],
-            alpha: false,
-            icc: true,
-            exif: true,
-            xmp: true,
-            dpi: true,
-            lossy: true,
-            ..base
-        },
-        Format::Tiff => FormatCaps {
-            depths: &[S::U8, S::U16, S::F32],
-            layouts: ALL_LAYOUTS,
-            icc: true,
-            xmp: true,
-            dpi: true,
-            text: true,
-            ..base
-        },
-        Format::WebP => FormatCaps {
-            icc: true,
-            exif: true,
-            xmp: true,
-            animation: true,
-            ..base
-        },
-        Format::Gif => FormatCaps {
-            layouts: &[L::Rgba],
-            animation: true,
-            lossy: true,
-            ..base
-        },
+        Format::Png => {
+            FormatCaps { depths: &[S::U8, S::U16], layouts: RGB_GRAY, icc: true, exif: true, xmp: true, dpi: true, text: true, animation: true, ..base }
+        }
+        Format::Jpeg => FormatCaps { layouts: &[L::Gray, L::Rgb, L::Cmyk], alpha: false, icc: true, exif: true, xmp: true, dpi: true, lossy: true, ..base },
+        Format::Tiff => FormatCaps { depths: &[S::U8, S::U16, S::F32], layouts: ALL_LAYOUTS, icc: true, xmp: true, dpi: true, text: true, ..base },
+        Format::WebP => FormatCaps { icc: true, exif: true, xmp: true, animation: true, ..base },
+        Format::Gif => FormatCaps { layouts: &[L::Rgba], animation: true, lossy: true, ..base },
         Format::Bmp => base,
-        Format::Tga => FormatCaps {
-            layouts: RGB_GRAY,
-            ..base
-        },
-        Format::Ico => FormatCaps {
-            layouts: &[L::Rgba],
-            ..base
-        },
-        Format::Pnm => FormatCaps {
-            depths: &[S::U8, S::U16, S::F32],
-            layouts: ALL_LAYOUTS,
-            ..base
-        },
+        Format::Tga => FormatCaps { layouts: RGB_GRAY, ..base },
+        Format::Ico => FormatCaps { layouts: &[L::Rgba], ..base },
+        Format::Pnm => FormatCaps { depths: &[S::U8, S::U16, S::F32], layouts: ALL_LAYOUTS, ..base },
         Format::Qoi => base,
-        Format::OpenExr => FormatCaps {
-            depths: &[S::F16, S::F32],
-            layouts: RGB_GRAY,
-            ..base
-        },
-        Format::Hdr => FormatCaps {
-            depths: &[S::F32],
-            layouts: &[L::Rgb],
-            alpha: false,
-            lossy: true,
-            ..base
-        },
-        Format::Avif => FormatCaps {
-            read: false,
-            write: cfg!(feature = "avif"),
-            lossy: true,
-            ..base
-        },
+        Format::OpenExr => FormatCaps { depths: &[S::F16, S::F32], layouts: RGB_GRAY, ..base },
+        Format::Hdr => FormatCaps { depths: &[S::F32], layouts: &[L::Rgb], alpha: false, lossy: true, ..base },
+        Format::Avif => FormatCaps { read: false, write: cfg!(feature = "avif"), lossy: true, ..base },
     }
 }
 
@@ -264,11 +203,7 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
     if b.starts_with(&[0xFF, 0xD8, 0xFF]) {
         return Some(Format::Jpeg);
     }
-    if b.starts_with(b"II*\0")
-        || b.starts_with(b"MM\0*")
-        || b.starts_with(b"II+\0")
-        || b.starts_with(b"MM\0+")
-    {
+    if b.starts_with(b"II*\0") || b.starts_with(b"MM\0*") || b.starts_with(b"II+\0") || b.starts_with(b"MM\0+") {
         return Some(Format::Tiff);
     }
     if b.len() >= 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" {
@@ -295,11 +230,7 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
     if b.len() >= 6 && b[0..4] == [0, 0, 1, 0] && (b[4] != 0 || b[5] != 0) {
         return Some(Format::Ico);
     }
-    if b.len() >= 3
-        && b[0] == b'P'
-        && matches!(b[1], b'1'..=b'7' | b'F' | b'f')
-        && b[2].is_ascii_whitespace()
-    {
+    if b.len() >= 3 && b[0] == b'P' && matches!(b[1], b'1'..=b'7' | b'F' | b'f') && b[2].is_ascii_whitespace() {
         return Some(Format::Pnm);
     }
     if looks_like_tga(b) {
@@ -312,10 +243,7 @@ fn is_avif_ftyp(b: &[u8]) -> bool {
     let size = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize;
     let end = size.clamp(12, b.len().min(64));
     let brands = &b[8..end];
-    brands
-        .chunks_exact(4)
-        .enumerate()
-        .any(|(i, c)| i != 1 && (c == b"avif" || c == b"avis"))
+    brands.as_chunks::<4>().0.iter().enumerate().any(|(i, c)| i != 1 && (c == b"avif" || c == b"avis"))
 }
 
 fn looks_like_tga(b: &[u8]) -> bool {
@@ -350,12 +278,6 @@ fn looks_like_tga(b: &[u8]) -> bool {
 /// Look up a format by file extension (case-insensitive, with or without a
 /// leading dot, or a full file name/path).
 pub fn from_extension(ext: &str) -> Option<Format> {
-    let ext = ext
-        .rsplit(['.', '/', '\\'])
-        .next()
-        .unwrap_or(ext)
-        .to_ascii_lowercase();
-    Format::ALL
-        .into_iter()
-        .find(|f| f.extensions().contains(&ext.as_str()))
+    let ext = ext.rsplit(['.', '/', '\\']).next().unwrap_or(ext).to_ascii_lowercase();
+    Format::ALL.into_iter().find(|f| f.extensions().contains(&ext.as_str()))
 }

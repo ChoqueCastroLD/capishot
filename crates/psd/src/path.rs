@@ -115,7 +115,9 @@ impl PathData {
             return Err(PsdError::LimitExceeded("path records"));
         }
         let records = data
-            .chunks_exact(RECORD_LEN)
+            .as_chunks::<RECORD_LEN>()
+            .0
+            .iter()
             .map(|c| {
                 let mut d = [0u8; 24];
                 d.copy_from_slice(&c[2..]);
@@ -163,12 +165,7 @@ impl PathData {
                 remaining = remaining.saturating_sub(1);
                 let pt = |i: usize| (fixed_to_f64(r.i32_at(i * 8 + 4)), fixed_to_f64(r.i32_at(i * 8)));
                 if let Some(s) = out.last_mut() {
-                    s.knots.push(PsdKnot {
-                        linked: matches!(r.selector, 1 | 4),
-                        pre: pt(0),
-                        anchor: pt(1),
-                        post: pt(2),
-                    });
+                    s.knots.push(PsdKnot { linked: matches!(r.selector, 1 | 4), pre: pt(0), anchor: pt(1), post: pt(2) });
                 }
             }
         }
@@ -178,10 +175,7 @@ impl PathData {
     /// Builds a record list: a fill rule record, an initial fill record,
     /// then each subpath's length record and knots.
     pub fn from_subpaths(subpaths: &[PsdSubpath], initial_fill: bool) -> Self {
-        let mut records = vec![
-            PathRecord { selector: selector::FILL_RULE, data: [0; 24] },
-            PathRecord { selector: selector::INITIAL_FILL, data: [0; 24] },
-        ];
+        let mut records = vec![PathRecord { selector: selector::FILL_RULE, data: [0; 24] }, PathRecord { selector: selector::INITIAL_FILL, data: [0; 24] }];
         records[1].data[..2].copy_from_slice(&u16::from(initial_fill).to_be_bytes());
         for s in subpaths {
             let mut data = [0u8; 24];
@@ -263,11 +257,7 @@ mod tests {
                     PsdKnot { linked: false, pre: (0.5, 0.75), anchor: (0.5, 0.75), post: (0.5, 0.75) },
                 ],
             },
-            PsdSubpath {
-                closed: false,
-                operation: 2,
-                knots: vec![PsdKnot { linked: false, pre: (-0.5, 1.5), anchor: (0.0, 1.0), post: (0.0625, 0.9375) }],
-            },
+            PsdSubpath { closed: false, operation: 2, knots: vec![PsdKnot { linked: false, pre: (-0.5, 1.5), anchor: (0.0, 1.0), post: (0.0625, 0.9375) }] },
         ]
     }
 

@@ -651,7 +651,14 @@ impl PuppetSolver {
     /// Deforms the mesh: `pin_dst` (one per pin given to [`Self::new`]), optional fixed pin
     /// rotations (degrees), `iterations` local/global rounds, warm-started from `init` when
     /// given. Returns the deformed vertices and the rigid ARAP energy after each round.
-    pub fn solve(&self, pin_dst: &[[f64; 2]], rotations: &[Option<f64>], mode: PuppetMode, iterations: usize, init: Option<&[[f64; 2]]>) -> (Vec<[f64; 2]>, Vec<f64>) {
+    pub fn solve(
+        &self,
+        pin_dst: &[[f64; 2]],
+        rotations: &[Option<f64>],
+        mode: PuppetMode,
+        iterations: usize,
+        init: Option<&[[f64; 2]]>,
+    ) -> (Vec<[f64; 2]>, Vec<f64>) {
         let nv = self.mesh.verts.len();
         let mut v: Vec<[f64; 2]> = match init {
             Some(i) if i.len() == nv => i.to_vec(),
@@ -667,7 +674,16 @@ impl PuppetSolver {
                 .bound
                 .iter()
                 .zip(rotations)
-                .filter_map(|(b, r)| r.map(|deg| ((0..3).fold([0.0, 0.0], |a, k| [a[0] + b.bary[k] * self.mesh.verts[b.verts[k]][0], a[1] + b.bary[k] * self.mesh.verts[b.verts[k]][1]]), deg.to_radians())))
+                .filter_map(|(b, r)| {
+                    r.map(|deg| {
+                        (
+                            (0..3).fold([0.0, 0.0], |a, k| {
+                                [a[0] + b.bary[k] * self.mesh.verts[b.verts[k]][0], a[1] + b.bary[k] * self.mesh.verts[b.verts[k]][1]]
+                            }),
+                            deg.to_radians(),
+                        )
+                    })
+                })
                 .collect();
             let r: Vec<[f64; 4]> = self
                 .mesh
@@ -781,12 +797,14 @@ mod tests {
         let b = s.content_bounds();
         let m = build_mesh(&s, b, PuppetDensity::Normal, 2.0);
         assert!(m.tris.len() > 20);
-        let inside = |p: [f64; 2]| m.tris.iter().any(|t| {
-            let xs = t.map(|i| m.verts[i]);
-            let (x0, x1) = (xs.iter().map(|v| v[0]).fold(f64::MAX, f64::min), xs.iter().map(|v| v[0]).fold(f64::MIN, f64::max));
-            let (y0, y1) = (xs.iter().map(|v| v[1]).fold(f64::MAX, f64::min), xs.iter().map(|v| v[1]).fold(f64::MIN, f64::max));
-            p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1
-        });
+        let inside = |p: [f64; 2]| {
+            m.tris.iter().any(|t| {
+                let xs = t.map(|i| m.verts[i]);
+                let (x0, x1) = (xs.iter().map(|v| v[0]).fold(f64::MAX, f64::min), xs.iter().map(|v| v[0]).fold(f64::MIN, f64::max));
+                let (y0, y1) = (xs.iter().map(|v| v[1]).fold(f64::MAX, f64::min), xs.iter().map(|v| v[1]).fold(f64::MIN, f64::max));
+                p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1
+            })
+        };
         assert!(inside([28.0, 30.0]) && inside([60.0, 62.0]));
         assert!(!inside([60.0, 20.0]), "the empty corner of the L has no mesh");
         let more = build_mesh(&s, b, PuppetDensity::More, 2.0);
@@ -799,7 +817,13 @@ mod tests {
         for st in [SampleType::U8, SampleType::U16, SampleType::F32] {
             let s = blob(st);
             let b = s.content_bounds();
-            for pins in [vec![], vec![PuppetPin { src: [28.0, 20.0], dst: [28.0, 20.0], rotate: None, depth: 0 }, PuppetPin { src: [60.0, 62.0], dst: [60.0, 62.0], rotate: None, depth: 0 }]] {
+            for pins in [
+                vec![],
+                vec![
+                    PuppetPin { src: [28.0, 20.0], dst: [28.0, 20.0], rotate: None, depth: 0 },
+                    PuppetPin { src: [60.0, 62.0], dst: [60.0, 62.0], rotate: None, depth: 0 },
+                ],
+            ] {
                 let w = PuppetWarp { pins, mode: PuppetMode::Normal, density: PuppetDensity::Normal, expansion: 2.0 };
                 let out = puppet_warp(&s, b, &w, Interp::Bicubic);
                 let worst = s.read_region(b).iter().zip(out.read_region(b)).map(|(a, c)| (a - c).abs()).fold(0.0f32, f32::max);
@@ -812,7 +836,12 @@ mod tests {
     fn a_single_pin_translates_rigidly() {
         let s = blob(SampleType::U8);
         let b = s.content_bounds();
-        let w = PuppetWarp { pins: vec![PuppetPin { src: [28.0, 30.0], dst: [38.0, 25.0], rotate: None, depth: 0 }], mode: PuppetMode::Rigid, density: PuppetDensity::Normal, expansion: 2.0 };
+        let w = PuppetWarp {
+            pins: vec![PuppetPin { src: [28.0, 30.0], dst: [38.0, 25.0], rotate: None, depth: 0 }],
+            mode: PuppetMode::Rigid,
+            density: PuppetDensity::Normal,
+            expansion: 2.0,
+        };
         let (solver, v, _) = deform(&s, b, &w, ITERATIONS);
         for (d, x) in v.iter().zip(&solver.mesh.verts) {
             assert!((d[0] - x[0] - 10.0).abs() < 1e-3 && (d[1] - x[1] + 5.0).abs() < 1e-3, "{d:?} {x:?}");

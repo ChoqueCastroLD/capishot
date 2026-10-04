@@ -48,7 +48,13 @@ pub fn builtin() -> Vec<ToolPreset> {
 
 fn list(s: &mut Session, p: &Value) -> Result<Value> {
     let filter = str_param(p, "tool").map(norm);
-    let items: Vec<Value> = s.presets.tool_presets.iter().filter(|t| filter.as_ref().is_none_or(|f| norm(&t.tool) == *f)).map(|t| json!({"name": t.name, "tool": t.tool})).collect();
+    let items: Vec<Value> = s
+        .presets
+        .tool_presets
+        .iter()
+        .filter(|t| filter.as_ref().is_none_or(|f| norm(&t.tool) == *f))
+        .map(|t| json!({"name": t.name, "tool": t.tool}))
+        .collect();
     Ok(json!({"presets": items}))
 }
 
@@ -60,7 +66,23 @@ fn new_preset(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, "`options` must be an object"));
     }
     // Brush-based tools carry the current brush unless the caller sent one.
-    let brushy = ["brush", "pencil", "eraser", "clonestamp", "healing", "spothealing", "historybrush", "blur", "sharpen", "smudge", "dodge", "burn", "sponge", "mixerbrush", "colorreplacement"];
+    let brushy = [
+        "brush",
+        "pencil",
+        "eraser",
+        "clonestamp",
+        "healing",
+        "spothealing",
+        "historybrush",
+        "blur",
+        "sharpen",
+        "smudge",
+        "dodge",
+        "burn",
+        "sponge",
+        "mixerbrush",
+        "colorreplacement",
+    ];
     if options.get("brush").is_none() && brushy.contains(&norm(&tool).as_str()) {
         options["brush"] = serde_json::to_value(&s.tools.brush).unwrap_or(Value::Null);
     }
@@ -78,7 +100,13 @@ fn new_preset(s: &mut Session, p: &Value) -> Result<Value> {
 fn select(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "tool.presets.select";
     let name = req_str(p, "preset", CMD)?;
-    let t = s.presets.tool_presets.iter().find(|t| t.name == name).cloned().ok_or_else(|| bad(CMD, format!("no tool preset \"{name}\" (see tool.presets.list)")))?;
+    let t = s
+        .presets
+        .tool_presets
+        .iter()
+        .find(|t| t.name == name)
+        .cloned()
+        .ok_or_else(|| bad(CMD, format!("no tool preset \"{name}\" (see tool.presets.list)")))?;
     if let Some(b) = t.options.get("brush").filter(|b| b.is_object()) {
         super::call(s, "tools.setBrush", json!({"brush": b}))?;
     }
@@ -111,7 +139,16 @@ fn reset(s: &mut Session, _: &Value) -> Result<Value> {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec { id: "tool.presets.list", label: "Tool Presets", menu: &[], shortcut: None, params: r##"{"tool":name? (Current Tool Only)} → {presets:[{name,tool}]}"##, enabled: always, run: list, journal: false },
+        CommandSpec {
+            id: "tool.presets.list",
+            label: "Tool Presets",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"tool":name? (Current Tool Only)} → {presets:[{name,tool}]}"##,
+            enabled: always,
+            run: list,
+            journal: false,
+        },
         CommandSpec {
             id: "tool.presets.new",
             label: "New Tool Preset…",
@@ -122,8 +159,35 @@ pub fn specs() -> Vec<CommandSpec> {
             run: new_preset,
             journal: true,
         },
-        CommandSpec { id: "tool.presets.select", label: "Select Tool Preset", menu: &[], shortcut: None, params: r##"{"preset":name} → {name,tool,options} (applies "brush" and "foreground"; the shell switches tool and options)"##, enabled: always, run: select, journal: true },
-        CommandSpec { id: "tool.presets.edit", label: "Edit Tool Presets", menu: &[], shortcut: None, params: r##"{"action":"rename|delete","preset":name|[names],"name":str (rename)}"##, enabled: always, run: edit, journal: true },
-        CommandSpec { id: "tool.presets.reset", label: "Reset Tool Presets", menu: &[], shortcut: None, params: "{}", enabled: always, run: reset, journal: true },
+        CommandSpec {
+            id: "tool.presets.select",
+            label: "Select Tool Preset",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"preset":name} → {name,tool,options} (applies "brush" and "foreground"; the shell switches tool and options)"##,
+            enabled: always,
+            run: select,
+            journal: true,
+        },
+        CommandSpec {
+            id: "tool.presets.edit",
+            label: "Edit Tool Presets",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"action":"rename|delete","preset":name|[names],"name":str (rename)}"##,
+            enabled: always,
+            run: edit,
+            journal: true,
+        },
+        CommandSpec {
+            id: "tool.presets.reset",
+            label: "Reset Tool Presets",
+            menu: &[],
+            shortcut: None,
+            params: "{}",
+            enabled: always,
+            run: reset,
+            journal: true,
+        },
     ]
 }

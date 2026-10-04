@@ -44,7 +44,13 @@ pub fn canvas_style(app: &PhotocraftApp) -> crate::gpu_canvas::CanvasStyle {
     let [l, d] = t.colors();
     let f = |c: [u8; 3]| c.map(|v| v as f32 / 255.0);
     let g = prefs::parse_hex(&t.gamut_warning_color).unwrap_or([128; 3]);
-    crate::gpu_canvas::CanvasStyle { checker_square: t.square().unwrap_or(0.0), checker_light: f(l), checker_dark: f(d), gamut_color: f(g), gamut_opacity: t.gamut_warning_opacity as f32 / 100.0 }
+    crate::gpu_canvas::CanvasStyle {
+        checker_square: t.square().unwrap_or(0.0),
+        checker_light: f(l),
+        checker_dark: f(d),
+        gamut_color: f(g),
+        gamut_opacity: t.gamut_warning_opacity as f32 / 100.0,
+    }
 }
 
 /// Pasteboard colour from Preferences › Interface (`None` = the theme's default canvas).
@@ -182,7 +188,13 @@ fn autosave(app: &mut PhotocraftApp) {
         return;
     }
     app.prefs_rt.next_autosave_ms = now + interval;
-    let jobs: Vec<_> = app.session.documents().iter().filter(|d| d.is_dirty() && app.prefs_rt.autosaved.get(&d.doc.id) != Some(&d.revision)).map(|d| (d.doc.clone(), d.revision, d.path.clone())).collect();
+    let jobs: Vec<_> = app
+        .session
+        .documents()
+        .iter()
+        .filter(|d| d.is_dirty() && app.prefs_rt.autosaved.get(&d.doc.id) != Some(&d.revision))
+        .map(|d| (d.doc.clone(), d.revision, d.path.clone()))
+        .collect();
     for (doc, rev, path) in jobs {
         if let Some(save) = app.services.autosave.as_mut() {
             match save(&doc, rev, path.as_deref()) {
@@ -330,7 +342,8 @@ pub fn invoke(app: &mut PhotocraftApp, _ctx: &egui::Context, id: &str, params: &
         }
         "edit.fade" | "edit.findAndReplaceText" | "edit.defineBrushPreset" | "edit.defineCustomShape" | "edit.autoAlignLayers" | "edit.autoBlendLayers" => {
             if !app.session.is_enabled(id) {
-                return Some(Err(photocraft_engine::commands::find(id).map_or("not available".into(), |c| format!("{} is not available right now", c.label.trim_end_matches('…')))));
+                return Some(Err(photocraft_engine::commands::find(id)
+                    .map_or("not available".into(), |c| format!("{} is not available right now", c.label.trim_end_matches('…')))));
             }
             let d = crate::filter_dialog::open(app, id);
             if let Some(dm) = d.and_then(|d| app.ui.dialog_mut(d)) {
@@ -370,8 +383,12 @@ pub fn invoke(app: &mut PhotocraftApp, _ctx: &egui::Context, id: &str, params: &
             }
             dialog(d)
         }
-        "edit.presets.presetManager" => Some(Ok(json!({"dialog": open_kind(app, "presets", "Preset Manager", json!({"kind": "brushes", "selected": 0, "newName": ""}))}))),
-        "edit.presets.exportImportPresets" => Some(Ok(json!({"dialog": open_kind(app, "presetsIO", "Export/Import Presets", json!({"action": "export", "brushes": true, "customShapes": true}))}))),
+        "edit.presets.presetManager" => {
+            Some(Ok(json!({"dialog": open_kind(app, "presets", "Preset Manager", json!({"kind": "brushes", "selected": 0, "newName": ""}))})))
+        }
+        "edit.presets.exportImportPresets" => Some(Ok(
+            json!({"dialog": open_kind(app, "presetsIO", "Export/Import Presets", json!({"action": "export", "brushes": true, "customShapes": true}))}),
+        )),
         _ => None,
     }
 }
@@ -419,7 +436,8 @@ fn field_order(p: &prefs::Preferences, sections: &Map<String, Value>) -> Value {
         let body = &text[start..];
         let end = body.find('}').unwrap_or(body.len());
         let region = &body[..end];
-        let mut keys: Vec<(usize, String)> = v.as_object().into_iter().flatten().map(|(k, _)| (region.find(&format!("\"{k}\":")).unwrap_or(usize::MAX), k.clone())).collect();
+        let mut keys: Vec<(usize, String)> =
+            v.as_object().into_iter().flatten().map(|(k, _)| (region.find(&format!("\"{k}\":")).unwrap_or(usize::MAX), k.clone())).collect();
         keys.sort();
         out.insert(id.clone(), json!(keys.into_iter().map(|(_, k)| k).collect::<Vec<_>>()));
     }
@@ -448,14 +466,23 @@ pub fn open_mismatch(app: &mut PhotocraftApp, report: &Value) -> u64 {
     let msg = if report.get("missing").and_then(Value::as_bool) == Some(true) {
         format!("The document does not have an embedded colour profile. Working space: {}.", report["working"].as_str().unwrap_or("?"))
     } else {
-        format!("The document has an embedded colour profile that does not match the working space.\nEmbedded: {}\nWorking: {}", report["embedded"].as_str().unwrap_or("?"), report["working"].as_str().unwrap_or("?"))
+        format!(
+            "The document has an embedded colour profile that does not match the working space.\nEmbedded: {}\nWorking: {}",
+            report["embedded"].as_str().unwrap_or("?"),
+            report["working"].as_str().unwrap_or("?")
+        )
     };
     let action = match report["action"].as_str() {
         Some("converted") => "convert",
         Some("discarded") => "discard",
         _ => "preserve",
     };
-    open_kind(app, "mismatch", "Embedded Profile Mismatch", json!({"message": msg, "action": action, "applied": action, "missing": report.get("missing").is_some()}))
+    open_kind(
+        app,
+        "mismatch",
+        "Embedded Profile Mismatch",
+        json!({"message": msg, "action": action, "applied": action, "missing": report.get("missing").is_some()}),
+    )
 }
 
 // ------------------------------------------------------------------ bodies
@@ -522,7 +549,13 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                 } else if resp.hovered() {
                     ui.painter().rect_filled(rect, t.radius_sm, t.hover);
                 }
-                ui.painter().text(rect.left_center() + vec2(8.0, 0.0), egui::Align2::LEFT_CENTER, title, crate::theme::medium(12.5), if sel { t.text } else { t.text_dim });
+                ui.painter().text(
+                    rect.left_center() + vec2(8.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    title,
+                    crate::theme::medium(12.5),
+                    if sel { t.text } else { t.text_dim },
+                );
                 if resp.clicked() {
                     section = id.to_string();
                 }
@@ -535,7 +568,8 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             ui.label(RichText::new(title).font(crate::theme::semibold(14.0)).color(t.text));
             ui.add_space(6.0);
             egui::ScrollArea::vertical().max_height(390.0).id_salt("prefs-scroll").show(ui, |ui| {
-                let order: Vec<String> = f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+                let order: Vec<String> =
+                    f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
                 if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
                     section_fields(ui, &section, obj, &order);
                 }
@@ -683,10 +717,12 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
     };
     // Key capture for the selected command.
     if capture && tab == 0 && !selected.is_empty() {
-        let pressed = ui.input(|i| i.events.iter().find_map(|e| match e {
-            egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
-            _ => None,
-        }));
+        let pressed = ui.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                _ => None,
+            })
+        });
         if let Some((key, m)) = pressed {
             ui.input_mut(|i| {
                 i.consume_key(m, key);
@@ -698,9 +734,17 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
                 capture = false;
                 message = "Shortcut removed.".into();
             } else if let Some(sc) = shortcut_text(key, m) {
-                let clash: Vec<String> = items.iter().filter(|(id, _, _, def)| *id != selected && eff(&overrides, id, def).as_deref().and_then(prefs::normalize_shortcut) == Some(sc.clone())).map(|(_, label, path, _)| format!("{} › {}", path.join(" › "), label.trim_end_matches('…'))).collect();
+                let clash: Vec<String> = items
+                    .iter()
+                    .filter(|(id, _, _, def)| *id != selected && eff(&overrides, id, def).as_deref().and_then(prefs::normalize_shortcut) == Some(sc.clone()))
+                    .map(|(_, label, path, _)| format!("{} › {}", path.join(" › "), label.trim_end_matches('…')))
+                    .collect();
                 overrides.insert(selected.clone(), sc.clone());
-                message = if clash.is_empty() { format!("{} assigned.", crate::shortcuts::pretty(&sc)) } else { format!("{} is already in use by {} and will be removed from it when you click OK.", crate::shortcuts::pretty(&sc), clash.join(", ")) };
+                message = if clash.is_empty() {
+                    format!("{} assigned.", crate::shortcuts::pretty(&sc))
+                } else {
+                    format!("{} is already in use by {} and will be removed from it when you click OK.", crate::shortcuts::pretty(&sc), clash.join(", "))
+                };
                 capture = false;
             }
         }
@@ -734,7 +778,8 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
                 if tab == 0 {
                     let text = if sel && capture { "Press keys…".to_string() } else { cur.as_deref().map(crate::shortcuts::pretty).unwrap_or_default() };
                     let changed = overrides.contains_key(id);
-                    let r = ui.add(egui::Button::new(RichText::new(text).size(12.0).color(if changed { t.accent_text } else { t.text })).min_size(vec2(120.0, 18.0)));
+                    let r = ui
+                        .add(egui::Button::new(RichText::new(text).size(12.0).color(if changed { t.accent_text } else { t.text })).min_size(vec2(120.0, 18.0)));
                     if r.clicked() {
                         selected = id.clone();
                         capture = true;
@@ -750,7 +795,8 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
                         hidden.push(id.clone());
                     }
                     let mut col = colors.get(id).cloned().unwrap_or_else(|| "none".into());
-                    let opts: Vec<(String, &str)> = ["none", "red", "orange", "yellow", "green", "blue", "violet", "gray"].iter().map(|c| (c.to_string(), *c)).collect();
+                    let opts: Vec<(String, &str)> =
+                        ["none", "red", "orange", "yellow", "green", "blue", "violet", "gray"].iter().map(|c| (c.to_string(), *c)).collect();
                     crate::widgets::dropdown(ui, &format!("menu-color-{id}"), &mut col, &opts, 90.0);
                     if col == "none" {
                         colors.remove(id);
@@ -827,7 +873,13 @@ fn presets_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, 
         let opts = [("brushes".to_string(), "Brushes"), ("customShapes".to_string(), "Custom Shapes"), ("patterns".to_string(), "Patterns")];
         crate::widgets::dropdown(ui, "preset-kind", &mut kind, &opts, 180.0);
     });
-    let list = app.session.execute("edit.presets.presetManager", json!({"kind": kind})).ok().and_then(|v| v.get(&kind).cloned()).and_then(|v| serde_json::from_value::<Vec<String>>(v).ok()).unwrap_or_default();
+    let list = app
+        .session
+        .execute("edit.presets.presetManager", json!({"kind": kind}))
+        .ok()
+        .and_then(|v| v.get(&kind).cloned())
+        .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+        .unwrap_or_default();
     let mut selected = f.get("selected").and_then(Value::as_u64).unwrap_or(0) as usize;
     egui::ScrollArea::vertical().max_height(260.0).id_salt("preset-list").show(ui, |ui| {
         for (i, name) in list.iter().enumerate() {
@@ -879,7 +931,11 @@ fn mismatch_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let opts: &[(&str, &str)] = if missing {
         &[("preserve", "Leave as is (don't color manage)"), ("assignWorking", "Assign working space")]
     } else {
-        &[("preserve", "Use the embedded profile (instead of the working space)"), ("convert", "Convert document's colors to the working space"), ("discard", "Discard the embedded profile (don't color manage)")]
+        &[
+            ("preserve", "Use the embedded profile (instead of the working space)"),
+            ("convert", "Convert document's colors to the working space"),
+            ("discard", "Discard the embedded profile (don't color manage)"),
+        ]
     };
     for (v, label) in opts {
         ui.radio_value(&mut action, v.to_string(), *label);
@@ -905,7 +961,10 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
             let changed: Vec<(String, String)> = ov.iter().filter(|(_, s)| !s.is_empty()).map(|(k, s)| (k.clone(), s.clone())).collect();
             for (id, sc) in changed {
                 for (other, _, _, def) in &items {
-                    if *other != id && !ov.contains_key(other) && def.as_deref().and_then(prefs::normalize_shortcut).as_deref() == prefs::normalize_shortcut(&sc).as_deref() {
+                    if *other != id
+                        && !ov.contains_key(other)
+                        && def.as_deref().and_then(prefs::normalize_shortcut).as_deref() == prefs::normalize_shortcut(&sc).as_deref()
+                    {
                         ov.insert(other.clone(), String::new());
                     }
                 }

@@ -37,7 +37,13 @@ fn section(ui: &mut egui::Ui, id: &str, title: &str) -> bool {
     let key = egui::Id::new(("layer-props-section", id));
     let mut open = ui.data(|d| d.get_temp::<bool>(key)).unwrap_or(true);
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
-    crate::icons::paint(ui, Rect::from_center_size(pos2(r.left() + 7.0, r.center().y), vec2(12.0, 12.0)), if open { "chevron-down" } else { "chevron-right" }, 11.0, t.text_dim);
+    crate::icons::paint(
+        ui,
+        Rect::from_center_size(pos2(r.left() + 7.0, r.center().y), vec2(12.0, 12.0)),
+        if open { "chevron-down" } else { "chevron-right" },
+        11.0,
+        t.text_dim,
+    );
     ui.painter().text(pos2(r.left() + 18.0, r.center().y), egui::Align2::LEFT_CENTER, title, crate::theme::semibold(12.0), t.text);
     if resp.clicked() {
         open = !open;

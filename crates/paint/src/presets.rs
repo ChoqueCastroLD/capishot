@@ -15,11 +15,21 @@ pub fn builtin() -> Vec<BrushPreset> {
         preset("Soft Round", BrushSettings { size: 45.0, hardness: 0.0, ..base.clone() }),
         preset(
             "Hard Round Pressure Size",
-            BrushSettings { size: 30.0, hardness: 1.0, shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic::controlled(Control::PenPressure), ..Default::default() }, ..base.clone() },
+            BrushSettings {
+                size: 30.0,
+                hardness: 1.0,
+                shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic::controlled(Control::PenPressure), ..Default::default() },
+                ..base.clone()
+            },
         ),
         preset(
             "Soft Round Pressure Opacity",
-            BrushSettings { size: 45.0, hardness: 0.0, transfer: Transfer { enabled: true, opacity: Dynamic::controlled(Control::PenPressure), ..Default::default() }, ..base.clone() },
+            BrushSettings {
+                size: 45.0,
+                hardness: 0.0,
+                transfer: Transfer { enabled: true, opacity: Dynamic::controlled(Control::PenPressure), ..Default::default() },
+                ..base.clone()
+            },
         ),
         preset("Airbrush Soft", BrushSettings { size: 80.0, hardness: 0.0, flow: 0.1, spacing: 0.1, build_up: true, build_up_rate: 25.0, ..base.clone() }),
         preset("Hard Pencil", BrushSettings { size: 3.0, hardness: 1.0, aliased: true, spacing: 0.1, ..base.clone() }),
@@ -30,8 +40,18 @@ pub fn builtin() -> Vec<BrushPreset> {
                 size: 40.0,
                 tip: TipShape::Sampled(chalk_tip(64, 7)),
                 spacing: 0.2,
-                shape_dynamics: ShapeDynamics { enabled: true, angle: Dynamic::jitter(1.0), size: Dynamic { jitter: 0.15, ..Default::default() }, ..Default::default() },
-                texture: Texture { enabled: true, pattern: Pattern::Procedural { style: PatternStyle::Paper, size: 128, seed: 3 }, depth: 0.6, ..Default::default() },
+                shape_dynamics: ShapeDynamics {
+                    enabled: true,
+                    angle: Dynamic::jitter(1.0),
+                    size: Dynamic { jitter: 0.15, ..Default::default() },
+                    ..Default::default()
+                },
+                texture: Texture {
+                    enabled: true,
+                    pattern: Pattern::Procedural { style: PatternStyle::Paper, size: 128, seed: 3 },
+                    depth: 0.6,
+                    ..Default::default()
+                },
                 ..base.clone()
             },
         ),
@@ -60,7 +80,11 @@ pub fn builtin() -> Vec<BrushPreset> {
                 tip: TipShape::Sampled(bristle_tip(64, 5)),
                 spacing: 0.04,
                 shape_dynamics: ShapeDynamics { enabled: true, angle: Dynamic::controlled(Control::Direction), ..Default::default() },
-                transfer: Transfer { enabled: true, flow: Dynamic { control: Control::Fade, fade_steps: 400, minimum: 0.1, ..Default::default() }, ..Default::default() },
+                transfer: Transfer {
+                    enabled: true,
+                    flow: Dynamic { control: Control::Fade, fade_steps: 400, minimum: 0.1, ..Default::default() },
+                    ..Default::default()
+                },
                 ..base.clone()
             },
         ),
@@ -70,7 +94,13 @@ pub fn builtin() -> Vec<BrushPreset> {
                 size: 60.0,
                 hardness: 0.3,
                 wet_edges: true,
-                texture: Texture { enabled: true, pattern: Pattern::Procedural { style: PatternStyle::Paper, size: 256, seed: 9 }, depth: 0.35, scale: 1.5, ..Default::default() },
+                texture: Texture {
+                    enabled: true,
+                    pattern: Pattern::Procedural { style: PatternStyle::Paper, size: 256, seed: 9 },
+                    depth: 0.35,
+                    scale: 1.5,
+                    ..Default::default()
+                },
                 ..base.clone()
             },
         ),
@@ -79,7 +109,13 @@ pub fn builtin() -> Vec<BrushPreset> {
             BrushSettings {
                 size: 50.0,
                 hardness: 0.8,
-                texture: Texture { enabled: true, pattern: Pattern::Procedural { style: PatternStyle::Canvas, size: 64, seed: 1 }, mode: MaskMode::Subtract, depth: 0.7, ..Default::default() },
+                texture: Texture {
+                    enabled: true,
+                    pattern: Pattern::Procedural { style: PatternStyle::Canvas, size: 64, seed: 1 },
+                    mode: MaskMode::Subtract,
+                    depth: 0.7,
+                    ..Default::default()
+                },
                 ..base.clone()
             },
         ),
@@ -102,7 +138,17 @@ pub fn builtin() -> Vec<BrushPreset> {
                 size: 50.0,
                 hardness: 0.6,
                 noise: true,
-                dual_brush: DualBrush { enabled: true, tip: TipShape::Sampled(spatter_tip(48, 23, 20)), size: 30.0, spacing: 0.3, scatter: 1.0, both_axes: true, count: 2, flip: true, ..Default::default() },
+                dual_brush: DualBrush {
+                    enabled: true,
+                    tip: TipShape::Sampled(spatter_tip(48, 23, 20)),
+                    size: 30.0,
+                    spacing: 0.3,
+                    scatter: 1.0,
+                    both_axes: true,
+                    count: 2,
+                    flip: true,
+                    ..Default::default()
+                },
                 ..base
             },
         ),

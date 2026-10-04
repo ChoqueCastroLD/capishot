@@ -35,12 +35,7 @@ pub struct Rect {
 impl Rect {
     /// Rectangle from origin and size.
     pub fn from_xywh(left: i32, top: i32, width: u32, height: u32) -> Self {
-        Rect {
-            top,
-            left,
-            bottom: top.saturating_add(height.min(i32::MAX as u32) as i32),
-            right: left.saturating_add(width.min(i32::MAX as u32) as i32),
-        }
+        Rect { top, left, bottom: top.saturating_add(height.min(i32::MAX as u32) as i32), right: left.saturating_add(width.min(i32::MAX as u32) as i32) }
     }
     /// Width (may be negative for malformed data).
     pub fn width(&self) -> i64 {
@@ -219,11 +214,7 @@ impl LayerMask {
         } else {
             None
         };
-        let real = if r.remaining() >= 18 {
-            Some(RealMask { flags: r.u8()?, background: r.u8()?, rect: Rect::read(&mut r)? })
-        } else {
-            None
-        };
+        let real = if r.remaining() >= 18 { Some(RealMask { flags: r.u8()?, background: r.u8()?, rect: Rect::read(&mut r)? }) } else { None };
         Ok(LayerMask { rect, default_color, flags, parameters, real, trailing: r.peek_rest().to_vec() })
     }
 
@@ -298,10 +289,7 @@ impl BlendingRanges {
     }
     /// Parsed entries (incomplete trailing bytes are ignored).
     pub fn ranges(&self) -> Vec<BlendRange> {
-        self.data
-            .chunks_exact(8)
-            .map(|c| BlendRange { source: [c[0], c[1], c[2], c[3]], dest: [c[4], c[5], c[6], c[7]] })
-            .collect()
+        self.data.as_chunks::<8>().0.iter().map(|c| BlendRange { source: [c[0], c[1], c[2], c[3]], dest: [c[4], c[5], c[6], c[7]] }).collect()
     }
 }
 
@@ -321,15 +309,7 @@ pub struct ChannelData {
 
 impl ChannelData {
     /// Encodes planar samples (`height × row_bytes`).
-    pub fn encode(
-        id: i16,
-        compression: Compression,
-        decoded: &[u8],
-        width: usize,
-        height: usize,
-        depth: u16,
-        version: Version,
-    ) -> Result<Self> {
+    pub fn encode(id: i16, compression: Compression, decoded: &[u8], width: usize, height: usize, depth: u16, version: Version) -> Result<Self> {
         let layout = PlaneLayout { planes: 1, width, height, depth, version };
         Ok(ChannelData { id, compression: Some(compression), data: encode_planes(compression, decoded, &layout)? })
     }
@@ -351,15 +331,7 @@ impl ChannelData {
 
     /// Replaces the channel contents, re-encoding with `compression`.
     #[allow(clippy::too_many_arguments)]
-    pub fn set_decoded(
-        &mut self,
-        compression: Compression,
-        decoded: &[u8],
-        width: usize,
-        height: usize,
-        depth: u16,
-        version: Version,
-    ) -> Result<()> {
+    pub fn set_decoded(&mut self, compression: Compression, decoded: &[u8], width: usize, height: usize, depth: u16, version: Version) -> Result<()> {
         *self = Self::encode(self.id, compression, decoded, width, height, depth, version)?;
         Ok(())
     }
@@ -549,23 +521,7 @@ impl LayerRecord {
         let blending_ranges = BlendingRanges { data: x.bytes_u64(u64::from(br_len))?.to_vec() };
         let name = read_pascal(&mut x, 4)?;
         let (blocks, extra_trailing) = read_blocks(&mut x, version)?;
-        Ok((
-            LayerRecord {
-                rect,
-                channels,
-                blend_mode,
-                opacity,
-                clipping,
-                flags,
-                filler,
-                mask,
-                blending_ranges,
-                name,
-                blocks,
-                extra_trailing,
-            },
-            lens,
-        ))
+        Ok((LayerRecord { rect, channels, blend_mode, opacity, clipping, flags, filler, mask, blending_ranges, name, blocks, extra_trailing }, lens))
     }
 
     fn write(&self, out: &mut Vec<u8>, version: Version) -> Result<()> {
@@ -772,11 +728,7 @@ mod tests {
     #[test]
     fn mask_variants_roundtrip() {
         let base = LayerMask::new(Rect::from_xywh(1, 2, 3, 4), 0, 0);
-        let with_real = LayerMask {
-            real: Some(RealMask { flags: 1, background: 255, rect: Rect::from_xywh(0, 0, 9, 9) }),
-            trailing: vec![],
-            ..base.clone()
-        };
+        let with_real = LayerMask { real: Some(RealMask { flags: 1, background: 255, rect: Rect::from_xywh(0, 0, 9, 9) }), trailing: vec![], ..base.clone() };
         let with_params = LayerMask {
             flags: LayerMask::FLAG_PARAMETERS,
             parameters: Some(MaskParameters {
@@ -808,11 +760,7 @@ mod tests {
         let mut out = Vec::new();
         LayerMask::new(Rect::default(), 0, 0).write(&mut out);
         assert_eq!(out.len(), 20);
-        let m = LayerMask {
-            real: Some(RealMask::default()),
-            trailing: vec![],
-            ..LayerMask::new(Rect::default(), 0, 0)
-        };
+        let m = LayerMask { real: Some(RealMask::default()), trailing: vec![], ..LayerMask::new(Rect::default(), 0, 0) };
         let mut out = Vec::new();
         m.write(&mut out);
         assert_eq!(out.len(), 36);
@@ -905,11 +853,7 @@ mod tests {
 
     #[test]
     fn unknown_blend_and_blocks_passthrough() {
-        let rec = LayerRecord {
-            blend_mode: BlendMode::Unknown(*b"wxyz"),
-            blocks: vec![TaggedBlock::new(*b"Zzzz", vec![1, 2, 3, 4, 5])],
-            ..Default::default()
-        };
+        let rec = LayerRecord { blend_mode: BlendMode::Unknown(*b"wxyz"), blocks: vec![TaggedBlock::new(*b"Zzzz", vec![1, 2, 3, 4, 5])], ..Default::default() };
         rt(&LayerInfo { layers: vec![rec], ..Default::default() }, Version::Psd);
     }
 }

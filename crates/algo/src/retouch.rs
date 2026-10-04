@@ -178,7 +178,16 @@ pub fn local_blur(data: &[f32], w: usize, h: usize, ch: usize, alpha: Option<usi
 /// With `protect_detail`, each result is clamped to the 3×3 neighbourhood's range, which stops
 /// halos and noise from being amplified into new extremes. Alpha is left unchanged.
 #[allow(clippy::too_many_arguments)]
-pub fn local_sharpen(data: &[f32], w: usize, h: usize, ch: usize, alpha: Option<usize>, win: (usize, usize, usize, usize), amount: f32, protect_detail: bool) -> Vec<f32> {
+pub fn local_sharpen(
+    data: &[f32],
+    w: usize,
+    h: usize,
+    ch: usize,
+    alpha: Option<usize>,
+    win: (usize, usize, usize, usize),
+    amount: f32,
+    protect_detail: bool,
+) -> Vec<f32> {
     let (x0, y0, x1, y1) = win;
     let ow = x1 - x0;
     let blur = local_blur(data, w, h, ch, alpha, win, 1.0);
@@ -289,7 +298,7 @@ mod tests {
         let (w, h, ch) = (8, 1, 4);
         let data: Vec<f32> = (0..w).flat_map(|x| if x < 4 { [1.0, 0.0, 0.0, 1.0] } else { [0.0, 1.0, 0.0, 0.0] }).collect();
         let b = local_blur(&data, w, h, ch, Some(3), (2, 0, 6, 1), 1.0);
-        for p in b.chunks_exact(4) {
+        for p in b.as_chunks::<4>().0 {
             if p[3] > 0.01 {
                 assert!(p[0] > 0.99 && p[1] < 0.01, "{p:?}");
             }

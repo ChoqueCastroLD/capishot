@@ -218,7 +218,15 @@ impl TextStyles {
 
     /// Re-resolves a run against (possibly changed) styles, keeping its overrides: `old` gives
     /// the styles as they were when the overrides were made.
-    pub fn restyle_char(&self, old: &TextStyles, run: &CharStyle, old_para: Option<u32>, new_para: Option<u32>, new_chr: Option<u32>, family: &str) -> CharStyle {
+    pub fn restyle_char(
+        &self,
+        old: &TextStyles,
+        run: &CharStyle,
+        old_para: Option<u32>,
+        new_para: Option<u32>,
+        new_chr: Option<u32>,
+        family: &str,
+    ) -> CharStyle {
         let overrides = old.char_overrides(run, old_para, family);
         let base = self.resolve_char(new_para, new_chr, family);
         apply_attrs(&base, &overrides).unwrap_or(base)
@@ -247,7 +255,12 @@ mod tests {
     fn styles() -> TextStyles {
         let mut s = TextStyles::default();
         s.character.push(CharacterStyleDef { id: 1, name: "Big".into(), attrs: attrs(json!({"size_pt": 40.0, "underline": true})) });
-        s.paragraph.push(ParagraphStyleDef { id: 1, name: "Head".into(), para_attrs: attrs(json!({"align": "Center"})), char_attrs: attrs(json!({"size_pt": 20.0, "weight": 700})) });
+        s.paragraph.push(ParagraphStyleDef {
+            id: 1,
+            name: "Head".into(),
+            para_attrs: attrs(json!({"align": "Center"})),
+            char_attrs: attrs(json!({"size_pt": 20.0, "weight": 700})),
+        });
         s
     }
 

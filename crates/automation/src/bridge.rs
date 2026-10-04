@@ -12,10 +12,7 @@ use tokio::sync::Mutex;
 
 use crate::AutomationError;
 
-type Conn = (
-    BufReader<tokio::net::tcp::OwnedReadHalf>,
-    tokio::net::tcp::OwnedWriteHalf,
-);
+type Conn = (BufReader<tokio::net::tcp::OwnedReadHalf>, tokio::net::tcp::OwnedWriteHalf);
 
 pub struct BridgeClient {
     addr: String,
@@ -31,16 +28,9 @@ impl BridgeClient {
         let addr = addr.into();
         let host = addr.rsplit_once(':').map(|(h, _)| h).unwrap_or(&addr);
         if !matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1") {
-            return Err(AutomationError::BadRequest(format!(
-                "bridge address must be loopback, got `{addr}`"
-            )));
+            return Err(AutomationError::BadRequest(format!("bridge address must be loopback, got `{addr}`")));
         }
-        Ok(BridgeClient {
-            addr,
-            conn: Mutex::new(None),
-            next_id: AtomicU64::new(1),
-            timeout: Duration::from_secs(60),
-        })
+        Ok(BridgeClient { addr, conn: Mutex::new(None), next_id: AtomicU64::new(1), timeout: Duration::from_secs(60) })
     }
 
     pub fn with_timeout(mut self, t: Duration) -> Self {
@@ -61,12 +51,7 @@ impl BridgeClient {
                 let s = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(&self.addr))
                     .await
                     .map_err(|_| AutomationError::Bridge(format!("timed out connecting to {}", self.addr)))?
-                    .map_err(|e| {
-                        AutomationError::Bridge(format!(
-                            "cannot connect to {} ({e}); start the app with `photocraft --control <port>`",
-                            self.addr
-                        ))
-                    })?;
+                    .map_err(|e| AutomationError::Bridge(format!("cannot connect to {} ({e}); start the app with `photocraft --control <port>`", self.addr)))?;
                 let (r, w) = s.into_split();
                 *guard = Some((BufReader::new(r), w));
             }
@@ -84,10 +69,7 @@ impl BridgeClient {
                 }
                 Err(_) => {
                     *guard = None;
-                    return Err(AutomationError::Bridge(format!(
-                        "`{method}` timed out after {:?}",
-                        self.timeout
-                    )));
+                    return Err(AutomationError::Bridge(format!("`{method}` timed out after {:?}", self.timeout)));
                 }
             }
         }
@@ -96,14 +78,8 @@ impl BridgeClient {
 }
 
 /// Outer `Err` = transport failure (retryable); inner = app-level result.
-async fn exchange(
-    conn: &mut Conn,
-    id: u64,
-    method: &str,
-    params: &Value,
-) -> Result<Result<Value, AutomationError>, AutomationError> {
-    let mut line = serde_json::to_string(&json!({"id": id, "method": method, "params": params}))
-        .map_err(|e| AutomationError::Other(e.to_string()))?;
+async fn exchange(conn: &mut Conn, id: u64, method: &str, params: &Value) -> Result<Result<Value, AutomationError>, AutomationError> {
+    let mut line = serde_json::to_string(&json!({"id": id, "method": method, "params": params})).map_err(|e| AutomationError::Other(e.to_string()))?;
     line.push('\n');
     let io = |e: std::io::Error| AutomationError::Bridge(e.to_string());
     conn.1.write_all(line.as_bytes()).await.map_err(io)?;
@@ -113,9 +89,7 @@ async fn exchange(
         buf.clear();
         let n = conn.0.read_line(&mut buf).await.map_err(io)?;
         if n == 0 {
-            return Err(AutomationError::Bridge(
-                "connection closed by the app".into(),
-            ));
+            return Err(AutomationError::Bridge("connection closed by the app".into()));
         }
         let Ok(v) = serde_json::from_str::<Value>(buf.trim()) else {
             continue;
@@ -126,12 +100,7 @@ async fn exchange(
         return Ok(if v.get("ok").and_then(Value::as_bool) == Some(true) {
             Ok(v.get("result").cloned().unwrap_or(Value::Null))
         } else {
-            Err(AutomationError::App(
-                v.get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown error")
-                    .to_owned(),
-            ))
+            Err(AutomationError::App(v.get("error").and_then(Value::as_str).unwrap_or("unknown error").to_owned()))
         });
     }
 }

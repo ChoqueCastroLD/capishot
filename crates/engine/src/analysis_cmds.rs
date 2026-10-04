@@ -54,7 +54,8 @@ pub const COLUMNS: &[(&str, &str)] = &[
 ];
 
 const COMMON: &[&str] = &["label", "dateTime", "document", "source", "scale", "scaleUnits", "scaleFactor"];
-const SELECTION_ONLY: &[&str] = &["count", "area", "perimeter", "circularity", "height", "width", "grayMin", "grayMax", "grayMean", "grayMedian", "integratedDensity", "histogram"];
+const SELECTION_ONLY: &[&str] =
+    &["count", "area", "perimeter", "circularity", "height", "width", "grayMin", "grayMax", "grayMean", "grayMedian", "integratedDensity", "histogram"];
 const RULER_ONLY: &[&str] = &["length", "angle"];
 const COUNT_ONLY: &[&str] = &["count"];
 
@@ -298,7 +299,9 @@ fn select_data_points(s: &mut Session, p: &Value) -> Result<Value> {
         list.sort_by_key(|k| COLUMNS.iter().position(|c| c.0 == k));
     }
     s.analysis.data_points = next;
-    Ok(json!({"dataPoints": s.analysis.data_points, "available": {"selection": available("selection"), "ruler": available("ruler"), "count": available("count")}, "columns": COLUMNS.iter().map(|c| json!({"key": c.0, "name": c.1})).collect::<Vec<_>>()}))
+    Ok(
+        json!({"dataPoints": s.analysis.data_points, "available": {"selection": available("selection"), "ruler": available("ruler"), "count": available("count")}, "columns": COLUMNS.iter().map(|c| json!({"key": c.0, "name": c.1})).collect::<Vec<_>>()}),
+    )
 }
 
 // ------------------------------------------------------------------ selection measurements
@@ -441,7 +444,8 @@ pub fn measure_features(mask: &[bool], gray: &[f32], w: usize, h: usize, origin:
             },
         );
     // Area, bounds and gray values.
-    let mut feats: Vec<Feature> = (0..n).map(|_| Feature { bounds: Rect::EMPTY, gray_min: f64::MAX, gray_max: f64::MIN, histogram: vec![0; 256], ..Default::default() }).collect();
+    let mut feats: Vec<Feature> =
+        (0..n).map(|_| Feature { bounds: Rect::EMPTY, gray_min: f64::MAX, gray_max: f64::MIN, histogram: vec![0; 256], ..Default::default() }).collect();
     let mut sums = vec![0.0f64; n];
     let mut values: Vec<Vec<u16>> = vec![Vec::new(); n];
     for y in 0..h {
@@ -849,11 +853,14 @@ fn base_row(s: &mut Session, d: &Document, source: &str, label: &str, now: &str)
     m.insert("label".into(), json!(label));
     m.insert("dateTime".into(), json!(now));
     m.insert("document".into(), json!(d.name));
-    m.insert("source".into(), json!(match source {
-        "selection" => "Selection",
-        "ruler" => "Ruler Tool",
-        _ => "Count Tool",
-    }));
+    m.insert(
+        "source".into(),
+        json!(match source {
+            "selection" => "Selection",
+            "ruler" => "Ruler Tool",
+            _ => "Count Tool",
+        }),
+    );
     m.insert("scale".into(), json!(sc.describe()));
     m.insert("scaleUnits".into(), json!(sc.units));
     m.insert("scaleFactor".into(), json!(sc.factor()));
@@ -1094,13 +1101,69 @@ macro_rules! spec {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("image.analysis.setMeasurementScale", "Set Measurement Scale…", ["Image", "Analysis"], r##"{"preset":"default|custom"="custom","pixelLength":px,"logicalLength":number,"units":str (e.g. "mm")} (no params: read the scale)"##, has_doc, set_scale, true),
-        spec!("image.analysis.selectDataPoints", "Select Data Points…", ["Image", "Analysis"], r##"{"selection":[keys]|{key:bool}?,"ruler":[keys]|{key:bool}?,"count":[keys]|{key:bool}?,"reset":bool=false} (keys: label,dateTime,document,source,scale,scaleUnits,scaleFactor,count,area,perimeter,circularity,height,width,grayMin,grayMax,grayMean,grayMedian,integratedDensity,histogram,length,angle)"##, always, select_data_points, true),
-        spec!("image.analysis.recordMeasurements", "Record Measurements", ["Image", "Analysis"], r##"{"source":"auto|selection|ruler|count"="auto"} → appended Measurement Log rows (selection: summary + one row per feature)"##, has_doc, record, true),
-        spec!("image.analysis.rulerTool", "Ruler Tool", ["Image", "Analysis"], r##"{"start":[x,y],"end":[x,y],"protractor":[x,y]|null?,"clear":bool=false} (no params: read) → X/Y/W/H/angle/L1/L2"##, has_doc, ruler_tool, true),
-        spec!("image.analysis.countTool", "Count Tool", ["Image", "Analysis"], r##"{} → count groups and markers (edit with count.*)"##, has_doc, count_tool, false),
-        spec!("image.analysis.placeScaleMarker", "Place Scale Marker…", ["Image", "Analysis"], r##"{"length":logical units=nice ≈ width/5,"font":str?,"fontSize":pt=12,"displayText":bool=true,"textPosition":"top|bottom"="bottom","color":"black|white"="black"}"##, has_doc, place_scale_marker, true),
-        spec!("image.analysis.straightenLayer", "Straighten Layer", [], r##"{"crop":bool=(active layer is the Background)} (rotates so the ruler line is level; crop = rotate the canvas and crop to the image)"##, has_ruler, straighten, true),
+        spec!(
+            "image.analysis.setMeasurementScale",
+            "Set Measurement Scale…",
+            ["Image", "Analysis"],
+            r##"{"preset":"default|custom"="custom","pixelLength":px,"logicalLength":number,"units":str (e.g. "mm")} (no params: read the scale)"##,
+            has_doc,
+            set_scale,
+            true
+        ),
+        spec!(
+            "image.analysis.selectDataPoints",
+            "Select Data Points…",
+            ["Image", "Analysis"],
+            r##"{"selection":[keys]|{key:bool}?,"ruler":[keys]|{key:bool}?,"count":[keys]|{key:bool}?,"reset":bool=false} (keys: label,dateTime,document,source,scale,scaleUnits,scaleFactor,count,area,perimeter,circularity,height,width,grayMin,grayMax,grayMean,grayMedian,integratedDensity,histogram,length,angle)"##,
+            always,
+            select_data_points,
+            true
+        ),
+        spec!(
+            "image.analysis.recordMeasurements",
+            "Record Measurements",
+            ["Image", "Analysis"],
+            r##"{"source":"auto|selection|ruler|count"="auto"} → appended Measurement Log rows (selection: summary + one row per feature)"##,
+            has_doc,
+            record,
+            true
+        ),
+        spec!(
+            "image.analysis.rulerTool",
+            "Ruler Tool",
+            ["Image", "Analysis"],
+            r##"{"start":[x,y],"end":[x,y],"protractor":[x,y]|null?,"clear":bool=false} (no params: read) → X/Y/W/H/angle/L1/L2"##,
+            has_doc,
+            ruler_tool,
+            true
+        ),
+        spec!(
+            "image.analysis.countTool",
+            "Count Tool",
+            ["Image", "Analysis"],
+            r##"{} → count groups and markers (edit with count.*)"##,
+            has_doc,
+            count_tool,
+            false
+        ),
+        spec!(
+            "image.analysis.placeScaleMarker",
+            "Place Scale Marker…",
+            ["Image", "Analysis"],
+            r##"{"length":logical units=nice ≈ width/5,"font":str?,"fontSize":pt=12,"displayText":bool=true,"textPosition":"top|bottom"="bottom","color":"black|white"="black"}"##,
+            has_doc,
+            place_scale_marker,
+            true
+        ),
+        spec!(
+            "image.analysis.straightenLayer",
+            "Straighten Layer",
+            [],
+            r##"{"crop":bool=(active layer is the Background)} (rotates so the ruler line is level; crop = rotate the canvas and crop to the image)"##,
+            has_ruler,
+            straighten,
+            true
+        ),
         spec!("image.analysis.info", "Analysis Info", [], r##"{} → scale, ruler readout, count groups, note and log counts"##, has_doc, analysis_info, false),
         spec!("count.add", "Add Count", [], r##"{"x":px,"y":px,"group":index?}"##, has_doc, count_add, true),
         spec!("count.remove", "Remove Count", [], r##"{"index":n,"group":index?} | {"x":px,"y":px,"radius":px=6}"##, has_doc, count_remove, true),
@@ -1108,10 +1171,26 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("count.clear", "Clear Count", [], r##"{"group":index|"all"=active}"##, has_doc, count_clear, true),
         spec!("count.newGroup", "New Count Group", [], r##"{"name":str?,"color":"#rrggbb"|[r,g,b]?}"##, has_doc, count_new_group, true),
         spec!("count.deleteGroup", "Delete Count Group", [], r##"{"group":index=active}"##, has_doc, count_delete_group, true),
-        spec!("count.setGroup", "Count Group Options", [], r##"{"group":index=active,"name":str?,"color":"#rrggbb"|[r,g,b]?,"markerSize":1..10?,"labelSize":8..72?,"visible":bool?,"active":bool?}"##, has_doc, count_set_group, true),
+        spec!(
+            "count.setGroup",
+            "Count Group Options",
+            [],
+            r##"{"group":index=active,"name":str?,"color":"#rrggbb"|[r,g,b]?,"markerSize":1..10?,"labelSize":8..72?,"visible":bool?,"active":bool?}"##,
+            has_doc,
+            count_set_group,
+            true
+        ),
         spec!("measurementLog.list", "Measurement Log", [], r##"{} → rows and columns"##, always, log_list, false),
         spec!("measurementLog.delete", "Delete Measurements", [], r##"{"rows":[ids]}|{"all":true}"##, has_log, log_delete, true),
-        spec!("measurementLog.export", "Export Measurements…", [], r##"{"path":str? (CSV file; omitted → returns the CSV text),"rows":[ids]?}"##, always, log_export, true),
+        spec!(
+            "measurementLog.export",
+            "Export Measurements…",
+            [],
+            r##"{"path":str? (CSV file; omitted → returns the CSV text),"rows":[ids]?}"##,
+            always,
+            log_export,
+            true
+        ),
     ]
 }
 

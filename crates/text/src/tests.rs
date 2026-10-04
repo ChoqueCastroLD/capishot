@@ -1,38 +1,20 @@
 use photocraft_color::{Color, PixelFormat, SampleType};
 use photocraft_doc::TextLayer;
-use photocraft_doc::text::{
-    CharStyle, FontFeature, ParagraphRun, ParagraphStyle, TextAlign, TextDirection, TextRun,
-    TextShape,
-};
+use photocraft_doc::text::{CharStyle, FontFeature, ParagraphRun, ParagraphStyle, TextAlign, TextDirection, TextRun, TextShape};
 use photocraft_geom::Affine;
 
 use crate::{TextEngine, fonts};
 
 fn point(text: &str, size_pt: f32) -> TextLayer {
-    TextLayer {
-        text: text.into(),
-        font_family: "Inter".into(),
-        size_pt,
-        ..Default::default()
-    }
+    TextLayer { text: text.into(), font_family: "Inter".into(), size_pt, ..Default::default() }
 }
 
 fn styled(text: &str, style: CharStyle) -> TextLayer {
-    TextLayer {
-        text: text.into(),
-        runs: vec![TextRun {
-            len: text.len(),
-            style,
-        }],
-        ..Default::default()
-    }
+    TextLayer { text: text.into(), runs: vec![TextRun { len: text.len(), style }], ..Default::default() }
 }
 
 fn with_para(mut t: TextLayer, p: ParagraphStyle) -> TextLayer {
-    t.paragraphs = vec![ParagraphRun {
-        len: t.text.len(),
-        style: p,
-    }];
+    t.paragraphs = vec![ParagraphRun { len: t.text.len(), style: p }];
     t
 }
 
@@ -42,10 +24,7 @@ fn width(l: &crate::TextLayout) -> f32 {
 
 fn alpha_sum(s: &photocraft_raster::Surface, r: photocraft_geom::Rect) -> f64 {
     let n = s.channels();
-    s.read_region(r)
-        .chunks_exact(n)
-        .map(|p| f64::from(p[n - 1]))
-        .sum()
+    s.read_region(r).chunks_exact(n).map(|p| f64::from(p[n - 1])).sum()
 }
 
 #[test]
@@ -70,12 +49,7 @@ fn metrics_are_stable_and_scale_with_dpi() {
     assert_eq!(w, again);
     assert!((80.0..110.0).contains(&w), "{w}");
     let b = e.layout(&point("Hamburgefonstiv", 12.0), 144.0);
-    assert!(
-        (width(&b) - 2.0 * w).abs() < 0.05,
-        "{} vs {}",
-        width(&b),
-        2.0 * w
-    );
+    assert!((width(&b) - 2.0 * w).abs() < 0.05, "{} vs {}", width(&b), 2.0 * w);
     // Point text: first baseline at the anchor.
     assert_eq!(a.lines[0].baseline, 0.0);
     assert!(a.lines[0].ascent > 8.0 && a.lines[0].ascent < 13.0);
@@ -86,62 +60,27 @@ fn auto_and_explicit_leading() {
     let mut e = TextEngine::new();
     let l = e.layout(&point("one\ntwo\rthree", 10.0), 72.0);
     assert_eq!(l.lines.len(), 3);
-    assert!(
-        (l.lines[1].baseline - 12.0).abs() < 1e-3,
-        "auto leading = 1.2 × size"
-    );
+    assert!((l.lines[1].baseline - 12.0).abs() < 1e-3, "auto leading = 1.2 × size");
     assert!((l.lines[2].baseline - 24.0).abs() < 1e-3);
     assert_eq!(&"one\ntwo\rthree"[l.lines[2].range.clone()], "three");
-    let t = styled(
-        "a\nb",
-        CharStyle {
-            size_pt: 10.0,
-            leading_pt: Some(30.0),
-            ..Default::default()
-        },
-    );
+    let t = styled("a\nb", CharStyle { size_pt: 10.0, leading_pt: Some(30.0), ..Default::default() });
     let l = e.layout(&t, 144.0);
-    assert!(
-        (l.lines[1].baseline - 60.0).abs() < 1e-3,
-        "{}",
-        l.lines[1].baseline
-    );
+    assert!((l.lines[1].baseline - 60.0).abs() < 1e-3, "{}", l.lines[1].baseline);
     // Space before/after in points.
-    let t = with_para(
-        point("a\nb", 10.0),
-        ParagraphStyle {
-            space_after_pt: 5.0,
-            ..Default::default()
-        },
-    );
+    let t = with_para(point("a\nb", 10.0), ParagraphStyle { space_after_pt: 5.0, ..Default::default() });
     let l = e.layout(&t, 72.0);
-    assert!(
-        (l.lines[1].baseline - 17.0).abs() < 1e-3,
-        "{}",
-        l.lines[1].baseline
-    );
+    assert!((l.lines[1].baseline - 17.0).abs() < 1e-3, "{}", l.lines[1].baseline);
 }
 
 #[test]
 fn box_text_wraps_inside_width() {
     let mut e = TextEngine::new();
-    let mut t = point(
-        "The quick brown fox jumps over the lazy dog again and again",
-        12.0,
-    );
-    t.shape = TextShape::Box {
-        x: 10.0,
-        y: 20.0,
-        width: 100.0,
-        height: 1000.0,
-    };
+    let mut t = point("The quick brown fox jumps over the lazy dog again and again", 12.0);
+    t.shape = TextShape::Box { x: 10.0, y: 20.0, width: 100.0, height: 1000.0 };
     let l = e.layout(&t, 72.0);
     assert!(l.lines.len() >= 3, "{}", l.lines.len());
     for line in &l.lines {
-        assert!(
-            line.x0 >= 10.0 - 1e-3 && line.x1 <= 110.0 + 1e-3,
-            "{line:?}"
-        );
+        assert!(line.x0 >= 10.0 - 1e-3 && line.x1 <= 110.0 + 1e-3, "{line:?}");
     }
     // First baseline = top + ascender height ('d'), a bit less than the hhea ascent.
     let drop = l.lines[0].baseline - 20.0;
@@ -152,12 +91,7 @@ fn box_text_wraps_inside_width() {
         assert!(w[1].range.start >= w[0].range.end);
     }
     // Overflowing lines are hidden, like Photoshop.
-    t.shape = TextShape::Box {
-        x: 0.0,
-        y: 0.0,
-        width: 100.0,
-        height: 30.0,
-    };
+    t.shape = TextShape::Box { x: 0.0, y: 0.0, width: 100.0, height: 30.0 };
     let l2 = e.layout(&t, 72.0);
     assert_eq!(l2.lines.len(), 2);
 }
@@ -165,69 +99,24 @@ fn box_text_wraps_inside_width() {
 #[test]
 fn alignment_point_and_box() {
     let mut e = TextEngine::new();
-    let c = e.layout(
-        &with_para(
-            point("Centered", 20.0),
-            ParagraphStyle {
-                align: TextAlign::Center,
-                ..Default::default()
-            },
-        ),
-        72.0,
-    );
+    let c = e.layout(&with_para(point("Centered", 20.0), ParagraphStyle { align: TextAlign::Center, ..Default::default() }), 72.0);
     let ln = &c.lines[0];
     assert!((ln.x0 + ln.x1).abs() < 0.01, "centered on anchor: {ln:?}");
-    let r = e.layout(
-        &with_para(
-            point("Right", 20.0),
-            ParagraphStyle {
-                align: TextAlign::Right,
-                ..Default::default()
-            },
-        ),
-        72.0,
-    );
+    let r = e.layout(&with_para(point("Right", 20.0), ParagraphStyle { align: TextAlign::Right, ..Default::default() }), 72.0);
     assert!(r.lines[0].x1.abs() < 0.01 && r.lines[0].x0 < -10.0);
 
     let mut t = point("aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk", 12.0);
-    t.shape = TextShape::Box {
-        x: 0.0,
-        y: 0.0,
-        width: 120.0,
-        height: 500.0,
-    };
-    let t = with_para(
-        t,
-        ParagraphStyle {
-            align: TextAlign::JustifyLeft,
-            ..Default::default()
-        },
-    );
+    t.shape = TextShape::Box { x: 0.0, y: 0.0, width: 120.0, height: 500.0 };
+    let t = with_para(t, ParagraphStyle { align: TextAlign::JustifyLeft, ..Default::default() });
     let l = e.layout(&t, 72.0);
     assert!(l.lines.len() > 1);
     let first = &l.lines[0];
     // Justified line: last glyph ends at the right edge (within a pixel).
-    let last_glyph_x = l
-        .glyphs
-        .iter()
-        .filter(|g| (g.y - first.baseline).abs() < 1e-3)
-        .map(|g| g.x)
-        .fold(f32::MIN, f32::max);
+    let last_glyph_x = l.glyphs.iter().filter(|g| (g.y - first.baseline).abs() < 1e-3).map(|g| g.x).fold(f32::MIN, f32::max);
     assert!(last_glyph_x > 110.0, "{last_glyph_x}");
     let right = with_para(
-        TextLayer {
-            shape: TextShape::Box {
-                x: 0.0,
-                y: 0.0,
-                width: 200.0,
-                height: 100.0,
-            },
-            ..point("end", 12.0)
-        },
-        ParagraphStyle {
-            align: TextAlign::Right,
-            ..Default::default()
-        },
+        TextLayer { shape: TextShape::Box { x: 0.0, y: 0.0, width: 200.0, height: 100.0 }, ..point("end", 12.0) },
+        ParagraphStyle { align: TextAlign::Right, ..Default::default() },
     );
     let l = e.layout(&right, 72.0);
     assert!((l.lines[0].x1 - 200.0).abs() < 0.5, "{:?}", l.lines[0]);
@@ -239,34 +128,16 @@ fn rtl_text_is_reordered() {
     // Hebrew isn't in the bundled fonts, but bidi still resolves (glyphs may be .notdef).
     let text = "abc שלום def";
     let l = e.layout(&point(text, 12.0), 72.0);
-    let heb: Vec<_> = l
-        .clusters
-        .iter()
-        .filter(|c| {
-            text[c.range.clone()]
-                .chars()
-                .all(|ch| ('\u{0590}'..='\u{05FF}').contains(&ch))
-        })
-        .collect();
+    let heb: Vec<_> = l.clusters.iter().filter(|c| text[c.range.clone()].chars().all(|ch| ('\u{0590}'..='\u{05FF}').contains(&ch))).collect();
     assert_eq!(heb.len(), 4);
     assert!(heb.iter().all(|c| c.rtl));
     // Visual order: the first logical Hebrew letter is rightmost among them.
     let first = heb.iter().min_by_key(|c| c.range.start).unwrap();
     assert!(heb.iter().all(|c| c.x <= first.x + 1e-3));
     // Forced RTL paragraph: the Latin run ends up to the right of the Hebrew.
-    let t = with_para(
-        point("שלום abc", 12.0),
-        ParagraphStyle {
-            direction: TextDirection::Rtl,
-            ..Default::default()
-        },
-    );
+    let t = with_para(point("שלום abc", 12.0), ParagraphStyle { direction: TextDirection::Rtl, ..Default::default() });
     let l = e.layout(&t, 72.0);
-    let a = l
-        .clusters
-        .iter()
-        .find(|c| &"שלום abc"[c.range.clone()] == "a")
-        .unwrap();
+    let a = l.clusters.iter().find(|c| &"שלום abc"[c.range.clone()] == "a").unwrap();
     let shin = l.clusters.iter().find(|c| c.range.start == 0).unwrap();
     assert!(a.x < shin.x, "abc left of the Hebrew in an RTL paragraph");
     assert!(l.clusters.iter().all(|c| c.range.end <= "שלום abc".len()));
@@ -312,23 +183,11 @@ fn truetype_collections_load() {
     // and check both faces are indexed (families already present gain faces).
     let before = db.faces("JetBrains Mono").len();
     let names = db.register_font_data(ttc);
-    assert!(
-        names.iter().any(|n| n == "Inter") && names.iter().any(|n| n == "JetBrains Mono"),
-        "{names:?}"
-    );
+    assert!(names.iter().any(|n| n == "Inter") && names.iter().any(|n| n == "JetBrains Mono"), "{names:?}");
     assert_eq!(db.faces("JetBrains Mono").len(), before + 1);
     // Layout with the TTC-backed face works.
-    let mut e = TextEngine {
-        fonts: db,
-        layouter: crate::layout::Layouter::new(),
-    };
-    let t = styled(
-        "mono",
-        CharStyle {
-            font_family: "JetBrains Mono".into(),
-            ..Default::default()
-        },
-    );
+    let mut e = TextEngine { fonts: db, layouter: crate::layout::Layouter::new() };
+    let t = styled("mono", CharStyle { font_family: "JetBrains Mono".into(), ..Default::default() });
     let l = e.layout(&t, 72.0);
     assert!(l.glyphs.iter().all(|g| g.id != 0));
 }
@@ -337,44 +196,14 @@ fn truetype_collections_load() {
 fn opentype_features_and_tracking() {
     let mut e = TextEngine::new();
     let ids = |e: &mut TextEngine, feats: Vec<FontFeature>, lig: bool| {
-        let t = styled(
-            "a0",
-            CharStyle {
-                features: feats,
-                ligatures: lig,
-                ..Default::default()
-            },
-        );
-        e.layout(&t, 72.0)
-            .glyphs
-            .iter()
-            .map(|g| g.id)
-            .collect::<Vec<_>>()
+        let t = styled("a0", CharStyle { features: feats, ligatures: lig, ..Default::default() });
+        e.layout(&t, 72.0).glyphs.iter().map(|g| g.id).collect::<Vec<_>>()
     };
     let plain = ids(&mut e, vec![], true);
-    let alt = ids(
-        &mut e,
-        vec![FontFeature {
-            tag: "zero".into(),
-            value: 1,
-        }],
-        true,
-    );
-    assert_ne!(
-        plain, alt,
-        "Inter's `zero` feature selects the slashed zero"
-    );
+    let alt = ids(&mut e, vec![FontFeature { tag: "zero".into(), value: 1 }], true);
+    assert_ne!(plain, alt, "Inter's `zero` feature selects the slashed zero");
     let a = width(&e.layout(&styled("tracking", CharStyle::default()), 72.0));
-    let b = width(&e.layout(
-        &styled(
-            "tracking",
-            CharStyle {
-                tracking: 100.0,
-                ..Default::default()
-            },
-        ),
-        72.0,
-    ));
+    let b = width(&e.layout(&styled("tracking", CharStyle { tracking: 100.0, ..Default::default() }), 72.0));
     // 100/1000 em at 12 px per letter (8 letters; trailing spacing counts too).
     assert!((b - a - 8.0 * 1.2).abs() < 1.3, "{a} → {b}");
 }
@@ -382,10 +211,7 @@ fn opentype_features_and_tracking() {
 #[test]
 fn raster_coverage_scales_and_depths_agree() {
     let mut e = TextEngine::new();
-    let t = |size: f32| TextLayer {
-        transform: Affine::translate(10.0, 50.0),
-        ..point("Ink", size)
-    };
+    let t = |size: f32| TextLayer { transform: Affine::translate(10.0, 50.0), ..point("Ink", size) };
     let (_, r12) = e.render(&t(12.0), 72.0, PixelFormat::RGBA8);
     let (_, r24) = e.render(&t(24.0), 72.0, PixelFormat::RGBA8);
     let s12 = alpha_sum(&r12.surface, r12.rect);
@@ -394,17 +220,8 @@ fn raster_coverage_scales_and_depths_agree() {
     let ratio = s24 / s12;
     assert!((3.6..4.4).contains(&ratio), "ink ∝ size²: {ratio}");
     // Placement: anchored at (10, 50) baseline.
-    assert!(
-        r12.rect.x0 >= 8 && r12.rect.x0 <= 11 && r12.rect.y1 <= 53 && r12.rect.y1 >= 50,
-        "{:?}",
-        r12.rect
-    );
-    for fmt in [
-        PixelFormat::RGBA16,
-        PixelFormat::RGBA32F,
-        PixelFormat::GRAYA8,
-        PixelFormat::CMYKA8,
-    ] {
+    assert!(r12.rect.x0 >= 8 && r12.rect.x0 <= 11 && r12.rect.y1 <= 53 && r12.rect.y1 >= 50, "{:?}", r12.rect);
+    for fmt in [PixelFormat::RGBA16, PixelFormat::RGBA32F, PixelFormat::GRAYA8, PixelFormat::CMYKA8] {
         let (_, r) = e.render(&t(12.0), 72.0, fmt);
         assert_eq!(r.rect, r12.rect);
         let s = alpha_sum(&r.surface, r.rect);
@@ -414,10 +231,7 @@ fn raster_coverage_scales_and_depths_agree() {
     let (_, again) = e.render(&t(12.0), 72.0, PixelFormat::RGBA8);
     assert_eq!(again.surface, r12.surface);
     // Golden-ish total ink for "Ink" in Inter 12 px (±3%).
-    assert!(
-        (s12 - GOLDEN_INK_12).abs() / GOLDEN_INK_12 < 0.03,
-        "ink sum {s12}"
-    );
+    assert!((s12 - GOLDEN_INK_12).abs() / GOLDEN_INK_12 < 0.03, "ink sum {s12}");
 }
 
 /// Sum of alpha for "Ink", Inter Regular 12 px (measured once; guards rasterizer regressions).
@@ -426,102 +240,44 @@ const GOLDEN_INK_12: f64 = 44.4;
 #[test]
 fn styles_change_pixels() {
     let mut e = TextEngine::new();
-    let base = CharStyle {
-        size_pt: 30.0,
-        ..Default::default()
-    };
+    let base = CharStyle { size_pt: 30.0, ..Default::default() };
     let ink = |e: &mut TextEngine, s: CharStyle| {
-        let (_, r) = e.render(
-            &TextLayer {
-                transform: Affine::translate(5.0, 40.0),
-                ..styled("Hi", s)
-            },
-            72.0,
-            PixelFormat::RGBA8,
-        );
+        let (_, r) = e.render(&TextLayer { transform: Affine::translate(5.0, 40.0), ..styled("Hi", s) }, 72.0, PixelFormat::RGBA8);
         (alpha_sum(&r.surface, r.rect), r.rect)
     };
     let (plain, prect) = ink(&mut e, base.clone());
-    let (bold, _) = ink(
-        &mut e,
-        CharStyle {
-            faux_bold: true,
-            ..base.clone()
-        },
-    );
+    let (bold, _) = ink(&mut e, CharStyle { faux_bold: true, ..base.clone() });
     assert!(bold > plain * 1.1, "{plain} → {bold}");
-    let (under, urect) = ink(
-        &mut e,
-        CharStyle {
-            underline: true,
-            ..base.clone()
-        },
-    );
+    let (under, urect) = ink(&mut e, CharStyle { underline: true, ..base.clone() });
     assert!(under > plain && urect.y1 > prect.y1);
-    let (_, irect) = ink(
-        &mut e,
-        CharStyle {
-            faux_italic: true,
-            ..base.clone()
-        },
-    );
+    let (_, irect) = ink(&mut e, CharStyle { faux_italic: true, ..base.clone() });
     assert!(irect.x1 > prect.x1, "slanted top extends right");
-    let (_, srect) = ink(
-        &mut e,
-        CharStyle {
-            baseline_shift_pt: 10.0,
-            ..base.clone()
-        },
-    );
+    let (_, srect) = ink(&mut e, CharStyle { baseline_shift_pt: 10.0, ..base.clone() });
     assert_eq!(srect.y0, prect.y0 - 10);
-    let (_, hrect) = ink(
-        &mut e,
-        CharStyle {
-            horizontal_scale: 2.0,
-            ..base.clone()
-        },
-    );
+    let (_, hrect) = ink(&mut e, CharStyle { horizontal_scale: 2.0, ..base.clone() });
     assert!(hrect.width() as f32 > prect.width() as f32 * 1.7);
 }
 
 #[test]
 fn multicolor_runs() {
     let mut e = TextEngine::new();
-    let red = CharStyle {
-        size_pt: 40.0,
-        color: Color::rgb(1.0, 0.0, 0.0),
-        ..Default::default()
-    };
-    let blue = CharStyle {
-        color: Color::rgb(0.0, 0.0, 1.0),
-        ..red.clone()
-    };
+    let red = CharStyle { size_pt: 40.0, color: Color::rgb(1.0, 0.0, 0.0), ..Default::default() };
+    let blue = CharStyle { color: Color::rgb(0.0, 0.0, 1.0), ..red.clone() };
     let t = TextLayer {
         text: "HH".into(),
-        runs: vec![
-            TextRun { len: 1, style: red },
-            TextRun {
-                len: 1,
-                style: blue,
-            },
-        ],
+        runs: vec![TextRun { len: 1, style: red }, TextRun { len: 1, style: blue }],
         transform: Affine::translate(0.0, 40.0),
         ..Default::default()
     };
     let (l, r) = e.render(&t, 72.0, PixelFormat::RGBA8);
     assert_eq!(l.glyphs.len(), 2);
     let px = r.surface.read_region(r.rect);
-    let opaque: Vec<&[f32]> = px.chunks_exact(4).filter(|p| p[3] > 0.99).collect();
+    let opaque: Vec<&[f32; 4]> = px.as_chunks::<4>().0.iter().filter(|p| p[3] > 0.99).collect();
     assert!(opaque.iter().any(|p| p[0] > 0.99 && p[2] < 0.01));
     assert!(opaque.iter().any(|p| p[2] > 0.99 && p[0] < 0.01));
     // CMYK target keeps colour in the document model.
     let (_, rc) = e.render(&t, 72.0, PixelFormat::CMYKA8);
-    assert!(
-        rc.surface
-            .read_region(rc.rect)
-            .chunks_exact(5)
-            .any(|p| p[4] > 0.99 && p[1] > 0.9 && p[2] > 0.9)
-    );
+    assert!(rc.surface.read_region(rc.rect).as_chunks::<5>().0.iter().any(|p| p[4] > 0.99 && p[1] > 0.9 && p[2] > 0.9));
 }
 
 #[test]
@@ -554,15 +310,9 @@ fn empty_text_and_empty_lines() {
 #[test]
 fn postscript_names() {
     let g = fonts::guess_from_postscript("MyriadPro-BoldIt");
-    assert_eq!(
-        (g.family.as_str(), g.weight, g.italic),
-        ("Myriad Pro", 700, true)
-    );
+    assert_eq!((g.family.as_str(), g.weight, g.italic), ("Myriad Pro", 700, true));
     let g = fonts::guess_from_postscript("TimesNewRomanPSMT");
-    assert_eq!(
-        (g.family.as_str(), g.weight, g.italic),
-        ("Times New Roman", 400, false)
-    );
+    assert_eq!((g.family.as_str(), g.weight, g.italic), ("Times New Roman", 400, false));
     let g = fonts::guess_from_postscript("Arial-BoldMT");
     assert_eq!((g.family.as_str(), g.weight), ("Arial", 700));
     let mut db = fonts::FontDb::new();
@@ -570,28 +320,14 @@ fn postscript_names() {
     assert_eq!((r.family.as_str(), r.weight, r.exact), ("Inter", 600, true));
     // Unknown fonts fall back gracefully in layout.
     let mut e = TextEngine::new();
-    let t = styled(
-        "x",
-        CharStyle {
-            font_family: "Nonexistent Sans".into(),
-            postscript_name: Some("Nope-Bold".into()),
-            ..Default::default()
-        },
-    );
+    let t = styled("x", CharStyle { font_family: "Nonexistent Sans".into(), postscript_name: Some("Nope-Bold".into()), ..Default::default() });
     assert!(e.layout(&t, 72.0).glyphs[0].id != 0);
 }
 
 #[test]
 fn depth_is_respected() {
     let mut e = TextEngine::new();
-    let (_, r) = e.render(
-        &TextLayer {
-            transform: Affine::translate(2.0, 20.0),
-            ..point("a", 20.0)
-        },
-        72.0,
-        PixelFormat::RGBA16,
-    );
+    let (_, r) = e.render(&TextLayer { transform: Affine::translate(2.0, 20.0), ..point("a", 20.0) }, 72.0, PixelFormat::RGBA16);
     assert_eq!(r.surface.format().sample, SampleType::U16);
     assert!(r.surface.format().alpha);
 }
@@ -604,84 +340,25 @@ fn dump_sample() {
     let Some(path) = std::env::var_os("PHOTOCRAFT_TEXT_DUMP") else {
         return;
     };
-    let mut e = if std::env::var_os("PHOTOCRAFT_TEXT_SYSTEM").is_some() {
-        TextEngine::with_system_fonts()
-    } else {
-        TextEngine::new()
-    };
-    let s = CharStyle {
-        size_pt: 28.0,
-        ..Default::default()
-    };
-    let text = "Photocraft Type\nBold faux, italic faux, underline\nשלום عربي mixed ✓\nJustified paragraph text wraps inside the box nicely and evenly across lines.";
+    let mut e = if std::env::var_os("PHOTOCRAFT_TEXT_SYSTEM").is_some() { TextEngine::with_system_fonts() } else { TextEngine::new() };
+    let s = CharStyle { size_pt: 28.0, ..Default::default() };
+    let text =
+        "Photocraft Type\nBold faux, italic faux, underline\nשלום عربي mixed ✓\nJustified paragraph text wraps inside the box nicely and evenly across lines.";
     let runs = vec![
-        TextRun {
-            len: 16,
-            style: CharStyle {
-                size_pt: 40.0,
-                color: Color::rgb(0.1, 0.3, 0.9),
-                caps: Caps::Normal,
-                ..s.clone()
-            },
-        },
-        TextRun {
-            len: 5,
-            style: CharStyle {
-                faux_bold: true,
-                ..s.clone()
-            },
-        },
-        TextRun {
-            len: 13,
-            style: CharStyle {
-                faux_italic: true,
-                color: Color::rgb(0.8, 0.1, 0.1),
-                ..s.clone()
-            },
-        },
-        TextRun {
-            len: 11,
-            style: CharStyle {
-                underline: true,
-                strikethrough: false,
-                ..s.clone()
-            },
-        },
-        TextRun {
-            len: 1000,
-            style: CharStyle {
-                size_pt: 20.0,
-                tracking: 20.0,
-                ..s.clone()
-            },
-        },
+        TextRun { len: 16, style: CharStyle { size_pt: 40.0, color: Color::rgb(0.1, 0.3, 0.9), caps: Caps::Normal, ..s.clone() } },
+        TextRun { len: 5, style: CharStyle { faux_bold: true, ..s.clone() } },
+        TextRun { len: 13, style: CharStyle { faux_italic: true, color: Color::rgb(0.8, 0.1, 0.1), ..s.clone() } },
+        TextRun { len: 11, style: CharStyle { underline: true, strikethrough: false, ..s.clone() } },
+        TextRun { len: 1000, style: CharStyle { size_pt: 20.0, tracking: 20.0, ..s.clone() } },
     ];
     let t = TextLayer {
         text: text.into(),
         runs,
         paragraphs: vec![
-            ParagraphRun {
-                len: 45,
-                style: ParagraphStyle {
-                    align: TextAlign::Left,
-                    ..Default::default()
-                },
-            },
-            ParagraphRun {
-                len: 1000,
-                style: ParagraphStyle {
-                    align: TextAlign::JustifyLeft,
-                    space_before_pt: 6.0,
-                    ..Default::default()
-                },
-            },
+            ParagraphRun { len: 45, style: ParagraphStyle { align: TextAlign::Left, ..Default::default() } },
+            ParagraphRun { len: 1000, style: ParagraphStyle { align: TextAlign::JustifyLeft, space_before_pt: 6.0, ..Default::default() } },
         ],
-        shape: TextShape::Box {
-            x: 0.0,
-            y: 0.0,
-            width: 560.0,
-            height: 400.0,
-        },
+        shape: TextShape::Box { x: 0.0, y: 0.0, width: 560.0, height: 400.0 },
         transform: Affine::translate(20.0, 20.0),
         ..Default::default()
     };
@@ -703,11 +380,8 @@ fn dump_sample() {
 /// Variable-font axes reach the outlines (uses a system variable font when one is present).
 #[test]
 fn variable_font_axes() {
-    let candidates = [
-        "/System/Library/Fonts/SFNS.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-VariableFont_wdth,wght.ttf",
-        "C:\\Windows\\Fonts\\bahnschrift.ttf",
-    ];
+    let candidates =
+        ["/System/Library/Fonts/SFNS.ttf", "/usr/share/fonts/truetype/noto/NotoSans-VariableFont_wdth,wght.ttf", "C:\\Windows\\Fonts\\bahnschrift.ttf"];
     let Some(bytes) = candidates.iter().find_map(|p| std::fs::read(p).ok()) else {
         return;
     };
@@ -716,32 +390,17 @@ fn variable_font_axes() {
     let Some(fam) = fams.first().cloned() else {
         return;
     };
-    if !e
-        .fonts
-        .faces(&fam)
-        .iter()
-        .any(|f| f.axes.iter().any(|a| a.0 == "wght"))
-    {
+    if !e.fonts.faces(&fam).iter().any(|f| f.axes.iter().any(|a| a.0 == "wght")) {
         return;
     }
     let ink = |e: &mut TextEngine, w: f32| {
         let s = CharStyle {
             font_family: fam.clone(),
             size_pt: 40.0,
-            variations: vec![photocraft_doc::text::FontVariation {
-                axis: "wght".into(),
-                value: w,
-            }],
+            variations: vec![photocraft_doc::text::FontVariation { axis: "wght".into(), value: w }],
             ..Default::default()
         };
-        let (_, r) = e.render(
-            &TextLayer {
-                transform: Affine::translate(0.0, 50.0),
-                ..styled("Weight", s)
-            },
-            72.0,
-            PixelFormat::RGBA8,
-        );
+        let (_, r) = e.render(&TextLayer { transform: Affine::translate(0.0, 50.0), ..styled("Weight", s) }, 72.0, PixelFormat::RGBA8);
         alpha_sum(&r.surface, r.rect)
     };
     let light = ink(&mut e, 200.0);
@@ -757,29 +416,15 @@ fn warp_bends_rendered_text_and_outlines() {
     t.transform = Affine::translate(20.0, 60.0);
     let fmt = PixelFormat::RGBA8;
     let (_, flat) = e.render(&t, 72.0, fmt);
-    t.warp = Some(TextWarp {
-        style: "warpArc".into(),
-        value: 60.0,
-        horizontal: true,
-        ..Default::default()
-    });
+    t.warp = Some(TextWarp { style: "warpArc".into(), value: 60.0, horizontal: true, ..Default::default() });
     let (layout, arced) = e.render(&t, 72.0, fmt);
     // An arc pushes the ends down: the warped ink is taller and pixels differ.
-    assert!(
-        arced.rect.height() > flat.rect.height() + 10,
-        "{:?} vs {:?}",
-        arced.rect,
-        flat.rect
-    );
+    assert!(arced.rect.height() > flat.rect.height() + 10, "{:?} vs {:?}", arced.rect, flat.rect);
     assert!(alpha_sum(&arced.surface, arced.rect) > 0.0);
     // Outlines follow the same warp: the first glyph's outline sits lower than the middle one's.
     let warp = crate::render::layout_warp(&layout, t.warp.as_ref());
     let outs = crate::render::outlines(&layout, &t.transform, warp.as_ref());
-    assert_eq!(
-        outs.len(),
-        layout.glyphs.iter().filter(|g| g.id != 0).count() - 1,
-        "space has no outline"
-    );
+    assert_eq!(outs.len(), layout.glyphs.iter().filter(|g| g.id != 0).count() - 1, "space has no outline");
     let low_y = |els: &Vec<crate::render::PathEl>| {
         els.iter()
             .filter_map(|e| match e {
@@ -795,12 +440,7 @@ fn warp_bends_rendered_text_and_outlines() {
     for els in &flat_outs {
         for el in els {
             if let crate::render::PathEl::MoveTo(p) | crate::render::PathEl::LineTo(p) = el {
-                assert!(
-                    p[0] >= f64::from(r.x0)
-                        && p[0] <= f64::from(r.x1)
-                        && p[1] >= f64::from(r.y0)
-                        && p[1] <= f64::from(r.y1)
-                );
+                assert!(p[0] >= f64::from(r.x0) && p[0] <= f64::from(r.x1) && p[1] >= f64::from(r.y0) && p[1] <= f64::from(r.y1));
             }
         }
     }
@@ -812,34 +452,14 @@ fn psd_round_trips_antialias_opentype_and_warp() {
     let style = CharStyle {
         font_family: "Inter".into(),
         size_pt: 20.0,
-        features: vec![
-            FontFeature {
-                tag: "swsh".into(),
-                value: 1,
-            },
-            FontFeature {
-                tag: "frac".into(),
-                value: 1,
-            },
-        ],
+        features: vec![FontFeature { tag: "swsh".into(), value: 1 }, FontFeature { tag: "frac".into(), value: 1 }],
         discretionary_ligatures: true,
         ..Default::default()
     };
-    for aa in [
-        AntiAlias::Windows,
-        AntiAlias::WindowsLcd,
-        AntiAlias::Crisp,
-        AntiAlias::None,
-    ] {
+    for aa in [AntiAlias::Windows, AntiAlias::WindowsLcd, AntiAlias::Crisp, AntiAlias::None] {
         let mut t = styled("1/2 Swash", style.clone());
         t.antialias = aa;
-        t.warp = Some(TextWarp {
-            style: "warpFlag".into(),
-            value: -35.0,
-            horizontal_distortion: 10.0,
-            vertical_distortion: 0.0,
-            horizontal: false,
-        });
+        t.warp = Some(TextWarp { style: "warpFlag".into(), value: -35.0, horizontal_distortion: 10.0, vertical_distortion: 0.0, horizontal: false });
         let bytes = crate::psd::build_tysh(&t, 72.0, None);
         let back = crate::psd::text_layer_from_tysh(&bytes, 72.0).unwrap();
         assert_eq!(back.antialias, aa);

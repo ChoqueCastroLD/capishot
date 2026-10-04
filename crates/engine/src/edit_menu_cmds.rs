@@ -48,7 +48,10 @@ pub struct EditState {
 
 /// Commands whose result Edit › Fade can blend back against the previous state.
 fn fadeable(id: &str) -> bool {
-    id.starts_with("filter.") || id.starts_with("image.adjustments.") || id.starts_with("paint.") || matches!(id, "edit.fill" | "edit.stroke" | "edit.contentAwareFill" | "image.autoTone" | "image.autoContrast" | "image.autoColor")
+    id.starts_with("filter.")
+        || id.starts_with("image.adjustments.")
+        || id.starts_with("paint.")
+        || matches!(id, "edit.fill" | "edit.stroke" | "edit.contentAwareFill" | "image.autoTone" | "image.autoContrast" | "image.autoColor")
 }
 
 /// Called after every successful command: remember a fadeable result.
@@ -59,23 +62,27 @@ pub(crate) fn after_command(s: &mut Session, id: &str) {
     let Some(st) = s.active() else { return };
     let Some(layer) = st.active_layer else { return };
     let label = st.history.undo_label().unwrap_or(id).to_string();
-    let mask = st.doc.layer(layer).is_some_and(|l| l.mask.is_some()) && st.history.state(st.history.past_len().wrapping_sub(1)).is_some_and(|prev| {
-        // The mask changed and the pixels didn't: the command painted the mask.
-        let now = st.doc.layer(layer);
-        let was = prev.layer(layer);
-        let surf_eq = |a: Option<&Surface>, b: Option<&Surface>| match (a, b) {
-            (Some(a), Some(b)) => crate_fingerprint(a) == crate_fingerprint(b),
-            (None, None) => true,
-            _ => false,
-        };
-        surf_eq(now.and_then(|l| l.surface()), was.and_then(|l| l.surface())) && !surf_eq(now.and_then(|l| l.mask.as_ref().map(|m| &m.surface)), was.and_then(|l| l.mask.as_ref().map(|m| &m.surface)))
-    });
+    let mask = st.doc.layer(layer).is_some_and(|l| l.mask.is_some())
+        && st.history.state(st.history.past_len().wrapping_sub(1)).is_some_and(|prev| {
+            // The mask changed and the pixels didn't: the command painted the mask.
+            let now = st.doc.layer(layer);
+            let was = prev.layer(layer);
+            let surf_eq = |a: Option<&Surface>, b: Option<&Surface>| match (a, b) {
+                (Some(a), Some(b)) => crate_fingerprint(a) == crate_fingerprint(b),
+                (None, None) => true,
+                _ => false,
+            };
+            surf_eq(now.and_then(|l| l.surface()), was.and_then(|l| l.surface()))
+                && !surf_eq(now.and_then(|l| l.mask.as_ref().map(|m| &m.surface)), was.and_then(|l| l.mask.as_ref().map(|m| &m.surface)))
+        });
     s.edit_state.fade = Some(FadeSource { doc: st.doc.id, revision: st.revision, layer, mask, label });
 }
 
 /// Tile identity of a surface (pointer equality of its COW tiles).
 fn crate_fingerprint(s: &Surface) -> u64 {
-    s.tiles().fold(s.tile_count() as u64, |h, (c, t)| (h ^ std::sync::Arc::as_ptr(t) as usize as u64 ^ ((c.tx as u64) << 32 | c.ty as u32 as u64)).wrapping_mul(0x100_0000_01b3))
+    s.tiles().fold(s.tile_count() as u64, |h, (c, t)| {
+        (h ^ std::sync::Arc::as_ptr(t) as usize as u64 ^ ((c.tx as u64) << 32 | c.ty as u32 as u64)).wrapping_mul(0x100_0000_01b3)
+    })
 }
 
 // ------------------------------------------------------------------ helpers
@@ -271,7 +278,9 @@ fn can_purge_histories(s: &Session) -> std::result::Result<(), String> {
     if s.documents().iter().any(|d| d.history.can_undo() || d.history.can_redo()) { Ok(()) } else { Err("no history to purge".into()) }
 }
 fn can_purge_all(s: &Session) -> std::result::Result<(), String> {
-    can_purge_histories(s).or_else(|_| can_purge_clipboard(s)).or_else(|_| if photocraft_compose::effect_cache_bytes() > 0 { Ok(()) } else { Err("nothing to purge".into()) })
+    can_purge_histories(s)
+        .or_else(|_| can_purge_clipboard(s))
+        .or_else(|_| if photocraft_compose::effect_cache_bytes() > 0 { Ok(()) } else { Err("nothing to purge".into()) })
 }
 
 // ------------------------------------------------------------------ Content-Aware Fill
@@ -527,7 +536,13 @@ fn can_define_shape(s: &Session) -> std::result::Result<(), String> {
 fn define_custom_shape(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let path = current_path(&st.doc, st.active_layer, p.get("path").and_then(Value::as_str)).ok_or_else(|| bad("edit.defineCustomShape", "no such path"))?;
-    let name = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| format!("Shape {}", s.edit_state.custom_shapes.len() + 1));
+    let name = p
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("Shape {}", s.edit_state.custom_shapes.len() + 1));
     let shapes = &mut s.edit_state.custom_shapes;
     match shapes.iter_mut().find(|c| c.name == name) {
         Some(c) => c.path = path,
@@ -575,7 +590,8 @@ pub fn find_matches(text: &str, find: &str, case: bool, whole: bool) -> Vec<(usi
 
 fn type_layers(doc: &Document, forward: bool) -> Vec<LayerId> {
     // Layers panel order: top first.
-    let mut ids: Vec<LayerId> = doc.walk().into_iter().rev().filter(|(_, _, l)| matches!(l.content, LayerContent::Text(_)) && !l.locks.all).map(|(_, _, l)| l.id).collect();
+    let mut ids: Vec<LayerId> =
+        doc.walk().into_iter().rev().filter(|(_, _, l)| matches!(l.content, LayerContent::Text(_)) && !l.locks.all).map(|(_, _, l)| l.id).collect();
     if !forward {
         ids.reverse();
     }
@@ -591,7 +607,8 @@ fn find_replace(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "edit.findAndReplaceText";
     let find = p.get("find").and_then(Value::as_str).filter(|f| !f.is_empty()).ok_or_else(|| bad(cmd, "missing `find`"))?.to_string();
     let replace = str_or(p, "replace", "").to_string();
-    let (case, whole, forward, all_layers) = (bool_or(p, "caseSensitive", false), bool_or(p, "wholeWord", false), bool_or(p, "forward", true), bool_or(p, "allLayers", true));
+    let (case, whole, forward, all_layers) =
+        (bool_or(p, "caseSensitive", false), bool_or(p, "wholeWord", false), bool_or(p, "forward", true), bool_or(p, "allLayers", true));
     let action = str_or(p, "action", "changeAll").to_string();
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let mut layers = type_layers(&st.doc, forward);
@@ -608,7 +625,8 @@ fn find_replace(s: &mut Session, p: &Value) -> Result<Value> {
     match action.as_str() {
         "changeAll" => {
             let doc = st.doc.clone();
-            let plan: Vec<(LayerId, Vec<(usize, usize)>)> = layers.iter().filter_map(|id| Some((*id, find_matches(&text_of(&doc, *id)?, &find, case, whole)))).filter(|(_, m)| !m.is_empty()).collect();
+            let plan: Vec<(LayerId, Vec<(usize, usize)>)> =
+                layers.iter().filter_map(|id| Some((*id, find_matches(&text_of(&doc, *id)?, &find, case, whole)))).filter(|(_, m)| !m.is_empty()).collect();
             let count: usize = plan.iter().map(|(_, m)| m.len()).sum();
             if count == 0 {
                 return Ok(json!({"count": 0, "layers": 0}));
@@ -678,7 +696,9 @@ fn find_replace(s: &mut Session, p: &Value) -> Result<Value> {
                 if let Some((a, b)) = hit {
                     s.edit_state.find_cursor = Some((id, a, b));
                     let _ = s.select_layer(id);
-                    return Ok(json!({"found": {"layer": id.0, "start": a, "end": b, "text": &text[a..b]}, "changed": changed.map(|(l, a, b)| json!({"layer": l.0, "start": a, "end": b}))}));
+                    return Ok(
+                        json!({"found": {"layer": id.0, "start": a, "end": b, "text": &text[a..b]}, "changed": changed.map(|(l, a, b)| json!({"layer": l.0, "start": a, "end": b}))}),
+                    );
                 }
             }
             s.edit_state.find_cursor = None;
@@ -736,7 +756,8 @@ fn preset_manager(s: &mut Session, p: &Value) -> Result<Value> {
     let i = preset_index(s, &kind, p)?;
     match action {
         "rename" => {
-            let new = p.get("newName").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).ok_or_else(|| bad(cmd, "missing `newName`"))?.to_string();
+            let new =
+                p.get("newName").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).ok_or_else(|| bad(cmd, "missing `newName`"))?.to_string();
             match kind.as_str() {
                 "brushes" => s.tools.presets[i].name = new,
                 "patterns" => s.patterns.items[i].name = new,
@@ -775,14 +796,22 @@ pub const PRESET_FORMAT: &str = "photocraft-presets";
 
 fn export_import(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "edit.presets.exportImportPresets";
-    let kinds: Vec<String> = p.get("kinds").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_else(|| ["brushes", "customShapes"].iter().map(|k| k.to_string()).collect());
+    let kinds: Vec<String> = p
+        .get("kinds")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_else(|| ["brushes", "customShapes"].iter().map(|k| k.to_string()).collect());
     let want = |k: &str| kinds.iter().any(|x| x == k);
     match str_or(p, "action", "export") {
         "export" => {
             let file = PresetFile {
                 format: PRESET_FORMAT.into(),
                 version: 1,
-                brushes: if want("brushes") { s.tools.presets.iter().filter(|b| !b.builtin || bool_or(p, "includeBuiltins", false)).cloned().collect() } else { Vec::new() },
+                brushes: if want("brushes") {
+                    s.tools.presets.iter().filter(|b| !b.builtin || bool_or(p, "includeBuiltins", false)).cloned().collect()
+                } else {
+                    Vec::new()
+                },
                 custom_shapes: if want("customShapes") { s.edit_state.custom_shapes.clone() } else { Vec::new() },
             };
             Ok(json!({"data": file, "brushes": file.brushes.len(), "customShapes": file.custom_shapes.len()}))
@@ -832,11 +861,21 @@ macro_rules! spec {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("edit.fade", "Fade…", ["Edit"], Some("Cmd+Shift+F"), r##"{"opacity":0..100=100,"mode":"normal|multiply|screen|overlay|softLight|hardLight|darken|lighten|difference|color|luminosity"}"##, can_fade, fade),
+        spec!(
+            "edit.fade",
+            "Fade…",
+            ["Edit"],
+            Some("Cmd+Shift+F"),
+            r##"{"opacity":0..100=100,"mode":"normal|multiply|screen|overlay|softLight|hardLight|darken|lighten|difference|color|luminosity"}"##,
+            can_fade,
+            fade
+        ),
         spec!("edit.purge.undo", "Undo", ["Edit", "Purge"], None, "{}", can_purge_undo, |s, _| purge(s, "undo")),
         spec!("edit.purge.clipboard", "Clipboard", ["Edit", "Purge"], None, "{}", can_purge_clipboard, |s, _| purge(s, "clipboard")),
         spec!("edit.purge.histories", "Histories", ["Edit", "Purge"], None, "{}", can_purge_histories, |s, _| purge(s, "histories")),
-        spec!("edit.purge.videoCache", "Video Cache", ["Edit", "Purge"], None, "{}", always, |_, _| Ok(json!({"purged": [], "bytes": 0, "message": "nothing to purge (no video layers)"}))),
+        spec!("edit.purge.videoCache", "Video Cache", ["Edit", "Purge"], None, "{}", always, |_, _| Ok(
+            json!({"purged": [], "bytes": 0, "message": "nothing to purge (no video layers)"})
+        )),
         spec!("edit.purge.all", "All", ["Edit", "Purge"], None, "{}", can_purge_all, |s, _| purge(s, "all")),
         spec!(
             "edit.contentAwareFill",
@@ -856,8 +895,24 @@ pub fn specs() -> Vec<CommandSpec> {
             |s| pixel_layer(s).map(|_| ()),
             content_aware_scale
         ),
-        spec!("edit.defineBrushPreset", "Define Brush Preset…", ["Edit"], None, r##"{"name":text}"##, |s| if s.is_enabled("brush.defineFromSelection") { Ok(()) } else { Err("select pixels to define a brush from".into()) }, define_brush_preset),
-        spec!("edit.defineCustomShape", "Define Custom Shape…", ["Edit"], None, r##"{"name":text,"path":"work|<saved path name>"?}"##, can_define_shape, define_custom_shape),
+        spec!(
+            "edit.defineBrushPreset",
+            "Define Brush Preset…",
+            ["Edit"],
+            None,
+            r##"{"name":text}"##,
+            |s| if s.is_enabled("brush.defineFromSelection") { Ok(()) } else { Err("select pixels to define a brush from".into()) },
+            define_brush_preset
+        ),
+        spec!(
+            "edit.defineCustomShape",
+            "Define Custom Shape…",
+            ["Edit"],
+            None,
+            r##"{"name":text,"path":"work|<saved path name>"?}"##,
+            can_define_shape,
+            define_custom_shape
+        ),
         spec!(
             "edit.findAndReplaceText",
             "Find and Replace Text…",
@@ -867,8 +922,24 @@ pub fn specs() -> Vec<CommandSpec> {
             has_type_layer,
             find_replace
         ),
-        spec!("edit.presets.presetManager", "Preset Manager…", ["Edit", "Presets"], None, r##"{"action":"list|rename|delete|move","kind":"brushes|customShapes|patterns","index":n?,"name":str?,"newName":str?,"to":n?}"##, always, preset_manager),
-        spec!("edit.presets.exportImportPresets", "Export/Import Presets…", ["Edit", "Presets"], None, r##"{"action":"export|import","kinds":["brushes","customShapes"]?,"data":json (import),"includeBuiltins":bool=false}"##, always, export_import),
+        spec!(
+            "edit.presets.presetManager",
+            "Preset Manager…",
+            ["Edit", "Presets"],
+            None,
+            r##"{"action":"list|rename|delete|move","kind":"brushes|customShapes|patterns","index":n?,"name":str?,"newName":str?,"to":n?}"##,
+            always,
+            preset_manager
+        ),
+        spec!(
+            "edit.presets.exportImportPresets",
+            "Export/Import Presets…",
+            ["Edit", "Presets"],
+            None,
+            r##"{"action":"export|import","kinds":["brushes","customShapes"]?,"data":json (import),"includeBuiltins":bool=false}"##,
+            always,
+            export_import
+        ),
     ]
 }
 

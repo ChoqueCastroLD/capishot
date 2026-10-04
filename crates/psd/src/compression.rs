@@ -218,11 +218,7 @@ pub fn decode_planes(compression: Compression, data: &[u8], layout: &PlaneLayout
 pub fn encode_planes(compression: Compression, decoded: &[u8], layout: &PlaneLayout) -> Result<Vec<u8>> {
     let total = layout.decoded_len()?;
     if decoded.len() != total {
-        return Err(PsdError::invalid(format!(
-            "decoded buffer has {} bytes, layout requires {}",
-            decoded.len(),
-            total
-        )));
+        return Err(PsdError::invalid(format!("decoded buffer has {} bytes, layout requires {}", decoded.len(), total)));
     }
     match compression {
         Compression::Raw => Ok(decoded.to_vec()),
@@ -246,10 +242,7 @@ pub(crate) fn validate_planes(compression: Compression, data: &[u8], layout: &Pl
     match compression {
         Compression::Raw => {
             if (data.len() as u64) < total {
-                return Err(PsdError::UnexpectedEof {
-                    offset: data.len(),
-                    needed: usize::try_from(total - data.len() as u64).unwrap_or(usize::MAX),
-                });
+                return Err(PsdError::UnexpectedEof { offset: data.len(), needed: usize::try_from(total - data.len() as u64).unwrap_or(usize::MAX) });
             }
             Ok(())
         }
@@ -262,10 +255,7 @@ pub(crate) fn validate_planes(compression: Compression, data: &[u8], layout: &Pl
                 sum += read_count(&mut r, layout.version)? as u64;
             }
             if sum > r.remaining() as u64 {
-                return Err(PsdError::UnexpectedEof {
-                    offset: data.len(),
-                    needed: usize::try_from(sum - r.remaining() as u64).unwrap_or(usize::MAX),
-                });
+                return Err(PsdError::UnexpectedEof { offset: data.len(), needed: usize::try_from(sum - r.remaining() as u64).unwrap_or(usize::MAX) });
             }
             Ok(())
         }
@@ -355,9 +345,7 @@ pub fn zip_compress(data: &[u8]) -> Vec<u8> {
 pub fn zip_decompress(data: &[u8], expected: usize) -> Result<Vec<u8>> {
     let dec = flate2::read::ZlibDecoder::new(data);
     let mut out = Vec::with_capacity(expected.min(data.len().saturating_mul(1032)));
-    dec.take(expected as u64)
-        .read_to_end(&mut out)
-        .map_err(|e| PsdError::Decompress(e.to_string()))?;
+    dec.take(expected as u64).read_to_end(&mut out).map_err(|e| PsdError::Decompress(e.to_string()))?;
     if out.len() < expected {
         return Err(PsdError::Decompress(format!("zlib stream produced {} of {} bytes", out.len(), expected)));
     }

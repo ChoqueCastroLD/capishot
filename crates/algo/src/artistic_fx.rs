@@ -673,7 +673,8 @@ fn apply(e: &GalleryEffect, win: &mut Win, ctx: &Ctx) {
             let eb = g("edgeBrightness") / 50.0;
             for i in 0..win.c.len() {
                 let k = clamp01(edge[i] * 6.0);
-                win.c[i] = if eb >= 0.5 { map(win.c[i], |v| v + (1.0 - v) * k * (eb - 0.5) * 2.0) } else { map(win.c[i], |v| v * (1.0 - k * (0.5 - eb) * 2.0)) };
+                win.c[i] =
+                    if eb >= 0.5 { map(win.c[i], |v| v + (1.0 - v) * k * (eb - 0.5) * 2.0) } else { map(win.c[i], |v| v * (1.0 - k * (0.5 - eb) * 2.0)) };
             }
         }
         F::AngledStrokes | F::Crosshatch => {
@@ -863,10 +864,12 @@ fn apply(e: &GalleryEffect, win: &mut Win, ctx: &Ctx) {
             let r = (g("strokeLength") / 2.0) as usize;
             let bal = g("lightDarkBalance") / 100.0;
             let l = win.lum();
-            let mut n: Vec<f32> = (0..win.c.len()).map(|i| {
-                let (x, y) = win.xy(i);
-                hash01(x, y, 0, 151)
-            }).collect();
+            let mut n: Vec<f32> = (0..win.c.len())
+                .map(|i| {
+                    let (x, y) = win.xy(i);
+                    hash01(x, y, 0, 151)
+                })
+                .collect();
             line_blur(&mut n, 1, w, h, direction(e.choice("strokeDirection")), r);
             let sd = 0.2887 / ((2 * r + 1) as f32).sqrt();
             for i in 0..win.c.len() {
@@ -1034,7 +1037,11 @@ fn apply(e: &GalleryEffect, win: &mut Win, ctx: &Ctx) {
                 let q = match ty {
                     "soft" => [p[0] + hc(0) * it * 0.4, p[1] + hc(1) * it * 0.4, p[2] + hc(2) * it * 0.4],
                     "sprinkles" => {
-                        if hash01(x, y, 3, 211) < it * 0.15 { bg } else { p }
+                        if hash01(x, y, 3, 211) < it * 0.15 {
+                            bg
+                        } else {
+                            p
+                        }
                     }
                     "clumped" => map(p, |v| v + (vnoise(x as f32 / 2.0, y as f32 / 2.0, 212) - 0.5) * it * 1.2),
                     "contrasty" => map(p, |v| (v - 0.5) * (1.0 + it * 2.0) + 0.5 + hc(4) * it * 0.5),
@@ -1049,7 +1056,11 @@ fn apply(e: &GalleryEffect, win: &mut Win, ctx: &Ctx) {
                     "horizontal" => map(p, |v| v + (vnoise(x as f32 / 25.0, y as f32, 216) - 0.5) * it),
                     "vertical" => map(p, |v| v + (vnoise(x as f32, y as f32 / 25.0, 217) - 0.5) * it),
                     "speckle" => {
-                        if hash01(x, y, 6, 211) < it * 0.1 { mix(p, fg, 0.85) } else { p }
+                        if hash01(x, y, 6, 211) < it * 0.1 {
+                            mix(p, fg, 0.85)
+                        } else {
+                            p
+                        }
                     }
                     _ => [p[0] + hc(0) * it * 0.8, p[1] + hc(1) * it * 0.8, p[2] + hc(2) * it * 0.8],
                 };
@@ -1191,7 +1202,14 @@ mod tests {
             s.fill_rect(Rect::new(0, y, w, y + 3), &[0.9, 0.8, 0.2, 1.0]);
         }
         let t = std::time::Instant::now();
-        std::hint::black_box(crate::apply_in(&s, &FilterParams::AddNoise { amount: 10.0, distribution: crate::Distribution::Uniform, monochromatic: true, seed: 1 }, b, b, None, b));
+        std::hint::black_box(crate::apply_in(
+            &s,
+            &FilterParams::AddNoise { amount: 10.0, distribution: crate::Distribution::Uniform, monochromatic: true, seed: 1 },
+            b,
+            b,
+            None,
+            b,
+        ));
         println!("{:>18}: {:>7.0} ms", "(addNoise baseline)", t.elapsed().as_secs_f64() * 1000.0);
         let mut total = 0.0;
         for f in crate::GalleryFilter::ALL {

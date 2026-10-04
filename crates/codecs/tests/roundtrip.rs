@@ -31,39 +31,26 @@ fn check_roundtrip(format: Format, layout: ChannelLayout, sample: SampleType) {
         test_image(layout, sample)
     };
     let opts = EncodeOptions::default();
-    let bytes = encode(&img, format, &opts)
-        .unwrap_or_else(|e| panic!("{format:?} {layout:?} {sample:?}: {e}"));
+    let bytes = encode(&img, format, &opts).unwrap_or_else(|e| panic!("{format:?} {layout:?} {sample:?}: {e}"));
     assert_eq!(detect(&bytes), Some(format), "detect after encode");
     if !c.read {
         return;
     }
-    let back =
-        decode(&bytes).unwrap_or_else(|e| panic!("{format:?} {layout:?} {sample:?} decode: {e}"));
+    let back = decode(&bytes).unwrap_or_else(|e| panic!("{format:?} {layout:?} {sample:?} decode: {e}"));
     assert_eq!(back.dimensions(), img.dimensions());
 
     // Native storage must be preserved when the format declares support.
     let float_pnm_special = format == Format::Pnm && sample.is_float();
     if c.layouts.contains(&layout) && c.depths.contains(&sample) && !float_pnm_special {
         assert_eq!(back.layout(), layout, "{format:?} must keep layout");
-        assert_eq!(
-            back.sample_type(),
-            sample,
-            "{format:?} must keep sample type"
-        );
+        assert_eq!(back.sample_type(), sample, "{format:?} must keep sample type");
     }
     if c.depths.contains(&sample) && !float_pnm_special {
-        assert_eq!(
-            back.sample_type(),
-            sample,
-            "{format:?} must keep supported depth"
-        );
+        assert_eq!(back.sample_type(), sample, "{format:?} must keep supported depth");
     }
     // Integer sources never lose precision in formats offering that depth.
     if sample == SampleType::U16 && c.depths.contains(&SampleType::U16) {
-        assert!(matches!(
-            back.sample_type(),
-            SampleType::U16 | SampleType::F32
-        ));
+        assert!(matches!(back.sample_type(), SampleType::U16 | SampleType::F32));
     }
 
     let expected = img.convert(back.layout(), back.sample_type());
@@ -79,22 +66,12 @@ fn check_roundtrip(format: Format, layout: ChannelLayout, sample: SampleType) {
             }
             pe[ch - 1] = pb[ch - 1];
         }
-        expected_cmp = Image::from_normalized(
-            img.width(),
-            img.height(),
-            back.layout(),
-            back.sample_type(),
-            &e,
-        )
-        .unwrap();
+        expected_cmp = Image::from_normalized(img.width(), img.height(), back.layout(), back.sample_type(), &e).unwrap();
     }
 
     if c.lossy {
         let p = psnr(&expected_cmp, &back);
-        assert!(
-            p >= psnr_threshold(format),
-            "{format:?} {layout:?} {sample:?}: PSNR {p:.2} dB"
-        );
+        assert!(p >= psnr_threshold(format), "{format:?} {layout:?} {sample:?}: PSNR {p:.2} dB");
     } else {
         assert_eq!(
             expected_cmp.data(),
@@ -196,21 +173,10 @@ fn hdr_format_keeps_bright_values_approximately() {
 
 #[test]
 fn f16_exr_is_bit_exact() {
-    let vals: Vec<f16> = (0..20 * 10 * 4)
-        .map(|i| f16::from_f32(i as f32 * 0.013 - 1.0))
-        .collect();
+    let vals: Vec<f16> = (0..20 * 10 * 4).map(|i| f16::from_f32(i as f32 * 0.013 - 1.0)).collect();
     let img = Image::from_f16(20, 10, ChannelLayout::Rgba, &vals).unwrap();
-    for comp in [
-        ExrCompression::None,
-        ExrCompression::Rle,
-        ExrCompression::Zip1,
-        ExrCompression::Zip16,
-        ExrCompression::Piz,
-    ] {
-        let opts = EncodeOptions {
-            exr_compression: comp,
-            ..Default::default()
-        };
+    for comp in [ExrCompression::None, ExrCompression::Rle, ExrCompression::Zip1, ExrCompression::Zip16, ExrCompression::Piz] {
+        let opts = EncodeOptions { exr_compression: comp, ..Default::default() };
         let back = decode(&encode(&img, Format::OpenExr, &opts).unwrap()).unwrap();
         assert_eq!(back.to_f16_samples().unwrap(), vals, "{comp:?}");
     }
@@ -221,22 +187,10 @@ fn tiff_all_compressions_lossless() {
     for layout in ChannelLayout::ALL {
         for sample in [SampleType::U8, SampleType::U16, SampleType::F32] {
             let img = test_image(layout, sample);
-            for comp in [
-                TiffCompression::None,
-                TiffCompression::Lzw,
-                TiffCompression::Deflate,
-                TiffCompression::PackBits,
-            ] {
-                let opts = EncodeOptions {
-                    tiff_compression: comp,
-                    ..Default::default()
-                };
+            for comp in [TiffCompression::None, TiffCompression::Lzw, TiffCompression::Deflate, TiffCompression::PackBits] {
+                let opts = EncodeOptions { tiff_compression: comp, ..Default::default() };
                 let back = decode(&encode(&img, Format::Tiff, &opts).unwrap()).unwrap();
-                assert_eq!(
-                    back,
-                    img.clone().with_meta(back.meta.clone()),
-                    "{layout:?} {sample:?} {comp:?}"
-                );
+                assert_eq!(back, img.clone().with_meta(back.meta.clone()), "{layout:?} {sample:?} {comp:?}");
             }
         }
     }
@@ -245,16 +199,8 @@ fn tiff_all_compressions_lossless() {
 #[test]
 fn png_all_compressions_lossless() {
     let img = test_image(ChannelLayout::Rgba, SampleType::U16);
-    for comp in [
-        PngCompression::None,
-        PngCompression::Fast,
-        PngCompression::Default,
-        PngCompression::Best,
-    ] {
-        let opts = EncodeOptions {
-            png_compression: comp,
-            ..Default::default()
-        };
+    for comp in [PngCompression::None, PngCompression::Fast, PngCompression::Default, PngCompression::Best] {
+        let opts = EncodeOptions { png_compression: comp, ..Default::default() };
         let back = decode(&encode(&img, Format::Png, &opts).unwrap()).unwrap();
         assert_eq!(back.data(), img.data(), "{comp:?}");
     }
@@ -263,24 +209,8 @@ fn png_all_compressions_lossless() {
 #[test]
 fn jpeg_quality_affects_size_and_error() {
     let img = test_image(ChannelLayout::Rgb, SampleType::U8);
-    let lo = encode(
-        &img,
-        Format::Jpeg,
-        &EncodeOptions {
-            jpeg_quality: 20,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let hi = encode(
-        &img,
-        Format::Jpeg,
-        &EncodeOptions {
-            jpeg_quality: 98,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let lo = encode(&img, Format::Jpeg, &EncodeOptions { jpeg_quality: 20, ..Default::default() }).unwrap();
+    let hi = encode(&img, Format::Jpeg, &EncodeOptions { jpeg_quality: 98, ..Default::default() }).unwrap();
     assert!(lo.len() < hi.len());
     let plo = psnr(&img, &decode(&lo).unwrap());
     let phi = psnr(&img, &decode(&hi).unwrap());
@@ -290,48 +220,16 @@ fn jpeg_quality_affects_size_and_error() {
 #[test]
 fn jpeg_444_beats_420_on_chroma_detail() {
     let img = synth(64, 64, ChannelLayout::Rgb, SampleType::U8, 3, 0.5);
-    let a = encode(
-        &img,
-        Format::Jpeg,
-        &EncodeOptions {
-            jpeg_chroma_subsampling: false,
-            jpeg_quality: 95,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let b = encode(
-        &img,
-        Format::Jpeg,
-        &EncodeOptions {
-            jpeg_chroma_subsampling: true,
-            jpeg_quality: 95,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let a = encode(&img, Format::Jpeg, &EncodeOptions { jpeg_chroma_subsampling: false, jpeg_quality: 95, ..Default::default() }).unwrap();
+    let b = encode(&img, Format::Jpeg, &EncodeOptions { jpeg_chroma_subsampling: true, jpeg_quality: 95, ..Default::default() }).unwrap();
     assert!(psnr(&img, &decode(&a).unwrap()) > psnr(&img, &decode(&b).unwrap()));
 }
 
 #[test]
 fn webp_lossy_request_is_honest_error() {
     let img = test_image(ChannelLayout::Rgb, SampleType::U8);
-    let e = encode(
-        &img,
-        Format::WebP,
-        &EncodeOptions {
-            webp_lossless: false,
-            ..Default::default()
-        },
-    )
-    .unwrap_err();
-    assert!(matches!(
-        e,
-        CodecError::Unsupported {
-            format: Format::WebP,
-            ..
-        }
-    ));
+    let e = encode(&img, Format::WebP, &EncodeOptions { webp_lossless: false, ..Default::default() }).unwrap_err();
+    assert!(matches!(e, CodecError::Unsupported { format: Format::WebP, .. }));
 }
 
 #[test]
@@ -346,10 +244,7 @@ fn one_pixel_images_roundtrip() {
 #[test]
 fn ico_rejects_oversize() {
     let img = Image::new(300, 10, ChannelLayout::Rgba, SampleType::U8);
-    assert!(matches!(
-        encode(&img, Format::Ico, &EncodeOptions::default()),
-        Err(CodecError::Encode { .. })
-    ));
+    assert!(matches!(encode(&img, Format::Ico, &EncodeOptions::default()), Err(CodecError::Encode { .. })));
     let img = Image::new(256, 256, ChannelLayout::Rgba, SampleType::U8);
     assert!(encode(&img, Format::Ico, &EncodeOptions::default()).is_ok());
 }

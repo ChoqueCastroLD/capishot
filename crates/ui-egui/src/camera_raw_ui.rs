@@ -118,7 +118,22 @@ pub fn open(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String> 
         }
     }
     let float = surf.format().sample == photocraft_color::SampleType::F32;
-    let mut d = CameraRawDialog { layer, layer_name: name, params: CameraRaw::default(), proxy, pw, ph, full_w: w, float, tex: None, before_tex: None, dirty: true, show_before: false, mixer_tab: 1, render_ms: 0.0 };
+    let mut d = CameraRawDialog {
+        layer,
+        layer_name: name,
+        params: CameraRaw::default(),
+        proxy,
+        pw,
+        ph,
+        full_w: w,
+        float,
+        tex: None,
+        before_tex: None,
+        dirty: true,
+        show_before: false,
+        mixer_tab: 1,
+        render_ms: 0.0,
+    };
     d.render(ctx);
     app.camera_raw = Some(d);
     Ok(())
@@ -382,7 +397,17 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 row(ui, &mut dirty, "Roughness", &mut p.grain_roughness, 0.0..=100.0, None);
                 widgets::section_label(ui, "Vignetting");
                 let mut style = p.vignette_style.clone();
-                if widgets::dropdown(ui, "cr-vig-style", &mut style, &[("highlightPriority".to_string(), "Highlight Priority"), ("colorPriority".to_string(), "Color Priority"), ("paintOverlay".to_string(), "Paint Overlay")], 200.0) {
+                if widgets::dropdown(
+                    ui,
+                    "cr-vig-style",
+                    &mut style,
+                    &[
+                        ("highlightPriority".to_string(), "Highlight Priority"),
+                        ("colorPriority".to_string(), "Color Priority"),
+                        ("paintOverlay".to_string(), "Paint Overlay"),
+                    ],
+                    200.0,
+                ) {
                     p.vignette_style = style;
                     dirty = true;
                 }

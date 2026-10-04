@@ -221,7 +221,19 @@ mod tests {
         let a = Rect::new(0, 0, 11, 2);
         let mut sel = Surface::new(PixelFormat::GRAY8);
         sel.fill_rect(Rect::new(0, 0, 11, 1), &[1.0]);
-        paint_gradient(&mut s, a, (0.5, 0.0), (10.5, 0.0), GradientShape::Linear, &[(0.0, [0.0, 0.0, 0.0, 1.0]), (1.0, [1.0, 1.0, 1.0, 1.0])], false, 1.0, BlendMode::Normal, false, Some(&sel));
+        paint_gradient(
+            &mut s,
+            a,
+            (0.5, 0.0),
+            (10.5, 0.0),
+            GradientShape::Linear,
+            &[(0.0, [0.0, 0.0, 0.0, 1.0]), (1.0, [1.0, 1.0, 1.0, 1.0])],
+            false,
+            1.0,
+            BlendMode::Normal,
+            false,
+            Some(&sel),
+        );
         assert!(s.pixel(0, 0)[0] < 0.01 && s.pixel(10, 0)[0] > 0.99);
         assert!((s.pixel(5, 0)[0] - 0.5).abs() < 0.01);
         assert_eq!(s.pixel(5, 1)[3], 0.0, "outside the selection");

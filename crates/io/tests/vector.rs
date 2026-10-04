@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use photocraft_color::{Color, ColorMode, SampleType};
 use photocraft_doc::{
-    Document, Fill, Knot, Layer, LayerContent, LineCap, LineJoin, LiveShape, NamedPath, Path, PathOp, ShapeLayer, ShapeStroke,
-    Size, StrokeAlign, Subpath, VectorMask,
+    Document, Fill, Knot, Layer, LayerContent, LineCap, LineJoin, LiveShape, NamedPath, Path, PathOp, ShapeLayer, ShapeStroke, Size, StrokeAlign, Subpath,
+    VectorMask,
 };
 use photocraft_geom::{Point, Rect};
 use photocraft_io::*;
@@ -125,7 +125,9 @@ fn shape_layer_typed_roundtrip() {
     // A second round trip keeps every vector block byte-identical.
     let c = roundtrip(&b);
     for i in 1..3 {
-        let keys = |l: &Layer| l.psd_blocks.iter().filter(|(k, _)| matches!(k, b"vmsk" | b"vsms" | b"vstk" | b"vogk" | b"vscg" | b"SoCo")).cloned().collect::<Vec<_>>();
+        let keys = |l: &Layer| {
+            l.psd_blocks.iter().filter(|(k, _)| matches!(k, b"vmsk" | b"vsms" | b"vstk" | b"vogk" | b"vscg" | b"SoCo")).cloned().collect::<Vec<_>>()
+        };
         assert_eq!(keys(&c.layers[i]), keys(&b.layers[i]), "layer {i}");
     }
 }
@@ -194,7 +196,8 @@ fn corpus_shape_coverage_matches_photoshop() {
             if sh.stroke.is_some() || !matches!(sh.fill, Some(Fill::Solid(_))) || !l.effects.items.is_empty() || sh.path.is_empty() {
                 continue;
             }
-            let r = cache.content_bounds().union(&photocraft_vector::fill_rasterizer(&sh.path, 0.01).pixel_bounds().unwrap_or(Rect::EMPTY)).intersect(&d.bounds());
+            let r =
+                cache.content_bounds().union(&photocraft_vector::fill_rasterizer(&sh.path, 0.01).pixel_bounds().unwrap_or(Rect::EMPTY)).intersect(&d.bounds());
             if r.is_empty() {
                 continue;
             }
@@ -253,7 +256,15 @@ fn corpus_vector_blocks_survive_roundtrip() {
         checked += a.len();
         let summary = |v: &[NamedBlock]| v.iter().map(|(n, k, d)| format!("{n}/{}:{}", String::from_utf8_lossy(k), d.len())).collect::<Vec<_>>();
         for x in &a {
-            assert!(b.contains(x), "{}: {}/{} changed or missing; before {:?} after {:?}", p.display(), x.0, String::from_utf8_lossy(&x.1), summary(&a), summary(&b));
+            assert!(
+                b.contains(x),
+                "{}: {}/{} changed or missing; before {:?} after {:?}",
+                p.display(),
+                x.0,
+                String::from_utf8_lossy(&x.1),
+                summary(&a),
+                summary(&b)
+            );
         }
         // Saved paths too.
         for r in file.resources.iter().filter(|r| (2000..=2997).contains(&r.id)) {

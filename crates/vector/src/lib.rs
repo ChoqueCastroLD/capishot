@@ -176,7 +176,14 @@ pub enum Paint {
     None,
     /// Straight RGBA.
     Solid([f32; 4]),
-    Gradient { stops: Vec<(f32, [f32; 4])>, style: GradientStyle, angle: f32, scale: f32, reverse: bool, bounds: (f64, f64, f64, f64) },
+    Gradient {
+        stops: Vec<(f32, [f32; 4])>,
+        style: GradientStyle,
+        angle: f32,
+        scale: f32,
+        reverse: bool,
+        bounds: (f64, f64, f64, f64),
+    },
 }
 
 impl Paint {

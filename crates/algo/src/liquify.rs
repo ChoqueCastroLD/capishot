@@ -494,7 +494,8 @@ pub fn apply_liquify(src: &Surface, field: &LiquifyField) -> Surface {
         if !moved {
             return None;
         }
-        let foot = Rect::new(fx0.floor() as i32 - 3, fy0.floor() as i32 - 3, fx1.ceil() as i32 + 3, fy1.ceil() as i32 + 3).intersect(&t.inflate(maxd)).intersect(&b);
+        let foot =
+            Rect::new(fx0.floor() as i32 - 3, fy0.floor() as i32 - 3, fx1.ceil() as i32 + 3, fy1.ceil() as i32 + 3).intersect(&t.inflate(maxd)).intersect(&b);
         if foot.is_empty() {
             return None;
         }
@@ -665,7 +666,12 @@ impl ProxyImage {
     pub fn proxy_rect(&self, r: Rect) -> [usize; 4] {
         let s = self.scale;
         let f = |v: i32, o: i32| (f64::from(v - o) / s).max(0.0);
-        [f(r.x0, self.bounds.x0).floor() as usize, f(r.y0, self.bounds.y0).floor() as usize, (f(r.x1, self.bounds.x0).ceil() as usize + 1).min(self.w), (f(r.y1, self.bounds.y0).ceil() as usize + 1).min(self.h)]
+        [
+            f(r.x0, self.bounds.x0).floor() as usize,
+            f(r.y0, self.bounds.y0).floor() as usize,
+            (f(r.x1, self.bounds.x0).ceil() as usize + 1).min(self.w),
+            (f(r.y1, self.bounds.y0).ceil() as usize + 1).min(self.h),
+        ]
     }
 }
 

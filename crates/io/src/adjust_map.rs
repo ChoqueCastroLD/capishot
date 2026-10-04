@@ -9,10 +9,8 @@ use photocraft_doc::adjust::{CurvePoint, LevelsChannel};
 use photocraft_psd::descriptor::{Descriptor, Value, VersionedDescriptor};
 
 /// All PSD adjustment keys recognized as adjustment layers.
-pub const ADJUSTMENT_KEYS: [&[u8; 4]; 16] = [
-    b"levl", b"curv", b"hue2", b"brit", b"nvrt", b"thrs", b"post", b"expA", b"vibA", b"blnc", b"mixr", b"grdm", b"phfl",
-    b"selc", b"blwh", b"clrL",
-];
+pub const ADJUSTMENT_KEYS: [&[u8; 4]; 16] =
+    [b"levl", b"curv", b"hue2", b"brit", b"nvrt", b"thrs", b"post", b"expA", b"vibA", b"blnc", b"mixr", b"grdm", b"phfl", b"selc", b"blwh", b"clrL"];
 
 fn be16(d: &[u8], at: usize) -> Option<u16> {
     d.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]))
@@ -137,13 +135,8 @@ fn parse_any(key: &[u8; 4], data: &[u8], cged: Option<&[u8]>) -> Adjustment {
                     legacy: desc_bool(&d, "useLegacy").unwrap_or(false),
                 })
             });
-            modern.or_else(|| {
-                Some(Adjustment::BrightnessContrast {
-                    brightness: f32::from(bei16(data, 0)?),
-                    contrast: f32::from(bei16(data, 2)?),
-                    legacy: true,
-                })
-            })
+            modern
+                .or_else(|| Some(Adjustment::BrightnessContrast { brightness: f32::from(bei16(data, 0)?), contrast: f32::from(bei16(data, 2)?), legacy: true }))
         }
         b"hue2" => (|| {
             let colorize = *data.get(2)? != 0;
@@ -155,9 +148,7 @@ fn parse_any(key: &[u8; 4], data: &[u8], cged: Option<&[u8]>) -> Adjustment {
                 colorize,
             })
         })(),
-        b"expA" => (|| {
-            Some(Adjustment::Exposure { exposure: bef32(data, 2)?, offset: bef32(data, 6)?, gamma: bef32(data, 10)? })
-        })(),
+        b"expA" => (|| Some(Adjustment::Exposure { exposure: bef32(data, 2)?, offset: bef32(data, 6)?, gamma: bef32(data, 10)? }))(),
         b"levl" => (|| {
             let m = levels_rec(data, 2)?;
             let r = levels_rec(data, 12)?;
@@ -386,14 +377,8 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
                 }
             }
             // Six default hue ranges (reds, yellows, greens, cyans, blues, magentas).
-            let ranges: [[u16; 4]; 6] = [
-                [315, 345, 15, 45],
-                [15, 45, 75, 105],
-                [75, 105, 135, 165],
-                [135, 165, 195, 225],
-                [195, 225, 255, 285],
-                [255, 285, 315, 345],
-            ];
+            let ranges: [[u16; 4]; 6] =
+                [[315, 345, 15, 45], [15, 45, 75, 105], [75, 105, 135, 165], [135, 165, 195, 225], [195, 225, 255, 285], [255, 285, 315, 345]];
             for r in ranges {
                 for x in r {
                     put16(&mut v, x);
@@ -447,7 +432,8 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
         }
         Adjustment::ColorLookup { name, lut: Some(table), size, dither, .. } => {
             let file = photocraft_cms::lutfile::LutFile { title: String::new(), size: *size as usize, data: table.to_vec() };
-            let en = |t: &str, val: &str| Value::Enumerated { type_id: photocraft_psd::descriptor::Id::new(t), value: photocraft_psd::descriptor::Id::new(val) };
+            let en =
+                |t: &str, val: &str| Value::Enumerated { type_id: photocraft_psd::descriptor::Id::new(t), value: photocraft_psd::descriptor::Id::new(val) };
             let text = |t: &str| Value::Text(photocraft_psd::descriptor::UnicodeString::new_nul(t));
             let d = Descriptor::new("null")
                 .with("lookupType", en("colorLookupType", "3DLUT"))
@@ -533,17 +519,9 @@ mod tests {
         rt(Adjustment::HueSaturation { hue: 30.0, saturation: -20.0, lightness: 5.0, colorize: false });
         rt(Adjustment::HueSaturation { hue: 200.0, saturation: 50.0, lightness: 0.0, colorize: true });
         rt(Adjustment::Exposure { exposure: 1.5, offset: -0.01, gamma: 0.9 });
-        let lc = |a: u16, b: u16| LevelsChannel {
-            in_black: f32::from(a) / 255.0,
-            in_white: f32::from(b) / 255.0,
-            gamma: 1.2,
-            out_black: 0.0,
-            out_white: 1.0,
-        };
+        let lc = |a: u16, b: u16| LevelsChannel { in_black: f32::from(a) / 255.0, in_white: f32::from(b) / 255.0, gamma: 1.2, out_black: 0.0, out_white: 1.0 };
         rt(Adjustment::Levels { master: lc(10, 240), per_channel: [lc(0, 255), lc(5, 250), lc(20, 200)] });
-        let pts = |v: &[(u8, u8)]| {
-            v.iter().map(|&(i, o)| CurvePoint { input: f32::from(i) / 255.0, output: f32::from(o) / 255.0 }).collect::<Vec<_>>()
-        };
+        let pts = |v: &[(u8, u8)]| v.iter().map(|&(i, o)| CurvePoint { input: f32::from(i) / 255.0, output: f32::from(o) / 255.0 }).collect::<Vec<_>>();
         rt(Adjustment::Curves {
             master: pts(&[(0, 0), (128, 150), (255, 255)]),
             per_channel: [pts(&[(0, 10), (255, 255)]), pts(&[(0, 0), (255, 245)]), pts(&[(0, 0), (64, 32), (255, 255)])],

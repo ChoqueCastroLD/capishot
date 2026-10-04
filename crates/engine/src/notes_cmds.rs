@@ -190,11 +190,56 @@ pub fn import_notes_from(s: &mut Session, name: &str, bytes: &[u8]) -> Result<Va
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec { id: "notes.add", label: "New Note", menu: &[], shortcut: None, params: r##"{"x":px,"y":px,"text":str="","author":str="","color":"#rrggbb"|[r,g,b]=pale yellow,"open":bool=true}"##, enabled: has_doc, run: add, journal: true },
-        CommandSpec { id: "notes.set", label: "Edit Note", menu: &[], shortcut: None, params: r##"{"index":n,"text":str?,"author":str?,"color":"#rrggbb"|[r,g,b]?,"x":px?,"y":px?,"open":bool?}"##, enabled: has_notes, run: set, journal: true },
-        CommandSpec { id: "notes.delete", label: "Delete Note", menu: &[], shortcut: None, params: r##"{"index":n}|{"all":true}"##, enabled: has_notes, run: delete, journal: true },
-        CommandSpec { id: "notes.list", label: "Notes", menu: &[], shortcut: None, params: r##"{} → notes (index, author, text, colour, position, open, modified)"##, enabled: has_doc, run: list, journal: false },
-        CommandSpec { id: "file.import.notes", label: "Notes…", menu: &["File", "Import"], shortcut: None, params: r##"{"path":".psd|.psb|.pcraft with notes"}"##, enabled: has_doc, run: import, journal: true },
+        CommandSpec {
+            id: "notes.add",
+            label: "New Note",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"x":px,"y":px,"text":str="","author":str="","color":"#rrggbb"|[r,g,b]=pale yellow,"open":bool=true}"##,
+            enabled: has_doc,
+            run: add,
+            journal: true,
+        },
+        CommandSpec {
+            id: "notes.set",
+            label: "Edit Note",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"index":n,"text":str?,"author":str?,"color":"#rrggbb"|[r,g,b]?,"x":px?,"y":px?,"open":bool?}"##,
+            enabled: has_notes,
+            run: set,
+            journal: true,
+        },
+        CommandSpec {
+            id: "notes.delete",
+            label: "Delete Note",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"index":n}|{"all":true}"##,
+            enabled: has_notes,
+            run: delete,
+            journal: true,
+        },
+        CommandSpec {
+            id: "notes.list",
+            label: "Notes",
+            menu: &[],
+            shortcut: None,
+            params: r##"{} → notes (index, author, text, colour, position, open, modified)"##,
+            enabled: has_doc,
+            run: list,
+            journal: false,
+        },
+        CommandSpec {
+            id: "file.import.notes",
+            label: "Notes…",
+            menu: &["File", "Import"],
+            shortcut: None,
+            params: r##"{"path":".psd|.psb|.pcraft with notes"}"##,
+            enabled: has_doc,
+            run: import,
+            journal: true,
+        },
     ]
 }
 

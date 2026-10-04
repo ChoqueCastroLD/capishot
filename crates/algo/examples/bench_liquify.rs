@@ -93,14 +93,24 @@ fn main() {
 
     // Puppet warp on a 24 MP layer.
     let pw = PuppetWarp {
-        pins: vec![PuppetPin { src: [1000.0, 2000.0], dst: [1000.0, 2000.0], rotate: None, depth: 0 }, PuppetPin { src: [5000.0, 2000.0], dst: [4800.0, 1200.0], rotate: None, depth: 0 }, PuppetPin { src: [3000.0, 3500.0], dst: [3100.0, 3500.0], rotate: None, depth: 0 }],
+        pins: vec![
+            PuppetPin { src: [1000.0, 2000.0], dst: [1000.0, 2000.0], rotate: None, depth: 0 },
+            PuppetPin { src: [5000.0, 2000.0], dst: [4800.0, 1200.0], rotate: None, depth: 0 },
+            PuppetPin { src: [3000.0, 3500.0], dst: [3100.0, 3500.0], rotate: None, depth: 0 },
+        ],
         mode: PuppetMode::Normal,
         density: PuppetDensity::Normal,
         expansion: 2.0,
     };
     let t = Instant::now();
     let (solver, v, order) = deform(&s, b, &pw, photocraft_algo::puppet::ITERATIONS);
-    println!("puppet mesh {} verts / {} tris + ARAP ({} rounds): {:.1} ms", solver.mesh.verts.len(), solver.mesh.tris.len(), photocraft_algo::puppet::ITERATIONS, t.elapsed().as_secs_f64() * 1e3);
+    println!(
+        "puppet mesh {} verts / {} tris + ARAP ({} rounds): {:.1} ms",
+        solver.mesh.verts.len(),
+        solver.mesh.tris.len(),
+        photocraft_algo::puppet::ITERATIONS,
+        t.elapsed().as_secs_f64() * 1e3
+    );
     let dst: Vec<[f64; 2]> = pw.pins.iter().map(|p| p.dst).collect();
     let t = Instant::now();
     let _ = solver.solve(&dst, &[None; 3], PuppetMode::Normal, 4, Some(&v));

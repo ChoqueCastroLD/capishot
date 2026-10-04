@@ -42,7 +42,9 @@ fn kind_blocks(id: &str, l: &Layer) -> bool {
         "layer.rasterize.fillContent" => !matches!(c, LayerContent::Fill(_)),
         "layer.rasterize.smartObject" => !matches!(c, LayerContent::Smart(_)),
         "layer.rasterize.vectorMask" => l.vector_mask.is_none(),
-        "layer.rasterize.layer" => matches!(c, LayerContent::Raster(_) | LayerContent::Group(_) | LayerContent::Adjustment(_)) && l.vector_mask.is_none() && l.effects.items.is_empty(),
+        "layer.rasterize.layer" => {
+            matches!(c, LayerContent::Raster(_) | LayerContent::Group(_) | LayerContent::Adjustment(_)) && l.vector_mask.is_none() && l.effects.items.is_empty()
+        }
         "layer.layerStyle.copyLayerStyle" | "layer.layerStyle.clear" => l.effects.items.is_empty(),
         _ => id.starts_with("layer.combineShapes.") && !matches!(c, LayerContent::Shape(_)),
     }
@@ -89,7 +91,20 @@ mod tests {
     #[test]
     fn background_greys_styles_masks_and_transforms() {
         let mut s = session();
-        for id in ["layer.layerStyle.dropShadow", "layer.layerMask.revealAll", "layer.arrange.bringForward", "layer.mergeDown", "edit.freeTransform", "edit.transform.scale", "layer.flattenImage", "layer.mergeVisible", "layer.createClippingMask", "layer.rasterize.layer", "layer.combineShapes.unite", "layer.delete.hiddenLayers"] {
+        for id in [
+            "layer.layerStyle.dropShadow",
+            "layer.layerMask.revealAll",
+            "layer.arrange.bringForward",
+            "layer.mergeDown",
+            "edit.freeTransform",
+            "edit.transform.scale",
+            "layer.flattenImage",
+            "layer.mergeVisible",
+            "layer.createClippingMask",
+            "layer.rasterize.layer",
+            "layer.combineShapes.unite",
+            "layer.delete.hiddenLayers",
+        ] {
             assert!(off(&s, id), "{id} should be greyed on a lone Background");
         }
         assert!(!off(&s, "layer.layerStyle.globalLight"));

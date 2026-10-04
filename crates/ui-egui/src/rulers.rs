@@ -179,15 +179,18 @@ pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &
     // Preferences › Units & Rulers: labels in the ruler unit (percent of the document's side).
     let ur = &app.session.prefs().units_and_rulers;
     let (unit, ppi) = (ur.rulers, ur.point_size.per_inch());
-    let (dpi, size) = app.session.active().map_or((72.0, [1.0, 1.0]), |d| (d.doc.resolution_dpi.max(1.0) as f64, [d.doc.size.width as f64, d.doc.size.height as f64]));
+    let (dpi, size) =
+        app.session.active().map_or((72.0, [1.0, 1.0]), |d| (d.doc.resolution_dpi.max(1.0) as f64, [d.doc.size.width as f64, d.doc.size.height as f64]));
     let whole = unit == photocraft_engine::prefs::Unit::Pixels;
-    let label = |v: f64, step: f64| -> String {
-        if step >= 1.0 || whole { format!("{}", v.round() as i64) } else { crate::widgets::fmt_num2(v) }
-    };
+    let label = |v: f64, step: f64| -> String { if step >= 1.0 || whole { format!("{}", v.round() as i64) } else { crate::widgets::fmt_num2(v) } };
     for (vertical, extent) in [(false, size[0]), (true, size[1])] {
         let px_per_unit = unit.to_px(1.0, dpi, extent, ppi).max(1e-9);
         let step = nice_step(60.0 / (xf.zoom as f64 * px_per_unit).max(1e-6), whole);
-        let (d0, d1) = if vertical { (xf.to_doc(left.left_top())[1], xf.to_doc(left.left_bottom())[1]) } else { (xf.to_doc(top.left_top())[0], xf.to_doc(top.right_top())[0]) };
+        let (d0, d1) = if vertical {
+            (xf.to_doc(left.left_top())[1], xf.to_doc(left.left_bottom())[1])
+        } else {
+            (xf.to_doc(top.left_top())[0], xf.to_doc(top.right_top())[0])
+        };
         let (u0, u1) = (d0 / px_per_unit, d1 / px_per_unit);
         let mut v = (u0 / step).floor() * step;
         while v <= u1 {

@@ -35,10 +35,12 @@ fn variable_blur(src: &Image, out: Rect, ctx: &Ctx, smax: f32, sigma: impl Fn(f3
     let (ow, oh) = (out.width() as usize, out.height() as usize);
     // Level σs: 0, then smax / 2^(LEVELS-1) … smax.
     let lv: Vec<f32> = std::iter::once(0.0).chain((0..LEVELS).map(|k| smax / 2f32.powi((LEVELS - 1 - k) as i32))).collect();
-    let sig: Vec<f32> = (0..ow * oh).map(|i| {
-        let (x, y) = xy(out, i);
-        sigma(x as f32 + 0.5, y as f32 + 0.5).clamp(0.0, smax)
-    }).collect();
+    let sig: Vec<f32> = (0..ow * oh)
+        .map(|i| {
+            let (x, y) = xy(out, i);
+            sigma(x as f32 + 0.5, y as f32 + 0.5).clamp(0.0, smax)
+        })
+        .collect();
     // Hat-function weight of level k for σ s.
     let weight = |k: usize, s: f32| -> f32 {
         let c = lv[k];
@@ -146,7 +148,8 @@ pub(crate) fn field(src: &Image, out: Rect, ctx: &Ctx, pins: &[FieldPin]) -> Vec
         return src.crop(out);
     }
     let smax = pins.iter().map(|p| sigma_of(p.blur)).fold(0.0, f32::max);
-    let pts: Vec<(f32, f32, f32)> = pins.iter().map(|p| (b.x0 as f32 + p.x * b.width() as f32, b.y0 as f32 + p.y * b.height() as f32, sigma_of(p.blur))).collect();
+    let pts: Vec<(f32, f32, f32)> =
+        pins.iter().map(|p| (b.x0 as f32 + p.x * b.width() as f32, b.y0 as f32 + p.y * b.height() as f32, sigma_of(p.blur))).collect();
     variable_blur(src, out, ctx, smax, |x, y| {
         let (mut ws, mut s) = (0.0f32, 0.0f32);
         for &(px, py, sg) in &pts {

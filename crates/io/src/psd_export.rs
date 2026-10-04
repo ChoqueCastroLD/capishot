@@ -6,8 +6,7 @@ use photocraft_psd::file::{GlobalLayerMask, LayerInfoPlacement};
 use photocraft_psd::layer::{BlendingRanges, ChannelData, LayerFlags, LayerInfo, LayerMask as PsdMask, MaskData, MaskParameters};
 use photocraft_psd::resources::{ImageResource, ResolutionInfo, ids, version_info_resource};
 use photocraft_psd::{
-    BlendMode as PsdBlend, ColorMode as PsdMode, Compression, Header, ImageData, LayerRecord, PsdFile, Rect as PsdRect,
-    SectionType, TaggedBlock, Version,
+    BlendMode as PsdBlend, ColorMode as PsdMode, Compression, Header, ImageData, LayerRecord, PsdFile, Rect as PsdRect, SectionType, TaggedBlock, Version,
 };
 use photocraft_raster::Surface;
 
@@ -15,7 +14,6 @@ use crate::adjust_map;
 use crate::blocks;
 use crate::pixels::{deinterleave, encode_be, psd_depth};
 use crate::psd_import::REGENERATED;
-
 
 /// Options for [`document_to_psd_with`].
 #[derive(Debug, Clone, Default)]
@@ -96,7 +94,8 @@ impl Ex {
         let planes = deinterleave(&bytes, self.cc + 1, self.fmt.sample, &invert);
         let (w, h) = (r.width() as usize, r.height() as usize);
         // Alpha (-1) first, then the colour channels; each compressed on its own thread.
-        let order: Vec<(i16, &Vec<u8>)> = std::iter::once((-1, &planes[self.cc])).chain(planes.iter().take(self.cc).enumerate().map(|(c, p)| (c as i16, p))).collect();
+        let order: Vec<(i16, &Vec<u8>)> =
+            std::iter::once((-1, &planes[self.cc])).chain(planes.iter().take(self.cc).enumerate().map(|(c, p)| (c as i16, p))).collect();
         let ch = crate::pixels::par_map(order, |(id, plane)| self.encode(id, plane, w, h));
         (to_psd_rect(r), ch)
     }
@@ -106,11 +105,7 @@ impl Ex {
         let default = s.default_pixel().first().copied().unwrap_or(0.0);
         let r = s.content_bounds();
         let (w, h) = (r.width() as usize, r.height() as usize);
-        let plane = if r.is_empty() {
-            Vec::new()
-        } else {
-            deinterleave(&s.to_interleaved(r), 1, self.mask_fmt.sample, &[false]).remove(0)
-        };
+        let plane = if r.is_empty() { Vec::new() } else { deinterleave(&s.to_interleaved(r), 1, self.mask_fmt.sample, &[false]).remove(0) };
         let mut flags = 0u8;
         if !m.linked {
             flags |= PsdMask::FLAG_RELATIVE;
@@ -211,8 +206,7 @@ impl Ex {
     /// adjustment or fill block is reused verbatim while it still decodes to
     /// the layer's current parameters; otherwise it is regenerated.
     fn content_blocks(&mut self, l: &Layer) -> Vec<TaggedBlock> {
-        let mut raw: Vec<([u8; 4], Vec<u8>)> =
-            l.psd_blocks.iter().filter(|(k, _)| !REGENERATED.contains(&k)).map(|(k, d)| (*k, d.to_vec())).collect();
+        let mut raw: Vec<([u8; 4], Vec<u8>)> = l.psd_blocks.iter().filter(|(k, _)| !REGENERATED.contains(&k)).map(|(k, d)| (*k, d.to_vec())).collect();
         // A stale multi-effects block would override the regenerated lfx2.
         if effects_unchanged(l) == Some(false) {
             raw.retain(|(k, _)| k != b"lmfx");
@@ -240,9 +234,7 @@ impl Ex {
                     _ => adjust_map::Channels::Other,
                 };
                 let cged = raw.iter().find(|(k, _)| k == b"CgEd").map(|(_, d)| d.clone());
-                let keep = raw
-                    .iter()
-                    .any(|(k, d)| adjust_map::ADJUSTMENT_KEYS.contains(&k) && adjust_map::parse(k, d, cged.as_deref(), channels) == *a);
+                let keep = raw.iter().any(|(k, d)| adjust_map::ADJUSTMENT_KEYS.contains(&k) && adjust_map::parse(k, d, cged.as_deref(), channels) == *a);
                 if !keep {
                     raw.retain(|(k, _)| !adjust_map::ADJUSTMENT_KEYS.contains(&k) && k != b"CgEd");
                     let w = adjust_map::write(a);
@@ -730,12 +722,8 @@ pub fn document_to_psd_with(doc: &Document, opts: &PsdExportOptions) -> (PsdFile
 
     let has_layers = !ex.records.is_empty();
     let placement = match (has_layers, sample) {
-        (true, SampleType::U16) => {
-            LayerInfoPlacement::GlobalBlock { index: 0, signature: *b"8BIM", key: *b"Lr16", padding: None }
-        }
-        (true, SampleType::F32) => {
-            LayerInfoPlacement::GlobalBlock { index: 0, signature: *b"8BIM", key: *b"Lr32", padding: None }
-        }
+        (true, SampleType::U16) => LayerInfoPlacement::GlobalBlock { index: 0, signature: *b"8BIM", key: *b"Lr16", padding: None },
+        (true, SampleType::F32) => LayerInfoPlacement::GlobalBlock { index: 0, signature: *b"8BIM", key: *b"Lr32", padding: None },
         _ => LayerInfoPlacement::Section,
     };
     let records = std::mem::take(&mut ex.records);

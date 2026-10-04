@@ -173,7 +173,15 @@ pub fn marquee_end(style: &str, w: f64, h: f64, shift: bool, start: [f64; 2], en
 }
 
 /// Crop options bar ratio presets: (key, label).
-pub const CROP_RATIOS: &[(&str, &str)] = &[("", "Ratio"), ("original", "Original Ratio"), ("1:1", "1 : 1 (Square)"), ("4:5", "4 : 5 (8 : 10)"), ("5:7", "5 : 7"), ("2:3", "2 : 3 (4 : 6)"), ("16:9", "16 : 9")];
+pub const CROP_RATIOS: &[(&str, &str)] = &[
+    ("", "Ratio"),
+    ("original", "Original Ratio"),
+    ("1:1", "1 : 1 (Square)"),
+    ("4:5", "4 : 5 (8 : 10)"),
+    ("5:7", "5 : 7"),
+    ("2:3", "2 : 3 (4 : 6)"),
+    ("16:9", "16 : 9"),
+];
 
 /// Width/height of a crop ratio key (`original` uses the document size).
 pub fn crop_ratio(key: &str, doc_w: f64, doc_h: f64) -> Option<(f64, f64)> {

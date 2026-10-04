@@ -114,7 +114,8 @@ pub(crate) fn list_images(dir: &str) -> Result<Vec<String>> {
 }
 
 /// Extensions the batch commands pick up from a folder.
-const OPENABLE: &[&str] = &["psd", "psb", "pcraft", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "exr", "hdr", "qoi", "ico", "pnm", "ppm", "pgm"];
+const OPENABLE: &[&str] =
+    &["psd", "psb", "pcraft", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "exr", "hdr", "qoi", "ico", "pnm", "ppm", "pgm"];
 
 pub(crate) fn file_name(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
@@ -399,10 +400,17 @@ pub fn read_file_info(xmp: Option<&str>) -> Value {
             Some((_, _, inner)) => li_values(inner),
             None => find_attr(x, prop).map(|(_, _, v)| vec![xml_unescape(v)]).unwrap_or_default(),
         };
-        let v = if kind == "Bag" { json!(vals) } else if kind == "Seq" { json!(vals.join("; ")) } else { json!(vals.into_iter().next().unwrap_or_default()) };
+        let v = if kind == "Bag" {
+            json!(vals)
+        } else if kind == "Seq" {
+            json!(vals.join("; "))
+        } else {
+            json!(vals.into_iter().next().unwrap_or_default())
+        };
         m.insert(key.into(), v);
     }
-    let marked = find_element(x, "xmpRights:Marked").map(|(_, _, v)| v.trim().to_string()).or_else(|| find_attr(x, "xmpRights:Marked").map(|(_, _, v)| v.to_string()));
+    let marked =
+        find_element(x, "xmpRights:Marked").map(|(_, _, v)| v.trim().to_string()).or_else(|| find_attr(x, "xmpRights:Marked").map(|(_, _, v)| v.to_string()));
     m.insert(
         "copyrightStatus".into(),
         json!(match marked.as_deref() {
@@ -411,7 +419,9 @@ pub fn read_file_info(xmp: Option<&str>) -> Value {
             _ => "unknown",
         }),
     );
-    let url = find_element(x, "xmpRights:WebStatement").map(|(_, _, v)| xml_unescape(v.trim())).or_else(|| find_attr(x, "xmpRights:WebStatement").map(|(_, _, v)| xml_unescape(v)));
+    let url = find_element(x, "xmpRights:WebStatement")
+        .map(|(_, _, v)| xml_unescape(v.trim()))
+        .or_else(|| find_attr(x, "xmpRights:WebStatement").map(|(_, _, v)| xml_unescape(v)));
     m.insert("copyrightUrl".into(), json!(url.unwrap_or_default()));
     Value::Object(m)
 }
@@ -454,7 +464,9 @@ pub fn write_file_info(xmp: Option<&str>, info: &Value) -> String {
         }
         let items: String = vals
             .iter()
-            .map(|v| if kind == "Alt" { format!("<rdf:li xml:lang=\"x-default\">{}</rdf:li>", xml_escape(v)) } else { format!("<rdf:li>{}</rdf:li>", xml_escape(v)) })
+            .map(|v| {
+                if kind == "Alt" { format!("<rdf:li xml:lang=\"x-default\">{}</rdf:li>", xml_escape(v)) } else { format!("<rdf:li>{}</rdf:li>", xml_escape(v)) }
+            })
             .collect();
         if kind.is_empty() {
             body.push_str(&format!("   <{prop}>{}</{prop}>\n", xml_escape(&vals[0])));
@@ -537,7 +549,9 @@ fn conditional_mode_change(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let cur = mode_name(s.active().ok_or(EngineError::NoDocument)?.doc.mode);
     let from: Vec<String> = match p.get("from") {
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(|v| v.to_ascii_lowercase().replace("gray", "grayscale").replace("grayscalescale", "grayscale")).collect(),
+        Some(Value::Array(a)) => {
+            a.iter().filter_map(Value::as_str).map(|v| v.to_ascii_lowercase().replace("gray", "grayscale").replace("grayscalescale", "grayscale")).collect()
+        }
         Some(Value::String(v)) if v != "any" => vec![v.to_ascii_lowercase()],
         _ => vec!["any".into()],
     };
@@ -554,7 +568,9 @@ fn parse_steps(v: &Value) -> Result<Vec<(String, Value)>> {
     let arr = v.as_array().ok_or_else(|| bad("\"steps\" must be an array"))?;
     arr.iter()
         .map(|st| match st {
-            Value::Array(a) if !a.is_empty() => Ok((a[0].as_str().ok_or_else(|| bad("step id must be a string"))?.to_string(), a.get(1).cloned().unwrap_or(json!({})))),
+            Value::Array(a) if !a.is_empty() => {
+                Ok((a[0].as_str().ok_or_else(|| bad("step id must be a string"))?.to_string(), a.get(1).cloned().unwrap_or(json!({}))))
+            }
             Value::Object(o) => {
                 let id = o.get("command").or_else(|| o.get("id")).and_then(Value::as_str).ok_or_else(|| bad("step needs \"command\""))?;
                 Ok((id.to_string(), o.get("params").cloned().unwrap_or(json!({}))))
@@ -576,7 +592,14 @@ pub(crate) fn batch_inputs(p: &Value, cmd: &str) -> Result<Vec<String>> {
 
 /// Opens each input in a scratch session, runs `f` on it and saves it to `output` as `format`
 /// (`"same"` keeps the input's extension). Errors per file are collected, not fatal.
-pub(crate) fn process_files(inputs: &[String], output: &str, format: &str, quality: Option<f64>, suffix: &str, f: &dyn Fn(&mut Session) -> Result<()>) -> Value {
+pub(crate) fn process_files(
+    inputs: &[String],
+    output: &str,
+    format: &str,
+    quality: Option<f64>,
+    suffix: &str,
+    f: &dyn Fn(&mut Session) -> Result<()>,
+) -> Value {
     let mut files = Vec::new();
     let mut errors = Vec::new();
     for path in inputs {
@@ -586,7 +609,11 @@ pub(crate) fn process_files(inputs: &[String], output: &str, format: &str, quali
             let doc = import(&file_name(path), &bytes)?;
             scratch.add_document(doc, Some(path.clone()));
             f(&mut scratch)?;
-            let ext = if format == "same" { path.rsplit('.').next().unwrap_or("png").to_ascii_lowercase() } else { format.trim_start_matches('.').to_ascii_lowercase() };
+            let ext = if format == "same" {
+                path.rsplit('.').next().unwrap_or("png").to_ascii_lowercase()
+            } else {
+                format.trim_start_matches('.').to_ascii_lowercase()
+            };
             let out = join(output, &format!("{}{suffix}.{ext}", stem(path)));
             let d = scratch.active().ok_or(EngineError::NoDocument)?;
             save_doc(&d.doc, &out, quality)?;
@@ -602,7 +629,8 @@ pub(crate) fn process_files(inputs: &[String], output: &str, format: &str, quali
 
 fn batch(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.automate.batch";
-    let steps = parse_steps(p.get("steps").or_else(|| p.get("action")).ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: "missing \"steps\"".into() })?)?;
+    let steps =
+        parse_steps(p.get("steps").or_else(|| p.get("action")).ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: "missing \"steps\"".into() })?)?;
     if let Some((id, _)) = steps.iter().find(|(id, _)| crate::commands::find(id).is_none()) {
         return Err(EngineError::BadParams { cmd: cmd.into(), msg: format!("unknown command `{id}` in the action") });
     }
@@ -968,23 +996,137 @@ pub fn specs() -> Vec<CommandSpec> {
     }
     vec![
         spec!("file.closeAll", "Close All", &["File"], Some("Cmd+Alt+W"), "{}", has_doc, |s, _| close_all(s)),
-        spec!("file.closeOthers", "Close Others", &["File"], Some("Cmd+Alt+P"), r##"{"document":index? (the one to keep; default active)}"##, has_doc, close_others),
+        spec!(
+            "file.closeOthers",
+            "Close Others",
+            &["File"],
+            Some("Cmd+Alt+P"),
+            r##"{"document":index? (the one to keep; default active)}"##,
+            has_doc,
+            close_others
+        ),
         spec!("file.revert", "Revert", &["File"], Some("F12"), "{} (reloads the saved file as one undoable step)", can_revert, |s, _| revert(s)),
-        spec!("file.saveACopy", "Save a Copy…", &["File"], Some("Cmd+Alt+S"), r##"{"path":str (format from the extension),"quality":0..12? (JPEG),"layers":bool=true}"##, native_doc, save_a_copy),
-        spec!("file.openAs", "Open As…", &["File"], Some("Cmd+Alt+Shift+O"), r##"{"path":str,"as":"psd|png|jpg|tiff|…"? (decode as this format)}"##, native, open_as),
-        spec!("file.placeEmbedded", "Place Embedded…", &["File"], None, r##"{"path":str,"scale":%? (default: fit when larger than the canvas),"fit":bool=true,"center":[x,y]?}"##, native_doc, |s, p| place(s, p, false)),
-        spec!("file.placeLinked", "Place Linked…", &["File"], None, r##"{"path":str,"scale":%?,"fit":bool=true,"center":[x,y]?}"##, native_doc, |s, p| place(s, p, true)),
-        spec!("file.fileInfo", "File Info…", &["File"], Some("Cmd+Alt+Shift+I"), r##"{"title":str?,"author":str?,"authorTitle":str?,"description":str?,"keywords":[str]|"a; b"?,"copyright":str?,"copyrightStatus":"unknown|copyrighted|publicDomain"?,"copyrightUrl":str?} (no keys: read)"##, has_doc, file_info),
-        spec!("file.automate.fitImage", "Fit Image…", &["File", "Automate"], None, r##"{"width":px,"height":px,"dontEnlarge":bool=false,"resample":"bicubic|bilinear|nearest|lanczos|preserveDetails"="bicubic"}"##, has_doc, fit_image),
-        spec!("file.automate.conditionalModeChange", "Conditional Mode Change…", &["File", "Automate"], None, r##"{"from":["rgb","grayscale","cmyk","lab","indexed","bitmap",…]|"any"="any","to":"rgb|grayscale|cmyk|lab"}"##, has_doc, conditional_mode_change),
-        spec!("file.automate.batch", "Batch…", &["File", "Automate"], None, r##"{"steps":[[commandId,params]|{"command":id,"params":{}}…] (a recorded action),"input":folder|[paths],"output":folder,"format":"same|png|jpg|psd|tiff|…"="same","quality":0..12?} → {files, errors}"##, native, batch),
-        spec!("file.scripts.imageProcessor", "Image Processor…", &["File", "Scripts"], None, r##"{"input":folder|[paths],"output":folder,"format":"jpg|png|psd|tiff|…"="jpg","quality":0..12=8,"width":px?,"height":px? (fit, never enlarge),"convertToSrgb":bool=false} → {files, errors}"##, native, image_processor),
-        spec!("file.scripts.loadFilesIntoStack", "Load Files into Stack…", &["File", "Scripts"], None, r##"{"paths":[str]|folder,"createSmartObject":bool=false} → new document with one layer per file (inside one smart object with createSmartObject)"##, native, load_files_into_stack),
+        spec!(
+            "file.saveACopy",
+            "Save a Copy…",
+            &["File"],
+            Some("Cmd+Alt+S"),
+            r##"{"path":str (format from the extension),"quality":0..12? (JPEG),"layers":bool=true}"##,
+            native_doc,
+            save_a_copy
+        ),
+        spec!(
+            "file.openAs",
+            "Open As…",
+            &["File"],
+            Some("Cmd+Alt+Shift+O"),
+            r##"{"path":str,"as":"psd|png|jpg|tiff|…"? (decode as this format)}"##,
+            native,
+            open_as
+        ),
+        spec!(
+            "file.placeEmbedded",
+            "Place Embedded…",
+            &["File"],
+            None,
+            r##"{"path":str,"scale":%? (default: fit when larger than the canvas),"fit":bool=true,"center":[x,y]?}"##,
+            native_doc,
+            |s, p| place(s, p, false)
+        ),
+        spec!("file.placeLinked", "Place Linked…", &["File"], None, r##"{"path":str,"scale":%?,"fit":bool=true,"center":[x,y]?}"##, native_doc, |s, p| place(
+            s, p, true
+        )),
+        spec!(
+            "file.fileInfo",
+            "File Info…",
+            &["File"],
+            Some("Cmd+Alt+Shift+I"),
+            r##"{"title":str?,"author":str?,"authorTitle":str?,"description":str?,"keywords":[str]|"a; b"?,"copyright":str?,"copyrightStatus":"unknown|copyrighted|publicDomain"?,"copyrightUrl":str?} (no keys: read)"##,
+            has_doc,
+            file_info
+        ),
+        spec!(
+            "file.automate.fitImage",
+            "Fit Image…",
+            &["File", "Automate"],
+            None,
+            r##"{"width":px,"height":px,"dontEnlarge":bool=false,"resample":"bicubic|bilinear|nearest|lanczos|preserveDetails"="bicubic"}"##,
+            has_doc,
+            fit_image
+        ),
+        spec!(
+            "file.automate.conditionalModeChange",
+            "Conditional Mode Change…",
+            &["File", "Automate"],
+            None,
+            r##"{"from":["rgb","grayscale","cmyk","lab","indexed","bitmap",…]|"any"="any","to":"rgb|grayscale|cmyk|lab"}"##,
+            has_doc,
+            conditional_mode_change
+        ),
+        spec!(
+            "file.automate.batch",
+            "Batch…",
+            &["File", "Automate"],
+            None,
+            r##"{"steps":[[commandId,params]|{"command":id,"params":{}}…] (a recorded action),"input":folder|[paths],"output":folder,"format":"same|png|jpg|psd|tiff|…"="same","quality":0..12?} → {files, errors}"##,
+            native,
+            batch
+        ),
+        spec!(
+            "file.scripts.imageProcessor",
+            "Image Processor…",
+            &["File", "Scripts"],
+            None,
+            r##"{"input":folder|[paths],"output":folder,"format":"jpg|png|psd|tiff|…"="jpg","quality":0..12=8,"width":px?,"height":px? (fit, never enlarge),"convertToSrgb":bool=false} → {files, errors}"##,
+            native,
+            image_processor
+        ),
+        spec!(
+            "file.scripts.loadFilesIntoStack",
+            "Load Files into Stack…",
+            &["File", "Scripts"],
+            None,
+            r##"{"paths":[str]|folder,"createSmartObject":bool=false} → new document with one layer per file (inside one smart object with createSmartObject)"##,
+            native,
+            load_files_into_stack
+        ),
         spec!("file.scripts.flattenAllLayerEffects", "Flatten All Layer Effects", &["File", "Scripts"], None, "{}", has_doc, |s, _| flatten_all_effects(s)),
-        spec!("file.scripts.flattenAllMasks", "Flatten All Masks", &["File", "Scripts"], None, "{} (pixel layers; masks on other layer kinds are left)", has_doc, |s, _| flatten_all_masks(s)),
-        spec!("file.export.layersToFiles", "Layers to Files…", &["File", "Export"], None, r##"{"dir":folder,"format":"png|jpg|psd|tiff|…"="png","prefix":str=document name,"visibleOnly":bool=true,"quality":0..12?} → {files}"##, native_doc, layers_to_files),
-        spec!("file.export.colorLookupTables", "Color Lookup Tables…", &["File", "Export"], None, r##"{"path":str? (.cube; omit to return the text),"size":2..256=33,"title":str?}"##, has_adjustments, color_lookup_tables),
-        spec!("view.newGuideLayout", "New Guide Layout…", &["View"], None, r##"{"columns":n=0,"width":px?,"gutter":px=0,"rows":n=0,"height":px?,"rowGutter":px=gutter,"margin":px|[top,left,bottom,right]=0,"centerColumns":bool=false,"clearExisting":bool=false}"##, has_doc, new_guide_layout),
+        spec!(
+            "file.scripts.flattenAllMasks",
+            "Flatten All Masks",
+            &["File", "Scripts"],
+            None,
+            "{} (pixel layers; masks on other layer kinds are left)",
+            has_doc,
+            |s, _| flatten_all_masks(s)
+        ),
+        spec!(
+            "file.export.layersToFiles",
+            "Layers to Files…",
+            &["File", "Export"],
+            None,
+            r##"{"dir":folder,"format":"png|jpg|psd|tiff|…"="png","prefix":str=document name,"visibleOnly":bool=true,"quality":0..12?} → {files}"##,
+            native_doc,
+            layers_to_files
+        ),
+        spec!(
+            "file.export.colorLookupTables",
+            "Color Lookup Tables…",
+            &["File", "Export"],
+            None,
+            r##"{"path":str? (.cube; omit to return the text),"size":2..256=33,"title":str?}"##,
+            has_adjustments,
+            color_lookup_tables
+        ),
+        spec!(
+            "view.newGuideLayout",
+            "New Guide Layout…",
+            &["View"],
+            None,
+            r##"{"columns":n=0,"width":px?,"gutter":px=0,"rows":n=0,"height":px?,"rowGutter":px=gutter,"margin":px|[top,left,bottom,right]=0,"centerColumns":bool=false,"clearExisting":bool=false}"##,
+            has_doc,
+            new_guide_layout
+        ),
         spec!("view.newGuidesFromShape", "New Guides From Shape", &["View"], None, r##"{"layer":id?}"##, has_shape, guides_from_shape),
         spec!("view.clearCanvasGuides", "Clear Canvas Guides", &["View"], None, "{}", has_doc, |s, _| clear_canvas_guides(s)),
     ]

@@ -46,7 +46,10 @@ impl ControlRequest {
 
 pub enum Outcome {
     Done(Value),
-    Screenshot { token: u64, path: Option<String> },
+    Screenshot {
+        token: u64,
+        path: Option<String>,
+    },
     /// Synthetic input queued: reply once the app has processed all of it (so a following
     /// `ui.inspect`/`engine.execute` observes the effect).
     AfterInput,
@@ -213,7 +216,13 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             // Modifier flags may be top-level or grouped under "modifiers".
             let m = p.get("modifiers").unwrap_or(p);
             let flag = |k: &str| m.get(k).and_then(Value::as_bool).unwrap_or(false);
-            let mods = egui::Modifiers { shift: flag("shift"), alt: flag("alt"), command: flag("command"), mac_cmd: cfg!(target_os = "macos") && flag("command"), ctrl: flag("ctrl") };
+            let mods = egui::Modifiers {
+                shift: flag("shift"),
+                alt: flag("alt"),
+                command: flag("command"),
+                mac_cmd: cfg!(target_os = "macos") && flag("command"),
+                ctrl: flag("ctrl"),
+            };
             if let Some(t) = s("tool").and_then(Tool::from_name) {
                 app.ui.tool = t;
             }
@@ -257,7 +266,13 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             // Modifier flags may be top-level or grouped under "modifiers".
             let m = p.get("modifiers").unwrap_or(p);
             let flag = |k: &str| m.get(k).and_then(Value::as_bool).unwrap_or(false);
-            let modifiers = egui::Modifiers { command: flag("command"), mac_cmd: cfg!(target_os = "macos") && flag("command"), shift: flag("shift"), alt: flag("alt"), ctrl: flag("ctrl") };
+            let modifiers = egui::Modifiers {
+                command: flag("command"),
+                mac_cmd: cfg!(target_os = "macos") && flag("command"),
+                shift: flag("shift"),
+                alt: flag("alt"),
+                ctrl: flag("ctrl"),
+            };
             app.synthetic.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
             app.synthetic.push(egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers });
             ctx.request_repaint();
@@ -308,12 +323,8 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
 /// Snapshot of everything on screen, addressable by id.
 pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
     let screen = ctx.content_rect();
-    let dialogs: Vec<Value> = app
-        .ui
-        .dialogs
-        .iter()
-        .map(|d| json!({"id": d.id, "kind": d.kind, "title": crate::dialogs::title(d), "fields": d.fields}))
-        .collect();
+    let dialogs: Vec<Value> =
+        app.ui.dialogs.iter().map(|d| json!({"id": d.id, "kind": d.kind, "title": crate::dialogs::title(d), "fields": d.fields})).collect();
     json!({
         "window": {"width": screen.width(), "height": screen.height(), "pixelsPerPoint": ctx.pixels_per_point()},
         "tool": app.ui.tool,

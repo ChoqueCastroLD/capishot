@@ -19,11 +19,7 @@ pub fn crc32(data: &[u8]) -> u32 {
         for (i, e) in t.iter_mut().enumerate() {
             let mut c = i as u32;
             for _ in 0..8 {
-                c = if c & 1 != 0 {
-                    0xEDB8_8320 ^ (c >> 1)
-                } else {
-                    c >> 1
-                };
+                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
             }
             *e = c;
         }
@@ -51,23 +47,15 @@ impl Default for ZipWriter {
 
 impl ZipWriter {
     pub fn new() -> Self {
-        ZipWriter {
-            out: Vec::new(),
-            central: Vec::new(),
-            count: 0,
-        }
+        ZipWriter { out: Vec::new(), central: Vec::new(), count: 0 }
     }
 
     pub fn add(&mut self, name: &str, data: &[u8]) -> Result<(), FormatError> {
         if self.count == u16::MAX {
-            return Err(FormatError::Unsupported(
-                "more than 65535 zip entries (ZIP64 not supported)".into(),
-            ));
+            return Err(FormatError::Unsupported("more than 65535 zip entries (ZIP64 not supported)".into()));
         }
-        let size = u32::try_from(data.len())
-            .map_err(|_| FormatError::Unsupported("zip entry over 4 GiB".into()))?;
-        let offset = u32::try_from(self.out.len())
-            .map_err(|_| FormatError::Unsupported("zip over 4 GiB".into()))?;
+        let size = u32::try_from(data.len()).map_err(|_| FormatError::Unsupported("zip entry over 4 GiB".into()))?;
+        let offset = u32::try_from(self.out.len()).map_err(|_| FormatError::Unsupported("zip over 4 GiB".into()))?;
         let crc = crc32(data);
         let name_b = name.as_bytes();
         // Local file header.
@@ -107,8 +95,7 @@ impl ZipWriter {
     }
 
     pub fn finish(mut self) -> Result<Vec<u8>, FormatError> {
-        let cd_offset = u32::try_from(self.out.len())
-            .map_err(|_| FormatError::Unsupported("zip over 4 GiB".into()))?;
+        let cd_offset = u32::try_from(self.out.len()).map_err(|_| FormatError::Unsupported("zip over 4 GiB".into()))?;
         let cd_size = self.central.len() as u32;
         self.out.extend_from_slice(&self.central);
         self.out.extend_from_slice(&EOCD_SIG.to_le_bytes());
@@ -139,14 +126,10 @@ pub struct ZipReader<'a> {
 }
 
 fn u16_at(b: &[u8], o: usize) -> Result<u16, FormatError> {
-    b.get(o..o + 2)
-        .map(|s| u16::from_le_bytes([s[0], s[1]]))
-        .ok_or_else(|| FormatError::corrupt("truncated zip"))
+    b.get(o..o + 2).map(|s| u16::from_le_bytes([s[0], s[1]])).ok_or_else(|| FormatError::corrupt("truncated zip"))
 }
 fn u32_at(b: &[u8], o: usize) -> Result<u32, FormatError> {
-    b.get(o..o + 4)
-        .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
-        .ok_or_else(|| FormatError::corrupt("truncated zip"))
+    b.get(o..o + 4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])).ok_or_else(|| FormatError::corrupt("truncated zip"))
 }
 
 impl<'a> ZipReader<'a> {
@@ -181,9 +164,7 @@ impl<'a> ZipReader<'a> {
             let elen = u16_at(bytes, p + 30)? as usize;
             let clen = u16_at(bytes, p + 32)? as usize;
             let local = u32_at(bytes, p + 42)? as usize;
-            let name = bytes
-                .get(p + 46..p + 46 + nlen)
-                .ok_or_else(|| FormatError::corrupt("truncated zip name"))?;
+            let name = bytes.get(p + 46..p + 46 + nlen).ok_or_else(|| FormatError::corrupt("truncated zip name"))?;
             let name = String::from_utf8_lossy(name).into_owned();
             if flags & 1 != 0 {
                 return Err(FormatError::Unsupported("encrypted zip entries".into()));
@@ -195,22 +176,10 @@ impl<'a> ZipReader<'a> {
             let lnlen = u16_at(bytes, local + 26)? as usize;
             let lelen = u16_at(bytes, local + 28)? as usize;
             let data_offset = local + 30 + lnlen + lelen;
-            if data_offset
-                .checked_add(compressed)
-                .is_none_or(|e| e > bytes.len())
-            {
-                return Err(FormatError::corrupt(format!(
-                    "zip entry `{name}` out of range"
-                )));
+            if data_offset.checked_add(compressed).is_none_or(|e| e > bytes.len()) {
+                return Err(FormatError::corrupt(format!("zip entry `{name}` out of range")));
             }
-            entries.push(Entry {
-                name,
-                method,
-                crc,
-                compressed,
-                uncompressed,
-                data_offset,
-            });
+            entries.push(Entry { name, method, crc, compressed, uncompressed, data_offset });
             p += 46 + nlen + elen + clen;
         }
         Ok(ZipReader { bytes, entries })
@@ -223,10 +192,7 @@ impl<'a> ZipReader<'a> {
     /// Entry payload (decompressed), at most `max` bytes, CRC-checked.
     pub fn read(&self, e: &Entry, max: usize) -> Result<Vec<u8>, FormatError> {
         if e.uncompressed > max {
-            return Err(FormatError::LimitExceeded(format!(
-                "zip entry `{}` is {} bytes (max {max})",
-                e.name, e.uncompressed
-            )));
+            return Err(FormatError::LimitExceeded(format!("zip entry `{}` is {} bytes (max {max})", e.name, e.uncompressed)));
         }
         let raw = &self.bytes[e.data_offset..e.data_offset + e.compressed];
         let data = match e.method {
@@ -236,37 +202,24 @@ impl<'a> ZipReader<'a> {
                 flate2::read::DeflateDecoder::new(raw)
                     .take(max as u64 + 1)
                     .read_to_end(&mut out)
-                    .map_err(|err| {
-                        FormatError::corrupt(format!("zip entry `{}`: {err}", e.name))
-                    })?;
+                    .map_err(|err| FormatError::corrupt(format!("zip entry `{}`: {err}", e.name)))?;
                 out
             }
             m => {
-                return Err(FormatError::Unsupported(format!(
-                    "zip compression method {m} for `{}`",
-                    e.name
-                )));
+                return Err(FormatError::Unsupported(format!("zip compression method {m} for `{}`", e.name)));
             }
         };
         if data.len() != e.uncompressed || data.len() > max {
-            return Err(FormatError::corrupt(format!(
-                "zip entry `{}` has wrong size",
-                e.name
-            )));
+            return Err(FormatError::corrupt(format!("zip entry `{}` has wrong size", e.name)));
         }
         if crc32(&data) != e.crc {
-            return Err(FormatError::corrupt(format!(
-                "zip entry `{}` failed its CRC check",
-                e.name
-            )));
+            return Err(FormatError::corrupt(format!("zip entry `{}` failed its CRC check", e.name)));
         }
         Ok(data)
     }
 
     pub fn read_by_name(&self, name: &str, max: usize) -> Result<Vec<u8>, FormatError> {
-        let e = self
-            .find(name)
-            .ok_or_else(|| FormatError::corrupt(format!("missing `{name}`")))?;
+        let e = self.find(name).ok_or_else(|| FormatError::corrupt(format!("missing `{name}`")))?;
         self.read(e, max)
     }
 }
@@ -292,10 +245,7 @@ mod tests {
         assert_eq!(r.read_by_name("a.txt", 100).unwrap(), b"hello");
         assert_eq!(r.read_by_name("dir/b.bin", 100).unwrap(), [0, 1, 2, 3]);
         assert!(r.read_by_name("empty", 0).unwrap().is_empty());
-        assert!(matches!(
-            r.read_by_name("a.txt", 3),
-            Err(FormatError::LimitExceeded(_))
-        ));
+        assert!(matches!(r.read_by_name("a.txt", 3), Err(FormatError::LimitExceeded(_))));
     }
 
     #[test]

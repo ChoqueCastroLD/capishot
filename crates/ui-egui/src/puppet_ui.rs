@@ -80,7 +80,13 @@ impl PuppetSession {
     }
 
     fn pin_at(&self, p: [f64; 2], tol: f64) -> Option<usize> {
-        self.warp.pins.iter().enumerate().filter(|(_, q)| (q.dst[0] - p[0]).hypot(q.dst[1] - p[1]) <= tol).min_by(|a, b| dist(a.1.dst, p).total_cmp(&dist(b.1.dst, p))).map(|(i, _)| i)
+        self.warp
+            .pins
+            .iter()
+            .enumerate()
+            .filter(|(_, q)| (q.dst[0] - p[0]).hypot(q.dst[1] - p[1]) <= tol)
+            .min_by(|a, b| dist(a.1.dst, p).total_cmp(&dist(b.1.dst, p)))
+            .map(|(i, _)| i)
     }
 
     /// The rest position of a point on the deformed mesh (where a new pin attaches).
@@ -289,11 +295,23 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut rebind = false;
     ui.label("Mode:");
     let mode = s.warp.mode;
-    crate::widgets::dropdown(ui, "puppet-mode", &mut s.warp.mode, &[(PuppetMode::Rigid, "Rigid"), (PuppetMode::Normal, "Normal"), (PuppetMode::Distort, "Distort")], 90.0);
+    crate::widgets::dropdown(
+        ui,
+        "puppet-mode",
+        &mut s.warp.mode,
+        &[(PuppetMode::Rigid, "Rigid"), (PuppetMode::Normal, "Normal"), (PuppetMode::Distort, "Distort")],
+        90.0,
+    );
     resolve |= mode != s.warp.mode;
     ui.label("Density:");
     let density = s.warp.density;
-    crate::widgets::dropdown(ui, "puppet-density", &mut s.warp.density, &[(PuppetDensity::Fewer, "Fewer Points"), (PuppetDensity::Normal, "Normal"), (PuppetDensity::More, "More Points")], 110.0);
+    crate::widgets::dropdown(
+        ui,
+        "puppet-density",
+        &mut s.warp.density,
+        &[(PuppetDensity::Fewer, "Fewer Points"), (PuppetDensity::Normal, "Normal"), (PuppetDensity::More, "More Points")],
+        110.0,
+    );
     remesh |= density != s.warp.density;
     ui.label("Expansion:");
     let mut e = s.warp.expansion as f32;

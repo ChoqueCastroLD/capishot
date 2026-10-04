@@ -27,7 +27,12 @@ fn anti_alias_and_orientation_are_one_step_each() {
     let mut s = session(8);
     assert!(!s.is_enabled("type.antiAlias.crisp"));
     let id = text_layer(&mut s, "Aa");
-    for (cmd, aa) in [("type.antiAlias.crisp", AntiAlias::Crisp), ("type.antiAlias.windows", AntiAlias::Windows), ("type.antiAlias.windowsLcd", AntiAlias::WindowsLcd), ("type.antiAlias.none", AntiAlias::None)] {
+    for (cmd, aa) in [
+        ("type.antiAlias.crisp", AntiAlias::Crisp),
+        ("type.antiAlias.windows", AntiAlias::Windows),
+        ("type.antiAlias.windowsLcd", AntiAlias::WindowsLcd),
+        ("type.antiAlias.none", AntiAlias::None),
+    ] {
         s.execute(cmd, json!({})).unwrap();
         assert_eq!(text(&s, id).antialias, aa);
     }

@@ -190,7 +190,11 @@ fn load_frames(path: &str, fmt: photocraft_color::PixelFormat) -> Result<Vec<Sur
 }
 
 fn new_from_file(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = p.get("path").and_then(Value::as_str).ok_or_else(|| EngineError::BadParams { cmd: "layer.videoLayers.newVideoLayerFromFile".into(), msg: "need `path`".into() })?.to_string();
+    let path = p
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::BadParams { cmd: "layer.videoLayers.newVideoLayerFromFile".into(), msg: "need `path`".into() })?
+        .to_string();
     let fps = p.get("fps").and_then(Value::as_f64).unwrap_or(30.0) as f32;
     let fmt = s.active().ok_or(EngineError::NoDocument)?.doc.pixel_format();
     let frames = load_frames(&path, fmt)?;
@@ -216,7 +220,11 @@ fn new_from_file(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn replace_footage(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = p.get("path").and_then(Value::as_str).ok_or_else(|| EngineError::BadParams { cmd: "layer.videoLayers.replaceFootage".into(), msg: "need `path`".into() })?.to_string();
+    let path = p
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::BadParams { cmd: "layer.videoLayers.replaceFootage".into(), msg: "need `path`".into() })?
+        .to_string();
     let fmt = s.active().ok_or(EngineError::NoDocument)?.doc.pixel_format();
     let frames = load_frames(&path, fmt)?;
     edit_video(s, "Replace Footage", move |v, _| {
@@ -241,7 +249,11 @@ fn reload_frame(s: &mut Session, _p: &Value) -> Result<Value> {
     let (src, fmt) = {
         let st = s.active().ok_or(EngineError::NoDocument)?;
         let id = st.active_layer.ok_or(EngineError::NoDocument)?;
-        let v = st.doc.layer(id).and_then(|l| l.video.as_ref()).ok_or_else(|| EngineError::BadParams { cmd: "layer.videoLayers.reloadFrame".into(), msg: "not a video layer".into() })?;
+        let v = st
+            .doc
+            .layer(id)
+            .and_then(|l| l.video.as_ref())
+            .ok_or_else(|| EngineError::BadParams { cmd: "layer.videoLayers.reloadFrame".into(), msg: "not a video layer".into() })?;
         (v.source.clone(), st.doc.pixel_format())
     };
     let photocraft_doc::VideoSource::File { path } = src else {
@@ -256,7 +268,11 @@ fn reload_frame(s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// Import › Video Frames to Layers: load frames from a file/sequence and add each as its own layer.
 fn frames_to_layers(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = p.get("path").and_then(Value::as_str).ok_or_else(|| EngineError::BadParams { cmd: "file.import.videoFramesToLayers".into(), msg: "need `path`".into() })?.to_string();
+    let path = p
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::BadParams { cmd: "file.import.videoFramesToLayers".into(), msg: "need `path`".into() })?
+        .to_string();
     let fmt = s.active().ok_or(EngineError::NoDocument)?.doc.pixel_format();
     let frames = load_frames(&path, fmt)?;
     let n = frames.len();

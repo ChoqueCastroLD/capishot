@@ -177,12 +177,7 @@ impl Parser<'_> {
             Some(b'/') => Ok(Value::Name(self.name())),
             Some(_) => {
                 let start = self.i;
-                while self.i < b.len()
-                    && !matches!(
-                        b[self.i],
-                        b' ' | b'\t' | b'\r' | b'\n' | b'[' | b']' | b'<' | b'>' | b'(' | b'/'
-                    )
-                {
+                while self.i < b.len() && !matches!(b[self.i], b' ' | b'\t' | b'\r' | b'\n' | b'[' | b']' | b'<' | b'>' | b'(' | b'/') {
                     self.i += 1;
                 }
                 let tok = std::str::from_utf8(&b[start..self.i]).unwrap_or("");
@@ -193,15 +188,8 @@ impl Parser<'_> {
                         self.i += 1;
                         self.err("unexpected byte")
                     }
-                    t if t.contains('.') || t.contains('e') || t.contains('E') => t
-                        .parse()
-                        .map(Value::Real)
-                        .or_else(|_| self.err("bad number")),
-                    t => t.parse().map(Value::Int).or_else(|_| {
-                        t.parse()
-                            .map(Value::Real)
-                            .or_else(|_| self.err("bad token"))
-                    }),
+                    t if t.contains('.') || t.contains('e') || t.contains('E') => t.parse().map(Value::Real).or_else(|_| self.err("bad number")),
+                    t => t.parse().map(Value::Int).or_else(|_| t.parse().map(Value::Real).or_else(|_| self.err("bad token"))),
                 }
             }
         }
@@ -209,12 +197,7 @@ impl Parser<'_> {
     fn name(&mut self) -> String {
         self.i += 1; // '/'
         let start = self.i;
-        while self.i < self.b.len()
-            && !matches!(
-                self.b[self.i],
-                b' ' | b'\t' | b'\r' | b'\n' | b'[' | b']' | b'<' | b'>' | b'(' | b'/'
-            )
-        {
+        while self.i < self.b.len() && !matches!(self.b[self.i], b' ' | b'\t' | b'\r' | b'\n' | b'[' | b']' | b'<' | b'>' | b'(' | b'/') {
             self.i += 1;
         }
         String::from_utf8_lossy(&self.b[start..self.i]).into_owned()
@@ -223,10 +206,7 @@ impl Parser<'_> {
 
 fn decode_string(raw: &[u8]) -> String {
     if raw.len() >= 2 && raw[0] == 0xFE && raw[1] == 0xFF {
-        let u: Vec<u16> = raw[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
-            .collect();
+        let u: Vec<u16> = raw[2..].as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
         String::from_utf16_lossy(&u)
     } else {
         raw.iter().map(|&c| c as char).collect()
@@ -252,8 +232,7 @@ fn indent(out: &mut Vec<u8>, n: usize) {
 }
 
 fn is_container(v: &Value) -> bool {
-    matches!(v, Value::Dict(_))
-        || matches!(v, Value::Array(a) if a.iter().any(|x| matches!(x, Value::Dict(_) | Value::Array(_))))
+    matches!(v, Value::Dict(_)) || matches!(v, Value::Array(a) if a.iter().any(|x| matches!(x, Value::Dict(_) | Value::Array(_))))
 }
 
 fn write_value(v: &Value, depth: usize, out: &mut Vec<u8>) {
@@ -357,34 +336,12 @@ mod tests {
     #[test]
     fn parses_sample() {
         let v = parse(SAMPLE).unwrap();
-        assert_eq!(
-            v.path(&["EngineDict", "Editor", "Text"])
-                .and_then(Value::as_str),
-            Some("Hi)\r")
-        );
-        let nums: Vec<f64> = v
-            .path(&["EngineDict", "Nums"])
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(Value::as_f64)
-            .collect();
+        assert_eq!(v.path(&["EngineDict", "Editor", "Text"]).and_then(Value::as_str), Some("Hi)\r"));
+        let nums: Vec<f64> = v.path(&["EngineDict", "Nums"]).unwrap().as_array().unwrap().iter().filter_map(Value::as_f64).collect();
         assert_eq!(nums, [1.0, 0.5, -2.0, 0.0]);
-        assert_eq!(
-            v.path(&["EngineDict", "Flag"]).and_then(Value::as_bool),
-            Some(true)
-        );
-        assert_eq!(
-            v.path(&["EngineDict", "Kind"]),
-            Some(&Value::Name("Roman".into()))
-        );
-        assert_eq!(
-            v.path(&["EngineDict", "Runs"]).unwrap().as_array().unwrap()[0]
-                .get("A")
-                .and_then(Value::as_i64),
-            Some(1)
-        );
+        assert_eq!(v.path(&["EngineDict", "Flag"]).and_then(Value::as_bool), Some(true));
+        assert_eq!(v.path(&["EngineDict", "Kind"]), Some(&Value::Name("Roman".into())));
+        assert_eq!(v.path(&["EngineDict", "Runs"]).unwrap().as_array().unwrap()[0].get("A").and_then(Value::as_i64), Some(1));
     }
 
     #[test]

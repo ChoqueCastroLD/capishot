@@ -142,7 +142,9 @@ impl WebSettings {
         if let Some(k) = s("palette") {
             st.palette = match k {
                 "restrictive" | "web" => PaletteKind::Web,
-                k => PaletteKind::from_id(k).ok_or_else(|| bad(cmd, format!("unknown palette `{k}` (perceptual|selective|adaptive|restrictive|exact|systemMac|systemWindows|uniform)")))?,
+                k => PaletteKind::from_id(k).ok_or_else(|| {
+                    bad(cmd, format!("unknown palette `{k}` (perceptual|selective|adaptive|restrictive|exact|systemMac|systemWindows|uniform)"))
+                })?,
             };
         }
         if let Some(n) = crate::commands::int(p, "colors").filter(|v| *v > 0).map(|v| v as u64) {
@@ -168,7 +170,13 @@ impl WebSettings {
             Some(c) => st.matte = Some(hex3(c).ok_or_else(|| bad(cmd, "matte is \"none\" or \"#rrggbb\""))?),
             None => {}
         }
-        for (k, slot) in [("interlaced", &mut st.interlaced), ("progressive", &mut st.progressive), ("optimized", &mut st.optimized), ("embedIcc", &mut st.embed_icc), ("convertToSrgb", &mut st.convert_to_srgb)] {
+        for (k, slot) in [
+            ("interlaced", &mut st.interlaced),
+            ("progressive", &mut st.progressive),
+            ("optimized", &mut st.optimized),
+            ("embedIcc", &mut st.embed_icc),
+            ("convertToSrgb", &mut st.convert_to_srgb),
+        ] {
             if let Some(b) = p.get(k).and_then(Value::as_bool) {
                 *slot = b;
             }
@@ -230,11 +238,29 @@ impl WebSettings {
 }
 
 /// Save for Web's named presets.
-pub const PRESETS: [&str; 12] = ["GIF 128 Dithered", "GIF 128 No Dither", "GIF 32 Dithered", "GIF 32 No Dither", "GIF 64 Dithered", "GIF 64 No Dither", "GIF Restrictive", "JPEG High", "JPEG Low", "JPEG Medium", "PNG-24", "PNG-8 128 Dithered"];
+pub const PRESETS: [&str; 12] = [
+    "GIF 128 Dithered",
+    "GIF 128 No Dither",
+    "GIF 32 Dithered",
+    "GIF 32 No Dither",
+    "GIF 64 Dithered",
+    "GIF 64 No Dither",
+    "GIF Restrictive",
+    "JPEG High",
+    "JPEG Low",
+    "JPEG Medium",
+    "PNG-24",
+    "PNG-8 128 Dithered",
+];
 
 pub fn preset_settings(name: &str) -> Option<WebSettings> {
     let d = WebSettings::default();
-    let gif = |colors: usize, dither: bool| WebSettings { format: WebFormat::Gif, colors, dither: if dither { Dither::Diffusion } else { Dither::None }, ..WebSettings::default() };
+    let gif = |colors: usize, dither: bool| WebSettings {
+        format: WebFormat::Gif,
+        colors,
+        dither: if dither { Dither::Diffusion } else { Dither::None },
+        ..WebSettings::default()
+    };
     Some(match name {
         "GIF 128 Dithered" => gif(128, true),
         "GIF 128 No Dither" => gif(128, false),
@@ -343,7 +369,9 @@ pub fn optimize(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings, icc: O
     };
     let region = || (rect.y0..rect.y1).flat_map(row);
     let matte = st.matte.unwrap_or([1.0, 1.0, 1.0]);
-    let over = |p: &[f32; 4]| -> [f32; 4] { [p[0] * p[3] + matte[0] * (1.0 - p[3]), p[1] * p[3] + matte[1] * (1.0 - p[3]), p[2] * p[3] + matte[2] * (1.0 - p[3]), 1.0] };
+    let over = |p: &[f32; 4]| -> [f32; 4] {
+        [p[0] * p[3] + matte[0] * (1.0 - p[3]), p[1] * p[3] + matte[1] * (1.0 - p[3]), p[2] * p[3] + matte[2] * (1.0 - p[3]), 1.0]
+    };
     let (ww, hh) = (w as u32, h as u32);
     let e = |e: photocraft_codecs::CodecError| other(e);
     let mut look: Vec<u8> = Vec::new();
@@ -357,12 +385,17 @@ pub fn optimize(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings, icc: O
                 data.extend_from_slice(&[to8(q[0]), to8(q[1]), to8(q[2]), to8(q[3])][..k]);
             }
             if preview {
-                look = if alpha { data.clone() } else { data.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect() };
+                look = if alpha { data.clone() } else { data.as_chunks::<3>().0.iter().flat_map(|c| [c[0], c[1], c[2], 255]).collect() };
             }
             let layout = if alpha { photocraft_codecs::ChannelLayout::Rgba } else { photocraft_codecs::ChannelLayout::Rgb };
             let meta = photocraft_codecs::Metadata { dpi: Some((dpi, dpi)), xmp: xmp.map(str::to_string), ..Default::default() };
             let img = photocraft_codecs::Image::from_u8(ww, hh, layout, data).map_err(e)?.with_icc(icc.map(<[u8]>::to_vec)).with_meta(meta);
-            let opts = photocraft_codecs::EncodeOptions { png_interlaced: st.interlaced, embed_icc: icc.is_some(), embed_metadata: xmp.is_some(), ..Default::default() };
+            let opts = photocraft_codecs::EncodeOptions {
+                png_interlaced: st.interlaced,
+                embed_icc: icc.is_some(),
+                embed_metadata: xmp.is_some(),
+                ..Default::default()
+            };
             (photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &opts).map_err(e)?, None)
         }
         WebFormat::Jpeg => {
@@ -373,12 +406,13 @@ pub fn optimize(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings, icc: O
             }
             // Save for Web's 0–100 quality → encoder 1–100.
             let q = st.quality.max(1);
-            let bytes = photocraft_codecs::web::encode_jpeg_rgb8(ww, hh, &rgb, q, st.progressive, st.optimized, icc.filter(|_| st.embed_icc), Some(dpi), xmp).map_err(e)?;
+            let bytes = photocraft_codecs::web::encode_jpeg_rgb8(ww, hh, &rgb, q, st.progressive, st.optimized, icc.filter(|_| st.embed_icc), Some(dpi), xmp)
+                .map_err(e)?;
             if preview {
                 // The preview shows the compression artefacts.
                 look = match photocraft_codecs::decode(&bytes) {
                     Ok(img) => img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8).data().to_vec(),
-                    Err(_) => rgb.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
+                    Err(_) => rgb.as_chunks::<3>().0.iter().flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
                 };
             }
             (bytes, None)
@@ -444,10 +478,13 @@ pub fn optimize(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings, icc: O
             });
             let idx = quantize_rows(&mut work, w, &pal, st.dither, st.dither_amount, t);
             if preview {
-                look = idx.iter().flat_map(|k| {
-                    let c = pal[*k as usize];
-                    [c[0], c[1], c[2], if Some(*k as usize) == t { 0 } else { 255 }]
-                }).collect();
+                look = idx
+                    .iter()
+                    .flat_map(|k| {
+                        let c = pal[*k as usize];
+                        [c[0], c[1], c[2], if Some(*k as usize) == t { 0 } else { 255 }]
+                    })
+                    .collect();
             }
             let tt = t.map(|v| v as u8);
             let bytes = if st.format == WebFormat::Gif {
@@ -575,7 +612,10 @@ fn quantize_rows(px: &mut [[f32; 4]], w: usize, pal: &[[u8; 3]], dither: Dither,
         use rayon::prelude::*;
         let band = w * 64;
         let mut idx = vec![0u8; px.len()];
-        px.par_chunks_mut(band).zip(idx.par_chunks_mut(band)).enumerate().for_each(|(i, (p, out))| out.copy_from_slice(&quantize_band(p, w, i * 64, pal, dither, amount, t)));
+        px.par_chunks_mut(band)
+            .zip(idx.par_chunks_mut(band))
+            .enumerate()
+            .for_each(|(i, (p, out))| out.copy_from_slice(&quantize_band(p, w, i * 64, pal, dither, amount, t)));
         idx
     }
     #[cfg(target_arch = "wasm32")]
@@ -593,7 +633,12 @@ fn html_escape(s: &str) -> String {
 }
 
 fn scale_rect(r: Rect, sx: f64, sy: f64) -> Rect {
-    Rect::new((f64::from(r.x0) * sx).round() as i32, (f64::from(r.y0) * sy).round() as i32, (f64::from(r.x1) * sx).round() as i32, (f64::from(r.y1) * sy).round() as i32)
+    Rect::new(
+        (f64::from(r.x0) * sx).round() as i32,
+        (f64::from(r.y0) * sy).round() as i32,
+        (f64::from(r.x1) * sx).round() as i32,
+        (f64::from(r.y1) * sy).round() as i32,
+    )
 }
 
 /// The HTML table for `cells` (rect, td body) over a `w`×`h` image: one column per distinct x
@@ -696,7 +741,8 @@ fn save_for_web(s: &mut Session, p: &Value) -> Result<Value> {
         crate::automate_cmds::fire_event(s, "export");
         return Ok(json!({"files": [path], "bytes": o.bytes.len(), "width": o.width, "height": o.height, "colors": o.colors}));
     }
-    let dir = dir.map(str::to_string).or_else(|| single.and_then(|f| std::path::Path::new(f).parent().map(|d| d.to_string_lossy().into_owned()))).unwrap_or_default();
+    let dir =
+        dir.map(str::to_string).or_else(|| single.and_then(|f| std::path::Path::new(f).parent().map(|d| d.to_string_lossy().into_owned()))).unwrap_or_default();
     let html = p.get("html").and_then(Value::as_bool).unwrap_or(false);
     let images = p.get("imagesFolder").and_then(Value::as_str).unwrap_or("images").to_string();
     let base = single.map(stem).unwrap_or_else(|| slices::base_name(&doc));
@@ -755,7 +801,13 @@ fn save_for_web(s: &mut Session, p: &Value) -> Result<Value> {
 fn export_preferences(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export.exportPreferences";
     let mut values = serde_json::Map::new();
-    for (k, key) in [("quickExportFormat", "export.quickExportFormat"), ("quickExportLocation", "export.quickExportLocation"), ("jpegQuality", "export.jpegQuality"), ("metadata", "export.metadata"), ("convertToSrgb", "export.convertToSrgb")] {
+    for (k, key) in [
+        ("quickExportFormat", "export.quickExportFormat"),
+        ("quickExportLocation", "export.quickExportLocation"),
+        ("jpegQuality", "export.jpegQuality"),
+        ("metadata", "export.metadata"),
+        ("convertToSrgb", "export.convertToSrgb"),
+    ] {
         if let Some(v) = p.get(k) {
             values.insert(key.into(), v.clone());
         }
@@ -813,7 +865,16 @@ fn quick_export(s: &mut Session, p: &Value) -> Result<Value> {
     let (wdoc, _, _) = web_document(&doc, &json!({}), &st)?;
     let buf = photocraft_compose::flatten(&wdoc);
     let xmp = web_xmp(&doc, st.metadata);
-    let opt = optimize(&buf.px, wdoc.size.width as usize, wdoc.bounds(), &st, wdoc.icc_profile.as_deref().map(|v| v.as_slice()), xmp.as_deref(), wdoc.resolution_dpi, false)?;
+    let opt = optimize(
+        &buf.px,
+        wdoc.size.width as usize,
+        wdoc.bounds(),
+        &st,
+        wdoc.icc_profile.as_deref().map(|v| v.as_slice()),
+        xmp.as_deref(),
+        wdoc.resolution_dpi,
+        false,
+    )?;
     write_file(&path, &opt.bytes)?;
     crate::automate_cmds::fire_event(s, "export");
     Ok(json!({"path": path, "format": fmt, "bytes": opt.bytes.len()}))
@@ -1098,9 +1159,33 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             save_for_web
         ),
-        spec!("file.export.exportPreferences", "Export Preferences…", &["File", "Export"], None, r##"{"quickExportFormat":"png|jpg|gif|webp"?,"quickExportLocation":"ask|sameFolder"?,"jpegQuality":1..100?,"metadata":"none|copyright|all"?,"convertToSrgb":bool?} → {values}"##, |_| Ok(()), export_preferences),
-        spec!("file.export.quickExport", "Quick Export", &[], None, r##"{"path":str? (required unless Export Preferences › Location is "sameFolder" and the document is saved)} → {path, format, bytes}"##, native_doc, quick_export),
-        spec!("file.generate.imageAssets", "Image Assets", &["File", "Generate"], None, r##"{"on":bool? (default: toggle),"dir":folder? (default <document>-assets next to the file)} → {enabled, files, errors}; layers named like "foo.png", "200% foo@2x.png", "48x48 icons/a.png8", "photo.jpg80%" are exported, now and after each save"##, has_doc, image_assets),
+        spec!(
+            "file.export.exportPreferences",
+            "Export Preferences…",
+            &["File", "Export"],
+            None,
+            r##"{"quickExportFormat":"png|jpg|gif|webp"?,"quickExportLocation":"ask|sameFolder"?,"jpegQuality":1..100?,"metadata":"none|copyright|all"?,"convertToSrgb":bool?} → {values}"##,
+            |_| Ok(()),
+            export_preferences
+        ),
+        spec!(
+            "file.export.quickExport",
+            "Quick Export",
+            &[],
+            None,
+            r##"{"path":str? (required unless Export Preferences › Location is "sameFolder" and the document is saved)} → {path, format, bytes}"##,
+            native_doc,
+            quick_export
+        ),
+        spec!(
+            "file.generate.imageAssets",
+            "Image Assets",
+            &["File", "Generate"],
+            None,
+            r##"{"on":bool? (default: toggle),"dir":folder? (default <document>-assets next to the file)} → {enabled, files, errors}; layers named like "foo.png", "200% foo@2x.png", "48x48 icons/a.png8", "photo.jpg80%" are exported, now and after each save"##,
+            has_doc,
+            image_assets
+        ),
     ]
 }
 

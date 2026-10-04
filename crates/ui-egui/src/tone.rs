@@ -26,7 +26,7 @@ fn compute_histograms(doc: &Document, hide: LayerId) -> Histograms {
     }
     let img = photocraft_compose::thumbnail(&d, 384);
     let mut h = [[0u32; 256]; 4];
-    for p in img.pixels.chunks_exact(4) {
+    for p in img.pixels.as_chunks::<4>().0 {
         if p[3] == 0 {
             continue;
         }
@@ -168,7 +168,13 @@ pub fn histogram_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     });
     ui.add_space(4.0);
     egui::Grid::new("hist-stats").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
-        for (k, v) in [("Mean:", format!("{mean:.2}")), ("Std Dev:", format!("{:.2}", var.sqrt())), ("Median:", median.unwrap_or(0).to_string()), ("Pixels:", (size.width as u64 * size.height as u64).to_string()), ("Cache Level:", level.to_string())] {
+        for (k, v) in [
+            ("Mean:", format!("{mean:.2}")),
+            ("Std Dev:", format!("{:.2}", var.sqrt())),
+            ("Median:", median.unwrap_or(0).to_string()),
+            ("Pixels:", (size.width as u64 * size.height as u64).to_string()),
+            ("Cache Level:", level.to_string()),
+        ] {
             ui.label(egui::RichText::new(k).color(t.text_dim).size(11.5));
             ui.label(egui::RichText::new(v).font(crate::theme::mono(11.5)).color(t.text));
             ui.end_row();
@@ -194,7 +200,8 @@ fn curves_params(pts: &[Vec<[f32; 2]>; 4]) -> Value {
 }
 
 fn lut_of(points: &[[f32; 2]]) -> Vec<f32> {
-    let cp: Vec<photocraft_doc::adjust::CurvePoint> = points.iter().map(|p| photocraft_doc::adjust::CurvePoint { input: p[0] / 255.0, output: p[1] / 255.0 }).collect();
+    let cp: Vec<photocraft_doc::adjust::CurvePoint> =
+        points.iter().map(|p| photocraft_doc::adjust::CurvePoint { input: p[0] / 255.0, output: p[1] / 255.0 }).collect();
     photocraft_compose::adjust::curve_lut(&cp)
 }
 
@@ -245,7 +252,8 @@ pub fn curves_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId) {
     mesh.add_triangle(4, 6, 7);
     p.add(mesh);
     let to_scr = |q: [f32; 2]| pos2(graph.left() + q[0] / 255.0 * graph.width(), graph.bottom() - q[1] / 255.0 * graph.height());
-    let to_val = |s: Pos2| [((s.x - graph.left()) / graph.width() * 255.0).clamp(0.0, 255.0), ((graph.bottom() - s.y) / graph.height() * 255.0).clamp(0.0, 255.0)];
+    let to_val =
+        |s: Pos2| [((s.x - graph.left()) / graph.width() * 255.0).clamp(0.0, 255.0), ((graph.bottom() - s.y) / graph.height() * 255.0).clamp(0.0, 255.0)];
     // Other channels' curves, faintly, when editing the composite (Photoshop shows them too).
     let draw_curve = |pts: &[[f32; 2]], color: Color32, width: f32| {
         let lut = lut_of(pts);
@@ -270,7 +278,8 @@ pub fn curves_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId) {
     if (resp.drag_started() || resp.clicked())
         && let Some(pos) = resp.interact_pointer_pos()
     {
-        let hit = cur.iter().enumerate().map(|(i, q)| (i, to_scr(*q).distance(pos))).filter(|(_, d)| *d < 9.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i);
+        let hit =
+            cur.iter().enumerate().map(|(i, q)| (i, to_scr(*q).distance(pos))).filter(|(_, d)| *d < 9.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i);
         sel = match hit {
             Some(i) => Some(i),
             None if graph.contains(pos) => {
@@ -568,7 +577,12 @@ mod tests {
         for (a, b) in v.iter().flatten().zip(back.iter().flatten()) {
             assert!((a - b).abs() < 0.01, "{a} vs {b}");
         }
-        let pts: [Vec<[f32; 2]>; 4] = [vec![[0.0, 0.0], [128.0, 150.0], [255.0, 255.0]], vec![[0.0, 10.0], [255.0, 245.0]], vec![[0.0, 0.0], [255.0, 255.0]], vec![[0.0, 0.0], [255.0, 255.0]]];
+        let pts: [Vec<[f32; 2]>; 4] = [
+            vec![[0.0, 0.0], [128.0, 150.0], [255.0, 255.0]],
+            vec![[0.0, 10.0], [255.0, 245.0]],
+            vec![[0.0, 0.0], [255.0, 255.0]],
+            vec![[0.0, 0.0], [255.0, 255.0]],
+        ];
         let adj = photocraft_engine::commands::adjustment_from_params("curves", &curves_params(&pts));
         assert_eq!(curves_points(&adj), pts);
     }

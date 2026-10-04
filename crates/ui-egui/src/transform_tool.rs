@@ -63,7 +63,8 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
     }
     let image = preview_image(&doc, id, lifted.as_ref(), b);
     let texture = ctx.load_texture(format!("transform-{session}"), image, egui::TextureOptions::LINEAR);
-    app.transform_preview = Some(TransformPreview { session, doc: Arc::new(pd), texture, opacity: layer.opacity * layer.fill_opacity, gesture: None, warp_drag: None });
+    app.transform_preview =
+        Some(TransformPreview { session, doc: Arc::new(pd), texture, opacity: layer.opacity * layer.fill_opacity, gesture: None, warp_drag: None });
     app.ui.transform = Some(TransformSession {
         session,
         layer: id.0,
@@ -130,7 +131,8 @@ pub fn begin_warp(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), St
 /// Switch to Warp mode: a smart object's existing warp (when the box is untouched), else a
 /// custom mesh following the current box (so a transform made first carries over).
 pub fn enter_warp(app: &mut PhotocraftApp) {
-    let existing = app.session.active().and_then(|d| d.doc.layer(LayerId(app.ui.transform.as_ref()?.layer)).and_then(photocraft_engine::warp_cmds::smart_warp_doc_space));
+    let existing =
+        app.session.active().and_then(|d| d.doc.layer(LayerId(app.ui.transform.as_ref()?.layer)).and_then(photocraft_engine::warp_cmds::smart_warp_doc_space));
     let Some(t) = app.ui.transform.as_mut() else { return };
     if t.warp.is_some() {
         return;
@@ -397,8 +399,20 @@ fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods: egui::Mod
                 let k = if sx.abs() > sy.abs() { sx.abs() } else { sy.abs() };
                 let (nx, ny) = (k * sx.signum(), k * sy.signum());
                 let (ax, ay) = if mods.alt { (pu, pv) } else { (if mu.0 { r[2] } else { r[0] }, if mv.0 { r[3] } else { r[1] }) };
-                let fx = if mods.alt { 0.5 } else if mu.0 { 1.0 } else { 0.0 };
-                let fy = if mods.alt { 0.5 } else if mv.0 { 1.0 } else { 0.0 };
+                let fx = if mods.alt {
+                    0.5
+                } else if mu.0 {
+                    1.0
+                } else {
+                    0.0
+                };
+                let fy = if mods.alt {
+                    0.5
+                } else if mv.0 {
+                    1.0
+                } else {
+                    0.0
+                };
                 r[0] = ax - nx * fx;
                 r[2] = r[0] + nx;
                 r[1] = ay - ny * fy;
@@ -813,7 +827,16 @@ mod tests {
     use super::*;
 
     fn session() -> TransformSession {
-        TransformSession { session: 1, layer: 1, rect: [0.0, 0.0, 100.0, 50.0], quad: corners([0.0, 0.0, 100.0, 50.0]), pivot: [50.0, 25.0], interpolation: "bicubic".into(), warp: None, selection: false }
+        TransformSession {
+            session: 1,
+            layer: 1,
+            rect: [0.0, 0.0, 100.0, 50.0],
+            quad: corners([0.0, 0.0, 100.0, 50.0]),
+            pivot: [50.0, 25.0],
+            interpolation: "bicubic".into(),
+            warp: None,
+            selection: false,
+        }
     }
 
     fn drag(s: &mut TransformSession, from: [f64; 2], to: [f64; 2], mods: egui::Modifiers) {

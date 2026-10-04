@@ -20,21 +20,12 @@ pub enum CodecError {
 
 impl CodecError {
     pub(crate) fn malformed(format: Format, e: impl std::fmt::Display) -> Self {
-        CodecError::Malformed {
-            format,
-            message: e.to_string(),
-        }
+        CodecError::Malformed { format, message: e.to_string() }
     }
     pub(crate) fn encode(format: Format, e: impl std::fmt::Display) -> Self {
-        CodecError::Encode {
-            format,
-            message: e.to_string(),
-        }
+        CodecError::Encode { format, message: e.to_string() }
     }
     pub(crate) fn unsupported(format: Format, reason: impl Into<String>) -> Self {
-        CodecError::Unsupported {
-            format,
-            reason: reason.into(),
-        }
+        CodecError::Unsupported { format, reason: reason.into() }
     }
 }

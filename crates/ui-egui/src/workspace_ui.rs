@@ -105,7 +105,11 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
     if id == "view.thirtyTwoBitPreviewOptions" && no_params(params) {
         let d = app.session.active()?;
         let h = app.session.color.hdr.get(&d.doc.id).copied().unwrap_or_default();
-        return Some(open(app, "preview32", json!({"method": if h.highlight_compression { "highlightCompression" } else { "exposureGamma" }, "exposure": h.exposure, "gamma": h.gamma})));
+        return Some(open(
+            app,
+            "preview32",
+            json!({"method": if h.highlight_compression { "highlightCompression" } else { "exposureGamma" }, "exposure": h.exposure, "gamma": h.gamma}),
+        ));
     }
     if !handles(id) {
         return None;
@@ -126,7 +130,9 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
             app.session.prefs.edit(|p| p.workspace_locked = on);
             Ok(json!({"locked": on}))
         }
-        "window.workspace.newWorkspace" if no_params(params) => open(app, "newWorkspace", json!({"name": "", "keyboardShortcuts": false, "menus": false, "toolbar": false})),
+        "window.workspace.newWorkspace" if no_params(params) => {
+            open(app, "newWorkspace", json!({"name": "", "keyboardShortcuts": false, "menus": false, "toolbar": false}))
+        }
         "window.workspace.newWorkspace" => new_workspace(app, params),
         "window.workspace.deleteWorkspace" if no_params(params) => {
             let first = app.session.prefs().workspaces.keys().next().cloned().unwrap_or_default();
@@ -321,12 +327,9 @@ fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
     };
     let names: Vec<String> = app.session.prefs().workspaces.keys().cloned().collect();
     let mut result: Option<bool> = None;
-    egui::Window::new(title)
-        .id(egui::Id::new("shell-dialog"))
-        .collapsible(false)
-        .resizable(false)
-        .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
-        .show(ctx, |ui| {
+    egui::Window::new(title).id(egui::Id::new("shell-dialog")).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(
+        ctx,
+        |ui| {
             ui.label(RichText::new(title).color(t.text).size(13.0).strong());
             crate::widgets::hairline(ui);
             ui.add_space(6.0);
@@ -358,7 +361,11 @@ fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 "newWorkspace" => {
                     text(ui, &mut f, "name", "Name:");
                     ui.label(RichText::new("Capture").color(t.text_dim).size(11.0));
-                    ui.label(RichText::new("Panel locations are saved in the workspace. Keyboard shortcuts, menus and toolbar are optional.").color(t.text_faint).size(10.5));
+                    ui.label(
+                        RichText::new("Panel locations are saved in the workspace. Keyboard shortcuts, menus and toolbar are optional.")
+                            .color(t.text_faint)
+                            .size(10.5),
+                    );
                     check(ui, &mut f, "keyboardShortcuts", "Keyboard Shortcuts");
                     check(ui, &mut f, "menus", "Menus");
                     check(ui, &mut f, "toolbar", "Toolbar");
@@ -376,7 +383,13 @@ fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
                 "preview32" => {
                     let mut m = f.get("method").and_then(Value::as_str).unwrap_or("exposureGamma").to_string();
-                    if crate::widgets::dropdown(ui, "p32-method", &mut m, &[("exposureGamma".to_string(), "Exposure and Gamma"), ("highlightCompression".to_string(), "Highlight Compression")], 180.0) {
+                    if crate::widgets::dropdown(
+                        ui,
+                        "p32-method",
+                        &mut m,
+                        &[("exposureGamma".to_string(), "Exposure and Gamma"), ("highlightCompression".to_string(), "Highlight Compression")],
+                        180.0,
+                    ) {
                         f.insert("method".into(), json!(m));
                     }
                     ui.add_enabled_ui(m == "exposureGamma", |ui| {
@@ -385,7 +398,21 @@ fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     });
                 }
                 _ => {
-                    for (k, label) in [("layerEdges", "Layer Edges"), ("selectionEdges", "Selection Edges"), ("targetPath", "Target Path"), ("notes", "Notes"), ("pixelGrid", "Pixel Grid"), ("slices", "Slices"), ("count", "Count"), ("smartGuides", "Smart Guides"), ("brushPreview", "Brush Preview"), ("mesh", "Mesh"), ("editPins", "Edit Pins"), ("canvasGuides", "Canvas Guides"), ("artboardGuides", "Artboard Guides")] {
+                    for (k, label) in [
+                        ("layerEdges", "Layer Edges"),
+                        ("selectionEdges", "Selection Edges"),
+                        ("targetPath", "Target Path"),
+                        ("notes", "Notes"),
+                        ("pixelGrid", "Pixel Grid"),
+                        ("slices", "Slices"),
+                        ("count", "Count"),
+                        ("smartGuides", "Smart Guides"),
+                        ("brushPreview", "Brush Preview"),
+                        ("mesh", "Mesh"),
+                        ("editPins", "Edit Pins"),
+                        ("canvasGuides", "Canvas Guides"),
+                        ("artboardGuides", "Artboard Guides"),
+                    ] {
                         check(ui, &mut f, k, label);
                     }
                 }
@@ -402,7 +429,8 @@ fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     }
                 });
             });
-        });
+        },
+    );
     match result {
         Some(true) => {
             if let Some((id, p)) = dialog_command(&kind, &f) {

@@ -47,7 +47,12 @@ fn list(s: &mut Session, _: &Value) -> Result<Value> {
         .pattern_groups
         .iter()
         .map(|g| {
-            let pats: Vec<Value> = g.items.iter().filter_map(|id| s.patterns.items.iter().find(|p| &p.id == id)).map(|p| json!({"id": p.id, "name": p.display_name(), "width": p.width, "height": p.height})).collect();
+            let pats: Vec<Value> = g
+                .items
+                .iter()
+                .filter_map(|id| s.patterns.items.iter().find(|p| &p.id == id))
+                .map(|p| json!({"id": p.id, "name": p.display_name(), "width": p.width, "height": p.height}))
+                .collect();
             json!({"name": g.name, "patterns": pats})
         })
         .collect();
@@ -152,7 +157,16 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec { id: "pattern.presets.list", label: "Pattern Presets", menu: &[], shortcut: None, params: "{} → {groups:[{name,patterns:[{id,name,width,height}]}],current}", enabled: always, run: list, journal: false },
+        CommandSpec {
+            id: "pattern.presets.list",
+            label: "Pattern Presets",
+            menu: &[],
+            shortcut: None,
+            params: "{} → {groups:[{name,patterns:[{id,name,width,height}]}],current}",
+            enabled: always,
+            run: list,
+            journal: false,
+        },
         CommandSpec {
             id: "pattern.presets.select",
             label: "Select Pattern",
@@ -163,8 +177,35 @@ pub fn specs() -> Vec<CommandSpec> {
             run: select,
             journal: true,
         },
-        CommandSpec { id: "pattern.presets.apply", label: "New Pattern Fill Layer from Preset", menu: &[], shortcut: None, params: r##"{"pattern":id|name?=selected,"scale":1..1000=100,"angle":deg=0} → {layer}"##, enabled: super::has_doc, run: apply, journal: true },
-        CommandSpec { id: "pattern.presets.new", label: "New Pattern Preset", menu: &[], shortcut: None, params: r##"{"name":str?,"group":name?,"rect":[x0,y0,x1,y1]?} (Define Pattern from the selection/canvas into a group)"##, enabled: super::has_doc, run: new_preset, journal: true },
-        CommandSpec { id: "pattern.presets.edit", label: "Edit Pattern Presets", menu: &[], shortcut: None, params: super::GROUP_EDIT_PARAMS, enabled: always, run: edit, journal: true },
+        CommandSpec {
+            id: "pattern.presets.apply",
+            label: "New Pattern Fill Layer from Preset",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"pattern":id|name?=selected,"scale":1..1000=100,"angle":deg=0} → {layer}"##,
+            enabled: super::has_doc,
+            run: apply,
+            journal: true,
+        },
+        CommandSpec {
+            id: "pattern.presets.new",
+            label: "New Pattern Preset",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"name":str?,"group":name?,"rect":[x0,y0,x1,y1]?} (Define Pattern from the selection/canvas into a group)"##,
+            enabled: super::has_doc,
+            run: new_preset,
+            journal: true,
+        },
+        CommandSpec {
+            id: "pattern.presets.edit",
+            label: "Edit Pattern Presets",
+            menu: &[],
+            shortcut: None,
+            params: super::GROUP_EDIT_PARAMS,
+            enabled: always,
+            run: edit,
+            journal: true,
+        },
     ]
 }

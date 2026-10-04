@@ -153,7 +153,8 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
         ui.vertical(|ui| {
             let layer = f.get("__layer").and_then(Value::as_u64);
             let key = egui::Id::new(("export-preview", doc.id.0, app.session.active().map_or(0, |s| s.revision), layer));
-            let sig = format!("{}{}{}{}", s_fmt(f), n(f, "quality", 85.0), f.get("transparency").map(|v| v.to_string()).unwrap_or_default(), n(f, "scale", 100.0));
+            let sig =
+                format!("{}{}{}{}", s_fmt(f), n(f, "quality", 85.0), f.get("transparency").map(|v| v.to_string()).unwrap_or_default(), n(f, "scale", 100.0));
             let cached: Option<(String, Option<u64>, Arc<egui::TextureHandle>)> = ui.data(|d| d.get_temp(key));
             let (size, tex) = match cached.filter(|c| c.0 == sig) {
                 Some((_, size, tex)) => (size, tex),
@@ -231,7 +232,13 @@ mod tests {
 
     #[test]
     fn export_document_scales_and_flattens() {
-        let doc = Document::with_background("x", photocraft_doc::Size::new(200, 100), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8, photocraft_doc::Color::WHITE);
+        let doc = Document::with_background(
+            "x",
+            photocraft_doc::Size::new(200, 100),
+            photocraft_doc::ColorMode::Rgb,
+            photocraft_doc::SampleType::U8,
+            photocraft_doc::Color::WHITE,
+        );
         let mut f = Map::new();
         f.insert("format".into(), json!("jpg"));
         f.insert("scale".into(), json!(50));

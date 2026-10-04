@@ -75,7 +75,13 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
             };
             let steps: Vec<Value> = action.steps.iter().map(|(id, p)| json!([id, p])).collect();
             let name = action.name.clone();
-            form(app, id, "Create Droplet", json!({"path": format!("{dir}/{name}.pcdroplet"), "name": name, "steps": steps, "output": format!("{dir}/droplet-output"), "format": "same"}), json!({"format": ["same", "png", "jpg", "psd", "tiff"]}))
+            form(
+                app,
+                id,
+                "Create Droplet",
+                json!({"path": format!("{dir}/{name}.pcdroplet"), "name": name, "steps": steps, "output": format!("{dir}/droplet-output"), "format": "same"}),
+                json!({"format": ["same", "png", "jpg", "psd", "tiff"]}),
+            )
         }
         "file.scripts.statistics" => {
             let modes: Vec<&str> = photocraft_doc::StackMode::ALL.iter().map(|m| m.id()).collect();
@@ -187,7 +193,24 @@ pub fn open_web(app: &mut PhotocraftApp) -> u64 {
             }
         }
     }
-    for (k, v) in [("format", json!("jpeg")), ("quality", json!(60)), ("palette", json!("selective")), ("colors", json!(128)), ("dither", json!("diffusion")), ("ditherAmount", json!(88)), ("transparency", json!(true)), ("matte", json!("#ffffff")), ("interlaced", json!(false)), ("progressive", json!(false)), ("optimized", json!(true)), ("embedIcc", json!(false)), ("convertToSrgb", json!(true)), ("metadata", json!("copyright")), ("percent", json!(100.0)), ("webSnap", json!(0))] {
+    for (k, v) in [
+        ("format", json!("jpeg")),
+        ("quality", json!(60)),
+        ("palette", json!("selective")),
+        ("colors", json!(128)),
+        ("dither", json!("diffusion")),
+        ("ditherAmount", json!(88)),
+        ("transparency", json!(true)),
+        ("matte", json!("#ffffff")),
+        ("interlaced", json!(false)),
+        ("progressive", json!(false)),
+        ("optimized", json!(true)),
+        ("embedIcc", json!(false)),
+        ("convertToSrgb", json!(true)),
+        ("metadata", json!("copyright")),
+        ("percent", json!(100.0)),
+        ("webSnap", json!(0)),
+    ] {
         f.entry(k.to_string()).or_insert(v);
     }
     app.ui.open_dialog(DialogKind::Command, f)
@@ -234,7 +257,11 @@ fn web_pane(app: &PhotocraftApp, ui: &mut egui::Ui, size: egui::Vec2, p: Option<
             let (fw, fh) = (f64::from(doc.size.width) * pct, f64::from(doc.size.height) * pct);
             let k = (640.0 / fw.max(fh)).min(1.0);
             let st = WebSettings::default();
-            let Ok((wd, _, _)) = web_cmds::web_document(&doc, &json!({"width": (fw * k).round().max(1.0), "height": (fh * k).round().max(1.0), "resample": "bilinear"}), &st) else { return };
+            let Ok((wd, _, _)) =
+                web_cmds::web_document(&doc, &json!({"width": (fw * k).round().max(1.0), "height": (fh * k).round().max(1.0), "resample": "bilinear"}), &st)
+            else {
+                return;
+            };
             let buf = photocraft_compose::flatten(&wd);
             let v = (Arc::new(buf.px), wd.size.width, wd.size.height, (fw * fh) / (f64::from(wd.size.width) * f64::from(wd.size.height)).max(1.0));
             ui.data_mut(|d| d.insert_temp(wkey, v.clone()));
@@ -249,7 +276,9 @@ fn web_pane(app: &PhotocraftApp, ui: &mut egui::Ui, size: egui::Vec2, p: Option<
         None => {
             let (rgba, info) = match p {
                 None => (px.iter().flat_map(|q| q.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).collect::<Vec<u8>>(), None),
-                Some(p) => match WebSettings::from_params(p, "preview").and_then(|st| web_cmds::optimize(&px, w as usize, photocraft_geom::Rect::new(0, 0, w as i32, h as i32), &st, None, None, 72.0, true)) {
+                Some(p) => match WebSettings::from_params(p, "preview")
+                    .and_then(|st| web_cmds::optimize(&px, w as usize, photocraft_geom::Rect::new(0, 0, w as i32, h as i32), &st, None, None, 72.0, true))
+                {
                     Ok(Optimized { preview, bytes, colors, ext, .. }) => (preview, Some(((bytes.len() as f64 * ratio) as usize, colors, ext))),
                     Err(_) => (vec![0; (w * h * 4) as usize], None),
                 },
@@ -274,7 +303,10 @@ fn web_pane(app: &PhotocraftApp, ui: &mut egui::Ui, size: egui::Vec2, p: Option<
             (Some(_), Some((bytes, colors, ext))) => {
                 // Photoshop's download estimate at 56.6 Kbps.
                 let secs = (bytes as f64 * 8.0 / 56_600.0).ceil();
-                (format!("{}  {}", ext.to_uppercase(), crate::sizing::human_bytes(bytes as f64)), format!("{secs} sec @ 56.6 Kbps{}", colors.map(|c| format!("  ·  {c} colors")).unwrap_or_default()))
+                (
+                    format!("{}  {}", ext.to_uppercase(), crate::sizing::human_bytes(bytes as f64)),
+                    format!("{secs} sec @ 56.6 Kbps{}", colors.map(|c| format!("  ·  {c} colors")).unwrap_or_default()),
+                )
             }
             (Some(_), None) => ("—".into(), String::new()),
         };
@@ -370,9 +402,29 @@ fn web_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             let fmt = s(f, "format", "jpeg");
             match fmt.as_str() {
                 "gif" | "png8" => {
-                    dropdown_str(ui, "web-palette", f, "palette", &[("perceptual", "Perceptual"), ("selective", "Selective"), ("adaptive", "Adaptive"), ("restrictive", "Restrictive (Web)"), ("exact", "Exact")], 150.0);
+                    dropdown_str(
+                        ui,
+                        "web-palette",
+                        f,
+                        "palette",
+                        &[
+                            ("perceptual", "Perceptual"),
+                            ("selective", "Selective"),
+                            ("adaptive", "Adaptive"),
+                            ("restrictive", "Restrictive (Web)"),
+                            ("exact", "Exact"),
+                        ],
+                        150.0,
+                    );
                     number(ui, f, "colors", "Colors", 2.0..=256.0, "", 128.0);
-                    dropdown_str(ui, "web-dither", f, "dither", &[("none", "No Dither"), ("diffusion", "Diffusion"), ("pattern", "Pattern"), ("noise", "Noise")], 150.0);
+                    dropdown_str(
+                        ui,
+                        "web-dither",
+                        f,
+                        "dither",
+                        &[("none", "No Dither"), ("diffusion", "Diffusion"), ("pattern", "Pattern"), ("noise", "Noise")],
+                        150.0,
+                    );
                     number(ui, f, "ditherAmount", "Dither", 0.0..=100.0, "%", 88.0);
                     check(ui, f, "transparency", "Transparency", true);
                     check(ui, f, "interlaced", "Interlaced", false);
@@ -405,13 +457,24 @@ fn web_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             check(ui, f, "convertToSrgb", "Convert to sRGB", true);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("Metadata").color(t.text_dim));
-                dropdown_str(ui, "web-meta", f, "metadata", &[("none", "None"), ("copyright", "Copyright"), ("copyrightAndContact", "Copyright and Contact Info"), ("all", "All")], 160.0);
+                dropdown_str(
+                    ui,
+                    "web-meta",
+                    f,
+                    "metadata",
+                    &[("none", "None"), ("copyright", "Copyright"), ("copyrightAndContact", "Copyright and Contact Info"), ("all", "All")],
+                    160.0,
+                );
             });
             ui.add_space(8.0);
             ui.label(egui::RichText::new("Image Size").font(crate::theme::semibold(12.0)).color(t.text));
             number(ui, f, "percent", "Percent", 1.0..=1000.0, "%", 100.0);
             let pct = n(f, "percent", 100.0) / 100.0;
-            ui.label(egui::RichText::new(format!("W: {} px   H: {} px", (f64::from(doc.size.width) * pct).round(), (f64::from(doc.size.height) * pct).round())).color(t.text_dim).size(11.5));
+            ui.label(
+                egui::RichText::new(format!("W: {} px   H: {} px", (f64::from(doc.size.width) * pct).round(), (f64::from(doc.size.height) * pct).round()))
+                    .color(t.text_dim)
+                    .size(11.5),
+            );
             let nslices = photocraft_doc::slices::resolve(&doc).len();
             if !doc.slices.is_empty() {
                 ui.add_space(6.0);
@@ -454,7 +517,27 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
     if let Some(Value::Object(m)) = app.session.file_menu.last_print.clone() {
         f.extend(m);
     }
-    for (k, v) in [("printer", json!("")), ("copies", json!(1)), ("paper", json!("letter")), ("orientation", json!("portrait")), ("colorHandling", json!("printerManages")), ("printerProfile", json!("coated-cmyk")), ("intent", json!("relative")), ("bpc", json!(true)), ("center", json!(true)), ("top", json!(0.0)), ("left", json!(0.0)), ("scale", json!(100.0)), ("scaleToFit", json!(false)), ("cornerCropMarks", json!(false)), ("centerCropMarks", json!(false)), ("registrationMarks", json!(false)), ("description", json!(false)), ("labels", json!(false)), ("output", json!(""))] {
+    for (k, v) in [
+        ("printer", json!("")),
+        ("copies", json!(1)),
+        ("paper", json!("letter")),
+        ("orientation", json!("portrait")),
+        ("colorHandling", json!("printerManages")),
+        ("printerProfile", json!("coated-cmyk")),
+        ("intent", json!("relative")),
+        ("bpc", json!(true)),
+        ("center", json!(true)),
+        ("top", json!(0.0)),
+        ("left", json!(0.0)),
+        ("scale", json!(100.0)),
+        ("scaleToFit", json!(false)),
+        ("cornerCropMarks", json!(false)),
+        ("centerCropMarks", json!(false)),
+        ("registrationMarks", json!(false)),
+        ("description", json!(false)),
+        ("labels", json!(false)),
+        ("output", json!("")),
+    ] {
         f.entry(k.to_string()).or_insert(v);
     }
     app.ui.open_dialog(DialogKind::Command, f)
@@ -467,48 +550,62 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
     ui.horizontal_top(|ui| {
         // Page preview.
         ui.vertical(|ui| {
-        let (area, _) = ui.allocate_exact_size(egui::vec2(330.0, 400.0), egui::Sense::hover());
-        ui.painter().rect_filled(area, 0.0, t.canvas);
-        match photocraft_engine::print_cmds::layout(&doc, &p, "file.print") {
-            Ok(l) => {
-                let (pw, ph) = l.paper;
-                let k = ((area.width() - 20.0) / pw as f32).min((area.height() - 20.0) / ph as f32);
-                let page = egui::Rect::from_center_size(area.center(), egui::vec2(pw as f32 * k, ph as f32 * k));
-                ui.painter().rect_filled(page, 0.0, egui::Color32::WHITE);
-                ui.painter().rect_stroke(page, 0.0, egui::Stroke::new(1.0, t.separator), egui::StrokeKind::Outside);
-                let (x, y, w, h) = l.rect;
-                let img = egui::Rect::from_min_size(egui::pos2(page.left() + x as f32 * k, page.bottom() - (y + h) as f32 * k), egui::vec2(w as f32 * k, h as f32 * k));
-                let key = egui::Id::new(("print-thumb", doc.id.0, app.session.active().map_or(0, |d| d.revision)));
-                let tex: Option<Arc<egui::TextureHandle>> = ui.data(|d| d.get_temp(key));
-                let tex = tex.unwrap_or_else(|| {
-                    let th = photocraft_compose::thumbnail(&doc, 400);
-                    let ci = egui::ColorImage::from_rgba_unmultiplied([th.width as usize, th.height as usize], &th.pixels);
-                    let tx = Arc::new(ui.ctx().load_texture("print-thumb", ci, egui::TextureOptions::LINEAR));
-                    ui.data_mut(|d| d.insert_temp(key, tx.clone()));
-                    tx
-                });
-                let clip = ui.painter().with_clip_rect(page);
-                clip.image(tex.id(), img, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                let mark = egui::Stroke::new(1.0, egui::Color32::BLACK);
-                if l.marks.corner_crop {
-                    for (c, dx, dy) in [(img.left_top(), -1.0, -1.0), (img.right_top(), 1.0, -1.0), (img.left_bottom(), -1.0, 1.0), (img.right_bottom(), 1.0, 1.0)] {
-                        clip.line_segment([c + egui::vec2(dx * 3.0, 0.0), c + egui::vec2(dx * 12.0, 0.0)], mark);
-                        clip.line_segment([c + egui::vec2(0.0, dy * 3.0), c + egui::vec2(0.0, dy * 12.0)], mark);
+            let (area, _) = ui.allocate_exact_size(egui::vec2(330.0, 400.0), egui::Sense::hover());
+            ui.painter().rect_filled(area, 0.0, t.canvas);
+            match photocraft_engine::print_cmds::layout(&doc, &p, "file.print") {
+                Ok(l) => {
+                    let (pw, ph) = l.paper;
+                    let k = ((area.width() - 20.0) / pw as f32).min((area.height() - 20.0) / ph as f32);
+                    let page = egui::Rect::from_center_size(area.center(), egui::vec2(pw as f32 * k, ph as f32 * k));
+                    ui.painter().rect_filled(page, 0.0, egui::Color32::WHITE);
+                    ui.painter().rect_stroke(page, 0.0, egui::Stroke::new(1.0, t.separator), egui::StrokeKind::Outside);
+                    let (x, y, w, h) = l.rect;
+                    let img = egui::Rect::from_min_size(
+                        egui::pos2(page.left() + x as f32 * k, page.bottom() - (y + h) as f32 * k),
+                        egui::vec2(w as f32 * k, h as f32 * k),
+                    );
+                    let key = egui::Id::new(("print-thumb", doc.id.0, app.session.active().map_or(0, |d| d.revision)));
+                    let tex: Option<Arc<egui::TextureHandle>> = ui.data(|d| d.get_temp(key));
+                    let tex = tex.unwrap_or_else(|| {
+                        let th = photocraft_compose::thumbnail(&doc, 400);
+                        let ci = egui::ColorImage::from_rgba_unmultiplied([th.width as usize, th.height as usize], &th.pixels);
+                        let tx = Arc::new(ui.ctx().load_texture("print-thumb", ci, egui::TextureOptions::LINEAR));
+                        ui.data_mut(|d| d.insert_temp(key, tx.clone()));
+                        tx
+                    });
+                    let clip = ui.painter().with_clip_rect(page);
+                    clip.image(tex.id(), img, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    let mark = egui::Stroke::new(1.0, egui::Color32::BLACK);
+                    if l.marks.corner_crop {
+                        for (c, dx, dy) in
+                            [(img.left_top(), -1.0, -1.0), (img.right_top(), 1.0, -1.0), (img.left_bottom(), -1.0, 1.0), (img.right_bottom(), 1.0, 1.0)]
+                        {
+                            clip.line_segment([c + egui::vec2(dx * 3.0, 0.0), c + egui::vec2(dx * 12.0, 0.0)], mark);
+                            clip.line_segment([c + egui::vec2(0.0, dy * 3.0), c + egui::vec2(0.0, dy * 12.0)], mark);
+                        }
                     }
-                }
-                if l.marks.registration {
-                    for c in [img.center_top() - egui::vec2(0.0, 9.0), img.center_bottom() + egui::vec2(0.0, 9.0), img.left_center() - egui::vec2(9.0, 0.0), img.right_center() + egui::vec2(9.0, 0.0)] {
-                        clip.circle_stroke(c, 3.5, mark);
+                    if l.marks.registration {
+                        for c in [
+                            img.center_top() - egui::vec2(0.0, 9.0),
+                            img.center_bottom() + egui::vec2(0.0, 9.0),
+                            img.left_center() - egui::vec2(9.0, 0.0),
+                            img.right_center() + egui::vec2(9.0, 0.0),
+                        ] {
+                            clip.circle_stroke(c, 3.5, mark);
+                        }
                     }
+                    let fits = x >= 0.0 && y >= 0.0 && x + w <= pw && y + h <= ph;
+                    let note = if fits { String::new() } else { "  ·  larger than the paper".to_string() };
+                    ui.label(
+                        egui::RichText::new(format!("Scale {:.1}%  ·  {:.2} × {:.2} in{note}", l.scale * 100.0, w / 72.0, h / 72.0))
+                            .color(if fits { t.text_dim } else { t.warning })
+                            .size(11.0),
+                    );
                 }
-                let fits = x >= 0.0 && y >= 0.0 && x + w <= pw && y + h <= ph;
-                let note = if fits { String::new() } else { "  ·  larger than the paper".to_string() };
-                ui.label(egui::RichText::new(format!("Scale {:.1}%  ·  {:.2} × {:.2} in{note}", l.scale * 100.0, w / 72.0, h / 72.0)).color(if fits { t.text_dim } else { t.warning }).size(11.0));
+                Err(e) => {
+                    ui.painter().text(area.center(), egui::Align2::CENTER_CENTER, e.to_string(), egui::FontId::proportional(12.0), t.text_dim);
+                }
             }
-            Err(e) => {
-                ui.painter().text(area.center(), egui::Align2::CENTER_CENTER, e.to_string(), egui::FontId::proportional(12.0), t.text_dim);
-            }
-        }
         });
         ui.add_space(12.0);
         ui.vertical(|ui| {
@@ -532,11 +629,47 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                 dropdown_str(ui, "print-orient", f, "orientation", &[("portrait", "Portrait"), ("landscape", "Landscape")], 110.0);
             });
             head(ui, "Color Management");
-            dropdown_str(ui, "print-color", f, "colorHandling", &[("printerManages", "Printer Manages Colors"), ("photocraftManages", "PhotoCraft Manages Colors"), ("noColorManagement", "No Color Management")], 240.0);
+            dropdown_str(
+                ui,
+                "print-color",
+                f,
+                "colorHandling",
+                &[
+                    ("printerManages", "Printer Manages Colors"),
+                    ("photocraftManages", "PhotoCraft Manages Colors"),
+                    ("noColorManagement", "No Color Management"),
+                ],
+                240.0,
+            );
             if s(f, "colorHandling", "") == "photocraftManages" {
-                dropdown_str(ui, "print-profile", f, "printerProfile", &[("coated-cmyk", "Coated CMYK"), ("srgb", "sRGB IEC61966-2.1"), ("adobe-rgb-compat", "Adobe RGB (1998) compatible"), ("display-p3", "Display P3"), ("gray-gamma-2.2", "Gray Gamma 2.2")], 240.0);
+                dropdown_str(
+                    ui,
+                    "print-profile",
+                    f,
+                    "printerProfile",
+                    &[
+                        ("coated-cmyk", "Coated CMYK"),
+                        ("srgb", "sRGB IEC61966-2.1"),
+                        ("adobe-rgb-compat", "Adobe RGB (1998) compatible"),
+                        ("display-p3", "Display P3"),
+                        ("gray-gamma-2.2", "Gray Gamma 2.2"),
+                    ],
+                    240.0,
+                );
                 ui.horizontal(|ui| {
-                    dropdown_str(ui, "print-intent", f, "intent", &[("perceptual", "Perceptual"), ("relative", "Relative Colorimetric"), ("saturation", "Saturation"), ("absolute", "Absolute Colorimetric")], 170.0);
+                    dropdown_str(
+                        ui,
+                        "print-intent",
+                        f,
+                        "intent",
+                        &[
+                            ("perceptual", "Perceptual"),
+                            ("relative", "Relative Colorimetric"),
+                            ("saturation", "Saturation"),
+                            ("absolute", "Absolute Colorimetric"),
+                        ],
+                        170.0,
+                    );
                     check(ui, f, "bpc", "Black Point Compensation", true);
                 });
             }
@@ -573,7 +706,11 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
 
 fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
     let r = app.run("file.print", params(f))?;
-    app.ui.status = if r["sent"] == json!(true) { format!("Sent to the printer ({})", r["spooler"].as_str().unwrap_or("")) } else { format!("Printed to {}", r["pdf"].as_str().unwrap_or("")) };
+    app.ui.status = if r["sent"] == json!(true) {
+        format!("Sent to the printer ({})", r["spooler"].as_str().unwrap_or(""))
+    } else {
+        format!("Printed to {}", r["pdf"].as_str().unwrap_or(""))
+    };
     Ok(r)
 }
 

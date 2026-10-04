@@ -161,7 +161,14 @@ impl Tex {
         Tex { texture, view }
     }
     fn map(device: &wgpu::Device, label: &str, r: Rect, format: wgpu::TextureFormat) -> Self {
-        Tex::new(device, label, r.width(), r.height(), format, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST)
+        Tex::new(
+            device,
+            label,
+            r.width(),
+            r.height(),
+            format,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        )
     }
     /// Upload R32F values (row-major over `r`) into this region-space texture at `r`.
     fn write_r32(&self, queue: &wgpu::Queue, region: Rect, r: Rect, v: &[f32]) {
@@ -170,7 +177,12 @@ impl Tex {
         }
         let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
         queue.write_texture(
-            wgpu::TexelCopyTextureInfo { texture: &self.texture, mip_level: 0, origin: wgpu::Origin3d { x: (r.x0 - region.x0) as u32, y: (r.y0 - region.y0) as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: (r.x0 - region.x0) as u32, y: (r.y0 - region.y0) as u32, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
             &bytes,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(r.width() * 4), rows_per_image: Some(r.height()) },
             wgpu::Extent3d { width: r.width(), height: r.height(), depth_or_array_layers: 1 },
@@ -214,7 +226,10 @@ struct FxEntry {
 
 impl FxEntry {
     fn bytes(&self) -> usize {
-        self.shape.bytes() + self.shape_cpu.len() * 4 + self.fields.values().map(|(_, t)| t.bytes()).sum::<usize>() + self.progs.iter().flat_map(|p| p.maps.iter().flatten()).map(Tex::bytes).sum::<usize>()
+        self.shape.bytes()
+            + self.shape_cpu.len() * 4
+            + self.fields.values().map(|(_, t)| t.bytes()).sum::<usize>()
+            + self.progs.iter().flat_map(|p| p.maps.iter().flatten()).map(Tex::bytes).sum::<usize>()
     }
 }
 
@@ -253,7 +268,12 @@ impl Kit {
             data[2 * i * STRIDE as usize..][..w.len()].copy_from_slice(&w);
             data[(2 * i + 1) * STRIDE as usize..][..d.op.len()].copy_from_slice(&d.op);
         }
-        let ubuf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("pc_fx_uniforms"), size: data.len() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pc_fx_uniforms"),
+            size: data.len() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         queue.write_buffer(&ubuf, 0, &data);
         let bg0 = uniform_group(device, &self.bgl0, &ubuf);
         for (i, d) in draws.iter().enumerate() {
@@ -269,7 +289,12 @@ impl Kit {
             let bg1 = texture_group(device, &self.bgl1, &views);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("pc_fx_map"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &d.target, resolve_target: None, depth_slice: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &d.target,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -289,14 +314,21 @@ fn uniform_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, ubuf: &w
         label: Some("pc_compose_uniforms"),
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: ubuf, offset: 0, size: NonZeroU64::new(CHUNK_UNIFORM) }) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: ubuf, offset: 0, size: NonZeroU64::new(OP_UNIFORM) }) },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: ubuf, offset: 0, size: NonZeroU64::new(CHUNK_UNIFORM) }),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: ubuf, offset: 0, size: NonZeroU64::new(OP_UNIFORM) }),
+            },
         ],
     })
 }
 
 fn texture_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, views: &[&wgpu::TextureView]) -> wgpu::BindGroup {
-    let e: Vec<wgpu::BindGroupEntry> = views.iter().enumerate().map(|(b, v)| wgpu::BindGroupEntry { binding: b as u32, resource: wgpu::BindingResource::TextureView(v) }).collect();
+    let e: Vec<wgpu::BindGroupEntry> =
+        views.iter().enumerate().map(|(b, v)| wgpu::BindGroupEntry { binding: b as u32, resource: wgpu::BindingResource::TextureView(v) }).collect();
     device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("pc_compose_pass"), layout, entries: &e })
 }
 
@@ -312,13 +344,20 @@ pub struct Compositor {
     max_dim: u32,
     frame: u64,
     acc_format: wgpu::TextureFormat,
+    /// Whether the effect-map pipelines could be built (else documents with layer effects are
+    /// [`Unsupported`] and use the CPU compositor).
+    effect_maps: bool,
 }
 
 fn tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
-        ty: wgpu::BindingType::Texture { multisampled: false, sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2 },
+        ty: wgpu::BindingType::Texture {
+            multisampled: false,
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            view_dimension: wgpu::TextureViewDimension::D2,
+        },
         count: None,
     }
 }
@@ -344,6 +383,24 @@ struct Bound {
     patterns: Vec<Option<wgpu::TextureView>>,
 }
 
+/// Runs `f` inside validation and internal-error scopes and returns the first error raised.
+/// Native wgpu reports errors synchronously; where they only arrive asynchronously (WebGPU) none
+/// is reported.
+fn first_error<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> (T, Option<wgpu::Error>) {
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+    let out = f();
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    let mut error = None;
+    // Scopes pop in reverse order.
+    for pop in [internal.pop(), validation.pop()] {
+        if let std::task::Poll::Ready(Some(e)) = std::pin::pin!(pop).poll(&mut cx) {
+            error.get_or_insert(e);
+        }
+    }
+    (out, error)
+}
+
 impl Compositor {
     /// Create a compositor with the default accumulation format ([`ACC_FORMAT`]).
     pub fn new(device: &wgpu::Device) -> Self {
@@ -355,10 +412,17 @@ impl Compositor {
     /// and would otherwise panic at render-pipeline creation.
     pub fn preferred_acc_format(adapter: &wgpu::Adapter) -> wgpu::TextureFormat {
         let feats = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba32Float);
-        if feats.allowed_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT) {
-            wgpu::TextureFormat::Rgba32Float
-        } else {
-            wgpu::TextureFormat::Rgba16Float
+        if feats.allowed_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT) { wgpu::TextureFormat::Rgba32Float } else { wgpu::TextureFormat::Rgba16Float }
+    }
+
+    /// [`Compositor::new_with_format`], but a shader or pipeline the driver can't build (e.g. a
+    /// D3D12 shader-compiler failure) is an `Err` instead of a panic, so the caller can fall back
+    /// to the CPU compositor. Where errors only arrive asynchronously (WebGPU), creation is assumed
+    /// to have worked.
+    pub fn try_new_with_format(device: &wgpu::Device, acc_format: wgpu::TextureFormat) -> Result<Self, Unsupported> {
+        match first_error(device, || Self::new_with_format(device, acc_format)) {
+            (comp, None) => Ok(comp),
+            (_, Some(e)) => Err(Unsupported(format!("couldn't build the compositor's pipelines: {e}"))),
         }
     }
 
@@ -367,27 +431,47 @@ impl Compositor {
     /// which otherwise panics at render-pipeline creation. See `Compositor::preferred_acc_format`.
     pub fn new_with_format(device: &wgpu::Device, acc_format: wgpu::TextureFormat) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_compose"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
-        let bgl0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pc_compose_uniforms"), entries: &[uniform_entry(0, CHUNK_UNIFORM), uniform_entry(1, OP_UNIFORM)] });
-        let bgl1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pc_compose_textures"), entries: &(0..8).map(tex_entry).collect::<Vec<_>>() });
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_compose"), bind_group_layouts: &[Some(&bgl0), Some(&bgl1)], immediate_size: 0 });
-        let mut pipelines = HashMap::new();
-        for k in Kernel::DRAWN {
+        let bgl0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pc_compose_uniforms"),
+            entries: &[uniform_entry(0, CHUNK_UNIFORM), uniform_entry(1, OP_UNIFORM)],
+        });
+        let bgl1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pc_compose_textures"),
+            entries: &(0..8).map(tex_entry).collect::<Vec<_>>(),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pc_compose"),
+            bind_group_layouts: &[Some(&bgl0), Some(&bgl1)],
+            immediate_size: 0,
+        });
+        let pipeline = |k: Kernel, format: wgpu::TextureFormat| {
             let entry = k.entry().expect("drawn kernels have an entry point");
-            let formats: &[wgpu::TextureFormat] = if k.is_map() { &[MAP32, MAP16] } else { &[acc_format] };
-            for &format in formats {
-                let p = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some(entry),
-                    layout: Some(&layout),
-                    vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
-                    primitive: wgpu::PrimitiveState::default(),
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    fragment: Some(wgpu::FragmentState { module: &module, entry_point: Some(entry), targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })], compilation_options: Default::default() }),
-                    multiview_mask: None,
-                    cache: None,
-                });
-                pipelines.insert((k, format), p);
-            }
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(entry),
+                    targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let mut pipelines: HashMap<_, _> = Kernel::DRAWN.iter().filter(|k| !k.is_map()).map(|&k| ((k, acc_format), pipeline(k, acc_format))).collect();
+        // Effect maps render to R32Float / R16Float, which some adapters (e.g. GL without float
+        // render targets) can't: then layer effects use the CPU compositor and the rest stays here.
+        let maps = Kernel::DRAWN.iter().filter(|k| k.is_map()).flat_map(|&k| [(k, MAP32), (k, MAP16)]);
+        let (maps, map_error) = first_error(device, || maps.map(|key| (key, pipeline(key.0, key.1))).collect::<Vec<_>>());
+        if let Some(e) = &map_error {
+            log::info!("GPU compositor: no effect-map pipelines ({e}); layer effects use the CPU");
+        } else {
+            pipelines.extend(maps);
         }
         let dummy = Tex::new(device, "pc_compose_dummy", 1, 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING).view;
         Self {
@@ -400,6 +484,7 @@ impl Compositor {
             max_dim: device.limits().max_texture_dimension_2d,
             frame: 0,
             acc_format,
+            effect_maps: map_error.is_none(),
         }
     }
 
@@ -415,6 +500,9 @@ impl Compositor {
 
     /// Effect regions and patterns must fit in textures.
     fn check_fx(&self, doc: &Document, p: &Plan<'_>) -> Result<(), Unsupported> {
+        if !self.effect_maps && !p.fx.is_empty() {
+            return Err(Unsupported("layer effects need float effect-map render targets, which this GPU lacks".into()));
+        }
         for f in &p.fx {
             if f.region.width() > self.max_dim || f.region.height() > self.max_dim {
                 return Err(Unsupported(format!("effect region of `{}` larger than the GPU texture limit ({})", f.layer.name, self.max_dim)));
@@ -451,7 +539,14 @@ impl Compositor {
     /// Composite `region` of `doc`. Each finished chunk is passed to `sink` while its encoder is
     /// still open; the chunk texture is reused afterwards, so the sink must record any copies
     /// or passes that read it into the given encoder. Submits the work before returning.
-    pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, doc: &Document, region: Rect, mut sink: impl FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>)) -> Result<Stats, Unsupported> {
+    pub fn render(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        doc: &Document,
+        region: Rect,
+        mut sink: impl FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
+    ) -> Result<Stats, Unsupported> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_compose") });
         let stats = self.encode(device, queue, &mut encoder, doc, region, &mut sink)?;
         queue.submit([encoder.finish()]);
@@ -459,7 +554,15 @@ impl Compositor {
     }
 
     /// Like [`Self::render`] but records into `encoder` without submitting.
-    pub fn encode(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, doc: &Document, region: Rect, sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>)) -> Result<Stats, Unsupported> {
+    pub fn encode(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        doc: &Document,
+        region: Rect,
+        sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
+    ) -> Result<Stats, Unsupported> {
         let canvas = doc.bounds();
         if canvas.width() > self.max_dim || canvas.height() > self.max_dim {
             return Err(Unsupported(format!("document larger than the GPU texture limit ({})", self.max_dim)));
@@ -526,10 +629,11 @@ impl Compositor {
                 keys.push(k);
                 (keys.len() - 1, r)
             });
-            let mask = p.mask.as_ref().and_then(|m| self.sync(device, queue, doc, m.layer, Role::Mask, m.surface.get(), tile_grid(canvas), stats)).map(|(k, r)| {
-                keys.push(k);
-                (keys.len() - 1, r)
-            });
+            let mask =
+                p.mask.as_ref().and_then(|m| self.sync(device, queue, doc, m.layer, Role::Mask, m.surface.get(), tile_grid(canvas), stats)).map(|(k, r)| {
+                    keys.push(k);
+                    (keys.len() - 1, r)
+                });
             views.push((tex, mask));
             maps.push(p.map.and_then(|m| {
                 let e = self.fx.get(&plan.fx[m.fx].layer.id)?;
@@ -544,7 +648,18 @@ impl Compositor {
     /// Run `plan` over `chunks` (document rects, at most CHUNK square), handing each finished
     /// chunk to `sink`.
     #[allow(clippy::too_many_arguments)]
-    fn run_plan(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, doc: DocId, canvas: Rect, plan: &Plan<'_>, chunks: &[Rect], stats: &mut Stats, sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>)) {
+    fn run_plan(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        doc: DocId,
+        canvas: Rect,
+        plan: &Plan<'_>,
+        chunks: &[Rect],
+        stats: &mut Stats,
+        sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
+    ) {
         let bound = self.bind_plan(device, queue, doc, canvas, plan, stats);
 
         // Chunk pool.
@@ -556,7 +671,10 @@ impl Compositor {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: self.acc_format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
             let v = t.create_view(&Default::default());
@@ -577,7 +695,12 @@ impl Compositor {
             let off = (op_base + i as u64 * STRIDE) as usize;
             data[off..][..w.len()].copy_from_slice(&w);
         }
-        let ubuf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("pc_compose_uniforms"), size: data.len() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pc_compose_uniforms"),
+            size: data.len() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         queue.write_buffer(&ubuf, 0, &data);
         let bg0 = uniform_group(device, &self.kit.bgl0, &ubuf);
 
@@ -618,8 +741,18 @@ impl Compositor {
                         let src = &self.pool[p.a.expect("copy source") as usize].0;
                         let dst = &self.pool[p.dst as usize].0;
                         encoder.copy_texture_to_texture(
-                            wgpu::TexelCopyTextureInfo { texture: src, mip_level: 0, origin: wgpu::Origin3d { x: scissor.x0 as u32, y: scissor.y0 as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
-                            wgpu::TexelCopyTextureInfo { texture: dst, mip_level: 0, origin: wgpu::Origin3d { x: scissor.x0 as u32, y: scissor.y0 as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
+                            wgpu::TexelCopyTextureInfo {
+                                texture: src,
+                                mip_level: 0,
+                                origin: wgpu::Origin3d { x: scissor.x0 as u32, y: scissor.y0 as u32, z: 0 },
+                                aspect: wgpu::TextureAspect::All,
+                            },
+                            wgpu::TexelCopyTextureInfo {
+                                texture: dst,
+                                mip_level: 0,
+                                origin: wgpu::Origin3d { x: scissor.x0 as u32, y: scissor.y0 as u32, z: 0 },
+                                aspect: wgpu::TextureAspect::All,
+                            },
                             wgpu::Extent3d { width: scissor.width(), height: scissor.height(), depth_or_array_layers: 1 },
                         );
                         continue;
@@ -634,7 +767,10 @@ impl Compositor {
                         view: target,
                         resolve_target: None,
                         depth_slice: None,
-                        ops: wgpu::Operations { load: if clear { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) } else { wgpu::LoadOp::Load }, store: wgpu::StoreOp::Store },
+                        ops: wgpu::Operations {
+                            load: if clear { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) } else { wgpu::LoadOp::Load },
+                            store: wgpu::StoreOp::Store,
+                        },
                     })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
@@ -657,7 +793,17 @@ impl Compositor {
 
     /// Upload changed tiles of `surface`; returns the resident key and its region (x, y, w, h).
     #[allow(clippy::too_many_arguments)]
-    fn sync(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, doc: DocId, layer: LayerId, role: Role, surface: &Surface, grid: Rect, stats: &mut Stats) -> Option<((LayerId, Role), [i32; 4])> {
+    fn sync(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        doc: DocId,
+        layer: LayerId,
+        role: Role,
+        surface: &Surface,
+        grid: Rect,
+        stats: &mut Stats,
+    ) -> Option<((LayerId, Role), [i32; 4])> {
         let region = surface.tile_bounds().intersect(&grid);
         if region.is_empty() {
             return None;
@@ -709,7 +855,11 @@ impl Compositor {
         }
         let gone: Vec<TileCoord> = r.tiles.keys().filter(|c| surface.tile(**c).is_none()).copied().collect();
         if !gone.is_empty() {
-            let bytes = if r.default_nonzero { convert_tile(surface, None, kind, TileCoord::new(0, 0)) } else { vec![0u8; (TILE_SIZE * TILE_SIZE) as usize * kind.bytes_per_pixel()] };
+            let bytes = if r.default_nonzero {
+                convert_tile(surface, None, kind, TileCoord::new(0, 0))
+            } else {
+                vec![0u8; (TILE_SIZE * TILE_SIZE) as usize * kind.bytes_per_pixel()]
+            };
             for c in gone {
                 write_tile(queue, r, c, &bytes);
                 r.tiles.remove(&c);
@@ -720,7 +870,9 @@ impl Compositor {
 
     /// Premultiplied RGBA32F texture of a pattern (cached by pixel identity).
     fn pattern_view(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, pat: &Pattern) -> wgpu::TextureView {
-        let fp = pat.surface.tiles().fold((pat.width as u64) << 32 | pat.height as u64, |acc, (c, t)| acc.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ (Arc::as_ptr(t) as usize as u64) ^ ((c.tx as u64) << 20) ^ c.ty as u64);
+        let fp = pat.surface.tiles().fold((pat.width as u64) << 32 | pat.height as u64, |acc, (c, t)| {
+            acc.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ (Arc::as_ptr(t) as usize as u64) ^ ((c.tx as u64) << 20) ^ c.ty as u64
+        });
         let key = format!("{}\u{0}{}", pat.id, pat.name);
         if let Some((f, t)) = self.patterns.get(&key)
             && *f == fp
@@ -761,7 +913,15 @@ impl Compositor {
     }
 
     /// Build or update the effect maps of one layer.
-    fn sync_fx(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, doc: &Document, f: &plan::FxLayer<'_>, stats: &mut Stats) {
+    fn sync_fx(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        doc: &Document,
+        f: &plan::FxLayer<'_>,
+        stats: &mut Stats,
+    ) {
         let layer = f.layer;
         let region = f.region;
         let canvas = doc.bounds();
@@ -805,7 +965,21 @@ impl Compositor {
         if rebuild {
             let shape = Tex::map(device, "pc_fx_shape", region, MAP32);
             let n = rw as usize * rh as usize;
-            self.fx.insert(layer.id, FxEntry { doc: doc.id, region, shape_key, tiles: [None, None], _pin: is_group.then(|| layer.clone()), shape_cpu: vec![0.0; n], shape, fields: HashMap::new(), progs: Vec::new(), last_used: frame });
+            self.fx.insert(
+                layer.id,
+                FxEntry {
+                    doc: doc.id,
+                    region,
+                    shape_key,
+                    tiles: [None, None],
+                    _pin: is_group.then(|| layer.clone()),
+                    shape_cpu: vec![0.0; n],
+                    shape,
+                    fields: HashMap::new(),
+                    progs: Vec::new(),
+                    last_used: frame,
+                },
+            );
             damage = region;
         }
         let e = self.fx.get_mut(&layer.id).expect("inserted");
@@ -828,7 +1002,8 @@ impl Compositor {
         // Programs, and the distance fields they read (max reach per field).
         let vector_shape = matches!(layer.content, LayerContent::Shape(_));
         let anchor = layer.effects.reference.unwrap_or((f64::from(f.bounds.x0), f64::from(f.bounds.y0)));
-        let progs: Vec<fx::MapProgram> = layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect();
+        let progs: Vec<fx::MapProgram> =
+            layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect();
         let mut want: HashMap<FieldKind, i32> = HashMap::new();
         for (k, r) in progs.iter().flat_map(|p| p.fields.iter()) {
             let w = want.entry(*k).or_insert(0);
@@ -873,7 +1048,10 @@ impl Compositor {
                 continue;
             }
             if !same {
-                e.progs[i] = ProgState { key: prog.key, maps: (0..prog.maps).map(|k| prog.stages.iter().any(|s| s.out == Some(k)).then(|| Tex::map(device, "pc_fx_map", region, MAP16))).collect() };
+                e.progs[i] = ProgState {
+                    key: prog.key,
+                    maps: (0..prog.maps).map(|k| prog.stages.iter().any(|s| s.out == Some(k)).then(|| Tex::map(device, "pc_fx_map", region, MAP16))).collect(),
+                };
             }
             stats.fx_programs += 1;
             self.run_program(device, queue, encoder, layer.id, i, prog, d, stats);
@@ -882,8 +1060,19 @@ impl Compositor {
 
     /// Record the passes of `prog` (maps of item `item` of `layer`) recomputing damage `d`.
     #[allow(clippy::too_many_arguments)]
-    fn run_program(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, layer: LayerId, item: usize, prog: &fx::MapProgram, d: Rect, stats: &mut Stats) {
-        let pattern_views: Vec<Option<wgpu::TextureView>> = prog.stages.iter().map(|s| s.pattern.as_ref().map(|p| self.pattern_view(device, queue, p))).collect();
+    fn run_program(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        layer: LayerId,
+        item: usize,
+        prog: &fx::MapProgram,
+        d: Rect,
+        stats: &mut Stats,
+    ) {
+        let pattern_views: Vec<Option<wgpu::TextureView>> =
+            prog.stages.iter().map(|s| s.pattern.as_ref().map(|p| self.pattern_view(device, queue, p))).collect();
         let e = &self.fx[&layer];
         let region = e.region;
         let shape = e.shape.view.clone();
@@ -973,7 +1162,24 @@ fn op_words(p: &plan::Pass<'_>, tex: Option<[i32; 4]>, mask: Option<[i32; 4]>, m
         flags |= 8;
     }
     let (mpo, mps) = map.map_or(([0, 0], [0, 0]), |r| ([r.x0, r.y0], [r.width() as i32, r.height() as i32]));
-    let mut v = vec![I(plan::mode_index(p.mode)), I(p.adjust_kind), U(flags), U(0), F(p.opacity), F(density), F(mdefault), F(0.0), I(to[0]), I(to[1]), I(ts[0]), I(ts[1]), I(mo[0]), I(mo[1]), I(ms[0]), I(ms[1])];
+    let mut v = vec![
+        I(plan::mode_index(p.mode)),
+        I(p.adjust_kind),
+        U(flags),
+        U(0),
+        F(p.opacity),
+        F(density),
+        F(mdefault),
+        F(0.0),
+        I(to[0]),
+        I(to[1]),
+        I(ts[0]),
+        I(ts[1]),
+        I(mo[0]),
+        I(mo[1]),
+        I(ms[0]),
+        I(ms[1]),
+    ];
     v.extend(p.color.iter().map(|f| F(*f)));
     for row in &p.params {
         v.extend(row.iter().map(|f| F(*f)));
@@ -993,7 +1199,12 @@ fn write_tile(queue: &wgpu::Queue, r: &Resident, c: TileCoord, bytes: &[u8]) {
     let tr = c.rect();
     let bpp = r.kind.bytes_per_pixel() as u32;
     queue.write_texture(
-        wgpu::TexelCopyTextureInfo { texture: &r.texture, mip_level: 0, origin: wgpu::Origin3d { x: (tr.x0 - r.region.x0) as u32, y: (tr.y0 - r.region.y0) as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyTextureInfo {
+            texture: &r.texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: (tr.x0 - r.region.x0) as u32, y: (tr.y0 - r.region.y0) as u32, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
         bytes,
         wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(TILE_SIZE as u32 * bpp), rows_per_image: Some(TILE_SIZE as u32) },
         wgpu::Extent3d { width: TILE_SIZE as u32, height: TILE_SIZE as u32, depth_or_array_layers: 1 },
@@ -1129,7 +1340,13 @@ pub fn render_to_vec(comp: &mut Compositor, device: &wgpu::Device, queue: &wgpu:
 
 /// [`render_to_vec`] plus the render's [`Stats`].
 #[cfg(not(target_arch = "wasm32"))]
-pub fn render_to_vec_stats(comp: &mut Compositor, device: &wgpu::Device, queue: &wgpu::Queue, doc: &Document, rect: Rect) -> Result<(Vec<[f32; 4]>, Stats), Unsupported> {
+pub fn render_to_vec_stats(
+    comp: &mut Compositor,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    doc: &Document,
+    rect: Rect,
+) -> Result<(Vec<[f32; 4]>, Stats), Unsupported> {
     let rect = rect.intersect(&doc.bounds());
     let mut staging: Vec<(Rect, wgpu::Buffer, u32)> = Vec::new();
     let mut bpp = 16u32;
@@ -1137,10 +1354,18 @@ pub fn render_to_vec_stats(comp: &mut Compositor, device: &wgpu::Device, queue: 
         // Bytes per pixel of the accumulation format (Rgba32Float = 16, Rgba16Float = 8).
         bpp = if out.texture.format() == wgpu::TextureFormat::Rgba32Float { 16 } else { 8 };
         let row = (out.rect.width() * bpp).div_ceil(256) * 256;
-        let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("pc_readback"), size: (row * out.rect.height()) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pc_readback"),
+            size: (row * out.rect.height()) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo { texture: out.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(out.rect.height()) } },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buf,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(out.rect.height()) },
+            },
             wgpu::Extent3d { width: out.rect.width(), height: out.rect.height(), depth_or_array_layers: 1 },
         );
         staging.push((out.rect, buf, row));
@@ -1184,7 +1409,9 @@ mod tests {
     #[test]
     fn shader_validates() {
         let module = wgpu::naga::front::wgsl::parse_str(SHADER).unwrap_or_else(|e| panic!("{}", e.emit_to_string(SHADER)));
-        wgpu::naga::valid::Validator::new(wgpu::naga::valid::ValidationFlags::all(), wgpu::naga::valid::Capabilities::empty()).validate(&module).unwrap_or_else(|e| panic!("{e:?}"));
+        wgpu::naga::valid::Validator::new(wgpu::naga::valid::ValidationFlags::all(), wgpu::naga::valid::Capabilities::empty())
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{e:?}"));
         for k in Kernel::DRAWN {
             let e = k.entry().unwrap();
             assert!(module.entry_points.iter().any(|ep| ep.name == e), "missing entry point {e}");

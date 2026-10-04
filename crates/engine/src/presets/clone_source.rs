@@ -43,7 +43,11 @@ impl Default for CloneSource {
 
 impl CloneSource {
     pub fn is_identity(&self) -> bool {
-        (self.scale[0] - 100.0).abs() < 1e-9 && (self.scale[1] - 100.0).abs() < 1e-9 && self.rotation.rem_euclid(360.0).abs() < 1e-9 && !self.flip_h && !self.flip_v
+        (self.scale[0] - 100.0).abs() < 1e-9
+            && (self.scale[1] - 100.0).abs() < 1e-9
+            && self.rotation.rem_euclid(360.0).abs() < 1e-9
+            && !self.flip_h
+            && !self.flip_v
     }
     /// The panel's Offset X/Y: source − anchor (once a stroke paired them).
     pub fn offset(&self) -> Option<[f64; 2]> {
@@ -149,7 +153,10 @@ pub fn mapping(s: &mut Session, p: &Value, first: (f64, f64), cmd: &str) -> Resu
     let slot = s.presets.clone.active().clone();
     let explicit_tf = ["scale", "rotation", "flipH", "flipV"].iter().any(|k| p.get(*k).is_some());
     let m = if explicit_tf {
-        let sc = p.get("scale").and_then(Value::as_array).map_or([100.0, 100.0], |a| [a.first().and_then(Value::as_f64).unwrap_or(100.0), a.get(1).and_then(Value::as_f64).unwrap_or(100.0)]);
+        let sc = p
+            .get("scale")
+            .and_then(Value::as_array)
+            .map_or([100.0, 100.0], |a| [a.first().and_then(Value::as_f64).unwrap_or(100.0), a.get(1).and_then(Value::as_f64).unwrap_or(100.0)]);
         let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
         transform_matrix(sc, p.get("rotation").and_then(Value::as_f64).unwrap_or(0.0), flag("flipH"), flag("flipV"))
     } else {
@@ -236,7 +243,9 @@ fn index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
 
 fn list(s: &mut Session, _: &Value) -> Result<Value> {
     let c = &s.presets.clone;
-    Ok(json!({"active": c.active, "sources": c.slots.iter().enumerate().map(|(i, x)| x.to_json(i)).collect::<Vec<_>>(), "overlay": serde_json::to_value(&c.overlay).unwrap_or(Value::Null)}))
+    Ok(
+        json!({"active": c.active, "sources": c.slots.iter().enumerate().map(|(i, x)| x.to_json(i)).collect::<Vec<_>>(), "overlay": serde_json::to_value(&c.overlay).unwrap_or(Value::Null)}),
+    )
 }
 
 fn select(s: &mut Session, p: &Value) -> Result<Value> {
@@ -333,8 +342,26 @@ fn overlay(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec { id: "cloneSource.list", label: "Clone Sources", menu: &[], shortcut: None, params: "{} → {active,sources:[{index,source,anchor,offset,layer,width,height,rotation,flipH,flipV}],overlay}", enabled: always, run: list, journal: false },
-        CommandSpec { id: "cloneSource.select", label: "Select Clone Source", menu: &[], shortcut: None, params: r##"{"index":0..4}"##, enabled: always, run: select, journal: true },
+        CommandSpec {
+            id: "cloneSource.list",
+            label: "Clone Sources",
+            menu: &[],
+            shortcut: None,
+            params: "{} → {active,sources:[{index,source,anchor,offset,layer,width,height,rotation,flipH,flipV}],overlay}",
+            enabled: always,
+            run: list,
+            journal: false,
+        },
+        CommandSpec {
+            id: "cloneSource.select",
+            label: "Select Clone Source",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"index":0..4}"##,
+            enabled: always,
+            run: select,
+            journal: true,
+        },
         CommandSpec {
             id: "cloneSource.set",
             label: "Set Clone Source",
@@ -345,7 +372,25 @@ pub fn specs() -> Vec<CommandSpec> {
             run: set,
             journal: true,
         },
-        CommandSpec { id: "cloneSource.resetTransform", label: "Reset Transform", menu: &[], shortcut: None, params: r##"{"index":0..4?=active}"##, enabled: always, run: reset_transform, journal: true },
-        CommandSpec { id: "cloneSource.overlay", label: "Clone Source Overlay", menu: &[], shortcut: None, params: r##"{"show":bool?,"opacity":0..100?,"clipped":bool?,"autoHide":bool?,"invert":bool?,"blend":"normal|darken|lighten|difference"?}"##, enabled: always, run: overlay, journal: true },
+        CommandSpec {
+            id: "cloneSource.resetTransform",
+            label: "Reset Transform",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"index":0..4?=active}"##,
+            enabled: always,
+            run: reset_transform,
+            journal: true,
+        },
+        CommandSpec {
+            id: "cloneSource.overlay",
+            label: "Clone Source Overlay",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"show":bool?,"opacity":0..100?,"clipped":bool?,"autoHide":bool?,"invert":bool?,"blend":"normal|darken|lighten|difference"?}"##,
+            enabled: always,
+            run: overlay,
+            journal: true,
+        },
     ]
 }

@@ -150,7 +150,11 @@ fn spacing_sets_dab_count() {
 fn pressure_controls_size_with_minimum() {
     let b = BrushSettings {
         size: 40.0,
-        shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic { control: Control::PenPressure, minimum: 0.25, ..Default::default() }, ..Default::default() },
+        shape_dynamics: ShapeDynamics {
+            enabled: true,
+            size: Dynamic { control: Control::PenPressure, minimum: 0.25, ..Default::default() },
+            ..Default::default()
+        },
         ..brush()
     };
     let pts = vec![StrokePoint::new(0.0, 0.0, 0.0), StrokePoint::new(200.0, 0.0, 1.0)];
@@ -165,7 +169,11 @@ fn fade_ramps_over_steps() {
     let b = BrushSettings {
         size: 20.0,
         spacing: 0.5,
-        shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic { control: Control::Fade, fade_steps: 10, minimum: 0.0, ..Default::default() }, ..Default::default() },
+        shape_dynamics: ShapeDynamics {
+            enabled: true,
+            size: Dynamic { control: Control::Fade, fade_steps: 10, minimum: 0.0, ..Default::default() },
+            ..Default::default()
+        },
         ..brush()
     };
     let d = dabs_of(&b, &line(0.0, 300.0, 0.0));
@@ -173,7 +181,10 @@ fn fade_ramps_over_steps() {
     assert!(d[5].radius < d[0].radius * 0.6, "{}", d[5].radius);
     assert!(d.iter().skip(10).all(|x| x.radius <= 0.5 + 1e-6));
     // Fade on opacity (Transfer).
-    let b = BrushSettings { transfer: Transfer { enabled: true, opacity: Dynamic { control: Control::Fade, fade_steps: 4, ..Default::default() }, ..Default::default() }, ..brush() };
+    let b = BrushSettings {
+        transfer: Transfer { enabled: true, opacity: Dynamic { control: Control::Fade, fade_steps: 4, ..Default::default() }, ..Default::default() },
+        ..brush()
+    };
     let d = dabs_of(&b, &line(0.0, 100.0, 0.0));
     assert_eq!(d[0].opacity, 1.0);
     assert_eq!(d[4].opacity, 0.0);
@@ -198,7 +209,11 @@ fn tilt_direction_and_rotation_drive_angle() {
     let d = dabs_of(&mk(Control::Rotation), &[q, StrokePoint { x: 20.0, ..q }]);
     assert!((d[0].angle.to_degrees() - 30.0).abs() < 1e-3);
     // Pen tilt on size: upright pen full size, flat pen minimum.
-    let b = BrushSettings { shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic::controlled(Control::PenTilt), ..Default::default() }, size: 20.0, ..brush() };
+    let b = BrushSettings {
+        shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic::controlled(Control::PenTilt), ..Default::default() },
+        size: 20.0,
+        ..brush()
+    };
     let mut flat = StrokePoint::new(0.0, 0.0, 1.0);
     flat.tilt_x = 90.0;
     let d = dabs_of(&b, &[flat]);
@@ -210,7 +225,14 @@ fn jitter_is_deterministic_per_seed() {
     let b = BrushSettings {
         size: 30.0,
         seed: 42,
-        shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic::jitter(1.0), angle: Dynamic::jitter(1.0), roundness: Dynamic { jitter: 1.0, minimum: 0.2, ..Default::default() }, flip_x_jitter: true, flip_y_jitter: true },
+        shape_dynamics: ShapeDynamics {
+            enabled: true,
+            size: Dynamic::jitter(1.0),
+            angle: Dynamic::jitter(1.0),
+            roundness: Dynamic { jitter: 1.0, minimum: 0.2, ..Default::default() },
+            flip_x_jitter: true,
+            flip_y_jitter: true,
+        },
         scattering: Scattering { enabled: true, scatter: Dynamic::jitter(2.0), both_axes: true, count: 3, count_jitter: Dynamic::jitter(1.0) },
         ..brush()
     };
@@ -283,7 +305,8 @@ fn color_dynamics_ranges() {
     let d = dabs_of(&b, &line(0.0, 200.0, 0.0));
     assert!(d.windows(2).all(|w| w[0].color == w[1].color));
     // Per-tip colours land in the pixels.
-    let b = BrushSettings { size: 10.0, spacing: 3.0, color_dynamics: ColorDynamics { enabled: true, fg_bg: Dynamic::jitter(1.0), ..Default::default() }, ..base };
+    let b =
+        BrushSettings { size: 10.0, spacing: 3.0, color_dynamics: ColorDynamics { enabled: true, fg_bg: Dynamic::jitter(1.0), ..Default::default() }, ..base };
     let s = paint(&b, &line(10.0, 310.0, 20.0), 330, 40);
     let colours: Vec<[f32; 4]> = (0..11).map(|i| s.rgba(10 + i * 30, 20)).collect();
     assert!(colours.iter().any(|c| c[2] > 0.6) && colours.iter().any(|c| c[0] > 0.6), "{colours:?}");
@@ -292,7 +315,8 @@ fn color_dynamics_ranges() {
 #[test]
 fn transfer_opacity_caps_and_flow_builds() {
     // Pressure on opacity caps coverage.
-    let b = BrushSettings { transfer: Transfer { enabled: true, opacity: Dynamic::controlled(Control::PenPressure), ..Default::default() }, size: 10.0, ..brush() };
+    let b =
+        BrushSettings { transfer: Transfer { enabled: true, opacity: Dynamic::controlled(Control::PenPressure), ..Default::default() }, size: 10.0, ..brush() };
     let pts = vec![StrokePoint::new(10.0, 10.0, 0.4), StrokePoint::new(90.0, 10.0, 0.4)];
     let s = paint(&b, &pts, 100, 20);
     assert!((s.rgba(50, 10)[3] - 0.4).abs() < 0.01, "{}", s.rgba(50, 10)[3]);
@@ -363,7 +387,18 @@ fn texture_modulates_coverage() {
     let s = paint(&b, &line(20.0, 80.0, 30.0), 100, 60);
     assert!(s.rgba(46, 30)[3] > 0.9);
     // All modes keep zero coverage at zero and stay in range.
-    for m in [MaskMode::Multiply, MaskMode::Subtract, MaskMode::Darken, MaskMode::Overlay, MaskMode::ColorDodge, MaskMode::ColorBurn, MaskMode::LinearBurn, MaskMode::HardMix, MaskMode::LinearHeight, MaskMode::Height] {
+    for m in [
+        MaskMode::Multiply,
+        MaskMode::Subtract,
+        MaskMode::Darken,
+        MaskMode::Overlay,
+        MaskMode::ColorDodge,
+        MaskMode::ColorBurn,
+        MaskMode::LinearBurn,
+        MaskMode::HardMix,
+        MaskMode::LinearHeight,
+        MaskMode::Height,
+    ] {
         for t in [0.0, 0.3, 1.0] {
             assert_eq!(mask_combine(m, 0.0, t, 1.0), 0.0, "{m:?}");
             let v = mask_combine(m, 0.7, t, 0.8);
@@ -383,11 +418,7 @@ fn texture_modulates_coverage() {
 #[test]
 fn dual_brush_intersects() {
     // Dual tip: small dabs far apart → the stroke survives only where they land.
-    let b = BrushSettings {
-        size: 30.0,
-        dual_brush: DualBrush { enabled: true, size: 6.0, spacing: 5.0, hardness: 1.0, ..Default::default() },
-        ..brush()
-    };
+    let b = BrushSettings { size: 30.0, dual_brush: DualBrush { enabled: true, size: 6.0, spacing: 5.0, hardness: 1.0, ..Default::default() }, ..brush() };
     let s = paint(&b, &line(20.0, 200.0, 30.0), 220, 60);
     // Dual dabs every 30 px starting at x = 20.
     assert!(s.rgba(20, 30)[3] > 0.9 && s.rgba(50, 30)[3] > 0.9);
@@ -416,10 +447,15 @@ fn wet_edges_and_noise() {
     let soft = BrushSettings { size: 40.0, hardness: 0.0, ..brush() };
     let a = paint(&soft, &[StrokePoint::new(50.0, 50.0, 1.0)], 100, 100);
     let n = paint(&BrushSettings { noise: true, ..soft }, &[StrokePoint::new(50.0, 50.0, 1.0)], 100, 100);
-    let extreme = |s: &Surface| (30..70).flat_map(|y| (30..70).map(move |x| (x, y))).filter(|&(x, y)| {
-        let v = s.rgba(x, y)[3];
-        !(0.15..=0.85).contains(&v)
-    }).count();
+    let extreme = |s: &Surface| {
+        (30..70)
+            .flat_map(|y| (30..70).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let v = s.rgba(x, y)[3];
+                !(0.15..=0.85).contains(&v)
+            })
+            .count()
+    };
     assert!(extreme(&n) > extreme(&a) + 100, "{} vs {}", extreme(&n), extreme(&a));
 }
 

@@ -127,18 +127,35 @@ fn synthetic(depth: SampleType) -> Document {
         g.artboard = Some(Artboard { rect: Rect::new(0, 0, 40, 40), background: ArtboardBackground::White, preset: "Custom".into() });
     }
     if let LayerContent::Group(g) = &mut g2.content {
-        g.artboard = Some(Artboard { rect: Rect::new(40, 0, 80, 40), background: ArtboardBackground::Custom(Color::rgb(0.0, 1.0, 0.0)), preset: String::new() });
+        g.artboard =
+            Some(Artboard { rect: Rect::new(40, 0, 80, 40), background: ArtboardBackground::Custom(Color::rgb(0.0, 1.0, 0.0)), preset: String::new() });
     }
     d.layers = vec![g1, g2];
     let states = capture_states(&d);
-    d.layer_comps.push(LayerComp { id: 11, name: "Both".into(), comment: "all".into(), apply_visibility: true, apply_position: true, apply_appearance: false, states });
+    d.layer_comps.push(LayerComp {
+        id: 11,
+        name: "Both".into(),
+        comment: "all".into(),
+        apply_visibility: true,
+        apply_position: true,
+        apply_appearance: false,
+        states,
+    });
     d.layers[1].visible = false;
     if let Some(ch) = d.layers[0].children_mut() {
         ch[0].blend = BlendMode::Multiply;
     }
     let mut states = capture_states(&d);
     states.retain(|s| s.layer != d.layers[0].id);
-    d.layer_comps.push(LayerComp { id: 12, name: "One".into(), comment: String::new(), apply_visibility: true, apply_position: false, apply_appearance: true, states });
+    d.layer_comps.push(LayerComp {
+        id: 12,
+        name: "One".into(),
+        comment: String::new(),
+        apply_visibility: true,
+        apply_position: false,
+        apply_appearance: true,
+        states,
+    });
     d.last_applied_comp = Some(12);
     d
 }
@@ -178,7 +195,15 @@ fn synthetic_psd_roundtrip_all_depths() {
 #[test]
 fn synthetic_pcraft_roundtrip_keeps_everything() {
     let mut d = synthetic(SampleType::U16);
-    d.last_document_state = Some(LayerComp { id: 0, name: "Last Document State".into(), comment: String::new(), apply_visibility: true, apply_position: true, apply_appearance: true, states: capture_states(&d) });
+    d.last_document_state = Some(LayerComp {
+        id: 0,
+        name: "Last Document State".into(),
+        comment: String::new(),
+        apply_visibility: true,
+        apply_position: true,
+        apply_appearance: true,
+        states: capture_states(&d),
+    });
     let bytes = photocraft_format::save_to_bytes(&d, &Default::default()).unwrap();
     let back = photocraft_format::load_from_bytes(&bytes).unwrap();
     assert_eq!(back.layer_comps, d.layer_comps);

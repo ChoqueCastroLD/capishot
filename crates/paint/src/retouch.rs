@@ -365,7 +365,10 @@ mod tests {
     fn coverage_composite_copies_exactly_at_full_hardness() {
         for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F, PixelFormat::CMYKA8, PixelFormat::GRAYA8] {
             let mut s = Surface::new(fmt);
-            s.fill_rect(Rect::new(0, 0, 64, 64), &vec![0.2; fmt.channels()].iter().enumerate().map(|(i, v)| if i + 1 == fmt.channels() { 1.0 } else { *v }).collect::<Vec<_>>());
+            s.fill_rect(
+                Rect::new(0, 0, 64, 64),
+                &vec![0.2; fmt.channels()].iter().enumerate().map(|(i, v)| if i + 1 == fmt.channels() { 1.0 } else { *v }).collect::<Vec<_>>(),
+            );
             let st = stroke(&[(20.0, 20.0)], 10.0, 1.0);
             let (r, cov) = stroke_coverage(&st);
             let mut paint = Region::new(r, fmt.channels());

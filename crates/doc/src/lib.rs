@@ -15,11 +15,11 @@ pub mod effects;
 pub mod mode;
 pub mod pattern;
 pub mod slices;
-pub mod variables;
-pub mod video;
 pub mod text;
 pub mod text_styles;
+pub mod variables;
 pub mod vector;
+pub mod video;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,20 +32,19 @@ pub use effects::{
     Bevel, BevelContour, BevelStyle, BevelTechnique, BevelTexture, Contour, Effect, FxCommon, FxPaint, GlobalLight, Glow, GlowSource, GlowTechnique, Gradient,
     GradientStyle, Satin, Shadow, StrokeFx, StrokePosition,
 };
+pub use mode::{ColorTable, Duotone, DuotoneInk, StackMode};
+pub use pattern::Pattern;
 pub use photocraft_color::{BlendMode, Color, ColorMode, PixelFormat, SampleType};
 pub use photocraft_geom::{Affine, Rect, Size};
 pub use photocraft_raster::Surface;
-pub use mode::{ColorTable, Duotone, DuotoneInk, StackMode};
-pub use pattern::Pattern;
-pub use video::{Timeline, VideoData, VideoSource};
-pub use variables::{DataSet, DataValue, PixelAlign, PixelMethod, VarKind, VariableDef, Variables};
+use serde::{Deserialize, Serialize};
 pub use slices::{Slice, SliceKind, SliceOrigin, Slices};
 pub use text_styles::TextStyles;
+pub use variables::{DataSet, DataValue, PixelAlign, PixelMethod, VarKind, VariableDef, Variables};
 pub use vector::{
-    ClippingPath, FillRule, Knot, LineCap, LineJoin, LiveShape, NamedPath, Path, PathOp, ShapeLayer, ShapeStroke, StrokeAlign, Subpath,
-    VectorMask,
+    ClippingPath, FillRule, Knot, LineCap, LineJoin, LiveShape, NamedPath, Path, PathOp, ShapeLayer, ShapeStroke, StrokeAlign, Subpath, VectorMask,
 };
-use serde::{Deserialize, Serialize};
+pub use video::{Timeline, VideoData, VideoSource};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -175,7 +174,13 @@ pub struct Group {
 pub enum Fill {
     Solid(Color),
     /// Gradient between stops at `angle` degrees (`style` geometry, optionally reversed).
-    Gradient { stops: Vec<(f32, Color)>, angle: f32, scale: f32, style: GradientStyle, reverse: bool },
+    Gradient {
+        stops: Vec<(f32, Color)>,
+        angle: f32,
+        scale: f32,
+        style: GradientStyle,
+        reverse: bool,
+    },
     /// A pattern from [`Document::patterns`] (looked up by `id`, then `name`).
     Pattern {
         name: String,

@@ -95,7 +95,8 @@ fn clone_stamp_sample_all_layers_onto_empty_layer_and_opacity() {
     let p = rgba(&s, 48, 16);
     assert!(p[0] > 0.99 && p[1] < 0.01 && p[3] > 0.99, "{p:?}");
     // currentAndBelow on the bottom layer ignores layers above.
-    s.execute("paint.cloneStamp", json!({"points": [[40, 5]], "source": [8, 5], "size": 4, "hardness": 100, "opacity": 50, "sampleLayer": "currentAndBelow"})).unwrap();
+    s.execute("paint.cloneStamp", json!({"points": [[40, 5]], "source": [8, 5], "size": 4, "hardness": 100, "opacity": 50, "sampleLayer": "currentAndBelow"}))
+        .unwrap();
     let p = rgba(&s, 40, 5);
     assert!((p[3] - 0.5).abs() < 0.02, "opacity 50 → half alpha {p:?}");
     assert!(s.execute("paint.cloneStamp", json!({"points": [[1, 1]], "source": [0, 0], "sampleLayer": "nope"})).is_err());
@@ -282,7 +283,18 @@ fn history_brush_errors_when_layer_is_new() {
 
 #[test]
 fn retouch_commands_are_registered_and_need_a_pixel_layer() {
-    let ids = ["paint.cloneStamp", "paint.healingBrush", "paint.spotHealing", "paint.dodge", "paint.burn", "paint.sponge", "paint.blur", "paint.sharpen", "paint.smudge", "paint.historyBrush"];
+    let ids = [
+        "paint.cloneStamp",
+        "paint.healingBrush",
+        "paint.spotHealing",
+        "paint.dodge",
+        "paint.burn",
+        "paint.sponge",
+        "paint.blur",
+        "paint.sharpen",
+        "paint.smudge",
+        "paint.historyBrush",
+    ];
     for id in ids {
         let spec = crate::commands::find(id).unwrap_or_else(|| panic!("{id} missing"));
         assert!(spec.params.contains("\"points\"") && spec.params.contains("spacing"), "{id}");
@@ -293,4 +305,3 @@ fn retouch_commands_are_registered_and_need_a_pixel_layer() {
     assert!(s.execute("paint.dodge", json!({"points": [[1, 1]], "range": "bogus"})).is_err());
     assert!(s.execute("paint.spotHealing", json!({"points": [[1, 1]], "type": "bogus"})).is_err());
 }
-

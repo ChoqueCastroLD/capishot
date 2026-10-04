@@ -409,7 +409,10 @@ mod tests {
         let p = WideAngle {
             model: WideModel::Fisheye,
             focal_length: 8.0,
-            constraints: vec![Constraint { a: [60.0, 70.0], b: [420.0, 70.0], orientation: Orientation::Horizontal }, Constraint { a: [80.0, 60.0], b: [80.0, 260.0], orientation: Orientation::Free }],
+            constraints: vec![
+                Constraint { a: [60.0, 70.0], b: [420.0, 70.0], orientation: Orientation::Horizontal },
+                Constraint { a: [80.0, 60.0], b: [80.0, 260.0], orientation: Orientation::Free },
+            ],
             ..Default::default()
         };
         let cam = Camera::new(&p, frame);
@@ -453,11 +456,30 @@ mod tile_tests {
         let frame = Rect::new(0, 0, 772, 517);
         let mut s = Surface::new(PixelFormat::RGBA8);
         s.fill_rect(frame, &[0.2, 0.4, 0.6, 1.0]);
-        for p in [WideAngle::default(), WideAngle { model: WideModel::Fisheye, focal_length: 12.0, constraints: vec![Constraint { a: [20.0, 30.0], b: [700.0, 35.0], orientation: Orientation::Horizontal }], ..Default::default() }] {
+        for p in [
+            WideAngle::default(),
+            WideAngle {
+                model: WideModel::Fisheye,
+                focal_length: 12.0,
+                constraints: vec![Constraint { a: [20.0, 30.0], b: [700.0, 35.0], orientation: Orientation::Horizontal }],
+                ..Default::default()
+            },
+        ] {
             let out = apply(&s, frame, &p, Interp::Bilinear);
             let holes: Vec<(i32, i32)> = (80..440).flat_map(|y| (80..690).map(move |x| (x, y))).filter(|&(x, y)| out.rgba(x, y)[3] < 0.5).collect();
             let m = solve(&p, frame);
-            assert!(holes.is_empty(), "{} holes, first {:?} last {:?}; mesh {}x{} v0 {:?} vlast {:?} bounds {:?}", holes.len(), holes.first(), holes.last(), m.nx, m.ny, m.verts[0], m.verts.last(), out.content_bounds());
+            assert!(
+                holes.is_empty(),
+                "{} holes, first {:?} last {:?}; mesh {}x{} v0 {:?} vlast {:?} bounds {:?}",
+                holes.len(),
+                holes.first(),
+                holes.last(),
+                m.nx,
+                m.ny,
+                m.verts[0],
+                m.verts.last(),
+                out.content_bounds()
+            );
         }
     }
 }

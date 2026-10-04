@@ -47,7 +47,8 @@ fn delete(s: &mut Session) -> Result<Value> {
 }
 
 fn set_frame(s: &mut Session, p: &Value) -> Result<Value> {
-    let f = p.get("frame").and_then(Value::as_u64).ok_or_else(|| EngineError::BadParams { cmd: "timeline.setFrame".into(), msg: "need `frame`".into() })? as usize;
+    let f =
+        p.get("frame").and_then(Value::as_u64).ok_or_else(|| EngineError::BadParams { cmd: "timeline.setFrame".into(), msg: "need `frame`".into() })? as usize;
     with_timeline(s, |t| {
         if let Some(t) = t {
             t.current = f;
@@ -85,7 +86,9 @@ fn set_props(s: &mut Session, p: &Value) -> Result<Value> {
 fn info(s: &mut Session) -> Result<Value> {
     let st = s.active().ok_or(EngineError::NoDocument)?;
     Ok(match &st.doc.timeline {
-        Some(t) => json!({"timeline": {"fps": t.fps, "duration": t.duration, "current": t.current, "workStart": t.work_start, "workEnd": t.work_end, "time": t.time()}}),
+        Some(t) => {
+            json!({"timeline": {"fps": t.fps, "duration": t.duration, "current": t.current, "workStart": t.work_start, "workEnd": t.work_end, "time": t.time()}})
+        }
         None => json!({"timeline": null}),
     })
 }

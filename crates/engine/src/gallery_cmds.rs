@@ -105,7 +105,9 @@ fn run_gallery(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let effects = effects_from_json(p).map_err(EngineError::Other)?;
     if effects.is_empty() {
-        return Err(EngineError::Other("filter.filterGallery needs `effects`: [{\"filter\": \"<key>\", \"params\": {...}}] (pass {\"list\": true} for the catalogue)".into()));
+        return Err(EngineError::Other(
+            "filter.filterGallery needs `effects`: [{\"filter\": \"<key>\", \"params\": {...}}] (pass {\"list\": true} for the catalogue)".into(),
+        ));
     }
     // Normalize the recorded params (journal / smart filter) to the canonical form.
     let mut q: Map<String, Value> = p.as_object().cloned().unwrap_or_default();
@@ -143,12 +145,53 @@ pub fn specs() -> Vec<CommandSpec> {
         journal: true,
     }];
     v.extend(gallery_specs![
-        ColoredPencil, Cutout, DryBrush, FilmGrain, Fresco, NeonGlow, PaintDaubs, PaletteKnife, PlasticWrap, PosterEdges, RoughPastels, SmudgeStick, Sponge, Underpainting, Watercolor,
-        AccentedEdges, AngledStrokes, Crosshatch, DarkStrokes, InkOutlines, Spatter, SprayedStrokes, SumiE,
-        DiffuseGlow, Glass, OceanRipple,
-        BasRelief, ChalkCharcoal, Charcoal, Chrome, ConteCrayon, GraphicPen, HalftonePattern, NotePaper, Photocopy, Plaster, Reticulation, Stamp, TornEdges, WaterPaper,
+        ColoredPencil,
+        Cutout,
+        DryBrush,
+        FilmGrain,
+        Fresco,
+        NeonGlow,
+        PaintDaubs,
+        PaletteKnife,
+        PlasticWrap,
+        PosterEdges,
+        RoughPastels,
+        SmudgeStick,
+        Sponge,
+        Underpainting,
+        Watercolor,
+        AccentedEdges,
+        AngledStrokes,
+        Crosshatch,
+        DarkStrokes,
+        InkOutlines,
+        Spatter,
+        SprayedStrokes,
+        SumiE,
+        DiffuseGlow,
+        Glass,
+        OceanRipple,
+        BasRelief,
+        ChalkCharcoal,
+        Charcoal,
+        Chrome,
+        ConteCrayon,
+        GraphicPen,
+        HalftonePattern,
+        NotePaper,
+        Photocopy,
+        Plaster,
+        Reticulation,
+        Stamp,
+        TornEdges,
+        WaterPaper,
         GlowingEdges,
-        Craquelure, Grain, MosaicTiles, Patchwork, StainedGlass, Texturizer,
+        Craquelure,
+        Grain,
+        MosaicTiles,
+        Patchwork,
+        StainedGlass,
+        Texturizer,
     ]);
     v
 }

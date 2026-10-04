@@ -10,7 +10,8 @@ use crate::PhotocraftApp;
 use crate::state::DialogKind;
 use crate::theme::Tokens;
 
-const UNITS: [(&str, &str); 7] = [("px", "Pixels"), ("percent", "Percent"), ("in", "Inches"), ("cm", "Centimeters"), ("mm", "Millimeters"), ("pt", "Points"), ("pica", "Picas")];
+const UNITS: [(&str, &str); 7] =
+    [("px", "Pixels"), ("percent", "Percent"), ("in", "Inches"), ("cm", "Centimeters"), ("mm", "Millimeters"), ("pt", "Points"), ("pica", "Picas")];
 
 /// Dialog unit for the Units & Rulers preference.
 fn pref_unit(u: photocraft_engine::prefs::Unit) -> &'static str {
@@ -326,7 +327,17 @@ fn anchor_grid(ui: &mut egui::Ui, current: &str, dw: f64, dh: f64) -> Option<&'s
         let r = Rect::from_min_size(rect.min + vec2(x as f32 * cell, y as f32 * cell), vec2(cell, cell)).shrink(1.0);
         let resp = ui.interact(r, ui.id().with(("anchor", i)), Sense::click());
         let selected = i as i32 == ci;
-        ui.painter().rect_filled(r, 2.0, if selected { t.field.gamma_multiply(1.6) } else if resp.hovered() { t.hover } else { t.field });
+        ui.painter().rect_filled(
+            r,
+            2.0,
+            if selected {
+                t.field.gamma_multiply(1.6)
+            } else if resp.hovered() {
+                t.hover
+            } else {
+                t.field
+            },
+        );
         ui.painter().rect_stroke(r, 2.0, Stroke::new(1.0, t.separator), StrokeKind::Inside);
         if selected {
             ui.painter().rect_filled(Rect::from_center_size(r.center(), vec2(8.0, 8.0)), 1.0, t.text);

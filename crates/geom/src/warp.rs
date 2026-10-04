@@ -188,7 +188,8 @@ impl StyleWarp {
     pub fn apply(&self, x: f64, y: f64) -> (f64, f64) {
         // Normalised coordinates: u along the warp axis, v across it, both -1..1 over the box.
         let (dx, dy) = (x - self.c.0, y - self.c.1);
-        let (u, v, hu, hv) = if self.vertical { (dy / self.h.1, dx / self.h.0, self.h.1, self.h.0) } else { (dx / self.h.0, dy / self.h.1, self.h.0, self.h.1) };
+        let (u, v, hu, hv) =
+            if self.vertical { (dy / self.h.1, dx / self.h.0, self.h.1, self.h.0) } else { (dx / self.h.0, dy / self.h.1, self.h.0, self.h.1) };
         let (mut u2, mut v2) = self.bend(u, v, hu / hv);
         // Distortions: a perspective-like taper along each axis.
         if self.hd != 0.0 {
@@ -291,12 +292,7 @@ fn split_cubic(p: [[f64; 2]; 4], t: f64) -> [[f64; 2]; 7] {
 
 /// Inverse of the Bernstein interpolation matrix at t = 0, 1/3, 2/3, 1 (rows: control point,
 /// columns: sample). Exact rational values.
-const BERN_INV: [[f64; 4]; 4] = [
-    [1.0, 0.0, 0.0, 0.0],
-    [-5.0 / 6.0, 3.0, -1.5, 1.0 / 3.0],
-    [1.0 / 3.0, -1.5, 3.0, -5.0 / 6.0],
-    [0.0, 0.0, 0.0, 1.0],
-];
+const BERN_INV: [[f64; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [-5.0 / 6.0, 3.0, -1.5, 1.0 / 3.0], [1.0 / 3.0, -1.5, 3.0, -5.0 / 6.0], [0.0, 0.0, 0.0, 1.0]];
 
 /// A grid of bicubic Bezier patches over the unit square of a source box.
 ///
@@ -369,7 +365,10 @@ impl BezierMesh {
     /// Checks the invariants (knots and point count); malformed data from files is rejected.
     pub fn is_valid(&self) -> bool {
         let knots_ok = |k: &[f64]| k.len() >= 2 && k[0] == 0.0 && k[k.len() - 1] == 1.0 && k.windows(2).all(|w| w[1] > w[0]);
-        knots_ok(&self.us) && knots_ok(&self.vs) && self.points.len() == self.nx() * self.ny() && self.points.iter().all(|p| p[0].is_finite() && p[1].is_finite())
+        knots_ok(&self.us)
+            && knots_ok(&self.vs)
+            && self.points.len() == self.nx() * self.ny()
+            && self.points.iter().all(|p| p[0].is_finite() && p[1].is_finite())
     }
 
     fn locate(knots: &[f64], s: f64) -> (usize, f64) {

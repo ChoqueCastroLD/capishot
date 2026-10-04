@@ -12,12 +12,12 @@ use crate::layer::{CHANNEL_REAL_USER_MASK, CHANNEL_TRANSPARENCY, CHANNEL_USER_MA
 
 /// Interprets planar big-endian bytes as u16 samples.
 pub fn samples_u16(bytes: &[u8]) -> Vec<u16> {
-    bytes.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect()
+    bytes.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]])).collect()
 }
 
 /// Interprets planar big-endian bytes as f32 samples.
 pub fn samples_f32(bytes: &[u8]) -> Vec<f32> {
-    bytes.chunks_exact(4).map(|c| f32::from_be_bytes([c[0], c[1], c[2], c[3]])).collect()
+    bytes.as_chunks::<4>().0.iter().map(|c| f32::from_be_bytes([c[0], c[1], c[2], c[3]])).collect()
 }
 
 /// Encodes u16 samples as big-endian bytes.
@@ -50,10 +50,7 @@ pub fn plane_to_u8(bytes: &[u8], depth: u16, width: usize, height: usize) -> Res
         1 => unpack_bits(bytes, width, height).into_iter().map(|b| if b == 1 { 0 } else { 255 }).collect(),
         8 => bytes.to_vec(),
         16 => samples_u16(bytes).into_iter().map(|v| ((u32::from(v) * 255 + 32767) / 65535) as u8).collect(),
-        32 => samples_f32(bytes)
-            .into_iter()
-            .map(|v| if v.is_nan() { 0 } else { (v.clamp(0.0, 1.0) * 255.0).round() as u8 })
-            .collect(),
+        32 => samples_f32(bytes).into_iter().map(|v| if v.is_nan() { 0 } else { (v.clamp(0.0, 1.0) * 255.0).round() as u8 }).collect(),
         d => return Err(PsdError::Unsupported(format!("depth {d}"))),
     })
 }
@@ -90,13 +87,7 @@ pub struct GrayImage {
     pub default_value: u8,
 }
 
-fn interleave(
-    mode: ColorMode,
-    color: &[Vec<u8>],
-    alpha: Option<&[u8]>,
-    palette: &[u8],
-    n: usize,
-) -> Result<Vec<u8>> {
+fn interleave(mode: ColorMode, color: &[Vec<u8>], alpha: Option<&[u8]>, palette: &[u8], n: usize) -> Result<Vec<u8>> {
     let mut out = vec![0u8; n * 4];
     for i in 0..n {
         let (r, g, b) = match mode {

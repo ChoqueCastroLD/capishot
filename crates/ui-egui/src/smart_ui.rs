@@ -22,7 +22,8 @@ pub fn thumb_badge(ui: &egui::Ui, l: &Layer, thumb: Rect) {
 
 /// The display name of a smart filter (its command's label without the ellipsis).
 fn filter_label(command: &str) -> String {
-    photocraft_engine::commands::find(command).map_or_else(|| command.rsplit('.').next().unwrap_or(command).to_string(), |c| c.label.trim_end_matches('…').to_string())
+    photocraft_engine::commands::find(command)
+        .map_or_else(|| command.rsplit('.').next().unwrap_or(command).to_string(), |c| c.label.trim_end_matches('…').to_string())
 }
 
 /// Smart Filters header + one row per filter (top filter first, as in Photoshop) under a smart

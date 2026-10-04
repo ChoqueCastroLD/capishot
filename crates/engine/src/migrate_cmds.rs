@@ -25,10 +25,10 @@ fn groups<T: serde::de::DeserializeOwned>(v: &Value, key: &str) -> Vec<Group<T>>
 }
 
 fn migrate(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = p.get("path").and_then(Value::as_str).ok_or_else(|| EngineError::BadParams {
-        cmd: "edit.presets.migratePresets".into(),
-        msg: "need `path` to a presets or preferences file".into(),
-    })?;
+    let path = p
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::BadParams { cmd: "edit.presets.migratePresets".into(), msg: "need `path` to a presets or preferences file".into() })?;
     let text = std::fs::read_to_string(path).map_err(|e| EngineError::Other(format!("read `{path}`: {e}")))?;
     let root: Value = serde_json::from_str(&text).map_err(|e| EngineError::Other(format!("`{path}` is not JSON: {e}")))?;
     // Accept a full preferences file (has a `presets` section) or a bare presets object.

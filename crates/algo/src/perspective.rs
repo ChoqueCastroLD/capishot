@@ -129,7 +129,8 @@ pub fn straighten(planes: &mut [Plane], mode: Straighten) {
     let groups = linked_corners(planes);
     let group_of = |p: usize, c: usize| groups.iter().position(|g| g.contains(&(p, c))).unwrap_or(0);
     let mut pos: Vec<[f64; 2]> = groups.iter().map(|g| planes[g[0].0].dst[g[0].1]).collect();
-    let edges: Vec<(usize, usize)> = (0..planes.len()).flat_map(|p| (0..4).map(move |k| (p, k))).map(|(p, k)| (group_of(p, k), group_of(p, (k + 1) % 4))).collect();
+    let edges: Vec<(usize, usize)> =
+        (0..planes.len()).flat_map(|p| (0..4).map(move |k| (p, k))).map(|(p, k)| (group_of(p, k), group_of(p, (k + 1) % 4))).collect();
     for (a, b) in edges {
         let (pa, pb) = (pos[a], pos[b]);
         let (dx, dy) = ((pb[0] - pa[0]).abs(), (pb[1] - pa[1]).abs());
@@ -167,10 +168,17 @@ impl PerspectiveMap {
             let mut shared = [None; 4];
             for (k, s) in shared.iter_mut().enumerate() {
                 let (a, b) = (p.src[k], p.src[(k + 1) % 4]);
-                *s = planes.iter().enumerate().find(|(j, o)| *j != i && (0..4).any(|m| {
-                    let (c, d) = (o.src[m], o.src[(m + 1) % 4]);
-                    (near(a, c) && near(b, d)) || (near(a, d) && near(b, c))
-                })).map(|(j, _)| j);
+                *s = planes
+                    .iter()
+                    .enumerate()
+                    .find(|(j, o)| {
+                        *j != i
+                            && (0..4).any(|m| {
+                                let (c, d) = (o.src[m], o.src[(m + 1) % 4]);
+                                (near(a, c) && near(b, d)) || (near(a, d) && near(b, c))
+                            })
+                    })
+                    .map(|(j, _)| j);
             }
             maps.push(PlaneMap { src, src_inv, dst, quad: p.src, shared });
         }
@@ -246,10 +254,12 @@ pub fn unit_corners() -> [[f64; 2]; 4] {
 /// A point of plane `p` at plane coordinates `(u, v)`, in source space.
 pub fn plane_point(p: &Plane, u: f64, v: f64, dst: bool) -> [f64; 2] {
     let q = if dst { &p.dst } else { &p.src };
-    unit_to_quad(q).map(|h| {
-        let (x, y) = h.apply(u, v);
-        [x, y]
-    }).unwrap_or(q[0])
+    unit_to_quad(q)
+        .map(|h| {
+            let (x, y) = h.apply(u, v);
+            [x, y]
+        })
+        .unwrap_or(q[0])
 }
 
 #[cfg(test)]
@@ -299,7 +309,8 @@ mod tests {
 
     #[test]
     fn straighten_levels_and_plumbs_edges() {
-        let mut ps = vec![Plane { src: [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]], dst: [[0.0, 3.0], [100.0, -2.0], [96.0, 100.0], [4.0, 104.0]] }];
+        let mut ps =
+            vec![Plane { src: [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]], dst: [[0.0, 3.0], [100.0, -2.0], [96.0, 100.0], [4.0, 104.0]] }];
         straighten(&mut ps, Straighten::Vertical);
         assert_eq!(ps[0].dst[1][0], ps[0].dst[2][0]);
         assert_eq!(ps[0].dst[0][0], ps[0].dst[3][0]);

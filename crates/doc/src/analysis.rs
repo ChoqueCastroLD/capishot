@@ -108,7 +108,15 @@ pub struct Note {
 impl Default for Note {
     fn default() -> Self {
         // Photoshop's default note colour (pale yellow).
-        Self { author: String::new(), color: Color::rgb(1.0, 1.0, 0.51), text: String::new(), position: [0.0, 0.0], popup: [0.0, 0.0, 0.0, 0.0], open: false, modified: String::new() }
+        Self {
+            author: String::new(),
+            color: Color::rgb(1.0, 1.0, 0.51),
+            text: String::new(),
+            position: [0.0, 0.0],
+            popup: [0.0, 0.0, 0.0, 0.0],
+            open: false,
+            modified: String::new(),
+        }
     }
 }
 

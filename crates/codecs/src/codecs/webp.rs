@@ -19,40 +19,23 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
     let mut dec = image_webp::WebPDecoder::new(Cursor::new(bytes)).map_err(err)?;
     dec.set_memory_limit(limits.alloc_usize());
     let (w, h) = dec.dimensions();
-    let layout = if dec.has_alpha() {
-        ChannelLayout::Rgba
-    } else {
-        ChannelLayout::Rgb
-    };
+    let layout = if dec.has_alpha() { ChannelLayout::Rgba } else { ChannelLayout::Rgb };
     limits.check(w, h, layout, SampleType::U8)?;
-    let size = dec
-        .output_buffer_size()
-        .ok_or_else(|| err("image too large"))?;
+    let size = dec.output_buffer_size().ok_or_else(|| err("image too large"))?;
     let mut buf = vec![0u8; size];
     dec.read_image(&mut buf).map_err(err)?;
     let icc = dec.icc_profile().ok().flatten();
     let exif = dec.exif_metadata().ok().flatten();
-    let xmp = dec
-        .xmp_metadata()
-        .ok()
-        .flatten()
-        .and_then(|b| String::from_utf8(b).ok());
+    let xmp = dec.xmp_metadata().ok().flatten().and_then(|b| String::from_utf8(b).ok());
     let mut img = Image::from_u8(w, h, layout, buf)?;
     img.icc = icc;
-    img.meta = Metadata {
-        exif,
-        xmp,
-        ..Default::default()
-    };
+    img.meta = Metadata { exif, xmp, ..Default::default() };
     Ok(img)
 }
 
 pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
     if !opts.webp_lossless {
-        return Err(CodecError::unsupported(
-            F,
-            "lossy WebP encoding needs libwebp (C); only lossless is available",
-        ));
+        return Err(CodecError::unsupported(F, "lossy WebP encoding needs libwebp (C); only lossless is available"));
     }
     let img = src.convert(plan.layout, plan.sample);
     let ct = match img.layout() {
@@ -77,7 +60,6 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
             enc.set_xmp_metadata(xmp.as_bytes().to_vec());
         }
     }
-    enc.encode(img.data(), img.width(), img.height(), ct)
-        .map_err(|e| CodecError::encode(F, e))?;
+    enc.encode(img.data(), img.width(), img.height(), ct).map_err(|e| CodecError::encode(F, e))?;
     Ok(out)
 }

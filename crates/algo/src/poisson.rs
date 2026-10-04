@@ -272,10 +272,12 @@ mod tests {
         // Destination: flat reddish; source: bluish with a stripe texture.
         let dst: Vec<f32> = (0..w * h).flat_map(|_| [0.7, 0.3, 0.2]).collect();
         let tex = |x: usize| if (x / 4).is_multiple_of(2) { 0.05 } else { -0.05 };
-        let src: Vec<f32> = (0..w * h).flat_map(|i| {
-            let t = tex(i % w);
-            [0.1 + t, 0.2 + t, 0.8 + t]
-        }).collect();
+        let src: Vec<f32> = (0..w * h)
+            .flat_map(|i| {
+                let t = tex(i % w);
+                [0.1 + t, 0.2 + t, 0.8 + t]
+            })
+            .collect();
         let out = seamless_clone(w, h, ch, &src, &dst, &mask);
         // Mean colour inside the mask matches the destination.
         let inside: Vec<usize> = (0..w * h).filter(|&i| mask[i]).collect();

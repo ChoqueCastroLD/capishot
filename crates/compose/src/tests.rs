@@ -260,7 +260,13 @@ fn solid_and_gradient_fill_layers() {
     d.layers.push(Layer::new("fill", LayerContent::Fill(Fill::Solid(Color::rgb(0.0, 0.0, 1.0)))));
     assert!(close4(px(&d, 5, 0), [0.0, 0.0, 1.0, 1.0]));
 
-    let g = Fill::Gradient { stops: vec![(0.0, Color::BLACK), (1.0, Color::WHITE)], angle: 0.0, scale: 1.0, style: photocraft_doc::GradientStyle::Linear, reverse: false };
+    let g = Fill::Gradient {
+        stops: vec![(0.0, Color::BLACK), (1.0, Color::WHITE)],
+        angle: 0.0,
+        scale: 1.0,
+        style: photocraft_doc::GradientStyle::Linear,
+        reverse: false,
+    };
     let buf = render_fill(&g, Rect::new(0, 0, 10, 1), Rect::new(0, 0, 10, 1), &[]);
     // tile independence: a 1px render of the right edge equals the full render
     let one = render_fill(&g, Rect::new(9, 0, 10, 1), Rect::new(0, 0, 10, 1), &[]);
@@ -353,7 +359,12 @@ fn fx_doc(effects: Vec<Effect>) -> Document {
 }
 
 fn stroke(size: f32, position: StrokePosition) -> Effect {
-    Effect::Stroke(StrokeFx { common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0), size, position, paint: FxPaint::Color(Color::rgb(0.0, 0.0, 1.0)) })
+    Effect::Stroke(StrokeFx {
+        common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0),
+        size,
+        position,
+        paint: FxPaint::Color(Color::rgb(0.0, 0.0, 1.0)),
+    })
 }
 
 #[test]
@@ -516,25 +527,28 @@ fn satin_and_bevel_stay_inside_shape() {
         anti_alias: true,
         invert: false,
     });
-    let d = fx_doc(vec![satin, Effect::BevelEmboss(photocraft_doc::Bevel {
-        enabled: true,
-        style: photocraft_doc::BevelStyle::InnerBevel,
-        technique: photocraft_doc::BevelTechnique::Smooth,
-        depth: 1.0,
-        up: true,
-        size: 4.0,
-        soften: 0.0,
-        angle: 90.0,
-        altitude: 30.0,
-        use_global_light: false,
-        gloss_contour: photocraft_doc::Contour::Linear,
-        highlight: FxCommon::new(photocraft_color::BlendMode::Screen, 0.75),
-        highlight_color: Color::WHITE,
-        shadow: FxCommon::new(photocraft_color::BlendMode::Multiply, 0.75),
-        shadow_color: Color::BLACK,
-        contour: None,
-        texture: None,
-    })]);
+    let d = fx_doc(vec![
+        satin,
+        Effect::BevelEmboss(photocraft_doc::Bevel {
+            enabled: true,
+            style: photocraft_doc::BevelStyle::InnerBevel,
+            technique: photocraft_doc::BevelTechnique::Smooth,
+            depth: 1.0,
+            up: true,
+            size: 4.0,
+            soften: 0.0,
+            angle: 90.0,
+            altitude: 30.0,
+            use_global_light: false,
+            gloss_contour: photocraft_doc::Contour::Linear,
+            highlight: FxCommon::new(photocraft_color::BlendMode::Screen, 0.75),
+            highlight_color: Color::WHITE,
+            shadow: FxCommon::new(photocraft_color::BlendMode::Multiply, 0.75),
+            shadow_color: Color::BLACK,
+            contour: None,
+            texture: None,
+        }),
+    ]);
     for (x, y) in [(5, 5), (35, 20), (20, 35)] {
         assert!(close4(px(&d, x, y), [1.0; 4]), "({x},{y}) {:?}", px(&d, x, y));
     }
@@ -558,7 +572,10 @@ fn clipped_layer_effects_are_clipped_to_base() {
 #[test]
 fn group_effects_apply_to_group_shape() {
     let mut d = doc_white(40, 40);
-    let mut g = Layer::group("g", vec![solid_layer("a", Rect::new(10, 10, 20, 30), [1.0, 0.0, 0.0, 1.0]), solid_layer("b", Rect::new(20, 10, 30, 30), [1.0, 0.0, 0.0, 1.0])]);
+    let mut g = Layer::group(
+        "g",
+        vec![solid_layer("a", Rect::new(10, 10, 20, 30), [1.0, 0.0, 0.0, 1.0]), solid_layer("b", Rect::new(20, 10, 30, 30), [1.0, 0.0, 0.0, 1.0])],
+    );
     g.effects.items.push(stroke(2.0, StrokePosition::Outside));
     d.layers.push(g);
     assert!(close4(px(&d, 9, 20), [0.0, 0.0, 1.0, 1.0]));
@@ -787,28 +804,16 @@ const FULL: photocraft_doc::BlendRange = photocraft_doc::BlendRange::FULL;
 fn blend_if_this_layer_hides_by_the_layers_own_value() {
     // Mid-grey backdrop; the layer is black on the left, white on the right.
     let mut d = doc_white(8, 8);
-    d.layers.push(solid_layer(
-        "grey",
-        Rect::new(0, 0, 8, 8),
-        [0.5, 0.5, 0.5, 1.0],
-    ));
+    d.layers.push(solid_layer("grey", Rect::new(0, 0, 8, 8), [0.5, 0.5, 0.5, 1.0]));
     let mut l = solid_layer("bw", Rect::new(0, 0, 4, 8), [0.0, 0.0, 0.0, 1.0]);
-    l.surface_mut()
-        .unwrap()
-        .fill_rect(Rect::new(4, 0, 8, 8), &[1.0, 1.0, 1.0, 1.0]);
+    l.surface_mut().unwrap().fill_rect(Rect::new(4, 0, 8, 8), &[1.0, 1.0, 1.0, 1.0]);
     // Gray › This Layer: black point at 50 hides the blacks.
     l.blend_if.set(0, [range([50, 50], [255, 255]), FULL]);
     d.layers.push(l);
-    assert!(
-        close4(px(&d, 1, 1), [0.5, 0.5, 0.5, 1.0]),
-        "{:?}",
-        px(&d, 1, 1)
-    );
+    assert!(close4(px(&d, 1, 1), [0.5, 0.5, 0.5, 1.0]), "{:?}", px(&d, 1, 1));
     assert!(close4(px(&d, 6, 1), [1.0, 1.0, 1.0, 1.0]));
     // White point at 200 hides the whites as well.
-    d.layers[2]
-        .blend_if
-        .set(0, [range([50, 50], [200, 200]), FULL]);
+    d.layers[2].blend_if.set(0, [range([50, 50], [200, 200]), FULL]);
     assert!(close4(px(&d, 6, 1), [0.5, 0.5, 0.5, 1.0]));
     // Back to the defaults: everything shows again.
     d.layers[2].blend_if.set(0, [FULL, FULL]);
@@ -820,11 +825,7 @@ fn blend_if_this_layer_hides_by_the_layers_own_value() {
 fn blend_if_underlying_layer_hides_by_the_backdrop_value() {
     // Backdrop black on the left, white on the right; a red layer over all of it.
     let mut d = doc_white(8, 8);
-    d.layers.push(solid_layer(
-        "black",
-        Rect::new(0, 0, 4, 8),
-        [0.0, 0.0, 0.0, 1.0],
-    ));
+    d.layers.push(solid_layer("black", Rect::new(0, 0, 4, 8), [0.0, 0.0, 0.0, 1.0]));
     let mut l = solid_layer("red", Rect::new(0, 0, 8, 8), [1.0, 0.0, 0.0, 1.0]);
     // Gray › Underlying Layer: white point at 128 = only over the darks (sky-replacement style).
     l.blend_if.set(0, [FULL, range([0, 0], [128, 128])]);
@@ -839,10 +840,7 @@ fn blend_if_split_point_fades_like_opacity() {
     // is exactly the layer at 50% opacity, also over a semi-transparent backdrop.
     let v = 100.0 / 255.0;
     let mut d = doc_white(4, 4);
-    d.layers[0]
-        .surface_mut()
-        .unwrap()
-        .fill_rect(Rect::new(0, 0, 4, 4), &[0.0, 0.2, 1.0, 0.5]);
+    d.layers[0].surface_mut().unwrap().fill_rect(Rect::new(0, 0, 4, 4), &[0.0, 0.2, 1.0, 0.5]);
     let mut l = solid_layer("v", Rect::new(0, 0, 4, 4), [v, v, v, 1.0]);
     l.blend = BlendMode::Multiply;
     let mut half = l.clone();
@@ -852,10 +850,7 @@ fn blend_if_split_point_fades_like_opacity() {
     d.layers.push(l);
     d2.layers.push(half);
     let (a, b) = (px(&d, 1, 1), px(&d2, 1, 1));
-    assert!(
-        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4),
-        "{a:?} vs {b:?}"
-    );
+    assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4), "{a:?} vs {b:?}");
 }
 
 #[test]
@@ -863,29 +858,21 @@ fn blend_if_per_channel_ranges() {
     // Blue › This Layer: hide pixels whose blue is above 100.
     let mut d = doc_white(8, 8);
     let mut l = solid_layer("c", Rect::new(0, 0, 4, 8), [1.0, 0.0, 0.0, 1.0]);
-    l.surface_mut()
-        .unwrap()
-        .fill_rect(Rect::new(4, 0, 8, 8), &[0.0, 0.0, 1.0, 1.0]);
+    l.surface_mut().unwrap().fill_rect(Rect::new(4, 0, 8, 8), &[0.0, 0.0, 1.0, 1.0]);
     l.blend_if.set(3, [range([0, 0], [100, 100]), FULL]);
     d.layers.push(l);
     assert!(close4(px(&d, 1, 1), [1.0, 0.0, 0.0, 1.0]));
     assert!(close4(px(&d, 6, 1), [1.0, 1.0, 1.0, 1.0]));
     // Red › Underlying Layer: the backdrop's red (255) is above 254 → hidden everywhere.
     d.layers[1].blend_if = Default::default();
-    d.layers[1]
-        .blend_if
-        .set(1, [FULL, range([0, 0], [254, 254])]);
+    d.layers[1].blend_if.set(1, [FULL, range([0, 0], [254, 254])]);
     assert!(close4(px(&d, 1, 1), [1.0; 4]));
 }
 
 #[test]
 fn blend_if_on_adjustment_and_clipped_layers() {
     let mut d = doc_white(8, 8);
-    d.layers.push(solid_layer(
-        "dark",
-        Rect::new(0, 0, 4, 8),
-        [0.1, 0.1, 0.1, 1.0],
-    ));
+    d.layers.push(solid_layer("dark", Rect::new(0, 0, 4, 8), [0.1, 0.1, 0.1, 1.0]));
     // Invert, but only where the backdrop is dark (Underlying white point at 128).
     let mut inv = Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert));
     inv.blend_if.set(0, [FULL, range([0, 0], [128, 128])]);
@@ -895,9 +882,7 @@ fn blend_if_on_adjustment_and_clipped_layers() {
     // A clipped layer judges "underlying" by its clipping base.
     let mut d = doc_white(8, 8);
     let mut base = solid_layer("base", Rect::new(0, 0, 8, 8), [0.0, 0.0, 0.0, 1.0]);
-    base.surface_mut()
-        .unwrap()
-        .fill_rect(Rect::new(4, 0, 8, 8), &[0.9, 0.9, 0.9, 1.0]);
+    base.surface_mut().unwrap().fill_rect(Rect::new(4, 0, 8, 8), &[0.9, 0.9, 0.9, 1.0]);
     let mut clip = solid_layer("clip", Rect::new(0, 0, 8, 8), [0.0, 1.0, 0.0, 1.0]);
     clip.clipped = true;
     clip.blend_if.set(0, [FULL, range([128, 128], [255, 255])]);
@@ -910,17 +895,9 @@ fn blend_if_on_adjustment_and_clipped_layers() {
 #[test]
 fn blend_if_modes() {
     // Grayscale documents: the single channel's entry (or the gray entry) applies.
-    let mut d = Document::with_background(
-        "g",
-        Size::new(4, 4),
-        ColorMode::Grayscale,
-        SampleType::U8,
-        Color::WHITE,
-    );
+    let mut d = Document::with_background("g", Size::new(4, 4), ColorMode::Grayscale, SampleType::U8, Color::WHITE);
     let mut l = Layer::raster("k", d.pixel_format());
-    l.surface_mut()
-        .unwrap()
-        .fill_rect(Rect::new(0, 0, 4, 4), &[0.0, 1.0]);
+    l.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 4, 4), &[0.0, 1.0]);
     l.blend_if.set(1, [range([10, 10], [255, 255]), FULL]);
     d.layers.push(l);
     assert!(close4(px(&d, 1, 1), [1.0; 4]), "{:?}", px(&d, 1, 1));
@@ -984,10 +961,7 @@ fn modern_contrast_matches_photoshop() {
 
 #[test]
 fn modern_brightness_matches_photoshop() {
-    let cases: [(f32, [u8; 10]); 2] = [
-        (50.0, [0, 22, 44, 88, 132, 171, 203, 228, 246, 255]),
-        (-50.0, [0, 12, 23, 47, 70, 93, 118, 148, 186, 255]),
-    ];
+    let cases: [(f32, [u8; 10]); 2] = [(50.0, [0, 22, 44, 88, 132, 171, 203, 228, 246, 255]), (-50.0, [0, 12, 23, 47, 70, 93, 118, 148, 186, 255])];
     let xs = [0usize, 16, 32, 64, 96, 128, 160, 192, 224, 255];
     for (b, out) in cases {
         for (i, &x) in xs.iter().enumerate() {
