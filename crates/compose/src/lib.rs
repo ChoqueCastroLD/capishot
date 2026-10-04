@@ -389,6 +389,12 @@ pub fn fill_frame(layer: &Layer, canvas: Rect) -> Rect {
     frame
 }
 
+/// A fill layer's content over `canvas`, laid out in the frame its masks give it (as the
+/// compositor does) but without applying the masks: the pixels a PSD fill layer stores.
+pub fn render_fill_content(layer: &Layer, f: &Fill, canvas: Rect, patterns: &[Pattern]) -> Buffer {
+    render_fill(f, canvas, fill_frame(layer, canvas), patterns)
+}
+
 fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &[Pattern]) -> Buffer {
     match f {
         Fill::Solid(c) => {

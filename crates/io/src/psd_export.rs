@@ -333,9 +333,8 @@ impl Ex {
         {
             return c.surface.clone();
         }
-        let mut plain = Layer::new("fill", LayerContent::Fill(f.clone()));
-        plain.fill_cache = None;
-        let buf = photocraft_compose::render_layer(&plain, self.canvas);
+        // In the frame the layer's masks give it, like the compositor (masks are stored apart).
+        let buf = photocraft_compose::render_fill_content(l, f, self.canvas, &[]);
         let mut s = Surface::new(self.fmt);
         let vals: Vec<f32> = buf.px.iter().flat_map(|p| photocraft_raster::from_rgba(&self.fmt, *p)).collect();
         s.write_region(self.canvas, &vals);

@@ -58,7 +58,7 @@ pub(crate) fn apply_display_info(data: &[u8], versioned: bool, channels: &mut [A
     }
 }
 
-fn decode_color(space: u16, c: [u16; 4]) -> Color {
+pub(crate) fn decode_color(space: u16, c: [u16; 4]) -> Color {
     let n = |v: u16| f32::from(v) / 65535.0;
     match space {
         // Photoshop colour structures store CMYK inverted (65535 = no ink).
