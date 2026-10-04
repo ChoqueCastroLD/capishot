@@ -10,7 +10,7 @@ use photocraft_doc::LayerContent;
 use photocraft_geom::Rect;
 use photocraft_paint::mixer::{MixerSettings, apply_mixer_stroke};
 use photocraft_paint::replace::{Limits, ReplaceMode, ReplaceSettings, Sampling, apply_color_replacement};
-use photocraft_paint::{BrushPreset, BrushSettings, GrayTile, Stroke, StrokePoint, TipShape, render_stroke};
+use photocraft_paint::{BrushPreset, BrushSettings, GrayTile, Stroke, StrokePoint, StrokeRenderer, TipShape, render_stroke};
 use photocraft_raster::Surface;
 use serde_json::{Value, json};
 
@@ -154,25 +154,34 @@ fn damage_json(s: &mut Session, dmg: Rect) -> Value {
     json!({ "damage": [dmg.x0, dmg.y0, dmg.width(), dmg.height()] })
 }
 
-/// Stroke with a resolved brush onto the target layer (pixels or mask).
-fn stroke_with(s: &mut Session, p: &Value, label: &str, brush: BrushSettings, pts: Vec<StrokePoint>, auto_erase: bool) -> Result<Value> {
+/// The target layer (`None` for a channel), brush and zoom of a stroke. On a mask or channel the
+/// eraser paints the background colour (Photoshop).
+fn stroke_target(s: &Session, p: &Value, brush: BrushSettings) -> Result<(Option<photocraft_doc::LayerId>, BrushSettings, f32)> {
     let gray = is_mask_target(p) || crate::channel_cmds::is_channel_target(p);
     let id = if crate::channel_cmds::is_channel_target(p) { None } else { Some(layer_id(s, p)?) };
-    let zoom = num(p, "zoom").unwrap_or(1.0);
+    let brush = if gray && brush.erase { BrushSettings { erase: false, color: s.tools.background, ..brush } } else { brush };
+    Ok((id, brush, num(p, "zoom").unwrap_or(1.0)))
+}
+
+/// Erasing a layer with locked transparency (e.g. the Background) can't remove opacity, so it
+/// paints the background colour instead (Photoshop).
+fn erase_locked(brush: &mut BrushSettings, lock: bool, bg: [f32; 4]) {
+    if brush.erase && lock {
+        brush.erase = false;
+        brush.color = bg;
+    }
+}
+
+/// Stroke with a resolved brush onto the target layer (pixels or mask).
+fn stroke_with(s: &mut Session, p: &Value, label: &str, brush: BrushSettings, pts: Vec<StrokePoint>, auto_erase: bool) -> Result<Value> {
     let bg = s.tools.background;
     let fg = brush.color;
-    // On a mask or channel the eraser paints the background colour (Photoshop).
-    let brush = if gray && brush.erase { BrushSettings { erase: false, color: bg, ..brush } } else { brush };
+    let (id, brush, zoom) = stroke_target(s, p, brush)?;
     let dmg = s.edit(label, |doc, _| {
         let sel = doc.selection.clone();
         let (surf, lock) = crate::channel_cmds::target_surface(doc, id, p)?;
         let mut brush = brush;
-        // Erasing a layer with locked transparency (e.g. the Background) can't remove opacity, so
-        // it paints the background colour instead (Photoshop). `gray` targets are handled above.
-        if brush.erase && lock {
-            brush.erase = false;
-            brush.color = bg;
-        }
+        erase_locked(&mut brush, lock, bg);
         if auto_erase {
             // Pencil Auto Erase: starting on foreground-coloured pixels paints the background colour.
             let c = surf.rgba(pts[0].x.floor() as i32, pts[0].y.floor() as i32);
@@ -202,6 +211,54 @@ pub fn paint_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     let brush = with_blend_mode(resolve_brush(s, p, "paint.stroke")?, p);
     let label = if brush.erase { "Eraser" } else { "Brush Tool" };
     stroke_with(s, p, label, brush, pts, false)
+}
+
+/// A `paint.stroke` rendered while it is drawn, onto a copy of the active document, so the canvas
+/// shows the real dabs before the stroke commits. Committing the same params and points with
+/// `"seed": live.seed` gives the same pixels.
+pub struct LiveStroke {
+    /// The active document with the stroke so far.
+    pub doc: std::sync::Arc<photocraft_doc::Document>,
+    /// Jitter seed to pass to `paint.stroke`.
+    pub seed: u64,
+    renderer: StrokeRenderer,
+    pre: Surface,
+    sel: Option<Surface>,
+    lock: bool,
+    layer: Option<photocraft_doc::LayerId>,
+    params: Value,
+}
+
+impl LiveStroke {
+    /// Start from `paint.stroke` params; their `points` are rendered.
+    pub fn begin(s: &Session, p: &Value) -> Result<Self> {
+        has_paintable(s).map_err(EngineError::Other)?;
+        let pts = parse_points(p, "paint.stroke")?;
+        let brush = with_blend_mode(resolve_brush(s, p, "paint.stroke")?, p);
+        let seed = brush.seed;
+        let (layer, mut brush, zoom) = stroke_target(s, p, brush)?;
+        let mut doc = (*s.active().ok_or(EngineError::NoDocument)?.doc).clone();
+        let sel = doc.selection.clone();
+        let (surf, lock) = crate::channel_cmds::target_surface(&mut doc, layer, p)?;
+        erase_locked(&mut brush, lock, s.tools.background);
+        let renderer = StrokeRenderer::new(&brush, Some(surf.format()), zoom);
+        let pre = surf.clone();
+        let mut live = Self { doc: std::sync::Arc::new(doc), seed, renderer, pre, sel, lock, layer, params: p.clone() };
+        live.push(&pts)?;
+        Ok(live)
+    }
+
+    /// Everything the stroke has touched so far.
+    pub fn bounds(&self) -> Rect {
+        self.renderer.bounds()
+    }
+
+    /// Render more points; returns the rectangle that changed.
+    pub fn push(&mut self, pts: &[StrokePoint]) -> Result<Rect> {
+        self.renderer.push(pts);
+        let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
+        Ok(self.renderer.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false))
+    }
 }
 
 fn pencil(s: &mut Session, p: &Value) -> Result<Value> {

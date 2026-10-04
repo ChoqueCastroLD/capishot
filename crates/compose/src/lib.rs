@@ -290,25 +290,53 @@ pub fn thumbnail_buffer(doc: &Document, max_side: u32) -> Buffer {
 /// The document's composite area-averaged (premultiplied) down to `w`×`h` (clamped to the
 /// document size), rendered in bands so no full-size composite is held.
 pub fn render_reduced(doc: &Document, w: u32, h: u32) -> Buffer {
-    render_reduced_in_bands(doc, w, h, 0)
+    render_reduced_in_bands(doc, w, h, None, 0)
 }
 
-/// [`render_reduced`] with an explicit band height (see [`render_bands`]).
-fn render_reduced_in_bands(doc: &Document, w: u32, h: u32, band_rows: i32) -> Buffer {
+/// The part of [`render_reduced`]`(doc, w, h)` that a change to `damage` (document pixels) can
+/// affect: the output pixels whose source areas meet it, rendered from just those areas, with the
+/// same values the whole reduction gives them. The buffer's rect is in output pixels (empty when
+/// `damage` misses the document), so a reduced canvas texture can update only what a stroke touched.
+pub fn render_reduced_damage(doc: &Document, w: u32, h: u32, damage: Rect) -> Buffer {
+    render_reduced_in_bands(doc, w, h, Some(damage), 0)
+}
+
+/// [`render_reduced`] (or, with `damage`, [`render_reduced_damage`]) with an explicit band height
+/// (see [`render_bands`]).
+fn render_reduced_in_bands(doc: &Document, w: u32, h: u32, damage: Option<Rect>, band_rows: i32) -> Buffer {
     let b = doc.bounds();
     let (fw, fh) = (b.width() as usize, b.height() as usize);
     let (w, h) = (w.clamp(1, b.width().max(1)) as usize, h.clamp(1, b.height().max(1)) as usize);
-    let rect = Rect::from_xywh(0, 0, w as u32, h as u32);
+    let full = Rect::from_xywh(0, 0, w as u32, h as u32);
     if fw == 0 || fh == 0 {
-        return Buffer::transparent(rect);
-    }
-    if (w, h) == (fw, fh) {
-        let mut out = render(doc, b);
-        out.rect = rect;
-        return out;
+        return Buffer::transparent(if damage.is_some() { Rect::EMPTY } else { full });
     }
     // Output column / row of each document column / row: output pixel t covers [t·f/n, (t+1)·f/n).
     let span = |t: usize, f: usize, n: usize| (t * f / n, ((t + 1) * f / n).max(t * f / n + 1).min(f));
+    // The output pixel whose span holds document column / row `x` (spans are contiguous: n <= f).
+    let cell = |x: usize, f: usize, n: usize| ((x + 1) * n).saturating_sub(1) / f;
+    // Output pixels to produce and the document area they cover.
+    let out = match damage {
+        None => full,
+        Some(d) => {
+            let d = d.intersect(&b);
+            if d.is_empty() {
+                return Buffer::transparent(Rect::EMPTY);
+            }
+            let (x0, x1) = ((d.x0 - b.x0) as usize, (d.x1 - b.x0) as usize);
+            let (y0, y1) = ((d.y0 - b.y0) as usize, (d.y1 - b.y0) as usize);
+            Rect::new(cell(x0, fw, w) as i32, cell(y0, fh, h) as i32, cell(x1 - 1, fw, w) as i32 + 1, cell(y1 - 1, fh, h) as i32 + 1)
+        }
+    };
+    let (ox0, oy0, ow, oh) = (out.x0 as usize, out.y0 as usize, out.width() as usize, out.height() as usize);
+    let (sx0, sx1) = (span(ox0, fw, w).0, span(ox0 + ow - 1, fw, w).1);
+    let (sy0, sy1) = (span(oy0, fh, h).0, span(oy0 + oh - 1, fh, h).1);
+    let src = Rect::new(b.x0 + sx0 as i32, b.y0 + sy0 as i32, b.x0 + sx1 as i32, b.y0 + sy1 as i32);
+    if (w, h) == (fw, fh) {
+        let mut px = render(doc, src);
+        px.rect = out;
+        return px;
+    }
     let map = |f: usize, n: usize| {
         let mut m = vec![0u32; f];
         for t in 0..n {
@@ -318,17 +346,19 @@ fn render_reduced_in_bands(doc: &Document, w: u32, h: u32, band_rows: i32) -> Bu
         m
     };
     let (cols, rows) = (map(fw, w), map(fh, h));
-    let mut acc = vec![[0.0f32; 4]; w * h];
-    let ok: Result<(), ()> = render_bands(doc, b, band_rows, |band| {
+    let cols = &cols[sx0..sx1];
+    let mut acc = vec![[0.0f32; 4]; ow * oh];
+    let ok: Result<(), ()> = render_bands(doc, src, band_rows, |band| {
         let (by0, by1) = ((band.rect.y0 - b.y0) as usize, (band.rect.y1 - b.y0) as usize);
         let (t0, t1) = (rows[by0] as usize, rows[by1 - 1] as usize + 1);
+        let sw = sx1 - sx0;
         // Each output row sums its source rows in this band (in order, top to bottom).
         let sum_row = |t: usize, out: &mut [[f32; 4]]| {
             let (a, z) = span(t, fh, h);
             for y in a.max(by0)..z.min(by1) {
-                let src = &band.px[(y - by0) * fw..(y - by0 + 1) * fw];
-                for (p, &c) in src.iter().zip(&cols) {
-                    let o = &mut out[c as usize];
+                let src = &band.px[(y - by0) * sw..(y - by0 + 1) * sw];
+                for (p, &c) in src.iter().zip(cols) {
+                    let o = &mut out[c as usize - ox0];
                     for i in 0..3 {
                         o[i] += p[i] * p[3];
                     }
@@ -336,26 +366,26 @@ fn render_reduced_in_bands(doc: &Document, w: u32, h: u32, band_rows: i32) -> Bu
                 }
             }
         };
-        let part = &mut acc[t0 * w..t1 * w];
+        let part = &mut acc[(t0 - oy0) * ow..(t1 - oy0) * ow];
         #[cfg(not(target_arch = "wasm32"))]
         {
             use rayon::prelude::*;
-            part.par_chunks_mut(w).enumerate().for_each(|(i, out)| sum_row(t0 + i, out));
+            part.par_chunks_mut(ow).enumerate().for_each(|(i, out)| sum_row(t0 + i, out));
         }
         #[cfg(target_arch = "wasm32")]
-        for (i, out) in part.chunks_mut(w).enumerate() {
+        for (i, out) in part.chunks_mut(ow).enumerate() {
             sum_row(t0 + i, out);
         }
         Ok(())
     });
     debug_assert!(ok.is_ok());
     for (i, p) in acc.iter_mut().enumerate() {
-        let ((x0, x1), (y0, y1)) = (span(i % w, fw, w), span(i / w, fh, h));
+        let ((x0, x1), (y0, y1)) = (span(ox0 + i % ow, fw, w), span(oy0 + i / ow, fh, h));
         let n = ((y1 - y0) * (x1 - x0)).max(1) as f32;
         let a = p[3];
         *p = if a > 0.0 { [p[0] / a, p[1] / a, p[2] / a, a / n] } else { [0.0; 4] };
     }
-    Buffer { rect, px: acc }
+    Buffer { rect: out, px: acc }
 }
 
 /// Composite a sibling list (bottom→top) onto `backdrop`.

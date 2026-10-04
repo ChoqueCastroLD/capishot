@@ -1096,7 +1096,7 @@ fn reference_reduce(doc: &Document, w: usize, h: usize) -> Vec<[f32; 4]> {
 fn reduced_render_matches_the_full_composite_averaged() {
     let d = tall_doc(53, 1000);
     for (w, h, band) in [(10, 190, 0), (7, 33, 256), (53, 999, 512), (1, 1, 256)] {
-        let got = render_reduced_in_bands(&d, w, h, band);
+        let got = render_reduced_in_bands(&d, w, h, None, band);
         assert_eq!((got.rect.width(), got.rect.height()), (w, h));
         assert_eq!(got.px, reference_reduce(&d, w as usize, h as usize), "{w}x{h} band {band}");
     }
@@ -1104,6 +1104,37 @@ fn reduced_render_matches_the_full_composite_averaged() {
     assert_eq!(render_reduced(&d, 53, 1000).px, flatten(&d).px);
     let empty = Document::new("e", Size::new(0, 0), ColorMode::Rgb, SampleType::U8);
     assert_eq!(render_reduced(&empty, 4, 4).px, vec![[0.0; 4]]);
+}
+
+#[test]
+fn reduced_damage_matches_the_whole_reduction() {
+    // A reduced canvas texture updates only what a stroke touched: those pixels must equal the
+    // whole reduction's, for uneven factors, damage on span edges and bands smaller than the area.
+    let d = tall_doc(53, 1000);
+    for (w, h, band) in [(10, 190, 0), (7, 33, 256), (53, 999, 64), (53, 1000, 0), (1, 1, 256)] {
+        let all = render_reduced_in_bands(&d, w, h, None, band);
+        for dmg in [Rect::new(0, 0, 1, 1), Rect::new(5, 17, 6, 18), Rect::new(12, 300, 40, 701), Rect::new(-9, 990, 80, 2000), Rect::new(0, 0, 53, 1000)] {
+            let part = render_reduced_in_bands(&d, w, h, Some(dmg), band);
+            let r = part.rect;
+            assert!(!r.is_empty() && r.x0 >= 0 && r.y0 >= 0 && r.x1 as u32 <= w && r.y1 as u32 <= h, "{w}x{h} {dmg:?} -> {r:?}");
+            for y in r.y0..r.y1 {
+                for x in r.x0..r.x1 {
+                    assert_eq!(part.get(x, y), all.get(x, y), "{w}x{h} band {band} {dmg:?} at {x},{y}");
+                }
+            }
+            // Exactly the output pixels whose source area meets the damage.
+            let span = |t: u32, f: u32, n: u32| (t * f / n, ((t + 1) * f / n).max(t * f / n + 1).min(f));
+            let d = dmg.intersect(&Rect::new(0, 0, 53, 1000));
+            for y in 0..h {
+                for x in 0..w {
+                    let ((x0, x1), (y0, y1)) = (span(x, 53, w), span(y, 1000, h));
+                    let meets = !Rect::new(x0 as i32, y0 as i32, x1 as i32, y1 as i32).intersect(&d).is_empty();
+                    assert_eq!(r.contains(x as i32, y as i32), meets, "{w}x{h} {dmg:?} at {x},{y}");
+                }
+            }
+        }
+        assert!(render_reduced_in_bands(&d, w, h, Some(Rect::new(60, 0, 70, 10)), band).rect.is_empty());
+    }
 }
 
 #[test]

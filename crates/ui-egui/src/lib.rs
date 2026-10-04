@@ -182,6 +182,8 @@ pub struct PhotocraftApp {
     canvases: HashMap<DocId, canvas::CanvasCache>,
     checker: Option<egui::TextureHandle>,
     drag: Option<canvas::Drag>,
+    /// Brush/Eraser stroke being drawn, rendered by the engine (see `canvas::LiveStroke`).
+    live_stroke: Option<canvas::LiveStroke>,
     control_rx: Option<Receiver<ControlRequest>>,
     pending_screenshots: Vec<(u64, Option<String>, Sender<ControlResponse>)>,
     /// Screenshots not yet requested from the viewport: (token, earliest time in ms, frames seen).
@@ -272,6 +274,7 @@ impl PhotocraftApp {
             canvases: HashMap::new(),
             checker: None,
             drag: None,
+            live_stroke: None,
             control_rx: None,
             pending_screenshots: Vec::new(),
             queued_screenshots: Vec::new(),

@@ -247,3 +247,28 @@ fn eraser_on_background_layer_paints_the_background_colour() {
     let w = st.doc.layers[0].surface().unwrap().rgba(10, 2);
     assert!(w[0] > 0.9 && w[1] > 0.9 && w[2] > 0.9, "untouched stays white: {w:?}");
 }
+
+#[test]
+fn live_stroke_matches_the_committed_stroke() {
+    // The canvas previews strokes with `LiveStroke`; it must show what `paint.stroke` commits
+    // (soft edge, scatter seed), not a stand-in.
+    let mut s = session(200, 100);
+    let pts = [[10.0, 50.0, 1.0], [60.0, 30.0, 0.7], [120.0, 60.0, 0.9], [180.0, 40.0, 1.0]];
+    let p = json!({"points": [pts[0]], "preset": "Spatter", "brush": {"hardness": 0.0}, "smoothing": 0.0, "target": "pixels"});
+    let mut live = LiveStroke::begin(&s, &p).unwrap();
+    for c in pts[1..].chunks(2) {
+        let sp: Vec<StrokePoint> = c.iter().map(|q| StrokePoint::new(q[0], q[1], q[2] as f32)).collect();
+        assert!(!live.push(&sp).unwrap().is_empty());
+    }
+    let mut commit = p.clone();
+    commit["points"] = json!(pts);
+    commit["seed"] = json!(live.seed);
+    s.execute("paint.stroke", commit).unwrap();
+    let shown = live.doc.layer(s.active().unwrap().active_layer.unwrap()).unwrap().surface().unwrap().clone();
+    assert!(same_pixels(&shown, &surface(&s), Rect::new(0, 0, 200, 100)));
+    assert!((0..100).any(|y| (0..200).any(|x| (0.05..0.95).contains(&shown.rgba(x, y)[3]))), "soft edge previewed");
+    // Bad input is an error, not a panic.
+    assert!(LiveStroke::begin(&s, &json!({"points": []})).is_err());
+    assert!(LiveStroke::begin(&s, &json!({"points": [[1, 1]], "target": {"channel": 9}})).is_err());
+    assert!(LiveStroke::begin(&Session::new(), &json!({"points": [[1, 1]]})).is_err());
+}

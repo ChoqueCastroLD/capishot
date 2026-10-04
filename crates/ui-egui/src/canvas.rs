@@ -39,6 +39,77 @@ pub struct Drag {
     pub modifiers: egui::Modifiers,
 }
 
+/// A Brush/Eraser stroke shown while it is drawn: the engine renders the real dabs onto a copy of
+/// the document, and the canvas redraws only what each step changed.
+pub(crate) struct LiveStroke {
+    stroke: photocraft_engine::brush_cmds::LiveStroke,
+    doc: photocraft_doc::DocId,
+    revision: u64,
+    /// Preview key of the stroke; step `n` displays as `key + n`.
+    key: u64,
+    /// Damage of each step (step 0 = the document before the stroke).
+    damage: Vec<DRect>,
+    /// Drag points rendered so far.
+    fed: usize,
+}
+
+impl LiveStroke {
+    fn display_key(&self) -> u64 {
+        self.key + self.damage.len() as u64
+    }
+
+    /// What changed since the canvas showed preview `key` (0 = the document before the stroke).
+    fn since(&self, key: u64) -> Option<DRect> {
+        let seen = if key == 0 { 0 } else { usize::try_from(key.checked_sub(self.key)?).ok()? };
+        Some(self.damage.get(seen..)?.iter().fold(DRect::EMPTY, |a, r| a.union(r)))
+    }
+}
+
+/// The live stroke on document `idx`, while it is current.
+fn live_stroke(app: &PhotocraftApp, idx: usize) -> Option<&LiveStroke> {
+    let st = app.session.documents().get(idx)?;
+    app.live_stroke.as_ref().filter(|l| app.drag.is_some() && l.doc == st.doc.id && l.revision == st.revision)
+}
+
+/// `paint.stroke` params for a Brush/Eraser drag (shared by the live preview and the commit).
+fn stroke_params(app: &PhotocraftApp, tool: Tool, points: &[Vec<f64>]) -> serde_json::Value {
+    json!({ "points": points, "erase": tool == Tool::Eraser, "smoothing": 0.3, "target": paint_target(app) })
+}
+
+fn begin_live_stroke(app: &PhotocraftApp, tool: Tool) -> Option<LiveStroke> {
+    static STROKES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let st = app.session.active()?;
+    let d = app.drag.as_ref()?;
+    let stroke = photocraft_engine::brush_cmds::LiveStroke::begin(&app.session, &stroke_params(app, tool, &app.stylus.stroke_points(&d.points))).ok()?;
+    let n = STROKES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) & 0xff_ffff;
+    let damage = vec![stroke.bounds()];
+    Some(LiveStroke { stroke, doc: st.doc.id, revision: st.revision, key: (1 << 44) | (n << 20), damage, fed: d.points.len() })
+}
+
+/// Render the drag points the live stroke hasn't seen yet, with the pen pressure, tilt and
+/// rotation the commit's `paint.stroke` gets for them.
+fn feed_live_stroke(app: &mut PhotocraftApp) {
+    let (Some(l), Some(d)) = (app.live_stroke.as_mut(), app.drag.as_ref()) else { return };
+    let pose = &app.stylus.stroke;
+    let pts: Vec<_> = (l.fed..d.points.len())
+        .filter_map(|i| {
+            let p = d.points.get(i)?;
+            let t = pose.get(i).or(pose.last()).copied().unwrap_or_default();
+            let mut sp = photocraft_engine::paint::StrokePoint::new(p[0], p[1], p[2] as f32);
+            (sp.tilt_x, sp.tilt_y, sp.rotation) = (t[0], t[1], t[2]);
+            Some(sp)
+        })
+        .collect();
+    if pts.is_empty() {
+        return;
+    }
+    l.fed = d.points.len();
+    match l.stroke.push(&pts) {
+        Ok(r) => l.damage.push(r),
+        Err(_) => app.live_stroke = None,
+    }
+}
+
 /// Abstract tool event, produced by the mouse or by automation (`ui.pointer`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ToolEvent {
@@ -145,6 +216,9 @@ fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>
     if let Some(shown) = crate::distort_ui::display_doc(app, idx) {
         return shown;
     }
+    if let Some(l) = live_stroke(app, idx) {
+        return (l.stroke.doc.clone(), l.display_key());
+    }
     if let (Some(t), Some(pv)) = (&app.ui.transform, &app.transform_preview)
         && app.session.active_index() == Some(idx)
         && st.doc.layer(photocraft_doc::LayerId(t.layer)).is_some()
@@ -231,6 +305,8 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
     };
     let (doc, preview_key) = display_doc(app, idx);
     let (display, display_key) = canvas_display(app, &doc);
+    let seen = app.canvases.get(&id).map(|c| (c.tex_revision, c.tex_preview_key));
+    let damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, preview_key), display_key, last_damage));
     let preview_key = preview_key ^ display_key;
     let cache = app.canvases.entry(id).or_insert(CanvasCache {
         revision: 0,
@@ -242,27 +318,24 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
         tex_preview_key: 0,
     });
     if cache.tex_revision != revision || cache.texture.is_none() || cache.tex_preview_key != preview_key {
-        let partial = cache.texture.is_some()
-            && cache.tex_preview_key == preview_key
-            && cache.tex_revision + 1 == revision
-            && cache.scale == 1.0
-            && last_damage.is_some();
         let t0 = crate::gpu_canvas::now_ms();
-        if partial {
-            let r = last_damage.unwrap_or(DRect::EMPTY).intersect(&doc.bounds());
+        let longest = doc.size.width.max(doc.size.height);
+        let factor = longest.div_ceil(MAX_TEXTURE).max(1);
+        let (w, h) = ((doc.size.width / factor).max(1), (doc.size.height / factor).max(1));
+        let current = cache.texture.as_mut().filter(|t| t.size() == [w as usize, h as usize]);
+        if let (Some(d), Some(t)) = (damage, current) {
+            // Only what the edit or stroke touched: the reduced texture's pixels over it, with the
+            // values the whole reduction gives them (factor 1 is the plain composite of `d`).
+            let buf = photocraft_compose::render_reduced_damage(&doc, w, h, d);
+            let r = buf.rect;
             if !r.is_empty() {
-                let buf = photocraft_compose::render(&doc, r);
                 let t1 = crate::gpu_canvas::now_ms();
-                if let Some(t) = cache.texture.as_mut() {
-                    t.set_partial([r.x0 as usize, r.y0 as usize], display_image(display.as_deref(), &buf), TextureOptions::LINEAR);
-                }
-                app.perf.record("rect", r.width() as u64 * r.height() as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
+                t.set_partial([r.x0 as usize, r.y0 as usize], display_image(display.as_deref(), &buf), TextureOptions::LINEAR);
+                let px = (r.width() as u64 * r.height() as u64).saturating_mul(u64::from(factor).pow(2));
+                app.perf.record("rect", px, t1 - t0, crate::gpu_canvas::now_ms() - t1);
             }
         } else {
-            let longest = doc.size.width.max(doc.size.height);
-            let factor = longest.div_ceil(MAX_TEXTURE).max(1);
             // Reduced in bands straight from the compositor: no full-size composite in memory.
-            let (w, h) = ((doc.size.width / factor).max(1), (doc.size.height / factor).max(1));
             let full = photocraft_compose::render_reduced(&doc, w, h);
             let t1 = crate::gpu_canvas::now_ms();
             let (img, scale) = (display_image(display.as_deref(), &full), 1.0 / factor as f32);
@@ -277,6 +350,18 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
         cache.tex_preview_key = preview_key;
     }
     Some((cache.texture.as_ref()?.id(), cache.scale))
+}
+
+/// What changed since a canvas cache showed (`revision`, `preview key`) `seen`, when only a
+/// rectangle did: the last edit's damage, or the live stroke's dabs since then. Cached keys have
+/// the colour display's key folded in (`^ display_key`); `now`'s is still raw.
+fn damage_since(app: &PhotocraftApp, idx: usize, seen: (u64, u64), now: (u64, u64), display_key: u64, last_damage: Option<DRect>) -> Option<DRect> {
+    if seen.1 == now.1 ^ display_key && seen.0 + 1 == now.0 {
+        return last_damage;
+    }
+    let l = live_stroke(app, idx).filter(|l| seen.0 == now.0 && l.display_key() == now.1)?;
+    let r = l.since(seen.1 ^ display_key)?;
+    Some(if r.is_empty() { r } else { r.inflate(effect_reach(&l.stroke.doc.layers)) })
 }
 
 /// How far beyond an edit's damage rect the composite can change: layer effects (shadows, glows,
@@ -312,6 +397,8 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
     };
     let (doc, preview_key) = display_doc(app, idx);
     let (display, display_key) = canvas_display(app, &doc);
+    let seen = app.canvases.get(&id).map(|c| (c.revision, c.preview_key));
+    let damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, preview_key), display_key, last_damage));
     let preview_key = preview_key ^ display_key;
     let size = [doc.size.width, doc.size.height];
     let cache = app.canvases.entry(id).or_insert(CanvasCache {
@@ -327,8 +414,8 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
     if present && cache.revision == revision && cache.preview_key == preview_key {
         return true;
     }
-    let partial = present && cache.preview_key == preview_key && cache.revision + 1 == revision && last_damage.is_some();
-    let r = gpu.refresh(id.0, &doc, if partial { last_damage } else { None }, display.as_deref());
+    let partial = present && damage.is_some();
+    let r = gpu.refresh(id.0, &doc, if partial { damage } else { None }, display.as_deref());
     if let Some(e) = &r.fallback
         && app.perf.gpu_fallback.as_deref() != Some(e.as_str())
     {
@@ -1235,17 +1322,8 @@ fn draw_drag_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
         last = crop_end(app, d.start, last);
     }
     match d.tool {
-        Tool::Brush | Tool::Eraser => {
-            let c = if d.tool == Tool::Eraser { [1.0, 1.0, 1.0, 0.6] } else { app.session.tools.foreground };
-            let color = Color32::from_rgba_unmultiplied((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, (c[3] * 255.0) as u8);
-            let pts: Vec<Pos2> = d.points.iter().map(|p| xf.to_screen(p[0] as f32, p[1] as f32)).collect();
-            let w = (app.session.tools.brush.size * xf.zoom).max(1.0);
-            if pts.len() == 1 {
-                painter.circle_filled(pts[0], w / 2.0, color);
-            } else {
-                painter.add(egui::Shape::line(pts, Stroke::new(w, color)));
-            }
-        }
+        // The canvas shows the live stroke itself (`LiveStroke`).
+        Tool::Brush | Tool::Eraser => {}
         t if t.is_brushlike() || t == Tool::QuickSelection => {
             // Retouching strokes preview as a translucent trail of the brush footprint.
             let pts: Vec<Pos2> = d.points.iter().map(|p| xf.to_screen(p[0] as f32, p[1] as f32)).collect();
@@ -1416,6 +1494,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             }
             app.drag = Some(Drag { tool, start: [x, y], points: vec![[x, y, pressure as f64]], modifiers: mods });
             app.stylus.begin_stroke();
+            app.live_stroke = if matches!(tool, Tool::Brush | Tool::Eraser) { begin_live_stroke(app, tool) } else { None };
         }
         ToolEvent::Move { x, y, pressure } => {
             if tool == Tool::Type && app.drag.is_none() {
@@ -1430,6 +1509,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 d.points.push([x, y, pressure as f64]);
                 app.stylus.record_point();
             }
+            feed_live_stroke(app);
         }
         ToolEvent::Up { x, y } => {
             if tool == Tool::Type
@@ -1461,8 +1541,27 @@ fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
         Tool::PathSelection => crate::vector_ui::path_selection_finish(app, d.start, [end[0], end[1]]),
         Tool::Type => crate::type_tool::pointer_up(app, d.start, [end[0], end[1]]),
         Tool::Brush | Tool::Eraser => {
-            let pts = app.stylus.stroke_points(&d.points);
-            let _ = app.run("paint.stroke", json!({ "points": pts, "erase": d.tool == Tool::Eraser, "smoothing": 0.3, "target": paint_target(app) }));
+            let live = app.live_stroke.take();
+            let mut p = stroke_params(app, d.tool, &app.stylus.stroke_points(&d.points));
+            if let Some(l) = &live {
+                p["seed"] = json!(l.stroke.seed);
+            }
+            // The canvas already shows the stroke: let the commit's damage rect refresh it rather
+            // than recompositing the whole document.
+            if app.run("paint.stroke", p).is_ok()
+                && let Some(l) = live
+            {
+                let display_key = app.session.active().map_or(0, |st| canvas_display(app, &st.doc).1);
+                if let Some(c) = app.canvases.get_mut(&l.doc) {
+                    // Raw preview key 0 = the document itself (its colour display folded in).
+                    if l.since(c.preview_key ^ display_key).is_some() {
+                        c.preview_key = display_key;
+                    }
+                    if l.since(c.tex_preview_key ^ display_key).is_some() {
+                        c.tex_preview_key = display_key;
+                    }
+                }
+            }
         }
         Tool::RectMarquee | Tool::EllipseMarquee => {
             let o = &app.ui.tool_options;
@@ -1638,6 +1737,67 @@ mod tests {
             let r = xf.doc_rect(DRect::new(0, 0, 10, 10));
             assert!(r.width() > 0.0 && r.height() > 0.0);
         }
+    }
+
+    #[test]
+    fn brush_drag_shows_the_real_stroke_and_commits_it() {
+        // The drag used to draw a hard, flat stand-in and only showed the soft brush on release.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 120, "height": 60, "background": "transparent"})).unwrap();
+        app.run("tools.setBrush", json!({"brush": {"size": 20, "hardness": 0.0}})).unwrap();
+        app.ui.tool = Tool::Brush;
+        let m = egui::Modifiers::NONE;
+        let alpha = |d: &Document, x, y| d.layers[0].surface().unwrap().rgba(x, y)[3];
+        let rev = app.session.documents()[0].revision;
+        tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 30.0, pressure: 1.0 }, m);
+        for x in [40.0, 70.0, 100.0] {
+            tool_event(&mut app, ToolEvent::Move { x, y: 30.0, pressure: 1.0 }, m);
+        }
+        let (shown, key) = display_doc(&mut app, 0);
+        assert_ne!(key, 0);
+        assert!(alpha(&shown, 40, 30) > 0.5 && (0.01..0.5).contains(&alpha(&shown, 40, 38)), "soft stroke while drawing");
+        assert_eq!(alpha(&app.session.documents()[0].doc, 40, 30), 0.0, "not committed yet");
+        // The canvas redraws only what the stroke touched.
+        let dk = canvas_display(&app, &app.session.documents()[0].doc).1;
+        let d = damage_since(&app, 0, (rev, dk), (rev, key), dk, None).unwrap();
+        assert!(d.contains(40, 30) && !d.contains(40, 2) && d.width() < 120, "{d:?}");
+        tool_event(&mut app, ToolEvent::Up { x: 100.0, y: 30.0 }, m);
+        let doc = app.session.documents()[0].doc.clone();
+        assert!(app.live_stroke.is_none() && display_doc(&mut app, 0).1 == 0);
+        assert_eq!((alpha(&doc, 40, 30), alpha(&doc, 40, 38)), (alpha(&shown, 40, 30), alpha(&shown, 40, 38)), "commit matches the preview");
+    }
+
+    #[test]
+    fn live_stroke_uses_pen_tilt_and_updates_a_reduced_texture_partially() {
+        // Pen tilt drives the size; the preview must use the tilt the commit gets. The document
+        // is wider than MAX_TEXTURE, so the CPU texture is reduced (factor 2) and each step
+        // must update only the reduced pixels it touched.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 4097, "height": 90, "background": "transparent"})).unwrap();
+        let tilt = json!({"size": 30, "hardness": 1.0, "spacing": 0.05, "shapeDynamics": {"enabled": true, "size": {"control": "penTilt"}}});
+        app.run("tools.setBrush", json!({ "brush": tilt })).unwrap();
+        app.ui.tool = Tool::Brush;
+        assert_eq!(ensure_texture(&mut app, &ctx, 0).map(|t| t.1), Some(0.5));
+        let m = egui::Modifiers::NONE;
+        app.stylus.feed.set(Some(crate::stylus::PenSample { pressure: 1.0, tilt_x: 60.0, tilt_y: 0.0, rotation: 0.0 }));
+        tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 45.0, pressure: 1.0 }, m);
+        for x in [300.0, 600.0, 900.0] {
+            tool_event(&mut app, ToolEvent::Move { x, y: 45.0, pressure: 1.0 }, m);
+            ensure_texture(&mut app, &ctx, 0);
+            assert_eq!(app.perf.last_refresh, "rect");
+            assert!(app.perf.last_refresh_px < 4097 * 90 / 4, "{}", app.perf.last_refresh_px);
+        }
+        let shown = display_doc(&mut app, 0).0;
+        tool_event(&mut app, ToolEvent::Up { x: 900.0, y: 45.0 }, m);
+        ensure_texture(&mut app, &ctx, 0);
+        assert_eq!(app.perf.last_refresh, "rect", "the commit refreshes only the stroke");
+        let doc = app.session.documents()[0].doc.clone();
+        let (a, b) = (doc.layers[0].surface().unwrap(), shown.layers[0].surface().unwrap());
+        // 60° tilt shrinks the dab well below 30 px: the preview shows that size, as committed.
+        assert!(a.rgba(500, 45)[3] > 0.5 && a.rgba(500, 45 + 12)[3] == 0.0);
+        // (The smoothed tail catches up to the end point only when the stroke finishes.)
+        assert!((0..90).all(|y| (0..700).all(|x| a.rgba(x, y) == b.rgba(x, y))), "commit matches the preview");
     }
 
     #[test]
