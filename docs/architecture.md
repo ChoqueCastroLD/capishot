@@ -98,7 +98,7 @@ photocraft/
 │  ├─ psd/                     photocraft-psd       PSD/PSB read + write; its OWN format-level model; depends on nothing in this workspace
 │  ├─ adobe-assets/            photocraft-adobe-assets  .abr .asl .aco/.ase .grd .pat .csh .atn .cube/.3dl, ACR .xmp presets (standalone, like psd)
 │  ├─ codecs/                  photocraft-codecs    png/jpeg/tiff/webp/gif/bmp/avif/jxl (+heif via feature) decode/encode
-│  ├─ raw/                     photocraft-raw       camera RAW decode (rawler) + develop pipeline + lens profiles
+│  ├─ raw/                     photocraft-raw       clean-room camera RAW decode (DNG, CR2, TIFF/EP) + develop pipeline (standalone, like psd)
 │  ├─ format/                  photocraft-format    native document format (.pcraft bundle): manifest + content-addressed tiles
 │  ├─ io/                      photocraft-io        import/export orchestration; doc ⇄ PSD mapping; PDF/SVG import (features)
 │  │  ── intelligence ──
@@ -122,7 +122,7 @@ photocraft/
 └─ plan/                       this directory
 ```
 
-**What exists today.** This layout is the target design. Built so far: `geom`, `cms`, `color`, `raster`, `psd`, `codecs`, `doc`, `ops`, `algo`, `paint`, `text`, `vector`, `compose`, `gpu`, `format`, `io`, `engine`, `ui-egui`, `automation`, `testkit`, and the three apps. Not yet split out: `viewport` and `tools` live inside `ui-egui` and `engine`; `platform` services are function hooks injected by each app (`ui_egui::Services`); `adobe-assets`, `raw` and `ml` are not started.
+**What exists today.** This layout is the target design. Built so far: `geom`, `cms`, `color`, `raster`, `psd`, `codecs`, `doc`, `ops`, `algo`, `paint`, `text`, `vector`, `compose`, `gpu`, `format`, `raw`, `io`, `engine`, `ui-egui`, `automation`, `testkit`, and the three apps. Not yet split out: `viewport` and `tools` live inside `ui-egui` and `engine`; `platform` services are function hooks injected by each app (`ui_egui::Services`); `adobe-assets` and `ml` are not started.
 
 **Crate granularity:** start with the crates above. Split `algo` into `-adjust`, `-filters`, `-select`, `-inpaint` and `-warp` once any module passes about 10k lines, or once compile times hurt. Its internal module boundaries should already follow those lines.
 
@@ -137,10 +137,10 @@ photocraft/
  L6  ui-egui · automation · platform
  L5  engine
  L4  tools · viewport · io · ml
- L3  compose · gpu · format · raw · codecs
+ L3  compose · gpu · format
  L2  ops · algo · paint · text · vector
  L1  doc
- L0  geom · color · raster                 psd, adobe-assets (standalone, no workspace deps)
+ L0  geom · cms · color · raster           psd, codecs, raw, adobe-assets (standalone, no workspace deps)
 ```
 
 **Rules** (checked by `cargo xtask layers` in CI, which parses `cargo metadata`):

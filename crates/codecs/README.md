@@ -60,6 +60,10 @@ the same.
 
 ## Documented asymmetries and limitations
 
+* **Camera raw files** (DNG, CR2, NEF, ARW… which are TIFF-structured) are recognised and refused
+  with `CodecError::Unsupported`: they are sensor data, not flat images. `photocraft-raw` decodes
+  and develops them, and `photocraft-io` routes them there.
+
 * **AVIF (the only asymmetric format).** Encoding uses `ravif`, which is pure Rust. Decoding
   needs `dav1d`, which is C. AVIF is therefore read-unsupported, and write support is gated
   behind the non-default `avif` feature. In a default build it is neither readable nor writable,

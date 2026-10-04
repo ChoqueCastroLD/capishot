@@ -114,8 +114,10 @@ pub(crate) fn list_images(dir: &str) -> Result<Vec<String>> {
 }
 
 /// Extensions the batch commands pick up from a folder.
-const OPENABLE: &[&str] =
-    &["psd", "psb", "pcraft", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "exr", "hdr", "qoi", "ico", "pnm", "ppm", "pgm"];
+const OPENABLE: &[&str] = &[
+    "psd", "psb", "pcraft", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "exr", "hdr", "qoi", "ico", "pnm", "ppm", "pgm", "dng", "cr2",
+    "nef", "nrw", "arw", "pef",
+];
 
 pub(crate) fn file_name(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
@@ -265,11 +267,13 @@ pub fn open_bytes_as(s: &mut Session, name: &str, bytes: &[u8], as_ext: Option<&
         Some(ext) => format!("{}.{}", stem(name), ext.trim_start_matches('.')),
         None => name.to_string(),
     };
-    let mut doc = import(&decode_name, bytes)?;
+    let r = photocraft_io::import(&decode_name, bytes).map_err(|e| EngineError::Other(format!("{decode_name}: {e}")))?;
+    let mut doc = r.document;
     doc.name = file_name(name);
     // Color Settings policies (preserve / convert / discard the embedded profile).
     let (i, color) = s.open_document(doc, path);
-    Ok(json!({"document": i, "color": color}))
+    // Import notes (e.g. how a camera raw was developed, or that only its preview opened).
+    Ok(json!({"document": i, "color": color, "warnings": r.warnings}))
 }
 
 fn open_as(s: &mut Session, p: &Value) -> Result<Value> {

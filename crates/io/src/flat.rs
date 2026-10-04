@@ -13,6 +13,11 @@ use crate::{ExportOptions, ExportResult, ImportResult, IoError};
 /// Decodes a flat image into a single-layer document.
 pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
     let img = codecs::decode(bytes)?;
+    image_to_document(name, &img)
+}
+
+/// A decoded flat image as a single-layer document.
+pub(crate) fn image_to_document(name: &str, img: &Image) -> Result<ImportResult, IoError> {
     let mut warnings = Vec::new();
     let (mode, target_layout) = match img.layout() {
         ChannelLayout::Gray | ChannelLayout::GrayA => (ColorMode::Grayscale, ChannelLayout::GrayA),

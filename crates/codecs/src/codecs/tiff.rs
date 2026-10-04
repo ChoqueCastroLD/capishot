@@ -135,7 +135,7 @@ fn camera_raw(b: &[u8]) -> bool {
 
 pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
     if camera_raw(bytes) {
-        return Err(CodecError::unsupported(F, "camera raw files (such as CR2, NEF, ARW or DNG) are not supported"));
+        return Err(CodecError::unsupported(F, "camera raw files (such as CR2, NEF, ARW or DNG) are not flat images; decode them with photocraft-raw"));
     }
     let tl = {
         let mut l = tiff::decoder::Limits::default();

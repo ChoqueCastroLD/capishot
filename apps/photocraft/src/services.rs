@@ -13,8 +13,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 /// Everything File › Open reads: PhotoCraft documents, Photoshop documents and flat images.
-const OPEN_EXTS: &[&str] =
-    &["pcraft", "psd", "psb", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm"];
+const OPEN_EXTS: &[&str] = &[
+    "pcraft", "psd", "psb", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm",
+    "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf",
+];
 
 /// File › Save As formats: (filter name, extensions). The filter matching the suggested name's
 /// extension comes first, so a .pcraft document saves as .pcraft by default and everything else

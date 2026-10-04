@@ -18,11 +18,13 @@ photocraft-doc = { workspace = true }
 photocraft-compose = { workspace = true }
 photocraft-psd = { workspace = true }
 photocraft-codecs = { workspace = true }
+photocraft-raw = { workspace = true }
 photocraft-text = { workspace = true }
 photocraft-format = { path = "../format" }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 photocraft-psd = { workspace = true, features = ["testgen"] }
+photocraft-raw = { workspace = true, features = ["testgen"] }
 proptest = { workspace = true }
 photocraft-vector = { workspace = true }

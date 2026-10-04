@@ -3394,6 +3394,7 @@ dependencies = [
  "photocraft-ops",
  "photocraft-paint",
  "photocraft-raster",
+ "photocraft-raw",
  "photocraft-text",
  "photocraft-vector",
  "rayon",
@@ -3457,6 +3458,7 @@ dependencies = [
  "photocraft-geom",
  "photocraft-psd",
  "photocraft-raster",
+ "photocraft-raw",
  "photocraft-text",
  "photocraft-vector",
  "proptest",
@@ -3500,6 +3502,15 @@ dependencies = [
  "photocraft-geom",
  "proptest",
  "serde",
+]
+
+[[package]]
+name = "photocraft-raw"
+version = "0.1.1"
+dependencies = [
+ "photocraft-raw",
+ "png 0.18.1",
+ "rayon",
 ]
 
 [[package]]

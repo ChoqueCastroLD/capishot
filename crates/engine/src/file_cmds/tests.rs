@@ -49,6 +49,23 @@ fn close_all_and_close_others() {
 }
 
 #[test]
+fn camera_raw_opens_as_16_bit_with_notes() {
+    use photocraft_raw::testgen::{DngSpec, mosaic, scene};
+    let (w, h) = (24, 16);
+    let mut spec = DngSpec::cfa(w, h, mosaic(&scene(w, h), w, [0, 1, 1, 2], 0, 65535));
+    spec.as_shot_neutral = Some([0.5, 1.0, 0.7]);
+    let mut s = Session::new();
+    let r = open_bytes_as(&mut s, "IMG_0001.dng", &spec.build(), None, None).unwrap();
+    assert!(r["warnings"].as_array().is_some_and(|w| w.iter().any(|m| m.as_str().is_some_and(|m| m.contains("DNG")))), "{r}");
+    assert_eq!((doc(&s).size.width, doc(&s).size.height), (24, 16));
+    assert_eq!(doc(&s).depth, photocraft_color::SampleType::U16);
+    // Damaged raw data is an error, not a crash.
+    let mut bad = spec.build();
+    bad.truncate(bad.len() / 2);
+    assert!(open_bytes_as(&mut s, "bad.dng", &bad, None, None).is_err());
+}
+
+#[test]
 fn revert_reloads_as_one_undoable_step() {
     let dir = tmp("revert");
     let path = png(&dir, "a.png", 16, 12, "#ff0000");

@@ -10,6 +10,9 @@
 //!   and smart-object data) and re-export writes them back; text, shape and
 //!   smart-object layers also keep their pixels as the cached raster, and fill
 //!   layers keep Photoshop's rendering in `Layer::fill_cache`.
+//! * Camera raws (DNG, CR2, uncompressed / lossless TIFF-EP raws) via
+//!   `photocraft-raw`, developed into a 16-bit ProPhoto RGB "Background"
+//!   layer; unsupported raw variants fall back to the embedded JPEG preview.
 //! * Every other format goes through `photocraft-codecs` as a single
 //!   "Background" layer (depth and Gray/RGB/CMYK model preserved).
 //!
@@ -32,6 +35,7 @@ pub mod pattern_map;
 mod pixels;
 mod psd_export;
 mod psd_import;
+pub mod raw;
 pub mod slices_map;
 pub mod text_styles_map;
 pub mod vector_map;
@@ -63,6 +67,9 @@ pub enum IoError {
     /// Native `.pcraft` bundle failure.
     #[error("pcraft: {0}")]
     Pcraft(#[from] photocraft_format::FormatError),
+    /// Camera raw decode failure.
+    #[error("{0}")]
+    Raw(#[from] photocraft_raw::RawError),
 }
 
 /// Result of [`import`].
@@ -97,8 +104,8 @@ pub fn is_psd(bytes: &[u8]) -> bool {
     bytes.starts_with(b"8BPS")
 }
 
-/// Imports a file. PSD/PSB are detected by magic; everything else is decoded
-/// with `photocraft-codecs`.
+/// Imports a file. PSD/PSB and camera raws are detected by magic; everything
+/// else is decoded with `photocraft-codecs`.
 pub fn import(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
     if photocraft_format::is_pcraft(bytes) {
         return Ok(ImportResult { document: photocraft_format::load_from_bytes(bytes)?, warnings: Vec::new() });
@@ -108,6 +115,9 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
         let (mut document, warnings) = psd_to_document(&file);
         document.name = name.to_string();
         return Ok(ImportResult { document, warnings });
+    }
+    if raw::is_raw(bytes) {
+        return raw::import_raw(name, bytes);
     }
     flat::import_flat(name, bytes)
 }
