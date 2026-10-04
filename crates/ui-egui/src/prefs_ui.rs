@@ -121,6 +121,27 @@ pub fn load(app: &mut PhotocraftApp) {
     }
 }
 
+/// Attach the brush preset store once its background load finishes, and surface write
+/// failures in the status bar.
+fn presets_store(app: &mut PhotocraftApp) {
+    if let Some(rx) = &app.services.preset_store {
+        match rx.try_recv() {
+            Ok(opened) => {
+                app.services.preset_store = None;
+                let warnings = app.session.attach_preset_store(opened);
+                if let Some(w) = warnings.first() {
+                    app.ui.status = if warnings.len() == 1 { w.clone() } else { format!("{w} (+{} more brush preset warnings)", warnings.len() - 1) };
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => app.services.preset_store = None,
+        }
+    }
+    if let Some(w) = app.session.preset_store.as_mut().map(|s| s.take_warnings()).and_then(|w| w.into_iter().next()) {
+        app.ui.status = w;
+    }
+}
+
 /// Per-frame upkeep: theme sync, persistence, autosave and the history log.
 pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !app.prefs_rt.loaded {
@@ -139,6 +160,7 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         app.session.prefs.edit(|p| p.interface.theme = t);
         app.prefs_rt.theme_pref = Some(t);
     }
+    presets_store(app);
     if app.session.prefs.rev() != app.prefs_rt.saved_rev {
         app.prefs_rt.saved_rev = app.session.prefs.rev();
         let text = app.session.prefs_to_json();
@@ -1051,6 +1073,28 @@ mod tests {
         tick(&mut app2, &ctx);
         assert_eq!(app2.session.prefs().interface.theme, Theme::Classic);
         assert!(store2.lock().unwrap().as_ref().unwrap().contains("classic"));
+    }
+
+    #[test]
+    fn brush_preset_store_attaches_when_loaded_and_persists() {
+        use photocraft_engine::preset_store::{MemBackend, open};
+        let mem = MemBackend::default();
+        let ctx = egui::Context::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services { preset_store: Some(rx), ..Default::default() });
+        // Still loading: presets made now are kept and written once the store arrives.
+        tick(&mut app, &ctx);
+        app.run("brush.presets.save", json!({"name": "Early"})).unwrap();
+        assert!(mem.files.lock().unwrap().is_empty());
+        tx.send(open(Box::new(mem.clone()))).unwrap();
+        tick(&mut app, &ctx);
+        assert!(app.services.preset_store.is_none() && app.session.preset_store.is_some());
+        app.run("brush.presets.save", json!({"name": "Late"})).unwrap();
+        let mut s2 = photocraft_engine::Session::new();
+        assert!(s2.attach_preset_store(open(Box::new(mem))).is_empty());
+        for n in ["Early", "Late"] {
+            assert!(s2.tools.presets.iter().any(|p| p.name == n), "{n}");
+        }
     }
 
     #[test]

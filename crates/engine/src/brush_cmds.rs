@@ -375,6 +375,7 @@ fn upsert(s: &mut Session, preset: BrushPreset) {
         Some(x) => *x = preset,
         None => s.tools.presets.push(preset),
     }
+    s.brush_presets_changed();
 }
 
 fn presets_save(s: &mut Session, p: &Value) -> Result<Value> {
@@ -396,6 +397,7 @@ fn presets_delete(s: &mut Session, p: &Value) -> Result<Value> {
     if s.tools.presets.len() == before {
         return Err(bad(cmd, format!("no brush preset named `{name}`")));
     }
+    s.brush_presets_changed();
     Ok(json!({ "count": s.tools.presets.len() }))
 }
 

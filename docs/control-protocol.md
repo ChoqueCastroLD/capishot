@@ -102,6 +102,13 @@ The desktop app stores them in `preferences.json` in the platform config directo
 `$XDG_CONFIG_HOME/photocraft`; override with `PHOTOCRAFT_CONFIG_DIR`); autosaves go to its
 `Recovery` folder. The web build keeps them in `localStorage`.
 
+User and imported (`.abr`) brush presets live in the config directory's `Presets` folder: one
+`.pcbrushes` JSON file per preset group, content-addressed tip bitmaps under `tips/`, and an
+`index.json` with the group order and deleted built-ins (see `photocraft_engine::preset_store`).
+The store loads in the background at launch and syncs after every brush preset change; built-ins
+are never written. Headless CLI/MCP sessions and the web build keep brush presets for the session
+only. Gradient presets (including imported `.grd` groups) persist with the preferences.
+
 ## Snapping
 
 With View › Snap on, tool gestures snap to the View › Snap To targets (guides and grid while they

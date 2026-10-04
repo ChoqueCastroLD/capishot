@@ -49,6 +49,7 @@ mod pixels;
 pub mod plugin_cmds;
 pub mod prefs;
 pub mod preset_import_cmds;
+pub mod preset_store;
 pub mod presets;
 pub mod print_cmds;
 pub mod proof_sim;
@@ -186,6 +187,9 @@ pub struct ToolState {
     pub brush: photocraft_paint::BrushSettings,
     /// Brush presets (built-ins plus user presets; see `brush.presets.*`).
     pub presets: Vec<photocraft_paint::BrushPreset>,
+    /// Bumped whenever `presets` changes ([`Session::brush_presets_changed`]); the preset store
+    /// syncs when it moves.
+    pub presets_rev: u64,
     /// Mixer Brush paint carried between strokes.
     pub mixer: photocraft_paint::mixer::MixerState,
 }
@@ -197,6 +201,7 @@ impl Default for ToolState {
             background: [1.0, 1.0, 1.0, 1.0],
             brush: Default::default(),
             presets: photocraft_paint::presets::builtin(),
+            presets_rev: 0,
             mixer: Default::default(),
         }
     }
@@ -238,6 +243,9 @@ pub struct Session {
     /// File menu state: Lock Slices, Image Assets, last Print / Save for Web settings, script
     /// event log (see `automate_cmds`).
     pub file_menu: automate_cmds::FileMenuState,
+    /// Persistent brush preset store (desktop only; `None` keeps presets session-only, as in
+    /// headless and test sessions). See `preset_store`.
+    pub preset_store: Option<preset_store::PresetStore>,
 }
 
 impl Session {
@@ -311,6 +319,7 @@ impl Session {
         let r = r?;
         edit_menu_cmds::after_command(self, id);
         automate_cmds::after_command(self, id);
+        self.sync_preset_store();
         if spec.journal {
             self.journal.push((id.to_string(), params));
         }

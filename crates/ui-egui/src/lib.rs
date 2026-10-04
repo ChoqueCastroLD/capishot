@@ -174,6 +174,10 @@ pub struct Services {
     pub append_text: Option<AppendTextFn>,
     /// OS requests (macOS open-documents / quit Apple events), polled every frame.
     pub os_events: Option<OsEventsFn>,
+    /// The persistent brush preset store, loading in the background (desktop; see
+    /// `photocraft_engine::preset_store`). Attached to the session once it arrives; without
+    /// one, brush presets are session-only (web, tests).
+    pub preset_store: Option<std::sync::mpsc::Receiver<photocraft_engine::preset_store::Opened>>,
 }
 
 pub struct PhotocraftApp {

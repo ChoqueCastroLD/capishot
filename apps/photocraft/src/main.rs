@@ -98,6 +98,8 @@ fn main() -> eframe::Result {
 
     // Read the main display's ICC profile while the window opens (colour-managed canvas).
     let monitor = monitor_profile::detect_async();
+    // Brush presets load in the background; the app attaches them when they arrive.
+    let presets = services::presets_dir().map(photocraft_engine::preset_store::open_dir_async);
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon())
@@ -118,7 +120,9 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let automation = control.as_ref().map(|(_, _, workspace)| workspace.clone());
-            let mut app = PhotocraftApp::new(Session::new(), services::native(automation));
+            let mut services = services::native(automation);
+            services.preset_store = presets;
+            let mut app = PhotocraftApp::new(Session::new(), services);
             app.integrated_titlebar = cfg!(target_os = "macos");
             if let Ok(Some(icc)) = monitor.recv_timeout(std::time::Duration::from_secs(2)) {
                 app.session.color.monitor_profile = Some(std::sync::Arc::new(icc));

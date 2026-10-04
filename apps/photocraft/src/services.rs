@@ -57,6 +57,12 @@ fn prefs_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("preferences.json"))
 }
 
+/// The brush preset store (one file per preset group plus tip bitmaps; see
+/// `photocraft_engine::preset_store`).
+pub fn presets_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("Presets"))
+}
+
 fn recovery_dir() -> Option<PathBuf> {
     config_dir().map(|d| d.join("Recovery"))
 }
@@ -168,6 +174,8 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         })),
         // Set by main once the Apple-event handlers are connected (macOS).
         os_events: None,
+        // Set by main, which starts loading the store before the window opens.
+        preset_store: None,
     }
 }
 

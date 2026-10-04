@@ -759,7 +759,12 @@ fn preset_manager(s: &mut Session, p: &Value) -> Result<Value> {
             let new =
                 p.get("newName").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).ok_or_else(|| bad(cmd, "missing `newName`"))?.to_string();
             match kind.as_str() {
-                "brushes" => s.tools.presets[i].name = new,
+                "brushes" => {
+                    // A renamed built-in is the user's preset now (and persists as one).
+                    let b = &mut s.tools.presets[i];
+                    b.name = new;
+                    b.builtin = false;
+                }
                 "patterns" => s.patterns.items[i].name = new,
                 _ => s.edit_state.custom_shapes[i].name = new,
             }
@@ -778,6 +783,9 @@ fn preset_manager(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         other => return Err(bad(cmd, format!("unknown action `{other}` (list|rename|delete|move)"))),
+    }
+    if kind == "brushes" {
+        s.brush_presets_changed();
     }
     Ok(json!({kind.clone(): preset_names(s, &kind)}))
 }
@@ -835,6 +843,7 @@ fn export_import(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                     nb += 1;
                 }
+                s.brush_presets_changed();
             }
             if want("customShapes") {
                 for c in file.custom_shapes {

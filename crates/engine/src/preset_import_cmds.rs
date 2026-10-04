@@ -75,6 +75,7 @@ fn import_abr(s: &mut Session, p: &Value) -> Result<Value> {
         names.push(preset.name.clone());
         s.tools.presets.push(preset);
     }
+    s.brush_presets_changed();
     if p.get("select").and_then(Value::as_bool).unwrap_or(false)
         && let Some(first) = names.first()
         && let Some(pr) = photocraft_paint::presets::find(&s.tools.presets, first)
