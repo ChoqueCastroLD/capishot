@@ -48,6 +48,8 @@ xtask/                       cargo xtask layers | wasm | ci | stats | corpus | p
 7. **Never break wasm.** L0–L6 must `cargo check --target wasm32-unknown-unknown` (run `cargo xtask wasm`). File-system code is `cfg(not(target_arch = "wasm32"))` or goes through the platform services.
 8. **Performance is a feature.** Benchmark heavy operations on a 24–36 MP image in release. Work per tile in parallel (rayon), skip empty tiles, never scan a full surface per frame (cache per revision), and record before/after timings in the dev log.
 
+9. **Never panic on input.** A command's `run` closure and anything it calls must return `Err`, never panic, for *any* params or document state. No `unwrap`/`expect`/`panic!`/`unreachable!`/`todo!` on values derived from params, selections, layer/channel indices, or pixel data; no slice indexing (`a[i]`) or integer division without first checking bounds/zero; validate sizes before allocating (reject absurd dimensions instead of trying to allocate). Use `?`, `ok_or(...)`, `get(i)`, `checked_*`/`saturating_*`, and clamp ranges. `unwrap`/`expect` are allowed only on invariants that cannot depend on input (e.g. a just-created layer), and in tests. The `panic_hunt` integration test fuzzes every command with adversarial params and must stay green.
+
 ## 4. Picking work
 
 Priorities: important infrastructure first, then low-hanging parity, then the long tail.
