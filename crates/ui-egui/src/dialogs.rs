@@ -12,8 +12,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let mut fields = d.fields.clone();
         let mut outcome: Option<bool> = None; // Some(true)=OK, Some(false)=Cancel
         let title = title(&d);
+        let id = egui::Id::new(("dialog", d.id));
+        // Offset from centre, moved by dragging the title bar (view state only, so egui memory).
+        let offset: egui::Vec2 = ctx.data(|m| m.get_temp(id)).unwrap_or_default();
+        let mut drag = egui::Vec2::ZERO;
+        let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_CENTER, offset);
         // Photoshop doesn't dim the window behind dialogs: previews must be judged at true contrast.
-        let modal = egui::Modal::new(egui::Id::new(("dialog", d.id))).backdrop_color(egui::Color32::TRANSPARENT).show(ctx, |ui| {
+        let modal = egui::Modal::new(id).area(area).backdrop_color(egui::Color32::TRANSPARENT).show(ctx, |ui| {
             ui.set_min_width(380.0);
             let wide = crate::prefs_ui::width(&d.fields);
             if let Some(w) = wide {
@@ -33,7 +38,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 ui.set_min_width(w);
                 ui.set_max_width(w);
             }
-            ui.label(egui::RichText::new(&title).font(crate::theme::semibold(15.0)));
+            let t = ui.add(egui::Label::new(egui::RichText::new(&title).font(crate::theme::semibold(15.0))).selectable(false)).rect;
+            let bar = egui::Rect::from_min_max(t.min, egui::pos2(ui.max_rect().right(), t.bottom()));
+            drag = ui.interact(bar, id.with("title"), egui::Sense::drag()).drag_delta();
             ui.add_space(4.0);
             crate::widgets::hairline(ui);
             ui.add_space(8.0);
@@ -89,6 +96,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
             });
         });
+        if drag != egui::Vec2::ZERO {
+            // Keep the whole dialog (and so its title bar) on screen.
+            let room = ((ctx.content_rect().size() - modal.response.rect.size()) / 2.0).max(egui::Vec2::ZERO);
+            ctx.data_mut(|m| m.insert_temp(id, (offset + drag).clamp(-room, room)));
+        }
         if modal.should_close() && outcome.is_none() {
             outcome = Some(false);
         }
@@ -172,4 +184,37 @@ pub fn open_command_dialog(app: &mut PhotocraftApp, command: &str, label: &str) 
         fields.insert(key.into(), json!(default));
     }
     app.ui.open_dialog(DialogKind::Command, fields)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dragging_the_title_bar_moves_the_dialog() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut harness = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_ui_state(|ui, app| show(app, ui.ctx()), app);
+        PhotocraftApp::setup_context(&harness.ctx, crate::theme::ThemeKind::ALL[0]);
+        harness.state_mut().ui.open_dialog(DialogKind::LayerStyle, serde_json::Map::new());
+        harness.run_steps(3);
+        let before = harness.get_by_label("Layer Style").rect();
+
+        // Grab the title text itself: it must move the dialog, not select the text.
+        let from = before.center();
+        harness.hover_at(from);
+        harness.drag_at(from);
+        harness.run_steps(2);
+        for i in 1..=10 {
+            harness.hover_at(from + egui::vec2(-12.0, 8.0) * i as f32);
+            harness.run_steps(1);
+        }
+        harness.drop_at(from + egui::vec2(-120.0, 80.0));
+        harness.run_steps(3);
+
+        let moved = harness.get_by_label("Layer Style").rect().min - before.min;
+        assert!((moved - egui::vec2(-120.0, 80.0)).length() < 1.0, "dialog moved by {moved:?}");
+        assert_eq!(harness.state().ui.dialogs.len(), 1, "dragging must not close the dialog");
+    }
 }
