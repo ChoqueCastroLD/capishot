@@ -344,6 +344,9 @@ pub struct Compositor {
     max_dim: u32,
     frame: u64,
     acc_format: wgpu::TextureFormat,
+    /// Whether the effect-map pipelines could be built (else documents with layer effects are
+    /// [`Unsupported`] and use the CPU compositor).
+    effect_maps: bool,
 }
 
 fn tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -380,6 +383,24 @@ struct Bound {
     patterns: Vec<Option<wgpu::TextureView>>,
 }
 
+/// Runs `f` inside validation and internal-error scopes and returns the first error raised.
+/// Native wgpu reports errors synchronously; where they only arrive asynchronously (WebGPU) none
+/// is reported.
+fn first_error<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> (T, Option<wgpu::Error>) {
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+    let out = f();
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    let mut error = None;
+    // Scopes pop in reverse order.
+    for pop in [internal.pop(), validation.pop()] {
+        if let std::task::Poll::Ready(Some(e)) = std::pin::pin!(pop).poll(&mut cx) {
+            error.get_or_insert(e);
+        }
+    }
+    (out, error)
+}
+
 impl Compositor {
     /// Create a compositor with the default accumulation format ([`ACC_FORMAT`]).
     pub fn new(device: &wgpu::Device) -> Self {
@@ -399,18 +420,10 @@ impl Compositor {
     /// to the CPU compositor. Where errors only arrive asynchronously (WebGPU), creation is assumed
     /// to have worked.
     pub fn try_new_with_format(device: &wgpu::Device, acc_format: wgpu::TextureFormat) -> Result<Self, Unsupported> {
-        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
-        let comp = Self::new_with_format(device, acc_format);
-        // Pop in reverse order; native wgpu reports errors synchronously, so the futures are ready.
-        let errors = [internal.pop(), validation.pop()];
-        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
-        for f in errors {
-            if let std::task::Poll::Ready(Some(e)) = std::pin::pin!(f).poll(&mut cx) {
-                return Err(Unsupported(format!("couldn't build the compositor's pipelines: {e}")));
-            }
+        match first_error(device, || Self::new_with_format(device, acc_format)) {
+            (comp, None) => Ok(comp),
+            (_, Some(e)) => Err(Unsupported(format!("couldn't build the compositor's pipelines: {e}"))),
         }
-        Ok(comp)
     }
 
     /// Create a compositor whose accumulation/render-target format is `acc_format`. Pass
@@ -431,29 +444,34 @@ impl Compositor {
             bind_group_layouts: &[Some(&bgl0), Some(&bgl1)],
             immediate_size: 0,
         });
-        let mut pipelines = HashMap::new();
-        for k in Kernel::DRAWN {
+        let pipeline = |k: Kernel, format: wgpu::TextureFormat| {
             let entry = k.entry().expect("drawn kernels have an entry point");
-            let formats: &[wgpu::TextureFormat] = if k.is_map() { &[MAP32, MAP16] } else { &[acc_format] };
-            for &format in formats {
-                let p = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some(entry),
-                    layout: Some(&layout),
-                    vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
-                    primitive: wgpu::PrimitiveState::default(),
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    fragment: Some(wgpu::FragmentState {
-                        module: &module,
-                        entry_point: Some(entry),
-                        targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
-                        compilation_options: Default::default(),
-                    }),
-                    multiview_mask: None,
-                    cache: None,
-                });
-                pipelines.insert((k, format), p);
-            }
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(entry),
+                    targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let mut pipelines: HashMap<_, _> = Kernel::DRAWN.iter().filter(|k| !k.is_map()).map(|&k| ((k, acc_format), pipeline(k, acc_format))).collect();
+        // Effect maps render to R32Float / R16Float, which some adapters (e.g. GL without float
+        // render targets) can't: then layer effects use the CPU compositor and the rest stays here.
+        let maps = Kernel::DRAWN.iter().filter(|k| k.is_map()).flat_map(|&k| [(k, MAP32), (k, MAP16)]);
+        let (maps, map_error) = first_error(device, || maps.map(|key| (key, pipeline(key.0, key.1))).collect::<Vec<_>>());
+        if let Some(e) = &map_error {
+            log::info!("GPU compositor: no effect-map pipelines ({e}); layer effects use the CPU");
+        } else {
+            pipelines.extend(maps);
         }
         let dummy = Tex::new(device, "pc_compose_dummy", 1, 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING).view;
         Self {
@@ -466,6 +484,7 @@ impl Compositor {
             max_dim: device.limits().max_texture_dimension_2d,
             frame: 0,
             acc_format,
+            effect_maps: map_error.is_none(),
         }
     }
 
@@ -481,6 +500,9 @@ impl Compositor {
 
     /// Effect regions and patterns must fit in textures.
     fn check_fx(&self, doc: &Document, p: &Plan<'_>) -> Result<(), Unsupported> {
+        if !self.effect_maps && !p.fx.is_empty() {
+            return Err(Unsupported("layer effects need float effect-map render targets, which this GPU lacks".into()));
+        }
         for f in &p.fx {
             if f.region.width() > self.max_dim || f.region.height() > self.max_dim {
                 return Err(Unsupported(format!("effect region of `{}` larger than the GPU texture limit ({})", f.layer.name, self.max_dim)));

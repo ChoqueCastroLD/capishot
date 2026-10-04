@@ -25,8 +25,27 @@ fn gpu() -> Option<Gpu> {
         }
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
-    let comp = Compositor::new(&device);
+    // Exact parity needs 32-bit float targets. Adapters without them (e.g. GL software
+    // rasterizers) use the CPU compositor in the app, so there is nothing to compare there.
+    if Compositor::preferred_acc_format(&adapter) != wgpu::TextureFormat::Rgba32Float {
+        eprintln!("skipping GPU parity tests: adapter can't render Rgba32Float");
+        return None;
+    }
+    let comp = match Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("skipping GPU parity tests: {e}");
+            return None;
+        }
+    };
     Some(Gpu { device, queue, comp })
+}
+
+/// Any adapter and device, for the fallback-path tests (which don't need 32-bit float targets).
+fn any_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    let adapter = pollster::block_on(wgpu::Instance::default().request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+    Some((adapter, device, queue))
 }
 
 /// Deterministic pseudo-random values in 0..1.
@@ -1092,14 +1111,11 @@ fn rgba16f_fallback_path_renders() {
     // Rgba16Float. Force that path here (even on a 32f-capable GPU) to prove it works end to end —
     // pipeline creation, the accumulation texture, and the half-float readback — within display
     // tolerance of the CPU reference. This is the path Intel-Vulkan / limited GPUs take.
-    let instance = wgpu::Instance::default();
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
-        return;
+    let Some((adapter, device, queue)) = any_device() else { return };
+    let mut comp = match Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba16Float) {
+        Ok(c) => c,
+        Err(e) => return eprintln!("skipping: {e}"),
     };
-    let Some((device, queue)) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok() else {
-        return;
-    };
-    let mut comp = Compositor::new_with_format(&device, wgpu::TextureFormat::Rgba16Float);
     let mut d = base_doc(48, 32);
     let mut top = noise_layer("top", PixelFormat::RGBA8, Rect::from_xywh(0, 0, 48, 32), 7, 1.0);
     top.blend = BlendMode::Multiply;
@@ -1125,8 +1141,12 @@ fn rgba16f_fallback_path_renders() {
 fn unbuildable_pipelines_are_an_error_not_a_panic() {
     // The app falls back to the CPU compositor on Err; a panic here would crash it (as FXC once
     // did on D3D12). A depth format can't be a colour target, so its pipelines fail to build.
-    let Some(g) = gpu() else { return };
-    let e = Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Depth32Float).err().expect("depth target must fail");
+    let Some((adapter, device, _)) = any_device() else { return };
+    let e = Compositor::try_new_with_format(&device, wgpu::TextureFormat::Depth32Float).err().expect("depth target must fail");
     assert!(e.0.contains("pipelines"), "{e}");
-    assert!(Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Rgba16Float).is_ok());
+    // The format the app picks builds (effect maps the adapter can't render are left out, not fatal).
+    let f = Compositor::preferred_acc_format(&adapter);
+    if adapter.get_texture_format_features(f).allowed_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT) {
+        assert!(Compositor::try_new_with_format(&device, f).is_ok());
+    }
 }
