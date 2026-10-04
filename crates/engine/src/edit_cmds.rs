@@ -298,7 +298,7 @@ fn auto_adjust(s: &mut Session, kind: &str) -> Result<Value> {
             }
         }
     }
-    let adj = Adjustment::Levels { master: LevelsChannel::default(), per_channel: per };
+    let adj = Adjustment::Levels { master: LevelsChannel::default(), per_channel: per, space: Default::default(), black: LevelsChannel::default() };
     let label = match kind {
         "contrast" => "Auto Contrast",
         "color" => "Auto Color",
@@ -306,8 +306,9 @@ fn auto_adjust(s: &mut Session, kind: &str) -> Result<Value> {
     };
     s.edit(label, |doc, _| {
         let sel = doc.selection.clone();
+        let mode = doc.mode;
         let surf = doc.layer_mut(id).and_then(|l| l.surface_mut()).ok_or(EngineError::NoLayer(id))?;
-        crate::pixels::adjust_surface(surf, &adj, sel.as_ref());
+        crate::pixels::adjust_surface(surf, &adj, sel.as_ref(), mode);
         Ok(())
     })?;
     Ok(Value::Null)

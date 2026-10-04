@@ -171,7 +171,8 @@ fn edited_adjustment_regenerates_block_unedited_keeps_raw() {
     use std::sync::Arc;
     let mut d = gen_doc(ColorMode::Rgb, SampleType::U8, Features::PIXELS);
     // Levels block with non-default extra records (record 5 changed).
-    let base = Adjustment::Levels { master: adjust::LevelsChannel::default(), per_channel: Default::default() };
+    let base =
+        Adjustment::Levels { master: adjust::LevelsChannel::default(), per_channel: Default::default(), space: Default::default(), black: Default::default() };
     let mut l = Layer::new("lv", LayerContent::Adjustment(base.clone()));
     let psd = document_to_psd(&{
         let mut t = d.clone();

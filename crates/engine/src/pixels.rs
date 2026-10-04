@@ -6,7 +6,9 @@ use photocraft_geom::Rect;
 use photocraft_raster::{Surface, from_rgba, to_rgba};
 
 /// Apply an adjustment destructively to a surface, weighted by an optional selection.
-pub fn adjust_surface(s: &mut Surface, adj: &Adjustment, selection: Option<&Surface>) {
+/// Applies `adj` to a surface (any colour model and depth, via straight RGBA) through the
+/// selection; `mode` is the document's, for the tone transfer (e.g. Exposure in Grayscale).
+pub fn adjust_surface(s: &mut Surface, adj: &Adjustment, selection: Option<&Surface>, mode: photocraft_color::ColorMode) {
     let r = s.content_bounds();
     if r.is_empty() {
         return;
@@ -16,7 +18,7 @@ pub fn adjust_surface(s: &mut Surface, adj: &Adjustment, selection: Option<&Surf
     let raw = s.read_region(r);
     let mut buf = Buffer { rect: r, px: raw.chunks_exact(n).map(|p| to_rgba(&fmt, p)).collect() };
     let orig = buf.clone();
-    adjust::apply(adj, &mut buf);
+    adjust::apply_with(adj, &mut buf, adjust::Transfer::for_mode(mode));
     let w = r.width() as usize;
     let mut out = Vec::with_capacity(raw.len());
     for (i, (a, o)) in buf.px.iter().zip(&orig.px).enumerate() {

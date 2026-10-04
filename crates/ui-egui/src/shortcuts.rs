@@ -217,9 +217,8 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         if consume(ctx, &sc) {
             if crate::menus::is_enabled(app, &id) {
-                let r = if id.starts_with("image.adjustments.") && !crate::panels::adjustment_sliders(id.rsplit('.').next().unwrap_or("")).is_empty() {
-                    let label = photocraft_engine::commands::find(&id).map(|c| c.label).unwrap_or("");
-                    crate::dialogs::open_command_dialog(app, &id, label);
+                let r = if crate::adjust_dialog::has_dialog(&id) {
+                    crate::adjust_dialog::open(app, &id);
                     Ok(serde_json::Value::Null)
                 } else {
                     crate::menus::invoke(app, ctx, &id, json!({}))

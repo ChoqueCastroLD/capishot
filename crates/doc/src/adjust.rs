@@ -9,6 +9,14 @@ pub struct CurvePoint {
     pub output: f32,
 }
 
+/// Whether `points` is the straight 0→0, 1→1 line (or too short to be a curve).
+pub fn is_identity_curve(points: &[CurvePoint]) -> bool {
+    match points {
+        [a, b] => a.input == 0.0 && a.output == 0.0 && b.input == 1.0 && b.output == 1.0,
+        p => p.len() < 2,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LevelsChannel {
     pub in_black: f32,
@@ -24,6 +32,93 @@ impl Default for LevelsChannel {
     }
 }
 
+/// Which document channels the per-channel records of Levels and Curves address. Compositing
+/// happens in display RGB; `Cmyk` and `Lab` records are applied to the pixel converted into that
+/// space (the same conversions the document's surfaces use), so ink and Lab channel edits behave
+/// like Photoshop's in CMYK and Lab documents. Grayscale documents use `Rgb` with the master record.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToneSpace {
+    /// `per_channel` = red, green, blue.
+    #[default]
+    Rgb,
+    /// `per_channel` = cyan, magenta, yellow plus `black`; values are channel brightness
+    /// (1 - ink), and the master record applies to all four inks.
+    Cmyk,
+    /// `per_channel` = lightness, a, b (stored 0..=1 like Lab surfaces); there is no composite
+    /// record in Lab, so the master is ignored.
+    Lab,
+}
+
+/// One of Hue/Saturation's six colour ranges (reds, yellows, greens, cyans, blues, magentas).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HueRange {
+    /// Hue shift in degrees (-180..=180).
+    pub hue: f32,
+    /// Saturation change in percent (-100..=100).
+    pub saturation: f32,
+    /// Lightness change in percent (-100..=100).
+    pub lightness: f32,
+    /// Hue degrees where the range starts fading in, is fully on, starts fading out and ends
+    /// (Photoshop's four range sliders). May wrap past 0/360.
+    pub bounds: [f32; 4],
+}
+
+impl HueRange {
+    /// The neutral range `i` (0 = reds … 5 = magentas) with Photoshop's default extent: fully on
+    /// for 30° around its centre, fading over 30° each side.
+    pub fn neutral(i: usize) -> Self {
+        let c = 60.0 * i as f32;
+        Self { hue: 0.0, saturation: 0.0, lightness: 0.0, bounds: [c - 45.0, c - 15.0, c + 15.0, c + 45.0] }
+    }
+
+    pub fn defaults() -> [HueRange; 6] {
+        std::array::from_fn(Self::neutral)
+    }
+
+    /// The canonical form of four range sliders: increasing, within one turn, centre in
+    /// -30..330 (so the default reds are -45, -15, 15, 45 whichever way they were written).
+    pub fn canonical_bounds(b: [f32; 4]) -> [f32; 4] {
+        if b.iter().any(|v| !v.is_finite()) {
+            return [-45.0, -15.0, 15.0, 45.0];
+        }
+        let mut out = [b[0]; 4];
+        for k in 1..4 {
+            out[k] = (out[k - 1] + (b[k] - out[k - 1]).rem_euclid(360.0)).min(out[0] + 359.0);
+        }
+        let centre = (out[1] + out[2]) / 2.0;
+        let shift = (centre + 30.0).rem_euclid(360.0) - 30.0 - centre;
+        out.map(|v| v + shift)
+    }
+
+    pub fn is_neutral(&self) -> bool {
+        self.hue == 0.0 && self.saturation == 0.0 && self.lightness == 0.0
+    }
+
+    /// How much a pixel of hue `deg` (degrees) belongs to this range, 0..=1.
+    pub fn weight(&self, deg: f32) -> f32 {
+        let [a, b, c, d] = self.bounds;
+        // Measure from the range's start so wrap-around ranges (reds) work.
+        let rel = |x: f32| if x.is_finite() { (x - a).rem_euclid(360.0) } else { 0.0 };
+        let b = rel(b);
+        let c = rel(c).max(b);
+        let d = rel(d).max(c);
+        let h = rel(deg);
+        if h <= b {
+            if b <= 0.0 { 1.0 } else { h / b }
+        } else if h <= c {
+            1.0
+        } else if h <= d {
+            if d <= c { 1.0 } else { (d - h) / (d - c) }
+        } else {
+            0.0
+        }
+    }
+}
+
+fn default_hue_ranges() -> [HueRange; 6] {
+    HueRange::defaults()
+}
+
 /// Photoshop adjustment layers (Layer → New Adjustment Layer).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Adjustment {
@@ -32,15 +127,25 @@ pub enum Adjustment {
         contrast: f32,
         legacy: bool,
     },
-    /// Composite channel first, then R, G, B.
+    /// Composite channel first, then R, G, B (or the channels `space` names).
     Levels {
         master: LevelsChannel,
         per_channel: [LevelsChannel; 3],
+        #[serde(default)]
+        space: ToneSpace,
+        /// The black ink channel when `space` is [`ToneSpace::Cmyk`].
+        #[serde(default)]
+        black: LevelsChannel,
     },
-    /// Master curve then R, G, B curves.
+    /// Master curve then R, G, B curves (or the channels `space` names).
     Curves {
         master: Vec<CurvePoint>,
         per_channel: [Vec<CurvePoint>; 3],
+        #[serde(default)]
+        space: ToneSpace,
+        /// The black ink curve when `space` is [`ToneSpace::Cmyk`] (empty = identity).
+        #[serde(default)]
+        black: Vec<CurvePoint>,
     },
     Exposure {
         exposure: f32,
@@ -51,11 +156,14 @@ pub enum Adjustment {
         vibrance: f32,
         saturation: f32,
     },
+    /// Master hue / saturation / lightness (or the Colorize colour) plus six hue ranges.
     HueSaturation {
         hue: f32,
         saturation: f32,
         lightness: f32,
         colorize: bool,
+        #[serde(default = "default_hue_ranges")]
+        ranges: [HueRange; 6],
     },
     ColorBalance {
         shadows: [f32; 3],
@@ -99,6 +207,9 @@ pub enum Adjustment {
     GradientMap {
         stops: Vec<(f32, [f32; 3])>,
         reverse: bool,
+        /// Ordered dither of ±½ an 8-bit step to hide banding.
+        #[serde(default)]
+        dither: bool,
     },
     /// Per range (reds, yellows, greens, cyans, blues, magentas, whites, neutrals, blacks) the
     /// cyan, magenta, yellow and black change in percent (-100..=100), as in Photoshop.
@@ -137,15 +248,49 @@ impl Adjustment {
     }
 
     pub fn default_hue_saturation() -> Self {
-        Adjustment::HueSaturation { hue: 0.0, saturation: 0.0, lightness: 0.0, colorize: false }
+        Adjustment::HueSaturation { hue: 0.0, saturation: 0.0, lightness: 0.0, colorize: false, ranges: HueRange::defaults() }
     }
 
     pub fn identity_curves() -> Self {
         let line = || vec![CurvePoint { input: 0.0, output: 0.0 }, CurvePoint { input: 1.0, output: 1.0 }];
-        Adjustment::Curves { master: line(), per_channel: [line(), line(), line()] }
+        Adjustment::Curves { master: line(), per_channel: [line(), line(), line()], space: ToneSpace::Rgb, black: Vec::new() }
     }
 
     pub fn identity_levels() -> Self {
-        Adjustment::Levels { master: LevelsChannel::default(), per_channel: Default::default() }
+        Adjustment::Levels { master: LevelsChannel::default(), per_channel: Default::default(), space: ToneSpace::Rgb, black: LevelsChannel::default() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hue_range_weights() {
+        let reds = HueRange::neutral(0);
+        assert_eq!(reds.weight(0.0), 1.0);
+        assert_eq!(reds.weight(350.0), 1.0);
+        assert!((reds.weight(30.0) - 0.5).abs() < 1e-5);
+        assert!((reds.weight(330.0) - 0.5).abs() < 1e-5);
+        assert_eq!(reds.weight(60.0), 0.0);
+        assert_eq!(reds.weight(180.0), 0.0);
+        let blues = HueRange::neutral(4);
+        assert_eq!(blues.weight(240.0), 1.0);
+        assert_eq!(blues.weight(120.0), 0.0);
+        // Degenerate bounds never divide by zero.
+        let odd = HueRange { bounds: [10.0, 10.0, 10.0, 10.0], ..HueRange::neutral(0) };
+        assert!(odd.weight(10.0).is_finite() && odd.weight(200.0).is_finite());
+        let nan = HueRange { bounds: [f32::NAN; 4], ..HueRange::neutral(0) };
+        assert!(nan.weight(10.0).is_finite());
+    }
+
+    #[test]
+    fn old_files_get_neutral_new_fields() {
+        let a: Adjustment = serde_json::from_str(r#"{"HueSaturation":{"hue":1.0,"saturation":2.0,"lightness":3.0,"colorize":false}}"#).unwrap();
+        assert!(matches!(a, Adjustment::HueSaturation { ranges, .. } if ranges == HueRange::defaults()));
+        let c: Adjustment = serde_json::from_str(r#"{"Curves":{"master":[],"per_channel":[[],[],[]]}}"#).unwrap();
+        assert!(matches!(c, Adjustment::Curves { space: ToneSpace::Rgb, .. }));
+        let g: Adjustment = serde_json::from_str(r#"{"GradientMap":{"stops":[],"reverse":true}}"#).unwrap();
+        assert!(matches!(g, Adjustment::GradientMap { dither: false, .. }));
     }
 }

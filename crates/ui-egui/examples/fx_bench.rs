@@ -111,7 +111,16 @@ fn synthetic(w: u32, h: u32) -> Document {
             l.effects.items = effects();
         }
     }
-    let mut adj = Layer::new("curves", LayerContent::Adjustment(Adjustment::HueSaturation { hue: 10.0, saturation: 10.0, lightness: 0.0, colorize: false }));
+    let mut adj = Layer::new(
+        "curves",
+        LayerContent::Adjustment(Adjustment::HueSaturation {
+            hue: 10.0,
+            saturation: 10.0,
+            lightness: 0.0,
+            colorize: false,
+            ranges: photocraft_doc::adjust::HueRange::defaults(),
+        }),
+    );
     adj.opacity = 0.9;
     doc.layers.push(adj);
     doc

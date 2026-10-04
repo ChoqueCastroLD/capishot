@@ -1,7 +1,6 @@
 //! The command registry. Ids follow Photoshop's menu structure (see the parity checklist).
 
 use photocraft_color::{BlendMode, Color, ColorMode, SampleType};
-use photocraft_doc::adjust::CurvePoint;
 use photocraft_doc::{Adjustment, Document, Fill, Layer, LayerContent, LayerId, LayerMask, Size};
 use photocraft_geom::Rect;
 use photocraft_raster::Surface;
@@ -165,7 +164,7 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
         return s.edit(label, |doc, _| {
             let sel = doc.selection.clone();
             if let Some(surf) = crate::channel_cmds::channel_surface_for_filter(doc, p)? {
-                pixels::adjust_surface(surf, &adj, sel.as_ref());
+                pixels::adjust_surface(surf, &adj, sel.as_ref(), ColorMode::Grayscale);
                 surf.prune();
             }
             Ok(Value::Null)
@@ -174,84 +173,25 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
     let id = layer_param(s, &Value::Null)?;
     s.edit(label, |doc, _| {
         let sel = doc.selection.clone();
+        let mode = doc.mode;
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         let surf = l.surface_mut().ok_or_else(|| EngineError::Other("not a pixel layer".into()))?;
-        pixels::adjust_surface(surf, &adj, sel.as_ref());
+        pixels::adjust_surface(surf, &adj, sel.as_ref(), mode);
         Ok(())
     })?;
     Ok(Value::Null)
 }
 
+/// Lenient adjustment from params for previews: bad params fall back to the kind's defaults.
+/// Commands use the checked [`crate::adjust_params::from_params`].
 pub fn adjustment_from_params(kind: &str, p: &Value) -> Adjustment {
-    match kind {
-        "invert" => Adjustment::Invert,
-        "hueSaturation" => Adjustment::HueSaturation {
-            hue: f32_or(p, "hue", 0.0),
-            saturation: f32_or(p, "saturation", 0.0),
-            lightness: f32_or(p, "lightness", 0.0),
-            colorize: p.get("colorize").and_then(Value::as_bool).unwrap_or(false),
-        },
-        "brightnessContrast" => {
-            Adjustment::BrightnessContrast { brightness: f32_or(p, "brightness", 0.0), contrast: f32_or(p, "contrast", 0.0), legacy: false }
-        }
-        "threshold" => Adjustment::Threshold { level: f32_or(p, "level", 128.0) / 255.0 },
-        "posterize" => Adjustment::Posterize { levels: f32_or(p, "levels", 4.0) as u32 },
-        "exposure" => Adjustment::Exposure { exposure: f32_or(p, "exposure", 0.0), offset: f32_or(p, "offset", 0.0), gamma: f32_or(p, "gamma", 1.0) },
-        "vibrance" => Adjustment::Vibrance { vibrance: f32_or(p, "vibrance", 0.0), saturation: f32_or(p, "saturation", 0.0) },
-        "levels" => {
-            // Master keys at the top level; per channel under "red"/"green"/"blue" (0–255 levels).
-            let ch = |p: &Value| photocraft_doc::adjust::LevelsChannel {
-                in_black: f32_or(p, "inBlack", 0.0) / 255.0,
-                in_white: f32_or(p, "inWhite", 255.0) / 255.0,
-                gamma: f32_or(p, "gamma", 1.0).clamp(0.01, 9.99),
-                out_black: f32_or(p, "outBlack", 0.0) / 255.0,
-                out_white: f32_or(p, "outWhite", 255.0) / 255.0,
-            };
-            let per = |k: &str| p.get(k).map(ch).unwrap_or_default();
-            Adjustment::Levels { master: ch(p), per_channel: [per("red"), per("green"), per("blue")] }
-        }
-        "curves" => {
-            // "points" = master curve; "red"/"green"/"blue" = per-channel curves ([[in, out], …], 0–255).
-            let parse = |v: Option<&Value>| -> Option<Vec<CurvePoint>> {
-                let pts: Vec<CurvePoint> = v?
-                    .as_array()?
-                    .iter()
-                    .filter_map(|v| {
-                        let a = v.as_array()?;
-                        Some(CurvePoint { input: a.first()?.as_f64()? as f32 / 255.0, output: a.get(1)?.as_f64()? as f32 / 255.0 })
-                    })
-                    .collect();
-                (pts.len() >= 2).then_some(pts)
-            };
-            let mut a = Adjustment::identity_curves();
-            if let Adjustment::Curves { master, per_channel } = &mut a {
-                if let Some(m) = parse(p.get("points")) {
-                    *master = m;
-                }
-                for (i, k) in ["red", "green", "blue"].iter().enumerate() {
-                    if let Some(c) = parse(p.get(*k)) {
-                        per_channel[i] = c;
-                    }
-                }
-            }
-            a
-        }
-        "blackWhite" => Adjustment::BlackWhite { weights: [40.0, 60.0, 40.0, 60.0, 20.0, 80.0], tint: None },
-        "photoFilter" => Adjustment::PhotoFilter { color: [0.925, 0.541, 0.0], density: f32_or(p, "density", 25.0) / 100.0, preserve_luminosity: true },
-        "channelMixer" => Adjustment::ChannelMixer { matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], monochrome: false },
-        "colorBalance" => Adjustment::ColorBalance { shadows: [0.0; 3], midtones: [0.0; 3], highlights: [0.0; 3], preserve_luminosity: true },
-        "gradientMap" => Adjustment::GradientMap { stops: vec![(0.0, [0.0; 3]), (1.0, [1.0; 3])], reverse: false },
-        "selectiveColor" => crate::adjust_cmds::selective_from_params(p, None),
-        // Best effort here (a bad LUT file gives an empty lookup); commands use the checked path.
-        "colorLookup" => crate::adjust_cmds::lookup_from_params(p, None).unwrap_or(Adjustment::ColorLookup {
-            name: String::new(),
-            lut: None,
-            size: 0,
-            tetrahedral: false,
-            dither: false,
-        }),
-        _ => Adjustment::Invert,
-    }
+    crate::adjust_params::from_params(kind, p, None, ColorMode::Rgb)
+        .or_else(|_| crate::adjust_params::default_for(kind, ColorMode::Rgb))
+        .unwrap_or(Adjustment::Invert)
+}
+
+fn doc_mode(s: &Session) -> ColorMode {
+    s.active().map_or(ColorMode::Rgb, |d| d.doc.mode)
 }
 
 // ---------- the table ----------
@@ -690,12 +630,18 @@ fn build() -> Vec<CommandSpec> {
         cmd!("layer.setAdjustment", "Adjustment Properties", [], None, r##"{"layer":id?, …params of that adjustment kind}"##, has_layer, |s, p| {
             let id = layer_param(s, p)?;
             s.edit("Modify Adjustment", |doc, _| {
+                let mode = doc.mode;
                 let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
                 let LayerContent::Adjustment(adj) = &mut l.content else { return Err(EngineError::Other("not an adjustment layer".into())) };
+                if matches!(adj, Adjustment::Unsupported { .. }) {
+                    return Err(EngineError::Other("this adjustment can't be edited (kept as imported)".into()));
+                }
                 let kind = adjustment_kind(adj);
-                *adj = match crate::adjust_cmds::update_adjustment(adj, p) {
-                    Some(r) => r?,
-                    None => adjustment_from_params(kind, p),
+                // No params resets to the defaults; otherwise params merge over the current values.
+                *adj = if crate::adjust_params::user_keys(p).is_empty() {
+                    crate::adjust_params::default_for(kind, mode)?
+                } else {
+                    crate::adjust_params::from_params(kind, p, Some(adj), mode)?
                 };
                 Ok(())
             })?;
@@ -791,7 +737,18 @@ fn build() -> Vec<CommandSpec> {
             Ok(Value::Null)
         }),
         cmd!("image.adjustments.desaturate", "Desaturate", ["Image", "Adjustments"], Some("Cmd+Shift+U"), "{}", has_pixel_layer, |s, _| {
-            destructive_adjust(s, "Desaturate", Adjustment::HueSaturation { hue: 0.0, saturation: -100.0, lightness: 0.0, colorize: false }, &Value::Null)
+            destructive_adjust(
+                s,
+                "Desaturate",
+                Adjustment::HueSaturation {
+                    hue: 0.0,
+                    saturation: -100.0,
+                    lightness: 0.0,
+                    colorize: false,
+                    ranges: photocraft_doc::adjust::HueRange::defaults(),
+                },
+                &Value::Null,
+            )
         }),
         // Paint
         cmd!(
@@ -895,21 +852,51 @@ fn build() -> Vec<CommandSpec> {
     ];
 
     // Adjustment layers + destructive adjustments, generated from one list.
+    // Levels/Curves channel keys follow the document: red/green/blue (RGB), gray (Grayscale),
+    // cyan/magenta/yellow/black (CMYK), lightness/a/b (Lab); see `adjust_params`.
     const ADJ: &[(&str, &str, &str)] = &[
-        ("brightnessContrast", "Brightness/Contrast…", r##"{"brightness":-150..150,"contrast":-50..100}"##),
-        ("levels", "Levels…", r##"{"inBlack":0..255,"inWhite":0..255,"gamma":0.1..10}"##),
-        ("curves", "Curves…", r##"{"points":[[in,out],…] in 0..255}"##),
-        ("exposure", "Exposure…", r##"{"exposure":-20..20,"offset":-0.5..0.5,"gamma":0.01..9.99}"##),
-        ("vibrance", "Vibrance…", r##"{"vibrance":-100..100,"saturation":-100..100}"##),
-        ("hueSaturation", "Hue/Saturation…", r##"{"hue":-180..180,"saturation":-100..100,"lightness":-100..100,"colorize":bool}"##),
-        ("colorBalance", "Color Balance…", "{}"),
-        ("blackWhite", "Black & White…", "{}"),
-        ("photoFilter", "Photo Filter…", r##"{"density":0..100}"##),
-        ("channelMixer", "Channel Mixer…", "{}"),
+        ("brightnessContrast", "Brightness/Contrast…", r##"{"brightness":-150..150=0,"contrast":-50..100=0,"legacy":bool=false}"##),
+        (
+            "levels",
+            "Levels…",
+            r##"{"inBlack":0..253=0,"gamma":0.01..9.99=1,"inWhite":2..255=255,"outBlack":0..255=0,"outWhite":0..255=255,"red":json,"green":json,"blue":json} (top level = composite; per channel {"inBlack","gamma","inWhite","outBlack","outWhite"} under red/green/blue, gray, cyan/magenta/yellow/black or lightness/a/b)"##,
+        ),
+        (
+            "curves",
+            "Curves…",
+            r##"{"points":json,"red":json,"green":json,"blue":json} (curves as [[in,out],…] in 0..255, 2..19 points: points = composite; red/green/blue, gray, cyan/magenta/yellow/black or lightness/a/b per channel)"##,
+        ),
+        ("exposure", "Exposure…", r##"{"exposure":-20..20=0,"offset":-0.5..0.5=0,"gamma":0.01..9.99=1}"##),
+        ("vibrance", "Vibrance…", r##"{"vibrance":-100..100=0,"saturation":-100..100=0}"##),
+        (
+            "hueSaturation",
+            "Hue/Saturation…",
+            r##"{"hue":-180..180=0,"saturation":-100..100=0,"lightness":-100..100=0,"colorize":bool=false,"reds":json,"yellows":json,"greens":json,"cyans":json,"blues":json,"magentas":json} (per range {"hue","saturation","lightness","range":[4 hue degrees]}; colorize: hue 0..360, saturation 0..100)"##,
+        ),
+        (
+            "colorBalance",
+            "Color Balance…",
+            r##"{"shadows":json,"midtones":json,"highlights":json,"preserveLuminosity":bool=true} (each tone [cyan-red, magenta-green, yellow-blue] in -100..100)"##,
+        ),
+        (
+            "blackWhite",
+            "Black & White…",
+            r##"{"reds":-200..300=40,"yellows":-200..300=60,"greens":-200..300=40,"cyans":-200..300=60,"blues":-200..300=20,"magentas":-200..300=80,"tint":bool=false,"tintColor":"#rrggbb"}"##,
+        ),
+        (
+            "photoFilter",
+            "Photo Filter…",
+            r##"{"filter":"warming85|warmingLBA|warming81|cooling80|coolingLBB|cooling82|red|orange|yellow|green|cyan|blue|violet|magenta|sepia|deepRed|deepBlue|deepEmerald|deepYellow|underwater","color":"#rrggbb","density":0..100=25,"preserveLuminosity":bool=true}"##,
+        ),
+        (
+            "channelMixer",
+            "Channel Mixer…",
+            r##"{"red":json,"green":json,"blue":json,"gray":json,"monochrome":bool=false} (per output channel [red %, green %, blue %, constant %] in -200..200; gray = the monochrome mix)"##,
+        ),
         ("invert", "Invert", "{}"),
-        ("posterize", "Posterize…", r##"{"levels":2..255}"##),
-        ("threshold", "Threshold…", r##"{"level":1..255}"##),
-        ("gradientMap", "Gradient Map…", "{}"),
+        ("posterize", "Posterize…", r##"{"levels":2..255=4}"##),
+        ("threshold", "Threshold…", r##"{"level":1..255=128}"##),
+        ("gradientMap", "Gradient Map…", r##"{"stops":json,"reverse":bool=false,"dither":bool=false} (stops [[location 0..1, "#rrggbb"], …], 2..64)"##),
         (
             "selectiveColor",
             "Selective Color…",
@@ -933,7 +920,7 @@ fn build() -> Vec<CommandSpec> {
             enabled: has_doc,
             run: |s, p| {
                 let kind = p.get("__kind").and_then(Value::as_str).unwrap_or("invert").to_string();
-                let adj = if kind == "colorLookup" { crate::adjust_cmds::lookup_from_params(p, None)? } else { adjustment_from_params(&kind, p) };
+                let adj = crate::adjust_params::from_params(&kind, p, None, doc_mode(s))?;
                 new_adjustment(s, adj)
             },
             journal: true,
@@ -955,7 +942,7 @@ fn build() -> Vec<CommandSpec> {
             enabled: has_pixel_or_channel,
             run: |s, p| {
                 let kind = p.get("__kind").and_then(Value::as_str).unwrap_or("invert").to_string();
-                let adj = if kind == "colorLookup" { crate::adjust_cmds::lookup_from_params(p, None)? } else { adjustment_from_params(&kind, p) };
+                let adj = crate::adjust_params::from_params(&kind, p, None, doc_mode(s))?;
                 let label = adj.label().to_string();
                 destructive_adjust(s, &label, adj, p)
             },

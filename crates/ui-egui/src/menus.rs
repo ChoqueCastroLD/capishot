@@ -359,12 +359,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         fl if crate::filter_dialog::has_dialog(fl) && params.as_object().is_none_or(|o| o.is_empty()) => {
             Ok(json!({"dialog": crate::filter_dialog::open(app, fl)}))
         }
-        a if a.starts_with("image.adjustments.")
-            && params.as_object().is_none_or(|o| o.is_empty())
-            && !crate::panels::adjustment_sliders(a.rsplit('.').next().unwrap_or("")).is_empty() =>
-        {
-            let label = photocraft_engine::commands::find(a).map(|c| c.label).unwrap_or(a);
-            Ok(json!({"dialog": crate::dialogs::open_command_dialog(app, a, label)}))
+        a if crate::adjust_dialog::has_dialog(a) && params.as_object().is_none_or(|o| o.is_empty()) => {
+            Ok(json!({"dialog": crate::adjust_dialog::open(app, a).ok_or("no document")?}))
         }
         t if t.starts_with("window.toggle.") => {
             let p = &mut app.ui.panels;

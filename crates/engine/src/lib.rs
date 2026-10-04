@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod adjust_cmds;
+pub mod adjust_params;
 pub mod align_cmds;
 pub mod analysis_cmds;
 pub mod artboard_cmds;

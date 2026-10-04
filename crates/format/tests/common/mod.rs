@@ -75,7 +75,16 @@ pub fn rich_doc(mode: ColorMode, depth: SampleType) -> Document {
     let mut inner = Layer::raster("Inner", pf);
     scribble(inner.surface_mut().unwrap(), 6, hdr);
     let nested = Layer::group("Nested", vec![inner]);
-    let mut adj = Layer::new("Hue/Sat", LayerContent::Adjustment(Adjustment::HueSaturation { hue: 30.0, saturation: -10.0, lightness: 5.0, colorize: false }));
+    let mut adj = Layer::new(
+        "Hue/Sat",
+        LayerContent::Adjustment(Adjustment::HueSaturation {
+            hue: 30.0,
+            saturation: -10.0,
+            lightness: 5.0,
+            colorize: false,
+            ranges: photocraft_doc::adjust::HueRange::defaults(),
+        }),
+    );
     adj.visible = false;
     let mut group = Layer::group("Group", vec![nested, adj]);
     if let LayerContent::Group(g) = &mut group.content {

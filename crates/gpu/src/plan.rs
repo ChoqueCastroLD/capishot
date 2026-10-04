@@ -15,6 +15,7 @@
 use photocraft_color::BlendMode;
 use photocraft_compose::adjust::{self, Transfer};
 use photocraft_compose::effects::has_effects;
+use photocraft_doc::adjust::ToneSpace;
 use photocraft_doc::{Adjustment, Document, Effect, Fill, FxPaint, GlobalLight, Gradient, Layer, LayerContent, LayerId, Pattern, StrokePosition};
 use photocraft_geom::Rect;
 use photocraft_raster::Surface;
@@ -585,7 +586,7 @@ impl<'a> Planner<'a> {
 
         if let LayerContent::Adjustment(adj) = &layer.content {
             let before = self.retain(backdrop);
-            let mut adjusted = self.adjust(adj, backdrop);
+            let mut adjusted = self.adjust(adj, backdrop)?;
             for c in visible_clipped {
                 adjusted = self.atop(c, adjusted)?;
             }
@@ -765,7 +766,7 @@ impl<'a> Planner<'a> {
         let opacity = layer.opacity * layer.fill_opacity;
         if let LayerContent::Adjustment(adj) = &layer.content {
             let before = self.retain(base);
-            let adjusted = self.adjust(adj, base);
+            let adjusted = self.adjust(adj, base)?;
             let mut p = Pass::new(Kernel::AdjMix, 0);
             p.a = Some(before);
             p.b = Some(adjusted);
@@ -789,14 +790,17 @@ impl<'a> Planner<'a> {
     }
 
     /// adjust::apply_with on a slot (consumes it).
-    fn adjust(&mut self, adj: &Adjustment, src: Slot) -> Slot {
+    fn adjust(&mut self, adj: &Adjustment, src: Slot) -> Result<Slot, Unsupported> {
+        if !adjustment_on_gpu(adj) {
+            return Err(Unsupported(format!("{} on CMYK/Lab channels (evaluated on the CPU)", adj.label())));
+        }
         let mut p = Pass::new(Kernel::Adjust, 0);
         p.a = Some(src);
         let (kind, params, lut) = adjustment_program(adj, self.cx.transfer);
         p.adjust_kind = kind;
         p.params = params;
         p.lut = lut;
-        self.emit(p)
+        Ok(self.emit(p))
     }
 
     /// `composite_with_effects` (atop = false) or the clipped-layer variant of `composite_atop`
@@ -1215,6 +1219,21 @@ fn lut_rows(f: impl Fn(usize, f32) -> f32, rows: usize) -> Vec<[f32; 4096]> {
 
 type Program = (i32, [[f32; 4]; 4], Option<Vec<[f32; 4096]>>);
 
+/// A CPU LUT (4096 entries) as one texture row.
+fn to_row(t: &[f32]) -> [f32; 4096] {
+    let mut row = [0.0f32; 4096];
+    for (o, v) in row.iter_mut().zip(t) {
+        *o = *v;
+    }
+    row
+}
+
+/// Whether the adjustment kernel can evaluate `adj`: Levels and Curves on CMYK ink or Lab
+/// channels convert through ICC profiles per pixel, which only the CPU does.
+pub fn adjustment_on_gpu(adj: &Adjustment) -> bool {
+    !matches!(adj, Adjustment::Levels { space: ToneSpace::Cmyk | ToneSpace::Lab, .. } | Adjustment::Curves { space: ToneSpace::Cmyk | ToneSpace::Lab, .. })
+}
+
 /// Adjustment → (kernel kind, parameters, LUT rows). Kinds are the `switch` in `adjust()`.
 pub fn adjustment_program(adj: &Adjustment, transfer: Transfer) -> Program {
     let mut p = [[0.0f32; 4]; 4];
@@ -1248,32 +1267,17 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer) -> Program {
             p[0] = [2f32.powf(*exposure), *offset, gamma.max(0.01), g];
             (6, p, None)
         }
-        Adjustment::Levels { master, per_channel } => (7, p, Some(lut_rows(|i, v| adjust::levels(&per_channel[i], adjust::levels(master, v)), 3))),
-        Adjustment::Curves { master, per_channel } => {
-            let m = adjust::curve_lut(master);
-            let chans: Vec<Vec<f32>> = per_channel.iter().map(|c| adjust::curve_lut(c)).collect();
-            let lut = |t: &[f32], v: f32| {
-                let x = v.clamp(0.0, 1.0) * (t.len() - 1) as f32;
-                let i = x.floor() as usize;
-                let j = (i + 1).min(t.len() - 1);
-                let f = x - i as f32;
-                t[i] * (1.0 - f) + t[j] * f
-            };
-            // The CPU LUT is `m(ch[k])` per entry; entries are on the same 4096 grid.
-            let rows = (0..3)
-                .map(|r| {
-                    let mut row = [0.0f32; 4096];
-                    for (k, v) in row.iter_mut().enumerate() {
-                        *v = lut(&m, chans[r][k.min(chans[r].len() - 1)]);
-                    }
-                    row
-                })
-                .collect();
-            (7, p, Some(rows))
-        }
-        Adjustment::HueSaturation { hue, saturation, lightness, colorize } => {
+        // RGB space only (see `adjustment_on_gpu`); the rows are the CPU's channel∘master LUTs.
+        Adjustment::Levels { .. } | Adjustment::Curves { .. } => (7, p, Some(adjust::tone_luts(adj).iter().take(3).map(|t| to_row(t)).collect())),
+        Adjustment::HueSaturation { hue, saturation, lightness, colorize, ranges } => {
             p[0] = [*hue, saturation / 100.0, lightness / 100.0, if *colorize { 1.0 } else { 0.0 }];
-            (8, p, None)
+            if !*colorize && ranges.iter().any(|r| !r.is_neutral()) {
+                // Range edits: hue-indexed rows (shift, saturation, lightness), as on the CPU.
+                p[1][0] = 1.0;
+                (8, p, Some(adjust::hue_range_tables(ranges).iter().map(|t| to_row(t)).collect()))
+            } else {
+                (8, p, None)
+            }
         }
         Adjustment::Vibrance { vibrance, saturation } => {
             p[0] = [vibrance / 100.0, saturation / 100.0, 0.0, 0.0];
@@ -1299,8 +1303,9 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer) -> Program {
             }
             (12, p, None)
         }
-        Adjustment::GradientMap { stops, reverse } => {
+        Adjustment::GradientMap { stops, reverse, dither } => {
             p[0][0] = if *reverse { 1.0 } else { 0.0 };
+            p[0][1] = if *dither { 1.0 } else { 0.0 };
             let s4: Vec<(f32, [f32; 4])> = stops.iter().map(|(t, c)| (*t, [c[0], c[1], c[2], 1.0])).collect();
             let rows = lut_rows(|r, t| if s4.is_empty() { t } else { sample_stops4(&s4, t)[r] }, 3);
             (13, p, Some(rows))

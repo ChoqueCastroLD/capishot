@@ -397,12 +397,12 @@ fn type_edit_rerenders_cache_to_new_text() {
 fn levels_and_curves_params_cover_output_and_channels() {
     use photocraft_doc::Adjustment;
     let a = crate::commands::adjustment_from_params("levels", &json!({"inBlack": 10, "outWhite": 200, "green": {"gamma": 1.5}}));
-    let Adjustment::Levels { master, per_channel } = a else { panic!() };
+    let Adjustment::Levels { master, per_channel, .. } = a else { panic!() };
     assert!((master.in_black - 10.0 / 255.0).abs() < 1e-6 && (master.out_white - 200.0 / 255.0).abs() < 1e-6);
     assert_eq!(per_channel[1].gamma, 1.5);
     assert_eq!(per_channel[0].gamma, 1.0);
     let c = crate::commands::adjustment_from_params("curves", &json!({"points": [[0, 0], [128, 160], [255, 255]], "blue": [[0, 20], [255, 235]]}));
-    let Adjustment::Curves { master, per_channel } = c else { panic!() };
+    let Adjustment::Curves { master, per_channel, .. } = c else { panic!() };
     assert_eq!(master.len(), 3);
     assert!((per_channel[2][0].output - 20.0 / 255.0).abs() < 1e-6);
     assert_eq!(per_channel[0].len(), 2);

@@ -2,7 +2,7 @@
 //! the reference compositor within 2/255 (premultiplied). Skips when no GPU adapter exists.
 
 use photocraft_color::{BlendMode, Color, ColorMode, PixelFormat, SampleType};
-use photocraft_doc::adjust::{CurvePoint, LevelsChannel};
+use photocraft_doc::adjust::{CurvePoint, HueRange, LevelsChannel};
 use photocraft_doc::{Adjustment, Document, Fill, GradientStyle, Layer, LayerContent, LayerMask};
 use photocraft_geom::{Rect, Size};
 use photocraft_gpu::{Compositor, render_to_vec};
@@ -124,6 +124,13 @@ fn blend_modes() {
     }
 }
 
+fn hue_ranges() -> [HueRange; 6] {
+    let mut r = HueRange::defaults();
+    r[0] = HueRange { hue: 20.0, saturation: -50.0, lightness: 10.0, ..HueRange::neutral(0) };
+    r[4] = HueRange { hue: -30.0, saturation: 40.0, lightness: -20.0, bounds: [180.0, 220.0, 260.0, 300.0] };
+    r
+}
+
 fn adjustments() -> Vec<Adjustment> {
     let lc = |a: f32, b: f32, g: f32| LevelsChannel { in_black: a, in_white: b, gamma: g, out_black: 0.05, out_white: 0.95 };
     let pts = |v: &[(f32, f32)]| v.iter().map(|&(input, output)| CurvePoint { input, output }).collect::<Vec<_>>();
@@ -134,13 +141,21 @@ fn adjustments() -> Vec<Adjustment> {
         Adjustment::BrightnessContrast { brightness: 30.0, contrast: 40.0, legacy: false },
         Adjustment::BrightnessContrast { brightness: -20.0, contrast: -30.0, legacy: true },
         Adjustment::Exposure { exposure: 0.7, offset: 0.02, gamma: 1.2 },
-        Adjustment::Levels { master: lc(0.1, 0.9, 1.3), per_channel: [lc(0.0, 1.0, 0.8), LevelsChannel::default(), lc(0.2, 0.8, 1.0)] },
+        Adjustment::Levels {
+            master: lc(0.1, 0.9, 1.3),
+            per_channel: [lc(0.0, 1.0, 0.8), LevelsChannel::default(), lc(0.2, 0.8, 1.0)],
+            space: Default::default(),
+            black: LevelsChannel::default(),
+        },
         Adjustment::Curves {
             master: pts(&[(0.0, 0.1), (0.4, 0.6), (1.0, 0.9)]),
             per_channel: [pts(&[(0.0, 0.0), (0.5, 0.3), (1.0, 1.0)]), pts(&[(0.0, 0.0), (1.0, 1.0)]), pts(&[(0.0, 0.2), (1.0, 1.0)])],
+            space: Default::default(),
+            black: Vec::new(),
         },
-        Adjustment::HueSaturation { hue: 40.0, saturation: 30.0, lightness: -10.0, colorize: false },
-        Adjustment::HueSaturation { hue: 200.0, saturation: 50.0, lightness: 20.0, colorize: true },
+        Adjustment::HueSaturation { hue: 40.0, saturation: 30.0, lightness: -10.0, colorize: false, ranges: HueRange::defaults() },
+        Adjustment::HueSaturation { hue: 200.0, saturation: 50.0, lightness: 20.0, colorize: true, ranges: HueRange::defaults() },
+        Adjustment::HueSaturation { hue: -10.0, saturation: 10.0, lightness: 5.0, colorize: false, ranges: hue_ranges() },
         Adjustment::Vibrance { vibrance: 50.0, saturation: -20.0 },
         Adjustment::ChannelMixer { matrix: [[0.5, 0.3, 0.2, 0.0], [0.1, 0.8, 0.1, 0.05], [0.0, 0.2, 0.9, -0.05]], monochrome: false },
         Adjustment::ChannelMixer { matrix: [[0.4, 0.4, 0.2, 0.0], [0.0; 4], [0.0; 4]], monochrome: true },
@@ -148,8 +163,8 @@ fn adjustments() -> Vec<Adjustment> {
         Adjustment::PhotoFilter { color: [0.2, 0.6, 0.9], density: 0.3, preserve_luminosity: false },
         Adjustment::BlackWhite { weights: [40.0, 60.0, 40.0, 60.0, 20.0, 80.0], tint: None },
         Adjustment::BlackWhite { weights: [70.0, 20.0, 50.0, 10.0, 90.0, 30.0], tint: Some([0.9, 0.7, 0.5]) },
-        Adjustment::GradientMap { stops: vec![(0.0, [0.1, 0.0, 0.3]), (0.5, [0.9, 0.3, 0.1]), (1.0, [1.0, 1.0, 0.8])], reverse: false },
-        Adjustment::GradientMap { stops: vec![(0.0, [0.0, 0.0, 0.0]), (1.0, [1.0, 1.0, 1.0])], reverse: true },
+        Adjustment::GradientMap { stops: vec![(0.0, [0.1, 0.0, 0.3]), (0.5, [0.9, 0.3, 0.1]), (1.0, [1.0, 1.0, 0.8])], reverse: false, dither: false },
+        Adjustment::GradientMap { stops: vec![(0.0, [0.0, 0.0, 0.0]), (1.0, [1.0, 1.0, 1.0])], reverse: true, dither: true },
         Adjustment::ColorBalance { shadows: [20.0, -10.0, 5.0], midtones: [-15.0, 10.0, 30.0], highlights: [0.0, 5.0, -20.0], preserve_luminosity: true },
         Adjustment::ColorBalance { shadows: [10.0, 0.0, 0.0], midtones: [0.0, 0.0, 0.0], highlights: [0.0, 0.0, 10.0], preserve_luminosity: false },
         Adjustment::SelectiveColor { relative: true, adjustments: selective() },
@@ -241,7 +256,10 @@ fn groups_masks_and_clipping() {
         let mut c1 = child(17, BlendMode::Multiply);
         c1.clipped = true;
         c1.opacity = 0.6;
-        let mut c2 = Layer::new("hs", LayerContent::Adjustment(Adjustment::HueSaturation { hue: 90.0, saturation: 20.0, lightness: 0.0, colorize: false }));
+        let mut c2 = Layer::new(
+            "hs",
+            LayerContent::Adjustment(Adjustment::HueSaturation { hue: 90.0, saturation: 20.0, lightness: 0.0, colorize: false, ranges: HueRange::defaults() }),
+        );
         c2.clipped = true;
         d.layers.extend([base, c1, c2]);
         check(&mut g, &d, &format!("clipping hidden={hidden}"));

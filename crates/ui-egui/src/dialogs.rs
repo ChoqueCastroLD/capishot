@@ -96,9 +96,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::prefs_ui::owns(&fields) => crate::prefs_ui::body(app, ui, &mut fields),
                 DialogKind::Command if fields.contains_key("__export") => crate::export_dialog::body(app, ui, &mut fields),
                 DialogKind::Command if fields.contains_key("__sizing") => crate::sizing::body(ui, &mut fields),
+                DialogKind::Command if crate::adjust_dialog::owns(&fields) => crate::adjust_dialog::body(app, ui, &mut fields),
                 DialogKind::Command if fields.contains_key("__filter") => crate::filter_dialog::body(ui, &mut fields),
                 DialogKind::Command if fields.contains_key("__form") => crate::view_cmds::form_body(ui, &mut fields),
-                DialogKind::Command => command_fields(ui, &mut fields),
+                DialogKind::Command => {}
                 DialogKind::LayerStyle => crate::layer_style::body(ui, &mut fields),
                 DialogKind::Error => {
                     ui.label(fields.get("message").and_then(Value::as_str).unwrap_or("Error"));
@@ -198,32 +199,20 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
     }
 }
 
-fn command_fields(ui: &mut egui::Ui, f: &mut serde_json::Map<String, Value>) {
-    let kind = f.get("__kind").and_then(Value::as_str).unwrap_or_default().to_string();
-    for &(key, label, min, max, default) in crate::panels::adjustment_sliders(&kind) {
-        let mut v = f.get(key).and_then(Value::as_f64).unwrap_or(default as f64) as f32;
-        if ui.add(egui::Slider::new(&mut v, min..=max).text(label)).changed() {
-            f.insert(key.into(), json!(v));
-        }
-    }
-    if kind == "hueSaturation" {
-        let mut c = f.get("colorize").and_then(Value::as_bool).unwrap_or(false);
-        if ui.checkbox(&mut c, "Colorize").changed() {
-            f.insert("colorize".into(), json!(c));
-        }
-    }
-}
-
-/// Open a parameter dialog for a destructive `image.adjustments.*` command.
+/// Open the parameter dialog of `command`: the adjustment editor for `image.adjustments.*`, the
+/// schema dialog for filters, otherwise a bare confirm dialog.
 pub fn open_command_dialog(app: &mut PhotocraftApp, command: &str, label: &str) -> u64 {
-    let kind = command.rsplit('.').next().unwrap_or_default();
+    if let Some(id) = crate::adjust_dialog::open(app, command) {
+        return id;
+    }
+    if crate::filter_dialog::has_dialog(command)
+        && let Some(id) = crate::filter_dialog::open(app, command)
+    {
+        return id;
+    }
     let mut fields = serde_json::Map::new();
     fields.insert("__command".into(), json!(command));
     fields.insert("__label".into(), json!(label));
-    fields.insert("__kind".into(), json!(kind));
-    for &(key, _, _, _, default) in crate::panels::adjustment_sliders(kind) {
-        fields.insert(key.into(), json!(default));
-    }
     app.ui.open_dialog(DialogKind::Command, fields)
 }
 

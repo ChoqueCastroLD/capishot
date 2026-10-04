@@ -11,7 +11,7 @@
 //! stay [`Adjustment::Unsupported`] and are written back verbatim.
 
 use photocraft_doc::Adjustment;
-use photocraft_doc::adjust::{CurvePoint, LevelsChannel};
+use photocraft_doc::adjust::{CurvePoint, HueRange, LevelsChannel, ToneSpace};
 use photocraft_psd::descriptor::{Descriptor, Value, VersionedDescriptor};
 
 /// All PSD adjustment keys recognized as adjustment layers.
@@ -51,7 +51,7 @@ fn parse_curves(d: &[u8]) -> Option<Adjustment> {
     let bits = u32::from_be_bytes(d.get(3..7)?.try_into().ok()?);
     let mut at = 7;
     let line = || vec![CurvePoint { input: 0.0, output: 0.0 }, CurvePoint { input: 1.0, output: 1.0 }];
-    let mut curves: Vec<Vec<CurvePoint>> = vec![line(), line(), line(), line()];
+    let mut curves: Vec<Vec<CurvePoint>> = vec![line(), line(), line(), line(), line()];
     for bit in 0..32usize {
         if bits & (1 << bit) == 0 {
             continue;
@@ -71,8 +71,8 @@ fn parse_curves(d: &[u8]) -> Option<Adjustment> {
     }
     let mut it = curves.into_iter();
     let master = it.next()?;
-    let (r, g, b) = (it.next()?, it.next()?, it.next()?);
-    Some(Adjustment::Curves { master, per_channel: [r, g, b] })
+    let (r, g, b, k) = (it.next()?, it.next()?, it.next()?, it.next()?);
+    Some(Adjustment::Curves { master, per_channel: [r, g, b], space: ToneSpace::Rgb, black: k })
 }
 
 fn desc_num(d: &Descriptor, key: &str) -> Option<f32> {
@@ -98,7 +98,11 @@ pub enum Channels {
     Rgb,
     /// Record 1 is the gray channel (applied to all three display channels).
     Gray,
-    /// Channel records do not map to display RGB (CMYK, Lab); ignored.
+    /// Records 1..=4 are cyan, magenta, yellow, black ([`ToneSpace::Cmyk`]).
+    Cmyk,
+    /// Records 1..=3 are lightness, a, b ([`ToneSpace::Lab`]).
+    Lab,
+    /// Channel records do not map to display channels (multichannel, indexed…); ignored.
     Other,
 }
 
@@ -113,7 +117,28 @@ pub fn parse(key: &[u8; 4], data: &[u8], cged: Option<&[u8]>, channels: Channels
     }
     let mut a = parse_any(key, data, cged);
     match (&mut a, channels) {
-        (_, Channels::Rgb) => {}
+        (Adjustment::Levels { space, black, .. }, Channels::Cmyk) | (Adjustment::Levels { space, black, .. }, Channels::Lab) => {
+            *space = if channels == Channels::Cmyk { ToneSpace::Cmyk } else { ToneSpace::Lab };
+            if channels == Channels::Lab {
+                *black = LevelsChannel::default();
+            }
+        }
+        (Adjustment::Curves { space, black, .. }, Channels::Cmyk) => {
+            *space = ToneSpace::Cmyk;
+            if photocraft_doc::adjust::is_identity_curve(black) {
+                black.clear();
+            }
+        }
+        (Adjustment::Curves { space, black, .. }, Channels::Lab) => {
+            *space = ToneSpace::Lab;
+            black.clear();
+        }
+        (Adjustment::Levels { black, .. }, _) => *black = LevelsChannel::default(),
+        (Adjustment::Curves { black, .. }, _) => black.clear(),
+        _ => {}
+    }
+    match (&mut a, channels) {
+        (_, Channels::Rgb | Channels::Cmyk | Channels::Lab) => {}
         (Adjustment::Levels { per_channel, .. }, Channels::Gray) => {
             let g = per_channel[0].clone();
             *per_channel = [g.clone(), g.clone(), g];
@@ -152,11 +177,21 @@ fn parse_any(key: &[u8; 4], data: &[u8], cged: Option<&[u8]>) -> Adjustment {
         b"hue2" => (|| {
             let colorize = *data.get(2)? != 0;
             let base = if colorize { 4 } else { 10 };
+            // Six ranges from byte 16: four range values (degrees) then hue, saturation, lightness.
+            let mut ranges = HueRange::defaults();
+            for (i, r) in ranges.iter_mut().enumerate() {
+                let at = 16 + i * 14;
+                let v = |k: usize| bei16(data, at + 2 * k).map(f32::from);
+                if let (Some(a), Some(b), Some(c), Some(d), Some(h), Some(s), Some(l)) = (v(0), v(1), v(2), v(3), v(4), v(5), v(6)) {
+                    *r = HueRange { hue: h, saturation: s, lightness: l, bounds: HueRange::canonical_bounds([a, b, c, d]) };
+                }
+            }
             Some(Adjustment::HueSaturation {
                 hue: f32::from(bei16(data, base)?),
                 saturation: f32::from(bei16(data, base + 2)?),
                 lightness: f32::from(bei16(data, base + 4)?),
                 colorize,
+                ranges,
             })
         })(),
         b"expA" => (|| Some(Adjustment::Exposure { exposure: bef32(data, 2)?, offset: bef32(data, 6)?, gamma: bef32(data, 10)? }))(),
@@ -165,7 +200,8 @@ fn parse_any(key: &[u8; 4], data: &[u8], cged: Option<&[u8]>) -> Adjustment {
             let r = levels_rec(data, 12)?;
             let g = levels_rec(data, 22)?;
             let b = levels_rec(data, 32)?;
-            Some(Adjustment::Levels { master: m, per_channel: [r, g, b] })
+            let k = levels_rec(data, 42).unwrap_or_default();
+            Some(Adjustment::Levels { master: m, per_channel: [r, g, b], space: ToneSpace::Rgb, black: k })
         })(),
         b"curv" => parse_curves(data),
         b"selc" => parse_selective(data),
@@ -193,6 +229,7 @@ fn be32(d: &[u8], at: usize) -> Option<u32> {
 fn parse_gradient_map(d: &[u8]) -> Option<Adjustment> {
     let version = be16(d, 0)?;
     let reverse = *d.get(2)? != 0;
+    let dither = d.get(3).is_some_and(|b| *b != 0);
     let (method, mut at) = match version {
         1 => (None, 4),
         3 => (Some(d.get(4..8)?), 8),
@@ -227,16 +264,16 @@ fn parse_gradient_map(d: &[u8]) -> Option<Adjustment> {
     let baked = crate::gradient_bake::bake(stops, &mids, smooth, crate::gradient_bake::Method::from_code(method));
     let mut stops: Vec<(f32, [f32; 3])> = baked.iter().map(|(t, c)| (*t, c.to_rgb())).collect();
     stops.sort_by(|a, b| a.0.total_cmp(&b.0));
-    Some(Adjustment::GradientMap { stops, reverse })
+    Some(Adjustment::GradientMap { stops, reverse, dither })
 }
 
 /// `grdm` version 1 for [`Adjustment::GradientMap`] (Classic interpolation, Smoothness 0, so
 /// the stops are reproduced exactly).
-fn write_gradient_map(stops: &[(f32, [f32; 3])], reverse: bool) -> Vec<u8> {
+fn write_gradient_map(stops: &[(f32, [f32; 3])], reverse: bool, dither: bool) -> Vec<u8> {
     let mut v = Vec::new();
     put16(&mut v, 1);
     v.push(u8::from(reverse));
-    v.push(0);
+    v.push(u8::from(dither));
     let name: Vec<u16> = "Custom".encode_utf16().chain(std::iter::once(0)).collect();
     v.extend_from_slice(&(name.len() as u32).to_be_bytes());
     for u in name {
@@ -497,7 +534,7 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
                 .with("Auto", Value::Boolean(false));
             return vec![(*b"brit", v), (*b"CgEd", VersionedDescriptor::new(d).to_bytes())];
         }
-        Adjustment::HueSaturation { hue, saturation, lightness, colorize } => {
+        Adjustment::HueSaturation { hue, saturation, lightness, colorize, ranges } => {
             put16(&mut v, 2);
             v.push(u8::from(*colorize));
             v.push(0);
@@ -506,14 +543,15 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
                     v.extend_from_slice(&clamp_i16(*x).to_be_bytes());
                 }
             }
-            // Six default hue ranges (reds, yellows, greens, cyans, blues, magentas).
-            let ranges: [[u16; 4]; 6] =
-                [[315, 345, 15, 45], [15, 45, 75, 105], [75, 105, 135, 165], [135, 165, 195, 225], [195, 225, 255, 285], [255, 285, 315, 345]];
+            // Six hue ranges (reds, yellows, greens, cyans, blues, magentas): range values in
+            // 0..360, then the range's hue, saturation and lightness.
             for r in ranges {
-                for x in r {
-                    put16(&mut v, x);
+                for x in r.bounds {
+                    put16(&mut v, x.rem_euclid(360.0).round() as u16 % 360);
                 }
-                v.extend_from_slice(&[0; 6]);
+                for x in [r.hue, r.saturation, r.lightness] {
+                    v.extend_from_slice(&clamp_i16(x).to_be_bytes());
+                }
             }
             return vec![(*b"hue2", v)];
         }
@@ -525,22 +563,25 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             v.push(1); // color space flag (spec: "1 byte")
             return vec![(*b"expA", v)];
         }
-        Adjustment::Levels { master, per_channel } => {
+        Adjustment::Levels { master, per_channel, space, black } => {
             put16(&mut v, 2);
             levels_write(&mut v, master);
             for c in per_channel {
                 levels_write(&mut v, c);
             }
-            for _ in 4..29 {
+            let ident = LevelsChannel::default();
+            levels_write(&mut v, if *space == ToneSpace::Cmyk { black } else { &ident });
+            for _ in 5..29 {
                 levels_write(&mut v, &LevelsChannel::default());
             }
             return vec![(*b"levl", v)];
         }
-        Adjustment::Curves { master, per_channel } => {
+        Adjustment::Curves { master, per_channel, space, black } => {
             v.push(0);
             put16(&mut v, 1);
-            v.extend_from_slice(&0b1111u32.to_be_bytes());
-            for c in std::iter::once(master).chain(per_channel.iter()) {
+            let ink = *space == ToneSpace::Cmyk && black.len() >= 2;
+            v.extend_from_slice(&(if ink { 0b11111u32 } else { 0b1111 }).to_be_bytes());
+            for c in std::iter::once(master).chain(per_channel.iter()).chain(ink.then_some(black)) {
                 put16(&mut v, c.len().min(19) as u16);
                 for p in c.iter().take(19) {
                     put16(&mut v, q255(p.output));
@@ -587,7 +628,7 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             v.extend_from_slice(&VersionedDescriptor::new(d).to_bytes());
             return vec![(*b"clrL", v)];
         }
-        Adjustment::GradientMap { stops, reverse } => {
+        Adjustment::GradientMap { stops, reverse, dither } => {
             // Photoshop needs two stops; fewer are written as the gradient they render as
             // (none: black to white, i.e. the gray value itself; one: that colour throughout).
             let stops = match stops.as_slice() {
@@ -595,7 +636,7 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
                 [(_, c)] => vec![(0.0, *c), (1.0, *c)],
                 s => s.to_vec(),
             };
-            return vec![(*b"grdm", write_gradient_map(&stops, *reverse))];
+            return vec![(*b"grdm", write_gradient_map(&stops, *reverse, *dither))];
         }
         Adjustment::Vibrance { vibrance, saturation } => {
             let d = Descriptor::new("null")
@@ -668,7 +709,7 @@ mod tests {
     #[test]
     fn gradient_map_v3_methods_and_smoothness() {
         let classic = vec![(0.0, [0.0, 0.0, 1.0]), (1.0, [1.0, 1.0, 0.0])];
-        let v1 = write_gradient_map(&classic, false);
+        let v1 = write_gradient_map(&classic, false, false);
         // Version 3 inserts the interpolation method after reverse/dither.
         let v3 = |m: &[u8; 4]| {
             let mut v = v1.clone();
@@ -692,10 +733,10 @@ mod tests {
         assert!((p[0] - c[0]).abs() > 0.02, "perceptual differs from classic {p:?}");
         // Smoothness 100 % (4096) bends a three-stop ramp.
         let three = vec![(0.0, [0.0; 3]), (0.25, [1.0, 0.0, 0.0]), (0.75, [0.0, 0.0, 1.0]), (1.0, [1.0; 3])];
-        let mut smooth = write_gradient_map(&three, false);
+        let mut smooth = write_gradient_map(&three, false, false);
         let at = smooth.len() - 2 - 16 - 2 - 4 - 2 - 2 - 4 - 2 - 2 - 2;
         smooth[at..at + 2].copy_from_slice(&4096u16.to_be_bytes());
-        let (a, b) = (at_t(&write_gradient_map(&three, false), 0.4), at_t(&smooth, 0.4));
+        let (a, b) = (at_t(&write_gradient_map(&three, false, false), 0.4), at_t(&smooth, 0.4));
         assert!((0..3).any(|k| (a[k] - b[k]).abs() > 1e-3), "{a:?} {b:?}");
         // Noise gradients (no colour stops) stay unsupported.
         assert!(matches!(parse(b"grdm", &[0, 1, 0, 0, 0, 0, 0, 0, 0, 0], None, Channels::Rgb), Adjustment::Unsupported { .. }));
@@ -716,18 +757,42 @@ mod tests {
         rt(Adjustment::Posterize { levels: 4 });
         rt(Adjustment::BrightnessContrast { brightness: 20.0, contrast: -10.0, legacy: false });
         rt(Adjustment::BrightnessContrast { brightness: -150.0, contrast: 100.0, legacy: true });
-        rt(Adjustment::HueSaturation { hue: 30.0, saturation: -20.0, lightness: 5.0, colorize: false });
-        rt(Adjustment::HueSaturation { hue: 200.0, saturation: 50.0, lightness: 0.0, colorize: true });
+        rt(Adjustment::HueSaturation { hue: 30.0, saturation: -20.0, lightness: 5.0, colorize: false, ranges: HueRange::defaults() });
+        rt(Adjustment::HueSaturation { hue: 200.0, saturation: 50.0, lightness: 0.0, colorize: true, ranges: HueRange::defaults() });
+        let mut ranges = HueRange::defaults();
+        ranges[0] = HueRange { hue: 15.0, saturation: -40.0, lightness: 10.0, bounds: [-60.0, -20.0, 10.0, 30.0] };
+        ranges[4].saturation = 25.0;
+        rt(Adjustment::HueSaturation { hue: -10.0, saturation: 0.0, lightness: 0.0, colorize: false, ranges });
         rt(Adjustment::Exposure { exposure: 1.5, offset: -0.01, gamma: 0.9 });
         let lc = |a: u16, b: u16| LevelsChannel { in_black: f32::from(a) / 255.0, in_white: f32::from(b) / 255.0, gamma: 1.2, out_black: 0.0, out_white: 1.0 };
-        rt(Adjustment::Levels { master: lc(10, 240), per_channel: [lc(0, 255), lc(5, 250), lc(20, 200)] });
+        rt(Adjustment::Levels {
+            master: lc(10, 240),
+            per_channel: [lc(0, 255), lc(5, 250), lc(20, 200)],
+            space: ToneSpace::Rgb,
+            black: LevelsChannel::default(),
+        });
         let pts = |v: &[(u8, u8)]| v.iter().map(|&(i, o)| CurvePoint { input: f32::from(i) / 255.0, output: f32::from(o) / 255.0 }).collect::<Vec<_>>();
         rt(Adjustment::Curves {
             master: pts(&[(0, 0), (128, 150), (255, 255)]),
             per_channel: [pts(&[(0, 10), (255, 255)]), pts(&[(0, 0), (255, 245)]), pts(&[(0, 0), (64, 32), (255, 255)])],
+            space: ToneSpace::Rgb,
+            black: Vec::new(),
         });
+        // CMYK ink curves and levels keep their black record.
+        let ink = Adjustment::Curves {
+            master: pts(&[(0, 0), (255, 255)]),
+            per_channel: [pts(&[(0, 0), (255, 255)]), pts(&[(0, 30), (255, 255)]), pts(&[(0, 0), (255, 255)])],
+            space: ToneSpace::Cmyk,
+            black: pts(&[(0, 0), (128, 100), (255, 255)]),
+        };
+        let b = write(&ink);
+        assert_eq!(parse(&b[0].0, &b[0].1, None, Channels::Cmyk), ink);
+        let inkl = Adjustment::Levels { master: lc(0, 255), per_channel: [lc(0, 255), lc(5, 250), lc(0, 255)], space: ToneSpace::Cmyk, black: lc(30, 255) };
+        let b = write(&inkl);
+        assert_eq!(parse(&b[0].0, &b[0].1, None, Channels::Cmyk), inkl);
         rt(Adjustment::Unsupported { psd_key: "selc".into(), raw: vec![1, 2, 3] });
-        rt(Adjustment::GradientMap { stops: vec![(0.0, [0.0, 0.0, 0.0]), (0.5, [1.0, 0.0, 0.0]), (1.0, [1.0, 1.0, 1.0])], reverse: true });
+        rt(Adjustment::GradientMap { stops: vec![(0.0, [0.0, 0.0, 0.0]), (0.5, [1.0, 0.0, 0.0]), (1.0, [1.0, 1.0, 1.0])], reverse: true, dither: false });
+        rt(Adjustment::GradientMap { stops: vec![(0.0, [0.0, 0.0, 0.0]), (1.0, [1.0, 1.0, 1.0])], reverse: false, dither: true });
         rt(Adjustment::SelectiveColor { relative: true, adjustments: std::array::from_fn(|r| [r as f32 * 10.0 - 40.0, 5.0, -100.0, 100.0]) });
         rt(Adjustment::SelectiveColor { relative: false, adjustments: [[0.0; 4]; 9] });
         rt(Adjustment::Vibrance { vibrance: 35.0, saturation: -12.0 });
@@ -952,9 +1017,9 @@ mod tests {
         for (stops, want) in
             [(vec![], vec![(0.0, [0.0; 3]), (1.0, [1.0; 3])]), (vec![(0.3, [0.2, 0.4, 0.6])], vec![(0.0, [0.2, 0.4, 0.6]), (1.0, [0.2, 0.4, 0.6])])]
         {
-            let b = write(&Adjustment::GradientMap { stops, reverse: true });
+            let b = write(&Adjustment::GradientMap { stops, reverse: true, dither: false });
             let back = parse(&b[0].0, &b[0].1, None, Channels::Rgb);
-            let Adjustment::GradientMap { stops, reverse: true } = back else { panic!("{back:?}") };
+            let Adjustment::GradientMap { stops, reverse: true, .. } = back else { panic!("{back:?}") };
             assert_eq!(stops.len(), want.len());
             for (s, w) in stops.iter().zip(&want) {
                 assert!((s.0 - w.0).abs() < 1e-6 && (0..3).all(|k| (s.1[k] - w.1[k]).abs() < 1e-4), "{s:?} vs {w:?}");
@@ -975,7 +1040,12 @@ mod tests {
     #[test]
     fn non_rgb_ignores_channel_records() {
         let lc = LevelsChannel { in_black: 0.1, ..Default::default() };
-        let a = Adjustment::Levels { master: LevelsChannel::default(), per_channel: [lc.clone(), lc.clone(), lc] };
+        let a = Adjustment::Levels {
+            master: LevelsChannel::default(),
+            per_channel: [lc.clone(), lc.clone(), lc],
+            space: ToneSpace::Rgb,
+            black: LevelsChannel::default(),
+        };
         let b = write(&a);
         match parse(&b[0].0, &b[0].1, None, Channels::Other) {
             Adjustment::Levels { per_channel, .. } => assert_eq!(per_channel, <[LevelsChannel; 3]>::default()),
@@ -986,7 +1056,12 @@ mod tests {
     #[test]
     fn gray_uses_first_channel_record_for_all() {
         let lc = LevelsChannel { in_black: 44.0 / 255.0, ..Default::default() };
-        let a = Adjustment::Levels { master: LevelsChannel::default(), per_channel: [lc.clone(), Default::default(), Default::default()] };
+        let a = Adjustment::Levels {
+            master: LevelsChannel::default(),
+            per_channel: [lc.clone(), Default::default(), Default::default()],
+            space: ToneSpace::Rgb,
+            black: LevelsChannel::default(),
+        };
         let b = write(&a);
         match parse(&b[0].0, &b[0].1, None, Channels::Gray) {
             Adjustment::Levels { per_channel, .. } => assert_eq!(per_channel, [lc.clone(), lc.clone(), lc]),

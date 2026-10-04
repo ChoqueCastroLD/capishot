@@ -231,6 +231,8 @@ impl Ex {
                 let channels = match self.fmt.mode {
                     ColorMode::Rgb => adjust_map::Channels::Rgb,
                     ColorMode::Grayscale => adjust_map::Channels::Gray,
+                    ColorMode::Cmyk => adjust_map::Channels::Cmyk,
+                    ColorMode::Lab => adjust_map::Channels::Lab,
                     _ => adjust_map::Channels::Other,
                 };
                 let cged = raw.iter().find(|(k, _)| k == b"CgEd").map(|(_, d)| d.clone());

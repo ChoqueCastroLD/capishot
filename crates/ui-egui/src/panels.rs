@@ -1609,40 +1609,6 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 // ----------------------------------------------------------------------------- properties
 
-/// Slider spec for adjustment properties: (param key, label, min, max, default).
-pub fn adjustment_sliders(kind: &str) -> &'static [(&'static str, &'static str, f32, f32, f32)] {
-    match kind {
-        "hueSaturation" => {
-            &[("hue", "Hue", -180.0, 180.0, 0.0), ("saturation", "Saturation", -100.0, 100.0, 0.0), ("lightness", "Lightness", -100.0, 100.0, 0.0)]
-        }
-        "brightnessContrast" => &[("brightness", "Brightness", -150.0, 150.0, 0.0), ("contrast", "Contrast", -50.0, 100.0, 0.0)],
-        "exposure" => &[("exposure", "Exposure", -5.0, 5.0, 0.0), ("offset", "Offset", -0.5, 0.5, 0.0), ("gamma", "Gamma Correction", 0.1, 3.0, 1.0)],
-        "vibrance" => &[("vibrance", "Vibrance", -100.0, 100.0, 0.0), ("saturation", "Saturation", -100.0, 100.0, 0.0)],
-        "levels" => &[("inBlack", "Input Black", 0.0, 253.0, 0.0), ("gamma", "Midtones", 0.1, 9.99, 1.0), ("inWhite", "Input White", 2.0, 255.0, 255.0)],
-        "threshold" => &[("level", "Threshold Level", 1.0, 255.0, 128.0)],
-        "posterize" => &[("levels", "Levels", 2.0, 255.0, 4.0)],
-        "photoFilter" => &[("density", "Density", 0.0, 100.0, 25.0)],
-        _ => &[],
-    }
-}
-
-pub fn adjustment_values(a: &photocraft_doc::Adjustment) -> Value {
-    use photocraft_doc::Adjustment as A;
-    match a {
-        A::HueSaturation { hue, saturation, lightness, colorize } => {
-            json!({"hue": hue, "saturation": saturation, "lightness": lightness, "colorize": colorize})
-        }
-        A::BrightnessContrast { brightness, contrast, .. } => json!({"brightness": brightness, "contrast": contrast}),
-        A::Exposure { exposure, offset, gamma } => json!({"exposure": exposure, "offset": offset, "gamma": gamma}),
-        A::Vibrance { vibrance, saturation } => json!({"vibrance": vibrance, "saturation": saturation}),
-        A::Levels { master, .. } => json!({"inBlack": master.in_black * 255.0, "inWhite": master.in_white * 255.0, "gamma": master.gamma}),
-        A::Threshold { level } => json!({"level": level * 255.0}),
-        A::Posterize { levels } => json!({"levels": levels}),
-        A::PhotoFilter { density, .. } => json!({"density": density * 100.0}),
-        _ => json!({}),
-    }
-}
-
 /// Floating Properties card anchored to the canvas' top-right corner.
 pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // Pro (Photoshop) docks Properties; Studio floats it over the canvas.
@@ -1728,63 +1694,7 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 fn adjustment_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj: &photocraft_doc::Adjustment) {
-    let t = Tokens::get(ui.ctx());
-    let kind = photocraft_engine::commands::adjustment_kind(adj);
-    let committed = adjustment_values(adj);
-    let mut values = match &app.live_adjust {
-        Some((l, v)) if *l == id => v.clone(),
-        _ => committed,
-    };
-    let mut commit = false;
-    let mut live = false;
-    let hue = widgets::hue_stops();
-    let tone = matches!(kind, "levels" | "curves");
-    if kind == "levels" {
-        crate::tone::levels_editor(app, ui, id);
-    } else if kind == "curves" {
-        crate::tone::curves_editor(app, ui, id);
-    }
-    for &(key, label, min, max, default) in if tone { &[][..] } else { adjustment_sliders(kind) } {
-        let mut v = values.get(key).and_then(Value::as_f64).unwrap_or(default as f64) as f32;
-        let gradient = if key == "hue" { Some(&hue[..]) } else { None };
-        let unit = match key {
-            "hue" => "°",
-            "saturation" | "lightness" | "vibrance" | "density" => "%",
-            _ => "",
-        };
-        let r = widgets::slider_row(ui, label, &mut v, min..=max, unit, gradient);
-        if r.changed() {
-            values[key] = json!(v);
-            live = true;
-        }
-        if r.drag_stopped() || (r.changed() && !r.dragged()) {
-            commit = true;
-        }
-    }
-    if kind == "hueSaturation" {
-        let mut c = values.get("colorize").and_then(Value::as_bool).unwrap_or(false);
-        if widgets::toggle(ui, &mut c, "Colorize").changed() {
-            values["colorize"] = json!(c);
-            commit = true;
-        }
-        ui.add_space(4.0);
-    }
-    if kind == "selectiveColor" {
-        crate::adjust_ui::selective_color_editor(app, ui, id, adj);
-    } else if kind == "colorLookup" {
-        crate::adjust_ui::color_lookup_editor(app, ui, id, adj);
-    } else if adjustment_sliders(kind).is_empty() && !tone && kind != "invert" {
-        ui.label(RichText::new("Detailed controls for this adjustment arrive in milestone M7.").color(t.text_faint));
-    }
-    if live {
-        app.live_adjust = Some((id, values.clone()));
-    }
-    if commit {
-        let mut p = values;
-        p["layer"] = json!(id.0);
-        let _ = app.run("layer.setAdjustment", p);
-        app.live_adjust = None;
-    }
+    crate::adjust_editors::layer_editor(app, ui, id, adj);
     ui.add_space(6.0);
     let layer = app.session.active().and_then(|s| s.doc.layer(id).cloned());
     if let Some(l) = layer {

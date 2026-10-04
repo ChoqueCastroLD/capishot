@@ -482,18 +482,30 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             let hsl = rgb_to_hsl(c);
             var hh: f32;
             var ss: f32;
+            // Range edits (LUT rows indexed by the original hue, faded out towards grey).
+            var dh = 0.0;
+            var ds = 0.0;
+            var dl = 0.0;
+            if (p1.x > 0.5) {
+                let chroma = min((max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b))) * 4.0, 1.0);
+                dh = lut(0, hsl.x) * chroma;
+                ds = lut(1, hsl.x) * chroma;
+                dl = lut(2, hsl.x) * chroma;
+            }
+            let sat = clamp(p0.y + ds, -1.0, 1.0);
+            let light = clamp(p0.z + dl, -1.0, 1.0);
             if (p0.w > 0.5) {
                 hh = rem_euclid(p0.x, 360.0) / 360.0;
-                ss = max(abs(p0.y), 0.25);
+                ss = max(abs(sat), 0.25);
             } else {
-                hh = rem_euclid(hsl.x + p0.x / 360.0, 1.0);
-                ss = clamp(hsl.y * (1.0 + p0.y), 0.0, 1.0);
+                hh = rem_euclid(hsl.x + (p0.x + dh) / 360.0, 1.0);
+                ss = clamp(hsl.y * (1.0 + sat), 0.0, 1.0);
             }
             var rgb = hsl_to_rgb(hh, ss, hsl.z);
-            if (p0.z > 0.0) {
-                rgb = rgb + (1.0 - rgb) * p0.z;
-            } else if (p0.z < 0.0) {
-                rgb = rgb * (1.0 + p0.z);
+            if (light > 0.0) {
+                rgb = rgb + (1.0 - rgb) * light;
+            } else if (light < 0.0) {
+                rgb = rgb * (1.0 + light);
             }
             return rgb;
         }
@@ -518,15 +530,16 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             return f;
         }
         case 12: {                                                             // Black & White
-            let hsl = rgb_to_hsl(c);
-            let base = gray(c);
-            let sector = hsl.x * 6.0;
-            let i0 = u32(floor(sector)) % 6u;
-            let i1 = (i0 + 1u) % 6u;
-            let f = sector - trunc(sector);
-            var w = array<f32, 6>(p0.x - 40.0, p0.y - 60.0, p0.z - 40.0, p0.w - 60.0, p1.x - 20.0, p1.y - 80.0);
-            let wt = w[i0] * (1.0 - f) + w[i1] * f;
-            let g = clamp(base + hsl.y * wt / 100.0 * 0.5, 0.0, 1.0);
+            // compose::adjust::black_white_gray: grey + secondary + primary parts, weighted.
+            var w = array<f32, 6>(p0.x, p0.y, p0.z, p0.w, p1.x, p1.y);
+            let mx = max(c.r, max(c.g, c.b));
+            let mn = min(c.r, min(c.g, c.b));
+            let mid = c.r + c.g + c.b - mx - mn;
+            var primary = 4;
+            if (c.r >= c.g && c.r >= c.b) { primary = 0; } else if (c.g >= c.b) { primary = 2; }
+            var secondary = 5;
+            if (c.b <= c.r && c.b <= c.g) { secondary = 1; } else if (c.r <= c.g) { secondary = 3; }
+            let g = clamp(mn + (mid - mn) * w[secondary] / 100.0 + (mx - mid) * w[primary] / 100.0, 0.0, 1.0);
             if (p1.z > 0.5) {
                 return clamp(g * p2.rgb * 2.0, vec3(0.0), vec3(1.0)) * 0.5 + g * 0.5;
             }
@@ -535,7 +548,9 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
         case 13: {                                                             // Gradient map
             var t = gray(c);
             if (p0.x > 0.5) { t = 1.0 - t; }
-            return vec3(lut(0, t), lut(1, t), lut(2, t));
+            var o = vec3(lut(0, t), lut(1, t), lut(2, t));
+            if (p0.y > 0.5) { o = clamp(o + bayer4(adj_px) / 255.0, vec3(0.0), vec3(1.0)); }
+            return o;
         }
         case 14: {                                                             // Color balance
             let l = gray(c);

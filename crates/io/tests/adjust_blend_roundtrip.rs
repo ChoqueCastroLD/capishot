@@ -11,6 +11,7 @@ use std::sync::Arc;
 use common::*;
 use photocraft_color::{BlendMode, ColorMode, SampleType};
 use photocraft_doc::adjust::{CurvePoint, LevelsChannel};
+use photocraft_doc::adjust::{HueRange, ToneSpace};
 use photocraft_doc::*;
 use photocraft_geom::Rect;
 use photocraft_io::*;
@@ -45,18 +46,28 @@ fn adjustments() -> Vec<(Adjustment, bool)> {
     let all = vec![
         (Adjustment::BrightnessContrast { brightness: 30.0, contrast: -20.0, legacy: false }, true),
         (Adjustment::BrightnessContrast { brightness: -40.0, contrast: 50.0, legacy: true }, true),
-        (Adjustment::Levels { master: lc(10, 240, 1.2), per_channel: [lc(0, 255, 1.0), lc(5, 250, 0.8), lc(20, 200, 1.5)] }, true),
+        (
+            Adjustment::Levels {
+                master: lc(10, 240, 1.2),
+                per_channel: [lc(0, 255, 1.0), lc(5, 250, 0.8), lc(20, 200, 1.5)],
+                space: ToneSpace::Rgb,
+                black: Default::default(),
+            },
+            true,
+        ),
         (
             Adjustment::Curves {
                 master: pts(&[(0, 0), (128, 150), (255, 255)]),
                 per_channel: [pts(&[(0, 10), (255, 255)]), pts(&[(0, 0), (255, 245)]), pts(&[(0, 0), (64, 32), (255, 255)])],
+                space: ToneSpace::Rgb,
+                black: Vec::new(),
             },
             true,
         ),
         (Adjustment::Exposure { exposure: 0.75, offset: -0.0125, gamma: 0.9 }, true),
         (Adjustment::Vibrance { vibrance: 60.0, saturation: -25.0 }, true),
-        (Adjustment::HueSaturation { hue: 40.0, saturation: -30.0, lightness: 10.0, colorize: false }, true),
-        (Adjustment::HueSaturation { hue: 200.0, saturation: 50.0, lightness: -10.0, colorize: true }, true),
+        (Adjustment::HueSaturation { hue: 40.0, saturation: -30.0, lightness: 10.0, colorize: false, ranges: HueRange::defaults() }, true),
+        (Adjustment::HueSaturation { hue: 200.0, saturation: 50.0, lightness: -10.0, colorize: true, ranges: HueRange::defaults() }, true),
         (
             Adjustment::ColorBalance { shadows: [20.0, -10.0, 5.0], midtones: [-15.0, 10.0, 30.0], highlights: [0.0, 5.0, -20.0], preserve_luminosity: true },
             true,
@@ -74,11 +85,18 @@ fn adjustments() -> Vec<(Adjustment, bool)> {
         (Adjustment::Invert, true),
         (Adjustment::Posterize { levels: 4 }, true),
         (Adjustment::Threshold { level: g(140) }, true),
-        (Adjustment::GradientMap { stops: vec![(0.0, [q16(6554), 0.0, q16(19661)]), (0.5, [1.0, 0.2, 0.0]), (1.0, [1.0, 1.0, 0.8])], reverse: false }, true),
-        (Adjustment::GradientMap { stops: vec![(0.0, [0.0, 0.0, 1.0]), (1.0, [1.0, 1.0, 0.0])], reverse: true }, true),
+        (
+            Adjustment::GradientMap {
+                stops: vec![(0.0, [q16(6554), 0.0, q16(19661)]), (0.5, [1.0, 0.2, 0.0]), (1.0, [1.0, 1.0, 0.8])],
+                reverse: false,
+                dither: false,
+            },
+            true,
+        ),
+        (Adjustment::GradientMap { stops: vec![(0.0, [0.0, 0.0, 1.0]), (1.0, [1.0, 1.0, 0.0])], reverse: true, dither: false }, true),
         // Fewer than two stops: written as the equivalent two-stop gradient.
-        (Adjustment::GradientMap { stops: vec![], reverse: false }, false),
-        (Adjustment::GradientMap { stops: vec![(0.4, [0.2, 0.6, 0.4])], reverse: false }, false),
+        (Adjustment::GradientMap { stops: vec![], reverse: false, dither: false }, false),
+        (Adjustment::GradientMap { stops: vec![(0.4, [0.2, 0.6, 0.4])], reverse: false, dither: false }, false),
         (Adjustment::SelectiveColor { relative: true, adjustments: std::array::from_fn(|r| [r as f32 * 10.0 - 40.0, 5.0, -30.0, 20.0]) }, true),
         (Adjustment::SelectiveColor { relative: false, adjustments: std::array::from_fn(|r| [0.0, r as f32 * 5.0, 0.0, -10.0]) }, true),
         // A block this version cannot read (a truncated Selective Color) is kept verbatim.

@@ -204,9 +204,10 @@ fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>
         && let LayerContent::Adjustment(a) = &l.content
     {
         let kind = photocraft_engine::commands::adjustment_kind(a);
+        let preview = photocraft_engine::adjust_params::from_params(kind, params, Some(a), st.doc.mode).unwrap_or_else(|_| a.clone());
         let mut doc = (*st.doc).clone();
         if let Some(lm) = doc.layer_mut(*layer) {
-            lm.content = LayerContent::Adjustment(photocraft_engine::commands::adjustment_from_params(kind, params));
+            lm.content = LayerContent::Adjustment(preview);
         }
         let key = 1 + params.to_string().bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
         return (std::sync::Arc::new(doc), key);
@@ -423,9 +424,10 @@ fn ensure_proxy_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u64
         let l = proxy.layer(layer)?;
         let LayerContent::Adjustment(a) = &l.content else { return None };
         let kind = photocraft_engine::commands::adjustment_kind(a);
+        let preview = photocraft_engine::adjust_params::from_params(kind, &params, Some(a), proxy.mode).unwrap_or_else(|_| a.clone());
         let mut p = (*proxy).clone();
         if let Some(lm) = p.layer_mut(layer) {
-            lm.content = LayerContent::Adjustment(photocraft_engine::commands::adjustment_from_params(kind, &params));
+            lm.content = LayerContent::Adjustment(preview);
         }
         let t0 = crate::gpu_canvas::now_ms();
         let buf = photocraft_compose::flatten(&p);

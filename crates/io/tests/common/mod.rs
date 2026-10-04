@@ -145,11 +145,13 @@ pub fn gen_doc(mode: ColorMode, depth: SampleType, f: Features) -> Document {
             Adjustment::Threshold { level: g(100) },
             Adjustment::Posterize { levels: 5 },
             Adjustment::BrightnessContrast { brightness: 20.0, contrast: -10.0, legacy: false },
-            Adjustment::HueSaturation { hue: 30.0, saturation: -20.0, lightness: 5.0, colorize: false },
+            Adjustment::HueSaturation { hue: 30.0, saturation: -20.0, lightness: 5.0, colorize: false, ranges: photocraft_doc::adjust::HueRange::defaults() },
             Adjustment::Exposure { exposure: 0.5, offset: 0.0, gamma: 1.0 },
             Adjustment::Levels {
                 master: LevelsChannel { in_black: g(10), in_white: g(240), gamma: 1.2, out_black: 0.0, out_white: 1.0 },
                 per_channel: Default::default(),
+                space: tone_space(mode),
+                black: Default::default(),
             },
             Adjustment::Curves {
                 master: vec![CurvePoint { input: 0.0, output: 0.0 }, CurvePoint { input: g(128), output: g(150) }, CurvePoint { input: 1.0, output: 1.0 }],
@@ -158,6 +160,8 @@ pub fn gen_doc(mode: ColorMode, depth: SampleType, f: Features) -> Document {
                     vec![CurvePoint { input: 0.0, output: 0.0 }, CurvePoint { input: 1.0, output: 1.0 }],
                     vec![CurvePoint { input: 0.0, output: 0.0 }, CurvePoint { input: 1.0, output: 1.0 }],
                 ],
+                space: tone_space(mode),
+                black: Vec::new(),
             },
             Adjustment::Unsupported { psd_key: "selc".into(), raw: vec![0, 1, 0, 0] },
         ];
@@ -313,4 +317,13 @@ pub fn max_diff(a: &[[f32; 4]], b: &[[f32; 4]]) -> f32 {
         }
     }
     m
+}
+
+/// The Levels/Curves channel space a PSD of `mode` stores (its records are the document's channels).
+fn tone_space(mode: ColorMode) -> photocraft_doc::adjust::ToneSpace {
+    match mode {
+        ColorMode::Cmyk => photocraft_doc::adjust::ToneSpace::Cmyk,
+        ColorMode::Lab => photocraft_doc::adjust::ToneSpace::Lab,
+        _ => photocraft_doc::adjust::ToneSpace::Rgb,
+    }
 }

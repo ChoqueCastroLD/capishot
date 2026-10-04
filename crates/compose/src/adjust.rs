@@ -5,7 +5,7 @@
 
 use photocraft_color::convert::rgb_to_gray;
 use photocraft_doc::Adjustment;
-use photocraft_doc::adjust::{CurvePoint, LevelsChannel};
+use photocraft_doc::adjust::{CurvePoint, HueRange, LevelsChannel, ToneSpace};
 
 use crate::Buffer;
 
@@ -96,39 +96,26 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
                 })
             })
         }
-        Adjustment::Levels { master, per_channel } => {
-            let luts: [Vec<f32>; 3] =
-                std::array::from_fn(|i| (0..LUT_SIZE).map(|k| levels(&per_channel[i], levels(master, k as f32 / (LUT_SIZE - 1) as f32))).collect());
-            map_rgb(buf, |c| std::array::from_fn(|i| lut(&luts[i], c[i])))
+        Adjustment::Levels { space, .. } | Adjustment::Curves { space, .. } => {
+            let luts = tone_luts(adj);
+            match space {
+                ToneSpace::Rgb => map_rgb(buf, |c| std::array::from_fn(|i| lut(&luts[i], c[i]))),
+                ToneSpace::Cmyk | ToneSpace::Lab => map_rgb(buf, |c| tone_in_space(*space, &luts, c)),
+            }
         }
-        Adjustment::Curves { master, per_channel } => {
-            // Photoshop applies each channel's curve first, then the
-            // composite (RGB) curve.
-            let m = curve_lut(master);
-            let luts: [Vec<f32>; 3] = std::array::from_fn(|i| {
-                let ch = curve_lut(&per_channel[i]);
-                ch.iter().map(|&v| lut(&m, v)).collect()
-            });
-            map_rgb(buf, |c| std::array::from_fn(|i| lut(&luts[i], c[i])))
-        }
-        Adjustment::HueSaturation { hue, saturation, lightness, colorize } => {
-            let (h, s, l) = (*hue, *saturation / 100.0, *lightness / 100.0);
+        Adjustment::HueSaturation { hue, saturation, lightness, colorize, ranges } => {
+            let table = (!*colorize && ranges.iter().any(|r| !r.is_neutral())).then(|| hue_range_tables(ranges));
             map_rgb(buf, |c| {
-                let (mut hh, mut ss, ll) = rgb_to_hsl(c);
-                if *colorize {
-                    hh = h.rem_euclid(360.0) / 360.0;
-                    ss = s.abs().max(0.25);
-                } else {
-                    hh = (hh + h / 360.0).rem_euclid(1.0);
-                    ss = (ss * (1.0 + s)).clamp(0.0, 1.0);
-                }
-                let mut rgb = hsl_to_rgb(hh, ss, ll);
-                if l > 0.0 {
-                    rgb = rgb.map(|v| v + (1.0 - v) * l);
-                } else if l < 0.0 {
-                    rgb = rgb.map(|v| v * (1.0 + l));
-                }
-                rgb
+                let (dh, ds, dl) = match &table {
+                    Some(t) => {
+                        // Range edits follow the pixel's original hue, faded out towards grey (greys have no hue).
+                        let h0 = rgb_to_hsl(c).0;
+                        let chroma = ((c[0].max(c[1]).max(c[2]) - c[0].min(c[1]).min(c[2])) * 4.0).min(1.0);
+                        (lut(&t[0], h0) * chroma, lut(&t[1], h0) * chroma, lut(&t[2], h0) * chroma)
+                    }
+                    None => (0.0, 0.0, 0.0),
+                };
+                hue_saturation(c, *hue + dh, (*saturation / 100.0 + ds).clamp(-1.0, 1.0), (*lightness / 100.0 + dl).clamp(-1.0, 1.0), *colorize)
             })
         }
         Adjustment::Vibrance { vibrance, saturation } => {
@@ -154,28 +141,30 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
             }
         }),
         Adjustment::BlackWhite { weights, tint } => map_rgb(buf, |c| {
-            // weights: reds, yellows, greens, cyans, blues, magentas in percent (PS defaults 40,60,40,60,20,80)
-            let (h, s, _l) = rgb_to_hsl(c);
-            let base = rgb_to_gray(c);
-            let sector = h * 6.0;
-            let i0 = sector.floor() as usize % 6;
-            let i1 = (i0 + 1) % 6;
-            let f = sector.fract();
-            let defaults = [40.0, 60.0, 40.0, 60.0, 20.0, 80.0];
-            let w = (weights[i0] - defaults[i0]) * (1.0 - f) + (weights[i1] - defaults[i1]) * f;
-            let g = (base + s * w / 100.0 * 0.5).clamp(0.0, 1.0);
+            let g = black_white_gray(c, weights);
             match tint {
                 Some(t) => std::array::from_fn(|i| (g * t[i] * 2.0).clamp(0.0, 1.0) * 0.5 + g * 0.5),
                 None => [g; 3],
             }
         }),
-        Adjustment::GradientMap { stops, reverse } => map_rgb(buf, |c| {
-            let mut t = rgb_to_gray(c);
-            if *reverse {
-                t = 1.0 - t;
+        Adjustment::GradientMap { stops, reverse, dither } => {
+            let (w, x0, y0) = (buf.rect.width().max(1) as usize, buf.rect.x0, buf.rect.y0);
+            for (i, p) in buf.px.iter_mut().enumerate() {
+                if p[3] <= 0.0 {
+                    continue;
+                }
+                let mut t = rgb_to_gray([p[0], p[1], p[2]]);
+                if *reverse {
+                    t = 1.0 - t;
+                }
+                let mut o = gradient(stops, t);
+                if *dither {
+                    let d = bayer4(x0 + (i % w) as i32, y0 + (i / w) as i32) / 255.0;
+                    o = o.map(|v| (v + d).clamp(0.0, 1.0));
+                }
+                p[..3].copy_from_slice(&o);
             }
-            gradient(stops, t)
-        }),
+        }
         Adjustment::ColorBalance { shadows, midtones, highlights, preserve_luminosity } => map_rgb(buf, |c| {
             let l = rgb_to_gray(c);
             let ws = (1.0 - l * 2.0).clamp(0.0, 1.0);
@@ -207,6 +196,117 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
         // Not evaluated: identity (still round-trips through PSD).
         Adjustment::ColorLookup { .. } | Adjustment::Unsupported { .. } => {}
     }
+}
+
+/// Per-channel LUTs of a Levels or Curves adjustment, each channel's record composed with the
+/// master (Photoshop applies the channel curve first, then the composite). Four rows: the three
+/// `per_channel` channels then black (identity unless the space is CMYK). In Lab there is no
+/// composite record, so the master is ignored.
+pub fn tone_luts(adj: &Adjustment) -> [Vec<f32>; 4] {
+    let x = |k: usize| k as f32 / (LUT_SIZE - 1) as f32;
+    match adj {
+        Adjustment::Levels { master, per_channel, space, black } => {
+            let ident = LevelsChannel::default();
+            let m = if *space == ToneSpace::Lab { &ident } else { master };
+            let row = |c: &LevelsChannel| (0..LUT_SIZE).map(|k| levels(c, levels(m, x(k)))).collect();
+            [row(&per_channel[0]), row(&per_channel[1]), row(&per_channel[2]), row(if *space == ToneSpace::Cmyk { black } else { &ident })]
+        }
+        Adjustment::Curves { master, per_channel, space, black } => {
+            let m = if *space == ToneSpace::Lab { curve_lut(&[]) } else { curve_lut(master) };
+            let row = |c: &[CurvePoint]| curve_lut(c).iter().map(|&v| lut(&m, v)).collect();
+            [row(&per_channel[0]), row(&per_channel[1]), row(&per_channel[2]), row(if *space == ToneSpace::Cmyk { black } else { &[] })]
+        }
+        _ => std::array::from_fn(|_| (0..LUT_SIZE).map(x).collect()),
+    }
+}
+
+/// Applies channel LUTs to a display-RGB colour in CMYK (ink brightness, 1 - ink) or Lab space,
+/// through the conversions the document's surfaces use. The change is added as a difference of
+/// two round trips, so channels a curve leaves alone (and out-of-gamut colours) stay exact.
+fn tone_in_space(space: ToneSpace, luts: &[Vec<f32>; 4], c: [f32; 3]) -> [f32; 3] {
+    use photocraft_color::convert::{cmyk_to_rgb, lab_to_srgb, rgb_to_cmyk, srgb_to_lab};
+    let (before, after) = match space {
+        ToneSpace::Cmyk => {
+            let ink = rgb_to_cmyk(c);
+            let out: [f32; 4] = std::array::from_fn(|i| 1.0 - lut(&luts[i], 1.0 - ink[i]));
+            if out == ink {
+                return c;
+            }
+            (cmyk_to_rgb(ink), cmyk_to_rgb(out))
+        }
+        ToneSpace::Lab => {
+            let l = srgb_to_lab(c);
+            let n = [l[0] / 100.0, (l[1] + 128.0) / 255.0, (l[2] + 128.0) / 255.0];
+            let o: [f32; 3] = std::array::from_fn(|i| lut(&luts[i], n[i]));
+            if o == n {
+                return c;
+            }
+            let back = |v: [f32; 3]| lab_to_srgb([v[0] * 100.0, v[1] * 255.0 - 128.0, v[2] * 255.0 - 128.0]);
+            (back(n), back(o))
+        }
+        ToneSpace::Rgb => return std::array::from_fn(|i| lut(&luts[i], c[i])),
+    };
+    std::array::from_fn(|i| (c[i] + after[i] - before[i]).clamp(0.0, 1.0))
+}
+
+/// Hue/Saturation's range edits as three hue-indexed tables (hue shift in degrees, saturation and
+/// lightness as fractions), sampled at hue `k / (len - 1)` turns. Ranges add up where they overlap.
+pub fn hue_range_tables(ranges: &[HueRange; 6]) -> [Vec<f32>; 3] {
+    let at = |k: usize| {
+        let deg = k as f32 / (LUT_SIZE - 1) as f32 * 360.0;
+        ranges.iter().filter(|r| !r.is_neutral()).fold([0.0f32; 3], |acc, r| {
+            let w = r.weight(deg);
+            [acc[0] + w * r.hue, acc[1] + w * r.saturation / 100.0, acc[2] + w * r.lightness / 100.0]
+        })
+    };
+    let rows: Vec<[f32; 3]> = (0..LUT_SIZE).map(at).collect();
+    std::array::from_fn(|i| rows.iter().map(|r| r[i]).collect())
+}
+
+/// One Hue/Saturation evaluation: hue shift in degrees, saturation and lightness in -1..=1.
+/// Colorize sets the hue and saturation instead of shifting them.
+pub fn hue_saturation(c: [f32; 3], hue: f32, s: f32, l: f32, colorize: bool) -> [f32; 3] {
+    let (mut hh, mut ss, ll) = rgb_to_hsl(c);
+    if colorize {
+        hh = hue.rem_euclid(360.0) / 360.0;
+        ss = s.abs().max(0.25);
+    } else {
+        hh = (hh + hue / 360.0).rem_euclid(1.0);
+        ss = (ss * (1.0 + s)).clamp(0.0, 1.0);
+    }
+    let mut rgb = hsl_to_rgb(hh, ss, ll);
+    if l > 0.0 {
+        rgb = rgb.map(|v| v + (1.0 - v) * l);
+    } else if l < 0.0 {
+        rgb = rgb.map(|v| v * (1.0 + l));
+    }
+    rgb
+}
+
+/// Black & White grey value. Each colour is the sum of a grey part (its smallest channel), a
+/// secondary-colour part (yellow, cyan or magenta: middle − smallest) and a primary part (red,
+/// green or blue: largest − middle); the sliders (percent, Photoshop defaults 40 60 40 60 20 80 for
+/// reds, yellows, greens, cyans, blues, magentas) weight the two colour parts.
+pub fn black_white_gray(c: [f32; 3], weights: &[f32; 6]) -> f32 {
+    let (r, g, b) = (c[0], c[1], c[2]);
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let mid = r + g + b - max - min;
+    // Primary: the largest channel; secondary: the two largest channels together.
+    let primary = if r >= g && r >= b {
+        0
+    } else if g >= b {
+        2
+    } else {
+        4
+    };
+    let secondary = if b <= r && b <= g {
+        1 // red + green = yellow
+    } else if r <= g {
+        3 // green + blue = cyan
+    } else {
+        5 // red + blue = magenta
+    };
+    (min + (mid - min) * weights[secondary] / 100.0 + (max - mid) * weights[primary] / 100.0).clamp(0.0, 1.0)
 }
 
 /// Ordered-dither offset in -0.5..0.5 (4×4 Bayer matrix) for document pixel (x, y).
@@ -539,5 +639,95 @@ mod lookup_tests {
         let sum: f32 = (0..4).flat_map(|y| (0..4).map(move |x| bayer4(x, y))).sum();
         assert!(sum.abs() < 1e-5);
         assert_eq!(bayer4(-4, -4), bayer4(0, 0));
+    }
+}
+
+#[cfg(test)]
+mod tone_tests {
+    use super::*;
+    use photocraft_geom::Rect;
+
+    fn ramp() -> Buffer {
+        let rect = Rect::new(0, 0, 8, 8);
+        let px = (0..64).map(|i| [((i % 8) as f32) / 7.0, ((i / 8) as f32) / 7.0, 0.3, 1.0]).collect();
+        Buffer { rect, px }
+    }
+
+    #[test]
+    fn identity_tone_in_every_space_is_identity() {
+        for space in [ToneSpace::Rgb, ToneSpace::Cmyk, ToneSpace::Lab] {
+            let mut a = Adjustment::identity_curves();
+            if let Adjustment::Curves { space: s, .. } = &mut a {
+                *s = space;
+            }
+            let mut b = ramp();
+            apply(&a, &mut b);
+            for (x, y) in b.px.iter().zip(ramp().px.iter()) {
+                for k in 0..3 {
+                    assert!((x[k] - y[k]).abs() < 0.02, "{space:?} {x:?} {y:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cmyk_black_curve_darkens_and_lab_lightness_lifts() {
+        let line = |a: f32, b: f32| vec![CurvePoint { input: 0.0, output: a }, CurvePoint { input: 1.0, output: b }];
+        // Black brightness 1 -> 0.5: more black ink everywhere.
+        let a = Adjustment::Curves {
+            master: line(0.0, 1.0),
+            per_channel: [line(0.0, 1.0), line(0.0, 1.0), line(0.0, 1.0)],
+            space: ToneSpace::Cmyk,
+            black: line(0.0, 0.5),
+        };
+        let mut b = Buffer { rect: Rect::new(0, 0, 1, 1), px: vec![[0.8, 0.8, 0.8, 1.0]] };
+        apply(&a, &mut b);
+        assert!(b.px[0][0] < 0.7, "{:?}", b.px[0]);
+        // Lab lightness 0..1 -> 0.2..1 lifts a dark grey; a/b untouched keeps it grey.
+        let a = Adjustment::Curves {
+            master: line(1.0, 0.0), // ignored in Lab
+            per_channel: [line(0.2, 1.0), line(0.0, 1.0), line(0.0, 1.0)],
+            space: ToneSpace::Lab,
+            black: Vec::new(),
+        };
+        let mut b = Buffer { rect: Rect::new(0, 0, 1, 1), px: vec![[0.2, 0.2, 0.2, 1.0]] };
+        apply(&a, &mut b);
+        let p = b.px[0];
+        assert!(p[0] > 0.3 && (p[0] - p[2]).abs() < 0.02, "{p:?}");
+    }
+
+    #[test]
+    fn hue_ranges_only_touch_their_colours() {
+        let mut ranges = HueRange::defaults();
+        ranges[0].saturation = -100.0; // desaturate reds
+        let a = Adjustment::HueSaturation { hue: 0.0, saturation: 0.0, lightness: 0.0, colorize: false, ranges };
+        let mut b = Buffer { rect: Rect::new(0, 0, 3, 1), px: vec![[0.9, 0.1, 0.1, 1.0], [0.1, 0.1, 0.9, 1.0], [0.5, 0.5, 0.5, 1.0]] };
+        apply(&a, &mut b);
+        let red = b.px[0];
+        assert!((red[0] - red[1]).abs() < 0.05, "red desaturated {red:?}");
+        assert!((b.px[1][2] - 0.9).abs() < 1e-4 && (b.px[1][0] - 0.1).abs() < 1e-4, "blue untouched {:?}", b.px[1]);
+        assert_eq!(b.px[2], [0.5, 0.5, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn black_white_weights() {
+        let d = [40.0, 60.0, 40.0, 60.0, 20.0, 80.0];
+        assert!((black_white_gray([0.5; 3], &d) - 0.5).abs() < 1e-6, "greys keep their value");
+        assert!((black_white_gray([1.0, 0.0, 0.0], &d) - 0.4).abs() < 1e-6);
+        assert!((black_white_gray([1.0, 1.0, 0.0], &d) - 0.6).abs() < 1e-6);
+        let mut w = d;
+        w[0] = 100.0;
+        assert!(black_white_gray([1.0, 0.0, 0.0], &w) > black_white_gray([1.0, 0.0, 0.0], &d));
+    }
+
+    #[test]
+    fn gradient_map_dither_stays_close() {
+        let stops = vec![(0.0, [0.0; 3]), (1.0, [1.0; 3])];
+        let mut a = ramp();
+        let mut b = ramp();
+        apply(&Adjustment::GradientMap { stops: stops.clone(), reverse: false, dither: false }, &mut a);
+        apply(&Adjustment::GradientMap { stops, reverse: false, dither: true }, &mut b);
+        assert!(a.px.iter().zip(&b.px).all(|(x, y)| (x[0] - y[0]).abs() <= 0.5 / 255.0 + 1e-6));
+        assert!(a.px.iter().zip(&b.px).any(|(x, y)| x[0] != y[0]));
     }
 }
