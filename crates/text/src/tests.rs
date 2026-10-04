@@ -471,3 +471,17 @@ fn psd_round_trips_antialias_opentype_and_warp() {
         assert_eq!(tags, ["frac", "swsh"]);
     }
 }
+
+/// Regression: a PSD whose text engine data has no `EngineDict` (or isn't a dictionary)
+/// panicked with `expect("EngineDict")` when the layer was written back (PSD export).
+#[test]
+fn engine_data_template_without_engine_dict() {
+    use crate::engine_data::{self as ed, Value as E};
+    let t = styled("Hi", CharStyle::default());
+    let no_engine_dict = ed::parse(b"<< /ResourceDict << >> >>").unwrap();
+    for template in [no_engine_dict, E::Dict(vec![]), E::Int(3)] {
+        let e = crate::psd::build_engine_data(&t, Some(template), 72.0);
+        let text = e.path(&["EngineDict", "Editor", "Text"]);
+        assert!(matches!(text, Some(E::String(s)) if s == "Hi\r"), "{text:?}");
+    }
+}

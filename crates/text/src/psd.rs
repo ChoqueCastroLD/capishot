@@ -432,7 +432,15 @@ pub(crate) fn font_entry(name: &str) -> E {
 /// Updates (or creates) an EngineData tree for `layer`.
 pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E {
     let k = 72.0 / if dpi > 0.0 { dpi } else { 72.0 };
-    let mut e = template.unwrap_or_else(|| E::Dict(vec![("EngineDict".into(), E::dict()), ("ResourceDict".into(), E::dict())]));
+    let fresh = || E::Dict(vec![("EngineDict".into(), E::dict()), ("ResourceDict".into(), E::dict())]);
+    // The template comes from the PSD: it may not be a dictionary or may lack `EngineDict`.
+    let mut e = match template {
+        Some(t @ E::Dict(_)) => t,
+        _ => fresh(),
+    };
+    if !matches!(e.get("EngineDict"), Some(E::Dict(_))) {
+        e.set("EngineDict", E::dict());
+    }
     let runs = layer.char_runs();
     let paras = layer.paragraph_runs();
     let text = layer.text.replace('\n', "\r");
@@ -483,7 +491,9 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
     }
     let fontset = E::Array(fonts.iter().map(|f| font_entry(f)).collect());
 
-    let dict = e.get_mut("EngineDict").expect("EngineDict");
+    let Some(dict) = e.get_mut("EngineDict") else {
+        return fresh();
+    };
     let mut editor = dict.get("Editor").cloned().unwrap_or_else(E::dict);
     editor.set("Text", E::String(ed_text));
     dict.set("Editor", editor);

@@ -158,8 +158,7 @@ pub struct Mips {
 impl Mips {
     pub fn new(t: &GrayTile) -> Self {
         let mut levels = vec![(t.width as usize, t.height as usize, t.to_f32())];
-        loop {
-            let (w, h, v) = levels.last().expect("level");
+        while let Some((w, h, v)) = levels.last() {
             if *w <= 1 && *h <= 1 {
                 break;
             }

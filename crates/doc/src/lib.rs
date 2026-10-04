@@ -6,6 +6,7 @@
 //! Non-destructive kinds (adjustment, fill, text, shape, smart object) and colour modes beyond RGB are
 //! part of the model from day one, even where rendering support lands later (architecture §1.1).
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod adjust;
 pub mod analysis;
@@ -767,11 +768,8 @@ impl Document {
     /// Insert `layer` directly above the layer `above` (or at the top of the root if None).
     pub fn insert_above(&mut self, above: Option<LayerId>, layer: Layer) -> LayerId {
         let id = layer.id;
-        match above.and_then(|a| self.path_of(a)) {
-            Some(path) => {
-                let (sib, idx) = self.siblings_mut(&path).expect("valid path");
-                sib.insert(idx + 1, layer);
-            }
+        match above.and_then(|a| self.path_of(a)).and_then(|path| self.siblings_mut(&path)) {
+            Some((sib, idx)) => sib.insert(idx + 1, layer),
             None => self.layers.push(layer),
         }
         id
@@ -799,7 +797,8 @@ impl Document {
     /// Next unused "Layer N" name.
     pub fn next_layer_name(&self, base: &str) -> String {
         let names: std::collections::HashSet<&str> = self.walk().into_iter().map(|(_, _, l)| l.name.as_str()).collect();
-        (1..).map(|n| format!("{base} {n}")).find(|n| !names.contains(n.as_str())).expect("infinite")
+        // At most `names.len() + 1` candidates are needed, so the search always succeeds.
+        (1..=names.len() + 1).map(|n| format!("{base} {n}")).find(|n| !names.contains(n.as_str())).unwrap_or_else(|| base.to_string())
     }
 
     /// Top-most layer id, useful as the default active layer.

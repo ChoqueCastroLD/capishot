@@ -11,33 +11,37 @@ use std::sync::OnceLock;
 
 use photocraft_cms::{Builtin, Intent, Transform};
 
-fn cmyk_to_srgb_transform() -> &'static Transform {
-    static T: OnceLock<Transform> = OnceLock::new();
-    T.get_or_init(|| {
-        Transform::new(Builtin::CoatedCmyk.profile(), Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).expect("built-in profiles link")
-    })
+// The built-in profiles always link (the tests use these transforms); `None` only guards
+// against a cms regression, and then the conversions fall back to the naive formulas.
+fn cmyk_to_srgb_transform() -> Option<&'static Transform> {
+    static T: OnceLock<Option<Transform>> = OnceLock::new();
+    T.get_or_init(|| Transform::new(Builtin::CoatedCmyk.profile(), Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).ok()).as_ref()
 }
 
-fn srgb_to_cmyk_transform() -> &'static Transform {
-    static T: OnceLock<Transform> = OnceLock::new();
-    T.get_or_init(|| {
-        Transform::new(Builtin::Srgb.profile(), Builtin::CoatedCmyk.profile(), Intent::RelativeColorimetric, true).expect("built-in profiles link")
-    })
+fn srgb_to_cmyk_transform() -> Option<&'static Transform> {
+    static T: OnceLock<Option<Transform>> = OnceLock::new();
+    T.get_or_init(|| Transform::new(Builtin::Srgb.profile(), Builtin::CoatedCmyk.profile(), Intent::RelativeColorimetric, true).ok()).as_ref()
 }
 
 /// Colour-managed CMYK → sRGB (built-in coated CMYK profile, relative colorimetric + BPC).
 #[inline]
 pub fn cmyk_to_rgb(c: [f32; 4]) -> [f32; 3] {
+    let Some(t) = cmyk_to_srgb_transform() else {
+        return cmyk_to_rgb_naive(c);
+    };
     let mut o = [0.0f32; 3];
-    cmyk_to_srgb_transform().eval_fast(&c, &mut o);
+    t.eval_fast(&c, &mut o);
     o
 }
 
 /// Colour-managed sRGB → CMYK (built-in coated CMYK profile, relative colorimetric + BPC).
 #[inline]
 pub fn rgb_to_cmyk(rgb: [f32; 3]) -> [f32; 4] {
+    let Some(t) = srgb_to_cmyk_transform() else {
+        return rgb_to_cmyk_naive(rgb);
+    };
     let mut o = [0.0f32; 4];
-    srgb_to_cmyk_transform().eval_fast(&[rgb[0].clamp(0.0, 1.0), rgb[1].clamp(0.0, 1.0), rgb[2].clamp(0.0, 1.0)], &mut o);
+    t.eval_fast(&[rgb[0].clamp(0.0, 1.0), rgb[1].clamp(0.0, 1.0), rgb[2].clamp(0.0, 1.0)], &mut o);
     o
 }
 

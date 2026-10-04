@@ -3,6 +3,7 @@
 //! Document space is integer pixels with the origin at the canvas top-left.
 //! Layers may extend beyond the canvas (negative coordinates are valid).
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use serde::{Deserialize, Serialize};
 

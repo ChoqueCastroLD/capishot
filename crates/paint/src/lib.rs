@@ -12,6 +12,7 @@
 //! stroke buffer → pixels), [`presets`] (built-ins), [`mixer`] (Mixer Brush), [`replace`] (Color
 //! Replacement), [`retouch`] (sequential/accumulating helpers for the retouch tools).
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use photocraft_geom::{Point, Rect};
 use photocraft_raster::Surface;

@@ -15,6 +15,7 @@
 //! [`PixelFormat`] (only tiles that differ from the default are allocated). Pure Rust, no
 //! platform dependencies; builds for `wasm32` (single-threaded there, rayon elsewhere).
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod flatten;
 pub mod raster;

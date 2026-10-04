@@ -5,6 +5,7 @@
 //! so cloning a surface is O(tiles) and mutation copies only the touched tiles. That makes
 //! undo snapshots, background jobs and autosave cheap.
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

@@ -12,6 +12,7 @@
 //! The usual entry point is [`TextEngine::render_layer`], which refreshes a
 //! [`photocraft_doc::TextLayer`]'s cache from its style model.
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod engine_data;
 pub mod fonts;

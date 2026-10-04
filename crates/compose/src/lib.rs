@@ -12,6 +12,7 @@
 //! This is the reference the GPU backend (milestone M5) must match within 1/255. Compositing
 //! currently happens in display RGB. Mode-native (CMYK/Lab) compositing arrives with ICC in M8.
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod adjust;
 pub mod bounds;
