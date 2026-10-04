@@ -56,7 +56,9 @@ impl BridgeClient {
                 *guard = Some((BufReader::new(r), w));
             }
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let conn = guard.as_mut().expect("connected");
+            let Some(conn) = guard.as_mut() else {
+                return Err(AutomationError::Bridge(format!("not connected to {}", self.addr)));
+            };
             match tokio::time::timeout(self.timeout, exchange(conn, id, method, &params)).await {
                 Ok(Ok(v)) => return v,
                 Ok(Err(e)) if attempt == 0 => {

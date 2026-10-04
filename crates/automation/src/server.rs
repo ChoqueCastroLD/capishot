@@ -165,6 +165,12 @@ fn fail(e: impl std::fmt::Display) -> CallToolResult {
     CallToolResult::error(vec![Content::text(e.to_string())])
 }
 
+/// Neither backend took the call. The backend is always headless or a bridge, so this only
+/// guards against a future backend kind.
+fn no_backend() -> CallToolResult {
+    fail("internal error: no headless session or app bridge")
+}
+
 fn png_result(png: &[u8], note: String) -> CallToolResult {
     let b64 = base64::engine::general_purpose::STANDARD.encode(png);
     CallToolResult::success(vec![Content::image(b64, "image/png"), Content::text(note)])
@@ -285,7 +291,9 @@ impl PhotocraftMcp {
         if let Some(r) = self.headless_op(|h| Ok(h.session_list())).await {
             return to_result(r);
         }
-        let b = self.bridge_client().expect("bridge");
+        let Some(b) = self.bridge_client() else {
+            return Ok(no_backend());
+        };
         to_result(b.call("ui.inspect", json!({})).await)
     }
 
@@ -295,7 +303,9 @@ impl PhotocraftMcp {
         if let Some(r) = self.headless_op(move |h| h.open(&path)).await {
             return to_result(r);
         }
-        let b = self.bridge_client().expect("bridge");
+        let Some(b) = self.bridge_client() else {
+            return Ok(no_backend());
+        };
         to_result(b.call("app.open", json!({"path": p.path})).await)
     }
 
@@ -342,7 +352,9 @@ impl PhotocraftMcp {
         if let Some(r) = self.headless_op(move |h| h.inspect(p.index)).await {
             return to_result(r);
         }
-        let b = self.bridge_client().expect("bridge");
+        let Some(b) = self.bridge_client() else {
+            return Ok(no_backend());
+        };
         to_result(b.call("engine.execute", json!({"command": "document.inspect", "params": {}})).await)
     }
 
@@ -355,7 +367,9 @@ impl PhotocraftMcp {
                 Err(e) => fail(e),
             });
         }
-        let b = self.bridge_client().expect("bridge");
+        let Some(b) = self.bridge_client() else {
+            return Ok(no_backend());
+        };
         self.screenshot(b, Some(max)).await
     }
 
@@ -380,7 +394,9 @@ impl PhotocraftMcp {
         let all = if let Some(r) = self.headless_op(|h| Ok(h.command_list())).await {
             r
         } else {
-            let b = self.bridge_client().expect("bridge");
+            let Some(b) = self.bridge_client() else {
+                return Ok(no_backend());
+            };
             b.call("engine.commands", json!({})).await
         };
         let all = match all {
@@ -417,7 +433,9 @@ impl PhotocraftMcp {
         if let Some(r) = self.headless_op(move |h| h.batch(&args)).await {
             return to_result(r);
         }
-        let b = self.bridge_client().expect("bridge");
+        let Some(b) = self.bridge_client() else {
+            return Ok(no_backend());
+        };
         let mut results = Vec::new();
         let mut failed = 0;
         for s in &steps {
@@ -502,19 +520,20 @@ impl PhotocraftMcp {
         if let Some(r) = self.headless_op(move |h| h.command_run(&id2, params2)).await {
             return to_result(r);
         }
-        let b = self.bridge_client().expect("bridge");
+        let Some(b) = self.bridge_client() else {
+            return Ok(no_backend());
+        };
         to_result(b.call("engine.execute", json!({"command": id, "params": params})).await)
     }
 
     async fn save_impl(&self, p: SaveParams) -> Result<CallToolResult, McpError> {
-        if self.bridge_client().is_some() {
-            let b = self.bridge_client().expect("bridge");
+        if let Some(b) = self.bridge_client() {
             let Some(path) = p.path else {
                 return Ok(fail("bridge mode needs `path`"));
             };
             return to_result(b.call("app.save", json!({"path": path})).await);
         }
-        let r = self
+        let Some(r) = self
             .headless_op(move |h| {
                 let mut opts = photocraft_io::ExportOptions::default();
                 if let Some(q) = p.quality {
@@ -524,7 +543,9 @@ impl PhotocraftMcp {
                 h.save(p.index, path.as_deref(), p.format.as_deref(), &opts)
             })
             .await
-            .expect("headless");
+        else {
+            return Ok(no_backend());
+        };
         to_result(r)
     }
 }

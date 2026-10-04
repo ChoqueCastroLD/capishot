@@ -16,7 +16,7 @@
 use std::io::{BufRead, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -160,10 +160,12 @@ pub fn respond(h: &Mutex<Headless>, line: &str) -> Value {
         return json!({"id": id, "ok": false, "error": "missing `method`"});
     };
     let params = req.get("params").cloned().unwrap_or(Value::Null);
-    let r = match h.lock() {
-        Ok(mut g) => g.handle(method, params),
-        Err(_) => Err(AutomationError::Other("session lock poisoned".into())),
-    };
+    // Last-resort guard (AGENTS.md, Never crash): a command that panics answers this request
+    // with an error instead of taking down the connection (or the whole stdio server). Edits
+    // run on a copy of the document (`Session::edit`), so the session stays consistent and a
+    // poisoned lock is safe to keep using, the same as the MCP server does.
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| h.lock().unwrap_or_else(PoisonError::into_inner).handle(method, params)))
+        .unwrap_or_else(|_| Err(AutomationError::Other(format!("internal error: `{method}` panicked"))));
     match r {
         Ok(v) => json!({"id": id, "ok": true, "result": v}),
         Err(e) => json!({"id": id, "ok": false, "error": e.to_string()}),
@@ -237,6 +239,23 @@ mod tests {
         assert!(!replies[3]["ok"].as_bool().unwrap());
         assert!(replies[3]["error"].as_str().unwrap().contains("unknown method"));
         assert_eq!(replies[4]["id"], Value::Null);
+    }
+
+    /// Regression: after a panic while the session lock was held, every later request
+    /// failed with "session lock poisoned"; the server now keeps serving.
+    #[test]
+    fn poisoned_session_keeps_serving() {
+        let h = session();
+        let _ = std::thread::scope(|sc| {
+            sc.spawn(|| {
+                let _g = h.lock().unwrap();
+                panic!("poison the session lock");
+            })
+            .join()
+        });
+        assert!(h.is_poisoned());
+        let r = respond(&h, r#"{"id":1,"method":"doc.new","params":{"width":8,"height":8}}"#);
+        assert_eq!(r["ok"], true, "{r}");
     }
 
     #[test]
