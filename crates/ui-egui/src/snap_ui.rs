@@ -124,8 +124,15 @@ fn near_handle(q: &[[f64; 2]; 4], p: [f64; 2], tol: f64) -> bool {
     })
 }
 
+/// Photoshop: holding Ctrl (Windows) / Control (macOS) *during* a drag temporarily turns snapping
+/// off. Only the held state while dragging counts: Ctrl at the press belongs to the tool (Ctrl-click
+/// auto-selects with the Move tool), and ⌘ on the Mac never overrides snapping.
+fn override_held(mods: egui::Modifiers) -> bool {
+    mods.ctrl && !mods.mac_cmd
+}
+
 /// Start snapping for a drag beginning at `p` (called on pointer down).
-fn begin(app: &mut PhotocraftApp, p: [f64; 2], mods: egui::Modifiers) {
+fn begin(app: &mut PhotocraftApp, p: [f64; 2]) {
     app.prefs_rt.snap = None;
     app.prefs_rt.snap_lines.clear();
     if app.session.active().is_none() {
@@ -158,7 +165,7 @@ fn begin(app: &mut PhotocraftApp, p: [f64; 2], mods: egui::Modifiers) {
         targets = targets.filtered(|k| k != SnapKind::Guide);
     }
     let smart = if matches!(gesture, Gesture::Move { .. }) && smart_on(app) { build(app, &exclude, true) } else { SnapTargets::default() };
-    app.prefs_rt.snap = Some(ActiveSnap { gesture, start: p, targets, smart, disabled: mods.ctrl && !mods.mac_cmd });
+    app.prefs_rt.snap = Some(ActiveSnap { gesture, start: p, targets, smart, disabled: false });
 }
 
 /// Round to whole pixels when Preferences › Tools asks vector tools and transforms to snap to
@@ -199,7 +206,7 @@ fn apply(app: &mut PhotocraftApp, p: [f64; 2]) -> [f64; 2] {
 pub fn filter_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) -> ToolEvent {
     match ev {
         ToolEvent::Down { x, y, pressure } => {
-            begin(app, [x, y], mods);
+            begin(app, [x, y]);
             // Moves snap their delta, which is zero at the start: keep the press point.
             let p = match app.prefs_rt.snap.as_ref().map(|s| &s.gesture) {
                 Some(Gesture::Point) => {
@@ -215,7 +222,7 @@ pub fn filter_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifier
                 return ev;
             }
             if let Some(s) = app.prefs_rt.snap.as_mut() {
-                s.disabled = mods.ctrl && !mods.mac_cmd;
+                s.disabled = override_held(mods);
             }
             let q = apply(app, [x, y]);
             let p = pixel_round(app, q);
@@ -224,6 +231,9 @@ pub fn filter_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifier
         ToolEvent::Up { x, y } => {
             if app.prefs_rt.snap.is_none() {
                 return ev;
+            }
+            if let Some(s) = app.prefs_rt.snap.as_mut() {
+                s.disabled = override_held(mods);
             }
             let q = apply(app, [x, y]);
             let p = pixel_round(app, q);
@@ -341,9 +351,17 @@ mod tests {
         assert_eq!(mover_bounds(&app).x0, 303);
         app.ui.extras.snap = true;
         let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
-        crate::canvas::tool_event(&mut app, ToolEvent::Down { x: 60.0, y: 60.0, pressure: 1.0 }, ctrl);
+        crate::canvas::tool_event(&mut app, ToolEvent::Down { x: 60.0, y: 60.0, pressure: 1.0 }, m);
         crate::canvas::tool_event(&mut app, ToolEvent::Up { x: 62.0, y: 60.0 }, ctrl);
         assert_eq!(mover_bounds(&app).x0, 305, "no snap to the target's right edge at 350? (moved freely)");
+        // Ctrl only at the press (Ctrl-click auto-select) doesn't turn snapping off for the drag.
+        crate::canvas::tool_event(&mut app, ToolEvent::Down { x: 60.0, y: 60.0, pressure: 1.0 }, ctrl);
+        crate::canvas::tool_event(&mut app, ToolEvent::Move { x: 61.0, y: 60.0, pressure: 1.0 }, m);
+        assert!(!app.prefs_rt.snap.as_ref().is_some_and(|s| s.disabled));
+        crate::canvas::tool_event(&mut app, ToolEvent::Up { x: 61.0, y: 60.0 }, m);
+        // ⌘ on the Mac is not the override.
+        let cmd = egui::Modifiers { mac_cmd: true, command: true, ..Default::default() };
+        assert!(!override_held(cmd) && override_held(ctrl));
     }
 
     #[test]

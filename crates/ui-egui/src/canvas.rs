@@ -880,8 +880,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
     }
 
+    // Under an open dialog the canvas widget is inert, but the image still pans and zooms.
+    let under_dialog = !app.ui.dialogs.is_empty();
+    let free_hover = under_dialog && crate::dialogs::free_pointer_over(&ctx, rect).is_some();
     // Navigation: scroll pans, pinch / ⌘-scroll zooms around the pointer.
-    if response.hovered() {
+    if response.hovered() || free_hover {
         let (scroll, zoom_delta, pointer) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
         if zoom_delta != 1.0
             && let Some(p) = pointer
@@ -905,6 +908,15 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let middle = ui.input(|i| i.pointer.middle_down());
     let tool = if space_pan || middle { Tool::Hand } else { app.ui.tool };
 
+    if under_dialog {
+        if let Some(d) = crate::dialogs::pan_delta(&ctx, rect, app.ui.tool == Tool::Hand) {
+            view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
+            view.center[1] -= d.y / view.zoom;
+            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if free_hover && (space_pan || app.ui.tool == Tool::Hand) {
+            ctx.set_cursor_icon(egui::CursorIcon::Grab);
+        }
+    }
     if tool == Tool::Hand && response.dragged() {
         let d = response.drag_delta();
         view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };

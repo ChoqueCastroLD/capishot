@@ -487,7 +487,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             hint(ui, "Click the first point or press ↵ to close · Esc cancels");
                         }
                     }
-                    Tool::MagicWand if t.pro => {
+                    Tool::MagicWand => {
                         selection_mode_buttons(app, ui);
                         widgets::vline(ui, 22.0);
                         opt_label(ui, "Tolerance");
@@ -624,7 +624,6 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     }
                     Tool::Hand => hint(ui, "Drag to pan  ·  hold Space with any tool"),
                     Tool::Lasso | Tool::PolygonLasso => hint(ui, "Drag (lasso) or click points (polygonal) · ⇧ add · ⌥ subtract"),
-                    Tool::MagicWand => hint(ui, "Click to select similar colours"),
                     Tool::Crop => hint(ui, "Drag a crop box · ↵ commits · Esc cancels"),
                     Tool::Gradient => hint(ui, "Drag to draw a gradient"),
                     Tool::PaintBucket => hint(ui, "Click to fill similar colours"),
@@ -1667,10 +1666,15 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         .corner_radius(CornerRadius::same(t.radius_lg as u8))
         .shadow(egui::Shadow { offset: [0, 12], blur: 36, spread: 0, color: t.shadow })
         .inner_margin(egui::Margin::same(14));
-    egui::Area::new(egui::Id::new("properties-card")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
+    // A floating panel (Order::Middle like other panels, so menus, popups and dialogs stay above
+    // it), anchored to the canvas corner and dragged by its title off the part being worked on.
+    let card_id = egui::Id::new("properties-card");
+    let offset: egui::Vec2 = ctx.data(|m| m.get_temp(card_id)).unwrap_or_default();
+    let mut drag = egui::Vec2::ZERO;
+    let shown = egui::Area::new(card_id).order(egui::Order::Middle).fixed_pos(pos + offset).show(ctx, |ui| {
         frame.show(ui, |ui| {
             ui.set_width(width - 28.0);
-            ui.horizontal(|ui| {
+            let title = ui.horizontal(|ui| {
                 ui.label(RichText::new("Properties").font(theme::semibold(13.5)).color(t.text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if icons::button(ui, "minus", 22.0, false, "Hide Properties").clicked() {
@@ -1678,6 +1682,12 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     }
                 });
             });
+            let bar = title.response.rect.with_max_x(title.response.rect.right() - 28.0);
+            let grip = ui.interact(bar, card_id.with("title"), Sense::drag());
+            if grip.hovered() || grip.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+            drag = grip.drag_delta();
             ui.add_space(6.0);
             let icon = match &layer.content {
                 LayerContent::Adjustment(_) => "sliders-horizontal",
@@ -1708,6 +1718,13 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
         });
     });
+    if drag != egui::Vec2::ZERO && canvas.is_positive() {
+        // Keep the title bar inside the canvas.
+        let r = shown.response.rect.translate(drag);
+        let dx = (canvas.left() - r.left()).max(0.0) - (r.right() - canvas.right()).max(0.0);
+        let dy = (canvas.top() - r.top()).max(0.0) - (r.top() + 40.0 - canvas.bottom()).max(0.0);
+        ctx.data_mut(|m| m.insert_temp(card_id, offset + drag + egui::vec2(dx, dy)));
+    }
 }
 
 fn adjustment_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj: &photocraft_doc::Adjustment) {

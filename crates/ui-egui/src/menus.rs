@@ -687,21 +687,40 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
         egui::MenuBar::new().ui(ui, |ui| {
             ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
+            let mut buttons = Vec::with_capacity(TOP_MENUS.len());
             for top in TOP_MENUS {
                 let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
-                ui.menu_button(egui::RichText::new(top).color(t.text_dim), |ui| {
+                let r = ui.menu_button(egui::RichText::new(top).color(t.text_dim), |ui| {
                     ui.set_min_width(220.0);
                     if mine.is_empty() {
                         ui.weak("(coming soon)");
                     }
                     render_level(ui, &mine, 1, &mut clicked);
                 });
+                buttons.push(r.response);
             }
+            switch_on_hover(ui.ctx(), &buttons);
         });
     });
     if let Some(id) = clicked {
         let ctx = ui.ctx().clone();
         let _ = invoke(app, &ctx, &id, json!({}));
+    }
+}
+
+/// Like a native menu bar (Windows, macOS): while one top-level menu is open, hovering another
+/// top-level title opens that menu instead.
+fn switch_on_hover(ctx: &egui::Context, buttons: &[egui::Response]) {
+    let ids: Vec<egui::Id> = buttons.iter().map(egui::Popup::default_response_id).collect();
+    let Some(open) = ids.iter().position(|id| egui::Popup::is_id_open(ctx, *id)) else { return };
+    // `Response::hovered` is false while the menu's popup layer is open, so test the pointer
+    // against the titles directly (the bar is never under its own dropdowns).
+    let Some(p) = ctx.pointer_hover_pos() else { return };
+    if let Some(i) = buttons.iter().position(|b| b.interact_rect.contains(p))
+        && i != open
+    {
+        egui::Popup::open_id(ctx, ids[i]);
+        ctx.request_repaint();
     }
 }
 
@@ -810,6 +829,46 @@ mod tests {
                 harness.run_steps(3);
                 assert!(harness.query_by_label_contains("Open…").is_some(), "{theme:?}: File menu did not open");
             }
+        }
+    }
+
+    #[test]
+    fn hovering_another_title_switches_the_open_menu() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 700.0)).build_ui_state(|ui, app| menu_bar(app, ui), app);
+        PhotocraftApp::setup_context(&harness.ctx, crate::theme::ThemeKind::ALL[0]);
+        harness.run_steps(3);
+        // Nothing open: hovering a title does not open it.
+        harness.get_by_label("Image").hover();
+        harness.run_steps(3);
+        assert!(harness.query_by_label_contains("Open…").is_none() && harness.query_by_label_contains("Duplicate…").is_none());
+        harness.get_by_label("File").click();
+        harness.run_steps(3);
+        assert!(harness.query_by_label_contains("Open…").is_some());
+        harness.get_by_label("Image").hover();
+        harness.run_steps(4);
+        assert!(harness.query_by_label_contains("Open…").is_none(), "File menu should close");
+        assert!(harness.query_by_label_contains("Duplicate…").is_some(), "Image menu should open on hover");
+    }
+
+    #[test]
+    fn dropdown_items_have_room() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        for theme in crate::theme::ThemeKind::ALL {
+            let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(|ui, app| menu_bar(app, ui), app);
+            PhotocraftApp::setup_context(&harness.ctx, theme);
+            harness.run_steps(3);
+            harness.get_by_label("File").click();
+            harness.run_steps(3);
+            let a = harness.get_by_label_contains("New…").rect();
+            let b = harness.get_by_label_contains("Open…").rect();
+            let font = egui::TextStyle::Button.resolve(&harness.ctx.global_style()).size;
+            assert!(a.height() >= font + 8.0, "{theme:?}: item height {} for a {font} pt font", a.height());
+            assert!(b.top() - a.top() >= font + 10.0, "{theme:?}: rows {} apart", b.top() - a.top());
         }
     }
 

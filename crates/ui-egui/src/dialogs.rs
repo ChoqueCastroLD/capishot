@@ -6,8 +6,40 @@ use serde_json::{Value, json};
 use crate::PhotocraftApp;
 use crate::state::{Dialog, DialogKind};
 
+/// Where this frame's dialogs are on screen (the canvas reads last frame's: it draws first).
+const RECTS: &str = "pc-dialog-rects";
+
+fn rects(ctx: &egui::Context) -> Vec<egui::Rect> {
+    ctx.data(|m| m.get_temp(egui::Id::new(RECTS))).unwrap_or_default()
+}
+
+/// With a dialog open the rest of the window is inert (egui's modal layer), but like Photoshop the
+/// image can still be panned and zoomed under it. The pointer position when it is over `canvas`
+/// and not over a dialog or one of its popups.
+pub fn free_pointer_over(ctx: &egui::Context, canvas: egui::Rect) -> Option<egui::Pos2> {
+    if egui::Popup::is_any_open(ctx) {
+        return None;
+    }
+    let p = ctx.pointer_hover_pos()?;
+    let rects = rects(ctx);
+    (canvas.contains(p) && !rects.iter().any(|r| r.contains(p))).then_some(p)
+}
+
+/// Pan drag under an open dialog: Space-drag, middle-drag, or a drag with the Hand tool, started on
+/// the free canvas. Returns this frame's pointer movement.
+pub fn pan_delta(ctx: &egui::Context, canvas: egui::Rect, hand: bool) -> Option<egui::Vec2> {
+    let rects = rects(ctx);
+    let (origin, panning, delta) = ctx.input(|i| {
+        let p = &i.pointer;
+        (p.press_origin(), p.middle_down() || (p.primary_down() && (hand || i.key_down(egui::Key::Space))), p.delta())
+    });
+    let origin = origin?;
+    (panning && canvas.contains(origin) && !rects.iter().any(|r| r.contains(origin))).then_some(delta)
+}
+
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let dialogs = app.ui.dialogs.clone();
+    let mut shown = Vec::new();
     for d in dialogs {
         let mut fields = d.fields.clone();
         let mut outcome: Option<bool> = None; // Some(true)=OK, Some(false)=Cancel
@@ -95,13 +127,21 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     }
                 }
             });
+            // The frame around the content (Frame::popup's margin and stroke).
+            ui.min_rect().expand(ui.spacing().menu_margin.sum().max_elem() + 2.0)
         });
+        shown.push(modal.inner);
         if drag != egui::Vec2::ZERO {
             // Keep the whole dialog (and so its title bar) on screen.
             let room = ((ctx.content_rect().size() - modal.response.rect.size()) / 2.0).max(egui::Vec2::ZERO);
             ctx.data_mut(|m| m.insert_temp(id, (offset + drag).clamp(-room, room)));
         }
-        if modal.should_close() && outcome.is_none() {
+        // Esc cancels (topmost dialog, no popup open). A click outside does nothing: Photoshop keeps
+        // the dialog, and the pointer may be panning or zooming the canvas under it.
+        if outcome.is_none()
+            && (modal.response.should_close()
+                || (modal.is_top_modal && !modal.any_popup_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))))
+        {
             outcome = Some(false);
         }
         if let Some(dm) = app.ui.dialog_mut(d.id) {
@@ -118,6 +158,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             None => {}
         }
     }
+    ctx.data_mut(|m| m.insert_temp(egui::Id::new(RECTS), shown));
 }
 
 pub fn title(d: &Dialog) -> String {

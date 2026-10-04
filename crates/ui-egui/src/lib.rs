@@ -531,7 +531,8 @@ impl eframe::App for PhotocraftApp {
         }
     }
 
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        shortcuts::clipboard_keys(ctx, ctx.text_edit_focused() || self.ui.text_edit.is_some(), raw_input);
         raw_input.events.extend(self.take_synthetic_step());
     }
 
@@ -717,6 +718,9 @@ impl PhotocraftApp {
         theme::install_fonts(ctx);
         egui_extras::install_image_loaders(ctx);
         theme::apply(ctx, kind);
+        // egui's own ⌘+ / ⌘- / ⌘0 scale the whole interface; PhotoCraft zooms the canvas instead
+        // (shortcuts.rs), like Photoshop.
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
     }
 }
 
@@ -849,6 +853,9 @@ impl PhotocraftApp {
         true
     }
 }
+
+#[cfg(test)]
+mod input_tests;
 
 #[cfg(test)]
 mod clipboard_tests {
