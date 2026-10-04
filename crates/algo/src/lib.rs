@@ -27,6 +27,7 @@ pub mod content_aware;
 mod denoise;
 mod distort;
 mod distort2;
+pub mod erase;
 pub mod exif;
 pub mod features;
 mod fxutil;

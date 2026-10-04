@@ -408,6 +408,24 @@ pub fn transform_shape(sh: &mut ShapeLayer, a: &Affine) {
                 LiveShape::Line { from, to, weight } => LiveShape::Line { from: pt(from), to: pt(to), weight },
             })
         }
+        // Flips and 90° turns keep rectangles, ellipses and lines live (Image Rotation): the new
+        // live box is the mapped box. Polygons/stars would change orientation, so they don't.
+        (Some(l), false) if (m1.abs() < 1e-12 && m2.abs() < 1e-12) || (m0.abs() < 1e-12 && m3.abs() < 1e-12) => {
+            let pt = |p: [f64; 2]| [m0 * p[0] + m2 * p[1] + tx, m1 * p[0] + m3 * p[1] + ty];
+            let r = |r: [f64; 4]| {
+                let (p, q) = (pt([r[0], r[1]]), pt([r[0] + r[2], r[1] + r[3]]));
+                [p[0].min(q[0]), p[1].min(q[1]), (q[0] - p[0]).abs(), (q[1] - p[1]).abs()]
+            };
+            let k = (m0.abs() + m1.abs()).min(m2.abs() + m3.abs());
+            match l {
+                LiveShape::Rect { rect, radii } if radii.iter().all(|v| (v - radii[0]).abs() < 1e-9) => {
+                    Some(LiveShape::Rect { rect: r(rect), radii: radii.map(|v| v * k) })
+                }
+                LiveShape::Ellipse { rect } => Some(LiveShape::Ellipse { rect: r(rect) }),
+                LiveShape::Line { from, to, weight } => Some(LiveShape::Line { from: pt(from), to: pt(to), weight: weight * k }),
+                _ => None,
+            }
+        }
         _ => None,
     };
     sh.psd_raw = None;

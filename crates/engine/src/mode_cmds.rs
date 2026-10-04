@@ -81,6 +81,7 @@ fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
         doc.size = new;
         let canvas = doc.bounds();
         let fmt = doc.pixel_format();
+        let dpi = doc.resolution_dpi;
         for l in doc.layers.iter_mut() {
             let background = l.name == "Background" && l.locks.position && matches!(l.content, LayerContent::Raster(_));
             if background && let Some(surf) = l.surface_mut() {
@@ -104,22 +105,18 @@ fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
                 crate::transform_cmds::transform_layer(None, l, &h, Some(a), interp)?;
                 l.locks = locks;
             }
+            // What Free Transform leaves alone: unlinked vector masks, gradient angles, artboards…
+            crate::canvas_geom::transform_layer_geometry(l, &a, false, dpi);
         }
+        crate::canvas_geom::transform_doc_marks(doc, &a);
         for ch in doc.channels.iter_mut().chain(doc.quick_mask.as_mut()) {
             ch.surface = crate::transform_cmds::warp_gray(&ch.surface, &h, interp);
         }
         if let Some(sel) = &doc.selection {
             doc.selection = Some(crate::transform_cmds::warp_gray(sel, &h, Interp::Bilinear)).filter(|s| !s.content_bounds().is_empty());
         }
-        // Type and smart objects re-render from their new transforms.
-        let ids: Vec<LayerId> =
-            doc.walk().iter().filter(|(_, _, l)| matches!(l.content, LayerContent::Text(_) | LayerContent::Smart(_))).map(|(_, _, l)| l.id).collect();
-        for id in ids {
-            let snapshot = doc.clone();
-            if let Some(l) = doc.layer_mut(id) {
-                crate::transform_cmds::refresh_text(&snapshot, l);
-            }
-        }
+        // Type, shapes and smart objects re-render from their new geometry.
+        crate::canvas_geom::refresh(doc, crate::canvas_geom::Refresh::All);
         doc.guides = Default::default();
         Ok(new)
     })?;

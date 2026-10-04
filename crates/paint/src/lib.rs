@@ -18,6 +18,7 @@ use photocraft_geom::{Point, Rect};
 use photocraft_raster::Surface;
 use serde::{Deserialize, Serialize};
 
+pub mod bg_erase;
 pub mod brush;
 pub mod dynamics;
 pub mod mixer;

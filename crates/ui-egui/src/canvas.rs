@@ -1059,7 +1059,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                         _ => {
                             painter.circle_stroke(p, r + 0.5, Stroke::new(1.0, Color32::from_black_alpha(140)));
                             painter.circle_stroke(p, r, Stroke::new(1.0, Color32::from_white_alpha(220)));
-                            if cur.show_crosshair_in_brush_tip || r > 6.0 {
+                            // The Background Eraser always shows its sampling hotspot (Photoshop).
+                            if cur.show_crosshair_in_brush_tip || r > 6.0 || tool == Tool::BackgroundEraser {
                                 crosshair(3.0);
                             }
                             egui::CursorIcon::None
@@ -1408,6 +1409,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                     let _ = app.run("select.magicWand", json!({"x": x.floor(), "y": y.floor(), "tolerance": o.tolerance, "contiguous": o.contiguous, "antiAlias": o.anti_alias, "sampleAllLayers": o.sample_all_layers, "mode": mode}));
                     return;
                 }
+                Tool::MagicEraser => {
+                    crate::eraser_ui::click(app, tool, x, y);
+                    return;
+                }
                 Tool::PaintBucket => {
                     let o = app.ui.tool_options.clone();
                     let contents = if o.bucket_fill_pattern { "pattern" } else { "foreground" };
@@ -1464,7 +1469,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
 
 fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
     let end = d.points.last().copied().unwrap_or([d.start[0], d.start[1], 1.0]);
-    if crate::retouch_ui::finish_stroke(app, d.tool, &d.points, d.modifiers) {
+    if crate::eraser_ui::finish_stroke(app, d.tool, &d.points) || crate::retouch_ui::finish_stroke(app, d.tool, &d.points, d.modifiers) {
         return;
     }
     match d.tool {

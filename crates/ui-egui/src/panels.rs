@@ -28,7 +28,7 @@ const TOOL_SECTIONS: &[&[&[Tool]]] = &[
         &[Tool::Brush],
         &[Tool::CloneStamp],
         &[Tool::HistoryBrush],
-        &[Tool::Eraser],
+        &[Tool::Eraser, Tool::BackgroundEraser, Tool::MagicEraser],
         &[Tool::Gradient, Tool::PaintBucket],
         &[Tool::Blur, Tool::Sharpen, Tool::Smudge],
         &[Tool::Dodge, Tool::Burn, Tool::Sponge],
@@ -364,7 +364,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     brush_preset_chip(ui, &mut app.session.tools.brush);
                     widgets::vline(ui, 22.0);
                 }
-                if crate::retouch_ui::options_bar(app, ui, tool)
+                if crate::eraser_ui::options_bar(app, ui, tool)
+                    || crate::retouch_ui::options_bar(app, ui, tool)
                     || crate::vector_ui::options_bar(app, ui, tool)
                     || crate::analysis_ui::options_bar(app, ui, tool)
                     || crate::slice_ui::options_bar(app, ui, tool)

@@ -87,6 +87,15 @@ fn has_selection(s: &Session) -> std::result::Result<(), String> {
     s.active().filter(|d| d.doc.selection.is_some()).map(|_| ()).ok_or_else(|| "no selection".into())
 }
 
+/// Image › Image Rotation by a right angle or a flip (pixels, vectors, guides, … all move).
+fn turn(s: &mut Session, label: &str, t: crate::canvas_geom::Turn) -> Result<Value> {
+    s.edit(label, |doc, _| {
+        crate::canvas_geom::turn_canvas(doc, t);
+        Ok(())
+    })?;
+    Ok(Value::Null)
+}
+
 macro_rules! cmd {
     ($id:literal, $label:literal, [$($m:literal),*], $sc:expr, $params:literal, $en:expr, $run:expr) => {
         CommandSpec { id: $id, label: $label, menu: &[$($m),*], shortcut: $sc, params: $params, enabled: $en, run: $run, journal: true }
@@ -695,46 +704,19 @@ fn build() -> Vec<CommandSpec> {
         ),
         // Image
         cmd!("image.imageRotation.flipCanvasHorizontal", "Flip Canvas Horizontal", ["Image", "Image Rotation"], None, "{}", has_doc, |s, _| {
-            s.edit("Flip Canvas Horizontal", |doc, _| {
-                let w = doc.size.width as i32;
-                pixels::remap_document(doc, &|x, y| (w - 1 - x, y));
-                Ok(())
-            })?;
-            Ok(Value::Null)
+            turn(s, "Flip Canvas Horizontal", crate::canvas_geom::Turn::FlipHorizontal)
         }),
         cmd!("image.imageRotation.flipCanvasVertical", "Flip Canvas Vertical", ["Image", "Image Rotation"], None, "{}", has_doc, |s, _| {
-            s.edit("Flip Canvas Vertical", |doc, _| {
-                let h = doc.size.height as i32;
-                pixels::remap_document(doc, &|x, y| (x, h - 1 - y));
-                Ok(())
-            })?;
-            Ok(Value::Null)
+            turn(s, "Flip Canvas Vertical", crate::canvas_geom::Turn::FlipVertical)
         }),
         cmd!("image.imageRotation.180", "180°", ["Image", "Image Rotation"], None, "{}", has_doc, |s, _| {
-            s.edit("Rotate Canvas", |doc, _| {
-                let (w, h) = (doc.size.width as i32, doc.size.height as i32);
-                pixels::remap_document(doc, &|x, y| (w - 1 - x, h - 1 - y));
-                Ok(())
-            })?;
-            Ok(Value::Null)
+            turn(s, "Rotate Canvas", crate::canvas_geom::Turn::Rotate180)
         }),
         cmd!("image.imageRotation.90cw", "90° Clockwise", ["Image", "Image Rotation"], None, "{}", has_doc, |s, _| {
-            s.edit("Rotate Canvas", |doc, _| {
-                let h = doc.size.height as i32;
-                pixels::remap_document(doc, &|x, y| (h - 1 - y, x));
-                doc.size = Size::new(doc.size.height, doc.size.width);
-                Ok(())
-            })?;
-            Ok(Value::Null)
+            turn(s, "Rotate Canvas", crate::canvas_geom::Turn::Cw90)
         }),
         cmd!("image.imageRotation.90ccw", "90° Counter Clockwise", ["Image", "Image Rotation"], None, "{}", has_doc, |s, _| {
-            s.edit("Rotate Canvas", |doc, _| {
-                let w = doc.size.width as i32;
-                pixels::remap_document(doc, &|x, y| (y, w - 1 - x));
-                doc.size = Size::new(doc.size.height, doc.size.width);
-                Ok(())
-            })?;
-            Ok(Value::Null)
+            turn(s, "Rotate Canvas", crate::canvas_geom::Turn::Ccw90)
         }),
         cmd!("image.adjustments.desaturate", "Desaturate", ["Image", "Adjustments"], Some("Cmd+Shift+U"), "{}", has_pixel_layer, |s, _| {
             destructive_adjust(
@@ -960,6 +942,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::edit_cmds::specs());
     v.extend(crate::color_cmds::specs());
     v.extend(crate::brush_cmds::specs());
+    v.extend(crate::eraser_cmds::specs());
     v.extend(crate::retouch_cmds::specs());
     v.extend(crate::image_cmds::specs());
     v.extend(crate::selection_cmds::specs());

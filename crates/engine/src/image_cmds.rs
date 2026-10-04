@@ -129,25 +129,17 @@ fn image_size(s: &mut Session, p: &Value) -> Result<Value> {
             *surf = resize_surface(surf, sx, sy, if is_mask { Resample::Bilinear } else { filter });
         });
         let k = ((sx + sy) / 2.0) as f32;
-        for_each_layer(&mut doc.layers, &mut |l| {
-            scale_effects(&mut l.effects, k);
-            if let Some(r) = &mut l.effects.reference {
-                *r = (r.0 * sx, r.1 * sy);
-            }
-        });
+        for_each_layer(&mut doc.layers, &mut |l| scale_effects(&mut l.effects, k));
         for ch in doc.channels.iter_mut().chain(doc.quick_mask.as_mut()) {
             ch.surface = resize_surface(&ch.surface, sx, sy, Resample::Bilinear);
         }
         if let Some(sel) = &doc.selection {
             doc.selection = Some(resize_surface(sel, sx, sy, Resample::Bilinear));
         }
-        for g in &mut doc.guides.horizontal {
-            *g *= sy as f32;
-        }
-        for g in &mut doc.guides.vertical {
-            *g *= sx as f32;
-        }
+        // Vector geometry, guides and marks scale with the pixels; vectors re-render sharp.
+        crate::canvas_geom::transform_geometry(doc, &photocraft_geom::Affine { m: [sx, 0.0, 0.0, sy, 0.0, 0.0] });
         doc.size = Size::new(nw, nh);
+        crate::canvas_geom::refresh(doc, crate::canvas_geom::Refresh::All);
         Ok(())
     })?;
     Ok(json!({ "width": nw, "height": nh }))
@@ -159,29 +151,15 @@ fn translate_doc(doc: &mut Document, dx: i32, dy: i32) {
         return;
     }
     for_each_surface(&mut doc.layers, true, &mut |surf, _| *surf = translate_surface(surf, dx, dy));
-    fn shift_fx_reference(layers: &mut [photocraft_doc::Layer], dx: f64, dy: f64) {
-        for l in layers {
-            if let Some(r) = &mut l.effects.reference {
-                *r = (r.0 + dx, r.1 + dy);
-            }
-            if let LayerContent::Group(g) = &mut l.content {
-                shift_fx_reference(&mut g.children, dx, dy);
-            }
-        }
-    }
-    shift_fx_reference(&mut doc.layers, f64::from(dx), f64::from(dy));
     for ch in doc.channels.iter_mut().chain(doc.quick_mask.as_mut()) {
         ch.surface = translate_surface(&ch.surface, dx, dy);
     }
     if let Some(sel) = &doc.selection {
         doc.selection = Some(translate_surface(sel, dx, dy));
     }
-    for g in &mut doc.guides.horizontal {
-        *g += dy as f32;
-    }
-    for g in &mut doc.guides.vertical {
-        *g += dx as f32;
-    }
+    // Type, shapes, smart objects, vector masks, paths, guides, slices, notes… (caches above
+    // are already translated exactly, so nothing needs re-rendering for the move itself).
+    crate::canvas_geom::transform_geometry(doc, &photocraft_geom::Affine::translate(f64::from(dx), f64::from(dy)));
 }
 
 /// Crops the document to `r` (in current document coordinates).
@@ -191,6 +169,7 @@ fn crop_doc(doc: &mut Document, r: Rect, delete_pixels: bool) {
     }
     translate_doc(doc, -r.x0, -r.y0);
     doc.size = Size::new(r.width(), r.height());
+    crate::canvas_geom::refresh(doc, crate::canvas_geom::Refresh::Shapes);
 }
 
 fn anchor_factors(a: &str) -> (f64, f64) {
@@ -242,6 +221,7 @@ fn canvas_size(s: &mut Session, p: &Value) -> Result<Value> {
     s.edit("Canvas Size", |doc, _| {
         translate_doc(doc, dx, dy);
         doc.size = Size::new(nw, nh);
+        crate::canvas_geom::refresh(doc, crate::canvas_geom::Refresh::Shapes);
         let canvas = doc.bounds();
         let old = Rect::from_xywh(dx, dy, ow as u32, oh as u32);
         // The locked Background layer is extended with the extension colour.

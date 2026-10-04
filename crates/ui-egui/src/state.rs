@@ -18,6 +18,8 @@ pub enum Tool {
     Count,
     Brush,
     Eraser,
+    BackgroundEraser,
+    MagicEraser,
     Gradient,
     PaintBucket,
     Type,
@@ -48,7 +50,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 40] = [
+    pub const ALL: [Tool; 42] = [
         Tool::Move,
         Tool::RectMarquee,
         Tool::EllipseMarquee,
@@ -62,6 +64,8 @@ impl Tool {
         Tool::Count,
         Tool::Brush,
         Tool::Eraser,
+        Tool::BackgroundEraser,
+        Tool::MagicEraser,
         Tool::Gradient,
         Tool::PaintBucket,
         Tool::Type,
@@ -98,6 +102,8 @@ impl Tool {
             Tool::EllipseMarquee => "Elliptical Marquee Tool",
             Tool::Brush => "Brush Tool",
             Tool::Eraser => "Eraser Tool",
+            Tool::BackgroundEraser => "Background Eraser Tool",
+            Tool::MagicEraser => "Magic Eraser Tool",
             Tool::Eyedropper => "Eyedropper Tool",
             Tool::Ruler => "Ruler Tool",
             Tool::Note => "Note Tool",
@@ -141,6 +147,7 @@ impl Tool {
             self,
             Tool::Brush
                 | Tool::Eraser
+                | Tool::BackgroundEraser
                 | Tool::SpotHealing
                 | Tool::Healing
                 | Tool::CloneStamp
@@ -159,7 +166,7 @@ impl Tool {
             Tool::Move => 'V',
             Tool::RectMarquee | Tool::EllipseMarquee => 'M',
             Tool::Brush => 'B',
-            Tool::Eraser => 'E',
+            Tool::Eraser | Tool::BackgroundEraser | Tool::MagicEraser => 'E',
             Tool::Eyedropper | Tool::Ruler | Tool::Note | Tool::Count => 'I',
             Tool::Lasso | Tool::PolygonLasso => 'L',
             Tool::MagicWand => 'W',
@@ -358,6 +365,15 @@ pub struct ToolOptions {
     pub crop_ratio: String,
     #[serde(default = "yes")]
     pub crop_delete: bool,
+    /// Magic Eraser opacity % (tolerance, anti-alias, contiguous and sample-all are shared with the
+    /// Magic Wand and Paint Bucket).
+    pub magic_eraser_opacity: f32,
+    /// Background Eraser: sampling (continuous | once | backgroundSwatch), limits (discontiguous |
+    /// contiguous | findEdges), tolerance % and Protect Foreground Color.
+    pub bg_sampling: String,
+    pub bg_limits: String,
+    pub bg_tolerance: f32,
+    pub bg_protect_fg: bool,
 }
 
 fn yes() -> bool {
@@ -420,6 +436,11 @@ impl Default for ToolOptions {
             move_show_transform: false,
             crop_ratio: String::new(),
             crop_delete: true,
+            magic_eraser_opacity: 100.0,
+            bg_sampling: "continuous".into(),
+            bg_limits: "contiguous".into(),
+            bg_tolerance: 50.0,
+            bg_protect_fg: false,
         }
     }
 }

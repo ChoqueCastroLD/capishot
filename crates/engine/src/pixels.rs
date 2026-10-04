@@ -97,29 +97,6 @@ pub fn remap_surface(s: &Surface, map: impl Fn(i32, i32) -> (i32, i32)) -> Surfa
     out
 }
 
-/// Apply a coordinate mapping to every raster surface and mask in the document.
-pub fn remap_document(doc: &mut Document, map: &dyn Fn(i32, i32) -> (i32, i32)) {
-    fn rec(layers: &mut [Layer], map: &dyn Fn(i32, i32) -> (i32, i32)) {
-        for l in layers {
-            if let Some(m) = &mut l.mask {
-                m.surface = remap_surface(&m.surface, map);
-            }
-            match &mut l.content {
-                LayerContent::Raster(s) => *s = remap_surface(s, map),
-                LayerContent::Group(g) => rec(&mut g.children, map),
-                _ => {}
-            }
-        }
-    }
-    rec(&mut doc.layers, map);
-    for ch in doc.channels.iter_mut().chain(doc.quick_mask.as_mut()) {
-        ch.surface = remap_surface(&ch.surface, map);
-    }
-    if let Some(sel) = &doc.selection {
-        doc.selection = Some(remap_surface(sel, map));
-    }
-}
-
 /// Merge `upper` onto `lower` producing a raster layer (Layer → Merge Down).
 pub fn merge_down(doc_bounds: Rect, lower: &Layer, upper: &Layer, format: photocraft_color::PixelFormat) -> Layer {
     let area = [lower, upper].iter().map(|l| l.surface().map(|s| s.content_bounds()).unwrap_or(doc_bounds)).fold(Rect::EMPTY, |a, b| a.union(&b));
