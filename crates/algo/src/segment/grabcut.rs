@@ -9,7 +9,7 @@
 use photocraft_geom::Rect;
 
 use super::gmm::{DEFAULT_REG, Gmm};
-use super::{HARD_BG, HARD_FG, FREE, Region, RgbImage, Sampler, contrast_beta, data_costs, grid_cut, subsample};
+use super::{FREE, HARD_BG, HARD_FG, Region, RgbImage, Sampler, contrast_beta, data_costs, grid_cut, subsample};
 
 /// Definite background.
 pub const BG: u8 = 0;

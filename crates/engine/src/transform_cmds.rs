@@ -250,7 +250,8 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("the transform collapses the layer"));
     }
     let m = h.0;
-    let affine = (m[6].abs() < 1e-12 && m[7].abs() < 1e-12).then(|| Affine { m: [m[0] / m[8], m[3] / m[8], m[1] / m[8], m[4] / m[8], m[2] / m[8], m[5] / m[8]] });
+    let affine =
+        (m[6].abs() < 1e-12 && m[7].abs() < 1e-12).then(|| Affine { m: [m[0] / m[8], m[3] / m[8], m[1] / m[8], m[4] / m[8], m[2] / m[8], m[5] / m[8]] });
     let interp = Interp::parse(p.get("interpolation").and_then(Value::as_str).unwrap_or("bicubic"));
     s.edit("Free Transform", |doc, _| {
         let sel = doc.selection.clone();

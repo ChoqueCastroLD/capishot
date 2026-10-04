@@ -81,7 +81,20 @@ fn moving_rect(app: &PhotocraftApp) -> Option<[f64; 4]> {
 }
 
 fn is_point_tool(t: Tool) -> bool {
-    matches!(t, Tool::RectMarquee | Tool::EllipseMarquee | Tool::Crop | Tool::ObjectSelection | Tool::Pen | Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line | Tool::Type)
+    matches!(
+        t,
+        Tool::RectMarquee
+            | Tool::EllipseMarquee
+            | Tool::Crop
+            | Tool::ObjectSelection
+            | Tool::Pen
+            | Tool::Rectangle
+            | Tool::EllipseShape
+            | Tool::Triangle
+            | Tool::Polygon
+            | Tool::Line
+            | Tool::Type
+    )
 }
 
 fn quad_rect(q: &[[f64; 2]; 4]) -> [f64; 4] {
@@ -151,7 +164,9 @@ fn begin(app: &mut PhotocraftApp, p: [f64; 2], mods: egui::Modifiers) {
 /// Round to whole pixels when Preferences › Tools asks vector tools and transforms to snap to
 /// the pixel grid.
 fn pixel_round(app: &PhotocraftApp, p: [f64; 2]) -> [f64; 2] {
-    if app.session.prefs().tools.snap_vector_tools_and_transforms_to_pixel_grid && matches!(app.ui.tool, Tool::Pen | Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line) {
+    if app.session.prefs().tools.snap_vector_tools_and_transforms_to_pixel_grid
+        && matches!(app.ui.tool, Tool::Pen | Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line)
+    {
         [p[0].round(), p[1].round()]
     } else {
         p
@@ -244,8 +259,13 @@ pub fn draw(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
     let Some(snap) = &app.prefs_rt.snap else { return };
     let smart_color = hex_color(&app.session.prefs().guides_grid_and_slices.smart_guide_color, Color32::from_rgb(255, 0, 255));
     // The moved layers' bounds follow the Move tool (Free Transform draws its own box).
-    if let (Gesture::Move { rect }, Some(d)) = (&snap.gesture, app.drag.as_ref().and_then(|d| d.points.last()).map(|p| [p[0] - snap.start[0], p[1] - snap.start[1]])) {
-        let r = egui::Rect::from_two_pos(xf.to_screen((rect[0] + d[0]) as f32, (rect[1] + d[1]) as f32), xf.to_screen((rect[2] + d[0]) as f32, (rect[3] + d[1]) as f32));
+    if let (Gesture::Move { rect }, Some(d)) =
+        (&snap.gesture, app.drag.as_ref().and_then(|d| d.points.last()).map(|p| [p[0] - snap.start[0], p[1] - snap.start[1]]))
+    {
+        let r = egui::Rect::from_two_pos(
+            xf.to_screen((rect[0] + d[0]) as f32, (rect[1] + d[1]) as f32),
+            xf.to_screen((rect[2] + d[0]) as f32, (rect[3] + d[1]) as f32),
+        );
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, crate::theme::Tokens::get(painter.ctx()).accent), egui::StrokeKind::Middle);
     }
     if !smart_on(app) {
@@ -260,7 +280,11 @@ pub fn draw(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
 }
 
 fn draw_line(painter: &egui::Painter, xf: &ViewXform, l: &SnapLine, color: Color32) {
-    let (a, b) = if l.vertical { (xf.to_screen(l.pos as f32, l.from as f32), xf.to_screen(l.pos as f32, l.to as f32)) } else { (xf.to_screen(l.from as f32, l.pos as f32), xf.to_screen(l.to as f32, l.pos as f32)) };
+    let (a, b) = if l.vertical {
+        (xf.to_screen(l.pos as f32, l.from as f32), xf.to_screen(l.pos as f32, l.to as f32))
+    } else {
+        (xf.to_screen(l.from as f32, l.pos as f32), xf.to_screen(l.to as f32, l.pos as f32))
+    };
     painter.line_segment([pos2(a.x.round() + 0.5, a.y.round() + 0.5), pos2(b.x.round() + 0.5, b.y.round() + 0.5)], Stroke::new(1.0, color));
 }
 
@@ -376,7 +400,11 @@ mod tests {
     fn grid_snapping_uses_preferences() {
         let mut app = app_with_box();
         app.ui.extras.grid = true;
-        app.run("prefs.set", json!({"values": {"guidesGridAndSlices.gridlineEvery": 100, "guidesGridAndSlices.gridUnit": "pixels", "guidesGridAndSlices.subdivisions": 4}})).unwrap();
+        app.run(
+            "prefs.set",
+            json!({"values": {"guidesGridAndSlices.gridlineEvery": 100, "guidesGridAndSlices.gridUnit": "pixels", "guidesGridAndSlices.subdivisions": 4}}),
+        )
+        .unwrap();
         assert_eq!(options(&app).grid_step, 25.0);
         app.ui.tool = Tool::RectMarquee;
         let m = egui::Modifiers::NONE;

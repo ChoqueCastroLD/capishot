@@ -19,14 +19,14 @@
 
 mod adjust_map;
 pub mod annotations_map;
+pub mod blocks;
 mod channel_map;
 pub mod comps_map;
 pub mod effects_map;
-pub mod blocks;
-mod gradient_bake;
 mod flat;
-mod multichannel_map;
+mod gradient_bake;
 pub mod linked;
+mod multichannel_map;
 pub mod pattern_map;
 mod pixels;
 mod psd_export;

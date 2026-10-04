@@ -342,7 +342,8 @@ fn apply_image_hand_computed() {
     s.execute("channel.new", json!({"fill": "white"})).unwrap();
     s.execute("channel.target", json!({"channel": "composite"})).unwrap();
     rect(&mut s, 0, 0, 20, 20, "replace");
-    s.execute("image.applyImage", json!({"source": {"document": 1, "channel": "red"}, "blending": "add", "scale": 2, "offset": -10, "mask": {"channel": 0}})).unwrap();
+    s.execute("image.applyImage", json!({"source": {"document": 1, "channel": "red"}, "blending": "add", "scale": 2, "offset": -10, "mask": {"channel": 0}}))
+        .unwrap();
     let want = ((g + 1.0) / 2.0 - 10.0 / 255.0).clamp(0.0, 1.0);
     assert!((px(&s, 3, 3)[1] - want).abs() < 0.003);
     assert!((px(&s, 30, 3)[1] - g).abs() < 0.003, "outside the selection");
@@ -377,10 +378,19 @@ fn calculations_results() {
     assert_eq!(doc(&s).channels[i].name, "X");
     assert_eq!((chan(&s, i, 5, 5), chan(&s, i, 15, 5), chan(&s, i, 25, 5)), (0.0, 1.0, 0.0));
     // Screen = union, at 50% opacity; source 1 inverted.
-    s.execute("image.calculations", json!({"source1": {"channel": 0, "invert": true}, "source2": {"channel": 1}, "blending": "difference", "result": "selection"})).unwrap();
+    s.execute(
+        "image.calculations",
+        json!({"source1": {"channel": 0, "invert": true}, "source2": {"channel": 1}, "blending": "difference", "result": "selection"}),
+    )
+    .unwrap();
     // |s2 - (1 - s1)|: x=5: |0-0|=0, x=15: |1-0|=1, x=35: |0-1|=1
     assert_eq!((sel_at(&s, 5, 5), sel_at(&s, 15, 5), sel_at(&s, 35, 5)), (0.0, 1.0, 1.0));
-    let r = s.execute("image.calculations", json!({"source1": {"channel": "composite"}, "source2": {"channel": 1}, "blending": "normal", "opacity": 50, "result": "newDocument"})).unwrap();
+    let r = s
+        .execute(
+            "image.calculations",
+            json!({"source1": {"channel": "composite"}, "source2": {"channel": 1}, "blending": "normal", "opacity": 50, "result": "newDocument"}),
+        )
+        .unwrap();
     assert_eq!(r["document"], 1);
     let d = doc(&s);
     assert_eq!(d.mode, ColorMode::Grayscale);

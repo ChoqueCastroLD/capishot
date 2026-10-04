@@ -15,10 +15,7 @@ use photocraft_doc::text::{CharStyle, ParagraphStyle};
 use photocraft_doc::{TextLayer, TextStyles};
 
 use crate::engine_data::Value as E;
-use crate::psd::{
-    char_style, engine_data, para_style, paragraph_properties, parse_tysh, postscript_for,
-    style_sheet_data, write_tysh,
-};
+use crate::psd::{char_style, engine_data, para_style, paragraph_properties, parse_tysh, postscript_for, style_sheet_data, write_tysh};
 
 /// Style sheets read from one type layer.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -42,26 +39,16 @@ fn k_of(dpi: f32) -> f32 {
 }
 
 fn names(set: Option<&E>) -> Vec<String> {
-    set.and_then(E::as_array)
-        .map(|a| {
-            a.iter()
-                .map(|s| s.get("Name").and_then(E::as_str).unwrap_or("").to_string())
-                .collect()
-        })
-        .unwrap_or_default()
+    set.and_then(E::as_array).map(|a| a.iter().map(|s| s.get("Name").and_then(E::as_str).unwrap_or("").to_string()).collect()).unwrap_or_default()
 }
 
 /// Index a run's sheet dictionary refers to (`Parent` index, else `Name`), skipping `normal`.
 fn reference(sheet: Option<&E>, set_names: &[String], normal: usize) -> Option<usize> {
     let s = sheet?;
-    let i = s
-        .get("Parent")
-        .and_then(E::as_i64)
-        .map(|i| i as usize)
-        .or_else(|| {
-            let n = s.get("Name").and_then(E::as_str)?;
-            set_names.iter().position(|x| x == n)
-        })?;
+    let i = s.get("Parent").and_then(E::as_i64).map(|i| i as usize).or_else(|| {
+        let n = s.get("Name").and_then(E::as_str)?;
+        set_names.iter().position(|x| x == n)
+    })?;
     (i != normal && i < set_names.len()).then_some(i)
 }
 
@@ -70,44 +57,25 @@ pub fn read_style_sheets(tysh: &[u8], dpi: f32) -> Option<PsdStyleSheets> {
     let t = parse_tysh(tysh)?;
     let e = engine_data(&t.text)?;
     let k = k_of(dpi);
-    let res = e
-        .get("ResourceDict")
-        .or_else(|| e.get("DocumentResources"))?;
+    let res = e.get("ResourceDict").or_else(|| e.get("DocumentResources"))?;
     let fonts: Vec<String> = names(res.get("FontSet"));
-    let sset = res
-        .get("StyleSheetSet")
-        .and_then(E::as_array)
-        .unwrap_or(&[]);
-    let pset = res
-        .get("ParagraphSheetSet")
-        .and_then(E::as_array)
-        .unwrap_or(&[]);
-    let normal_c = res
-        .get("TheNormalStyleSheet")
-        .and_then(E::as_i64)
-        .unwrap_or(0) as usize;
-    let normal_p = res
-        .get("TheNormalParagraphSheet")
-        .and_then(E::as_i64)
-        .unwrap_or(0) as usize;
+    let sset = res.get("StyleSheetSet").and_then(E::as_array).unwrap_or(&[]);
+    let pset = res.get("ParagraphSheetSet").and_then(E::as_array).unwrap_or(&[]);
+    let normal_c = res.get("TheNormalStyleSheet").and_then(E::as_i64).unwrap_or(0) as usize;
+    let normal_p = res.get("TheNormalParagraphSheet").and_then(E::as_i64).unwrap_or(0) as usize;
     let empty = E::dict();
     let base_data = sset.get(normal_c).and_then(|s| s.get("StyleSheetData"));
     let normal_char = char_style(None, base_data.unwrap_or(&empty), &fonts, k);
     let base_props = pset.get(normal_p).and_then(|s| s.get("Properties"));
     let normal_para = para_style(None, base_props.unwrap_or(&empty), k);
-    let mut out = PsdStyleSheets {
-        normal_char,
-        normal_para,
-        ..Default::default()
-    };
+    let mut out = PsdStyleSheets { normal_char, normal_para, ..Default::default() };
     for (i, s) in sset.iter().enumerate() {
         if i == normal_c {
             continue;
         }
         let name = s.get("Name").and_then(E::as_str).unwrap_or("").to_string();
         let data = s.get("StyleSheetData").unwrap_or(&empty);
-        out.char_sheets
-            .push((i, name, char_style(base_data, data, &fonts, k)));
+        out.char_sheets.push((i, name, char_style(base_data, data, &fonts, k)));
     }
     for (i, s) in pset.iter().enumerate() {
         if i == normal_p {
@@ -115,41 +83,17 @@ pub fn read_style_sheets(tysh: &[u8], dpi: f32) -> Option<PsdStyleSheets> {
         }
         let name = s.get("Name").and_then(E::as_str).unwrap_or("").to_string();
         let props = s.get("Properties").unwrap_or(&empty);
-        let dss = s
-            .get("DefaultStyleSheet")
-            .and_then(E::as_i64)
-            .map(|i| i as usize)
-            .filter(|i| *i != normal_c);
-        let cs = dss.and_then(|d| sset.get(d)).map(|d| {
-            char_style(
-                base_data,
-                d.get("StyleSheetData").unwrap_or(&empty),
-                &fonts,
-                k,
-            )
-        });
-        out.para_sheets
-            .push((i, name, para_style(base_props, props, k), cs));
+        let dss = s.get("DefaultStyleSheet").and_then(E::as_i64).map(|i| i as usize).filter(|i| *i != normal_c);
+        let cs = dss.and_then(|d| sset.get(d)).map(|d| char_style(base_data, d.get("StyleSheetData").unwrap_or(&empty), &fonts, k));
+        out.para_sheets.push((i, name, para_style(base_props, props, k), cs));
     }
     let snames = names(res.get("StyleSheetSet"));
     let pnames = names(res.get("ParagraphSheetSet"));
-    if let Some(a) = e
-        .path(&["EngineDict", "StyleRun", "RunArray"])
-        .and_then(E::as_array)
-    {
-        out.run_char = a
-            .iter()
-            .map(|r| reference(r.get("StyleSheet"), &snames, normal_c))
-            .collect();
+    if let Some(a) = e.path(&["EngineDict", "StyleRun", "RunArray"]).and_then(E::as_array) {
+        out.run_char = a.iter().map(|r| reference(r.get("StyleSheet"), &snames, normal_c)).collect();
     }
-    if let Some(a) = e
-        .path(&["EngineDict", "ParagraphRun", "RunArray"])
-        .and_then(E::as_array)
-    {
-        out.run_para = a
-            .iter()
-            .map(|r| reference(r.get("ParagraphSheet"), &pnames, normal_p))
-            .collect();
+    if let Some(a) = e.path(&["EngineDict", "ParagraphRun", "RunArray"]).and_then(E::as_array) {
+        out.run_para = a.iter().map(|r| reference(r.get("ParagraphSheet"), &pnames, normal_p)).collect();
     }
     Some(out)
 }
@@ -174,36 +118,17 @@ pub fn has_named_sheets(tysh: &[u8]) -> bool {
 
 /// Rewrites the style sheets of a `TySh` block from the document's styles and the layer's run
 /// references. The normal sheets are kept; other sheets are replaced by `styles`.
-pub fn write_style_sheets(
-    tysh: &[u8],
-    layer: &TextLayer,
-    styles: &TextStyles,
-    dpi: f32,
-) -> Option<Vec<u8>> {
+pub fn write_style_sheets(tysh: &[u8], layer: &TextLayer, styles: &TextStyles, dpi: f32) -> Option<Vec<u8>> {
     let mut t = parse_tysh(tysh)?;
     let mut e = engine_data(&t.text)?;
     let k = k_of(dpi);
     for key in ["ResourceDict", "DocumentResources"] {
         let Some(rd) = e.get_mut(key) else { continue };
         let mut fonts = names(rd.get("FontSet"));
-        let normal_c = rd
-            .get("TheNormalStyleSheet")
-            .and_then(E::as_i64)
-            .unwrap_or(0) as usize;
-        let normal_p = rd
-            .get("TheNormalParagraphSheet")
-            .and_then(E::as_i64)
-            .unwrap_or(0) as usize;
-        let keep_c = rd
-            .get("StyleSheetSet")
-            .and_then(E::as_array)
-            .and_then(|a| a.get(normal_c).or(a.first()))
-            .cloned();
-        let keep_p = rd
-            .get("ParagraphSheetSet")
-            .and_then(E::as_array)
-            .and_then(|a| a.get(normal_p).or(a.first()))
-            .cloned();
+        let normal_c = rd.get("TheNormalStyleSheet").and_then(E::as_i64).unwrap_or(0) as usize;
+        let normal_p = rd.get("TheNormalParagraphSheet").and_then(E::as_i64).unwrap_or(0) as usize;
+        let keep_c = rd.get("StyleSheetSet").and_then(E::as_array).and_then(|a| a.get(normal_c).or(a.first())).cloned();
+        let keep_p = rd.get("ParagraphSheetSet").and_then(E::as_array).and_then(|a| a.get(normal_p).or(a.first())).cloned();
         let mut font_index = |s: &CharStyle| {
             let ps = postscript_for(s);
             match fonts.iter().position(|f| *f == ps) {
@@ -238,25 +163,12 @@ pub fn write_style_sheets(
         rd.set("ParagraphSheetSet", E::Array(pset));
         rd.set("TheNormalStyleSheet", E::Int(0));
         rd.set("TheNormalParagraphSheet", E::Int(0));
-        rd.set(
-            "FontSet",
-            E::Array(fonts.iter().map(|f| crate::psd::font_entry(f)).collect()),
-        );
+        rd.set("FontSet", E::Array(fonts.iter().map(|f| crate::psd::font_entry(f)).collect()));
     }
-    let char_ix = |id: Option<u32>| {
-        id.and_then(|id| styles.character.iter().position(|d| d.id == id))
-            .map(|i| i as i64 + 1)
-    };
-    let para_ix = |id: Option<u32>| {
-        id.and_then(|id| styles.paragraph.iter().position(|d| d.id == id))
-            .map(|i| i as i64 + 1)
-    };
+    let char_ix = |id: Option<u32>| id.and_then(|id| styles.character.iter().position(|d| d.id == id)).map(|i| i as i64 + 1);
+    let para_ix = |id: Option<u32>| id.and_then(|id| styles.paragraph.iter().position(|d| d.id == id)).map(|i| i as i64 + 1);
     let runs = layer.char_runs();
-    if let Some(E::Array(a)) = e
-        .get_mut("EngineDict")
-        .and_then(|d| d.get_mut("StyleRun"))
-        .and_then(|r| r.get_mut("RunArray"))
-    {
+    if let Some(E::Array(a)) = e.get_mut("EngineDict").and_then(|d| d.get_mut("StyleRun")).and_then(|r| r.get_mut("RunArray")) {
         for (i, r) in a.iter_mut().enumerate() {
             if let Some(sheet) = r.get_mut("StyleSheet") {
                 remove_key(sheet, "Parent");
@@ -268,11 +180,7 @@ pub fn write_style_sheets(
         }
     }
     let paras = layer.paragraph_runs();
-    if let Some(E::Array(a)) = e
-        .get_mut("EngineDict")
-        .and_then(|d| d.get_mut("ParagraphRun"))
-        .and_then(|r| r.get_mut("RunArray"))
-    {
+    if let Some(E::Array(a)) = e.get_mut("EngineDict").and_then(|d| d.get_mut("ParagraphRun")).and_then(|r| r.get_mut("RunArray")) {
         for (i, r) in a.iter_mut().enumerate() {
             if let Some(sheet) = r.get_mut("ParagraphSheet") {
                 remove_key(sheet, "Parent");
@@ -303,48 +211,20 @@ mod tests {
         styles.character.push(CharacterStyleDef {
             id: 4,
             name: "Emphasis".into(),
-            attrs: diff_attrs(
-                &CharStyle {
-                    size_pt: 30.0,
-                    underline: true,
-                    ..Default::default()
-                },
-                &CharStyle::default(),
-            ),
+            attrs: diff_attrs(&CharStyle { size_pt: 30.0, underline: true, ..Default::default() }, &CharStyle::default()),
         });
         styles.paragraph.push(ParagraphStyleDef {
             id: 2,
             name: "Centered".into(),
-            para_attrs: diff_attrs(
-                &ParagraphStyle {
-                    align: TextAlign::Center,
-                    ..Default::default()
-                },
-                &ParagraphStyle::default(),
-            ),
+            para_attrs: diff_attrs(&ParagraphStyle { align: TextAlign::Center, ..Default::default() }, &ParagraphStyle::default()),
             ..Default::default()
         });
-        let base = CharStyle {
-            font_family: crate::fonts::DEFAULT_FAMILY.into(),
-            ..Default::default()
-        };
+        let base = CharStyle { font_family: crate::fonts::DEFAULT_FAMILY.into(), ..Default::default() };
         let emph = styles.resolve_char(Some(2), Some(4), crate::fonts::DEFAULT_FAMILY);
         let mut layer = TextLayer {
             text: "plain bold".into(),
-            runs: vec![
-                TextRun {
-                    len: 6,
-                    style: base.clone(),
-                },
-                TextRun {
-                    len: 4,
-                    style: emph,
-                },
-            ],
-            paragraphs: vec![photocraft_doc::text::ParagraphRun {
-                len: 10,
-                style: styles.resolve_para(Some(2)),
-            }],
+            runs: vec![TextRun { len: 6, style: base.clone() }, TextRun { len: 4, style: emph }],
+            paragraphs: vec![photocraft_doc::text::ParagraphRun { len: 10, style: styles.resolve_para(Some(2)) }],
             ..Default::default()
         };
         layer.sync_summary();
@@ -355,10 +235,7 @@ mod tests {
         let r = read_style_sheets(&out, 72.0).unwrap();
         assert_eq!(r.char_sheets.len(), 1);
         assert_eq!(r.char_sheets[0].1, "Emphasis");
-        assert_eq!(
-            (r.char_sheets[0].2.size_pt, r.char_sheets[0].2.underline),
-            (30.0, true)
-        );
+        assert_eq!((r.char_sheets[0].2.size_pt, r.char_sheets[0].2.underline), (30.0, true));
         assert_eq!(r.para_sheets[0].1, "Centered");
         assert_eq!(r.para_sheets[0].2.align, TextAlign::Center);
         assert_eq!(r.run_char, vec![None, Some(1)]);
@@ -370,13 +247,7 @@ mod tests {
         // No styles: the sets shrink back to the normal sheets.
         let plain = write_style_sheets(&out, &layer, &TextStyles::default(), 72.0).unwrap();
         assert!(!has_named_sheets(&plain));
-        assert!(
-            read_style_sheets(&plain, 72.0)
-                .unwrap()
-                .run_char
-                .iter()
-                .all(Option::is_none)
-        );
+        assert!(read_style_sheets(&plain, 72.0).unwrap().run_char.iter().all(Option::is_none));
     }
 
     #[test]
@@ -384,14 +255,6 @@ mod tests {
         assert!(read_style_sheets(&[], 72.0).is_none());
         assert!(read_style_sheets(&[0u8; 60], 72.0).is_none());
         assert!(!has_named_sheets(b"junk"));
-        assert!(
-            write_style_sheets(
-                &[1, 2, 3],
-                &TextLayer::default(),
-                &TextStyles::default(),
-                72.0
-            )
-            .is_none()
-        );
+        assert!(write_style_sheets(&[1, 2, 3], &TextLayer::default(), &TextStyles::default(), 72.0).is_none());
     }
 }

@@ -91,7 +91,8 @@ fn adjustment_layers_change_composite() {
 #[test]
 fn every_adjustment_command_runs() {
     let mut s = session_with_doc();
-    let ids: Vec<&str> = command_specs().iter().map(|c| c.id).filter(|id| id.starts_with("layer.newAdjustmentLayer.") || id.starts_with("image.adjustments.")).collect();
+    let ids: Vec<&str> =
+        command_specs().iter().map(|c| c.id).filter(|id| id.starts_with("layer.newAdjustmentLayer.") || id.starts_with("image.adjustments.")).collect();
     assert!(ids.len() >= 28);
     for id in ids {
         // re-select the background for destructive ones

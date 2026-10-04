@@ -97,7 +97,11 @@ pub const GALLERY_CATEGORIES: [&str; 6] = ["Artistic", "Brush Strokes", "Distort
 /// One parameter of a gallery filter.
 #[derive(Clone, Debug, PartialEq)]
 pub enum GalleryParamKind {
-    Range { min: f32, max: f32, default: f32 },
+    Range {
+        min: f32,
+        max: f32,
+        default: f32,
+    },
     /// Choices; the first is the default. Stored as the index.
     Choice(Vec<&'static str>),
     Bool(bool),

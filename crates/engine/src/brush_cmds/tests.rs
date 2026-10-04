@@ -41,7 +41,8 @@ fn stroke_accepts_full_points_brush_and_preset() {
     // Tilt up = 90°: the flat tip stands vertically.
     assert!(rgba(&s, 50, 40)[3] > 0.9 && rgba(&s, 50, 60)[3] > 0.9 && rgba(&s, 60, 50)[3] < 0.01);
     // Object points.
-    s.execute("paint.stroke", json!({"points": [{"x": 150, "y": 20}, {"x": 180, "y": 20, "pressure": 1.0}], "size": 4, "brush": {"pressureSize": false}})).unwrap();
+    s.execute("paint.stroke", json!({"points": [{"x": 150, "y": 20}, {"x": 180, "y": 20, "pressure": 1.0}], "size": 4, "brush": {"pressureSize": false}}))
+        .unwrap();
     assert!(rgba(&s, 165, 20)[3] > 0.9);
     // Presets by name.
     s.execute("paint.stroke", json!({"points": [[20, 80], [120, 80]], "preset": "Hard Round"})).unwrap();
@@ -103,7 +104,11 @@ fn pencil_is_aliased_and_auto_erases() {
 fn mixer_brush_reservoir_and_cleaning() {
     let mut s = session(200, 30);
     s.execute("tools.setColors", json!({"foreground": "#ff0000"})).unwrap();
-    s.execute("paint.mixerBrush", json!({"points": [[5, 15], [195, 15]], "size": 8, "wet": 0, "load": 0, "mix": 0, "brush": {"pressureSize": false, "spacing": 0.25}})).unwrap();
+    s.execute(
+        "paint.mixerBrush",
+        json!({"points": [[5, 15], [195, 15]], "size": 8, "wet": 0, "load": 0, "mix": 0, "brush": {"pressureSize": false, "spacing": 0.25}}),
+    )
+    .unwrap();
     assert!(rgba(&s, 10, 15)[3] > 0.95 && rgba(&s, 190, 15)[3] < 0.5, "low load dries out");
     assert!(s.tools.mixer.pickup.is_none(), "cleaned after stroke");
     // Wet, not cleaned: the pickup persists into the session.
@@ -124,7 +129,8 @@ fn color_replacement_modes() {
     let lum = |c: [f32; 4]| photocraft_color::blend::lum([c[0], c[1], c[2]]);
     assert!(c[0] > c[1], "{c:?}");
     assert!((lum(c) - lum(before)).abs() < 0.02);
-    s.execute("paint.colorReplacement", json!({"points": [[10, 5], [50, 5]], "size": 6, "mode": "luminosity", "sampling": "once", "limits": "discontiguous"})).unwrap();
+    s.execute("paint.colorReplacement", json!({"points": [[10, 5], [50, 5]], "size": 6, "mode": "luminosity", "sampling": "once", "limits": "discontiguous"}))
+        .unwrap();
     assert!((lum(rgba(&s, 30, 5)) - 0.3).abs() < 0.02);
     assert!(s.execute("paint.colorReplacement", json!({"points": [[1, 1]], "mode": "bogus"})).is_err());
 }
@@ -202,7 +208,6 @@ fn works_on_cmyk_and_16_bit() {
         assert!(rgba(&s, 30, 5)[0] < 0.2, "{mode}/{depth}: {:?}", rgba(&s, 30, 5));
     }
 }
-
 
 #[test]
 fn brush_blend_mode_multiply() {

@@ -9,12 +9,7 @@ fn version() -> impl Strategy<Value = Version> {
     prop_oneof![Just(Version::Psd), Just(Version::Psb)]
 }
 fn compression() -> impl Strategy<Value = Compression> {
-    prop_oneof![
-        Just(Compression::Raw),
-        Just(Compression::Rle),
-        Just(Compression::Zip),
-        Just(Compression::ZipPrediction)
-    ]
+    prop_oneof![Just(Compression::Raw), Just(Compression::Rle), Just(Compression::Zip), Just(Compression::ZipPrediction)]
 }
 fn depth() -> impl Strategy<Value = u16> {
     prop_oneof![Just(1u16), Just(8), Just(16), Just(32)]

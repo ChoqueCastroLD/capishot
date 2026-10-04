@@ -163,7 +163,13 @@ fn read_pattern(r: &mut Rd) -> Result<PsdPattern> {
         depth = d;
         let (cw, ch) = ((cr - cl).max(0) as usize, (cb - ct).max(0) as usize);
         let layout = PlaneLayout { planes: 1, width: cw, height: ch, depth: d, version: Version::Psd };
-        let compression = if comp == 1 { Compression::Rle } else if comp == 0 { Compression::Raw } else { Compression::Unknown(u16::from(comp)) };
+        let compression = if comp == 1 {
+            Compression::Rle
+        } else if comp == 0 {
+            Compression::Raw
+        } else {
+            Compression::Unknown(u16::from(comp))
+        };
         let plane = decode_planes(compression, data, &layout)?;
         // Place a channel rect smaller than the pattern rect into a full plane.
         let bpp = (usize::from(d) / 8).max(1);
@@ -230,7 +236,8 @@ fn write_pattern(p: &PsdPattern, out: &mut Vec<u8>) -> Result<()> {
     body.extend_from_slice(&SLOTS.to_be_bytes());
     let layout = PlaneLayout { planes: 1, width: p.width as usize, height: p.height as usize, depth: p.depth, version: Version::Psd };
     let array = |plane: &[u8], body: &mut Vec<u8>| -> Result<()> {
-        let (comp, data) = if p.depth == 8 { (1u8, encode_planes(Compression::Rle, plane, &layout)?) } else { (0u8, encode_planes(Compression::Raw, plane, &layout)?) };
+        let (comp, data) =
+            if p.depth == 8 { (1u8, encode_planes(Compression::Rle, plane, &layout)?) } else { (0u8, encode_planes(Compression::Raw, plane, &layout)?) };
         body.extend_from_slice(&1u32.to_be_bytes());
         body.extend_from_slice(&((23 + data.len()) as u32).to_be_bytes());
         body.extend_from_slice(&u32::from(p.depth).to_be_bytes());

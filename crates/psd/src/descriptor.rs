@@ -60,11 +60,7 @@ impl Id {
     /// [`Id::Str`].
     pub fn new(s: &str) -> Self {
         let b = s.as_bytes();
-        if b.len() == 4 {
-            Id::Code([b[0], b[1], b[2], b[3]])
-        } else {
-            Id::Str(b.to_vec())
-        }
+        if b.len() == 4 { Id::Code([b[0], b[1], b[2], b[3]]) } else { Id::Str(b.to_vec()) }
     }
     /// The identifier's bytes.
     pub fn as_bytes(&self) -> &[u8] {
@@ -79,11 +75,7 @@ impl Id {
     }
     pub(crate) fn read(r: &mut Reader<'_>) -> Result<Self> {
         let n = r.u32()?;
-        if n == 0 {
-            Ok(Id::Code(r.array()?))
-        } else {
-            Ok(Id::Str(r.bytes_u64(u64::from(n))?.to_vec()))
-        }
+        if n == 0 { Ok(Id::Code(r.array()?)) } else { Ok(Id::Str(r.bytes_u64(u64::from(n))?.to_vec())) }
     }
     pub(crate) fn write(&self, out: &mut Vec<u8>) {
         match self {
@@ -432,10 +424,7 @@ fn read_typed_value(r: &mut Reader<'_>, ty: &[u8; 4], depth: usize) -> Result<Va
             Value::ObjectArray(ObjectArray { prefix, body: read_descriptor(r, depth + 1)? })
         }
         other => {
-            return Err(PsdError::Unsupported(format!(
-                "descriptor OSType {:?}",
-                String::from_utf8_lossy(other)
-            )));
+            return Err(PsdError::Unsupported(format!("descriptor OSType {:?}", String::from_utf8_lossy(other))));
         }
     })
 }
@@ -451,10 +440,7 @@ fn read_reference_item(r: &mut Reader<'_>) -> Result<ReferenceItem> {
         b"indx" => ReferenceItem::Index(r.u32()?),
         b"name" => ReferenceItem::Name { class: Class::read(r)?, name: UnicodeString::read(r)? },
         other => {
-            return Err(PsdError::Unsupported(format!(
-                "reference item type {:?}",
-                String::from_utf8_lossy(other)
-            )));
+            return Err(PsdError::Unsupported(format!("reference item type {:?}", String::from_utf8_lossy(other))));
         }
     })
 }
@@ -609,8 +595,7 @@ mod tests {
                 "ObAr",
                 Value::ObjectArray(ObjectArray {
                     prefix: 16,
-                    body: Descriptor::new("rationalPoint")
-                        .with("Hrzn", Value::UnitFloats { unit: *b"#Pxl", values: vec![1.0, 2.0] }),
+                    body: Descriptor::new("rationalPoint").with("Hrzn", Value::UnitFloats { unit: *b"#Pxl", values: vec![1.0, 2.0] }),
                 }),
             )
     }
@@ -732,10 +717,7 @@ pub(crate) mod proptests {
     use proptest::prelude::*;
 
     fn arb_id() -> impl Strategy<Value = Id> {
-        prop_oneof![
-            any::<[u8; 4]>().prop_map(Id::Code),
-            proptest::collection::vec(any::<u8>(), 1..12).prop_map(Id::Str),
-        ]
+        prop_oneof![any::<[u8; 4]>().prop_map(Id::Code), proptest::collection::vec(any::<u8>(), 1..12).prop_map(Id::Str),]
     }
     fn arb_ustr() -> impl Strategy<Value = UnicodeString> {
         proptest::collection::vec(any::<u16>(), 0..8).prop_map(UnicodeString)
@@ -747,8 +729,7 @@ pub(crate) mod proptests {
         prop_oneof![
             (arb_class(), arb_id()).prop_map(|(class, key)| ReferenceItem::Property { class, key }),
             arb_class().prop_map(ReferenceItem::Class),
-            (arb_class(), arb_id(), arb_id())
-                .prop_map(|(class, type_id, value)| ReferenceItem::Enumerated { class, type_id, value }),
+            (arb_class(), arb_id(), arb_id()).prop_map(|(class, type_id, value)| ReferenceItem::Enumerated { class, type_id, value }),
             (arb_class(), any::<i32>()).prop_map(|(class, offset)| ReferenceItem::Offset { class, offset }),
             any::<u32>().prop_map(ReferenceItem::Identifier),
             any::<u32>().prop_map(ReferenceItem::Index),
@@ -762,8 +743,7 @@ pub(crate) mod proptests {
         prop_oneof![
             finite().prop_map(Value::Double),
             (any::<[u8; 4]>(), finite()).prop_map(|(unit, value)| Value::UnitFloat { unit, value }),
-            (any::<[u8; 4]>(), proptest::collection::vec(finite(), 0..4))
-                .prop_map(|(unit, values)| Value::UnitFloats { unit, values }),
+            (any::<[u8; 4]>(), proptest::collection::vec(finite(), 0..4)).prop_map(|(unit, values)| Value::UnitFloats { unit, values }),
             arb_ustr().prop_map(Value::Text),
             (arb_id(), arb_id()).prop_map(|(type_id, value)| Value::Enumerated { type_id, value }),
             any::<i32>().prop_map(Value::Integer),
@@ -784,19 +764,15 @@ pub(crate) mod proptests {
                 proptest::collection::vec(inner.clone(), 0..4).prop_map(Value::List),
                 (arb_ustr(), arb_id(), proptest::collection::vec((arb_id(), inner.clone()), 0..4))
                     .prop_map(|(name, id, items)| Value::Descriptor(Descriptor { name, class_id: id, items })),
-                (arb_ustr(), arb_id(), proptest::collection::vec((arb_id(), inner.clone()), 0..3)).prop_map(
-                    |(name, id, items)| Value::GlobalObject(Descriptor { name, class_id: id, items })
-                ),
-                (any::<u32>(), arb_id(), proptest::collection::vec((arb_id(), inner), 0..3)).prop_map(
-                    |(prefix, id, items)| Value::ObjectArray(ObjectArray {
-                        prefix,
-                        body: Descriptor { name: UnicodeString::default(), class_id: id, items }
-                    })
-                ),
+                (arb_ustr(), arb_id(), proptest::collection::vec((arb_id(), inner.clone()), 0..3))
+                    .prop_map(|(name, id, items)| Value::GlobalObject(Descriptor { name, class_id: id, items })),
+                (any::<u32>(), arb_id(), proptest::collection::vec((arb_id(), inner), 0..3)).prop_map(|(prefix, id, items)| Value::ObjectArray(ObjectArray {
+                    prefix,
+                    body: Descriptor { name: UnicodeString::default(), class_id: id, items }
+                })),
             ]
         });
-        (arb_ustr(), arb_id(), proptest::collection::vec((arb_id(), value), 0..6))
-            .prop_map(|(name, id, items)| Descriptor { name, class_id: id, items })
+        (arb_ustr(), arb_id(), proptest::collection::vec((arb_id(), value), 0..6)).prop_map(|(name, id, items)| Descriptor { name, class_id: id, items })
     }
 
     proptest! {

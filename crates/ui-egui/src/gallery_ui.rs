@@ -290,7 +290,9 @@ fn update_preview(d: &mut GalleryDialog, ctx: &egui::Context, area: ERect) {
         d.center = [d.canvas.x0 as f32 + cw / 2.0, d.canvas.y0 as f32 + ch / 2.0];
     }
     let (hw, hh) = (area.width() / zoom / 2.0, area.height() / zoom / 2.0);
-    let vis = Rect::new((d.center[0] - hw).floor() as i32, (d.center[1] - hh).floor() as i32, (d.center[0] + hw).ceil() as i32, (d.center[1] + hh).ceil() as i32).intersect(&d.canvas);
+    let vis =
+        Rect::new((d.center[0] - hw).floor() as i32, (d.center[1] - hh).floor() as i32, (d.center[0] + hw).ceil() as i32, (d.center[1] + hh).ceil() as i32)
+            .intersect(&d.canvas);
     let k = (1.0 / zoom).ceil().max(1.0) as u32;
     let params = d.params();
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -429,7 +431,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                             }
                             let stroke = if selected { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.separator) };
                             ui.painter().rect_stroke(r, 0.0, stroke, egui::StrokeKind::Outside);
-                            ui.add_sized([THUMB[0] as f32, 14.0], egui::Label::new(egui::RichText::new(f.name()).size(10.5).color(if selected { t.text } else { t.text_dim })).truncate());
+                            ui.add_sized(
+                                [THUMB[0] as f32, 14.0],
+                                egui::Label::new(egui::RichText::new(f.name()).size(10.5).color(if selected { t.text } else { t.text_dim })).truncate(),
+                            );
                             resp
                         });
                         if cell.inner.clicked() {
@@ -494,7 +499,12 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         e.params.insert(p.key, json!(b));
                     }
                     Kind::Json if p.key == "glowColor" => {
-                        let c = e.params.get("glowColor").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).map(|v| v as f32).collect::<Vec<_>>()).filter(|v| v.len() >= 3);
+                        let c = e
+                            .params
+                            .get("glowColor")
+                            .and_then(Value::as_array)
+                            .map(|a| a.iter().filter_map(Value::as_f64).map(|v| v as f32).collect::<Vec<_>>())
+                            .filter(|v| v.len() >= 3);
                         let neon = photocraft_algo::GalleryEffect::new(GalleryFilter::NeonGlow).color;
                         let mut rgb = c.map_or([neon[0], neon[1], neon[2]], |v| [v[0], v[1], v[2]]);
                         ui.horizontal(|ui| {
@@ -525,7 +535,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
                 let eye = ERect::from_min_size(row.min + vec2(4.0, 4.0), vec2(16.0, 16.0));
                 crate::icons::paint(ui, eye, if d.effects[i].visible { "eye" } else { "eye-off" }, 14.0, t.icon);
-                ui.painter().text(row.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, d.effects[i].filter.name(), FontId::proportional(12.5), if d.effects[i].visible { t.text } else { t.text_faint });
+                ui.painter().text(
+                    row.left_center() + vec2(28.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    d.effects[i].filter.name(),
+                    FontId::proportional(12.5),
+                    if d.effects[i].visible { t.text } else { t.text_faint },
+                );
                 if resp.clicked() {
                     if resp.interact_pointer_pos().is_some_and(|p| p.x < eye.right() + 4.0) {
                         toggle = Some(i);

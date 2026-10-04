@@ -179,12 +179,16 @@ pub fn stack_image(file_name: &str, bytes: &[u8], fmt: PixelFormat, mode: photoc
         all => all,
     };
     let bounds = doc.bounds();
-    let frames: Vec<Vec<[f32; 4]>> = layers.iter().filter(|l| l.visible).map(|l| {
-        let mut one = l.clone();
-        one.blend = BlendMode::Normal;
-        one.clipped = false;
-        photocraft_compose::render_layer(&one, bounds).px
-    }).collect();
+    let frames: Vec<Vec<[f32; 4]>> = layers
+        .iter()
+        .filter(|l| l.visible)
+        .map(|l| {
+            let mut one = l.clone();
+            one.blend = BlendMode::Normal;
+            one.clipped = false;
+            photocraft_compose::render_layer(&one, bounds).px
+        })
+        .collect();
     let stat = match mode {
         photocraft_doc::StackMode::Entropy => Stat::Entropy,
         photocraft_doc::StackMode::Kurtosis => Stat::Kurtosis,
@@ -382,7 +386,8 @@ pub(crate) fn add_smart_filter(doc: &mut Document, id: LayerId, sf: photocraft_d
     }
     let bounds = selection.map(Surface::content_bounds).filter(|b| !b.is_empty()).unwrap_or(canvas);
     let cache = sm.cache.as_ref().ok_or_else(|| other("smart object has no pixels"))?;
-    let out = crate::filters::apply_filter_to_surface(&sf.command, &sf.params, cache, bounds, selection, canvas).ok_or_else(|| other(format!("unknown filter {}", sf.command)))?;
+    let out = crate::filters::apply_filter_to_surface(&sf.command, &sf.params, cache, bounds, selection, canvas)
+        .ok_or_else(|| other(format!("unknown filter {}", sf.command)))?;
     sm.cache = Some(out);
     sm.smart_filters.push(sf);
     Ok(())
@@ -518,7 +523,10 @@ pub fn layer_to_smart(doc: &Document, l: &Layer) -> Result<Layer> {
     cache_put(cache_key(&bytes, fmt), SourceImage { surface: Arc::new(translate_surface(&cache, -b.x0, -b.y0)), bounds: sub.bounds() });
 
     let source = SmartSource::Embedded { file_name: sub.name.clone(), bytes: Arc::new(bytes) };
-    let mut out = Layer::new(if background { "Layer 0".to_string() } else { l.name.clone() }, LayerContent::Smart(SmartObject::new(source, Affine::translate(b.x0 as f64, b.y0 as f64), Some(cache))));
+    let mut out = Layer::new(
+        if background { "Layer 0".to_string() } else { l.name.clone() },
+        LayerContent::Smart(SmartObject::new(source, Affine::translate(b.x0 as f64, b.y0 as f64), Some(cache))),
+    );
     out.visible = l.visible;
     out.opacity = l.opacity;
     out.blend = if l.blend == BlendMode::PassThrough { BlendMode::Normal } else { l.blend };
@@ -818,7 +826,14 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("filter.convertForSmartFilters", "Convert for Smart Filters", &["Filter"], r##"{"layer":id?}"##, not_smart, convert),
         spec!("layer.smartObjects.newSmartObjectViaCopy", "New Smart Object via Copy", SO, r##"{"layer":id?}"##, has_smart, via_copy),
         spec!("layer.smartObjects.rasterize", "Rasterize", SO, r##"{"layer":id?}"##, has_smart, |s, p| s.execute("layer.rasterize.smartObject", p.clone())),
-        spec!("layer.smartObjects.editContents", "Edit Contents", SO, r##"{"layer":id?} → opens the contents as a new document; saving (layer.smartObjects.saveContents) or closing it updates the smart object"##, has_smart, edit_contents),
+        spec!(
+            "layer.smartObjects.editContents",
+            "Edit Contents",
+            SO,
+            r##"{"layer":id?} → opens the contents as a new document; saving (layer.smartObjects.saveContents) or closing it updates the smart object"##,
+            has_smart,
+            edit_contents
+        ),
         spec!("layer.smartObjects.saveContents", "Save Contents", &[], "{} (in an Edit Contents document)", is_smart_child, |s, _| {
             let i = s.active_index().ok_or(EngineError::NoDocument)?;
             Ok(json!({"updated": commit_child(s, i)?}))
@@ -834,43 +849,78 @@ pub fn specs() -> Vec<CommandSpec> {
             s.edit("Update Modified Content", |doc, _| refresh_or_fail(doc, id))?;
             Ok(json!({"layer": id.0}))
         }),
-        spec!("layer.smartObjects.updateAllModifiedContent", "Update All Modified Content", SO, "{}", |s| s.active().map(|_| ()).ok_or_else(|| "no document open".into()), |s, _| update_all(s)),
+        spec!(
+            "layer.smartObjects.updateAllModifiedContent",
+            "Update All Modified Content",
+            SO,
+            "{}",
+            |s| s.active().map(|_| ()).ok_or_else(|| "no document open".into()),
+            |s, _| update_all(s)
+        ),
         spec!("layer.smartObjects.convertToEmbedded", "Convert to Embedded", SO, r##"{"layer":id?}"##, has_linked, |s, p| {
             set_source(s, p, "Convert to Embedded", true, |meta, src| {
                 let (file_name, bytes) = source_bytes(meta, src).ok_or_else(|| other("the linked file can't be read"))?;
                 Ok(SmartSource::Embedded { file_name, bytes })
             })
         }),
-        spec!("layer.smartObjects.convertToLinked", "Convert to Linked…", SO, r##"{"layer":id?,"path":str} (writes the contents there)"##, has_smart, |s, p| {
-            let path = path_param("layer.smartObjects.convertToLinked", p)?.to_string();
-            set_source(s, p, "Convert to Linked", false, |meta, src| {
-                let (_, bytes) = source_bytes(meta, src).ok_or_else(|| other("the smart object's contents are unavailable"))?;
-                std::fs::write(&path, &*bytes).map_err(|e| other(format!("can't write {path}: {e}")))?;
-                Ok(SmartSource::Linked { path })
-            })
-        }),
+        spec!(
+            "layer.smartObjects.convertToLinked",
+            "Convert to Linked…",
+            SO,
+            r##"{"layer":id?,"path":str} (writes the contents there)"##,
+            has_smart,
+            |s, p| {
+                let path = path_param("layer.smartObjects.convertToLinked", p)?.to_string();
+                set_source(s, p, "Convert to Linked", false, |meta, src| {
+                    let (_, bytes) = source_bytes(meta, src).ok_or_else(|| other("the smart object's contents are unavailable"))?;
+                    std::fs::write(&path, &*bytes).map_err(|e| other(format!("can't write {path}: {e}")))?;
+                    Ok(SmartSource::Linked { path })
+                })
+            }
+        ),
         // Smart filters
-        spec!("layer.smartFilter.disableSmartFilters", "Disable Smart Filters", SF, r##"{"layer":id?,"enabled":bool? (default: toggle)}"##, has_smart_filters, |s, p| {
-            edit_filters(s, p, "Disable Smart Filters", |sm| {
-                sm.filters_enabled = p.get("enabled").and_then(Value::as_bool).unwrap_or(!sm.filters_enabled);
-                Ok(())
-            })
-        }),
+        spec!(
+            "layer.smartFilter.disableSmartFilters",
+            "Disable Smart Filters",
+            SF,
+            r##"{"layer":id?,"enabled":bool? (default: toggle)}"##,
+            has_smart_filters,
+            |s, p| {
+                edit_filters(s, p, "Disable Smart Filters", |sm| {
+                    sm.filters_enabled = p.get("enabled").and_then(Value::as_bool).unwrap_or(!sm.filters_enabled);
+                    Ok(())
+                })
+            }
+        ),
         spec!("layer.smartFilter.deleteFilterMask", "Delete Filter Mask", SF, r##"{"layer":id?}"##, has_filter_mask, |s, p| {
             edit_filters(s, p, "Delete Filter Mask", |sm| {
                 sm.filter_mask = None;
                 Ok(())
             })
         }),
-        spec!("layer.smartFilter.disableFilterMask", "Disable Filter Mask", SF, r##"{"layer":id?,"enabled":bool? (default: toggle)}"##, has_filter_mask, |s, p| {
-            edit_filters(s, p, "Disable Filter Mask", |sm| {
-                if let Some(m) = &mut sm.filter_mask {
-                    m.enabled = p.get("enabled").and_then(Value::as_bool).unwrap_or(!m.enabled);
-                }
-                Ok(())
-            })
-        }),
-        spec!("layer.smartFilter.blendingOptions", "Blending Options…", SF, r##"{"layer":id?,"index":u32? (0 = bottom; default top),"blend":str?,"opacity":0..1?}"##, has_smart_filters, blending_options),
+        spec!(
+            "layer.smartFilter.disableFilterMask",
+            "Disable Filter Mask",
+            SF,
+            r##"{"layer":id?,"enabled":bool? (default: toggle)}"##,
+            has_filter_mask,
+            |s, p| {
+                edit_filters(s, p, "Disable Filter Mask", |sm| {
+                    if let Some(m) = &mut sm.filter_mask {
+                        m.enabled = p.get("enabled").and_then(Value::as_bool).unwrap_or(!m.enabled);
+                    }
+                    Ok(())
+                })
+            }
+        ),
+        spec!(
+            "layer.smartFilter.blendingOptions",
+            "Blending Options…",
+            SF,
+            r##"{"layer":id?,"index":u32? (0 = bottom; default top),"blend":str?,"opacity":0..1?}"##,
+            has_smart_filters,
+            blending_options
+        ),
         spec!("layer.smartFilter.clearSmartFilters", "Clear Smart Filters", SF, r##"{"layer":id?}"##, has_smart_filters, |s, p| {
             edit_filters(s, p, "Clear Smart Filters", |sm| {
                 sm.smart_filters.clear();
@@ -878,8 +928,22 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(())
             })
         }),
-        spec!("layer.smartFilter.setVisible", "Show/Hide Smart Filter", &[], r##"{"layer":id?,"index":u32?,"visible":bool? (default: toggle)}"##, has_smart_filters, set_filter_visible),
-        spec!("layer.smartFilter.setParams", "Edit Smart Filter", &[], r##"{"layer":id?,"index":u32?,"params":{…} (merged)}"##, has_smart_filters, set_filter_params),
+        spec!(
+            "layer.smartFilter.setVisible",
+            "Show/Hide Smart Filter",
+            &[],
+            r##"{"layer":id?,"index":u32?,"visible":bool? (default: toggle)}"##,
+            has_smart_filters,
+            set_filter_visible
+        ),
+        spec!(
+            "layer.smartFilter.setParams",
+            "Edit Smart Filter",
+            &[],
+            r##"{"layer":id?,"index":u32?,"params":{…} (merged)}"##,
+            has_smart_filters,
+            set_filter_params
+        ),
         spec!("layer.smartFilter.delete", "Delete Smart Filter", &[], r##"{"layer":id?,"index":u32?}"##, has_smart_filters, delete_filter),
         spec!("layer.smartFilter.move", "Move Smart Filter", &[], r##"{"layer":id?,"index":u32?,"to":u32}"##, has_smart_filters, move_filter),
     ]

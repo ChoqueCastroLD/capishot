@@ -75,14 +75,21 @@ mod tests {
                 for y in 0..4 {
                     for x in 0..8 {
                         let px = &mut data[(y * 8 + x) * ch..][..ch];
-                        if x < 4 { px[0] = 1.0; } else { px[1] = 1.0; }
-                        if fmt.alpha { px[ch - 1] = 1.0; }
+                        if x < 4 {
+                            px[0] = 1.0;
+                        } else {
+                            px[1] = 1.0;
+                        }
+                        if fmt.alpha {
+                            px[ch - 1] = 1.0;
+                        }
                     }
                 }
                 surf.write_region(Rect::new(0, 0, 8, 4), &data);
             }
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
 
         let r = s.execute("image.trap", json!({"width": 1})).unwrap();
         assert_eq!(r["trapped"], true);

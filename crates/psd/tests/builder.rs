@@ -6,12 +6,7 @@ fn rgba_pattern(w: usize, h: usize, seed: u8) -> Vec<u8> {
     let mut v = Vec::with_capacity(w * h * 4);
     for y in 0..h {
         for x in 0..w {
-            v.extend_from_slice(&[
-                (x * 10) as u8 ^ seed,
-                (y * 20) as u8,
-                (x + y) as u8 ^ seed,
-                if (x + y) % 3 == 0 { 0 } else { 200 + (x % 50) as u8 },
-            ]);
+            v.extend_from_slice(&[(x * 10) as u8 ^ seed, (y * 20) as u8, (x + y) as u8 ^ seed, if (x + y) % 3 == 0 { 0 } else { 200 + (x % 50) as u8 }]);
         }
     }
     v

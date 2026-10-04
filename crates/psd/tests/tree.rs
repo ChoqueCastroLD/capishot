@@ -96,14 +96,7 @@ fn empty_group() {
 
 #[test]
 fn sibling_groups() {
-    let f = file_with(vec![
-        rec("</Layer group>", END),
-        rec("a", None),
-        rec("G1", OPEN),
-        rec("</Layer group>", END),
-        rec("b", None),
-        rec("G2", OPEN),
-    ]);
+    let f = file_with(vec![rec("</Layer group>", END), rec("a", None), rec("G1", OPEN), rec("</Layer group>", END), rec("b", None), rec("G2", OPEN)]);
     assert_eq!(names(&f, &f.layer_tree()), "G1[a],G2[b]");
 }
 

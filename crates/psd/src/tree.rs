@@ -65,8 +65,7 @@ impl PsdFile {
             match rec.section_type() {
                 SectionType::BoundingDivider => stack.push((Some(i), Vec::new())),
                 SectionType::OpenFolder | SectionType::ClosedFolder => {
-                    let (divider, children) =
-                        if stack.len() > 1 { stack.pop().unwrap_or_default() } else { (None, Vec::new()) };
+                    let (divider, children) = if stack.len() > 1 { stack.pop().unwrap_or_default() } else { (None, Vec::new()) };
                     if let Some(top) = stack.last_mut() {
                         top.1.push(LayerNode::Group { index: i, divider, children });
                     }

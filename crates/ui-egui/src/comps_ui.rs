@@ -59,7 +59,11 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
         if doc.layer_comps.is_empty() {
             ui.add_space(6.0);
-            ui.label(egui::RichText::new("Capture the visibility, position and style of every layer with + below, then switch between versions.").color(t.text_faint).size(11.5));
+            ui.label(
+                egui::RichText::new("Capture the visibility, position and style of every layer with + below, then switch between versions.")
+                    .color(t.text_faint)
+                    .size(11.5),
+            );
         }
         for c in &doc.layer_comps {
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
@@ -75,7 +79,11 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 crate::icons::paint(ui, marker, "check", 10.0, t.accent);
             }
             // The three apply toggles, right-aligned.
-            let toggles = [("eye", "Visibility", c.apply_visibility, "visibility"), ("move", "Position", c.apply_position, "position"), ("sparkles", "Appearance (Layer Style)", c.apply_appearance, "appearance")];
+            let toggles = [
+                ("eye", "Visibility", c.apply_visibility, "visibility"),
+                ("move", "Position", c.apply_position, "position"),
+                ("sparkles", "Appearance (Layer Style)", c.apply_appearance, "appearance"),
+            ];
             let mut x = rect.right() - 14.0;
             let mut toggle_hit = false;
             for (icon, tip, on, key) in toggles.iter().rev() {

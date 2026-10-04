@@ -20,15 +20,13 @@ mod image;
 mod options;
 pub mod web;
 
+pub use crate::codecs::png::encode_indexed as encode_png_indexed;
 pub use crate::error::CodecError;
 pub use crate::fidelity::{FidelityWarning, fidelity_warnings, fidelity_warnings_with};
 pub use crate::format::{ASYMMETRIC_EXCEPTIONS, Format, FormatCaps, caps, detect, from_extension};
 pub use crate::image::{ChannelLayout, Image, Metadata, SampleType};
-pub use crate::options::{
-    DecodeOptions, EncodeOptions, ExrCompression, Limits, PngCompression, TiffCompression,
-};
+pub use crate::options::{DecodeOptions, EncodeOptions, ExrCompression, Limits, PngCompression, TiffCompression};
 pub use half::f16;
-pub use crate::codecs::png::encode_indexed as encode_png_indexed;
 
 use crate::codecs::{exr, jpeg, png, pnm, tiff, via_image, webp};
 
@@ -49,16 +47,9 @@ pub fn decode_as(format: Format, bytes: &[u8]) -> Result<Image, CodecError> {
 }
 
 /// Decode as a specific format.
-pub fn decode_as_with(
-    format: Format,
-    bytes: &[u8],
-    opts: &DecodeOptions,
-) -> Result<Image, CodecError> {
+pub fn decode_as_with(format: Format, bytes: &[u8], opts: &DecodeOptions) -> Result<Image, CodecError> {
     if !caps(format).read {
-        return Err(CodecError::unsupported(
-            format,
-            "decoding is not available for this format",
-        ));
+        return Err(CodecError::unsupported(format, "decoding is not available for this format"));
     }
     let l = &opts.limits;
     let img = match format {
@@ -68,13 +59,7 @@ pub fn decode_as_with(
         Format::WebP => webp::decode(bytes, l),
         Format::Pnm => pnm::decode(bytes, l),
         Format::OpenExr => exr::decode(bytes, l),
-        Format::Gif
-        | Format::Bmp
-        | Format::Tga
-        | Format::Ico
-        | Format::Qoi
-        | Format::Hdr
-        | Format::Avif => via_image::decode(format, bytes, l),
+        Format::Gif | Format::Bmp | Format::Tga | Format::Ico | Format::Qoi | Format::Hdr | Format::Avif => via_image::decode(format, bytes, l),
     }?;
     // Final guard for decoders whose header we could not pre-inspect.
     l.check(img.width(), img.height(), img.layout(), img.sample_type())?;
@@ -86,23 +71,15 @@ pub fn decode_as_with(
 /// format, oversize image) return an error.
 pub fn encode(image: &Image, format: Format, opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
     if !caps(format).write {
-        return Err(CodecError::unsupported(
-            format,
-            "encoding is not available in this build",
-        ));
+        return Err(CodecError::unsupported(format, "encoding is not available in this build"));
     }
     if image.width() == 0 || image.height() == 0 {
-        return Err(CodecError::InvalidImage(
-            "cannot encode an empty image".into(),
-        ));
+        return Err(CodecError::InvalidImage("cannot encode an empty image".into()));
     }
     if let Some((mw, mh)) = format.max_dimensions()
         && (image.width() > mw || image.height() > mh)
     {
-        return Err(CodecError::encode(
-            format,
-            format!("dimensions exceed {mw}x{mh}"),
-        ));
+        return Err(CodecError::encode(format, format!("dimensions exceed {mw}x{mh}")));
     }
     let plan = fidelity::plan(image, format, opts);
     match format {
@@ -112,12 +89,6 @@ pub fn encode(image: &Image, format: Format, opts: &EncodeOptions) -> Result<Vec
         Format::WebP => webp::encode(image, plan, opts),
         Format::Pnm => pnm::encode(image, plan, opts),
         Format::OpenExr => exr::encode(image, plan, opts),
-        Format::Gif
-        | Format::Bmp
-        | Format::Tga
-        | Format::Ico
-        | Format::Qoi
-        | Format::Hdr
-        | Format::Avif => via_image::encode(format, image, plan, opts),
+        Format::Gif | Format::Bmp | Format::Tga | Format::Ico | Format::Qoi | Format::Hdr | Format::Avif => via_image::encode(format, image, plan, opts),
     }
 }

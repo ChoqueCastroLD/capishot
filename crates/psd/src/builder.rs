@@ -78,12 +78,8 @@ impl PixelData {
     fn alpha_is_opaque(&self, n: usize) -> bool {
         let spp = self.spp();
         match self {
-            PixelData::Rgba8(v) | PixelData::GrayA8(v) | PixelData::Cmyka8(v) => {
-                (0..n).all(|i| v[i * spp + spp - 1] == 255)
-            }
-            PixelData::Rgba16(v) | PixelData::GrayA16(v) | PixelData::Cmyka16(v) => {
-                (0..n).all(|i| v[i * spp + spp - 1] == 65535)
-            }
+            PixelData::Rgba8(v) | PixelData::GrayA8(v) | PixelData::Cmyka8(v) => (0..n).all(|i| v[i * spp + spp - 1] == 255),
+            PixelData::Rgba16(v) | PixelData::GrayA16(v) | PixelData::Cmyka16(v) => (0..n).all(|i| v[i * spp + spp - 1] == 65535),
         }
     }
 }
@@ -282,12 +278,7 @@ impl PsdBuilder {
 
     fn check_pixels(&self, p: &PixelData, n: usize) -> Result<()> {
         if p.mode_depth() != (self.color_mode, self.depth) {
-            return Err(PsdError::invalid(format!(
-                "pixel format {:?} does not match document {:?}/{}",
-                p.mode_depth(),
-                self.color_mode,
-                self.depth
-            )));
+            return Err(PsdError::invalid(format!("pixel format {:?} does not match document {:?}/{}", p.mode_depth(), self.color_mode, self.depth)));
         }
         if p.len() != n * p.spp() {
             return Err(PsdError::invalid(format!("pixel buffer has {} samples, expected {}", p.len(), n * p.spp())));
@@ -321,11 +312,7 @@ impl PsdBuilder {
             if m.data.len() != mw * mh {
                 return Err(PsdError::invalid("mask buffer size mismatch"));
             }
-            let plane: Vec<u8> = if self.depth == 16 {
-                m.data.iter().flat_map(|&v| (u16::from(v) * 257).to_be_bytes()).collect()
-            } else {
-                m.data.clone()
-            };
+            let plane: Vec<u8> = if self.depth == 16 { m.data.iter().flat_map(|&v| (u16::from(v) * 257).to_be_bytes()).collect() } else { m.data.clone() };
             channels.push(self.channel(-2, &plane, mw, mh)?);
             let flags = if m.disabled { LayerMask::FLAG_DISABLED } else { 0 };
             mask = MaskData::Mask(LayerMask::new(m.rect, m.default_color, flags));

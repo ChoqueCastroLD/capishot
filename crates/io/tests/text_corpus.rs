@@ -19,11 +19,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             collect(&p, out);
-        } else if p
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb"))
-        {
+        } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb")) {
             out.push(p);
         }
     }
@@ -72,39 +68,16 @@ fn corpus_text_layers() {
             };
             n += 1;
             assert!(t.psd_raw.is_some());
-            assert!(
-                !t.runs.is_empty(),
-                "{name}/{}: no style runs parsed",
-                l.name
-            );
-            assert_eq!(
-                t.runs
-                    .iter()
-                    .map(|r| r.len)
-                    .sum::<usize>()
-                    .min(t.text.len()),
-                t.text.len(),
-                "{name}/{}: runs cover text",
-                l.name
-            );
+            assert!(!t.runs.is_empty(), "{name}/{}: no style runs parsed", l.name);
+            assert_eq!(t.runs.iter().map(|r| r.len).sum::<usize>().min(t.text.len()), t.text.len(), "{name}/{}: runs cover text", l.name);
             let st = &t.runs[0].style;
-            assert!(
-                st.size_pt > 0.0 && st.postscript_name.is_some(),
-                "{name}/{}: {st:?}",
-                l.name
-            );
+            assert!(st.size_pt > 0.0 && st.postscript_name.is_some(), "{name}/{}: {st:?}", l.name);
             // Round trip of the model through our own TySh writer.
             let rebuilt = photocraft_text::psd::build_tysh(t, doc.resolution_dpi, None);
-            let back =
-                photocraft_text::psd::text_layer_from_tysh(&rebuilt, doc.resolution_dpi).unwrap();
+            let back = photocraft_text::psd::text_layer_from_tysh(&rebuilt, doc.resolution_dpi).unwrap();
             assert_eq!(back.text, t.text);
             assert_eq!(back.char_runs(), t.char_runs(), "{name}/{}", l.name);
-            assert_eq!(
-                back.paragraph_runs(),
-                t.paragraph_runs(),
-                "{name}/{}",
-                l.name
-            );
+            assert_eq!(back.paragraph_runs(), t.paragraph_runs(), "{name}/{}", l.name);
             assert_eq!(back.shape, t.shape);
 
             // Geometry vs Photoshop's pixels.
@@ -112,12 +85,7 @@ fn corpus_text_layers() {
             let ps_rect = ps.content_bounds();
             let (_, ours) = engine.render(t, doc.resolution_dpi, doc.pixel_format());
             let our_rect = ours.surface.content_bounds();
-            let u = Rect::new(
-                ps_rect.x0.min(our_rect.x0),
-                ps_rect.y0.min(our_rect.y0),
-                ps_rect.x1.max(our_rect.x1),
-                ps_rect.y1.max(our_rect.y1),
-            );
+            let u = Rect::new(ps_rect.x0.min(our_rect.x0), ps_rect.y0.min(our_rect.y0), ps_rect.x1.max(our_rect.x1), ps_rect.y1.max(our_rect.y1));
             let (a, b) = (alpha(ps, u), alpha(&ours.surface, u));
             let inter: f32 = a.iter().zip(&b).map(|(x, y)| x.min(*y)).sum();
             let union: f32 = a.iter().zip(&b).map(|(x, y)| x.max(*y)).sum();
@@ -135,37 +103,26 @@ fn corpus_text_layers() {
                 st.size_pt,
                 t.shape,
                 (ps_rect.x0, ps_rect.y0, ps_rect.width(), ps_rect.height()),
-                (
-                    our_rect.x0,
-                    our_rect.y0,
-                    our_rect.width(),
-                    our_rect.height()
-                ),
+                (our_rect.x0, our_rect.y0, our_rect.width(), our_rect.height()),
                 if ok { "ok" } else { "GEOMETRY OFF" }
             );
         }
     }
     println!("text layers: {n}, geometry within tolerance: {good_geometry}");
     if n > 0 {
-        assert!(
-            good_geometry * 2 >= n,
-            "most text layers should land where Photoshop drew them"
-        );
+        assert!(good_geometry * 2 >= n, "most text layers should land where Photoshop drew them");
     }
 }
 
 /// Unedited text layers are written back byte-for-byte.
 #[test]
 fn corpus_tysh_lossless() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../corpus/psd/ag-psd/read-write/text/src.psd");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/psd/ag-psd/read-write/text/src.psd");
     let Ok(bytes) = std::fs::read(&root) else {
         return;
     };
     let doc = photocraft_io::import("src.psd", &bytes).unwrap().document;
-    let out = photocraft_io::export(&doc, "out.psd", &Default::default())
-        .unwrap()
-        .bytes;
+    let out = photocraft_io::export(&doc, "out.psd", &Default::default()).unwrap().bytes;
     let find = |b: &[u8]| {
         let i = b.windows(8).position(|w| w == b"8BIMTySh").unwrap();
         let len = u32::from_be_bytes(b[i + 8..i + 12].try_into().unwrap()) as usize;
@@ -179,70 +136,30 @@ fn corpus_tysh_lossless() {
 #[test]
 fn created_text_layer_roundtrips_through_psd() {
     use photocraft_color::{Color, ColorMode, SampleType};
-    use photocraft_doc::text::{
-        CharStyle, ParagraphRun, ParagraphStyle, TextAlign, TextRun, TextShape,
-    };
+    use photocraft_doc::text::{CharStyle, ParagraphRun, ParagraphStyle, TextAlign, TextRun, TextShape};
     use photocraft_doc::{Document, Size, TextLayer};
     let mut doc = Document::new("t", Size::new(120, 80), ColorMode::Rgb, SampleType::U8);
     doc.resolution_dpi = 144.0;
-    let a = CharStyle {
-        font_family: "Inter".into(),
-        size_pt: 10.0,
-        color: Color::rgb(0.2, 0.4, 0.6),
-        ..Default::default()
-    };
-    let b = CharStyle {
-        faux_bold: true,
-        underline: true,
-        tracking: 50.0,
-        leading_pt: Some(14.0),
-        ..a.clone()
-    };
+    let a = CharStyle { font_family: "Inter".into(), size_pt: 10.0, color: Color::rgb(0.2, 0.4, 0.6), ..Default::default() };
+    let b = CharStyle { faux_bold: true, underline: true, tracking: 50.0, leading_pt: Some(14.0), ..a.clone() };
     let mut t = TextLayer {
         text: "Größe\nzwei".into(),
         runs: vec![TextRun { len: 3, style: a }, TextRun { len: 9, style: b }],
         paragraphs: vec![
-            ParagraphRun {
-                len: 7,
-                style: ParagraphStyle {
-                    align: TextAlign::Center,
-                    space_after_pt: 3.0,
-                    ..Default::default()
-                },
-            },
-            ParagraphRun {
-                len: 5,
-                style: ParagraphStyle {
-                    align: TextAlign::JustifyAll,
-                    ..Default::default()
-                },
-            },
+            ParagraphRun { len: 7, style: ParagraphStyle { align: TextAlign::Center, space_after_pt: 3.0, ..Default::default() } },
+            ParagraphRun { len: 5, style: ParagraphStyle { align: TextAlign::JustifyAll, ..Default::default() } },
         ],
-        shape: TextShape::Box {
-            x: 0.0,
-            y: 0.0,
-            width: 100.0,
-            height: 60.0,
-        },
+        shape: TextShape::Box { x: 0.0, y: 0.0, width: 100.0, height: 60.0 },
         transform: photocraft_geom::Affine::translate(8.0, 6.0),
         ..Default::default()
     };
     t.sync_summary();
     photocraft_text::TextEngine::new().render_layer(&mut t, doc.resolution_dpi, doc.pixel_format());
-    doc.layers.push(photocraft_doc::Layer::new(
-        "t",
-        LayerContent::Text(t.clone()),
-    ));
+    doc.layers.push(photocraft_doc::Layer::new("t", LayerContent::Text(t.clone())));
     let out = photocraft_io::export(&doc, "t.psd", &Default::default()).unwrap();
-    assert!(
-        !out.warnings.iter().any(|w| w.contains("text layer")),
-        "{:?}",
-        out.warnings
-    );
+    assert!(!out.warnings.iter().any(|w| w.contains("text layer")), "{:?}", out.warnings);
     let back = photocraft_io::import("t.psd", &out.bytes).unwrap().document;
-    let LayerContent::Text(bt) = &back.layers[0].content else {
-        panic!("not text")
-    };
+    let LayerContent::Text(bt) = &back.layers[0].content else { panic!("not text") };
     let strip = |v: Vec<photocraft_doc::text::TextRun>| {
         v.into_iter()
             .map(|mut r| {
@@ -257,9 +174,5 @@ fn created_text_layer_roundtrips_through_psd() {
     assert_eq!(bt.paragraph_runs(), t.paragraph_runs());
     assert_eq!(bt.shape, t.shape);
     assert_eq!(bt.transform, t.transform);
-    assert!(
-        bt.cache
-            .as_ref()
-            .is_some_and(|c| c.content_bounds().width() > 10)
-    );
+    assert!(bt.cache.as_ref().is_some_and(|c| c.content_bounds().width() > 10));
 }

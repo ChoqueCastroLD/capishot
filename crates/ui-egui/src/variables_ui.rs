@@ -20,11 +20,7 @@ pub fn owns(fields: &Map<String, Value>) -> bool {
 /// Layers available to bind, top to bottom: (id, display name, is-text).
 fn layer_options(app: &PhotocraftApp) -> Vec<(u64, String, bool)> {
     let Some(st) = app.session.active() else { return Vec::new() };
-    st.doc
-        .walk()
-        .iter()
-        .map(|(_, _, l)| (l.id.0, l.name.clone(), matches!(l.content, photocraft_doc::LayerContent::Text(_))))
-        .collect()
+    st.doc.walk().iter().map(|(_, _, l)| (l.id.0, l.name.clone(), matches!(l.content, photocraft_doc::LayerContent::Text(_)))).collect()
 }
 
 /// Menu entry points. Returns None for ids this module doesn't own.
@@ -191,7 +187,13 @@ fn data_sets_page(ui: &mut egui::Ui, _t: &Tokens, state: &mut Value, fields: &mu
     let def_meta: Vec<(String, String)> = state
         .get("defs")
         .and_then(Value::as_array)
-        .map(|a| a.iter().map(|d| (d.get("name").and_then(Value::as_str).unwrap_or("").to_string(), d.get("type").and_then(Value::as_str).unwrap_or("visibility").to_string())).collect())
+        .map(|a| {
+            a.iter()
+                .map(|d| {
+                    (d.get("name").and_then(Value::as_str).unwrap_or("").to_string(), d.get("type").and_then(Value::as_str).unwrap_or("visibility").to_string())
+                })
+                .collect()
+        })
         .unwrap_or_default();
     if def_meta.is_empty() {
         ui.weak("Define at least one variable first.");
@@ -296,7 +298,7 @@ pub fn confirm(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> Result<V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use photocraft_doc::{DataSet, DataValue, VarKind, VariableDef, Variables, variables::Value as VV, LayerId};
+    use photocraft_doc::{DataSet, DataValue, LayerId, VarKind, VariableDef, Variables, variables::Value as VV};
 
     #[test]
     fn to_state_mirrors_the_command_shape() {
@@ -305,10 +307,7 @@ mod tests {
                 VariableDef { name: "show".into(), layer: LayerId(1), kind: VarKind::Visibility },
                 VariableDef { name: "title".into(), layer: LayerId(2), kind: VarKind::TextReplacement },
             ],
-            data_sets: vec![DataSet {
-                name: "A".into(),
-                values: vec![DataValue { variable: "show".into(), value: VV::Visibility(false) }],
-            }],
+            data_sets: vec![DataSet { name: "A".into(), values: vec![DataValue { variable: "show".into(), value: VV::Visibility(false) }] }],
             active: None,
         };
         let s = to_state(&v);

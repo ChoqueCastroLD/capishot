@@ -140,16 +140,11 @@ impl BlendMode {
     }
 
     pub fn from_psd_key(key: [u8; 4]) -> Option<BlendMode> {
-        std::iter::once(BlendMode::PassThrough)
-            .chain(Self::LAYER_MODES)
-            .find(|m| m.psd_key() == key)
+        std::iter::once(BlendMode::PassThrough).chain(Self::LAYER_MODES).find(|m| m.psd_key() == key)
     }
 
     pub fn is_separable(self) -> bool {
-        !matches!(
-            self,
-            BlendMode::Hue | BlendMode::Saturation | BlendMode::Color | BlendMode::Luminosity | BlendMode::DarkerColor | BlendMode::LighterColor
-        )
+        !matches!(self, BlendMode::Hue | BlendMode::Saturation | BlendMode::Color | BlendMode::Luminosity | BlendMode::DarkerColor | BlendMode::LighterColor)
     }
 }
 
@@ -241,11 +236,7 @@ fn hard_light(cb: f32, cs: f32) -> f32 {
 /// Photoshop's Soft Light (differs from the W3C/PDF definition in the upper half).
 #[inline]
 fn soft_light_ps(cb: f32, cs: f32) -> f32 {
-    if cs <= 0.5 {
-        2.0 * cb * cs + cb * cb * (1.0 - 2.0 * cs)
-    } else {
-        2.0 * cb * (1.0 - cs) + cb.max(0.0).sqrt() * (2.0 * cs - 1.0)
-    }
+    if cs <= 0.5 { 2.0 * cb * cs + cb * cb * (1.0 - 2.0 * cs) } else { 2.0 * cb * (1.0 - cs) + cb.max(0.0).sqrt() * (2.0 * cs - 1.0) }
 }
 
 // ---- non-separable helpers (W3C Compositing Level 1) ----
@@ -305,10 +296,18 @@ pub fn blend_rgb(mode: BlendMode, cb: [f32; 3], cs: [f32; 3]) -> [f32; 3] {
         BlendMode::Color => set_lum(cs, lum(cb)),
         BlendMode::Luminosity => set_lum(cb, lum(cs)),
         BlendMode::DarkerColor => {
-            if lum(cs) < lum(cb) { cs } else { cb }
+            if lum(cs) < lum(cb) {
+                cs
+            } else {
+                cb
+            }
         }
         BlendMode::LighterColor => {
-            if lum(cs) > lum(cb) { cs } else { cb }
+            if lum(cs) > lum(cb) {
+                cs
+            } else {
+                cb
+            }
         }
         m => [blend_channel(m, cb[0], cs[0]), blend_channel(m, cb[1], cs[1]), blend_channel(m, cb[2], cs[2])],
     }

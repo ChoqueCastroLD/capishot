@@ -24,7 +24,8 @@ pub fn sharpness(img: &super::RgbImage, noise: f32) -> Vec<f32> {
     for yy in 0..h {
         for x in 0..w {
             let c = at(x, yy);
-            let l = (2.0 * c - at(x.saturating_sub(1), yy) - at((x + 1).min(w - 1), yy)).abs() + (2.0 * c - at(x, yy.saturating_sub(1)) - at(x, (yy + 1).min(h - 1))).abs();
+            let l = (2.0 * c - at(x.saturating_sub(1), yy) - at((x + 1).min(w - 1), yy)).abs()
+                + (2.0 * c - at(x, yy.saturating_sub(1)) - at(x, (yy + 1).min(h - 1))).abs();
             lap[yy * w + x] = l;
         }
     }

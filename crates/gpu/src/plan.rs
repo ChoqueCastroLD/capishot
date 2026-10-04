@@ -293,7 +293,14 @@ pub struct DocCtx<'a> {
 
 impl<'a> DocCtx<'a> {
     pub fn of(doc: &'a Document) -> Self {
-        DocCtx { canvas: doc.bounds(), transfer: Transfer::for_mode(doc.mode), light: doc.global_light, patterns: &doc.patterns, mode: doc.mode, depth: doc.depth }
+        DocCtx {
+            canvas: doc.bounds(),
+            transfer: Transfer::for_mode(doc.mode),
+            light: doc.global_light,
+            patterns: &doc.patterns,
+            mode: doc.mode,
+            depth: doc.depth,
+        }
     }
 }
 
@@ -443,16 +450,18 @@ impl<'a> Planner<'a> {
         if !m.enabled {
             return None;
         }
-        Some(MaskUse { layer: layer.id, surface: SurfaceRef::Doc(&m.surface), density: m.density, default: m.surface.default_pixel().first().copied().unwrap_or(1.0) })
+        Some(MaskUse {
+            layer: layer.id,
+            surface: SurfaceRef::Doc(&m.surface),
+            density: m.density,
+            default: m.surface.default_pixel().first().copied().unwrap_or(1.0),
+        })
     }
 
     /// Blending Options › Blend If has no GPU pass yet: such documents use the CPU compositor.
     fn check_blend_if(&self, layer: &Layer) -> Result<(), Unsupported> {
         if photocraft_compose::blend_if_active(layer, self.cx.mode) {
-            return Err(Unsupported(format!(
-                "Blend If on `{}` (composited on the CPU)",
-                layer.name
-            )));
+            return Err(Unsupported(format!("Blend If on `{}` (composited on the CPU)", layer.name)));
         }
         Ok(())
     }
@@ -837,7 +846,18 @@ impl<'a> Planner<'a> {
                 // The layer hides the shadow beneath it where its fill is see-through.
                 let flags = if s.knocks_out { F_KNOCKOUT } else { 0 };
                 let see_through = 1.0 - layer.fill_opacity.clamp(0.0, 1.0);
-                w = self.paint_k(w, content, Cov::Map(map(i, 0), 0.0), &Paint::Color(s.color.to_rgb()), s.common.blend, s.common.opacity, flags, clip, sb, see_through);
+                w = self.paint_k(
+                    w,
+                    content,
+                    Cov::Map(map(i, 0), 0.0),
+                    &Paint::Color(s.color.to_rgb()),
+                    s.common.blend,
+                    s.common.opacity,
+                    flags,
+                    clip,
+                    sb,
+                    see_through,
+                );
             }
         }
         for &(i, e) in &rev {
@@ -900,7 +920,17 @@ impl<'a> Planner<'a> {
                 && b.style != photocraft_doc::BevelStyle::OuterBevel
             {
                 // Inner part (emboss styles: maps 0–1 inside, 2–3 outside).
-                l = self.paint(l, content, Cov::Map(map(i, 0), 0.0), &Paint::Color(b.highlight_color.to_rgb()), b.highlight.blend, b.highlight.opacity, F_REL, clip, sb);
+                l = self.paint(
+                    l,
+                    content,
+                    Cov::Map(map(i, 0), 0.0),
+                    &Paint::Color(b.highlight_color.to_rgb()),
+                    b.highlight.blend,
+                    b.highlight.opacity,
+                    F_REL,
+                    clip,
+                    sb,
+                );
                 l = self.paint(l, content, Cov::Map(map(i, 1), 0.0), &Paint::Color(b.shadow_color.to_rgb()), b.shadow.blend, b.shadow.opacity, F_REL, clip, sb);
             }
         }
@@ -910,7 +940,13 @@ impl<'a> Planner<'a> {
         // Outside stroke parts lie beneath the layer and blend onto the exterior result with their
         // own mode; a higher stroke covers the ones below it (each takes its coverage × opacity
         // not yet taken above it, blended over the result as it was before the strokes).
-        let outs: Vec<(usize, &photocraft_doc::StrokeFx)> = items.iter().copied().enumerate().filter_map(|(i, e)| if let Effect::Stroke(st) = e { Some((i, st)) } else { None }).filter(|(_, st)| stroke_widths(st).1 > 0.0).collect();
+        let outs: Vec<(usize, &photocraft_doc::StrokeFx)> = items
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(i, e)| if let Effect::Stroke(st) = e { Some((i, st)) } else { None })
+            .filter(|(_, st)| stroke_widths(st).1 > 0.0)
+            .collect();
         if !outs.is_empty() {
             let (mut acc, mut cover): (Option<Slot>, Option<Slot>) = (None, None);
             for (n, &(i, st)) in outs.iter().enumerate() {
@@ -947,7 +983,17 @@ impl<'a> Planner<'a> {
                 && paint != photocraft_compose::effects::BevelPaint::Inner
             {
                 let k = if paint == photocraft_compose::effects::BevelPaint::Both { 2 } else { 0 };
-                w = self.paint(w, content, Cov::Map(map(i, k), 0.0), &Paint::Color(b.highlight_color.to_rgb()), b.highlight.blend, b.highlight.opacity, 0, clip, sb);
+                w = self.paint(
+                    w,
+                    content,
+                    Cov::Map(map(i, k), 0.0),
+                    &Paint::Color(b.highlight_color.to_rgb()),
+                    b.highlight.blend,
+                    b.highlight.opacity,
+                    0,
+                    clip,
+                    sb,
+                );
                 w = self.paint(w, content, Cov::Map(map(i, k + 1), 0.0), &Paint::Color(b.shadow_color.to_rgb()), b.shadow.blend, b.shadow.opacity, 0, clip, sb);
             }
         }
@@ -1002,7 +1048,18 @@ impl<'a> Planner<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn fx_pass_kernel(&mut self, kernel: Kernel, dst: Slot, content: Slot, paint: &Paint<'a>, blend: BlendMode, opacity: f32, flags: u32, clip: Rect, sb: Rect) -> Pass<'a> {
+    fn fx_pass_kernel(
+        &mut self,
+        kernel: Kernel,
+        dst: Slot,
+        content: Slot,
+        paint: &Paint<'a>,
+        blend: BlendMode,
+        opacity: f32,
+        flags: u32,
+        clip: Rect,
+        sb: Rect,
+    ) -> Pass<'a> {
         let mut p = Pass::new(kernel, 0);
         p.a = Some(self.retain(dst));
         p.b = Some(self.retain(content));
@@ -1046,7 +1103,19 @@ impl<'a> Planner<'a> {
 
     /// [`Self::paint`] with the knockout strength (`F_KNOCKOUT`: coverage × (1 − alpha × k)).
     #[allow(clippy::too_many_arguments)]
-    fn paint_k(&mut self, dst: Slot, content: Slot, cov: Cov, paint: &Paint<'a>, blend: BlendMode, opacity: f32, flags: u32, clip: Rect, sb: Rect, knockout: f32) -> Slot {
+    fn paint_k(
+        &mut self,
+        dst: Slot,
+        content: Slot,
+        cov: Cov,
+        paint: &Paint<'a>,
+        blend: BlendMode,
+        opacity: f32,
+        flags: u32,
+        clip: Rect,
+        sb: Rect,
+        knockout: f32,
+    ) -> Slot {
         if matches!(paint, Paint::None) {
             // Missing pattern: compose paints nothing.
             return dst;
@@ -1343,24 +1412,9 @@ mod tests {
 
     #[test]
     fn blend_if_falls_back_to_the_cpu() {
-        let mut d = Document::with_background(
-            "t",
-            Size::new(8, 8),
-            ColorMode::Rgb,
-            SampleType::U8,
-            Color::WHITE,
-        );
+        let mut d = Document::with_background("t", Size::new(8, 8), ColorMode::Rgb, SampleType::U8, Color::WHITE);
         let mut l = Layer::raster("bi", d.pixel_format());
-        l.blend_if.set(
-            0,
-            [
-                photocraft_doc::BlendRange {
-                    black: [40, 40],
-                    white: [255, 255],
-                },
-                photocraft_doc::BlendRange::FULL,
-            ],
-        );
+        l.blend_if.set(0, [photocraft_doc::BlendRange { black: [40, 40], white: [255, 255] }, photocraft_doc::BlendRange::FULL]);
         d.layers.push(l.clone());
         assert!(plan(&d).unwrap_err().0.contains("Blend If"));
         // Clipped layers too.

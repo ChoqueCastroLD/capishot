@@ -12,9 +12,7 @@ use crate::header::Version;
 use crate::io::{Reader, WriteExt};
 
 /// Keys whose length field is 8 bytes in PSB files.
-pub const PSB_LONG_KEYS: [&[u8; 4]; 13] = [
-    b"LMsk", b"Lr16", b"Lr32", b"Layr", b"Mt16", b"Mt32", b"Mtrn", b"Alph", b"FMsk", b"lnk2", b"FEid", b"FXid", b"PxSD",
-];
+pub const PSB_LONG_KEYS: [&[u8; 4]; 13] = [b"LMsk", b"Lr16", b"Lr32", b"Layr", b"Mt16", b"Mt32", b"Mtrn", b"Alph", b"FMsk", b"lnk2", b"FEid", b"FXid", b"PxSD"];
 
 /// Returns `true` if `key` uses an 8-byte length in `version`.
 pub fn uses_long_length(version: Version, key: &[u8; 4]) -> bool {
@@ -290,12 +288,7 @@ pub(crate) fn read_blocks(r: &mut Reader<'_>, version: Version) -> Result<(Vec<T
         }
         let pad = pad.unwrap_or(0);
         let pad_bytes = r.bytes(pad)?.to_vec();
-        let padding = if pad_bytes.len() == TaggedBlock::default_padding(data.len()) && pad_bytes.iter().all(|&b| b == 0)
-        {
-            None
-        } else {
-            Some(pad_bytes)
-        };
+        let padding = if pad_bytes.len() == TaggedBlock::default_padding(data.len()) && pad_bytes.iter().all(|&b| b == 0) { None } else { Some(pad_bytes) };
         blocks.push(TaggedBlock { signature, key, data, padding });
     }
 }
@@ -368,10 +361,7 @@ mod tests {
         assert_eq!(TaggedBlock::layer_id(7).parsed(), Some(Ok(BlockData::LayerId(7))));
         assert_eq!(TaggedBlock::name_source(*b"cont").parsed(), Some(Ok(BlockData::NameSource(*b"cont"))));
         assert_eq!(TaggedBlock::blend_clipped_as_group(true).parsed(), Some(Ok(BlockData::BlendClippedAsGroup(true))));
-        assert_eq!(
-            TaggedBlock::blend_interior_elements(false).parsed(),
-            Some(Ok(BlockData::BlendInteriorElements(false)))
-        );
+        assert_eq!(TaggedBlock::blend_interior_elements(false).parsed(), Some(Ok(BlockData::BlendInteriorElements(false))));
         assert_eq!(TaggedBlock::knockout(2).parsed(), Some(Ok(BlockData::Knockout(2))));
         assert_eq!(TaggedBlock::protection(0x8000_0000).parsed(), Some(Ok(BlockData::Protection(0x8000_0000))));
         assert_eq!(TaggedBlock::sheet_color(3).parsed(), Some(Ok(BlockData::SheetColor(3))));

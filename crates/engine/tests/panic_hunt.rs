@@ -2,9 +2,9 @@
 //! (Rule 9 in AGENTS.md.) Each command runs on its own thread with a timeout, so one bad command
 //! can't wedge the run — panics are caught and hangs are reported. Opt-in (slow):
 //! `cargo test -p photocraft-engine --test panic_hunt -- --ignored`.
-use photocraft_engine::{command_specs, Session};
-use serde_json::{json, Value};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use photocraft_engine::{Session, command_specs};
+use serde_json::{Value, json};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc;
 use std::time::Duration;
 

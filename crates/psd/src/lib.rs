@@ -68,9 +68,7 @@ pub use error::{PsdError, Result};
 pub use file::{GlobalLayerMask, LayerInfoPlacement, PsdFile};
 pub use header::{ColorMode, Header, Version};
 pub use image_data::ImageData;
-pub use layer::{
-    BlendingRanges, ChannelData, LayerFlags, LayerInfo, LayerMask, LayerRecord, MaskData, MaskParameters, RealMask, Rect,
-};
+pub use layer::{BlendingRanges, ChannelData, LayerFlags, LayerInfo, LayerMask, LayerRecord, MaskData, MaskParameters, RealMask, Rect};
 pub use pixels::{GrayImage, Layer, RgbaImage};
 pub use resources::{ImageResource, ResolutionInfo, ResourceData};
 pub use tagged::{BlockData, SectionDivider, SectionType, TaggedBlock};

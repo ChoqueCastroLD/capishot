@@ -34,10 +34,7 @@ pub fn psd_style(id: &str) -> Option<&'static str> {
     if l == "none" || l == "warpnone" {
         return Some("warpNone");
     }
-    STYLES
-        .iter()
-        .find(|(psd, short)| psd.to_ascii_lowercase() == l || short.to_ascii_lowercase() == l)
-        .map(|(psd, _)| *psd)
+    STYLES.iter().find(|(psd, short)| psd.to_ascii_lowercase() == l || short.to_ascii_lowercase() == l).map(|(psd, _)| *psd)
 }
 
 /// A warp prepared for one layout: the shared style math of
@@ -50,15 +47,8 @@ impl Warp {
     /// `warpNone`, unknown styles, an all-zero warp or empty bounds.
     pub fn new(w: &TextWarp, bounds: [f32; 4]) -> Option<Warp> {
         let style = WarpStyle::parse(&w.style).filter(|s| s.is_preset() && s.psd_name() == w.style)?;
-        StyleWarp::new(
-            style,
-            f64::from(w.value),
-            f64::from(w.horizontal_distortion),
-            f64::from(w.vertical_distortion),
-            !w.horizontal,
-            bounds.map(f64::from),
-        )
-        .map(Warp)
+        StyleWarp::new(style, f64::from(w.value), f64::from(w.horizontal_distortion), f64::from(w.vertical_distortion), !w.horizontal, bounds.map(f64::from))
+            .map(Warp)
     }
 
     /// Longest segment (text-space px) worth sending through [`Warp::apply`] unsplit.
@@ -77,13 +67,7 @@ mod tests {
     use super::*;
 
     fn warp(style: &str, value: f32) -> Warp {
-        let w = TextWarp {
-            style: psd_style(style).unwrap().into(),
-            value,
-            horizontal_distortion: 0.0,
-            vertical_distortion: 0.0,
-            horizontal: true,
-        };
+        let w = TextWarp { style: psd_style(style).unwrap().into(), value, horizontal_distortion: 0.0, vertical_distortion: 0.0, horizontal: true };
         Warp::new(&w, [0.0, -40.0, 200.0, 10.0]).unwrap()
     }
 
@@ -93,17 +77,9 @@ mod tests {
         assert_eq!(psd_style("warpTwist"), Some("warpTwist"));
         assert_eq!(psd_style("none"), Some("warpNone"));
         assert_eq!(psd_style("spiral"), None);
-        let none = TextWarp {
-            style: "warpNone".into(),
-            value: 50.0,
-            ..Default::default()
-        };
+        let none = TextWarp { style: "warpNone".into(), value: 50.0, ..Default::default() };
         assert!(Warp::new(&none, [0.0, 0.0, 10.0, 10.0]).is_none());
-        let flat = TextWarp {
-            style: "warpArc".into(),
-            value: 0.0,
-            ..Default::default()
-        };
+        let flat = TextWarp { style: "warpArc".into(), value: 0.0, ..Default::default() };
         assert!(Warp::new(&flat, [0.0, 0.0, 10.0, 10.0]).is_none());
     }
 

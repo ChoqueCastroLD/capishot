@@ -12,7 +12,10 @@ pub enum Curve {
     Gamma(f64),
     /// ICC `parametricCurveType` function `kind` (0–4) with parameters `[g, a, b, c, d, e, f]`
     /// (unused ones are 0).
-    Parametric { kind: u16, p: [f64; 7] },
+    Parametric {
+        kind: u16,
+        p: [f64; 7],
+    },
     /// Samples at evenly spaced inputs over `[0, 1]`, normalised outputs.
     Table(Vec<f32>),
 }

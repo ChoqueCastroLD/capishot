@@ -52,10 +52,9 @@ pub fn parse_script(text: &str) -> Result<Vec<(String, Value)>> {
         let v: Value = serde_json::from_str(t).map_err(|e| bad(cmd, format!("script JSON: {e}")))?;
         let steps = match &v {
             Value::Array(_) => &v,
-            Value::Object(o) => o
-                .get("steps")
-                .or_else(|| o.get("action").and_then(|a| a.get("steps").or(Some(a))))
-                .ok_or_else(|| bad(cmd, "script object needs \"steps\""))?,
+            Value::Object(o) => {
+                o.get("steps").or_else(|| o.get("action").and_then(|a| a.get("steps").or(Some(a)))).ok_or_else(|| bad(cmd, "script object needs \"steps\""))?
+            }
             _ => unreachable!(),
         };
         return parse_steps(steps, cmd);
@@ -77,7 +76,9 @@ fn parse_steps(v: &Value, cmd: &str) -> Result<Vec<(String, Value)>> {
     let arr = v.as_array().ok_or_else(|| bad(cmd, "steps must be an array"))?;
     arr.iter()
         .map(|st| match st {
-            Value::Array(a) if !a.is_empty() => Ok((a[0].as_str().ok_or_else(|| bad(cmd, "step id must be a string"))?.to_string(), a.get(1).cloned().unwrap_or(json!({})))),
+            Value::Array(a) if !a.is_empty() => {
+                Ok((a[0].as_str().ok_or_else(|| bad(cmd, "step id must be a string"))?.to_string(), a.get(1).cloned().unwrap_or(json!({}))))
+            }
             Value::Object(o) => {
                 let id = o.get("command").or_else(|| o.get("id")).and_then(Value::as_str).ok_or_else(|| bad(cmd, "step needs \"command\""))?;
                 Ok((id.to_string(), o.get("params").cloned().unwrap_or(json!({}))))
@@ -176,7 +177,11 @@ fn script_events(s: &mut Session, p: &Value) -> Result<Value> {
         ev.bindings.remove(i as usize);
     }
     // The dialog's flat form: "event" + "script" at the top level means add.
-    let flat = p.get("event").and_then(Value::as_str).filter(|_| p.get("script").and_then(Value::as_str).is_some_and(|v| !v.is_empty())).map(|e| json!({"event": e, "script": p["script"], "name": p.get("name").cloned().unwrap_or(Value::Null)}));
+    let flat = p
+        .get("event")
+        .and_then(Value::as_str)
+        .filter(|_| p.get("script").and_then(Value::as_str).is_some_and(|v| !v.is_empty()))
+        .map(|e| json!({"event": e, "script": p["script"], "name": p.get("name").cloned().unwrap_or(Value::Null)}));
     if let Some(a) = p.get("add").cloned().or(flat).as_ref() {
         let event = a.get("event").and_then(Value::as_str).ok_or_else(|| bad(cmd, "add needs \"event\""))?;
         if !EVENTS.iter().any(|(id, _)| *id == event) {
@@ -190,7 +195,12 @@ fn script_events(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(st) = &steps {
             check_known(&parse_steps(st, cmd)?, cmd)?;
         }
-        let name = a.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| script.as_deref().map(file_name).unwrap_or_else(|| "Action".into()));
+        let name = a
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|n| !n.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| script.as_deref().map(file_name).unwrap_or_else(|| "Action".into()));
         ev.bindings.push(ScriptBinding { event: event.into(), script, steps, name });
         if a.get("enable").and_then(Value::as_bool).unwrap_or(true) {
             ev.enabled = true;
@@ -293,7 +303,10 @@ fn write_shim(droplet: &str) -> Result<String> {
     let abs = std::fs::canonicalize(droplet).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| droplet.to_string());
     let base = abs.trim_end_matches(".pcdroplet").trim_end_matches(".json");
     let shim = format!("{base}.command");
-    let body = format!("#!/bin/sh\n# PhotoCraft droplet: runs the action on the files given (or dropped).\nexec \"${{PHOTOCRAFT_CLI:-photocraft-cli}}\" droplet \"{}\" \"$@\"\n", abs.replace('"', "\\\""));
+    let body = format!(
+        "#!/bin/sh\n# PhotoCraft droplet: runs the action on the files given (or dropped).\nexec \"${{PHOTOCRAFT_CLI:-photocraft-cli}}\" droplet \"{}\" \"$@\"\n",
+        abs.replace('"', "\\\"")
+    );
     std::fs::write(&shim, body).map_err(|e| EngineError::Other(format!("{shim}: {e}")))?;
     #[cfg(unix)]
     {
@@ -346,7 +359,10 @@ fn run_droplet(s: &mut Session, p: &Value) -> Result<Value> {
 fn statistics(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.scripts.statistics";
     let mode = p.get("mode").or_else(|| p.get("stackMode")).and_then(Value::as_str).unwrap_or("median");
-    let sm = photocraft_doc::StackMode::ALL.into_iter().find(|m| m.id().eq_ignore_ascii_case(mode)).ok_or_else(|| bad(cmd, format!("unknown stack mode `{mode}`")))?;
+    let sm = photocraft_doc::StackMode::ALL
+        .into_iter()
+        .find(|m| m.id().eq_ignore_ascii_case(mode))
+        .ok_or_else(|| bad(cmd, format!("unknown stack mode `{mode}`")))?;
     let input = p.get("input").or_else(|| p.get("paths")).cloned().ok_or_else(|| bad(cmd, "missing \"input\" (files or a folder)"))?;
     let align = p.get("align").and_then(Value::as_bool).unwrap_or(false);
     let r = s.execute("file.scripts.loadFilesIntoStack", json!({"paths": input, "createSmartObject": !align}))?;
@@ -498,12 +514,54 @@ pub fn specs() -> Vec<CommandSpec> {
     }
     let native = crate::file_cmds::native;
     vec![
-        spec!("file.automate.contactSheetII", "Contact Sheet II…", &["File", "Automate"], r##"{"input":folder|[paths],"units":"inches|cm|mm|pixels"="inches","width":8,"height":10,"resolution":ppi=300,"mode":"rgb|gray|cmyk|lab"="rgb","depth":8|16=8,"columns":5,"rows":6,"placeAcrossFirst":bool=true,"autoSpacing":bool=true,"horizontal":units?,"vertical":units?,"rotateForBestFit":bool=false,"caption":bool=true (file name as caption),"font":family?,"fontSize":pt=12,"flatten":bool=false} → {documents, pages, images}"##, native, contact_sheet),
-        spec!("file.automate.createDroplet", "Create Droplet…", &["File", "Automate"], r##"{"path":str (.pcdroplet),"steps":[[id,params]…] (the action),"name":str?,"output":folder?,"format":"same|png|jpg|…"?,"quality":0..12?,"shim":bool=true on macOS/Linux (writes <name>.command calling `photocraft-cli droplet`)} → {path, shim}"##, native, create_droplet),
-        spec!("file.automate.runDroplet", "Run Droplet", &[], r##"{"droplet":path,"input":[files or folders],"output":folder? (default: droplet's, else <input folder>/droplet-output)} → {files, errors}"##, native, run_droplet),
-        spec!("file.scripts.statistics", "Statistics…", &["File", "Scripts"], r##"{"mode":"mean|median|maximum|minimum|range|summation|variance|standardDeviation|skewness|kurtosis|entropy"="median","input":folder|[paths],"align":bool=false (Auto-Align first)} → new document with one stack-mode smart object"##, native, statistics),
-        spec!("file.scripts.browse", "Browse…", &["File", "Scripts"], r##"{"path":script file | "script":text | "steps":[[id,params]…]} (JSON action, or one `command.id {json}` per line) → {steps, ok, results}"##, |_| Ok(()), browse),
-        spec!("file.scripts.scriptEventsManager", "Script Events Manager…", &["File", "Scripts"], r##"{"enabled":bool?,"add":{"event":"startApplication|newDocument|openDocument|saveDocument|closeDocument|print|export|everything","script":path?|"steps":[…]?,"name":str?}?,"remove":index?,"removeAll":bool?} → {enabled, bindings, events}"##, |_| Ok(()), script_events),
+        spec!(
+            "file.automate.contactSheetII",
+            "Contact Sheet II…",
+            &["File", "Automate"],
+            r##"{"input":folder|[paths],"units":"inches|cm|mm|pixels"="inches","width":8,"height":10,"resolution":ppi=300,"mode":"rgb|gray|cmyk|lab"="rgb","depth":8|16=8,"columns":5,"rows":6,"placeAcrossFirst":bool=true,"autoSpacing":bool=true,"horizontal":units?,"vertical":units?,"rotateForBestFit":bool=false,"caption":bool=true (file name as caption),"font":family?,"fontSize":pt=12,"flatten":bool=false} → {documents, pages, images}"##,
+            native,
+            contact_sheet
+        ),
+        spec!(
+            "file.automate.createDroplet",
+            "Create Droplet…",
+            &["File", "Automate"],
+            r##"{"path":str (.pcdroplet),"steps":[[id,params]…] (the action),"name":str?,"output":folder?,"format":"same|png|jpg|…"?,"quality":0..12?,"shim":bool=true on macOS/Linux (writes <name>.command calling `photocraft-cli droplet`)} → {path, shim}"##,
+            native,
+            create_droplet
+        ),
+        spec!(
+            "file.automate.runDroplet",
+            "Run Droplet",
+            &[],
+            r##"{"droplet":path,"input":[files or folders],"output":folder? (default: droplet's, else <input folder>/droplet-output)} → {files, errors}"##,
+            native,
+            run_droplet
+        ),
+        spec!(
+            "file.scripts.statistics",
+            "Statistics…",
+            &["File", "Scripts"],
+            r##"{"mode":"mean|median|maximum|minimum|range|summation|variance|standardDeviation|skewness|kurtosis|entropy"="median","input":folder|[paths],"align":bool=false (Auto-Align first)} → new document with one stack-mode smart object"##,
+            native,
+            statistics
+        ),
+        spec!(
+            "file.scripts.browse",
+            "Browse…",
+            &["File", "Scripts"],
+            r##"{"path":script file | "script":text | "steps":[[id,params]…]} (JSON action, or one `command.id {json}` per line) → {steps, ok, results}"##,
+            |_| Ok(()),
+            browse
+        ),
+        spec!(
+            "file.scripts.scriptEventsManager",
+            "Script Events Manager…",
+            &["File", "Scripts"],
+            r##"{"enabled":bool?,"add":{"event":"startApplication|newDocument|openDocument|saveDocument|closeDocument|print|export|everything","script":path?|"steps":[…]?,"name":str?}?,"remove":index?,"removeAll":bool?} → {enabled, bindings, events}"##,
+            |_| Ok(()),
+            script_events
+        ),
     ]
 }
 

@@ -181,7 +181,11 @@ pub fn warp_triangles(src: &Surface, src_rect: Rect, verts: &[([f64; 2], [f64; 2
         }
         let fw = foot.width() as usize;
         let at = |x: i32, y: i32, c: usize| -> f64 {
-            if x < foot.x0 || y < foot.y0 || x >= foot.x1 || y >= foot.y1 { 0.0 } else { f64::from(px[((y - foot.y0) as usize * fw + (x - foot.x0) as usize) * n + c]) }
+            if x < foot.x0 || y < foot.y0 || x >= foot.x1 || y >= foot.y1 {
+                0.0
+            } else {
+                f64::from(px[((y - foot.y0) as usize * fw + (x - foot.x0) as usize) * n + c])
+            }
         };
         let mut outp = vec![0.0f32; w * h * n];
         let mut any = false;

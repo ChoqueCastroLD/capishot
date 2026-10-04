@@ -394,7 +394,8 @@ fn photomerge(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.automate.photomerge";
     let t0 = Stopwatch::start();
     let layout_s = p.get("layout").and_then(Value::as_str).unwrap_or("auto");
-    let layout = Layout::parse(layout_s).ok_or_else(|| bad(cmd, format!("unknown layout `{layout_s}` (auto|perspective|cylindrical|spherical|collage|reposition)")))?;
+    let layout =
+        Layout::parse(layout_s).ok_or_else(|| bad(cmd, format!("unknown layout `{layout_s}` (auto|perspective|cylindrical|spherical|collage|reposition)")))?;
     let blend = p.get("blend").and_then(Value::as_bool).unwrap_or(true);
     let vignette = p.get("vignetteRemoval").and_then(Value::as_bool).unwrap_or(false);
     let geometric = p.get("geometricCorrection").and_then(Value::as_bool).unwrap_or(false);
@@ -405,7 +406,8 @@ fn photomerge(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let focal35 = p.get("focalLength").and_then(Value::as_f64).filter(|f| *f > 0.0).or_else(|| exif_focal(&srcs));
     let images: Vec<(&Surface, Rect)> = srcs.iter().map(|s| (&s.surf, Rect::new(0, 0, s.w as i32, s.h as i32))).collect();
-    let al = register(&images, layout, None, geometric, focal35).ok_or_else(|| EngineError::Other("Photomerge couldn't find enough matching detail between the images".into()))?;
+    let al = register(&images, layout, None, geometric, focal35)
+        .ok_or_else(|| EngineError::Other("Photomerge couldn't find enough matching detail between the images".into()))?;
     let t_reg = t0.ms() / 1000.0;
     let placed: Vec<usize> = (0..srcs.len()).filter(|&i| al.placements[i].is_some()).collect();
     let failed: Vec<String> = (0..srcs.len()).filter(|&i| al.placements[i].is_none()).map(|i| srcs[i].name.clone()).collect();
@@ -426,7 +428,18 @@ fn photomerge(s: &mut Session, p: &Value) -> Result<Value> {
     let offset = (-x0.floor(), -y0.floor());
     let warped: Vec<Surface> = {
         let jobs: Vec<usize> = placed.clone();
-        jobs.iter().map(|&i| warp_placed(&srcs[i].surf, Rect::new(0, 0, srcs[i].w as i32, srcs[i].h as i32), (0.0, 0.0), al.placements[i].as_ref().expect("placed"), offset, Interp::Bicubic)).collect()
+        jobs.iter()
+            .map(|&i| {
+                warp_placed(
+                    &srcs[i].surf,
+                    Rect::new(0, 0, srcs[i].w as i32, srcs[i].h as i32),
+                    (0.0, 0.0),
+                    al.placements[i].as_ref().expect("placed"),
+                    offset,
+                    Interp::Bicubic,
+                )
+            })
+            .collect()
     };
     let t_warp = t0.ms() / 1000.0;
     let mut doc = Document::new(format!("Untitled_Panorama{}", s.documents().len() + 1), Size::new(cw as u32, ch as u32), fmt.mode, fmt.sample);
@@ -621,7 +634,17 @@ fn merge_to_hdr(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`ghostBase` is an image index"));
     }
     let refs: Vec<&[[f32; 4]]> = imgs.iter().map(Vec::as_slice).collect();
-    let merged = hdr::merge(w, h, &refs, &MergeOptions { exposures: exposures.clone(), remove_ghosts: p.get("removeGhosts").and_then(Value::as_bool).unwrap_or(false), ghost_base, response: None });
+    let merged = hdr::merge(
+        w,
+        h,
+        &refs,
+        &MergeOptions {
+            exposures: exposures.clone(),
+            remove_ghosts: p.get("removeGhosts").and_then(Value::as_bool).unwrap_or(false),
+            ghost_base,
+            response: None,
+        },
+    );
     let mode = p.get("mode").and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|n| n.to_string()))).unwrap_or_else(|| "32".into());
     let (depth, mut px) = match mode.as_str() {
         "32" => (SampleType::F32, merged.px.clone()),
@@ -791,7 +814,12 @@ mod tests {
             z = z.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             (z >> 33) as f64 / (1u64 << 31) as f64
         };
-        let mut px: Vec<[f32; 4]> = (0..w * h).map(|i| { let x = (i % w) as f32 / w as f32; [0.3 + 0.2 * x, 0.35, 0.4 - 0.1 * x, 1.0] }).collect();
+        let mut px: Vec<[f32; 4]> = (0..w * h)
+            .map(|i| {
+                let x = (i % w) as f32 / w as f32;
+                [0.3 + 0.2 * x, 0.35, 0.4 - 0.1 * x, 1.0]
+            })
+            .collect();
         for _ in 0..(w * h / 700) {
             let (cx, cy, r) = (rnd() * w as f64, rnd() * h as f64, 3.0 + rnd() * 9.0);
             let col = [rnd() as f32, rnd() as f32, rnd() as f32, 1.0];
@@ -821,7 +849,12 @@ mod tests {
     }
 
     fn crop(px: &[[f32; 4]], sw: usize, x0: usize, y0: usize, w: usize, h: usize, gain: f32) -> Vec<[f32; 4]> {
-        (0..w * h).map(|i| { let q = px[(y0 + i / w) * sw + x0 + i % w]; [q[0] * gain, q[1] * gain, q[2] * gain, 1.0] }).collect()
+        (0..w * h)
+            .map(|i| {
+                let q = px[(y0 + i / w) * sw + x0 + i % w];
+                [q[0] * gain, q[1] * gain, q[2] * gain, 1.0]
+            })
+            .collect()
     }
 
     #[test]
@@ -903,12 +936,31 @@ mod tests {
     #[test]
     fn hdr_merge_from_synthetic_exposures() {
         let (w, h) = (96usize, 64usize);
-        let radiance: Vec<[f32; 3]> = (0..w * h).map(|i| { let x = (i % w) as f32 / w as f32; let b = 0.003 * 2f32.powf(x * 11.0) * (1.0 + 0.2 * ((i / w) as f32 * 0.3).sin()); [b, b * 0.9, b * 0.7] }).collect();
-        let shoot = |dt: f32| -> Vec<[f32; 4]> { radiance.iter().map(|r| { let f = |v: f32| photocraft_algo_srgb((v * dt).min(1.0)); [f(r[0]), f(r[1]), f(r[2]), 1.0] }).collect() };
+        let radiance: Vec<[f32; 3]> = (0..w * h)
+            .map(|i| {
+                let x = (i % w) as f32 / w as f32;
+                let b = 0.003 * 2f32.powf(x * 11.0) * (1.0 + 0.2 * ((i / w) as f32 * 0.3).sin());
+                [b, b * 0.9, b * 0.7]
+            })
+            .collect();
+        let shoot = |dt: f32| -> Vec<[f32; 4]> {
+            radiance
+                .iter()
+                .map(|r| {
+                    let f = |v: f32| photocraft_algo_srgb((v * dt).min(1.0));
+                    [f(r[0]), f(r[1]), f(r[2]), 1.0]
+                })
+                .collect()
+        };
         let mut s = Session::new();
         for (k, dt) in [0.25f32, 1.0, 4.0].into_iter().enumerate() {
             let mut d = doc_from(&format!("e{k}"), &shoot(dt), w, h, SampleType::U8);
-            d.metadata.exif = Some(std::sync::Arc::new(exif::build(&exif::CameraInfo { exposure_time: Some(dt as f64 / 100.0), f_number: Some(8.0), iso: Some(100.0), ..Default::default() })));
+            d.metadata.exif = Some(std::sync::Arc::new(exif::build(&exif::CameraInfo {
+                exposure_time: Some(dt as f64 / 100.0),
+                f_number: Some(8.0),
+                iso: Some(100.0),
+                ..Default::default()
+            })));
             s.add_document(d, None);
         }
         let r = s.execute("file.automate.mergeToHdrPro", json!({"useOpenDocuments": true})).unwrap();
@@ -927,7 +979,9 @@ mod tests {
         s.close(out);
         // 8-bit tone-mapped output with explicit EVs.
         for method in ["localAdaptation", "exposureGamma", "highlightCompression", "equalizeHistogram"] {
-            let r = s.execute("file.automate.mergeToHdrPro", json!({"paths": [], "useOpenDocuments": true, "exposures": [0, 2, 4], "mode": "8", "method": method})).unwrap();
+            let r = s
+                .execute("file.automate.mergeToHdrPro", json!({"paths": [], "useOpenDocuments": true, "exposures": [0, 2, 4], "mode": "8", "method": method}))
+                .unwrap();
             assert_eq!(r["exposureSource"], "params");
             let d = &s.active().unwrap().doc;
             assert_eq!(d.depth, SampleType::U8);

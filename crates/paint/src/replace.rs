@@ -61,7 +61,15 @@ pub struct ReplaceSettings {
 
 impl Default for ReplaceSettings {
     fn default() -> Self {
-        Self { mode: ReplaceMode::Color, sampling: Sampling::Continuous, limits: Limits::Contiguous, tolerance: 0.3, anti_alias: true, color: [1.0, 0.0, 0.0, 1.0], background: [1.0; 4] }
+        Self {
+            mode: ReplaceMode::Color,
+            sampling: Sampling::Continuous,
+            limits: Limits::Contiguous,
+            tolerance: 0.3,
+            anti_alias: true,
+            color: [1.0, 0.0, 0.0, 1.0],
+            background: [1.0; 4],
+        }
     }
 }
 
@@ -231,7 +239,14 @@ mod tests {
     #[test]
     fn continuous_sampling_follows_the_cursor_and_swatch_limits() {
         let mut s = setup(PixelFormat::RGBA8);
-        let rs = ReplaceSettings { mode: ReplaceMode::Color, sampling: Sampling::Continuous, limits: Limits::Contiguous, tolerance: 0.1, color: [1.0, 0.0, 0.0, 1.0], ..Default::default() };
+        let rs = ReplaceSettings {
+            mode: ReplaceMode::Color,
+            sampling: Sampling::Continuous,
+            limits: Limits::Contiguous,
+            tolerance: 0.1,
+            color: [1.0, 0.0, 0.0, 1.0],
+            ..Default::default()
+        };
         apply_color_replacement(&mut s, &stroke(), &rs, None, false);
         assert!(s.rgba(20, 20)[0] > 0.3 && s.rgba(70, 20)[0] > s.rgba(70, 20)[1], "both halves recoloured {:?} {:?}", s.rgba(20, 20), s.rgba(70, 20));
         // Background swatch = white: nothing matches.
@@ -251,7 +266,14 @@ mod tests {
         let st = Stroke { points: vec![StrokePoint::new(20.0, 20.0, 1.0)], ..stroke() };
         for (limits, island_changed) in [(Limits::Contiguous, false), (Limits::Discontiguous, true)] {
             let mut t = s.clone();
-            let rs = ReplaceSettings { mode: ReplaceMode::Color, sampling: Sampling::Once, limits, tolerance: 0.05, color: [1.0, 0.0, 0.0, 1.0], ..Default::default() };
+            let rs = ReplaceSettings {
+                mode: ReplaceMode::Color,
+                sampling: Sampling::Once,
+                limits,
+                tolerance: 0.05,
+                color: [1.0, 0.0, 0.0, 1.0],
+                ..Default::default()
+            };
             apply_color_replacement(&mut t, &st, &rs, None, false);
             let changed = (t.rgba(34, 20)[0] - 0.2).abs() > 0.05;
             assert_eq!(changed, island_changed, "{limits:?}");

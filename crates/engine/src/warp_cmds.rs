@@ -132,7 +132,8 @@ fn warp_layer(doc_sel: Option<&Surface>, l: &mut Layer, w: &Warp, rect: Rect, in
             // Store in source space: undo the placement transform around the warp.
             let t = sm.transform;
             let inv = t.inverse().ok_or_else(|| EngineError::Other("the smart object's transform is degenerate".into()))?;
-            let corners = [[w.bounds[0], w.bounds[1]], [w.bounds[2], w.bounds[1]], [w.bounds[2], w.bounds[3]], [w.bounds[0], w.bounds[3]]].map(|p| affine_apply(&inv, p));
+            let corners =
+                [[w.bounds[0], w.bounds[1]], [w.bounds[2], w.bounds[1]], [w.bounds[2], w.bounds[3]], [w.bounds[0], w.bounds[3]]].map(|p| affine_apply(&inv, p));
             let sb = corners.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])]);
             let src_warp = match w.style {
                 WarpStyle::None => None,
@@ -313,12 +314,66 @@ pub fn specs() -> Vec<CommandSpec> {
     const P: &str = r##"{"layer":id?,"rect":[x0,y0,x1,y1]? (warp box; default = layer content ∩ selection),"style":"custom|none|arc|arcLower|arcUpper|arch|bulge|shellLower|shellUpper|flag|wave|fish|rise|fisheye|inflate|squeeze|twist","bend":%=50,"hDistort":%,"vDistort":%,"vertical":bool,"mesh":{"us":[0,…,1],"vs":[0,…,1],"points":[[x,y]…]} ((3c+1)×(3r+1) control points, row-major, document px),"grid":[cols,rows]?,"warp":{full warp object}?,"interpolation":"bicubic|bilinear|nearest"}"##;
     const S: &str = r##"{"warp":{…}? (the warp being edited; returned split),"rect":[x0,y0,x1,y1]?,"at":[x,y]? (document point; default = middle of the patch)} — without `warp`, edits the active smart object's warp"##;
     vec![
-        CommandSpec { id: "edit.transform.warp", label: "Warp", menu: &["Edit", "Transform"], shortcut: None, params: P, enabled: has_layer, journal: true, run: |s, p| apply(s, p, "edit.transform.warp") },
-        CommandSpec { id: "layer.smartObjects.warp", label: "Warp", menu: &["Layer", "Smart Objects"], shortcut: None, params: P, enabled: active_smart, journal: true, run: |s, p| apply(s, p, "layer.smartObjects.warp") },
-        CommandSpec { id: "edit.transform.splitWarpCrosswise", label: "Split Warp Crosswise", menu: &["Edit", "Transform"], shortcut: None, params: S, enabled: has_layer, journal: true, run: |s, p| split(s, p, "edit.transform.splitWarpCrosswise", Split::Crosswise) },
-        CommandSpec { id: "edit.transform.splitWarpHorizontally", label: "Split Warp Horizontally", menu: &["Edit", "Transform"], shortcut: None, params: S, enabled: has_layer, journal: true, run: |s, p| split(s, p, "edit.transform.splitWarpHorizontally", Split::Horizontal) },
-        CommandSpec { id: "edit.transform.splitWarpVertically", label: "Split Warp Vertically", menu: &["Edit", "Transform"], shortcut: None, params: S, enabled: has_layer, journal: true, run: |s, p| split(s, p, "edit.transform.splitWarpVertically", Split::Vertical) },
-        CommandSpec { id: "edit.transform.removeWarpSplit", label: "Remove Warp Split", menu: &["Edit", "Transform"], shortcut: None, params: S, enabled: has_layer, journal: true, run: |s, p| split(s, p, "edit.transform.removeWarpSplit", Split::Remove) },
+        CommandSpec {
+            id: "edit.transform.warp",
+            label: "Warp",
+            menu: &["Edit", "Transform"],
+            shortcut: None,
+            params: P,
+            enabled: has_layer,
+            journal: true,
+            run: |s, p| apply(s, p, "edit.transform.warp"),
+        },
+        CommandSpec {
+            id: "layer.smartObjects.warp",
+            label: "Warp",
+            menu: &["Layer", "Smart Objects"],
+            shortcut: None,
+            params: P,
+            enabled: active_smart,
+            journal: true,
+            run: |s, p| apply(s, p, "layer.smartObjects.warp"),
+        },
+        CommandSpec {
+            id: "edit.transform.splitWarpCrosswise",
+            label: "Split Warp Crosswise",
+            menu: &["Edit", "Transform"],
+            shortcut: None,
+            params: S,
+            enabled: has_layer,
+            journal: true,
+            run: |s, p| split(s, p, "edit.transform.splitWarpCrosswise", Split::Crosswise),
+        },
+        CommandSpec {
+            id: "edit.transform.splitWarpHorizontally",
+            label: "Split Warp Horizontally",
+            menu: &["Edit", "Transform"],
+            shortcut: None,
+            params: S,
+            enabled: has_layer,
+            journal: true,
+            run: |s, p| split(s, p, "edit.transform.splitWarpHorizontally", Split::Horizontal),
+        },
+        CommandSpec {
+            id: "edit.transform.splitWarpVertically",
+            label: "Split Warp Vertically",
+            menu: &["Edit", "Transform"],
+            shortcut: None,
+            params: S,
+            enabled: has_layer,
+            journal: true,
+            run: |s, p| split(s, p, "edit.transform.splitWarpVertically", Split::Vertical),
+        },
+        CommandSpec {
+            id: "edit.transform.removeWarpSplit",
+            label: "Remove Warp Split",
+            menu: &["Edit", "Transform"],
+            shortcut: None,
+            params: S,
+            enabled: has_layer,
+            journal: true,
+            run: |s, p| split(s, p, "edit.transform.removeWarpSplit", Split::Remove),
+        },
     ]
 }
 

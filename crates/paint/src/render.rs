@@ -306,7 +306,13 @@ impl CoverageMap {
                         }
                         let ti = trow + (x - tx * COV_TILE) as usize;
                         let c = tile.cov[ti];
-                        let nv = if use_max { c.max(v * ceil) } else if ceil > c { c + v * (ceil - c) } else { c };
+                        let nv = if use_max {
+                            c.max(v * ceil)
+                        } else if ceil > c {
+                            c + v * (ceil - c)
+                        } else {
+                            c
+                        };
                         if nv <= c {
                             continue;
                         }
@@ -561,7 +567,14 @@ impl StrokeRenderer {
 }
 
 /// Render a whole stroke onto `target` (one-shot). Returns the damaged rectangle.
-pub fn render_stroke(target: &mut Surface, brush: &BrushSettings, points: &[StrokePoint], selection: Option<&Surface>, lock_transparency: bool, zoom: f32) -> Rect {
+pub fn render_stroke(
+    target: &mut Surface,
+    brush: &BrushSettings,
+    points: &[StrokePoint],
+    selection: Option<&Surface>,
+    lock_transparency: bool,
+    zoom: f32,
+) -> Rect {
     if points.is_empty() {
         return Rect::EMPTY;
     }

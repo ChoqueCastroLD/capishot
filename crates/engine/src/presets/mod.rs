@@ -197,7 +197,11 @@ pub(crate) fn req_str<'a>(p: &'a Value, k: &str, cmd: &str) -> Result<&'a str> {
 
 /// Locate a preset by name (optionally within `group`): (group index, item index).
 pub(crate) fn find<T: Named>(groups: &[Group<T>], name: &str, group: Option<&str>) -> Option<(usize, usize)> {
-    groups.iter().enumerate().filter(|(_, g)| group.is_none_or(|n| g.name == n)).find_map(|(gi, g)| g.items.iter().position(|i| i.name() == name).map(|ii| (gi, ii)))
+    groups
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| group.is_none_or(|n| g.name == n))
+        .find_map(|(gi, g)| g.items.iter().position(|i| i.name() == name).map(|ii| (gi, ii)))
 }
 
 /// `base`, or `base 2`, `base 3`… so names stay unique across all groups (Photoshop allows

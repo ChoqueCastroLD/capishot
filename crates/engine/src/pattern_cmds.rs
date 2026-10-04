@@ -233,7 +233,8 @@ fn define(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn library_index(s: &Session, cmd: &str, p: &Value) -> Result<usize> {
     let key = p.get("pattern").and_then(Value::as_str).ok_or_else(|| bad(cmd, "missing `pattern` (id or name)"))?;
-    let found = photocraft_doc::pattern::find(&s.patterns.items, key, key).map(|f| f.id.clone()).ok_or_else(|| bad(cmd, format!("no library pattern \"{key}\"")))?;
+    let found =
+        photocraft_doc::pattern::find(&s.patterns.items, key, key).map(|f| f.id.clone()).ok_or_else(|| bad(cmd, format!("no library pattern \"{key}\"")))?;
     Ok(s.patterns.items.iter().position(|q| q.id == found).unwrap_or(0))
 }
 
@@ -281,7 +282,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "pattern.export";
     let path = p.get("path").and_then(Value::as_str).ok_or_else(|| bad(cmd, "missing `path`"))?;
     let pats: Vec<Pattern> = match p.get("patterns").and_then(Value::as_array) {
-        Some(keys) => keys.iter().filter_map(Value::as_str).map(|k| resolve(s, k).ok_or_else(|| bad(cmd, format!("no pattern \"{k}\"")))).collect::<Result<_>>()?,
+        Some(keys) => {
+            keys.iter().filter_map(Value::as_str).map(|k| resolve(s, k).ok_or_else(|| bad(cmd, format!("no pattern \"{k}\"")))).collect::<Result<_>>()?
+        }
         None => s.patterns.items.clone(),
     };
     let bytes = photocraft_io::pattern_map::write_pat(&pats).map_err(EngineError::Other)?;
@@ -291,9 +294,10 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(crate) fn placement(p: &Value) -> (f32, f32, bool, (f32, f32)) {
     let num = |k: &str, d: f64| p.get(k).and_then(Value::as_f64).unwrap_or(d) as f32;
-    let phase = p.get("phase").and_then(Value::as_array).map_or((0.0, 0.0), |a| {
-        (a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)
-    });
+    let phase = p
+        .get("phase")
+        .and_then(Value::as_array)
+        .map_or((0.0, 0.0), |a| (a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32));
     ((num("scale", 100.0) / 100.0).clamp(0.01, 10.0), num("angle", 0.0), p.get("link").and_then(Value::as_bool).unwrap_or(true), phase)
 }
 
@@ -360,10 +364,13 @@ fn brush_texture(s: &mut Session, p: &Value) -> Result<Value> {
     // Brush textures are grey: luminance of the composite over white.
     let mut px = vec![[0.0f32; 4]; (pat.width * pat.height) as usize];
     pat.surface.read_rgba_into(pat.rect(), &mut px);
-    let lum: Vec<f32> = px.iter().map(|q| {
-        let l = 0.299 * q[0] + 0.587 * q[1] + 0.114 * q[2];
-        l * q[3] + (1.0 - q[3])
-    }).collect();
+    let lum: Vec<f32> = px
+        .iter()
+        .map(|q| {
+            let l = 0.299 * q[0] + 0.587 * q[1] + 0.114 * q[2];
+            l * q[3] + (1.0 - q[3])
+        })
+        .collect();
     let tile = photocraft_paint::GrayTile::from_f32(pat.width, pat.height, &lum);
     let t = &mut s.tools.brush.texture;
     t.pattern = photocraft_paint::Pattern::Tile(tile);
@@ -395,11 +402,56 @@ pub fn specs() -> Vec<CommandSpec> {
             journal: true,
             run: define,
         },
-        CommandSpec { id: "pattern.list", label: "Patterns", menu: &[], shortcut: None, params: "{} → [{id,name,width,height,mode,depth,inDocument,inLibrary}]", enabled: always, journal: false, run: list },
-        CommandSpec { id: "pattern.rename", label: "Rename Pattern", menu: &[], shortcut: None, params: r##"{"pattern":id|name,"name":str}"##, enabled: has_pattern, journal: true, run: rename },
-        CommandSpec { id: "pattern.delete", label: "Delete Pattern", menu: &[], shortcut: None, params: r##"{"pattern":id|name} (library only; documents keep their copy)"##, enabled: has_pattern, journal: true, run: delete },
-        CommandSpec { id: "pattern.import", label: "Import Patterns…", menu: &[], shortcut: None, params: r##"{"path":".pat file"}"##, enabled: always, journal: true, run: import },
-        CommandSpec { id: "pattern.export", label: "Export Patterns…", menu: &[], shortcut: None, params: r##"{"path":".pat file","patterns":[id|name]? (default: the whole library)}"##, enabled: has_pattern, journal: true, run: export },
+        CommandSpec {
+            id: "pattern.list",
+            label: "Patterns",
+            menu: &[],
+            shortcut: None,
+            params: "{} → [{id,name,width,height,mode,depth,inDocument,inLibrary}]",
+            enabled: always,
+            journal: false,
+            run: list,
+        },
+        CommandSpec {
+            id: "pattern.rename",
+            label: "Rename Pattern",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"pattern":id|name,"name":str}"##,
+            enabled: has_pattern,
+            journal: true,
+            run: rename,
+        },
+        CommandSpec {
+            id: "pattern.delete",
+            label: "Delete Pattern",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"pattern":id|name} (library only; documents keep their copy)"##,
+            enabled: has_pattern,
+            journal: true,
+            run: delete,
+        },
+        CommandSpec {
+            id: "pattern.import",
+            label: "Import Patterns…",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"path":".pat file"}"##,
+            enabled: always,
+            journal: true,
+            run: import,
+        },
+        CommandSpec {
+            id: "pattern.export",
+            label: "Export Patterns…",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"path":".pat file","patterns":[id|name]? (default: the whole library)}"##,
+            enabled: has_pattern,
+            journal: true,
+            run: export,
+        },
         CommandSpec {
             id: "layer.newFillLayer.pattern",
             label: "Pattern…",

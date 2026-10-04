@@ -29,9 +29,7 @@ fn all_generated_channels_decode() {
         assert_eq!(merged.len(), f.header.row_bytes() * h * usize::from(f.header.channels));
         for (i, layer) in f.layers().iter().enumerate() {
             for ch in &layer.channels {
-                layer
-                    .decode_channel(ch.id, f.header.depth, f.header.version)
-                    .unwrap_or_else(|e| panic!("{} layer {i} ch {}: {e}", c.name, ch.id));
+                layer.decode_channel(ch.id, f.header.depth, f.header.version).unwrap_or_else(|e| panic!("{} layer {i} ch {}: {e}", c.name, ch.id));
             }
         }
         let _ = (w, h);

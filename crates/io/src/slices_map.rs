@@ -124,8 +124,23 @@ mod tests {
         l.psd_id = Some(5);
         let lid = l.id;
         d.layers.push(l);
-        d.slices.list.push(Slice { id: 1, name: "hero".into(), rect: Rect::new(10, 10, 60, 40), url: "https://example.org".into(), alt: "Hero".into(), ..Default::default() });
-        d.slices.list.push(Slice { id: 2, origin: SliceOrigin::Layer, layer: Some(lid), rect: Rect::new(70, 50, 100, 80), kind: SliceKind::NoImage, outsets: [1, 1, 1, 1], ..Default::default() });
+        d.slices.list.push(Slice {
+            id: 1,
+            name: "hero".into(),
+            rect: Rect::new(10, 10, 60, 40),
+            url: "https://example.org".into(),
+            alt: "Hero".into(),
+            ..Default::default()
+        });
+        d.slices.list.push(Slice {
+            id: 2,
+            origin: SliceOrigin::Layer,
+            layer: Some(lid),
+            rect: Rect::new(70, 50, 100, 80),
+            kind: SliceKind::NoImage,
+            outsets: [1, 1, 1, 1],
+            ..Default::default()
+        });
         let ids: HashMap<LayerId, u32> = [(lid, 5)].into_iter().collect();
         let data = export_resource(&d, &ids).unwrap().unwrap();
         // Read back into a copy of the document without slices.

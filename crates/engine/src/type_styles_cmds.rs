@@ -204,11 +204,14 @@ fn restyle(t: &mut TextLayer, old: &TextStyles, new: &TextStyles, range: Option<
     let whole = range.is_none();
     // Paragraphs.
     let old_paras = t.paragraph_runs();
-    let starts: Vec<usize> = old_paras.iter().scan(0, |acc, r| {
-        let s = *acc;
-        *acc += r.len;
-        Some(s)
-    }).collect();
+    let starts: Vec<usize> = old_paras
+        .iter()
+        .scan(0, |acc, r| {
+            let s = *acc;
+            *acc += r.len;
+            Some(s)
+        })
+        .collect();
     let para_at = |off: usize| old_paras[starts.iter().rposition(|&s| s <= off).unwrap_or(0)].style.clone();
     let mut paras: Vec<(std::ops::Range<usize>, ParagraphStyle, Option<u32>)> = Vec::new(); // range, new style, old ref
     for pr in photocraft_text::layout::split_paragraphs(&text) {
@@ -433,7 +436,11 @@ fn new_style(s: &mut Session, p: &Value, paragraph: bool) -> Result<Value> {
             ca = c;
         }
     }
-    let name = p.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| st.unique_name(paragraph, if paragraph { "Paragraph Style" } else { "Character Style" }));
+    let name = p
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| st.unique_name(paragraph, if paragraph { "Paragraph Style" } else { "Character Style" }));
     let id = if paragraph {
         let id = st.next_para_id();
         st.paragraph.push(ParagraphStyleDef { id, name: name.clone(), para_attrs: pa, char_attrs: ca });
@@ -553,7 +560,8 @@ fn set_options(s: &mut Session, p: &Value, paragraph: bool) -> Result<Value> {
     let id = lookup_id(cmd, &st, p, paragraph, paragraph)?;
     let (ca, pa) = parse_attrs(cmd, p.get("attrs").unwrap_or(&Value::Null))?;
     let replace = p.get("replace").and_then(Value::as_bool).unwrap_or(false);
-    let clear: Vec<String> = p.get("clear").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    let clear: Vec<String> =
+        p.get("clear").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     let name = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
     let merge = |dst: &mut StyleAttrs, src: StyleAttrs| {
         if replace {
@@ -604,7 +612,11 @@ fn apply(s: &mut Session, p: &Value, paragraph: bool) -> Result<Value> {
     let target = target_ranges(s, p)?;
     let clear = p.get("clearOverrides").and_then(Value::as_bool).unwrap_or(false);
     let r = Some(id).filter(|i| *i != 0);
-    let op = if paragraph { Op { set_para: Some(r), clear_para: clear, clear_char: clear, ..Op::default() } } else { Op { set_char: Some(r), clear_char: clear, ..Op::default() } };
+    let op = if paragraph {
+        Op { set_para: Some(r), clear_para: clear, clear_char: clear, ..Op::default() }
+    } else {
+        Op { set_char: Some(r), clear_char: clear, ..Op::default() }
+    };
     let n = commit(s, if paragraph { "Apply Paragraph Style" } else { "Apply Character Style" }, st, &target, op)?;
     Ok(json!({ "id": id, "layers": n, "current": current(s, p) }))
 }

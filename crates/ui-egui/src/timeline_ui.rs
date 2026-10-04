@@ -1,12 +1,12 @@
 //! Window › Timeline: a floating panel that creates and drives the document timeline. All actions
 //! run the engine `timeline.*` commands, so the control channel drives it the same way.
 
-use egui::{vec2, RichText};
+use egui::{RichText, vec2};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::theme::Tokens;
 use crate::PhotocraftApp;
+use crate::theme::Tokens;
 
 /// Timeline panel view state.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -104,12 +104,7 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 // Scrubber: frame playhead across the duration.
                 if tl.duration > 1 {
                     let mut frame = tl.current as f64;
-                    let resp = ui.add(
-                        egui::Slider::new(&mut frame, 0.0..=(tl.duration - 1) as f64)
-                            .integer()
-                            .show_value(false)
-                            .text("playhead"),
-                    );
+                    let resp = ui.add(egui::Slider::new(&mut frame, 0.0..=(tl.duration - 1) as f64).integer().show_value(false).text("playhead"));
                     if resp.changed() {
                         act = Some(("timeline.setFrame", json!({ "frame": frame as u64 })));
                     }

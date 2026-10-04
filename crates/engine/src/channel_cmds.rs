@@ -80,9 +80,7 @@ impl ChannelView {
     /// True when the canvas shows just the normal composite (nothing extra to draw).
     pub fn is_plain(&self, doc: &Document) -> bool {
         let colors = color_count(doc);
-        self.visible_colors(colors) == colors
-            && !(0..doc.channels.len()).any(|i| self.alpha_shown(i))
-            && (doc.quick_mask.is_none() || self.quick_mask_hidden)
+        self.visible_colors(colors) == colors && !(0..doc.channels.len()).any(|i| self.alpha_shown(i)) && (doc.quick_mask.is_none() || self.quick_mask_hidden)
     }
 }
 
@@ -512,7 +510,9 @@ pub(crate) fn channel_surface_for_filter<'a>(doc: &'a mut Document, p: &Value) -
 
 /// Commands whose target follows the Channels panel.
 fn routed(id: &str) -> bool {
-    id.starts_with("filter.") || id.starts_with("image.adjustments.") || matches!(id, "paint.stroke" | "paint.pencil" | "paint.bucket" | "paint.gradient" | "paint.mixerBrush" | "edit.fill" | "image.applyImage")
+    id.starts_with("filter.")
+        || id.starts_with("image.adjustments.")
+        || matches!(id, "paint.stroke" | "paint.pencil" | "paint.bucket" | "paint.gradient" | "paint.mixerBrush" | "edit.fill" | "image.applyImage")
 }
 
 /// Fill in `"target"` from the targeted channel (or Quick Mask mode) when the caller gave none.
@@ -576,7 +576,10 @@ pub(crate) fn restrict_to_color(before: &Document, after: &mut Document, id: Lay
 /// The active document targets an alpha channel or is in Quick Mask mode, so pixel commands
 /// work without a pixel layer.
 pub(crate) fn edits_channel(s: &Session) -> bool {
-    s.active().is_some_and(|st| st.doc.quick_mask.is_some() && st.channel_view.target == ChannelTarget::Composite || matches!(st.channel_view.target, ChannelTarget::Alpha(i) if i < st.doc.channels.len()))
+    s.active().is_some_and(|st| {
+        st.doc.quick_mask.is_some() && st.channel_view.target == ChannelTarget::Composite
+            || matches!(st.channel_view.target, ChannelTarget::Alpha(i) if i < st.doc.channels.len())
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -815,7 +818,11 @@ fn new_spot(s: &mut Session, p: &Value) -> Result<Value> {
     let i = s.edit("New Spot Channel", |doc, _| {
         let area = doc.bounds();
         let fmt = channel_format(doc);
-        let surface = if from_sel && doc.selection.is_some() { plane_surface(&sel::mask_from_surface(doc.selection.as_ref(), area), area, fmt) } else { Surface::new(fmt) };
+        let surface = if from_sel && doc.selection.is_some() {
+            plane_surface(&sel::mask_from_surface(doc.selection.as_ref(), area), area, fmt)
+        } else {
+            Surface::new(fmt)
+        };
         let name = name.clone().unwrap_or_else(|| next_alpha_name(doc, "Spot Color"));
         doc.channels.push(AlphaChannel { spot: Some((color, solidity)), ..AlphaChannel::new(name, surface) });
         Ok(doc.channels.len() - 1)
@@ -966,7 +973,17 @@ fn move_channel(s: &mut Session, p: &Value) -> Result<Value> {
         v.alpha_visible.resize(n, false);
         let vis = v.alpha_visible.remove(i);
         v.alpha_visible.insert(to, vis);
-        let remap = |t: usize| if t == i { to } else if i < t && t <= to { t - 1 } else if to <= t && t < i { t + 1 } else { t };
+        let remap = |t: usize| {
+            if t == i {
+                to
+            } else if i < t && t <= to {
+                t - 1
+            } else if to <= t && t < i {
+                t + 1
+            } else {
+                t
+            }
+        };
         if let ChannelTarget::Alpha(t) = v.target {
             v.target = ChannelTarget::Alpha(remap(t));
         }
@@ -1100,7 +1117,12 @@ fn options(s: &mut Session, p: &Value) -> Result<Value> {
         }
         ChanRef::QuickMask => {
             // Quick Mask Options persist for the session; the live Quick Mask follows them.
-            let mut probe = AlphaChannel { color: s.quick_mask_options.color, opacity: s.quick_mask_options.opacity, indicates: s.quick_mask_options.indicates, ..AlphaChannel::new("Quick Mask", Surface::new(PixelFormat::GRAY8)) };
+            let mut probe = AlphaChannel {
+                color: s.quick_mask_options.color,
+                opacity: s.quick_mask_options.opacity,
+                indicates: s.quick_mask_options.indicates,
+                ..AlphaChannel::new("Quick Mask", Surface::new(PixelFormat::GRAY8))
+            };
             apply(&mut probe)?;
             if probe.spot.is_some() {
                 return Err(bad(cmd, "Quick Mask can't be a spot channel"));
@@ -1218,7 +1240,10 @@ fn merge(s: &mut Session, p: &Value) -> Result<Value> {
         other => return Err(bad(cmd, format!("unknown mode `{other}`"))),
     };
     let srcs: Vec<usize> = match p.get("documents").and_then(Value::as_array) {
-        Some(a) => a.iter().map(|v| v.as_u64().map(|i| i as usize).filter(|i| *i < s.documents().len()).ok_or_else(|| bad(cmd, "bad document index"))).collect::<Result<_>>()?,
+        Some(a) => a
+            .iter()
+            .map(|v| v.as_u64().map(|i| i as usize).filter(|i| *i < s.documents().len()).ok_or_else(|| bad(cmd, "bad document index")))
+            .collect::<Result<_>>()?,
         None => mergeable(s).into_iter().take(mode.color_channels()).collect(),
     };
     if srcs.len() < mode.color_channels() {
@@ -1285,7 +1310,8 @@ fn apply_image(s: &mut Session, p: &Value) -> Result<Value> {
         let weight = |i: usize| opacity * mask.as_ref().map_or(1.0, |m| m[i]) * selection.as_ref().map_or(1.0, |m| m[i]);
         if is_channel_target(p) {
             // A grayscale target gets the luminosity of a colour source (one plane).
-            let srcp = if src.len() == 1 { src[0].clone() } else { (0..src[0].len()).map(|i| src.iter().map(|pl| pl[i]).sum::<f32>() / src.len() as f32).collect() };
+            let srcp =
+                if src.len() == 1 { src[0].clone() } else { (0..src[0].len()).map(|i| src.iter().map(|pl| pl[i]).sum::<f32>() / src.len() as f32).collect() };
             let (surf, _) = target_surface(doc, None, p)?;
             let base = read_plane(surf, area);
             let out: Vec<f32> = base.iter().enumerate().map(|(i, &b)| b + (blending.apply(b, srcp[i]) - b) * weight(i)).collect();
@@ -1335,7 +1361,8 @@ fn calculations(s: &mut Session, p: &Value) -> Result<Value> {
     let s2 = source(s, &source_spec(p, "source2", "source2").unwrap_or_else(|| json!({})), cmd, true)?.remove(0);
     let mask = mask_plane(s, p, cmd)?;
     // Source 1 is blended onto Source 2.
-    let out: Vec<f32> = s2.iter().zip(&s1).enumerate().map(|(i, (&b, &t))| b + (blending.apply(b, t) - b) * opacity * mask.as_ref().map_or(1.0, |m| m[i])).collect();
+    let out: Vec<f32> =
+        s2.iter().zip(&s1).enumerate().map(|(i, (&b, &t))| b + (blending.apply(b, t) - b) * opacity * mask.as_ref().map_or(1.0, |m| m[i])).collect();
     let name = p.get("name").and_then(Value::as_str).map(str::to_string);
     match p.get("result").and_then(Value::as_str).unwrap_or("newChannel") {
         "newChannel" => {
@@ -1407,24 +1434,113 @@ macro_rules! spec {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("select.saveSelection", "Save Selection…", ["Select"], None, r##"{"name":str?,"channel":"new"|index|name="new","document":index?,"operation":"new|replace|add|subtract|intersect"="new"}"##, has_selection, save_selection),
-        spec!("select.loadSelection", "Load Selection…", ["Select"], None, r##"{"channel":index|name|"composite"|"red|green|blue|…"|"transparency"|"mask"|"quickMask"|"selection","layer":id?,"document":index?,"invert":bool=false,"operation":"new|add|subtract|intersect"="new"}"##, has_doc, load_selection),
+        spec!(
+            "select.saveSelection",
+            "Save Selection…",
+            ["Select"],
+            None,
+            r##"{"name":str?,"channel":"new"|index|name="new","document":index?,"operation":"new|replace|add|subtract|intersect"="new"}"##,
+            has_selection,
+            save_selection
+        ),
+        spec!(
+            "select.loadSelection",
+            "Load Selection…",
+            ["Select"],
+            None,
+            r##"{"channel":index|name|"composite"|"red|green|blue|…"|"transparency"|"mask"|"quickMask"|"selection","layer":id?,"document":index?,"invert":bool=false,"operation":"new|add|subtract|intersect"="new"}"##,
+            has_doc,
+            load_selection
+        ),
         spec!("select.editInQuickMaskMode", "Edit in Quick Mask Mode", ["Select"], Some("Q"), r##"{"on":bool?=toggle}"##, has_doc, quick_mask),
-        spec!("image.applyImage", "Apply Image…", ["Image"], None, r##"{"source":{"document":index?,"layer":id|"merged"="merged","channel":"composite"|"red|…"|index|"selection"|"transparency"|"mask"="composite","invert":bool=false},"blending":"normal|multiply|screen|overlay|softLight|hardLight|colorDodge|colorBurn|darken|lighten|difference|exclusion|linearBurn|linearDodge|add|subtract|…"="multiply","opacity":0..100=100,"scale":1..2=1,"offset":-255..255=0,"preserveTransparency":bool=false,"mask":{"document","layer","channel","invert"}?,"sourceChannel|sourceDocument|sourceLayer|sourceInvert|maskChannel|…":flat form of source/mask?}"##, has_apply_target, apply_image),
-        spec!("image.calculations", "Calculations…", ["Image"], None, r##"{"source1":{"document","layer","channel","invert"},"source2":{…},"blending":"multiply|…"="multiply","opacity":0..100=100,"scale":1..2=1,"offset":-255..255=0,"mask":{…}?,"result":"newChannel|newDocument|selection"="newChannel","name":str?}"##, has_doc, calculations),
-        spec!("channel.new", "New Channel…", [], None, r##"{"name":str?,"fill":"black|white|selection"="black","color":"#rrggbb"="#ff0000","opacity":0..100=50,"indicates":"masked|selected"="masked"}"##, has_doc, new_channel),
-        spec!("channel.newSpot", "New Spot Channel…", [], None, r##"{"name":str?,"color":"#rrggbb"="#ff0000","solidity":0..100=0,"fromSelection":bool=true}"##, has_doc, new_spot),
-        spec!("channel.duplicate", "Duplicate Channel…", [], None, r##"{"channel":index|name|"red|…"|"composite"|"quickMask","name":str?,"document":index|"new"?=active,"invert":bool=false}"##, has_doc, duplicate_channel),
+        spec!(
+            "image.applyImage",
+            "Apply Image…",
+            ["Image"],
+            None,
+            r##"{"source":{"document":index?,"layer":id|"merged"="merged","channel":"composite"|"red|…"|index|"selection"|"transparency"|"mask"="composite","invert":bool=false},"blending":"normal|multiply|screen|overlay|softLight|hardLight|colorDodge|colorBurn|darken|lighten|difference|exclusion|linearBurn|linearDodge|add|subtract|…"="multiply","opacity":0..100=100,"scale":1..2=1,"offset":-255..255=0,"preserveTransparency":bool=false,"mask":{"document","layer","channel","invert"}?,"sourceChannel|sourceDocument|sourceLayer|sourceInvert|maskChannel|…":flat form of source/mask?}"##,
+            has_apply_target,
+            apply_image
+        ),
+        spec!(
+            "image.calculations",
+            "Calculations…",
+            ["Image"],
+            None,
+            r##"{"source1":{"document","layer","channel","invert"},"source2":{…},"blending":"multiply|…"="multiply","opacity":0..100=100,"scale":1..2=1,"offset":-255..255=0,"mask":{…}?,"result":"newChannel|newDocument|selection"="newChannel","name":str?}"##,
+            has_doc,
+            calculations
+        ),
+        spec!(
+            "channel.new",
+            "New Channel…",
+            [],
+            None,
+            r##"{"name":str?,"fill":"black|white|selection"="black","color":"#rrggbb"="#ff0000","opacity":0..100=50,"indicates":"masked|selected"="masked"}"##,
+            has_doc,
+            new_channel
+        ),
+        spec!(
+            "channel.newSpot",
+            "New Spot Channel…",
+            [],
+            None,
+            r##"{"name":str?,"color":"#rrggbb"="#ff0000","solidity":0..100=0,"fromSelection":bool=true}"##,
+            has_doc,
+            new_spot
+        ),
+        spec!(
+            "channel.duplicate",
+            "Duplicate Channel…",
+            [],
+            None,
+            r##"{"channel":index|name|"red|…"|"composite"|"quickMask","name":str?,"document":index|"new"?=active,"invert":bool=false}"##,
+            has_doc,
+            duplicate_channel
+        ),
         spec!("channel.delete", "Delete Channel", [], None, r##"{"channel":index|name?=targeted}"##, has_channels, delete_channel),
         spec!("channel.rename", "Rename Channel", [], None, r##"{"channel":index|name,"name":str}"##, has_channels, rename_channel),
         spec!("channel.move", "Reorder Channel", [], None, r##"{"channel":index|name,"to":index}"##, has_channels, move_channel),
         spec!("channel.target", "Target Channel", [], None, r##"{"channel":"composite"|"red|green|blue|…"|index|name="composite"}"##, has_doc, target_cmd),
-        spec!("channel.setVisible", "Channel Visibility", [], None, r##"{"channel":"composite"|"red|…"|index|name|"quickMask","visible":bool?=toggle}"##, has_doc, set_visible),
-        spec!("channel.options", "Channel Options…", [], None, r##"{"channel":index|name|"quickMask","name":str?,"indicates":"masked|selected|spot"?,"color":"#rrggbb"?,"opacity":0..100?,"solidity":0..100?}"##, has_doc, options),
+        spec!(
+            "channel.setVisible",
+            "Channel Visibility",
+            [],
+            None,
+            r##"{"channel":"composite"|"red|…"|index|name|"quickMask","visible":bool?=toggle}"##,
+            has_doc,
+            set_visible
+        ),
+        spec!(
+            "channel.options",
+            "Channel Options…",
+            [],
+            None,
+            r##"{"channel":index|name|"quickMask","name":str?,"indicates":"masked|selected|spot"?,"color":"#rrggbb"?,"opacity":0..100?,"solidity":0..100?}"##,
+            has_doc,
+            options
+        ),
         spec!("channel.mergeSpot", "Merge Spot Channel", [], None, r##"{"channel":index|name?=targeted or first spot}"##, has_spot, merge_spot),
         spec!("channel.split", "Split Channels", [], None, r##"{"closeOriginal":bool=true}"##, can_split, split),
-        spec!("channel.merge", "Merge Channels…", [], None, r##"{"mode":"rgb|cmyk|lab"="rgb","documents":[index,…]?=open grayscale docs of the active size,"name":str?}"##, can_merge, merge),
-        CommandSpec { id: "channel.list", label: "Channels", menu: &[], shortcut: None, params: "{}", enabled: has_doc, run: |s, _| Ok(list(s)), journal: false },
+        spec!(
+            "channel.merge",
+            "Merge Channels…",
+            [],
+            None,
+            r##"{"mode":"rgb|cmyk|lab"="rgb","documents":[index,…]?=open grayscale docs of the active size,"name":str?}"##,
+            can_merge,
+            merge
+        ),
+        CommandSpec {
+            id: "channel.list",
+            label: "Channels",
+            menu: &[],
+            shortcut: None,
+            params: "{}",
+            enabled: has_doc,
+            run: |s, _| Ok(list(s)),
+            journal: false,
+        },
         spec!("channel.target.composite", "Target Composite Channel", [], Some("Cmd+2"), "{}", has_doc, |s, _| target_slot(s, 2)),
         spec!("channel.target.slot3", "Target Channel 3", [], Some("Cmd+3"), "{}", slot_ok::<3>, |s, _| target_slot(s, 3)),
         spec!("channel.target.slot4", "Target Channel 4", [], Some("Cmd+4"), "{}", slot_ok::<4>, |s, _| target_slot(s, 4)),
@@ -1450,5 +1566,9 @@ fn has_apply_target(s: &Session) -> std::result::Result<(), String> {
     has_layer(s)?;
     let d = s.active().expect("checked");
     let l = d.doc.layer(d.active_layer.expect("checked")).expect("checked");
-    if matches!(l.content, LayerContent::Raster(_)) { Ok(()) } else { Err(format!("Apply Image needs a pixel layer (active layer is a {} layer)", l.content.kind_name())) }
+    if matches!(l.content, LayerContent::Raster(_)) {
+        Ok(())
+    } else {
+        Err(format!("Apply Image needs a pixel layer (active layer is a {} layer)", l.content.kind_name()))
+    }
 }

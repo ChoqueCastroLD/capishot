@@ -101,7 +101,10 @@ fn puppet_identity_translation_and_undo() {
         s.execute(PUPPET, json!({"pins": [{"src": [30, 25], "dst": [36, 29]}], "mode": "rigid", "interpolation": "bilinear"})).unwrap();
         let after = active_surface(&s);
         assert_eq!(after.content_bounds(), Rect::new(16, 14, 66, 44), "{depth}");
-        assert!(worst(&after.convert(before.format()), &photocraft_algo::resample::translate_surface(&before, 6, 4), Rect::new(16, 14, 66, 44)) <= 1.0 / 255.0, "{depth}");
+        assert!(
+            worst(&after.convert(before.format()), &photocraft_algo::resample::translate_surface(&before, 6, 4), Rect::new(16, 14, 66, 44)) <= 1.0 / 255.0,
+            "{depth}"
+        );
         s.undo();
         assert_eq!(active_surface(&s), before);
         assert!(s.execute(PUPPET, json!({"pins": [{"src": [1, 1]}]})).is_err());
@@ -133,7 +136,10 @@ fn perspective_identity_known_homography_and_mask() {
         s.execute(PERSPECTIVE, json!({"planes": [{"src": q, "dst": d}], "interpolation": "bilinear"})).unwrap();
         let after = active_surface(&s);
         assert_eq!(after.content_bounds(), Rect::new(15, 13, 65, 43));
-        assert!(worst(&after.convert(before.format()), &photocraft_algo::resample::translate_surface(&before, 5, 3), Rect::new(15, 13, 65, 43)) <= 1.0 / 255.0, "{depth}");
+        assert!(
+            worst(&after.convert(before.format()), &photocraft_algo::resample::translate_surface(&before, 5, 3), Rect::new(15, 13, 65, 43)) <= 1.0 / 255.0,
+            "{depth}"
+        );
         s.undo();
         assert_eq!(active_surface(&s), before);
     }

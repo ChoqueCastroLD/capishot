@@ -57,8 +57,7 @@ impl Headless {
         let p = if params.is_null() { json!({}) } else { params };
         match method {
             "engine.execute" => {
-                let id =
-                    str_of(&p, "command").ok_or_else(|| bad("engine.execute needs `command`"))?;
+                let id = str_of(&p, "command").ok_or_else(|| bad("engine.execute needs `command`"))?;
                 self.command_run(id, p.get("params").cloned().unwrap_or(Value::Null))
             }
             "engine.commands" => {
@@ -70,11 +69,7 @@ impl Headless {
                             .into_iter()
                             .flatten()
                             .filter(|c| {
-                                let hay = format!(
-                                    "{} {}",
-                                    c["id"].as_str().unwrap_or(""),
-                                    c["label"].as_str().unwrap_or("")
-                                );
+                                let hay = format!("{} {}", c["id"].as_str().unwrap_or(""), c["label"].as_str().unwrap_or(""));
                                 hay.to_lowercase().contains(&n)
                             })
                             .cloned()
@@ -102,8 +97,7 @@ impl Headless {
                 let png = self.render_png(index_of(&p), max)?;
                 match str_of(&p, "path") {
                     Some(path) => {
-                        std::fs::write(path, &png)
-                            .map_err(|e| AutomationError::Io(e.to_string()))?;
+                        std::fs::write(path, &png).map_err(|e| AutomationError::Io(e.to_string()))?;
                         Ok(json!({"path": path, "bytes": png.len()}))
                     }
                     None => Ok(json!({
@@ -127,14 +121,8 @@ impl Headless {
     /// `{method, params?}` (any [`METHODS`] entry). Stops at the first error unless
     /// `stopOnError` is false; the reply lists every step's result.
     pub fn batch(&mut self, p: &Value) -> Result<Value, AutomationError> {
-        let steps = p
-            .get("steps")
-            .and_then(Value::as_array)
-            .ok_or_else(|| bad("batch needs `steps`"))?;
-        let stop = p
-            .get("stopOnError")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
+        let steps = p.get("steps").and_then(Value::as_array).ok_or_else(|| bad("batch needs `steps`"))?;
+        let stop = p.get("stopOnError").and_then(Value::as_bool).unwrap_or(true);
         let mut results = Vec::with_capacity(steps.len());
         let mut failed = 0usize;
         for (i, s) in steps.iter().enumerate() {
@@ -142,11 +130,7 @@ impl Headless {
             let r = if let Some(c) = str_of(s, "command") {
                 self.command_run(c, params)
             } else if let Some(m) = str_of(s, "method") {
-                if m == "batch" {
-                    Err(bad("nested batch"))
-                } else {
-                    self.handle(m, params)
-                }
+                if m == "batch" { Err(bad("nested batch")) } else { self.handle(m, params) }
             } else {
                 Err(bad(format!("step {i} needs `command` or `method`")))
             };
@@ -202,16 +186,9 @@ pub fn serve_lines(h: &Mutex<Headless>, r: impl BufRead, mut w: impl Write) -> s
 
 /// Serve on a loopback TCP address (one thread per connection, one shared session).
 /// Refuses non-loopback addresses.
-pub fn serve_tcp(
-    addr: &str,
-    h: Arc<Mutex<Headless>>,
-    ready: impl FnOnce(std::net::SocketAddr),
-) -> Result<(), AutomationError> {
-    let listener =
-        TcpListener::bind(addr).map_err(|e| AutomationError::Io(format!("bind {addr}: {e}")))?;
-    let local = listener
-        .local_addr()
-        .map_err(|e| AutomationError::Io(e.to_string()))?;
+pub fn serve_tcp(addr: &str, h: Arc<Mutex<Headless>>, ready: impl FnOnce(std::net::SocketAddr)) -> Result<(), AutomationError> {
+    let listener = TcpListener::bind(addr).map_err(|e| AutomationError::Io(format!("bind {addr}: {e}")))?;
+    let local = listener.local_addr().map_err(|e| AutomationError::Io(e.to_string()))?;
     if !local.ip().is_loopback() {
         return Err(bad(format!("{addr} is not a loopback address")));
     }
@@ -252,22 +229,13 @@ mod tests {
         );
         let mut out = Vec::new();
         serve_lines(&h, input.as_bytes(), &mut out).unwrap();
-        let replies: Vec<Value> = String::from_utf8(out)
-            .unwrap()
-            .lines()
-            .map(|l| serde_json::from_str(l).unwrap())
-            .collect();
+        let replies: Vec<Value> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(replies.len(), 5);
         assert!(replies[0]["ok"].as_bool().unwrap());
         assert_eq!(replies[1]["id"], 2);
         assert!(replies[2]["result"].to_string().contains("Ink"));
         assert!(!replies[3]["ok"].as_bool().unwrap());
-        assert!(
-            replies[3]["error"]
-                .as_str()
-                .unwrap()
-                .contains("unknown method")
-        );
+        assert!(replies[3]["error"].as_str().unwrap().contains("unknown method"));
         assert_eq!(replies[4]["id"], Value::Null);
     }
 
@@ -275,8 +243,7 @@ mod tests {
     fn batch_stops_on_error_unless_told_not_to() {
         let h = session();
         let mut g = h.lock().unwrap();
-        g.handle("doc.new", json!({"width": 16, "height": 16}))
-            .unwrap();
+        g.handle("doc.new", json!({"width": 16, "height": 16})).unwrap();
         let steps = json!([
             {"command": "layer.new.layer", "params": {"name": "A"}},
             {"command": "no.such.command"},
@@ -287,9 +254,7 @@ mod tests {
         assert_eq!(r["completed"], 1);
         assert_eq!(r["failed"], 1);
         assert_eq!(r["results"].as_array().unwrap().len(), 2);
-        let r = g
-            .handle("batch", json!({"steps": steps, "stopOnError": false}))
-            .unwrap();
+        let r = g.handle("batch", json!({"steps": steps, "stopOnError": false})).unwrap();
         assert_eq!(r["completed"], 3);
         let insp = &r["results"][3]["result"];
         assert!(insp.to_string().contains("\"B\""));
@@ -299,31 +264,15 @@ mod tests {
     fn render_to_file_and_base64() {
         let h = session();
         let mut g = h.lock().unwrap();
-        g.handle(
-            "doc.new",
-            json!({"width": 40, "height": 20, "background": "black"}),
-        )
-        .unwrap();
+        g.handle("doc.new", json!({"width": 40, "height": 20, "background": "black"})).unwrap();
         let b = g.handle("doc.render", json!({"maxSide": 10})).unwrap();
-        let png = base64::engine::general_purpose::STANDARD
-            .decode(b["base64"].as_str().unwrap())
-            .unwrap();
+        let png = base64::engine::general_purpose::STANDARD.decode(b["base64"].as_str().unwrap()).unwrap();
         let img = photocraft_codecs::decode(&png).unwrap();
         assert_eq!(img.dimensions(), (10, 5));
         let path = std::env::temp_dir().join(format!("pc-rpc-{}.png", std::process::id()));
-        let r = g
-            .handle(
-                "doc.render",
-                json!({"path": path.to_string_lossy(), "maxSide": 0}),
-            )
-            .unwrap();
+        let r = g.handle("doc.render", json!({"path": path.to_string_lossy(), "maxSide": 0})).unwrap();
         assert!(r["bytes"].as_u64().unwrap() > 0);
-        assert_eq!(
-            photocraft_codecs::decode(&std::fs::read(&path).unwrap())
-                .unwrap()
-                .dimensions(),
-            (40, 20)
-        );
+        assert_eq!(photocraft_codecs::decode(&std::fs::read(&path).unwrap()).unwrap().dimensions(), (40, 20));
         let _ = std::fs::remove_file(path);
     }
 
@@ -339,9 +288,7 @@ mod tests {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
         writeln!(s, r#"{{"id":"a","method":"methods"}}"#).unwrap();
         let mut line = String::new();
-        BufReader::new(s.try_clone().unwrap())
-            .read_line(&mut line)
-            .unwrap();
+        BufReader::new(s.try_clone().unwrap()).read_line(&mut line).unwrap();
         let v: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(v["id"], "a");
         assert!(v["result"].as_array().unwrap().iter().any(|m| m == "batch"));

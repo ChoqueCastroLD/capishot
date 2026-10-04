@@ -440,9 +440,30 @@ macro_rules! spec {
 /// Brush command specs.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("paint.pencil", "Pencil", r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…}?,"preset":name?,"size":px?,"opacity":0..1?,"color":"#rrggbb"?=foreground,"mode":"normal|multiply|screen|…"="normal","erase":bool?,"autoErase":bool=false,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##, has_paintable, pencil, true),
-        spec!("paint.mixerBrush", "Mixer Brush", r##"{"points":[…],"brush":{…}?,"preset":name?,"size":px?,"wet":0..100=50,"load":0..100=50,"mix":0..100=50,"flow":0..100=100,"color":"#rrggbb"?=foreground,"sampleAllLayers":bool=false,"cleanAfterStroke":bool=true,"loadAfterStroke":bool=true,"seed":u64?}"##, has_paintable, mixer_brush, true),
-        spec!("paint.colorReplacement", "Color Replacement", r##"{"points":[…],"brush":{…}?,"size":px?,"mode":"hue|saturation|color|luminosity"="color","sampling":"continuous|once|backgroundSwatch"="continuous","limits":"contiguous|discontiguous|findEdges"="contiguous","tolerance":0..100=30,"antiAlias":bool=true,"color":"#rrggbb"?=foreground,"seed":u64?}"##, crate::commands::has_paintable, color_replacement, true),
+        spec!(
+            "paint.pencil",
+            "Pencil",
+            r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…}?,"preset":name?,"size":px?,"opacity":0..1?,"color":"#rrggbb"?=foreground,"mode":"normal|multiply|screen|…"="normal","erase":bool?,"autoErase":bool=false,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
+            has_paintable,
+            pencil,
+            true
+        ),
+        spec!(
+            "paint.mixerBrush",
+            "Mixer Brush",
+            r##"{"points":[…],"brush":{…}?,"preset":name?,"size":px?,"wet":0..100=50,"load":0..100=50,"mix":0..100=50,"flow":0..100=100,"color":"#rrggbb"?=foreground,"sampleAllLayers":bool=false,"cleanAfterStroke":bool=true,"loadAfterStroke":bool=true,"seed":u64?}"##,
+            has_paintable,
+            mixer_brush,
+            true
+        ),
+        spec!(
+            "paint.colorReplacement",
+            "Color Replacement",
+            r##"{"points":[…],"brush":{…}?,"size":px?,"mode":"hue|saturation|color|luminosity"="color","sampling":"continuous|once|backgroundSwatch"="continuous","limits":"contiguous|discontiguous|findEdges"="contiguous","tolerance":0..100=30,"antiAlias":bool=true,"color":"#rrggbb"?=foreground,"seed":u64?}"##,
+            crate::commands::has_paintable,
+            color_replacement,
+            true
+        ),
         spec!("brush.presets.list", "List Brush Presets", r##"{"full":bool=false}"##, always, presets_list, false),
         spec!("brush.presets.save", "Save Brush Preset", r##"{"name":string,"brush":{…BrushSettings}?=current brush}"##, always, presets_save, true),
         spec!("brush.presets.delete", "Delete Brush Preset", r##"{"name":string}"##, always, presets_delete, true),

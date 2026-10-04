@@ -35,7 +35,9 @@ pub fn from_psd(p: &PsdPattern) -> Option<Pattern> {
     // 1-bit patterns: expand to 8-bit grey.
     let (channels, depth): (Vec<Vec<u8>>, u16) = if p.depth == 1 {
         let row = w.div_ceil(8);
-        let expand = |plane: &Vec<u8>| -> Vec<u8> { (0..w * h).map(|i| if plane.get((i / w) * row + (i % w) / 8).is_some_and(|b| b & (0x80 >> (i % w % 8)) != 0) { 0 } else { 255 }).collect() };
+        let expand = |plane: &Vec<u8>| -> Vec<u8> {
+            (0..w * h).map(|i| if plane.get((i / w) * row + (i % w) / 8).is_some_and(|b| b & (0x80 >> (i % w % 8)) != 0) { 0 } else { 255 }).collect()
+        };
         (p.channels.iter().map(expand).collect(), 8)
     } else {
         (p.channels.clone(), p.depth)
@@ -89,7 +91,17 @@ pub fn to_psd(p: &Pattern) -> PsdPattern {
     }
     let mut planes = deinterleave(&bytes, ch, fmt.sample, &invert);
     let alpha = fmt.alpha.then(|| planes.pop()).flatten();
-    PsdPattern { mode: psd_mode(mode), width: p.width, height: p.height, name: p.name.clone(), id: p.id.clone(), palette: None, depth: psd_depth(fmt.sample), channels: planes, alpha }
+    PsdPattern {
+        mode: psd_mode(mode),
+        width: p.width,
+        height: p.height,
+        name: p.name.clone(),
+        id: p.id.clone(),
+        palette: None,
+        depth: psd_depth(fmt.sample),
+        channels: planes,
+        alpha,
+    }
 }
 
 /// Patterns decoded from the document's raw pattern blocks (malformed blocks are skipped).

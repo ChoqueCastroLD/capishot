@@ -93,7 +93,12 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId]) -> Value {
             v["adjustment"] = serde_json::to_value(a).unwrap_or(Value::Null);
         }
         LayerContent::Smart(sm) => {
-            v["smartFilters"] = Value::Array(sm.smart_filters.iter().map(|f| json!({"command": f.command, "params": f.params, "visible": f.visible, "opacity": f.opacity, "blend": f.blend.label()})).collect());
+            v["smartFilters"] = Value::Array(
+                sm.smart_filters
+                    .iter()
+                    .map(|f| json!({"command": f.command, "params": f.params, "visible": f.visible, "opacity": f.opacity, "blend": f.blend.label()}))
+                    .collect(),
+            );
             v["smartFiltersEnabled"] = json!(sm.filters_enabled);
         }
         LayerContent::Text(t) => {

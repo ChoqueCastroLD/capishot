@@ -110,7 +110,8 @@ fn resolved_lens_params(p: &Value, lc: &LensCorrection) -> Value {
 
 /// Adaptive Wide Angle settings; a zero focal length is taken from EXIF when present.
 pub fn wide_params(cmd: &str, p: &Value, info: Option<&exif::CameraInfo>) -> Result<WideAngle> {
-    let mut wa: WideAngle = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, format!("bad params: {e} (constraints: [{{\"a\":[x,y],\"b\":[x,y],\"orientation\":\"free|horizontal|vertical\"}}])")))?;
+    let mut wa: WideAngle = serde_json::from_value(p.clone())
+        .map_err(|e| bad(cmd, format!("bad params: {e} (constraints: [{{\"a\":[x,y],\"b\":[x,y],\"orientation\":\"free|horizontal|vertical\"}}])")))?;
     if wa.constraints.iter().any(|c| c.a.iter().chain(&c.b).any(|v| !v.is_finite())) {
         return Err(bad(cmd, "constraint points must be finite"));
     }
@@ -296,7 +297,8 @@ fn lens_correction(s: &mut Session, p: &Value) -> Result<Value> {
     let lc = lens_params(LENS, p, frame, info.as_ref())?;
     let stored = resolved_lens_params(p, &lc);
     let t0 = Stopwatch::start();
-    let id = run_filter(s, LENS, "Lens Correction", stored.clone(), matches!(lc.edge, EdgeMode::Transparency), &|surf, canvas| lens::correct(surf, canvas, &lc))?;
+    let id =
+        run_filter(s, LENS, "Lens Correction", stored.clone(), matches!(lc.edge, EdgeMode::Transparency), &|surf, canvas| lens::correct(surf, canvas, &lc))?;
     Ok(json!({"layer": id.0, "profile": lc.profile.as_ref().map(|p| p.name.clone()), "angle": lc.angle, "scale": lc.scale, "params": stored, "ms": t0.ms()}))
 }
 
@@ -315,7 +317,11 @@ fn adaptive_wide_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let interp = Interp::parse(p.get("interpolation").and_then(Value::as_str).unwrap_or("bicubic"));
     let id = run_filter(s, WIDE, "Adaptive Wide Angle", stored.clone(), true, &|surf, canvas| {
         let tris = mesh.triangles();
-        if canvas == frame { photocraft_algo::warp::warp_triangles(surf, canvas, &mesh.verts, &tris, interp) } else { wideangle::apply(surf, canvas, &wa, interp) }
+        if canvas == frame {
+            photocraft_algo::warp::warp_triangles(surf, canvas, &mesh.verts, &tris, interp)
+        } else {
+            wideangle::apply(surf, canvas, &wa, interp)
+        }
     })?;
     let model = match cam.model {
         wideangle::WideModel::Fisheye => "fisheye",
@@ -371,7 +377,16 @@ const LENS_DOC: &str = r##"{"profile":"none|auto|generic","focalLength":mm=0,"co
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec { id: LENS, label: "Lens Correction…", menu: &["Filter"], shortcut: Some("Cmd+Shift+R"), params: LENS_DOC, enabled: filterable, run: lens_correction, journal: true },
+        CommandSpec {
+            id: LENS,
+            label: "Lens Correction…",
+            menu: &["Filter"],
+            shortcut: Some("Cmd+Shift+R"),
+            params: LENS_DOC,
+            enabled: filterable,
+            run: lens_correction,
+            journal: true,
+        },
         CommandSpec {
             id: WIDE,
             label: "Adaptive Wide Angle…",
@@ -449,7 +464,8 @@ mod tests {
         // EXIF-driven auto profile.
         let mut s = session(8);
         s.edit("exif", |doc, _| {
-            doc.metadata.exif = Some(std::sync::Arc::new(exif::build(&exif::CameraInfo { focal_length: Some(16.0), focal_length_35mm: Some(24.0), ..Default::default() })));
+            doc.metadata.exif =
+                Some(std::sync::Arc::new(exif::build(&exif::CameraInfo { focal_length: Some(16.0), focal_length_35mm: Some(24.0), ..Default::default() })));
             Ok(())
         })
         .unwrap();
@@ -480,7 +496,9 @@ mod tests {
     #[test]
     fn adaptive_wide_angle_straightens() {
         let mut s = session(8);
-        let r = s.execute(WIDE, json!({"model": "fisheye", "focalLength": 10, "constraints": [{"a": [10, 15], "b": [110, 15], "orientation": "horizontal"}]})).unwrap();
+        let r = s
+            .execute(WIDE, json!({"model": "fisheye", "focalLength": 10, "constraints": [{"a": [10, 15], "b": [110, 15], "orientation": "horizontal"}]}))
+            .unwrap();
         assert_eq!(r["model"], "fisheye");
         assert!(r["residual"].as_f64().unwrap() < 2.0, "{r}");
         assert!(s.execute(WIDE, json!({"constraints": [{"a": [0, 0]}]})).is_err());
@@ -531,7 +549,12 @@ mod tests {
             let path = dir.join("in").join(format!("shot{k}.png"));
             crate::file_cmds::save_doc(&s.active().unwrap().doc, path.to_str().unwrap(), None).unwrap();
         }
-        let r = s.execute(LENS_BATCH, json!({"input": dir.join("in").to_str().unwrap(), "output": dir.join("out").to_str().unwrap(), "vignetteAmount": 60, "edge": "edgeExtension"})).unwrap();
+        let r = s
+            .execute(
+                LENS_BATCH,
+                json!({"input": dir.join("in").to_str().unwrap(), "output": dir.join("out").to_str().unwrap(), "vignetteAmount": 60, "edge": "edgeExtension"}),
+            )
+            .unwrap();
         assert_eq!(r["files"].as_array().unwrap().len(), 2, "{r}");
         assert!(r["errors"].as_array().unwrap().is_empty());
         assert!(dir.join("out").join("shot0.png").is_file());

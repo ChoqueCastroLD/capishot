@@ -17,7 +17,17 @@ fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
 #[test]
 fn show_snap_extras_and_screen_modes_are_state() {
     let (mut app, ctx) = app_with(1);
-    for id in ["view.show.layerEdges", "view.show.pixelGrid", "view.snapTo.layers", "view.extras", "view.screenMode.fullScreen", "view.flipHorizontal", "window.arrange.fourUp", "type.fontPreviewSize.huge", "type.languageOptions.eastAsianFeatures"] {
+    for id in [
+        "view.show.layerEdges",
+        "view.show.pixelGrid",
+        "view.snapTo.layers",
+        "view.extras",
+        "view.screenMode.fullScreen",
+        "view.flipHorizontal",
+        "window.arrange.fourUp",
+        "type.fontPreviewSize.huge",
+        "type.languageOptions.eastAsianFeatures",
+    ] {
         assert!(is_live(id), "{id}");
     }
     assert_eq!(checked(&app, "view.show.layerEdges"), Some(false));

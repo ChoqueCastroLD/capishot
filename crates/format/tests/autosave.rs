@@ -12,22 +12,14 @@ fn autosave_then_recover() {
     let dir = temp_dir("recovery");
     let doc = Arc::new(rich_doc(ColorMode::Rgb, SampleType::U16));
     let saver = Autosaver::new(&dir, "doc-1");
-    saver.request(
-        doc.clone(),
-        7,
-        Some("/work/a.pcraft".into()),
-        SaveOptions::default(),
-    );
+    saver.request(doc.clone(), 7, Some("/work/a.pcraft".into()), SaveOptions::default());
     let r = saver.flush().expect("a save ran");
     let stats = r.unwrap();
     assert!(stats.tiles_written > 0);
     let entries = list_recovery(&dir);
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].info.revision, 7);
-    assert_eq!(
-        entries[0].info.original_path.as_deref(),
-        Some("/work/a.pcraft")
-    );
+    assert_eq!(entries[0].info.original_path.as_deref(), Some("/work/a.pcraft"));
     assert_eq!(entries[0].info.document_name, "Rich");
     assert_eq!(recover(&entries[0]).unwrap(), *doc);
     discard_recovery(&dir, &entries[0]).unwrap();
@@ -42,17 +34,8 @@ fn repeated_autosaves_are_incremental_and_coalesced() {
     let mut doc = rich_doc(ColorMode::Rgb, SampleType::U8);
     for i in 0..5 {
         let id = doc.layers[1].id;
-        doc.layer_mut(id)
-            .unwrap()
-            .surface_mut()
-            .unwrap()
-            .write_pixel(i, 0, &[1.0, 0.0, 0.0, 1.0]);
-        saver.request(
-            Arc::new(doc.clone()),
-            i as u64,
-            None,
-            SaveOptions::default(),
-        );
+        doc.layer_mut(id).unwrap().surface_mut().unwrap().write_pixel(i, 0, &[1.0, 0.0, 0.0, 1.0]);
+        saver.request(Arc::new(doc.clone()), i as u64, None, SaveOptions::default());
     }
     saver.flush().unwrap().unwrap();
     let e = list_recovery(&dir);
@@ -65,19 +48,9 @@ fn repeated_autosaves_are_incremental_and_coalesced() {
 fn discard_removes_everything() {
     let dir = temp_dir("discard");
     let saver = Autosaver::new(&dir, "x y/z");
-    saver.request(
-        Arc::new(rich_doc(ColorMode::Grayscale, SampleType::U8)),
-        1,
-        None,
-        SaveOptions::default(),
-    );
+    saver.request(Arc::new(rich_doc(ColorMode::Grayscale, SampleType::U8)), 1, None, SaveOptions::default());
     let path = saver.bundle_path();
-    assert!(
-        path.file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("x_y_z")
-    );
+    assert!(path.file_name().unwrap().to_string_lossy().starts_with("x_y_z"));
     saver.discard().unwrap();
     assert!(list_recovery(&dir).is_empty());
     assert!(!path.exists());

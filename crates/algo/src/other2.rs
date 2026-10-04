@@ -12,7 +12,8 @@ use crate::{Ctx, HsbModel};
 pub(crate) fn custom(src: &Image, out: Rect, ctx: &Ctx, kernel: &[f32], scale: f32, offset: f32) -> Vec<f32> {
     let n = src.ch;
     let cc = ncol(ctx, n);
-    let k: Vec<(i32, i32, f32)> = (0..25).filter_map(|i| kernel.get(i).copied().filter(|v| *v != 0.0).map(|v| (i as i32 % 5 - 2, i as i32 / 5 - 2, v))).collect();
+    let k: Vec<(i32, i32, f32)> =
+        (0..25).filter_map(|i| kernel.get(i).copied().filter(|v| *v != 0.0).map(|v| (i as i32 % 5 - 2, i as i32 / 5 - 2, v))).collect();
     let s = if scale == 0.0 { 1.0 } else { scale };
     let off = offset / 255.0;
     let mut res = src.crop(out);

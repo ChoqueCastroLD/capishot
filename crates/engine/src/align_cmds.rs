@@ -47,7 +47,8 @@ fn auto_align(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "select two or more pixel layers"));
     }
     let projection = p.get("projection").and_then(Value::as_str).unwrap_or("auto");
-    let layout = Layout::parse(projection).ok_or_else(|| bad(cmd, format!("unknown projection `{projection}` (auto|perspective|cylindrical|spherical|collage|reposition)")))?;
+    let layout = Layout::parse(projection)
+        .ok_or_else(|| bad(cmd, format!("unknown projection `{projection}` (auto|perspective|cylindrical|spherical|collage|reposition)")))?;
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let doc = st.doc.clone();
     let reference = match p.get("reference").and_then(Value::as_u64) {
@@ -61,7 +62,8 @@ fn auto_align(s: &mut Session, p: &Value) -> Result<Value> {
     let images: Vec<(&Surface, Rect)> = surfs.iter().map(|s| (*s, area)).collect();
     let focal35 = doc.metadata.exif.as_ref().and_then(|e| photocraft_algo::exif::read(e).focal_length_35mm);
     let geometric = p.get("geometricCorrection").and_then(Value::as_bool).unwrap_or(false);
-    let al = register(&images, layout, Some(ref_idx), geometric, focal35).ok_or_else(|| EngineError::Other("Auto-Align couldn't find enough matching detail between the layers".into()))?;
+    let al = register(&images, layout, Some(ref_idx), geometric, focal35)
+        .ok_or_else(|| EngineError::Other("Auto-Align couldn't find enough matching detail between the layers".into()))?;
     let interp = Interp::parse(p.get("interpolation").and_then(Value::as_str).unwrap_or("bicubic"));
     let planar = matches!(al.layout, Layout::Perspective | Layout::Collage | Layout::Reposition);
     let mut inliers = vec![0usize; ids.len()];
@@ -181,7 +183,8 @@ fn auto_blend(s: &mut Session, p: &Value) -> Result<Value> {
         (weights, blended)
     } else {
         // Panorama: seams routed through agreement, multi-band blended (photo_cmds).
-        let surfs: Vec<Surface> = ids.iter().map(|id| doc.layer(*id).and_then(|l| l.surface()).cloned().ok_or(EngineError::NoLayer(*id))).collect::<Result<_>>()?;
+        let surfs: Vec<Surface> =
+            ids.iter().map(|id| doc.layer(*id).and_then(|l| l.surface()).cloned().ok_or(EngineError::NoLayer(*id))).collect::<Result<_>>()?;
         let order = seam_order(&surfs, 0);
         let b = seam_blend(&surfs, area, &order, seamless, false, None);
         let weights: Vec<Vec<f32>> = b.layers.iter().map(|(_, m)| m.read_region(area)).collect();
@@ -219,7 +222,12 @@ macro_rules! spec {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("edit.autoAlignLayers", "Auto-Align Layers…", r##"{"projection":"auto|perspective|cylindrical|spherical|collage|reposition","reference":layer id?=bottom selected layer,"geometricCorrection":bool=false,"interpolation":"bicubic|bilinear|nearest"}"##, auto_align),
+        spec!(
+            "edit.autoAlignLayers",
+            "Auto-Align Layers…",
+            r##"{"projection":"auto|perspective|cylindrical|spherical|collage|reposition","reference":layer id?=bottom selected layer,"geometricCorrection":bool=false,"interpolation":"bicubic|bilinear|nearest"}"##,
+            auto_align
+        ),
         spec!("edit.autoBlendLayers", "Auto-Blend Layers…", r##"{"method":"panorama|stack","seamlessTones":bool=true}"##, auto_blend),
     ]
 }

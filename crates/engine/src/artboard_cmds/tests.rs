@@ -158,7 +158,9 @@ fn raster_pdf_xref_offsets_point_at_objects() {
 #[test]
 fn disabled_without_artboards() {
     let mut s = session(8);
-    for id in ["layer.artboard.set", "view.clearSelectedArtboardGuides", "file.export.artboardsToFiles", "file.export.artboardsToPdf", "layer.new.artboardFromGroup"] {
+    for id in
+        ["layer.artboard.set", "view.clearSelectedArtboardGuides", "file.export.artboardsToFiles", "file.export.artboardsToPdf", "layer.new.artboardFromGroup"]
+    {
         assert!(!s.is_enabled(id), "{id}");
     }
     assert!(s.is_enabled("layer.new.artboard"));

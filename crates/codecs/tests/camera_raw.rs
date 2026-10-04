@@ -25,10 +25,7 @@ fn tiff(ifds: &[Vec<(u16, u16, u32)>], header8: Option<[u8; 4]>) -> Vec<u8> {
         b.extend_from_slice(&0u32.to_le_bytes());
     }
     // Layout: IFDs back to back, then one shared 12-byte pixel strip.
-    let sizes: Vec<u32> = ifds
-        .iter()
-        .map(|e| 2 + 12 * (e.len() as u32 + 1) + 4)
-        .collect();
+    let sizes: Vec<u32> = ifds.iter().map(|e| 2 + 12 * (e.len() as u32 + 1) + 4).collect();
     let strip = first + sizes.iter().sum::<u32>();
     let mut at = first;
     for (i, entries) in ifds.iter().enumerate() {
@@ -77,10 +74,7 @@ fn assert_camera_raw(bytes: &[u8]) {
             assert!(reason.contains("camera raw"), "unexpected reason: {reason}");
         }
         Err(e) => panic!("expected a camera raw error, got: {e}"),
-        Ok(img) => panic!(
-            "expected a camera raw error, decoded {:?}",
-            img.dimensions()
-        ),
+        Ok(img) => panic!("expected a camera raw error, decoded {:?}", img.dimensions()),
     }
 }
 

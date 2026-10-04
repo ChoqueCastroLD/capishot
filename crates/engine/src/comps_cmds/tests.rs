@@ -164,7 +164,9 @@ fn disabled_states_and_bad_params() {
     assert!(!s.is_enabled("layerComp.new"));
     s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
     assert!(s.is_enabled("layerComp.new"));
-    for id in ["layerComp.apply", "layerComp.update", "layerComp.next", "layerComp.delete", "file.export.layerCompsToFiles", "layerComp.restoreLastDocumentState"] {
+    for id in
+        ["layerComp.apply", "layerComp.update", "layerComp.next", "layerComp.delete", "file.export.layerCompsToFiles", "layerComp.restoreLastDocumentState"]
+    {
         assert!(!s.is_enabled(id), "{id}");
     }
     s.execute("layerComp.new", json!({})).unwrap();

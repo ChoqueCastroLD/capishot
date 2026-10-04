@@ -487,7 +487,8 @@ fn flame_colour(t: f32, custom: Option<[f32; 4]>) -> [f32; 4] {
             [rgb[0], rgb[1], rgb[2], a * c[3]]
         }
         None => {
-            const STOPS: [(f32, [f32; 3]); 5] = [(0.0, [1.0, 0.98, 0.85]), (0.2, [1.0, 0.86, 0.35]), (0.45, [1.0, 0.55, 0.08]), (0.75, [0.9, 0.25, 0.02]), (1.0, [0.6, 0.08, 0.0])];
+            const STOPS: [(f32, [f32; 3]); 5] =
+                [(0.0, [1.0, 0.98, 0.85]), (0.2, [1.0, 0.86, 0.35]), (0.45, [1.0, 0.55, 0.08]), (0.75, [0.9, 0.25, 0.02]), (1.0, [0.6, 0.08, 0.0])];
             let k = t.clamp(0.0, 1.0);
             let mut rgb = STOPS[4].1;
             for w in STOPS.windows(2) {
@@ -539,7 +540,11 @@ fn draw_flame(out: &mut Vec<Prim>, spine: &Spine, width: f32, spec: &FlameSpec, 
         let o = sway(u);
         let c = flame_colour(u, spec.color);
         let r = half * (1.25 - u) + 2.0;
-        out.push(Prim::ellipse((px - dy * o, py + dx * o), r, r * 1.2, dy.atan2(dx), [c[0], c[1], c[2], 0.16 * opacity], [c[0], c[1] * 0.6, c[2] * 0.3, 0.0]).with_soft(r.max(2.0)).additive());
+        out.push(
+            Prim::ellipse((px - dy * o, py + dx * o), r, r * 1.2, dy.atan2(dx), [c[0], c[1], c[2], 0.16 * opacity], [c[0], c[1] * 0.6, c[2] * 0.3, 0.0])
+                .with_soft(r.max(2.0))
+                .additive(),
+        );
     }
     let line_r = (half / lines as f32 * 2.2).clamp(0.8, 10.0);
     for li in 0..lines {
@@ -572,7 +577,11 @@ fn draw_flame(out: &mut Vec<Prim>, spine: &Spine, width: f32, spec: &FlameSpec, 
             if let Some((q, rq, uq)) = prev {
                 // Fade in over the first tenth (a soft base) and out towards the line's tip.
                 let f = |c: [f32; 4], uu: f32, t: f32| [c[0], c[1], c[2], c[3] * opacity * (1.0 - t.powi(3)) * ((uu - start) / 0.08).clamp(0.0, 1.0).sqrt()];
-                out.push(Prim::capsule(q, p, rq, r, f(flame_colour(uq, spec.color), uq, fade_t), f(flame_colour(u, spec.color), u, fade_t)).with_soft(1.0 + lr * 0.6).lighten());
+                out.push(
+                    Prim::capsule(q, p, rq, r, f(flame_colour(uq, spec.color), uq, fade_t), f(flame_colour(u, spec.color), u, fade_t))
+                        .with_soft(1.0 + lr * 0.6)
+                        .lighten(),
+                );
             }
             prev = Some((p, r, u));
         }
@@ -586,7 +595,8 @@ pub fn flame(spec: &FlameSpec, paths: &[Vec<(f32, f32)>]) -> Vec<Prim> {
     let length = spec.length.clamp(1.0, 1000.0);
     let width = spec.width.clamp(1.0, 1000.0);
     let interval = spec.interval.clamp(1.0, 1000.0);
-    let pick_len = |rng: &mut Rng, var: f32| if spec.randomize_length || var > 0.0 { length * rng.range(1.0 - var.max(0.4), 1.0 + var.max(0.4) * 0.5) } else { length };
+    let pick_len =
+        |rng: &mut Rng, var: f32| if spec.randomize_length || var > 0.0 { length * rng.range(1.0 - var.max(0.4), 1.0 + var.max(0.4) * 0.5) } else { length };
     for path in paths.iter().filter(|p| !p.is_empty()) {
         let spine = Spine::new(path.clone());
         let total = spine.len();
@@ -600,14 +610,29 @@ pub fn flame(spec: &FlameSpec, paths: &[Vec<(f32, f32)>]) -> Vec<Prim> {
                 let c = FlameSpec { flame_shape: FlameShape::Oval, turbulent: spec.turbulent * 0.3, jag: spec.jag * 0.2, ..spec.clone() };
                 draw_flame(&mut out, &candle, (width * 0.6).max(4.0), &c, &mut rng);
                 let core = flame_colour(0.05, spec.color);
-                out.push(Prim::ellipse((base.0, base.1 - h * 0.28), (width * 0.12).max(1.5), h * 0.22, 0.0, [core[0], core[1], core[2], 0.9 * spec.opacity.clamp(0.0, 100.0) / 100.0], [core[0], core[1], core[2], 0.0]).with_soft(2.0).additive());
+                out.push(
+                    Prim::ellipse(
+                        (base.0, base.1 - h * 0.28),
+                        (width * 0.12).max(1.5),
+                        h * 0.22,
+                        0.0,
+                        [core[0], core[1], core[2], 0.9 * spec.opacity.clamp(0.0, 100.0) / 100.0],
+                        [core[0], core[1], core[2], 0.0],
+                    )
+                    .with_soft(2.0)
+                    .additive(),
+                );
             }
             _ => {
                 let closed = path.len() > 2 && {
                     let (a, b) = (path[0], path[path.len() - 1]);
                     (a.0 - b.0).abs() < 1.0 && (a.1 - b.1).abs() < 1.0
                 };
-                let count = if spec.adjust_interval_for_loops && closed { (total / interval).round().max(1.0) as usize } else { (total / interval).floor() as usize + 1 };
+                let count = if spec.adjust_interval_for_loops && closed {
+                    (total / interval).round().max(1.0) as usize
+                } else {
+                    (total / interval).floor() as usize + 1
+                };
                 let step = if spec.adjust_interval_for_loops && closed { total / count as f32 } else { interval };
                 for k in 0..count {
                     let s = k as f32 * step;
@@ -699,7 +724,22 @@ struct TreeKind {
 }
 
 #[allow(clippy::too_many_arguments)]
-const fn tk(name: &'static str, habit: Habit, levels: u32, children: u32, spread: f32, ratio: f32, trunk: f32, droop: f32, wiggle: f32, thick: f32, leaf: Leaf, leaf_col: [f32; 3], bark: [f32; 3], accent: Option<[f32; 3]>) -> TreeKind {
+const fn tk(
+    name: &'static str,
+    habit: Habit,
+    levels: u32,
+    children: u32,
+    spread: f32,
+    ratio: f32,
+    trunk: f32,
+    droop: f32,
+    wiggle: f32,
+    thick: f32,
+    leaf: Leaf,
+    leaf_col: [f32; 3],
+    bark: [f32; 3],
+    accent: Option<[f32; 3]>,
+) -> TreeKind {
     TreeKind { name, habit, levels, children, spread, ratio, trunk, droop, wiggle, thick, leaf, leaf_col, bark, accent }
 }
 
@@ -1023,7 +1063,8 @@ pub fn tree(spec: &TreeSpec, canvas: Rect) -> Vec<Prim> {
                     ang += 0.06 * d.sin().atan2(d.cos());
                     let nq = (q.0 + ang.cos() * flen / segs as f32, q.1 + ang.sin() * flen / segs as f32);
                     let k2 = t.light_at(nq);
-                    t.leaves.push((k2 - 0.1, Prim::capsule(q, nq, (r0 * 0.15).max(0.6), (r0 * 0.1).max(0.4), shade(t.leaf, k2 * 0.8), shade(t.leaf, k2 * 0.8))));
+                    t.leaves
+                        .push((k2 - 0.1, Prim::capsule(q, nq, (r0 * 0.15).max(0.6), (r0 * 0.1).max(0.4), shade(t.leaf, k2 * 0.8), shade(t.leaf, k2 * 0.8))));
                     for j in 0..leaflets {
                         let along = j as f32 / leaflets as f32;
                         let at = (q.0 + (nq.0 - q.0) * along, q.1 + (nq.1 - q.1) * along);
@@ -1201,7 +1242,12 @@ pub fn picture_frame(spec: &FrameSpec, canvas: Rect) -> Vec<Prim> {
     let thick = (unit * 0.04 + short * 0.00012 * spec.thickness.clamp(1.0, 100.0)).max(0.6);
     let spacing = unit * (4.0 - 3.2 * spec.arrangement.clamp(1.0, 100.0) / 100.0);
     let inset = margin + unit;
-    let b = Border { x0: canvas.x0 as f32 + inset, y0: canvas.y0 as f32 + inset, w: (canvas.width() as f32 - 2.0 * inset).max(1.0), h: (canvas.height() as f32 - 2.0 * inset).max(1.0) };
+    let b = Border {
+        x0: canvas.x0 as f32 + inset,
+        y0: canvas.y0 as f32 + inset,
+        w: (canvas.width() as f32 - 2.0 * inset).max(1.0),
+        h: (canvas.height() as f32 - 2.0 * inset).max(1.0),
+    };
     let total = b.len();
     let count = (total / spacing).round().max(4.0) as usize;
     let step = total / count as f32;
@@ -1333,7 +1379,14 @@ pub fn picture_frame(spec: &FrameSpec, canvas: Rect) -> Vec<Prim> {
                     if style == "rope" {
                         if k % 2 == 0 {
                             let (_, t, _) = b.at(s);
-                            out.push(Prim::ellipse(q, unit * 0.45, unit * 0.2, t.1.atan2(t.0) + 0.7, shade([vine[0], vine[1], vine[2]], 1.1), shade([vine[0], vine[1], vine[2]], 0.65)));
+                            out.push(Prim::ellipse(
+                                q,
+                                unit * 0.45,
+                                unit * 0.2,
+                                t.1.atan2(t.0) + 0.7,
+                                shade([vine[0], vine[1], vine[2]], 1.1),
+                                shade([vine[0], vine[1], vine[2]], 0.65),
+                            ));
                         }
                     } else if let Some(pp) = prev {
                         out.push(Prim::capsule(pp, q, thick, thick, vine, vine));
@@ -1342,7 +1395,12 @@ pub fn picture_frame(spec: &FrameSpec, canvas: Rect) -> Vec<Prim> {
                 }
                 if style == "doubleLine" {
                     // A second rule inside each line and corner squares.
-                    let inner = Border { x0: b.x0 + unit * 0.6 + off, y0: b.y0 + unit * 0.6 + off, w: b.w - 2.0 * (unit * 0.6 + off), h: b.h - 2.0 * (unit * 0.6 + off) };
+                    let inner = Border {
+                        x0: b.x0 + unit * 0.6 + off,
+                        y0: b.y0 + unit * 0.6 + off,
+                        w: b.w - 2.0 * (unit * 0.6 + off),
+                        h: b.h - 2.0 * (unit * 0.6 + off),
+                    };
                     for e in 0..4 {
                         let (p, _, _) = inner.at([0.0, inner.w, inner.w + inner.h, 2.0 * inner.w + inner.h][e]);
                         let (q, _, _) = inner.at([inner.w, inner.w + inner.h, 2.0 * inner.w + inner.h, inner.len() - 0.001][e]);
@@ -1458,7 +1516,14 @@ mod tests {
             assert!(!picture_frame(&FrameSpec { frame: k, ..Default::default() }, canvas).is_empty(), "frame {k}");
         }
         let path = default_flame_path(canvas);
-        for t in [FlameType::OneFlameAlongPath, FlameType::MultipleFlamesAlongPath, FlameType::MultipleFlamesPathDirections, FlameType::MultipleFlamesVariousLength, FlameType::CandleLight, FlameType::MultipleFlamesOneDirection] {
+        for t in [
+            FlameType::OneFlameAlongPath,
+            FlameType::MultipleFlamesAlongPath,
+            FlameType::MultipleFlamesPathDirections,
+            FlameType::MultipleFlamesVariousLength,
+            FlameType::CandleLight,
+            FlameType::MultipleFlamesOneDirection,
+        ] {
             assert!(!flame(&FlameSpec { flame_type: t, ..Default::default() }, std::slice::from_ref(&path)).is_empty(), "{t:?}");
         }
     }

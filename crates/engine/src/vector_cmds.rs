@@ -19,8 +19,8 @@
 use photocraft_algo::selection::{self as sel, SelectionMode};
 use photocraft_color::{BlendMode, Color};
 use photocraft_doc::{
-    Document, Fill, FillRule, GradientStyle, Knot, Layer, LayerContent, LayerId, LineCap, LineJoin, LiveShape, NamedPath, Path, PathOp,
-    ShapeLayer, ShapeStroke, StrokeAlign, Subpath, VectorMask,
+    Document, Fill, FillRule, GradientStyle, Knot, Layer, LayerContent, LayerId, LineCap, LineJoin, LiveShape, NamedPath, Path, PathOp, ShapeLayer,
+    ShapeStroke, StrokeAlign, Subpath, VectorMask,
 };
 use photocraft_geom::{Affine, Point, Rect};
 use photocraft_vector as vector;
@@ -223,7 +223,14 @@ fn parse_fill(v: &Value) -> std::result::Result<Option<Fill>, String> {
         }));
     }
     if let Some(name) = v.get("pattern").and_then(Value::as_str) {
-        return Ok(Some(Fill::Pattern { name: name.into(), scale: f64p(v, "scale").unwrap_or(100.0) as f32 / 100.0, id: String::new(), angle: 0.0, link: true, phase: (0.0, 0.0) }));
+        return Ok(Some(Fill::Pattern {
+            name: name.into(),
+            scale: f64p(v, "scale").unwrap_or(100.0) as f32 / 100.0,
+            id: String::new(),
+            angle: 0.0,
+            link: true,
+            phase: (0.0, 0.0),
+        }));
     }
     Err(format!("unrecognised fill {v}"))
 }
@@ -611,7 +618,9 @@ fn paths_list(s: &Session) -> Result<Value> {
     let knots = |p: &Path| p.subpaths.iter().map(|s| s.knots.len()).sum::<usize>();
     let layer = d.active_layer.and_then(|id| doc.layer(id)).and_then(|l| match &l.content {
         LayerContent::Shape(sh) => Some(json!({ "kind": "shape", "layer": l.id.0, "name": format!("{} Shape Path", l.name), "knots": knots(&sh.path) })),
-        _ => l.vector_mask.as_ref().map(|v| json!({ "kind": "vectorMask", "layer": l.id.0, "name": format!("{} Vector Mask", l.name), "knots": knots(&v.path) })),
+        _ => {
+            l.vector_mask.as_ref().map(|v| json!({ "kind": "vectorMask", "layer": l.id.0, "name": format!("{} Vector Mask", l.name), "knots": knots(&v.path) }))
+        }
     });
     Ok(json!({
         "paths": doc.paths.iter().map(|p| json!({ "name": p.name, "knots": knots(&p.path), "subpaths": p.path.subpaths.len() })).collect::<Vec<_>>(),
@@ -828,7 +837,9 @@ fn path_stroke(s: &mut Session, p: &Value) -> Result<Value> {
         let mut dmg = Rect::EMPTY;
         for pl in &lines {
             let mut pts: Vec<photocraft_paint::StrokePoint> = pl.pts.iter().map(|&(x, y)| photocraft_paint::StrokePoint::new(x, y, 1.0)).collect();
-            if pl.closed && let Some(first) = pts.first().copied() {
+            if pl.closed
+                && let Some(first) = pts.first().copied()
+            {
                 pts.push(first);
             }
             if pts.is_empty() {
@@ -850,7 +861,9 @@ fn vector_mask_info(s: &Session, id: LayerId) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let l = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
     Ok(match &l.vector_mask {
-        Some(v) => json!({ "layer": id.0, "path": path_json(&v.path), "enabled": v.enabled, "linked": v.linked, "density": v.density * 100.0, "feather": v.feather }),
+        Some(v) => {
+            json!({ "layer": id.0, "path": path_json(&v.path), "enabled": v.enabled, "linked": v.linked, "density": v.density * 100.0, "feather": v.feather })
+        }
         None => json!({ "layer": id.0, "vectorMask": null }),
     })
 }
@@ -940,7 +953,8 @@ fn vector_mask_rasterize(s: &mut Session, p: &Value) -> Result<Value> {
         let vals = vector::vector_mask_values(&vm, area);
         let mut mask = l.mask.take().unwrap_or_else(|| {
             let mut m = photocraft_doc::LayerMask::reveal_all();
-            m.surface = photocraft_raster::Surface::with_default(photocraft_color::PixelFormat::new(photocraft_color::ColorMode::Grayscale, depth, false), &[1.0]);
+            m.surface =
+                photocraft_raster::Surface::with_default(photocraft_color::PixelFormat::new(photocraft_color::ColorMode::Grayscale, depth, false), &[1.0]);
             m
         });
         // Outside the canvas the vector mask is 0 unless it is empty/inverted; keep the old default there.
@@ -1096,7 +1110,9 @@ pub fn specs() -> Vec<CommandSpec> {
             "path.set",
             "Set Path",
             [],
-            leak(format!(r##"{{"name":str|"work"="work","path":{{…}},"op":"combine|subtract|intersect|exclude"? (append to the existing path with this op instead of replacing)}}. {PATH_FORM}"##)),
+            leak(format!(
+                r##"{{"name":str|"work"="work","path":{{…}},"op":"combine|subtract|intersect|exclude"? (append to the existing path with this op instead of replacing)}}. {PATH_FORM}"##
+            )),
             has_doc,
             path_set
         ),
@@ -1152,18 +1168,54 @@ pub fn specs() -> Vec<CommandSpec> {
             vector_mask_edit
         ),
         spec!("layer.vectorMask.delete", "Delete Vector Mask", ["Layer", "Vector Mask"], r##"{"layer":id?}"##, has_layer, vector_mask_delete),
-        spec!("layer.rasterize.vectorMask", "Rasterize Vector Mask", [], r##"{"layer":id?} (multiplied into the layer mask)"##, has_layer, vector_mask_rasterize),
+        spec!(
+            "layer.rasterize.vectorMask",
+            "Rasterize Vector Mask",
+            [],
+            r##"{"layer":id?} (multiplied into the layer mask)"##,
+            has_layer,
+            vector_mask_rasterize
+        ),
         // Menu ids of Photoshop's Layer › Vector Mask / Rasterize / Combine Shapes.
-        spec!("layer.vectorMask.revealAll", "Vector Mask: Reveal All", [], r##"{"layer":id?}"##, has_layer, |s, p| vector_mask_add(s, &with(p, "hide", json!(false)), false)),
-        spec!("layer.vectorMask.hideAll", "Vector Mask: Hide All", [], r##"{"layer":id?}"##, has_layer, |s, p| vector_mask_add(s, &with(p, "hide", json!(true)), false)),
-        spec!("layer.vectorMask.currentPath", "Vector Mask: Current Path", [], r##"{"layer":id?,"name":str|"work"="work"}"##, has_layer, |s, p| vector_mask_add(s, p, true)),
-        spec!("layer.vectorMask.enabled", "Enable Vector Mask", [], r##"{"layer":id?,"enabled":bool? (default: toggle)}"##, has_layer, |s, p| toggle_vector_mask(s, p, "enabled")),
-        spec!("layer.vectorMask.linked", "Link Vector Mask", [], r##"{"layer":id?,"linked":bool? (default: toggle)}"##, has_layer, |s, p| toggle_vector_mask(s, p, "linked")),
+        spec!("layer.vectorMask.revealAll", "Vector Mask: Reveal All", [], r##"{"layer":id?}"##, has_layer, |s, p| vector_mask_add(
+            s,
+            &with(p, "hide", json!(false)),
+            false
+        )),
+        spec!("layer.vectorMask.hideAll", "Vector Mask: Hide All", [], r##"{"layer":id?}"##, has_layer, |s, p| vector_mask_add(
+            s,
+            &with(p, "hide", json!(true)),
+            false
+        )),
+        spec!("layer.vectorMask.currentPath", "Vector Mask: Current Path", [], r##"{"layer":id?,"name":str|"work"="work"}"##, has_layer, |s, p| {
+            vector_mask_add(s, p, true)
+        }),
+        spec!("layer.vectorMask.enabled", "Enable Vector Mask", [], r##"{"layer":id?,"enabled":bool? (default: toggle)}"##, has_layer, |s, p| {
+            toggle_vector_mask(s, p, "enabled")
+        }),
+        spec!("layer.vectorMask.linked", "Link Vector Mask", [], r##"{"layer":id?,"linked":bool? (default: toggle)}"##, has_layer, |s, p| toggle_vector_mask(
+            s, p, "linked"
+        )),
         spec!("layer.rasterize.shape", "Rasterize Shape", [], r##"{"layer":id?}"##, has_layer, shape_rasterize),
-        spec!("layer.combineShapes.unite", "Unite Shapes", [], r##"{"layer":id?,"subpath":index? (default all but the first)}"##, has_layer, |s, p| shape_edit(s, &with(p, "op", json!("combine")))),
-        spec!("layer.combineShapes.subtractFrontShape", "Subtract Front Shape", [], r##"{"layer":id?,"subpath":index?}"##, has_layer, |s, p| shape_edit(s, &with(p, "op", json!("subtract")))),
-        spec!("layer.combineShapes.intersectShapeAreas", "Intersect Shape Areas", [], r##"{"layer":id?,"subpath":index?}"##, has_layer, |s, p| shape_edit(s, &with(p, "op", json!("intersect")))),
-        spec!("layer.combineShapes.excludeOverlappingShapes", "Exclude Overlapping Shapes", [], r##"{"layer":id?,"subpath":index?}"##, has_layer, |s, p| shape_edit(s, &with(p, "op", json!("exclude")))),
+        spec!(
+            "layer.combineShapes.unite",
+            "Unite Shapes",
+            [],
+            r##"{"layer":id?,"subpath":index? (default all but the first)}"##,
+            has_layer,
+            |s, p| shape_edit(s, &with(p, "op", json!("combine")))
+        ),
+        spec!("layer.combineShapes.subtractFrontShape", "Subtract Front Shape", [], r##"{"layer":id?,"subpath":index?}"##, has_layer, |s, p| shape_edit(
+            s,
+            &with(p, "op", json!("subtract"))
+        )),
+        spec!("layer.combineShapes.intersectShapeAreas", "Intersect Shape Areas", [], r##"{"layer":id?,"subpath":index?}"##, has_layer, |s, p| shape_edit(
+            s,
+            &with(p, "op", json!("intersect"))
+        )),
+        spec!("layer.combineShapes.excludeOverlappingShapes", "Exclude Overlapping Shapes", [], r##"{"layer":id?,"subpath":index?}"##, has_layer, |s, p| {
+            shape_edit(s, &with(p, "op", json!("exclude")))
+        }),
         spec!(
             "layer.combineShapes.mergeShapeComponents",
             "Merge Shape Components",

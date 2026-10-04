@@ -145,7 +145,16 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
             if selected && tool_on {
                 painter.rect_stroke(sr, 0.0, Stroke::new(2.0, selected_color), egui::StrokeKind::Inside);
                 if r.origin == SliceOrigin::User {
-                    for c in [sr.left_top(), sr.right_top(), sr.left_bottom(), sr.right_bottom(), sr.center_top(), sr.center_bottom(), sr.left_center(), sr.right_center()] {
+                    for c in [
+                        sr.left_top(),
+                        sr.right_top(),
+                        sr.left_bottom(),
+                        sr.right_bottom(),
+                        sr.center_top(),
+                        sr.center_bottom(),
+                        sr.left_center(),
+                        sr.right_center(),
+                    ] {
                         painter.rect_filled(Rect::from_center_size(c, vec2(5.0, 5.0)), 0.0, selected_color);
                     }
                 }
@@ -158,7 +167,13 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
                 let font = egui::FontId::proportional(10.0);
                 let galley = painter.layout_no_wrap(label, font, Color32::WHITE);
                 let badge = Rect::from_min_size(sr.left_top() + vec2(2.0, 2.0), galley.size() + vec2(6.0, 2.0));
-                let bg = if pass { Color32::from_gray(110) } else if selected && tool_on { selected_color } else { color };
+                let bg = if pass {
+                    Color32::from_gray(110)
+                } else if selected && tool_on {
+                    selected_color
+                } else {
+                    color
+                };
                 painter.rect_filled(badge, 2.0, bg);
                 painter.galley(badge.min + vec2(3.0, 1.0), galley, Color32::WHITE);
             }
@@ -241,7 +256,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
         }
     } else {
         let sel = app.ui.slices.selected.is_some();
-        let stored = sel && app.session.active().is_some_and(|d| slices::resolve(&d.doc).iter().any(|r| Some(r.number) == app.ui.slices.selected && r.id.is_some()));
+        let stored =
+            sel && app.session.active().is_some_and(|d| slices::resolve(&d.doc).iter().any(|r| Some(r.number) == app.ui.slices.selected && r.id.is_some()));
         if ui.add_enabled_ui(sel && !locked, |ui| crate::widgets::secondary_button(ui, "Promote", 0.0)).inner.clicked() {
             let _ = selected_id(app, true).map(|id| app.run("slice.promote", json!({"slice": id})));
         }

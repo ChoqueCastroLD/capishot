@@ -14,25 +14,16 @@ pub(crate) const STEPS: &[Step] = &[];
 
 /// Upgrade `v` in place to `target` using `steps`.
 pub(crate) fn migrate_with(v: &mut Value, steps: &[Step], target: u32) -> Result<u32> {
-    let found = v
-        .get("format_version")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| FormatError::corrupt("manifest has no format_version"))?;
-    let found =
-        u32::try_from(found).map_err(|_| FormatError::corrupt("format_version out of range"))?;
+    let found = v.get("format_version").and_then(Value::as_u64).ok_or_else(|| FormatError::corrupt("manifest has no format_version"))?;
+    let found = u32::try_from(found).map_err(|_| FormatError::corrupt("format_version out of range"))?;
     if found == 0 {
         return Err(FormatError::corrupt("format_version 0 is invalid"));
     }
     if found > target {
-        return Err(FormatError::TooNew {
-            found,
-            supported: target,
-        });
+        return Err(FormatError::TooNew { found, supported: target });
     }
     for ver in found..target {
-        let step = steps
-            .get(ver as usize - 1)
-            .ok_or_else(|| FormatError::Unsupported(format!("no migration from format {ver}")))?;
+        let step = steps.get(ver as usize - 1).ok_or_else(|| FormatError::Unsupported(format!("no migration from format {ver}")))?;
         step(v)?;
         v["format_version"] = Value::from(ver + 1);
     }
@@ -79,10 +70,7 @@ mod tests {
     #[test]
     fn too_new_and_invalid_versions() {
         let mut v = json!({"format_version": 99});
-        assert!(matches!(
-            migrate(&mut v),
-            Err(FormatError::TooNew { found: 99, .. })
-        ));
+        assert!(matches!(migrate(&mut v), Err(FormatError::TooNew { found: 99, .. })));
         assert!(migrate(&mut json!({"format_version": 0})).is_err());
         assert!(migrate(&mut json!({})).is_err());
         assert!(migrate_with(&mut json!({"format_version": 1}), &[], 2).is_err());

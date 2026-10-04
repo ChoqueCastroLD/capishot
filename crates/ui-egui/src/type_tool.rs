@@ -58,7 +58,8 @@ fn to_text(aff: &Affine, x: f64, y: f64) -> (f32, f32) {
 fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<LayerId> {
     let doc = app.session.active()?.doc.clone();
     let slop = 6.0 / app.current_zoom().max(0.01);
-    let mut ids: Vec<LayerId> = doc.walk().into_iter().filter(|(_, _, l)| l.visible && matches!(l.content, LayerContent::Text(_))).map(|(_, _, l)| l.id).collect();
+    let mut ids: Vec<LayerId> =
+        doc.walk().into_iter().filter(|(_, _, l)| l.visible && matches!(l.content, LayerContent::Text(_))).map(|(_, _, l)| l.id).collect();
     ids.reverse(); // walk() is bottom-up; hit the topmost first
     ids.into_iter().find(|id| {
         let Some((l, aff, _)) = layout(app, *id) else { return false };
@@ -409,7 +410,8 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
     if a < b {
         let fill = Color32::from_rgba_unmultiplied(t.accent.r(), t.accent.g(), t.accent.b(), 110);
         for (li, ln) in l.lines.iter().enumerate() {
-            let xs: Vec<(f32, f32)> = l.clusters.iter().filter(|c| c.line == li && c.range.start >= a && c.range.end <= b).map(|c| (c.x, c.x + c.advance)).collect();
+            let xs: Vec<(f32, f32)> =
+                l.clusters.iter().filter(|c| c.line == li && c.range.start >= a && c.range.end <= b).map(|c| (c.x, c.x + c.advance)).collect();
             let (mut x0, mut x1) = xs.iter().fold((f32::MAX, f32::MIN), |(lo, hi), (p, q)| (lo.min(*p), hi.max(*q)));
             // A selected line break shows as a small sliver past the line end.
             if b > ln.range.end && a <= ln.range.end {
@@ -560,7 +562,13 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         apply(app, json!({"size": size}));
     }
     let mut aa = o.type_aa.clone();
-    let aa_opts = [("none".to_string(), "None"), ("sharp".to_string(), "Sharp"), ("crisp".to_string(), "Crisp"), ("strong".to_string(), "Strong"), ("smooth".to_string(), "Smooth")];
+    let aa_opts = [
+        ("none".to_string(), "None"),
+        ("sharp".to_string(), "Sharp"),
+        ("crisp".to_string(), "Crisp"),
+        ("strong".to_string(), "Strong"),
+        ("smooth".to_string(), "Smooth"),
+    ];
     if crate::widgets::dropdown(ui, "type-aa", &mut aa, &aa_opts, 80.0) {
         app.ui.tool_options.type_aa = aa.clone();
         if let Some((layer, _)) = target(app) {
@@ -573,7 +581,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     crate::widgets::vline(ui, 22.0);
     ui.spacing_mut().item_spacing.x = 2.0;
-    for (align, icon, tip) in [("left", "align-left", "Left align text"), ("center", "align-center", "Center text"), ("right", "align-right", "Right align text")] {
+    for (align, icon, tip) in
+        [("left", "align-left", "Left align text"), ("center", "align-center", "Center text"), ("right", "align-right", "Right align text")]
+    {
         if crate::icons::button(ui, icon, 24.0, o.type_align == align, tip).clicked() {
             app.ui.tool_options.type_align = align.into();
             apply(app, json!({"align": align}));
@@ -582,7 +592,14 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing.x = 8.0;
     crate::widgets::vline(ui, 22.0);
     // Text colour swatch with a picker popup.
-    let c = shown.as_ref().map(|s| s.3).map(|c| { let v = c.to_rgb(); [v[0], v[1], v[2], 1.0] }).unwrap_or(app.session.tools.foreground);
+    let c = shown
+        .as_ref()
+        .map(|s| s.3)
+        .map(|c| {
+            let v = c.to_rgb();
+            [v[0], v[1], v[2], 1.0]
+        })
+        .unwrap_or(app.session.tools.foreground);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(28.0, 18.0), egui::Sense::click());
     let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(q(c[0]), q(c[1]), q(c[2])));
@@ -722,7 +739,13 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
         .to_string();
         icon_label(ui, "text-cursor", "Kerning");
-        if crate::widgets::dropdown(ui, "props-kern", &mut k, &[("metrics".to_string(), "Metrics"), ("optical".to_string(), "Optical"), ("off".to_string(), "0")], w) {
+        if crate::widgets::dropdown(
+            ui,
+            "props-kern",
+            &mut k,
+            &[("metrics".to_string(), "Metrics"), ("optical".to_string(), "Optical"), ("off".to_string(), "0")],
+            w,
+        ) {
             apply(app, json!({"kerning": k}));
         }
         if let Some(v) = num_field(ui, "VA", "Tracking (1/1000 em)", c.tracking, -1000.0..=10000.0, "", w) {
@@ -763,14 +786,30 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let toggles: [(&str, &str, bool, serde_json::Value); 6] = [
             ("T", "Faux Bold", c.faux_bold, json!({"fauxBold": !c.faux_bold})),
             ("T", "Faux Italic", c.faux_italic, json!({"fauxItalic": !c.faux_italic})),
-            ("TT", "All Caps", caps == photocraft_doc::text::Caps::AllCaps, json!({"caps": if caps == photocraft_doc::text::Caps::AllCaps { "normal" } else { "allCaps" }})),
-            ("Tᴛ", "Small Caps", caps == photocraft_doc::text::Caps::SmallCaps, json!({"caps": if caps == photocraft_doc::text::Caps::SmallCaps { "normal" } else { "smallCaps" }})),
+            (
+                "TT",
+                "All Caps",
+                caps == photocraft_doc::text::Caps::AllCaps,
+                json!({"caps": if caps == photocraft_doc::text::Caps::AllCaps { "normal" } else { "allCaps" }}),
+            ),
+            (
+                "Tᴛ",
+                "Small Caps",
+                caps == photocraft_doc::text::Caps::SmallCaps,
+                json!({"caps": if caps == photocraft_doc::text::Caps::SmallCaps { "normal" } else { "smallCaps" }}),
+            ),
             ("T", "Underline", c.underline, json!({"underline": !c.underline})),
             ("T", "Strikethrough", c.strikethrough, json!({"strikethrough": !c.strikethrough})),
         ];
         for (i, (glyph, tip, on, props)) in toggles.into_iter().enumerate() {
             let (r, resp) = ui.allocate_exact_size(egui::vec2(28.0, 24.0), egui::Sense::click());
-            let bg = if on { t.accent_soft } else if resp.hovered() { t.hover } else { Color32::TRANSPARENT };
+            let bg = if on {
+                t.accent_soft
+            } else if resp.hovered() {
+                t.hover
+            } else {
+                Color32::TRANSPARENT
+            };
             ui.painter().rect_filled(r, 3.0, bg);
             let font = if i == 0 { crate::theme::semibold(13.0) } else { egui::FontId::proportional(13.0) };
             let col = if on { t.text } else { t.text_dim };
@@ -813,7 +852,17 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         for (key, tip, a) in items {
             let (r, resp) = ui.allocate_exact_size(egui::vec2(26.0, 24.0), egui::Sense::click());
             let on = para.align == a;
-            ui.painter().rect_filled(r, 3.0, if on { t.accent_soft } else if resp.hovered() { t.hover } else { Color32::TRANSPARENT });
+            ui.painter().rect_filled(
+                r,
+                3.0,
+                if on {
+                    t.accent_soft
+                } else if resp.hovered() {
+                    t.hover
+                } else {
+                    Color32::TRANSPARENT
+                },
+            );
             if on {
                 ui.painter().rect_stroke(r, 3.0, Stroke::new(1.0, t.accent_border), egui::StrokeKind::Inside);
             }

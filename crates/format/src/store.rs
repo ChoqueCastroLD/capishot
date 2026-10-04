@@ -30,18 +30,11 @@ fn compress(data: &[u8]) -> Vec<u8> {
 }
 
 fn decompress(data: &[u8], expected: usize, what: &str) -> Result<Vec<u8>> {
-    let mut dec = ruzstd::decoding::StreamingDecoder::new(data)
-        .map_err(|e| FormatError::corrupt(format!("{what}: zstd: {e}")))?;
+    let mut dec = ruzstd::decoding::StreamingDecoder::new(data).map_err(|e| FormatError::corrupt(format!("{what}: zstd: {e}")))?;
     let mut out = Vec::with_capacity(expected.min(64 << 20));
-    (&mut dec)
-        .take(expected as u64 + 1)
-        .read_to_end(&mut out)
-        .map_err(|e| FormatError::corrupt(format!("{what}: zstd: {e}")))?;
+    (&mut dec).take(expected as u64 + 1).read_to_end(&mut out).map_err(|e| FormatError::corrupt(format!("{what}: zstd: {e}")))?;
     if out.len() != expected {
-        return Err(FormatError::corrupt(format!(
-            "{what}: expected {expected} bytes, got {}",
-            out.len()
-        )));
+        return Err(FormatError::corrupt(format!("{what}: expected {expected} bytes, got {}", out.len())));
     }
     Ok(out)
 }
@@ -51,15 +44,9 @@ fn hash_bytes(b: &[u8]) -> Hash {
 }
 
 fn png(img: &Rgba8Image) -> Result<Vec<u8>> {
-    let image = photocraft_codecs::Image::from_u8(
-        img.width,
-        img.height,
-        photocraft_codecs::ChannelLayout::Rgba,
-        img.pixels.clone(),
-    )
-    .map_err(|e| FormatError::Unsupported(format!("preview: {e}")))?;
-    photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default())
-        .map_err(|e| FormatError::Unsupported(format!("preview: {e}")))
+    let image = photocraft_codecs::Image::from_u8(img.width, img.height, photocraft_codecs::ChannelLayout::Rgba, img.pixels.clone())
+        .map_err(|e| FormatError::Unsupported(format!("preview: {e}")))?;
+    photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).map_err(|e| FormatError::Unsupported(format!("preview: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -76,9 +63,7 @@ pub(crate) struct ZipSource<'a> {
 
 impl<'a> ZipSource<'a> {
     pub fn new(bytes: &'a [u8]) -> Result<Self> {
-        Ok(ZipSource {
-            zip: ZipReader::new(bytes)?,
-        })
+        Ok(ZipSource { zip: ZipReader::new(bytes)? })
     }
 }
 
@@ -95,13 +80,9 @@ pub(crate) struct DirSource {
 impl Source for DirSource {
     fn get(&self, path: &str, max: usize) -> Result<Vec<u8>> {
         let p = self.root.join(path);
-        let len = std::fs::metadata(&p)
-            .map_err(|_| FormatError::corrupt(format!("missing `{path}`")))?
-            .len();
+        let len = std::fs::metadata(&p).map_err(|_| FormatError::corrupt(format!("missing `{path}`")))?.len();
         if len > max as u64 {
-            return Err(FormatError::LimitExceeded(format!(
-                "`{path}` is {len} bytes (max {max})"
-            )));
+            return Err(FormatError::LimitExceeded(format!("`{path}` is {len} bytes (max {max})")));
         }
         Ok(std::fs::read(p)?)
     }
@@ -129,10 +110,7 @@ impl LoadFetch<'_> {
     fn account(&mut self, n: usize) -> Result<()> {
         self.total += n as u64;
         if self.total > self.opts.max_total_bytes {
-            return Err(FormatError::LimitExceeded(format!(
-                "bundle expands beyond {} bytes",
-                self.opts.max_total_bytes
-            )));
+            return Err(FormatError::LimitExceeded(format!("bundle expands beyond {} bytes", self.opts.max_total_bytes)));
         }
         Ok(())
     }
@@ -148,9 +126,7 @@ impl Fetch for LoadFetch<'_> {
         let z = self.src.get(&path, len + len / 8 + 4096)?;
         let data = decompress(&z, len, &path)?;
         if hash_bytes(&data) != hash {
-            return Err(FormatError::corrupt(format!(
-                "{path}: content does not match its hash"
-            )));
+            return Err(FormatError::corrupt(format!("{path}: content does not match its hash")));
         }
         Ok(data)
     }
@@ -166,23 +142,15 @@ impl Fetch for LoadFetch<'_> {
         let z = self.src.get(&path, self.opts.max_blob_bytes)?;
         // Blob length is not in the manifest; the frame header bounds it and
         // we cap at max_blob_bytes.
-        let mut dec = ruzstd::decoding::StreamingDecoder::new(&z[..])
-            .map_err(|e| FormatError::corrupt(format!("{path}: zstd: {e}")))?;
+        let mut dec = ruzstd::decoding::StreamingDecoder::new(&z[..]).map_err(|e| FormatError::corrupt(format!("{path}: zstd: {e}")))?;
         let mut data = Vec::new();
-        (&mut dec)
-            .take(self.opts.max_blob_bytes as u64 + 1)
-            .read_to_end(&mut data)
-            .map_err(|e| FormatError::corrupt(format!("{path}: zstd: {e}")))?;
+        (&mut dec).take(self.opts.max_blob_bytes as u64 + 1).read_to_end(&mut data).map_err(|e| FormatError::corrupt(format!("{path}: zstd: {e}")))?;
         if data.len() > self.opts.max_blob_bytes {
-            return Err(FormatError::LimitExceeded(format!(
-                "{path} exceeds max_blob_bytes"
-            )));
+            return Err(FormatError::LimitExceeded(format!("{path} exceeds max_blob_bytes")));
         }
         self.account(data.len())?;
         if hash_bytes(&data) != hash {
-            return Err(FormatError::corrupt(format!(
-                "{path}: content does not match its hash"
-            )));
+            return Err(FormatError::corrupt(format!("{path}: content does not match its hash")));
         }
         let data = Arc::new(data);
         self.blobs.insert(hash.to_owned(), data.clone());
@@ -192,25 +160,12 @@ impl Fetch for LoadFetch<'_> {
 
 pub(crate) fn load(src: &dyn Source, opts: &LoadOptions) -> Result<Document> {
     let m = read_manifest(src, opts)?;
-    let mut fetch = LoadFetch {
-        src,
-        opts: *opts,
-        total: 0,
-        blobs: HashMap::new(),
-    };
-    let mut loader = Loader {
-        fetch: &mut fetch,
-        preserve_ids: opts.preserve_ids,
-        max_id: 0,
-        id_map: HashMap::new(),
-    };
+    let mut fetch = LoadFetch { src, opts: *opts, total: 0, blobs: HashMap::new() };
+    let mut loader = Loader { fetch: &mut fetch, preserve_ids: opts.preserve_ids, max_id: 0, id_map: HashMap::new() };
     let doc = loader.document(&m.document)?;
     if opts.preserve_ids && !convert::reserve_ids_through(loader.max_id) {
         // Ids far beyond our counter: remap instead of risking collisions.
-        let fresh = LoadOptions {
-            preserve_ids: false,
-            ..*opts
-        };
+        let fresh = LoadOptions { preserve_ids: false, ..*opts };
         return load(src, &fresh);
     }
     Ok(doc)
@@ -252,9 +207,7 @@ impl Sink for Collect<'_> {
             && w.upgrade().is_some_and(|t| Arc::ptr_eq(&t, tile))
         {
             let h = h.clone();
-            self.tiles
-                .entry(h.clone())
-                .or_insert_with(|| (tile.clone(), format.sample));
+            self.tiles.entry(h.clone()).or_insert_with(|| (tile.clone(), format.sample));
             return h;
         }
         let h = if cfg!(target_endian = "big") {
@@ -267,9 +220,7 @@ impl Sink for Collect<'_> {
         if let Some(cache) = self.hash_cache.as_deref_mut() {
             cache.insert(key, (Arc::downgrade(tile), h.clone()));
         }
-        self.tiles
-            .entry(h.clone())
-            .or_insert_with(|| (tile.clone(), format.sample));
+        self.tiles.entry(h.clone()).or_insert_with(|| (tile.clone(), format.sample));
         h
     }
 
@@ -353,10 +304,7 @@ impl PcraftWriter {
 
     fn prepare(&mut self, doc: &Document, opts: &SaveOptions) -> Result<Prepared> {
         self.hash_cache.retain(|_, (w, _)| w.strong_count() > 0);
-        let mut c = Collect {
-            hash_cache: Some(&mut self.hash_cache),
-            ..Default::default()
-        };
+        let mut c = Collect { hash_cache: Some(&mut self.hash_cache), ..Default::default() };
         let document = convert::doc_m(doc, &mut c);
         let mut previews = Vec::new();
         if let Some(t) = &opts.thumbnail {
@@ -373,12 +321,7 @@ impl PcraftWriter {
             composite: opts.composite.as_ref().map(|_| COMPOSITE.to_owned()),
         };
         let manifest = serde_json::to_vec_pretty(&manifest)?;
-        let stats = SaveStats {
-            tiles_total: c.tiles.len(),
-            blobs_total: c.blobs.len(),
-            manifest_bytes: manifest.len(),
-            ..Default::default()
-        };
+        let stats = SaveStats { tiles_total: c.tiles.len(), blobs_total: c.blobs.len(), manifest_bytes: manifest.len(), ..Default::default() };
         let mut objects = BTreeMap::new();
         for (h, (t, s)) in c.tiles {
             objects.insert(tile_path(&h), Object::Tile(t, s));
@@ -386,12 +329,7 @@ impl PcraftWriter {
         for (h, b) in c.blobs {
             objects.insert(blob_path(&h), Object::Blob(b));
         }
-        Ok(Prepared {
-            manifest,
-            objects,
-            previews,
-            stats,
-        })
+        Ok(Prepared { manifest, objects, previews, stats })
     }
 
     /// Save as a ZIP bundle in memory.
@@ -432,12 +370,7 @@ impl PcraftWriter {
 
     /// Save into a directory bundle: writes only missing objects, then the
     /// manifest (atomically), then removes unreferenced objects.
-    pub fn save_dir(
-        &mut self,
-        doc: &Document,
-        dir: &Path,
-        opts: &SaveOptions,
-    ) -> Result<SaveStats> {
+    pub fn save_dir(&mut self, doc: &Document, dir: &Path, opts: &SaveOptions) -> Result<SaveStats> {
         let p = self.prepare(doc, opts)?;
         let mut stats = p.stats;
         for sub in ["tiles", "blobs", "composite"] {
@@ -477,12 +410,7 @@ impl PcraftWriter {
 
     /// Save to `path`: a directory bundle if `path` is an existing directory
     /// or ends with a path separator, otherwise a ZIP file (written atomically).
-    pub fn save_path(
-        &mut self,
-        doc: &Document,
-        path: &Path,
-        opts: &SaveOptions,
-    ) -> Result<SaveStats> {
+    pub fn save_path(&mut self, doc: &Document, path: &Path, opts: &SaveOptions) -> Result<SaveStats> {
         let s = path.to_string_lossy();
         if path.is_dir() || s.ends_with('/') || s.ends_with('\\') {
             self.save_dir(doc, path, opts)
@@ -514,12 +442,7 @@ pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension(format!(
-        "{}tmp",
-        path.extension()
-            .map(|e| format!("{}.", e.to_string_lossy()))
-            .unwrap_or_default()
-    ));
+    let tmp = path.with_extension(format!("{}tmp", path.extension().map(|e| format!("{}.", e.to_string_lossy())).unwrap_or_default()));
     std::fs::write(&tmp, data)?;
     std::fs::rename(&tmp, path)?;
     Ok(())

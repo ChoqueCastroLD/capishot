@@ -19,30 +19,17 @@ pub struct Opened {
 /// natively; everything else goes through `photocraft-io` (PSD, PNG, …).
 pub fn open(path: &Path) -> Result<Opened, AutomationError> {
     if path.is_dir() {
-        return Ok(Opened {
-            document: photocraft_format::load_path(path)?,
-            warnings: Vec::new(),
-        });
+        return Ok(Opened { document: photocraft_format::load_path(path)?, warnings: Vec::new() });
     }
-    let bytes =
-        std::fs::read(path).map_err(|e| AutomationError::Io(format!("{}: {e}", path.display())))?;
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let bytes = std::fs::read(path).map_err(|e| AutomationError::Io(format!("{}: {e}", path.display())))?;
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let r = photocraft_io::import(&name, &bytes)?;
-    Ok(Opened {
-        document: r.document,
-        warnings: r.warnings,
-    })
+    Ok(Opened { document: r.document, warnings: r.warnings })
 }
 
 /// Previews for a `.pcraft` bundle.
 pub fn previews(doc: &Document) -> SaveOptions {
-    SaveOptions {
-        thumbnail: Some(photocraft_compose::thumbnail(doc, 256)),
-        composite: Some(photocraft_compose::thumbnail(doc, 1024)),
-    }
+    SaveOptions { thumbnail: Some(photocraft_compose::thumbnail(doc, 256)), composite: Some(photocraft_compose::thumbnail(doc, 1024)) }
 }
 
 /// Save or export `doc` to `path`, choosing the format from the extension
@@ -57,16 +44,8 @@ pub fn save(
 ) -> Result<Vec<String>, AutomationError> {
     let ext = format_override
         .map(|f| f.trim_start_matches('.').to_ascii_lowercase())
-        .or_else(|| {
-            path.extension()
-                .map(|e| e.to_string_lossy().to_ascii_lowercase())
-        })
-        .ok_or_else(|| {
-            AutomationError::BadRequest(format!(
-                "cannot tell the format of `{}`; pass a format",
-                path.display()
-            ))
-        })?;
+        .or_else(|| path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()))
+        .ok_or_else(|| AutomationError::BadRequest(format!("cannot tell the format of `{}`; pass a format", path.display())))?;
     if ext == photocraft_format::EXTENSION {
         let mut local = PcraftWriter::new();
         let w = writer.unwrap_or(&mut local);
@@ -77,26 +56,15 @@ pub fn save(
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| AutomationError::Io(e.to_string()))?;
     }
-    std::fs::write(path, &r.bytes)
-        .map_err(|e| AutomationError::Io(format!("{}: {e}", path.display())))?;
+    std::fs::write(path, &r.bytes).map_err(|e| AutomationError::Io(format!("{}: {e}", path.display())))?;
     Ok(r.warnings)
 }
 
 /// Flattened document as PNG, scaled to fit `max_side` (0 = full size).
 pub fn render_png(doc: &Document, max_side: u32) -> Result<Vec<u8>, AutomationError> {
-    let side = if max_side == 0 {
-        doc.size.width.max(doc.size.height)
-    } else {
-        max_side
-    };
+    let side = if max_side == 0 { doc.size.width.max(doc.size.height) } else { max_side };
     let img = photocraft_compose::thumbnail(doc, side.max(1));
-    let image = photocraft_codecs::Image::from_u8(
-        img.width,
-        img.height,
-        photocraft_codecs::ChannelLayout::Rgba,
-        img.pixels,
-    )
-    .map_err(|e| AutomationError::Other(e.to_string()))?;
-    photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default())
-        .map_err(|e| AutomationError::Other(e.to_string()))
+    let image = photocraft_codecs::Image::from_u8(img.width, img.height, photocraft_codecs::ChannelLayout::Rgba, img.pixels)
+        .map_err(|e| AutomationError::Other(e.to_string()))?;
+    photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).map_err(|e| AutomationError::Other(e.to_string()))
 }

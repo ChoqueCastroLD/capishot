@@ -151,7 +151,12 @@ impl SnapTargets {
 
     /// Only the targets for which `keep` holds (e.g. smart guides: layer alignments).
     pub fn filtered(&self, keep: impl Fn(SnapKind) -> bool) -> SnapTargets {
-        SnapTargets { x: self.x.iter().copied().filter(|t| keep(t.kind)).collect(), y: self.y.iter().copied().filter(|t| keep(t.kind)).collect(), grid: self.grid.filter(|_| keep(SnapKind::Grid)), extent: self.extent }
+        SnapTargets {
+            x: self.x.iter().copied().filter(|t| keep(t.kind)).collect(),
+            y: self.y.iter().copied().filter(|t| keep(t.kind)).collect(),
+            grid: self.grid.filter(|_| keep(SnapKind::Grid)),
+            extent: self.extent,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -225,7 +230,9 @@ impl SnapTargets {
                 let moved = v + d;
                 let list = if vertical { &self.x } else { &self.y };
                 let hit = list.iter().copied().filter(|t| (t.pos - moved).abs() < 1e-6).min_by_key(|t| u8::from(t.kind != SnapKind::Guide));
-                let hit = hit.or_else(|| self.grid.filter(|s| ((moved / s).round() * s - moved).abs() < 1e-6).map(|_| Target { pos: moved, kind: SnapKind::Grid, span: other }));
+                let hit = hit.or_else(|| {
+                    self.grid.filter(|s| ((moved / s).round() * s - moved).abs() < 1e-6).map(|_| Target { pos: moved, kind: SnapKind::Grid, span: other })
+                });
                 if let Some(t) = hit {
                     lines.push(line(vertical, t, other.0, other.1));
                 }

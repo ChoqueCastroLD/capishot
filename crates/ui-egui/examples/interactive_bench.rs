@@ -45,7 +45,9 @@ struct Gpu {
 
 fn gpu() -> Option<Gpu> {
     let instance = wgpu::Instance::default();
-    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).ok()?;
+    let adapter =
+        block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() }))
+            .ok()?;
     eprintln!("adapter: {}", adapter.get_info().name);
     let limits = adapter.limits();
     let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: limits, ..Default::default() })).ok()?;
@@ -155,7 +157,8 @@ fn exec(s: &mut Session, id: &str, p: Value) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let (w, h) = arg(&args, "--size").and_then(|s| s.split_once('x').map(|(a, b)| (a.parse().unwrap_or(7360), b.parse().unwrap_or(4912)))).unwrap_or((7360, 4912));
+    let (w, h) =
+        arg(&args, "--size").and_then(|s| s.split_once('x').map(|(a, b)| (a.parse().unwrap_or(7360), b.parse().unwrap_or(4912)))).unwrap_or((7360, 4912));
     let reps: usize = arg(&args, "--reps").and_then(|v| v.parse().ok()).unwrap_or(5).max(1);
     let mut b = Bench { gpu: if args.iter().any(|a| a == "--cpu") { None } else { gpu() }, reps, only: arg(&args, "--only"), rows: Vec::new() };
     println!("document {w}×{h} ({:.1} MP), 8-bit RGB, {} reps, {}", (w * h) as f64 / 1e6, reps, if b.gpu.is_some() { "GPU canvas" } else { "CPU canvas" });
@@ -288,7 +291,9 @@ fn main() {
     });
 
     if let Some(out) = arg(&args, "--json") {
-        let rows: Vec<Value> = b.rows.iter().map(|(n, med, min, max, cold)| json!({"name": n, "median_ms": med, "min_ms": min, "max_ms": max, "cold_ms": cold})).collect();
-        std::fs::write(&out, serde_json::to_string_pretty(&json!({"width": w, "height": h, "gpu": b.gpu.is_some(), "rows": rows})).unwrap()).expect("write json");
+        let rows: Vec<Value> =
+            b.rows.iter().map(|(n, med, min, max, cold)| json!({"name": n, "median_ms": med, "min_ms": min, "max_ms": max, "cold_ms": cold})).collect();
+        std::fs::write(&out, serde_json::to_string_pretty(&json!({"width": w, "height": h, "gpu": b.gpu.is_some(), "rows": rows})).unwrap())
+            .expect("write json");
     }
 }

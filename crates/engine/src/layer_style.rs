@@ -2,8 +2,8 @@
 
 use photocraft_color::{BlendMode, Color};
 use photocraft_doc::{
-    Bevel, BevelStyle, BevelTechnique, Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, GradientStyle,
-    Satin, Shadow, StrokeFx, StrokePosition,
+    Bevel, BevelStyle, BevelTechnique, Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, GradientStyle, Satin, Shadow, StrokeFx,
+    StrokePosition,
 };
 use serde_json::{Value, json};
 
@@ -149,7 +149,11 @@ pub fn effect_from_params(kind: &str, p: &Value) -> Option<Effect> {
             highlight_color: Color::WHITE,
             shadow: FxCommon::new(BlendMode::Multiply, 0.75),
             shadow_color: Color::BLACK,
-            contour: b(p, "contour", false).then(|| photocraft_doc::BevelContour { contour: Contour::Linear, range: (f(p, "contourRange", 50.0) / 100.0).clamp(0.01, 1.0), anti_alias: false }),
+            contour: b(p, "contour", false).then(|| photocraft_doc::BevelContour {
+                contour: Contour::Linear,
+                range: (f(p, "contourRange", 50.0) / 100.0).clamp(0.01, 1.0),
+                anti_alias: false,
+            }),
             texture: p.get("texture").and_then(Value::as_str).filter(|t| !t.is_empty()).map(|t| photocraft_doc::BevelTexture {
                 name: t.to_string(),
                 id: t.to_string(),
@@ -215,15 +219,47 @@ macro_rules! style_cmd {
 /// The `layer.layerStyle.*` command specs.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        style_cmd!("dropShadow", "Drop Shadow…", r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str="multiply","angle":deg=120,"useGlobalLight":bool,"distance":px=5,"spread":0..100,"size":px=5,"knocksOut":bool,"add":bool,"layer":id}"##),
-        style_cmd!("innerShadow", "Inner Shadow…", r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str,"angle":deg,"distance":px,"choke":0..100,"size":px,"add":bool}"##),
-        style_cmd!("outerGlow", "Outer Glow…", r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str="screen","technique":"softer|precise","spread":0..100,"size":px,"range":0..100,"add":bool}"##),
-        style_cmd!("innerGlow", "Inner Glow…", r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str="screen","technique":"softer|precise","source":"edge|center","choke":0..100,"size":px,"add":bool}"##),
-        style_cmd!("stroke", "Stroke…", r##"{"size":px=3,"position":"outside|inside|center","color":"#rrggbb","from":"#rrggbb","to":"#rrggbb","style":str,"angle":deg,"opacity":0..100,"blend":str,"add":bool}"##),
+        style_cmd!(
+            "dropShadow",
+            "Drop Shadow…",
+            r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str="multiply","angle":deg=120,"useGlobalLight":bool,"distance":px=5,"spread":0..100,"size":px=5,"knocksOut":bool,"add":bool,"layer":id}"##
+        ),
+        style_cmd!(
+            "innerShadow",
+            "Inner Shadow…",
+            r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str,"angle":deg,"distance":px,"choke":0..100,"size":px,"add":bool}"##
+        ),
+        style_cmd!(
+            "outerGlow",
+            "Outer Glow…",
+            r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str="screen","technique":"softer|precise","spread":0..100,"size":px,"range":0..100,"add":bool}"##
+        ),
+        style_cmd!(
+            "innerGlow",
+            "Inner Glow…",
+            r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str="screen","technique":"softer|precise","source":"edge|center","choke":0..100,"size":px,"add":bool}"##
+        ),
+        style_cmd!(
+            "stroke",
+            "Stroke…",
+            r##"{"size":px=3,"position":"outside|inside|center","color":"#rrggbb","from":"#rrggbb","to":"#rrggbb","style":str,"angle":deg,"opacity":0..100,"blend":str,"add":bool}"##
+        ),
         style_cmd!("colorOverlay", "Color Overlay…", r##"{"color":"#rrggbb","opacity":0..100=100,"blend":str,"add":bool}"##),
-        style_cmd!("gradientOverlay", "Gradient Overlay…", r##"{"from":"#rrggbb","to":"#rrggbb","style":"linear|radial|angle|reflected|diamond","angle":deg=90,"scale":10..150=100,"reverse":bool,"opacity":0..100,"blend":str,"add":bool}"##),
-        style_cmd!("patternOverlay", "Pattern Overlay…", r##"{"pattern":id|name?=first library pattern,"opacity":0..100=100,"blend":str,"scale":1..1000=100,"angle":deg=0,"link":bool=true,"phaseX":px,"phaseY":px,"add":bool}"##),
-        style_cmd!("bevelEmboss", "Bevel & Emboss…", r##"{"style":"inner|outer|emboss|pillow|stroke","technique":"smooth|chiselHard|chiselSoft","contour":bool,"contourRange":1..100=50,"texture":pattern id|name?,"textureScale":1..1000=100,"textureDepth":-1000..1000=100,"textureInvert":bool,"textureLink":bool=true,"depth":1..1000=100,"direction":"up|down","size":px=5,"soften":px,"angle":deg,"altitude":deg,"add":bool}"##),
+        style_cmd!(
+            "gradientOverlay",
+            "Gradient Overlay…",
+            r##"{"from":"#rrggbb","to":"#rrggbb","style":"linear|radial|angle|reflected|diamond","angle":deg=90,"scale":10..150=100,"reverse":bool,"opacity":0..100,"blend":str,"add":bool}"##
+        ),
+        style_cmd!(
+            "patternOverlay",
+            "Pattern Overlay…",
+            r##"{"pattern":id|name?=first library pattern,"opacity":0..100=100,"blend":str,"scale":1..1000=100,"angle":deg=0,"link":bool=true,"phaseX":px,"phaseY":px,"add":bool}"##
+        ),
+        style_cmd!(
+            "bevelEmboss",
+            "Bevel & Emboss…",
+            r##"{"style":"inner|outer|emboss|pillow|stroke","technique":"smooth|chiselHard|chiselSoft","contour":bool,"contourRange":1..100=50,"texture":pattern id|name?,"textureScale":1..1000=100,"textureDepth":-1000..1000=100,"textureInvert":bool,"textureLink":bool=true,"depth":1..1000=100,"direction":"up|down","size":px=5,"soften":px,"angle":deg,"altitude":deg,"add":bool}"##
+        ),
         style_cmd!("satin", "Satin…", r##"{"color":"#rrggbb","opacity":0..100=50,"blend":str,"angle":deg,"distance":px,"size":px,"invert":bool,"add":bool}"##),
         CommandSpec {
             id: "layer.layerStyle.clear",

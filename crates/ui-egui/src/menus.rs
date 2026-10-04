@@ -201,7 +201,11 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
             }
         }
         "file.save" => {
-            let path = params.get("path").and_then(Value::as_str).map(str::to_string).or_else(|| app.session.active().and_then(|d| d.path.clone()).filter(|p| p.ends_with(".psd") || p.ends_with(".psb")));
+            let path = params
+                .get("path")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| app.session.active().and_then(|d| d.path.clone()).filter(|p| p.ends_with(".psd") || p.ends_with(".psb")));
             app.save_as(path).map(|p| json!({"path": p}))
         }
         "file.exit" => {
@@ -265,7 +269,11 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
         // Layer › Export As… / Quick Export as PNG: the export pipeline on just the active layer.
         l if matches!(l, "layer.exportAs" | "layer.quickExportAsPng") && params.as_object().is_none_or(|o| o.is_empty()) => {
             let layer = app.session.active().and_then(|d| d.active_layer).ok_or("no active layer")?;
-            if l == "layer.exportAs" { Ok(json!({"dialog": crate::export_dialog::open_layer(app, layer)?})) } else { crate::export_dialog::quick_export_layer_png(app, layer) }
+            if l == "layer.exportAs" {
+                Ok(json!({"dialog": crate::export_dialog::open_layer(app, layer)?}))
+            } else {
+                crate::export_dialog::quick_export_layer_png(app, layer)
+            }
         }
         "layer.layerStyle.blendingOptions" if params.as_object().is_none_or(|o| o.is_empty()) => {
             crate::layer_style::open(app, Some(crate::layer_style::BLENDING)).map(|d| json!({"dialog": d})).ok_or_else(|| "no active layer".to_string())
@@ -287,12 +295,14 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
             // Photoshop: paste in place when the copied area is visible, else centred in the view;
             // images from other apps are always centred.
             let external = app.import_os_clipboard();
-            let visible = !external && app.session.active_index().zip(app.session.clipboard.as_ref()).is_some_and(|(i, clip)| {
-                let v = &app.ui.views[i];
-                let (hw, hh) = (app.last_canvas_rect.width() / 2.0 / v.zoom, app.last_canvas_rect.height() / 2.0 / v.zoom);
-                let r = photocraft_geom::Rect::new((v.center[0] - hw) as i32, (v.center[1] - hh) as i32, (v.center[0] + hw) as i32, (v.center[1] + hh) as i32);
-                !clip.bounds.intersect(&r).is_empty()
-            });
+            let visible = !external
+                && app.session.active_index().zip(app.session.clipboard.as_ref()).is_some_and(|(i, clip)| {
+                    let v = &app.ui.views[i];
+                    let (hw, hh) = (app.last_canvas_rect.width() / 2.0 / v.zoom, app.last_canvas_rect.height() / 2.0 / v.zoom);
+                    let r =
+                        photocraft_geom::Rect::new((v.center[0] - hw) as i32, (v.center[1] - hh) as i32, (v.center[0] + hw) as i32, (v.center[1] + hh) as i32);
+                    !clip.bounds.intersect(&r).is_empty()
+                });
             let p = match app.session.active_index() {
                 Some(i) if !visible => json!({"center": app.ui.views[i].center}),
                 _ => json!({}),
@@ -311,15 +321,21 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
             *slot = !*slot;
             Ok(json!(*slot))
         }
-        "edit.freeTransform" | "edit.transform.scale" | "edit.transform.rotate" | "edit.transform.skew" | "edit.transform.distort" | "edit.transform.perspective" => {
-            crate::transform_tool::begin(app, ctx).map(|_| json!({"transform": app.ui.transform}))
-        }
+        "edit.freeTransform"
+        | "edit.transform.scale"
+        | "edit.transform.rotate"
+        | "edit.transform.skew"
+        | "edit.transform.distort"
+        | "edit.transform.perspective" => crate::transform_tool::begin(app, ctx).map(|_| json!({"transform": app.ui.transform})),
         // Edit › Transform › Warp from the menu: interactive Warp mode (with params: the engine).
         "edit.transform.warp" | "layer.smartObjects.warp" if params.as_object().is_none_or(|o| o.is_empty()) => {
             crate::transform_tool::begin_warp(app, ctx).map(|_| json!({"transform": app.ui.transform}))
         }
         // Split warps edit the mesh of an active Warp session.
-        "edit.transform.splitWarpCrosswise" | "edit.transform.splitWarpHorizontally" | "edit.transform.splitWarpVertically" | "edit.transform.removeWarpSplit"
+        "edit.transform.splitWarpCrosswise"
+        | "edit.transform.splitWarpHorizontally"
+        | "edit.transform.splitWarpVertically"
+        | "edit.transform.removeWarpSplit"
             if app.ui.transform.as_ref().is_some_and(|t| t.warp.is_some()) && params.get("warp").is_none() =>
         {
             let at = params.get("at").and_then(Value::as_array).and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?]));
@@ -404,7 +420,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         i if i.starts_with("file.openRecent.") => true,
         i if crate::links::url_for(i).is_some() => true,
         i if i.starts_with("window.theme.") => true,
-        "file.save" | "file.saveAs" | "file.export.exportAs" | "file.export.quickExportAsPng" => app.session.active().is_some() && app.services.export.is_some(),
+        "file.save" | "file.saveAs" | "file.export.exportAs" | "file.export.quickExportAsPng" => {
+            app.session.active().is_some() && app.services.export.is_some()
+        }
         i if i.starts_with("window.toggle.") => true,
         i if panel_alias(i).is_some() || workspace_name(i).is_some() => true,
         i if proof_preset(i).is_some() => app.session.active().is_some(),
@@ -413,10 +431,15 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         "view.rulers" | "view.show.grid" | "view.show.guides" | "view.snap" | "view.lockGuides" => true,
         "select.selectAndMask" => app.session.is_enabled("select.refineEdge"),
         "select.transformSelection" => app.ui.transform.is_none() && app.session.is_enabled("select.transformSelection"),
-        i if (i.starts_with("view.zoom") || i == "view.fitOnScreen" || i == "view.actualPixels") || i == "window.newWindowForDocument" => app.session.active().is_some(),
-        "edit.freeTransform" | "edit.transform.scale" | "edit.transform.rotate" | "edit.transform.skew" | "edit.transform.distort" | "edit.transform.perspective" => {
-            app.ui.transform.is_none() && app.session.active().and_then(|s| s.active_layer).is_some()
+        i if (i.starts_with("view.zoom") || i == "view.fitOnScreen" || i == "view.actualPixels") || i == "window.newWindowForDocument" => {
+            app.session.active().is_some()
         }
+        "edit.freeTransform"
+        | "edit.transform.scale"
+        | "edit.transform.rotate"
+        | "edit.transform.skew"
+        | "edit.transform.distort"
+        | "edit.transform.perspective" => app.ui.transform.is_none() && app.session.active().and_then(|s| s.active_layer).is_some(),
         i => app.session.is_enabled(i),
     }
 }
@@ -511,7 +534,18 @@ pub struct MenuItem {
 /// Is `id` implemented by the engine or the shell (a live menu item)? Shared by the menus and
 /// the parity report ([`crate::parity`]).
 pub fn is_live(id: &str) -> bool {
-    photocraft_engine::commands::find(id).is_some() || UI_COMMANDS.iter().any(|c| c.0 == id) || panel_alias(id).is_some() || workspace_name(id).is_some() || proof_preset(id).is_some() || id == "view.proofSetup.custom" || crate::view_cmds::handles(id) || crate::analysis_ui::handles(id) || crate::workspace_ui::handles(id) || crate::preset_panels::handles(id) || crate::type_panels_ui::handles(id) || crate::timeline_ui::handles(id)
+    photocraft_engine::commands::find(id).is_some()
+        || UI_COMMANDS.iter().any(|c| c.0 == id)
+        || panel_alias(id).is_some()
+        || workspace_name(id).is_some()
+        || proof_preset(id).is_some()
+        || id == "view.proofSetup.custom"
+        || crate::view_cmds::handles(id)
+        || crate::analysis_ui::handles(id)
+        || crate::workspace_ui::handles(id)
+        || crate::preset_panels::handles(id)
+        || crate::type_panels_ui::handles(id)
+        || crate::timeline_ui::handles(id)
 }
 
 pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
@@ -532,10 +566,26 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
     // 2) Our commands that Photoshop's tree doesn't list (or lists under another id).
     let mut extra: Vec<MenuItem> = Vec::new();
     for &(id, label, path, sc) in UI_COMMANDS {
-        extra.push(MenuItem { id: id.into(), label: label.into(), path: path.iter().map(|s| s.to_string()).collect(), shortcut: sc.map(Into::into), enabled: is_enabled(app, id), checked: checked(app, id), color: None });
+        extra.push(MenuItem {
+            id: id.into(),
+            label: label.into(),
+            path: path.iter().map(|s| s.to_string()).collect(),
+            shortcut: sc.map(Into::into),
+            enabled: is_enabled(app, id),
+            checked: checked(app, id),
+            color: None,
+        });
     }
     for c in photocraft_engine::command_specs().iter().filter(|c| !c.menu.is_empty()) {
-        extra.push(MenuItem { id: c.id.into(), label: c.label.into(), path: c.menu.iter().map(|s| s.to_string()).collect(), shortcut: c.shortcut.map(Into::into), enabled: is_enabled(app, c.id), checked: None, color: None });
+        extra.push(MenuItem {
+            id: c.id.into(),
+            label: c.label.into(),
+            path: c.menu.iter().map(|s| s.to_string()).collect(),
+            shortcut: c.shortcut.map(Into::into),
+            enabled: is_enabled(app, c.id),
+            checked: None,
+            color: None,
+        });
     }
     for e in extra {
         let dup = items.iter().any(|i| i.id == e.id || (i.path == e.path && i.label.trim_end_matches('…') == e.label.trim_end_matches('…')));
@@ -562,14 +612,25 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
         if !recent.is_empty() {
             recent.push(MenuItem { id: "---".into(), label: "---".into(), path: rp.clone(), shortcut: None, enabled: false, checked: None, color: None });
         }
-        recent.push(MenuItem { id: "file.clearRecent".into(), label: "Clear Recent Files".into(), path: rp.clone(), shortcut: None, enabled: !app.ui.recent_files.is_empty(), checked: None, color: None });
+        recent.push(MenuItem {
+            id: "file.clearRecent".into(),
+            label: "Clear Recent Files".into(),
+            path: rp.clone(),
+            shortcut: None,
+            enabled: !app.ui.recent_files.is_empty(),
+            checked: None,
+            color: None,
+        });
         for (k, it) in recent.into_iter().enumerate() {
             items.insert(after + 1 + k, it);
         }
     }
     // Help: the link items, a separator, then About.
     if let Some(at) = items.iter().position(|i| i.id == "help.about") {
-        items.insert(at, MenuItem { id: "---".into(), label: "---".into(), path: vec!["Help".into()], shortcut: None, enabled: false, checked: None, color: None });
+        items.insert(
+            at,
+            MenuItem { id: "---".into(), label: "---".into(), path: vec!["Help".into()], shortcut: None, enabled: false, checked: None, color: None },
+        );
     }
     // Edit › Keyboard Shortcuts overrides, Edit › Menus hidden items and colours.
     let prefs = app.session.prefs();

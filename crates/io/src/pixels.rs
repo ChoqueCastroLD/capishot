@@ -204,4 +204,3 @@ mod tests {
         assert_eq!(decode_be(&f, 0, SampleType::F32), 2.5);
     }
 }
-

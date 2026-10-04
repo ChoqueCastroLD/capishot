@@ -3,8 +3,8 @@
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image, SampleType as CS};
 use photocraft_color::{ColorMode, SampleType};
 use photocraft_doc::{Document, Layer, Size};
-use photocraft_geom::Rect;
 use photocraft_format::Autosaver;
+use photocraft_geom::Rect;
 use photocraft_ui_egui::Services;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-const IMAGE_EXTS: &[&str] = &["psd", "psb", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm"];
+const IMAGE_EXTS: &[&str] =
+    &["psd", "psb", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm"];
 
 /// Per-user settings directory: `PHOTOCRAFT_CONFIG_DIR`, else the platform convention
 /// (macOS `~/Library/Application Support/Photocraft`, Windows `%APPDATA%\Photocraft`, Linux
@@ -68,7 +69,12 @@ pub fn native() -> Services {
         })),
         pick_save: Some(Box::new(|suggested: &str| {
             let p = std::path::Path::new(suggested);
-            let mut d = rfd::FileDialog::new().add_filter("Photoshop", &["psd", "psb"]).add_filter("PNG", &["png"]).add_filter("JPEG", &["jpg"]).add_filter("TIFF", &["tif"]).add_filter("OpenEXR", &["exr"]);
+            let mut d = rfd::FileDialog::new()
+                .add_filter("Photoshop", &["psd", "psb"])
+                .add_filter("PNG", &["png"])
+                .add_filter("JPEG", &["jpg"])
+                .add_filter("TIFF", &["tif"])
+                .add_filter("OpenEXR", &["exr"]);
             if let Some(name) = p.file_name() {
                 d = d.set_file_name(name.to_string_lossy());
             }
@@ -136,7 +142,13 @@ pub fn import_flat(name: &str, bytes: &[u8]) -> Result<Document, String> {
     };
     let gray = matches!(img.layout(), ChannelLayout::Gray | ChannelLayout::GrayA);
     let cmyk = matches!(img.layout(), ChannelLayout::Cmyk | ChannelLayout::CmykA);
-    let mode = if gray { ColorMode::Grayscale } else if cmyk { ColorMode::Cmyk } else { ColorMode::Rgb };
+    let mode = if gray {
+        ColorMode::Grayscale
+    } else if cmyk {
+        ColorMode::Cmyk
+    } else {
+        ColorMode::Rgb
+    };
     let target = match mode {
         ColorMode::Grayscale => ChannelLayout::GrayA,
         ColorMode::Cmyk => ChannelLayout::CmykA,

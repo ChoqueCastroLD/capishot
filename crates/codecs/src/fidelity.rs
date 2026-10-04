@@ -51,10 +51,7 @@ pub enum FidelityWarning {
 impl FidelityWarning {
     /// `true` for warnings that make encoding fail outright.
     pub fn is_fatal(&self) -> bool {
-        matches!(
-            self,
-            FidelityWarning::WriteUnsupported { .. } | FidelityWarning::DimensionsExceeded { .. }
-        )
+        matches!(self, FidelityWarning::WriteUnsupported { .. } | FidelityWarning::DimensionsExceeded { .. })
     }
 }
 
@@ -74,12 +71,7 @@ impl fmt::Display for FidelityWarning {
             WriteUnsupported { format } => {
                 write!(f, "{} cannot be written in this build", format.name())
             }
-            DepthReduced { from, to } => write!(
-                f,
-                "{} will be reduced to {}",
-                depth_name(*from),
-                depth_name(*to)
-            ),
+            DepthReduced { from, to } => write!(f, "{} will be reduced to {}", depth_name(*from), depth_name(*to)),
             RangeClipped => write!(f, "HDR values outside 0..1 will be clipped"),
             AlphaDiscarded => write!(f, "alpha will be discarded"),
             AlphaBinarized => write!(f, "alpha will be reduced to on/off transparency"),
@@ -94,14 +86,8 @@ impl fmt::Display for FidelityWarning {
             XmpDropped => write!(f, "XMP not supported; it will be dropped"),
             DpiDropped => write!(f, "resolution (DPI) not supported; it will be dropped"),
             TextDropped => write!(f, "text metadata not supported; it will be dropped"),
-            DimensionsExceeded {
-                max_width,
-                max_height,
-            } => {
-                write!(
-                    f,
-                    "image exceeds the format maximum of {max_width}x{max_height}"
-                )
+            DimensionsExceeded { max_width, max_height } => {
+                write!(f, "image exceeds the format maximum of {max_width}x{max_height}")
             }
         }
     }
@@ -125,10 +111,7 @@ fn pick_sample(src: SampleType, depths: &[SampleType]) -> SampleType {
         SampleType::F16 => &[SampleType::F32, SampleType::U16, SampleType::U8],
         SampleType::F32 => &[SampleType::F16, SampleType::U16, SampleType::U8],
     };
-    pref.iter()
-        .copied()
-        .find(|s| depths.contains(s))
-        .unwrap_or(depths[0])
+    pref.iter().copied().find(|s| depths.contains(s)).unwrap_or(depths[0])
 }
 
 fn pick_layout(src: ChannelLayout, layouts: &[ChannelLayout], alpha: bool) -> ChannelLayout {
@@ -141,11 +124,7 @@ fn pick_layout(src: ChannelLayout, layouts: &[ChannelLayout], alpha: bool) -> Ch
     }
     // CMYK falls back to RGB; gray expands to RGB.
     if cand.is_cmyk() || cand.is_gray() {
-        cand = if cand.has_alpha() {
-            ChannelLayout::Rgba
-        } else {
-            ChannelLayout::Rgb
-        };
+        cand = if cand.has_alpha() { ChannelLayout::Rgba } else { ChannelLayout::Rgb };
     }
     if layouts.contains(&cand) {
         return cand;
@@ -165,14 +144,8 @@ pub(crate) fn plan(image: &Image, format: Format, _opts: &EncodeOptions) -> Plan
     match format {
         // PNM: integer data can use any layout (PAM); float goes to PFM
         // which only has gray and RGB.
-        Format::Pnm if sample.is_float() => Plan {
-            layout: pick_layout(layout, &[ChannelLayout::Gray, ChannelLayout::Rgb], false),
-            sample: SampleType::F32,
-        },
-        _ => Plan {
-            layout: pick_layout(layout, c.layouts, c.alpha),
-            sample: pick_sample(sample, c.depths),
-        },
+        Format::Pnm if sample.is_float() => Plan { layout: pick_layout(layout, &[ChannelLayout::Gray, ChannelLayout::Rgb], false), sample: SampleType::F32 },
+        _ => Plan { layout: pick_layout(layout, c.layouts, c.alpha), sample: pick_sample(sample, c.depths) },
     }
 }
 
@@ -182,11 +155,7 @@ pub fn fidelity_warnings(image: &Image, format: Format) -> Vec<FidelityWarning> 
 }
 
 /// Warnings for writing `image` as `format` with the given options.
-pub fn fidelity_warnings_with(
-    image: &Image,
-    format: Format,
-    opts: &EncodeOptions,
-) -> Vec<FidelityWarning> {
+pub fn fidelity_warnings_with(image: &Image, format: Format, opts: &EncodeOptions) -> Vec<FidelityWarning> {
     use FidelityWarning as W;
     let c = caps(format);
     let mut w = Vec::new();
@@ -197,10 +166,7 @@ pub fn fidelity_warnings_with(
     if let Some((mw, mh)) = format.max_dimensions()
         && (image.width() > mw || image.height() > mh)
     {
-        w.push(W::DimensionsExceeded {
-            max_width: mw,
-            max_height: mh,
-        });
+        w.push(W::DimensionsExceeded { max_width: mw, max_height: mh });
     }
     let p = plan(image, format, opts);
     let (sl, ss) = (image.layout(), image.sample_type());
@@ -214,10 +180,7 @@ pub fn fidelity_warnings_with(
         _ => true,
     };
     if lossy_depth {
-        w.push(W::DepthReduced {
-            from: ss,
-            to: p.sample,
-        });
+        w.push(W::DepthReduced { from: ss, to: p.sample });
     }
     if ss.is_float() && !p.sample.is_float() && image.has_out_of_range() {
         w.push(W::RangeClipped);

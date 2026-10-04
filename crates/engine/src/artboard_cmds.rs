@@ -165,7 +165,11 @@ fn new_artboard(s: &mut Session, p: &Value) -> Result<Value> {
         None => Rect::from_xywh(0, 0, pw, ph),
     };
     // A preset decides the size (dialogs send the canvas size alongside it).
-    let rect = if preset.is_empty() || p.get("rect").is_some() { rect_param(p, base, cmd)? } else { rect_param(&json!({"x": p.get("x"), "y": p.get("y")}), base, cmd)? };
+    let rect = if preset.is_empty() || p.get("rect").is_some() {
+        rect_param(p, base, cmd)?
+    } else {
+        rect_param(&json!({"x": p.get("x"), "y": p.get("y")}), base, cmd)?
+    };
     let background = background_param(p, cmd)?.unwrap_or_default();
     let name = p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string);
     let id = s.edit("New Artboard", |doc, active| {
@@ -370,10 +374,20 @@ pub fn raster_pdf(pages: &[(u32, u32, f32, Vec<u8>)]) -> Vec<u8> {
         let k = 72.0 / f64::from(dpi.max(1.0));
         let (pw, ph) = (f64::from(*w) * k, f64::from(*h) * k);
         let (contents, image) = (4 + i * 3, 5 + i * 3);
-        obj(&mut out, format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {pw:.3} {ph:.3}] /Resources << /XObject << /Im0 {image} 0 R >> >> /Contents {contents} 0 R >>").as_bytes());
+        obj(
+            &mut out,
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {pw:.3} {ph:.3}] /Resources << /XObject << /Im0 {image} 0 R >> >> /Contents {contents} 0 R >>"
+            )
+            .as_bytes(),
+        );
         let stream = format!("q {pw:.3} 0 0 {ph:.3} 0 0 cm /Im0 Do Q");
         obj(&mut out, format!("<< /Length {} >>\nstream\n{stream}\nendstream", stream.len()).as_bytes());
-        let mut img = format!("<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n", jpeg.len()).into_bytes();
+        let mut img = format!(
+            "<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n",
+            jpeg.len()
+        )
+        .into_bytes();
         img.extend_from_slice(jpeg);
         img.extend_from_slice(b"\nendstream");
         obj(&mut out, &img);
@@ -421,13 +435,62 @@ pub fn specs() -> Vec<CommandSpec> {
         };
     }
     vec![
-        spec!("layer.new.artboard", "Artboard…", &["Layer", "New"], r##"{"rect":[x,y,w,h]? | "x","y","width","height"? (default: canvas size, right of the last board),"preset":"iPhone 14|Web 1920|A4|…"?,"name":str?,"background":"white|black|transparent|custom"="white","color":[r,g,b]|"#rrggbb"? (custom)} → {layer, rect}"##, has_doc, new_artboard),
-        spec!("layer.new.artboardFromGroup", "Artboard from Group…", &["Layer", "New"], r##"{"layer":id? (a top-level group; default active),"background":…?} → {layer, rect}"##, has_plain_group, artboard_from_group),
-        spec!("layer.new.artboardFromLayers", "Artboard from Layers…", &["Layer", "New"], r##"{"name":str?,"background":…?} (the selected layers) → {layer, rect}"##, has_free_layers, artboard_from_layers),
-        spec!("layer.artboard.set", "Edit Artboard", &[], r##"{"layer":id? (default: the active artboard),"x","y","width","height"?|"rect":[x,y,w,h]?,"preset":str?,"background":"white|black|transparent|custom"?,"color":…?,"name":str?,"moveContents":bool=true} → {layer, rect}"##, has_active_artboard, set_props),
-        spec!("view.clearSelectedArtboardGuides", "Clear Selected Artboard Guides", &["View"], "{} (guides inside the active artboard)", has_active_artboard, |s, _| clear_artboard_guides(s)),
-        spec!("file.export.artboardsToFiles", "Artboards to Files…", &["File", "Export"], r##"{"dir":folder,"format":"png|jpg|psd|tiff|…"="png","prefix":str=document name ("" = none),"artboards":[id]? (default all),"quality":0..12?} → {files}"##, export_artboards, artboards_to_files),
-        spec!("file.export.artboardsToPdf", "Artboards to PDF…", &["File", "Export"], r##"{"path":str (.pdf),"artboards":[id]?,"quality":0..12=10} → {path, pages} (one raster page per board)"##, export_artboards, artboards_to_pdf),
+        spec!(
+            "layer.new.artboard",
+            "Artboard…",
+            &["Layer", "New"],
+            r##"{"rect":[x,y,w,h]? | "x","y","width","height"? (default: canvas size, right of the last board),"preset":"iPhone 14|Web 1920|A4|…"?,"name":str?,"background":"white|black|transparent|custom"="white","color":[r,g,b]|"#rrggbb"? (custom)} → {layer, rect}"##,
+            has_doc,
+            new_artboard
+        ),
+        spec!(
+            "layer.new.artboardFromGroup",
+            "Artboard from Group…",
+            &["Layer", "New"],
+            r##"{"layer":id? (a top-level group; default active),"background":…?} → {layer, rect}"##,
+            has_plain_group,
+            artboard_from_group
+        ),
+        spec!(
+            "layer.new.artboardFromLayers",
+            "Artboard from Layers…",
+            &["Layer", "New"],
+            r##"{"name":str?,"background":…?} (the selected layers) → {layer, rect}"##,
+            has_free_layers,
+            artboard_from_layers
+        ),
+        spec!(
+            "layer.artboard.set",
+            "Edit Artboard",
+            &[],
+            r##"{"layer":id? (default: the active artboard),"x","y","width","height"?|"rect":[x,y,w,h]?,"preset":str?,"background":"white|black|transparent|custom"?,"color":…?,"name":str?,"moveContents":bool=true} → {layer, rect}"##,
+            has_active_artboard,
+            set_props
+        ),
+        spec!(
+            "view.clearSelectedArtboardGuides",
+            "Clear Selected Artboard Guides",
+            &["View"],
+            "{} (guides inside the active artboard)",
+            has_active_artboard,
+            |s, _| clear_artboard_guides(s)
+        ),
+        spec!(
+            "file.export.artboardsToFiles",
+            "Artboards to Files…",
+            &["File", "Export"],
+            r##"{"dir":folder,"format":"png|jpg|psd|tiff|…"="png","prefix":str=document name ("" = none),"artboards":[id]? (default all),"quality":0..12?} → {files}"##,
+            export_artboards,
+            artboards_to_files
+        ),
+        spec!(
+            "file.export.artboardsToPdf",
+            "Artboards to PDF…",
+            &["File", "Export"],
+            r##"{"path":str (.pdf),"artboards":[id]?,"quality":0..12=10} → {path, pages} (one raster page per board)"##,
+            export_artboards,
+            artboards_to_pdf
+        ),
     ]
 }
 

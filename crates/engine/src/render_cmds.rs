@@ -71,7 +71,9 @@ fn flame_paths(s: &Session, p: &Value) -> Option<Vec<Vec<(f32, f32)>>> {
         .into_iter()
         .map(|pl| {
             let mut v: Vec<(f32, f32)> = pl.pts.iter().map(|&(x, y)| (x as f32, y as f32)).collect();
-            if pl.closed && let Some(&f) = v.first() {
+            if pl.closed
+                && let Some(&f) = v.first()
+            {
                 v.push(f);
             }
             v
@@ -238,7 +240,11 @@ mod tests {
     #[test]
     fn each_renderer_draws_undoes_and_is_seeded_at_every_depth() {
         for depth in ["8", "16", "32"] {
-            for (id, p) in [("filter.render.flame", json!({})), ("filter.render.tree", json!({"baseTreeType": 7})), ("filter.render.pictureFrame", json!({"frame": "roses"}))] {
+            for (id, p) in [
+                ("filter.render.flame", json!({})),
+                ("filter.render.tree", json!({"baseTreeType": 7})),
+                ("filter.render.pictureFrame", json!({"frame": "roses"})),
+            ] {
                 let mut s = session(depth);
                 let r = s.execute(id, p.clone()).unwrap_or_else(|e| panic!("{id}@{depth}: {e}"));
                 assert!(r["primitives"].as_u64().unwrap() > 0, "{id}");

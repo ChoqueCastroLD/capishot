@@ -64,7 +64,16 @@ fn new_filters() -> Vec<FilterParams> {
         FilterParams::ZigZag { amount: 50.0, ridges: 4.0, style: ZigZagStyle::PondRipples },
         FilterParams::Fibers { variance: 16.0, strength: 4.0, seed: 8, foreground: BLACK, background: WHITE },
         FilterParams::LensFlare { brightness: 100.0, center_x: 0.3, center_y: 0.3, lens: LensType::Zoom },
-        FilterParams::LightingEffects { lights: vec![Light::default()], gloss: 0.0, metallic: 0.0, exposure: 0.0, ambience: 10.0, texture: TextureChannel::Luminance, height: 50.0, white_is_high: true },
+        FilterParams::LightingEffects {
+            lights: vec![Light::default()],
+            gloss: 0.0,
+            metallic: 0.0,
+            exposure: 0.0,
+            ambience: 10.0,
+            texture: TextureChannel::Luminance,
+            height: 50.0,
+            white_is_high: true,
+        },
         FilterParams::ReduceNoise { strength: 6.0, preserve_details: 60.0, reduce_color_noise: 45.0, sharpen_details: 25.0, remove_jpeg_artifact: true },
         FilterParams::SmartBlur { radius: 3.0, threshold: 40.0, quality: BlurQuality::High, mode: SmartBlurMode::Normal },
         FilterParams::SmartBlur { radius: 3.0, threshold: 25.0, quality: BlurQuality::Low, mode: SmartBlurMode::OverlayEdge },
@@ -90,7 +99,11 @@ fn new_filters() -> Vec<FilterParams> {
         FilterParams::FieldBlur { pins: vec![FieldPin { x: 0.2, y: 0.2, blur: 0.0 }, FieldPin { x: 0.8, y: 0.8, blur: 6.0 }] },
         FilterParams::SpinBlur { pins: vec![SpinPin { blur_angle: 30.0, ..SpinPin::default() }] },
         FilterParams::PathBlur { paths: vec![BlurPath { points: vec![[0.1, 0.2], [0.9, 0.8]], speed: 8.0, taper: 30.0 }] },
-        FilterParams::Custom { kernel: vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 5.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], scale: 1.0, offset: 0.0 },
+        FilterParams::Custom {
+            kernel: vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 5.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            scale: 1.0,
+            offset: 0.0,
+        },
         FilterParams::HsbHsl { input: HsbModel::Rgb, output: HsbModel::Hsl },
         FilterParams::DeInterlace { eliminate_even: false, interpolate: true },
         FilterParams::NtscColors,
@@ -136,8 +149,17 @@ fn new_filters_change_pixels_and_respect_empty_selection() {
 fn new_filters_agree_across_bit_depths() {
     // Threshold-type filters flip where quantized inputs straddle a threshold; compare them on average only.
     let thresholdy = |p: &FilterParams| {
-        matches!(p, FilterParams::Facet | FilterParams::OilPaint { .. } | FilterParams::Mezzotint { .. } | FilterParams::TraceContour { .. } | FilterParams::SmartBlur { .. } | FilterParams::ColorHalftone { .. } | FilterParams::Diffuse { .. } | FilterParams::Wind { .. })
-            || matches!(p, FilterParams::Extrude { level_based: true, .. })
+        matches!(
+            p,
+            FilterParams::Facet
+                | FilterParams::OilPaint { .. }
+                | FilterParams::Mezzotint { .. }
+                | FilterParams::TraceContour { .. }
+                | FilterParams::SmartBlur { .. }
+                | FilterParams::ColorHalftone { .. }
+                | FilterParams::Diffuse { .. }
+                | FilterParams::Wind { .. }
+        ) || matches!(p, FilterParams::Extrude { level_based: true, .. })
     };
     for p in new_filters() {
         let outs: Vec<Vec<f32>> = [SampleType::U8, SampleType::U16, SampleType::F32]
@@ -186,7 +208,9 @@ fn new_params_serde_roundtrip() {
         let back: FilterParams = serde_json::from_str(&j).unwrap();
         // Caller-supplied maps are not serialized.
         let strip = |p: &FilterParams| match p.clone() {
-            FilterParams::Displace { horizontal, vertical, stretch, undefined, .. } => FilterParams::Displace { horizontal, vertical, stretch, undefined, map: None },
+            FilterParams::Displace { horizontal, vertical, stretch, undefined, .. } => {
+                FilterParams::Displace { horizontal, vertical, stretch, undefined, map: None }
+            }
             other => other,
         };
         assert_eq!(back, strip(&p), "{j}");
@@ -345,7 +369,8 @@ fn trace_contour_draws_line_at_level_crossing() {
 #[test]
 fn tiles_leave_gaps_with_fill() {
     let s = flat(SampleType::F32, R, [0.0, 0.0, 1.0, 1.0]);
-    let out = run(&s, &FilterParams::Tiles { count: 3, max_offset: 40.0, fill: TileFill::Foreground, foreground: [0.0, 1.0, 0.0, 1.0], background: WHITE, seed: 2 });
+    let out =
+        run(&s, &FilterParams::Tiles { count: 3, max_offset: 40.0, fill: TileFill::Foreground, foreground: [0.0, 1.0, 0.0, 1.0], background: WHITE, seed: 2 });
     let v = out.read_region(R);
     assert!(v.chunks_exact(4).any(|p| p[1] > 0.99), "foreground gaps");
     assert!(v.chunks_exact(4).filter(|p| p[2] > 0.99).count() > 600, "mostly tiles");
@@ -354,12 +379,26 @@ fn tiles_leave_gaps_with_fill() {
 #[test]
 fn extrude_blocks_and_pyramids_shade_cells() {
     let s = pattern(SampleType::F32, R);
-    let blocks = run(&s, &FilterParams::Extrude { kind: ExtrudeType::Blocks, size: 8.0, depth: 40.0, level_based: false, solid_front: true, mask_incomplete: false, seed: 1 });
+    let blocks = run(
+        &s,
+        &FilterParams::Extrude { kind: ExtrudeType::Blocks, size: 8.0, depth: 40.0, level_based: false, solid_front: true, mask_incomplete: false, seed: 1 },
+    );
     // A solid front face is uniform: find two equal neighbours somewhere in the middle.
     let same = (5..35).any(|x| blocks.pixel(x, 12) == blocks.pixel(x + 1, 12));
     assert!(same);
     let flat_s = flat(SampleType::F32, R, [0.5, 0.5, 0.5, 1.0]);
-    let pyr = run(&flat_s, &FilterParams::Extrude { kind: ExtrudeType::Pyramids, size: 10.0, depth: 100.0, level_based: false, solid_front: false, mask_incomplete: false, seed: 1 });
+    let pyr = run(
+        &flat_s,
+        &FilterParams::Extrude {
+            kind: ExtrudeType::Pyramids,
+            size: 10.0,
+            depth: 100.0,
+            level_based: false,
+            solid_front: false,
+            mask_incomplete: false,
+            seed: 1,
+        },
+    );
     // Light from the top-left: the left face is brighter than the right face.
     assert!(pyr.pixel(11, 15)[0] > pyr.pixel(18, 15)[0], "{:?} {:?}", pyr.pixel(11, 15), pyr.pixel(18, 15));
 }
@@ -390,11 +429,35 @@ fn lens_flare_is_brightest_at_its_centre() {
 fn lighting_point_light_falls_off() {
     let s = flat(SampleType::F32, R, [0.8, 0.8, 0.8, 1.0]);
     let light = Light { kind: LightKind::Point, x: 0.1, y: 0.5, z: 0.2, radius: 1.0, intensity: 50.0, ..Light::default() };
-    let out = run(&s, &FilterParams::LightingEffects { lights: vec![light], gloss: -100.0, metallic: 0.0, exposure: 0.0, ambience: 0.0, texture: TextureChannel::None, height: 0.0, white_is_high: true });
+    let out = run(
+        &s,
+        &FilterParams::LightingEffects {
+            lights: vec![light],
+            gloss: -100.0,
+            metallic: 0.0,
+            exposure: 0.0,
+            ambience: 0.0,
+            texture: TextureChannel::None,
+            height: 0.0,
+            white_is_high: true,
+        },
+    );
     assert!(out.pixel(4, 15)[0] > out.pixel(36, 15)[0] + 0.1, "{:?} {:?}", out.pixel(4, 15), out.pixel(36, 15));
     // A spot light does not reach outside its cone.
     let spot = Light { kind: LightKind::Spot, x: 0.5, y: 0.5, z: 0.3, target_x: 0.5, target_y: 0.5, cone: 20.0, ..Light::default() };
-    let out = run(&s, &FilterParams::LightingEffects { lights: vec![spot], gloss: 0.0, metallic: 0.0, exposure: 0.0, ambience: 0.0, texture: TextureChannel::None, height: 0.0, white_is_high: true });
+    let out = run(
+        &s,
+        &FilterParams::LightingEffects {
+            lights: vec![spot],
+            gloss: 0.0,
+            metallic: 0.0,
+            exposure: 0.0,
+            ambience: 0.0,
+            texture: TextureChannel::None,
+            height: 0.0,
+            white_is_high: true,
+        },
+    );
     assert!(out.pixel(20, 15)[0] > 0.3 && out.pixel(1, 1)[0] < 1e-4, "{:?} {:?}", out.pixel(20, 15), out.pixel(1, 1));
 }
 
@@ -413,7 +476,10 @@ fn noisy(st: SampleType) -> Surface {
 fn reduce_noise_lowers_noise() {
     let s = noisy(SampleType::F32);
     let inner = Rect::new(8, 8, 32, 22);
-    let out = run(&s, &FilterParams::ReduceNoise { strength: 10.0, preserve_details: 0.0, reduce_color_noise: 100.0, sharpen_details: 0.0, remove_jpeg_artifact: false });
+    let out = run(
+        &s,
+        &FilterParams::ReduceNoise { strength: 10.0, preserve_details: 0.0, reduce_color_noise: 100.0, sharpen_details: 0.0, remove_jpeg_artifact: false },
+    );
     for c in 0..3 {
         assert!(variance(&out, inner, c) < variance(&s, inner, c) * 0.5, "channel {c}");
     }
@@ -572,7 +638,10 @@ fn ntsc_limits_saturated_colours_only() {
 fn displace_shifts_by_map_and_shear_by_curve() {
     let s = pattern(SampleType::F32, R);
     let v = 0.5 + 3.0 / 64.0;
-    let out = run(&s, &FilterParams::Displace { horizontal: 25.0, vertical: 0.0, stretch: false, undefined: UndefinedAreas::Wrap, map: Some(map_image([v, 0.5, 0.5, 1.0])) });
+    let out = run(
+        &s,
+        &FilterParams::Displace { horizontal: 25.0, vertical: 0.0, stretch: false, undefined: UndefinedAreas::Wrap, map: Some(map_image([v, 0.5, 0.5, 1.0])) },
+    );
     for x in 0..30 {
         assert_eq!(out.pixel(x, 7), s.pixel(x + 3, 7), "x={x}");
     }

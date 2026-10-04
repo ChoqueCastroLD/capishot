@@ -53,7 +53,17 @@ pub struct AnalysisUi {
 
 impl Default for AnalysisUi {
     fn default() -> Self {
-        Self { measurement_log: false, notes: false, log_selected: Vec::new(), note_selected: None, note_author: String::new(), note_color: [1.0, 1.0, 0.51], use_measurement_scale: false, dialog: None, drag: None }
+        Self {
+            measurement_log: false,
+            notes: false,
+            log_selected: Vec::new(),
+            note_selected: None,
+            note_author: String::new(),
+            note_color: [1.0, 1.0, 0.51],
+            use_measurement_scale: false,
+            dialog: None,
+            drag: None,
+        }
     }
 }
 
@@ -116,7 +126,11 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
         "image.analysis.setMeasurementScale" => {
             let d = doc?;
             let sc = &d.measurement.scale;
-            open(app, "scale", json!({"preset": if sc.is_default() { "default" } else { "custom" }, "pixelLength": sc.pixel_length, "logicalLength": sc.logical_length, "units": sc.units}))
+            open(
+                app,
+                "scale",
+                json!({"preset": if sc.is_default() { "default" } else { "custom" }, "pixelLength": sc.pixel_length, "logicalLength": sc.logical_length, "units": sc.units}),
+            )
         }
         "image.analysis.selectDataPoints" => {
             let dp = serde_json::to_value(&app.session.analysis.data_points).unwrap_or_default();
@@ -125,7 +139,11 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
         "image.analysis.placeScaleMarker" => {
             let d = doc?;
             let units = d.measurement.scale.units.clone();
-            open(app, "scaleMarker", json!({"length": suggested_length(&d), "units": units, "fontSize": 12.0, "displayText": true, "textPosition": "bottom", "color": "black"}))
+            open(
+                app,
+                "scaleMarker",
+                json!({"length": suggested_length(&d), "units": units, "fontSize": 12.0, "displayText": true, "textPosition": "bottom", "color": "black"}),
+            )
         }
         "image.analysis.recordMeasurements" => {
             // The current tool picks the source, as in Photoshop.
@@ -271,7 +289,8 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) ->
         }
         (Tool::Note, ToolEvent::Down { x, y, .. }) => {
             let z = f64::from(app.current_zoom().max(0.01));
-            let hit = doc.notes.iter().rposition(|n| x >= n.position[0] && x <= n.position[0] + 16.0 / z && y >= n.position[1] && y <= n.position[1] + 20.0 / z);
+            let hit =
+                doc.notes.iter().rposition(|n| x >= n.position[0] && x <= n.position[0] + 16.0 / z && y >= n.position[1] && y <= n.position[1] + 20.0 / z);
             match hit {
                 Some(i) => {
                     app.ui.analysis.note_selected = Some(i);
@@ -363,7 +382,12 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
             let fill = color32(n.color.to_rgb());
             painter.rect_filled(r, CornerRadius::same(2), fill);
             let sel = app.ui.analysis.note_selected == Some(i);
-            painter.rect_stroke(r, CornerRadius::same(2), Stroke::new(if sel { 2.0 } else { 1.0 }, if sel { Color32::WHITE } else { Color32::from_black_alpha(200) }), egui::StrokeKind::Outside);
+            painter.rect_stroke(
+                r,
+                CornerRadius::same(2),
+                Stroke::new(if sel { 2.0 } else { 1.0 }, if sel { Color32::WHITE } else { Color32::from_black_alpha(200) }),
+                egui::StrokeKind::Outside,
+            );
             // Folded corner and text lines.
             let ink = Color32::from_black_alpha(140);
             painter.line_segment([r.right_top() + vec2(-5.0, 0.0), r.right_top() + vec2(0.0, 5.0)], Stroke::new(1.0, ink));
@@ -697,11 +721,17 @@ pub fn dialog_command(kind: &str, f: &Map<String, Value>) -> Option<(&'static st
             if f.get("preset").and_then(Value::as_str) == Some("default") {
                 ("image.analysis.setMeasurementScale", json!({"preset": "default"}))
             } else {
-                ("image.analysis.setMeasurementScale", json!({"preset": "custom", "pixelLength": f.get("pixelLength"), "logicalLength": f.get("logicalLength"), "units": f.get("units")}))
+                (
+                    "image.analysis.setMeasurementScale",
+                    json!({"preset": "custom", "pixelLength": f.get("pixelLength"), "logicalLength": f.get("logicalLength"), "units": f.get("units")}),
+                )
             }
         }
         "dataPoints" => ("image.analysis.selectDataPoints", json!({"selection": f.get("selection"), "ruler": f.get("ruler"), "count": f.get("count")})),
-        "scaleMarker" => ("image.analysis.placeScaleMarker", json!({"length": f.get("length"), "fontSize": f.get("fontSize"), "displayText": f.get("displayText"), "textPosition": f.get("textPosition"), "color": f.get("color")})),
+        "scaleMarker" => (
+            "image.analysis.placeScaleMarker",
+            json!({"length": f.get("length"), "fontSize": f.get("fontSize"), "displayText": f.get("displayText"), "textPosition": f.get("textPosition"), "color": f.get("color")}),
+        ),
         _ => return None,
     })
 }
@@ -750,7 +780,11 @@ fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         for (source, label) in [("selection", "Selections"), ("ruler", "Ruler Tool"), ("count", "Count Tool")] {
                             ui.vertical(|ui| {
                                 ui.label(RichText::new(label).color(t.text).size(11.0).strong());
-                                let mut list: Vec<String> = f.get(source).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect()).unwrap_or_default();
+                                let mut list: Vec<String> = f
+                                    .get(source)
+                                    .and_then(Value::as_array)
+                                    .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
+                                    .unwrap_or_default();
                                 let mut changed = false;
                                 for key in photocraft_engine::analysis_cmds::available(source) {
                                     let name = photocraft_engine::analysis_cmds::COLUMNS.iter().find(|c| c.0 == key).map_or(key, |c| c.1);
@@ -853,7 +887,14 @@ pub(crate) mod tests {
         crate::menus::invoke(&mut app, &ctx, "window.panel.notes", json!({"show": true})).unwrap();
         assert!(app.ui.analysis.notes);
         let items = crate::menus::menu_items(&app);
-        for id in ["window.panel.measurementLog", "window.panel.notes", "image.analysis.setMeasurementScale", "image.analysis.placeScaleMarker", "file.import.notes", "view.proofSetup.workingCyanPlate"] {
+        for id in [
+            "window.panel.measurementLog",
+            "window.panel.notes",
+            "image.analysis.setMeasurementScale",
+            "image.analysis.placeScaleMarker",
+            "file.import.notes",
+            "view.proofSetup.workingCyanPlate",
+        ] {
             assert!(items.iter().any(|i| i.id == id && i.enabled), "{id} live");
         }
     }

@@ -288,7 +288,8 @@ pub(crate) fn tiles(src: &Image, out: Rect, ctx: &Ctx, count: u32, max_offset: f
                 let (cx, cy) = (gx + dx, gy + dy);
                 let (ox, oy) = offset(cx, cy);
                 let (u, v) = (fx - ox - cx as f32 * ts, fy - oy - cy as f32 * ts);
-                if u >= 0.0 && v >= 0.0 && u < ts && v < ts && (cx as f32 * ts) < b.width() as f32 && (cy as f32 * ts) < b.height() as f32 && cx >= 0 && cy >= 0 {
+                if u >= 0.0 && v >= 0.0 && u < ts && v < ts && (cx as f32 * ts) < b.width() as f32 && (cy as f32 * ts) < b.height() as f32 && cx >= 0 && cy >= 0
+                {
                     let order = (cy, cx);
                     if hit.is_none_or(|(o, _, _)| order > o) {
                         hit = Some((order, ox, oy));

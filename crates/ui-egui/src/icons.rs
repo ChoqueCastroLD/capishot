@@ -97,7 +97,13 @@ pub fn button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tool
     } else if hovered {
         ui.painter().rect_filled(rect, t.radius_sm, t.hover);
     }
-    let tint = if selected { t.accent_text } else if hovered { t.text } else { t.icon };
+    let tint = if selected {
+        t.accent_text
+    } else if hovered {
+        t.text
+    } else {
+        t.icon
+    };
     paint(ui, rect, name, (box_size * 0.52).round(), tint);
     if tooltip.is_empty() { resp } else { resp.on_hover_text(tooltip) }
 }

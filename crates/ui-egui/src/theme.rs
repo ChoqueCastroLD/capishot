@@ -334,7 +334,12 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
     w.noninteractive.bg_stroke = Stroke::new(1.0, t.separator);
     w.noninteractive.fg_stroke = Stroke::new(1.0, t.text_dim);
     w.noninteractive.corner_radius = r;
-    for (wv, bg, stroke) in [(&mut w.inactive, t.field, t.field_border), (&mut w.hovered, t.hover, t.field_border), (&mut w.active, t.pressed, t.accent_border), (&mut w.open, t.hover, t.field_border)] {
+    for (wv, bg, stroke) in [
+        (&mut w.inactive, t.field, t.field_border),
+        (&mut w.hovered, t.hover, t.field_border),
+        (&mut w.active, t.pressed, t.accent_border),
+        (&mut w.open, t.hover, t.field_border),
+    ] {
         wv.bg_fill = bg;
         wv.weak_bg_fill = bg;
         wv.bg_stroke = if t.bevel { Stroke::new(1.0, Color32::from_gray(64)) } else { Stroke::new(1.0, stroke) };
@@ -484,7 +489,34 @@ pub mod live {
                     }
                 };
             }
-            c!(chrome, canvas, canvas_dot, dock, card, card_border, field, field_border, hover, pressed, text, text_dim, text_faint, icon, accent, accent_soft, accent_border, accent_text, separator, shadow, primary_bg, primary_text, danger, warning, tab_strip, row_selected);
+            c!(
+                chrome,
+                canvas,
+                canvas_dot,
+                dock,
+                card,
+                card_border,
+                field,
+                field_border,
+                hover,
+                pressed,
+                text,
+                text_dim,
+                text_faint,
+                icon,
+                accent,
+                accent_soft,
+                accent_border,
+                accent_text,
+                separator,
+                shadow,
+                primary_bg,
+                primary_text,
+                danger,
+                warning,
+                tab_strip,
+                row_selected
+            );
         }
         unknown
     }

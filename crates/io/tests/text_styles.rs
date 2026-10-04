@@ -8,8 +8,17 @@ use photocraft_doc::{Document, Layer, LayerContent, Size, TextLayer, TextStyles}
 
 fn styles() -> TextStyles {
     let mut s = TextStyles::default();
-    s.character.push(CharacterStyleDef { id: 3, name: "Loud".into(), attrs: diff_attrs(&CharStyle { size_pt: 30.0, underline: true, ..Default::default() }, &CharStyle::default()) });
-    s.paragraph.push(ParagraphStyleDef { id: 1, name: "Middle".into(), para_attrs: diff_attrs(&ParagraphStyle { align: TextAlign::Center, ..Default::default() }, &ParagraphStyle::default()), ..Default::default() });
+    s.character.push(CharacterStyleDef {
+        id: 3,
+        name: "Loud".into(),
+        attrs: diff_attrs(&CharStyle { size_pt: 30.0, underline: true, ..Default::default() }, &CharStyle::default()),
+    });
+    s.paragraph.push(ParagraphStyleDef {
+        id: 1,
+        name: "Middle".into(),
+        para_attrs: diff_attrs(&ParagraphStyle { align: TextAlign::Center, ..Default::default() }, &ParagraphStyle::default()),
+        ..Default::default()
+    });
     s
 }
 

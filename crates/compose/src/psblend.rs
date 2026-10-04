@@ -114,12 +114,7 @@ pub fn composite(mode: BlendMode, backdrop: [f32; 4], source: [f32; 4], opacity:
         }
         let kb = ab * (1.0 - as_);
         let inv = 1.0 / ao;
-        return [
-            (kb * backdrop[0] + as_ * source[0]) * inv,
-            (kb * backdrop[1] + as_ * source[1]) * inv,
-            (kb * backdrop[2] + as_ * source[2]) * inv,
-            ao,
-        ];
+        return [(kb * backdrop[0] + as_ * source[0]) * inv, (kb * backdrop[1] + as_ * source[1]) * inv, (kb * backdrop[2] + as_ * source[2]) * inv, ao];
     }
     let cb = [backdrop[0], backdrop[1], backdrop[2]];
     let cs = [source[0], source[1], source[2]];
@@ -191,7 +186,10 @@ mod tests {
         // 69 % blue (0, 51, 153) over grey 129: Photoshop shows (57, 80, 146).
         let r = composite_gamma(BlendMode::Normal, [129.0 / 255.0, 129.0 / 255.0, 129.0 / 255.0, 1.0], [0.0, 0.2, 0.6, 0.686], 1.0, TEXT_GAMMA);
         assert!((r[0] * 255.0 - 57.0).abs() < 2.0 && (r[1] * 255.0 - 80.0).abs() < 2.0 && (r[2] * 255.0 - 146.0).abs() < 2.0, "{r:?}");
-        assert_eq!(composite_gamma(BlendMode::Multiply, [0.2, 0.4, 0.6, 0.7], [0.5, 0.1, 0.9, 0.5], 0.8, 1.0), composite(BlendMode::Multiply, [0.2, 0.4, 0.6, 0.7], [0.5, 0.1, 0.9, 0.5], 0.8));
+        assert_eq!(
+            composite_gamma(BlendMode::Multiply, [0.2, 0.4, 0.6, 0.7], [0.5, 0.1, 0.9, 0.5], 0.8, 1.0),
+            composite(BlendMode::Multiply, [0.2, 0.4, 0.6, 0.7], [0.5, 0.1, 0.9, 0.5], 0.8)
+        );
     }
 
     use super::*;
@@ -228,7 +226,8 @@ mod tests {
             }
             let (cb, cs) = ([0.2, 0.5, 0.9], [0.7, 0.1, 0.4]);
             assert_eq!(blend_rgb(m, cb, cs), generic::blend_rgb(m, cb, cs));
-            let (a, b) = (composite(m, [0.2, 0.5, 0.9, 0.7], [0.7, 0.1, 0.4, 0.6], 0.8), generic::composite(m, [0.2, 0.5, 0.9, 0.7], [0.7, 0.1, 0.4, 0.6], 0.8));
+            let (a, b) =
+                (composite(m, [0.2, 0.5, 0.9, 0.7], [0.7, 0.1, 0.4, 0.6], 0.8), generic::composite(m, [0.2, 0.5, 0.9, 0.7], [0.7, 0.1, 0.4, 0.6], 0.8));
             for c in 0..4 {
                 assert!((a[c] - b[c]).abs() < 1e-6, "{m:?} {a:?} {b:?}");
             }

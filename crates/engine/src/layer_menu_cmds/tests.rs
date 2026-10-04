@@ -20,11 +20,7 @@ fn active(s: &Session) -> &Layer {
 fn paint(s: &mut Session, f: impl Fn(i32, i32) -> [f32; 4]) {
     s.edit("setup", |doc, active| {
         let b = doc.bounds();
-        let surf = doc
-            .layer_mut(active.unwrap())
-            .unwrap()
-            .surface_mut()
-            .unwrap();
+        let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
         let fmt = surf.format();
         let mut data = Vec::new();
         for y in b.y0..b.y1 {
@@ -44,12 +40,7 @@ fn disc(x: i32, y: i32) -> [f32; 4] {
     let d = (((x - 20) * (x - 20) + (y - 15) * (y - 15)) as f32).sqrt();
     let a = (10.0 - d).clamp(0.0, 1.0);
     // Edge pixels were matted on black: colour scaled by alpha.
-    [
-        0.9 * if a < 1.0 { a } else { 1.0 },
-        0.1 * a.min(1.0),
-        0.1 * a.min(1.0),
-        a,
-    ]
+    [0.9 * if a < 1.0 { a } else { 1.0 }, 0.1 * a.min(1.0), 0.1 * a.min(1.0), a]
 }
 
 fn select_left_half(s: &mut Session) {
@@ -69,8 +60,7 @@ fn mask_apply_from_transparency_hide_selection() {
         paint(&mut s, |_, _| [0.2, 0.4, 0.6, 1.0]);
         assert!(!s.is_enabled("layer.layerMask.apply"));
         select_left_half(&mut s);
-        s.execute("layer.layerMask.hideSelection", json!({}))
-            .unwrap();
+        s.execute("layer.layerMask.hideSelection", json!({})).unwrap();
         assert!(doc(&s).selection.is_none());
         let m = active(&s).mask.as_ref().unwrap();
         assert_eq!((m.value(5, 5), m.value(30, 5)), (0.0, 1.0));
@@ -80,8 +70,7 @@ fn mask_apply_from_transparency_hide_selection() {
         assert_eq!(surf.rgba(5, 5)[3], 0.0);
         assert_eq!(surf.rgba(30, 5)[3], 1.0);
         // From Transparency: alpha moves into the mask, pixels become opaque.
-        s.execute("layer.layerMask.fromTransparency", json!({}))
-            .unwrap();
+        s.execute("layer.layerMask.fromTransparency", json!({})).unwrap();
         let l = active(&s);
         assert_eq!(l.mask.as_ref().unwrap().value(5, 5), 0.0);
         assert_eq!(l.mask.as_ref().unwrap().value(30, 5), 1.0);
@@ -105,43 +94,27 @@ fn matting_commands_fix_dark_fringes() {
         });
         let ex = edge.expect("an antialiased edge pixel");
         let before = active(&s).surface().unwrap().rgba(ex, 17);
-        s.execute("layer.matting.removeBlackMatte", json!({}))
-            .unwrap();
+        s.execute("layer.matting.removeBlackMatte", json!({})).unwrap();
         let after = active(&s).surface().unwrap().rgba(ex, 17);
-        assert!(
-            after[0] > before[0] + 0.05,
-            "{depth}: {before:?} → {after:?}"
-        );
+        assert!(after[0] > before[0] + 0.05, "{depth}: {before:?} → {after:?}");
         assert!((after[3] - before[3]).abs() < 1e-2, "alpha kept");
         s.execute("edit.undo", json!({})).unwrap();
-        s.execute("layer.matting.defringe", json!({"width": 2}))
-            .unwrap();
+        s.execute("layer.matting.defringe", json!({"width": 2})).unwrap();
         let d = active(&s).surface().unwrap().rgba(ex, 17);
-        assert!(
-            d[0] > 0.8,
-            "{depth}: defringed edge takes the core red: {d:?}"
-        );
+        assert!(d[0] > 0.8, "{depth}: defringed edge takes the core red: {d:?}");
         s.execute("edit.undo", json!({})).unwrap();
-        s.execute("layer.matting.colorDecontaminate", json!({"amount": 100}))
-            .unwrap();
+        s.execute("layer.matting.colorDecontaminate", json!({"amount": 100})).unwrap();
         let c = active(&s).surface().unwrap().rgba(ex, 17);
         assert!(c[0] > before[0], "{depth}: {before:?} → {c:?}");
         s.execute("edit.undo", json!({})).unwrap();
-        s.execute("layer.matting.removeWhiteMatte", json!({}))
-            .unwrap();
+        s.execute("layer.matting.removeWhiteMatte", json!({})).unwrap();
     }
 }
 
 #[test]
 fn defringe_pure_function() {
     // 5×1: transparent, fringe (blue), core red ×3.
-    let mut px = vec![
-        [0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.5],
-        [1.0, 0.0, 0.0, 1.0],
-        [1.0, 0.0, 0.0, 1.0],
-        [1.0, 0.0, 0.0, 1.0],
-    ];
+    let mut px = vec![[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.5], [1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]];
     defringe(&mut px, 5, 1, 1);
     assert_eq!(px[1], [1.0, 0.0, 0.0, 0.5]);
     assert_eq!(px[0][3], 0.0);
@@ -151,44 +124,16 @@ fn defringe_pure_function() {
 fn global_light_blending_options_scale_effects() {
     let mut s = session(8, "rgb");
     paint(&mut s, disc);
-    s.execute(
-        "layer.layerStyle.globalLight",
-        json!({"angle": 200, "altitude": 45}),
-    )
-    .unwrap();
-    assert_eq!(
-        (doc(&s).global_light.angle, doc(&s).global_light.altitude),
-        (-160.0, 45.0)
-    );
-    s.execute(
-        "layer.layerStyle.blendingOptions",
-        json!({"blend": "Multiply", "opacity": 50, "fillOpacity": 25}),
-    )
-    .unwrap();
+    s.execute("layer.layerStyle.globalLight", json!({"angle": 200, "altitude": 45})).unwrap();
+    assert_eq!((doc(&s).global_light.angle, doc(&s).global_light.altitude), (-160.0, 45.0));
+    s.execute("layer.layerStyle.blendingOptions", json!({"blend": "Multiply", "opacity": 50, "fillOpacity": 25})).unwrap();
     let l = active(&s);
-    assert_eq!(
-        (l.blend, l.opacity, l.fill_opacity),
-        (BlendMode::Multiply, 0.5, 0.25)
-    );
-    assert!(
-        s.execute("layer.layerStyle.blendingOptions", json!({"blend": "nope"}))
-            .is_err()
-    );
-    assert!(
-        s.execute(
-            "layer.layerStyle.blendingOptions",
-            json!({"blend": "Pass Through"})
-        )
-        .is_err()
-    );
+    assert_eq!((l.blend, l.opacity, l.fill_opacity), (BlendMode::Multiply, 0.5, 0.25));
+    assert!(s.execute("layer.layerStyle.blendingOptions", json!({"blend": "nope"})).is_err());
+    assert!(s.execute("layer.layerStyle.blendingOptions", json!({"blend": "Pass Through"})).is_err());
     assert!(!s.is_enabled("layer.layerStyle.scaleEffects"));
-    s.execute(
-        "layer.layerStyle.dropShadow",
-        json!({"distance": 10, "size": 4}),
-    )
-    .unwrap();
-    s.execute("layer.layerStyle.scaleEffects", json!({"scale": 200}))
-        .unwrap();
+    s.execute("layer.layerStyle.dropShadow", json!({"distance": 10, "size": 4})).unwrap();
+    s.execute("layer.layerStyle.scaleEffects", json!({"scale": 200})).unwrap();
     match &active(&s).effects.items[0] {
         Effect::DropShadow(sh) => assert_eq!((sh.distance, sh.size), (20.0, 8.0)),
         e => panic!("{e:?}"),
@@ -200,32 +145,13 @@ fn blending_options_blend_if() {
     for depth in DEPTHS {
         let mut s = session(depth, "rgb");
         // Black on the left, white on the right.
-        paint(&mut s, |x, _| {
-            if x < 20 {
-                [0.0, 0.0, 0.0, 1.0]
-            } else {
-                [1.0; 4]
-            }
-        });
+        paint(&mut s, |x, _| if x < 20 { [0.0, 0.0, 0.0, 1.0] } else { [1.0; 4] });
         let at = |s: &Session, x: i32| photocraft_compose::flatten(doc(s)).get(x, 5);
         // Gray › This Layer: black point 50 hides the black half.
-        s.execute(
-            "layer.layerStyle.blendingOptions",
-            json!({"blendIf": {"channel": "gray", "thisLayer": [50, 255]}}),
-        )
-        .unwrap();
+        s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": {"channel": "gray", "thisLayer": [50, 255]}})).unwrap();
         assert_eq!(at(&s, 5)[3], 0.0, "depth {depth}");
         assert_eq!(at(&s, 30), [1.0; 4], "depth {depth}");
-        assert_eq!(
-            active(&s).blend_if.get(0),
-            [
-                BlendRange {
-                    black: [50, 50],
-                    white: [255, 255]
-                },
-                BlendRange::FULL
-            ]
-        );
+        assert_eq!(active(&s).blend_if.get(0), [BlendRange { black: [50, 50], white: [255, 255] }, BlendRange::FULL]);
         // Setting the other slider pair keeps this one; split points are 4 values.
         s.execute(
             "layer.layerStyle.blendingOptions",
@@ -234,29 +160,13 @@ fn blending_options_blend_if() {
         .unwrap();
         let bi = &active(&s).blend_if;
         assert_eq!(bi.get(0)[0].black, [50, 50]);
-        assert_eq!(
-            bi.get(0)[1],
-            BlendRange {
-                black: [0, 10],
-                white: [245, 255]
-            }
-        );
-        assert_eq!(
-            bi.get(3)[0],
-            BlendRange {
-                black: [0, 0],
-                white: [200, 200]
-            }
-        );
+        assert_eq!(bi.get(0)[1], BlendRange { black: [0, 10], white: [245, 255] });
+        assert_eq!(bi.get(3)[0], BlendRange { black: [0, 0], white: [200, 200] });
         let ins = crate::inspect::layer(active(&s));
-        assert_eq!(
-            ins["blendIf"][0],
-            json!({"channel": 0, "thisLayer": [50, 50, 255, 255], "underlying": [0, 10, 245, 255]})
-        );
+        assert_eq!(ins["blendIf"][0], json!({"channel": 0, "thisLayer": [50, 50, 255, 255], "underlying": [0, 10, 245, 255]}));
         assert_eq!(ins["blendIf"][1]["channel"], 3);
         // Blending options without `blendIf` (the dialog's blend/opacity/fill) leave it alone.
-        s.execute("layer.layerStyle.blendingOptions", json!({"opacity": 90}))
-            .unwrap();
+        s.execute("layer.layerStyle.blendingOptions", json!({"opacity": 90})).unwrap();
         assert!(!active(&s).blend_if.is_default());
         // One undo step per call.
         s.execute("edit.undo", json!({})).unwrap();
@@ -264,8 +174,7 @@ fn blending_options_blend_if() {
         assert_eq!(active(&s).blend_if.get(0)[1], BlendRange::FULL);
         assert_eq!(active(&s).blend_if.get(0)[0].black, [50, 50]);
         // null resets everything.
-        s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": null}))
-            .unwrap();
+        s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": null})).unwrap();
         assert!(active(&s).blend_if.is_default());
         assert!(crate::inspect::layer(active(&s)).get("blendIf").is_none());
         assert_eq!(at(&s, 5), [0.0, 0.0, 0.0, 1.0]);
@@ -287,11 +196,7 @@ fn blend_if_rejects_bad_params() {
         json!({"channel": "gray", "underlying": "dark"}),
         json!("gray"),
     ] {
-        assert!(
-            s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": bad}))
-                .is_err(),
-            "{bad}"
-        );
+        assert!(s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": bad})).is_err(), "{bad}");
     }
     assert!(active(&s).blend_if.is_default());
     assert_eq!(s.active().unwrap().history.past_len(), steps);
@@ -300,26 +205,12 @@ fn blend_if_rejects_bad_params() {
 #[test]
 fn blend_if_channel_names_follow_the_mode() {
     let mut s = session(8, "cmyk");
-    s.execute(
-        "layer.layerStyle.blendingOptions",
-        json!({"blendIf": {"channel": "black", "underlying": [0, 128]}}),
-    )
-    .unwrap();
+    s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": {"channel": "black", "underlying": [0, 128]}})).unwrap();
     assert_eq!(active(&s).blend_if.get(4)[1].white, [128, 128]);
-    assert!(
-        s.execute(
-            "layer.layerStyle.blendingOptions",
-            json!({"blendIf": {"channel": "red", "underlying": [0, 128]}})
-        )
-        .is_err()
-    );
+    assert!(s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": {"channel": "red", "underlying": [0, 128]}})).is_err());
     // A grayscale document's Gray is its one channel.
     let mut s = session(16, "grayscale");
-    s.execute(
-        "layer.layerStyle.blendingOptions",
-        json!({"blendIf": {"channel": "gray", "thisLayer": [30, 255]}}),
-    )
-    .unwrap();
+    s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": {"channel": "gray", "thisLayer": [30, 255]}})).unwrap();
     assert_eq!(active(&s).blend_if.get(1)[0].black, [30, 30]);
     assert_eq!(active(&s).blend_if.get(0), [BlendRange::FULL; 2]);
 }
@@ -328,29 +219,13 @@ fn blend_if_channel_names_follow_the_mode() {
 fn create_layer_splits_effects_and_keeps_the_look() {
     let mut s = session(8, "rgb");
     s.execute("layer.new.layer", json!({})).unwrap();
-    paint(&mut s, |x, y| {
-        if (10..30).contains(&x) && (8..22).contains(&y) {
-            [0.2, 0.5, 0.9, 1.0]
-        } else {
-            [0.0; 4]
-        }
-    });
-    s.execute(
-        "layer.layerStyle.dropShadow",
-        json!({"blend": "normal", "distance": 4, "size": 2, "opacity": 60}),
-    )
-    .unwrap();
-    s.execute(
-        "layer.layerStyle.colorOverlay",
-        json!({"color": "#ff8000", "opacity": 50, "add": true}),
-    )
-    .unwrap();
+    paint(&mut s, |x, y| if (10..30).contains(&x) && (8..22).contains(&y) { [0.2, 0.5, 0.9, 1.0] } else { [0.0; 4] });
+    s.execute("layer.layerStyle.dropShadow", json!({"blend": "normal", "distance": 4, "size": 2, "opacity": 60})).unwrap();
+    s.execute("layer.layerStyle.colorOverlay", json!({"color": "#ff8000", "opacity": 50, "add": true})).unwrap();
     let id = active(&s).id;
     let before = photocraft_compose::flatten(doc(&s));
     let n0 = doc(&s).layers.len();
-    let r = s
-        .execute("layer.layerStyle.createLayer", json!({}))
-        .unwrap();
+    let r = s.execute("layer.layerStyle.createLayer", json!({})).unwrap();
     assert_eq!(r["layers"], json!(2));
     let d = doc(&s);
     assert_eq!(d.layers.len(), n0 + 2);
@@ -359,17 +234,8 @@ fn create_layer_splits_effects_and_keeps_the_look() {
     assert!(d.layers[i + 1].name.ends_with("Color Overlay") && d.layers[i + 1].clipped);
     assert!(d.layers[i].effects.items.is_empty());
     let after = photocraft_compose::flatten(d);
-    let worst = before
-        .px
-        .iter()
-        .zip(&after.px)
-        .map(|(a, b)| (0..4).map(|c| (a[c] - b[c]).abs()).fold(0.0, f32::max))
-        .fold(0.0, f32::max);
-    assert!(
-        worst < 3.0 / 255.0,
-        "composite changed by {}",
-        worst * 255.0
-    );
+    let worst = before.px.iter().zip(&after.px).map(|(a, b)| (0..4).map(|c| (a[c] - b[c]).abs()).fold(0.0, f32::max)).fold(0.0, f32::max);
+    assert!(worst < 3.0 / 255.0, "composite changed by {}", worst * 255.0);
     assert!(!s.is_enabled("layer.layerStyle.createLayer"));
     s.execute("edit.undo", json!({})).unwrap();
     assert_eq!(doc(&s).layers.len(), n0);
@@ -379,69 +245,29 @@ fn create_layer_splits_effects_and_keeps_the_look() {
 fn content_options_reports_the_editor() {
     let mut s = session(8, "rgb");
     assert!(!s.is_enabled("layer.layerContentOptions"));
-    s.execute("layer.newAdjustmentLayer.levels", json!({}))
-        .unwrap();
-    assert_eq!(
-        s.execute("layer.layerContentOptions", json!({})).unwrap()["editor"],
-        json!("adjustment:levels")
-    );
-    s.execute("layer.newFillLayer.solidColor", json!({}))
-        .unwrap();
-    assert_eq!(
-        s.execute("layer.layerContentOptions", json!({})).unwrap()["editor"],
-        json!("fill")
-    );
+    s.execute("layer.newAdjustmentLayer.levels", json!({})).unwrap();
+    assert_eq!(s.execute("layer.layerContentOptions", json!({})).unwrap()["editor"], json!("adjustment:levels"));
+    s.execute("layer.newFillLayer.solidColor", json!({})).unwrap();
+    assert_eq!(s.execute("layer.layerContentOptions", json!({})).unwrap()["editor"], json!("fill"));
 }
 
 #[test]
 fn export_layer_trims_to_its_pixels() {
     let mut s = session(16, "rgb");
-    paint(&mut s, |x, y| {
-        if (5..15).contains(&x) && (4..10).contains(&y) {
-            [1.0, 0.0, 0.0, 1.0]
-        } else {
-            [0.0; 4]
-        }
-    });
+    paint(&mut s, |x, y| if (5..15).contains(&x) && (4..10).contains(&y) { [1.0, 0.0, 0.0, 1.0] } else { [0.0; 4] });
     let d = layer_document(doc(&s), active(&s).id).unwrap();
     assert_eq!((d.size.width, d.size.height), (10, 6));
-    assert_eq!(
-        d.layers[0].surface().unwrap().rgba(0, 0),
-        [1.0, 0.0, 0.0, 1.0]
-    );
+    assert_eq!(d.layers[0].surface().unwrap().rgba(0, 0), [1.0, 0.0, 0.0, 1.0]);
     let dir = std::env::temp_dir().join(format!("pc-layer-export-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("layer.png");
-    let r = s
-        .execute(
-            "layer.quickExportAsPng",
-            json!({"path": path.to_string_lossy()}),
-        )
-        .unwrap();
-    assert_eq!(
-        (r["width"].as_u64(), r["height"].as_u64()),
-        (Some(10), Some(6))
-    );
-    assert!(
-        std::fs::read(&path)
-            .unwrap()
-            .starts_with(&[0x89, b'P', b'N', b'G'])
-    );
+    let r = s.execute("layer.quickExportAsPng", json!({"path": path.to_string_lossy()})).unwrap();
+    assert_eq!((r["width"].as_u64(), r["height"].as_u64()), (Some(10), Some(6)));
+    assert!(std::fs::read(&path).unwrap().starts_with(&[0x89, b'P', b'N', b'G']));
     let jpg = dir.join("layer.jpg");
-    let r = s
-        .execute(
-            "layer.exportAs",
-            json!({"path": jpg.to_string_lossy(), "scale": 200}),
-        )
-        .unwrap();
+    let r = s.execute("layer.exportAs", json!({"path": jpg.to_string_lossy(), "scale": 200})).unwrap();
     assert_eq!(r["width"].as_u64(), Some(20));
-    assert!(
-        s.execute(
-            "layer.quickExportAsPng",
-            json!({"path": jpg.to_string_lossy()})
-        )
-        .is_err()
-    );
+    assert!(s.execute("layer.quickExportAsPng", json!({"path": jpg.to_string_lossy()})).is_err());
     assert!(s.execute("layer.exportAs", json!({})).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -457,24 +283,11 @@ fn stack_modes_render_from_the_nested_layers() {
             let mut l = Layer::raster(format!("f{k}"), fmt);
             let v = if k == 2 { 1.0 } else { 0.4 };
             let surf = l.surface_mut().unwrap();
-            surf.write_region(
-                Rect::new(0, 0, 40, 30),
-                &photocraft_raster::from_rgba(&fmt, [0.4, 0.4, 0.4, 1.0]).repeat(1200),
-            );
-            surf.write_region(
-                Rect::new(3, 3, 4, 4),
-                &photocraft_raster::from_rgba(&fmt, [v, v, v, 1.0]),
-            );
+            surf.write_region(Rect::new(0, 0, 40, 30), &photocraft_raster::from_rgba(&fmt, [0.4, 0.4, 0.4, 1.0]).repeat(1200));
+            surf.write_region(Rect::new(3, 3, 4, 4), &photocraft_raster::from_rgba(&fmt, [v, v, v, 1.0]));
             kids.push(l);
         }
-        let g = Layer::new(
-            "stack",
-            LayerContent::Group(photocraft_doc::Group {
-                children: kids,
-                expanded: true,
-                artboard: None,
-            }),
-        );
+        let g = Layer::new("stack", LayerContent::Group(photocraft_doc::Group { children: kids, expanded: true, artboard: None }));
         let smart = crate::smart_cmds::layer_to_smart(doc, &g)?;
         let id = smart.id;
         doc.layers = vec![smart];
@@ -487,39 +300,24 @@ fn stack_modes_render_from_the_nested_layers() {
         LayerContent::Smart(sm) => sm.cache.unwrap().rgba(x, y),
         _ => panic!(),
     };
-    assert!(
-        at(&s, 3, 3)[0] > 0.9,
-        "normal composite shows the top frame"
-    );
-    s.execute("layer.smartObjects.stackMode.median", json!({}))
-        .unwrap();
-    assert!(
-        (at(&s, 3, 3)[0] - 0.4).abs() < 2.0 / 255.0,
-        "median removes the outlier"
-    );
-    s.execute("layer.smartObjects.stackMode.maximum", json!({}))
-        .unwrap();
+    assert!(at(&s, 3, 3)[0] > 0.9, "normal composite shows the top frame");
+    s.execute("layer.smartObjects.stackMode.median", json!({})).unwrap();
+    assert!((at(&s, 3, 3)[0] - 0.4).abs() < 2.0 / 255.0, "median removes the outlier");
+    s.execute("layer.smartObjects.stackMode.maximum", json!({})).unwrap();
     assert!(at(&s, 3, 3)[0] > 0.99);
-    s.execute("layer.smartObjects.stackMode.range", json!({}))
-        .unwrap();
+    s.execute("layer.smartObjects.stackMode.range", json!({})).unwrap();
     assert!(at(&s, 10, 10)[0] < 1.0 / 255.0);
     for m in StackMode::ALL {
-        s.execute(
-            &format!("layer.smartObjects.stackMode.{}", m.id()),
-            json!({}),
-        )
-        .unwrap();
+        s.execute(&format!("layer.smartObjects.stackMode.{}", m.id()), json!({})).unwrap();
         match &active(&s).content {
             LayerContent::Smart(sm) => assert_eq!(sm.stack_mode, Some(m)),
             _ => panic!(),
         }
     }
-    s.execute("layer.smartObjects.stackMode.none", json!({}))
-        .unwrap();
+    s.execute("layer.smartObjects.stackMode.none", json!({})).unwrap();
     assert!(at(&s, 3, 3)[0] > 0.9);
     // The stack mode survives .pcraft.
-    s.execute("layer.smartObjects.stackMode.mean", json!({}))
-        .unwrap();
+    s.execute("layer.smartObjects.stackMode.mean", json!({})).unwrap();
     let bytes = photocraft_format::save_to_bytes(doc(&s), &Default::default()).unwrap();
     let back = photocraft_format::load_from_bytes(&bytes).unwrap();
     match &back.layers[0].content {
@@ -537,9 +335,7 @@ fn reveal_in_finder_dry_run_and_enabled() {
         let mut l = Layer::new(
             "linked",
             LayerContent::Smart(photocraft_doc::SmartObject::new(
-                SmartSource::Linked {
-                    path: "/tmp/pics/a.png".into(),
-                },
+                SmartSource::Linked { path: "/tmp/pics/a.png".into() },
                 photocraft_geom::Affine::IDENTITY,
                 None,
             )),
@@ -550,9 +346,7 @@ fn reveal_in_finder_dry_run_and_enabled() {
     })
     .unwrap();
     assert!(s.is_enabled("layer.smartObjects.revealInFinder"));
-    let r = s
-        .execute("layer.smartObjects.revealInFinder", json!({"dryRun": true}))
-        .unwrap();
+    let r = s.execute("layer.smartObjects.revealInFinder", json!({"dryRun": true})).unwrap();
     let (prog, args) = reveal_command("/tmp/pics/a.png");
     assert_eq!(r["program"], json!(prog));
     assert_eq!(r["args"], json!(args));
@@ -563,19 +357,12 @@ fn mask_all_objects_masks_the_subject() {
     let mut s = session(8, "rgb");
     paint(&mut s, |x, y| {
         let inside = (((x - 20) * (x - 20) + (y - 15) * (y - 15)) as f32).sqrt() < 8.0;
-        if inside {
-            [0.9, 0.2, 0.1, 1.0]
-        } else {
-            [0.95, 0.95, 0.95, 1.0]
-        }
+        if inside { [0.9, 0.2, 0.1, 1.0] } else { [0.95, 0.95, 0.95, 1.0] }
     });
     match s.execute("layer.maskAllObjects", json!({})) {
         Ok(_) => {
             let m = active(&s).mask.as_ref().unwrap();
-            assert!(
-                m.value(20, 15) > m.value(1, 1),
-                "subject revealed, background hidden"
-            );
+            assert!(m.value(20, 15) > m.value(1, 1), "subject revealed, background hidden");
         }
         // The segmentation may decline tiny images; then nothing changes.
         Err(_) => assert!(active(&s).mask.is_none()),
@@ -587,17 +374,11 @@ fn layer_masks_in_gray_cmyk_lab() {
     for mode in ["gray", "cmyk", "lab"] {
         let mut s = session(16, mode);
         paint(&mut s, disc);
-        s.execute("layer.layerMask.fromTransparency", json!({}))
-            .unwrap();
+        s.execute("layer.layerMask.fromTransparency", json!({})).unwrap();
         s.execute("layer.layerMask.apply", json!({})).unwrap();
-        s.execute("layer.matting.defringe", json!({"width": 1}))
-            .unwrap();
-        s.execute("layer.matting.removeBlackMatte", json!({}))
-            .unwrap();
-        assert!(
-            active(&s).surface().unwrap().rgba(20, 15)[3] > 0.99,
-            "{mode}"
-        );
+        s.execute("layer.matting.defringe", json!({"width": 1})).unwrap();
+        s.execute("layer.matting.removeBlackMatte", json!({})).unwrap();
+        assert!(active(&s).surface().unwrap().rgba(20, 15)[3] > 0.99, "{mode}");
     }
 }
 
@@ -615,25 +396,14 @@ fn load_files_into_stack_as_smart_object_then_median() {
             photocraft_doc::Color::rgba(*v, *v, *v, 1.0),
         );
         let p = dir.join(format!("f{k}.png"));
-        std::fs::write(
-            &p,
-            photocraft_io::export(&d, "f.png", &Default::default())
-                .unwrap()
-                .bytes,
-        )
-        .unwrap();
+        std::fs::write(&p, photocraft_io::export(&d, "f.png", &Default::default()).unwrap().bytes).unwrap();
         paths.push(p.to_string_lossy().into_owned());
     }
     let mut s = Session::new();
-    s.execute(
-        "file.scripts.loadFilesIntoStack",
-        json!({"paths": paths, "createSmartObject": true}),
-    )
-    .unwrap();
+    s.execute("file.scripts.loadFilesIntoStack", json!({"paths": paths, "createSmartObject": true})).unwrap();
     assert_eq!(doc(&s).layers.len(), 1);
     assert!(matches!(doc(&s).layers[0].content, LayerContent::Smart(_)));
-    s.execute("layer.smartObjects.stackMode.median", json!({}))
-        .unwrap();
+    s.execute("layer.smartObjects.stackMode.median", json!({})).unwrap();
     let px = photocraft_compose::render(doc(&s), Rect::from_xywh(2, 2, 1, 1)).px[0];
     assert!((px[0] - 0.2).abs() < 2.0 / 255.0, "{px:?}");
     let _ = std::fs::remove_dir_all(&dir);

@@ -255,10 +255,17 @@ fn find_and_replace_across_type_layers() {
     s.execute("type.create", json!({"text": "world peace, World", "x": 4, "y": 40, "size": 12})).unwrap();
     let r = s.execute("edit.findAndReplaceText", json!({"find": "world", "replace": "planet"})).unwrap();
     assert_eq!((r["count"].as_u64(), r["layers"].as_u64()), (Some(3), Some(2)));
-    let texts: Vec<String> = s.active().unwrap().doc.walk().into_iter().filter_map(|(_, _, l)| match &l.content {
-        LayerContent::Text(t) => Some(t.text.clone()),
-        _ => None,
-    }).collect();
+    let texts: Vec<String> = s
+        .active()
+        .unwrap()
+        .doc
+        .walk()
+        .into_iter()
+        .filter_map(|(_, _, l)| match &l.content {
+            LayerContent::Text(t) => Some(t.text.clone()),
+            _ => None,
+        })
+        .collect();
     assert!(texts.contains(&"Hello planet".to_string()), "{texts:?}");
     assert!(texts.contains(&"planet peace, planet".to_string()), "{texts:?}");
     s.undo();

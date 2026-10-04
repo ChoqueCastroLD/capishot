@@ -39,17 +39,10 @@ fn frame_from_layers(s: &mut Session, p: &Value) -> Result<Value> {
         gp.insert("name".into(), name.clone());
     }
     let grouped = s.execute("layer.new.groupFromLayers", Value::Object(gp))?;
-    let gid = LayerId(
-        grouped
-            .get("layer")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| EngineError::Other("grouping did not return a layer".into()))?,
-    );
-    let rect = crate::layer_multi_cmds::layer_bounds(
-        s.active().ok_or(EngineError::NoDocument)?.doc.layer(gid).ok_or(EngineError::NoLayer(gid))?,
-    )
-    .filter(|r| !r.is_empty())
-    .unwrap_or_else(|| s.active().unwrap().doc.bounds());
+    let gid = LayerId(grouped.get("layer").and_then(Value::as_u64).ok_or_else(|| EngineError::Other("grouping did not return a layer".into()))?);
+    let rect = crate::layer_multi_cmds::layer_bounds(s.active().ok_or(EngineError::NoDocument)?.doc.layer(gid).ok_or(EngineError::NoLayer(gid))?)
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| s.active().unwrap().doc.bounds());
 
     s.edit("Frame from Layers", |doc, _| {
         let g = doc.layer_mut(gid).ok_or(EngineError::NoLayer(gid))?;

@@ -68,4 +68,3 @@ pub fn content_bounds(s: &Surface) -> Rect {
     }
     out
 }
-

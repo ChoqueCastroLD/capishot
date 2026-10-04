@@ -12,11 +12,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             collect(&p, out);
-        } else if p
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb"))
-        {
+        } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb")) {
             out.push(p);
         }
     }
@@ -24,8 +20,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// Files known to be invalid upstream, with the reason. They are reported but
 /// do not fail the test.
-const KNOWN_BAD: &[(&str, &str)] =
-    &[("group-divider-blend-mode.psd", "psd-tools fixture stripped to 1906 bytes: merged image data missing")];
+const KNOWN_BAD: &[(&str, &str)] = &[("group-divider-blend-mode.psd", "psd-tools fixture stripped to 1906 bytes: merged image data missing")];
 
 #[test]
 fn corpus_parse_and_byte_stable() {

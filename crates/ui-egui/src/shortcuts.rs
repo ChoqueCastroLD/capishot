@@ -17,15 +17,17 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
             "Alt" => mods |= Modifiers::ALT,
             "Ctrl" => mods |= Modifiers::CTRL,
             "" => key = Some(Key::Plus),
-            k => key = Key::from_name(k).or(match k {
-                "=" => Some(Key::Equals),
-                "-" => Some(Key::Minus),
-                "[" => Some(Key::OpenBracket),
-                ";" => Some(Key::Semicolon),
-                "'" => Some(Key::Quote),
-                "]" => Some(Key::CloseBracket),
-                _ => None,
-            }),
+            k => {
+                key = Key::from_name(k).or(match k {
+                    "=" => Some(Key::Equals),
+                    "-" => Some(Key::Minus),
+                    "[" => Some(Key::OpenBracket),
+                    ";" => Some(Key::Semicolon),
+                    "'" => Some(Key::Quote),
+                    "]" => Some(Key::CloseBracket),
+                    _ => None,
+                })
+            }
         }
     }
     Some(KeyboardShortcut::new(mods, key?))
@@ -89,7 +91,9 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
             prefs
                 .shortcuts
                 .iter()
-                .filter(|(id, sc)| !sc.is_empty() && photocraft_engine::commands::find(id).is_none() && !crate::menus::UI_COMMANDS.iter().any(|c| c.0 == id.as_str()))
+                .filter(|(id, sc)| {
+                    !sc.is_empty() && photocraft_engine::commands::find(id).is_none() && !crate::menus::UI_COMMANDS.iter().any(|c| c.0 == id.as_str())
+                })
                 .filter_map(|(id, sc)| Some((id.clone(), parse(sc)?))),
         )
         .filter(|(_, sc)| sc.modifiers != Modifiers::NONE || !matches!(sc.logical_key, Key::X | Key::D))
@@ -201,7 +205,10 @@ mod tests {
     #[test]
     fn no_duplicate_shortcuts() {
         let mut seen = std::collections::HashMap::new();
-        let all = photocraft_engine::command_specs().iter().filter_map(|c| c.shortcut.map(|s| (c.id, s))).chain(crate::menus::UI_COMMANDS.iter().filter_map(|(id, _, _, s)| s.map(|s| (*id, s))));
+        let all = photocraft_engine::command_specs()
+            .iter()
+            .filter_map(|c| c.shortcut.map(|s| (c.id, s)))
+            .chain(crate::menus::UI_COMMANDS.iter().filter_map(|(id, _, _, s)| s.map(|s| (*id, s))));
         for (id, s) in all {
             if let Some(prev) = seen.insert(s, id) {
                 panic!("shortcut {s} bound to both {prev} and {id}");

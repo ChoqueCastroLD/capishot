@@ -232,7 +232,15 @@ mod tests {
 
     #[test]
     fn captured_info_bits() {
-        let mut c = LayerComp { id: 1, name: "c".into(), comment: String::new(), apply_visibility: false, apply_position: false, apply_appearance: false, states: vec![] };
+        let mut c = LayerComp {
+            id: 1,
+            name: "c".into(),
+            comment: String::new(),
+            apply_visibility: false,
+            apply_position: false,
+            apply_appearance: false,
+            states: vec![],
+        };
         c.set_captured_info(5);
         assert!(c.apply_visibility && !c.apply_position && c.apply_appearance);
         assert_eq!(c.captured_info(), 5);
@@ -242,7 +250,15 @@ mod tests {
     fn missing_layers_and_ids() {
         let mut d = doc();
         let states = capture_states(&d);
-        d.layer_comps.push(LayerComp { id: next_comp_id(&d), name: "c".into(), comment: String::new(), apply_visibility: true, apply_position: true, apply_appearance: true, states });
+        d.layer_comps.push(LayerComp {
+            id: next_comp_id(&d),
+            name: "c".into(),
+            comment: String::new(),
+            apply_visibility: true,
+            apply_position: true,
+            apply_appearance: true,
+            states,
+        });
         assert_eq!(d.layer_comps[0].id, 1);
         assert_eq!(next_comp_id(&d), 2);
         let gone = d.layers[1].id;

@@ -58,7 +58,11 @@ impl WideAngleDialog {
         let k = self.scale;
         let mut p = self.params.clone();
         let (fx, fy) = (self.frame.x0 as f64, self.frame.y0 as f64);
-        p.constraints = p.constraints.iter().map(|c| Constraint { a: [(c.a[0] - fx) * k, (c.a[1] - fy) * k], b: [(c.b[0] - fx) * k, (c.b[1] - fy) * k], orientation: c.orientation }).collect();
+        p.constraints = p
+            .constraints
+            .iter()
+            .map(|c| Constraint { a: [(c.a[0] - fx) * k, (c.a[1] - fy) * k], b: [(c.b[0] - fx) * k, (c.b[1] - fy) * k], orientation: c.orientation })
+            .collect();
         p
     }
 
@@ -97,15 +101,41 @@ pub fn open(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String> 
     let (w, h) = (frame.width() as usize, frame.height() as usize);
     let k = w.max(h).div_ceil(PROXY_SIDE).max(1);
     let (pw, ph) = (w.div_ceil(k), h.div_ceil(k));
-    let proxy = photocraft_algo::resample::resize_surface(&surf.convert(PixelFormat::RGBA8), 1.0 / k as f64, 1.0 / k as f64, photocraft_algo::resample::Resample::Bilinear);
+    let proxy = photocraft_algo::resample::resize_surface(
+        &surf.convert(PixelFormat::RGBA8),
+        1.0 / k as f64,
+        1.0 / k as f64,
+        photocraft_algo::resample::Resample::Bilinear,
+    );
     // Normalise the proxy to start at the origin.
     let mut px = Surface::new(PixelFormat::RGBA8);
-    let src_r = Rect::new((frame.x0 as f64 / k as f64) as i32, (frame.y0 as f64 / k as f64) as i32, (frame.x0 as f64 / k as f64) as i32 + pw as i32, (frame.y0 as f64 / k as f64) as i32 + ph as i32);
+    let src_r = Rect::new(
+        (frame.x0 as f64 / k as f64) as i32,
+        (frame.y0 as f64 / k as f64) as i32,
+        (frame.x0 as f64 / k as f64) as i32 + pw as i32,
+        (frame.y0 as f64 / k as f64) as i32 + ph as i32,
+    );
     px.write_region(Rect::new(0, 0, pw as i32, ph as i32), &proxy.read_region(src_r));
     // EXIF focal length / crop factor, as the engine would resolve them.
     let info = st.doc.metadata.exif.as_ref().map(|e| photocraft_algo::exif::read(e));
     let params = photocraft_engine::lens_cmds::wide_params("filter.adaptiveWideAngle", &json!({}), info.as_ref()).unwrap_or_default();
-    let mut d = WideAngleDialog { layer, layer_name: name, params, frame, scale: 1.0 / k as f64, proxy: px, pw, ph, src_tex: None, out_tex: None, dirty: true, preview: true, drag: None, residual: 0.0, render_ms: 0.0 };
+    let mut d = WideAngleDialog {
+        layer,
+        layer_name: name,
+        params,
+        frame,
+        scale: 1.0 / k as f64,
+        proxy: px,
+        pw,
+        ph,
+        src_tex: None,
+        out_tex: None,
+        dirty: true,
+        preview: true,
+        drag: None,
+        residual: 0.0,
+        render_ms: 0.0,
+    };
     d.render(ctx);
     app.wide_angle = Some(d);
     Ok(())
@@ -233,7 +263,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             && let Some(p) = resp.interact_pointer_pos()
         {
             // Delete the constraint whose curve passes nearest the click.
-            let near = d.params.constraints.iter().enumerate().map(|(i, c)| (i, cam.arc(c.a, c.b, 24).iter().map(|q| (to_screen(*q) - p).length()).fold(f32::MAX, f32::min))).min_by(|a, b| a.1.total_cmp(&b.1));
+            let near = d
+                .params
+                .constraints
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (i, cam.arc(c.a, c.b, 24).iter().map(|q| (to_screen(*q) - p).length()).fold(f32::MAX, f32::min)))
+                .min_by(|a, b| a.1.total_cmp(&b.1));
             if let Some((i, dist)) = near
                 && dist < 10.0
             {
@@ -257,10 +293,14 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let mesh = (!show_src && !d.params.constraints.is_empty()).then(|| wideangle::solve(&d.proxy_params(), pf));
         for c in &d.params.constraints {
             let pts: Vec<Pos2> = match &mesh {
-                Some(m) => cam.arc(c.a, c.b, 24).iter().map(|q| {
-                    let pq = m.map(pf, [(q[0] - fx) * k, (q[1] - fy) * k]);
-                    to_screen([pq[0] / k + fx, pq[1] / k + fy])
-                }).collect(),
+                Some(m) => cam
+                    .arc(c.a, c.b, 24)
+                    .iter()
+                    .map(|q| {
+                        let pq = m.map(pf, [(q[0] - fx) * k, (q[1] - fy) * k]);
+                        to_screen([pq[0] / k + fx, pq[1] / k + fy])
+                    })
+                    .collect(),
                 None => cam.arc(c.a, c.b, 24).iter().map(|q| to_screen(*q)).collect(),
             };
             if let (Some(a), Some(b)) = (pts.first(), pts.last()) {
@@ -282,7 +322,18 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ui.spacing_mut().item_spacing.y = 5.0;
             widgets::section_label(ui, "Correction");
             let mut model = d.params.model;
-            if widgets::dropdown(ui, "awa-model", &mut model, &[(WideModel::Auto, "Auto"), (WideModel::Fisheye, "Fisheye"), (WideModel::Perspective, "Perspective"), (WideModel::FullSpherical, "Full Spherical")], 200.0) {
+            if widgets::dropdown(
+                ui,
+                "awa-model",
+                &mut model,
+                &[
+                    (WideModel::Auto, "Auto"),
+                    (WideModel::Fisheye, "Fisheye"),
+                    (WideModel::Perspective, "Perspective"),
+                    (WideModel::FullSpherical, "Full Spherical"),
+                ],
+                200.0,
+            ) {
                 d.params.model = model;
                 d.dirty = true;
             }
@@ -308,7 +359,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     ui.label(format!("{}", i + 1));
                     let mut o = c.orientation;
-                    if widgets::dropdown(ui, &format!("awa-o-{i}"), &mut o, &[(Orientation::Free, "Free"), (Orientation::Horizontal, "Horizontal"), (Orientation::Vertical, "Vertical")], 120.0) {
+                    if widgets::dropdown(
+                        ui,
+                        &format!("awa-o-{i}"),
+                        &mut o,
+                        &[(Orientation::Free, "Free"), (Orientation::Horizontal, "Horizontal"), (Orientation::Vertical, "Vertical")],
+                        120.0,
+                    ) {
                         c.orientation = o;
                         d.dirty = true;
                     }
@@ -323,7 +380,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
             widgets::hairline(ui);
             widgets::checkbox(ui, &mut d.preview, "Preview");
-            ui.label(egui::RichText::new("Drag on the image to add a constraint; Shift for horizontal/vertical; right-click to delete.").color(t.text_faint).size(11.0));
+            ui.label(
+                egui::RichText::new("Drag on the image to add a constraint; Shift for horizontal/vertical; right-click to delete.")
+                    .color(t.text_faint)
+                    .size(11.0),
+            );
         });
         let foot = ERect::from_min_max(pos2(full.left(), full.bottom() - footer_h), full.max);
         painter.rect_filled(foot, 0.0, t.dock);
@@ -363,7 +424,14 @@ mod tests {
         app.run("edit.fill", json!({"color": "#808080"})).unwrap();
         let r = menu(&mut app, &ctx, "filter.adaptiveWideAngle", &json!({})).unwrap().unwrap();
         assert_eq!(r["proxy"], json!([160, 100]));
-        let r = menu(&mut app, &ctx, "filter.adaptiveWideAngle", &json!({"ui": {"set": {"model": "fisheye", "focalLength": 10.0}, "add": {"a": [20, 20], "b": [140, 20], "orientation": "horizontal"}}})).unwrap().unwrap();
+        let r = menu(
+            &mut app,
+            &ctx,
+            "filter.adaptiveWideAngle",
+            &json!({"ui": {"set": {"model": "fisheye", "focalLength": 10.0}, "add": {"a": [20, 20], "b": [140, 20], "orientation": "horizontal"}}}),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(r["params"]["constraints"].as_array().unwrap().len(), 1);
         assert!(r["residual"].as_f64().unwrap() < 3.0, "{r}");
         let r = menu(&mut app, &ctx, "filter.adaptiveWideAngle", &json!({"ui": {"commit": true}})).unwrap().unwrap();

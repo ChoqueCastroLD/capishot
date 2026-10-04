@@ -27,18 +27,55 @@ impl Default for LevelsChannel {
 /// Photoshop adjustment layers (Layer → New Adjustment Layer).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Adjustment {
-    BrightnessContrast { brightness: f32, contrast: f32, legacy: bool },
+    BrightnessContrast {
+        brightness: f32,
+        contrast: f32,
+        legacy: bool,
+    },
     /// Composite channel first, then R, G, B.
-    Levels { master: LevelsChannel, per_channel: [LevelsChannel; 3] },
+    Levels {
+        master: LevelsChannel,
+        per_channel: [LevelsChannel; 3],
+    },
     /// Master curve then R, G, B curves.
-    Curves { master: Vec<CurvePoint>, per_channel: [Vec<CurvePoint>; 3] },
-    Exposure { exposure: f32, offset: f32, gamma: f32 },
-    Vibrance { vibrance: f32, saturation: f32 },
-    HueSaturation { hue: f32, saturation: f32, lightness: f32, colorize: bool },
-    ColorBalance { shadows: [f32; 3], midtones: [f32; 3], highlights: [f32; 3], preserve_luminosity: bool },
-    BlackWhite { weights: [f32; 6], tint: Option<[f32; 3]> },
-    PhotoFilter { color: [f32; 3], density: f32, preserve_luminosity: bool },
-    ChannelMixer { matrix: [[f32; 4]; 3], monochrome: bool },
+    Curves {
+        master: Vec<CurvePoint>,
+        per_channel: [Vec<CurvePoint>; 3],
+    },
+    Exposure {
+        exposure: f32,
+        offset: f32,
+        gamma: f32,
+    },
+    Vibrance {
+        vibrance: f32,
+        saturation: f32,
+    },
+    HueSaturation {
+        hue: f32,
+        saturation: f32,
+        lightness: f32,
+        colorize: bool,
+    },
+    ColorBalance {
+        shadows: [f32; 3],
+        midtones: [f32; 3],
+        highlights: [f32; 3],
+        preserve_luminosity: bool,
+    },
+    BlackWhite {
+        weights: [f32; 6],
+        tint: Option<[f32; 3]>,
+    },
+    PhotoFilter {
+        color: [f32; 3],
+        density: f32,
+        preserve_luminosity: bool,
+    },
+    ChannelMixer {
+        matrix: [[f32; 4]; 3],
+        monochrome: bool,
+    },
     /// A 3D LUT: `size`³ RGB triplets, red varying fastest (`((b·size + g)·size + r)·3`), in 0..=1.
     /// `lut` is None for a lookup Photoshop stores as an ICC profile (identity here).
     ColorLookup {
@@ -53,14 +90,27 @@ pub enum Adjustment {
         dither: bool,
     },
     Invert,
-    Posterize { levels: u32 },
-    Threshold { level: f32 },
-    GradientMap { stops: Vec<(f32, [f32; 3])>, reverse: bool },
+    Posterize {
+        levels: u32,
+    },
+    Threshold {
+        level: f32,
+    },
+    GradientMap {
+        stops: Vec<(f32, [f32; 3])>,
+        reverse: bool,
+    },
     /// Per range (reds, yellows, greens, cyans, blues, magentas, whites, neutrals, blacks) the
     /// cyan, magenta, yellow and black change in percent (-100..=100), as in Photoshop.
-    SelectiveColor { relative: bool, adjustments: [[f32; 4]; 9] },
+    SelectiveColor {
+        relative: bool,
+        adjustments: [[f32; 4]; 9],
+    },
     /// A PSD adjustment we can't evaluate yet; preserved raw for round-trip.
-    Unsupported { psd_key: String, raw: Vec<u8> },
+    Unsupported {
+        psd_key: String,
+        raw: Vec<u8>,
+    },
 }
 
 impl Adjustment {

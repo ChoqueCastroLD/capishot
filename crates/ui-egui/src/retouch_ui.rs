@@ -37,13 +37,17 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
         Tool::Blur => ("paint.blur", json!({"strength": o.strength})),
         Tool::Sharpen => ("paint.sharpen", json!({"strength": o.strength, "protectDetail": o.protect_detail})),
         Tool::Smudge => ("paint.smudge", json!({"strength": o.strength, "fingerPainting": o.finger_painting})),
-        Tool::Dodge | Tool::Burn => (if tool == Tool::Dodge { "paint.dodge" } else { "paint.burn" }, json!({"range": o.tone_range, "exposure": o.exposure, "protectTones": o.protect_tones})),
+        Tool::Dodge | Tool::Burn => (
+            if tool == Tool::Dodge { "paint.dodge" } else { "paint.burn" },
+            json!({"range": o.tone_range, "exposure": o.exposure, "protectTones": o.protect_tones}),
+        ),
         Tool::Sponge => ("paint.sponge", json!({"mode": o.sponge_mode, "vibrance": o.vibrance})),
         Tool::QuickSelection => {
             let size = app.session.tools.brush.size;
             let mode = if mods.alt { "subtract" } else { "add" };
             let xy: Vec<[f64; 2]> = points.iter().map(|q| [q[0], q[1]]).collect();
-            let _ = app.run("select.quick", json!({"points": xy, "size": size, "mode": mode, "enhanceEdge": o.enhance_edge, "sampleAllLayers": o.sample_all_layers}));
+            let _ = app
+                .run("select.quick", json!({"points": xy, "size": size, "mode": mode, "enhanceEdge": o.enhance_edge, "sampleAllLayers": o.sample_all_layers}));
             return true;
         }
         _ => return false,
@@ -70,8 +74,17 @@ pub fn finish_object_selection(app: &mut PhotocraftApp, start: [f64; 2], end: [f
     if w < 2.0 || h < 2.0 {
         return;
     }
-    let mode = if mods.alt { "subtract" } else if mods.shift { "add" } else { "replace" };
-    let _ = app.run("select.object", json!({"rect": [x.round(), y.round(), w.round(), h.round()], "mode": mode, "sampleAllLayers": app.ui.tool_options.sample_all_layers}));
+    let mode = if mods.alt {
+        "subtract"
+    } else if mods.shift {
+        "add"
+    } else {
+        "replace"
+    };
+    let _ = app.run(
+        "select.object",
+        json!({"rect": [x.round(), y.round(), w.round(), h.round()], "mode": mode, "sampleAllLayers": app.ui.tool_options.sample_all_layers}),
+    );
 }
 
 /// ⌥-click with Clone Stamp / Healing Brush sets the source.

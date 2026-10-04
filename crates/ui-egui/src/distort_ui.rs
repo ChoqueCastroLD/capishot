@@ -106,10 +106,18 @@ pub fn menu(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Val
         "filter.filterGallery" if ui.is_some() && app.distort.gallery.is_some() => Some(crate::gallery_ui::control(app, ui.unwrap_or(&Value::Null))),
         "filter.liquify" if empty => Some(crate::liquify_ui::open(app, ctx).map(|_| json!({"liquify": app.distort.describe()["liquify"]}))),
         "filter.liquify" if ui.is_some() && app.distort.liquify.is_some() => Some(crate::liquify_ui::control(app, ui.unwrap_or(&Value::Null))),
-        "edit.puppetWarp" | "layer.smartObjects.puppetWarp" if empty => Some(crate::puppet_ui::begin(app, ctx, id).map(|_| json!({"puppet": app.distort.describe()["puppet"]}))),
-        "edit.puppetWarp" | "layer.smartObjects.puppetWarp" if ui.is_some() && app.distort.puppet.is_some() => Some(crate::puppet_ui::control(app, ui.unwrap_or(&Value::Null))),
-        "edit.perspectiveWarp" | "layer.smartObjects.perspectiveWarp" if empty => Some(crate::perspective_ui::begin(app, ctx, id).map(|_| json!({"perspective": app.distort.describe()["perspective"]}))),
-        "edit.perspectiveWarp" | "layer.smartObjects.perspectiveWarp" if ui.is_some() && app.distort.perspective.is_some() => Some(crate::perspective_ui::control(app, ui.unwrap_or(&Value::Null))),
+        "edit.puppetWarp" | "layer.smartObjects.puppetWarp" if empty => {
+            Some(crate::puppet_ui::begin(app, ctx, id).map(|_| json!({"puppet": app.distort.describe()["puppet"]})))
+        }
+        "edit.puppetWarp" | "layer.smartObjects.puppetWarp" if ui.is_some() && app.distort.puppet.is_some() => {
+            Some(crate::puppet_ui::control(app, ui.unwrap_or(&Value::Null)))
+        }
+        "edit.perspectiveWarp" | "layer.smartObjects.perspectiveWarp" if empty => {
+            Some(crate::perspective_ui::begin(app, ctx, id).map(|_| json!({"perspective": app.distort.describe()["perspective"]})))
+        }
+        "edit.perspectiveWarp" | "layer.smartObjects.perspectiveWarp" if ui.is_some() && app.distort.perspective.is_some() => {
+            Some(crate::perspective_ui::control(app, ui.unwrap_or(&Value::Null)))
+        }
         _ => None,
     }
 }

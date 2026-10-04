@@ -9,8 +9,8 @@ use photocraft_doc::{Document, LayerContent};
 use photocraft_geom::Rect as DRect;
 use serde_json::json;
 
-use crate::state::{Tool, View};
 use crate::PhotocraftApp;
+use crate::state::{Tool, View};
 
 /// Largest texture side we upload; bigger documents display downsampled until the GPU path lands.
 pub const MAX_TEXTURE: u32 = 4096;
@@ -82,12 +82,9 @@ pub fn fit_view(view: &mut View, doc: &Document, area: Vec2) {
 
 /// Zoom steps like Photoshop's (⌘+ / ⌘−).
 pub fn zoom_step(z: f32, dir: i32) -> f32 {
-    const STEPS: [f32; 22] = [0.01, 0.02, 0.03, 0.05, 0.0667, 0.1, 0.125, 0.1667, 0.25, 0.333, 0.5, 0.6667, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 12.0, 16.0, 32.0];
-    if dir > 0 {
-        STEPS.iter().copied().find(|s| *s > z * 1.001).unwrap_or(32.0)
-    } else {
-        STEPS.iter().rev().copied().find(|s| *s < z * 0.999).unwrap_or(0.01)
-    }
+    const STEPS: [f32; 22] =
+        [0.01, 0.02, 0.03, 0.05, 0.0667, 0.1, 0.125, 0.1667, 0.25, 0.333, 0.5, 0.6667, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 12.0, 16.0, 32.0];
+    if dir > 0 { STEPS.iter().copied().find(|s| *s > z * 1.001).unwrap_or(32.0) } else { STEPS.iter().rev().copied().find(|s| *s < z * 0.999).unwrap_or(0.01) }
 }
 
 fn checker(app: &mut PhotocraftApp, ctx: &egui::Context) -> egui::TextureId {
@@ -101,7 +98,12 @@ fn checker(app: &mut PhotocraftApp, ctx: &egui::Context) -> egui::TextureId {
         .get_or_insert_with(|| {
             let (a, b) = (Color32::from_rgb(ca[0], ca[1], ca[2]), Color32::from_rgb(cb[0], cb[1], cb[2]));
             let img = egui::ColorImage::new([2, 2], vec![a, b, b, a]);
-            let opts = TextureOptions { magnification: egui::TextureFilter::Nearest, minification: egui::TextureFilter::Nearest, wrap_mode: egui::TextureWrapMode::Repeat, mipmap_mode: None };
+            let opts = TextureOptions {
+                magnification: egui::TextureFilter::Nearest,
+                minification: egui::TextureFilter::Nearest,
+                wrap_mode: egui::TextureWrapMode::Repeat,
+                mipmap_mode: None,
+            };
             ctx.load_texture("checker", img, opts)
         })
         .id()
@@ -199,9 +201,21 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
         (st.revision, st.last_damage.map(|r| if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) }), st.doc.id)
     };
     let (doc, preview_key) = display_doc(app, idx);
-    let cache = app.canvases.entry(id).or_insert(CanvasCache { revision: 0, texture: None, scale: 1.0, preview_key: 0, on_gpu: false, tex_revision: 0, tex_preview_key: 0 });
+    let cache = app.canvases.entry(id).or_insert(CanvasCache {
+        revision: 0,
+        texture: None,
+        scale: 1.0,
+        preview_key: 0,
+        on_gpu: false,
+        tex_revision: 0,
+        tex_preview_key: 0,
+    });
     if cache.tex_revision != revision || cache.texture.is_none() || cache.tex_preview_key != preview_key {
-        let partial = cache.texture.is_some() && cache.tex_preview_key == preview_key && cache.tex_revision + 1 == revision && cache.scale == 1.0 && last_damage.is_some();
+        let partial = cache.texture.is_some()
+            && cache.tex_preview_key == preview_key
+            && cache.tex_revision + 1 == revision
+            && cache.scale == 1.0
+            && last_damage.is_some();
         let t0 = crate::gpu_canvas::now_ms();
         if partial {
             let r = last_damage.unwrap().intersect(&doc.bounds());
@@ -255,10 +269,25 @@ fn effect_reach(layers: &[photocraft_doc::Layer]) -> i32 {
 /// Returns false if there is no GPU canvas.
 fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
     let Some(gpu) = app.gpu.clone() else { return false };
-    let Some((revision, last_damage, id)) = app.session.documents().get(idx).map(|st| (st.revision, st.last_damage.map(|r| if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) }), st.doc.id)) else { return false };
+    let Some((revision, last_damage, id)) = app
+        .session
+        .documents()
+        .get(idx)
+        .map(|st| (st.revision, st.last_damage.map(|r| if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) }), st.doc.id))
+    else {
+        return false;
+    };
     let (doc, preview_key) = display_doc(app, idx);
     let size = [doc.size.width, doc.size.height];
-    let cache = app.canvases.entry(id).or_insert(CanvasCache { revision: 0, texture: None, scale: 1.0, preview_key: 0, on_gpu: false, tex_revision: 0, tex_preview_key: 0 });
+    let cache = app.canvases.entry(id).or_insert(CanvasCache {
+        revision: 0,
+        texture: None,
+        scale: 1.0,
+        preview_key: 0,
+        on_gpu: false,
+        tex_revision: 0,
+        tex_preview_key: 0,
+    });
     let present = cache.on_gpu && gpu.has(id.0, size);
     if present && cache.revision == revision && cache.preview_key == preview_key {
         return true;
@@ -544,7 +573,12 @@ fn dots(ctx: &egui::Context, t: &crate::theme::Tokens) -> Option<egui::TextureId
         let c = t.canvas_dot;
         px[(n / 2 + dy) * n + n / 2 + dx] = Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
     }
-    let opts = TextureOptions { magnification: egui::TextureFilter::Linear, minification: egui::TextureFilter::Linear, wrap_mode: egui::TextureWrapMode::Repeat, mipmap_mode: None };
+    let opts = TextureOptions {
+        magnification: egui::TextureFilter::Linear,
+        minification: egui::TextureFilter::Linear,
+        wrap_mode: egui::TextureWrapMode::Repeat,
+        mipmap_mode: None,
+    };
     let tex = ctx.load_texture("canvas-dots", egui::ColorImage::new([n, n], px), opts);
     let id = tex.id();
     ctx.data_mut(|d| d.insert_temp(key, tex));
@@ -632,7 +666,16 @@ fn sync_display_lut(app: &mut PhotocraftApp, ctx: &egui::Context, doc: &photocra
     let sig = if mode == 0 {
         String::new()
     } else {
-        format!("{mode} {} {:?} {} {} {} {:?} {:?}", pv.setup.profile.content_hash(), pv.setup.intent, pv.setup.bpc, pv.setup.simulate_paper, pv.gamut_threshold, doc.mode, doc.icc_profile.as_ref().map(|p| p.len()))
+        format!(
+            "{mode} {} {:?} {} {} {} {:?} {:?}",
+            pv.setup.profile.content_hash(),
+            pv.setup.intent,
+            pv.setup.bpc,
+            pv.setup.simulate_paper,
+            pv.gamut_threshold,
+            doc.mode,
+            doc.icc_profile.as_ref().map(|p| p.len())
+        )
     };
     let key = egui::Id::new(("pc-display-lut", doc.id.0));
     if ctx.data(|d| d.get_temp::<String>(key)).as_deref() == Some(sig.as_str()) {
@@ -696,7 +739,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             doc_size: [doc.size.width.div_ceil(k), doc.size.height.div_ceil(k)],
             zoom: view.zoom * k as f32,
             center: [view.center[0] / k as f32, view.center[1] / k as f32],
-            shadow: { let t = crate::theme::Tokens::get(&ctx); !t.bevel && !t.pro && drop_shadow },
+            shadow: {
+                let t = crate::theme::Tokens::get(&ctx);
+                !t.bevel && !t.pro && drop_shadow
+            },
             pixel_grid: false,
             view_key: egui::Id::new(("pc-canvas-proxy", ctx.viewport_id(), idx)).value(),
             display: 0,
@@ -711,7 +757,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             doc_size: [doc.size.width, doc.size.height],
             zoom: view.zoom,
             center: view.center,
-            shadow: { let t = crate::theme::Tokens::get(&ctx); !t.bevel && !t.pro && drop_shadow },
+            shadow: {
+                let t = crate::theme::Tokens::get(&ctx);
+                !t.bevel && !t.pro && drop_shadow
+            },
             pixel_grid,
             view_key: egui::Id::new(("pc-canvas", ctx.viewport_id(), idx)).value(),
             display: sync_display_lut(app, &ctx, &doc),
@@ -809,7 +858,13 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             ((br[0].ceil() as i32).div_euclid(q) + 2) * q,
             ((br[1].ceil() as i32).div_euclid(q) + 2) * q,
         );
-        let key = crate::surface_fingerprint(sel) ^ (step as u64) << 56 ^ doc.id.0.rotate_left(17) ^ (vis.x0 as u64) << 8 ^ (vis.y0 as u64) << 24 ^ (vis.x1 as u64) << 36 ^ (vis.y1 as u64) << 48;
+        let key = crate::surface_fingerprint(sel)
+            ^ (step as u64) << 56
+            ^ doc.id.0.rotate_left(17)
+            ^ (vis.x0 as u64) << 8
+            ^ (vis.y0 as u64) << 24
+            ^ (vis.x1 as u64) << 36
+            ^ (vis.y1 as u64) << 48;
         let fresh = matches!(&app.outline_cache, Some((d, k, _)) if *d == doc.id && *k == key);
         if !fresh {
             let t0 = crate::gpu_canvas::now_ms();
@@ -962,13 +1017,23 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     }
                 }
                 // Preferences › Cursors › Other Cursors: Precise shows a crosshair for every tool.
-                Tool::Move | Tool::Type | Tool::Eyedropper if app.session.prefs().cursors.other == photocraft_engine::prefs::OtherCursor::Precise => egui::CursorIcon::Crosshair,
+                Tool::Move | Tool::Type | Tool::Eyedropper if app.session.prefs().cursors.other == photocraft_engine::prefs::OtherCursor::Precise => {
+                    egui::CursorIcon::Crosshair
+                }
                 Tool::Move => egui::CursorIcon::Move,
                 Tool::Hand => {
-                    if response.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab }
+                    if response.dragged() {
+                        egui::CursorIcon::Grabbing
+                    } else {
+                        egui::CursorIcon::Grab
+                    }
                 }
                 Tool::Zoom => {
-                    if alt { egui::CursorIcon::ZoomOut } else { egui::CursorIcon::ZoomIn }
+                    if alt {
+                        egui::CursorIcon::ZoomOut
+                    } else {
+                        egui::CursorIcon::ZoomIn
+                    }
                 }
                 Tool::Type => egui::CursorIcon::Text,
                 _ => egui::CursorIcon::Crosshair,
@@ -1162,9 +1227,19 @@ fn draw_drag_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
             }
         }
         Tool::Line => {
-            painter.line_segment([xf.to_screen(d.start[0] as f32, d.start[1] as f32), xf.to_screen(last[0] as f32, last[1] as f32)], Stroke::new(1.0, crate::theme::Tokens::get(painter.ctx()).accent));
+            painter.line_segment(
+                [xf.to_screen(d.start[0] as f32, d.start[1] as f32), xf.to_screen(last[0] as f32, last[1] as f32)],
+                Stroke::new(1.0, crate::theme::Tokens::get(painter.ctx()).accent),
+            );
         }
-        Tool::RectMarquee | Tool::EllipseMarquee | Tool::ObjectSelection | Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::CustomShape => {
+        Tool::RectMarquee
+        | Tool::EllipseMarquee
+        | Tool::ObjectSelection
+        | Tool::Rectangle
+        | Tool::EllipseShape
+        | Tool::Triangle
+        | Tool::Polygon
+        | Tool::CustomShape => {
             let r = Rect::from_two_pos(xf.to_screen(d.start[0] as f32, d.start[1] as f32), xf.to_screen(last[0] as f32, last[1] as f32));
             if matches!(d.tool, Tool::EllipseMarquee | Tool::EllipseShape) {
                 painter.add(egui::Shape::ellipse_stroke(r.center(), r.size() / 2.0, Stroke::new(1.0, Color32::WHITE)));
@@ -1291,7 +1366,9 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 }
                 Tool::PolygonLasso => {
                     // Click adds a vertex; clicking near the first vertex closes the polygon.
-                    let close = app.ui.polygon.first().is_some_and(|p0| app.ui.polygon.len() >= 3 && ((p0[0] - x).powi(2) + (p0[1] - y).powi(2)).sqrt() < 8.0 / app.current_zoom().max(0.01) as f64);
+                    let close = app.ui.polygon.first().is_some_and(|p0| {
+                        app.ui.polygon.len() >= 3 && ((p0[0] - x).powi(2) + (p0[1] - y).powi(2)).sqrt() < 8.0 / app.current_zoom().max(0.01) as f64
+                    });
                     if close {
                         commit_polygon(app, mods);
                     } else {

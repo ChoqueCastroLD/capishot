@@ -96,7 +96,14 @@ fn interlaced_rows(h: usize) -> Vec<usize> {
 
 /// An indexed GIF89a: `palette` (1..=256 entries), one index per pixel, optional transparent
 /// index (Graphic Control Extension) and interlacing.
-pub fn encode_gif_indexed(width: u32, height: u32, indices: &[u8], palette: &[[u8; 3]], transparent: Option<u8>, interlaced: bool) -> Result<Vec<u8>, CodecError> {
+pub fn encode_gif_indexed(
+    width: u32,
+    height: u32,
+    indices: &[u8],
+    palette: &[[u8; 3]],
+    transparent: Option<u8>,
+    interlaced: bool,
+) -> Result<Vec<u8>, CodecError> {
     let (w, h) = (width as usize, height as usize);
     if width == 0 || height == 0 || width > 65535 || height > 65535 || indices.len() != w * h {
         return Err(gif_err("GIF size must be 1..=65535 and match the index data"));
@@ -278,7 +285,17 @@ pub fn decode_wbmp(bytes: &[u8]) -> Result<(u32, u32, Vec<bool>), CodecError> {
 /// JPEG from 8-bit RGB (`rgb.len() == 3·w·h`): quality 1..=100, optional progressive scans and
 /// optimised Huffman tables (Save for Web's "Optimized"), optional ICC profile, density and XMP.
 #[allow(clippy::too_many_arguments)]
-pub fn encode_jpeg_rgb8(width: u32, height: u32, rgb: &[u8], quality: u8, progressive: bool, optimized: bool, icc: Option<&[u8]>, dpi: Option<f32>, xmp: Option<&str>) -> Result<Vec<u8>, CodecError> {
+pub fn encode_jpeg_rgb8(
+    width: u32,
+    height: u32,
+    rgb: &[u8],
+    quality: u8,
+    progressive: bool,
+    optimized: bool,
+    icc: Option<&[u8]>,
+    dpi: Option<f32>,
+    xmp: Option<&str>,
+) -> Result<Vec<u8>, CodecError> {
     let e = |e: jpeg_encoder::EncodingError| CodecError::encode(Format::Jpeg, e);
     let (Ok(w16), Ok(h16)) = (u16::try_from(width), u16::try_from(height)) else {
         return Err(CodecError::encode(Format::Jpeg, "JPEG dimensions are limited to 65535"));
@@ -425,12 +442,7 @@ mod anim_tests {
     #[test]
     fn animated_gif_has_header_and_frames() {
         let frames: Vec<GifFrame> = (0..3)
-            .map(|i| GifFrame {
-                indices: vec![i as u8; 4],
-                palette: vec![[0, 0, 0], [255, 0, 0], [0, 255, 0]],
-                transparent: None,
-                delay_cs: 4,
-            })
+            .map(|i| GifFrame { indices: vec![i as u8; 4], palette: vec![[0, 0, 0], [255, 0, 0], [0, 255, 0]], transparent: None, delay_cs: 4 })
             .collect();
         let g = encode_gif_animated(2, 2, &frames, true).unwrap();
         assert_eq!(&g[..6], b"GIF89a");

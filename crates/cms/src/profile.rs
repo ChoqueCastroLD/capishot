@@ -585,8 +585,11 @@ fn parse_lut(d: &[u8], a2b: bool) -> Result<Lut, CmsError> {
                 let mut v = Vec::with_capacity(count);
                 for _ in 0..count {
                     let s = r.slice(*off, len * bps)?;
-                    let t: Vec<f32> =
-                        if wide { s.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect() } else { s.iter().map(|b| *b as f32 / 255.0).collect() };
+                    let t: Vec<f32> = if wide {
+                        s.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect()
+                    } else {
+                        s.iter().map(|b| *b as f32 / 255.0).collect()
+                    };
                     *off += len * bps;
                     v.push(Curve::Table(t));
                 }
@@ -599,8 +602,11 @@ fn parse_lut(d: &[u8], a2b: bool) -> Result<Lut, CmsError> {
             }
             let total = nodes as usize * o;
             let s = r.slice(off, total * bps)?;
-            let data: Vec<f32> =
-                if wide { s.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect() } else { s.iter().map(|b| *b as f32 / 255.0).collect() };
+            let data: Vec<f32> = if wide {
+                s.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]]) as f32 / 65535.0).collect()
+            } else {
+                s.iter().map(|b| *b as f32 / 255.0).collect()
+            };
             off += total * bps;
             let out_curves = read_tables(&mut off, o, n_out)?;
             let mut stages = Vec::new();

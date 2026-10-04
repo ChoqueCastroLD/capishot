@@ -127,7 +127,12 @@ fn presets_persist_through_preferences_json() {
     t.load_prefs_json(&text).unwrap();
     let names = |t: &mut Session, cmd: &str, key: &str| -> Vec<String> {
         let v = t.execute(cmd, json!({})).unwrap();
-        v["groups"].as_array().unwrap().iter().flat_map(|g| g[key].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect::<Vec<_>>()).collect()
+        v["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|g| g[key].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect::<Vec<_>>())
+            .collect()
     };
     assert!(names(&mut t, "gradient.presets.list", "presets").contains(&"Saved".to_string()));
     assert!(names(&mut t, "shape.presets.list", "shapes").contains(&"Tri".to_string()));

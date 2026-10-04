@@ -28,11 +28,7 @@ async fn connect(server: PhotocraftMcp) -> RunningService<RoleClient, Client> {
     Client.serve(c).await.expect("client init")
 }
 
-async fn call(
-    client: &RunningService<RoleClient, Client>,
-    name: &str,
-    args: Value,
-) -> CallToolResult {
+async fn call(client: &RunningService<RoleClient, Client>, name: &str, args: Value) -> CallToolResult {
     let mut p = CallToolRequestParams::new(name.to_owned());
     if let Value::Object(m) = args {
         p = p.with_arguments(m);
@@ -41,12 +37,7 @@ async fn call(
 }
 
 fn text(r: &CallToolResult) -> String {
-    r.content
-        .iter()
-        .filter_map(|c| c.as_text())
-        .map(|t| t.text.clone())
-        .collect::<Vec<_>>()
-        .join("\n")
+    r.content.iter().filter_map(|c| c.as_text()).map(|t| t.text.clone()).collect::<Vec<_>>().join("\n")
 }
 
 fn json_of(r: &CallToolResult) -> Value {
@@ -86,28 +77,15 @@ async fn lists_expected_tools() {
         "ui_set",
         "control_call",
     ] {
-        assert!(
-            names.contains(&n.to_string()),
-            "missing tool {n}: {names:?}"
-        );
+        assert!(names.contains(&n.to_string()), "missing tool {n}: {names:?}");
     }
     for t in &tools {
-        assert!(
-            t.name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_'),
-            "tool name `{}`",
-            t.name
-        );
+        assert!(t.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'), "tool name `{}`", t.name);
         assert!(t.description.as_ref().is_some_and(|d| !d.is_empty()));
     }
     let info = client.peer_info().expect("server info");
     assert_eq!(info.server_info.as_ref().unwrap().name, "photocraft");
-    assert!(
-        info.instructions
-            .as_ref()
-            .is_some_and(|i| i.contains("command_list"))
-    );
+    assert!(info.instructions.as_ref().is_some_and(|i| i.contains("command_list")));
     client.cancel().await.unwrap();
 }
 
@@ -116,48 +94,23 @@ async fn headless_edit_render_save_roundtrip() {
     let dir = tmp("edit");
     let client = connect(PhotocraftMcp::headless()).await;
 
-    let r = call(
-        &client,
-        "doc_new",
-        json!({"width": 64, "height": 48, "background": "white", "name": "Agent"}),
-    )
-    .await;
+    let r = call(&client, "doc_new", json!({"width": 64, "height": 48, "background": "white", "name": "Agent"})).await;
     assert_ne!(r.is_error, Some(true), "{}", text(&r));
-    let r = call(
-        &client,
-        "command_run",
-        json!({"id": "layer.new.layer", "params": {"name": "Ink"}}),
-    )
-    .await;
+    let r = call(&client, "command_run", json!({"id": "layer.new.layer", "params": {"name": "Ink"}})).await;
     assert_ne!(r.is_error, Some(true), "{}", text(&r));
-    let r = call(
-        &client,
-        "command_run",
-        json!({"id": "paint.stroke", "params": {"points": [[5, 5, 1.0], [50, 40, 1.0]], "size": 6, "color": "#ff0000"}}),
-    )
-    .await;
+    let r =
+        call(&client, "command_run", json!({"id": "paint.stroke", "params": {"points": [[5, 5, 1.0], [50, 40, 1.0]], "size": 6, "color": "#ff0000"}})).await;
     assert_ne!(r.is_error, Some(true), "{}", text(&r));
 
     let doc = json_of(&call(&client, "doc_inspect", json!({})).await);
     assert_eq!(doc["width"], 64);
-    let names: Vec<&str> = doc["layers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|l| l["name"].as_str())
-        .collect();
+    let names: Vec<&str> = doc["layers"].as_array().unwrap().iter().filter_map(|l| l["name"].as_str()).collect();
     assert_eq!(names, ["Ink", "Background"]);
 
     let r = call(&client, "doc_render_preview", json!({"max_side": 32})).await;
-    let img = r
-        .content
-        .iter()
-        .find_map(|c| c.as_image())
-        .expect("image content");
+    let img = r.content.iter().find_map(|c| c.as_image()).expect("image content");
     assert_eq!(img.mime_type, "image/png");
-    let png = base64::engine::general_purpose::STANDARD
-        .decode(&img.data)
-        .unwrap();
+    let png = base64::engine::general_purpose::STANDARD.decode(&img.data).unwrap();
     let decoded = photocraft_codecs::decode(&png).unwrap();
     assert_eq!(decoded.dimensions(), (32, 24));
 
@@ -165,23 +118,9 @@ async fn headless_edit_render_save_roundtrip() {
     let r = json_of(&call(&client, "doc_save", json!({"path": pc.to_string_lossy()})).await);
     assert_eq!(r["path"], pc.to_string_lossy().as_ref());
     let png_path = dir.join("agent.png");
-    json_of(
-        &call(
-            &client,
-            "doc_export",
-            json!({"path": png_path.to_string_lossy()}),
-        )
-        .await,
-    );
+    json_of(&call(&client, "doc_export", json!({"path": png_path.to_string_lossy()})).await);
     let jpg_path = dir.join("agent.jpg");
-    json_of(
-        &call(
-            &client,
-            "doc_export",
-            json!({"path": jpg_path.to_string_lossy(), "quality": 70}),
-        )
-        .await,
-    );
+    json_of(&call(&client, "doc_export", json!({"path": jpg_path.to_string_lossy(), "quality": 70})).await);
     assert!(photocraft_codecs::decode(&std::fs::read(&png_path).unwrap()).is_ok());
     assert!(std::fs::metadata(&jpg_path).unwrap().len() > 100);
 
@@ -206,28 +145,10 @@ async fn command_list_filters() {
     assert!(n_all > 20);
     let blur = json_of(&call(&client, "command_list", json!({"filter": "blur"})).await);
     assert!(!blur.as_array().unwrap().is_empty() && blur.as_array().unwrap().len() < n_all);
-    assert!(
-        blur.as_array()
-            .unwrap()
-            .iter()
-            .all(|c| c["params"].is_string())
-    );
+    assert!(blur.as_array().unwrap().iter().all(|c| c["params"].is_string()));
     let enabled = json_of(&call(&client, "command_list", json!({"enabled_only": true})).await);
-    assert!(
-        enabled
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| c["id"] == "file.new")
-    );
-    assert!(
-        !enabled
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| c["id"] == "layer.new.layer"),
-        "needs a document"
-    );
+    assert!(enabled.as_array().unwrap().iter().any(|c| c["id"] == "file.new"));
+    assert!(!enabled.as_array().unwrap().iter().any(|c| c["id"] == "layer.new.layer"), "needs a document");
     client.cancel().await.unwrap();
 }
 
@@ -239,12 +160,7 @@ async fn errors_are_tool_errors_not_crashes() {
     assert!(text(&r).contains("unknown command"));
     let r = call(&client, "doc_inspect", json!({})).await;
     assert_eq!(r.is_error, Some(true));
-    let r = call(
-        &client,
-        "doc_open",
-        json!({"path": "/definitely/missing.png"}),
-    )
-    .await;
+    let r = call(&client, "doc_open", json!({"path": "/definitely/missing.png"})).await;
     assert_eq!(r.is_error, Some(true));
     let r = call(&client, "ui_inspect", json!({})).await;
     assert_eq!(r.is_error, Some(true));
@@ -259,35 +175,13 @@ async fn errors_are_tool_errors_not_crashes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn open_png_and_inspect() {
     let dir = tmp("open");
-    let img = photocraft_codecs::Image::from_u8(
-        8,
-        4,
-        photocraft_codecs::ChannelLayout::Rgb,
-        vec![200; 96],
-    )
-    .unwrap();
+    let img = photocraft_codecs::Image::from_u8(8, 4, photocraft_codecs::ChannelLayout::Rgb, vec![200; 96]).unwrap();
     let path = dir.join("in.png");
-    std::fs::File::create(&path)
-        .unwrap()
-        .write_all(
-            &photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default())
-                .unwrap(),
-        )
-        .unwrap();
+    std::fs::File::create(&path).unwrap().write_all(&photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()).unwrap();
     let client = connect(PhotocraftMcp::headless()).await;
     let o = json_of(&call(&client, "doc_open", json!({"path": path.to_string_lossy()})).await);
-    assert_eq!(
-        (o["width"].as_u64(), o["height"].as_u64()),
-        (Some(8), Some(4))
-    );
-    let px = json_of(
-        &call(
-            &client,
-            "command_run",
-            json!({"id": "document.pixel", "params": {"x": 1, "y": 1}}),
-        )
-        .await,
-    );
+    assert_eq!((o["width"].as_u64(), o["height"].as_u64()), (Some(8), Some(4)));
+    let px = json_of(&call(&client, "command_run", json!({"id": "document.pixel", "params": {"x": 1, "y": 1}})).await);
     assert!(px.to_string().contains("0.78"), "{px}");
     client.cancel().await.unwrap();
     std::fs::remove_dir_all(dir).unwrap();
@@ -321,31 +215,14 @@ async fn fake_app() -> (String, tokio::task::JoinHandle<Vec<Value>>) {
                 }
                 "ui.screenshot" => {
                     let path = req["params"]["path"].as_str().unwrap().to_owned();
-                    let img = photocraft_codecs::Image::from_u8(
-                        40,
-                        20,
-                        photocraft_codecs::ChannelLayout::Rgba,
-                        vec![9; 3200],
-                    )
-                    .unwrap();
-                    std::fs::write(
-                        &path,
-                        photocraft_codecs::encode(
-                            &img,
-                            photocraft_codecs::Format::Png,
-                            &Default::default(),
-                        )
-                        .unwrap(),
-                    )
-                    .unwrap();
+                    let img = photocraft_codecs::Image::from_u8(40, 20, photocraft_codecs::ChannelLayout::Rgba, vec![9; 3200]).unwrap();
+                    std::fs::write(&path, photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()).unwrap();
                     json!({"id": id, "ok": true, "result": {"path": path}})
                 }
                 _ => json!({"id": id, "ok": false, "error": format!("unknown tool `{method}`")}),
             };
             // A stale line first, to check id matching.
-            w.write_all(b"{\"id\":999999,\"ok\":true,\"result\":null}\n")
-                .await
-                .unwrap();
+            w.write_all(b"{\"id\":999999,\"ok\":true,\"result\":null}\n").await.unwrap();
             w.write_all(format!("{reply}\n").as_bytes()).await.unwrap();
             seen.push(req);
         }
@@ -361,30 +238,14 @@ async fn bridge_forwards_to_control_protocol() {
 
     let ui = json_of(&call(&client, "ui_inspect", json!({})).await);
     assert_eq!(ui["tool"], "brush");
-    let r = json_of(
-        &call(
-            &client,
-            "command_run",
-            json!({"id": "layer.new.layer", "params": {"name": "X"}}),
-        )
-        .await,
-    );
+    let r = json_of(&call(&client, "command_run", json!({"id": "layer.new.layer", "params": {"name": "X"}})).await);
     assert_eq!(r["ran"], "layer.new.layer");
     let l = json_of(&call(&client, "command_list", json!({})).await);
     assert_eq!(l[0]["id"], "file.new");
     let shot = call(&client, "ui_screenshot", json!({"max_side": 20})).await;
-    let img = shot
-        .content
-        .iter()
-        .find_map(|c| c.as_image())
-        .expect("image");
-    let png = base64::engine::general_purpose::STANDARD
-        .decode(&img.data)
-        .unwrap();
-    assert_eq!(
-        photocraft_codecs::decode(&png).unwrap().dimensions(),
-        (20, 10)
-    );
+    let img = shot.content.iter().find_map(|c| c.as_image()).expect("image");
+    let png = base64::engine::general_purpose::STANDARD.decode(&img.data).unwrap();
+    assert_eq!(photocraft_codecs::decode(&png).unwrap().dimensions(), (20, 10));
     let e = call(&client, "control_call", json!({"method": "bogus.method"})).await;
     assert_eq!(e.is_error, Some(true));
     assert!(text(&e).contains("unknown tool"));

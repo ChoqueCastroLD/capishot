@@ -6,8 +6,8 @@
 use photocraft_color::{BlendMode, Color};
 use photocraft_doc::adjust::CurvePoint;
 use photocraft_doc::{
-    Bevel, BevelContour, BevelStyle, BevelTechnique, BevelTexture, Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, Satin, Shadow,
-    StrokeFx, StrokePosition,
+    Bevel, BevelContour, BevelStyle, BevelTechnique, BevelTexture, Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, Satin,
+    Shadow, StrokeFx, StrokePosition,
 };
 use photocraft_psd::descriptor::{Descriptor, Id, UnicodeString, Value, VersionedDescriptor};
 
@@ -80,11 +80,7 @@ fn contour(d: &Descriptor, key: &str) -> Contour {
         }
     }
     let linear = points.len() == 2 && points[0].input == 0.0 && points[0].output == 0.0 && points[1].input == 1.0 && points[1].output == 1.0;
-    if points.is_empty() || (linear && (name.is_empty() || name == "Linear")) {
-        Contour::Linear
-    } else {
-        Contour::Custom { name, points }
-    }
+    if points.is_empty() || (linear && (name.is_empty() || name == "Linear")) { Contour::Linear } else { Contour::Custom { name, points } }
 }
 fn contour_value(c: &Contour) -> Value {
     let (name, points) = match c {
@@ -103,11 +99,7 @@ fn contour_value(c: &Contour) -> Value {
 }
 
 fn common(d: &Descriptor, blend: BlendMode, opacity: f32) -> FxCommon {
-    FxCommon {
-        enabled: !matches!(d.get("enab"), Some(Value::Boolean(false))),
-        blend: blend_of(d, "Md  ", blend),
-        opacity: pct(d, "Opct", opacity),
-    }
+    FxCommon { enabled: !matches!(d.get("enab"), Some(Value::Boolean(false))), blend: blend_of(d, "Md  ", blend), opacity: pct(d, "Opct", opacity) }
 }
 
 fn gradient_from(d: &Descriptor) -> Gradient {
@@ -312,10 +304,7 @@ fn gradient_keys(mut d: Descriptor, g: &Gradient) -> Descriptor {
         .with("Rvrs", Value::Boolean(g.reverse))
         .with("Algn", Value::Boolean(g.align))
         .with("Scl ", unit(b"#Prc", g.scale * 100.0));
-    d.with(
-        "Ofst",
-        Value::Descriptor(Descriptor::new("Pnt ").with("Hrzn", unit(b"#Prc", g.offset.0 * 100.0)).with("Vrtc", unit(b"#Prc", g.offset.1 * 100.0))),
-    )
+    d.with("Ofst", Value::Descriptor(Descriptor::new("Pnt ").with("Hrzn", unit(b"#Prc", g.offset.0 * 100.0)).with("Vrtc", unit(b"#Prc", g.offset.1 * 100.0))))
 }
 
 fn write_one(e: &Effect) -> (&'static str, Descriptor) {
@@ -358,10 +347,8 @@ fn write_one(e: &Effect) -> (&'static str, Descriptor) {
                 .with("TrnS", contour_value(&g.contour))
                 .with("Inpr", unit(b"#Prc", g.range * 100.0));
             if inner {
-                d = d.with(
-                    "glwS",
-                    Value::Enumerated { type_id: Id::new("IGSr"), value: Id::new(if g.source == GlowSource::Center { "SrcC" } else { "SrcE" }) },
-                );
+                d = d
+                    .with("glwS", Value::Enumerated { type_id: Id::new("IGSr"), value: Id::new(if g.source == GlowSource::Center { "SrcC" } else { "SrcE" }) });
             }
             (if inner { "IrGl" } else { "OrGl" }, d)
         }
@@ -375,9 +362,9 @@ fn write_one(e: &Effect) -> (&'static str, Descriptor) {
                 .with("Styl", Value::Enumerated { type_id: Id::new("FStl"), value: Id::new(styl) })
                 .with("Sz  ", unit(b"#Pxl", s.size));
             d = match &s.paint {
-                FxPaint::Color(c) => d
-                    .with("PntT", Value::Enumerated { type_id: Id::new("FrFl"), value: Id::new("SClr") })
-                    .with("Clr ", Value::Descriptor(color_to_desc(c))),
+                FxPaint::Color(c) => {
+                    d.with("PntT", Value::Enumerated { type_id: Id::new("FrFl"), value: Id::new("SClr") }).with("Clr ", Value::Descriptor(color_to_desc(c)))
+                }
                 FxPaint::Gradient(g) => gradient_keys(d.with("PntT", Value::Enumerated { type_id: Id::new("FrFl"), value: Id::new("GrFl") }), g),
                 FxPaint::Pattern { name, id, scale } => d
                     .with("PntT", Value::Enumerated { type_id: Id::new("FrFl"), value: Id::new("Ptrn") })
@@ -393,16 +380,16 @@ fn write_one(e: &Effect) -> (&'static str, Descriptor) {
             };
             ("FrFX", d)
         }
-        Effect::ColorOverlay { common: c, color } => {
-            ("SoFi", with_common(Descriptor::new("SoFi"), c).with("Clr ", Value::Descriptor(color_to_desc(color))))
-        }
+        Effect::ColorOverlay { common: c, color } => ("SoFi", with_common(Descriptor::new("SoFi"), c).with("Clr ", Value::Descriptor(color_to_desc(color)))),
         Effect::GradientOverlay { common: c, gradient, dither } => {
             ("GrFl", gradient_keys(with_common(Descriptor::new("GrFl"), c), gradient).with("Dthr", Value::Boolean(*dither)))
         }
         Effect::PatternOverlay { common: c, name, id, scale, angle, link, phase } => (
             "patternFill",
             with_pattern_placement(
-                with_common(Descriptor::new("patternFill"), c).with("Ptrn", Value::Descriptor(pattern_ref_desc(name, id))).with("Scl ", unit(b"#Prc", scale * 100.0)),
+                with_common(Descriptor::new("patternFill"), c)
+                    .with("Ptrn", Value::Descriptor(pattern_ref_desc(name, id)))
+                    .with("Scl ", unit(b"#Prc", scale * 100.0)),
                 *angle,
                 *link,
                 *phase,
@@ -453,7 +440,11 @@ fn write_one(e: &Effect) -> (&'static str, Descriptor) {
                 .with("TrnS", contour_value(&b.gloss_contour))
                 .with("Sftn", unit(b"#Pxl", b.soften));
             let d = match &b.contour {
-                Some(c) => d.with("useShape", Value::Boolean(true)).with("MpgS", contour_value(&c.contour)).with("AntA", Value::Boolean(c.anti_alias)).with("Inpr", unit(b"#Prc", c.range * 100.0)),
+                Some(c) => d
+                    .with("useShape", Value::Boolean(true))
+                    .with("MpgS", contour_value(&c.contour))
+                    .with("AntA", Value::Boolean(c.anti_alias))
+                    .with("Inpr", unit(b"#Prc", c.range * 100.0)),
                 None => d.with("useShape", Value::Boolean(false)),
             };
             let d = match &b.texture {
@@ -507,9 +498,7 @@ pub fn parse_lrfx(data: &[u8]) -> Option<(bool, Vec<Effect>)> {
         Some(Color::rgb(c(0)?, c(1)?, c(2)?))
     };
     let blend_at = |at: usize| -> BlendMode {
-        data.get(at + 4..at + 8)
-            .and_then(|k| photocraft_color::BlendMode::from_psd_key([k[0], k[1], k[2], k[3]]))
-            .unwrap_or(BlendMode::Normal)
+        data.get(at + 4..at + 8).and_then(|k| photocraft_color::BlendMode::from_psd_key([k[0], k[1], k[2], k[3]])).unwrap_or(BlendMode::Normal)
     };
     let count = be16(2)?;
     let mut at = 4;
@@ -595,8 +584,25 @@ mod tests {
         };
         vec![
             Effect::default_drop_shadow(),
-            Effect::DropShadow(Shadow { distance: 9.0, spread: 0.25, contour: Contour::Custom { name: "Cone".into(), points: vec![CurvePoint { input: 0.0, output: 0.0 }, CurvePoint { input: 0.5, output: 1.0 }, CurvePoint { input: 1.0, output: 0.0 }] }, ..match Effect::default_drop_shadow() { Effect::DropShadow(s) => s, _ => unreachable!() } }),
-            Effect::InnerShadow(Shadow { knocks_out: false, ..match Effect::default_drop_shadow() { Effect::DropShadow(s) => s, _ => unreachable!() } }),
+            Effect::DropShadow(Shadow {
+                distance: 9.0,
+                spread: 0.25,
+                contour: Contour::Custom {
+                    name: "Cone".into(),
+                    points: vec![CurvePoint { input: 0.0, output: 0.0 }, CurvePoint { input: 0.5, output: 1.0 }, CurvePoint { input: 1.0, output: 0.0 }],
+                },
+                ..match Effect::default_drop_shadow() {
+                    Effect::DropShadow(s) => s,
+                    _ => unreachable!(),
+                }
+            }),
+            Effect::InnerShadow(Shadow {
+                knocks_out: false,
+                ..match Effect::default_drop_shadow() {
+                    Effect::DropShadow(s) => s,
+                    _ => unreachable!(),
+                }
+            }),
             Effect::OuterGlow(Glow {
                 common: FxCommon::new(BlendMode::Screen, 0.5),
                 paint: FxPaint::Color(Color::rgb(1.0, 1.0, 0.0)),
@@ -623,12 +629,39 @@ mod tests {
                 noise: 0.0,
                 source: GlowSource::Center,
             }),
-            Effect::Stroke(StrokeFx { common: FxCommon::new(BlendMode::Normal, 1.0), size: 3.0, position: StrokePosition::Inside, paint: FxPaint::Color(Color::rgb(0.0, 1.0, 0.0)) }),
-            Effect::Stroke(StrokeFx { common: FxCommon::new(BlendMode::Multiply, 0.5), size: 6.0, position: StrokePosition::Center, paint: FxPaint::Gradient(g.clone()) }),
+            Effect::Stroke(StrokeFx {
+                common: FxCommon::new(BlendMode::Normal, 1.0),
+                size: 3.0,
+                position: StrokePosition::Inside,
+                paint: FxPaint::Color(Color::rgb(0.0, 1.0, 0.0)),
+            }),
+            Effect::Stroke(StrokeFx {
+                common: FxCommon::new(BlendMode::Multiply, 0.5),
+                size: 6.0,
+                position: StrokePosition::Center,
+                paint: FxPaint::Gradient(g.clone()),
+            }),
             Effect::ColorOverlay { common: FxCommon::new(BlendMode::Overlay, 0.5), color: Color::rgb(0.0, 0.0, 1.0) },
             Effect::GradientOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), gradient: g, dither: true },
-            Effect::PatternOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), name: "Bubbles".into(), id: "abc".into(), scale: 1.0, angle: 15.0, link: false, phase: (4.0, 2.0) },
-            Effect::Satin(Satin { common: FxCommon::new(BlendMode::Multiply, 0.5), color: Color::BLACK, angle: 19.0, distance: 11.0, size: 14.0, contour: Contour::Linear, anti_alias: true, invert: true }),
+            Effect::PatternOverlay {
+                common: FxCommon::new(BlendMode::Normal, 1.0),
+                name: "Bubbles".into(),
+                id: "abc".into(),
+                scale: 1.0,
+                angle: 15.0,
+                link: false,
+                phase: (4.0, 2.0),
+            },
+            Effect::Satin(Satin {
+                common: FxCommon::new(BlendMode::Multiply, 0.5),
+                color: Color::BLACK,
+                angle: 19.0,
+                distance: 11.0,
+                size: 14.0,
+                contour: Contour::Linear,
+                anti_alias: true,
+                invert: true,
+            }),
             Effect::BevelEmboss(Bevel {
                 enabled: true,
                 style: BevelStyle::Emboss,

@@ -15,16 +15,67 @@ pub type Preset = (&'static str, u32, u32, f32);
 /// Photoshop's New Document categories and their blank-document presets.
 pub const CATEGORIES: &[(&str, &[Preset])] = &[
     ("Recent", &[("Default Photoshop Size", 2100, 1500, 300.0), ("HDTV 1080p", 1920, 1080, 72.0)]),
-    ("Photo", &[("Landscape, 6 x 4", 1800, 1200, 300.0), ("Landscape, 7 x 5", 2100, 1500, 300.0), ("Landscape, 10 x 8", 3000, 2400, 300.0), ("Portrait, 4 x 6", 1200, 1800, 300.0), ("Portrait, 5 x 7", 1500, 2100, 300.0), ("Square, 5 x 5", 1500, 1500, 300.0)]),
-    ("Print", &[("Letter", 2550, 3300, 300.0), ("Legal", 2550, 4200, 300.0), ("Tabloid", 3300, 5100, 300.0), ("A4", 2480, 3508, 300.0), ("A3", 3508, 4961, 300.0), ("A5", 1748, 2480, 300.0)]),
-    ("Art & Illustration", &[("Poster", 5400, 7200, 300.0), ("Postcard", 1800, 1200, 300.0), ("Comic Book", 1988, 3075, 300.0), ("Square, 12 x 12", 3600, 3600, 300.0)]),
-    ("Web", &[("Web Most Common", 1366, 768, 72.0), ("Web Minimum", 1024, 768, 72.0), ("Web Large", 1920, 1080, 72.0), ("MacBook Pro 16\"", 3456, 2234, 72.0), ("iMac 24\"", 4480, 2520, 72.0)]),
-    ("Mobile", &[("iPhone 16", 1179, 2556, 72.0), ("iPhone 16 Pro Max", 1320, 2868, 72.0), ("iPad Pro 13\"", 2064, 2752, 72.0), ("Android 1080p", 1080, 1920, 72.0), ("Apple Watch 45mm", 396, 484, 72.0)]),
-    ("Film & Video", &[("HDTV 1080p", 1920, 1080, 72.0), ("HDTV 720p", 1280, 720, 72.0), ("UHD 4K", 3840, 2160, 72.0), ("DCI 4K", 4096, 2160, 72.0), ("UHD 8K", 7680, 4320, 72.0)]),
+    (
+        "Photo",
+        &[
+            ("Landscape, 6 x 4", 1800, 1200, 300.0),
+            ("Landscape, 7 x 5", 2100, 1500, 300.0),
+            ("Landscape, 10 x 8", 3000, 2400, 300.0),
+            ("Portrait, 4 x 6", 1200, 1800, 300.0),
+            ("Portrait, 5 x 7", 1500, 2100, 300.0),
+            ("Square, 5 x 5", 1500, 1500, 300.0),
+        ],
+    ),
+    (
+        "Print",
+        &[
+            ("Letter", 2550, 3300, 300.0),
+            ("Legal", 2550, 4200, 300.0),
+            ("Tabloid", 3300, 5100, 300.0),
+            ("A4", 2480, 3508, 300.0),
+            ("A3", 3508, 4961, 300.0),
+            ("A5", 1748, 2480, 300.0),
+        ],
+    ),
+    (
+        "Art & Illustration",
+        &[("Poster", 5400, 7200, 300.0), ("Postcard", 1800, 1200, 300.0), ("Comic Book", 1988, 3075, 300.0), ("Square, 12 x 12", 3600, 3600, 300.0)],
+    ),
+    (
+        "Web",
+        &[
+            ("Web Most Common", 1366, 768, 72.0),
+            ("Web Minimum", 1024, 768, 72.0),
+            ("Web Large", 1920, 1080, 72.0),
+            ("MacBook Pro 16\"", 3456, 2234, 72.0),
+            ("iMac 24\"", 4480, 2520, 72.0),
+        ],
+    ),
+    (
+        "Mobile",
+        &[
+            ("iPhone 16", 1179, 2556, 72.0),
+            ("iPhone 16 Pro Max", 1320, 2868, 72.0),
+            ("iPad Pro 13\"", 2064, 2752, 72.0),
+            ("Android 1080p", 1080, 1920, 72.0),
+            ("Apple Watch 45mm", 396, 484, 72.0),
+        ],
+    ),
+    (
+        "Film & Video",
+        &[
+            ("HDTV 1080p", 1920, 1080, 72.0),
+            ("HDTV 720p", 1280, 720, 72.0),
+            ("UHD 4K", 3840, 2160, 72.0),
+            ("DCI 4K", 4096, 2160, 72.0),
+            ("UHD 8K", 7680, 4320, 72.0),
+        ],
+    ),
 ];
 
 /// Width/Height units: (key, label, units per inch; 0 = pixels).
-pub const UNITS: &[(&str, &str, f32)] = &[("px", "Pixels", 0.0), ("in", "Inches", 1.0), ("cm", "Centimeters", 2.54), ("mm", "Millimeters", 25.4), ("pt", "Points", 72.0), ("pica", "Picas", 6.0)];
+pub const UNITS: &[(&str, &str, f32)] =
+    &[("px", "Pixels", 0.0), ("in", "Inches", 1.0), ("cm", "Centimeters", 2.54), ("mm", "Millimeters", 25.4), ("pt", "Points", 72.0), ("pica", "Picas", 6.0)];
 
 /// Pixels to the display unit at `ppi`.
 pub fn to_unit(px: f32, unit: &str, ppi: f32) -> f32 {
@@ -112,7 +163,17 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                     for p in row {
                         let (r, resp) = ui.allocate_exact_size(card, Sense::click());
                         let on = chosen == p.0;
-                        ui.painter().rect_filled(r, t.radius, if on { t.row_selected } else if resp.hovered() { t.hover } else { t.field });
+                        ui.painter().rect_filled(
+                            r,
+                            t.radius,
+                            if on {
+                                t.row_selected
+                            } else if resp.hovered() {
+                                t.hover
+                            } else {
+                                t.field
+                            },
+                        );
                         if on {
                             ui.painter().rect_stroke(r, t.radius, Stroke::new(1.5, t.accent), StrokeKind::Inside);
                         }
@@ -120,7 +181,12 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                         ui.painter().text(pos2(r.center().x, r.top() + 72.0), Align2::CENTER_CENTER, p.0, egui::FontId::proportional(12.0), t.text);
                         let unit = if p.3 >= 300.0 { "in" } else { "px" };
                         let size = if unit == "in" {
-                            format!("{} x {} in @ {} ppi", widgets::fmt_num(to_unit(p.1 as f32, "in", p.3) as f64), widgets::fmt_num(to_unit(p.2 as f32, "in", p.3) as f64), p.3)
+                            format!(
+                                "{} x {} in @ {} ppi",
+                                widgets::fmt_num(to_unit(p.1 as f32, "in", p.3) as f64),
+                                widgets::fmt_num(to_unit(p.2 as f32, "in", p.3) as f64),
+                                p.3
+                            )
                         } else {
                             format!("{} x {} px @ {} ppi", p.1, p.2, p.3)
                         };
@@ -192,7 +258,18 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             small_label(ui, "Color Mode");
             ui.horizontal(|ui| {
                 let mut mode = get_s(f, "mode", "rgb");
-                if widgets::dropdown(ui, "nd-mode", &mut mode, &[("gray".to_string(), "Grayscale"), ("rgb".to_string(), "RGB Color"), ("cmyk".to_string(), "CMYK Color"), ("lab".to_string(), "Lab Color")], 110.0) {
+                if widgets::dropdown(
+                    ui,
+                    "nd-mode",
+                    &mut mode,
+                    &[
+                        ("gray".to_string(), "Grayscale"),
+                        ("rgb".to_string(), "RGB Color"),
+                        ("cmyk".to_string(), "CMYK Color"),
+                        ("lab".to_string(), "Lab Color"),
+                    ],
+                    110.0,
+                ) {
                     f.insert("mode".into(), json!(mode));
                 }
                 let mut depth = f.get("depth").and_then(Value::as_u64).unwrap_or(8);
@@ -203,7 +280,12 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             ui.add_space(4.0);
             small_label(ui, "Background Contents");
             let mut bg = get_s(f, "background", "white");
-            let opts = [("white".to_string(), "White"), ("black".to_string(), "Black"), ("backgroundColor".to_string(), "Background Color"), ("transparent".to_string(), "Transparent")];
+            let opts = [
+                ("white".to_string(), "White"),
+                ("black".to_string(), "Black"),
+                ("backgroundColor".to_string(), "Background Color"),
+                ("transparent".to_string(), "Transparent"),
+            ];
             if widgets::dropdown(ui, "nd-bg", &mut bg, &opts, 240.0) {
                 f.insert("background".into(), json!(bg));
             }

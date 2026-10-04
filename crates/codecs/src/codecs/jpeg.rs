@@ -72,16 +72,12 @@ pub(crate) fn scan_metadata(b: &[u8]) -> JpegMeta {
                 m.exif = Some(seg[EXIF_HEADER.len()..].to_vec());
             }
             0xE1 if seg.starts_with(XMP_HEADER) && m.xmp.is_none() => {
-                m.xmp = std::str::from_utf8(&seg[XMP_HEADER.len()..])
-                    .ok()
-                    .map(|s| s.trim_end_matches('\0').to_owned());
+                m.xmp = std::str::from_utf8(&seg[XMP_HEADER.len()..]).ok().map(|s| s.trim_end_matches('\0').to_owned());
             }
             0xE2 if seg.len() >= 14 && seg.starts_with(ICC_HEADER) => {
                 icc_parts.push((seg[12], seg[13], &seg[14..]));
             }
-            0xC0..=0xCF
-                if !matches!(marker, 0xC4 | 0xC8 | 0xCC) && seg.len() >= 6 && m.frame.is_none() =>
-            {
+            0xC0..=0xCF if !matches!(marker, 0xC4 | 0xC8 | 0xCC) && seg.len() >= 6 && m.frame.is_none() => {
                 let h = u16::from_be_bytes([seg[1], seg[2]]) as u32;
                 let w = u16::from_be_bytes([seg[3], seg[4]]) as u32;
                 m.frame = Some((w, h, seg[5]));
@@ -96,11 +92,7 @@ pub(crate) fn scan_metadata(b: &[u8]) -> JpegMeta {
     if !icc_parts.is_empty() {
         icc_parts.sort_by_key(|p| p.0);
         let total = icc_parts[0].1 as usize;
-        let seqs_ok = icc_parts.len() == total
-            && icc_parts
-                .iter()
-                .enumerate()
-                .all(|(k, p)| p.0 as usize == k + 1 && p.1 as usize == total);
+        let seqs_ok = icc_parts.len() == total && icc_parts.iter().enumerate().all(|(k, p)| p.0 as usize == k + 1 && p.1 as usize == total);
         if seqs_ok || icc_parts.len() == 1 {
             m.icc = Some(icc_parts.iter().flat_map(|p| p.2.iter().copied()).collect());
         }
@@ -117,10 +109,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
     if let Some((w, h, nc)) = meta.frame {
         limits.check_bytes(w, h, u64::from(nc.max(1)))?;
     }
-    let options = DecoderOptions::default()
-        .set_strict_mode(false)
-        .set_max_width(65535)
-        .set_max_height(65535);
+    let options = DecoderOptions::default().set_strict_mode(false).set_max_width(65535).set_max_height(65535);
     let mut dec = zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(bytes), options);
     dec.decode_headers().map_err(err)?;
     let (w, h) = dec.dimensions().ok_or_else(|| err("no dimensions"))?;
@@ -159,12 +148,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
     }
     let mut img = Image::from_raw(w, h, layout, SampleType::U8, px)?;
     img.icc = meta.icc;
-    img.meta = Metadata {
-        exif: meta.exif,
-        xmp: meta.xmp,
-        dpi: meta.dpi,
-        text: Vec::new(),
-    };
+    img.meta = Metadata { exif: meta.exif, xmp: meta.xmp, dpi: meta.dpi, text: Vec::new() };
     Ok(img)
 }
 
@@ -174,10 +158,7 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
     let (w16, h16) = match (u16::try_from(w), u16::try_from(h)) {
         (Ok(a), Ok(b)) => (a, b),
         _ => {
-            return Err(CodecError::encode(
-                F,
-                "JPEG dimensions are limited to 65535",
-            ));
+            return Err(CodecError::encode(F, "JPEG dimensions are limited to 65535"));
         }
     };
     let ct = match img.layout() {
@@ -202,10 +183,7 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
             && x >= 1.0
             && y >= 1.0
         {
-            enc.set_density(jpeg_encoder::Density::Inch {
-                x: x.round().min(65535.0) as u16,
-                y: y.round().min(65535.0) as u16,
-            });
+            enc.set_density(jpeg_encoder::Density::Inch { x: x.round().min(65535.0) as u16, y: y.round().min(65535.0) as u16 });
         }
         if let Some(exif) = &img.meta.exif {
             let mut seg = EXIF_HEADER.to_vec();

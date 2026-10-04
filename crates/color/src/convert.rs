@@ -13,12 +13,16 @@ use photocraft_cms::{Builtin, Intent, Transform};
 
 fn cmyk_to_srgb_transform() -> &'static Transform {
     static T: OnceLock<Transform> = OnceLock::new();
-    T.get_or_init(|| Transform::new(Builtin::CoatedCmyk.profile(), Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).expect("built-in profiles link"))
+    T.get_or_init(|| {
+        Transform::new(Builtin::CoatedCmyk.profile(), Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).expect("built-in profiles link")
+    })
 }
 
 fn srgb_to_cmyk_transform() -> &'static Transform {
     static T: OnceLock<Transform> = OnceLock::new();
-    T.get_or_init(|| Transform::new(Builtin::Srgb.profile(), Builtin::CoatedCmyk.profile(), Intent::RelativeColorimetric, true).expect("built-in profiles link"))
+    T.get_or_init(|| {
+        Transform::new(Builtin::Srgb.profile(), Builtin::CoatedCmyk.profile(), Intent::RelativeColorimetric, true).expect("built-in profiles link")
+    })
 }
 
 /// Colour-managed CMYK → sRGB (built-in coated CMYK profile, relative colorimetric + BPC).
@@ -76,11 +80,7 @@ pub fn lab_to_srgb(lab: [f32; 3]) -> [f32; 3] {
     let finv = |t: f32| if t > 6.0 / 29.0 { t * t * t } else { 3.0 * (6.0f32 / 29.0).powi(2) * (t - 4.0 / 29.0) };
     let xyz = [finv(fx) * D50[0], finv(fy) * D50[1], finv(fz) * D50[2]];
     // D50 XYZ → linear sRGB (Bradford-adapted matrix)
-    let m = [
-        [3.133_856, -1.616_867, -0.490_615],
-        [-0.978_768, 1.916_142, 0.033_454],
-        [0.071_945, -0.228_991, 1.405_243],
-    ];
+    let m = [[3.133_856, -1.616_867, -0.490_615], [-0.978_768, 1.916_142, 0.033_454], [0.071_945, -0.228_991, 1.405_243]];
     let mut out = [0.0f32; 3];
     for i in 0..3 {
         let lin = m[i][0] * xyz[0] + m[i][1] * xyz[1] + m[i][2] * xyz[2];
@@ -92,11 +92,7 @@ pub fn lab_to_srgb(lab: [f32; 3]) -> [f32; 3] {
 /// Encoded sRGB → CIE L*a*b* (D50).
 pub fn srgb_to_lab(rgb: [f32; 3]) -> [f32; 3] {
     let lin = [srgb_to_linear(rgb[0]), srgb_to_linear(rgb[1]), srgb_to_linear(rgb[2])];
-    let m = [
-        [0.436_074, 0.385_064, 0.143_080],
-        [0.222_504, 0.716_878, 0.060_618],
-        [0.013_932, 0.097_104, 0.714_173],
-    ];
+    let m = [[0.436_074, 0.385_064, 0.143_080], [0.222_504, 0.716_878, 0.060_618], [0.013_932, 0.097_104, 0.714_173]];
     let mut xyz = [0.0f32; 3];
     for i in 0..3 {
         xyz[i] = (m[i][0] * lin[0] + m[i][1] * lin[1] + m[i][2] * lin[2]) / D50[i];

@@ -6,9 +6,7 @@
 //! a preserved block is written back byte-identical while it still decodes to the layer's
 //! current model; otherwise it is regenerated from the model.
 
-use photocraft_doc::{
-    Fill, FillRule, Knot, LineCap, LineJoin, LiveShape, Path, PathOp, ShapeLayer, ShapeStroke, StrokeAlign, Subpath, VectorMask,
-};
+use photocraft_doc::{Fill, FillRule, Knot, LineCap, LineJoin, LiveShape, Path, PathOp, ShapeLayer, ShapeStroke, StrokeAlign, Subpath, VectorMask};
 use photocraft_geom::Point;
 use photocraft_psd::descriptor::{Descriptor, Id, Value, VersionedDescriptor};
 use photocraft_psd::path::{PathData, PsdKnot, PsdSubpath, VectorMaskBlock};
@@ -240,34 +238,40 @@ pub fn vstk_bytes(stroke: Option<&ShapeStroke>, fill_enabled: bool, dpi: f32) ->
         .with("strokeStyleMiterLimit", Value::Double(f64::from(s.miter_limit)))
         .with(
             "strokeStyleLineCapType",
-            en("strokeStyleLineCapType", match s.cap {
-                LineCap::Butt => "strokeStyleButtCap",
-                LineCap::Round => "strokeStyleRoundCap",
-                LineCap::Square => "strokeStyleSquareCap",
-            }),
+            en(
+                "strokeStyleLineCapType",
+                match s.cap {
+                    LineCap::Butt => "strokeStyleButtCap",
+                    LineCap::Round => "strokeStyleRoundCap",
+                    LineCap::Square => "strokeStyleSquareCap",
+                },
+            ),
         )
         .with(
             "strokeStyleLineJoinType",
-            en("strokeStyleLineJoinType", match s.join {
-                LineJoin::Miter => "strokeStyleMiterJoin",
-                LineJoin::Round => "strokeStyleRoundJoin",
-                LineJoin::Bevel => "strokeStyleBevelJoin",
-            }),
+            en(
+                "strokeStyleLineJoinType",
+                match s.join {
+                    LineJoin::Miter => "strokeStyleMiterJoin",
+                    LineJoin::Round => "strokeStyleRoundJoin",
+                    LineJoin::Bevel => "strokeStyleBevelJoin",
+                },
+            ),
         )
         .with(
             "strokeStyleLineAlignment",
-            en("strokeStyleLineAlignment", match s.align {
-                StrokeAlign::Inside => "strokeStyleAlignInside",
-                StrokeAlign::Center => "strokeStyleAlignCenter",
-                StrokeAlign::Outside => "strokeStyleAlignOutside",
-            }),
+            en(
+                "strokeStyleLineAlignment",
+                match s.align {
+                    StrokeAlign::Inside => "strokeStyleAlignInside",
+                    StrokeAlign::Center => "strokeStyleAlignCenter",
+                    StrokeAlign::Outside => "strokeStyleAlignOutside",
+                },
+            ),
         )
         .with("strokeStyleScaleLock", Value::Boolean(false))
         .with("strokeStyleStrokeAdjust", Value::Boolean(false))
-        .with(
-            "strokeStyleLineDashSet",
-            Value::List(s.dashes.iter().map(|v| Value::UnitFloat { unit: *b"#Nne", value: f64::from(*v) }).collect()),
-        )
+        .with("strokeStyleLineDashSet", Value::List(s.dashes.iter().map(|v| Value::UnitFloat { unit: *b"#Nne", value: f64::from(*v) }).collect()))
         .with("strokeStyleBlendMode", en("BlnM", "Nrml"))
         .with("strokeStyleOpacity", Value::UnitFloat { unit: *b"#Prc", value: f64::from(s.opacity * 100.0) })
         .with("strokeStyleContent", Value::Descriptor(content))

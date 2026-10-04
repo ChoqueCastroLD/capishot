@@ -11,10 +11,7 @@
 
 use photocraft_color::{Color, ColorMode};
 use photocraft_doc::TextLayer;
-use photocraft_doc::text::{
-    AntiAlias, Caps, CharStyle, Kerning, Orientation, ParagraphRun, ParagraphStyle, TextAlign,
-    TextRun, TextShape, TextWarp,
-};
+use photocraft_doc::text::{AntiAlias, Caps, CharStyle, Kerning, Orientation, ParagraphRun, ParagraphStyle, TextAlign, TextRun, TextShape, TextWarp};
 use photocraft_geom::Affine;
 use photocraft_psd::descriptor::{Descriptor, Id, UnicodeString, Value as D, VersionedDescriptor};
 
@@ -33,20 +30,14 @@ pub struct TySh {
 
 /// Parses a `TySh` block.
 pub fn parse_tysh(data: &[u8]) -> Option<TySh> {
-    let f = |at: usize| {
-        data.get(at..at + 8)
-            .map(|b| f64::from_be_bytes(b.try_into().unwrap_or([0; 8])))
-    };
+    let f = |at: usize| data.get(at..at + 8).map(|b| f64::from_be_bytes(b.try_into().unwrap_or([0; 8])));
     let mut m = [0.0; 6];
     for (i, v) in m.iter_mut().enumerate() {
         *v = f(2 + i * 8)?;
     }
     let (text, used) = VersionedDescriptor::parse_prefix(data.get(52..)?).ok()?;
     let rest = data.get(52 + used..).unwrap_or(&[]);
-    let (warp, wused) = match rest
-        .get(2..)
-        .and_then(|r| VersionedDescriptor::parse_prefix(r).ok())
-    {
+    let (warp, wused) = match rest.get(2..).and_then(|r| VersionedDescriptor::parse_prefix(r).ok()) {
         Some((w, n)) => (Some(w.descriptor), n + 2),
         None => (None, 0),
     };
@@ -57,12 +48,7 @@ pub fn parse_tysh(data: &[u8]) -> Option<TySh> {
             *b = i32::from_be_bytes(x.try_into().unwrap_or([0; 4]));
         }
     }
-    Some(TySh {
-        transform: Affine { m },
-        text: text.descriptor,
-        warp,
-        bounds,
-    })
+    Some(TySh { transform: Affine { m }, text: text.descriptor, warp, bounds })
 }
 
 /// Serializes a `TySh` block.
@@ -91,17 +77,12 @@ fn default_warp() -> Descriptor {
 }
 
 fn enumv(t: &str, v: &str) -> D {
-    D::Enumerated {
-        type_id: Id::new(t),
-        value: Id::new(v),
-    }
+    D::Enumerated { type_id: Id::new(t), value: Id::new(v) }
 }
 
 fn enum_value(d: &Descriptor, key: &str) -> Option<String> {
     match d.get(key) {
-        Some(D::Enumerated { value, .. }) => {
-            Some(String::from_utf8_lossy(value.as_bytes()).into_owned())
-        }
+        Some(D::Enumerated { value, .. }) => Some(String::from_utf8_lossy(value.as_bytes()).into_owned()),
         _ => None,
     }
 }
@@ -126,19 +107,12 @@ pub fn engine_data(text: &Descriptor) -> Option<E> {
 /// Builds a [`TextLayer`] (model, text and transform; no cache, no `psd_raw`) from `TySh` data.
 pub fn text_layer_from_tysh(data: &[u8], dpi: f32) -> Option<TextLayer> {
     let t = parse_tysh(data)?;
-    let mut layer = TextLayer {
-        transform: t.transform,
-        ..Default::default()
-    };
+    let mut layer = TextLayer { transform: t.transform, ..Default::default() };
     let txt = match t.text.get("Txt ") {
         Some(D::Text(s)) => Some(s.to_string_lossy().trim_end_matches('\0').to_string()),
         _ => None,
     };
-    layer.orientation = if enum_value(&t.text, "Ornt").as_deref() == Some("Vrtc") {
-        Orientation::Vertical
-    } else {
-        Orientation::Horizontal
-    };
+    layer.orientation = if enum_value(&t.text, "Ornt").as_deref() == Some("Vrtc") { Orientation::Vertical } else { Orientation::Horizontal };
     layer.antialias = match enum_value(&t.text, "AntA").as_deref() {
         Some("Anno" | "antiAliasNone") => AntiAlias::None,
         Some("antiAliasSharp" | "AnSh") => AntiAlias::Sharp,
@@ -171,9 +145,7 @@ pub fn text_layer_from_tysh(data: &[u8], dpi: f32) -> Option<TextLayer> {
 }
 
 pub(crate) fn arr_f(v: Option<&E>) -> Vec<f64> {
-    v.and_then(E::as_array)
-        .map(|a| a.iter().filter_map(E::as_f64).collect())
-        .unwrap_or_default()
+    v.and_then(E::as_array).map(|a| a.iter().filter_map(E::as_f64).collect()).unwrap_or_default()
 }
 
 /// Converts UTF-16 run lengths over `text` into UTF-8 byte lengths.
@@ -198,39 +170,20 @@ fn utf16_to_byte_lengths(text: &str, lens: &[f64]) -> Vec<usize> {
 }
 
 fn apply_engine_data(layer: &mut TextLayer, e: &E, txt: Option<&str>, k: f32) {
-    let ed_text = e
-        .path(&["EngineDict", "Editor", "Text"])
-        .and_then(E::as_str)
-        .unwrap_or("")
-        .to_string();
+    let ed_text = e.path(&["EngineDict", "Editor", "Text"]).and_then(E::as_str).unwrap_or("").to_string();
     // Photoshop always ends the engine text with a paragraph break; the descriptor text doesn't.
-    let text = txt
-        .map(str::to_string)
-        .unwrap_or_else(|| ed_text.strip_suffix('\r').unwrap_or(&ed_text).to_string());
+    let text = txt.map(str::to_string).unwrap_or_else(|| ed_text.strip_suffix('\r').unwrap_or(&ed_text).to_string());
     layer.text = text.replace('\r', "\n");
     let res = e.get("ResourceDict").or_else(|| e.get("DocumentResources"));
     let fonts: Vec<String> = res
         .and_then(|r| r.get("FontSet"))
         .and_then(E::as_array)
-        .map(|a| {
-            a.iter()
-                .map(|f| f.get("Name").and_then(E::as_str).unwrap_or("").to_string())
-                .collect()
-        })
+        .map(|a| a.iter().map(|f| f.get("Name").and_then(E::as_str).unwrap_or("").to_string()).collect())
         .unwrap_or_default();
-    let default_sheet = res
-        .and_then(|r| r.get("TheNormalStyleSheet"))
-        .and_then(E::as_i64)
-        .unwrap_or(0) as usize;
-    let base_style = res
-        .and_then(|r| r.get("StyleSheetSet"))
-        .and_then(E::as_array)
-        .and_then(|a| a.get(default_sheet).or(a.first()))
-        .and_then(|s| s.get("StyleSheetData"));
-    let default_para_sheet = res
-        .and_then(|r| r.get("TheNormalParagraphSheet"))
-        .and_then(E::as_i64)
-        .unwrap_or(0) as usize;
+    let default_sheet = res.and_then(|r| r.get("TheNormalStyleSheet")).and_then(E::as_i64).unwrap_or(0) as usize;
+    let base_style =
+        res.and_then(|r| r.get("StyleSheetSet")).and_then(E::as_array).and_then(|a| a.get(default_sheet).or(a.first())).and_then(|s| s.get("StyleSheetData"));
+    let default_para_sheet = res.and_then(|r| r.get("TheNormalParagraphSheet")).and_then(E::as_i64).unwrap_or(0) as usize;
     let base_para = res
         .and_then(|r| r.get("ParagraphSheetSet"))
         .and_then(E::as_array)
@@ -242,59 +195,29 @@ fn apply_engine_data(layer: &mut TextLayer, e: &E, txt: Option<&str>, k: f32) {
     let sdata: Vec<&E> = srun
         .and_then(|r| r.get("RunArray"))
         .and_then(E::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.path(&["StyleSheet", "StyleSheetData"]))
-                .collect()
-        })
+        .map(|a| a.iter().filter_map(|x| x.path(&["StyleSheet", "StyleSheetData"])).collect())
         .unwrap_or_default();
     let slens = utf16_to_byte_lengths(&ed_text, &arr_f(srun.and_then(|r| r.get("RunLengthArray"))));
-    layer.runs = sdata
-        .iter()
-        .zip(slens)
-        .map(|(d, len)| TextRun {
-            len,
-            style: char_style(base_style, d, &fonts, k),
-        })
-        .collect();
+    layer.runs = sdata.iter().zip(slens).map(|(d, len)| TextRun { len, style: char_style(base_style, d, &fonts, k) }).collect();
 
     // Paragraph runs.
     let prun = e.path(&["EngineDict", "ParagraphRun"]);
     let pdata: Vec<&E> = prun
         .and_then(|r| r.get("RunArray"))
         .and_then(E::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.path(&["ParagraphSheet", "Properties"]))
-                .collect()
-        })
+        .map(|a| a.iter().filter_map(|x| x.path(&["ParagraphSheet", "Properties"])).collect())
         .unwrap_or_default();
     let plens = utf16_to_byte_lengths(&ed_text, &arr_f(prun.and_then(|r| r.get("RunLengthArray"))));
-    layer.paragraphs = pdata
-        .iter()
-        .zip(plens)
-        .map(|(d, len)| ParagraphRun {
-            len,
-            style: para_style(base_para, d, k),
-        })
-        .collect();
+    layer.paragraphs = pdata.iter().zip(plens).map(|(d, len)| ParagraphRun { len, style: para_style(base_para, d, k) }).collect();
 
     // Shape.
-    let shape = e
-        .path(&["EngineDict", "Rendered", "Shapes", "Children"])
-        .and_then(E::as_array)
-        .and_then(|a| a.first());
+    let shape = e.path(&["EngineDict", "Rendered", "Shapes", "Children"]).and_then(E::as_array).and_then(|a| a.first());
     if let Some(sh) = shape
         && sh.get("ShapeType").and_then(E::as_i64) == Some(1)
     {
         let b = arr_f(sh.path(&["Cookie", "Photoshop", "BoxBounds"]));
         if b.len() == 4 {
-            layer.shape = TextShape::Box {
-                x: b[0] as f32,
-                y: b[1] as f32,
-                width: (b[2] - b[0]) as f32,
-                height: (b[3] - b[1]) as f32,
-            };
+            layer.shape = TextShape::Box { x: b[0] as f32, y: b[1] as f32, width: (b[2] - b[0]) as f32, height: (b[3] - b[1]) as f32 };
         }
     }
 }
@@ -308,10 +231,7 @@ pub(crate) fn char_style(base: Option<&E>, d: &E, fonts: &[String], k: f32) -> C
     let num = |key: &str| g(key).and_then(E::as_f64);
     let flag = |key: &str| g(key).and_then(E::as_bool);
     let mut s = CharStyle::default();
-    if let Some(ps) = g("Font")
-        .and_then(E::as_i64)
-        .and_then(|i| fonts.get(i as usize))
-    {
+    if let Some(ps) = g("Font").and_then(E::as_i64).and_then(|i| fonts.get(i as usize)) {
         let r = guess_from_postscript(ps);
         s.font_family = r.family;
         s.weight = r.weight;
@@ -338,17 +258,10 @@ pub(crate) fn char_style(base: Option<&E>, d: &E, fonts: &[String], k: f32) -> C
     s.discretionary_ligatures = flag("DLigatures").unwrap_or(false);
     for (key, tag) in OPENTYPE_KEYS {
         if flag(key) == Some(true) {
-            s.features.push(photocraft_doc::text::FontFeature {
-                tag: tag.to_string(),
-                value: 1,
-            });
+            s.features.push(photocraft_doc::text::FontFeature { tag: tag.to_string(), value: 1 });
         }
     }
-    s.kerning = if flag("AutoKerning") == Some(false) {
-        Kerning::Off
-    } else {
-        Kerning::Metrics
-    };
+    s.kerning = if flag("AutoKerning") == Some(false) { Kerning::Off } else { Kerning::Metrics };
     s.caps = match g("FontCaps").and_then(E::as_i64) {
         Some(1) => Caps::SmallCaps,
         Some(2) => Caps::AllCaps,
@@ -358,16 +271,8 @@ pub(crate) fn char_style(base: Option<&E>, d: &E, fonts: &[String], k: f32) -> C
         let v = arr_f(c.get("Values"));
         let a = v.first().copied().unwrap_or(1.0) as f32;
         s.color = match v.len() {
-            5 => Color {
-                mode: ColorMode::Cmyk,
-                c: [v[1] as f32, v[2] as f32, v[3] as f32, v[4] as f32],
-                alpha: a,
-            },
-            2 => Color {
-                mode: ColorMode::Grayscale,
-                c: [v[1] as f32, 0.0, 0.0, 0.0],
-                alpha: a,
-            },
+            5 => Color { mode: ColorMode::Cmyk, c: [v[1] as f32, v[2] as f32, v[3] as f32, v[4] as f32], alpha: a },
+            2 => Color { mode: ColorMode::Grayscale, c: [v[1] as f32, 0.0, 0.0, 0.0], alpha: a },
             4 => Color::rgba(v[1] as f32, v[2] as f32, v[3] as f32, a),
             _ => Color::BLACK,
         };
@@ -393,9 +298,7 @@ pub(crate) fn para_style(base: Option<&E>, d: &E, k: f32) -> ParagraphStyle {
         space_before_pt: num("SpaceBefore").unwrap_or(0.0) as f32 * k,
         space_after_pt: num("SpaceAfter").unwrap_or(0.0) as f32 * k,
         auto_leading: num("AutoLeading").unwrap_or(1.2) as f32,
-        hyphenate: lookup(d, base, "AutoHyphenate")
-            .and_then(E::as_bool)
-            .unwrap_or(false),
+        hyphenate: lookup(d, base, "AutoHyphenate").and_then(E::as_bool).unwrap_or(false),
         ..Default::default()
     }
 }
@@ -411,11 +314,7 @@ pub(crate) fn postscript_for(s: &CharStyle) -> String {
     if let Some(ps) = &s.postscript_name {
         return ps.clone();
     }
-    let fam = if s.font_family.is_empty() {
-        crate::fonts::DEFAULT_FAMILY
-    } else {
-        &s.font_family
-    };
+    let fam = if s.font_family.is_empty() { crate::fonts::DEFAULT_FAMILY } else { &s.font_family };
     let w = match s.weight {
         0..=150 => "Thin",
         151..=250 => "ExtraLight",
@@ -451,13 +350,7 @@ pub const OPENTYPE_KEYS: [(&str, &str); 8] = [
 pub(crate) fn style_sheet_data(s: &CharStyle, font: usize, k: f32) -> E {
     let c = &s.color;
     let values = match c.mode {
-        ColorMode::Cmyk => vec![
-            real(c.alpha),
-            real(c.c[0]),
-            real(c.c[1]),
-            real(c.c[2]),
-            real(c.c[3]),
-        ],
+        ColorMode::Cmyk => vec![real(c.alpha), real(c.c[0]), real(c.c[1]), real(c.c[2]), real(c.c[3])],
         ColorMode::Grayscale => vec![real(c.alpha), real(c.c[0])],
         _ => {
             let [r, g, b] = c.to_rgb();
@@ -499,13 +392,7 @@ pub(crate) fn style_sheet_data(s: &CharStyle, font: usize, k: f32) -> E {
         ("Strikethrough".into(), E::Bool(s.strikethrough)),
         ("Ligatures".into(), E::Bool(s.ligatures)),
         ("DLigatures".into(), E::Bool(s.discretionary_ligatures)),
-        (
-            "FillColor".into(),
-            E::Dict(vec![
-                ("Type".into(), E::Int(color_type)),
-                ("Values".into(), E::Array(values)),
-            ]),
-        ),
+        ("FillColor".into(), E::Dict(vec![("Type".into(), E::Int(color_type)), ("Values".into(), E::Array(values))])),
     ];
     dict.append(&mut opentype);
     E::Dict(dict)
@@ -539,23 +426,13 @@ fn utf16_len(s: &str) -> i64 {
 }
 
 pub(crate) fn font_entry(name: &str) -> E {
-    E::Dict(vec![
-        ("Name".into(), E::String(name.into())),
-        ("Script".into(), E::Int(0)),
-        ("FontType".into(), E::Int(1)),
-        ("Synthetic".into(), E::Int(0)),
-    ])
+    E::Dict(vec![("Name".into(), E::String(name.into())), ("Script".into(), E::Int(0)), ("FontType".into(), E::Int(1)), ("Synthetic".into(), E::Int(0))])
 }
 
 /// Updates (or creates) an EngineData tree for `layer`.
 pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E {
     let k = 72.0 / if dpi > 0.0 { dpi } else { 72.0 };
-    let mut e = template.unwrap_or_else(|| {
-        E::Dict(vec![
-            ("EngineDict".into(), E::dict()),
-            ("ResourceDict".into(), E::dict()),
-        ])
-    });
+    let mut e = template.unwrap_or_else(|| E::Dict(vec![("EngineDict".into(), E::dict()), ("ResourceDict".into(), E::dict())]));
     let runs = layer.char_runs();
     let paras = layer.paragraph_runs();
     let text = layer.text.replace('\n', "\r");
@@ -565,11 +442,7 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
     let mut fonts: Vec<String> = e
         .path(&["ResourceDict", "FontSet"])
         .and_then(E::as_array)
-        .map(|a| {
-            a.iter()
-                .map(|f| f.get("Name").and_then(E::as_str).unwrap_or("").to_string())
-                .collect()
-        })
+        .map(|a| a.iter().map(|f| f.get("Name").and_then(E::as_str).unwrap_or("").to_string()).collect())
         .unwrap_or_default();
     let mut font_index = |ps: String| match fonts.iter().position(|f| *f == ps) {
         Some(i) => i,
@@ -589,13 +462,7 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
             n += 1; // trailing paragraph break
         }
         let fi = font_index(postscript_for(&r.style));
-        sruns.push(E::Dict(vec![(
-            "StyleSheet".into(),
-            E::Dict(vec![(
-                "StyleSheetData".into(),
-                style_sheet_data(&r.style, fi, k),
-            )]),
-        )]));
+        sruns.push(E::Dict(vec![("StyleSheet".into(), E::Dict(vec![("StyleSheetData".into(), style_sheet_data(&r.style, fi, k))]))]));
         slens.push(E::Int(n));
     }
     let mut pruns = Vec::new();
@@ -610,10 +477,7 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
         }
         pruns.push(E::Dict(vec![(
             "ParagraphSheet".into(),
-            E::Dict(vec![
-                ("DefaultStyleSheet".into(), E::Int(0)),
-                ("Properties".into(), paragraph_properties(&p.style, k)),
-            ]),
+            E::Dict(vec![("DefaultStyleSheet".into(), E::Int(0)), ("Properties".into(), paragraph_properties(&p.style, k))]),
         )]));
         plens.push(E::Int(n));
     }
@@ -654,12 +518,7 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
     }
     let (shape_type, box_bounds) = match layer.shape {
         TextShape::Point => (0, None),
-        TextShape::Box {
-            x,
-            y,
-            width,
-            height,
-        } => (1, Some([x, y, x + width, y + height])),
+        TextShape::Box { x, y, width, height } => (1, Some([x, y, x + width, y + height])),
     };
     let mut photoshop = E::Dict(vec![("ShapeType".into(), E::Int(shape_type))]);
     match box_bounds {
@@ -670,46 +529,22 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
         "Base",
         E::Dict(vec![
             ("ShapeType".into(), E::Int(shape_type)),
-            (
-                "TransformPoint0".into(),
-                E::Array(vec![real(1.0), real(0.0)]),
-            ),
-            (
-                "TransformPoint1".into(),
-                E::Array(vec![real(0.0), real(1.0)]),
-            ),
-            (
-                "TransformPoint2".into(),
-                E::Array(vec![real(0.0), real(0.0)]),
-            ),
+            ("TransformPoint0".into(), E::Array(vec![real(1.0), real(0.0)])),
+            ("TransformPoint1".into(), E::Array(vec![real(0.0), real(1.0)])),
+            ("TransformPoint2".into(), E::Array(vec![real(0.0), real(0.0)])),
         ]),
     );
     let child = E::Dict(vec![
         ("ShapeType".into(), E::Int(shape_type)),
         ("Procession".into(), E::Int(0)),
-        (
-            "Lines".into(),
-            E::Dict(vec![
-                ("WritingDirection".into(), E::Int(0)),
-                ("Children".into(), E::Array(vec![])),
-            ]),
-        ),
-        (
-            "Cookie".into(),
-            E::Dict(vec![("Photoshop".into(), photoshop)]),
-        ),
+        ("Lines".into(), E::Dict(vec![("WritingDirection".into(), E::Int(0)), ("Children".into(), E::Array(vec![]))])),
+        ("Cookie".into(), E::Dict(vec![("Photoshop".into(), photoshop)])),
     ]);
     dict.set(
         "Rendered",
         E::Dict(vec![
             ("Version".into(), E::Int(1)),
-            (
-                "Shapes".into(),
-                E::Dict(vec![
-                    ("WritingDirection".into(), E::Int(0)),
-                    ("Children".into(), E::Array(vec![child])),
-                ]),
-            ),
+            ("Shapes".into(), E::Dict(vec![("WritingDirection".into(), E::Int(0)), ("Children".into(), E::Array(vec![child]))])),
         ]),
     );
 
@@ -725,10 +560,7 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
             let base = runs.first().map(|r| r.style.clone()).unwrap_or_default();
             rd.set(
                 "StyleSheetSet",
-                E::Array(vec![E::Dict(vec![
-                    ("Name".into(), E::String("Normal RGB".into())),
-                    ("StyleSheetData".into(), style_sheet_data(&base, 0, k)),
-                ])]),
+                E::Array(vec![E::Dict(vec![("Name".into(), E::String("Normal RGB".into())), ("StyleSheetData".into(), style_sheet_data(&base, 0, k))])]),
             );
         }
         if rd.get("ParagraphSheetSet").is_none() {
@@ -737,10 +569,7 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
                 E::Array(vec![E::Dict(vec![
                     ("Name".into(), E::String("Normal RGB".into())),
                     ("DefaultStyleSheet".into(), E::Int(0)),
-                    (
-                        "Properties".into(),
-                        paragraph_properties(&ParagraphStyle::default(), k),
-                    ),
+                    ("Properties".into(), paragraph_properties(&ParagraphStyle::default(), k)),
                 ])]),
             );
         }
@@ -759,35 +588,16 @@ pub fn build_tysh(layer: &TextLayer, dpi: f32, ink: Option<[f32; 4]>) -> Vec<u8>
     let old = layer.psd_raw.as_deref().and_then(|d| parse_tysh(d));
     let template = old.as_ref().and_then(|t| engine_data(&t.text));
     let e = build_engine_data(layer, template, dpi);
-    let mut text = old
-        .as_ref()
-        .map(|t| t.text.clone())
-        .unwrap_or_else(|| Descriptor::new("TxLr"));
-    let set =
-        |d: &mut Descriptor, key: &str, v: D| match d.items.iter_mut().find(|(k, _)| k.is(key)) {
-            Some(e) => e.1 = v,
-            None => d.items.push((Id::new(key), v)),
-        };
-    set(
-        &mut text,
-        "Txt ",
-        D::Text(UnicodeString::new_nul(&layer.text.replace('\n', "\r"))),
-    );
+    let mut text = old.as_ref().map(|t| t.text.clone()).unwrap_or_else(|| Descriptor::new("TxLr"));
+    let set = |d: &mut Descriptor, key: &str, v: D| match d.items.iter_mut().find(|(k, _)| k.is(key)) {
+        Some(e) => e.1 = v,
+        None => d.items.push((Id::new(key), v)),
+    };
+    set(&mut text, "Txt ", D::Text(UnicodeString::new_nul(&layer.text.replace('\n', "\r"))));
     if text.get("textGridding").is_none() {
         set(&mut text, "textGridding", enumv("textGridding", "None"));
     }
-    set(
-        &mut text,
-        "Ornt",
-        enumv(
-            "Ornt",
-            if layer.orientation == Orientation::Vertical {
-                "Vrtc"
-            } else {
-                "Hrzn"
-            },
-        ),
-    );
+    set(&mut text, "Ornt", enumv("Ornt", if layer.orientation == Orientation::Vertical { "Vrtc" } else { "Hrzn" }));
     set(
         &mut text,
         "AntA",
@@ -805,49 +615,17 @@ pub fn build_tysh(layer: &TextLayer, dpi: f32, ink: Option<[f32; 4]>) -> Vec<u8>
         ),
     );
     let [l, t, r, b] = match (layer.shape, ink) {
-        (
-            TextShape::Box {
-                x,
-                y,
-                width,
-                height,
-            },
-            _,
-        ) => [x, y, x + width, y + height],
+        (TextShape::Box { x, y, width, height }, _) => [x, y, x + width, y + height],
         (_, Some(i)) => i,
         _ => [0.0; 4],
     };
     let rect = |cls: &str| {
         D::Descriptor(
             Descriptor::new(cls)
-                .with(
-                    "Left",
-                    D::UnitFloat {
-                        unit: *b"#Pnt",
-                        value: f64::from(l),
-                    },
-                )
-                .with(
-                    "Top ",
-                    D::UnitFloat {
-                        unit: *b"#Pnt",
-                        value: f64::from(t),
-                    },
-                )
-                .with(
-                    "Rght",
-                    D::UnitFloat {
-                        unit: *b"#Pnt",
-                        value: f64::from(r),
-                    },
-                )
-                .with(
-                    "Btom",
-                    D::UnitFloat {
-                        unit: *b"#Pnt",
-                        value: f64::from(b),
-                    },
-                ),
+                .with("Left", D::UnitFloat { unit: *b"#Pnt", value: f64::from(l) })
+                .with("Top ", D::UnitFloat { unit: *b"#Pnt", value: f64::from(t) })
+                .with("Rght", D::UnitFloat { unit: *b"#Pnt", value: f64::from(r) })
+                .with("Btom", D::UnitFloat { unit: *b"#Pnt", value: f64::from(b) }),
         )
     };
     set(&mut text, "bounds", rect("bounds"));
@@ -861,34 +639,13 @@ pub fn build_tysh(layer: &TextLayer, dpi: f32, ink: Option<[f32; 4]>) -> Vec<u8>
             Descriptor::new("warp")
                 .with("warpStyle", enumv("warpStyle", &w.style))
                 .with("warpValue", D::Double(f64::from(w.value)))
-                .with(
-                    "warpPerspective",
-                    D::Double(f64::from(w.horizontal_distortion)),
-                )
-                .with(
-                    "warpPerspectiveOther",
-                    D::Double(f64::from(w.vertical_distortion)),
-                )
-                .with(
-                    "warpRotate",
-                    enumv("Ornt", if w.horizontal { "Hrzn" } else { "Vrtc" }),
-                ),
+                .with("warpPerspective", D::Double(f64::from(w.horizontal_distortion)))
+                .with("warpPerspectiveOther", D::Double(f64::from(w.vertical_distortion)))
+                .with("warpRotate", enumv("Ornt", if w.horizontal { "Hrzn" } else { "Vrtc" })),
         ),
-        (None, Some(old)) if enum_value(&old, "warpStyle").as_deref() == Some("warpNone") => {
-            Some(old)
-        }
+        (None, Some(old)) if enum_value(&old, "warpStyle").as_deref() == Some("warpNone") => Some(old),
         _ => None,
     };
-    let bounds = [
-        l.floor() as i32,
-        t.floor() as i32,
-        r.ceil() as i32,
-        b.ceil() as i32,
-    ];
-    write_tysh(&TySh {
-        transform: layer.transform,
-        text,
-        warp,
-        bounds,
-    })
+    let bounds = [l.floor() as i32, t.floor() as i32, r.ceil() as i32, b.ceil() as i32];
+    write_tysh(&TySh { transform: layer.transform, text, warp, bounds })
 }

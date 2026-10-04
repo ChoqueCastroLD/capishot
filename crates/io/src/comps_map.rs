@@ -13,7 +13,7 @@
 //! regenerated otherwise (comp appearance is not written to PSD; `.pcraft` keeps it).
 
 use photocraft_doc::comps::layer_position;
-use photocraft_doc::{Guides, Artboard, ArtboardBackground, CompLayerState, Document, Layer, LayerComp};
+use photocraft_doc::{Artboard, ArtboardBackground, CompLayerState, Document, Guides, Layer, LayerComp};
 use photocraft_geom::Rect;
 use photocraft_psd::descriptor::{Descriptor, UnicodeString, Value, VersionedDescriptor};
 use photocraft_psd::metadata::{MetadataItem, parse_shmd, write_shmd};
@@ -188,7 +188,15 @@ pub fn comps_from_psd(resource: Option<&[u8]>, doc: &Document) -> (Vec<LayerComp
         }
     }
     let last_applied = int(d, "lastAppliedComp").map(|v| v as u32).filter(|id| comps.iter().any(|c| c.id == *id));
-    let mut last = LayerComp { id: 0, name: "Last Document State".into(), comment: String::new(), apply_visibility: true, apply_position: true, apply_appearance: false, states: Vec::new() };
+    let mut last = LayerComp {
+        id: 0,
+        name: "Last Document State".into(),
+        comment: String::new(),
+        apply_visibility: true,
+        apply_position: true,
+        apply_appearance: false,
+        states: Vec::new(),
+    };
     for (_, _, l) in doc.walk() {
         let Some(settings) = layer_cmls(l).and_then(|c| parse_cmls(&c)) else { continue };
         let here = layer_position(l);
@@ -262,7 +270,10 @@ pub fn write_cmls(comps: &[LayerComp], last: Option<&LayerComp>, l: &Layer, psd_
     let mut settings: Vec<Value> = comps.iter().map(|c| setting_value(&[c.id], c.state(l.id), here)).collect();
     settings.push(setting_value(&[0], last.and_then(|c| c.state(l.id)), here));
     let origin = obj("null").with("Hrzn", Value::Double(0.0)).with("Vrtc", Value::Double(0.0));
-    let d = Descriptor::new("null").with("origFXRefPoint", Value::Descriptor(origin)).with("LyrI", Value::Integer(psd_id as i32)).with("layerSettings", Value::List(settings));
+    let d = Descriptor::new("null")
+        .with("origFXRefPoint", Value::Descriptor(origin))
+        .with("LyrI", Value::Integer(psd_id as i32))
+        .with("layerSettings", Value::List(settings));
     Some(VersionedDescriptor::new(d).to_bytes())
 }
 

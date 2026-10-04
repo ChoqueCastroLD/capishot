@@ -3,9 +3,9 @@
 use photocraft_color::ColorMode;
 use photocraft_geom::Rect;
 
+use crate::Ctx;
 use crate::fxutil::{MAXC, rgba, set_rgba, xy};
 use crate::image::Image;
-use crate::Ctx;
 
 /// De-Interlace: removes one field (odd = lines 1, 3, 5… counted from the
 /// bounds' top, i.e. even offsets) and rebuilds it from the neighbouring

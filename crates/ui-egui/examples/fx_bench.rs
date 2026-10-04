@@ -14,7 +14,9 @@ use std::time::Instant;
 
 use eframe::wgpu;
 use photocraft_color::{BlendMode, Color, ColorMode, SampleType};
-use photocraft_doc::{Adjustment, Bevel, BevelStyle, BevelTechnique, Contour, Document, Effect, FxCommon, FxPaint, Layer, LayerContent, StrokeFx, StrokePosition};
+use photocraft_doc::{
+    Adjustment, Bevel, BevelStyle, BevelTechnique, Contour, Document, Effect, FxCommon, FxPaint, Layer, LayerContent, StrokeFx, StrokePosition,
+};
 use photocraft_geom::{Rect, Size};
 use serde_json::json;
 
@@ -39,7 +41,12 @@ fn effects() -> Vec<Effect> {
     ds.size = 16.0;
     vec![
         Effect::DropShadow(ds),
-        Effect::Stroke(StrokeFx { common: FxCommon::new(BlendMode::Normal, 1.0), size: 6.0, position: StrokePosition::Outside, paint: FxPaint::Color(Color::rgb(0.95, 0.85, 0.2)) }),
+        Effect::Stroke(StrokeFx {
+            common: FxCommon::new(BlendMode::Normal, 1.0),
+            size: 6.0,
+            position: StrokePosition::Outside,
+            paint: FxPaint::Color(Color::rgb(0.95, 0.85, 0.2)),
+        }),
         Effect::BevelEmboss(Bevel {
             enabled: true,
             style: BevelStyle::InnerBevel,
@@ -90,7 +97,10 @@ fn synthetic(w: u32, h: u32) -> Document {
     let rows = lines.len() as u32;
     for (i, t) in lines.iter().enumerate() {
         let y = (h / (rows + 1)) * (i as u32 + 1);
-        let r = s.execute("type.create", json!({"x": (w / 12) as i32 + (i as i32 % 3) * 300, "y": y, "text": t, "size": (h / rows / 2).max(12), "color": "#d04020"}));
+        let r = s.execute(
+            "type.create",
+            json!({"x": (w / 12) as i32 + (i as i32 % 3) * 300, "y": y, "text": t, "size": (h / rows / 2).max(12), "color": "#d04020"}),
+        );
         if let Err(e) = r {
             eprintln!("type.create: {e}");
         }
@@ -115,7 +125,9 @@ struct Gpu {
 
 fn gpu() -> Option<Gpu> {
     let instance = wgpu::Instance::default();
-    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).ok()?;
+    let adapter =
+        block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() }))
+            .ok()?;
     eprintln!("adapter: {:?}", adapter.get_info().name);
     let limits = adapter.limits();
     let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: limits, ..Default::default() })).ok()?;
@@ -168,7 +180,17 @@ fn compare(files: &[String]) {
                 if std::env::var_os("FX_DUMP").is_some() && worst.0 > 1.0 / 255.0 {
                     println!("    cpu {:?} gpu {:?}", cpu.px[worst.1], out[worst.1]);
                     for (_, depth, l) in doc.walk() {
-                        println!("    {}{} {:?} op {} fill {} clipped {} visible {} fx {:?}", "  ".repeat(depth), l.name, l.blend, l.opacity, l.fill_opacity, l.clipped, l.visible, l.effects.items.iter().map(|e| e.label()).collect::<Vec<_>>());
+                        println!(
+                            "    {}{} {:?} op {} fill {} clipped {} visible {} fx {:?}",
+                            "  ".repeat(depth),
+                            l.name,
+                            l.blend,
+                            l.opacity,
+                            l.fill_opacity,
+                            l.clipped,
+                            l.visible,
+                            l.effects.items.iter().map(|e| e.label()).collect::<Vec<_>>()
+                        );
                     }
                 }
             }
@@ -228,10 +250,15 @@ fn main() {
                 Err(e) => gerr = Some(e),
             }
         }
-        show(what, region, stats(&mut cs), match gerr {
-            Some(e) => Err(e),
-            None => Ok(stats(&mut gs).unwrap_or((0.0, 0.0))),
-        });
+        show(
+            what,
+            region,
+            stats(&mut cs),
+            match gerr {
+                Some(e) => Err(e),
+                None => Ok(stats(&mut gs).unwrap_or((0.0, 0.0))),
+            },
+        );
     };
 
     if args.iter().any(|a| a == "--baseline") {
@@ -241,46 +268,76 @@ fn main() {
         }
         case(&mut plain, "baseline: no effects, full refresh", reps, &mut |_, _| full, false);
     }
-    case(&mut doc, "full refresh, cold effect caches", 1, &mut |_, _| {
-        photocraft_compose::purge_effect_cache();
-        full
-    }, true);
+    case(
+        &mut doc,
+        "full refresh, cold effect caches",
+        1,
+        &mut |_, _| {
+            photocraft_compose::purge_effect_cache();
+            full
+        },
+        true,
+    );
     case(&mut doc, "full refresh, warm caches", reps.min(3), &mut |_, _| full, true);
     // Adjustment tweak (maps unaffected).
-    case(&mut doc, "adjustment tweak (full refresh)", reps.min(3), &mut |d, _| {
-        if let Some(LayerContent::Adjustment(Adjustment::HueSaturation { hue, .. })) = d.layers.last_mut().map(|l| &mut l.content) {
-            *hue += 5.0;
-        }
-        full
-    }, true);
+    case(
+        &mut doc,
+        "adjustment tweak (full refresh)",
+        reps.min(3),
+        &mut |d, _| {
+            if let Some(LayerContent::Adjustment(Adjustment::HueSaturation { hue, .. })) = d.layers.last_mut().map(|l| &mut l.content) {
+                *hue += 5.0;
+            }
+            full
+        },
+        true,
+    );
     // Brush dabs on a plain layer and on the effect layer: the canvas refreshes the damage rect
     // grown by the effect reach (`canvas::effect_reach`).
     let margin = doc.walk().iter().map(|(_, _, l)| photocraft_compose::effects::margin(l)).max().unwrap_or(0);
     let (w, h) = (full.width() as i32, full.height() as i32);
-    case(&mut doc, "dab on a plain layer (damage + reach)", reps, &mut |d, i| {
-        let r = Rect::new(w / 3 + i as i32 * 70, h / 3, w / 3 + i as i32 * 70 + 64, h / 3 + 64);
-        if let Some(l) = d.layers.iter_mut().find(|l| l.name == "paint") {
-            l.surface_mut().unwrap().fill_rect(r, &[0.1, 0.9, 0.1, 1.0]);
-        }
-        r.inflate(margin)
-    }, true);
+    case(
+        &mut doc,
+        "dab on a plain layer (damage + reach)",
+        reps,
+        &mut |d, i| {
+            let r = Rect::new(w / 3 + i as i32 * 70, h / 3, w / 3 + i as i32 * 70 + 64, h / 3 + 64);
+            if let Some(l) = d.layers.iter_mut().find(|l| l.name == "paint") {
+                l.surface_mut().unwrap().fill_rect(r, &[0.1, 0.9, 0.1, 1.0]);
+            }
+            r.inflate(margin)
+        },
+        true,
+    );
     // Moving a text layer by whole pixels: its effect maps move with it.
-    case(&mut doc, "move a text layer 7 px (old + new bounds)", reps, &mut |d, _| {
-        let Some(l) = d.layers.iter_mut().find(|l| matches!(l.content, LayerContent::Text(_))) else { return Rect::EMPTY };
-        let LayerContent::Text(t) = &mut l.content else { return Rect::EMPTY };
-        let Some(src) = t.cache.as_ref() else { return Rect::EMPTY };
-        let b = src.content_bounds();
-        let to = Rect::new(b.x0 + 7, b.y0, b.x1 + 7, b.y1);
-        let mut moved = photocraft_raster::Surface::new(src.format());
-        moved.write_region(to, &src.read_region(b));
-        t.cache = Some(moved);
-        b.union(&to).inflate(margin)
-    }, true);
-    case(&mut doc, "dab on the effect layer (damage + reach)", reps, &mut |d, i| {
-        let r = Rect::new(w / 2 - 32 + i as i32 * 300, h / 2 - 32, w / 2 + 32 + i as i32 * 300, h / 2 + 32);
-        if let Some(l) = d.layers.iter_mut().find(|l| l.name == "blob") {
-            l.surface_mut().unwrap().fill_rect(r, &[0.9, 0.1, 0.1, 1.0]);
-        }
-        r.inflate(margin)
-    }, true);
+    case(
+        &mut doc,
+        "move a text layer 7 px (old + new bounds)",
+        reps,
+        &mut |d, _| {
+            let Some(l) = d.layers.iter_mut().find(|l| matches!(l.content, LayerContent::Text(_))) else { return Rect::EMPTY };
+            let LayerContent::Text(t) = &mut l.content else { return Rect::EMPTY };
+            let Some(src) = t.cache.as_ref() else { return Rect::EMPTY };
+            let b = src.content_bounds();
+            let to = Rect::new(b.x0 + 7, b.y0, b.x1 + 7, b.y1);
+            let mut moved = photocraft_raster::Surface::new(src.format());
+            moved.write_region(to, &src.read_region(b));
+            t.cache = Some(moved);
+            b.union(&to).inflate(margin)
+        },
+        true,
+    );
+    case(
+        &mut doc,
+        "dab on the effect layer (damage + reach)",
+        reps,
+        &mut |d, i| {
+            let r = Rect::new(w / 2 - 32 + i as i32 * 300, h / 2 - 32, w / 2 + 32 + i as i32 * 300, h / 2 + 32);
+            if let Some(l) = d.layers.iter_mut().find(|l| l.name == "blob") {
+                l.surface_mut().unwrap().fill_rect(r, &[0.9, 0.1, 0.1, 1.0]);
+            }
+            r.inflate(margin)
+        },
+        true,
+    );
 }

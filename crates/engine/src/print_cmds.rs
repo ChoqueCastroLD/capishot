@@ -31,7 +31,16 @@ fn other(e: impl std::fmt::Display) -> EngineError {
 // ---------- PDF ----------
 
 /// Paper sizes in points (portrait).
-pub const PAPERS: [(&str, f64, f64); 8] = [("letter", 612.0, 792.0), ("legal", 612.0, 1008.0), ("tabloid", 792.0, 1224.0), ("a3", 841.89, 1190.55), ("a4", 595.28, 841.89), ("a5", 419.53, 595.28), ("4x6", 288.0, 432.0), ("5x7", 360.0, 504.0)];
+pub const PAPERS: [(&str, f64, f64); 8] = [
+    ("letter", 612.0, 792.0),
+    ("legal", 612.0, 1008.0),
+    ("tabloid", 792.0, 1224.0),
+    ("a3", 841.89, 1190.55),
+    ("a4", 595.28, 841.89),
+    ("a5", 419.53, 595.28),
+    ("4x6", 288.0, 432.0),
+    ("5x7", 360.0, 504.0),
+];
 
 /// The image placed on a print page.
 pub struct PrintImage {
@@ -136,7 +145,13 @@ pub fn print_pdf(page: &PrintPage) -> Vec<u8> {
     // 1 catalog, 2 pages, 3 page, 4 contents, 5 image, 6 font, 7 ICC (optional).
     obj(&mut out, b"<< /Type /Catalog /Pages 2 0 R >>");
     obj(&mut out, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-    obj(&mut out, format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {pw:.2} {ph:.2}] /Resources << /XObject << /Im0 5 0 R >> /Font << /F1 6 0 R >> >> /Contents 4 0 R >>").as_bytes());
+    obj(
+        &mut out,
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {pw:.2} {ph:.2}] /Resources << /XObject << /Im0 5 0 R >> /Font << /F1 6 0 R >> >> /Contents 4 0 R >>"
+        )
+        .as_bytes(),
+    );
     // An explicit white page, so every viewer (and rasteriser) shows paper, not transparency.
     let mut content = format!("q 1 g 0 0 {pw:.2} {ph:.2} re f Q\nq {w:.3} 0 0 {h:.3} {x:.3} {y:.3} cm /Im0 Do Q\n");
     content.push_str(&marks_ops(page.marks, page.rect));
@@ -160,7 +175,13 @@ pub fn print_pdf(page: &PrintPage) -> Vec<u8> {
     };
     let cs = if img.icc.is_some() { "[/ICCBased 7 0 R]".to_string() } else { device.to_string() };
     let z = deflate(&img.data);
-    let mut body = format!("<< /Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {cs} /BitsPerComponent 8 /Filter /FlateDecode /Length {} >>\nstream\n", img.width, img.height, z.len()).into_bytes();
+    let mut body = format!(
+        "<< /Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {cs} /BitsPerComponent 8 /Filter /FlateDecode /Length {} >>\nstream\n",
+        img.width,
+        img.height,
+        z.len()
+    )
+    .into_bytes();
     body.extend_from_slice(&z);
     body.extend_from_slice(b"\nendstream");
     obj(&mut out, &body);
@@ -213,7 +234,8 @@ fn print_image(doc: &Document, p: &Value, cmd: &str) -> Result<(PrintImage, Valu
         let gray = d.mode == ColorMode::Grayscale;
         let buf = photocraft_compose::flatten(d).over_background([1.0, 1.0, 1.0]);
         let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-        let data: Vec<u8> = if gray { buf.px.iter().map(|p| to8(p[0])).collect() } else { buf.px.iter().flat_map(|p| [to8(p[0]), to8(p[1]), to8(p[2])]).collect() };
+        let data: Vec<u8> =
+            if gray { buf.px.iter().map(|p| to8(p[0])).collect() } else { buf.px.iter().flat_map(|p| [to8(p[0]), to8(p[1]), to8(p[2])]).collect() };
         return Ok((PrintImage { width: d.size.width, height: d.size.height, channels: if gray { 1 } else { 3 }, data, icc }, info));
     }
     t.execute("layer.flattenImage", json!({}))?;
@@ -235,7 +257,11 @@ fn print_image(doc: &Document, p: &Value, cmd: &str) -> Result<(PrintImage, Valu
 fn paper(p: &Value, cmd: &str) -> Result<(f64, f64)> {
     let (w, h) = match p.get("paper") {
         None => (612.0, 792.0),
-        Some(Value::String(name)) => PAPERS.iter().find(|(n, _, _)| n.eq_ignore_ascii_case(name)).map(|(_, w, h)| (*w, *h)).ok_or_else(|| bad(cmd, format!("unknown paper `{name}` ({})", PAPERS.map(|p| p.0).join("|"))))?,
+        Some(Value::String(name)) => PAPERS
+            .iter()
+            .find(|(n, _, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, w, h)| (*w, *h))
+            .ok_or_else(|| bad(cmd, format!("unknown paper `{name}` ({})", PAPERS.map(|p| p.0).join("|"))))?,
         Some(Value::Array(a)) if a.len() == 2 => (a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0)),
         _ => return Err(bad(cmd, "paper is a name or [width, height] in points")),
     };
@@ -269,7 +295,11 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
     };
     let margin = if marks.corner_crop || marks.center_crop || marks.registration { 36.0 } else { 18.0 };
     let fit = p.get("scaleToFit").and_then(Value::as_bool).unwrap_or(false);
-    let scale = if fit { ((pw - 2.0 * margin) / iw).min((ph - 2.0 * margin) / ih) } else { p.get("scale").and_then(Value::as_f64).filter(|v| *v > 0.0).unwrap_or(100.0) / 100.0 };
+    let scale = if fit {
+        ((pw - 2.0 * margin) / iw).min((ph - 2.0 * margin) / ih)
+    } else {
+        p.get("scale").and_then(Value::as_f64).filter(|v| *v > 0.0).unwrap_or(100.0) / 100.0
+    };
     let (w, h) = (iw * scale, ih * scale);
     let center = p.get("center").and_then(Value::as_bool).unwrap_or(true);
     let (x, y) = if center {
@@ -289,7 +319,11 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let doc = d.doc.clone();
     let PrintLayout { paper: (pw, ph), rect: (x, y, w, h), scale, marks } = layout(&doc, p, cmd)?;
     let (img, color) = print_image(&doc, p, cmd)?;
-    let description = p.get("description").and_then(Value::as_bool).unwrap_or(false).then(|| crate::file_cmds::read_file_info(doc.metadata.xmp.as_deref())["description"].as_str().unwrap_or_default().to_string());
+    let description = p
+        .get("description")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        .then(|| crate::file_cmds::read_file_info(doc.metadata.xmp.as_deref())["description"].as_str().unwrap_or_default().to_string());
     let label = p.get("labels").and_then(Value::as_bool).unwrap_or(false).then(|| doc.name.clone());
     let page = PrintPage { paper: (pw, ph), image: img, rect: (x, y, w, h), marks, description, label };
     let pdf = print_pdf(&page);
@@ -329,7 +363,9 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     }
     s.file_menu.last_print = Some(remembered);
     crate::automate_cmds::fire_event(s, "print");
-    Ok(json!({"pdf": pdf_path, "bytes": pdf.len(), "paper": [pw, ph], "imageRect": [x, y, w, h], "scale": scale * 100.0, "copies": copies, "command": if send { json!(argv) } else { Value::Null }, "sent": sent, "spooler": spool, "color": color}))
+    Ok(
+        json!({"pdf": pdf_path, "bytes": pdf.len(), "paper": [pw, ph], "imageRect": [x, y, w, h], "scale": scale * 100.0, "copies": copies, "command": if send { json!(argv) } else { Value::Null }, "sent": sent, "spooler": spool, "color": color}),
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -440,7 +476,11 @@ pub fn paths_to_ai(doc: &Document, which: &str) -> Result<(String, usize)> {
     let mut s = String::new();
     s.push_str("%!PS-Adobe-2.0 EPSF-1.2\n%%Creator: PhotoCraft\n");
     s.push_str(&format!("%%Title: ({})\n", doc.name.replace([')', '('], "_")));
-    s.push_str(&format!("%%BoundingBox: 0 0 {} {}\n%%HiResBoundingBox: 0 0 {w:.4} {h:.4}\n%AI3_Cropmarks: 0 0 {w:.4} {h:.4}\n", w.ceil() as i64, h.ceil() as i64));
+    s.push_str(&format!(
+        "%%BoundingBox: 0 0 {} {}\n%%HiResBoundingBox: 0 0 {w:.4} {h:.4}\n%AI3_Cropmarks: 0 0 {w:.4} {h:.4}\n",
+        w.ceil() as i64,
+        h.ceil() as i64
+    ));
     s.push_str("%%DocumentProcessColors: Black\n%%EndComments\n%%EndProlog\n%%BeginSetup\n%%EndSetup\n");
     let pt = |x: f64, y: f64| (x * k, h - y * k);
     let mut n = 0;
@@ -512,9 +552,33 @@ pub fn specs() -> Vec<CommandSpec> {
     const PRINT_PARAMS: &str = r##"{"printer":name? (default printer),"copies":1..999=1,"paper":"letter|legal|tabloid|a3|a4|a5|4x6|5x7"|[w,h] pt="letter","orientation":"portrait|landscape"="portrait","center":bool=true,"top":in?,"left":in?,"scale":%=100,"scaleToFit":bool=false,"colorHandling":"printerManages|photocraftManages|noColorManagement"="printerManages","printerProfile":profile? (photocraftManages),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true,"cornerCropMarks":bool,"centerCropMarks":bool,"registrationMarks":bool,"description":bool,"labels":bool,"output":pdf path? (print to PDF; then "send" defaults to false),"send":bool?,"dryRun":bool=false (render the PDF, report the lp command, don't spool)} → {pdf, imageRect, command, sent}"##;
     vec![
         spec!("file.print", "Print…", &["File"], Some("Cmd+P"), PRINT_PARAMS, native_doc, print),
-        spec!("file.printOneCopy", "Print One Copy", &["File"], Some("Cmd+Alt+Shift+P"), "{} (the last Print settings, one copy; any Print key overrides)", native_doc, print_one_copy),
-        spec!("file.package", "Package…", &["File"], None, r##"{"dir":folder,"format":"pcraft|psd|psb"="pcraft"} → {folder, document, links, missing} (copies the document and its linked files into <dir>/<name>/, relinked to Links/)"##, native_doc, package),
-        spec!("file.export.pathsToIllustrator", "Paths to Illustrator…", &["File", "Export"], None, r##"{"path":str? (.ai; omit to return the text),"paths":"all|work|<path name>"="all"} → {path, paths}"##, has_paths, paths_to_illustrator),
+        spec!(
+            "file.printOneCopy",
+            "Print One Copy",
+            &["File"],
+            Some("Cmd+Alt+Shift+P"),
+            "{} (the last Print settings, one copy; any Print key overrides)",
+            native_doc,
+            print_one_copy
+        ),
+        spec!(
+            "file.package",
+            "Package…",
+            &["File"],
+            None,
+            r##"{"dir":folder,"format":"pcraft|psd|psb"="pcraft"} → {folder, document, links, missing} (copies the document and its linked files into <dir>/<name>/, relinked to Links/)"##,
+            native_doc,
+            package
+        ),
+        spec!(
+            "file.export.pathsToIllustrator",
+            "Paths to Illustrator…",
+            &["File", "Export"],
+            None,
+            r##"{"path":str? (.ai; omit to return the text),"paths":"all|work|<path name>"="all"} → {path, paths}"##,
+            has_paths,
+            paths_to_illustrator
+        ),
     ]
 }
 

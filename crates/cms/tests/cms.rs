@@ -353,7 +353,9 @@ fn gray_profiles() {
 #[test]
 fn hdr_floats_survive_matrix_transforms() {
     let lin = Builtin::LinearSrgb.profile();
-    let t = Transform::with_options(lin, Builtin::Rec2020.profile(), TransformOptions { intent: Intent::RelativeColorimetric, bpc: false, precise_float: true }).unwrap();
+    let t =
+        Transform::with_options(lin, Builtin::Rec2020.profile(), TransformOptions { intent: Intent::RelativeColorimetric, bpc: false, precise_float: true })
+            .unwrap();
     let back = Transform::new(Builtin::Rec2020.profile(), lin, Intent::RelativeColorimetric, false).unwrap();
     let src = [4.0f32, 2.0, 0.5];
     let mut mid = [0.0f32; 3];
@@ -410,7 +412,13 @@ fn system_profiles() {
                 Err(e) => panic!("{}: {e}", path.display()),
             };
             seen += 1;
-            if !matches!(p.class, photocraft_cms::ProfileClass::Input | photocraft_cms::ProfileClass::Display | photocraft_cms::ProfileClass::Output | photocraft_cms::ProfileClass::ColorSpace) {
+            if !matches!(
+                p.class,
+                photocraft_cms::ProfileClass::Input
+                    | photocraft_cms::ProfileClass::Display
+                    | photocraft_cms::ProfileClass::Output
+                    | photocraft_cms::ProfileClass::ColorSpace
+            ) {
                 continue;
             }
             assert!(!p.description.is_empty(), "{}", path.display());
@@ -499,4 +507,3 @@ fn oracle_moxcms_system_cmyk() {
     let p99 = sorted[sorted.len() * 99 / 100];
     assert!(mean < 1.5 && p99 <= 6, "max {worst} p99 {p99} mean {mean}");
 }
-

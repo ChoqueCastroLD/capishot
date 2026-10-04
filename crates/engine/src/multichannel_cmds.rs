@@ -33,7 +33,11 @@ const SOURCES: [ColorMode; 5] = [ColorMode::Rgb, ColorMode::Cmyk, ColorMode::Lab
 
 fn enabled(s: &Session) -> std::result::Result<(), String> {
     let d = s.active().ok_or("no document open")?;
-    if SOURCES.contains(&d.doc.mode) { Ok(()) } else { Err(format!("Multichannel needs an RGB, CMYK, Lab, Grayscale or Duotone image (the document is {:?})", d.doc.mode)) }
+    if SOURCES.contains(&d.doc.mode) {
+        Ok(())
+    } else {
+        Err(format!("Multichannel needs an RGB, CMYK, Lab, Grayscale or Duotone image (the document is {:?})", d.doc.mode))
+    }
 }
 
 /// Native colour planes of the flattened image (opaque over white): one `Vec` per colour
@@ -95,12 +99,21 @@ fn inks_of(doc: &Document) -> Vec<(String, Color, Vec<f32>)> {
     let planes = flattened_planes(doc);
     let inv = |p: &Vec<f32>| p.iter().map(|v| 1.0 - v).collect::<Vec<f32>>();
     match doc.mode {
-        ColorMode::Rgb => [("Cyan", CYAN), ("Magenta", MAGENTA), ("Yellow", YELLOW)].into_iter().zip(&planes).map(|((n, c), p)| (n.to_string(), c, inv(p))).collect(),
-        ColorMode::Cmyk => [("Cyan", CYAN), ("Magenta", MAGENTA), ("Yellow", YELLOW), ("Black", BLACK)].into_iter().zip(planes).map(|((n, c), p)| (n.to_string(), c, p)).collect(),
+        ColorMode::Rgb => {
+            [("Cyan", CYAN), ("Magenta", MAGENTA), ("Yellow", YELLOW)].into_iter().zip(&planes).map(|((n, c), p)| (n.to_string(), c, inv(p))).collect()
+        }
+        ColorMode::Cmyk => [("Cyan", CYAN), ("Magenta", MAGENTA), ("Yellow", YELLOW), ("Black", BLACK)]
+            .into_iter()
+            .zip(planes)
+            .map(|((n, c), p)| (n.to_string(), c, p))
+            .collect(),
         ColorMode::Lab => planes.iter().enumerate().map(|(k, p)| (format!("Alpha {}", k + 1), Color::BLACK, inv(p))).collect(),
         ColorMode::Duotone if doc.duotone.as_ref().is_some_and(|d| !d.inks.is_empty()) => {
             let d = doc.duotone.as_ref().expect("checked");
-            d.inks.iter().map(|ink| (ink.name.clone(), Color::rgb(ink.color[0], ink.color[1], ink.color[2]), planes[0].iter().map(|g| ink.density(1.0 - g)).collect())).collect()
+            d.inks
+                .iter()
+                .map(|ink| (ink.name.clone(), Color::rgb(ink.color[0], ink.color[1], ink.color[2]), planes[0].iter().map(|g| ink.density(1.0 - g)).collect()))
+                .collect()
         }
         _ => vec![("Black".to_string(), Color::BLACK, inv(&planes[0]))],
     }
@@ -109,7 +122,10 @@ fn inks_of(doc: &Document) -> Vec<(String, Color, Vec<f32>)> {
 fn to_multichannel(s: &mut Session, _p: &Value) -> Result<Value> {
     let names = s.edit("Multichannel", |doc, active| {
         let inks = inks_of(doc);
-        let mut channels: Vec<AlphaChannel> = inks.iter().map(|(name, ink, vals)| AlphaChannel { spot: Some((*ink, 0.0)), ..AlphaChannel::new(name.clone(), channel_surface(doc, vals)) }).collect();
+        let mut channels: Vec<AlphaChannel> = inks
+            .iter()
+            .map(|(name, ink, vals)| AlphaChannel { spot: Some((*ink, 0.0)), ..AlphaChannel::new(name.clone(), channel_surface(doc, vals)) })
+            .collect();
         // Existing alpha / spot channels follow the inks, converted to the document depth.
         let fmt = PixelFormat::new(ColorMode::Grayscale, doc.depth, false);
         for mut ch in std::mem::take(&mut doc.channels) {

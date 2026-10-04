@@ -203,7 +203,10 @@ fn flatten_all_layer_effects_and_masks() {
         s.edit("fx", |doc, _| {
             let l = doc.layer_mut(id).unwrap();
             l.effects.enabled = true;
-            l.effects.items.push(photocraft_doc::Effect::ColorOverlay { common: photocraft_doc::effects::FxCommon::new(photocraft_color::BlendMode::Normal, 1.0), color: photocraft_color::Color::rgb(0.0, 1.0, 0.0) });
+            l.effects.items.push(photocraft_doc::Effect::ColorOverlay {
+                common: photocraft_doc::effects::FxCommon::new(photocraft_color::BlendMode::Normal, 1.0),
+                color: photocraft_color::Color::rgb(0.0, 1.0, 0.0),
+            });
             Ok(())
         })
         .unwrap();
@@ -287,7 +290,8 @@ fn color_lookup_table_bakes_the_adjustment_stack() {
     let r = s.execute("file.export.colorLookupTables", json!({"size": 3})).unwrap();
     let cube = r["cube"].as_str().unwrap();
     assert!(cube.contains("LUT_3D_SIZE 3"));
-    let rows: Vec<Vec<f32>> = cube.lines().filter(|l| l.chars().next().is_some_and(|c| c.is_ascii_digit())).map(|l| l.split(' ').map(|v| v.parse().unwrap()).collect()).collect();
+    let rows: Vec<Vec<f32>> =
+        cube.lines().filter(|l| l.chars().next().is_some_and(|c| c.is_ascii_digit())).map(|l| l.split(' ').map(|v| v.parse().unwrap()).collect()).collect();
     assert_eq!(rows.len(), 27);
     // First entry (0,0,0) → white; second (r = 0.5) → 0.5; last (1,1,1) → black.
     assert!(rows[0].iter().all(|v| (v - 1.0).abs() < 1e-3), "{:?}", rows[0]);

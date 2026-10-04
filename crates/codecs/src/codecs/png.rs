@@ -18,12 +18,7 @@ fn err(e: impl std::fmt::Display) -> CodecError {
 }
 
 pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
-    let mut decoder = png::Decoder::new_with_limits(
-        Cursor::new(bytes),
-        png::Limits {
-            bytes: limits.alloc_usize(),
-        },
-    );
+    let mut decoder = png::Decoder::new_with_limits(Cursor::new(bytes), png::Limits { bytes: limits.alloc_usize() });
     decoder.set_transformations(png::Transformations::EXPAND);
     {
         let info = decoder.read_header_info().map_err(map_png_err)?;
@@ -45,9 +40,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         png::BitDepth::Sixteen => SampleType::U16,
         d => return Err(err(format!("unexpected output bit depth {d:?}"))),
     };
-    let size = reader
-        .output_buffer_size()
-        .ok_or_else(|| err("image too large"))?;
+    let size = reader.output_buffer_size().ok_or_else(|| err("image too large"))?;
     let mut buf = vec![0u8; size];
     let out = reader.next_frame(&mut buf).map_err(map_png_err)?;
     buf.truncate(out.buffer_size());
@@ -63,19 +56,13 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
     let info = reader.info();
     let mut img = Image::from_raw(out.width, out.height, layout, sample, buf)?;
     img.icc = info.icc_profile.as_ref().map(|c| c.to_vec());
-    let mut meta = Metadata {
-        exif: info.exif_metadata.as_ref().map(|c| c.to_vec()),
-        ..Default::default()
-    };
+    let mut meta = Metadata { exif: info.exif_metadata.as_ref().map(|c| c.to_vec()), ..Default::default() };
     if let Some(d) = info.pixel_dims
         && d.unit == png::Unit::Meter
         && d.xppu > 0
         && d.yppu > 0
     {
-        meta.dpi = Some((
-            d.xppu as f32 * METERS_PER_INCH,
-            d.yppu as f32 * METERS_PER_INCH,
-        ));
+        meta.dpi = Some((d.xppu as f32 * METERS_PER_INCH, d.yppu as f32 * METERS_PER_INCH));
     }
     for t in &info.uncompressed_latin1_text {
         meta.text.push((t.keyword.clone(), t.text.clone()));
@@ -100,18 +87,13 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
 
 fn map_png_err(e: png::DecodingError) -> CodecError {
     match e {
-        png::DecodingError::LimitsExceeded => {
-            CodecError::LimitExceeded("PNG decoder memory limit".into())
-        }
+        png::DecodingError::LimitsExceeded => CodecError::LimitExceeded("PNG decoder memory limit".into()),
         e => err(e),
     }
 }
 
 fn is_latin1_keyword(k: &str) -> bool {
-    !k.is_empty()
-        && k.len() <= 79
-        && k.chars()
-            .all(|c| (' '..='~').contains(&c) || ('\u{a1}'..='\u{ff}').contains(&c))
+    !k.is_empty() && k.len() <= 79 && k.chars().all(|c| (' '..='~').contains(&c) || ('\u{a1}'..='\u{ff}').contains(&c))
 }
 
 pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
@@ -155,18 +137,14 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
             && x > 0.0
             && y > 0.0
         {
-            info.pixel_dims = Some(png::PixelDimensions {
-                xppu: (x / METERS_PER_INCH).round() as u32,
-                yppu: (y / METERS_PER_INCH).round() as u32,
-                unit: png::Unit::Meter,
-            });
+            info.pixel_dims =
+                Some(png::PixelDimensions { xppu: (x / METERS_PER_INCH).round() as u32, yppu: (y / METERS_PER_INCH).round() as u32, unit: png::Unit::Meter });
         }
     }
 
     let mut out = Vec::new();
     {
-        let mut encoder =
-            png::Encoder::with_info(&mut out, info).map_err(|e| CodecError::encode(F, e))?;
+        let mut encoder = png::Encoder::with_info(&mut out, info).map_err(|e| CodecError::encode(F, e))?;
         encoder.set_compression(match opts.png_compression {
             PngCompression::None => png::Compression::NoCompression,
             PngCompression::Fast => png::Compression::Fast,
@@ -186,28 +164,18 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
                 res.map_err(|e| CodecError::encode(F, e))?;
             }
             if let Some(xmp) = &img.meta.xmp {
-                encoder
-                    .add_itxt_chunk(XMP_KEYWORD.into(), xmp.clone())
-                    .map_err(|e| CodecError::encode(F, e))?;
+                encoder.add_itxt_chunk(XMP_KEYWORD.into(), xmp.clone()).map_err(|e| CodecError::encode(F, e))?;
             }
         }
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| CodecError::encode(F, e))?;
+        let mut writer = encoder.write_header().map_err(|e| CodecError::encode(F, e))?;
         if opts.png_interlaced {
             let bpp = img.layout().channels() * img.sample_type().bytes();
             let idat = adam7_idat(&data, w as usize, h as usize, bpp, opts.png_compression)?;
-            writer
-                .write_chunk(png::chunk::IDAT, &idat)
-                .map_err(|e| CodecError::encode(F, e))?;
+            writer.write_chunk(png::chunk::IDAT, &idat).map_err(|e| CodecError::encode(F, e))?;
         } else if let Some(idat) = parallel_idat(&data, w as usize, h as usize, img.layout().channels() * img.sample_type().bytes(), opts.png_compression) {
-            writer
-                .write_chunk(png::chunk::IDAT, &idat)
-                .map_err(|e| CodecError::encode(F, e))?;
+            writer.write_chunk(png::chunk::IDAT, &idat).map_err(|e| CodecError::encode(F, e))?;
         } else {
-            writer
-                .write_image_data(&data)
-                .map_err(|e| CodecError::encode(F, e))?;
+            writer.write_image_data(&data).map_err(|e| CodecError::encode(F, e))?;
         }
         writer.finish().map_err(|e| CodecError::encode(F, e))?;
     }
@@ -215,23 +183,9 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
 }
 
 /// Build the zlib stream for an Adam7-interlaced image (filter type 0).
-fn adam7_idat(
-    data: &[u8],
-    w: usize,
-    h: usize,
-    bpp: usize,
-    level: PngCompression,
-) -> Result<Vec<u8>, CodecError> {
+fn adam7_idat(data: &[u8], w: usize, h: usize, bpp: usize, level: PngCompression) -> Result<Vec<u8>, CodecError> {
     // (x0, y0, dx, dy) per pass.
-    const PASSES: [(usize, usize, usize, usize); 7] = [
-        (0, 0, 8, 8),
-        (4, 0, 8, 8),
-        (0, 4, 4, 8),
-        (2, 0, 4, 4),
-        (0, 2, 2, 4),
-        (1, 0, 2, 2),
-        (0, 1, 1, 2),
-    ];
+    const PASSES: [(usize, usize, usize, usize); 7] = [(0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4), (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2)];
     let mut raw = Vec::with_capacity(data.len() + h * 7);
     for (x0, y0, dx, dy) in PASSES {
         if x0 >= w || y0 >= h {
@@ -357,7 +311,13 @@ fn filter_row(row: &[u8], prev: Option<&[u8]>, bpp: usize, scratch: &mut [u8], o
     let paeth = |a: u8, b: u8, c: u8| {
         let p = i16::from(a) + i16::from(b) - i16::from(c);
         let (pa, pb, pc) = ((p - i16::from(a)).abs(), (p - i16::from(b)).abs(), (p - i16::from(c)).abs());
-        if pa <= pb && pa <= pc { a } else if pb <= pc { b } else { c }
+        if pa <= pb && pa <= pc {
+            a
+        } else if pb <= pc {
+            b
+        } else {
+            c
+        }
     };
     let cost = |v: &[u8]| v.iter().map(|&b| u64::from((b as i8).unsigned_abs())).sum::<u64>();
     let mut best = (cost(row), 0u8);

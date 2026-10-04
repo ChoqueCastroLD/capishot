@@ -10,8 +10,7 @@ use std::sync::Arc;
 
 use photocraft_color::Color;
 use photocraft_doc::text::{
-    AntiAlias, Caps, CharStyle, FontFeature, FontVariation, Kerning, ParagraphRun, ParagraphStyle,
-    TextAlign, TextDirection, TextRun, TextShape,
+    AntiAlias, Caps, CharStyle, FontFeature, FontVariation, Kerning, ParagraphRun, ParagraphStyle, TextAlign, TextDirection, TextRun, TextShape,
 };
 use photocraft_doc::{Affine, Document, Layer, LayerContent, LayerId, TextLayer};
 use serde_json::{Value, json};
@@ -20,26 +19,18 @@ use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 
 fn has_doc(s: &Session) -> std::result::Result<(), String> {
-    s.active()
-        .map(|_| ())
-        .ok_or_else(|| "no document open".into())
+    s.active().map(|_| ()).ok_or_else(|| "no document open".into())
 }
 
 fn layer_id(s: &Session, p: &Value) -> Result<LayerId> {
     match p.get("layer").and_then(Value::as_u64) {
         Some(id) => Ok(LayerId(id)),
-        None => s
-            .active()
-            .and_then(|d| d.active_layer)
-            .ok_or(EngineError::Other("no active layer".into())),
+        None => s.active().and_then(|d| d.active_layer).ok_or(EngineError::Other("no active layer".into())),
     }
 }
 
 fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
-    EngineError::BadParams {
-        cmd: cmd.into(),
-        msg: msg.into(),
-    }
+    EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
 }
 
 fn f32p(p: &Value, k: &str) -> Option<f32> {
@@ -50,20 +41,11 @@ fn color(v: &Value) -> Option<Color> {
     match v {
         Value::Array(a) if a.len() >= 3 => {
             let c: Vec<f32> = a.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect();
-            Some(Color::rgba(
-                c[0],
-                c[1],
-                c[2],
-                c.get(3).copied().unwrap_or(1.0),
-            ))
+            Some(Color::rgba(c[0], c[1], c[2], c.get(3).copied().unwrap_or(1.0)))
         }
         Value::String(s) => {
             let s = s.trim_start_matches('#');
-            let h = |i: usize| {
-                s.get(i..i + 2)
-                    .and_then(|x| u8::from_str_radix(x, 16).ok())
-                    .map(|v| f32::from(v) / 255.0)
-            };
+            let h = |i: usize| s.get(i..i + 2).and_then(|x| u8::from_str_radix(x, 16).ok()).map(|v| f32::from(v) / 255.0);
             match s.len() {
                 6 => Some(Color::rgb(h(0)?, h(2)?, h(4)?)),
                 8 => Some(Color::rgba(h(0)?, h(2)?, h(4)?, h(6)?)),
@@ -104,11 +86,7 @@ fn range_param(text: &str, p: &Value) -> (usize, usize) {
 pub fn apply_char_props(s: &mut CharStyle, p: &Value) -> bool {
     let mut any = false;
     let mut hit = |b: bool| any |= b;
-    if let Some(v) = p
-        .get("font")
-        .or_else(|| p.get("family"))
-        .and_then(Value::as_str)
-    {
+    if let Some(v) = p.get("font").or_else(|| p.get("family")).and_then(Value::as_str) {
         s.font_family = v.to_string();
         s.postscript_name = None;
         hit(true);
@@ -160,17 +138,9 @@ pub fn apply_char_props(s: &mut CharStyle, p: &Value) -> bool {
         }
         _ => {}
     }
-    for (k, f) in [
-        ("baselineShift", &mut s.baseline_shift_pt),
-        ("horizontalScale", &mut s.horizontal_scale),
-        ("verticalScale", &mut s.vertical_scale),
-    ] {
+    for (k, f) in [("baselineShift", &mut s.baseline_shift_pt), ("horizontalScale", &mut s.horizontal_scale), ("verticalScale", &mut s.vertical_scale)] {
         if let Some(v) = f32p(p, k) {
-            *f = if k == "baselineShift" {
-                v
-            } else {
-                (v / 100.0).max(0.01)
-            };
+            *f = if k == "baselineShift" { v } else { (v / 100.0).max(0.01) };
             hit(true);
         }
     }
@@ -205,16 +175,9 @@ pub fn apply_char_props(s: &mut CharStyle, p: &Value) -> bool {
     }
     if let Some(Value::Object(m)) = p.get("features") {
         for (tag, v) in m {
-            let value = v
-                .as_u64()
-                .map(|x| x as u16)
-                .or_else(|| v.as_bool().map(u16::from))
-                .unwrap_or(1);
+            let value = v.as_u64().map(|x| x as u16).or_else(|| v.as_bool().map(u16::from)).unwrap_or(1);
             s.features.retain(|f| &f.tag != tag);
-            s.features.push(FontFeature {
-                tag: tag.clone(),
-                value,
-            });
+            s.features.push(FontFeature { tag: tag.clone(), value });
         }
         hit(true);
     }
@@ -222,10 +185,7 @@ pub fn apply_char_props(s: &mut CharStyle, p: &Value) -> bool {
         for (axis, v) in m {
             s.variations.retain(|f| &f.axis != axis);
             if let Some(x) = v.as_f64() {
-                s.variations.push(FontVariation {
-                    axis: axis.clone(),
-                    value: x as f32,
-                });
+                s.variations.push(FontVariation { axis: axis.clone(), value: x as f32 });
             }
         }
         hit(true);
@@ -312,10 +272,7 @@ pub fn style_range(t: &mut TextLayer, a: usize, b: usize, f: &dyn Fn(&mut CharSt
         push_merge(&mut out, cb - ca, st);
         push_merge(&mut out, re - cb, r.style);
     }
-    t.runs = out
-        .into_iter()
-        .map(|(len, style)| TextRun { len, style })
-        .collect();
+    t.runs = out.into_iter().map(|(len, style)| TextRun { len, style }).collect();
     t.sync_summary();
 }
 
@@ -330,16 +287,11 @@ pub fn style_paragraphs(t: &mut TextLayer, a: usize, b: usize, f: &dyn Fn(&mut P
             Some(s)
         })
         .collect();
-    let style_at = |off: usize| {
-        old[starts.iter().rposition(|&s| s <= off).unwrap_or(0)]
-            .style
-            .clone()
-    };
+    let style_at = |off: usize| old[starts.iter().rposition(|&s| s <= off).unwrap_or(0)].style.clone();
     let mut out: Vec<(usize, ParagraphStyle)> = Vec::new();
     for pr in photocraft_text::layout::split_paragraphs(&t.text) {
         let mut st = style_at(pr.start);
-        let touches = (pr.start < b && pr.end > a)
-            || (a == b && a >= pr.start && (a < pr.end || pr.end == t.text.len()));
+        let touches = (pr.start < b && pr.end > a) || (a == b && a >= pr.start && (a < pr.end || pr.end == t.text.len()));
         if touches {
             f(&mut st);
         }
@@ -348,21 +300,13 @@ pub fn style_paragraphs(t: &mut TextLayer, a: usize, b: usize, f: &dyn Fn(&mut P
             out.push((0, st));
         }
     }
-    t.paragraphs = out
-        .into_iter()
-        .map(|(len, style)| ParagraphRun { len, style })
-        .collect();
+    t.paragraphs = out.into_iter().map(|(len, style)| ParagraphRun { len, style }).collect();
 }
 
 /// Replaces bytes `a..b` with `new`, keeping styles: inserted text takes the style of the
 /// character before it (or after it at the start).
 pub fn replace_text(t: &mut TextLayer, a: usize, b: usize, new: &str) {
-    fn adjust<S: Clone + PartialEq>(
-        runs: Vec<(usize, S)>,
-        a: usize,
-        b: usize,
-        ins: usize,
-    ) -> Vec<(usize, S)> {
+    fn adjust<S: Clone + PartialEq>(runs: Vec<(usize, S)>, a: usize, b: usize, ins: usize) -> Vec<(usize, S)> {
         let mut out: Vec<(usize, S)> = Vec::new();
         let mut at = 0;
         let host = runs
@@ -372,13 +316,7 @@ pub fn replace_text(t: &mut TextLayer, a: usize, b: usize, new: &str) {
                 *acc += r.0;
                 Some((s, s + r.0))
             })
-            .position(|(s, e)| {
-                if a == 0 {
-                    e > 0 || s == 0
-                } else {
-                    a > s && a <= e
-                }
-            })
+            .position(|(s, e)| if a == 0 { e > 0 || s == 0 } else { a > s && a <= e })
             .unwrap_or(0);
         for (i, (len, st)) in runs.into_iter().enumerate() {
             let (rs, re) = (at, at + len);
@@ -389,21 +327,10 @@ pub fn replace_text(t: &mut TextLayer, a: usize, b: usize, new: &str) {
         }
         out
     }
-    let (a, b) = (
-        a.min(t.text.len()),
-        b.min(t.text.len()).max(a.min(t.text.len())),
-    );
+    let (a, b) = (a.min(t.text.len()), b.min(t.text.len()).max(a.min(t.text.len())));
     let new = norm_text(new);
-    let cr: Vec<(usize, CharStyle)> = t
-        .char_runs()
-        .into_iter()
-        .map(|r| (r.len, r.style))
-        .collect();
-    let pr: Vec<(usize, ParagraphStyle)> = t
-        .paragraph_runs()
-        .into_iter()
-        .map(|r| (r.len, r.style))
-        .collect();
+    let cr: Vec<(usize, CharStyle)> = t.char_runs().into_iter().map(|r| (r.len, r.style)).collect();
+    let pr: Vec<(usize, ParagraphStyle)> = t.paragraph_runs().into_iter().map(|r| (r.len, r.style)).collect();
     let first_c = cr.first().map(|r| r.1.clone()).unwrap_or_default();
     let first_p = pr.first().map(|r| r.1.clone()).unwrap_or_default();
     let mut cr = adjust(cr, a, b, new.len());
@@ -415,48 +342,27 @@ pub fn replace_text(t: &mut TextLayer, a: usize, b: usize, new: &str) {
     if pr.is_empty() {
         pr.push((t.text.len(), first_p));
     }
-    t.runs = cr
-        .into_iter()
-        .map(|(len, style)| TextRun { len, style })
-        .collect();
-    t.paragraphs = pr
-        .into_iter()
-        .map(|(len, style)| ParagraphRun { len, style })
-        .collect();
+    t.runs = cr.into_iter().map(|(len, style)| TextRun { len, style }).collect();
+    t.paragraphs = pr.into_iter().map(|(len, style)| ParagraphRun { len, style }).collect();
     t.sync_summary();
 }
 
 /// Re-renders the layer's pixels and regenerates its PSD `TySh` data.
 pub fn refresh(doc: &Document, t: &mut TextLayer) {
     let dpi = doc.resolution_dpi;
-    let mut eng = photocraft_text::shared()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
     let (layout, r) = eng.render(t, dpi, doc.pixel_format());
     t.cache = Some(r.surface);
-    t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(
-        t,
-        dpi,
-        layout.bounds(),
-    )));
+    t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
 }
 
-fn with_text_layer<R>(
-    s: &mut Session,
-    p: &Value,
-    label: &str,
-    f: impl FnOnce(&mut TextLayer, &Document) -> Result<R>,
-) -> Result<R> {
+fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&mut TextLayer, &Document) -> Result<R>) -> Result<R> {
     let id = layer_id(s, p)?;
     s.edit(label, |doc, _| {
         let snapshot = doc.clone();
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         let LayerContent::Text(t) = &mut l.content else {
-            return Err(EngineError::Other(format!(
-                "layer {} is a {} layer, not a type layer",
-                id.0,
-                l.content.kind_name()
-            )));
+            return Err(EngineError::Other(format!("layer {} is a {} layer, not a type layer", id.0, l.content.kind_name())));
         };
         let r = f(t, &snapshot)?;
         refresh(&snapshot, t);
@@ -467,11 +373,7 @@ fn with_text_layer<R>(
 fn layer_name(text: &str) -> String {
     let first = text.lines().next().unwrap_or("").trim();
     let name: String = first.chars().take(40).collect();
-    if name.is_empty() {
-        "Type Layer".into()
-    } else {
-        name
-    }
+    if name.is_empty() { "Type Layer".into() } else { name }
 }
 
 fn info(s: &Session, p: &Value) -> Result<Value> {
@@ -479,10 +381,7 @@ fn info(s: &Session, p: &Value) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let l = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
     let LayerContent::Text(t) = &l.content else {
-        return Err(EngineError::Other(format!(
-            "layer {} is not a type layer",
-            id.0
-        )));
+        return Err(EngineError::Other(format!("layer {} is not a type layer", id.0)));
     };
     let text = &t.text;
     let mut at = 0;
@@ -505,20 +404,13 @@ fn info(s: &Session, p: &Value) -> Result<Value> {
             v
         })
         .collect();
-    let layout = photocraft_text::shared()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .layout(t, d.doc.resolution_dpi);
+    let layout = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).layout(t, d.doc.resolution_dpi);
     let lines: Vec<Value> = layout
         .lines
         .iter()
         .map(|ln| json!({ "start": char_at(text, ln.range.start), "end": char_at(text, ln.range.end), "baseline": ln.baseline, "x0": ln.x0, "x1": ln.x1, "ascent": ln.ascent, "descent": ln.descent }))
         .collect();
-    let bounds = t
-        .cache
-        .as_ref()
-        .map(|c| c.content_bounds())
-        .map(|r| json!([r.x0, r.y0, r.x1, r.y1]));
+    let bounds = t.cache.as_ref().map(|c| c.content_bounds()).map(|r| json!([r.x0, r.y0, r.x1, r.y1]));
     Ok(json!({
         "layer": id.0,
         "text": text,
@@ -754,11 +646,7 @@ mod tests {
 
     fn session() -> Session {
         let mut s = Session::new();
-        s.execute(
-            "file.new",
-            json!({"width": 200, "height": 100, "background": "transparent"}),
-        )
-        .unwrap();
+        s.execute("file.new", json!({"width": 200, "height": 100, "background": "transparent"})).unwrap();
         s
     }
 
@@ -772,18 +660,10 @@ mod tests {
     #[test]
     fn create_renders_and_is_undoable() {
         let mut s = session();
-        let r = s
-            .execute(
-                "type.create",
-                json!({"x": 10, "y": 50, "text": "Hello", "size": 24, "color": "#ff0000"}),
-            )
-            .unwrap();
+        let r = s.execute("type.create", json!({"x": 10, "y": 50, "text": "Hello", "size": 24, "color": "#ff0000"})).unwrap();
         let id = r["layer"].as_u64().unwrap();
         let b = r["bounds"].as_array().unwrap();
-        assert!(
-            b[0].as_i64().unwrap() >= 9 && b[3].as_i64().unwrap() <= 56,
-            "{b:?}"
-        );
+        assert!(b[0].as_i64().unwrap() >= 9 && b[3].as_i64().unwrap() <= 56, "{b:?}");
         let t = text_layer(&s, id);
         assert_eq!(t.text, "Hello");
         assert_eq!(t.runs[0].style.size_pt, 24.0);
@@ -793,14 +673,9 @@ mod tests {
         // Red pixels exist.
         let c = t.cache.as_ref().unwrap();
         let r = c.content_bounds();
-        assert!(
-            c.read_region(r)
-                .chunks_exact(4)
-                .any(|p| p[3] > 0.9 && p[0] > 0.9 && p[1] < 0.1)
-        );
+        assert!(c.read_region(r).chunks_exact(4).any(|p| p[3] > 0.9 && p[0] > 0.9 && p[1] < 0.1));
         // The TySh we generated parses back to the same model.
-        let back =
-            photocraft_text::psd::text_layer_from_tysh(t.psd_raw.as_ref().unwrap(), 72.0).unwrap();
+        let back = photocraft_text::psd::text_layer_from_tysh(t.psd_raw.as_ref().unwrap(), 72.0).unwrap();
         assert_eq!(back.text, "Hello");
         let strip = |mut r: Vec<TextRun>| {
             for x in &mut r {
@@ -809,10 +684,7 @@ mod tests {
             r
         };
         assert_eq!(strip(back.char_runs()), strip(t.char_runs()));
-        assert_eq!(
-            back.char_runs()[0].style.postscript_name.as_deref(),
-            Some("Inter-Regular")
-        );
+        assert_eq!(back.char_runs()[0].style.postscript_name.as_deref(), Some("Inter-Regular"));
         assert!(s.undo());
         assert!(s.active().unwrap().doc.layer(LayerId(id)).is_none());
     }
@@ -820,45 +692,24 @@ mod tests {
     #[test]
     fn edit_replace_keeps_styles() {
         let mut s = session();
-        let id = s
-            .execute(
-                "type.create",
-                json!({"x": 0, "y": 40, "text": "Hello world"}),
-            )
-            .unwrap()["layer"]
-            .as_u64()
-            .unwrap();
-        s.execute(
-            "type.setStyle",
-            json!({"layer": id, "range": [6, 11], "fauxBold": true, "color": [0, 0, 1]}),
-        )
-        .unwrap();
+        let id = s.execute("type.create", json!({"x": 0, "y": 40, "text": "Hello world"})).unwrap()["layer"].as_u64().unwrap();
+        s.execute("type.setStyle", json!({"layer": id, "range": [6, 11], "fauxBold": true, "color": [0, 0, 1]})).unwrap();
         let t = text_layer(&s, id);
         assert_eq!(t.runs.len(), 2);
         assert_eq!(t.runs[0].len, 6);
         assert!(t.runs[1].style.faux_bold);
         // Insert inside the bold word: inherits bold.
-        s.execute(
-            "type.edit",
-            json!({"layer": id, "replace": {"start": 8, "end": 8, "text": "XX"}}),
-        )
-        .unwrap();
+        s.execute("type.edit", json!({"layer": id, "replace": {"start": 8, "end": 8, "text": "XX"}})).unwrap();
         let t = text_layer(&s, id);
         assert_eq!(t.text, "Hello woXXrld");
         assert_eq!(t.runs[1].len, 7);
         // Delete across the style boundary.
-        s.execute(
-            "type.edit",
-            json!({"layer": id, "replace": {"start": 3, "end": 8, "text": ""}}),
-        )
-        .unwrap();
+        s.execute("type.edit", json!({"layer": id, "replace": {"start": 3, "end": 8, "text": ""}})).unwrap();
         let t = text_layer(&s, id);
         assert_eq!(t.text, "HelXXrld");
         assert_eq!(t.runs.iter().map(|r| r.len).collect::<Vec<_>>(), vec![3, 5]);
         // Whole-text replace with a multi-byte string.
-        let info = s
-            .execute("type.edit", json!({"layer": id, "text": "Größe ✓\nzwei"}))
-            .unwrap();
+        let info = s.execute("type.edit", json!({"layer": id, "text": "Größe ✓\nzwei"})).unwrap();
         assert_eq!(info["lines"].as_array().unwrap().len(), 2);
         let t = text_layer(&s, id);
         assert_eq!(t.runs.iter().map(|r| r.len).sum::<usize>(), t.text.len());
@@ -867,17 +718,10 @@ mod tests {
     #[test]
     fn set_style_paragraph_and_box() {
         let mut s = session();
-        let id = s
-            .execute("type.create", json!({"box": [10, 10, 80, 80], "text": "one two three four five six seven", "size": 12}))
-            .unwrap()["layer"]
+        let id = s.execute("type.create", json!({"box": [10, 10, 80, 80], "text": "one two three four five six seven", "size": 12})).unwrap()["layer"]
             .as_u64()
             .unwrap();
-        let info = s
-            .execute(
-                "type.setStyle",
-                json!({"layer": id, "align": "center", "leading": 20}),
-            )
-            .unwrap();
+        let info = s.execute("type.setStyle", json!({"layer": id, "align": "center", "leading": 20})).unwrap();
         let lines = info["lines"].as_array().unwrap();
         assert!(lines.len() >= 3);
         let b0 = lines[0]["baseline"].as_f64().unwrap();
@@ -890,10 +734,8 @@ mod tests {
         let r = t.cache.as_ref().unwrap().content_bounds();
         assert!(r.x0 >= 9 && r.x1 <= 91, "{r:?}");
         // Convert to point text and move.
-        s.execute("type.edit", json!({"layer": id, "point": [5, 30]}))
-            .unwrap();
-        s.execute("type.edit", json!({"layer": id, "move": [10, 0]}))
-            .unwrap();
+        s.execute("type.edit", json!({"layer": id, "point": [5, 30]})).unwrap();
+        s.execute("type.edit", json!({"layer": id, "move": [10, 0]})).unwrap();
         let t = text_layer(&s, id);
         assert_eq!(t.shape, TextShape::Point);
         assert_eq!(t.transform.m[4], 15.0);
@@ -902,27 +744,14 @@ mod tests {
     #[test]
     fn rasterize_and_fonts() {
         let mut s = session();
-        let id = s
-            .execute("type.create", json!({"x": 5, "y": 30, "text": "Raster"}))
-            .unwrap()["layer"]
-            .as_u64()
-            .unwrap();
+        let id = s.execute("type.create", json!({"x": 5, "y": 30, "text": "Raster"})).unwrap()["layer"].as_u64().unwrap();
         s.execute("type.rasterize", json!({"layer": id})).unwrap();
         let l = s.active().unwrap().doc.layer(LayerId(id)).unwrap();
         assert!(matches!(l.content, LayerContent::Raster(_)));
         assert!(l.surface().unwrap().content_bounds().width() > 10);
-        assert!(
-            s.execute("type.edit", json!({"layer": id, "text": "x"}))
-                .is_err()
-        );
+        assert!(s.execute("type.edit", json!({"layer": id, "text": "x"})).is_err());
         let fonts = s.execute("type.fonts", json!({})).unwrap();
-        assert!(
-            fonts["families"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|f| f == "Inter")
-        );
+        assert!(fonts["families"].as_array().unwrap().iter().any(|f| f == "Inter"));
         let faces = s.execute("type.fonts", json!({"family": "Inter"})).unwrap();
         assert!(!faces["faces"].as_array().unwrap().is_empty());
     }

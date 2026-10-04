@@ -76,7 +76,13 @@ pub fn combined_mask(layer: &Layer, canvas: Rect) -> Option<Surface> {
         && v_out > 0.0
     {
         let b = m.surface.content_bounds();
-        area = if area.is_empty() { b } else if b.is_empty() { area } else { area.union(&b) };
+        area = if area.is_empty() {
+            b
+        } else if b.is_empty() {
+            area
+        } else {
+            area.union(&b)
+        };
     }
     let area = area.intersect(&canvas);
     let mut s = Surface::with_default(FORMAT, &[p_def * v_out]);

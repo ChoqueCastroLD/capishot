@@ -141,7 +141,8 @@ fn text_shape_smart_raw_blocks_survive() {
 #[test]
 fn raster_layer_blocks_preserved() {
     let mut d = gen_doc(ColorMode::Rgb, SampleType::U8, Features::PIXELS);
-    let blocks = vec![(*b"vmsk", std::sync::Arc::new(vec![0u8; 12])), (*b"clbl", std::sync::Arc::new(vec![0u8, 0, 0, 0])), (*b"Zzzz", std::sync::Arc::new(vec![1u8]))];
+    let blocks =
+        vec![(*b"vmsk", std::sync::Arc::new(vec![0u8; 12])), (*b"clbl", std::sync::Arc::new(vec![0u8, 0, 0, 0])), (*b"Zzzz", std::sync::Arc::new(vec![1u8]))];
     d.layers[1].psd_blocks = blocks.clone();
     d.layers[1].vector_mask = photocraft_io::vector_map::vector_mask_from_block(&[0; 12], d.size.width, d.size.height);
     let back = roundtrip(&d);
@@ -263,7 +264,10 @@ fn gradient_and_pattern_fills_roundtrip() {
             reverse: true,
         }),
     ));
-    d.layers.push(Layer::new("pat", LayerContent::Fill(Fill::Pattern { name: "Dots".into(), scale: 0.5, id: String::new(), angle: 0.0, link: true, phase: (0.0, 0.0) })));
+    d.layers.push(Layer::new(
+        "pat",
+        LayerContent::Fill(Fill::Pattern { name: "Dots".into(), scale: 0.5, id: String::new(), angle: 0.0, link: true, phase: (0.0, 0.0) }),
+    ));
     let back = roundtrip(&d);
     assert_docs_eq(&d, &back);
 }
@@ -302,8 +306,18 @@ fn effects_roundtrip_typed_and_raw() {
     d.global_light = GlobalLight { angle: 45.0, altitude: 25.0 };
     d.layers[1].effects.items = vec![
         Effect::default_drop_shadow(),
-        Effect::Stroke(StrokeFx { common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0), size: 3.0, position: StrokePosition::Center, paint: FxPaint::Color(photocraft_color::Color::rgb(0.0, 1.0, 0.0)) }),
-        Effect::Stroke(StrokeFx { common: FxCommon::new(photocraft_color::BlendMode::Normal, 0.5), size: 6.0, position: StrokePosition::Outside, paint: FxPaint::Color(photocraft_color::Color::rgb(0.0, 0.0, 1.0)) }),
+        Effect::Stroke(StrokeFx {
+            common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0),
+            size: 3.0,
+            position: StrokePosition::Center,
+            paint: FxPaint::Color(photocraft_color::Color::rgb(0.0, 1.0, 0.0)),
+        }),
+        Effect::Stroke(StrokeFx {
+            common: FxCommon::new(photocraft_color::BlendMode::Normal, 0.5),
+            size: 6.0,
+            position: StrokePosition::Outside,
+            paint: FxPaint::Color(photocraft_color::Color::rgb(0.0, 0.0, 1.0)),
+        }),
     ];
     let back = roundtrip(&d);
     assert_eq!(back.global_light, d.global_light);
@@ -332,7 +346,10 @@ fn group_effects_use_lfxs() {
     use photocraft_doc::*;
     let mut d = gen_doc(ColorMode::Rgb, SampleType::U8, Features::PIXELS);
     let n = d.layers.iter().position(|l| l.is_group()).unwrap();
-    d.layers[n].effects.items.push(Effect::ColorOverlay { common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0), color: photocraft_color::Color::rgb(1.0, 0.0, 0.0) });
+    d.layers[n]
+        .effects
+        .items
+        .push(Effect::ColorOverlay { common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0), color: photocraft_color::Color::rgb(1.0, 0.0, 0.0) });
     let f = document_to_psd(&d);
     let rec = f.layers().iter().find(|r| r.name() == d.layers[n].name && r.section_type().is_folder()).unwrap();
     assert!(rec.block(b"lfxs").is_some() && rec.block(b"lfx2").is_none());
@@ -429,45 +446,15 @@ fn blend_if_round_trips_as_blending_ranges() {
     use photocraft_doc::{BlendIf, BlendRange, Document, Layer, Size};
     let mut d = Document::new("b", Size::new(8, 8), ColorMode::Rgb, SampleType::U8);
     let mut a = Layer::raster("a", d.pixel_format());
-    a.surface_mut().unwrap().fill_rect(
-        photocraft_geom::Rect::new(0, 0, 4, 4),
-        &[1.0, 1.0, 1.0, 1.0],
-    );
+    a.surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(0, 0, 4, 4), &[1.0, 1.0, 1.0, 1.0]);
     let mut bi = BlendIf::default();
     // Gray › This Layer: hide the whites, fading from 200 to 230.
-    bi.set(
-        0,
-        [
-            BlendRange {
-                black: [0, 0],
-                white: [200, 230],
-            },
-            BlendRange::FULL,
-        ],
-    );
+    bi.set(0, [BlendRange { black: [0, 0], white: [200, 230] }, BlendRange::FULL]);
     // Green › Underlying Layer: show only over values from 64 up.
-    bi.set(
-        2,
-        [
-            BlendRange::FULL,
-            BlendRange {
-                black: [64, 64],
-                white: [255, 255],
-            },
-        ],
-    );
+    bi.set(2, [BlendRange::FULL, BlendRange { black: [64, 64], white: [255, 255] }]);
     a.blend_if = bi.clone();
     let mut g = Layer::group("g", vec![Layer::raster("c", d.pixel_format())]);
-    g.blend_if.set(
-        1,
-        [
-            BlendRange {
-                black: [1, 2],
-                white: [3, 4],
-            },
-            BlendRange::FULL,
-        ],
-    );
+    g.blend_if.set(1, [BlendRange { black: [1, 2], white: [3, 4] }, BlendRange::FULL]);
     let b = Layer::raster("b", d.pixel_format());
     d.layers = vec![a, b, g];
     let f = document_to_psd(&d);
@@ -485,11 +472,5 @@ fn blend_if_round_trips_as_blending_ranges() {
     let back = roundtrip(&d);
     assert_eq!(back.layers[0].blend_if, bi);
     assert!(back.layers[1].blend_if.is_default());
-    assert_eq!(
-        back.layers[2].blend_if.get(1)[0],
-        BlendRange {
-            black: [1, 2],
-            white: [3, 4]
-        }
-    );
+    assert_eq!(back.layers[2].blend_if.get(1)[0], BlendRange { black: [1, 2], white: [3, 4] });
 }

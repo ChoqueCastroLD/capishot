@@ -79,19 +79,11 @@ fn camera_raw(b: &[u8]) -> bool {
     };
     let u16_at = |o: usize| {
         let s = b.get(o..o.checked_add(2)?)?;
-        Some(if le {
-            u16::from_le_bytes([s[0], s[1]])
-        } else {
-            u16::from_be_bytes([s[0], s[1]])
-        })
+        Some(if le { u16::from_le_bytes([s[0], s[1]]) } else { u16::from_be_bytes([s[0], s[1]]) })
     };
     let u32_at = |o: usize| {
         let s: [u8; 4] = b.get(o..o.checked_add(4)?)?.try_into().ok()?;
-        Some(if le {
-            u32::from_le_bytes(s)
-        } else {
-            u32::from_be_bytes(s)
-        })
+        Some(if le { u32::from_le_bytes(s) } else { u32::from_be_bytes(s) })
     };
     // CR2: "CR" and major version 2 right after the TIFF header.
     if b.get(8..11) == Some(b"CR\x02") {
@@ -120,9 +112,7 @@ fn camera_raw(b: &[u8]) -> bool {
             };
             match tag {
                 TAG_DNG_VERSION => return true,
-                TAG_PHOTOMETRIC
-                    if matches!(value(e), Some(PHOTOMETRIC_CFA | PHOTOMETRIC_LINEAR_RAW)) =>
-                {
+                TAG_PHOTOMETRIC if matches!(value(e), Some(PHOTOMETRIC_CFA | PHOTOMETRIC_LINEAR_RAW)) => {
                     return true;
                 }
                 TAG_SUB_IFDS if count == 1 => queue.extend(value(e)),
@@ -136,8 +126,7 @@ fn camera_raw(b: &[u8]) -> bool {
                 _ => {}
             }
         }
-        if let Some(next) = u32_at(ifd.saturating_add(2 + 12 * usize::from(n))).filter(|&o| o != 0)
-        {
+        if let Some(next) = u32_at(ifd.saturating_add(2 + 12 * usize::from(n))).filter(|&o| o != 0) {
             queue.push(next);
         }
     }
@@ -146,10 +135,7 @@ fn camera_raw(b: &[u8]) -> bool {
 
 pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
     if camera_raw(bytes) {
-        return Err(CodecError::unsupported(
-            F,
-            "camera raw files (such as CR2, NEF, ARW or DNG) are not supported",
-        ));
+        return Err(CodecError::unsupported(F, "camera raw files (such as CR2, NEF, ARW or DNG) are not supported"));
     }
     let tl = {
         let mut l = tiff::decoder::Limits::default();
@@ -157,9 +143,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         l.intermediate_buffer_size = limits.alloc_usize().min(1 << 30);
         l
     };
-    let mut dec = Decoder::new(Cursor::new(bytes))
-        .map_err(map_err)?
-        .with_limits(tl);
+    let mut dec = Decoder::new(Cursor::new(bytes)).map_err(map_err)?.with_limits(tl);
     let (w, h) = dec.dimensions().map_err(map_err)?;
     let ct = dec.colortype().map_err(map_err)?;
     let (layout, bits) = match ct {
@@ -170,27 +154,18 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         tiff::ColorType::CMYK(b) => (ChannelLayout::Cmyk, b),
         tiff::ColorType::CMYKA(b) => (ChannelLayout::CmykA, b),
         // The decoder reports gray+alpha as multiband (it ignores ExtraSamples).
-        tiff::ColorType::Multiband {
-            bit_depth,
-            num_samples: 2,
-        } => (ChannelLayout::GrayA, bit_depth),
+        tiff::ColorType::Multiband { bit_depth, num_samples: 2 } => (ChannelLayout::GrayA, bit_depth),
         other => return Err(CodecError::unsupported(F, format!("colour type {other:?}"))),
     };
     let bytes_per_sample = u64::from(bits.max(8) / 8);
     limits.check_bytes(w, h, layout.channels() as u64 * bytes_per_sample.max(1))?;
-    let white_is_zero = dec
-        .find_tag_unsigned::<u16>(Tag::PhotometricInterpretation)
-        .ok()
-        .flatten()
-        == Some(PhotometricInterpretation::WhiteIsZero.to_u16());
+    let white_is_zero = dec.find_tag_unsigned::<u16>(Tag::PhotometricInterpretation).ok().flatten() == Some(PhotometricInterpretation::WhiteIsZero.to_u16());
 
     let result = dec.read_image().map_err(map_err)?;
     let n = w as usize * h as usize * layout.channels();
     let mut img = match result {
         DecodingResult::U8(v) if bits == 8 => Image::from_u8(w, h, layout, v)?,
-        DecodingResult::U8(v) if bits < 8 && layout == ChannelLayout::Gray => {
-            Image::from_u8(w, h, layout, unpack_bits(&v, w as usize, h as usize, bits)?)?
-        }
+        DecodingResult::U8(v) if bits < 8 && layout == ChannelLayout::Gray => Image::from_u8(w, h, layout, unpack_bits(&v, w as usize, h as usize, bits)?)?,
         DecodingResult::U16(v) => Image::from_u16(w, h, layout, &v)?,
         DecodingResult::U32(v) => {
             let v: Vec<u16> = v.iter().map(|&x| (x >> 16) as u16).collect();
@@ -203,10 +178,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
             Image::from_f32(w, h, layout, &v)?
         }
         _ => {
-            return Err(CodecError::unsupported(
-                F,
-                format!("sample format for {ct:?}"),
-            ));
+            return Err(CodecError::unsupported(F, format!("sample format for {ct:?}")));
         }
     };
     if img.sample_count() != n {
@@ -225,11 +197,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         img = Image::from_normalized(w, h, layout, img.sample_type(), &v)?;
     }
 
-    img.icc = dec
-        .find_tag(Tag::IccProfile)
-        .ok()
-        .flatten()
-        .and_then(value_bytes);
+    img.icc = dec.find_tag(Tag::IccProfile).ok().flatten().and_then(value_bytes);
     let mut meta = Metadata {
         xmp: dec
             .find_tag(Tag::Unknown(TAG_XMP))
@@ -240,21 +208,9 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
             .map(|s| s.trim_end_matches('\0').to_owned()),
         ..Default::default()
     };
-    let unit = dec
-        .find_tag_unsigned::<u16>(Tag::ResolutionUnit)
-        .ok()
-        .flatten()
-        .unwrap_or(2);
-    let xr = dec
-        .find_tag(Tag::XResolution)
-        .ok()
-        .flatten()
-        .and_then(rational_f64);
-    let yr = dec
-        .find_tag(Tag::YResolution)
-        .ok()
-        .flatten()
-        .and_then(rational_f64);
+    let unit = dec.find_tag_unsigned::<u16>(Tag::ResolutionUnit).ok().flatten().unwrap_or(2);
+    let xr = dec.find_tag(Tag::XResolution).ok().flatten().and_then(rational_f64);
+    let yr = dec.find_tag(Tag::YResolution).ok().flatten().and_then(rational_f64);
     if let (Some(x), Some(y)) = (xr, yr)
         && x > 0.0
         && y > 0.0
@@ -266,12 +222,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         };
     }
     for (tag, key) in TEXT_TAGS {
-        if let Some(s) = dec
-            .find_tag(*tag)
-            .ok()
-            .flatten()
-            .and_then(|v| v.into_string().ok())
-        {
+        if let Some(s) = dec.find_tag(*tag).ok().flatten().and_then(|v| v.into_string().ok()) {
             let s = s.trim_end_matches('\0').to_owned();
             if !s.is_empty() {
                 meta.text.push(((*key).to_owned(), s));
@@ -367,46 +318,11 @@ macro_rules! custom_colortype {
 }
 
 use PhotometricInterpretation as PI;
-custom_colortype!(
-    GrayA8,
-    u8,
-    PI::BlackIsZero,
-    &[8, 8],
-    &[SampleFormat::Uint; 2],
-    int
-);
-custom_colortype!(
-    GrayA16,
-    u16,
-    PI::BlackIsZero,
-    &[16, 16],
-    &[SampleFormat::Uint; 2],
-    int
-);
-custom_colortype!(
-    GrayA32F,
-    f32,
-    PI::BlackIsZero,
-    &[32, 32],
-    &[SampleFormat::IEEEFP; 2],
-    float
-);
-custom_colortype!(
-    CmykA16,
-    u16,
-    PI::CMYK,
-    &[16; 5],
-    &[SampleFormat::Uint; 5],
-    int
-);
-custom_colortype!(
-    CmykA32F,
-    f32,
-    PI::CMYK,
-    &[32; 5],
-    &[SampleFormat::IEEEFP; 5],
-    float
-);
+custom_colortype!(GrayA8, u8, PI::BlackIsZero, &[8, 8], &[SampleFormat::Uint; 2], int);
+custom_colortype!(GrayA16, u16, PI::BlackIsZero, &[16, 16], &[SampleFormat::Uint; 2], int);
+custom_colortype!(GrayA32F, f32, PI::BlackIsZero, &[32, 32], &[SampleFormat::IEEEFP; 2], float);
+custom_colortype!(CmykA16, u16, PI::CMYK, &[16; 5], &[SampleFormat::Uint; 5], int);
+custom_colortype!(CmykA32F, f32, PI::CMYK, &[32; 5], &[SampleFormat::IEEEFP; 5], float);
 
 struct TagSet<'a> {
     icc: Option<&'a [u8]>,
@@ -416,13 +332,7 @@ struct TagSet<'a> {
     alpha: bool,
 }
 
-fn write_one<C>(
-    enc: &mut TiffEncoder<&mut Cursor<Vec<u8>>>,
-    w: u32,
-    h: u32,
-    data: &[C::Inner],
-    tags: &TagSet<'_>,
-) -> tiff::TiffResult<()>
+fn write_one<C>(enc: &mut TiffEncoder<&mut Cursor<Vec<u8>>>, w: u32, h: u32, data: &[C::Inner], tags: &TagSet<'_>) -> tiff::TiffResult<()>
 where
     C: TiffColorType,
     [C::Inner]: TiffValue,
@@ -430,14 +340,8 @@ where
     let mut im = enc.new_image::<C>(w, h)?;
     if let Some((x, y)) = tags.dpi {
         im.resolution_unit(ResolutionUnit::Inch);
-        im.x_resolution(Rational {
-            n: (x * 1000.0).round() as u32,
-            d: 1000,
-        });
-        im.y_resolution(Rational {
-            n: (y * 1000.0).round() as u32,
-            d: 1000,
-        });
+        im.x_resolution(Rational { n: (x * 1000.0).round() as u32, d: 1000 });
+        im.y_resolution(Rational { n: (y * 1000.0).round() as u32, d: 1000 });
     }
     let d = im.encoder();
     if tags.alpha {
@@ -462,16 +366,10 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
     let compression = match opts.tiff_compression {
         TiffCompression::None => tiff::encoder::Compression::Uncompressed,
         TiffCompression::Lzw => tiff::encoder::Compression::Lzw,
-        TiffCompression::Deflate => {
-            tiff::encoder::Compression::Deflate(tiff::encoder::DeflateLevel::Balanced)
-        }
+        TiffCompression::Deflate => tiff::encoder::Compression::Deflate(tiff::encoder::DeflateLevel::Balanced),
         TiffCompression::PackBits => tiff::encoder::Compression::Packbits,
     };
-    let predictor = if !img.sample_type().is_float()
-        && matches!(
-            opts.tiff_compression,
-            TiffCompression::Lzw | TiffCompression::Deflate
-        ) {
+    let predictor = if !img.sample_type().is_float() && matches!(opts.tiff_compression, TiffCompression::Lzw | TiffCompression::Deflate) {
         tiff::encoder::Predictor::Horizontal
     } else {
         tiff::encoder::Predictor::None
@@ -480,43 +378,23 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
         img.meta
             .text
             .iter()
-            .filter_map(|(k, v)| {
-                TEXT_TAGS
-                    .iter()
-                    .find(|(_, key)| key.eq_ignore_ascii_case(k))
-                    .map(|(t, _)| (*t, v.as_str()))
-            })
+            .filter_map(|(k, v)| TEXT_TAGS.iter().find(|(_, key)| key.eq_ignore_ascii_case(k)).map(|(t, _)| (*t, v.as_str())))
             .filter(|(_, v)| v.is_ascii() && !v.contains('\0'))
             .collect()
     } else {
         Vec::new()
     };
     let tags = TagSet {
-        icc: if opts.embed_icc {
-            img.icc.as_deref()
-        } else {
-            None
-        },
-        xmp: if opts.embed_metadata {
-            img.meta.xmp.as_deref().map(str::as_bytes)
-        } else {
-            None
-        },
-        dpi: if opts.embed_metadata {
-            img.meta.dpi.filter(|d| d.0 > 0.0 && d.1 > 0.0)
-        } else {
-            None
-        },
+        icc: if opts.embed_icc { img.icc.as_deref() } else { None },
+        xmp: if opts.embed_metadata { img.meta.xmp.as_deref().map(str::as_bytes) } else { None },
+        dpi: if opts.embed_metadata { img.meta.dpi.filter(|d| d.0 > 0.0 && d.1 > 0.0) } else { None },
         text,
         alpha: img.layout().has_alpha(),
     };
 
     let mut cursor = Cursor::new(Vec::new());
     {
-        let mut enc = TiffEncoder::new(&mut cursor)
-            .map_err(|e| CodecError::encode(F, e))?
-            .with_compression(compression)
-            .with_predictor(predictor);
+        let mut enc = TiffEncoder::new(&mut cursor).map_err(|e| CodecError::encode(F, e))?.with_compression(compression).with_predictor(predictor);
         use ChannelLayout as L;
         use SampleType as S;
         let u16s = || img.to_u16_samples().unwrap_or_default();
@@ -525,9 +403,7 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
         let res = match (img.layout(), img.sample_type()) {
             (L::Gray, S::U8) => write_one::<colortype::Gray8>(&mut enc, w, h, d8, &tags),
             (L::Gray, S::U16) => write_one::<colortype::Gray16>(&mut enc, w, h, &u16s(), &tags),
-            (L::Gray, S::F32) => {
-                write_one::<colortype::Gray32Float>(&mut enc, w, h, &f32s(), &tags)
-            }
+            (L::Gray, S::F32) => write_one::<colortype::Gray32Float>(&mut enc, w, h, &f32s(), &tags),
             (L::GrayA, S::U8) => write_one::<GrayA8>(&mut enc, w, h, d8, &tags),
             (L::GrayA, S::U16) => write_one::<GrayA16>(&mut enc, w, h, &u16s(), &tags),
             (L::GrayA, S::F32) => write_one::<GrayA32F>(&mut enc, w, h, &f32s(), &tags),
@@ -536,14 +412,10 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
             (L::Rgb, S::F32) => write_one::<colortype::RGB32Float>(&mut enc, w, h, &f32s(), &tags),
             (L::Rgba, S::U8) => write_one::<colortype::RGBA8>(&mut enc, w, h, d8, &tags),
             (L::Rgba, S::U16) => write_one::<colortype::RGBA16>(&mut enc, w, h, &u16s(), &tags),
-            (L::Rgba, S::F32) => {
-                write_one::<colortype::RGBA32Float>(&mut enc, w, h, &f32s(), &tags)
-            }
+            (L::Rgba, S::F32) => write_one::<colortype::RGBA32Float>(&mut enc, w, h, &f32s(), &tags),
             (L::Cmyk, S::U8) => write_one::<colortype::CMYK8>(&mut enc, w, h, d8, &tags),
             (L::Cmyk, S::U16) => write_one::<colortype::CMYK16>(&mut enc, w, h, &u16s(), &tags),
-            (L::Cmyk, S::F32) => {
-                write_one::<colortype::CMYK32Float>(&mut enc, w, h, &f32s(), &tags)
-            }
+            (L::Cmyk, S::F32) => write_one::<colortype::CMYK32Float>(&mut enc, w, h, &f32s(), &tags),
             (L::CmykA, S::U8) => write_one::<colortype::CMYKA8>(&mut enc, w, h, d8, &tags),
             (L::CmykA, S::U16) => write_one::<CmykA16>(&mut enc, w, h, &u16s(), &tags),
             (L::CmykA, S::F32) => write_one::<CmykA32F>(&mut enc, w, h, &f32s(), &tags),

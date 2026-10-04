@@ -84,13 +84,23 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
             // Expander triangle.
             let tri = Rect::from_center_size(pos2(rect.left() + 12.0, rect.center().y), vec2(8.0, 8.0));
-            let pts = if a.expanded { vec![tri.left_top(), tri.right_top(), tri.center_bottom()] } else { vec![tri.left_top(), tri.right_center(), tri.left_bottom()] };
+            let pts = if a.expanded {
+                vec![tri.left_top(), tri.right_top(), tri.center_bottom()]
+            } else {
+                vec![tri.left_top(), tri.right_center(), tri.left_bottom()]
+            };
             ui.painter().add(egui::Shape::convex_polygon(pts, t.text_dim, Stroke::NONE));
             crate::icons::paint(ui, Rect::from_center_size(pos2(rect.left() + 30.0, rect.center().y), vec2(16.0, 16.0)), "play", 11.0, t.icon);
             let recording_this = app.ui.actions.recording.is_some_and(|(_, r)| r == i);
             let steps = a.steps.len() + if recording_this { live } else { 0 };
             ui.painter().text(pos2(rect.left() + 44.0, rect.center().y), Align2::LEFT_CENTER, &a.name, egui::FontId::proportional(12.0), t.text);
-            ui.painter().text(pos2(rect.right() - 8.0, rect.center().y), Align2::RIGHT_CENTER, format!("{steps} steps"), egui::FontId::proportional(11.0), t.text_faint);
+            ui.painter().text(
+                pos2(rect.right() - 8.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                format!("{steps} steps"),
+                egui::FontId::proportional(11.0),
+                t.text_faint,
+            );
             if recording_this {
                 ui.painter().circle_filled(pos2(rect.right() - 64.0, rect.center().y), 4.0, Color32::from_rgb(230, 60, 60));
             }

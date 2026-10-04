@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use photocraft_color::{PixelFormat, SampleType};
 use photocraft_doc::{
-    AlphaChannel, CompAppearance, CompLayerState, DocId, Document, Effects, LayerComp, FillCache, Group, Layer, LayerContent, LayerId,
-    LayerMask, Metadata, NamedPath, Pattern, ShapeLayer, SmartObject, SmartSource, TextLayer,
+    AlphaChannel, CompAppearance, CompLayerState, DocId, Document, Effects, FillCache, Group, Layer, LayerComp, LayerContent, LayerId, LayerMask, Metadata,
+    NamedPath, Pattern, ShapeLayer, SmartObject, SmartSource, TextLayer,
 };
 use photocraft_geom::{TILE_SIZE, TileCoord};
 use photocraft_raster::{Surface, Tile, decode_pixel, encode_pixel};
@@ -42,23 +42,16 @@ pub(crate) fn unhex(s: &str) -> Result<Vec<u8>> {
     }
     (0..s.len())
         .step_by(2)
-        .map(|i| {
-            u8::from_str_radix(s.get(i..i + 2).unwrap_or("x"), 16)
-                .map_err(|_| FormatError::corrupt(format!("bad hex `{s}`")))
-        })
+        .map(|i| u8::from_str_radix(s.get(i..i + 2).unwrap_or("x"), 16).map_err(|_| FormatError::corrupt(format!("bad hex `{s}`"))))
         .collect()
 }
 
 fn key4(s: &str) -> Result<[u8; 4]> {
-    unhex(s)?
-        .try_into()
-        .map_err(|_| FormatError::corrupt(format!("bad 4-byte key `{s}`")))
+    unhex(s)?.try_into().map_err(|_| FormatError::corrupt(format!("bad 4-byte key `{s}`")))
 }
 
 pub(crate) fn is_valid_hash(h: &str) -> bool {
-    h.len() == 64
-        && h.bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Convert native-endian sample bytes to little-endian in place (and back:
@@ -86,18 +79,7 @@ fn surface_m(s: &Surface, sink: &mut dyn Sink) -> SurfaceM {
     let mut dp = vec![0u8; f.bytes_per_pixel()];
     encode_pixel(&f, &s.default_pixel(), &mut dp);
     swap_to_le(&mut dp, f.sample);
-    SurfaceM {
-        format: f,
-        default: hex(&dp),
-        tiles: s
-            .tiles()
-            .map(|(c, t)| TileRef {
-                tx: c.tx,
-                ty: c.ty,
-                hash: sink.tile(f, t),
-            })
-            .collect(),
-    }
+    SurfaceM { format: f, default: hex(&dp), tiles: s.tiles().map(|(c, t)| TileRef { tx: c.tx, ty: c.ty, hash: sink.tile(f, t) }).collect() }
 }
 
 fn opt_blob(b: &Option<Arc<Vec<u8>>>, sink: &mut dyn Sink) -> Option<Hash> {
@@ -115,17 +97,11 @@ fn video_m(v: &photocraft_doc::VideoData, sink: &mut dyn Sink) -> crate::manifes
 
 fn layer_m(l: &Layer, sink: &mut dyn Sink) -> LayerM {
     let content = match &l.content {
-        LayerContent::Raster(s) => ContentM::Raster {
-            surface: surface_m(s, sink),
-        },
-        LayerContent::Group(g) => ContentM::Group {
-            children: g.children.iter().map(|c| layer_m(c, sink)).collect(),
-            expanded: g.expanded,
-            artboard: g.artboard.clone(),
-        },
-        LayerContent::Adjustment(a) => ContentM::Adjustment {
-            adjustment: a.clone(),
-        },
+        LayerContent::Raster(s) => ContentM::Raster { surface: surface_m(s, sink) },
+        LayerContent::Group(g) => {
+            ContentM::Group { children: g.children.iter().map(|c| layer_m(c, sink)).collect(), expanded: g.expanded, artboard: g.artboard.clone() }
+        }
+        LayerContent::Adjustment(a) => ContentM::Adjustment { adjustment: a.clone() },
         LayerContent::Fill(f) => ContentM::Fill { fill: f.clone() },
         LayerContent::Text(t) => ContentM::Text {
             text: t.text.clone(),
@@ -152,10 +128,7 @@ fn layer_m(l: &Layer, sink: &mut dyn Sink) -> LayerM {
         },
         LayerContent::Smart(s) => ContentM::Smart {
             source: match &s.source {
-                SmartSource::Embedded { file_name, bytes } => SmartSourceM::Embedded {
-                    file_name: file_name.clone(),
-                    blob: sink.blob(bytes),
-                },
+                SmartSource::Embedded { file_name, bytes } => SmartSourceM::Embedded { file_name: file_name.clone(), blob: sink.blob(bytes) },
                 SmartSource::Linked { path } => SmartSourceM::Linked { path: path.clone() },
             },
             transform: s.transform,
@@ -199,16 +172,9 @@ fn layer_m(l: &Layer, sink: &mut dyn Sink) -> LayerM {
         },
         label: l.label,
         content,
-        psd_blocks: l
-            .psd_blocks
-            .iter()
-            .map(|(k, d)| (hex(k), sink.blob(d)))
-            .collect(),
+        psd_blocks: l.psd_blocks.iter().map(|(k, d)| (hex(k), sink.blob(d))).collect(),
         psd_id: l.psd_id,
-        fill_cache: l.fill_cache.as_ref().map(|fc| FillCacheM {
-            fill: fc.fill.clone(),
-            surface: surface_m(&fc.surface, sink),
-        }),
+        fill_cache: l.fill_cache.as_ref().map(|fc| FillCacheM { fill: fc.fill.clone(), surface: surface_m(&fc.surface, sink) }),
         link_group: l.link_group,
         excluded_channels: l.excluded_channels,
         blend_if: l.blend_if.clone(),
@@ -219,14 +185,7 @@ fn layer_m(l: &Layer, sink: &mut dyn Sink) -> LayerM {
 fn channel_m(c: &AlphaChannel, sink: &mut dyn Sink) -> ChannelM {
     // Destructured so a new `AlphaChannel` field fails to compile here until it is saved.
     let AlphaChannel { name, surface, spot, color, opacity, indicates } = c;
-    ChannelM {
-        name: name.clone(),
-        surface: surface_m(surface, sink),
-        spot: *spot,
-        color: *color,
-        opacity: *opacity,
-        indicates: *indicates,
-    }
+    ChannelM { name: name.clone(), surface: surface_m(surface, sink), spot: *spot, color: *color, opacity: *opacity, indicates: *indicates }
 }
 
 pub(crate) fn doc_m(d: &Document, sink: &mut dyn Sink) -> DocM {
@@ -245,42 +204,18 @@ pub(crate) fn doc_m(d: &Document, sink: &mut dyn Sink) -> DocM {
         metadata: MetadataM {
             xmp: d.metadata.xmp.clone(),
             exif: opt_blob(&d.metadata.exif, sink),
-            psd_resources: d
-                .metadata
-                .psd_resources
-                .iter()
-                .map(|(id, n, b)| (*id, n.clone(), sink.blob(b)))
-                .collect(),
-            psd_global_blocks: d
-                .metadata
-                .psd_global_blocks
-                .iter()
-                .map(|(s, k, b)| (hex(s), hex(k), sink.blob(b)))
-                .collect(),
+            psd_resources: d.metadata.psd_resources.iter().map(|(id, n, b)| (*id, n.clone(), sink.blob(b))).collect(),
+            psd_global_blocks: d.metadata.psd_global_blocks.iter().map(|(s, k, b)| (hex(s), hex(k), sink.blob(b))).collect(),
         },
         global_light: d.global_light,
-        paths: d
-            .paths
-            .iter()
-            .map(|p| NamedPathM {
-                name: p.name.clone(),
-                path: p.path.clone(),
-                psd_raw: opt_blob(&p.psd_raw, sink),
-            })
-            .collect(),
+        paths: d.paths.iter().map(|p| NamedPathM { name: p.name.clone(), path: p.path.clone(), psd_raw: opt_blob(&p.psd_raw, sink) }).collect(),
         work_path: d.work_path.clone(),
         clipping_path: d.clipping_path.clone(),
         quick_mask: d.quick_mask.as_ref().map(|c| channel_m(c, sink)),
         patterns: d
             .patterns
             .iter()
-            .map(|p| PatternM {
-                id: p.id.clone(),
-                name: p.name.clone(),
-                width: p.width,
-                height: p.height,
-                surface: surface_m(&p.surface, sink),
-            })
+            .map(|p| PatternM { id: p.id.clone(), name: p.name.clone(), width: p.width, height: p.height, surface: surface_m(&p.surface, sink) })
             .collect(),
         color_table: d.color_table.clone(),
         duotone: d.duotone.clone(),
@@ -350,9 +285,7 @@ impl Loader<'_> {
         let f = m.format;
         let mut dp = unhex(&m.default)?;
         if dp.len() != f.bytes_per_pixel() {
-            return Err(FormatError::corrupt(
-                "default pixel has wrong size for its format",
-            ));
+            return Err(FormatError::corrupt("default pixel has wrong size for its format"));
         }
         swap_to_le(&mut dp, f.sample);
         let mut s = Surface::with_default(f, &decode_pixel(&f, &dp));
@@ -360,10 +293,7 @@ impl Loader<'_> {
         for t in &m.tiles {
             let c = TileCoord::new(t.tx, t.ty);
             if s.tile(c).is_some() {
-                return Err(FormatError::corrupt(format!(
-                    "duplicate tile ({}, {})",
-                    t.tx, t.ty
-                )));
+                return Err(FormatError::corrupt(format!("duplicate tile ({}, {})", t.tx, t.ty)));
             }
             let mut bytes = self.fetch.tile(&t.hash, len)?;
             swap_to_le(&mut bytes, f.sample);
@@ -426,59 +356,35 @@ impl Loader<'_> {
 
     fn layer(&mut self, m: &LayerM, depth: usize) -> Result<Layer> {
         if depth > 256 {
-            return Err(FormatError::LimitExceeded(
-                "layer groups nested deeper than 256".into(),
-            ));
+            return Err(FormatError::LimitExceeded("layer groups nested deeper than 256".into()));
         }
         let content = match &m.content {
             ContentM::Raster { surface } => LayerContent::Raster(self.surface(surface)?),
             ContentM::Group { children, expanded, artboard } => LayerContent::Group(Group {
                 artboard: artboard.clone(),
-                children: children
-                    .iter()
-                    .map(|c| self.layer(c, depth + 1))
-                    .collect::<Result<_>>()?,
+                children: children.iter().map(|c| self.layer(c, depth + 1)).collect::<Result<_>>()?,
                 expanded: *expanded,
             }),
             ContentM::Adjustment { adjustment } => LayerContent::Adjustment(adjustment.clone()),
             ContentM::Fill { fill } => LayerContent::Fill(fill.clone()),
-            ContentM::Text {
-                text,
-                font_family,
-                size_pt,
-                color,
-                transform,
-                cache,
-                psd_raw,
-                runs,
-                paragraphs,
-                shape,
-                orientation,
-                antialias,
-                warp,
-            } => LayerContent::Text(TextLayer {
-                text: text.clone(),
-                font_family: font_family.clone(),
-                size_pt: *size_pt,
-                color: *color,
-                transform: *transform,
-                cache: self.opt_surface(cache)?,
-                psd_raw: self.opt_blob(psd_raw)?,
-                runs: runs.clone(),
-                paragraphs: paragraphs.clone(),
-                shape: *shape,
-                orientation: *orientation,
-                antialias: *antialias,
-                warp: warp.clone(),
-            }),
-            ContentM::Shape {
-                fill,
-                cache,
-                psd_raw,
-                path,
-                stroke,
-                live,
-            } => LayerContent::Shape(ShapeLayer {
+            ContentM::Text { text, font_family, size_pt, color, transform, cache, psd_raw, runs, paragraphs, shape, orientation, antialias, warp } => {
+                LayerContent::Text(TextLayer {
+                    text: text.clone(),
+                    font_family: font_family.clone(),
+                    size_pt: *size_pt,
+                    color: *color,
+                    transform: *transform,
+                    cache: self.opt_surface(cache)?,
+                    psd_raw: self.opt_blob(psd_raw)?,
+                    runs: runs.clone(),
+                    paragraphs: paragraphs.clone(),
+                    shape: *shape,
+                    orientation: *orientation,
+                    antialias: *antialias,
+                    warp: warp.clone(),
+                })
+            }
+            ContentM::Shape { fill, cache, psd_raw, path, stroke, live } => LayerContent::Shape(ShapeLayer {
                 path: path.clone(),
                 fill: fill.clone(),
                 stroke: stroke.clone(),
@@ -486,58 +392,40 @@ impl Loader<'_> {
                 cache: self.opt_surface(cache)?,
                 psd_raw: self.opt_blob(psd_raw)?,
             }),
-            ContentM::Smart {
-                source,
-                transform,
-                smart_filters,
-                cache,
-                psd_raw,
-                filters_enabled,
-                filter_mask,
-                warp,
-                stack_mode,
-            } => LayerContent::Smart(SmartObject {
-                source: match source {
-                    SmartSourceM::Embedded { file_name, blob } => SmartSource::Embedded {
-                        file_name: file_name.clone(),
-                        bytes: self.fetch.blob(blob)?,
+            ContentM::Smart { source, transform, smart_filters, cache, psd_raw, filters_enabled, filter_mask, warp, stack_mode } => {
+                LayerContent::Smart(SmartObject {
+                    source: match source {
+                        SmartSourceM::Embedded { file_name, blob } => SmartSource::Embedded { file_name: file_name.clone(), bytes: self.fetch.blob(blob)? },
+                        SmartSourceM::Linked { path } => SmartSource::Linked { path: path.clone() },
                     },
-                    SmartSourceM::Linked { path } => SmartSource::Linked { path: path.clone() },
-                },
-                transform: *transform,
-                smart_filters: smart_filters.clone(),
-                cache: self.opt_surface(cache)?,
-                psd_raw: self.opt_blob(psd_raw)?,
-                filters_enabled: *filters_enabled,
-                filter_mask: match filter_mask {
-                    Some(mm) => Some(LayerMask {
-                        surface: self.surface(&mm.surface)?,
-                        enabled: mm.enabled,
-                        linked: mm.linked,
-                        density: mm.density,
-                        feather: mm.feather,
-                    }),
-                    None => None,
-                },
-                warp: warp.clone().filter(|w| w.mesh.as_ref().is_none_or(|m| m.is_valid())),
-                stack_mode: *stack_mode,
-            }),
+                    transform: *transform,
+                    smart_filters: smart_filters.clone(),
+                    cache: self.opt_surface(cache)?,
+                    psd_raw: self.opt_blob(psd_raw)?,
+                    filters_enabled: *filters_enabled,
+                    filter_mask: match filter_mask {
+                        Some(mm) => Some(LayerMask {
+                            surface: self.surface(&mm.surface)?,
+                            enabled: mm.enabled,
+                            linked: mm.linked,
+                            density: mm.density,
+                            feather: mm.feather,
+                        }),
+                        None => None,
+                    },
+                    warp: warp.clone().filter(|w| w.mesh.as_ref().is_none_or(|m| m.is_valid())),
+                    stack_mode: *stack_mode,
+                })
+            }
         };
         let mask = match &m.mask {
-            Some(mm) => Some(LayerMask {
-                surface: self.surface(&mm.surface)?,
-                enabled: mm.enabled,
-                linked: mm.linked,
-                density: mm.density,
-                feather: mm.feather,
-            }),
+            Some(mm) => {
+                Some(LayerMask { surface: self.surface(&mm.surface)?, enabled: mm.enabled, linked: mm.linked, density: mm.density, feather: mm.feather })
+            }
             None => None,
         };
         let fill_cache = match &m.fill_cache {
-            Some(fc) => Some(FillCache {
-                fill: fc.fill.clone(),
-                surface: self.surface(&fc.surface)?,
-            }),
+            Some(fc) => Some(FillCache { fill: fc.fill.clone(), surface: self.surface(&fc.surface)? }),
             None => None,
         };
         let mut psd_blocks = Vec::with_capacity(m.psd_blocks.len());
@@ -574,46 +462,26 @@ impl Loader<'_> {
     }
 
     pub(crate) fn document(&mut self, m: &DocM) -> Result<Document> {
-        let layers = m
-            .layers
-            .iter()
-            .map(|l| self.layer(l, 0))
-            .collect::<Result<Vec<_>>>()?;
+        let layers = m.layers.iter().map(|l| self.layer(l, 0)).collect::<Result<Vec<_>>>()?;
         let mut channels = Vec::with_capacity(m.channels.len());
         for c in &m.channels {
             channels.push(self.channel(c)?);
         }
         let quick_mask = m.quick_mask.as_ref().map(|c| self.channel(c)).transpose()?;
-        let mut md = Metadata {
-            xmp: m.metadata.xmp.clone(),
-            exif: self.opt_blob(&m.metadata.exif)?,
-            psd_resources: Vec::new(),
-            psd_global_blocks: Vec::new(),
-        };
+        let mut md = Metadata { xmp: m.metadata.xmp.clone(), exif: self.opt_blob(&m.metadata.exif)?, psd_resources: Vec::new(), psd_global_blocks: Vec::new() };
         for (id, n, h) in &m.metadata.psd_resources {
             md.psd_resources.push((*id, n.clone(), self.fetch.blob(h)?));
         }
         for (s, k, h) in &m.metadata.psd_global_blocks {
-            md.psd_global_blocks
-                .push((key4(s)?, key4(k)?, self.fetch.blob(h)?));
+            md.psd_global_blocks.push((key4(s)?, key4(k)?, self.fetch.blob(h)?));
         }
         let mut paths = Vec::with_capacity(m.paths.len());
         for p in &m.paths {
-            paths.push(NamedPath {
-                name: p.name.clone(),
-                path: p.path.clone(),
-                psd_raw: self.opt_blob(&p.psd_raw)?,
-            });
+            paths.push(NamedPath { name: p.name.clone(), path: p.path.clone(), psd_raw: self.opt_blob(&p.psd_raw)? });
         }
         let mut patterns = Vec::with_capacity(m.patterns.len());
         for p in &m.patterns {
-            patterns.push(Pattern {
-                id: p.id.clone(),
-                name: p.name.clone(),
-                width: p.width,
-                height: p.height,
-                surface: self.surface(&p.surface)?,
-            });
+            patterns.push(Pattern { id: p.id.clone(), name: p.name.clone(), width: p.width, height: p.height, surface: self.surface(&p.surface)? });
         }
         let layer_comps = m.layer_comps.iter().map(|c| self.comp(c)).collect::<Result<Vec<_>>>()?;
         let last_document_state = m.last_document_state.as_ref().map(|c| self.comp(c)).transpose()?;
@@ -668,14 +536,7 @@ impl Loader<'_> {
     }
 
     fn channel(&mut self, c: &ChannelM) -> Result<AlphaChannel> {
-        Ok(AlphaChannel {
-            name: c.name.clone(),
-            surface: self.surface(&c.surface)?,
-            spot: c.spot,
-            color: c.color,
-            opacity: c.opacity,
-            indicates: c.indicates,
-        })
+        Ok(AlphaChannel { name: c.name.clone(), surface: self.surface(&c.surface)?, spot: c.spot, color: c.color, opacity: c.opacity, indicates: c.indicates })
     }
 }
 

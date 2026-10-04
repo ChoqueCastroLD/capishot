@@ -319,11 +319,8 @@ pub fn combine_region(old: Option<&Surface>, new: Option<&Region>, mode: Selecti
                 return nonempty(o.clone());
             }
             let p = prev_u8(o);
-            let out: Vec<f32> = p
-                .iter()
-                .zip(&new.mask)
-                .map(|(a, n)| if mode == SelectionMode::Add { *a.max(n) } else { a.saturating_sub(*n) } as f32 / 255.0)
-                .collect();
+            let out: Vec<f32> =
+                p.iter().zip(&new.mask).map(|(a, n)| if mode == SelectionMode::Add { *a.max(n) } else { a.saturating_sub(*n) } as f32 / 255.0).collect();
             let mut s = o.clone();
             s.write_region(b, &out);
             s.prune();
@@ -557,7 +554,9 @@ pub fn polygon(points: &[(f32, f32)], area: Rect, anti_alias: bool) -> Vec<f32> 
                 }
                 let (c0, c1) = (x0.floor() as usize, (x1.ceil() as usize).min(w));
                 for cx in c0..c1 {
-                    let cov = if anti_alias { ((cx + 1) as f32).min(x1) - (cx as f32).max(x0) } else {
+                    let cov = if anti_alias {
+                        ((cx + 1) as f32).min(x1) - (cx as f32).max(x0)
+                    } else {
                         let c = cx as f32 + 0.5;
                         if c >= x0 && c < x1 { 1.0 } else { 0.0 }
                     };
@@ -689,7 +688,13 @@ mod tests {
         let area = Rect::new(3, -2, 3 + w, -2 + h);
         let img = blobs(w, h);
         let f: Vec<[f32; 4]> = img.iter().map(|p| p.map(|v| v as f32 / 255.0)).collect();
-        for (seed, tol, contiguous, aa) in [((10, 5), 10.0, true, true), ((10, 5), 10.0, true, false), ((20, 20), 40.0, false, true), ((4, -2), 0.0, true, true), ((30, 10), 255.0, true, true)] {
+        for (seed, tol, contiguous, aa) in [
+            ((10, 5), 10.0, true, true),
+            ((10, 5), 10.0, true, false),
+            ((20, 20), 40.0, false, true),
+            ((4, -2), 0.0, true, true),
+            ((30, 10), 255.0, true, true),
+        ] {
             let reference = magic_wand(&f, area, seed, tol, contiguous, aa);
             let r = wand_region(&img, area, seed, tol, contiguous, aa).unwrap();
             for y in area.y0..area.y1 {

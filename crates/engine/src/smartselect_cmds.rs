@@ -173,7 +173,8 @@ fn refine_edge(s: &mut Session, p: &Value) -> Result<Value> {
         "layerMask" => {
             let id = active.ok_or_else(|| EngineError::Other("no active layer".into()))?;
             s.edit("Select and Mask", |doc, _| {
-                let surface = region.as_ref().map(matting::region_surface).unwrap_or_else(|| photocraft_raster::Surface::new(photocraft_color::PixelFormat::GRAY8));
+                let surface =
+                    region.as_ref().map(matting::region_surface).unwrap_or_else(|| photocraft_raster::Surface::new(photocraft_color::PixelFormat::GRAY8));
                 doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?.mask = Some(LayerMask { surface, ..LayerMask::reveal_all() });
                 doc.selection = None;
                 Ok(())
@@ -183,7 +184,9 @@ fn refine_edge(s: &mut Session, p: &Value) -> Result<Value> {
         _ => {
             let id = active.ok_or_else(|| EngineError::Other("no active layer".into()))?;
             let src_layer = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
-            let src = src_layer.surface().ok_or_else(|| EngineError::Other(format!("the active layer is a {} layer without pixels", src_layer.content.kind_name())))?;
+            let src = src_layer
+                .surface()
+                .ok_or_else(|| EngineError::Other(format!("the active layer is a {} layer without pixels", src_layer.content.kind_name())))?;
             let name = format!("{} copy", src_layer.name);
             let empty = Region { bbox: Rect::EMPTY, mask: Vec::new() };
             let reg = region.as_ref().unwrap_or(&empty);
@@ -219,9 +222,30 @@ macro_rules! spec {
 /// Smart selection command specs.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("select.quick", "Quick Selection", [], r##"{"points":[[x,y],…],"size":px=30,"mode":"add|subtract|replace"="add","sampleAllLayers":bool=false,"enhanceEdge":bool=false}"##, has_doc, quick_selection),
-        spec!("select.object", "Object Selection", [], r##"{"rect":[x,y,w,h],"mode":"replace|add|subtract|intersect"="replace","sampleAllLayers":bool=false}"##, has_doc, object_selection),
-        spec!("select.subject", "Subject", ["Select"], r##"{"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}"##, has_doc, select_subject),
+        spec!(
+            "select.quick",
+            "Quick Selection",
+            [],
+            r##"{"points":[[x,y],…],"size":px=30,"mode":"add|subtract|replace"="add","sampleAllLayers":bool=false,"enhanceEdge":bool=false}"##,
+            has_doc,
+            quick_selection
+        ),
+        spec!(
+            "select.object",
+            "Object Selection",
+            [],
+            r##"{"rect":[x,y,w,h],"mode":"replace|add|subtract|intersect"="replace","sampleAllLayers":bool=false}"##,
+            has_doc,
+            object_selection
+        ),
+        spec!(
+            "select.subject",
+            "Subject",
+            ["Select"],
+            r##"{"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}"##,
+            has_doc,
+            select_subject
+        ),
         spec!(
             "select.refineEdge",
             "Refine Edge",
@@ -230,7 +254,14 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             refine_edge
         ),
-        spec!("select.focusArea", "Focus Area…", ["Select"], r##"{"range":0..1=0.5,"noise":0..1=0,"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}"##, has_doc, focus_area),
+        spec!(
+            "select.focusArea",
+            "Focus Area…",
+            ["Select"],
+            r##"{"range":0..1=0.5,"noise":0..1=0,"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}"##,
+            has_doc,
+            focus_area
+        ),
     ]
 }
 
@@ -390,11 +421,12 @@ mod tests {
     }
 
     fn soft_count(s: &photocraft_raster::Surface, y: i32) -> usize {
-        (0..80).filter(|x| {
-            let v = s.sample_channel(*x, y, 0);
-            v > 0.05 && v < 0.95
-        })
-        .count()
+        (0..80)
+            .filter(|x| {
+                let v = s.sample_channel(*x, y, 0);
+                v > 0.05 && v < 0.95
+            })
+            .count()
     }
 
     #[test]

@@ -29,7 +29,8 @@ pub mod rng;
 pub mod tile;
 
 pub use brush::{
-    BrushPreset, BrushSettings, ColorDynamics, Control, DualBrush, Dynamic, MaskMode, Pattern, PatternStyle, Pose, Scattering, ShapeDynamics, Smoothing, Texture, TipShape, Transfer,
+    BrushPreset, BrushSettings, ColorDynamics, Control, DualBrush, Dynamic, MaskMode, Pattern, PatternStyle, Pose, Scattering, ShapeDynamics, Smoothing,
+    Texture, TipShape, Transfer,
 };
 pub use render::{BrushContext, StrokeRenderer, render_stroke};
 pub use tile::GrayTile;
@@ -96,7 +97,19 @@ pub struct Dab {
 impl Dab {
     /// A plain round dab.
     pub fn round(center: Point, radius: f32, alpha: f32) -> Self {
-        Self { center, radius, alpha, angle: 0.0, roundness: 1.0, flip_x: false, flip_y: false, opacity: 1.0, color: [0.0, 0.0, 0.0, 1.0], depth: 1.0, index: 0 }
+        Self {
+            center,
+            radius,
+            alpha,
+            angle: 0.0,
+            roundness: 1.0,
+            flip_x: false,
+            flip_y: false,
+            opacity: 1.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+            depth: 1.0,
+            index: 0,
+        }
     }
 }
 

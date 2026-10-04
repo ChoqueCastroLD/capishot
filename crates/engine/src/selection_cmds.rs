@@ -95,7 +95,12 @@ fn parse_color(p: &Value) -> [f32; 3] {
 }
 
 fn color_range(s: &mut Session, p: &Value) -> Result<Value> {
-    let color = if p.get("color").is_some() { parse_color(p) } else { let f = s.tools.foreground; [f[0], f[1], f[2]] };
+    let color = if p.get("color").is_some() {
+        parse_color(p)
+    } else {
+        let f = s.tools.foreground;
+        [f[0], f[1], f[2]]
+    };
     let (area, px) = sample_pixels(s, b(p, "sampleAllLayers", true))?;
     let mask = sel::color_range(&px, color, f(p, "fuzziness", 40.0));
     set_selection(s, "Color Range", area, mask, mode(p))
@@ -192,16 +197,39 @@ macro_rules! spec {
 /// Selection command specs.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("select.magicWand", "Magic Wand", [], r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"sampleAllLayers":bool=false,"mode":"replace|add|subtract|intersect"="replace"}"##, has_doc, magic_wand),
-        spec!("select.colorRange", "Color Range…", ["Select"], r##"{"color":"#rrggbb"=foreground,"fuzziness":0..200=40,"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}"##, has_doc, color_range),
+        spec!(
+            "select.magicWand",
+            "Magic Wand",
+            [],
+            r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"sampleAllLayers":bool=false,"mode":"replace|add|subtract|intersect"="replace"}"##,
+            has_doc,
+            magic_wand
+        ),
+        spec!(
+            "select.colorRange",
+            "Color Range…",
+            ["Select"],
+            r##"{"color":"#rrggbb"=foreground,"fuzziness":0..200=40,"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}"##,
+            has_doc,
+            color_range
+        ),
         spec!("select.modify.border", "Border…", ["Select", "Modify"], r##"{"radius":1..200=1}"##, has_selection, |s, p| modify(s, p, "border")),
         spec!("select.modify.smooth", "Smooth…", ["Select", "Modify"], r##"{"radius":1..500=1}"##, has_selection, |s, p| modify(s, p, "smooth")),
         spec!("select.modify.expand", "Expand…", ["Select", "Modify"], r##"{"radius":1..500=1}"##, has_selection, |s, p| modify(s, p, "expand")),
         spec!("select.modify.contract", "Contract…", ["Select", "Modify"], r##"{"radius":1..500=1}"##, has_selection, |s, p| modify(s, p, "contract")),
         spec!("select.modify.feather", "Feather…", ["Select", "Modify"], r##"{"radius":0.1..1000=1}"##, has_selection, |s, p| modify(s, p, "feather")),
         spec!("select.grow", "Grow", ["Select"], r##"{"tolerance":0..255=32,"sampleAllLayers":bool=false}"##, has_selection, |s, p| grow_similar(s, p, true)),
-        spec!("select.similar", "Similar", ["Select"], r##"{"tolerance":0..255=32,"sampleAllLayers":bool=false}"##, has_selection, |s, p| grow_similar(s, p, false)),
-        spec!("select.lasso", "Lasso", [], r##"{"points":[[x,y],…],"mode":"replace|add|subtract|intersect"="replace","antiAlias":bool=true,"feather":px=0}"##, has_doc, lasso),
+        spec!("select.similar", "Similar", ["Select"], r##"{"tolerance":0..255=32,"sampleAllLayers":bool=false}"##, has_selection, |s, p| grow_similar(
+            s, p, false
+        )),
+        spec!(
+            "select.lasso",
+            "Lasso",
+            [],
+            r##"{"points":[[x,y],…],"mode":"replace|add|subtract|intersect"="replace","antiAlias":bool=true,"feather":px=0}"##,
+            has_doc,
+            lasso
+        ),
     ]
 }
 

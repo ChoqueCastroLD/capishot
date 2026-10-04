@@ -37,7 +37,12 @@ fn print_dry_run_renders_a_pdf_and_reports_lp() {
     let dir = tmp("print");
     for depth in [8, 16, 32] {
         let mut s = session("rgb", depth);
-        let r = s.execute("file.print", json!({"dryRun": true, "printer": "Office", "copies": 2, "paper": "a4", "cornerCropMarks": true, "registrationMarks": true, "labels": true})).unwrap();
+        let r = s
+            .execute(
+                "file.print",
+                json!({"dryRun": true, "printer": "Office", "copies": 2, "paper": "a4", "cornerCropMarks": true, "registrationMarks": true, "labels": true}),
+            )
+            .unwrap();
         let cmd: Vec<String> = serde_json::from_value(r["command"].clone()).unwrap();
         assert_eq!(&cmd[..5], &["lp", "-d", "Office", "-n", "2"]);
         assert_eq!(r["sent"], false);
@@ -70,7 +75,12 @@ fn print_dry_run_renders_a_pdf_and_reports_lp() {
 #[test]
 fn photocraft_manages_colors_converts_to_the_printer_profile() {
     let mut s = session("rgb", 8);
-    let r = s.execute("file.print", json!({"dryRun": true, "colorHandling": "photocraftManages", "printerProfile": "coated-cmyk", "intent": "perceptual", "bpc": false})).unwrap();
+    let r = s
+        .execute(
+            "file.print",
+            json!({"dryRun": true, "colorHandling": "photocraftManages", "printerProfile": "coated-cmyk", "intent": "perceptual", "bpc": false}),
+        )
+        .unwrap();
     assert_eq!(r["color"]["intent"], "perceptual");
     let pdf = std::fs::read(r["pdf"].as_str().unwrap()).unwrap();
     let (_, _, cs, data) = pdf_image(&pdf);
@@ -128,7 +138,11 @@ fn package_copies_links_and_relinks() {
     assert!(linked[0].ends_with("Links/art.png"), "{linked:?}");
     // The open document still points at the original.
     let open = &s.active().unwrap().doc;
-    assert!(open.walk().iter().any(|(_, _, l)| matches!(&l.content, LayerContent::Smart(so) if matches!(&so.source, SmartSource::Linked { path } if *path == link))));
+    assert!(
+        open.walk()
+            .iter()
+            .any(|(_, _, l)| matches!(&l.content, LayerContent::Smart(so) if matches!(&so.source, SmartSource::Linked { path } if *path == link)))
+    );
 }
 
 #[test]

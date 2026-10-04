@@ -192,10 +192,13 @@ fn to_point(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn signed_area(knots: &[Knot]) -> f64 {
     let n = knots.len();
-    (0..n).map(|i| {
-        let (a, b) = (knots[i].anchor, knots[(i + 1) % n].anchor);
-        a.x * b.y - b.x * a.y
-    }).sum::<f64>() / 2.0
+    (0..n)
+        .map(|i| {
+            let (a, b) = (knots[i].anchor, knots[(i + 1) % n].anchor);
+            a.x * b.y - b.x * a.y
+        })
+        .sum::<f64>()
+        / 2.0
 }
 
 /// One glyph's outline elements as closed subpaths.
@@ -297,7 +300,8 @@ fn convert_to_shape(s: &mut Session, p: &Value) -> Result<Value> {
 fn warp_text(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "type.warpText";
     let style = p.get("style").and_then(Value::as_str).unwrap_or("arc");
-    let psd = photocraft_text::warp::psd_style(style).ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: format!("unknown warp style \"{style}\"") })?;
+    let psd =
+        photocraft_text::warp::psd_style(style).ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: format!("unknown warp style \"{style}\"") })?;
     let f = |k: &str, d: f64| p.get(k).and_then(Value::as_f64).unwrap_or(d).clamp(-100.0, 100.0) as f32;
     let warp = (psd != "warpNone").then(|| TextWarp {
         style: psd.into(),
@@ -497,7 +501,14 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("type.antiAlias.windowsLcd", "Windows LCD", &["Type", "Anti-Alias"], LP, has_text, |s, p| set_aa(s, p, AntiAlias::WindowsLcd)),
         spec!("type.antiAlias.windows", "Windows", &["Type", "Anti-Alias"], LP, has_text, |s, p| set_aa(s, p, AntiAlias::Windows)),
         spec!("type.orientation.horizontal", "Horizontal", &["Type", "Orientation"], LP, has_text, |s, p| set_orientation(s, p, Orientation::Horizontal)),
-        spec!("type.orientation.vertical", "Vertical", &["Type", "Orientation"], r##"{"layer":id?} (stored and saved; rendered horizontally for now)"##, has_text, |s, p| set_orientation(s, p, Orientation::Vertical)),
+        spec!(
+            "type.orientation.vertical",
+            "Vertical",
+            &["Type", "Orientation"],
+            r##"{"layer":id?} (stored and saved; rendered horizontally for now)"##,
+            has_text,
+            |s, p| set_orientation(s, p, Orientation::Vertical)
+        ),
         spec!("type.openType.standardLigatures", "Standard Ligatures", &["Type", "OpenType"], OT, has_text, |s, p| toggle_opentype(s, p, "liga")),
         spec!("type.openType.contextualAlternates", "Contextual Alternates", &["Type", "OpenType"], OT, has_text, |s, p| toggle_opentype(s, p, "calt")),
         spec!("type.openType.discretionaryLigatures", "Discretionary Ligatures", &["Type", "OpenType"], OT, has_text, |s, p| toggle_opentype(s, p, "dlig")),
@@ -513,12 +524,44 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("type.rasterizeTypeLayer", "Rasterize Type Layer", &["Type"], LP, has_text, |s, p| s.execute("type.rasterize", p.clone())),
         spec!("type.convertToParagraphText", "Convert to Paragraph Text", &["Type"], LP, has_point_text, to_paragraph),
         spec!("type.convertToPointText", "Convert to Point Text", &["Type"], LP, has_box_text, to_point),
-        spec!("type.warpText", "Warp Text…", &["Type"], r##"{"layer":id?,"style":"none|arc|arcLower|arcUpper|arch|bulge|shellLower|shellUpper|flag|wave|fish|rise|fisheye|inflate|squeeze|twist"="arc","bend":-100..100=50,"horizontalDistortion":-100..100=0,"verticalDistortion":-100..100=0,"orientation":"horizontal|vertical"="horizontal"}"##, has_text, warp_text),
+        spec!(
+            "type.warpText",
+            "Warp Text…",
+            &["Type"],
+            r##"{"layer":id?,"style":"none|arc|arcLower|arcUpper|arch|bulge|shellLower|shellUpper|flag|wave|fish|rise|fisheye|inflate|squeeze|twist"="arc","bend":-100..100=50,"horizontalDistortion":-100..100=0,"verticalDistortion":-100..100=0,"orientation":"horizontal|vertical"="horizontal"}"##,
+            has_text,
+            warp_text
+        ),
         spec!("type.updateAllTextLayers", "Update All Text Layers", &["Type"], "{}", any_text, |s, _| update_all(s)),
-        spec!("type.replaceAllMissingFonts", "Replace All Missing Fonts", &["Type"], "{} (with the default family)", any_text, |s, _| replace_fonts(s, &serde_json::Map::new(), true)),
-        spec!("type.resolveMissingFonts", "Resolve Missing Fonts…", &["Type"], r##"{"map":{"Missing Family":"Installed Family"}?} (no map: list the missing families)"##, any_text, resolve_missing),
-        spec!("type.pasteLoremIpsum", "Paste Lorem Ipsum", &["Type"], r##"{"layer":id?,"at":char? (default end),"new":bool=false (new paragraph text layer)}"##, has_doc, paste_lorem),
-        spec!("type.saveDefaultTypeStyles", "Save Default Type Styles", &["Type"], "{} (from the active type layer; new type layers start from them)", has_text, |s, _| save_defaults(s)),
+        spec!("type.replaceAllMissingFonts", "Replace All Missing Fonts", &["Type"], "{} (with the default family)", any_text, |s, _| replace_fonts(
+            s,
+            &serde_json::Map::new(),
+            true
+        )),
+        spec!(
+            "type.resolveMissingFonts",
+            "Resolve Missing Fonts…",
+            &["Type"],
+            r##"{"map":{"Missing Family":"Installed Family"}?} (no map: list the missing families)"##,
+            any_text,
+            resolve_missing
+        ),
+        spec!(
+            "type.pasteLoremIpsum",
+            "Paste Lorem Ipsum",
+            &["Type"],
+            r##"{"layer":id?,"at":char? (default end),"new":bool=false (new paragraph text layer)}"##,
+            has_doc,
+            paste_lorem
+        ),
+        spec!(
+            "type.saveDefaultTypeStyles",
+            "Save Default Type Styles",
+            &["Type"],
+            "{} (from the active type layer; new type layers start from them)",
+            has_text,
+            |s, _| save_defaults(s)
+        ),
         spec!("type.loadDefaultTypeStyles", "Load Default Type Styles", &["Type"], LP, has_defaults, load_defaults),
     ]
 }

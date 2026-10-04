@@ -33,10 +33,7 @@ impl<'a> Reader<'a> {
 
     pub(crate) fn bytes(&mut self, n: usize) -> Result<&'a [u8]> {
         if n > self.remaining() {
-            return Err(PsdError::UnexpectedEof {
-                offset: self.pos,
-                needed: n - self.remaining(),
-            });
+            return Err(PsdError::UnexpectedEof { offset: self.pos, needed: n - self.remaining() });
         }
         let s = &self.data[self.pos..self.pos + n];
         self.pos += n;
@@ -91,11 +88,7 @@ impl<'a> Reader<'a> {
 
     /// Reads a length field that is 4 bytes, or 8 bytes when `long`.
     pub(crate) fn len_field(&mut self, long: bool) -> Result<u64> {
-        if long {
-            self.u64()
-        } else {
-            Ok(u64::from(self.u32()?))
-        }
+        if long { self.u64() } else { Ok(u64::from(self.u32()?)) }
     }
 
     /// Returns `Err` unless `count * min_item_size` bytes remain. Used to
@@ -103,10 +96,7 @@ impl<'a> Reader<'a> {
     pub(crate) fn check_count(&self, count: u64, min_item_size: u64) -> Result<()> {
         let need = count.saturating_mul(min_item_size);
         if need > self.remaining() as u64 {
-            return Err(PsdError::UnexpectedEof {
-                offset: self.pos,
-                needed: usize::try_from(need - self.remaining() as u64).unwrap_or(usize::MAX),
-            });
+            return Err(PsdError::UnexpectedEof { offset: self.pos, needed: usize::try_from(need - self.remaining() as u64).unwrap_or(usize::MAX) });
         }
         Ok(())
     }
@@ -216,10 +206,7 @@ pub(crate) fn decode_legacy_name(b: &[u8]) -> String {
 
 /// Encodes a name for a legacy Pascal field: non-ASCII chars become `?`.
 pub(crate) fn encode_legacy_name(s: &str) -> Vec<u8> {
-    s.chars()
-        .map(|c| if c.is_ascii() && !c.is_ascii_control() { c as u8 } else { b'?' })
-        .take(255)
-        .collect()
+    s.chars().map(|c| if c.is_ascii() && !c.is_ascii_control() { c as u8 } else { b'?' }).take(255).collect()
 }
 
 /// Reads a Photoshop Unicode string: u32 code-unit count + UTF-16BE units.
@@ -291,14 +278,7 @@ mod tests {
 
     #[test]
     fn pascal_padding() {
-        for (name, align, total) in [
-            (&b""[..], 2, 2),
-            (&b"a"[..], 2, 2),
-            (&b"ab"[..], 2, 4),
-            (&b""[..], 4, 4),
-            (&b"abc"[..], 4, 4),
-            (&b"abcd"[..], 4, 8),
-        ] {
+        for (name, align, total) in [(&b""[..], 2, 2), (&b"a"[..], 2, 2), (&b"ab"[..], 2, 4), (&b""[..], 4, 4), (&b"abc"[..], 4, 4), (&b"abcd"[..], 4, 8)] {
             let mut v = Vec::new();
             write_pascal(&mut v, name, align);
             assert_eq!(v.len(), total, "{name:?} align {align}");

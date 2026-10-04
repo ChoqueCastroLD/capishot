@@ -51,7 +51,10 @@ pub fn entries(l: &Layer, multi: bool, has_selection: bool) -> Vec<Entry> {
     } else {
         v.push(Some(("Add Layer Mask", add_mask_command(has_selection, false))));
     }
-    v.push(Some((if l.clipped { "Release Clipping Mask" } else { "Create Clipping Mask" }, if l.clipped { "layer.releaseClippingMask" } else { "layer.createClippingMask" })));
+    v.push(Some((
+        if l.clipped { "Release Clipping Mask" } else { "Create Clipping Mask" },
+        if l.clipped { "layer.releaseClippingMask" } else { "layer.createClippingMask" },
+    )));
     v.push(None);
     v.push(Some(("Link Layers", "layer.linkLayers")));
     v.push(Some(("Select Linked Layers", "layer.selectLinkedLayers")));

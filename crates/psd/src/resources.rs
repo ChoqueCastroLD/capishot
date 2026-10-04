@@ -185,9 +185,7 @@ impl ImageResource {
                 if !d.len().is_multiple_of(2) {
                     Err(PsdError::invalid("layer group info has odd length"))
                 } else {
-                    Ok(ResourceData::LayerGroupInfo(
-                        d.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect(),
-                    ))
+                    Ok(ResourceData::LayerGroupInfo(d.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect()))
                 }
             }
             ids::THUMBNAIL | ids::THUMBNAIL_PS4 => Ok(ResourceData::Thumbnail(d)),

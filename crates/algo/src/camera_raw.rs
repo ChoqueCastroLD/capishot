@@ -779,11 +779,11 @@ fn detail(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, ps: f32) {
             let s = gauss(&y, w, h, 1.0 * ps.max(0.5));
             let t = p.sharpen_masking / 100.0 * 0.08;
             crate::photo_util::par_map(w * h, |i| {
-                    let (x, yy) = (i % w, i / w);
-                    let gx = s[yy * w + (x + 1).min(w - 1)] - s[yy * w + x.saturating_sub(1)];
-                    let gy = s[(yy + 1).min(h - 1) * w + x] - s[yy.saturating_sub(1) * w + x];
-                    smoothstep(t * 0.5, t + 1e-4, gx.hypot(gy))
-                })
+                let (x, yy) = (i % w, i / w);
+                let gx = s[yy * w + (x + 1).min(w - 1)] - s[yy * w + x.saturating_sub(1)];
+                let gy = s[(yy + 1).min(h - 1) * w + x] - s[yy.saturating_sub(1) * w + x];
+                smoothstep(t * 0.5, t + 1e-4, gx.hypot(gy))
+            })
         });
         let amt = p.sharpen_amount / 100.0 * 1.2;
         let det = p.sharpen_detail / 100.0;
@@ -916,7 +916,13 @@ mod tests {
         let vib = run(CameraRaw { vibrance: 100.0, ..Default::default() });
         let spread = |q: [f32; 4]| q[0].max(q[1]).max(q[2]) - q[0].min(q[1]).min(q[2]);
         assert!(spread(vib[w * h / 2]) > spread(base[w * h / 2]));
-        for p in [CameraRaw { clarity: 80.0, ..Default::default() }, CameraRaw { texture: 80.0, ..Default::default() }, CameraRaw { dehaze: 60.0, ..Default::default() }, CameraRaw { dehaze: -60.0, ..Default::default() }, CameraRaw { whites: 50.0, blacks: -50.0, ..Default::default() }] {
+        for p in [
+            CameraRaw { clarity: 80.0, ..Default::default() },
+            CameraRaw { texture: 80.0, ..Default::default() },
+            CameraRaw { dehaze: 60.0, ..Default::default() },
+            CameraRaw { dehaze: -60.0, ..Default::default() },
+            CameraRaw { whites: 50.0, blacks: -50.0, ..Default::default() },
+        ] {
             let out = run(p.clone());
             assert!(out.iter().all(|q| q[..3].iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))), "{p:?}");
             assert_ne!(out, base);
@@ -954,8 +960,16 @@ mod tests {
         develop(&mut c, w, h, &CameraRaw { point_curve: vec![[0.0, 30.0], [255.0, 255.0]], curve_shadows: 50.0, ..Default::default() }, false);
         assert!(c.iter().all(|q| q[1] >= 30.0 / 255.0 - 1e-4));
         // Noise reduction reduces variance; sharpening increases it; grain is deterministic.
-        let noisy: Vec<[f32; 4]> = (0..w * h).map(|i| { let n = hash01(i as i64, 0, 3) * 0.2; [0.4 + n, 0.4 + n, 0.4 + n, 1.0] }).collect();
-        let var = |a: &[[f32; 4]]| { let m = mean(a, 1); a.iter().map(|q| (q[1] - m).powi(2)).sum::<f32>() / a.len() as f32 };
+        let noisy: Vec<[f32; 4]> = (0..w * h)
+            .map(|i| {
+                let n = hash01(i as i64, 0, 3) * 0.2;
+                [0.4 + n, 0.4 + n, 0.4 + n, 1.0]
+            })
+            .collect();
+        let var = |a: &[[f32; 4]]| {
+            let m = mean(a, 1);
+            a.iter().map(|q| (q[1] - m).powi(2)).sum::<f32>() / a.len() as f32
+        };
         let mut nr = noisy.clone();
         develop(&mut nr, w, h, &CameraRaw { noise_luminance: 80.0, ..Default::default() }, false);
         assert!(var(&nr) < var(&noisy) * 0.5);

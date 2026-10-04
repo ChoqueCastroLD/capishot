@@ -194,8 +194,20 @@ fn crop_doc(doc: &mut Document, r: Rect, delete_pixels: bool) {
 }
 
 fn anchor_factors(a: &str) -> (f64, f64) {
-    let x = if a.contains("Left") || a == "left" { 0.0 } else if a.contains("Right") || a == "right" { 1.0 } else { 0.5 };
-    let y = if a.starts_with("top") { 0.0 } else if a.starts_with("bottom") { 1.0 } else { 0.5 };
+    let x = if a.contains("Left") || a == "left" {
+        0.0
+    } else if a.contains("Right") || a == "right" {
+        1.0
+    } else {
+        0.5
+    };
+    let y = if a.starts_with("top") {
+        0.0
+    } else if a.starts_with("bottom") {
+        1.0
+    } else {
+        0.5
+    };
     (x, y)
 }
 
@@ -261,7 +273,9 @@ fn crop(s: &mut Session, p: &Value) -> Result<Value> {
         _ => None,
     };
     // An explicit rectangle (the Crop tool) may extend past the canvas; a selection crop is clamped.
-    let r = explicit.or_else(|| s.active().and_then(|d| d.doc.selection.as_ref().map(|sel| sel.content_bounds().intersect(&d.doc.bounds())))).unwrap_or(Rect::EMPTY);
+    let r = explicit
+        .or_else(|| s.active().and_then(|d| d.doc.selection.as_ref().map(|sel| sel.content_bounds().intersect(&d.doc.bounds()))))
+        .unwrap_or(Rect::EMPTY);
     if r.is_empty() {
         return Err(EngineError::Other("nothing to crop: pass x/y/width/height or make a selection".into()));
     }
@@ -368,14 +382,63 @@ macro_rules! spec {
 /// Image menu command specs.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        spec!("image.imageSize", "Image Size…", ["Image"], r##"{"width":px,"height":px,"resolution":ppi,"resample":"bicubic|bilinear|nearest|lanczos|preserveDetails|none"="bicubic"}"##, has_doc, image_size),
-        spec!("image.canvasSize", "Canvas Size…", ["Image"], r##"{"width":px,"height":px,"relative":bool=false,"anchor":"topLeft|top|topRight|left|center|right|bottomLeft|bottom|bottomRight"="center","extensionColor":"background|foreground|white|black|transparent|#rrggbb"="background"}"##, has_doc, canvas_size),
+        spec!(
+            "image.imageSize",
+            "Image Size…",
+            ["Image"],
+            r##"{"width":px,"height":px,"resolution":ppi,"resample":"bicubic|bilinear|nearest|lanczos|preserveDetails|none"="bicubic"}"##,
+            has_doc,
+            image_size
+        ),
+        spec!(
+            "image.canvasSize",
+            "Canvas Size…",
+            ["Image"],
+            r##"{"width":px,"height":px,"relative":bool=false,"anchor":"topLeft|top|topRight|left|center|right|bottomLeft|bottom|bottomRight"="center","extensionColor":"background|foreground|white|black|transparent|#rrggbb"="background"}"##,
+            has_doc,
+            canvas_size
+        ),
         spec!("image.crop", "Crop", ["Image"], r##"{"x":px,"y":px,"width":px,"height":px,"deleteCroppedPixels":bool=true}"##, has_doc, crop),
-        spec!("image.trim", "Trim…", ["Image"], r##"{"basedOn":"transparent|topLeft|bottomRight"="transparent","top":bool=true,"bottom":bool=true,"left":bool=true,"right":bool=true}"##, has_doc, trim),
-        spec!("image.mode.rgb", "RGB Color", ["Image", "Mode"], r##"{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##, has_doc, |s, p| convert_mode(s, ColorMode::Rgb, p)),
-        spec!("image.mode.grayscale", "Grayscale", ["Image", "Mode"], r##"{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##, has_doc, |s, p| convert_mode(s, ColorMode::Grayscale, p)),
-        spec!("image.mode.cmyk", "CMYK Color", ["Image", "Mode"], r##"{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##, has_doc, |s, p| convert_mode(s, ColorMode::Cmyk, p)),
-        spec!("image.mode.lab", "Lab Color", ["Image", "Mode"], r##"{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##, has_doc, |s, p| convert_mode(s, ColorMode::Lab, p)),
+        spec!(
+            "image.trim",
+            "Trim…",
+            ["Image"],
+            r##"{"basedOn":"transparent|topLeft|bottomRight"="transparent","top":bool=true,"bottom":bool=true,"left":bool=true,"right":bool=true}"##,
+            has_doc,
+            trim
+        ),
+        spec!(
+            "image.mode.rgb",
+            "RGB Color",
+            ["Image", "Mode"],
+            r##"{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##,
+            has_doc,
+            |s, p| convert_mode(s, ColorMode::Rgb, p)
+        ),
+        spec!(
+            "image.mode.grayscale",
+            "Grayscale",
+            ["Image", "Mode"],
+            r##"{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##,
+            has_doc,
+            |s, p| convert_mode(s, ColorMode::Grayscale, p)
+        ),
+        spec!(
+            "image.mode.cmyk",
+            "CMYK Color",
+            ["Image", "Mode"],
+            r##"{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##,
+            has_doc,
+            |s, p| convert_mode(s, ColorMode::Cmyk, p)
+        ),
+        spec!(
+            "image.mode.lab",
+            "Lab Color",
+            ["Image", "Mode"],
+            r##"{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##,
+            has_doc,
+            |s, p| convert_mode(s, ColorMode::Lab, p)
+        ),
         spec!("image.mode.bits8", "8 Bits/Channel", ["Image", "Mode"], "{}", has_doc, |s, _| convert_depth(s, SampleType::U8)),
         spec!("image.mode.bits16", "16 Bits/Channel", ["Image", "Mode"], "{}", has_doc, |s, _| convert_depth(s, SampleType::U16)),
         spec!("image.mode.bits32", "32 Bits/Channel", ["Image", "Mode"], "{}", has_doc, |s, _| convert_depth(s, SampleType::F32)),

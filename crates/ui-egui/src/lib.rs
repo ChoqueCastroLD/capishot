@@ -9,10 +9,9 @@
 pub mod actions;
 pub mod adjust_ui;
 pub mod analysis_ui;
-pub mod file_ui;
-pub mod slice_ui;
 pub mod artboard_ui;
 pub mod brush_panel;
+pub mod camera_raw_ui;
 pub mod canvas;
 pub mod channel_view;
 pub mod channels_panel;
@@ -21,52 +20,53 @@ pub mod color_picker_ui;
 pub mod comps_ui;
 pub mod control;
 pub mod dialogs;
-mod variables_ui;
-mod timeline_ui;
+pub mod distort_ui;
 pub mod doc_props_ui;
 pub mod enable_rules;
 pub mod export_dialog;
-pub mod gpu_canvas;
+pub mod file_ui;
 pub mod filter_dialog;
+pub mod gallery_ui;
+pub mod gpu_canvas;
+mod icon_data;
 pub mod icons;
 pub mod layer_menu_ui;
 pub mod layer_props_ui;
 pub mod layer_style;
 pub mod links;
+pub mod liquify_ui;
 pub mod menu_catalog;
 pub mod menus;
 pub mod new_doc_ui;
 pub mod outline;
 pub mod palette;
-pub mod proxy;
-pub mod retouch_ui;
-pub mod rulers;
-pub mod smart_ui;
 pub mod panels;
 pub mod parity;
-pub mod shortcuts;
+pub mod perspective_ui;
 pub mod prefs_ui;
 pub mod preset_panels;
-pub mod type_panels_ui;
-pub mod snap_ui;
+pub mod proxy;
+pub mod puppet_ui;
+pub mod retouch_ui;
+pub mod rulers;
+pub mod shortcuts;
 mod sizing;
+pub mod slice_ui;
+pub mod smart_ui;
+pub mod snap_ui;
 pub mod state;
 pub mod theme;
+mod timeline_ui;
 pub mod tone;
 pub mod transform_tool;
-pub mod distort_ui;
-pub mod camera_raw_ui;
-pub mod wide_angle_ui;
-pub mod gallery_ui;
-pub mod liquify_ui;
-pub mod puppet_ui;
-pub mod perspective_ui;
+pub mod type_panels_ui;
 pub mod type_tool;
+mod variables_ui;
 pub mod vector_ui;
 pub mod view_cmds;
+pub mod wide_angle_ui;
 pub mod widgets;
 pub mod workspace_ui;
-mod icon_data;
 
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
@@ -494,7 +494,8 @@ impl eframe::App for PhotocraftApp {
         self.issue_screenshots(ctx);
         prefs_ui::tick(self, ctx);
         shortcuts::handle(self, ctx);
-        let arrived: Vec<(String, Vec<u8>)> = self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
+        let arrived: Vec<(String, Vec<u8>)> =
+            self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
         for (name, bytes) in arrived {
             if let Err(e) = self.open_bytes(&name, &bytes) {
                 self.ui.status = format!("Couldn't open {name}: {e}");
@@ -692,7 +693,11 @@ impl PhotocraftApp {
     /// release, so egui sees press and release in separate frames. Hosts that don't call
     /// `raw_input_hook` (offscreen harnesses) feed these to their input themselves.
     pub fn take_synthetic_step(&mut self) -> Vec<egui::Event> {
-        let n = self.synthetic.iter().position(|e| matches!(e, egui::Event::PointerButton { pressed: false, .. } | egui::Event::Key { pressed: false, .. })).map_or(self.synthetic.len(), |i| i + 1);
+        let n = self
+            .synthetic
+            .iter()
+            .position(|e| matches!(e, egui::Event::PointerButton { pressed: false, .. } | egui::Event::Key { pressed: false, .. }))
+            .map_or(self.synthetic.len(), |i| i + 1);
         self.synthetic.drain(..n).collect()
     }
 

@@ -326,12 +326,7 @@ impl Transform {
                 let s0 = s1 * c.grid[1];
                 for (sp, dp) in s.chunks_exact(ss).zip(d.chunks_exact_mut(ds)) {
                     let (a, b, cc) = (g0[sp[0] as usize], g1[sp[1] as usize], g2[sp[2] as usize]);
-                    c.tetra_pub(
-                        (a.0 + b.0 + cc.0) as usize,
-                        [s0, s1, c.outputs],
-                        [a.1, b.1, cc.1],
-                        &mut mid,
-                    );
+                    c.tetra_pub((a.0 + b.0 + cc.0) as usize, [s0, s1, c.outputs], [a.1, b.1, cc.1], &mut mid);
                     self.finish(&mid, &mut out);
                     for k in 0..self.outputs {
                         dp[k] = q(out[k]);
@@ -566,12 +561,7 @@ pub(crate) fn link_stages(src: &Profile, dst: &Profile, intent: Intent, bpc: boo
             if s_pcs == Pcs::Lab {
                 stages.push(Stage::LabToXyz);
             }
-            stages.push(Stage::Matrix {
-                rows: 3,
-                cols: 3,
-                m: vec![scale[0], 0.0, 0.0, 0.0, scale[1], 0.0, 0.0, 0.0, scale[2]],
-                offset: offset.to_vec(),
-            });
+            stages.push(Stage::Matrix { rows: 3, cols: 3, m: vec![scale[0], 0.0, 0.0, 0.0, scale[1], 0.0, 0.0, 0.0, scale[2]], offset: offset.to_vec() });
             if d_pcs == Pcs::Lab {
                 stages.push(Stage::XyzToLab);
             }

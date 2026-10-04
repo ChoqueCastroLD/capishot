@@ -234,9 +234,9 @@ pub fn auto_scale(lc: &LensCorrection, frame: Rect) -> f64 {
         let (x0, y0, x1, y1) = (frame.x0 as f64, frame.y0 as f64, frame.x1 as f64, frame.y1 as f64);
         (0..=40).all(|i| {
             let t = i as f64 / 40.0;
-            [(x0 + t * (x1 - x0), y0), (x0 + t * (x1 - x0), y1), (x0, y0 + t * (y1 - y0)), (x1, y0 + t * (y1 - y0))].iter().all(|&(x, y)| {
-                m.sample(x, y).is_some_and(|s| s.p[0] >= x0 - 0.5 && s.p[0] <= x1 + 0.5 && s.p[1] >= y0 - 0.5 && s.p[1] <= y1 + 0.5)
-            })
+            [(x0 + t * (x1 - x0), y0), (x0 + t * (x1 - x0), y1), (x0, y0 + t * (y1 - y0)), (x1, y0 + t * (y1 - y0))]
+                .iter()
+                .all(|&(x, y)| m.sample(x, y).is_some_and(|s| s.p[0] >= x0 - 0.5 && s.p[0] <= x1 + 0.5 && s.p[1] >= y0 - 0.5 && s.p[1] <= y1 + 0.5))
         })
     };
     if covers(lc.scale) {
@@ -366,7 +366,13 @@ pub fn remap(src: &Surface, frame: Rect, out_area: Rect, edge: EdgeMode, map: &(
             let alpha = if sfmt.alpha { bicubic(n_in - 1, s.p).clamp(0.0, 1.0) } else { 1.0 };
             let mut col = [0.0f32; 8];
             for (c, v) in col.iter_mut().enumerate().take(cc) {
-                let p = if rgb && c == 0 { s.pr } else if rgb && c == 2 { s.pb } else { s.p };
+                let p = if rgb && c == 0 {
+                    s.pr
+                } else if rgb && c == 2 {
+                    s.pb
+                } else {
+                    s.p
+                };
                 let pm = bicubic(c, p);
                 let straight = if sfmt.alpha { if alpha > 1e-6 { pm / alpha } else { 0.0 } } else { pm };
                 let g = s.gain;

@@ -120,12 +120,9 @@ pub fn remap_document(doc: &mut Document, map: &dyn Fn(i32, i32) -> (i32, i32)) 
 
 /// Merge `upper` onto `lower` producing a raster layer (Layer → Merge Down).
 pub fn merge_down(doc_bounds: Rect, lower: &Layer, upper: &Layer, format: photocraft_color::PixelFormat) -> Layer {
-    let area = [lower, upper]
-        .iter()
-        .map(|l| l.surface().map(|s| s.content_bounds()).unwrap_or(doc_bounds))
-        .fold(Rect::EMPTY, |a, b| a.union(&b));
+    let area = [lower, upper].iter().map(|l| l.surface().map(|s| s.content_bounds()).unwrap_or(doc_bounds)).fold(Rect::EMPTY, |a, b| a.union(&b));
     let stack = vec![lower.clone(), upper.clone()];
-        let mut tmp = Document::new("merge", doc_bounds.size(), format.mode, format.sample);
+    let mut tmp = Document::new("merge", doc_bounds.size(), format.mode, format.sample);
     tmp.layers = stack;
     let buf = photocraft_compose::render(&tmp, area);
     let mut s = Surface::new(format);

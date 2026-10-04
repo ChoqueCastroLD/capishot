@@ -163,7 +163,15 @@ mod tests {
     #[test]
     fn fit_artboard_and_menu_items() {
         let (mut app, ctx) = app();
-        for id in ["view.fitArtboardOnScreen", "window.panel.layerComps", "layer.new.artboard", "file.export.artboardsToFiles", "file.export.artboardsToPdf", "file.export.layerCompsToFiles", "view.clearSelectedArtboardGuides"] {
+        for id in [
+            "view.fitArtboardOnScreen",
+            "window.panel.layerComps",
+            "layer.new.artboard",
+            "file.export.artboardsToFiles",
+            "file.export.artboardsToPdf",
+            "file.export.layerCompsToFiles",
+            "view.clearSelectedArtboardGuides",
+        ] {
             assert!(is_live(id), "{id}");
         }
         let enabled = |app: &PhotocraftApp, id: &str| menu_items(app).into_iter().find(|i| i.id == id).is_some_and(|i| i.enabled);

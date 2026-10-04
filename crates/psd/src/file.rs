@@ -126,21 +126,10 @@ impl PsdFile {
         {
             let b = global_blocks.remove(i);
             layer_info = Some(info);
-            layer_info_placement =
-                LayerInfoPlacement::GlobalBlock { index: i, signature: b.signature, key: b.key, padding: b.padding };
+            layer_info_placement = LayerInfoPlacement::GlobalBlock { index: i, signature: b.signature, key: b.key, padding: b.padding };
         }
         let image_data = ImageData::read(&mut r, &header)?;
-        Ok(PsdFile {
-            header,
-            color_mode_data,
-            resources,
-            layer_info,
-            layer_info_placement,
-            global_layer_mask,
-            global_blocks,
-            layer_mask_trailing,
-            image_data,
-        })
+        Ok(PsdFile { header, color_mode_data, resources, layer_info, layer_info_placement, global_layer_mask, global_blocks, layer_mask_trailing, image_data })
     }
 
     /// Serializes the file.
@@ -157,10 +146,8 @@ impl PsdFile {
         // An entirely empty section is written as a zero length. (A section
         // containing only a zero layer-info length cannot be distinguished in
         // the model and is normalized to this form.)
-        let section_empty = self.layer_info.is_none()
-            && self.global_layer_mask.is_none()
-            && self.global_blocks.is_empty()
-            && self.layer_mask_trailing.is_empty();
+        let section_empty =
+            self.layer_info.is_none() && self.global_layer_mask.is_none() && self.global_blocks.is_empty() && self.layer_mask_trailing.is_empty();
         let at = out.begin_len(psb);
         if !section_empty {
             let li = out.begin_len(psb);

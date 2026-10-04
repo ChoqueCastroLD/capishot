@@ -73,7 +73,10 @@ fn shape_create_every_kind_and_undo() {
 fn shape_create_fill_stroke_and_composite() {
     let mut s = session(100, 100, 8);
     let r = s
-        .execute("shape.create", json!({"kind": "rect", "rect": [20, 20, 60, 60], "fill": "#ff0000", "stroke": {"width": 4, "color": "#0000ff", "align": "outside"}}))
+        .execute(
+            "shape.create",
+            json!({"kind": "rect", "rect": [20, 20, 60, 60], "fill": "#ff0000", "stroke": {"width": 4, "color": "#0000ff", "align": "outside"}}),
+        )
         .unwrap();
     assert_eq!(r["fill"], "#ff0000");
     assert_eq!(r["stroke"]["align"], "outside");
@@ -110,7 +113,12 @@ fn shape_edit_live_params_and_undo() {
     assert_eq!(r["kind"], "path");
     // Fill/stroke edits merge.
     s.execute("shape.edit", json!({"layer": id, "stroke": {"width": 3}})).unwrap();
-    let r = s.execute("shape.edit", json!({"layer": id, "stroke": {"cap": "round", "dashes": [2, 1]}, "fill": {"gradient": {"stops": [[0, "#000000"], [1, "#ffffff"]], "angle": 0}}})).unwrap();
+    let r = s
+        .execute(
+            "shape.edit",
+            json!({"layer": id, "stroke": {"cap": "round", "dashes": [2, 1]}, "fill": {"gradient": {"stops": [[0, "#000000"], [1, "#ffffff"]], "angle": 0}}}),
+        )
+        .unwrap();
     assert_eq!(r["stroke"]["width"], 3.0);
     assert_eq!(r["stroke"]["cap"], "round");
     assert!(r["fill"]["gradient"].is_object());

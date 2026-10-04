@@ -24,7 +24,8 @@ impl Component {
         for (i, row) in c.iter_mut().enumerate() {
             row[i] += reg;
         }
-        let det = c[0][0] * (c[1][1] * c[2][2] - c[1][2] * c[2][1]) - c[0][1] * (c[1][0] * c[2][2] - c[1][2] * c[2][0]) + c[0][2] * (c[1][0] * c[2][1] - c[1][1] * c[2][0]);
+        let det = c[0][0] * (c[1][1] * c[2][2] - c[1][2] * c[2][1]) - c[0][1] * (c[1][0] * c[2][2] - c[1][2] * c[2][0])
+            + c[0][2] * (c[1][0] * c[2][1] - c[1][1] * c[2][0]);
         if det <= 1e-30 || weight <= 0.0 {
             return None;
         }
@@ -34,13 +35,7 @@ impl Component {
             [(c[1][0] * c[2][1] - c[1][1] * c[2][0]) / det, (c[0][1] * c[2][0] - c[0][0] * c[2][1]) / det, (c[0][0] * c[1][1] - c[0][1] * c[1][0]) / det],
         ];
         let log_norm = weight.ln() - 0.5 * det.ln() - 1.5 * (2.0 * std::f64::consts::PI).ln();
-        Some(Component {
-            weight: weight as f32,
-            mean: mean.map(|v| v as f32),
-            cov: c.map(|r| r.map(|v| v as f32)),
-            inv,
-            log_norm,
-        })
+        Some(Component { weight: weight as f32, mean: mean.map(|v| v as f32), cov: c.map(|r| r.map(|v| v as f32)), inv, log_norm })
     }
 
     /// `ln(weight · N(z; μ, Σ))`.
@@ -48,7 +43,9 @@ impl Component {
     pub fn log_weighted(&self, z: [f32; 3]) -> f64 {
         let d = [(z[0] - self.mean[0]) as f64, (z[1] - self.mean[1]) as f64, (z[2] - self.mean[2]) as f64];
         let m = &self.inv;
-        let q = d[0] * (m[0][0] * d[0] + m[0][1] * d[1] + m[0][2] * d[2]) + d[1] * (m[1][0] * d[0] + m[1][1] * d[1] + m[1][2] * d[2]) + d[2] * (m[2][0] * d[0] + m[2][1] * d[1] + m[2][2] * d[2]);
+        let q = d[0] * (m[0][0] * d[0] + m[0][1] * d[1] + m[0][2] * d[2])
+            + d[1] * (m[1][0] * d[0] + m[1][1] * d[1] + m[1][2] * d[2])
+            + d[2] * (m[2][0] * d[0] + m[2][1] * d[1] + m[2][2] * d[2]);
         self.log_norm - 0.5 * q
     }
 }

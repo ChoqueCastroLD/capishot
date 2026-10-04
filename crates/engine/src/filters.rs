@@ -33,11 +33,7 @@ fn undefined(p: &Value) -> UndefinedAreas {
 
 /// Minimum / Maximum › Preserve (Photoshop's default is Squareness).
 fn preserve(p: &Value) -> Preserve {
-    if s(p, "preserve", "squareness") == "roundness" {
-        Preserve::Roundness
-    } else {
-        Preserve::Squareness
-    }
+    if s(p, "preserve", "squareness") == "roundness" { Preserve::Roundness } else { Preserve::Squareness }
 }
 
 /// Builds the algorithm parameters for a filter command id from JSON params
@@ -60,7 +56,9 @@ pub fn params_for(id: &str, p: &Value) -> Option<FilterParams> {
             center_x: f(p, "centerX", 0.5),
             center_y: f(p, "centerY", 0.5),
         },
-        "filter.blur.surfaceBlur" => FilterParams::SurfaceBlur { radius: f(p, "radius", 5.0).clamp(1.0, 100.0), threshold: f(p, "threshold", 15.0).clamp(2.0, 255.0) },
+        "filter.blur.surfaceBlur" => {
+            FilterParams::SurfaceBlur { radius: f(p, "radius", 5.0).clamp(1.0, 100.0), threshold: f(p, "threshold", 15.0).clamp(2.0, 255.0) }
+        }
         "filter.sharpen.unsharpMask" => FilterParams::UnsharpMask {
             amount: f(p, "amount", 50.0).clamp(1.0, 500.0),
             radius: f(p, "radius", 1.0).clamp(0.1, 1000.0),
@@ -79,12 +77,16 @@ pub fn params_for(id: &str, p: &Value) -> Option<FilterParams> {
             seed: i(p, "seed", 0) as u32,
         },
         "filter.noise.median" => FilterParams::Median { radius: f(p, "radius", 1.0).clamp(1.0, 500.0) },
-        "filter.noise.dustAndScratches" => FilterParams::DustAndScratches { radius: f(p, "radius", 1.0).clamp(1.0, 500.0), threshold: f(p, "threshold", 0.0).clamp(0.0, 255.0) },
+        "filter.noise.dustAndScratches" => {
+            FilterParams::DustAndScratches { radius: f(p, "radius", 1.0).clamp(1.0, 500.0), threshold: f(p, "threshold", 0.0).clamp(0.0, 255.0) }
+        }
         "filter.other.minimum" => FilterParams::Minimum { radius: f(p, "radius", 1.0).clamp(0.2, 500.0), preserve: preserve(p) },
         "filter.other.maximum" => FilterParams::Maximum { radius: f(p, "radius", 1.0).clamp(0.2, 500.0), preserve: preserve(p) },
         "filter.other.offset" => FilterParams::Offset { horizontal: i(p, "horizontal", 0), vertical: i(p, "vertical", 0), undefined: undefined(p) },
         "filter.pixelate.mosaic" => FilterParams::Mosaic { cell_size: f(p, "cellSize", 10.0).clamp(2.0, 200.0) },
-        "filter.stylize.emboss" => FilterParams::Emboss { angle: f(p, "angle", 135.0), height: f(p, "height", 3.0).clamp(1.0, 100.0), amount: f(p, "amount", 100.0).clamp(1.0, 500.0) },
+        "filter.stylize.emboss" => {
+            FilterParams::Emboss { angle: f(p, "angle", 135.0), height: f(p, "height", 3.0).clamp(1.0, 100.0), amount: f(p, "amount", 100.0).clamp(1.0, 500.0) }
+        }
         "filter.stylize.findEdges" => FilterParams::FindEdges,
         "filter.stylize.solarize" => FilterParams::Solarize,
         "filter.distort.twirl" => FilterParams::Twirl { angle: f(p, "angle", 50.0).clamp(-999.0, 999.0) },
@@ -204,7 +206,8 @@ pub(crate) fn run_filter(s: &mut Session, id: &str, p: &Value) -> Result<Value> 
             LayerContent::Raster(surf) => surf,
             LayerContent::Smart(_) => {
                 // Non-destructive: record the filter and re-render the smart object from its source.
-                let sf = SmartFilter { command: id.to_string(), params: params.clone(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
+                let sf =
+                    SmartFilter { command: id.to_string(), params: params.clone(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
                 return crate::smart_cmds::add_smart_filter(doc, layer, sf, selection.as_ref());
             }
             _ => return Err(EngineError::Other("not a pixel layer".into())),
@@ -244,11 +247,31 @@ pub fn specs() -> Vec<CommandSpec> {
         filter_cmd!("filter.noise.despeckle", "Despeckle", ["Filter", "Noise"], "{}"),
         filter_cmd!("filter.blur.boxBlur", "Box Blur…", ["Filter", "Blur"], r##"{"radius":1..2000=1}"##),
         filter_cmd!("filter.blur.motionBlur", "Motion Blur…", ["Filter", "Blur"], r##"{"angle":-360..360=0,"distance":1..2000=10}"##),
-        filter_cmd!("filter.blur.radialBlur", "Radial Blur…", ["Filter", "Blur"], r##"{"amount":1..100=10,"method":"spin|zoom","centerX":0..1=0.5,"centerY":0..1=0.5}"##),
+        filter_cmd!(
+            "filter.blur.radialBlur",
+            "Radial Blur…",
+            ["Filter", "Blur"],
+            r##"{"amount":1..100=10,"method":"spin|zoom","centerX":0..1=0.5,"centerY":0..1=0.5}"##
+        ),
         filter_cmd!("filter.blur.surfaceBlur", "Surface Blur…", ["Filter", "Blur"], r##"{"radius":1..100=5,"threshold":2..255=15}"##),
-        filter_cmd!("filter.sharpen.unsharpMask", "Unsharp Mask…", ["Filter", "Sharpen"], r##"{"amount":1..500=50,"radius":0.1..1000=1,"threshold":0..255=0}"##),
-        filter_cmd!("filter.sharpen.smartSharpen", "Smart Sharpen…", ["Filter", "Sharpen"], r##"{"amount":1..500=100,"radius":0.1..64=1,"reduceNoise":0..100=10}"##),
-        filter_cmd!("filter.noise.addNoise", "Add Noise…", ["Filter", "Noise"], r##"{"amount":0.1..400=12.5,"distribution":"uniform|gaussian","monochromatic":bool,"seed":u32=0}"##),
+        filter_cmd!(
+            "filter.sharpen.unsharpMask",
+            "Unsharp Mask…",
+            ["Filter", "Sharpen"],
+            r##"{"amount":1..500=50,"radius":0.1..1000=1,"threshold":0..255=0}"##
+        ),
+        filter_cmd!(
+            "filter.sharpen.smartSharpen",
+            "Smart Sharpen…",
+            ["Filter", "Sharpen"],
+            r##"{"amount":1..500=100,"radius":0.1..64=1,"reduceNoise":0..100=10}"##
+        ),
+        filter_cmd!(
+            "filter.noise.addNoise",
+            "Add Noise…",
+            ["Filter", "Noise"],
+            r##"{"amount":0.1..400=12.5,"distribution":"uniform|gaussian","monochromatic":bool,"seed":u32=0}"##
+        ),
         filter_cmd!("filter.noise.median", "Median…", ["Filter", "Noise"], r##"{"radius":1..500=1}"##),
         filter_cmd!("filter.noise.dustAndScratches", "Dust & Scratches…", ["Filter", "Noise"], r##"{"radius":1..500=1,"threshold":0..255=0}"##),
         filter_cmd!("filter.pixelate.mosaic", "Mosaic…", ["Filter", "Pixelate"], r##"{"cellSize":2..200=10}"##),
@@ -258,13 +281,23 @@ pub fn specs() -> Vec<CommandSpec> {
         filter_cmd!("filter.distort.twirl", "Twirl…", ["Filter", "Distort"], r##"{"angle":-999..999=50}"##),
         filter_cmd!("filter.distort.pinch", "Pinch…", ["Filter", "Distort"], r##"{"amount":-100..100=50}"##),
         filter_cmd!("filter.distort.spherize", "Spherize…", ["Filter", "Distort"], r##"{"amount":-100..100=100,"mode":"normal|horizontalOnly|verticalOnly"}"##),
-        filter_cmd!("filter.distort.wave", "Wave…", ["Filter", "Distort"], r##"{"generators":1..999=5,"wavelengthMin":1..998=10,"wavelengthMax":2..999=120,"amplitudeMin":1..998=5,"amplitudeMax":1..999=35,"type":"sine|triangle|square","undefinedAreas":"wrap|repeat","seed":u32=0}"##),
+        filter_cmd!(
+            "filter.distort.wave",
+            "Wave…",
+            ["Filter", "Distort"],
+            r##"{"generators":1..999=5,"wavelengthMin":1..998=10,"wavelengthMax":2..999=120,"amplitudeMin":1..998=5,"amplitudeMax":1..999=35,"type":"sine|triangle|square","undefinedAreas":"wrap|repeat","seed":u32=0}"##
+        ),
         filter_cmd!("filter.distort.ripple", "Ripple…", ["Filter", "Distort"], r##"{"amount":-999..999=100,"size":"small|medium|large"}"##),
         filter_cmd!("filter.distort.polarCoordinates", "Polar Coordinates…", ["Filter", "Distort"], r##"{"mode":"rectangularToPolar|polarToRectangular"}"##),
         filter_cmd!("filter.other.highPass", "High Pass…", ["Filter", "Other"], r##"{"radius":0.1..1000=10}"##),
         filter_cmd!("filter.other.minimum", "Minimum…", ["Filter", "Other"], r##"{"radius":0.2..500=1,"preserve":"squareness|roundness"}"##),
         filter_cmd!("filter.other.maximum", "Maximum…", ["Filter", "Other"], r##"{"radius":0.2..500=1,"preserve":"squareness|roundness"}"##),
-        filter_cmd!("filter.other.offset", "Offset…", ["Filter", "Other"], r##"{"horizontal":px=0,"vertical":px=0,"undefinedAreas":"wrap|repeat|transparent"}"##),
+        filter_cmd!(
+            "filter.other.offset",
+            "Offset…",
+            ["Filter", "Other"],
+            r##"{"horizontal":px=0,"vertical":px=0,"undefinedAreas":"wrap|repeat|transparent"}"##
+        ),
         CommandSpec {
             id: "filter.lastFilter",
             label: "Last Filter",
@@ -439,68 +472,36 @@ mod tests {
     fn minimum_maximum_preserve_roundness() {
         for depth in [8, 16, 32] {
             let mut s = Session::new();
-            s.execute(
-                "file.new",
-                json!({"width": 48, "height": 32, "depth": depth}),
-            )
-            .unwrap();
+            s.execute("file.new", json!({"width": 48, "height": 32, "depth": depth})).unwrap();
             s.execute("layer.new.layer", json!({})).unwrap();
             // A white dot on black.
             s.edit("dot", |doc, active| {
-                let surf = doc
-                    .layer_mut(active.unwrap())
-                    .unwrap()
-                    .surface_mut()
-                    .unwrap();
-                surf.fill_rect(
-                    photocraft_geom::Rect::new(0, 0, 48, 32),
-                    &[0.0, 0.0, 0.0, 1.0],
-                );
+                let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+                surf.fill_rect(photocraft_geom::Rect::new(0, 0, 48, 32), &[0.0, 0.0, 0.0, 1.0]);
                 surf.write_pixel(24, 16, &[1.0, 1.0, 1.0, 1.0]);
                 Ok(())
             })
             .unwrap();
             let before = active_pixels(&s);
             let lit = |s: &Session, x: usize, y: usize| active_pixels(s)[(y * 48 + x) * 4] > 0.5;
-            s.execute(
-                "filter.other.maximum",
-                json!({"radius": 4, "preserve": "roundness"}),
-            )
-            .unwrap();
+            s.execute("filter.other.maximum", json!({"radius": 4, "preserve": "roundness"})).unwrap();
             // Grown into a disc of radius 4: (4, 0) and (2, 3) are in, the square's corner isn't.
             assert!(lit(&s, 28, 16) && lit(&s, 26, 19), "depth {depth}");
             assert!(!lit(&s, 28, 20) && !lit(&s, 27, 19), "depth {depth}");
             s.execute("edit.undo", json!({})).unwrap();
             assert_eq!(active_pixels(&s), before);
             // The default is Squareness: the corner is taken.
-            s.execute("filter.other.maximum", json!({"radius": 4}))
-                .unwrap();
+            s.execute("filter.other.maximum", json!({"radius": 4})).unwrap();
             assert!(lit(&s, 28, 20), "depth {depth}");
             // Minimum with roundness: only the centre of that 9×9 square holds a whole disc.
-            s.execute(
-                "filter.other.minimum",
-                json!({"radius": 4, "preserve": "roundness"}),
-            )
-            .unwrap();
+            s.execute("filter.other.minimum", json!({"radius": 4, "preserve": "roundness"})).unwrap();
             assert!(!lit(&s, 20, 12) && lit(&s, 24, 16), "depth {depth}");
         }
         assert_eq!(
-            params_for(
-                "filter.other.minimum",
-                &json!({"radius": 2, "preserve": "roundness"})
-            ),
-            Some(FilterParams::Minimum {
-                radius: 2.0,
-                preserve: Preserve::Roundness
-            })
+            params_for("filter.other.minimum", &json!({"radius": 2, "preserve": "roundness"})),
+            Some(FilterParams::Minimum { radius: 2.0, preserve: Preserve::Roundness })
         );
-        assert_eq!(
-            params_for("filter.other.maximum", &json!({})),
-            Some(FilterParams::Maximum {
-                radius: 1.0,
-                preserve: Preserve::Squareness
-            })
-        );
+        assert_eq!(params_for("filter.other.maximum", &json!({})), Some(FilterParams::Maximum { radius: 1.0, preserve: Preserve::Squareness }));
     }
 
     #[test]

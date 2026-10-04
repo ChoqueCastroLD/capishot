@@ -67,8 +67,7 @@ pub struct Features {
 
 impl Features {
     pub const ALL: Features = Features { groups: true, masks: true, adjustments: true, fills: true, all_blends: true, extras: true };
-    pub const PIXELS: Features =
-        Features { groups: true, masks: true, adjustments: false, fills: false, all_blends: true, extras: false };
+    pub const PIXELS: Features = Features { groups: true, masks: true, adjustments: false, fills: false, all_blends: true, extras: false };
 }
 
 pub fn raster(name: &str, fmt: PixelFormat, r: Rect, seed: u32, alpha: bool) -> Layer {
@@ -105,22 +104,11 @@ pub fn gen_doc(mode: ColorMode, depth: SampleType, f: Features) -> Document {
 
     if f.masks {
         let mut m = raster("Masked", fmt, Rect::new(2, 2, 14, 12), 5, true);
-        m.mask = Some(LayerMask {
-            surface: mask_surface(depth, Rect::new(4, 4, 10, 9), 1.0, 1),
-            enabled: true,
-            linked: true,
-            density: 1.0,
-            feather: 0.0,
-        });
+        m.mask = Some(LayerMask { surface: mask_surface(depth, Rect::new(4, 4, 10, 9), 1.0, 1), enabled: true, linked: true, density: 1.0, feather: 0.0 });
         d.layers.push(m);
         let mut m2 = raster("Masked2", fmt, Rect::new(-2, 1, 6, 5), 6, true);
-        m2.mask = Some(LayerMask {
-            surface: mask_surface(depth, Rect::new(-1, 0, 3, 4), 0.0, 2),
-            enabled: false,
-            linked: false,
-            density: g(128),
-            feather: 2.5,
-        });
+        m2.mask =
+            Some(LayerMask { surface: mask_surface(depth, Rect::new(-1, 0, 3, 4), 0.0, 2), enabled: false, linked: false, density: g(128), feather: 2.5 });
         d.layers.push(m2);
     }
 

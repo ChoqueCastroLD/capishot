@@ -49,10 +49,7 @@ pub fn run(args: &[&str]) -> Result<(), String> {
     let [out, inputs @ ..] = args else {
         return Err("usage: cargo xtask ico <out.ico> <in.png>…".into());
     };
-    let pngs = inputs
-        .iter()
-        .map(|p| std::fs::read(p).map_err(|e| format!("read {p}: {e}")))
-        .collect::<Result<Vec<_>, _>>()?;
+    let pngs = inputs.iter().map(|p| std::fs::read(p).map_err(|e| format!("read {p}: {e}"))).collect::<Result<Vec<_>, _>>()?;
     let ico = pack(&pngs)?;
     std::fs::write(Path::new(out), &ico).map_err(|e| format!("write {out}: {e}"))?;
     println!("{out}: {} images, {} bytes", pngs.len(), ico.len());

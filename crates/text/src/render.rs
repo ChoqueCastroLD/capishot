@@ -37,9 +37,7 @@ impl<S: LineSink> LineSink for WarpSink<'_, S> {
         let len = ((p1.0 - p0.0).powi(2) + (p1.1 - p0.1).powi(2)).sqrt();
         let n = ((len / self.warp.max_segment()).ceil() as usize).clamp(1, 256);
         let map = |t: f64| {
-            let (x, y) = self
-                .warp
-                .apply(p0.0 + (p1.0 - p0.0) * t, p0.1 + (p1.1 - p0.1) * t);
+            let (x, y) = self.warp.apply(p0.0 + (p1.0 - p0.0) * t, p0.1 + (p1.1 - p0.1) * t);
             self.post.apply(x, y)
         };
         let mut a = map(0.0);
@@ -54,13 +52,7 @@ impl<S: LineSink> LineSink for WarpSink<'_, S> {
 /// Draws every glyph and decoration of `layout` whose style colour is `color` (or all of them
 /// when `color` is `None`) into `sink`, through `transform` (text space → sink space), bending
 /// the outlines with `warp` first (in text space).
-fn draw(
-    layout: &TextLayout,
-    transform: &Xform,
-    sink: &mut impl LineSink,
-    only_color: Option<&Color>,
-    warp: Option<&Warp>,
-) {
+fn draw(layout: &TextLayout, transform: &Xform, sink: &mut impl LineSink, only_color: Option<&Color>, warp: Option<&Warp>) {
     for g in &layout.glyphs {
         let st = &layout.styles[g.style as usize];
         if only_color.is_some_and(|c| c != &st.color) {
@@ -73,52 +65,23 @@ fn draw(
         let Some(outline) = font.outline_glyphs().get(GlyphId::new(g.id)) else {
             continue;
         };
-        let coords: Vec<NormalizedCoord> = face
-            .coords
-            .iter()
-            .map(|&c| NormalizedCoord::from_bits(c))
-            .collect();
-        let hs = if st.horizontal_scale > 0.0 {
-            st.horizontal_scale
-        } else {
-            1.0
-        } as f64;
-        let vs = if st.vertical_scale > 0.0 {
-            st.vertical_scale
-        } else {
-            1.0
-        } as f64;
+        let coords: Vec<NormalizedCoord> = face.coords.iter().map(|&c| NormalizedCoord::from_bits(c)).collect();
+        let hs = if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 } as f64;
+        let vs = if st.vertical_scale > 0.0 { st.vertical_scale } else { 1.0 } as f64;
         let skew_deg = if st.faux_italic { FAUX_ITALIC_DEG } else { 0.0 } + face.skew_deg;
         let skew = (skew_deg as f64).to_radians().tan() * vs;
         let shift = (st.baseline_shift_pt * layout.px_per_pt) as f64;
         let glyph = Xform([hs, 0.0, skew, -vs, g.x as f64, g.y as f64 - shift]);
         let bold = st.faux_bold || face.embolden;
         let r = (face.size_px * FAUX_BOLD_RADIUS) as f64;
-        let offsets: &[(f64, f64)] = if bold {
-            &[
-                (-1.0, 0.0),
-                (1.0, 0.0),
-                (0.0, -1.0),
-                (0.0, 1.0),
-                (0.7, 0.7),
-                (-0.7, -0.7),
-                (0.7, -0.7),
-                (-0.7, 0.7),
-            ]
-        } else {
-            &[(0.0, 0.0)]
-        };
+        let offsets: &[(f64, f64)] =
+            if bold { &[(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (0.7, 0.7), (-0.7, -0.7), (0.7, -0.7), (-0.7, 0.7)] } else { &[(0.0, 0.0)] };
         for &(ox, oy) in offsets {
             let local = Xform([1.0, 0.0, 0.0, 1.0, ox * r, oy * r]).mul(&glyph);
-            let settings =
-                DrawSettings::unhinted(Size::new(face.size_px), LocationRef::new(&coords));
+            let settings = DrawSettings::unhinted(Size::new(face.size_px), LocationRef::new(&coords));
             match warp {
                 Some(w) => {
-                    let mut ws = WarpSink {
-                        inner: &mut *sink,
-                        warp: w,
-                        post: *transform,
-                    };
+                    let mut ws = WarpSink { inner: &mut *sink, warp: w, post: *transform };
                     let mut pen = Pen::new(&mut ws, local);
                     if outline.draw(settings, &mut pen).is_ok() {
                         skrifa::outline::OutlinePen::close(&mut pen);
@@ -140,37 +103,16 @@ fn draw(
         }
         match warp {
             Some(w) => {
-                let mut ws = WarpSink {
-                    inner: &mut *sink,
-                    warp: w,
-                    post: *transform,
-                };
-                rect_to(
-                    &mut ws,
-                    &Xform::IDENTITY,
-                    d.x0 as f64,
-                    d.y0 as f64,
-                    d.x1 as f64,
-                    d.y1 as f64,
-                );
+                let mut ws = WarpSink { inner: &mut *sink, warp: w, post: *transform };
+                rect_to(&mut ws, &Xform::IDENTITY, d.x0 as f64, d.y0 as f64, d.x1 as f64, d.y1 as f64);
             }
-            None => rect_to(
-                sink,
-                transform,
-                d.x0 as f64,
-                d.y0 as f64,
-                d.x1 as f64,
-                d.y1 as f64,
-            ),
+            None => rect_to(sink, transform, d.x0 as f64, d.y0 as f64, d.x1 as f64, d.y1 as f64),
         }
     }
 }
 
 /// The warp to apply to `layout` (None when `warp` is absent, `warpNone` or flat).
-pub fn layout_warp(
-    layout: &TextLayout,
-    warp: Option<&photocraft_doc::text::TextWarp>,
-) -> Option<Warp> {
+pub fn layout_warp(layout: &TextLayout, warp: Option<&photocraft_doc::text::TextWarp>) -> Option<Warp> {
     Warp::new(warp?, layout.bounds()?)
 }
 
@@ -181,13 +123,7 @@ fn color_in(format: &PixelFormat, c: &Color) -> Vec<f32> {
         c.c[..n].to_vec()
     } else {
         let [r, g, b] = c.to_rgb();
-        let mut v = photocraft_raster::from_rgba(
-            &PixelFormat {
-                alpha: false,
-                ..*format
-            },
-            [r, g, b, 1.0],
-        );
+        let mut v = photocraft_raster::from_rgba(&PixelFormat { alpha: false, ..*format }, [r, g, b, 1.0]);
         v.truncate(n);
         v
     }
@@ -203,47 +139,25 @@ pub fn ink_rect_warped(layout: &TextLayout, transform: &Affine, warp: Option<&Wa
     let mut b = Bounds::default();
     draw(layout, &Xform(transform.m), &mut b, None, warp);
     match b.rect {
-        Some([x0, y0, x1, y1]) => Rect::new(
-            x0.floor() as i32 - 1,
-            y0.floor() as i32 - 1,
-            x1.ceil() as i32 + 1,
-            y1.ceil() as i32 + 1,
-        ),
+        Some([x0, y0, x1, y1]) => Rect::new(x0.floor() as i32 - 1, y0.floor() as i32 - 1, x1.ceil() as i32 + 1, y1.ceil() as i32 + 1),
         None => Rect::new(0, 0, 0, 0),
     }
 }
 
 /// Rasterizes `layout` through `transform` (text space → document pixels). The result always
 /// has an alpha channel; colour is written in `format`'s colour model and sample depth.
-pub fn rasterize(
-    layout: &TextLayout,
-    transform: &Affine,
-    format: PixelFormat,
-    antialias: AntiAlias,
-) -> Rendered {
+pub fn rasterize(layout: &TextLayout, transform: &Affine, format: PixelFormat, antialias: AntiAlias) -> Rendered {
     rasterize_warped(layout, transform, format, antialias, None)
 }
 
 /// [`rasterize`] with the glyph outlines bent by `warp` (Type › Warp Text).
-pub fn rasterize_warped(
-    layout: &TextLayout,
-    transform: &Affine,
-    format: PixelFormat,
-    antialias: AntiAlias,
-    warp: Option<&Warp>,
-) -> Rendered {
-    let format = PixelFormat {
-        alpha: true,
-        ..format
-    };
+pub fn rasterize_warped(layout: &TextLayout, transform: &Affine, format: PixelFormat, antialias: AntiAlias, warp: Option<&Warp>) -> Rendered {
+    let format = PixelFormat { alpha: true, ..format };
     let rect = ink_rect_warped(layout, transform, warp);
     let (w, h) = (rect.width() as usize, rect.height() as usize);
     let mut surface = Surface::new(format);
     if w == 0 || h == 0 || (w as u64) * (h as u64) > MAX_PIXELS {
-        return Rendered {
-            surface,
-            rect: Rect::new(0, 0, 0, 0),
-        };
+        return Rendered { surface, rect: Rect::new(0, 0, 0, 0) };
     }
     let n = format.mode.color_channels();
     let stride = n + 1;
@@ -263,11 +177,7 @@ pub fn rasterize_warped(
         let comps = color_in(&format, c);
         let a = c.alpha.clamp(0.0, 1.0);
         for (i, &cv) in cov.iter().enumerate() {
-            let cv = if antialias == AntiAlias::None {
-                if cv >= 0.5 { 1.0 } else { 0.0 }
-            } else {
-                cv
-            };
+            let cv = if antialias == AntiAlias::None { if cv >= 0.5 { 1.0 } else { 0.0 } } else { cv };
             let s = cv * a;
             if s <= 0.0 {
                 continue;
@@ -362,31 +272,14 @@ pub fn outlines(layout: &TextLayout, transform: &Affine, warp: Option<&Warp>) ->
         let Some(outline) = font.outline_glyphs().get(GlyphId::new(g.id)) else {
             continue;
         };
-        let coords: Vec<NormalizedCoord> = face
-            .coords
-            .iter()
-            .map(|&c| NormalizedCoord::from_bits(c))
-            .collect();
-        let hs = if st.horizontal_scale > 0.0 {
-            st.horizontal_scale
-        } else {
-            1.0
-        } as f64;
-        let vs = if st.vertical_scale > 0.0 {
-            st.vertical_scale
-        } else {
-            1.0
-        } as f64;
+        let coords: Vec<NormalizedCoord> = face.coords.iter().map(|&c| NormalizedCoord::from_bits(c)).collect();
+        let hs = if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 } as f64;
+        let vs = if st.vertical_scale > 0.0 { st.vertical_scale } else { 1.0 } as f64;
         let skew_deg = if st.faux_italic { FAUX_ITALIC_DEG } else { 0.0 } + face.skew_deg;
         let skew = (skew_deg as f64).to_radians().tan() * vs;
         let shift = (st.baseline_shift_pt * layout.px_per_pt) as f64;
         let glyph = Xform([hs, 0.0, skew, -vs, g.x as f64, g.y as f64 - shift]);
-        let mut rec = Recorder {
-            glyph,
-            post: Xform(transform.m),
-            warp,
-            out: Vec::new(),
-        };
+        let mut rec = Recorder { glyph, post: Xform(transform.m), warp, out: Vec::new() };
         let settings = DrawSettings::unhinted(Size::new(face.size_px), LocationRef::new(&coords));
         if outline.draw(settings, &mut rec).is_ok() && !rec.out.is_empty() {
             glyphs.push(rec.out);

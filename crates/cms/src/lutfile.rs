@@ -52,11 +52,7 @@ impl LutFile {
                 }
             }
         }
-        LutFile {
-            title: title.to_string(),
-            size,
-            data,
-        }
+        LutFile { title: title.to_string(), size, data }
     }
 
     fn check(self) -> Result<Self, LutError> {
@@ -64,11 +60,7 @@ impl LutFile {
             return err(format!("unsupported LUT size {}", self.size));
         }
         if self.data.len() != self.size.pow(3) * 3 {
-            return err(format!(
-                "expected {} entries, found {}",
-                self.size.pow(3),
-                self.data.len() / 3
-            ));
+            return err(format!("expected {} entries, found {}", self.size.pow(3), self.data.len() / 3));
         }
         if self.data.iter().any(|v| !v.is_finite()) {
             return err("non-finite LUT value");
@@ -105,26 +97,12 @@ pub fn parse_cube(text: &str) -> Result<LutFile, LutError> {
         let key = it.next().unwrap_or("");
         let nums = |it: std::str::SplitWhitespace<'_>| -> Result<[f32; 3], LutError> {
             let v: Vec<f32> = it.filter_map(|s| s.parse().ok()).collect();
-            if v.len() == 3 {
-                Ok([v[0], v[1], v[2]])
-            } else {
-                err(format!("bad line `{line}`"))
-            }
+            if v.len() == 3 { Ok([v[0], v[1], v[2]]) } else { err(format!("bad line `{line}`")) }
         };
         match key {
             "TITLE" => title = line[5..].trim().trim_matches('"').to_string(),
-            "LUT_3D_SIZE" => {
-                size3 = it
-                    .next()
-                    .and_then(|s| s.parse().ok())
-                    .ok_or_else(|| LutError("bad LUT_3D_SIZE".into()))?
-            }
-            "LUT_1D_SIZE" => {
-                size1 = it
-                    .next()
-                    .and_then(|s| s.parse().ok())
-                    .ok_or_else(|| LutError("bad LUT_1D_SIZE".into()))?
-            }
+            "LUT_3D_SIZE" => size3 = it.next().and_then(|s| s.parse().ok()).ok_or_else(|| LutError("bad LUT_3D_SIZE".into()))?,
+            "LUT_1D_SIZE" => size1 = it.next().and_then(|s| s.parse().ok()).ok_or_else(|| LutError("bad LUT_1D_SIZE".into()))?,
             "DOMAIN_MIN" => dmin = nums(it)?,
             "DOMAIN_MAX" => dmax = nums(it)?,
             "LUT_3D_INPUT_RANGE" | "LUT_1D_INPUT_RANGE" => {
@@ -134,13 +112,8 @@ pub fn parse_cube(text: &str) -> Result<LutFile, LutError> {
                     dmax = [v[1]; 3];
                 }
             }
-            k if k
-                .starts_with(|c: char| c.is_ascii_digit() || c == '-' || c == '+' || c == '.') =>
-            {
-                let mut v = vec![
-                    k.parse::<f32>()
-                        .map_err(|_| LutError(format!("bad number in `{line}`")))?,
-                ];
+            k if k.starts_with(|c: char| c.is_ascii_digit() || c == '-' || c == '+' || c == '.') => {
+                let mut v = vec![k.parse::<f32>().map_err(|_| LutError(format!("bad number in `{line}`")))?];
                 v.extend(it.filter_map(|s| s.parse::<f32>().ok()));
                 if v.len() != 3 {
                     return err(format!("bad data line `{line}`"));
@@ -153,12 +126,7 @@ pub fn parse_cube(text: &str) -> Result<LutFile, LutError> {
     }
     let _ = (dmin, dmax); // Domain other than 0..1 only shifts input sampling; we assume 0..1 inputs.
     if size3 > 0 {
-        return LutFile {
-            title,
-            size: size3,
-            data: rows,
-        }
-        .check();
+        return LutFile { title, size: size3, data: rows }.check();
     }
     if size1 >= 2 && rows.len() == size1 * 3 {
         let curve = |ch: usize, v: f32| {
@@ -167,9 +135,7 @@ pub fn parse_cube(text: &str) -> Result<LutFile, LutError> {
             let f = x - i as f32;
             rows[i * 3 + ch] * (1.0 - f) + rows[(i + 1) * 3 + ch] * f
         };
-        let mut l = LutFile::from_fn(&title, 33, |c| {
-            [curve(0, c[0]), curve(1, c[1]), curve(2, c[2])]
-        });
+        let mut l = LutFile::from_fn(&title, 33, |c| [curve(0, c[0]), curve(1, c[1]), curve(2, c[2])]);
         l.title = title;
         return l.check();
     }
@@ -185,10 +151,7 @@ pub fn parse_3dl(text: &str) -> Result<LutFile, LutError> {
         if line.is_empty() || line.starts_with(|c: char| c.is_ascii_alphabetic()) {
             continue;
         }
-        let v: Vec<f64> = line
-            .split_whitespace()
-            .filter_map(|s| s.parse().ok())
-            .collect();
+        let v: Vec<f64> = line.split_whitespace().filter_map(|s| s.parse().ok()).collect();
         if v.len() == 3 {
             rows.push([v[0], v[1], v[2]]);
         }
@@ -199,14 +162,7 @@ pub fn parse_3dl(text: &str) -> Result<LutFile, LutError> {
         return err(format!("{} rows is not a cube", rows.len()));
     }
     let max = rows.iter().flatten().fold(0.0f64, |a, &b| a.max(b));
-    let scale = if max <= 1.0 {
-        1.0
-    } else {
-        [1023.0, 4095.0, 16383.0, 65535.0]
-            .into_iter()
-            .find(|&s| max <= s)
-            .unwrap_or(max)
-    };
+    let scale = if max <= 1.0 { 1.0 } else { [1023.0, 4095.0, 16383.0, 65535.0].into_iter().find(|&s| max <= s).unwrap_or(max) };
     let mut data = vec![0.0f32; n * n * n * 3];
     for (i, row) in rows.iter().enumerate() {
         let (r, g, b) = (i / (n * n), (i / n) % n, i % n);
@@ -215,12 +171,7 @@ pub fn parse_3dl(text: &str) -> Result<LutFile, LutError> {
             data[at + k] = (row[k] / scale) as f32;
         }
     }
-    LutFile {
-        title: String::new(),
-        size: n,
-        data,
-    }
-    .check()
+    LutFile { title: String::new(), size: n, data }.check()
 }
 
 /// SpeedGrade `.look`: `<size>` and a hex `<data>` string of little-endian float32 RGB triplets
@@ -232,38 +183,14 @@ pub fn parse_look(text: &str) -> Result<LutFile, LutError> {
         let end = text[start..].find(&format!("</{name}>"))? + start;
         Some(text[start..end].trim().trim_matches('"').trim().to_string())
     };
-    let size: usize = tag("size")
-        .and_then(|s| s.parse().ok())
-        .ok_or_else(|| LutError("no <size> in .look".into()))?;
-    let hex: Vec<u8> = tag("data")
-        .ok_or_else(|| LutError("no <data> in .look".into()))?
-        .bytes()
-        .filter(u8::is_ascii_hexdigit)
-        .collect();
+    let size: usize = tag("size").and_then(|s| s.parse().ok()).ok_or_else(|| LutError("no <size> in .look".into()))?;
+    let hex: Vec<u8> = tag("data").ok_or_else(|| LutError("no <data> in .look".into()))?.bytes().filter(u8::is_ascii_hexdigit).collect();
     let nib = |c: u8| (c as char).to_digit(16).unwrap_or(0) as u8;
-    let bytes: Vec<u8> = hex
-        .chunks_exact(2)
-        .map(|p| nib(p[0]) << 4 | nib(p[1]))
-        .collect();
-    let floats: Vec<f32> = bytes
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-        .collect();
+    let bytes: Vec<u8> = hex.chunks_exact(2).map(|p| nib(p[0]) << 4 | nib(p[1])).collect();
+    let floats: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
     let n3 = size.pow(3);
-    let data = if floats.len() == n3 * 4 {
-        floats
-            .chunks_exact(4)
-            .flat_map(|c| [c[0], c[1], c[2]])
-            .collect()
-    } else {
-        floats
-    };
-    LutFile {
-        title: tag("title").unwrap_or_default(),
-        size,
-        data,
-    }
-    .check()
+    let data = if floats.len() == n3 * 4 { floats.chunks_exact(4).flat_map(|c| [c[0], c[1], c[2]]).collect() } else { floats };
+    LutFile { title: tag("title").unwrap_or_default(), size, data }.check()
 }
 
 /// Writes a `.cube` file (what Photoshop embeds in a Color Lookup layer).
@@ -347,10 +274,7 @@ mod tests {
     #[test]
     fn cube_roundtrip_and_identity() {
         let id = LutFile::identity(5);
-        let text = write_cube(&LutFile {
-            title: "Id".into(),
-            ..id.clone()
-        });
+        let text = write_cube(&LutFile { title: "Id".into(), ..id.clone() });
         let back = parse_cube(&text).unwrap();
         assert_eq!(back.size, 5);
         assert_eq!(back.title, "Id");
@@ -388,15 +312,8 @@ mod tests {
     #[test]
     fn look_hex_floats() {
         let id = LutFile::identity(2);
-        let hex: String = id
-            .data
-            .iter()
-            .flat_map(|v| v.to_le_bytes())
-            .map(|b| format!("{b:02X}"))
-            .collect();
-        let xml = format!(
-            "<?xml version=\"1.0\"?><look><LUT><size>\"2\"</size><data>\"{hex}\"</data></LUT></look>"
-        );
+        let hex: String = id.data.iter().flat_map(|v| v.to_le_bytes()).map(|b| format!("{b:02X}")).collect();
+        let xml = format!("<?xml version=\"1.0\"?><look><LUT><size>\"2\"</size><data>\"{hex}\"</data></LUT></look>");
         assert_eq!(parse("a.look", xml.as_bytes()).unwrap().data, id.data);
     }
 

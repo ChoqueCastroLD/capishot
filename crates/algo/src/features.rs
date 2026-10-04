@@ -136,7 +136,8 @@ pub fn harris(w: usize, h: usize, img: &[f32], max: usize, min_dist: f32, valid:
     let mut out = Vec::new();
     for c in cand {
         let (gx, gy) = ((c.x / cell) as usize, (c.y / cell) as usize);
-        let near = (gy.saturating_sub(1)..=(gy + 1).min(gh - 1)).any(|yy| (gx.saturating_sub(1)..=(gx + 1).min(gw - 1)).any(|xx| grid[yy * gw + xx].iter().any(|&(px, py)| (px - c.x).hypot(py - c.y) < min_dist)));
+        let near = (gy.saturating_sub(1)..=(gy + 1).min(gh - 1))
+            .any(|yy| (gx.saturating_sub(1)..=(gx + 1).min(gw - 1)).any(|xx| grid[yy * gw + xx].iter().any(|&(px, py)| (px - c.x).hypot(py - c.y) < min_dist)));
         if near {
             continue;
         }
@@ -311,7 +312,8 @@ pub fn fit(model: Model, src: &[[f64; 2]], dst: &[[f64; 2]]) -> Option<Homograph
                 return None;
             }
             // x' = a·x − b·y + tx, y' = b·x + a·y + ty.
-            let rows: Vec<(Vec<f64>, f64)> = src.iter().zip(dst).flat_map(|(s, d)| [(vec![s[0], -s[1], 1.0, 0.0], d[0]), (vec![s[1], s[0], 0.0, 1.0], d[1])]).collect();
+            let rows: Vec<(Vec<f64>, f64)> =
+                src.iter().zip(dst).flat_map(|(s, d)| [(vec![s[0], -s[1], 1.0, 0.0], d[0]), (vec![s[1], s[0], 0.0, 1.0], d[1])]).collect();
             let v = least_squares(&rows, 4)?;
             Some(Homography([v[0], -v[1], v[2], v[1], v[0], v[3], 0.0, 0.0, 1.0]))
         }
@@ -396,7 +398,15 @@ pub fn ransac(model: Model, src: &[[f64; 2]], dst: &[[f64; 2]], iters: usize, th
 /// Register `moving` onto `reference` (both `w × h` luminance; optional validity masks for
 /// transparent areas). Returns the model mapping `moving` coordinates to `reference`
 /// coordinates and the inlier count.
-pub fn register(w: usize, h: usize, reference: &[f32], moving: &[f32], valid_ref: Option<&[bool]>, valid_mov: Option<&[bool]>, model: Model) -> Option<(Homography, usize)> {
+pub fn register(
+    w: usize,
+    h: usize,
+    reference: &[f32],
+    moving: &[f32],
+    valid_ref: Option<&[bool]>,
+    valid_mov: Option<&[bool]>,
+    model: Model,
+) -> Option<(Homography, usize)> {
     let upright = model == Model::Translation;
     let min_dist = (w.max(h) as f32 / 60.0).clamp(4.0, 24.0);
     let ca = harris(w, h, reference, 600, min_dist, valid_ref);
@@ -479,20 +489,26 @@ mod tests {
     fn fits_are_exact_on_clean_data() {
         let src = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [5.0, 3.0]];
         let truth = Homography([1.1, 0.05, 3.0, -0.02, 0.95, -2.0, 0.001, 0.0005, 1.0]);
-        let dst: Vec<[f64; 2]> = src.iter().map(|p| {
-            let (x, y) = truth.apply(p[0], p[1]);
-            [x, y]
-        }).collect();
+        let dst: Vec<[f64; 2]> = src
+            .iter()
+            .map(|p| {
+                let (x, y) = truth.apply(p[0], p[1]);
+                [x, y]
+            })
+            .collect();
         let h = fit(Model::Homography, &src, &dst).unwrap();
         for p in &src {
             let (a, b) = (h.apply(p[0], p[1]), truth.apply(p[0], p[1]));
             assert!((a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6);
         }
         let sim = Homography([0.9, -0.2, 4.0, 0.2, 0.9, 1.0, 0.0, 0.0, 1.0]);
-        let dst: Vec<[f64; 2]> = src.iter().map(|p| {
-            let (x, y) = sim.apply(p[0], p[1]);
-            [x, y]
-        }).collect();
+        let dst: Vec<[f64; 2]> = src
+            .iter()
+            .map(|p| {
+                let (x, y) = sim.apply(p[0], p[1]);
+                [x, y]
+            })
+            .collect();
         let h = fit(Model::Similarity, &src, &dst).unwrap();
         assert!(h.0.iter().zip(sim.0).all(|(a, b)| (a - b).abs() < 1e-9));
     }

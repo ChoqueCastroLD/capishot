@@ -18,73 +18,39 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Limits {
-            max_width: 1 << 18,
-            max_height: 1 << 18,
-            max_pixels: 1 << 28,
-            max_alloc: 2 << 30,
-        }
+        Limits { max_width: 1 << 18, max_height: 1 << 18, max_pixels: 1 << 28, max_alloc: 2 << 30 }
     }
 }
 
 impl Limits {
     /// Effectively unlimited (still bounded by `usize` overflow checks).
     pub fn none() -> Self {
-        Limits {
-            max_width: u32::MAX,
-            max_height: u32::MAX,
-            max_pixels: u64::MAX,
-            max_alloc: u64::MAX,
-        }
+        Limits { max_width: u32::MAX, max_height: u32::MAX, max_pixels: u64::MAX, max_alloc: u64::MAX }
     }
 
     /// Validate declared dimensions for an output buffer of the given layout
     /// and sample type.
-    pub fn check(
-        &self,
-        width: u32,
-        height: u32,
-        layout: ChannelLayout,
-        sample: SampleType,
-    ) -> Result<(), CodecError> {
+    pub fn check(&self, width: u32, height: u32, layout: ChannelLayout, sample: SampleType) -> Result<(), CodecError> {
         self.check_bytes(width, height, (layout.channels() * sample.bytes()) as u64)
     }
 
-    pub(crate) fn check_bytes(
-        &self,
-        width: u32,
-        height: u32,
-        bytes_per_pixel: u64,
-    ) -> Result<(), CodecError> {
+    pub(crate) fn check_bytes(&self, width: u32, height: u32, bytes_per_pixel: u64) -> Result<(), CodecError> {
         if width == 0 || height == 0 {
-            return Err(CodecError::InvalidImage(format!(
-                "zero-sized image {width}x{height}"
-            )));
+            return Err(CodecError::InvalidImage(format!("zero-sized image {width}x{height}")));
         }
         if width > self.max_width || height > self.max_height {
-            return Err(CodecError::LimitExceeded(format!(
-                "dimensions {width}x{height} exceed max {}x{}",
-                self.max_width, self.max_height
-            )));
+            return Err(CodecError::LimitExceeded(format!("dimensions {width}x{height} exceed max {}x{}", self.max_width, self.max_height)));
         }
         let pixels = width as u64 * height as u64;
         if pixels > self.max_pixels {
-            return Err(CodecError::LimitExceeded(format!(
-                "{pixels} pixels exceed max {}",
-                self.max_pixels
-            )));
+            return Err(CodecError::LimitExceeded(format!("{pixels} pixels exceed max {}", self.max_pixels)));
         }
         let bytes = pixels.saturating_mul(bytes_per_pixel);
         if bytes > self.max_alloc {
-            return Err(CodecError::LimitExceeded(format!(
-                "{bytes} bytes exceed max_alloc {}",
-                self.max_alloc
-            )));
+            return Err(CodecError::LimitExceeded(format!("{bytes} bytes exceed max_alloc {}", self.max_alloc)));
         }
         if usize::try_from(bytes).is_err() {
-            return Err(CodecError::LimitExceeded(format!(
-                "{bytes} bytes do not fit in memory"
-            )));
+            return Err(CodecError::LimitExceeded(format!("{bytes} bytes do not fit in memory")));
         }
         Ok(())
     }

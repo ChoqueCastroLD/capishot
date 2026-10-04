@@ -44,7 +44,9 @@ fn comp_param(doc: &Document, p: &Value, cmd: &str) -> Result<u32> {
             let id = n.as_u64().ok_or_else(|| bad(cmd, "\"comp\" must be a comp id or name"))? as u32;
             doc.comp(id).map(|c| c.id).ok_or_else(|| bad(cmd, format!("no layer comp with id {id}")))
         }
-        Some(Value::String(name)) => doc.layer_comps.iter().find(|c| c.name == *name).map(|c| c.id).ok_or_else(|| bad(cmd, format!("no layer comp named \"{name}\""))),
+        Some(Value::String(name)) => {
+            doc.layer_comps.iter().find(|c| c.name == *name).map(|c| c.id).ok_or_else(|| bad(cmd, format!("no layer comp named \"{name}\"")))
+        }
         Some(_) => Err(bad(cmd, "\"comp\" must be a comp id or name")),
         None => doc
             .last_applied_comp
@@ -374,8 +376,22 @@ pub fn specs() -> Vec<CommandSpec> {
         };
     }
     vec![
-        spec!("layerComp.new", "New Layer Comp…", &[], r##"{"name":str="Layer Comp N","comment":str="","visibility":bool=true,"position":bool=true,"appearance":bool=true} → {comp}"##, has_doc, new_comp),
-        spec!("layerComp.update", "Update Layer Comp", &[], r##"{"comp":id|name|"*"? (default: last applied; "*" = all),"what":"all|visibility|position|appearance"="all"}"##, has_comps, update_comp),
+        spec!(
+            "layerComp.new",
+            "New Layer Comp…",
+            &[],
+            r##"{"name":str="Layer Comp N","comment":str="","visibility":bool=true,"position":bool=true,"appearance":bool=true} → {comp}"##,
+            has_doc,
+            new_comp
+        ),
+        spec!(
+            "layerComp.update",
+            "Update Layer Comp",
+            &[],
+            r##"{"comp":id|name|"*"? (default: last applied; "*" = all),"what":"all|visibility|position|appearance"="all"}"##,
+            has_comps,
+            update_comp
+        ),
         spec!("layerComp.apply", "Apply Layer Comp", &[], r##"{"comp":id|name? (default: last applied)} → {comp, missingLayers}"##, has_comps, apply_cmd),
         spec!("layerComp.previous", "Apply Previous Layer Comp", &[], "{}", has_comps, |s, _| step(s, -1)),
         spec!("layerComp.next", "Apply Next Layer Comp", &[], "{}", has_comps, |s, _| step(s, 1)),
@@ -383,11 +399,42 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("layerComp.duplicate", "Duplicate Layer Comp", &[], r##"{"comp":id|name?} → {comp}"##, has_comps, duplicate),
         spec!("layerComp.rename", "Rename Layer Comp", &[], r##"{"comp":id|name?,"name":str}"##, has_comps, rename),
         spec!("layerComp.setComment", "Layer Comp Comment", &[], r##"{"comp":id|name?,"comment":str}"##, has_comps, set_comment),
-        spec!("layerComp.setOptions", "Layer Comp Options…", &[], r##"{"comp":id|name?,"visibility":bool?,"position":bool?,"appearance":bool?,"name":str?,"comment":str?}"##, has_comps, set_options),
+        spec!(
+            "layerComp.setOptions",
+            "Layer Comp Options…",
+            &[],
+            r##"{"comp":id|name?,"visibility":bool?,"position":bool?,"appearance":bool?,"name":str?,"comment":str?}"##,
+            has_comps,
+            set_options
+        ),
         spec!("layerComp.restoreLastDocumentState", "Restore Last Document State", &[], "{}", has_last_state, |s, _| restore_last(s)),
-        spec!("layerComp.updateWarnings", "Layer Comp Warnings", &[], r##"{"clear":bool=false (drop states of deleted layers)} → {warnings:[{comp,name,missingLayers}],count}"##, has_doc, update_warnings),
-        CommandSpec { journal: false, ..spec!("layerComp.list", "List Layer Comps", &[], "{} → {comps:[{id,name,comment,visibility,position,appearance,layers,missingLayers}],lastApplied,hasLastDocumentState}", has_doc, |s, _| list(s)) },
-        spec!("file.export.layerCompsToFiles", "Layer Comps to Files…", &["File", "Export"], r##"{"dir":folder,"format":"png|jpg|psd|tiff|…"="png","prefix":str=document name,"selectedOnly":bool=false (only the last applied comp),"comps":[id]?,"quality":0..12?} → {files}"##, export_comps, comps_to_files),
+        spec!(
+            "layerComp.updateWarnings",
+            "Layer Comp Warnings",
+            &[],
+            r##"{"clear":bool=false (drop states of deleted layers)} → {warnings:[{comp,name,missingLayers}],count}"##,
+            has_doc,
+            update_warnings
+        ),
+        CommandSpec {
+            journal: false,
+            ..spec!(
+                "layerComp.list",
+                "List Layer Comps",
+                &[],
+                "{} → {comps:[{id,name,comment,visibility,position,appearance,layers,missingLayers}],lastApplied,hasLastDocumentState}",
+                has_doc,
+                |s, _| list(s)
+            )
+        },
+        spec!(
+            "file.export.layerCompsToFiles",
+            "Layer Comps to Files…",
+            &["File", "Export"],
+            r##"{"dir":folder,"format":"png|jpg|psd|tiff|…"="png","prefix":str=document name,"selectedOnly":bool=false (only the last applied comp),"comps":[id]?,"quality":0..12?} → {files}"##,
+            export_comps,
+            comps_to_files
+        ),
     ]
 }
 

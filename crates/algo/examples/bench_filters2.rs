@@ -11,9 +11,7 @@ fn main() {
     let r = Rect::new(0, 0, w, h);
     let mut s = Surface::new(PixelFormat::RGBA8);
     // Busy deterministic content (gradients plus texture) so edge-aware filters do real work.
-    let bytes: Vec<u8> = (0..h)
-        .flat_map(|y| (0..w).flat_map(move |x| [(x % 256) as u8, ((x * 3 + y) / 11 % 256) as u8, ((x ^ y) % 256) as u8, 255]))
-        .collect();
+    let bytes: Vec<u8> = (0..h).flat_map(|y| (0..w).flat_map(move |x| [(x % 256) as u8, ((x * 3 + y) / 11 % 256) as u8, ((x ^ y) % 256) as u8, 255])).collect();
     s.write_interleaved(r, &bytes);
     let cases = vec![
         FilterParams::OilPaint { stylization: 4.0, cleanliness: 5.0, scale: 1.0, bristle_detail: 5.0, lighting: true, angle: -60.0, shine: 1.0 },
@@ -43,7 +41,16 @@ fn main() {
         FilterParams::PathBlur { paths: vec![BlurPath::default()] },
         FilterParams::Crystallize { cell_size: 10.0, seed: 0 },
         FilterParams::ColorHalftone { max_radius: 8.0, angles: [108.0, 162.0, 90.0, 45.0] },
-        FilterParams::LightingEffects { lights: vec![Light::default()], gloss: 0.0, metallic: 0.0, exposure: 0.0, ambience: 8.0, texture: TextureChannel::Luminance, height: 50.0, white_is_high: true },
+        FilterParams::LightingEffects {
+            lights: vec![Light::default()],
+            gloss: 0.0,
+            metallic: 0.0,
+            exposure: 0.0,
+            ambience: 8.0,
+            texture: TextureChannel::Luminance,
+            height: 50.0,
+            white_is_high: true,
+        },
     ];
     for p in cases {
         if only.as_deref().is_some_and(|o| !p.label().to_lowercase().contains(&o.to_lowercase())) {

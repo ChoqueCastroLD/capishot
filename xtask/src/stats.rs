@@ -55,19 +55,11 @@ fn count_tests(src: &str) -> (usize, usize) {
 }
 
 fn exact_tests(pkg: &str) -> Option<usize> {
-    let out = crate::cargo()
-        .args(["test", "-q", "-p", pkg, "--", "--list"])
-        .output()
-        .ok()?;
+    let out = crate::cargo().args(["test", "-q", "-p", pkg, "--", "--list"]).output().ok()?;
     if !out.status.success() {
         return None;
     }
-    Some(
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .filter(|l| l.ends_with(": test"))
-            .count(),
-    )
+    Some(String::from_utf8_lossy(&out.stdout).lines().filter(|l| l.ends_with(": test")).count())
 }
 
 pub fn run(_root: &Path, exact: bool) -> Result<(), String> {
@@ -75,10 +67,7 @@ pub fn run(_root: &Path, exact: bool) -> Result<(), String> {
     let mut rows = Vec::new();
     for p in meta["packages"].as_array().into_iter().flatten() {
         let name = p["name"].as_str().unwrap_or("?").to_owned();
-        let Some(dir) = p["manifest_path"]
-            .as_str()
-            .and_then(|m| Path::new(m).parent().map(Path::to_path_buf))
-        else {
+        let Some(dir) = p["manifest_path"].as_str().and_then(|m| Path::new(m).parent().map(Path::to_path_buf)) else {
             continue;
         };
         let mut c = Counts::default();
@@ -88,15 +77,8 @@ pub fn run(_root: &Path, exact: bool) -> Result<(), String> {
     }
     rows.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let exact_col = if exact {
-        format!(" {:>8}", "harness")
-    } else {
-        String::new()
-    };
-    println!(
-        "{:<26} {:>6} {:>8} {:>7} {:>10}{exact_col}",
-        "crate", "files", "lines", "#[test]", "proptest!"
-    );
+    let exact_col = if exact { format!(" {:>8}", "harness") } else { String::new() };
+    println!("{:<26} {:>6} {:>8} {:>7} {:>10}{exact_col}", "crate", "files", "lines", "#[test]", "proptest!");
     println!("{}", "-".repeat(62 + if exact { 9 } else { 0 }));
     let mut total = Counts::default();
     let mut total_exact = 0;
@@ -109,29 +91,17 @@ pub fn run(_root: &Path, exact: bool) -> Result<(), String> {
             }
             (true, None) => format!(" {:>8}", "error"),
         };
-        println!(
-            "{name:<26} {:>6} {:>8} {:>7} {:>10}{ex_s}",
-            c.files, c.lines, c.tests, c.proptests
-        );
+        println!("{name:<26} {:>6} {:>8} {:>7} {:>10}{ex_s}", c.files, c.lines, c.tests, c.proptests);
         total.files += c.files;
         total.lines += c.lines;
         total.tests += c.tests;
         total.proptests += c.proptests;
     }
     println!("{}", "-".repeat(62 + if exact { 9 } else { 0 }));
-    let ex_s = if exact {
-        format!(" {total_exact:>8}")
-    } else {
-        String::new()
-    };
-    println!(
-        "{:<26} {:>6} {:>8} {:>7} {:>10}{ex_s}",
-        "TOTAL", total.files, total.lines, total.tests, total.proptests
-    );
+    let ex_s = if exact { format!(" {total_exact:>8}") } else { String::new() };
+    println!("{:<26} {:>6} {:>8} {:>7} {:>10}{ex_s}", "TOTAL", total.files, total.lines, total.tests, total.proptests);
     if !exact {
-        println!(
-            "\n(#[test] counts source attributes; macro-generated tests count once. Use --exact for harness counts.)"
-        );
+        println!("\n(#[test] counts source attributes; macro-generated tests count once. Use --exact for harness counts.)");
     }
     Ok(())
 }
@@ -142,8 +112,7 @@ mod tests {
 
     #[test]
     fn counts_attributes_and_proptest_blocks() {
-        let src =
-            "#[test]\nfn a() {}\n// #[test] commented\n    #[test]\nfn b() {}\nproptest! {\n}\n";
+        let src = "#[test]\nfn a() {}\n// #[test] commented\n    #[test]\nfn b() {}\nproptest! {\n}\n";
         assert_eq!(count_tests(src), (2, 1));
     }
 }

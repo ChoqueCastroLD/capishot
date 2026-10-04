@@ -7,13 +7,7 @@ use crate::{Ctx, Preserve, UndefinedAreas};
 
 /// Minimum or Maximum with the dialog's Preserve option: a square (`min_max`) or a disc
 /// (`min_max_round`).
-pub(crate) fn min_max_preserve(
-    src: &Image,
-    out: Rect,
-    radius: f32,
-    max: bool,
-    preserve: Preserve,
-) -> Vec<f32> {
+pub(crate) fn min_max_preserve(src: &Image, out: Rect, radius: f32, max: bool, preserve: Preserve) -> Vec<f32> {
     match preserve {
         Preserve::Squareness => min_max(src, out, radius, max),
         Preserve::Roundness => min_max_round(src, out, radius, max),

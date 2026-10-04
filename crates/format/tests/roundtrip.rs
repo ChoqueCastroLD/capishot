@@ -7,12 +7,7 @@ use photocraft_doc::{Document, Layer, LayerId};
 use photocraft_format::*;
 use photocraft_raster::Rgba8Image;
 
-const MODES: [ColorMode; 4] = [
-    ColorMode::Rgb,
-    ColorMode::Grayscale,
-    ColorMode::Cmyk,
-    ColorMode::Lab,
-];
+const MODES: [ColorMode; 4] = [ColorMode::Rgb, ColorMode::Grayscale, ColorMode::Cmyk, ColorMode::Lab];
 
 fn check_zip(mode: ColorMode, depth: SampleType) {
     let doc = rich_doc(mode, depth);
@@ -44,9 +39,7 @@ fn directory_bundle_roundtrip_all_modes() {
         for depth in SampleType::ALL {
             let doc = rich_doc(mode, depth);
             let dir = temp_dir("dir");
-            PcraftWriter::new()
-                .save_dir(&doc, &dir, &SaveOptions::default())
-                .unwrap();
+            PcraftWriter::new().save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
             assert!(dir.join("manifest.json").is_file());
             assert_eq!(load_path(&dir).unwrap(), doc, "{mode:?} {depth:?}");
             std::fs::remove_dir_all(dir).unwrap();
@@ -59,9 +52,7 @@ fn save_path_zip_file() {
     let doc = rich_doc(ColorMode::Rgb, SampleType::U8);
     let dir = temp_dir("file");
     let path = dir.join("a.pcraft");
-    PcraftWriter::new()
-        .save_path(&doc, &path, &SaveOptions::default())
-        .unwrap();
+    PcraftWriter::new().save_path(&doc, &path, &SaveOptions::default()).unwrap();
     assert!(path.is_file());
     assert_eq!(load_path(&path).unwrap(), doc);
     std::fs::remove_dir_all(dir).unwrap();
@@ -69,16 +60,8 @@ fn save_path_zip_file() {
 
 #[test]
 fn empty_document_roundtrips() {
-    let doc = Document::new(
-        "empty",
-        photocraft_doc::Size::new(1, 1),
-        ColorMode::Rgb,
-        SampleType::U8,
-    );
-    assert_eq!(
-        load_from_bytes(&save_to_bytes(&doc, &SaveOptions::default()).unwrap()).unwrap(),
-        doc
-    );
+    let doc = Document::new("empty", photocraft_doc::Size::new(1, 1), ColorMode::Rgb, SampleType::U8);
+    assert_eq!(load_from_bytes(&save_to_bytes(&doc, &SaveOptions::default()).unwrap()).unwrap(), doc);
 }
 
 #[test]
@@ -94,11 +77,7 @@ fn zip_incremental_only_new_tiles() {
     assert_eq!(s2.blobs_written, 0);
     // Touch one pixel of one layer: exactly one tile is new.
     let id = doc.layers[1].id;
-    doc.layer_mut(id)
-        .unwrap()
-        .surface_mut()
-        .unwrap()
-        .write_pixel(3, 3, &[0.5, 0.5, 0.5, 1.0]);
+    doc.layer_mut(id).unwrap().surface_mut().unwrap().write_pixel(3, 3, &[0.5, 0.5, 0.5, 1.0]);
     let (bytes, s3) = w.save_zip(&doc, &SaveOptions::default()).unwrap();
     assert_eq!(s3.tiles_written, 1);
     assert_eq!(load_from_bytes(&bytes).unwrap(), doc);
@@ -112,9 +91,7 @@ fn directory_incremental_and_gc() {
     let s1 = w.save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
     assert_eq!(s1.tiles_written, s1.tiles_total);
     // A fresh writer still skips files already on disk.
-    let s2 = PcraftWriter::new()
-        .save_dir(&doc, &dir, &SaveOptions::default())
-        .unwrap();
+    let s2 = PcraftWriter::new().save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
     assert_eq!(s2.tiles_written, 0);
     assert_eq!(s2.objects_removed, 0);
     // Delete a layer: its unique tiles get garbage-collected.
@@ -130,20 +107,13 @@ fn directory_incremental_and_gc() {
 
 #[test]
 fn identical_tiles_are_stored_once() {
-    let mut doc = Document::new(
-        "d",
-        photocraft_doc::Size::new(10, 10),
-        ColorMode::Rgb,
-        SampleType::U8,
-    );
+    let mut doc = Document::new("d", photocraft_doc::Size::new(10, 10), ColorMode::Rgb, SampleType::U8);
     let mut a = Layer::raster("a", doc.pixel_format());
     scribble(a.surface_mut().unwrap(), 5, false);
     let b = a.duplicate();
     doc.layers.push(a);
     doc.layers.push(b);
-    let (_, s) = PcraftWriter::new()
-        .save_zip(&doc, &SaveOptions::default())
-        .unwrap();
+    let (_, s) = PcraftWriter::new().save_zip(&doc, &SaveOptions::default()).unwrap();
     let per_layer = doc.layers[0].surface().unwrap().tile_count();
     assert_eq!(s.tiles_total, per_layer);
 }
@@ -165,24 +135,14 @@ fn ids_preserved_and_counter_advanced() {
     }
     let back = load_from_bytes(&z.finish().unwrap()).unwrap();
     assert_eq!(back.layers[0].id.0, big);
-    assert!(
-        LayerId::fresh().0 > big,
-        "fresh ids must not collide with loaded ids"
-    );
+    assert!(LayerId::fresh().0 > big, "fresh ids must not collide with loaded ids");
 }
 
 #[test]
 fn fresh_ids_option() {
     let doc = rich_doc(ColorMode::Rgb, SampleType::U8);
     let bytes = save_to_bytes(&doc, &SaveOptions::default()).unwrap();
-    let back = load_from_bytes_with(
-        &bytes,
-        &LoadOptions {
-            preserve_ids: false,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let back = load_from_bytes_with(&bytes, &LoadOptions { preserve_ids: false, ..Default::default() }).unwrap();
     assert_ne!(back.id, doc.id);
     assert_ne!(back.layers[0].id, doc.layers[0].id);
     assert_eq!(back.layers.len(), doc.layers.len());
@@ -193,15 +153,8 @@ fn fresh_ids_option() {
 fn previews_embedded_and_readable() {
     let doc = rich_doc(ColorMode::Rgb, SampleType::U8);
     let mut thumb = Rgba8Image::new(4, 3);
-    thumb
-        .pixels
-        .iter_mut()
-        .enumerate()
-        .for_each(|(i, p)| *p = i as u8);
-    let opts = SaveOptions {
-        thumbnail: Some(thumb.clone()),
-        composite: Some(thumb.clone()),
-    };
+    thumb.pixels.iter_mut().enumerate().for_each(|(i, p)| *p = i as u8);
+    let opts = SaveOptions { thumbnail: Some(thumb.clone()), composite: Some(thumb.clone()) };
     let bytes = save_to_bytes(&doc, &opts).unwrap();
     let png = read_thumbnail(&bytes).unwrap().unwrap();
     let img = photocraft_codecs::decode(&png).unwrap();
@@ -210,11 +163,7 @@ fn previews_embedded_and_readable() {
     let m = read_manifest(&bytes).unwrap();
     assert_eq!(m.composite.as_deref(), Some("composite/preview.png"));
     assert_eq!(m.format_version, FORMAT_VERSION);
-    assert!(
-        read_thumbnail(&save_to_bytes(&doc, &SaveOptions::default()).unwrap())
-            .unwrap()
-            .is_none()
-    );
+    assert!(read_thumbnail(&save_to_bytes(&doc, &SaveOptions::default()).unwrap()).unwrap().is_none());
 }
 
 #[test]
@@ -227,11 +176,7 @@ fn manifest_is_human_readable_json() {
     assert!(text.contains("\"format_version\": 1"));
     assert!(text.contains("\"Hue/Sat\""));
     assert!(text.contains("filter.blur.gaussian"));
-    assert!(
-        r.entries
-            .iter()
-            .any(|e| e.name.starts_with("tiles/") && e.name.ends_with(".zst"))
-    );
+    assert!(r.entries.iter().any(|e| e.name.starts_with("tiles/") && e.name.ends_with(".zst")));
     assert!(r.entries.iter().any(|e| e.name.starts_with("blobs/")));
 }
 
@@ -323,26 +268,8 @@ fn blend_if_roundtrips() {
     use photocraft_doc::{BlendIf, BlendRange};
     let mut doc = rich_doc(ColorMode::Rgb, SampleType::U16);
     let mut bi = BlendIf::default();
-    bi.set(
-        0,
-        [
-            BlendRange {
-                black: [20, 60],
-                white: [255, 255],
-            },
-            BlendRange::FULL,
-        ],
-    );
-    bi.set(
-        3,
-        [
-            BlendRange::FULL,
-            BlendRange {
-                black: [0, 0],
-                white: [180, 220],
-            },
-        ],
-    );
+    bi.set(0, [BlendRange { black: [20, 60], white: [255, 255] }, BlendRange::FULL]);
+    bi.set(3, [BlendRange::FULL, BlendRange { black: [0, 0], white: [180, 220] }]);
     doc.layers[0].blend_if = bi.clone();
     let back = load_from_bytes(&save_to_bytes(&doc, &SaveOptions::default()).unwrap()).unwrap();
     assert_eq!(back, doc);

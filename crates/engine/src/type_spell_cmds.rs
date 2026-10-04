@@ -77,7 +77,9 @@ fn list(s: &Session, p: &Value) -> Result<Value> {
     for id in layers_param(s, p) {
         let Some(t) = text(&st.doc, id) else { continue };
         for m in dict.misspellings(t, &ok) {
-            out.push(json!({ "layer": id.0, "start": char_at(t, m.start), "end": char_at(t, m.end), "word": m.word, "suggestions": dict.suggest(&m.word, max) }));
+            out.push(
+                json!({ "layer": id.0, "start": char_at(t, m.start), "end": char_at(t, m.end), "word": m.word, "suggestions": dict.suggest(&m.word, max) }),
+            );
         }
     }
     Ok(json!({ "misspellings": out, "count": out.len() }))
@@ -142,7 +144,13 @@ fn change_all(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn add_word(s: &mut Session, p: &Value) -> Result<Value> {
-    let word = p.get("word").and_then(Value::as_str).map(str::trim).filter(|w| !w.is_empty() && !w.contains(char::is_whitespace)).ok_or_else(|| bad("edit.checkSpelling", "`add` needs a single `word`"))?.to_string();
+    let word = p
+        .get("word")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|w| !w.is_empty() && !w.contains(char::is_whitespace))
+        .ok_or_else(|| bad("edit.checkSpelling", "`add` needs a single `word`"))?
+        .to_string();
     let added = s.edit_prefs(|pr| {
         if pr.user_dictionary.iter().any(|w| w.eq_ignore_ascii_case(&word)) {
             false
@@ -176,7 +184,9 @@ fn check_spelling(s: &mut Session, p: &Value) -> Result<Value> {
             let w = p.get("word").and_then(Value::as_str).unwrap_or("");
             let ok = accepted(s, p);
             let d = Dictionary::english();
-            Ok(json!({ "word": w, "correct": d.check(w, &ok), "suggestions": d.suggest(w, p.get("suggestions").and_then(Value::as_u64).unwrap_or(5) as usize) }))
+            Ok(
+                json!({ "word": w, "correct": d.check(w, &ok), "suggestions": d.suggest(w, p.get("suggestions").and_then(Value::as_u64).unwrap_or(5) as usize) }),
+            )
         }
         other => Err(bad("edit.checkSpelling", format!("unknown action {other:?}"))),
     }
