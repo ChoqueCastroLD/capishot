@@ -402,7 +402,13 @@ fn system_profiles() {
                 continue;
             }
             let Ok(bytes) = std::fs::read(&path) else { continue };
-            let p = Profile::parse(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let p = match Profile::parse(&bytes) {
+                Ok(p) => p,
+                // Named-colour profiles are never used for conversions; colord's
+                // x11-colors.icc carries a stub B2A0 with overlapping elements.
+                Err(_) if bytes.get(12..16) == Some(b"nmcl") => continue,
+                Err(e) => panic!("{}: {e}", path.display()),
+            };
             seen += 1;
             if !matches!(p.class, photocraft_cms::ProfileClass::Input | photocraft_cms::ProfileClass::Display | photocraft_cms::ProfileClass::Output | photocraft_cms::ProfileClass::ColorSpace) {
                 continue;
