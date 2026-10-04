@@ -616,6 +616,7 @@ pub(crate) fn group_key(layer: &Layer, light: &GlobalLight) -> u64 {
 }
 
 #[cfg(test)]
+#[allow(clippy::unreachable)] // clippy.toml exempts unwrap/expect/panic in tests, not unreachable!
 mod tests {
     use super::*;
     use photocraft_color::BlendMode;

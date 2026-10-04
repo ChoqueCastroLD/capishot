@@ -662,7 +662,8 @@ impl<'a> Planner<'a> {
                 }
                 Ok(s)
             }
-            LayerContent::Adjustment(_) => unreachable!("adjustments handled by the caller"),
+            // Adjustments are handled by the caller and never get here.
+            LayerContent::Adjustment(_) => Err(Unsupported("adjustment layer reached the content planner".into())),
             LayerContent::Fill(f @ Fill::Pattern { name, scale, id, angle, link, phase }) if layer.fill_cache.as_ref().is_none_or(|c| c.fill != *f) => {
                 // compose::render_fill: the pattern tiled from the layer's frame (transparent
                 // when missing), then the layer's masks.

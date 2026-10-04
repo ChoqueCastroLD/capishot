@@ -23,6 +23,7 @@
 //! (Multichannel documents, documents or effect regions larger than the device's texture limit)
 //! returns [`Unsupported`]; callers fall back to the CPU compositor.
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod bounds;
 mod fx;
@@ -444,9 +445,10 @@ impl Compositor {
             bind_group_layouts: &[Some(&bgl0), Some(&bgl1)],
             immediate_size: 0,
         });
+        // `None` only for kernels without a fragment entry point, which are never drawn.
         let pipeline = |k: Kernel, format: wgpu::TextureFormat| {
-            let entry = k.entry().expect("drawn kernels have an entry point");
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            let entry = k.entry()?;
+            Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(entry),
                 layout: Some(&layout),
                 vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
@@ -461,13 +463,14 @@ impl Compositor {
                 }),
                 multiview_mask: None,
                 cache: None,
-            })
+            }))
         };
-        let mut pipelines: HashMap<_, _> = Kernel::DRAWN.iter().filter(|k| !k.is_map()).map(|&k| ((k, acc_format), pipeline(k, acc_format))).collect();
+        let mut pipelines: HashMap<_, _> =
+            Kernel::DRAWN.iter().filter(|k| !k.is_map()).filter_map(|&k| Some(((k, acc_format), pipeline(k, acc_format)?))).collect();
         // Effect maps render to R32Float / R16Float, which some adapters (e.g. GL without float
         // render targets) can't: then layer effects use the CPU compositor and the rest stays here.
         let maps = Kernel::DRAWN.iter().filter(|k| k.is_map()).flat_map(|&k| [(k, MAP32), (k, MAP16)]);
-        let (maps, map_error) = first_error(device, || maps.map(|key| (key, pipeline(key.0, key.1))).collect::<Vec<_>>());
+        let (maps, map_error) = first_error(device, || maps.filter_map(|key| Some((key, pipeline(key.0, key.1)?))).collect::<Vec<_>>());
         if let Some(e) = &map_error {
             log::info!("GPU compositor: no effect-map pipelines ({e}); layer effects use the CPU");
         } else {
@@ -738,7 +741,9 @@ impl Compositor {
                 };
                 match p.kernel {
                     Kernel::CopyRect | Kernel::CopyFull => {
-                        let src = &self.pool[p.a.expect("copy source") as usize].0;
+                        // The planner always gives copies a source.
+                        let Some(a) = p.a else { continue };
+                        let src = &self.pool[a as usize].0;
                         let dst = &self.pool[p.dst as usize].0;
                         encoder.copy_texture_to_texture(
                             wgpu::TexelCopyTextureInfo {
@@ -837,7 +842,8 @@ impl Compositor {
             }
             self.residents.insert(key, r);
         }
-        let r = self.residents.get_mut(&key).expect("inserted");
+        // Present: inserted above when it was missing or stale.
+        let r = self.residents.get_mut(&key)?;
         r.last_used = self.frame;
         r.doc = doc;
         for (c, t) in surface.tiles() {
@@ -956,8 +962,9 @@ impl Compositor {
             // Moved by whole pixels: maps are computed relative to the region, so if the shape
             // moved unchanged with it, every map is still exact.
             let v = fx::shape(doc, layer, region);
-            let e = self.fx.get_mut(&layer.id).expect("entry");
-            if v == e.shape_cpu {
+            if let Some(e) = self.fx.get_mut(&layer.id)
+                && v == e.shape_cpu
+            {
                 e.region = region;
                 rebuild = false;
             }
@@ -982,7 +989,8 @@ impl Compositor {
             );
             damage = region;
         }
-        let e = self.fx.get_mut(&layer.id).expect("inserted");
+        // Present: kept or (re)inserted above.
+        let Some(e) = self.fx.get_mut(&layer.id) else { return };
         e.last_used = frame;
         e.doc = doc.id;
         e.tiles = [content_src.map(fx::snapshot), mask_src.map(fx::snapshot)];
@@ -1041,7 +1049,7 @@ impl Compositor {
             if prog.maps == 0 {
                 continue;
             }
-            let e = self.fx.get_mut(&layer.id).expect("entry");
+            let Some(e) = self.fx.get_mut(&layer.id) else { return };
             let same = e.progs[i].key == prog.key && e.progs[i].maps.len() == prog.maps;
             let d = if same { damage } else { region };
             if d.is_empty() {
@@ -1085,17 +1093,19 @@ impl Compositor {
             let v = self.temp(device, region, &temps);
             temps.push(v);
         }
-        let target_of = |i: usize| -> (wgpu::TextureView, wgpu::TextureFormat) {
+        // `None` only if a program's map or temporary wasn't allocated, which `sync_fx` and
+        // `MapProgram::temps` rule out.
+        let target_of = |i: usize| -> Option<(wgpu::TextureView, wgpu::TextureFormat)> {
             match prog.stages[i].out {
-                Some(k) => (finals[k].clone().expect("final map allocated"), MAP16),
-                None => (temps[assign[i].expect("temporary assigned")].clone(), MAP32),
+                Some(k) => Some((finals.get(k)?.clone()?, MAP16)),
+                None => Some((temps.get((*assign.get(i)?)?)?.clone(), MAP32)),
             }
         };
         let view_of = |inp: Option<fx::In>| -> Option<wgpu::TextureView> {
             match inp? {
                 fx::In::Shape => Some(shape.clone()),
                 fx::In::Field(k) => fields.get(&k).map(|f| f.1.clone()),
-                fx::In::Val(k) => Some(target_of(k).0),
+                fx::In::Val(k) => target_of(k).map(|t| t.0),
             }
         };
         let mut draws = Vec::with_capacity(prog.stages.len());
@@ -1105,7 +1115,7 @@ impl Compositor {
                 continue;
             }
             stats.fx_pixels += w.width() as u64 * w.height() as u64;
-            let (target, format) = target_of(i);
+            let Some((target, format)) = target_of(i) else { continue };
             let mut p = plan::Pass::new(s.kernel, 0);
             p.params[0] = s.p0;
             p.params[1] = s.p1;
@@ -1377,12 +1387,12 @@ pub fn render_to_vec_stats(
     let w = rect.width() as usize;
     let mut out = vec![[0.0f32; 4]; w * rect.height() as usize];
     for (r, b, row) in &staging {
-        let data = b.slice(..).get_mapped_range().expect("mapped readback buffer");
+        let data = b.slice(..).get_mapped_range().map_err(|e| Unsupported(format!("GPU readback failed: {e:?}")))?;
         for y in 0..r.height() as usize {
             for x in 0..r.width() as usize {
                 let o = y * *row as usize + x * bpp as usize;
                 let px: [f32; 4] = if bpp == 16 {
-                    std::array::from_fn(|i| f32::from_le_bytes(data[o + i * 4..o + i * 4 + 4].try_into().expect("4 bytes")))
+                    std::array::from_fn(|i| f32::from_le_bytes([data[o + i * 4], data[o + i * 4 + 1], data[o + i * 4 + 2], data[o + i * 4 + 3]]))
                 } else {
                     std::array::from_fn(|i| half::f16::from_le_bytes([data[o + i * 2], data[o + i * 2 + 1]]).to_f32())
                 };
