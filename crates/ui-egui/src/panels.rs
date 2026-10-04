@@ -898,7 +898,7 @@ fn navigator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         return;
     };
     let ctx = ui.ctx().clone();
-    let Some((tex, _)) = crate::canvas::ensure_texture(app, &ctx, idx) else { return };
+    let Some(tex) = crate::canvas::navigator_texture(app, &ctx, idx) else { return };
     let size = app.session.documents()[idx].doc.size;
     let avail = ui.available_width();
     let box_h = 150.0;

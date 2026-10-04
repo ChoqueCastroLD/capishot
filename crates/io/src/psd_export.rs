@@ -92,6 +92,7 @@ impl Ex {
         let mut invert = vec![self.cmyk; self.cc];
         invert.push(false);
         let planes = deinterleave(&bytes, self.cc + 1, self.fmt.sample, &invert);
+        drop(bytes);
         let (w, h) = (r.width() as usize, r.height() as usize);
         // Alpha (-1) first, then the colour channels; each compressed on its own thread.
         let order: Vec<(i16, &Vec<u8>)> =
@@ -482,6 +483,57 @@ fn guides_resource(doc: &Document) -> Vec<u8> {
     v
 }
 
+fn cmyk_of(fmt: &PixelFormat) -> bool {
+    fmt.mode == ColorMode::Cmyk
+}
+
+/// The merged image's planes (colour channels, then alpha), big-endian, matted against white
+/// when `matte`; with whether any pixel needs the alpha channel and whether any is below 1.
+fn merged_planes(doc: &Document, fmt: &PixelFormat, cmyk: bool, matte: bool) -> (Vec<u8>, bool, bool) {
+    let sample = fmt.sample;
+    let cc = fmt.mode.color_channels();
+    let bps = sample.bytes();
+    let n = doc.size.area() as usize;
+    let plane = n * bps;
+    let mut planes = vec![0u8; plane * (cc + 1)];
+    let (mut has_alpha, mut translucent) = (false, false);
+    let white = photocraft_raster::from_rgba(fmt, [1.0, 1.0, 1.0, 1.0]);
+    let canvas = doc.bounds();
+    let w = canvas.width() as usize;
+    let space = photocraft_compose::cmyk_space(doc);
+    let _ = photocraft_compose::render_bands(doc, canvas, 0, |band| -> Result<(), ()> {
+        has_alpha |= band.px.iter().any(|p| q255(p[3]) < 255 || (sample == SampleType::F32 && p[3] < 1.0));
+        translucent |= band.px.iter().any(|p| p[3] < 1.0);
+        let start = (band.rect.y0 - canvas.y0) as usize * w;
+        // Converted and encoded on all cores, then copied into each plane.
+        let parts = crate::pixels::par_map(crate::pixels::bands(band.px.len()), |range| {
+            // The composite came through the document's CMYK profile: convert back through it too.
+            photocraft_color::convert::with_cmyk_space(space.as_ref(), || {
+                let mut out: Vec<Vec<u8>> = vec![Vec::with_capacity(range.len() * bps); cc + 1];
+                let mut v = [0.0f32; 5];
+                for p in &band.px[range.clone()] {
+                    photocraft_raster::from_rgba_into(fmt, *p, &mut v);
+                    for c in 0..=cc {
+                        // Matte against white like Photoshop (see `pixels::matte`).
+                        let m = if c < cc && matte { crate::pixels::matte(v[c], v[cc], white[c]) } else { v[c] };
+                        let x = if cmyk && c < cc { 1.0 - m } else { m };
+                        encode_be(x, sample, &mut out[c]);
+                    }
+                }
+                (range.start, out)
+            })
+        });
+        for (at, part) in parts {
+            for (c, src) in part.iter().enumerate() {
+                let o = c * plane + (start + at) * bps;
+                planes[o..o + src.len()].copy_from_slice(src);
+            }
+        }
+        Ok(())
+    });
+    (planes, has_alpha, translucent)
+}
+
 /// Converts a document to a PSD file model (see [`document_to_psd_with`]).
 pub fn document_to_psd(doc: &Document) -> PsdFile {
     document_to_psd_with(doc, &PsdExportOptions::default()).0
@@ -547,43 +599,16 @@ pub fn document_to_psd_with(doc: &Document, opts: &PsdExportOptions) -> (PsdFile
     }
     ex.emit(&doc.layers);
 
-    // Merged composite.
-    let comp = photocraft_compose::flatten(doc);
-    let n = comp.px.len();
-    let has_alpha = comp.px.iter().any(|p| q255(p[3]) < 255 || (sample == SampleType::F32 && p[3] < 1.0));
-    let white = photocraft_raster::from_rgba(&fmt, [1.0, 1.0, 1.0, 1.0]);
-    let cmyk = ex.cmyk;
-    // The composite came through the document's CMYK profile: convert back through it too.
-    let space = photocraft_compose::cmyk_space(doc);
-    // Converted and encoded in bands on all cores, then joined per plane.
-    let parts = crate::pixels::par_map(crate::pixels::bands(n), |range| {
-        photocraft_color::convert::with_cmyk_space(space.as_ref(), || {
-            let mut planes: Vec<Vec<u8>> = vec![Vec::with_capacity(range.len() * sample.bytes()); cc + 1];
-            let mut v = [0.0f32; 5];
-            for p in &comp.px[range] {
-                photocraft_raster::from_rgba_into(&fmt, *p, &mut v);
-                for c in 0..=cc {
-                    // Matte against white like Photoshop (see `pixels::matte`).
-                    let m = if c < cc && has_alpha { crate::pixels::matte(v[c], v[cc], white[c]) } else { v[c] };
-                    let x = if cmyk && c < cc { 1.0 - m } else { m };
-                    encode_be(x, sample, &mut planes[c]);
-                }
-            }
-            planes
-        })
-    });
-    let mut color_planes: Vec<Vec<u8>> = vec![Vec::with_capacity(n * sample.bytes()); cc + 1];
-    for part in parts {
-        for (dst, src) in color_planes.iter_mut().zip(part) {
-            dst.extend_from_slice(&src);
-        }
+    // Merged composite, rendered and encoded in bands (no full-size float composite). Matting
+    // against white only changes pixels with alpha < 1; if some are slightly translucent but all
+    // round to opaque (so no alpha channel is written), encode once more without the matte.
+    let (mut planes, has_alpha, translucent) = merged_planes(doc, &fmt, cmyk_of(&fmt), true);
+    if !has_alpha && translucent {
+        planes = merged_planes(doc, &fmt, cmyk_of(&fmt), false).0;
     }
-    let mut planes = Vec::new();
-    for p in &color_planes[..cc] {
-        planes.extend_from_slice(p);
-    }
-    if has_alpha {
-        planes.extend_from_slice(&color_planes[cc]);
+    let n = doc.size.area() as usize;
+    if !has_alpha {
+        planes.truncate(cc * n * sample.bytes());
     }
     let canvas = doc.bounds();
     let max_extra = 56 - cc - usize::from(has_alpha);

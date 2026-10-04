@@ -37,7 +37,7 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
     if !opts.webp_lossless {
         return Err(CodecError::unsupported(F, "lossy WebP encoding needs libwebp (C); only lossless is available"));
     }
-    let img = src.convert(plan.layout, plan.sample);
+    let img = src.converted(plan.layout, plan.sample);
     let ct = match img.layout() {
         ChannelLayout::Gray => image_webp::ColorType::L8,
         ChannelLayout::GrayA => image_webp::ColorType::La8,

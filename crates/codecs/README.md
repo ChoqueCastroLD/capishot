@@ -105,7 +105,7 @@ the same.
 `DecodeOptions { limits: Limits { max_width, max_height, max_pixels, max_alloc } }` guards
 decoding. Header dimensions are checked before the pixel buffer is allocated, and the budget is
 also passed to the underlying decoders. A violation returns `CodecError::LimitExceeded`. The
-defaults are 262144 px per side, 2^28 pixels and 2 GiB.
+defaults are 262144 px per side, 2^30 pixels and 8 GiB (2 GiB on 32-bit targets such as wasm).
 
 ## Tests
 

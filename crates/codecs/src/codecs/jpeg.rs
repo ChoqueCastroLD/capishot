@@ -153,7 +153,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
 }
 
 pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
-    let img = src.convert(plan.layout, plan.sample);
+    let img = src.converted(plan.layout, plan.sample);
     let (w, h) = img.dimensions();
     let (w16, h16) = match (u16::try_from(w), u16::try_from(h)) {
         (Ok(a), Ok(b)) => (a, b),

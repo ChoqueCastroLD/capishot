@@ -138,37 +138,6 @@ fn canvas_display(app: &PhotocraftApp, doc: &Document) -> (Option<std::sync::Arc
     }
 }
 
-/// Box-downsample a composite for display.
-fn downsample(buf: &photocraft_compose::Buffer, factor: u32) -> photocraft_compose::Buffer {
-    let (w, h) = (buf.rect.width(), buf.rect.height());
-    let (nw, nh) = ((w / factor).max(1), (h / factor).max(1));
-    let mut out = photocraft_compose::Buffer::transparent(DRect::from_xywh(0, 0, nw, nh));
-    for y in 0..nh {
-        for x in 0..nw {
-            let mut acc = [0.0f32; 4];
-            let mut n = 0.0;
-            for dy in 0..factor {
-                for dx in 0..factor {
-                    let (sx, sy) = (x * factor + dx, y * factor + dy);
-                    if sx < w && sy < h {
-                        let p = buf.px[(sy * w + sx) as usize];
-                        // premultiplied average
-                        acc[0] += p[0] * p[3];
-                        acc[1] += p[1] * p[3];
-                        acc[2] += p[2] * p[3];
-                        acc[3] += p[3];
-                        n += 1.0;
-                    }
-                }
-            }
-            let a = acc[3] / n;
-            let px = if acc[3] > 0.0 { [acc[0] / acc[3], acc[1] / acc[3], acc[2] / acc[3], a] } else { [0.0; 4] };
-            out.px[(y * nw + x) as usize] = px;
-        }
-    }
-    out
-}
-
 /// The document to render: the committed one, or a clone with the live adjustment preview applied.
 fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>, u64) {
     let st = &app.session.documents()[idx];
@@ -219,6 +188,41 @@ fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>
     (st.doc.clone(), 0)
 }
 
+/// Longest side of the Navigator panel's image (about twice the panel's width, for HiDPI).
+pub const NAVIGATOR_SIDE: u32 = 512;
+
+/// The Navigator panel's image of document `idx`. With the CPU canvas that is the canvas texture
+/// itself; with the GPU canvas a thumbnail cached per revision, so an edit to a huge document
+/// doesn't also pay a full-resolution CPU composite for the navigator.
+pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Option<egui::TextureId> {
+    if app.gpu.is_none() {
+        return ensure_texture(app, ctx, idx).map(|(t, _)| t);
+    }
+    let (revision, id) = app.session.documents().get(idx).map(|st| (st.revision, st.doc.id))?;
+    let (doc, preview_key) = display_doc(app, idx);
+    let (display, display_key) = canvas_display(app, &doc);
+    let preview_key = preview_key ^ display_key;
+    let key = egui::Id::new(("navigator", id.0));
+    let cached: Option<(u64, u64, egui::TextureHandle)> = ctx.data(|d| d.get_temp(key));
+    if let Some((r, p, t)) = &cached
+        && (*r, *p) == (revision, preview_key)
+    {
+        return Some(t.id());
+    }
+    let t0 = crate::gpu_canvas::now_ms();
+    let image = display_image(display.as_deref(), &photocraft_compose::thumbnail_buffer(&doc, NAVIGATOR_SIDE));
+    let tex = match cached {
+        Some((_, _, mut t)) => {
+            t.set(image, TextureOptions::LINEAR);
+            t
+        }
+        None => ctx.load_texture(format!("navigator-{}", id.0), image, TextureOptions::LINEAR),
+    };
+    app.perf.span("navigator", crate::gpu_canvas::now_ms() - t0);
+    ctx.data_mut(|d| d.insert_temp(key, (revision, preview_key, tex.clone())));
+    Some(tex.id())
+}
+
 /// Make sure the canvas texture for document `idx` is current; returns (texture id, scale).
 pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Option<(egui::TextureId, f32)> {
     let (revision, last_damage, id) = {
@@ -255,12 +259,13 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
                 app.perf.record("rect", r.width() as u64 * r.height() as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
             }
         } else {
-            let full = photocraft_compose::flatten(&doc);
-            let t1 = crate::gpu_canvas::now_ms();
             let longest = doc.size.width.max(doc.size.height);
             let factor = longest.div_ceil(MAX_TEXTURE).max(1);
-            let d = display.as_deref();
-            let (img, scale) = if factor > 1 { (display_image(d, &downsample(&full, factor)), 1.0 / factor as f32) } else { (display_image(d, &full), 1.0) };
+            // Reduced in bands straight from the compositor: no full-size composite in memory.
+            let (w, h) = ((doc.size.width / factor).max(1), (doc.size.height / factor).max(1));
+            let full = photocraft_compose::render_reduced(&doc, w, h);
+            let t1 = crate::gpu_canvas::now_ms();
+            let (img, scale) = (display_image(display.as_deref(), &full), 1.0 / factor as f32);
             match cache.texture.as_mut() {
                 Some(t) if t.size() == img.size => t.set(img, TextureOptions::LINEAR),
                 _ => cache.texture = Some(ctx.load_texture(format!("canvas-{}", id.0), img, TextureOptions::LINEAR)),
@@ -308,7 +313,6 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
     let (doc, preview_key) = display_doc(app, idx);
     let (display, display_key) = canvas_display(app, &doc);
     let preview_key = preview_key ^ display_key;
-    let encode_srgb = display.as_ref().is_some_and(|d| d.encode_srgb);
     let size = [doc.size.width, doc.size.height];
     let cache = app.canvases.entry(id).or_insert(CanvasCache {
         revision: 0,
@@ -323,44 +327,18 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
     if present && cache.revision == revision && cache.preview_key == preview_key {
         return true;
     }
-    let t0 = crate::gpu_canvas::now_ms();
     let partial = present && cache.preview_key == preview_key && cache.revision + 1 == revision && last_damage.is_some();
-    let mut done = false;
-    // Preferred: the wgpu compositor renders straight into the display texture (damage rect for
-    // strokes, everything otherwise). Falls back to the CPU compositor below when unsupported.
-    let region = if partial { last_damage.unwrap_or(doc.bounds()).intersect(&doc.bounds()) } else { doc.bounds() };
-    match gpu.composite(&doc, region, encode_srgb) {
-        Ok(stats) => {
-            done = true;
-            let kind = if partial { "gpu-rect" } else { "gpu-full" };
-            app.perf.record(kind, region.width() as u64 * region.height() as u64, crate::gpu_canvas::now_ms() - t0, 0.0);
-            app.perf.gpu_uploads = stats.tiles_uploaded as u64;
-        }
-        Err(e) => {
-            if app.perf.gpu_fallback.as_deref() != Some(e.0.as_str()) {
-                log::info!("{e}; using the CPU compositor");
-            }
-            app.perf.gpu_fallback = Some(e.0);
-        }
+    let r = gpu.refresh(id.0, &doc, if partial { last_damage } else { None }, display.as_deref());
+    if let Some(e) = &r.fallback
+        && app.perf.gpu_fallback.as_deref() != Some(e.as_str())
+    {
+        log::info!("{e}; using the CPU compositor");
     }
-    if partial && !done {
-        let r = last_damage.unwrap_or(DRect::EMPTY).intersect(&doc.bounds());
-        if r.is_empty() {
-            done = true;
-        } else {
-            let buf = photocraft_compose::render(&doc, r);
-            let t1 = crate::gpu_canvas::now_ms();
-            done = gpu.upload_buffer_rect(id.0, &texture_buffer(display.as_deref(), &buf));
-            app.perf.record("rect", r.width() as u64 * r.height() as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
-        }
-    }
-    if !done {
-        // CPU fallback (documents the GPU compositor doesn't cover yet, e.g. layer effects).
-        // TODO: render only the visible region at display resolution when zoomed out.
-        let full = photocraft_compose::flatten(&doc);
-        let t1 = crate::gpu_canvas::now_ms();
-        gpu.upload_buffer_full(id.0, &texture_buffer(display.as_deref(), &full));
-        app.perf.record("full", size[0] as u64 * size[1] as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
+    app.perf.record(r.kind, r.px, r.composite_ms, r.upload_ms);
+    if r.kind.starts_with("gpu") {
+        app.perf.gpu_uploads = r.uploads;
+    } else {
+        app.perf.gpu_fallback = r.fallback;
     }
     let Some(cache) = app.canvases.get_mut(&id) else { return true };
     cache.revision = revision;
@@ -1687,16 +1665,6 @@ mod tests {
         assert_eq!(zoom_step(1.0, -1), 0.6667);
         assert_eq!(zoom_step(0.4, 1), 0.5);
         assert_eq!(zoom_step(32.0, 1), 32.0);
-    }
-
-    #[test]
-    fn downsample_averages_premultiplied() {
-        let mut b = photocraft_compose::Buffer::transparent(DRect::new(0, 0, 2, 2));
-        b.px[0] = [1.0, 0.0, 0.0, 1.0];
-        let d = downsample(&b, 2);
-        assert_eq!(d.px.len(), 1);
-        let p = d.px[0];
-        assert!((p[0] - 1.0).abs() < 1e-6 && (p[3] - 0.25).abs() < 1e-6, "{p:?}");
     }
 
     #[test]

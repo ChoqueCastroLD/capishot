@@ -33,6 +33,7 @@ pub fn start() {
         let q = query();
         let force_cpu = q.contains("cpu");
         let mut options = eframe::WebOptions::default();
+        photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
         if q.contains("webgl")
             && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
         {

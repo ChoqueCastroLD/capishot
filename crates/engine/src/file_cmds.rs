@@ -199,7 +199,7 @@ pub(crate) fn buffer_surface(buf: &photocraft_compose::Buffer, fmt: PixelFormat)
 
 /// The flattened image of `doc` as a surface in `fmt`, placed at the origin.
 pub(crate) fn flattened(doc: &Document, fmt: PixelFormat) -> Surface {
-    buffer_surface(&photocraft_compose::flatten(doc), fmt)
+    photocraft_compose::flatten_to_surface(doc, fmt, None)
 }
 
 // ---------- close / revert / save a copy / open as ----------

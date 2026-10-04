@@ -49,7 +49,8 @@ fn gpu() -> Option<Gpu> {
         block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() }))
             .ok()?;
     eprintln!("adapter: {}", adapter.get_info().name);
-    let limits = adapter.limits();
+    // The limits the app requests (see `gpu_canvas::use_adapter_limits`).
+    let limits = photocraft_ui_egui::gpu_canvas::device_limits(&adapter);
     let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: limits, ..Default::default() })).ok()?;
     let comp = photocraft_gpu::Compositor::new(&device);
     Some(Gpu { device, queue, comp })

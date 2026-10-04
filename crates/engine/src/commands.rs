@@ -586,12 +586,10 @@ fn build() -> Vec<CommandSpec> {
         }),
         cmd!("layer.flattenImage", "Flatten Image", ["Layer"], None, "{}", has_doc, |s, _| {
             s.edit("Flatten Image", |doc, active| {
-                let buf = photocraft_compose::flatten(doc).over_background([1.0, 1.0, 1.0]);
                 let fmt = doc.pixel_format();
-                let data: Vec<f32> = buf.px.iter().flat_map(|p| photocraft_raster::from_rgba(&fmt, *p)).collect();
                 let mut bg = Layer::raster("Background", fmt);
                 bg.locks.transparency = true;
-                crate::pixels_mut(&mut bg)?.write_region(doc.bounds(), &data);
+                *crate::pixels_mut(&mut bg)? = photocraft_compose::flatten_to_surface(doc, fmt, Some([1.0, 1.0, 1.0]));
                 *active = Some(bg.id);
                 doc.layers = vec![bg];
                 Ok(())

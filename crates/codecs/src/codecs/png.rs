@@ -97,7 +97,7 @@ fn is_latin1_keyword(k: &str) -> bool {
 }
 
 pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
-    let img = src.convert(plan.layout, plan.sample);
+    let img = src.converted(plan.layout, plan.sample);
     let (w, h) = img.dimensions();
     let color = match img.layout() {
         ChannelLayout::Gray => png::ColorType::Grayscale,
@@ -112,9 +112,9 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
         s => return Err(CodecError::encode(F, format!("unsupported sample {s:?}"))),
     };
     // Big-endian sample bytes.
-    let mut data = img.data().to_vec();
+    let mut data = std::borrow::Cow::Borrowed(img.data());
     if depth == png::BitDepth::Sixteen {
-        for c in data.as_chunks_mut::<2>().0 {
+        for c in data.to_mut().as_chunks_mut::<2>().0 {
             let v = u16::from_ne_bytes([c[0], c[1]]);
             c.copy_from_slice(&v.to_be_bytes());
         }

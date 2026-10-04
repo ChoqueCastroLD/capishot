@@ -241,7 +241,7 @@ fn decode_pam(r: &mut Reader<'_>, limits: &Limits) -> Result<Image, CodecError> 
 }
 
 pub(crate) fn encode(src: &Image, plan: Plan, _opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
-    let img = src.convert(plan.layout, plan.sample);
+    let img = src.converted(plan.layout, plan.sample);
     let (w, h) = img.dimensions();
     let layout = img.layout();
     let mut out = Vec::new();

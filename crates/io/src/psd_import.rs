@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use photocraft_color::{BlendMode, ColorMode, PixelFormat, SampleType};
 use photocraft_doc::{AlphaChannel, Document, Effects, FillCache, Group, Layer, LayerContent, LayerMask, ShapeLayer, SmartObject, SmartSource, TextLayer};
-use photocraft_geom::{Rect, Size};
+use photocraft_geom::{Rect, Size, TILE_SIZE};
 use photocraft_psd::layer::{CHANNEL_REAL_USER_MASK, CHANNEL_TRANSPARENCY, CHANNEL_USER_MASK};
 use photocraft_psd::resources::ids;
 use photocraft_psd::tagged::BlockData;
@@ -497,15 +497,22 @@ pub fn psd_to_document(file: &PsdFile) -> (Document, Vec<String>) {
             let mut s = Surface::from_interleaved(fmt, canvas, &bytes);
             if alpha_idx.is_some() {
                 // Undo Photoshop's white matting of the merged image.
+                // A band of tile rows at a time (no full-size float copy of the image).
                 let white = photocraft_raster::from_rgba(&fmt, [1.0, 1.0, 1.0, 1.0]);
-                let mut vals = s.read_region(canvas);
-                for px in vals.chunks_exact_mut(cc + 1) {
-                    let a = px[cc];
-                    for c in 0..cc {
-                        px[c] = if a <= 0.0 { 0.0 } else { crate::pixels::unmatte(px[c], a, white[c]) };
+                let mut vals = Vec::new();
+                let mut y = canvas.y0;
+                while y < canvas.y1 {
+                    let band = Rect::new(canvas.x0, y, canvas.x1, y.saturating_add(TILE_SIZE).min(canvas.y1));
+                    s.read_region_into(band, &mut vals);
+                    for px in vals.chunks_exact_mut(cc + 1) {
+                        let a = px[cc];
+                        for c in 0..cc {
+                            px[c] = if a <= 0.0 { 0.0 } else { crate::pixels::unmatte(px[c], a, white[c]) };
+                        }
                     }
+                    s.write_region(band, &vals);
+                    y = band.y1;
                 }
-                s.write_region(canvas, &vals);
             }
             s.prune();
             let mut bg = Layer::new("Background", LayerContent::Raster(s));

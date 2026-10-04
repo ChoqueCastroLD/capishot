@@ -360,7 +360,7 @@ where
 }
 
 pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
-    let img = src.convert(plan.layout, plan.sample);
+    let img = src.converted(plan.layout, plan.sample);
     let (w, h) = img.dimensions();
     let compression = match opts.tiff_compression {
         TiffCompression::None => tiff::encoder::Compression::Uncompressed,

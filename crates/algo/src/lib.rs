@@ -932,19 +932,33 @@ pub fn apply_tiled(
         }
         (*t, data)
     };
+    // Tiles are filtered in groups of about RESULT_BUDGET bytes (at least one per core) and each
+    // group is written before the next starts, so a huge layer never holds all its results as
+    // floats at once.
     #[cfg(not(target_arch = "wasm32"))]
-    let results: Vec<(Rect, Vec<f32>)> = {
-        use rayon::prelude::*;
-        tiles.par_iter().map(run).collect()
-    };
+    let threads = rayon::current_num_threads();
     #[cfg(target_arch = "wasm32")]
-    let results: Vec<(Rect, Vec<f32>)> = tiles.iter().map(run).collect();
-    for (t, data) in results {
-        out.write_region(t, &data);
+    let threads = 1;
+    let per_tile = (tile.max(1) as usize).pow(2) * fmt.channels() * std::mem::size_of::<f32>();
+    let group = (RESULT_BUDGET / per_tile.max(1)).max(threads).max(1);
+    for chunk in tiles.chunks(group) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let results: Vec<(Rect, Vec<f32>)> = {
+            use rayon::prelude::*;
+            chunk.par_iter().map(run).collect()
+        };
+        #[cfg(target_arch = "wasm32")]
+        let results: Vec<(Rect, Vec<f32>)> = chunk.iter().map(run).collect();
+        for (t, data) in results {
+            out.write_region(t, &data);
+        }
     }
     out.prune();
     out
 }
+
+/// Bytes of float filter results held at once by [`apply_tiled`].
+const RESULT_BUDGET: usize = 256 << 20;
 
 #[cfg(test)]
 mod tests;

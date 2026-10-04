@@ -22,6 +22,7 @@ pub mod effects;
 pub mod masks;
 pub mod multichannel;
 pub mod pattern;
+pub mod proxy;
 pub mod psblend;
 pub mod shape_split;
 
@@ -83,6 +84,7 @@ pub fn render(doc: &Document, rect: Rect) -> Buffer {
 
 /// [`render`] with an explicit tile size (tests check tile independence).
 pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
+    let tile = tile.max(1);
     let cx = Ctx {
         canvas: doc.bounds(),
         transfer: adjust::Transfer::for_mode(doc.mode),
@@ -96,6 +98,9 @@ pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
     // CMYK layers are read through the document's own CMYK profile (thread-local scope).
     let cmyk = cmyk_space(doc);
     let cmyk = cmyk.as_ref();
+    if rect.is_empty() {
+        return Buffer::transparent(rect);
+    }
     if rect.width() as i32 <= tile && rect.height() as i32 <= tile {
         return photocraft_color::convert::with_cmyk_space(cmyk, || {
             let mut buf = multichannel::backdrop(doc, rect);
@@ -105,39 +110,66 @@ pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
             buf
         });
     }
-    let mut tiles = Vec::new();
-    let mut y = rect.y0;
-    while y < rect.y1 {
-        let mut x = rect.x0;
-        while x < rect.x1 {
-            tiles.push(Rect::new(x, y, (x + tile).min(rect.x1), (y + tile).min(rect.y1)));
-            x += tile;
-        }
-        y += tile;
-    }
-    let run = |t: &Rect| {
+    let run = |t: Rect| {
         photocraft_color::convert::with_cmyk_space(cmyk, || {
-            let mut b = multichannel::backdrop(doc, *t);
+            let mut b = multichannel::backdrop(doc, t);
             psblend::LAB_MIX.with(|l| l.set(lab));
             composite_stack(&doc.layers, &mut b, &cx);
             psblend::LAB_MIX.with(|l| l.set(false));
             b
         })
     };
-    #[cfg(not(target_arch = "wasm32"))]
-    let parts: Vec<Buffer> = {
-        use rayon::prelude::*;
-        tiles.par_iter().map(run).collect()
-    };
-    #[cfg(target_arch = "wasm32")]
-    let parts: Vec<Buffer> = tiles.iter().map(run).collect();
-    let mut out = Buffer::transparent(rect);
+    // Tiles are written straight into the output, one row of tiles (a band) at a time, so the
+    // peak is the output plus the tiles in flight, not a second full-size copy.
     let w = rect.width() as usize;
-    for part in parts {
+    let mut out = Buffer::transparent(rect);
+    let band_tiles = |y0: i32| {
+        let y1 = y0.saturating_add(tile).min(rect.y1);
+        let mut v = Vec::new();
+        let mut x = rect.x0;
+        while x < rect.x1 {
+            let x1 = x.saturating_add(tile).min(rect.x1);
+            v.push(Rect::new(x, y0, x1, y1));
+            x = x1;
+        }
+        v
+    };
+    let put = |band: &mut [[f32; 4]], y0: i32, part: &Buffer| {
         let pw = part.rect.width() as usize;
         for (row, src) in part.px.chunks_exact(pw).enumerate() {
-            let o = ((part.rect.y0 - rect.y0) as usize + row) * w + (part.rect.x0 - rect.x0) as usize;
-            out.px[o..o + pw].copy_from_slice(src);
+            let o = ((part.rect.y0 - y0) as usize + row) * w + (part.rect.x0 - rect.x0) as usize;
+            band[o..o + pw].copy_from_slice(src);
+        }
+    };
+    let band_len = w * tile as usize;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        let bands = rect.height().div_ceil(tile as u32) as usize;
+        if bands >= 2 * rayon::current_num_threads() {
+            // Enough bands to keep every core busy: one band per task, its tiles in turn.
+            out.px.par_chunks_mut(band_len).enumerate().for_each(|(i, band)| {
+                let y0 = rect.y0 + i as i32 * tile;
+                for t in band_tiles(y0) {
+                    put(band, y0, &run(t));
+                }
+            });
+        } else {
+            // Few, wide bands: the tiles of each band in parallel.
+            for (i, band) in out.px.chunks_mut(band_len).enumerate() {
+                let y0 = rect.y0 + i as i32 * tile;
+                let parts: Vec<Buffer> = band_tiles(y0).into_par_iter().map(run).collect();
+                for part in &parts {
+                    put(band, y0, part);
+                }
+            }
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    for (i, band) in out.px.chunks_mut(band_len).enumerate() {
+        let y0 = rect.y0 + i as i32 * tile;
+        for t in band_tiles(y0) {
+            put(band, y0, &run(t));
         }
     }
     out
@@ -151,6 +183,58 @@ pub fn cmyk_space(doc: &Document) -> Option<std::sync::Arc<photocraft_color::con
         return None;
     }
     photocraft_color::convert::CmykSpace::for_profile(doc.icc_profile.as_ref())
+}
+
+/// Pixels per band of [`render_bands`] (a 14000 px wide band is ~600 rows, ~130 MB of f32).
+pub const BAND_PIXELS: u64 = 8 << 20;
+
+/// Composite `rect` in horizontal bands, top to bottom, handing each band to `sink` (tiles inside
+/// a band render in parallel). Peak memory is one band instead of the whole composite, so huge
+/// documents can be exported or displayed without a full-size float copy. `band_rows` of 0 picks
+/// about [`BAND_PIXELS`] per band; bands are whole multiples of [`RENDER_TILE`] rows.
+pub fn render_bands<E>(doc: &Document, rect: Rect, band_rows: i32, mut sink: impl FnMut(Buffer) -> Result<(), E>) -> Result<(), E> {
+    if rect.is_empty() {
+        return Ok(());
+    }
+    let rows = band_rows_for(rect.width(), band_rows);
+    let mut y = rect.y0;
+    while y < rect.y1 {
+        let y1 = y.saturating_add(rows).min(rect.y1);
+        sink(render(doc, Rect::new(rect.x0, y, rect.x1, y1)))?;
+        y = y1;
+    }
+    Ok(())
+}
+
+/// Band height for [`render_bands`]: `requested` rounded up to whole tiles, or ~[`BAND_PIXELS`].
+pub fn band_rows_for(width: u32, requested: i32) -> i32 {
+    let want = if requested > 0 { i64::from(requested) } else { (BAND_PIXELS / u64::from(width.max(1))) as i64 };
+    let tiles = (want + i64::from(RENDER_TILE) - 1) / i64::from(RENDER_TILE);
+    (tiles.clamp(1, 1 << 16) * i64::from(RENDER_TILE)) as i32
+}
+
+/// The document's composite as a pixel surface in `fmt` (straight RGBA converted to its model
+/// and depth), optionally flattened over an opaque `background`; rendered and written in bands,
+/// so no full-size float composite is held. Tiles equal to the default pixel are pruned.
+pub fn flatten_to_surface(doc: &Document, fmt: photocraft_color::PixelFormat, background: Option<[f32; 3]>) -> Surface {
+    let mut s = Surface::new(fmt);
+    let n = fmt.channels();
+    let mut data = Vec::new();
+    let _ = render_bands(doc, doc.bounds(), 0, |band| -> Result<(), ()> {
+        let band = match background {
+            Some(bg) => band.over_background(bg),
+            None => band,
+        };
+        data.clear();
+        data.resize(band.px.len() * n, 0.0);
+        for (p, out) in band.px.iter().zip(data.chunks_exact_mut(n)) {
+            photocraft_raster::from_rgba_into(&fmt, *p, out);
+        }
+        s.write_region(band.rect, &data);
+        Ok(())
+    });
+    s.prune();
+    s
 }
 
 /// Composite the full canvas.
@@ -176,42 +260,102 @@ pub fn render_layer(layer: &Layer, rect: Rect) -> Buffer {
     buf
 }
 
-/// Downscaled RGBA8 render of the document (nearest-neighbour sampling) for thumbnails or navigators.
+/// Documents above this many pixels get thumbnails from a proxy (see [`proxy`]) when that is
+/// faithful; smaller ones are reduced from the exact composite.
+pub const PROXY_THUMBNAIL_PIXELS: u64 = 16 << 20;
+
+/// Downscaled RGBA8 render of the document (area-averaged) for thumbnails, navigators and
+/// histograms, at most `max_side` pixels on its longer side. Large documents are reduced from a
+/// downsampled proxy (about twice the thumbnail's size), so a thumbnail of a 200 MP document
+/// costs milliseconds and no full-size composite; the rest stream the exact composite in bands.
 pub fn thumbnail(doc: &Document, max_side: u32) -> Rgba8Image {
-    // Composite once (tile-parallel), then area-average down. Rendering per thumbnail pixel
-    // would redo layer effects for every sample.
+    thumbnail_buffer(doc, max_side).to_rgba8()
+}
+
+/// [`thumbnail`] as straight-alpha floats (for callers that colour-convert it first).
+pub fn thumbnail_buffer(doc: &Document, max_side: u32) -> Buffer {
     let b = doc.bounds();
-    let scale = (max_side as f32 / b.width().max(b.height()).max(1) as f32).min(1.0);
+    let longest = b.width().max(b.height()).max(1);
+    let scale = (max_side as f32 / longest as f32).min(1.0);
     let w = ((b.width() as f32 * scale).round() as u32).max(1);
     let h = ((b.height() as f32 * scale).round() as u32).max(1);
-    let full = flatten(doc);
+    let k = longest / max_side.max(1).saturating_mul(2);
+    if k >= 2 && doc.size.area() > PROXY_THUMBNAIL_PIXELS && proxy::proxy_faithful(doc) {
+        render_reduced(&proxy::proxy_document(doc, k), w, h)
+    } else {
+        render_reduced(doc, w, h)
+    }
+}
+
+/// The document's composite area-averaged (premultiplied) down to `w`×`h` (clamped to the
+/// document size), rendered in bands so no full-size composite is held.
+pub fn render_reduced(doc: &Document, w: u32, h: u32) -> Buffer {
+    render_reduced_in_bands(doc, w, h, 0)
+}
+
+/// [`render_reduced`] with an explicit band height (see [`render_bands`]).
+fn render_reduced_in_bands(doc: &Document, w: u32, h: u32, band_rows: i32) -> Buffer {
+    let b = doc.bounds();
     let (fw, fh) = (b.width() as usize, b.height() as usize);
-    let mut img = Rgba8Image::new(w, h);
-    for ty in 0..h as usize {
-        let (y0, y1) = (ty * fh / h as usize, ((ty + 1) * fh / h as usize).max(ty * fh / h as usize + 1).min(fh));
-        for tx in 0..w as usize {
-            let (x0, x1) = (tx * fw / w as usize, ((tx + 1) * fw / w as usize).max(tx * fw / w as usize + 1).min(fw));
-            // Premultiplied average so transparent pixels don't darken edges.
-            let mut acc = [0.0f32; 4];
-            for y in y0..y1 {
-                for x in x0..x1 {
-                    let p = full.px[y * fw + x];
-                    for c in 0..3 {
-                        acc[c] += p[c] * p[3];
+    let (w, h) = (w.clamp(1, b.width().max(1)) as usize, h.clamp(1, b.height().max(1)) as usize);
+    let rect = Rect::from_xywh(0, 0, w as u32, h as u32);
+    if fw == 0 || fh == 0 {
+        return Buffer::transparent(rect);
+    }
+    if (w, h) == (fw, fh) {
+        let mut out = render(doc, b);
+        out.rect = rect;
+        return out;
+    }
+    // Output column / row of each document column / row: output pixel t covers [t·f/n, (t+1)·f/n).
+    let span = |t: usize, f: usize, n: usize| (t * f / n, ((t + 1) * f / n).max(t * f / n + 1).min(f));
+    let map = |f: usize, n: usize| {
+        let mut m = vec![0u32; f];
+        for t in 0..n {
+            let (a, z) = span(t, f, n);
+            m[a..z].fill(t as u32);
+        }
+        m
+    };
+    let (cols, rows) = (map(fw, w), map(fh, h));
+    let mut acc = vec![[0.0f32; 4]; w * h];
+    let ok: Result<(), ()> = render_bands(doc, b, band_rows, |band| {
+        let (by0, by1) = ((band.rect.y0 - b.y0) as usize, (band.rect.y1 - b.y0) as usize);
+        let (t0, t1) = (rows[by0] as usize, rows[by1 - 1] as usize + 1);
+        // Each output row sums its source rows in this band (in order, top to bottom).
+        let sum_row = |t: usize, out: &mut [[f32; 4]]| {
+            let (a, z) = span(t, fh, h);
+            for y in a.max(by0)..z.min(by1) {
+                let src = &band.px[(y - by0) * fw..(y - by0 + 1) * fw];
+                for (p, &c) in src.iter().zip(&cols) {
+                    let o = &mut out[c as usize];
+                    for i in 0..3 {
+                        o[i] += p[i] * p[3];
                     }
-                    acc[3] += p[3];
+                    o[3] += p[3];
                 }
             }
-            let n = ((y1 - y0) * (x1 - x0)).max(1) as f32;
-            let a = acc[3] / n;
-            let px = if acc[3] > 0.0 { [acc[0] / acc[3], acc[1] / acc[3], acc[2] / acc[3], a] } else { [0.0; 4] };
-            let o = (ty * w as usize + tx) * 4;
-            for (dst, v) in img.pixels[o..o + 4].iter_mut().zip(px) {
-                *dst = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-            }
+        };
+        let part = &mut acc[t0 * w..t1 * w];
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use rayon::prelude::*;
+            part.par_chunks_mut(w).enumerate().for_each(|(i, out)| sum_row(t0 + i, out));
         }
+        #[cfg(target_arch = "wasm32")]
+        for (i, out) in part.chunks_mut(w).enumerate() {
+            sum_row(t0 + i, out);
+        }
+        Ok(())
+    });
+    debug_assert!(ok.is_ok());
+    for (i, p) in acc.iter_mut().enumerate() {
+        let ((x0, x1), (y0, y1)) = (span(i % w, fw, w), span(i / w, fh, h));
+        let n = ((y1 - y0) * (x1 - x0)).max(1) as f32;
+        let a = p[3];
+        *p = if a > 0.0 { [p[0] / a, p[1] / a, p[2] / a, a / n] } else { [0.0; 4] };
     }
-    img
+    Buffer { rect, px: acc }
 }
 
 /// Composite a sibling list (bottom→top) onto `backdrop`.

@@ -327,6 +327,12 @@ impl Image {
         }
     }
 
+    /// [`Image::convert`], borrowing `self` when it already has that layout and sample type
+    /// (encoders use it so a full-size image isn't copied for nothing).
+    pub fn converted(&self, layout: ChannelLayout, sample: SampleType) -> std::borrow::Cow<'_, Image> {
+        if layout == self.layout && sample == self.sample { std::borrow::Cow::Borrowed(self) } else { std::borrow::Cow::Owned(self.convert(layout, sample)) }
+    }
+
     /// Interleaved RGBA, 8 bits per sample.
     pub fn to_rgba8(&self) -> Vec<u8> {
         self.convert(ChannelLayout::Rgba, SampleType::U8).data

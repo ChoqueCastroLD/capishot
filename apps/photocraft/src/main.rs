@@ -98,7 +98,7 @@ fn main() -> eframe::Result {
 
     // Read the main display's ICC profile while the window opens (colour-managed canvas).
     let monitor = monitor_profile::detect_async();
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon())
             .with_app_id(APP_ID)
@@ -111,6 +111,8 @@ fn main() -> eframe::Result {
             .with_title_shown(false),
         ..Default::default()
     };
+    // The adapter's real texture limits (egui asks for 8192 px), so big documents stay on the GPU.
+    photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
     eframe::run_native(
         "Photocraft",
         options,

@@ -27,6 +27,9 @@ pub struct History {
     undo: VecDeque<HistoryState>,
     redo: Vec<HistoryState>,
     pub max_states: usize,
+    /// Pixel memory budget in bytes for the current document plus the tiles only history holds
+    /// (0 = unlimited). [`History::trim`] drops the oldest states beyond it.
+    pub max_bytes: usize,
     /// Label of the step that produced the current document.
     current_label: String,
 }
@@ -39,7 +42,7 @@ impl Default for History {
 
 impl History {
     pub fn new(max_states: usize) -> Self {
-        Self { undo: VecDeque::new(), redo: Vec::new(), max_states: max_states.max(1), current_label: "Open".into() }
+        Self { undo: VecDeque::new(), redo: Vec::new(), max_states: max_states.max(1), max_bytes: 0, current_label: "Open".into() }
     }
 
     /// Record that `before` was replaced by a new current document via step `label`.
@@ -110,27 +113,54 @@ impl History {
 
     /// Approximate unique pixel bytes held by history (tiles not shared with `current`).
     pub fn unique_bytes(&self, current: &Document) -> usize {
-        fn collect(doc: &Document, out: &mut HashSet<usize>, bytes: &mut Vec<(usize, usize)>) {
-            for (_, _, l) in doc.walk() {
-                if let Some(s) = l.surface() {
-                    for (_, t) in s.tiles() {
-                        let p = Arc::as_ptr(t) as usize;
-                        if out.insert(p) {
-                            bytes.push((p, t.bytes().len()));
-                        }
-                    }
-                }
-            }
-        }
-        let mut cur = HashSet::new();
-        collect(current, &mut cur, &mut Vec::new());
-        let mut seen = cur.clone();
-        let mut hist = Vec::new();
-        for s in self.undo.iter().chain(self.redo.iter()) {
-            collect(&s.doc, &mut seen, &mut hist);
-        }
-        hist.iter().map(|(_, b)| b).sum()
+        let mut seen = HashSet::new();
+        tile_bytes(current, &mut seen);
+        self.undo.iter().chain(self.redo.iter()).map(|s| tile_bytes(&s.doc, &mut seen)).sum()
     }
+
+    /// Keep pixel memory within [`History::max_bytes`]: the current document's tiles plus the
+    /// tiles only history holds (newest states first). The oldest undo states that don't fit are
+    /// dropped; the most recent one is always kept so the last step can be undone. Returns how
+    /// many states were dropped.
+    pub fn trim(&mut self, current: &Document) -> usize {
+        if self.max_bytes == 0 || self.undo.len() <= 1 {
+            return 0;
+        }
+        let mut seen = HashSet::new();
+        let mut total = tile_bytes(current, &mut seen);
+        for s in self.redo.iter().rev() {
+            total = total.saturating_add(tile_bytes(&s.doc, &mut seen));
+        }
+        let mut keep = 0;
+        for s in self.undo.iter().rev() {
+            total = total.saturating_add(tile_bytes(&s.doc, &mut seen));
+            if total > self.max_bytes && keep >= 1 {
+                break;
+            }
+            keep += 1;
+        }
+        let drop = self.undo.len() - keep;
+        self.undo.drain(..drop);
+        drop
+    }
+}
+
+/// Bytes of the pixel tiles of `doc` (layers, masks, alpha channels) not already in `seen`.
+fn tile_bytes(doc: &Document, seen: &mut HashSet<usize>) -> usize {
+    let mut add = |s: &photocraft_doc::Surface| s.tiles().filter(|(_, t)| seen.insert(Arc::as_ptr(t) as usize)).map(|(_, t)| t.bytes().len()).sum::<usize>();
+    let mut n = 0;
+    for (_, _, l) in doc.walk() {
+        if let Some(s) = l.surface() {
+            n += add(s);
+        }
+        if let Some(m) = &l.mask {
+            n += add(&m.surface);
+        }
+    }
+    for c in doc.channels.iter().chain(&doc.quick_mask) {
+        n += add(&c.surface);
+    }
+    n
 }
 
 #[cfg(test)]
@@ -206,6 +236,33 @@ mod tests {
         }
         assert_eq!(n, 3);
         assert_eq!(cur.name, "6");
+    }
+
+    #[test]
+    fn byte_budget_drops_oldest_states_but_keeps_one() {
+        let mut h = History::new(50);
+        let mut cur = Arc::new(base());
+        let tile = 256 * 256 * 4;
+        // Each step repaints the background's tile: one unique tile per state.
+        for i in 0..6 {
+            edit(&mut h, &mut cur, &format!("paint {i}"), |d| {
+                let id = d.layers[0].id;
+                d.layer_mut(id).unwrap().surface_mut().unwrap().write_pixel(1, 1, &[i as f32 / 8.0, 0.0, 0.0, 1.0]);
+            });
+        }
+        assert_eq!(h.trim(&cur), 0, "unlimited by default");
+        assert_eq!(h.past_len(), 6);
+        // The current tile plus three history tiles fit.
+        h.max_bytes = 4 * tile;
+        assert_eq!(h.trim(&cur), 3);
+        assert_eq!(h.past_len(), 3);
+        assert_eq!(h.unique_bytes(&cur), 3 * tile);
+        assert_eq!(h.entries()[0], "paint 2");
+        // A budget smaller than one state still keeps the last step undoable.
+        h.max_bytes = 1;
+        h.trim(&cur);
+        assert_eq!(h.past_len(), 1);
+        assert!(h.undo(cur.clone()).is_some());
     }
 
     #[test]

@@ -351,7 +351,8 @@ impl Default for Export {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Performance {
-    /// Memory Photocraft may use, in MB (informational budget; drives the caches below).
+    /// Memory PhotoCraft may use, in MB: bounds each document's pixels plus its History (the
+    /// oldest states are dropped beyond it).
     pub memory_usage_mb: u32,
     /// Undo steps kept per document (History panel states).
     pub history_states: u32,
@@ -364,6 +365,14 @@ pub struct Performance {
     /// Memory budget of the layer-effect cache, in MB.
     pub effect_cache_mb: u32,
     pub legacy_compositing: bool,
+}
+
+impl Performance {
+    /// Pixel memory a document and its History may hold (Memory Usage), in bytes: beyond it
+    /// the oldest history states are dropped.
+    pub fn history_budget_bytes(&self) -> usize {
+        (self.memory_usage_mb as usize).saturating_mul(1 << 20)
+    }
 }
 
 impl Default for Performance {
@@ -1070,9 +1079,12 @@ impl Session {
     /// the layer-effect cache budget.
     pub fn apply_prefs(&mut self) {
         let n = self.prefs().performance.history_states.max(1) as usize;
+        let bytes = self.prefs().performance.history_budget_bytes();
         let budget = self.prefs().performance.effect_cache_mb as usize;
         for st in &mut self.docs {
             st.history.max_states = n;
+            st.history.max_bytes = bytes;
+            st.history.trim(&st.doc);
         }
         photocraft_compose::set_effect_cache_budget(budget << 20);
         crate::plugin_cmds::sync_prefs(self);

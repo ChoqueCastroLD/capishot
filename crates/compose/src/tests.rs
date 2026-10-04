@@ -1008,3 +1008,117 @@ fn levels_matches_photoshop() {
     assert!((adjust::levels(&ident(2.5), 1.0) - 1.0).abs() < 5e-4);
     assert!((adjust::levels(&ident(1.0), 0.37) - 0.37).abs() < 1e-6);
 }
+
+/// A tall document with soft content, a translucent region and an adjustment.
+fn tall_doc(w: u32, h: u32) -> Document {
+    let mut d = doc_white(w, h);
+    let mut l = Layer::raster("grad", PixelFormat::RGBA8);
+    let s = l.surface_mut().unwrap();
+    for y in 0..h as i32 {
+        s.fill_rect(Rect::new(0, y, w as i32 / 2, y + 1), &[y as f32 / h as f32, 0.3, 1.0 - y as f32 / h as f32, 1.0]);
+    }
+    s.fill_rect(Rect::new(w as i32 / 2, 0, w as i32, h as i32 / 3), &[0.9, 0.1, 0.1, 0.4]);
+    d.layers.push(l);
+    d.layers.push(Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert)));
+    d
+}
+
+#[test]
+fn render_tiled_in_place_matches_one_tile_with_many_bands() {
+    // Enough bands for the band-parallel path, and few for the tile-parallel one.
+    let d = tall_doc(37, 900);
+    let whole = render_tiled(&d, d.bounds(), 10_000);
+    for tile in [5, 64, 300] {
+        assert_eq!(render_tiled(&d, d.bounds(), tile), whole, "tile {tile}");
+    }
+    let r = Rect::new(3, 17, 30, 811);
+    assert_eq!(render_tiled(&d, r, 4).px, render_tiled(&d, r, 10_000).px);
+    assert!(render_tiled(&d, Rect::new(5, 5, 5, 900), 4).px.is_empty());
+}
+
+#[test]
+fn render_bands_cover_the_rect_in_order() {
+    let d = tall_doc(20, 700);
+    let r = Rect::new(2, 10, 18, 690);
+    let mut rows = Vec::new();
+    let mut px = Vec::new();
+    render_bands(&d, r, 100, |b| -> Result<(), ()> {
+        assert_eq!((b.rect.x0, b.rect.x1), (r.x0, r.x1));
+        rows.push((b.rect.y0, b.rect.y1));
+        px.extend(b.px);
+        Ok(())
+    })
+    .unwrap();
+    // 100 rows round up to one 256-row tile band.
+    assert_eq!(rows, vec![(10, 266), (266, 522), (522, 690)]);
+    assert_eq!(px, render(&d, r).px);
+    // The sink's error stops the render.
+    let mut n = 0;
+    assert_eq!(
+        render_bands(&d, r, 1, |_| {
+            n += 1;
+            Err("stop")
+        }),
+        Err("stop")
+    );
+    assert_eq!(n, 1);
+    assert_eq!(band_rows_for(14_000, 0) % RENDER_TILE, 0);
+    assert!(band_rows_for(1, 0) > 0 && band_rows_for(0, -5) > 0);
+}
+
+/// The previous thumbnail: flatten, then area-average (premultiplied).
+fn reference_reduce(doc: &Document, w: usize, h: usize) -> Vec<[f32; 4]> {
+    let full = flatten(doc);
+    let (fw, fh) = (full.rect.width() as usize, full.rect.height() as usize);
+    let mut out = Vec::new();
+    for ty in 0..h {
+        let (y0, y1) = (ty * fh / h, ((ty + 1) * fh / h).max(ty * fh / h + 1).min(fh));
+        for tx in 0..w {
+            let (x0, x1) = (tx * fw / w, ((tx + 1) * fw / w).max(tx * fw / w + 1).min(fw));
+            let mut acc = [0.0f32; 4];
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let p = full.px[y * fw + x];
+                    for c in 0..3 {
+                        acc[c] += p[c] * p[3];
+                    }
+                    acc[3] += p[3];
+                }
+            }
+            let n = ((y1 - y0) * (x1 - x0)).max(1) as f32;
+            out.push(if acc[3] > 0.0 { [acc[0] / acc[3], acc[1] / acc[3], acc[2] / acc[3], acc[3] / n] } else { [0.0; 4] });
+        }
+    }
+    out
+}
+
+#[test]
+fn reduced_render_matches_the_full_composite_averaged() {
+    let d = tall_doc(53, 1000);
+    for (w, h, band) in [(10, 190, 0), (7, 33, 256), (53, 999, 512), (1, 1, 256)] {
+        let got = render_reduced_in_bands(&d, w, h, band);
+        assert_eq!((got.rect.width(), got.rect.height()), (w, h));
+        assert_eq!(got.px, reference_reduce(&d, w as usize, h as usize), "{w}x{h} band {band}");
+    }
+    // Full size is the composite itself; an empty document reduces to transparency.
+    assert_eq!(render_reduced(&d, 53, 1000).px, flatten(&d).px);
+    let empty = Document::new("e", Size::new(0, 0), ColorMode::Rgb, SampleType::U8);
+    assert_eq!(render_reduced(&empty, 4, 4).px, vec![[0.0; 4]]);
+}
+
+#[test]
+fn large_documents_thumbnail_from_a_proxy() {
+    // 4200 × 4200 (17.6 MP) is above PROXY_THUMBNAIL_PIXELS: the proxy path must still give a
+    // thumbnail of the right size whose colours match the exact reduction.
+    let mut d = doc_white(4200, 4200);
+    d.layers.push(solid_layer("red", Rect::new(0, 0, 2100, 4200), [1.0, 0.0, 0.0, 1.0]));
+    let t = thumbnail(&d, 100);
+    assert_eq!((t.width, t.height), (100, 100));
+    let at = |x: usize, y: usize| t.pixels[(y * 100 + x) * 4..(y * 100 + x) * 4 + 4].to_vec();
+    assert_eq!(at(10, 50), vec![255, 0, 0, 255]);
+    assert_eq!(at(90, 50), vec![255, 255, 255, 255]);
+    // Effects don't scale with a proxy: such documents reduce the exact composite.
+    assert!(proxy::proxy_faithful(&d));
+    d.layers[1].effects.items.push(photocraft_doc::Effect::default_drop_shadow());
+    assert!(!proxy::proxy_faithful(&d));
+}

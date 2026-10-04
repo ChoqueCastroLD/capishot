@@ -270,6 +270,7 @@ impl Session {
     pub fn add_document(&mut self, doc: Document, path: Option<String>) -> usize {
         let mut st = DocState::new(doc, path);
         st.history.max_states = self.prefs.get().performance.history_states.max(1) as usize;
+        st.history.max_bytes = self.prefs.get().performance.history_budget_bytes();
         self.docs.push(st);
         let i = self.docs.len() - 1;
         self.active = Some(i);
@@ -340,6 +341,7 @@ impl Session {
         let st = self.active_mut().ok_or(EngineError::NoDocument)?;
         if key.is_none() || st.coalesce != key || !st.history.can_undo() {
             st.history.record(label, before);
+            st.history.trim(&st.doc);
         }
         st.coalesce = key;
         st.revision += 1;

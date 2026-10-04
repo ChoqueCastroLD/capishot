@@ -248,6 +248,94 @@ impl GpuCanvas {
         result
     }
 
+    /// Bring document `key`'s display texture up to date with `doc`: only `damage` when given (a
+    /// brush stroke on an already uploaded document), else everything. The wgpu compositor renders
+    /// straight into the texture when it supports the document; otherwise the CPU compositor does.
+    /// `display` is the canvas colour transform: the GPU path stores the sRGB encoding when it
+    /// asks for it, and every CPU band or rect goes through its `texture_buffer`.
+    pub fn refresh(
+        &self,
+        key: u64,
+        doc: &photocraft_doc::Document,
+        damage: Option<photocraft_geom::Rect>,
+        display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+    ) -> Refresh {
+        let bounds = doc.bounds();
+        let size = [doc.size.width, doc.size.height];
+        let damage = damage.filter(|_| self.has(key, size)).map(|r| r.intersect(&bounds));
+        let t0 = now_ms();
+        let mut out = Refresh::default();
+        let region = damage.unwrap_or(bounds);
+        let encode_srgb = display.is_some_and(|d| d.encode_srgb);
+        let gpu = if key == doc.id.0 { self.composite(doc, region, encode_srgb) } else { Err(photocraft_gpu::Unsupported("preview texture".into())) };
+        match gpu {
+            Ok(stats) => {
+                out.kind = if damage.is_some() { "gpu-rect" } else { "gpu-full" };
+                out.px = region.width() as u64 * region.height() as u64;
+                out.composite_ms = now_ms() - t0;
+                out.uploads = stats.tiles_uploaded as u64;
+                return out;
+            }
+            Err(e) => out.fallback = Some(e.0),
+        }
+        if let Some(r) = damage {
+            if r.is_empty() {
+                out.kind = "rect";
+                return out;
+            }
+            let buf = photocraft_compose::render(doc, r);
+            let t1 = now_ms();
+            if self.upload_buffer_rect(key, &texture_buffer(display, &buf)) {
+                out.kind = "rect";
+                out.px = r.width() as u64 * r.height() as u64;
+                out.composite_ms = t1 - t0;
+                out.upload_ms = now_ms() - t1;
+                return out;
+            }
+        }
+        self.upload_composite(key, doc, display);
+        out.kind = "full";
+        out.px = bounds.width() as u64 * bounds.height() as u64;
+        out.composite_ms = now_ms() - t0;
+        out
+    }
+
+    /// Composite the whole of `doc` with the CPU compositor into document `key`'s texture, band by
+    /// band (each band converted and uploaded before the next is rendered), so a huge document
+    /// never needs a full-size float composite or RGBA8 copy in memory.
+    pub fn upload_composite(&self, key: u64, doc: &photocraft_doc::Document, display: Option<&photocraft_engine::display_color::CanvasDisplay>) {
+        let size = [doc.size.width, doc.size.height];
+        if size[0] == 0 || size[1] == 0 {
+            return;
+        }
+        let (device, queue) = (&self.rs.device, &self.rs.queue);
+        {
+            let mut renderer = self.rs.renderer.write();
+            let Some(res) = renderer.callback_resources.get_mut::<Resources>() else { return };
+            if res.docs.get(&key).is_none_or(|d| d.size != size) {
+                let tex = DocTextures::new(device, res, size, self.tile);
+                res.docs.insert(key, tex);
+            }
+        }
+        let _ = photocraft_compose::render_bands(doc, doc.bounds(), 0, |band| -> Result<(), ()> {
+            let rgba = premultiply_rgba8(&texture_buffer(display, &band).px);
+            let renderer = self.rs.renderer.read();
+            let d = renderer.callback_resources.get::<Resources>().and_then(|r| r.docs.get(&key)).ok_or(())?;
+            d.write(queue, [0, band.rect.y0 as u32], [size[0], band.rect.height()], size[0], &rgba);
+            drop(renderer);
+            // Flush the staged band so its staging memory is reclaimed while the next renders.
+            queue.submit(std::iter::empty::<wgpu::CommandBuffer>());
+            let _ = device.poll(wgpu::PollType::Poll);
+            Ok(())
+        });
+        let mut renderer = self.rs.renderer.write();
+        if let Some(res) = renderer.callback_resources.get_mut::<Resources>()
+            && let Some(d) = res.docs.get(&key)
+        {
+            d.regenerate_mips(device, queue, res, [0, 0, size[0], size[1]]);
+        }
+    }
+
     /// Free textures of documents not in `live`.
     pub fn retain(&self, live: &[u64]) {
         let mut renderer = self.rs.renderer.write();
@@ -287,6 +375,61 @@ impl GpuCanvas {
     pub fn paint(painter: &egui::Painter, rect: egui::Rect, params: ViewParams) {
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, CanvasCallback { rect, params }));
     }
+}
+
+/// A CPU composite as the canvas texture stores it (`display`'s encoding; as is without one).
+fn texture_buffer<'a>(
+    display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+    buf: &'a photocraft_compose::Buffer,
+) -> std::borrow::Cow<'a, photocraft_compose::Buffer> {
+    match display {
+        Some(d) => d.texture_buffer(buf),
+        None => std::borrow::Cow::Borrowed(buf),
+    }
+}
+
+/// What a [`GpuCanvas::refresh`] did.
+#[derive(Clone, Debug, Default)]
+pub struct Refresh {
+    /// "gpu-rect", "gpu-full" (wgpu compositor), "rect" or "full" (CPU compositor).
+    pub kind: &'static str,
+    /// Pixels refreshed.
+    pub px: u64,
+    pub composite_ms: f64,
+    pub upload_ms: f64,
+    /// Layer tiles the wgpu compositor uploaded.
+    pub uploads: u64,
+    /// Why the wgpu compositor wasn't used.
+    pub fallback: Option<String>,
+}
+
+/// How the app creates its wgpu device: egui's defaults, except that the texture and buffer size
+/// limits are the adapter's own rather than egui's 8192 px cap, so large documents stay on the
+/// GPU compositor.
+pub fn wgpu_setup() -> egui_wgpu::WgpuSetup {
+    let mut setup = egui_wgpu::WgpuSetup::without_display_handle();
+    use_adapter_limits(&mut setup);
+    setup
+}
+
+/// Make `setup` request the adapter's own texture and buffer size limits instead of egui's
+/// default 8192 px cap (which sent every document wider or taller than 8192 px to the CPU
+/// compositor). Everything else (features, the WebGL2 base limits on GL) stays egui's default.
+pub fn use_adapter_limits(setup: &mut egui_wgpu::WgpuSetup) {
+    if let egui_wgpu::WgpuSetup::CreateNew(create) = setup {
+        create.device_descriptor = std::sync::Arc::new(|adapter| wgpu::DeviceDescriptor {
+            label: Some("photocraft wgpu device"),
+            required_limits: device_limits(adapter),
+            ..Default::default()
+        });
+    }
+}
+
+/// egui's base limits (WebGL2's on GL) with the adapter's maximum texture and buffer sizes.
+pub fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    let base = if adapter.get_info().backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::default() };
+    let a = adapter.limits();
+    wgpu::Limits { max_texture_dimension_2d: a.max_texture_dimension_2d, max_buffer_size: a.max_buffer_size, ..base }
 }
 
 /// Milliseconds since first call (monotonic). Always 0 on wasm, where `std::time` is unavailable.

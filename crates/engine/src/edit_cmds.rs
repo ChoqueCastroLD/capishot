@@ -66,14 +66,8 @@ fn lift(src: &Surface, sel: Option<&Surface>, canvas: Rect) -> Clip {
 
 /// Merged composite of the visible document as a surface in the document's format.
 fn merged_surface(doc: &Document) -> Surface {
-    let buf = photocraft_compose::flatten(doc);
     let fmt = doc.pixel_format();
-    let fmt = PixelFormat::new(fmt.mode, fmt.sample, true);
-    let data: Vec<f32> = buf.px.iter().flat_map(|p| photocraft_raster::from_rgba(&fmt, *p)).collect();
-    let mut s = Surface::new(fmt);
-    s.write_region(doc.bounds(), &data);
-    s.prune();
-    s
+    photocraft_compose::flatten_to_surface(doc, PixelFormat::new(fmt.mode, fmt.sample, true), None)
 }
 
 fn copy(s: &mut Session, merged: bool) -> Result<Value> {

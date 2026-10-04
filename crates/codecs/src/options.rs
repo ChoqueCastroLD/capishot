@@ -18,7 +18,10 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Limits { max_width: 1 << 18, max_height: 1 << 18, max_pixels: 1 << 28, max_alloc: 2 << 30 }
+        // 2^30 pixels (e.g. 32768²) and, on 64-bit targets, 8 GiB: enough for the large
+        // documents Photoshop users open (a 20000² RGBA 16-bit image is 3.2 GB).
+        let max_alloc = if cfg!(target_pointer_width = "64") { 8 << 30 } else { 2 << 30 };
+        Limits { max_width: 1 << 18, max_height: 1 << 18, max_pixels: 1 << 30, max_alloc }
     }
 }
 
