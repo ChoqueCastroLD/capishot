@@ -94,15 +94,132 @@ fn parse_color(p: &Value) -> [f32; 3] {
     }
 }
 
+/// Eyedropper samples from `key` (`[[x, y], …]` in document pixels): the colour under each point
+/// and where it was picked (area-local, for Localized Color Clusters).
+fn eyedropper_samples(p: &Value, key: &str, area: Rect, px: &[[f32; 4]], bad: &impl Fn(String) -> EngineError) -> Result<Vec<sel::RangeSample>> {
+    let Some(pts) = p.get(key) else { return Ok(Vec::new()) };
+    let pts = pts.as_array().ok_or_else(|| bad(format!("`{key}` must be [[x, y], …]")))?;
+    let w = area.width() as usize;
+    let mut out = Vec::with_capacity(pts.len().min(4096));
+    for pt in pts {
+        let xy = pt.as_array().and_then(|a| match a.as_slice() {
+            [x, y] => Some((x.as_f64()?, y.as_f64()?)),
+            _ => None,
+        });
+        let Some((x, y)) = xy.filter(|(x, y)| x.is_finite() && y.is_finite()) else {
+            return Err(bad(format!("bad point {pt} in `{key}` (want [x, y])")));
+        };
+        let (xi, yi) = (x.floor() as i32, y.floor() as i32);
+        let q = if area.contains(xi, yi) { px.get((yi - area.y0) as usize * w + (xi - area.x0) as usize) } else { None };
+        let Some(&[r, g, b, _]) = q else {
+            return Err(bad(format!("point [{x}, {y}] in `{key}` is outside the canvas")));
+        };
+        out.push(sel::RangeSample { color: [r, g, b], at: Some(((xi - area.x0) as f32, (yi - area.y0) as f32)) });
+    }
+    Ok(out)
+}
+
 fn color_range(s: &mut Session, p: &Value) -> Result<Value> {
-    let color = if p.get("color").is_some() {
-        parse_color(p)
-    } else {
-        let f = s.tools.foreground;
-        [f[0], f[1], f[2]]
+    const CMD: &str = "select.colorRange";
+    let bad = |msg: String| EngineError::BadParams { cmd: CMD.into(), msg };
+    let preset = p.get("select").map_or(Some("sampledColors"), Value::as_str).ok_or_else(|| bad("`select` must be a string".into()))?;
+    let invert = b(p, "invert", false);
+    let fuzz = |d: f32| f(p, "fuzziness", d).max(0.0);
+    let (area, mut mask) = match preset {
+        "sampledColors" => {
+            let (area, px) = sample_pixels(s, b(p, "sampleAllLayers", true))?;
+            let w = area.width() as usize;
+            // The dialog's eyedroppers: colours picked on the image, at their positions.
+            let mut samples = eyedropper_samples(p, "points", area, &px, &bad)?;
+            let minus = eyedropper_samples(p, "subtractPoints", area, &px, &bad)?;
+            if let Some(cs) = p.get("colors") {
+                let cs = cs.as_array().ok_or_else(|| bad("`colors` must be a list of colours".into()))?;
+                for c in cs {
+                    samples.push(sel::RangeSample { color: parse_color(&json!({ "color": c })), at: None });
+                }
+            }
+            if p.get("color").is_some() || samples.is_empty() {
+                let color = if p.get("color").is_some() {
+                    parse_color(p)
+                } else {
+                    let [r, g, b, _] = s.tools.foreground;
+                    [r, g, b]
+                };
+                samples.push(sel::RangeSample { color, at: None });
+            }
+            // Localized Color Clusters: Range is a percentage of the canvas's longer side.
+            let localized = if b(p, "localized", false) {
+                if !samples.iter().chain(&minus).any(|x| x.at.is_some()) {
+                    return Err(bad("localized clusters need eyedropper `points`".into()));
+                }
+                Some(f(p, "range", 100.0).clamp(0.0, 100.0) / 100.0 * area.width().max(area.height()) as f32)
+            } else {
+                None
+            };
+            let mut mask = sel::color_range_samples(&px, w, &samples, fuzz(40.0), localized);
+            // The minus eyedropper: colours matching a subtracted sample (same Fuzziness) drop out.
+            if !minus.is_empty() {
+                let cut = sel::color_range_samples(&px, w, &minus, fuzz(40.0), localized);
+                for (m, c) in mask.iter_mut().zip(&cut) {
+                    *m *= 1.0 - c;
+                }
+            }
+            (area, mask)
+        }
+        "reds" | "yellows" | "greens" | "cyans" | "blues" | "magentas" => {
+            let center = match preset {
+                "reds" => 0.0,
+                "yellows" => 60.0,
+                "greens" => 120.0,
+                "cyans" => 180.0,
+                "blues" => 240.0,
+                _ => 300.0,
+            };
+            let (area, px) = sample_pixels(s, b(p, "sampleAllLayers", true))?;
+            (area, sel::hue_range(&px, center))
+        }
+        "highlights" | "midtones" | "shadows" => {
+            // Range in levels (Highlights / Shadows: one value, Midtones: [low, high]); Fuzziness
+            // is a percentage of the tonal scale.
+            let level = |v: &Value| v.as_f64().filter(|x| (0.0..=255.0).contains(x)).map(|x| x as f32);
+            let r = p.get("tonalRange");
+            let (lo, hi) = match (preset, r) {
+                ("shadows", None) => (0.0, 65.0),
+                ("highlights", None) => (190.0, 255.0),
+                (_, None) => (105.0, 150.0),
+                ("shadows", Some(v)) => (0.0, level(v).ok_or_else(|| bad(format!("tonalRange: want a level 0..255 (got {v})")))?),
+                ("highlights", Some(v)) => (level(v).ok_or_else(|| bad(format!("tonalRange: want a level 0..255 (got {v})")))?, 255.0),
+                (_, Some(v)) => v
+                    .as_array()
+                    .and_then(|a| match a.as_slice() {
+                        [l, h] => Some((level(l)?, level(h)?)),
+                        _ => None,
+                    })
+                    .filter(|(l, h)| l <= h)
+                    .ok_or_else(|| bad(format!("tonalRange: want [low, high] levels 0..255 (got {v})")))?,
+            };
+            let (area, px) = sample_pixels(s, b(p, "sampleAllLayers", true))?;
+            (area, sel::tone_range(&px, lo, hi, fuzz(20.0).min(100.0) / 100.0 * 255.0))
+        }
+        "outOfGamut" => {
+            // Pixels the current proof setup (View › Proof Setup) can't reproduce, as the gamut
+            // warning shows them: judged on the composite.
+            let d = s.active().ok_or(EngineError::NoDocument)?;
+            let pv = s.color.proof(d.doc.id);
+            let (m, _) = crate::color_cmds::gamut_mask(&d.doc, &pv.setup, pv.gamut_threshold)?;
+            (d.doc.bounds(), m.iter().map(|v| f32::from(*v) / 255.0).collect())
+        }
+        other => {
+            return Err(bad(format!(
+                "unknown select `{other}` (sampledColors, reds, yellows, greens, cyans, blues, magentas, highlights, midtones, shadows, outOfGamut)"
+            )));
+        }
     };
-    let (area, px) = sample_pixels(s, b(p, "sampleAllLayers", true))?;
-    let mask = sel::color_range(&px, color, f(p, "fuzziness", 40.0));
+    if invert {
+        for v in &mut mask {
+            *v = 1.0 - *v;
+        }
+    }
     set_selection(s, "Color Range", area, mask, mode(p))
 }
 
@@ -209,7 +326,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "select.colorRange",
             "Color Range…",
             ["Select"],
-            r##"{"color":"#rrggbb"=foreground,"fuzziness":0..200=40,"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}"##,
+            r##"{"select":"sampledColors|reds|yellows|greens|cyans|blues|magentas|highlights|midtones|shadows|outOfGamut"="sampledColors","color":"#rrggbb"=foreground,"colors":["#rrggbb",…]?,"points":[[x,y],…]? (eyedropper samples),"subtractPoints":[[x,y],…]? (minus eyedropper),"fuzziness":0..200=40 (tones: 0..100 %=20),"localized":bool=false,"range":0..100=100 (% of the longer side),"tonalRange":level|[lo,hi] (shadows 65, highlights 190, midtones [105,150]),"invert":bool=false,"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}"##,
             has_doc,
             color_range
         ),
@@ -274,6 +391,107 @@ mod tests {
         s.execute("select.colorRange", json!({"color": "#ff0000", "fuzziness": 10})).unwrap();
         assert_eq!(coverage(&s, 10, 10), 1.0);
         assert_eq!(coverage(&s, 20, 20), 0.0);
+    }
+
+    /// Red squares (from `session`), a blue square, a black and a mid-grey strip on white.
+    fn session_colours() -> Session {
+        let mut s = session();
+        s.edit("paint", |doc, _| {
+            let bg = doc.layers[0].surface_mut().unwrap();
+            bg.fill_rect(Rect::new(5, 20, 15, 28), &[0.0, 0.0, 1.0, 1.0]);
+            bg.fill_rect(Rect::new(20, 20, 25, 28), &[0.0, 0.0, 0.0, 1.0]);
+            bg.fill_rect(Rect::new(30, 20, 35, 28), &[0.5, 0.5, 0.5, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s
+    }
+
+    #[test]
+    fn color_range_several_samples_points_and_invert() {
+        let mut s = session_colours();
+        s.execute("select.colorRange", json!({"colors": ["#ff0000", "#0000ff"], "fuzziness": 10})).unwrap();
+        assert_eq!((coverage(&s, 10, 10), coverage(&s, 30, 10), coverage(&s, 10, 24)), (1.0, 1.0, 1.0));
+        assert_eq!(coverage(&s, 2, 2), 0.0);
+        // Eyedropper point on the blue square; `invert` flips the result.
+        s.execute("select.colorRange", json!({"points": [[7, 22]], "fuzziness": 10, "invert": true})).unwrap();
+        assert_eq!((coverage(&s, 10, 24), coverage(&s, 10, 10), coverage(&s, 2, 2)), (0.0, 1.0, 1.0));
+        // Localized clusters: picked on the left red square, a 25% range (10 px) leaves the right one.
+        s.execute("select.colorRange", json!({"points": [[10, 10]], "fuzziness": 10, "localized": true, "range": 25})).unwrap();
+        assert_eq!(coverage(&s, 10, 10), 1.0);
+        assert!(coverage(&s, 13, 10) > 0.5);
+        assert_eq!(coverage(&s, 30, 10), 0.0);
+        // One undo step per call.
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(coverage(&s, 2, 2), 1.0);
+    }
+
+    #[test]
+    fn color_range_presets() {
+        let mut s = session_colours();
+        s.execute("select.colorRange", json!({"select": "reds"})).unwrap();
+        assert_eq!((coverage(&s, 10, 10), coverage(&s, 30, 10)), (1.0, 1.0));
+        assert_eq!((coverage(&s, 10, 24), coverage(&s, 2, 2), coverage(&s, 32, 24)), (0.0, 0.0, 0.0));
+        s.execute("select.colorRange", json!({"select": "blues"})).unwrap();
+        assert_eq!((coverage(&s, 10, 24), coverage(&s, 10, 10)), (1.0, 0.0));
+        s.execute("select.colorRange", json!({"select": "greens"})).unwrap();
+        assert!(s.active().unwrap().doc.selection.is_none() || coverage(&s, 10, 10) == 0.0);
+        // Tones: black is a shadow, white a highlight, 50% grey (128) a midtone.
+        s.execute("select.colorRange", json!({"select": "shadows"})).unwrap();
+        assert_eq!((coverage(&s, 22, 24), coverage(&s, 2, 2), coverage(&s, 32, 24)), (1.0, 0.0, 0.0));
+        s.execute("select.colorRange", json!({"select": "highlights"})).unwrap();
+        assert_eq!((coverage(&s, 22, 24), coverage(&s, 2, 2)), (0.0, 1.0));
+        s.execute("select.colorRange", json!({"select": "midtones", "fuzziness": 0})).unwrap();
+        assert_eq!((coverage(&s, 32, 24), coverage(&s, 2, 2), coverage(&s, 22, 24)), (1.0, 0.0, 0.0));
+        // A wider shadow range takes the grey too.
+        s.execute("select.colorRange", json!({"select": "shadows", "tonalRange": 140, "fuzziness": 0})).unwrap();
+        assert_eq!(coverage(&s, 32, 24), 1.0);
+        // Modes combine as for the other selection commands.
+        s.execute("select.colorRange", json!({"select": "reds", "mode": "add"})).unwrap();
+        assert_eq!((coverage(&s, 32, 24), coverage(&s, 10, 10)), (1.0, 1.0));
+    }
+
+    #[test]
+    fn color_range_out_of_gamut_matches_the_gamut_warning() {
+        let mut s = session();
+        s.edit("paint", |doc, _| {
+            // Saturated sRGB blue is outside the default CMYK proof; mid grey is inside.
+            let bg = doc.layers[0].surface_mut().unwrap();
+            bg.fill_rect(Rect::new(0, 20, 20, 30), &[0.0, 0.0, 1.0, 1.0]);
+            bg.fill_rect(Rect::new(20, 20, 40, 30), &[0.5, 0.5, 0.5, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("select.colorRange", json!({"select": "outOfGamut"})).unwrap();
+        assert_eq!((coverage(&s, 5, 25), coverage(&s, 30, 25)), (1.0, 0.0));
+        let warn = s.execute("view.gamutWarning", json!({"on": true})).unwrap();
+        let sel = s.active().unwrap().doc.selection.clone().unwrap();
+        let mut n = 0;
+        for y in 0..30 {
+            for x in 0..40 {
+                n += usize::from(sel.sample_channel(x, y, 0) > 0.5);
+            }
+        }
+        assert_eq!(warn["outOfGamut"].as_u64(), Some(n as u64));
+    }
+
+    #[test]
+    fn color_range_rejects_bad_params() {
+        let mut s = session_colours();
+        for p in [
+            json!({"select": "skin"}),
+            json!({"select": 3}),
+            json!({"points": [[100, 2]]}),
+            json!({"points": [[1]]}),
+            json!({"points": "here"}),
+            json!({"colors": "#ff0000"}),
+            json!({"localized": true}),
+            json!({"select": "midtones", "tonalRange": [200, 100]}),
+            json!({"select": "shadows", "tonalRange": 300}),
+        ] {
+            assert!(s.execute("select.colorRange", p.clone()).is_err(), "{p}");
+        }
+        assert!(s.active().unwrap().doc.selection.is_none());
     }
 
     #[test]

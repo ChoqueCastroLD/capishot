@@ -20,6 +20,7 @@ pub mod channel_view;
 pub mod channels_panel;
 pub mod chrome_ui;
 pub mod color_picker_ui;
+pub mod color_range_ui;
 pub mod comps_ui;
 pub mod control;
 pub mod dialogs;
@@ -213,6 +214,8 @@ pub struct PhotocraftApp {
     /// Selection outline cache: (doc, revision, segments).
     /// Live filter preview (proxy document with the filter applied).
     pub(crate) filter_preview: Option<filter_dialog::FilterPreview>,
+    /// Select › Color Range dialog preview (proxy document + mask / image textures).
+    pub(crate) color_range: Option<color_range_ui::Preview>,
     /// Synthetic input events queued by automation (`ui.click`, `ui.key`, …), injected next frame.
     pub(crate) synthetic: Vec<egui::Event>,
     /// True only while a frame is processing synthetic automation input. It
@@ -293,6 +296,7 @@ impl PhotocraftApp {
             proxy_uploaded: None,
             outline_cache: None,
             filter_preview: None,
+            color_range: None,
             synthetic: Vec::new(),
             automation_input: false,
             channel_thumbs: None,

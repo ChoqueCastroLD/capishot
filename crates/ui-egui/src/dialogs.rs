@@ -93,6 +93,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::variables_ui::owns(&fields) => crate::variables_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::file_ui::owns(&fields) => crate::file_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::color_picker_ui::owns(&fields) => crate::color_picker_ui::body(ui, &mut fields),
+                DialogKind::Command if crate::color_range_ui::owns(&fields) => crate::color_range_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::prefs_ui::owns(&fields) => crate::prefs_ui::body(app, ui, &mut fields),
                 DialogKind::Command if fields.contains_key("__export") => crate::export_dialog::body(app, ui, &mut fields),
                 DialogKind::Command if fields.contains_key("__sizing") => crate::sizing::body(ui, &mut fields),
@@ -106,7 +107,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
             }
             ui.add_space(8.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Align::Min, not Center: a centred row fills the height left over from last frame's
+            // (larger) size, so a dialog whose body gets shorter would never shrink back.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 if matches!(d.kind, DialogKind::About | DialogKind::Error) {
                     if crate::widgets::primary_button(ui, "OK", 84.0).clicked() {
@@ -155,6 +158,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             Some(false) => {
                 app.ui.close_dialog(d.id);
                 app.filter_preview = None;
+                app.color_range = None;
             }
             None => {}
         }
@@ -186,6 +190,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
         DialogKind::Command if crate::variables_ui::owns(&d.fields) => crate::variables_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::file_ui::owns(&d.fields) => crate::file_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::color_picker_ui::owns(&d.fields) => crate::color_picker_ui::confirm(app, &d.fields),
+        DialogKind::Command if crate::color_range_ui::owns(&d.fields) => crate::color_range_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::prefs_ui::owns(&d.fields) => crate::prefs_ui::confirm(app, &d.fields),
         DialogKind::Command if d.fields.contains_key("__export") => crate::export_dialog::confirm(app, &d.fields),
         DialogKind::Command => {
@@ -200,8 +205,12 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
 }
 
 /// Open the parameter dialog of `command`: the adjustment editor for `image.adjustments.*`, the
-/// schema dialog for filters, otherwise a bare confirm dialog.
+/// schema dialog for filters, the Color Range dialog for `select.colorRange`, otherwise a bare
+/// confirm dialog.
 pub fn open_command_dialog(app: &mut PhotocraftApp, command: &str, label: &str) -> u64 {
+    if command == crate::color_range_ui::COMMAND {
+        return crate::color_range_ui::open(app);
+    }
     if let Some(id) = crate::adjust_dialog::open(app, command) {
         return id;
     }

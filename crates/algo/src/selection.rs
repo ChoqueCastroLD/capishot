@@ -370,6 +370,100 @@ pub fn color_range(px: &[[f32; 4]], color: [f32; 3], fuzziness: f32) -> Vec<f32>
         .collect()
 }
 
+/// One Color Range sample (Sampled Colors): an eyedropper colour, and where it was picked
+/// (needed for Localized Color Clusters; area-local pixel coordinates).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RangeSample {
+    pub color: [f32; 3],
+    pub at: Option<(f32, f32)>,
+}
+
+/// Color Range › Sampled Colors with several samples (the dialog's "Add to Sample" eyedropper):
+/// each pixel takes its best match over the samples, each judged like [`color_range`]. With
+/// `localized` (Localized Color Clusters) a sample also fades with distance from where it was
+/// picked, reaching 0 at `localized` pixels, so only nearby matching colours are selected;
+/// samples without a position aren't localized. `w` is the row width of `px`.
+pub fn color_range_samples(px: &[[f32; 4]], w: usize, samples: &[RangeSample], fuzziness: f32, localized: Option<f32>) -> Vec<f32> {
+    let f = fuzziness.max(0.0) + 1.0;
+    px.iter()
+        .enumerate()
+        .map(|(i, &[r, g, b, a])| {
+            if a <= 0.0 {
+                return 0.0;
+            }
+            let (x, y) = ((i % w.max(1)) as f32, (i / w.max(1)) as f32);
+            samples.iter().fold(0.0f32, |best, s| {
+                let d = [r, g, b].iter().zip(&s.color).map(|(v, c)| (v - c).abs() * 255.0).fold(0.0f32, f32::max);
+                let mut k = (1.0 - d / f).clamp(0.0, 1.0);
+                if let (Some(radius), Some((sx, sy))) = (localized, s.at) {
+                    let dist = ((x - sx).powi(2) + (y - sy).powi(2)).sqrt();
+                    k *= (1.0 - dist / radius.max(1.0)).clamp(0.0, 1.0);
+                }
+                best.max(k)
+            })
+        })
+        .collect()
+}
+
+/// Hue (degrees, 0..360) and chroma (max − min) of an RGB colour.
+fn hue_chroma([r, g, b]: [f32; 3]) -> (f32, f32) {
+    let mx = r.max(g).max(b);
+    let mn = r.min(g).min(b);
+    let d = mx - mn;
+    if d <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let h = if mx == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if mx == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    (h * 60.0, d)
+}
+
+/// Color Range › Select: Reds, Yellows, Greens, Cyans, Blues or Magentas (`center` = 0, 60,
+/// 120, 180, 240, 300°). A pixel belongs to a family by how close its hue is (full at the
+/// family's hue, none 60° away, so an orange is half red, half yellow) times its chroma, so
+/// neutrals are never selected and muted colours only partly.
+pub fn hue_range(px: &[[f32; 4]], center: f32) -> Vec<f32> {
+    px.iter()
+        .map(|&[r, g, b, a]| {
+            if a <= 0.0 {
+                return 0.0;
+            }
+            let (h, chroma) = hue_chroma([r, g, b].map(|v| v.clamp(0.0, 1.0)));
+            let dh = (h - center).rem_euclid(360.0);
+            let dh = dh.min(360.0 - dh);
+            ((1.0 - dh / 60.0).clamp(0.0, 1.0) * chroma).clamp(0.0, 1.0)
+        })
+        .collect()
+}
+
+/// Color Range › Select: Highlights, Midtones or Shadows. Pixels whose luminance (Rec. 601
+/// weights, 0..255) lies in `lo..=hi` are fully selected; outside, selection falls off linearly
+/// to 0 over `falloff` levels (the dialog's Fuzziness).
+pub fn tone_range(px: &[[f32; 4]], lo: f32, hi: f32, falloff: f32) -> Vec<f32> {
+    let ramp = falloff.max(1e-3);
+    px.iter()
+        .map(|&[r, g, b, a]| {
+            if a <= 0.0 {
+                return 0.0;
+            }
+            let l = (0.299 * r + 0.587 * g + 0.114 * b).clamp(0.0, 1.0) * 255.0;
+            let out = if l < lo {
+                lo - l
+            } else if l > hi {
+                l - hi
+            } else {
+                0.0
+            };
+            (1.0 - out / ramp).clamp(0.0, 1.0)
+        })
+        .collect()
+}
+
 /// 1D squared distance transform (Felzenszwalb & Huttenlocher).
 fn dt1(f: &[f32], out: &mut [f32], v: &mut [usize], z: &mut [f32]) {
     let n = f.len();
@@ -608,6 +702,69 @@ mod tests {
         assert!(m[1] > 0.3 && m[1] < 1.0);
         assert_eq!(m[2], 0.0);
         assert_eq!(m[3], 0.0);
+    }
+
+    #[test]
+    fn color_range_several_samples_and_localized() {
+        let red = [1.0, 0.0, 0.0, 1.0];
+        let blue = [0.0, 0.0, 1.0, 1.0];
+        let green = [0.0, 1.0, 0.0, 1.0];
+        // 4 × 1: red, blue, green, red.
+        let px = vec![red, blue, green, red];
+        let s = |c: [f32; 4], at: Option<(f32, f32)>| RangeSample { color: [c[0], c[1], c[2]], at };
+        let m = color_range_samples(&px, 4, &[s(red, None), s(blue, None)], 10.0, None);
+        assert_eq!(m, vec![1.0, 1.0, 0.0, 1.0]);
+        // One sample is exactly the single-colour Color Range.
+        assert_eq!(color_range_samples(&px, 4, &[s(red, None)], 40.0, None), color_range(&px, [1.0, 0.0, 0.0], 40.0));
+        // Localized at x = 0 with a 2 px range: the far red pixel (x = 3) drops out, x = 1 would be half.
+        let m = color_range_samples(&px, 4, &[s(red, Some((0.0, 0.0)))], 10.0, Some(2.0));
+        assert_eq!(m, vec![1.0, 0.0, 0.0, 0.0]);
+        let reds = vec![red; 4];
+        let m = color_range_samples(&reds, 4, &[s(red, Some((0.0, 0.0)))], 10.0, Some(2.0));
+        assert_eq!(m, vec![1.0, 0.5, 0.0, 0.0]);
+        // No samples: nothing selected.
+        assert!(color_range_samples(&px, 4, &[], 10.0, None).iter().all(|v| *v == 0.0));
+    }
+
+    #[test]
+    fn hue_families() {
+        let px = vec![
+            [1.0, 0.0, 0.0, 1.0], // red
+            [1.0, 0.5, 0.0, 1.0], // orange: between red and yellow
+            [0.5, 0.5, 0.5, 1.0], // grey
+            [1.0, 0.5, 0.5, 1.0], // pink: a muted red
+            [0.0, 0.0, 1.0, 1.0], // blue
+            [1.0, 0.0, 0.0, 0.0], // transparent
+        ];
+        let reds = hue_range(&px, 0.0);
+        assert_eq!(reds[0], 1.0);
+        assert!((reds[1] - 0.5).abs() < 1e-5);
+        assert_eq!(reds[2], 0.0);
+        assert!((reds[3] - 0.5).abs() < 1e-5);
+        assert_eq!(reds[4], 0.0);
+        assert_eq!(reds[5], 0.0);
+        let yellows = hue_range(&px, 60.0);
+        assert!((yellows[1] - 0.5).abs() < 1e-5);
+        assert_eq!(hue_range(&px, 240.0)[4], 1.0);
+        // Magentas wrap around 360°.
+        assert_eq!(hue_range(&[[1.0, 0.0, 1.0, 1.0]], 300.0)[0], 1.0);
+        assert!((hue_range(&[[1.0, 0.0, 0.5, 1.0]], 300.0)[0] - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn tonal_ranges() {
+        let g = |v: f32| [v / 255.0, v / 255.0, v / 255.0, 1.0];
+        let px = vec![g(0.0), g(60.0), g(75.0), g(128.0), g(200.0), g(255.0)];
+        let near = |a: &[f32], b: &[f32]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4);
+        // Shadows up to 65, fading over 20 levels.
+        let sh = tone_range(&px, 0.0, 65.0, 20.0);
+        assert!(near(&sh, &[1.0, 1.0, 0.5, 0.0, 0.0, 0.0]), "{sh:?}");
+        // Highlights from 190.
+        let h = tone_range(&px, 190.0, 255.0, 20.0);
+        assert!(near(&h, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0]), "{h:?}");
+        // Midtones 105..150.
+        let m = tone_range(&px, 105.0, 150.0, 20.0);
+        assert!(near(&m, &[0.0, 0.0, 0.0, 1.0, 0.0, 0.0]), "{m:?}");
     }
 
     fn square(w: usize, h: usize) -> Vec<f32> {

@@ -303,6 +303,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             Ok(r)
         }
         // Photoshop's "Select and Mask…" is the engine's select.refineEdge.
+        // Select › Color Range… from the menu: the dialog (with params: the engine directly).
+        "select.colorRange" if params.as_object().is_none_or(|o| o.is_empty()) => Ok(json!({"dialog": crate::color_range_ui::open(app)})),
         "select.selectAndMask" => Ok(json!({"dialog": crate::filter_dialog::open(app, "select.refineEdge")})),
         // Select › Transform Selection from the menu: the interactive box (with params: the engine).
         "select.transformSelection" if params.as_object().is_none_or(|o| o.is_empty()) => {
