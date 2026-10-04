@@ -137,6 +137,8 @@ struct Resident {
     default_nonzero: bool,
     doc: DocId,
     last_used: u64,
+    /// CMYK profile the texels were converted with (`CmykSpace::id`, 0 = built-in / not CMYK).
+    cmyk: u64,
 }
 
 /// A texture and its default view.
@@ -348,6 +350,8 @@ pub struct Compositor {
     /// Whether the effect-map pipelines could be built (else documents with layer effects are
     /// [`Unsupported`] and use the CPU compositor).
     effect_maps: bool,
+    /// `CmykSpace::id` of the document being encoded (0: built-in coated CMYK).
+    cmyk: u64,
 }
 
 fn tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -488,6 +492,7 @@ impl Compositor {
             frame: 0,
             acc_format,
             effect_maps: map_error.is_none(),
+            cmyk: 0,
         }
     }
 
@@ -558,6 +563,21 @@ impl Compositor {
 
     /// Like [`Self::render`] but records into `encoder` without submitting.
     pub fn encode(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        doc: &Document,
+        region: Rect,
+        sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
+    ) -> Result<Stats, Unsupported> {
+        // CMYK layers convert through the document's own CMYK profile (uploads and plan colours).
+        let space = photocraft_compose::cmyk_space(doc);
+        self.cmyk = space.as_ref().map_or(0, |s| s.id);
+        photocraft_color::convert::with_cmyk_space(space.as_ref(), || self.encode_scoped(device, queue, encoder, doc, region, sink))
+    }
+
+    fn encode_scoped(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -816,7 +836,8 @@ impl Compositor {
         let format = surface.format();
         let kind = TexKind::for_surface(role, format);
         let key = (layer, role);
-        let stale = self.residents.get(&key).is_none_or(|r| r.region != region || r.kind != kind || r.format != format);
+        let cmyk = if format.mode == photocraft_color::ColorMode::Cmyk { self.cmyk } else { 0 };
+        let stale = self.residents.get(&key).is_none_or(|r| r.region != region || r.kind != kind || r.format != format || r.cmyk != cmyk);
         if stale {
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("pc_compose_layer"),
@@ -830,7 +851,7 @@ impl Compositor {
             });
             let view = texture.create_view(&Default::default());
             let default_nonzero = surface.default_pixel().iter().any(|v| *v != 0.0);
-            let r = Resident { texture, view, region, kind, format, tiles: HashMap::new(), default_nonzero, doc, last_used: 0 };
+            let r = Resident { texture, view, region, kind, format, tiles: HashMap::new(), default_nonzero, doc, last_used: 0, cmyk };
             if default_nonzero {
                 // Missing tiles read as the default pixel: initialise them.
                 let bytes = convert_tile(surface, None, kind, TileCoord::new(0, 0));

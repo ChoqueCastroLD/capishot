@@ -551,20 +551,24 @@ pub fn document_to_psd_with(doc: &Document, opts: &PsdExportOptions) -> (PsdFile
     let has_alpha = comp.px.iter().any(|p| q255(p[3]) < 255 || (sample == SampleType::F32 && p[3] < 1.0));
     let white = photocraft_raster::from_rgba(&fmt, [1.0, 1.0, 1.0, 1.0]);
     let cmyk = ex.cmyk;
+    // The composite came through the document's CMYK profile: convert back through it too.
+    let space = photocraft_compose::cmyk_space(doc);
     // Converted and encoded in bands on all cores, then joined per plane.
     let parts = crate::pixels::par_map(crate::pixels::bands(n), |range| {
-        let mut planes: Vec<Vec<u8>> = vec![Vec::with_capacity(range.len() * sample.bytes()); cc + 1];
-        let mut v = [0.0f32; 5];
-        for p in &comp.px[range] {
-            photocraft_raster::from_rgba_into(&fmt, *p, &mut v);
-            for c in 0..=cc {
-                // Matte against white like Photoshop (see `pixels::matte`).
-                let m = if c < cc && has_alpha { crate::pixels::matte(v[c], v[cc], white[c]) } else { v[c] };
-                let x = if cmyk && c < cc { 1.0 - m } else { m };
-                encode_be(x, sample, &mut planes[c]);
+        photocraft_color::convert::with_cmyk_space(space.as_ref(), || {
+            let mut planes: Vec<Vec<u8>> = vec![Vec::with_capacity(range.len() * sample.bytes()); cc + 1];
+            let mut v = [0.0f32; 5];
+            for p in &comp.px[range] {
+                photocraft_raster::from_rgba_into(&fmt, *p, &mut v);
+                for c in 0..=cc {
+                    // Matte against white like Photoshop (see `pixels::matte`).
+                    let m = if c < cc && has_alpha { crate::pixels::matte(v[c], v[cc], white[c]) } else { v[c] };
+                    let x = if cmyk && c < cc { 1.0 - m } else { m };
+                    encode_be(x, sample, &mut planes[c]);
+                }
             }
-        }
-        planes
+            planes
+        })
     });
     let mut color_planes: Vec<Vec<u8>> = vec![Vec::with_capacity(n * sample.bytes()); cc + 1];
     for part in parts {

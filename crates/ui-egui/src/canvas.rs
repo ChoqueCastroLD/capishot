@@ -114,6 +114,30 @@ fn buffer_to_image(buf: &photocraft_compose::Buffer) -> egui::ColorImage {
     egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels)
 }
 
+/// A composite as monitor pixels: document profile → monitor profile (nothing to do in the
+/// common sRGB-on-sRGB case).
+fn display_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>, buf: &photocraft_compose::Buffer) -> egui::ColorImage {
+    match display {
+        Some(d) if !d.is_identity() => {
+            let img = d.to_rgba8(buf);
+            egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels)
+        }
+        _ => buffer_to_image(buf),
+    }
+}
+
+/// The canvas display of `doc` and a key that changes with it (folded into the canvas caches'
+/// preview keys, so a monitor or profile change re-renders).
+fn canvas_display(app: &PhotocraftApp, doc: &Document) -> (Option<std::sync::Arc<photocraft_engine::display_color::CanvasDisplay>>, u64) {
+    match app.session.color.canvas_display(doc) {
+        Ok(d) => {
+            let k = d.key;
+            (Some(d), k)
+        }
+        Err(_) => (None, 0),
+    }
+}
+
 /// Box-downsample a composite for display.
 fn downsample(buf: &photocraft_compose::Buffer, factor: u32) -> photocraft_compose::Buffer {
     let (w, h) = (buf.rect.width(), buf.rect.height());
@@ -201,6 +225,8 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
         (st.revision, st.last_damage.map(|r| if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) }), st.doc.id)
     };
     let (doc, preview_key) = display_doc(app, idx);
+    let (display, display_key) = canvas_display(app, &doc);
+    let preview_key = preview_key ^ display_key;
     let cache = app.canvases.entry(id).or_insert(CanvasCache {
         revision: 0,
         texture: None,
@@ -223,7 +249,7 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
                 let buf = photocraft_compose::render(&doc, r);
                 let t1 = crate::gpu_canvas::now_ms();
                 if let Some(t) = cache.texture.as_mut() {
-                    t.set_partial([r.x0 as usize, r.y0 as usize], buf_image(&buf), TextureOptions::LINEAR);
+                    t.set_partial([r.x0 as usize, r.y0 as usize], display_image(display.as_deref(), &buf), TextureOptions::LINEAR);
                 }
                 app.perf.record("rect", r.width() as u64 * r.height() as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
             }
@@ -232,7 +258,8 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
             let t1 = crate::gpu_canvas::now_ms();
             let longest = doc.size.width.max(doc.size.height);
             let factor = longest.div_ceil(MAX_TEXTURE).max(1);
-            let (img, scale) = if factor > 1 { (buffer_to_image(&downsample(&full, factor)), 1.0 / factor as f32) } else { (buffer_to_image(&full), 1.0) };
+            let d = display.as_deref();
+            let (img, scale) = if factor > 1 { (display_image(d, &downsample(&full, factor)), 1.0 / factor as f32) } else { (display_image(d, &full), 1.0) };
             match cache.texture.as_mut() {
                 Some(t) if t.size() == img.size => t.set(img, TextureOptions::LINEAR),
                 _ => cache.texture = Some(ctx.load_texture(format!("canvas-{}", id.0), img, TextureOptions::LINEAR)),
@@ -278,6 +305,9 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
         return false;
     };
     let (doc, preview_key) = display_doc(app, idx);
+    let (display, display_key) = canvas_display(app, &doc);
+    let preview_key = preview_key ^ display_key;
+    let encode_srgb = display.as_ref().is_some_and(|d| d.encode_srgb);
     let size = [doc.size.width, doc.size.height];
     let cache = app.canvases.entry(id).or_insert(CanvasCache {
         revision: 0,
@@ -298,7 +328,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
     // Preferred: the wgpu compositor renders straight into the display texture (damage rect for
     // strokes, everything otherwise). Falls back to the CPU compositor below when unsupported.
     let region = if partial { last_damage.unwrap_or(doc.bounds()).intersect(&doc.bounds()) } else { doc.bounds() };
-    match gpu.composite(&doc, region) {
+    match gpu.composite(&doc, region, encode_srgb) {
         Ok(stats) => {
             done = true;
             let kind = if partial { "gpu-rect" } else { "gpu-full" };
@@ -319,7 +349,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
         } else {
             let buf = photocraft_compose::render(&doc, r);
             let t1 = crate::gpu_canvas::now_ms();
-            done = gpu.upload_buffer_rect(id.0, &buf);
+            done = gpu.upload_buffer_rect(id.0, &texture_buffer(display.as_deref(), &buf));
             app.perf.record("rect", r.width() as u64 * r.height() as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
         }
     }
@@ -328,7 +358,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
         // TODO: render only the visible region at display resolution when zoomed out.
         let full = photocraft_compose::flatten(&doc);
         let t1 = crate::gpu_canvas::now_ms();
-        gpu.upload_buffer_full(id.0, &full);
+        gpu.upload_buffer_full(id.0, &texture_buffer(display.as_deref(), &full));
         app.perf.record("full", size[0] as u64 * size[1] as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
     }
     let Some(cache) = app.canvases.get_mut(&id) else { return true };
@@ -361,7 +391,8 @@ fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u6
         if let Some(r) = &result {
             let buf = photocraft_compose::flatten(r);
             let t1 = crate::gpu_canvas::now_ms();
-            app.gpu.as_ref()?.upload_buffer_full(key, &buf);
+            let (display, _) = canvas_display(app, &doc);
+            app.gpu.as_ref()?.upload_buffer_full(key, &texture_buffer(display.as_deref(), &buf));
             app.perf.record("filter-preview", r.size.area(), t1 - t0, crate::gpu_canvas::now_ms() - t1);
         }
         app.filter_preview = Some(crate::filter_dialog::FilterPreview { doc: doc_id, revision, hash, k, result });
@@ -399,15 +430,23 @@ fn ensure_proxy_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u64
         let t0 = crate::gpu_canvas::now_ms();
         let buf = photocraft_compose::flatten(&p);
         let t1 = crate::gpu_canvas::now_ms();
-        app.gpu.as_ref()?.upload_buffer_full(key, &buf);
+        let (display, _) = canvas_display(app, &doc);
+        app.gpu.as_ref()?.upload_buffer_full(key, &texture_buffer(display.as_deref(), &buf));
         app.perf.record("proxy", p.size.area(), t1 - t0, crate::gpu_canvas::now_ms() - t1);
         app.proxy_uploaded = Some((doc_id, hash));
     }
     Some((k, key))
 }
 
-fn buf_image(buf: &photocraft_compose::Buffer) -> egui::ColorImage {
-    buffer_to_image(buf)
+/// A CPU composite as the GPU canvas texture stores it (sRGB-encoded for linear documents).
+fn texture_buffer<'a>(
+    display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+    buf: &'a photocraft_compose::Buffer,
+) -> std::borrow::Cow<'a, photocraft_compose::Buffer> {
+    match display {
+        Some(d) => d.texture_buffer(buf),
+        None => std::borrow::Cow::Borrowed(buf),
+    }
 }
 
 /// Tabs + canvas for the active document, or the start screen.
@@ -653,43 +692,40 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     });
 }
 
-/// Lattice size of the canvas display LUT (Proof Colors / Gamut Warning).
+/// Lattice size of the canvas display LUT (colour management, Proof Colors, Gamut Warning).
 const DISPLAY_LUT: usize = 33;
 
-/// Keep the GPU display LUT of `doc` in step with its View › Proof Colors / Gamut Warning state.
-/// Returns the canvas `display` mode (0 none, 1 proof, 2 proof + gamut warning).
-fn sync_display_lut(app: &mut PhotocraftApp, ctx: &egui::Context, doc: &photocraft_doc::Document) -> u8 {
-    let Some(gpu) = app.gpu.as_ref() else { return 0 };
-    let pv = app.session.color.proof(doc.id);
-    let mode = if pv.gamut_warning { 2 } else { u8::from(pv.enabled) };
+/// Keep the GPU display LUT under `key` (the document's texture or a preview of it) in step with
+/// `doc`'s colour management: document → monitor profile, View › Proof Colors / Gamut Warning
+/// and 32-bit preview. Returns the canvas `display` mode (0 none — the identity, e.g. sRGB on
+/// an sRGB monitor —, 1 LUT, 2 LUT + gamut warning).
+fn sync_display_lut(app: &mut PhotocraftApp, ctx: &egui::Context, doc: &photocraft_doc::Document, key: u64) -> u8 {
+    let Some(gpu) = app.gpu.clone() else { return 0 };
     // Rebuild only when anything feeding the LUT changes.
-    let sig = if mode == 0 {
-        String::new()
-    } else {
-        format!(
-            "{mode} {} {:?} {} {} {} {:?} {:?}",
-            pv.setup.profile.content_hash(),
-            pv.setup.intent,
-            pv.setup.bpc,
-            pv.setup.simulate_paper,
-            pv.gamut_threshold,
-            doc.mode,
-            doc.icc_profile.as_ref().map(|p| p.len())
-        )
-    };
-    let key = egui::Id::new(("pc-display-lut", doc.id.0));
-    if ctx.data(|d| d.get_temp::<String>(key)).as_deref() == Some(sig.as_str()) {
+    let sig = app.session.color.display_signature(doc);
+    let id = egui::Id::new(("pc-display-lut", key));
+    if let Some((s, mode)) = ctx.data(|d| d.get_temp::<(u64, u8)>(id))
+        && s == sig
+    {
         return mode;
     }
-    let lut = if mode == 0 { Ok(None) } else { app.session.color.canvas_lut(doc, DISPLAY_LUT) };
-    match lut {
-        Ok(bytes) => gpu.set_display_lut(doc.id.0, DISPLAY_LUT as u32, bytes.as_deref()),
-        Err(e) => {
-            app.ui.status = format!("Proof Colors: {e}");
-            gpu.set_display_lut(doc.id.0, DISPLAY_LUT as u32, None);
+    let gamut = app.session.color.proof(doc.id).gamut_warning;
+    let mode = match app.session.color.canvas_lut(doc, DISPLAY_LUT) {
+        Ok(Some(bytes)) => {
+            gpu.set_display_lut(key, DISPLAY_LUT as u32, Some(&bytes));
+            if gamut { 2 } else { 1 }
         }
-    }
-    ctx.data_mut(|d| d.insert_temp(key, sig));
+        Ok(None) => {
+            gpu.set_display_lut(key, DISPLAY_LUT as u32, None);
+            0
+        }
+        Err(e) => {
+            app.ui.status = format!("Color management: {e}");
+            gpu.set_display_lut(key, DISPLAY_LUT as u32, None);
+            0
+        }
+    };
+    ctx.data_mut(|d| d.insert_temp(id, (sig, mode)));
     mode
 }
 
@@ -745,7 +781,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             },
             pixel_grid: false,
             view_key: egui::Id::new(("pc-canvas-proxy", ctx.viewport_id(), idx)).value(),
-            display: 0,
+            display: sync_display_lut(app, &ctx, &doc, key),
         };
         crate::gpu_canvas::GpuCanvas::paint(&painter, rect, params);
     } else if !flip && ensure_gpu(app, idx) {
@@ -763,7 +799,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             },
             pixel_grid,
             view_key: egui::Id::new(("pc-canvas", ctx.viewport_id(), idx)).value(),
-            display: sync_display_lut(app, &ctx, &doc),
+            display: sync_display_lut(app, &ctx, &doc, doc.id.0),
         };
         crate::gpu_canvas::GpuCanvas::paint(&painter, rect, params);
     } else {

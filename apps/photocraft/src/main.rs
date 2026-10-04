@@ -16,6 +16,7 @@
 mod apple_events;
 mod control_server;
 mod crash_guard;
+mod monitor_profile;
 mod services;
 
 use photocraft_engine::Session;
@@ -83,6 +84,8 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     let apple_events = &apple_events;
 
+    // Read the main display's ICC profile while the window opens (colour-managed canvas).
+    let monitor = monitor_profile::detect_async();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon())
@@ -102,6 +105,9 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             let mut app = PhotocraftApp::new(Session::new(), services::native());
             app.integrated_titlebar = cfg!(target_os = "macos");
+            if let Ok(Some(icc)) = monitor.recv_timeout(std::time::Duration::from_secs(2)) {
+                app.session.color.monitor_profile = Some(std::sync::Arc::new(icc));
+            }
             // Preferences › Performance › Use Graphics Processor.
             if let Some(rs) = cc.wgpu_render_state.clone()
                 && std::env::var_os("PHOTOCRAFT_CPU_CANVAS").is_none()

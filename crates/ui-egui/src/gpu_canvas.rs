@@ -51,8 +51,8 @@ pub struct ViewParams {
     pub pixel_grid: bool,
     /// Distinguishes views painted in the same frame (main canvas, extra windows).
     pub view_key: u64,
-    /// Display transform: 0 none, 1 the document's display LUT (Proof Colors), 2 LUT plus the
-    /// gamut warning (see [`GpuCanvas::set_display_lut`]).
+    /// Display transform: 0 none, 1 the document's display LUT (document → monitor profile,
+    /// Proof Colors), 2 LUT plus the gamut warning (see [`GpuCanvas::set_display_lut`]).
     pub display: u8,
 }
 
@@ -147,9 +147,16 @@ impl GpuCanvas {
     }
 
     /// Composite `region` of `doc` with the wgpu compositor straight into its display texture
-    /// (no CPU pixels, no upload of the composite). Returns `Err` when the document uses features
-    /// the GPU compositor doesn't cover yet; the caller then falls back to the CPU compositor.
-    pub fn composite(&self, doc: &photocraft_doc::Document, region: photocraft_geom::Rect) -> Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> {
+    /// (no CPU pixels, no upload of the composite). `encode_srgb` stores the sRGB encoding of the
+    /// composite (linear documents, see `photocraft_engine::display_color`). Returns `Err` when the
+    /// document uses features the GPU compositor doesn't cover yet; the caller then falls back to
+    /// the CPU compositor.
+    pub fn composite(
+        &self,
+        doc: &photocraft_doc::Document,
+        region: photocraft_geom::Rect,
+        encode_srgb: bool,
+    ) -> Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> {
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let size = [doc.size.width, doc.size.height];
         if size[0] == 0 || size[1] == 0 {
@@ -195,7 +202,7 @@ impl GpuCanvas {
                 if r.is_empty() {
                     continue;
                 }
-                let offset = [out.rect.x0 - tx, out.rect.y0 - ty, 0, 0];
+                let offset = [out.rect.x0 - tx, out.rect.y0 - ty, i32::from(encode_srgb), 0];
                 let ubuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("pc_encode"),
                     contents: &offset.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(),
@@ -1028,7 +1035,8 @@ fn fs_tile(in: VOut) -> @location(0) vec4<f32> {
         col = textureSampleLevel(tex, samp, (i + 0.5 + f) / size, 0.0);
     }
     if (view.d.z > 0.5 && col.a > 0.0) {
-        // Proof Colors / Gamut Warning: the document's display LUT (alpha flags out-of-gamut).
+        // Colour management, Proof Colors, Gamut Warning: the document's display LUT (alpha flags
+        // out-of-gamut colours).
         let n = f32(textureDimensions(lut).x);
         let c = clamp(col.rgb / col.a, vec3(0.0), vec3(1.0));
         let l = textureSampleLevel(lut, samp, (c * (n - 1.0) + 0.5) / n, 0.0);
@@ -1061,11 +1069,20 @@ fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
     return vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0);
 }
 
+fn srgb_encode(c: vec3<f32>) -> vec3<f32> {
+    return select(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3(0.0031308));
+}
+
 @fragment
 fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let c = textureLoad(acc, vec2<i32>(floor(pos.xy)) - offset.xy, 0);
     let a = clamp(c.a, 0.0, 1.0);
-    return vec4(clamp(c.rgb, vec3(0.0), vec3(1.0)) * a, a);
+    var rgb = clamp(c.rgb, vec3(0.0), vec3(1.0));
+    if (offset.z != 0) {
+        // Linear composite: store its sRGB encoding (8-bit precision where it matters).
+        rgb = srgb_encode(rgb);
+    }
+    return vec4(rgb * a, a);
 }
 "#;
 

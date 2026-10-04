@@ -123,6 +123,9 @@ pub struct ColorSettings {
     /// Advanced › "Blend Text Colors Using Gamma" (1 = off; Photoshop's default 1.45): type
     /// layers mix anti-aliased edges in this gamma (`photocraft_compose::psblend::set_text_gamma`).
     pub blend_text_gamma: f32,
+    /// Monitor profile the canvas is displayed in: `auto` (the main display's profile when the
+    /// platform supplies it, else sRGB), a built-in RGB profile id or an `.icc` path.
+    pub monitor_profile: String,
 }
 
 impl Default for ColorSettings {
@@ -141,6 +144,7 @@ impl Default for ColorSettings {
             bpc: true,
             dither: true,
             blend_text_gamma: photocraft_compose::psblend::TEXT_GAMMA,
+            monitor_profile: "auto".into(),
         }
     }
 }
@@ -176,6 +180,13 @@ pub fn validate_settings(c: &ColorSettings) -> std::result::Result<(), String> {
             return Err(format!("working space `{spec}` is {:?}, not {space:?}", p.color_space));
         }
     }
+    let m = c.monitor_profile.as_str();
+    if !(m.is_empty() || m == "auto") {
+        let p = resolve_profile(m, None, Some(ColorMode::Rgb)).map_err(|e| e.to_string())?;
+        if p.color_space != ColorSpace::Rgb {
+            return Err(format!("monitor profile `{m}` is {:?}, not RGB", p.color_space));
+        }
+    }
     if Intent::parse(&c.intent).is_none() {
         return Err(format!("unknown intent `{}` (perceptual|relative|saturation|absolute)", c.intent));
     }
@@ -188,9 +199,11 @@ pub struct ColorState {
     /// Edit › Color Settings (persisted with the preferences).
     pub settings: ColorSettings,
     proofs: HashMap<DocId, ProofView>,
-    /// Monitor profile bytes supplied by the platform (`None` = sRGB display).
+    /// The main display's ICC profile as read by the platform (used when Color Settings ›
+    /// Monitor Profile is `auto`; `None` = sRGB display).
     pub monitor_profile: Option<Arc<Vec<u8>>>,
     display_cache: Mutex<HashMap<DisplayKey, Arc<Transform>>>,
+    pub(crate) display: crate::display_color::DisplayCaches,
     /// View › 32-bit Preview Options per document.
     pub hdr: HashMap<DocId, crate::proof_sim::HdrPreview>,
 }
@@ -232,7 +245,10 @@ impl ColorState {
             Some(emb) => {
                 let mismatch = emb.content_hash() != working.content_hash();
                 let base = json!({"embedded": emb.description, "working": working.description, "mismatch": mismatch, "policy": policy.id()});
-                if !mismatch {
+                // 32-bit linear images (EXR/HDR are tagged linear sRGB on import) stay linear, as
+                // Photoshop keeps 32-bit documents in a linear version of the working space.
+                let linear_hdr = doc.depth == SampleType::F32 && emb.content_hash() == Builtin::LinearSrgb.profile().content_hash();
+                if !mismatch || linear_hdr {
                     return merge(base, json!({"action": "kept"}));
                 }
                 let action = match policy {
@@ -266,24 +282,20 @@ impl ColorState {
         self.proofs.get(&doc).cloned().unwrap_or_else(|| ProofView { gamut_threshold: photocraft_cms::gamut::DEFAULT_THRESHOLD, ..Default::default() })
     }
 
+    /// The document's proofing state when it was ever changed (no default allocated).
+    pub(crate) fn proof_ref(&self, doc: DocId) -> Option<&ProofView> {
+        self.proofs.get(&doc)
+    }
+
     pub(crate) fn proof_mut(&mut self, doc: DocId) -> &mut ProofView {
         self.proofs.entry(doc).or_insert_with(|| ProofView { gamut_threshold: photocraft_cms::gamut::DEFAULT_THRESHOLD, ..Default::default() })
     }
 
-    /// The monitor profile (sRGB when none was supplied or it does not parse as RGB).
-    pub fn monitor(&self) -> Arc<Profile> {
-        self.monitor_profile
-            .as_ref()
-            .and_then(|b| profile_from_bytes(b).ok())
-            .filter(|p| p.color_space == ColorSpace::Rgb)
-            .unwrap_or_else(|| Arc::new(Builtin::Srgb.profile().clone()))
-    }
-
-    /// Transform from the document's composite (what `photocraft_compose::flatten` returns) to
+    /// Transform from the canvas texture values (the composite, `CanvasDisplay::source`) to
     /// the monitor, including the soft proof when View › Proof Colors is on. Cached per
     /// profile pair and proof settings.
     pub fn display_transform(&self, doc: &Document) -> Result<Arc<Transform>> {
-        let src = composite_profile(doc);
+        let src = self.canvas_display(doc)?.source.clone();
         let dst = self.monitor();
         let pv = self.proof(doc.id);
         let proof = pv.enabled.then(|| (pv.setup.profile.content_hash(), pv.setup.intent, pv.setup.bpc, pv.setup.simulate_paper));
@@ -294,7 +306,7 @@ impl ColorState {
         let t = if pv.enabled {
             Transform::proof(&src, &pv.setup.profile, &dst, pv.setup.intent, pv.setup.bpc, pv.setup.simulate_paper)
         } else {
-            Transform::new(&src, &dst, Intent::RelativeColorimetric, true)
+            Transform::new(&src, &dst, crate::display_color::DISPLAY_INTENT, crate::display_color::DISPLAY_BPC)
         }
         .map_err(cms_err)?;
         let t = Arc::new(t);
@@ -316,18 +328,20 @@ impl ColorState {
         Ok(Lut3d::from_transform(&t, size))
     }
 
-    /// What the canvas should do for `doc`: `None` when neither Proof Colors nor Gamut Warning is
-    /// on, else an RGBA8 display LUT (`size`³, red fastest) whose alpha is 255 where the colour is
-    /// out of the proof gamut (only with Gamut Warning on).
+    /// What the canvas should do for `doc`: `None` when the canvas values go to the screen
+    /// unchanged (the document's display profile matches the monitor and neither Proof Colors,
+    /// Gamut Warning nor a 32-bit preview is on), else an RGBA8 display LUT (`size`³, red fastest)
+    /// mapping canvas texture values to the monitor, whose alpha is 255 where the colour is out
+    /// of the proof gamut (only with Gamut Warning on).
     pub fn canvas_lut(&self, doc: &Document, size: usize) -> Result<Option<Vec<u8>>> {
         let pv = self.proof(doc.id);
+        let display = self.canvas_display(doc)?;
         if !pv.enabled && !pv.gamut_warning && !crate::proof_sim::hdr_active(self, doc) {
-            return Ok(None);
+            return Ok(display.transform.as_ref().map(|t| Lut3d::from_transform(t, size.max(2)).to_rgba8()));
         }
         let lut = self.display_lut(doc, size)?;
         let mut bytes = lut.to_rgba8();
-        let check =
-            if pv.gamut_warning { Some(GamutCheck::new(&composite_profile(doc), &pv.setup.profile, pv.gamut_threshold).map_err(cms_err)?) } else { None };
+        let check = if pv.gamut_warning { Some(GamutCheck::new(&display.source, &pv.setup.profile, pv.gamut_threshold).map_err(cms_err)?) } else { None };
         let s = (size - 1) as f32;
         for (i, px) in bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let rgb = [(i % size) as f32 / s, ((i / size) % size) as f32 / s, (i / (size * size)) as f32 / s];
@@ -787,6 +801,9 @@ fn color_settings(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(v) = str_of("workingGray") {
         next.working_gray = v;
     }
+    if let Some(v) = str_of("monitorProfile") {
+        next.monitor_profile = v;
+    }
     for (k, slot) in [("policyRgb", &mut next.policy_rgb), ("policyCmyk", &mut next.policy_cmyk), ("policyGray", &mut next.policy_gray)] {
         if let Some(v) = p.get(k).and_then(Value::as_str) {
             *slot = Policy::parse(v).ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: format!("`{k}` must be preserve|convert|off") })?;
@@ -830,6 +847,8 @@ fn color_settings(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({
         "settings": c,
         "working": {"rgb": desc(ColorMode::Rgb), "cmyk": desc(ColorMode::Cmyk), "gray": desc(ColorMode::Grayscale)},
+        "monitor": s.color.monitor().description,
+        "monitorDetected": s.color.monitor_profile.is_some(),
     }))
 }
 
@@ -912,7 +931,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "edit.colorSettings",
             "Color Settings…",
             ["Edit"],
-            r##"{"workingRgb":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020","workingCmyk":"coated-cmyk","workingGray":"sgray|gray-gamma-2.2","policyRgb":"preserve|convert|off","policyCmyk":"preserve|convert|off","policyGray":"preserve|convert|off","askOnMismatch":bool=true,"askOnPaste":bool=true,"askOnMissing":bool=false,"intent":"relative|perceptual|saturation|absolute","blendTextGamma":1.0..2.2|bool=1.45,"bpc":bool=true,"dither":bool=true,"reset":bool=false} (working spaces also accept .icc paths)"##,
+            r##"{"workingRgb":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020","workingCmyk":"coated-cmyk","workingGray":"sgray|gray-gamma-2.2","policyRgb":"preserve|convert|off","policyCmyk":"preserve|convert|off","policyGray":"preserve|convert|off","askOnMismatch":bool=true,"askOnPaste":bool=true,"askOnMissing":bool=false,"intent":"relative|perceptual|saturation|absolute","blendTextGamma":1.0..2.2|bool=1.45,"bpc":bool=true,"dither":bool=true,"monitorProfile":"auto|srgb|display-p3|adobe-rgb-compat|prophoto-compat|rec2020","reset":bool=false} (working spaces and the monitor profile also accept .icc paths; monitor `auto` = the main display's profile when the platform provides it, else sRGB)"##,
             always,
             color_settings,
             true,

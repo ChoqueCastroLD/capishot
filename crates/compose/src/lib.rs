@@ -10,7 +10,9 @@
 //! - fill layers, Dissolve
 //!
 //! This is the reference the GPU backend (milestone M5) must match within 1/255. Compositing
-//! currently happens in display RGB. Mode-native (CMYK/Lab) compositing arrives with ICC in M8.
+//! currently happens in display RGB. CMYK layers are read through the document's CMYK profile
+//! (the built-in coated CMYK when untagged) and composited in sRGB; mode-native (CMYK/Lab)
+//! compositing arrives with ICC in M8.
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -91,12 +93,17 @@ pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
     };
     // Lab documents mix Normal blending in CIELAB, as Photoshop does (psblend::LAB_MIX).
     let lab = doc.mode == photocraft_color::ColorMode::Lab;
+    // CMYK layers are read through the document's own CMYK profile (thread-local scope).
+    let cmyk = cmyk_space(doc);
+    let cmyk = cmyk.as_ref();
     if rect.width() as i32 <= tile && rect.height() as i32 <= tile {
-        let mut buf = multichannel::backdrop(doc, rect);
-        psblend::LAB_MIX.with(|l| l.set(lab));
-        composite_stack(&doc.layers, &mut buf, &cx);
-        psblend::LAB_MIX.with(|l| l.set(false));
-        return buf;
+        return photocraft_color::convert::with_cmyk_space(cmyk, || {
+            let mut buf = multichannel::backdrop(doc, rect);
+            psblend::LAB_MIX.with(|l| l.set(lab));
+            composite_stack(&doc.layers, &mut buf, &cx);
+            psblend::LAB_MIX.with(|l| l.set(false));
+            buf
+        });
     }
     let mut tiles = Vec::new();
     let mut y = rect.y0;
@@ -109,11 +116,13 @@ pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
         y += tile;
     }
     let run = |t: &Rect| {
-        let mut b = multichannel::backdrop(doc, *t);
-        psblend::LAB_MIX.with(|l| l.set(lab));
-        composite_stack(&doc.layers, &mut b, &cx);
-        psblend::LAB_MIX.with(|l| l.set(false));
-        b
+        photocraft_color::convert::with_cmyk_space(cmyk, || {
+            let mut b = multichannel::backdrop(doc, *t);
+            psblend::LAB_MIX.with(|l| l.set(lab));
+            composite_stack(&doc.layers, &mut b, &cx);
+            psblend::LAB_MIX.with(|l| l.set(false));
+            b
+        })
     };
     #[cfg(not(target_arch = "wasm32"))]
     let parts: Vec<Buffer> = {
@@ -132,6 +141,16 @@ pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
         }
     }
     out
+}
+
+/// The document's own CMYK profile for reading its CMYK pixels (`None`: not a CMYK document,
+/// untagged, or the built-in coated CMYK). Enter it with `photocraft_color::convert::with_cmyk_space`
+/// around code that converts the document's CMYK pixels or colours to RGB.
+pub fn cmyk_space(doc: &Document) -> Option<std::sync::Arc<photocraft_color::convert::CmykSpace>> {
+    if doc.mode != photocraft_color::ColorMode::Cmyk {
+        return None;
+    }
+    photocraft_color::convert::CmykSpace::for_profile(doc.icc_profile.as_ref())
 }
 
 /// Composite the full canvas.

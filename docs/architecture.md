@@ -315,7 +315,8 @@ Both backends consume the same plan. This is the only place that encodes Photosh
 ### 7.3 Color
 
 - Blending happens in document space by default, which is Photoshop-compatible. A per-document "linear light blending" option is also available.
-- **Display transform:** compose the ICC transforms with `photocraft-cms`, then bake them into a 3D LUT that the canvas shader's final pass applies (Proof Colors and Gamut Warning work this way today).
+- **Display transform** (`engine/src/display_color.rs`): the canvas is always colour-managed, document profile → monitor profile (relative colorimetric + BPC), cached per (document profile, mode, monitor). On the GPU canvas the transform, plus Proof Colors / Gamut Warning / 32-bit preview, is baked into a 33³ 3D LUT the canvas shader's final pass applies; the CPU canvas runs an 8-bit `photocraft-cms` transform on the composite. When the document profile matches the monitor (sRGB on sRGB) there is no LUT and no transform. Linear composites (EXR/HDR, tagged linear sRGB on import) are stored sRGB-encoded in the 8-bit canvas texture. CMYK documents are read through their embedded CMYK profile (`photocraft_color::convert::with_cmyk_space`, entered by the compositors and composite exports).
+- **Monitor profile:** Edit › Color Settings › Monitor Profile: `auto` (macOS: the main display's profile, read at launch through `osascript`/AppKit `NSScreen.colorSpace.ICCProfileData`, no FFI; elsewhere sRGB), a built-in RGB profile or an `.icc` path. The profile is not re-read when the window moves to another display.
 - **HDR/EDR output** (an `rgba16float` surface with an extended-range colorspace) is a later-phase feature. The interfaces already carry `f32` pixels.
 
 ### 7.4 Oracle

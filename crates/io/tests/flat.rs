@@ -48,7 +48,28 @@ codec_rt!(tiff_rgb16, "tif", ColorMode::Rgb, SampleType::U16, false, 0.0);
 codec_rt!(tiff_cmyk8, "tiff", ColorMode::Cmyk, SampleType::U8, false, 0.0);
 codec_rt!(tiff_cmyka16, "tiff", ColorMode::Cmyk, SampleType::U16, true, 0.0);
 codec_rt!(tiff_gray8, "tiff", ColorMode::Grayscale, SampleType::U8, false, 0.0);
-codec_rt!(exr_rgba32, "exr", ColorMode::Rgb, SampleType::F32, true, 0.0);
+
+/// EXR stores linear light: a linear document round-trips exactly; an sRGB (untagged) one is
+/// linearised on export and comes back tagged linear sRGB with the same colours.
+#[test]
+fn exr_rgba32() {
+    let mut d = single(ColorMode::Rgb, SampleType::F32, true);
+    d.icc_profile = Some(photocraft_cms::Builtin::LinearSrgb.profile().to_bytes());
+    let r = export(&d, "exr", &ExportOptions::default()).expect("export");
+    let back = import("x.exr", &r.bytes).expect("import").document;
+    assert_eq!((back.size, back.mode, back.depth), (d.size, d.mode, d.depth));
+    assert_eq!(back.icc_profile.as_deref(), d.icc_profile.as_deref(), "tagged linear sRGB");
+    pixels_eq(&d, &back, 0.0);
+    // Untagged (sRGB) → linearised.
+    let srgb = single(ColorMode::Rgb, SampleType::F32, true);
+    let r = export(&srgb, "exr", &ExportOptions::default()).expect("export");
+    let back = import("x.exr", &r.bytes).expect("import").document;
+    let (a, b) = (srgb.layers[0].surface().unwrap().pixel(2, 3), back.layers[0].surface().unwrap().pixel(2, 3));
+    for c in 0..3 {
+        assert!((photocraft_color::convert::srgb_to_linear(a[c]) - b[c]).abs() < 1e-4, "{a:?} -> {b:?}");
+    }
+    assert!((a[3] - b[3]).abs() < 1e-6, "alpha kept");
+}
 
 fn smooth(mode: ColorMode) -> photocraft_doc::Document {
     let mut d = photocraft_doc::Document::new("s", photocraft_geom::Size::new(32, 16), mode, SampleType::U8);

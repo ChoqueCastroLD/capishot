@@ -22,12 +22,12 @@ use photocraft_doc::Document;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::color_cmds::{ColorState, composite_profile};
+use crate::color_cmds::ColorState;
 use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 
 /// What a proof simulates.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ProofKind {
     /// The proof profile (Working CMYK, Custom…).
@@ -153,7 +153,7 @@ pub fn display_lut(c: &ColorState, doc: &Document, size: usize) -> Result<Option
         return Ok(None);
     }
     let err = |e: photocraft_cms::CmsError| EngineError::Other(format!("colour management: {e}"));
-    let src = composite_profile(doc);
+    let src = c.canvas_display(doc)?.source.clone();
     let mon = c.monitor();
     let srgb = Builtin::Srgb.profile();
     let setup = &pv.setup;
@@ -163,7 +163,7 @@ pub fn display_lut(c: &ColorState, doc: &Document, size: usize) -> Result<Option
             let t = if pv.enabled {
                 Transform::proof(&src, &setup.profile, &mon, setup.intent, setup.bpc, setup.simulate_paper)
             } else {
-                Transform::new(&src, &mon, Intent::RelativeColorimetric, true)
+                Transform::new(&src, &mon, crate::display_color::DISPLAY_INTENT, crate::display_color::DISPLAY_BPC)
             }
             .map_err(err)?;
             Box::new(move |v| eval3(&t, &v))
