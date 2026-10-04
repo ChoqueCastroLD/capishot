@@ -39,6 +39,19 @@ xtask/                       cargo xtask layers | wasm | ci | stats | corpus | p
 
 ## 3. Golden rules
 
+### Never crash (outranks feature work)
+
+People trust PhotoCraft with their work, and a crash loses it. A malformed file, a bad command or MCP param, a corrupt settings file, an odd keystroke or a full disk must produce an error the user or agent can act on, never a panic. Don't ship a feature by adding a panic path; fix a crash before building on top of it. The shared standard is `../craftrules/standards/never-crash.md`.
+
+- **Non-test code never panics.** No `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!` or `unimplemented!`. Return the crate's error type and propagate with `?`; use `ok_or(..)?`, `let .. else { return Err(..) }`, `if let`, or `unwrap_or*` where a fallback is truly correct (never one that silently corrupts a document). Unfinished features return an "unsupported" error. The only exception is a provably infallible literal: `#[allow(clippy::expect_used)]` plus `.expect("why it can't fail")`.
+- **No `unsafe`.** The workspace sets `unsafe_code = "forbid"`.
+- **Input-derived numbers are hostile.** Use `get()` rather than `[i]`/`[a..b]` for indices from files, params, selections or arithmetic on them; slice strings only at char boundaries; use `checked_*`/`saturating_*` for lengths, offsets and counts; guard division by zero and NaN/inf casts; cap allocations sized by input.
+- **Bound recursion** with depth limits or seen-sets (documents can be deep or cyclic).
+- **Don't cascade.** Handle lock poisoning (`lock().unwrap_or_else(PoisonError::into_inner)`) and treat thread joins as `Result`s.
+- **Last-resort guard.** The app shell must catch an escaped panic around command dispatch and file import/export, reports it as an error and keeps the document. It's a safety net, not a licence to panic. Keep `panic = "unwind"`.
+- **Prove it.** Every crash fix comes with a small synthetic regression test that panicked before the fix.
+- **Enforced by clippy.** `clippy.toml` allows `unwrap`/`expect`/`panic`/indexing in tests only. Clean crates carry `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`; new crates start with it.
+
 1. **Everything is a command.** New user-visible behaviour = a command in the engine (`crates/engine/src/*_cmds.rs`, registered in `commands.rs`) with id, label, menu path, shortcut, params doc, `enabled` and `run`, plus tests. The UI, CLI, control channel and MCP all dispatch commands by id. Use the **exact id from `crates/ui-egui/src/menu_catalog.rs`** and the menu item goes live automatically. Only pure view/window state (zoom, panels, screen mode) belongs to the shell (`menus.rs` `UI_COMMANDS`).
 2. **No format or colour assumptions.** Bit depth (8/16/32f) and colour model (RGB/Gray/CMYK/Lab…) are runtime data. Never introduce a `u8`-only pixel path in public APIs. Never assume sRGB: colour conversions go through `photocraft-cms` (`Transform`, `transform::cached`). Test at several depths.
 3. **Clean-room.** We studied Photoshop and other proprietary editors for *behaviour and look only*. Never copy their code, shaders, profiles or assets. Implement from public specs (Adobe PSD spec, ICC, ISO 32000 blend modes, papers) and observation. Third-party assets must be permissively licensed, keep their license file next to them, and get a row in `ATTRIBUTION.md` (path, title, author, source, license) in the same change; so do original assets. The ArtCraft logos in `docs/brand/` are not open source (`docs/brand/LICENSE-brand.txt`).
@@ -48,7 +61,7 @@ xtask/                       cargo xtask layers | wasm | ci | stats | corpus | p
 7. **Never break wasm.** L0–L6 must `cargo check --target wasm32-unknown-unknown` (run `cargo xtask wasm`). File-system code is `cfg(not(target_arch = "wasm32"))` or goes through the platform services.
 8. **Performance is a feature.** Benchmark heavy operations on a 24–36 MP image in release. Work per tile in parallel (rayon), skip empty tiles, never scan a full surface per frame (cache per revision), and record before/after timings in the dev log.
 
-9. **Never panic on input.** A command's `run` closure and anything it calls must return `Err`, never panic, for *any* params or document state. No `unwrap`/`expect`/`panic!`/`unreachable!`/`todo!` on values derived from params, selections, layer/channel indices, or pixel data; no slice indexing (`a[i]`) or integer division without first checking bounds/zero; validate sizes before allocating (reject absurd dimensions instead of trying to allocate). Use `?`, `ok_or(...)`, `get(i)`, `checked_*`/`saturating_*`, and clamp ranges. `unwrap`/`expect` are allowed only on invariants that cannot depend on input (e.g. a just-created layer), and in tests. The `panic_hunt` integration test fuzzes every command with adversarial params and must stay green.
+9. **Never panic on input** (see *Never crash* above). A command's `run` closure and anything it calls must return `Err`, never panic, for *any* params or document state: validate params, check bounds before indexing or dividing, and reject absurd sizes before allocating. The `panic_hunt` integration test fuzzes every command with adversarial params and must stay green.
 
 ## 4. Picking work
 

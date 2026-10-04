@@ -50,7 +50,7 @@ rayon = "1"
 criterion = { version = "0.5", default-features = false }
 
 [workspace.lints.rust]
-unsafe_code = "deny"
+unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 dbg_macro = "warn"

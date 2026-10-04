@@ -3,6 +3,7 @@
 - **Language:** Rust only. No JavaScript or TypeScript. On the web, `wasm-bindgen` generates a small loader; never hand-write JS.
 - **Licence:** contributions are MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`). The ArtCraft logos in `docs/brand/` are not open source (`docs/brand/LICENSE-brand.txt`).
 - **Clean-room:** do not copy code, shaders, icons, ICC profiles or other assets from proprietary software (such as Photoshop). Match behaviour and look by observation and public specs. Only use assets with permissive licences, keep their license next to the asset (e.g. `assets/fonts/OFL-*.txt`, `assets/icons/LICENSE-lucide.txt`), and list every asset in `ATTRIBUTION.md`.
+- **Never crash:** non-test code must not panic: no `unwrap`/`expect`/`panic!`/`unreachable!`/`todo!`/`unimplemented!` and no `unsafe`. Errors go through `Result` and `?`, input-derived indices and sizes are checked, and every crash fix ships with a regression test. See *Never crash* in `AGENTS.md`.
 - **Commands, not handlers:** new features are engine commands with tests, and the UI calls them (checklist below).
 - **Layering:** `cargo xtask layers` must pass. Register new crates in `xtask/src/layers.rs`.
 - **Tests:** required for every change. Format code needs round-trip and malformed-input tests. Pixel code is tested at 8, 16 and 32-bit.
