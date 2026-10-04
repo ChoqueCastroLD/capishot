@@ -901,6 +901,10 @@ fn presets_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, 
         if ui.add_enabled(selected < list.len(), egui::Button::new("Delete")).clicked() {
             let _ = app.run("edit.presets.presetManager", json!({"action": "delete", "kind": kind, "index": selected}));
         }
+        // Load Photoshop brushes (.abr) into the library.
+        if kind == "brushes" && ui.button("Load…").on_hover_text("Import Photoshop brushes (.abr)").clicked() {
+            app.open_dialog_file();
+        }
     });
     f.insert("kind".into(), json!(kind));
     f.insert("selected".into(), json!(selected));

@@ -52,6 +52,7 @@ pub mod parity;
 pub mod perspective_ui;
 pub mod plugin_ui;
 pub mod prefs_ui;
+pub mod preset_files_ui;
 pub mod preset_panels;
 pub mod proxy;
 pub mod puppet_ui;
@@ -63,6 +64,7 @@ pub mod slice_ui;
 pub mod smart_ui;
 pub mod snap_ui;
 pub mod state;
+pub mod stylus;
 pub mod theme;
 mod timeline_ui;
 pub mod tone;
@@ -240,6 +242,8 @@ pub struct PhotocraftApp {
     pub(crate) discard: Option<discard_ui::Prompt>,
     /// Set once the user has agreed to quit, so the resulting close request goes through.
     pub(crate) allow_close: bool,
+    /// Pen pressure/tilt from the platform (see `stylus`).
+    pub stylus: stylus::Stylus,
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     live_tokens: theme::live::LiveTokens,
 }
@@ -291,6 +295,7 @@ impl PhotocraftApp {
             prefs_rt: Default::default(),
             discard: None,
             allow_close: false,
+            stylus: Default::default(),
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
         };
@@ -362,8 +367,11 @@ impl PhotocraftApp {
 
     /// Open a file's bytes as a new document named `name`; returns the import warnings (also
     /// shown to the user). Files from disk go through [`open_file`](Self::open_file), which also
-    /// remembers the path.
+    /// remembers the path. Brush and gradient files go to the preset libraries instead.
     pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
+        if let Some(r) = preset_files_ui::open(self, name, bytes) {
+            return r.map(|()| Vec::new());
+        }
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
         let (doc, warnings) = import(name, bytes)?;
         // Edit › Color Settings policies apply on open; mismatches can ask what to do.

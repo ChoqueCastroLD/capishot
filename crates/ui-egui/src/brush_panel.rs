@@ -312,12 +312,46 @@ pub fn preview_pixels(b: &BrushSettings, w: u32, h: u32, color: [f32; 4]) -> Vec
     px.iter().flat_map(|p| p.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).collect()
 }
 
-/// Texture for a brush preview, cached on the brush's JSON.
+/// Cheap signature of everything that changes a brush's preview. Sampled tips and pattern tiles
+/// contribute their size and a strided sample instead of every pixel, so imported presets with
+/// big tips don't serialise megabytes per frame.
+pub fn preview_sig(b: &BrushSettings) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    fn js<T: serde::Serialize>(h: &mut DefaultHasher, v: &T) {
+        serde_json::to_vec(v).unwrap_or_default().hash(h);
+    }
+    fn tile(h: &mut DefaultHasher, t: &paint::GrayTile) {
+        (t.width, t.height).hash(h);
+        let step = (t.data.len() / 4096).max(1);
+        t.data.iter().step_by(step).for_each(|v| v.hash(h));
+    }
+    fn tip(h: &mut DefaultHasher, t: &paint::TipShape) {
+        match t {
+            paint::TipShape::Round => 0u8.hash(h),
+            paint::TipShape::Sampled(g) => tile(h, g),
+        }
+    }
+    let mut h = DefaultHasher::new();
+    js(&mut h, &(b.size, b.hardness, b.spacing, b.opacity, b.flow, b.pressure_size, b.pressure_opacity, b.erase, b.mode, b.angle, b.roundness));
+    js(&mut h, &(b.flip_x, b.flip_y, b.aliased, b.noise, b.wet_edges, b.build_up, b.build_up_rate, b.protect_texture, b.seed));
+    js(&mut h, &(&b.shape_dynamics, &b.scattering, &b.color_dynamics, &b.transfer, &b.pose, &b.smoothing));
+    tip(&mut h, &b.tip);
+    let d = &b.dual_brush;
+    js(&mut h, &(d.enabled, d.mode, d.size, d.hardness, d.roundness, d.angle, d.spacing, d.scatter, d.both_axes, d.count, d.flip));
+    tip(&mut h, &d.tip);
+    let t = &b.texture;
+    js(&mut h, &(t.enabled, t.invert, t.scale, t.brightness, t.contrast, t.each_tip, t.mode, t.depth, t.depth_jitter));
+    match &t.pattern {
+        Pattern::Tile(g) => tile(&mut h, g),
+        p => js(&mut h, p),
+    }
+    h.finish()
+}
+
+/// Texture for a brush preview, cached on [`preview_sig`].
 fn preview_texture(ui: &egui::Ui, b: &BrushSettings, w: u32, h: u32, color: Color32) -> Arc<egui::TextureHandle> {
-    let mut key_b = b.clone();
-    key_b.color = [0.0; 4];
-    let sig = format!("{}{w}x{h}{color:?}", serde_json::to_string(&key_b).unwrap_or_default());
-    let id = egui::Id::new(("brush-preview", sig));
+    let id = egui::Id::new(("brush-preview", preview_sig(b), w, h, color));
     if let Some(tex) = ui.data(|d| d.get_temp::<Arc<egui::TextureHandle>>(id)) {
         return tex;
     }
@@ -329,32 +363,81 @@ fn preview_texture(ui: &egui::Ui, b: &BrushSettings, w: u32, h: u32, color: Colo
     tex
 }
 
+/// Group label for presets saved without a group.
+pub const UNGROUPED: &str = "My Brushes";
+
+/// Preset indices in panel order: groups in order of first appearance.
+pub fn grouped_presets(presets: &[paint::BrushPreset]) -> Vec<(String, Vec<usize>)> {
+    let mut out: Vec<(String, Vec<usize>)> = Vec::new();
+    for (i, p) in presets.iter().enumerate() {
+        let g = if p.group.is_empty() { UNGROUPED } else { p.group.as_str() };
+        match out.iter_mut().find(|(n, _)| n == g) {
+            Some((_, v)) => v.push(i),
+            None => out.push((g.to_string(), vec![i])),
+        }
+    }
+    out
+}
+
 fn presets_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    let presets: Vec<(String, BrushSettings)> = app.session.tools.presets.iter().map(|p| (p.name.clone(), p.brush.clone())).collect();
-    // The current brush matches a preset when everything but its colour and size agrees.
-    let same = |a: &BrushSettings, b: &BrushSettings| BrushSettings { color: b.color, size: b.size, background: b.background, ..a.clone() } == *b;
-    let current = app.session.tools.brush.clone();
-    egui::ScrollArea::vertical().id_salt("brush-presets").max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
-        for (name, brush) in presets {
-            let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
-            if same(&brush, &current) {
-                ui.painter().rect_filled(r, t.radius_sm, t.accent_soft);
-            } else if resp.hovered() {
-                ui.painter().rect_filled(r, t.radius_sm, t.hover);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("{} presets", app.session.tools.presets.len())).color(t.text_faint));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button("Import Brushes…").on_hover_text("Load Photoshop brushes (.abr)").clicked() {
+                app.open_dialog_file();
             }
-            let tex = preview_texture(ui, &brush, 180, 36, t.text);
-            let ir = egui::Rect::from_min_size(r.left_top() + vec2(4.0, 2.0), vec2(180.0, 36.0));
-            ui.painter().image(tex.id(), ir, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Color32::WHITE);
-            ui.painter().text(egui::pos2(ir.right() + 10.0, r.center().y), egui::Align2::LEFT_CENTER, &name, egui::FontId::proportional(12.0), t.text_dim);
-            if resp.clicked() {
-                let r = app.session.execute("tools.setBrush", json!({"preset": name}));
-                if let Err(e) = r {
-                    app.ui.status = e.to_string();
+        });
+    });
+    ui.add_space(4.0);
+    let groups = grouped_presets(&app.session.tools.presets);
+    // The current brush matches a preset when everything but its colour and size agrees.
+    // Cheap fields first: the full comparison clones the preset (and its tip).
+    let same = |a: &BrushSettings, b: &BrushSettings| {
+        a.hardness == b.hardness
+            && a.spacing == b.spacing
+            && a.tip == b.tip
+            && BrushSettings { color: b.color, size: b.size, background: b.background, ..a.clone() } == *b
+    };
+    let brush = &app.session.tools.brush;
+    let mut clicked = None;
+    egui::ScrollArea::vertical().id_salt("brush-presets").max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
+        for (group, items) in groups {
+            ui.add_space(4.0);
+            ui.label(RichText::new(&group).font(theme::semibold(12.0)).color(t.text));
+            ui.add_space(2.0);
+            for i in items {
+                let Some(p) = app.session.tools.presets.get(i) else { continue };
+                let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+                if !ui.is_rect_visible(r) {
+                    continue;
+                }
+                if same(&p.brush, brush) {
+                    ui.painter().rect_filled(r, t.radius_sm, t.accent_soft);
+                } else if resp.hovered() {
+                    ui.painter().rect_filled(r, t.radius_sm, t.hover);
+                }
+                let tex = preview_texture(ui, &p.brush, 180, 36, t.text);
+                let ir = egui::Rect::from_min_size(r.left_top() + vec2(4.0, 2.0), vec2(180.0, 36.0));
+                ui.painter().image(tex.id(), ir, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Color32::WHITE);
+                ui.painter().text(
+                    egui::pos2(ir.right() + 10.0, r.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    &p.name,
+                    egui::FontId::proportional(12.0),
+                    t.text_dim,
+                );
+                if resp.clicked() {
+                    clicked = Some(p.name.clone());
                 }
             }
         }
     });
+    if let Some(name) = clicked
+        && let Err(e) = app.session.execute("tools.setBrush", json!({"preset": name}))
+    {
+        app.ui.status = e.to_string();
+    }
 }
 
 pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {

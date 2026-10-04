@@ -124,6 +124,117 @@ pub fn bristle_tip(n: u32, seed: u32) -> GrayTile {
     })
 }
 
+/// A charcoal tip: a squat ellipse of broken horizontal streaks with a gritty edge.
+pub fn charcoal_tip(n: u32, seed: u32) -> GrayTile {
+    let salt = u64::from(seed) + 404;
+    let c = n as f32 / 2.0;
+    GrayTile::from_fn(n, n, |x, y| {
+        let (dx, dy) = ((x as f32 + 0.5 - c) / c, (y as f32 + 0.5 - c) / c);
+        let r = (dx * dx + (dy * 1.6).powi(2)).sqrt();
+        let edge = 0.85 + 0.15 * value_noise(dx * 6.0 + 9.0, dy * 6.0 + 9.0, 64, salt);
+        if r > edge {
+            return 0.0;
+        }
+        // Streaks: per-row density modulated along x so they break up.
+        let row = hash2(0, y as i32, salt);
+        let along = value_noise(x as f32 / 6.0, y as f32 / 1.5, 1 << 12, salt ^ 0x77);
+        let grit = hash2(x as i32, y as i32, salt ^ 0x13);
+        let v = (0.35 + 0.65 * row) * (0.4 + 0.6 * along) * if grit < 0.15 { 0.2 } else { 1.0 };
+        v * ((edge - r) * 6.0).clamp(0.0, 1.0)
+    })
+}
+
+/// A leaf: a pointed lens shape with a lighter midrib, stem towards -x.
+pub fn leaf_tip(n: u32) -> GrayTile {
+    let c = n as f32 / 2.0;
+    GrayTile::from_fn(n, n, |x, y| {
+        let (u, v) = ((x as f32 + 0.5 - c) / c, (y as f32 + 0.5 - c) / c);
+        // Half-width of the blade at u: widest a little behind the middle, pointed at both ends.
+        let t = ((u + 1.0) / 2.0).clamp(0.0, 1.0);
+        let half = 0.42 * (std::f32::consts::PI * t).sin() * (1.0 - 0.25 * t);
+        let inside = ((half - v.abs()) * c).clamp(0.0, 1.0);
+        let rib = 1.0 - 0.45 * (1.0 - (v.abs() * c / 1.2).clamp(0.0, 1.0));
+        let veins = 1.0 - 0.2 * (1.0 - ((((u * 7.0 - v.abs() * 5.0).fract()) - 0.5).abs() * 8.0).clamp(0.0, 1.0));
+        let stem = if u < -0.75 && v.abs() * c < 0.9 { 1.0 } else { 0.0 };
+        (inside * rib * veins).max(stem)
+    })
+}
+
+/// Grass: a tuft of tapered, slightly curved blades rising from the bottom edge.
+pub fn grass_tip(n: u32, seed: u32, blades: u32) -> GrayTile {
+    let salt = u64::from(seed) + 505;
+    let s = n as f32;
+    let bl: Vec<(f32, f32, f32, f32)> = (0..blades)
+        .map(|i| {
+            let base = (0.3 + 0.4 * hash2(i as i32, 0, salt)) * s;
+            let height = (0.55 + 0.42 * hash2(i as i32, 1, salt)) * s;
+            let lean = (hash2(i as i32, 2, salt) - 0.5) * 0.9;
+            let width = (0.025 + 0.025 * hash2(i as i32, 3, salt)) * s;
+            (base, height, lean, width)
+        })
+        .collect();
+    GrayTile::from_fn(n, n, |x, y| {
+        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+        let up = s - py;
+        bl.iter().fold(0.0f32, |acc, &(base, height, lean, width)| {
+            if up < 0.0 || up > height {
+                return acc;
+            }
+            let t = up / height;
+            let cx = base + lean * height * t * t;
+            let w = width * (1.0 - t) + 0.3;
+            acc.max((w - (px - cx).abs()).clamp(0.0, 1.0))
+        })
+    })
+}
+
+/// A sea sponge: a disc riddled with holes of different sizes.
+pub fn sponge_tip(n: u32, seed: u32) -> GrayTile {
+    let salt = u64::from(seed) + 606;
+    let c = n as f32 / 2.0;
+    GrayTile::from_fn(n, n, |x, y| {
+        let (dx, dy) = (x as f32 + 0.5 - c, y as f32 + 0.5 - c);
+        let r = (dx * dx + dy * dy).sqrt() / c;
+        let edge = 0.78 + 0.2 * value_noise((dy.atan2(dx) + std::f32::consts::PI) * 2.5, 0.5, 16, salt);
+        let disc = ((edge - r) * 6.0).clamp(0.0, 1.0);
+        let pores = fbm(x as f32, y as f32, n as f32, 6, 3, salt);
+        disc * ((pores - 0.42) * 6.0).clamp(0.0, 1.0)
+    })
+}
+
+/// A four-point sparkle with a soft glow.
+pub fn star_tip(n: u32) -> GrayTile {
+    let c = n as f32 / 2.0;
+    GrayTile::from_fn(n, n, |x, y| {
+        let (u, v) = (((x as f32 + 0.5 - c) / c).abs(), ((y as f32 + 0.5 - c) / c).abs());
+        let ray = |a: f32, b: f32| ((1.0 - a) * (1.0 - (b / (0.08 * (1.0 - a) + 0.005)).min(1.0))).max(0.0);
+        let glow = (1.0 - (u * u + v * v).sqrt() * 2.5).max(0.0).powi(2);
+        ray(u, v).max(ray(v, u)).max(glow).min(1.0)
+    })
+}
+
+/// A rake: a row of separate round bristles of slightly different sizes.
+pub fn rake_tip(n: u32, seed: u32, bristles: u32) -> GrayTile {
+    let salt = u64::from(seed) + 707;
+    let s = n as f32;
+    let k = bristles.max(1);
+    let dots: Vec<(f32, f32, f32)> = (0..k)
+        .map(|i| {
+            let x = s * (i as f32 + 0.5) / k as f32;
+            let y = s / 2.0 + (hash2(i as i32, 0, salt) - 0.5) * s * 0.08;
+            let r = s / k as f32 * (0.22 + 0.18 * hash2(i as i32, 1, salt));
+            (x, y, r)
+        })
+        .collect();
+    GrayTile::from_fn(n, n, |x, y| {
+        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+        dots.iter().fold(0.0f32, |acc, &(dx, dy, r)| {
+            let d = ((px - dx).powi(2) + (py - dy).powi(2)).sqrt();
+            acc.max((r + 0.5 - d).clamp(0.0, 1.0) * 0.9)
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,7 +257,17 @@ mod tests {
 
     #[test]
     fn tips_have_paint() {
-        for t in [chalk_tip(48, 1), spatter_tip(48, 1, 12), bristle_tip(48, 1)] {
+        for t in [
+            chalk_tip(48, 1),
+            spatter_tip(48, 1, 12),
+            bristle_tip(48, 1),
+            charcoal_tip(48, 1),
+            leaf_tip(48),
+            grass_tip(48, 1, 9),
+            sponge_tip(48, 1),
+            star_tip(48),
+            rake_tip(48, 1, 7),
+        ] {
             assert!(t.is_valid());
             let sum: f32 = t.to_f32().iter().sum();
             assert!(sum > 48.0, "{sum}");

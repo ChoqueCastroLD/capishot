@@ -27,6 +27,10 @@ impl PhotocraftApp {
     /// `path` for File › Save, and `path` goes to the top of Open Recent. Returns the import
     /// warnings (also shown to the user).
     pub fn open_file(&mut self, path: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
+        // Brushes/gradients go to the preset libraries (no document, no Open Recent entry).
+        if let Some(r) = crate::preset_files_ui::open(self, path, bytes) {
+            return r.map(|()| Vec::new());
+        }
         let warnings = self.open_bytes(&display_name(path), bytes)?;
         if let Some(st) = self.session.active_mut() {
             st.path = Some(path.to_string());

@@ -3479,6 +3479,7 @@ dependencies = [
  "photocraft-doc",
  "photocraft-format",
  "photocraft-geom",
+ "photocraft-paint",
  "photocraft-psd",
  "photocraft-raster",
  "photocraft-raw",

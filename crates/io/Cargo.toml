@@ -20,6 +20,7 @@ photocraft-psd = { workspace = true }
 photocraft-codecs = { workspace = true }
 photocraft-raw = { workspace = true }
 photocraft-text = { workspace = true }
+photocraft-paint = { workspace = true }
 photocraft-format = { path = "../format" }
 thiserror = { workspace = true }
 

@@ -40,12 +40,14 @@
 #![warn(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod abr;
 pub mod blend;
 pub mod builder;
 pub mod compression;
 pub mod descriptor;
 pub mod error;
 pub mod file;
+pub mod grd;
 pub mod header;
 pub mod image_data;
 mod io;

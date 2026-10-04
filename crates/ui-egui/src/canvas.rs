@@ -942,6 +942,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
     }
 
+    // Pen pressure/tilt for this frame's tool events (mouse = 1.0).
+    app.stylus.update(&ui.input(|i| i.events.clone()));
     let space_pan = ui.input(|i| i.key_down(egui::Key::Space));
     let middle = ui.input(|i| i.pointer.middle_down());
     let tool = if space_pan || middle { Tool::Hand } else { app.ui.tool };
@@ -965,13 +967,13 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             && let Some(p) = response.interact_pointer_pos()
         {
             let d = xf.to_doc(p);
-            tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: 1.0 }, mods);
+            tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: app.stylus.pressure() }, mods);
         }
         if response.dragged()
             && let Some(p) = response.interact_pointer_pos()
         {
             let d = xf.to_doc(p);
-            tool_event(app, ToolEvent::Move { x: d[0], y: d[1], pressure: 1.0 }, mods);
+            tool_event(app, ToolEvent::Move { x: d[0], y: d[1], pressure: app.stylus.pressure() }, mods);
         }
         if response.drag_stopped() {
             let p = response.interact_pointer_pos().map(|p| xf.to_doc(p)).or_else(|| app.drag.as_ref().and_then(|d| d.points.last().map(|q| [q[0], q[1]])));
@@ -1435,6 +1437,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 _ => {}
             }
             app.drag = Some(Drag { tool, start: [x, y], points: vec![[x, y, pressure as f64]], modifiers: mods });
+            app.stylus.begin_stroke();
         }
         ToolEvent::Move { x, y, pressure } => {
             if tool == Tool::Type && app.drag.is_none() {
@@ -1447,6 +1450,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 && d.points.last().is_none_or(|p| (p[0] - x).abs() + (p[1] - y).abs() > 0.25)
             {
                 d.points.push([x, y, pressure as f64]);
+                app.stylus.record_point();
             }
         }
         ToolEvent::Up { x, y } => {
@@ -1461,6 +1465,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             let Some(mut d) = app.drag.take() else { return };
             if d.points.last().is_none_or(|p| p[0] != x || p[1] != y) {
                 d.points.push([x, y, d.points.last().map_or(1.0, |p| p[2])]);
+                app.stylus.record_point();
             }
             finish_gesture(app, d);
         }
@@ -1478,7 +1483,7 @@ fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
         Tool::PathSelection => crate::vector_ui::path_selection_finish(app, d.start, [end[0], end[1]]),
         Tool::Type => crate::type_tool::pointer_up(app, d.start, [end[0], end[1]]),
         Tool::Brush | Tool::Eraser => {
-            let pts: Vec<[f64; 3]> = d.points.clone();
+            let pts = app.stylus.stroke_points(&d.points);
             let _ = app.run("paint.stroke", json!({ "points": pts, "erase": d.tool == Tool::Eraser, "smoothing": 0.3, "target": paint_target(app) }));
         }
         Tool::RectMarquee | Tool::EllipseMarquee => {

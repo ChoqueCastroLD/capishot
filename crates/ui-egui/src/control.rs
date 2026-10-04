@@ -11,7 +11,7 @@
 //! - `ui.menu.invoke {id}` / `ui.menu.list`: activate a menu item by id; list the menu tree
 //! - `ui.dialog.open {kind, fields?}` (kinds: newDocument, about, layerStyle {effect?}, colorPicker {target: foreground|background}, command {command}) / `ui.dialog.set {dialog, field, value}` / `ui.dialog.confirm {dialog}` / `ui.dialog.cancel {dialog}`
 //! - `ui.window.open {document?}` / `ui.window.close {window}`: extra document windows
-//! - `ui.pointer {events: [{kind: down|move|up, x, y, pressure?}], modifiers?}`: drive the active tool in document coordinates
+//! - `ui.pointer {events: [{kind: down|move|up, x, y, pressure?, tiltX?, tiltY?, rotation?}], modifiers?}`: drive the active tool in document coordinates
 //! - `ui.click {x, y, button?, count?}` / `ui.move {x, y}`: synthetic pointer input in screen points
 //! - `ui.key {key, command?, shift?, alt?, ctrl?}` / `ui.type {text}`: synthetic keyboard input
 //! - `ui.resize {width, height}`: resize the main window
@@ -235,8 +235,16 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
                     "up" => ToolEvent::Up { x, y },
                     _ => ToolEvent::Move { x, y, pressure: pr },
                 };
+                // A simulated pen: tilt/rotation reach the stroke like a real stylus's (see `stylus`).
+                let tilt = |k: &str| e.get(k).and_then(Value::as_f64).map(|v| v as f32);
+                let pen = (tilt("tiltX"), tilt("tiltY"), tilt("rotation"));
+                if pen != (None, None, None) {
+                    let (tilt_x, tilt_y, rotation) = (pen.0.unwrap_or(0.0), pen.1.unwrap_or(0.0), pen.2.unwrap_or(0.0));
+                    app.stylus.feed.set(Some(crate::stylus::PenSample { pressure: pr, tilt_x, tilt_y, rotation }));
+                }
                 tool_event(app, ev, mods);
             }
+            app.stylus.feed.set(None);
             ok(json!({"status": app.ui.status}))
         }
         "ui.click" | "ui.move" => {

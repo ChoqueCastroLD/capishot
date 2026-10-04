@@ -101,7 +101,8 @@ impl<'de> Deserialize<'de> for GrayTile {
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-fn b64_encode(b: &[u8]) -> String {
+/// Standard base64 with padding (the tile serde form; commands taking file bytes).
+pub fn b64_encode(b: &[u8]) -> String {
     let mut out = String::with_capacity(b.len().div_ceil(3) * 4);
     for c in b.chunks(3) {
         let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
@@ -113,7 +114,8 @@ fn b64_encode(b: &[u8]) -> String {
     out
 }
 
-fn b64_decode(s: &str) -> Option<Vec<u8>> {
+/// Decode standard base64 (whitespace ignored); `None` on invalid input.
+pub fn b64_decode(s: &str) -> Option<Vec<u8>> {
     let val = |c: u8| -> Option<u32> {
         Some(match c {
             b'A'..=b'Z' => c - b'A',

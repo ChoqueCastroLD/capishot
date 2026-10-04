@@ -48,6 +48,7 @@ pub mod pick_cmds;
 mod pixels;
 pub mod plugin_cmds;
 pub mod prefs;
+pub mod preset_import_cmds;
 pub mod presets;
 pub mod print_cmds;
 pub mod proof_sim;

@@ -28,3 +28,10 @@ path = "fuzz_targets/descriptor.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "abr"
+path = "fuzz_targets/abr.rs"
+test = false
+doc = false
+bench = false

@@ -437,4 +437,7 @@ pub struct BrushPreset {
     /// Shipped with Photocraft (built-ins can be deleted from a session but are regenerated on reset).
     #[serde(default)]
     pub builtin: bool,
+    /// Preset group (folder) in the Brushes panel, e.g. "General" or an imported file's name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub group: String,
 }
