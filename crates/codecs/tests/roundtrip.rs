@@ -243,15 +243,15 @@ fn one_pixel_images_roundtrip() {
 
 #[test]
 fn ico_rejects_oversize() {
-    let img = Image::new(300, 10, ChannelLayout::Rgba, SampleType::U8);
+    let img = Image::new(300, 10, ChannelLayout::Rgba, SampleType::U8).unwrap();
     assert!(matches!(encode(&img, Format::Ico, &EncodeOptions::default()), Err(CodecError::Encode { .. })));
-    let img = Image::new(256, 256, ChannelLayout::Rgba, SampleType::U8);
+    let img = Image::new(256, 256, ChannelLayout::Rgba, SampleType::U8).unwrap();
     assert!(encode(&img, Format::Ico, &EncodeOptions::default()).is_ok());
 }
 
 #[test]
 fn empty_image_rejected() {
-    let img = Image::new(0, 5, ChannelLayout::Rgb, SampleType::U8);
+    let img = Image::new(0, 5, ChannelLayout::Rgb, SampleType::U8).unwrap();
     for f in writable_formats() {
         assert!(encode(&img, f, &EncodeOptions::default()).is_err(), "{f:?}");
     }

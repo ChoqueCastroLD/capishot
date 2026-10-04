@@ -16,7 +16,7 @@ avif = ["image/avif"]
 thiserror.workspace = true
 image = { workspace = true, features = ["gif", "bmp", "tga", "ico", "qoi", "hdr"] }
 png = "0.18"
-tiff = { version = "0.10", default-features = false, features = ["deflate", "lzw"] }
+tiff = { version = "0.11", default-features = false, features = ["deflate", "lzw"] }
 exr = { version = "1.73", default-features = false }
 half = "2"
 flate2.workspace = true

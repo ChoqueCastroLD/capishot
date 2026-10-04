@@ -2110,7 +2110,7 @@ dependencies = [
  "qoi",
  "ravif",
  "rgb",
- "tiff 0.11.3",
+ "tiff",
  "zune-core",
  "zune-jpeg",
 ]
@@ -3323,7 +3323,7 @@ dependencies = [
  "png 0.18.1",
  "proptest",
  "thiserror 2.0.21",
- "tiff 0.10.3",
+ "tiff",
  "zune-core",
  "zune-jpeg",
 ]
@@ -4712,18 +4712,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
-]
-
-[[package]]
-name = "tiff"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af9605de7fee8d9551863fd692cce7637f548dbd9db9180fcc07ccc6d26c336f"
-dependencies = [
- "flate2",
- "half",
- "quick-error 2.0.1",
- "weezl",
 ]
 
 [[package]]

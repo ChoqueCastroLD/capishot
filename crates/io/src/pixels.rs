@@ -152,7 +152,11 @@ pub fn par_map<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Ve
     std::thread::scope(|sc| {
         let f = &f;
         let hs: Vec<_> = items.into_iter().map(|t| sc.spawn(move || f(t))).collect();
-        hs.into_iter().map(|h| h.join().expect("worker panicked")).collect()
+        // Join every worker first (an unjoined panicked thread would make the scope panic),
+        // then hand a worker's panic to the caller exactly as the sequential path would, so
+        // the shell's last-resort guard reports it instead of the scope aborting the join.
+        let joined: Vec<_> = hs.into_iter().map(|h| h.join()).collect();
+        joined.into_iter().map(|r| r.unwrap_or_else(|p| std::panic::resume_unwind(p))).collect()
     })
 }
 

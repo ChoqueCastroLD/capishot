@@ -202,3 +202,53 @@ fn samples_cached() -> &'static [(Format, Vec<u8>)] {
     static S: std::sync::OnceLock<Vec<(Format, Vec<u8>)>> = std::sync::OnceLock::new();
     S.get_or_init(samples)
 }
+
+/// A little-endian TIFF with one 1x1 8-bit grey strip and the given extra IFD entries
+/// (tag, type, count, value), sorted into place.
+fn tiny_tiff(extra: &[(u16, u16, u32, u32)]) -> Vec<u8> {
+    const SHORT: u16 = 3;
+    const LONG: u16 = 4;
+    let mut entries = vec![
+        (256, SHORT, 1, 1), // ImageWidth
+        (257, SHORT, 1, 1), // ImageLength
+        (258, SHORT, 1, 8), // BitsPerSample
+        (259, SHORT, 1, 1), // Compression: none
+        (262, SHORT, 1, 1), // Photometric: BlackIsZero
+        (273, LONG, 1, 0),  // StripOffsets (patched below)
+        (277, SHORT, 1, 1), // SamplesPerPixel
+        (278, SHORT, 1, 1), // RowsPerStrip
+        (279, LONG, 1, 1),  // StripByteCounts
+    ];
+    entries.extend_from_slice(extra);
+    entries.sort_by_key(|e| e.0);
+    let ifd_len = 2 + 12 * entries.len() + 4;
+    let strip = 8 + ifd_len as u32;
+    let mut b = b"II*\0".to_vec();
+    b.extend_from_slice(&8u32.to_le_bytes());
+    b.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    for (tag, ty, count, value) in entries {
+        let value = if tag == 273 { strip } else { value };
+        b.extend_from_slice(&tag.to_le_bytes());
+        b.extend_from_slice(&ty.to_le_bytes());
+        b.extend_from_slice(&count.to_le_bytes());
+        b.extend_from_slice(&value.to_le_bytes());
+    }
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.push(0x80);
+    b
+}
+
+#[test]
+fn tiff_fixture_decodes() {
+    let img = decode_as_with(Format::Tiff, &tiny_tiff(&[]), &tight()).unwrap();
+    assert_eq!((img.width(), img.height()), (1, 1));
+}
+
+/// Regression: an empty SampleFormat tag made the tiff 0.10 decoder index an empty list
+/// (`index out of bounds: the len is 0`). Found by mutation fuzzing; fixed by tiff 0.11.
+#[test]
+fn tiff_empty_sample_format_is_an_error() {
+    let bytes = tiny_tiff(&[(339, 3, 0, 0)]);
+    assert!(decode_as_with(Format::Tiff, &bytes, &tight()).is_err());
+    assert!(decode_with(&bytes, &tight()).is_err());
+}

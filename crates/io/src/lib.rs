@@ -16,6 +16,7 @@
 //! Exports to PSD render the merged composite with
 //! `photocraft_compose::flatten`; flat exports report what is lost.
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod adjust_map;
 pub mod annotations_map;

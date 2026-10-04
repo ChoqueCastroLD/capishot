@@ -146,7 +146,7 @@ fn hdr_is_lossy() {
 }
 #[test]
 fn ico_oversize_is_fatal() {
-    let img = Image::new(512, 16, ChannelLayout::Rgba, SampleType::U8);
+    let img = Image::new(512, 16, ChannelLayout::Rgba, SampleType::U8).unwrap();
     let w = warns(&img, Format::Ico);
     assert!(w.iter().any(|w| w.is_fatal()));
     assert!(w.contains(&W::DimensionsExceeded { max_width: 256, max_height: 256 }));

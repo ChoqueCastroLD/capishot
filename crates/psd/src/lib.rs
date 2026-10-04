@@ -38,6 +38,7 @@
 //! ```
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod blend;
 pub mod builder;
@@ -57,6 +58,8 @@ pub mod resources;
 pub mod slices;
 pub mod tagged;
 #[cfg(any(test, feature = "testgen"))]
+// Test-data generator (tests and fuzz seeds only): failing loudly is the point.
+#[allow(clippy::expect_used)]
 pub mod testgen;
 pub mod tree;
 

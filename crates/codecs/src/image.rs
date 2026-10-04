@@ -144,13 +144,10 @@ fn byte_len(width: u32, height: u32, layout: ChannelLayout, sample: SampleType) 
 }
 
 impl Image {
-    /// A zero-filled image.
-    ///
-    /// # Panics
-    /// If the byte size overflows `usize`.
-    pub fn new(width: u32, height: u32, layout: ChannelLayout, sample: SampleType) -> Self {
-        let len = byte_len(width, height, layout, sample).expect("image size overflows usize");
-        Image { width, height, layout, sample, data: vec![0; len], icc: None, meta: Metadata::default() }
+    /// A zero-filled image, or an error if the byte size overflows `usize`.
+    pub fn new(width: u32, height: u32, layout: ChannelLayout, sample: SampleType) -> Result<Self, CodecError> {
+        let len = byte_len(width, height, layout, sample).ok_or_else(|| CodecError::InvalidImage("image size overflows usize".into()))?;
+        Ok(Image { width, height, layout, sample, data: vec![0; len], icc: None, meta: Metadata::default() })
     }
 
     /// Wrap raw interleaved, native-endian bytes.
@@ -472,7 +469,7 @@ mod tests {
 
     #[test]
     fn icc_dropped_on_model_change() {
-        let img = Image::new(2, 2, ChannelLayout::Cmyk, SampleType::U8).with_icc(Some(vec![1, 2, 3]));
+        let img = Image::new(2, 2, ChannelLayout::Cmyk, SampleType::U8).unwrap().with_icc(Some(vec![1, 2, 3]));
         assert!(img.convert(ChannelLayout::Rgb, SampleType::U8).icc.is_none());
         assert!(img.convert(ChannelLayout::CmykA, SampleType::U16).icc.is_some());
     }

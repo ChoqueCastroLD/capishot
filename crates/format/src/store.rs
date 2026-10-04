@@ -272,11 +272,14 @@ impl Object {
     }
 }
 
+/// A bundle path and its compressed bytes.
+type Compressed<'a> = (&'a String, Arc<Vec<u8>>);
+
 /// Compresses `objects` on scoped worker threads (sequentially on wasm).
-fn par_compress<'a>(objects: &[(&'a String, &'a Object)]) -> Vec<(&'a String, Arc<Vec<u8>>)> {
+fn par_compress<'a>(objects: &[(&'a String, &'a Object)]) -> Result<Vec<Compressed<'a>>> {
     let threads = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 32) };
     if threads < 2 || objects.len() < 2 {
-        return objects.iter().map(|(p, o)| (*p, Arc::new(o.compressed()))).collect();
+        return Ok(objects.iter().map(|(p, o)| (*p, Arc::new(o.compressed()))).collect());
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
     std::thread::scope(|sc| {
@@ -293,7 +296,14 @@ fn par_compress<'a>(objects: &[(&'a String, &'a Object)]) -> Vec<(&'a String, Ar
                 })
             })
             .collect();
-        hs.into_iter().flat_map(|h| h.join().expect("compress worker")).collect()
+        // Join every worker before looking at the results, so one failure can't leave
+        // another worker unjoined (the scope would then panic).
+        let joined: Vec<_> = hs.into_iter().map(|h| h.join()).collect();
+        let mut out = Vec::with_capacity(objects.len());
+        for r in joined {
+            out.extend(r.map_err(|_| FormatError::Io(std::io::Error::other("compression worker panicked")))?);
+        }
+        Ok(out)
     })
 }
 
@@ -344,7 +354,7 @@ impl PcraftWriter {
         let mut next = HashMap::with_capacity(p.objects.len());
         // New objects are compressed on all cores first (zstd dominates a full save).
         let todo: Vec<(&String, &Object)> = p.objects.iter().filter(|(path, _)| !self.compressed.contains_key(*path)).collect();
-        let mut fresh: HashMap<&String, Arc<Vec<u8>>> = par_compress(&todo).into_iter().collect();
+        let mut fresh: HashMap<&String, Arc<Vec<u8>>> = par_compress(&todo)?.into_iter().collect();
         for (path, obj) in &p.objects {
             let data = match self.compressed.get(path) {
                 Some(d) => {

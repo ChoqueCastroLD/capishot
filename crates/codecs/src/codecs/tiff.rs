@@ -237,7 +237,6 @@ fn rational_f64(v: tiff::decoder::ifd::Value) -> Option<f64> {
     use tiff::decoder::ifd::Value;
     match v {
         Value::Rational(n, d) if d != 0 => Some(n as f64 / d as f64),
-        Value::RationalBig(n, d) if d != 0 => Some(n as f64 / d as f64),
         Value::Float(f) => Some(f as f64),
         Value::Double(f) => Some(f),
         Value::Unsigned(u) => Some(u as f64),
