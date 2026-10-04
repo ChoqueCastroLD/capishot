@@ -376,3 +376,23 @@ mod tests {
         assert!(!s.is_enabled("select.transformSelection"));
     }
 }
+
+#[cfg(test)]
+mod hang_tests {
+    use super::*;
+
+    #[test]
+    fn transform_selection_with_extreme_params_terminates() {
+        // Regression (panic_hunt): a huge off-canvas transform used to allocate a buffer spanning
+        // the old + new bounds and hang. It must return quickly without crashing.
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 24, "height": 16})).unwrap();
+        s.execute("select.rect", json!({"x": 1, "y": 1, "width": 6, "height": 5})).unwrap();
+        // dx/dy move the selection far off-canvas; scaleX enlarges it — the old code allocated a
+        // buffer spanning the original + moved bounds (~1e5 × 1e5) and hung.
+        let r = s.execute("select.transformSelection", json!({"dx": 1e5, "dy": -1e5, "scaleX": 300.0}));
+        assert!(r.is_ok(), "far transform returns without hanging: {r:?}");
+        // The document is still usable.
+        assert!(s.execute("select.all", json!({})).is_ok());
+    }
+}

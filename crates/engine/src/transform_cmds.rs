@@ -47,10 +47,12 @@ pub(crate) fn warp_gray(s: &Surface, h: &Homography, interp: Interp) -> Surface 
     let v = s.read_region(src);
     tmp.write_region(src, &v.iter().flat_map(|g| [*g, 1.0]).collect::<Vec<f32>>());
     let w = warp_surface(&tmp, src, h, interp);
-    // Everything the old content covered becomes default, then the warped content composites over.
-    let cover = src.union(&w.content_bounds());
-    let old: Vec<f32> = vec![default; cover.width() as usize * cover.height() as usize];
-    out.write_region(cover, &old);
+    // Clear the old content region, then composite the warped content over it. These are written as
+    // two sparse regions rather than one dense `src ∪ warped` block: a transform that moves the
+    // content far away (e.g. a huge translation) would otherwise allocate a buffer spanning both and
+    // hang/OOM. `Surface` is tile-sparse, so distant regions cost only their own tiles.
+    let old: Vec<f32> = vec![default; src.width() as usize * src.height() as usize];
+    out.write_region(src, &old);
     let b = w.content_bounds();
     if !b.is_empty() {
         let px = w.read_region(b);
