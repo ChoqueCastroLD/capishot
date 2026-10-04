@@ -215,21 +215,43 @@ pub fn pattern_list(app: &PhotocraftApp) -> Value {
 
 /// Apply the dialog: replace the layer's effects with the enabled ones.
 pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
+    apply(f, |id, p| app.run(id, p))
+}
+
+/// Runs the dialog's commands through `run`: blending options, clear, then each enabled effect.
+fn apply(f: &Map<String, Value>, mut run: impl FnMut(&str, Value) -> Result<Value, String>) -> Result<Value, String> {
     let layer = f.get("layer").cloned().unwrap_or(Value::Null);
     if let Some(Value::Object(bo)) = f.get(&format!("p:{BLENDING}")) {
         let mut p = Value::Object(bo.clone());
         p["layer"] = layer.clone();
-        app.run("layer.layerStyle.blendingOptions", p)?;
+        run("layer.layerStyle.blendingOptions", p)?;
     }
-    let _ = app.run("layer.layerStyle.clear", json!({"layer": layer}));
+    let _ = run("layer.layerStyle.clear", json!({"layer": layer}));
     for &(kind, _) in KINDS {
         if f.get(&format!("on:{kind}")).and_then(Value::as_bool) == Some(true) {
             let mut p = f.get(&format!("p:{kind}")).cloned().unwrap_or_else(|| json!({}));
             p["layer"] = layer.clone();
-            app.run(&format!("layer.layerStyle.{kind}"), p)?;
+            run(&format!("layer.layerStyle.{kind}"), p)?;
         }
     }
     Ok(Value::Null)
+}
+
+/// Hash of the fields that change the rendered style (not the selected page).
+pub fn preview_hash(f: &Map<String, Value>) -> u64 {
+    f.iter()
+        .filter(|(k, _)| k.as_str() == "layer" || k.starts_with("on:") || k.starts_with("p:"))
+        .flat_map(|(k, v)| k.bytes().chain(v.to_string().into_bytes()))
+        .fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3))
+}
+
+/// `doc` with the dialog's style applied, run on a scratch session (no history) for the live preview.
+pub fn preview_document(doc: &photocraft_doc::Document, patterns: &photocraft_engine::pattern_cmds::PatternLibrary, f: &Map<String, Value>) -> Option<photocraft_doc::Document> {
+    let mut s = photocraft_engine::Session::new();
+    s.patterns = patterns.clone();
+    s.add_document(doc.clone(), None);
+    apply(f, |id, p| s.execute(id, p).map_err(|e| e.to_string())).ok()?;
+    s.active().map(|d| (*d.doc).clone())
 }
 
 /// Dialog body (left list, right parameters).
@@ -392,6 +414,23 @@ mod tests {
         assert_eq!(f["selected"], "stroke");
         assert_eq!(f["on:stroke"], true);
         assert_eq!(f["on:dropShadow"], false);
+    }
+
+    #[test]
+    fn preview_applies_the_style_without_touching_the_document() {
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        let st = s.active().unwrap();
+        let mut f = initial_fields(st.doc.layer(st.active_layer.unwrap()).unwrap(), Some("colorOverlay"));
+        let h = preview_hash(&f);
+        f.insert("selected".into(), json!("stroke"));
+        assert_eq!(preview_hash(&f), h, "switching pages doesn't re-render");
+        f.insert("on:stroke".into(), json!(true));
+        assert_ne!(preview_hash(&f), h);
+        let shown = preview_document(&st.doc, &s.patterns, &f).unwrap();
+        let fx = |d: &photocraft_doc::Document| d.layer(st.active_layer.unwrap()).unwrap().effects.items.len();
+        assert_eq!((fx(&shown), fx(&st.doc)), (2, 0));
     }
 
     #[test]

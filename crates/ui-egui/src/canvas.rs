@@ -144,7 +144,7 @@ fn downsample(buf: &photocraft_compose::Buffer, factor: u32) -> photocraft_compo
 }
 
 /// The document to render: the committed one, or a clone with the live adjustment preview applied.
-fn display_doc(app: &PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>, u64) {
+fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>, u64) {
     let st = &app.session.documents()[idx];
     // Puppet / Perspective Warp previews hide the layer they draw on a mesh.
     if let Some(shown) = crate::distort_ui::display_doc(app, idx) {
@@ -155,6 +155,23 @@ fn display_doc(app: &PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>, u6
         && st.doc.layer(photocraft_doc::LayerId(t.layer)).is_some()
     {
         return (pv.doc.clone(), (1 << 40) + pv.session);
+    }
+    // Layer Style dialog: show its effects live (Cancel just drops the preview).
+    let style = app.ui.dialogs.iter().find(|d| d.kind == crate::state::DialogKind::LayerStyle);
+    if style.is_none() {
+        app.style_preview = None;
+    }
+    if let Some(d) = style
+        && app.session.active_index() == Some(idx)
+    {
+        let key = (crate::layer_style::preview_hash(&d.fields) ^ st.revision.wrapping_mul(0x9e37_79b9_7f4a_7c15)) | 1 << 63;
+        if app.style_preview.as_ref().map(|p| p.0) != Some(key) {
+            let shown = crate::layer_style::preview_document(&st.doc, &app.session.patterns, &d.fields).map(std::sync::Arc::new);
+            app.style_preview = Some((key, shown));
+        }
+        if let Some((_, Some(doc))) = &app.style_preview {
+            return (doc.clone(), key);
+        }
     }
     if let Some((layer, params)) = &app.live_adjust
         && let Some(l) = st.doc.layer(*layer)
@@ -1506,6 +1523,25 @@ mod tests {
             let r = xf.doc_rect(DRect::new(0, 0, 10, 10));
             assert!(r.width() > 0.0 && r.height() > 0.0);
         }
+    }
+
+    #[test]
+    fn layer_style_dialog_previews_live_and_cancel_restores() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 16, "height": 16})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        let fx = |d: &Document| d.layers.iter().map(|l| l.effects.items.len()).sum::<usize>();
+        let id = crate::layer_style::open(&mut app, Some("colorOverlay")).unwrap();
+        let (shown, key) = display_doc(&mut app, 0);
+        assert_eq!((fx(&shown), fx(&app.session.documents()[0].doc)), (1, 0), "previewed, not committed");
+        app.ui.dialog_mut(id).unwrap().fields.insert("on:stroke".into(), json!(true));
+        let (shown, key2) = display_doc(&mut app, 0);
+        assert_eq!(fx(&shown), 2);
+        assert_ne!(key, key2, "an edit re-renders the canvas");
+        app.ui.close_dialog(id);
+        let (shown, key) = display_doc(&mut app, 0);
+        assert_eq!((fx(&shown), key), (0, 0));
+        assert!(app.style_preview.is_none());
     }
 
     #[test]

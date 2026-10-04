@@ -191,6 +191,8 @@ pub struct PhotocraftApp {
     pub(crate) doc_hist: Option<(DocId, u64, f64, std::sync::Arc<tone::Histograms>)>,
     /// Free Transform preview (document without the moving pixels + their texture).
     pub(crate) transform_preview: Option<transform_tool::TransformPreview>,
+    /// Live Layer Style dialog preview: (key over revision + style fields, document with the style applied).
+    pub(crate) style_preview: Option<(u64, Option<std::sync::Arc<Document>>)>,
     /// Liquify dialog, Puppet Warp and Perspective Warp sessions (distort_ui).
     pub(crate) distort: distort_ui::Distort,
     /// Filter › Camera Raw Filter dialog (camera_raw_ui).
@@ -259,6 +261,7 @@ impl PhotocraftApp {
             info_sample: None,
             os_clip_sig: None,
             transform_preview: None,
+            style_preview: None,
             distort: Default::default(),
             camera_raw: None,
             wide_angle: None,
