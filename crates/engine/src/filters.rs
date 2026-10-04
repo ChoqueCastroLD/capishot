@@ -4,7 +4,7 @@
 //! smart object, recording a smart filter), respects the selection, and is
 //! undoable. `filter.lastFilter` re-runs the most recent filter command.
 
-use photocraft_algo::{self as algo, Distribution, FilterParams, PolarMode, RadialMethod, RippleSize, SpherizeMode, UndefinedAreas, WaveType};
+use photocraft_algo::{self as algo, Distribution, FilterParams, PolarMode, Preserve, RadialMethod, RippleSize, SpherizeMode, UndefinedAreas, WaveType};
 use photocraft_doc::{LayerContent, SmartFilter};
 use serde_json::{Value, json};
 
@@ -28,6 +28,15 @@ fn undefined(p: &Value) -> UndefinedAreas {
         "repeat" => UndefinedAreas::Repeat,
         "transparent" => UndefinedAreas::Transparent,
         _ => UndefinedAreas::Wrap,
+    }
+}
+
+/// Minimum / Maximum › Preserve (Photoshop's default is Squareness).
+fn preserve(p: &Value) -> Preserve {
+    if s(p, "preserve", "squareness") == "roundness" {
+        Preserve::Roundness
+    } else {
+        Preserve::Squareness
     }
 }
 
@@ -71,8 +80,8 @@ pub fn params_for(id: &str, p: &Value) -> Option<FilterParams> {
         },
         "filter.noise.median" => FilterParams::Median { radius: f(p, "radius", 1.0).clamp(1.0, 500.0) },
         "filter.noise.dustAndScratches" => FilterParams::DustAndScratches { radius: f(p, "radius", 1.0).clamp(1.0, 500.0), threshold: f(p, "threshold", 0.0).clamp(0.0, 255.0) },
-        "filter.other.minimum" => FilterParams::Minimum { radius: f(p, "radius", 1.0).clamp(0.2, 500.0) },
-        "filter.other.maximum" => FilterParams::Maximum { radius: f(p, "radius", 1.0).clamp(0.2, 500.0) },
+        "filter.other.minimum" => FilterParams::Minimum { radius: f(p, "radius", 1.0).clamp(0.2, 500.0), preserve: preserve(p) },
+        "filter.other.maximum" => FilterParams::Maximum { radius: f(p, "radius", 1.0).clamp(0.2, 500.0), preserve: preserve(p) },
         "filter.other.offset" => FilterParams::Offset { horizontal: i(p, "horizontal", 0), vertical: i(p, "vertical", 0), undefined: undefined(p) },
         "filter.pixelate.mosaic" => FilterParams::Mosaic { cell_size: f(p, "cellSize", 10.0).clamp(2.0, 200.0) },
         "filter.stylize.emboss" => FilterParams::Emboss { angle: f(p, "angle", 135.0), height: f(p, "height", 3.0).clamp(1.0, 100.0), amount: f(p, "amount", 100.0).clamp(1.0, 500.0) },
@@ -253,8 +262,8 @@ pub fn specs() -> Vec<CommandSpec> {
         filter_cmd!("filter.distort.ripple", "Ripple…", ["Filter", "Distort"], r##"{"amount":-999..999=100,"size":"small|medium|large"}"##),
         filter_cmd!("filter.distort.polarCoordinates", "Polar Coordinates…", ["Filter", "Distort"], r##"{"mode":"rectangularToPolar|polarToRectangular"}"##),
         filter_cmd!("filter.other.highPass", "High Pass…", ["Filter", "Other"], r##"{"radius":0.1..1000=10}"##),
-        filter_cmd!("filter.other.minimum", "Minimum…", ["Filter", "Other"], r##"{"radius":0.2..500=1}"##),
-        filter_cmd!("filter.other.maximum", "Maximum…", ["Filter", "Other"], r##"{"radius":0.2..500=1}"##),
+        filter_cmd!("filter.other.minimum", "Minimum…", ["Filter", "Other"], r##"{"radius":0.2..500=1,"preserve":"squareness|roundness"}"##),
+        filter_cmd!("filter.other.maximum", "Maximum…", ["Filter", "Other"], r##"{"radius":0.2..500=1,"preserve":"squareness|roundness"}"##),
         filter_cmd!("filter.other.offset", "Offset…", ["Filter", "Other"], r##"{"horizontal":px=0,"vertical":px=0,"undefinedAreas":"wrap|repeat|transparent"}"##),
         CommandSpec {
             id: "filter.lastFilter",
@@ -424,6 +433,74 @@ mod tests {
         );
         assert_eq!(params_for("filter.blur.gaussianBlur", &json!({"radius": -3})), Some(FilterParams::GaussianBlur { radius: 0.1 }));
         assert!(params_for("filter.nope", &json!({})).is_none());
+    }
+
+    #[test]
+    fn minimum_maximum_preserve_roundness() {
+        for depth in [8, 16, 32] {
+            let mut s = Session::new();
+            s.execute(
+                "file.new",
+                json!({"width": 48, "height": 32, "depth": depth}),
+            )
+            .unwrap();
+            s.execute("layer.new.layer", json!({})).unwrap();
+            // A white dot on black.
+            s.edit("dot", |doc, active| {
+                let surf = doc
+                    .layer_mut(active.unwrap())
+                    .unwrap()
+                    .surface_mut()
+                    .unwrap();
+                surf.fill_rect(
+                    photocraft_geom::Rect::new(0, 0, 48, 32),
+                    &[0.0, 0.0, 0.0, 1.0],
+                );
+                surf.write_pixel(24, 16, &[1.0, 1.0, 1.0, 1.0]);
+                Ok(())
+            })
+            .unwrap();
+            let before = active_pixels(&s);
+            let lit = |s: &Session, x: usize, y: usize| active_pixels(s)[(y * 48 + x) * 4] > 0.5;
+            s.execute(
+                "filter.other.maximum",
+                json!({"radius": 4, "preserve": "roundness"}),
+            )
+            .unwrap();
+            // Grown into a disc of radius 4: (4, 0) and (2, 3) are in, the square's corner isn't.
+            assert!(lit(&s, 28, 16) && lit(&s, 26, 19), "depth {depth}");
+            assert!(!lit(&s, 28, 20) && !lit(&s, 27, 19), "depth {depth}");
+            s.execute("edit.undo", json!({})).unwrap();
+            assert_eq!(active_pixels(&s), before);
+            // The default is Squareness: the corner is taken.
+            s.execute("filter.other.maximum", json!({"radius": 4}))
+                .unwrap();
+            assert!(lit(&s, 28, 20), "depth {depth}");
+            // Minimum with roundness: only the centre of that 9×9 square holds a whole disc.
+            s.execute(
+                "filter.other.minimum",
+                json!({"radius": 4, "preserve": "roundness"}),
+            )
+            .unwrap();
+            assert!(!lit(&s, 20, 12) && lit(&s, 24, 16), "depth {depth}");
+        }
+        assert_eq!(
+            params_for(
+                "filter.other.minimum",
+                &json!({"radius": 2, "preserve": "roundness"})
+            ),
+            Some(FilterParams::Minimum {
+                radius: 2.0,
+                preserve: Preserve::Roundness
+            })
+        );
+        assert_eq!(
+            params_for("filter.other.maximum", &json!({})),
+            Some(FilterParams::Maximum {
+                radius: 1.0,
+                preserve: Preserve::Squareness
+            })
+        );
     }
 
     #[test]

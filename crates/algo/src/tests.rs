@@ -45,8 +45,10 @@ fn all_filters() -> Vec<FilterParams> {
         FilterParams::AddNoise { amount: 25.0, distribution: Distribution::Gaussian, monochromatic: false, seed: 3 },
         FilterParams::Median { radius: 2.0 },
         FilterParams::DustAndScratches { radius: 2.0, threshold: 10.0 },
-        FilterParams::Minimum { radius: 1.0 },
-        FilterParams::Maximum { radius: 2.0 },
+        FilterParams::Minimum { radius: 1.0, preserve: Preserve::Squareness },
+        FilterParams::Maximum { radius: 2.0, preserve: Preserve::Squareness },
+        FilterParams::Minimum { radius: 2.5, preserve: Preserve::Roundness },
+        FilterParams::Maximum { radius: 3.0, preserve: Preserve::Roundness },
         FilterParams::Offset { horizontal: 7, vertical: -3, undefined: UndefinedAreas::Wrap },
         FilterParams::Mosaic { cell_size: 6.0 },
         FilterParams::Emboss { angle: 135.0, height: 2.0, amount: 100.0 },
@@ -224,11 +226,156 @@ fn median_and_dust_remove_a_speck() {
 fn minimum_maximum_spread() {
     let mut s = flat(SampleType::F32, R, [0.5, 0.5, 0.5, 1.0]);
     s.write_pixel(10, 10, &[1.0, 1.0, 1.0, 1.0]);
-    let mx = run(&s, &FilterParams::Maximum { radius: 1.0 });
+    let mx = run(&s, &FilterParams::Maximum { radius: 1.0, preserve: Preserve::Squareness });
     assert!((mx.pixel(11, 11)[0] - 1.0).abs() < 1e-6);
     assert!((mx.pixel(12, 10)[0] - 0.5).abs() < 1e-6);
-    let mn = run(&s, &FilterParams::Minimum { radius: 1.0 });
+    let mn = run(&s, &FilterParams::Minimum { radius: 1.0, preserve: Preserve::Squareness });
     assert!((mn.pixel(10, 10)[0] - 0.5).abs() < 1e-6);
+}
+
+#[test]
+fn maximum_roundness_grows_a_point_into_a_disc() {
+    // One white pixel on black: Maximum spreads it over the structuring element itself.
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        let mut s = flat(depth, R, [0.0, 0.0, 0.0, 1.0]);
+        s.write_pixel(20, 15, &[1.0, 1.0, 1.0, 1.0]);
+        for radius in [1.0f32, 2.0, 3.5, 6.0] {
+            let round = run(
+                &s,
+                &FilterParams::Maximum {
+                    radius,
+                    preserve: Preserve::Roundness,
+                },
+            );
+            let square = run(
+                &s,
+                &FilterParams::Maximum {
+                    radius,
+                    preserve: Preserve::Squareness,
+                },
+            );
+            let rs = radius.round() as i32;
+            for y in R.y0..R.y1 {
+                for x in R.x0..R.x1 {
+                    let (dx, dy) = (x - 20, y - 15);
+                    let in_disc = (dx * dx + dy * dy) as f32 <= radius * radius;
+                    assert_eq!(
+                        round.pixel(x, y)[0] > 0.5,
+                        in_disc,
+                        "{depth:?} r {radius} at {dx},{dy}"
+                    );
+                    assert_eq!(
+                        square.pixel(x, y)[0] > 0.5,
+                        dx.abs() <= rs && dy.abs() <= rs,
+                        "{depth:?} r {radius} at {dx},{dy}"
+                    );
+                }
+            }
+        }
+    }
+    // Radius 1: the four neighbours, not the diagonals (a 3×3 square would take them).
+    let mut s = flat(SampleType::U8, R, [0.0, 0.0, 0.0, 1.0]);
+    s.write_pixel(20, 15, &[1.0, 1.0, 1.0, 1.0]);
+    let r1 = run(
+        &s,
+        &FilterParams::Maximum {
+            radius: 1.0,
+            preserve: Preserve::Roundness,
+        },
+    );
+    assert_eq!(r1.pixel(21, 15)[0], 1.0);
+    assert_eq!(r1.pixel(21, 16)[0], 0.0);
+}
+
+#[test]
+fn minimum_maximum_roundness_match_brute_force() {
+    // Exhaustive disc search on a textured image, both operators, a few radii (incl. fractional).
+    let s = pattern(SampleType::F32, R);
+    let img = s.read_region(R);
+    let at = |x: i32, y: i32, c: usize| -> Option<f32> {
+        R.contains(x, y)
+            .then(|| img[((y * 40 + x) * 4) as usize + c])
+    };
+    for radius in [1.0f32, 1.5, 2.9, 4.0] {
+        let ri = radius.floor() as i32;
+        for max in [false, true] {
+            let p = if max {
+                FilterParams::Maximum {
+                    radius,
+                    preserve: Preserve::Roundness,
+                }
+            } else {
+                FilterParams::Minimum {
+                    radius,
+                    preserve: Preserve::Roundness,
+                }
+            };
+            let got = run(&s, &p);
+            for y in R.y0 + ri..R.y1 - ri {
+                for x in R.x0 + ri..R.x1 - ri {
+                    for c in 0..3 {
+                        let mut want = if max { f32::MIN } else { f32::MAX };
+                        for dy in -ri..=ri {
+                            for dx in -ri..=ri {
+                                if (dx * dx + dy * dy) as f32 <= radius * radius
+                                    && let Some(v) = at(x + dx, y + dy, c)
+                                {
+                                    want = if max { want.max(v) } else { want.min(v) };
+                                }
+                            }
+                        }
+                        assert!(
+                            (got.pixel(x, y)[c] - want).abs() < 1e-6,
+                            "r {radius} max {max} at {x},{y} c{c}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn running_extreme_windows() {
+    let v = [3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0];
+    let mut out = Vec::new();
+    for k in 1..=v.len() {
+        for max in [false, true] {
+            crate::other::running_extreme(&v, k, max, &mut out);
+            let want: Vec<f32> = v
+                .windows(k)
+                .map(|w| {
+                    w.iter()
+                        .copied()
+                        .fold(if max { f32::MIN } else { f32::MAX }, |a, b| {
+                            if max { a.max(b) } else { a.min(b) }
+                        })
+                })
+                .collect();
+            assert_eq!(out, want, "k {k} max {max}");
+        }
+    }
+}
+
+#[test]
+fn minimum_maximum_old_params_default_to_squareness() {
+    let p: FilterParams = serde_json::from_str(r#"{"filter":"minimum","radius":3}"#).unwrap();
+    assert_eq!(
+        p,
+        FilterParams::Minimum {
+            radius: 3.0,
+            preserve: Preserve::Squareness
+        }
+    );
+    let p: FilterParams =
+        serde_json::from_str(r#"{"filter":"maximum","radius":2,"preserve":"roundness"}"#).unwrap();
+    assert_eq!(
+        p,
+        FilterParams::Maximum {
+            radius: 2.0,
+            preserve: Preserve::Roundness
+        }
+    );
 }
 
 #[test]

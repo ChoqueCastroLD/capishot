@@ -117,6 +117,17 @@ pub enum UndefinedAreas {
     Transparent,
 }
 
+/// Minimum / Maximum › Preserve: the shape the filter grows or shrinks by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Preserve {
+    /// A square of `2·radius + 1` pixels (keeps corners square).
+    #[default]
+    Squareness,
+    /// A disc of `radius` pixels (rounds corners off evenly).
+    Roundness,
+}
+
 /// Spherize mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -179,8 +190,17 @@ pub enum FilterParams {
     AddNoise { amount: f32, distribution: Distribution, monochromatic: bool, seed: u32 },
     Median { radius: f32 },
     DustAndScratches { radius: f32, threshold: f32 },
-    Minimum { radius: f32 },
-    Maximum { radius: f32 },
+    /// Radius px; `preserve` is the dialog's Preserve (older params default to Squareness).
+    Minimum {
+        radius: f32,
+        #[serde(default)]
+        preserve: Preserve,
+    },
+    Maximum {
+        radius: f32,
+        #[serde(default)]
+        preserve: Preserve,
+    },
     Offset { horizontal: i32, vertical: i32, undefined: UndefinedAreas },
     Mosaic { cell_size: f32 },
     /// Angle degrees, height px, amount %.
@@ -319,8 +339,8 @@ impl FilterParams {
             | FilterParams::SurfaceBlur { radius, .. }
             | FilterParams::Median { radius }
             | FilterParams::DustAndScratches { radius, .. }
-            | FilterParams::Minimum { radius }
-            | FilterParams::Maximum { radius } => Halo::Radius(radius.max(0.0).ceil() as i32 + 1),
+            | FilterParams::Minimum { radius, .. }
+            | FilterParams::Maximum { radius, .. } => Halo::Radius(radius.max(0.0).ceil() as i32 + 1),
             FilterParams::MotionBlur { distance, .. } => Halo::Radius((distance.abs() / 2.0).ceil() as i32 + 2),
             FilterParams::Mosaic { cell_size } => Halo::Radius(cell_size.max(1.0).ceil() as i32 + 1),
             FilterParams::Emboss { height, .. } => Halo::Radius(height.abs().ceil() as i32 + 2),
@@ -474,8 +494,8 @@ pub fn kernel(params: &FilterParams, src: &Image, out: Rect, ctx: &Ctx) -> Vec<f
         FilterParams::AddNoise { amount, distribution, monochromatic, seed } => noise::add(src, out, ctx, *amount, *distribution, *monochromatic, *seed),
         FilterParams::Median { radius } => noise::median(src, out, *radius, None),
         FilterParams::DustAndScratches { radius, threshold } => noise::median(src, out, *radius, Some(*threshold)),
-        FilterParams::Minimum { radius } => other::min_max(src, out, *radius, false),
-        FilterParams::Maximum { radius } => other::min_max(src, out, *radius, true),
+        FilterParams::Minimum { radius, preserve } => other::min_max_preserve(src, out, *radius, false, *preserve),
+        FilterParams::Maximum { radius, preserve } => other::min_max_preserve(src, out, *radius, true, *preserve),
         FilterParams::Offset { horizontal, vertical, undefined } => other::offset(src, out, ctx, *horizontal, *vertical, *undefined),
         FilterParams::Mosaic { cell_size } => stylize::mosaic(src, out, ctx, *cell_size),
         FilterParams::Emboss { angle, height, amount } => stylize::emboss(src, out, ctx, *angle, *height, *amount),
