@@ -127,7 +127,7 @@ fn blur_preserves_flat_colour_and_mass() {
     for p in [FilterParams::GaussianBlur { radius: 2.0 }, FilterParams::BoxBlur { radius: 3.0 }] {
         let out = run(&small, &p);
         let big = Rect::new(-10, -10, 40, 40);
-        let sum: f32 = out.read_region(big).chunks_exact(4).map(|px| px[3]).sum();
+        let sum: f32 = out.read_region(big).as_chunks::<4>().0.iter().map(|px| px[3]).sum();
         assert!((sum - 100.0).abs() < 0.01, "{}: {sum}", p.label());
         // No colour bleeding from transparent pixels.
         let edge = out.pixel(9, 15);
@@ -176,7 +176,7 @@ fn unsharp_threshold_and_contrast() {
     let sharp = run(&s, &FilterParams::UnsharpMask { amount: 200.0, radius: 2.0, threshold: 0.0 });
     let var = |surf: &Surface| {
         let v = surf.read_region(Rect::new(5, 5, 35, 25));
-        let reds: Vec<f32> = v.chunks_exact(4).map(|p| p[0]).collect();
+        let reds: Vec<f32> = v.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
         let m = reds.iter().sum::<f32>() / reds.len() as f32;
         reds.iter().map(|r| (r - m).powi(2)).sum::<f32>()
     };
@@ -198,7 +198,7 @@ fn noise_is_deterministic_monochrome_and_centred() {
     assert_eq!(a, run(&s, &p));
     let v = a.read_region(R);
     let mut mean = 0.0;
-    for px in v.chunks_exact(4) {
+    for px in v.as_chunks::<4>().0 {
         assert_eq!(px[0], px[1]);
         assert_eq!(px[1], px[2]);
         assert!((px[0] - 0.5).abs() <= 0.25 + 1e-6);

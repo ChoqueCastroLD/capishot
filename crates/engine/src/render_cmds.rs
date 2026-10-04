@@ -234,7 +234,7 @@ mod tests {
     }
 
     fn opaque(s: &Session) -> usize {
-        pixels(s).chunks_exact(4).filter(|p| p[3] > 0.05).count()
+        pixels(s).as_chunks::<4>().0.iter().filter(|p| p[3] > 0.05).count()
     }
 
     #[test]
@@ -294,7 +294,7 @@ mod tests {
         let r = s.execute("filter.render.tree", json!({"newLayer": true, "baseTreeType": 1, "leavesAmount": 100})).unwrap();
         assert_eq!(r["newLayer"], json!(true));
         let px = pixels(&s);
-        let right = px.chunks_exact(4).enumerate().filter(|(i, p)| i % 160 >= 81 && p[3] > 0.0).count();
+        let right = px.as_chunks::<4>().0.iter().enumerate().filter(|(i, p)| i % 160 >= 81 && p[3] > 0.0).count();
         assert_eq!(right, 0, "nothing drawn outside the selection");
         assert!(opaque(&s) > 50);
     }

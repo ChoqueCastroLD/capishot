@@ -103,7 +103,7 @@ fn read_binary(data: &[u8], n: usize, maxval: u32) -> Result<Vec<u32>, CodecErro
         if data.len() < n * 2 {
             return Err(err("truncated raster"));
         }
-        Ok(data[..n * 2].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]]) as u32).collect())
+        Ok(data[..n * 2].as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]]) as u32).collect())
     }
 }
 

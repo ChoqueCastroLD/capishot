@@ -10,7 +10,7 @@ use photocraft_psd::layer::BlendingRanges;
 /// `brst` (channel blending restrictions): a list of big-endian u32 channel indices left out of
 /// blending → a bit mask (bit `i` = channel `i`; indices above 31 are ignored).
 pub fn parse_brst(data: &[u8]) -> u32 {
-    data.chunks_exact(4).map(|c| u32::from_be_bytes([c[0], c[1], c[2], c[3]])).filter(|&i| i < 32).fold(0, |m, i| m | 1 << i)
+    data.as_chunks::<4>().0.iter().map(|c| u32::from_be_bytes([c[0], c[1], c[2], c[3]])).filter(|&i| i < 32).fold(0, |m, i| m | 1 << i)
 }
 
 /// Inverse of [`parse_brst`]; `None` when every channel blends (no block).

@@ -48,7 +48,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
     // tolerated: pixel data is already complete.
     let _ = reader.finish();
     if sample == SampleType::U16 {
-        for c in buf.chunks_exact_mut(2) {
+        for c in buf.as_chunks_mut::<2>().0 {
             let v = u16::from_be_bytes([c[0], c[1]]);
             c.copy_from_slice(&v.to_ne_bytes());
         }
@@ -114,7 +114,7 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
     // Big-endian sample bytes.
     let mut data = img.data().to_vec();
     if depth == png::BitDepth::Sixteen {
-        for c in data.chunks_exact_mut(2) {
+        for c in data.as_chunks_mut::<2>().0 {
             let v = u16::from_ne_bytes([c[0], c[1]]);
             c.copy_from_slice(&v.to_be_bytes());
         }

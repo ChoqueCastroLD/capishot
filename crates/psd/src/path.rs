@@ -115,7 +115,9 @@ impl PathData {
             return Err(PsdError::LimitExceeded("path records"));
         }
         let records = data
-            .chunks_exact(RECORD_LEN)
+            .as_chunks::<RECORD_LEN>()
+            .0
+            .iter()
             .map(|c| {
                 let mut d = [0u8; 24];
                 d.copy_from_slice(&c[2..]);

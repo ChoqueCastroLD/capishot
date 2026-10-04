@@ -133,7 +133,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         // Adobe-style CMYK is stored inverted (255 = no ink).
         ColorSpace::CMYK => px.iter_mut().for_each(|v| *v = 255 - *v),
         ColorSpace::YCCK => {
-            for p in px.chunks_exact_mut(4) {
+            for p in px.as_chunks_mut::<4>().0 {
                 let (y, cb, cr) = (p[0] as f32, p[1] as f32 - 128.0, p[2] as f32 - 128.0);
                 let c = y + 1.402 * cr;
                 let m = y - 0.344_136 * cb - 0.714_136 * cr;

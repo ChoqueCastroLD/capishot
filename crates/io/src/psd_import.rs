@@ -351,7 +351,7 @@ fn unicode_names(data: &[u8]) -> Vec<String> {
         let n = u32::from_be_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]]) as usize;
         at += 4;
         let Some(b) = data.get(at..at + n * 2) else { break };
-        let units: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = b.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
         out.push(String::from_utf16_lossy(&units).trim_end_matches('\0').to_string());
         at += n * 2;
     }
@@ -549,7 +549,9 @@ pub fn psd_to_document(file: &PsdFile) -> (Document, Vec<String>) {
             let mut s = Surface::new(fmt);
             let vals: Vec<f32> = img
                 .data
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .flat_map(|p| {
                     let v = photocraft_raster::from_rgba(&fmt, [p[0], p[1], p[2], p[3]].map(|x| f32::from(x) / 255.0));
                     v.into_iter()

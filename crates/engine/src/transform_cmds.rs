@@ -56,7 +56,7 @@ pub(crate) fn warp_gray(s: &Surface, h: &Homography, interp: Interp) -> Surface 
     let b = w.content_bounds();
     if !b.is_empty() {
         let px = w.read_region(b);
-        let flat: Vec<f32> = px.chunks_exact(2).map(|p| p[0] * p[1] + default * (1.0 - p[1])).collect();
+        let flat: Vec<f32> = px.as_chunks::<2>().0.iter().map(|p| p[0] * p[1] + default * (1.0 - p[1])).collect();
         out.write_region(b, &flat);
     }
     out.prune();

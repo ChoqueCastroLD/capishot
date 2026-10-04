@@ -158,7 +158,7 @@ fn colour_filters_use_and_record_tool_colours() {
     let r = s.execute("filter.render.fibers", json!({"seed": 1})).unwrap();
     assert_eq!(r["filter"]["foreground"], json!([1.0, 0.0, 0.0, 1.0]));
     let px = pixels(&s);
-    for p in px.chunks_exact(4) {
+    for p in px.as_chunks::<4>().0 {
         assert!(p[1] < 1e-2 && (p[0] + p[2] - 1.0).abs() < 2e-2, "{p:?}");
     }
 }

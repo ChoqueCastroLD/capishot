@@ -686,7 +686,7 @@ fn draw_mesh(d: &LiquifyDialog, painter: &egui::Painter, area: ERect) {
                             pts.push([pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t]);
                         }
                     }
-                    for seg in pts.chunks_exact(2) {
+                    for seg in pts.as_chunks::<2>().0 {
                         painter.line_segment([to_screen(d, area, seg[0]), to_screen(d, area, seg[1])], stroke);
                     }
                     k += 1;

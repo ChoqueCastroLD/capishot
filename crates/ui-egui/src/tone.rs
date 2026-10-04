@@ -26,7 +26,7 @@ fn compute_histograms(doc: &Document, hide: LayerId) -> Histograms {
     }
     let img = photocraft_compose::thumbnail(&d, 384);
     let mut h = [[0u32; 256]; 4];
-    for p in img.pixels.chunks_exact(4) {
+    for p in img.pixels.as_chunks::<4>().0 {
         if p[3] == 0 {
             continue;
         }

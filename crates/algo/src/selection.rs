@@ -547,7 +547,7 @@ pub fn polygon(points: &[(f32, f32)], area: Rect, anti_alias: bool) -> Vec<f32> 
                 }
             }
             xs.sort_by(|a, b| a.total_cmp(b));
-            for span in xs.chunks_exact(2) {
+            for span in xs.as_chunks::<2>().0 {
                 let (x0, x1) = ((span[0] - area.x0 as f32).max(0.0), (span[1] - area.x0 as f32).min(w as f32));
                 if x1 <= x0 {
                     continue;

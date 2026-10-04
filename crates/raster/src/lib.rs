@@ -277,13 +277,13 @@ impl Surface {
                 match (fmt.mode, fmt.sample, fmt.alpha) {
                     (ColorMode::Rgb, SampleType::U8, true) => {
                         let src = &t.data[base..base + dst.len() * 4];
-                        for (d, s) in dst.iter_mut().zip(src.chunks_exact(4)) {
+                        for (d, s) in dst.iter_mut().zip(src.as_chunks::<4>().0) {
                             *d = [s[0] as f32 / 255.0, s[1] as f32 / 255.0, s[2] as f32 / 255.0, s[3] as f32 / 255.0];
                         }
                     }
                     (ColorMode::Grayscale, SampleType::U8, true) => {
                         let src = &t.data[base..base + dst.len() * 2];
-                        for (d, s) in dst.iter_mut().zip(src.chunks_exact(2)) {
+                        for (d, s) in dst.iter_mut().zip(src.as_chunks::<2>().0) {
                             let g = s[0] as f32 / 255.0;
                             *d = [g, g, g, s[1] as f32 / 255.0];
                         }
@@ -324,7 +324,7 @@ impl Surface {
                     Some(t) if rgba8 => {
                         let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (tr.x0 - tc.tx * TILE_SIZE) as usize) * 4;
                         let len = dst.len();
-                        for (d, s) in dst.iter_mut().zip(t.data[base..base + len * 4].chunks_exact(4)) {
+                        for (d, s) in dst.iter_mut().zip(t.data[base..base + len * 4].as_chunks::<4>().0) {
                             *d = [s[0], s[1], s[2], s[3]];
                         }
                     }

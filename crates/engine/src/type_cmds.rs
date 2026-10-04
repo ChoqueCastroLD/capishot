@@ -673,7 +673,7 @@ mod tests {
         // Red pixels exist.
         let c = t.cache.as_ref().unwrap();
         let r = c.content_bounds();
-        assert!(c.read_region(r).chunks_exact(4).any(|p| p[3] > 0.9 && p[0] > 0.9 && p[1] < 0.1));
+        assert!(c.read_region(r).as_chunks::<4>().0.iter().any(|p| p[3] > 0.9 && p[0] > 0.9 && p[1] < 0.1));
         // The TySh we generated parses back to the same model.
         let back = photocraft_text::psd::text_layer_from_tysh(t.psd_raw.as_ref().unwrap(), 72.0).unwrap();
         assert_eq!(back.text, "Hello");

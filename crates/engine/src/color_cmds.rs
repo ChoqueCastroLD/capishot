@@ -329,7 +329,7 @@ impl ColorState {
         let check =
             if pv.gamut_warning { Some(GamutCheck::new(&composite_profile(doc), &pv.setup.profile, pv.gamut_threshold).map_err(cms_err)?) } else { None };
         let s = (size - 1) as f32;
-        for (i, px) in bytes.chunks_exact_mut(4).enumerate() {
+        for (i, px) in bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let rgb = [(i % size) as f32 / s, ((i / size) % size) as f32 / s, (i / (size * size)) as f32 / s];
             px[3] = if check.as_ref().is_some_and(|c| c.out_of_gamut(&rgb)) { 255 } else { 0 };
         }
@@ -1127,7 +1127,7 @@ mod tests {
             let surf = doc.layers[0].surface_mut().unwrap();
             let mut bytes = vec![0u8; r.width() as usize * r.height() as usize * 4];
             let mut x = 1u32;
-            for px in bytes.chunks_exact_mut(4) {
+            for px in bytes.as_chunks_mut::<4>().0 {
                 x ^= x << 13;
                 x ^= x >> 17;
                 x ^= x << 5;

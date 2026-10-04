@@ -243,7 +243,7 @@ fn is_avif_ftyp(b: &[u8]) -> bool {
     let size = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize;
     let end = size.clamp(12, b.len().min(64));
     let brands = &b[8..end];
-    brands.chunks_exact(4).enumerate().any(|(i, c)| i != 1 && (c == b"avif" || c == b"avis"))
+    brands.as_chunks::<4>().0.iter().enumerate().any(|(i, c)| i != 1 && (c == b"avif" || c == b"avis"))
 }
 
 fn looks_like_tga(b: &[u8]) -> bool {

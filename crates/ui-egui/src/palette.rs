@@ -90,9 +90,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                                 s,
                                 m.id,
                                 m.label.trim_end_matches('…').to_string(),
-                                Some(path)
-                                    .filter(|_| true)
-                                    .map(|p| p + &m.shortcut.map(|s| format!("   {}", crate::shortcuts::pretty(&s))).unwrap_or_default()),
+                                Some(path + &m.shortcut.map(|s| format!("   {}", crate::shortcuts::pretty(&s))).unwrap_or_default()),
                                 m.enabled,
                             ))
                         })

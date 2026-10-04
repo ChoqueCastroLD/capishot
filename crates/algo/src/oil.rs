@@ -65,7 +65,9 @@ pub(crate) fn oil_paint(src: &Image, out: Rect, ctx: &Ctx, spec: &OilSpec) -> Ve
     gauss_blur_n(&mut efg, ww, wh, 3, tensor_sigma(spec.scale));
     // 4. Stroke direction = minor eigenvector (along edges).
     let tangent: Vec<(f32, f32)> = efg
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let (e, f, g) = (t[0], t[1], t[2]);
             let l1 = 0.5 * (e + g + ((e - g) * (e - g) + 4.0 * f * f).sqrt());

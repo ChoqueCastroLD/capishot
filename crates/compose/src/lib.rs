@@ -48,7 +48,7 @@ impl Buffer {
     }
     pub fn to_rgba8(&self) -> Rgba8Image {
         let mut img = Rgba8Image::new(self.rect.width(), self.rect.height());
-        for (o, p) in img.pixels.chunks_exact_mut(4).zip(&self.px) {
+        for (o, p) in img.pixels.as_chunks_mut::<4>().0.iter_mut().zip(&self.px) {
             for (dst, v) in o.iter_mut().zip(p) {
                 *dst = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
             }

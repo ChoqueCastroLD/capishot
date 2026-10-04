@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for GrayTile {
         let data: Vec<u16> = match t.data {
             DataIn::B64(s) => {
                 let b = b64_decode(&s).ok_or_else(|| D::Error::custom("invalid base64 in tile data"))?;
-                b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect()
+                b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect()
             }
             DataIn::Floats(v) => v.iter().map(|&x| q16(x)).collect(),
         };

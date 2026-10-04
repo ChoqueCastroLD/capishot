@@ -105,7 +105,7 @@ fn read_pattern(r: &mut Rd) -> Result<PsdPattern> {
     if n > 65_536 {
         return Err(PsdError::LimitExceeded("pattern name length"));
     }
-    let units: Vec<u16> = r.take(n * 2)?.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+    let units: Vec<u16> = r.take(n * 2)?.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
     let name = String::from_utf16_lossy(&units).trim_end_matches('\0').to_string();
     let idl = r.u8()? as usize;
     let id = String::from_utf8_lossy(r.take(idl)?).to_string();

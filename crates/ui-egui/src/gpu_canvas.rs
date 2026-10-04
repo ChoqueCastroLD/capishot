@@ -341,7 +341,7 @@ impl Perf {
 /// Straight-alpha f32 RGBA (sRGB-encoded) → premultiplied RGBA8, split across threads on native.
 pub fn premultiply_rgba8(px: &[[f32; 4]]) -> Vec<u8> {
     fn convert(src: &[[f32; 4]], dst: &mut [u8]) {
-        for (o, p) in dst.chunks_exact_mut(4).zip(src) {
+        for (o, p) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src) {
             let a = p[3].clamp(0.0, 1.0);
             o[0] = (p[0].clamp(0.0, 1.0) * a * 255.0 + 0.5) as u8;
             o[1] = (p[1].clamp(0.0, 1.0) * a * 255.0 + 0.5) as u8;

@@ -186,10 +186,10 @@ pub fn parse_look(text: &str) -> Result<LutFile, LutError> {
     let size: usize = tag("size").and_then(|s| s.parse().ok()).ok_or_else(|| LutError("no <size> in .look".into()))?;
     let hex: Vec<u8> = tag("data").ok_or_else(|| LutError("no <data> in .look".into()))?.bytes().filter(u8::is_ascii_hexdigit).collect();
     let nib = |c: u8| (c as char).to_digit(16).unwrap_or(0) as u8;
-    let bytes: Vec<u8> = hex.chunks_exact(2).map(|p| nib(p[0]) << 4 | nib(p[1])).collect();
-    let floats: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    let bytes: Vec<u8> = hex.as_chunks::<2>().0.iter().map(|p| nib(p[0]) << 4 | nib(p[1])).collect();
+    let floats: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
     let n3 = size.pow(3);
-    let data = if floats.len() == n3 * 4 { floats.chunks_exact(4).flat_map(|c| [c[0], c[1], c[2]]).collect() } else { floats };
+    let data = if floats.len() == n3 * 4 { floats.as_chunks::<4>().0.iter().flat_map(|c| [c[0], c[1], c[2]]).collect() } else { floats };
     LutFile { title: tag("title").unwrap_or_default(), size, data }.check()
 }
 
@@ -200,7 +200,7 @@ pub fn write_cube(l: &LutFile) -> String {
         s.push_str(&format!("TITLE \"{}\"\n", l.title.replace('"', "'")));
     }
     s.push_str(&format!("LUT_3D_SIZE {}\n", l.size));
-    for c in l.data.chunks_exact(3) {
+    for c in l.data.as_chunks::<3>().0 {
         s.push_str(&format!("{:.6} {:.6} {:.6}\n", c[0], c[1], c[2]));
     }
     s

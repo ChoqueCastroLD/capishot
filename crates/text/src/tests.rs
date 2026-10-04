@@ -272,12 +272,12 @@ fn multicolor_runs() {
     let (l, r) = e.render(&t, 72.0, PixelFormat::RGBA8);
     assert_eq!(l.glyphs.len(), 2);
     let px = r.surface.read_region(r.rect);
-    let opaque: Vec<&[f32]> = px.chunks_exact(4).filter(|p| p[3] > 0.99).collect();
+    let opaque: Vec<&[f32; 4]> = px.as_chunks::<4>().0.iter().filter(|p| p[3] > 0.99).collect();
     assert!(opaque.iter().any(|p| p[0] > 0.99 && p[2] < 0.01));
     assert!(opaque.iter().any(|p| p[2] > 0.99 && p[0] < 0.01));
     // CMYK target keeps colour in the document model.
     let (_, rc) = e.render(&t, 72.0, PixelFormat::CMYKA8);
-    assert!(rc.surface.read_region(rc.rect).chunks_exact(5).any(|p| p[4] > 0.99 && p[1] > 0.9 && p[2] > 0.9));
+    assert!(rc.surface.read_region(rc.rect).as_chunks::<5>().0.iter().any(|p| p[4] > 0.99 && p[1] > 0.9 && p[2] > 0.9));
 }
 
 #[test]

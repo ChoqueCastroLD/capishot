@@ -289,7 +289,7 @@ impl BlendingRanges {
     }
     /// Parsed entries (incomplete trailing bytes are ignored).
     pub fn ranges(&self) -> Vec<BlendRange> {
-        self.data.chunks_exact(8).map(|c| BlendRange { source: [c[0], c[1], c[2], c[3]], dest: [c[4], c[5], c[6], c[7]] }).collect()
+        self.data.as_chunks::<8>().0.iter().map(|c| BlendRange { source: [c[0], c[1], c[2], c[3]], dest: [c[4], c[5], c[6], c[7]] }).collect()
     }
 }
 

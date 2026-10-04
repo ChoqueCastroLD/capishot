@@ -429,18 +429,18 @@ impl Transform {
         let run = |(s, d): (&[u8], &mut [u8])| match sample {
             SampleKind::U8 => self.run_u8(s, src_stride, d, dst_stride, extra),
             SampleKind::U16 => {
-                let a: Vec<u16> = s.chunks_exact(2).map(|b| u16::from_ne_bytes([b[0], b[1]])).collect();
-                let mut o: Vec<u16> = d.chunks_exact(2).map(|b| u16::from_ne_bytes([b[0], b[1]])).collect();
+                let a: Vec<u16> = s.as_chunks::<2>().0.iter().map(|b| u16::from_ne_bytes([b[0], b[1]])).collect();
+                let mut o: Vec<u16> = d.as_chunks::<2>().0.iter().map(|b| u16::from_ne_bytes([b[0], b[1]])).collect();
                 self.run_u16(&a, src_stride, &mut o, dst_stride, extra);
-                for (b, v) in d.chunks_exact_mut(2).zip(o) {
+                for (b, v) in d.as_chunks_mut::<2>().0.iter_mut().zip(o) {
                     b.copy_from_slice(&v.to_ne_bytes());
                 }
             }
             SampleKind::F32 => {
-                let a: Vec<f32> = s.chunks_exact(4).map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])).collect();
-                let mut o: Vec<f32> = d.chunks_exact(4).map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])).collect();
+                let a: Vec<f32> = s.as_chunks::<4>().0.iter().map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])).collect();
+                let mut o: Vec<f32> = d.as_chunks::<4>().0.iter().map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])).collect();
                 self.run_f32(&a, src_stride, &mut o, dst_stride, extra);
-                for (b, v) in d.chunks_exact_mut(4).zip(o) {
+                for (b, v) in d.as_chunks_mut::<4>().0.iter_mut().zip(o) {
                     b.copy_from_slice(&v.to_ne_bytes());
                 }
             }

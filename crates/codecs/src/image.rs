@@ -238,17 +238,17 @@ impl Image {
 
     /// Copy samples out as `u16` (only when the sample type is `U16`).
     pub fn to_u16_samples(&self) -> Option<Vec<u16>> {
-        (self.sample == SampleType::U16).then(|| self.data.chunks_exact(2).map(|c| u16::from_ne_bytes([c[0], c[1]])).collect())
+        (self.sample == SampleType::U16).then(|| self.data.as_chunks::<2>().0.iter().map(|c| u16::from_ne_bytes([c[0], c[1]])).collect())
     }
 
     /// Copy samples out as `f16` (only when the sample type is `F16`).
     pub fn to_f16_samples(&self) -> Option<Vec<f16>> {
-        (self.sample == SampleType::F16).then(|| self.data.chunks_exact(2).map(|c| f16::from_bits(u16::from_ne_bytes([c[0], c[1]]))).collect())
+        (self.sample == SampleType::F16).then(|| self.data.as_chunks::<2>().0.iter().map(|c| f16::from_bits(u16::from_ne_bytes([c[0], c[1]]))).collect())
     }
 
     /// Copy samples out as `f32` (only when the sample type is `F32`).
     pub fn to_f32_samples(&self) -> Option<Vec<f32>> {
-        (self.sample == SampleType::F32).then(|| self.data.chunks_exact(4).map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]])).collect())
+        (self.sample == SampleType::F32).then(|| self.data.as_chunks::<4>().0.iter().map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]])).collect())
     }
 
     /// Sample `index` (in samples, not bytes) as a normalized f32.
@@ -363,9 +363,9 @@ pub(crate) fn read_normalized(data: &[u8], sample: SampleType, i: usize) -> f32 
 pub(crate) fn to_normalized(data: &[u8], sample: SampleType) -> Vec<f32> {
     match sample {
         SampleType::U8 => data.iter().map(|&v| v as f32 / 255.0).collect(),
-        SampleType::U16 => data.chunks_exact(2).map(|c| u16::from_ne_bytes([c[0], c[1]]) as f32 / 65535.0).collect(),
-        SampleType::F16 => data.chunks_exact(2).map(|c| f16::from_bits(u16::from_ne_bytes([c[0], c[1]])).to_f32()).collect(),
-        SampleType::F32 => data.chunks_exact(4).map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]])).collect(),
+        SampleType::U16 => data.as_chunks::<2>().0.iter().map(|c| u16::from_ne_bytes([c[0], c[1]]) as f32 / 65535.0).collect(),
+        SampleType::F16 => data.as_chunks::<2>().0.iter().map(|c| f16::from_bits(u16::from_ne_bytes([c[0], c[1]])).to_f32()).collect(),
+        SampleType::F32 => data.as_chunks::<4>().0.iter().map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]])).collect(),
     }
 }
 

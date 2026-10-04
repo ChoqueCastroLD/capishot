@@ -303,7 +303,7 @@ fn mezzotint_is_binary_and_tracks_brightness() {
     let out = run(&s, &FilterParams::Mezzotint { kind: MezzotintType::FineDots, seed: 1 });
     let v = out.read_region(R);
     let mut mean = [0.0f32; 3];
-    for px in v.chunks_exact(4) {
+    for px in v.as_chunks::<4>().0 {
         for k in 0..3 {
             assert!(px[k] == 0.0 || px[k] == 1.0);
             mean[k] += px[k] / 1200.0;
@@ -318,10 +318,10 @@ fn halftone_covers_by_ink() {
     let w = run(&flat(SampleType::F32, R, WHITE), &FilterParams::ColorHalftone { max_radius: 4.0, angles });
     assert!(w.read_region(R).iter().all(|&v| (v - 1.0).abs() < 1e-6), "white paper stays white");
     let b = run(&flat(SampleType::F32, R, BLACK), &FilterParams::ColorHalftone { max_radius: 4.0, angles });
-    let mean_b: f32 = b.read_region(R).chunks_exact(4).map(|p| p[0]).sum::<f32>() / 1200.0;
+    let mean_b: f32 = b.read_region(R).as_chunks::<4>().0.iter().map(|p| p[0]).sum::<f32>() / 1200.0;
     assert!(mean_b < 0.05, "black is fully inked: {mean_b}");
     let g = run(&flat(SampleType::F32, R, [0.5, 0.5, 0.5, 1.0]), &FilterParams::ColorHalftone { max_radius: 4.0, angles });
-    let mean_g: f32 = g.read_region(R).chunks_exact(4).map(|p| p[1]).sum::<f32>() / 1200.0;
+    let mean_g: f32 = g.read_region(R).as_chunks::<4>().0.iter().map(|p| p[1]).sum::<f32>() / 1200.0;
     assert!((mean_g - 0.5).abs() < 0.12, "mid gray ≈ half coverage: {mean_g}");
 }
 
@@ -330,8 +330,8 @@ fn pointillize_shows_canvas() {
     let s = flat(SampleType::F32, R, [0.0, 0.0, 1.0, 1.0]);
     let out = run(&s, &FilterParams::Pointillize { cell_size: 10.0, seed: 3, background: [1.0, 0.0, 0.0, 1.0] });
     let v = out.read_region(R);
-    assert!(v.chunks_exact(4).any(|p| p[0] > 0.99 && p[2] < 0.01), "canvas visible between dots");
-    assert!(v.chunks_exact(4).any(|p| p[2] > 0.9), "dots take the image colour");
+    assert!(v.as_chunks::<4>().0.iter().any(|p| p[0] > 0.99 && p[2] < 0.01), "canvas visible between dots");
+    assert!(v.as_chunks::<4>().0.iter().any(|p| p[2] > 0.9), "dots take the image colour");
 }
 
 #[test]
@@ -372,8 +372,8 @@ fn tiles_leave_gaps_with_fill() {
     let out =
         run(&s, &FilterParams::Tiles { count: 3, max_offset: 40.0, fill: TileFill::Foreground, foreground: [0.0, 1.0, 0.0, 1.0], background: WHITE, seed: 2 });
     let v = out.read_region(R);
-    assert!(v.chunks_exact(4).any(|p| p[1] > 0.99), "foreground gaps");
-    assert!(v.chunks_exact(4).filter(|p| p[2] > 0.99).count() > 600, "mostly tiles");
+    assert!(v.as_chunks::<4>().0.iter().any(|p| p[1] > 0.99), "foreground gaps");
+    assert!(v.as_chunks::<4>().0.iter().filter(|p| p[2] > 0.99).count() > 600, "mostly tiles");
 }
 
 #[test]
@@ -409,7 +409,7 @@ fn fibers_lie_between_colours_and_are_seeded() {
     let p = FilterParams::Fibers { variance: 16.0, strength: 4.0, seed: 1, foreground: [1.0, 0.0, 0.0, 1.0], background: [0.0, 0.0, 1.0, 1.0] };
     let a = run(&s, &p);
     assert_eq!(a, run(&s, &p));
-    for px in a.read_region(R).chunks_exact(4) {
+    for px in a.read_region(R).as_chunks::<4>().0 {
         assert!((px[0] + px[2] - 1.0).abs() < 1e-5 && px[1].abs() < 1e-6);
     }
     let b = run(&s, &FilterParams::Fibers { variance: 16.0, strength: 4.0, seed: 2, foreground: [1.0, 0.0, 0.0, 1.0], background: [0.0, 0.0, 1.0, 1.0] });
@@ -462,7 +462,7 @@ fn lighting_point_light_falls_off() {
 }
 
 fn variance(s: &Surface, r: Rect, c: usize) -> f32 {
-    let v: Vec<f32> = s.read_region(r).chunks_exact(4).map(|p| p[c]).collect();
+    let v: Vec<f32> = s.read_region(r).as_chunks::<4>().0.iter().map(|p| p[c]).collect();
     let m = v.iter().sum::<f32>() / v.len() as f32;
     v.iter().map(|x| (x - m).powi(2)).sum::<f32>() / v.len() as f32
 }
@@ -525,7 +525,7 @@ fn shaped_blurs_spread_a_point_into_the_shape() {
         },
     );
     // A triangle iris pointing up: the bokeh reaches farther below the point than above it... and specular boost brightens.
-    let sum: f32 = lb.read_region(R).chunks_exact(4).map(|p| p[0]).sum();
+    let sum: f32 = lb.read_region(R).as_chunks::<4>().0.iter().map(|p| p[0]).sum();
     assert!(sum > 1.5, "highlight bloomed: {sum}");
     assert!(lb.pixel(20, 15 + 5)[0] != lb.pixel(20, 15 - 5)[0], "triangular, not circular");
 }
