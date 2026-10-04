@@ -13,6 +13,7 @@
 //! CIE 15, and Adobe's published black point compensation paper. This crate depends on no
 //! other workspace crate.
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod builtin;
 pub mod clut;

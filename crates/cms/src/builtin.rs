@@ -106,8 +106,9 @@ impl Builtin {
     /// The profile (built once per process).
     pub fn profile(self) -> &'static Profile {
         static CELLS: [OnceLock<Profile>; 10] = [const { OnceLock::new() }; 10];
-        let i = Builtin::ALL.iter().position(|b| *b == self).expect("listed");
-        CELLS[i].get_or_init(|| build(self))
+        // `ALL` lists the variants in declaration order (checked by `all_in_declaration_order`),
+        // so the discriminant is the cell index.
+        CELLS[self as usize].get_or_init(|| build(self))
     }
 }
 
@@ -134,7 +135,10 @@ fn d65() -> [f64; 3] {
 /// Colorant matrix adapted to D50 and quantized to s15Fixed16, with each row nudged so that
 /// RGB (1, 1, 1) maps exactly to the stored D50 white (keeps neutrals neutral).
 fn colorants(r: [f64; 2], g: [f64; 2], b: [f64; 2], white: [f64; 3]) -> (Mat3, Option<Mat3>) {
-    let m = math::rgb_to_xyz_matrix(r, g, b, white);
+    // Only called with the constant primaries of the built-in spaces, which are independent
+    // (every built-in profile is built in the tests).
+    #[allow(clippy::expect_used)]
+    let m = math::rgb_to_xyz_matrix(r, g, b, white).expect("built-in primaries are independent");
     let d50 = math::d50_quantized();
     let adapt = if (white[0] - math::D50[0]).abs() < 1e-3 && (white[2] - math::D50[2]).abs() < 1e-3 { None } else { Some(math::bradford(white, math::D50)) };
     let m50 = match &adapt {
@@ -258,6 +262,8 @@ fn build(b: Builtin) -> Profile {
         Builtin::GrayGamma22 => gray(b.description(), Curve::Gamma(2.2)),
         Builtin::SGray => gray(b.description(), srgb_trc()),
         Builtin::LabD50 => lab(),
-        Builtin::CoatedCmyk => Profile::parse(COATED_CMYK_ICC).expect("shipped CMYK profile parses"),
+        // The shipped bytes are `synth::coated_cmyk()` (checked by the `regen` test); rebuild
+        // them rather than crash if they ever fail to parse.
+        Builtin::CoatedCmyk => Profile::parse(COATED_CMYK_ICC).unwrap_or_else(|_| crate::synth::coated_cmyk()),
     }
 }

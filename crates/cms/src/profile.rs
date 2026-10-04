@@ -241,6 +241,9 @@ impl Profile {
         p.matrix = Some(m);
         p.trc = Some([c.clone(), c.clone(), c]);
         p.gray_trc = None;
+        // The gray LUTs take one input channel; this profile is the matrix/TRC model above.
+        p.a2b = Default::default();
+        p.b2a = Default::default();
         p.bytes = None;
         p.hash = Default::default();
         Some(p)

@@ -111,10 +111,13 @@ fn lut_parts(stages: &[Stage]) -> Option<LutParts<'_>> {
     }
 }
 
-fn encode_mft(stages: &[Stage], wide: bool) -> Vec<u8> {
-    let (mat, a, clut, b) = lut_parts(stages).expect("lut8/lut16 stages are [matrix?] curves, clut, curves");
-    let g = clut.grid[0];
-    assert!(clut.grid.iter().all(|x| *x == g), "lut8/lut16 need a uniform grid");
+/// `None` unless the stages are `[matrix?] curves, clut, curves` with a uniform grid.
+fn encode_mft(stages: &[Stage], wide: bool) -> Option<Vec<u8>> {
+    let (mat, a, clut, b) = lut_parts(stages)?;
+    let g = *clut.grid.first()?;
+    if !clut.grid.iter().all(|x| *x == g) {
+        return None;
+    }
     let mut o = if wide { b"mft2\0\0\0\0".to_vec() } else { b"mft1\0\0\0\0".to_vec() };
     o.extend_from_slice(&[clut.inputs as u8, clut.outputs as u8, g as u8, 0]);
     let m = mat.unwrap_or_else(|| vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
@@ -146,10 +149,11 @@ fn encode_mft(stages: &[Stage], wide: bool) -> Vec<u8> {
             put(&mut o, v);
         }
     }
-    o
+    Some(o)
 }
 
-fn encode_ab(stages: &[Stage], a2b: bool, inputs: usize, outputs: usize) -> Vec<u8> {
+/// `None` when the stages aren't a layout `lutAtoB`/`lutBtoA` can store in this direction.
+fn encode_ab(stages: &[Stage], a2b: bool, inputs: usize, outputs: usize) -> Option<Vec<u8>> {
     let mut a_curves: Option<&[Curve]> = None;
     let mut clut: Option<&Clut> = None;
     let mut m_curves: Option<&[Curve]> = None;
@@ -173,7 +177,7 @@ fn encode_ab(stages: &[Stage], a2b: bool, inputs: usize, outputs: usize) -> Vec<
                 b_curves = Some(b.as_slice());
             }
             [Stage::Curves(b)] => b_curves = Some(b.as_slice()),
-            _ => panic!("unsupported lutAtoB stage layout"),
+            _ => return None,
         }
     } else {
         // B [matrix, M] [CLUT, A]
@@ -193,7 +197,9 @@ fn encode_ab(stages: &[Stage], a2b: bool, inputs: usize, outputs: usize) -> Vec<
             a_curves = Some(a.as_slice());
             k += 2;
         }
-        assert_eq!(k, v.len(), "unsupported lutBtoA stage layout");
+        if k != v.len() {
+            return None;
+        }
     }
     let mut o = if a2b { b"mAB \0\0\0\0".to_vec() } else { b"mBA \0\0\0\0".to_vec() };
     o.extend_from_slice(&[inputs as u8, outputs as u8, 0, 0]);
@@ -205,7 +211,7 @@ fn encode_ab(stages: &[Stage], a2b: bool, inputs: usize, outputs: usize) -> Vec<
             pad4(o);
         }
     };
-    let b = b_curves.expect("B curves are required");
+    let b = b_curves?;
     offs[0] = o.len() as u32;
     curves(&mut o, b);
     if let Some((mm, off)) = matrix {
@@ -217,7 +223,7 @@ fn encode_ab(stages: &[Stage], a2b: bool, inputs: usize, outputs: usize) -> Vec<
             o.extend_from_slice(&s15(*v));
         }
         offs[2] = o.len() as u32;
-        curves(&mut o, m_curves.expect("M curves accompany the matrix"));
+        curves(&mut o, m_curves?);
     }
     if let Some(c) = clut {
         offs[3] = o.len() as u32;
@@ -232,15 +238,17 @@ fn encode_ab(stages: &[Stage], a2b: bool, inputs: usize, outputs: usize) -> Vec<
         }
         pad4(&mut o);
         offs[4] = o.len() as u32;
-        curves(&mut o, a_curves.expect("A curves accompany the CLUT"));
+        curves(&mut o, a_curves?);
     }
     for (k, v) in offs.iter().enumerate() {
         o[12 + k * 4..16 + k * 4].copy_from_slice(&v.to_be_bytes());
     }
-    o
+    Some(o)
 }
 
-/// Encodes `p` as ICC v4.3 bytes (identical tag data is shared between tags).
+/// Encodes `p` as ICC v4.3 bytes (identical tag data is shared between tags). A LUT whose
+/// stage layout its tag type can't store (only possible for a parsed profile whose LUT tag
+/// used the other direction's type) is left out; the matrix/TRC tags still describe it.
 pub fn encode(p: &Profile) -> Vec<u8> {
     let mut tags: Vec<([u8; 4], Vec<u8>)> = Vec::new();
     tags.push((*b"desc", mluc(&p.description)));
@@ -277,7 +285,9 @@ pub fn encode(p: &Profile) -> Vec<u8> {
                     LutKind::Lut8 => encode_mft(&l.stages, false),
                     LutKind::Ab => encode_ab(&l.stages, a2b, l.inputs, l.outputs),
                 };
-                tags.push((*name, data));
+                if let Some(data) = data {
+                    tags.push((*name, data));
+                }
             }
         }
     }

@@ -507,3 +507,86 @@ fn oracle_moxcms_system_cmyk() {
     let p99 = sorted[sorted.len() * 99 / 100];
     assert!(mean < 1.5 && p99 <= 6, "max {worst} p99 {p99} mean {mean}");
 }
+
+#[test]
+fn builtin_all_in_declaration_order() {
+    // `Builtin::profile` indexes its cache by discriminant.
+    for (i, b) in Builtin::ALL.iter().enumerate() {
+        assert_eq!(*b as usize, i, "{b:?}");
+    }
+}
+
+/// `icc` with one more tag appended (the tag table grows by 12 bytes, so offsets shift).
+fn with_tag(icc: &[u8], sig: &[u8; 4], data: &[u8]) -> Vec<u8> {
+    let be = |o: usize| u32::from_be_bytes(icc[o..o + 4].try_into().unwrap());
+    let count = be(128) as usize;
+    let table_end = 132 + count * 12;
+    let mut body = icc[table_end..].to_vec();
+    while !body.len().is_multiple_of(4) {
+        body.push(0);
+    }
+    let mut out = icc[..128].to_vec();
+    out.extend_from_slice(&(count as u32 + 1).to_be_bytes());
+    for i in 0..count {
+        let o = 132 + i * 12;
+        out.extend_from_slice(&icc[o..o + 4]);
+        out.extend_from_slice(&(be(o + 4) + 12).to_be_bytes());
+        out.extend_from_slice(&icc[o + 8..o + 12]);
+    }
+    let new_off = (table_end + 12 + body.len()) as u32;
+    out.extend_from_slice(sig);
+    out.extend_from_slice(&new_off.to_be_bytes());
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(&body);
+    out.extend_from_slice(data);
+    let size = out.len() as u32;
+    out[..4].copy_from_slice(&size.to_be_bytes());
+    out
+}
+
+/// A `lutBtoA` ("mBA ") tag, 1 → 3 channels, using every element:
+/// B curves, matrix, M curves, CLUT, A curves.
+fn mba_1_to_3() -> Vec<u8> {
+    let curv = b"curv\0\0\0\0\0\0\0\0"; // identity curve, 12 bytes
+    let mut d = b"mBA \0\0\0\0".to_vec();
+    d.extend_from_slice(&[1, 3, 0, 0]);
+    // offsets: B, matrix, M, CLUT, A
+    for off in [32u32, 44, 92, 104, 132] {
+        d.extend_from_slice(&off.to_be_bytes());
+    }
+    d.extend_from_slice(curv); // B @ 32
+    for k in 0..12 {
+        let v: i32 = if k % 4 == 0 && k < 9 { 0x10000 } else { 0 };
+        d.extend_from_slice(&v.to_be_bytes()); // matrix @ 44 (identity, zero offset)
+    }
+    d.extend_from_slice(curv); // M @ 92
+    let mut grid = [0u8; 16];
+    grid[0] = 2;
+    d.extend_from_slice(&grid); // CLUT @ 104
+    d.extend_from_slice(&[1, 0, 0, 0]); // 8-bit precision
+    d.extend_from_slice(&[0, 0, 0, 255, 255, 255]); // 2 nodes x 3 outputs
+    d.extend_from_slice(&[0, 0]); // pad to 132
+    for _ in 0..3 {
+        d.extend_from_slice(curv); // A @ 132
+    }
+    d
+}
+
+/// Regression: a gray profile whose A2B0 tag is stored as "mBA " parsed fine, but
+/// re-encoding its RGB view (`gray_as_rgb`, used for gray documents' composites) hit
+/// `panic!("unsupported lutAtoB stage layout")` in the ICC writer.
+#[test]
+fn gray_profile_with_reversed_lut_type_reencodes() {
+    let sgray = Builtin::SGray.profile().to_bytes();
+    let icc = with_tag(&sgray, b"A2B0", &mba_1_to_3());
+    let p = Profile::parse(&icc).unwrap();
+    assert!(p.a2b[0].is_some(), "the crafted A2B0 tag should parse");
+    let rgb = p.gray_as_rgb().unwrap();
+    assert!(rgb.is_matrix_shaper(), "RGB view keeps no gray LUTs");
+    let back = Profile::parse(&rgb.to_bytes()).unwrap();
+    assert_eq!(back.color_space, ColorSpace::Rgb);
+    // The writer itself must not panic on a LUT it can't store either.
+    let mut odd = p.clone();
+    odd.description = "re-encoded".into();
+    let _ = Profile::parse(&odd.with_encoded_bytes().to_bytes()).unwrap();
+}

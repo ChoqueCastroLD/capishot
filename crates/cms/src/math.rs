@@ -59,6 +59,8 @@ const BRADFORD: Mat3 = [[0.8951, 0.2664, -0.1614], [-0.7502, 1.7135, 0.0367], [0
 
 /// Bradford chromatic adaptation matrix from white `src` to white `dst` (both XYZ).
 pub fn bradford(src: [f64; 3], dst: [f64; 3]) -> Mat3 {
+    // `BRADFORD` is a constant with determinant ~1.7 (see `bradford_maps_white`).
+    #[allow(clippy::expect_used)]
     let inv = invert(&BRADFORD).expect("Bradford matrix is invertible");
     let s = apply(&BRADFORD, src);
     let d = apply(&BRADFORD, dst);
@@ -66,12 +68,13 @@ pub fn bradford(src: [f64; 3], dst: [f64; 3]) -> Mat3 {
     mul(&inv, &mul(&scale, &BRADFORD))
 }
 
-/// RGB → XYZ matrix (relative to `white`, Y = 1) for primaries given as chromaticities.
-pub fn rgb_to_xyz_matrix(r: [f64; 2], g: [f64; 2], b: [f64; 2], white: [f64; 3]) -> Mat3 {
+/// RGB → XYZ matrix (relative to `white`, Y = 1) for primaries given as chromaticities, or
+/// `None` when the primaries are not independent.
+pub fn rgb_to_xyz_matrix(r: [f64; 2], g: [f64; 2], b: [f64; 2], white: [f64; 3]) -> Option<Mat3> {
     let (xr, xg, xb) = (xy_to_xyz(r), xy_to_xyz(g), xy_to_xyz(b));
     let m = [[xr[0], xg[0], xb[0]], [xr[1], xg[1], xb[1]], [xr[2], xg[2], xb[2]]];
-    let s = apply(&invert(&m).expect("primaries are independent"), white);
-    [[m[0][0] * s[0], m[0][1] * s[1], m[0][2] * s[2]], [m[1][0] * s[0], m[1][1] * s[1], m[1][2] * s[2]], [m[2][0] * s[0], m[2][1] * s[1], m[2][2] * s[2]]]
+    let s = apply(&invert(&m)?, white);
+    Some([[m[0][0] * s[0], m[0][1] * s[1], m[0][2] * s[2]], [m[1][0] * s[0], m[1][1] * s[1], m[1][2] * s[2]], [m[2][0] * s[0], m[2][1] * s[1], m[2][2] * s[2]]])
 }
 
 const EPS: f64 = 216.0 / 24389.0; // (6/29)^3
