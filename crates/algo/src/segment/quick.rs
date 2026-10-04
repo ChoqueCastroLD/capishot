@@ -108,6 +108,8 @@ pub fn segment(img: &RgbImage, seeds: &[bool]) -> (Gmm, Gmm, Vec<bool>) {
 /// A near-uniform density over the RGB cube.
 pub fn broad_model() -> Gmm {
     let corners: Vec<[f32; 3]> = (0..8).map(|i| [(i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32]).collect();
+    // Eight fixed, distinct samples: the fit cannot fail.
+    #[allow(clippy::expect_used)]
     Gmm::fit(&corners, 1, 0.0).expect("non-degenerate")
 }
 

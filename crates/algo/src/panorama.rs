@@ -616,7 +616,7 @@ fn align_layout(feats: &[ImageFeatures], matches: &[PairMatch], opts: &AlignOpti
     let mp = motion.n_params();
     let refine_focal = projection != Projection::Plane;
     let n_glob = usize::from(opts.geometric) + usize::from(refine_focal);
-    let mut params: Vec<f64> = movable.iter().flat_map(|&i| motion.to_params(&tf[i].expect("placed"))).collect();
+    let mut params: Vec<f64> = movable.iter().filter_map(|&i| tf[i].as_ref()).flat_map(|t| motion.to_params(t)).collect();
     if opts.geometric {
         params.push(0.0);
     }
@@ -1105,7 +1105,7 @@ pub fn multiband(w: usize, h: usize, imgs: &[RoiImage], weights: &[Vec<f32>], le
     // Level sizes of the panorama.
     let mut sizes = vec![(w, h)];
     for _ in 1..levels {
-        let (pw, ph) = *sizes.last().expect("non-empty");
+        let Some(&(pw, ph)) = sizes.last() else { break };
         sizes.push((pw.div_ceil(2), ph.div_ceil(2)));
     }
     let mut acc: Vec<Vec<f32>> = sizes.iter().map(|&(lw, lh)| vec![0.0; lw * lh * ch]).collect();
@@ -1195,7 +1195,8 @@ pub fn multiband(w: usize, h: usize, imgs: &[RoiImage], weights: &[Vec<f32>], le
         }
     }
     // Collapse.
-    let mut cur = acc.pop().expect("levels ≥ 1");
+    // `levels ≥ 1`, so there is always a coarsest level.
+    let Some(mut cur) = acc.pop() else { return (vec![0.0; w * h * ch], vec![0.0; w * h]) };
     for l in (0..levels - 1).rev() {
         let (pw, ph) = sizes[l];
         let (sw, sh) = sizes[l + 1];

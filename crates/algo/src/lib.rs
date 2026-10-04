@@ -16,6 +16,7 @@
 //! [`apply`] runs a filter over an area, tile by tile (in parallel with
 //! rayon on native targets; single-threaded on wasm).
 #![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod artistic;
 mod artistic_fx;
@@ -906,7 +907,11 @@ pub fn apply_tiled(
                 };
                 &owned
             }
-            (None, Halo::Bounds) => unreachable!("shared image exists for global filters"),
+            // `shared` is always read for global filters; read the same image if it weren't.
+            (None, Halo::Bounds) => {
+                owned = Image::read(surface, bounds.union(&area));
+                &owned
+            }
         };
         let mut data = kernel(params, src, *t, &ctx);
         if let Some(sel) = selection {
