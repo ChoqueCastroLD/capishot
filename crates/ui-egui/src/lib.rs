@@ -48,6 +48,7 @@ pub mod menus;
 pub mod new_doc_ui;
 pub mod notices;
 pub mod outline;
+pub mod paint_mouse;
 pub mod palette;
 pub mod panels;
 pub mod parity;
@@ -190,6 +191,8 @@ pub struct PhotocraftApp {
     drag: Option<canvas::Drag>,
     /// Brush/Eraser stroke being drawn, rendered by the engine (see `canvas::LiveStroke`).
     live_stroke: Option<canvas::LiveStroke>,
+    /// The next tool `Down` is a right-button drag that erases (see `paint_mouse`).
+    secondary_erase: bool,
     control_rx: Option<Receiver<ControlRequest>>,
     pending_screenshots: Vec<(u64, Option<String>, Sender<ControlResponse>)>,
     /// Screenshots not yet requested from the viewport: (token, earliest time in ms, frames seen).
@@ -285,6 +288,7 @@ impl PhotocraftApp {
             checker: None,
             drag: None,
             live_stroke: None,
+            secondary_erase: false,
             control_rx: None,
             pending_screenshots: Vec::new(),
             queued_screenshots: Vec::new(),

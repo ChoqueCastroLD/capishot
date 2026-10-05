@@ -441,6 +441,67 @@ impl StrokeRenderer {
         self.raster_pending();
     }
 
+    /// What finishing the stroke now would add (the smoothing catch-up tail to the last point, or
+    /// a lone first dab), for live previews: a renderer holding copies of the coverage tiles the
+    /// tail touches with the tail rendered in, so its `composite` draws exactly those tiles as
+    /// [`finish`](Self::finish) would leave them. `None` when finishing adds nothing.
+    pub fn tail_preview(&self) -> Option<StrokeRenderer> {
+        let mut generator = self.generator.clone();
+        let (mut dabs, mut duals) = (Vec::new(), Vec::new());
+        generator.finish(&mut dabs, &mut duals);
+        if dabs.is_empty() && duals.is_empty() {
+            return None;
+        }
+        let mut keys = HashSet::new();
+        for r in dabs.iter().map(|d| self.ctx.dab_rect(d, false)).chain(duals.iter().map(|d| self.ctx.dab_rect(d, true))) {
+            if r.is_empty() {
+                continue;
+            }
+            for ty in r.y0.div_euclid(COV_TILE)..=(r.y1 - 1).div_euclid(COV_TILE) {
+                for tx in r.x0.div_euclid(COV_TILE)..=(r.x1 - 1).div_euclid(COV_TILE) {
+                    keys.insert((tx, ty));
+                }
+            }
+        }
+        let subset = |m: &CoverageMap| CoverageMap {
+            tiles: keys.iter().filter_map(|k| m.tiles.get(k).map(|t| (*k, t.clone()))).collect(),
+            nc: m.nc,
+            bounds: m.bounds,
+            dirty: HashSet::new(),
+        };
+        let mut t = StrokeRenderer {
+            ctx: self.ctx.clone(),
+            generator,
+            cov: subset(&self.cov),
+            dual: self.dual.as_ref().map(subset),
+            fmt: self.fmt,
+            per_dab_color: self.per_dab_color,
+            dabs_done: self.dabs_done,
+            scratch: Vec::new(),
+            dab_buf: dabs,
+            dual_buf: duals,
+            all_dabs: None,
+        };
+        t.raster_pending();
+        // Tiles whose coverage the tail doesn't change still composite the same: redraw them all.
+        t.cov.dirty.extend(t.cov.tiles.keys().copied());
+        Some(t)
+    }
+
+    /// Mark the coverage tiles over `r` for the next `composite` (e.g. to redraw over a preview).
+    pub fn mark_dirty(&mut self, r: Rect) {
+        if r.is_empty() {
+            return;
+        }
+        for ty in r.y0.div_euclid(COV_TILE)..=(r.y1 - 1).div_euclid(COV_TILE) {
+            for tx in r.x0.div_euclid(COV_TILE)..=(r.x1 - 1).div_euclid(COV_TILE) {
+                if self.cov.tiles.contains_key(&(tx, ty)) {
+                    self.cov.dirty.insert((tx, ty));
+                }
+            }
+        }
+    }
+
     /// Final stroke coverage at a pixel (stroke-level masks applied, before opacity/selection).
     pub fn coverage_at(&self, x: i32, y: i32) -> f32 {
         let c = self.cov.get(x, y);

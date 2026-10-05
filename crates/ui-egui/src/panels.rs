@@ -372,6 +372,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 {
                     return;
                 }
+                crate::paint_mouse::sync_tool_smoothing(app);
                 let b = &mut app.session.tools.brush;
                 match app.ui.tool {
                     Tool::Brush | Tool::Eraser if t.pro => {
@@ -398,8 +399,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         }
                         let _ = icons::button(ui, "sparkles", 24.0, false, "Enable airbrush-style build-up effects");
                         opt_label(ui, "Smoothing");
-                        let mut sm = 10.0f32;
-                        widgets::value_field(ui, &mut sm, 0.0..=100.0, "%", 58.0);
+                        smoothing_field(ui, b, 58.0);
                         let _ = icons::button(ui, "settings", 24.0, false, "Set additional smoothing options");
                         widgets::vline(ui, 22.0);
                         if icons::button(ui, "circle-dot", 24.0, b.pressure_size, "Always use pressure for size").clicked() {
@@ -426,6 +426,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         if widgets::value_field(ui, &mut f, 1.0..=100.0, "%", 66.0).changed() {
                             b.flow = f / 100.0;
                         }
+                        opt_label(ui, "Smoothing");
+                        smoothing_field(ui, b, 66.0);
                         widgets::vline(ui, 22.0);
                         widgets::toggle(ui, &mut b.pressure_size, "Pressure for Size");
                         widgets::toggle(ui, &mut b.pressure_opacity, "Pressure for Opacity");
@@ -1953,6 +1955,14 @@ fn brush_tip(p: &egui::Painter, c: egui::Pos2, rad: f32, hardness: f32, color: C
     }
 }
 
+/// Options-bar Smoothing % (the brush's stroke smoothing; the live stroke and the commit use it).
+fn smoothing_field(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings, width: f32) {
+    let mut sm = (b.smoothing.amount * 100.0).round();
+    if widgets::value_field(ui, &mut sm, 0.0..=100.0, "%", width).changed() {
+        b.smoothing.amount = (sm / 100.0).clamp(0.0, 1.0);
+    }
+}
+
 /// Options-bar brush chip; opens Photoshop's Brush Preset Picker (size, hardness, preset tips).
 fn brush_preset_chip(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings) {
     let t = Tokens::get(ui.ctx());
@@ -1965,76 +1975,69 @@ fn brush_preset_chip(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings
     ui.painter().text(pos2(c.x, r.bottom() - 5.0), Align2::CENTER_CENTER, format!("{}", b.size.round() as i64), egui::FontId::proportional(9.5), t.text_dim);
     icons::paint(ui, Rect::from_center_size(pos2(r.right() - 9.0, c.y), vec2(10.0, 10.0)), "chevron-down", 9.0, t.text_faint);
     let resp = resp.on_hover_text("Brush Preset picker");
-    egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-        ui.set_width(260.0);
-        // Size: value field plus a logarithmic slider (small sizes get most of the travel).
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Size").color(t.text_dim));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let mut size = b.size;
-                if widgets::value_field(ui, &mut size, 1.0..=5000.0, "px", 72.0).changed() {
-                    b.size = size.round().clamp(1.0, 5000.0);
-                }
-            });
-        });
-        let mut lv = b.size.max(1.0).ln();
-        if widgets::slider(ui, &mut lv, 0.0..=5000f32.ln(), None).changed() {
-            b.size = lv.exp().round().clamp(1.0, 5000.0);
-        }
-        let mut hard = b.hardness * 100.0;
-        if widgets::slider_row(ui, "Hardness", &mut hard, 0.0..=100.0, "%", None).changed() {
-            b.hardness = (hard / 100.0).clamp(0.0, 1.0);
-        }
-        ui.add_space(6.0);
-        widgets::hairline(ui);
-        ui.add_space(6.0);
-        ui.label(RichText::new("General Brushes").color(t.text_dim).size(11.5));
-        // Photoshop's default round presets: soft and hard at common sizes.
-        let presets: [(f32, f32); 12] = [
-            (1.0, 1.0),
-            (3.0, 1.0),
-            (5.0, 1.0),
-            (9.0, 1.0),
-            (13.0, 1.0),
-            (19.0, 1.0),
-            (5.0, 0.0),
-            (9.0, 0.0),
-            (13.0, 0.0),
-            (17.0, 0.0),
-            (45.0, 0.0),
-            (65.0, 0.0),
-        ];
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-            for (sz, hd) in presets {
-                let (cell, cr) = ui.allocate_exact_size(vec2(38.0, 44.0), Sense::click());
-                let on = (b.size - sz).abs() < 0.5 && (b.hardness - hd).abs() < 0.01;
-                ui.painter().rect_filled(
-                    cell,
-                    3.0,
-                    if on {
-                        t.accent_soft
-                    } else if cr.hovered() {
-                        t.hover
-                    } else {
-                        t.field
-                    },
-                );
-                let rad = (sz / 2.0).clamp(1.0, 13.0);
-                brush_tip(ui.painter(), pos2(cell.center().x, cell.top() + 17.0), rad, hd, t.text);
-                ui.painter().text(
-                    pos2(cell.center().x, cell.bottom() - 7.0),
-                    Align2::CENTER_CENTER,
-                    format!("{}", sz as i64),
-                    egui::FontId::proportional(9.5),
-                    t.text_dim,
-                );
-                if cr.on_hover_text(format!("{} Round {sz:.0} px", if hd >= 1.0 { "Hard" } else { "Soft" })).clicked() {
-                    b.size = sz;
-                    b.hardness = hd;
-                }
+    egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| brush_picker_body(ui, b));
+}
+
+/// The Brush Preset picker's contents (size, hardness, preset tips): the options-bar chip's
+/// popup, and the picker a right-click on the canvas opens (`paint_mouse`).
+pub(crate) fn brush_picker_body(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings) {
+    let t = Tokens::get(ui.ctx());
+    ui.set_width(260.0);
+    // Size: value field plus a logarithmic slider (small sizes get most of the travel).
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Size").color(t.text_dim));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let mut size = b.size;
+            if widgets::value_field(ui, &mut size, 1.0..=5000.0, "px", 72.0).changed() {
+                b.size = size.round().clamp(1.0, 5000.0);
             }
         });
+    });
+    let mut lv = b.size.max(1.0).ln();
+    if widgets::slider(ui, &mut lv, 0.0..=5000f32.ln(), None).changed() {
+        b.size = lv.exp().round().clamp(1.0, 5000.0);
+    }
+    let mut hard = b.hardness * 100.0;
+    if widgets::slider_row(ui, "Hardness", &mut hard, 0.0..=100.0, "%", None).changed() {
+        b.hardness = (hard / 100.0).clamp(0.0, 1.0);
+    }
+    ui.add_space(6.0);
+    widgets::hairline(ui);
+    ui.add_space(6.0);
+    ui.label(RichText::new("General Brushes").color(t.text_dim).size(11.5));
+    // Photoshop's default round presets: soft and hard at common sizes.
+    let presets: [(f32, f32); 12] =
+        [(1.0, 1.0), (3.0, 1.0), (5.0, 1.0), (9.0, 1.0), (13.0, 1.0), (19.0, 1.0), (5.0, 0.0), (9.0, 0.0), (13.0, 0.0), (17.0, 0.0), (45.0, 0.0), (65.0, 0.0)];
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        for (sz, hd) in presets {
+            let (cell, cr) = ui.allocate_exact_size(vec2(38.0, 44.0), Sense::click());
+            let on = (b.size - sz).abs() < 0.5 && (b.hardness - hd).abs() < 0.01;
+            ui.painter().rect_filled(
+                cell,
+                3.0,
+                if on {
+                    t.accent_soft
+                } else if cr.hovered() {
+                    t.hover
+                } else {
+                    t.field
+                },
+            );
+            let rad = (sz / 2.0).clamp(1.0, 13.0);
+            brush_tip(ui.painter(), pos2(cell.center().x, cell.top() + 17.0), rad, hd, t.text);
+            ui.painter().text(
+                pos2(cell.center().x, cell.bottom() - 7.0),
+                Align2::CENTER_CENTER,
+                format!("{}", sz as i64),
+                egui::FontId::proportional(9.5),
+                t.text_dim,
+            );
+            if cr.on_hover_text(format!("{} Round {sz:.0} px", if hd >= 1.0 { "Hard" } else { "Soft" })).clicked() {
+                b.size = sz;
+                b.hardness = hd;
+            }
+        }
     });
 }
 

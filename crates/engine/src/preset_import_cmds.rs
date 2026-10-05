@@ -80,7 +80,7 @@ fn import_abr(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(first) = names.first()
         && let Some(pr) = photocraft_paint::presets::find(&s.tools.presets, first)
     {
-        s.tools.brush = pr.brush.clone();
+        s.tools.brush = pr.brush.clone().picked_over(&s.tools.brush);
     }
     Ok(json!({ "group": group, "imported": names, "count": names.len(), "version": imp.version, "warnings": imp.warnings }))
 }

@@ -260,7 +260,7 @@ New contributors and AI agents: start with [`AGENTS.md`](AGENTS.md), then [`docs
 Installers for macOS, Windows, Linux and the web are attached to each [GitHub release](https://github.com/storytold/photocraft/releases). Maintainers: [`docs/releasing.md`](docs/releasing.md) explains how releases are built, signed and published.
 
 > [!IMPORTANT]
-> **Status:** PhotoCraft is in early alpha. The core editing workflow is here, and we're working toward full Photoshop parity milestone by milestone (see [`docs/roadmap.md`](docs/roadmap.md)). Progress is measured, not guessed: `cargo xtask parity` checks every item in Photoshop's menu tree against the live command registry and writes [`docs/parity.md`](docs/parity.md). Expect rough edges, and please file issues. You can also tell us what broke on [Discord](https://discord.gg/artcraft).
+> **Status:** PhotoCraft is in early alpha. The core editing workflow is here, and we're working toward full Photoshop parity, milestone by milestone (see [`docs/roadmap.md`](docs/roadmap.md)). Progress is measured, not guessed: `cargo xtask parity` checks every item in Photoshop's menu tree against the live command registry and writes [`docs/parity.md`](docs/parity.md). Expect rough edges, and please file issues. You can also tell us what broke on [Discord](https://discord.gg/artcraft).
 
 ## Documentation
 

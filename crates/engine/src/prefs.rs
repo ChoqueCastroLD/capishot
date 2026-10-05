@@ -71,6 +71,11 @@ choice!(
     /// opacity contour), Full Size Brush Tip (the whole diameter).
     PaintingCursor { Standard = "standard", Precise = "precise", NormalTip = "normalTip", FullSizeTip = "fullSizeTip" } default NormalTip
 );
+choice!(
+    /// Right mouse button on the canvas with a painting tool: open the Brush Preset picker at the
+    /// pointer (Photoshop), or erase with the current brush while dragging (Krita, Paint).
+    RightClickPaint { BrushPicker = "brushPicker", Erase = "erase" } default BrushPicker
+);
 choice!(OtherCursor { Standard = "standard", Precise = "precise" } default Standard);
 choice!(CheckerSize { None = "none", Small = "small", Medium = "medium", Large = "large" } default Medium);
 choice!(CheckerColors { Light = "light", Medium = "medium", Dark = "dark", Red = "red", Orange = "orange", Green = "green", Blue = "blue", Purple = "purple", Custom = "custom" } default Light);
@@ -254,6 +259,8 @@ pub struct Tools {
     pub show_transformation_values: bool,
     pub overscroll: bool,
     pub double_click_layer_mask_launches_select_and_mask: bool,
+    /// What the right mouse button does on the canvas with the Brush and other painting tools.
+    pub right_click_with_painting_tools: RightClickPaint,
 }
 
 impl Default for Tools {
@@ -268,6 +275,7 @@ impl Default for Tools {
             show_transformation_values: true,
             overscroll: true,
             double_click_layer_mask_launches_select_and_mask: true,
+            right_click_with_painting_tools: RightClickPaint::BrushPicker,
         }
     }
 }
@@ -758,6 +766,7 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "export.metadata" => ExportMetadata::NAMES,
         "cursors.painting" => PaintingCursor::NAMES,
         "cursors.other" => OtherCursor::NAMES,
+        "tools.rightClickWithPaintingTools" => RightClickPaint::NAMES,
         "transparencyAndGamut.gridSize" => CheckerSize::NAMES,
         "transparencyAndGamut.gridColors" => CheckerColors::NAMES,
         "unitsAndRulers.rulers" | "guidesGridAndSlices.gridUnit" => Unit::NAMES,

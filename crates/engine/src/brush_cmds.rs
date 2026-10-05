@@ -47,6 +47,9 @@ fn always(_: &Session) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Largest stroke coordinate accepted (a few times the largest document side, 300 000 px).
+const MAX_COORD: f64 = 1_000_000.0;
+
 /// Parse `points`: arrays `[x, y, pressure?, tiltX?, tiltY?, rotation?, timeMs?, wheel?]` or
 /// objects `{"x":…, "y":…, "pressure":…, "tiltX":…, …, "time":…}`.
 pub fn parse_points(p: &Value, cmd: &str) -> Result<Vec<StrokePoint>> {
@@ -70,6 +73,10 @@ pub fn parse_points(p: &Value, cmd: &str) -> Result<Vec<StrokePoint>> {
         .collect();
     if pts.is_empty() {
         return Err(bad(cmd, "`points` is empty"));
+    }
+    // A stroke runs dab by dab along its length: an absurd coordinate would mean billions of dabs.
+    if pts.iter().any(|q| !(q.x.abs() <= MAX_COORD && q.y.abs() <= MAX_COORD)) {
+        return Err(bad(cmd, format!("point coordinates must be finite and within ±{MAX_COORD}")));
     }
     Ok(pts)
 }
@@ -107,7 +114,7 @@ fn find_preset<'a>(s: &'a Session, name: &str, cmd: &str) -> Result<&'a BrushPre
 pub fn resolve_brush(s: &Session, p: &Value, cmd: &str) -> Result<BrushSettings> {
     let mut b = s.tools.brush.clone();
     if let Some(name) = p.get("preset").and_then(Value::as_str) {
-        b = find_preset(s, name, cmd)?.brush.clone().with_protected_texture(&s.tools.brush);
+        b = find_preset(s, name, cmd)?.brush.clone().picked_over(&s.tools.brush);
     }
     if let Some(patch) = p.get("brush").filter(|v| v.is_object()) {
         b = merge_brush(&b, patch, cmd)?;
@@ -227,6 +234,8 @@ pub struct LiveStroke {
     lock: bool,
     layer: Option<photocraft_doc::LayerId>,
     params: Value,
+    /// Where the doc shows the stroke's end as finishing it would draw it (see `push`).
+    tail: Rect,
 }
 
 impl LiveStroke {
@@ -243,21 +252,37 @@ impl LiveStroke {
         erase_locked(&mut brush, lock, s.tools.background);
         let renderer = StrokeRenderer::new(&brush, Some(surf.format()), zoom);
         let pre = surf.clone();
-        let mut live = Self { doc: std::sync::Arc::new(doc), seed, renderer, pre, sel, lock, layer, params: p.clone() };
+        let mut live = Self { doc: std::sync::Arc::new(doc), seed, renderer, pre, sel, lock, layer, params: p.clone(), tail: Rect::EMPTY };
         live.push(&pts)?;
         Ok(live)
     }
 
     /// Everything the stroke has touched so far.
     pub fn bounds(&self) -> Rect {
-        self.renderer.bounds()
+        self.renderer.bounds().union(&self.tail)
     }
 
-    /// Render more points; returns the rectangle that changed.
+    /// Render more points; returns the rectangle that changed. The doc shows the stroke as
+    /// committing it now would: with smoothing, the brush lags behind the pointer and catches up
+    /// when the stroke ends, so that catch-up tail is drawn too (and redrawn on every step), and
+    /// nothing new appears on release.
     pub fn push(&mut self, pts: &[StrokePoint]) -> Result<Rect> {
         self.renderer.push(pts);
         let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
-        Ok(self.renderer.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false))
+        let mut dmg = Rect::EMPTY;
+        let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
+        if !old.is_empty() {
+            // Back to the stroke without the previous tail.
+            surf.write_region(old, &self.pre.read_region(old));
+            self.renderer.mark_dirty(old);
+            dmg = old;
+        }
+        dmg = dmg.union(&self.renderer.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false));
+        if let Some(mut tail) = self.renderer.tail_preview() {
+            self.tail = tail.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false);
+            dmg = dmg.union(&self.tail);
+        }
+        Ok(dmg)
     }
 }
 
@@ -470,7 +495,7 @@ fn set_brush(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "tools.setBrush";
     let mut b = s.tools.brush.clone();
     if let Some(name) = p.get("preset").and_then(Value::as_str) {
-        b = find_preset(s, name, cmd)?.brush.clone().with_protected_texture(&s.tools.brush);
+        b = find_preset(s, name, cmd)?.brush.clone().picked_over(&s.tools.brush);
     }
     if flag(p, "reset", false) {
         b = BrushSettings::default();

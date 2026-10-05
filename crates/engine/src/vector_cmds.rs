@@ -842,6 +842,8 @@ fn path_stroke(s: &mut Session, p: &Value) -> Result<Value> {
         erase: tool == "eraser",
         ..base
     };
+    // The path is the exact geometry: stroke smoothing (a hand-drawing aid) would cut its corners.
+    brush.smoothing.amount = 0.0;
     match tool {
         "pencil" => brush.hardness = 1.0,
         "brush" | "eraser" => {}

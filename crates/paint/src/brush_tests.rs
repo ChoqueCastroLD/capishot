@@ -615,3 +615,26 @@ fn protect_texture_keeps_pattern() {
     assert_eq!(next.texture.mode, canvas.texture.mode);
     assert_eq!(canvas.clone().with_protected_texture(&chalk).texture.pattern, canvas.texture.pattern);
 }
+
+#[test]
+fn tail_preview_shows_the_stroke_as_finishing_it_would() {
+    // Live previews draw the smoothing catch-up tail before the stroke ends: compositing the
+    // tail preview over the incremental composite gives exactly the finished stroke.
+    let fmt = PixelFormat::new(ColorMode::Rgb, SampleType::U16, true);
+    let b = BrushSettings { size: 9.0, smoothing: Smoothing { amount: 0.7, ..Default::default() }, ..brush() };
+    let pts: Vec<StrokePoint> = (0..12).map(|i| StrokePoint::new(5.0 + i as f64 * 9.0, 20.0 + (i % 3) as f64 * 7.0, 1.0)).collect();
+    let pre = Surface::new(fmt);
+    let mut live = pre.clone();
+    let mut r = StrokeRenderer::new(&b, Some(fmt), 1.0);
+    r.push(&pts);
+    r.composite(&pre, &mut live, None, false, false);
+    let mut tail = r.tail_preview().expect("the brush lags: there is a tail");
+    tail.composite(&pre, &mut live, None, false, false);
+    let mut done = pre.clone();
+    render_stroke(&mut done, &b, &pts, None, false, 1.0);
+    assert!((0..60).all(|y| (0..120).all(|x| live.rgba(x, y) == done.rgba(x, y))));
+    // Without smoothing (and past the first dab) finishing adds nothing.
+    let mut r = StrokeRenderer::new(&brush(), Some(fmt), 1.0);
+    r.push(&pts);
+    assert!(r.tail_preview().is_none());
+}

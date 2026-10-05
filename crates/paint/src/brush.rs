@@ -417,6 +417,14 @@ impl Default for BrushSettings {
 }
 
 impl BrushSettings {
+    /// This brush (a preset) picked while `current` is the tool's brush: Smoothing is a tool
+    /// option, so it stays the tool's (Photoshop), and a protected texture stays too.
+    pub fn picked_over(self, current: &BrushSettings) -> Self {
+        let mut b = self.with_protected_texture(current);
+        b.smoothing = current.smoothing.clone();
+        b
+    }
+
     /// Apply Protect Texture: if `current` protects its texture, a newly chosen brush with a texture
     /// keeps `current`'s pattern and scale.
     pub fn with_protected_texture(mut self, current: &BrushSettings) -> Self {
