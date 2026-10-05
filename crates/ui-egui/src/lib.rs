@@ -81,11 +81,13 @@ pub mod slice_ui;
 pub mod smart_ui;
 pub mod snap_ui;
 pub mod state;
+pub mod stroke_constraint;
 pub mod stylus;
 mod tab_strip;
 pub mod theme;
 mod timeline_ui;
 pub mod tone;
+pub mod tool_feedback;
 pub mod transform_tex;
 pub mod transform_tool;
 pub mod type_panels_ui;
@@ -96,6 +98,7 @@ pub mod view_cmds;
 pub mod wide_angle_ui;
 pub mod widgets;
 pub mod workspace_ui;
+pub mod zoom_tool;
 
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
@@ -209,6 +212,8 @@ pub struct PhotocraftApp {
     live_stroke: Option<canvas::LiveStroke>,
     /// The next tool `Down` is a right-button drag that erases (see `paint_mouse`).
     secondary_erase: bool,
+    /// End of the last painting stroke: ⇧-click draws a straight line from it (#178).
+    last_stroke_end: Option<(DocId, [f64; 2])>,
     control_rx: Option<Receiver<ControlRequest>>,
     pending_screenshots: Vec<(u64, Option<String>, Sender<ControlResponse>)>,
     /// Screenshots not yet requested from the viewport: (token, earliest time in ms, frames seen).
@@ -317,6 +322,7 @@ impl PhotocraftApp {
             drag: None,
             live_stroke: None,
             secondary_erase: false,
+            last_stroke_end: None,
             control_rx: None,
             pending_screenshots: Vec::new(),
             queued_screenshots: Vec::new(),

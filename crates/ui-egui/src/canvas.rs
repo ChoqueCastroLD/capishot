@@ -40,6 +40,8 @@ pub struct Drag {
     /// A Brush/Eraser stroke that erases: the Eraser, or a right-button Brush drag with
     /// Preferences › Tools › Right-click with painting tools set to Erase.
     pub erase: bool,
+    /// ⇧ constraint of a painting stroke (stroke_constraint.rs).
+    pub constrain: Option<crate::stroke_constraint::Axis>,
 }
 
 /// A Brush/Eraser stroke shown while it is drawn: the engine renders the real dabs onto a copy of
@@ -1150,7 +1152,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // Tools follow the left button; the right one opens the Brush Preset picker or erases
         // (Preferences › Tools, `paint_mouse`).
         crate::paint_mouse::sync_tool_smoothing(app);
-        let buttons = crate::paint_mouse::canvas_buttons(app, &response, tool);
+        let mut buttons = crate::paint_mouse::canvas_buttons(app, &response, tool);
+        // Zoom tool drags: scrubby zoom or a zoom rectangle (zoom_tool.rs); clicks step below.
+        if tool == Tool::Zoom && crate::zoom_tool::drag(app, &ctx, &mut view, &xf, &buttons, response.interact_pointer_pos()) {
+            (buttons.started, buttons.dragged, buttons.stopped) = (false, false, false);
+        }
         // A drag is only recognised once the pointer has moved past egui's click distance: the
         // gesture starts where the button went down, not where it is now (#123).
         if buttons.started
@@ -1205,6 +1211,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             crate::rulers::draw_guides(app, &painter, &xf, &doc);
         }
         draw_drag_preview(app, &painter, &xf);
+        crate::zoom_tool::draw(&ctx, &painter);
         draw_transform_controls(app, &painter, &xf);
         crate::paint_mouse::show_picker(app, &ctx);
         crate::snap_ui::draw(app, &painter, &xf);
@@ -1261,7 +1268,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                             painter.circle_stroke(p, r + 0.5, Stroke::new(1.0, Color32::from_black_alpha(140)));
                             painter.circle_stroke(p, r, Stroke::new(1.0, Color32::from_white_alpha(220)));
                             // The Background Eraser always shows its sampling hotspot (Photoshop).
-                            if cur.show_crosshair_in_brush_tip || r > 6.0 || tool == Tool::BackgroundEraser {
+                            // Quick Selection shows its +/− badge there instead.
+                            if (cur.show_crosshair_in_brush_tip || r > 6.0 || tool == Tool::BackgroundEraser) && tool != Tool::QuickSelection {
                                 crosshair(3.0);
                             }
                             egui::CursorIcon::None
@@ -1291,6 +1299,13 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 _ => egui::CursorIcon::Crosshair,
             };
             ui.ctx().set_cursor_icon(icon);
+            // Selection tools: + / − / × badge for the effective mode (#170). A gesture keeps the
+            // mode it started with (⇧ then constrains the marquee instead of adding).
+            let held = crate::workspace_ui::sticky_mods(app, ui.input(|i| i.modifiers));
+            let mods = app.drag.as_ref().map_or(held, |d| d.modifiers);
+            if let Some(b) = crate::tool_feedback::badge(app, tool, mods) {
+                crate::tool_feedback::draw_badge(&painter, p, b, tool == Tool::QuickSelection);
+            }
         }
     }
     if primary {
@@ -1411,10 +1426,10 @@ fn draw_tool_state(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform,
         if let Some(h) = hover {
             pts.push(h);
         }
-        painter.add(egui::Shape::line(pts.clone(), Stroke::new(1.0, Color32::WHITE)));
-        painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, Color32::BLACK), 4.0, 4.0));
-        for p in &pts[..app.ui.polygon.len()] {
+        crate::tool_feedback::draw_ants(painter, &pts, false);
+        for p in pts.iter().take(app.ui.polygon.len()) {
             painter.rect_filled(Rect::from_center_size(*p, vec2(5.0, 5.0)), 0.0, Color32::WHITE);
+            painter.rect_stroke(Rect::from_center_size(*p, vec2(5.0, 5.0)), 0.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Outside);
         }
     }
     if let Some(c) = app.ui.crop_rect {
@@ -1498,19 +1513,19 @@ fn draw_drag_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
         }
         t if crate::vector_ui::is_shape_tool(t) => crate::vector_ui::draw_shape_preview(app, painter, xf, t, d.start, last, d.modifiers),
         Tool::RectMarquee | Tool::EllipseMarquee | Tool::ObjectSelection => {
+            // Marching ants, visible on any pixels (#172).
             let r = Rect::from_two_pos(xf.to_screen(d.start[0] as f32, d.start[1] as f32), xf.to_screen(last[0] as f32, last[1] as f32));
-            if d.tool == Tool::EllipseMarquee {
-                painter.add(egui::Shape::ellipse_stroke(r.center(), r.size() / 2.0, Stroke::new(1.0, Color32::WHITE)));
+            let r = Rect::from_min_max(r.min.round() + vec2(0.5, 0.5), r.max.round() + vec2(0.5, 0.5));
+            let pts = if d.tool == Tool::EllipseMarquee {
+                crate::tool_feedback::ellipse_points(r)
             } else {
-                painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::WHITE), egui::StrokeKind::Middle);
-            }
+                vec![r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()]
+            };
+            crate::tool_feedback::draw_ants(painter, &pts, true);
         }
         Tool::Lasso => {
             let pts: Vec<Pos2> = d.points.iter().map(|p| xf.to_screen(p[0] as f32, p[1] as f32)).collect();
-            if pts.len() > 1 {
-                painter.add(egui::Shape::line(pts.clone(), Stroke::new(1.0, Color32::WHITE)));
-                painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, Color32::BLACK), 4.0, 4.0));
-            }
+            crate::tool_feedback::draw_ants(painter, &pts, false);
         }
         Tool::Gradient => {
             let a = xf.to_screen(d.start[0] as f32, d.start[1] as f32);
@@ -1654,8 +1669,18 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             }
             crate::paint_mouse::sync_tool_smoothing(app);
             let erase = tool == Tool::Eraser || std::mem::take(&mut app.secondary_erase);
-            app.drag = Some(Drag { tool, start: [x, y], points: vec![[x, y, pressure as f64]], modifiers: mods, erase });
+            // ⇧-click after a stroke: a straight line from where it ended (stroke_constraint.rs).
+            let active = app.session.active().map(|st| st.doc.id);
+            let from = app.last_stroke_end.filter(|(doc, _)| mods.shift && crate::stroke_constraint::connects(tool) && Some(*doc) == active).map(|(_, p)| p);
+            let mut points = vec![[x, y, pressure as f64]];
+            if let Some(p) = from {
+                points.insert(0, [p[0], p[1], pressure as f64]);
+            }
+            app.drag = Some(Drag { tool, start: from.unwrap_or([x, y]), points, modifiers: mods, erase, constrain: None });
             app.stylus.begin_stroke();
+            if from.is_some() {
+                app.stylus.record_point();
+            }
             app.live_stroke = if matches!(tool, Tool::Brush | Tool::Eraser) { begin_live_stroke(app) } else { None };
         }
         ToolEvent::Move { x, y, pressure } => {
@@ -1665,11 +1690,15 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             if tool == Tool::Pen {
                 crate::vector_ui::pen_move(app, x, y);
             }
-            if let Some(d) = &mut app.drag
-                && d.points.last().is_none_or(|p| (p[0] - x).abs() + (p[1] - y).abs() > 0.25)
-            {
-                d.points.push([x, y, pressure as f64]);
-                app.stylus.record_point();
+            let zoom = app.current_zoom();
+            if let Some(d) = &mut app.drag {
+                // ⇧: straight 0/45/90° strokes, 45° gradient angles (stroke_constraint.rs).
+                let last = d.points.last().map_or(d.start, |p| [p[0], p[1]]);
+                let [x, y] = crate::stroke_constraint::constrain(d.tool, &mut d.constrain, d.start, last, [x, y], mods.shift, zoom);
+                if d.points.last().is_none_or(|p| (p[0] - x).abs() + (p[1] - y).abs() > 0.25) {
+                    d.points.push([x, y, pressure as f64]);
+                    app.stylus.record_point();
+                }
             }
             feed_live_stroke(app);
         }
@@ -1682,7 +1711,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             if tool == Tool::Pen {
                 crate::vector_ui::pen_up(app);
             }
+            let zoom = app.current_zoom();
             let Some(mut d) = app.drag.take() else { return };
+            let last = d.points.last().map_or(d.start, |p| [p[0], p[1]]);
+            let [x, y] = crate::stroke_constraint::constrain(d.tool, &mut d.constrain, d.start, last, [x, y], mods.shift, zoom);
             if d.points.last().is_none_or(|p| p[0] != x || p[1] != y) {
                 d.points.push([x, y, d.points.last().map_or(1.0, |p| p[2])]);
                 app.stylus.record_point();
@@ -1695,6 +1727,12 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
 
 fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
     let end = d.points.last().copied().unwrap_or([d.start[0], d.start[1], 1.0]);
+    // Where the next ⇧-click line starts.
+    if crate::stroke_constraint::connects(d.tool)
+        && let Some(st) = app.session.active()
+    {
+        app.last_stroke_end = Some((st.doc.id, [end[0], end[1]]));
+    }
     if crate::eraser_ui::finish_stroke(app, d.tool, &d.points) || crate::retouch_ui::finish_stroke(app, d.tool, &d.points, d.modifiers) {
         return;
     }
@@ -1738,18 +1776,7 @@ fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
                 }
                 return;
             }
-            let bar = ["replace", "add", "subtract", "intersect"][app.ui.selection_mode.min(3) as usize];
-            let mode = if !d.modifiers.shift && !d.modifiers.alt {
-                bar
-            } else if d.modifiers.shift && d.modifiers.alt {
-                "intersect"
-            } else if d.modifiers.shift {
-                "add"
-            } else if d.modifiers.alt {
-                "subtract"
-            } else {
-                "replace"
-            };
+            let mode = selection_mode(app, d.modifiers);
             let (aa, feather) = (app.ui.tool_options.anti_alias, app.ui.tool_options.feather);
             let _ = app.run("select.rect", json!({"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0, "mode": mode, "ellipse": d.tool == Tool::EllipseMarquee, "antiAlias": aa, "feather": feather}));
         }
@@ -1813,16 +1840,9 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// Selection mode from the options bar, overridden by modifier keys (⇧ add, ⌥ subtract, ⇧⌥ intersect).
+/// The cursor badge announces the same mode (`tool_feedback`).
 fn selection_mode(app: &PhotocraftApp, m: egui::Modifiers) -> &'static str {
-    if m.shift && m.alt {
-        "intersect"
-    } else if m.shift {
-        "add"
-    } else if m.alt {
-        "subtract"
-    } else {
-        ["replace", "add", "subtract", "intersect"][app.ui.selection_mode.min(3) as usize]
-    }
+    crate::tool_feedback::selection_mode(Tool::Lasso, app.ui.selection_mode, m)
 }
 
 /// Close the polygonal lasso and make the selection.

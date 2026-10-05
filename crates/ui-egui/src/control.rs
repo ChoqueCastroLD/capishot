@@ -123,6 +123,10 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             if let Some(m) = p.get("maskTarget").and_then(Value::as_bool) {
                 app.ui.mask_target = m;
             }
+            // Selection tools' options-bar mode: 0 New, 1 Add, 2 Subtract, 3 Intersect.
+            if let Some(m) = p.get("selectionMode").and_then(Value::as_u64) {
+                app.ui.selection_mode = m.min(3) as u8;
+            }
             if let Some(tabs) = p.get("dockTabs") {
                 let mut cur = serde_json::to_value(app.ui.dock_tabs).unwrap_or_default();
                 if let (Some(c), Some(n)) = (cur.as_object_mut(), tabs.as_object()) {

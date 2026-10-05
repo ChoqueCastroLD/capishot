@@ -110,7 +110,8 @@ pub fn draw_shape_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &Vie
     for (pts, _) in path_lines(&path, &|q| xf.to_screen(q[0] as f32, q[1] as f32)) {
         // Every tool's own shape is convex (custom shapes aren't, and draw no fill).
         painter.add(egui::Shape::convex_polygon(pts.clone(), fill, stroke));
-        painter.add(egui::Shape::closed_line(pts, Stroke::new(1.0, accent)));
+        // The accent path over a dark halo: visible on any pixels (#172).
+        painter.extend(crate::tool_feedback::contrast_path(pts, true, accent));
     }
 }
 

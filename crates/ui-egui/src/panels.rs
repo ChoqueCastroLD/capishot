@@ -619,7 +619,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     Tool::Move => hint(ui, "Drag to move the active layer"),
                     Tool::Eyedropper => hint(ui, "Click to sample the foreground colour  ·  ⌥-click for background"),
                     Tool::Zoom => {
-                        hint(ui, "Click to zoom in  ·  ⌥-click to zoom out");
+                        widgets::checkbox(ui, &mut app.ui.tool_options.zoom_scrubby, "Scrubby Zoom");
+                        hint(ui, "Click to zoom in  ·  ⌥-click to zoom out  ·  drag right/left to zoom in/out");
                         if widgets::secondary_button(ui, "Fit Screen", 0.0).clicked()
                             && let Some(i) = app.session.active_index()
                         {

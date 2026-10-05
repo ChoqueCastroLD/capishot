@@ -378,6 +378,9 @@ pub struct ToolOptions {
     pub bg_limits: String,
     pub bg_tolerance: f32,
     pub bg_protect_fg: bool,
+    /// Zoom tool › Scrubby Zoom: dragging left/right zooms continuously (else a zoom rectangle).
+    #[serde(default = "yes")]
+    pub zoom_scrubby: bool,
 }
 
 fn yes() -> bool {
@@ -445,6 +448,7 @@ impl Default for ToolOptions {
             bg_limits: "contiguous".into(),
             bg_tolerance: 50.0,
             bg_protect_fg: false,
+            zoom_scrubby: true,
         }
     }
 }
