@@ -847,7 +847,16 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
             for (i, (p, a)) in backdrop.px.iter_mut().zip(&before.px).enumerate() {
                 let k = opacity * mask_k(&mv, i);
                 let b = *p;
-                *p = std::array::from_fn(|c| a[c] + (b[c] - a[c]) * k);
+                // Coverage mixes premultiplied colour; the stored buffer remains straight alpha.
+                let wa = a[3] * (1.0 - k);
+                let wb = b[3] * k;
+                let alpha = wa + wb;
+                *p = if alpha > 0.0 {
+                    let c = |c: usize| (a[c] * wa + b[c] * wb) / alpha;
+                    [c(0), c(1), c(2), alpha]
+                } else {
+                    [0.0; 4]
+                };
             }
         }
         // Layers clipped to a pass-through group sit atop the group's

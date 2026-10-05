@@ -687,7 +687,7 @@ fn fs_adjmix(in: VOut) -> @location(0) vec4<f32> {
     return vec4(b.rgb + (bl - b.rgb) * k, b.a);
 }
 
-// Pass-through group opacity/mask: lerp(A, B, opacity × mask) on all channels.
+// Pass-through group coverage mixes premultiplied colour, then returns straight alpha.
 @fragment
 fn fs_lerp(in: VOut) -> @location(0) vec4<f32> {
     let p = local(in.pos);
@@ -708,7 +708,11 @@ fn fs_lerp(in: VOut) -> @location(0) vec4<f32> {
         return vec4(clamp(pm.rgb / al, vec3(0.0), vec3(1.0)), al);
     }
     let k = op.opacity * mask_value(doc_px(p));
-    return a + (b - a) * k;
+    let wa = a.a * (1.0 - k);
+    let wb = b.a * k;
+    let alpha = wa + wb;
+    if (alpha <= 0.0) { return vec4(0.0); }
+    return vec4((a.rgb * wa + b.rgb * wb) / alpha, alpha);
 }
 
 // ---- layer effects (compose::effects::composite_with_effects) -------------------------------

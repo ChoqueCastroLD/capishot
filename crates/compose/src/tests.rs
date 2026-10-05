@@ -173,6 +173,16 @@ fn pass_through_group_opacity_mixes() {
     g.opacity = 0.25;
     d.layers.push(g);
     assert!((px(&d, 0, 0)[0] - 0.75).abs() <= E);
+
+    // Opaque backdrops hide straight-alpha interpolation errors.
+    let mut transparent = Document::new("coverage", Size::new(2, 2), ColorMode::Rgb, SampleType::F32);
+    let mut red = Layer::raster("HDR red", transparent.pixel_format());
+    red.surface_mut().unwrap().fill_rect(transparent.bounds(), &[2.0, 0.0, 0.0, 1.0]);
+    let mut group = Layer::group("half", vec![red]);
+    group.opacity = 0.5;
+    transparent.layers.push(group);
+    let actual = px(&transparent, 0, 0);
+    assert!(close4(actual, [2.0, 0.0, 0.0, 0.5]), "{actual:?}");
 }
 
 #[test]
