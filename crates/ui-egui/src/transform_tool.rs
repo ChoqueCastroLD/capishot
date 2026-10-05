@@ -35,11 +35,17 @@ fn corners(r: [f64; 4]) -> [[f64; 2]; 4] {
     [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]]
 }
 
-/// Start Free Transform on the active layer (or its selected pixels).
+/// Start Free Transform on the active layer (or its selected pixels), or on the targeted unlinked
+/// layer mask, alpha channel or Quick Mask.
 pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String> {
+    let target = crate::canvas::paint_target(app);
     let st = app.session.active().ok_or("no document")?;
-    let id = st.active_layer.ok_or("no active layer")?;
     let doc = st.doc.clone();
+    let lone = photocraft_engine::transform_cmds::lone_target(&doc, st.active_layer, &json!({ "target": target })).map_err(|e| e.to_string())?.cloned();
+    if let Some(surf) = lone {
+        return begin_lone(app, ctx, doc, surf, target);
+    }
+    let id = st.active_layer.ok_or("no active layer")?;
     let layer = doc.layer(id).ok_or("no layer")?;
     if matches!(layer.content, LayerContent::Adjustment(_)) && layer.mask.is_none() {
         return Err("Adjustment layers have nothing to transform".into());
@@ -78,6 +84,60 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
         interpolation: "bicubic".into(),
         warp: None,
         selection: false,
+        target: None,
+    });
+    Ok(())
+}
+
+/// Free Transform of a targeted unlinked layer mask, alpha channel or Quick Mask by itself: the
+/// box frames its content (within the selection) and previews the moving values in grey over the
+/// document with them vacated.
+fn begin_lone(
+    app: &mut PhotocraftApp,
+    ctx: &egui::Context,
+    doc: Arc<Document>,
+    surf: photocraft_raster::Surface,
+    target: serde_json::Value,
+) -> Result<(), String> {
+    use photocraft_engine::transform_cmds as tc;
+    let b = tc::target_bounds(&doc, &surf);
+    if b.is_empty() {
+        return Err("Could not transform: nothing is selected".into());
+    }
+    let whole;
+    let sel = match &doc.selection {
+        Some(s) => s,
+        None => {
+            let mut s = photocraft_raster::Surface::new(photocraft_color::PixelFormat::GRAY8);
+            s.fill_rect(b, &[1.0]);
+            whole = s;
+            &whole
+        }
+    };
+    let (lifted, rest) = tc::split_gray_selected(&surf, sel).ok_or("this channel can't be transformed")?;
+    crate::type_tool::commit(app);
+    let layer = app.session.active().and_then(|st| st.active_layer).map_or(0, |l| l.0);
+    let mut pd = (*doc).clone();
+    let tp = json!({ "target": target });
+    if let Ok(Some(s)) = tc::lone_target_mut(&mut pd, Some(LayerId(layer)), &tp) {
+        *s = rest;
+    }
+    let rect = [b.x0 as f64, b.y0 as f64, b.x1 as f64, b.y1 as f64];
+    let session = app.ui.alloc_id();
+    let max_side = ctx.input(|i| i.max_texture_side).max(app.gpu.as_ref().map_or(1, |g| g.max_texture_side()));
+    let (image, uv) = crate::transform_tex::read_surface(&lifted, None, b, max_side);
+    let texture = crate::transform_tex::PreviewTextures::new(ctx, format!("transform-{session}"), image, uv);
+    app.transform_preview = Some(TransformPreview { session, doc: Arc::new(pd), texture, opacity: 0.6, gesture: None, warp_drag: None });
+    app.ui.transform = Some(TransformSession {
+        session,
+        layer,
+        rect,
+        quad: corners(rect),
+        pivot: [(rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0],
+        interpolation: "bicubic".into(),
+        warp: None,
+        selection: false,
+        target: Some(target),
     });
     Ok(())
 }
@@ -120,6 +180,7 @@ pub fn begin_selection(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(
         interpolation: "bilinear".into(),
         warp: None,
         selection: true,
+        target: None,
     });
     Ok(())
 }
@@ -139,7 +200,8 @@ pub fn enter_warp(app: &mut PhotocraftApp) {
     let existing =
         app.session.active().and_then(|d| d.doc.layer(LayerId(app.ui.transform.as_ref()?.layer)).and_then(photocraft_engine::warp_cmds::smart_warp_doc_space));
     let Some(t) = app.ui.transform.as_mut() else { return };
-    if t.warp.is_some() {
+    // Warp moves layers only: a lone mask or channel keeps the box.
+    if t.warp.is_some() || t.target.is_some() {
         return;
     }
     if t.quad == corners(t.rect)
@@ -178,6 +240,8 @@ fn preview_image(
     max_side: usize,
 ) -> (egui::ColorImage, [f32; 2]) {
     let layer = doc.layer(id);
+    // Linked masks move with the pixels, so the moving texels carry them (#205).
+    let mask = layer.and_then(|l| preview_mask(l, b));
     // Groups and type/fill layers preview from a flattened render of just that layer.
     let rendered;
     let surf: Option<&photocraft_raster::Surface> = match (lifted, layer.and_then(|l| l.surface())) {
@@ -199,7 +263,26 @@ fn preview_image(
         }
     };
     let Some(surf) = surf else { return (egui::ColorImage::new([1, 1], vec![Color32::TRANSPARENT]), [1.0, 1.0]) };
-    crate::transform_tex::read_surface(surf, b, max_side)
+    // A flattened render already has the masks applied.
+    let raw = lifted.is_some() || layer.is_some_and(|l| matches!(l.content, LayerContent::Raster(_)));
+    crate::transform_tex::read_surface(surf, mask.as_ref().filter(|_| raw), b, max_side)
+}
+
+/// The layer's masks as the moving texels carry them: the enabled masks when all of them are linked
+/// (the vector mask and feathering folded in as the compositor applies them), else the linked
+/// pixel mask alone. `None` when no enabled mask moves with the pixels.
+fn preview_mask(l: &photocraft_doc::Layer, b: photocraft_geom::Rect) -> Option<crate::transform_tex::PreviewMask> {
+    use crate::transform_tex::PreviewMask;
+    let pixel = l.mask.as_ref().filter(|m| m.enabled);
+    let vector = l.vector_mask.as_ref().filter(|v| v.enabled);
+    let linked_pixel = pixel.filter(|m| m.linked);
+    if pixel.is_none_or(|m| m.linked)
+        && vector.is_some_and(|v| v.linked)
+        && let Some(surface) = photocraft_compose::masks::combined_mask(l, b)
+    {
+        return Some(PreviewMask { surface, density: 1.0 });
+    }
+    linked_pixel.map(|m| PreviewMask { surface: m.surface.clone(), density: m.density })
 }
 
 fn contains(l: &photocraft_doc::Layer, id: LayerId) -> bool {
@@ -234,7 +317,11 @@ pub fn commit(app: &mut PhotocraftApp) {
     if t.quad == corners(t.rect) {
         return; // untouched: nothing to do (Photoshop adds no history step either)
     }
-    if let Err(e) = app.run("edit.transform", json!({"layer": t.layer, "rect": t.rect, "quad": t.quad, "interpolation": t.interpolation})) {
+    let mut p = json!({"layer": t.layer, "rect": t.rect, "quad": t.quad, "interpolation": t.interpolation});
+    if let Some(target) = t.target {
+        p["target"] = target;
+    }
+    if let Err(e) = app.run("edit.transform", p) {
         app.ui.status = e;
     }
 }
@@ -908,6 +995,7 @@ mod tests {
             interpolation: "bicubic".into(),
             warp: None,
             selection: false,
+            target: None,
         }
     }
 
@@ -1072,6 +1160,14 @@ mod tests {
         let t0 = std::time::Instant::now();
         begin(&mut app, &ctx).unwrap();
         let begin_ms = t0.elapsed().as_secs_f64() * 1e3;
+        // The same with a linked layer mask applied to the texels (#205).
+        cancel(&mut app);
+        app.session.execute("layer.layerMask.revealAll", json!({})).unwrap();
+        app.session.execute("paint.gradient", json!({"from": [0, 0], "to": [w, 0], "colors": ["#000000", "#ffffff"], "target": "mask"})).unwrap();
+        let t0 = std::time::Instant::now();
+        begin(&mut app, &ctx).unwrap();
+        let masked_ms = t0.elapsed().as_secs_f64() * 1e3;
+        eprintln!("transform preview begin {w}x{h}: {begin_ms:.1} ms, with a linked mask {masked_ms:.1} ms");
         let size = app.transform_preview.as_ref().unwrap().texture.size();
         rotate_about_pivot(&mut app, 0.05);
         let frame = |zoom: f32| {
@@ -1146,5 +1242,92 @@ mod tests {
         begin_warp(&mut app, &ctx).unwrap();
         leave_warp(&mut app);
         assert!(app.ui.transform.as_ref().unwrap().warp.is_none());
+    }
+
+    // ---- Layer masks (#205) ----
+
+    /// `app_with_square` (red over 8..24) plus a reveal-all mask hiding x < 16.
+    fn masked_app(linked: bool) -> PhotocraftApp {
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        app.session.execute("layer.layerMask.revealAll", json!({})).unwrap();
+        app.session
+            .edit("mask", |doc, a| {
+                let m = doc.layer_mut(a.unwrap()).unwrap().mask.as_mut().unwrap();
+                m.surface.fill_rect(photocraft_geom::Rect::new(0, 0, 16, 64), &[0.0]);
+                m.linked = linked;
+                Ok(())
+            })
+            .unwrap();
+        app
+    }
+
+    fn texel_alpha(img: &egui::ColorImage, x: usize, y: usize) -> u8 {
+        img.pixels[y * img.size[0] + x].a()
+    }
+
+    #[test]
+    fn preview_applies_the_linked_mask() {
+        for linked in [true, false] {
+            let app = masked_app(linked);
+            let st = app.session.active().unwrap();
+            let id = st.active_layer.unwrap();
+            let b = photocraft_geom::Rect::new(8, 8, 24, 24);
+            let (img, _) = preview_image(&st.doc, id, None, b, 4096);
+            // Texel x = doc x − 8: x 10 is hidden by the mask, x 20 shows.
+            assert_eq!(texel_alpha(&img, 12, 4), 255);
+            assert_eq!(texel_alpha(&img, 2, 4), if linked { 0 } else { 255 }, "linked={linked}");
+        }
+        // With a selection the lifted pixels carry the mask too.
+        let mut app = masked_app(true);
+        app.session.execute("select.rect", json!({"x": 8, "y": 8, "width": 12, "height": 16})).unwrap();
+        let ctx = egui::Context::default();
+        begin(&mut app, &ctx).unwrap();
+        let st = app.session.active().unwrap();
+        let sel = st.doc.selection.clone().unwrap();
+        let id = st.active_layer.unwrap();
+        let (lifted, _) = photocraft_engine::transform_cmds::split_selected(st.doc.layer(id).unwrap().surface().unwrap(), &sel);
+        let b = photocraft_geom::Rect::new(8, 8, 20, 24);
+        let (img, _) = preview_image(&st.doc, id, Some(&lifted), b, 4096);
+        assert_eq!(texel_alpha(&img, 2, 4), 0, "masked");
+        assert_eq!(texel_alpha(&img, 10, 4), 255, "revealed");
+    }
+
+    #[test]
+    fn targeted_unlinked_mask_transforms_alone_through_the_box() {
+        let mut app = masked_app(false);
+        app.ui.mask_target = true;
+        let ctx = egui::Context::default();
+        begin(&mut app, &ctx).unwrap();
+        let t = app.ui.transform.as_ref().unwrap();
+        assert_eq!(t.target, Some(json!("mask")));
+        assert_eq!(t.rect, [0.0, 0.0, 16.0, 64.0], "the box frames the mask's content");
+        // The preview document shows the mask vacated (revealed).
+        let pd = &app.transform_preview.as_ref().unwrap().doc;
+        assert!(pd.layer(app.session.active().unwrap().active_layer.unwrap()).unwrap().mask.as_ref().unwrap().surface.sample_channel(4, 4, 0) > 0.99);
+        // Move the box 20 px right and commit.
+        let t = app.ui.transform.as_mut().unwrap();
+        t.quad = t.quad.map(|[x, y]| [x + 20.0, y]);
+        commit(&mut app);
+        assert!(!app.ui.status_error, "{}", app.ui.status);
+        let st = app.session.active().unwrap();
+        let l = st.doc.layer(st.active_layer.unwrap()).unwrap();
+        let m = &l.mask.as_ref().unwrap().surface;
+        assert!(m.sample_channel(4, 30, 0) > 0.99 && m.sample_channel(30, 30, 0) < 0.01, "mask moved 20 px right");
+        assert_eq!(l.surface().unwrap().content_bounds(), photocraft_geom::Rect::new(8, 8, 24, 24), "pixels untouched");
+        // Warp mode doesn't apply to a lone mask.
+        app.ui.mask_target = true;
+        begin(&mut app, &ctx).unwrap();
+        enter_warp(&mut app);
+        assert!(app.ui.transform.as_ref().unwrap().warp.is_none());
+    }
+
+    #[test]
+    fn linked_mask_target_transforms_the_layer() {
+        let mut app = masked_app(true);
+        app.ui.mask_target = true;
+        let ctx = egui::Context::default();
+        begin(&mut app, &ctx).unwrap();
+        assert_eq!(app.ui.transform.as_ref().unwrap().target, None);
+        assert_eq!(app.ui.transform.as_ref().unwrap().rect, [8.0, 8.0, 24.0, 24.0]);
     }
 }

@@ -124,7 +124,14 @@ fn halve(img: &ColorImage) -> ColorImage {
 /// Reads `b` of `surf` as premultiplied texels, at full resolution when it fits in `max_side`
 /// (else box-filtered down by the smallest integer factor that fits). Returns the image and the
 /// uv extent of it that covers `b`.
-pub fn read_surface(surf: &photocraft_raster::Surface, b: photocraft_geom::Rect, max_side: usize) -> (ColorImage, [f32; 2]) {
+/// A layer mask applied to the preview texels: the texel's alpha is scaled by
+/// `1 − density × (1 − value)`, as the compositor applies a pixel mask.
+pub struct PreviewMask {
+    pub surface: photocraft_raster::Surface,
+    pub density: f32,
+}
+
+pub fn read_surface(surf: &photocraft_raster::Surface, mask: Option<&PreviewMask>, b: photocraft_geom::Rect, max_side: usize) -> (ColorImage, [f32; 2]) {
     let (w, h) = (b.width() as usize, b.height() as usize);
     if w == 0 || h == 0 {
         return (ColorImage::new([1, 1], vec![Color32::TRANSPARENT]), [1.0, 1.0]);
@@ -139,6 +146,14 @@ pub fn read_surface(surf: &photocraft_raster::Surface, b: photocraft_geom::Rect,
         let rows = (y1 - y0).max(0) as usize;
         let mut buf = vec![[0u8; 4]; w * rows];
         surf.read_rgba8_into(photocraft_geom::Rect::new(b.x0, y0, b.x1, y1), &mut buf);
+        if let Some(m) = mask {
+            let v = m.surface.read_region(photocraft_geom::Rect::new(b.x0, y0, b.x1, y1));
+            let ch = m.surface.channels().max(1);
+            for (p, mv) in buf.iter_mut().zip(v.chunks_exact(ch)) {
+                let k = (1.0 - m.density * (1.0 - mv.first().copied().unwrap_or(1.0))).clamp(0.0, 1.0);
+                p[3] = (f32::from(p[3]) * k).round() as u8;
+            }
+        }
         if k == 1 {
             for (o, p) in out.iter_mut().zip(&buf) {
                 *o = if p[3] == 255 { Color32::from_rgb(p[0], p[1], p[2]) } else { Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]) };
@@ -204,21 +219,21 @@ mod tests {
             }
         }
         let r = photocraft_geom::Rect::new(0, 0, 500, 300);
-        let (img, uv) = read_surface(&s, r, 8192);
+        let (img, uv) = read_surface(&s, None, r, 8192);
         assert_eq!(img.size, [500, 300]);
         assert_eq!(uv, [1.0, 1.0]);
         assert_eq!(img.pixels[0], Color32::WHITE);
         assert_eq!(img.pixels[1].a(), 0);
         // Over the limit: box-filtered (grey-ish average), uv covers the padded edge.
-        let (small, uv) = read_surface(&s, r, 256);
+        let (small, uv) = read_surface(&s, None, r, 256);
         assert_eq!(small.size, [250, 150]);
         assert!((100..=155).contains(&small.pixels[0].a()), "{:?}", small.pixels[0]);
         assert_eq!(uv, [1.0, 1.0]);
-        let (odd, uv) = read_surface(&s, photocraft_geom::Rect::new(0, 0, 301, 3), 256);
+        let (odd, uv) = read_surface(&s, None, photocraft_geom::Rect::new(0, 0, 301, 3), 256);
         assert_eq!(odd.size, [151, 2]);
         assert!(uv[0] < 1.0 && uv[1] < 1.0);
         // Empty rect: a placeholder, no panic.
-        assert_eq!(read_surface(&s, photocraft_geom::Rect::new(5, 5, 5, 9), 256).0.size, [1, 1]);
+        assert_eq!(read_surface(&s, None, photocraft_geom::Rect::new(5, 5, 5, 9), 256).0.size, [1, 1]);
     }
 
     #[test]

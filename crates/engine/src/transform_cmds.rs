@@ -65,6 +65,101 @@ pub(crate) fn warp_gray(s: &Surface, h: &Homography, interp: Interp) -> Surface 
     out
 }
 
+/// Split a single-channel surface whose outside reads as its default (a mask, a channel) by a
+/// selection: (the selected values as grey + alpha = selection, the surface with the selected
+/// values replaced by the default). `None` for surfaces that aren't a single grey channel.
+pub fn split_gray_selected(s: &Surface, sel: &Surface) -> Option<(Surface, Surface)> {
+    let fmt = s.format();
+    if fmt.alpha || fmt.channels() != 1 {
+        return None;
+    }
+    let default = s.default_pixel().first().copied().unwrap_or(0.0);
+    let mut rest = s.clone();
+    let mut lifted = Surface::new(PixelFormat::new(fmt.mode, fmt.sample, true));
+    // Everything selected moves, including default-valued parts outside the painted content, so
+    // the moved region stays aligned with the moved pixels.
+    let area = sel.content_bounds();
+    if area.is_empty() {
+        return Some((lifted, rest));
+    }
+    let v = s.read_region(area);
+    let w = area.width() as usize;
+    let mut lp = Vec::with_capacity(v.len() * 2);
+    let mut rp = Vec::with_capacity(v.len());
+    for (i, g) in v.iter().enumerate() {
+        let (x, y) = (area.x0 + (i % w) as i32, area.y0 + (i / w) as i32);
+        let k = sel.sample_channel(x, y, 0);
+        lp.extend([*g, k]);
+        rp.push(g * (1.0 - k) + default * k);
+    }
+    lifted.write_region(area, &lp);
+    lifted.prune();
+    rest.write_region(area, &rp);
+    rest.prune();
+    Some((lifted, rest))
+}
+
+/// [`warp_gray`] limited to a selection: only the selected values move (the vacated area reads as
+/// the default), as the selected pixels of the layer do.
+pub(crate) fn warp_gray_selected(s: &Surface, sel: &Surface, h: &Homography, interp: Interp) -> Surface {
+    let Some((lifted, mut out)) = split_gray_selected(s, sel) else { return warp_gray(s, h, interp) };
+    let src = lifted.content_bounds();
+    if src.is_empty() {
+        return out;
+    }
+    let w = warp_surface(&lifted, src, h, interp);
+    let b = w.content_bounds();
+    if !b.is_empty() {
+        let moved = w.read_region(b);
+        let under = out.read_region(b);
+        let flat: Vec<f32> = moved.as_chunks::<2>().0.iter().zip(&under).map(|(p, u)| p[0] * p[1] + u * (1.0 - p[1])).collect();
+        out.write_region(b, &flat);
+    }
+    out.prune();
+    out
+}
+
+/// The surface Free Transform moves by itself when the params target one (`"target"`): an
+/// unlinked layer mask, an alpha channel or the Quick Mask. `None` means the layer, with its
+/// linked masks (a targeted *linked* mask moves together with its layer, as in Photoshop).
+pub fn lone_target<'a>(doc: &'a Document, layer: Option<LayerId>, p: &Value) -> Result<Option<&'a Surface>> {
+    use crate::channel_cmds::Target;
+    match crate::channel_cmds::target_of(p) {
+        Target::Pixels => Ok(None),
+        Target::Mask => {
+            let id = layer.ok_or_else(|| EngineError::Other("no active layer".into()))?;
+            let l = doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+            let m = l.mask.as_ref().ok_or_else(|| EngineError::Other("layer has no mask".into()))?;
+            Ok((!m.linked).then_some(&m.surface))
+        }
+        Target::Alpha(i) => doc
+            .channels
+            .get(i)
+            .map(|c| Some(&c.surface))
+            .ok_or_else(|| EngineError::Other(format!("no alpha channel {i} (document has {})", doc.channels.len()))),
+        Target::QuickMask => doc.quick_mask.as_ref().map(|c| Some(&c.surface)).ok_or_else(|| EngineError::Other("not in Quick Mask mode".into())),
+    }
+}
+
+/// [`lone_target`], mutably.
+pub fn lone_target_mut<'a>(doc: &'a mut Document, layer: Option<LayerId>, p: &Value) -> Result<Option<&'a mut Surface>> {
+    if lone_target(doc, layer, p)?.is_none() {
+        return Ok(None);
+    }
+    crate::channel_cmds::target_surface(doc, layer, p).map(|(s, _)| Some(s))
+}
+
+/// The frame Free Transform starts from on a lone target: its painted content (the whole canvas
+/// when nothing is painted), within the selection.
+pub fn target_bounds(doc: &Document, surf: &Surface) -> Rect {
+    let content = surf.content_bounds();
+    let content = if content.is_empty() { doc.bounds() } else { content };
+    match &doc.selection {
+        Some(sel) => content.intersect(&sel.content_bounds()),
+        None => content,
+    }
+}
+
 pub(crate) fn transform_layer(doc_sel: Option<&Surface>, l: &mut Layer, h: &Homography, affine: Option<Affine>, interp: Interp) -> Result<()> {
     // Photoshop turns the Background into a normal layer before transforming it.
     if l.locks.position && l.name == "Background" {
@@ -75,6 +170,9 @@ pub(crate) fn transform_layer(doc_sel: Option<&Surface>, l: &mut Layer, h: &Homo
     if l.locks.position || l.locks.all {
         return Err(EngineError::Other(format!("layer \"{}\" is locked", l.name)));
     }
+    // With a selection only the selected pixels move, and so only the same region of a linked
+    // mask (#205). Groups, type, shapes and smart objects move whole.
+    let mask_sel = doc_sel.filter(|_| !matches!(l.content, LayerContent::Group(_) | LayerContent::Text(_) | LayerContent::Shape(_) | LayerContent::Smart(_)));
     match &mut l.content {
         LayerContent::Group(g) => {
             for c in g.children.iter_mut() {
@@ -129,7 +227,10 @@ pub(crate) fn transform_layer(doc_sel: Option<&Surface>, l: &mut Layer, h: &Homo
     if let Some(m) = l.mask.as_mut()
         && m.linked
     {
-        m.surface = warp_gray(&m.surface, h, interp);
+        m.surface = match mask_sel {
+            Some(sel) => warp_gray_selected(&m.surface, sel, h, interp),
+            None => warp_gray(&m.surface, h, interp),
+        };
     }
     if let Some(vm) = l.vector_mask.as_mut()
         && vm.linked
@@ -219,17 +320,26 @@ fn quad_param(p: &Value) -> Option<[[f64; 2]; 4]> {
 fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let id = match p.get("layer").and_then(Value::as_u64) {
-        Some(v) => LayerId(v),
-        None => st.active_layer.ok_or(EngineError::Other("no active layer".into()))?,
+        Some(v) => Some(LayerId(v)),
+        None => st.active_layer,
     };
-    let layer = st.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+    let lone = lone_target(&st.doc, id, p)?;
+    let id = match (id, lone.is_some() && crate::channel_cmds::is_channel_target(p)) {
+        (_, true) => None,
+        (Some(id), false) => Some(id),
+        (None, false) => return Err(EngineError::Other("no active layer".into())),
+    };
     let rect = match p.get("rect").and_then(Value::as_array) {
         Some(r) if r.len() == 4 => {
             let v: Vec<f64> = r.iter().map(|x| x.as_f64().unwrap_or(0.0)).collect();
             [v[0], v[1], v[2], v[3]]
         }
         _ => {
-            let b = transform_bounds(&st.doc, layer);
+            let b = match (lone, id) {
+                (Some(surf), _) => target_bounds(&st.doc, surf),
+                (None, Some(id)) => transform_bounds(&st.doc, st.doc.layer(id).ok_or(EngineError::NoLayer(id))?),
+                (None, None) => Rect::EMPTY,
+            };
             if b.is_empty() {
                 return Err(EngineError::Other("nothing to transform".into()));
             }
@@ -255,8 +365,22 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     let affine =
         (m[6].abs() < 1e-12 && m[7].abs() < 1e-12).then(|| Affine { m: [m[0] / m[8], m[3] / m[8], m[1] / m[8], m[4] / m[8], m[2] / m[8], m[5] / m[8]] });
     let interp = Interp::parse(p.get("interpolation").and_then(Value::as_str).unwrap_or("bicubic"));
+    let lone = lone.is_some();
     s.edit("Free Transform", |doc, _| {
         let sel = doc.selection.clone();
+        if lone {
+            // A targeted unlinked mask, alpha channel or Quick Mask transforms by itself.
+            let (surf, _) = crate::channel_cmds::target_surface(doc, id, p)?;
+            *surf = match &sel {
+                Some(sel) => warp_gray_selected(surf, sel, &h, interp),
+                None => warp_gray(surf, &h, interp),
+            };
+            if let Some(sel) = &doc.selection {
+                doc.selection = Some(warp_gray(sel, &h, Interp::Bilinear)).filter(|s| !s.content_bounds().is_empty());
+            }
+            return Ok(());
+        }
+        let id = id.ok_or_else(|| EngineError::Other("no active layer".into()))?;
         let is_group = doc.layer(id).is_some_and(Layer::is_group);
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         transform_layer(if is_group { None } else { sel.as_ref() }, l, &h, affine, interp)?;
@@ -280,7 +404,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Free Transform",
         menu: &[],
         shortcut: None,
-        params: r##"{"layer":id?,"rect":[x0,y0,x1,y1]? (source frame; default = layer content ∩ selection),"quad":[[x,y]×4]? (where the frame's corners go, clockwise from top-left),"matrix":[a,b,c,d,e,f]? (affine alternative),"interpolation":"bicubic|bilinear|nearest"="bicubic"}"##,
+        params: r##"{"layer":id?,"rect":[x0,y0,x1,y1]? (source frame; default = layer content ∩ selection),"quad":[[x,y]×4]? (where the frame's corners go, clockwise from top-left),"matrix":[a,b,c,d,e,f]? (affine alternative),"interpolation":"bicubic|bilinear|nearest"="bicubic","target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target (an unlinked mask, an alpha channel or the Quick Mask transforms alone; a linked mask moves with its layer)}"##,
         enabled: has_layer,
         journal: true,
         run: transform,
@@ -394,5 +518,149 @@ mod tests {
         s.execute("layer.translate", json!({"dx": 20, "dy": 10})).unwrap();
         let b1 = active_bounds(&s);
         assert_eq!((b1.x0 - b0.x0, b1.y0 - b0.y0), (20, 10));
+    }
+
+    // ---- Layer masks and targets (#205) ----
+
+    /// `session()` plus a reveal-all mask with `hide` painted black (linked unless `linked` is false).
+    fn masked(hide: &[Rect], linked: bool) -> Session {
+        let mut s = session();
+        s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+        s.edit("mask", |doc, active| {
+            let m = doc.layer_mut(active.unwrap()).unwrap().mask.as_mut().unwrap();
+            for r in hide {
+                m.surface.fill_rect(*r, &[0.0]);
+            }
+            m.linked = linked;
+            Ok(())
+        })
+        .unwrap();
+        s
+    }
+
+    fn mask_at(s: &Session, x: i32, y: i32) -> f32 {
+        let st = s.active().unwrap();
+        st.doc.layer(st.active_layer.unwrap()).unwrap().mask.as_ref().unwrap().surface.sample_channel(x, y, 0)
+    }
+
+    fn alpha_at(s: &Session, x: i32, y: i32) -> f32 {
+        let st = s.active().unwrap();
+        st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().pixel(x, y)[3]
+    }
+
+    #[test]
+    fn linked_raster_mask_moves_with_the_pixels() {
+        let mut s = masked(&[Rect::new(10, 10, 20, 20)], true);
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 40, 50]})).unwrap();
+        assert_eq!(active_bounds(&s), Rect::new(50, 60, 70, 70));
+        assert!(mask_at(&s, 55, 65) < 0.01, "the hidden half moved with the pixels");
+        assert!(mask_at(&s, 65, 65) > 0.99);
+        assert!(mask_at(&s, 15, 15) > 0.99, "nothing hidden left behind");
+    }
+
+    #[test]
+    fn linked_mask_with_a_selection_moves_only_the_selected_region() {
+        // The selection covers the left half of the red rect; the mask hides its left quarter
+        // (selected) and its right quarter (not selected).
+        let mut s = masked(&[Rect::new(10, 10, 15, 20), Rect::new(25, 10, 30, 20)], true);
+        s.execute("select.rect", json!({"x": 10, "y": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 0, 50]})).unwrap();
+        // Moved pixels and their mask line up.
+        assert_eq!(alpha_at(&s, 12, 65), 1.0);
+        assert!(mask_at(&s, 12, 65) < 0.01, "selected hidden quarter moved");
+        assert!(mask_at(&s, 17, 65) > 0.99, "selected visible quarter moved");
+        // The vacated area reads as revealed (default), with transparent pixels.
+        assert_eq!(alpha_at(&s, 12, 15), 0.0);
+        assert!(mask_at(&s, 12, 15) > 0.99);
+        // The unselected part of the mask stays, aligned with the unselected pixels.
+        assert_eq!(alpha_at(&s, 27, 15), 1.0);
+        assert!(mask_at(&s, 27, 15) < 0.01, "unselected mask stays put");
+        assert!(mask_at(&s, 27, 65) > 0.99, "and isn't copied along");
+        // Every pixel's mask value is where it was relative to the pixel.
+        for (x, y) in [(11, 61), (14, 69), (15, 61), (19, 69)] {
+            let want = if x < 15 { 0.0 } else { 1.0 };
+            assert!((mask_at(&s, x, y) - want).abs() < 0.01, "({x},{y})");
+        }
+    }
+
+    #[test]
+    fn unlinked_mask_stays_put() {
+        let mut s = masked(&[Rect::new(10, 10, 20, 20)], false);
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 40, 50]})).unwrap();
+        assert_eq!(active_bounds(&s), Rect::new(50, 60, 70, 70));
+        assert!(mask_at(&s, 15, 15) < 0.01);
+        assert!(mask_at(&s, 55, 65) > 0.99);
+        // With a selection too.
+        let mut s = masked(&[Rect::new(10, 10, 20, 20)], false);
+        s.execute("select.rect", json!({"x": 10, "y": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 0, 50]})).unwrap();
+        assert!(mask_at(&s, 15, 15) < 0.01 && mask_at(&s, 15, 65) > 0.99);
+    }
+
+    #[test]
+    fn targeted_unlinked_mask_transforms_alone() {
+        let mut s = masked(&[Rect::new(10, 10, 20, 20)], false);
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 40, 50], "target": "mask"})).unwrap();
+        assert_eq!(active_bounds(&s), Rect::new(10, 10, 30, 20), "pixels untouched");
+        assert!(mask_at(&s, 55, 65) < 0.01, "mask moved");
+        assert!(mask_at(&s, 15, 15) > 0.99, "vacated area reads as the default");
+        s.undo();
+        assert!(mask_at(&s, 15, 15) < 0.01, "one undo step");
+        // With a selection, only its part of the mask.
+        s.execute("select.rect", json!({"x": 10, "y": 10, "width": 5, "height": 10})).unwrap();
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 0, 50], "target": "mask"})).unwrap();
+        assert!(mask_at(&s, 12, 65) < 0.01 && mask_at(&s, 12, 15) > 0.99);
+        assert!(mask_at(&s, 17, 15) < 0.01, "unselected mask stays");
+        assert_eq!(active_bounds(&s), Rect::new(10, 10, 30, 20), "pixels untouched");
+    }
+
+    #[test]
+    fn targeted_linked_mask_moves_with_its_layer() {
+        // Photoshop: a linked mask can't move without its layer.
+        let mut s = masked(&[Rect::new(10, 10, 20, 20)], true);
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 40, 50], "target": "mask"})).unwrap();
+        assert_eq!(active_bounds(&s), Rect::new(50, 60, 70, 70));
+        assert!(mask_at(&s, 55, 65) < 0.01);
+    }
+
+    #[test]
+    fn targeted_alpha_channel_transforms_alone() {
+        let mut s = session();
+        s.execute("channel.new", json!({})).unwrap();
+        s.edit("paint channel", |doc, _| {
+            doc.channels[0].surface.fill_rect(Rect::new(10, 10, 20, 20), &[1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 40, 50], "target": {"channel": 0}})).unwrap();
+        let st = s.active().unwrap();
+        let ch = &st.doc.channels[0].surface;
+        assert!(ch.sample_channel(55, 65, 0) > 0.99 && ch.sample_channel(15, 15, 0) < 0.01);
+        assert_eq!(active_bounds(&s), Rect::new(10, 10, 30, 20), "layer untouched");
+    }
+
+    #[test]
+    fn transform_targets_fail_gracefully() {
+        let mut s = session();
+        let m = json!([1, 0, 0, 1, 5, 5]);
+        assert!(s.execute("edit.transform", json!({"matrix": m, "target": "mask"})).is_err(), "no mask");
+        assert!(s.execute("edit.transform", json!({"matrix": m, "target": {"channel": 9}})).is_err());
+        assert!(s.execute("edit.transform", json!({"matrix": m, "target": "quickMask"})).is_err());
+        // Unknown target shapes fall back to the pixels.
+        s.execute("edit.transform", json!({"matrix": m, "target": 7})).unwrap();
+        s.execute("edit.transform", json!({"matrix": m, "target": {"channel": "x"}})).unwrap();
+        // Selections that miss the mask entirely transform nothing, without panicking.
+        let mut s = masked(&[Rect::new(10, 10, 20, 20)], false);
+        s.execute("select.rect", json!({"x": 80, "y": 80, "width": 5, "height": 5})).unwrap();
+        let _ = s.execute("edit.transform", json!({"matrix": [1e9, 0, 0, 1e9, 0, 0], "target": "mask"}));
+        let _ = s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 1e12, 0], "target": "mask"}));
+    }
+
+    #[test]
+    fn split_gray_selected_rejects_non_gray() {
+        let s = Surface::new(PixelFormat::RGBA8);
+        let mut sel = Surface::new(PixelFormat::GRAY8);
+        sel.fill_rect(Rect::new(0, 0, 4, 4), &[1.0]);
+        assert!(split_gray_selected(&s, &sel).is_none());
     }
 }

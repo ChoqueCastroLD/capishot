@@ -470,6 +470,10 @@ pub struct TransformSession {
     /// Select › Transform Selection: the box transforms the selection outline, not pixels.
     #[serde(default)]
     pub selection: bool,
+    /// `edit.transform`'s `"target"` when the box moves an unlinked layer mask, an alpha channel or
+    /// the Quick Mask by itself (`None`: the layer, with its linked masks).
+    #[serde(default)]
+    pub target: Option<serde_json::Value>,
 }
 
 /// In-progress inline type editing (Type tool). Offsets are character indices.
