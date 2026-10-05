@@ -251,8 +251,9 @@ pub struct PhotocraftApp {
     /// The session clipboard currently holds an image imported from the OS clipboard: it has no
     /// original position, so Paste centres it (see `menus` "edit.paste").
     pub(crate) clip_external: bool,
-    /// Last `ctx` time (s) the OS clipboard was polled; a read every frame is too costly.
-    last_clip_poll: f64,
+    /// The OS clipboard was already read for the paste in flight (Edit › Paste positions it first),
+    /// so `run` doesn't read it a second time.
+    pub(crate) clip_read_for_paste: bool,
     /// Pointer position over the canvas (document px), for the Info panel and status bar.
     pub(crate) hover_doc: Option<[f64; 2]>,
     /// Info panel sample cache: ((x, y, revision), composite RGBA).
@@ -324,7 +325,7 @@ impl PhotocraftApp {
             info_sample: None,
             os_clip_sig: None,
             clip_external: false,
-            last_clip_poll: f64::NEG_INFINITY,
+            clip_read_for_paste: false,
             transform_preview: None,
             style_preview: None,
             distort: Default::default(),
@@ -365,6 +366,7 @@ impl PhotocraftApp {
 
     /// Run an engine command, reporting errors in the status bar.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        let clip_read = std::mem::take(&mut self.clip_read_for_paste);
         if self.automation_input
             && let Some(authorize) = self.services.automation_command.as_ref()
         {
@@ -375,8 +377,17 @@ impl PhotocraftApp {
             self.session.edit_prefs(|prefs| prefs.script_events.enabled = false);
         }
         let t0 = gpu_canvas::now_ms();
+        // The OS clipboard is read only on an explicit paste, never in the background (privacy, CPU).
         if matches!(id, "edit.paste" | "edit.pasteSpecial.pasteInPlace") {
-            self.import_os_clipboard();
+            if !clip_read {
+                self.import_os_clipboard();
+            }
+            if self.session.clipboard.is_none() && self.session.active().is_some() && self.services.clipboard_get_image.is_some() {
+                // Enabled on the strength of the OS clipboard, which held no image: a quiet no-op.
+                self.ui.status = "Nothing to paste: the clipboard holds no image".into();
+                self.ui.status_error = false;
+                return Ok(serde_json::json!({"pasted": false}));
+            }
         }
         let r = self.session.execute(id, params).map_err(|e| e.to_string());
         if r.is_ok() && matches!(id, "edit.copy" | "edit.cut" | "edit.copyMerged") {
@@ -658,12 +669,6 @@ impl eframe::App for PhotocraftApp {
         self.issue_screenshots(ctx);
         prefs_ui::tick(self, ctx);
         discard_ui::guard_window_close(self, ctx);
-        // Mirror the OS clipboard a few times a second so Edit > Paste greys correctly and Ctrl+V
-        // sees images copied in other apps (a clipboard read every frame is too costly).
-        if now - self.last_clip_poll >= 0.25 {
-            self.last_clip_poll = now;
-            self.import_os_clipboard();
-        }
         shortcuts::handle(self, ctx);
         let arrived: Vec<(String, Vec<u8>)> =
             self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
@@ -1024,7 +1029,6 @@ mod clipboard_tests {
 
     #[test]
     fn os_clipboard_bridge() {
-        type OsClip = Arc<Mutex<Option<(u32, u32, Vec<u8>)>>>;
         let os: OsClip = Arc::default();
         let (a, b) = (os.clone(), os.clone());
         let services = Services {
@@ -1052,25 +1056,72 @@ mod clipboard_tests {
         assert_eq!(surf.content_bounds().width(), 3);
     }
 
-    #[test]
-    fn external_clipboard_enables_and_centres_paste() {
-        // The periodic clipboard poll in `logic` (or the ⌘V handler) imports the OS image into
-        // the session clipboard before the enabled check and the menu's positioning run.
-        type OsClip = Arc<Mutex<Option<(u32, u32, Vec<u8>)>>>;
-        let os: OsClip = Arc::default();
-        let b = os.clone();
-        let services = Services { clipboard_get_image: Some(Box::new(move || b.lock().unwrap().clone())), ..Default::default() };
-        let mut app = PhotocraftApp::new(Session::new(), services);
+    type OsClip = Arc<Mutex<Option<(u32, u32, Vec<u8>)>>>;
+
+    /// An app whose OS clipboard is `os`, counting every read in `reads`.
+    fn app_with_os_clipboard(os: &OsClip, reads: &Arc<std::sync::atomic::AtomicUsize>) -> PhotocraftApp {
+        let (b, n) = (os.clone(), reads.clone());
+        let get = move || {
+            n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            b.lock().unwrap().clone()
+        };
+        let mut app = PhotocraftApp::new(Session::new(), Services { clipboard_get_image: Some(Box::new(get)), ..Default::default() });
         app.session.execute("file.new", serde_json::json!({"width": 64, "height": 64})).unwrap();
         app.sync_views();
-        // An image copied in another app: Paste greys until the import brings it in.
+        app
+    }
+
+    #[test]
+    fn external_clipboard_enables_and_centres_paste() {
+        // Paste is enabled from the clipboard service alone (no read); the explicit paste imports
+        // the OS image, once, and centres it like Photoshop does for foreign clipboard content.
+        let (os, reads) = (OsClip::default(), Arc::default());
+        let mut app = app_with_os_clipboard(&os, &reads);
         *os.lock().unwrap() = Some((4, 4, [255u8, 0, 0, 255].repeat(16)));
-        assert!(!crate::menus::is_enabled(&app, "edit.paste"));
-        assert!(app.import_os_clipboard());
+        assert!(app.session.clipboard.is_none());
         assert!(crate::menus::is_enabled(&app, "edit.paste"));
-        // Invoking Paste after the import still treats the image as external and centres it
-        // instead of pasting at (0,0) like an in-app copy.
+        assert!(crate::menus::is_enabled(&app, "edit.pasteSpecial.pasteInPlace"));
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0, "enablement never reads the clipboard");
         let r = crate::menus::invoke(&mut app, &egui::Context::default(), "edit.paste", serde_json::json!({})).unwrap();
         assert_ne!(r["offset"], serde_json::json!([0, 0]), "external image is centred: {r}");
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1, "one read per explicit paste");
+        // Without a clipboard service Paste greys until something is copied in the app.
+        let mut plain = PhotocraftApp::new(Session::new(), Services::default());
+        plain.session.execute("file.new", serde_json::json!({"width": 8, "height": 8})).unwrap();
+        assert!(!crate::menus::is_enabled(&plain, "edit.paste"));
+    }
+
+    #[test]
+    fn pasting_an_empty_or_non_image_os_clipboard_is_a_quiet_no_op() {
+        let (os, reads) = (OsClip::default(), Arc::default());
+        let mut app = app_with_os_clipboard(&os, &reads);
+        let layers = app.session.active().unwrap().doc.layers.len();
+        let r = crate::menus::invoke(&mut app, &egui::Context::default(), "edit.paste", serde_json::json!({})).unwrap();
+        assert_eq!(r["pasted"], serde_json::json!(false));
+        assert_eq!(app.run("edit.pasteSpecial.pasteInPlace", serde_json::json!({})).unwrap()["pasted"], serde_json::json!(false));
+        assert_eq!(app.session.active().unwrap().doc.layers.len(), layers);
+        assert!(!app.ui.status_error && !app.ui.status.is_empty());
+    }
+
+    #[test]
+    fn idle_frames_never_read_the_os_clipboard() {
+        let (os, reads) = (OsClip::default(), Arc::<std::sync::atomic::AtomicUsize>::default());
+        *os.lock().unwrap() = Some((4, 4, [255u8, 0, 0, 255].repeat(16)));
+        let (b, n) = (os.clone(), reads.clone());
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_max_steps(64).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            let get = move || {
+                n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                b.lock().unwrap().clone()
+            };
+            let mut app = PhotocraftApp::new(Session::new(), Services { clipboard_get_image: Some(Box::new(get)), ..Default::default() });
+            app.session.execute("file.new", serde_json::json!({"width": 64, "height": 64})).unwrap();
+            app
+        });
+        for _ in 0..20 {
+            h.step();
+        }
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0, "the OS clipboard is read only on an explicit paste");
+        assert!(h.state().session.clipboard.is_none());
     }
 }

@@ -312,7 +312,12 @@ fn cjk_font_candidates() -> Vec<(std::path::PathBuf, u32)> {
             ("/System/Library/Fonts/Hiragino Sans GB.ttc", 0),
         ]
     } else if cfg!(target_os = "windows") {
-        &[("C:\\Windows\\Fonts\\YuGothM.ttc", 0), ("C:\\Windows\\Fonts\\YuGothR.ttc", 0), ("C:\\Windows\\Fonts\\meiryo.ttc", 0), ("C:\\Windows\\Fonts\\msgothic.ttc", 0)]
+        &[
+            ("C:\\Windows\\Fonts\\YuGothM.ttc", 0),
+            ("C:\\Windows\\Fonts\\YuGothR.ttc", 0),
+            ("C:\\Windows\\Fonts\\meiryo.ttc", 0),
+            ("C:\\Windows\\Fonts\\msgothic.ttc", 0),
+        ]
     } else {
         &[
             ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),

@@ -2057,12 +2057,7 @@ mod transform_controls_tests {
         app.ui.tool = Tool::Move;
         app.ui.tool_options.move_show_transform = true;
 
-        let xf = ViewXform {
-            rect: Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0)),
-            zoom: 1.0,
-            center: [100.0, 100.0],
-            flip: false,
-        };
+        let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0)), zoom: 1.0, center: [100.0, 100.0], flip: false };
         let r = transform_controls_rect(&app, &xf).expect("shape layers have transform bounds");
         assert!(transform_controls_hit(r, r.right_bottom()));
 
