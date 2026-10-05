@@ -43,7 +43,7 @@ fn colour(p: &Value, k: &str, d: [f32; 4]) -> [f32; 4] {
             [c(0, 0.0), c(1, 0.0), c(2, 0.0), c(3, 1.0)]
         }
         Some(Value::String(h)) if h.len() == 7 && h.starts_with('#') => {
-            let ch = |j: usize| u8::from_str_radix(&h[j..j + 2], 16).map_or(0.0, |v| v as f32 / 255.0);
+            let ch = |j: usize| h.get(j..j + 2).and_then(|s| u8::from_str_radix(s, 16).ok()).map_or(0.0, |v| v as f32 / 255.0);
             [ch(1), ch(3), ch(5), 1.0]
         }
         _ => d,

@@ -925,7 +925,7 @@ pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
     if s.len() != 6 {
         return None;
     }
-    let b = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
+    let b = |i: usize| s.get(i..i + 2).and_then(|s| u8::from_str_radix(s, 16).ok());
     Some([b(0)?, b(2)?, b(4)?])
 }
 
