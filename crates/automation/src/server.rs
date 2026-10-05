@@ -14,6 +14,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::bridge::BridgeClient;
+use crate::budgets::{BatchReplyBudget, MAX_PREVIEW_SIDE, check_png, json_bytes};
 use crate::headless::Headless;
 use crate::security::MAX_BATCH_STEPS;
 use crate::{AuthorizedWorkspace, AutomationError, files};
@@ -88,7 +89,8 @@ pub struct SaveParams {
 pub struct PreviewParams {
     #[serde(default)]
     pub index: Option<usize>,
-    /// Longest side of the returned PNG in pixels (default 1024, 0 = full size).
+    /// Longest side of a headless preview (default 1024, maximum 2048).
+    /// Zero requests full size within that ceiling. Bridge mode returns the window screenshot.
     #[serde(default)]
     pub max_side: Option<u32>,
 }
@@ -160,11 +162,26 @@ pub struct ControlParams {
 // ---------------------------------------------------------------------------
 
 fn ok_json(v: &Value) -> CallToolResult {
-    CallToolResult::success(vec![Content::text(serde_json::to_string_pretty(v).unwrap_or_default())])
+    let text = match json_bytes(v).and_then(|bytes| String::from_utf8(bytes).map_err(|error| AutomationError::Other(error.to_string()))) {
+        Ok(text) => text,
+        Err(error) => return fail(format!("{error}; operation may have completed")),
+    };
+    bounded_tool_result(CallToolResult::success(vec![Content::text(text)]))
+}
+
+fn bounded_tool_result(result: CallToolResult) -> CallToolResult {
+    match json_bytes(&result) {
+        Ok(_) => result,
+        Err(error) => fail(format!("{error}; operation may have completed")),
+    }
 }
 
 fn fail(e: impl std::fmt::Display) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(e.to_string())])
+    let result = CallToolResult::error(vec![Content::text(e.to_string())]);
+    if json_bytes(&result).is_err() {
+        return CallToolResult::error(vec![Content::text("response budget exceeded; operation may have completed")]);
+    }
+    result
 }
 
 /// Neither backend took the call. The backend is always headless or a bridge, so this only
@@ -174,8 +191,11 @@ fn no_backend() -> CallToolResult {
 }
 
 fn png_result(png: &[u8], note: String) -> CallToolResult {
+    if let Err(error) = check_png(png.len()) {
+        return fail(error);
+    }
     let b64 = base64::engine::general_purpose::STANDARD.encode(png);
-    CallToolResult::success(vec![Content::image(b64, "image/png"), Content::text(note)])
+    bounded_tool_result(CallToolResult::success(vec![Content::image(b64, "image/png"), Content::text(note)]))
 }
 
 fn to_result(r: Result<Value, AutomationError>) -> Result<CallToolResult, McpError> {
@@ -247,6 +267,9 @@ impl PhotocraftMcp {
     }
 
     async fn screenshot(&self, b: &BridgeClient, max_side: Option<u32>) -> Result<CallToolResult, McpError> {
+        if max_side.is_some_and(|side| side > MAX_PREVIEW_SIDE) {
+            return Ok(fail(format!("automation preview side exceeds {MAX_PREVIEW_SIDE} pixels")));
+        }
         let response = match b.call("ui.screenshot", json!({})).await {
             Ok(response) => response,
             Err(error) => return Ok(fail(error)),
@@ -258,19 +281,26 @@ impl PhotocraftMcp {
             Ok(bytes) => bytes,
             Err(error) => return Ok(fail(format!("app screenshot data: {error}"))),
         };
-        let bytes = match max_side {
-            Some(m) if m > 0 => downscale_png(&bytes, m).unwrap_or(bytes),
-            _ => bytes,
+        if let Err(error) = check_png(bytes.len()) {
+            return Ok(fail(error));
+        }
+        let bytes = match downscale_png(&bytes, max_side.unwrap_or(0)) {
+            Ok(Some(small)) => small,
+            Ok(None) => bytes,
+            Err(error) => return Ok(fail(error)),
         };
         Ok(png_result(&bytes, "screenshot of the live app window".into()))
     }
 }
 
-fn downscale_png(png: &[u8], max_side: u32) -> Option<Vec<u8>> {
-    let img = photocraft_codecs::decode(png).ok()?;
+fn downscale_png(png: &[u8], max_side: u32) -> Result<Option<Vec<u8>>, AutomationError> {
+    // A compressed reply's byte limit does not bound its decoded pixel allocation.
+    let opts =
+        photocraft_codecs::DecodeOptions { limits: photocraft_codecs::Limits { max_width: 8192, max_height: 8192, max_pixels: 16 << 20, max_alloc: 64 << 20 } };
+    let img = photocraft_codecs::decode_as_with(photocraft_codecs::Format::Png, png, &opts).map_err(|error| AutomationError::Other(error.to_string()))?;
     let (w, h) = img.dimensions();
-    if w.max(h) <= max_side {
-        return None;
+    if max_side == 0 || w.max(h) <= max_side {
+        return Ok(None);
     }
     let s = max_side as f32 / w.max(h) as f32;
     let (nw, nh) = (((w as f32 * s) as u32).max(1), ((h as f32 * s) as u32).max(1));
@@ -285,8 +315,11 @@ fn downscale_png(png: &[u8], max_side: u32) -> Option<Vec<u8>> {
             out[di..di + 4].copy_from_slice(&src[si..si + 4]);
         }
     }
-    let small = photocraft_codecs::Image::from_u8(nw, nh, photocraft_codecs::ChannelLayout::Rgba, out).ok()?;
-    photocraft_codecs::encode(&small, photocraft_codecs::Format::Png, &Default::default()).ok()
+    let small =
+        photocraft_codecs::Image::from_u8(nw, nh, photocraft_codecs::ChannelLayout::Rgba, out).map_err(|error| AutomationError::Other(error.to_string()))?;
+    let bytes =
+        photocraft_codecs::encode(&small, photocraft_codecs::Format::Png, &Default::default()).map_err(|error| AutomationError::Other(error.to_string()))?;
+    Ok(Some(bytes))
 }
 
 // ---------------------------------------------------------------------------
@@ -450,15 +483,24 @@ impl PhotocraftMcp {
         };
         let mut results = Vec::new();
         let mut failed = 0;
+        let mut reply_budget = BatchReplyBudget::default();
         for s in &steps {
-            match b.call("engine.execute", s.clone()).await {
-                Ok(v) => results.push(json!({"ok": true, "result": v})),
-                Err(e) => {
-                    failed += 1;
-                    results.push(json!({"ok": false, "error": e.to_string()}));
-                    if stop {
-                        break;
-                    }
+            let response = b.call("engine.execute", s.clone()).await;
+            let was_error = response.is_err();
+            let result = match response {
+                Ok(value) => json!({"ok": true, "result": value}),
+                Err(error) => json!({"ok": false, "error": error.to_string()}),
+            };
+            if let Err(error) = reply_budget.charge(&result) {
+                failed += 1;
+                results.push(json!({"ok": false, "error": format!("batch response budget exceeded; current step may have completed: {error}")}));
+                break;
+            }
+            results.push(result);
+            if was_error {
+                failed += 1;
+                if stop {
+                    break;
                 }
             }
         }
@@ -573,6 +615,25 @@ pub fn render_document_png(doc: &photocraft_doc::Document, max_side: u32) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_text_checks_the_encoded_tool_envelope() {
+        // JSON escaping in the outer text-content envelope also consumes the budget.
+        let result = ok_json(&json!("\n".repeat(crate::budgets::MAX_RESPONSE_BYTES / 3)));
+        assert_eq!(result.is_error, Some(true));
+        assert!(json_bytes(&result).is_ok());
+        let error = fail("x".repeat(crate::budgets::MAX_RESPONSE_BYTES));
+        assert_eq!(error.is_error, Some(true));
+        assert!(json_bytes(&error).is_ok());
+    }
+
+    #[test]
+    fn bridge_screenshot_decode_limits_apply_even_without_downscaling() {
+        let image = photocraft_codecs::Image::from_u8(8193, 1, photocraft_codecs::ChannelLayout::Rgba, vec![0; 8193 * 4]).unwrap();
+        let png = photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+        assert!(downscale_png(&png, 0).is_err());
+        assert!(downscale_png(&png, 1024).is_err());
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_panicking_command_does_not_wedge_the_session() {

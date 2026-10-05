@@ -13,6 +13,8 @@ Automation requests are untrusted input with potential effects beyond the active
 | Symlink-safe capability filesystem | **Implemented:** relative operations use held directory capabilities and reject link escapes |
 | Request-byte and JSON-depth limits | **Partial:** 1 MiB request-line limit; no explicit JSON-depth policy |
 | Batch-step limit | **Implemented:** 256 steps for headless and MCP batches |
+| Reply-size limit | **Implemented:** 8 MiB encoded JSON/MCP result; aggregate batch reply budget |
+| Headless preview budgets | **Implemented:** 2048-pixel requested edge, 67,108,864 source pixels, 5 MiB encoded PNG |
 | Connection/worker limit | **Implemented:** 16 active TCP connections; one worker thread per accepted active connection |
 | Security audit events | **Proposed** |
 
@@ -36,5 +38,6 @@ MCP or control client
 
 The current token proves possession of a secret but does not provide general method authorization.
 Filesystem handles and a defensive command-path policy are implemented; explicit non-filesystem
-capabilities, broader resource budgets, and audit events remain. Private token handling, process
+capabilities, session-memory/command-duration budgets, and audit events remain. Preview and
+reply ceilings do not bound all document operations or desktop screenshot capture. Private token handling, process
 isolation, and least-privileged execution are still practical containment measures.

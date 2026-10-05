@@ -209,10 +209,32 @@ in headless and bridge mode.
 The desktop and headless TCP listeners currently enforce:
 
 - a 1 MiB maximum encoded request line;
+- an 8 MiB maximum encoded JSON reply, including the newline;
 - at most 16 simultaneously serviced connections per listener;
 - a 30-second socket read/write timeout;
 - at most 256 steps in a headless `batch` or MCP `command_batch` request.
 
 An oversized line, excess connection, unauthenticated request, or unauthorized filesystem path is
-rejected before command dispatch or file effects. These limits do not impose JSON-depth,
-response-size, render, document-memory, command-duration, or general per-method capability budgets.
+rejected before command dispatch or file effects. The headless JSON-lines stdio server also
+enforces the request and reply byte ceilings. MCP tool results are checked as encoded JSON,
+including the text/image content envelope, and the MCP bridge bounds incoming desktop replies.
+
+Headless automation previews (`doc.render` / MCP `doc_render_preview`) allow a maximum requested
+edge of 2048 pixels and a source document of at most 67,108,864 pixels. `maxSide: 0` (MCP
+`max_side: 0`) still means full size, but fails if the document's longest edge exceeds 2048.
+PNG results are capped at 5 MiB before base64 encoding or writing a rendered file. Preview
+dimension/source checks run before compositing; the encoded-PNG check runs after encoding.
+Explicit trusted-local CLI rendering keeps its existing behavior.
+
+Batch replies have an aggregate byte budget with space reserved for the outer reply and ID.
+Exhausting it stops later steps even when `stopOnError` is false. A result can exceed the reply
+budget after an edit has run: the error says the operation may have completed. Earlier steps
+are not rolled back; inspect state before retrying. The MCP bridge drops an oversized incoming
+reply without automatically retrying the operation. Bridged screenshots are decoded with
+8192-pixel edge, 16,777,216-pixel, and 64 MiB allocation ceilings, even without downscaling.
+
+These ceilings do not implement explicit JSON-depth policy, total session/document-memory
+accounting, compositor scratch-space accounting, command cancellation/duration limits, or
+general per-method capabilities. Desktop screenshot capture/encoding and document import/export
+still need their own operation budgets; the desktop reply ceiling applies after the UI creates
+its response. A bounded output does not imply bounded command cost.

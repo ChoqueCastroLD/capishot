@@ -8,6 +8,15 @@ Automation is a privilege boundary because requests can cause filesystem access,
 - Headless TCP refuses a successfully bound non-loopback address.
 - Every desktop-control and headless-TCP connection must authenticate with a 256-bit bearer token before method dispatch.
 - Encoded request lines are limited to 1 MiB, active TCP connections to 16, and headless/MCP batches to 256 steps.
+- JSON-lines replies and encoded MCP tool results are limited to 8 MiB; retained batch replies
+  have an aggregate budget and stop later steps when exhausted. The headless stdio JSON-lines
+  transport enforces the same request/reply ceilings as TCP.
+- Headless previews reject requested edges above 2048 pixels and source documents above
+  67,108,864 pixels before compositing. Full-size requests must fit the edge ceiling. Rendered
+  PNGs are limited to 5 MiB before base64 encoding or file writes. Trusted-local CLI rendering
+  retains its existing behavior.
+- The MCP bridge bounds incoming replies and does not retry an operation after an oversized
+  reply. Screenshot decoding has separate dimension, pixel, and allocation ceilings.
 - MCP normally uses stdio and can optionally bridge to loopback control TCP.
 - The bridge and UI request paths use timeouts.
 - Engine commands are expected to reject invalid parameters without panicking.
@@ -23,10 +32,18 @@ Automation is a privilege boundary because requests can cause filesystem access,
 
 - no per-client or per-tool capabilities;
 - no general per-client or per-tool capability model beyond filesystem read/write authority;
-- no explicit JSON-depth, response-size, render, document-memory, or command-duration budget;
+- no explicit JSON-depth policy, aggregate document/session-memory accounting, compositor
+  scratch-space accounting, or command-duration/cancellation budget;
 - one thread per accepted TCP connection;
 - no structured security audit event stream;
-- full-size renders and expensive engine commands are not charged to a session budget.
+- desktop screenshot capture/encoding and document import/export have no automation-specific
+  operation budgets; the desktop transport limits replies after their creation;
+- expensive engine commands are not charged to a session budget.
+
+Reply rejection can happen after a command has changed state. Such errors report that the
+operation may have completed. Exhausting a batch reply budget stops subsequent steps, including
+when normal command errors would allow the batch to continue; it does not roll back prior edits.
+See [Control protocol](../automation/control-protocol.md) for the authoritative protocol reference.
 
 ## Proposed session model
 

@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use base64::Engine as _;
 use serde_json::{Value, json};
 
+use crate::budgets::{BatchReplyBudget, write_reply};
 use crate::security::{
     ConnectionLimiter, LineRead, MAX_BATCH_STEPS, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream, read_bounded_line,
 };
@@ -96,7 +97,12 @@ impl Headless {
             }
             "doc.inspect" => self.inspect(index_of(&p)),
             "doc.render" => {
-                let max = p.get("maxSide").and_then(Value::as_u64).unwrap_or(1024) as u32;
+                let max = match p.get("maxSide") {
+                    None => 1024,
+                    Some(value) => {
+                        value.as_u64().and_then(|value| u32::try_from(value).ok()).ok_or_else(|| bad("maxSide must be an unsigned 32-bit integer"))?
+                    }
+                };
                 let png = self.render_png(index_of(&p), max)?;
                 match str_of(&p, "path") {
                     Some(path) => {
@@ -131,6 +137,7 @@ impl Headless {
         let stop = p.get("stopOnError").and_then(Value::as_bool).unwrap_or(true);
         let mut results = Vec::with_capacity(steps.len());
         let mut failed = 0usize;
+        let mut reply_budget = BatchReplyBudget::default();
         for (i, s) in steps.iter().enumerate() {
             let params = s.get("params").cloned().unwrap_or(Value::Null);
             let r = if let Some(c) = str_of(s, "command") {
@@ -140,14 +147,21 @@ impl Headless {
             } else {
                 Err(bad(format!("step {i} needs `command` or `method`")))
             };
-            match r {
-                Ok(v) => results.push(json!({"ok": true, "result": v})),
-                Err(e) => {
-                    failed += 1;
-                    results.push(json!({"ok": false, "error": e.to_string()}));
-                    if stop {
-                        break;
-                    }
+            let was_error = r.is_err();
+            let result = match r {
+                Ok(v) => json!({"ok": true, "result": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            };
+            if let Err(error) = reply_budget.charge(&result) {
+                failed += 1;
+                results.push(json!({"ok": false, "error": format!("batch response budget exceeded; current step may have completed: {error}")}));
+                break;
+            }
+            results.push(result);
+            if was_error {
+                failed += 1;
+                if stop {
+                    break;
                 }
             }
         }
@@ -179,17 +193,25 @@ pub fn respond(h: &Mutex<Headless>, line: &str) -> Value {
 }
 
 /// Serve JSON lines from `r` to `w` until EOF. Blank lines are ignored.
-pub fn serve_lines(h: &Mutex<Headless>, r: impl BufRead, mut w: impl Write) -> std::io::Result<()> {
-    for line in r.lines() {
-        let line = line?;
+pub fn serve_lines(h: &Mutex<Headless>, mut r: impl BufRead, mut w: impl Write) -> std::io::Result<()> {
+    let mut line = String::new();
+    loop {
+        match read_bounded_line(&mut r, &mut line)? {
+            LineRead::Eof => return Ok(()),
+            LineRead::TooLong => {
+                write_reply(&mut w, &json!({"id": null, "ok": false, "error": format!("request exceeds {MAX_REQUEST_BYTES} bytes")}))?;
+                w.flush()?;
+                return Ok(());
+            }
+            LineRead::Line => {}
+        }
         if line.trim().is_empty() {
             continue;
         }
         let reply = respond(h, &line);
-        writeln!(w, "{reply}")?;
+        write_reply(&mut w, &reply)?;
         w.flush()?;
     }
-    Ok(())
 }
 
 fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token: &str) -> std::io::Result<()> {
@@ -208,7 +230,7 @@ fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token:
                     "ok": false,
                     "error": format!("request exceeds {MAX_REQUEST_BYTES} bytes"),
                 });
-                writeln!(out, "{reply}")?;
+                write_reply(&mut out, &reply)?;
                 out.flush()?;
                 return Ok(());
             }
@@ -222,7 +244,7 @@ fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token:
             authenticated = ok;
             reply
         };
-        writeln!(out, "{reply}")?;
+        write_reply(&mut out, &reply)?;
         out.flush()?;
         if !authenticated {
             return Ok(());
@@ -354,6 +376,72 @@ mod tests {
         assert!(r["bytes"].as_u64().unwrap() > 0);
         assert_eq!(photocraft_codecs::decode(&std::fs::read(&path).unwrap()).unwrap().dimensions(), (40, 20));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn automation_preview_rejects_oversized_full_size_and_numeric_wraparound() {
+        let mut h = Headless::new();
+        h.handle("doc.new", json!({"width": 2049, "height": 1})).unwrap();
+        for max in [json!(0), json!(2049), json!(u64::from(u32::MAX) + 1), json!(-1), json!(1.5)] {
+            assert!(h.handle("doc.render", json!({"maxSide": max})).is_err());
+        }
+        // A smaller preview still works, and rejection leaves the source document intact.
+        let rendered = h.handle("doc.render", json!({"maxSide": 32})).unwrap();
+        let png = base64::engine::general_purpose::STANDARD.decode(rendered["base64"].as_str().unwrap()).unwrap();
+        assert_eq!(photocraft_codecs::decode(&png).unwrap().dimensions(), (32, 1));
+        assert_eq!(h.session.active().unwrap().doc.size.width, 2049);
+    }
+
+    #[test]
+    fn stdio_rejects_oversized_frames_before_dispatch() {
+        let h = Mutex::new(Headless::new());
+        let input = " ".repeat(MAX_REQUEST_BYTES + 1);
+        let mut out = Vec::new();
+        serve_lines(&h, input.as_bytes(), &mut out).unwrap();
+        let reply: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(reply["ok"], false);
+        assert!(reply["error"].as_str().unwrap().contains("request exceeds"));
+        assert!(h.lock().unwrap().session.documents().is_empty());
+    }
+
+    #[test]
+    fn preview_rejection_precedes_output_file_creation() {
+        let root = std::env::temp_dir().join(format!("pc-preview-budget-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let workspace = crate::AuthorizedWorkspace::new(None, Some(&root)).unwrap();
+        let mut h = Headless::with_workspace(workspace);
+        h.handle("doc.new", json!({"width": 16, "height": 8})).unwrap();
+        let result = h.handle("doc.render", json!({"maxSide": 2049, "path": "rejected.png"}));
+        assert!(result.unwrap_err().to_string().contains("preview side exceeds"));
+        assert!(!root.join("rejected.png").exists());
+        assert!(h.handle("doc.render", json!({"maxSide": 16, "path": "accepted.png"})).is_ok());
+        assert!(root.join("accepted.png").exists());
+        // Release directory capabilities before cleanup on Windows.
+        drop(h);
+        std::fs::remove_file(root.join("accepted.png")).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn trusted_local_render_keeps_full_size_behavior() {
+        let mut h = Headless::trusted_local();
+        h.handle("doc.new", json!({"width": 2049, "height": 1})).unwrap();
+        let rendered = h.handle("doc.render", json!({"maxSide": 0})).unwrap();
+        let png = base64::engine::general_purpose::STANDARD.decode(rendered["base64"].as_str().unwrap()).unwrap();
+        assert_eq!(photocraft_codecs::decode(&png).unwrap().dimensions(), (2049, 1));
+    }
+
+    #[test]
+    fn batch_response_budget_stops_later_steps_even_when_stop_on_error_is_false() {
+        let mut h = Headless::new();
+        let mut steps = vec![json!({"command": "command.list"}); MAX_BATCH_STEPS - 1];
+        steps.push(json!({"command": "file.new", "params": {"width": 8, "height": 8}}));
+        let result = h.batch(&json!({"steps": steps, "stopOnError": false})).unwrap();
+        assert_eq!(result["failed"], 1);
+        assert!(result["results"].as_array().unwrap().last().unwrap()["error"].as_str().unwrap().contains("batch response budget exceeded"));
+        assert!(h.session.documents().is_empty(), "later edit must not execute after the quota is exhausted");
+        assert!(crate::budgets::json_bytes(&result).is_ok());
+        assert!(h.handle("methods", Value::Null).is_ok());
     }
 
     #[test]

@@ -190,6 +190,56 @@ async fn errors_are_tool_errors_not_crashes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn preview_budget_failure_preserves_the_mcp_session() {
+    let client = connect(PhotocraftMcp::headless()).await;
+    json_of(&call(&client, "doc_new", json!({"width": 2049, "height": 1})).await);
+    for side in [0, 2049] {
+        let reply = call(&client, "doc_render_preview", json!({"max_side": side})).await;
+        assert_eq!(reply.is_error, Some(true));
+        assert!(text(&reply).contains("preview side exceeds"));
+    }
+    let preview = call(&client, "doc_render_preview", json!({"max_side": 32})).await;
+    assert!(preview.content.iter().any(|content| content.as_image().is_some()));
+    let inspected = json_of(&call(&client, "doc_inspect", json!({})).await);
+    assert_eq!(inspected["width"], 2049);
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_response_budget_drops_connection_without_retrying_the_operation() {
+    use photocraft_automation::{BridgeClient, budgets::MAX_RESPONSE_BYTES};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = tokio::spawn(async move {
+        let (sock, _) = listener.accept().await.unwrap();
+        let (read, mut write) = sock.into_split();
+        let mut reader = BufReader::new(read);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let auth: Value = serde_json::from_str(&line).unwrap();
+        let reply = json!({"id": auth["id"], "ok": true, "result": {"authenticated": true}});
+        write.write_all(format!("{reply}\n").as_bytes()).await.unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        let request: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(request["method"], "engine.execute");
+        let mut oversized = vec![b'x'; MAX_RESPONSE_BYTES];
+        // The read limit cuts this multi-byte character in half. Classification must
+        // still be a non-retryable budget error, not a UTF-8 transport failure.
+        oversized.extend_from_slice("é".as_bytes());
+        write.write_all(&oversized).await.unwrap();
+        // A retry would connect to this still-live listener. The budget error must return
+        // directly instead, without waiting for another authentication exchange.
+        let next = tokio::time::timeout(std::time::Duration::from_millis(250), listener.accept()).await;
+        assert!(next.is_err(), "oversized reply must not retry the operation");
+    });
+    let bridge = BridgeClient::new(&addr, CONTROL_TOKEN).unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), bridge.call("engine.execute", json!({"command": "command.list"}))).await.unwrap();
+    assert!(result.unwrap_err().to_string().contains("bridge response exceeds"));
+    app.await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn open_png_and_inspect() {
     let dir = tmp("open");
     let img = photocraft_codecs::Image::from_u8(8, 4, photocraft_codecs::ChannelLayout::Rgb, vec![200; 96]).unwrap();

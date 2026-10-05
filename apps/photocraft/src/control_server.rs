@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
+use photocraft_automation::budgets::write_reply;
 use photocraft_automation::security::{
     ConnectionLimiter, LineRead, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream, read_bounded_line,
 };
@@ -62,7 +63,7 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
                     "ok": false,
                     "error": format!("request exceeds {MAX_REQUEST_BYTES} bytes"),
                 });
-                let _ = writeln!(out, "{reply}");
+                let _ = write_reply(&mut out, &reply);
                 let _ = out.flush();
                 break;
             }
@@ -72,7 +73,7 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
         if !authenticated {
             let (reply, ok) = authentication_reply(&line, token);
             authenticated = ok;
-            if writeln!(out, "{reply}").is_err() || out.flush().is_err() || !authenticated {
+            if write_reply(&mut out, &reply).is_err() || out.flush().is_err() || !authenticated {
                 break;
             }
             continue;
@@ -95,11 +96,62 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
             }
             Err(e) => json!({"ok": false, "error": format!("bad JSON: {e}")}),
         };
-        if writeln!(out, "{reply}").is_err() {
+        if write_reply(&mut out, &reply).is_err() {
             break;
         }
         if out.flush().is_err() {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::BufRead;
+
+    #[test]
+    fn oversized_reply_preserves_framing_id_and_the_next_control_request() {
+        use photocraft_automation::budgets::MAX_RESPONSE_BYTES;
+        const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            serve(stream, TOKEN, tx, egui::Context::default());
+        });
+        let handler = std::thread::spawn(move || {
+            let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(first.method, "test.large");
+            first.reply.send(json!({"ok": true, "result": "x".repeat(MAX_RESPONSE_BYTES)})).unwrap();
+            let second = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(second.method, "test.small");
+            second.reply.send(json!({"ok": true, "result": "still serving"})).unwrap();
+        });
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        writeln!(stream, "{}", json!({"id": 1, "method": "auth", "params": {"token": TOKEN}})).unwrap();
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["ok"], true);
+        writeln!(stream, "{}", json!({"id": 2, "method": "test.large"})).unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        let rejected: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(rejected["id"], 2);
+        assert_eq!(rejected["ok"], false);
+        assert!(rejected["error"].as_str().unwrap().contains("operation may have completed"));
+        writeln!(stream, "{}", json!({"id": 3, "method": "test.small"})).unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        let accepted: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(accepted["id"], 3);
+        assert_eq!(accepted["result"], "still serving");
+        drop(reader);
+        drop(stream);
+        handler.join().unwrap();
+        server.join().unwrap();
     }
 }

@@ -139,7 +139,15 @@ impl Headless {
 
     pub fn render_png(&self, index: Option<usize>, max_side: u32) -> Result<Vec<u8>, AutomationError> {
         let i = self.doc_index(index)?;
-        files::render_png(&self.session.documents()[i].doc, max_side)
+        let doc = &self.session.documents()[i].doc;
+        if !matches!(&self.filesystem, Filesystem::TrustedLocal) {
+            crate::budgets::check_preview(doc.size.width, doc.size.height, max_side)?;
+        }
+        let png = files::render_png(doc, max_side)?;
+        if !matches!(&self.filesystem, Filesystem::TrustedLocal) {
+            crate::budgets::check_png(png.len())?;
+        }
+        Ok(png)
     }
 
     pub fn session_list(&self) -> Value {

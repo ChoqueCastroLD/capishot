@@ -21,13 +21,18 @@ Implementation is split across:
 before dispatch; the bridge accepts only loopback-style addresses and authenticates on
 connection; encoded request lines are limited to 1 MiB; active connections are limited to 16;
 socket I/O and handler waits use timeouts; MCP and headless batches are limited to 256 steps.
+JSON-lines replies and encoded MCP tool results are capped at 8 MiB, with aggregate batch reply
+budgets. Headless previews have source-pixel, requested-edge, and encoded-PNG ceilings. The
+bridge bounds incoming reply frames and screenshot decoding.
 Automation file methods require separately configured read and write roots. Request paths are
 relative, and absolute, traversal, alternate-separator, device-name, and link-escape paths are
 rejected before file effects.
 
 **Known limitations:** the token is a bearer credential and grants the complete non-filesystem
 control surface. There is no encryption, client identity, general per-method capability check,
-JSON-depth limit, or operation/resource budget. The listener creates one thread per authenticated
+explicit JSON-depth policy, aggregate session-memory accounting, or command-duration/cancellation
+budget. Desktop capture/encoding and import/export still need their own operation budgets.
+The listener creates one thread per authenticated
 active connection, within the connection cap. Trusted one-shot CLI operations and interactive
 desktop file pickers retain the launching user's normal filesystem authority.
 

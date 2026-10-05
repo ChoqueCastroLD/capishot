@@ -6,11 +6,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
 use crate::AutomationError;
+use crate::budgets::MAX_RESPONSE_BYTES;
 use crate::security::{AUTH_METHOD, MAX_REQUEST_BYTES, validate_token};
 
 type Conn = (BufReader<tokio::net::tcp::OwnedReadHalf>, tokio::net::tcp::OwnedWriteHalf);
@@ -75,6 +76,12 @@ impl BridgeClient {
                 return Err(AutomationError::Bridge(format!("not connected to {}", self.addr)));
             };
             match tokio::time::timeout(self.timeout, exchange(conn, id, method, &params)).await {
+                Ok(Ok(Err(error @ AutomationError::BadRequest(_)))) => {
+                    // An oversized frame leaves unread bytes. Drop this connection and
+                    // report the budget failure without retrying a possibly completed edit.
+                    *guard = None;
+                    return Err(error);
+                }
                 Ok(Ok(v)) => return v,
                 Ok(Err(e)) if attempt == 0 => {
                     *guard = None;
@@ -104,14 +111,19 @@ async fn exchange(conn: &mut Conn, id: u64, method: &str, params: &Value) -> Res
     let io = |e: std::io::Error| AutomationError::Bridge(e.to_string());
     conn.1.write_all(line.as_bytes()).await.map_err(io)?;
     conn.1.flush().await.map_err(io)?;
-    let mut buf = String::new();
+    let mut buf = Vec::new();
     loop {
         buf.clear();
-        let n = conn.0.read_line(&mut buf).await.map_err(io)?;
+        // Read raw bytes so truncation inside a UTF-8 character still reports the
+        // budget error instead of a retryable decoding/transport error.
+        let n = (&mut conn.0).take((MAX_RESPONSE_BYTES + 1) as u64).read_until(b'\n', &mut buf).await.map_err(io)?;
+        if n > MAX_RESPONSE_BYTES {
+            return Ok(Err(AutomationError::BadRequest(format!("bridge response exceeds {MAX_RESPONSE_BYTES} bytes; operation may have completed"))));
+        }
         if n == 0 {
             return Err(AutomationError::Bridge("connection closed by the app".into()));
         }
-        let Ok(v) = serde_json::from_str::<Value>(buf.trim()) else {
+        let Ok(v) = serde_json::from_slice::<Value>(&buf) else {
             continue;
         };
         if v.get("id").and_then(Value::as_u64) != Some(id) {
