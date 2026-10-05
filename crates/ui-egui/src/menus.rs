@@ -698,6 +698,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let items = menu_items(app);
     let mut clicked: Option<String> = None;
     let t = crate::theme::Tokens::get(ui.ctx());
+    let mut nav = crate::menu_nav::Nav::load(ui.ctx());
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         let v = &mut ui.style_mut().visuals;
@@ -707,6 +708,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
         egui::MenuBar::new().ui(ui, |ui| {
             ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
+            nav.bar_bottom = Some(ui.max_rect().bottom());
             let mut buttons = Vec::with_capacity(TOP_MENUS.len());
             for top in TOP_MENUS {
                 let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
@@ -715,13 +717,16 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     if mine.is_empty() {
                         ui.weak("(coming soon)");
                     }
-                    render_level(ui, &mine, 1, &mut clicked);
+                    render_level(ui, &mine, 1, &mut clicked, &mut nav);
                 });
                 buttons.push(r.response);
             }
             switch_on_hover(ui.ctx(), &buttons);
+            let tops: Vec<egui::Id> = buttons.iter().map(egui::Popup::default_response_id).collect();
+            nav.keys(ui.ctx(), &tops, &mut clicked);
         });
     });
+    nav.store(ui.ctx());
     if let Some(id) = clicked {
         let ctx = ui.ctx().clone();
         let _ = invoke(app, &ctx, &id, json!({}));
@@ -743,6 +748,10 @@ fn switch_on_hover(ctx: &egui::Context, buttons: &[egui::Response]) {
     // `Response::hovered` is false while the menu's popup layer is open. Hit-test the title
     // rect manually, but only when its own layer is top-most at the pointer.
     let Some(p) = ctx.pointer_hover_pos() else { return };
+    // Only a moving pointer switches: a pointer resting on a title must not undo ← / → .
+    if ctx.input(|i| i.pointer.delta() == egui::Vec2::ZERO) {
+        return;
+    }
     if let Some(i) = buttons.iter().position(|b| pointer_reaches_title(ctx, b, p))
         && i != open
     {
@@ -751,19 +760,13 @@ fn switch_on_hover(ctx: &egui::Context, buttons: &[egui::Response]) {
     }
 }
 
-fn render_level(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>) {
-    // On short displays leave room for the menu bar and popup frame so the ScrollArea becomes
-    // active before the popup reaches the bottom edge. Keep wheel/scrollbar input and also allow
-    // direct dragging of the menu contents.
-    let max_height = (ui.ctx().content_rect().height() - 56.0).max(96.0);
-    egui::ScrollArea::vertical()
-        .id_salt(("menu-level", depth))
-        .max_height(max_height)
-        .scroll_source(egui::containers::scroll_area::ScrollSource::ALL)
-        .show(ui, |ui| render_level_rows(ui, items, depth, clicked));
+fn render_level(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>, nav: &mut crate::menu_nav::Nav) {
+    // Menu popups can be taller than the window: each level stays on screen and scrolls (wheel,
+    // scroll arrows, keyboard), like a native menu on a small display.
+    crate::menu_nav::level(ui, depth, nav, |ui, nav| render_level_rows(ui, items, depth, clicked, nav));
 }
 
-fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>) {
+fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>, nav: &mut crate::menu_nav::Nav) {
     let t = crate::theme::Tokens::get(ui.ctx());
     if t.pro {
         // Spectrum/macOS menus: blue highlight row with white text.
@@ -798,7 +801,12 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
             if let Some(sc) = &it.shortcut {
                 b = b.shortcut_text(crate::shortcuts::pretty(sc));
             }
-            if ui.add_enabled(it.enabled, b).clicked() {
+            let hit = nav.row(ui, depth - 1, it.enabled, Some(&it.id), |ui, _| {
+                let r = ui.add_enabled(it.enabled, b);
+                let hit = r.clicked();
+                (r, hit)
+            });
+            if hit {
                 *clicked = Some(it.id.clone());
                 ui.close();
             }
@@ -811,8 +819,9 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
             shown_subs.push(name);
             let child: Vec<&MenuItem> = items.iter().copied().filter(|c| c.path.len() > depth && c.path[depth] == name).collect();
             let any_enabled = child.iter().any(|c| c.enabled && c.label != "---");
-            ui.add_enabled_ui(any_enabled || !child.is_empty(), |ui| {
-                ui.menu_button(name, |ui| render_level(ui, &child, depth + 1, clicked));
+            let enabled = any_enabled || !child.is_empty();
+            ui.add_enabled_ui(enabled, |ui| {
+                nav.row(ui, depth - 1, enabled, None, |ui, nav| (ui.menu_button(name, |ui| render_level(ui, &child, depth + 1, clicked, nav)).response, ()));
             });
             last_was_sep = false;
         }

@@ -162,6 +162,8 @@ pub struct Preview {
     /// Hash of the params the mask texture shows.
     mask_key: u64,
     mask: Option<egui::TextureHandle>,
+    /// Why the preview couldn't be drawn (shown in the dialog and logged, never silent: #145).
+    error: Option<String>,
 }
 
 fn hash(text: &str) -> u64 {
@@ -170,13 +172,13 @@ fn hash(text: &str) -> u64 {
 
 /// The selection mask `params` would make, on the proxy: the engine command run on a scratch
 /// session (Out Of Gamut uses the document's own proof setup).
-fn proxy_mask(app: &PhotocraftApp, proxy: &Document, k: u32, params: &Value) -> Option<Vec<f32>> {
+fn proxy_mask(app: &PhotocraftApp, proxy: &Document, k: u32, params: &Value) -> Result<Vec<f32>, String> {
     let area = proxy.bounds();
     if params.get("select").and_then(Value::as_str) == Some("outOfGamut") {
         let pv = app.session.color.proof(proxy.id);
-        let (m, _) = photocraft_engine::color_cmds::gamut_mask(proxy, &pv.setup, pv.gamut_threshold).ok()?;
+        let (m, _) = photocraft_engine::color_cmds::gamut_mask(proxy, &pv.setup, pv.gamut_threshold).map_err(|e| e.to_string())?;
         let invert = params.get("invert").and_then(Value::as_bool).unwrap_or(false);
-        return Some(m.iter().map(|v| f32::from(*v) / 255.0).map(|v| if invert { 1.0 - v } else { v }).collect());
+        return Ok(m.iter().map(|v| f32::from(*v) / 255.0).map(|v| if invert { 1.0 - v } else { v }).collect());
     }
     let mut p = params.clone();
     // Eyedropper points are in document pixels; the proxy is 1/k the size.
@@ -203,9 +205,20 @@ fn proxy_mask(app: &PhotocraftApp, proxy: &Document, k: u32, params: &Value) -> 
     if let Some(id) = app.session.active().and_then(|d| d.active_layer) {
         let _ = s.select_layer(id);
     }
-    s.execute(COMMAND, p).ok()?;
-    let d = s.active()?;
-    Some(photocraft_algo::selection::mask_from_surface(d.doc.selection.as_ref(), area))
+    s.execute(COMMAND, p).map_err(|e| e.to_string())?;
+    let d = s.active().ok_or("no preview document")?;
+    Ok(photocraft_algo::selection::mask_from_surface(d.doc.selection.as_ref(), area))
+}
+
+/// Record why the preview failed (logged once per new reason), or clear it.
+fn report(app: &mut PhotocraftApp, error: Option<String>) {
+    let Some(p) = app.color_range.as_mut() else { return };
+    if p.error != error {
+        if let Some(e) = &error {
+            log::warn!("Color Range preview: {e}");
+        }
+        p.error = error;
+    }
 }
 
 /// Refresh the cached proxy / textures for the active document and the dialog's params. Returns
@@ -219,7 +232,7 @@ fn preview(app: &mut PhotocraftApp, ctx: &egui::Context, f: &Map<String, Value>)
         let side = doc.size.width.max(doc.size.height).max(1);
         let k = side.div_ceil(PREVIEW).max(1);
         let proxy = Arc::new(crate::proxy::proxy_document(&doc, k));
-        app.color_range = Some(Preview { doc: doc_id, revision, k, proxy, image: None, mask_key: 0, mask: None });
+        app.color_range = Some(Preview { doc: doc_id, revision, k, proxy, image: None, mask_key: 0, mask: None, error: None });
     }
     let image_view = s(f, "__view", "selection") == "image";
     let params = params(f);
@@ -234,6 +247,7 @@ fn preview(app: &mut PhotocraftApp, ctx: &egui::Context, f: &Map<String, Value>)
             let thumb = photocraft_compose::thumbnail(&proxy, proxy.size.width.max(proxy.size.height));
             let size = [thumb.width as usize, thumb.height as usize];
             if size != [w, h] || thumb.pixels.len() != w * h * 4 {
+                report(app, Some(format!("the image thumbnail is {}×{}, expected {w}×{h}", thumb.width, thumb.height)));
                 return None;
             }
             let img = egui::ColorImage::from_rgba_unmultiplied(size, &thumb.pixels);
@@ -245,8 +259,18 @@ fn preview(app: &mut PhotocraftApp, ctx: &egui::Context, f: &Map<String, Value>)
         return app.color_range.as_ref()?.image.as_ref().map(|t| (t.id(), [w, h], k));
     }
     if app.color_range.as_ref().is_some_and(|p| p.mask_key != key || p.mask.is_none()) {
-        let mask = proxy_mask(app, &proxy, k, &params).unwrap_or_else(|| vec![0.0; w * h]);
+        let mask = match proxy_mask(app, &proxy, k, &params) {
+            Ok(m) => {
+                report(app, None);
+                m
+            }
+            Err(e) => {
+                report(app, Some(e));
+                vec![0.0; w * h]
+            }
+        };
         if mask.len() != w * h {
+            report(app, Some(format!("the selection preview has {} pixels, expected {}", mask.len(), w * h)));
             return None;
         }
         let px: Vec<Color32> = mask.iter().map(|v| Color32::from_gray((v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8)).collect();
@@ -368,8 +392,22 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                 pick(app, f, at, ui.input(|i| i.modifiers));
             }
         }
+        // A preview that can't be drawn says why (#145) instead of staying blank.
+        if let Some(e) = app.color_range.as_ref().and_then(|p| p.error.clone()) {
+            ui.painter().rect_filled(frame, 0.0, t.canvas);
+            let msg = format!(
+                "Preview unavailable:
+{e}"
+            );
+            let g = ui.painter().layout(msg, egui::FontId::proportional(11.0), t.text_faint, frame.width() - 16.0);
+            ui.painter().galley(frame.center() - g.size() / 2.0, g, t.text_faint);
+        }
         ui.painter().rect_stroke(frame, 0.0, Stroke::new(1.0, t.field_border), StrokeKind::Outside);
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, ui.is_enabled(), "Color Range preview"));
+        let label = match app.color_range.as_ref().and_then(|p| p.error.as_deref()) {
+            Some(e) => format!("Color Range preview unavailable: {e}"),
+            None => "Color Range preview".to_string(),
+        };
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, ui.is_enabled(), &label));
         ui.add_space(10.0);
         ui.vertical(|ui| {
             ui.add_enabled_ui(c.sampling, |ui| {
@@ -703,5 +741,52 @@ mod tests {
             f.insert("select".into(), json!(v));
             app.run(COMMAND, params(&f)).unwrap();
         }
+    }
+
+    /// #145: the whole app without a GPU (no wgpu render state: the CPU canvas, as on a Linux
+    /// machine whose adapter can't run the GPU canvas), on a small window. Select › Color Range…
+    /// from the menu opens the dialog on screen and draws both previews.
+    #[test]
+    fn opens_and_previews_in_the_full_app_without_a_gpu() {
+        let mut h = Harness::builder().with_size(egui::vec2(1024.0, 600.0)).build_eframe(|cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            assert!(cc.wgpu_render_state.is_none(), "this test covers the no-GPU path");
+            app_with_doc()
+        });
+        h.run_steps(6);
+        assert!(h.state().gpu.is_none(), "the CPU canvas");
+        h.get_all_by_label("Select").next().expect("the Select menu").click();
+        h.run_steps(3);
+        h.get_by_label("Color Range…").click();
+        h.run_steps(6);
+        let id = dialog_id(h.state());
+        let area = h.ctx.memory(|m| m.area_rect(egui::Id::new(("dialog", id)))).expect("the dialog is drawn");
+        assert!(h.ctx.content_rect().contains_rect(area), "the dialog is on screen: {area:?}");
+        assert!(h.query_by_label("Color Range preview").is_some());
+        let p = h.state().color_range.as_ref().expect("the preview is cached");
+        assert!(p.mask.is_some() && p.error.is_none(), "the selection preview is drawn: {:?}", p.error);
+        set(&mut h, "__view", json!("image"));
+        let p = h.state().color_range.as_ref().unwrap();
+        assert!(p.image.is_some() && p.error.is_none(), "the image preview is drawn: {:?}", p.error);
+        set(&mut h, "select", json!("reds"));
+        ok(&mut h);
+        h.run_steps(3);
+        assert_eq!(coverage(h.state(), 5, 5), 1.0);
+    }
+
+    #[test]
+    fn a_preview_failure_is_shown_not_silent() {
+        let mut h = harness(app_with_doc());
+        open(h.state_mut());
+        h.run_steps(3);
+        // The engine refuses these params: the preview says so instead of staying blank.
+        let id = dialog_id(h.state());
+        h.state_mut().ui.dialog_mut(id).unwrap().fields.insert("select".into(), json!("noSuchMode"));
+        h.run_steps(3);
+        let err = h.state().color_range.as_ref().and_then(|p| p.error.clone());
+        assert!(err.is_some(), "the failure is recorded");
+        assert!(h.query_by_label_contains("Color Range preview unavailable").is_some(), "and shown");
+        set(&mut h, "select", json!("reds"));
+        assert!(h.state().color_range.as_ref().unwrap().error.is_none(), "and cleared once the preview works again");
     }
 }
