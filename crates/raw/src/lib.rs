@@ -3,7 +3,9 @@
 //! Implemented only from public specifications and papers: TIFF 6.0,
 //! TIFF/EP (ISO 12234-2), the Adobe DNG Specification 1.7, ITU-T T.81
 //! (lossless JPEG, process 14), the published structure of Canon's CR2
-//! container, and the demosaicing papers cited in [`Demosaic`]. No code from
+//! container, published descriptions of Sony's cRAW code, public maker-note
+//! tag tables, observation of sample files, and the demosaicing papers cited
+//! in [`Demosaic`]. No code from
 //! dcraw, LibRaw, rawspeed, rawler, rawloader or darktable was used.
 //!
 //! * [`identify`] / [`is_raw`] recognise raw files from their bytes.
@@ -16,9 +18,10 @@
 //!   formats whose sensor data is not decoded yet.
 //!
 //! Decoded today: DNG (uncompressed and lossless-JPEG, strips and tiles, CFA
-//! and LinearRaw), CR2 (lossless JPEG with Canon slices) and uncompressed or
-//! lossless-JPEG TIFF/EP raws (NEF, ARW, PEF… when not vendor-compressed).
-//! Everything else reports [`RawError::Unsupported`].
+//! and LinearRaw), CR2 (lossless JPEG with Canon slices), uncompressed or
+//! lossless-JPEG TIFF/EP raws (NEF, ARW, PEF… when not vendor-compressed),
+//! Sony compressed ARW (cRAW), Panasonic RW2 (RawFormat 5) and uncompressed
+//! Olympus ORF. Everything else reports [`RawError::Unsupported`].
 //!
 //! The crate is standalone (no workspace dependencies), does no I/O, builds for
 //! `wasm32-unknown-unknown` and never panics on hostile input: sizes are
@@ -35,9 +38,12 @@ mod dng;
 mod error;
 mod ljpeg;
 mod opcodes;
+mod orf;
 mod par;
 mod preview;
+mod rw2;
 mod sensor;
+mod sony;
 mod tiff;
 mod tiffep;
 
@@ -200,13 +206,13 @@ pub fn decode(bytes: &[u8], limits: &Limits) -> Result<Sensor, RawError> {
     match format {
         RawFormat::Cr3 => Err(RawError::unsupported("Canon CR3 (ISO BMFF / CRX) is not decoded yet")),
         RawFormat::Raf => Err(RawError::unsupported("Fujifilm RAF is not decoded yet")),
-        RawFormat::Rw2 => Err(RawError::unsupported("Panasonic RW2 is not decoded yet")),
-        RawFormat::Orf => Err(RawError::unsupported("Olympus ORF is not decoded yet")),
         _ => {
             let t = Tiff::new(bytes).ok_or(RawError::NotRaw)?;
             match format {
                 RawFormat::Dng => dng::decode(&t, limits),
                 RawFormat::Cr2 => cr2::decode(&t, limits),
+                RawFormat::Rw2 => rw2::decode(&t, limits),
+                RawFormat::Orf => orf::decode(&t, limits),
                 f => tiffep::decode(&t, f, limits),
             }
         }

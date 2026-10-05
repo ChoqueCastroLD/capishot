@@ -57,6 +57,12 @@ pub fn embedded_preview(bytes: &[u8]) -> Option<Preview<'_>> {
             found.extend(candidate(bytes, off, len));
         }
     } else if let Some(t) = Tiff::new(bytes) {
+        // Olympus ORF: the preview is referenced from the maker note.
+        if matches!(bytes.get(0..4), Some(b"IIRO" | b"IIRS" | b"MMOR"))
+            && let Some((off, len)) = crate::orf::preview_range(&t)
+        {
+            found.extend(candidate(bytes, off, len));
+        }
         for ifd in t.all_ifds() {
             if let (Some(off), Some(len)) = (t.tag_uint(&ifd, tag::JPEG_INTERCHANGE_FORMAT), t.tag_uint(&ifd, tag::JPEG_INTERCHANGE_FORMAT_LENGTH)) {
                 found.extend(candidate(bytes, off as usize, len as usize));

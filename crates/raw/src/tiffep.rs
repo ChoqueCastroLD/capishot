@@ -1,7 +1,8 @@
 //! TIFF/EP-structured raws (NEF, ARW, PEF and others) whose sensor data is
 //! stored uncompressed or as lossless JPEG in a standard CFA IFD (TIFF/EP,
 //! ISO 12234-2: PhotometricInterpretation 32803, CFARepeatPatternDim and
-//! CFAPattern). Vendor-specific compressions are reported as unsupported.
+//! CFAPattern), plus Sony's compressed ARW (see [`crate::sony`]). Other
+//! vendor-specific compressions are reported as unsupported.
 //!
 //! Black and white levels use DNG-style tags when the camera writes them,
 //! then the vendor's publicly documented tags (Nikon maker note BlackLevel,
@@ -13,13 +14,13 @@
 use crate::cr2::clip_level;
 use crate::error::{RawError, Result};
 use crate::sensor::{BlackLevels, Cfa, JpegLayout, Rect, Sensor, read_plane};
+use crate::sony::{self, SONY_RAW_FILE_TYPE};
 use crate::tiff::{Ifd, Tiff, tag};
 use crate::{Limits, RawFormat};
 
 const PHOTOMETRIC_CFA: u32 = 32803;
 const NIKON_WB_RB_LEVELS: u16 = 0x000C;
 const NIKON_BLACK_LEVEL: u16 = 0x003D;
-const SONY_RAW_FILE_TYPE: u16 = 0x7000;
 const SONY_BLACK_LEVEL: u16 = 0x7310;
 const SONY_WB_RGGB_LEVELS: u16 = 0x7313;
 
@@ -37,7 +38,7 @@ pub(crate) fn is_sony_non_cfa(t: &Tiff, ifds: &[Ifd]) -> bool {
 }
 
 /// CFA from the TIFF/EP tags of the raw IFD, or the EXIF CFAPattern.
-fn cfa(t: &Tiff, raw: &Ifd, ifds: &[Ifd]) -> Option<Cfa> {
+pub(crate) fn cfa(t: &Tiff, raw: &Ifd, ifds: &[Ifd]) -> Option<Cfa> {
     let dim = t.tag_uints(raw, tag::CFA_REPEAT_PATTERN_DIM);
     let pat = t.tag_uints(raw, tag::CFA_PATTERN);
     let (rows, cols, colors) = match (dim.as_slice(), pat) {
@@ -75,7 +76,7 @@ fn nikon_maker_note<'a>(t: &Tiff<'a>, ifds: &[Ifd]) -> Option<(Tiff<'a>, Ifd)> {
 
 /// Four levels listed in R, G, G, B order, placed at their 2×2 CFA positions
 /// (data parity).
-fn rggb_by_position(cfa: &Cfa, v: &[f64]) -> Option<[f32; 4]> {
+pub(crate) fn rggb_by_position(cfa: &Cfa, v: &[f64]) -> Option<[f32; 4]> {
     let [r, g1, g2, b] = <[f64; 4]>::try_from(v).ok()?;
     if [r, g1, g2, b].iter().any(|x| !x.is_finite() || *x < 0.0) {
         return None;
@@ -100,7 +101,8 @@ pub(crate) fn decode(t: &Tiff, format: RawFormat, limits: &Limits) -> Result<Sen
         }
         return Err(RawError::unsupported(format!("{}: no CFA image found", format.name())));
     };
-    let plane = read_plane(t, &raw, limits, JpegLayout::Quads)?;
+    let plane =
+        if format == RawFormat::Arw && sony::is_craw(t, &raw) { sony::read_craw(t, &raw, limits)? } else { read_plane(t, &raw, limits, JpegLayout::Quads)? };
     if plane.samples != 1 {
         return Err(RawError::unsupported(format!("CFA data with {} samples per pixel", plane.samples)));
     }

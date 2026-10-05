@@ -1,7 +1,7 @@
 //! Truncated and corrupted raw files must fail cleanly, never panic, and
 //! never allocate beyond the limits.
 
-use photocraft_raw::testgen::{Cr2Spec, DngSpec, DngStorage, mosaic, scene, tiff_ep};
+use photocraft_raw::testgen::{Cr2Spec, DngSpec, DngStorage, mosaic, orf, rw2, scene, sony_craw, tiff_ep};
 use photocraft_raw::*;
 
 fn samples() -> Vec<Vec<u8>> {
@@ -41,6 +41,10 @@ fn samples() -> Vec<Vec<u8>> {
         .build(),
     );
     out.push(tiff_ep("NIKON", w, h, &cfa, [0, 1, 1, 2], 12, vec![]));
+    let codes = mosaic(&scene(64, 6), 64, [0, 1, 1, 2], 256, 1900);
+    out.push(sony_craw(64, 6, &codes, [8000, 10400, 12900, 14100]));
+    out.push(rw2(30, 8, &mosaic(&scene(30, 8), 30, [0, 1, 1, 2], 128, 4095), 12));
+    out.push(orf(w, h, &cfa));
     out
 }
 
