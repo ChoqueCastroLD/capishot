@@ -36,6 +36,9 @@
 //! Set `PHOTOCRAFT_CORPUS_STRICT=1` to also fail on import/export errors
 //! (files listed in `KNOWN_BAD` excepted).
 //!
+//! Every exported file must also pass `common::strict_block_errors` (#200): each tagged block
+//! re-parses strictly, with the padding Photoshop writes, so other readers (psd-tools) stay aligned.
+//!
 //! `*_mutations_never_panic` truncates and corrupts every corpus file and
 //! asserts import + flatten return (Ok or Err) without panicking.
 
@@ -119,6 +122,11 @@ fn dissolve_matches(doc: &photocraft_doc::Document, ours: &[[f32; 4]], ps: &[[f3
         }
     }
     true
+}
+
+thread_local! {
+    /// Files whose export has tagged blocks that fail `common::strict_block_errors`.
+    static BLOCK_ERRORS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Files known to be invalid upstream: their parse error is expected.
@@ -284,6 +292,12 @@ fn check_file(name: &str, bytes: &[u8]) -> (Outcome, Option<f32>) {
                 eprintln!("{name:<60} REEXPORT-PARSE-ERROR {e}");
                 return (Outcome::Error, None);
             }
+            // Every exported tagged block must re-parse strictly (#200).
+            let errs = common::strict_block_errors(&r.bytes);
+            if !errs.is_empty() {
+                eprintln!("{name:<60} EXPORT-BLOCK-ERROR {}", errs.join("; "));
+                BLOCK_ERRORS.with(|b| b.borrow_mut().push(format!("{name}: {}", errs.join("; "))));
+            }
             match import(name, &r.bytes) {
                 Ok(i) => i.document,
                 Err(e) => {
@@ -357,6 +371,7 @@ fn check_file(name: &str, bytes: &[u8]) -> (Outcome, Option<f32>) {
 fn run_oracle(src: &Source) {
     let Some((root, enforce)) = locate(src) else { return };
     let files = files_in(&root);
+    BLOCK_ERRORS.with(|b| b.borrow_mut().clear());
     let (mut pass, mut thumb_pass, mut diff, mut skipped, mut errors) = (0, 0, 0, 0, 0);
     let (mut rt_same, mut rt_diff, mut crashes) = (0, Vec::new(), Vec::new());
     eprintln!("{:<60} {:>6} {:>9} {:>8}  status", "file", "layers", "max_err", "bad_px%");
@@ -394,11 +409,14 @@ fn run_oracle(src: &Source) {
     );
     let pass = pass + thumb_pass;
     eprintln!("{label}: export -> re-import renders the same for {rt_same} files; differs for {}: {}", rt_diff.len(), rt_diff.join(", "));
+    let block_errors = BLOCK_ERRORS.with(|b| b.borrow().clone());
+    eprintln!("{label}: exported files whose tagged blocks fail the strict re-parse: {}", block_errors.len());
     if std::env::var_os("PHOTOCRAFT_CORPUS_STRICT").is_some() {
         assert_eq!(errors, 0);
     }
     if enforce {
         assert!(crashes.is_empty(), "{label}: panics (Rule 9): {crashes:?}");
+        assert!(block_errors.is_empty(), "{label}: exported tagged blocks fail the strict re-parse (#200): {block_errors:?}");
         assert!(pass >= src.pass_floor, "{label}: oracle pass count {pass} fell below the floor {}", src.pass_floor);
         assert!(rt_same >= src.roundtrip_floor, "{label}: export round trip {rt_same} fell below the floor {}: {rt_diff:?}", src.roundtrip_floor);
     }

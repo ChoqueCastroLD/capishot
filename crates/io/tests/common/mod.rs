@@ -327,3 +327,53 @@ fn tone_space(mode: ColorMode) -> photocraft_doc::adjust::ToneSpace {
         _ => photocraft_doc::adjust::ToneSpace::Rgb,
     }
 }
+
+/// Strict structural check of a written PSD/PSB (#200): every tagged block must
+/// re-parse with its section sizes matching, laid out as Photoshop writes it so
+/// that readers which step from block to block by length (psd-tools) stay
+/// aligned. Returns one message per problem; empty means clean.
+///
+/// - the file parses, with no unparsed bytes left in the layer and mask section;
+/// - the layer info body is padded to a multiple of 4;
+/// - global (document-level) blocks are padded to a multiple of 4;
+/// - layer blocks have an even length with no pad byte outside it;
+/// - blocks with inner lengths (`PlLd`, `SoLd`, `SoLE`, `lnk2`/`lnk3`/`lnkD`, `lfx2`)
+///   re-parse exactly (`TaggedBlock::check_structure`).
+pub fn strict_block_errors(bytes: &[u8]) -> Vec<String> {
+    let file = match photocraft_psd::PsdFile::from_bytes(bytes) {
+        Ok(f) => f,
+        Err(e) => return vec![format!("parse: {e}")],
+    };
+    let v = file.header.version;
+    let mut errs = Vec::new();
+    if !file.layer_mask_trailing.is_empty() {
+        errs.push(format!("{} unparsed bytes at the end of the layer and mask section", file.layer_mask_trailing.len()));
+    }
+    if let Some(li) = &file.layer_info {
+        let body = li.unpadded_len(v).unwrap_or(1);
+        let pad = li.padding.as_ref().map_or(body % 2, |p| p.len() as u64);
+        if (body + pad) % 4 != 0 {
+            errs.push(format!("layer info: {body} bytes + {pad} padding is not a multiple of 4"));
+        }
+    }
+    for b in &file.global_blocks {
+        let pad = b.padding.as_ref().map_or(b.data.len() % 2, Vec::len);
+        if (b.data.len() + pad) % 4 != 0 {
+            errs.push(format!("global {}: {} data bytes + {pad} padding is not a multiple of 4", b.key_str(), b.data.len()));
+        }
+        if let Err(e) = b.check_structure() {
+            errs.push(format!("global {}: {e}", b.key_str()));
+        }
+    }
+    for (i, l) in file.layers().iter().enumerate() {
+        for b in &l.blocks {
+            if b.data.len() % 2 != 0 || b.padding.as_ref().is_some_and(|p| !p.is_empty()) {
+                errs.push(format!("layer {i} {}: {} data bytes with padding outside the length", b.key_str(), b.data.len()));
+            }
+            if let Err(e) = b.check_structure() {
+                errs.push(format!("layer {i} {}: {e}", b.key_str()));
+            }
+        }
+    }
+    errs
+}

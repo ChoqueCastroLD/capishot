@@ -70,7 +70,7 @@
     </td>
     <td width="25%" valign="top">
       <h3>🗂️ Real PSD files</h3>
-      Open, edit and save layered Photoshop documents. 134 of 135 real-world PSDs round-trip byte for byte.
+      Open, edit and save layered Photoshop documents. Re-saving keeps the render of 307 of the 309 psd-tools test files.
     </td>
     <td width="25%" valign="top">
       <h3>🤖 Agent-ready</h3>
@@ -213,7 +213,7 @@ Every screenshot here is the real app at work on public-domain art, rendered off
 
 PhotoCraft's PSD support is a standalone crate written from Adobe's public specification and tested against a corpus of real-world files.
 
-- **Byte-exact round trips:** 134 of 135 corpus files are written back identical, and anything we don't model yet (raw blocks, descriptors, extras) is preserved verbatim instead of being dropped.
+- **Faithful round trips:** opening and re-saving a document renders the same for 307 of the 309 files in the psd-tools test set and 169 of 170 in our mixed ag-psd/psd-tools set (`crates/io/tests/corpus.rs`; fetch the psd-tools set with `cargo xtask corpus --psd-tools`), and anything we don't model yet (raw blocks, descriptors, extras) is carried over instead of being dropped. A re-saved file is not byte-identical to its source: PhotoCraft rewrites image resources, layer records and the composite. Only the standalone `photocraft-psd` crate, parsing and writing a file without the document model, reproduces every parseable corpus file byte for byte (`crates/psd/tests/corpus.rs`).
 - **Pixels that match:** a composite oracle compares our render with Photoshop's own merged image, covering gradient interpolation (Classic, Perceptual and Linear), layer effects, shape strokes, clipping and fill opacity.
 - **Large documents:** PSB, 16 and 32-bit files, and CMYK and Lab documents open natively.
 

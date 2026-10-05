@@ -59,7 +59,9 @@ BlockData::{UnicodeName, SectionDivider, LayerId, NameSource, BlendClippedAsGrou
             BlendInteriorElements, Knockout, Protection, SheetColor, FillOpacity, MetadataSetting}
 constructors: unicode_name, section_divider, layer_id, name_source, blend_clipped_as_group,
               blend_interior_elements, knockout, protection, sheet_color, fill_opacity
-tagged::uses_long_length(version, key)   // PSB 8-byte length keys
+TaggedBlock::check_structure() -> Result<()>   // strict inner re-parse of PlLd, SoLd, SoLE, lnk2/3/D, lfx2
+tagged::uses_long_length(version, key)   // PSB 8-byte length keys (the spec's 13 + lnk3, lnkE, pths, extd, extn, FELS, cinf, artd)
+LayerInfo::unpadded_len(version), LayerInfo::pad_to(version, 4)   // Photoshop pads the layer info to 4
 
 // Image resources
 ImageResource { signature, id, name, data };  ImageResource::parsed() -> Option<Result<ResourceData>>

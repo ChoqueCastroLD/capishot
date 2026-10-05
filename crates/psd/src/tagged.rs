@@ -11,8 +11,16 @@ use crate::error::{PsdError, Result};
 use crate::header::Version;
 use crate::io::{Reader, WriteExt};
 
-/// Keys whose length field is 8 bytes in PSB files.
-pub const PSB_LONG_KEYS: [&[u8; 4]; 13] = [b"LMsk", b"Lr16", b"Lr32", b"Layr", b"Mt16", b"Mt32", b"Mtrn", b"Alph", b"FMsk", b"lnk2", b"FEid", b"FXid", b"PxSD"];
+/// Keys whose length field is 8 bytes in PSB files: the thirteen the Adobe
+/// specification lists, plus keys Photoshop also writes with 8-byte lengths
+/// although the specification omits them (observed in real PSB files, e.g.
+/// `lnkE` and `cinf` in the ag-psd test set, and expected by other PSB
+/// readers such as psd-tools). Reading one of these with a 4-byte length
+/// misaligns every block after it (#200).
+pub const PSB_LONG_KEYS: [&[u8; 4]; 21] = [
+    b"LMsk", b"Lr16", b"Lr32", b"Layr", b"Mt16", b"Mt32", b"Mtrn", b"Alph", b"FMsk", b"lnk2", b"FEid", b"FXid", b"PxSD", // spec
+    b"lnk3", b"lnkE", b"pths", b"extd", b"extn", b"FELS", b"cinf", b"artd", // observed
+];
 
 /// Returns `true` if `key` uses an 8-byte length in `version`.
 pub fn uses_long_length(version: Version, key: &[u8; 4]) -> bool {
@@ -218,6 +226,60 @@ impl TaggedBlock {
         Self::flag(*b"iOpa", v)
     }
 
+    /// Strictly re-parses the internal structure of blocks whose data carries
+    /// its own sizes, so a block that a strict reader would reject is caught
+    /// here: `PlLd` (a `plcL` placed layer), `SoLd`/`SoLE` (`soLD` placed
+    /// layer data), `lnk2`/`lnk3`/`lnkD` (length-prefixed linked files) and
+    /// `lfx2` (object effects). Every inner length must stay inside the block
+    /// and the parse must end at the end of the data, apart from up to three
+    /// zero padding bytes. Other keys are not checked and return `Ok`.
+    ///
+    /// Layouts follow the Adobe Photoshop File Format specification
+    /// ("Additional Layer Information": Placed Layer, Placed Layer Data,
+    /// Linked Layer, Object Based Effects Layer Info).
+    pub fn check_structure(&self) -> Result<()> {
+        let d = &self.data[..];
+        let mut r = Reader::new(d);
+        match &self.key {
+            b"PlLd" => {
+                expect_kind(&mut r, b"plcL")?;
+                let _version = r.u32()?;
+                crate::io::read_pascal(&mut r, 1)?;
+                // Page, total pages, anti-alias policy, layer type; transform (8 doubles).
+                r.skip(4 * 4 + 8 * 8)?;
+                let _warp_version = r.u32()?;
+                crate::descriptor::VersionedDescriptor::read(&mut r)?;
+            }
+            b"SoLd" | b"SoLE" => {
+                expect_kind(&mut r, b"soLD")?;
+                let _version = r.u32()?;
+                crate::descriptor::VersionedDescriptor::read(&mut r)?;
+            }
+            b"lfx2" => {
+                let _effects_version = r.u32()?;
+                crate::descriptor::VersionedDescriptor::read(&mut r)?;
+            }
+            b"lnk2" | b"lnk3" | b"lnkD" => {
+                while r.remaining() >= 8 {
+                    let len = r.u64()?;
+                    let item = r.bytes_u64(len)?;
+                    if !matches!(item.get(..4), Some(b"liFD" | b"liFE" | b"liFA")) {
+                        return Err(PsdError::invalid(format!("{}: linked item of unknown type", self.key_str())));
+                    }
+                    // Items are padded to a multiple of 4.
+                    let pad = ((4 - len % 4) % 4).min(r.remaining() as u64);
+                    r.skip(pad as usize)?;
+                }
+            }
+            _ => return Ok(()),
+        }
+        let rest = r.peek_rest();
+        if rest.len() > 3 || rest.iter().any(|&b| b != 0) {
+            return Err(PsdError::invalid(format!("{}: {} unexpected bytes after the block structure", self.key_str(), rest.len())));
+        }
+        Ok(())
+    }
+
     pub(crate) fn write(&self, out: &mut Vec<u8>, version: Version) -> Result<()> {
         out.put(&self.signature);
         out.put(&self.key);
@@ -236,6 +298,14 @@ impl TaggedBlock {
         let p = self.padding.as_ref().map_or(Self::default_padding(self.data.len()), Vec::len);
         8 + l + self.data.len() + p
     }
+}
+
+fn expect_kind(r: &mut Reader<'_>, kind: &'static [u8; 4]) -> Result<()> {
+    let found = r.array::<4>()?;
+    if &found != kind {
+        return Err(PsdError::invalid(format!("expected {} structure, found {:?}", String::from_utf8_lossy(kind), String::from_utf8_lossy(&found))));
+    }
+    Ok(())
 }
 
 fn parse_section(d: &[u8]) -> Result<SectionDivider> {

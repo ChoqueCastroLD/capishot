@@ -195,6 +195,14 @@ impl Ex {
             blocks.push(TaggedBlock::new(key, d));
         }
         blocks.extend(extra);
+        // Layer-level blocks keep their pad byte inside the length, as Photoshop writes them:
+        // readers such as psd-tools do not skip a pad after an odd length, so a regenerated
+        // odd-length `lfx2` misaligned every block after it (#200).
+        for b in &mut blocks {
+            if b.data.len() % 2 == 1 && b.padding.is_none() {
+                b.data.push(0);
+            }
+        }
         LayerRecord {
             rect,
             channels,
@@ -222,10 +230,13 @@ impl Ex {
             raw.retain(|(k, _)| k != b"lmfx");
         }
         let mut regenerated: Vec<([u8; 4], Vec<u8>)> = Vec::new();
+        // `keys` is in the importer's priority order (`psd_raw` came from the first key present),
+        // not file order: Photoshop writes `PlLd` before `SoLd`, and overwriting the first match
+        // in file order put `soLD` data under the `PlLd` key (#200).
         let set_principal = |raw: &mut Vec<([u8; 4], Vec<u8>)>, keys: &[&[u8; 4]], data: Option<&std::sync::Arc<Vec<u8>>>| {
             let Some(d) = data else { return };
-            match raw.iter_mut().find(|(k, _)| keys.contains(&k)) {
-                Some(e) => e.1 = d.to_vec(),
+            match keys.iter().find_map(|k| raw.iter().position(|(rk, _)| rk == *k)) {
+                Some(i) => raw[i].1 = d.to_vec(),
                 None => raw.push((*keys[0], d.to_vec())),
             }
         };
@@ -276,7 +287,7 @@ impl Ex {
                 }
             }
             LayerContent::Smart(sm) => {
-                set_principal(&mut raw, &[b"SoLd", b"PlLd", b"SoLE"], sm.psd_raw.as_ref());
+                set_principal(&mut raw, smart_keys(sm.psd_raw.as_deref().map(Vec::as_slice)), sm.psd_raw.as_ref());
                 if !raw.iter().any(|(k, _)| matches!(k, b"SoLd" | b"PlLd" | b"SoLE")) {
                     self.warnings.push(format!("layer \"{}\": smart object written as pixels", l.name));
                 }
@@ -439,6 +450,18 @@ fn link_group_resource(layers: &[Layer]) -> Option<Vec<u8>> {
 
 /// Whether the layer's effects still equal what its preserved `lmfx`/`lfx2`
 /// decodes to. `None` when there is nothing preserved or it can't be decoded.
+/// Block keys a smart object's `psd_raw` may be written under, in priority order. The data says
+/// which it is: `PlLd` holds a `plcL` structure, `SoLd`/`SoLE` a `soLD` one (Adobe PSD spec,
+/// "Placed Layer" and "Placed Layer Data"). Writing one under the other's key makes the block
+/// unreadable.
+fn smart_keys(data: Option<&[u8]>) -> &'static [&'static [u8; 4]] {
+    match data.and_then(|d| d.get(..4)) {
+        Some(b"plcL") => &[b"PlLd"],
+        Some(b"soLD") => &[b"SoLd", b"SoLE"],
+        _ => &[b"SoLd", b"PlLd", b"SoLE"],
+    }
+}
+
 fn effects_unchanged(l: &Layer) -> Option<bool> {
     let src = l.psd_blocks.iter().find(|(k, _)| k == b"lmfx").map(|(_, d)| d.clone()).or_else(|| l.effects.psd_raw.clone())?;
     let (m, items) = crate::effects_map::parse_lfx2(&src)?;
@@ -726,6 +749,10 @@ pub fn document_to_psd_with(doc: &Document, opts: &PsdExportOptions) -> (PsdFile
     for (sig, key, data) in &crate::annotations_map::export_blocks(doc, crate::pattern_map::export_global_blocks(doc)) {
         let mut tb = TaggedBlock::new(*key, data.to_vec());
         tb.signature = *sig;
+        // Photoshop pads document-level (global) blocks to a multiple of 4, and readers such as
+        // psd-tools step to the next block that way: an even pad after `CAI ` (77 bytes)
+        // misaligned every block after it (#200).
+        tb.padding = Some(vec![0; (4 - data.len() % 4) % 4]);
         global_blocks.push(tb);
     }
     let comps_resource = ex.comps.is_some().then(|| crate::comps_map::write_comps_resource(doc));
@@ -773,11 +800,19 @@ pub fn document_to_psd_with(doc: &Document, opts: &PsdExportOptions) -> (PsdFile
         _ => LayerInfoPlacement::Section,
     };
     let records = std::mem::take(&mut ex.records);
+    let mut layer_info = has_layers.then_some(LayerInfo { merged_alpha: has_alpha, layers: records, padding: None });
+    if let Some(info) = &mut layer_info {
+        // Photoshop pads the layer info to 4 bytes (an even pad misaligns readers after a global
+        // `Lr16`/`Lr32` block, #200). A length that cannot be computed keeps the even default.
+        if info.pad_to(version, 4).is_err() {
+            info.padding = None;
+        }
+    }
     let file = PsdFile {
         header,
         color_mode_data: Vec::new(),
         resources,
-        layer_info: has_layers.then_some(LayerInfo { merged_alpha: has_alpha, layers: records, padding: None }),
+        layer_info,
         layer_info_placement: placement,
         global_layer_mask: (has_layers || !global_blocks.is_empty()).then(GlobalLayerMask::default),
         global_blocks,

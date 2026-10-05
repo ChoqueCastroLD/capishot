@@ -644,6 +644,32 @@ impl LayerInfo {
         Ok(LayerInfo { merged_alpha, layers, padding })
     }
 
+    /// Length of the body (layer count, records and channel data) without
+    /// its trailing padding.
+    pub fn unpadded_len(&self, version: Version) -> Result<u64> {
+        let mut records = Vec::new();
+        records.put_i16(0);
+        for l in &self.layers {
+            l.write(&mut records, version)?;
+        }
+        let mut n = records.len() as u64;
+        for c in self.layers.iter().flat_map(|l| &l.channels).filter(|c| c.compression.is_some()) {
+            n = n.saturating_add(2).saturating_add(c.data.len() as u64);
+        }
+        Ok(n)
+    }
+
+    /// Sets the padding so the body length is a multiple of `align`, as
+    /// Photoshop writes it (4). Readers that step over a global `Lr16`/`Lr32`
+    /// block in 4-byte units (psd-tools) misread the blocks after a body that
+    /// is only padded to even.
+    pub fn pad_to(&mut self, version: Version, align: u64) -> Result<()> {
+        let align = align.max(1);
+        let len = self.unpadded_len(version)?;
+        self.padding = Some(vec![0; ((align - len % align) % align) as usize]);
+        Ok(())
+    }
+
     /// Serializes the body (without a length field).
     pub(crate) fn write_body(&self, out: &mut Vec<u8>, version: Version) -> Result<()> {
         let start = out.len();

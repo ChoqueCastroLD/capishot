@@ -146,7 +146,12 @@ fn raster_layer_blocks_preserved() {
     d.layers[1].psd_blocks = blocks.clone();
     d.layers[1].vector_mask = photocraft_io::vector_map::vector_mask_from_block(&[0; 12], d.size.width, d.size.height);
     let back = roundtrip(&d);
-    assert_eq!(back.layers[1].psd_blocks, blocks);
+    // An odd-length layer block comes back with its pad byte inside the length (as Photoshop
+    // lays layer blocks out, #200); everything else is verbatim.
+    let mut expected = blocks.clone();
+    expected[2].1 = std::sync::Arc::new(vec![1u8, 0]);
+    assert_eq!(back.layers[1].psd_blocks, expected);
+    assert_eq!(roundtrip(&back).layers[1].psd_blocks, expected, "stable after the first save");
     assert_eq!(back.layers[1].vector_mask, d.layers[1].vector_mask);
 }
 
