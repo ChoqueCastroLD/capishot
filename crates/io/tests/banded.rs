@@ -61,6 +61,17 @@ fn single_layer_native_export_strips_opaque_alpha() {
         let img = photocraft_codecs::decode(&r.bytes).unwrap();
         assert_eq!(img.layout().has_alpha(), alpha < 1.0);
     }
+
+    let mut d = layered(8, 4, SampleType::U16, 1.0);
+    d.layers.truncate(1);
+    // A fractional edge exercises coverage rather than merely cropping raw samples.
+    d.layers[0].vector_mask = Some(photocraft_doc::VectorMask::new(photocraft_vector::shapes::rect(0.0, 0.0, 4.5, 4.0)));
+    let r = export(&d, "x.png", &ExportOptions::default()).unwrap();
+    let img = photocraft_codecs::decode(&r.bytes).unwrap();
+    assert_eq!(img.sample_type(), photocraft_codecs::SampleType::U16);
+    assert!(img.layout().has_alpha());
+    let got: Vec<f32> = img.to_rgba_f32().iter().map(|v| (v * 65535.0).round()).collect();
+    assert_eq!(got, composite_q(&d, 65535.0), "active vector mask: pixels differ");
 }
 
 #[test]

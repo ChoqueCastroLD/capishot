@@ -88,9 +88,12 @@ fn single_layer(doc: &Document) -> Option<&Surface> {
         && l.opacity >= 1.0
         && l.fill_opacity >= 1.0
         && l.mask.is_none()
+        && l.vector_mask.as_ref().is_none_or(|mask| !mask.enabled)
         && l.effects.items.is_empty()
         && l.effects.psd_raw.is_none()
-        && matches!(l.blend, BlendMode::Normal | BlendMode::PassThrough);
+        && matches!(l.blend, BlendMode::Normal | BlendMode::PassThrough)
+        && photocraft_compose::channel_weights(l, doc.mode).is_none()
+        && !photocraft_compose::blend_if_active(l, doc.mode);
     match (&l.content, ok) {
         (LayerContent::Raster(s), true) if s.format() == doc.pixel_format() => Some(s),
         _ => None,
