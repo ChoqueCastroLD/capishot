@@ -833,10 +833,12 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
         && layer.blend == BlendMode::PassThrough
         && !effects::has_effects(layer)
     {
-        let before = backdrop.clone();
-        composite_stack(&g.children, backdrop, cx);
         let needs_mix = opacity < 1.0 || layer.mask.is_some() || layer.vector_mask.is_some();
-        if needs_mix {
+        let has_clipped = clipped.iter().any(|c| c.visible);
+        // Children can draw directly unless mixing or clipping needs the original backdrop.
+        let before = (needs_mix || has_clipped).then(|| backdrop.clone());
+        composite_stack(&g.children, backdrop, cx);
+        if needs_mix && let Some(before) = &before {
             let mv = mask_vals(layer, rect);
             for (i, (p, a)) in backdrop.px.iter_mut().zip(&before.px).enumerate() {
                 let k = opacity * mask_k(&mv, i);
@@ -849,9 +851,7 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
         // them, each placed over the original backdrop) is added to the
         // pass-through result. Exact when the children blend Normal, close
         // otherwise (matches psd-tools clipping-mask3/4/5).
-        if clipped.iter().any(|c| c.visible)
-            && let Some(iso) = render_content(layer, rect, cx)
-        {
+        if has_clipped && let (Some(before), Some(iso)) = (before, render_content(layer, rect, cx)) {
             let mut clipped_iso = iso.clone();
             for c in clipped.iter().filter(|c| c.visible) {
                 composite_atop(c, &mut clipped_iso, cx);
@@ -877,8 +877,7 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
 
     // Adjustment layers transform the backdrop, then blend the result back in.
     if let LayerContent::Adjustment(adj) = &layer.content {
-        let before = backdrop.clone();
-        let mut adjusted = before.clone();
+        let mut adjusted = backdrop.clone();
         adjust::apply_with(adj, &mut adjusted, cx.transfer);
         // Clipped layers onto an adjustment are uncommon; they composite atop the adjusted result.
         for c in clipped.iter().filter(|c| c.visible) {
@@ -892,7 +891,8 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
                 if k <= 0.0 {
                     continue;
                 }
-                let b = before.px[i];
+                // Only `adjusted` has changed; this pixel's original backdrop is still in place.
+                let b = backdrop.px[i];
                 let a = adjusted.px[i];
                 let blended = blend::blend_rgb(layer.blend, [b[0], b[1], b[2]], [a[0], a[1], a[2]]);
                 backdrop.px[i] = [b[0] + (blended[0] - b[0]) * k, b[1] + (blended[1] - b[1]) * k, b[2] + (blended[2] - b[2]) * k, b[3]];
