@@ -1455,22 +1455,10 @@ fn draw_drag_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
                 painter.add(egui::Shape::line(pts, Stroke::new(w, col)));
             }
         }
-        Tool::Line => {
-            painter.line_segment(
-                [xf.to_screen(d.start[0] as f32, d.start[1] as f32), xf.to_screen(last[0] as f32, last[1] as f32)],
-                Stroke::new(1.0, crate::theme::Tokens::get(painter.ctx()).accent),
-            );
-        }
-        Tool::RectMarquee
-        | Tool::EllipseMarquee
-        | Tool::ObjectSelection
-        | Tool::Rectangle
-        | Tool::EllipseShape
-        | Tool::Triangle
-        | Tool::Polygon
-        | Tool::CustomShape => {
+        t if crate::vector_ui::is_shape_tool(t) => crate::vector_ui::draw_shape_preview(app, painter, xf, t, d.start, last, d.modifiers),
+        Tool::RectMarquee | Tool::EllipseMarquee | Tool::ObjectSelection => {
             let r = Rect::from_two_pos(xf.to_screen(d.start[0] as f32, d.start[1] as f32), xf.to_screen(last[0] as f32, last[1] as f32));
-            if matches!(d.tool, Tool::EllipseMarquee | Tool::EllipseShape) {
+            if d.tool == Tool::EllipseMarquee {
                 painter.add(egui::Shape::ellipse_stroke(r.center(), r.size() / 2.0, Stroke::new(1.0, Color32::WHITE)));
             } else {
                 painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::WHITE), egui::StrokeKind::Middle);

@@ -349,6 +349,12 @@ fn live_from_params(cmd: &str, kind: &str, p: &Value, prev: Option<&LiveShape>) 
     })
 }
 
+/// The path `shape.create` draws for live-shape params `p` (the Shape tools preview it while dragging).
+pub fn shape_path(p: &Value) -> Result<Path> {
+    let kind = p.get("kind").and_then(Value::as_str).unwrap_or("rect");
+    Ok(vector::shapes::live_path(&live_from_params("shape.create", kind, p, None)?))
+}
+
 fn live_kind(l: &LiveShape) -> &'static str {
     match l {
         LiveShape::Rect { radii, .. } if radii.iter().any(|r| *r > 0.0) => "roundedRect",

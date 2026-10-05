@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 use crate::canvas::ViewXform;
-use crate::state::Tool;
+use crate::state::{Tool, ToolOptions};
 use crate::theme::Tokens;
 
 /// Pen tool path under construction: knots as [anchor, in, out] (document px).
@@ -25,9 +25,14 @@ pub fn is_shape_tool(t: Tool) -> bool {
     matches!(t, Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line | Tool::CustomShape)
 }
 
-fn hex(c: [f32; 4]) -> String {
+fn rgb32(c: [f32; 4]) -> Color32 {
     let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    format!("#{:02x}{:02x}{:02x}", b(c[0]), b(c[1]), b(c[2]))
+    Color32::from_rgb(b(c[0]), b(c[1]), b(c[2]))
+}
+
+fn hex(c: [f32; 4]) -> String {
+    let c = rgb32(c);
+    format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b())
 }
 
 fn stroke_param(app: &PhotocraftApp) -> Value {
@@ -35,12 +40,10 @@ fn stroke_param(app: &PhotocraftApp) -> Value {
     if o.stroke_width > 0.0 { json!({"width": o.stroke_width, "color": hex(app.session.tools.background)}) } else { Value::Null }
 }
 
-/// Finish a Shape-tool drag: ⇧ constrains proportions, ⌥ draws from the centre.
-pub fn finish_shape(app: &mut PhotocraftApp, tool: Tool, start: [f64; 2], end: [f64; 2], mods: egui::Modifiers) {
-    let o = app.ui.tool_options.clone();
-    let fill = if o.shape_fill { json!(hex(app.session.tools.foreground)) } else { Value::Null };
-    let stroke = stroke_param(app);
-    let p = if tool == Tool::Line {
+/// Geometry of a Shape-tool drag as `shape.create` params, without fill and stroke (None when too
+/// small): ⇧ constrains proportions, ⌥ draws from the centre. Custom shapes give their box as a `rect`.
+fn shape_geometry(o: &ToolOptions, tool: Tool, start: [f64; 2], end: [f64; 2], mods: egui::Modifiers) -> Option<Value> {
+    Some(if tool == Tool::Line {
         let (mut dx, mut dy) = (end[0] - start[0], end[1] - start[1]);
         if mods.shift {
             // Snap to 45°.
@@ -49,9 +52,9 @@ pub fn finish_shape(app: &mut PhotocraftApp, tool: Tool, start: [f64; 2], end: [
             (dx, dy) = (len * a.cos(), len * a.sin());
         }
         if dx.hypot(dy) < 1.0 {
-            return;
+            return None;
         }
-        json!({"kind": "line", "from": start, "to": [start[0] + dx, start[1] + dy], "weight": o.line_weight.max(1.0), "fill": fill, "stroke": stroke})
+        json!({"kind": "line", "from": start, "to": [start[0] + dx, start[1] + dy], "weight": o.line_weight.max(1.0)})
     } else {
         let (mut w, mut h) = (end[0] - start[0], end[1] - start[1]);
         if mods.shift {
@@ -62,26 +65,52 @@ pub fn finish_shape(app: &mut PhotocraftApp, tool: Tool, start: [f64; 2], end: [
         let (w, h) = if mods.alt { (w * 2.0, h * 2.0) } else { (w, h) };
         let rect = [x0.min(x0 + w).round(), y0.min(y0 + h).round(), w.abs().round(), h.abs().round()];
         if rect[2] < 1.0 || rect[3] < 1.0 {
-            return;
-        }
-        if tool == Tool::CustomShape {
-            // ⇧ keeps the shape's proportions (the rect is already squared).
-            crate::preset_panels::finish_custom_shape(app, rect, mods.shift, fill, stroke);
-            return;
+            return None;
         }
         match tool {
-            Tool::Rectangle if o.corner_radius > 0.0 => {
-                json!({"kind": "roundedRect", "rect": rect, "radii": vec![o.corner_radius; 4], "fill": fill, "stroke": stroke})
-            }
-            Tool::Rectangle => json!({"kind": "rect", "rect": rect, "fill": fill, "stroke": stroke}),
-            Tool::EllipseShape => json!({"kind": "ellipse", "rect": rect, "fill": fill, "stroke": stroke}),
-            Tool::Triangle => json!({"kind": "polygon", "rect": rect, "sides": 3, "fill": fill, "stroke": stroke}),
-            _ => json!({"kind": "polygon", "rect": rect, "sides": o.polygon_sides.max(3), "fill": fill, "stroke": stroke}),
+            Tool::Rectangle if o.corner_radius > 0.0 => json!({"kind": "roundedRect", "rect": rect, "radii": vec![o.corner_radius; 4]}),
+            Tool::Rectangle | Tool::CustomShape => json!({"kind": "rect", "rect": rect}),
+            Tool::EllipseShape => json!({"kind": "ellipse", "rect": rect}),
+            Tool::Triangle => json!({"kind": "polygon", "rect": rect, "sides": 3}),
+            _ => json!({"kind": "polygon", "rect": rect, "sides": o.polygon_sides.max(3)}),
         }
-    };
+    })
+}
+
+/// Finish a Shape-tool drag: ⇧ constrains proportions, ⌥ draws from the centre.
+pub fn finish_shape(app: &mut PhotocraftApp, tool: Tool, start: [f64; 2], end: [f64; 2], mods: egui::Modifiers) {
+    let Some(mut p) = shape_geometry(&app.ui.tool_options, tool, start, end, mods) else { return };
+    let fill = if app.ui.tool_options.shape_fill { json!(hex(app.session.tools.foreground)) } else { Value::Null };
+    let stroke = stroke_param(app);
+    if tool == Tool::CustomShape {
+        // ⇧ keeps the shape's proportions (the rect is already squared).
+        if let Ok(rect) = serde_json::from_value(p["rect"].take()) {
+            crate::preset_panels::finish_custom_shape(app, rect, mods.shift, fill, stroke);
+        }
+        return;
+    }
+    p["fill"] = fill;
+    p["stroke"] = stroke;
     if let Err(e) = app.run("shape.create", p) {
         app.ui.status = e;
         app.ui.status_error = true;
+    }
+}
+
+/// Shape-tool drag preview: the shape `finish_shape` will create, filled and stroked, under its
+/// path outline. Custom shapes show their box outline only.
+pub fn draw_shape_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, tool: Tool, start: [f64; 2], end: [f64; 2], mods: egui::Modifiers) {
+    let o = &app.ui.tool_options;
+    let Some(path) = shape_geometry(o, tool, start, end, mods).and_then(|p| photocraft_engine::vector_cmds::shape_path(&p).ok()) else { return };
+    let custom = tool == Tool::CustomShape;
+    // ponytail: preview colours skip the canvas's colour management; the commit renders them exactly.
+    let fill = if o.shape_fill && !custom { rgb32(app.session.tools.foreground) } else { Color32::TRANSPARENT };
+    let stroke = if o.stroke_width > 0.0 && !custom { Stroke::new(o.stroke_width * xf.zoom, rgb32(app.session.tools.background)) } else { Stroke::NONE };
+    let accent = Tokens::get(painter.ctx()).accent;
+    for (pts, _) in path_lines(&path, &|q| xf.to_screen(q[0] as f32, q[1] as f32)) {
+        // Every tool's own shape is convex (custom shapes aren't, and draw no fill).
+        painter.add(egui::Shape::convex_polygon(pts.clone(), fill, stroke));
+        painter.add(egui::Shape::closed_line(pts, Stroke::new(1.0, accent)));
     }
 }
 
@@ -303,10 +332,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
     crate::widgets::vline(ui, 22.0);
     lbl(ui, "Fill:");
     crate::widgets::checkbox(ui, &mut o.shape_fill, "");
-    let fg = app.session.tools.foreground;
-    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     let (r, _) = ui.allocate_exact_size(vec2(22.0, 16.0), Sense::hover());
-    ui.painter().rect_filled(r, 2.0, Color32::from_rgb(q(fg[0]), q(fg[1]), q(fg[2])));
+    ui.painter().rect_filled(r, 2.0, rgb32(app.session.tools.foreground));
     ui.painter().rect_stroke(r, 2.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Outside);
     lbl(ui, "Stroke:");
     crate::widgets::value_field(ui, &mut o.stroke_width, 0.0..=288.0, "px", 58.0);
@@ -618,6 +645,26 @@ mod tests {
         assert!(b.x0.abs_diff(80) <= 1 && b.width().abs_diff(40) <= 1, "alt = from centre: {b:?}");
         finish_shape(&mut app, Tool::Line, [10.0, 150.0], [90.0, 152.0], egui::Modifiers::SHIFT);
         assert_eq!(app.session.active().unwrap().doc.layers.len(), 4);
+    }
+
+    #[test]
+    fn shape_preview_is_the_committed_path() {
+        let mut app = app();
+        app.ui.tool_options.corner_radius = 8.0;
+        let preview = |app: &PhotocraftApp, tool, end| {
+            shape_geometry(&app.ui.tool_options, tool, [10.0, 10.0], end, egui::Modifiers::ALT)
+                .and_then(|p| photocraft_engine::vector_cmds::shape_path(&p).ok())
+        };
+        for tool in [Tool::Rectangle, Tool::EllipseShape, Tool::Triangle, Tool::Polygon, Tool::Line] {
+            let shown = preview(&app, tool, [60.0, 30.0]).unwrap();
+            finish_shape(&mut app, tool, [10.0, 10.0], [60.0, 30.0], egui::Modifiers::ALT);
+            let st = app.session.active().unwrap();
+            let LayerContent::Shape(sh) = &st.doc.layer(st.active_layer.unwrap()).unwrap().content else { panic!("{tool:?}: no shape layer") };
+            assert_eq!(sh.path, shown, "{tool:?}");
+        }
+        assert!(preview(&app, Tool::Rectangle, [10.2, 40.0]).is_none(), "too thin to draw");
+        assert!(photocraft_engine::vector_cmds::shape_path(&json!({"kind": "nope", "rect": [0, 0, 5, 5]})).is_err());
+        assert!(photocraft_engine::vector_cmds::shape_path(&json!({"kind": "rect"})).is_err());
     }
 
     #[test]
