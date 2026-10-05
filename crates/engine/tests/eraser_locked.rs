@@ -93,6 +93,30 @@ fn eraser_on_transparency_locked_layer_paints_background_colour() {
 }
 
 #[test]
+fn stroke_path_with_the_eraser_paints_background_colour_on_locked_layers() {
+    let path = json!({"path": {"subpaths": [{"knots": [[5, 10], [35, 10]]}]}});
+    // The Background: background colour, still opaque.
+    let mut s = doc("rgb", 8);
+    s.execute("path.set", path.clone()).unwrap();
+    s.execute("path.stroke", json!({"tool": "eraser", "size": 6, "hardness": 1.0, "opacity": 100})).unwrap();
+    assert!(close(layer_px(&s, 20, 10), [1.0, 0.0, 0.0, 1.0]), "{:?}", layer_px(&s, 20, 10));
+    // A transparency-locked layer: the same, and transparent pixels stay transparent.
+    let mut s = doc("rgb", 16);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("paint.stroke", json!({"points": [[2, 10], [38, 10]], "size": 12, "hardness": 1.0, "color": "#00ff00"})).unwrap();
+    s.execute("layer.lockLayers", json!({"transparency": true})).unwrap();
+    s.execute("path.set", path.clone()).unwrap();
+    s.execute("path.stroke", json!({"tool": "eraser", "size": 6, "hardness": 1.0, "opacity": 100})).unwrap();
+    assert!(close(layer_px(&s, 20, 10), [1.0, 0.0, 0.0, 1.0]), "{:?}", layer_px(&s, 20, 10));
+    assert_eq!(layer_px(&s, 20, 25)[3], 0.0);
+    // Unlocked: erased to transparency.
+    s.execute("layer.lockLayers", json!({"transparency": false})).unwrap();
+    s.execute("paint.stroke", json!({"points": [[2, 10], [38, 10]], "size": 12, "hardness": 1.0, "color": "#00ff00"})).unwrap();
+    s.execute("path.stroke", json!({"tool": "eraser", "size": 6, "hardness": 1.0, "opacity": 100})).unwrap();
+    assert_eq!(layer_px(&s, 20, 10)[3], 0.0);
+}
+
+#[test]
 fn eraser_bad_params_fail_gracefully() {
     let mut s = doc("rgb", 8);
     assert!(s.execute("paint.stroke", json!({"erase": true})).is_err());

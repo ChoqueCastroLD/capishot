@@ -857,11 +857,18 @@ fn path_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let lines = vector::flatten_path(&path, 0.1);
     let id = layer_id(s, p)?;
+    let bg = s.tools.background;
     let dmg = s.edit("Stroke Path", |doc, _| {
         let sel = doc.selection.clone();
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         let lock = l.locks.transparency;
         let surf = l.surface_mut().ok_or_else(|| EngineError::Other("Stroke Path needs a pixel layer".into()))?;
+        let mut brush = brush.clone();
+        if brush.erase && lock {
+            // Locked transparency (e.g. the Background): the Eraser paints the background colour (#76).
+            brush.erase = false;
+            brush.color = bg;
+        }
         let mut dmg = Rect::EMPTY;
         for pl in &lines {
             let mut pts: Vec<photocraft_paint::StrokePoint> = pl.pts.iter().map(|&(x, y)| photocraft_paint::StrokePoint::new(x, y, 1.0)).collect();
