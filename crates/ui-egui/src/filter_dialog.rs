@@ -243,6 +243,10 @@ fn choice_label(v: &str) -> String {
     label(v)
 }
 
+fn uses_logarithmic_slider(min: f32, max: f32) -> bool {
+    min > 0.0 && max / min > 500.0
+}
+
 /// Dialog body for filter commands.
 pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
@@ -268,16 +272,20 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                 } else {
                     ""
                 };
-                let logarithmic = min > 0.0 && max / min > 500.0;
-                if logarithmic {
-                    // Scrub the value field directly; add a log-scaled slider for huge ranges.
-                    let mut lv = v.max(min.max(0.1)).ln();
-                    let r = crate::widgets::slider_row(ui, &label(&p.key), &mut v, min..=max, unit, None);
-                    let _ = r;
-                    let r2 = crate::widgets::slider(ui, &mut lv, min.max(0.1).ln()..=max.ln(), None);
-                    if r2.changed() {
+                if uses_logarithmic_slider(min, max) {
+                    // Keep one numeric field for direct entry and one log-scaled slider for
+                    // wide ranges. slider_row would add a second, linear slider (#146).
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(label(&p.key)).color(t.text_dim));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            crate::widgets::value_field(ui, &mut v, min..=max, unit, 74.0);
+                        });
+                    });
+                    let mut lv = v.clamp(min, max).ln();
+                    if crate::widgets::slider(ui, &mut lv, min.ln()..=max.ln(), None).changed() {
                         v = lv.exp();
                     }
+                    ui.add_space(4.0);
                 } else {
                     crate::widgets::slider_row(ui, &label(&p.key), &mut v, min..=max, unit, None);
                 }
@@ -419,6 +427,14 @@ mod tests {
             kinds,
             [&Kind::Bool(true), &Kind::Grid(25), &Kind::Json, &Kind::Json, &Kind::Text, &Kind::Document, &Kind::Range { min: 1.0, max: 9999.0, default: 1.0 }]
         );
+    }
+
+    #[test]
+    fn wide_positive_ranges_use_the_logarithmic_slider_path() {
+        assert!(uses_logarithmic_slider(0.1, 1000.0), "Gaussian Blur radius");
+        assert!(uses_logarithmic_slider(1.0, 9999.0));
+        assert!(!uses_logarithmic_slider(1.0, 500.0));
+        assert!(!uses_logarithmic_slider(0.0, 1000.0));
     }
 
     #[test]
