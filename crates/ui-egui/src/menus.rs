@@ -714,15 +714,22 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
 }
 
+/// True only when the pointer can actually reach a menu title. A tall submenu can be
+/// repositioned upward by egui and overlap the menu bar; in that case the popup's layer is
+/// top-most and hovering it must not switch the open top-level menu.
+fn pointer_reaches_title(ctx: &egui::Context, response: &egui::Response, p: egui::Pos2) -> bool {
+    response.interact_rect.contains(p) && ctx.layer_id_at(p) == Some(response.layer_id)
+}
+
 /// Like a native menu bar (Windows, macOS): while one top-level menu is open, hovering another
 /// top-level title opens that menu instead.
 fn switch_on_hover(ctx: &egui::Context, buttons: &[egui::Response]) {
     let ids: Vec<egui::Id> = buttons.iter().map(egui::Popup::default_response_id).collect();
     let Some(open) = ids.iter().position(|id| egui::Popup::is_id_open(ctx, *id)) else { return };
-    // `Response::hovered` is false while the menu's popup layer is open, so test the pointer
-    // against the titles directly (the bar is never under its own dropdowns).
+    // `Response::hovered` is false while the menu's popup layer is open. Hit-test the title
+    // rect manually, but only when its own layer is top-most at the pointer.
     let Some(p) = ctx.pointer_hover_pos() else { return };
-    if let Some(i) = buttons.iter().position(|b| b.interact_rect.contains(p))
+    if let Some(i) = buttons.iter().position(|b| pointer_reaches_title(ctx, b, p))
         && i != open
     {
         egui::Popup::open_id(ctx, ids[i]);
@@ -731,6 +738,16 @@ fn switch_on_hover(ctx: &egui::Context, buttons: &[egui::Response]) {
 }
 
 fn render_level(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>) {
+    // Menu popups can be taller than the viewport. Keep each level on-screen and scroll it,
+    // matching egui's own bounded-popup pattern used by ComboBox.
+    let max_height = (ui.ctx().content_rect().height() - 32.0).max(120.0);
+    egui::ScrollArea::vertical()
+        .id_salt(("menu-level", depth))
+        .max_height(max_height)
+        .show(ui, |ui| render_level_rows(ui, items, depth, clicked));
+}
+
+fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>) {
     let t = crate::theme::Tokens::get(ui.ctx());
     if t.pro {
         // Spectrum/macOS menus: blue highlight row with white text.
@@ -839,6 +856,33 @@ mod tests {
     }
 
     #[test]
+    fn overlapped_menu_title_does_not_receive_hover_switching() {
+        let ctx = egui::Context::default();
+        let mut title: Option<egui::Response> = None;
+        let p = egui::pos2(90.0, 12.0);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0))),
+            ..Default::default()
+        };
+        let _ = ctx.run(raw, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(80.0, 24.0), egui::Sense::hover());
+                let shifted = rect.translate(egui::vec2(p.x - rect.center().x, p.y - rect.center().y));
+                let response = ui.interact(shifted, egui::Id::new("menu-title-test"), egui::Sense::hover());
+                title = Some(response);
+            });
+            egui::Area::new(egui::Id::new("overlapping-popup-test"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(p - egui::vec2(10.0, 10.0))
+                .show(ctx, |ui| {
+                    ui.allocate_space(egui::vec2(20.0, 20.0));
+                });
+            let response = title.as_ref().unwrap();
+            assert!(!pointer_reaches_title(ctx, response, p));
+        });
+    }
+
+    #[test]
     fn hovering_another_title_switches_the_open_menu() {
         use egui_kittest::{Harness, kittest::Queryable};
 
@@ -876,6 +920,29 @@ mod tests {
             assert!(a.height() >= font + 8.0, "{theme:?}: item height {} for a {font} pt font", a.height());
             assert!(b.top() - a.top() >= font + 10.0, "{theme:?}: rows {} apart", b.top() - a.top());
         }
+    }
+
+    #[test]
+    fn menu_level_height_is_bounded_by_viewport() {
+        use egui_kittest::Harness;
+
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut harness = Harness::builder().with_size(egui::vec2(900.0, 240.0)).build_ui_state(|ui, app| menu_bar(app, ui), app);
+        PhotocraftApp::setup_context(&harness.ctx, crate::theme::ThemeKind::ALL[0]);
+        harness.run_steps(3);
+        // Opening a top-level menu with many entries must not grow its popup past the viewport.
+        use egui_kittest::kittest::Queryable;
+        harness.get_by_label("Filter").click();
+        harness.run_steps(3);
+        let viewport = harness.ctx.content_rect();
+        let max_bottom = harness
+            .ctx
+            .memory(|m| m.areas().visible_layer_ids())
+            .into_iter()
+            .filter_map(|layer| harness.ctx.memory(|m| m.area_rect(layer.id)))
+            .map(|r| r.bottom())
+            .fold(viewport.top(), f32::max);
+        assert!(max_bottom <= viewport.bottom() + 1.0, "menu popup overflowed viewport: {max_bottom} > {}", viewport.bottom());
     }
 
     #[test]
