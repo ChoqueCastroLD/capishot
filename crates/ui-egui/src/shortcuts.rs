@@ -254,6 +254,7 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if pressed(Key::Escape) {
             app.ui.polygon.clear();
             app.ui.crop_rect = None;
+            app.crop.drag = None;
             return;
         }
     }

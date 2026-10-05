@@ -24,6 +24,7 @@ pub mod color_picker_ui;
 pub mod color_range_ui;
 pub mod comps_ui;
 pub mod control;
+pub mod crop_ui;
 pub mod dialogs;
 pub mod discard_ui;
 pub mod distort_ui;
@@ -262,6 +263,8 @@ pub struct PhotocraftApp {
     info_sample: Option<((i32, i32, u64), [f32; 4])>,
     /// Guide being dragged (from a ruler or with the Move tool).
     pub(crate) guide_drag: Option<rulers::GuideDrag>,
+    /// Crop tool gesture in progress (see `crop_ui`).
+    pub(crate) crop: crop_ui::CropState,
     /// Type tool layout cache: ((doc, revision, layer), layout).
     pub(crate) type_layout: Option<((u64, u64, u64), std::sync::Arc<photocraft_text::TextLayout>)>,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
@@ -324,6 +327,7 @@ impl PhotocraftApp {
             channel_views: HashMap::new(),
             type_layout: None,
             guide_drag: None,
+            crop: Default::default(),
             hover_doc: None,
             info_sample: None,
             os_clip_sig: None,

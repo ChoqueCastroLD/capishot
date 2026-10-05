@@ -627,7 +627,10 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     }
                     Tool::Hand => hint(ui, "Drag to pan  ·  hold Space with any tool"),
                     Tool::Lasso | Tool::PolygonLasso => hint(ui, "Drag (lasso) or click points (polygonal) · ⇧ add · ⌥ subtract"),
-                    Tool::Crop => hint(ui, "Drag a crop box · ↵ commits · Esc cancels"),
+                    Tool::Crop => hint(
+                        ui,
+                        "Drag a crop box · drag inside to move · edges resize (⇧ ratio, ⌥ centre) · Space moves while drawing · ↵ commits · Esc cancels",
+                    ),
                     Tool::Gradient => hint(ui, "Drag to draw a gradient"),
                     Tool::PaintBucket => hint(ui, "Click to fill similar colours"),
                     Tool::Type => hint(ui, "Click to add text"),

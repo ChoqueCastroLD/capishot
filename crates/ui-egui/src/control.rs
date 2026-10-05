@@ -259,6 +259,8 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             if let Some(t) = s("tool").and_then(Tool::from_name) {
                 app.ui.tool = t;
             }
+            // Space held: the Crop tool moves the frame being drawn.
+            crate::crop_ui::set_space(app, flag("space"));
             for e in events {
                 let x = e.get("x").and_then(Value::as_f64).unwrap_or(0.0);
                 let y = e.get("y").and_then(Value::as_f64).unwrap_or(0.0);

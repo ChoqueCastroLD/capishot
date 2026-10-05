@@ -1107,7 +1107,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
 
     // Pen pressure/tilt for this frame's tool events (mouse = 1.0).
     app.stylus.update(&ui.input(|i| i.events.clone()));
-    let space_pan = ui.input(|i| i.key_down(egui::Key::Space));
+    let space_down = ui.input(|i| i.key_down(egui::Key::Space));
+    // Space while drawing a crop frame moves it instead of panning.
+    crate::crop_ui::set_space(app, space_down);
+    let space_pan = space_down && !crate::crop_ui::active(app);
     let middle = ui.input(|i| i.pointer.middle_down());
     let tool = if space_pan || middle { Tool::Hand } else { app.ui.tool };
 
@@ -1203,6 +1206,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if let Some((vertical, _)) = guide_hover {
             ui.ctx().set_cursor_icon(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
         } else if let Some(c) = response.hover_pos().and_then(|p| crate::transform_tool::cursor(app, xf.to_doc(p))) {
+            ui.ctx().set_cursor_icon(c);
+        } else if let Some(c) = response.hover_pos().filter(|_| tool == Tool::Crop).and_then(|p| crate::crop_ui::cursor(app, xf.to_doc(p))) {
             ui.ctx().set_cursor_icon(c);
         } else if let Some(p) = response.hover_pos() {
             let alt = ui.input(|i| i.modifiers.alt);
@@ -1345,7 +1350,7 @@ fn marching_ants(painter: &egui::Painter, r: Rect, time: f64) {
     }
 }
 
-/// Photoshop crop overlay: dimmed outside, bright frame, rule-of-thirds grid, corner handles.
+/// Photoshop crop overlay: dimmed outside, bright frame, rule-of-thirds grid, corner and edge handles.
 fn crop_overlay(painter: &egui::Painter, r: Rect) {
     let clip = painter.clip_rect();
     let dim = Color32::from_black_alpha(130);
@@ -1371,6 +1376,12 @@ fn crop_overlay(painter: &egui::Painter, r: Rect) {
         painter.line_segment([c, c + vec2(l * dx, 0.0)], h);
         painter.line_segment([c, c + vec2(0.0, l * dy)], h);
     }
+    // Edge handles: short bars at the middle of each side.
+    let (lx, ly) = (l.min(r.width() / 4.0) / 2.0, l.min(r.height() / 4.0) / 2.0);
+    for (c, horizontal) in [(r.center_top(), true), (r.center_bottom(), true), (r.left_center(), false), (r.right_center(), false)] {
+        let e = if horizontal { vec2(lx, 0.0) } else { vec2(0.0, ly) };
+        painter.line_segment([c - e, c + e], h);
+    }
 }
 
 /// Overlays that persist between gestures: polygonal lasso in progress, pending crop box.
@@ -1386,9 +1397,7 @@ fn draw_tool_state(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform,
             painter.rect_filled(Rect::from_center_size(*p, vec2(5.0, 5.0)), 0.0, Color32::WHITE);
         }
     }
-    if let Some(c) = app.ui.crop_rect
-        && app.drag.is_none()
-    {
+    if let Some(c) = app.ui.crop_rect {
         let r = Rect::from_two_pos(xf.to_screen(c[0] as f32, c[1] as f32), xf.to_screen(c[2] as f32, c[3] as f32));
         crop_overlay(painter, r);
     }
@@ -1453,9 +1462,6 @@ fn draw_drag_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
         let o = &app.ui.tool_options;
         last = crate::chrome_ui::marquee_end(&o.marquee_style, o.marquee_width as f64, o.marquee_height as f64, false, d.start, last);
     }
-    if d.tool == Tool::Crop {
-        last = crop_end(app, d.start, last);
-    }
     match d.tool {
         // The canvas shows the live stroke itself (`LiveStroke`).
         Tool::Brush | Tool::Eraser => {}
@@ -1494,10 +1500,6 @@ fn draw_drag_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
             painter.circle_filled(a, 3.0, Color32::WHITE);
             painter.circle_filled(b, 3.0, Color32::WHITE);
         }
-        Tool::Crop => {
-            let r = Rect::from_two_pos(xf.to_screen(d.start[0] as f32, d.start[1] as f32), xf.to_screen(last[0] as f32, last[1] as f32));
-            crop_overlay(painter, r);
-        }
         Tool::Type => {
             let r = Rect::from_two_pos(xf.to_screen(d.start[0] as f32, d.start[1] as f32), xf.to_screen(last[0] as f32, last[1] as f32));
             let pts = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
@@ -1530,6 +1532,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     }
     // Slice and Slice Select tools.
     if crate::slice_ui::pointer(app, ev, mods) {
+        return;
+    }
+    // Crop tool: draw, move and resize the frame.
+    if crate::crop_ui::pointer(app, ev, mods) {
         return;
     }
     let tool = app.ui.tool;
@@ -1735,13 +1741,6 @@ fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
                 );
             }
         }
-        Tool::Crop => {
-            let end = crop_end(app, d.start, [end[0], end[1]]);
-            let r = [d.start[0].min(end[0]), d.start[1].min(end[1]), d.start[0].max(end[0]), d.start[1].max(end[1])];
-            if r[2] - r[0] >= 2.0 && r[3] - r[1] >= 2.0 {
-                app.ui.crop_rect = Some(r);
-            }
-        }
         Tool::Move => {
             let (dx, dy) = ((end[0] - d.start[0]).round(), (end[1] - d.start[1]).round());
             if dx != 0.0 || dy != 0.0 {
@@ -1804,15 +1803,6 @@ pub fn commit_polygon(app: &mut PhotocraftApp, mods: egui::Modifiers) {
 }
 
 /// Apply the crop tool's rectangle.
-/// Crop drag end under the options-bar aspect ratio.
-fn crop_end(app: &PhotocraftApp, start: [f64; 2], end: [f64; 2]) -> [f64; 2] {
-    let size = app.session.active().map_or((1.0, 1.0), |s| (s.doc.size.width as f64, s.doc.size.height as f64));
-    match crate::chrome_ui::crop_ratio(&app.ui.tool_options.crop_ratio, size.0, size.1) {
-        Some((w, h)) => crate::chrome_ui::marquee_end("fixedRatio", w, h, false, start, end),
-        None => end,
-    }
-}
-
 pub fn commit_crop(app: &mut PhotocraftApp) {
     let Some(r) = app.ui.crop_rect.take() else { return };
     let (x, y) = (r[0].round(), r[1].round());
