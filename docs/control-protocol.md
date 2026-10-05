@@ -102,7 +102,9 @@ log text file. GPU on/off and the GPU tile size apply at the next launch.
 The desktop app stores them in `preferences.json` in the platform config directory (macOS
 `~/Library/Application Support/Photocraft`, Windows `%APPDATA%\Photocraft`, Linux
 `$XDG_CONFIG_HOME/photocraft`; override with `PHOTOCRAFT_CONFIG_DIR`); autosaves go to its
-`Recovery` folder. The web build keeps them in `localStorage`.
+`Recovery` folder. In portable mode (a `portable.txt` or `PhotoCraft.portable` file beside the
+executable, as in the Windows portable zip) that directory is `PhotoCraftData` next to the
+executable instead. The web build keeps them in `localStorage`.
 
 User and imported (`.abr`) brush presets live in the config directory's `Presets` folder: one
 `.pcbrushes` JSON file per preset group, content-addressed tip bitmaps under `tips/`, and an

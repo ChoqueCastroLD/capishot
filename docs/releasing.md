@@ -107,6 +107,12 @@ goes in `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, so host build scripts aren't affected
   as the cached icon filename, and an extensionless filename can render as a blank document
   icon. `packaging/windows/check-icons.ps1` checks the references and extensions in CI;
   `package.ps1` also validates the built MSI with ICE50 before signing it.
+- **Portable zip:** it ships `packaging/windows/portable.txt` beside `photocraft.exe`. That
+  marker (or a `PhotoCraft.portable` file) switches on portable mode: preferences, presets,
+  recovery autosaves and the GPU startup marker go to `PhotoCraftData\` next to the exe instead
+  of `%APPDATA%\Photocraft`. If that folder isn't writable the app warns and uses `%APPDATA%`.
+  The MSI has no marker. The logic is in `apps/photocraft/src/app_dirs.rs` and works the same
+  on macOS and Linux.
 - **Signing:** `packaging/windows/sign.ps1` signs both `.exe` files and then the `.msi` with
   `signtool`, using SHA-256 and an RFC 3161 timestamp. It uses whichever material is present:
   1. a `.pfx` file (`WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`), timestamped by

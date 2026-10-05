@@ -36,21 +36,11 @@ fn save_filters(suggested: &str) -> Vec<(&'static str, &'static [&'static str])>
     v
 }
 
-/// Per-user settings directory: `PHOTOCRAFT_CONFIG_DIR`, else the platform convention
-/// (macOS `~/Library/Application Support/Photocraft`, Windows `%APPDATA%\Photocraft`, Linux
-/// `$XDG_CONFIG_HOME/photocraft` or `~/.config/photocraft`).
+/// Per-user settings directory: `PHOTOCRAFT_CONFIG_DIR`, else `<exe dir>/PhotoCraftData` in
+/// portable mode, else the platform convention. Everything the app persists lives under it; see
+/// [`crate::app_dirs`].
 pub fn config_dir() -> Option<PathBuf> {
-    if let Some(d) = std::env::var_os("PHOTOCRAFT_CONFIG_DIR") {
-        return Some(PathBuf::from(d));
-    }
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    if cfg!(target_os = "macos") {
-        return home.map(|h| h.join("Library/Application Support/Photocraft"));
-    }
-    if cfg!(windows) {
-        return std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("Photocraft"));
-    }
-    std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| home.map(|h| h.join(".config"))).map(|c| c.join("photocraft"))
+    crate::app_dirs::config_dir()
 }
 
 pub fn prefs_file() -> Option<PathBuf> {

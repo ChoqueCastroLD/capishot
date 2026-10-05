@@ -17,6 +17,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod app_dirs;
 mod app_icon;
 #[cfg(target_os = "macos")]
 mod apple_events;
@@ -223,6 +224,10 @@ fn main() -> eframe::Result {
             tablet::spawn_x11(&app.stylus.feed, tablet::DisplayKind::of(cc));
             // Paths on the command line (Linux/Windows file associations, `photocraft a.psd`).
             app.open_paths(&files);
+            // Portable marker found but its data folder isn't writable (#228): say where settings went.
+            if let Some(w) = &app_dirs::current().warning {
+                photocraft_ui_egui::notices::post(&mut app, "Portable mode is off", vec![w.clone()], false);
+            }
             Ok(Box::new(app))
         }),
     );
