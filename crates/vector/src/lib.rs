@@ -74,22 +74,51 @@ pub fn path_coverage(path: &Path, rect: Rect) -> Vec<f32> {
     fill_rasterizer(path, DEFAULT_TOLERANCE).render(rect)
 }
 
+enum MaskGeometry {
+    Constant(f32),
+    Path(Rasterizer),
+}
+
+/// A vector mask's immutable geometry and density, reusable across render rectangles.
+pub struct CompiledVectorMask {
+    geometry: MaskGeometry,
+    density: Option<f32>,
+}
+
+impl CompiledVectorMask {
+    /// Compiles only enabled, nonempty paths using the default flattening tolerance.
+    pub fn new(m: &VectorMask) -> Self {
+        let geometry = if !m.enabled {
+            MaskGeometry::Constant(1.0)
+        } else if m.path.is_empty() {
+            // An empty Photoshop vector mask reveals all, unlike an empty fill path.
+            MaskGeometry::Constant(if m.path.inverted { 0.0 } else { 1.0 })
+        } else {
+            MaskGeometry::Path(fill_rasterizer(&m.path, DEFAULT_TOLERANCE))
+        };
+        Self { geometry, density: (m.enabled && m.density < 1.0).then(|| m.density.clamp(0.0, 1.0)) }
+    }
+
+    /// Effective mask values over `rect`, with invocation-local rasterization state.
+    pub fn render(&self, rect: Rect) -> Vec<f32> {
+        let mut v = match &self.geometry {
+            MaskGeometry::Constant(value) => vec![*value; rect.width() as usize * rect.height() as usize],
+            MaskGeometry::Path(rasterizer) => rasterizer.render(rect),
+        };
+        if let Some(d) = self.density {
+            for x in &mut v {
+                *x = 1.0 - d * (1.0 - *x);
+            }
+        }
+        v
+    }
+}
+
 /// Effective vector-mask values over `rect` (density applied; all ones when disabled). Like
 /// Photoshop, a vector mask without any subpath reveals everything (hides everything when
 /// inverted): "Add Vector Mask" starts from an empty, revealing mask.
 pub fn vector_mask_values(m: &VectorMask, rect: Rect) -> Vec<f32> {
-    let n = rect.width() as usize * rect.height() as usize;
-    if !m.enabled {
-        return vec![1.0; n];
-    }
-    let mut v = if m.path.is_empty() { vec![if m.path.inverted { 0.0 } else { 1.0 }; n] } else { path_coverage(&m.path, rect) };
-    if m.density < 1.0 {
-        let d = m.density.clamp(0.0, 1.0);
-        for x in &mut v {
-            *x = 1.0 - d * (1.0 - *x);
-        }
-    }
-    v
+    CompiledVectorMask::new(m).render(rect)
 }
 
 /// Tile-aligned bands (rows of tiles) covering `r`.

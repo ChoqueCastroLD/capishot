@@ -84,15 +84,12 @@ pub fn render(doc: &Document, rect: Rect) -> Buffer {
 
 /// [`render`] with an explicit tile size (tests check tile independence).
 pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
+    let cx = Ctx::for_doc(doc);
+    render_tiled_with(doc, rect, tile, &cx)
+}
+
+fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer {
     let tile = tile.max(1);
-    let cx = Ctx {
-        canvas: doc.bounds(),
-        transfer: adjust::Transfer::for_mode(doc.mode),
-        light: doc.global_light,
-        patterns: &doc.patterns,
-        mode: doc.mode,
-        depth: doc.depth,
-    };
     // Lab documents mix Normal blending in CIELAB, as Photoshop does (psblend::LAB_MIX).
     let lab = doc.mode == photocraft_color::ColorMode::Lab;
     // CMYK layers are read through the document's own CMYK profile (thread-local scope).
@@ -105,7 +102,7 @@ pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
         return photocraft_color::convert::with_cmyk_space(cmyk, || {
             let mut buf = multichannel::backdrop(doc, rect);
             psblend::LAB_MIX.with(|l| l.set(lab));
-            composite_stack(&doc.layers, &mut buf, &cx);
+            composite_stack(&doc.layers, &mut buf, cx);
             psblend::LAB_MIX.with(|l| l.set(false));
             buf
         });
@@ -114,7 +111,7 @@ pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
         photocraft_color::convert::with_cmyk_space(cmyk, || {
             let mut b = multichannel::backdrop(doc, t);
             psblend::LAB_MIX.with(|l| l.set(lab));
-            composite_stack(&doc.layers, &mut b, &cx);
+            composite_stack(&doc.layers, &mut b, cx);
             psblend::LAB_MIX.with(|l| l.set(false));
             b
         })
@@ -196,11 +193,12 @@ pub fn render_bands<E>(doc: &Document, rect: Rect, band_rows: i32, mut sink: imp
     if rect.is_empty() {
         return Ok(());
     }
+    let cx = Ctx::for_doc(doc);
     let rows = band_rows_for(rect.width(), band_rows);
     let mut y = rect.y0;
     while y < rect.y1 {
         let y1 = y.saturating_add(rows).min(rect.y1);
-        sink(render(doc, Rect::new(rect.x0, y, rect.x1, y1)))?;
+        sink(render_tiled_with(doc, Rect::new(rect.x0, y, rect.x1, y1), RENDER_TILE, &cx))?;
         y = y1;
     }
     Ok(())
@@ -255,6 +253,7 @@ pub fn render_layer(layer: &Layer, rect: Rect) -> Buffer {
             patterns: &[],
             mode: photocraft_color::ColorMode::Rgb,
             depth: photocraft_color::SampleType::F32,
+            vector_masks: RenderVectorMasks::default(),
         },
     );
     buf
@@ -388,7 +387,26 @@ fn render_reduced_in_bands(doc: &Document, w: u32, h: u32, damage: Option<Rect>,
     Buffer { rect: out, px: acc }
 }
 
-/// Composite a sibling list (bottom→top) onto `backdrop`.
+#[derive(Default)]
+struct RenderVectorMasks {
+    masks: std::sync::Mutex<std::collections::HashMap<usize, std::sync::Arc<std::sync::OnceLock<photocraft_vector::CompiledVectorMask>>>>,
+}
+
+impl RenderVectorMasks {
+    fn values(&self, mask: &photocraft_doc::VectorMask, rect: Rect) -> Vec<f32> {
+        // Addresses identify immutable mask instances only for this render's lifetime.
+        let key = std::ptr::from_ref(mask) as usize;
+        let slot = {
+            let mut masks = self.masks.lock().unwrap_or_else(|e| e.into_inner());
+            masks.entry(key).or_default().clone()
+        };
+        // Compilation is sequential. Rendering can enter Rayon and must happen after
+        // initialization, so waiting tiles cannot re-enter a slot still being built.
+        let compiled = slot.get_or_init(|| photocraft_vector::CompiledVectorMask::new(mask));
+        compiled.render(rect)
+    }
+}
+
 /// Rendering context shared down the tree.
 struct Ctx<'a> {
     /// Document canvas: fill layers and gradients are laid out relative to it, never to the render rect.
@@ -402,8 +420,24 @@ struct Ctx<'a> {
     /// The document's colour mode (channel restrictions name its channels).
     mode: photocraft_color::ColorMode,
     depth: photocraft_color::SampleType,
+    vector_masks: RenderVectorMasks,
 }
 
+impl<'a> Ctx<'a> {
+    fn for_doc(doc: &'a Document) -> Self {
+        Self {
+            canvas: doc.bounds(),
+            transfer: adjust::Transfer::for_mode(doc.mode),
+            light: doc.global_light,
+            patterns: &doc.patterns,
+            mode: doc.mode,
+            depth: doc.depth,
+            vector_masks: RenderVectorMasks::default(),
+        }
+    }
+}
+
+/// Composite a sibling list (bottom→top) onto `backdrop`.
 fn composite_stack(layers: &[Layer], backdrop: &mut Buffer, cx: &Ctx) {
     let mut i = 0;
     while i < layers.len() {
@@ -489,8 +523,8 @@ pub fn paint_bounds(layer: &Layer) -> Option<Rect> {
 
 /// The layer's effective mask over `rect` (row-major), read once per tile: the pixel mask
 /// times the rasterized vector mask.
-fn mask_vals(layer: &Layer, rect: Rect) -> Option<Vec<f32>> {
-    let vector = layer.vector_mask.as_ref().map(|vm| photocraft_vector::vector_mask_values(vm, rect));
+fn mask_vals(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Vec<f32>> {
+    let vector = layer.vector_mask.as_ref().map(|vm| cx.vector_masks.values(vm, rect));
     let Some(m) = layer.mask.as_ref() else { return vector };
     let mut v = Vec::new();
     m.values_into(rect, &mut v);
@@ -527,7 +561,7 @@ fn render_content(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Buffer> {
             None => Buffer::transparent(rect),
         },
     };
-    if let Some(m) = mask_vals(layer, rect) {
+    if let Some(m) = mask_vals(layer, rect, cx) {
         for (p, k) in buf.px.iter_mut().zip(&m) {
             p[3] *= k;
         }
@@ -538,14 +572,7 @@ fn render_content(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Buffer> {
 /// The alpha of `layer`'s own content over `rect` (masks applied, row-major): the shape its
 /// effect maps are built from (for the GPU compositor). Zero for adjustment layers.
 pub fn layer_shape(doc: &Document, layer: &Layer, rect: Rect) -> Vec<f32> {
-    let cx = Ctx {
-        canvas: doc.bounds(),
-        transfer: adjust::Transfer::for_mode(doc.mode),
-        light: doc.global_light,
-        patterns: &doc.patterns,
-        mode: doc.mode,
-        depth: doc.depth,
-    };
+    let cx = Ctx::for_doc(doc);
     render_content(layer, rect, &cx).map(|b| b.px.iter().map(|p| p[3]).collect()).unwrap_or_else(|| vec![0.0; rect.width() as usize * rect.height() as usize])
 }
 
@@ -843,7 +870,7 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
         let before = (needs_mix || has_clipped).then(|| backdrop.clone());
         composite_stack(&g.children, backdrop, cx);
         if needs_mix && let Some(before) = &before {
-            let mv = mask_vals(layer, rect);
+            let mv = mask_vals(layer, rect, cx);
             for (i, (p, a)) in backdrop.px.iter_mut().zip(&before.px).enumerate() {
                 let k = opacity * mask_k(&mv, i);
                 let b = *p;
@@ -896,7 +923,7 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
         for c in clipped.iter().filter(|c| c.visible) {
             composite_atop(c, &mut adjusted, cx);
         }
-        let mv = mask_vals(layer, rect);
+        let mv = mask_vals(layer, rect, cx);
         for y in rect.y0..rect.y1 {
             for x in rect.x0..rect.x1 {
                 let i = ((y - rect.y0) as usize) * rect.width() as usize + (x - rect.x0) as usize;
@@ -959,7 +986,7 @@ fn shape_parts(layer: &Layer, clipped: &[Layer], rect: Rect, cx: &Ctx) -> Option
     let (fs, ss) = shape_split::split(sh, cx.canvas)?;
     let mut f = surface_to_buffer(&fs, rect);
     let mut s = surface_to_buffer(&ss, rect);
-    if let Some(m) = mask_vals(layer, rect) {
+    if let Some(m) = mask_vals(layer, rect, cx) {
         for ((a, b), k) in f.px.iter_mut().zip(s.px.iter_mut()).zip(&m) {
             a[3] *= k;
             b[3] *= k;
@@ -1150,7 +1177,7 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
     if let LayerContent::Adjustment(adj) = &layer.content {
         let mut adjusted = base.clone();
         adjust::apply_with(adj, &mut adjusted, cx.transfer);
-        let mv = mask_vals(layer, rect);
+        let mv = mask_vals(layer, rect, cx);
         for (i, p) in base.px.iter_mut().enumerate() {
             let k = layer.opacity * layer.fill_opacity * mask_k(&mv, i);
             let a = adjusted.px[i];
