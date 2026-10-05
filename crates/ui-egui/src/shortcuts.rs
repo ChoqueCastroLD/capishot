@@ -263,12 +263,17 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if pressed(Key::D) {
         let _ = app.run("tools.defaultColors", json!({}));
     }
-    let b = &mut app.session.tools.brush;
-    if pressed(Key::OpenBracket) {
-        b.size = (b.size / 1.25).max(1.0).round();
-    }
-    if pressed(Key::CloseBracket) {
-        b.size = (b.size * 1.25).min(2500.0).round().max(b.size + 1.0);
+    // [ and ] resize the brush through `tools.setBrush` (journaled, drivable).
+    let size = app.session.tools.brush.size;
+    let next = if pressed(Key::OpenBracket) {
+        (size / 1.25).max(1.0).round()
+    } else if pressed(Key::CloseBracket) {
+        (size * 1.25).min(2500.0).round().max(size + 1.0)
+    } else {
+        size
+    };
+    if next != size {
+        let _ = app.run("tools.setBrush", serde_json::json!({ "brush": { "size": next } }));
     }
 }
 

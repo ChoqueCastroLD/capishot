@@ -24,11 +24,13 @@ pub struct MixerSettings {
     pub load: f32,
     pub mix: f32,
     pub flow: f32,
+    /// Pick up colour from all visible layers instead of the target layer only.
+    pub sample_all_layers: bool,
 }
 
 impl Default for MixerSettings {
     fn default() -> Self {
-        Self { wet: 0.5, load: 0.5, mix: 0.5, flow: 1.0 }
+        Self { wet: 0.5, load: 0.5, mix: 0.5, flow: 1.0, sample_all_layers: false }
     }
 }
 
@@ -87,6 +89,8 @@ pub fn apply_mixer_stroke(
     let mut acc = vec![0.0f32; n];
     let mut paint = vec![0.0f32; n];
     let dmg = apply_dab_stroke(target, &st, selection, lock_transparency, 0, |work, fp| {
+        // Transfer › Wetness / Mix Jitter scale the settings per dab.
+        let (wet, mix) = (wet * fp.dab.wet.clamp(0.0, 1.0), mix * fp.dab.mix.clamp(0.0, 1.0));
         // Sample the canvas under the dab.
         acc.iter_mut().for_each(|v| *v = 0.0);
         let (mut wsum, mut asum) = (0.0f32, 0.0f32);
@@ -165,7 +169,7 @@ mod tests {
             let mut s = Surface::new(PixelFormat::RGBA8);
             let mut st = MixerState::default();
             st.load([1.0, 0.0, 0.0, 1.0]);
-            apply_mixer_stroke(&mut s, None, &stroke(10.0), &MixerSettings { wet: 0.0, load, mix: 0.0, flow: 1.0 }, &mut st, None, false);
+            apply_mixer_stroke(&mut s, None, &stroke(10.0), &MixerSettings { wet: 0.0, load, mix: 0.0, flow: 1.0, ..Default::default() }, &mut st, None, false);
             let (start, end) = (s.rgba(10, 10)[3], s.rgba(190, 10)[3]);
             assert!(start > 0.95, "{start}");
             if expect_dry {
@@ -186,7 +190,15 @@ mod tests {
         s.fill_rect(Rect::new(100, 0, 200, 20), &[1.0, 1.0, 1.0, 1.0]);
         let mut st = MixerState::default();
         st.load([1.0, 0.0, 0.0, 1.0]);
-        apply_mixer_stroke(&mut s, None, &stroke(10.0), &MixerSettings { wet: 1.0, load: 0.3, mix: 0.9, flow: 1.0 }, &mut st, None, false);
+        apply_mixer_stroke(
+            &mut s,
+            None,
+            &stroke(10.0),
+            &MixerSettings { wet: 1.0, load: 0.3, mix: 0.9, flow: 1.0, ..Default::default() },
+            &mut st,
+            None,
+            false,
+        );
         // Blue is dragged into the white half.
         let c = s.rgba(115, 10);
         assert!(c[2] > c[1] + 0.05 && c[1] < 0.95, "{c:?}");
@@ -204,5 +216,25 @@ mod tests {
         let dmg = apply_mixer_stroke(&mut s, None, &stroke(10.0), &MixerSettings { wet: 0.0, ..Default::default() }, &mut st, None, false);
         assert!(!dmg.is_empty());
         assert_eq!(s.rgba(50, 10)[3], 0.0);
+    }
+
+    #[test]
+    fn transfer_wetness_control_scales_pickup_per_dab() {
+        // Wetness on Pen Pressure: no pressure means a dry brush (no pickup), full pressure picks up.
+        let run = |pressure: f32| {
+            let mut s = Surface::new(PixelFormat::RGBA8);
+            s.fill_rect(Rect::new(0, 0, 200, 20), &[0.0, 0.0, 1.0, 1.0]);
+            let mut st = MixerState::default();
+            st.load([1.0, 0.0, 0.0, 1.0]);
+            let mut k = stroke(10.0);
+            k.brush.transfer = crate::Transfer { enabled: true, wetness: crate::Dynamic::controlled(crate::Control::PenPressure), ..Default::default() };
+            for p in &mut k.points {
+                p.pressure = pressure;
+            }
+            apply_mixer_stroke(&mut s, None, &k, &MixerSettings { wet: 1.0, load: 1.0, mix: 1.0, flow: 1.0, ..Default::default() }, &mut st, None, false);
+            st.pickup
+        };
+        assert!(run(0.0).is_none());
+        assert!(run(1.0).is_some_and(|p| p[2] > 0.2));
     }
 }

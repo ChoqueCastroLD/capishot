@@ -10,6 +10,7 @@
 use photocraft_color::BlendMode;
 use serde::{Deserialize, Serialize};
 
+use crate::mixer::MixerSettings;
 use crate::tile::GrayTile;
 
 /// What drives a dynamic parameter (Photoshop's "Control" pop-ups).
@@ -80,12 +81,19 @@ pub struct ShapeDynamics {
     pub enabled: bool,
     /// Size jitter / control; `minimum` is Photoshop's Minimum Diameter.
     pub size: Dynamic,
+    /// Tilt Scale, 0..2 (0–200 %): with the size control on Pen Tilt, how much a tilted pen
+    /// squashes the tip's height (before the tip angle is applied). At full tilt the height is
+    /// scaled by `1 − tiltScale / 2`, so 0 leaves the tip alone and 200 % flattens it.
+    pub tilt_scale: f32,
     /// Angle jitter (fraction of ±180°) / control.
     pub angle: Dynamic,
     /// Roundness jitter / control; `minimum` is Minimum Roundness.
     pub roundness: Dynamic,
     pub flip_x_jitter: bool,
     pub flip_y_jitter: bool,
+    /// Brush Projection: the pen's tilt and barrel rotation are applied to the tip as a
+    /// projection (the tip is foreshortened along the tilt direction and turns with the pen).
+    pub brush_projection: bool,
 }
 
 /// Scattering.
@@ -254,13 +262,36 @@ impl Default for ColorDynamics {
     }
 }
 
-/// Transfer: per-dab opacity ceiling and flow.
+/// Transfer: per-dab opacity ceiling and flow, plus the Mixer Brush's wetness and mix.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Transfer {
     pub enabled: bool,
     pub opacity: Dynamic,
     pub flow: Dynamic,
+    /// Wetness Jitter / control (Mixer Brush only): scales the Wet setting per dab.
+    pub wetness: Dynamic,
+    /// Mix Jitter / control (Mixer Brush only): scales the Mix setting per dab.
+    pub mix: Dynamic,
+}
+
+/// The sections a lock can hold (the lock icons in Photoshop's Brush Settings list): a locked
+/// section keeps its settings when another brush preset is picked.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SectionLocks {
+    pub shape_dynamics: bool,
+    pub scattering: bool,
+    pub texture: bool,
+    pub dual_brush: bool,
+    pub color_dynamics: bool,
+    pub transfer: bool,
+    pub pose: bool,
+    pub noise: bool,
+    pub wet_edges: bool,
+    pub build_up: bool,
+    pub smoothing: bool,
+    pub protect_texture: bool,
 }
 
 /// Brush Pose: stylus values used instead of (override) or for missing device data.
@@ -327,6 +358,9 @@ pub struct BrushSettings {
     pub hardness: f32,
     /// Spacing between dabs as a fraction of the diameter.
     pub spacing: f32,
+    /// Photoshop's Spacing checkbox. Off: the pointer's speed sets the spacing (one dab every
+    /// [`crate::dynamics::SPEED_SPACING_MS`] of stroke time; without timestamps, one per input point).
+    pub spacing_enabled: bool,
     /// Maximum coverage for the whole stroke.
     pub opacity: f32,
     /// Per-dab coverage.
@@ -374,6 +408,10 @@ pub struct BrushSettings {
     pub smoothing: Smoothing,
     /// Keep the current texture (pattern + scale) when switching to another textured preset.
     pub protect_texture: bool,
+    /// Sections whose settings stay when another preset is picked (tool state, like Photoshop's locks).
+    pub locks: SectionLocks,
+    /// Mixer Brush options (Wet, Load, Mix, Flow, Sample All Layers) used by `paint.mixerBrush`.
+    pub mixer: MixerSettings,
     /// Random seed for jitters (commands derive it from the stroke when not given), so strokes replay.
     pub seed: u64,
 }
@@ -384,6 +422,7 @@ impl Default for BrushSettings {
             size: 20.0,
             hardness: 1.0,
             spacing: 0.1,
+            spacing_enabled: true,
             opacity: 1.0,
             flow: 1.0,
             pressure_size: true,
@@ -411,6 +450,8 @@ impl Default for BrushSettings {
             build_up_rate: 20.0,
             smoothing: Smoothing::default(),
             protect_texture: false,
+            locks: SectionLocks::default(),
+            mixer: MixerSettings::default(),
             seed: 0,
         }
     }
@@ -418,10 +459,47 @@ impl Default for BrushSettings {
 
 impl BrushSettings {
     /// This brush (a preset) picked while `current` is the tool's brush: Smoothing is a tool
-    /// option, so it stays the tool's (Photoshop), and a protected texture stays too.
+    /// option, so it stays the tool's (Photoshop), a protected texture stays too, and so does every
+    /// section `current` has locked (the locks themselves are tool state and carry over).
     pub fn picked_over(self, current: &BrushSettings) -> Self {
         let mut b = self.with_protected_texture(current);
         b.smoothing = current.smoothing.clone();
+        let l = &current.locks;
+        if l.shape_dynamics {
+            b.shape_dynamics = current.shape_dynamics.clone();
+        }
+        if l.scattering {
+            b.scattering = current.scattering.clone();
+        }
+        if l.texture {
+            b.texture = current.texture.clone();
+        }
+        if l.dual_brush {
+            b.dual_brush = current.dual_brush.clone();
+        }
+        if l.color_dynamics {
+            b.color_dynamics = current.color_dynamics.clone();
+        }
+        if l.transfer {
+            b.transfer = current.transfer.clone();
+        }
+        if l.pose {
+            b.pose = current.pose.clone();
+        }
+        if l.noise {
+            b.noise = current.noise;
+        }
+        if l.wet_edges {
+            b.wet_edges = current.wet_edges;
+        }
+        if l.build_up {
+            b.build_up = current.build_up;
+            b.build_up_rate = current.build_up_rate;
+        }
+        if l.protect_texture {
+            b.protect_texture = current.protect_texture;
+        }
+        b.locks = current.locks.clone();
         b
     }
 

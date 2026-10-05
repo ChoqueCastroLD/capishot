@@ -9,7 +9,8 @@
 //! - `tips/<hash>.pctip`: content-addressed bitmaps, deflated, stored at 8 bits per sample when
 //!   the tip came from 8-bit data and 16 bits otherwise. Renaming or re-grouping a preset only
 //!   rewrites a small JSON file; a tip no group references any more is deleted;
-//! - `index.json`: group order and the built-in presets the user deleted.
+//! - `index.json`: group order, the order of every preset (built-ins included, so drag and drop
+//!   in the Brushes panel persists) and the built-in presets the user deleted.
 //!
 //! Built-in presets are never written (they are regenerated on start). The store syncs after
 //! every command that changes the brush presets ([`Session::brush_presets_changed`]); only groups
@@ -324,6 +325,8 @@ struct IndexFile {
     groups: Vec<String>,
     /// Built-in presets the user deleted (by name).
     hidden_builtins: Vec<String>,
+    /// Every preset's name in library (panel) order; empty when it is the default order.
+    order: Vec<String>,
 }
 
 /// The group's file name: a readable, sanitised prefix plus a hash of the exact name, so
@@ -403,6 +406,8 @@ pub struct Opened {
     pub presets: Vec<BrushPreset>,
     /// Built-in presets the user deleted.
     pub hidden_builtins: Vec<String>,
+    /// The saved library order (preset names), empty when none was saved.
+    pub order: Vec<String>,
     /// Files that were skipped (corrupt, oversized, missing tips).
     pub warnings: Vec<String>,
 }
@@ -515,8 +520,9 @@ pub fn open(backend: Box<dyn PresetBackend>) -> Opened {
         }
     }
     let hidden_builtins = index.as_ref().map(|i| i.hidden_builtins.clone()).unwrap_or_default();
+    let order = index.as_ref().map(|i| i.order.clone()).unwrap_or_default();
     store.index = index;
-    Opened { store, presets, hidden_builtins, warnings }
+    Opened { store, presets, hidden_builtins, order, warnings }
 }
 
 /// Read and decode tips, in parallel on native targets.
@@ -615,10 +621,24 @@ impl PresetStore {
         // Index: group order and deleted built-ins.
         let hidden: Vec<String> = builtin_names().iter().filter(|n| !presets.iter().any(|p| p.name.eq_ignore_ascii_case(n))).map(|n| n.to_string()).collect();
         let groups: Vec<String> = files.into_iter().filter(|f| self.groups.contains_key(f)).collect();
-        let want = IndexFile { version: 1, groups, hidden_builtins: hidden };
-        let same = self.index.as_ref().is_some_and(|i| i.groups == want.groups && i.hidden_builtins == want.hidden_builtins);
+        // The full order is only saved once it differs from the default (built-ins, then the rest).
+        let order: Vec<String> = presets.iter().map(|p| p.name.clone()).collect();
+        let default_order: Vec<String> = presets.iter().filter(|p| p.builtin).chain(presets.iter().filter(|p| !p.builtin)).map(|p| p.name.clone()).collect();
+        let builtins_in_order = {
+            let names = builtin_names();
+            let mut it = presets.iter().filter(|p| p.builtin).map(|p| names.iter().position(|n| *n == p.name));
+            let first = it.next().flatten();
+            it.try_fold(first, |prev, cur| match (prev, cur) {
+                (Some(a), Some(b)) if b > a => Some(Some(b)),
+                _ => None,
+            })
+            .is_some()
+        };
+        let order = if builtins_in_order && order == default_order { Vec::new() } else { order };
+        let want = IndexFile { version: 1, groups, hidden_builtins: hidden, order };
+        let same = self.index.as_ref().is_some_and(|i| i.groups == want.groups && i.hidden_builtins == want.hidden_builtins && i.order == want.order);
         if !same {
-            let empty = want.groups.is_empty() && want.hidden_builtins.is_empty();
+            let empty = want.groups.is_empty() && want.hidden_builtins.is_empty() && want.order.is_empty();
             let r = if empty && self.index.is_none() {
                 Ok(())
             } else {
@@ -693,7 +713,7 @@ impl Session {
     /// built-in of the same name; presets created before the store finished loading win), hide
     /// deleted built-ins, then sync. Returns the load warnings.
     pub fn attach_preset_store(&mut self, opened: Opened) -> Vec<String> {
-        let Opened { store, presets, hidden_builtins, mut warnings } = opened;
+        let Opened { store, presets, hidden_builtins, order, mut warnings } = opened;
         let lib = &mut self.tools.presets;
         lib.retain(|p| !(p.builtin && hidden_builtins.iter().any(|h| h.eq_ignore_ascii_case(&p.name))));
         for p in presets {
@@ -702,6 +722,11 @@ impl Session {
                 Some(_) => {}
                 None => lib.push(p),
             }
+        }
+        // The saved panel order (stable: presets it doesn't name keep their order, at the end).
+        if !order.is_empty() {
+            let pos: HashMap<String, usize> = order.iter().enumerate().map(|(i, n)| (n.to_lowercase(), i)).collect();
+            lib.sort_by_key(|p| pos.get(&p.name.to_lowercase()).copied().unwrap_or(usize::MAX));
         }
         self.preset_store = Some(store);
         self.brush_presets_changed();

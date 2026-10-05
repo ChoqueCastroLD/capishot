@@ -173,6 +173,12 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             if let Some(i) = u("brushTab") {
                 app.ui.brush_tab = (i as usize).min(1);
             }
+            if let Some(v) = p.get("brushesView").cloned() {
+                match serde_json::from_value(v) {
+                    Ok(v) => app.ui.brushes_panel.view = v,
+                    Err(e) => return err(format!("brushesView: {e} (list, grid)")),
+                }
+            }
             if let Some(size) = p.get("brushSize").and_then(Value::as_f64) {
                 app.session.tools.brush.size = size as f32;
             }

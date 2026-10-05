@@ -311,3 +311,93 @@ fn live_stroke_matches_the_committed_stroke() {
     assert!(LiveStroke::begin(&s, &json!({"points": [[1, 1]], "target": {"channel": 9}})).is_err());
     assert!(LiveStroke::begin(&Session::new(), &json!({"points": [[1, 1]]})).is_err());
 }
+
+#[test]
+fn new_brush_controls_round_trip_through_set_brush() {
+    let mut s = session(40, 40);
+    let patch = json!({
+        "spacingEnabled": false,
+        "shapeDynamics": {"tiltScale": 1.5, "brushProjection": true},
+        "transfer": {"wetness": {"jitter": 0.3, "control": "penPressure"}, "mix": {"jitter": 0.6, "minimum": 0.2}},
+        "locks": {"shapeDynamics": true, "texture": true, "noise": true},
+        "mixer": {"wet": 0.8, "load": 0.25, "mix": 0.4, "flow": 0.9, "sampleAllLayers": true},
+    });
+    s.execute("tools.setBrush", json!({ "brush": patch })).unwrap();
+    let b = &s.tools.brush;
+    assert!(!b.spacing_enabled && b.shape_dynamics.brush_projection && b.shape_dynamics.tilt_scale == 1.5);
+    assert_eq!(b.transfer.wetness.control, photocraft_paint::Control::PenPressure);
+    assert_eq!((b.transfer.mix.jitter, b.transfer.mix.minimum), (0.6, 0.2));
+    assert!(b.locks.shape_dynamics && b.locks.texture && b.locks.noise && !b.locks.scattering);
+    assert_eq!((b.mixer.wet, b.mixer.load, b.mixer.mix, b.mixer.flow, b.mixer.sample_all_layers), (0.8, 0.25, 0.4, 0.9, true));
+    // brush.get reports them, and a fresh session gets the same brush from the reported JSON.
+    let got = s.execute("brush.get", json!({})).unwrap();
+    for (path, want) in [
+        ("/spacingEnabled", json!(false)),
+        ("/shapeDynamics/tiltScale", json!(1.5)),
+        ("/shapeDynamics/brushProjection", json!(true)),
+        ("/transfer/wetness/control", json!("penPressure")),
+        ("/locks/texture", json!(true)),
+        ("/mixer/sampleAllLayers", json!(true)),
+        ("/mixer/load", json!(0.25)),
+    ] {
+        assert_eq!(got.pointer(path), Some(&want), "{path}");
+    }
+    let mut t = session(40, 40);
+    t.execute("tools.setBrush", json!({ "brush": got })).unwrap();
+    assert_eq!(t.tools.brush, s.tools.brush);
+    // Locked sections survive picking a preset through the command.
+    s.execute("tools.setBrush", json!({"preset": "Chalk"})).unwrap();
+    assert!(s.tools.brush.shape_dynamics.brush_projection && s.tools.brush.locks.texture);
+    // Wrong types are errors and leave the brush alone.
+    let before = s.tools.brush.clone();
+    for bad in
+        [json!({"spacingEnabled": 3}), json!({"locks": {"texture": "yes"}}), json!({"mixer": {"wet": "wet"}}), json!({"shapeDynamics": {"tiltScale": []}})]
+    {
+        assert!(s.execute("tools.setBrush", json!({ "brush": bad })).is_err());
+    }
+    assert_eq!(s.tools.brush, before);
+}
+
+#[test]
+fn mixer_brush_uses_the_brush_mixer_settings() {
+    let mut s = session(200, 30);
+    s.execute("tools.setColors", json!({"foreground": "#ff0000"})).unwrap();
+    // No wet/load params: the brush's Mixer settings (a dry brush with 0 % Load) apply.
+    s.execute("tools.setBrush", json!({"brush": {"pressureSize": false, "spacing": 0.25, "mixer": {"wet": 0, "load": 0, "mix": 0}}})).unwrap();
+    s.execute("paint.mixerBrush", json!({"points": [[5, 15], [195, 15]], "size": 8})).unwrap();
+    assert!(rgba(&s, 10, 15)[3] > 0.95 && rgba(&s, 190, 15)[3] < 0.5, "the brush's 0 % Load dries out");
+    // A param still overrides the brush.
+    s.execute("paint.mixerBrush", json!({"points": [[5, 5], [195, 5]], "size": 8, "load": 100})).unwrap();
+    assert!(rgba(&s, 190, 5)[3] > 0.95);
+}
+
+#[test]
+fn coalesced_set_brush_calls_journal_once_per_gesture() {
+    let mut s = session(20, 20);
+    let n = s.journal.len();
+    for k in 1..=10 {
+        s.execute("tools.setBrush", json!({"brush": {"opacity": k as f32 / 20.0}, "coalesce": "bar:1"})).unwrap();
+        s.execute("brush.get", json!({})).unwrap();
+    }
+    s.execute("tools.setBrush", json!({"brush": {"shapeDynamics": {"tiltScale": 0.5}}, "coalesce": "bar:1"})).unwrap();
+    assert_eq!(s.journal.len(), n + 1, "one gesture, one entry");
+    let (id, p) = s.journal.last().unwrap();
+    assert_eq!(id, "tools.setBrush");
+    assert_eq!(p["brush"], json!({"opacity": 0.5, "shapeDynamics": {"tiltScale": 0.5}}));
+    // A new gesture is a new entry; so is an uncoalesced call.
+    s.execute("tools.setBrush", json!({"brush": {"flow": 0.5}, "coalesce": "bar:2"})).unwrap();
+    s.execute("tools.setBrush", json!({"brush": {"flow": 0.4}, "coalesce": "bar:2"})).unwrap();
+    s.execute("tools.setBrush", json!({"brush": {"size": 33}})).unwrap();
+    assert_eq!(s.journal.len(), n + 3);
+    // Another command in between ends the gesture.
+    s.execute("tools.setBrush", json!({"brush": {"size": 34}, "coalesce": "bar:3"})).unwrap();
+    s.execute("paint.stroke", json!({"points": [[2, 2], [10, 10]]})).unwrap();
+    s.execute("tools.setBrush", json!({"brush": {"size": 35}, "coalesce": "bar:3"})).unwrap();
+    assert_eq!(s.journal.len(), n + 6);
+    // Replay gives the same brush.
+    let mut t = session(20, 20);
+    for (id, p) in s.journal.iter().skip(1) {
+        t.execute(id, p.clone()).unwrap();
+    }
+    assert_eq!(t.tools.brush, s.tools.brush);
+}

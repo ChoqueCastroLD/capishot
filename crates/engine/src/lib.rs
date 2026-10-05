@@ -14,6 +14,7 @@ pub mod analysis_cmds;
 pub mod artboard_cmds;
 pub mod automate_cmds;
 pub mod brush_cmds;
+pub mod brush_preset_cmds;
 pub mod build_info;
 mod canvas_geom;
 pub mod channel_cmds;
@@ -198,6 +199,9 @@ pub struct ToolState {
     pub presets_rev: u64,
     /// Mixer Brush paint carried between strokes.
     pub mixer: photocraft_paint::mixer::MixerState,
+    /// The coalescing key of the running `tools.setBrush` gesture and the brush before it, so the
+    /// gesture journals as one call ([`brush_cmds::coalesce_journal`]).
+    pub brush_gesture: Option<(String, photocraft_paint::BrushSettings)>,
 }
 
 impl Default for ToolState {
@@ -213,6 +217,7 @@ impl Default for ToolState {
             presets: photocraft_paint::presets::builtin(),
             presets_rev: 0,
             mixer: Default::default(),
+            brush_gesture: None,
         }
     }
 }
@@ -336,7 +341,7 @@ impl Session {
         edit_menu_cmds::after_command(self, id);
         automate_cmds::after_command(self, id);
         self.sync_preset_store();
-        if spec.journal {
+        if spec.journal && !brush_cmds::coalesce_journal(self, id, &params) {
             self.journal.push((id.to_string(), params));
         }
         Ok(r)

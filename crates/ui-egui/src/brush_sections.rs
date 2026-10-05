@@ -328,12 +328,22 @@ fn tip_shape(ui: &mut egui::Ui, b: &mut BrushSettings, presets: &[BrushPreset]) 
     ui.add_enabled_ui(matches!(b.tip, TipShape::Round), |ui| {
         pct(ui, "Hardness", &mut b.hardness, 1.0);
     });
-    signed_pct(ui, "Spacing", &mut b.spacing, 0.01, 10.0);
+    // Unchecked, the pointer's speed sets the spacing (Photoshop).
+    widgets::checkbox(ui, &mut b.spacing_enabled, "Spacing").on_hover_text("Off: the speed of the pointer sets the spacing");
+    ui.add_space(2.0);
+    let on = b.spacing_enabled;
+    ui.add_enabled_ui(on, |ui| signed_pct(ui, "Spacing", &mut b.spacing, 0.01, 10.0));
 }
 
 fn shape_dynamics(ui: &mut egui::Ui, b: &mut BrushSettings) {
     let sd = &mut b.shape_dynamics;
-    dynamic(ui, "brush-size-ctl", "Size Jitter", &mut sd.size, 1.0, Some("Minimum Diameter"), false);
+    pct(ui, "Size Jitter", &mut sd.size.jitter, 1.0);
+    control_row(ui, "brush-size-ctl", &mut sd.size, false);
+    pct(ui, "Minimum Diameter", &mut sd.size.minimum, 1.0);
+    // Tilt Scale applies with the size control on Pen Tilt (greyed out otherwise, like Photoshop).
+    let tilt = sd.size.control == Control::PenTilt;
+    ui.add_enabled_ui(tilt, |ui| pct(ui, "Tilt Scale", &mut sd.tilt_scale, 2.0));
+    ui.add_space(6.0);
     dynamic(ui, "brush-angle-ctl", "Angle Jitter", &mut sd.angle, 1.0, None, true);
     dynamic(ui, "brush-round-ctl", "Roundness Jitter", &mut sd.roundness, 1.0, Some("Minimum Roundness"), false);
     ui.horizontal(|ui| {
@@ -341,6 +351,8 @@ fn shape_dynamics(ui: &mut egui::Ui, b: &mut BrushSettings) {
         ui.add_space(8.0);
         widgets::checkbox(ui, &mut sd.flip_y_jitter, "Flip Y Jitter");
     });
+    ui.add_space(2.0);
+    widgets::checkbox(ui, &mut sd.brush_projection, "Brush Projection").on_hover_text("Apply the pen's tilt and rotation to the tip shape");
 }
 
 fn scattering(ui: &mut egui::Ui, b: &mut BrushSettings) {
@@ -519,6 +531,25 @@ fn transfer(ui: &mut egui::Ui, b: &mut BrushSettings) {
     let tr = &mut b.transfer;
     dynamic(ui, "brush-opacity-ctl", "Opacity Jitter", &mut tr.opacity, 1.0, Some("Minimum"), false);
     dynamic(ui, "brush-flow-ctl", "Flow Jitter", &mut tr.flow, 1.0, Some("Minimum"), false);
+    dynamic(ui, "brush-wet-ctl", "Wetness Jitter", &mut tr.wetness, 1.0, Some("Minimum"), false);
+    dynamic(ui, "brush-mix-ctl", "Mix Jitter", &mut tr.mix, 1.0, Some("Minimum"), false);
+}
+
+/// The Mixer Brush options the brush carries (Photoshop shows them in the Mixer Brush's options
+/// bar; `paint.mixerBrush` uses them unless its params override them).
+fn mixer_options(ui: &mut egui::Ui, b: &mut BrushSettings) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(4.0);
+    widgets::hairline(ui);
+    ui.add_space(4.0);
+    ui.label(RichText::new("Mixer Brush").font(theme::semibold(11.5)).color(t.text_dim));
+    ui.add_space(2.0);
+    let m = &mut b.mixer;
+    pct(ui, "Wet", &mut m.wet, 1.0);
+    pct(ui, "Load", &mut m.load, 1.0);
+    pct(ui, "Mix", &mut m.mix, 1.0);
+    pct(ui, "Flow", &mut m.flow, 1.0);
+    widgets::checkbox(ui, &mut m.sample_all_layers, "Sample All Layers");
 }
 
 /// Tilt is stored in degrees (±90, W3C Pointer Events); Photoshop shows it as ±100 %.
@@ -564,7 +595,10 @@ pub fn section_body(ui: &mut egui::Ui, b: &mut BrushSettings, i: usize, presets:
         3 => texture(ui, b),
         4 => dual_brush(ui, b, presets),
         5 => color_dynamics(ui, b),
-        6 => transfer(ui, b),
+        6 => {
+            transfer(ui, b);
+            mixer_options(ui, b);
+        }
         7 => pose(ui, b),
         8 => note(ui, "Adds extra randomness to the soft edges of the brush tip. No options: turn it on in the list."),
         9 => note(ui, "Builds up paint along the edges of the stroke for a watercolour look. No options: turn it on in the list."),

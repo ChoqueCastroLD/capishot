@@ -144,6 +144,12 @@ impl BrushContext {
         let (cx, cy) = (d.center.x as f32, d.center.y as f32);
         let (sn, cs) = d.angle.sin_cos();
         let (fx, fy) = (if d.flip_x { -1.0 } else { 1.0 }, if d.flip_y { -1.0 } else { 1.0 });
+        // Brush Projection: stretch the sampling coordinates along the tilt direction, which
+        // foreshortens the tip there by `proj_scale`.
+        let proj = (!dual && d.proj_scale < 0.999).then(|| {
+            let (ps, pc) = d.proj_angle.sin_cos();
+            (pc, ps, 1.0 / d.proj_scale.max(0.05) - 1.0)
+        });
         let r = d.radius;
         let ro = d.roundness.max(0.5 / r).min(1.0);
         let rm = (r * ro).max(0.5);
@@ -163,8 +169,13 @@ impl BrushContext {
             for xx in 0..w {
                 let x = rect.x0 + xx as i32;
                 let dx = x as f32 + 0.5 - cx;
-                // To y-up, rotate by -angle, flip.
-                let (ux, uy) = (dx, -dy);
+                // To y-up, project, rotate by -angle, flip.
+                let (mut ux, mut uy) = (dx, -dy);
+                if let Some((ax, ay, k)) = proj {
+                    let t = (ux * ax + uy * ay) * k;
+                    ux += t * ax;
+                    uy += t * ay;
+                }
                 let u = (ux * cs + uy * sn) * fx;
                 let v = (-ux * sn + uy * cs) * fy;
                 let (mut val, rn) = match mips {

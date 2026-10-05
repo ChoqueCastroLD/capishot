@@ -27,7 +27,7 @@ fn size_dyn(size: Dynamic) -> ShapeDynamics {
 }
 
 fn transfer(opacity: Dynamic, flow: Dynamic) -> Transfer {
-    Transfer { enabled: true, opacity, flow }
+    Transfer { enabled: true, opacity, flow, ..Default::default() }
 }
 
 fn paper(seed: u32, depth: f32) -> Texture {

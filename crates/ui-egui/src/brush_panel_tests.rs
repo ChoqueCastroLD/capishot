@@ -34,6 +34,7 @@ fn edit_section(i: usize, b: &mut BrushSettings) {
             b.roundness = 0.4;
             b.hardness = 0.25;
             b.spacing = 0.6;
+            b.spacing_enabled = false;
         }
         1 => {
             let sd = &mut b.shape_dynamics;
@@ -43,6 +44,8 @@ fn edit_section(i: usize, b: &mut BrushSettings) {
             sd.roundness = dynamic(0.5, Control::PenTilt, 0.25);
             sd.flip_x_jitter = true;
             sd.flip_y_jitter = true;
+            sd.tilt_scale = 1.25;
+            sd.brush_projection = true;
         }
         2 => {
             let sc = &mut b.scattering;
@@ -92,6 +95,9 @@ fn edit_section(i: usize, b: &mut BrushSettings) {
             b.transfer.enabled = true;
             b.transfer.opacity = dynamic(0.5, Control::PenPressure, 0.1);
             b.transfer.flow = dynamic(0.25, Control::Fade, 0.3);
+            b.transfer.wetness = dynamic(0.35, Control::PenPressure, 0.1);
+            b.transfer.mix = dynamic(0.45, Control::Fade, 0.2);
+            b.mixer = paint::MixerSettings { wet: 0.9, load: 0.15, mix: 0.7, flow: 0.8, sample_all_layers: true };
         }
         7 => {
             let p = &mut b.pose;
@@ -136,7 +142,7 @@ fn every_section_round_trips_through_set_brush() {
         let (id, p) = last_journal(&app).expect("journaled");
         assert_eq!(id, "tools.setBrush");
         let patch = &p["brush"];
-        assert!(patch.as_object().is_some_and(|o| !o.is_empty() && o.len() <= 7), "section {i}: {patch}");
+        assert!(patch.as_object().is_some_and(|o| !o.is_empty() && o.len() <= 8), "section {i}: {patch}");
         // And the engine's view (`brush.get`) reads back the same settings.
         let got = app.session.execute("brush.get", json!({})).unwrap();
         assert_eq!(serde_json::from_value::<BrushSettings>(got).unwrap(), after, "section {i}");
@@ -189,6 +195,144 @@ fn bad_patches_fail_without_touching_the_brush() {
     }
 }
 
+#[test]
+fn section_locks_round_trip_and_survive_preset_picks() {
+    let mut b = BrushSettings::default();
+    for (i, (name, _)) in SECTIONS.iter().enumerate() {
+        assert_eq!(section_lock(&mut b, i).is_some(), i > 0, "{name} has a lock");
+    }
+    let mut app = app();
+    let before = app.session.tools.brush.clone();
+    let mut after = before.clone();
+    edit_section(2, &mut after);
+    for i in [2, 6, 8] {
+        *section_lock(&mut after, i).unwrap() = true;
+    }
+    commit(&mut app, &before, &after);
+    let (_, p) = last_journal(&app).unwrap();
+    assert_eq!(p["brush"]["locks"], json!({"scattering": true, "transfer": true, "noise": true}));
+    // Picking a preset keeps the locked sections (and the locks), and the preset still reads as current.
+    let chalk = paint::presets::find(&app.session.tools.presets, "Chalk").unwrap().brush.clone();
+    app.run("tools.setBrush", json!({"preset": "Chalk"})).unwrap();
+    let b = &app.session.tools.brush;
+    assert_eq!(b.scattering, after.scattering);
+    assert!(b.locks.scattering && b.locks.noise);
+    assert_eq!(b.tip, chalk.tip);
+}
+
+/// A harness that shows the options bar with `tool` in the Studio (non-pro) theme.
+fn options_bar_harness(tool: crate::state::Tool) -> Harness<'static, PhotocraftApp> {
+    let mut app = app();
+    app.ui.tool = tool;
+    let mut h = Harness::builder().with_size(vec2(1400.0, 60.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            crate::panels::options_bar(app, ui);
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+    h.run_steps(4);
+    h
+}
+
+#[test]
+fn options_bar_edits_are_one_set_brush_per_gesture() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = options_bar_harness(crate::state::Tool::Brush);
+    let n = h.state().session.journal.len();
+    h.run_steps(3);
+    assert_eq!(h.state().session.journal.len(), n, "showing the bar issues nothing");
+    // Drag the Opacity field left: many frames, one journal entry.
+    let label = h.get_by_label("Opacity").rect();
+    let start = egui::pos2(label.right() + 40.0, label.center().y);
+    h.hover_at(start);
+    h.run();
+    h.drag_at(start);
+    h.run();
+    for k in 1..=8 {
+        h.hover_at(start - vec2(5.0 * k as f32, 0.0));
+        h.run();
+    }
+    h.drop_at(start - vec2(40.0, 0.0));
+    h.run_steps(2);
+    let opacity = h.state().session.tools.brush.opacity;
+    assert!(opacity < 0.95, "the drag lowered the opacity: {opacity}");
+    let j = &h.state().session.journal;
+    assert_eq!(j.len(), n + 1, "{:?}", &j[n..]);
+    let (id, p) = j.last().unwrap();
+    assert_eq!(id, "tools.setBrush");
+    assert_eq!(p["brush"]["opacity"].as_f64().map(|v| v as f32), Some(opacity));
+    // A click is its own gesture: the Pressure for Size switch sits left of its label.
+    let label = h.get_by_label("Pressure for Size").rect();
+    let was = h.state().session.tools.brush.pressure_size;
+    let at = egui::pos2(label.left() - 18.0, label.center().y);
+    h.hover_at(at);
+    h.run();
+    h.drag_at(at);
+    h.run();
+    h.drop_at(at);
+    h.run_steps(2);
+    assert_eq!(h.state().session.tools.brush.pressure_size, !was);
+    assert_eq!(h.state().session.journal.len(), n + 2);
+    assert_eq!(h.state().session.journal.last().unwrap().1["brush"], json!({"pressureSize": !was}));
+    // Replaying the journal gives the same brush.
+    let mut s = photocraft_engine::Session::new();
+    for (id, p) in &h.state().session.journal {
+        s.execute(id, p.clone()).unwrap();
+    }
+    assert_eq!(s.tools.brush, h.state().session.tools.brush);
+}
+
+#[test]
+fn drop_targets_and_actions_reorder_presets() {
+    use crate::brushes_tab::{Action, apply, drop_target, group_key};
+    let mut app = app();
+    for (n, g) in [("A1", "Alpha"), ("A2", "Alpha"), ("A3", "Alpha"), ("B1", "Beta")] {
+        app.session.tools.presets.push(paint::BrushPreset { name: n.into(), brush: Default::default(), builtin: false, group: g.into() });
+    }
+    let p = &app.session.tools.presets;
+    // Dropping A1 on A3's lower half lands after A3 (index 2 once A1 is out); on its upper half, before it.
+    assert_eq!(drop_target(p, "A1", "A3", true), Some(("Alpha".into(), 2)));
+    assert_eq!(drop_target(p, "A1", "A3", false), Some(("Alpha".into(), 1)));
+    assert_eq!(drop_target(p, "A3", "A1", false), Some(("Alpha".into(), 0)));
+    assert_eq!(drop_target(p, "A2", "B1", true), Some(("Beta".into(), 1)));
+    assert_eq!(drop_target(p, "A2", "Nope", true), None);
+    assert_eq!(group_key(p, UNGROUPED), "");
+    let (group, index) = drop_target(p, "A1", "A3", true).unwrap();
+    apply(&mut app, vec![Action::Move { name: "A1".into(), group, index: Some(index) }]);
+    let names = |app: &PhotocraftApp, g: &str| app.session.tools.presets.iter().filter(|x| x.group == g).map(|x| x.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&app, "Alpha"), ["A2", "A3", "A1"]);
+    apply(&mut app, vec![Action::Move { name: "A2".into(), group: "Beta".into(), index: None }]);
+    assert_eq!(names(&app, "Beta"), ["B1", "A2"]);
+    apply(&mut app, vec![Action::MoveGroup { group: "Beta".into(), before: Some("Alpha".into()) }]);
+    let order = photocraft_engine::brush_preset_cmds::group_order(&app.session.tools.presets);
+    assert!(order.iter().position(|g| g == "Beta") < order.iter().position(|g| g == "Alpha"));
+    // Rename and delete from the context menu.
+    apply(&mut app, vec![Action::Rename(Renaming { group: false, name: "A3".into(), text: "Third".into() })]);
+    assert!(paint::presets::find(&app.session.tools.presets, "Third").is_some());
+    assert!(app.ui.brushes_panel.renaming.is_none());
+    apply(&mut app, vec![Action::Rename(Renaming { group: true, name: "Beta".into(), text: "Bees".into() })]);
+    assert_eq!(names(&app, "Bees"), ["B1", "A2"]);
+    apply(&mut app, vec![Action::Delete("Third".into()), Action::DeleteGroup("Bees".into())]);
+    assert_eq!(names(&app, "Alpha"), ["A1"]);
+    assert!(names(&app, "Bees").is_empty());
+    // Every action went through a journaled command.
+    let ids: Vec<&str> = app.session.journal.iter().map(|(id, _)| id.as_str()).collect();
+    for id in [
+        "brush.presets.move",
+        "brush.presets.moveGroup",
+        "brush.presets.rename",
+        "brush.presets.renameGroup",
+        "brush.presets.delete",
+        "brush.presets.deleteGroup",
+    ] {
+        assert!(ids.contains(&id), "{id}: {ids:?}");
+    }
+}
+
 fn harness(tab: usize, section: usize) -> Harness<'static, PhotocraftApp> {
     let mut app = app();
     app.ui.panels.brush_settings = true;
@@ -229,9 +373,13 @@ fn preview_strip_re_renders_only_when_the_brush_changes() {
 
 #[test]
 fn every_section_draws_without_issuing_commands() {
-    for tab in 0..2 {
+    for tab in 0..3 {
         for section in 0..SECTIONS.len() {
-            let mut h = harness(tab, section);
+            // Tab 2: the Brushes tab in grid view.
+            let mut h = harness(tab.min(1), section);
+            if tab == 2 {
+                h.state_mut().ui.brushes_panel.view = BrushesView::Grid;
+            }
             // A brush with every section on and a sampled tip.
             let mut b = BrushSettings::default();
             for i in 0..SECTIONS.len() {

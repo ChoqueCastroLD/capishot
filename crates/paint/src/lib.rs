@@ -31,9 +31,10 @@ pub mod rng;
 pub mod tile;
 
 pub use brush::{
-    BrushPreset, BrushSettings, ColorDynamics, Control, DualBrush, Dynamic, MaskMode, Pattern, PatternStyle, Pose, Scattering, ShapeDynamics, Smoothing,
-    Texture, TipShape, Transfer,
+    BrushPreset, BrushSettings, ColorDynamics, Control, DualBrush, Dynamic, MaskMode, Pattern, PatternStyle, Pose, Scattering, SectionLocks, ShapeDynamics,
+    Smoothing, Texture, TipShape, Transfer,
 };
+pub use mixer::MixerSettings;
 pub use render::{BrushContext, StrokeRenderer, render_stroke};
 pub use tile::GrayTile;
 
@@ -94,6 +95,13 @@ pub struct Dab {
     pub depth: f32,
     /// Position in the stroke (0 = first).
     pub index: u64,
+    /// Brush Projection: direction (radians, counter-clockwise, y up) along which the tip is
+    /// foreshortened, and the factor (1 = no projection).
+    pub proj_angle: f32,
+    pub proj_scale: f32,
+    /// Mixer Brush multipliers of Wet and Mix (Transfer › Wetness/Mix Jitter), 1 = as set.
+    pub wet: f32,
+    pub mix: f32,
 }
 
 impl Dab {
@@ -111,6 +119,10 @@ impl Dab {
             color: [0.0, 0.0, 0.0, 1.0],
             depth: 1.0,
             index: 0,
+            proj_angle: 0.0,
+            proj_scale: 1.0,
+            wet: 1.0,
+            mix: 1.0,
         }
     }
 }

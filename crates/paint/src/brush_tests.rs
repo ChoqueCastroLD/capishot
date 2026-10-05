@@ -232,6 +232,7 @@ fn jitter_is_deterministic_per_seed() {
             roundness: Dynamic { jitter: 1.0, minimum: 0.2, ..Default::default() },
             flip_x_jitter: true,
             flip_y_jitter: true,
+            ..Default::default()
         },
         scattering: Scattering { enabled: true, scatter: Dynamic::jitter(2.0), both_axes: true, count: 3, count_jitter: Dynamic::jitter(1.0) },
         ..brush()
@@ -637,4 +638,178 @@ fn tail_preview_shows_the_stroke_as_finishing_it_would() {
     let mut r = StrokeRenderer::new(&brush(), Some(fmt), 1.0);
     r.push(&pts);
     assert!(r.tail_preview().is_none());
+}
+
+// ---------- Tilt Scale, Brush Projection, speed spacing, locks, mixer transfer ----------
+
+/// Coverage extent (pixels above half coverage) of a rasterised dab along x and y through its centre.
+fn extents(b: &BrushSettings, d: &Dab) -> (usize, usize) {
+    let r = raster(b, d);
+    let (cx, cy) = (d.center.x.floor() as i32, d.center.y.floor() as i32);
+    let w = (r.0.x0..r.0.x1).filter(|&x| at(&r, x, cy) > 0.5).count();
+    let h = (r.0.y0..r.0.y1).filter(|&y| at(&r, cx, y) > 0.5).count();
+    (w, h)
+}
+
+fn pen(x: f64, y: f64, tilt_x: f32, tilt_y: f32, rotation: f32) -> StrokePoint {
+    StrokePoint { tilt_x, tilt_y, rotation, ..StrokePoint::new(x, y, 1.0) }
+}
+
+#[test]
+fn tilt_scale_squashes_the_tip_height_with_pen_tilt() {
+    // Size control on Pen Tilt with a 100 % minimum, so only Tilt Scale changes the shape.
+    let mk = |scale: f32| BrushSettings {
+        size: 40.0,
+        shape_dynamics: ShapeDynamics {
+            enabled: true,
+            size: Dynamic { control: Control::PenTilt, minimum: 1.0, ..Default::default() },
+            tilt_scale: scale,
+            ..Default::default()
+        },
+        ..brush()
+    };
+    let upright = [pen(50.0, 50.0, 0.0, 0.0, 0.0)];
+    let tilted = [pen(50.0, 50.0, 45.0, 0.0, 0.0)];
+    // 0 % (the default) and an upright pen leave the tip round.
+    let d = dabs_of(&mk(0.0), &tilted)[0];
+    assert_eq!(d.roundness, 1.0);
+    let d = dabs_of(&mk(2.0), &upright)[0];
+    assert_eq!(d.roundness, 1.0);
+    // 100 % at 45° tilt: height × (1 − 0.5 × 0.5) = 0.75; 200 %: 0.5.
+    let d = dabs_of(&mk(1.0), &tilted)[0];
+    assert!((d.roundness - 0.75).abs() < 1e-4, "{}", d.roundness);
+    let d2 = dabs_of(&mk(2.0), &tilted)[0];
+    assert!((d2.roundness - 0.5).abs() < 1e-4, "{}", d2.roundness);
+    let (w, h) = extents(&mk(2.0), &d2);
+    assert!(w >= 38 && (h as i32 - 20).abs() <= 2, "{w}×{h}");
+    // Only with the size control on Pen Tilt (Photoshop greys the slider otherwise).
+    let mut b = mk(2.0);
+    b.shape_dynamics.size.control = Control::PenPressure;
+    assert_eq!(dabs_of(&b, &tilted)[0].roundness, 1.0);
+    // Rendered strokes differ.
+    let a = paint(&mk(0.0), &[pen(20.0, 40.0, 60.0, 0.0, 0.0), pen(120.0, 40.0, 60.0, 0.0, 0.0)], 0, 0);
+    let c = paint(&mk(2.0), &[pen(20.0, 40.0, 60.0, 0.0, 0.0), pen(120.0, 40.0, 60.0, 0.0, 0.0)], 0, 0);
+    let area = Rect::new(0, 0, 160, 80);
+    assert!(alpha_sum(&c, area) < alpha_sum(&a, area) * 0.75, "{} vs {}", alpha_sum(&c, area), alpha_sum(&a, area));
+}
+
+#[test]
+fn brush_projection_foreshortens_along_tilt_and_turns_with_rotation() {
+    let mk = |on: bool| BrushSettings { size: 40.0, shape_dynamics: ShapeDynamics { enabled: true, brush_projection: on, ..Default::default() }, ..brush() };
+    // Tilted 60° towards +x: the tip is foreshortened to cos 60° = ½ along x.
+    let pts = [pen(50.0, 50.0, 60.0, 0.0, 0.0)];
+    let d = dabs_of(&mk(true), &pts)[0];
+    assert!((d.proj_scale - 0.5).abs() < 1e-4 && d.proj_angle.abs() < 1e-5, "{d:?}");
+    let (w, h) = extents(&mk(true), &d);
+    assert!((w as i32 - 20).abs() <= 2 && h >= 38, "{w}×{h}");
+    // Tilted along y instead: foreshortened vertically.
+    let d = dabs_of(&mk(true), &[pen(50.0, 50.0, 0.0, 60.0, 0.0)])[0];
+    let (w, h) = extents(&mk(true), &d);
+    assert!(w >= 38 && (h as i32 - 20).abs() <= 2, "{w}×{h}");
+    // Off: the tilt doesn't touch the tip.
+    let d = dabs_of(&mk(false), &pts)[0];
+    assert_eq!((d.proj_scale, d.angle), (1.0, 0.0));
+    assert_eq!(extents(&mk(false), &d), (40, 40));
+    // Barrel rotation turns the tip (an elliptical one shows it).
+    let mut b = mk(true);
+    b.roundness = 0.5;
+    let d = dabs_of(&b, &[pen(50.0, 50.0, 0.0, 0.0, 90.0)])[0];
+    assert!((d.angle.to_degrees() - 90.0).abs() < 1e-3);
+    let (w, h) = extents(&b, &d);
+    assert!(w < h, "{w}×{h}");
+    // Dual-brush dabs are never projected.
+    let ctx = BrushContext::new(&mk(true));
+    let dd = Dab { proj_scale: 0.3, ..Dab::round(Point::new(50.0, 50.0), 20.0, 1.0) };
+    let (r, mut a, mut c) = (ctx.dab_rect(&dd, true), Vec::new(), Vec::new());
+    ctx.rasterize(&dd, true, r, &mut a);
+    ctx.rasterize(&Dab { proj_scale: 1.0, ..dd }, true, r, &mut c);
+    assert_eq!(a, c);
+}
+
+#[test]
+fn spacing_off_spaces_dabs_by_pointer_speed() {
+    let mut b = BrushSettings { size: 20.0, spacing_enabled: false, ..brush() };
+    let timed = |ms: f64| vec![StrokePoint { time: 0.0, ..StrokePoint::new(0.0, 10.0, 1.0) }, StrokePoint { time: ms, ..StrokePoint::new(100.0, 10.0, 1.0) }];
+    // 100 px in 400 ms: a dab every 8 ms = every 2 px; in 40 ms: every 20 px.
+    let slow = dabs_of(&b, &timed(400.0)).len();
+    let fast = dabs_of(&b, &timed(40.0)).len();
+    assert_eq!((slow, fast), (51, 6));
+    // Never denser than half a pixel, however slow.
+    assert!(dabs_of(&b, &timed(1.0e9)).len() <= 201);
+    // No timestamps: one dab per input point.
+    let pts: Vec<StrokePoint> = (0..7).map(|i| StrokePoint::new(f64::from(i) * 15.0, 10.0, 1.0)).collect();
+    assert_eq!(dabs_of(&b, &pts).len(), 7);
+    // Checked: fixed spacing (25 % of 20 px = 5 px) whatever the speed.
+    b.spacing_enabled = true;
+    assert_eq!(dabs_of(&b, &timed(400.0)).len(), dabs_of(&b, &timed(40.0)).len());
+    // Chunked input gives the same dabs.
+    b.spacing_enabled = false;
+    let pts: Vec<StrokePoint> = (0..20).map(|i| StrokePoint { time: f64::from(i) * 13.0, ..StrokePoint::new(f64::from(i) * 7.0, 10.0, 1.0) }).collect();
+    let one = dabs_of(&b, &pts);
+    let mut g = crate::dynamics::DabGenerator::new(&b, 1.0);
+    let (mut out, mut dual) = (Vec::new(), Vec::new());
+    for c in pts.chunks(3) {
+        g.push(c, &mut out, &mut dual);
+    }
+    g.finish(&mut out, &mut dual);
+    assert_eq!(one, out);
+}
+
+#[test]
+fn locked_sections_survive_picking_a_preset() {
+    let presets = crate::presets::builtin();
+    let chalk = crate::presets::find(&presets, "chalk").unwrap().brush.clone();
+    let mut cur = BrushSettings {
+        scattering: Scattering { enabled: true, count: 5, ..Default::default() },
+        transfer: Transfer { enabled: true, wetness: Dynamic::jitter(0.4), ..Default::default() },
+        noise: true,
+        ..brush()
+    };
+    // Unlocked: the preset's sections win.
+    let next = chalk.clone().picked_over(&cur);
+    assert_eq!(next.scattering, chalk.scattering);
+    assert_eq!(next.noise, chalk.noise);
+    // Locked: the current sections stay, and so do the locks.
+    cur.locks = SectionLocks { scattering: true, transfer: true, noise: true, ..Default::default() };
+    let next = chalk.clone().picked_over(&cur);
+    assert_eq!(next.scattering, cur.scattering);
+    assert_eq!(next.transfer, cur.transfer);
+    assert!(next.noise);
+    assert_eq!(next.locks, cur.locks);
+    // Unlocked sections still come from the preset.
+    assert_eq!(next.texture, chalk.texture);
+    assert_eq!(next.tip, chalk.tip);
+}
+
+#[test]
+fn transfer_wetness_and_mix_vary_per_dab() {
+    let b = BrushSettings {
+        transfer: Transfer {
+            enabled: true,
+            wetness: Dynamic::controlled(Control::PenPressure),
+            mix: Dynamic { jitter: 1.0, minimum: 0.25, ..Default::default() },
+            ..Default::default()
+        },
+        ..brush()
+    };
+    let pts = [StrokePoint::new(0.0, 0.0, 0.3), StrokePoint::new(60.0, 0.0, 0.3)];
+    let d = dabs_of(&b, &pts);
+    assert!(d.iter().all(|x| (x.wet - 0.3).abs() < 1e-5));
+    assert!(d.iter().all(|x| (0.25..=1.0).contains(&x.mix)) && d.iter().any(|x| x.mix < 0.9));
+    // Transfer off: as set.
+    let d = dabs_of(&brush(), &pts);
+    assert!(d.iter().all(|x| x.wet == 1.0 && x.mix == 1.0));
+    // New fields round-trip and old JSON loads with neutral values.
+    let full = BrushSettings {
+        spacing_enabled: false,
+        shape_dynamics: ShapeDynamics { tilt_scale: 1.5, brush_projection: true, ..Default::default() },
+        locks: SectionLocks { texture: true, ..Default::default() },
+        mixer: crate::mixer::MixerSettings { wet: 0.9, sample_all_layers: true, ..Default::default() },
+        ..b
+    };
+    let back: BrushSettings = serde_json::from_value(serde_json::to_value(&full).unwrap()).unwrap();
+    assert_eq!(back, full);
+    let old: BrushSettings = serde_json::from_str(r#"{"size": 12, "shapeDynamics": {"enabled": true}, "transfer": {"enabled": true}}"#).unwrap();
+    assert!(old.spacing_enabled && !old.shape_dynamics.brush_projection && old.shape_dynamics.tilt_scale == 0.0 && old.locks == SectionLocks::default());
+    assert_eq!(old.mixer, crate::mixer::MixerSettings::default());
 }

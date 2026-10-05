@@ -110,7 +110,10 @@ pub fn show_picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // Keep the whole picker on screen (it is about 280 × 300 points).
     let pos = egui::pos2(x.min(screen.right() - 284.0).max(screen.left()), y.min(screen.bottom() - 310.0).max(screen.top()));
     let area = egui::Area::new(egui::Id::new("canvas-brush-picker")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| crate::panels::brush_picker_body(ui, &mut app.session.tools.brush));
+        let before = app.session.tools.brush.clone();
+        let mut b = before.clone();
+        egui::Frame::popup(ui.style()).show(ui, |ui| crate::panels::brush_picker_body(ui, &mut b));
+        crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &b);
     });
     let outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p)));
     if outside {

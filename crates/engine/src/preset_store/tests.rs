@@ -240,6 +240,41 @@ fn startup_with_many_groups_loads_them_all() {
 }
 
 #[test]
+fn reordering_presets_and_groups_persists() {
+    let names = |s: &Session| s.tools.presets.iter().map(|p| (p.name.clone(), p.group.clone())).collect::<Vec<_>>();
+    let dir = TempDir::new("reorder");
+    let (mut s, _) = session(&dir);
+    for (n, g) in [("Ink 1", "Inks"), ("Ink 2", "Inks"), ("Wash", "Washes")] {
+        s.execute("brush.presets.save", json!({"name": n})).unwrap();
+        s.tools.presets.iter_mut().find(|p| p.name == n).unwrap().group = g.into();
+    }
+    s.brush_presets_changed();
+    s.sync_preset_store();
+    // Untouched order: no order list is written (the default order is implied).
+    let (t, _) = session(&dir);
+    assert_eq!(names(&t), names(&s));
+    // Reorder a built-in within its group, a user preset across groups, and whole groups.
+    let builtin_group = s.tools.presets[0].group.clone();
+    let last_builtin = s.tools.presets.iter().rfind(|p| p.builtin && p.group == builtin_group).unwrap().name.clone();
+    let first = s.tools.presets[0].name.clone();
+    s.execute("brush.presets.move", json!({"name": last_builtin, "before": first})).unwrap();
+    s.execute("brush.presets.move", json!({"name": "Ink 2", "group": "Washes", "index": 0})).unwrap();
+    s.execute("brush.presets.moveGroup", json!({"group": "Washes", "index": 0})).unwrap();
+    s.execute("brush.presets.moveGroup", json!({"group": "Inks", "before": builtin_group})).unwrap();
+    assert_eq!(s.tools.presets[0].name, "Ink 2");
+    let (t, w) = session(&dir);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(names(&t), names(&s), "the panel order survives a restart");
+    assert!(t.tools.presets.iter().find(|p| p.name == last_builtin).unwrap().builtin, "reordering keeps a built-in built-in");
+    // Renaming and deleting a group persist too.
+    s.execute("brush.presets.renameGroup", json!({"group": "Inks", "newName": "Pens"})).unwrap();
+    s.execute("brush.presets.deleteGroup", json!({"group": "Washes"})).unwrap();
+    let (t, _) = session(&dir);
+    assert_eq!(names(&t), names(&s));
+    assert!(t.tools.presets.iter().all(|p| p.group != "Washes" && p.group != "Inks"));
+}
+
+#[test]
 fn corrupt_and_oversized_files_are_skipped_with_a_warning() {
     let dir = TempDir::new("corrupt");
     let (mut s, _) = session(&dir);

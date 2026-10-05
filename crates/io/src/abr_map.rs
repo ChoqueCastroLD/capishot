@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 
 use photocraft_paint::{
-    BrushPreset, BrushSettings, Control, DualBrush, Dynamic, GrayTile, MaskMode, Pattern, PatternStyle, Pose, ShapeDynamics, TipShape, Transfer,
+    BrushPreset, BrushSettings, Control, DualBrush, Dynamic, GrayTile, MaskMode, MixerSettings, Pattern, PatternStyle, Pose, ShapeDynamics, TipShape, Transfer,
 };
 use photocraft_psd::abr::{self, AbrFile, AbrSample, LegacyTip};
 use photocraft_psd::descriptor::{Descriptor, Value};
@@ -281,6 +281,25 @@ impl Mapper<'_> {
         }
     }
 
+    /// Mixer Brush tool options captured with a preset (Wet, Load, Mix, Flow, Sample All Layers).
+    /// Key names are best effort (Photoshop doesn't document them); several spellings are read.
+    fn mixer_options(&mut self, to: &Descriptor, m: &mut MixerSettings) {
+        let first = |keys: &[&str]| keys.iter().find_map(|k| pct(to, k));
+        let wet = first(&["wetness", "Wtns", "wet"]);
+        let load = first(&["dryness", "load", "Ld  "]);
+        let mix = first(&["mix", "mixRatio", "Mx  "]);
+        if wet.is_none() && load.is_none() && mix.is_none() {
+            return;
+        }
+        m.wet = wet.unwrap_or(m.wet).clamp(0.0, 1.0);
+        m.load = load.unwrap_or(m.load).clamp(0.0, 1.0);
+        m.mix = mix.unwrap_or(m.mix).clamp(0.0, 1.0);
+        m.flow = pct(to, "flow").unwrap_or(m.flow).clamp(0.0, 1.0);
+        if let Some(v) = ["sampleMerged", "useAllLayers", "sampleAllLayers", "Mrgd"].iter().find_map(|k| boolean(to, k)) {
+            m.sample_all_layers = v;
+        }
+    }
+
     fn preset(&mut self, d: &Descriptor) -> Option<BrushSettings> {
         for (k, _) in &d.items {
             let k = String::from_utf8_lossy(k.as_bytes()).to_string();
@@ -298,8 +317,9 @@ impl Mapper<'_> {
             }
             b.angle = num(t, "Angl").unwrap_or(0.0) as f32;
             b.roundness = pct(t, "Rndn").unwrap_or(1.0).clamp(0.01, 1.0);
-            // `Intr` off = spacing unchecked (Photoshop spaces by pointer speed): keep it tight.
-            b.spacing = if boolean(t, "Intr") == Some(false) { 0.05 } else { pct(t, "Spcn").unwrap_or(0.25).clamp(0.01, 10.0) };
+            // `Intr` off = the Spacing checkbox is off: the pointer's speed sets the spacing.
+            b.spacing = pct(t, "Spcn").unwrap_or(0.25).clamp(0.01, 10.0);
+            b.spacing_enabled = boolean(t, "Intr") != Some(false);
             b.flip_x = boolean(t, "flipX").unwrap_or(false);
             b.flip_y = boolean(t, "flipY").unwrap_or(false);
         }
@@ -316,13 +336,9 @@ impl Mapper<'_> {
                 roundness,
                 flip_x_jitter: boolean(d, "flipX").unwrap_or(false),
                 flip_y_jitter: boolean(d, "flipY").unwrap_or(false),
+                tilt_scale: pct(d, "tiltScale").unwrap_or(0.0).clamp(0.0, 2.0),
+                brush_projection: boolean(d, "brushProjection").unwrap_or(false),
             };
-            if pct(d, "tiltScale").is_some_and(|v| v > 0.0) {
-                self.warnings.insert("Tilt Scale (Shape Dynamics) is not supported".into());
-            }
-            if boolean(d, "brushProjection") == Some(true) {
-                self.warnings.insert("Brush Projection is not supported".into());
-            }
         }
         // Scattering.
         if boolean(d, "useScatter") == Some(true) {
@@ -393,12 +409,13 @@ impl Mapper<'_> {
         }
         // Transfer.
         if boolean(d, "usePaintDynamics") == Some(true) {
-            b.transfer = Transfer { enabled: true, opacity: self.dynamic(obj(d, "opVr")), flow: self.dynamic(obj(d, "prVr")) };
-            for (k, what) in [("wtVr", "Wetness"), ("mxVr", "Mix")] {
-                if self.dynamic(obj(d, k)).is_active() {
-                    self.warnings.insert(format!("Transfer › {what} jitter (Mixer Brush) is not supported"));
-                }
-            }
+            b.transfer = Transfer {
+                enabled: true,
+                opacity: self.dynamic(obj(d, "opVr")),
+                flow: self.dynamic(obj(d, "prVr")),
+                wetness: self.dynamic(obj(d, "wtVr")),
+                mix: self.dynamic(obj(d, "mxVr")),
+            };
         }
         // Brush Pose (Photoshop's tilt is ±100 %; ours is ±90°).
         if boolean(d, "useBrushPose") == Some(true) {
@@ -443,6 +460,7 @@ impl Mapper<'_> {
             if let Some(v) = boolean(to, "smoothingZoomCompensation") {
                 b.smoothing.adjust_for_zoom = v;
             }
+            self.mixer_options(to, &mut b.mixer);
             if mask_blend_is_set(to) {
                 self.warnings.insert("tool blend modes stored with presets are not applied".into());
             }

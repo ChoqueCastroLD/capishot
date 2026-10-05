@@ -360,8 +360,12 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     return;
                 }
                 let tool = app.ui.tool;
+                // Brush edits here go through `tools.setBrush`, one journal entry per gesture (Rule 1).
                 if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Eraser)) || tool == Tool::QuickSelection {
-                    brush_preset_chip(ui, &mut app.session.tools.brush);
+                    let before = app.session.tools.brush.clone();
+                    let mut b = before.clone();
+                    brush_preset_chip(ui, &mut b);
+                    crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &b);
                     widgets::vline(ui, 22.0);
                 }
                 if crate::eraser_ui::options_bar(app, ui, tool)
@@ -373,7 +377,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     return;
                 }
                 crate::paint_mouse::sync_tool_smoothing(app);
-                let b = &mut app.session.tools.brush;
+                let brush_before = app.session.tools.brush.clone();
+                let mut brush = brush_before.clone();
+                let b = &mut brush;
                 match app.ui.tool {
                     Tool::Brush | Tool::Eraser if t.pro => {
                         brush_preset_chip(ui, b);
@@ -637,6 +643,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     // Retouching and smart-selection tools draw their bar in `retouch_ui::options_bar`.
                     _ => {}
                 }
+                crate::brush_panel::commit_gesture(app, ui.ctx(), &brush_before, &brush);
             });
         });
 }

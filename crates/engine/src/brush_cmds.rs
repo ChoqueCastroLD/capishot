@@ -337,8 +337,16 @@ fn mixer_brush(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "paint.mixerBrush";
     let pts = parse_points(p, cmd)?;
     let brush = resolve_brush(s, p, cmd)?;
-    let m = MixerSettings { wet: pct(p, "wet", 50.0), load: pct(p, "load", 50.0), mix: pct(p, "mix", 50.0), flow: pct(p, "flow", 100.0) };
-    let sample_all = flag(p, "sampleAllLayers", false);
+    // The brush's Mixer Brush options, overridden by the scalar params.
+    let bm = &brush.mixer;
+    let m = MixerSettings {
+        wet: pct(p, "wet", bm.wet * 100.0),
+        load: pct(p, "load", bm.load * 100.0),
+        mix: pct(p, "mix", bm.mix * 100.0),
+        flow: pct(p, "flow", bm.flow * 100.0),
+        sample_all_layers: flag(p, "sampleAllLayers", bm.sample_all_layers),
+    };
+    let sample_all = m.sample_all_layers;
     let (clean, load_after) = (flag(p, "cleanAfterStroke", true), flag(p, "loadAfterStroke", true));
     let mut state = s.tools.mixer.clone();
     if load_after || state.reservoir.is_none() {
@@ -543,8 +551,87 @@ fn set_brush(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     b = merge_brush(&b, &patch, cmd)?;
-    s.tools.brush = b;
+    let before = std::mem::replace(&mut s.tools.brush, b);
+    // A coalesced gesture (one slider drag) journals as one call: remember the brush it started from.
+    let key = p.get("coalesce").and_then(Value::as_str).filter(|_| p.get("preset").is_none() && p.get("reset").is_none());
+    let continuing = |s: &Session, k: &str| {
+        s.tools.brush_gesture.as_ref().is_some_and(|(g, _)| g == k)
+            && s.journal.last().is_some_and(|(id, lp)| id == cmd && lp.get("coalesce").and_then(Value::as_str) == Some(k))
+    };
+    match key {
+        Some(k) if continuing(s, k) => {}
+        Some(k) => s.tools.brush_gesture = Some((k.to_string(), before)),
+        None => s.tools.brush_gesture = None,
+    }
     Ok(brush_json(&s.tools.brush))
+}
+
+/// The brush as JSON with the bitmaps (sampled tips, pattern tiles) that `skip` names replaced by
+/// placeholders: they can be megabytes of base64, and skipped ones are equal on both sides.
+fn light_json(b: &BrushSettings, skip: (bool, bool, bool)) -> Value {
+    let mut c = b.clone();
+    if skip.0 {
+        c.tip = TipShape::Round;
+    }
+    if skip.1 {
+        c.dual_brush.tip = TipShape::Round;
+    }
+    if skip.2 {
+        c.texture.pattern = photocraft_paint::Pattern::default();
+    }
+    serde_json::to_value(&c).unwrap_or(Value::Null)
+}
+
+/// Fields of `new` that differ from `old`, nested objects diffed key by key: the minimal
+/// `tools.setBrush` `brush` patch that turns `old` into `new` (`{}` when nothing changed).
+pub fn brush_patch(old: &BrushSettings, new: &BrushSettings) -> Value {
+    let skip = (old.tip == new.tip, old.dual_brush.tip == new.dual_brush.tip, old.texture.pattern == new.texture.pattern);
+    fn diff(a: &Value, b: &Value) -> Option<Value> {
+        match (a, b) {
+            (Value::Object(ao), Value::Object(bo)) => {
+                let mut out = serde_json::Map::new();
+                for (k, bv) in bo {
+                    match ao.get(k) {
+                        Some(av) => {
+                            if let Some(d) = diff(av, bv) {
+                                out.insert(k.clone(), d);
+                            }
+                        }
+                        None => {
+                            out.insert(k.clone(), bv.clone());
+                        }
+                    }
+                }
+                (!out.is_empty()).then_some(Value::Object(out))
+            }
+            // Enums with payloads (tips, patterns) are replaced whole.
+            _ => (a != b).then(|| b.clone()),
+        }
+    }
+    diff(&light_json(old, skip), &light_json(new, skip)).unwrap_or_else(|| json!({}))
+}
+
+/// Journal hook ([`Session::execute`]): consecutive `tools.setBrush` calls with the same
+/// `coalesce` key (one drag in the options bar or the Brush Settings panel) are one journal
+/// entry, the patch from the brush before the gesture to the brush now. Returns true when the
+/// call was folded into the previous entry.
+pub fn coalesce_journal(s: &mut Session, id: &str, params: &Value) -> bool {
+    if id != "tools.setBrush" {
+        return false;
+    }
+    let Some(key) = params.get("coalesce").and_then(Value::as_str) else { return false };
+    let Some((gk, start)) = s.tools.brush_gesture.as_ref() else { return false };
+    if gk != key {
+        return false;
+    }
+    let patch = brush_patch(start, &s.tools.brush);
+    match s.journal.last_mut() {
+        Some((last, lp)) if last == id && lp.get("coalesce").and_then(Value::as_str) == Some(key) => {
+            *lp = json!({ "brush": patch, "coalesce": key });
+            true
+        }
+        _ => false,
+    }
 }
 
 macro_rules! spec {
@@ -567,7 +654,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "paint.mixerBrush",
             "Mixer Brush",
-            r##"{"points":[…],"brush":{…}?,"preset":name?,"size":px?,"wet":0..100=50,"load":0..100=50,"mix":0..100=50,"flow":0..100=100,"color":"#rrggbb"?=foreground,"sampleAllLayers":bool=false,"cleanAfterStroke":bool=true,"loadAfterStroke":bool=true,"seed":u64?}"##,
+            r##"{"points":[…],"brush":{…}?,"preset":name?,"size":px?,"wet":0..100=brush.mixer.wet,"load":0..100=brush.mixer.load,"mix":0..100=brush.mixer.mix,"flow":0..100=brush.mixer.flow,"color":"#rrggbb"?=foreground,"sampleAllLayers":bool=brush.mixer.sampleAllLayers,"cleanAfterStroke":bool=true,"loadAfterStroke":bool=true,"seed":u64?}"##,
             has_paintable,
             mixer_brush,
             true
