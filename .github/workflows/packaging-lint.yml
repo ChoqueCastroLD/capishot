@@ -44,6 +44,7 @@ jobs:
             if ($errors) { $errors | ForEach-Object { Write-Output "::error file=$($f.Name)::$_" }; exit 1 }
             Write-Output "ok $($f.Name)"
           }
+          ./packaging/windows/check-icons.ps1
       - name: XML, desktop entry, AppStream, Flatpak manifest
         run: |
           xmllint --noout packaging/windows/photocraft.wxs packaging/macos/*.plist* packaging/linux/*.xml*

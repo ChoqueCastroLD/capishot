@@ -24,8 +24,10 @@
         DowngradeErrorMessage="A newer version of PhotoCraft is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
-    <Icon Id="PhotocraftIcon" SourceFile="$(var.IconPath)" />
-    <Property Id="ARPPRODUCTICON" Value="PhotocraftIcon" />
+    <!-- MSI caches this icon using its Id as the filename. Advertised shortcuts to an
+         .exe need an .exe icon identifier (ICE50), even when the source is an ICO. -->
+    <Icon Id="PhotocraftIcon.exe" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="PhotocraftIcon.exe" />
     <Property Id="ARPURLINFOABOUT" Value="https://getartcraft.com/apps/photocraft" />
     <Property Id="ARPURLUPDATEINFO" Value="https://getartcraft.com/apps/photocraft" />
     <Property Id="ARPHELPLINK" Value="https://discord.gg/artcraft" />
@@ -46,7 +48,7 @@
         <File Id="PhotocraftExe" Source="$(var.BinDir)\photocraft.exe" KeyPath="yes">
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="PhotoCraft"
               Description="PhotoCraft image editor" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
-              Icon="PhotocraftIcon" IconIndex="0" />
+              Icon="PhotocraftIcon.exe" IconIndex="0" />
         </File>
 
         <!-- .pcraft: PhotoCraft's own format; PhotoCraft is its default app. -->

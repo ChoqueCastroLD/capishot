@@ -103,6 +103,10 @@ goes in `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, so host build scripts aren't affected
   "Open with" for PSD/PSB and image files. It also registers App Paths (Win+R `photocraft`).
   The MSI version is the numeric `X.Y.Z`, because MSI has no pre-release field. Same-version
   upgrades are allowed so that release candidates replace each other.
+- Shortcut icon identifiers keep the executable's `.exe` extension: MSI uses the identifier
+  as the cached icon filename, and an extensionless filename can render as a blank document
+  icon. `packaging/windows/check-icons.ps1` checks the references and extensions in CI;
+  `package.ps1` also validates the built MSI with ICE50 before signing it.
 - **Signing:** `packaging/windows/sign.ps1` signs both `.exe` files and then the `.msi` with
   `signtool`, using SHA-256 and an RFC 3161 timestamp. It uses whichever material is present:
   1. a `.pfx` file (`WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`), timestamped by
