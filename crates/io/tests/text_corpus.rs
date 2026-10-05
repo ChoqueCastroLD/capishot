@@ -1,16 +1,23 @@
-//! Type layers in the optional real-file corpus (`corpus/psd`, gitignored; skips if absent).
+//! Type layers in the real-file corpus (`corpus/psd`, gitignored; feature `corpus`, fetched by
+//! `cargo xtask corpus --all`; a missing corpus fails).
 //!
 //! For every text layer: the TySh/EngineData model must parse (text, fonts, sizes, colours,
 //! runs), the `TySh` must survive a PSD round trip byte-for-byte, and our engine's re-render is
 //! compared with Photoshop's cached pixels. The fonts usually differ, so the comparison checks
 //! geometry (ink bounds and alpha overlap) and is reported; the assertions are loose.
 
+#[cfg(feature = "corpus")]
 use std::path::{Path, PathBuf};
 
-use photocraft_doc::{Layer, LayerContent};
+#[cfg(feature = "corpus")]
+use photocraft_doc::Layer;
+use photocraft_doc::LayerContent;
+#[cfg(feature = "corpus")]
 use photocraft_geom::Rect;
+#[cfg(feature = "corpus")]
 use photocraft_raster::Surface;
 
+#[cfg(feature = "corpus")]
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
@@ -25,6 +32,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+#[cfg(feature = "corpus")]
 fn walk<'a>(layers: &'a [Layer], out: &mut Vec<&'a Layer>) {
     for l in layers {
         out.push(l);
@@ -34,17 +42,17 @@ fn walk<'a>(layers: &'a [Layer], out: &mut Vec<&'a Layer>) {
     }
 }
 
+#[cfg(feature = "corpus")]
 fn alpha(s: &Surface, r: Rect) -> Vec<f32> {
     let n = s.channels();
     s.read_region(r).chunks_exact(n).map(|p| p[n - 1]).collect()
 }
 
+#[cfg(feature = "corpus")]
 #[test]
 fn corpus_text_layers() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/psd");
-    if !root.is_dir() {
-        return;
-    }
+    assert!(root.is_dir(), "{} is missing: run `cargo xtask corpus --all`", root.display());
     let mut files = Vec::new();
     collect(&root, &mut files);
     files.sort();
@@ -115,12 +123,11 @@ fn corpus_text_layers() {
 }
 
 /// Unedited text layers are written back byte-for-byte.
+#[cfg(feature = "corpus")]
 #[test]
 fn corpus_tysh_lossless() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/psd/ag-psd/read-write/text/src.psd");
-    let Ok(bytes) = std::fs::read(&root) else {
-        return;
-    };
+    let bytes = std::fs::read(&root).unwrap_or_else(|e| panic!("{}: {e}: run `cargo xtask corpus --all`", root.display()));
     let doc = photocraft_io::import("src.psd", &bytes).unwrap().document;
     let out = photocraft_io::export(&doc, "out.psd", &Default::default()).unwrap().bytes;
     let find = |b: &[u8]| {

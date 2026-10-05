@@ -322,7 +322,7 @@ Both backends consume the same plan. This is the only place that encodes Photosh
 
 ### 7.4 Oracle
 
-**PSD files contain Photoshop's own merged composite.** Running our compositor on a PSD's layers and diffing against its embedded composite gives a free, large conformance test suite. `testkit` automates this over a PSD corpus.
+**PSD files contain Photoshop's own merged composite.** Running our compositor on a PSD's layers and diffing against its embedded composite gives a free, large conformance test suite. `testkit` automates this over a PSD corpus. The corpora are fetched at pinned commits into `corpus/` (never committed) by `cargo xtask corpus --all`; our own Photoshop-authored oracles live in https://github.com/storytold/photocraft-corpus (see `docs/development.md` › Test corpora).
 
 ---
 
@@ -363,6 +363,7 @@ psd/src/
   - Composite-oracle diffs (§7.4).
   - `cargo-fuzz` on the parser.
   - A corpus from MIT/BSD-licensed test sets (ag-psd, psd-tools), fetched by `xtask`, not committed.
+  - Our own Photoshop-authored oracle PSDs (smart filters, effect shapes, type, adjustments in every mode and depth) from https://github.com/storytold/photocraft-corpus, fetched at a pinned commit the same way.
 - **Existing crates:** `psd` (read-only, limited) and the new `ag-psd` Rust port. We evaluate them in spike week 1, then either depend on one, fork it, or write our own. Given how central PSD is, writing our own behind a stable API is likely.
 
 ---

@@ -3,10 +3,12 @@
 //! Pure Rust (std + serde_json). External tools (`cargo`, `curl`, `tar`) are
 //! invoked through `std::process::Command`.
 
+mod corpus;
+mod corpus_pins;
 mod ico;
 mod layers;
 mod perf;
-mod psd_tools;
+mod pinned;
 mod scorecard;
 mod sha256;
 mod stats;
@@ -22,10 +24,14 @@ commands:
   layers          enforce the crate dependency layering (plan/architecture.md §3)
   wasm            cargo check --target wasm32-unknown-unknown for the wasm-safe crates
   ci              fmt --check, clippy -D warnings, test, layers, wasm (stops at first failure)
-  corpus [--download] [--psd-tools [--update-manifest]]
-                  show where test corpora live; --download fetches PngSuite into corpus/pngsuite;
-                  --psd-tools fetches the psd-tools PSDs (MIT, pinned commit, sha256-verified)
-                  into corpus/psd-tools
+  corpus [--all | --pngsuite | --psd | --psd-tools | --photoshop] [--local] [--update-manifest]
+                  show where test corpora live and their pins (xtask/src/corpus_pins.rs), or fetch
+                  them into corpus/ (pinned commits, sha256-verified; --all = every corpus;
+                  --photoshop --local copies from ../photocraft-corpus or $PHOTOCRAFT_CORPUS_REPO)
+  test-corpus [-p <crate>]... [--changed] [--local] [-- <test args>]
+                  fetch every corpus, then cargo test --release --features corpus on the corpus
+                  crates; --changed runs only if psd/io/codecs/compose/gpu/text/format changed;
+                  --local takes corpus/photoshop from the photocraft-corpus authoring clone
   stats [--exact] count tests and lines per crate (--exact: ask the test harness via `-- --list`)
   parity          Photoshop menu parity; rewrites docs/parity.md
   perf [--quick] [--update-baseline] [--threshold PCT] [--bench NAME]... [--skip-build] [--reuse]
@@ -46,8 +52,8 @@ fn main() -> ExitCode {
         Some("layers") => cmd_layers(),
         Some("wasm") => cmd_wasm(),
         Some("ci") => cmd_ci(),
-        Some("corpus") if rest.contains(&"--psd-tools") => psd_tools::fetch(rest.contains(&"--update-manifest")),
-        Some("corpus") => cmd_corpus(rest.contains(&"--download")),
+        Some("corpus") => corpus::cmd(&rest),
+        Some("test-corpus") => corpus::test_cmd(&rest),
         Some("stats") => stats::run(&root(), rest.contains(&"--exact")),
         Some("parity") => cmd_parity(),
         Some("perf") => perf::run(&root(), &rest),
@@ -214,43 +220,4 @@ fn cmd_ci() -> Result<(), String> {
     }
     println!("\nCI summary: all {} steps passed ({})", done.len(), done.join(", "));
     Ok(())
-}
-
-const PNGSUITE_URL: &str = "http://www.schaik.com/pngsuite/PngSuite-2017jul19.tgz";
-
-fn cmd_corpus(download: bool) -> Result<(), String> {
-    let corpus = root().join("corpus");
-    println!(
-        "Test corpora live under {} (git-ignored, never committed).
-Tests that use a corpus skip cleanly when it is absent.
-
-  corpus/pngsuite/   PngSuite (public domain) — photocraft-codecs compares every file
-                     against the `image` crate. Fetch: cargo xtask corpus --download
-  corpus/psd/        PSD samples from MIT/BSD projects (ag-psd, psd-tools test data).
-                     Copy files in manually; licences must be MIT/BSD/CC0.
-  corpus/psd-tools/  the full psd-tools test set (MIT) at a pinned commit, verified
-                     against xtask/psd-tools-corpus.sha256. Fetch: cargo xtask corpus --psd-tools
-                     Run: PHOTOCRAFT_PSDTOOLS_CORPUS=1 cargo test --release -p photocraft-io --test corpus
-  corpus/tiff/       libtiff pics (optional)
-  corpus/exr/        OpenEXR sample images (optional)
-  corpus/raw/        raw.pixls.us samples, CC0 (optional)
-",
-        corpus.display()
-    );
-    if !download {
-        return Ok(());
-    }
-    let dest = corpus.join("pngsuite");
-    std::fs::create_dir_all(&dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
-    let tgz = corpus.join("PngSuite-2017jul19.tgz");
-    let mut curl = Command::new("curl");
-    curl.args(["-fsSL", "-o"]).arg(&tgz).arg(PNGSUITE_URL);
-    run(curl, &format!("curl {PNGSUITE_URL}"))?;
-    let mut tar = Command::new("tar");
-    tar.arg("-xzf").arg(&tgz).arg("-C").arg(&dest);
-    run(tar, "tar -xzf PngSuite-2017jul19.tgz")?;
-    let _ = std::fs::remove_file(&tgz);
-    let n = std::fs::read_dir(&dest).map(|d| d.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "png")).count()).unwrap_or(0);
-    println!("PngSuite: {n} PNG files in {}", dest.display());
-    if n == 0 { Err("no PNG files extracted".into()) } else { Ok(()) }
 }

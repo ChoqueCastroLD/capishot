@@ -7,6 +7,10 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
+corpus = []
+
 [dependencies]
 photocraft-geom = { workspace = true }
 photocraft-color = { workspace = true }

@@ -62,8 +62,8 @@ Confidence: moderate — the next users of 0.2.x will move these numbers either 
 |---|---|---|---|
 | Menu wiring | 626/626 menu items dispatch a command (`parity.md`) | high but shallow | Says nothing about behaviour. |
 | PSD fidelity (rendering) | Corpus oracle 115/170 (68%): 30 differ, 26 have no usable reference, 1 import error | medium | Push to 170/170 under way (effects/strokes, multi-instance effects, 16/32-bit and colour modes, references for skipped files). |
-| PSD round trip | 169/169 re-import identically; every adjustment layer and blend mode round-trips | high (within corpus) | Floors in `crates/io/tests/corpus.rs`; raise, never lower. |
-| Smart filters / text / effect shapes in PSDs | Not measured: the corpus barely contains them | unknown (probably low–medium) | A Photoshop-authored reference set is being built (`corpus/photoshop`). |
+| PSD round trip | 169/169 re-import identically; every adjustment layer and blend mode round-trips | high (within corpus) | Floors in `crates/io/tests/corpus.rs`; raise, never lower. Corpora: `cargo xtask corpus --all` (ours: https://github.com/storytold/photocraft-corpus). |
+| Smart filters / text / effect shapes in PSDs | Measured on our Photoshop-authored set (https://github.com/storytold/photocraft-corpus, `corpus/photoshop`, 256 files): see the per-group floors in `crates/io/tests/corpus.rs` and `crates/engine/tests/photoshop_oracles.rs` | low–medium | Fix from the failure map (`cargo xtask test-corpus -- --nocapture`). |
 | Core editing (layers, masks, selections, adjustments, filters, transforms) | Broad engine coverage; many interaction bugs fixed after 0.2.0 (adjustment dialogs, Curves, crop, Move/Transform modifiers, gesture origin) | medium | Fixes not yet user-validated. |
 | UI / UX polish | Shortcut audit 214 → 0 failures; dock, Layers rows and menus reworked; first visual-QA sweep found 14 defects (#147–#157) | low–medium | Needs recurring visual QA with realistic documents. |
 | Tools | ~20 Photoshop tools missing: Pencil, Mixer Brush (tool), Patch, Content-Aware Move, Red Eye, Pattern Stamp, Art History Brush, Freeform/Curvature Pen, anchor tools, Direct Selection, Magnetic Lasso, single row/column marquee, Color Sampler, Perspective Crop, Rotate View, the Vertical Type tool (vertical layout itself landed, #199: toggle via Type › Orientation) and type masks, Frame | low–medium | Magic/Background Eraser added; live gradients in progress (#180). |
@@ -81,7 +81,8 @@ Confidence: moderate — the next users of 0.2.x will move these numbers either 
 
 1. **Ship the fixes:** cut 0.2.1 once the current batch lands, so users validate them.
 2. **PSD fidelity to 170/170** with round trips, plus the Photoshop-authored reference set for smart
-   filters, the text engine and effect shapes; enforce floors in `corpus.rs`.
+   filters, the text engine and effect shapes (https://github.com/storytold/photocraft-corpus, fetched by
+   `cargo xtask corpus --all`); enforce floors in `corpus.rs`.
 3. **Workflow acceptance tests:** 30–50 real tasks (retouch a portrait, social post with text and
    effects, composite with masks and adjustment layers, CMYK print prep…) scripted end to end and
    checked against Photoshop's output on every build. Their pass rate becomes the headline parity

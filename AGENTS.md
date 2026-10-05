@@ -15,6 +15,7 @@ PhotoCraft is an open-source, native, Photoshop-comparable image editor written 
 | `docs/parity.md` | Generated list of every Photoshop menu item, live or missing |
 | `docs/scorecard.md` | Generated scorecard: performance budgets and numbers, corpus floors, per-area checklists (tools, files, UI, type, automation, reliability, distribution), settings that do nothing |
 | `crates/<name>/README.md` (where present) | Public API of that crate |
+| [photocraft-corpus](https://github.com/storytold/photocraft-corpus) + `docs/development.md` › Test corpora | Real-file test oracles (our Photoshop-authored PSDs); with psd-tools, ag-psd and PngSuite fetched into `corpus/` by `cargo xtask corpus --all` at the pins in `xtask/src/corpus_pins.rs` |
 
 ## 2. Workspace map
 
@@ -33,7 +34,7 @@ apps/
   photocraft                 desktop app (eframe/wgpu), TCP control server
   photocraft-cli             headless CLI (convert/info/run/batch/commands/mcp)
   photocraft-web             the same app in the browser (trunk + wasm-bindgen)
-xtask/                       cargo xtask layers | wasm | ci | stats | corpus | parity | perf | scorecard
+xtask/                       cargo xtask layers | wasm | ci | stats | corpus | test-corpus | parity | perf | scorecard
 ```
 
 **Layering is enforced** by `cargo xtask layers`. A crate may depend only on lower layers. `psd`, `codecs` and `cms` depend on nothing in the workspace. Nothing below `ui-egui` may use egui, eframe, winit or rfd. A new crate must be registered in `xtask/src/layers.rs`.
@@ -94,7 +95,10 @@ cargo xtask scorecard       # if you moved a number: flip the checklist row in s
                             # corpus floor, fix a dead preference, or meet a budget (then set enforce = true
                             # in perf/budgets.toml); commit the regenerated docs/scorecard.md (CI checks it)
 cargo xtask perf --quick    # if you touched a hot path; `cargo xtask perf --update-baseline` publishes a full run
+cargo xtask test-corpus     # if you touched psd, io, codecs, compose, gpu, text or format (or: --changed decides)
 ```
+
+**Test corpora.** Real-file corpora live in `corpus/` (gitignored, never committed), fetched at pinned commits and sha256-verified by `cargo xtask corpus --all`: our Photoshop-authored oracles from https://github.com/storytold/photocraft-corpus plus psd-tools, ag-psd and PngSuite from their upstreams. Pins: `xtask/src/corpus_pins.rs`. The corpus tests are opt-in (cargo feature `corpus`): plain `cargo test` skips them, and with the feature on a missing corpus fails ("run `cargo xtask corpus --all`"). `cargo xtask test-corpus` fetches and runs them all. CI always runs them (the `corpus` job, cached by pin). Never commit corpus files; new oracles go to photocraft-corpus (its `AGENTS.md`), then a pin bump here. Details: `docs/development.md` › Test corpora.
 
 Commands must **never panic** on bad input (Rule 9): every `run` closure and the code it calls returns `Err`, not a panic, for any params or document state. New commands come with a graceful-failure test (empty/out-of-range/wrong-type params → `Err`, not a crash).
 

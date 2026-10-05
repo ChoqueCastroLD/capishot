@@ -7,6 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
+# Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
+corpus = []
 default = []
 # AVIF *encode* via ravif (pure Rust). Decoding AVIF needs dav1d (C), so AVIF
 # stays read-unsupported and therefore asymmetric; it is off by default.

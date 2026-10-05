@@ -1,7 +1,7 @@
-//! Optional corpus test: iterates `corpus/psd/**/*.{psd,psb}` and
-//! `corpus/psd-tools/**/*.{psd,psb}` (the full psd-tools set, fetched by
-//! `cargo xtask corpus --psd-tools`) at the workspace root when present
-//! (never committed). Skips silently when neither directory exists.
+//! Corpus test (feature `corpus`; run with `cargo xtask test-corpus`): iterates
+//! `corpus/psd/**/*.{psd,psb}` and `corpus/psd-tools/**/*.{psd,psb}` at the workspace root
+//! (gitignored, fetched and verified by `cargo xtask corpus --all`). A missing corpus fails.
+#![cfg(feature = "corpus")]
 
 use std::path::{Path, PathBuf};
 
@@ -31,9 +31,7 @@ fn corpus_parse_and_byte_stable() {
 }
 
 fn parse_and_byte_stable(root: &Path) {
-    if !root.is_dir() {
-        return;
-    }
+    assert!(root.is_dir(), "{} is missing: run `cargo xtask corpus --all`", root.display());
     let mut files = Vec::new();
     collect(root, &mut files);
     files.sort();

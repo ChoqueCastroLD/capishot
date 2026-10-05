@@ -1,6 +1,7 @@
 //! Notes (`Anno`) and the measurement scale (resource 1074) through PSD: verbatim while
 //! unchanged, regenerated after edits.
 
+#[cfg(feature = "corpus")]
 use std::path::PathBuf;
 
 use photocraft_color::{ColorMode, SampleType};
@@ -10,17 +11,20 @@ use photocraft_io::annotations_map::MEASUREMENT_SCALE;
 use photocraft_io::{ExportOptions, export, import};
 use photocraft_psd::PsdFile;
 
-fn corpus(rel: &str) -> Option<Vec<u8>> {
-    std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus/psd").join(rel)).ok()
+#[cfg(feature = "corpus")]
+fn corpus(rel: &str) -> Vec<u8> {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus/psd").join(rel);
+    std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e}: run `cargo xtask corpus --all`", p.display()))
 }
 
 fn to_psd(doc: &Document) -> Vec<u8> {
     export(doc, "x.psd", &ExportOptions::default()).expect("export").bytes
 }
 
+#[cfg(feature = "corpus")]
 #[test]
 fn corpus_notes_import_and_verbatim_export() {
-    let Some(bytes) = corpus("ag-psd/read-write/annotations/src.psd") else { return };
+    let bytes = corpus("ag-psd/read-write/annotations/src.psd");
     let src = PsdFile::from_bytes(&bytes).unwrap();
     let mut doc = import("src.psd", &bytes).unwrap().document;
     assert_eq!(doc.notes.len(), 2);

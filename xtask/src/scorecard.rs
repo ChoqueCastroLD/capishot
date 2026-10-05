@@ -139,7 +139,7 @@ pub fn parse_corpus(src: &str) -> Vec<Corpus> {
             let v = v.trim().trim_matches('"').to_string();
             match k.trim() {
                 "label" => c.label = v,
-                "default_dir" => c.dir = v,
+                "dir" | "default_dir" => c.dir = v,
                 "pass_floor" => c.pass_floor = v.parse().ok(),
                 "roundtrip_floor" => c.roundtrip_floor = v.parse().ok(),
                 _ => {}
@@ -589,7 +589,7 @@ rows are targets the code doesn't meet yet: they are reported, and only their re
         s.push_str(&format!("\n## {}\n\n", c.title));
         match c.area.as_str() {
             "file" => {
-                s.push_str("Corpus floors (`crates/io/tests/corpus.rs`): the enforced minimums; the corpus test fails below them when the corpus is present.\n\n| Corpus | Directory | Files | Oracle pass floor | Round-trip floor |\n|---|---|---:|---:|---:|\n");
+                s.push_str("Corpus floors (`crates/io/tests/corpus.rs`): the enforced minimums; the corpus tests (cargo feature `corpus`, `cargo xtask test-corpus`, always run in CI) fail below them.\n\n| Corpus | Directory | Files | Oracle pass floor | Round-trip floor |\n|---|---|---:|---:|---:|\n");
                 for k in &inp.corpora {
                     let n = |v: Option<u32>| v.map_or_else(|| "–".into(), |x| x.to_string());
                     s.push_str(&format!("| {} | `{}` | {} | {} | {} |\n", k.label, k.dir, n(k.files), n(k.pass_floor), n(k.roundtrip_floor)));
@@ -776,14 +776,18 @@ const MIXED: Source = Source { label: "io corpus", env: "PHOTOCRAFT_CORPUS", def
 /// 202 vs the merged image.
 const PSD_TOOLS: Source =
     Source { label: "psd-tools corpus", env: "X", default_dir: "corpus/psd-tools", pass_floor: 212, roundtrip_floor: 307, extra: 5 };
+
+/// Ours (256 files; https://github.com/storytold/photocraft-corpus), grouped by feature.
+const PHOTOSHOP: Source = Source { label: "photoshop oracles", dir: "corpus/photoshop", group_depth: 2, pass_floor: 74, roundtrip_floor: 256 };
 "#;
         let c = parse_corpus(src);
-        assert_eq!(c.len(), 2);
+        assert_eq!(c.len(), 3);
         assert_eq!(
             (c[0].label.as_str(), c[0].dir.as_str(), c[0].files, c[0].pass_floor, c[0].roundtrip_floor),
             ("io corpus", "corpus/psd", Some(170), Some(133), Some(169))
         );
         assert_eq!((c[1].files, c[1].pass_floor, c[1].roundtrip_floor), (Some(309), Some(212), Some(307)));
+        assert_eq!((c[2].dir.as_str(), c[2].files, c[2].pass_floor, c[2].roundtrip_floor), ("corpus/photoshop", Some(256), Some(74), Some(256)));
         assert!(parse_corpus("const X: u32 = 1;").is_empty());
     }
 

@@ -277,6 +277,13 @@ Developer, architecture, automation, format, and security documentation is maint
 
 Security architecture, threat modeling, parser hardening, fuzzing, and vulnerability reporting are covered in the [security documentation](book/src/security/) and the repository [security policy](SECURITY.md).
 
+## Test corpora
+
+PhotoCraft is tested against real files: our own Photoshop-authored oracle PSDs in
+[photocraft-corpus](https://github.com/storytold/photocraft-corpus) plus the psd-tools, ag-psd and PngSuite sets, pinned and
+sha256-verified. Fetch them with `cargo xtask corpus --all` and run the tests with
+`cargo xtask test-corpus` (details in [docs/development.md](docs/development.md#test-corpora)).
+
 ## The Crafting Apps
 
 PhotoCraft is one of the **Crafting Apps**: free, open-source creative tools from the

@@ -340,17 +340,20 @@ pub fn keep_resource(doc: &Document, id: u16) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "corpus")]
     const SAMPLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/psd/ag-psd/read-write/annotations/src.psd");
 
+    #[cfg(feature = "corpus")]
     fn anno_of(bytes: &[u8]) -> Option<Vec<u8>> {
         let i = bytes.windows(8).position(|w| w == b"8BIMAnno")?;
         let n = u32::from_be_bytes(bytes[i + 8..i + 12].try_into().ok()?) as usize;
         Some(bytes[i + 12..i + 12 + n].to_vec())
     }
 
+    #[cfg(feature = "corpus")]
     #[test]
     fn parses_and_rewrites_the_sample_byte_exact() {
-        let Ok(file) = std::fs::read(SAMPLE) else { return };
+        let file = std::fs::read(SAMPLE).unwrap_or_else(|e| panic!("{SAMPLE}: {e}: run `cargo xtask corpus --all`"));
         let raw = anno_of(&file).unwrap();
         let notes = parse_anno(&raw).unwrap();
         assert_eq!(notes.len(), 2);

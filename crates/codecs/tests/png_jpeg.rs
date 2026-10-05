@@ -196,14 +196,16 @@ fn tiff_f32_output_matches_oracle() {
 }
 
 // ---------------------------------------------------------------------------
-// Optional PngSuite corpus (repo-root corpus/pngsuite/*.png)
+// PngSuite corpus (repo-root corpus/pngsuite/*.png; feature `corpus`, fetched by
+// `cargo xtask corpus --all`; missing = failure)
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "corpus")]
 #[test]
 fn pngsuite_corpus_matches_oracle() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/pngsuite");
     let Ok(entries) = std::fs::read_dir(&dir) else {
-        return;
+        panic!("{} is missing: run `cargo xtask corpus --all`", dir.display());
     };
     let mut checked = 0;
     for e in entries.flatten() {
@@ -224,4 +226,5 @@ fn pngsuite_corpus_matches_oracle() {
         }
     }
     eprintln!("pngsuite: {checked} files compared");
+    assert!(checked > 100, "{}: only {checked} PNGs compared: run `cargo xtask corpus --all`", dir.display());
 }

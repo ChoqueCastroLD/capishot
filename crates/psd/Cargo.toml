@@ -11,6 +11,8 @@ name = "photocraft_psd"
 path = "src/lib.rs"
 
 [features]
+# Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
+corpus = []
 default = []
 serde = ["dep:serde"]
 testgen = []

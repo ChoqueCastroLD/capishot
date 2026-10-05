@@ -1,6 +1,7 @@
 //! Layer comps (resource 1065 + per-layer `cmls`) and artboards (`artb`) through PSD and
 //! `.pcraft`: byte-exact while unchanged, regenerated after edits.
 
+#[cfg(feature = "corpus")]
 use std::path::PathBuf;
 
 use photocraft_color::{BlendMode, Color, ColorMode, PixelFormat, SampleType};
@@ -11,9 +12,10 @@ use photocraft_io::comps_map::LAYER_COMPS;
 use photocraft_io::{ExportOptions, export, import};
 use photocraft_psd::PsdFile;
 
-fn corpus(rel: &str) -> Option<Vec<u8>> {
+#[cfg(feature = "corpus")]
+fn corpus(rel: &str) -> Vec<u8> {
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus/psd").join(rel);
-    std::fs::read(p).ok()
+    std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e}: run `cargo xtask corpus --all`", p.display()))
 }
 
 fn to_psd(doc: &Document) -> Vec<u8> {
@@ -24,9 +26,10 @@ fn layer_block<'a>(f: &'a PsdFile, name: &str, key: &[u8; 4]) -> Option<&'a [u8]
     f.layers().iter().find(|r| r.name() == name).and_then(|r| r.block(key)).map(|b| b.data.as_slice())
 }
 
+#[cfg(feature = "corpus")]
 #[test]
 fn corpus_layer_comps_import_and_verbatim_export() {
-    let Some(bytes) = corpus("ag-psd/read-write/layer-comps/src.psd") else { return };
+    let bytes = corpus("ag-psd/read-write/layer-comps/src.psd");
     let src = PsdFile::from_bytes(&bytes).unwrap();
     let doc = import("src.psd", &bytes).unwrap().document;
     let names: Vec<_> = doc.layer_comps.iter().map(|c| c.name.as_str()).collect();
@@ -86,9 +89,10 @@ fn corpus_layer_comps_import_and_verbatim_export() {
     }
 }
 
+#[cfg(feature = "corpus")]
 #[test]
 fn corpus_artboards_import_and_verbatim_export() {
-    let Some(bytes) = corpus("psd-tools/gradient-sizes.psd") else { return };
+    let bytes = corpus("psd-tools/gradient-sizes.psd");
     let src = PsdFile::from_bytes(&bytes).unwrap();
     let doc = import("g.psd", &bytes).unwrap().document;
     let boards = doc.artboards();

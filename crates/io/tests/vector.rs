@@ -1,8 +1,10 @@
-//! Vector data ⇄ PSD: synthetic round trips of paths, shape layers and vector masks, plus an
-//! optional corpus check (`corpus/psd`, skipped when absent) that compares our rasterization
+//! Vector data ⇄ PSD: synthetic round trips of paths, shape layers and vector masks, plus a
+//! corpus check (`corpus/psd`, feature `corpus`) that compares our rasterization
 //! of every plain shape layer with the pixels Photoshop stored for it.
 
+#[cfg(feature = "corpus")]
 use std::path::{Path as FsPath, PathBuf};
+#[cfg(feature = "corpus")]
 use std::sync::Arc;
 
 use photocraft_color::{Color, ColorMode, SampleType};
@@ -12,6 +14,7 @@ use photocraft_doc::{
 };
 use photocraft_geom::{Point, Rect};
 use photocraft_io::*;
+#[cfg(feature = "corpus")]
 use photocraft_psd::PsdFile;
 
 fn roundtrip(d: &Document) -> Document {
@@ -161,6 +164,7 @@ fn vector_mask_roundtrip_and_removal() {
     assert!(roundtrip(&g).layers[1].vector_mask.is_some());
 }
 
+#[cfg(feature = "corpus")]
 fn collect(dir: &FsPath, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
@@ -175,12 +179,11 @@ fn collect(dir: &FsPath, out: &mut Vec<PathBuf>) {
 
 /// Every plain shape layer in the corpus (solid fill, no stroke, no effects, visible fill):
 /// our fill coverage vs the alpha of Photoshop's pixels. Reported; asserted loosely.
+#[cfg(feature = "corpus")]
 #[test]
 fn corpus_shape_coverage_matches_photoshop() {
     let root = FsPath::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/psd");
-    if !root.is_dir() {
-        return;
-    }
+    assert!(root.is_dir(), "{} is missing: run `cargo xtask corpus --all`", root.display());
     let mut files = Vec::new();
     collect(&root, &mut files);
     files.sort();
@@ -223,15 +226,15 @@ fn corpus_shape_coverage_matches_photoshop() {
 }
 
 /// (layer name, block key, data).
+#[cfg(feature = "corpus")]
 type NamedBlock = (String, [u8; 4], Arc<Vec<u8>>);
 
 /// Unedited corpus shapes and vector masks export with byte-identical vector blocks.
+#[cfg(feature = "corpus")]
 #[test]
 fn corpus_vector_blocks_survive_roundtrip() {
     let root = FsPath::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/psd");
-    if !root.is_dir() {
-        return;
-    }
+    assert!(root.is_dir(), "{} is missing: run `cargo xtask corpus --all`", root.display());
     let mut files = Vec::new();
     collect(&root, &mut files);
     files.sort();
