@@ -5,7 +5,75 @@
 //! wrap-around on premultiplied colour, so integer placements at 100 % reproduce the tile
 //! exactly and scaled ones stay seamless.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
 use photocraft_doc::{Pattern, Rect};
+
+pub(crate) const PREPARED_PATTERN_BYTES: usize = 64 << 20;
+const MAX_PREPARED_PATTERNS: usize = 64;
+type PreparedSlot = Arc<OnceLock<Option<Arc<Tile>>>>;
+
+struct PreparedState {
+    slots: HashMap<usize, PreparedSlot>,
+    reserved_bytes: usize,
+}
+
+/// Demand-prepared pixels owned by one rendering call, never by the document.
+pub(crate) struct PreparedPatterns<'a> {
+    patterns: &'a [Pattern],
+    budget: usize,
+    state: Mutex<PreparedState>,
+}
+
+impl<'a> PreparedPatterns<'a> {
+    pub(crate) fn new(patterns: &'a [Pattern], budget: usize) -> Self {
+        Self { patterns, budget, state: Mutex::new(PreparedState { slots: HashMap::new(), reserved_bytes: 0 }) }
+    }
+
+    pub(crate) fn source(&self) -> &'a [Pattern] {
+        self.patterns
+    }
+
+    pub(crate) fn get(&self, id: &str, name: &str) -> Option<Arc<Tile>> {
+        let p = photocraft_doc::pattern::find(self.patterns, id, name)?;
+        if p.is_empty() {
+            return None;
+        }
+        let bytes = usize::try_from(p.width)
+            .ok()
+            .and_then(|w| usize::try_from(p.height).ok().and_then(|h| w.checked_mul(h)))
+            .and_then(|pixels| pixels.checked_mul(std::mem::size_of::<[f32; 4]>()));
+        // The borrowed immutable slice pins these addresses for the complete call.
+        let key = std::ptr::from_ref(p) as usize;
+        let slot = {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(slot) = state.slots.get(&key) {
+                Some(Arc::clone(slot))
+            } else if let Some(bytes) = bytes
+                && bytes <= self.budget.saturating_sub(state.reserved_bytes)
+                && state.slots.len() < MAX_PREPARED_PATTERNS
+            {
+                let slot: PreparedSlot = Arc::new(OnceLock::new());
+                // Reserve before initialization: concurrent pending buffers consume the budget too.
+                state.reserved_bytes += bytes;
+                state.slots.insert(key, Arc::clone(&slot));
+                Some(slot)
+            } else {
+                None
+            }
+        };
+        match slot {
+            Some(slot) => {
+                // Conversion must stay serial: Rayon work stealing can re-enter this slot
+                // while its initializer is running inside an effect-map OnceLock.
+                // Run on the requesting worker to preserve its active CMYK profile.
+                slot.get_or_init(|| Tile::new(p).map(Arc::new)).clone()
+            }
+            None => Tile::new(p).map(Arc::new),
+        }
+    }
+}
 
 /// A pattern converted once to straight-alpha RGBA for sampling.
 pub struct Tile {
@@ -140,9 +208,16 @@ mod tests {
 
     #[test]
     fn identity_placement_tiles_exactly() {
-        let t = Tile::new(&checker()).unwrap();
+        let patterns = [checker()];
+        let prepared = PreparedPatterns::new(&patterns, PREPARED_PATTERN_BYTES);
+        let t = prepared.get(&patterns[0].id, "").unwrap();
+        let again = prepared.get(&patterns[0].id, "").unwrap();
+        assert!(Arc::ptr_eq(&t, &again));
+        let uncached = PreparedPatterns::new(&patterns, 0);
+        let fallback = uncached.get(&patterns[0].id, "").unwrap();
         let p = Placement::new(Rect::new(0, 0, 10, 10), false, (0.0, 0.0), 1.0, 0.0);
         let px = render(&t, &p, Rect::new(-4, 0, 8, 1));
+        assert_eq!(px, render(&fallback, &p, Rect::new(-4, 0, 8, 1)));
         assert_eq!(px[0], [0.0, 0.0, 1.0, 1.0]); // x = -4 wraps to 0
         assert_eq!(px[6], [1.0, 0.0, 0.0, 1.0]); // x = 2
         assert_eq!(px[8], [0.0, 0.0, 1.0, 1.0]); // x = 4

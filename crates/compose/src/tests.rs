@@ -283,9 +283,10 @@ fn solid_and_gradient_fill_layers() {
         style: photocraft_doc::GradientStyle::Linear,
         reverse: false,
     };
-    let buf = render_fill(&g, Rect::new(0, 0, 10, 1), Rect::new(0, 0, 10, 1), &[]);
+    let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
+    let buf = render_fill(&g, Rect::new(0, 0, 10, 1), Rect::new(0, 0, 10, 1), &patterns);
     // tile independence: a 1px render of the right edge equals the full render
-    let one = render_fill(&g, Rect::new(9, 0, 10, 1), Rect::new(0, 0, 10, 1), &[]);
+    let one = render_fill(&g, Rect::new(9, 0, 10, 1), Rect::new(0, 0, 10, 1), &patterns);
     assert_eq!(one.px[0], buf.px[9]);
     assert!(buf.px[0][0] < buf.px[9][0], "left dark, right light");
 }
@@ -685,14 +686,16 @@ fn effect_maps_are_cached_and_invalidated_by_pixel_changes() {
     let mut l = solid_layer("fx", Rect::new(16, 16, 48, 48), [1.0, 0.0, 0.0, 1.0]);
     l.effects.items.push(photocraft_doc::Effect::default_drop_shadow());
     doc.layers.push(l);
-    let cx = Ctx::for_doc(&doc);
+    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES);
+    let cx = Ctx::for_doc(&doc, &patterns);
     let a = effect_maps(&doc.layers[1], &cx);
     let b = effect_maps(&doc.layers[1], &cx);
     assert!(std::sync::Arc::ptr_eq(&a, &b), "second request hits the cache");
     let first = flatten(&doc);
     // Editing the layer's pixels changes its tiles, so the maps are rebuilt.
     doc.layers[1].surface_mut().unwrap().fill_rect(Rect::new(8, 8, 20, 20), &[0.0, 0.0, 1.0, 1.0]);
-    let cx = Ctx::for_doc(&doc);
+    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES);
+    let cx = Ctx::for_doc(&doc, &patterns);
     let c = effect_maps(&doc.layers[1], &cx);
     assert!(!std::sync::Arc::ptr_eq(&a, &c), "pixel edit invalidates");
     // Cached rendering equals a fresh build (tiled and full renders agree too).

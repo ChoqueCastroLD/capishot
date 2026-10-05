@@ -84,7 +84,8 @@ pub fn render(doc: &Document, rect: Rect) -> Buffer {
 
 /// [`render`] with an explicit tile size (tests check tile independence).
 pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
-    let cx = Ctx::for_doc(doc);
+    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES);
+    let cx = Ctx::for_doc(doc, &patterns);
     render_tiled_with(doc, rect, tile, &cx)
 }
 
@@ -193,7 +194,9 @@ pub fn render_bands<E>(doc: &Document, rect: Rect, band_rows: i32, mut sink: imp
     if rect.is_empty() {
         return Ok(());
     }
-    let cx = Ctx::for_doc(doc);
+    // Keep prepared pixels and compiled vector masks across bands without retaining any rendered band.
+    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES);
+    let cx = Ctx::for_doc(doc, &patterns);
     let rows = band_rows_for(rect.width(), band_rows);
     let mut y = rect.y0;
     while y < rect.y1 {
@@ -243,6 +246,7 @@ pub fn flatten(doc: &Document) -> Buffer {
 /// Render an arbitrary subset: a single layer (e.g. for thumbnails), isolated.
 pub fn render_layer(layer: &Layer, rect: Rect) -> Buffer {
     let mut buf = Buffer::transparent(rect);
+    let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
     composite_stack(
         std::slice::from_ref(layer),
         &mut buf,
@@ -250,7 +254,7 @@ pub fn render_layer(layer: &Layer, rect: Rect) -> Buffer {
             canvas: rect,
             transfer: adjust::Transfer::Srgb,
             light: photocraft_doc::GlobalLight::default(),
-            patterns: &[],
+            patterns: &patterns,
             mode: photocraft_color::ColorMode::Rgb,
             depth: photocraft_color::SampleType::F32,
             vector_masks: RenderVectorMasks::default(),
@@ -415,8 +419,8 @@ struct Ctx<'a> {
     transfer: adjust::Transfer,
     /// Global light for layer effects.
     light: photocraft_doc::GlobalLight,
-    /// The document's patterns (pattern fills and overlays).
-    patterns: &'a [Pattern],
+    /// Prepared document patterns, shared across all tiles and bands of this render call.
+    patterns: &'a pattern::PreparedPatterns<'a>,
     /// The document's colour mode (channel restrictions name its channels).
     mode: photocraft_color::ColorMode,
     depth: photocraft_color::SampleType,
@@ -424,12 +428,12 @@ struct Ctx<'a> {
 }
 
 impl<'a> Ctx<'a> {
-    fn for_doc(doc: &'a Document) -> Self {
+    fn for_doc(doc: &Document, patterns: &'a pattern::PreparedPatterns<'a>) -> Self {
         Self {
             canvas: doc.bounds(),
             transfer: adjust::Transfer::for_mode(doc.mode),
             light: doc.global_light,
-            patterns: &doc.patterns,
+            patterns,
             mode: doc.mode,
             depth: doc.depth,
             vector_masks: RenderVectorMasks::default(),
@@ -572,7 +576,8 @@ fn render_content(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Buffer> {
 /// The alpha of `layer`'s own content over `rect` (masks applied, row-major): the shape its
 /// effect maps are built from (for the GPU compositor). Zero for adjustment layers.
 pub fn layer_shape(doc: &Document, layer: &Layer, rect: Rect) -> Vec<f32> {
-    let cx = Ctx::for_doc(doc);
+    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES);
+    let cx = Ctx::for_doc(doc, &patterns);
     render_content(layer, rect, &cx).map(|b| b.px.iter().map(|p| p[3]).collect()).unwrap_or_else(|| vec![0.0; rect.width() as usize * rect.height() as usize])
 }
 
@@ -612,10 +617,11 @@ pub fn fill_frame(layer: &Layer, canvas: Rect) -> Rect {
 /// A fill layer's content over `canvas`, laid out in the frame its masks give it (as the
 /// compositor does) but without applying the masks: the pixels a PSD fill layer stores.
 pub fn render_fill_content(layer: &Layer, f: &Fill, canvas: Rect, patterns: &[Pattern]) -> Buffer {
-    render_fill(f, canvas, fill_frame(layer, canvas), patterns)
+    let prepared = pattern::PreparedPatterns::new(patterns, pattern::PREPARED_PATTERN_BYTES);
+    render_fill(f, canvas, fill_frame(layer, canvas), &prepared)
 }
 
-fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &[Pattern]) -> Buffer {
+fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &pattern::PreparedPatterns<'_>) -> Buffer {
     match f {
         Fill::Solid(c) => {
             let rgb = c.to_rgb();
@@ -642,7 +648,7 @@ fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &[Pattern]) -> Buff
             b
         }
         // Laid out from the layer's frame when linked; transparent if the pattern is missing.
-        Fill::Pattern { name, scale, id, angle, link, phase } => match photocraft_doc::pattern::find(patterns, id, name).and_then(pattern::Tile::new) {
+        Fill::Pattern { name, scale, id, angle, link, phase } => match patterns.get(id, name) {
             Some(tile) => Buffer { rect, px: pattern::render(&tile, &pattern::Placement::new(canvas, *link, *phase, *scale, *angle), rect) },
             None => Buffer::transparent(rect),
         },
@@ -949,7 +955,14 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
             composite_atop(c, &mut content, cx);
         }
         let maps = effect_maps(layer, cx);
-        effects::composite_with_effects(layer, &content, backdrop, &maps, paint_bounds(layer).unwrap_or_else(|| layer_bounds(layer, cx.canvas)), cx.patterns);
+        effects::composite_with_effects_prepared(
+            layer,
+            &content,
+            backdrop,
+            &maps,
+            paint_bounds(layer).unwrap_or_else(|| layer_bounds(layer, cx.canvas)),
+            cx.patterns,
+        );
         return;
     }
     if let Some((mut content, stroke)) = shape_parts(layer, clipped, rect, cx) {
@@ -1101,7 +1114,7 @@ fn effect_maps(layer: &Layer, cx: &Ctx) -> std::sync::Arc<effects::FxMaps> {
     let region = layer_bounds(layer, cx.canvas).inflate(m).intersect(&cx.canvas.inflate(m));
     if std::env::var_os("PHOTOCRAFT_FX_NOCACHE").is_some() {
         let shape = render_content(layer, region, cx).map(|b| b.px.iter().map(|p| p[3]).collect()).unwrap_or_default();
-        return std::sync::Arc::new(effects::build_maps(layer, shape, region, &cx.light, &texture_ctx(layer, region, cx)));
+        return std::sync::Arc::new(effects::build_maps_prepared(layer, shape, region, &cx.light, &texture_ctx(layer, region, cx), cx.patterns));
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
     layer_identity(layer, &mut h);
@@ -1127,7 +1140,7 @@ fn effect_maps(layer: &Layer, cx: &Ctx) -> std::sync::Arc<effects::FxMaps> {
                 .map(|b| b.px.iter().map(|p| p[3]).collect())
                 .unwrap_or_else(|| vec![0.0; region.width() as usize * region.height() as usize])
         };
-        let maps = effects::build_maps(layer, shape, region, &cx.light, &texture_ctx(layer, region, cx));
+        let maps = effects::build_maps_prepared(layer, shape, region, &cx.light, &texture_ctx(layer, region, cx), cx.patterns);
         let bytes = maps.bytes();
         // Counted exactly once, when the entry is built.
         fx_cache().lock().unwrap_or_else(|e| e.into_inner()).bytes += bytes;
@@ -1152,7 +1165,7 @@ fn effect_maps(layer: &Layer, cx: &Ctx) -> std::sync::Arc<effects::FxMaps> {
 
 fn texture_ctx<'a>(layer: &Layer, region: Rect, cx: &Ctx<'a>) -> effects::TextureCtx<'a> {
     let sb = paint_bounds(layer).unwrap_or_else(|| layer_bounds(layer, cx.canvas));
-    effects::TextureCtx { rect: region, patterns: cx.patterns, anchor: layer.effects.reference.unwrap_or((f64::from(sb.x0), f64::from(sb.y0))) }
+    effects::TextureCtx { rect: region, patterns: cx.patterns.source(), anchor: layer.effects.reference.unwrap_or((f64::from(sb.x0), f64::from(sb.y0))) }
 }
 
 /// Composite `layer` onto `base` restricted to the base's alpha (clipping mask semantics),
@@ -1195,7 +1208,7 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
         let Some(content) = render_content(layer, rect, cx) else { return };
         let mut opaque = Buffer { rect, px: base.px.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() };
         let maps = effect_maps(layer, cx);
-        effects::composite_with_effects(
+        effects::composite_with_effects_prepared(
             layer,
             &content,
             &mut opaque,
