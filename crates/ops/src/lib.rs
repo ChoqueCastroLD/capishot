@@ -123,6 +123,14 @@ impl History {
         self.undo.iter().chain(self.redo.iter()).map(|s| tile_bytes(&s.doc, &mut seen)).sum()
     }
 
+    /// Pixel bytes of `current` plus the tiles only history holds (what [`History::trim`]
+    /// bounds by [`History::max_bytes`]).
+    pub fn pixel_bytes(&self, current: &Document) -> usize {
+        let mut seen = HashSet::new();
+        let own = tile_bytes(current, &mut seen);
+        self.undo.iter().chain(self.redo.iter()).fold(own, |n, s| n.saturating_add(tile_bytes(&s.doc, &mut seen)))
+    }
+
     /// Keep pixel memory within [`History::max_bytes`]: the current document's tiles plus the
     /// tiles only history holds (newest states first). The oldest undo states that don't fit are
     /// dropped; the most recent one is always kept so the last step can be undone. Returns how
@@ -262,6 +270,7 @@ mod tests {
         assert_eq!(h.trim(&cur), 3);
         assert_eq!(h.past_len(), 3);
         assert_eq!(h.unique_bytes(&cur), 3 * tile);
+        assert_eq!(h.pixel_bytes(&cur), 4 * tile, "the current tile plus history's");
         assert_eq!(h.entries()[0], "paint 2");
         // A budget smaller than one state still keeps the last step undoable.
         h.max_bytes = 1;

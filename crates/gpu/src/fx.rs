@@ -92,15 +92,7 @@ impl MapProgram {
     /// the reach each field was computed with.
     pub fn windows(&self, d: Rect, region: Rect, field_reach: &dyn Fn(FieldKind) -> i32) -> Vec<Rect> {
         let n = self.stages.len();
-        let reach_of = |reach: &[i32], i: Option<In>| match i {
-            Some(In::Val(k)) => reach[k],
-            Some(In::Field(f)) => field_radius(f, field_reach(f)),
-            _ => 0,
-        };
-        let mut reach = vec![0i32; n];
-        for (i, s) in self.stages.iter().enumerate() {
-            reach[i] = reach_of(&reach, s.a).max(reach_of(&reach, s.b)).max(reach_of(&reach, s.s)) + s.radius;
-        }
+        let reach = self.stage_reach(field_reach);
         let mut need = vec![Rect::EMPTY; n];
         for (i, s) in self.stages.iter().enumerate() {
             if s.out.is_some() {
@@ -121,6 +113,27 @@ impl MapProgram {
             }
         }
         need
+    }
+
+    /// Per stage, how far (px) its output depends on the shape.
+    fn stage_reach(&self, field_reach: &dyn Fn(FieldKind) -> i32) -> Vec<i32> {
+        let mut reach: Vec<i32> = Vec::with_capacity(self.stages.len());
+        for s in &self.stages {
+            let of = |i: Option<In>| match i {
+                Some(In::Val(k)) => reach.get(k).copied().unwrap_or(0),
+                Some(In::Field(f)) => field_radius(f, field_reach(f)),
+                _ => 0,
+            };
+            let r = of(s.a).max(of(s.b)).max(of(s.s)) + s.radius;
+            reach.push(r);
+        }
+        reach
+    }
+
+    /// How far (px) any final map depends on the shape: maps computed over a window are exact
+    /// at least this far inside it.
+    pub fn reach(&self, field_reach: &dyn Fn(FieldKind) -> i32) -> i32 {
+        self.stage_reach(field_reach).into_iter().zip(&self.stages).filter(|(_, s)| s.out.is_some()).map(|(r, _)| r).max().unwrap_or(0)
     }
 
     /// Physical temporary index per stage (None for final maps), reusing temporaries after

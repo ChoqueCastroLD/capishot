@@ -3,25 +3,31 @@
 //! Renders a [`Document`] with wgpu, producing the same straight-alpha composite as the CPU
 //! reference (`photocraft-compose`) within ~1/255:
 //!
-//! - **Residency.** Layer and mask surfaces live on the GPU as dense textures covering their
-//!   allocated tiles. Surfaces are copy-on-write `Arc` tiles, so a tile is re-uploaded only when
-//!   its `Arc` changed (a brush stroke uploads just the touched 256² tiles; undo swaps pointers
-//!   back and uploads only what differs). RGBA8 tiles upload with zero conversion.
+//! - **Residency.** Layer and mask surfaces live on the GPU in square *pages* (up to [`PAGE`]²,
+//!   never above the device's texture limit) covering their allocated tiles. A page is uploaded
+//!   only when a chunk inside it is drawn, and surfaces are copy-on-write `Arc` tiles, so a tile
+//!   is re-uploaded only when its `Arc` changed (a brush stroke uploads just the touched 256²
+//!   tiles; undo swaps pointers back and uploads only what differs). RGBA8 tiles upload with
+//!   zero conversion. Pages over a byte budget are evicted least recently used first.
 //! - **Planner** ([`plan`]). The layer tree becomes a linear list of passes over abstract
 //!   chunk-sized buffers (blend with every Photoshop mode, opacity × fill, masks, clipping groups,
 //!   pass-through vs isolated groups, adjustments, solid / gradient fills, layer effects).
 //! - **Layer effects** (`fx.rs`). Each effect layer's maps (shadow, glow, satin, bevel, stroke
 //!   bands) are built by fragment passes over its effect region and cached on the GPU per layer
-//!   state; a brush stroke rebuilds only the damaged tiles grown by the effect reach.
-//! - **Execution.** The canvas is processed in chunks (1024² RGBA32F accumulators, reused), and
-//!   each finished chunk is handed to a caller-supplied sink, e.g. to encode it straight into a
-//!   display texture — no readback.
+//!   state; a brush stroke rebuilds only the damaged tiles grown by the effect reach. A region
+//!   larger than the texture limit is built per page cell, over the cell grown by the effects'
+//!   reach, so every map is exact inside its cell.
+//! - **Execution.** The canvas is processed page cell by page cell, each in chunks (1024²
+//!   RGBA32F accumulators, reused) that bind only that cell's pages, and each finished chunk is
+//!   handed to a caller-supplied sink, e.g. to encode it straight into a display texture — no
+//!   readback. Documents of any size composite on the GPU; a huge refresh submits as it goes, so
+//!   staged uploads and evicted pages stay bounded.
 //!
 //! Vector masks (rasterised once per mask state into a combined mask texture), layers clipped to
 //! pass-through groups, stroked shapes with clipped layers (fill and stroke split once per shape
 //! state), pattern fills and artboards are planned like everything else. What remains
-//! (Multichannel documents, documents or effect regions larger than the device's texture limit)
-//! returns [`Unsupported`]; callers fall back to the CPU compositor.
+//! (Multichannel documents, patterns larger than the texture limit) returns [`Unsupported`];
+//! callers fall back to the CPU compositor.
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -56,6 +62,19 @@ const CHUNK_UNIFORM: u64 = 16;
 const OP_UNIFORM: u64 = 176;
 /// GPU memory the effect-map cache may hold before evicting layers not drawn this frame.
 pub const FX_BUDGET: usize = 1536 << 20;
+/// Largest side of the square pages layer surfaces are stored in on the GPU (smaller when the
+/// device's texture limit is). A chunk only binds the pages of the cell it lies in, so layers of
+/// any size composite on the GPU.
+pub const PAGE: u32 = 2048;
+/// GPU memory resident layer pages may hold before the least recently used are evicted.
+pub const RESIDENT_BUDGET: u64 = 4 << 30;
+/// Uploads (bytes) [`Compositor::render`] stages before submitting the work recorded so far, so
+/// a refresh of a huge document never holds all its uploads in staging memory at once.
+const FLUSH_BYTES: u64 = 512 << 20;
+/// Pass pixels (chunk pixels × passes) [`Compositor::render`] records before submitting: one
+/// command buffer holding a whole huge refresh can run for seconds, long enough for the OS to
+/// reset the GPU.
+const FLUSH_WORK: u64 = 1 << 30;
 
 /// A finished chunk: straight-alpha RGBA32F pixels of `rect` (document coordinates) at the
 /// texture's origin.
@@ -79,6 +98,12 @@ pub struct Stats {
     pub fx_programs: usize,
     /// Effect-map pixels written (all stages).
     pub fx_pixels: u64,
+    /// Page cells the region spans (each binds only the layer pages it overlaps).
+    pub cells: usize,
+    /// Layer pages and paged effect maps evicted to stay within the memory budgets.
+    pub evicted: usize,
+    /// Intermediate submits of a huge refresh (to bound staging and evicted memory).
+    pub flushes: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,11 +150,18 @@ impl TexKind {
 
 /// Index into the render's resident key list, and the texture's region (x, y, w, h).
 type ResidentRef = (usize, [i32; 4]);
+/// A page cell: the square `[x·page, (x+1)·page) × [y·page, (y+1)·page)` of document pixels.
+type Cell = (i32, i32);
+/// A resident layer page.
+type ResKey = (LayerId, Role, Cell);
+/// Effect maps of a layer: over its whole effect region (`None`), or one page cell of a region
+/// larger than the texture limit.
+type FxKey = (LayerId, Option<Cell>);
 
 struct Resident {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
-    /// Document-pixel rect covered (tile aligned).
+    /// Document-pixel rect covered (tile aligned, inside one page cell).
     region: Rect,
     kind: TexKind,
     format: PixelFormat,
@@ -137,8 +169,16 @@ struct Resident {
     default_nonzero: bool,
     doc: DocId,
     last_used: u64,
+    /// Cell visit that last used it (least recently used pages are evicted first).
+    stamp: u64,
     /// CMYK profile the texels were converted with (`CmykSpace::id`, 0 = built-in / not CMYK).
     cmyk: u64,
+}
+
+impl Resident {
+    fn bytes(&self) -> u64 {
+        self.region.width() as u64 * self.region.height() as u64 * self.kind.bytes_per_pixel() as u64
+    }
 }
 
 /// A texture and its default view.
@@ -225,6 +265,7 @@ struct FxEntry {
     fields: HashMap<FieldKind, (i32, Tex)>,
     progs: Vec<ProgState>,
     last_used: u64,
+    stamp: u64,
 }
 
 impl FxEntry {
@@ -339,13 +380,30 @@ fn texture_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, views: &
 pub struct Compositor {
     kit: Kit,
     pool: Vec<(wgpu::Texture, wgpu::TextureView)>,
-    residents: HashMap<(LayerId, Role), Resident>,
-    fx: HashMap<LayerId, FxEntry>,
+    residents: HashMap<ResKey, Resident>,
+    fx: HashMap<FxKey, FxEntry>,
     /// Effect temporaries (R32F, region sized) and the frame they were last used.
     temps: Vec<(Tex, u64)>,
     patterns: HashMap<String, (u64, Tex)>,
+    /// Texture side limit the paging is planned for (the device's, or smaller in tests).
     max_dim: u32,
+    /// The device's real texture side limit.
+    device_max: u32,
+    /// Page side (a power of two, multiple of the tile size, at most `max_dim`).
+    page: u32,
+    /// Chunk side (divides `page`).
+    chunk: u32,
+    resident_budget: u64,
+    /// GPU memory the effect-map cache may hold ([`FX_BUDGET`] or less).
+    fx_budget: u64,
+    /// What the view shows: a full refresh draws these cells last, so their pages are the
+    /// ones still resident for the edits that follow.
+    focus: Option<Rect>,
     frame: u64,
+    /// Cell visits so far (LRU clock of pages).
+    stamp: u64,
+    /// Bytes staged by uploads since the last submit.
+    staged: u64,
     acc_format: wgpu::TextureFormat,
     /// Whether the effect-map pipelines could be built (else documents with layer effects are
     /// [`Unsupported`] and use the CPU compositor).
@@ -379,13 +437,52 @@ fn uniform_entry(binding: u32, size: u64) -> wgpu::BindGroupLayoutEntry {
 /// The compositor's WGSL source (exposed for validation in tests).
 pub const SHADER: &str = include_str!("compose.wgsl");
 
-/// Pass-level resources resolved for one plan: residents (texture, mask), effect maps (view and
-/// region) and pattern textures per pass.
+/// Pass-level resources resolved for one page cell: resident pages (texture, mask) and effect
+/// maps (view and region) per pass.
 struct Bound {
     views: Vec<(Option<ResidentRef>, Option<ResidentRef>)>,
-    keys: Vec<(LayerId, Role)>,
+    keys: Vec<ResKey>,
     maps: Vec<Option<(wgpu::TextureView, Rect)>>,
+}
+
+/// Pass-level resources shared by every cell of a frame.
+struct FrameRes {
+    /// Tile area of each pass's (texture, mask) surface within the canvas tile grid.
+    areas: Vec<(Rect, Rect)>,
+    luts: Vec<Option<(wgpu::Texture, wgpu::TextureView)>>,
     patterns: Vec<Option<wgpu::TextureView>>,
+}
+
+/// Document pixels of page cell `c`.
+fn cell_rect(c: Cell, page: u32) -> Rect {
+    let p = page as i32;
+    Rect::new(c.0.saturating_mul(p), c.1.saturating_mul(p), c.0.saturating_add(1).saturating_mul(p), c.1.saturating_add(1).saturating_mul(p))
+}
+
+/// `r` cut along the grid of `step`-sized squares (row-major).
+fn grid_rects(r: Rect, step: u32) -> Vec<Rect> {
+    let s = step.max(1) as i32;
+    let mut out = Vec::new();
+    let mut y = r.y0.div_euclid(s) * s;
+    while y < r.y1 {
+        let mut x = r.x0.div_euclid(s) * s;
+        while x < r.x1 {
+            out.push(Rect::new(x, y, x.saturating_add(s), y.saturating_add(s)).intersect(&r));
+            x = x.saturating_add(s);
+        }
+        y = y.saturating_add(s);
+    }
+    out
+}
+
+/// The reach up to which each distance field must be exact (the largest any program asks for).
+fn field_reaches(progs: &[fx::MapProgram]) -> HashMap<FieldKind, i32> {
+    let mut want: HashMap<FieldKind, i32> = HashMap::new();
+    for (k, r) in progs.iter().flat_map(|p| p.fields.iter()) {
+        let w = want.entry(*k).or_insert(0);
+        *w = (*w).max(*r);
+    }
+    want
 }
 
 /// Runs `f` inside validation and internal-error scopes and returns the first error raised.
@@ -488,32 +585,149 @@ impl Compositor {
             fx: HashMap::new(),
             temps: Vec::new(),
             patterns: HashMap::new(),
-            max_dim: device.limits().max_texture_dimension_2d,
+            max_dim: 0,
+            device_max: device.limits().max_texture_dimension_2d,
+            page: PAGE,
+            chunk: CHUNK,
+            resident_budget: RESIDENT_BUDGET,
+            fx_budget: FX_BUDGET as u64,
+            focus: None,
             frame: 0,
+            stamp: 0,
+            staged: 0,
             acc_format,
             effect_maps: map_error.is_none(),
             cmyk: 0,
         }
+        .with_texture_limit(device.limits().max_texture_dimension_2d)
     }
 
-    /// Whether `doc` can be composited on the GPU.
-    pub fn supports(&self, doc: &Document) -> Result<(), Unsupported> {
-        let b = doc.bounds();
-        if b.width() > self.max_dim || b.height() > self.max_dim {
-            return Err(Unsupported(format!("document larger than the GPU texture limit ({})", self.max_dim)));
+    fn with_texture_limit(mut self, max: u32) -> Self {
+        self.set_texture_limit(max);
+        self
+    }
+
+    /// Plan paging for a texture side limit of `max` (clamped to the device's own limit and at
+    /// least one tile). Tests use a small limit to exercise documents larger than it on any
+    /// adapter. Drops every cached texture.
+    pub fn set_texture_limit(&mut self, max: u32) {
+        let tile = TILE_SIZE as u32;
+        self.max_dim = max.min(self.device_max).max(tile);
+        let mut page = tile;
+        while page * 2 <= self.max_dim.min(PAGE) {
+            page *= 2;
         }
+        self.page = page;
+        self.chunk = CHUNK.min(page);
+        self.pool.clear();
+        self.residents.clear();
+        self.fx.clear();
+        self.temps.clear();
+    }
+
+    /// The page side layer surfaces are stored in.
+    pub fn page_size(&self) -> u32 {
+        self.page
+    }
+
+    /// Set the GPU memory resident layer pages may hold (default [`RESIDENT_BUDGET`]).
+    pub fn set_resident_budget(&mut self, bytes: u64) {
+        self.resident_budget = bytes;
+    }
+
+    /// Set the GPU memory the compositor may hold for layer pages and effect maps together
+    /// (a quarter of it, at most [`FX_BUDGET`], for effect maps). Uploads and evicted pages in
+    /// flight during a refresh stay within about a quarter more.
+    pub fn set_memory_budget(&mut self, bytes: u64) {
+        self.fx_budget = (FX_BUDGET as u64).min(bytes / 4);
+        self.resident_budget = bytes.saturating_sub(self.fx_budget);
+    }
+
+    /// The budget of layer pages plus effect maps (bytes).
+    pub fn memory_budget(&self) -> u64 {
+        self.resident_budget.saturating_add(self.fx_budget)
+    }
+
+    /// Bytes of the layer pages a render of `region` needs resident (each layer and mask
+    /// surface's tiles within the region's page cells, in their texture format).
+    pub fn working_set(&self, doc: &Document, region: Rect) -> u64 {
+        let Ok(plan) = plan(doc) else { return 0 };
+        let grid = tile_grid(doc.bounds());
+        let cells = grid_rects(region.intersect(&doc.bounds()), self.page)
+            .into_iter()
+            .map(|r| cell_rect((r.x0.div_euclid(self.page as i32), r.y0.div_euclid(self.page as i32)), self.page))
+            .fold(Rect::EMPTY, |a, c| if a.is_empty() { c } else { a.union(&c) });
+        let mut seen = std::collections::HashSet::new();
+        let mut total = 0u64;
+        for p in &plan.passes {
+            let sources = [p.tex.as_ref().map(|t| (t.layer, t.role, t.surface.get())), p.mask.as_ref().map(|m| (m.layer, Role::Mask, m.surface.get()))];
+            for (layer, role, s) in sources.into_iter().flatten() {
+                if seen.insert((layer, role)) {
+                    let a = s.tile_bounds().intersect(&grid).intersect(&cells);
+                    total += a.width() as u64 * a.height() as u64 * TexKind::for_surface(role, s.format()).bytes_per_pixel() as u64;
+                }
+            }
+        }
+        total
+    }
+
+    /// Whether a render of `region` keeps every layer page it needs within the budget; when it
+    /// doesn't, each render re-uploads what was evicted.
+    pub fn fits_budget(&self, doc: &Document, region: Rect) -> bool {
+        self.working_set(doc, region) <= self.resident_budget
+    }
+
+    /// The document area the view shows (`None`: unknown). Full refreshes draw its cells last.
+    pub fn set_focus(&mut self, focus: Option<Rect>) {
+        self.focus = focus;
+    }
+
+    /// GPU memory held by resident layer pages (bytes).
+    pub fn resident_bytes(&self) -> u64 {
+        self.residents.values().map(Resident::bytes).sum()
+    }
+
+    /// Whether `doc` can be composited on the GPU. Documents and layers larger than the texture
+    /// limit are fine: surfaces are stored in page-sized textures and effect maps of regions
+    /// larger than the limit are built per page cell.
+    pub fn supports(&self, doc: &Document) -> Result<(), Unsupported> {
         let p = plan(doc)?;
         self.check_fx(doc, &p)
     }
 
-    /// Effect regions and patterns must fit in textures.
+    /// Whether the maps of an effect region are built per page cell (it exceeds the limit).
+    fn fx_paged(&self, region: Rect) -> bool {
+        region.width() > self.max_dim || region.height() > self.max_dim
+    }
+
+    /// How far beyond a page cell the effect maps of `f` must be computed to be exact in it.
+    fn fx_apron(doc: &Document, f: &plan::FxLayer<'_>) -> i32 {
+        let vector_shape = matches!(f.layer.content, LayerContent::Shape(_));
+        let progs: Vec<fx::MapProgram> = f
+            .layer
+            .effects
+            .items
+            .iter()
+            .filter(|e| e.enabled())
+            .map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, (0.0, 0.0)))
+            .collect();
+        let want = field_reaches(&progs);
+        // Distance fields are exact one pixel inside the window they are computed from.
+        progs.iter().map(|p| p.reach(&|k| want.get(&k).copied().unwrap_or(0))).max().unwrap_or(0).saturating_add(2)
+    }
+
+    /// Effect maps must fit in textures (per page cell when the region exceeds the limit), and
+    /// patterns in one texture.
     fn check_fx(&self, doc: &Document, p: &Plan<'_>) -> Result<(), Unsupported> {
         if !self.effect_maps && !p.fx.is_empty() {
             return Err(Unsupported("layer effects need float effect-map render targets, which this GPU lacks".into()));
         }
         for f in &p.fx {
-            if f.region.width() > self.max_dim || f.region.height() > self.max_dim {
-                return Err(Unsupported(format!("effect region of `{}` larger than the GPU texture limit ({})", f.layer.name, self.max_dim)));
+            if self.fx_paged(f.region) {
+                let side = i64::from(self.page) + 2 * i64::from(Self::fx_apron(doc, f));
+                if side > i64::from(self.device_max) {
+                    return Err(Unsupported(format!("effects of `{}` reach too far to build per page", f.layer.name)));
+                }
             }
             for e in f.layer.effects.items.iter().filter(|e| e.enabled()) {
                 for s in fx::program_with(e, &doc.global_light, false, &doc.patterns, (0.0, 0.0)).stages {
@@ -525,7 +739,7 @@ impl Compositor {
         }
         for pass in &p.passes {
             if let Some(pat) = pass.pattern
-                && (pat.width > self.max_dim || pat.height > self.max_dim)
+                && (pat.width > self.device_max || pat.height > self.device_max)
             {
                 return Err(Unsupported(format!("pattern `{}` larger than the GPU texture limit", pat.name)));
             }
@@ -546,7 +760,9 @@ impl Compositor {
 
     /// Composite `region` of `doc`. Each finished chunk is passed to `sink` while its encoder is
     /// still open; the chunk texture is reused afterwards, so the sink must record any copies
-    /// or passes that read it into the given encoder. Submits the work before returning.
+    /// or passes that read it into the given encoder. Submits the work before returning; a
+    /// refresh of a huge document also submits in between (the sink may be handed a new
+    /// encoder), so its uploads and evicted pages never pile up in memory.
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -556,7 +772,7 @@ impl Compositor {
         mut sink: impl FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
     ) -> Result<Stats, Unsupported> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_compose") });
-        let stats = self.encode(device, queue, &mut encoder, doc, region, &mut sink)?;
+        let stats = self.encode_inner(device, queue, &mut encoder, doc, region, &mut sink, true)?;
         queue.submit([encoder.finish()]);
         Ok(stats)
     }
@@ -571,12 +787,27 @@ impl Compositor {
         region: Rect,
         sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
     ) -> Result<Stats, Unsupported> {
+        self.encode_inner(device, queue, encoder, doc, region, sink, false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn encode_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        doc: &Document,
+        region: Rect,
+        sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
+        flush: bool,
+    ) -> Result<Stats, Unsupported> {
         // CMYK layers convert through the document's own CMYK profile (uploads and plan colours).
         let space = photocraft_compose::cmyk_space(doc);
         self.cmyk = space.as_ref().map_or(0, |s| s.id);
-        photocraft_color::convert::with_cmyk_space(space.as_ref(), || self.encode_scoped(device, queue, encoder, doc, region, sink))
+        photocraft_color::convert::with_cmyk_space(space.as_ref(), || self.encode_scoped(device, queue, encoder, doc, region, sink, flush))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn encode_scoped(
         &mut self,
         device: &wgpu::Device,
@@ -585,11 +816,9 @@ impl Compositor {
         doc: &Document,
         region: Rect,
         sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
+        flush: bool,
     ) -> Result<Stats, Unsupported> {
         let canvas = doc.bounds();
-        if canvas.width() > self.max_dim || canvas.height() > self.max_dim {
-            return Err(Unsupported(format!("document larger than the GPU texture limit ({})", self.max_dim)));
-        }
         let region = region.intersect(&canvas);
         let plan = plan(doc)?;
         self.check_fx(doc, &plan)?;
@@ -598,98 +827,222 @@ impl Compositor {
             return Ok(stats);
         }
         self.frame += 1;
+        self.stamp += 1;
+        self.staged = 0;
 
-        // Effect maps first (they may render group shapes through sub-plans).
-        for f in &plan.fx {
-            self.sync_fx(device, queue, encoder, doc, f, &mut stats);
-        }
-
-        // Chunks.
-        let mut chunks = Vec::new();
-        let mut y = region.y0;
-        while y < region.y1 {
-            let mut x = region.x0;
-            while x < region.x1 {
-                chunks.push(Rect::new(x, y, (x + CHUNK as i32).min(region.x1), (y + CHUNK as i32).min(region.y1)));
-                x += CHUNK as i32;
+        // Effect maps of whole regions first (they may render group shapes through sub-plans);
+        // regions larger than the limit are built per cell below.
+        let paged: Vec<bool> = plan.fx.iter().map(|f| self.fx_paged(f.region)).collect();
+        let aprons: Vec<i32> = plan.fx.iter().zip(&paged).map(|(f, &pg)| if pg { Self::fx_apron(doc, f) } else { 0 }).collect();
+        for (f, &pg) in plan.fx.iter().zip(&paged) {
+            if !pg {
+                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, None), f.region, &mut stats);
             }
-            y += CHUNK as i32;
         }
-        stats.chunks = chunks.len();
-        self.run_plan(device, queue, encoder, doc.id, canvas, &plan, &chunks, &mut stats, sink);
+        let fr = self.frame_res(device, queue, canvas, &plan);
+
+        // Page cells; every other frame in reverse, so a repeated full refresh of a document
+        // larger than the budget starts with the pages still resident.
+        let page = self.page;
+        let mut cells = grid_rects(region, page);
+        if self.frame.is_multiple_of(2) {
+            cells.reverse();
+        }
+        if let Some(f) = self.focus {
+            let p = page as i32;
+            let focused = |r: &Rect| !cell_rect((r.x0.div_euclid(p), r.y0.div_euclid(p)), page).intersect(&f).is_empty();
+            cells.sort_by_key(focused);
+        }
+        let flush_bytes = FLUSH_BYTES.min(self.memory_budget() / 8).max(16 << 20);
+        stats.cells = cells.len();
+        // The previous intermediate submit (waited for before the next is queued; the web has
+        // no blocking wait and relies on the browser's own scheduling).
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut last_submit: Option<wgpu::SubmissionIndex> = None;
+        // Work recorded and bytes evicted since the last submit.
+        let (mut work, mut freed) = (0u64, 0u64);
+        for part in cells {
+            self.stamp += 1;
+            let cell = (part.x0.div_euclid(page as i32), part.y0.div_euclid(page as i32));
+            let cr = cell_rect(cell, page);
+            for (i, f) in plan.fx.iter().enumerate() {
+                let pf = cr.intersect(&f.region);
+                if !paged.get(i).copied().unwrap_or(false) || pf.is_empty() {
+                    continue;
+                }
+                let window = pf.inflate(aprons.get(i).copied().unwrap_or(0)).intersect(&f.region);
+                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, Some(cell)), window, &mut stats);
+            }
+            let chunks = grid_rects(part, self.chunk);
+            stats.chunks += chunks.len();
+            work += part.width() as u64 * part.height() as u64 * plan.passes.len() as u64;
+            self.run_cell(device, queue, encoder, doc.id, &plan, &paged, cell, &fr, &chunks, &mut stats, sink);
+            let (evicted, bytes) = self.evict();
+            stats.evicted += evicted;
+            freed += bytes;
+            if flush && (self.staged >= flush_bytes || work >= FLUSH_WORK || freed >= flush_bytes) {
+                // Submit what's recorded, and wait for the previous submit, so at most two
+                // batches of uploads and evicted pages are in flight.
+                let done = std::mem::replace(encoder, device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_compose") }));
+                let index = queue.submit([done.finish()]);
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(prev) = last_submit.replace(index) {
+                    let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(prev), timeout: None });
+                }
+                #[cfg(target_arch = "wasm32")]
+                let _ = index;
+                self.staged = 0;
+                work = 0;
+                freed = 0;
+                stats.flushes += 1;
+            }
+        }
 
         // Evict this document's textures whose layers are gone (hidden layers stay resident so
         // toggling visibility costs no upload).
         let frame = self.frame;
         let live: std::collections::HashSet<LayerId> = doc.walk().into_iter().map(|(_, _, l)| l.id).collect();
-        self.residents.retain(|(id, _), r| r.doc != doc.id || r.last_used == frame || live.contains(id));
-        self.fx.retain(|id, e| e.doc != doc.id || e.last_used == frame || live.contains(id));
-        self.evict_fx();
+        self.residents.retain(|(id, _, _), r| r.doc != doc.id || r.last_used == frame || live.contains(id));
+        self.fx.retain(|(id, _), e| e.doc != doc.id || e.last_used == frame || live.contains(id));
+        stats.evicted += self.evict().0;
         self.temps.retain(|(_, used)| frame.saturating_sub(*used) < 240);
         Ok(stats)
     }
 
-    /// Keep the effect cache within [`FX_BUDGET`], dropping layers not drawn this frame
-    /// (least recently used first).
-    fn evict_fx(&mut self) {
-        let mut total = self.fx_cache_bytes();
-        while total > FX_BUDGET {
-            let Some((&id, _)) = self.fx.iter().filter(|(_, e)| e.last_used != self.frame).min_by_key(|(_, e)| e.last_used) else { break };
-            if let Some(e) = self.fx.remove(&id) {
-                total = total.saturating_sub(e.bytes());
+    /// Keep resident pages within the resident budget and the effect cache within
+    /// its budget, least recently used first. Never drops what the current cell uses, nor
+    /// whole-region effect maps drawn this frame. Returns how many textures were dropped and
+    /// their bytes.
+    fn evict(&mut self) -> (usize, u64) {
+        let (mut n, mut freed) = (0, 0u64);
+        let mut total = self.resident_bytes();
+        if total > self.resident_budget {
+            let mut lru: Vec<(u64, ResKey, u64)> =
+                self.residents.iter().filter(|(_, r)| r.stamp != self.stamp).map(|(k, r)| (r.stamp, *k, r.bytes())).collect();
+            lru.sort_unstable_by_key(|c| c.0);
+            for (_, k, bytes) in lru {
+                if total <= self.resident_budget {
+                    break;
+                }
+                self.residents.remove(&k);
+                total = total.saturating_sub(bytes);
+                n += 1;
+                freed += bytes;
             }
         }
-    }
-
-    /// Bring every surface `plan` samples up to date and resolve its effect maps and patterns.
-    fn bind_plan(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, doc: DocId, canvas: Rect, plan: &Plan<'_>, stats: &mut Stats) -> Bound {
-        let mut views: Vec<(Option<ResidentRef>, Option<ResidentRef>)> = Vec::with_capacity(plan.passes.len());
-        let mut keys: Vec<(LayerId, Role)> = Vec::new();
-        let mut maps = Vec::with_capacity(plan.passes.len());
-        let mut patterns = Vec::with_capacity(plan.passes.len());
-        for p in &plan.passes {
-            let tex = p.tex.as_ref().and_then(|t| self.sync(device, queue, doc, t.layer, t.role, t.surface.get(), tile_grid(canvas), stats)).map(|(k, r)| {
-                keys.push(k);
-                (keys.len() - 1, r)
-            });
-            let mask =
-                p.mask.as_ref().and_then(|m| self.sync(device, queue, doc, m.layer, Role::Mask, m.surface.get(), tile_grid(canvas), stats)).map(|(k, r)| {
-                    keys.push(k);
-                    (keys.len() - 1, r)
-                });
-            views.push((tex, mask));
-            maps.push(p.map.and_then(|m| {
-                let e = self.fx.get(&plan.fx[m.fx].layer.id)?;
-                let t = e.progs.get(m.item)?.maps.get(m.map)?.as_ref()?;
-                Some((t.view.clone(), e.region))
-            }));
-            patterns.push(p.pattern.map(|pat| self.pattern_view(device, queue, pat)));
+        let mut total = self.fx_cache_bytes();
+        let fx_budget = usize::try_from(self.fx_budget).unwrap_or(usize::MAX);
+        if total > fx_budget {
+            let (frame, stamp) = (self.frame, self.stamp);
+            let mut lru: Vec<((u64, u64), FxKey)> = self
+                .fx
+                .iter()
+                .filter(|(k, e)| e.last_used != frame || (k.1.is_some() && e.stamp != stamp))
+                .map(|(k, e)| ((e.last_used, e.stamp), *k))
+                .collect();
+            lru.sort_unstable_by_key(|c| c.0);
+            for (_, k) in lru {
+                if total <= fx_budget {
+                    break;
+                }
+                if let Some(e) = self.fx.remove(&k) {
+                    total = total.saturating_sub(e.bytes());
+                    n += 1;
+                    freed += e.bytes() as u64;
+                }
+            }
         }
-        Bound { views, keys, maps, patterns }
+        (n, freed)
     }
 
-    /// Run `plan` over `chunks` (document rects, at most CHUNK square), handing each finished
-    /// chunk to `sink`.
+    /// Per-frame resources of `plan`: the tile area of each pass's surfaces, its LUT and pattern.
+    fn frame_res(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, canvas: Rect, plan: &Plan<'_>) -> FrameRes {
+        let grid = tile_grid(canvas);
+        let area = |s: &Surface| s.tile_bounds().intersect(&grid);
+        let areas = plan
+            .passes
+            .iter()
+            .map(|p| (p.tex.as_ref().map_or(Rect::EMPTY, |t| area(t.surface.get())), p.mask.as_ref().map_or(Rect::EMPTY, |m| area(m.surface.get()))))
+            .collect();
+        let luts = plan.passes.iter().map(|p| p.lut.as_ref().map(|rows| lut_texture(device, queue, rows))).collect();
+        let patterns = plan.passes.iter().map(|p| p.pattern.map(|pat| self.pattern_view(device, queue, pat))).collect();
+        FrameRes { areas, luts, patterns }
+    }
+
+    /// Bring the pages of `cell` that `plan` samples up to date and resolve its effect maps.
     #[allow(clippy::too_many_arguments)]
-    fn run_plan(
+    fn bind_cell(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         doc: DocId,
-        canvas: Rect,
         plan: &Plan<'_>,
+        paged: &[bool],
+        cell: Cell,
+        fr: &FrameRes,
+        stats: &mut Stats,
+    ) -> Bound {
+        let cr = cell_rect(cell, self.page);
+        let mut views: Vec<(Option<ResidentRef>, Option<ResidentRef>)> = Vec::with_capacity(plan.passes.len());
+        let mut keys: Vec<ResKey> = Vec::new();
+        let mut maps = Vec::with_capacity(plan.passes.len());
+        for (i, p) in plan.passes.iter().enumerate() {
+            let (ta, ma) = fr.areas.get(i).copied().unwrap_or((Rect::EMPTY, Rect::EMPTY));
+            let tex =
+                p.tex.as_ref().and_then(|t| self.sync(device, queue, encoder, doc, (t.layer, t.role, cell), t.surface.get(), ta.intersect(&cr), stats)).map(
+                    |(k, r)| {
+                        keys.push(k);
+                        (keys.len() - 1, r)
+                    },
+                );
+            let mask = p
+                .mask
+                .as_ref()
+                .and_then(|m| self.sync(device, queue, encoder, doc, (m.layer, Role::Mask, cell), m.surface.get(), ma.intersect(&cr), stats))
+                .map(|(k, r)| {
+                    keys.push(k);
+                    (keys.len() - 1, r)
+                });
+            views.push((tex, mask));
+            maps.push(p.map.and_then(|m| {
+                let f = plan.fx.get(m.fx)?;
+                let key = (f.layer.id, paged.get(m.fx).copied().unwrap_or(false).then_some(cell));
+                let e = self.fx.get(&key)?;
+                let t = e.progs.get(m.item)?.maps.get(m.map)?.as_ref()?;
+                Some((t.view.clone(), e.region))
+            }));
+        }
+        Bound { views, keys, maps }
+    }
+
+    /// Run `plan` over the `chunks` of one page cell (document rects, at most a chunk square),
+    /// handing each finished chunk to `sink`.
+    #[allow(clippy::too_many_arguments)]
+    fn run_cell(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        doc: DocId,
+        plan: &Plan<'_>,
+        paged: &[bool],
+        cell: Cell,
+        fr: &FrameRes,
         chunks: &[Rect],
         stats: &mut Stats,
         sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
     ) {
-        let bound = self.bind_plan(device, queue, doc, canvas, plan, stats);
+        if chunks.is_empty() {
+            return;
+        }
+        let bound = self.bind_cell(device, queue, encoder, doc, plan, paged, cell, fr, stats);
 
         // Chunk pool.
         while self.pool.len() < plan.slots as usize {
             let t = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("pc_compose_chunk"),
-                size: wgpu::Extent3d { width: CHUNK, height: CHUNK, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d { width: self.chunk, height: self.chunk, depth_or_array_layers: 1 },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -728,9 +1081,8 @@ impl Compositor {
         let bg0 = uniform_group(device, &self.kit.bgl0, &ubuf);
 
         // Per-pass texture bind groups (chunk-independent: pool slots are reused per chunk).
-        let resident_views: Vec<&wgpu::TextureView> = bound.keys.iter().map(|k| &self.residents[k].view).collect();
-        let luts: Vec<_> = plan.passes.iter().map(|p| p.lut.as_ref().map(|rows| lut_texture(device, queue, rows))).collect();
         let dummy = &self.kit.dummy;
+        let resident_views: Vec<&wgpu::TextureView> = bound.keys.iter().map(|k| self.residents.get(k).map_or(dummy, |r| &r.view)).collect();
         let mut bg1 = Vec::with_capacity(plan.passes.len());
         for (i, p) in plan.passes.iter().enumerate() {
             if p.kernel.entry().is_none() {
@@ -741,9 +1093,9 @@ impl Compositor {
             let (tex, mask) = &bound.views[i];
             let tv = tex.map_or(slot(p.d), |(k, _)| resident_views[k]);
             let mv = mask.map_or(dummy, |(k, _)| resident_views[k]);
-            let lv = luts[i].as_ref().map_or(dummy, |(_, v)| v);
+            let lv = fr.luts.get(i).and_then(Option::as_ref).map_or(dummy, |(_, v)| v);
             let map = bound.maps[i].as_ref().map_or(dummy, |(v, _)| v);
-            let pat = bound.patterns[i].as_ref().unwrap_or(dummy);
+            let pat = fr.patterns.get(i).and_then(Option::as_ref).unwrap_or(dummy);
             bg1.push(Some(texture_group(device, &self.kit.bgl1, &[slot(p.a), slot(p.b), tv, mv, lv, slot(p.c), map, pat])));
         }
 
@@ -816,26 +1168,25 @@ impl Compositor {
         }
     }
 
-    /// Upload changed tiles of `surface`; returns the resident key and its region (x, y, w, h).
+    /// Upload changed tiles of `surface` within `region` (its tile area inside one page cell);
+    /// returns the resident key and its region (x, y, w, h).
     #[allow(clippy::too_many_arguments)]
     fn sync(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
         doc: DocId,
-        layer: LayerId,
-        role: Role,
+        key: ResKey,
         surface: &Surface,
-        grid: Rect,
+        region: Rect,
         stats: &mut Stats,
-    ) -> Option<((LayerId, Role), [i32; 4])> {
-        let region = surface.tile_bounds().intersect(&grid);
+    ) -> Option<(ResKey, [i32; 4])> {
         if region.is_empty() {
             return None;
         }
         let format = surface.format();
-        let kind = TexKind::for_surface(role, format);
-        let key = (layer, role);
+        let kind = TexKind::for_surface(key.1, format);
         let cmyk = if format.mode == photocraft_color::ColorMode::Cmyk { self.cmyk } else { 0 };
         let stale = self.residents.get(&key).is_none_or(|r| r.region != region || r.kind != kind || r.format != format || r.cmyk != cmyk);
         if stale {
@@ -851,45 +1202,89 @@ impl Compositor {
             });
             let view = texture.create_view(&Default::default());
             let default_nonzero = surface.default_pixel().iter().any(|v| *v != 0.0);
-            let r = Resident { texture, view, region, kind, format, tiles: HashMap::new(), default_nonzero, doc, last_used: 0, cmyk };
-            if default_nonzero {
-                // Missing tiles read as the default pixel: initialise them.
-                let bytes = convert_tile(surface, None, kind, TileCoord::new(0, 0));
+            let mut r = Resident { texture, view, region, kind, format, tiles: HashMap::new(), default_nonzero, doc, last_used: 0, stamp: 0, cmyk };
+            // A new page is assembled straight into a mapped staging buffer and copied in one go
+            // (missing tiles read as the default pixel; the buffer starts zeroed).
+            let bpp = kind.bytes_per_pixel();
+            let (w, h) = (region.width() as usize, region.height() as usize);
+            let staging = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("pc_page_upload"),
+                size: (w * h * bpp) as u64,
+                usage: wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: true,
+            });
+            if let Ok(mut view) = staging.slice(..).get_mapped_range_mut() {
+                let default = default_nonzero.then(|| convert_tile(surface, None, kind, TileCoord::new(0, 0)));
+                let row = TILE_SIZE as usize * bpp;
                 for c in region.tiles() {
-                    if surface.tile(c).is_none() {
-                        write_tile(queue, &r, c, &bytes);
+                    let converted;
+                    let bytes = match (surface.tile(c), &default) {
+                        (Some(t), _) => {
+                            converted = convert_tile(surface, Some(t), kind, c);
+                            stats.tiles_uploaded += 1;
+                            stats.bytes_uploaded += converted.len();
+                            r.tiles.insert(c, t.clone());
+                            &converted
+                        }
+                        (None, Some(d)) => d,
+                        (None, None) => continue,
+                    };
+                    let tr = c.rect();
+                    let (ox, oy) = ((tr.x0 - region.x0) as usize, (tr.y0 - region.y0) as usize);
+                    for (y, src) in bytes.chunks_exact(row).enumerate() {
+                        let o = ((oy + y) * w + ox) * bpp;
+                        if o + row <= view.len() {
+                            view.slice(o..o + row).copy_from_slice(src);
+                        }
                     }
                 }
             }
+            staging.unmap();
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &staging,
+                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some((w * bpp) as u32), rows_per_image: Some(h as u32) },
+                },
+                wgpu::TexelCopyTextureInfo { texture: &r.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
+            );
+            self.staged += (w * h * bpp) as u64;
             self.residents.insert(key, r);
         }
         // Present: inserted above when it was missing or stale.
         let r = self.residents.get_mut(&key)?;
         r.last_used = self.frame;
+        r.stamp = self.stamp;
         r.doc = doc;
-        for (c, t) in surface.tiles() {
-            if region.intersect(&c.rect()) != c.rect() {
-                continue;
-            }
-            if r.tiles.get(c).is_some_and(|old| Arc::ptr_eq(old, t)) {
-                continue;
-            }
-            let bytes = convert_tile(surface, Some(t), kind, *c);
-            write_tile(queue, r, *c, &bytes);
-            stats.tiles_uploaded += 1;
-            stats.bytes_uploaded += bytes.len();
-            r.tiles.insert(*c, t.clone());
-        }
-        let gone: Vec<TileCoord> = r.tiles.keys().filter(|c| surface.tile(**c).is_none()).copied().collect();
-        if !gone.is_empty() {
-            let bytes = if r.default_nonzero {
-                convert_tile(surface, None, kind, TileCoord::new(0, 0))
-            } else {
-                vec![0u8; (TILE_SIZE * TILE_SIZE) as usize * kind.bytes_per_pixel()]
-            };
-            for c in gone {
-                write_tile(queue, r, c, &bytes);
-                r.tiles.remove(&c);
+        let mut blank: Option<Vec<u8>> = None;
+        for c in region.tiles() {
+            match surface.tile(c) {
+                Some(t) => {
+                    if r.tiles.get(&c).is_some_and(|old| Arc::ptr_eq(old, t)) {
+                        continue;
+                    }
+                    let bytes = convert_tile(surface, Some(t), kind, c);
+                    write_tile(queue, r, c, &bytes);
+                    stats.tiles_uploaded += 1;
+                    stats.bytes_uploaded += bytes.len();
+                    self.staged += bytes.len() as u64;
+                    r.tiles.insert(c, t.clone());
+                }
+                None => {
+                    if r.tiles.remove(&c).is_none() {
+                        continue;
+                    }
+                    // A tile that went away reads as the default pixel again.
+                    let bytes = blank.get_or_insert_with(|| {
+                        if r.default_nonzero {
+                            convert_tile(surface, None, kind, TileCoord::new(0, 0))
+                        } else {
+                            vec![0u8; (TILE_SIZE * TILE_SIZE) as usize * kind.bytes_per_pixel()]
+                        }
+                    });
+                    write_tile(queue, r, c, bytes);
+                    self.staged += bytes.len() as u64;
+                }
             }
         }
         Some((key, [region.x0, region.y0, region.width() as i32, region.height() as i32]))
@@ -922,16 +1317,23 @@ impl Compositor {
         v
     }
 
-    /// A region-sized R32F temporary not in `taken`.
+    /// An R32F temporary at least `region`-sized (the smallest that fits) not in `taken`.
+    /// Stages only read what they wrote, inside the region, so a larger one is as good; page
+    /// windows of different sizes share them.
     fn temp(&mut self, device: &wgpu::Device, region: Rect, taken: &[wgpu::TextureView]) -> wgpu::TextureView {
         let (w, h) = (region.width(), region.height());
         let frame = self.frame;
-        for (t, used) in &mut self.temps {
-            let s = t.texture.size();
-            if s.width == w && s.height == h && !taken.contains(&t.view) {
-                *used = frame;
-                return t.view.clone();
-            }
+        let fit = self
+            .temps
+            .iter_mut()
+            .filter(|(t, _)| {
+                let s = t.texture.size();
+                s.width >= w && s.height >= h && !taken.contains(&t.view)
+            })
+            .min_by_key(|(t, _)| t.texture.size().width as u64 * t.texture.size().height as u64);
+        if let Some((t, used)) = fit {
+            *used = frame;
+            return t.view.clone();
         }
         let t = Tex::map(device, "pc_fx_temp", region, MAP32);
         let v = t.view.clone();
@@ -939,7 +1341,9 @@ impl Compositor {
         v
     }
 
-    /// Build or update the effect maps of one layer.
+    /// Build or update the effect maps of one layer over `region`: its whole effect region, or
+    /// the window of one page cell (`key.1`) grown by the effects' reach.
+    #[allow(clippy::too_many_arguments)]
     fn sync_fx(
         &mut self,
         device: &wgpu::Device,
@@ -947,10 +1351,11 @@ impl Compositor {
         encoder: &mut wgpu::CommandEncoder,
         doc: &Document,
         f: &plan::FxLayer<'_>,
+        key: FxKey,
+        region: Rect,
         stats: &mut Stats,
     ) {
         let layer = f.layer;
-        let region = f.region;
         let canvas = doc.bounds();
         let is_group = matches!(layer.content, LayerContent::Group(_));
         let shape_key = if is_group { fx::group_key(layer, &doc.global_light) } else { fx::shape_key(layer, canvas) };
@@ -961,11 +1366,12 @@ impl Compositor {
         // What changed: everything (new settings / size), the position only, some tiles, or
         // nothing.
         let mut damage = Rect::EMPTY;
-        let prev = self.fx.get(&layer.id).filter(|e| e.shape_key == shape_key).map(|e| e.region);
+        let prev = self.fx.get(&key).filter(|e| e.shape_key == shape_key).map(|e| e.region);
         let mut rebuild = true;
-        if prev == Some(region) {
+        if prev == Some(region)
+            && let Some(e) = self.fx.get(&key)
+        {
             rebuild = false;
-            let e = &self.fx[&layer.id];
             for (old, cur) in e.tiles.iter().zip([content_src, mask_src]) {
                 let d = match (old, cur) {
                     (Some(o), Some(s)) => fx::damage(o, s),
@@ -983,7 +1389,7 @@ impl Compositor {
             // Moved by whole pixels: maps are computed relative to the region, so if the shape
             // moved unchanged with it, every map is still exact.
             let v = fx::shape(doc, layer, region);
-            if let Some(e) = self.fx.get_mut(&layer.id)
+            if let Some(e) = self.fx.get_mut(&key)
                 && v == e.shape_cpu
             {
                 e.region = region;
@@ -994,7 +1400,7 @@ impl Compositor {
             let shape = Tex::map(device, "pc_fx_shape", region, MAP32);
             let n = rw as usize * rh as usize;
             self.fx.insert(
-                layer.id,
+                key,
                 FxEntry {
                     doc: doc.id,
                     region,
@@ -1006,13 +1412,16 @@ impl Compositor {
                     fields: HashMap::new(),
                     progs: Vec::new(),
                     last_used: frame,
+                    stamp: 0,
                 },
             );
             damage = region;
         }
         // Present: kept or (re)inserted above.
-        let Some(e) = self.fx.get_mut(&layer.id) else { return };
+        let stamp = self.stamp;
+        let Some(e) = self.fx.get_mut(&key) else { return };
         e.last_used = frame;
+        e.stamp = stamp;
         e.doc = doc.id;
         e.tiles = [content_src.map(fx::snapshot), mask_src.map(fx::snapshot)];
         if region.is_empty() {
@@ -1020,12 +1429,14 @@ impl Compositor {
         }
 
         let t_trace = web_time_now();
+        let mut staged = 0u64;
         // Shape over the damage (compose's own alpha).
         if !damage.is_empty() {
             stats.fx_shapes += 1;
             let v = fx::shape(doc, layer, damage);
             fx::paste(&mut e.shape_cpu, region, damage, &v);
             e.shape.write_r32(queue, region, damage, &v);
+            staged += v.len() as u64 * 4;
         }
 
         // Programs, and the distance fields they read (max reach per field).
@@ -1033,11 +1444,7 @@ impl Compositor {
         let anchor = layer.effects.reference.unwrap_or((f64::from(f.bounds.x0), f64::from(f.bounds.y0)));
         let progs: Vec<fx::MapProgram> =
             layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect();
-        let mut want: HashMap<FieldKind, i32> = HashMap::new();
-        for (k, r) in progs.iter().flat_map(|p| p.fields.iter()) {
-            let w = want.entry(*k).or_insert(0);
-            *w = (*w).max(*r);
-        }
+        let want = field_reaches(&progs);
         e.fields.retain(|k, _| want.contains_key(k));
         for (&kind, &reach) in &want {
             let have = e.fields.get(&kind).map(|(r, _)| *r);
@@ -1055,7 +1462,10 @@ impl Compositor {
             if have.is_none_or(|r| r < reach) {
                 e.fields.insert(kind, (reach, Tex::map(device, "pc_fx_field", region, MAP32)));
             }
-            e.fields[&kind].1.write_r32(queue, region, out, &v);
+            if let Some((_, t)) = e.fields.get(&kind) {
+                t.write_r32(queue, region, out, &v);
+            }
+            staged += v.len() as u64 * 4;
             stats.fx_pixels += out.width() as u64 * out.height() as u64;
         }
 
@@ -1066,11 +1476,12 @@ impl Compositor {
         while e.progs.len() < progs.len() {
             e.progs.push(ProgState { key: 0, maps: Vec::new() });
         }
+        self.staged += staged;
         for (i, prog) in progs.iter().enumerate() {
             if prog.maps == 0 {
                 continue;
             }
-            let Some(e) = self.fx.get_mut(&layer.id) else { return };
+            let Some(e) = self.fx.get_mut(&key) else { return };
             let same = e.progs[i].key == prog.key && e.progs[i].maps.len() == prog.maps;
             let d = if same { damage } else { region };
             if d.is_empty() {
@@ -1083,7 +1494,7 @@ impl Compositor {
                 };
             }
             stats.fx_programs += 1;
-            self.run_program(device, queue, encoder, layer.id, i, prog, d, stats);
+            self.run_program(device, queue, encoder, key, i, prog, d, stats);
         }
     }
 
@@ -1094,7 +1505,7 @@ impl Compositor {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        layer: LayerId,
+        key: FxKey,
         item: usize,
         prog: &fx::MapProgram,
         d: Rect,
@@ -1102,7 +1513,7 @@ impl Compositor {
     ) {
         let pattern_views: Vec<Option<wgpu::TextureView>> =
             prog.stages.iter().map(|s| s.pattern.as_ref().map(|p| self.pattern_view(device, queue, p))).collect();
-        let e = &self.fx[&layer];
+        let Some(e) = self.fx.get(&key) else { return };
         let region = e.region;
         let shape = e.shape.view.clone();
         let finals: Vec<Option<wgpu::TextureView>> = e.progs[item].maps.iter().map(|m| m.as_ref().map(|t| t.view.clone())).collect();

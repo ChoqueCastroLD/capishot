@@ -152,6 +152,37 @@ impl GpuCanvas {
         Some((d.format, bytes))
     }
 
+    /// Set the GPU memory the wgpu compositor may hold for layer pages and effect maps (see
+    /// [`memory_budget`]); pages beyond it are evicted least recently used first.
+    pub fn set_memory_budget(&self, bytes: u64) {
+        let mut r = self.rs.renderer.write();
+        if let Some(res) = r.callback_resources.get_mut::<Resources>() {
+            res.compositor_budget = Some(bytes);
+        }
+    }
+
+    /// The compositor's memory budget (`None` until [`GpuCanvas::set_memory_budget`]).
+    pub fn memory_budget(&self) -> Option<u64> {
+        let r = self.rs.renderer.read();
+        r.callback_resources.get::<Resources>()?.compositor_budget
+    }
+
+    /// The document area the view shows: full refreshes composite it last, so its layer pages
+    /// are the ones still resident for the edits that follow.
+    pub fn set_focus(&self, focus: Option<photocraft_geom::Rect>) {
+        let mut r = self.rs.renderer.write();
+        if let Some(res) = r.callback_resources.get_mut::<Resources>() {
+            res.compositor_focus = focus;
+        }
+    }
+
+    /// GPU bytes the wgpu compositor holds: resident layer pages and cached effect maps.
+    pub fn compositor_bytes(&self) -> Option<(u64, usize)> {
+        let r = self.rs.renderer.read();
+        let c = r.callback_resources.get::<Resources>()?.compositor.as_ref()?;
+        Some((c.resident_bytes(), c.fx_cache_bytes()))
+    }
+
     /// Set the checkerboard and gamut warning colours.
     pub fn set_style(&self, style: CanvasStyle) {
         let mut r = self.rs.renderer.write();
@@ -179,10 +210,8 @@ impl GpuCanvas {
         }
         match &res.compositor {
             Some(c) => c.supports(doc).is_ok(),
-            None => {
-                let max = self.rs.device.limits().max_texture_dimension_2d;
-                doc.size.width <= max && doc.size.height <= max && photocraft_gpu::plan(doc).is_ok()
-            }
+            // Layers larger than the texture limit are stored in pages, so any size qualifies.
+            None => photocraft_gpu::plan(doc).is_ok(),
         }
     }
 
@@ -291,6 +320,10 @@ impl GpuCanvas {
                 }
             },
         };
+        if let Some(b) = res.compositor_budget {
+            comp.set_memory_budget(b);
+        }
+        comp.set_focus(res.compositor_focus);
         let key = doc.id.0;
         let format = self.format_for(doc.depth, size);
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format);
@@ -298,6 +331,13 @@ impl GpuCanvas {
         if let Err(e) = comp.supports(doc) {
             res.compositor = Some(comp);
             return Err(e);
+        }
+        // A full refresh whose layer pages don't fit the memory budget would re-upload the
+        // evicted ones every time (no faster than the CPU, and more memory): the banded CPU
+        // compositor does it, and edits in the view (damage rects) stay on the GPU.
+        if region == doc.bounds() && !comp.fits_budget(doc, region) {
+            res.compositor = Some(comp);
+            return Err(photocraft_gpu::Unsupported("layers exceed the GPU memory budget; full refresh on the CPU".into()));
         }
         if fresh {
             let tex = DocTextures::new(device, res, size, self.tile, format);
@@ -647,6 +687,12 @@ pub struct Perf {
     pub gpu_uploads: u64,
     /// Why the last refresh fell back to the CPU compositor (None = GPU composited).
     pub gpu_fallback: Option<String>,
+    /// GPU memory the compositor may hold for layer pages and effect maps (MB; see
+    /// [`memory_budget`]).
+    pub gpu_budget_mb: u64,
+    /// The Memory Usage allowance (bytes) `gpu_budget_mb` was computed from.
+    #[serde(skip)]
+    pub gpu_budget_allowance: u64,
     /// Last command run through the app and its duration (ms).
     pub last_command: String,
     pub command_ms: f64,
@@ -809,6 +855,50 @@ fn texel_to_f32(format: wgpu::TextureFormat, b: &[u8]) -> [f32; 4] {
 // ---------------------------------------------------------------------------------------------
 // GPU resources
 
+/// Floor of the compositor's memory budget: enough for a viewport's pages of a dozen layers.
+pub const MIN_GPU_BUDGET: u64 = 512 << 20;
+
+/// GPU memory the wgpu compositor may hold for layer pages and effect maps: what Memory Usage
+/// (`allowance`, Preferences › Performance) leaves after the document's pixels and History
+/// (`pixels`), at most a quarter of physical memory (`ram`; 16 GB assumed when unknown), and at
+/// least [`MIN_GPU_BUDGET`]. On unified-memory machines these textures share RAM with the
+/// document, so a huge document keeps its layers on the GPU only as far as memory allows; the
+/// rest is uploaded per refresh as the view needs it.
+pub fn memory_budget(allowance: u64, pixels: u64, ram: Option<u64>) -> u64 {
+    let ram = ram.unwrap_or(16 << 30);
+    allowance.saturating_sub(pixels).min(ram / 4).max(MIN_GPU_BUDGET)
+}
+
+/// Physical memory of this machine in bytes, if known. `PHOTOCRAFT_RAM_MB` overrides it (to
+/// simulate a smaller machine).
+pub fn physical_memory() -> Option<u64> {
+    static RAM: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *RAM.get_or_init(|| {
+        if let Some(mb) = std::env::var("PHOTOCRAFT_RAM_MB").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
+            return mb.checked_mul(1 << 20);
+        }
+        detect_physical_memory()
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn detect_physical_memory() -> Option<u64> {
+    let out = std::process::Command::new("/usr/sbin/sysctl").args(["-n", "hw.memsize"]).output().ok()?;
+    String::from_utf8(out.stdout).ok()?.trim().parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn detect_physical_memory() -> Option<u64> {
+    let info = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let kb: u64 = info.lines().find_map(|l| l.strip_prefix("MemTotal:"))?.trim().trim_end_matches("kB").trim().parse().ok()?;
+    kb.checked_mul(1024)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn detect_physical_memory() -> Option<u64> {
+    None
+}
+
 struct Resources {
     view_bgl: wgpu::BindGroupLayout,
     tile_bgl: wgpu::BindGroupLayout,
@@ -828,6 +918,10 @@ struct Resources {
     compositor: Option<photocraft_gpu::Compositor>,
     /// Why the wgpu compositor couldn't be created (then the CPU compositor is used).
     compositor_failed: Option<photocraft_gpu::Unsupported>,
+    /// GPU memory the compositor may hold (`None`: its default), and the document area the
+    /// view shows; applied before every composite.
+    compositor_budget: Option<u64>,
+    compositor_focus: Option<photocraft_geom::Rect>,
     encode_bgl: wgpu::BindGroupLayout,
     encode_pipeline: wgpu::RenderPipeline,
     lut_bgl: wgpu::BindGroupLayout,
@@ -1087,6 +1181,8 @@ impl Resources {
             out_linear: target.is_srgb(),
             compositor: None,
             compositor_failed: None,
+            compositor_budget: None,
+            compositor_focus: None,
             encode_bgl,
             encode_pipeline,
         }
@@ -1578,6 +1674,19 @@ fn fs(in: V) -> @location(0) vec4<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_budget_follows_memory_usage_and_ram() {
+        const G: u64 = 1 << 30;
+        // What Memory Usage leaves after the document, within a quarter of RAM.
+        assert_eq!(memory_budget(8 * G, 3 * G, Some(48 * G)), 5 * G);
+        assert_eq!(memory_budget(8 * G, 3 * G, Some(16 * G)), 4 * G);
+        assert_eq!(memory_budget(64 * G, 3 * G, Some(16 * G)), 4 * G);
+        // Never below the floor, even with nothing left; 16 GB assumed when RAM is unknown.
+        assert_eq!(memory_budget(8 * G, 10 * G, Some(48 * G)), MIN_GPU_BUDGET);
+        assert_eq!(memory_budget(64 * G, 0, None), 4 * G);
+        assert!(physical_memory().is_none_or(|b| b >= 256 << 20));
+    }
 
     #[test]
     fn filter_modes() {

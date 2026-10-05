@@ -13,7 +13,13 @@ struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     comp: Compositor,
+    /// The same device with a simulated texture limit of [`PAGED_LIMIT`]: every check also runs
+    /// through layer pages and per-cell effect maps.
+    paged: Compositor,
 }
+
+/// Simulated texture limit (pages and chunks of 256 px).
+const PAGED_LIMIT: u32 = 256;
 
 fn gpu() -> Option<Gpu> {
     let instance = wgpu::Instance::default();
@@ -38,7 +44,9 @@ fn gpu() -> Option<Gpu> {
             return None;
         }
     };
-    Some(Gpu { device, queue, comp })
+    let mut paged = Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float).ok()?;
+    paged.set_texture_limit(PAGED_LIMIT);
+    Some(Gpu { device, queue, comp, paged })
 }
 
 /// Any adapter and device, for the fallback-path tests (which don't need 32-bit float targets).
@@ -88,11 +96,10 @@ fn base_doc(w: u32, h: u32) -> Document {
     d
 }
 
-fn check(g: &mut Gpu, doc: &Document, what: &str) {
-    let cpu = photocraft_compose::flatten(doc);
-    let out = render_to_vec(&mut g.comp, &g.device, &g.queue, doc, doc.bounds()).unwrap_or_else(|e| panic!("{what}: {e}"));
+/// Largest premultiplied difference between `cpu` and `gpu` pixels, and its index.
+fn worst_diff(cpu: &[[f32; 4]], gpu: &[[f32; 4]]) -> (f32, usize) {
     let mut worst = (0.0f32, 0usize);
-    for (i, (c, o)) in cpu.px.iter().zip(&out).enumerate() {
+    for (i, (c, o)) in cpu.iter().zip(gpu).enumerate() {
         let pc = [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]];
         let po = [o[0] * o[3], o[1] * o[3], o[2] * o[3], o[3]];
         for k in 0..4 {
@@ -102,9 +109,29 @@ fn check(g: &mut Gpu, doc: &Document, what: &str) {
             }
         }
     }
-    let w = doc.size.width as usize;
-    let (x, y) = (worst.1 % w, worst.1 / w);
-    assert!(worst.0 <= TOL, "{what}: max diff {:.2}/255 at ({x},{y}): cpu {:?} gpu {:?}", worst.0 * 255.0, cpu.px[worst.1], out[worst.1]);
+    worst
+}
+
+/// GPU (whole textures, then pages) vs CPU over `rect`: Err with the worst pixel if over the
+/// tolerance, else the stats of the unpaged render.
+fn diff_rect(g: &mut Gpu, doc: &Document, rect: Rect, what: &str) -> Result<photocraft_gpu::Stats, String> {
+    let cpu = photocraft_compose::render(doc, rect);
+    let mut first = None;
+    for (label, comp) in [("", &mut g.comp), (" (paged)", &mut g.paged)] {
+        let (out, stats) = photocraft_gpu::render_to_vec_stats(comp, &g.device, &g.queue, doc, rect).map_err(|e| format!("{what}{label}: {e}"))?;
+        let worst = worst_diff(&cpu.px, &out);
+        let w = rect.width() as usize;
+        let (x, y) = (rect.x0 + (worst.1 % w) as i32, rect.y0 + (worst.1 / w) as i32);
+        if worst.0 > TOL {
+            return Err(format!("{what}{label}: max diff {:.2}/255 at ({x},{y}): cpu {:?} gpu {:?}", worst.0 * 255.0, cpu.px[worst.1], out[worst.1]));
+        }
+        first.get_or_insert(stats);
+    }
+    first.ok_or_else(|| format!("{what}: no render"))
+}
+
+fn check(g: &mut Gpu, doc: &Document, what: &str) {
+    diff_rect(g, doc, doc.bounds(), what).unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
@@ -673,25 +700,7 @@ fn effect_cases() -> Vec<(&'static str, Vec<Effect>)> {
 
 /// GPU vs CPU over the whole document: Err with the worst pixel if over the tolerance.
 fn fx_diff(g: &mut Gpu, doc: &Document, what: &str) -> Result<photocraft_gpu::Stats, String> {
-    let cpu = photocraft_compose::flatten(doc);
-    let (out, stats) = photocraft_gpu::render_to_vec_stats(&mut g.comp, &g.device, &g.queue, doc, doc.bounds()).map_err(|e| format!("{what}: {e}"))?;
-    let mut worst = (0.0f32, 0usize);
-    for (i, (c, o)) in cpu.px.iter().zip(&out).enumerate() {
-        let pc = [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]];
-        let po = [o[0] * o[3], o[1] * o[3], o[2] * o[3], o[3]];
-        for k in 0..4 {
-            let d = (pc[k] - po[k]).abs();
-            if d.is_nan() || d > worst.0 {
-                worst = (if d.is_nan() { 9.0 } else { d }, i);
-            }
-        }
-    }
-    let w = doc.size.width as usize;
-    let (x, y) = (worst.1 % w, worst.1 / w);
-    if worst.0 > TOL {
-        return Err(format!("{what}: max diff {:.2}/255 at ({x},{y}): cpu {:?} gpu {:?}", worst.0 * 255.0, cpu.px[worst.1], out[worst.1]));
-    }
-    Ok(stats)
+    diff_rect(g, doc, doc.bounds(), what)
 }
 
 fn fx_check(g: &mut Gpu, doc: &Document, what: &str) -> photocraft_gpu::Stats {
@@ -927,8 +936,13 @@ fn as_text(src: Layer) -> Layer {
     l
 }
 
+/// Held by tests that change the process-wide text gamma, and by tests with type layers that
+/// run long enough to see such a change.
+static TEXT_GAMMA: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn type_layers_blend_with_text_gamma() {
+    let _gamma = TEXT_GAMMA.lock().unwrap_or_else(|e| e.into_inner());
     let Some(mut g) = gpu() else { return };
     for mode in [BlendMode::Normal, BlendMode::Multiply, BlendMode::Screen, BlendMode::Color] {
         let mut d = base_doc(64, 48);
@@ -1166,5 +1180,120 @@ fn unbuildable_pipelines_are_an_error_not_a_panic() {
     let f = Compositor::preferred_acc_format(&adapter);
     if adapter.get_texture_format_features(f).allowed_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT) {
         assert!(Compositor::try_new_with_format(&device, f).is_ok());
+    }
+}
+
+// ---- documents larger than the texture limit ------------------------------------------------
+
+/// A document several pages wide under [`PAGED_LIMIT`]: pixel layers crossing page borders (one
+/// masked, one off-canvas), a big effect layer whose region exceeds the limit (maps built per
+/// page cell), a type layer with a shadow, an adjustment, a clipped group and a gradient fill.
+fn big_doc() -> Document {
+    let (w, h) = (1100, 900);
+    let mut d = fx_doc(w, h, SampleType::U8);
+    // Right over the background: adjustment results round to 8 bits, which would turn sub-LSB
+    // float differences of blends beneath into whole steps.
+    let mut adj = Layer::new("invert", LayerContent::Adjustment(Adjustment::Invert));
+    adj.opacity = 0.6;
+    adj.mask = Some(mask(Rect::new(240, 0, 800, 520), 83, 0.0));
+    d.layers.push(adj);
+    let mut top = noise_layer("top", PixelFormat::RGBA8, Rect::new(-30, 200, 700, 820), 81, 0.0);
+    top.blend = BlendMode::Multiply;
+    top.mask = Some(mask(Rect::new(100, 240, 600, 700), 82, 1.0));
+    d.layers.push(top);
+    let stack = effect_cases().into_iter().find(|(n, _)| *n == "full stack").unwrap().1;
+    let mut big = blob("big", d.pixel_format(), 520.0, 450.0, 330.0, [0.9, 0.4, 0.2]);
+    big.effects.items = stack;
+    big.effects.items.push(Effect::OuterGlow(glow(FxPaint::Color(Color::rgb(0.2, 1.0, 0.6)), GlowTechnique::Softer, 40.0, 0.2, GlowSource::Edge)));
+    d.layers.push(big);
+    let mut text = as_text(blob("type", d.pixel_format(), 900.0, 150.0, 90.0, [0.1, 0.2, 0.9]));
+    text.effects.items = vec![Effect::DropShadow(shadow(BlendMode::Multiply, 0.8, 135.0, 12.0, 20.0, 0.0))];
+    d.layers.push(text);
+    let a = noise_layer("ga", PixelFormat::RGBA8, Rect::new(200, 500, 1000, 880), 84, 0.6);
+    let mut c = noise_layer("gc", PixelFormat::RGBA8, Rect::new(0, 600, 1100, 700), 85, 0.0);
+    c.clipped = true;
+    c.blend = BlendMode::Screen;
+    let mut grp = Layer::group("g", vec![a, c]);
+    grp.opacity = 0.9;
+    d.layers.push(grp);
+    let stops = vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (0.6, Color::rgb(0.0, 1.0, 0.2)), (1.0, Color::rgb(0.1, 0.1, 0.9))];
+    let mut grad = Layer::new("grad", LayerContent::Fill(Fill::Gradient { stops, angle: 30.0, scale: 0.8, style: GradientStyle::Radial, reverse: false }));
+    grad.opacity = 0.3;
+    grad.blend = BlendMode::Overlay;
+    d.layers.push(grad);
+    d
+}
+
+#[test]
+fn documents_larger_than_the_texture_limit() {
+    let _gamma = TEXT_GAMMA.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut g) = gpu() else { return };
+    let mut d = big_doc();
+    assert!(g.paged.supports(&d).is_ok());
+    // Every pass sees page borders, and effect maps and blurs crossing them.
+    check(&mut g, &d, "big document");
+    let s = photocraft_gpu::render_to_vec_stats(&mut g.paged, &g.device, &g.queue, &d, d.bounds()).unwrap().1;
+    assert!(s.cells >= 20 && s.chunks == s.cells, "{s:?}");
+    // A viewport off the page grid covers only its cells.
+    let view = Rect::new(300, 330, 790, 610);
+    diff_rect(&mut g, &d, view, "viewport").unwrap_or_else(|e| panic!("{e}"));
+    let s = photocraft_gpu::render_to_vec_stats(&mut g.paged, &g.device, &g.queue, &d, view).unwrap().1;
+    assert_eq!(s.cells, 6, "{s:?}");
+    // A dab across a page corner on the effect layer, and an edit elsewhere.
+    d.layers[3].surface_mut().unwrap().fill_rect(Rect::new(500, 490, 530, 530), &[0.1, 0.1, 0.9, 1.0]);
+    d.layers[2].surface_mut().unwrap().fill_rect(Rect::new(250, 250, 270, 270), &[0.0, 0.0, 0.0, 0.0]);
+    check(&mut g, &d, "after dabs");
+    let s = photocraft_gpu::render_to_vec_stats(&mut g.paged, &g.device, &g.queue, &d, d.bounds()).unwrap().1;
+    assert_eq!((s.tiles_uploaded, s.fx_shapes), (0, 0), "nothing changed since the last render: {s:?}");
+}
+
+#[test]
+fn pages_are_evicted_under_the_budget() {
+    let _gamma = TEXT_GAMMA.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut g) = gpu() else { return };
+    let mut d = big_doc();
+    check(&mut g, &d, "warm");
+    let all = g.paged.resident_bytes();
+    // A budget of one page: everything but the cell being drawn is evicted as the render goes.
+    let page = u64::from(g.paged.page_size()).pow(2) * 4;
+    g.paged.set_resident_budget(page);
+    for round in 0..3 {
+        let cpu = photocraft_compose::flatten(&d);
+        let (out, s) = photocraft_gpu::render_to_vec_stats(&mut g.paged, &g.device, &g.queue, &d, d.bounds()).unwrap();
+        let worst = worst_diff(&cpu.px, &out);
+        assert!(worst.0 <= TOL, "round {round}: max diff {:.2}/255 at {}", worst.0 * 255.0, worst.1);
+        assert!(s.evicted > 0, "round {round}: {s:?}");
+        assert!(g.paged.resident_bytes() < all / 4, "{} of {all}", g.paged.resident_bytes());
+        // Evicted pages come back with the edits made meanwhile.
+        d.layers[2].surface_mut().unwrap().fill_rect(Rect::new(10 + round * 300, 300, 60 + round * 300, 340), &[0.9, 0.9, 0.1, 1.0]);
+        d.layers[3].surface_mut().unwrap().fill_rect(Rect::new(200 + round * 200, 420, 240 + round * 200, 470), &[0.0, 0.0, 0.0, 0.0]);
+    }
+    check(&mut g, &d, "after eviction");
+}
+
+#[test]
+fn the_focused_view_stays_resident_after_a_full_refresh() {
+    let _gamma = TEXT_GAMMA.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(g) = gpu() else { return };
+    let d = big_doc();
+    let mut comp = Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Rgba32Float).unwrap();
+    comp.set_texture_limit(PAGED_LIMIT);
+    let view = Rect::new(520, 300, 760, 500);
+    photocraft_gpu::render_to_vec(&mut comp, &g.device, &g.queue, &d, view).unwrap();
+    // A budget holding just the view's pages: a full refresh evicts as it goes, and draws the
+    // view's cells last, so the next edit in the view uploads nothing.
+    // The working set of a region is what rendering it makes resident.
+    assert_eq!(comp.working_set(&d, view), comp.resident_bytes());
+    assert!(comp.working_set(&d, d.bounds()) > 4 * comp.resident_bytes());
+    comp.set_resident_budget(comp.resident_bytes());
+    assert!(comp.fits_budget(&d, view) && !comp.fits_budget(&d, d.bounds()));
+    comp.set_focus(Some(view));
+    for _ in 0..2 {
+        let s = photocraft_gpu::render_to_vec_stats(&mut comp, &g.device, &g.queue, &d, d.bounds()).unwrap().1;
+        assert!(s.evicted > 0, "{s:?}");
+        let (out, s) = photocraft_gpu::render_to_vec_stats(&mut comp, &g.device, &g.queue, &d, view).unwrap();
+        assert_eq!(s.tiles_uploaded, 0, "{s:?}");
+        let cpu = photocraft_compose::render(&d, view);
+        assert!(worst_diff(&cpu.px, &out).0 <= TOL);
     }
 }
