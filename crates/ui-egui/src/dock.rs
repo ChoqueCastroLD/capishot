@@ -323,6 +323,10 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
         }
         egui::Popup::menu(&resp.menu).show(|ui| {
             ui.set_min_width(170.0);
+            if tabs.get(sel) == Some(&"Layers") {
+                crate::layer_row_ui::panel_menu(app, ui);
+                ui.separator();
+            }
             if ui.button(if collapsed { "Expand Panel Group" } else { "Collapse Panel Group" }).clicked() {
                 actions.push(Action::ToggleCollapse(g));
                 ui.close();

@@ -142,6 +142,10 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
                     Err(e) => return err(e),
                 }
             }
+            // Right dock width in points (clamped to the dock's 250..=520 range), applied next frame.
+            if let Some(w) = p.get("dockWidth").and_then(Value::as_f64) {
+                crate::panels::request_dock_width(ctx, w as f32);
+            }
             if let Some(i) = app.session.active_index() {
                 if let Some(z) = p.get("zoom").and_then(Value::as_f64) {
                     app.ui.views[i].zoom = (z as f32).clamp(0.01, 64.0);

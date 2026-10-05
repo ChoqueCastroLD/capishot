@@ -30,6 +30,7 @@ pub mod file_cmds;
 pub mod filters;
 pub mod filters_ext;
 mod frame_cmds;
+pub mod fx_view_cmds;
 pub mod gallery_cmds;
 pub mod group_view_cmds;
 pub mod image_cmds;
@@ -144,6 +145,9 @@ pub struct DocState {
     pub channel_view: channel_cmds::ChannelView,
     /// Select › Isolate Layers: the Layers panel lists only these layers (empty = off; view state).
     pub isolated_layers: Vec<LayerId>,
+    /// Layers panel: layers whose effects list is collapsed under their row (the fx triangle;
+    /// view state, not history). Effects lists start open.
+    pub fx_collapsed: Vec<LayerId>,
 }
 
 impl DocState {
@@ -162,6 +166,7 @@ impl DocState {
             coalesce: None,
             channel_view: Default::default(),
             isolated_layers: Vec::new(),
+            fx_collapsed: Vec::new(),
         }
     }
     /// The selected layers in bottom-to-top document order, always including the active layer.
