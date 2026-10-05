@@ -314,10 +314,12 @@ fn convert_mode(s: &mut Session, mode: ColorMode, p: &Value) -> Result<Value> {
 
 /// Image → Mode → 8/16/32 Bits/Channel.
 fn convert_depth(s: &mut Session, depth: SampleType) -> Result<Value> {
+    let current = s.active().ok_or(EngineError::NoDocument)?.doc.depth;
+    if current == depth {
+        // History::record clears redo even when an edit closure leaves the document unchanged.
+        return Ok(Value::Null);
+    }
     s.edit("Bit Depth", |doc, _| {
-        if doc.depth == depth {
-            return Ok(());
-        }
         for_each_surface(&mut doc.layers, true, &mut |surf, _| {
             let f = surf.format().with_sample(depth);
             *surf = surf.convert(f);
@@ -550,6 +552,11 @@ mod tests {
         assert_eq!((d.mode, d.depth), (ColorMode::Rgb, SampleType::U8));
         s.execute("edit.undo", json!({})).unwrap();
         assert_eq!(doc(&s).depth, SampleType::F32);
+        let revision = s.active().unwrap().revision;
+        s.execute("image.mode.bits32", json!({})).unwrap();
+        assert_eq!(s.active().unwrap().revision, revision, "an unchanged bit depth must preserve the history branch");
+        assert!(s.redo(), "selecting the current depth must not discard the undone conversion");
+        assert_eq!(doc(&s).depth, SampleType::U8);
     }
 
     #[test]
