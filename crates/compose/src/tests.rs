@@ -684,6 +684,17 @@ fn effect_maps_are_cached_and_invalidated_by_pixel_changes() {
         assert!(close4(*p, *q));
     }
     assert_ne!(first.px, again.px);
+
+    // Tileless masks differ only in their defaults; reusing their effect maps leaves a ghost shadow.
+    let mut masked = fx_doc(vec![Effect::DropShadow(shadow(5.0, 90.0))]);
+    masked.layers[1].mask = Some(photocraft_doc::LayerMask::reveal_all());
+    assert!(close4(px(&masked, 20, 32), [0.0, 0.0, 0.0, 1.0]));
+    masked.layers[1].mask = Some(photocraft_doc::LayerMask::hide_all());
+    let warm = flatten(&masked);
+    let mut cold = masked.clone();
+    cold.layers[1].id = Layer::raster("uncached", cold.pixel_format()).id;
+    assert!(warm.px == flatten(&cold).px, "default-only mask changes must invalidate cached effects");
+    assert!(close4(px(&masked, 20, 32), [1.0; 4]));
 }
 
 // ---------- PSD-fidelity effect semantics (fitted on Photoshop composites) ----------

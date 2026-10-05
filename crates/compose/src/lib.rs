@@ -968,11 +968,19 @@ fn shape_parts(layer: &Layer, clipped: &[Layer], rect: Rect, cx: &Ctx) -> Option
 fn layer_identity(layer: &Layer, h: &mut std::collections::hash_map::DefaultHasher) {
     use std::hash::{Hash, Hasher};
     fn surface_fp(s: &Surface) -> u64 {
-        s.tiles().fold(s.tile_count() as u64, |acc, (c, t)| {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        s.format().hash(&mut h);
+        // Missing tiles read the default pixel, so tile identity alone is not pixel identity.
+        for sample in s.default_pixel() {
+            sample.to_bits().hash(&mut h);
+        }
+        let tiles = s.tiles().fold(s.tile_count() as u64, |acc, (c, t)| {
             let mut x = (std::sync::Arc::as_ptr(t) as usize as u64) ^ ((c.tx as u64) << 40) ^ ((c.ty as u32 as u64) << 8);
             x = x.wrapping_mul(0x9e37_79b9_7f4a_7c15);
             acc.wrapping_add(x ^ (x >> 29))
-        })
+        });
+        tiles.hash(&mut h);
+        h.finish()
     }
     layer.id.0.hash(h);
     layer.visible.hash(h);
