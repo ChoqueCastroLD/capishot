@@ -220,6 +220,8 @@ mod tests {
     fn shift_gradient_snaps_to_45_degrees() {
         let mut app = app();
         app.ui.tool = Tool::Gradient;
+        // The destructive drag (live gradients snap in gradient_ui.rs, with the same helper).
+        app.ui.tool_options.gradient_classic = true;
         let shift = egui::Modifiers::SHIFT;
         tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 10.0, pressure: 1.0 }, shift);
         tool_event(&mut app, ToolEvent::Move { x: 60.0, y: 52.0, pressure: 1.0 }, shift);

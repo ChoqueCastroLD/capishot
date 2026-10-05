@@ -315,7 +315,10 @@ pub fn plan(doc: &Document) -> Result<Plan<'_>, Unsupported> {
     }
     let mut p = Planner::new(DocCtx::of(doc));
     let root = p.clear();
-    let root = p.stack(&doc.layers, root)?;
+    // Start at the topmost layer that hides everything beneath it (an opaque fill layer): the
+    // layers below can't change the result, so they cost no passes or uploads.
+    let start = doc.layers.iter().rposition(|l| photocraft_compose::occludes_below(l, doc.mode)).unwrap_or(0);
+    let root = p.stack(doc.layers.get(start..).unwrap_or(&doc.layers), root)?;
     Ok(p.finish(root))
 }
 
@@ -805,25 +808,19 @@ impl<'a> Planner<'a> {
                 let rgb = c.to_rgb();
                 p.color = [rgb[0], rgb[1], rgb[2], c.alpha];
             }
-            Fill::Gradient { stops, angle, scale, style, reverse } => {
+            Fill::Gradient { angle, scale, style, reverse, offset, dither, .. } => {
                 p.gradient = true;
                 // compose::render_fill: whole-pixel end points (fill_layout).
-                let (angle, scale, offset) = photocraft_compose::fill_layout::fill_gradient_layout(*style, *angle, *scale, frame);
+                let (angle, scale, offset) = photocraft_compose::fill_layout::gradient_layout(*style, *angle, *scale, *offset, frame);
                 p.params[0] = [angle, scale, if *reverse { 1.0 } else { 0.0 }, style_index(*style)];
                 let c = frame;
                 p.params[1] = [c.x0 as f32, c.y0 as f32, c.width() as f32, c.height() as f32];
-                p.params[2][0] = offset.0;
-                p.params[2][1] = offset.1;
-                let conv: Vec<(f32, [f32; 4])> = stops
-                    .iter()
-                    .map(|(t, c)| {
-                        let r = c.to_rgb();
-                        (*t, [r[0], r[1], r[2], c.alpha])
-                    })
-                    .collect();
+                // p2.xy: centre offset; p2.w: dither (the shared position hash, see the shader).
+                p.params[2] = [offset.0, offset.1, 0.0, if *dither { 1.0 } else { 0.0 }];
+                let ramp = photocraft_compose::gradient_fill::Ramp::new(f);
                 let mut rows = vec![[0.0f32; 4096]; 4];
                 for k in 0..4096 {
-                    let v = sample_stops4(&conv, k as f32 / 4095.0);
+                    let v = ramp.as_ref().map_or([0.0; 4], |r| r.sample(k as f32 / 4095.0));
                     for (ch, row) in rows.iter_mut().enumerate() {
                         row[k] = v[ch];
                     }
@@ -1636,6 +1633,50 @@ mod tests {
         assert_eq!(last.kernel, Kernel::CopyRect);
         assert_eq!(last.dst, p.root);
         assert!(p.slots <= 6, "{} slots", p.slots);
+    }
+
+    #[test]
+    fn opaque_fill_layers_skip_what_they_cover() {
+        let opaque = || Fill::gradient(vec![(0.0, Color::BLACK), (1.0, Color::WHITE)], 30.0, 1.0, photocraft_doc::GradientStyle::Linear, false);
+        let mut d = Document::with_background("t", Size::new(8, 8), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        for i in 0..4 {
+            // Small painted layers (empty ones plan no passes at all).
+            let mut l = Layer::raster(format!("l{i}"), d.pixel_format());
+            l.surface_mut().unwrap().fill_rect(Rect::new(i, i, i + 2, i + 2), &[0.0, 0.0, 1.0, 1.0]);
+            d.layers.push(l);
+        }
+        d.layers.push(Layer::new("g", LayerContent::Fill(opaque())));
+        let mut top = Layer::raster("top", d.pixel_format());
+        top.clipped = true;
+        d.layers.push(top);
+        // Clear, then the fill and its clipped layer: the background and four rasters are skipped.
+        let skipped = plan(&d).unwrap().passes.len();
+        let mut alone = d.clone();
+        alone.layers.drain(..5);
+        assert_eq!(skipped, plan(&alone).unwrap().passes.len());
+        // Anything that lets the layers below show through keeps them.
+        let see_through: [fn(&mut Layer); 6] = [
+            |l| l.opacity = 0.99,
+            |l| l.fill_opacity = 0.5,
+            |l| l.blend = BlendMode::Multiply,
+            |l| l.visible = false,
+            |l| l.excluded_channels = 1,
+            |l| {
+                if let LayerContent::Fill(Fill::Gradient { opacity_stops, .. }) = &mut l.content {
+                    opacity_stops.push((1.0, 0.5));
+                }
+            },
+        ];
+        for (k, f) in see_through.iter().enumerate() {
+            let mut d2 = d.clone();
+            f(&mut d2.layers[5]);
+            assert!(plan(&d2).unwrap().passes.len() > skipped, "case {k}: the layers below are planned");
+            assert!(!photocraft_compose::occludes_below(&d2.layers[5], ColorMode::Rgb), "case {k}");
+        }
+        let mut translucent = d.clone();
+        translucent.layers[5].content = LayerContent::Fill(Fill::Solid(Color::rgba(1.0, 0.0, 0.0, 0.5)));
+        assert!(!photocraft_compose::occludes_below(&translucent.layers[5], ColorMode::Rgb));
+        assert!(photocraft_compose::occludes_below(&d.layers[5], ColorMode::Rgb));
     }
 
     #[test]

@@ -20,6 +20,7 @@ pub mod adjust;
 pub mod bounds;
 pub mod effects;
 pub mod fill_layout;
+pub mod gradient_fill;
 pub mod masks;
 pub mod multichannel;
 pub mod pattern;
@@ -674,6 +675,10 @@ pub fn surface_to_buffer(s: &Surface, rect: Rect) -> Buffer {
 /// the vector mask's path; otherwise the canvas.
 pub fn fill_frame(layer: &Layer, canvas: Rect) -> Rect {
     let mut frame = canvas;
+    // "Align with layer" off: the canvas (the Gradient tool's live gradients).
+    if let LayerContent::Fill(Fill::Gradient { align: false, .. }) = &layer.content {
+        return frame;
+    }
     if let Some(m) = &layer.mask
         && m.enabled
         && m.surface.default_pixel().first().is_some_and(|v| *v <= 0.0)
@@ -709,53 +714,13 @@ fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &pattern::PreparedP
             let rgb = c.to_rgb();
             Buffer::filled(rect, [rgb[0], rgb[1], rgb[2], c.alpha])
         }
-        Fill::Gradient { stops, angle, scale, style, reverse } => {
-            // Convert once per render call, while its document CMYK profile is active.
-            let stops: Vec<_> = stops
-                .iter()
-                .map(|(p, c)| {
-                    let rgb = c.to_rgb();
-                    (*p, [rgb[0], rgb[1], rgb[2], c.alpha])
-                })
-                .collect();
-            // Gradient geometry relative to the layer's frame, independent of the render rect.
-            let (angle, scale, offset) = fill_layout::fill_gradient_layout(*style, *angle, *scale, canvas);
-            let mut b = Buffer::transparent(rect);
-            for y in rect.y0..rect.y1 {
-                for x in rect.x0..rect.x1 {
-                    let t = effects::gradient_t(*style, angle, scale, *reverse, offset, canvas, x as f32 + 0.5, y as f32 + 0.5);
-                    let i = ((y - rect.y0) as usize) * rect.width() as usize + (x - rect.x0) as usize;
-                    b.px[i] = sample_stops(&stops, t);
-                }
-            }
-            b
-        }
+        // Gradient geometry relative to the layer's frame, independent of the render rect.
+        Fill::Gradient { .. } => Buffer { rect, px: gradient_fill::render(f, rect, canvas) },
         // Laid out from the layer's frame when linked; transparent if the pattern is missing.
         Fill::Pattern { name, scale, id, angle, link, phase } => match patterns.get(id, name) {
             Some(tile) => Buffer { rect, px: pattern::render(&tile, &pattern::Placement::new(canvas, *link, *phase, *scale, *angle), rect) },
             None => Buffer::transparent(rect),
         },
-    }
-}
-
-fn sample_stops(stops: &[(f32, [f32; 4])], t: f32) -> [f32; 4] {
-    match stops {
-        [] => [0.0; 4],
-        [only] => only.1,
-        _ => {
-            if t <= stops[0].0 {
-                return stops[0].1;
-            }
-            for w in stops.windows(2) {
-                let (a, b) = (&w[0], &w[1]);
-                if t <= b.0 {
-                    let k = if b.0 > a.0 { (t - a.0) / (b.0 - a.0) } else { 0.0 };
-                    let (ca, cb) = (a.1, b.1);
-                    return std::array::from_fn(|i| ca[i] + (cb[i] - ca[i]) * k);
-                }
-            }
-            stops[stops.len() - 1].1
-        }
     }
 }
 
@@ -868,6 +833,37 @@ pub fn transparent_outside(layer: &Layer) -> bool {
         LayerContent::Fill(_) | LayerContent::Adjustment(_) => true,
         _ => layer.surface().is_none_or(|s| s.format().alpha && s.default_pixel().last().is_some_and(|a| *a <= 0.0)),
     }
+}
+
+/// Whether `layer` replaces everything beneath it in its stack: a visible, unclipped fill layer
+/// in Normal mode at full opacity and fill, without masks, effects, channel restrictions or Blend
+/// If, whose fill is opaque everywhere (a solid colour, or a gradient whose colour and opacity
+/// stops are all opaque). Normal blending at alpha 1 returns the layer's colour exactly, so the
+/// layers below can be skipped (the live Gradient tool's preview recomposites the whole canvas on
+/// every pointer move).
+pub fn occludes_below(layer: &Layer, mode: photocraft_color::ColorMode) -> bool {
+    let LayerContent::Fill(f) = &layer.content else { return false };
+    let opaque = match f {
+        Fill::Solid(c) => c.alpha >= 1.0,
+        Fill::Gradient { stops, opacity_stops, .. } => {
+            !stops.is_empty() && stops.iter().all(|(_, c)| c.alpha >= 1.0) && opacity_stops.iter().all(|(_, o)| *o >= 1.0)
+        }
+        Fill::Pattern { .. } => false,
+    };
+    // A cached render in use (a PSD's stored fill pixels) may not be opaque.
+    let cached = layer.fill_cache.as_ref().is_some_and(|c| c.fill == *f);
+    opaque
+        && !cached
+        && layer.visible
+        && !layer.clipped
+        && layer.blend == photocraft_color::BlendMode::Normal
+        && layer.opacity >= 1.0
+        && layer.fill_opacity >= 1.0
+        && !layer.mask.as_ref().is_some_and(|m| m.enabled)
+        && !layer.vector_mask.as_ref().is_some_and(|m| m.enabled)
+        && !effects::has_effects(layer)
+        && layer.excluded_channels == 0
+        && !blend_if_active(layer, mode)
 }
 
 /// Whether Blending Options › Blend If changes how `layer` composites in a `mode` document.

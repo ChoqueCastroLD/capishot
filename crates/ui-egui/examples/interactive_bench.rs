@@ -17,7 +17,7 @@
 use std::time::Instant;
 
 use eframe::wgpu;
-use photocraft_doc::Document;
+use photocraft_doc::{Document, LayerContent};
 use photocraft_engine::Session;
 use photocraft_geom::Rect;
 use serde_json::{Value, json};
@@ -96,19 +96,24 @@ impl Bench {
         let st = s.active().expect("document");
         let doc = st.doc.clone();
         let region = if full { doc.bounds() } else { st.last_damage.map_or(doc.bounds(), |r| r.inflate(reach(&doc.layers)).intersect(&doc.bounds())) };
+        self.render(&doc, region)
+    }
+
+    /// GPU (or CPU fallback) composite of `region` of `doc`, waited on.
+    fn render(&mut self, doc: &Document, region: Rect) -> f64 {
         if region.is_empty() {
             return 0.0;
         }
         let t = Instant::now();
         match &mut self.gpu {
             Some(g) => {
-                if g.comp.render(&g.device, &g.queue, &doc, region, |_, _| {}).is_err() {
-                    std::hint::black_box(photocraft_compose::render(&doc, region));
+                if g.comp.render(&g.device, &g.queue, doc, region, |_, _| {}).is_err() {
+                    std::hint::black_box(photocraft_compose::render(doc, region));
                 }
                 let _ = g.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
             }
             None => {
-                std::hint::black_box(photocraft_compose::render(&doc, region));
+                std::hint::black_box(photocraft_compose::render(doc, region));
             }
         }
         t.elapsed().as_secs_f64() * 1000.0
@@ -409,6 +414,45 @@ fn main() {
         let t = Instant::now();
         std::hint::black_box(photocraft_io::export(&d, "x.jpg", &Default::default()).expect("jpg"));
         ms(t)
+    });
+
+    // ---- live gradient ------------------------------------------------------------------------
+    // A Gradient tool drag in live mode: each pointer move previews a shallow copy of the document
+    // with the edited fill (gradient_ui::display_doc, through gradient_fill_cmds::apply_set) and
+    // recomposites the whole canvas, since the fill covers it. Release commits one command.
+    exec(&mut s, "gradient.fill.create", json!({"from": [w as f32 * 0.2, h as f32 * 0.5], "to": [w as f32 * 0.8, h as f32 * 0.5]}));
+    let gid = s.active().and_then(|st| st.active_layer).expect("gradient layer");
+    let mut k = 0;
+    b.time("live gradient preview doc (no refresh)", |_| {
+        k += 1;
+        let to = [w as f32 * (0.6 + 0.03 * (k % 10) as f32), h as f32 * (0.3 + 0.04 * (k % 7) as f32)];
+        let t = Instant::now();
+        let d = doc(&s);
+        let l = d.layer(gid).expect("layer");
+        let LayerContent::Fill(f) = &l.content else { panic!("not a fill") };
+        let f = photocraft_engine::gradient_fill_cmds::apply_set(l, f, d.bounds(), &json!({"to": to}), [0.0, 0.0, 0.0, 1.0], [1.0; 4]).expect("set");
+        let mut shown = (*d).clone();
+        shown.layer_mut(gid).expect("layer").content = LayerContent::Fill(f);
+        std::hint::black_box(&shown);
+        ms(t)
+    });
+    b.time("live gradient drag update (preview + full refresh)", |b| {
+        k += 1;
+        let to = [w as f32 * (0.6 + 0.03 * (k % 10) as f32), h as f32 * (0.3 + 0.04 * (k % 7) as f32)];
+        let t = Instant::now();
+        let d = doc(&s);
+        let l = d.layer(gid).expect("layer");
+        let LayerContent::Fill(f) = &l.content else { panic!("not a fill") };
+        let f = photocraft_engine::gradient_fill_cmds::apply_set(l, f, d.bounds(), &json!({"to": to}), [0.0, 0.0, 0.0, 1.0], [1.0; 4]).expect("set");
+        let mut shown = (*d).clone();
+        shown.layer_mut(gid).expect("layer").content = LayerContent::Fill(f);
+        ms(t) + b.render(&shown, shown.bounds())
+    });
+    b.time("live gradient release (gradient.fill.set + refresh)", |b| {
+        k += 1;
+        let t = Instant::now();
+        exec(&mut s, "gradient.fill.set", json!({"layer": gid.0, "to": [w as f32 * (0.6 + 0.03 * (k % 10) as f32), h as f32 * 0.4]}));
+        ms(t) + b.refresh(&s, false)
     });
 
     if let Some(out) = arg(&args, "--json") {

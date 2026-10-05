@@ -311,13 +311,7 @@ fn solid_and_gradient_fill_layers() {
     d.layers.push(Layer::new("fill", LayerContent::Fill(Fill::Solid(Color::rgb(0.0, 0.0, 1.0)))));
     assert!(close4(px(&d, 5, 0), [0.0, 0.0, 1.0, 1.0]));
 
-    let g = Fill::Gradient {
-        stops: vec![(0.0, Color::BLACK), (1.0, Color::WHITE)],
-        angle: 0.0,
-        scale: 1.0,
-        style: photocraft_doc::GradientStyle::Linear,
-        reverse: false,
-    };
+    let g = Fill::gradient(vec![(0.0, Color::BLACK), (1.0, Color::WHITE)], 0.0, 1.0, photocraft_doc::GradientStyle::Linear, false);
     let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
     let buf = render_fill(&g, Rect::new(0, 0, 10, 1), Rect::new(0, 0, 10, 1), &patterns);
     // tile independence: a 1px render of the right edge equals the full render
@@ -1175,7 +1169,7 @@ fn small_gradient_fill_matches_photoshop_at_all_depths() {
     let stops = vec![(0.0, Color::rgb(0.0, 0.0, 0.0)), (1.0, Color::rgb(1.0, 1.0, 1.0))];
     for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
         let mut d = Document::new("g", Size::new(4, 4), ColorMode::Rgb, depth);
-        let fill = Fill::Gradient { stops: stops.clone(), angle: 30.0, scale: 1.0, style: photocraft_doc::GradientStyle::Reflected, reverse: false };
+        let fill = Fill::gradient(stops.clone(), 30.0, 1.0, photocraft_doc::GradientStyle::Reflected, false);
         d.layers.push(Layer::new("g", LayerContent::Fill(fill)));
         let out = flatten(&d);
         for y in 0..4usize {

@@ -124,6 +124,25 @@ mod tests {
     }
 
     #[test]
+    fn offset_centres_snap_like_the_frame_centre() {
+        // A zero offset is the plain layout exactly.
+        let f = Rect::new(0, 0, 7, 5);
+        for style in [GradientStyle::Linear, GradientStyle::Reflected] {
+            assert_eq!(gradient_layout(style, 30.0, 1.0, (0.0, 0.0), f), fill_gradient_layout(style, 30.0, 1.0, f));
+        }
+        // Moving the centre by whole pixels moves the snapped layout by the same pixels.
+        let big = Rect::new(0, 0, 40, 20);
+        let (a0, s0, o0) = gradient_layout(GradientStyle::Linear, 30.0, 0.5, (0.0, 0.0), big);
+        let (a1, s1, o1) = gradient_layout(GradientStyle::Linear, 30.0, 0.5, (0.25, -0.1), big);
+        assert!((a0 - a1).abs() < 1e-4 && (s0 - s1).abs() < 1e-4, "{a0} {a1} {s0} {s1}");
+        assert!((o1.0 - o0.0 - 0.25).abs() < 1e-4 && (o1.1 - o0.1 + 0.1).abs() < 1e-4, "{o0:?} {o1:?}");
+        // Non-snapping styles and bad offsets pass through.
+        assert_eq!(gradient_layout(GradientStyle::Radial, 30.0, 1.0, (0.2, 0.1), big), (30.0, 1.0, (0.2, 0.1)));
+        let (_, _, o) = gradient_layout(GradientStyle::Linear, 30.0, 1.0, (f32::NAN, 0.0), big);
+        assert!(o.0.is_nan());
+    }
+
+    #[test]
     fn large_frames_barely_move_and_bad_input_is_harmless() {
         let f = Rect::new(0, 0, 3000, 2000);
         let (a, s, o) = fill_gradient_layout(GradientStyle::Linear, 30.0, 1.0, f);

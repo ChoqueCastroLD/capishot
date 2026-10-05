@@ -57,13 +57,7 @@ fn filled_shape_stroke_follows_the_outline_where_the_fill_fades_out() {
     let mut d = doc(40, 40);
     let mut transparent = Color::rgb(1.0, 0.0, 0.0);
     transparent.alpha = 0.0;
-    let fade = Fill::Gradient {
-        stops: vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (1.0, transparent)],
-        angle: 0.0,
-        scale: 1.0,
-        style: GradientStyle::Linear,
-        reverse: false,
-    };
+    let fade = Fill::gradient(vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (1.0, transparent)], 0.0, 1.0, GradientStyle::Linear, false);
     let mut l = shape(10.0, 30.0, fade, None);
     l.effects.items = vec![stroke(3.0, StrokePosition::Outside, blue()), stroke(2.0, StrokePosition::Inside, FxPaint::Color(Color::rgb(0.0, 1.0, 0.0)))];
     d.layers.push(l);
