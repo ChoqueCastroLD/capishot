@@ -752,10 +752,15 @@ fn switch_on_hover(ctx: &egui::Context, buttons: &[egui::Response]) {
 }
 
 fn render_level(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>) {
-    // Menu popups can be taller than the viewport. Keep each level on-screen and scroll it,
-    // matching egui's own bounded-popup pattern used by ComboBox.
-    let max_height = (ui.ctx().content_rect().height() - 32.0).max(120.0);
-    egui::ScrollArea::vertical().id_salt(("menu-level", depth)).max_height(max_height).show(ui, |ui| render_level_rows(ui, items, depth, clicked));
+    // On short displays leave room for the menu bar and popup frame so the ScrollArea becomes
+    // active before the popup reaches the bottom edge. Keep wheel/scrollbar input and also allow
+    // direct dragging of the menu contents.
+    let max_height = (ui.ctx().content_rect().height() - 56.0).max(96.0);
+    egui::ScrollArea::vertical()
+        .id_salt(("menu-level", depth))
+        .max_height(max_height)
+        .scroll_source(egui::containers::scroll_area::ScrollSource::ALL)
+        .show(ui, |ui| render_level_rows(ui, items, depth, clicked));
 }
 
 fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>) {
@@ -958,6 +963,32 @@ mod tests {
             .map(|r| r.bottom())
             .fold(viewport.top(), f32::max);
         assert!(max_bottom <= viewport.bottom() + 1.0, "menu popup overflowed viewport: {max_bottom} > {}", viewport.bottom());
+    }
+
+    #[test]
+    fn tall_menu_scrolls_with_mouse_wheel_on_short_display() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut harness = Harness::builder().with_size(egui::vec2(900.0, 220.0)).build_ui_state(|ui, app| menu_bar(app, ui), app);
+        PhotocraftApp::setup_context(&harness.ctx, crate::theme::ThemeKind::ALL[0]);
+        harness.run_steps(3);
+        harness.get_by_label("Filter").click();
+        harness.run_steps(3);
+
+        let item = harness.get_by_label_contains("Filter Gallery…");
+        let before = item.rect().top();
+        harness.hover_at(item.rect().center());
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -80.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(4);
+
+        let after = harness.get_by_label_contains("Filter Gallery…").rect().top();
+        assert!(after < before - 1.0, "mouse wheel should move tall menu content: {before} -> {after}");
     }
 
     #[test]
