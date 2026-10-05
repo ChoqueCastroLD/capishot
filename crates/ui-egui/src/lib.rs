@@ -262,8 +262,8 @@ pub struct PhotocraftApp {
     pub(crate) guide_drag: Option<rulers::GuideDrag>,
     /// Type tool layout cache: ((doc, revision, layer), layout).
     pub(crate) type_layout: Option<((u64, u64, u64), std::sync::Arc<photocraft_text::TextLayout>)>,
-    /// Channel thumbnails (composite + per channel) cached per (doc, revision).
-    channel_thumbs: Option<(DocId, u64, Vec<egui::TextureHandle>)>,
+    /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
+    channel_thumbs: Option<(DocId, std::sync::Weak<Document>, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
     pub(crate) channel_views: HashMap<u64, channel_view::Cache>,
     /// Selection outline keyed by (document, mask identity × step × visible region).
@@ -914,12 +914,18 @@ impl PhotocraftApp {
 }
 
 impl PhotocraftApp {
-    /// Channels panel thumbnails of the active document (cached per revision): the composite,
+    /// Channels panel thumbnails of the active document snapshot: the composite,
     /// each colour channel (when there is more than one), each alpha channel, then the Quick Mask.
     pub fn channel_thumbs(&mut self, ctx: &egui::Context) -> Vec<egui::TextureId> {
-        let Some(st) = self.session.active() else { return Vec::new() };
-        let (id, rev, doc) = (st.doc.id, st.revision, st.doc.clone());
-        if !matches!(&self.channel_thumbs, Some((d, r, _)) if *d == id && *r == rev) {
+        let Some(st) = self.session.active() else {
+            self.channel_thumbs = None;
+            return Vec::new();
+        };
+        let (id, doc) = (st.doc.id, st.doc.clone());
+        // View-only commands bump revision without changing pixels. Keeping a Weak pins allocation
+        // identity against address reuse without retaining the document's pixel data.
+        let snapshot = std::sync::Arc::downgrade(&doc);
+        if !matches!(&self.channel_thumbs, Some((d, old, _)) if *d == id && old.ptr_eq(&snapshot)) {
             let comp = photocraft_compose::thumbnail(&doc, 56);
             let (w, h) = (comp.width as usize, comp.height as usize);
             let side = w.max(h);
@@ -966,7 +972,7 @@ impl PhotocraftApp {
                 }
                 texs.push(ctx.load_texture(format!("chan-a{i}"), egui::ColorImage::new([side, side], px), egui::TextureOptions::LINEAR));
             }
-            self.channel_thumbs = Some((id, rev, texs));
+            self.channel_thumbs = Some((id, snapshot, texs));
         }
         self.channel_thumbs.as_ref().map(|(_, _, t)| t.iter().map(|t| t.id()).collect()).unwrap_or_default()
     }
