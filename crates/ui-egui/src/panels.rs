@@ -842,7 +842,7 @@ fn info_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let fx = move |px: f64| units.format(px, dpi, size.width as f64);
     let units_y = app.session.prefs().units_and_rulers.clone();
     let fy = move |px: f64| units_y.format(px, dpi, size.height as f64);
-    let sel = st.doc.selection.as_ref().map(|m| m.content_bounds());
+    let sel = st.doc.selection.as_ref().map(photocraft_compose::bounds::content_bounds);
     let pos = app
         .hover_doc
         .map(|p| (p[0].floor() as i32, p[1].floor() as i32))
