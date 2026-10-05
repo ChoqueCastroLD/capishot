@@ -468,6 +468,9 @@ fn build() -> Vec<CommandSpec> {
             |s, p| {
                 let id = layer_param(s, p)?;
                 let label = if p.get("visible").is_some() && p.as_object().is_some_and(|o| o.len() <= 2) { "Layer Visibility" } else { "Layer Properties" };
+                let before = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
+                // Clipping and channel changes reach the layers around it: recomposite everything.
+                let local = p.get("clipped").is_none() && p.get("channels").is_none();
                 s.edit(label, |doc, _| {
                     let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
                     if let Some(v) = p.get("name").and_then(Value::as_str) {
@@ -510,6 +513,9 @@ fn build() -> Vec<CommandSpec> {
                     }
                     Ok(())
                 })?;
+                if local {
+                    crate::layer_multi_cmds::note_damage(s, &before, &[id]);
+                }
                 Ok(Value::Null)
             }
         ),
@@ -1071,7 +1077,7 @@ fn combine(a: &Surface, b: &Surface, area: Rect, f: impl Fn(f32, f32) -> f32) ->
 /// Move a layer's pixels, linked mask and type by whole pixels (vectors move via
 /// `vector_cmds::translate_vectors`).
 pub(crate) fn translate_layer(doc: &Document, l: &mut Layer, dx: i32, dy: i32) {
-    use photocraft_algo::resample::translate_surface;
+    use crate::layer_multi_cmds::shift_surface as translate_surface;
     // Linked patterns in the layer's effects move with it.
     if let Some(r) = &mut l.effects.reference {
         *r = (r.0 + f64::from(dx), r.1 + f64::from(dy));

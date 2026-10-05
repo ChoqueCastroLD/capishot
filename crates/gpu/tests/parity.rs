@@ -429,6 +429,60 @@ use photocraft_doc::{
 
 /// An anti-aliased blob (disc plus a soft-edged bar and a hole) with partially transparent parts,
 /// so effects see real edge coverage, concavities and interior alpha.
+/// Small layers composite only over their bounds and are copied back into the backdrop (#125):
+/// every blend mode, clipped layers, isolated and pass-through groups (with adjustments, masks,
+/// opacity), layers partly off the canvas and over several chunks must still match the CPU.
+#[test]
+fn small_layers_composite_over_their_bounds() {
+    let Some(mut g) = gpu() else { return };
+    let small = |seed: u32, x: i32, y: i32, mode: BlendMode| {
+        let mut l = noise_layer("s", PixelFormat::RGBA8, Rect::from_xywh(x, y, 23, 17), seed, 0.0);
+        l.blend = mode;
+        l.opacity = 0.85;
+        l
+    };
+    let mut d = base_doc(200, 150);
+    for (i, mode) in BlendMode::LAYER_MODES.into_iter().enumerate() {
+        let i = i as i32;
+        d.layers.push(small(100 + i as u32, (i * 29) % 190 - 8, (i * 37) % 140 - 5, mode));
+    }
+    // A clipping base with a raster and an adjustment clipped to it.
+    let base = small(200, 120, 90, BlendMode::Normal);
+    let mut c1 = noise_layer("c1", PixelFormat::RGBA8, Rect::new(100, 80, 190, 140), 201, 0.0);
+    c1.clipped = true;
+    c1.blend = BlendMode::Multiply;
+    let mut c2 = Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert));
+    c2.clipped = true;
+    d.layers.extend([base, c1, c2]);
+    // An isolated group with a mask, an adjustment and a nested pass-through group.
+    let inner = Layer::group("inner", vec![small(300, 40, 100, BlendMode::Screen), small(301, 55, 110, BlendMode::Normal)]);
+    let mut iso = Layer::group(
+        "iso",
+        vec![
+            small(302, 30, 95, BlendMode::Normal),
+            Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert)),
+            inner,
+            small(303, 70, 120, BlendMode::Overlay),
+        ],
+    );
+    iso.blend = BlendMode::Normal;
+    iso.opacity = 0.75;
+    iso.mask = Some(mask(Rect::new(25, 90, 100, 145), 304, 1.0));
+    d.layers.push(iso);
+    // A pass-through group with opacity around small layers.
+    let mut pt = Layer::group("pt", vec![small(305, 150, 10, BlendMode::Normal), small(306, 160, 20, BlendMode::Difference)]);
+    pt.opacity = 0.6;
+    d.layers.push(pt);
+    check(&mut g, &d, "small layers");
+    // The same over several compositor chunks.
+    let mut big = base_doc(1500, 1200);
+    for (i, mode) in BlendMode::LAYER_MODES.into_iter().enumerate() {
+        let i = i as i32;
+        big.layers.push(small(400 + i as u32, 1010 + (i % 4) * 5, 1010 + (i / 4) * 5, mode));
+    }
+    check(&mut g, &big, "small layers across chunks");
+}
+
 fn blob(name: &str, fmt: PixelFormat, cx: f32, cy: f32, r: f32, color: [f32; 3]) -> Layer {
     let mut l = Layer::raster(name, fmt);
     let rect = Rect::new((cx - r - 12.0) as i32, (cy - r - 4.0) as i32, (cx + r + 14.0) as i32, (cy + r + 4.0) as i32);

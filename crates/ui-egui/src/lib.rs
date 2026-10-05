@@ -57,6 +57,7 @@ pub mod menu_catalog;
 pub mod menu_nav;
 pub mod menus;
 pub mod move_mods;
+pub mod move_ui;
 pub mod new_doc_ui;
 pub mod notices;
 pub mod outline;
@@ -213,6 +214,8 @@ pub struct PhotocraftApp {
     live_stroke: Option<canvas::LiveStroke>,
     /// Footprint trail of a retouching drag (see `stroke_trail`).
     trail: Option<stroke_trail::Trail>,
+    /// Move tool drag shown live (`move_ui`).
+    pub(crate) move_preview: Option<move_ui::MovePreview>,
     /// The next tool `Down` is a right-button drag that erases (see `paint_mouse`).
     secondary_erase: bool,
     /// End of the last painting stroke: ⇧-click draws a straight line from it (#178).
@@ -325,6 +328,7 @@ impl PhotocraftApp {
             drag: None,
             live_stroke: None,
             trail: None,
+            move_preview: None,
             secondary_erase: false,
             last_stroke_end: None,
             control_rx: None,

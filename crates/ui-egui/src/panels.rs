@@ -1389,6 +1389,16 @@ fn layer_row(
     layer_drag_and_drop(ctx, ui, l, rect, &resp, actions);
     // Rows are painted: name them for screen readers and UI tests.
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &l.name));
+    // A row scrolled out of view only keeps its place (#125): a layout's hundreds of rows would
+    // otherwise lay out names, icons and thumbnails every frame. Group rows stay whole: their
+    // disclosure triangle is a widget (accessibility, scroll-to).
+    if !ui.is_rect_visible(rect)
+        && !l.is_group()
+        && !resp.context_menu_opened()
+        && ctx.data(|d| d.get_temp::<String>(egui::Id::new(("rename", l.id.0)))).is_none()
+    {
+        return;
+    }
     let painter = ui.painter_at(rect.expand(1.0));
     if t.pro {
         if selected {
@@ -1684,11 +1694,12 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     let Some(st) = app.session.active() else { return };
     let Some(id) = st.active_layer else { return };
-    let Some(layer) = st.doc.layer(id).cloned() else { return };
+    let Some(layer) = st.doc.layer(id) else { return };
     // The floating card appears for adjustment and fill layers (their controls live here).
     if !matches!(layer.content, LayerContent::Adjustment(_) | LayerContent::Fill(_)) {
         return;
     }
+    let layer = layer.clone();
     let t = Tokens::get(ctx);
     let canvas = app.last_canvas_rect;
     let width = 320.0;
@@ -1821,9 +1832,11 @@ fn properties_body(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         return;
     }
     let Some(id) = st.active_layer else { return };
-    let Some(layer) = st.doc.layer(id).cloned() else { return };
+    // Borrowed from the document snapshot: cloning the layer every frame copied whole groups.
+    let doc = st.doc.clone();
+    let Some(layer) = doc.layer(id) else { return };
     // Header: kind icon, layer name and kind (#155); sections below draw their own separators.
-    crate::props_layout::header(ui, &layer);
+    crate::props_layout::header(ui, layer);
     let is_adjustment = matches!(layer.content, LayerContent::Adjustment(_));
     if is_adjustment || layer.artboard().is_some() || !t.pro {
         ui.add_space(4.0);
@@ -1833,12 +1846,12 @@ fn properties_body(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if let LayerContent::Adjustment(adj) = &layer.content {
         adjustment_controls(app, ui, id, adj);
     } else if layer.artboard().is_some() {
-        crate::artboard_ui::properties(app, ui, &layer);
+        crate::artboard_ui::properties(app, ui, layer);
     } else if t.pro {
         // Transform, Align, the kind's sections and Quick Actions.
-        crate::layer_props_ui::properties(app, ui, &layer);
+        crate::layer_props_ui::properties(app, ui, layer);
     } else {
-        layer_controls(app, ui, &layer);
+        layer_controls(app, ui, layer);
         if matches!(layer.content, LayerContent::Text(_)) {
             crate::type_tool::type_properties(app, ui);
         }
@@ -2155,6 +2168,9 @@ fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usi
     }
     for (i, (name, on, kind)) in rows.into_iter().enumerate() {
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
         if resp.hovered() {
             ui.painter().rect_filled(rect, 0.0, t.hover.gamma_multiply(0.35));
         }

@@ -328,7 +328,8 @@ impl GpuCanvas {
         let format = self.format_for(doc.depth, size);
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format);
         let region = if fresh { doc.bounds() } else { region.intersect(&doc.bounds()) };
-        if let Err(e) = comp.supports(doc) {
+        // Checked before allocating a new canvas texture only: `render` plans (and refuses) itself.
+        if fresh && let Err(e) = comp.supports(doc) {
             res.compositor = Some(comp);
             return Err(e);
         }
@@ -421,6 +422,11 @@ impl GpuCanvas {
         let damage = damage.filter(|_| self.has(key, size) && self.format_of(key) == Some(format)).map(|r| r.intersect(&bounds));
         let t0 = now_ms();
         let mut out = Refresh::default();
+        if damage.is_some_and(|r| r.is_empty()) {
+            // Nothing changed on the canvas (selecting a layer, say): don't even plan.
+            out.kind = "rect";
+            return out;
+        }
         let region = damage.unwrap_or(bounds);
         let encode_srgb = display.is_some_and(|d| d.encode_srgb);
         let gpu = if key == doc.id.0 { self.composite(doc, region, encode_srgb) } else { Err(photocraft_gpu::Unsupported("preview texture".into())) };

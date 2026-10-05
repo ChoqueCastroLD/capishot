@@ -85,7 +85,10 @@ pub struct SnapTargets {
 /// Bounds of a layer for snapping: what Free Transform would show (`None` for empty layers,
 /// groups and maskless adjustment layers).
 pub fn layer_rect(doc: &Document, id: LayerId) -> Option<[f64; 4]> {
-    let l = doc.layer(id)?;
+    rect_of(doc, doc.layer(id)?)
+}
+
+fn rect_of(doc: &Document, l: &photocraft_doc::Layer) -> Option<[f64; 4]> {
     if l.is_group() || (matches!(l.content, LayerContent::Adjustment(_)) && l.mask.is_none()) {
         return None;
     }
@@ -118,7 +121,7 @@ impl SnapTargets {
                 if !l.visible || exclude.contains(&l.id) {
                     continue;
                 }
-                if let Some(r) = layer_rect(doc, l.id) {
+                if let Some(r) = rect_of(doc, l) {
                     t.add_rect(r, SnapKind::LayerEdge, SnapKind::LayerCenter);
                 }
             }

@@ -26,6 +26,11 @@ pub fn transparent_outside(layer: &Layer) -> bool {
     photocraft_compose::transparent_outside(layer)
 }
 
+/// `photocraft_compose::composite_bounds`: where compositing the layer can change anything.
+pub fn composite_bounds(layer: &Layer, canvas: Rect) -> Option<Rect> {
+    photocraft_compose::composite_bounds(layer, canvas)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

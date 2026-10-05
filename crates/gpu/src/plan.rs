@@ -639,18 +639,72 @@ impl<'a> Planner<'a> {
             return Ok(self.emit(p));
         }
 
+        // A layer that covers little of the canvas composites only over its bounds and is
+        // copied back into the backdrop (#125): a layout with hundreds of small text and shape
+        // layers otherwise shades every layer over every chunk.
+        let clip = self.local_clip(layer);
+        if clip.is_some_and(|c| c.is_empty()) {
+            // Nothing to draw (an empty layer, or a group of them).
+            for c in &visible_clipped {
+                self.check_blend_if(c)?;
+            }
+            return Ok(backdrop);
+        }
+        let start = self.passes.len();
         let mut content = self.content(layer)?;
         for c in visible_clipped {
             content = self.atop(c, content)?;
         }
+        if let Some(clip) = clip {
+            // Everything that built the layer's content only matters inside its bounds.
+            for p in &mut self.passes[start..] {
+                if p.clip.is_none() && !matches!(p.kernel, Kernel::Clear | Kernel::CopyFull) {
+                    p.clip = Some(clip);
+                }
+            }
+        }
         let mut p = Pass::new(Kernel::Blend, 0);
-        p.a = Some(backdrop);
+        p.a = Some(if clip.is_some() { self.retain(backdrop) } else { backdrop });
         p.b = Some(content);
         p.mode = layer.blend;
         p.opacity = opacity;
         p.flags = gamma_flag(layer);
         p.extra[3] = photocraft_compose::text_gamma(layer);
-        Ok(self.emit(p))
+        p.clip = clip;
+        let merged = self.emit(p);
+        match clip {
+            Some(clip) => Ok(self.write_back(backdrop, merged, clip)),
+            None => Ok(merged),
+        }
+    }
+
+    /// The rect a plain layer composites over: its composite bounds when they cover at most half
+    /// the canvas (beyond that, compositing everywhere costs less than the copy back).
+    fn local_clip(&self, layer: &Layer) -> Option<Rect> {
+        let canvas = self.cx.canvas;
+        let b = bounds::composite_bounds(layer, canvas)?;
+        (b.width() as u64 * b.height() as u64 * 2 <= canvas.width() as u64 * canvas.height() as u64).then_some(b)
+    }
+
+    /// Copy `merged` into `backdrop` over `clip` (in place when nothing else holds the backdrop);
+    /// returns the new backdrop. Consumes both.
+    fn write_back(&mut self, backdrop: Slot, merged: Slot, clip: Rect) -> Slot {
+        let dst = if self.refs[backdrop as usize] == 1 {
+            backdrop
+        } else {
+            let n = self.alloc();
+            let mut p = Pass::new(Kernel::CopyFull, n);
+            p.a = Some(backdrop);
+            self.passes.push(p);
+            self.release(backdrop);
+            n
+        };
+        let mut p = Pass::new(Kernel::CopyRect, dst);
+        p.a = Some(merged);
+        p.clip = Some(clip);
+        self.passes.push(p);
+        self.release(merged);
+        dst
     }
 
     /// render_content for non-adjustment layers.
@@ -1058,22 +1112,7 @@ impl<'a> Planner<'a> {
         self.release(content);
 
         // Write the clipped result back into the backdrop (in place when nothing else holds it).
-        let dst = if self.refs[backdrop as usize] == 1 {
-            backdrop
-        } else {
-            let n = self.alloc();
-            let mut p = Pass::new(Kernel::CopyFull, n);
-            p.a = Some(backdrop);
-            self.passes.push(p);
-            self.release(backdrop);
-            n
-        };
-        let mut p = Pass::new(Kernel::CopyRect, dst);
-        p.a = Some(merged);
-        p.clip = Some(clip);
-        self.passes.push(p);
-        self.release(merged);
-        Ok(dst)
+        Ok(self.write_back(backdrop, merged, clip))
     }
 
     fn fx_paint(&self, p: &'a FxPaint, anchor: (f64, f64)) -> Paint<'a> {
@@ -1437,8 +1476,35 @@ mod tests {
             d.layers.push(Layer::raster(format!("l{i}"), d.pixel_format()));
         }
         let p = plan(&d).unwrap();
+        // Empty layers draw nothing.
+        assert_eq!(p.passes.len(), 1 + 2);
+        for (i, l) in d.layers.iter_mut().skip(1).enumerate() {
+            l.surface_mut().unwrap().fill_rect(Rect::new(i as i32 % 4, 0, 4, 8), &[0.0, 0.0, 1.0, 1.0]);
+        }
+        let p = plan(&d).unwrap();
         assert!(p.slots <= 3, "{} slots", p.slots);
-        assert_eq!(p.passes.len(), 1 + 11 * 2);
+        // The background, then each small layer over its bounds and copied back.
+        assert_eq!(p.passes.len(), 1 + 2 + 10 * 3);
+    }
+
+    #[test]
+    fn small_layers_composite_only_over_their_bounds() {
+        let mut d = Document::with_background("t", Size::new(64, 64), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        let mut l = Layer::raster("small", d.pixel_format());
+        l.surface_mut().unwrap().fill_rect(Rect::new(10, 12, 20, 30), &[1.0, 0.0, 0.0, 1.0]);
+        let mut group = Layer::group("g", vec![l]);
+        group.blend = BlendMode::Normal;
+        d.layers.push(group);
+        let p = plan(&d).unwrap();
+        let r = Rect::new(10, 12, 20, 30);
+        // The group's content, its blend and the copy back are all limited to the layer.
+        assert!(p.passes.iter().filter(|p| matches!(p.kernel, Kernel::Content | Kernel::Blend)).skip(2).all(|p| p.clip == Some(r)), "{:?}", p.passes);
+        let last = p.passes.last().unwrap();
+        assert_eq!((last.kernel, last.dst, last.clip), (Kernel::CopyRect, p.root, Some(r)));
+        // A layer that covers most of the canvas composites everywhere.
+        d.layers[1].children_mut().unwrap()[0].surface_mut().unwrap().fill_rect(Rect::new(0, 0, 60, 60), &[1.0, 0.0, 0.0, 1.0]);
+        let p = plan(&d).unwrap();
+        assert!(p.passes.iter().all(|p| p.clip.is_none()));
     }
 
     #[test]

@@ -696,7 +696,10 @@ fn menu_tint(name: &str) -> Option<egui::Color32> {
 
 /// Draws the menu bar; returns the right edge of the last menu title (the bar itself fills the row).
 pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
-    let items = menu_items(app);
+    // Built only while a menu is open: every item's enabled/checked state scales with the
+    // document (layer lookups), which cost milliseconds per frame on large layouts (#125).
+    let items: std::cell::OnceCell<Vec<MenuItem>> = std::cell::OnceCell::new();
+    let app_ref: &PhotocraftApp = app;
     let mut right = ui.cursor().left();
     let mut clicked: Option<String> = None;
     let t = crate::theme::Tokens::get(ui.ctx());
@@ -713,8 +716,9 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
             nav.bar_bottom = Some(ui.max_rect().bottom());
             let mut buttons = Vec::with_capacity(TOP_MENUS.len());
             for top in TOP_MENUS {
-                let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
                 let r = ui.menu_button(egui::RichText::new(top).color(t.text_dim), |ui| {
+                    let items = items.get_or_init(|| menu_items(app_ref));
+                    let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
                     ui.set_min_width(220.0);
                     if mine.is_empty() {
                         ui.weak("(coming soon)");

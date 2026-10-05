@@ -246,15 +246,123 @@ pub fn translate(s: &mut Session, p: &Value) -> Result<Value> {
     if roots.is_empty() {
         return Err(EngineError::Other("no active layer".into()));
     }
-    s.edit("Move", |doc, _| {
-        let ids = top_level(doc, &with_links(doc, &roots));
+    let before = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
+    let ids = s.edit("Move", |doc, _| {
+        let ids = move_targets(doc, &roots);
         if ids.is_empty() {
             return Err(EngineError::NoLayer(roots[0]));
         }
-        let moves: Vec<_> = ids.into_iter().map(|id| (id, dx, dy)).collect();
-        move_layers(doc, &moves)
+        let moves: Vec<_> = ids.iter().map(|&id| (id, dx, dy)).collect();
+        move_layers(doc, &moves)?;
+        Ok(ids)
     })?;
+    note_damage(s, &before, &ids);
     Ok(Value::Null)
+}
+
+/// The layers a move of `roots` takes along: their linked layers, without layers whose group
+/// is also moving (the group carries them).
+pub fn move_targets(doc: &Document, roots: &[LayerId]) -> Vec<LayerId> {
+    top_level(doc, &with_links(doc, roots))
+}
+
+/// `doc` with the layers `ids` ([`move_targets`]) moved by whole pixels, as `layer.translate`
+/// leaves them: the Move tool's live preview while it drags. Type, shape and smart-object pixels
+/// shift as they are instead of re-rendering (the commit re-renders them), so a drag frame costs
+/// copying the moving pixels only.
+pub fn moved(doc: &Document, ids: &[LayerId], dx: i32, dy: i32) -> Result<Document> {
+    let mut out = doc.clone();
+    for &id in ids {
+        let l = out.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+        if l.locks.position || l.locks.all {
+            return Err(EngineError::Other(format!("layer \"{}\" is position-locked", l.name)));
+        }
+        shift_shown(doc, l, dx, dy);
+    }
+    Ok(out)
+}
+
+/// `photocraft_algo::resample::translate_surface` with the content scan cached per tile (a Move
+/// drag shifts the same layers every frame; scanning them each time cost more than the copy).
+pub(crate) fn shift_surface(s: &photocraft_raster::Surface, dx: i32, dy: i32) -> photocraft_raster::Surface {
+    let mut out = photocraft_raster::Surface::with_default(s.format(), &s.default_pixel());
+    let r = photocraft_compose::bounds::content_bounds(s);
+    if !r.is_empty() {
+        out.write_interleaved(r.translate(dx, dy), &s.to_interleaved(r));
+    }
+    out
+}
+
+/// [`crate::commands::translate_layer`] plus the vector side, without re-rendering anything.
+fn shift_shown(doc: &Document, l: &mut Layer, dx: i32, dy: i32) {
+    use self::shift_surface as translate_surface;
+    let a = photocraft_geom::Affine::translate(f64::from(dx), f64::from(dy));
+    if let Some(r) = &mut l.effects.reference {
+        *r = (r.0 + f64::from(dx), r.1 + f64::from(dy));
+    }
+    if let Some(m) = l.mask.as_mut().filter(|m| m.linked) {
+        m.surface = translate_surface(&m.surface, dx, dy);
+    }
+    if let Some(vm) = l.vector_mask.as_mut().filter(|v| v.linked) {
+        vm.path = vm.path.transform(&a);
+    }
+    match &mut l.content {
+        LayerContent::Raster(s) => *s = translate_surface(s, dx, dy),
+        LayerContent::Text(t) => {
+            t.transform = a.mul(&t.transform);
+            if let Some(c) = &mut t.cache {
+                *c = translate_surface(c, dx, dy);
+            }
+        }
+        LayerContent::Shape(sh) => {
+            // The rendered shape is cut at the canvas: one that reaches past it renders again.
+            let canvas = doc.bounds();
+            let inside = sh.cache.as_ref().is_some_and(|c| {
+                let b = photocraft_compose::bounds::content_bounds(c);
+                b.is_empty() || (b.x0 > canvas.x0 && b.y0 > canvas.y0 && b.x1 < canvas.x1 && b.y1 < canvas.y1)
+            });
+            crate::vector_cmds::transform_shape(sh, &a);
+            match &mut sh.cache {
+                Some(c) if inside => *c = translate_surface(c, dx, dy),
+                _ => crate::vector_cmds::refresh_shape(doc, sh),
+            }
+        }
+        LayerContent::Smart(sm) => crate::smart_cmds::shift_smart(sm, dx, dy),
+        LayerContent::Group(g) => {
+            if let Some(ab) = &mut g.artboard {
+                ab.rect = ab.rect.translate(dx, dy);
+            }
+            g.children.iter_mut().for_each(|c| shift_shown(doc, c, dx, dy));
+        }
+        LayerContent::Adjustment(_) | LayerContent::Fill(_) => {}
+    }
+}
+
+/// The document pixels an edit of the layers `ids` (moved, shown, hidden or restyled; contents
+/// otherwise as they were) can have changed from `before` to `after`, or `None` for anywhere.
+pub fn layers_damage(before: &Document, after: &Document, ids: &[LayerId]) -> Option<Rect> {
+    let mut out = Rect::EMPTY;
+    for d in [before, after] {
+        let canvas = d.bounds();
+        for id in ids {
+            // A layer gone from one side (never for a move) changes who knows what.
+            let b = photocraft_compose::change_bounds(d.layer(*id)?, canvas)?;
+            if !b.is_empty() {
+                out = if out.is_empty() { b } else { out.union(&b) };
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Report [`layers_damage`] as the active document's last change, so the canvas recomposites
+/// only that (grown by the effect reach around it) instead of everything.
+pub(crate) fn note_damage(s: &mut Session, before: &Document, ids: &[LayerId]) {
+    let Some(st) = s.active_mut() else { return };
+    if before.size != st.doc.size {
+        return;
+    }
+    st.last_damage = layers_damage(before, &st.doc, ids);
 }
 
 /// Content bounds used by Align/Distribute: the layer's pixels (type and shape layers use their
@@ -732,6 +840,54 @@ mod tests {
 
     fn sel(s: &Session) -> Vec<LayerId> {
         selected(s)
+    }
+
+    fn damage(s: &Session) -> Option<Rect> {
+        s.active().unwrap().last_damage
+    }
+
+    #[test]
+    fn moves_and_layer_props_report_only_their_area() {
+        let mut s = session(8);
+        let a = rect_layer(&mut s, Rect::new(10, 10, 20, 20));
+        s.execute("layer.select", json!({"layer": a.0})).unwrap();
+        s.execute("layer.translate", json!({"dx": 5, "dy": -3})).unwrap();
+        assert_eq!(damage(&s), Some(Rect::new(10, 7, 25, 20)), "where the layer was and is");
+        s.execute("layer.setProps", json!({"layer": a.0, "visible": false})).unwrap();
+        assert_eq!(damage(&s), Some(Rect::new(15, 7, 25, 17)));
+        s.execute("layer.setProps", json!({"layer": a.0, "opacity": 0.5, "blend": "Multiply"})).unwrap();
+        assert_eq!(damage(&s), Some(Rect::new(15, 7, 25, 17)));
+        // Clipping changes reach the layers around: everything.
+        s.execute("layer.setProps", json!({"layer": a.0, "clipped": true})).unwrap();
+        assert_eq!(damage(&s), None);
+        // An adjustment layer changes everything beneath it.
+        let adj = s.execute("layer.newAdjustmentLayer.invert", json!({})).unwrap()["layer"].as_u64().unwrap();
+        s.execute("layer.setProps", json!({"layer": adj, "visible": false})).unwrap();
+        assert_eq!(damage(&s), None);
+        // The Background (opaque everywhere): everything.
+        let bg = doc(&s).layers[0].id;
+        s.execute("layer.setProps", json!({"layer": bg.0, "opacity": 0.5})).unwrap();
+        let all = doc(&s).bounds();
+        assert!(damage(&s).is_none_or(|r| r.contains_rect(&all)), "{:?}", damage(&s));
+        // Bad params still fail cleanly.
+        assert!(s.execute("layer.setProps", json!({"layer": 999_999, "visible": true})).is_err());
+        assert!(s.execute("layer.translate", json!({"layer": 999_999, "dx": 1})).is_err());
+    }
+
+    #[test]
+    fn the_move_preview_matches_the_move() {
+        let mut s = session(8);
+        let a = rect_layer(&mut s, Rect::new(10, 10, 20, 20));
+        let before = s.active().unwrap().doc.clone();
+        let ids = move_targets(&before, &[a]);
+        let shown = moved(&before, &ids, 7, 4).unwrap();
+        s.execute("layer.translate", json!({"layer": a.0, "dx": 7, "dy": 4})).unwrap();
+        assert_eq!(layer_bounds(shown.layer(a).unwrap()), Some(bounds(&s, a)));
+        // Locked layers don't move in the preview either.
+        let mut locked = (*before).clone();
+        locked.layer_mut(a).unwrap().locks.position = true;
+        assert!(moved(&locked, &ids, 1, 1).is_err());
+        assert!(moved(&before, &[LayerId(999_999)], 1, 1).is_err());
     }
 
     fn select_all(s: &mut Session, ids: &[LayerId]) {

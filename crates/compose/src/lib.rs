@@ -737,6 +737,55 @@ fn restore_channels(out: &mut Buffer, before: &Buffer, w: [f32; 3]) {
     }
 }
 
+/// Where `layer`'s composite (its pixels and effects; a group's visible children with theirs) can
+/// be non-transparent, or `None` when it may draw anywhere (a surface with an opaque default
+/// pixel). Outside it, compositing the layer leaves the backdrop unchanged in every blend mode.
+/// Adjustment layers count as empty: they only change pixels already there (which is what an
+/// isolated group needs; see [`change_bounds`] for the document-level question).
+pub fn composite_bounds(layer: &Layer, canvas: Rect) -> Option<Rect> {
+    if !transparent_outside(layer) {
+        return None;
+    }
+    let own = match &layer.content {
+        LayerContent::Group(g) if g.artboard.is_none() => {
+            let mut acc = Rect::EMPTY;
+            for c in g.children.iter().filter(|c| c.visible) {
+                let b = composite_bounds(c, canvas)?;
+                if !b.is_empty() {
+                    acc = if acc.is_empty() { b } else { acc.union(&b) };
+                }
+            }
+            acc
+        }
+        LayerContent::Adjustment(_) => Rect::EMPTY,
+        _ => layer_bounds(layer, canvas),
+    };
+    if own.is_empty() {
+        return Some(Rect::EMPTY);
+    }
+    let m = if effects::has_effects(layer) { effects::margin(layer) } else { 0 };
+    Some(own.inflate(m).intersect(&canvas))
+}
+
+/// The document pixels that showing, hiding, moving or restyling `layer` can change, or `None`
+/// for anywhere: an adjustment layer (and a pass-through group holding one) reaches everything
+/// beneath it. Clipped layers above stay within their base's bounds, so they are covered too;
+/// effects of groups around the layer can reach further (callers grow the rect by that reach).
+pub fn change_bounds(layer: &Layer, canvas: Rect) -> Option<Rect> {
+    fn reaches_below(l: &Layer) -> bool {
+        match &l.content {
+            // Clipped, it changes only its base's pixels.
+            LayerContent::Adjustment(_) => !l.clipped,
+            LayerContent::Group(g) if l.blend == BlendMode::PassThrough => g.children.iter().any(reaches_below),
+            _ => false,
+        }
+    }
+    if matches!(layer.content, LayerContent::Adjustment(_)) || reaches_below(layer) {
+        return None;
+    }
+    composite_bounds(layer, canvas)
+}
+
 /// Whether the layer's content is transparent outside its bounds (every surface it draws from
 /// has a transparent default pixel), so its effects can't change pixels beyond its bounds grown
 /// by their reach.

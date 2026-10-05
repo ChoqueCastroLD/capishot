@@ -19,12 +19,14 @@ fn bad(msg: impl Into<String>) -> EngineError {
 }
 
 /// Document-space bounds a transform of `layer` starts from (what Free Transform frames).
+/// Content scans are cached per tile: snapping asks for every layer's bounds per Move drag.
 pub fn transform_bounds(doc: &Document, layer: &Layer) -> Rect {
     let content = match &layer.content {
         LayerContent::Group(g) => g.children.iter().map(|l| transform_bounds(doc, l)).fold(Rect::EMPTY, |a, b| a.union(&b)),
-        _ => layer.surface().map_or(Rect::EMPTY, Surface::content_bounds),
+        _ => layer.surface().map_or(Rect::EMPTY, photocraft_compose::bounds::content_bounds),
     };
-    let content = if content.is_empty() { layer.mask.as_ref().map_or(Rect::EMPTY, |m| m.surface.content_bounds()) } else { content };
+    let content =
+        if content.is_empty() { layer.mask.as_ref().map_or(Rect::EMPTY, |m| photocraft_compose::bounds::content_bounds(&m.surface)) } else { content };
     match &doc.selection {
         Some(sel) if !layer.is_group() => content.intersect(&sel.content_bounds()),
         _ => content,

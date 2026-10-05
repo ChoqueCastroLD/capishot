@@ -403,10 +403,10 @@ pub(crate) fn snap_affine(a: Affine) -> Affine {
 pub(crate) fn shift_smart(sm: &mut SmartObject, dx: i32, dy: i32) {
     sm.transform = Affine::translate(dx as f64, dy as f64).mul(&sm.transform);
     if let Some(c) = &mut sm.cache {
-        *c = translate_surface(c, dx, dy);
+        *c = crate::layer_multi_cmds::shift_surface(c, dx, dy);
     }
     if let Some(m) = &mut sm.filter_mask {
-        m.surface = translate_surface(&m.surface, dx, dy);
+        m.surface = crate::layer_multi_cmds::shift_surface(&m.surface, dx, dy);
     }
 }
 

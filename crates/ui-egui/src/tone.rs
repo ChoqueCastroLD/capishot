@@ -127,12 +127,14 @@ pub fn histograms(app: &mut PhotocraftApp, source: HistSource, space: ToneSpace)
     let layer = match source {
         HistSource::BelowLayer(l) | HistSource::Layer(l) => l,
     };
-    if let Some((d, l, r, h)) = &app.tone_hist
+    let pixels_kept = view_only(st);
+    if let Some((d, l, r, h)) = app.tone_hist.as_mut()
         && *d == doc_id
         && *l == layer
-        && *r == rev
+        && (*r == rev || (*r + 1 == rev && pixels_kept))
         && h.tag == want
     {
+        *r = rev;
         return h.clone();
     }
     let t0 = crate::gpu_canvas::now_ms();
@@ -140,6 +142,12 @@ pub fn histograms(app: &mut PhotocraftApp, source: HistSource, space: ToneSpace)
     app.perf.span("histogram", crate::gpu_canvas::now_ms() - t0);
     app.tone_hist = Some((doc_id, layer, rev, h.clone()));
     h
+}
+
+/// Whether the latest revision changed no pixels (selecting a layer, say): cached histograms of
+/// the previous revision still hold (#125).
+fn view_only(st: &photocraft_engine::DocState) -> bool {
+    st.last_damage.is_some_and(|r| r.is_empty())
 }
 
 /// After an editor commits its own adjustment layer, the image below it is unchanged: keep the
@@ -220,6 +228,13 @@ pub fn histogram_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     };
     let (doc_id, rev) = (st.doc.id, st.revision);
     let now = crate::gpu_canvas::now_ms();
+    if view_only(st)
+        && let Some((d, r, _, _)) = app.doc_hist.as_mut()
+        && *d == doc_id
+        && *r + 1 == rev
+    {
+        *r = rev;
+    }
     let stale = !matches!(&app.doc_hist, Some((d, r, _, _)) if *d == doc_id && *r == rev);
     let due = app.doc_hist.as_ref().is_none_or(|(d, _, at, _)| *d != doc_id || now - at > 250.0);
     if stale && due {
