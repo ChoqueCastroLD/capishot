@@ -539,8 +539,10 @@ impl<'a> Planner<'a> {
         let opacity = layer.opacity * layer.fill_opacity;
         let visible_clipped: Vec<&'a Layer> = clipped.iter().filter(|c| c.visible).collect();
 
+        // Below 100% fill a pass-through group renders isolated (as the CPU compositor does).
         if let LayerContent::Group(g) = &layer.content
             && layer.blend == BlendMode::PassThrough
+            && layer.fill_opacity >= 1.0
             && !has_effects(layer)
         {
             let before = self.retain(backdrop);

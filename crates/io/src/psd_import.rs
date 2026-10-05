@@ -73,6 +73,23 @@ fn selected_real_mask(rec: &LayerRecord) -> Option<photocraft_psd::RealMask> {
     rec.layer_mask()?.real
 }
 
+/// The fill of a plain shape layer (fill block + vector path, no stroke) to import as a fill layer
+/// with a vector mask: when its mask parameters give the vector mask a density below 100 % or a
+/// feather, or when it stores no pixels and fills with a pattern.
+fn soft_shape_fill(rec: &LayerRecord, has_vector: bool, fill_key: Option<&[u8; 4]>) -> Option<photocraft_doc::Fill> {
+    if !has_vector || rec.block(b"vstk").is_some() || rec.block(b"vscg").is_some() {
+        return None;
+    }
+    let k = fill_key?;
+    let fill = rec.block(k).and_then(|b| blocks::parse_fill(k, &b.data))?;
+    let p = rec.layer_mask().and_then(|m| m.parameters);
+    let soft = p.is_some_and(|p| p.vector_density.is_some_and(|d| d < 255) || p.vector_feather.is_some_and(|f| f > 0.0));
+    // Without stored pixels a pattern-filled shape cannot be rasterized on its own (the
+    // compositor resolves the document's patterns for fill layers).
+    let unrendered_pattern = (rec.rect.is_empty() || rec.rect.size().is_err()) && matches!(fill, photocraft_doc::Fill::Pattern { .. });
+    (soft || unrendered_pattern).then_some(fill)
+}
+
 impl Ctx<'_> {
     fn warn(&mut self, s: impl Into<String>) {
         self.warnings.push(s.into());
@@ -247,11 +264,22 @@ impl Ctx<'_> {
                 warp: rec.block(k).and_then(|b| blocks::parse_placed_warp(k, &b.data)),
                 stack_mode: None,
             })
+        } else if let Some(f) = soft_shape_fill(rec, vector_key.is_some(), fill_key) {
+            // A shape whose vector mask has a density or feather is a fill layer seen through a
+            // soft vector mask: the fill shows beyond the path, which the stored pixels (the
+            // shape alone) lack. Import it as exactly that.
+            LayerContent::Fill(f)
         } else if (vector_key.is_some() && (fill_key.is_some() || rec.block(b"vstk").is_some())) || rec.block(b"vscg").is_some() {
             let fill = fill_key.and_then(|k| rec.block(k).and_then(|b| blocks::parse_fill(k, &b.data)));
             let mut sh = ShapeLayer { fill, cache: Some(self.record_surface(rec, &name)), psd_raw: vector_key.and_then(principal), ..Default::default() };
             let lookup = |k: &[u8; 4]| rec.block(k).map(|b| b.data.clone());
             crate::vector_map::shape_from_blocks(&mut sh, &lookup, self.file.header.width, self.file.header.height, self.dpi);
+            // No stored pixels (32-bit documents, files saved without layer pixels): render the
+            // shape from its path and fill, as Photoshop does when it opens the file.
+            if (rec.rect.is_empty() || rec.rect.size().is_err()) && (!sh.path.subpaths.is_empty() || sh.path.inverted) {
+                let canvas = Rect::new(0, 0, self.file.header.width as i32, self.file.header.height as i32);
+                sh.cache = Some(photocraft_vector::render_shape(&sh, self.fmt, canvas));
+            }
             LayerContent::Shape(sh)
         } else if let Some(k) = fill_key {
             match rec.block(k).and_then(|b| blocks::parse_fill(k, &b.data)) {

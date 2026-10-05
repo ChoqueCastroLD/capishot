@@ -528,6 +528,14 @@ pub fn paint_bounds(layer: &Layer) -> Option<Rect> {
 /// The layer's effective mask over `rect` (row-major), read once per tile: the pixel mask
 /// times the rasterized vector mask.
 fn mask_vals(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Vec<f32>> {
+    // Feathers blur across tiles: read the cached, canvas-wide combined mask.
+    if masks::has_feather(layer)
+        && let Some(s) = masks::combined_mask(layer, cx.canvas)
+    {
+        let mut v = Vec::new();
+        s.read_region_into(rect, &mut v);
+        return Some(v);
+    }
     let vector = layer.vector_mask.as_ref().map(|vm| cx.vector_masks.values(vm, rect));
     let Some(m) = layer.mask.as_ref() else { return vector };
     let mut v = Vec::new();
@@ -865,9 +873,12 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
     }
     let opacity = layer.opacity * layer.fill_opacity;
 
-    // Pass-through groups composite their children straight into the backdrop.
+    // Pass-through groups composite their children straight into the backdrop. Below 100% fill
+    // Photoshop renders the group isolated, like Normal (psd-tools passthrough_fill_*: an
+    // adjustment inside no longer reaches the layers beneath).
     if let LayerContent::Group(g) = &layer.content
         && layer.blend == BlendMode::PassThrough
+        && layer.fill_opacity >= 1.0
         && !effects::has_effects(layer)
     {
         let needs_mix = opacity < 1.0 || layer.mask.is_some() || layer.vector_mask.is_some();

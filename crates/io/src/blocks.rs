@@ -244,6 +244,70 @@ pub(crate) fn gradient_desc(stops: &[(f32, Color)], opacity: &[(f32, f32)]) -> D
         .with("Trns", Value::List(trns))
 }
 
+/// Opacity stops of a `Grdn` descriptor with Photoshop's smoothness and midpoints applied (the
+/// same curve as the colour stops, Classic interpolation), densely sampled.
+fn smoothed_opacity_stops(grad: &Descriptor) -> Vec<(f32, f32)> {
+    let mut stops = Vec::new();
+    let mut mids = Vec::new();
+    if let Some(Value::List(items)) = grad.get("Trns") {
+        for it in items {
+            if let Value::Descriptor(s) = it {
+                let a = num(s.get("Opct")).unwrap_or(100.0) as f32 / 100.0;
+                stops.push((num(s.get("Lctn")).unwrap_or(0.0) as f32 / 4096.0, Color::rgba(a, a, a, 1.0)));
+                mids.push(num(s.get("Mdpn")).unwrap_or(50.0) as f32 / 100.0);
+            }
+        }
+    }
+    let mut order: Vec<usize> = (0..stops.len()).collect();
+    order.sort_by(|a, b| stops[*a].0.total_cmp(&stops[*b].0));
+    let mids: Vec<f32> = order.iter().skip(1).filter_map(|i| mids.get(*i).copied()).collect();
+    let smooth = num(grad.get("Intr")).map_or(0.0, |v| (v / 4096.0) as f32);
+    let baked = if stops.len() >= 2 { crate::gradient_bake::bake(stops, &mids, smooth, crate::gradient_bake::Method::Classic) } else { stops };
+    baked.into_iter().map(|(t, c)| (t, c.to_rgb()[0])).collect()
+}
+
+/// Piecewise-linear value of sorted `(location, v)` stops at `t` (clamped at the ends).
+fn lerp_stops<T: Copy>(stops: &[(f32, T)], t: f32, mix: impl Fn(T, T, f32) -> T) -> Option<T> {
+    let first = stops.first()?;
+    if t <= first.0 {
+        return Some(first.1);
+    }
+    for w in stops.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        if t <= b.0 {
+            let k = if b.0 > a.0 { (t - a.0) / (b.0 - a.0) } else { 1.0 };
+            return Some(mix(a.1, b.1, k));
+        }
+    }
+    stops.last().map(|s| s.1)
+}
+
+/// Folds a gradient's opacity stops into its colour stops' alpha (the model keeps one stop
+/// list): stops at every colour and opacity location, colours and opacities each interpolated
+/// linearly. Without opacity stops (or all opaque) the colour stops are returned unchanged.
+/// psd-tools layers-minimal/gradient-fill.psd ("Color to Transparent", no stored pixels).
+pub(crate) fn with_opacity_stops(stops: Vec<(f32, Color)>, opacity: &[(f32, f32)]) -> Vec<(f32, Color)> {
+    let mut op: Vec<(f32, f32)> = opacity.iter().copied().filter(|(t, a)| t.is_finite() && a.is_finite()).collect();
+    if op.iter().all(|(_, a)| *a >= 1.0) || stops.is_empty() {
+        return stops;
+    }
+    op.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut sorted = stops;
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut locs: Vec<f32> = sorted.iter().map(|s| s.0).chain(op.iter().map(|s| s.0)).collect();
+    locs.sort_by(f32::total_cmp);
+    locs.dedup();
+    let mix_color =
+        |a: Color, b: Color, k: f32| Color { c: std::array::from_fn(|i| a.c[i] + (b.c[i] - a.c[i]) * k), alpha: a.alpha + (b.alpha - a.alpha) * k, ..a };
+    locs.into_iter()
+        .filter_map(|t| {
+            let c = lerp_stops(&sorted, t, mix_color)?;
+            let a = lerp_stops(&op, t, |a, b, k| a + (b - a) * k)?;
+            Some((t, Color { alpha: (c.alpha * a).clamp(0.0, 1.0), ..c }))
+        })
+        .collect()
+}
+
 /// Parses a fill block (`SoCo`, `GdFl`, `PtFl`).
 pub fn parse_fill(key: &[u8; 4], data: &[u8]) -> Option<Fill> {
     // Block data may carry trailing padding after the descriptor.
@@ -260,9 +324,11 @@ pub fn fill_from_desc(key: &[u8; 4], d: &Descriptor) -> Option<Fill> {
             let angle = num(d.get("Angl")).unwrap_or(90.0) as f32;
             let scale = num(d.get("Scl ")).map_or(1.0, |v| v as f32 / 100.0);
             let (mut stops, _) = get_desc(d, "Grad").map(|g| gradient_stops_with(g, enum_of(d, "gs99"))).unwrap_or_default();
+            let opacity = get_desc(d, "Grad").map(smoothed_opacity_stops).unwrap_or_default();
             if stops.is_empty() {
                 stops = vec![(0.0, Color::BLACK), (1.0, Color::WHITE)];
             }
+            let stops = with_opacity_stops(stops, &opacity);
             Some(Fill::Gradient { stops, angle, scale, style: gradient_style(d), reverse: bool_of(d, "Rvrs") })
         }
         b"PtFl" => {
@@ -431,6 +497,31 @@ pub fn effects_enabled(lfx2: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// psd-tools layers-minimal/gradient-fill.psd ("Color to Transparent", no stored pixels): a
+    /// gradient fill's opacity stops reach the model (as stop alpha) and survive a write.
+    #[test]
+    fn gradient_fill_opacity_stops_become_alpha() {
+        use photocraft_color::Color;
+        use photocraft_doc::{Fill, GradientStyle};
+        let red = Color::rgba(1.0, 0.0, 0.0, 1.0);
+        let f = Fill::Gradient {
+            stops: vec![(0.0, red), (1.0, Color { alpha: 0.0, ..red })],
+            angle: 90.0,
+            scale: 1.0,
+            style: GradientStyle::Linear,
+            reverse: false,
+        };
+        let (k, data) = super::write_fill(&f);
+        let Some(Fill::Gradient { stops, .. }) = super::parse_fill(&k, &data) else { panic!("gradient") };
+        let alpha_at = |t: f32| stops.iter().min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs())).map(|s| s.1.alpha).unwrap();
+        assert_eq!(alpha_at(0.0), 1.0);
+        assert!(alpha_at(1.0) < 0.01, "{stops:?}");
+        assert!(stops.iter().all(|s| s.1.c[0] == 1.0 && s.1.c[1] == 0.0));
+        // Opaque gradients keep their colour stops untouched.
+        let opaque = super::with_opacity_stops(vec![(0.0, red), (1.0, Color::WHITE)], &[(0.0, 1.0), (1.0, 1.0)]);
+        assert_eq!(opaque, vec![(0.0, red), (1.0, Color::WHITE)]);
+    }
+
     #[test]
     fn blending_ranges_map_to_blend_if() {
         use photocraft_doc::{BlendIf, BlendRange};

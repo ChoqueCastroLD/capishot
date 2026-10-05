@@ -48,7 +48,7 @@ ChannelData { id, compression: Option<Compression>, data }   // encoded bytes ke
 ChannelData::encode(id, compression, decoded, w, h, depth, version)
 ChannelData::decode(w, h, depth, version); set_decoded(...)
 MaskData::{None, Mask(LayerMask), Raw(Vec<u8>)}
-LayerMask { rect, default_color, flags, parameters: Option<MaskParameters>, real: Option<RealMask>, trailing }
+LayerMask { rect, default_color, flags, parameters: Option<MaskParameters>, real: Option<RealMask>, trailing, real_first }
 BlendMode (27 modes + PassThrough + Unknown([u8;4])); BlendMode::key()/from_key()
 Layer<'_>::rgba8() -> Result<RgbaImage>; user_mask() -> Option<Result<GrayImage>>; channel_bytes(id)
 

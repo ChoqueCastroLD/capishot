@@ -5,6 +5,8 @@
 
 mod ico;
 mod layers;
+mod psd_tools;
+mod sha256;
 mod stats;
 mod version;
 
@@ -18,8 +20,10 @@ commands:
   layers          enforce the crate dependency layering (plan/architecture.md §3)
   wasm            cargo check --target wasm32-unknown-unknown for the wasm-safe crates
   ci              fmt --check, clippy -D warnings, test, layers, wasm (stops at first failure)
-  corpus [--download]
-                  show where test corpora live; --download fetches PngSuite into corpus/pngsuite
+  corpus [--download] [--psd-tools [--update-manifest]]
+                  show where test corpora live; --download fetches PngSuite into corpus/pngsuite;
+                  --psd-tools fetches the psd-tools PSDs (MIT, pinned commit, sha256-verified)
+                  into corpus/psd-tools
   stats [--exact] count tests and lines per crate (--exact: ask the test harness via `-- --list`)
   parity          Photoshop menu parity; rewrites docs/parity.md
   version [set X.Y.Z[-pre]]
@@ -35,6 +39,7 @@ fn main() -> ExitCode {
         Some("layers") => cmd_layers(),
         Some("wasm") => cmd_wasm(),
         Some("ci") => cmd_ci(),
+        Some("corpus") if rest.contains(&"--psd-tools") => psd_tools::fetch(rest.contains(&"--update-manifest")),
         Some("corpus") => cmd_corpus(rest.contains(&"--download")),
         Some("stats") => stats::run(&root(), rest.contains(&"--exact")),
         Some("parity") => cmd_parity(),
@@ -214,6 +219,9 @@ Tests that use a corpus skip cleanly when it is absent.
                      against the `image` crate. Fetch: cargo xtask corpus --download
   corpus/psd/        PSD samples from MIT/BSD projects (ag-psd, psd-tools test data).
                      Copy files in manually; licences must be MIT/BSD/CC0.
+  corpus/psd-tools/  the full psd-tools test set (MIT) at a pinned commit, verified
+                     against xtask/psd-tools-corpus.sha256. Fetch: cargo xtask corpus --psd-tools
+                     Run: PHOTOCRAFT_PSDTOOLS_CORPUS=1 cargo test --release -p photocraft-io --test corpus
   corpus/tiff/       libtiff pics (optional)
   corpus/exr/        OpenEXR sample images (optional)
   corpus/raw/        raw.pixls.us samples, CC0 (optional)

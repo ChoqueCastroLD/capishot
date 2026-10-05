@@ -281,6 +281,7 @@ pub fn layered(version: Version, mode: ColorMode, depth: u16, compression: Compr
         parameters: Some(MaskParameters { flags: 0b0011, user_density: Some(200), user_feather: Some(1.5), vector_density: None, vector_feather: None }),
         real: Some(RealMask { flags: 0, background: 255, rect: Rect::from_xywh(0, 0, 3, 3) }),
         trailing: Vec::new(),
+        real_first: true,
     };
     next(&mut layers, Rect::from_xywh(3, 3, 6, 4), "Grüße", BlendMode::ColorDodge, Some(real_mask));
     layers.push(group_record(&header, "Inner", SectionType::ClosedFolder, BlendMode::Normal, id0 + 2));

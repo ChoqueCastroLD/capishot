@@ -101,7 +101,7 @@ impl Ex {
         (to_psd_rect(r), ch)
     }
 
-    fn mask(&self, m: &LayerMask) -> (MaskData, Option<ChannelData>) {
+    fn mask(&self, m: &LayerMask, vector: Option<(f32, f32)>) -> (MaskData, Option<ChannelData>) {
         let s = if m.surface.format() != self.mask_fmt { m.surface.convert(self.mask_fmt) } else { m.surface.clone() };
         let default = s.default_pixel().first().copied().unwrap_or(0.0);
         let r = s.content_bounds();
@@ -114,18 +114,10 @@ impl Ex {
         if !m.enabled {
             flags |= PsdMask::FLAG_DISABLED;
         }
-        let density = (m.density < 1.0).then(|| q255(m.density));
-        let feather = (m.feather != 0.0).then_some(f64::from(m.feather));
-        let parameters = (density.is_some() || feather.is_some()).then(|| {
+        let parameters = mask_parameters(Some((m.density, m.feather)), vector);
+        if parameters.is_some() {
             flags |= PsdMask::FLAG_PARAMETERS;
-            MaskParameters {
-                flags: u8::from(density.is_some()) | u8::from(feather.is_some()) << 1,
-                user_density: density,
-                user_feather: feather,
-                vector_density: None,
-                vector_feather: None,
-            }
-        });
+        }
         let pm = PsdMask {
             rect: if r.is_empty() { PsdRect::default() } else { to_psd_rect(r) },
             default_color: q255(default),
@@ -133,6 +125,7 @@ impl Ex {
             trailing: if parameters.is_none() { vec![0, 0] } else { Vec::new() },
             parameters,
             real: None,
+            real_first: true,
         };
         (MaskData::Mask(pm), Some(self.encode(-2, &plane, w, h)))
     }
@@ -157,10 +150,23 @@ impl Ex {
             None => (PsdRect::default(), self.empty_channels()),
         };
         let mut mask = MaskData::None;
+        // Vector mask density/feather live in the mask parameters, with or without a user mask.
+        let vector = l.vector_mask.as_ref().map(|vm| (vm.density, vm.feather));
         if let Some(m) = &l.mask {
-            let (md, ch) = self.mask(m);
+            let (md, ch) = self.mask(m, vector);
             mask = md;
             channels.extend(ch);
+        } else if let Some(parameters) = mask_parameters(None, vector) {
+            // Parameters only: no user mask channel, so nothing hides on re-import.
+            mask = MaskData::Mask(PsdMask {
+                rect: PsdRect::default(),
+                default_color: 255,
+                flags: PsdMask::FLAG_PARAMETERS,
+                parameters: Some(parameters),
+                real: None,
+                trailing: Vec::new(),
+                real_first: true,
+            });
         }
         let mut flags = LayerFlags(0);
         flags.set_hidden(!l.visible);
@@ -320,11 +326,6 @@ impl Ex {
                     None => raw.push((*b"vmsk", data)),
                 }
             }
-        }
-        if let Some(vm) = &l.vector_mask
-            && (vm.density < 1.0 || vm.feather != 0.0)
-        {
-            self.warnings.push(format!("layer \"{}\": vector mask density/feather are not written to PSD", l.name));
         }
     }
 
@@ -778,4 +779,18 @@ pub fn document_to_psd_with(doc: &Document, opts: &PsdExportOptions) -> (PsdFile
         image_data,
     };
     (file, ex.warnings)
+}
+
+/// PSD mask parameters for a user mask's and a vector mask's (density, feather); `None` when
+/// every value is the default (density 1, feather 0).
+fn mask_parameters(user: Option<(f32, f32)>, vector: Option<(f32, f32)>) -> Option<MaskParameters> {
+    let density = |v: Option<(f32, f32)>| v.and_then(|(d, _)| (d < 1.0).then(|| q255(d)));
+    let feather = |v: Option<(f32, f32)>| v.and_then(|(_, f)| (f != 0.0).then_some(f64::from(f)));
+    let p =
+        MaskParameters { flags: 0, user_density: density(user), user_feather: feather(user), vector_density: density(vector), vector_feather: feather(vector) };
+    let flags = u8::from(p.user_density.is_some())
+        | u8::from(p.user_feather.is_some()) << 1
+        | u8::from(p.vector_density.is_some()) << 2
+        | u8::from(p.vector_feather.is_some()) << 3;
+    (flags != 0).then_some(MaskParameters { flags, ..p })
 }

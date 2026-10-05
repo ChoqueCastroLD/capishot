@@ -51,3 +51,8 @@ Artwork shown in the screenshots (all public domain, via Wikimedia Commons; deta
 `corpus/` is gitignored. `corpus/psd` holds MIT-licensed test PSDs (ag-psd, psd-tools), listed in
 `corpus/psd/SOURCES.md`; `cargo xtask corpus --download` fetches PngSuite (public domain). Files
 copied in by hand must be MIT, BSD or CC0. No test fixtures are committed to the repository.
+
+`cargo xtask corpus --psd-tools` fetches every PSD/PSB of the psd-tools test set
+([`tests/psd_files`](https://github.com/psd-tools/psd-tools/tree/main/tests/psd_files), MIT,
+Copyright (c) 2019 Kota Yamaguchi) at a pinned commit into `corpus/psd-tools/`, verified against
+the sha256 list in `xtask/psd-tools-corpus.sha256`, with the upstream `LICENSE` next to them.

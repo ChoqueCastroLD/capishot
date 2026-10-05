@@ -181,6 +181,10 @@ pub fn merged_composite(file: &PsdFile) -> Result<Vec<[f32; 4]>, IoError> {
     }
     // Generic path (Lab, CMYK and others) via the raster model conversion.
     let (doc, _) = psd_to_document(&PsdFile { layer_info: None, ..file.clone() });
+    // Multichannel documents keep their channels apart (no layer): composite them.
+    if doc.layers.is_empty() && doc.mode == photocraft_color::ColorMode::Multichannel {
+        return Ok(photocraft_compose::flatten(&doc).px);
+    }
     let l = doc.layers.first().ok_or_else(|| IoError::Unsupported("no merged image".into()))?;
     let s = l.surface().ok_or_else(|| IoError::Unsupported("no merged image".into()))?;
     Ok(photocraft_compose::surface_to_buffer(s, doc.bounds()).px)

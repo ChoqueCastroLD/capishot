@@ -153,6 +153,41 @@ fn isolated_group_differs_from_pass_through() {
     assert!((iso[0] - 0.5).abs() <= E, "{iso:?}");
 }
 
+/// psd-tools passthrough_fill_adjustment.psd: below 100% fill a pass-through group is isolated,
+/// so an adjustment inside it no longer changes the layers beneath.
+#[test]
+fn pass_through_group_below_full_fill_is_isolated() {
+    let make = |fill: f32| {
+        let mut d = doc_white(2, 2);
+        let mut g = Layer::group("g", vec![Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert))]);
+        g.blend = BlendMode::PassThrough;
+        g.fill_opacity = fill;
+        d.layers.push(g);
+        px(&d, 0, 0)
+    };
+    assert!(close4(make(1.0), [0.0, 0.0, 0.0, 1.0]), "full fill: the invert reaches the background");
+    assert!(close4(make(0.4), [1.0; 4]), "isolated: nothing beneath to invert");
+}
+
+/// psd-tools layer_mask_data.psd: a mask feather blurs the mask edge (CPU and the GPU's
+/// combined mask share `masks::combined_mask`).
+#[test]
+fn mask_feather_blurs_the_edge() {
+    let mut d = doc_white(64, 8);
+    let mut l = solid_layer("k", Rect::new(0, 0, 64, 8), [0.0, 0.0, 0.0, 1.0]);
+    let mut m = LayerMask::hide_all();
+    m.surface.fill_rect(Rect::new(0, 0, 32, 8), &[1.0]);
+    l.mask = Some(m);
+    d.layers.push(l.clone());
+    assert!(px(&d, 31, 4)[0] < 0.01 && px(&d, 32, 4)[0] > 0.99, "sharp without feather");
+    if let Some(m) = &mut d.layers[1].mask {
+        m.feather = 8.0;
+    }
+    let (a, b) = (px(&d, 31, 4)[0], px(&d, 32, 4)[0]);
+    assert!(a > 0.3 && a < 0.5 && b > 0.5 && b < 0.7, "soft edge around 50%: {a} {b}");
+    assert!(px(&d, 4, 4)[0] < 0.01 && px(&d, 60, 4)[0] > 0.99, "far from the edge unchanged");
+}
+
 #[test]
 fn group_opacity_applies_once() {
     let mut d = doc_white(2, 2);

@@ -169,7 +169,7 @@ the live command registry (`menus::is_live`) and rewrites [`docs/parity.md`](par
   - byte-exact round trips
   - malformed-input sweeps (truncate at every offset)
   - fuzz targets (`crates/*/fuzz`)
-- **Real-file corpus** in `corpus/` (gitignored). `corpus/psd` holds MIT-licensed test PSDs, listed with their sources in `corpus/psd/SOURCES.md`, and `cargo xtask corpus --download` fetches PngSuite. Tests skip silently when a corpus is absent.
+- **Real-file corpus** in `corpus/` (gitignored). `corpus/psd` holds MIT-licensed test PSDs, listed with their sources in `corpus/psd/SOURCES.md`, `cargo xtask corpus --download` fetches PngSuite, and `cargo xtask corpus --psd-tools` fetches the complete psd-tools test set (MIT, 309 PSD/PSB files at a pinned commit, sha256-verified) into `corpus/psd-tools`. Tests skip silently when a corpus is absent.
 - **Composite oracle:** a PSD's embedded merged image is compared with our compositor's output. The pass rate is tracked in the roadmap.
 - **UI:** unit tests for widgets and state, plus screenshot checks through the control channel.
 
@@ -229,7 +229,15 @@ so a following `ui.inspect` observes their effect.
 ## Rendering fidelity (PSD oracle)
 
 `cargo test --release -p photocraft-io --test corpus -- --nocapture` compares our composite of every
-corpus PSD with Photoshop's own merged image (PASS ≤ 2/255). To dig into one file:
+corpus PSD with Photoshop's own merged image (PASS ≤ 2/255) and checks that export → re-import renders
+the same, per source with its own floors: `corpus/psd` (enforced with `PHOTOCRAFT_CORPUS=1`) and the
+psd-tools set (`cargo xtask corpus --psd-tools`, enforced with `PHOTOCRAFT_PSDTOOLS_CORPUS=1`, which
+also runs a truncation/corruption sweep over every file that must never panic). A panic is reported
+as `CRASH` and fails an enforced run. Files without a real merged image (Maximize Compatibility off)
+are judged against their embedded thumbnail instead (`PASS (thumbnail)`, a strict low-resolution
+check); a file only SKIPs when it has no oracle at all. Raise the floors in `crates/io/tests/corpus.rs` when they
+improve; never lower them. Synthetic reproductions of corpus findings live in
+`crates/io/tests/corpus_regressions.rs` (corpus files are never committed). To dig into one file:
 
 ```sh
 cargo run --release -p photocraft-io --example oracle_diff -- corpus/psd/<file>.psd 0 png /tmp/diff.png
