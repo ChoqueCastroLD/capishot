@@ -744,6 +744,9 @@ pub struct Preferences {
     /// as the user changes it and restored at launch when Workspace › Remember Workspace
     /// Changes is on. JSON owned by the shell.
     pub panel_layout: Value,
+    /// The last choices of dialogs that remember them across restarts, by command id (Edit ›
+    /// Fill…: `"edit.fill"` → its params). JSON owned by the shell.
+    pub dialogs: BTreeMap<String, Value>,
     /// File › Scripts › Script Events Manager: event → script bindings.
     pub script_events: crate::automate_cmds::ScriptEvents,
 }

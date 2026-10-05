@@ -48,6 +48,7 @@ pub mod eraser_ui;
 pub mod export_dialog;
 pub mod file_open;
 pub mod file_ui;
+pub mod fill_ui;
 pub mod filter_dialog;
 pub mod gallery_ui;
 pub mod gpu_canvas;
@@ -86,6 +87,7 @@ pub mod preset_panels;
 pub mod props_layout;
 pub mod proxy;
 pub mod puppet_ui;
+pub mod rasterize_prompt;
 pub mod retouch_ui;
 pub mod rulers;
 pub mod shortcut_dispatch;
@@ -1200,6 +1202,9 @@ impl PhotocraftApp {
 
 #[cfg(test)]
 mod input_tests;
+
+#[cfg(test)]
+mod pencil_tests;
 
 #[cfg(test)]
 mod marquee_tests;

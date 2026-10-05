@@ -25,7 +25,7 @@ const TOOL_SECTIONS: &[&[&[Tool]]] = &[
     ],
     &[
         &[Tool::SpotHealing, Tool::Healing],
-        &[Tool::Brush],
+        &[Tool::Brush, Tool::Pencil],
         &[Tool::CloneStamp],
         &[Tool::HistoryBrush],
         &[Tool::Eraser, Tool::BackgroundEraser, Tool::MagicEraser],
@@ -423,7 +423,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
                 let tool = app.ui.tool;
                 // Brush edits here go through `tools.setBrush`, one journal entry per gesture (Rule 1).
-                if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Eraser)) || tool == Tool::QuickSelection {
+                if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser)) || tool == Tool::QuickSelection {
                     let before = app.session.tools.brush.clone();
                     let mut b = before.clone();
                     let pick = brush_preset_chip(ui, &mut b, &app.session.tools.presets);
@@ -478,6 +478,32 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             b.pressure_size = !b.pressure_size;
                         }
                         let _ = icons::button(ui, "arrow-left-right", 24.0, false, tl!("Set painting symmetry options"));
+                    }
+                    // Pencil: Photoshop's options (no hardness or flow: the pencil is always hard).
+                    Tool::Pencil => {
+                        picked = brush_preset_chip(ui, b, &app.session.tools.presets);
+                        crate::brush_picker::settings_toggle(app, ui);
+                        widgets::vline(ui, 22.0);
+                        if !t.pro {
+                            opt_label(ui, "Size");
+                            widgets::value_field(ui, &mut b.size, 1.0..=5000.0, "px", 76.0);
+                            widgets::vline(ui, 22.0);
+                        }
+                        opt_label(ui, "Mode");
+                        let mut mode = b.mode;
+                        let opts: Vec<(BlendMode, &str)> = BlendMode::LAYER_MODES.iter().map(|m| (*m, m.label())).collect();
+                        if widgets::dropdown(ui, "pencil-mode", &mut mode, &opts, 96.0) {
+                            b.mode = mode;
+                        }
+                        opt_label(ui, "Opacity");
+                        let mut o = b.opacity * 100.0;
+                        if widgets::value_field(ui, &mut o, 0.0..=100.0, "%", if t.pro { 62.0 } else { 66.0 }).changed() {
+                            b.opacity = o / 100.0;
+                        }
+                        opt_label(ui, "Smoothing");
+                        smoothing_field(ui, b, if t.pro { 58.0 } else { 66.0 });
+                        widgets::vline(ui, 22.0);
+                        widgets::checkbox(ui, &mut app.ui.tool_options.pencil_auto_erase, "Auto Erase");
                     }
                     Tool::Brush | Tool::Eraser => {
                         picked = brush_preset_chip(ui, b, &app.session.tools.presets);
