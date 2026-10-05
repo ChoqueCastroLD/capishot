@@ -279,7 +279,13 @@ impl Session {
     }
 
     /// Add a document (from File → New, an import, etc.) and make it active.
-    pub fn add_document(&mut self, doc: Document, path: Option<String>) -> usize {
+    /// Preserve its identity unless another open document already owns it.
+    /// Identity-dependent callers must read the admitted document at the returned index.
+    pub fn add_document(&mut self, mut doc: Document, path: Option<String>) -> usize {
+        // Persisted IDs can overlap the allocator, so check every replacement too.
+        while self.docs.iter().any(|st| st.doc.id == doc.id) {
+            doc.id = photocraft_doc::DocId::fresh();
+        }
         let mut st = DocState::new(doc, path);
         st.history.max_states = self.prefs.get().performance.history_states.max(1) as usize;
         st.history.max_bytes = self.prefs.get().performance.history_budget_bytes();

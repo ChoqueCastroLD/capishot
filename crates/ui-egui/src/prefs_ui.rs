@@ -1171,11 +1171,26 @@ mod tests {
         autosave_now(&mut app);
         tick(&mut app, &ctx);
         assert_eq!(saved.lock().unwrap().len(), 1, "unchanged since the last autosave");
+
+        // Loaded copies can have the same persisted identity and dirty revision.
+        let original = app.session.active().unwrap().doc.clone();
+        let original_id = original.id;
+        app.session.add_document(original.as_ref().clone(), None);
+        app.run("edit.fill", json!({"color": "#0000ff"})).unwrap();
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        {
+            let saved = saved.lock().unwrap();
+            assert_eq!(saved.len(), 2, "both dirty copies need independent autosaves");
+            assert_eq!(saved[0].0, original_id.0);
+            assert_ne!(saved[0].0, saved[1].0, "recovery ownership must be distinct");
+            assert_eq!(saved[0].1, saved[1].1, "the revisions must match to reproduce suppression");
+        }
         app.run("prefs.set", json!({"path": "fileHandling.autosave", "value": false})).unwrap();
         app.run("edit.fill", json!({"color": "#00ff00"})).unwrap();
         autosave_now(&mut app);
         tick(&mut app, &ctx);
-        assert_eq!(saved.lock().unwrap().len(), 1, "autosave off");
+        assert_eq!(saved.lock().unwrap().len(), 2, "autosave off");
     }
 
     #[test]

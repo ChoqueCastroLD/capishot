@@ -618,8 +618,9 @@ fn edit_contents(s: &mut Session, p: &Value) -> Result<Value> {
     // Bundles keep their document id; each open copy needs its own.
     child.id = DocId::fresh();
     child.name = name;
-    let child_id = child.id;
     let index = s.add_document(child, None);
+    // Admission may replace an ID already owned by another open document.
+    let child_id = s.documents().get(index).ok_or(EngineError::NoDocument)?.doc.id;
     s.smart_links.retain(|l| l.child != child_id);
     s.smart_links.push(SmartLink { child: child_id, parent, layer: id });
     Ok(json!({"document": index, "parentLayer": id.0}))
