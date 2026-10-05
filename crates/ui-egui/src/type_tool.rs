@@ -209,6 +209,18 @@ fn insert(app: &mut PhotocraftApp, s: &str) {
     }
 }
 
+/// Alt+←/→: kern the pair before the caret by `by` (1/1000 em). No pair (caret at a text or line
+/// edge): nothing happens, like Photoshop. Not coalesced: one history step per press.
+fn kern_pair(app: &mut PhotocraftApp, id: LayerId, caret: usize, by: f32) {
+    let Some(text) = current_text(app, id) else { return };
+    let before = caret.checked_sub(1).and_then(|i| text.chars().nth(i));
+    let after = text.chars().nth(caret);
+    if before.is_none_or(|c| c == '\n') || after.is_none_or(|c| c == '\n') {
+        return;
+    }
+    let _ = app.run("type.edit", json!({"layer": id.0, "kernPair": {"at": caret, "by": by}}));
+}
+
 /// IME composition. The preedit text is written into the layer (so it lays out and reflows like
 /// typed text) and replaced by every update; `commit` makes the result final.
 fn ime_update(app: &mut PhotocraftApp, s: &str, commit: bool) {
@@ -393,11 +405,17 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                             insert(app, "");
                         }
                     }
+                    // Photoshop: Alt/Option+←/→ at a collapsed caret kerns the pair before it by
+                    // 20/1000 em (100 with ⌘/Ctrl), one history step per press.
+                    Key::ArrowLeft | Key::ArrowRight if m.alt && !m.shift && a == b => {
+                        let step = if m.command { 100.0 } else { 20.0 };
+                        kern_pair(app, id, ed.caret, if *key == Key::ArrowRight { step } else { -step });
+                    }
                     Key::ArrowLeft | Key::ArrowRight => {
                         let fwd = *key == Key::ArrowRight;
-                        let to = if m.command {
-                            line_edge(app, id, ed.caret, fwd)
-                        } else if m.alt {
+                        // Word movement: ⌘/Ctrl (Photoshop's; Alt is kerning), and Alt+Shift
+                        // extends the selection by words; Home/End go to the line edges.
+                        let to = if m.command || m.alt {
                             word_boundary(&text, ed.caret, fwd)
                         } else if a != b && !m.shift {
                             if fwd { b } else { a }
@@ -794,6 +812,85 @@ fn styles_at(app: &PhotocraftApp) -> Option<(photocraft_doc::text::CharStyle, ph
     Some((c, p))
 }
 
+/// Kerning shown for the target: at a collapsed caret, the pair before it (Photoshop's
+/// Character panel); else the style at the selection.
+fn kerning_at(app: &PhotocraftApp) -> Option<(photocraft_doc::text::Kerning, f32)> {
+    let ed = app.ui.text_edit.as_ref().filter(|e| e.caret == e.anchor && e.caret > 0)?;
+    let st = app.session.active()?;
+    let t = text_layer(&st.doc, LayerId(ed.layer))?;
+    let at = byte_of(&t.text, ed.caret - 1);
+    let mut end = 0;
+    t.char_runs()
+        .into_iter()
+        .find(|r| {
+            end += r.len;
+            at < end
+        })
+        .map(|r| (r.style.kerning, r.style.kern))
+}
+
+/// The Character panel's kerning text: "Metrics", "Optical" or the manual value.
+pub(crate) fn kerning_label((mode, kern): (photocraft_doc::text::Kerning, f32)) -> String {
+    use photocraft_doc::text::Kerning;
+    match mode {
+        _ if kern != 0.0 && kern.is_finite() => format!("{}", kern.round() as i64),
+        Kerning::Metrics => "Metrics".into(),
+        Kerning::Optical => "Optical".into(),
+        Kerning::Off => "0".into(),
+    }
+}
+
+/// Parses a typed kerning value: Metrics / Optical (any case) or a number in 1/1000 em
+/// (Photoshop's range, -1000..10000). `None` for anything else.
+pub(crate) fn parse_kerning(s: &str) -> Option<serde_json::Value> {
+    let s = s.trim();
+    match s.to_ascii_lowercase().as_str() {
+        "metrics" => Some(json!("metrics")),
+        "optical" => Some(json!("optical")),
+        _ => s.parse::<f64>().ok().filter(|v| v.is_finite() && (-1000.0..=10000.0).contains(v)).map(|v| json!(v.round())),
+    }
+}
+
+/// Photoshop's editable kerning combo: type a value or Metrics/Optical, or pick a preset.
+fn kerning_field(ui: &mut egui::Ui, shown: &str, width: f32) -> Option<serde_json::Value> {
+    let id = ui.make_persistent_id("props-kern-text");
+    let mut buf: String = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| shown.to_string());
+    let mut out = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let resp = ui.add(egui::TextEdit::singleline(&mut buf).desired_width((width - 40.0).max(24.0)).id(id.with("edit")));
+        if resp.has_focus() {
+            ui.data_mut(|d| d.insert_temp(id, buf.clone()));
+        } else {
+            ui.data_mut(|d| d.remove::<String>(id));
+        }
+        if resp.lost_focus() && buf.trim() != shown {
+            out = parse_kerning(&buf);
+        }
+        let presets = ["Metrics", "Optical", "0", "-100", "-75", "-50", "-25", "-10", "-5", "5", "10", "25", "50", "75", "100", "200"];
+        egui::ComboBox::from_id_salt("props-kern-presets").selected_text("").width(16.0).height(420.0).icon(crate::widgets::chevron_icon).show_ui(ui, |ui| {
+            for p in presets {
+                if ui.selectable_label(p == shown, p).clicked() {
+                    out = parse_kerning(p);
+                }
+            }
+        });
+    });
+    out
+}
+
+/// Applies a kerning value: at a collapsed caret to the pair before it, else to the selection
+/// (or the whole layer).
+fn apply_kerning(app: &mut PhotocraftApp, ctx: &egui::Context, v: serde_json::Value) {
+    match app.ui.text_edit.clone().filter(|e| e.caret == e.anchor) {
+        Some(ed) if ed.caret > 0 => {
+            let _ = app.run("type.edit", json!({"layer": ed.layer, "range": [ed.caret - 1, ed.caret], "kerning": v}));
+        }
+        Some(_) => {}
+        None => apply(app, ctx, json!({ "kerning": v })),
+    }
+}
+
 fn icon_label(ui: &mut egui::Ui, icon: &str, tip: &str) {
     let t = crate::theme::Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(egui::vec2(crate::props_layout::LABEL_W, 22.0), egui::Sense::hover());
@@ -932,23 +1029,12 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
             }
         });
         row(ui, &mut |ui| {
-            let mut k = match c.kerning {
-                photocraft_doc::text::Kerning::Metrics => "metrics",
-                photocraft_doc::text::Kerning::Optical => "optical",
-                photocraft_doc::text::Kerning::Off => "off",
-            }
-            .to_string();
+            let shown = kerning_label(kerning_at(app).unwrap_or((c.kerning, c.kern)));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = LABEL_GAP;
-                icon_label(ui, "text-cursor", "Kerning");
-                if crate::widgets::dropdown(
-                    ui,
-                    "props-kern",
-                    &mut k,
-                    &[("metrics".to_string(), "Metrics"), ("optical".to_string(), "Optical"), ("off".to_string(), "0")],
-                    w,
-                ) {
-                    apply(app, ui.ctx(), json!({"kerning": k}));
+                icon_label(ui, "text-cursor", "Kerning: Metrics, Optical or a value in 1/1000 em (Alt+←/→ at the caret)");
+                if let Some(v) = kerning_field(ui, &shown, w) {
+                    apply_kerning(app, ui.ctx(), v);
                 }
             });
             if let Some(v) = num_field(ui, "VA", "Tracking (1/1000 em)", c.tracking, -1000.0..=10000.0, "", w) {
