@@ -130,6 +130,7 @@ struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     comp: photocraft_gpu::Compositor,
+    adapter: String,
 }
 
 fn gpu() -> Option<Gpu> {
@@ -142,7 +143,7 @@ fn gpu() -> Option<Gpu> {
     let limits = photocraft_ui_egui::gpu_canvas::device_limits(&adapter);
     let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: limits, ..Default::default() })).ok()?;
     let comp = photocraft_gpu::Compositor::new(&device);
-    Some(Gpu { device, queue, comp })
+    Some(Gpu { device, queue, comp, adapter: adapter.get_info().name })
 }
 
 fn gpu_time(g: &mut Gpu, doc: &Document, region: Rect) -> Result<f64, String> {
@@ -227,6 +228,7 @@ fn main() {
     let full = doc.bounds();
     println!("document {}x{} ({} layers)", doc.size.width, doc.size.height, doc.walk().len());
     let mut g = gpu();
+    let adapter = g.as_ref().map(|g| g.adapter.clone());
     let mut gt = |doc: &Document, r: Rect| match g.as_mut() {
         Some(g) => gpu_time(g, doc, r),
         None => Err("no adapter".into()),
@@ -246,8 +248,13 @@ fn main() {
         };
         println!("{what:<42} {mp:6.2} MP   cpu {c:>22}   gpu {g}   (min / median)");
     };
+    // `--json out.json` (`cargo xtask perf`): one row per case and compositor, with samples and
+    // the peak RSS while the case ran.
+    let rss = photocraft_testkit::perf::RssSampler::start(std::time::Duration::from_millis(2));
+    let mut json_rows: Vec<serde_json::Value> = Vec::new();
     // Each case: `edit` mutates the document, then both compositors refresh `region`.
     let mut case = |doc: &mut Document, what: &str, n: usize, edit: &mut dyn FnMut(&mut Document, usize) -> Rect, cpu_too: bool| {
+        rss.reset();
         let (mut cs, mut gs, mut gerr) = (Vec::new(), Vec::new(), None);
         let mut region = full;
         for i in 0..n {
@@ -259,6 +266,13 @@ fn main() {
                 Ok(v) => gs.push(v),
                 Err(e) => gerr = Some(e),
             }
+        }
+        let peak = rss.peak();
+        if !gs.is_empty() {
+            json_rows.push(photocraft_testkit::perf::row(&format!("{what} (GPU)"), &gs, peak, None));
+        }
+        if !cs.is_empty() {
+            json_rows.push(photocraft_testkit::perf::row(&format!("{what} (CPU)"), &cs, peak, None));
         }
         show(
             what,
@@ -350,4 +364,12 @@ fn main() {
         },
         true,
     );
+    if let Some(out) = arg(&args, "--json") {
+        let context = json!({"width": w, "height": h, "gpu_adapter": adapter});
+        let report = photocraft_testkit::perf::report("fx_bench", context, json_rows, Some(&rss));
+        if let Err(e) = photocraft_testkit::perf::write_report(&out, &report) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    }
 }

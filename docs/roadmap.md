@@ -34,6 +34,15 @@ This is the reference answer to "how close are we to Photoshop parity, really". 
 before picking work. Update it (with dated measurements) when the numbers move; don't restate the
 menu-parity number in its place.
 
+**Measured numbers live in the [scorecard](scorecard.md)** (`cargo xtask scorecard`, kept current
+by CI): performance scenarios against their budgets, corpus floors, per-area checklists with
+done / partial / missing counts, and the number of settings that do nothing. Where the scorecard
+and the estimates below disagree, the scorecard's numbers supersede them. As of 2026-10-05 it
+counts 67 of 129 preferences that nothing reads; 3 of the 25 budgeted performance scenarios meet
+their #209–#211 targets (first baseline, taken on a heavily loaded machine), and the 150-layer
+nudge scenario crashes the GPU compositor; the open area issues' checklists (#203–#220) are
+almost entirely missing or partial.
+
 **Bottom line.** Two days after 0.2.0 we had merged ~96 PRs and closed ~48 issues, but **real
 Photoshop parity is still well below 50%**. The biggest gaps are AI, missing tools, professional
 workflow depth and the plug-in ecosystem. Most fixes since 0.2.0 have passed our tests but have

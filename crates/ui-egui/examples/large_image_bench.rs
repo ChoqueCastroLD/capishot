@@ -99,7 +99,10 @@ fn main() {
         let jpeg = photocraft_codecs::encode(&img, photocraft_codecs::Format::Jpeg, &Default::default()).expect("jpeg");
         std::fs::write(&src, jpeg).expect("write cache");
         eprintln!("generated {} in {:.0} ms (run again to measure)", src.display(), ms(t));
-        return;
+        // `--json` (`cargo xtask perf`) measures in the same run.
+        if arg(&args, "--json").is_none() {
+            return;
+        }
     }
     let gpu = if args.iter().any(|a| a == "--cpu") { None } else { canvas() };
     let gpu = gpu.as_ref();
@@ -119,23 +122,37 @@ fn main() {
     let t_open = ms(t);
     let t = Instant::now();
     let path = refresh(gpu, &s, true);
+    let t_first = ms(t);
     println!("open (decode + document)      {t_open:>9.0} ms");
-    println!("first refresh ({path:<8})       {:>9.0} ms", ms(t));
+    println!("first refresh ({path:<8})       {t_first:>9.0} ms");
+    // `--json out.json` (`cargo xtask perf`): open and first refresh (every op includes them),
+    // the canvas texture size and the process's peak RSS.
+    let json_out = arg(&args, "--json");
+    let mut json_rows = vec![
+        photocraft_testkit::perf::row("open (decode + document)", &[t_open], None, None),
+        photocraft_testkit::perf::row("first refresh", &[t_first], None, None),
+    ];
     if let Some((g, _)) = gpu
         && let Some((format, bytes)) = g.texture_info(s.active().expect("doc").doc.id.0)
     {
         println!("canvas texture {format:?}, {} MB with mips", bytes >> 20);
+        if let Some(r) = json_rows.get_mut(1) {
+            r["gpu_bytes"] = json!(bytes);
+        }
     }
 
     let doc = || s.active().expect("doc").doc.clone();
     match op.as_str() {
         "open" => {}
         "refresh" => {
+            let mut v = Vec::new();
             for _ in 0..3 {
                 let t = Instant::now();
                 let path = refresh(gpu, &s, true);
+                v.push(ms(t));
                 println!("full refresh ({path:<8})        {:>9.0} ms", ms(t));
             }
+            json_rows.push(photocraft_testkit::perf::row("full refresh", &v, None, None));
         }
         "thumbs" => {
             let d = doc();
@@ -180,5 +197,14 @@ fn main() {
             println!("save {ext:<6} ({:>5} MB)          {:>9.0} ms", out.bytes.len() >> 20, ms(t));
         }
         other => eprintln!("unknown --op {other}"),
+    }
+    if let Some(out) = json_out {
+        let peak = photocraft_testkit::perf::process_peak_rss_bytes().or_else(photocraft_testkit::perf::current_rss_bytes);
+        let context = json!({"width": w, "height": h, "op": op, "gpu_adapter": gpu.map(|(_, rs)| rs.adapter.get_info().name)});
+        let mut report = photocraft_testkit::perf::report("large_image_bench", context, json_rows, None);
+        report["process_peak_rss_bytes"] = json!(peak);
+        if let Err(e) = photocraft_testkit::perf::write_report(&out, &report) {
+            eprintln!("{e}");
+        }
     }
 }

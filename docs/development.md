@@ -185,6 +185,60 @@ the live command registry (`menus::is_live`) and rewrites [`docs/parity.md`](par
 - `ui.inspect` returns `perf` timings (UI ms per frame, composite ms, upload ms).
 - Never scan full surfaces per frame. Cache per document revision (`PhotocraftApp::cached_bounds`). An uncached `content_bounds()` on a 36 MP layer once cost 77 ms per frame.
 
+## Scorecard and performance budgets
+
+[`docs/scorecard.md`](scorecard.md) says, with numbers, where PhotoCraft stands per area. It is
+generated; never edit it by hand.
+
+```sh
+cargo xtask scorecard            # regenerate docs/scorecard.md
+cargo xtask scorecard --check    # what CI runs: fails if the committed file is stale
+cargo xtask perf                 # full benchmark run (tens of minutes, release build)
+cargo xtask perf --quick         # small synthetic documents (about a minute once built)
+cargo xtask perf --update-baseline   # also write perf/baseline.json from this run
+```
+
+**Sources.** The scorecard reads only committed files, so it is deterministic:
+- `scorecard/*.toml`: one checklist per area (tools, file compatibility, UI, type, automation,
+  reliability, distribution, open bugs). Each item has an `id`, a short `target`, a `status`
+  (`done`, `partial` or `missing`), the `issue` and a `note` with the evidence (file:line).
+  Statuses must be true on `main`: verify against the code, and say `partial` with a note when
+  unsure. Flip a row in the PR that changes it.
+- `perf/budgets.toml`: the benches `xtask perf` runs and the scenarios P1…Pn, each mapped to one
+  bench row, with a budget (targets from #209, #210, #211). `enforce = false` marks a target the
+  code doesn't meet yet (reported as over budget; only regressions fail); flip it to `true` in the
+  PR that meets it. Scenarios the code can't support yet carry `not_measurable` and a reason, never
+  a number.
+- `perf/baseline.json`: the numbers the scorecard shows, written only by
+  `cargo xtask perf --update-baseline`, with the machine (CPU, RAM, GPU adapter, OS), its machine
+  class, commit, date and load average.
+- `crates/io/tests/corpus.rs`: the corpus floors (every `Source { .. }` constant).
+- The prefs audit: `Preferences` fields that no code reads (target 0, #204), plus counts taken
+  from the tree (never-crash attribute coverage, `docs/parity.md`).
+
+**Perf runs.** `xtask perf` builds the benches in release (`perf_scenarios`, `interactive_bench`,
+`fx_bench`, `type_bench`, `large_image_bench`, and `layout_bench` once it exists), runs each with
+`--json`, and merges the reports into `target/perf/results.json` keyed by scenario id, with p50,
+p95 and max (nearest rank over the samples), peak RSS measured in-process (`photocraft-testkit`'s
+`perf::RssSampler`), GPU bytes held by the canvas, and the load average before and after each
+bench. `target/perf/summary.md` is the Markdown table. It exits non-zero when an enforced budget
+breaks, when a scenario's p50 regresses more than 15 % (`--threshold`, or `regression_pct`)
+against a baseline from the same machine class and mode, or when a bench fails. Runs from
+different machine classes are never compared, and `--quick` numbers are only compared with a
+quick baseline. Machines that run other work give noisy numbers: check the load average in the
+summary before trusting a regression, and record it next to any number you quote.
+
+**Adding a scenario.** Add a row to a bench (keep its name stable: it is the key), give the
+bench `--json` support through `photocraft_testkit::perf::{row, report, write_report}`, then add a
+`[[scenario]]` to `perf/budgets.toml` and run `cargo xtask scorecard`.
+
+**CI.** `ci.yml` runs `cargo xtask scorecard --check`. `perf-nightly.yml` runs `cargo xtask perf`
+on a fixed macOS runner every night (and on demand), posts the table as the job summary, uploads
+`results.json`, and fails on a broken budget or regression. It never runs on pull requests: the
+release build of the benches alone takes longer than PR CI should. To give the nightly runner
+its own baseline, run the workflow by hand with `update_baseline` and commit the `perf-baseline`
+artifact as `perf/baseline.json`.
+
 ## Web build
 
 `apps/photocraft-web` runs the same `PhotocraftApp` in the browser through eframe's web runner. The renderer is wgpu: WebGPU where the browser has it, WebGL2 otherwise. It is Rust only. The only JavaScript is the glue that wasm-bindgen generates.

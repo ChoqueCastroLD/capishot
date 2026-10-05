@@ -81,6 +81,20 @@ fn main() {
     while size(&app) != start && undos < steps + 1 && app.session.undo() {
         undos += 1;
     }
+    // `--json out.json` (`cargo xtask perf`): the per-step samples.
+    if let Some(out) = arg(&args, "--json") {
+        use photocraft_testkit::perf::{process_peak_rss_bytes, report, row, write_report};
+        let rss = photocraft_testkit::perf::current_rss_bytes().max(process_peak_rss_bytes());
+        let rows = vec![
+            row("font size step: command", &cmd, rss, None),
+            row("font size step: canvas refresh", &canvas, rss, None),
+            row("font size step: total", &total, rss, None),
+        ];
+        let rep = report("type_bench", json!({"width": w, "height": h, "layers": n, "steps": steps, "effects": effects}), rows, None);
+        if let Err(e) = write_report(&out, &rep) {
+            eprintln!("{e}");
+        }
+    }
     println!(
         "size step (median of {steps}): command {:.2} ms, canvas refresh {:.2} ms, total {:.2} ms; undo steps for the drag: {undos}",
         median(cmd),

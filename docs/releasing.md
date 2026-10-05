@@ -25,7 +25,13 @@ and ids stay lowercase (`photocraft-<version>-<platform>-<arch>.<ext>`, `ai.stor
    every artifact and `SHA256SUMS.txt`. The notes are generated from the merged PRs.
 4. **Check it.** Download an installer or two and look at the job summaries. Any
    `::warning::` there means a signing secret was missing and that artifact is unsigned.
-5. **Publish** the draft in the GitHub UI. Publishing creates the `v0.2.0` tag. Versions with a
+5. **Add the scorecard deltas** to the draft's notes: what moved in
+   [`docs/scorecard.md`](scorecard.md) since the previous release. Compare the summary table
+   and the performance table of both tags (`git diff v<previous> v<this> -- docs/scorecard.md`)
+   and list each area's done / partial / missing change, the scenarios that newly meet their
+   budget or got slower, corpus floors raised, and the change in settings that do nothing.
+   Quote numbers with the baseline's machine and load average.
+6. **Publish** the draft in the GitHub UI. Publishing creates the `v0.2.0` tag. Versions with a
    pre-release suffix (`-rc.1`) are marked as pre-releases.
 
 Pushing to `release` again before you publish rebuilds the same draft and replaces its assets.

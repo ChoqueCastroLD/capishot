@@ -2622,6 +2622,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "memory-stats"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c73f5c649995a115e1a0220b35e4df0a1294500477f97a91d0660fb5abeb574a"
+dependencies = [
+ "libc",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3667,9 +3677,11 @@ dependencies = [
 name = "photocraft-testkit"
 version = "0.2.0"
 dependencies = [
+ "memory-stats",
  "photocraft-color",
  "photocraft-geom",
  "photocraft-raster",
+ "serde_json",
 ]
 
 [[package]]
@@ -3708,6 +3720,7 @@ dependencies = [
  "photocraft-io",
  "photocraft-plugins",
  "photocraft-raster",
+ "photocraft-testkit",
  "photocraft-text",
  "photocraft-vector",
  "rayon",
@@ -6258,7 +6271,9 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.2.0"
 dependencies = [
+ "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

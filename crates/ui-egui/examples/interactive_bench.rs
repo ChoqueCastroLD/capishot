@@ -83,6 +83,10 @@ struct Bench {
     /// state later rows need).
     only: Option<String>,
     rows: Vec<(String, f64, f64, f64, f64)>,
+    /// Per row (same order as `rows`): the timed samples and the peak RSS while they ran, for
+    /// `--json` (`cargo xtask perf`).
+    extra: Vec<(Vec<f64>, Option<u64>)>,
+    rss: photocraft_testkit::perf::RssSampler,
 }
 
 impl Bench {
@@ -116,8 +120,10 @@ impl Bench {
             f(self);
             return;
         }
+        self.rss.reset();
         let cold = f(self);
         let mut v: Vec<f64> = (0..self.reps).map(|_| f(self)).collect();
+        self.extra.push((v.clone(), self.rss.peak()));
         v.sort_by(f64::total_cmp);
         let med = v[v.len() / 2];
         println!("{name:<44} {med:>9.1} ms   (min {:>8.1}, max {:>8.1}, cold {:>8.1})", v[0], v[v.len() - 1], cold);
@@ -161,7 +167,14 @@ fn main() {
     let (w, h) =
         arg(&args, "--size").and_then(|s| s.split_once('x').map(|(a, b)| (a.parse().unwrap_or(7360), b.parse().unwrap_or(4912)))).unwrap_or((7360, 4912));
     let reps: usize = arg(&args, "--reps").and_then(|v| v.parse().ok()).unwrap_or(5).max(1);
-    let mut b = Bench { gpu: if args.iter().any(|a| a == "--cpu") { None } else { gpu() }, reps, only: arg(&args, "--only"), rows: Vec::new() };
+    let mut b = Bench {
+        gpu: if args.iter().any(|a| a == "--cpu") { None } else { gpu() },
+        reps,
+        only: arg(&args, "--only"),
+        rows: Vec::new(),
+        extra: Vec::new(),
+        rss: photocraft_testkit::perf::RssSampler::start(std::time::Duration::from_millis(2)),
+    };
     println!("document {w}×{h} ({:.1} MP), 8-bit RGB, {} reps, {}", (w * h) as f64 / 1e6, reps, if b.gpu.is_some() { "GPU canvas" } else { "CPU canvas" });
 
     // ---- open / save / export ----------------------------------------------------------------
@@ -399,8 +412,18 @@ fn main() {
     });
 
     if let Some(out) = arg(&args, "--json") {
-        let rows: Vec<Value> =
-            b.rows.iter().map(|(n, med, min, max, cold)| json!({"name": n, "median_ms": med, "min_ms": min, "max_ms": max, "cold_ms": cold})).collect();
+        let rows: Vec<Value> = b
+            .rows
+            .iter()
+            .zip(&b.extra)
+            .map(|((n, med, min, max, cold), (samples, rss))| {
+                let mut r = json!({"name": n, "median_ms": med, "min_ms": min, "max_ms": max, "cold_ms": cold});
+                // For `cargo xtask perf`: raw samples (it computes p50 / p95) and peak RSS.
+                r["samples_ms"] = json!(samples);
+                r["peak_rss_bytes"] = json!(rss);
+                r
+            })
+            .collect();
         std::fs::write(&out, serde_json::to_string_pretty(&json!({"width": w, "height": h, "gpu": b.gpu.is_some(), "rows": rows})).unwrap())
             .expect("write json");
     }

@@ -60,6 +60,12 @@ jobs:
       - name: Dependency layering
         run: cargo xtask layers
 
+      # docs/scorecard.md must match its sources (checklists, budgets, baseline, corpus floors,
+      # prefs audit). Static: it reads committed files only, no benchmarks run here.
+      - name: Scorecard up to date
+        if: runner.os == 'Linux'
+        run: cargo xtask scorecard --check
+
   wasm:
     name: wasm32 check
     runs-on: ubuntu-latest

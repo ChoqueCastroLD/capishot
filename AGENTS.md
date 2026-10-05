@@ -13,6 +13,7 @@ PhotoCraft is an open-source, native, Photoshop-comparable image editor written 
 | `docs/ui-design.md` | Design tokens, themes, widgets, and how to match Photoshop's look |
 | `docs/roadmap.md` | Honest parity assessment (where we're lacking, where we're going), milestones, **current focus** |
 | `docs/parity.md` | Generated list of every Photoshop menu item, live or missing |
+| `docs/scorecard.md` | Generated scorecard: performance budgets and numbers, corpus floors, per-area checklists (tools, files, UI, type, automation, reliability, distribution), settings that do nothing |
 | `crates/<name>/README.md` (where present) | Public API of that crate |
 
 ## 2. Workspace map
@@ -32,7 +33,7 @@ apps/
   photocraft                 desktop app (eframe/wgpu), TCP control server
   photocraft-cli             headless CLI (convert/info/run/batch/commands/mcp)
   photocraft-web             the same app in the browser (trunk + wasm-bindgen)
-xtask/                       cargo xtask layers | wasm | ci | stats | corpus | parity
+xtask/                       cargo xtask layers | wasm | ci | stats | corpus | parity | perf | scorecard
 ```
 
 **Layering is enforced** by `cargo xtask layers`. A crate may depend only on lower layers. `psd`, `codecs` and `cms` depend on nothing in the workspace. Nothing below `ui-egui` may use egui, eframe, winit or rfd. A new crate must be registered in `xtask/src/layers.rs`.
@@ -71,9 +72,12 @@ Priorities: important infrastructure first, then low-hanging parity, then the lo
    where PhotoCraft is lacking and the priority order of where we're going. `docs/parity.md`
    (menu wiring) is not a measure of behaviour. When your work moves a measured number (PSD oracle,
    round trips, workflow tests, performance), update that section with the dated figure.
-1. `docs/roadmap.md` → **Current focus**.
-2. `cargo xtask parity` → `docs/parity.md` lists every missing menu item, grouped by menu. Low-hanging fruit is usually a missing command whose algorithm already exists in `algo`, `paint`, `vector` or `text`.
-3. `log/devlog.md` → the "Still open" bullets of recent entries.
+1. **Check `docs/scorecard.md`** before picking work: each area's `missing` and `partial` rows,
+   the performance scenarios that are over budget or not measurable yet, and the count of
+   settings that do nothing. Its numbers are measured; prefer them to estimates.
+2. `docs/roadmap.md` → **Current focus**.
+3. `cargo xtask parity` → `docs/parity.md` lists every missing menu item, grouped by menu. Low-hanging fruit is usually a missing command whose algorithm already exists in `algo`, `paint`, `vector` or `text`.
+4. `log/devlog.md` → the "Still open" bullets of recent entries.
 
 When parity rises, raise `FLOOR` in `crates/ui-egui/src/parity.rs` (never lower it).
 
@@ -86,6 +90,10 @@ cargo xtask layers
 cargo xtask wasm            # if you touched L0–L6
 cargo xtask parity          # if you added commands; commit the regenerated docs/parity.md
 cargo test -p photocraft-engine --test panic_hunt -- --ignored   # if you added/changed commands: no panic on adversarial input (Rule 9)
+cargo xtask scorecard       # if you moved a number: flip the checklist row in scorecard/*.toml, raise a
+                            # corpus floor, fix a dead preference, or meet a budget (then set enforce = true
+                            # in perf/budgets.toml); commit the regenerated docs/scorecard.md (CI checks it)
+cargo xtask perf --quick    # if you touched a hot path; `cargo xtask perf --update-baseline` publishes a full run
 ```
 
 Commands must **never panic** on bad input (Rule 9): every `run` closure and the code it calls returns `Err`, not a panic, for any params or document state. New commands come with a graceful-failure test (empty/out-of-range/wrong-type params → `Err`, not a crash).
@@ -105,6 +113,7 @@ Then append a terse entry to `log/devlog.md` (what landed, numbers, what's still
 
 - `docs/roadmap.md`: milestones M0–M12, status and the current focus.
 - `docs/parity.md`: generated Photoshop menu coverage.
+- `docs/scorecard.md`: generated scorecard (sources: `scorecard/*.toml`, `perf/budgets.toml`, `perf/baseline.json`, corpus floors, prefs audit).
 - `docs/releasing.md`: cutting a release (`cargo xtask version`, the `release` branch), signing secrets, packaging scripts in `packaging/`.
 - `../craftrules/release/playbook.md`: how every storytold app builds signed release binaries (the canonical recipe; `docs/release-playbook.md` just points there); `docs/releasing.md` is PhotoCraft's specifics.
 - `plan/` (local, gitignored): research, parity plan, execution plan, estimates.
