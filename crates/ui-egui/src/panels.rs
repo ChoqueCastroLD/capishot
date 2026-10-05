@@ -418,8 +418,10 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Eraser)) || tool == Tool::QuickSelection {
                     let before = app.session.tools.brush.clone();
                     let mut b = before.clone();
-                    brush_preset_chip(ui, &mut b);
+                    let pick = brush_preset_chip(ui, &mut b, &app.session.tools.presets);
                     crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &b);
+                    crate::brush_picker::apply(app, ui.ctx(), pick);
+                    crate::brush_picker::settings_toggle(app, ui);
                     widgets::vline(ui, 22.0);
                 }
                 if crate::eraser_ui::options_bar(app, ui, tool)
@@ -434,9 +436,11 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 let brush_before = app.session.tools.brush.clone();
                 let mut brush = brush_before.clone();
                 let b = &mut brush;
+                let mut picked = None;
                 match app.ui.tool {
                     Tool::Brush | Tool::Eraser if t.pro => {
-                        brush_preset_chip(ui, b);
+                        picked = brush_preset_chip(ui, b, &app.session.tools.presets);
+                        crate::brush_picker::settings_toggle(app, ui);
                         widgets::vline(ui, 22.0);
                         opt_label(ui, "Mode");
                         let mut mode = b.mode;
@@ -468,6 +472,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         let _ = icons::button(ui, "arrow-left-right", 24.0, false, "Set painting symmetry options");
                     }
                     Tool::Brush | Tool::Eraser => {
+                        picked = brush_preset_chip(ui, b, &app.session.tools.presets);
+                        crate::brush_picker::settings_toggle(app, ui);
+                        widgets::vline(ui, 22.0);
                         opt_label(ui, "Size");
                         widgets::value_field(ui, &mut b.size, 1.0..=2500.0, "px", 76.0);
                         widgets::vline(ui, 22.0);
@@ -736,6 +743,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     _ => {}
                 }
                 crate::brush_panel::commit_gesture(app, ui.ctx(), &brush_before, &brush);
+                crate::brush_picker::apply(app, ui.ctx(), picked);
             });
         });
 }
@@ -2101,8 +2109,13 @@ fn smoothing_field(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings, 
     }
 }
 
-/// Options-bar brush chip; opens Photoshop's Brush Preset Picker (size, hardness, preset tips).
-fn brush_preset_chip(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings) {
+/// Options-bar brush chip; opens Photoshop's Brush Preset picker (size, hardness, the preset
+/// library). Returns what the picker asked for beyond the size and hardness edits in `b`.
+fn brush_preset_chip(
+    ui: &mut egui::Ui,
+    b: &mut photocraft_engine::BrushSettings,
+    presets: &[photocraft_engine::paint::BrushPreset],
+) -> Option<crate::brush_picker::Pick> {
     let t = Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(vec2(44.0, 30.0), Sense::click());
     if resp.hovered() {
@@ -2112,71 +2125,12 @@ fn brush_preset_chip(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings
     brush_tip(ui.painter(), c, 7.0, b.hardness, Color32::WHITE);
     ui.painter().text(pos2(c.x, r.bottom() - 5.0), Align2::CENTER_CENTER, format!("{}", b.size.round() as i64), egui::FontId::proportional(9.5), t.text_dim);
     icons::paint(ui, Rect::from_center_size(pos2(r.right() - 9.0, c.y), vec2(10.0, 10.0)), "chevron-down", 9.0, t.text_faint);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Brush Preset picker"));
     let resp = resp.on_hover_text("Brush Preset picker");
-    egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| brush_picker_body(ui, b));
-}
-
-/// The Brush Preset picker's contents (size, hardness, preset tips): the options-bar chip's
-/// popup, and the picker a right-click on the canvas opens (`paint_mouse`).
-pub(crate) fn brush_picker_body(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings) {
-    let t = Tokens::get(ui.ctx());
-    ui.set_width(260.0);
-    // Size: value field plus a logarithmic slider (small sizes get most of the travel).
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Size").color(t.text_dim));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let mut size = b.size;
-            if widgets::value_field(ui, &mut size, 1.0..=5000.0, "px", 72.0).changed() {
-                b.size = size.round().clamp(1.0, 5000.0);
-            }
-        });
-    });
-    let mut lv = b.size.max(1.0).ln();
-    if widgets::slider(ui, &mut lv, 0.0..=5000f32.ln(), None).changed() {
-        b.size = lv.exp().round().clamp(1.0, 5000.0);
-    }
-    let mut hard = b.hardness * 100.0;
-    if widgets::slider_row(ui, "Hardness", &mut hard, 0.0..=100.0, "%", None).changed() {
-        b.hardness = (hard / 100.0).clamp(0.0, 1.0);
-    }
-    ui.add_space(6.0);
-    widgets::hairline(ui);
-    ui.add_space(6.0);
-    ui.label(RichText::new("General Brushes").color(t.text_dim).size(11.5));
-    // Photoshop's default round presets: soft and hard at common sizes.
-    let presets: [(f32, f32); 12] =
-        [(1.0, 1.0), (3.0, 1.0), (5.0, 1.0), (9.0, 1.0), (13.0, 1.0), (19.0, 1.0), (5.0, 0.0), (9.0, 0.0), (13.0, 0.0), (17.0, 0.0), (45.0, 0.0), (65.0, 0.0)];
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-        for (sz, hd) in presets {
-            let (cell, cr) = ui.allocate_exact_size(vec2(38.0, 44.0), Sense::click());
-            let on = (b.size - sz).abs() < 0.5 && (b.hardness - hd).abs() < 0.01;
-            ui.painter().rect_filled(
-                cell,
-                3.0,
-                if on {
-                    t.accent_soft
-                } else if cr.hovered() {
-                    t.hover
-                } else {
-                    t.field
-                },
-            );
-            let rad = (sz / 2.0).clamp(1.0, 13.0);
-            brush_tip(ui.painter(), pos2(cell.center().x, cell.top() + 17.0), rad, hd, t.text);
-            ui.painter().text(
-                pos2(cell.center().x, cell.bottom() - 7.0),
-                Align2::CENTER_CENTER,
-                format!("{}", sz as i64),
-                egui::FontId::proportional(9.5),
-                t.text_dim,
-            );
-            if cr.on_hover_text(format!("{} Round {sz:.0} px", if hd >= 1.0 { "Hard" } else { "Soft" })).clicked() {
-                b.size = sz;
-                b.hardness = hd;
-            }
-        }
-    });
+    egui::Popup::from_toggle_button_response(&resp)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| crate::brush_picker::body(ui, b, presets))
+        .and_then(|r| r.inner)
 }
 
 /// Drag a layer row to reorder: drop on the upper/lower half to place above/below, or on the middle

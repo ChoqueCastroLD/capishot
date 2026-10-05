@@ -418,3 +418,94 @@ fn brushes_panel_groups_collapse_and_filter() {
     h.run_steps(2);
     assert!(brush_preview::render_count(&ctx) >= n);
 }
+
+/// A fresh session with the Brush tool: shortcuts, the options bar and the Brush Settings window,
+/// in the default theme (#258).
+fn app_harness() -> Harness<'static, PhotocraftApp> {
+    let mut app = app();
+    app.ui.tool = crate::state::Tool::Brush;
+    let mut h = Harness::builder().with_size(vec2(1400.0, 900.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            let ctx = ui.ctx().clone();
+            if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            crate::shortcuts::handle(app, &ctx);
+            crate::panels::options_bar(app, ui);
+            window(app, &ctx);
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::default());
+    h.run_steps(4);
+    h
+}
+
+#[test]
+fn f5_edits_the_default_brush_with_every_section() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = app_harness();
+    assert!(!h.state().ui.panels.brush_settings);
+    let fresh = h.state().session.tools.brush.clone();
+    assert!(!fresh.shape_dynamics.enabled && !fresh.transfer.enabled, "the default round brush has no dynamics yet");
+    h.key_press(egui::Key::F5);
+    h.run_steps(3);
+    assert!(h.state().ui.panels.brush_settings && h.state().ui.brush_tab == 0, "F5 shows Brush Settings");
+    // Every section is there for the built-in round brush, not only for sampled or imported ones.
+    for (name, _) in SECTIONS {
+        assert!(h.query_all_by_label(name).next().is_some(), "{name} listed");
+    }
+    // Clicking a section's name shows it and turns it on: one tools.setBrush.
+    let n = h.state().session.journal.len();
+    h.get_by_label("Shape Dynamics").click();
+    h.run_steps(3);
+    assert_eq!(h.state().ui.brush_section, 1);
+    assert!(h.state().session.tools.brush.shape_dynamics.enabled);
+    assert_eq!(h.state().session.journal.len(), n + 1);
+    let (id, p) = last_journal(h.state()).unwrap();
+    assert_eq!(id, "tools.setBrush");
+    assert_eq!(p["brush"]["shapeDynamics"]["enabled"], json!(true));
+    // A section's box toggles it without showing it.
+    h.get_by_label("Enable Transfer").click();
+    h.run_steps(3);
+    assert!(h.state().session.tools.brush.transfer.enabled);
+    assert_eq!(h.state().ui.brush_section, 1);
+    assert_eq!(h.state().session.journal.len(), n + 2);
+    // The rest of the brush is untouched.
+    let b = &h.state().session.tools.brush;
+    assert_eq!((b.size, b.hardness, &b.tip), (fresh.size, fresh.hardness, &fresh.tip));
+    // F5 again hides the panel.
+    h.key_press(egui::Key::F5);
+    h.run_steps(2);
+    assert!(!h.state().ui.panels.brush_settings);
+}
+
+#[test]
+fn options_bar_reaches_brush_settings_and_the_preset_library() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = app_harness();
+    // Photoshop's "Toggle the Brush Settings panel" button beside the brush chip.
+    h.get_by_label("Toggle the Brush Settings panel").click();
+    h.run_steps(3);
+    assert!(h.state().ui.panels.brush_settings);
+    h.get_by_label("Toggle the Brush Settings panel").click();
+    h.run_steps(3);
+    assert!(!h.state().ui.panels.brush_settings);
+    // The chip's picker lists the session's presets in their groups, not a fixed set of tips.
+    h.get_by_label("Brush Preset picker").click();
+    h.run_steps(3);
+    let presets = h.state().session.tools.presets.clone();
+    for (group, _) in grouped_presets(&presets) {
+        assert!(h.query_by_label(&group).is_some(), "group {group}");
+    }
+    let target = presets.iter().find(|p| p.group == "Dry Media").or(presets.last()).unwrap().name.clone();
+    assert!(!is_current(&paint::presets::find(&presets, &target).unwrap().brush, &h.state().session.tools.brush));
+    h.get_by_label(&target).click();
+    h.run_steps(3);
+    assert_eq!(last_journal(h.state()).unwrap(), ("tools.setBrush".to_string(), json!({ "preset": target })));
+    assert!(is_current(&paint::presets::find(&presets, &target).unwrap().brush, &h.state().session.tools.brush));
+    // Its Brush Settings button opens the full editor.
+    h.get_by_label("Brush Settings…").click();
+    h.run_steps(3);
+    assert!(h.state().ui.panels.brush_settings && h.state().ui.brush_tab == 0);
+}

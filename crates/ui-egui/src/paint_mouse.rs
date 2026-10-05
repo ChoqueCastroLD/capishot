@@ -107,13 +107,19 @@ pub fn show_picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     }
     let screen = ctx.content_rect();
-    // Keep the whole picker on screen (it is about 280 × 300 points).
-    let pos = egui::pos2(x.min(screen.right() - 284.0).max(screen.left()), y.min(screen.bottom() - 310.0).max(screen.top()));
-    let area = egui::Area::new(egui::Id::new("canvas-brush-picker")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
+    // Keep the whole picker on screen: its last size, or about 320 × 480 points before it shows.
+    let id = egui::Id::new("canvas-brush-picker");
+    let size = ctx.memory(|m| m.area_rect(id)).map_or(egui::vec2(324.0, 480.0), |r| r.size());
+    let pos = egui::pos2(x.min(screen.right() - size.x).max(screen.left()), y.min(screen.bottom() - size.y).max(screen.top()));
+    let area = egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let before = app.session.tools.brush.clone();
         let mut b = before.clone();
-        egui::Frame::popup(ui.style()).show(ui, |ui| crate::panels::brush_picker_body(ui, &mut b));
+        let pick = egui::Frame::popup(ui.style()).show(ui, |ui| crate::brush_picker::body(ui, &mut b, &app.session.tools.presets)).inner;
         crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &b);
+        if pick == Some(crate::brush_picker::Pick::OpenSettings) {
+            app.ui.brush_picker = None;
+        }
+        crate::brush_picker::apply(app, ui.ctx(), pick);
     });
     let outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p)));
     if outside {
@@ -209,10 +215,20 @@ mod tests {
         press(&mut h, c, PointerButton::Secondary, false);
         assert_eq!(h.state().ui.brush_picker, Some([c.x, c.y]), "opened at the pointer");
         assert!(strokes(&h).is_empty());
-        // The picker shows over the canvas, at the pointer.
+        // The picker shows over the canvas at the pointer, moved up just enough to stay on screen.
         h.run_steps(2);
         let shown = h.ctx.memory(|m| m.area_rect(egui::Id::new("canvas-brush-picker"))).expect("picker shown");
-        assert!(shown.min.distance(c) < 1.0 && shown.width() > 250.0 && shown.height() > 150.0, "{shown:?}");
+        let screen = h.ctx.content_rect();
+        assert!((shown.min.x - c.x).abs() < 1.0 && shown.min.y <= c.y + 1.0, "{shown:?}");
+        assert!(screen.contains_rect(shown.shrink(0.5)) && shown.width() > 250.0 && shown.height() > 150.0, "{shown:?}");
+        // It is the real preset library, not a fixed set of round tips (#258).
+        let names: Vec<String> = h.state().session.tools.presets.iter().take(3).map(|p| p.name.clone()).collect();
+        {
+            use egui_kittest::kittest::Queryable;
+            for n in &names {
+                assert!(h.query_by_label(n).is_some(), "{n} listed");
+            }
+        }
         // A right drag doesn't paint either.
         drag(&mut h, PointerButton::Secondary);
         assert!(strokes(&h).is_empty(), "right-drag never paints with the brush picker preference");

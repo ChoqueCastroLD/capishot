@@ -15,6 +15,7 @@ pub mod adjust_ui;
 pub mod analysis_ui;
 pub mod artboard_ui;
 pub mod brush_panel;
+pub mod brush_picker;
 pub mod brush_preview;
 pub mod brush_sections;
 pub mod brushes_tab;
