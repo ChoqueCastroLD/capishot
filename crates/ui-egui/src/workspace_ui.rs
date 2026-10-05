@@ -174,7 +174,7 @@ fn new_workspace(app: &mut PhotocraftApp, p: &Value) -> Result<Value, String> {
         return Err(format!("\"{name}\" is a built-in workspace"));
     }
     let prefs = app.session.prefs().clone();
-    let mut ws = json!({"panels": app.ui.panels, "dockTabs": app.ui.dock_tabs});
+    let mut ws = json!({"panels": app.ui.panels, "dockTabs": app.ui.dock_tabs, "dock": app.ui.dock});
     if p.get("keyboardShortcuts").and_then(Value::as_bool) == Some(true) {
         ws["shortcuts"] = json!(prefs.shortcuts);
     }
@@ -221,12 +221,9 @@ fn select_workspace(app: &mut PhotocraftApp, p: &Value) -> Result<Value, String>
 /// Apply the current workspace when it is a saved one. Returns false for the built-in presets.
 pub fn apply_custom(app: &mut PhotocraftApp) -> bool {
     let Some(ws) = app.session.prefs().workspaces.get(&app.ui.workspace).cloned() else { return false };
-    if let Ok(p) = serde_json::from_value(ws["panels"].clone()) {
-        app.ui.panels = p;
-    }
-    if let Ok(t) = serde_json::from_value(ws["dockTabs"].clone()) {
-        app.ui.dock_tabs = t;
-    }
+    // Workspaces saved before the dock layout existed get the default heights.
+    app.ui.dock = Default::default();
+    crate::dock::apply(app, &ws);
     let (sc, menus, toolbar) = (ws.get("shortcuts").cloned(), ws.get("menus").cloned(), ws.get("toolbar").cloned());
     if sc.is_some() || menus.is_some() || toolbar.is_some() {
         app.session.prefs.edit(|p| {

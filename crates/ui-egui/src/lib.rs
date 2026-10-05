@@ -29,6 +29,7 @@ pub mod dialogs;
 pub mod discard_ui;
 pub mod distort_ui;
 pub mod doc_props_ui;
+pub mod dock;
 pub mod enable_rules;
 pub mod eraser_ui;
 pub mod export_dialog;

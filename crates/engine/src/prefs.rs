@@ -722,6 +722,10 @@ pub struct Preferences {
     pub workspaces: BTreeMap<String, Value>,
     /// Window › Workspace › Lock Workspace: panels can't be moved.
     pub workspace_locked: bool,
+    /// The live panel layout (dock group heights, order, collapsed groups, open panels), saved
+    /// as the user changes it and restored at launch when Workspace › Remember Workspace
+    /// Changes is on. JSON owned by the shell.
+    pub panel_layout: Value,
     /// File › Scripts › Script Events Manager: event → script bindings.
     pub script_events: crate::automate_cmds::ScriptEvents,
 }

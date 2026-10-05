@@ -716,7 +716,7 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if t.pro {
         dock_panels(app, ui, &p, &t);
     }
-    // Narrow icon rail (always visible) that toggles panels.
+    // Narrow icon rail (always visible): shows, expands or collapses panel groups.
     let (rw, rb) = if t.pro { (36.0, 28.0) } else { (44.0, 32.0) };
     egui::Panel::right("rail").resizable(false).exact_size(rw).frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(4, 8))).show(
         ui,
@@ -724,23 +724,20 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let r = ui.max_rect();
             ui.painter().line_segment([r.left_top() - vec2(6.0, 8.0), r.left_bottom() + vec2(-6.0, 8.0)], Stroke::new(1.0, t.separator));
             ui.spacing_mut().item_spacing.y = 4.0;
-            let entries: [(&str, &str, bool); 5] = [
-                ("sliders-horizontal", "Properties", p.properties),
-                ("navigation", "Navigator", p.navigator),
-                ("palette", "Color & Swatches", p.color),
-                ("layers", "Layers", p.layers),
-                ("clock", "History", p.history),
+            use crate::dock::Group;
+            let entries: [(&str, &str, Group); 5] = [
+                ("sliders-horizontal", "Properties", Group::Properties),
+                ("navigation", "Navigator", Group::Navigator),
+                ("palette", "Color & Swatches", Group::Color),
+                ("layers", "Layers", Group::Layers),
+                ("clock", "History", Group::History),
             ];
-            for (icon, name, on) in entries {
+            for (icon, name, g) in entries {
+                // Studio floats Properties outside the dock.
+                let docked = t.pro || g != Group::Properties;
+                let on = g.shown(&p) && !(docked && app.ui.dock.is_collapsed(g));
                 if icons::rail_button(ui, icon, rb, on, name).clicked() {
-                    let panels = &mut app.ui.panels;
-                    match name {
-                        "Properties" => panels.properties = !panels.properties,
-                        "Navigator" => panels.navigator = !panels.navigator,
-                        "Color & Swatches" => panels.color = !panels.color,
-                        "Layers" => panels.layers = !panels.layers,
-                        _ => panels.history = !panels.history,
-                    }
+                    crate::dock::rail_click(app, g, docked);
                 }
             }
         },
@@ -748,11 +745,23 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if !t.pro {
         dock_panels(app, ui, &p, &t);
     }
+    crate::dock::persist(app, ui.ctx());
 }
 
 fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Panels, t: &Tokens) {
-    let p = p.clone();
-    if !(p.layers || p.history || p.color || p.navigator || (t.pro && p.properties)) {
+    use crate::dock::Group;
+    // Floating in Studio, Properties docks only in Pro (Photoshop).
+    let shown: Vec<Group> = [
+        (Group::Color, p.color),
+        (Group::Properties, t.pro && p.properties),
+        (Group::Navigator, p.navigator),
+        (Group::History, p.history),
+        (Group::Layers, p.layers),
+    ]
+    .into_iter()
+    .filter_map(|(g, on)| on.then_some(g))
+    .collect();
+    if shown.is_empty() {
         return;
     }
     let margin = if t.pro { 2 } else { 8 };
@@ -762,73 +771,34 @@ fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Pan
         .size_range(250.0..=520.0)
         .frame(egui::Frame::NONE.fill(t.dock).inner_margin(egui::Margin::same(margin)))
         .show(ui, |ui| {
-            let draw = |app: &mut PhotocraftApp, ui: &mut egui::Ui| {
-                ui.spacing_mut().item_spacing.y = if t.pro { 0.0 } else { 6.0 };
-                // Photoshop Essentials order: Color, Properties, (Navigator, History), Layers last and filling.
-                if p.color {
-                    let mut sel = app.ui.dock_tabs.color;
-                    // Photoshop Essentials: Color | Swatches | Gradients | Patterns.
-                    let tabs: &[&str] = if t.pro { &["Color", "Swatches", "Gradients", "Patterns"] } else { &["Swatches", "Color", "Gradients", "Patterns"] };
-                    let pro = t.pro;
-                    widgets::card(ui, "color", tabs, &mut sel, |ui, tab| match (pro, tab) {
-                        (_, 2) => crate::preset_panels::gradients_panel(app, ui),
-                        (_, 3) => crate::preset_panels::patterns_panel(app, ui),
-                        (true, 0) => color_field(app, ui),
-                        (true, _) => swatches(app, ui),
-                        (false, 0) => swatches(app, ui),
-                        (false, _) => color_picker(app, ui),
-                    });
-                    app.ui.dock_tabs.color = sel;
-                }
-                if t.pro && p.properties {
-                    let mut sel = app.ui.dock_tabs.properties;
-                    // Leave Layers at least ~240 px; Properties scrolls within what remains.
-                    let reserve = if p.layers { 240.0 } else { 40.0 };
-                    let max_h = (ui.available_height() - reserve - 40.0).max(70.0);
-                    widgets::card(ui, "properties", &["Properties", "Adjustments"], &mut sel, |ui, tab| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("props-scroll")
-                            .max_height(max_h)
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| if tab == 0 { properties_body(app, ui) } else { adjustments_grid(app, ui) });
-                    });
-                    app.ui.dock_tabs.properties = sel;
-                }
-                if p.navigator {
-                    let mut sel = app.ui.dock_tabs.navigator;
-                    widgets::card(ui, "navigator", &["Navigator", "Histogram", "Info"], &mut sel, |ui, tab| match tab {
-                        0 => navigator(app, ui),
-                        1 => crate::tone::histogram_panel(app, ui),
-                        _ => info_panel(app, ui),
-                    });
-                    app.ui.dock_tabs.navigator = sel;
-                }
-                if p.history {
-                    let mut sel = app.ui.dock_tabs.history;
-                    widgets::card(ui, "history", &["History", "Actions", "Layer Comps"], &mut sel, |ui, tab| match tab {
-                        0 => history(app, ui),
-                        1 => crate::actions::panel(app, ui),
-                        _ => crate::comps_ui::panel(app, ui),
-                    });
-                    app.ui.dock_tabs.history = sel;
-                }
-                if p.layers {
-                    let mut sel = app.ui.dock_tabs.layers;
-                    widgets::card(ui, "layers", &["Layers", "Channels", "Paths"], &mut sel, |ui, tab| match tab {
-                        0 => layers(app, ui),
-                        1 => channels(app, ui),
-                        _ => crate::vector_ui::paths_panel(app, ui),
-                    });
-                    app.ui.dock_tabs.layers = sel;
-                }
-            };
-            if t.pro {
-                // Fixed panels on top, Layers takes the rest (it scrolls internally).
-                draw(app, ui);
-            } else {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| draw(app, ui));
-            }
+            // Groups keep their heights whatever they show (#88): see `dock`.
+            crate::dock::show(app, ui, &shown, dock_body);
         });
+}
+
+/// One dock group's tab content; `dock` bounds it and scrolls it when it's taller.
+fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate::dock::Group, tab: usize) {
+    use crate::dock::Group;
+    let pro = Tokens::get(ui.ctx()).pro;
+    match (group, tab) {
+        (Group::Color, 2) => crate::preset_panels::gradients_panel(app, ui),
+        (Group::Color, 3) => crate::preset_panels::patterns_panel(app, ui),
+        (Group::Color, 0) if pro => color_field(app, ui),
+        (Group::Color, _) if pro => swatches(app, ui),
+        (Group::Color, 0) => swatches(app, ui),
+        (Group::Color, _) => color_picker(app, ui),
+        (Group::Properties, 0) => properties_body(app, ui),
+        (Group::Properties, _) => adjustments_grid(app, ui),
+        (Group::Navigator, 0) => navigator(app, ui),
+        (Group::Navigator, 1) => crate::tone::histogram_panel(app, ui),
+        (Group::Navigator, _) => info_panel(app, ui),
+        (Group::History, 0) => history(app, ui),
+        (Group::History, 1) => crate::actions::panel(app, ui),
+        (Group::History, _) => crate::comps_ui::panel(app, ui),
+        (Group::Layers, 0) => layers(app, ui),
+        (Group::Layers, 1) => channels(app, ui),
+        (Group::Layers, _) => crate::vector_ui::paths_panel(app, ui),
+    }
 }
 
 /// Photoshop's Info panel: colour under the pointer (RGB and CMYK), position, selection size.
@@ -1162,7 +1132,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let rows = doc.walk();
     let ctx = ui.ctx().clone();
     let footer = 38.0;
-    let fill = t.pro && ui.available_height() > footer + 60.0;
+    let fill = ui.available_height() > footer + 60.0;
     let rows_h = if fill { ui.available_height() - footer } else { f32::INFINITY };
     egui::ScrollArea::vertical()
         .id_salt("layer-rows")
@@ -1564,10 +1534,10 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     let mut target: Option<isize> = None;
     let all = entries.iter().map(|e| (e.clone(), false)).chain(redo.iter().map(|e| (e.clone(), true)));
-    // Leave room for Layers below (the dock gives Layers a height budget).
-    let reserve = if app.ui.panels.layers { 250.0 } else { 0.0 };
-    let max_h = (ui.available_height() - reserve - 40.0).clamp(60.0, 360.0);
-    egui::ScrollArea::vertical().id_salt("history-rows").max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+    // The dock gives History a fixed height: the rows scroll above the footer.
+    let footer = if t.pro { 34.0 } else { 0.0 };
+    let max_h = (ui.available_height() - footer).max(40.0);
+    egui::ScrollArea::vertical().id_salt("history-rows").max_height(max_h).auto_shrink([false, false]).show(ui, |ui| {
         for (i, (e, is_redo)) in all.enumerate() {
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
             if i == current {

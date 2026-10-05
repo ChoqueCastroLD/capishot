@@ -587,6 +587,9 @@ pub struct UiState {
     pub workspace: String,
     pub palette_open: bool,
     pub dock_tabs: DockTabs,
+    /// Right-dock group order, heights and collapsed groups (see `dock`).
+    #[serde(default)]
+    pub dock: crate::dock::DockLayout,
     /// Brush Settings: selected section (0 = Brush Tip Shape) and tab (0 settings, 1 Brushes).
     #[serde(default)]
     pub brush_section: usize,
@@ -651,6 +654,7 @@ impl Default for UiState {
             workspace: "Essentials".into(),
             palette_open: false,
             dock_tabs: DockTabs::default(),
+            dock: Default::default(),
             brush_section: 0,
             brush_tab: 0,
             selection_mode: 0,

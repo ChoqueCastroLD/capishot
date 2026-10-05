@@ -22,48 +22,82 @@ pub fn surface(ui: &Ui, rect: Rect, fill: Color32, raised: bool) {
 /// A dock card: rounded container with a header of pill tabs and optional trailing actions.
 /// Returns the index of the selected tab.
 pub fn card(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, body: impl FnOnce(&mut Ui, usize)) {
+    let _ = card_ex(ui, id, tabs, selected, false, body);
+}
+
+/// What happened on a card's tab strip this frame (see [`card_ex`]).
+pub struct CardResponse {
+    /// The tab strip background: drag to move the group, double-click to collapse it.
+    pub strip: Response,
+    /// The panel menu button (hamburger in Pro, ellipsis in Studio).
+    pub menu: Response,
+    /// A tab was double-clicked (Photoshop collapses the group).
+    pub tab_double_clicked: bool,
+}
+
+/// [`card`] that can be collapsed to its tab strip and reports strip and menu interactions.
+pub fn card_ex(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, collapsed: bool, body: impl FnOnce(&mut Ui, usize)) -> CardResponse {
     let t = Tokens::get(ui.ctx());
     if t.pro {
-        return pro_panel(ui, id, tabs, selected, body);
+        return pro_panel(ui, id, tabs, selected, collapsed, body);
     }
     let frame = egui::Frame::NONE
         .fill(t.card)
         .stroke(Stroke::new(1.0, t.card_border))
         .corner_radius(CornerRadius::same(t.radius as u8))
-        .inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 10 });
-    frame.show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            for (i, name) in tabs.iter().enumerate() {
-                if pill_tab(ui, name, *selected == i).clicked() {
-                    *selected = i;
-                }
+        .inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: if collapsed { 6 } else { 10 } });
+    let out = frame
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            // Registered before the tabs so they keep their clicks; drags fall through to it.
+            let strip_rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 22.0));
+            let strip = ui.interact(strip_rect, ui.id().with((id, "strip")), Sense::click_and_drag());
+            let mut double = false;
+            let menu = ui
+                .horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    for (i, name) in tabs.iter().enumerate() {
+                        let r = pill_tab(ui, name, *selected == i);
+                        double |= r.double_clicked();
+                        if r.clicked() {
+                            *selected = i;
+                        }
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        crate::icons::button(ui, "ellipsis", 22.0, false, &format!("{} options", tabs.get(*selected).copied().unwrap_or(id)))
+                    })
+                    .inner
+                })
+                .inner;
+            if !collapsed {
+                ui.add_space(6.0);
+                body(ui, *selected);
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                let _ = crate::icons::button(ui, "ellipsis", 22.0, false, &format!("{} options", tabs.get(*selected).copied().unwrap_or(id)));
-            });
-        });
-        ui.add_space(6.0);
-        body(ui, *selected);
-    });
+            CardResponse { strip, menu, tab_double_clicked: double }
+        })
+        .inner;
     ui.add_space(6.0);
+    out
 }
 
 /// Photoshop-grammar panel group: dark tab strip with flat tabs, flat body, hamburger menu.
-fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, body: impl FnOnce(&mut Ui, usize)) {
+fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, collapsed: bool, body: impl FnOnce(&mut Ui, usize)) -> CardResponse {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
-    // Tab strip.
+    // Tab strip. Its background senses drags (move the group) and double-clicks (collapse);
+    // the tabs, registered after it, keep their clicks.
     let (strip, _) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
-    ui.painter().rect_filled(strip, CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, t.tab_strip);
+    let strip_resp = ui.interact(strip, ui.id().with((id, "strip")), Sense::click_and_drag());
+    let rounding = if collapsed { CornerRadius::same(3) } else { CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 } };
+    ui.painter().rect_filled(strip, rounding, t.tab_strip);
     let mut x = strip.left();
+    let mut double = false;
     for (i, name) in tabs.iter().enumerate() {
         let galley = ui.painter().layout_no_wrap((*name).to_owned(), egui::FontId::proportional(11.5), t.text);
         let r = Rect::from_min_size(pos2(x, strip.top()), vec2(galley.size().x + 22.0, strip.height()));
         let resp = ui.interact(r, ui.id().with((id, "tab", i)), Sense::click());
-        let active = *selected == i;
+        let active = *selected == i && !collapsed;
         if active {
             ui.painter().rect_filled(r, CornerRadius { nw: if i == 0 { 3 } else { 0 }, ne: 0, sw: 0, se: 0 }, t.card);
         } else if resp.hovered() {
@@ -77,6 +111,7 @@ fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, body: i
             t.text_faint
         };
         ui.painter().galley_with_override_text_color(r.center() - galley.size() / 2.0, galley, color);
+        double |= resp.double_clicked();
         if resp.clicked() {
             *selected = i;
         }
@@ -91,15 +126,18 @@ fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, body: i
         ui.painter().line_segment([pos2(menu.center().x - 5.0, y), pos2(menu.center().x + 5.0, y)], Stroke::new(1.0, c));
     }
     // Body.
-    egui::Frame::NONE
-        .fill(t.card)
-        .corner_radius(CornerRadius { nw: 0, ne: 0, sw: 3, se: 3 })
-        .inner_margin(egui::Margin { left: 8, right: 8, top: 8, bottom: 8 })
-        .show(ui, |ui| {
-            ui.set_width(width - 16.0);
-            body(ui, *selected);
-        });
+    if !collapsed {
+        egui::Frame::NONE
+            .fill(t.card)
+            .corner_radius(CornerRadius { nw: 0, ne: 0, sw: 3, se: 3 })
+            .inner_margin(egui::Margin { left: 8, right: 8, top: 8, bottom: 8 })
+            .show(ui, |ui| {
+                ui.set_width(width - 16.0);
+                body(ui, *selected);
+            });
+    }
     ui.add_space(2.0);
+    CardResponse { strip: strip_resp, menu: mresp, tab_double_clicked: double }
 }
 
 pub fn pill_tab(ui: &mut Ui, label: &str, selected: bool) -> Response {

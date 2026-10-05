@@ -453,15 +453,22 @@ fn flag_param(p: &Value, cur: bool) -> bool {
 
 fn run(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, p: &Value) -> Result<Value, String> {
     if let Some((panel, tab)) = panel_tab(app, id) {
+        let group = crate::dock::Group::from_key(panel);
+        let collapsed = group.is_some_and(|g| app.ui.dock.is_collapsed(g));
         let (vis, cur) = panel_state(app, panel);
-        // Like Photoshop: choosing a visible panel's menu item again hides it.
-        if *vis && *cur == tab && !id.starts_with("type.panels.") {
+        // Like Photoshop: choosing a visible panel's menu item again hides it. A collapsed
+        // group is expanded instead, so the menu item always brings the panel back (#129).
+        if *vis && *cur == tab && !collapsed && !id.starts_with("type.panels.") {
             *vis = false;
         } else {
             *vis = true;
             *cur = tab;
         }
-        return Ok(json!({"panel": panel, "tab": tab, "visible": *vis}));
+        let visible = *vis;
+        if let Some(g) = group.filter(|_| visible) {
+            crate::dock::reveal(app, g);
+        }
+        return Ok(json!({"panel": panel, "tab": tab, "visible": visible}));
     }
     let o = &mut app.ui.view;
     if let Some(k) = id.strip_prefix("view.show.") {

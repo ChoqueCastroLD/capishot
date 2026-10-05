@@ -101,6 +101,7 @@ pub fn load(app: &mut PhotocraftApp) {
     {
         app.ui.status = format!("Preferences were reset: {e}");
     }
+    crate::dock::restore(app);
     app.prefs_rt.saved_rev = app.session.prefs.rev();
     if app.session.prefs().file_handling.recover_on_launch
         && let Some(recover) = app.services.recover.as_mut()

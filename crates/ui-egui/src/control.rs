@@ -135,6 +135,13 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
                     Err(e) => return err(e),
                 }
             }
+            // Dock group order, heights and collapsed groups (see `dock::DockLayout`).
+            if let Some(d) = p.get("dock") {
+                match serde_json::from_value(d.clone()) {
+                    Ok(v) => app.ui.dock = v,
+                    Err(e) => return err(e),
+                }
+            }
             if let Some(i) = app.session.active_index() {
                 if let Some(z) = p.get("zoom").and_then(Value::as_f64) {
                     app.ui.views[i].zoom = (z as f32).clamp(0.01, 64.0);

@@ -372,6 +372,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             Ok(json!({"dialog": crate::adjust_dialog::open(app, a).ok_or("no document")?}))
         }
         t if t.starts_with("window.toggle.") => {
+            // A shown but collapsed dock group is expanded rather than hidden (#129).
+            if let Some(g) = crate::dock::Group::from_key(&t["window.toggle.".len()..]).filter(|g| g.shown(&app.ui.panels) && app.ui.dock.is_collapsed(*g)) {
+                crate::dock::reveal(app, g);
+                return Ok(Value::Null);
+            }
             let p = &mut app.ui.panels;
             let slot = match &t["window.toggle.".len()..] {
                 "layers" => &mut p.layers,
@@ -385,6 +390,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 _ => return Err(format!("unknown panel in {t}")),
             };
             *slot = !*slot;
+            if let Some(g) = crate::dock::Group::from_key(&t["window.toggle.".len()..]).filter(|g| g.shown(&app.ui.panels)) {
+                crate::dock::reveal(app, g);
+            }
             Ok(Value::Null)
         }
         // Layer › Layer Style › <effect>… opens the Layer Style dialog on that effect.
@@ -812,6 +820,9 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
     if crate::workspace_ui::apply_custom(app) {
         return;
     }
+    // Presets use the default group order, heights and tabs (Reset brings everything back).
+    app.ui.dock = Default::default();
+    app.ui.dock_tabs = Default::default();
     let p = &mut app.ui.panels;
     let (nav, color, layers, history, props) = match app.ui.workspace.as_str() {
         "Photography" => (true, false, true, true, true),
