@@ -587,6 +587,10 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
     let partial = present && damage.is_some();
     gpu_budget(app, &gpu, idx, partial, visible);
     let r = gpu.refresh(id.0, &doc, if partial { damage } else { None }, display.as_deref());
+    if r.kind == "lost" {
+        // The device is gone: draw this frame on the CPU path; `gpu_status` drops the GPU canvas.
+        return false;
+    }
     if let Some(e) = &r.fallback
         && app.perf.gpu_fallback.as_deref() != Some(e.as_str())
     {

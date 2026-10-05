@@ -59,6 +59,13 @@ choice!(Theme { Pro = "pro", ProMedium = "proMedium", Studio = "studio", StudioL
 choice!(CanvasColor { Default = "default", Black = "black", DarkGray = "darkGray", MediumGray = "mediumGray", LightGray = "lightGray", Custom = "custom" } default Default);
 choice!(CanvasBorder { DropShadow = "dropShadow", Line = "line", None = "none" } default DropShadow);
 choice!(UiScale { Auto = "auto", P100 = "100", P200 = "200" } default Auto);
+choice!(
+    /// Graphics backend of the desktop app's window and GPU canvas (applies at next launch).
+    /// `auto` lets PhotoCraft pick (DX12 for Intel adapters on Windows); `cpu` composites on the
+    /// CPU and draws the window with a software adapter where the platform has one. A start that
+    /// crashes inside the graphics driver moves this to the next safer choice.
+    GpuBackend { Auto = "auto", Vulkan = "vulkan", Dx12 = "dx12", Metal = "metal", Gl = "gl", Cpu = "cpu" } default Auto
+);
 choice!(UiFontSize { Tiny = "tiny", Small = "small", Medium = "medium", Large = "large" } default Small);
 choice!(LogDestination { Metadata = "metadata", TextFile = "textFile", Both = "both" } default Metadata);
 choice!(LogDetail { SessionsOnly = "sessionsOnly", Concise = "concise", Detailed = "detailed" } default Concise);
@@ -370,6 +377,8 @@ pub struct Performance {
     pub cache_tile_size: u32,
     /// Draw the canvas with the GPU (applies at next launch).
     pub use_gpu: bool,
+    /// Graphics backend (applies at next launch; see [`GpuBackend`]).
+    pub gpu_backend: GpuBackend,
     /// Memory budget of the layer-effect cache, in MB.
     pub effect_cache_mb: u32,
     pub legacy_compositing: bool,
@@ -391,6 +400,7 @@ impl Default for Performance {
             cache_levels: 4,
             cache_tile_size: 8192,
             use_gpu: true,
+            gpu_backend: GpuBackend::Auto,
             effect_cache_mb: 768,
             legacy_compositing: false,
         }
@@ -860,6 +870,7 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "rawDefaults.colorSpace" => RawColorSpace::NAMES,
         "rawDefaults.bitDepth" => RawDepth::NAMES,
         "rawDefaults.sharpenFor" => RawSharpen::NAMES,
+        "performance.gpuBackend" => GpuBackend::NAMES,
         _ => return None,
     })
 }

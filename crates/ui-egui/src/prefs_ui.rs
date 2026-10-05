@@ -487,7 +487,8 @@ pub fn open_preferences(app: &mut PhotocraftApp, section: &str) -> u64 {
     let values = app.session.prefs().to_json();
     let working: Map<String, Value> = SECTIONS.iter().filter_map(|(id, _)| Some((id.to_string(), values.get(id)?.clone()))).collect();
     let order = field_order(app.session.prefs(), &working);
-    open_kind(app, "prefs", "Preferences", json!({"section": section, "values": working, "__order": order}))
+    let gpu = app.perf.gpu_info.lines();
+    open_kind(app, "prefs", "Preferences", json!({"section": section, "values": working, "__order": order, "__gpuInfo": gpu}))
 }
 
 /// Each section's keys in declaration order (JSON objects sort their keys; the serialised text
@@ -588,6 +589,11 @@ fn choice_label(v: &str) -> String {
         "16" => "16 Bits/Channel".into(),
         "postScript" => "PostScript (72 points/inch)".into(),
         "traditional" => "Traditional (72.27 points/inch)".into(),
+        "vulkan" => "Vulkan".into(),
+        "dx12" => "DirectX 12".into(),
+        "metal" => "Metal".into(),
+        "gl" => "OpenGL".into(),
+        "cpu" => "CPU (no GPU acceleration)".into(),
         v => humanize(v),
     }
 }
@@ -646,6 +652,9 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                     ui.label(RichText::new("These settings aren't available in PhotoCraft yet.").color(t.text_faint));
                 } else if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
                     section_fields(ui, &section, obj, &order);
+                    if section == "performance" {
+                        gpu_status_rows(ui, f.get("__gpuInfo"), obj);
+                    }
                     ui.add_space(8.0);
                 }
                 if has_visible_fields(&values, &section)
@@ -659,6 +668,25 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     });
     f.insert("section".into(), json!(section));
     f.insert("values".into(), values);
+}
+
+/// Preferences › Performance: what the app renders with now, and a reset of the GPU backend
+/// (a crashed start may have moved it to a safer choice).
+fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, obj: &mut Map<String, Value>) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(10.0);
+    ui.label(RichText::new("Graphics").font(crate::theme::semibold(12.5)).color(t.text));
+    for line in info.and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+        ui.label(RichText::new(line).color(t.text_dim));
+    }
+    let auto = obj.get("gpuBackend").and_then(Value::as_str) == Some("auto");
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if ui.add_enabled(!auto, egui::Button::new("Reset GPU Backend")).clicked() {
+            obj.insert("gpuBackend".into(), json!("auto"));
+        }
+        ui.label(RichText::new("Applies at next launch.").color(t.text_faint));
+    });
 }
 
 /// Does `section` have any setting the dialog shows (see [`prefs::HIDDEN_UNTIL_IMPLEMENTED`])?

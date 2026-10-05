@@ -2,7 +2,11 @@
 //!
 //! Usage: `photocraft [--control <port>] [--control-token <64-hex> |
 //! --control-token-file <path>] [--automation-read-root <dir>]
-//! [--automation-write-root <dir>] [files…]`
+//! [--automation-write-root <dir>] [--safe-gpu] [files…]`
+//!
+//! `--safe-gpu` starts with the CPU renderer (no GPU canvas; a software adapter for the window
+//! where the platform has one) for this launch, e.g. after a graphics driver crash. A start that
+//! crashes inside the driver also falls back by itself next time (see `gpu_startup`).
 //!
 //! `--control <port>` (or `PHOTOCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server.
 //! The first line must authenticate; subsequent request lines get reply lines.
@@ -17,6 +21,7 @@
 mod apple_events;
 mod control_server;
 mod crash_guard;
+mod gpu_startup;
 // Pure logic is tested on every platform; only Linux runs the check.
 #[cfg(any(target_os = "linux", test))]
 mod linux_libs;
@@ -47,6 +52,7 @@ fn main() -> eframe::Result {
     let mut automation_read_root = std::env::var_os("PHOTOCRAFT_AUTOMATION_READ_ROOT").map(std::path::PathBuf::from);
     let mut automation_write_root = std::env::var_os("PHOTOCRAFT_AUTOMATION_WRITE_ROOT").map(std::path::PathBuf::from);
     let mut files = Vec::new();
+    let mut safe_gpu = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -55,6 +61,7 @@ fn main() -> eframe::Result {
             "--control-token-file" => control_token_file = args.next().map(std::path::PathBuf::from),
             "--automation-read-root" => automation_read_root = args.next().map(std::path::PathBuf::from),
             "--automation-write-root" => automation_write_root = args.next().map(std::path::PathBuf::from),
+            "--safe-gpu" => safe_gpu = true,
             "--version" => {
                 println!("photocraft {}", photocraft_engine::build_info::long_version());
                 return Ok(());
@@ -124,9 +131,38 @@ fn main() -> eframe::Result {
             .with_title_shown(false),
         ..Default::default()
     };
+    // Crash-safe GPU startup (#4): pick the backend (a marker left by a start that died in the
+    // driver moves to a safer one), and lock this start's marker until the first frames render.
+    let t_sentinel = std::time::Instant::now();
+    let os = gpu_startup::Os::current();
+    let (pref, _) = gpu_startup::read_prefs(services::prefs_file().as_deref());
+    let (previous, sentinel) = match services::config_dir() {
+        Some(dir) => gpu_startup::Sentinel::begin(&dir),
+        None => (gpu_startup::Previous::Clean, None),
+    };
+    let env_backend = std::env::var("WGPU_BACKEND").ok();
+    let plan = gpu_startup::plan(pref, previous.crashed(), env_backend.as_deref(), safe_gpu, os);
+    if let Some(m) = previous.crashed() {
+        log::warn!("the previous start didn't finish (GPU backend {}, adapter {:?}); {}", m.backend, m.adapter, plan.reason.as_deref().unwrap_or(""));
+    }
+    let sentinel: gpu_startup::SharedSentinel = std::sync::Arc::new(std::sync::Mutex::new(sentinel));
+    if let Some(s) = sentinel.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
+        let backend = match &plan.env {
+            Some(v) => format!("env:{v}"),
+            None => plan.backend.name().to_string(),
+        };
+        let marker = gpu_startup::Marker { backend, version: photocraft_engine::build_info::long_version().to_string(), ..Default::default() };
+        if let Err(e) = s.write(marker) {
+            log::warn!("GPU startup marker: {e}");
+        }
+    }
+    let gpu_note: std::sync::Arc<std::sync::Mutex<Option<String>>> = Default::default();
     // The adapter's real texture limits (egui asks for 8192 px), so big documents stay on the GPU.
-    photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
-    eframe::run_native(
+    gpu_startup::configure(&mut options.wgpu_options.wgpu_setup, &plan, os, sentinel.clone(), gpu_note.clone());
+    let sentinel_ms = t_sentinel.elapsed().as_secs_f64() * 1000.0;
+    log::info!("GPU startup: {:?} ({sentinel_ms:.2} ms)", plan);
+    let started_sentinel = sentinel.clone();
+    let result = eframe::run_native(
         "Photocraft",
         options,
         Box::new(move |cc| {
@@ -138,13 +174,39 @@ fn main() -> eframe::Result {
             if let Ok(Some(icc)) = monitor.recv_timeout(std::time::Duration::from_secs(2)) {
                 app.session.color.monitor_profile = Some(std::sync::Arc::new(icc));
             }
-            // Preferences › Performance › Use Graphics Processor.
-            if let Some(rs) = cc.wgpu_render_state.clone()
-                && std::env::var_os("PHOTOCRAFT_CPU_CANVAS").is_none()
-                && app.session.prefs().performance.use_gpu
-            {
-                app.set_wgpu(rs);
+            // Preferences › Performance › Use Graphics Processor (and the GPU backend: `cpu`
+            // composites on the CPU).
+            let info = &mut app.perf.gpu_info;
+            info.preference = pref.name().to_string();
+            info.selected = if plan.env.is_some() { "env".into() } else { plan.backend.name().to_string() };
+            info.fallback = plan.reason.clone().or_else(|| gpu_note.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone());
+            info.canvas = "cpu".into();
+            if let Some(rs) = cc.wgpu_render_state.clone() {
+                app.perf.gpu_info.set_adapter(&rs.adapter.get_info());
+                if plan.backend != photocraft_engine::prefs::GpuBackend::Cpu
+                    && std::env::var_os("PHOTOCRAFT_CPU_CANVAS").is_none()
+                    && app.session.prefs().performance.use_gpu
+                {
+                    app.set_wgpu(rs);
+                } else {
+                    // The window still draws with wgpu: record its errors instead of panicking.
+                    let _ = photocraft_ui_egui::gpu_canvas::DeviceHealth::watch(&rs.device);
+                }
             }
+            app.perf.span("gpuSentinel", sentinel_ms);
+            // Once the first frames rendered: clear the marker, and keep a crash fallback.
+            let remember = plan.remember.then_some(plan.backend);
+            app.on_started(move |app| {
+                if let Some(s) = started_sentinel.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+                    s.finish();
+                }
+                if let Some(b) = remember
+                    && app.session.prefs().performance.gpu_backend != b
+                    && let Err(e) = app.run("prefs.set", serde_json::json!({"path": "performance.gpuBackend", "value": b.name()}))
+                {
+                    log::warn!("couldn't remember GPU backend {}: {e}", b.name());
+                }
+            });
             if let Some((port, token, _)) = control {
                 let rx = control_server::start(port, token, cc.egui_ctx.clone());
                 app = app.with_control(rx);
@@ -157,5 +219,13 @@ fn main() -> eframe::Result {
             app.open_paths(&files);
             Ok(Box::new(app))
         }),
-    )
+    );
+    // Closed before the first frames rendered: not a driver crash. (A start that failed to
+    // create its device keeps the marker, so the next one tries a safer backend.)
+    if result.is_ok()
+        && let Some(s) = sentinel.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+    {
+        s.finish();
+    }
+    result
 }

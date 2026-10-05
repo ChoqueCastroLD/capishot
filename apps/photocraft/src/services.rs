@@ -53,7 +53,7 @@ pub fn config_dir() -> Option<PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| home.map(|h| h.join(".config"))).map(|c| c.join("photocraft"))
 }
 
-fn prefs_file() -> Option<PathBuf> {
+pub fn prefs_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("preferences.json"))
 }
 

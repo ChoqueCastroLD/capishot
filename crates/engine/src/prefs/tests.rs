@@ -204,3 +204,29 @@ fn right_click_with_painting_tools_pref() {
     let old: Tools = serde_json::from_value(json!({"showTooltips": false})).unwrap();
     assert_eq!(old.right_click_with_painting_tools, RightClickPaint::BrushPicker);
 }
+
+#[test]
+fn gpu_backend_round_trips_and_validates() {
+    let mut s = session();
+    assert_eq!(s.prefs().performance.gpu_backend, GpuBackend::Auto);
+    assert_eq!(s.execute("prefs.get", json!({"path": "performance.gpuBackend"})).unwrap(), json!("auto"));
+    s.execute("prefs.set", json!({"path": "performance.gpuBackend", "value": "dx12"})).unwrap();
+    assert_eq!(s.prefs().performance.gpu_backend, GpuBackend::Dx12);
+    // Unknown names and wrong types are errors, and leave the value alone.
+    assert!(s.execute("prefs.set", json!({"path": "performance.gpuBackend", "value": "directx"})).is_err());
+    assert!(s.execute("prefs.set", json!({"path": "performance.gpuBackend", "value": 3})).is_err());
+    assert_eq!(s.prefs().performance.gpu_backend, GpuBackend::Dx12);
+    // Persisted and restored with the rest of the preferences.
+    let text = s.prefs_to_json();
+    let mut t = Session::new();
+    t.load_prefs_json(&text).unwrap();
+    assert_eq!(t.prefs().performance.gpu_backend, GpuBackend::Dx12);
+    // Files from before the setting load as `auto`.
+    let mut u = Session::new();
+    u.load_prefs_json(r#"{"performance": {"useGpu": true}}"#).unwrap();
+    assert_eq!(u.prefs().performance.gpu_backend, GpuBackend::Auto);
+    assert_eq!(choices("performance.gpuBackend"), Some(GpuBackend::NAMES));
+    for n in GpuBackend::NAMES {
+        assert_eq!(GpuBackend::parse(n).map(GpuBackend::name), Some(*n));
+    }
+}

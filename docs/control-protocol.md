@@ -34,7 +34,7 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 
 - `engine.execute {command, params}`: run any engine or UI command by id. Engine commands run directly with their default params and never open a dialog. Use `ui.menu.invoke` for menu-click behaviour, which opens a command's dialog when no params are given
 - `engine.commands`: list commands with enablement
-- `ui.inspect`: full UI state (tool, panels, views, dialogs, windows, menu tree, window size). `view` holds the View/Window/Type preferences: `screen_mode`, `extras`, `show` and `snap_to` flags, `flip_horizontal`, `arrange` (Window › Arrange layout), pixel aspect, font preview size, language options
+- `ui.inspect`: full UI state (tool, panels, views, dialogs, windows, menu tree, window size). `view` holds the View/Window/Type preferences: `screen_mode`, `extras`, `show` and `snap_to` flags, `flip_horizontal`, `arrange` (Window › Arrange layout), pixel aspect, font preview size, language options. `perf.timings.gpuInfo` holds the graphics adapter, backend, driver, the backend chosen at launch and why, the canvas renderer (`gpu`/`cpu`) and, after a device loss, `lost` (`help.systemInfo` returns the same as `info`)
 - `ui.set {tool?, panels?, dockTabs?, dock?, dockWidth?, maskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSize?, brushSection?, brushTab?}`: change UI state (`selectionMode` is the selection tools' options-bar mode, 0 New, 1 Add, 2 Subtract, 3 Intersect; `brushSection` indexes the Brush Settings sections, `brushTab` 0 = Brush Settings, 1 = Brushes; `dock` is `{order: ["layers", …], heights: {"properties": 180}, collapsed: ["color"]}`, the right-dock groups top to bottom, their heights in points and the groups collapsed to their tab strip; `dockWidth` sets the right dock width in points, clamped to 250..520)
 - `ui.menu.invoke {id}` / `ui.menu.list`: activate a menu item by id; list the menu tree
 - `ui.dialog.open {kind, fields?}` (kinds `newDocument`, `about`, `layerStyle {effect?}`, `colorPicker {target: foreground|background}`, `command {command}`) / `ui.dialog.set {dialog, field, value}` / `ui.dialog.confirm {dialog}` / `ui.dialog.cancel {dialog}`
@@ -43,6 +43,7 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 - `ui.key {key, command?, shift?, alt?, ctrl?}` (flags may also be grouped under `modifiers`): press and release a key, e.g. `{"key": "ArrowLeft", "shift": true}`
 - `ui.type {text}`: type text (goes to the focused widget, or to the canvas while the Type tool is editing)
 - `ui.resize {width, height}`: resize the main window
+- `ui.gpu.simulateLoss {error?}`: act as if the wgpu device was lost (or reported an error with `error: true`). The app switches to the CPU renderer for the rest of the session and shows the same notice as on a real loss. Returns `wasActive` and `gpuInfo`. For testing the fallback
 - `ui.screenshot {path?, focus?}`: capture the main window (PNG). With no path the reply contains
   base64 PNG data; a path is relative to the automation write root. Raises the window first
   (default) because occluded macOS windows stop rendering

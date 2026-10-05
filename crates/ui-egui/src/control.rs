@@ -15,6 +15,9 @@
 //! - `ui.click {x, y, button?, count?}` / `ui.move {x, y}`: synthetic pointer input in screen points
 //! - `ui.key {key, command?, shift?, alt?, ctrl?}` / `ui.type {text}`: synthetic keyboard input
 //! - `ui.resize {width, height}`: resize the main window
+//! - `ui.gpu.simulateLoss {error?}`: act as if the wgpu device was lost (or, with `error: true`,
+//!   reported an error): the app switches to the CPU renderer for the rest of the session, as on a
+//!   real loss. For testing the fallback; returns whether a GPU canvas was active
 //! - `ui.screenshot {path?, focus?}`: capture the main window (PNG). Raises the window first (default)
 //!   because occluded macOS windows stop rendering
 //! - `ui.focus`: bring the main window to the front
@@ -355,6 +358,24 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             let (w, h) = (p.get("width").and_then(Value::as_f64).unwrap_or(1280.0), p.get("height").and_then(Value::as_f64).unwrap_or(800.0));
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w as f32, h as f32)));
             ok(Value::Null)
+        }
+        "ui.gpu.simulateLoss" => {
+            let error = p.get("error").and_then(Value::as_bool).unwrap_or(false);
+            let fault = if error {
+                photocraft_gpu::Fault::Error("simulated error (ui.gpu.simulateLoss)".into())
+            } else {
+                photocraft_gpu::Fault::Lost("simulated (ui.gpu.simulateLoss)".into())
+            };
+            let active = match app.gpu_health() {
+                Some(h) => {
+                    h.mark(fault);
+                    true
+                }
+                None => false,
+            };
+            app.check_gpu(ctx);
+            ctx.request_repaint();
+            ok(json!({"wasActive": active, "gpuInfo": app.perf.gpu_info}))
         }
         "ui.focus" => {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));

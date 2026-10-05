@@ -29,7 +29,8 @@ use std::num::NonZeroU64;
 
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, RenderState, ScreenDescriptor};
 use eframe::wgpu;
-use eframe::wgpu::util::DeviceExt as _;
+
+pub use photocraft_gpu::{DeviceHealth, Fault};
 
 /// Default tile side; documents up to this size (and the device limit) use a single texture.
 pub const DEFAULT_TILE: u32 = 8192;
@@ -83,11 +84,16 @@ enum HighPolicy {
 }
 
 /// Uploads documents to the GPU and paints them. Cheap to clone.
+///
+/// Once the device is lost or reports an uncaptured error (see [`GpuCanvas::fault`]), every
+/// method is a no-op or an `Err`, so nothing reaches the GPU again; the app then switches to the
+/// CPU canvas (#243).
 #[derive(Clone)]
 pub struct GpuCanvas {
     rs: RenderState,
     tile: u32,
     high: HighPolicy,
+    health: photocraft_gpu::DeviceHealth,
 }
 
 /// Can `adapter` use `Rgba16Float` as a sampled, filtered, render-target and copy texture?
@@ -115,10 +121,42 @@ impl GpuCanvas {
             Some("1") => HighPolicy::Always,
             _ => HighPolicy::Budget,
         };
-        let res = Resources::new(&rs.device, &rs.queue, rs.target_format, high != HighPolicy::Off);
+        // Device loss and uncaptured errors mark this flag instead of panicking (#243).
+        let health = photocraft_gpu::DeviceHealth::watch(&rs.device);
+        let mut res = Resources::new(&rs.device, &rs.queue, rs.target_format, high != HighPolicy::Off);
+        res.health = health.clone();
         rs.renderer.write().callback_resources.insert(res);
         log::info!("gpu canvas: target {:?}, max texture {max}, tile {tile}, 16F canvas {high:?}", rs.target_format);
-        Self { rs: rs.clone(), tile, high }
+        Self { rs: rs.clone(), tile, high, health }
+    }
+
+    /// The device's health flag (shared with the wgpu compositor and the paint callback).
+    pub fn health(&self) -> &photocraft_gpu::DeviceHealth {
+        &self.health
+    }
+
+    /// Why the GPU can't be used any more (`None` while it can).
+    pub fn fault(&self) -> Option<photocraft_gpu::Fault> {
+        self.health.fault()
+    }
+
+    /// Free every GPU resource the canvas holds (compositor pages, document textures, LUTs) after
+    /// a fault; the paint callback draws nothing from then on.
+    pub fn release(&self) {
+        let mut r = self.rs.renderer.write();
+        if let Some(res) = r.callback_resources.get_mut::<Resources>() {
+            res.compositor = None;
+            res.compositor_failed = Some(photocraft_gpu::Unsupported(self.fault().map_or_else(|| "GPU canvas released".into(), |f| f.to_string())));
+            res.docs.clear();
+            res.luts.clear();
+            res.display_lut_signatures.clear();
+            res.views.clear();
+        }
+    }
+
+    /// The adapter this canvas renders with.
+    pub fn adapter_info(&self) -> wgpu::AdapterInfo {
+        self.rs.adapter.get_info()
     }
 
     /// The canvas texture format for a document of `depth` and `size`: `Rgba16Float` for 16/32-bit
@@ -223,7 +261,7 @@ impl GpuCanvas {
 
     /// Replace the whole document image with a `format` texture of premultiplied `texels`.
     fn upload_full_as(&self, doc: u64, size: [u32; 2], format: wgpu::TextureFormat, texels: &[u8]) {
-        if size[0] == 0 || size[1] == 0 || texels.len() as u64 != size[0] as u64 * size[1] as u64 * texel_bytes(format) {
+        if size[0] == 0 || size[1] == 0 || texels.len() as u64 != size[0] as u64 * size[1] as u64 * texel_bytes(format) || !self.health.is_ok() {
             return;
         }
         let (device, queue) = (&self.rs.device, &self.rs.queue);
@@ -242,6 +280,9 @@ impl GpuCanvas {
     /// in its texture format (`size[0] * size[1]` texels: RGBA8 or RGBA16F). Returns false if the
     /// document isn't uploaded, the rectangle doesn't fit or the buffer has the wrong size.
     pub fn upload_rect(&self, doc: u64, origin: [u32; 2], size: [u32; 2], texels: &[u8]) -> bool {
+        if !self.health.is_ok() {
+            return false;
+        }
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.get_mut::<Resources>() else { return false };
@@ -303,6 +344,9 @@ impl GpuCanvas {
         if std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() {
             return Err(photocraft_gpu::Unsupported("disabled by PHOTOCRAFT_CPU_COMPOSE".into()));
         }
+        if let Some(f) = self.fault() {
+            return Err(photocraft_gpu::Unsupported(f.to_string()));
+        }
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.get_mut::<Resources>() else { return Err(photocraft_gpu::Unsupported("no GPU canvas".into())) };
         // A driver that couldn't build the pipelines once won't later: stay on the CPU compositor.
@@ -320,6 +364,7 @@ impl GpuCanvas {
                 }
             },
         };
+        comp.set_health(self.health.clone());
         if let Some(b) = res.compositor_budget {
             comp.set_memory_budget(b);
         }
@@ -351,51 +396,62 @@ impl GpuCanvas {
         let bgl = &res.encode_bgl;
         // A float canvas keeps values above 1.0 (32-bit documents, for the 32-bit preview).
         let keep_hdr = i32::from(format == FORMAT_HIGH);
-        let result = comp.render(device, queue, doc, region, |enc, out| {
-            for t in &d.tiles {
-                let [tx, ty, tw, th] = t.rect.map(|v| v as i32);
-                let r = out.rect.intersect(&photocraft_geom::Rect::from_xywh(tx, ty, tw as u32, th as u32));
-                if r.is_empty() {
-                    continue;
+        // Last-resort guard: a wgpu panic (e.g. polling a device lost mid-refresh) marks the
+        // device lost instead of taking the app and its documents down.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            comp.render(device, queue, doc, region, |enc, out| {
+                for t in &d.tiles {
+                    let [tx, ty, tw, th] = t.rect.map(|v| v as i32);
+                    let r = out.rect.intersect(&photocraft_geom::Rect::from_xywh(tx, ty, tw as u32, th as u32));
+                    if r.is_empty() {
+                        continue;
+                    }
+                    let offset = [out.rect.x0 - tx, out.rect.y0 - ty, i32::from(encode_srgb), keep_hdr];
+                    let ubuf = init_buffer(device, "pc_encode", &offset.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(), wgpu::BufferUsages::UNIFORM);
+                    let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("pc_encode"),
+                        layout: bgl,
+                        entries: &[
+                            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(out.view) },
+                            wgpu::BindGroupEntry { binding: 1, resource: ubuf.as_entire_binding() },
+                        ],
+                    });
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("pc_encode"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &t.levels[0],
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    pass.set_pipeline(pipe);
+                    pass.set_bind_group(0, &bg, &[]);
+                    pass.set_scissor_rect((r.x0 - tx) as u32, (r.y0 - ty) as u32, r.width(), r.height());
+                    pass.draw(0..3, 0..1);
                 }
-                let offset = [out.rect.x0 - tx, out.rect.y0 - ty, i32::from(encode_srgb), keep_hdr];
-                let ubuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("pc_encode"),
-                    contents: &offset.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("pc_encode"),
-                    layout: bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(out.view) },
-                        wgpu::BindGroupEntry { binding: 1, resource: ubuf.as_entire_binding() },
-                    ],
-                });
-                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("pc_encode"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &t.levels[0],
-                        resolve_target: None,
-                        depth_slice: None,
-                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pass.set_pipeline(pipe);
-                pass.set_bind_group(0, &bg, &[]);
-                pass.set_scissor_rect((r.x0 - tx) as u32, (r.y0 - ty) as u32, r.width(), r.height());
-                pass.draw(0..3, 0..1);
-            }
-        });
+            })
+        }));
+        let Ok(result) = result else {
+            self.health.mark(photocraft_gpu::Fault::Lost("the GPU compositor stopped (internal error)".into()));
+            res.docs.remove(&key);
+            return Err(photocraft_gpu::Unsupported("GPU device lost".into()));
+        };
+        // Lost during the refresh: its output can't be trusted.
+        let result = match self.fault() {
+            Some(f) => Err(photocraft_gpu::Unsupported(f.to_string())),
+            None => result,
+        };
         if result.is_ok() {
             d.regenerate_mips(device, queue, res, [region.x0 as u32, region.y0 as u32, region.x1 as u32, region.y1 as u32]);
             if std::env::var_os("PHOTOCRAFT_GPU_SYNC").is_some() {
                 // Benchmarking: wait for the GPU so callers can time the whole refresh.
-                let _ = device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+                #[cfg(not(target_arch = "wasm32"))]
+                self.health.wait(device, None);
             }
         } else if fresh {
             res.docs.remove(&key);
@@ -416,6 +472,10 @@ impl GpuCanvas {
         damage: Option<photocraft_geom::Rect>,
         display: Option<&photocraft_engine::display_color::CanvasDisplay>,
     ) -> Refresh {
+        if let Some(f) = self.fault() {
+            // Nothing reaches the GPU any more; the app switches to the CPU canvas.
+            return Refresh { kind: "lost", fallback: Some(f.to_string()), ..Default::default() };
+        }
         let bounds = doc.bounds();
         let size = [doc.size.width, doc.size.height];
         let format = self.format_for(doc.depth, size);
@@ -467,7 +527,7 @@ impl GpuCanvas {
     /// never needs a full-size float composite or texture-format copy in memory.
     pub fn upload_composite(&self, key: u64, doc: &photocraft_doc::Document, display: Option<&photocraft_engine::display_color::CanvasDisplay>) {
         let size = [doc.size.width, doc.size.height];
-        if size[0] == 0 || size[1] == 0 {
+        if size[0] == 0 || size[1] == 0 || !self.health.is_ok() {
             return;
         }
         let format = self.format_for(doc.depth, size);
@@ -482,6 +542,9 @@ impl GpuCanvas {
         }
         let mut rgba = Vec::new();
         let _ = photocraft_compose::render_bands(doc, doc.bounds(), 0, |band| -> Result<(), ()> {
+            if !self.health.is_ok() {
+                return Err(());
+            }
             texels_into(format, &texture_buffer(display, &band).px, &mut rgba);
             let renderer = self.rs.renderer.read();
             let d = renderer.callback_resources.get::<Resources>().and_then(|r| r.docs.get(&key)).ok_or(())?;
@@ -489,9 +552,12 @@ impl GpuCanvas {
             drop(renderer);
             // Flush the staged band so its staging memory is reclaimed while the next renders.
             queue.submit(std::iter::empty::<wgpu::CommandBuffer>());
-            let _ = device.poll(wgpu::PollType::Poll);
+            self.health.poll(device);
             Ok(())
         });
+        if !self.health.is_ok() {
+            return;
+        }
         let mut renderer = self.rs.renderer.write();
         if let Some(res) = renderer.callback_resources.get_mut::<Resources>()
             && let Some(d) = res.docs.get(&key)
@@ -535,6 +601,9 @@ impl GpuCanvas {
     /// fastest. RGB is the display colour for each lattice input; alpha 255 marks out-of-gamut
     /// colours for the gamut warning.
     pub fn set_display_lut(&self, doc: u64, size: u32, rgba: Option<&[u8]>) {
+        if !self.health.is_ok() {
+            return;
+        }
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.get_mut::<Resources>() else { return };
@@ -559,6 +628,9 @@ impl GpuCanvas {
     /// and debugging.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn read_texels(&self, key: u64) -> Option<(wgpu::TextureFormat, [u32; 2], Vec<[f32; 4]>)> {
+        if !self.health.is_ok() {
+            return None;
+        }
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let renderer = self.rs.renderer.read();
         let d = renderer.callback_resources.get::<Resources>()?.docs.get(&key)?;
@@ -586,7 +658,9 @@ impl GpuCanvas {
             queue.submit([enc.finish()]);
             let slice = buf.slice(..);
             slice.map_async(wgpu::MapMode::Read, |_| {});
-            device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).ok()?;
+            if !self.health.wait(device, None) {
+                return None;
+            }
             let data = slice.get_mapped_range().ok()?;
             for y in 0..th as usize {
                 let src = data.get(y * row as usize..)?;
@@ -644,11 +718,16 @@ pub fn wgpu_setup() -> egui_wgpu::WgpuSetup {
 /// default 8192 px cap (which sent every document wider or taller than 8192 px to the CPU
 /// compositor). Everything else (features, the WebGL2 base limits on GL) stays egui's default.
 pub fn use_adapter_limits(setup: &mut egui_wgpu::WgpuSetup) {
+    use_adapter_limits_with(setup, |_| {});
+}
+
+/// [`use_adapter_limits`], calling `on_adapter` with the chosen adapter just before the device
+/// is requested (the desktop app records it in its crash-safe startup marker).
+pub fn use_adapter_limits_with(setup: &mut egui_wgpu::WgpuSetup, on_adapter: impl Fn(&wgpu::Adapter) + Send + Sync + 'static) {
     if let egui_wgpu::WgpuSetup::CreateNew(create) = setup {
-        create.device_descriptor = std::sync::Arc::new(|adapter| wgpu::DeviceDescriptor {
-            label: Some("photocraft wgpu device"),
-            required_limits: device_limits(adapter),
-            ..Default::default()
+        create.device_descriptor = std::sync::Arc::new(move |adapter| {
+            on_adapter(adapter);
+            wgpu::DeviceDescriptor { label: Some("photocraft wgpu device"), required_limits: device_limits(adapter), ..Default::default() }
         });
     }
 }
@@ -693,6 +772,8 @@ pub struct Perf {
     pub gpu_uploads: u64,
     /// Why the last refresh fell back to the CPU compositor (None = GPU composited).
     pub gpu_fallback: Option<String>,
+    /// Adapter, backend, driver and fallback state (Help › System Info).
+    pub gpu_info: GpuInfo,
     /// GPU memory the compositor may hold for layer pages and effect maps (MB; see
     /// [`memory_budget`]).
     pub gpu_budget_mb: u64,
@@ -706,6 +787,81 @@ pub struct Perf {
     pub spans: std::collections::BTreeMap<&'static str, f64>,
     #[serde(skip)]
     max_decay: f64,
+}
+
+/// What the app renders with and why (Help › System Info, Preferences › Performance, the `perf`
+/// control-channel output).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuInfo {
+    /// Adapter name ("" before the window opens).
+    pub adapter: String,
+    /// wgpu backend of the window's device ("vulkan", "dx12", "metal", "gl", …).
+    pub backend: String,
+    /// Device type ("discreteGpu", "integratedGpu", "cpu", …).
+    pub device_type: String,
+    /// Driver name and version as the driver reports them.
+    pub driver: String,
+    /// `performance.gpuBackend` at launch.
+    pub preference: String,
+    /// The backend startup chose ("auto", "dx12", "cpu", …, or "env" for `WGPU_BACKEND`).
+    pub selected: String,
+    /// Why startup didn't use the preference as is (previous start crashed, `--safe-gpu`,
+    /// `WGPU_BACKEND`, Intel on Windows).
+    pub fallback: Option<String>,
+    /// "gpu" (wgpu canvas and compositor) or "cpu" (CPU compositor, egui textures).
+    pub canvas: String,
+    /// Why the GPU canvas was dropped during this session (device lost or a GPU error).
+    pub lost: Option<String>,
+}
+
+impl GpuInfo {
+    /// Fill the adapter fields from `info`.
+    pub fn set_adapter(&mut self, info: &wgpu::AdapterInfo) {
+        self.adapter = info.name.clone();
+        self.backend = backend_name(info.backend).to_string();
+        self.device_type = match info.device_type {
+            wgpu::DeviceType::DiscreteGpu => "discreteGpu",
+            wgpu::DeviceType::IntegratedGpu => "integratedGpu",
+            wgpu::DeviceType::VirtualGpu => "virtualGpu",
+            wgpu::DeviceType::Cpu => "cpu",
+            wgpu::DeviceType::Other => "other",
+        }
+        .to_string();
+        self.driver = [info.driver.as_str(), info.driver_info.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" ");
+    }
+
+    /// Human-readable lines for Help › System Info.
+    pub fn lines(&self) -> Vec<String> {
+        let or = |s: &str, d: &str| if s.is_empty() { d.to_string() } else { s.to_string() };
+        let mut v = vec![
+            format!("Graphics adapter: {}", or(&self.adapter, "unknown")),
+            format!("Backend: {} ({})", or(&self.backend, "unknown"), or(&self.device_type, "unknown type")),
+            format!("Driver: {}", or(&self.driver, "unknown")),
+            format!("GPU backend preference: {}", or(&self.preference, "auto")),
+            format!("Selected at launch: {}", or(&self.selected, "auto")),
+            format!("Canvas renderer: {}", if self.canvas == "gpu" { "GPU" } else { "CPU" }),
+        ];
+        if let Some(f) = &self.fallback {
+            v.push(format!("Fallback: {f}"));
+        }
+        if let Some(l) = &self.lost {
+            v.push(format!("This session: {l}"));
+        }
+        v
+    }
+}
+
+/// The preference name of a wgpu backend.
+pub fn backend_name(b: wgpu::Backend) -> &'static str {
+    match b {
+        wgpu::Backend::Vulkan => "vulkan",
+        wgpu::Backend::Dx12 => "dx12",
+        wgpu::Backend::Metal => "metal",
+        wgpu::Backend::Gl => "gl",
+        wgpu::Backend::BrowserWebGpu => "webgpu",
+        wgpu::Backend::Noop => "noop",
+    }
 }
 
 impl Perf {
@@ -930,6 +1086,8 @@ struct Resources {
     compositor: Option<photocraft_gpu::Compositor>,
     /// Why the wgpu compositor couldn't be created (then the CPU compositor is used).
     compositor_failed: Option<photocraft_gpu::Unsupported>,
+    /// The device's health: the paint callback issues no GPU work once it's lost.
+    health: photocraft_gpu::DeviceHealth,
     /// GPU memory the compositor may hold (`None`: its default), and the document area the
     /// view shows; applied before every composite.
     compositor_budget: Option<u64>,
@@ -1193,6 +1351,7 @@ impl Resources {
             out_linear: target.is_srgb(),
             compositor: None,
             compositor_failed: None,
+            health: photocraft_gpu::DeviceHealth::new(),
             compositor_budget: None,
             compositor_focus: None,
             encode_bgl,
@@ -1213,6 +1372,20 @@ impl Resources {
 
 fn mip_count(w: u32, h: u32) -> u32 {
     32 - w.max(h).max(1).leading_zeros()
+}
+
+/// A buffer holding `contents`, like `DeviceExt::create_buffer_init` but without its panic when
+/// the device was lost (an invalid buffer has no mapped range): the buffer is then just invalid.
+fn init_buffer(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> wgpu::Buffer {
+    let size = (contents.len() as u64).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT).max(wgpu::COPY_BUFFER_ALIGNMENT);
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: true });
+    if let Ok(mut view) = buffer.slice(..).get_mapped_range_mut()
+        && view.len() >= contents.len()
+    {
+        view.slice(..contents.len()).copy_from_slice(contents);
+    }
+    buffer.unmap();
+    buffer
 }
 
 impl DocTextures {
@@ -1239,11 +1412,7 @@ impl DocTextures {
                     .map(|l| texture.create_view(&wgpu::TextureViewDescriptor { base_mip_level: l, mip_level_count: Some(1), ..Default::default() }))
                     .collect();
                 let full = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("pc_canvas_tile"),
-                    contents: &f32_bytes(&[tx as f32, ty as f32, w as f32, h as f32]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+                let uniform = init_buffer(device, "pc_canvas_tile", &f32_bytes(&[tx as f32, ty as f32, w as f32, h as f32]), wgpu::BufferUsages::UNIFORM);
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("pc_canvas_tile"),
                     layout: &res.tile_bgl,
@@ -1416,6 +1585,9 @@ impl CallbackTrait for CanvasCallback {
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let Some(res) = resources.get_mut::<Resources>() else { return Vec::new() };
+        if !res.health.is_ok() {
+            return Vec::new();
+        }
         let data = self.uniforms(screen.size_in_pixels, screen.pixels_per_point, res.out_linear, &res.style);
         let (bgl, sampler) = (&res.view_bgl, &res.sampler);
         let v = res.views.entry(self.params.view_key).or_insert_with(|| {
@@ -1444,6 +1616,9 @@ impl CallbackTrait for CanvasCallback {
 
     fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &CallbackResources) {
         let Some(res) = resources.get::<Resources>() else { return };
+        if !res.health.is_ok() {
+            return;
+        }
         let Some(view) = res.views.get(&self.params.view_key) else { return };
         let [sw, sh] = info.screen_size_px;
         let clip = info.clip_rect_in_pixels();

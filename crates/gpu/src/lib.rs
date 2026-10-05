@@ -33,6 +33,7 @@
 
 pub mod bounds;
 mod fx;
+pub mod health;
 pub mod plan;
 
 use std::collections::HashMap;
@@ -45,6 +46,7 @@ use photocraft_doc::{DocId, Document, Layer, LayerContent, LayerId, Pattern};
 use photocraft_geom::{Rect, TILE_SIZE, TileCoord};
 use photocraft_raster::{Surface, Tile};
 
+pub use health::{DeviceHealth, Fault};
 pub use plan::{Kernel, Plan, Role, Unsupported, plan};
 
 /// Accumulator format for intermediate buffers. Full float: discontinuous operations
@@ -410,6 +412,8 @@ pub struct Compositor {
     effect_maps: bool,
     /// `CmykSpace::id` of the document being encoded (0: built-in coated CMYK).
     cmyk: u64,
+    /// The device's health (see [`Compositor::set_health`]); `None` = assumed healthy.
+    health: Option<DeviceHealth>,
 }
 
 fn tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -598,6 +602,7 @@ impl Compositor {
             acc_format,
             effect_maps: map_error.is_none(),
             cmyk: 0,
+            health: None,
         }
         .with_texture_limit(device.limits().max_texture_dimension_2d)
     }
@@ -758,6 +763,18 @@ impl Compositor {
         self.fx.values().map(FxEntry::bytes).sum()
     }
 
+    /// Watch `health` (see [`DeviceHealth::watch`]): once the device is lost or reported an
+    /// error, every render returns [`Unsupported`] without touching the GPU, so callers use the
+    /// CPU compositor instead.
+    pub fn set_health(&mut self, health: DeviceHealth) {
+        self.health = Some(health);
+    }
+
+    /// Why the device can't be used (`None` while healthy or unwatched).
+    pub fn fault(&self) -> Option<Fault> {
+        self.health.as_ref().and_then(DeviceHealth::fault)
+    }
+
     /// Composite `region` of `doc`. Each finished chunk is passed to `sink` while its encoder is
     /// still open; the chunk texture is reused afterwards, so the sink must record any copies
     /// or passes that read it into the given encoder. Submits the work before returning; a
@@ -801,6 +818,9 @@ impl Compositor {
         sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
         flush: bool,
     ) -> Result<Stats, Unsupported> {
+        if let Some(f) = self.fault() {
+            return Err(Unsupported(f.to_string()));
+        }
         // CMYK layers convert through the document's own CMYK profile (uploads and plan colours).
         let space = photocraft_compose::cmyk_space(doc);
         self.cmyk = space.as_ref().map_or(0, |s| s.id);
@@ -892,7 +912,14 @@ impl Compositor {
                 let index = queue.submit([done.finish()]);
                 #[cfg(not(target_arch = "wasm32"))]
                 if let Some(prev) = last_submit.replace(index) {
-                    let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(prev), timeout: None });
+                    match &self.health {
+                        Some(h) => {
+                            h.wait(device, Some(prev));
+                        }
+                        None => {
+                            let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(prev), timeout: None });
+                        }
+                    }
                 }
                 #[cfg(target_arch = "wasm32")]
                 let _ = index;
@@ -900,6 +927,10 @@ impl Compositor {
                 work = 0;
                 freed = 0;
                 stats.flushes += 1;
+                // The device was lost mid-refresh: issue no more work.
+                if let Some(f) = self.fault() {
+                    return Err(Unsupported(f.to_string()));
+                }
             }
         }
 
@@ -1824,7 +1855,13 @@ pub fn render_to_vec_stats(
     for (_, b, _) in &staging {
         b.slice(..).map_async(wgpu::MapMode::Read, |_| {});
     }
-    let _ = device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+    match &comp.health {
+        Some(h) if !h.wait(device, None) => return Err(Unsupported(h.fault().map_or_else(|| "GPU device lost".into(), |f| f.to_string()))),
+        Some(_) => {}
+        None => {
+            let _ = device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+        }
+    }
     let w = rect.width() as usize;
     let mut out = vec![[0.0f32; 4]; w * rect.height() as usize];
     for (r, b, row) in &staging {

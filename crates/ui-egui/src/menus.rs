@@ -56,6 +56,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("help.artcraftWebsite", "ArtCraft Website", &["Help"], None),
     ("help.github", "PhotoCraft on GitHub", &["Help"], None),
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
+    ("help.systemInfo", "System Info…", &["Help"], None),
     ("help.about", "About PhotoCraft", &["Help"], None),
 ];
 
@@ -281,6 +282,12 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             Ok(Value::Null)
         }
         "help.about" => Ok(json!({"dialog": app.ui.open_dialog(DialogKind::About, Default::default())})),
+        "help.systemInfo" => {
+            let mut fields = serde_json::Map::new();
+            fields.insert("systemInfo".into(), json!(true));
+            let dialog = app.ui.open_dialog(DialogKind::About, fields);
+            Ok(json!({"dialog": dialog, "info": crate::gpu_status::system_info_json(app)}))
+        }
         "file.export.exportAs" => Ok(json!({"dialog": crate::export_dialog::open(app)?})),
         "file.export.quickExportAsPng" => crate::export_dialog::quick_export_png(app),
         // Layer › Export As… / Quick Export as PNG: the export pipeline on just the active layer.
@@ -438,7 +445,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         return e;
     }
     match id {
-        "file.open" | "file.exit" | "file.clearRecent" | "help.about" | "edit.search" => true,
+        "file.open" | "file.exit" | "file.clearRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
         i if i.starts_with("file.openRecent.") => true,
         i if crate::links::url_for(i).is_some() => true,
         i if i.starts_with("window.theme.") => true,
@@ -653,8 +660,8 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             items.insert(after + 1 + k, it);
         }
     }
-    // Help: the link items, a separator, then About.
-    if let Some(at) = items.iter().position(|i| i.id == "help.about") {
+    // Help: the link items, a separator, then System Info and About.
+    if let Some(at) = items.iter().position(|i| i.id == "help.systemInfo" || i.id == "help.about") {
         items.insert(
             at,
             MenuItem { id: "---".into(), label: "---".into(), path: vec!["Help".into()], shortcut: None, enabled: false, checked: None, color: None },

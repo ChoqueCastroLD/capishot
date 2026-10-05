@@ -78,6 +78,16 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ui.add_space(8.0);
             match d.kind {
                 DialogKind::NewDocument => crate::new_doc_ui::body(ui, &mut fields),
+                DialogKind::About if fields.get("systemInfo").and_then(Value::as_bool) == Some(true) => {
+                    let lines = crate::gpu_status::system_info(app);
+                    for l in &lines {
+                        ui.add(egui::Label::new(egui::RichText::new(l).font(crate::theme::mono(12.0))).selectable(true));
+                    }
+                    ui.add_space(8.0);
+                    if crate::widgets::secondary_button(ui, "Copy", 84.0).clicked() {
+                        ui.ctx().copy_text(lines.join("\n"));
+                    }
+                }
                 DialogKind::About => {
                     ui.label("PhotoCraft — an open-source, native image editor written in Rust.");
                     ui.label(format!("Version {}", photocraft_engine::build_info::long_version()));
@@ -169,6 +179,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
 pub fn title(d: &Dialog) -> String {
     match d.kind {
         DialogKind::NewDocument => "New Document".into(),
+        DialogKind::About if d.fields.get("systemInfo").and_then(Value::as_bool) == Some(true) => "System Info".into(),
         DialogKind::About => "About PhotoCraft".into(),
         DialogKind::LayerStyle => "Layer Style".into(),
         DialogKind::Command => d.fields.get("__label").and_then(Value::as_str).unwrap_or("Command").trim_end_matches('…').to_string(),

@@ -42,6 +42,7 @@ pub mod file_ui;
 pub mod filter_dialog;
 pub mod gallery_ui;
 pub mod gpu_canvas;
+pub mod gpu_status;
 pub mod gradient_ui;
 mod icon_data;
 pub mod icons;
@@ -304,8 +305,11 @@ pub struct PhotocraftApp {
     pub(crate) channel_views: HashMap<u64, channel_view::Cache>,
     /// Selection outline keyed by (document, mask identity × step × visible region).
     pub(crate) outline_cache: Option<(DocId, u64, std::sync::Arc<Vec<outline::Segment>>)>,
-    /// GPU canvas renderer, when running on the wgpu backend (see [`Self::set_wgpu`]).
+    /// GPU canvas renderer, when running on the wgpu backend (see [`Self::set_wgpu`]). Dropped
+    /// for the rest of the session when the device is lost (see `gpu_status`).
     gpu: Option<gpu_canvas::GpuCanvas>,
+    /// Run once the first frames have rendered (see [`Self::on_started`]).
+    started: Option<gpu_status::StartedHook>,
     /// Frame and canvas-upload timings (exposed via `ui.inspect`).
     pub perf: gpu_canvas::Perf,
     /// Preferences, autosave and snapping runtime state (see `prefs_ui`, `snap_ui`).
@@ -377,6 +381,7 @@ impl PhotocraftApp {
             tone_hist: None,
             doc_hist: None,
             gpu: None,
+            started: None,
             perf: Default::default(),
             prefs_rt: Default::default(),
             discard: None,
@@ -397,8 +402,34 @@ impl PhotocraftApp {
     pub fn set_wgpu(&mut self, rs: eframe::egui_wgpu::RenderState) {
         // Preferences › Performance › cache tile size (PHOTOCRAFT_GPU_TILE still overrides).
         let tile = self.session.prefs().performance.cache_tile_size;
-        self.gpu = Some(gpu_canvas::GpuCanvas::with_tile(&rs, Some(tile)));
+        let gpu = gpu_canvas::GpuCanvas::with_tile(&rs, Some(tile));
+        self.perf.gpu_info.set_adapter(&gpu.adapter_info());
+        self.perf.gpu_info.canvas = "gpu".into();
+        self.gpu = Some(gpu);
         self.prefs_rt.gpu_style = None;
+    }
+
+    /// Whether the document canvas currently draws on the GPU (false on the CPU path, and after
+    /// the device was lost).
+    pub fn gpu_active(&self) -> bool {
+        self.gpu.is_some()
+    }
+
+    /// The GPU canvas's device health flag (tests inject faults through it).
+    pub fn gpu_health(&self) -> Option<photocraft_gpu::DeviceHealth> {
+        self.gpu.as_ref().map(|g| g.health().clone())
+    }
+
+    /// Run `hook` once the app has rendered its first frames (and a document opened at launch
+    /// has drawn): the desktop app clears its crash-safe GPU startup marker there.
+    pub fn on_started(&mut self, hook: impl FnOnce(&mut PhotocraftApp) + 'static) {
+        self.started = Some(Box::new(hook));
+    }
+
+    /// Per-frame GPU health check (called from `logic`; tests call it directly): falls back to
+    /// the CPU canvas after a device loss and runs the started hook.
+    pub fn check_gpu(&mut self, ctx: &egui::Context) {
+        gpu_status::check(self, ctx);
     }
 
     /// Attach a control channel (requests arrive from a transport thread: TCP, stdin, tests).
@@ -722,6 +753,7 @@ impl eframe::App for PhotocraftApp {
         }
         self.last_frame_time = now;
         self.sync_views();
+        self.check_gpu(ctx);
         #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
         if self.live_tokens.poll(ctx, self.ui.theme) {
             self.checker = None;
@@ -816,6 +848,8 @@ impl eframe::App for PhotocraftApp {
         wide_angle_ui::show(self, &ctx);
         canvas::extra_windows(self, &ctx);
         notices::show(self, &ctx);
+        // A device lost while drawing this frame: switch to the CPU canvas before the next one.
+        gpu_status::check(self, &ctx);
         self.automation_input = false;
         self.perf.frame(gpu_canvas::now_ms() - t0);
         // Synthetic input is injected one press/release step per frame: keep frames coming until
