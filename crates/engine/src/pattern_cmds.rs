@@ -288,7 +288,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         None => s.patterns.items.clone(),
     };
     let bytes = photocraft_io::pattern_map::write_pat(&pats).map_err(EngineError::Other)?;
-    std::fs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    crate::file_cmds::write_file(path, &bytes)?;
     Ok(json!({"path": path, "count": pats.len(), "bytes": bytes.len()}))
 }
 

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir, OpenOptions};
+use photocraft_format::atomic::RenameRetry;
 use serde_json::Value;
 
 use crate::AutomationError;
@@ -50,7 +51,10 @@ impl AuthorizedWorkspace {
         Ok(bytes)
     }
 
-    /// Create or replace one file below the configured write root.
+    /// Create or replace one file below the configured write root, crash-safely: the bytes go to
+    /// a temporary file beside the target, which is synced and renamed over it (the same steps
+    /// as [`photocraft_format::atomic_write`], through the directory capability). On failure
+    /// the previous file is untouched and the temporary file is removed.
     ///
     /// The parent directory must already exist. `cap-std` performs path
     /// resolution and file creation relative to the held directory handle, so
@@ -58,11 +62,29 @@ impl AuthorizedWorkspace {
     pub fn write(&self, path: &str, bytes: &[u8]) -> Result<(), AutomationError> {
         let relative = relative_path(path)?;
         let root = self.write.as_ref().ok_or_else(|| AutomationError::BadRequest(format!("{DENIED}: write authority is absent")))?;
+        let leaf = relative.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let parent = relative.parent().map(Path::to_path_buf).unwrap_or_default();
+        let tmp = parent.join(photocraft_format::atomic::temp_name(&leaf));
         let mut options = OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        let mut file = root.dir.open_with(&relative, &options).map_err(|e| file_error("write", path, e))?;
-        file.write_all(bytes).map_err(|e| file_error("write", path, e))?;
-        file.flush().map_err(|e| file_error("write", path, e))
+        options.write(true).create_new(true);
+        let written = root.dir.open_with(&tmp, &options).and_then(|mut file| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        });
+        let renamed = written.and_then(|()| photocraft_format::atomic::retry_rename(RenameRetry::platform(), || root.dir.rename(&tmp, &root.dir, &relative)));
+        if let Err(e) = renamed {
+            let _ = root.dir.remove_file(&tmp);
+            return Err(file_error("write", path, e));
+        }
+        // Flush the directory entry (Unix); best effort, the new bytes are already in place.
+        #[cfg(unix)]
+        {
+            let dir = if parent.as_os_str().is_empty() { PathBuf::from(".") } else { parent };
+            if let Ok(d) = root.dir.open(&dir) {
+                let _ = d.sync_all();
+            }
+        }
+        Ok(())
     }
 }
 
@@ -254,6 +276,43 @@ mod tests {
         assert_eq!(workspace.read("read.txt").unwrap(), b"canary");
         workspace.write("new-output.txt", b"created").unwrap();
         assert_eq!(std::fs::read(inside.join("new-output.txt")).unwrap(), b"created");
+    }
+
+    fn temp_files(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".tmp")).collect()
+    }
+
+    #[test]
+    fn write_replaces_atomically_and_leaves_no_temp_file() {
+        let (inside, _, workspace) = roots("atomic");
+        std::fs::create_dir_all(inside.join("sub")).unwrap();
+        workspace.write("sub/out.psd", b"original").unwrap();
+        workspace.write("sub/out.psd", b"replacement").unwrap();
+        assert_eq!(std::fs::read(inside.join("sub/out.psd")).unwrap(), b"replacement");
+        assert!(temp_files(&inside.join("sub")).is_empty());
+        // Renaming over a directory fails: nothing is left behind and the directory survives.
+        std::fs::create_dir_all(inside.join("adir")).unwrap();
+        assert!(workspace.write("adir", b"x").is_err());
+        assert!(inside.join("adir").is_dir());
+        assert!(temp_files(&inside).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_into_read_only_folder_keeps_the_original() {
+        use std::os::unix::fs::PermissionsExt;
+        let (inside, _, workspace) = roots("readonly");
+        let ro = inside.join("ro");
+        std::fs::create_dir_all(&ro).unwrap();
+        std::fs::write(ro.join("doc.psd"), b"original").unwrap();
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let root_user = std::fs::File::create(ro.join("probe")).is_ok();
+        if !root_user {
+            assert!(workspace.write("ro/doc.psd", b"new").is_err());
+            assert_eq!(std::fs::read(ro.join("doc.psd")).unwrap(), b"original");
+            assert!(temp_files(&ro).is_empty());
+        }
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]

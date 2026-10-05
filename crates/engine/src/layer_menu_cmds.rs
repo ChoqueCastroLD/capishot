@@ -709,7 +709,7 @@ fn export_layer(s: &mut Session, p: &Value, cmd: &str, png_only: bool) -> Result
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
-    std::fs::write(path, bytes).map_err(|e| other(format!("{path}: {e}")))
+    crate::file_cmds::write_file(path, bytes)
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -448,12 +448,8 @@ fn list_objects(dir: &Path) -> Result<HashSet<String>> {
     Ok(out)
 }
 
+/// Crash-safe replace of one file (see [`crate::atomic`]).
 pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_extension(format!("{}tmp", path.extension().map(|e| format!("{}.", e.to_string_lossy())).unwrap_or_default()));
-    std::fs::write(&tmp, data)?;
-    std::fs::rename(&tmp, path)?;
+    crate::atomic::atomic_write(path, data)?;
     Ok(())
 }

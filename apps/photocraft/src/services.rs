@@ -67,14 +67,11 @@ fn recovery_dir() -> Option<PathBuf> {
     config_dir().map(|d| d.join("Recovery"))
 }
 
-/// Write `bytes` atomically (temp file + rename) so a crash never leaves half a preferences file.
+/// Write `bytes` crash-safely (temp file beside the target, fsync, rename, directory fsync; see
+/// [`photocraft_format::atomic`]). Every document write (Save, Save As, Export, Save for Web) and
+/// the preferences go through here, so a failed or interrupted save never destroys the old file.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+    photocraft_format::atomic_write(path, bytes).map_err(|e| e.to_string())
 }
 
 pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) -> Services {
@@ -123,7 +120,7 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             }
             Some(d.save_file()?.to_string_lossy().to_string())
         })),
-        write: Some(Box::new(|path: &str, bytes: &[u8]| std::fs::write(path, bytes).map_err(|e| e.to_string()))),
+        write: Some(Box::new(|path: &str, bytes: &[u8]| write_atomic(Path::new(path), bytes))),
         automation_read,
         automation_write,
         automation_command,

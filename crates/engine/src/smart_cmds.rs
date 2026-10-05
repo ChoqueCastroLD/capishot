@@ -605,7 +605,7 @@ fn export_contents(s: &mut Session, p: &Value) -> Result<Value> {
     let id = layer_param(s, p)?;
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let (name, bytes) = source_bytes(&st.doc.metadata, &smart(&st.doc, id)?.source).ok_or_else(|| other("the smart object's contents are unavailable"))?;
-    std::fs::write(path, &*bytes).map_err(|e| other(format!("can't write {path}: {e}")))?;
+    crate::file_cmds::write_file(path, &bytes)?;
     Ok(json!({"path": path, "fileName": name, "bytes": bytes.len()}))
 }
 
@@ -874,7 +874,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 let path = path_param("layer.smartObjects.convertToLinked", p)?.to_string();
                 set_source(s, p, "Convert to Linked", false, |meta, src| {
                     let (_, bytes) = source_bytes(meta, src).ok_or_else(|| other("the smart object's contents are unavailable"))?;
-                    std::fs::write(&path, &*bytes).map_err(|e| other(format!("can't write {path}: {e}")))?;
+                    crate::file_cmds::write_file(&path, &bytes)?;
                     Ok(SmartSource::Linked { path })
                 })
             }

@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod atomic;
 pub mod autosave;
 mod convert;
 pub mod manifest;
@@ -32,6 +33,7 @@ use std::path::Path;
 use photocraft_doc::Document;
 use photocraft_raster::Rgba8Image;
 
+pub use atomic::atomic_write;
 pub use autosave::{Autosaver, RecoveryEntry, discard_recovery, list_recovery, recover};
 pub use manifest::{FORMAT_VERSION, Manifest};
 pub use store::{PcraftWriter, SaveStats};

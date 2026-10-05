@@ -353,7 +353,7 @@ fn export_as_files(s: &mut Session, p: &Value) -> Result<Value> {
         let path = format!("{dir}/{stem}.{format}");
         let opts = photocraft_io::ExportOptions::default();
         let bytes = photocraft_io::export(&doc, format, &opts).map(|r| r.bytes).map_err(|e| EngineError::Other(format!("export `{}`: {e}", set.name)))?;
-        std::fs::write(&path, &bytes).map_err(|e| EngineError::Other(format!("write `{path}`: {e}")))?;
+        crate::file_cmds::write_file(&path, &bytes)?;
         files.push(path);
     }
     Ok(json!({"files": files, "count": files.len()}))

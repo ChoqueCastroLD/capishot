@@ -326,7 +326,7 @@ fn render_video(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let gif = photocraft_codecs::web::encode_gif_animated(w as u32, h as u32, &gframes, true).map_err(|e| EngineError::Other(e.to_string()))?;
         let path = format!("{dir}/{stem}.gif");
-        std::fs::write(&path, &gif).map_err(|e| EngineError::Other(format!("write `{path}`: {e}")))?;
+        crate::file_cmds::write_file(&path, &gif)?;
         return Ok(json!({"frames": frames, "file": path}));
     }
 
@@ -341,7 +341,7 @@ fn render_video(s: &mut Session, p: &Value) -> Result<Value> {
         sync(&mut doc);
         let path = format!("{dir}/{stem}_{f:04}.{format}");
         let bytes = photocraft_io::export(&doc, format, &opts).map(|r| r.bytes).map_err(|e| EngineError::Other(format!("render frame {f}: {e}")))?;
-        std::fs::write(&path, &bytes).map_err(|e| EngineError::Other(format!("write `{path}`: {e}")))?;
+        crate::file_cmds::write_file(&path, &bytes)?;
         files.push(path);
     }
     Ok(json!({"frames": files.len(), "dir": dir}))

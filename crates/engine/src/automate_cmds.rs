@@ -307,7 +307,7 @@ fn write_shim(droplet: &str) -> Result<String> {
         "#!/bin/sh\n# PhotoCraft droplet: runs the action on the files given (or dropped).\nexec \"${{PHOTOCRAFT_CLI:-photocraft-cli}}\" droplet \"{}\" \"$@\"\n",
         abs.replace('"', "\\\"")
     );
-    std::fs::write(&shim, body).map_err(|e| EngineError::Other(format!("{shim}: {e}")))?;
+    crate::file_cmds::write_file(&shim, body.as_bytes())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
