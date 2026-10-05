@@ -7,10 +7,26 @@ static site in `photocraft-web-<version>/`:
 |---|---|
 | `index.html` | The page. It loads everything through relative URLs. |
 | `photocraft-web-<hash>.js` | wasm-bindgen glue (generated, ES module) |
-| `photocraft-web-<hash>_bg.wasm` | The app, about 13 MB, or 5 MB with compression |
+| `photocraft-web-<hash>_bg.wasm` | The app: about 19 MiB raw, 8 MiB with gzip, 5.6 MiB with Brotli (see [Sizes](#sizes)) |
 | `_headers`, `.htaccess` | Sample header rules for Netlify/Cloudflare Pages and Apache |
 
 There is no server-side code. Upload the folder's contents anywhere that serves static files.
+
+## Sizes
+
+Measured on the 0.2.x build (`packaging/web/package.sh`; gzip `-9`, Brotli quality 11):
+
+| File | Raw | gzip | Brotli |
+|---|---|---|---|
+| `photocraft-web-<hash>_bg.wasm` | 19,680,726 bytes (18.8 MiB) | 8,177,260 (7.8 MiB) | 5,868,731 (5.6 MiB) |
+| `photocraft-web-<hash>.js` | about 160 KB | about 23 KB | about 20 KB |
+
+Per-file upload limits: Cloudflare Pages and Workers static assets reject any file over
+**25 MiB** (26,214,400 bytes). The wasm fits, and `packaging/web/package.sh` fails the build if
+it ever grows past 24 MiB, so a release can't ship a file a common host refuses. (Releases up to
+0.2.0 shipped a 25.8 MiB wasm, which Cloudflare rejected; issue #198.) The size comes from the
+`wasm-release` Cargo profile (fat LTO, size-optimized code with the pixel crates kept at full
+speed) plus `wasm-opt -Oz`.
 
 ## Any path works
 
@@ -25,8 +41,8 @@ hash, so they can be cached forever. Only `index.html` needs revalidation.
   any other type, and the app then loads slowly or not at all. Serve `.js` as `text/javascript`.
   Most hosts already do both. For nginx, check that `mime.types` has `application/wasm wasm;`.
 - **Compression:** turn on gzip or Brotli for `.wasm`, `.js` and `.html`. That takes the
-  download from about 13 MB to about 5 MB. You can also precompress (`brotli -k *.wasm`) and let
-  the server send `Content-Encoding: br`.
+  download from about 19 MiB to about 8 MiB (gzip) or 5.6 MiB (Brotli). You can also
+  precompress (`brotli -k *.wasm`) and let the server send `Content-Encoding: br`.
 - **Caching:** `Cache-Control: public, max-age=31536000, immutable` on the hashed `.wasm` and
   `.js` files, and `no-cache` on `index.html`.
 - **HTTPS:** WebGPU (and the clipboard) only work in a secure context, which means `https://`

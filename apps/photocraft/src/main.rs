@@ -17,6 +17,9 @@
 mod apple_events;
 mod control_server;
 mod crash_guard;
+// Pure logic is tested on every platform; only Linux runs the check.
+#[cfg(any(target_os = "linux", test))]
+mod linux_libs;
 mod monitor_profile;
 mod services;
 
@@ -60,6 +63,14 @@ fn main() -> eframe::Result {
             _ if a.starts_with("-psn_") => {}
             _ => files.push(a),
         }
+    }
+
+    // winit and wgpu dlopen the windowing and GPU libraries, and some of those crates panic when
+    // one is missing (issue #201). Name the package to install and exit instead.
+    #[cfg(target_os = "linux")]
+    if let Err(message) = linux_libs::preflight() {
+        eprint!("{message}");
+        std::process::exit(1);
     }
 
     let control = if let Some(port) = control_port {

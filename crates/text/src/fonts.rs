@@ -15,12 +15,19 @@ pub const DEFAULT_FAMILY: &str = "Inter";
 /// Bundled monospace family.
 pub const MONO_FAMILY: &str = "JetBrains Mono";
 
+// The font files are embedded once, here. The UI (`ui-egui` theme) uses these same statics:
+// a second `include_bytes!` of the same file elsewhere put a second 1.5 MB copy into the wasm.
+pub static INTER_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+pub static INTER_MEDIUM: &[u8] = include_bytes!("../../../assets/fonts/Inter-Medium.ttf");
+pub static INTER_SEMIBOLD: &[u8] = include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf");
+pub static JETBRAINS_MONO_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
+
 /// Fonts shipped with Photocraft (OFL; licences in `assets/fonts`).
-pub const BUNDLED: &[(&str, &[u8])] = &[
-    ("Inter-Regular.ttf", include_bytes!("../../../assets/fonts/Inter-Regular.ttf")),
-    ("Inter-Medium.ttf", include_bytes!("../../../assets/fonts/Inter-Medium.ttf")),
-    ("Inter-SemiBold.ttf", include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf")),
-    ("JetBrainsMono-Regular.ttf", include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf")),
+pub static BUNDLED: &[(&str, &[u8])] = &[
+    ("Inter-Regular.ttf", INTER_REGULAR),
+    ("Inter-Medium.ttf", INTER_MEDIUM),
+    ("Inter-SemiBold.ttf", INTER_SEMIBOLD),
+    ("JetBrainsMono-Regular.ttf", JETBRAINS_MONO_REGULAR),
 ];
 
 /// Families tried (if installed) after the requested one, for missing glyphs. The CJK families

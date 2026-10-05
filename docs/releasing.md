@@ -160,8 +160,13 @@ Why these formats:
 All Linux binaries are built on Ubuntu 22.04 and need **glibc ≥ 2.35**: Ubuntu 22.04+,
 Debian 12+, Fedora 36+, RHEL 10, openSUSE Tumbleweed. They link only glibc and libgcc_s. X11,
 Wayland, xkbcommon, Vulkan and EGL are loaded at runtime from the system, which is also where
-the GPU driver has to come from. That's why the packages declare them as dependencies and the
-AppImage doesn't bundle them.
+the GPU driver has to come from. That's why the .deb and .rpm declare them as dependencies
+(the full list, and why each is there, is in `packaging/linux/nfpm.yaml`) and the AppImage
+doesn't bundle them. The Flatpak gets them from the freedesktop runtime. Because the AppImage
+and the tarball can't declare dependencies, `photocraft` checks for the libraries its session
+(X11 or Wayland) needs before it opens a window (`apps/photocraft/src/linux_libs.rs`) and, if
+one is missing, prints the package to install and exits with status 1 instead of crashing.
+`PHOTOCRAFT_SKIP_LIB_CHECK=1` skips the check.
 
 Locally (on Linux): install [nfpm](https://nfpm.goreleaser.com/install/), then
 `packaging/linux/package.sh` (or `--formats "deb tar"`).
@@ -170,7 +175,9 @@ Locally (on Linux): install [nfpm](https://nfpm.goreleaser.com/install/), then
 
 `packaging/web/package.sh` runs `trunk build --release` (see `apps/photocraft-web/Trunk.toml`)
 and zips `dist/web` together with sample `_headers` and `.htaccess` files and the hosting guide.
-The site only uses relative URLs, so it works under any path and in an iframe.
+The site only uses relative URLs, so it works under any path and in an iframe. The wasm builds
+with the size-optimized `wasm-release` Cargo profile (set in `apps/photocraft-web/index.html`),
+and the script fails if any `.wasm` exceeds 24 MiB, below Cloudflare's 25 MiB per-file limit.
 [`packaging/web/README.md`](../packaging/web/README.md) covers MIME types, compression,
 caching, the iframe snippet and the `?webgl` / `?cpu` flags.
 
