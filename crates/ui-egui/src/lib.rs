@@ -17,6 +17,7 @@ pub mod artboard_ui;
 pub mod brush_panel;
 pub mod brush_picker;
 pub mod brush_preview;
+pub mod brush_resize;
 pub mod brush_sections;
 pub mod brushes_tab;
 pub mod camera_raw_ui;
@@ -223,6 +224,8 @@ pub struct PhotocraftApp {
     secondary_erase: bool,
     /// End of the last painting stroke: ⇧-click draws a straight line from it (#178).
     last_stroke_end: Option<(DocId, [f64; 2])>,
+    /// Control+Alt-drag brush resize in progress (`brush_resize`, #231).
+    pub(crate) brush_resize: Option<brush_resize::Resize>,
     control_rx: Option<Receiver<ControlRequest>>,
     pending_screenshots: Vec<(u64, Option<String>, Sender<ControlResponse>)>,
     /// Screenshots not yet requested from the viewport: (token, earliest time in ms, frames seen).
@@ -339,6 +342,7 @@ impl PhotocraftApp {
             move_preview: None,
             secondary_erase: false,
             last_stroke_end: None,
+            brush_resize: None,
             control_rx: None,
             pending_screenshots: Vec::new(),
             queued_screenshots: Vec::new(),

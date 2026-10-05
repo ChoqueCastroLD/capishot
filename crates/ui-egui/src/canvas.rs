@@ -96,35 +96,32 @@ pub fn marquee_readout(r: [f64; 4]) -> [String; 2] {
 /// Draw the marquee size readout below-right of the cursor (kept on screen), like Photoshop's:
 /// two rows, `W:` / `H:` labels on the left and the values right-aligned.
 fn draw_marquee_readout(ctx: &egui::Context, cursor: Pos2, values: [String; 2]) {
+    draw_readout(ctx, "marquee-readout", cursor, ["W:", "H:"], values);
+}
+
+/// A two-row readout beside the pointer (labels left, values right-aligned), above everything.
+pub(crate) fn draw_readout(ctx: &egui::Context, id: &str, cursor: Pos2, labels: [&str; 2], values: [String; 2]) {
     let t = crate::theme::Tokens::get(ctx);
     let font = egui::FontId::proportional(11.5);
-    let labels = ["W:", "H:"];
     let width = |text: &str| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), font.clone(), t.text).size().x);
     let (lw, vw) = (labels.map(width), [width(&values[0]), width(&values[1])]);
     let (label_col, value_col) = (lw[0].max(lw[1]), vw[0].max(vw[1]));
-    egui::Area::new(egui::Id::new("marquee-readout"))
-        .order(egui::Order::Tooltip)
-        .fixed_pos(cursor + vec2(16.0, 18.0))
-        .interactable(false)
-        .constrain(true)
-        .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(t.card)
-                .stroke(Stroke::new(1.0, t.card_border))
-                .corner_radius(t.radius_sm)
-                .inner_margin(egui::Margin::symmetric(7, 4))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = vec2(0.0, 1.0);
-                    for (i, value) in values.into_iter().enumerate() {
-                        // Labels left, values right-aligned on one edge, sharing a baseline.
-                        ui.horizontal(|ui| {
-                            ui.add(egui::Label::new(egui::RichText::new(labels[i]).font(font.clone()).color(t.text_dim)).extend());
-                            ui.add_space(label_col - lw[i] + 12.0 + value_col - vw[i]);
-                            ui.add(egui::Label::new(egui::RichText::new(value).font(font.clone()).color(t.text)).extend());
-                        });
-                    }
-                });
-        });
+    egui::Area::new(egui::Id::new(id)).order(egui::Order::Tooltip).fixed_pos(cursor + vec2(16.0, 18.0)).interactable(false).constrain(true).show(ctx, |ui| {
+        egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(t.radius_sm).inner_margin(egui::Margin::symmetric(7, 4)).show(
+            ui,
+            |ui| {
+                ui.spacing_mut().item_spacing = vec2(0.0, 1.0);
+                for (i, value) in values.into_iter().enumerate() {
+                    // Labels left, values right-aligned on one edge, sharing a baseline.
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Label::new(egui::RichText::new(labels[i]).font(font.clone()).color(t.text_dim)).extend());
+                        ui.add_space(label_col - lw[i] + 12.0 + value_col - vw[i]);
+                        ui.add(egui::Label::new(egui::RichText::new(value).font(font.clone()).color(t.text)).extend());
+                    });
+                }
+            },
+        );
+    });
 }
 
 /// A Brush/Eraser stroke shown while it is drawn: the engine renders the real dabs onto a copy of
@@ -1402,6 +1399,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
         draw_drag_preview(app, &painter, &xf);
         crate::zoom_tool::draw(&ctx, &painter);
+        let resizing = crate::brush_resize::draw(app, &painter, &xf);
         draw_transform_controls(app, &painter, &xf);
         crate::paint_mouse::show_picker(app, &ctx);
         crate::snap_ui::draw(app, &painter, &xf);
@@ -1430,6 +1428,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         } else if let Some(p) = response.hover_pos() {
             let alt = ui.input(|i| i.modifiers.alt);
             let icon = match tool {
+                // Resizing the brush: the circle stays where the drag began (`brush_resize`).
+                t if resizing && crate::brush_resize::applies(t) => egui::CursorIcon::None,
                 t if t.is_brushlike() || t == Tool::QuickSelection => {
                     // Preferences › Cursors: brush tip outline (normal = the 50% contour, or
                     // full size), precise crosshair, or the standard pointer.
@@ -1768,6 +1768,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     }
     // Window › Modifier Keys: sticky Shift/⌘/⌥ act as held keys.
     let mods = crate::workspace_ui::sticky_mods(app, mods);
+    // Control+Alt-drag with a painting tool resizes the brush instead of painting (#231).
+    if crate::brush_resize::pointer(app, ev, mods) {
+        return;
+    }
     // Move tool: ⇧ locks the axis, ⌥ duplicates (move_mods.rs).
     let ev = crate::move_mods::filter_event(app, ev, mods);
     // Ruler, Count and Note tools.
