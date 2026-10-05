@@ -502,7 +502,12 @@ fn merged_planes(doc: &Document, fmt: &PixelFormat, cmyk: bool, matte: bool) -> 
     let w = canvas.width() as usize;
     let space = photocraft_compose::cmyk_space(doc);
     let _ = photocraft_compose::render_bands(doc, canvas, 0, |band| -> Result<(), ()> {
-        has_alpha |= band.px.iter().any(|p| q255(p[3]) < 255 || (sample == SampleType::F32 && p[3] < 1.0));
+        // Retain alpha whenever it differs from opaque at the stored precision.
+        has_alpha |= band.px.iter().any(|p| match sample {
+            SampleType::U8 => q255(p[3]) < 255,
+            SampleType::U16 => (p[3].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16 != u16::MAX,
+            SampleType::F32 => p[3] != 1.0,
+        });
         translucent |= band.px.iter().any(|p| p[3] < 1.0);
         let start = (band.rect.y0 - canvas.y0) as usize * w;
         // Converted and encoded on all cores, then copied into each plane.

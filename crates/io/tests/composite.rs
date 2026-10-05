@@ -171,4 +171,16 @@ fn merged_alpha_written_when_transparent() {
     assert!(f.merged_has_alpha());
     let merged = merged_composite(&f).unwrap();
     assert_eq!(merged[3][3], 0.0);
+
+    // U8 rounding must not erase transparency that is representable in the exported U16 plane.
+    let mut near = photocraft_doc::Document::new("near opaque", photocraft_geom::Size::new(1, 1), ColorMode::Rgb, SampleType::U16);
+    let mut layer = photocraft_doc::Layer::raster("pixel", near.pixel_format());
+    layer.surface_mut().unwrap().fill_rect(near.bounds(), &[1.0, 0.0, 0.0, 65500.0 / 65535.0]);
+    near.layers.push(layer);
+    let out = export(&near, "near.psd", &ExportOptions::default()).unwrap();
+    let file = PsdFile::from_bytes(&out.bytes).unwrap();
+    assert_eq!(file.header.channels, 4);
+    assert!(file.merged_has_alpha());
+    let samples = file.decode_merged().unwrap();
+    assert_eq!(u16::from_be_bytes([samples[6], samples[7]]), 65500);
 }
