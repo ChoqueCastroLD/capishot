@@ -915,9 +915,9 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
     }
 
     if effects::has_effects(layer) {
-        // Effects reach beyond the render rect: render the layer larger.
-        let big = rect.inflate(effects::margin(layer));
-        let Some(mut content) = render_content(layer, big, cx) else { return };
+        // Neighbourhoods are already captured by the full-region effect maps;
+        // content and effect application only need the output rectangle.
+        let Some(mut content) = render_content(layer, rect, cx) else { return };
         for c in clipped.iter().filter(|c| c.visible) {
             composite_atop(c, &mut content, cx);
         }
@@ -1164,8 +1164,8 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
     if effects::has_effects(layer) {
         // Effects of a clipped layer are clipped to the base too: render
         // them over the base (treated as opaque) and keep the base's alpha.
-        let big = rect.inflate(effects::margin(layer));
-        let Some(content) = render_content(layer, big, cx) else { return };
+        // The full-region effect maps already capture their neighbourhoods.
+        let Some(content) = render_content(layer, rect, cx) else { return };
         let mut opaque = Buffer { rect, px: base.px.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() };
         let maps = effect_maps(layer, cx);
         effects::composite_with_effects(

@@ -600,11 +600,19 @@ fn group_effects_apply_to_group_shape() {
 
 #[test]
 fn effects_render_identically_in_tiles() {
-    let d = fx_doc(vec![Effect::DropShadow(Shadow { spread: 0.0, size: 5.0, ..shadow(4.0, 120.0) }), stroke(2.0, StrokePosition::Outside)]);
-    let full = flatten(&d);
-    for (x, y) in [(33, 33), (8, 20), (31, 12)] {
-        let t = render(&d, Rect::from_xywh(x, y, 1, 1)).px[0];
-        assert!(close4(t, full.get(x, y)), "({x},{y})");
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        let mut d = fx_doc(vec![Effect::DropShadow(Shadow { spread: 0.0, size: 5.0, ..shadow(4.0, 120.0) }), stroke(2.0, StrokePosition::Outside)]);
+        d.depth = depth;
+        for layer in &mut d.layers {
+            if let Some(surface) = layer.surface_mut() {
+                *surface = surface.convert(photocraft_color::PixelFormat { sample: depth, ..surface.format() });
+            }
+        }
+        let full = flatten(&d);
+        // Compare every boundary pixel: a few sampled points miss application-halo regressions.
+        for tile in [1, 7, 33] {
+            assert_eq!(render_tiled(&d, d.bounds(), tile), full, "{depth:?}, tile {tile}");
+        }
     }
 }
 
