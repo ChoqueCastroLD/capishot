@@ -1516,6 +1516,16 @@ fn draw_drag_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
     }
 }
 
+fn sample_eyedropper(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers) {
+    if let Ok(v) = app.run("document.pixel", json!({"x": x.floor(), "y": y.floor()})) {
+        let color: Vec<f32> = serde_json::from_value(v).unwrap_or_default();
+        if color.len() == 4 && color[3] > 0.0 {
+            let key = if mods.alt { "background" } else { "foreground" };
+            let _ = app.run("tools.setColors", json!({ key: [color[0], color[1], color[2], 1.0] }));
+        }
+    }
+}
+
 /// Tool state machine. Shared by mouse input and automation.
 pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) {
     // View › Snap / Snap To and smart guides (snap_ui.rs).
@@ -1541,6 +1551,15 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
         return;
     }
     let tool = app.ui.tool;
+    if tool == Tool::Eyedropper {
+        match ev {
+            ToolEvent::Down { x, y, .. } | ToolEvent::Move { x, y, .. } => {
+                sample_eyedropper(app, x, y, mods);
+                return;
+            }
+            ToolEvent::Up { .. } => return,
+        }
+    }
     // Move tool over a guide drags the guide (off the canvas deletes it).
     match ev {
         ToolEvent::Down { x, y, .. } if tool == Tool::Move => {
@@ -1573,16 +1592,6 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     }
     match ev {
         ToolEvent::Down { x, y, pressure } => {
-            if tool == Tool::Eyedropper {
-                if let Ok(v) = app.run("document.pixel", json!({"x": x.floor(), "y": y.floor()})) {
-                    let c: Vec<f32> = serde_json::from_value(v).unwrap_or_default();
-                    if c.len() == 4 && c[3] > 0.0 {
-                        let key = if mods.alt { "background" } else { "foreground" };
-                        let _ = app.run("tools.setColors", json!({ key: [c[0], c[1], c[2], 1.0] }));
-                    }
-                }
-                return;
-            }
             match tool {
                 Tool::Pen => {
                     crate::vector_ui::pen_down(app, x, y);
@@ -1854,6 +1863,21 @@ mod tests {
             let r = xf.doc_rect(DRect::new(0, 0, 10, 10));
             assert!(r.width() > 0.0 && r.height() > 0.0);
         }
+    }
+
+    #[test]
+    fn eyedropper_drag_updates_the_sampled_colour() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 40, "height": 20, "background": "transparent"})).unwrap();
+        app.run("shape.create", json!({"kind": "rect", "rect": [0, 0, 20, 20], "fill": "#ff0000"})).unwrap();
+        app.run("shape.create", json!({"kind": "rect", "rect": [20, 0, 20, 20], "fill": "#00ff00"})).unwrap();
+        app.ui.tool = Tool::Eyedropper;
+
+        tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 10.0, pressure: 1.0 }, egui::Modifiers::NONE);
+        assert!(app.session.tools.foreground[0] > 0.99 && app.session.tools.foreground[1] < 0.01);
+
+        tool_event(&mut app, ToolEvent::Move { x: 30.0, y: 10.0, pressure: 1.0 }, egui::Modifiers::NONE);
+        assert!(app.session.tools.foreground[1] > 0.99 && app.session.tools.foreground[0] < 0.01);
     }
 
     #[test]
