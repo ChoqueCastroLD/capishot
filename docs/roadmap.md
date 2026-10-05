@@ -30,42 +30,60 @@ readiness; treat it as an upper bound.
 
 ## Honest parity assessment (2026-10-05)
 
-Written after the 0.2.0 release and the first wave of real user feedback. **We are far from real
-Photoshop parity.** `parity.md` says 625/625 menu items are live, but that only means each item
-dispatches *a* command. In the first day of public use, users hit broken basics that all counted as
-"live": text selection offset from the cursor, shortcuts that didn't fire after clicking a panel
-(214 failures in an audit), panels resizing themselves, an immovable crop frame, folders that
-wouldn't collapse, and lag on layout-style PSDs.
+This is the reference answer to "how close are we to Photoshop parity, really". Agents: read it
+before picking work. Update it (with dated measurements) when the numbers move; don't restate the
+menu-parity number in its place.
 
-| Area | State |
-|---|---|
-| Core editing (layers, masks, selections, adjustments, filters, transforms, blend modes) | Broad coverage; engine quality decent; interaction/UI quality only started catching up after 0.2.0. |
-| PSD fidelity | Composite oracle 113/170 (~66%). All adjustment layers and blend modes round-trip; Photoshop smart filters in PSDs, some effect shapes and text-engine details remain. psd-tools corpus being added (#81). |
-| Tools | ~20 Photoshop tools missing entirely: Pencil, Mixer Brush (as a tool), Patch, Content-Aware Move, Red Eye, Pattern Stamp, Art History Brush, Freeform/Curvature Pen, anchor tools, Direct Selection, Magnetic Lasso, single row/column marquee, Color Sampler, Perspective Crop, Rotate View, vertical type and type masks, Frame. |
-| Text | Engine works; advanced typography (OpenType features, text-on-path editing, full paragraph composer parity) and PSD text fidelity are partial. |
-| Painting | Brush model close to Photoshop after #136/#174; no pen pressure on macOS/Linux (#79), no Mixer Brush tool, no Art History Brush. |
-| AI / generative | ~0%: no Generative Fill/Expand (#41, deferred), Neural Filters or Remove tool. Classical Select Subject / Content-Aware Fill only. |
-| Ecosystem | No .8BF plug-ins (by decision: sandboxed WebAssembly plug-ins instead), no ExtendScript/UXP/.atn actions, no Adobe Fonts / Libraries / cloud documents. |
-| Camera RAW | DNG, CR2, Sony ARW (lossless + compressed), RW2, uncompressed ORF decode; Nikon compressed NEF, CR3, RAF fall back to the embedded preview (clean-room limits, #50). |
-| Performance / robustness | Strong on large rasters (14k+ on the GPU, banded memory); layout-style documents were laggy (#125/#128 in progress); real-file testing has only just begun. |
+**Bottom line.** Two days after 0.2.0 we had merged ~96 PRs and closed ~48 issues, but **real
+Photoshop parity is still well below 50%**. The biggest gaps are AI, missing tools, professional
+workflow depth and the plug-in ecosystem. Most fixes since 0.2.0 have passed our tests but have
+**not yet been validated by users**, and this week proved our tests miss what users hit:
+on first public use they found broken basics (text selection offset, 214 shortcut failures, panels
+resizing themselves, an immovable crop frame, folders that wouldn't collapse, lag on layout PSDs)
+that all counted as "live" in `parity.md`.
 
-**Estimate.** Feature surface: roughly **55–70%** of what a typical Photoshop user touches exists in
-some form. "A working professional could switch today": roughly **20–35%**; professionals live in
-the details (exact tool behaviour, PSD fidelity on their own files, typography, AI, plug-ins).
-True 1:1 parity is **many months** of focused work, and some areas need product decisions rather
-than effort (generative AI backend, the 8BF ecosystem, clean-room RAW limits).
+**Overall.** Feature surface: roughly **60–70%** of what a typical Photoshop user touches exists in
+some form. "A professional could switch for daily work": roughly **25–35%**. True 1:1 parity is
+**many months** of focused work, and some areas need product decisions rather than effort.
+Confidence: moderate — the next users of 0.2.x will move these numbers either way.
 
-**Making it measurable** (replace guesses with numbers; update this section as they land):
-1. **Workflow acceptance tests:** 30–50 real tasks (e.g. retouch a portrait, build a social post
-   with text and effects, composite with masks and adjustment layers, prepare a CMYK print file),
-   each scripted end to end and checked against Photoshop's output, run on every build. The pass
-   rate becomes the headline parity number.
-2. **Real-file corpus:** users' shareable PSDs plus the psd-tools set (#81), with pass-rate floors
-   that only go up (`crates/io/tests/corpus.rs`).
-3. **Recurring visual QA:** screenshot sweeps of realistic documents (`cargo run -p photocraft-engine
-   --example designer_psd`). The first sweep found 14 defects (#147–#157) that unit tests missed.
-4. **User reports:** fast turnaround from report → issue → fix; ask reporters for OS, document
-   size, layer count and a screenshot.
+### By dimension
+
+| Dimension | Measured / evidence (2026-10-05) | Grade | Notes |
+|---|---|---|---|
+| Menu wiring | 626/626 menu items dispatch a command (`parity.md`) | high but shallow | Says nothing about behaviour. |
+| PSD fidelity (rendering) | Corpus oracle 115/170 (68%): 30 differ, 26 have no usable reference, 1 import error | medium | Push to 170/170 under way (effects/strokes, multi-instance effects, 16/32-bit and colour modes, references for skipped files). |
+| PSD round trip | 169/169 re-import identically; every adjustment layer and blend mode round-trips | high (within corpus) | Floors in `crates/io/tests/corpus.rs`; raise, never lower. |
+| Smart filters / text / effect shapes in PSDs | Not measured: the corpus barely contains them | unknown (probably low–medium) | A Photoshop-authored reference set is being built (`corpus/photoshop`). |
+| Core editing (layers, masks, selections, adjustments, filters, transforms) | Broad engine coverage; many interaction bugs fixed after 0.2.0 (adjustment dialogs, Curves, crop, Move/Transform modifiers, gesture origin) | medium | Fixes not yet user-validated. |
+| UI / UX polish | Shortcut audit 214 → 0 failures; dock, Layers rows and menus reworked; first visual-QA sweep found 14 defects (#147–#157) | low–medium | Needs recurring visual QA with realistic documents. |
+| Tools | ~20 Photoshop tools missing: Pencil, Mixer Brush (tool), Patch, Content-Aware Move, Red Eye, Pattern Stamp, Art History Brush, Freeform/Curvature Pen, anchor tools, Direct Selection, Magnetic Lasso, single row/column marquee, Color Sampler, Perspective Crop, Rotate View, vertical type and type masks, Frame | low–medium | Magic/Background Eraser added; live gradients in progress (#180). |
+| Painting | Brush model and Brush Settings panel near Photoshop; .abr/.grd import; persistent presets; pressure on Windows and web only | medium | macOS/Linux pressure blocked on the windowing layer (#79). |
+| Text / typography | Engine works; caret placement and size editing fixed; OpenType features, text-on-path editing, composer parity partial | medium-low | Measure with the Photoshop-authored set. |
+| Colour management | Colour-managed canvas (document → monitor), embedded CMYK profiles, linear EXR/HDR, 16-bit float canvas | medium-high | Monitor profile follows only at launch. |
+| Performance | 14k+ px on the GPU at ~⅓ the memory; adjustment preview 285 ms → 4–9 ms; font-size edits 297 ms → 4.6 ms | medium-high on rasters | Complex layout documents still laggy (#125/#128); >16384 px GPU tiling in progress (#49). |
+| Stability | Never-crash lint series, crash guard, `panic_hunt` fuzzing in the gate | medium-high | No field crash data yet. |
+| Camera RAW | DNG, CR2, Sony ARW (lossless + compressed), RW2, uncompressed ORF | medium | Nikon compressed NEF, CR3, RAF blocked by clean-room limits (#50). |
+| AI / generative | none | ~0% | Deferred by decision (#41). |
+| Ecosystem | Sandboxed WebAssembly plug-ins instead of .8BF; no ExtendScript/UXP/.atn; no Adobe Fonts/Libraries/cloud docs | low | By design for 8BF; scripting compatibility open. |
+| Platforms | macOS (notarized), Windows, Linux (AppImage/deb/rpm/Flatpak bundle), web | medium-high | Flathub later (#173); Windows signing material pending. |
+
+### Where we're going (priority order)
+
+1. **Ship the fixes:** cut 0.2.1 once the current batch lands, so users validate them.
+2. **PSD fidelity to 170/170** with round trips, plus the Photoshop-authored reference set for smart
+   filters, the text engine and effect shapes; enforce floors in `corpus.rs`.
+3. **Workflow acceptance tests:** 30–50 real tasks (retouch a portrait, social post with text and
+   effects, composite with masks and adjustment layers, CMYK print prep…) scripted end to end and
+   checked against Photoshop's output on every build. Their pass rate becomes the headline parity
+   number.
+4. **Missing tools,** starting with the Pen variants and Direct Selection, Patch / Content-Aware
+   Move, Pencil, Rotate View, Perspective Crop.
+5. **Complex-document performance** (#125/#128) and GPU tiling beyond the texture limit (#49).
+6. **Recurring visual QA** (`cargo run -p photocraft-engine --example designer_psd`) and fast
+   turnaround on user reports (OS, document size, layer count, screenshot).
+7. Later / needs decisions: generative AI backend (#41), scripting compatibility (ExtendScript /
+   UXP / .atn), Flathub (#173), macOS/Linux pen pressure (#79).
 
 ## Current focus (infrastructure before the long tail)
 
@@ -77,10 +95,8 @@ Landed on 2026-10-01:
   (`docs/releasing.md`).
 
 Next:
-1. **Quality of what exists** (from user feedback after 0.2.0, see the assessment above): workflow
-   acceptance tests, real-file corpus, visual QA, and the open user issues. 0.2.0 shipped signed and
-   notarized on 2026-10-05 (`docs/releasing.md`); Windows code-signing material still needs to be
-   obtained.
+1. **Follow "Where we're going" in the assessment above.** 0.2.0 shipped signed and notarized on
+   2026-10-05 (`docs/releasing.md`); Windows code-signing material still needs to be obtained.
 2. **Fidelity**: the PSD oracle (113/170). Modern Brightness/Contrast and grayscale Levels
    curves; chisel-soft / stroke-emboss bevel shapes; Photoshop's 8-bit blend rounding; non-Normal
    modes in Lab documents; Photoshop smart filters in `SoLd`.

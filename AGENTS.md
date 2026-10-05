@@ -11,7 +11,7 @@ PhotoCraft is an open-source, native, Photoshop-comparable image editor written 
 | `docs/contributing.md` | Rules: clean-room, tests, layering, style, commits; the "add a command" checklist |
 | `docs/control-protocol.md` | JSON control channel: how agents drive and screenshot the running app |
 | `docs/ui-design.md` | Design tokens, themes, widgets, and how to match Photoshop's look |
-| `docs/roadmap.md` | Milestones and the **current focus** |
+| `docs/roadmap.md` | Honest parity assessment (where we're lacking, where we're going), milestones, **current focus** |
 | `docs/parity.md` | Generated list of every Photoshop menu item, live or missing |
 | `crates/<name>/README.md` (where present) | Public API of that crate |
 
@@ -67,6 +67,10 @@ People trust PhotoCraft with their work, and a crash loses it. A malformed file,
 
 Priorities: important infrastructure first, then low-hanging parity, then the long tail.
 
+0. **Read `docs/roadmap.md` → "Honest parity assessment" first.** It says, dimension by dimension,
+   where PhotoCraft is lacking and the priority order of where we're going. `docs/parity.md`
+   (menu wiring) is not a measure of behaviour. When your work moves a measured number (PSD oracle,
+   round trips, workflow tests, performance), update that section with the dated figure.
 1. `docs/roadmap.md` → **Current focus**.
 2. `cargo xtask parity` → `docs/parity.md` lists every missing menu item, grouped by menu. Low-hanging fruit is usually a missing command whose algorithm already exists in `algo`, `paint`, `vector` or `text`.
 3. `log/devlog.md` → the "Still open" bullets of recent entries.
