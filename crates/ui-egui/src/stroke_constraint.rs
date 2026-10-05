@@ -82,6 +82,46 @@ pub fn constrain(tool: Tool, axis: &mut Option<Axis>, start: [f64; 2], last: [f6
     }
 }
 
+/// Where the ⇧-click line preview starts (#257): the end of the last stroke on the active
+/// document, while ⇧ is held with a painting tool and nothing is being painted.
+pub fn line_preview_start(app: &crate::PhotocraftApp, tool: Tool, shift: bool) -> Option<[f64; 2]> {
+    if !shift || !connects(tool) || app.drag.is_some() {
+        return None;
+    }
+    let active = app.session.active()?.doc.id;
+    app.last_stroke_end.filter(|(doc, _)| *doc == active).map(|(_, p)| p)
+}
+
+/// Photoshop's rubber band: while ⇧ is held after a stroke, a thin line from where that stroke
+/// ended to the pointer shows the line a click will paint, with the brush footprint at the
+/// pointer (drawn here only when the painting cursor doesn't already show the tip). Two line
+/// segments and at most one circle: no measurable cost per frame. Returns the drawn segment.
+pub fn draw_line_preview(
+    app: &crate::PhotocraftApp,
+    painter: &egui::Painter,
+    xf: &crate::canvas::ViewXform,
+    pointer: egui::Pos2,
+    tool: Tool,
+    shift: bool,
+) -> Option<[egui::Pos2; 2]> {
+    use egui::{Color32, Stroke};
+    let a = line_preview_start(app, tool, shift)?;
+    let a = xf.to_screen(a[0] as f32, a[1] as f32);
+    if !(a.x.is_finite() && a.y.is_finite()) {
+        return None;
+    }
+    for (w, c) in [(2.5, Color32::from_black_alpha(120)), (1.0, Color32::from_white_alpha(230))] {
+        painter.line_segment([a, pointer], Stroke::new(w, c));
+    }
+    use photocraft_engine::prefs::PaintingCursor;
+    if matches!(app.session.prefs().cursors.painting, PaintingCursor::Standard | PaintingCursor::Precise) {
+        let r = (app.session.tools.brush.size / 2.0 * xf.zoom).max(1.0);
+        painter.circle_stroke(pointer, r + 0.5, Stroke::new(1.0, Color32::from_black_alpha(140)));
+        painter.circle_stroke(pointer, r, Stroke::new(1.0, Color32::from_white_alpha(220)));
+    }
+    Some([a, pointer])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +274,101 @@ mod tests {
         tool_event(&mut app, ToolEvent::Up { x: 90.0, y: 22.0 }, shift);
         let p = app.session.journal.iter().rev().find(|(id, _)| id == "paint.gradient").map(|(_, p)| p.clone()).unwrap();
         assert_eq!(p["to"], json!([90.0, 10.0]));
+    }
+
+    #[test]
+    fn line_preview_needs_shift_a_previous_stroke_and_no_stroke_in_progress() {
+        let mut app = app();
+        app.ui.tool = Tool::Brush;
+        assert_eq!(line_preview_start(&app, Tool::Brush, true), None, "no previous stroke");
+        let none = egui::Modifiers::NONE;
+        tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 10.0, pressure: 1.0 }, none);
+        tool_event(&mut app, ToolEvent::Move { x: 30.0, y: 20.0, pressure: 1.0 }, none);
+        assert_eq!(line_preview_start(&app, Tool::Brush, true), None, "while painting");
+        tool_event(&mut app, ToolEvent::Up { x: 30.0, y: 20.0 }, none);
+        assert_eq!(line_preview_start(&app, Tool::Brush, true), Some([30.0, 20.0]));
+        assert_eq!(line_preview_start(&app, Tool::Brush, false), None, "⇧ released");
+        assert_eq!(line_preview_start(&app, Tool::Eraser, true), Some([30.0, 20.0]), "any painting tool");
+        assert_eq!(line_preview_start(&app, Tool::Move, true), None);
+        // Another document has no line start.
+        app.run("file.new", json!({"width": 60, "height": 60})).unwrap();
+        assert_eq!(line_preview_start(&app, Tool::Brush, true), None);
+    }
+
+    /// Every line segment the last frame painted.
+    fn segments(h: &egui_kittest::Harness<'static, PhotocraftApp>) -> Vec<[egui::Pos2; 2]> {
+        fn walk(s: &egui::Shape, out: &mut Vec<[egui::Pos2; 2]>) {
+            match s {
+                egui::Shape::LineSegment { points, .. } => out.push(*points),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for c in &h.output().shapes {
+            walk(&c.shape, &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn shift_shows_a_rubber_band_from_the_last_stroke_to_the_pointer() {
+        use egui::{Event, Modifiers, PointerButton, vec2};
+        let mut a = app();
+        a.ui.tool = Tool::Brush;
+        a.sync_views();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1000.0, 700.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                let ctx = ui.ctx().clone();
+                if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                egui::CentralPanel::default().show(ui, |ui| crate::canvas::document_area(app, ui));
+            },
+            a,
+        );
+        crate::PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::default());
+        h.run_steps(4);
+        let c = h.state().last_canvas_rect.center();
+        let target = c + vec2(120.0, 90.0);
+        let near = |p: egui::Pos2, q: egui::Pos2| p.distance(q) < 1.5;
+        let band = |h: &egui_kittest::Harness<'static, PhotocraftApp>, from: egui::Pos2| segments(h).iter().any(|s| near(s[0], from) && near(s[1], target));
+        // ⇧ with no previous stroke: nothing.
+        h.event(Event::ModifiersChanged(Modifiers::SHIFT));
+        h.event(Event::PointerMoved(target));
+        h.run_steps(2);
+        assert!(!segments(&h).iter().any(|s| near(s[1], target) && s[0].distance(s[1]) > 20.0), "no band without a previous stroke");
+        // A stroke ending at c.
+        h.event(Event::ModifiersChanged(Modifiers::NONE));
+        let start = c - vec2(60.0, 0.0);
+        h.event(Event::PointerMoved(start));
+        h.run();
+        h.event(Event::PointerButton { pos: start, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        h.run();
+        for k in 1..=6 {
+            h.event(Event::PointerMoved(start + vec2(10.0 * k as f32, 0.0)));
+            h.run();
+        }
+        h.event(Event::PointerButton { pos: c, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        h.run_steps(2);
+        let end = h.state().last_stroke_end.map(|(_, p)| p).expect("stroke recorded");
+        let xf = {
+            let st = h.state();
+            let v = st.ui.views[st.session.active_index().unwrap()].clone();
+            crate::canvas::ViewXform { rect: st.last_canvas_rect, zoom: v.zoom, center: v.center, flip: false }
+        };
+        let from = xf.to_screen(end[0] as f32, end[1] as f32);
+        h.event(Event::PointerMoved(target));
+        h.run_steps(2);
+        assert!(!band(&h, from), "no band without ⇧");
+        h.event(Event::ModifiersChanged(Modifiers::SHIFT));
+        h.run_steps(2);
+        assert!(band(&h, from), "⇧ shows the line from the last stroke's end to the pointer");
+        h.event(Event::ModifiersChanged(Modifiers::NONE));
+        h.run_steps(2);
+        assert!(!band(&h, from), "releasing ⇧ hides it");
+        // Previewing never edits: no stroke, no undo step.
+        let n = h.state().session.journal.iter().filter(|(id, _)| id == "paint.stroke").count();
+        assert_eq!(n, 1);
     }
 }

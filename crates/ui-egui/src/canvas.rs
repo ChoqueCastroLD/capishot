@@ -1497,6 +1497,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             if let Some(b) = crate::tool_feedback::badge(app, tool, mods) {
                 crate::tool_feedback::draw_badge(&painter, p, b, tool == Tool::QuickSelection);
             }
+            // ⇧ after a stroke: the straight line a click would paint (#257).
+            crate::stroke_constraint::draw_line_preview(app, &painter, &xf, p, tool, held.shift);
         }
     }
     if primary {
