@@ -595,13 +595,21 @@ fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &[Pattern]) -> Buff
             Buffer::filled(rect, [rgb[0], rgb[1], rgb[2], c.alpha])
         }
         Fill::Gradient { stops, angle, scale, style, reverse } => {
+            // Convert once per render call, while its document CMYK profile is active.
+            let stops: Vec<_> = stops
+                .iter()
+                .map(|(p, c)| {
+                    let rgb = c.to_rgb();
+                    (*p, [rgb[0], rgb[1], rgb[2], c.alpha])
+                })
+                .collect();
             // Gradient geometry relative to the layer's frame, independent of the render rect.
             let mut b = Buffer::transparent(rect);
             for y in rect.y0..rect.y1 {
                 for x in rect.x0..rect.x1 {
                     let t = effects::gradient_t(*style, *angle, *scale, *reverse, (0.0, 0.0), canvas, x as f32 + 0.5, y as f32 + 0.5);
                     let i = ((y - rect.y0) as usize) * rect.width() as usize + (x - rect.x0) as usize;
-                    b.px[i] = sample_stops(stops, t);
+                    b.px[i] = sample_stops(&stops, t);
                 }
             }
             b
@@ -614,27 +622,23 @@ fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &[Pattern]) -> Buff
     }
 }
 
-fn sample_stops(stops: &[(f32, photocraft_color::Color)], t: f32) -> [f32; 4] {
-    let conv = |c: &photocraft_color::Color| {
-        let r = c.to_rgb();
-        [r[0], r[1], r[2], c.alpha]
-    };
+fn sample_stops(stops: &[(f32, [f32; 4])], t: f32) -> [f32; 4] {
     match stops {
         [] => [0.0; 4],
-        [only] => conv(&only.1),
+        [only] => only.1,
         _ => {
             if t <= stops[0].0 {
-                return conv(&stops[0].1);
+                return stops[0].1;
             }
             for w in stops.windows(2) {
                 let (a, b) = (&w[0], &w[1]);
                 if t <= b.0 {
                     let k = if b.0 > a.0 { (t - a.0) / (b.0 - a.0) } else { 0.0 };
-                    let (ca, cb) = (conv(&a.1), conv(&b.1));
+                    let (ca, cb) = (a.1, b.1);
                     return std::array::from_fn(|i| ca[i] + (cb[i] - ca[i]) * k);
                 }
             }
-            conv(&stops[stops.len() - 1].1)
+            stops[stops.len() - 1].1
         }
     }
 }

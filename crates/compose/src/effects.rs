@@ -446,9 +446,25 @@ pub fn gradient_t(style: GradientStyle, angle: f32, scale: f32, reverse: bool, o
 
 /// Samples colour and opacity stops at `t`.
 pub fn sample_gradient(g: &Gradient, t: f32) -> [f32; 4] {
-    let color = sample_stops(&g.stops.iter().map(|(p, c)| (*p, rgb(c))).collect::<Vec<_>>(), t);
-    let alpha = if g.opacity_stops.is_empty() { 1.0 } else { sample_stops(&g.opacity_stops.iter().map(|(p, a)| (*p, [*a; 3])).collect::<Vec<_>>(), t)[0] };
-    [color[0], color[1], color[2], alpha]
+    PreparedGradient::new(g).sample(t)
+}
+
+// Prepared only for one paint call: CMYK conversions must use that call's active profile.
+struct PreparedGradient {
+    color: Vec<(f32, [f32; 3])>,
+    opacity: Vec<(f32, [f32; 3])>,
+}
+
+impl PreparedGradient {
+    fn new(g: &Gradient) -> Self {
+        Self { color: g.stops.iter().map(|(p, c)| (*p, rgb(c))).collect(), opacity: g.opacity_stops.iter().map(|(p, a)| (*p, [*a; 3])).collect() }
+    }
+
+    fn sample(&self, t: f32) -> [f32; 4] {
+        let color = sample_stops(&self.color, t);
+        let alpha = if self.opacity.is_empty() { 1.0 } else { sample_stops(&self.opacity, t)[0] };
+        [color[0], color[1], color[2], alpha]
+    }
 }
 
 fn sample_stops(stops: &[(f32, [f32; 3])], t: f32) -> [f32; 3] {
@@ -578,13 +594,14 @@ fn paint_fx(dst: &mut Buffer, m: &Map, p: &FxPaint, shape_bounds: Rect, anchor: 
     match p {
         FxPaint::Color(c) => paint_color(dst, m, rgb(c), blend, opacity),
         FxPaint::Gradient(g) => {
+            let prepared = PreparedGradient::new(g);
             let w = big.width() as usize;
             paint(
                 dst,
                 m,
                 |i| {
                     let (x, y) = ((big.x0 + (i % w) as i32) as f32 + 0.5, (big.y0 + (i / w) as i32) as f32 + 0.5);
-                    sample_gradient(g, gradient_t(g.style, g.angle, g.scale, g.reverse, g.offset, shape_bounds, x, y))
+                    prepared.sample(gradient_t(g.style, g.angle, g.scale, g.reverse, g.offset, shape_bounds, x, y))
                 },
                 blend,
                 opacity,
