@@ -104,6 +104,27 @@ pub fn max_sample(s: SampleType) -> Vec<u8> {
     }
 }
 
+/// Top of Photoshop's 16-bit Lab a*/b* scale: it stores `32768 + 256·a` (0..65280 spans −128..127,
+/// fitted on psd-tools `4x4_16bit_lab`: the merged image holds a stop's `LbCl` a* = 52.29 as 46154),
+/// while documents keep a*/b* on the 8-bit scale `(a + 128) / 255` at every depth.
+pub const LAB16_CHROMA_MAX: f32 = 65280.0;
+
+/// Rescales the a*/b* channels (1 and 2) of interleaved native-endian 16-bit Lab pixels with
+/// `ch` channels: PSD → document when `to_doc`, else document → PSD. Round-trips exactly.
+pub fn lab16_chroma(bytes: &mut [u8], ch: usize, to_doc: bool) {
+    if ch < 3 {
+        return;
+    }
+    let k = if to_doc { 65535.0 / f64::from(LAB16_CHROMA_MAX) } else { f64::from(LAB16_CHROMA_MAX) / 65535.0 };
+    for px in bytes.chunks_exact_mut(ch * 2) {
+        for c in 1..3 {
+            let v = u16::from_ne_bytes([px[2 * c], px[2 * c + 1]]);
+            let w = (f64::from(v) * k).round().min(65535.0) as u16;
+            px[2 * c..2 * c + 2].copy_from_slice(&w.to_ne_bytes());
+        }
+    }
+}
+
 /// Native-endian encoding of zero.
 pub fn zero_sample(s: SampleType) -> Vec<u8> {
     vec![0; s.bytes()]
@@ -196,6 +217,34 @@ mod tests {
     fn missing_planes_use_fill() {
         let il = interleave(&[None, Some(&[5, 6])], &[vec![9], vec![0]], 2, SampleType::U8, &[false, false]);
         assert_eq!(il, vec![9, 5, 9, 6]);
+    }
+
+    #[test]
+    fn lab16_chroma_scale_round_trips() {
+        // Two pixels of three channels: L is untouched, a*/b* rescale, and every PSD value
+        // comes back exactly.
+        let mut all = Vec::new();
+        for v in 0..=u16::MAX {
+            all.extend_from_slice(&v.to_ne_bytes());
+            all.extend_from_slice(&v.to_ne_bytes());
+            all.extend_from_slice(&v.to_ne_bytes());
+        }
+        let orig = all.clone();
+        lab16_chroma(&mut all, 3, true);
+        let px = |b: &[u8], i: usize, c: usize| u16::from_ne_bytes([b[(i * 3 + c) * 2], b[(i * 3 + c) * 2 + 1]]);
+        // Neutral (32768 in PSD) is 128 / 255 of the document scale; 65280 (a* = 127) is the top.
+        assert_eq!(px(&all, 32768, 0), 32768);
+        assert_eq!(px(&all, 32768, 1), (32768.0f64 * 65535.0 / 65280.0).round() as u16);
+        assert_eq!(px(&all, 65280, 2), 65535);
+        lab16_chroma(&mut all, 3, false);
+        for i in 0..=65280usize {
+            assert_eq!(px(&all, i, 1), px(&orig, i, 1), "{i}");
+        }
+        // Short or odd buffers are left alone.
+        let mut short = vec![1u8, 2, 3];
+        lab16_chroma(&mut short, 3, true);
+        lab16_chroma(&mut short, 1, true);
+        assert_eq!(short, [1, 2, 3]);
     }
 
     #[test]

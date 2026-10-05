@@ -64,6 +64,63 @@ const PASS_TOL: f32 = 2.0 / 255.0;
 /// Export → re-import must render within one 8-bit step of the imported document.
 const ROUNDTRIP_TOL: f32 = 1.0 / 255.0 + 1e-5;
 
+/// Dissolve block size and tolerance (see [`dissolve_matches`]).
+const DISSOLVE_BLOCK: i32 = 16;
+const DISSOLVE_TOL: f32 = 0.1;
+
+/// Oracle for documents with Dissolve layers. Photoshop's dissolve decides each pixel with a
+/// position-only pseudo-random threshold (observed on psd-tools dissolve.psd: where dissolved
+/// layers of equal opacity overlap, a pixel shows the top layer or nothing, never a lower one),
+/// but its generator is not public and can't be recovered from one binary pattern; ours uses
+/// another hash with the same rule. So outside the dissolve layers' bounds pixels must match
+/// as usual (≤ 2/255), and inside them the premultiplied colour averaged over 16 × 16 blocks
+/// (density and colour) must agree within 0.1 (binomial noise of a 50 % dissolve is about
+/// 0.044 per block difference).
+fn dissolve_matches(doc: &photocraft_doc::Document, ours: &[[f32; 4]], ps: &[[f32; 4]]) -> bool {
+    let canvas = doc.bounds();
+    let regions: Vec<_> = doc
+        .walk()
+        .into_iter()
+        .filter(|(_, _, l)| l.visible && l.blend == photocraft_color::BlendMode::Dissolve)
+        .map(|(_, _, l)| photocraft_compose::layer_bounds(l, canvas).intersect(&canvas))
+        .filter(|r| !r.is_empty())
+        .collect();
+    let (w, h) = (canvas.width() as i32, canvas.height() as i32);
+    if regions.is_empty() || ours.len() != ps.len() || ours.len() != (w as usize) * (h as usize) {
+        return false;
+    }
+    let pm = |p: &[f32; 4], c: usize| if c < 3 { p[c] * p[3] } else { p[3] };
+    let inside = |x: i32, y: i32| regions.iter().any(|r| r.contains(x + canvas.x0, y + canvas.y0));
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) as usize;
+            if !inside(x, y) && (0..4).any(|c| (pm(&ours[i], c) - pm(&ps[i], c)).abs() > PASS_TOL) {
+                return false;
+            }
+        }
+    }
+    for by in (0..h).step_by(DISSOLVE_BLOCK as usize) {
+        for bx in (0..w).step_by(DISSOLVE_BLOCK as usize) {
+            let (x1, y1) = ((bx + DISSOLVE_BLOCK).min(w), (by + DISSOLVE_BLOCK).min(h));
+            let n = ((x1 - bx) * (y1 - by)) as f32;
+            for c in 0..4 {
+                let (mut a, mut b) = (0.0, 0.0);
+                for y in by..y1 {
+                    for x in bx..x1 {
+                        let i = (y * w + x) as usize;
+                        a += pm(&ours[i], c);
+                        b += pm(&ps[i], c);
+                    }
+                }
+                if ((a - b) / n).abs() > DISSOLVE_TOL {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 /// Files known to be invalid upstream: their parse error is expected.
 const KNOWN_BAD: &[(&str, &str)] = &[("group-divider-blend-mode.psd", "psd-tools fixture stripped to 1906 bytes: merged image data missing")];
 
@@ -80,13 +137,13 @@ struct Source {
     roundtrip_floor: usize,
 }
 
-/// Hand-picked mix in `corpus/psd` (170 files: 121 vs the merged image + 12 vs the thumbnail).
-const MIXED: Source = Source { label: "io corpus", env: "PHOTOCRAFT_CORPUS", default_dir: "corpus/psd", pass_floor: 133, roundtrip_floor: 169 };
+/// Hand-picked mix in `corpus/psd` (170 files: 128 vs the merged image + 12 vs the thumbnail).
+const MIXED: Source = Source { label: "io corpus", env: "PHOTOCRAFT_CORPUS", default_dir: "corpus/psd", pass_floor: 140, roundtrip_floor: 169 };
 
 /// The full psd-tools test set (309 files at the pinned commit; see `xtask/psd-tools-corpus.sha256`):
-/// 202 vs the merged image + 10 vs the thumbnail.
+/// 212 vs the merged image + 10 vs the thumbnail.
 const PSD_TOOLS: Source =
-    Source { label: "psd-tools corpus", env: "PHOTOCRAFT_PSDTOOLS_CORPUS", default_dir: "corpus/psd-tools", pass_floor: 212, roundtrip_floor: 307 };
+    Source { label: "psd-tools corpus", env: "PHOTOCRAFT_PSDTOOLS_CORPUS", default_dir: "corpus/psd-tools", pass_floor: 222, roundtrip_floor: 307 };
 
 /// The corpus directory and whether floors are enforced; `None` when absent.
 fn locate(src: &Source) -> Option<(PathBuf, bool)> {
@@ -280,7 +337,13 @@ fn check_file(name: &str, bytes: &[u8]) -> (Outcome, Option<f32>) {
     let m = common::max_diff(&ours, &merged);
     let bad = ours.iter().zip(&merged).filter(|(a, b)| (0..4).any(|c| (a[c] * a[3] - b[c] * b[3]).abs() > PASS_TOL)).count();
     let pct = 100.0 * bad as f32 / ours.len().max(1) as f32;
-    let (outcome, status) = if m <= PASS_TOL { (Outcome::Pass, "PASS") } else { (Outcome::Diff, "DIFF") };
+    let (outcome, status) = if m <= PASS_TOL {
+        (Outcome::Pass, "PASS")
+    } else if dissolve_matches(doc, &ours, &merged) {
+        (Outcome::Pass, "PASS (dissolve metric)")
+    } else {
+        (Outcome::Diff, "DIFF")
+    };
     let notes: Vec<&str> = imp.warnings.iter().map(String::as_str).take(2).collect();
     eprintln!("{name:<60} {layers:>6} {:>9.4} {:>7.2}%  {status} {}", m, pct, notes.join(" | "));
     if std::env::var_os("CORPUS_THUMB_CALIBRATE").is_some()

@@ -19,6 +19,7 @@
 pub mod adjust;
 pub mod bounds;
 pub mod effects;
+pub mod fill_layout;
 pub mod masks;
 pub mod multichannel;
 pub mod pattern;
@@ -645,10 +646,11 @@ fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &pattern::PreparedP
                 })
                 .collect();
             // Gradient geometry relative to the layer's frame, independent of the render rect.
+            let (angle, scale, offset) = fill_layout::fill_gradient_layout(*style, *angle, *scale, canvas);
             let mut b = Buffer::transparent(rect);
             for y in rect.y0..rect.y1 {
                 for x in rect.x0..rect.x1 {
-                    let t = effects::gradient_t(*style, *angle, *scale, *reverse, (0.0, 0.0), canvas, x as f32 + 0.5, y as f32 + 0.5);
+                    let t = effects::gradient_t(*style, angle, scale, *reverse, offset, canvas, x as f32 + 0.5, y as f32 + 0.5);
                     let i = ((y - rect.y0) as usize) * rect.width() as usize + (x - rect.x0) as usize;
                     b.px[i] = sample_stops(&stops, t);
                 }
@@ -935,7 +937,7 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
     // Adjustment layers transform the backdrop, then blend the result back in.
     if let LayerContent::Adjustment(adj) = &layer.content {
         let mut adjusted = backdrop.clone();
-        adjust::apply_with(adj, &mut adjusted, cx.transfer);
+        adjust::apply_depth(adj, &mut adjusted, cx.transfer, adjustment_quantum(cx.depth));
         // Clipped layers onto an adjustment are uncommon; they composite atop the adjusted result.
         for c in clipped.iter().filter(|c| c.visible) {
             composite_atop(c, &mut adjusted, cx);
@@ -1200,7 +1202,7 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
     let rect = base.rect;
     if let LayerContent::Adjustment(adj) = &layer.content {
         let mut adjusted = base.clone();
-        adjust::apply_with(adj, &mut adjusted, cx.transfer);
+        adjust::apply_depth(adj, &mut adjusted, cx.transfer, adjustment_quantum(cx.depth));
         let mv = mask_vals(layer, rect, cx);
         for (i, p) in base.px.iter_mut().enumerate() {
             let k = layer.opacity * layer.fill_opacity * mask_k(&mv, i);
