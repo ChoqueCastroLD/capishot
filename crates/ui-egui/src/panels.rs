@@ -1363,8 +1363,10 @@ fn layer_row(
     let mut mask_rect = None;
     if let Some(m) = &l.mask {
         let mr = Rect::from_min_size(pos2(x, rect.center().y - ts / 2.0), vec2(ts, ts));
-        let tex = app.mask_thumb(ctx, doc, l.id, m);
-        painter.image(tex, mr, Rect::from_min_max(egui::Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+        if ui.is_rect_visible(mr) {
+            let tex = app.mask_thumb(ctx, doc, l.id, m);
+            painter.image(tex, mr, Rect::from_min_max(egui::Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+        }
         painter.rect_stroke(
             mr,
             if t.pro { 0.0 } else { 4.0 },
@@ -1498,9 +1500,12 @@ fn draw_layer_thumb(app: &mut PhotocraftApp, ctx: &egui::Context, ui: &egui::Ui,
             p.rect_filled(rect, 6.0, Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
         }
         _ => {
-            widgets::checker(p, rect, 5.0);
-            let tex = app.layer_thumb(ctx, doc, l);
-            p.image(tex, rect, Rect::from_min_max(egui::Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+            // Keep row layout and outside thumbnail decorations when the image is clipped.
+            if ui.is_rect_visible(rect) {
+                widgets::checker(p, rect, 5.0);
+                let tex = app.layer_thumb(ctx, doc, l);
+                p.image(tex, rect, Rect::from_min_max(egui::Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+            }
         }
     }
     let stroke = if t.pro {
