@@ -167,7 +167,7 @@ pub fn merged_composite(file: &PsdFile) -> Result<Vec<[f32; 4]>, IoError> {
                 let mut v: [f32; 4] = std::array::from_fn(|i| f32::from(p[i]) / 255.0);
                 if unmatte {
                     for c in 0..3 {
-                        v[c] = pixels::unmatte(v[c], v[3], 1.0);
+                        v[c] = pixels::unmatte(v[c], v[3], 1.0).clamp(0.0, 1.0);
                     }
                 }
                 v

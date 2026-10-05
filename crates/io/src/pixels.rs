@@ -139,8 +139,9 @@ pub fn matte(c: f32, a: f32, white: f32) -> f32 {
 }
 
 /// Inverse of [`matte`] (returns `white` where alpha is 0).
+/// Keep HDR and negative samples; integer encoders own normalized-range clipping.
 pub fn unmatte(m: f32, a: f32, white: f32) -> f32 {
-    if a <= 0.0 { white } else { ((m - white * (1.0 - a)) / a).clamp(0.0, 1.0) }
+    if a <= 0.0 { white } else { (m - white * (1.0 - a)) / a }
 }
 
 /// `items.map(f)` on scoped threads (one per item; callers pass a handful of channels or
