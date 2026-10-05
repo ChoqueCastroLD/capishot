@@ -67,6 +67,12 @@ fn doc_mode(m: PsdMode) -> Option<ColorMode> {
     })
 }
 
+// Real-mask metadata without a -3 channel still selects the synthetic -2 mask.
+fn selected_real_mask(rec: &LayerRecord) -> Option<photocraft_psd::RealMask> {
+    rec.channel(CHANNEL_REAL_USER_MASK)?;
+    rec.layer_mask()?.real
+}
+
 impl Ctx<'_> {
     fn warn(&mut self, s: impl Into<String>) {
         self.warnings.push(s.into());
@@ -108,8 +114,8 @@ impl Ctx<'_> {
 
     fn record_mask(&mut self, rec: &LayerRecord, name: &str) -> Option<LayerMask> {
         let m = rec.layer_mask()?;
-        let (id, rect, default, flags) = match (rec.channel(CHANNEL_REAL_USER_MASK), m.real) {
-            (Some(_), Some(real)) => (CHANNEL_REAL_USER_MASK, real.rect, real.background, real.flags),
+        let (id, rect, default, flags) = match selected_real_mask(rec) {
+            Some(real) => (CHANNEL_REAL_USER_MASK, real.rect, real.background, real.flags),
             _ => {
                 rec.channel(CHANNEL_USER_MASK)?;
                 (CHANNEL_USER_MASK, m.rect, m.default_color, m.flags)
@@ -272,7 +278,7 @@ impl Ctx<'_> {
         // Mask flag bit 3: the user mask was rendered from vector data. For
         // shape/text/smart layers the cached pixels already include that
         // coverage, so applying it again would double-mask.
-        if rendered && rec.layer_mask().is_some_and(|m| m.flags & 8 != 0) {
+        if rendered && selected_real_mask(rec).is_none() && rec.layer_mask().is_some_and(|m| m.flags & 8 != 0) {
             l.mask = None;
         }
         if !matches!(l.content, LayerContent::Shape(_)) {
@@ -292,7 +298,7 @@ impl Ctx<'_> {
                 vm.density = p.vector_density.map_or(1.0, |d| f32::from(d) / 255.0);
                 vm.feather = p.vector_feather.map_or(0.0, |f| f as f32);
             }
-            if m.flags & 8 != 0 && m.real.is_none() {
+            if m.flags & 8 != 0 && selected_real_mask(rec).is_none() {
                 l.mask = None;
             }
         }

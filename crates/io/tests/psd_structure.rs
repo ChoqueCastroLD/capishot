@@ -446,6 +446,18 @@ fn vector_rendered_mask_not_doubled_on_shapes() {
     let l = d.layers.last().unwrap();
     assert_eq!(l.content.kind_name(), "Shape");
     assert!(l.mask.is_none());
+
+    let record = f.layers_mut().last_mut().unwrap();
+    let photocraft_psd::MaskData::Mask(mask) = &mut record.mask else { panic!("fixture has a mask") };
+    mask.real = Some(photocraft_psd::RealMask { flags: 0, background: 255, rect: photocraft_psd::Rect { top: 0, left: 0, bottom: 1, right: 1 } });
+    record.channels.push(photocraft_psd::ChannelData { id: -3, compression: Some(Compression::Raw), data: vec![64] });
+    let (imported, _) = psd_to_document(&f);
+    assert_eq!(imported.layers.last().unwrap().content.kind_name(), "Shape");
+    let mask = imported.layers.last().unwrap().mask.as_ref().expect("selected real mask must survive synthetic cleanup");
+    assert!((mask.surface.sample_channel(0, 0, 0) - 64.0 / 255.0).abs() < 1e-6);
+    let exported = export(&imported, "real-mask.psd", &Default::default()).unwrap();
+    let reopened = import("real-mask.psd", &exported.bytes).unwrap().document;
+    assert_eq!(reopened.layers.last().unwrap().mask.as_ref().unwrap().surface.pixel(0, 0), mask.surface.pixel(0, 0));
 }
 
 #[test]
