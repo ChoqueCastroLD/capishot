@@ -1129,7 +1129,8 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.add_space(2.0);
     }
 
-    let rows = doc.walk();
+    // Top of the stack first, groups above their contents, closed groups' contents hidden (#126).
+    let rows = crate::layer_tree_ui::display_rows(&doc, !app.ui.layer_filter.is_empty());
     let ctx = ui.ctx().clone();
     let footer = 38.0;
     let fill = ui.available_height() > footer + 60.0;
@@ -1141,7 +1142,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .auto_shrink([false, !fill])
         .show(ui, |ui| {
             let filter = app.ui.layer_filter.clone();
-            for (_, depth, l) in rows.iter().rev() {
+            for &(depth, l) in &rows {
                 // Select › Isolate Layers.
                 if !photocraft_engine::select_extra_cmds::isolation_shows(&doc, &isolated, l.id) {
                     continue;
@@ -1160,11 +1161,11 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     }
                 }
                 let row = RowSel { selected: selection.contains(&l.id), primary: active == Some(l.id), multi: selection.len() > 1 };
-                layer_row(app, &ctx, ui, &doc, l, *depth, row, &mut actions);
+                layer_row(app, &ctx, ui, &doc, l, depth, row, &mut actions);
                 if !l.effects.items.is_empty() {
-                    effect_rows(app, ui, l, *depth);
+                    effect_rows(app, ui, l, depth);
                 }
-                crate::smart_ui::filter_rows(app, ui, l, *depth, &mut actions);
+                crate::smart_ui::filter_rows(app, ui, l, depth, &mut actions);
             }
         });
     // End any layer drag after every row has had a chance to accept the drop.
@@ -1301,6 +1302,8 @@ fn layer_row(
     let row_h = if t.pro { 32.0 } else { 46.0 };
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
     layer_drag_and_drop(ctx, ui, l, rect, &resp, actions);
+    // Rows are painted: name them for screen readers and UI tests.
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &l.name));
     let painter = ui.painter_at(rect.expand(1.0));
     if t.pro {
         if selected {
@@ -1325,6 +1328,7 @@ fn layer_row(
         actions.push(("layer.setProps".into(), json!({"layer": l.id.0, "visible": !l.visible})));
     }
     x += 28.0 + depth as f32 * 14.0;
+    let toggled = crate::layer_tree_ui::disclosure(ui, rect, &mut x, l, actions);
     if l.clipped {
         painter.text(pos2(x, rect.center().y), Align2::LEFT_CENTER, "↳", egui::FontId::proportional(13.0), t.text_faint);
         x += 12.0;
@@ -1405,7 +1409,7 @@ fn layer_row(
     });
     if let Some(p) = thumb_load {
         actions.push(("select.loadSelection".into(), p));
-    } else if resp.clicked() && !eye_resp.clicked() {
+    } else if resp.clicked() && !eye_resp.clicked() && !toggled {
         let mode = select_mode(ui.input(|i| i.modifiers));
         actions.push(("layer.select".into(), json!({"layer": l.id.0, "mode": mode})));
         // Clicking a thumbnail picks what painting targets; adjustment/fill layers target their mask.

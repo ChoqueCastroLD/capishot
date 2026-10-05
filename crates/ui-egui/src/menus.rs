@@ -60,7 +60,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
 ];
 
 /// Photoshop's Window › <panel> ids for the panels the shell already has, as `window.toggle.*`.
-fn panel_alias(id: &str) -> Option<&'static str> {
+pub(crate) fn panel_alias(id: &str) -> Option<&'static str> {
     Some(match id.strip_prefix("window.panel.")? {
         "layers" => "window.toggle.layers",
         "history" => "window.toggle.history",

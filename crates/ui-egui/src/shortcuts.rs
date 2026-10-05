@@ -162,10 +162,22 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.distort.liquify.is_some() && !ctx.text_edit_focused() {
         crate::liquify_ui::keys(app, ctx);
     }
-    if ctx.egui_wants_keyboard_input() || !app.ui.dialogs.is_empty() || app.discard.is_some() {
-        // Dialogs and focused sliders keep canvas zoom; a focused text field keeps its keys.
-        if !ctx.text_edit_focused() {
+    use crate::shortcut_dispatch::{Focus, dispatch, pressed_command};
+    let focus = Focus::of(ctx);
+    // Dialogs (and Liquify's panel while one of its controls has focus) keep canvas zoom; a
+    // focused text field keeps its keys.
+    let liquify_focus = app.distort.liquify.is_some() && focus != Focus::None;
+    if liquify_focus || !app.ui.dialogs.is_empty() || app.discard.is_some() {
+        if focus != Focus::Text {
             nav_keys(app, ctx);
+        }
+        return;
+    }
+    if focus == Focus::Text {
+        // A focused field keeps its typing and editing keys; menu shortcuts (⌘J, ⌘S, F7…) still
+        // fire, as in Photoshop.
+        if let Some(id) = pressed_command(app, ctx, focus, false) {
+            dispatch(app, ctx, &id);
         }
         return;
     }
@@ -197,44 +209,10 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     // Inline type editing eats text and navigation keys; ⌘-shortcuts still reach the menus.
     let editing = crate::type_tool::handle_keys(app, ctx);
-    // Registry + UI command shortcuts, most-modifiers first so ⇧⌘Z wins over ⌘Z.
-    // Edit › Keyboard Shortcuts overrides replace the defaults (and can bind any menu item).
-    let prefs = app.session.prefs();
-    let mut all: Vec<(String, KeyboardShortcut)> = crate::menus::UI_COMMANDS
-        .iter()
-        .filter_map(|(id, _, _, sc)| Some((id.to_string(), parse(prefs.shortcut(id, *sc)?)?)))
-        .chain(photocraft_engine::command_specs().iter().filter_map(|c| Some((c.id.to_string(), parse(prefs.shortcut(c.id, c.shortcut)?)?))))
-        .chain(
-            prefs
-                .shortcuts
-                .iter()
-                .filter(|(id, sc)| {
-                    !sc.is_empty() && photocraft_engine::commands::find(id).is_none() && !crate::menus::UI_COMMANDS.iter().any(|c| c.0 == id.as_str())
-                })
-                .filter_map(|(id, sc)| Some((id.clone(), parse(sc)?))),
-        )
-        .filter(|(_, sc)| sc.modifiers != Modifiers::NONE || !matches!(sc.logical_key, Key::X | Key::D))
-        .collect();
-    all.sort_by_key(|(_, sc)| std::cmp::Reverse(sc.modifiers.shift as u8 + sc.modifiers.alt as u8 + sc.modifiers.command as u8));
-    for (id, sc) in all {
-        // While typing, clipboard/select-all shortcuts belong to the text, not the pixels.
-        if editing && matches!(id.as_str(), "edit.copy" | "edit.cut" | "edit.paste" | "edit.copyMerged" | "select.all" | "edit.pasteSpecial.pasteInPlace") {
-            continue;
-        }
-        if consume(ctx, &sc) {
-            if crate::menus::is_enabled(app, &id) {
-                let r = if crate::adjust_dialog::has_dialog(&id) {
-                    crate::adjust_dialog::open(app, &id);
-                    Ok(serde_json::Value::Null)
-                } else {
-                    crate::menus::invoke(app, ctx, &id, json!({}))
-                };
-                if let Err(e) = r {
-                    app.ui.status = e;
-                }
-            }
-            return;
-        }
+    // Registry, UI and menu-catalogue shortcuts (see [`crate::shortcut_dispatch::bindings`]).
+    if let Some(id) = pressed_command(app, ctx, focus, editing) {
+        dispatch(app, ctx, &id);
+        return;
     }
     if editing {
         return;
