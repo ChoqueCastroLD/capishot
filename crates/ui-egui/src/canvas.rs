@@ -42,6 +42,89 @@ pub struct Drag {
     pub erase: bool,
     /// ⇧ constraint of a painting stroke (stroke_constraint.rs).
     pub constrain: Option<crate::stroke_constraint::Axis>,
+    /// Modifiers held now (updated on every pointer event of the gesture).
+    pub live: egui::Modifiers,
+    /// Which of the modifiers held at the press have been released since.
+    pub released: egui::Modifiers,
+}
+
+impl Drag {
+    pub fn new(tool: Tool, start: [f64; 2], points: Vec<[f64; 3]>, modifiers: egui::Modifiers, erase: bool) -> Self {
+        Self { tool, start, points, modifiers, erase, constrain: None, live: modifiers, released: egui::Modifiers::NONE }
+    }
+
+    /// Record the modifiers of a pointer event.
+    fn track(&mut self, mods: egui::Modifiers) {
+        self.live = mods;
+        self.released.shift |= !mods.shift;
+        self.released.alt |= !mods.alt;
+    }
+
+    /// ⇧ (square / circle) and ⌥ (from the centre) for a marquee drag. A modifier held at the press
+    /// picks the selection mode instead (add / subtract, #188) until it is released and pressed
+    /// again, as in Photoshop.
+    pub fn marquee_mods(&self) -> (bool, bool) {
+        let fresh = |now: bool, at_press: bool, released: bool| now && (!at_press || released);
+        (fresh(self.live.shift, self.modifiers.shift, self.released.shift), fresh(self.live.alt, self.modifiers.alt, self.released.alt))
+    }
+}
+
+/// The marquee dragged from `d.start` to `end` as two document-space corners: the options-bar
+/// style (fixed ratio / fixed size), ⇧ for a square or circle, ⌥ to draw from the centre.
+pub fn marquee_corners(o: &crate::state::ToolOptions, d: &Drag, end: [f64; 2]) -> ([f64; 2], [f64; 2]) {
+    let (shift, alt) = d.marquee_mods();
+    let e = crate::chrome_ui::marquee_end(&o.marquee_style, o.marquee_width as f64, o.marquee_height as f64, shift, d.start, end);
+    if !alt {
+        return (d.start, e);
+    }
+    let (dx, dy) = (e[0] - d.start[0], e[1] - d.start[1]);
+    // A fixed size is centred on the press point; otherwise the drag is the half extent.
+    let (hx, hy) = if o.marquee_style == "fixedSize" { (dx / 2.0, dy / 2.0) } else { (dx, dy) };
+    ([d.start[0] - hx, d.start[1] - hy], [d.start[0] + hx, d.start[1] + hy])
+}
+
+/// The pixel rectangle `[x0, y0, x1, y1]` a marquee between two corners selects.
+pub fn marquee_px(a: [f64; 2], b: [f64; 2]) -> [f64; 4] {
+    [a[0].min(b[0]).floor(), a[1].min(b[1]).floor(), a[0].max(b[0]).ceil(), a[1].max(b[1]).ceil()]
+}
+
+/// The size readout shown beside the cursor while dragging a marquee: the width and height values.
+pub fn marquee_readout(r: [f64; 4]) -> [String; 2] {
+    [format!("{} px", r[2] - r[0]), format!("{} px", r[3] - r[1])]
+}
+
+/// Draw the marquee size readout below-right of the cursor (kept on screen), like Photoshop's:
+/// two rows, `W:` / `H:` labels on the left and the values right-aligned.
+fn draw_marquee_readout(ctx: &egui::Context, cursor: Pos2, values: [String; 2]) {
+    let t = crate::theme::Tokens::get(ctx);
+    let font = egui::FontId::proportional(11.5);
+    let labels = ["W:", "H:"];
+    let width = |text: &str| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), font.clone(), t.text).size().x);
+    let (lw, vw) = (labels.map(width), [width(&values[0]), width(&values[1])]);
+    let (label_col, value_col) = (lw[0].max(lw[1]), vw[0].max(vw[1]));
+    egui::Area::new(egui::Id::new("marquee-readout"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(cursor + vec2(16.0, 18.0))
+        .interactable(false)
+        .constrain(true)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(t.card)
+                .stroke(Stroke::new(1.0, t.card_border))
+                .corner_radius(t.radius_sm)
+                .inner_margin(egui::Margin::symmetric(7, 4))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = vec2(0.0, 1.0);
+                    for (i, value) in values.into_iter().enumerate() {
+                        // Labels left, values right-aligned on one edge, sharing a baseline.
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Label::new(egui::RichText::new(labels[i]).font(font.clone()).color(t.text_dim)).extend());
+                            ui.add_space(label_col - lw[i] + 12.0 + value_col - vw[i]);
+                            ui.add(egui::Label::new(egui::RichText::new(value).font(font.clone()).color(t.text)).extend());
+                        });
+                    }
+                });
+        });
 }
 
 /// A Brush/Eraser stroke shown while it is drawn: the engine renders the real dabs onto a copy of
@@ -1594,10 +1677,10 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
         app.trail = None;
         return;
     };
-    let mut last = d.points.last().map(|p| [p[0], p[1]]).unwrap_or(d.start);
-    if matches!(d.tool, Tool::RectMarquee | Tool::EllipseMarquee) {
-        let o = &app.ui.tool_options;
-        last = crate::chrome_ui::marquee_end(&o.marquee_style, o.marquee_width as f64, o.marquee_height as f64, false, d.start, last);
+    let last = d.points.last().map(|p| [p[0], p[1]]).unwrap_or(d.start);
+    let marquee = matches!(d.tool, Tool::RectMarquee | Tool::EllipseMarquee).then(|| marquee_corners(&app.ui.tool_options, d, last));
+    if let Some((a, b)) = marquee {
+        draw_marquee_readout(painter.ctx(), xf.to_screen(last[0] as f32, last[1] as f32), marquee_readout(marquee_px(a, b)));
     }
     match d.tool {
         // The canvas shows the live stroke itself (`LiveStroke`).
@@ -1616,7 +1699,8 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
         t if crate::vector_ui::is_shape_tool(t) => crate::vector_ui::draw_shape_preview(app, painter, xf, t, d.start, last, d.modifiers),
         Tool::RectMarquee | Tool::EllipseMarquee | Tool::ObjectSelection => {
             // Marching ants, visible on any pixels (#172).
-            let r = Rect::from_two_pos(xf.to_screen(d.start[0] as f32, d.start[1] as f32), xf.to_screen(last[0] as f32, last[1] as f32));
+            let (a, b) = marquee.unwrap_or((d.start, last));
+            let r = Rect::from_two_pos(xf.to_screen(a[0] as f32, a[1] as f32), xf.to_screen(b[0] as f32, b[1] as f32));
             let r = Rect::from_min_max(r.min.round() + vec2(0.5, 0.5), r.max.round() + vec2(0.5, 0.5));
             let pts = if d.tool == Tool::EllipseMarquee {
                 crate::tool_feedback::ellipse_points(r)
@@ -1784,7 +1868,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             if let Some(p) = from {
                 points.insert(0, [p[0], p[1], pressure as f64]);
             }
-            app.drag = Some(Drag { tool, start: from.unwrap_or([x, y]), points, modifiers: mods, erase, constrain: None });
+            app.drag = Some(Drag::new(tool, from.unwrap_or([x, y]), points, mods, erase));
             app.trail = None;
             app.stylus.begin_stroke();
             if from.is_some() {
@@ -1801,6 +1885,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             }
             let zoom = app.current_zoom();
             if let Some(d) = &mut app.drag {
+                d.track(mods);
                 // ⇧: straight 0/45/90° strokes, 45° gradient angles (stroke_constraint.rs).
                 let last = d.points.last().map_or(d.start, |p| [p[0], p[1]]);
                 let [x, y] = crate::stroke_constraint::constrain(d.tool, &mut d.constrain, d.start, last, [x, y], mods.shift, zoom);
@@ -1822,6 +1907,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             }
             let zoom = app.current_zoom();
             let Some(mut d) = app.drag.take() else { return };
+            d.track(mods);
             let last = d.points.last().map_or(d.start, |p| [p[0], p[1]]);
             let [x, y] = crate::stroke_constraint::constrain(d.tool, &mut d.constrain, d.start, last, [x, y], mods.shift, zoom);
             // A Move-tool click (released where it was pressed) selects, it never moves: snapping
@@ -1881,11 +1967,8 @@ fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
             }
         }
         Tool::RectMarquee | Tool::EllipseMarquee => {
-            let o = &app.ui.tool_options;
-            let e = crate::chrome_ui::marquee_end(&o.marquee_style, o.marquee_width as f64, o.marquee_height as f64, false, d.start, [end[0], end[1]]);
-            let end = [e[0], e[1], 1.0];
-            let (x0, y0) = (d.start[0].min(end[0]).floor(), d.start[1].min(end[1]).floor());
-            let (x1, y1) = (d.start[0].max(end[0]).ceil(), d.start[1].max(end[1]).ceil());
+            let (a, b) = marquee_corners(&app.ui.tool_options, &d, [end[0], end[1]]);
+            let [x0, y0, x1, y1] = marquee_px(a, b);
             if x1 - x0 < 2.0 || y1 - y0 < 2.0 {
                 if app.session.is_enabled("select.deselect") {
                     let _ = app.run("select.deselect", json!({}));

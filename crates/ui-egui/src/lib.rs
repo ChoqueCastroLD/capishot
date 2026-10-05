@@ -1134,6 +1134,9 @@ impl PhotocraftApp {
 mod input_tests;
 
 #[cfg(test)]
+mod marquee_tests;
+
+#[cfg(test)]
 mod clipboard_tests {
     use super::*;
     use std::sync::{Arc, Mutex};
