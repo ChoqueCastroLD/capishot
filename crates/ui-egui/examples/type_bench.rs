@@ -4,7 +4,7 @@
 //! for it (`canvas::ensure_texture`, the path without a GPU or when the GPU compositor falls back).
 //!
 //! ```sh
-//! cargo run --release -p photocraft-ui-egui --example type_bench -- [--size 6000x4000] [--layers 50] [--steps 30] [--effects]
+//! cargo run --release -p photocraft-ui-egui --example type_bench -- [--size 6000x4000] [--layers 50] [--steps 30] [--effects] [--typing]
 //! ```
 
 use std::time::Instant;
@@ -21,6 +21,45 @@ fn median(mut v: Vec<f64>) -> f64 {
     v.get(v.len() / 2).copied().unwrap_or(0.0)
 }
 
+/// `--typing`: per-keystroke cost of typing into a horizontal and a vertical (#199) Japanese type
+/// layer: the edit command (re-layout and re-render), the Type tool's overlay layout and the CPU
+/// canvas refresh, as the Type tool does it for each character.
+fn typing(app: &mut PhotocraftApp, steps: usize) {
+    let text: Vec<char> = "縦書きのテキストは、「右から左へ」進みます。PhotoCraft 2026年ー".chars().collect();
+    for orient in ["horizontal", "vertical"] {
+        let r = app.run("type.create", json!({"x": 3000, "y": 200, "text": "", "size": 48, "font": "Hiragino Sans"})).expect("type.create");
+        let id = r["layer"].as_u64().unwrap_or(0);
+        app.run(&format!("type.orientation.{orient}"), json!({"layer": id})).expect("orientation");
+        app.sync_views();
+        let ctx = egui::Context::default();
+        let _ = photocraft_ui_egui::canvas::ensure_texture(app, &ctx, 0);
+        let (mut cmd, mut lay, mut canvas, mut total) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for i in 0..steps {
+            let c = text.get(i % text.len()).copied().unwrap_or('あ');
+            let t0 = Instant::now();
+            app.run("type.edit", json!({"layer": id, "replace": {"start": i, "end": i, "text": c.to_string()}, "coalesce": format!("typing-{orient}")}))
+                .expect("type.edit");
+            let t1 = Instant::now();
+            let _ = photocraft_ui_egui::type_tool::layout(app, photocraft_doc::LayerId(id));
+            let t2 = Instant::now();
+            let _ = photocraft_ui_egui::canvas::ensure_texture(app, &ctx, 0);
+            let t3 = Instant::now();
+            cmd.push((t1 - t0).as_secs_f64() * 1e3);
+            lay.push((t2 - t1).as_secs_f64() * 1e3);
+            canvas.push((t3 - t2).as_secs_f64() * 1e3);
+            total.push((t3 - t0).as_secs_f64() * 1e3);
+        }
+        let worst = total.iter().copied().fold(0.0, f64::max);
+        println!(
+            "{orient:>10} typing (median of {steps} keystrokes): command {:.2} ms, overlay layout {:.2} ms, canvas refresh {:.2} ms, total {:.2} ms (worst {worst:.2} ms)",
+            median(cmd),
+            median(lay),
+            median(canvas),
+            median(total),
+        );
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let (w, h) =
@@ -33,6 +72,10 @@ fn main() {
 
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
     app.run("file.new", json!({"width": w, "height": h})).expect("new document");
+    if args.iter().any(|a| a == "--typing") {
+        typing(&mut app, steps);
+        return;
+    }
     let t0 = Instant::now();
     let mut ids = Vec::new();
     for i in 0..n {

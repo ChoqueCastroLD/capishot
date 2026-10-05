@@ -8,7 +8,7 @@ use skrifa::instance::{LocationRef, NormalizedCoord, Size};
 use skrifa::outline::DrawSettings;
 use skrifa::{GlyphId, MetadataProvider};
 
-use crate::layout::TextLayout;
+use crate::layout::{GlyphOrient, PlacedGlyph, TextLayout};
 use crate::raster::{Bounds, Coverage, LineSink, Pen, Xform, rect_to};
 use crate::warp::Warp;
 
@@ -66,12 +66,7 @@ fn draw(layout: &TextLayout, transform: &Xform, sink: &mut impl LineSink, only_c
             continue;
         };
         let coords: Vec<NormalizedCoord> = face.coords.iter().map(|&c| NormalizedCoord::from_bits(c)).collect();
-        let hs = if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 } as f64;
-        let vs = if st.vertical_scale > 0.0 { st.vertical_scale } else { 1.0 } as f64;
-        let skew_deg = if st.faux_italic { FAUX_ITALIC_DEG } else { 0.0 } + face.skew_deg;
-        let skew = (skew_deg as f64).to_radians().tan() * vs;
-        let shift = (st.baseline_shift_pt * layout.px_per_pt) as f64;
-        let glyph = Xform([hs, 0.0, skew, -vs, g.x as f64, g.y as f64 - shift]);
+        let glyph = glyph_xform(layout, g, face.skew_deg);
         let bold = st.faux_bold || face.embolden;
         let r = (face.size_px * FAUX_BOLD_RADIUS) as f64;
         let offsets: &[(f64, f64)] =
@@ -108,6 +103,25 @@ fn draw(layout: &TextLayout, transform: &Xform, sink: &mut impl LineSink, only_c
             }
             None => rect_to(sink, transform, d.x0 as f64, d.y0 as f64, d.x1 as f64, d.y1 as f64),
         }
+    }
+}
+
+/// Font units (scaled to px, y up) → text space for a placed glyph: scales, faux italic,
+/// baseline shift, and the vertical-type orientation.
+fn glyph_xform(layout: &TextLayout, g: &PlacedGlyph, face_skew_deg: f32) -> Xform {
+    let Some(st) = layout.styles.get(g.style as usize) else { return Xform([1.0, 0.0, 0.0, -1.0, g.x as f64, g.y as f64]) };
+    let hs = if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 } as f64;
+    let vs = if st.vertical_scale > 0.0 { st.vertical_scale } else { 1.0 } as f64;
+    let skew_deg = if st.faux_italic { FAUX_ITALIC_DEG } else { 0.0 } + face_skew_deg;
+    let skew = (skew_deg as f64).to_radians().tan() * vs;
+    let shift = (st.baseline_shift_pt * layout.px_per_pt) as f64;
+    let (x, y) = (g.x as f64, g.y as f64);
+    match g.orient {
+        GlyphOrient::Horizontal => Xform([hs, 0.0, skew, -vs, x, y - shift]),
+        // Baseline shift moves upright glyphs in vertical type to the right.
+        GlyphOrient::Upright => Xform([hs, 0.0, skew, -vs, x + shift, y]),
+        // 90° clockwise: the glyph's up direction (and its baseline shift) points right.
+        GlyphOrient::Rotated => Xform([0.0, 1.0, -1.0, 0.0, x, y]).mul(&Xform([hs, 0.0, skew, -vs, 0.0, -shift])),
     }
 }
 
@@ -264,7 +278,6 @@ impl skrifa::outline::OutlinePen for Recorder<'_> {
 pub fn outlines(layout: &TextLayout, transform: &Affine, warp: Option<&Warp>) -> Vec<Vec<PathEl>> {
     let mut glyphs = Vec::new();
     for g in &layout.glyphs {
-        let st = &layout.styles[g.style as usize];
         let face = &layout.faces[g.face as usize];
         let Ok(font) = skrifa::FontRef::from_index(face.font.data.as_ref(), face.font.index) else {
             continue;
@@ -273,12 +286,7 @@ pub fn outlines(layout: &TextLayout, transform: &Affine, warp: Option<&Warp>) ->
             continue;
         };
         let coords: Vec<NormalizedCoord> = face.coords.iter().map(|&c| NormalizedCoord::from_bits(c)).collect();
-        let hs = if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 } as f64;
-        let vs = if st.vertical_scale > 0.0 { st.vertical_scale } else { 1.0 } as f64;
-        let skew_deg = if st.faux_italic { FAUX_ITALIC_DEG } else { 0.0 } + face.skew_deg;
-        let skew = (skew_deg as f64).to_radians().tan() * vs;
-        let shift = (st.baseline_shift_pt * layout.px_per_pt) as f64;
-        let glyph = Xform([hs, 0.0, skew, -vs, g.x as f64, g.y as f64 - shift]);
+        let glyph = glyph_xform(layout, g, face.skew_deg);
         let mut rec = Recorder { glyph, post: Xform(transform.m), warp, out: Vec::new() };
         let settings = DrawSettings::unhinted(Size::new(face.size_px), LocationRef::new(&coords));
         if outline.draw(settings, &mut rec).is_ok() && !rec.out.is_empty() {

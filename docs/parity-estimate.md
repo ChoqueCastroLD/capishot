@@ -32,7 +32,7 @@ just presence.
 | Paint / brush engine, retouch (clone, healing) | ~85% | Solid; no Mixer Brush depth, no Content-Aware healing |
 | Adjustments + adjustment layers | ~90% | All kinds present; Camera Raw depth and a few toe-curve models approximate |
 | Filters (incl. Filter Gallery ×47, Liquify, blurs, render) | ~88% | Gallery looks are approximations; no Neural Filters |
-| Type / text engine, character & paragraph styles, glyphs | ~90% | Vertical type and OpenType alternates thin |
+| Type / text engine, character & paragraph styles, glyphs | ~90% | Vertical type laid out and rendered (#199; no mojikumi or upright-Roman option yet); OpenType alternates thin |
 | Color management (ICC v2/v4, intents, soft-proof) | ~90% | Own pure-Rust CMS; no Adobe CMYK profiles (synthetic) |
 | File I/O: PSD, native .pcraft, flats (png/jpg/tiff/webp/exr/…) | ~85% | PSD oracle ~65% pixel-exact; most structure round-trips |
 | Transform, warp, puppet, perspective, liquify | ~88% | No Face-Aware Liquify (needs a landmark model) |

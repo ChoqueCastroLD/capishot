@@ -217,7 +217,7 @@ pub enum TextShape {
 pub enum Orientation {
     #[default]
     Horizontal,
-    /// Vertical type: modelled for round trip, rendered horizontally for now.
+    /// Vertical type (tategaki): columns top to bottom, advancing right to left.
     Vertical,
 }
 

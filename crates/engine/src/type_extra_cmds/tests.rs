@@ -73,6 +73,73 @@ fn point_and_paragraph_conversion_keep_the_text_in_place() {
     }
 }
 
+/// Issue #199: vertical type is laid out top to bottom, columns right to left, on the canvas.
+#[test]
+fn vertical_orientation_renders_columns_inside_the_canvas() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 1000, "height": 600, "background": "#fff8e7", "name": "flyer"})).unwrap();
+    // The issue's repro (its font may be missing here: fallback fonts then cover the text).
+    let r = s.execute("type.create", json!({"x": 900, "y": 30, "text": "縦書きテスト", "size": 40, "font": "Noto Sans CJK JP", "name": "vertical"})).unwrap();
+    let id = LayerId(r["layer"].as_u64().unwrap());
+    let flat = ink(&s, id);
+    assert!(flat.width() > flat.height(), "horizontal first: {flat:?}");
+    let v = s.execute("type.orientation.vertical", json!({})).unwrap();
+    assert_eq!(v, json!({"orientation": "vertical"}));
+    let b = ink(&s, id);
+    assert!(b.height() > b.width(), "{b:?}");
+    assert!(b.x0 >= 0 && b.x1 <= 1000 && b.y0 >= 0 && b.y1 <= 600, "inside the canvas: {b:?}");
+    // Centred on the anchor's x, running down from its y.
+    assert!(b.x0 < 900 && b.x1 > 900 && b.y0 >= 25, "{b:?}");
+    // Latin text: a second column of a two-line layer sits left of the first.
+    let r = s.execute("type.create", json!({"x": 500, "y": 30, "text": "ABC\nDEF", "size": 40})).unwrap();
+    let two = LayerId(r["layer"].as_u64().unwrap());
+    s.execute("type.orientation.vertical", json!({"layer": two.0})).unwrap();
+    let st = s.active().unwrap();
+    let l = layout(&st.doc, text(&s, two));
+    assert!(l.vertical && l.lines.len() == 2);
+    let [x0, y0, x1, y1] = l.bounds().unwrap();
+    assert!(x1 > 0.0 && x0 < -40.0 && y0 >= -1e-3 && y1 > 60.0, "{:?}", l.bounds());
+    // Bad layer ids fail cleanly.
+    assert!(s.execute("type.orientation.vertical", json!({"layer": 9999})).is_err());
+}
+
+#[test]
+fn vertical_point_and_paragraph_conversion_keep_the_columns_in_place() {
+    for align in ["left", "center", "right"] {
+        let mut s = session(8);
+        s.execute("image.canvasSize", json!({"width": 300, "height": 400})).ok();
+        let r = s.execute("type.create", json!({"x": 150, "y": 100, "text": "Hello world", "size": 30, "align": align})).unwrap();
+        let id = LayerId(r["layer"].as_u64().unwrap());
+        s.execute("type.orientation.vertical", json!({})).unwrap();
+        let st = s.active().unwrap();
+        let before = layout(&st.doc, text(&s, id)).bounds().unwrap();
+        let before_tf = text(&s, id).transform;
+        let map = |t: &photocraft_geom::Affine, b: [f32; 4]| {
+            let p = t.apply(photocraft_geom::Point::new(f64::from(b[0]), f64::from(b[1])));
+            (p.x, p.y)
+        };
+        let doc_before = map(&before_tf, before);
+        s.execute("type.convertToParagraphText", json!({})).unwrap();
+        let TextShape::Box { height, .. } = text(&s, id).shape else { panic!("box expected") };
+        let st = s.active().unwrap();
+        let l = layout(&st.doc, text(&s, id));
+        assert_eq!(l.lines.len(), 1, "{align}: no new wraps");
+        assert!(height > 0.0);
+        // The column's first glyph stays where it was (glyph positions in document space).
+        let g_after = l.glyphs[0];
+        let tf = text(&s, id).transform;
+        let p_after = tf.apply(photocraft_geom::Point::new(f64::from(g_after.x), f64::from(g_after.y)));
+        s.execute("type.convertToPointText", json!({})).unwrap();
+        let st = s.active().unwrap();
+        let back = layout(&st.doc, text(&s, id));
+        let g_back = back.glyphs[0];
+        let p_back = text(&s, id).transform.apply(photocraft_geom::Point::new(f64::from(g_back.x), f64::from(g_back.y)));
+        assert!((p_after.x - p_back.x).abs() < 1.5 && (p_after.y - p_back.y).abs() < 1.5, "{align}: {p_after:?} → {p_back:?}");
+        let back_doc = map(&text(&s, id).transform, back.bounds().unwrap());
+        assert!((back_doc.0 - doc_before.0).abs() < 1.5 && (back_doc.1 - doc_before.1).abs() < 1.5, "{align}: {doc_before:?} → {back_doc:?}");
+    }
+}
+
 #[test]
 fn paragraph_to_point_hardens_soft_wraps() {
     let mut s = session(8);

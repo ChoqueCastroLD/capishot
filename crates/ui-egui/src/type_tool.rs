@@ -275,20 +275,42 @@ pub fn select_word(app: &mut PhotocraftApp) {
     }
 }
 
-/// Caret on the neighbouring line (±1), keeping the x position.
-fn vertical(app: &mut PhotocraftApp, id: LayerId, caret: usize, dir: i32) -> usize {
+/// Caret on the neighbouring line (±1; a column in vertical type), keeping the position
+/// along the line. Works in line space, so it serves both orientations.
+fn line_step(app: &mut PhotocraftApp, id: LayerId, caret: usize, dir: i32) -> usize {
     let Some((l, _, text)) = layout(app, id) else { return caret };
     let (x, top, bottom) = l.caret(byte_of(&text, caret));
     let h = (bottom - top).max(1.0);
     let y = if dir < 0 { top - h * 0.5 } else { bottom + h * 0.5 };
-    let Some(b) = l.bounds() else { return caret };
+    let Some(b) = l.line_bounds() else { return caret };
     if y < b[1] {
         return 0;
     }
     if y > b[3] {
         return text.chars().count();
     }
-    char_of(&text, l.hit_test(x, y))
+    char_of(&text, l.hit_test_line(x, y))
+}
+
+fn is_vertical(app: &PhotocraftApp, id: LayerId) -> bool {
+    app.session.active().and_then(|s| text_layer(&s.doc, id)).is_some_and(|t| t.orientation == photocraft_doc::text::Orientation::Vertical)
+}
+
+/// Arrow keys follow the text flow: in vertical type ↑/↓ move along the column (previous/next
+/// character) and ←/→ move to the next/previous column (columns advance right to left). Returns
+/// the horizontal-type key with the same meaning.
+pub(crate) fn flow_key(key: egui::Key, vertical: bool) -> egui::Key {
+    use egui::Key;
+    if !vertical {
+        return key;
+    }
+    match key {
+        Key::ArrowUp => Key::ArrowLeft,
+        Key::ArrowDown => Key::ArrowRight,
+        Key::ArrowLeft => Key::ArrowDown,
+        Key::ArrowRight => Key::ArrowUp,
+        k => k,
+    }
 }
 
 /// Line start / end for the caret's line.
@@ -316,6 +338,7 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(530)); // caret blink
     let events = ctx.input(|i| i.events.clone());
+    let vertical_flow = is_vertical(app, id);
     let mut handled = vec![false; events.len()];
     for (k, ev) in events.iter().enumerate() {
         let Some(ed) = app.ui.text_edit.clone() else { break };
@@ -348,6 +371,7 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
             }
             egui::Event::Key { key, pressed: true, modifiers: m, .. } => {
                 use egui::Key;
+                let key = &flow_key(*key, vertical_flow);
                 match key {
                     Key::Backspace | Key::Delete => {
                         if a == b {
@@ -388,7 +412,7 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                         let to = if m.command {
                             if *key == Key::ArrowUp { 0 } else { n }
                         } else {
-                            vertical(app, id, ed.caret, if *key == Key::ArrowUp { -1 } else { 1 })
+                            line_step(app, id, ed.caret, if *key == Key::ArrowUp { -1 } else { 1 })
                         };
                         set(app, to, m.shift);
                     }
@@ -445,15 +469,21 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
     let id = LayerId(ed.layer);
     let Some((l, aff, text)) = layout(app, id) else { return };
     let t = crate::theme::Tokens::get(painter.ctx());
-    let scr = |x: f32, y: f32| -> Pos2 {
+    // Text space → screen.
+    let scr_t = |x: f32, y: f32| -> Pos2 {
         let p = aff.apply(Point::new(x as f64, y as f64));
         xf.to_screen(p.x as f32, p.y as f32)
+    };
+    // Line space (lines, clusters, carets) → screen: vertical type turns it 90° clockwise.
+    let scr = |x: f32, y: f32| -> Pos2 {
+        let (x, y) = l.to_text(x, y);
+        scr_t(x, y)
     };
     // Tell the OS where the caret is: this is what enables the IME and places its candidate window.
     {
         let (x, top, bot) = l.caret(byte_of(&text, ed.caret));
         let (x, top, bot) = if l.lines.is_empty() { (0.0, -(12.0 * l.px_per_pt.max(1.0)), 3.0) } else { (x, top, bot) };
-        let r = egui::Rect::from_two_pos(scr(x, top), scr(x, bot)).expand2(egui::vec2(1.0, 0.0));
+        let r = egui::Rect::from_two_pos(scr(x, top), scr(x, bot)).expand(1.0);
         painter.ctx().output_mut(|o| {
             o.ime = Some(egui::output::IMEOutput { purpose: egui::IMEPurpose::Normal, rect: r, cursor_rect: r, should_interrupt_composition: false });
         });
@@ -463,7 +493,7 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
     let frame = Stroke::new(1.0, t.accent);
     match shape {
         Some(photocraft_doc::text::TextShape::Box { x, y, width, height }) => {
-            let c = [scr(x, y), scr(x + width, y), scr(x + width, y + height), scr(x, y + height)];
+            let c = [scr_t(x, y), scr_t(x + width, y), scr_t(x + width, y + height), scr_t(x, y + height)];
             painter.add(egui::Shape::closed_line(c.to_vec(), frame));
             let mids = [c[0].lerp(c[1], 0.5), c[1].lerp(c[2], 0.5), c[2].lerp(c[3], 0.5), c[3].lerp(c[0], 0.5)];
             for p in c.iter().chain(mids.iter()) {
@@ -474,7 +504,8 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
         }
         _ => {
             for ln in &l.lines {
-                let y = ln.baseline + ln.descent * 0.25;
+                // Horizontal: just under the baseline; vertical: the column's centre line.
+                let y = if l.vertical { ln.baseline } else { ln.baseline + ln.descent * 0.25 };
                 painter.line_segment([scr(ln.x0.min(0.0), y), scr(ln.x1.max(ln.x0 + 1.0), y)], Stroke::new(1.0, t.accent.gamma_multiply(0.8)));
             }
         }
@@ -648,7 +679,15 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         Some((f, s, z, _)) => (f.clone(), if s.is_empty() { "Regular".into() } else { s.clone() }, *z),
         None => (o.type_font.clone(), o.type_style.clone(), o.type_size),
     };
-    let _ = crate::icons::button(ui, "text-cursor", 24.0, false, "Toggle text orientation");
+    if crate::icons::button(ui, "text-cursor", 24.0, false, "Toggle text orientation").clicked()
+        && let Some((layer, _)) = target(app)
+    {
+        let to = if is_vertical(app, LayerId(layer)) { "horizontal" } else { "vertical" };
+        if let Err(e) = app.run(&format!("type.orientation.{to}"), json!({"layer": layer})) {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
+    }
     if font_picker(ui, &mut fam, 170.0) {
         app.ui.tool_options.type_font = fam.clone();
         let st = styles(&fam);

@@ -136,6 +136,10 @@ pub fn text_layer_from_tysh(data: &[u8], dpi: f32) -> Option<TextLayer> {
     }
     let k = 72.0 / if dpi > 0.0 { dpi } else { 72.0 };
     if let Some(e) = engine_data(&t.text) {
+        // Without an `Ornt` key, the engine data's writing direction says it (2 = vertical).
+        if enum_value(&t.text, "Ornt").is_none() && e.path(&["EngineDict", "Rendered", "Shapes", "WritingDirection"]).and_then(E::as_f64) == Some(2.0) {
+            layer.orientation = Orientation::Vertical;
+        }
         apply_engine_data(&mut layer, &e, txt.as_deref(), k);
     } else {
         layer.text = txt.unwrap_or_default().replace('\r', "\n");
@@ -544,17 +548,20 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
             ("TransformPoint2".into(), E::Array(vec![real(0.0), real(0.0)])),
         ]),
     );
+    // EngineData writing direction and procession, as Photoshop writes vertical type: 2 and 1
+    // (horizontal: 0 and 0). The descriptor's `Ornt` agrees.
+    let writing = if layer.orientation == Orientation::Vertical { 2 } else { 0 };
     let child = E::Dict(vec![
         ("ShapeType".into(), E::Int(shape_type)),
-        ("Procession".into(), E::Int(0)),
-        ("Lines".into(), E::Dict(vec![("WritingDirection".into(), E::Int(0)), ("Children".into(), E::Array(vec![]))])),
+        ("Procession".into(), E::Int(i64::from(writing == 2))),
+        ("Lines".into(), E::Dict(vec![("WritingDirection".into(), E::Int(writing)), ("Children".into(), E::Array(vec![]))])),
         ("Cookie".into(), E::Dict(vec![("Photoshop".into(), photoshop)])),
     ]);
     dict.set(
         "Rendered",
         E::Dict(vec![
             ("Version".into(), E::Int(1)),
-            ("Shapes".into(), E::Dict(vec![("WritingDirection".into(), E::Int(0)), ("Children".into(), E::Array(vec![child]))])),
+            ("Shapes".into(), E::Dict(vec![("WritingDirection".into(), E::Int(writing)), ("Children".into(), E::Array(vec![child]))])),
         ]),
     );
 
