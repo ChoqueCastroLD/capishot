@@ -784,6 +784,53 @@ fn inside_stroke_respects_partial_edge_coverage() {
 }
 
 #[test]
+fn emboss_shades_the_composited_layer() {
+    // Emboss styles paint over the layer as composited (for type: mixed at the text gamma), so a
+    // Normal white highlight `k` on an edge pixel keeps (1 − R) = (1 − k)(1 − C) whatever C is:
+    // the ratio of type to raster results equals that of their plain composites.
+    let emboss = Effect::BevelEmboss(photocraft_doc::Bevel {
+        enabled: true,
+        style: photocraft_doc::BevelStyle::Emboss,
+        technique: photocraft_doc::BevelTechnique::Smooth,
+        depth: 1.0,
+        up: true,
+        size: 6.0,
+        soften: 0.0,
+        angle: 90.0,
+        altitude: 30.0,
+        use_global_light: false,
+        gloss_contour: photocraft_doc::Contour::Linear,
+        highlight: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0),
+        highlight_color: Color::WHITE,
+        shadow: FxCommon::new(photocraft_color::BlendMode::Multiply, 0.0),
+        shadow_color: Color::BLACK,
+        contour: None,
+        texture: None,
+    });
+    let make = |text: bool, fx: bool| {
+        let mut d = doc_white(40, 40);
+        let mut l = solid_layer("sq", Rect::new(10, 10, 30, 30), [0.2, 0.1, 0.6, 1.0]);
+        l.surface_mut().unwrap().fill_rect(Rect::new(10, 10, 30, 11), &[0.2, 0.1, 0.6, 0.5]);
+        if text {
+            let t = photocraft_doc::TextLayer { cache: l.surface().cloned(), ..Default::default() };
+            l = Layer::new("t", LayerContent::Text(t));
+        }
+        if fx {
+            l.effects.items = vec![emboss.clone()];
+        }
+        d.layers.push(l);
+        px(&d, 20, 10)
+    };
+    let (ct, cr, rt, rr) = (make(true, false), make(false, false), make(true, true), make(false, true));
+    assert!(rr[1] > cr[1] + 0.05, "the top edge is lit: {rr:?} vs {cr:?}");
+    assert!((ct[1] - cr[1]).abs() > 0.02, "text gamma changes the edge: {ct:?} {cr:?}");
+    for c in 0..3 {
+        let want = (1.0 - ct[c]) / (1.0 - cr[c]);
+        assert!(((1.0 - rt[c]) / (1.0 - rr[c]) - want).abs() < 2e-3, "channel {c}: {rt:?} {rr:?} {ct:?} {cr:?}");
+    }
+}
+
+#[test]
 fn interior_effects_keep_the_layer_alpha() {
     // A colour overlay replaces a half-transparent pixel's colour without adding coverage.
     let mut d = Document::new("t", Size::new(40, 40), ColorMode::Rgb, SampleType::U8);

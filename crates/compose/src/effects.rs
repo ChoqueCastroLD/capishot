@@ -5,17 +5,19 @@
 //! fill opacity) with pattern/gradient/colour overlays, satin, inner glows,
 //! inner shadows, strokes and the inner bevel on top. Exterior effects blend
 //! straight into the backdrop with their own modes; the layer and its
-//! interior effects blend with the layer's mode. Layer opacity applies to
-//! the whole stack; fill opacity only to the layer's own pixels.
+//! interior effects blend with the layer's mode. Emboss and pillow emboss then
+//! shade the composited result (inside and outside halves). Layer opacity
+//! applies to the whole stack; fill opacity only to the layer's own pixels.
 //!
 //! Interior effects are painted relative to the layer's shape and then take the shape's alpha
 //! (an overlay recolours a half-transparent edge without adding coverage). The outside parts
 //! of strokes blend onto the backdrop with their own modes, an upper stroke covering the
 //! lower ones. Drop shadows are knocked out only through see-through fill.
 //!
-//! Shapes come from the layer's alpha (after its mask). Strokes measure distances with a
-//! 5 × 5 chamfer metric seeded at sub-pixel edge offsets (as Photoshop does); other effects
-//! use an exact Euclidean distance transform. Soft falloffs are Gaussian blurs.
+//! Shapes come from the layer's alpha (after its mask). Strokes and spread / choke measure
+//! distances with a 5 × 5 chamfer metric seeded at sub-pixel edge offsets (as Photoshop does);
+//! precise glows and chiselled bevels use an exact Euclidean distance transform. Soft falloffs
+//! are two box blurs (a tent).
 
 use photocraft_color::blend::BlendMode;
 use photocraft_doc::Pattern;
@@ -242,9 +244,9 @@ fn dist_outside(s: &Map) -> Vec<f32> {
 /// Distance metric for effect distance fields.
 #[derive(Clone, Copy, PartialEq)]
 enum Metric {
-    /// Exact Euclidean (spread/choke dilation, glows, bevels).
+    /// Exact Euclidean (precise glows, bevels).
     Euclidean,
-    /// 5 × 5 chamfer (strokes; see [`chamfer_nearest`]).
+    /// 5 × 5 chamfer (strokes, spread / choke; see [`chamfer_nearest`]).
     Chamfer,
 }
 
@@ -326,12 +328,16 @@ fn blur(m: &mut Map, size: f32) {
     }
 }
 
-/// Grows the shape by `r` pixels (anti-aliased), keeping the original soft edge.
+/// Grows the shape by `r` pixels (anti-aliased), keeping the original soft edge. Distances use
+/// the 5 × 5 chamfer metric, as for strokes: Photoshop's spread of a group drop shadow around an
+/// ellipse (ag-psd group-drop-shadows) is round at 0° and 45° and falls short in between, peaking
+/// near 15° where the chamfer metric overestimates most (5/255 lighter with an exact Euclidean
+/// dilation, within 2/255 with the chamfer).
 fn dilate(s: &Map, r: f32) -> Map {
     if r <= 0.0 {
         return s.clone();
     }
-    let d = dist_outside(s);
+    let d = dist_outside_by(s, Metric::Chamfer);
     let mut out = s.clone();
     for (o, d) in out.v.iter_mut().zip(d) {
         // Partly covered pixels (distance sentinel < 0) grow by `r` from their own coverage, so a
@@ -432,9 +438,13 @@ pub fn gradient_t(style: GradientStyle, angle: f32, scale: f32, reverse: bool, o
     // shape-fx2), an 87° one on a 600 × 60 text line 60 px (layer_effects); axis-aligned angles
     // span the width / height.
     let chord = (w / c.abs().max(1e-6)).min(h / s.abs().max(1e-6)).max(1.0) * scale.max(1e-3);
+    // Linear / Reflected sample the pixel's top-left corner, half a pixel before its centre
+    // (with the whole-pixel end points of `fill_layout`: layer_effects' overlay 5.8 → 1.8/255,
+    // shape-fx2 2.8 → 1.1/255, gradient-fill.psd 1.9 → 0.5/255).
+    let corner = 0.5 * (c - s);
     let mut t = match style {
-        GradientStyle::Linear => along / chord + 0.5,
-        GradientStyle::Reflected => (along / (chord / 2.0)).abs(),
+        GradientStyle::Linear => (along - corner) / chord + 0.5,
+        GradientStyle::Reflected => ((along - corner) / (chord / 2.0)).abs(),
         GradientStyle::Radial => (dx * dx + dy * dy).sqrt() / (len / 2.0),
         GradientStyle::Diamond => (along.abs() + across.abs()) / (len / 2.0),
         // Clockwise sweep starting at the gradient angle.
@@ -615,13 +625,14 @@ fn paint_fx(
         FxPaint::Color(c) => paint_color(dst, m, rgb(c), blend, opacity),
         FxPaint::Gradient(g) => {
             let prepared = PreparedGradient::new(g);
+            let (angle, scale, offset) = crate::fill_layout::gradient_layout(g.style, g.angle, g.scale, g.offset, shape_bounds);
             let w = big.width() as usize;
             paint(
                 dst,
                 m,
                 |i| {
                     let (x, y) = ((big.x0 + (i % w) as i32) as f32 + 0.5, (big.y0 + (i / w) as i32) as f32 + 0.5);
-                    prepared.sample(gradient_t(g.style, g.angle, g.scale, g.reverse, g.offset, shape_bounds, x, y))
+                    prepared.sample(gradient_t(g.style, angle, scale, g.reverse, offset, shape_bounds, x, y))
                 },
                 blend,
                 opacity,
@@ -811,7 +822,7 @@ pub const BEVEL_H_EPS: f32 = 1e-5;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BevelGeom {
     pub paint: BevelPaint,
-    /// Box width of the smooth height blur (size; half the size for emboss styles).
+    /// Box width of the smooth height blur (size; half the size, rounded up, for emboss styles).
     pub width: f32,
     /// Height-map gradient scale: depth × width (smooth) or depth × size (chisel), signed by
     /// direction.
@@ -830,7 +841,10 @@ pub fn bevel_geom(b: &Bevel) -> BevelGeom {
         BevelStyle::Emboss | BevelStyle::PillowEmboss => BevelPaint::Both,
         BevelStyle::InnerBevel | BevelStyle::StrokeEmboss => BevelPaint::Inner,
     };
-    let width = if emboss { size / 2.0 } else { size };
+    // Emboss styles straddle the edge with half the size, rounded up to whole pixels: a 41 px
+    // emboss blurs over 21 (psd-tools layer_effects: 20.5 left narrow letter parts up to
+    // 5.7/255 dark, 21 is within 2.2).
+    let width = if emboss { (size / 2.0).ceil() } else { size };
     let smooth = b.technique == BevelTechnique::Smooth;
     let sign = if b.up { 1.0 } else { -1.0 };
     BevelGeom {
@@ -922,7 +936,16 @@ fn bevel_maps(shape: &Map, b: &Bevel, light: &GlobalLight, tex: &TextureCtx, pat
     let (sa, ca) = angle.to_radians().sin_cos();
     let (se, ce) = altitude.to_radians().sin_cos();
     let light_v = [ca * ce, -sa * ce, se];
-    let shade_into = |depth: f32, outer: bool| -> (Map, Map) {
+    // Region: 0 = inside (× the shape's alpha), 1 = under the layer's edge and outside.
+    // A pixel is on the bevel where its height is raised. Emboss styles also shade the last pixel
+    // past the blur's reach (a raised 4-neighbour: it still slopes; psd-tools layer_effects'
+    // emboss shadow runs one row past it), outer bevels don't (Photoshop oracle
+    // bevel-outer-smooth).
+    let reach_past = g.paint == BevelPaint::Both;
+    let on_bevel = |x: i64, y: i64| {
+        hmap.get(x, y) > BEVEL_H_EPS || (reach_past && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dy)| hmap.get(x + dx, y + dy) > BEVEL_H_EPS))
+    };
+    let shade_into = |depth: f32, region_kind: u8| -> (Map, Map) {
         let (mut hi, mut sh) = (Map::new(shape.w, shape.h, 0.0), Map::new(shape.w, shape.h, 0.0));
         for y in 0..shape.h as i64 {
             for x in 0..shape.w as i64 {
@@ -932,7 +955,7 @@ fn bevel_maps(shape: &Map, b: &Bevel, light: &GlobalLight, tex: &TextureCtx, pat
                 let n = [-gx, -gy, 1.0];
                 let len = (n[0] * n[0] + n[1] * n[1] + 1.0).sqrt();
                 let shade = (n[0] * light_v[0] + n[1] * light_v[1] + n[2] * light_v[2]) / len;
-                let region = if outer { f32::from(shape.v[i] < 1.0 - INSIDE_EPS && hmap.v[i] > BEVEL_H_EPS) } else { shape.v[i] };
+                let region = if region_kind == 0 { shape.v[i] } else { f32::from(shape.v[i] < 1.0 - INSIDE_EPS && on_bevel(x, y)) };
                 let k = shade - se;
                 if k > 0.0 {
                     hi.v[i] = (k / (1.0 - se).max(1e-3)).clamp(0.0, 1.0) * region;
@@ -945,13 +968,21 @@ fn bevel_maps(shape: &Map, b: &Bevel, light: &GlobalLight, tex: &TextureCtx, pat
     };
     let maps = match g.paint {
         BevelPaint::Inner | BevelPaint::Outer => {
-            let (hi, sh) = shade_into(g.depth, g.paint == BevelPaint::Outer);
+            let (hi, sh) = shade_into(g.depth, u8::from(g.paint == BevelPaint::Outer));
             vec![hi, sh]
         }
         BevelPaint::Both => {
-            let (hi, sh) = shade_into(g.depth, false);
-            let (ho, so) = shade_into(if g.pillow { -g.depth } else { g.depth }, true);
-            vec![hi, sh, ho, so]
+            // One map per colour over the whole bevel: the inside half where the shape is (× its
+            // alpha), the outside half (pillow: facing the other way) for the rest of each pixel.
+            // A 1 % edge pixel of a pillow emboss takes the outside shading (Photoshop oracle
+            // bevel-pillow-smooth), a 75 % one of an emboss mostly the inside (layer_effects).
+            let (hi, sh) = shade_into(g.depth, 0);
+            let (ho, so) = shade_into(if g.pillow { -g.depth } else { g.depth }, 1);
+            let mix = |a: Map, b: Map| -> Map {
+                let v = a.v.iter().zip(&b.v).zip(&shape.v).map(|((x, y), s)| if *s > INSIDE_EPS { *x } else { 0.0 } + y * (1.0 - s.min(1.0))).collect();
+                Map { w: a.w, h: a.h, v }
+            };
+            vec![mix(hi, ho), mix(sh, so)]
         }
     };
     (maps, g.paint)
@@ -1196,7 +1227,7 @@ pub(crate) fn composite_with_effects_prepared(
     }
     for (i, e) in rev() {
         if let Effect::BevelEmboss(b) = e
-            && maps.bevel_paint[i] != BevelPaint::Outer
+            && maps.bevel_paint[i] == BevelPaint::Inner
         {
             let (hi, sh) = (rel(fx(i, 0)), rel(fx(i, 1)));
             paint_color(&mut lay, &hi, rgb(&b.highlight_color), b.highlight.blend, b.highlight.opacity);
@@ -1257,10 +1288,9 @@ pub(crate) fn composite_with_effects_prepared(
     }
     for (i, e) in rev() {
         if let Effect::BevelEmboss(b) = e
-            && maps.bevel_paint[i] != BevelPaint::Inner
+            && maps.bevel_paint[i] == BevelPaint::Outer
         {
-            let k = if maps.bevel_paint[i] == BevelPaint::Both { 2 } else { 0 };
-            let (hi, sh) = (fx(i, k), fx(i, k + 1));
+            let (hi, sh) = (fx(i, 0), fx(i, 1));
             paint_color(&mut work, &hi, rgb(&b.highlight_color), b.highlight.blend, b.highlight.opacity);
             paint_color(&mut work, &sh, rgb(&b.shadow_color), b.shadow.blend, b.shadow.opacity);
         }
@@ -1272,6 +1302,17 @@ pub(crate) fn composite_with_effects_prepared(
     for (wp, lp) in work.px.iter_mut().zip(&lay.px) {
         if lp[3] > 0.0 {
             *wp = psblend::composite_gamma(mode, *wp, *lp, 1.0, gamma);
+        }
+    }
+    // Emboss styles shade the composited layer (their maps cover inside and outside). Painting
+    // them into the layer before its (text-gamma) composite left a type layer's lit top edges up
+    // to 6/255 dark (psd-tools layer_effects Emboss: 7.8 → 5.7/255).
+    for (i, e) in rev() {
+        if let Effect::BevelEmboss(b) = e
+            && maps.bevel_paint[i] == BevelPaint::Both
+        {
+            paint_color(&mut work, &fx(i, 0), rgb(&b.highlight_color), b.highlight.blend, b.highlight.opacity);
+            paint_color(&mut work, &fx(i, 1), rgb(&b.shadow_color), b.shadow.blend, b.shadow.opacity);
         }
     }
     // Layer opacity applies to the whole stack.
@@ -1305,15 +1346,15 @@ fn mix_premul(a: [f32; 4], b: [f32; 4], k: f32) -> [f32; 4] {
 /// `glow_map`, `bevel_maps` and `build_maps`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FieldKind {
-    /// `dist_outside` of the shape: spread of drop shadows and softer outer glows, precise outer
-    /// and centre glows, bevels.
+    /// `dist_outside` of the shape: precise outer and centre glows, bevels.
     Outside,
     /// `dist_inside` of the shape: precise edge inner glows, bevels.
     Inside,
-    /// `dist_outside` of `1 - alpha`: choke of inner shadows, softer inner glows.
-    OutsideInverse,
-    /// Stroke distance outside the shape.
+    /// Chamfer distance outside the shape: outside strokes, and the spread of drop shadows and
+    /// softer outer glows ([`dilate`]).
     StrokeOutside,
+    /// Chamfer distance outside `1 - alpha`: the choke of inner shadows and softer inner glows.
+    ChokeInside,
     /// Stroke distance inside the shape.
     StrokeInside,
     /// Stroke distance outside a shape layer's outline (from its local coverage).
@@ -1326,8 +1367,8 @@ pub fn distance_field(kind: FieldKind, alpha: Vec<f32>, w: usize, h: usize) -> V
     match kind {
         FieldKind::Outside => dist_outside(&s),
         FieldKind::Inside => dist_inside(&s),
-        FieldKind::OutsideInverse => dist_outside(&s.map(|a| 1.0 - a)),
         FieldKind::StrokeOutside => dist_outside_by(&s, Metric::Chamfer),
+        FieldKind::ChokeInside => dist_outside_by(&s.map(|a| 1.0 - a), Metric::Chamfer),
         FieldKind::StrokeInside => dist_inside_by(&s, Metric::Chamfer),
         FieldKind::StrokeOutsideVector => dist_outside_by(&local_coverage(&s), Metric::Chamfer),
     }
@@ -1374,9 +1415,10 @@ mod tests {
         let b = Rect::new(0, 0, 100, 100);
         let t = |s, x, y| gradient_t(s, 0.0, 1.0, false, (0.0, 0.0), b, x, y);
         assert!(t(GradientStyle::Linear, 0.0, 50.0) < 0.01);
-        assert!((t(GradientStyle::Linear, 50.0, 50.0) - 0.5).abs() < 1e-6);
+        // Linear / reflected sample pixel corners: the centre is reached half a pixel later.
+        assert!((t(GradientStyle::Linear, 50.5, 50.0) - 0.5).abs() < 1e-6);
         assert!(t(GradientStyle::Linear, 100.0, 50.0) > 0.99);
-        assert!(t(GradientStyle::Reflected, 50.0, 50.0) < 1e-6);
+        assert!(t(GradientStyle::Reflected, 50.5, 50.0) < 1e-6);
         assert!((t(GradientStyle::Reflected, 0.0, 50.0) - 1.0).abs() < 1e-6);
         assert!(t(GradientStyle::Radial, 50.0, 50.0) < 1e-6);
         assert!((t(GradientStyle::Radial, 50.0, 0.0) - 1.0).abs() < 1e-6);
@@ -1385,6 +1427,18 @@ mod tests {
         assert!((ang - 0.75).abs() < 1e-3, "{ang}");
         let rev = gradient_t(GradientStyle::Linear, 0.0, 1.0, true, (0.0, 0.0), b, 0.0, 50.0);
         assert!(rev > 0.99);
+    }
+
+    #[test]
+    fn effect_gradients_snap_end_points_and_sample_corners() {
+        // 87° over 600 × 60 at (99, 422): end points (397, 482) and (400, 422), so the overlay runs
+        // along (3, -60) from its midpoint (398.5, 452), sampled at pixel corners.
+        let frame = Rect::new(99, 422, 699, 482);
+        let (a, sc, o) = crate::fill_layout::gradient_layout(GradientStyle::Linear, 87.0, 1.0, (0.0, 0.0), frame);
+        assert!((a - (60f32).atan2(3.0).to_degrees()).abs() < 1e-3, "{a}");
+        let t = |x: f32, y: f32| gradient_t(GradientStyle::Linear, a, sc, false, o, frame, x, y);
+        assert!((t(399.0, 452.5) - 0.5).abs() < 1e-4, "{}", t(399.0, 452.5));
+        assert!(t(400.5, 422.5) > 0.99 && t(397.5, 482.5) < 0.01);
     }
 
     #[test]
@@ -1400,6 +1454,19 @@ mod tests {
         assert!((at(1, 3) - (5f32.sqrt() + 1.0)).abs() < 1e-5, "knight + straight, not √10");
         assert!((at(2, 3) - (5f32.sqrt() + std::f32::consts::SQRT_2)).abs() < 1e-5);
         assert!(near.iter().all(|&n| n == 0));
+    }
+
+    #[test]
+    fn spread_dilates_with_the_chamfer_metric() {
+        // One opaque pixel grown by 3 px: at offset (1, 3) the chamfer distance is √5 + 1 = 3.236
+        // (Euclidean 3.162), so the anti-aliased rim keeps 3 + 0.5 − (3.236 − 0.5) = 0.764.
+        let mut m = Map::new(9, 9, 0.0);
+        m.v[4 * 9 + 4] = 1.0;
+        let d = dilate(&m, 3.0);
+        assert!((d.v[7 * 9 + 5] - 0.764).abs() < 1e-3, "{}", d.v[7 * 9 + 5]);
+        // (2, 3): √5 + √2 = 3.650 (Euclidean 3.606) leaves 0.350; axis steps are exact.
+        assert!((d.v[7 * 9 + 6] - (4.0 - 5f32.sqrt() - std::f32::consts::SQRT_2)).abs() < 1e-4, "{}", d.v[7 * 9 + 6]);
+        assert_eq!(d.v[4 * 9 + 7], 1.0);
     }
 
     #[test]
@@ -1494,13 +1561,33 @@ mod tests {
         let l = GlobalLight::default();
         let (e, paint) =
             bevel_maps(&shape, &bevel_of(BevelStyle::Emboss, BevelTechnique::Smooth), &l, &no_tex(), &PreparedPatterns::new(&[], PREPARED_PATTERN_BYTES));
-        assert_eq!((paint, e.len()), (BevelPaint::Both, 4));
+        assert_eq!((paint, e.len()), (BevelPaint::Both, 2));
         let at = |m: &Map, x: usize, y: usize| m.v[y * 40 + x];
         // Emboss: the slope across the top edge faces the light on both sides.
-        assert!(at(&e[0], 20, 10) > 0.3 && at(&e[2], 20, 9) > 0.3);
+        assert!(at(&e[0], 20, 10) > 0.3 && at(&e[0], 20, 9) > 0.3);
         let (p, _) =
             bevel_maps(&shape, &bevel_of(BevelStyle::PillowEmboss, BevelTechnique::Smooth), &l, &no_tex(), &PreparedPatterns::new(&[], PREPARED_PATTERN_BYTES));
-        assert!(at(&p[0], 20, 10) > 0.3 && at(&p[3], 20, 9) > 0.3, "pillow: outside top edge in shadow");
+        assert!(at(&p[0], 20, 10) > 0.3 && at(&p[1], 20, 9) > 0.3, "pillow: outside top edge in shadow");
+    }
+
+    #[test]
+    fn emboss_width_rounds_up_and_shades_past_the_blur() {
+        let mut b = bevel_of(BevelStyle::Emboss, BevelTechnique::Smooth);
+        b.size = 41.0;
+        let g = bevel_geom(&b);
+        assert_eq!((g.width, g.depth), (21.0, 21.0));
+        b.size = 5.0;
+        assert_eq!(bevel_geom(&b).width, 3.0);
+        // The first row past the height blur's reach still slopes (its upper neighbour is raised),
+        // so it shades; the row after it does not.
+        let shape = square(60, 20, 40);
+        b.size = 9.0;
+        b.angle = 90.0;
+        let (m, _) = bevel_maps(&shape, &b, &GlobalLight::default(), &no_tex(), &PreparedPatterns::new(&[], PREPARED_PATTERN_BYTES));
+        let reach = tent_kernel(bevel_geom(&b).width).0 as usize;
+        let row = 39 + reach + 1; // last shape row + reach + 1: height 0, neighbour above raised
+        assert!(m[1].v[row * 60 + 30] > 0.0, "{}", m[1].v[row * 60 + 30]);
+        assert_eq!(m[1].v[(row + 1) * 60 + 30], 0.0);
     }
 
     #[test]

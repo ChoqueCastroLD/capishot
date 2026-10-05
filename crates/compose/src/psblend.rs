@@ -131,17 +131,17 @@ pub fn composite(mode: BlendMode, backdrop: [f32; 4], source: [f32; 4], opacity:
 }
 
 /// Photoshop's "Blend Text Colors Using Gamma" (Color Settings › Advanced, on at 1.45 by
-/// default): type layers mix their colour with the backdrop in a gamma-1.45 space, so
-/// anti-aliased glyph edges come out lighter over dark backdrops than a linear mix (fitted on
-/// psd-tools layer_effects.psd: a 69 % edge pixel of a blue overlay over grey is 57/255 in red,
-/// a linear mix gives 40).
+/// default): type layers mix their colour with the backdrop in linear light raised to 1 / 1.45
+/// ([`text_encode`]), so anti-aliased glyph edges come out lighter over dark backdrops than a
+/// mix of the encoded values (psd-tools layer_effects.psd: a 69 % edge pixel of a blue overlay
+/// over grey is 57/255 in red, an encoded mix gives 40).
 pub const TEXT_GAMMA: f32 = 1.45;
 
 static TEXT_GAMMA_SETTING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3fb9_999a); // 1.45f32
 
 /// Sets Color Settings › "Blend Text Colors Using Gamma" (1 = off). It is an application
-/// setting, not stored in documents: files saved with it off (ag-psd float-color) mix type
-/// linearly. Values are clamped to Photoshop's 1.00–2.20.
+/// setting, not stored in documents (1 here means switched off: a plain mix of the encoded
+/// values). Values are clamped to Photoshop's 1.00–2.20.
 ///
 /// The value is process-wide: a test that changes it races every concurrently running test
 /// that composites a type layer, so such tests belong in their own test binary (see
@@ -156,7 +156,24 @@ pub fn text_gamma() -> f32 {
     f32::from_bits(TEXT_GAMMA_SETTING.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-/// [`composite`] with the coverage mix done in a `gamma` space (`gamma == 1` is [`composite`]).
+/// Into the text blending space: linear light raised to `1 / gamma`. Gamma 2.2 is close to
+/// mixing the encoded values, lower settings approach linear light. Fitted on psd-tools
+/// layer_effects.psd (a blue colour overlay's glyph edges over grey, every coverage level within
+/// 0.6/255; a plain `v^1.45` power mix is 6/255 too light at 94 % coverage) and ag-psd
+/// float-color.
+#[inline]
+pub fn text_encode(v: f32, gamma: f32) -> f32 {
+    photocraft_color::convert::srgb_to_linear(v.max(0.0)).powf(1.0 / gamma)
+}
+
+/// Inverse of [`text_encode`].
+#[inline]
+pub fn text_decode(v: f32, gamma: f32) -> f32 {
+    photocraft_color::convert::linear_to_srgb(v.max(0.0).powf(gamma))
+}
+
+/// [`composite`] with the coverage mix done in the text blending space of `gamma`
+/// ([`text_encode`]; `gamma == 1` is [`composite`], the setting switched off).
 pub fn composite_gamma(mode: BlendMode, backdrop: [f32; 4], source: [f32; 4], opacity: f32, gamma: f32) -> [f32; 4] {
     if gamma == 1.0 {
         return composite(mode, backdrop, source, opacity);
@@ -174,10 +191,11 @@ pub fn composite_gamma(mode: BlendMode, backdrop: [f32; 4], source: [f32; 4], op
     let cs = [source[0], source[1], source[2]];
     let b = blend_rgb(mode, cb, cs);
     let (wb, ws, wbs) = ((1.0 - as_) * ab / ao, (1.0 - ab) * as_ / ao, as_ * ab / ao);
-    let g = |v: f32| v.max(0.0).powf(gamma);
+    let g = |v: f32| text_encode(v, gamma);
+    let ginv = |v: f32| text_decode(v, gamma);
     let mut out = [0.0f32; 4];
     for i in 0..3 {
-        out[i] = (wb * g(cb[i]) + ws * g(cs[i]) + wbs * g(b[i])).powf(1.0 / gamma);
+        out[i] = ginv(wb * g(cb[i]) + ws * g(cs[i]) + wbs * g(b[i]));
     }
     out[3] = ao;
     out
@@ -189,7 +207,10 @@ mod tests {
     fn text_gamma_lightens_dark_edges() {
         // 69 % blue (0, 51, 153) over grey 129: Photoshop shows (57, 80, 146).
         let r = composite_gamma(BlendMode::Normal, [129.0 / 255.0, 129.0 / 255.0, 129.0 / 255.0, 1.0], [0.0, 0.2, 0.6, 0.686], 1.0, TEXT_GAMMA);
-        assert!((r[0] * 255.0 - 57.0).abs() < 2.0 && (r[1] * 255.0 - 80.0).abs() < 2.0 && (r[2] * 255.0 - 146.0).abs() < 2.0, "{r:?}");
+        assert!((r[0] * 255.0 - 57.0).abs() < 1.0 && (r[1] * 255.0 - 80.0).abs() < 1.0 && (r[2] * 255.0 - 146.0).abs() < 1.0, "{r:?}");
+        // Near-opaque edges stay dark: 94 % coverage shows (13, 57, 152) (a v^1.45 mix gives 19 red).
+        let r = composite_gamma(BlendMode::Normal, [129.0 / 255.0, 129.0 / 255.0, 129.0 / 255.0, 1.0], [0.0, 0.2, 0.6, 0.937], 1.0, TEXT_GAMMA);
+        assert!((r[0] * 255.0 - 13.0).abs() < 1.0 && (r[1] * 255.0 - 57.0).abs() < 1.0 && (r[2] * 255.0 - 152.0).abs() < 1.0, "{r:?}");
         assert_eq!(
             composite_gamma(BlendMode::Multiply, [0.2, 0.4, 0.6, 0.7], [0.5, 0.1, 0.9, 0.5], 0.8, 1.0),
             composite(BlendMode::Multiply, [0.2, 0.4, 0.6, 0.7], [0.5, 0.1, 0.9, 0.5], 0.8)

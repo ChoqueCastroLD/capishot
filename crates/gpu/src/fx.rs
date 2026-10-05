@@ -290,7 +290,7 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
             if r > 0.0 {
                 // dist_outside of the shifted map is the shifted field (integer offsets; shifted-in
                 // pixels are far away for a drop shadow, inside for an inner shadow).
-                let f = b.field(if inner { FieldKind::OutsideInverse } else { FieldKind::Outside }, r);
+                let f = b.field(if inner { FieldKind::ChokeInside } else { FieldKind::StrokeOutside }, r);
                 let d = if dx == 0.0 && dy == 0.0 {
                     f
                 } else {
@@ -321,7 +321,7 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
                     let (r, bw) = photocraft_compose::effects::spread_split(g.size, g.spread);
                     let mut m = src;
                     if r > 0.0 {
-                        let d = b.field(if inner { FieldKind::OutsideInverse } else { FieldKind::Outside }, r);
+                        let d = b.field(if inner { FieldKind::ChokeInside } else { FieldKind::StrokeOutside }, r);
                         m = b.dilate(src, d, r);
                     }
                     let m = b.blur(m, bw);
@@ -385,16 +385,18 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
             let (sa, ca) = angle.to_radians().sin_cos();
             let (se, ce) = altitude.to_radians().sin_cos();
             let lut = contour_lut(&bv.gloss_contour).map(Arc::new);
-            let passes: Vec<(f32, bool)> = match g.paint {
-                BevelPaint::Inner => vec![(g.depth, false)],
-                BevelPaint::Outer => vec![(g.depth, true)],
-                BevelPaint::Both => vec![(g.depth, false), (if g.pillow { -g.depth } else { g.depth }, true)],
+            // Region (`fs_mbevelshade`): 0 inside, 1 under the edge and outside, 2 / 3 emboss /
+            // pillow emboss (both halves in one map).
+            let passes: Vec<(f32, f32)> = match g.paint {
+                BevelPaint::Inner => vec![(g.depth, 0.0)],
+                BevelPaint::Outer => vec![(g.depth, 1.0)],
+                BevelPaint::Both => vec![(g.depth, if g.pillow { 3.0 } else { 2.0 })],
             };
             let mut out = 0;
-            for (depth, outer) in &passes {
+            for (depth, region) in &passes {
                 for which in [0.0, 1.0] {
                     let mut s = stage(Kernel::MBevelShade, Some(h), None, [ca * ce, -sa * ce, se, se], 1);
-                    s.p1 = [*depth, f32::from(u8::from(*outer)), which, f32::from(u8::from(lut.is_some()))];
+                    s.p1 = [*depth, *region, which, f32::from(u8::from(lut.is_some()))];
                     s.lut = lut.clone();
                     s.s = Some(In::Shape);
                     s.out = Some(out);
@@ -681,14 +683,9 @@ mod tests {
                 shape[y * w + x] = (90.0 - r).clamp(0.0, 1.0) * if (x / 13 + y / 17) % 5 == 0 { 0.6 } else { 1.0 };
             }
         }
-        for kind in [
-            FieldKind::Outside,
-            FieldKind::Inside,
-            FieldKind::OutsideInverse,
-            FieldKind::StrokeOutside,
-            FieldKind::StrokeInside,
-            FieldKind::StrokeOutsideVector,
-        ] {
+        for kind in
+            [FieldKind::Outside, FieldKind::Inside, FieldKind::ChokeInside, FieldKind::StrokeOutside, FieldKind::StrokeInside, FieldKind::StrokeOutsideVector]
+        {
             let reach = 9;
             let whole = photocraft_compose::effects::distance_field(kind, shape.clone(), w, h);
             let banded = field(kind, reach, &shape, region, region);

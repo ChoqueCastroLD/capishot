@@ -19,13 +19,26 @@ use crate::effects;
 /// Effective `(angle, scale, centre offset)` for a gradient fill with `style`, `angle` (degrees)
 /// and `scale` laid out in `frame`.
 pub fn fill_gradient_layout(style: GradientStyle, angle: f32, scale: f32, frame: Rect) -> (f32, f32, (f32, f32)) {
-    let unchanged = (angle, scale, (0.0, 0.0));
-    if !matches!(style, GradientStyle::Linear | GradientStyle::Reflected) || !angle.is_finite() || !scale.is_finite() {
+    gradient_layout(style, angle, scale, (0.0, 0.0), frame)
+}
+
+/// [`fill_gradient_layout`] for a gradient centred `offset` (a fraction of the frame) off the
+/// frame's centre: layer-effect gradients (overlays, gradient glows and strokes) snap the same
+/// way (psd-tools layer_effects: an 87° overlay on a 600 × 60 text line runs along (3, 60), i.e.
+/// 87.14°).
+pub fn gradient_layout(style: GradientStyle, angle: f32, scale: f32, offset: (f32, f32), frame: Rect) -> (f32, f32, (f32, f32)) {
+    let unchanged = (angle, scale, offset);
+    if !matches!(style, GradientStyle::Linear | GradientStyle::Reflected)
+        || !angle.is_finite()
+        || !scale.is_finite()
+        || !offset.0.is_finite()
+        || !offset.1.is_finite()
+    {
         return unchanged;
     }
     let w = f64::from(frame.width().max(1));
     let h = f64::from(frame.height().max(1));
-    let (cx, cy) = (f64::from(frame.x0) + w / 2.0, f64::from(frame.y0) + h / 2.0);
+    let (cx, cy) = (f64::from(frame.x0) + w / 2.0 + f64::from(offset.0) * w, f64::from(frame.y0) + h / 2.0 + f64::from(offset.1) * h);
     // Unscaled chord length along `a` (radians), as `effects::gradient_t`.
     let chord_of = |a: f64| {
         let (s, c) = a.sin_cos();
@@ -55,8 +68,8 @@ pub fn fill_gradient_layout(style: GradientStyle, angle: f32, scale: f32, frame:
     // Reflected spans half the chord from the centre; Linear the whole chord.
     let span = if style == GradientStyle::Reflected { 2.0 * len } else { len };
     let scale2 = span / chord_of(a2);
-    let offset = (((mid.0 - cx) / w) as f32, ((mid.1 - cy) / h) as f32);
-    (a2.to_degrees() as f32, scale2 as f32, offset)
+    let shift = (((mid.0 - cx) / w) as f32, ((mid.1 - cy) / h) as f32);
+    (a2.to_degrees() as f32, scale2 as f32, (offset.0 + shift.0, offset.1 + shift.1))
 }
 
 /// Gradient parameter `t` of a gradient fill at pixel centre `(x, y)` (see [`fill_gradient_layout`]).

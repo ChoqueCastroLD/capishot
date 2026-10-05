@@ -516,13 +516,14 @@ pub fn layer_bounds(layer: &Layer, canvas: Rect) -> Rect {
 }
 
 /// The frame layer-effect gradients and linked patterns are laid out in, when it isn't the
-/// layer's pixel bounds: a shape layer's path bounds (rounded out to whole pixels). Its rendered
+/// layer's pixel bounds: a shape layer's path bounds, truncated to whole pixels. Its rendered
 /// pixels can extend past the path (transparent anti-aliasing margin), which Photoshop ignores:
-/// psd-tools shape-fx2's 45° overlay spans the 29 px path, not the 32 px of pixels.
+/// psd-tools shape-fx2's 45° overlay spans the 0.92–29.61 path as 0–29 (29 px, centred at 14.5),
+/// not the 32 px of pixels.
 pub fn paint_bounds(layer: &Layer) -> Option<Rect> {
     let LayerContent::Shape(sh) = &layer.content else { return None };
     let (x0, y0, x1, y1) = sh.path.control_bounds()?;
-    let r = Rect::new(x0.floor() as i32, y0.floor() as i32, x1.ceil() as i32, y1.ceil() as i32);
+    let r = Rect::new(x0.floor() as i32, y0.floor() as i32, x1.floor() as i32, y1.floor() as i32);
     (!r.is_empty()).then_some(r)
 }
 

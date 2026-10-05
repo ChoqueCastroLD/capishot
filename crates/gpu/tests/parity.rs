@@ -1001,6 +1001,24 @@ fn type_layers_blend_with_text_gamma() {
     ];
     d.layers.push(l);
     fx_check(&mut g, &d, "text fx");
+    // Emboss styles shade the composited layer (merge, shade, then the opacity mix), also as a
+    // clipped layer over an opaque base.
+    let mut e = fx_doc(96, 80, SampleType::U8);
+    let mut l = as_text(blob("emboss", e.pixel_format(), 46.0, 40.0, 20.0, [0.4, 0.1, 0.3]));
+    l.effects.items = vec![
+        Effect::BevelEmboss(bevel(BevelStyle::Emboss, true, 9.0, 0.0)),
+        Effect::BevelEmboss(bevel(BevelStyle::PillowEmboss, false, 5.0, 1.0)),
+        Effect::DropShadow(shadow(BlendMode::Multiply, 0.6, 90.0, 5.0, 6.0, 0.0)),
+    ];
+    l.opacity = 0.7;
+    l.fill_opacity = 0.6;
+    e.layers.push(l.clone());
+    fx_check(&mut g, &e, "text emboss");
+    let mut c = l;
+    c.clipped = true;
+    c.blend = BlendMode::Multiply;
+    e.layers.push(c);
+    fx_check(&mut g, &e, "clipped text emboss");
     // The gamma changes edge pixels against a linear mix.
     let flat = photocraft_compose::flatten(&d);
     let mut lin = d.clone();

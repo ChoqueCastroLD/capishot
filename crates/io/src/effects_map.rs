@@ -47,8 +47,35 @@ const BLEND_NAMES: [(BlendMode, &str); 28] = [
     (BlendMode::PassThrough, "passThrough"),
 ];
 
+/// Long (string-ID) names some writers use instead of the four-character codes, for the modes
+/// whose code is a short ID (`BlnM` `multiply` = `Mltp`). The others already use their long name.
+const BLEND_LONG_NAMES: [(BlendMode, &str); 17] = [
+    (BlendMode::Normal, "normal"),
+    (BlendMode::Dissolve, "dissolve"),
+    (BlendMode::Darken, "darken"),
+    (BlendMode::Multiply, "multiply"),
+    (BlendMode::ColorBurn, "colorBurn"),
+    (BlendMode::Lighten, "lighten"),
+    (BlendMode::Screen, "screen"),
+    (BlendMode::ColorDodge, "colorDodge"),
+    (BlendMode::Overlay, "overlay"),
+    (BlendMode::SoftLight, "softLight"),
+    (BlendMode::HardLight, "hardLight"),
+    (BlendMode::Difference, "difference"),
+    (BlendMode::Exclusion, "exclusion"),
+    (BlendMode::Hue, "hue"),
+    (BlendMode::Saturation, "saturation"),
+    (BlendMode::Color, "color"),
+    (BlendMode::Luminosity, "luminosity"),
+];
+
+/// A blend-mode enum from either its four-character code or its long string ID.
+fn blend_from_id(v: &[u8]) -> Option<BlendMode> {
+    BLEND_NAMES.iter().chain(&BLEND_LONG_NAMES).find(|(_, n)| n.as_bytes() == v).map(|(m, _)| *m)
+}
+
 fn blend_of(d: &Descriptor, key: &str, default: BlendMode) -> BlendMode {
-    enum_of(d, key).and_then(|v| BLEND_NAMES.iter().find(|(_, n)| n.as_bytes() == v).map(|(m, _)| *m)).unwrap_or(default)
+    enum_of(d, key).and_then(blend_from_id).unwrap_or(default)
 }
 
 fn blend_value(m: BlendMode) -> Value {
@@ -718,6 +745,34 @@ mod tests {
         let mut s = std::collections::HashSet::new();
         for (_, n) in BLEND_NAMES {
             assert!(s.insert(n));
+        }
+    }
+
+    #[test]
+    fn long_string_blend_ids_parse() {
+        // Some writers store effect modes as long string IDs (`BlnM` `multiply`, `colorDodge`)
+        // instead of the four-character codes (psd-tools effects/blend-modes.psd).
+        let long = |v: &str| Value::Enumerated { type_id: Id::new("BlnM"), value: Id::new(v) };
+        let d = Descriptor::new("null")
+            .with("masterFXSwitch", Value::Boolean(true))
+            .with("DrSh", Value::Descriptor(Descriptor::new("DrSh").with("enab", Value::Boolean(true)).with("Md  ", long("linearBurn"))))
+            .with("ebbl", Value::Descriptor(Descriptor::new("ebbl").with("hglM", long("colorDodge")).with("sdwM", long("colorBurn"))))
+            .with("SoFi", Value::Descriptor(Descriptor::new("SoFi").with("Md  ", long("hue"))));
+        let mut data = 0u32.to_be_bytes().to_vec();
+        data.extend(VersionedDescriptor { version: 16, descriptor: d }.to_bytes());
+        let (_, fx) = parse_lfx2(&data).unwrap();
+        let modes: Vec<BlendMode> = fx
+            .iter()
+            .flat_map(|e| match e {
+                Effect::DropShadow(s) => vec![s.common.blend],
+                Effect::BevelEmboss(b) => vec![b.highlight.blend, b.shadow.blend],
+                Effect::ColorOverlay { common, .. } => vec![common.blend],
+                _ => vec![],
+            })
+            .collect();
+        assert_eq!(modes, vec![BlendMode::LinearBurn, BlendMode::ColorDodge, BlendMode::ColorBurn, BlendMode::Hue]);
+        for (m, n) in BLEND_LONG_NAMES {
+            assert_eq!(blend_from_id(n.as_bytes()), Some(m));
         }
     }
 

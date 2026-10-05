@@ -137,13 +137,13 @@ struct Source {
     roundtrip_floor: usize,
 }
 
-/// Hand-picked mix in `corpus/psd` (170 files: 128 vs the merged image + 12 vs the thumbnail).
-const MIXED: Source = Source { label: "io corpus", env: "PHOTOCRAFT_CORPUS", default_dir: "corpus/psd", pass_floor: 140, roundtrip_floor: 169 };
+/// Hand-picked mix in `corpus/psd` (170 files: 133 vs the merged image + 12 vs the thumbnail).
+const MIXED: Source = Source { label: "io corpus", env: "PHOTOCRAFT_CORPUS", default_dir: "corpus/psd", pass_floor: 145, roundtrip_floor: 169 };
 
 /// The full psd-tools test set (309 files at the pinned commit; see `xtask/psd-tools-corpus.sha256`):
-/// 212 vs the merged image + 10 vs the thumbnail.
+/// 218 vs the merged image + 10 vs the thumbnail.
 const PSD_TOOLS: Source =
-    Source { label: "psd-tools corpus", env: "PHOTOCRAFT_PSDTOOLS_CORPUS", default_dir: "corpus/psd-tools", pass_floor: 222, roundtrip_floor: 307 };
+    Source { label: "psd-tools corpus", env: "PHOTOCRAFT_PSDTOOLS_CORPUS", default_dir: "corpus/psd-tools", pass_floor: 228, roundtrip_floor: 307 };
 
 /// The corpus directory and whether floors are enforced; `None` when absent.
 fn locate(src: &Source) -> Option<(PathBuf, bool)> {

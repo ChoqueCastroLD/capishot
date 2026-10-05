@@ -38,6 +38,7 @@ const F_MASK_TEX: u32 = 2u;      // mask pixels live in `mask_tex`
 const F_TEX: u32 = 4u;           // layer pixels live in `layer_tex`
 const F_GRADIENT: u32 = 8u;      // gradient fill (stops in `lut_tex`)
 const F_KNOCKOUT: u32 = 16u;     // effect paint: the layer knocks out the coverage (drop shadow)
+const F_NO_LAYER: u32 = 32u;    // effect merge: A already holds the layer (only the opacity mix)
 const F_VECTOR: u32 = 64u;       // effect paint: shape layer (outside stroke never inside)
 const F_ATOP: u32 = 128u;        // effect merge: clipped layer over an opaque base
 const F_GATE: u32 = 256u;        // effect paint: coverage only inside the layer's shape
@@ -240,7 +241,17 @@ fn composite(mode: i32, b: vec4<f32>, s: vec4<f32>, opacity: f32) -> vec4<f32> {
     return vec4(rgb, ao);
 }
 
-// `psblend::composite_gamma`: coverage mixed in a gamma space (type layers, gamma 1.45).
+// `psblend::text_encode` / `text_decode`: linear light raised to 1 / gamma.
+fn text_enc(c: vec3<f32>, g: f32) -> vec3<f32> {
+    let l = vec3(srgb_to_linear(max(c.r, 0.0)), srgb_to_linear(max(c.g, 0.0)), srgb_to_linear(max(c.b, 0.0)));
+    return pow(l, vec3(1.0 / g));
+}
+fn text_dec(v: vec3<f32>, g: f32) -> vec3<f32> {
+    let l = pow(max(v, vec3(0.0)), vec3(g));
+    return vec3(linear_to_srgb(l.r), linear_to_srgb(l.g), linear_to_srgb(l.b));
+}
+
+// `psblend::composite_gamma`: coverage mixed in the text blending space (type layers, 1.45).
 fn composite_g(mode: i32, b: vec4<f32>, s: vec4<f32>, opacity: f32, gamma_on: bool) -> vec4<f32> {
     if (!gamma_on) { return composite(mode, b, s, opacity); }
     let ab = b.a;
@@ -250,8 +261,8 @@ fn composite_g(mode: i32, b: vec4<f32>, s: vec4<f32>, opacity: f32, gamma_on: bo
     let ao = as_ + ab * (1.0 - as_);
     if (ao <= 0.0) { return vec4(0.0); }
     let g = op.p4.w; // psblend::text_gamma
-    let pw = (1.0 - as_) * ab * pow(max(b.rgb, vec3(0.0)), vec3(g)) + (1.0 - ab) * as_ * pow(max(s.rgb, vec3(0.0)), vec3(g)) + as_ * ab * pow(max(bl, vec3(0.0)), vec3(g));
-    return vec4(pow(pw / ao, vec3(1.0 / g)), ao);
+    let pw = (1.0 - as_) * ab * text_enc(b.rgb, g) + (1.0 - ab) * as_ * text_enc(s.rgb, g) + as_ * ab * text_enc(bl, g);
+    return vec4(text_dec(pw / ao, g), ao);
 }
 
 // photocraft_color::convert::{srgb_to_lab, lab_to_srgb} (D50, Bradford to sRGB).
@@ -593,13 +604,15 @@ fn gradient_t(d: vec2<i32>) -> f32 {
     let len = max(sqrt((c * w) * (c * w) + (s * h) * (s * h)), 1.0) * max(op.p0.y, 1e-3);
     // effects::gradient_t: Linear / Reflected span the bounds' chord along the angle.
     let chord = max(min(w / max(abs(c), 1e-6), h / max(abs(s), 1e-6)), 1.0) * max(op.p0.y, 1e-3);
+    // Linear / Reflected sample the pixel's top-left corner (effects::gradient_t).
+    let corner = 0.5 * (c - s);
     var t: f32;
     switch i32(op.p0.w) {
         case 1: { t = sqrt(dx * dx + dy * dy) / (len / 2.0); }                  // Radial
         case 2: { t = rem_euclid((a - atan2(-dy, dx)) / 6.28318530718, 1.0); }   // Angle
-        case 3: { t = abs(along / (chord / 2.0)); }                             // Reflected
+        case 3: { t = abs((along - corner) / (chord / 2.0)); }                  // Reflected
         case 4: { t = (abs(along) + abs(across)) / (len / 2.0); }               // Diamond
-        default: { t = along / chord + 0.5; }                                   // Linear
+        default: { t = (along - corner) / chord + 0.5; }                        // Linear
     }
     t = clamp(t, 0.0, 1.0);
     if (op.p0.z > 0.5) { t = 1.0 - t; }
@@ -880,7 +893,7 @@ fn fs_fxmerge(in: VOut) -> @location(0) vec4<f32> {
     var w = textureLoad(tex_a, p, 0);
     let l = textureLoad(tex_b, p, 0);
     let c = textureLoad(tex_c, p, 0);
-    if (l.a > 0.0) { w = composite_g(op.mode, w, l, 1.0, (op.flags & F_TEXT_GAMMA) != 0u); }
+    if (l.a > 0.0 && (op.flags & F_NO_LAYER) == 0u) { w = composite_g(op.mode, w, l, 1.0, (op.flags & F_TEXT_GAMMA) != 0u); }
     let atop = (op.flags & F_ATOP) != 0u;
     var before = c;
     if (atop) { before = vec4(c.rgb, 1.0); }
@@ -1000,19 +1013,33 @@ fn fs_mbevelh(in: VOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_mbevelshade(in: VOut) -> @location(0) vec4<f32> {
     let p = local(in.pos);
-    let depth = op.p1.x;
+    let s = textureLoad(layer_tex, p, 0).r;
+    // effects::bevel_maps' on_bevel: the height above BEVEL_H_EPS (emboss styles: or a
+    // 4-neighbour's).
+    var hmax = ra(p);
+    if (op.p1.y > 1.5) {
+        hmax = max(max(hmax, max(ra(p + vec2(1, 0)), ra(p - vec2(1, 0)))), max(ra(p + vec2(0, 1)), ra(p - vec2(0, 1))));
+    }
+    let outside = select(0.0, 1.0, s < 1.0 - INSIDE_EPS && hmax > 1e-5);
+    // p1.y: 0 inside (× alpha), 1 under the edge and outside (outer bevel), 2 / 3 emboss / pillow
+    // emboss (inside where the shape is, plus the outside half, flipped for pillow, × 1 − alpha).
+    if (op.p1.y < 0.5) { return mout(bevel_part(p, op.p1.x, s)); }
+    if (op.p1.y < 1.5) { return mout(bevel_part(p, op.p1.x, outside)); }
+    var inner = 0.0;
+    if (s > INSIDE_EPS) { inner = bevel_part(p, op.p1.x, s); }
+    let od = select(op.p1.x, -op.p1.x, op.p1.y > 2.5);
+    return mout(inner + bevel_part(p, od, outside) * (1.0 - min(s, 1.0)));
+}
+
+// One bevel shading value (`bevel_maps`' shade_into): highlight (p1.z = 0) or shadow amount for
+// height-gradient scale `depth`, times `region`, through the gloss contour.
+fn bevel_part(p: vec2<i32>, depth: f32, region: f32) -> f32 {
     let gx = (ra(p + vec2(1, 0)) - ra(p - vec2(1, 0))) * 0.5 * depth;
     let gy = (ra(p + vec2(0, 1)) - ra(p - vec2(0, 1))) * 0.5 * depth;
     let n = vec3(-gx, -gy, 1.0);
     let len = sqrt(n.x * n.x + n.y * n.y + 1.0);
     let shade = (n.x * op.p0.x + n.y * op.p0.y + n.z * op.p0.z) / len;
     let se = op.p0.w;
-    let s = textureLoad(layer_tex, p, 0).r;
-    var region = s;
-    if (op.p1.y > 0.5) {
-        // Outside parts paint at full strength wherever the shape isn't opaque (edge pixels too).
-        region = select(0.0, 1.0, s < 1.0 - INSIDE_EPS && textureLoad(tex_a, p, 0).r > 1e-5); // effects::BEVEL_H_EPS
-    }
     let k = shade - se;
     var v = 0.0;
     if (op.p1.z > 0.5) {
@@ -1021,7 +1048,7 @@ fn fs_mbevelshade(in: VOut) -> @location(0) vec4<f32> {
         v = clamp(k / max(1.0 - se, 1e-3), 0.0, 1.0) * region;
     }
     if (op.p1.w > 0.5) { v = lut(0, v); }
-    return mout(v);
+    return v;
 }
 
 // Bevel texture (`effects::bevel_height`): A + k × luminance of the pattern (× its alpha; 1 −
