@@ -1538,6 +1538,8 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     }
     // Window › Modifier Keys: sticky Shift/⌘/⌥ act as held keys.
     let mods = crate::workspace_ui::sticky_mods(app, mods);
+    // Move tool: ⇧ locks the axis, ⌥ duplicates (move_mods.rs).
+    let ev = crate::move_mods::filter_event(app, ev, mods);
     // Ruler, Count and Note tools.
     if crate::analysis_ui::pointer(app, ev, mods) {
         return;
@@ -1668,6 +1670,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 app.stylus.record_point();
             }
             finish_gesture(app, d);
+            crate::move_mods::finish(app);
         }
     }
 }

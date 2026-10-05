@@ -124,6 +124,11 @@ impl GpuCanvas {
     /// The canvas texture format for a document of `depth` and `size`: `Rgba16Float` for 16/32-bit
     /// documents when the adapter supports it and the document fits [`F16_BUDGET_PX`], else
     /// `Rgba8Unorm`.
+    /// The device's largest 2D texture side (egui textures can use it too).
+    pub fn max_texture_side(&self) -> usize {
+        self.rs.device.limits().max_texture_dimension_2d as usize
+    }
+
     pub fn format_for(&self, depth: photocraft_doc::SampleType, size: [u32; 2]) -> wgpu::TextureFormat {
         let px = size[0] as u64 * size[1] as u64;
         let high = match self.high {

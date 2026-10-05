@@ -99,6 +99,11 @@ impl History {
         self.undo.len()
     }
 
+    /// Rename the current step (e.g. after folding several steps into one with [`Self::purge_last`]).
+    pub fn set_current_label(&mut self, label: impl Into<String>) {
+        self.current_label = label.into();
+    }
+
     /// Forget the most recent undo state and every redo state (Edit › Purge › Undo): the
     /// last step can no longer be undone and its pixels are released.
     pub fn purge_last(&mut self) -> bool {

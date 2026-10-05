@@ -54,6 +54,7 @@ pub mod liquify_ui;
 pub mod menu_catalog;
 pub mod menu_nav;
 pub mod menus;
+pub mod move_mods;
 pub mod new_doc_ui;
 pub mod notices;
 pub mod outline;
@@ -82,6 +83,7 @@ mod tab_strip;
 pub mod theme;
 mod timeline_ui;
 pub mod tone;
+pub mod transform_tex;
 pub mod transform_tool;
 pub mod type_panels_ui;
 pub mod type_tool;
@@ -251,6 +253,8 @@ pub struct PhotocraftApp {
     pub(crate) doc_hist: Option<(DocId, u64, f64, std::sync::Arc<tone::Histograms>)>,
     /// Free Transform preview (document without the moving pixels + their texture).
     pub(crate) transform_preview: Option<transform_tool::TransformPreview>,
+    /// Move-tool ⇧/⌥ drag state (move_mods).
+    pub(crate) move_mods: move_mods::MoveDrag,
     /// Live Layer Style dialog preview: (key over revision + style fields, document with the style applied).
     pub(crate) style_preview: Option<(u64, Option<std::sync::Arc<Document>>)>,
     /// Liquify dialog, Puppet Warp and Perspective Warp sessions (distort_ui).
@@ -344,6 +348,7 @@ impl PhotocraftApp {
             clip_external: false,
             clip_read_for_paste: false,
             transform_preview: None,
+            move_mods: Default::default(),
             style_preview: None,
             distort: Default::default(),
             camera_raw: None,

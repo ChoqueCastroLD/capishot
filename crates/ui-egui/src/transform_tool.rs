@@ -2,8 +2,10 @@
 //! engine's `edit.transform` (one quad for scale/rotate/skew/distort/perspective).
 //!
 //! Gestures follow Photoshop CC: corner drag scales proportionally (⇧ for free), edges scale one
-//! axis, ⌥ scales about the reference point, ⌘-drag a corner distorts, drag outside rotates
-//! (⇧ snaps to 15°), drag inside moves, the reference point can be dragged. ↩ commits, Esc cancels.
+//! axis, ⌥ scales about the reference point, ⌘-drag a corner distorts (⌘⌥⇧: perspective), ⌘-drag
+//! an edge skews (⇧ along the edge), drag outside rotates (⇧ snaps to 15°), drag inside moves
+//! (⇧ locks to 8 directions), the reference point can be dragged and ⌥-click puts it under the
+//! pointer. Arrow keys nudge the box (move_mods.rs). ↩ commits, Esc cancels.
 
 use std::sync::Arc;
 
@@ -17,12 +19,12 @@ use crate::PhotocraftApp;
 use crate::canvas::{ToolEvent, ViewXform};
 use crate::state::TransformSession;
 
-/// Preview state that isn't serialisable: the document without the transformed pixels, and a
-/// texture of those pixels.
+/// Preview state that isn't serialisable: the document without the transformed pixels, and
+/// full-resolution textures of those pixels (transform_tex.rs).
 pub struct TransformPreview {
     pub session: u64,
     pub doc: Arc<Document>,
-    pub texture: egui::TextureHandle,
+    pub texture: crate::transform_tex::PreviewTextures,
     pub opacity: f32,
     gesture: Option<Gesture>,
     /// Warp-mode drag: (control point, pointer start, mesh points at the start).
@@ -61,8 +63,10 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
     } else if let Some(l) = pd.layer_mut(id) {
         l.visible = false;
     }
-    let image = preview_image(&doc, id, lifted.as_ref(), b);
-    let texture = ctx.load_texture(format!("transform-{session}"), image, egui::TextureOptions::LINEAR);
+    // egui reports the renderer's limit in the app; offscreen harnesses only through the device.
+    let max_side = ctx.input(|i| i.max_texture_side).max(app.gpu.as_ref().map_or(1, |g| g.max_texture_side()));
+    let (image, uv) = preview_image(&doc, id, lifted.as_ref(), b, max_side);
+    let texture = crate::transform_tex::PreviewTextures::new(ctx, format!("transform-{session}"), image, uv);
     app.transform_preview =
         Some(TransformPreview { session, doc: Arc::new(pd), texture, opacity: layer.opacity * layer.fill_opacity, gesture: None, warp_drag: None });
     app.ui.transform = Some(TransformSession {
@@ -102,7 +106,8 @@ pub fn begin_selection(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(
             px[ty * tw + tx] = Color32::from_rgba_unmultiplied(120, 170, 255, (m * 110.0) as u8);
         }
     }
-    let texture = ctx.load_texture(format!("transform-{session}"), egui::ColorImage::new([tw, th], px), egui::TextureOptions::LINEAR);
+    let uv = [w as f32 / (tw * k) as f32, h as f32 / (th * k) as f32];
+    let texture = crate::transform_tex::PreviewTextures::new(ctx, format!("transform-{session}"), egui::ColorImage::new([tw, th], px), uv);
     let mut pd = (*doc).clone();
     pd.selection = None;
     app.transform_preview = Some(TransformPreview { session, doc: Arc::new(pd), texture, opacity: 1.0, gesture: None, warp_drag: None });
@@ -162,12 +167,16 @@ pub fn leave_warp(app: &mut PhotocraftApp) {
     }
 }
 
-/// Texture of the moving pixels over `b`, at most 2048 px on the long side.
-fn preview_image(doc: &Document, id: LayerId, lifted: Option<&photocraft_raster::Surface>, b: photocraft_geom::Rect) -> egui::ColorImage {
-    let (w, h) = (b.width() as usize, b.height() as usize);
-    let k = w.max(h).div_ceil(2048).max(1);
-    let (tw, th) = (w.div_ceil(k), h.div_ceil(k));
-    let mut px = vec![Color32::TRANSPARENT; tw * th];
+/// Texels of the moving pixels over `b`: full resolution unless the long side exceeds the GPU's
+/// `max_side` (#91: this used to be capped at 2048 px, so big layers previewed blurry), plus the
+/// uv extent covering `b`.
+fn preview_image(
+    doc: &Document,
+    id: LayerId,
+    lifted: Option<&photocraft_raster::Surface>,
+    b: photocraft_geom::Rect,
+    max_side: usize,
+) -> (egui::ColorImage, [f32; 2]) {
     let layer = doc.layer(id);
     // Groups and type/fill layers preview from a flattened render of just that layer.
     let rendered;
@@ -189,17 +198,8 @@ fn preview_image(doc: &Document, id: LayerId, lifted: Option<&photocraft_raster:
             Some(&rendered)
         }
     };
-    let Some(surf) = surf else { return egui::ColorImage::new([tw, th], px) };
-    let mut row = vec![[0u8; 4]; w];
-    for ty in 0..th {
-        let y = b.y0 + (ty * k) as i32;
-        surf.read_rgba8_into(photocraft_geom::Rect::new(b.x0, y, b.x1, y + 1), &mut row);
-        for tx in 0..tw {
-            let p = row[(tx * k).min(w - 1)];
-            px[ty * tw + tx] = Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]);
-        }
-    }
-    egui::ColorImage::new([tw, th], px)
+    let Some(surf) = surf else { return (egui::ColorImage::new([1, 1], vec![Color32::TRANSPARENT]), [1.0, 1.0]) };
+    crate::transform_tex::read_surface(surf, b, max_side)
 }
 
 fn contains(l: &photocraft_doc::Layer, id: LayerId) -> bool {
@@ -303,7 +303,18 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) ->
     }
     let Some(pv) = app.transform_preview.as_mut() else { return false };
     match ev {
-        ToolEvent::Down { x, y, .. } => pv.gesture = Some(Gesture { hit: hit(&t, [x, y], tol), start: [x, y], quad0: t.quad, pivot0: t.pivot }),
+        ToolEvent::Down { x, y, .. } => {
+            let mut h = hit(&t, [x, y], tol);
+            // ⌥-click away from the handles moves the reference point there (and drags it).
+            if mods.alt
+                && matches!(h, Hit::Inside | Hit::Outside)
+                && let Some(s) = app.ui.transform.as_mut()
+            {
+                s.pivot = [x, y];
+                h = Hit::Pivot;
+            }
+            pv.gesture = Some(Gesture { hit: h, start: [x, y], quad0: t.quad, pivot0: t.pivot });
+        }
         ToolEvent::Move { x, y, .. } | ToolEvent::Up { x, y } => {
             let g = pv.gesture;
             if matches!(ev, ToolEvent::Up { .. }) {
@@ -321,6 +332,14 @@ fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods: egui::Mod
     let (dx, dy) = (p[0] - g.start[0], p[1] - g.start[1]);
     match g.hit {
         Hit::Inside => {
+            // ⇧ locks the move to the axes and diagonals; the current offset keeps the lock stable.
+            let (dx, dy) = if mods.shift {
+                let prev = [s.quad[0][0] - g.quad0[0][0], s.quad[0][1] - g.quad0[0][1]];
+                let d = crate::move_mods::constrain([dx, dy], Some(prev), crate::move_mods::TRANSFORM_DIRECTIONS);
+                (d[0], d[1])
+            } else {
+                (dx, dy)
+            };
             s.quad = g.quad0.map(|q| [q[0] + dx, q[1] + dy]);
             s.pivot = [g.pivot0[0] + dx, g.pivot0[1] + dy];
         }
@@ -342,10 +361,51 @@ fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods: egui::Mod
                 [c[0] + x * cs - y * sn, c[1] + x * sn + y * cs]
             });
         }
+        Hit::Corner(i) if mods.command && mods.alt && mods.shift => {
+            // Perspective: the corner moves along the dominant axis and the corner sharing that
+            // side moves the opposite way.
+            s.quad = g.quad0;
+            let horizontal = dx.abs() >= dy.abs();
+            // Corners 0..3 = TL, TR, BR, BL: horizontal drags pair along the top/bottom edge,
+            // vertical ones along the left/right edge.
+            let j = match (i, horizontal) {
+                (0, true) => 1,
+                (1, true) => 0,
+                (2, true) => 3,
+                (3, true) => 2,
+                (0, false) => 3,
+                (3, false) => 0,
+                (1, false) => 2,
+                _ => 1,
+            };
+            let (mx, my) = if horizontal { (dx, 0.0) } else { (0.0, dy) };
+            s.quad[i] = [g.quad0[i][0] + mx, g.quad0[i][1] + my];
+            s.quad[j] = [g.quad0[j][0] - mx, g.quad0[j][1] - my];
+        }
         Hit::Corner(i) if mods.command => {
             // Distort: move the corner freely.
             s.quad = g.quad0;
             s.quad[i] = [g.quad0[i][0] + dx, g.quad0[i][1] + dy];
+        }
+        Hit::Edge(i) if mods.command => {
+            // Skew: the edge's two corners move together (⇧: only along the edge).
+            let (a, b) = (i, (i + 1) % 4);
+            let (mut mx, mut my) = (dx, dy);
+            if mods.shift {
+                let e = [g.quad0[b][0] - g.quad0[a][0], g.quad0[b][1] - g.quad0[a][1]];
+                let l2 = e[0] * e[0] + e[1] * e[1];
+                let t = if l2 > 0.0 { (dx * e[0] + dy * e[1]) / l2 } else { 0.0 };
+                (mx, my) = (t * e[0], t * e[1]);
+            }
+            s.quad = g.quad0;
+            s.quad[a] = [g.quad0[a][0] + mx, g.quad0[a][1] + my];
+            s.quad[b] = [g.quad0[b][0] + mx, g.quad0[b][1] + my];
+            if mods.alt {
+                // ⌥: the opposite edge skews the other way (about the centre).
+                let (c, d) = ((i + 2) % 4, (i + 3) % 4);
+                s.quad[c] = [g.quad0[c][0] - mx, g.quad0[c][1] - my];
+                s.quad[d] = [g.quad0[d][0] - mx, g.quad0[d][1] - my];
+            }
         }
         Hit::Corner(_) | Hit::Edge(_) => {
             // Work in the box's own (unit) frame so rotated/skewed boxes scale along their axes.
@@ -524,13 +584,14 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
     if let Some(h) = Homography::rect_to_quad([0.0, 0.0, 1.0, 1.0], t.quad) {
         // A 24×24 grid keeps perspective previews straight.
         let n = 24;
-        let mut mesh = egui::Mesh::with_texture(pv.texture.id());
+        let (tex, uv) = pv.texture.pick(painter.ctx(), xf.zoom * painter.ctx().pixels_per_point(), quad_scale(t), t.interpolation == "nearest");
+        let mut mesh = egui::Mesh::with_texture(tex);
         let tint = Color32::from_white_alpha((pv.opacity.clamp(0.0, 1.0) * 255.0) as u8);
         for j in 0..=n {
             for i in 0..=n {
                 let (u, v) = (i as f64 / n as f64, j as f64 / n as f64);
                 let (x, y) = h.apply(u, v);
-                mesh.vertices.push(egui::epaint::Vertex { pos: xf.to_screen(x as f32, y as f32), uv: pos2(u as f32, v as f32), color: tint });
+                mesh.vertices.push(egui::epaint::Vertex { pos: xf.to_screen(x as f32, y as f32), uv: pos2(u as f32 * uv[0], v as f32 * uv[1]), color: tint });
             }
         }
         for j in 0..n {
@@ -565,13 +626,14 @@ fn draw_warp(painter: &egui::Painter, xf: &ViewXform, t: &TransformSession, w: &
     let scr = |q: [f64; 2]| xf.to_screen(q[0] as f32, q[1] as f32);
     let r = t.rect;
     let n = 32;
-    let mut mesh = egui::Mesh::with_texture(pv.texture.id());
+    let (tex, uv) = pv.texture.pick(painter.ctx(), xf.zoom * painter.ctx().pixels_per_point(), 1.0, t.interpolation == "nearest");
+    let mut mesh = egui::Mesh::with_texture(tex);
     let tint = Color32::from_white_alpha((pv.opacity.clamp(0.0, 1.0) * 255.0) as u8);
     for j in 0..=n {
         for i in 0..=n {
             let (u, v) = (i as f64 / n as f64, j as f64 / n as f64);
             let (x, y) = w.map(r[0] + u * (r[2] - r[0]), r[1] + v * (r[3] - r[1]));
-            mesh.vertices.push(egui::epaint::Vertex { pos: xf.to_screen(x as f32, y as f32), uv: pos2(u as f32, v as f32), color: tint });
+            mesh.vertices.push(egui::epaint::Vertex { pos: xf.to_screen(x as f32, y as f32), uv: pos2(u as f32 * uv[0], v as f32 * uv[1]), color: tint });
         }
     }
     for j in 0..n {
@@ -638,6 +700,16 @@ fn draw_warp(painter: &egui::Painter, xf: &ViewXform, t: &TransformSession, w: &
             }
         }
     }
+}
+
+/// How much the box enlarges its pixels: the longest edge relative to the original (picks the
+/// preview's texture level and filter).
+fn quad_scale(t: &TransformSession) -> f32 {
+    let (w0, h0) = ((t.rect[2] - t.rect[0]).max(1e-9), (t.rect[3] - t.rect[1]).max(1e-9));
+    let len = |a: [f64; 2], b: [f64; 2]| (b[0] - a[0]).hypot(b[1] - a[1]);
+    let q = &t.quad;
+    let s = (len(q[0], q[1]) / w0).max(len(q[3], q[2]) / w0).max(len(q[0], q[3]) / h0).max(len(q[1], q[2]) / h0);
+    if s.is_finite() { s as f32 } else { 1.0 }
 }
 
 /// Scale (%), angle (°) and translation implied by the current quad (affine readout).
@@ -912,6 +984,111 @@ mod tests {
         let b = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().content_bounds();
         assert!(b.width().abs_diff(32) <= 2 && b.x0.abs_diff(0) <= 1, "{b:?}");
         assert!(app.ui.transform.is_none() && app.transform_preview.is_none());
+    }
+
+    fn app_with_square(size: u32, fill: photocraft_geom::Rect) -> PhotocraftApp {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": size, "height": size})).unwrap();
+        app.sync_views();
+        app.session.execute("layer.new.layer", json!({})).unwrap();
+        app.session
+            .edit("paint", |doc, a| {
+                doc.layer_mut(a.unwrap()).unwrap().surface_mut().unwrap().fill_rect(fill, &[1.0, 0.0, 0.0, 1.0]);
+                Ok(())
+            })
+            .unwrap();
+        app
+    }
+
+    /// A context that reports a real GPU's texture limit (the default reports 2048).
+    fn gpu_ctx() -> egui::Context {
+        let ctx = egui::Context::default();
+        // Clear the font atlas delta: epaint panics on dropping unapplied deltas in debug builds.
+        let mut out = ctx.run_ui(egui::RawInput { max_texture_side: Some(16384), ..Default::default() }, |_| {});
+        out.textures_delta.clear();
+        ctx
+    }
+
+    #[test]
+    fn preview_texture_is_full_resolution() {
+        // #91: the preview used to be sampled down to 2048 px, so big layers looked blurry at 100%.
+        let mut app = app_with_square(3000, photocraft_geom::Rect::new(10, 20, 2810, 2420));
+        let ctx = gpu_ctx();
+        begin(&mut app, &ctx).unwrap();
+        let pv = app.transform_preview.as_ref().unwrap();
+        assert_eq!(pv.texture.size(), [2800, 2400], "one texel per layer pixel");
+        // At 100% the texture has at least as many texels as the box covers screen pixels.
+        let t = app.ui.transform.as_ref().unwrap();
+        assert!(pv.texture.size()[0] as f64 >= t.rect[2] - t.rect[0]);
+    }
+
+    #[test]
+    fn shift_body_drag_locks_to_eight_directions_and_switches() {
+        let mut s = session();
+        let g = Gesture { hit: Hit::Inside, start: [40.0, 20.0], quad0: s.quad, pivot0: s.pivot };
+        apply_drag(&mut s, g, [60.0, 23.0], egui::Modifiers::SHIFT);
+        assert!(close(s.quad, corners([20.0, 0.0, 120.0, 50.0])), "horizontal: {:?}", s.quad);
+        apply_drag(&mut s, g, [60.0, 39.0], egui::Modifiers::SHIFT);
+        assert!((s.quad[0][0] - s.quad[0][1]).abs() < 1e-9 && s.quad[0][0] > 15.0, "diagonal: {:?}", s.quad[0]);
+        apply_drag(&mut s, g, [41.0, 60.0], egui::Modifiers::SHIFT);
+        assert!(close(s.quad, corners([0.0, 40.0, 100.0, 90.0])), "vertical: {:?}", s.quad);
+    }
+
+    #[test]
+    fn alt_click_moves_the_reference_point_and_edges_skew() {
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        let ctx = egui::Context::default();
+        begin(&mut app, &ctx).unwrap();
+        assert!(pointer(&mut app, ToolEvent::Down { x: 40.0, y: 40.0, pressure: 1.0 }, egui::Modifiers::ALT));
+        pointer(&mut app, ToolEvent::Up { x: 40.0, y: 40.0 }, egui::Modifiers::ALT);
+        let t = app.ui.transform.as_ref().unwrap();
+        assert_eq!(t.pivot, [40.0, 40.0]);
+        assert_eq!(t.quad, corners(t.rect), "the box didn't move");
+        // ⌘ on an edge skews: both corners of the top edge move.
+        let mut s = session();
+        drag(&mut s, [50.0, 0.0], [70.0, 5.0], egui::Modifiers::COMMAND);
+        assert_eq!((s.quad[0], s.quad[1], s.quad[2]), ([20.0, 5.0], [120.0, 5.0], [100.0, 50.0]));
+        // ⌘⇧: only along the edge.
+        let mut s = session();
+        drag(&mut s, [50.0, 0.0], [70.0, 5.0], egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
+        assert_eq!((s.quad[0], s.quad[1]), ([20.0, 0.0], [120.0, 0.0]));
+        // ⌘⌥⇧ on a corner: perspective (the paired corner mirrors).
+        let mut s = session();
+        drag(&mut s, [100.0, 0.0], [101.0, -10.0], egui::Modifiers::COMMAND | egui::Modifiers::ALT | egui::Modifiers::SHIFT);
+        assert_eq!((s.quad[1], s.quad[2]), ([100.0, -10.0], [100.0, 60.0]));
+    }
+
+    /// `cargo test --release -p photocraft-ui-egui transform_preview_bench -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn transform_preview_bench() {
+        let (w, h) = (6000, 4000);
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": w, "height": h})).unwrap();
+        app.sync_views();
+        app.session.execute("layer.new.layer", json!({})).unwrap();
+        app.session.execute("filter.render.clouds", json!({})).unwrap();
+        let ctx = gpu_ctx();
+        let t0 = std::time::Instant::now();
+        begin(&mut app, &ctx).unwrap();
+        let begin_ms = t0.elapsed().as_secs_f64() * 1e3;
+        let size = app.transform_preview.as_ref().unwrap().texture.size();
+        rotate_about_pivot(&mut app, 0.05);
+        let frame = |zoom: f32| {
+            let t0 = std::time::Instant::now();
+            let _ = ctx.run_ui(egui::RawInput { max_texture_side: Some(16384), ..Default::default() }, |ui| {
+                let painter = ui.ctx().layer_painter(egui::LayerId::background());
+                let xf = ViewXform { rect: egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0)), zoom, center: [3000.0, 2000.0], flip: false };
+                draw_overlay(&app, &painter, &xf);
+            });
+            t0.elapsed().as_secs_f64() * 1e3
+        };
+        let first: Vec<f64> = [1.0, 0.25, 3.0].iter().map(|z| frame(*z)).collect();
+        let n = 50;
+        let steady = (0..n).map(|i| frame([1.0, 0.25, 3.0][i % 3])).sum::<f64>() / n as f64;
+        eprintln!(
+            "transform preview {w}x{h}: texture {size:?}, begin {begin_ms:.1} ms, first frame per level (1x, 0.25x, 3x) {first:.1?} ms, steady frame {steady:.3} ms"
+        );
     }
 
     #[test]
