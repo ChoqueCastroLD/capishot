@@ -142,6 +142,10 @@ static TEXT_GAMMA_SETTING: std::sync::atomic::AtomicU32 = std::sync::atomic::Ato
 /// Sets Color Settings › "Blend Text Colors Using Gamma" (1 = off). It is an application
 /// setting, not stored in documents: files saved with it off (ag-psd float-color) mix type
 /// linearly. Values are clamped to Photoshop's 1.00–2.20.
+///
+/// The value is process-wide: a test that changes it races every concurrently running test
+/// that composites a type layer, so such tests belong in their own test binary (see
+/// `crates/engine/tests/text_gamma.rs`).
 pub fn set_text_gamma(gamma: f32) {
     let g = if gamma.is_finite() { gamma.clamp(1.0, 2.2) } else { TEXT_GAMMA };
     TEXT_GAMMA_SETTING.store(g.to_bits(), std::sync::atomic::Ordering::Relaxed);

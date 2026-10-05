@@ -1221,19 +1221,8 @@ mod settings_tests {
         assert_eq!(t.color.settings, s.color.settings);
     }
 
-    #[test]
-    fn blend_text_gamma_setting() {
-        let mut s = Session::new();
-        assert!((s.color.settings.blend_text_gamma - 1.45).abs() < 1e-6);
-        assert!(s.execute("edit.colorSettings", json!({"blendTextGamma": 3.0})).is_err());
-        // The compositor's (application-wide) gamma follows; restored to the default at once.
-        s.execute("edit.colorSettings", json!({"blendTextGamma": 1.45})).unwrap();
-        assert!((photocraft_compose::psblend::text_gamma() - 1.45).abs() < 1e-6);
-        let r = s.execute("edit.colorSettings", json!({"blendTextGamma": false})).unwrap();
-        assert_eq!(r["settings"]["blendTextGamma"], 1.0);
-        s.execute("edit.colorSettings", json!({"blendTextGamma": true})).unwrap();
-        assert!((s.color.settings.blend_text_gamma - 1.45).abs() < 1e-6);
-    }
+    // The Blend Text Colors Using Gamma test is `tests/text_gamma.rs`: it changes the
+    // process-wide text gamma, which would race every unit test here that composites type.
 
     #[test]
     fn open_policies() {

@@ -106,9 +106,19 @@ fn check_turn(depth: u64, mode: &str, t: Turn) {
     refresh(&mut d, Refresh::All);
     let (mean, big) = diff(&photocraft_compose::flatten(&d).px, &want);
     assert!(mean < 2.0 / 255.0 && big < 0.01, "{t:?} {depth} {mode} re-rendered: mean {mean} big {big}");
-    // Undo restores the original.
+    // Undo restores the original, bit-exactly.
     s.execute("edit.undo", json!({})).unwrap();
-    assert_eq!(photocraft_compose::flatten(doc(&s)).px, before.px);
+    let undone = photocraft_compose::flatten(doc(&s));
+    assert_eq!(undone.px.len(), before.px.len(), "{t:?} {depth} {mode}: undo changed the canvas size");
+    let (mut n, mut max, mut first) = (0usize, 0.0f32, None);
+    for (i, (p, q)) in undone.px.iter().zip(&before.px).enumerate() {
+        if p != q {
+            n += 1;
+            max = (0..4).map(|c| (p[c] - q[c]).abs()).fold(max, f32::max);
+            first.get_or_insert((i % W as usize, i / W as usize, *p, *q));
+        }
+    }
+    assert!(n == 0, "{t:?} {depth} {mode}: undo left {n} pixels different (max {max}); first (x, y, undone, before): {first:?}");
 }
 
 #[test]
