@@ -84,6 +84,11 @@ pub fn parse_points(p: &Value, cmd: &str) -> Result<Vec<StrokePoint>> {
 /// Deep-merge `patch` into `base` (objects merge key by key; anything else replaces).
 fn merge(base: &mut Value, patch: &Value) {
     match (base, patch) {
+        // A different variant of an externally tagged enum (`{"tile":…}` → `{"procedural":…}`)
+        // replaces the old one instead of merging into a two-variant object.
+        (Value::Object(b), Value::Object(p)) if b.len() == 1 && p.len() == 1 && b.keys().next() != p.keys().next() => {
+            *b = p.clone();
+        }
         (Value::Object(b), Value::Object(p)) => {
             for (k, v) in p {
                 match b.get_mut(k) {
@@ -100,9 +105,36 @@ fn merge(base: &mut Value, patch: &Value) {
 
 /// Apply a JSON brush patch onto a brush.
 pub fn merge_brush(base: &BrushSettings, patch: &Value, cmd: &str) -> Result<BrushSettings> {
-    let mut v = serde_json::to_value(base).map_err(|e| bad(cmd, e.to_string()))?;
+    // Bitmaps the patch doesn't touch (sampled tips, pattern tiles: up to megabytes of base64) skip
+    // the JSON round trip, so a Brush Settings slider on an imported tip stays cheap.
+    let touches = |path: &[&str]| {
+        let mut v = patch;
+        for k in path {
+            match v.get(k) {
+                Some(x) => v = x,
+                // A non-object on the way replaces the whole section.
+                None => return !v.is_object(),
+            }
+        }
+        true
+    };
+    let mut light = base.clone();
+    let tip = (!touches(&["tip"])).then(|| std::mem::take(&mut light.tip));
+    let dual_tip = (!touches(&["dualBrush", "tip"])).then(|| std::mem::take(&mut light.dual_brush.tip));
+    let pattern = (!touches(&["texture", "pattern"])).then(|| std::mem::take(&mut light.texture.pattern));
+    let mut v = serde_json::to_value(&light).map_err(|e| bad(cmd, e.to_string()))?;
     merge(&mut v, patch);
-    serde_json::from_value(v).map_err(|e| bad(cmd, format!("invalid brush: {e}")))
+    let mut out: BrushSettings = serde_json::from_value(v).map_err(|e| bad(cmd, format!("invalid brush: {e}")))?;
+    if let Some(t) = tip {
+        out.tip = t;
+    }
+    if let Some(t) = dual_tip {
+        out.dual_brush.tip = t;
+    }
+    if let Some(p) = pattern {
+        out.texture.pattern = p;
+    }
+    Ok(out)
 }
 
 fn find_preset<'a>(s: &'a Session, name: &str, cmd: &str) -> Result<&'a BrushPreset> {

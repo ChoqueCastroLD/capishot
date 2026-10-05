@@ -177,6 +177,45 @@ fn set_brush_merges_fields() {
 }
 
 #[test]
+fn set_brush_keeps_untouched_bitmaps_and_replaces_touched_ones() {
+    let tile = |w, h, k: u32| GrayTile::from_fn(w, h, move |x, y| ((x * k + y) % 5) as f32 / 4.0);
+    let base = BrushSettings {
+        tip: TipShape::Sampled(tile(900, 700, 3)),
+        dual_brush: photocraft_paint::DualBrush { tip: TipShape::Sampled(tile(30, 20, 2)), ..Default::default() },
+        texture: photocraft_paint::Texture { pattern: photocraft_paint::Pattern::Tile(tile(64, 64, 1)), ..Default::default() },
+        ..Default::default()
+    };
+    let cmd = "tools.setBrush";
+    // Untouched bitmaps survive any patch that doesn't name them.
+    for patch in [json!({"size": 12}), json!({"dualBrush": {"size": 9}}), json!({"texture": {"depth": 0.5}}), json!({})] {
+        let b = merge_brush(&base, &patch, cmd).unwrap();
+        assert_eq!((&b.tip, &b.dual_brush.tip, &b.texture.pattern), (&base.tip, &base.dual_brush.tip, &base.texture.pattern), "{patch}");
+    }
+    let b = merge_brush(&base, &json!({"size": 12, "dualBrush": {"size": 9}}), cmd).unwrap();
+    assert_eq!((b.size, b.dual_brush.size), (12.0, 9.0));
+    // Named ones are replaced.
+    let b = merge_brush(
+        &base,
+        &json!({"tip": "round", "dualBrush": {"tip": "round"}, "texture": {"pattern": {"procedural": {"style": "dots", "size": 32, "seed": 2}}}}),
+        cmd,
+    )
+    .unwrap();
+    assert_eq!((&b.tip, &b.dual_brush.tip), (&TipShape::Round, &TipShape::Round));
+    assert!(matches!(b.texture.pattern, photocraft_paint::Pattern::Procedural { size: 32, .. }));
+    // A section replaced by a non-object is an error, not a silently kept bitmap.
+    assert!(merge_brush(&base, &json!({"dualBrush": 3}), cmd).is_err());
+    assert!(merge_brush(&base, &json!(null), cmd).is_err());
+    // Speed: a panel edit on a big imported tip doesn't base64 the tip.
+    let big = BrushSettings { tip: TipShape::Sampled(tile(2500, 2500, 7)), ..Default::default() };
+    let t0 = std::time::Instant::now();
+    for i in 0..10 {
+        merge_brush(&big, &json!({"size": 10 + i}), cmd).unwrap();
+    }
+    let ms = t0.elapsed().as_secs_f64() * 100.0;
+    eprintln!("merge_brush on a 2500 px tip: {ms:.2} ms per edit");
+}
+
+#[test]
 fn define_brush_from_selection() {
     let mut s = session(40, 40);
     assert!(s.execute("brush.defineFromSelection", json!({"name": "Blob"})).is_err(), "needs a selection");

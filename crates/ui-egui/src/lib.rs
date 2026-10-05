@@ -15,6 +15,8 @@ pub mod adjust_ui;
 pub mod analysis_ui;
 pub mod artboard_ui;
 pub mod brush_panel;
+pub mod brush_preview;
+pub mod brush_sections;
 pub mod camera_raw_ui;
 pub mod canvas;
 pub mod channel_view;
