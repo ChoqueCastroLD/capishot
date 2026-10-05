@@ -3404,6 +3404,7 @@ dependencies = [
  "photocraft-geom",
  "photocraft-io",
  "photocraft-raster",
+ "photocraft-tablet",
  "photocraft-ui-egui",
  "rfd",
  "serde_json",
@@ -3671,6 +3672,18 @@ dependencies = [
  "photocraft-raw",
  "png 0.18.1",
  "rayon",
+]
+
+[[package]]
+name = "photocraft-tablet"
+version = "0.2.0"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "x11rb",
 ]
 
 [[package]]

@@ -27,6 +27,9 @@ mod gpu_startup;
 mod linux_libs;
 mod monitor_profile;
 mod services;
+// Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+mod tablet;
 
 use photocraft_engine::Session;
 use photocraft_ui_egui::PhotocraftApp;
@@ -113,6 +116,13 @@ fn main() -> eframe::Result {
     let apple_events = apple_events::AppleEvents::install();
     #[cfg(target_os = "macos")]
     let apple_events = &apple_events;
+
+    // Pen tablet samples on macOS (AppKit event monitor, before winit sees each event) and X11
+    // (started once eframe says which display server it is on). The monitor lives until the event
+    // loop returns.
+    let stylus_feed = photocraft_ui_egui::stylus::StylusFeed::default();
+    #[cfg(target_os = "macos")]
+    let _tablet = tablet::install_macos(&stylus_feed);
 
     // Read the main display's ICC profile while the window opens (colour-managed canvas).
     let monitor = monitor_profile::detect_async();
@@ -215,6 +225,11 @@ fn main() -> eframe::Result {
             {
                 app.services.os_events = Some(apple_events.connect(&cc.egui_ctx));
             }
+            // Tablet pressure/tilt/eraser (winit drops them): the macOS monitor installed above
+            // and the X11 reader write into this feed.
+            app.stylus.feed = stylus_feed;
+            #[cfg(target_os = "linux")]
+            tablet::spawn_x11(&app.stylus.feed, tablet::DisplayKind::of(cc));
             // Paths on the command line (Linux/Windows file associations, `photocraft a.psd`).
             app.open_paths(&files);
             Ok(Box::new(app))

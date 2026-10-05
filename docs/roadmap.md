@@ -18,7 +18,7 @@ readiness; treat it as an upper bound.
 | M3 Viewer app | ✅ | egui shell (Pro / Studio / Classic themes), 13+ codecs, native and web (trunk) builds |
 | M4 Native format + engine | ✅ | 500+ commands, `.pcraft` (incremental, autosave, crash recovery), CLI, persistent preferences |
 | M5 GPU compositor | 🟡 | wgpu compositor drives the canvas, layer effects, vector masks, artboards, pattern fills and every clip case included (≤1/255 vs CPU); Multichannel documents fall back to the CPU |
-| M6 Paint + select | 🟡 | brush engine, all selection tools, multi-layer selection, snapping + smart guides, free transform + warp; stylus pressure on Windows (WM_POINTER via winit) and the web (Pointer Events, with tilt/twist); macOS and Linux wait on winit tablet support |
+| M6 Paint + select | 🟡 | brush engine, all selection tools, multi-layer selection, snapping + smart guides, free transform + warp; stylus pressure on Windows (WM_POINTER via winit), the web (Pointer Events, with tilt/twist), macOS (AppKit event monitor: pressure, tilt, rotation, eraser end) and Linux X11 (XInput2 raw valuators); Linux Wayland (tablet-v2) still open (#79) |
 | M7 Adjust + filters | 🟡 | 16 adjustment layers + destructive-only adjustments, 70+ filters incl. Blur Gallery, Actions record/replay, Fade |
 | M8 PSD v2 | 🟡 | adjustments (incl. Selective Color, Color Lookup), fills, effects, patterns, text, shapes, smart objects, alpha channels; oracle 111/170 |
 | M9 Text, vector, styles | 🟡 | type engine + Warp Text, shapes / pen / paths, all 10 effects on CPU and GPU (parity ≤1/255, 30/31 corpus effect files on the GPU) |
@@ -67,7 +67,7 @@ Confidence: moderate — the next users of 0.2.x will move these numbers either 
 | Core editing (layers, masks, selections, adjustments, filters, transforms) | Broad engine coverage; many interaction bugs fixed after 0.2.0 (adjustment dialogs, Curves, crop, Move/Transform modifiers, gesture origin) | medium | Fixes not yet user-validated. |
 | UI / UX polish | Shortcut audit 214 → 0 failures; dock, Layers rows and menus reworked; first visual-QA sweep found 14 defects (#147–#157) | low–medium | Needs recurring visual QA with realistic documents. |
 | Tools | ~20 Photoshop tools missing: Pencil, Mixer Brush (tool), Patch, Content-Aware Move, Red Eye, Pattern Stamp, Art History Brush, Freeform/Curvature Pen, anchor tools, Direct Selection, Magnetic Lasso, single row/column marquee, Color Sampler, Perspective Crop, Rotate View, the Vertical Type tool (vertical layout itself landed, #199: toggle via Type › Orientation) and type masks, Frame | low–medium | Magic/Background Eraser added; live gradients in progress (#180). |
-| Painting | Brush model and Brush Settings panel near Photoshop; .abr/.grd import; persistent presets; pressure on Windows and web only | medium | macOS/Linux pressure blocked on the windowing layer (#79). |
+| Painting | Brush model and Brush Settings panel near Photoshop; .abr/.grd import; persistent presets; pen pressure/tilt on Windows, web, macOS and X11 | medium | Wayland pen input open (#79); macOS/X11 pressure not yet verified on tablet hardware. |
 | Text / typography | Engine works; caret placement and size editing fixed; OpenType features, text-on-path editing, composer parity partial | medium-low | Measure with the Photoshop-authored set. |
 | Colour management | Colour-managed canvas (document → monitor), embedded CMYK profiles, linear EXR/HDR, 16-bit float canvas | medium-high | Monitor profile follows only at launch. |
 | Performance | 14k+ px on the GPU at ~⅓ the memory; adjustment preview 285 ms → 4–9 ms; font-size edits 297 ms → 4.6 ms | medium-high on rasters | Complex layout documents still laggy (#125/#128); >16384 px GPU tiling in progress (#49). |
@@ -93,7 +93,7 @@ Confidence: moderate — the next users of 0.2.x will move these numbers either 
 6. **Recurring visual QA** (`cargo run -p photocraft-engine --example designer_psd`) and fast
    turnaround on user reports (OS, document size, layer count, screenshot).
 7. Later / needs decisions: generative AI backend (#41), scripting compatibility (ExtendScript /
-   UXP / .atn), Flathub (#173), macOS/Linux pen pressure (#79).
+   UXP / .atn), Flathub (#173), Wayland pen pressure (#79).
 
 ## Current focus (infrastructure before the long tail)
 

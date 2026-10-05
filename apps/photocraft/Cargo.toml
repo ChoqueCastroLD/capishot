@@ -22,6 +22,8 @@ photocraft-io = { workspace = true }
 photocraft-format = { workspace = true }
 photocraft-automation = { workspace = true }
 photocraft-ui-egui = { workspace = true }
+# Pen tablet pressure/tilt on macOS and X11 (the workspace's one isolated unsafe helper crate).
+photocraft-tablet = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
 egui = { workspace = true }
 serde_json = { workspace = true }

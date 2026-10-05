@@ -1310,8 +1310,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
     }
 
-    // Pen pressure/tilt for this frame's tool events (mouse = 1.0).
+    // Pen pressure/tilt for this frame's tool events (mouse = 1.0), unless Preferences › Tools ›
+    // Use Tablet Pressure is off; the pen's eraser end selects the Eraser.
+    app.stylus.use_pressure = app.session.prefs().tools.use_tablet_pressure;
     app.stylus.update(&ui.input(|i| i.events.clone()));
+    crate::stylus::Stylus::sync_eraser_tool(app);
     let space_down = ui.input(|i| i.key_down(egui::Key::Space));
     // Space while drawing a crop frame moves it instead of panning.
     crate::crop_ui::set_space(app, space_down);
@@ -2165,7 +2168,7 @@ mod tests {
         app.ui.tool = Tool::Brush;
         assert_eq!(ensure_texture(&mut app, &ctx, 0).map(|t| t.1), Some(0.5));
         let m = egui::Modifiers::NONE;
-        app.stylus.feed.set(Some(crate::stylus::PenSample { pressure: 1.0, tilt_x: 60.0, tilt_y: 0.0, rotation: 0.0 }));
+        app.stylus.feed.set(Some(crate::stylus::PenSample { pressure: 1.0, tilt_x: 60.0, tilt_y: 0.0, rotation: 0.0, eraser: false }));
         tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 45.0, pressure: 1.0 }, m);
         for x in [300.0, 600.0, 900.0] {
             tool_event(&mut app, ToolEvent::Move { x, y: 45.0, pressure: 1.0 }, m);
