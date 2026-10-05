@@ -19,10 +19,12 @@ fn app() -> PhotocraftApp {
 }
 
 fn harness((w, h, scale): (f32, f32, f32)) -> Harness<'static, PhotocraftApp> {
-    let mut h = Harness::builder()
-        .with_size(egui::vec2(w / scale, h / scale))
-        .with_pixels_per_point(scale)
-        .build_ui_state(|ui, app| crate::menus::menu_bar(app, ui), app());
+    let mut h = Harness::builder().with_size(egui::vec2(w / scale, h / scale)).with_pixels_per_point(scale).build_ui_state(
+        |ui, app| {
+            crate::menus::menu_bar(app, ui);
+        },
+        app(),
+    );
     PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
     h.ctx.all_styles_mut(|s| s.scroll_animation = egui::style::ScrollAnimation::none());
     h.run_steps(3);

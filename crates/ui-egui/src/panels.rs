@@ -292,42 +292,95 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
             }
             let title = app.session.active().map(|d| format!("{}{}", d.doc.name, if d.is_dirty() { "  •" } else { "" })).unwrap_or_else(|| "PhotoCraft".into());
-            ui.painter().text(full.center(), Align2::CENTER_CENTER, title, theme::medium(13.0), t.text_dim);
+            // The menus and the right-hand controls are laid out first; the title is centred in
+            // whatever room is left between them, shortened or dropped rather than drawn over them.
+            let (mut menus_right, mut controls_left) = (full.left(), full.right());
             ui.horizontal_centered(|ui| {
-                crate::menus::menu_bar(app, ui);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    let mut ws = app.ui.workspace.clone();
-                    let opts = [
-                        ("Essentials".to_string(), "Essentials"),
-                        ("Photography".to_string(), "Photography"),
-                        ("Painting".to_string(), "Painting"),
-                        ("Graphic and Web".to_string(), "Graphic and Web"),
-                    ];
-                    if widgets::dropdown(ui, "workspace", &mut ws, &opts, 130.0) {
-                        app.ui.workspace = ws;
-                        crate::menus::apply_workspace(app);
-                    }
-                    if icons::button(ui, "search", 28.0, app.ui.palette_open, "Search commands (⌘K)").clicked() {
-                        app.ui.palette_open = !app.ui.palette_open;
-                    }
-                    let theme_icon = if t.dark() { "sun" } else { "moon" };
-                    if icons::button(ui, theme_icon, 28.0, false, "Switch theme").clicked() {
-                        let next = app.ui.theme.next();
-                        app.set_theme(ui.ctx(), next);
-                    }
-                    // Always one click away: the community Discord.
-                    let discord = egui::Button::image_and_text(
-                        icons::image("message-square", 14.0, t.text_dim),
-                        egui::RichText::new("Discord").color(t.text_dim).size(12.0),
-                    )
-                    .frame(false);
-                    if ui.add(discord).on_hover_text(format!("Join the ArtCraft Discord ({})", crate::links::DISCORD)).clicked() {
-                        crate::links::open(app, ui.ctx(), crate::links::DISCORD);
-                    }
-                });
+                menus_right = crate::menus::menu_bar(app, ui);
+                controls_left = ui
+                    .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let mut ws = app.ui.workspace.clone();
+                        let opts = [
+                            ("Essentials".to_string(), "Essentials"),
+                            ("Photography".to_string(), "Photography"),
+                            ("Painting".to_string(), "Painting"),
+                            ("Graphic and Web".to_string(), "Graphic and Web"),
+                        ];
+                        if widgets::dropdown(ui, "workspace", &mut ws, &opts, 130.0) {
+                            app.ui.workspace = ws;
+                            crate::menus::apply_workspace(app);
+                        }
+                        if icons::button(ui, "search", 28.0, app.ui.palette_open, "Search commands (⌘K)").clicked() {
+                            app.ui.palette_open = !app.ui.palette_open;
+                        }
+                        let theme_icon = if t.dark() { "sun" } else { "moon" };
+                        if icons::button(ui, theme_icon, 28.0, false, "Switch theme").clicked() {
+                            let next = app.ui.theme.next();
+                            app.set_theme(ui.ctx(), next);
+                        }
+                        // Always one click away: the community Discord.
+                        let discord = egui::Button::image_and_text(
+                            icons::image("message-square", 14.0, t.text_dim),
+                            egui::RichText::new("Discord").color(t.text_dim).size(12.0),
+                        )
+                        .frame(false);
+                        if ui.add(discord).on_hover_text(format!("Join the ArtCraft Discord ({})", crate::links::DISCORD)).clicked() {
+                            crate::links::open(app, ui.ctx(), crate::links::DISCORD);
+                        }
+                        ui.min_rect().left()
+                    })
+                    .inner;
             });
+            let font = theme::medium(13.0);
+            let galley = ui.painter().layout_no_wrap(title.clone(), font.clone(), t.text_dim);
+            if let Some(x) = title_x(full.center().x, menus_right, controls_left, galley.size().x) {
+                ui.painter().galley(egui::pos2(x, full.center().y - galley.size().y / 2.0), galley, t.text_dim);
+            } else if controls_left - menus_right > 80.0 {
+                // Too narrow for the whole name: show the start of it, elided, in the free gap.
+                let avail = controls_left - menus_right - 2.0 * TITLE_GAP;
+                let mut job = egui::text::LayoutJob::simple_singleline(title, font, t.text_dim);
+                job.wrap = egui::text::TextWrapping::truncate_at_width(avail);
+                let g = ui.painter().layout_job(job);
+                ui.painter().galley(egui::pos2(menus_right + TITLE_GAP, full.center().y - g.size().y / 2.0), g, t.text_dim);
+            }
         });
+}
+
+/// Minimum space kept between the window title and the menus or controls beside it.
+const TITLE_GAP: f32 = 16.0;
+
+/// Left edge for a title `width` wide: centred on `center` when it fits between the menus
+/// (ending at `menus_right`) and the right-hand controls (starting at `controls_left`), else
+/// slid into that gap; None when the gap is too small for the whole title.
+fn title_x(center: f32, menus_right: f32, controls_left: f32, width: f32) -> Option<f32> {
+    let (lo, hi) = (menus_right + TITLE_GAP, controls_left - TITLE_GAP - width);
+    if !(lo.is_finite() && hi.is_finite() && width.is_finite()) || hi < lo {
+        return None;
+    }
+    if !center.is_finite() {
+        return Some(lo);
+    }
+    Some((center - width / 2.0).clamp(lo, hi))
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::title_x;
+
+    #[test]
+    fn title_never_overlaps_menus_or_controls() {
+        // Wide window: centred.
+        assert_eq!(title_x(800.0, 420.0, 1300.0, 60.0), Some(770.0));
+        // Centre would hit the menus: slid right into the gap.
+        assert_eq!(title_x(400.0, 420.0, 1300.0, 60.0), Some(436.0));
+        // Centre would hit the controls: slid left.
+        assert_eq!(title_x(1280.0, 420.0, 1300.0, 60.0), Some(1224.0));
+        // No room for the whole title: the caller elides or drops it.
+        assert_eq!(title_x(400.0, 420.0, 480.0, 60.0), None);
+        assert_eq!(title_x(f32::NAN, 420.0, 1300.0, 60.0), Some(436.0));
+        assert_eq!(title_x(400.0, f32::INFINITY, 1300.0, 60.0), None);
+    }
 }
 
 // ----------------------------------------------------------------------------- options bar
