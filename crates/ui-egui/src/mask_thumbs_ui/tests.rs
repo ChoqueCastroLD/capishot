@@ -202,3 +202,185 @@ fn panels_never_panic_on_odd_documents() {
     let (r, uv) = crate::channels_panel::fit_thumb(Rect::from_min_size(pos2(0.0, 0.0), vec2(28.0, 28.0)), 0, 0);
     assert!(r.is_finite() && uv.is_finite() && r.width() > 0.0);
 }
+
+// ---------------------------------------------------------------------------------------------
+// #196: ⌥-click mask view, ⌘-click vector mask to select, vector-mask target brackets.
+
+/// The session above with a black dot painted into the layer mask at (50, 50).
+fn dotted() -> (photocraft_engine::Session, u64, u64) {
+    let (mut s, masked, shape) = session();
+    s.execute("paint.stroke", json!({"points": [[50, 50]], "size": 20, "hardness": 1.0, "color": "#000000", "target": "mask"})).unwrap();
+    (s, masked, shape)
+}
+
+fn mask_rect(h: &Harness<'_, PhotocraftApp>, id: u64, kind: MaskKind) -> Rect {
+    recorded(&h.ctx, id).unwrap().0.into_iter().find(|(k, _)| *k == kind).unwrap().1
+}
+
+/// The layer thumbnail sits left of the first chain (see `paint`).
+fn layer_thumb_center(h: &Harness<'_, PhotocraftApp>, id: u64) -> Pos2 {
+    let first = recorded(&h.ctx, id).unwrap().0[0].1;
+    pos2(first.left() - 4.0 - super::CHAIN_W - first.width() / 2.0, first.center().y)
+}
+
+fn mask_view(h: &Harness<'_, PhotocraftApp>) -> serde_json::Value {
+    photocraft_engine::inspect::document(h.state().session.active().unwrap())["layerMaskView"].clone()
+}
+
+fn canvas_px(h: &Harness<'_, PhotocraftApp>) -> Option<Vec<egui::Color32>> {
+    let st = h.state().session.active().unwrap();
+    crate::channel_view::render(&st.doc, &st.channel_view, photocraft_geom::Rect::new(0, 0, 200, 100), 1, false)
+}
+
+fn near(a: Rect, b: Rect) -> bool {
+    (a.min - b.min).length() < 0.6 && (a.max - b.max).length() < 0.6
+}
+
+#[test]
+fn alt_click_views_the_mask_in_gray_and_the_layer_thumbnail_returns() {
+    for ppp in [1.0, 2.0] {
+        let (s, masked, _) = dotted();
+        let mut h = harness(s, 0, ppp, 290.0);
+        let doc = h.state().session.active().unwrap().doc.clone();
+        let r = mask_rect(&h, masked, MaskKind::Pixel);
+        click_with(&mut h, r.center(), Modifiers::ALT);
+        assert_eq!(mask_view(&h), json!({"layer": masked, "mode": "gray"}), "@{ppp}x");
+        assert!(h.state().ui.mask_target, "viewing the mask targets it");
+        assert_eq!(crate::canvas::paint_target(h.state()), json!("mask"), "painting paints the mask");
+        let px = canvas_px(&h).expect("the canvas shows the mask");
+        assert_eq!(px[50 * 200 + 50], egui::Color32::BLACK, "hidden reads black");
+        assert_eq!(px[10 * 200 + 150], egui::Color32::WHITE, "revealed reads white");
+        assert!(near(super::brackets(&h.ctx).unwrap(), r.expand(3.0)), "brackets on the mask");
+        // ⌥-click again: back to the composite.
+        click_with(&mut h, r.center(), Modifiers::ALT);
+        assert_eq!(mask_view(&h), serde_json::Value::Null);
+        assert!(canvas_px(&h).is_none());
+        // Into mask view again, then out by clicking the layer thumbnail.
+        click_with(&mut h, r.center(), Modifiers::ALT);
+        assert_eq!(mask_view(&h)["mode"], "gray");
+        let p = layer_thumb_center(&h, masked);
+        click_with(&mut h, p, Modifiers::NONE);
+        assert_eq!(mask_view(&h), serde_json::Value::Null, "@{ppp}x the layer thumbnail returns");
+        assert!(!h.state().ui.mask_target, "and targets the pixels");
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.state().session.active().unwrap().doc), "viewing never touched the document");
+    }
+}
+
+#[test]
+fn shift_alt_click_shows_a_rubylith_and_the_channels_eye_toggles_it() {
+    let (s, masked, _) = dotted();
+    let mut h = harness(s, 0, 1.0, 290.0);
+    let r = mask_rect(&h, masked, MaskKind::Pixel);
+    click_with(&mut h, r.center(), Modifiers::SHIFT | Modifiers::ALT);
+    assert_eq!(mask_view(&h), json!({"layer": masked, "mode": "overlay"}));
+    let px = canvas_px(&h).unwrap();
+    assert_eq!(px[50 * 200 + 50], egui::Color32::from_rgba_premultiplied(128, 0, 0, 128), "50% red over hidden areas");
+    assert_eq!(px[10 * 200 + 150], egui::Color32::TRANSPARENT, "the composite shows through elsewhere");
+    assert!(layer(&h, masked).mask.unwrap().enabled, "⇧⌥ doesn't disable the mask");
+    // Channels: the mask row's eye shows and hides the overlay.
+    let ctx = h.ctx.clone();
+    let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"dockTabs": {"layers": 1}}));
+    crate::control::handle(h.state_mut(), &ctx, &req);
+    h.run_steps(4);
+    let p = h.get_by_label("Visibility Masked Mask").rect().center();
+    click_with(&mut h, p, Modifiers::NONE);
+    assert_eq!(mask_view(&h), serde_json::Value::Null, "the eye hides the overlay");
+    let p = h.get_by_label("Visibility Masked Mask").rect().center();
+    click_with(&mut h, p, Modifiers::NONE);
+    assert_eq!(mask_view(&h)["mode"], "overlay", "and shows it again");
+    // In gray view the composite's eye brings the composite back under the overlay.
+    h.state_mut().run("view.layerMask", json!({"mode": "gray"})).unwrap();
+    h.run_steps(3);
+    let p = h.get_by_label("Visibility RGB").rect().center();
+    click_with(&mut h, p, Modifiers::NONE);
+    assert_eq!(mask_view(&h)["mode"], "overlay");
+}
+
+#[test]
+fn command_click_a_vector_mask_loads_its_path_as_a_selection() {
+    let (s, masked, _) = session();
+    let mut h = harness(s, 0, 1.0, 290.0);
+    let r = mask_rect(&h, masked, MaskKind::Vector);
+    let sel = |h: &Harness<'_, PhotocraftApp>| h.state().session.active().unwrap().doc.selection.clone();
+    click_with(&mut h, r.center(), Modifiers::COMMAND);
+    let b = sel(&h).expect("⌘-click selects the path").content_bounds();
+    assert_eq!((b.x0, b.y0, b.width(), b.height()), (20, 10, 100, 80));
+    assert!(!h.state().ui.vector_mask_target, "⌘-click doesn't retarget");
+    // ⌘⇧ add a 4×4 square, ⌘⌥ subtract, ⌘⇧⌥ intersect.
+    h.state_mut().run("select.rect", json!({"x": 150, "y": 50, "width": 4, "height": 4})).unwrap();
+    click_with(&mut h, r.center(), Modifiers::COMMAND | Modifiers::SHIFT);
+    let s1 = sel(&h).unwrap();
+    assert!(s1.sample_channel(60, 50, 0) > 0.99 && s1.sample_channel(151, 51, 0) > 0.99, "added");
+    h.state_mut().run("select.all", json!({})).unwrap();
+    click_with(&mut h, r.center(), Modifiers::COMMAND | Modifiers::ALT);
+    let s2 = sel(&h).unwrap();
+    assert!(s2.sample_channel(60, 50, 0) < 0.01 && s2.sample_channel(150, 50, 0) > 0.99, "subtracted");
+    h.state_mut().run("select.rect", json!({"x": 100, "y": 0, "width": 100, "height": 100})).unwrap();
+    click_with(&mut h, r.center(), Modifiers::COMMAND | Modifiers::SHIFT | Modifiers::ALT);
+    let b = sel(&h).unwrap().content_bounds();
+    assert_eq!((b.x0, b.y0, b.width(), b.height()), (100, 10, 20, 80), "intersected");
+}
+
+#[test]
+fn clicking_the_vector_mask_targets_it_for_the_path_tools() {
+    let (s, masked, _) = session();
+    let mut h = harness(s, 0, 1.0, 290.0);
+    let r = mask_rect(&h, masked, MaskKind::Vector);
+    click_with(&mut h, r.center(), Modifiers::NONE);
+    assert!(h.state().ui.vector_mask_target && !h.state().ui.mask_target);
+    assert_eq!(h.state().ui.selected_path.as_deref(), Some("layer"), "the Paths panel selects its path");
+    assert!(near(super::brackets(&h.ctx).unwrap(), r.expand(3.0)), "brackets on the vector mask");
+    assert_eq!(crate::canvas::paint_target(h.state()), json!("pixels"));
+    // Path Selection moves the vector mask.
+    crate::vector_ui::path_selection_finish(h.state_mut(), [30.0, 30.0], [35.0, 32.0]);
+    let k = layer(&h, masked).vector_mask.unwrap().path.subpaths[0].knots[0].anchor;
+    assert_eq!((k.x, k.y), (25.0, 12.0));
+    // The Pen adds a subpath to it.
+    h.state_mut().ui.pen = Some(crate::vector_ui::PenPath { knots: vec![[[150.0, 10.0]; 3], [[190.0, 10.0]; 3], [[190.0, 40.0]; 3]], dragging: false });
+    crate::vector_ui::pen_commit(h.state_mut(), true);
+    assert_eq!(layer(&h, masked).vector_mask.unwrap().path.subpaths.len(), 2);
+    assert!(h.state().session.active().unwrap().doc.work_path.is_none(), "not a work path");
+    h.run_steps(2);
+    // The pixel mask and the layer thumbnail take the brackets back.
+    let m = mask_rect(&h, masked, MaskKind::Pixel);
+    click_with(&mut h, m.center(), Modifiers::NONE);
+    assert!(h.state().ui.mask_target && !h.state().ui.vector_mask_target);
+    assert!(near(super::brackets(&h.ctx).unwrap(), m.expand(3.0)));
+    click_with(&mut h, r.center(), Modifiers::NONE);
+    let p = layer_thumb_center(&h, masked);
+    click_with(&mut h, p, Modifiers::NONE);
+    assert!(!h.state().ui.mask_target && !h.state().ui.vector_mask_target);
+    // Deleting the vector mask drops the target.
+    click_with(&mut h, r.center(), Modifiers::NONE);
+    assert!(h.state().ui.vector_mask_target);
+    h.state_mut().run("layer.vectorMask.delete", json!({"layer": masked})).unwrap();
+    h.run_steps(2);
+    assert!(!h.state().ui.vector_mask_target);
+}
+
+#[test]
+fn mask_view_gestures_fail_gracefully_without_a_mask() {
+    let (s, masked, shape) = session();
+    let mut h = harness(s, 0, 1.0, 290.0);
+    // ⌥-click on a vector mask is not a mask view.
+    let p = mask_rect(&h, masked, MaskKind::Vector).center();
+    click_with(&mut h, p, Modifiers::ALT);
+    assert_eq!(mask_view(&h), serde_json::Value::Null);
+    // A layer without a layer mask: the command fails, nothing changes.
+    assert!(h.state_mut().run("view.layerMask", json!({"layer": shape, "mode": "gray"})).is_err());
+    assert_eq!(mask_view(&h), serde_json::Value::Null);
+    h.run_steps(2);
+    // A stale view (layer gone) draws nothing instead of panicking.
+    h.state_mut().session.active_mut().unwrap().channel_view.layer_mask = Some(photocraft_engine::mask_view_cmds::LayerMaskView {
+        layer: photocraft_doc::LayerId(987_654),
+        mode: photocraft_engine::mask_view_cmds::MaskViewMode::Gray,
+    });
+    assert!(canvas_px(&h).is_none());
+    h.run_steps(2);
+    // The mask goes while it is shown: the view ends.
+    h.state_mut().run("view.layerMask", json!({"layer": masked, "mode": "gray"})).unwrap();
+    h.state_mut().run("layer.layerMask.delete", json!({"layer": masked})).unwrap();
+    h.run_steps(2);
+    assert_eq!(mask_view(&h), serde_json::Value::Null);
+    assert_eq!(crate::canvas::paint_target(h.state()), json!("pixels"));
+}

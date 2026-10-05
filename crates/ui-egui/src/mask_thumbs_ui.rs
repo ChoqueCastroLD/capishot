@@ -5,6 +5,9 @@
 //! (`layer.layerMask.linked` / `layer.vectorMask.linked`); a disabled mask is crossed out with
 //! a red X and ⇧-clicking a mask thumbnail toggles it (`…enabled`). Vector masks render as a
 //! white (revealed) / grey (hidden) thumbnail, cached like the other row thumbnails.
+//!
+//! #196: ⌥-click a layer-mask thumbnail to view the mask (⇧⌥: as an overlay), ⌘-click either
+//! mask to load it as a selection, and click the vector mask to target it (brackets).
 
 use egui::{Color32, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use photocraft_doc::{Document, Layer, LayerId, VectorMask};
@@ -174,13 +177,57 @@ fn paint_chain(painter: &Painter, c: Pos2, color: Color32) {
 }
 
 /// The command a click on mask thumbnail `kind` issues with modifiers `m`, if it is one that
-/// replaces the normal click (⇧: toggle the mask on/off, like Photoshop).
+/// replaces the normal click: ⇧ toggles the mask on/off; ⌥ views a layer mask alone in
+/// grayscale and ⇧⌥ as a rubylith overlay (again: back to the composite), like Photoshop.
 pub fn click_command(l: &Layer, kind: MaskKind, m: egui::Modifiers) -> Option<(String, Value)> {
-    if !m.shift || m.command {
+    if m.command {
+        return None;
+    }
+    if m.alt {
+        let mode = if m.shift { "toggleOverlay" } else { "toggleGray" };
+        return (kind == MaskKind::Pixel && l.mask.is_some()).then(|| (photocraft_engine::mask_view_cmds::ID.into(), json!({"layer": l.id.0, "mode": mode})));
+    }
+    if !m.shift {
         return None;
     }
     let enabled = masks(l).into_iter().find(|(k, _, _)| *k == kind)?.1;
     Some((format!("{}.enabled", kind.command()), json!({"layer": l.id.0, "enabled": !enabled})))
+}
+
+/// The `select.loadSelection` params for a ⌘-click on mask thumbnail `kind` (⌘⇧ add, ⌘⌥
+/// subtract, ⌘⇧⌥ intersect).
+pub fn load_params(l: &Layer, kind: MaskKind, m: egui::Modifiers) -> Value {
+    let channel = match kind {
+        MaskKind::Pixel => "mask",
+        MaskKind::Vector => "vectorMask",
+    };
+    json!({"channel": channel, "layer": l.id.0, "operation": crate::channels_panel::load_operation(m)})
+}
+
+/// The active layer of `st` has a vector mask (shape layers' paths are content, not masks).
+pub fn has_vector_mask(st: &photocraft_engine::DocState) -> bool {
+    st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| l.vector_mask.is_some() && !matches!(l.content, photocraft_doc::LayerContent::Shape(_)))
+}
+
+/// Photoshop's target brackets: corner marks just outside thumbnail `r`.
+pub fn paint_brackets(painter: &Painter, r: Rect, color: Color32) {
+    let r = r.expand(3.0);
+    let k = 6.0;
+    let st = Stroke::new(1.5, color);
+    for (c, dx, dy) in [(r.left_top(), 1.0, 1.0), (r.right_top(), -1.0, 1.0), (r.right_bottom(), -1.0, -1.0), (r.left_bottom(), 1.0, -1.0)] {
+        painter.line_segment([c, c + vec2(k * dx, 0.0)], st);
+        painter.line_segment([c, c + vec2(0.0, k * dy)], st);
+    }
+    painter.ctx().data_mut(|d| d.insert_temp(bracket_id(), r));
+}
+
+fn bracket_id() -> egui::Id {
+    egui::Id::new("layer-target-brackets")
+}
+
+/// Where the target brackets were last drawn (for tests and automation).
+pub fn brackets(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|d| d.get_temp(bracket_id()))
 }
 
 /// Cheap identity of a vector mask's geometry and state.

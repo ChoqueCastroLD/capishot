@@ -52,6 +52,8 @@ pub struct ChannelView {
     /// Visible alpha channels (missing entries are hidden).
     pub alpha_visible: Vec<bool>,
     pub quick_mask_hidden: bool,
+    /// ⌥-click view of the active layer's mask (#196); see [`crate::mask_view_cmds`].
+    pub layer_mask: Option<crate::mask_view_cmds::LayerMaskView>,
 }
 
 impl ChannelView {
@@ -80,7 +82,15 @@ impl ChannelView {
     /// True when the canvas shows just the normal composite (nothing extra to draw).
     pub fn is_plain(&self, doc: &Document) -> bool {
         let colors = color_count(doc);
-        self.visible_colors(colors) == colors && !(0..doc.channels.len()).any(|i| self.alpha_shown(i)) && (doc.quick_mask.is_none() || self.quick_mask_hidden)
+        self.visible_colors(colors) == colors
+            && !(0..doc.channels.len()).any(|i| self.alpha_shown(i))
+            && (doc.quick_mask.is_none() || self.quick_mask_hidden)
+            && self.shown_layer_mask(doc).is_none()
+    }
+    /// The layer mask shown on the canvas (#196) and how, if its layer still has a mask.
+    pub fn shown_layer_mask<'a>(&self, doc: &'a Document) -> Option<(&'a photocraft_doc::LayerMask, crate::mask_view_cmds::MaskViewMode)> {
+        let v = self.layer_mask?;
+        Some((doc.layer(v.layer)?.mask.as_ref()?, v.mode))
     }
 }
 
@@ -115,6 +125,7 @@ pub(crate) fn fix_view(st: &mut DocState) {
     if v.visible_colors(colors) == 0 && !(0..n).any(|i| v.alpha_shown(i)) {
         v.color_hidden.clear();
     }
+    crate::mask_view_cmds::fix(st);
 }
 
 /// Bump the revision for a view-only change without dirtying a clean document.
@@ -212,6 +223,8 @@ pub enum ChanRef {
     Selection,
     Transparency,
     LayerMask,
+    /// The layer's vector mask, rasterized (⌘-click its thumbnail, #196).
+    VectorMask,
 }
 
 pub fn parse_ref(v: &Value, doc: &Document) -> Option<ChanRef> {
@@ -233,6 +246,7 @@ pub fn parse_ref(v: &Value, doc: &Document) -> Option<ChanRef> {
                 "selection" => return Some(ChanRef::Selection),
                 "transparency" => return Some(ChanRef::Transparency),
                 "mask" | "layermask" => return Some(ChanRef::LayerMask),
+                "vectormask" | "vector mask" => return Some(ChanRef::VectorMask),
                 _ => {}
             }
             if l == composite_name(mode).to_ascii_lowercase() {
@@ -334,6 +348,14 @@ fn ref_planes(doc: &Document, layer: Option<LayerId>, active: Option<LayerId>, r
             let l = doc.layer(id).ok_or(EngineError::NoLayer(id))?;
             let m = l.mask.as_ref().ok_or_else(|| EngineError::Other(format!("layer \"{}\" has no mask", l.name)))?;
             vec![read_plane(&m.surface, area)]
+        }
+        ChanRef::VectorMask => {
+            let id = layer.or(active).ok_or_else(|| EngineError::Other("vector mask needs a layer".into()))?;
+            let l = doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+            let m = l.vector_mask.as_ref().ok_or_else(|| EngineError::Other(format!("layer \"{}\" has no vector mask", l.name)))?;
+            // The path's shape, whether or not the mask is enabled (as Photoshop loads it).
+            let shape = photocraft_doc::VectorMask { enabled: true, density: 1.0, feather: 0.0, ..m.clone() };
+            vec![photocraft_vector::vector_mask_values(&shape, area)]
         }
     })
 }
@@ -541,6 +563,8 @@ pub(crate) fn inject_target(s: &Session, id: &str, params: Value) -> Value {
     let t = match st.channel_view.target {
         ChannelTarget::Alpha(i) if i < st.doc.channels.len() => json!({ "channel": i }),
         ChannelTarget::Composite if st.doc.quick_mask.is_some() => json!("quickMask"),
+        // Viewing the active layer's mask (⌥-click): pixel commands edit the mask.
+        ChannelTarget::Composite if crate::mask_view_cmds::current(st).is_some() => json!("mask"),
         _ => return params,
     };
     match params {
@@ -1429,6 +1453,7 @@ pub fn channels_json(st: &DocState) -> Value {
         "quickMask": doc.quick_mask.as_ref().map(|q| json!({ "visible": !v.quick_mask_hidden, "color": q.color.to_rgb(), "opacity": q.opacity, "indicates": q.indicates })),
         "target": v.target,
         "compositeVisible": v.visible_colors(colors) == colors,
+        "layerMaskView": crate::mask_view_cmds::view_json(st),
     })
 }
 
@@ -1461,7 +1486,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Load Selection…",
             ["Select"],
             None,
-            r##"{"channel":index|name|"composite"|"red|green|blue|…"|"transparency"|"mask"|"quickMask"|"selection","layer":id?,"document":index?,"invert":bool=false,"operation":"new|add|subtract|intersect"="new"}"##,
+            r##"{"channel":index|name|"composite"|"red|green|blue|…"|"transparency"|"mask"|"vectorMask"|"quickMask"|"selection","layer":id?,"document":index?,"invert":bool=false,"operation":"new|add|subtract|intersect"="new"}"##,
             has_doc,
             load_selection
         ),

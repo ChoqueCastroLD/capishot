@@ -44,6 +44,7 @@ pub fn document(d: &DocState) -> Value {
         "revision": d.revision,
         "channels": crate::channel_cmds::channels_json(d),
         "quickMask": doc.quick_mask.is_some(),
+        "layerMaskView": crate::mask_view_cmds::view_json(d),
         "layerComps": doc.layer_comps.iter().map(|c| json!({"id": c.id, "name": c.name})).collect::<Vec<_>>(),
         "lastAppliedComp": doc.last_applied_comp,
         "measurement": {"scale": doc.measurement.scale.describe(), "ruler": doc.measurement.ruler.map(|r| json!({"start": r.start, "end": r.end, "protractor": r.protractor})), "count": doc.measurement.count_total(), "countGroups": doc.measurement.count_groups.len()},

@@ -166,6 +166,13 @@ pub fn pen_commit(app: &mut PhotocraftApp, closed: bool) {
         let stroke =
             if closed { stroke_param(app) } else { json!({"width": app.ui.tool_options.stroke_width.max(1.0), "color": hex(app.session.tools.foreground)}) };
         app.run("shape.create", json!({"kind": "path", "path": path, "fill": fill, "stroke": stroke}))
+    } else if let Some((id, existing)) = targeted_vector_mask(app) {
+        // A targeted vector mask takes the new subpath (#196), as in Photoshop.
+        let mut p = photocraft_engine::vector_cmds::path_json(&existing);
+        if let (Some(subs), Some(new)) = (p.get_mut("subpaths").and_then(Value::as_array_mut), path.get("subpaths").and_then(Value::as_array)) {
+            subs.extend(new.iter().cloned());
+        }
+        app.run("layer.vectorMask.edit", json!({"layer": id, "path": p}))
     } else {
         app.run("path.set", json!({"name": "work", "path": path}))
     };
@@ -178,15 +185,35 @@ pub fn pen_commit(app: &mut PhotocraftApp, closed: bool) {
 // ---------------------------------------------------------------------------------------------
 // Path Selection
 
-/// The path Path Selection edits: the active shape layer's, else the work path.
-fn target_path(app: &PhotocraftApp) -> Option<(Option<u64>, Path)> {
+/// What Path Selection edits.
+enum PathTarget {
+    Shape(u64),
+    /// The active layer's vector mask, when its Layers thumbnail is targeted (#196).
+    VectorMask(u64),
+    Work,
+}
+
+/// The targeted vector mask of the active layer, if the Layers panel targets it.
+fn targeted_vector_mask(app: &PhotocraftApp) -> Option<(u64, Path)> {
+    let st = app.session.active()?;
+    let l = st.active_layer.and_then(|id| st.doc.layer(id))?;
+    (app.ui.vector_mask_target && !matches!(l.content, LayerContent::Shape(_))).then_some(())?;
+    l.vector_mask.as_ref().map(|m| (l.id.0, m.path.clone()))
+}
+
+/// The path Path Selection edits: the targeted vector mask, the active shape layer's path, else
+/// the work path.
+fn target_path(app: &PhotocraftApp) -> Option<(PathTarget, Path)> {
+    if let Some((id, p)) = targeted_vector_mask(app) {
+        return Some((PathTarget::VectorMask(id), p));
+    }
     let st = app.session.active()?;
     if let Some(l) = st.active_layer.and_then(|id| st.doc.layer(id))
         && let LayerContent::Shape(sh) = &l.content
     {
-        return Some((Some(l.id.0), sh.path.clone()));
+        return Some((PathTarget::Shape(l.id.0), sh.path.clone()));
     }
-    st.doc.work_path.clone().map(|p| (None, p))
+    st.doc.work_path.clone().map(|p| (PathTarget::Work, p))
 }
 
 pub fn path_selection_finish(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
@@ -194,10 +221,14 @@ pub fn path_selection_finish(app: &mut PhotocraftApp, start: [f64; 2], end: [f64
     if dx.abs() + dy.abs() < 0.5 {
         return;
     }
-    let Some((layer, path)) = target_path(app) else { return };
-    let _ = match layer {
-        Some(id) => app.run("shape.edit", json!({"layer": id, "move": [dx.round(), dy.round()]})),
-        None => {
+    let Some((target, path)) = target_path(app) else { return };
+    let _ = match target {
+        PathTarget::Shape(id) => app.run("shape.edit", json!({"layer": id, "move": [dx.round(), dy.round()]})),
+        PathTarget::VectorMask(id) => {
+            let moved = path.transform(&Affine::translate(dx.round(), dy.round()));
+            app.run("layer.vectorMask.edit", json!({"layer": id, "path": photocraft_engine::vector_cmds::path_json(&moved)}))
+        }
+        PathTarget::Work => {
             let moved = path.transform(&Affine::translate(dx.round(), dy.round()));
             app.run("path.set", json!({"name": "work", "path": photocraft_engine::vector_cmds::path_json(&moved)}))
         }
@@ -274,6 +305,10 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
             draw_path(&sh.path, tool == Tool::PathSelection);
         }
     }
+    // A targeted vector mask shows its path with any tool (#196).
+    if let Some((_, p)) = targeted_vector_mask(app) {
+        draw_path(&p, tool == Tool::PathSelection);
+    }
     // Pen path in progress, with handles of the last knot and a rubber band to the pointer.
     if let Some(pen) = &app.ui.pen {
         let mut pts = Vec::new();
@@ -318,7 +353,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
     };
     let o = &mut app.ui.tool_options;
     if tool == Tool::PathSelection {
-        lbl(ui, "Drag to move the active shape's path or the Work Path");
+        lbl(ui, if app.ui.vector_mask_target { "Drag to move the targeted vector mask" } else { "Drag to move the active shape's path or the Work Path" });
         return true;
     }
     if tool == Tool::Pen {

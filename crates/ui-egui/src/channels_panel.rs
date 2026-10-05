@@ -53,6 +53,9 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     };
     let doc = st.doc.clone();
     let view = st.channel_view.clone();
+    // ⌥-click mask view (#196): gray shows the mask alone (colour eyes off), overlay over the composite.
+    let mask_view = photocraft_engine::mask_view_cmds::current(st).map(|v| v.mode);
+    let gray_view = mask_view == Some(photocraft_engine::mask_view_cmds::MaskViewMode::Gray);
     let active_layer = st.active_layer;
     let mode = doc.pixel_format().mode;
     let colors = mode.color_channels();
@@ -91,14 +94,14 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     channel_cmds::composite_name(mode).to_string(),
                     0,
                     Some(2),
-                    view.visible_colors(colors) == colors,
+                    view.visible_colors(colors) == colors && !gray_view,
                     view.target == ChannelTarget::Composite && !quick && !mask_targeted,
                 ),
                 Row::Color(k) => (
                     channel_cmds::color_names(mode)[k].to_string(),
                     1 + k,
                     Some(3 + k),
-                    view.color_visible(k),
+                    view.color_visible(k) && !gray_view,
                     (view.target == ChannelTarget::Composite && !quick && !mask_targeted) || view.target == ChannelTarget::Color(k),
                 ),
                 Row::Alpha(i) => (
@@ -111,7 +114,9 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 Row::QuickMask => {
                     ("Quick Mask".to_string(), 1 + shown_colors + doc.channels.len(), None, !view.quick_mask_hidden, view.target == ChannelTarget::Composite)
                 }
-                Row::LayerMask => (masked.as_ref().map(|l| format!("{} Mask", l.name)).unwrap_or_default(), usize::MAX, None, false, mask_targeted),
+                Row::LayerMask => {
+                    (masked.as_ref().map(|l| format!("{} Mask", l.name)).unwrap_or_default(), usize::MAX, None, mask_view.is_some(), mask_targeted)
+                }
             };
             let row_h = if t.pro { 36.0 } else { 40.0 };
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
@@ -127,12 +132,22 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
             let eye = Rect::from_min_size(pos2(rect.left() + 6.0, rect.center().y - 11.0), vec2(22.0, 22.0));
             let eye_resp = ui.interact(eye, ui.id().with(("chan-eye", format!("{:?}", row.reference()))), Sense::click());
-            // The layer mask's eye slot stays empty: its overlay view isn't supported yet.
-            if row != Row::LayerMask {
+            // Like Photoshop, the temporary mask row's eye is empty until the mask is shown.
+            if row != Row::LayerMask || visible || eye_resp.hovered() {
                 icons::paint(ui, eye, if visible { "eye" } else { "eye-off" }, 14.0, if visible { t.icon } else { t.text_faint });
             }
-            if eye_resp.clicked() && row != Row::LayerMask {
-                actions.push(("channel.setVisible".into(), json!({ "channel": row.reference(), "visible": !visible })));
+            let eye_resp = eye_resp.on_hover_text(if row == Row::LayerMask { "Show the layer mask as an overlay" } else { "Toggle visibility" });
+            eye_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Visibility {name}")));
+            let layer_id = masked.as_ref().map(|l| l.id.0);
+            if eye_resp.clicked() {
+                let view_cmd = photocraft_engine::mask_view_cmds::ID.to_string();
+                match row {
+                    // The mask's eye: the overlay on, or the mask view off.
+                    Row::LayerMask => actions.push((view_cmd, json!({ "layer": layer_id, "mode": if visible { "off" } else { "overlay" } }))),
+                    // Showing the composite again over a gray mask view keeps the mask as an overlay.
+                    Row::Composite if gray_view => actions.push((view_cmd, json!({ "layer": layer_id, "mode": "overlay" }))),
+                    _ => actions.push(("channel.setVisible".into(), json!({ "channel": row.reference(), "visible": !visible }))),
+                }
             }
             let ts = if t.pro { 28.0 } else { 30.0 };
             let cell = Rect::from_min_size(pos2(rect.left() + 36.0, rect.center().y - ts / 2.0), vec2(ts, ts));

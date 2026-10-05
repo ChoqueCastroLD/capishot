@@ -10,6 +10,7 @@
 use egui::{Color32, TextureOptions};
 use photocraft_doc::{AlphaChannel, ColorMode, Document};
 use photocraft_engine::channel_cmds::{ChannelView, color_count};
+use photocraft_engine::mask_view_cmds::MaskViewMode;
 use photocraft_geom::Rect;
 use photocraft_raster::{Surface, from_rgba, to_rgba};
 
@@ -22,6 +23,9 @@ pub struct Cache {
     revision: u64,
     key: u64,
     factor: u32,
+    /// False while the plain composite shows: the texture is kept (so toggling a view back on
+    /// reuses its allocation) but its pixels are stale.
+    valid: bool,
     tex: egui::TextureHandle,
 }
 
@@ -65,6 +69,22 @@ pub fn render(doc: &Document, v: &ChannelView, r: Rect, factor: u32, in_color: b
     if v.is_plain(doc) || r.is_empty() {
         return None;
     }
+    let layer_mask = v.shown_layer_mask(doc);
+    // ⌥-click mask view (#196): the layer mask alone, in grayscale (white reveals); ⇧⌥ with
+    // nothing else shown: just the rubylith. Both straight from the mask, in parallel rows, so
+    // switching the view on a 24 MP document takes one frame.
+    let only_mask = ChannelView { layer_mask: None, ..v.clone() }.is_plain(doc);
+    match layer_mask {
+        Some((m, MaskViewMode::Gray)) => return Some(mask_px(&m.surface, r, factor, |g| Color32::from_gray(q(g)))),
+        Some((m, MaskViewMode::Overlay)) if only_mask => {
+            let c = AlphaChannel::DEFAULT_COLOR.to_rgb();
+            return Some(mask_px(&m.surface, r, factor, |g| {
+                let a = 0.5 * (1.0 - g.clamp(0.0, 1.0));
+                Color32::from_rgba_premultiplied(q(c[0] * a), q(c[1] * a), q(c[2] * a), q(a))
+            }));
+        }
+        _ => {}
+    }
     let colors = color_count(doc);
     let vis = v.visible_colors(colors);
     let (w, h) = (r.width().div_ceil(factor), r.height().div_ceil(factor));
@@ -102,6 +122,17 @@ pub fn render(doc: &Document, v: &ChannelView, r: Rect, factor: u32, in_color: b
     } else {
         vec![[0.0; 4]; n]
     };
+    // Rubylith: `color` at `opacity` × coverage over the accumulated pixels.
+    let mut tint = |values: Vec<f32>, color: photocraft_color::Color, opacity: f32, coverage: &dyn Fn(f32) -> f32| {
+        let c = color.to_rgb();
+        for (o, val) in out.iter_mut().zip(values) {
+            let a = (coverage(val.clamp(0.0, 1.0)) * opacity).clamp(0.0, 1.0);
+            for j in 0..3 {
+                o[j] = c[j] * a + o[j] * (1.0 - a);
+            }
+            o[3] = a + o[3] * (1.0 - a);
+        }
+    };
     let quick = doc.quick_mask.as_ref().filter(|_| !v.quick_mask_hidden);
     for ch in overlays.into_iter().chain(quick) {
         let (color, opacity) = match ch.spot {
@@ -109,17 +140,46 @@ pub fn render(doc: &Document, v: &ChannelView, r: Rect, factor: u32, in_color: b
             Some((ink, solidity)) => (ink, 0.5 + 0.5 * solidity),
             None => (ch.color, ch.opacity),
         };
-        let c = color.to_rgb();
-        for (o, val) in out.iter_mut().zip(sample(&ch.surface, r, factor)) {
-            let a = (ch.overlay_coverage(val.clamp(0.0, 1.0)) * opacity).clamp(0.0, 1.0);
-            for j in 0..3 {
-                o[j] = c[j] * a + o[j] * (1.0 - a);
-            }
-            o[3] = a + o[3] * (1.0 - a);
-        }
+        tint(sample(&ch.surface, r, factor), color, opacity, &|x| ch.overlay_coverage(x));
     }
-    let q = |x: f32| (x.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+    // ⇧⌥-click mask view (#196): the layer mask as Quick Mask's red over the hidden areas
+    // (Photoshop's Layer Mask Display Options default).
+    if let Some((m, MaskViewMode::Overlay)) = layer_mask {
+        tint(sample(&m.surface, r, factor), AlphaChannel::DEFAULT_COLOR, 0.5, &|x| 1.0 - x);
+    }
     Some(out.into_iter().map(|p| Color32::from_rgba_premultiplied(q(p[0]), q(p[1]), q(p[2]), q(p[3]))).collect())
+}
+
+/// `r` of a one-channel surface sampled every `factor` px, mapped to colours row by row (in
+/// parallel off the web).
+fn mask_px(s: &Surface, r: Rect, factor: u32, color: impl Fn(f32) -> Color32 + Sync) -> Vec<Color32> {
+    let (w, h) = (r.width().div_ceil(factor) as usize, r.height().div_ceil(factor) as usize);
+    let mut px = vec![Color32::TRANSPARENT; w * h];
+    let row = |y: usize, out: &mut [Color32]| {
+        let mut vals = vec![0.0f32; out.len()];
+        s.sample_row_strided(r.y0 + (y as u32 * factor) as i32, r.x0, factor as i32, 0, &mut vals);
+        for (o, v) in out.iter_mut().zip(vals) {
+            *o = color(v);
+        }
+    };
+    if w == 0 {
+        return px;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        px.par_chunks_mut(w).enumerate().for_each(|(y, out)| row(y, out));
+    }
+    #[cfg(target_arch = "wasm32")]
+    for (y, out) in px.chunks_mut(w).enumerate() {
+        row(y, out);
+    }
+    px
+}
+
+/// A float in 0..=1 as an 8-bit channel value.
+fn q(x: f32) -> u8 {
+    (x.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
 }
 
 fn view_key(v: &ChannelView, in_color: bool) -> u64 {
@@ -135,7 +195,9 @@ pub fn ensure(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Optio
     let (revision, damage) = (st.revision, st.last_damage);
     let id = doc.id.0;
     if view.is_plain(&doc) {
-        app.channel_views.remove(&id);
+        if let Some(c) = app.channel_views.get_mut(&id) {
+            c.valid = false;
+        }
         return None;
     }
     let in_color = false;
@@ -146,20 +208,24 @@ pub fn ensure(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Optio
     if let Some(c) = app.channel_views.get_mut(&id)
         && c.key == key
         && c.factor == factor
+        && c.valid
     {
         if c.revision == revision {
             return Some(c.tex.id());
         }
         if c.revision + 1 == revision
-            && factor == 1
             && let Some(d) = damage
         {
-            let r = d.intersect(&doc.bounds());
+            // Re-render just the damage, snapped to the sampling grid so a downsampled texture
+            // (big documents) updates in place too.
+            let f = factor as i32;
+            let d = d.intersect(&doc.bounds());
+            let r = Rect::new(d.x0.div_euclid(f) * f, d.y0.div_euclid(f) * f, d.x1, d.y1).intersect(&doc.bounds());
             if !r.is_empty()
-                && let Some(px) = render(&doc, &view, r, 1, in_color)
+                && let Some(px) = render(&doc, &view, r, factor, in_color)
             {
-                let img = egui::ColorImage::new([r.width() as usize, r.height() as usize], px);
-                c.tex.set_partial([r.x0 as usize, r.y0 as usize], img, TextureOptions::LINEAR);
+                let img = egui::ColorImage::new([r.width().div_ceil(factor) as usize, r.height().div_ceil(factor) as usize], px);
+                c.tex.set_partial([(r.x0 / f) as usize, (r.y0 / f) as usize], img, TextureOptions::LINEAR);
             }
             c.revision = revision;
             return Some(c.tex.id());
@@ -175,10 +241,11 @@ pub fn ensure(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Optio
             c.revision = revision;
             c.key = key;
             c.factor = factor;
+            c.valid = true;
         }
         _ => {
             let tex = ctx.load_texture(format!("channel-view-{id}"), img, TextureOptions::LINEAR);
-            app.channel_views.insert(id, Cache { revision, key, factor, tex });
+            app.channel_views.insert(id, Cache { revision, key, factor, valid: true, tex });
         }
     }
     app.channel_views.get(&id).map(|c| c.tex.id())
@@ -213,6 +280,63 @@ mod tests {
         let px = render(&st.doc, &st.channel_view, st.doc.bounds(), 1, false).unwrap();
         assert_eq!(px[0], Color32::TRANSPARENT, "selected: no overlay");
         assert_eq!(px[6], Color32::from_rgba_premultiplied(128, 0, 0, 128), "masked: 50% red");
+    }
+
+    #[test]
+    fn layer_mask_views_and_damage_on_the_downsampled_grid() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 37, "height": 21})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.execute("edit.fill", json!({"color": "#0000ff"})).unwrap();
+        s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+        s.execute("paint.gradient", json!({"from": [0, 0], "to": [37, 0], "colors": ["#000000", "#ffffff"], "target": "mask"})).unwrap();
+        s.execute("view.layerMask", json!({"mode": "gray"})).unwrap();
+        let st = s.active().unwrap();
+        let b = st.doc.bounds();
+        let full = render(&st.doc, &st.channel_view, b, 1, false).unwrap();
+        assert!(full[0].r() < 10 && full[36].r() > 245 && full[0].a() == 255, "opaque grayscale ramp");
+        // A sub-rect starting on the factor grid matches the same pixels of the full render.
+        for f in [1u32, 2, 3] {
+            let all = render(&st.doc, &st.channel_view, b, f, false).unwrap();
+            let w = b.width().div_ceil(f) as usize;
+            let r = Rect::new(3 * f as i32, 2 * f as i32, 30, 19);
+            let part = render(&st.doc, &st.channel_view, r, f, false).unwrap();
+            let pw = r.width().div_ceil(f) as usize;
+            for (i, p) in part.iter().enumerate() {
+                assert_eq!(*p, all[(i / pw + 2) * w + i % pw + 3], "factor {f}, pixel {i}");
+            }
+        }
+        s.execute("view.layerMask", json!({"mode": "overlay"})).unwrap();
+        let st = s.active().unwrap();
+        let px = render(&st.doc, &st.channel_view, b, 1, false).unwrap();
+        assert!(px[0].r() >= 124 && px[0].g() == 0 && px[0].a() >= 124, "about 50% red over the hidden end: {:?}", px[0]);
+        assert!(px[36].a() <= 4, "next to nothing over the revealed end: {:?}", px[36]);
+    }
+
+    /// `cargo test --release -p photocraft-ui-egui --lib mask_view_switch_24mp -- --ignored --nocapture`
+    #[test]
+    #[ignore = "benchmark"]
+    fn mask_view_switch_24mp() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 6000, "height": 4000})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.execute("edit.fill", json!({"color": "#d0402b"})).unwrap();
+        s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+        s.execute("paint.gradient", json!({"from": [0, 0], "to": [6000, 0], "colors": ["#000000", "#ffffff"], "target": "mask"})).unwrap();
+        let factor = 6000u32.div_ceil(MAX_SIDE);
+        for mode in ["gray", "overlay"] {
+            s.execute("view.layerMask", json!({"mode": mode})).unwrap();
+            let st = s.active().unwrap();
+            let mut best = f64::MAX;
+            for _ in 0..8 {
+                let t = std::time::Instant::now();
+                let px = render(&st.doc, &st.channel_view, st.doc.bounds(), factor, false).unwrap();
+                let img = egui::ColorImage::new([3000, 2000], px);
+                std::hint::black_box(img);
+                best = best.min(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            println!("24 MP mask view {mode}: {best:.1} ms (render at 1/{factor})");
+        }
     }
 
     #[test]

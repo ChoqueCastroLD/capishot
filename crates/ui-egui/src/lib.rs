@@ -495,6 +495,12 @@ impl PhotocraftApp {
         self.ui.views.resize_with(n, Default::default);
         self.ui.windows.retain(|w| w.document < n);
         self.prune_thumbs();
+        self.sync_mask_targets();
+        // Channel-view textures outlive a hidden view (cheap re-show), not their document.
+        if !self.channel_views.is_empty() {
+            let docs = self.session.documents();
+            self.channel_views.retain(|id, _| docs.iter().any(|d| d.doc.id.0 == *id));
+        }
         // Commands may close and reopen a preserved-ID document before the next repaint.
         canvas::retain_gpu_documents(self);
     }
@@ -876,6 +882,19 @@ fn read_dropped(_f: &dyn egui::DroppedFile) -> Result<Vec<u8>, String> {
 }
 
 impl PhotocraftApp {
+    /// Viewing a layer mask (#196) targets it; a vector-mask target needs a vector mask on the
+    /// active layer (a shape layer's path is its content, not a mask).
+    fn sync_mask_targets(&mut self) {
+        let Some(st) = self.session.active() else { return };
+        if photocraft_engine::mask_view_cmds::current(st).is_some() {
+            self.ui.mask_target = true;
+            self.ui.vector_mask_target = false;
+        }
+        if self.ui.vector_mask_target && !mask_thumbs_ui::has_vector_mask(st) {
+            self.ui.vector_mask_target = false;
+        }
+    }
+
     fn prune_thumbs(&mut self) {
         let documents = self.session.documents();
         if self.thumb_documents.len() == documents.len()

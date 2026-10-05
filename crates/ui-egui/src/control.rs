@@ -125,6 +125,11 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             }
             if let Some(m) = p.get("maskTarget").and_then(Value::as_bool) {
                 app.ui.mask_target = m;
+                app.ui.vector_mask_target &= !m;
+            }
+            if let Some(m) = p.get("vectorMaskTarget").and_then(Value::as_bool) {
+                app.ui.vector_mask_target = m;
+                app.ui.mask_target &= !m;
             }
             // Selection tools' options-bar mode: 0 New, 1 Add, 2 Subtract, 3 Intersect.
             if let Some(m) = p.get("selectionMode").and_then(Value::as_u64) {

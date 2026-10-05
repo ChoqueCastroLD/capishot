@@ -2068,7 +2068,7 @@ pub fn commit_crop(app: &mut PhotocraftApp) {
     }
 }
 
-/// "mask" when the Layers panel targets the active layer's mask, else "pixels".
+/// "mask" when the Layers panel targets (or the canvas shows) the active layer's mask, else "pixels".
 pub fn paint_target(app: &PhotocraftApp) -> serde_json::Value {
     use photocraft_engine::channel_cmds::ChannelTarget;
     let Some(st) = app.session.active() else { return json!("pixels") };
@@ -2079,7 +2079,9 @@ pub fn paint_target(app: &PhotocraftApp) -> serde_json::Value {
         _ => {}
     }
     let has_mask = st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| l.mask.is_some());
-    json!(if app.ui.mask_target && has_mask { "mask" } else { "pixels" })
+    // Viewing the mask (⌥-click its thumbnail, #196) paints the mask.
+    let viewing = photocraft_engine::mask_view_cmds::current(st).is_some();
+    json!(if (app.ui.mask_target || viewing) && has_mask { "mask" } else { "pixels" })
 }
 
 /// `#rrggbb` for an sRGB colour (the engine's colour parameter notation).

@@ -1348,6 +1348,12 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     for (id, p) in actions {
         if id == "ui.maskTarget" {
             app.ui.mask_target = p.as_bool().unwrap_or(false);
+            app.ui.vector_mask_target = false;
+            continue;
+        }
+        if id == "ui.vectorMaskTarget" {
+            app.ui.vector_mask_target = p.as_bool().unwrap_or(false);
+            app.ui.mask_target = false;
             continue;
         }
         if p.is_null() {
@@ -1471,17 +1477,19 @@ fn layer_row(
     // Link chains and pixel / vector mask thumbnails (#153).
     let masks = crate::mask_thumbs_ui::paint(app, ctx, ui, &painter, doc, l, &mut x, rect.center().y, ts, actions);
     let mask_rect = masks.thumb(crate::mask_thumbs_ui::MaskKind::Pixel);
-    // Photoshop frames the targeted thumbnail (pixels or mask) of the active layer with corner brackets.
+    let vector_rect = masks.thumb(crate::mask_thumbs_ui::MaskKind::Vector);
+    // Photoshop frames the targeted thumbnail (pixels, mask or vector mask) of the active layer
+    // with corner brackets.
     if row.primary {
-        let target = if app.ui.mask_target { mask_rect } else { Some(thumb) };
-        if let Some(r) = target.filter(|_| l.mask.is_some() || !app.ui.mask_target) {
-            let r = r.expand(3.0);
-            let k = 6.0;
-            let st = Stroke::new(1.5, t.text);
-            for (c, dx, dy) in [(r.left_top(), 1.0, 1.0), (r.right_top(), -1.0, 1.0), (r.right_bottom(), -1.0, -1.0), (r.left_bottom(), 1.0, -1.0)] {
-                painter.line_segment([c, c + vec2(k * dx, 0.0)], st);
-                painter.line_segment([c, c + vec2(0.0, k * dy)], st);
-            }
+        let target = if app.ui.vector_mask_target && vector_rect.is_some() {
+            vector_rect
+        } else if app.ui.mask_target {
+            mask_rect.or(Some(thumb))
+        } else {
+            Some(thumb)
+        };
+        if let Some(r) = target {
+            crate::mask_thumbs_ui::paint_brackets(&painter, r, t.text);
         }
     }
     // Right-hand indicators first; the name gets what is left and ends in "…" (#144).
@@ -1508,15 +1516,16 @@ fn layer_row(
         crate::layer_row_ui::label(&painter, x, rect.center().y + 8.0, name_right, &sub, egui::FontId::proportional(11.0), t.text_faint);
     }
     crate::layer_row_ui::record(ctx, crate::layer_row_ui::RowRects { layer: l.id.0, row: rect, name: name_rect, indicators });
-    // ⌘-click a layer or mask thumbnail loads its transparency / mask as a selection (⇧ add,
-    // ⌥ subtract, ⇧⌥ intersect) instead of changing the layer selection.
+    // ⌘-click a layer, mask or vector-mask thumbnail loads its transparency / mask / path as a
+    // selection (⇧ add, ⌥ subtract, ⇧⌥ intersect) instead of changing the layer selection.
     let thumb_load = resp.clicked().then(|| (ui.input(|i| i.modifiers), resp.interact_pointer_pos())).and_then(|(m, pos)| {
         let p = pos.filter(|_| m.command)?;
-        let on_mask = mask_rect.is_some_and(|r| r.expand(2.0).contains(p));
-        (on_mask || thumb.expand(2.0).contains(p))
-            .then(|| json!({"channel": if on_mask { "mask" } else { "transparency" }, "layer": l.id.0, "operation": crate::channels_panel::load_operation(m)}))
+        if let Some(kind) = masks.hit(p) {
+            return Some(crate::mask_thumbs_ui::load_params(l, kind, m));
+        }
+        thumb.expand(2.0).contains(p).then(|| json!({"channel": "transparency", "layer": l.id.0, "operation": crate::channels_panel::load_operation(m)}))
     });
-    // ⇧-click a mask thumbnail: disable / enable that mask.
+    // ⇧-click a mask thumbnail: disable / enable that mask; ⌥-click a layer mask: view it.
     let mask_toggle = resp.clicked().then(|| (ui.input(|i| i.modifiers), resp.interact_pointer_pos())).and_then(|(m, pos)| {
         let kind = masks.hit(pos?)?;
         crate::mask_thumbs_ui::click_command(l, kind, m)
@@ -1532,12 +1541,19 @@ fn layer_row(
         let pos = resp.interact_pointer_pos();
         let on_mask = mask_rect.zip(pos).is_some_and(|(r, p)| r.expand(2.0).contains(p));
         let on_thumb = pos.is_some_and(|p| thumb.expand(2.0).contains(p));
-        // The vector mask thumbnail picks the layer's path in the Paths panel.
-        if pos.and_then(|p| masks.hit(p)) == Some(crate::mask_thumbs_ui::MaskKind::Vector) {
-            app.ui.selected_path = Some("layer".into());
+        let on_vector = pos.and_then(|p| masks.hit(p)) == Some(crate::mask_thumbs_ui::MaskKind::Vector);
+        // Clicking the layer thumbnail leaves mask view (#196).
+        let viewing = app.session.active().and_then(photocraft_engine::mask_view_cmds::current).is_some_and(|v| v.layer == l.id);
+        if on_thumb && viewing {
+            actions.push((photocraft_engine::mask_view_cmds::ID.into(), json!({"layer": l.id.0, "mode": "off"})));
         }
         let content_less = matches!(l.content, LayerContent::Adjustment(_) | LayerContent::Fill(_));
-        if on_mask || (content_less && l.mask.is_some()) {
+        if on_vector {
+            // The vector mask thumbnail targets the vector mask: the path tools edit it and the
+            // Paths panel selects the layer's path.
+            app.ui.selected_path = Some("layer".into());
+            actions.push(("ui.vectorMaskTarget".into(), json!(true)));
+        } else if on_mask || (content_less && l.mask.is_some()) {
             actions.push(("ui.maskTarget".into(), json!(true)));
         } else if on_thumb || !row.primary {
             actions.push(("ui.maskTarget".into(), json!(false)));
