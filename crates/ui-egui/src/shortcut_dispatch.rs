@@ -7,7 +7,7 @@
 //! is disabled in the current state reports why on the status bar instead of doing nothing
 //! silently, as the greyed menu item shows.
 
-use egui::{Key, KeyboardShortcut, Modifiers};
+use egui::{Key, KeyboardShortcut};
 use serde_json::json;
 
 use crate::PhotocraftApp;
@@ -41,7 +41,9 @@ pub fn take_log(ctx: &egui::Context) -> Vec<(String, Outcome)> {
 
 /// Every key binding, most modifiers first (so ⇧⌘Z wins over ⌘Z), each key owned by one command:
 /// command and shell shortcuts, then the menu catalogue's for live items without their own,
-/// then Edit › Keyboard Shortcuts assignments to any other menu item.
+/// then Edit › Keyboard Shortcuts assignments to any other menu item. D and X
+/// (`tools.defaultColors` / `tools.swapColors`) and the fill keys are commands like any other, so
+/// their overrides apply. Held temporary tools (Space…) are not here: see [`crate::hold_keys`].
 pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
     let prefs = app.session.prefs();
     let ui = crate::menus::UI_COMMANDS.iter().map(|(id, _, _, sc)| (*id, prefs.shortcut(id, *sc)));
@@ -58,15 +60,16 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
     let overrides = prefs
         .shortcuts
         .iter()
-        .filter(|(id, sc)| !sc.is_empty() && photocraft_engine::commands::find(id).is_none() && !crate::menus::UI_COMMANDS.iter().any(|c| c.0 == id.as_str()))
+        .filter(|(id, sc)| {
+            !sc.is_empty()
+                && photocraft_engine::commands::find(id).is_none()
+                && !crate::menus::UI_COMMANDS.iter().any(|c| c.0 == id.as_str())
+                && !crate::hold_keys::is_temporary(id)
+        })
         .map(|(id, sc)| (id.as_str(), Some(sc.as_str())));
     let mut all: Vec<(String, KeyboardShortcut)> = Vec::new();
     for (id, sc) in ui.chain(engine).chain(catalog).chain(overrides) {
         let Some(sc) = sc.and_then(parse) else { continue };
-        // Plain X and D are the colour keys (handled with the tool keys).
-        if sc.modifiers == Modifiers::NONE && matches!(sc.logical_key, Key::X | Key::D) {
-            continue;
-        }
         if !all.iter().any(|(_, b)| *b == sc) {
             all.push((id.to_string(), sc));
         }

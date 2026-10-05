@@ -46,6 +46,7 @@ pub mod gallery_ui;
 pub mod gpu_canvas;
 pub mod gpu_status;
 pub mod gradient_ui;
+pub mod hold_keys;
 mod icon_data;
 pub mod icons;
 pub mod layer_menu_ui;

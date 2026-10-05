@@ -1132,6 +1132,22 @@ fn capitalize(s: &str) -> String {
     }
 }
 
+/// Hold-and-release gestures (#249): temporary tools that last while their key is held and give
+/// the previous tool back on release. They are bound like shortcuts (Edit › Keyboard Shortcuts ›
+/// Tools › Temporary, `edit.keyboardShortcuts`) but held rather than pressed, so they are not
+/// commands; the UI reads their keys through [`Preferences::shortcut`]. While a selection or
+/// shape is being dragged, the Hand key repositions it instead of panning (Photoshop's Space).
+pub const TEMPORARY_TOOLS: &[(&str, &str, &str)] = &[
+    ("tools.temporary.hand", "Hand Tool (hold)", "Space"),
+    ("tools.temporary.zoomIn", "Zoom In (hold, drag to scrub)", "Cmd+Space"),
+    ("tools.temporary.zoomOut", "Zoom Out (hold)", "Cmd+Alt+Space"),
+];
+
+/// Every bindable id with its default: commands, then the temporary tools.
+fn bindable() -> impl Iterator<Item = (&'static str, Option<&'static str>)> {
+    crate::command_specs().iter().map(|c| (c.id, c.shortcut)).chain(TEMPORARY_TOOLS.iter().map(|t| (t.0, Some(t.2))))
+}
+
 /// Shortcuts bound to more than one command: (shortcut, ids). `bindings` are (id, shortcut).
 pub fn conflicts<'a>(bindings: impl IntoIterator<Item = (&'a str, &'a str)>) -> Vec<(String, Vec<String>)> {
     let mut by: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1362,7 +1378,7 @@ fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(m) = p.get("set").and_then(Value::as_object) {
         let mut next = s.prefs().clone();
         for (id, v) in m {
-            if crate::commands::find(id).is_none() && !p.get("allowUnknown").and_then(Value::as_bool).unwrap_or(false) {
+            if !bindable().any(|(b, _)| b == id) && !p.get("allowUnknown").and_then(Value::as_bool).unwrap_or(false) {
                 return Err(bad(cmd, format!("unknown command `{id}`")));
             }
             next.set(&format!("shortcuts.{id}"), v.clone()).map_err(|e| bad(cmd, e))?;
@@ -1371,9 +1387,9 @@ fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
         if p.get("removeConflicts").and_then(Value::as_bool).unwrap_or(true) {
             for (id, v) in m {
                 let Some(sc) = v.as_str().and_then(normalize_shortcut) else { continue };
-                for c in crate::command_specs() {
-                    if c.id != id && next.shortcut(c.id, c.shortcut).and_then(normalize_shortcut).as_deref() == Some(sc.as_str()) {
-                        next.shortcuts.insert(c.id.to_string(), String::new());
+                for (c, def) in bindable() {
+                    if c != id && next.shortcut(c, def).and_then(normalize_shortcut).as_deref() == Some(sc.as_str()) {
+                        next.shortcuts.insert(c.to_string(), String::new());
                     }
                 }
             }
@@ -1382,13 +1398,22 @@ fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let prefs = s.prefs();
     let filter = p.get("filter").and_then(Value::as_str).map(str::to_ascii_lowercase);
+    let temporary = TEMPORARY_TOOLS.iter().map(|t| (t.0, t.1, &["Tools", "Temporary"][..], Some(t.2), true));
     let list: Vec<Value> = crate::command_specs()
         .iter()
-        .filter(|c| filter.as_ref().is_none_or(|f| c.id.to_ascii_lowercase().contains(f) || c.label.to_ascii_lowercase().contains(f)))
-        .filter(|c| p.get("list").and_then(Value::as_bool).unwrap_or(false) || filter.is_some() || prefs.shortcuts.contains_key(c.id))
-        .map(|c| json!({"id": c.id, "label": c.label, "menu": c.menu, "default": c.shortcut, "shortcut": prefs.shortcut(c.id, c.shortcut)}))
+        .map(|c| (c.id, c.label, c.menu, c.shortcut, false))
+        .chain(temporary)
+        .filter(|c| filter.as_ref().is_none_or(|f| c.0.to_ascii_lowercase().contains(f) || c.1.to_ascii_lowercase().contains(f)))
+        .filter(|c| p.get("list").and_then(Value::as_bool).unwrap_or(false) || filter.is_some() || prefs.shortcuts.contains_key(c.0))
+        .map(|(id, label, menu, def, hold)| {
+            let mut v = json!({"id": id, "label": label, "menu": menu, "default": def, "shortcut": prefs.shortcut(id, def)});
+            if hold {
+                v["hold"] = json!(true);
+            }
+            v
+        })
         .collect();
-    let bindings: Vec<(&str, &str)> = crate::command_specs().iter().filter_map(|c| Some((c.id, prefs.shortcut(c.id, c.shortcut)?))).collect();
+    let bindings: Vec<(&str, &str)> = bindable().filter_map(|(id, def)| Some((id, prefs.shortcut(id, def)?))).collect();
     let conflicts: Vec<Value> = conflicts(bindings).into_iter().map(|(sc, ids)| json!({"shortcut": sc, "commands": ids})).collect();
     Ok(json!({"overrides": prefs.shortcuts, "commands": list, "conflicts": conflicts}))
 }
@@ -1511,7 +1536,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Keyboard Shortcuts…",
             ["Edit"],
             Some("Cmd+Alt+Shift+K"),
-            r##"{"set":{"<command id>":"Cmd+Shift+X"|""(remove)|null(default)}?,"reset":true|["<id>",…]?,"removeConflicts":bool=true,"filter":str?,"list":bool=false}"##,
+            r##"{"set":{"<command id>|tools.temporary.hand|zoomIn|zoomOut":"Cmd+Shift+X"|""(remove)|null(default)}?,"reset":true|["<id>",…]?,"removeConflicts":bool=true,"filter":str?,"list":bool=false}"##,
             keyboard_shortcuts,
             true
         ),

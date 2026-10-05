@@ -83,6 +83,7 @@ pub fn default_shortcut(id: &str) -> Option<String> {
         .and_then(|c| c.3)
         .or_else(|| photocraft_engine::commands::find(id).and_then(|c| c.shortcut))
         .or_else(|| crate::menu_catalog::CATALOG.iter().find(|c| c.3 == id).and_then(|c| c.2))
+        .or_else(|| photocraft_engine::prefs::TEMPORARY_TOOLS.iter().find(|t| t.0 == id).map(|t| t.2))
         .map(str::to_string)
 }
 
@@ -105,11 +106,12 @@ fn shifted(k: Key) -> Option<Key> {
 /// - Modifiers match exactly (⌘⌥I is not ⌘I), with ⌘ = Ctrl off the Mac.
 /// - `=` also matches `+` (⌘+ with ⇧ on a US layout, the numpad `+`, the `+` key of Nordic and
 ///   German layouts): Photoshop zooms in on both.
-/// - Delete also matches Backspace (the Mac's "delete" key).
+/// - Delete also matches Backspace (the Mac's "delete" key), and Backspace matches Delete (⌥⌫
+///   and ⌥Delete both fill on Windows).
 /// - A ⇧ shortcut on a punctuation key matches the shifted character (⌘⇧; arrives as ⌘`:`).
 pub fn key_matches(sc: &KeyboardShortcut, key: Key, mods: Modifiers) -> bool {
     let k = sc.logical_key;
-    let direct = key == k || (k == Key::Delete && key == Key::Backspace);
+    let direct = key == k || (k == Key::Delete && key == Key::Backspace) || (k == Key::Backspace && key == Key::Delete);
     let plus = k == Key::Equals && key == Key::Plus;
     let via_shift = sc.modifiers.shift && shifted(k) == Some(key);
     if !(direct || plus || via_shift) {
@@ -263,7 +265,8 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if editing {
         return;
     }
-    // Single-key tools and colours (no modifiers).
+    // Single-key tools (no modifiers). D and X are commands (`tools.defaultColors` /
+    // `tools.swapColors`), dispatched above with any Keyboard Shortcuts override.
     let pressed = |k: Key| ctx.input_mut(|i| i.consume_key(Modifiers::NONE, k));
     // Enter / Escape commit or cancel in-progress tool state (polygonal lasso, crop).
     if !app.ui.polygon.is_empty() || app.ui.crop_rect.is_some() {
@@ -298,12 +301,6 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
             };
             return;
         }
-    }
-    if pressed(Key::X) {
-        let _ = app.run("tools.swapColors", json!({}));
-    }
-    if pressed(Key::D) {
-        let _ = app.run("tools.defaultColors", json!({}));
     }
     // [ and ] resize the brush through `tools.setBrush` (journaled, drivable).
     let size = app.session.tools.brush.size;

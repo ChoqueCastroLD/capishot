@@ -324,9 +324,25 @@ pub fn shortcut_items(app: &PhotocraftApp) -> Vec<(String, String, Vec<String>, 
         let default = default_shortcut(&it.id).or(it.shortcut.clone().filter(|_| !app.session.prefs().shortcuts.contains_key(&it.id)));
         out.push((it.id, it.label, it.path, default));
     }
+    // Commands without a menu item: the colour and fill keys (D, X, ⌥⌫…) sit under Tools, as
+    // Photoshop lists its colour keys in the Tools shortcut set, after the rest; then the held
+    // temporary tools (#249).
+    let tools_key = |id: &str| id.starts_with("tools.") || photocraft_engine::fill_key_cmds::IDS.contains(&id);
+    let mut tools = Vec::new();
     for c in photocraft_engine::command_specs() {
         if seen.insert(c.id.to_string()) && c.shortcut.is_some() {
-            out.push((c.id.into(), c.label.into(), c.menu.iter().map(|s| s.to_string()).collect(), c.shortcut.map(Into::into)));
+            let item = (c.id.to_string(), c.label.to_string(), c.menu.iter().map(|s| s.to_string()).collect::<Vec<_>>(), c.shortcut.map(Into::into));
+            if c.menu.is_empty() && tools_key(c.id) {
+                tools.push((item.0, item.1, vec!["Tools".to_string()], item.3));
+            } else {
+                out.push(item);
+            }
+        }
+    }
+    out.extend(tools);
+    for (id, label, def) in prefs::TEMPORARY_TOOLS {
+        if seen.insert(id.to_string()) {
+            out.push((id.to_string(), label.to_string(), vec!["Tools".into(), "Temporary".into()], Some(def.to_string())));
         }
     }
     out

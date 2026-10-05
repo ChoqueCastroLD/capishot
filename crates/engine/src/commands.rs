@@ -272,7 +272,7 @@ fn build() -> Vec<CommandSpec> {
             "Fill…",
             ["Edit"],
             Some("Shift+F5"),
-            r##"{"contents":"color|pattern"="color","color":"#rrggbb|[r,g,b,a]"=foreground,"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"opacity":%=100,"target":"pixels"|{"channel":i}|"quickMask"?}"##,
+            r##"{"contents":"color|pattern"="color","color":"#rrggbb|[r,g,b,a]"=foreground,"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"opacity":%=100,"preserveTransparency":bool=false,"target":"pixels"|{"channel":i}|"quickMask"?}"##,
             has_pixel_or_channel,
             |s, p| {
                 if p.get("contents").and_then(Value::as_str) == Some("pattern") {
@@ -280,10 +280,13 @@ fn build() -> Vec<CommandSpec> {
                 }
                 let color = color_param(p, "color", s.tools.foreground);
                 let id = if crate::channel_cmds::is_channel_target(p) { None } else { Some(layer_param(s, p)?) };
+                // Fill › Preserve Transparency (⇧⌥⌫ / ⇧⌘⌫): only where the layer already has pixels.
+                let preserve = p.get("preserveTransparency").and_then(Value::as_bool).unwrap_or(false);
                 s.edit("Fill", |doc, _| {
                     let sel = doc.selection.clone();
                     let area = sel.as_ref().map(|m| m.content_bounds()).unwrap_or(doc.bounds());
                     let (surf, lock) = crate::channel_cmds::target_surface(doc, id, p)?;
+                    let lock = lock || (preserve && !crate::channel_cmds::is_channel_target(p));
                     pixels::fill_surface(surf, area, color, sel.as_ref(), lock);
                     Ok(())
                 })?;
@@ -972,6 +975,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::layer_multi_cmds::specs());
     v.extend(crate::prefs::specs());
     v.extend(crate::edit_menu_cmds::specs());
+    v.extend(crate::fill_key_cmds::specs());
     v.extend(crate::align_cmds::specs());
     v.extend(crate::photo_cmds::specs());
     v.extend(crate::lens_cmds::specs());
