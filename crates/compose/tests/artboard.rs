@@ -44,6 +44,17 @@ fn contents_are_clipped_and_background_painted() {
             assert_eq!(render_tiled(&d, d.bounds(), 7).px, buf.px);
         }
     }
+
+    // Proxy pixel (x,y) samples (4*x,4*y); unaligned half-open artboard edges must agree.
+    let original = artboard_doc(SampleType::F32, ArtboardBackground::White, BlendMode::PassThrough);
+    let source = render(&original, original.bounds());
+    let proxy = photocraft_compose::proxy::proxy_document(&original, 4);
+    let reduced = render(&proxy, proxy.bounds());
+    for y in 0..proxy.size.height as i32 {
+        for x in 0..proxy.size.width as i32 {
+            assert!(close(reduced.get(x, y), source.get(4 * x, 4 * y)), "proxy artboard differs at ({x}, {y})");
+        }
+    }
 }
 
 #[test]

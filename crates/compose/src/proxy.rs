@@ -42,6 +42,15 @@ fn shrink_layer(l: &mut Layer, k: u32) {
     match &mut l.content {
         LayerContent::Raster(s) => *s = downsample(s, k),
         LayerContent::Group(g) => {
+            if let Some(ab) = &mut g.artboard {
+                let divisor = i64::from(k);
+                // Pixel x samples source x*k: both half-open edges round up, including negatives.
+                let edge = |v: i32| {
+                    let v = i64::from(v);
+                    (v.div_euclid(divisor) + i64::from(v.rem_euclid(divisor) != 0)) as i32
+                };
+                ab.rect = Rect::new(edge(ab.rect.x0), edge(ab.rect.y0), edge(ab.rect.x1), edge(ab.rect.y1));
+            }
             for c in &mut g.children {
                 shrink_layer(c, k);
             }
