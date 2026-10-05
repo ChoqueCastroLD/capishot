@@ -17,6 +17,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod app_icon;
 #[cfg(target_os = "macos")]
 mod apple_events;
 mod control_server;
@@ -36,16 +37,6 @@ use photocraft_ui_egui::PhotocraftApp;
 
 /// Matches the `.desktop` file and hicolor icon name, so Wayland docks pick up the icon.
 const APP_ID: &str = "ai.storyteller.photocraft";
-
-/// Window, taskbar and (when running unbundled) Dock icon. macOS gets the padded 1024 px render
-/// on Apple's icon grid; elsewhere the tighter 256 px hicolor render reads better at small sizes.
-fn app_icon() -> egui::IconData {
-    #[cfg(target_os = "macos")]
-    const PNG: &[u8] = include_bytes!("../../../assets/app-icon/photocraft-1024.png");
-    #[cfg(not(target_os = "macos"))]
-    const PNG: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.photocraft.png");
-    eframe::icon_data::from_png_bytes(PNG).unwrap_or_default()
-}
 
 fn main() -> eframe::Result {
     crash_guard::install_hook();
@@ -130,7 +121,7 @@ fn main() -> eframe::Result {
     let presets = services::presets_dir().map(photocraft_engine::preset_store::open_dir_async);
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_icon(app_icon())
+            .with_icon(app_icon::window_icon())
             .with_app_id(APP_ID)
             .with_title("PhotoCraft")
             .with_inner_size([1440.0, 900.0])

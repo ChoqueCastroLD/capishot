@@ -36,7 +36,10 @@ craftrules at `assets/app-icons/photocraft/source.png`. License: see `LICENSE.tx
 - `hicolor/<size>/apps/ai.storyteller.photocraft.png` (16–512) and `hicolor/scalable/...svg`:
   Linux icon theme.
 
-The app also sets the window icon and Wayland app ID at runtime (`apps/photocraft/src/main.rs`).
+The app also sets the window icon and Wayland app ID at runtime (`apps/photocraft/src/app_icon.rs`,
+`main.rs`). On Windows the taskbar shows the icon of the Start Menu shortcut that launches the
+exe, so the MSI's `<Icon Id>` keeps the `.exe` extension (ICE50); `app_icon.rs` documents the
+details and tests the `.ico` sizes and the WiX icon references.
 
 ## Regenerate
 
