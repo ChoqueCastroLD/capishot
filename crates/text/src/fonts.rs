@@ -23,30 +23,22 @@ pub const BUNDLED: &[(&str, &[u8])] = &[
     ("JetBrainsMono-Regular.ttf", include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf")),
 ];
 
-/// Families tried (if installed) after the requested one, for missing glyphs.
-const FALLBACK_CANDIDATES: &[&str] = &[
-    "Noto Sans",
-    "Arial Unicode MS",
-    "Segoe UI",
-    "DejaVu Sans",
-    "Geeza Pro",
-    "Arial Hebrew",
-    "Noto Sans Arabic",
-    "Noto Sans Hebrew",
-    // Japanese first, so shared Han characters get Japanese forms before the SC fonts are tried.
-    "Hiragino Sans",
-    "Hiragino Kaku Gothic ProN",
-    "Yu Gothic",
-    "Meiryo",
-    "Noto Sans CJK JP",
-    "Noto Sans JP",
-    "IPAexGothic",
-    "Noto Sans CJK SC",
-    "PingFang SC",
-    "Apple Color Emoji",
-    "Segoe UI Emoji",
-    "Noto Color Emoji",
-];
+/// Families tried (if installed) after the requested one, for missing glyphs. The CJK families
+/// ([`crate::cjk::families`]) go between these two lists, in the UI locale's script order.
+const FALLBACK_CANDIDATES: &[&str] = &["Noto Sans", "Segoe UI", "DejaVu Sans", "Geeza Pro", "Arial Hebrew", "Noto Sans Arabic", "Noto Sans Hebrew"];
+/// Broad-coverage and emoji fonts, tried after the CJK script fonts so shared Han characters get
+/// the locale's forms instead of Arial Unicode's.
+const FALLBACK_LAST: &[&str] = &["Arial Unicode MS", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"];
+
+/// Every fallback family candidate, CJK ordered for `order` (see [`crate::cjk::script_order`]).
+pub fn fallback_candidates(order: &[crate::cjk::CjkScript; 4]) -> Vec<&'static str> {
+    let mut v = FALLBACK_CANDIDATES.to_vec();
+    for s in order {
+        v.extend_from_slice(crate::cjk::families(*s));
+    }
+    v.extend_from_slice(FALLBACK_LAST);
+    v
+}
 
 /// One face in the database (for font menus).
 #[derive(Clone, Debug, PartialEq)]
@@ -121,6 +113,10 @@ impl FontDb {
             for d in system_font_dirs() {
                 collect_font_files(&d, 0, &mut files);
             }
+            // PingFang (the macOS Chinese UI font) lives outside the font folders.
+            if cfg!(target_os = "macos") {
+                files.extend(crate::cjk::mac_pingfang());
+            }
             for f in files {
                 self.fcx.collection.load_fonts_from_paths([f]);
             }
@@ -161,7 +157,8 @@ impl FontDb {
                 }
             }
         }
-        self.fallbacks = FALLBACK_CANDIDATES.iter().filter(|f| c.family_id(f).is_some()).map(|s| s.to_string()).collect();
+        let order = crate::cjk::ui_script_order();
+        self.fallbacks = fallback_candidates(&order).into_iter().filter(|f| c.family_id(f).is_some()).map(str::to_string).collect();
     }
 
     /// Families available after the requested one (bundled default + installed coverage fonts).
