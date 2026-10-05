@@ -143,6 +143,10 @@ impl FontDb {
                 names.push(n.to_string());
             }
         }
+        // Deterministic order, user-facing families first: a collection's registration order isn't
+        // stable, and macOS ships private UI faces (".Hiragino Kaku Gothic Interface") whose
+        // metrics differ from the public family's.
+        names.sort_by_key(|n| (is_hidden_family(n), n.to_lowercase()));
         self.ps_cache.clear();
         self.refresh_generics();
         names
@@ -175,7 +179,8 @@ impl FontDb {
 
     /// All family names, sorted.
     pub fn families(&mut self) -> Vec<String> {
-        let mut v: Vec<String> = self.fcx.collection.family_names().map(str::to_string).collect();
+        // Private system faces (a leading '.', e.g. macOS ".SF NS") are hidden, as in Photoshop.
+        let mut v: Vec<String> = self.fcx.collection.family_names().filter(|n| !is_hidden_family(n)).map(str::to_string).collect();
         v.sort_by_key(|s| s.to_lowercase());
         v.dedup();
         v
@@ -359,8 +364,23 @@ fn system_font_dirs() -> Vec<std::path::PathBuf> {
     v
 }
 
+/// A platform-private family (macOS names its UI faces with a leading '.'): never listed or
+/// picked by default.
+pub fn is_hidden_family(name: &str) -> bool {
+    name.starts_with('.')
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    #[test]
+    fn hidden_families_sort_last_and_are_not_listed() {
+        assert!(super::is_hidden_family(".Hiragino Kaku Gothic Interface"));
+        assert!(!super::is_hidden_family("Hiragino Sans"));
+        let mut v = [".Hiragino Kaku Gothic Interface".to_string(), "Hiragino Kaku Gothic ProN".to_string()];
+        v.sort_by_key(|n| (super::is_hidden_family(n), n.to_lowercase()));
+        assert_eq!(v[0], "Hiragino Kaku Gothic ProN");
+    }
+
     #[test]
     #[cfg(target_os = "linux")]
     fn scans_flatpak_host_fonts() {
