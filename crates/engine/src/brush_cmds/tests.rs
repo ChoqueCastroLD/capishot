@@ -313,6 +313,51 @@ fn live_stroke_matches_the_committed_stroke() {
 }
 
 #[test]
+fn live_stroke_equals_the_commit_at_every_zoom_with_smoothing() {
+    // #189: the preview while dragging must be the committed stroke (within 1/255), with a soft
+    // brush on an opaque Background with content, at any zoom (the smoothing string scales with
+    // it), with smoothing on, pressure, 8 and 16 bits, and points fed one pointer move at a time.
+    let pts: Vec<[f64; 3]> = (0..40)
+        .map(|i| {
+            let t = f64::from(i) / 39.0;
+            [40.0 + 120.0 * t, 60.0 + 30.0 * (t * 7.0).sin(), 0.3 + 0.7 * t]
+        })
+        .collect();
+    for depth in [8, 16] {
+        for zoom in [0.25, 1.0, 4.0, 16.0] {
+            for (amount, pulled) in [(0.1, false), (0.5, false), (0.3, true)] {
+                let mut s = Session::new();
+                s.execute("file.new", json!({"width": 200, "height": 120, "depth": depth, "background": "white"})).unwrap();
+                s.execute("edit.fill", json!({"color": "#1a2550"})).unwrap();
+                s.execute("paint.stroke", json!({"points": [[20, 20], [180, 100]], "size": 8, "hardness": 1.0, "color": "#ffffff"})).unwrap();
+                s.tools.foreground = [0.0, 0.0, 0.0, 1.0];
+                let brush = json!({"size": 40, "hardness": 0.0, "pressureSize": true, "smoothing": {"amount": amount, "pulledString": pulled}});
+                let p = json!({"points": [pts[0]], "brush": brush, "zoom": zoom, "target": "pixels"});
+                let mut live = LiveStroke::begin(&s, &p).unwrap();
+                for q in &pts[1..] {
+                    live.push(&[StrokePoint::new(q[0], q[1], q[2] as f32)]).unwrap();
+                }
+                let mut commit = p.clone();
+                commit["points"] = json!(pts);
+                commit["seed"] = json!(live.seed);
+                s.execute("paint.stroke", commit).unwrap();
+                let shown = live.doc.layer(s.active().unwrap().active_layer.unwrap()).unwrap().surface().unwrap().clone();
+                let done = surface(&s);
+                let worst = (0..120).flat_map(|y| (0..200).map(move |x| (x, y))).map(|(x, y)| {
+                    let (a, b) = (shown.rgba(x, y), done.rgba(x, y));
+                    (0..4).map(|i| (a[i] - b[i]).abs()).fold(0.0f32, f32::max)
+                });
+                let worst = worst.fold(0.0f32, f32::max);
+                let label = format!("depth {depth}, zoom {zoom}, smoothing {amount} (pulled string {pulled})");
+                assert!(worst <= 1.0 / 255.0, "{label}: preview differs from the commit by {worst}");
+                // Not two blank canvases: the soft stroke is there, edge included.
+                assert!(done.rgba(40, 60)[0] < 0.1 && (0.05..0.9).contains(&done.rgba(40, 60 - 14)[2]), "{label}: soft stroke");
+            }
+        }
+    }
+}
+
+#[test]
 fn new_brush_controls_round_trip_through_set_brush() {
     let mut s = session(40, 40);
     let patch = json!({

@@ -1489,9 +1489,12 @@ fn draw_transform_controls(app: &mut PhotocraftApp, painter: &egui::Painter, xf:
     }
 }
 
-fn draw_drag_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
+fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
     draw_tool_state(app, painter, xf, painter.ctx().input(|i| i.pointer.hover_pos()));
-    let Some(d) = &app.drag else { return };
+    let Some(d) = &app.drag else {
+        app.trail = None;
+        return;
+    };
     let mut last = d.points.last().map(|p| [p[0], p[1]]).unwrap_or(d.start);
     if matches!(d.tool, Tool::RectMarquee | Tool::EllipseMarquee) {
         let o = &app.ui.tool_options;
@@ -1501,15 +1504,15 @@ fn draw_drag_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
         // The canvas shows the live stroke itself (`LiveStroke`).
         Tool::Brush | Tool::Eraser => {}
         t if t.is_brushlike() || t == Tool::QuickSelection => {
-            // Retouching strokes preview as a translucent trail of the brush footprint.
-            let pts: Vec<Pos2> = d.points.iter().map(|p| xf.to_screen(p[0] as f32, p[1] as f32)).collect();
-            let w = (app.session.tools.brush.size * xf.zoom).max(1.0);
+            // Retouching strokes preview as a translucent trail of the brush footprint: a mask,
+            // not a brush-wide egui polyline (which zoomed in tessellates into wedges, #189).
             let col = Color32::from_white_alpha(if t == Tool::QuickSelection { 40 } else { 60 });
-            if pts.len() == 1 {
-                painter.circle_filled(pts[0], w / 2.0, col);
-            } else {
-                painter.add(egui::Shape::line(pts, Stroke::new(w, col)));
-            }
+            let Some(st) = app.session.active() else { return };
+            let size = [st.doc.size.width, st.doc.size.height];
+            let doc_rect = xf.doc_rect(st.doc.bounds());
+            let trail = app.trail.get_or_insert_with(|| crate::stroke_trail::Trail::new(size));
+            trail.feed(&d.points, app.session.tools.brush.size);
+            trail.draw(painter, doc_rect, xf.flip, col);
         }
         t if crate::vector_ui::is_shape_tool(t) => crate::vector_ui::draw_shape_preview(app, painter, xf, t, d.start, last, d.modifiers),
         Tool::RectMarquee | Tool::EllipseMarquee | Tool::ObjectSelection => {
@@ -1677,6 +1680,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 points.insert(0, [p[0], p[1], pressure as f64]);
             }
             app.drag = Some(Drag { tool, start: from.unwrap_or([x, y]), points, modifiers: mods, erase, constrain: None });
+            app.trail = None;
             app.stylus.begin_stroke();
             if from.is_some() {
                 app.stylus.record_point();
@@ -2068,6 +2072,83 @@ mod tests {
         let done = app.session.documents()[0].doc.clone();
         let (a, b) = (live.layers[0].surface().unwrap(), done.layers[0].surface().unwrap());
         assert!((0..120).all(|y| (0..200).all(|x| a.rgba(x, y) == b.rgba(x, y))), "no stale tails in the preview");
+    }
+
+    /// Shapes the drag preview paints for `app` this frame.
+    fn drag_preview_shapes(app: &mut PhotocraftApp, ctx: &egui::Context, zoom: f32) -> Vec<egui::epaint::ClippedShape> {
+        let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let ctx = ui.ctx();
+            let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+            let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(rect);
+            let xf = ViewXform { rect, zoom, center: [60.0, 30.0], flip: false };
+            draw_drag_preview(app, &painter, &xf);
+        });
+        let egui::FullOutput { mut textures_delta, shapes, .. } = out;
+        textures_delta.clear();
+        shapes
+    }
+
+    #[test]
+    fn brush_drags_paint_no_stand_in_shape_over_the_canvas() {
+        // #189: v0.1 drew the stroke being dragged as a foreground-coloured egui polyline as wide
+        // as the brush; zoomed in, egui tessellated it into hard black wedges fanning out from the
+        // start. The canvas shows the real stroke (`LiveStroke`) and nothing is drawn over it.
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 120, "height": 60})).unwrap();
+        app.run("tools.setBrush", json!({"brush": {"size": 30, "hardness": 0.0}})).unwrap();
+        for tool in [Tool::Brush, Tool::Eraser] {
+            app.ui.tool = tool;
+            let idle = drag_preview_shapes(&mut app, &ctx, 12.0).len();
+            tool_event(&mut app, ToolEvent::Down { x: 20.0, y: 30.0, pressure: 1.0 }, egui::Modifiers::NONE);
+            for i in 1..40 {
+                let t = f64::from(i);
+                tool_event(&mut app, ToolEvent::Move { x: 20.0 + t, y: 30.0 + (t / 3.0).sin() * 4.0, pressure: 1.0 }, egui::Modifiers::NONE);
+            }
+            assert!(app.live_stroke.is_some(), "{tool:?}: the canvas shows the live stroke");
+            assert_eq!(drag_preview_shapes(&mut app, &ctx, 12.0).len(), idle, "{tool:?}: no overlay while dragging");
+            tool_event(&mut app, ToolEvent::Up { x: 59.0, y: 30.0 }, egui::Modifiers::NONE);
+        }
+    }
+
+    #[test]
+    fn retouch_drags_show_the_footprint_without_wedges() {
+        // The retouching tools' trail was the same brush-wide polyline (#189): now a mask of the
+        // footprint, with nothing outside the brush radius of the path, however small the steps.
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 120, "height": 60})).unwrap();
+        app.run("tools.setBrush", json!({"brush": {"size": 30}})).unwrap();
+        app.ui.tool = Tool::Dodge;
+        tool_event(&mut app, ToolEvent::Down { x: 20.0, y: 30.0, pressure: 1.0 }, egui::Modifiers::NONE);
+        let mut pts = vec![[20.0, 30.0]];
+        for i in 1..80 {
+            let t = f64::from(i) * 0.5;
+            let p = [20.0 + t, 30.0 + (t / 2.0).sin() * 3.0];
+            tool_event(&mut app, ToolEvent::Move { x: p[0], y: p[1], pressure: 1.0 }, egui::Modifiers::NONE);
+            pts.push(p);
+            if i % 20 == 0 {
+                // One mesh for the trail, however long the drag.
+                let shapes = drag_preview_shapes(&mut app, &ctx, 12.0);
+                assert!(!shapes.iter().any(|s| matches!(s.shape, egui::Shape::Path(_))), "no polyline");
+            }
+        }
+        drag_preview_shapes(&mut app, &ctx, 12.0);
+        let trail = app.trail.as_ref().unwrap();
+        assert_eq!(trail.scale(), 1.0);
+        for y in 0..60 {
+            for x in 0..120 {
+                let d = pts.iter().map(|p| (x as f64 + 0.5 - p[0]).hypot(y as f64 + 0.5 - p[1])).fold(f64::MAX, f64::min);
+                if d < 14.0 {
+                    assert_eq!(trail.coverage(x, y), 255, "({x}, {y}) inside the footprint");
+                } else if d > 16.0 {
+                    assert_eq!(trail.coverage(x, y), 0, "({x}, {y}) outside the footprint");
+                }
+            }
+        }
+        tool_event(&mut app, ToolEvent::Up { x: 59.5, y: 30.0 }, egui::Modifiers::NONE);
+        drag_preview_shapes(&mut app, &ctx, 12.0);
+        assert!(app.trail.is_none(), "the trail ends with the drag");
     }
 
     #[test]
