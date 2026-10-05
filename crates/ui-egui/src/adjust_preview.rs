@@ -423,6 +423,14 @@ pub fn proxy_drawn(app: &mut PhotocraftApp, frame: &ProxyFrame) {
     }
 }
 
+pub(crate) fn retain_documents(app: &mut PhotocraftApp) {
+    // Native reopen can reuse the ID and revision; neither the old base document nor its
+    // coverage and upload markers may survive after that document leaves the session.
+    if app.adjust_preview.as_ref().is_some_and(|p| !app.session.documents().iter().any(|st| st.doc.id == p.doc)) {
+        app.adjust_preview = None;
+    }
+}
+
 /// GPU texture keys the preview uses besides the documents' own (keep them alive).
 pub fn gpu_keys(app: &PhotocraftApp) -> Option<u64> {
     let p = app.adjust_preview.as_ref().filter(|p| p.hash != 0)?;

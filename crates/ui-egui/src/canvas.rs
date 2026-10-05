@@ -589,8 +589,9 @@ fn texture_buffer<'a>(
     }
 }
 
-/// Tabs + canvas for the active document, or the start screen.
-pub fn document_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+pub(crate) fn retain_gpu_documents(app: &mut PhotocraftApp) {
+    // Remove a closed adjustment owner's proxy before collecting its live GPU keys.
+    crate::adjust_preview::retain_documents(app);
     if let Some(gpu) = &app.gpu {
         // Keep each document's texture plus its preview textures (filter preview, adjustment proxy);
         // retaining only document ids freed the previews every frame (blank canvas while previewing).
@@ -598,6 +599,21 @@ pub fn document_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         live.extend(crate::adjust_preview::gpu_keys(app));
         gpu.retain(&live);
     }
+    // Upload markers must not outlive the resources they describe: native reopen can reuse
+    // both the document ID and revision before the next frame while a preview dialog stays open.
+    let documents = app.session.documents();
+    if app.filter_preview.as_ref().is_some_and(|preview| !documents.iter().any(|st| st.doc.id == preview.doc)) {
+        app.filter_preview = None;
+    }
+    if app.proxy_uploaded.is_some_and(|(doc, _)| !documents.iter().any(|st| st.doc.id == doc)) {
+        app.proxy_uploaded = None;
+        app.proxy = None;
+    }
+}
+
+/// Tabs + canvas for the active document, or the start screen.
+pub fn document_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    retain_gpu_documents(app);
     if app.ui.chrome.shows_home(app.session.documents().len()) {
         start_screen(app, ui);
         return;
@@ -840,12 +856,11 @@ const DISPLAY_LUT: usize = 33;
 /// `doc`'s colour management: document → monitor profile and View › Proof Colors / Gamut
 /// Warning (the 32-bit preview is applied by the canvas shader, see [`hdr_preview`]). Returns the canvas `display` mode (0 none — the identity, e.g. sRGB on
 /// an sRGB monitor —, 1 LUT, 2 LUT + gamut warning).
-fn sync_display_lut(app: &mut PhotocraftApp, ctx: &egui::Context, doc: &photocraft_doc::Document, key: u64) -> u8 {
+fn sync_display_lut(app: &mut PhotocraftApp, doc: &photocraft_doc::Document, key: u64) -> u8 {
     let Some(gpu) = app.gpu.clone() else { return 0 };
     // Rebuild only when anything feeding the LUT changes.
     let sig = app.session.color.display_signature(doc);
-    let id = egui::Id::new(("pc-display-lut", key));
-    if let Some((s, mode)) = ctx.data(|d| d.get_temp::<(u64, u8)>(id))
+    if let Some((s, mode)) = gpu.display_lut_signature(key)
         && s == sig
     {
         return mode;
@@ -866,7 +881,7 @@ fn sync_display_lut(app: &mut PhotocraftApp, ctx: &egui::Context, doc: &photocra
             0
         }
     };
-    ctx.data_mut(|d| d.insert_temp(id, (sig, mode)));
+    gpu.cache_display_lut_signature(key, sig, mode);
     mode
 }
 
@@ -929,7 +944,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             },
             pixel_grid: false,
             view_key: egui::Id::new(("pc-canvas-proxy", ctx.viewport_id(), idx)).value(),
-            display: sync_display_lut(app, &ctx, &doc, key),
+            display: sync_display_lut(app, &doc, key),
             hdr: hdr_preview(app, &doc),
         };
         crate::gpu_canvas::GpuCanvas::paint(&painter, rect, params);
@@ -948,7 +963,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             },
             pixel_grid,
             view_key: egui::Id::new(("pc-canvas", ctx.viewport_id(), idx)).value(),
-            display: sync_display_lut(app, &ctx, &doc, doc.id.0),
+            display: sync_display_lut(app, &doc, doc.id.0),
             hdr: hdr_preview(app, &doc),
         };
         crate::gpu_canvas::GpuCanvas::paint(&painter, rect, params);

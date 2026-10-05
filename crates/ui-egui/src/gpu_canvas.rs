@@ -449,12 +449,11 @@ impl GpuCanvas {
         }
     }
 
-    /// Free textures of documents not in `live`.
+    /// Free textures, display LUTs and their signatures for documents not in `live`.
     pub fn retain(&self, live: &[u64]) {
         let mut renderer = self.rs.renderer.write();
-        if let Some(res) = renderer.callback_resources.get_mut::<Resources>()
-            && res.docs.keys().any(|k| !live.contains(k))
-        {
+        let Some(res) = renderer.callback_resources.get_mut::<Resources>() else { return };
+        if res.docs.keys().any(|k| !live.contains(k)) {
             let gone: Vec<u64> = res.docs.keys().filter(|k| !live.contains(k)).copied().collect();
             if let Some(c) = res.compositor.as_mut() {
                 for k in &gone {
@@ -462,6 +461,22 @@ impl GpuCanvas {
                 }
             }
             res.docs.retain(|k, _| live.contains(k));
+        }
+        // LUTs and identity-transform signatures can outlive document textures. Prune both,
+        // or a preserved-ID reopen can skip rebuilding a missing LUT.
+        res.luts.retain(|k, _| live.contains(k));
+        res.display_lut_signatures.retain(|k, _| live.contains(k));
+    }
+
+    pub(crate) fn display_lut_signature(&self, doc: u64) -> Option<(u64, u8)> {
+        let renderer = self.rs.renderer.read();
+        renderer.callback_resources.get::<Resources>()?.display_lut_signatures.get(&doc).copied()
+    }
+
+    pub(crate) fn cache_display_lut_signature(&self, doc: u64, signature: u64, mode: u8) {
+        let mut renderer = self.rs.renderer.write();
+        if let Some(res) = renderer.callback_resources.get_mut::<Resources>() {
+            res.display_lut_signatures.insert(doc, (signature, mode));
         }
     }
 
@@ -472,6 +487,7 @@ impl GpuCanvas {
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.get_mut::<Resources>() else { return };
+        res.display_lut_signatures.remove(&doc);
         match rgba {
             None => {
                 res.luts.remove(&doc);
@@ -812,6 +828,8 @@ struct Resources {
     lut_bgl: wgpu::BindGroupLayout,
     /// Display LUTs per document (Proof Colors / Gamut Warning); `identity_lut` otherwise.
     luts: HashMap<u64, wgpu::BindGroup>,
+    /// Signatures belong to their renderer resources, including identity transforms (mode 0).
+    display_lut_signatures: HashMap<u64, (u64, u8)>,
     identity_lut: wgpu::BindGroup,
     /// Transparency checkerboard and gamut warning colours (Preferences › Transparency & Gamut).
     style: CanvasStyle,
@@ -1046,6 +1064,7 @@ impl Resources {
         Self {
             lut_bgl,
             luts: HashMap::new(),
+            display_lut_signatures: HashMap::new(),
             identity_lut,
             style: CanvasStyle::default(),
             view_bgl,

@@ -424,6 +424,8 @@ impl PhotocraftApp {
         self.ui.views.resize_with(n, Default::default);
         self.ui.windows.retain(|w| w.document < n);
         self.prune_thumbs();
+        // Commands may close and reopen a preserved-ID document before the next repaint.
+        canvas::retain_gpu_documents(self);
     }
 
     /// Record `path` as the most-recently-opened file (File › Open Recent): de-duplicated, newest
