@@ -44,8 +44,8 @@ in the dialog.
 | macOS 11+ (universal: Apple silicon + Intel) | `photocraft-<v>-macos-universal.dmg`, `photocraft-cli-<v>-macos-universal.zip` | `macos-15` |
 | Windows 10+ x64 | `photocraft-<v>-windows-x64.msi`, `photocraft-<v>-windows-x64-portable.zip` | `windows-latest` |
 | Windows 10+ x86 (32-bit) | `photocraft-<v>-windows-x86.msi`, `photocraft-<v>-windows-x86-portable.zip` | `windows-latest` |
-| Linux x86_64 | `photocraft-<v>-linux-x86_64.{AppImage,deb,rpm,tar.gz}` | `ubuntu-22.04` |
-| Linux aarch64 | `photocraft-<v>-linux-aarch64.{AppImage,deb,rpm,tar.gz}` | `ubuntu-22.04-arm` |
+| Linux x86_64 | `photocraft-<v>-linux-x86_64.{AppImage,deb,rpm,tar.gz,flatpak}` | `ubuntu-22.04` (Flatpak: `ubuntu-24.04`) |
+| Linux aarch64 | `photocraft-<v>-linux-aarch64.{AppImage,deb,rpm,tar.gz,flatpak}` | `ubuntu-22.04-arm` (Flatpak: `ubuntu-24.04-arm`) |
 | Web | `photocraft-web-<v>.zip` (static site; see [`packaging/web/README.md`](../packaging/web/README.md)) | `ubuntu-latest` |
 
 Every binary reports its version, the commit and the build date: `photocraft --version`,
@@ -128,11 +128,34 @@ Why these formats:
   (`nfpm.yaml`). It doesn't need cargo-deb and cargo-generate-rpm metadata in our crates, and
   it can build both formats on Ubuntu.
 - **.tar.gz** is for people who manage their own `/opt` or `~/.local`.
-- **Flatpak** is the route into Flathub, GNOME Software and KDE Discover.
-  `packaging/linux/flatpak/ai.storyteller.photocraft.yml` is ready for a Flathub submission.
-  CI only validates it. A real build needs vendored crate sources (`cargo-sources.json` from
-  `flatpak-cargo-generator.py`) and adds 20+ minutes per architecture. Build it by hand with
-  the commands in the manifest's header.
+- **Flatpak bundle** (`.flatpak`) is a single file that installs into Flatpak, sandboxed and
+  updatable by installing a newer bundle, for people who prefer Flatpak to AppImage.
+  `packaging/linux/flatpak-bundle.sh` repackages the job's `.tar.gz` with
+  `packaging/linux/flatpak/ai.storyteller.photocraft.bundle.yml` on the freedesktop 26.08
+  runtime. It does no Rust build and needs no network inside `flatpak-builder`, so the bundle
+  holds the same binaries as the other formats. A separate `flatpak` job per architecture
+  (`ubuntu-24.04` and `ubuntu-24.04-arm`, for flatpak-builder 1.4) downloads the Linux job's
+  artifact, runs the script, installs the bundle and runs `photocraft-cli --version` inside the
+  sandbox as a smoke test. The bundle names Flathub as its runtime repo, so users install
+  it with:
+
+  ```sh
+  flatpak install --user photocraft-<v>-linux-x86_64.flatpak   # pulls org.freedesktop.Platform//26.08 from Flathub if missing
+  flatpak run ai.storyteller.photocraft
+  ```
+
+  Sandbox permissions (justified in the manifest): Wayland with X11 fallback, IPC (X11
+  shared memory), `dri` for the GPU, and read/write access to Pictures and Documents. Every
+  other file goes through the file-chooser and document portals. There's no network, so the
+  `--control` server is only reachable from inside the sandbox until the user runs
+  `flatpak override --user --share=network ai.storyteller.photocraft`. Host fonts are read from
+  `/run/host/fonts` and `/run/host/user-fonts`. Locally (on Linux, with `flatpak` and
+  `flatpak-builder`): `packaging/linux/package.sh --formats tar && packaging/linux/flatpak-bundle.sh`.
+- **Flathub**: `packaging/linux/flatpak/ai.storyteller.photocraft.yml` builds from source and
+  is ready for a Flathub submission (it keeps the same runtime and `finish-args` as the bundle
+  manifest, which packaging-lint checks). CI doesn't build it. A real build needs vendored crate
+  sources (`cargo-sources.json` from `flatpak-cargo-generator.py`) and adds 20+ minutes per
+  architecture. Build it by hand with the commands in the manifest's header.
 
 All Linux binaries are built on Ubuntu 22.04 and need **glibc ≥ 2.35**: Ubuntu 22.04+,
 Debian 12+, Fedora 36+, RHEL 10, openSUSE Tumbleweed. They link only glibc and libgcc_s. X11,
@@ -192,4 +215,5 @@ The outputs are committed, so packaging never needs those tools.
 
 `.github/workflows/packaging-lint.yml` runs in seconds on any change to `packaging/`, the
 workflows or the icons. It runs actionlint, shellcheck, a PowerShell parse, xmllint,
-`desktop-file-validate`, `appstreamcli validate`, and a YAML check of the Flatpak manifest.
+`desktop-file-validate`, `appstreamcli validate`, and a YAML check that the two Flatpak
+manifests agree on the runtime and permissions.

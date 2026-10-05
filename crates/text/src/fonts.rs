@@ -340,6 +340,10 @@ fn system_font_dirs() -> Vec<std::path::PathBuf> {
     } else {
         v.push(PathBuf::from("/usr/share/fonts"));
         v.push(PathBuf::from("/usr/local/share/fonts"));
+        // Inside a Flatpak sandbox the host's system and per-user fonts are mounted here
+        // (`/usr/share/fonts` is the runtime's own small set). Missing dirs are skipped.
+        v.push(PathBuf::from("/run/host/fonts"));
+        v.push(PathBuf::from("/run/host/user-fonts"));
         if let Some(d) = std::env::var_os("XDG_DATA_HOME") {
             v.push(PathBuf::from(d).join("fonts"));
         }
@@ -349,4 +353,22 @@ fn system_font_dirs() -> Vec<std::path::PathBuf> {
         }
     }
     v
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn scans_flatpak_host_fonts() {
+        let dirs = super::system_font_dirs();
+        assert!(dirs.iter().any(|d| d.ends_with("run/host/fonts")));
+        assert!(dirs.iter().any(|d| d.ends_with("run/host/user-fonts")));
+    }
+
+    #[test]
+    fn missing_font_dirs_are_skipped() {
+        let mut files = Vec::new();
+        super::collect_font_files(std::path::Path::new("/nonexistent/photocraft/fonts"), 0, &mut files);
+        assert!(files.is_empty());
+    }
 }

@@ -201,6 +201,44 @@ jobs:
           path: dist/release/*
           if-no-files-found: error
 
+  flatpak:
+    name: Flatpak ${{ matrix.arch }}
+    needs: [version, linux]
+    # Repackages the Linux job's tarball (the same binaries as the AppImage/deb/rpm); no Rust
+    # build here. 24.04 for a newer flatpak-builder (1.4) than 22.04 ships.
+    runs-on: ${{ matrix.runner }}
+    # No `environment: release`: this job signs nothing, so it gets no release secrets.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    env:
+      PHOTOCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      PHOTOCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/linux
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          # librsvg2-common: the SVG pixbuf loader. flatpak-builder runs the host's
+          # `appstreamcli compose`, which renders the scalable icon and fails without it.
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder librsvg2-common
+          # Ubuntu 24.04's AppArmor blocks the unprivileged user namespaces bubblewrap needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Build the Flatpak bundle
+        run: packaging/linux/flatpak-bundle.sh "dist/linux/photocraft-$PHOTOCRAFT_VERSION-linux-${{ matrix.arch }}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-flatpak-${{ matrix.arch }}
+          path: dist/release/*.flatpak
+          if-no-files-found: error
+
   web:
     name: Web (wasm)
     needs: version
@@ -236,7 +274,7 @@ jobs:
 
   release:
     name: Draft GitHub Release
-    needs: [version, macos, windows, linux, web]
+    needs: [version, macos, windows, linux, flatpak, web]
     runs-on: ubuntu-latest
     environment: release
     permissions:
