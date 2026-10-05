@@ -1,12 +1,14 @@
 # Roadmap
 
-Status legend: ✅ done · 🟡 in progress · ⬜ not started. Updated 2026-10-01.
+Status legend: ✅ done · 🟡 in progress · ⬜ not started. Updated 2026-10-05.
 
-**Parity metric:** `cargo xtask parity` measures how much of Photoshop's menu tree is live and
-writes [`parity.md`](parity.md). It is the headline number for "how close are we", next to the PSD
-composite oracle and the test count. For the weighted feature-parity estimate (~82% overall) and the
-remaining Opus 5.5 effort (~25–40 wall-clock hours to a 95%, ships-for-most state), see
-[`parity-estimate.md`](parity-estimate.md).
+**Parity metrics.** `cargo xtask parity` measures how much of Photoshop's menu tree is *wired to a
+command* and writes [`parity.md`](parity.md). It does **not** measure whether those commands behave
+like Photoshop, feel right, or survive real files. Read it next to the PSD composite oracle, the
+test count, and the [honest parity assessment](#honest-parity-assessment-2026-10-05) below, which
+is the reference answer to "how close are we really". The weighted feature estimate in
+[`parity-estimate.md`](parity-estimate.md) (~82%) counts feature surface and overstates user-facing
+readiness; treat it as an upper bound.
 
 | M | Status | Where we are |
 |---|---|---|
@@ -26,6 +28,45 @@ remaining Opus 5.5 effort (~25–40 wall-clock hours to a 95%, ships-for-most st
 
 **Menu parity: 532 / 625 (85.1%)** on 2026-10-01, up from 224 (35.8%) the day before. See [`parity.md`](parity.md).
 
+## Honest parity assessment (2026-10-05)
+
+Written after the 0.2.0 release and the first wave of real user feedback. **We are far from real
+Photoshop parity.** `parity.md` says 625/625 menu items are live, but that only means each item
+dispatches *a* command. In the first day of public use, users hit broken basics that all counted as
+"live": text selection offset from the cursor, shortcuts that didn't fire after clicking a panel
+(214 failures in an audit), panels resizing themselves, an immovable crop frame, folders that
+wouldn't collapse, and lag on layout-style PSDs.
+
+| Area | State |
+|---|---|
+| Core editing (layers, masks, selections, adjustments, filters, transforms, blend modes) | Broad coverage; engine quality decent; interaction/UI quality only started catching up after 0.2.0. |
+| PSD fidelity | Composite oracle 113/170 (~66%). All adjustment layers and blend modes round-trip; Photoshop smart filters in PSDs, some effect shapes and text-engine details remain. psd-tools corpus being added (#81). |
+| Tools | ~20 Photoshop tools missing entirely: Pencil, Mixer Brush (as a tool), Patch, Content-Aware Move, Red Eye, Pattern Stamp, Art History Brush, Freeform/Curvature Pen, anchor tools, Direct Selection, Magnetic Lasso, single row/column marquee, Color Sampler, Perspective Crop, Rotate View, vertical type and type masks, Frame. |
+| Text | Engine works; advanced typography (OpenType features, text-on-path editing, full paragraph composer parity) and PSD text fidelity are partial. |
+| Painting | Brush model close to Photoshop after #136/#174; no pen pressure on macOS/Linux (#79), no Mixer Brush tool, no Art History Brush. |
+| AI / generative | ~0%: no Generative Fill/Expand (#41, deferred), Neural Filters or Remove tool. Classical Select Subject / Content-Aware Fill only. |
+| Ecosystem | No .8BF plug-ins (by decision: sandboxed WebAssembly plug-ins instead), no ExtendScript/UXP/.atn actions, no Adobe Fonts / Libraries / cloud documents. |
+| Camera RAW | DNG, CR2, Sony ARW (lossless + compressed), RW2, uncompressed ORF decode; Nikon compressed NEF, CR3, RAF fall back to the embedded preview (clean-room limits, #50). |
+| Performance / robustness | Strong on large rasters (14k+ on the GPU, banded memory); layout-style documents were laggy (#125/#128 in progress); real-file testing has only just begun. |
+
+**Estimate.** Feature surface: roughly **55–70%** of what a typical Photoshop user touches exists in
+some form. "A working professional could switch today": roughly **20–35%**; professionals live in
+the details (exact tool behaviour, PSD fidelity on their own files, typography, AI, plug-ins).
+True 1:1 parity is **many months** of focused work, and some areas need product decisions rather
+than effort (generative AI backend, the 8BF ecosystem, clean-room RAW limits).
+
+**Making it measurable** (replace guesses with numbers; update this section as they land):
+1. **Workflow acceptance tests:** 30–50 real tasks (e.g. retouch a portrait, build a social post
+   with text and effects, composite with masks and adjustment layers, prepare a CMYK print file),
+   each scripted end to end and checked against Photoshop's output, run on every build. The pass
+   rate becomes the headline parity number.
+2. **Real-file corpus:** users' shareable PSDs plus the psd-tools set (#81), with pass-rate floors
+   that only go up (`crates/io/tests/corpus.rs`).
+3. **Recurring visual QA:** screenshot sweeps of realistic documents (`cargo run -p photocraft-engine
+   --example designer_psd`). The first sweep found 14 defects (#147–#157) that unit tests missed.
+4. **User reports:** fast turnaround from report → issue → fix; ask reporters for OS, document
+   size, layer count and a screenshot.
+
 ## Current focus (infrastructure before the long tail)
 
 Landed on 2026-10-01:
@@ -36,8 +77,10 @@ Landed on 2026-10-01:
   (`docs/releasing.md`).
 
 Next:
-1. **First signed release**: push to `release`, verify notarization and the installers, and fix CI
-   (`docs/releasing.md`). Windows code-signing material still needs to be obtained.
+1. **Quality of what exists** (from user feedback after 0.2.0, see the assessment above): workflow
+   acceptance tests, real-file corpus, visual QA, and the open user issues. 0.2.0 shipped signed and
+   notarized on 2026-10-05 (`docs/releasing.md`); Windows code-signing material still needs to be
+   obtained.
 2. **Fidelity**: the PSD oracle (113/170). Modern Brightness/Contrast and grayscale Levels
    curves; chisel-soft / stroke-emboss bevel shapes; Photoshop's 8-bit blend rounding; non-Normal
    modes in Lab documents; Photoshop smart filters in `SoLd`.
