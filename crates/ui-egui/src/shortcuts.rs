@@ -156,6 +156,12 @@ pub fn clipboard_keys(ctx: &egui::Context, typing: bool, raw: &mut egui::RawInpu
 }
 
 pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    // Liquify is a full-window custom dialog with focusable sliders. egui can therefore claim
+    // keyboard input before the distortion-mode handler below runs. Give Liquify's local
+    // shortcuts first refusal (Undo, brush size, tool keys), but never steal keys from text edits.
+    if app.distort.liquify.is_some() && !ctx.text_edit_focused() {
+        crate::liquify_ui::keys(app, ctx);
+    }
     if ctx.egui_wants_keyboard_input() || !app.ui.dialogs.is_empty() || app.discard.is_some() {
         // Dialogs and focused sliders keep canvas zoom; a focused text field keeps its keys.
         if !ctx.text_edit_focused() {

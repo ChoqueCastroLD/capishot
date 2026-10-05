@@ -755,6 +755,38 @@ mod tests {
     }
 
     #[test]
+    fn shortcut_handler_undoes_liquify_even_when_egui_owns_keyboard_focus() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_layer();
+        open(&mut app, &ctx).unwrap();
+        for ev in [
+            ToolEvent::Down { x: 40.0, y: 40.0, pressure: 1.0 },
+            ToolEvent::Move { x: 52.0, y: 40.0, pressure: 1.0 },
+            ToolEvent::Up { x: 52.0, y: 40.0 },
+        ] {
+            pointer(&mut app, ev, egui::Modifiers::NONE);
+        }
+        assert_eq!(app.distort.liquify.as_ref().unwrap().strokes.len(), 1);
+
+        let raw = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Z,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            }],
+            ..Default::default()
+        };
+        let _ = ctx.run(raw, |ctx| {
+            ctx.memory_mut(|m| m.request_focus(egui::Id::new("liquify-slider-focus")));
+            assert!(ctx.egui_wants_keyboard_input());
+            crate::shortcuts::handle(&mut app, ctx);
+        });
+        assert_eq!(app.distort.liquify.as_ref().unwrap().strokes.len(), 0);
+    }
+
+    #[test]
     fn menu_opens_the_dialog_and_routes_pointer_events() {
         let ctx = egui::Context::default();
         let mut app = app_with_layer();
