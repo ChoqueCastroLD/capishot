@@ -34,9 +34,9 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
             (if tool == Tool::Healing { "paint.healingBrush" } else { "paint.cloneStamp" }, p)
         }
         Tool::HistoryBrush => ("paint.historyBrush", json!({})),
-        Tool::Blur => ("paint.blur", json!({"strength": o.strength})),
-        Tool::Sharpen => ("paint.sharpen", json!({"strength": o.strength, "protectDetail": o.protect_detail})),
-        Tool::Smudge => ("paint.smudge", json!({"strength": o.strength, "fingerPainting": o.finger_painting})),
+        Tool::Blur => ("paint.blur", json!({"strength": o.strength, "sampleAllLayers": o.sample_all_layers})),
+        Tool::Sharpen => ("paint.sharpen", json!({"strength": o.strength, "protectDetail": o.protect_detail, "sampleAllLayers": o.sample_all_layers})),
+        Tool::Smudge => ("paint.smudge", json!({"strength": o.strength, "fingerPainting": o.finger_painting, "sampleAllLayers": o.sample_all_layers})),
         Tool::Dodge | Tool::Burn => (
             if tool == Tool::Dodge { "paint.dodge" } else { "paint.burn" },
             json!({"range": o.tone_range, "exposure": o.exposure, "protectTones": o.protect_tones}),
@@ -53,6 +53,8 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
         _ => return false,
     };
     p["points"] = pts;
+    // The layer mask, an alpha channel or the Quick Mask when targeted, as the Brush paints.
+    p["target"] = crate::canvas::paint_target(app);
     match app.run(cmd, p) {
         Ok(r) if matches!(tool, Tool::Healing | Tool::CloneStamp) => {
             // Aligned: keep the offset for later strokes; non-aligned: every stroke restarts at the source.
@@ -197,4 +199,73 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
         _ => {}
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::canvas::{ToolEvent, tool_event};
+
+    fn app() -> PhotocraftApp {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 100, "height": 60})).unwrap();
+        app.run("tools.setBrush", json!({"brush": {"size": 16, "hardness": 1.0}})).unwrap();
+        app
+    }
+
+    fn drag(app: &mut PhotocraftApp, tool: Tool) {
+        app.ui.tool = tool;
+        let m = egui::Modifiers::NONE;
+        tool_event(app, ToolEvent::Down { x: 10.0, y: 30.0, pressure: 1.0 }, m);
+        tool_event(app, ToolEvent::Move { x: 50.0, y: 30.0, pressure: 1.0 }, m);
+        tool_event(app, ToolEvent::Up { x: 50.0, y: 30.0 }, m);
+        assert!(!app.ui.status_error, "{tool:?}: {}", app.ui.status);
+    }
+
+    fn active(app: &PhotocraftApp) -> &photocraft_doc::Layer {
+        let st = app.session.active().unwrap();
+        st.active_layer.and_then(|id| st.doc.layer(id)).unwrap()
+    }
+
+    fn stripes(app: &mut PhotocraftApp, step: usize, target: &str) {
+        for x in (0..100).step_by(step) {
+            app.run("paint.pencil", json!({"points": [[x, 0], [x, 60]], "size": 2, "color": "#606060", "target": target})).unwrap();
+        }
+    }
+
+    #[test]
+    fn retouch_strokes_paint_the_targeted_mask() {
+        // #207: with the mask targeted, retouching changes the mask, never the pixels.
+        for tool in [Tool::Blur, Tool::Sharpen, Tool::Smudge, Tool::Dodge, Tool::Burn] {
+            let mut app = app();
+            app.run("layer.new.layer", json!({})).unwrap();
+            stripes(&mut app, 4, "pixels");
+            app.run("layer.layerMask.revealAll", json!({})).unwrap();
+            stripes(&mut app, 6, "mask");
+            app.ui.mask_target = true;
+            app.ui.tool_options.protect_detail = false;
+            let b = app.session.active().unwrap().doc.bounds();
+            let px0 = active(&app).surface().unwrap().read_region(b);
+            let mask0 = active(&app).mask.as_ref().unwrap().surface.read_region(b);
+            drag(&mut app, tool);
+            assert_eq!(active(&app).surface().unwrap().read_region(b), px0, "{tool:?}: pixels untouched");
+            assert_ne!(active(&app).mask.as_ref().unwrap().surface.read_region(b), mask0, "{tool:?}: mask changed");
+        }
+    }
+
+    #[test]
+    fn sample_all_layers_reaches_blur_sharpen_and_smudge() {
+        // #207: the options-bar checkbox reaches the command.
+        for tool in [Tool::Blur, Tool::Sharpen, Tool::Smudge] {
+            for all in [false, true] {
+                let mut app = app();
+                stripes(&mut app, 4, "pixels");
+                app.run("layer.new.layer", json!({})).unwrap();
+                app.ui.tool_options.sample_all_layers = all;
+                drag(&mut app, tool);
+                let a = active(&app).surface().unwrap().rgba(30, 30)[3];
+                assert_eq!(a > 0.0, all, "{tool:?} sampleAllLayers={all}: alpha {a}");
+            }
+        }
+    }
 }

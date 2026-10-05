@@ -256,16 +256,39 @@ pub fn apply_dab_stroke(
             let wv = work.px(x, y);
             let i = out.index(x, y) * n;
             let o = &mut out.data[i..i + n];
-            for c in 0..n {
-                if lock_transparency && Some(c) == a {
-                    continue;
+            match a {
+                // Alpha changes: mix premultiplied, so colour under transparent pixels doesn't bleed in.
+                Some(a) if !lock_transparency => mix_premultiplied(o, wv, a, k),
+                _ => {
+                    for c in 0..n {
+                        if lock_transparency && Some(c) == a {
+                            continue;
+                        }
+                        o[c] += (wv[c] - o[c]) * k;
+                    }
                 }
-                o[c] += (wv[c] - o[c]) * k;
             }
         }
     }
     out.write(target);
     bounds
+}
+
+/// `dst ← lerp(dst, src, k)` in premultiplied space (straight in, straight out; `a` = alpha index).
+/// Where the result is fully transparent the colour is mixed straight, so it stays defined.
+#[inline]
+pub fn mix_premultiplied(dst: &mut [f32], src: &[f32], a: usize, k: f32) {
+    let (Some(&da), Some(&sa)) = (dst.get(a), src.get(a)) else { return };
+    let oa = da + (sa - da) * k;
+    for (c, (d, s)) in dst.iter_mut().zip(src).enumerate() {
+        if c == a {
+            continue;
+        }
+        *d = if oa > 1e-6 { (*d * da + (*s * sa - *d * da) * k) / oa } else { *d + (*s - *d) * k };
+    }
+    if let Some(d) = dst.get_mut(a) {
+        *d = oa;
+    }
 }
 
 /// Smudge state: a colour buffer carried from dab to dab (centred on the dab), which is laid down at
@@ -278,12 +301,22 @@ pub struct Smudge {
     /// the first dab.
     pub finger: Option<Vec<f32>>,
     radius: i32,
+    /// Alpha channel index: when set, the carried colour is premultiplied, so smudging into or out
+    /// of transparency never drags in the (meaningless) colour of transparent pixels.
+    alpha: Option<usize>,
+    /// Carried colour (premultiplied when `alpha` is set).
     carry: Option<Vec<f32>>,
 }
 
 impl Smudge {
     pub fn new(strength: f32, finger: Option<Vec<f32>>, max_brush_size: f32) -> Self {
-        Self { strength: strength.clamp(0.0, 1.0), finger, radius: (max_brush_size / 2.0).ceil() as i32 + 2, carry: None }
+        Self { strength: strength.clamp(0.0, 1.0), finger, radius: (max_brush_size / 2.0).ceil() as i32 + 2, alpha: None, carry: None }
+    }
+
+    /// Mix in premultiplied space using alpha channel `a` (the format's [`alpha_index`]).
+    pub fn with_alpha(mut self, a: Option<usize>) -> Self {
+        self.alpha = a;
+        self
     }
 
     /// Apply one dab to the working copy.
@@ -292,13 +325,23 @@ impl Smudge {
         let side = (2 * r + 1) as usize;
         let (cx, cy) = (fp.dab.center.x.floor() as i32, fp.dab.center.y.floor() as i32);
         let wr = work.rect;
-        let clamp_px = |work: &Region, x: i32, y: i32| -> Vec<f32> { work.px(x.clamp(wr.x0, wr.x1 - 1), y.clamp(wr.y0, wr.y1 - 1)).to_vec() };
+        let alpha = self.alpha.filter(|a| *a < n);
+        let clamp_px = |work: &Region, x: i32, y: i32| -> Vec<f32> {
+            let mut v = work.px(x.clamp(wr.x0, wr.x1 - 1), y.clamp(wr.y0, wr.y1 - 1)).to_vec();
+            premultiply(&mut v, alpha);
+            v
+        };
         let carry = self.carry.get_or_insert_with(|| {
             let mut c = vec![0.0f32; side * side * n];
             for qy in 0..side {
                 for qx in 0..side {
                     let v = match &self.finger {
-                        Some(f) => f.clone(),
+                        Some(f) => {
+                            let mut f = f.clone();
+                            f.resize(n, 1.0);
+                            premultiply(&mut f, alpha);
+                            f
+                        }
                         None => clamp_px(work, cx + qx as i32 - r, cy + qy as i32 - r),
                     };
                     c[(qy * side + qx) * n..(qy * side + qx + 1) * n].copy_from_slice(&v[..n]);
@@ -316,8 +359,28 @@ impl Smudge {
                 }
                 let q = (qy as usize * side + qx as usize) * n;
                 let px = work.px_mut(x, y);
-                for c in 0..n {
-                    px[c] += (carry[q + c] - px[c]) * k;
+                match alpha {
+                    Some(a) => {
+                        // Back to straight for the mix (premultiplied lerp towards the carried colour).
+                        let ca = carry[q + a];
+                        let mut buf = [0.0f32; 16];
+                        let m = n.min(buf.len());
+                        buf[..m].copy_from_slice(&carry[q..q + m]);
+                        let src = &mut buf[..m];
+                        if ca > 1e-6 {
+                            for (c, v) in src.iter_mut().enumerate() {
+                                if c != a {
+                                    *v /= ca;
+                                }
+                            }
+                        }
+                        mix_premultiplied(px, src, a, k);
+                    }
+                    None => {
+                        for c in 0..n {
+                            px[c] += (carry[q + c] - px[c]) * k;
+                        }
+                    }
                 }
             }
         }
@@ -331,10 +394,22 @@ impl Smudge {
                 }
                 let q = (qy * side + qx) * n;
                 let px = work.px(x, y);
+                let pa = alpha.map_or(1.0, |a| px[a]);
                 for c in 0..n {
-                    carry[q + c] = carry[q + c] * keep + px[c] * (1.0 - keep);
+                    let v = if alpha.is_some_and(|a| a != c) { px[c] * pa } else { px[c] };
+                    carry[q + c] = carry[q + c] * keep + v * (1.0 - keep);
                 }
             }
+        }
+    }
+}
+
+/// Premultiply a straight pixel in place (no-op without alpha).
+fn premultiply(px: &mut [f32], alpha: Option<usize>) {
+    let Some(pa) = alpha.and_then(|a| px.get(a).copied()) else { return };
+    for (c, v) in px.iter_mut().enumerate() {
+        if Some(c) != alpha {
+            *v *= pa;
         }
     }
 }
@@ -424,5 +499,51 @@ mod tests {
             apply_dab_stroke(&mut s2, &st, None, false, 0, |w, fp| fg.dab(w, fp));
             assert!(s2.pixel(22, 20)[0] < 0.5);
         }
+    }
+
+    #[test]
+    fn smudge_into_transparency_leaves_no_dark_fringe() {
+        // #207: straight mixing dragged the black of transparent pixels into the colour.
+        for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F] {
+            let mut s = Surface::new(fmt);
+            s.fill_rect(Rect::new(0, 0, 30, 40), &[1.0, 0.8, 0.0, 1.0]);
+            let st = stroke(&[(20.0, 20.0), (70.0, 20.0)], 12.0, 0.5);
+            let mut sm = Smudge::new(0.8, None, 12.0).with_alpha(Some(3));
+            apply_dab_stroke(&mut s, &st, None, false, 0, |w, fp| sm.dab(w, fp));
+            let mut smudged = 0;
+            for x in 30..80 {
+                for y in 14..27 {
+                    let p = s.rgba(x, y);
+                    if p[3] > 0.02 {
+                        smudged += 1;
+                        assert!(p[0] > 0.97 && (p[1] - 0.8).abs() < 0.03, "{fmt:?} ({x},{y}): {p:?} darkened");
+                    }
+                }
+            }
+            assert!(smudged > 50, "{fmt:?}: colour was dragged into the transparent area");
+            // And at partial opacity the mix back is premultiplied too.
+            let mut s = Surface::new(fmt);
+            s.fill_rect(Rect::new(0, 0, 30, 40), &[1.0, 0.8, 0.0, 1.0]);
+            let mut st = st.clone();
+            st.brush.opacity = 0.5;
+            let mut sm = Smudge::new(0.8, None, 12.0).with_alpha(Some(3));
+            apply_dab_stroke(&mut s, &st, None, false, 0, |w, fp| sm.dab(w, fp));
+            let p = s.rgba(34, 20);
+            assert!(p[3] > 0.02 && p[0] > 0.97, "{fmt:?}: {p:?}");
+        }
+    }
+
+    #[test]
+    fn premultiplied_mix_ignores_colour_of_transparent_pixels() {
+        let mut d = [0.0, 0.0, 0.0, 0.0];
+        mix_premultiplied(&mut d, &[1.0, 0.5, 0.0, 1.0], 3, 0.25);
+        assert_eq!(d, [1.0, 0.5, 0.0, 0.25]);
+        let mut d = [0.2, 0.2, 0.2, 1.0];
+        mix_premultiplied(&mut d, &[0.0, 0.0, 0.0, 0.0], 3, 1.0);
+        assert_eq!(d[3], 0.0);
+        // Out-of-range alpha index: untouched, no panic.
+        let mut d = [0.5, 0.5];
+        mix_premultiplied(&mut d, &[1.0, 1.0], 7, 0.5);
+        assert_eq!(d, [0.5, 0.5]);
     }
 }

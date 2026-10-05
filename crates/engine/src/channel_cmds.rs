@@ -517,6 +517,19 @@ fn routed(id: &str) -> bool {
         || id == "plugin.run"
         || id.starts_with("image.adjustments.")
         || matches!(id, "paint.stroke" | "paint.pencil" | "paint.bucket" | "paint.gradient" | "paint.mixerBrush" | "edit.fill" | "image.applyImage")
+        || matches!(
+            id,
+            "paint.cloneStamp"
+                | "paint.healingBrush"
+                | "paint.spotHealing"
+                | "paint.dodge"
+                | "paint.burn"
+                | "paint.sponge"
+                | "paint.blur"
+                | "paint.sharpen"
+                | "paint.smudge"
+                | "paint.historyBrush"
+        )
 }
 
 /// Fill in `"target"` from the targeted channel (or Quick Mask mode) when the caller gave none.
