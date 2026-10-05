@@ -1067,7 +1067,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     };
     let doc = st.doc.clone();
     let active = st.active_layer;
-    let active_layer = active.and_then(|id| doc.layer(id)).cloned();
+    let active_layer = active.and_then(|id| doc.layer(id));
     let selection = st.selected_layers();
     let isolated = st.isolated_layers.clone();
     let mut actions: Vec<(String, Value)> = Vec::new();
@@ -1101,7 +1101,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         });
         ui.add_space(4.0);
     }
-    if let Some(l) = &active_layer {
+    if let Some(l) = active_layer {
         // Photoshop greys blend mode, Opacity and Fill for the Background layer.
         let bg = crate::doc_props_ui::is_background(&doc, l);
         ui.horizontal(|ui| {
