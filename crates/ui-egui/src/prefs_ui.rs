@@ -102,6 +102,7 @@ pub fn load(app: &mut PhotocraftApp) {
         app.ui.status = format!("Preferences were reset: {e}");
     }
     crate::dock::restore(app);
+    app.sync_recent();
     app.prefs_rt.saved_rev = app.session.prefs.rev();
     if app.session.prefs().file_handling.recover_on_launch
         && let Some(recover) = app.services.recover.as_mut()
@@ -169,6 +170,17 @@ fn sync_display_scale(app: &PhotocraftApp, ctx: &egui::Context) {
     ctx.set_zoom_factor(scale / native_scale);
 }
 
+/// Interface › Show Tooltips and Tools › Show Tooltips (either one off hides them): egui never
+/// shows a tooltip whose delay is infinite. Re-checked every frame because a theme change
+/// rebuilds the style; that's one style read, and a write only when it differs.
+fn sync_tooltips(app: &PhotocraftApp, ctx: &egui::Context) {
+    let p = app.session.prefs();
+    let delay = if p.interface.show_tooltips && p.tools.show_tooltips { crate::theme::TOOLTIP_DELAY } else { f32::INFINITY };
+    if ctx.global_style().interaction.tooltip_delay != delay {
+        ctx.global_style_mut(|s| s.interaction.tooltip_delay = delay);
+    }
+}
+
 /// Per-frame upkeep: theme sync, persistence, autosave and the history log.
 pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !app.prefs_rt.loaded {
@@ -189,6 +201,8 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         app.prefs_rt.theme_pref = Some(t);
     }
     presets_store(app);
+    sync_tooltips(app, ctx);
+    app.sync_recent();
     if app.session.prefs.rev() != app.prefs_rt.saved_rev {
         app.prefs_rt.saved_rev = app.session.prefs.rev();
         let text = app.session.prefs_to_json();
@@ -593,6 +607,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             ui.set_width(170.0);
             for (id, title) in SECTIONS {
                 let sel = section == id;
+                let empty = !has_visible_fields(&values, id);
                 let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 22.0), Sense::click());
                 if sel {
                     ui.painter().rect_filled(rect, t.radius_sm, t.row_selected);
@@ -604,7 +619,13 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                     egui::Align2::LEFT_CENTER,
                     title,
                     crate::theme::medium(12.5),
-                    if sel { t.text } else { t.text_dim },
+                    if sel {
+                        t.text
+                    } else if empty {
+                        t.text_faint
+                    } else {
+                        t.text_dim
+                    },
                 );
                 if resp.clicked() {
                     section = id.to_string();
@@ -620,11 +641,15 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             egui::ScrollArea::vertical().max_height(390.0).id_salt("prefs-scroll").show(ui, |ui| {
                 let order: Vec<String> =
                     f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-                if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
+                if !has_visible_fields(&values, &section) {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("These settings aren't available in PhotoCraft yet.").color(t.text_faint));
+                } else if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
                     section_fields(ui, &section, obj, &order);
+                    ui.add_space(8.0);
                 }
-                ui.add_space(8.0);
-                if crate::widgets::secondary_button(ui, "Reset Section", 110.0).clicked()
+                if has_visible_fields(&values, &section)
+                    && crate::widgets::secondary_button(ui, "Reset Section", 110.0).clicked()
                     && let Some(def) = prefs::Preferences::default().get(&section)
                 {
                     values[&section] = def;
@@ -636,6 +661,11 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     f.insert("values".into(), values);
 }
 
+/// Does `section` have any setting the dialog shows (see [`prefs::HIDDEN_UNTIL_IMPLEMENTED`])?
+fn has_visible_fields(values: &Value, section: &str) -> bool {
+    values.get(section).and_then(Value::as_object).is_some_and(|o| o.keys().any(|k| !prefs::is_hidden(&format!("{section}.{k}"))))
+}
+
 /// Generic editor for a section's fields: checkboxes, dropdowns for choices, colour swatches,
 /// number fields with the preference's range, text fields.
 fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, order: &[String]) {
@@ -645,6 +675,11 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
     egui::Grid::new(("prefs-grid", section)).num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| {
         for k in keys {
             let path = format!("{section}.{k}");
+            // Settings nothing reads yet stay out of the dialog (issue #204); their stored values
+            // pass through untouched.
+            if prefs::is_hidden(&path) {
+                continue;
+            }
             let v = obj.get(&k).cloned().unwrap_or(Value::Null);
             let label = humanize(&k);
             match &v {
@@ -1131,6 +1166,76 @@ mod tests {
             ctx.run_ui(input, |ui| tick(&mut app, ui.ctx())).textures_delta.clear();
             assert!((ctx.pixels_per_point() - expected).abs() < 1e-4);
         }
+    }
+
+    #[test]
+    fn recent_files_survive_a_restart_and_honour_the_count() {
+        let (mut app, store) = app_with_store();
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        app.push_recent("/work/a.psd");
+        app.push_recent("/work/b.png");
+        tick(&mut app, &ctx);
+        let saved = store.lock().unwrap().clone().unwrap();
+        // A new app instance (a restart) gets the list back, newest first.
+        let (mut app2, _) = app_with_saved(Some(saved));
+        tick(&mut app2, &ctx);
+        assert_eq!(app2.ui.recent_files, vec!["/work/b.png".to_string(), "/work/a.psd".to_string()]);
+        // Lowering "Recent File List Contains" shortens the menu at once; 0 turns it off.
+        app2.run("prefs.set", json!({"values": {"fileHandling.recentFileCount": 1}})).unwrap();
+        tick(&mut app2, &ctx);
+        assert_eq!(app2.ui.recent_files, vec!["/work/b.png".to_string()]);
+        app2.push_recent("/work/c.tif");
+        assert_eq!(app2.session.prefs().file_handling.recent_files, vec!["/work/c.tif".to_string()]);
+        app2.run("prefs.set", json!({"values": {"fileHandling.recentFileCount": 0}})).unwrap();
+        tick(&mut app2, &ctx);
+        app2.push_recent("/work/d.tif");
+        assert!(app2.ui.recent_files.is_empty());
+        // Clearing the list in the Preferences dialog (or by an agent) reaches the menu.
+        app2.run("prefs.set", json!({"values": {"fileHandling.recentFileCount": 20, "fileHandling.recentFiles": ["/x.psd"]}})).unwrap();
+        tick(&mut app2, &ctx);
+        assert_eq!(app2.ui.recent_files, vec!["/x.psd".to_string()]);
+        // A hostile count from a hand-edited preferences file is capped, not trusted.
+        app2.run("prefs.set", json!({"values": {"fileHandling.recentFileCount": 100}})).unwrap();
+        app2.session.prefs.edit(|p| p.file_handling.recent_file_count = u32::MAX);
+        assert_eq!(app2.recent_cap(), 100);
+    }
+
+    #[test]
+    fn show_tooltips_preferences_turn_tooltips_off() {
+        let (mut app, _) = app_with_store();
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        assert_eq!(ctx.global_style().interaction.tooltip_delay, crate::theme::TOOLTIP_DELAY);
+        for path in ["interface.showTooltips", "tools.showTooltips"] {
+            app.run("prefs.set", json!({"values": {path: false}})).unwrap();
+            tick(&mut app, &ctx);
+            assert!(ctx.global_style().interaction.tooltip_delay.is_infinite(), "{path} off hides tooltips");
+            app.run("prefs.set", json!({"values": {path: true}})).unwrap();
+            tick(&mut app, &ctx);
+            assert_eq!(ctx.global_style().interaction.tooltip_delay, crate::theme::TOOLTIP_DELAY);
+        }
+    }
+
+    #[test]
+    fn unimplemented_preferences_are_hidden_from_the_dialog() {
+        let values = prefs::Preferences::default().to_json();
+        assert!(has_visible_fields(&values, "general"));
+        assert!(has_visible_fields(&values, "fileHandling"));
+        // Every setting of these sections is still unimplemented.
+        for section in ["type", "enhancedControls", "rawDefaults", "integrations", "scratchDisks"] {
+            assert!(!has_visible_fields(&values, section), "{section}");
+        }
+        assert!(prefs::is_hidden("rawDefaults.applyAutoTone"));
+        assert!(!prefs::is_hidden("general.autoShowHomeScreen"));
+        assert!(!prefs::is_hidden("interface.uiScale"));
+        // Hidden values still round-trip through the dialog untouched.
+        let (mut app, _) = app_with_store();
+        app.run("prefs.set", json!({"values": {"type.smartQuotes": false}})).unwrap();
+        let id = open_preferences(&mut app, "type");
+        let fields = app.ui.dialogs.iter().find(|d| d.id == id).map(|d| d.fields.clone()).unwrap();
+        confirm(&mut app, &fields).unwrap();
+        assert!(!app.session.prefs().type_.smart_quotes);
     }
 
     #[test]

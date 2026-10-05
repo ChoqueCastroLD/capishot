@@ -752,6 +752,84 @@ pub const SECTIONS: [(&str, &str); 18] = [
     ("integrations", "Integrations"),
 ];
 
+/// Preferences that nothing reads yet, so Edit › Preferences doesn't show them: a control that
+/// does nothing is worse than a missing one (https://github.com/storytold/photocraft/issues/204).
+/// They still load, save and round-trip through `prefs.get` / `prefs.set` unchanged.
+///
+/// When you implement one, remove it here; the `prefs_usage` test fails while a listed
+/// preference is read anywhere outside `prefs.rs`, and while an unlisted one is read nowhere.
+pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
+    "general.colorPicker",
+    "general.beepWhenDone",
+    "general.exportClipboard",
+    "general.resizeImageDuringPlace",
+    "general.alwaysCreateSmartObjectsWhenPlacing",
+    "general.animatedZoom",
+    "general.zoomResizesWindows",
+    "general.useLegacyFreeTransform",
+    "interface.uiFontSize",
+    "interface.showChannelsInColor",
+    "interface.dynamicColorSliders",
+    "workspace.autoCollapseIconPanels",
+    "workspace.autoShowHiddenPanels",
+    "workspace.openDocumentsAsTabs",
+    "workspace.enableFloatingDocumentWindowDocking",
+    "workspace.largeTabs",
+    "workspace.enableNarrowOptionsBar",
+    "tools.zoomClickedPointToCenter",
+    "tools.enableFlickPanning",
+    "tools.varyRoundBrushHardnessOnHud",
+    "tools.showTransformationValues",
+    "tools.overscroll",
+    "tools.doubleClickLayerMaskLaunchesSelectAndMask",
+    "fileHandling.imagePreviews",
+    "fileHandling.lowercaseExtension",
+    "fileHandling.saveInBackground",
+    "fileHandling.ignoreExifProfileTag",
+    "fileHandling.askBeforeSavingLayeredTiff",
+    "fileHandling.maximizePsdCompatibility",
+    "performance.cacheLevels",
+    "performance.effectCacheMb",
+    "performance.legacyCompositing",
+    "scratchDisks.disks",
+    "cursors.brushPreviewColor",
+    "unitsAndRulers.typeUnits",
+    "unitsAndRulers.columnWidth",
+    "unitsAndRulers.gutter",
+    "unitsAndRulers.printResolution",
+    "unitsAndRulers.screenResolution",
+    "plugIns.showExtensionPanels",
+    "plugIns.allowScriptsToConnect",
+    "plugIns.generatorEnabled",
+    "type.smartQuotes",
+    "type.missingGlyphProtection",
+    "type.showFontNamesInEnglish",
+    "type.useEscToCommit",
+    "type.textEngine",
+    "type.fontPreview",
+    "type.fillNewTypeLayersWithPlaceholder",
+    "type.recentFonts",
+    "enhancedControls.scrubbySliderAcceleration",
+    "enhancedControls.touchGestures",
+    "enhancedControls.zoomWithTrackpadPinch",
+    "enhancedControls.rotateViewWithTrackpad",
+    "rawDefaults.colorSpace",
+    "rawDefaults.bitDepth",
+    "rawDefaults.resolution",
+    "rawDefaults.sharpenFor",
+    "rawDefaults.openAsSmartObject",
+    "rawDefaults.applyAutoTone",
+    // Agent access is governed by the launch flags (`--control`, the automation roots), not
+    // by these yet.
+    "integrations.allowAgentControl",
+    "integrations.controlPort",
+];
+
+/// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
+pub fn is_hidden(path: &str) -> bool {
+    HIDDEN_UNTIL_IMPLEMENTED.contains(&path)
+}
+
 /// Choices of an enumerated preference (dotted path, e.g. `"cursors.painting"`).
 pub fn choices(path: &str) -> Option<&'static [&'static str]> {
     Some(match path {

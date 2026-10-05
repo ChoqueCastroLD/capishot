@@ -465,12 +465,40 @@ impl PhotocraftApp {
     }
 
     /// Record `path` as the most-recently-opened file (File › Open Recent): de-duplicated, newest
-    /// first, capped at 10.
+    /// first, capped at Preferences › File Handling › Recent File List Contains. The list lives in
+    /// the preferences (`fileHandling.recentFiles`), so it survives a restart; `ui.recent_files`
+    /// mirrors it for the menus and the Home screen.
     pub fn push_recent(&mut self, path: &str) {
-        let r = &mut self.ui.recent_files;
+        let cap = self.recent_cap();
+        let mut r = self.session.prefs().file_handling.recent_files.clone();
         r.retain(|p| p != path);
         r.insert(0, path.to_string());
-        r.truncate(10);
+        r.truncate(cap);
+        self.ui.recent_files = r.clone();
+        self.session.prefs.edit(|p| p.file_handling.recent_files = r);
+    }
+
+    /// File › Open Recent › Clear Recent File List.
+    pub fn clear_recent(&mut self) {
+        self.ui.recent_files.clear();
+        self.session.prefs.edit(|p| p.file_handling.recent_files.clear());
+    }
+
+    /// How many recent files to remember ("Recent File List Contains", 0–100).
+    pub fn recent_cap(&self) -> usize {
+        self.session.prefs().file_handling.recent_file_count.min(100) as usize
+    }
+
+    /// Mirror the stored recent-file list into the UI state (after loading the preferences, or
+    /// when the Preferences dialog or an agent changes the list or its length). Cheap enough to
+    /// run every frame: a slice comparison of at most 100 paths, no allocation unless it changed.
+    pub fn sync_recent(&mut self) {
+        let cap = self.recent_cap();
+        let stored = &self.session.prefs().file_handling.recent_files;
+        let want = stored.get(..cap.min(stored.len())).unwrap_or_default();
+        if self.ui.recent_files.as_slice() != want {
+            self.ui.recent_files = want.to_vec();
+        }
     }
 
     /// Open a file's bytes as a new document named `name`; returns the import warnings (also

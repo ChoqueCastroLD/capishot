@@ -230,7 +230,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             Ok(Value::Null)
         }
         "file.clearRecent" => {
-            app.ui.recent_files.clear();
+            app.clear_recent();
             Ok(Value::Null)
         }
         id if id.starts_with("file.openRecent.") => {
@@ -1095,7 +1095,12 @@ mod open_recent_tests {
         for i in 0..15 {
             app.push_recent(&format!("/tmp/f{i}.png"));
         }
-        assert_eq!(app.ui.recent_files.len(), 10, "capped at 10");
+        assert_eq!(app.ui.recent_files.len(), 17, "all kept below the default cap of 20");
+        for i in 15..30 {
+            app.push_recent(&format!("/tmp/f{i}.png"));
+        }
+        assert_eq!(app.ui.recent_files.len(), 20, "capped at Recent File List Contains (20)");
+        assert_eq!(app.session.prefs().file_handling.recent_files, app.ui.recent_files, "stored in the preferences");
 
         // Menu lists them under File › Open Recent, with basenames, plus Clear Recent Files.
         app.ui.recent_files = vec!["/tmp/a.png".into(), "/dir/b.psd".into()];
@@ -1109,6 +1114,7 @@ mod open_recent_tests {
         let ctx = egui::Context::default();
         invoke(&mut app, &ctx, "file.clearRecent", json!({})).unwrap();
         assert!(app.ui.recent_files.is_empty());
+        assert!(app.session.prefs().file_handling.recent_files.is_empty(), "cleared in the preferences too");
         // No recent items in the menu once cleared (only the disabled "Clear Recent Files").
         assert!(!menu_items(&app).iter().any(|i| i.id.starts_with("file.openRecent.")));
         // A bad recent index errors gracefully (no panic).

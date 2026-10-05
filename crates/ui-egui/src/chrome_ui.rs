@@ -20,9 +20,10 @@ pub struct ChromeState {
 }
 
 impl ChromeState {
-    /// Is the Home screen up, given the current number of open documents?
-    pub fn shows_home(&self, documents: usize) -> bool {
-        documents == 0 || self.home == Some(documents)
+    /// Is the Home screen up, given the current number of open documents? With no documents it
+    /// shows by itself when `auto_show` (Preferences › General › Auto show the Home Screen).
+    pub fn shows_home(&self, documents: usize, auto_show: bool) -> bool {
+        (documents == 0 && auto_show) || self.home == Some(documents)
     }
 }
 
@@ -146,8 +147,11 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 /// screen over the open documents, which stay open.
 pub fn home_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let n = app.session.documents().len();
-    let on = app.ui.chrome.shows_home(n);
-    if icons::button(ui, "house", 26.0, on && n > 0, "Home").clicked() && n > 0 {
+    let auto = app.session.prefs().general.auto_show_home_screen;
+    let on = app.ui.chrome.shows_home(n, auto);
+    // With no documents and auto-show on, Home can't be dismissed (there's nothing behind it).
+    let can_toggle = n > 0 || !auto;
+    if icons::button(ui, "house", 26.0, on && can_toggle, "Home").clicked() && can_toggle {
         app.ui.chrome.home = if on { None } else { Some(n) };
     }
 }
@@ -224,11 +228,20 @@ mod tests {
     #[test]
     fn home_screen_closes_when_a_document_opens() {
         let mut c = ChromeState::default();
-        assert!(c.shows_home(0));
-        assert!(!c.shows_home(2));
+        assert!(c.shows_home(0, true));
+        assert!(!c.shows_home(2, true));
         c.home = Some(2);
-        assert!(c.shows_home(2));
-        assert!(!c.shows_home(3));
+        assert!(c.shows_home(2, true));
+        assert!(!c.shows_home(3, true));
+    }
+
+    #[test]
+    fn auto_show_home_screen_off_leaves_an_empty_workspace() {
+        let mut c = ChromeState::default();
+        assert!(!c.shows_home(0, false), "no Home by itself");
+        c.home = Some(0);
+        assert!(c.shows_home(0, false), "the Home button still opens it");
+        assert!(!c.shows_home(1, false), "opening a document leaves it");
     }
 
     #[test]
