@@ -211,11 +211,15 @@ fn canvas_display(app: &PhotocraftApp, doc: &Document) -> (Option<std::sync::Arc
 
 /// The document to render: the committed one, or a clone with the live adjustment preview applied.
 fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>, u64) {
-    let st = &app.session.documents()[idx];
     // Puppet / Perspective Warp previews hide the layer they draw on a mesh.
     if let Some(shown) = crate::distort_ui::display_doc(app, idx) {
         return shown;
     }
+    // Image › Adjustments dialog: a temporary adjustment layer clipped to the target.
+    if let Some(shown) = crate::adjust_preview::display_doc(app, idx) {
+        return shown;
+    }
+    let st = &app.session.documents()[idx];
     if let Some(l) = live_stroke(app, idx) {
         return (l.stroke.doc.clone(), l.display_key());
     }
@@ -264,6 +268,8 @@ fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>
 
 /// Longest side of the Navigator panel's image (about twice the panel's width, for HiDPI).
 pub const NAVIGATOR_SIDE: u32 = 512;
+/// How long adjustment-dialog settings must stay unchanged before the navigator shows them.
+const NAVIGATOR_SETTLE_MS: f64 = 200.0;
 
 /// The Navigator panel's image of document `idx`. With the CPU canvas that is the canvas texture
 /// itself; with the GPU canvas a thumbnail cached per revision, so an edit to a huge document
@@ -281,6 +287,15 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     if let Some((r, p, t)) = &cached
         && (*r, *p) == (revision, preview_key)
     {
+        return Some(t.id());
+    }
+    // While an adjustment dialog's settings are changing, the navigator keeps its image and
+    // catches up once they settle (a thumbnail composite per change would cost more than the canvas).
+    if let Some((r, _, t)) = &cached
+        && *r == revision
+        && crate::adjust_preview::settling(app, NAVIGATOR_SETTLE_MS)
+    {
+        ctx.request_repaint_after(std::time::Duration::from_millis(NAVIGATOR_SETTLE_MS as u64));
         return Some(t.id());
     }
     let t0 = crate::gpu_canvas::now_ms();
@@ -303,7 +318,15 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
         let st = app.session.documents().get(idx)?;
         (st.revision, st.last_damage.map(|r| if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) }), st.doc.id)
     };
-    let (doc, preview_key) = display_doc(app, idx);
+    let (mut doc, mut preview_key) = display_doc(app, idx);
+    // A flipped view draws a GPU machine's canvas through here: an adjustment dialog's preview of
+    // a large document (taken by the GPU path) would cost a full-size CPU composite per change.
+    if crate::adjust_preview::shown_key(app) == Some(preview_key)
+        && let Some(st) = app.session.documents().get(idx)
+        && crate::proxy::factor(&st.doc) > 1
+    {
+        (doc, preview_key) = (st.doc.clone(), 0);
+    }
     let (display, display_key) = canvas_display(app, &doc);
     let seen = app.canvases.get(&id).map(|c| (c.tex_revision, c.tex_preview_key));
     let damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, preview_key), display_key, last_damage));
@@ -359,6 +382,13 @@ fn damage_since(app: &PhotocraftApp, idx: usize, seen: (u64, u64), now: (u64, u6
     if seen.1 == now.1 ^ display_key && seen.0 + 1 == now.0 {
         return last_damage;
     }
+    // Between an adjustment dialog's previews (and the document): the target's area.
+    if seen.0 == now.0
+        && let Some(st) = app.session.documents().get(idx)
+        && let Some(r) = crate::adjust_preview::switch_region(app, st.doc.id, now.0, seen.1 ^ display_key, now.1)
+    {
+        return Some(r);
+    }
     let l = live_stroke(app, idx).filter(|l| seen.0 == now.0 && l.display_key() == now.1)?;
     let r = l.since(seen.1 ^ display_key)?;
     Some(if r.is_empty() { r } else { r.inflate(effect_reach(&l.stroke.doc.layers)) })
@@ -366,7 +396,7 @@ fn damage_since(app: &PhotocraftApp, idx: usize, seen: (u64, u64), now: (u64, u6
 
 /// How far beyond an edit's damage rect the composite can change: layer effects (shadows, glows,
 /// strokes, …) on the edited layer and on the groups around it reach that far.
-fn effect_reach(layers: &[photocraft_doc::Layer]) -> i32 {
+pub(crate) fn effect_reach(layers: &[photocraft_doc::Layer]) -> i32 {
     layers
         .iter()
         .filter(|l| l.visible)
@@ -385,7 +415,7 @@ fn effect_reach(layers: &[photocraft_doc::Layer]) -> i32 {
 /// GPU path: make sure document `idx` is current in the GPU canvas. Brush strokes re-composite
 /// and upload only their damage rect; everything else re-composites the whole document.
 /// Returns false if there is no GPU canvas.
-fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
+fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
     let Some(gpu) = app.gpu.clone() else { return false };
     let Some((revision, last_damage, id)) = app
         .session
@@ -395,11 +425,17 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
     else {
         return false;
     };
-    let (doc, preview_key) = display_doc(app, idx);
+    let (doc, raw_key) = display_doc(app, idx);
     let (display, display_key) = canvas_display(app, &doc);
     let seen = app.canvases.get(&id).map(|c| (c.revision, c.preview_key));
-    let damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, preview_key), display_key, last_damage));
-    let preview_key = preview_key ^ display_key;
+    let mut damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, raw_key), display_key, last_damage));
+    // To an adjustment dialog's preview: only what the view shows now (the rest as it moves there).
+    if damage.is_some()
+        && let Some(r) = seen.filter(|s| s.0 == revision).and_then(|s| crate::adjust_preview::switch_region(app, id, revision, s.1 ^ display_key, raw_key))
+    {
+        damage = Some(crate::adjust_preview::switch_damage(app, raw_key, r, visible));
+    }
+    let preview_key = raw_key ^ display_key;
     let size = [doc.size.width, doc.size.height];
     let cache = app.canvases.entry(id).or_insert(CanvasCache {
         revision: 0,
@@ -412,6 +448,11 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
     });
     let present = cache.on_gpu && gpu.has(id.0, size);
     if present && cache.revision == revision && cache.preview_key == preview_key {
+        // An adjustment preview composited where the view was: catch up where it moved to.
+        if let Some(r) = crate::adjust_preview::uncovered(app, id, raw_key, visible) {
+            let r = gpu.refresh(id.0, &doc, Some(r), display.as_deref());
+            app.perf.record(r.kind, r.px, r.composite_ms, r.upload_ms);
+        }
         return true;
     }
     let partial = present && damage.is_some();
@@ -437,6 +478,9 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize) -> bool {
 
 /// Live preview for an open filter dialog: run the filter on the proxy and upload it.
 fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u64)> {
+    if crate::adjust_preview::on_layer(app, idx) {
+        return None;
+    }
     let d = app.ui.dialogs.iter().find(|d| d.fields.contains_key("__filter"))?;
     if d.fields.get("__preview").and_then(serde_json::Value::as_bool) != Some(true) {
         return None;
@@ -464,6 +508,31 @@ fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u6
         app.filter_preview = Some(crate::filter_dialog::FilterPreview { doc: doc_id, revision, hash, k, result });
     }
     app.filter_preview.as_ref().filter(|p| p.result.is_some()).map(|p| (p.k, key))
+}
+
+/// The document pixels a (non-rotated) view shows, with a margin for filtering.
+fn visible_doc_rect(xf: &ViewXform) -> DRect {
+    let (a, b) = (xf.to_doc(xf.rect.min), xf.to_doc(xf.rect.max));
+    let c = |v: f64| v.clamp(-1e9, 1e9) as i32;
+    DRect::new(c(a[0].min(b[0]).floor()) - 2, c(a[1].min(b[1]).floor()) - 2, c(a[0].max(b[0]).ceil()) + 2, c(a[1].max(b[1]).ceil()) + 2)
+}
+
+/// Zoomed-out Image › Adjustments preview on a large document: the wgpu compositor renders the
+/// reduced preview document (`adjust_preview::gpu_proxy`) into its own texture, over the target's
+/// area after the first frame. Returns (factor, gpu key) to draw.
+fn ensure_adjust_proxy(app: &mut PhotocraftApp, idx: usize, zoom: f32) -> Option<(u32, u64)> {
+    let frame = crate::adjust_preview::gpu_proxy(app, idx, zoom)?;
+    let key = frame.doc.id.0;
+    let size = [frame.doc.size.width, frame.doc.size.height];
+    let gpu = app.gpu.clone()?;
+    if frame.stale || !gpu.has(key, size) {
+        let doc = app.session.documents().get(idx)?.doc.clone();
+        let (display, _) = canvas_display(app, &doc);
+        let r = gpu.refresh(key, &frame.doc, frame.damage, display.as_deref());
+        app.perf.record(if r.kind.starts_with("gpu") { "gpu-adjust-proxy" } else { "adjust-proxy" }, r.px, r.composite_ms, r.upload_ms);
+        crate::adjust_preview::proxy_drawn(app, &frame);
+    }
+    Some((frame.k, key))
 }
 
 /// If a live adjustment preview is active on a large document, composite it on the proxy and upload
@@ -521,7 +590,8 @@ pub fn document_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if let Some(gpu) = &app.gpu {
         // Keep each document's texture plus its preview textures (filter preview, adjustment proxy);
         // retaining only document ids freed the previews every frame (blank canvas while previewing).
-        let live: Vec<u64> = app.session.documents().iter().flat_map(|st| [st.doc.id.0, st.doc.id.0 ^ (1u64 << 61), st.doc.id.0 ^ (1u64 << 62)]).collect();
+        let mut live: Vec<u64> = app.session.documents().iter().flat_map(|st| [st.doc.id.0, st.doc.id.0 ^ (1u64 << 61), st.doc.id.0 ^ (1u64 << 62)]).collect();
+        live.extend(crate::adjust_preview::gpu_keys(app));
         gpu.retain(&live);
     }
     if app.ui.chrome.shows_home(app.session.documents().len()) {
@@ -839,7 +909,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // A flipped view draws through the CPU path (the GPU canvas shader has no mirroring).
     if app.gpu.is_some()
         && !flip
-        && let Some((k, key)) = ensure_filter_preview(app, idx).or_else(|| ensure_proxy_preview(app, idx))
+        && let Some((k, key)) = ensure_adjust_proxy(app, idx, view.zoom * ctx.pixels_per_point())
+            .or_else(|| ensure_filter_preview(app, idx))
+            .or_else(|| ensure_proxy_preview(app, idx))
     {
         on_gpu = true;
         let params = crate::gpu_canvas::ViewParams {
@@ -857,7 +929,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             hdr: hdr_preview(app, &doc),
         };
         crate::gpu_canvas::GpuCanvas::paint(&painter, rect, params);
-    } else if !flip && ensure_gpu(app, idx) {
+    } else if !flip && ensure_gpu(app, idx, visible_doc_rect(&xf)) {
         on_gpu = true;
         app.perf.gpu = true;
         // Shadow, checkerboard, document and pixel grid in one custom shader (gpu_canvas.rs).

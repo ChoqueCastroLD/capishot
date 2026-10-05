@@ -161,6 +161,26 @@ impl GpuCanvas {
         r.callback_resources.get::<Resources>().and_then(|res| res.docs.get(&doc)).is_some_and(|d| d.size == size)
     }
 
+    /// Whether [`GpuCanvas::composite`] would draw `doc` with the wgpu compositor (rather than
+    /// fall back to the CPU compositor).
+    pub fn supports(&self, doc: &photocraft_doc::Document) -> bool {
+        if std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() || doc.size.width == 0 || doc.size.height == 0 {
+            return false;
+        }
+        let r = self.rs.renderer.read();
+        let Some(res) = r.callback_resources.get::<Resources>() else { return false };
+        if res.compositor_failed.is_some() {
+            return false;
+        }
+        match &res.compositor {
+            Some(c) => c.supports(doc).is_ok(),
+            None => {
+                let max = self.rs.device.limits().max_texture_dimension_2d;
+                doc.size.width <= max && doc.size.height <= max && photocraft_gpu::plan(doc).is_ok()
+            }
+        }
+    }
+
     /// Replace the whole document image with an `Rgba8Unorm` texture. `rgba` is premultiplied
     /// RGBA8, `size[0] * size[1] * 4` bytes (anything else is ignored).
     pub fn upload_full(&self, doc: u64, size: [u32; 2], rgba: &[u8]) {

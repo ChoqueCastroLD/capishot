@@ -3,9 +3,10 @@
 //!
 //! The dialog's fields are the command's complete parameter set (so automation can read and set
 //! them with `ui.dialog.set`) plus private `__` keys. While it is open the canvas previews the
-//! *real command* on the proxy document through the filter-preview machinery (`__filter` +
-//! `__preview`); OK runs the command once (one history step) and Cancel drops the preview, leaving
-//! the document untouched.
+//! settings as a temporary adjustment layer clipped to the target (`adjust_preview`, composited on
+//! the GPU); where that can't match the command, the *real command* runs on the proxy document
+//! through the filter-preview machinery (`__filter` + `__preview`). OK runs the command once (one
+//! history step) and Cancel drops the preview, leaving the document untouched.
 
 use serde_json::{Map, Value, json};
 
