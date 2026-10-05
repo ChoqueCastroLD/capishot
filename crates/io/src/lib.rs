@@ -108,7 +108,8 @@ pub fn is_psd(bytes: &[u8]) -> bool {
 /// Imports a file. PSD/PSB and camera raws are detected by magic; everything
 /// else is decoded with `photocraft-codecs`.
 pub fn import(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
-    if photocraft_format::is_pcraft(bytes) {
+    // A declared native extension must reach its loader so malformed bundles retain format errors.
+    if has_extension(name, photocraft_format::EXTENSION) || photocraft_format::is_pcraft(bytes) {
         return Ok(ImportResult { document: photocraft_format::load_from_bytes(bytes)?, warnings: Vec::new() });
     }
     if is_psd(bytes) {
@@ -125,6 +126,10 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
 
 fn extension(name_or_ext: &str) -> String {
     name_or_ext.rsplit(['.', '/', '\\']).next().unwrap_or(name_or_ext).to_ascii_lowercase()
+}
+
+fn has_extension(name: &str, expected: &str) -> bool {
+    name.rsplit(['/', '\\']).next().and_then(|name| name.rsplit_once('.')).is_some_and(|(base, ext)| !base.is_empty() && ext.eq_ignore_ascii_case(expected))
 }
 
 /// Exports `doc` to the format named by `name_or_ext` (a file name, path or

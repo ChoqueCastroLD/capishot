@@ -91,13 +91,20 @@ impl Default for LoadOptions {
     }
 }
 
-/// `true` if `bytes` look like a `.pcraft` ZIP bundle (a ZIP whose first
-/// entry is `manifest.json`, which is how we write them).
+/// `true` when ZIP bytes contain a `manifest.json` entry.
+///
+/// Bundles written here place the manifest first; re-zipped bundles may reorder entries.
 pub fn is_pcraft(bytes: &[u8]) -> bool {
-    bytes.len() > 30 && bytes.starts_with(b"PK\x03\x04") && {
-        let n = u16::from_le_bytes([bytes[26], bytes[27]]) as usize;
-        bytes.get(30..30 + n) == Some(b"manifest.json")
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return false;
     }
+    if bytes.len() >= 30 {
+        let name_len = u16::from_le_bytes([bytes[26], bytes[27]]) as usize;
+        if bytes.get(30..30 + name_len) == Some(b"manifest.json") {
+            return true;
+        }
+    }
+    zip::ZipReader::new(bytes).is_ok_and(|archive| archive.find("manifest.json").is_some())
 }
 
 /// Save to an in-memory ZIP bundle (one-shot; use [`PcraftWriter`] for

@@ -216,4 +216,22 @@ fn synthetic_pcraft_roundtrip_keeps_everything() {
     let c = &fresh.layer_comps[0];
     assert_eq!(c.states.len(), fresh.layer_count());
     assert!(c.states.iter().all(|s| fresh.layer(s.layer).is_some()));
+
+    // Native identity is independent of ZIP entry order and the filename extension.
+    let zip = photocraft_format::zip::ZipReader::new(&bytes).unwrap();
+    let mut reordered = photocraft_format::zip::ZipWriter::new();
+    reordered.add("extra.txt", b"not the manifest").unwrap();
+    for entry in &zip.entries {
+        reordered.add(&entry.name, &zip.read(entry, bytes.len()).unwrap()).unwrap();
+    }
+    let reordered = reordered.finish().unwrap();
+    for name in ["x.PCRAFT", "no-extension"] {
+        let imported = import(name, &reordered).unwrap().document;
+        assert_eq!(imported.layer_comps, d.layer_comps);
+        assert_eq!(imported.layers[1].artboard(), d.layers[1].artboard());
+    }
+
+    let png = export(&d, "x.png", &ExportOptions::default()).unwrap().bytes;
+    assert!(import("pcraft", &png).is_ok());
+    assert!(matches!(import("broken.pcraft", b"not a native bundle"), Err(photocraft_io::IoError::Pcraft(_))));
 }

@@ -126,10 +126,10 @@ pub struct ZipReader<'a> {
 }
 
 fn u16_at(b: &[u8], o: usize) -> Result<u16, FormatError> {
-    b.get(o..o + 2).map(|s| u16::from_le_bytes([s[0], s[1]])).ok_or_else(|| FormatError::corrupt("truncated zip"))
+    o.checked_add(2).and_then(|end| b.get(o..end)).map(|s| u16::from_le_bytes([s[0], s[1]])).ok_or_else(|| FormatError::corrupt("truncated zip"))
 }
 fn u32_at(b: &[u8], o: usize) -> Result<u32, FormatError> {
-    b.get(o..o + 4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])).ok_or_else(|| FormatError::corrupt("truncated zip"))
+    o.checked_add(4).and_then(|end| b.get(o..end)).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])).ok_or_else(|| FormatError::corrupt("truncated zip"))
 }
 
 impl<'a> ZipReader<'a> {
@@ -146,12 +146,11 @@ impl<'a> ZipReader<'a> {
         let count = u16_at(bytes, eocd + 10)? as usize;
         let cd_size = u32_at(bytes, eocd + 12)? as usize;
         let cd_off = u32_at(bytes, eocd + 16)? as usize;
-        if cd_off.checked_add(cd_size).is_none_or(|e| e > eocd) {
-            return Err(FormatError::corrupt("zip central directory out of range"));
-        }
+        let cd_end = cd_off.checked_add(cd_size).filter(|end| *end <= eocd).ok_or_else(|| FormatError::corrupt("zip central directory out of range"))?;
         let mut entries = Vec::with_capacity(count.min(bytes.len() / 46));
         let mut p = cd_off;
         for _ in 0..count {
+            let header_end = p.checked_add(46).filter(|end| *end <= cd_end).ok_or_else(|| FormatError::corrupt("truncated zip central directory entry"))?;
             if u32_at(bytes, p)? != CENTRAL_SIG {
                 return Err(FormatError::corrupt("bad zip central directory entry"));
             }
@@ -164,23 +163,36 @@ impl<'a> ZipReader<'a> {
             let elen = u16_at(bytes, p + 30)? as usize;
             let clen = u16_at(bytes, p + 32)? as usize;
             let local = u32_at(bytes, p + 42)? as usize;
-            let name = bytes.get(p + 46..p + 46 + nlen).ok_or_else(|| FormatError::corrupt("truncated zip name"))?;
+            let name_end = header_end.checked_add(nlen).filter(|end| *end <= cd_end).ok_or_else(|| FormatError::corrupt("zip entry name out of range"))?;
+            let name = bytes.get(header_end..name_end).ok_or_else(|| FormatError::corrupt("truncated zip name"))?;
             let name = String::from_utf8_lossy(name).into_owned();
             if flags & 1 != 0 {
                 return Err(FormatError::Unsupported("encrypted zip entries".into()));
             }
+            // Bound each entry by the declared central-directory extent before advancing.
+            let entry_end = name_end
+                .checked_add(elen)
+                .and_then(|end| end.checked_add(clen))
+                .filter(|end| *end <= cd_end)
+                .ok_or_else(|| FormatError::corrupt("zip central directory entry out of range"))?;
             // Local header gives the real data offset.
             if u32_at(bytes, local)? != LOCAL_SIG {
                 return Err(FormatError::corrupt("bad zip local header"));
             }
-            let lnlen = u16_at(bytes, local + 26)? as usize;
-            let lelen = u16_at(bytes, local + 28)? as usize;
-            let data_offset = local + 30 + lnlen + lelen;
-            if data_offset.checked_add(compressed).is_none_or(|e| e > bytes.len()) {
+            let local_name_len = local.checked_add(26).ok_or_else(|| FormatError::corrupt("zip local header offset overflow"))?;
+            let local_extra_len = local.checked_add(28).ok_or_else(|| FormatError::corrupt("zip local header offset overflow"))?;
+            let lnlen = u16_at(bytes, local_name_len)? as usize;
+            let lelen = u16_at(bytes, local_extra_len)? as usize;
+            let data_offset = local
+                .checked_add(30)
+                .and_then(|offset| offset.checked_add(lnlen))
+                .and_then(|offset| offset.checked_add(lelen))
+                .ok_or_else(|| FormatError::corrupt("zip data offset overflow"))?;
+            if data_offset.checked_add(compressed).is_none_or(|end| end > bytes.len()) {
                 return Err(FormatError::corrupt(format!("zip entry `{name}` out of range")));
             }
             entries.push(Entry { name, method, crc, compressed, uncompressed, data_offset });
-            p += 46 + nlen + elen + clen;
+            p = entry_end;
         }
         Ok(ZipReader { bytes, entries })
     }
@@ -257,5 +269,11 @@ mod tests {
         bytes[pos] = b'j';
         let r = ZipReader::new(&bytes).unwrap();
         assert!(r.read_by_name("a", 100).is_err());
+    }
+
+    #[test]
+    fn offset_access_rejects_overflow() {
+        assert!(u16_at(&[], usize::MAX).is_err());
+        assert!(u32_at(&[], usize::MAX - 3).is_err());
     }
 }
