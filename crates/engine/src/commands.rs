@@ -217,8 +217,16 @@ fn build() -> Vec<CommandSpec> {
             r##"{"width":u32=1920,"height":u32=1080,"mode":"rgb|gray|cmyk|lab"="rgb","depth":8|16|32=8,"background":"white|black|backgroundColor|transparent|#rrggbb"="white","resolution":ppi=72,"name":str}"##,
             always,
             |s, p| {
-                let w = p.get("width").and_then(Value::as_u64).unwrap_or(1920).clamp(1, 300_000) as u32;
-                let h = p.get("height").and_then(Value::as_u64).unwrap_or(1080).clamp(1, 300_000) as u32;
+                // A size given as a float (`512.0`, as JSON from a UI field) is still that size (#254).
+                let px = |k: &str, d: u32| match p.get(k) {
+                    Some(v) => v
+                        .as_u64()
+                        .map(|n| n.clamp(1, 300_000) as u32)
+                        .or_else(|| v.as_f64().filter(|f| f.is_finite()).map(|f| f.round().clamp(1.0, 300_000.0) as u32))
+                        .unwrap_or(d),
+                    None => d,
+                };
+                let (w, h) = (px("width", 1920), px("height", 1080));
                 let mode = match p.get("mode").and_then(Value::as_str).unwrap_or("rgb") {
                     "gray" | "grayscale" => ColorMode::Grayscale,
                     "cmyk" => ColorMode::Cmyk,

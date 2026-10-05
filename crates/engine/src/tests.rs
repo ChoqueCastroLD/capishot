@@ -31,6 +31,18 @@ fn unknown_and_disabled_commands_error() {
 }
 
 #[test]
+fn file_new_takes_whole_floats_and_survives_odd_sizes() {
+    // #254: the New dialog sent `512.0`; it must not fall back to 1920 x 1080.
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 512.0, "height": 511.6})).unwrap();
+    let d = &s.active().unwrap().doc;
+    assert_eq!((d.size.width, d.size.height), (512, 512));
+    s.execute("file.new", json!({"width": -5.0, "height": "x"})).unwrap();
+    let d = &s.active().unwrap().doc;
+    assert_eq!((d.size.width, d.size.height), (1, 1080));
+}
+
+#[test]
 fn file_new_variants() {
     let mut s = Session::new();
     s.execute("file.new", json!({"width": 10, "height": 5, "background": "transparent"})).unwrap();

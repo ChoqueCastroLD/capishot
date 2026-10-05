@@ -93,6 +93,12 @@ pub fn from_unit(v: f32, unit: &str, ppi: f32) -> f32 {
     }
 }
 
+/// A typed size as the whole pixel count `file.new` takes (#254: a float like `512.0` isn't one, so
+/// the command fell back to its 1920 x 1080 default). Clamped to the command's 1–300000 range.
+pub fn px_value(px: f32) -> Value {
+    json!(if px.is_finite() { px.round().clamp(1.0, 300_000.0) as u32 } else { 1 })
+}
+
 /// Apply a preset to the dialog fields.
 pub fn apply_preset(f: &mut Map<String, Value>, p: &Preset) {
     f.insert("width".into(), json!(p.1));
@@ -216,7 +222,7 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             ui.horizontal(|ui| {
                 let mut w = to_unit(get_f(f, "width", 1920.0), &unit, ppi);
                 if widgets::value_field(ui, &mut w, 0.01..=300_000.0, "", 110.0).changed() {
-                    f.insert("width".into(), json!(from_unit(w, &unit, ppi).max(1.0)));
+                    f.insert("width".into(), px_value(from_unit(w, &unit, ppi)));
                     f.remove("__preset");
                 }
                 let opts: Vec<(String, &str)> = UNITS.iter().map(|u| (u.0.to_string(), u.1)).collect();
@@ -228,7 +234,7 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             ui.horizontal(|ui| {
                 let mut h = to_unit(get_f(f, "height", 1080.0), &unit, ppi);
                 if widgets::value_field(ui, &mut h, 0.01..=300_000.0, "", 110.0).changed() {
-                    f.insert("height".into(), json!(from_unit(h, &unit, ppi).max(1.0)));
+                    f.insert("height".into(), px_value(from_unit(h, &unit, ppi)));
                     f.remove("__preset");
                 }
                 ui.add_space(6.0);
@@ -236,8 +242,8 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                 let (w, h) = (get_f(f, "width", 1920.0), get_f(f, "height", 1080.0));
                 for (icon, portrait) in [("rectangle-vertical", true), ("rectangle-horizontal", false)] {
                     if icons::button(ui, icon, 24.0, (h > w) == portrait, if portrait { "Portrait" } else { "Landscape" }).clicked() && (h > w) != portrait {
-                        f.insert("width".into(), json!(h));
-                        f.insert("height".into(), json!(w));
+                        f.insert("width".into(), px_value(h));
+                        f.insert("height".into(), px_value(w));
                     }
                 }
             });
@@ -319,5 +325,156 @@ mod tests {
         s.execute("file.new", p).unwrap();
         let d = &s.active().unwrap().doc;
         assert_eq!((d.size.width, d.size.height, d.resolution_dpi), (2480, 3508, 300.0));
+    }
+    /// The real dialog (#254): a typed size must reach `file.new`, however it is confirmed.
+    mod dialog {
+        use super::super::{CATEGORIES, apply_preset};
+        use crate::PhotocraftApp;
+        use crate::state::{DialogKind, UiState};
+        use egui::accesskit::Role;
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        fn harness() -> Harness<'static, PhotocraftApp> {
+            let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_ui_state(|ui, app| crate::dialogs::show(app, ui.ctx()), app);
+            PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+            h.state_mut().ui.open_dialog(DialogKind::NewDocument, UiState::new_document_fields());
+            h.run_steps(3);
+            h
+        }
+
+        fn click_at(h: &mut Harness<'static, PhotocraftApp>, at: egui::Pos2) {
+            h.hover_at(at);
+            h.run_steps(1);
+            h.drag_at(at);
+            h.run_steps(1);
+            h.drop_at(at);
+            h.run_steps(2);
+        }
+
+        /// The Width (0), Height (1) and Resolution (2) fields.
+        fn field(h: &Harness<'static, PhotocraftApp>, i: usize) -> egui::Rect {
+            h.query_all_by_role(Role::SpinButton).nth(i).map(|n| n.rect()).expect("a size field")
+        }
+
+        /// Click into field `i` (which selects its text) and type `text`, as a user does.
+        fn type_into(h: &mut Harness<'static, PhotocraftApp>, i: usize, text: &str) {
+            let r = field(h, i);
+            click_at(h, r.center());
+            for c in text.chars() {
+                h.event(egui::Event::Text(c.to_string()));
+                h.run_steps(1);
+            }
+        }
+
+        fn fields(h: &Harness<'static, PhotocraftApp>) -> serde_json::Map<String, serde_json::Value> {
+            h.state().ui.dialogs.first().map(|d| d.fields.clone()).expect("the dialog is open")
+        }
+
+        fn set_fields(h: &mut Harness<'static, PhotocraftApp>, f: serde_json::Map<String, serde_json::Value>) {
+            h.state_mut().ui.dialogs[0].fields = f;
+            h.run_steps(2);
+        }
+
+        fn enter(h: &mut Harness<'static, PhotocraftApp>) {
+            h.key_press(egui::Key::Enter);
+            h.run_steps(3);
+        }
+
+        fn created(h: &Harness<'static, PhotocraftApp>) -> (u32, u32, f32) {
+            assert!(h.state().ui.dialogs.is_empty(), "the dialog closed");
+            let d = &h.state().session.active().expect("a new document").doc;
+            (d.size.width, d.size.height, d.resolution_dpi)
+        }
+
+        #[test]
+        fn typed_size_then_enter_creates_that_size() {
+            let mut h = harness();
+            type_into(&mut h, 0, "512");
+            type_into(&mut h, 1, "512");
+            let f = fields(&h);
+            assert_eq!((f["width"].as_u64(), f["height"].as_u64()), (Some(512), Some(512)), "whole pixels: {f:?}");
+            enter(&mut h);
+            assert_eq!(created(&h), (512, 512, 72.0));
+        }
+
+        #[test]
+        fn typed_size_then_create_without_leaving_the_field_creates_that_size() {
+            let mut h = harness();
+            type_into(&mut h, 0, "512");
+            type_into(&mut h, 1, "300");
+            // Still editing Height: click Create straight away.
+            let create = h.get_by_label("Create").rect();
+            click_at(&mut h, create.center());
+            assert_eq!(created(&h), (512, 300, 72.0));
+        }
+
+        #[test]
+        fn typing_over_a_preset_wins() {
+            let mut h = harness();
+            let mut f = fields(&h);
+            let web = CATEGORIES.iter().find(|c| c.0 == "Web").unwrap().1.iter().find(|p| p.0 == "Web Minimum").unwrap();
+            apply_preset(&mut f, web);
+            set_fields(&mut h, f);
+            type_into(&mut h, 0, "512");
+            type_into(&mut h, 1, "512");
+            assert!(fields(&h).get("__preset").is_none(), "typing deselects the preset");
+            enter(&mut h);
+            assert_eq!(created(&h), (512, 512, 72.0));
+        }
+
+        #[test]
+        fn clicking_a_preset_card_after_typing_sets_its_size() {
+            let mut h = harness();
+            type_into(&mut h, 0, "512");
+            h.get_by_label("Photo").click();
+            h.run_steps(2);
+            // The first card ("Landscape, 6 x 4") sits under the presets heading.
+            let heading = h.get_by_label_contains("BLANK DOCUMENT PRESETS").rect();
+            click_at(&mut h, heading.left_bottom() + egui::vec2(80.0, 60.0));
+            assert_eq!(fields(&h).get("__preset").and_then(|v| v.as_str()), Some("Landscape, 6 x 4"));
+            enter(&mut h);
+            assert_eq!(created(&h), (1800, 1200, 300.0));
+        }
+
+        #[test]
+        fn typed_size_in_inches_converts_at_the_resolution() {
+            let mut h = harness();
+            type_into(&mut h, 2, "300");
+            let mut f = fields(&h);
+            f.insert("__unit".into(), serde_json::json!("in"));
+            set_fields(&mut h, f);
+            type_into(&mut h, 0, "2");
+            type_into(&mut h, 1, "1.5");
+            enter(&mut h);
+            assert_eq!(created(&h), (600, 450, 300.0));
+        }
+
+        #[test]
+        fn changing_units_keeps_the_typed_pixel_size() {
+            let mut h = harness();
+            type_into(&mut h, 0, "512");
+            type_into(&mut h, 1, "512");
+            for unit in ["in", "cm", "mm", "pt", "pica", "px"] {
+                let mut f = fields(&h);
+                f.insert("__unit".into(), serde_json::json!(unit));
+                set_fields(&mut h, f);
+            }
+            enter(&mut h);
+            assert_eq!(created(&h), (512, 512, 72.0));
+        }
+
+        #[test]
+        fn orientation_swap_keeps_whole_pixels() {
+            let mut h = harness();
+            type_into(&mut h, 0, "512");
+            type_into(&mut h, 1, "256");
+            // The Portrait icon button follows the "Orientation" label (icons have tooltips only).
+            let label = h.get_by_label("Orientation").rect();
+            let gap = h.ctx.global_style().spacing.item_spacing.x;
+            click_at(&mut h, egui::pos2(label.right() + gap + 12.0, label.center().y));
+            enter(&mut h);
+            assert_eq!(created(&h), (256, 512, 72.0));
+        }
     }
 }

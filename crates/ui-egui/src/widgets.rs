@@ -297,6 +297,8 @@ fn button_impl(ui: &mut Ui, label: &str, min_width: f32, bg: Color32, fg: Color3
     let h = if t.pro { 28.0 } else { 30.0 };
     let size = vec2((galley.size().x + 28.0).max(min_width), h);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    // Painted text: name the button for accessibility (and so tests and agents can find it).
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
     if t.pro {
         // Spectrum buttons: fully rounded; primary = filled accent, secondary = outline.
         let down = resp.is_pointer_button_down_on();
