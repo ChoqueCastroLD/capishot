@@ -218,3 +218,121 @@ fn left_and_right_switch_menus_and_shortcuts_wait_while_one_is_open() {
     assert!(h.query_by_label_contains("Open…").is_none(), "Esc closes the menu");
     assert!(!is_open(&h.ctx), "shortcuts work again");
 }
+
+/// A level's visible height (its view) and the full height of its rows: equal means no scrolling.
+fn fits(h: &Harness<'static, PhotocraftApp>, level: usize) -> (f32, f32) {
+    let nav = Nav::current(&h.ctx);
+    (nav.views.get(level).map_or(0.0, |v| v.height()), nav.contents.get(level).copied().unwrap_or(0.0))
+}
+
+/// The on-screen rect of the popup holding `level` (the smallest area around its view).
+fn popup(h: &Harness<'static, PhotocraftApp>, level: usize) -> egui::Rect {
+    let Some(view) = Nav::current(&h.ctx).views.get(level).copied() else { return egui::Rect::NOTHING };
+    h.ctx
+        .memory(|m| m.areas().visible_layer_ids())
+        .into_iter()
+        .filter_map(|layer| h.ctx.memory(|m| m.area_rect(layer.id)))
+        .filter(|r| r.contains(view.center()) && r.width() < 600.0)
+        .min_by(|a, b| a.area().total_cmp(&b.area()))
+        .unwrap_or(egui::Rect::NOTHING)
+}
+
+/// The popup is as tall as its rows plus the menu frame: no blank space, no clipped rows.
+fn hugs_rows(h: &Harness<'static, PhotocraftApp>, level: usize) -> Result<(), String> {
+    let (_, content) = fits(h, level);
+    let frame = h.ctx.global_style().spacing.menu_margin.sum().y + 2.0;
+    let area = popup(h, level);
+    ((area.height() - content - frame).abs() < 2.0).then_some(()).ok_or(format!("popup {} pt tall for {content} pt of rows + {frame} frame", area.height()))
+}
+
+/// Open the `n`th enabled submenu of the open top-level menu with the keyboard.
+fn open_submenu(h: &mut Harness<'static, PhotocraftApp>, n: usize) -> bool {
+    let subs: Vec<usize> = rows(h, 0).iter().enumerate().filter(|(_, r)| r.enabled && r.command.is_none()).map(|(i, _)| i).collect();
+    let Some(&target) = subs.get(n) else { return false };
+    for _ in 0..rows(h, 0).len() {
+        if Nav::current(&h.ctx).highlighted(0) == Some(target) {
+            break;
+        }
+        key(h, egui::Key::ArrowDown);
+    }
+    key(h, egui::Key::ArrowRight);
+    h.run_steps(3);
+    Nav::current(&h.ctx).rows.get(1).is_some_and(|r| !r.is_empty())
+}
+
+#[test]
+fn menus_are_as_tall_as_their_rows_on_a_tall_window() {
+    // #235: every menu opened at egui's 400 pt default area height and scrolled, even at 1440 × 900.
+    let mut checked = 0;
+    for top in crate::menus::TOP_MENUS {
+        let mut h = harness((1440.0, 900.0, 1.0));
+        open(&mut h, top);
+        let (view, content) = fits(&h, 0);
+        if content > h.ctx.content_rect().height() - 60.0 {
+            continue; // Taller than the window itself: scrolling is right (see the short-window tests).
+        }
+        checked += 1;
+        assert!((view - content).abs() < 1.0, "{top}: the menu is {view} pt tall for {content} pt of rows");
+        if let Err(e) = hugs_rows(&h, 0) {
+            panic!("{top}: {e}");
+        }
+        assert!(h.query_by_label("Scroll menu down").is_none(), "{top}: no scroll arrows when the rows fit");
+        assert!((0..rows(&h, 0).len()).all(|i| visible(&h, 0, i)), "{top}: every row is on screen without scrolling");
+    }
+    assert!(checked >= 6, "most menus fit a 900 px window: {checked}");
+    // The File menu is taller than the old 400 pt cap and fits at 1440 × 900.
+    let mut h = harness((1440.0, 900.0, 1.0));
+    open(&mut h, "File");
+    let (view, content) = fits(&h, 0);
+    assert!(content > 420.0 && (view - content).abs() < 1.0, "File: {view} pt view for {content} pt of rows");
+    assert_eq!(hugs_rows(&h, 0), Ok(()));
+}
+
+#[test]
+fn submenus_are_as_tall_as_their_rows_on_a_tall_window() {
+    let mut checked = 0;
+    for top in ["Filter", "Image", "Layer"] {
+        for n in 0..3 {
+            let mut h = harness((1440.0, 900.0, 1.0));
+            open(&mut h, top);
+            if !open_submenu(&mut h, n) {
+                continue;
+            }
+            checked += 1;
+            let (view, content) = fits(&h, 1);
+            assert!(content > 0.0 && (view - content).abs() < 1.0, "{top} submenu {n}: {view} pt view for {content} pt of rows");
+            if let Err(e) = hugs_rows(&h, 1) {
+                panic!("{top} submenu {n}: {e}");
+            }
+        }
+    }
+    assert!(checked >= 6, "opened {checked} submenus");
+}
+
+#[test]
+fn a_short_window_still_scrolls_the_file_menu_to_its_last_row() {
+    let mut h = harness((1000.0, 500.0, 1.0));
+    open(&mut h, "File");
+    let (view, content) = fits(&h, 0);
+    assert!(view < content - 1.0, "File must overflow a 500 px window: {view} vs {content}");
+    let nav = Nav::current(&h.ctx);
+    assert!(nav.views[0].bottom() <= h.ctx.content_rect().bottom(), "the menu stays in the window");
+    assert!(h.query_by_label("Scroll menu down").is_some());
+    let last = rows(&h, 0).len() - 1;
+    assert!(!visible(&h, 0, last));
+    h.hover_at(nav.views[0].center());
+    h.run_steps(2);
+    for _ in 0..60 {
+        if visible(&h, 0, last) {
+            break;
+        }
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -60.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        h.run_steps(2);
+    }
+    assert!(visible(&h, 0, last), "the wheel reaches File's last row");
+}

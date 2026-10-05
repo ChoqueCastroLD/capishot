@@ -49,6 +49,8 @@ pub struct Nav {
     pub bar_bottom: Option<f32>,
     /// The visible (scrolled) part of each level.
     pub(crate) views: Vec<Rect>,
+    /// The full height of each level's rows (taller than its view when it scrolls).
+    pub(crate) contents: Vec<f32>,
     /// Scroll the highlighted row of `level` into view when it is next drawn.
     reveal: bool,
     /// Highlight the first enabled row of this level once it has been drawn (a keyboard-opened
@@ -107,6 +109,8 @@ impl Nav {
         self.roots.resize(level + 1, root);
         self.views.truncate(level);
         self.views.resize(level + 1, Rect::NOTHING);
+        self.contents.truncate(level);
+        self.contents.resize(level + 1, 0.0);
     }
 
     /// Draw a row of `level` with `add`, highlighted like a hovered row when the keyboard (or the
@@ -267,16 +271,26 @@ pub fn level(ui: &mut Ui, depth: usize, nav: &mut Nav, rows: impl FnOnce(&mut Ui
     let content: Option<f32> = ctx.data(|d| d.get_temp(key));
     let over = content.is_some_and(|h| h > room + 0.5);
     let up = over.then(|| ui.allocate_exact_size(vec2(0.0, ARROW), Sense::hover()).0);
+    let height = if over { room - 2.0 * ARROW } else { room };
     // Wheel, scroll bar and dragging the rows all scroll (#160).
+    // The popup's `Ui` is only as tall as the popup was last frame (egui's `default_area_size`, 400
+    // pt, on the first): a scroll area never grows past that, so every menu stuck at that height
+    // and scrolled even on a tall window (#235). Ask for the room the window has; auto-shrink then
+    // fits the area to its rows, so a menu scrolls only when they don't fit.
     let out = egui::ScrollArea::vertical()
         .id_salt(("menu-level", depth))
-        .max_height(if over { room - 2.0 * ARROW } else { room })
+        .max_height(height)
+        .min_scrolled_height(height)
         .scroll_source(egui::containers::scroll_area::ScrollSource::ALL)
         .show(ui, |ui| rows(ui, nav));
     let down = over.then(|| ui.allocate_exact_size(vec2(0.0, ARROW), Sense::hover()).0);
     ctx.data_mut(|d| d.insert_temp(key, out.content_size.y));
     if let Some(v) = nav.views.get_mut(level) {
-        *v = out.inner_rect;
+        // `inner_rect` is the size asked for, before auto-shrink fits it to the rows.
+        *v = Rect::from_min_size(out.inner_rect.min, vec2(out.inner_rect.width(), out.inner_rect.height().min(out.content_size.y)));
+    }
+    if let Some(c) = nav.contents.get_mut(level) {
+        *c = out.content_size.y;
     }
     if nav.first_at == Some(level) {
         nav.first_at = None;
