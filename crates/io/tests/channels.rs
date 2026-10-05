@@ -41,4 +41,13 @@ fn channel_options_spot_and_quick_mask_roundtrip() {
         assert_eq!(f2.resources.iter().filter(|r| r.id == 1077).count(), 1);
         assert_eq!(f2.resources.iter().filter(|r| r.id == 1022).count(), 1);
     }
+
+    let mut full = Document::with_background("full", Size::new(1, 1), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+    full.channels = (0..53).map(|i| AlphaChannel::new(format!("Alpha {i}"), Surface::new(PixelFormat::GRAY8))).collect();
+    full.quick_mask = Some(AlphaChannel::new("Quick Mask", Surface::new(PixelFormat::GRAY8)));
+    let out = photocraft_io::export(&full, "full.psd", &Default::default()).unwrap();
+    assert!(out.warnings.iter().any(|warning| warning.contains("Quick Mask")), "{:?}", out.warnings);
+    let file = photocraft_psd::PsdFile::from_bytes(&out.bytes).unwrap();
+    assert_eq!(file.header.channels, 56);
+    assert!(file.resources.iter().all(|resource| resource.id != 1022));
 }

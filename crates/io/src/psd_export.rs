@@ -628,7 +628,11 @@ pub fn document_to_psd_with(doc: &Document, opts: &PsdExportOptions) -> (PsdFile
             extra.push(q);
             Some((cc + usize::from(has_alpha) + extra.len() - 1) as u16)
         }
-        _ => None,
+        Some(_) => {
+            ex.warnings.push("Quick Mask was dropped because the PSD channel limit was reached".into());
+            None
+        }
+        None => None,
     };
     for a in &extra {
         let s = if a.surface.format() != ex.mask_fmt { a.surface.convert(ex.mask_fmt) } else { a.surface.clone() };
