@@ -13,6 +13,8 @@
 //!
 //! The source JPEG is generated once and cached (`--cache <dir>`, default the system temp dir).
 //! `--op open` is the baseline every other operation includes. `--cpu` skips the GPU.
+//! `--depth 16` or `--depth 32` converts the document to that bit depth after opening (the
+//! conversion is part of "open"), e.g. a 36 MP 16-bit refresh: `--size 7360x4912 --depth 16 --op refresh`.
 
 use std::time::Instant;
 
@@ -109,11 +111,21 @@ fn main() {
     drop(bytes);
     let mut s = Session::new();
     s.open_document(doc, Some("photo.jpg".into()));
+    match arg(&args, "--depth").as_deref() {
+        Some("16") => exec(&mut s, "image.mode.bits16", json!({})),
+        Some("32") => exec(&mut s, "image.mode.bits32", json!({})),
+        _ => {}
+    }
     let t_open = ms(t);
     let t = Instant::now();
     let path = refresh(gpu, &s, true);
     println!("open (decode + document)      {t_open:>9.0} ms");
     println!("first refresh ({path:<8})       {:>9.0} ms", ms(t));
+    if let Some((g, _)) = gpu
+        && let Some((format, bytes)) = g.texture_info(s.active().expect("doc").doc.id.0)
+    {
+        println!("canvas texture {format:?}, {} MB with mips", bytes >> 20);
+    }
 
     let doc = || s.active().expect("doc").doc.clone();
     match op.as_str() {

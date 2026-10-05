@@ -146,9 +146,15 @@ pub fn dichromat(rgb_lin: [f32; 3], protan: bool) -> [f32; 3] {
 
 /// The display LUT when a simulation or 32-bit preview applies (None = plain profile proof).
 pub fn display_lut(c: &ColorState, doc: &Document, size: usize) -> Result<Option<Lut3d>> {
+    display_lut_with(c, doc, size, true)
+}
+
+/// [`display_lut`], leaving the 32-bit preview out when `include_hdr` is false (the GPU canvas
+/// applies it in its shader).
+pub fn display_lut_with(c: &ColorState, doc: &Document, size: usize, include_hdr: bool) -> Result<Option<Lut3d>> {
     let pv = c.proof(doc.id);
     let kind = if pv.enabled { pv.setup.kind } else { ProofKind::Profile };
-    let hdr = if hdr_active(c, doc) { c.hdr.get(&doc.id).copied() } else { None };
+    let hdr = if include_hdr { c.hdr_preview(doc) } else { None };
     if kind == ProofKind::Profile && hdr.is_none() {
         return Ok(None);
     }
@@ -423,6 +429,9 @@ mod tests {
         let q = sample(&lut, [1, 1, 1]);
         assert!((q[0] - 0.354).abs() < 0.02, "{q:?}");
         assert!(s.color.canvas_lut(&d, 5).unwrap().is_some());
+        // The GPU canvas applies it in its shader: its LUT leaves it out (none for sRGB).
+        assert_eq!(s.color.hdr_preview(&d), Some(HdrPreview { highlight_compression: false, exposure: 1.0, gamma: 1.0 }));
+        assert!(s.color.gpu_canvas_lut(&d, 5).unwrap().is_none());
         // Highlight Compression: identity mapping, so no LUT.
         s.execute("view.thirtyTwoBitPreviewOptions", json!({"method": "highlightCompression"})).unwrap();
         assert!(!hdr_active(&s.color, &d));

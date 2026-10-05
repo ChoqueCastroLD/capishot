@@ -66,7 +66,8 @@ impl CanvasDisplay {
     }
 
     /// GPU canvas: a CPU composite as the texture stores it (sRGB-encoded for linear
-    /// composites; the display LUT does the rest).
+    /// composites; the display LUT does the rest). Values above 1.0 are encoded too (the sRGB
+    /// curve extended), for the float canvas texture of 32-bit documents.
     pub fn texture_buffer<'a>(&self, buf: &'a Buffer) -> Cow<'a, Buffer> {
         if !self.encode_srgb {
             return Cow::Borrowed(buf);
@@ -74,7 +75,8 @@ impl CanvasDisplay {
         let mut b = buf.clone();
         for p in &mut b.px {
             for v in &mut p[..3] {
-                *v = photocraft_color::convert::linear_to_srgb(v.clamp(0.0, 1.0));
+                // Capped at the largest half float; NaN is dropped by the texel conversion.
+                *v = photocraft_color::convert::linear_to_srgb(v.clamp(0.0, 65504.0));
             }
         }
         Cow::Owned(b)

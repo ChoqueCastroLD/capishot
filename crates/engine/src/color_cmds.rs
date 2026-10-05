@@ -321,11 +321,22 @@ impl ColorState {
     /// The display transform as an `size³` RGBA 3D LUT (upload with
     /// [`Lut3d::to_rgba16f_bytes`] and apply in the canvas shader).
     pub fn display_lut(&self, doc: &Document, size: usize) -> Result<Lut3d> {
-        if let Some(lut) = crate::proof_sim::display_lut(self, doc, size)? {
+        self.display_lut_with(doc, size, true)
+    }
+
+    /// [`ColorState::display_lut`], with or without the 32-bit preview (exposure/gamma).
+    fn display_lut_with(&self, doc: &Document, size: usize, hdr: bool) -> Result<Lut3d> {
+        if let Some(lut) = crate::proof_sim::display_lut_with(self, doc, size, hdr)? {
             return Ok(lut);
         }
         let t = self.display_transform(doc)?;
         Ok(Lut3d::from_transform(&t, size))
+    }
+
+    /// View › 32-bit Preview Options of `doc` when they change the display (a 32-bit document
+    /// with a non-default exposure or gamma).
+    pub fn hdr_preview(&self, doc: &Document) -> Option<crate::proof_sim::HdrPreview> {
+        if crate::proof_sim::hdr_active(self, doc) { self.hdr.get(&doc.id).copied() } else { None }
     }
 
     /// What the canvas should do for `doc`: `None` when the canvas values go to the screen
@@ -334,12 +345,24 @@ impl ColorState {
     /// mapping canvas texture values to the monitor, whose alpha is 255 where the colour is out
     /// of the proof gamut (only with Gamut Warning on).
     pub fn canvas_lut(&self, doc: &Document, size: usize) -> Result<Option<Vec<u8>>> {
+        self.canvas_lut_with(doc, size, true)
+    }
+
+    /// [`ColorState::canvas_lut`] without the 32-bit preview, which the GPU canvas shader applies
+    /// itself (see [`ColorState::hdr_preview`]) so that 32-bit values above 1.0, kept by its float
+    /// texture, are exposed into range rather than clipped by the LUT's 0..1 domain.
+    pub fn gpu_canvas_lut(&self, doc: &Document, size: usize) -> Result<Option<Vec<u8>>> {
+        self.canvas_lut_with(doc, size, false)
+    }
+
+    fn canvas_lut_with(&self, doc: &Document, size: usize, hdr: bool) -> Result<Option<Vec<u8>>> {
+        let size = size.max(2);
         let pv = self.proof(doc.id);
         let display = self.canvas_display(doc)?;
-        if !pv.enabled && !pv.gamut_warning && !crate::proof_sim::hdr_active(self, doc) {
-            return Ok(display.transform.as_ref().map(|t| Lut3d::from_transform(t, size.max(2)).to_rgba8()));
+        if !pv.enabled && !pv.gamut_warning && !(hdr && crate::proof_sim::hdr_active(self, doc)) {
+            return Ok(display.transform.as_ref().map(|t| Lut3d::from_transform(t, size).to_rgba8()));
         }
-        let lut = self.display_lut(doc, size)?;
+        let lut = self.display_lut_with(doc, size, hdr)?;
         let mut bytes = lut.to_rgba8();
         let check = if pv.gamut_warning { Some(GamutCheck::new(&display.source, &pv.setup.profile, pv.gamut_threshold).map_err(cms_err)?) } else { None };
         let s = (size - 1) as f32;

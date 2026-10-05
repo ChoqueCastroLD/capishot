@@ -458,7 +458,7 @@ fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u6
             let buf = photocraft_compose::flatten(r);
             let t1 = crate::gpu_canvas::now_ms();
             let (display, _) = canvas_display(app, &doc);
-            app.gpu.as_ref()?.upload_buffer_full(key, &texture_buffer(display.as_deref(), &buf));
+            app.gpu.as_ref()?.upload_buffer_full(key, &texture_buffer(display.as_deref(), &buf), doc.depth);
             app.perf.record("filter-preview", r.size.area(), t1 - t0, crate::gpu_canvas::now_ms() - t1);
         }
         app.filter_preview = Some(crate::filter_dialog::FilterPreview { doc: doc_id, revision, hash, k, result });
@@ -498,7 +498,7 @@ fn ensure_proxy_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u64
         let buf = photocraft_compose::flatten(&p);
         let t1 = crate::gpu_canvas::now_ms();
         let (display, _) = canvas_display(app, &doc);
-        app.gpu.as_ref()?.upload_buffer_full(key, &texture_buffer(display.as_deref(), &buf));
+        app.gpu.as_ref()?.upload_buffer_full(key, &texture_buffer(display.as_deref(), &buf), doc.depth);
         app.perf.record("proxy", p.size.area(), t1 - t0, crate::gpu_canvas::now_ms() - t1);
         app.proxy_uploaded = Some((doc_id, hash));
     }
@@ -763,8 +763,8 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 const DISPLAY_LUT: usize = 33;
 
 /// Keep the GPU display LUT under `key` (the document's texture or a preview of it) in step with
-/// `doc`'s colour management: document → monitor profile, View › Proof Colors / Gamut Warning
-/// and 32-bit preview. Returns the canvas `display` mode (0 none — the identity, e.g. sRGB on
+/// `doc`'s colour management: document → monitor profile and View › Proof Colors / Gamut
+/// Warning (the 32-bit preview is applied by the canvas shader, see [`hdr_preview`]). Returns the canvas `display` mode (0 none — the identity, e.g. sRGB on
 /// an sRGB monitor —, 1 LUT, 2 LUT + gamut warning).
 fn sync_display_lut(app: &mut PhotocraftApp, ctx: &egui::Context, doc: &photocraft_doc::Document, key: u64) -> u8 {
     let Some(gpu) = app.gpu.clone() else { return 0 };
@@ -777,7 +777,7 @@ fn sync_display_lut(app: &mut PhotocraftApp, ctx: &egui::Context, doc: &photocra
         return mode;
     }
     let gamut = app.session.color.proof(doc.id).gamut_warning;
-    let mode = match app.session.color.canvas_lut(doc, DISPLAY_LUT) {
+    let mode = match app.session.color.gpu_canvas_lut(doc, DISPLAY_LUT) {
         Ok(Some(bytes)) => {
             gpu.set_display_lut(key, DISPLAY_LUT as u32, Some(&bytes));
             if gamut { 2 } else { 1 }
@@ -794,6 +794,11 @@ fn sync_display_lut(app: &mut PhotocraftApp, ctx: &egui::Context, doc: &photocra
     };
     ctx.data_mut(|d| d.insert_temp(id, (sig, mode)));
     mode
+}
+
+/// View › 32-bit Preview Options for the GPU canvas shader: (exposure, gamma) when active.
+fn hdr_preview(app: &PhotocraftApp, doc: &photocraft_doc::Document) -> Option<[f32; 2]> {
+    app.session.color.hdr_preview(doc).map(|h| [h.exposure, h.gamma])
 }
 
 /// Draw one canvas view and handle its input. `primary` = main window (tools active).
@@ -849,6 +854,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             pixel_grid: false,
             view_key: egui::Id::new(("pc-canvas-proxy", ctx.viewport_id(), idx)).value(),
             display: sync_display_lut(app, &ctx, &doc, key),
+            hdr: hdr_preview(app, &doc),
         };
         crate::gpu_canvas::GpuCanvas::paint(&painter, rect, params);
     } else if !flip && ensure_gpu(app, idx) {
@@ -867,6 +873,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             pixel_grid,
             view_key: egui::Id::new(("pc-canvas", ctx.viewport_id(), idx)).value(),
             display: sync_display_lut(app, &ctx, &doc, doc.id.0),
+            hdr: hdr_preview(app, &doc),
         };
         crate::gpu_canvas::GpuCanvas::paint(&painter, rect, params);
     } else {
