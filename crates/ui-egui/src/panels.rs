@@ -1356,14 +1356,15 @@ fn layer_row(
     if eye_resp.clicked() {
         actions.push(("layer.setProps".into(), json!({"layer": l.id.0, "visible": !l.visible})));
     }
-    let ts = if t.pro { 24.0 } else { 34.0 };
-    // Everything but the indentation and the name, so a narrow panel squeezes the indentation first.
-    let fixed = 6.0
+    // Everything but the thumbnails, the indentation and the name, so a narrow panel squeezes
+    // the indentation first, then the thumbnails (a layer with two masks has three).
+    let others = 6.0
         + 28.0
         + if l.is_group() { crate::layer_tree_ui::TRIANGLE_W } else { 0.0 }
         + if l.clipped { 12.0 } else { 0.0 }
-        + (ts + 6.0) * if l.mask.is_some() { 2.0 } else { 1.0 }
         + crate::layer_row_ui::reserved_width(l);
+    let ts = crate::mask_thumbs_ui::thumb_size(l, if t.pro { 24.0 } else { 34.0 }, rect.width() - others);
+    let fixed = others + ts + 6.0 + crate::mask_thumbs_ui::width(l, ts);
     x += 28.0 + crate::layer_row_ui::indent(depth, rect.width(), fixed);
     let toggled = crate::layer_tree_ui::disclosure(ui, rect, &mut x, l, actions);
     if l.clipped {
@@ -1373,22 +1374,9 @@ fn layer_row(
     let thumb = Rect::from_min_size(pos2(x, rect.center().y - ts / 2.0), vec2(ts, ts));
     draw_layer_thumb(app, ctx, ui, doc, l, thumb, row.primary);
     x += ts + 6.0;
-    let mut mask_rect = None;
-    if let Some(m) = &l.mask {
-        let mr = Rect::from_min_size(pos2(x, rect.center().y - ts / 2.0), vec2(ts, ts));
-        if ui.is_rect_visible(mr) {
-            let tex = app.mask_thumb(ctx, doc, l.id, m);
-            painter.image(tex, mr, Rect::from_min_max(egui::Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
-        }
-        painter.rect_stroke(
-            mr,
-            if t.pro { 0.0 } else { 4.0 },
-            Stroke::new(1.0, if t.pro { Color32::from_gray(20) } else { t.field_border }),
-            StrokeKind::Outside,
-        );
-        mask_rect = Some(mr);
-        x += ts + 6.0;
-    }
+    // Link chains and pixel / vector mask thumbnails (#153).
+    let masks = crate::mask_thumbs_ui::paint(app, ctx, ui, &painter, doc, l, &mut x, rect.center().y, ts, actions);
+    let mask_rect = masks.thumb(crate::mask_thumbs_ui::MaskKind::Pixel);
     // Photoshop frames the targeted thumbnail (pixels or mask) of the active layer with corner brackets.
     if row.primary {
         let target = if app.ui.mask_target { mask_rect } else { Some(thumb) };
@@ -1434,15 +1422,26 @@ fn layer_row(
         (on_mask || thumb.expand(2.0).contains(p))
             .then(|| json!({"channel": if on_mask { "mask" } else { "transparency" }, "layer": l.id.0, "operation": crate::channels_panel::load_operation(m)}))
     });
+    // ⇧-click a mask thumbnail: disable / enable that mask.
+    let mask_toggle = resp.clicked().then(|| (ui.input(|i| i.modifiers), resp.interact_pointer_pos())).and_then(|(m, pos)| {
+        let kind = masks.hit(pos?)?;
+        crate::mask_thumbs_ui::click_command(l, kind, m)
+    });
     if let Some(p) = thumb_load {
         actions.push(("select.loadSelection".into(), p));
-    } else if resp.clicked() && !eye_resp.clicked() && !toggled && !fx_toggled {
+    } else if let Some(cmd) = mask_toggle {
+        actions.push(cmd);
+    } else if resp.clicked() && !eye_resp.clicked() && !toggled && !fx_toggled && !masks.clicked {
         let mode = select_mode(ui.input(|i| i.modifiers));
         actions.push(("layer.select".into(), json!({"layer": l.id.0, "mode": mode})));
         // Clicking a thumbnail picks what painting targets; adjustment/fill layers target their mask.
         let pos = resp.interact_pointer_pos();
         let on_mask = mask_rect.zip(pos).is_some_and(|(r, p)| r.expand(2.0).contains(p));
         let on_thumb = pos.is_some_and(|p| thumb.expand(2.0).contains(p));
+        // The vector mask thumbnail picks the layer's path in the Paths panel.
+        if pos.and_then(|p| masks.hit(p)) == Some(crate::mask_thumbs_ui::MaskKind::Vector) {
+            app.ui.selected_path = Some("layer".into());
+        }
         let content_less = matches!(l.content, LayerContent::Adjustment(_) | LayerContent::Fill(_));
         if on_mask || (content_less && l.mask.is_some()) {
             actions.push(("ui.maskTarget".into(), json!(true)));

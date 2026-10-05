@@ -3681,6 +3681,7 @@ dependencies = [
  "photocraft-plugins",
  "photocraft-raster",
  "photocraft-text",
+ "photocraft-vector",
  "rayon",
  "serde",
  "serde_json",

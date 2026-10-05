@@ -25,7 +25,7 @@ const ICON_W: f32 = 14.0;
 /// Width of the effects triangle beside the fx badge.
 const TRIANGLE_W: f32 = 10.0;
 /// The blend-mode label is shown only while the name keeps at least this much room.
-const MIN_NAME_W: f32 = 64.0;
+pub const MIN_NAME_W: f32 = 64.0;
 
 /// A right-hand row indicator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

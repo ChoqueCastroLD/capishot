@@ -540,6 +540,8 @@ pub fn shape_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: photocra
 
 fn thumb(ui: &egui::Ui, r: Rect, path: &Path, doc: &Document) {
     let t = Tokens::get(ui.ctx());
+    // At the document's aspect ratio, like the Channels thumbnails.
+    let r = crate::channels_panel::fit_thumb(r, doc.size.width, doc.size.height).0;
     ui.painter().rect_filled(r, 0.0, Color32::from_gray(if t.pro { 222 } else { 240 }));
     let (w, h) = (doc.size.width.max(1) as f64, doc.size.height.max(1) as f64);
     let s = (r.width() as f64 / w).min(r.height() as f64 / h);
@@ -554,6 +556,55 @@ fn thumb(ui: &egui::Ui, r: Rect, path: &Path, doc: &Document) {
     }
 }
 
+/// What a Paths panel row is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathRow {
+    Saved,
+    Work,
+    /// The selected layer's shape path or vector mask (temporary, italic).
+    Layer,
+}
+
+/// A Paths panel row.
+#[derive(Clone, Debug)]
+pub struct PathEntry {
+    pub name: String,
+    pub path: Path,
+    pub kind: PathRow,
+}
+
+/// The Paths panel's rows, top to bottom: saved paths, the work path, then the selected layer's
+/// shape path ("<Layer> Shape Path") or vector mask ("<Layer> Vector Mask"), like Photoshop.
+pub fn path_rows(doc: &Document, active: Option<photocraft_doc::LayerId>) -> Vec<PathEntry> {
+    let mut rows: Vec<_> = doc.paths.iter().map(|p| PathEntry { name: p.name.clone(), path: p.path.clone(), kind: PathRow::Saved }).collect();
+    if let Some(wp) = &doc.work_path {
+        rows.push(PathEntry { name: "Work Path".into(), path: wp.clone(), kind: PathRow::Work });
+    }
+    if let Some(l) = active.and_then(|id| doc.layer(id)) {
+        let layer_path = match &l.content {
+            LayerContent::Shape(sh) => Some((format!("{} Shape Path", l.name), sh.path.clone())),
+            _ => l.vector_mask.as_ref().map(|v| (format!("{} Vector Mask", l.name), v.path.clone())),
+        };
+        if let Some((name, path)) = layer_path {
+            rows.push(PathEntry { name, path, kind: PathRow::Layer });
+        }
+    }
+    rows
+}
+
+fn footer_id() -> egui::Id {
+    egui::Id::new("paths-footer")
+}
+
+fn ctx_data_footer(ctx: &egui::Context, r: Rect) {
+    ctx.data_mut(|d| d.insert_temp(footer_id(), r));
+}
+
+/// Where the Paths panel's button footer was drawn last frame.
+pub fn paths_footer(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|d| d.get_temp(footer_id()))
+}
+
 pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(st) = app.session.active() else {
@@ -561,51 +612,79 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         return;
     };
     let doc = st.doc.clone();
-    let mut rows: Vec<(String, Path, bool)> = doc.paths.iter().map(|p| (p.name.clone(), p.path.clone(), false)).collect();
-    if let Some(wp) = &doc.work_path {
-        rows.push(("Work Path".into(), wp.clone(), true));
-    }
-    if rows.is_empty() {
-        ui.label(egui::RichText::new("Draw with the Pen tool (P) or make a work path from a selection.").color(t.text_faint).size(11.5));
-    }
+    let rows = path_rows(&doc, st.active_layer);
+    let has_layer_path = rows.iter().any(|r| r.kind == PathRow::Layer);
     let mut action: Option<(&str, Value)> = None;
-    for (name, path, work) in &rows {
-        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
-        let key = if *work { "work".to_string() } else { name.clone() };
-        let sel = app.ui.selected_path.as_deref() == Some(key.as_str());
-        if sel {
-            ui.painter().rect_filled(r, 0.0, t.row_selected);
-        } else if resp.hovered() {
-            ui.painter().rect_filled(r, 0.0, t.hover.gamma_multiply(0.5));
-        }
-        thumb(ui, Rect::from_min_size(pos2(r.left() + 8.0, r.top() + 4.0), vec2(28.0, 28.0)), path, &doc);
-        let mut job = egui::text::LayoutJob::default();
-        job.append(name, 0.0, egui::TextFormat { font_id: egui::FontId::proportional(12.0), color: t.text, italics: *work, ..Default::default() });
-        let g = ui.painter().layout_job(job);
-        ui.painter().galley(pos2(r.left() + 46.0, r.center().y - g.size().y / 2.0), g, t.text);
-        if resp.clicked() {
-            app.ui.selected_path = Some(key.clone());
-        }
-        // Double-clicking the Work Path saves it (Photoshop's "Save Path").
-        if resp.double_clicked() && *work {
-            let n = doc.paths.len() + 1;
-            action = Some(("path.rename", json!({"name": "work", "to": format!("Path {n}")})));
-        }
-        ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.separator));
-    }
+    // The buttons sit in a footer at the panel's bottom, like Photoshop's.
+    let footer = 34.0;
+    let fill = ui.available_height() > footer + 60.0;
+    let rows_h = if fill { ui.available_height() - footer } else { f32::INFINITY };
+    egui::ScrollArea::vertical().id_salt("path-rows").max_height(rows_h).min_scrolled_height(if fill { rows_h } else { 0.0 }).auto_shrink([false, !fill]).show(
+        ui,
+        |ui| {
+            if rows.is_empty() {
+                ui.label(egui::RichText::new("Draw with the Pen tool (P) or make a work path from a selection.").color(t.text_faint).size(11.5));
+            }
+            for PathEntry { name, path, kind } in &rows {
+                let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
+                let key = match kind {
+                    PathRow::Work => "work".to_string(),
+                    PathRow::Layer => "layer".to_string(),
+                    PathRow::Saved => name.clone(),
+                };
+                // Rows are painted: name them for screen readers and UI tests.
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::SelectableLabel, true, name));
+                let sel = app.ui.selected_path.as_deref() == Some(key.as_str());
+                if sel {
+                    ui.painter().rect_filled(r, 0.0, t.row_selected);
+                } else if resp.hovered() {
+                    ui.painter().rect_filled(r, 0.0, t.hover.gamma_multiply(0.5));
+                }
+                thumb(ui, Rect::from_min_size(pos2(r.left() + 8.0, r.top() + 4.0), vec2(28.0, 28.0)), path, &doc);
+                let mut job = egui::text::LayoutJob::default();
+                // Temporary paths (the work path, the selected layer's shape path or vector mask) are italic.
+                let italics = *kind != PathRow::Saved;
+                job.append(name, 0.0, egui::TextFormat { font_id: egui::FontId::proportional(12.0), color: t.text, italics, ..Default::default() });
+                let g = ui.painter().layout_job(job);
+                ui.painter().galley(pos2(r.left() + 46.0, r.center().y - g.size().y / 2.0), g, t.text);
+                if resp.clicked() {
+                    app.ui.selected_path = Some(key.clone());
+                }
+                // Double-clicking the Work Path saves it (Photoshop's "Save Path").
+                if resp.double_clicked() && *kind == PathRow::Work {
+                    let n = doc.paths.len() + 1;
+                    action = Some(("path.rename", json!({"name": "work", "to": format!("Path {n}")})));
+                }
+                ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.separator));
+            }
+        },
+    );
     ui.add_space(4.0);
-    let sel = app.ui.selected_path.clone().unwrap_or_else(|| "work".into());
-    ui.horizontal(|ui| {
+    crate::widgets::hairline(ui);
+    ui.add_space(2.0);
+    let sel = app.ui.selected_path.clone().filter(|s| s != "layer" || has_layer_path).unwrap_or_else(|| "work".into());
+    let footer_rect = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         let fg = hex(app.session.tools.foreground);
-        let items: [(&str, &str, &str, Value); 6] = [
+        let mut n = doc.paths.len() + 1;
+        while doc.paths.iter().any(|p| p.name == format!("Path {n}")) {
+            n += 1;
+        }
+        let items: [(&str, &str, &str, Value); 7] = [
             ("paint-bucket", "Fill path with foreground color", "path.fill", json!({"name": sel, "color": fg})),
             ("circle", "Stroke path with brush", "path.stroke", json!({"name": sel, "tool": "brush"})),
             ("square-dashed", "Load path as a selection", "path.toSelection", json!({"name": sel})),
             ("spline", "Make work path from selection", "select.toWorkPath", json!({"tolerance": 2.0})),
             ("square", "Add vector mask", "layer.vectorMask.fromPath", json!({"name": sel})),
+            ("square-plus", "Create new path", "path.set", json!({"name": format!("Path {n}"), "path": {"subpaths": []}})),
             ("trash", "Delete path", "path.delete", json!({"name": sel})),
         ];
+        // The layer's own path: deleting it deletes the vector mask (a shape keeps its path).
+        let shape = rows.iter().any(|r| r.kind == PathRow::Layer && r.name.ends_with(" Shape Path"));
+        let delete_layer_path = sel == "layer" && !shape;
+        let items = items.map(|(icon, tip, cmd, p)| {
+            if cmd == "path.delete" && delete_layer_path { (icon, "Delete vector mask", "layer.vectorMask.delete", json!({})) } else { (icon, tip, cmd, p) }
+        });
         for (icon, tip, cmd, p) in items {
             let icon = if crate::icons::exists(icon) { icon } else { "square" };
             if crate::icons::button(ui, icon, 24.0, false, tip).clicked() {
@@ -613,6 +692,7 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         }
     });
+    ctx_data_footer(ui.ctx(), footer_rect.response.rect);
     if let Some((cmd, p)) = action
         && let Err(e) = app.run(cmd, p)
     {

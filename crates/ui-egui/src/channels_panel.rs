@@ -17,6 +17,8 @@ enum Row {
     Color(usize),
     Alpha(usize),
     QuickMask,
+    /// The selected layer's mask: a temporary channel, listed while the layer is selected.
+    LayerMask,
 }
 
 impl Row {
@@ -27,6 +29,7 @@ impl Row {
             Row::Color(k) => json!({ "color": k }),
             Row::Alpha(i) => json!(i),
             Row::QuickMask => json!("quickMask"),
+            Row::LayerMask => json!("mask"),
         }
     }
 }
@@ -50,16 +53,24 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     };
     let doc = st.doc.clone();
     let view = st.channel_view.clone();
+    let active_layer = st.active_layer;
     let mode = doc.pixel_format().mode;
     let colors = mode.color_channels();
     let quick = doc.quick_mask.is_some();
     let ctx = ui.ctx().clone();
     let thumbs = app.channel_thumbs(&ctx);
+    // The active layer's mask (Photoshop lists it, in italics, below the colour channels).
+    let masked = active_layer.and_then(|id| doc.layer(id)).filter(|l| l.mask.is_some()).cloned();
+    let mask_tex = masked.as_ref().and_then(|l| Some(app.mask_thumb(&ctx, &doc, l.id, l.mask.as_ref()?)));
+    let mask_targeted = masked.is_some() && app.ui.mask_target && view.target == ChannelTarget::Composite && !quick;
     // Multichannel images are their ink channels only (no composite or colour rows).
     let multichannel = doc.mode == photocraft_doc::ColorMode::Multichannel;
     let mut rows = if multichannel { Vec::new() } else { vec![Row::Composite] };
     if colors > 1 && !multichannel {
         rows.extend((0..colors).map(Row::Color));
+    }
+    if masked.is_some() {
+        rows.push(Row::LayerMask);
     }
     rows.extend((0..doc.channels.len()).map(Row::Alpha));
     if quick {
@@ -67,8 +78,13 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     let shown_colors = if colors > 1 { colors } else { 0 };
     let mut actions: Vec<(String, Value)> = Vec::new();
+    // The buttons sit in a footer at the panel's bottom, like Photoshop's.
     let footer = 34.0;
-    egui::ScrollArea::vertical().max_height((ui.available_height() - footer).max(60.0)).auto_shrink([false, true]).show(ui, |ui| {
+    let fill = ui.available_height() > footer + 60.0;
+    let rows_h = if fill { ui.available_height() - footer } else { f32::INFINITY };
+    let mut mask_click = None;
+    let mut drawn = Vec::new();
+    egui::ScrollArea::vertical().max_height(rows_h).min_scrolled_height(if fill { rows_h } else { 0.0 }).auto_shrink([false, !fill]).show(ui, |ui| {
         for row in rows {
             let (name, thumb_idx, slot, visible, selected) = match row {
                 Row::Composite => (
@@ -76,14 +92,14 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     0,
                     Some(2),
                     view.visible_colors(colors) == colors,
-                    view.target == ChannelTarget::Composite && !quick,
+                    view.target == ChannelTarget::Composite && !quick && !mask_targeted,
                 ),
                 Row::Color(k) => (
                     channel_cmds::color_names(mode)[k].to_string(),
                     1 + k,
                     Some(3 + k),
                     view.color_visible(k),
-                    (view.target == ChannelTarget::Composite && !quick) || view.target == ChannelTarget::Color(k),
+                    (view.target == ChannelTarget::Composite && !quick && !mask_targeted) || view.target == ChannelTarget::Color(k),
                 ),
                 Row::Alpha(i) => (
                     doc.channels[i].name.clone(),
@@ -95,6 +111,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 Row::QuickMask => {
                     ("Quick Mask".to_string(), 1 + shown_colors + doc.channels.len(), None, !view.quick_mask_hidden, view.target == ChannelTarget::Composite)
                 }
+                Row::LayerMask => (masked.as_ref().map(|l| format!("{} Mask", l.name)).unwrap_or_default(), usize::MAX, None, false, mask_targeted),
             };
             let row_h = if t.pro { 36.0 } else { 40.0 };
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
@@ -110,15 +127,24 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
             let eye = Rect::from_min_size(pos2(rect.left() + 6.0, rect.center().y - 11.0), vec2(22.0, 22.0));
             let eye_resp = ui.interact(eye, ui.id().with(("chan-eye", format!("{:?}", row.reference()))), Sense::click());
-            icons::paint(ui, eye, if visible { "eye" } else { "eye-off" }, 14.0, if visible { t.icon } else { t.text_faint });
-            if eye_resp.clicked() {
+            // The layer mask's eye slot stays empty: its overlay view isn't supported yet.
+            if row != Row::LayerMask {
+                icons::paint(ui, eye, if visible { "eye" } else { "eye-off" }, 14.0, if visible { t.icon } else { t.text_faint });
+            }
+            if eye_resp.clicked() && row != Row::LayerMask {
                 actions.push(("channel.setVisible".into(), json!({ "channel": row.reference(), "visible": !visible })));
             }
             let ts = if t.pro { 28.0 } else { 30.0 };
-            let thumb = Rect::from_min_size(pos2(rect.left() + 36.0, rect.center().y - ts / 2.0), vec2(ts, ts));
-            if let Some(tex) = thumbs.get(thumb_idx) {
-                painter.image(*tex, thumb, Rect::from_min_max(egui::Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+            let cell = Rect::from_min_size(pos2(rect.left() + 36.0, rect.center().y - ts / 2.0), vec2(ts, ts));
+            // Thumbnails keep the document's aspect ratio (the textures are letterboxed squares).
+            let (thumb, uv) = fit_thumb(cell, doc.size.width, doc.size.height);
+            let tex = if row == Row::LayerMask { mask_tex } else { thumbs.get(thumb_idx).copied() };
+            if let Some(tex) = tex {
+                painter.image(tex, thumb, uv, Color32::WHITE);
             }
+            drawn.push((name.clone(), thumb));
+            // Rows are painted: name them for screen readers and UI tests.
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &name));
             // Spot channels: a swatch of the ink on the thumbnail corner.
             if let Row::Alpha(i) = row
                 && let Some((ink, _)) = doc.channels[i].spot
@@ -127,12 +153,12 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 painter.rect_filled(Rect::from_min_size(thumb.right_bottom() - vec2(9.0, 9.0), vec2(9.0, 9.0)), 0.0, Color32::from_rgb(c[0], c[1], c[2]));
             }
             painter.rect_stroke(thumb, 0.0, Stroke::new(1.0, if t.pro { Color32::from_gray(20) } else { t.field_border }), StrokeKind::Outside);
-            let italic = row == Row::QuickMask || matches!(row, Row::Alpha(i) if doc.channels[i].spot.is_some());
+            let italic = matches!(row, Row::QuickMask | Row::LayerMask) || matches!(row, Row::Alpha(i) if doc.channels[i].spot.is_some());
             let mut job = egui::text::LayoutJob::default();
             let font = if selected && !t.pro { theme::medium(12.5) } else { egui::FontId::proportional(12.0) };
             job.append(&name, 0.0, egui::TextFormat { font_id: font, color: t.text, italics: italic, ..Default::default() });
             let galley = painter.layout_job(job);
-            let text_pos = pos2(thumb.right() + 10.0, rect.center().y - galley.size().y / 2.0);
+            let text_pos = pos2(cell.right() + 10.0, rect.center().y - galley.size().y / 2.0);
             painter.galley(text_pos, galley, t.text);
             if let Some(slot) = slot {
                 painter.text(
@@ -146,9 +172,19 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let rename_id = egui::Id::new(("chan-rename", doc.id.0, format!("{:?}", row.reference())));
             if resp.clicked() && !eye_resp.clicked() {
                 let m = ui.input(|i| i.modifiers);
-                if m.command {
+                if m.command && row == Row::LayerMask {
+                    let layer = masked.as_ref().map(|l| l.id.0);
+                    actions.push(("select.loadSelection".into(), json!({ "channel": "mask", "layer": layer, "operation": load_operation(m) })));
+                } else if m.command {
                     actions.push(("select.loadSelection".into(), json!({ "channel": row.reference(), "operation": load_operation(m) })));
+                } else if row == Row::LayerMask {
+                    // Targets the mask, as clicking its thumbnail in the Layers panel does.
+                    mask_click = Some(true);
+                    actions.push(("channel.target".into(), json!({ "channel": "composite" })));
                 } else {
+                    if matches!(row, Row::Composite | Row::Color(_)) {
+                        mask_click = Some(false);
+                    }
                     let target = if row == Row::QuickMask { json!("composite") } else { row.reference() };
                     actions.push(("channel.target".into(), json!({ "channel": target })));
                 }
@@ -200,6 +236,11 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     Row::Composite | Row::Color(_) => {
                         item(ui, a, "Duplicate Channel", "channel.duplicate", json!({ "channel": row.reference() }));
                     }
+                    Row::LayerMask => {
+                        let enabled = masked.as_ref().and_then(|l| l.mask.as_ref()).is_none_or(|m| m.enabled);
+                        item(ui, a, if enabled { "Disable Layer Mask" } else { "Enable Layer Mask" }, "layer.layerMask.enabled", json!({}));
+                        item(ui, a, "Delete Layer Mask", "layer.layerMask.delete", json!({}));
+                    }
                 }
                 ui.separator();
                 item(ui, a, "New Channel…", "channel.new", json!({}));
@@ -235,6 +276,10 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         });
     });
+    ctx.data_mut(|d| d.insert_temp(thumbs_id(), drawn));
+    if let Some(on) = mask_click {
+        app.ui.mask_target = on;
+    }
     for (id, p) in actions {
         if id == "ui.renameChannel" {
             if let Some(i) = p.as_u64().and_then(|i| doc.channels.get(i as usize)) {
@@ -245,6 +290,25 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
         let _ = app.run(&id, p);
     }
+}
+
+fn thumbs_id() -> egui::Id {
+    egui::Id::new("channel-thumb-rects")
+}
+
+/// The Channels rows drawn last frame: (name, thumbnail rect).
+pub fn recorded(ctx: &egui::Context) -> Vec<(String, Rect)> {
+    ctx.data(|d| d.get_temp(thumbs_id())).unwrap_or_default()
+}
+
+/// The part of a square `cell` a `w`×`h` document fills, and the matching UVs of a square,
+/// letterboxed thumbnail texture: thumbnails keep the document's aspect ratio.
+pub fn fit_thumb(cell: Rect, w: u32, h: u32) -> (Rect, Rect) {
+    let (w, h) = (w.max(1) as f32, h.max(1) as f32);
+    let (fw, fh) = (w / w.max(h), h / w.max(h));
+    let size = vec2(cell.width() * fw, cell.height() * fh).max(vec2(1.0, 1.0));
+    let uv = Rect::from_center_size(pos2(0.5, 0.5), vec2(fw, fh));
+    (Rect::from_center_size(cell.center(), size), uv)
 }
 
 fn item(ui: &mut egui::Ui, actions: &mut Vec<(String, Value)>, label: &str, cmd: &str, p: Value) {

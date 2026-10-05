@@ -52,6 +52,7 @@ pub mod layer_style;
 pub mod layer_tree_ui;
 pub mod links;
 pub mod liquify_ui;
+pub mod mask_thumbs_ui;
 pub mod menu_catalog;
 pub mod menu_nav;
 pub mod menus;
@@ -226,7 +227,7 @@ pub struct PhotocraftApp {
     pub last_canvas_rect: egui::Rect,
     pub fps: f32,
     last_frame_time: f64,
-    thumbs: HashMap<(photocraft_doc::LayerId, bool), (u64, egui::TextureHandle)>,
+    thumbs: HashMap<(photocraft_doc::LayerId, u8), (u64, egui::TextureHandle)>,
     /// Snapshots whose live layer/mask keys were last used to prune thumbnail handles.
     thumb_documents: Vec<(DocId, std::sync::Weak<Document>)>,
     /// Content bounds cached per (key, revision): scanning a 36 MP layer every frame cost ~77 ms.
@@ -807,9 +808,12 @@ impl PhotocraftApp {
             let mut live = std::collections::HashSet::new();
             let mut pending: Vec<_> = documents.iter().flat_map(|st| &st.doc.layers).collect();
             while let Some(layer) = pending.pop() {
-                live.insert((layer.id, false));
+                live.insert((layer.id, mask_thumbs_ui::THUMB_LAYER));
                 if layer.mask.is_some() {
-                    live.insert((layer.id, true));
+                    live.insert((layer.id, mask_thumbs_ui::THUMB_MASK));
+                }
+                if layer.vector_mask.is_some() {
+                    live.insert((layer.id, mask_thumbs_ui::THUMB_VECTOR));
                 }
                 if let Some(children) = layer.children() {
                     pending.extend(children);
@@ -833,7 +837,7 @@ impl PhotocraftApp {
         // Key by content, not document revision: COW tiles change pointer only when their pixels
         // change, so unrelated edits (e.g. painting another layer) don't rebuild this thumbnail.
         let rev = layer.surface().map_or(0, surface_fingerprint) ^ (doc.size.width as u64) << 40;
-        let key = (layer.id, false);
+        let key = (layer.id, mask_thumbs_ui::THUMB_LAYER);
         if let Some((r, tex)) = self.thumbs.get(&key)
             && *r == rev
         {
@@ -851,7 +855,7 @@ impl PhotocraftApp {
 
     pub fn mask_thumb(&mut self, ctx: &egui::Context, doc: &Document, id: photocraft_doc::LayerId, mask: &photocraft_doc::LayerMask) -> egui::TextureId {
         let rev = surface_fingerprint(&mask.surface) ^ (doc.size.width as u64) << 40;
-        let key = (id, true);
+        let key = (id, mask_thumbs_ui::THUMB_MASK);
         if let Some((r, tex)) = self.thumbs.get(&key)
             && *r == rev
         {
@@ -865,7 +869,7 @@ impl PhotocraftApp {
         self.store_thumb(ctx, key, rev, img)
     }
 
-    fn store_thumb(&mut self, ctx: &egui::Context, key: (photocraft_doc::LayerId, bool), rev: u64, img: egui::ColorImage) -> egui::TextureId {
+    fn store_thumb(&mut self, ctx: &egui::Context, key: (photocraft_doc::LayerId, u8), rev: u64, img: egui::ColorImage) -> egui::TextureId {
         match self.thumbs.get_mut(&key) {
             Some((r, tex)) => {
                 tex.set(img, egui::TextureOptions::LINEAR);
