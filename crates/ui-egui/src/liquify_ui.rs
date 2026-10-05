@@ -169,12 +169,14 @@ impl LiquifyDialog {
         let d = self.field.apply_stroke(&s);
         self.strokes.push(s);
         self.mark(d, true);
+        self.render_dirty();
     }
 
     fn rebuild(&mut self) {
         self.field = LiquifyField::from_strokes(self.canvas, self.cell, &self.strokes);
         self.dirty = Some([0, 0, self.proxy.w, self.proxy.h]);
         self.mask_dirty = true;
+        self.render_dirty();
     }
 
     fn undo(&mut self) {
@@ -752,6 +754,34 @@ mod tests {
         control(&mut app, &json!({"commit": true})).unwrap();
         assert!(app.distort.liquify.is_none());
         assert_eq!(app.session.active().unwrap().history.past_len(), before + 1);
+    }
+
+    #[test]
+    fn undo_rerenders_the_proxy_before_the_next_texture_upload() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_layer();
+        open(&mut app, &ctx).unwrap();
+        control(&mut app, &json!({"tool": "forwardWarp", "size": 40})).unwrap();
+        for ev in [
+            ToolEvent::Down { x: 35.0, y: 40.0, pressure: 1.0 },
+            ToolEvent::Move { x: 55.0, y: 40.0, pressure: 1.0 },
+            ToolEvent::Up { x: 55.0, y: 40.0 },
+            ToolEvent::Down { x: 70.0, y: 40.0, pressure: 1.0 },
+            ToolEvent::Move { x: 90.0, y: 40.0, pressure: 1.0 },
+            ToolEvent::Up { x: 90.0, y: 40.0 },
+        ] {
+            pointer(&mut app, ev, egui::Modifiers::NONE);
+        }
+
+        let before = app.distort.liquify.as_ref().unwrap().out.clone();
+        control(&mut app, &json!({"undo": true})).unwrap();
+        let d = app.distort.liquify.as_ref().unwrap();
+        assert_eq!(d.strokes.len(), 1);
+        assert_ne!(d.out, before, "undo must update the pixels shown by the existing texture");
+
+        let mut expected = vec![[0u8; 4]; d.proxy.w * d.proxy.h];
+        d.proxy.render(&d.field, [0, 0, d.proxy.w, d.proxy.h], &mut expected);
+        assert_eq!(d.out, expected, "dirty upload source must match the rebuilt field");
     }
 
     #[test]
