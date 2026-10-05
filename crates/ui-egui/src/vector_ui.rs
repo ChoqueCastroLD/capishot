@@ -445,42 +445,43 @@ pub fn shape_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: photocra
     let t = Tokens::get(ui.ctx());
     let mut edit: Option<Value> = None;
     let key = |k: &str| format!("shape-{}-{k}", id.0);
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new("Appearance").font(crate::theme::semibold(12.0)).color(t.text));
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Fill").color(t.text_dim).size(12.0));
-        if let Some(c) = swatch(ui, sh.fill.as_ref(), "Set shape fill type") {
-            edit = Some(if c == "none" { json!({"fill": null}) } else { json!({"fill": c, "coalesce": key("fill")}) });
-        }
-        ui.add_space(12.0);
-        ui.label(egui::RichText::new("Stroke").color(t.text_dim).size(12.0));
-        if let Some(c) = swatch(ui, sh.stroke.as_ref().map(|s| &s.paint), "Set shape stroke type") {
-            edit = Some(if c == "none" {
-                json!({"stroke": null})
-            } else {
-                json!({"stroke": {"color": c, "width": sh.stroke.as_ref().map_or(3.0, |s| s.width)}, "coalesce": key("stroke")})
-            });
-        }
-        let mut w = sh.stroke.as_ref().map_or(0.0, |s| s.width);
-        if crate::widgets::value_field(ui, &mut w, 0.0..=288.0, "px", 60.0).changed() {
-            edit = Some(if w <= 0.0 { json!({"stroke": null}) } else { json!({"stroke": {"width": w}, "coalesce": key("stroke-w")}) });
-        }
-        if sh.stroke.is_some() {
-            let mut align = match sh.stroke.as_ref().map(|s| s.align) {
-                Some(photocraft_doc::vector::StrokeAlign::Inside) => "inside",
-                Some(photocraft_doc::vector::StrokeAlign::Outside) => "outside",
-                _ => "center",
+    // The shared collapsible section headers (#155).
+    if crate::props_layout::section(ui, "appearance", "Appearance") {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Fill").color(t.text_dim).size(12.0));
+            if let Some(c) = swatch(ui, sh.fill.as_ref(), "Set shape fill type") {
+                edit = Some(if c == "none" { json!({"fill": null}) } else { json!({"fill": c, "coalesce": key("fill")}) });
             }
-            .to_string();
-            let opts = [("inside".to_string(), "Inside"), ("center".to_string(), "Center"), ("outside".to_string(), "Outside")];
-            if crate::widgets::dropdown(ui, &key("align"), &mut align, &opts, 84.0) {
-                edit = Some(json!({"stroke": {"align": align}}));
+            ui.add_space(12.0);
+            ui.label(egui::RichText::new("Stroke").color(t.text_dim).size(12.0));
+            if let Some(c) = swatch(ui, sh.stroke.as_ref().map(|s| &s.paint), "Set shape stroke type") {
+                edit = Some(if c == "none" {
+                    json!({"stroke": null})
+                } else {
+                    json!({"stroke": {"color": c, "width": sh.stroke.as_ref().map_or(3.0, |s| s.width)}, "coalesce": key("stroke")})
+                });
             }
-        }
-    });
-    if let Some(live) = &sh.live {
-        ui.add_space(6.0);
-        ui.label(egui::RichText::new("Shape").font(crate::theme::semibold(12.0)).color(t.text));
+            let mut w = sh.stroke.as_ref().map_or(0.0, |s| s.width);
+            if crate::widgets::value_field(ui, &mut w, 0.0..=288.0, "px", 60.0).changed() {
+                edit = Some(if w <= 0.0 { json!({"stroke": null}) } else { json!({"stroke": {"width": w}, "coalesce": key("stroke-w")}) });
+            }
+            if sh.stroke.is_some() {
+                let mut align = match sh.stroke.as_ref().map(|s| s.align) {
+                    Some(photocraft_doc::vector::StrokeAlign::Inside) => "inside",
+                    Some(photocraft_doc::vector::StrokeAlign::Outside) => "outside",
+                    _ => "center",
+                }
+                .to_string();
+                let opts = [("inside".to_string(), "Inside"), ("center".to_string(), "Center"), ("outside".to_string(), "Outside")];
+                if crate::widgets::dropdown(ui, &key("align"), &mut align, &opts, 84.0) {
+                    edit = Some(json!({"stroke": {"align": align}}));
+                }
+            }
+        });
+    }
+    if let Some(live) = &sh.live
+        && crate::props_layout::section(ui, "liveShape", "Shape")
+    {
         let num = |ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::RangeInclusive<f32>, unit: &str| -> bool {
             ui.label(egui::RichText::new(label).color(t.text_dim).size(12.0));
             crate::widgets::value_field(ui, v, range, unit, 64.0).changed()

@@ -1116,6 +1116,8 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        // Docks zero the item spacing: keep the Opacity and Fill fields apart (#155).
+        ui.add_space((theme::ROW_GAP - ui.spacing().item_spacing.y).max(0.0));
         ui.horizontal(|ui| {
             label(ui, if t.pro { "Lock:" } else { "Lock" });
             if t.pro {
@@ -1766,37 +1768,23 @@ fn properties_body(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     let Some(id) = st.active_layer else { return };
     let Some(layer) = st.doc.layer(id).cloned() else { return };
-    ui.horizontal(|ui| {
-        let icon = match &layer.content {
-            LayerContent::Adjustment(_) => "sliders-horizontal",
-            LayerContent::Group(_) => "folder",
-            LayerContent::Fill(_) => "paint-bucket",
-            LayerContent::Text(_) => "type",
-            LayerContent::Shape(_) => "pentagon",
-            _ => "image",
-        };
-        let (r, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
-        icons::paint(ui, r, icon, 15.0, t.icon);
-        let kind = match &layer.content {
-            LayerContent::Adjustment(a) => a.label().to_string(),
-            LayerContent::Group(g) if g.artboard.is_some() => "Artboard".to_string(),
-            other => format!("{} Layer", other.kind_name()),
-        };
-        ui.label(RichText::new(kind).color(t.text));
-    });
-    ui.add_space(4.0);
-    widgets::hairline(ui);
-    ui.add_space(6.0);
+    // Header: kind icon, layer name and kind (#155); sections below draw their own separators.
+    crate::props_layout::header(ui, &layer);
+    let is_adjustment = matches!(layer.content, LayerContent::Adjustment(_));
+    if is_adjustment || layer.artboard().is_some() || !t.pro {
+        ui.add_space(4.0);
+        widgets::hairline(ui);
+        ui.add_space(6.0);
+    }
     if let LayerContent::Adjustment(adj) = &layer.content {
         adjustment_controls(app, ui, id, adj);
     } else if layer.artboard().is_some() {
         crate::artboard_ui::properties(app, ui, &layer);
+    } else if t.pro {
+        // Transform, Align, the kind's sections and Quick Actions.
+        crate::layer_props_ui::properties(app, ui, &layer);
     } else {
-        if t.pro {
-            crate::layer_props_ui::properties(app, ui, &layer);
-        } else {
-            layer_controls(app, ui, &layer);
-        }
+        layer_controls(app, ui, &layer);
         if matches!(layer.content, LayerContent::Text(_)) {
             crate::type_tool::type_properties(app, ui);
         }

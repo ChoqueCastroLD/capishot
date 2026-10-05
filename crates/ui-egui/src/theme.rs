@@ -375,6 +375,10 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
     });
 }
 
+/// Vertical gap between stacked control rows in panels (Properties fields, the Layers panel's
+/// Opacity and Fill rows); docks zero egui's item spacing, so rows add this themselves.
+pub const ROW_GAP: f32 = 4.0;
+
 pub fn canvas_bg(t: &Tokens) -> Color32 {
     t.canvas
 }

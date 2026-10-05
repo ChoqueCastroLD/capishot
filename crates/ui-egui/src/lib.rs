@@ -69,6 +69,7 @@ pub mod plugin_ui;
 pub mod prefs_ui;
 pub mod preset_files_ui;
 pub mod preset_panels;
+pub mod props_layout;
 pub mod proxy;
 pub mod puppet_ui;
 pub mod retouch_ui;

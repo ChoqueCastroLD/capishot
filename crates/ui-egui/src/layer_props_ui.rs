@@ -1,12 +1,13 @@
 //! Properties panel for pixel (and other bounded) layers, Photoshop 2026 style: a Transform section
-//! (W/H/X/Y of the layer content, editable), Align and Distribute, and Quick Actions. Edits dispatch
+//! (W/H/X/Y of the layer content, editable), Align and Distribute, the kind's sections and Quick Actions. Edits dispatch
 //! `edit.transform`, `layer.translate`, `layer.align.*` and selection commands.
 
 use egui::{Rect, Sense, Stroke, pos2, vec2};
-use photocraft_doc::Layer;
+use photocraft_doc::{Layer, LayerContent};
 use serde_json::{Value, json};
 
-use crate::theme::Tokens;
+use crate::props_layout::{LABEL_GAP, LABEL_W, quick_actions_ui, section};
+use crate::theme::{ROW_GAP, Tokens};
 use crate::{PhotocraftApp, widgets};
 
 /// `edit.transform` params that scale the content box `b` = [x0, y0, x1, y1] to `w` x `h`, keeping
@@ -32,34 +33,14 @@ pub fn transform_params(layer: u64, b: [i32; 4], w: Option<f32>, h: Option<f32>,
     Some(json!({"layer": layer, "rect": b, "quad": quad}))
 }
 
-fn section(ui: &mut egui::Ui, id: &str, title: &str) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let key = egui::Id::new(("layer-props-section", id));
-    let mut open = ui.data(|d| d.get_temp::<bool>(key)).unwrap_or(true);
-    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
-    crate::icons::paint(
-        ui,
-        Rect::from_center_size(pos2(r.left() + 7.0, r.center().y), vec2(12.0, 12.0)),
-        if open { "chevron-down" } else { "chevron-right" },
-        11.0,
-        t.text_dim,
-    );
-    ui.painter().text(pos2(r.left() + 18.0, r.center().y), egui::Align2::LEFT_CENTER, title, crate::theme::semibold(12.0), t.text);
-    if resp.clicked() {
-        open = !open;
-        ui.data_mut(|d| d.insert_temp(key, open));
-    }
-    open
-}
-
 /// A number field that reports a value once committed (drag released, Enter, focus lost).
-fn field(ui: &mut egui::Ui, id: &str, label: &str, current: f32) -> Option<f32> {
+fn field(ui: &mut egui::Ui, id: &str, label: &str, current: f32, width: f32) -> Option<f32> {
     let t = Tokens::get(ui.ctx());
-    let (r, _) = ui.allocate_exact_size(vec2(16.0, 22.0), Sense::hover());
+    let (r, _) = ui.allocate_exact_size(vec2(LABEL_W, 22.0), Sense::hover());
     ui.painter().text(pos2(r.right() - 2.0, r.center().y), egui::Align2::RIGHT_CENTER, label, egui::FontId::proportional(12.0), t.text_dim);
     let key = egui::Id::new(("layer-props-field", id));
     let mut v = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(current);
-    let resp = widgets::value_field(ui, &mut v, -300_000.0..=300_000.0, "px", 80.0);
+    let resp = widgets::value_field(ui, &mut v, -300_000.0..=300_000.0, "px", width);
     if resp.dragged() || resp.has_focus() {
         ui.data_mut(|d| d.insert_temp(key, v));
         return None;
@@ -107,7 +88,12 @@ fn align_glyph(ui: &egui::Ui, r: Rect, kind: &str, color: egui::Color32) {
     }
 }
 
-/// Pro Properties body for a non-adjustment layer.
+/// Width of the link toggle between the W and H fields (the X/Y row leaves the same gap).
+const LINK_W: f32 = 20.0;
+
+/// Pro Properties body for a non-adjustment layer: Transform, Align and Distribute, the kind's own
+/// sections (Character/Paragraph/Type Options for type, Appearance/Shape for shapes), then Quick
+/// Actions, all with the same collapsible headers (#155).
 pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
     let t = Tokens::get(ui.ctx());
     let mut run: Vec<(String, Value)> = Vec::new();
@@ -117,32 +103,33 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
             let link_key = egui::Id::new("layer-props-link");
             let linked = ui.data(|d| d.get_temp::<bool>(link_key)).unwrap_or(true);
             let bb = [b.x0, b.y0, b.x1, b.y1];
+            // Two label+field columns with the link toggle between them, filling the panel.
+            let w = ((ui.available_width() - 2.0 * (LABEL_W + LABEL_GAP) - LINK_W - 2.0 * LABEL_GAP) / 2.0).max(36.0);
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                if let Some(v) = field(ui, "w", "W", b.width() as f32) {
+                ui.spacing_mut().item_spacing.x = LABEL_GAP;
+                if let Some(v) = field(ui, "w", "W", b.width() as f32, w) {
                     run.extend(transform_params(layer.id.0, bb, Some(v), None, linked).map(|p| ("edit.transform".to_string(), p)));
                 }
-                if crate::icons::button(ui, if linked { "link" } else { "unlink" }, 20.0, linked, "Link width and height").clicked() {
+                if crate::icons::button(ui, if linked { "link" } else { "unlink" }, LINK_W, linked, "Link width and height").clicked() {
                     ui.data_mut(|d| d.insert_temp(link_key, !linked));
                 }
-                if let Some(v) = field(ui, "h", "H", b.height() as f32) {
+                if let Some(v) = field(ui, "h", "H", b.height() as f32, w) {
                     run.extend(transform_params(layer.id.0, bb, None, Some(v), linked).map(|p| ("edit.transform".to_string(), p)));
                 }
             });
+            ui.add_space(ROW_GAP);
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                if let Some(v) = field(ui, "x", "X", b.x0 as f32) {
+                ui.spacing_mut().item_spacing.x = LABEL_GAP;
+                if let Some(v) = field(ui, "x", "X", b.x0 as f32, w) {
                     run.push(("layer.translate".into(), json!({"layer": layer.id.0, "dx": (v - b.x0 as f32).round() as i32, "dy": 0})));
                 }
-                ui.add_space(24.0);
-                if let Some(v) = field(ui, "y", "Y", b.y0 as f32) {
+                ui.add_space(LINK_W + LABEL_GAP);
+                if let Some(v) = field(ui, "y", "Y", b.y0 as f32, w) {
                     run.push(("layer.translate".into(), json!({"layer": layer.id.0, "dx": 0, "dy": (v - b.y0 as f32).round() as i32})));
                 }
             });
-            ui.add_space(4.0);
+            ui.add_space(ROW_GAP);
         }
-        widgets::hairline(ui);
-        ui.add_space(2.0);
     }
     if section(ui, "align", "Align and Distribute") {
         ui.horizontal(|ui| {
@@ -164,21 +151,24 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
                 }
             }
         });
-        ui.add_space(4.0);
+        ui.add_space(ROW_GAP);
     }
-    widgets::hairline(ui);
-    ui.add_space(2.0);
-    if section(ui, "quick", "Quick Actions") {
-        ui.horizontal(|ui| {
-            for (label, id) in [("Remove Background", "layer.removeBackground"), ("Select Subject", "select.subject")] {
-                if photocraft_engine::commands::find(id).is_some() && widgets::secondary_button(ui, label, 0.0).clicked() {
-                    run.push((id.to_string(), json!({})));
-                }
-            }
-        });
-    }
-    for (id, p) in run {
+    for (id, p) in run.drain(..) {
         if let Err(e) = app.run(&id, p) {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
+    }
+    match &layer.content {
+        LayerContent::Text(_) => crate::type_tool::type_properties(app, ui),
+        LayerContent::Shape(_) => crate::vector_ui::shape_properties(app, ui, layer.id),
+        _ => {}
+    }
+    // Re-read: a section above may have changed the layer (e.g. point to paragraph type).
+    let content = app.session.active().and_then(|s| s.doc.layer(layer.id)).map_or_else(|| layer.content.clone(), |l| l.content.clone());
+    if let Some(id) = quick_actions_ui(app, ui, &content) {
+        let ctx = ui.ctx().clone();
+        if let Err(e) = crate::menus::invoke(app, &ctx, id, json!({})) {
             app.ui.status = e;
             app.ui.status_error = true;
         }
