@@ -366,6 +366,13 @@ struct CurveUi {
 /// Dragging a point this far outside the graph removes it (it comes back if dragged back in).
 pub const DRAG_OFF: f32 = 12.0;
 const HIT_RADIUS: f32 = 9.0;
+const CURVE_HANDLE_SIZE: f32 = 7.0;
+const CURVE_GRAPH_PADDING: f32 = 5.0;
+
+fn curve_graph(full: Rect, side: f32) -> Rect {
+    let base = Rect::from_min_size(full.min + vec2(14.0, 0.0), vec2(side - 14.0, side - 14.0));
+    Rect::from_min_max(base.min + vec2(CURVE_GRAPH_PADDING, CURVE_GRAPH_PADDING), base.max - vec2(CURVE_GRAPH_PADDING, CURVE_GRAPH_PADDING))
+}
 
 fn read_curve(v: &Value, key: &str) -> Vec<[f32; 2]> {
     let pts: Vec<[f32; 2]> = v
@@ -403,7 +410,7 @@ fn curves(ui: &mut egui::Ui, v: &mut Value, cx: &EditorCx) -> Edit {
     let side = ui.available_width().clamp(120.0, 300.0);
     ui.add_space(4.0);
     let (full, resp) = ui.allocate_exact_size(vec2(side, side + 14.0), Sense::click_and_drag());
-    let graph = Rect::from_min_size(full.min + vec2(14.0, 0.0), vec2(side - 14.0, side - 14.0));
+    let graph = curve_graph(full, side);
     ui.data_mut(|d| d.insert_temp(cx.mem.with("curves-graph"), graph));
     let to_scr = |q: [f32; 2]| pos2(graph.left() + q[0] / 255.0 * graph.width(), graph.bottom() - q[1] / 255.0 * graph.height());
     let to_val =
@@ -535,7 +542,7 @@ fn curves(ui: &mut egui::Ui, v: &mut Value, cx: &EditorCx) -> Edit {
     }
     draw_curve(&pts, if ch == 0 { t.text } else { bar_color(&chan, &t) }, 1.5);
     for (i, q) in pts.iter().enumerate() {
-        let r = Rect::from_center_size(to_scr(*q), vec2(7.0, 7.0));
+        let r = Rect::from_center_size(to_scr(*q), vec2(CURVE_HANDLE_SIZE, CURVE_HANDLE_SIZE));
         if Some(i) == st.sel {
             p.rect_filled(r, 0.0, t.text);
             p.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::BLACK), StrokeKind::Outside);
@@ -1402,6 +1409,20 @@ mod tests {
         let to_scr = |q: [f32; 2]| Pos2::new(q[0], 255.0 - q[1]);
         assert_eq!(hit(&p, to_scr, Pos2::new(108.0, 146.0), 9.0), Some(2));
         assert_eq!(hit(&p, to_scr, Pos2::new(50.0, 50.0), 9.0), None);
+    }
+
+    #[test]
+    fn curve_endpoint_handles_fit_inside_the_allocated_area() {
+        for side in [120.0, 200.0, 300.0] {
+            let full = Rect::from_min_size(pos2(100.0, 50.0), vec2(side, side + 14.0));
+            let graph = curve_graph(full, side);
+            let to_scr = |q: [f32; 2]| pos2(graph.left() + q[0] / 255.0 * graph.width(), graph.bottom() - q[1] / 255.0 * graph.height());
+            for q in [[0.0, 0.0], [255.0, 255.0]] {
+                let r = Rect::from_center_size(to_scr(q), vec2(CURVE_HANDLE_SIZE, CURVE_HANDLE_SIZE)).expand(1.0);
+                assert!(r.left() >= full.left() && r.right() <= full.right());
+                assert!(r.top() >= full.top() && r.bottom() <= full.bottom());
+            }
+        }
     }
 
     #[test]
