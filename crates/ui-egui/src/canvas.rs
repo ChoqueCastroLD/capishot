@@ -1118,6 +1118,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if buttons.started
             && let Some(p) = response.interact_pointer_pos()
         {
+            if tool == Tool::Move && app.ui.transform.is_none() {
+                begin_transform_controls_at(app, &ctx, &xf, p);
+            }
             let d = xf.to_doc(p);
             tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: app.stylus.pressure() }, mods);
         }
@@ -1143,6 +1146,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     zoom_about(&mut view, &xf, p, nz);
                 }
                 _ => {
+                    if tool == Tool::Move && app.ui.transform.is_none() {
+                        begin_transform_controls_at(app, &ctx, &xf, p);
+                    }
                     tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: 1.0 }, mods);
                     tool_event(app, ToolEvent::Up { x: d[0], y: d[1] }, mods);
                 }
@@ -1373,22 +1379,48 @@ fn draw_tool_state(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform,
     }
 }
 
+/// Move tool › Show Transform Controls: the active layer's transform bounds.
+fn transform_controls_rect(app: &PhotocraftApp, xf: &ViewXform) -> Option<Rect> {
+    if app.ui.tool != Tool::Move || !app.ui.tool_options.move_show_transform || app.ui.transform.is_some() || app.drag.is_some() {
+        return None;
+    }
+    let st = app.session.active()?;
+    let l = st.active_layer.and_then(|id| st.doc.layer(id))?;
+    if crate::doc_props_ui::is_background(&st.doc, l) {
+        return None;
+    }
+    let b = photocraft_engine::transform_cmds::transform_bounds(&st.doc, l);
+    if b.is_empty() {
+        return None;
+    }
+    Some(Rect::from_two_pos(xf.to_screen(b.x0 as f32, b.y0 as f32), xf.to_screen(b.x1 as f32, b.y1 as f32)))
+}
+
+/// A visible handle starts scaling; the narrow band just outside the box starts rotation.
+/// The interior stays the normal Move-tool drag target.
+fn transform_controls_hit(r: Rect, p: Pos2) -> bool {
+    let handles = [r.left_top(), r.center_top(), r.right_top(), r.right_center(), r.right_bottom(), r.center_bottom(), r.left_bottom(), r.left_center()];
+    handles.iter().any(|h| h.distance(p) <= 8.0) || (r.expand(18.0).contains(p) && !r.expand(5.0).contains(p))
+}
+
+/// Enter the existing Free Transform session when a Move-tool transform control is pressed.
+fn begin_transform_controls_at(app: &mut PhotocraftApp, ctx: &egui::Context, xf: &ViewXform, p: Pos2) -> bool {
+    let Some(r) = transform_controls_rect(app, xf) else { return false };
+    if !transform_controls_hit(r, p) {
+        return false;
+    }
+    match crate::transform_tool::begin(app, ctx) {
+        Ok(()) => true,
+        Err(e) => {
+            app.ui.status = e;
+            false
+        }
+    }
+}
+
 /// Move tool › Show Transform Controls: the active layer's bounding box with its eight handles.
 fn draw_transform_controls(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
-    if app.ui.tool != Tool::Move || !app.ui.tool_options.move_show_transform || app.ui.transform.is_some() || app.drag.is_some() {
-        return;
-    }
-    let Some(st) = app.session.active() else { return };
-    let Some(l) = st.active_layer.and_then(|id| st.doc.layer(id)) else { return };
-    if crate::doc_props_ui::is_background(&st.doc, l) {
-        return;
-    }
-    let (id, Some(surf)) = (l.id.0, l.surface().cloned()) else { return };
-    let b = app.cached_bounds(id, &surf);
-    if b.is_empty() {
-        return;
-    }
-    let r = Rect::from_two_pos(xf.to_screen(b.x0 as f32, b.y0 as f32), xf.to_screen(b.x1 as f32, b.y1 as f32));
+    let Some(r) = transform_controls_rect(app, xf) else { return };
     let accent = crate::theme::Tokens::get(painter.ctx()).accent;
     painter.rect_stroke(r, 0.0, Stroke::new(1.0, accent), egui::StrokeKind::Middle);
     for p in [r.left_top(), r.center_top(), r.right_top(), r.right_center(), r.right_bottom(), r.center_bottom(), r.left_bottom(), r.left_center()] {
@@ -2020,5 +2052,44 @@ mod tests {
         assert_eq!(effect_reach(&[group.clone()]), 2 * m);
         group.visible = false;
         assert_eq!(effect_reach(&[group]), 0);
+    }
+}
+
+#[cfg(test)]
+mod transform_controls_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn move_transform_controls_start_free_transform_for_vector_shapes() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 200, "height": 200})).unwrap();
+        app.session.execute("shape.create", json!({"kind": "rect", "rect": [20, 30, 80, 40], "fill": "#ff0000"})).unwrap();
+        app.sync_views();
+        app.ui.tool = Tool::Move;
+        app.ui.tool_options.move_show_transform = true;
+
+        let xf = ViewXform {
+            rect: Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0)),
+            zoom: 1.0,
+            center: [100.0, 100.0],
+            flip: false,
+        };
+        let r = transform_controls_rect(&app, &xf).expect("shape layers have transform bounds");
+        assert!(transform_controls_hit(r, r.right_bottom()));
+
+        let ctx = egui::Context::default();
+        assert!(begin_transform_controls_at(&mut app, &ctx, &xf, r.right_bottom()));
+        let t = app.ui.transform.as_ref().expect("control press starts Free Transform");
+        assert_eq!(t.rect, [20.0, 30.0, 100.0, 70.0]);
+    }
+
+    #[test]
+    fn transform_control_hit_keeps_move_interior_free_and_has_rotation_band() {
+        let r = Rect::from_min_max(pos2(20.0, 30.0), pos2(100.0, 70.0));
+        assert!(transform_controls_hit(r, r.left_top()));
+        assert!(transform_controls_hit(r, pos2(60.0, 18.0)));
+        assert!(!transform_controls_hit(r, r.center()));
+        assert!(!transform_controls_hit(r, pos2(60.0, 4.0)));
     }
 }
