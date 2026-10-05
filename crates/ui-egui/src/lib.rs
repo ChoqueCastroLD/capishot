@@ -213,6 +213,8 @@ pub struct PhotocraftApp {
     pub fps: f32,
     last_frame_time: f64,
     thumbs: HashMap<(photocraft_doc::LayerId, bool), (u64, egui::TextureHandle)>,
+    /// Snapshots whose live layer/mask keys were last used to prune thumbnail handles.
+    thumb_documents: Vec<(DocId, std::sync::Weak<Document>)>,
     /// Content bounds cached per (key, revision): scanning a 36 MP layer every frame cost ~77 ms.
     bounds_cache: HashMap<u64, (u64, photocraft_geom::Rect)>,
     /// Downsampled proxy of the active document for live previews: (doc, revision, k, proxy).
@@ -308,6 +310,7 @@ impl PhotocraftApp {
             fps: 0.0,
             last_frame_time: 0.0,
             thumbs: HashMap::new(),
+            thumb_documents: Vec::new(),
             bounds_cache: HashMap::new(),
             proxy: None,
             proxy_uploaded: None,
@@ -420,6 +423,7 @@ impl PhotocraftApp {
         let n = self.session.documents().len();
         self.ui.views.resize_with(n, Default::default);
         self.ui.windows.retain(|w| w.document < n);
+        self.prune_thumbs();
     }
 
     /// Record `path` as the most-recently-opened file (File › Open Recent): de-duplicated, newest
@@ -768,6 +772,34 @@ fn read_dropped(_f: &dyn egui::DroppedFile) -> Result<Vec<u8>, String> {
 }
 
 impl PhotocraftApp {
+    fn prune_thumbs(&mut self) {
+        let documents = self.session.documents();
+        if self.thumb_documents.len() == documents.len()
+            && self.thumb_documents.iter().zip(documents).all(|((id, snapshot), st)| *id == st.doc.id && snapshot.ptr_eq(&std::sync::Arc::downgrade(&st.doc)))
+        {
+            return;
+        }
+        // Check snapshots every sync, but walk the layer tree only after it changes. A Weak
+        // tracks replacement (including undo and preserved-ID reopen) without retaining pixels.
+        if !self.thumbs.is_empty() {
+            let mut live = std::collections::HashSet::new();
+            let mut pending: Vec<_> = documents.iter().flat_map(|st| &st.doc.layers).collect();
+            while let Some(layer) = pending.pop() {
+                live.insert((layer.id, false));
+                if layer.mask.is_some() {
+                    live.insert((layer.id, true));
+                }
+                if let Some(children) = layer.children() {
+                    pending.extend(children);
+                }
+            }
+            // Native files can restore IDs: retain the union across all open documents, rather
+            // than deleting an ID just because one document containing it was closed.
+            self.thumbs.retain(|key, _| live.contains(key));
+        }
+        self.thumb_documents = documents.iter().map(|st| (st.doc.id, std::sync::Arc::downgrade(&st.doc))).collect();
+    }
+
     pub fn set_theme(&mut self, ctx: &egui::Context, kind: theme::ThemeKind) {
         self.ui.theme = kind;
         theme::apply(ctx, kind);
