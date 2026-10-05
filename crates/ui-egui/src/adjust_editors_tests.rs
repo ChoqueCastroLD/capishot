@@ -41,7 +41,11 @@ fn app_harness(kind: &str, mode: &str, depth: u32) -> Harness<'static, Photocraf
         s.execute("edit.fill", json!({"color": "#6a3020"})).unwrap();
         s.execute("select.deselect", json!({})).unwrap();
         s.execute(&format!("layer.newAdjustmentLayer.{kind}"), json!({})).unwrap();
-        PhotocraftApp::new(s, crate::Services::default())
+        let mut app = PhotocraftApp::new(s, crate::Services::default());
+        // The default Properties group gives way to Layers (#147) and scrolls taller editors;
+        // these tests drive every control without scrolling, so they size it like a user would.
+        app.ui.dock.heights.insert(crate::dock::Group::Properties, 560.0);
+        app
     });
     h.run_steps(8);
     h

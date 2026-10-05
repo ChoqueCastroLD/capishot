@@ -12,15 +12,15 @@ const ESSENTIALS: [Group; 3] = [Group::Color, Group::Properties, Group::Layers];
 #[test]
 fn last_expanded_group_fills_the_column() {
     let l = DockLayout::default();
-    let hs = l.heights_for(&ESSENTIALS, 800.0, 28.0);
+    let hs = l.heights_for(&ESSENTIALS, 1200.0, 28.0);
     assert_eq!(hs[0], (Group::Color, Group::Color.default_height()));
     assert_eq!(hs[1], (Group::Properties, Group::Properties.default_height()));
     let total: f32 = hs.iter().map(|(_, h)| h).sum::<f32>() + 2.0 * GAP;
-    assert!((total - 800.0).abs() < 1e-3, "{hs:?}");
+    assert!((total - 1200.0).abs() < 1e-3, "{hs:?}");
     // Collapsed groups shrink to the tab strip; the one above Layers keeps its height.
     let mut l = DockLayout::default();
     l.set_collapsed(Group::Color, true);
-    let hs = l.heights_for(&ESSENTIALS, 800.0, 28.0);
+    let hs = l.heights_for(&ESSENTIALS, 1000.0, 28.0);
     assert_eq!(hs[0].1, 28.0);
     assert_eq!(hs[1].1, Group::Properties.default_height());
     // Layers collapsed: Properties becomes the filler.
@@ -33,10 +33,10 @@ fn last_expanded_group_fills_the_column() {
 #[test]
 fn short_columns_squeeze_groups_down_to_their_minimum_and_never_go_negative() {
     let l = DockLayout::default();
-    let hs = l.heights_for(&ESSENTIALS, 500.0, 28.0);
+    let hs = l.heights_for(&ESSENTIALS, 400.0, 28.0);
     assert_eq!(hs[2].1, Group::Layers.min_height(), "Layers keeps its minimum: {hs:?}");
-    assert_eq!(hs[0].1, Group::Color.default_height(), "the group farthest from Layers gives way last");
-    assert!(hs[1].1 < Group::Properties.default_height());
+    assert_eq!(hs[0].1, Group::Color.compact_height(), "the group farthest from Layers gives way last");
+    assert!(hs[1].1 < Group::Properties.compact_height());
     for avail in [0.0, -50.0, 1.0, f32::NAN, f32::INFINITY, 1e9] {
         for (g, h) in l.heights_for(&ESSENTIALS, avail, 28.0) {
             assert!(h.is_finite() && h >= 0.0, "{g:?} at {avail}: {h}");
@@ -48,7 +48,7 @@ fn short_columns_squeeze_groups_down_to_their_minimum_and_never_go_negative() {
 #[test]
 fn bad_stored_values_are_sanitised() {
     let mut l = DockLayout { order: vec![Group::Layers, Group::Layers, Group::Color], ..Default::default() };
-    assert_eq!(l.order(), vec![Group::Layers, Group::Color, Group::Properties, Group::Navigator, Group::History]);
+    assert_eq!(l.order(), vec![Group::Layers, Group::Color, Group::Properties, Group::Character, Group::Navigator, Group::History]);
     for bad in [f32::NAN, -10.0, f32::INFINITY, 1e12] {
         l.heights.insert(Group::Color, bad);
         let h = l.height(Group::Color);
@@ -56,7 +56,7 @@ fn bad_stored_values_are_sanitised() {
     }
     // Unknown fields, wrong types and old UI state all load.
     let back: DockLayout = serde_json::from_value(json!({"order": ["layers"], "bogus": 1})).unwrap();
-    assert_eq!(back.order(), vec![Group::Layers, Group::Color, Group::Properties, Group::Navigator, Group::History]);
+    assert_eq!(back.order(), vec![Group::Layers, Group::Color, Group::Properties, Group::Character, Group::Navigator, Group::History]);
     let mut ui = serde_json::to_value(crate::state::UiState::default()).unwrap();
     ui.as_object_mut().unwrap().remove("dock");
     let ui: crate::state::UiState = serde_json::from_value(ui).unwrap();
@@ -150,11 +150,13 @@ fn dragging_the_splitter_resizes_and_survives_a_ui_state_round_trip() {
     let props = rect_of(&h, Group::Properties);
     let layers = rect_of(&h, Group::Layers);
     let split = Pos2::new(props.center().x, props.bottom() + GAP / 2.0);
-    drag(&mut h, split, split - vec2(0.0, 90.0));
+    let color = rect_of(&h, Group::Color);
+    drag(&mut h, split, split - vec2(0.0, 60.0));
     let props2 = rect_of(&h, Group::Properties);
     let layers2 = rect_of(&h, Group::Layers);
-    assert!((props2.height() - (props.height() - 90.0)).abs() < 2.0, "{props:?} -> {props2:?}");
-    assert!((layers2.top() - (layers.top() - 90.0)).abs() < 2.0, "{layers:?} -> {layers2:?}");
+    assert!((props2.height() - (props.height() - 60.0)).abs() < 2.0, "{props:?} -> {props2:?}");
+    assert!((layers2.top() - (layers.top() - 60.0)).abs() < 2.0, "{layers:?} -> {layers2:?}");
+    assert_eq!(rect_of(&h, Group::Color), color, "the group above keeps its place");
     assert_eq!(layers2.bottom(), layers.bottom());
     let stored = h.state().ui.dock.heights.get(&Group::Properties).copied().unwrap();
     // Dragging past the minimum stops at it.
@@ -347,4 +349,220 @@ fn clicking_around_the_ui_keeps_the_panels_put() {
         }
         h.state_mut().ui.dialogs.clear();
     }
+}
+
+fn is_pro(theme: ThemeKind) -> bool {
+    matches!(theme, ThemeKind::Pro | ThemeKind::ProMedium)
+}
+
+/// Full app at `size` (1× scale) on a document with `n` layers named "Row 00", "Row 01", …
+fn app_harness_rows(size: egui::Vec2, theme: ThemeKind, n: usize) -> Harness<'static, PhotocraftApp> {
+    let mut h = Harness::builder().with_size(size).with_max_steps(64).build_eframe(move |cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, theme);
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.ui.theme = theme;
+        app.run("file.new", json!({"width": 200, "height": 150})).unwrap();
+        for i in 0..n {
+            app.run("layer.new.layer", json!({"name": format!("Row {i:02}")})).unwrap();
+        }
+        app.sync_views();
+        app
+    });
+    h.run_steps(8);
+    h
+}
+
+/// Layer rows fully inside the Layers rows viewport.
+fn rows_in_view(h: &Harness<'static, PhotocraftApp>, n: usize) -> usize {
+    use egui_kittest::kittest::Queryable;
+    let layers = rect_of(h, Group::Layers);
+    (0..n)
+        .filter(|i| {
+            h.query_all_by_label(&format!("Row {i:02}"))
+                .map(|q| q.rect())
+                .any(|r| r.left() >= layers.left() - 1.0 && r.top() >= layers.top() + 26.0 && r.bottom() <= layers.bottom() - 36.0)
+        })
+        .count()
+}
+
+/// #147: the default workspace gives Layers the column's spare height: at least ten rows on a
+/// 900 pt window, and a usable list on a 720 pt one.
+#[test]
+fn default_layout_shows_ten_layer_rows_at_900pt() {
+    for (size, want) in [(vec2(1440.0, 900.0), 10), (vec2(1280.0, 720.0), 4)] {
+        let h = app_harness_rows(size, ThemeKind::ProMedium, 40);
+        let rows = rows_in_view(&h, 40);
+        let groups = last_rects(&h.ctx);
+        assert!(rows >= want, "{size:?}: {rows} rows visible, want ≥ {want}: {groups:?}");
+        // Color and Properties stay open, just not at the expense of Layers.
+        for g in [Group::Color, Group::Properties] {
+            assert!(rect_of(&h, g).height() >= g.compact_height() - 0.5, "{g:?} at {size:?}: {groups:?}");
+        }
+    }
+}
+
+#[test]
+fn defaults_give_way_to_layers_but_user_sizes_stay() {
+    let l = DockLayout::default();
+    // A tall column: everyone at their defaults, Layers takes the rest.
+    let hs = l.heights_for(&ESSENTIALS, 1200.0, 28.0);
+    assert_eq!(hs[0].1, Group::Color.default_height());
+    assert_eq!(hs[1].1, Group::Properties.default_height());
+    // A short one: default-sized groups shrink toward their compact heights so Layers keeps
+    // its preferred height, the one nearest Layers first.
+    let hs = l.heights_for(&ESSENTIALS, 820.0, 28.0);
+    assert!(hs[2].1 >= Group::Layers.preferred_fill() - 0.5, "{hs:?}");
+    assert!(hs[1].1 < Group::Properties.default_height() && hs[1].1 >= Group::Properties.compact_height(), "{hs:?}");
+    // Heights the user dragged to (saved in prefs) are kept as they are.
+    let mut mine = DockLayout::default();
+    mine.heights.insert(Group::Properties, 340.0);
+    mine.heights.insert(Group::Color, 200.0);
+    let hs = mine.heights_for(&ESSENTIALS, 800.0, 28.0);
+    assert_eq!((hs[0].1, hs[1].1), (200.0, 340.0), "{hs:?}");
+}
+
+/// #150: Window › Character opens a Character | Paragraph group next to Properties (which
+/// stays), and toggles closed again; old saved layouts place it above Layers.
+#[test]
+fn window_character_opens_its_own_group_and_keeps_properties() {
+    for theme in [ThemeKind::ProMedium, ThemeKind::Studio] {
+        let (app, _, _) = app_with_layers();
+        let mut h = harness(app, vec2(1440.0, 900.0), theme);
+        let ctx = h.ctx.clone();
+        crate::menus::invoke(h.state_mut(), &ctx, "window.panel.character", json!({})).unwrap();
+        h.run_steps(3);
+        let app = h.state();
+        assert!(app.ui.panels.character && app.ui.panels.properties && app.ui.dock_tabs.character == 0, "{theme:?}");
+        let ch = rect_of(&h, Group::Character);
+        assert!(ch.height() > 60.0, "{theme:?}: Character expanded: {ch:?}");
+        if is_pro(theme) {
+            let props = rect_of(&h, Group::Properties);
+            assert!(props.height() > 60.0 && props.bottom() <= ch.top(), "{theme:?}: Properties visible above Character");
+        }
+        assert!(rect_of(&h, Group::Layers).top() > ch.bottom(), "{theme:?}: Layers stays the filler at the bottom");
+        assert_eq!(crate::view_cmds::checked(h.state(), "window.panel.character"), Some(true));
+        // Paragraph is the group's second tab; choosing it again on its tab closes the group.
+        crate::menus::invoke(h.state_mut(), &ctx, "window.panel.paragraph", json!({})).unwrap();
+        assert!(h.state().ui.panels.character && h.state().ui.dock_tabs.character == 1);
+        crate::menus::invoke(h.state_mut(), &ctx, "window.panel.paragraph", json!({})).unwrap();
+        h.run_steps(3);
+        assert!(!h.state().ui.panels.character && h.state().ui.panels.properties, "{theme:?}");
+        assert!(!last_rects(&h.ctx).iter().any(|(g, _)| *g == Group::Character));
+        // Type › Panels › Character Panel always shows it; Reset Workspace closes it.
+        crate::menus::invoke(h.state_mut(), &ctx, "type.panels.character", json!({})).unwrap();
+        crate::menus::invoke(h.state_mut(), &ctx, "type.panels.character", json!({})).unwrap();
+        assert!(h.state().ui.panels.character);
+        crate::menus::invoke(h.state_mut(), &ctx, "window.workspace.resetWorkspace", json!({})).unwrap();
+        assert!(!h.state().ui.panels.character && h.state().ui.panels.properties);
+    }
+    // A layout saved before the group existed keeps Layers last.
+    let old = DockLayout { order: vec![Group::Color, Group::Properties, Group::Navigator, Group::History, Group::Layers], ..Default::default() };
+    assert_eq!(old.order(), Group::ALL.to_vec());
+    let moved = DockLayout { order: vec![Group::Layers, Group::Color], ..Default::default() };
+    assert_eq!(moved.order(), vec![Group::Layers, Group::Color, Group::Properties, Group::Character, Group::Navigator, Group::History]);
+}
+
+type StripProbe = Option<(Vec<(usize, Rect)>, Rect, Option<Rect>, Rect)>;
+
+/// #151: at narrow widths and 2× scale, in every theme, tabs elide or overflow into a chevron
+/// and never run under the panel menu button.
+#[test]
+fn tab_strips_never_overlap_the_menu_button() {
+    let overlap = |a: Rect, b: Rect| {
+        let i = a.intersect(b);
+        i.width() > 0.5 && i.height() > 0.5
+    };
+    for theme in ThemeKind::ALL {
+        for scale in [1.0, 2.0] {
+            for width in [180.0, 250.0, 290.0, 420.0] {
+                for g in Group::ALL {
+                    let tabs = g.tabs(is_pro(theme));
+                    for sel in 0..tabs.len() {
+                        let mut h = Harness::builder().with_size(vec2(width, 200.0)).with_pixels_per_point(scale).build_ui_state(
+                            move |ui, out: &mut StripProbe| {
+                                if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                                    return;
+                                }
+                                let mut s = sel;
+                                let r = crate::widgets::card_ex(ui, "t", tabs, &mut s, false, |ui, _| {
+                                    ui.label("body");
+                                });
+                                *out = Some((r.tabs, r.menu.rect, r.chevron, ui.max_rect()));
+                            },
+                            None,
+                        );
+                        PhotocraftApp::setup_context(&h.ctx, theme);
+                        h.run_steps(3);
+                        let (shown, menu, chevron, card) = h.state().clone().unwrap();
+                        let what = format!("{theme:?} {scale}x {width}pt {g:?} selected {sel}");
+                        assert!(shown.iter().any(|(i, _)| *i == sel), "{what}: the selected tab is on the strip: {shown:?}");
+                        for (i, r) in &shown {
+                            assert!(!overlap(*r, menu), "{what}: tab {i} {r:?} runs under the menu {menu:?}");
+                            assert!(r.left() >= card.left() - 0.5 && r.right() <= card.right() + 0.5, "{what}: tab {i} outside the card");
+                        }
+                        for w in shown.windows(2) {
+                            assert!(!overlap(w[0].1, w[1].1), "{what}: tabs overlap");
+                        }
+                        if let Some(c) = chevron {
+                            assert!(!overlap(c, menu) && shown.iter().all(|(_, r)| !overlap(*r, c)), "{what}: chevron overlaps");
+                        } else {
+                            assert_eq!(shown.len(), tabs.len(), "{what}: a tab went missing without a chevron");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// #151 in the real dock: every strip at 2× scale fits beside its menu button, and a tab in the
+/// chevron menu can still be chosen.
+#[test]
+fn dock_strips_fit_and_the_chevron_menu_switches_tabs() {
+    for theme in ThemeKind::ALL {
+        let (mut app, _, _) = app_with_layers();
+        app.ui.panels.history = true;
+        app.ui.panels.navigator = true;
+        app.ui.panels.character = true;
+        let mut h = Harness::builder().with_size(vec2(900.0, 1000.0)).with_pixels_per_point(2.0).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                crate::panels::right_dock(app, ui);
+                egui::CentralPanel::default().show(ui, |_| {});
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, theme);
+        h.state_mut().ui.theme = theme;
+        h.run_steps(4);
+        let strips = last_strips(&h.ctx);
+        assert!(strips.len() >= 5, "{theme:?}: {strips:?}");
+        for s in &strips {
+            for (i, r) in &s.tabs {
+                assert!(r.intersect(s.menu).width() <= 0.5, "{theme:?} {:?}: tab {i} under the menu", s.group);
+            }
+        }
+    }
+    // A strip too narrow for its tabs: pick a hidden tab from the chevron menu.
+    let mut h = Harness::builder().with_size(vec2(150.0, 200.0)).build_ui_state(
+        |ui, sel: &mut usize| {
+            if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            let _ = crate::widgets::card_ex(ui, "color", &["Color", "Swatches", "Gradients", "Patterns"], sel, false, |ui, _| {
+                ui.label("body");
+            });
+        },
+        0usize,
+    );
+    PhotocraftApp::setup_context(&h.ctx, ThemeKind::ProMedium);
+    h.run_steps(3);
+    use egui_kittest::kittest::Queryable;
+    h.get_by_label("More panels").click();
+    h.run_steps(3);
+    h.get_by_label("Patterns").click();
+    h.run_steps(3);
+    assert_eq!(*h.state(), 3, "Patterns chosen from the chevron menu");
 }

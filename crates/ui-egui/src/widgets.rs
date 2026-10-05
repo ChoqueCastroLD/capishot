@@ -33,6 +33,11 @@ pub struct CardResponse {
     pub menu: Response,
     /// A tab was double-clicked (Photoshop collapses the group).
     pub tab_double_clicked: bool,
+    /// Rects of the tabs on the strip, `(tab index, rect)`; tabs that don't fit are in the
+    /// chevron menu instead (#151).
+    pub tabs: Vec<(usize, Rect)>,
+    /// The » overflow button, when some tabs didn't fit.
+    pub chevron: Option<Rect>,
 }
 
 /// [`card`] that can be collapsed to its tab strip and reports strip and menu interactions.
@@ -52,29 +57,18 @@ pub fn card_ex(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, colla
             // Registered before the tabs so they keep their clicks; drags fall through to it.
             let strip_rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 22.0));
             let strip = ui.interact(strip_rect, ui.id().with((id, "strip")), Sense::click_and_drag());
-            let mut double = false;
-            let menu = ui
-                .horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    for (i, name) in tabs.iter().enumerate() {
-                        let r = pill_tab(ui, name, *selected == i);
-                        double |= r.double_clicked();
-                        if r.clicked() {
-                            *selected = i;
-                        }
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        crate::icons::button(ui, "ellipsis", 22.0, false, &format!("{} options", tabs.get(*selected).copied().unwrap_or(id)))
-                    })
-                    .inner
-                })
-                .inner;
+            // Pill tabs left of the menu button; they elide or overflow into a chevron (#151).
+            let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+            let tip = format!("{} options", tabs.get(*selected).copied().unwrap_or(id));
+            let menu_rect = Rect::from_min_max(pos2(row.right() - 22.0, row.top() + 1.0), pos2(row.right(), row.bottom() - 1.0));
+            let menu = crate::icons::button(&mut ui.new_child(egui::UiBuilder::new().max_rect(menu_rect)), "ellipsis", 22.0, false, &tip);
+            let area = Rect::from_min_max(row.min, pos2((menu_rect.left() - 4.0).max(row.left()), row.bottom()));
+            let tabs_out = crate::tab_strip::pill_tabs(ui, ui.id().with((id, "tabs")), area, tabs, selected);
             if !collapsed {
                 ui.add_space(6.0);
                 body(ui, *selected);
             }
-            CardResponse { strip, menu, tab_double_clicked: double }
+            CardResponse { strip, menu, tab_double_clicked: tabs_out.double_clicked, tabs: tabs_out.tabs, chevron: tabs_out.chevron }
         })
         .inner;
     ui.add_space(6.0);
@@ -91,34 +85,9 @@ fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, collaps
     let strip_resp = ui.interact(strip, ui.id().with((id, "strip")), Sense::click_and_drag());
     let rounding = if collapsed { CornerRadius::same(3) } else { CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 } };
     ui.painter().rect_filled(strip, rounding, t.tab_strip);
-    let mut x = strip.left();
-    let mut double = false;
-    for (i, name) in tabs.iter().enumerate() {
-        let galley = ui.painter().layout_no_wrap((*name).to_owned(), egui::FontId::proportional(11.5), t.text);
-        let r = Rect::from_min_size(pos2(x, strip.top()), vec2(galley.size().x + 22.0, strip.height()));
-        let resp = ui.interact(r, ui.id().with((id, "tab", i)), Sense::click());
-        let active = *selected == i && !collapsed;
-        if active {
-            ui.painter().rect_filled(r, CornerRadius { nw: if i == 0 { 3 } else { 0 }, ne: 0, sw: 0, se: 0 }, t.card);
-        } else if resp.hovered() {
-            ui.painter().rect_filled(r, 0.0, t.hover.gamma_multiply(0.4));
-        }
-        let color = if active {
-            t.text
-        } else if resp.hovered() {
-            t.text_dim
-        } else {
-            t.text_faint
-        };
-        ui.painter().galley_with_override_text_color(r.center() - galley.size() / 2.0, galley, color);
-        double |= resp.double_clicked();
-        if resp.clicked() {
-            *selected = i;
-        }
-        x = r.right();
-    }
-    // Panel menu (hamburger).
+    // Panel menu (hamburger); the tabs stay left of it, eliding or overflowing (#151).
     let menu = Rect::from_center_size(pos2(strip.right() - 14.0, strip.center().y), vec2(20.0, 18.0));
+    let tabs_out = crate::tab_strip::pro_tabs(ui, ui.id().with((id, "tabs")), strip, menu.left(), tabs, selected, collapsed);
     let mresp = ui.interact(menu, ui.id().with((id, "menu")), Sense::click());
     let c = if mresp.hovered() { t.text } else { t.text_faint };
     for k in 0..3 {
@@ -137,7 +106,7 @@ fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, collaps
             });
     }
     ui.add_space(2.0);
-    CardResponse { strip: strip_resp, menu: mresp, tab_double_clicked: double }
+    CardResponse { strip: strip_resp, menu: mresp, tab_double_clicked: tabs_out.double_clicked, tabs: tabs_out.tabs, chevron: tabs_out.chevron }
 }
 
 pub fn pill_tab(ui: &mut Ui, label: &str, selected: bool) -> Response {

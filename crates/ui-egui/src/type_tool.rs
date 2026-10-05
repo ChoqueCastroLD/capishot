@@ -803,6 +803,22 @@ fn align_glyph(p: &egui::Painter, r: egui::Rect, a: photocraft_doc::text::TextAl
 
 /// Properties panel sections for a type layer: Character and Paragraph (Photoshop CC layout).
 pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    type_sections(app, ui, true, true);
+}
+
+/// Window › Character / Paragraph (#150): the same controls as Properties, in their own dock
+/// group. Without a type layer (or a type edit) there is nothing to show.
+pub fn character_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui, paragraph: bool) {
+    if styles_at(app).is_none() {
+        let t = crate::theme::Tokens::get(ui.ctx());
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Select a type layer to edit its character and paragraph settings.").color(t.text_dim));
+        return;
+    }
+    type_sections(app, ui, !paragraph, paragraph);
+}
+
+fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, paragraph: bool) {
     let Some((c, para)) = styles_at(app) else { return };
     let t = crate::theme::Tokens::get(ui.ctx());
     let section = |ui: &mut egui::Ui, title: &str| {
@@ -810,141 +826,146 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.label(egui::RichText::new(title).font(crate::theme::semibold(12.0)).color(t.text));
         ui.add_space(2.0);
     };
-    section(ui, "Character");
-    let mut fam = c.font_family.clone();
-    ui.horizontal(|ui| {
-        if font_picker(ui, &mut fam) {
-            app.ui.tool_options.type_font = fam.clone();
-            let st = styles(&fam);
-            let style = if st.contains(&c.font_style) { c.font_style.clone() } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
-            apply(app, ui.ctx(), json!({"font": fam, "fontStyle": style}));
-        }
-    });
-    ui.horizontal(|ui| {
-        let mut style = if c.font_style.is_empty() { "Regular".to_string() } else { c.font_style.clone() };
-        let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), s)).collect();
-        let opts_ref: Vec<(String, &str)> = opts.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
-        if crate::widgets::dropdown(ui, "props-type-style", &mut style, &opts_ref, 170.0) {
-            apply(app, ui.ctx(), json!({"fontStyle": style}));
-        }
-    });
     let w = ((ui.available_width() - 70.0) / 2.0).clamp(50.0, 90.0);
-    ui.horizontal(|ui| {
-        let k = shown_scale(app);
-        if let Some(v) = num_field(ui, "tT", "Font size", c.size_pt * k, 0.1..=1296.0, "pt", w) {
-            app.ui.tool_options.type_size = v;
-            apply(app, ui.ctx(), json!({"size": v / k}));
-        }
-        let lead = c.leading_pt.unwrap_or(c.size_pt * para.auto_leading.max(0.01)) * k;
-        if let Some(v) = num_field(ui, "A↕", "Leading (set to the font size × auto-leading when Auto)", lead, 0.1..=5000.0, "pt", w) {
-            apply(app, ui.ctx(), json!({"leading": v / k}));
-        }
-    });
-    ui.horizontal(|ui| {
-        let mut k = match c.kerning {
-            photocraft_doc::text::Kerning::Metrics => "metrics",
-            photocraft_doc::text::Kerning::Optical => "optical",
-            photocraft_doc::text::Kerning::Off => "off",
-        }
-        .to_string();
-        icon_label(ui, "text-cursor", "Kerning");
-        if crate::widgets::dropdown(
-            ui,
-            "props-kern",
-            &mut k,
-            &[("metrics".to_string(), "Metrics"), ("optical".to_string(), "Optical"), ("off".to_string(), "0")],
-            w,
-        ) {
-            apply(app, ui.ctx(), json!({"kerning": k}));
-        }
-        if let Some(v) = num_field(ui, "VA", "Tracking (1/1000 em)", c.tracking, -1000.0..=10000.0, "", w) {
-            apply(app, ui.ctx(), json!({"tracking": v}));
-        }
-    });
-    ui.horizontal(|ui| {
-        if let Some(v) = num_field(ui, "↕T", "Vertical scale", c.vertical_scale * 100.0, 0.0..=1000.0, "%", w) {
-            apply(app, ui.ctx(), json!({"verticalScale": v}));
-        }
-        if let Some(v) = num_field(ui, "↔T", "Horizontal scale", c.horizontal_scale * 100.0, 0.0..=1000.0, "%", w) {
-            apply(app, ui.ctx(), json!({"horizontalScale": v}));
-        }
-    });
-    ui.horizontal(|ui| {
-        if let Some(v) = num_field(ui, "Aª", "Baseline shift", c.baseline_shift_pt, -1296.0..=1296.0, "pt", w) {
-            apply(app, ui.ctx(), json!({"baselineShift": v}));
-        }
-        // Colour chip.
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new("Color:").color(t.text_dim).size(12.0));
-        let rgb = c.color.to_rgb();
-        let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(40.0, 18.0), egui::Sense::click());
-        ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(q(rgb[0]), q(rgb[1]), q(rgb[2])));
-        ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Outside);
-        egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-            let mut col = Color32::from_rgb(q(rgb[0]), q(rgb[1]), q(rgb[2]));
-            if egui::color_picker::color_picker_color32(ui, &mut col, egui::color_picker::Alpha::Opaque) {
-                apply(app, ui.ctx(), json!({"color": format!("#{:02x}{:02x}{:02x}", col.r(), col.g(), col.b())}));
+    if character {
+        section(ui, "Character");
+        let mut fam = c.font_family.clone();
+        ui.horizontal(|ui| {
+            if font_picker(ui, &mut fam) {
+                app.ui.tool_options.type_font = fam.clone();
+                let st = styles(&fam);
+                let style = if st.contains(&c.font_style) { c.font_style.clone() } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
+                apply(app, ui.ctx(), json!({"font": fam, "fontStyle": style}));
             }
         });
-    });
-    // Faux styles row: T (bold)  T (italic)  TT  Tᴛ  T̲  T̶
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        let caps = c.caps;
-        let toggles: [(&str, &str, bool, serde_json::Value); 6] = [
-            ("T", "Faux Bold", c.faux_bold, json!({"fauxBold": !c.faux_bold})),
-            ("T", "Faux Italic", c.faux_italic, json!({"fauxItalic": !c.faux_italic})),
-            (
-                "TT",
-                "All Caps",
-                caps == photocraft_doc::text::Caps::AllCaps,
-                json!({"caps": if caps == photocraft_doc::text::Caps::AllCaps { "normal" } else { "allCaps" }}),
-            ),
-            (
-                "Tᴛ",
-                "Small Caps",
-                caps == photocraft_doc::text::Caps::SmallCaps,
-                json!({"caps": if caps == photocraft_doc::text::Caps::SmallCaps { "normal" } else { "smallCaps" }}),
-            ),
-            ("T", "Underline", c.underline, json!({"underline": !c.underline})),
-            ("T", "Strikethrough", c.strikethrough, json!({"strikethrough": !c.strikethrough})),
-        ];
-        for (i, (glyph, tip, on, props)) in toggles.into_iter().enumerate() {
-            let (r, resp) = ui.allocate_exact_size(egui::vec2(28.0, 24.0), egui::Sense::click());
-            let bg = if on {
-                t.accent_soft
-            } else if resp.hovered() {
-                t.hover
-            } else {
-                Color32::TRANSPARENT
-            };
-            ui.painter().rect_filled(r, 3.0, bg);
-            let font = if i == 0 { crate::theme::semibold(13.0) } else { egui::FontId::proportional(13.0) };
-            let col = if on { t.text } else { t.text_dim };
-            let g = ui.painter().layout_no_wrap(glyph.to_string(), font, col);
-            let pos = r.center() - g.size() / 2.0;
-            let gr = egui::Rect::from_min_size(pos, g.size());
-            if i == 1 {
-                // Faux italic: a slanted T drawn as strokes (no italic face is bundled).
-                let (top, bot, cx) = (gr.top() + 3.0, gr.bottom() - 3.0, gr.center().x);
-                let slant = (bot - top) * 0.25;
-                ui.painter().line_segment([egui::pos2(cx - 4.0 + slant / 2.0, top), egui::pos2(cx + 4.0 + slant / 2.0, top)], Stroke::new(1.3, col));
-                ui.painter().line_segment([egui::pos2(cx + slant / 2.0, top), egui::pos2(cx - slant / 2.0, bot)], Stroke::new(1.3, col));
-            } else {
-                ui.painter().galley(pos, g, col);
+        ui.horizontal(|ui| {
+            let mut style = if c.font_style.is_empty() { "Regular".to_string() } else { c.font_style.clone() };
+            let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), s)).collect();
+            let opts_ref: Vec<(String, &str)> = opts.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
+            if crate::widgets::dropdown(ui, "props-type-style", &mut style, &opts_ref, 170.0) {
+                apply(app, ui.ctx(), json!({"fontStyle": style}));
             }
-            if i == 4 {
-                ui.painter().line_segment([egui::pos2(gr.left(), gr.bottom() - 2.0), egui::pos2(gr.right(), gr.bottom() - 2.0)], Stroke::new(1.0, col));
+        });
+        ui.horizontal(|ui| {
+            let k = shown_scale(app);
+            if let Some(v) = num_field(ui, "tT", "Font size", c.size_pt * k, 0.1..=1296.0, "pt", w) {
+                app.ui.tool_options.type_size = v;
+                apply(app, ui.ctx(), json!({"size": v / k}));
             }
-            if i == 5 {
-                ui.painter().line_segment([egui::pos2(gr.left() - 1.0, gr.center().y), egui::pos2(gr.right() + 1.0, gr.center().y)], Stroke::new(1.0, col));
+            let lead = c.leading_pt.unwrap_or(c.size_pt * para.auto_leading.max(0.01)) * k;
+            if let Some(v) = num_field(ui, "A↕", "Leading (set to the font size × auto-leading when Auto)", lead, 0.1..=5000.0, "pt", w) {
+                apply(app, ui.ctx(), json!({"leading": v / k}));
             }
-            if resp.on_hover_text(tip).clicked() {
-                apply(app, ui.ctx(), props);
+        });
+        ui.horizontal(|ui| {
+            let mut k = match c.kerning {
+                photocraft_doc::text::Kerning::Metrics => "metrics",
+                photocraft_doc::text::Kerning::Optical => "optical",
+                photocraft_doc::text::Kerning::Off => "off",
             }
-        }
-    });
+            .to_string();
+            icon_label(ui, "text-cursor", "Kerning");
+            if crate::widgets::dropdown(
+                ui,
+                "props-kern",
+                &mut k,
+                &[("metrics".to_string(), "Metrics"), ("optical".to_string(), "Optical"), ("off".to_string(), "0")],
+                w,
+            ) {
+                apply(app, ui.ctx(), json!({"kerning": k}));
+            }
+            if let Some(v) = num_field(ui, "VA", "Tracking (1/1000 em)", c.tracking, -1000.0..=10000.0, "", w) {
+                apply(app, ui.ctx(), json!({"tracking": v}));
+            }
+        });
+        ui.horizontal(|ui| {
+            if let Some(v) = num_field(ui, "↕T", "Vertical scale", c.vertical_scale * 100.0, 0.0..=1000.0, "%", w) {
+                apply(app, ui.ctx(), json!({"verticalScale": v}));
+            }
+            if let Some(v) = num_field(ui, "↔T", "Horizontal scale", c.horizontal_scale * 100.0, 0.0..=1000.0, "%", w) {
+                apply(app, ui.ctx(), json!({"horizontalScale": v}));
+            }
+        });
+        ui.horizontal(|ui| {
+            if let Some(v) = num_field(ui, "Aª", "Baseline shift", c.baseline_shift_pt, -1296.0..=1296.0, "pt", w) {
+                apply(app, ui.ctx(), json!({"baselineShift": v}));
+            }
+            // Colour chip.
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Color:").color(t.text_dim).size(12.0));
+            let rgb = c.color.to_rgb();
+            let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            let (rect, resp) = ui.allocate_exact_size(egui::vec2(40.0, 18.0), egui::Sense::click());
+            ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(q(rgb[0]), q(rgb[1]), q(rgb[2])));
+            ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Outside);
+            egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                let mut col = Color32::from_rgb(q(rgb[0]), q(rgb[1]), q(rgb[2]));
+                if egui::color_picker::color_picker_color32(ui, &mut col, egui::color_picker::Alpha::Opaque) {
+                    apply(app, ui.ctx(), json!({"color": format!("#{:02x}{:02x}{:02x}", col.r(), col.g(), col.b())}));
+                }
+            });
+        });
+        // Faux styles row: T (bold)  T (italic)  TT  Tᴛ  T̲  T̶
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let caps = c.caps;
+            let toggles: [(&str, &str, bool, serde_json::Value); 6] = [
+                ("T", "Faux Bold", c.faux_bold, json!({"fauxBold": !c.faux_bold})),
+                ("T", "Faux Italic", c.faux_italic, json!({"fauxItalic": !c.faux_italic})),
+                (
+                    "TT",
+                    "All Caps",
+                    caps == photocraft_doc::text::Caps::AllCaps,
+                    json!({"caps": if caps == photocraft_doc::text::Caps::AllCaps { "normal" } else { "allCaps" }}),
+                ),
+                (
+                    "Tᴛ",
+                    "Small Caps",
+                    caps == photocraft_doc::text::Caps::SmallCaps,
+                    json!({"caps": if caps == photocraft_doc::text::Caps::SmallCaps { "normal" } else { "smallCaps" }}),
+                ),
+                ("T", "Underline", c.underline, json!({"underline": !c.underline})),
+                ("T", "Strikethrough", c.strikethrough, json!({"strikethrough": !c.strikethrough})),
+            ];
+            for (i, (glyph, tip, on, props)) in toggles.into_iter().enumerate() {
+                let (r, resp) = ui.allocate_exact_size(egui::vec2(28.0, 24.0), egui::Sense::click());
+                let bg = if on {
+                    t.accent_soft
+                } else if resp.hovered() {
+                    t.hover
+                } else {
+                    Color32::TRANSPARENT
+                };
+                ui.painter().rect_filled(r, 3.0, bg);
+                let font = if i == 0 { crate::theme::semibold(13.0) } else { egui::FontId::proportional(13.0) };
+                let col = if on { t.text } else { t.text_dim };
+                let g = ui.painter().layout_no_wrap(glyph.to_string(), font, col);
+                let pos = r.center() - g.size() / 2.0;
+                let gr = egui::Rect::from_min_size(pos, g.size());
+                if i == 1 {
+                    // Faux italic: a slanted T drawn as strokes (no italic face is bundled).
+                    let (top, bot, cx) = (gr.top() + 3.0, gr.bottom() - 3.0, gr.center().x);
+                    let slant = (bot - top) * 0.25;
+                    ui.painter().line_segment([egui::pos2(cx - 4.0 + slant / 2.0, top), egui::pos2(cx + 4.0 + slant / 2.0, top)], Stroke::new(1.3, col));
+                    ui.painter().line_segment([egui::pos2(cx + slant / 2.0, top), egui::pos2(cx - slant / 2.0, bot)], Stroke::new(1.3, col));
+                } else {
+                    ui.painter().galley(pos, g, col);
+                }
+                if i == 4 {
+                    ui.painter().line_segment([egui::pos2(gr.left(), gr.bottom() - 2.0), egui::pos2(gr.right(), gr.bottom() - 2.0)], Stroke::new(1.0, col));
+                }
+                if i == 5 {
+                    ui.painter().line_segment([egui::pos2(gr.left() - 1.0, gr.center().y), egui::pos2(gr.right() + 1.0, gr.center().y)], Stroke::new(1.0, col));
+                }
+                if resp.on_hover_text(tip).clicked() {
+                    apply(app, ui.ctx(), props);
+                }
+            }
+        });
+    }
+    if !paragraph {
+        return;
+    }
     section(ui, "Paragraph");
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;

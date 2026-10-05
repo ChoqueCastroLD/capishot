@@ -849,6 +849,7 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
     p.layers = layers;
     p.history = history;
     p.properties = props;
+    p.character = false;
 }
 
 #[cfg(test)]

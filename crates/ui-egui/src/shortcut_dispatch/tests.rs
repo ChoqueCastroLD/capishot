@@ -111,10 +111,11 @@ fn put_focus(h: &mut Harness<'_, PhotocraftApp>, place: Place) {
         }
         Place::OpacityField => {
             // The Layers panel's Opacity field: the DragValue in the right dock reading 100.
+            let layers = crate::dock::last_rects(&h.ctx).into_iter().find(|(g, _)| *g == crate::dock::Group::Layers).expect("Layers drawn").1;
             let at = h
                 .query_all_by_role(Role::SpinButton)
                 .map(|n| n.rect())
-                .filter(|r| r.center().x > 1100.0 && r.center().y > 500.0)
+                .filter(|r| layers.contains(r.center()))
                 .min_by(|a, b| a.center().y.total_cmp(&b.center().y))
                 .expect("Layers opacity field")
                 .center();

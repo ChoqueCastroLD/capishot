@@ -209,9 +209,10 @@ fn panel_tab(app: &PhotocraftApp, id: &str) -> Option<(&'static str, usize)> {
         "window.panel.paths" => ("layers", 2),
         "window.panel.layers" => ("layers", 0),
         "window.panel.adjustments" => ("properties", 1),
-        "window.panel.properties" | "window.panel.character" | "window.panel.paragraph" | "type.panels.character" | "type.panels.paragraph" => {
-            ("properties", 0)
-        }
+        "window.panel.properties" => ("properties", 0),
+        // Their own Character | Paragraph group, so Properties stays open (#150).
+        "window.panel.character" | "type.panels.character" => ("character", 0),
+        "window.panel.paragraph" | "type.panels.paragraph" => ("character", 1),
         "window.panel.swatches" => ("color", usize::from(pro)),
         "window.panel.color" => ("color", usize::from(!pro)),
         _ => return None,
@@ -225,6 +226,7 @@ fn panel_state<'a>(app: &'a mut PhotocraftApp, panel: &str) -> (&'a mut bool, &'
         "history" => (&mut p.history, &mut t.history),
         "layers" => (&mut p.layers, &mut t.layers),
         "color" => (&mut p.color, &mut t.color),
+        "character" => (&mut p.character, &mut t.character),
         _ => (&mut p.properties, &mut t.properties),
     }
 }
@@ -356,6 +358,7 @@ pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
             "history" => (p.history, t.history),
             "layers" => (p.layers, t.layers),
             "color" => (p.color, t.color),
+            "character" => (p.character, t.character),
             _ => (p.properties, t.properties),
         };
         return Some(vis && cur == tab);

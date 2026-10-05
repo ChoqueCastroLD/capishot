@@ -227,6 +227,9 @@ pub struct Panels {
     /// Window › Brush Settings (F5): floating, like Photoshop's.
     #[serde(default)]
     pub brush_settings: bool,
+    /// Window › Character / Paragraph: the Character | Paragraph dock group (#150).
+    #[serde(default)]
+    pub character: bool,
 }
 
 impl Default for Panels {
@@ -241,6 +244,7 @@ impl Default for Panels {
             options_bar: true,
             status_bar: true,
             brush_settings: false,
+            character: false,
         }
     }
 }
@@ -510,6 +514,8 @@ pub struct DockTabs {
     pub navigator: usize,
     /// History | Actions.
     pub history: usize,
+    /// Character | Paragraph.
+    pub character: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

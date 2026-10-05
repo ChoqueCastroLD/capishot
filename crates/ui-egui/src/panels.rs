@@ -774,6 +774,7 @@ fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Pan
     let shown: Vec<Group> = [
         (Group::Color, p.color),
         (Group::Properties, t.pro && p.properties),
+        (Group::Character, p.character),
         (Group::Navigator, p.navigator),
         (Group::History, p.history),
         (Group::Layers, p.layers),
@@ -808,6 +809,7 @@ fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate::dock::Gro
         (Group::Color, _) => color_picker(app, ui),
         (Group::Properties, 0) => properties_body(app, ui),
         (Group::Properties, _) => adjustments_grid(app, ui),
+        (Group::Character, tab) => crate::type_tool::character_panel(app, ui, tab == 1),
         (Group::Navigator, 0) => navigator(app, ui),
         (Group::Navigator, 1) => crate::tone::histogram_panel(app, ui),
         (Group::Navigator, _) => info_panel(app, ui),
@@ -1053,6 +1055,8 @@ fn blend_options(groups: bool) -> Vec<(BlendMode, &'static str)> {
 }
 
 fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    // A new active layer opens its parent groups and is scrolled into view (#152).
+    let reveal = crate::layer_reveal::track(app, ui.ctx());
     let Some(st) = app.session.active() else {
         empty(ui, "No document");
         return;
@@ -1182,7 +1186,11 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     }
                 }
                 let row = RowSel { selected: selection.contains(&l.id), primary: active == Some(l.id), multi: selection.len() > 1 };
+                let top = ui.cursor().top();
                 layer_row(app, &ctx, ui, &doc, l, depth, row, &mut actions);
+                if reveal == Some(l.id) {
+                    crate::layer_reveal::scroll_to_row(ui, top);
+                }
                 if !l.effects.items.is_empty() && fx_collapsed.iter().all(|id| *id != l.id) {
                     effect_rows(app, ui, l, depth);
                 }
