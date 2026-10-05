@@ -640,7 +640,7 @@ pub fn gain_map_opcode_list(area: [u32; 4], pitch: u32, gains: [[f32; 2]; 2]) ->
 pub struct Cr2Spec {
     pub width: usize,
     pub height: usize,
-    /// Sensor samples, row-major, RGGB from (`left`, `top`).
+    /// Sensor samples, row-major.
     pub data: Vec<u16>,
     pub precision: u8,
     pub components: usize,
@@ -651,6 +651,8 @@ pub struct Cr2Spec {
     /// As-shot RGGB levels written to ColorData at word offset 0x3F.
     pub wb_rggb: Option<[u16; 4]>,
     pub orientation: u16,
+    /// Canon model ID written to MakerNote tag 0x0010.
+    pub model_id: Option<u32>,
 }
 
 impl Cr2Spec {
@@ -679,6 +681,9 @@ impl Cr2Spec {
         }
         let raw_ifd = t.ifd(raw);
         let mut mn: Vec<(u16, Val)> = Vec::new();
+        if let Some(id) = self.model_id {
+            mn.push((0x0010, Val::Long(vec![id])));
+        }
         if let Some([l, tp, r, b]) = self.borders {
             mn.push((0x00E0, Val::Short(vec![34, w as u16, h as u16, 0, 0, l, tp, r, b, 0, 0, 0, 0, 0, 0, 0, 0])));
         }

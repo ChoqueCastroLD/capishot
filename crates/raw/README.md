@@ -23,8 +23,8 @@ Implemented only from public specifications, papers and observation of files:
 * TIFF 6.0, TIFF/EP (ISO 12234-2) and the Adobe DNG Specification 1.7.
 * ITU-T T.81 (ISO 10918-1) Annex H: lossless JPEG, process 14 ("LJ92").
 * The published description of Canon's CR2 container (header, raw IFD, slice tag 0xC640).
-* Publicly documented maker-note / private tags (ExifTool's tag tables): Canon SensorInfo
-  (0x00E0) and ColorData (0x4001), Nikon WB_RBLevels (0x000C) and BlackLevel (0x003D), Sony
+* Publicly documented maker-note / private tags (ExifTool's tag tables): Canon ModelID (0x0010),
+  SensorInfo (0x00E0) and ColorData (0x4001), Nikon WB_RBLevels (0x000C) and BlackLevel (0x003D), Sony
   BlackLevel (0x7310), WB_RGGBLevels (0x7313), SonyRawFileType (0x7000) and SonyToneCurve
   (0x7010), the PanasonicRaw IFD0 tags, Olympus ImageProcessing (0x2040) and CameraSettings
   (0x2020) preview tags.
@@ -46,7 +46,7 @@ camera colour tables were copied.
 |---|---|
 | DNG | Uncompressed (8–16 bit, packed or not) and lossless JPEG; strips and tiles; CFA (Bayer) and LinearRaw; LinearizationTable, BlackLevel (+ repeat, DeltaH/V), WhiteLevel, ActiveArea, DefaultCrop, ColorMatrix1/2, CameraCalibration, ForwardMatrix, AnalogBalance, AsShotNeutral / AsShotWhiteXY, BaselineExposure, Orientation, OpcodeList2 GainMap (lens shading) |
 | DNG (lossy JPEG, JPEG XL, floating point; opcodes other than GainMap) | Unsupported / not applied (reported) |
-| CR2 | Lossless JPEG with slices, borders and as-shot white balance from the maker note, black measured on the masked border |
+| CR2 | Lossless JPEG with slices, borders and as-shot white balance from the maker note, black measured on the masked border. CR2 has no CFA tag and the row phase varies by model, so it is measured from the data (the green diagonal), with a Canon model-ID table as the fallback (see `src/cr2.rs`) |
 | CR2 sRAW / mRAW | Unsupported |
 | NEF / NRW, ARW, PEF and other TIFF/EP raws | Uncompressed and lossless-JPEG (incl. Sony lossless ARW) CFA data |
 | Sony compressed ARW ("cRAW", SonyRawFileType 2) | Decoded: 11-bit min/max + 7-bit delta blocks, SonyToneCurve to 14 bits |

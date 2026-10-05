@@ -49,6 +49,7 @@ fn main() {
                     borders: None,
                     wb_rggb: None,
                     orientation: 1,
+                    model_id: None,
                 };
                 let _ = std::fs::write(format!("{dir}/synthetic.cr2"), cr2.build());
             }
@@ -167,7 +168,18 @@ fn synthetic(w: usize, h: usize, opts: &DevelopOptions) {
     spec.white = 15000;
     spec.as_shot_neutral = Some([0.5, 1.0, 0.7]);
     spec.color_matrix1 = Some((21, [0.9, -0.3, -0.1, -0.4, 1.3, 0.1, -0.1, 0.2, 0.6]));
-    let cr2 = Cr2Spec { width: w, height: h, data, precision: 14, components: 4, slices: vec![w / 2, w - w / 2], borders: None, wb_rggb: None, orientation: 1 };
+    let cr2 = Cr2Spec {
+        width: w,
+        height: h,
+        data,
+        precision: 14,
+        components: 4,
+        slices: vec![w / 2, w - w / 2],
+        borders: None,
+        wb_rggb: None,
+        orientation: 1,
+        model_id: None,
+    };
     let files = [
         ("DNG uncompressed", spec.build()),
         ("DNG LJ92 256x256 tiles", {

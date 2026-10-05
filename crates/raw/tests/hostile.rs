@@ -37,6 +37,7 @@ fn samples() -> Vec<Vec<u8>> {
             borders: Some([8, 2, 39, 9]),
             wb_rggb: Some([2000, 1024, 1024, 1500]),
             orientation: 8,
+            model_id: None,
         }
         .build(),
     );
