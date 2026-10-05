@@ -44,8 +44,8 @@ Baseline: 2026-10-05, commit `f5d2bcb54a`, Apple M4 Pro (48 GB), GPU Apple M4 Pr
 | P19 | Open a 20 MP layered PSD: editable | ≤ 3000 ms p95 | 1753 | 2794 | 2794 | 2.2 GB | 1.9 GB | pass | [#210](https://github.com/storytold/photocraft/issues/210) |
 | P21 | Content-Aware Fill on 10 MP | ≤ 1500 ms p95 | 218 | 256 | 256 | 1.8 GB | 1.8 GB | pass | [#210](https://github.com/storytold/photocraft/issues/210) |
 | P22 | Spot Healing stroke on 10 MP | ≤ 500 ms p95 | 157 | 247 | 247 | 1.8 GB | 1.9 GB | pass | [#210](https://github.com/storytold/photocraft/issues/210) |
-| P26 | Select › Modify › Smooth on 24 MP (radius 50) | ≤ 100 ms p95 | 19296 | 22051 | 22051 | 1.9 GB | – | over budget (target not met yet) | [#211](https://github.com/storytold/photocraft/issues/211) |
-| P27 | Select › Modify › Feather on 24 MP (radius 50) | ≤ 100 ms p95 | 42668 | 52100 | 52100 | 650 MB | – | over budget (target not met yet) | [#211](https://github.com/storytold/photocraft/issues/211) |
+| P26 | Select › Modify › Smooth on 24 MP (radius 50) | ≤ 100 ms p95 | 99.9 | 216 | 251 | 1.0 GB | – | over budget (target not met yet) | [#211](https://github.com/storytold/photocraft/issues/211) |
+| P27 | Select › Modify › Feather on 24 MP (radius 50) | ≤ 100 ms p95 | 122 | 357 | 360 | 1.1 GB | – | over budget (target not met yet) | [#211](https://github.com/storytold/photocraft/issues/211) |
 | P28 | Content-Aware Scale 24 MP (to 90 % width) | ≤ 3000 ms p95 | 954192 | 954192 | 954192 | 2.1 GB | – | over budget (target not met yet) | [#211](https://github.com/storytold/photocraft/issues/211) |
 | P29 | Select Subject on 24 MP, repeated | ≤ 100 ms p95 | 559 | 693 | 693 | 1.4 GB | – | over budget (target not met yet) | [#211](https://github.com/storytold/photocraft/issues/211) |
 | P33 | Brush dab on A4 300 ppi CMYK (dab to screen) | ≤ 6 ms p95 | 34.7 | 235 | 235 | 775 MB | 87 MB | over budget (target not met yet) | [#211](https://github.com/storytold/photocraft/issues/211) |
