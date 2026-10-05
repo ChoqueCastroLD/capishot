@@ -1133,8 +1133,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // (Preferences › Tools, `paint_mouse`).
         crate::paint_mouse::sync_tool_smoothing(app);
         let buttons = crate::paint_mouse::canvas_buttons(app, &response, tool);
+        // A drag is only recognised once the pointer has moved past egui's click distance: the
+        // gesture starts where the button went down, not where it is now (#123).
         if buttons.started
-            && let Some(p) = response.interact_pointer_pos()
+            && let Some(p) = ui.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)).or(response.interact_pointer_pos())
         {
             if tool == Tool::Move && app.ui.transform.is_none() {
                 begin_transform_controls_at(app, &ctx, &xf, p);

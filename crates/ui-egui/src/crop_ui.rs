@@ -400,8 +400,9 @@ mod tests {
             h.step();
         }
         let drawn = h.state().ui.crop_rect.unwrap();
-        // egui starts the drag at the first move past its threshold (220, 170).
-        assert_eq!((drawn[2] - drawn[0], drawn[3] - drawn[1]), (20.0, 10.0), "40x20 screen px at 200%");
+        // The frame starts where the button went down (200, 150), not at the first move past
+        // egui's drag threshold (#123).
+        assert_eq!((drawn[2] - drawn[0], drawn[3] - drawn[1]), (30.0, 20.0), "60x40 screen px at 200%");
         h.event(space(true));
         h.step();
         for p in [pos2(280.0, 200.0), pos2(300.0, 210.0)] {

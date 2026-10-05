@@ -62,10 +62,40 @@ fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<LayerId> {
         doc.walk().into_iter().filter(|(_, _, l)| l.visible && matches!(l.content, LayerContent::Text(_))).map(|(_, _, l)| l.id).collect();
     ids.reverse(); // walk() is bottom-up; hit the topmost first
     ids.into_iter().find(|id| {
-        let Some((l, aff, _)) = layout(app, *id) else { return false };
+        // The pixels shown count too: a PSD's type keeps Photoshop's rendering until edited,
+        // which can sit off our layout when fonts are substituted (#123).
+        let shown = text_layer(&doc, *id).and_then(|t| t.cache.as_ref()).map(|c| c.content_bounds()).is_some_and(|r| {
+            let s = f64::from(slop);
+            !r.is_empty() && x >= f64::from(r.x0) - s && x <= f64::from(r.x1) + s && y >= f64::from(r.y0) - s && y <= f64::from(r.y1) + s
+        });
+        let Some((l, aff, _)) = layout(app, *id) else { return shown };
         let (tx, ty) = to_text(&aff, x, y);
-        l.bounds().is_some_and(|b| tx >= b[0] - slop && tx <= b[2] + slop && ty >= b[1] - slop && ty <= b[3] + slop)
+        shown || l.bounds().is_some_and(|b| tx >= b[0] - slop && tx <= b[2] + slop && ty >= b[1] - slop && ty <= b[3] + slop)
     })
+}
+
+/// True when the layer's pixels are what our engine draws for it. A PSD's type layer keeps
+/// Photoshop's pixels until it is edited, and with substituted fonts or a different line layout
+/// they sit somewhere else than the glyphs the caret and selection are placed on.
+fn shows_own_layout(doc: &Document, t: &TextLayer) -> bool {
+    let Some(cache) = &t.cache else { return false };
+    let Ok(mut eng) = photocraft_text::shared().lock() else { return true };
+    let ours = eng.render(t, doc.resolution_dpi, doc.pixel_format()).1.surface.content_bounds();
+    let have = cache.content_bounds();
+    [(ours.x0, have.x0), (ours.y0, have.y0), (ours.x1, have.x1), (ours.y1, have.y1)].iter().all(|(a, b)| (a - b).abs() <= 1)
+}
+
+/// Start editing an existing type layer. Like Photoshop, editing shows the text as the type
+/// engine lays it out, so a PSD layer is re-rendered first (inside the edit session's history
+/// step, so Cancel brings Photoshop's pixels back).
+fn begin_edit(app: &mut PhotocraftApp, id: LayerId, key: &str) {
+    let Some(st) = app.session.active() else { return };
+    let doc = st.doc.clone();
+    if let Some(t) = text_layer(&doc, id)
+        && !shows_own_layout(&doc, t)
+    {
+        let _ = app.run("type.edit", json!({"layer": id.0, "coalesce": key}));
+    }
 }
 
 fn hit_offset(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> usize {
@@ -99,8 +129,10 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) -> boo
     }
     if let Some(id) = hit_layer(app, x, y) {
         let _ = app.session.select_layer(id);
+        let key = session_key(app);
+        begin_edit(app, id, &key);
         let off = hit_offset(app, id, x, y);
-        app.ui.text_edit = Some(TextEdit { layer: id.0, caret: off, anchor: off, session: session_key(app), created: false, dragging: true, preedit: None });
+        app.ui.text_edit = Some(TextEdit { layer: id.0, caret: off, anchor: off, session: key, created: false, dragging: true, preedit: None });
         return true;
     }
     false
@@ -566,17 +598,35 @@ fn target(app: &PhotocraftApp) -> Option<(u64, Option<[usize; 2]>)> {
     text_layer(&st.doc, id).map(|_| (id.0, None))
 }
 
+/// Scale of the target layer's transform. Like Photoshop, sizes show and edit as the layer
+/// appears: a 12 pt layer scaled 200% (common in PSDs) reads 24 pt.
+fn shown_scale(app: &PhotocraftApp) -> f32 {
+    let Some((id, _)) = target(app) else { return 1.0 };
+    let Some(t) = app.session.active().and_then(|st| text_layer(&st.doc, LayerId(id))) else { return 1.0 };
+    let m = t.transform.m;
+    let k = (m[0] * m[3] - m[1] * m[2]).abs().sqrt() as f32;
+    if k.is_finite() && k > 1e-3 { k } else { 1.0 }
+}
+
+/// Coalesce key while a field is being scrubbed: every step of one drag shares one history step
+/// (Photoshop's single step per scrub, #124). Unique per press, so two drags are two steps.
+fn drag_key(ctx: &egui::Context) -> Option<String> {
+    let id = ctx.dragged_id()?;
+    let t = ctx.input(|i| i.pointer.press_start_time())?;
+    Some(format!("type-drag-{}-{}", id.value(), t.to_bits()))
+}
+
 /// Apply character/paragraph properties to the target (selection, else whole layer) and remember
 /// them as tool defaults.
-fn apply(app: &mut PhotocraftApp, props: serde_json::Value) {
+fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, props: serde_json::Value) {
     let Some((layer, range)) = target(app) else { return };
     let mut p = props;
     p["layer"] = json!(layer);
     if let Some(r) = range {
         p["range"] = json!(r);
     }
-    if let Some(ed) = &app.ui.text_edit {
-        p["coalesce"] = json!(ed.session);
+    if let Some(key) = app.ui.text_edit.as_ref().map(|ed| ed.session.clone()).or_else(|| drag_key(ctx)) {
+        p["coalesce"] = json!(key);
     }
     let _ = app.run("type.setStyle", p);
 }
@@ -589,7 +639,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let st = app.session.active()?;
         let tl = text_layer(&st.doc, LayerId(id))?;
         let run = tl.char_runs().into_iter().next().map(|r| r.style);
-        Some((tl.font_family.clone(), run.as_ref().map(|s| s.font_style.clone()).unwrap_or_default(), tl.size_pt, tl.color))
+        // The size at the selection (else the first run), as the layer shows it (#124).
+        let size = styles_at(app).map_or(tl.size_pt, |(c, _)| c.size_pt) * shown_scale(app);
+        Some((tl.font_family.clone(), run.as_ref().map(|s| s.font_style.clone()).unwrap_or_default(), size, tl.color))
     });
     let o = app.ui.tool_options.clone();
     let (mut fam, mut style, mut size) = match &shown {
@@ -602,19 +654,20 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let st = styles(&fam);
         style = if st.contains(&style) { style } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
         app.ui.tool_options.type_style = style.clone();
-        apply(app, json!({"font": fam, "fontStyle": style}));
+        apply(app, ui.ctx(), json!({"font": fam, "fontStyle": style}));
     }
     let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), s)).collect();
     let opts_ref: Vec<(String, &str)> = opts.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
     if crate::widgets::dropdown(ui, "type-style", &mut style, &opts_ref, 110.0) {
         app.ui.tool_options.type_style = style.clone();
-        apply(app, json!({"fontStyle": style}));
+        apply(app, ui.ctx(), json!({"fontStyle": style}));
     }
     let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 22.0), egui::Sense::hover());
     crate::icons::paint(ui, r, "type", 13.0, t.icon);
     if crate::widgets::value_field(ui, &mut size, 1.0..=1296.0, "pt", 66.0).changed() {
         app.ui.tool_options.type_size = size;
-        apply(app, json!({"size": size}));
+        let k = shown_scale(app);
+        apply(app, ui.ctx(), json!({"size": size / k}));
     }
     let mut aa = o.type_aa.clone();
     let aa_opts = [
@@ -641,7 +694,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     {
         if crate::icons::button(ui, icon, 24.0, o.type_align == align, tip).clicked() {
             app.ui.tool_options.type_align = align.into();
-            apply(app, json!({"align": align}));
+            apply(app, ui.ctx(), json!({"align": align}));
         }
     }
     ui.spacing_mut().item_spacing.x = 8.0;
@@ -663,7 +716,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let mut col = Color32::from_rgb(q(c[0]), q(c[1]), q(c[2]));
         if egui::color_picker::color_picker_color32(ui, &mut col, egui::color_picker::Alpha::Opaque) {
-            apply(app, json!({"color": format!("#{:02x}{:02x}{:02x}", col.r(), col.g(), col.b())}));
+            apply(app, ui.ctx(), json!({"color": format!("#{:02x}{:02x}{:02x}", col.r(), col.g(), col.b())}));
         }
     });
     if app.ui.text_edit.is_some() {
@@ -764,7 +817,7 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             app.ui.tool_options.type_font = fam.clone();
             let st = styles(&fam);
             let style = if st.contains(&c.font_style) { c.font_style.clone() } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
-            apply(app, json!({"font": fam, "fontStyle": style}));
+            apply(app, ui.ctx(), json!({"font": fam, "fontStyle": style}));
         }
     });
     ui.horizontal(|ui| {
@@ -772,18 +825,19 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), s)).collect();
         let opts_ref: Vec<(String, &str)> = opts.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
         if crate::widgets::dropdown(ui, "props-type-style", &mut style, &opts_ref, 170.0) {
-            apply(app, json!({"fontStyle": style}));
+            apply(app, ui.ctx(), json!({"fontStyle": style}));
         }
     });
     let w = ((ui.available_width() - 70.0) / 2.0).clamp(50.0, 90.0);
     ui.horizontal(|ui| {
-        if let Some(v) = num_field(ui, "tT", "Font size", c.size_pt, 0.1..=1296.0, "pt", w) {
+        let k = shown_scale(app);
+        if let Some(v) = num_field(ui, "tT", "Font size", c.size_pt * k, 0.1..=1296.0, "pt", w) {
             app.ui.tool_options.type_size = v;
-            apply(app, json!({"size": v}));
+            apply(app, ui.ctx(), json!({"size": v / k}));
         }
-        let lead = c.leading_pt.unwrap_or(c.size_pt * para.auto_leading.max(0.01));
+        let lead = c.leading_pt.unwrap_or(c.size_pt * para.auto_leading.max(0.01)) * k;
         if let Some(v) = num_field(ui, "A↕", "Leading (set to the font size × auto-leading when Auto)", lead, 0.1..=5000.0, "pt", w) {
-            apply(app, json!({"leading": v}));
+            apply(app, ui.ctx(), json!({"leading": v / k}));
         }
     });
     ui.horizontal(|ui| {
@@ -801,23 +855,23 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             &[("metrics".to_string(), "Metrics"), ("optical".to_string(), "Optical"), ("off".to_string(), "0")],
             w,
         ) {
-            apply(app, json!({"kerning": k}));
+            apply(app, ui.ctx(), json!({"kerning": k}));
         }
         if let Some(v) = num_field(ui, "VA", "Tracking (1/1000 em)", c.tracking, -1000.0..=10000.0, "", w) {
-            apply(app, json!({"tracking": v}));
+            apply(app, ui.ctx(), json!({"tracking": v}));
         }
     });
     ui.horizontal(|ui| {
         if let Some(v) = num_field(ui, "↕T", "Vertical scale", c.vertical_scale * 100.0, 0.0..=1000.0, "%", w) {
-            apply(app, json!({"verticalScale": v}));
+            apply(app, ui.ctx(), json!({"verticalScale": v}));
         }
         if let Some(v) = num_field(ui, "↔T", "Horizontal scale", c.horizontal_scale * 100.0, 0.0..=1000.0, "%", w) {
-            apply(app, json!({"horizontalScale": v}));
+            apply(app, ui.ctx(), json!({"horizontalScale": v}));
         }
     });
     ui.horizontal(|ui| {
         if let Some(v) = num_field(ui, "Aª", "Baseline shift", c.baseline_shift_pt, -1296.0..=1296.0, "pt", w) {
-            apply(app, json!({"baselineShift": v}));
+            apply(app, ui.ctx(), json!({"baselineShift": v}));
         }
         // Colour chip.
         ui.add_space(8.0);
@@ -830,7 +884,7 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             let mut col = Color32::from_rgb(q(rgb[0]), q(rgb[1]), q(rgb[2]));
             if egui::color_picker::color_picker_color32(ui, &mut col, egui::color_picker::Alpha::Opaque) {
-                apply(app, json!({"color": format!("#{:02x}{:02x}{:02x}", col.r(), col.g(), col.b())}));
+                apply(app, ui.ctx(), json!({"color": format!("#{:02x}{:02x}{:02x}", col.r(), col.g(), col.b())}));
             }
         });
     });
@@ -887,7 +941,7 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ui.painter().line_segment([egui::pos2(gr.left() - 1.0, gr.center().y), egui::pos2(gr.right() + 1.0, gr.center().y)], Stroke::new(1.0, col));
             }
             if resp.on_hover_text(tip).clicked() {
-                apply(app, props);
+                apply(app, ui.ctx(), props);
             }
         }
     });
@@ -923,34 +977,34 @@ pub fn type_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
             align_glyph(ui.painter(), r.shrink2(egui::vec2(7.0, 7.0)), a, if on { t.text } else { t.icon });
             if resp.on_hover_text(tip).clicked() {
-                apply(app, json!({"align": key}));
+                apply(app, ui.ctx(), json!({"align": key}));
             }
         }
     });
     ui.horizontal(|ui| {
         if let Some(v) = num_field(ui, "→|", "Indent left margin", para.start_indent_pt, -1296.0..=1296.0, "pt", w) {
-            apply(app, json!({"startIndent": v}));
+            apply(app, ui.ctx(), json!({"startIndent": v}));
         }
         if let Some(v) = num_field(ui, "|←", "Indent right margin", para.end_indent_pt, -1296.0..=1296.0, "pt", w) {
-            apply(app, json!({"endIndent": v}));
+            apply(app, ui.ctx(), json!({"endIndent": v}));
         }
     });
     ui.horizontal(|ui| {
         if let Some(v) = num_field(ui, "¶→", "Indent first line", para.first_line_indent_pt, -1296.0..=1296.0, "pt", w) {
-            apply(app, json!({"firstLineIndent": v}));
+            apply(app, ui.ctx(), json!({"firstLineIndent": v}));
         }
     });
     ui.horizontal(|ui| {
         if let Some(v) = num_field(ui, "↑¶", "Add space before paragraph", para.space_before_pt, 0.0..=1296.0, "pt", w) {
-            apply(app, json!({"spaceBefore": v}));
+            apply(app, ui.ctx(), json!({"spaceBefore": v}));
         }
         if let Some(v) = num_field(ui, "¶↓", "Add space after paragraph", para.space_after_pt, 0.0..=1296.0, "pt", w) {
-            apply(app, json!({"spaceAfter": v}));
+            apply(app, ui.ctx(), json!({"spaceAfter": v}));
         }
     });
     let mut hy = para.hyphenate;
     if crate::widgets::checkbox(ui, &mut hy, "Hyphenate").changed() {
-        apply(app, json!({"hyphenate": hy}));
+        apply(app, ui.ctx(), json!({"hyphenate": hy}));
     }
 }
 
@@ -962,6 +1016,10 @@ pub fn cancel(app: &mut PhotocraftApp) {
         let _ = app.run("edit.undo", json!({}));
     }
 }
+
+#[cfg(test)]
+#[path = "type_tool_tests.rs"]
+mod canvas_tests;
 
 #[cfg(test)]
 mod tests {

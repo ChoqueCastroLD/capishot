@@ -485,3 +485,47 @@ fn engine_data_template_without_engine_dict() {
         assert!(matches!(text, Some(E::String(s)) if s == "Hi\r"), "{text:?}");
     }
 }
+
+/// #123: the caret geometry (clusters, lines) sits on the rendered glyphs, so a click on a glyph
+/// lands next to it: its left part before it, its right part after it. Plain text, tracking,
+/// horizontal scale, mixed sizes, and centred, wrapped paragraph text.
+#[test]
+fn clusters_sit_on_rendered_glyphs() {
+    let mut e = TextEngine::new();
+    let big = CharStyle { size_pt: 40.0, ..Default::default() };
+    let small = CharStyle { size_pt: 18.0, ..Default::default() };
+    let mixed =
+        TextLayer { text: "HOHOHO".into(), runs: vec![TextRun { len: 3, style: big.clone() }, TextRun { len: 3, style: small.clone() }], ..Default::default() };
+    let boxed = with_para(
+        TextLayer { shape: TextShape::Box { x: 0.0, y: 0.0, width: 150.0, height: 200.0 }, ..styled("HOH HOH HOH HOH", small.clone()) },
+        ParagraphStyle { align: TextAlign::Center, ..Default::default() },
+    );
+    let cases = [
+        ("plain", styled("HOHOH", big.clone())),
+        ("tracking", styled("HOHOH", CharStyle { tracking: 300.0, ..big.clone() })),
+        ("hscale", styled("HOHOH", CharStyle { horizontal_scale: 1.6, ..big.clone() })),
+        ("mixed", mixed),
+        ("box", boxed),
+    ];
+    for (name, t) in cases {
+        let t = TextLayer { transform: Affine::translate(7.0, 60.0), ..t };
+        let (l, r) = e.render(&t, 72.0, PixelFormat::RGBA8);
+        assert!(l.lines.len() >= if name == "box" { 2 } else { 1 }, "{name}");
+        for c in l.clusters.iter().filter(|c| !t.text[c.range.clone()].trim().is_empty()) {
+            let ln = &l.lines[c.line];
+            // Ink under the cluster's middle, between the line's ascent and descent.
+            let col = photocraft_geom::Rect::new(
+                (c.x + c.advance * 0.3 + 7.0).floor() as i32,
+                (ln.baseline - ln.ascent + 60.0).floor() as i32,
+                (c.x + c.advance * 0.55 + 7.0).ceil() as i32,
+                (ln.baseline + ln.descent + 60.0).ceil() as i32,
+            );
+            assert!(alpha_sum(&r.surface, col) > 1.0, "{name}: no ink under cluster {:?} ({col:?})", c.range);
+            let y = ln.baseline - ln.ascent * 0.4;
+            assert_eq!(l.hit_test(c.x + c.advance * 0.2, y), c.range.start, "{name}: left part of {:?}", c.range);
+            assert_eq!(l.hit_test(c.x + c.advance * 0.8, y), c.range.end, "{name}: right part of {:?}", c.range);
+            let (cx, top, bottom) = l.caret(c.range.start);
+            assert!((cx - c.x).abs() < 1e-3 && top < y && bottom > y, "{name}: caret at {:?}", c.range);
+        }
+    }
+}

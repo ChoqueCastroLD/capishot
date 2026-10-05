@@ -358,16 +358,24 @@ pub fn refresh(doc: &Document, t: &mut TextLayer) {
 
 fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&mut TextLayer, &Document) -> Result<R>) -> Result<R> {
     let id = layer_id(s, p)?;
-    s.edit(label, |doc, _| {
+    let (r, damage) = s.edit(label, |doc, _| {
         let snapshot = doc.clone();
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         let LayerContent::Text(t) = &mut l.content else {
             return Err(EngineError::Other(format!("layer {} is a {} layer, not a type layer", id.0, l.content.kind_name())));
         };
+        let before = t.cache.as_ref().map(|c| c.tile_bounds());
         let r = f(t, &snapshot)?;
         refresh(&snapshot, t);
-        Ok(r)
-    })
+        // Only this layer's pixels changed: the canvas recomposites their old and new area
+        // instead of the whole document (#124). Unknown old pixels mean a full refresh.
+        let damage = before.zip(t.cache.as_ref().map(|c| c.tile_bounds())).map(|(a, b)| a.union(&b));
+        Ok((r, damage))
+    })?;
+    if let Some(st) = s.active_mut() {
+        st.last_damage = damage;
+    }
+    Ok(r)
 }
 
 fn layer_name(text: &str) -> String {
@@ -754,6 +762,25 @@ mod tests {
         assert!(fonts["families"].as_array().unwrap().iter().any(|f| f == "Inter"));
         let faces = s.execute("type.fonts", json!({"family": "Inter"})).unwrap();
         assert!(!faces["faces"].as_array().unwrap().is_empty());
+    }
+
+    /// #124: a type edit damages only the layer's old and new pixels (the canvas recomposites
+    /// that, not the document), and a drag's coalesced steps are one history step.
+    #[test]
+    fn type_edits_damage_only_the_layer_and_coalesce() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 3000, "height": 2000})).unwrap();
+        let id = s.execute("type.create", json!({"x": 100, "y": 100, "text": "Hi", "size": 20})).unwrap()["layer"].as_u64().unwrap();
+        let steps = s.active().unwrap().history.entries().len();
+        for k in 0..5 {
+            s.execute("type.setStyle", json!({"layer": id, "size": 30 + k * 10, "coalesce": "drag"})).unwrap();
+            let d = s.active().unwrap().last_damage.expect("damage rect");
+            let r = text_layer(&s, id).cache.unwrap().content_bounds();
+            assert!(d.intersect(&r) == r && d.width() <= 512 && d.height() <= 512, "{d:?} {r:?}");
+        }
+        assert_eq!(s.active().unwrap().history.entries().len(), steps + 1);
+        assert!(s.undo());
+        assert_eq!(text_layer(&s, id).runs[0].style.size_pt, 20.0);
     }
 
     #[test]
