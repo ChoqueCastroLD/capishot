@@ -39,6 +39,7 @@ const F_TEX: u32 = 4u;           // layer pixels live in `layer_tex`
 const F_GRADIENT: u32 = 8u;      // gradient fill (stops in `lut_tex`)
 const F_KNOCKOUT: u32 = 16u;     // effect paint: the layer knocks out the coverage (drop shadow)
 const F_NO_LAYER: u32 = 32u;    // effect merge: A already holds the layer (only the opacity mix)
+const F_OUTLINE: u32 = 131072u;      // outside strokes: filled shape outline (effects::outline_share)
 const F_VECTOR: u32 = 64u;       // effect paint: shape layer (outside stroke never inside)
 const F_ATOP: u32 = 128u;        // effect merge: clipped layer over an opaque base
 const F_GATE: u32 = 256u;        // effect paint: coverage only inside the layer's shape
@@ -793,7 +794,10 @@ fn fx_color(d: vec2<i32>) -> vec4<f32> {
 
 // Effect chain steps (`kind`): 0 A at `opacity` × alpha; 1 an opaque copy of A (a clipping base
 // for clipped layers' effects); 2 A's colour with alpha `opacity` inside B's shape (the layer
-// before its interior effects); 3 A with its alpha × B's alpha (the shape's own alpha).
+// before its interior effects); 3 A with its alpha × B's alpha (the shape's own alpha); 4 the
+// vector stroke C over A, relative to the shape B, at `opacity`; 5 A's colour with alpha
+// `opacity` × A's alpha relative to B's (the layer within a filled shape's outline); 6 the
+// outside-stroke coverage seed (0, A's alpha); 7 A with alpha joined with the effect shape (map).
 @fragment
 fn fs_fxinit(in: VOut) -> @location(0) vec4<f32> {
     let p = local(in.pos);
@@ -802,8 +806,30 @@ fn fs_fxinit(in: VOut) -> @location(0) vec4<f32> {
         case 1: { return vec4(c.rgb, 1.0); }
         case 2: { return vec4(c.rgb, select(0.0, op.opacity, c.a > INSIDE_EPS)); }
         case 3: { return vec4(c.rgb, c.a * min(textureLoad(tex_b, p, 0).a, 1.0)); }
+        case 4: {
+            let a = textureLoad(tex_b, p, 0).a;
+            let s = textureLoad(tex_c, p, 0);
+            if (s.a <= 0.0 || a <= INSIDE_EPS) { return c; }
+            return composite(op.mode, c, vec4(s.rgb, op.opacity * min(s.a / a, 1.0)), 1.0);
+        }
+        case 5: {
+            let a = textureLoad(tex_b, p, 0).a;
+            if (a <= INSIDE_EPS) { return vec4(c.rgb, 0.0); }
+            return vec4(c.rgb, op.opacity * min(c.a / a, 1.0));
+        }
+        case 6: { return vec4(0.0, c.a, 0.0, 0.0); }
+        case 7: { return vec4(c.rgb, max(c.a, map_value(doc_px(p), 0.0))); }
         default: { return vec4(c.rgb, c.a * op.opacity); }
     }
+}
+
+// effects::outline_share: an outside stroke's share of an edge pixel the outline covers `cov` of,
+// beneath a layer of alpha `l` (disjoint areas).
+fn outline_share(cov: f32, l: f32) -> f32 {
+    let outside = max(1.0 - clamp(cov, 0.0, 1.0), 0.0);
+    let rest = 1.0 - clamp(l, 0.0, 1.0);
+    if (rest <= 1e-6) { return 1.0; }
+    return min(outside / rest, 1.0);
 }
 
 // effects::paint: composite `colour × coverage × opacity` into A. B is the layer (its alpha `a`
@@ -835,21 +861,32 @@ fn fs_fxpaint(in: VOut) -> @location(0) vec4<f32> {
 }
 
 // Outside strokes (A = the exterior result before them, B = the layer, C = coverage so far in
-// `.r`, D (`layer_tex`) = accumulated premultiplied colour). Each stroke takes its band × opacity
-// not yet covered above it; `kind` 0 accumulates that share of the stroke blended over A at full
+// `.r` and, along a filled shape's outline (F_OUTLINE), the layer's alpha in `.g`, D
+// (`layer_tex`) = accumulated premultiplied colour). Each stroke takes its band × opacity not yet
+// covered above it; `kind` 0 accumulates that share of the stroke blended over A at full
 // coverage, `kind` 1 the coverage.
 @fragment
 fn fs_fxstroke(in: VOut) -> @location(0) vec4<f32> {
     let p = local(in.pos);
     let d = doc_px(p);
     let a = textureLoad(tex_b, p, 0).a;
-    var k = map_value(d, 0.0);
-    if (a > INSIDE_EPS) { k = select(1.0, 0.0, (op.flags & F_VECTOR) != 0u); }
+    let outline = (op.flags & F_OUTLINE) != 0u;
     let first = (op.flags & F_FIRST) != 0u;
     var cover = 0.0;
-    if (!first) { cover = textureLoad(tex_c, p, 0).r; }
+    var lay_a = 0.0;
+    if (!first || outline) {
+        let cv = textureLoad(tex_c, p, 0);
+        cover = cv.r;
+        lay_a = cv.g;
+    }
+    var k = map_value(d, 0.0);
+    if (outline) {
+        k = k * outline_share(a, lay_a);
+    } else if (a > INSIDE_EPS) {
+        k = select(1.0, 0.0, (op.flags & F_VECTOR) != 0u);
+    }
     let share = k * op.opacity * (1.0 - cover);
-    if (op.kind == 1) { return vec4(cover + share, 0.0, 0.0, 0.0); }
+    if (op.kind == 1) { return vec4(cover + share, lay_a, 0.0, 0.0); }
     var acc = vec4(0.0);
     if (!first) { acc = textureLoad(layer_tex, p, 0); }
     if (share > 0.0) {

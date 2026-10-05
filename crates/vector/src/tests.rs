@@ -347,3 +347,31 @@ fn perf_6016() {
     );
     assert!(s16.tile_count() > 0);
 }
+
+#[test]
+fn joined_subpaths_fill_as_one_component() {
+    // An outer square and an inner one wound the other way: as one component (PSD operation
+    // -1 after the first record) the inner one is a hole; as separate "combine" shapes it isn't.
+    let outer = Subpath::polygon(&[(2.0, 2.0), (18.0, 2.0), (18.0, 18.0), (2.0, 18.0)]);
+    let inner = Subpath::polygon(&[(6.0, 6.0), (6.0, 14.0), (14.0, 14.0), (14.0, 6.0)]);
+    let r = Rect::new(0, 0, 20, 20);
+    let joined = Path::new(vec![outer.clone(), inner.clone().with_op(PathOp::Join)]);
+    let v = cov(&joined, r);
+    assert_eq!(v[10 * 20 + 10], 0.0, "hole");
+    assert_eq!(v[4 * 20 + 4], 1.0);
+    assert!((area(&v) - (256.0 - 64.0)).abs() < 1e-3);
+    let separate = Path::new(vec![outer.clone(), inner.clone()]);
+    assert_eq!(cov(&separate, r)[10 * 20 + 10], 1.0);
+    assert_eq!(joined.components(), vec![0..2]);
+    assert_eq!(separate.components(), vec![0..1, 1..2]);
+    // A component after a joined one starts afresh with its own operation.
+    let cut = Subpath::polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 4.0), (0.0, 4.0)]).with_op(PathOp::Subtract);
+    let p = Path::new(vec![outer, inner.with_op(PathOp::Join), cut]);
+    assert_eq!(p.components(), vec![0..2, 2..3]);
+    let v = cov(&p, r);
+    assert_eq!(v[3 * 20 + 10], 0.0);
+    assert_eq!(v[5 * 20 + 10], 1.0);
+    // A lone joined subpath acts as the first component.
+    let lone = Path::new(vec![Subpath::polygon(&[(2.0, 2.0), (8.0, 2.0), (8.0, 8.0)]).with_op(PathOp::Join)]);
+    assert_eq!(cov(&lone, r)[3 * 20 + 6], 1.0);
+}

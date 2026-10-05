@@ -119,6 +119,7 @@ fn op_from(s: &str) -> Option<PathOp> {
         "subtract" | "minus" => PathOp::Subtract,
         "intersect" => PathOp::Intersect,
         "exclude" | "xor" => PathOp::Exclude,
+        "join" => PathOp::Join,
         _ => return None,
     })
 }
@@ -129,6 +130,7 @@ fn op_name(op: PathOp) -> &'static str {
         PathOp::Subtract => "subtract",
         PathOp::Intersect => "intersect",
         PathOp::Exclude => "exclude",
+        PathOp::Join => "join",
     }
 }
 

@@ -564,6 +564,13 @@ pub(crate) fn shape_key(layer: &Layer, canvas: Rect) -> u64 {
             let fr = photocraft_compose::fill_frame(layer, canvas);
             (fr.x0, fr.y0, fr.x1, fr.y1, content.is_some()).hash(&mut h);
         }
+        // A filled shape's effect shape follows its outline too.
+        LayerContent::Shape(sh) => {
+            std::mem::discriminant(&layer.content).hash(&mut h);
+            if photocraft_compose::effect_outline(layer).is_some() {
+                format!("{:?}", sh.path).hash(&mut h);
+            }
+        }
         other => std::mem::discriminant(other).hash(&mut h),
     }
     for s in [content, mask].into_iter().flatten() {

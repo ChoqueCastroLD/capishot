@@ -290,6 +290,8 @@ pub struct DocCtx<'a> {
     pub mode: photocraft_color::ColorMode,
     /// Sample depth (adjustment results are rounded to it).
     pub depth: photocraft_color::SampleType,
+    /// The document (effect geometry the CPU computes, e.g. gradient stroke frames).
+    pub doc: &'a Document,
 }
 
 impl<'a> DocCtx<'a> {
@@ -301,6 +303,7 @@ impl<'a> DocCtx<'a> {
             patterns: &doc.patterns,
             mode: doc.mode,
             depth: doc.depth,
+            doc,
         }
     }
 }
@@ -340,6 +343,9 @@ enum Cov {
 pub const F_KNOCKOUT: u32 = 16;
 /// Effect merge: A already holds the layer; only mix with the backdrop by the layer's opacity.
 pub const F_NO_LAYER: u32 = 32;
+/// Outside strokes along a filled shape's outline (`effects::outline_share`; the coverage slot
+/// carries the layer's alpha in `.g`).
+pub const F_OUTLINE: u32 = 131072;
 /// Shape layer (outside strokes never show inside it).
 pub const F_VECTOR: u32 = 64;
 /// Merge onto an opaque clipping base, keeping its alpha.
@@ -371,6 +377,17 @@ pub const INIT_SCALE: i32 = 0;
 pub const INIT_OPAQUE: i32 = 1;
 pub const INIT_INSIDE: i32 = 2;
 pub const INIT_ALPHA: i32 = 3;
+/// The vector stroke C over A relative to the shape B, at `opacity`.
+pub const INIT_VSTROKE: i32 = 4;
+/// A's colour with alpha `opacity` × A's alpha relative to B's.
+pub const INIT_RELATIVE: i32 = 5;
+/// Outside-stroke coverage seed: (0, A's alpha).
+pub const INIT_COVER: i32 = 6;
+/// A with its alpha joined with the effect shape (the map).
+pub const INIT_OUTLINE: i32 = 7;
+
+/// `MapRef::item` of the layer's effect shape (`compose::layer_shape`) instead of an effect map.
+pub const SHAPE_MAP: usize = usize::MAX;
 
 impl<'a> Planner<'a> {
     fn new(cx: DocCtx<'a>) -> Self {
@@ -612,25 +629,23 @@ impl<'a> Planner<'a> {
             && let Some((fill, stroke)) = photocraft_compose::shape_split::split(sh, self.cx.canvas)
         {
             // The vector stroke goes above the clipped layers: the fill is the clipping base,
-            // the stroke is laid over the clipped result (compose::shape_parts).
-            let part = |s: &mut Self, role: Role, surface: Surface| {
-                let mut p = Pass::new(Kernel::Content, 0);
-                p.mask = s.mask_use(layer);
-                p.color = photocraft_raster::to_rgba(&surface.format(), &surface.default_pixel());
-                if surface.tile_count() > 0 {
-                    p.tex = Some(TexUse { layer: layer.id, role, surface: SurfaceRef::Derived(std::sync::Arc::new(surface)) });
-                }
-                s.emit(p)
-            };
-            let mut content = part(self, Role::Content, fill);
+            // the stroke is laid over the clipped result, then the masks apply to both
+            // (compose::shape_parts).
+            let mut content = self.shape_part(layer, Role::Content, fill);
             for c in visible_clipped {
                 content = self.atop(c, content)?;
             }
-            let stroke = part(self, Role::Stroke, stroke);
+            let stroke = self.shape_part(layer, Role::Stroke, stroke);
             let mut p = Pass::new(Kernel::Blend, 0);
             p.a = Some(content);
             p.b = Some(stroke);
-            let content = self.emit(p);
+            let mut content = self.emit(p);
+            if let Some(m) = self.mask_use(layer) {
+                let mut p = Pass::new(Kernel::Mask, 0);
+                p.a = Some(content);
+                p.mask = Some(m);
+                content = self.emit(p);
+            }
             let mut p = Pass::new(Kernel::Blend, 0);
             p.a = Some(backdrop);
             p.b = Some(content);
@@ -705,6 +720,16 @@ impl<'a> Planner<'a> {
         self.passes.push(p);
         self.release(merged);
         dst
+    }
+
+    /// A stroked shape's fill or vector stroke alone (`compose::shape_split`), unmasked.
+    fn shape_part(&mut self, layer: &'a Layer, role: Role, surface: Surface) -> Slot {
+        let mut p = Pass::new(Kernel::Content, 0);
+        p.color = photocraft_raster::to_rgba(&surface.format(), &surface.default_pixel());
+        if surface.tile_count() > 0 {
+            p.tex = Some(TexUse { layer: layer.id, role, surface: SurfaceRef::Derived(std::sync::Arc::new(surface)) });
+        }
+        self.emit(p)
     }
 
     /// render_content for non-adjustment layers.
@@ -873,22 +898,70 @@ impl<'a> Planner<'a> {
         let region = bounds::effect_region(layer, canvas);
         let sb = photocraft_compose::paint_bounds(layer).unwrap_or_else(|| bounds::layer_bounds(layer, canvas));
         let clip = if bounds::transparent_outside(layer) { region } else { canvas };
-        let mut content = self.content(layer)?;
-        if !matches!(layer.content, LayerContent::Group(_))
-            && let Some(p) = self.passes.last_mut()
-        {
-            p.clip = Some(clip);
+        // A stroked shape's vector stroke goes above its clipped layers and interior effects
+        // (compose::split_parts): the fill and the stroke unmasked, the masks applied after.
+        let split = match &layer.content {
+            LayerContent::Shape(sh) if sh.stroke.is_some() => photocraft_compose::shape_split::split(sh, canvas),
+            _ => None,
+        };
+        let (mut content, vstroke) = match split {
+            Some((fill, stroke)) => {
+                let f = self.shape_part(layer, Role::Content, fill);
+                let s = self.shape_part(layer, Role::Stroke, stroke);
+                (f, Some(s))
+            }
+            None => (self.content(layer)?, None),
+        };
+        for p in self.passes.iter_mut().rev().take(if vstroke.is_some() { 2 } else { 1 }) {
+            if !matches!(layer.content, LayerContent::Group(_)) {
+                p.clip = Some(clip);
+            }
         }
         for c in clipped {
             content = self.atop(c, content)?;
         }
         let fx = self.fx.len();
         self.fx.push(FxLayer { layer, region, bounds: sb });
+        let outline = photocraft_compose::effect_outline(layer).is_some();
+        let relative = outline || vstroke.is_some();
+        // `content` becomes the effect shape (B of every effect pass); `lay_src` the layer's colour.
+        let (lay_src, vstroke) = match vstroke {
+            Some(s) => {
+                let mut p = Pass::new(Kernel::Blend, 0);
+                p.a = Some(self.retain(content));
+                p.b = Some(self.retain(s));
+                p.clip = Some(clip);
+                let union = self.emit(p);
+                let m = self.mask_use(layer);
+                let masked = |me: &mut Self, slot: Slot| match &m {
+                    Some(m) => {
+                        let mut p = Pass::new(Kernel::Mask, 0);
+                        p.a = Some(slot);
+                        p.mask = Some(m.clone());
+                        p.clip = Some(clip);
+                        me.emit(p)
+                    }
+                    None => slot,
+                };
+                let fill = masked(self, content);
+                content = masked(self, union);
+                (fill, Some(masked(self, s)))
+            }
+            None => (self.retain(content), None),
+        };
+        if outline {
+            let mut p = Pass::new(Kernel::FxInit, 0);
+            p.a = Some(content);
+            p.adjust_kind = INIT_OUTLINE;
+            p.map = Some(MapRef { fx, item: SHAPE_MAP, map: 0 });
+            p.clip = Some(clip);
+            content = self.emit(p);
+        }
 
         let items: Vec<&'a Effect> = layer.effects.items.iter().filter(|e| e.enabled()).collect();
         // Linked patterns tile from the effects reference point (else the layer's top-left).
         let anchor = layer.effects.reference.unwrap_or((f64::from(sb.x0), f64::from(sb.y0)));
-        let vector_shape = matches!(layer.content, LayerContent::Shape(_));
+        let vector_shape = matches!(layer.content, LayerContent::Shape(_)) && !outline;
         let map = |item: usize, map: usize| MapRef { fx, item, map };
         let rev: Vec<(usize, &'a Effect)> = items.iter().copied().enumerate().rev().collect();
         let init = |s: &mut Self, src: Slot, b: Option<Slot>, kind: i32, opacity: f32| {
@@ -936,8 +1009,12 @@ impl<'a> Planner<'a> {
 
         // The layer: its colour at fill opacity inside its shape; interior effects are painted
         // relative to the shape (coverage within it), then the shape's alpha applies.
-        let c = self.retain(content);
-        let mut l = init(self, c, None, INIT_INSIDE, layer.fill_opacity);
+        let mut l = if relative {
+            let c = self.retain(content);
+            init(self, lay_src, Some(c), INIT_RELATIVE, layer.fill_opacity)
+        } else {
+            init(self, lay_src, None, INIT_INSIDE, layer.fill_opacity)
+        };
         for &(_, e) in &rev {
             if let Effect::PatternOverlay { common, name, id, scale, angle, link, phase } = e
                 && let Some(pat) = photocraft_doc::pattern::find(self.cx.patterns, id, name).filter(|p| !p.is_empty())
@@ -972,13 +1049,33 @@ impl<'a> Planner<'a> {
                 l = self.paint(l, content, Cov::Map(map(i, 0), 0.0), &Paint::Color(s.color.to_rgb()), s.common.blend, s.common.opacity, F_REL, clip, sb);
             }
         }
+        if let Some(s) = vstroke {
+            let mut p = Pass::new(Kernel::FxInit, 0);
+            p.a = Some(l);
+            p.b = Some(self.retain(content));
+            p.c = Some(s);
+            p.adjust_kind = INIT_VSTROKE;
+            p.opacity = layer.fill_opacity;
+            p.clip = Some(clip);
+            l = self.emit(p);
+        }
         // Inside stroke parts are painted over the layer (bottom instance first).
         for &(i, e) in &rev {
             if let Effect::Stroke(st) = e {
                 let (in_w, _) = stroke_widths(st);
                 if in_w > 0.0 {
                     let paint = self.fx_paint(&st.paint, anchor);
-                    l = self.paint(l, content, Cov::Map(map(i, 1), (in_w + 0.5).clamp(0.0, 1.0)), &paint, st.common.blend, st.common.opacity, F_GATE, clip, sb);
+                    l = self.paint(
+                        l,
+                        content,
+                        Cov::Map(map(i, 1), (in_w + 0.5).clamp(0.0, 1.0)),
+                        &paint,
+                        st.common.blend,
+                        st.common.opacity,
+                        F_GATE,
+                        clip,
+                        photocraft_compose::stroke_frame(self.cx.doc, layer, st).unwrap_or(sb),
+                    );
                 }
             }
         }
@@ -1016,11 +1113,26 @@ impl<'a> Planner<'a> {
             .collect();
         if !outs.is_empty() {
             let (mut acc, mut cover): (Option<Slot>, Option<Slot>) = (None, None);
+            if outline {
+                // The layer's alpha rides along the coverage (`effects::outline_share`).
+                let ll = self.retain(l);
+                cover = Some(init(self, ll, None, INIT_COVER, 1.0));
+            }
             for (n, &(i, st)) in outs.iter().enumerate() {
                 let paint = self.fx_paint(&st.paint, anchor);
-                let flags = F_STROKE_OUT | if vector_shape { F_VECTOR } else { 0 } | if n == 0 { F_FIRST } else { 0 };
+                let flags = F_STROKE_OUT | if vector_shape { F_VECTOR } else { 0 } | if outline { F_OUTLINE } else { 0 } | if n == 0 { F_FIRST } else { 0 };
                 // Share × blended colour, then coverage (both read the coverage so far).
-                let mut p = self.fx_pass_kernel(Kernel::FxStroke, w, content, &paint, st.common.blend, st.common.opacity, flags, clip, sb);
+                let mut p = self.fx_pass_kernel(
+                    Kernel::FxStroke,
+                    w,
+                    content,
+                    &paint,
+                    st.common.blend,
+                    st.common.opacity,
+                    flags,
+                    clip,
+                    photocraft_compose::stroke_frame(self.cx.doc, layer, st).unwrap_or(sb),
+                );
                 if matches!(paint, Paint::None) {
                     // A missing pattern paints nothing: the stroke's share keeps the result as is.
                     p.params[2][2] = 3.0;

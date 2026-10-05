@@ -122,7 +122,8 @@ impl Rasterizer {
             // Photoshop applies the first component as "combine".
             let op = if i == 0 { PathOp::Combine } else { c.op };
             acc = match op {
-                PathOp::Combine => acc | v,
+                // A joined component (only reachable when built by hand) combines.
+                PathOp::Combine | PathOp::Join => acc | v,
                 PathOp::Subtract => acc & !v,
                 PathOp::Intersect => acc & v,
                 PathOp::Exclude => acc ^ v,

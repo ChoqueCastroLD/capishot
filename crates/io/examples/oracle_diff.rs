@@ -11,6 +11,7 @@
 //! cargo run --release -p photocraft-io --example oracle_diff -- corpus/psd             # every file: max err, bad %, PASS/DIFF
 //! cargo run --release -p photocraft-io --example oracle_diff -- file.psd 0 dump prefix # raw f32 planes for offline fitting
 //! cargo run --release -p photocraft-io --example oracle_diff -- file.psd 0 bylayer    # max error around each layer
+//! SCALE=4 …                                                                         # upscale the png
 //! HIDE_ADJ=1 …                                                                        # adjustment layers hidden
 //! ONLY="name,name" …                                                                  # only these top-level layers (+ the bottom one)
 //! DUMP_FX=1 …                                                                          # raw effects descriptors
@@ -89,7 +90,21 @@ fn main() {
             println!("    alpha bounds ({x0},{y0})-({x1},{y1})");
         }
         if let photocraft_doc::LayerContent::Shape(sh) = &l.content {
-            println!("    shape path bounds {:?}", sh.path.control_bounds());
+            println!(
+                "    shape path bounds {:?} subpaths {} rule {:?} inverted {} fill {} stroke {} outline {}",
+                sh.path.control_bounds(),
+                sh.path.subpaths.len(),
+                sh.path.fill_rule,
+                sh.path.inverted,
+                sh.fill.is_some(),
+                sh.stroke.is_some(),
+                photocraft_compose::effect_outline(l).is_some()
+            );
+            if std::env::var_os("PATHS").is_some() {
+                for s in &sh.path.subpaths {
+                    println!("      subpath {:?} closed {} knots {:?}", s.op, s.closed, s.knots.iter().map(|k| (k.anchor.x, k.anchor.y)).collect::<Vec<_>>());
+                }
+            }
         }
         if let Some(vm) = &l.vector_mask {
             println!("    vector mask bounds {:?}", vm.path.control_bounds());
@@ -130,6 +145,19 @@ fn main() {
                     walk(&vd.descriptor, 3, &mut out);
                     for l in out.iter().filter(|l| !l.trim_start().starts_with("Clrs") && !l.trim_start().starts_with("Trns")) {
                         println!("{l}");
+                    }
+                }
+            }
+            if k == b"TySh"
+                && let Some(Ok((vd, _))) = v.get(52..).map(photocraft_psd::descriptor::VersionedDescriptor::parse_prefix)
+            {
+                // Text bounds (text space) and the transform.
+                let t: Vec<f64> = (0..6).map(|i| f64::from_be_bytes(v[2 + i * 8..10 + i * 8].try_into().unwrap())).collect();
+                println!("    TySh transform {t:?}");
+                for key in ["bounds", "boundingBox"] {
+                    if let Some(photocraft_psd::descriptor::Value::Descriptor(d)) = vd.descriptor.get(key) {
+                        let n: Vec<String> = d.items.iter().map(|(k, v)| format!("{}={v:?}", String::from_utf8_lossy(k.as_bytes()))).collect();
+                        println!("    TySh {key}: {}", n.join(" "));
                     }
                 }
             }
@@ -213,6 +241,20 @@ fn main() {
                 }
             }
         }
+        // SCALE=n: nearest-neighbour upscale (small files).
+        let k: usize = std::env::var("SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(1).clamp(1, 16);
+        let (img, w, h) = if k > 1 {
+            let mut big = vec![0u8; w * 3 * k * h * k * 4];
+            for y in 0..h * k {
+                for x in 0..w * 3 * k {
+                    let (s, d) = (((y / k) * w * 3 + x / k) * 4, (y * w * 3 * k + x) * 4);
+                    big[d..d + 4].copy_from_slice(&img[s..s + 4]);
+                }
+            }
+            (big, w * k, h * k)
+        } else {
+            (img, w, h)
+        };
         let image =
             photocraft_codecs::Image::from_raw((w * 3) as u32, h as u32, photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8, img)
                 .unwrap();
@@ -339,6 +381,43 @@ fn main() {
         for x in (x0..x1).step_by(((x1 - x0) / 20).max(1)) {
             let (a, b) = (ours[y * w + x], merged[y * w + x]);
             println!("x={x:5} ours {:?} ps {:?}", a.map(|v| (v * 1000.0).round() / 1000.0), b.map(|v| (v * 1000.0).round() / 1000.0));
+        }
+        return;
+    }
+    if std::env::args().nth(3).as_deref() == Some("solve") {
+        // solve layer-name x0 y0 x1 y1: per pixel the layer's content alpha `l`, its shape's path
+        // coverage `cov`, Photoshop's alpha `A` and the alpha `s` an effect beneath the layer
+        // would need (A = s + l (1 - s)) over a transparent backdrop.
+        let name = std::env::args().nth(4).expect("layer name");
+        let a: Vec<i32> = (5..9).map(|i| std::env::args().nth(i).and_then(|s| s.parse().ok()).unwrap_or(0)).collect();
+        let w = doc.size.width as usize;
+        let l = doc.walk().into_iter().map(|t| t.2).find(|l| l.name == name).expect("layer");
+        let r = photocraft_geom::Rect::new(a[0], a[1], a[2], a[3]);
+        let cov = match &l.content {
+            photocraft_doc::LayerContent::Shape(sh) => photocraft_vector::path_coverage(&sh.path, r),
+            _ => vec![0.0; r.width() as usize * r.height() as usize],
+        };
+        for y in r.y0..r.y1 {
+            for x in r.x0..r.x1 {
+                let la = l.surface().map_or(0.0, |s| s.pixel(x, y)[3]);
+                let c = cov[((y - r.y0) * r.width() as i32 + x - r.x0) as usize];
+                let p = merged[y as usize * w + x as usize];
+                let o = ours[y as usize * w + x as usize];
+                let s = if la < 1.0 { (p[3] - la) / (1.0 - la) } else { f32::NAN };
+                println!("({x:3},{y:3}) l {la:.3} cov {c:.3} A {:.3} ours {:.3} s {s:.3} ps {:?}", p[3], o[3], p.map(|v| (v * 255.0).round()));
+            }
+        }
+        return;
+    }
+    if std::env::args().nth(3).as_deref() == Some("line") {
+        // line x0 y0 x1 y1: every pixel on the segment, straight RGBA 0-255, ours | ps.
+        let w = doc.size.width as usize;
+        let a: Vec<i64> = (4..8).map(|i| std::env::args().nth(i).and_then(|s| s.parse().ok()).unwrap_or(0)).collect();
+        let n = (a[2] - a[0]).abs().max((a[3] - a[1]).abs()).max(1);
+        for k in 0..=n {
+            let (x, y) = ((a[0] + (a[2] - a[0]) * k / n) as usize, (a[1] + (a[3] - a[1]) * k / n) as usize);
+            let (o, p) = (ours[y * w + x], merged[y * w + x]);
+            println!("({x:4},{y:4}) ours {:?} ps {:?}", o.map(|v| (v * 255.0).round()), p.map(|v| (v * 255.0).round()));
         }
         return;
     }

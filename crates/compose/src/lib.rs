@@ -511,8 +511,65 @@ pub fn layer_bounds(layer: &Layer, canvas: Rect) -> Rect {
             }
         }),
         LayerContent::Fill(_) => canvas,
-        _ => layer.surface().map_or(Rect::EMPTY, bounds::content_bounds),
+        _ => {
+            let b = layer.surface().map_or(Rect::EMPTY, bounds::content_bounds);
+            // Effects follow a filled shape's outline, also where its fill is transparent.
+            match effect_outline(layer).and_then(|_| paint_bounds(layer)).filter(|_| effects::has_effects(layer)) {
+                Some(p) if !b.is_empty() => b.union(&p),
+                Some(p) => p,
+                None => b,
+            }
+        }
     }
+}
+
+/// The path a shape layer's effects are shaped by: its fill path. Photoshop builds a filled
+/// shape's layer effects from its vector outline, not from its pixels: a stroke runs along the
+/// whole path even where a gradient fill fades out (psd-tools stroke-effects). `None` for other
+/// layers, shapes without fill, empty and inverted paths, and shapes whose vector stroke reaches
+/// past the path (their pixels give the outline: psd-tools double-stroke-effects).
+pub fn effect_outline(layer: &Layer) -> Option<&photocraft_doc::vector::Path> {
+    let LayerContent::Shape(sh) = &layer.content else { return None };
+    let stroke_inside = sh.stroke.as_ref().is_none_or(|s| s.width <= 0.0 || s.align == photocraft_doc::vector::StrokeAlign::Inside);
+    (sh.fill.is_some() && stroke_inside && !sh.path.is_empty() && !sh.path.inverted).then_some(&sh.path)
+}
+
+/// The shape a layer's effects are built from over `rect` (row-major): its content's alpha
+/// (masks applied), completed for shapes with an [`effect_outline`] by the outline's coverage
+/// where the fill is see-through. With `l` the alpha and `f` the fill's own opacity (the largest
+/// alpha around), the shape is `l + (1 - f) × coverage`: Photoshop's own rasterization where the
+/// fill is opaque (it can differ from ours by a fraction of a pixel: psd-tools shape-fx2), the
+/// path where the fill fades out (psd-tools stroke-effects).
+fn effect_shape(layer: &Layer, rect: Rect, cx: &Ctx) -> Vec<f32> {
+    let n = rect.width() as usize * rect.height() as usize;
+    let Some(path) = effect_outline(layer).filter(|_| n > 0) else {
+        return render_content(layer, rect, cx).map(|b| b.px.iter().map(|p| p[3]).collect()).unwrap_or_else(|| vec![0.0; n]);
+    };
+    // Unmasked: the masks scale the shape, they aren't the fill's transparency.
+    let a: Vec<f32> = layer.surface().map(|s| surface_to_buffer(s, rect).px.iter().map(|p| p[3]).collect()).unwrap_or_else(|| vec![0.0; n]);
+    let cov = photocraft_vector::path_coverage(path, rect);
+    let mv = mask_vals(layer, rect, cx);
+    let (w, h) = (rect.width() as usize, rect.height() as usize);
+    let mut out = vec![0.0; n];
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            // A pixel the outline covers is inside, whatever the fill's opacity.
+            let v = if cov[i] >= 1.0 - 1e-3 {
+                1.0
+            } else {
+                let mut f = 0.0f32;
+                for yy in y.saturating_sub(1)..(y + 2).min(h) {
+                    for xx in x.saturating_sub(1)..(x + 2).min(w) {
+                        f = f.max(a[yy * w + xx]);
+                    }
+                }
+                (a[i] + (1.0 - f.min(1.0)) * cov[i]).clamp(0.0, 1.0)
+            };
+            out[i] = v * mask_k(&mv, i);
+        }
+    }
+    out
 }
 
 /// The frame layer-effect gradients and linked patterns are laid out in, when it isn't the
@@ -583,12 +640,27 @@ fn render_content(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Buffer> {
     Some(buf)
 }
 
-/// The alpha of `layer`'s own content over `rect` (masks applied, row-major): the shape its
-/// effect maps are built from (for the GPU compositor). Zero for adjustment layers.
+/// The shape `layer`'s effect maps are built from over `rect` (row-major; for the GPU
+/// compositor): its content's alpha (masks applied), joined with the [`effect_outline`] of a
+/// filled shape. Zero for adjustment layers.
+///
+/// See also [`stroke_frame`].
 pub fn layer_shape(doc: &Document, layer: &Layer, rect: Rect) -> Vec<f32> {
     let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES);
     let cx = Ctx::for_doc(doc, &patterns);
-    render_content(layer, rect, &cx).map(|b| b.px.iter().map(|p| p[3]).collect()).unwrap_or_else(|| vec![0.0; rect.width() as usize * rect.height() as usize])
+    effect_shape(layer, rect, &cx)
+}
+
+/// The frame a gradient stroke `st` of `layer` is laid out in (`effects::FxMaps::stroke_frame`),
+/// from the layer's cached effect maps; `None` when `st` isn't a gradient stroke of the layer.
+/// For the GPU compositor.
+pub fn stroke_frame(doc: &Document, layer: &Layer, st: &photocraft_doc::StrokeFx) -> Option<Rect> {
+    if !matches!(st.paint, photocraft_doc::FxPaint::Gradient(_)) || !effects::has_effects(layer) {
+        return None;
+    }
+    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES);
+    let cx = Ctx::for_doc(doc, &patterns);
+    effect_maps(layer, &cx).stroke_frame(st)
 }
 
 pub fn surface_to_buffer(s: &Surface, rect: Rect) -> Buffer {
@@ -1013,10 +1085,18 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
     if effects::has_effects(layer) {
         // Neighbourhoods are already captured by the full-region effect maps;
         // content and effect application only need the output rectangle.
-        let Some(mut content) = render_content(layer, rect, cx) else { return };
+        // A stroked shape's vector stroke stays above its clipped layers and interior effects.
+        let (mut content, vstroke) = match split_parts(layer, rect, cx) {
+            Some((fill, stroke, mask)) => (fill, Some((stroke, mask))),
+            None => {
+                let Some(content) = render_content(layer, rect, cx) else { return };
+                (content, None)
+            }
+        };
         for c in clipped.iter().filter(|c| c.visible) {
             composite_atop(c, &mut content, cx);
         }
+        let vstroke = vstroke.as_ref().map(|(s, m)| effects::VectorStroke { stroke: s, mask: m.as_deref() });
         let maps = effect_maps(layer, cx);
         effects::composite_with_effects_prepared(
             layer,
@@ -1025,15 +1105,17 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
             &maps,
             paint_bounds(layer).unwrap_or_else(|| layer_bounds(layer, cx.canvas)),
             cx.patterns,
+            vstroke,
         );
         return;
     }
-    if let Some((mut content, stroke)) = shape_parts(layer, clipped, rect, cx) {
+    if let Some((mut content, stroke, mask)) = shape_parts(layer, clipped, rect, cx) {
         for c in clipped.iter().filter(|c| c.visible) {
             composite_atop(c, &mut content, cx);
         }
-        for (p, s) in content.px.iter_mut().zip(&stroke.px) {
+        for (i, (p, s)) in content.px.iter_mut().zip(&stroke.px).enumerate() {
             *p = psblend::composite(BlendMode::Normal, *p, *s, 1.0);
+            p[3] *= mask_k(&mask, i);
         }
         blend_into(backdrop, &content, layer.blend, opacity);
         return;
@@ -1053,22 +1135,23 @@ pub fn text_gamma(layer: &Layer) -> f32 {
 
 /// A stroked shape layer with visible clipped layers: Photoshop draws the shape's vector stroke
 /// above the clipped layers, so the base content is the fill alone and the stroke is laid on top
-/// after clipping. Returns (fill, stroke) buffers over `rect`, masks applied.
-fn shape_parts(layer: &Layer, clipped: &[Layer], rect: Rect, cx: &Ctx) -> Option<(Buffer, Buffer)> {
-    let LayerContent::Shape(sh) = &layer.content else { return None };
-    if sh.stroke.is_none() || !clipped.iter().any(|c| c.visible) {
+/// after clipping. See [`split_parts`].
+fn shape_parts(layer: &Layer, clipped: &[Layer], rect: Rect, cx: &Ctx) -> Option<(Buffer, Buffer, Option<Vec<f32>>)> {
+    if !clipped.iter().any(|c| c.visible) {
         return None;
     }
+    split_parts(layer, rect, cx)
+}
+
+/// A stroked shape layer's (fill, vector stroke, mask values) over `rect`; `None` for other
+/// layers. Fill and stroke are unmasked: the mask applies to them together. Layer effects paint
+/// the fill's interior effects beneath the vector stroke (psd-tools stroke-composite: a colour
+/// overlay leaves the stroke, the stroke effect covers it).
+fn split_parts(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<(Buffer, Buffer, Option<Vec<f32>>)> {
+    let LayerContent::Shape(sh) = &layer.content else { return None };
+    sh.stroke.as_ref()?;
     let (fs, ss) = shape_split::split(sh, cx.canvas)?;
-    let mut f = surface_to_buffer(&fs, rect);
-    let mut s = surface_to_buffer(&ss, rect);
-    if let Some(m) = mask_vals(layer, rect, cx) {
-        for ((a, b), k) in f.px.iter_mut().zip(s.px.iter_mut()).zip(&m) {
-            a[3] *= k;
-            b[3] *= k;
-        }
-    }
-    Some((f, s))
+    Some((surface_to_buffer(&fs, rect), surface_to_buffer(&ss, rect), mask_vals(layer, rect, cx)))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1176,7 +1259,7 @@ fn effect_maps(layer: &Layer, cx: &Ctx) -> std::sync::Arc<effects::FxMaps> {
     let m = effects::margin(layer);
     let region = layer_bounds(layer, cx.canvas).inflate(m).intersect(&cx.canvas.inflate(m));
     if std::env::var_os("PHOTOCRAFT_FX_NOCACHE").is_some() {
-        let shape = render_content(layer, region, cx).map(|b| b.px.iter().map(|p| p[3]).collect()).unwrap_or_default();
+        let shape = if region.is_empty() { Vec::new() } else { effect_shape(layer, region, cx) };
         return std::sync::Arc::new(effects::build_maps_prepared(layer, shape, region, &cx.light, &texture_ctx(layer, region, cx), cx.patterns));
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1196,13 +1279,7 @@ fn effect_maps(layer: &Layer, cx: &Ctx) -> std::sync::Arc<effects::FxMaps> {
         }
     };
     let entry = slot.get_or_init(|| {
-        let shape: Vec<f32> = if region.is_empty() {
-            Vec::new()
-        } else {
-            render_content(layer, region, cx)
-                .map(|b| b.px.iter().map(|p| p[3]).collect())
-                .unwrap_or_else(|| vec![0.0; region.width() as usize * region.height() as usize])
-        };
+        let shape: Vec<f32> = if region.is_empty() { Vec::new() } else { effect_shape(layer, region, cx) };
         let maps = effects::build_maps_prepared(layer, shape, region, &cx.light, &texture_ctx(layer, region, cx), cx.patterns);
         let bytes = maps.bytes();
         // Counted exactly once, when the entry is built.
@@ -1268,7 +1345,14 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
         // Effects of a clipped layer are clipped to the base too: render
         // them over the base (treated as opaque) and keep the base's alpha.
         // The full-region effect maps already capture their neighbourhoods.
-        let Some(content) = render_content(layer, rect, cx) else { return };
+        let (content, vstroke) = match split_parts(layer, rect, cx) {
+            Some((fill, stroke, mask)) => (fill, Some((stroke, mask))),
+            None => {
+                let Some(content) = render_content(layer, rect, cx) else { return };
+                (content, None)
+            }
+        };
+        let vstroke = vstroke.as_ref().map(|(s, m)| effects::VectorStroke { stroke: s, mask: m.as_deref() });
         let mut opaque = Buffer { rect, px: base.px.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() };
         let maps = effect_maps(layer, cx);
         effects::composite_with_effects_prepared(
@@ -1278,6 +1362,7 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
             &maps,
             paint_bounds(layer).unwrap_or_else(|| layer_bounds(layer, cx.canvas)),
             cx.patterns,
+            vstroke,
         );
         for (p, o) in base.px.iter_mut().zip(&opaque.px) {
             if p[3] > 0.0 {
@@ -1328,5 +1413,7 @@ fn blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f
     }
 }
 
+#[cfg(test)]
+mod stroke_tests;
 #[cfg(test)]
 mod tests;

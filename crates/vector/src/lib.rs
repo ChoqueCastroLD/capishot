@@ -39,9 +39,9 @@ pub const DEFAULT_TOLERANCE: f64 = 0.01;
 /// folded with the subpath operations; open subpaths are closed implicitly.
 pub fn fill_rasterizer(path: &Path, tol: f64) -> Rasterizer {
     let mut r = Rasterizer::new(path.inverted);
-    for s in &path.subpaths {
-        let pl = flatten_subpath(s, tol);
-        r.add_component(&[pl.pts], s.op, path.fill_rule);
+    for c in path.components() {
+        let polys: Vec<Vec<(f64, f64)>> = path.subpaths[c.clone()].iter().map(|s| flatten_subpath(s, tol).pts).collect();
+        r.add_component(&polys, path.effective_op(c.start), path.fill_rule);
     }
     r
 }

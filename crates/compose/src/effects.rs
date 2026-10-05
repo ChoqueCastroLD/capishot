@@ -1001,6 +1001,17 @@ pub struct FxMaps {
     dout: Option<Vec<f32>>,
     /// Shape layers: distance outside the vector outline (from local coverage).
     vdout: Option<Vec<f32>>,
+    /// `shape` joins the alpha with a filled shape's outline (`crate::effect_outline`).
+    outline: bool,
+    /// Frames of gradient strokes by outside width (bits): see [`stroke_frame`].
+    frames: Vec<(u32, Rect)>,
+}
+
+impl FxMaps {
+    /// The frame of a gradient stroke `st` of this layer (see [`stroke_frame`]), if built.
+    pub fn stroke_frame(&self, st: &photocraft_doc::StrokeFx) -> Option<Rect> {
+        self.frames.iter().find(|f| f.0 == stroke_widths(st).1.to_bits()).map(|f| f.1)
+    }
 }
 
 impl FxMaps {
@@ -1090,8 +1101,21 @@ pub(crate) fn build_maps_prepared(
     let has_stroke = items.iter().any(|e| matches!(e, Effect::Stroke(_)));
     let vector_shape = matches!(layer.content, photocraft_doc::LayerContent::Shape(_));
     let (din, dout) = if has_stroke { (Some(dist_inside_by(&shape, Metric::Chamfer)), Some(dist_outside_by(&shape, Metric::Chamfer))) } else { (None, None) };
-    let vdout = (has_stroke && vector_shape).then(|| dist_outside_by(&local_coverage(&shape), Metric::Chamfer));
-    FxMaps { rect, shape, per, bevel_paint, din, dout, vdout }
+    // Without an outline (unfilled shapes), estimate the vector outline from local coverage.
+    let outline = crate::effect_outline(layer).is_some();
+    let vdout = (has_stroke && vector_shape && !outline).then(|| dist_outside_by(&local_coverage(&shape), Metric::Chamfer));
+    let mut frames: Vec<(u32, Rect)> = Vec::new();
+    for e in &items {
+        if let Effect::Stroke(st) = e
+            && matches!(st.paint, FxPaint::Gradient(_))
+        {
+            let out_w = stroke_widths(st).1;
+            if !frames.iter().any(|f| f.0 == out_w.to_bits()) {
+                frames.push((out_w.to_bits(), stroke_frame(&shape, out_w, rect)));
+            }
+        }
+    }
+    FxMaps { rect, shape, per, bevel_paint, din, dout, vdout, outline, frames }
 }
 
 /// Far outside any shape (distance fill for cropped distance fields).
@@ -1101,7 +1125,7 @@ const FAR: f32 = 1.0e9;
 /// masked, clipped layers applied) plus its effects into `backdrop`.
 pub fn composite_with_effects(layer: &Layer, content: &Buffer, backdrop: &mut Buffer, maps: &FxMaps, layer_bounds: Rect, patterns: &[Pattern]) {
     let prepared = PreparedPatterns::new(patterns, PREPARED_PATTERN_BYTES);
-    composite_with_effects_prepared(layer, content, backdrop, maps, layer_bounds, &prepared);
+    composite_with_effects_prepared(layer, content, backdrop, maps, layer_bounds, &prepared, None);
 }
 
 pub(crate) fn composite_with_effects_prepared(
@@ -1111,10 +1135,21 @@ pub(crate) fn composite_with_effects_prepared(
     maps: &FxMaps,
     layer_bounds: Rect,
     patterns: &PreparedPatterns<'_>,
+    vstroke: Option<VectorStroke<'_>>,
 ) {
     let big = content.rect;
     let (w, h) = (big.width() as usize, big.height() as usize);
-    let shape = Map { w, h, v: content.px.iter().map(|p| p[3]).collect() };
+    // The effect shape: the content's alpha (with a split-off vector stroke, `content` is the
+    // unmasked fill and the mask applies to fill ∪ stroke), joined with a filled shape's outline.
+    let kmask = |i: usize| vstroke.as_ref().and_then(|v| v.mask).and_then(|m| m.get(i)).copied().unwrap_or(1.0);
+    let union = |i: usize, a: f32| vstroke.as_ref().and_then(|v| v.stroke.px.get(i)).map_or(a, |s| kmask(i) * (a + s[3] * (1.0 - a)));
+    let shape = if maps.outline {
+        let o = maps.crop(&maps.shape, big, 0.0);
+        Map { w, h, v: o.v.iter().zip(&content.px).enumerate().map(|(i, (o, p))| o.max(union(i, p[3]))).collect() }
+    } else {
+        Map { w, h, v: content.px.iter().enumerate().map(|(i, p)| union(i, p[3])).collect() }
+    };
+    let relative = maps.outline || vstroke.is_some();
     let fx = |i: usize, k: usize| maps.crop(&maps.per[i][k], big, 0.0);
     // Layer bounds (gradients aligned with the layer use the whole layer,
     // independent of the render rect).
@@ -1163,7 +1198,18 @@ pub(crate) fn composite_with_effects_prepared(
     // keeps its alpha, as in Photoshop.
     let fill = layer.fill_opacity;
     let inside = |a: f32| a > INSIDE_EPS;
-    let mut lay = Buffer { rect: big, px: content.px.iter().map(|p| [p[0], p[1], p[2], if inside(p[3]) { fill } else { 0.0 }]).collect() };
+    // Within an outline (or a split-off vector stroke) the content's own transparency (a fading
+    // gradient fill) acts like fill opacity: the effects still cover the whole shape.
+    let lay_alpha = |i: usize, p: &[f32; 4], a: f32| {
+        if !inside(a) {
+            0.0
+        } else if relative {
+            fill * (kmask(i) * p[3] / a).min(1.0)
+        } else {
+            fill
+        }
+    };
+    let mut lay = Buffer { rect: big, px: content.px.iter().zip(&shape.v).enumerate().map(|(i, (p, a))| [p[0], p[1], p[2], lay_alpha(i, p, *a)]).collect() };
     let rel = |m: Map| -> Map {
         let v = m.v.iter().zip(&shape.v).map(|(m, a)| if inside(*a) { (m / a).min(1.0) } else { 0.0 }).collect();
         Map { w: m.w, h: m.h, v }
@@ -1202,6 +1248,15 @@ pub(crate) fn composite_with_effects_prepared(
             paint_color(&mut lay, &m, rgb(&s.color), s.common.blend, s.common.opacity);
         }
     }
+    // A stroked shape's vector stroke: Photoshop draws it above the fill's clipped layers and
+    // interior effects, below the stroke effect (psd-tools stroke-composite).
+    if let Some(vs) = &vstroke {
+        for (i, ((p, s), a)) in lay.px.iter_mut().zip(&vs.stroke.px).zip(&shape.v).enumerate() {
+            if s[3] > 0.0 && inside(*a) {
+                *p = psblend::composite(BlendMode::Normal, *p, [s[0], s[1], s[2], fill * (kmask(i) * s[3] / a).min(1.0)], 1.0);
+            }
+        }
+    }
     // Strokes. Inside parts are painted over the layer (bottom instance first); outside parts
     // are slid beneath it, so the first listed (top) instance is processed first.
     let strokes: Vec<&photocraft_doc::StrokeFx> = items.iter().filter_map(|e| if let Effect::Stroke(s) = e { Some(s) } else { None }).collect();
@@ -1209,11 +1264,9 @@ pub(crate) fn composite_with_effects_prepared(
         (Some(a), Some(b)) if !strokes.is_empty() => (maps.crop_vec(a, big, 0.0), maps.crop_vec(b, big, FAR)),
         _ => (Vec::new(), Vec::new()),
     };
-    let widths = |st: &photocraft_doc::StrokeFx| match st.position {
-        StrokePosition::Outside => (0.0, st.size),
-        StrokePosition::Inside => (st.size, 0.0),
-        StrokePosition::Center => (st.size / 2.0, st.size / 2.0),
-    };
+    let widths = stroke_widths;
+    // A gradient stroke aligned with the layer spans the stroke's own extent.
+    let frame = |st: &photocraft_doc::StrokeFx| maps.stroke_frame(st).unwrap_or(sb);
     for st in strokes.iter().rev().copied() {
         let (in_w, _) = widths(st);
         if in_w <= 0.0 {
@@ -1223,7 +1276,7 @@ pub(crate) fn composite_with_effects_prepared(
         for ((mv, a), dv) in m.v.iter_mut().zip(&shape.v).zip(&din) {
             *mv = if inside(*a) { (in_w + 0.5 - dv).clamp(0.0, 1.0) } else { 0.0 };
         }
-        paint_fx(&mut lay, &m, &st.paint, sb, anchor, big, st.common.blend, st.common.opacity, patterns);
+        paint_fx(&mut lay, &m, &st.paint, frame(st), anchor, big, st.common.blend, st.common.opacity, patterns);
     }
     for (i, e) in rev() {
         if let Effect::BevelEmboss(b) = e
@@ -1253,19 +1306,27 @@ pub(crate) fn composite_with_effects_prepared(
             if out_w <= 0.0 {
                 continue;
             }
-            // Shape layers: Photoshop strokes the vector outline, estimated from
-            // local coverage; the stroke never shows through the shape's pixels.
+            // Shape layers: Photoshop strokes the vector outline (estimated from local coverage
+            // for unfilled shapes); the stroke never shows through the shape's pixels. Along a
+            // filled shape's outline it covers the part of each edge pixel outside the path.
             let d = vdout.as_ref().unwrap_or(&dout);
             let mut share = vec![0.0f32; w * h];
             for (i, sh) in share.iter_mut().enumerate() {
-                let k = if inside(shape.v[i]) { if vector_shape { 0.0 } else { 1.0 } } else { (out_w + 0.5 - d[i]).clamp(0.0, 1.0) };
+                let band = (out_w + 0.5 - d[i]).clamp(0.0, 1.0);
+                let k = if maps.outline {
+                    band * outline_share(shape.v[i], lay.px[i][3])
+                } else if inside(shape.v[i]) {
+                    if vector_shape { 0.0 } else { 1.0 }
+                } else {
+                    band
+                };
                 *sh = k * st.common.opacity * (1.0 - cover[i]);
                 cover[i] += *sh;
             }
             // The stroke blended over the backdrop at full coverage.
             let mut blended = base.clone();
             let ones = Map { w, h, v: share.iter().map(|&s| if s > 0.0 { 1.0 } else { 0.0 }).collect() };
-            paint_fx(&mut blended, &ones, &st.paint, sb, anchor, big, st.common.blend, 1.0, patterns);
+            paint_fx(&mut blended, &ones, &st.paint, frame(st), anchor, big, st.common.blend, 1.0, patterns);
             for ((a, b), s) in acc.iter_mut().zip(&blended.px).zip(&share) {
                 if *s > 0.0 {
                     for c in 0..3 {
@@ -1325,6 +1386,55 @@ pub(crate) fn composite_with_effects_prepared(
             backdrop.px[i] = mix_premul(a, b, op);
         }
     }
+}
+
+/// Coverage of an outside stroke beneath a filled shape's edge pixel, for a pixel the outline
+/// covers `cov` of and the layer (with its interior effects) ends at alpha `l`. Photoshop treats
+/// the stroke and the shape as disjoint areas: the stroke fills the part outside the path and
+/// the layer adds its own alpha (psd-tools stroke-effects: a 58 % covered edge pixel of an
+/// opaque fill ends opaque, one of a faded fill at 42 % + its alpha). Composited beneath the
+/// layer, `share + l (1 - share) = (1 - cov) + l`.
+pub fn outline_share(cov: f32, l: f32) -> f32 {
+    let outside = (1.0 - cov.clamp(0.0, 1.0)).max(0.0);
+    let rest = 1.0 - l.clamp(0.0, 1.0);
+    if rest <= 1e-6 { 1.0 } else { (outside / rest).min(1.0) }
+}
+
+/// (inside width, outside width) of a stroke.
+pub fn stroke_widths(st: &photocraft_doc::StrokeFx) -> (f32, f32) {
+    match st.position {
+        StrokePosition::Outside => (0.0, st.size),
+        StrokePosition::Inside => (st.size, 0.0),
+        StrokePosition::Center => (st.size / 2.0, st.size / 2.0),
+    }
+}
+
+/// The frame a gradient stroke aligned with the layer is laid out in: the pixel bounds of the
+/// effect shape (over `rect`) grown by the stroke's outside width less one pixel. Photoshop
+/// spans the gradient over the stroke's extent, not the layer's: a 4 px outside stroke around a
+/// 22 px square runs its 90° gradient over 28 px (psd-tools stroke-effects), a 3 px one around
+/// 36 px of type over 40 px (psd-tools effect-stroke-gradient).
+fn stroke_frame(shape: &Map, out_w: f32, rect: Rect) -> Rect {
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+    for y in 0..shape.h {
+        for x in 0..shape.w {
+            if shape.v[y * shape.w + x] > INSIDE_EPS {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+            }
+        }
+    }
+    if x0 == usize::MAX {
+        return rect;
+    }
+    let grow = if out_w.is_finite() { (out_w.min(MAX_REACH).ceil() as i32 - 1).max(0) } else { 0 };
+    Rect::new(rect.x0 + x0 as i32, rect.y0 + y0 as i32, rect.x0 + x1 as i32, rect.y0 + y1 as i32).inflate(grow)
+}
+
+/// A stroked shape's vector stroke, composited apart from its fill (which the compositor then
+/// passes unmasked): the stroke's pixels over the render rect and the layer's mask values.
+pub(crate) struct VectorStroke<'a> {
+    pub stroke: &'a Buffer,
+    pub mask: Option<&'a [f32]>,
 }
 
 /// Premultiplied linear interpolation between two straight-alpha pixels.

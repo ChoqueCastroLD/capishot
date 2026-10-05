@@ -9,7 +9,8 @@
 //! Path operations follow Photoshop: every subpath is filled on its own (with the path's
 //! [`FillRule`]) and folded, in order, into the result with its [`PathOp`]; the first subpath
 //! always acts as "combine" (see [`Path::effective_op`]; verified against Photoshop's pixels in
-//! the PSD corpus). [`Path::inverted`] inverts the final area. A vector mask without subpaths
+//! the PSD corpus). Subpaths marked [`PathOp::Join`] belong to the shape component before them
+//! and are filled together with it (a custom shape's holes). [`Path::inverted`] inverts the final area. A vector mask without subpaths
 //! reveals everything (Photoshop's fresh "Add Vector Mask").
 
 use std::sync::Arc;
@@ -60,6 +61,10 @@ pub enum PathOp {
     Intersect,
     /// Exclude overlapping shapes (xor).
     Exclude,
+    /// Part of the previous subpath's shape component (PSD operation -1 after a component's
+    /// first record): the component's subpaths are filled together, with the path's fill rule,
+    /// so inner subpaths wound the other way cut holes (custom shapes).
+    Join,
 }
 
 /// Winding rule used to fill each subpath.
@@ -130,6 +135,19 @@ impl Path {
     /// "combine" whatever its stored operation (a lone "intersect" shape still draws).
     pub fn effective_op(&self, i: usize) -> PathOp {
         if i == 0 { PathOp::Combine } else { self.subpaths[i].op }
+    }
+    /// Shape components: ranges of subpaths filled together (a subpath starts a new component
+    /// unless it is a [`PathOp::Join`]), each folded in with its first subpath's
+    /// [`Path::effective_op`].
+    pub fn components(&self) -> Vec<std::ops::Range<usize>> {
+        let mut out: Vec<std::ops::Range<usize>> = Vec::new();
+        for (i, s) in self.subpaths.iter().enumerate() {
+            match out.last_mut() {
+                Some(r) if s.op == PathOp::Join => r.end = i + 1,
+                _ => out.push(i..i + 1),
+            }
+        }
+        out
     }
     pub fn transform(&self, a: &Affine) -> Path {
         let mut p = self.clone();
