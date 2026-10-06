@@ -33,7 +33,9 @@ pub struct LangInfo {
     pub name: &'static str,
     /// Catalog file contents (empty for the built-in English).
     pub source: &'static str,
-    /// Plural form index for a count (English: 0 = one, 1 = other; Japanese: always 0).
+    /// Plural form index for a count (English: 0 = one, 1 = other; Japanese and Chinese: always 0;
+    /// Czech: 0 = one, 1 = few (2–4), 2 = other). A catalog's `@plural` entries list one form per
+    /// index.
     pub plural: fn(u64) -> usize,
     /// Must the catalog cover every menu string? (checked by the tests)
     pub complete_menus: bool,
@@ -58,8 +60,17 @@ fn plural_russian(n: u64) -> usize {
     }
 }
 
+/// Czech: 1 → one, 2–4 → few, everything else (0, 5+) → other.
+fn plural_cs(n: u64) -> usize {
+    match n {
+        1 => 0,
+        2..=4 => 1,
+        _ => 2,
+    }
+}
+
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 6] = [
+pub static LANGUAGES: [LangInfo; 7] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo {
@@ -72,6 +83,7 @@ pub static LANGUAGES: [LangInfo; 6] = [
     },
     LangInfo { code: "es", name: "Español", source: include_str!("es.tsv"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "ru", name: "Русский", source: include_str!("ru.tsv"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "cs", name: "Čeština", source: include_str!("cs.tsv"), plural: plural_cs, complete_menus: true, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -272,6 +284,7 @@ mod tests {
 
     const JA: fn() -> Lang = || Lang::from_code("ja").expect("ja registered");
     const ZH: fn() -> Lang = || Lang::from_code("zh-hant").expect("zh-hant registered");
+    const CS: fn() -> Lang = || Lang::from_code("cs").expect("cs registered");
 
     #[test]
     fn tags_map_to_languages() {
@@ -280,6 +293,8 @@ mod tests {
         assert_eq!(lang_from_tag("en_US.UTF-8"), Some(Lang::EN));
         assert_eq!(lang_from_tag("C"), Some(Lang::EN));
         assert_eq!(lang_from_tag("POSIX"), Some(Lang::EN));
+        assert_eq!(lang_from_tag("cs_CZ.UTF-8"), Some(CS()));
+        assert_eq!(lang_from_tag("cs-CZ"), Some(CS()));
         assert_eq!(lang_from_tag("fr_FR"), None);
         // Traditional Chinese: by region, by script, and with a region after the script.
         assert_eq!(lang_from_tag("zh_TW.UTF-8"), Some(ZH()));
@@ -390,9 +405,22 @@ mod tests {
         assert_eq!(trn(JA(), 7, "{n} item", "{n} items"), "7 件");
         assert_eq!(trn(ZH(), 1, "{n} item", "{n} items"), "1 個項目");
         assert_eq!(trn(ZH(), 7, "{n} item", "{n} items"), "7 個項目");
+        assert_eq!(trn(CS(), 1, "{n} item", "{n} items"), "1 položka");
+        assert_eq!(trn(CS(), 3, "{n} item", "{n} items"), "3 položky");
+        assert_eq!(trn(CS(), 5, "{n} item", "{n} items"), "5 položek");
+        assert_eq!(trn(CS(), 0, "{n} item", "{n} items"), "0 položek");
         assert_eq!(fmt("{b} before {a}", &[("a", "x"), ("b", "y"), ("c", "z")]), "y before x");
         assert_eq!(fmt("{missing}", &[]), "{missing}");
         assert_eq!(placeholders("a {x} b {y} {"), ["x", "y"]);
+    }
+
+    #[test]
+    fn czech_plural_rule() {
+        let forms: Vec<usize> = [0, 1, 2, 3, 4, 5, 11, 12, 21, 22, 100, u64::MAX].into_iter().map(plural_cs).collect();
+        assert_eq!(forms, [2, 0, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]);
+        assert_eq!(tr(CS(), "Layer"), "Vrstva");
+        assert_eq!(tr_id(CS(), "select.all", "All"), "Vybrat vše", "an id override wins over the plain label");
+        assert_eq!(tr(CS(), "All"), "Vše");
     }
 
     /// Every bundled catalog is well-formed and consistent with its sources.
@@ -408,6 +436,8 @@ mod tests {
                 if ctx == "@plural" {
                     let one_other: Vec<&str> = src.split('|').collect();
                     assert_eq!(one_other.len(), 2, "{}: plural source must be `one|other`: {src:?}", l.code);
+                    let forms = (0..=1000).map(l.plural).max().unwrap_or(0) + 1;
+                    assert_eq!(tr.split('|').count(), forms, "{}: {forms} plural forms expected in {src:?}", l.code);
                     for form in tr.split('|') {
                         let mut want = placeholders(one_other[1]);
                         let mut got = placeholders(form);
