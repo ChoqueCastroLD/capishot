@@ -344,6 +344,8 @@
 	Merge Layers	合并图层
 	Merge Down	向下合并
 	Merge Visible	合并可见图层
+	Stamp Visible	盖印可见图层
+	Stamp Down	向下盖印
 	Flatten Image	拼合图像
 	Matting	修边
 	Color Decontaminate…	净化颜色…

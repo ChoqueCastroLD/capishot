@@ -349,6 +349,8 @@
 	Merge Layers	合併圖層
 	Merge Down	向下合併圖層
 	Merge Visible	合併可見圖層
+	Stamp Visible	蓋印可見圖層
+	Stamp Down	向下蓋印
 	Flatten Image	影像平面化
 	Matting	修邊
 	Color Decontaminate…	淨化顏色…
