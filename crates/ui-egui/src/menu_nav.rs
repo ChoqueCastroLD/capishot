@@ -271,12 +271,27 @@ fn pointer_on(ui: &Ui, rect: Rect) -> bool {
 /// scrolls instead of egui sliding it up over the menu bar, where it hid the menu titles.
 /// `anchor` is the submenu's row (unknown on its first frame); `frame` the popup's margins.
 pub fn level_room(screen: Rect, bar_bottom: Option<f32>, depth: usize, anchor: Option<Rect>, frame: f32) -> f32 {
-    let top = bar_bottom.unwrap_or(screen.top()).max(screen.top()) + EDGE;
-    let bottom = screen.bottom() - EDGE;
+    level_room_in(screen, screen, bar_bottom, depth, anchor, None, frame)
+}
+
+/// [`level_room`] when only `visible`, a part of the window's content rect `screen`, can be seen
+/// (#315: a window taller than its display runs under the taskbar). egui still places popups
+/// within the whole window, so a submenu opens upward only when downward doesn't fit the window.
+/// `rows` is the level's rows' height when known (the popup shrinks to it).
+pub fn level_room_in(screen: Rect, visible: Rect, bar_bottom: Option<f32>, depth: usize, anchor: Option<Rect>, rows: Option<f32>, frame: f32) -> f32 {
+    let top = bar_bottom.unwrap_or(visible.top()).max(visible.top()) + EDGE;
+    let bottom = visible.bottom().min(screen.bottom()) - EDGE;
     let below_bar = bottom - top;
     let room = match anchor.filter(|_| depth > 1) {
-        // Downward from the row, or upward from it, whichever leaves more room.
-        Some(row) => (bottom - row.top()).max(row.bottom() - top).min(below_bar),
+        Some(row) => {
+            // Downward from the row, or upward from it, whichever leaves more room. egui opens a
+            // submenu upward only when the downward one doesn't fit the window (it hangs from the
+            // row's top less half the frame margin).
+            let (down, up) = (bottom - row.top(), row.bottom() - top);
+            let opens_up = |h: f32| row.top() - (frame - 2.0) / 2.0 + h + frame > screen.bottom();
+            let want = rows.unwrap_or(f32::INFINITY);
+            if want > down && up > down && opens_up(want.min(up)) { up } else { down }.min(below_bar)
+        }
         None => below_bar,
     } - frame;
     if room.is_finite() { room.max(4.0 * ARROW) } else { 4.0 * ARROW }
@@ -289,13 +304,15 @@ pub fn level(ui: &mut Ui, depth: usize, nav: &mut Nav, rows: impl FnOnce(&mut Ui
     let level = depth.saturating_sub(1);
     nav.begin_level(level, find_menu_root(ui).id);
     let screen = ctx.content_rect();
+    // Only the part of the window on its monitor, clear of the taskbar, can be seen (#315).
+    let visible = crate::work_area::visible_rect(&ctx);
     // The menu frame's margin and stroke around the rows.
     let frame = ui.spacing().menu_margin.sum().y + 2.0;
     let anchor = nav.anchors.get(level).copied().flatten();
-    let room = level_room(screen, nav.bar_bottom, depth, anchor, frame);
     let key = ui.id().with(("pc-menu-level", depth));
     // Rows' height from the last frame: does this level overflow?
     let content: Option<f32> = ctx.data(|d| d.get_temp(key));
+    let room = level_room_in(screen, visible, nav.bar_bottom, depth, anchor, content, frame);
     let over = content.is_some_and(|h| h > room + 0.5);
     let up = over.then(|| ui.allocate_exact_size(vec2(0.0, ARROW), Sense::hover()).0);
     let height = if over { room - 2.0 * ARROW } else { room };

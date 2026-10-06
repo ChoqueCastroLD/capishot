@@ -8,6 +8,9 @@
 //!
 //! `--safe-gpu` draws the canvas on the CPU path, like the app's `--safe-gpu` launch.
 //!
+//! `--monitor 1366x768 --window-top 31` simulates the display the window is on (in points) and
+//! where its content starts on it, e.g. a window running under a Windows taskbar.
+//!
 //! `--script` is a JSON array of `[method, params]` control-protocol calls (see
 //! docs/control-protocol.md), applied in order with a few frames between them.
 
@@ -63,6 +66,13 @@ fn main() {
             }
             app
         });
+    if let Some((mw, mh)) = arg(&args, "--monitor").and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse::<f32>().ok()?, b.parse::<f32>().ok()?)))) {
+        let top: f32 = arg(&args, "--window-top").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let v = harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default();
+        v.monitor_size = Some(egui::vec2(mw, mh));
+        v.inner_rect = Some(egui::Rect::from_min_size(egui::pos2(0.0, top), egui::vec2(w, h)));
+        v.maximized = Some(false);
+    }
     harness.run_steps(4);
     let ctx = harness.ctx.clone();
     let timing = std::env::var_os("SNAPSHOT_TIMING").is_some();

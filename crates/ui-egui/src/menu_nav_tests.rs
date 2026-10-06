@@ -410,3 +410,110 @@ fn level_room_keeps_every_level_below_the_bar() {
     assert_eq!(level_room(screen, Some(f32::NAN), 1, None, frame), level_room(screen, None, 1, None, frame));
     assert_eq!(level_room(egui::Rect::NOTHING, bar, 2, Some(row), frame), 4.0 * ARROW);
 }
+
+/// #315: a 1366 × 768 pt display with a Windows taskbar. `window` is the window's content size and
+/// `top` where its content starts on the desktop (below the title bar), in points; the taskbar
+/// covers the monitor's bottom [`crate::work_area::TASKBAR`] points. `scale` is the UI scale.
+fn taskbar_harness(window: (f32, f32), top: f32, scale: f32) -> Harness<'static, PhotocraftApp> {
+    let mut h = harness((window.0 * scale, window.1 * scale, scale));
+    let v = h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default();
+    v.monitor_size = Some(egui::vec2(1366.0, 768.0));
+    v.inner_rect = Some(egui::Rect::from_min_size(egui::pos2(0.0, top), egui::vec2(window.0, window.1)));
+    v.maximized = Some(false);
+    h.run_steps(3);
+    h
+}
+
+/// The visible bottom of a taskbar harness: the monitor's bottom less the taskbar, in the window.
+fn taskbar_bottom(h: &Harness<'static, PhotocraftApp>) -> f32 {
+    crate::work_area::visible_rect(&h.ctx).bottom()
+}
+
+#[test]
+fn menus_stay_above_the_taskbar_and_scroll_to_their_last_row() {
+    // The default 1440 × 900 window on a 1366 × 768 display runs past the screen; a 1366 × 737
+    // window below a 31 pt title bar reaches under the taskbar. At 1× and 2× (a 2732 × 1536 px
+    // display at 200%).
+    let mut scrolled = 0;
+    for (window, top, scale) in [((1440.0, 900.0), 0.0, 1.0), ((1366.0, 737.0), 31.0, 1.0), ((1366.0, 737.0), 31.0, 2.0)] {
+        for menu in LONGEST {
+            let mut h = taskbar_harness(window, top, scale);
+            let bottom = taskbar_bottom(&h);
+            let what = format!("{window:?}@{scale}x {menu}");
+            assert!((bottom - (768.0 - crate::work_area::TASKBAR - top)).abs() < 1.0, "{what}: visible bottom {bottom}");
+            open(&mut h, menu);
+            for r in popups(&h) {
+                assert!(r.bottom() <= bottom + 0.5, "{what}: popup {r:?} runs under the taskbar (from {bottom})");
+            }
+            let last = rows(&h, 0).len() - 1;
+            let in_view = |h: &Harness<'static, PhotocraftApp>, i: usize| {
+                let nav = Nav::current(&h.ctx);
+                nav.views[0].expand(0.5).contains_rect(nav.rows[0][i].rect) && nav.views[0].bottom() <= bottom + 0.5
+            };
+            // A menu that fits above the taskbar needs no scrolling.
+            let Some(down) = h.query_by_label("Scroll menu down").map(|n| n.rect()) else {
+                assert!(in_view(&h, last), "{what}: fits, so its last row is in view");
+                continue;
+            };
+            scrolled += 1;
+            // The ▼ arrow is above the taskbar, and resting on it reaches the last row.
+            assert!(down.bottom() <= bottom, "{what}: ▼ at {down:?}");
+            assert!(!in_view(&h, last));
+            h.hover_at(down.center());
+            for _ in 0..400 {
+                h.run_steps(1);
+                if in_view(&h, last) {
+                    break;
+                }
+            }
+            assert!(in_view(&h, last), "{what}: ▼ scrolls to the last row, above the taskbar");
+            // And the wheel scrolls back up.
+            let view = Nav::current(&h.ctx).views[0];
+            h.hover_at(view.center());
+            for _ in 0..60 {
+                h.event(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, 120.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                });
+                h.run_steps(1);
+                if in_view(&h, 0) {
+                    break;
+                }
+            }
+            assert!(in_view(&h, 0), "{what}: the wheel scrolls back to the first row");
+        }
+    }
+    assert!(scrolled >= 6, "the long menus overflow above the taskbar: {scrolled}");
+}
+
+#[test]
+fn submenus_stay_above_the_taskbar() {
+    for menu in ["Image", "Layer", "Filter"] {
+        let mut h = taskbar_harness((1440.0, 900.0), 0.0, 1.0);
+        let bottom = taskbar_bottom(&h);
+        open(&mut h, menu);
+        let view = Nav::current(&h.ctx).views.first().copied().unwrap_or(egui::Rect::NOTHING);
+        let subs: Vec<egui::Rect> = rows(&h, 0).iter().filter(|r| r.enabled && r.command.is_none() && view.contains_rect(r.rect)).map(|r| r.rect).collect();
+        assert!(!subs.is_empty());
+        for (i, row) in subs.iter().enumerate() {
+            h.hover_at(row.center() + egui::vec2(-20.0, 0.0));
+            h.run_steps(6);
+            for r in popups(&h) {
+                assert!(r.bottom() <= bottom + 0.5, "{menu} submenu {i}: popup {r:?} runs under the taskbar (from {bottom})");
+            }
+            check_bar_clear(&h, &format!("{menu} submenu {i}"));
+        }
+    }
+}
+
+#[test]
+fn a_maximized_window_or_an_unknown_monitor_uses_the_whole_window() {
+    let mut h = taskbar_harness((1366.0, 728.0), 0.0, 1.0);
+    h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().maximized = Some(true);
+    h.run_steps(2);
+    assert_eq!(crate::work_area::visible_rect(&h.ctx), h.ctx.content_rect());
+    let h = harness((1366.0, 768.0, 1.0));
+    assert_eq!(crate::work_area::visible_rect(&h.ctx), h.ctx.content_rect());
+}

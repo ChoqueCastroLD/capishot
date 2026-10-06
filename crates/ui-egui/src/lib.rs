@@ -114,6 +114,7 @@ pub mod vector_ui;
 pub mod view_cmds;
 pub mod wide_angle_ui;
 pub mod widgets;
+pub mod work_area;
 pub mod workspace_ui;
 pub mod zoom_tool;
 
@@ -801,6 +802,9 @@ impl eframe::App for PhotocraftApp {
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
         prefs_ui::tick(self, ctx);
+        // A window bigger than its display (1440 × 900 on 1366 × 768) runs under the taskbar:
+        // maximize it into the work area once (#315).
+        work_area::fit_window(ctx);
         discard_ui::guard_window_close(self, ctx);
         shortcuts::handle(self, ctx);
         let arrived: Vec<(String, Vec<u8>)> =
