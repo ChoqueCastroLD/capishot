@@ -49,7 +49,7 @@ fn plural_none(_: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 4] = [
+pub static LANGUAGES: [LangInfo; 5] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo {
@@ -60,6 +60,7 @@ pub static LANGUAGES: [LangInfo; 4] = [
     LangInfo {
         code: "zh-hant", name: "繁體中文", source: include_str!("zh-hant.tsv"), plural: plural_none, complete_menus: true, catalog: OnceLock::new()
     },
+    LangInfo { code: "es", name: "Español", source: include_str!("es.tsv"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -312,6 +313,17 @@ mod tests {
         // `auto` and unknown codes follow the system (English under test).
         assert_eq!(Lang::from_pref("auto"), Lang::EN);
         assert_eq!(Lang::from_pref("xx-unknown"), Lang::EN);
+    }
+
+    #[test]
+    fn spanish_resolves_and_pluralises() {
+        let es = Lang::from_code("es").expect("es registered");
+        for tag in ["es", "es_ES.UTF-8", "es-MX", "es-419"] {
+            assert_eq!(lang_from_tag(tag), Some(es), "{tag}");
+        }
+        assert_eq!(tr(es, "Layer"), "Capa");
+        assert_eq!(trn(es, 1, "{n} item", "{n} items"), "1 elemento");
+        assert_eq!(trn(es, 3, "{n} item", "{n} items"), "3 elementos");
     }
 
     #[test]
