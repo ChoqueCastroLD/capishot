@@ -513,7 +513,16 @@ mod tests {
         assert!(none.is_none());
         // The process dies in the driver: the lock goes, the marker stays.
         drop(s);
-        let (prev, s) = Sentinel::begin(&dir);
+        // Another test in this binary spawns a process: between its fork and exec the child briefly
+        // shares this file's flock, so `begin` can see the lock as busy. Retry for a moment.
+        let (mut prev, mut s) = Sentinel::begin(&dir);
+        for _ in 0..50 {
+            if prev != Previous::Busy {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            (prev, s) = Sentinel::begin(&dir);
+        }
         let m = prev.crashed().cloned().expect("crash detected");
         assert_eq!((m.adapter.as_str(), m.tried()), ("GPU", Some(Vulkan)));
         // This start succeeds: the next one finds nothing.
