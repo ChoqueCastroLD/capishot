@@ -3594,6 +3594,8 @@ dependencies = [
 name = "photocraft-io"
 version = "0.2.0"
 dependencies = [
+ "blake3",
+ "photocraft-algo",
  "photocraft-cms",
  "photocraft-codecs",
  "photocraft-color",
@@ -3608,6 +3610,7 @@ dependencies = [
  "photocraft-text",
  "photocraft-vector",
  "proptest",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

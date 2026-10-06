@@ -355,7 +355,13 @@ psd/src/
   3. Groups (including pass-through), clipping, blend-if, adjustment and fill layers.
   4. Layer effects (lfx2).
   5. Text layers: shaped with `text`; the original descriptors are kept for round-trip.
-  6. Smart objects: embedded and linked.
+  6. Smart objects: embedded and linked, live both ways (`io::smart_map`). Import reads the
+     placed-layer data (`SoLd`: file id, transform quad, warp), the smart filter stack
+     (`filterFX`: modelled filters become their PhotoCraft command and params; any other filter
+     stays verbatim and is listed as not editable) and the filter mask (global `FEid`). Export
+     writes `PlLd` + `SoLd`, embeds the source in `lnk2` (a `.pcraft` source becomes a PSB of the
+     nested document, written by our own PSD writer) and a filter cache with the unfiltered
+     pixels and the mask in `FEid`; unedited imported smart objects stay byte-identical.
   7. Vector masks and shape layers.
 - **Testing:**
   - Round-trip byte-stability for unmodified files.
