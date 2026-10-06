@@ -173,6 +173,8 @@ fn main() -> eframe::Result {
             services.preset_store = presets;
             let mut app = PhotocraftApp::new(Session::new(), services);
             app.integrated_titlebar = cfg!(target_os = "macos");
+            // Long commands and file opens run as background jobs with progress and Cancel (#210).
+            app.background_jobs = std::env::var_os("PHOTOCRAFT_INLINE_JOBS").is_none();
             if let Ok(Some(icc)) = monitor.recv_timeout(std::time::Duration::from_secs(2)) {
                 app.session.color.monitor_profile = Some(std::sync::Arc::new(icc));
             }

@@ -3736,6 +3736,7 @@ dependencies = [
  "photocraft-gpu",
  "photocraft-io",
  "photocraft-plugins",
+ "photocraft-psd",
  "photocraft-raster",
  "photocraft-testkit",
  "photocraft-text",
