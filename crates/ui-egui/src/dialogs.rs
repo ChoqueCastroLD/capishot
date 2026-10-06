@@ -43,6 +43,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     for d in dialogs {
         let mut fields = d.fields.clone();
         let mut outcome: Option<bool> = None; // Some(true)=OK, Some(false)=Cancel
+        let mut apply_requested = false;
         let title = display_title(&d);
         let id = egui::Id::new(("dialog", d.id));
         // Offset from centre, moved by dragging the title bar (view state only, so egui memory).
@@ -138,6 +139,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     if crate::widgets::primary_button(ui, ok_label, 84.0).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         outcome = Some(true);
                     }
+                    if d.kind == DialogKind::Command && crate::prefs_ui::is_preferences(&fields) {
+                        let changed = crate::prefs_ui::preferences_changed(app, &fields);
+                        apply_requested = ui.add_enabled_ui(changed, |ui| crate::widgets::secondary_button(ui, tl!("Apply"), 84.0)).inner.clicked();
+                    }
                     if crate::widgets::secondary_button(ui, if d.kind == DialogKind::NewDocument { tl!("Close") } else { tl!("Cancel") }, 84.0).clicked() {
                         outcome = Some(false);
                     }
@@ -162,6 +167,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         if let Some(dm) = app.ui.dialog_mut(d.id) {
             dm.fields = fields;
+        }
+        if apply_requested && outcome.is_none() {
+            let _ = crate::prefs_ui::apply(app, d.id);
         }
         match outcome {
             Some(true) => {

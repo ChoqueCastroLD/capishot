@@ -54,6 +54,13 @@ missing-glyph boxes. Check every new panel with the offscreen snapshot tool (`do
 
 Use `ui.click {x,y}`, `ui.move`, `ui.key` and `ui.type` (synthetic input in screen points) to open menus, popups and context menus, then `ui.screenshot`.
 
+## Preferences
+
+Preferences has **Apply**, **OK** and **Cancel**. Apply saves the edited sections and keeps the
+dialog open; it is disabled when the values match the saved preferences. OK saves and closes.
+Cancel discards only changes made since the last successful Apply. A failed Apply leaves the
+draft open for correction. Settings marked for the next launch still require a restart.
+
 ## High DPI and 4K displays
 
 Edit → Preferences → Interface → UI Scale applies immediately. Auto follows the operating
