@@ -91,6 +91,15 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: packaging/macos/package.sh --arch universal
+      # Unpacks the CLI zip and checks the binary users get: Developer ID, hardened runtime,
+      # timestamp, and Gatekeeper's notarization lookup (codesign --verify, spctl). Also the DMG's
+      # stapled ticket. Strict when the signing secrets are present, warnings otherwise.
+      - name: Verify signatures and notarization
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: packaging/macos/verify.sh --arch universal
       - uses: actions/upload-artifact@v4
         with:
           name: release-macos

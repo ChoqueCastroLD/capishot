@@ -264,6 +264,14 @@ flatpak install --user photocraft-<version>-linux-x86_64.flatpak   # or -linux-a
 flatpak run ai.storyteller.photocraft
 ```
 
+On macOS, the command-line tool comes as `photocraft-cli-<version>-macos-universal.zip`. The binary is signed with the same Developer ID as the app and notarized by Apple. A bare binary can't carry a stapled notarization ticket the way the DMG does, so the first time you run it macOS checks the notarization online. You can confirm it yourself:
+
+```sh
+ditto -x -k photocraft-cli-<version>-macos-universal.zip .
+spctl --assess --type install -vv photocraft-cli-<version>-macos-universal/photocraft-cli
+# ... accepted, source=Notarized Developer ID
+```
+
 On FreeBSD 14 (x86_64), the release has a tarball laid out like `/usr/local`. Install the runtime libraries, then unpack it there:
 
 ```sh

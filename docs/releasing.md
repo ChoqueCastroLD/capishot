@@ -77,8 +77,20 @@ Every binary reports its version, the commit and the build date: `photocraft --v
   ticket is stapled to the app. The app goes on a DMG (`hdiutil`, with an `Applications` link
   to drag onto). The DMG is signed, notarized and stapled too. The script checks the results
   with `codesign --verify --strict`, `stapler validate` and `spctl -a -vvv`.
-- **CLI:** the universal `photocraft-cli` is signed with the hardened runtime, zipped and
-  notarized. A bare binary can't hold a stapled ticket, so Gatekeeper looks it up online.
+- **CLI:** the universal `photocraft-cli` is signed with the same Developer ID, the hardened
+  runtime and a secure timestamp (identifier `ai.storyteller.photocraft-cli`), zipped, and the zip
+  is sent to `notarytool`. Only `.app`, `.dmg` and `.pkg` can hold a stapled ticket, not a bare
+  Mach-O, so Gatekeeper looks the CLI's ticket up online the first time a downloaded
+  (quarantined) copy runs. Offline, that first run can be refused until the Mac is online again.
+- **Verification:** `packaging/macos/verify.sh` checks the artifacts as users download them. It
+  unpacks the CLI zip and requires, for the binary inside, `codesign --verify --strict`, both
+  architectures, the hardened runtime flag, a `Developer ID Application` authority from
+  `APPLE_TEAM_ID`, a timestamp, and `spctl --assess --type install` reporting
+  `source=Notarized Developer ID` (the same online lookup Gatekeeper does). For the DMG it runs
+  `codesign --verify`, `stapler validate` and `spctl --type open`. The release workflow runs it
+  as its own step after packaging. With signing secrets it fails the job on any miss; without
+  them it only checks signature integrity and warns, like `package.sh`. Run it locally after a
+  build: `packaging/macos/verify.sh --arch aarch64`.
 
 Locally, without certificates, the script signs ad-hoc (`codesign -s -`) and skips notarization.
 That's enough to check the bundle and the DMG on your own Mac:

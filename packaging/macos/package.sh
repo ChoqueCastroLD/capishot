@@ -150,13 +150,16 @@ CLI_DIR="$WORK/photocraft-cli-$VERSION-macos-$ARCH"
 mkdir -p "$CLI_DIR"
 cp "$WORK/bin/photocraft-cli" "$CLI_DIR/"
 copy_docs "$CLI_DIR"
-sign --options runtime "$CLI_DIR/photocraft-cli"
+# Same Developer ID and hardened runtime as the app, with an explicit reverse-DNS identifier
+# (codesign would otherwise use the bare file name).
+sign --options runtime --identifier ai.storyteller.photocraft-cli "$CLI_DIR/photocraft-cli"
 codesign --verify --strict --verbose=2 "$CLI_DIR/photocraft-cli"
 rm -f "$CLI_ZIP"
 ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"
-# A bare Mach-O can't carry a stapled ticket; Gatekeeper looks the notarization up online.
+# notarytool accepts a zip of the bare binary. A bare Mach-O can't carry a stapled ticket, so
+# Gatekeeper looks the notarization up online when a quarantined copy first runs.
 if [ "$NOTARIZE" = 1 ]; then notarize "$CLI_ZIP"; fi
 
 "$WORK/bin/photocraft-cli" --version
-echo "==> done"
+echo "==> done (check the artifacts as shipped with packaging/macos/verify.sh --arch $ARCH)"
 ls -lh "$DMG" "$CLI_ZIP"
