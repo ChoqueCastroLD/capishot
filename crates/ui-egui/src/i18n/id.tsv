@@ -2509,3 +2509,6 @@ cameraRaw	Blending	Pembauran
 	Save failed: {error}	Gagal menyimpan: {error}
 	Save cancelled	Penyimpanan dibatalkan
 	Couldn't place {name}: {error}	Tidak dapat menempatkan {name}: {error}
+	Magnetic Lasso Tool	Alat Magnetic Lasso
+	Frequency	Frekuensi
+	Use tablet pressure to change pen width	Gunakan tekanan tablet untuk mengubah lebar pena

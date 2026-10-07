@@ -299,6 +299,7 @@ pub(crate) fn freehand_tool(tool: Tool) -> bool {
             | Tool::Burn
             | Tool::Sponge
             | Tool::Lasso
+            | Tool::MagneticLasso
             | Tool::Patch
             | Tool::ContentAwareMove
             | Tool::QuickSelection
@@ -1681,6 +1682,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     app.stylus.use_pressure = app.session.prefs().tools.use_tablet_pressure;
     app.stylus.update(&ui.input(|i| i.events.clone()));
     crate::stylus::Stylus::sync_eraser_tool(app);
+    // A Magnetic Lasso border left behind by a tool or document switch is dropped.
+    crate::magnetic_lasso_ui::frame(app);
     // Held keys (hold_keys.rs): Space repositions a crop frame, marquee, lasso or shape being
     // drawn; otherwise Space is the Hand and ⌘Space / ⌘⌥Space the Zoom tool while held.
     let reposition = crate::hold_keys::reposition_held(app, &ctx);
@@ -1833,6 +1836,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             app.defer_live_stroke = false;
             // One live-stroke update for the whole frame, not one per recovered sample.
             feed_live_stroke(app);
+            crate::magnetic_lasso_ui::flush(app);
         }
         if buttons.stopped {
             let p = response.interact_pointer_pos().map(|p| xf.to_doc(p)).or_else(|| app.drag.as_ref().and_then(|d| d.points.last().map(|q| [q[0], q[1]])));
@@ -1857,6 +1861,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 // vertex (or already closed it), so the second never starts a new polygon. egui
                 // reports it as a triple click when a vertex went down shortly before.
                 Tool::PolygonLasso if response.double_clicked() || response.triple_clicked() => commit_polygon(app),
+                // The same for the Magnetic Lasso: along the edges, or straight with ⌥.
+                Tool::MagneticLasso if response.double_clicked() || response.triple_clicked() => crate::magnetic_lasso_ui::close(app, mods.alt),
                 _ => {
                     if tool == Tool::Move && app.ui.transform.is_none() {
                         begin_transform_controls_at(app, &ctx, &xf, p);
@@ -1865,6 +1871,17 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     tool_event(app, ToolEvent::Up { x: d[0], y: d[1] }, click_mods);
                 }
             }
+        }
+        // Magnetic Lasso: between clicks the border follows the pointer with the button up.
+        if tool == Tool::MagneticLasso && app.ui.magnetic.active() && !(buttons.started || buttons.dragged || buttons.stopped) && response.hovered() {
+            let moves: Vec<Pos2> = ui.input(|i| i.events.iter().filter_map(|e| if let egui::Event::PointerMoved(p) = e { Some(*p) } else { None }).collect());
+            app.defer_live_stroke = true;
+            for p in moves.into_iter().filter(|p| rect.contains(*p)) {
+                let d = xf.to_doc(p);
+                tool_event(app, ToolEvent::Move { x: d[0], y: d[1], pressure: app.stylus.pressure() }, mods);
+            }
+            app.defer_live_stroke = false;
+            crate::magnetic_lasso_ui::flush(app);
         }
         if app.ui.transform.is_some() && response.double_clicked() {
             crate::transform_tool::commit(app);
@@ -1992,6 +2009,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     }
                 }
                 Tool::Type | Tool::VerticalType => egui::CursorIcon::Text,
+                Tool::MagneticLasso => crate::magnetic_lasso_ui::cursor(app, &painter, p, view.zoom),
                 _ => egui::CursorIcon::Crosshair,
             };
             ui.ctx().set_cursor_icon(icon);
@@ -2126,8 +2144,9 @@ fn crop_overlay(painter: &egui::Painter, r: Rect) {
     }
 }
 
-/// Overlays that persist between gestures: polygonal lasso in progress, pending crop box.
+/// Overlays that persist between gestures: polygonal or magnetic lasso in progress, pending crop box.
 fn draw_tool_state(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, hover: Option<Pos2>) {
+    crate::magnetic_lasso_ui::draw(app, painter, xf, hover);
     if !app.ui.polygon.is_empty() {
         let mut pts: Vec<Pos2> = app.ui.polygon.iter().map(|p| xf.to_screen(p[0] as f32, p[1] as f32)).collect();
         if let Some(h) = hover {
@@ -2411,6 +2430,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     if crate::lasso_ui::pointer(app, ev, mods) {
         return;
     }
+    // Magnetic Lasso: fastening points and the border following the pointer.
+    if crate::magnetic_lasso_ui::pointer(app, ev, mods) {
+        return;
+    }
     let tool = app.ui.tool;
     if tool == Tool::Eyedropper {
         match ev {
@@ -2678,7 +2701,10 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
             let pts: Vec<[f64; 2]> = d.points.iter().map(|p| [p[0], p[1]]).collect();
             if pts.len() >= 3 {
                 let mode = selection_mode(app, d.modifiers);
-                let _ = app.run("select.lasso", json!({"points": pts, "mode": mode, "antiAlias": app.ui.tool_options.anti_alias}));
+                let o = &app.ui.tool_options;
+                // The Patch and Content-Aware Move tools have no Feather in their options bar.
+                let feather = if d.tool == Tool::Lasso { o.feather } else { 0.0 };
+                let _ = app.run("select.lasso", json!({"points": pts, "mode": mode, "antiAlias": o.anti_alias, "feather": feather}));
             } else if app.session.is_enabled("select.deselect") {
                 let _ = app.run("select.deselect", json!({}));
             }
@@ -2733,7 +2759,7 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// Selection mode from the options bar, overridden by modifier keys (⇧ add, ⌥ subtract, ⇧⌥ intersect).
 /// The cursor badge announces the same mode (`tool_feedback`).
-fn selection_mode(app: &PhotocraftApp, m: egui::Modifiers) -> &'static str {
+pub(crate) fn selection_mode(app: &PhotocraftApp, m: egui::Modifiers) -> &'static str {
     crate::tool_feedback::selection_mode(Tool::Lasso, app.ui.selection_mode, m)
 }
 
@@ -2756,9 +2782,10 @@ fn polygon_click(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers)
     app.ui.polygon.push([x, y]);
 }
 
-/// A new-selection polygonal lasso is being drawn, so the selection it will replace is hidden.
+/// A new-selection polygonal (or magnetic) lasso is being drawn, so the selection it will replace
+/// is hidden.
 pub fn polygon_replaces_selection(app: &PhotocraftApp) -> bool {
-    !app.ui.polygon.is_empty() && app.ui.polygon_mode == "replace"
+    (!app.ui.polygon.is_empty() && app.ui.polygon_mode == "replace") || crate::magnetic_lasso_ui::replaces_selection(app)
 }
 
 /// Close the polygonal lasso and make the selection in the mode it started in.
@@ -2767,7 +2794,8 @@ pub fn commit_polygon(app: &mut PhotocraftApp) {
     let mode = std::mem::take(&mut app.ui.polygon_mode);
     if pts.len() >= 3 {
         let mode = if mode.is_empty() { selection_mode(app, egui::Modifiers::NONE).to_owned() } else { mode };
-        let _ = app.run("select.lasso", json!({"points": pts, "mode": mode, "antiAlias": app.ui.tool_options.anti_alias}));
+        let o = &app.ui.tool_options;
+        let _ = app.run("select.lasso", json!({"points": pts, "mode": mode, "antiAlias": o.anti_alias, "feather": o.feather}));
     }
 }
 

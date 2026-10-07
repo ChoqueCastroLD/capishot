@@ -2365,3 +2365,6 @@ cameraRaw	Roughness	Неровность
 	Save failed: {error}	Не удалось сохранить: {error}
 	Save cancelled	Сохранение отменено
 	Couldn't place {name}: {error}	Не удалось поместить {name}: {error}
+	Magnetic Lasso Tool	Магнитное лассо
+	Frequency	Частота
+	Use tablet pressure to change pen width	Использовать нажим планшета для изменения ширины пера

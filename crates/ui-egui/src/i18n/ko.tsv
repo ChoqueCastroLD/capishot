@@ -2675,3 +2675,6 @@ cameraRaw	Color	색상
 	Save failed: {error}	저장 실패: {error}
 	Save cancelled	저장이 취소되었습니다
 	Couldn't place {name}: {error}	{name}을(를) 가져올 수 없습니다: {error}
+	Magnetic Lasso Tool	자석 올가미 도구
+	Frequency	빈도
+	Use tablet pressure to change pen width	태블릿 압력을 사용하여 펜 폭 변경

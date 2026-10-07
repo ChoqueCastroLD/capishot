@@ -2522,3 +2522,6 @@ cameraRaw	Blending	Fusion
 	Save failed: {error}	Échec de l'enregistrement : {error}
 	Save cancelled	Enregistrement annulé
 	Couldn't place {name}: {error}	Impossible d'importer {name} : {error}
+	Magnetic Lasso Tool	Outil Lasso magnétique
+	Frequency	Fréquence
+	Use tablet pressure to change pen width	Utiliser la pression de la tablette pour modifier la largeur de la plume

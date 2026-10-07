@@ -2073,3 +2073,6 @@ cameraRaw	Color	カラー
 	Don't show again	次回から表示しない
 	Save failed: {error}	保存に失敗しました: {error}
 	Save cancelled	保存をキャンセルしました
+	Magnetic Lasso Tool	マグネット選択ツール
+	Frequency	頻度
+	Use tablet pressure to change pen width	タブレットの筆圧を使用してペンの幅を変更

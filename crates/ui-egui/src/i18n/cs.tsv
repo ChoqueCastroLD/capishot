@@ -2089,3 +2089,6 @@ cameraRaw	Color	Barvy
 	Save failed: {error}	Uložení se nezdařilo: {error}
 	Save cancelled	Ukládání zrušeno
 	Couldn't place {name}: {error}	Nelze umístit {name}: {error}
+	Magnetic Lasso Tool	Nástroj magnetické laso
+	Frequency	Frekvence
+	Use tablet pressure to change pen width	Měnit šířku pera přítlakem tabletu
