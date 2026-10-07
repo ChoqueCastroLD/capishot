@@ -40,6 +40,31 @@ native system locale; an unsupported code follows the same fallback. Regional ta
 Simplified Chinese remain distinct. Every Portuguese locale (`pt`, `pt-BR`, `pt-PT`) uses the
 Brazilian Portuguese catalog.
 
+### First launch and system language
+
+With no saved preference, `interface.language` defaults to `auto`, so the first rendered
+window uses the first supported system UI language. An older preferences file without this
+field also uses Auto. If detection fails or none of the preferred languages is registered,
+the UI uses English (`en`). A saved manual language choice takes precedence on later launches;
+startup never overwrites it or writes the detected language into the preference file.
+
+The native-only, pinned `sys-locale` dependency provides safe Rust access to the platform APIs:
+
+- **Windows:** `GetUserPreferredUILanguages`, in the user's preferred order. This uses UI
+  languages rather than the Region setting for dates and numbers; they can differ.
+- **macOS:** `CFLocaleCopyPreferredLanguages`, in preferred order, without starting `defaults`
+  or depending on a particular `.plist` representation.
+- **Linux/BSD:** the platform's standard locale environment, including `LANGUAGE` lists.
+
+`PHOTOCRAFT_LOCALE` is an optional single-tag override for reproducible launches; an unsupported
+override falls back to English. Empty overrides use the system. Unix locale variables do not
+override Windows/macOS UI-language preferences. Tags are read once per process (at most 64,
+128 bytes each) and matched against the supported language registry. Changes to the
+OS language list itself take effect at the next launch. The web build keeps its existing
+English Auto fallback until browser-locale detection is implemented.
+
+API implementation and licensing: [sys-locale](https://github.com/1Password/sys-locale).
+
 Agents use the existing `prefs.set` command through CLI, MCP or the desktop control channel:
 
 ```json

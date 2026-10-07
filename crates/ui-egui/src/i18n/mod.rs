@@ -19,6 +19,9 @@
 //!   translators may reorder placeholders freely.
 
 mod catalog;
+mod system;
+
+pub use system::system_lang;
 
 use std::cell::Cell;
 use std::sync::OnceLock;
@@ -205,52 +208,6 @@ pub fn lang_from_tag(tag: &str) -> Option<Lang> {
     cands.iter().find_map(|c| Lang::from_code(c))
 }
 
-/// The system language (cached). English when it can't be determined.
-pub fn system_lang() -> Lang {
-    // Tests drive the UI by its English labels whatever the developer's locale is.
-    if cfg!(test) {
-        return Lang::EN;
-    }
-    static SYSTEM: OnceLock<Lang> = OnceLock::new();
-    *SYSTEM.get_or_init(detect_system_lang)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn detect_system_lang() -> Lang {
-    for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
-        if let Some(l) = std::env::var(var).ok().filter(|v| !v.is_empty()).and_then(|v| lang_from_tag(&v)) {
-            return l;
-        }
-    }
-    // Apps started from the Finder don't inherit LANG: use the macOS preferred-languages list.
-    // The absolute path keeps a `defaults` earlier on PATH from running; any failure means English.
-    #[cfg(target_os = "macos")]
-    if let Ok(out) = std::process::Command::new("/usr/bin/defaults").args(["read", "-g", "AppleLanguages"]).output()
-        && out.status.success()
-        && let Some(l) = first_supported(&String::from_utf8_lossy(&out.stdout))
-    {
-        return l;
-    }
-    // Windows sets no LANG: fall back to the OS locale the text engine already reads for its CJK
-    // font order (`HKCU\Control Panel\International` › `LocaleName`, e.g. `zh-TW`; on macOS the
-    // preferences plist). `PHOTOCRAFT_LOCALE` overrides it there too.
-    if let Some(l) = photocraft_text::cjk::ui_locale().and_then(lang_from_tag) {
-        return l;
-    }
-    Lang::EN
-}
-
-/// The first supported language in a `defaults read` list like `(\n    "ja-JP",\n    "en-US"\n)`.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn first_supported(list: &str) -> Option<Lang> {
-    list.split(['(', ')', ',', '"', '\n']).map(str::trim).filter(|s| !s.is_empty()).find_map(lang_from_tag)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn detect_system_lang() -> Lang {
-    Lang::EN
-}
-
 thread_local! {
     // Independent app/test threads must not change each other's drawing language.
     static CURRENT: Cell<Lang> = const { Cell::new(Lang::EN) };
@@ -399,15 +356,6 @@ mod tests {
         assert_eq!(candidates("zh_TW"), ["zh-tw", "zh-hant", "zh"]);
         assert_eq!(candidates("zh-CN"), ["zh-cn", "zh-hans", "zh"]);
         assert_eq!(candidates("zh-Hant-HK"), ["zh-hant-hk", "zh-hant", "zh"]);
-    }
-
-    #[test]
-    fn macos_language_list_is_parsed() {
-        assert_eq!(first_supported("(\n    \"ja-JP\",\n    \"en-US\"\n)\n"), Some(JA()));
-        assert_eq!(first_supported("(\n    \"fr-FR\",\n    \"en-US\"\n)\n"), Lang::from_code("fr"));
-        assert_eq!(first_supported("(\n    \"de-DE\",\n    \"en-US\"\n)\n"), Lang::from_code("de"));
-        assert_eq!(first_supported("(\n    \"zh-Hant-TW\",\n    \"en-US\"\n)\n"), Some(ZH()));
-        assert_eq!(first_supported("("), None);
     }
 
     #[test]
