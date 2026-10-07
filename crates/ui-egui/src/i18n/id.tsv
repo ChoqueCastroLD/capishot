@@ -2501,3 +2501,4 @@ cameraRaw	Blending	Pembauran
 	Don't show again	Jangan tampilkan lagi
 	Save failed: {error}	Gagal menyimpan: {error}
 	Save cancelled	Penyimpanan dibatalkan
+	Couldn't place {name}: {error}	Tidak dapat menempatkan {name}: {error}

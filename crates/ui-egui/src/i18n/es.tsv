@@ -1493,6 +1493,7 @@
 	Comic Book	Cómic
 	Conform	Conformar
 	Content-Aware Fill needs a selection on a pixel layer	El relleno de contenido necesita una selección en una capa de píxeles
+	Couldn't place {name}: {error}	No se pudo colocar {name}: {error}
 	Could not transform: the layer is empty	No se pudo transformar: la capa está vacía
 	Could not use Perspective Warp: the layer is empty	No se pudo usar la deformación en perspectiva: la capa está vacía
 	Could not use Puppet Warp: no opaque pixels	No se pudo usar la deformación de clavos: no hay píxeles opacos

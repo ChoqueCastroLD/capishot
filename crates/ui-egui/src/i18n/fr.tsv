@@ -2514,3 +2514,4 @@ cameraRaw	Blending	Fusion
 	Don't show again	Ne plus afficher
 	Save failed: {error}	Échec de l'enregistrement : {error}
 	Save cancelled	Enregistrement annulé
+	Couldn't place {name}: {error}	Impossible d'importer {name} : {error}

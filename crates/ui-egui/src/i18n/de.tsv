@@ -2124,4 +2124,5 @@
 	Don't show again	Nicht mehr anzeigen
 	Save failed: {error}	Speichern fehlgeschlagen: {error}
 	Save cancelled	Speichern abgebrochen
+	Couldn't place {name}: {error}	{name} konnte nicht platziert werden: {error}
 	Full-resolution preview unavailable	Vorschau in voller Auflösung nicht verfügbar

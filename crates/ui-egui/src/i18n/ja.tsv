@@ -1498,6 +1498,7 @@
 	Comic Book	コミック
 	Conform	適合
 	Content-Aware Fill needs a selection on a pixel layer	コンテンツに応じた塗りつぶしには、ピクセルレイヤー上の選択範囲が必要です
+	Couldn't place {name}: {error}	{name} を配置できませんでした: {error}
 	Could not transform: the layer is empty	変形できません: レイヤーが空です
 	Could not use Perspective Warp: the layer is empty	遠近法ワープを使えません: レイヤーが空です
 	Could not use Puppet Warp: no opaque pixels	パペットワープを使えません: 不透明なピクセルがありません

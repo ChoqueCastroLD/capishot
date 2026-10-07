@@ -1497,6 +1497,7 @@
 	Comic Book	漫畫書
 	Conform	符合
 	Content-Aware Fill needs a selection on a pixel layer	內容感知填滿需要在像素圖層上建立選取範圍
+	Couldn't place {name}: {error}	無法置入 {name}：{error}
 	Could not transform: the layer is empty	無法變形：圖層是空的
 	Could not use Perspective Warp: the layer is empty	無法使用透視彎曲：圖層是空的
 	Could not use Puppet Warp: no opaque pixels	無法使用操控彎曲：沒有不透明像素

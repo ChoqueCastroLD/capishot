@@ -2080,3 +2080,4 @@ cameraRaw	Color	Barvy
 	Don't show again	Příště nezobrazovat
 	Save failed: {error}	Uložení se nezdařilo: {error}
 	Save cancelled	Ukládání zrušeno
+	Couldn't place {name}: {error}	Nelze umístit {name}: {error}

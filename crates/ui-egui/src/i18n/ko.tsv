@@ -2667,3 +2667,4 @@ cameraRaw	Color	색상
 	Don't show again	다시 표시 안 함
 	Save failed: {error}	저장 실패: {error}
 	Save cancelled	저장이 취소되었습니다
+	Couldn't place {name}: {error}	{name}을(를) 가져올 수 없습니다: {error}

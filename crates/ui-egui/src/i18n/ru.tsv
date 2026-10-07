@@ -2357,3 +2357,4 @@ cameraRaw	Roughness	Неровность
 	Don't show again	Больше не показывать
 	Save failed: {error}	Не удалось сохранить: {error}
 	Save cancelled	Сохранение отменено
+	Couldn't place {name}: {error}	Не удалось поместить {name}: {error}
