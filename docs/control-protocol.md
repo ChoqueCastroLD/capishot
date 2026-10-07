@@ -80,6 +80,12 @@ store expose and persist the same setting; scripts keep using canonical command 
 | `type.hitTest` | `{"layer":id?,"x":px,"y":px}`: character under a document point. No `layer` picks the topmost visible type layer there. Result `{"layer","index","line","inside"}` |
 | `type.caret` | `{"layer":id?,"index":char}`: caret segment in document pixels, `{"index","line","segment":[[x,y],[x,y]]}` (rotated and vertical type included) |
 | `type.navigate` | `{"layer":id?,"index":char,"move":"wordPrev\|wordNext\|linePrev\|lineNext\|lineStart\|lineEnd\|start\|end","x":px?}`: neighbouring caret. `x` keeps the column across line moves. Result `{"index"}` |
+| `actions.list` | `{}` → `{actions:[{name, steps}], recording}` (the name being recorded, or null) |
+| `actions.get` | `{"action": name or index}` → `{name, steps:[[id, params], …]}`, the shape `file.automate.batch` and droplets take |
+| `actions.record` | `{"name":"Red"}` starts a new action (default name `Action N`). `{"action": name or index}` appends to one that exists |
+| `actions.stop` | `{}` → `{action, steps}`. Copies replayable journal entries since `actions.record` (queries and `actions.*` omitted) |
+| `actions.play` | `{"action": name or index, "from": step?}`. `from` and `failed.step` are 0-based. Returns `{action, ran, failed?:{step, id, error}}` and still returns ok when a step fails, so a partial run is reported. Leaves one history step per step that ran. Refuses to play while a play is already running. On an untrusted session each step is authorized the same way as a top-level command |
+| `actions.delete` | `{"action": name or index}` → `{deleted}`. Refused while recording |
 
 UI-level commands (`view.zoomIn`, `window.theme.pro`, `edit.search`, …) are also accepted by `engine.execute` and `ui.menu.invoke`.
 
@@ -138,8 +144,10 @@ User and imported (`.abr`) brush presets live in the config directory's `Presets
 `.pcbrushes` JSON file per preset group, content-addressed tip bitmaps under `tips/`, and an
 `index.json` with the group order and deleted built-ins (see `photocraft_engine::preset_store`).
 The store loads in the background at launch and syncs after every brush preset change; built-ins
-are never written. Headless CLI/MCP sessions and the web build keep brush presets for the session
-only. Gradient presets (including imported `.grd` groups) persist with the preferences.
+are never written. The Actions list is `actions.json` in that same folder and survives a restart.
+Headless CLI/MCP sessions and the web build keep brush presets and the action list for the session
+only, unless a store is attached. Gradient presets (including imported `.grd` groups) persist with
+the preferences.
 
 ## Snapping
 
