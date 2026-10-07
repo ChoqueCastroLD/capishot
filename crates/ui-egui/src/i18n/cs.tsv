@@ -2069,6 +2069,10 @@ cameraRaw	Color	Barvy
 	Enable {name}	Povolit {name}
 	Hold Alt while drawing for straight segments	Podržením Alt při kreslení vytvoříte rovné úseky
 	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Táhněte nebo klikejte body mnohoúhelníku · podržením Alt během lasa kreslíte rovné úseky · {add} přidat · {sub} před kreslením odečte
+	Move	Přesunout
+	Extend	Rozšířit
+	Structure:	Struktura:
+	Content-Aware Move Tool	Nástroj přesun s ohledem na obsah
 	TIFF Options	Možnosti TIFF
 	Including layers will increase file size.	Zahrnutí vrstev zvětší velikost souboru.
 	Discard Layers and Save a Copy	Zahodit vrstvy a uložit kopii

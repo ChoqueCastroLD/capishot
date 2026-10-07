@@ -2491,6 +2491,9 @@ cameraRaw	Blending	Pembauran
 	Enable {name}	Aktifkan {name}
 	Hold Alt while drawing for straight segments	Tahan Alt saat menggambar untuk segmen lurus
 	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Seret atau klik titik poligon · tahan Alt saat lasso untuk segmen lurus · {add} tambah · {sub} sebelum menggambar mengurangi
+	Extend	Perluas
+	Structure:	Struktur:
+	Content-Aware Move Tool	Alat Content-Aware Move
 	TIFF Options	Opsi TIFF
 	Including layers will increase file size.	Menyertakan layer akan memperbesar ukuran file.
 	Discard Layers and Save a Copy	Buang Layer dan Simpan Salinan

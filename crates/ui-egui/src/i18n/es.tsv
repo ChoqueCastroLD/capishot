@@ -2144,6 +2144,9 @@ cameraRaw	Amount	Cantidad
 	Enable {name}	Activar {name}
 	Hold Alt while drawing for straight segments	Mantenga Alt al dibujar para segmentos rectos
 	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Arrastre o haga clic en los puntos del polígono · mantenga Alt durante el lazo para segmentos rectos · {add} añadir · {sub} antes de dibujar resta
+	Extend	Extender
+	Structure:	Estructura:
+	Content-Aware Move Tool	Herramienta Mover según el contenido
 	TIFF Options	Opciones de TIFF
 	Including layers will increase file size.	Incluir las capas aumentará el tamaño del archivo.
 	Discard Layers and Save a Copy	Descartar capas y guardar una copia

@@ -2347,6 +2347,9 @@ cameraRaw	Roughness	Неровность
 	Enable {name}	Включить {name}
 	Hold Alt while drawing for straight segments	Удерживайте Alt при рисовании для прямых отрезков
 	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Перетащите или щёлкайте точки многоугольника · удерживайте Alt во время лассо для прямых отрезков · {add} добавить · {sub} перед рисованием вычитает
+	Extend	Расширение
+	Structure:	Структура:
+	Content-Aware Move Tool	Перемещение с учётом содержимого
 	TIFF Options	Параметры TIFF
 	Including layers will increase file size.	Включение слоёв увеличит размер файла.
 	Discard Layers and Save a Copy	Удалить слои и сохранить копию
