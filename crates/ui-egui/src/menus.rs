@@ -453,6 +453,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     if let Some(e) = crate::plugin_ui::is_enabled(app, id) {
         return e;
     }
+    if let Some(e) = crate::transform_tool::is_enabled(app, id) {
+        return e;
+    }
     match id {
         "file.open" | "file.exit" | "file.clearRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
         i if i.starts_with("file.openRecent.") => true,
