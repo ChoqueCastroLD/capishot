@@ -740,7 +740,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             let mut section = |ui: &mut egui::Ui, title: &str, prefix: &str| {
                                 ui.label(egui::RichText::new(tl!(&title)).small().color(t.text_dim));
                                 for c in photocraft_engine::command_specs().iter().filter(|c| c.id.starts_with(prefix)) {
-                                    if ui.add_enabled(app.session.is_enabled(c.id), egui::Button::new(c.label)).clicked() {
+                                    if ui.add_enabled(app.session.is_enabled(c.id), egui::Button::new(tl!(c.label))).clicked() {
                                         let _ = app.run(c.id, json!({}));
                                         ui.close();
                                     }
@@ -1462,7 +1462,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             egui::Popup::menu(&adj).show(|ui| {
                 ui.set_min_width(190.0);
                 for c in photocraft_engine::command_specs().iter().filter(|c| c.id.starts_with("layer.newAdjustmentLayer.")) {
-                    if ui.button(c.label.trim_end_matches('…')).clicked() {
+                    if ui.button(tl!(c.label).trim_end_matches('…')).clicked() {
                         actions.push((c.id.into(), json!({})));
                         ui.close();
                     }
@@ -1498,7 +1498,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
                 ui.separator();
                 for &(kind, label) in crate::layer_style::KINDS {
-                    if ui.button(format!("{label}…")).clicked() {
+                    if ui.button(format!("{}…", tl!(label))).clicked() {
                         crate::layer_style::open(app, Some(kind));
                         ui.close();
                     }

@@ -438,6 +438,37 @@ mod tests {
         assert_eq!(tr(zh, "no such label"), "no such label");
     }
 
+    /// Keep the Korean tool/menu vocabulary aligned with the Photoshop equivalents.
+    /// Sources and the product-specific vocabulary policy are recorded in `ko.tsv`.
+    #[test]
+    fn korean_uses_photoshop_terminology() {
+        let ko = Lang::from_code("ko").expect("ko registered");
+        for (source, expected) in [
+            ("Shape", "모양"),
+            ("Stroke", "획"),
+            ("Smudge Tool", "손가락 도구"),
+            ("Eyedropper Tool", "스포이드 도구"),
+            ("Rectangular Marquee Tool", "사각형 선택 윤곽 도구"),
+            ("Elliptical Marquee Tool", "원형 선택 윤곽 도구"),
+            ("Zoom Tool", "돋보기 도구"),
+            ("Horizontal Type Tool", "수평 문자 도구"),
+            ("Puppet Warp", "퍼펫 뒤틀기"),
+            ("Liquify…", "픽셀 유동화…"),
+            ("Gaussian Blur…", "가우시안 흐림 효과…"),
+            ("Gaussian Blur", "가우시안 흐림 효과"),
+            ("Adaptive Wide Angle…", "응용 광각…"),
+            ("Render", "렌더"),
+            ("Sharpen", "선명 효과"),
+            ("Vibrance", "활기"),
+            ("Layer Comps", "레이어 구성 요소"),
+            ("Vivid Light", "선명한 라이트"),
+            ("Hard Mix", "하드 혼합"),
+        ] {
+            assert_eq!(tr(ko, source), expected, "{source}");
+        }
+        assert_eq!(tr_id(ko, "filter.sharpen.sharpen", "Sharpen"), "선명하게");
+    }
+
     #[test]
     fn spanish_resolves_and_pluralises() {
         let es = Lang::from_code("es").expect("es registered");

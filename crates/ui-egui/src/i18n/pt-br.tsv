@@ -2507,3 +2507,5 @@ cameraRaw	Luminance Detail	Detalhe da luminância
 cameraRaw	Color Detail	Detalhe da cor
 cameraRaw	Roughness	Aspereza
 cameraRaw	Whites	Brancos
+	No patterns	Nenhum padrão
+	Enable {name}	Ativar {name}

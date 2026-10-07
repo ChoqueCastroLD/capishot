@@ -124,6 +124,7 @@ pub(crate) fn draw_readout(ctx: &egui::Context, id: &str, cursor: Pos2, labels: 
     let t = crate::theme::Tokens::get(ctx);
     let font = egui::FontId::proportional(11.5);
     let width = |text: &str| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), font.clone(), t.text).size().x);
+    let labels = labels.map(|label| tl!(label));
     let (lw, vw) = (labels.map(width), [width(&values[0]), width(&values[1])]);
     let (label_col, value_col) = (lw[0].max(lw[1]), vw[0].max(vw[1]));
     egui::Area::new(egui::Id::new(id)).order(egui::Order::Tooltip).fixed_pos(cursor + vec2(16.0, 18.0)).interactable(false).constrain(true).show(ctx, |ui| {

@@ -2345,3 +2345,5 @@ cameraRaw	Roughness	Неровность
 	Patch:	Заплатка:
 	Lasso around an area, then drag the selection	Обведите область лассо, затем перетащите выделение
 	Edit Type	Редактировать текст
+	No patterns	Нет узоров
+	Enable {name}	Включить {name}

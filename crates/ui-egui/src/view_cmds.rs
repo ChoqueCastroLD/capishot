@@ -704,7 +704,27 @@ fn label_of(key: &str) -> String {
             out.push(c);
         }
     }
-    out
+    let translated = tl!(&out);
+    if translated != out {
+        return translated.to_owned();
+    }
+    // Fall back to the Title Case filter label's translation, but keep the sentence-case
+    // English when that is untranslated too (English and partial catalogs read as before).
+    let title = crate::filter_dialog::label(key);
+    if title == crate::filter_dialog::source_label(key) { out } else { title }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::label_of;
+
+    #[test]
+    fn untranslated_form_labels_stay_sentence_case() {
+        crate::i18n::with_language(crate::i18n::Lang::EN, || {
+            assert_eq!(label_of("useAntialias"), "Use antialias");
+            assert_eq!(label_of("radius"), "Radius");
+        });
+    }
 }
 
 /// Body of a `__form` dialog: text fields, number fields, checkboxes and `__choices` dropdowns.

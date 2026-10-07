@@ -2045,3 +2045,5 @@ cameraRaw	Blending	混合
 	Patch:	修補：
 	Lasso around an area, then drag the selection	用套索圈出區域，然後拖曳選取範圍
 	Edit Type	編輯文字
+	No patterns	無圖樣
+	Enable {name}	啟用{name}

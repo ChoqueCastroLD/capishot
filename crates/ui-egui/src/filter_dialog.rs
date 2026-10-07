@@ -224,6 +224,10 @@ pub fn open_with_spec(app: &mut PhotocraftApp, command: &str, label: &str, spec:
 }
 
 pub(crate) fn label(key: &str) -> String {
+    tl!(&source_label(key)).to_owned()
+}
+
+pub(crate) fn source_label(key: &str) -> String {
     // camelCase → "Camel Case"
     let mut s = String::new();
     for (i, ch) in key.chars().enumerate() {
@@ -467,6 +471,41 @@ mod tests {
         }
         assert!(has_dialog("filter.blur.gaussianBlur"));
         assert!(!has_dialog("filter.stylize.findEdges"));
+    }
+
+    #[test]
+    fn korean_covers_generated_filter_options_and_gallery_names() {
+        let ko = crate::i18n::lang_from_tag("ko-KR").unwrap();
+        let mut missing = std::collections::BTreeSet::new();
+        let mut check = |s: String| {
+            if !matches!(s.as_str(), "X" | "Y" | "A" | "B") && !crate::i18n::has(ko, &s) {
+                missing.insert(s);
+            }
+        };
+        for c in photocraft_engine::command_specs().iter().filter(|c| c.id.starts_with("filter.") || c.id.starts_with("image.adjustments.")) {
+            for p in parse_spec(c.params) {
+                if !p.key.chars().all(|c| c.is_ascii_alphanumeric()) || matches!(p.kind, Kind::Json) {
+                    continue;
+                }
+                check(source_label(&p.key));
+                if let Kind::Choice(choices) = p.kind {
+                    for choice in choices {
+                        // Only symbolic options are UI choices; registry docs also contain
+                        // colour syntax and array notation, which are not translatable names.
+                        if choice.chars().all(|c| c.is_ascii_alphanumeric()) {
+                            check(source_label(&choice));
+                        }
+                    }
+                }
+            }
+        }
+        for f in photocraft_algo::GalleryFilter::ALL {
+            check(f.name().to_string());
+        }
+        for cat in photocraft_algo::GALLERY_CATEGORIES {
+            check(cat.to_string());
+        }
+        assert!(missing.is_empty(), "missing Korean dynamic labels: {missing:#?}");
     }
 
     #[test]
