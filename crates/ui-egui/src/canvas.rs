@@ -940,6 +940,8 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let active = app.session.active_index();
     let mut activate = None;
     let mut close = None;
+    let mut tab_action = None;
+    let tab_count = app.session.documents().len();
     let (mut focus_open, mut cancel_open) = (None, None);
     let focused_open = app.jobs.focus.is_some();
     egui::Frame::NONE.fill(t.canvas).inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 4 }).show(ui, |ui| {
@@ -974,6 +976,9 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 } else if resp.clicked() {
                     activate = Some(i);
                 }
+                resp.context_menu(|ui| {
+                    tab_action = tab_context_menu(ui, i, tab_count);
+                });
             }
             // Files opening in the background: a tab with a progress underline; × cancels.
             for (job, name, frac) in crate::jobs_ui::open_tabs(app) {
@@ -1010,6 +1015,33 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if let Some(i) = close {
         let _ = crate::menus::invoke(app, ui.ctx(), "file.close", json!({"document": i}));
     }
+    if let Some((id, params)) = tab_action
+        && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, params)
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
+/// All tab actions go through the same guarded File commands as the menu bar, including the
+/// unsaved-changes prompt. The clicked tab is explicit even when another document is active.
+fn tab_context_items(index: usize, count: usize) -> [(&'static str, &'static str, serde_json::Value, bool); 3] {
+    [
+        ("Close", "file.close", json!({"document": index}), true),
+        ("Close Others", "file.closeOthers", json!({"document": index}), count > 1),
+        ("Close All", "file.closeAll", json!({}), true),
+    ]
+}
+
+fn tab_context_menu(ui: &mut egui::Ui, index: usize, count: usize) -> Option<(&'static str, serde_json::Value)> {
+    ui.set_min_width(170.0);
+    for (label, id, params, enabled) in tab_context_items(index, count) {
+        if ui.add_enabled(enabled, egui::Button::new(tl!(label))).clicked() {
+            ui.close();
+            return Some((id, params));
+        }
+    }
+    None
 }
 
 /// Apply tab-strip clicks: a document tab shows that document, an opening tab its progress, and
@@ -1037,6 +1069,8 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
     let active = app.session.active_index().filter(|_| app.jobs.focus.is_none());
     let (mut activate, mut close) = (None, None);
+    let mut tab_action = None;
+    let tab_count = app.session.documents().len();
     let (strip, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), Sense::hover());
     ui.painter().rect_filled(strip, 0.0, t.tab_strip);
     let mut x = strip.left();
@@ -1069,6 +1103,9 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         } else if resp.clicked() {
             activate = Some(i);
         }
+        resp.context_menu(|ui| {
+            tab_action = tab_context_menu(ui, i, tab_count);
+        });
         x = r.right();
     }
     // Files opening in the background (#210): "name (Opening… 45%)" with a progress underline.
@@ -1100,6 +1137,12 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     open_tab_clicks(app, activate, focus_open, cancel_open);
     if let Some(i) = close {
         let _ = crate::menus::invoke(app, ui.ctx(), "file.close", json!({"document": i}));
+    }
+    if let Some((id, params)) = tab_action
+        && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, params)
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
     }
 }
 
@@ -1590,7 +1633,14 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             && let Some(p) = response.interact_pointer_pos()
         {
             let d = xf.to_doc(p);
+            app.ui.canvas_tool_menu = None;
             crate::layer_pick_ui::open(app, [p.x, p.y], d[0], d[1]);
+        }
+        if response.secondary_clicked()
+            && !crate::layer_pick_ui::is_gesture(tool, mods)
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            crate::canvas_tool_menu::open(app, tool, [p.x, p.y]);
         }
         // The (temporary) Hand pans above; its gestures never reach the tool underneath.
         if tool == Tool::Hand {
@@ -1704,6 +1754,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         draw_transform_controls(app, &painter, &xf);
         crate::paint_mouse::show_picker(app, &ctx);
         crate::layer_pick_ui::show(app, &ctx);
+        crate::canvas_tool_menu::show(app, &ctx);
         crate::snap_ui::draw(app, &painter, &xf);
         if border == photocraft_engine::prefs::CanvasBorder::Line {
             painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, Color32::from_gray(20)), egui::StrokeKind::Outside);
@@ -2521,6 +2572,30 @@ fn hex(c: [f32; 4]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_context_uses_clicked_document_and_existing_close_commands() {
+        let items = tab_context_items(2, 3);
+        assert_eq!(items.iter().map(|(_, id, _, _)| *id).collect::<Vec<_>>(), ["file.close", "file.closeOthers", "file.closeAll"]);
+        assert_eq!(items[0].2, json!({"document": 2}));
+        assert_eq!(items[1].2, json!({"document": 2}));
+        assert_eq!(items[2].2, json!({}));
+        assert!(!tab_context_items(0, 1)[1].3);
+        assert!(items.iter().all(|(_, id, _, _)| photocraft_engine::commands::find(id).is_some()));
+    }
+
+    #[test]
+    fn tab_close_others_prompts_for_unsaved_nonactive_document() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 8, "height": 8, "name": "Keep"})).unwrap();
+        app.run("file.new", json!({"width": 8, "height": 8, "name": "Edited"})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        assert_eq!(app.session.active_index(), Some(1));
+        let (_, id, params, _) = tab_context_items(0, 2)[1].clone();
+        crate::menus::invoke(&mut app, &egui::Context::default(), id, params).unwrap();
+        assert!(app.discard.is_some(), "close others must ask before discarding the edited tab");
+        assert_eq!(app.session.documents().len(), 2);
+    }
 
     #[test]
     fn wayland_start_screen_hint_does_not_claim_file_drop_works() {
