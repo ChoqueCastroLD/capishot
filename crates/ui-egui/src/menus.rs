@@ -758,16 +758,33 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
             nav.bar_bottom = Some(ui.max_rect().bottom());
             let mut buttons = Vec::with_capacity(TOP_MENUS.len());
             for top in TOP_MENUS {
-                let r = ui.menu_button(egui::RichText::new(crate::i18n::tr(lang, top)).color(t.text_dim), |ui| {
-                    let items = items.get_or_init(|| menu_items(app_ref));
-                    let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
-                    ui.set_min_width(220.0);
-                    if mine.is_empty() {
-                        ui.weak(crate::i18n::tr(lang, "(coming soon)"));
-                    }
-                    render_level(ui, &mine, 1, &mut clicked, &mut nav);
-                });
-                buttons.push(r.response);
+                // egui's menu_button toggles on release; these titles open on the press (one
+                // gesture can press, drag to an item and release), so each drives its popup.
+                let title = ui.add(egui::Button::new(egui::RichText::new(crate::i18n::tr(lang, top)).color(t.text_dim)));
+                // The bar's close behaviour and style, as a menu (not bar) config so submenus inside
+                // render as submenus.
+                let bar = egui::containers::menu::MenuConfig::find(ui);
+                let config = egui::containers::menu::MenuConfig::new().close_behavior(bar.close_behavior).style(bar.style.clone());
+                let open = title_press(ui.ctx(), &title);
+                // The release ending the press that opened this menu is a click "outside" the
+                // popup: it must not close it again.
+                let opening = title.clicked() && ui.ctx().data(|d| d.get_temp::<bool>(press_gesture_id())).unwrap_or(false);
+                let close = if opening { egui::PopupCloseBehavior::IgnoreClicks } else { config.close_behavior };
+                egui::Popup::menu(&title)
+                    .open_memory(open)
+                    .close_behavior(close)
+                    .style(config.style.clone())
+                    .info(egui::UiStackInfo::new(egui::UiKind::Menu).with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config))
+                    .show(|ui| {
+                        let items = items.get_or_init(|| menu_items(app_ref));
+                        let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
+                        ui.set_min_width(220.0);
+                        if mine.is_empty() {
+                            ui.weak(crate::i18n::tr(lang, "(coming soon)"));
+                        }
+                        render_level(ui, &mine, 1, &mut clicked, &mut nav);
+                    });
+                buttons.push(title);
             }
             right = buttons.iter().map(|b| b.rect.right()).fold(right, f32::max);
             switch_on_hover(ui.ctx(), &buttons);
@@ -776,6 +793,10 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
         });
     });
     nav.store(ui.ctx());
+    // The press-drag gesture ends with the button (its release was handled by the rows above).
+    if ui.input(|i| i.pointer.primary_released() || !i.pointer.primary_down()) {
+        ui.ctx().data_mut(|d| d.remove::<bool>(press_gesture_id()));
+    }
     if let Some(id) = clicked {
         let ctx = ui.ctx().clone();
         let id = alt_click(id, ctx.input(|i| i.modifiers.alt));
@@ -784,6 +805,34 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
         }
     }
     right
+}
+
+fn press_gesture_id() -> egui::Id {
+    egui::Id::new("menu-press-gesture")
+}
+
+/// A menu title's open/close command this frame, the press opens a closed menu (and
+/// starts a press-drag gesture: releasing on an item runs it) or closes an open one; the release
+/// never toggles, so the menu doesn't blink.
+fn title_press(ctx: &egui::Context, title: &egui::Response) -> Option<egui::SetOpenCommand> {
+    // A press this frame on the title (still down, or a whole click within one frame).
+    let pressed = ctx.input(|i| i.pointer.primary_pressed()) && (title.is_pointer_button_down_on() || title.clicked());
+    if !pressed {
+        return None;
+    }
+    let open = egui::Popup::is_id_open(ctx, egui::Popup::default_response_id(title));
+    if !open {
+        ctx.data_mut(|d| d.insert_temp(press_gesture_id(), true));
+    }
+    Some(egui::SetOpenCommand::Bool(!open))
+}
+
+/// Did the press-drag gesture that opened the menus end over `item` (released on it)?
+fn released_on(ui: &egui::Ui, item: &egui::Response) -> bool {
+    item.enabled()
+        && item.contains_pointer()
+        && ui.input(|i| i.pointer.primary_released())
+        && ui.ctx().data(|d| d.get_temp::<bool>(press_gesture_id())).unwrap_or(false)
 }
 
 /// True only when the pointer can actually reach a menu title. A tall submenu can be
@@ -865,7 +914,7 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
                     "image.mode.bits32" => r.on_hover_text(crate::i18n::tr(lang, "Floating point")),
                     _ => r,
                 };
-                let hit = r.clicked();
+                let hit = r.clicked() || released_on(ui, &r);
                 (r, hit)
             });
             if hit {
