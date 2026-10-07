@@ -187,6 +187,12 @@ intents, black point compensation). It ships CC0 built-in profiles, including a 
 the live command registry (`menus::is_live`) and rewrites [`docs/parity.md`](parity.md). The test
 `parity::tests::parity_does_not_regress` fails if the live count drops below `parity::FLOOR`.
 
+`cargo xtask i18n-coverage` prints the UI translation coverage for each language in the
+`crates/ui-egui/src/i18n/mod.rs` registry, in stable language-code order. Its English-key set is
+derived from UI `tl!` literals, the menu catalog and UI command table, and menu command labels in
+the engine source. Catalog rows are validated for malformed and duplicate keys; unused legacy
+translations do not affect the denominator. Unregistered locale TSV files are ignored.
+
 ## Testing strategy
 
 - **Unit and property tests** in every crate. proptest is used for tile COW, regions and codecs.
