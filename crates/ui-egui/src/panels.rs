@@ -485,7 +485,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         widgets::vline(ui, 22.0);
                         if !t.pro {
                             opt_label(ui, tl!("Size"));
-                            widgets::value_field(ui, &mut b.size, 1.0..=5000.0, "px", 76.0);
+                            widgets::value_field(ui, &mut b.size, 1.0..=photocraft_engine::paint::MAX_BRUSH_SIZE, "px", 76.0);
                             widgets::vline(ui, 22.0);
                         }
                         opt_label(ui, tl!("Mode"));
