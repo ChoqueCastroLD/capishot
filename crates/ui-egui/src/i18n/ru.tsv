@@ -2282,3 +2282,4 @@
 	GPU	GPU
 
 	Rendering mode	Режим отрисовки
+	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	Лассо заморозки: перетащите, чтобы заморозить область; Alt+перетаскивание размораживает (L)
