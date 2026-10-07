@@ -80,7 +80,7 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::SliceSelect => "square-dashed-mouse-pointer",
         Tool::Gradient => "blend",
         Tool::PaintBucket => "paint-bucket",
-        Tool::Type => "type",
+        Tool::Type | Tool::VerticalType => "type",
         Tool::Hand => "hand",
         Tool::Zoom => "zoom-in",
         Tool::SpotHealing | Tool::Healing => "bandage",
