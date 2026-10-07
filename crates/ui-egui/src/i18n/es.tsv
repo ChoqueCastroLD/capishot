@@ -1667,6 +1667,8 @@
 	Doc: {flat}/{layered}	Doc: {flat}/{layered}
 	Scratch: {size}	Temporal: {size}
 	Untagged {mode}	Sin etiquetar {mode}
+	Invalid {mode} profile	Perfil {mode} no válido
+	Unnamed {mode} profile	Perfil {mode} sin nombre
 	{w} px x {h} px ({ppi} ppi)	{w} px × {h} px ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	Resolución: {dpi} píxeles/pulgada
 	Doc: {w} × {h} px	Doc: {w} × {h} px

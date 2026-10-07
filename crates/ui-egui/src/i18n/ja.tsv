@@ -1672,6 +1672,8 @@
 	Doc: {flat}/{layered}	ドキュメント: {flat}/{layered}
 	Scratch: {size}	スクラッチ: {size}
 	Untagged {mode}	タグなし {mode}
+	Invalid {mode} profile	無効な {mode} プロファイル
+	Unnamed {mode} profile	名前のない {mode} プロファイル
 	{w} px x {h} px ({ppi} ppi)	{w} px × {h} px ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	解像度: {dpi} ピクセル/インチ
 	Doc: {w} × {h} px	ドキュメント: {w} × {h} px

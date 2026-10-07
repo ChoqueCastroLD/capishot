@@ -1403,6 +1403,8 @@
 	{name} options	Параметры: {name}
 	Align {what}	Выровнять: {what}
 	Untagged {mode}	Без профиля ({mode})
+	Invalid {mode} profile	Недопустимый профиль {mode}
+	Unnamed {mode} profile	Безымянный профиль {mode}
 	Constraints ({n})	Ограничения ({n})
 	Count: {n}	Счёт: {n}
 	Click to add a point · drag off or {key}-click or Delete to remove	Щёлкните, чтобы добавить точку · уведите или {key}-клик, либо Delete — удалить
