@@ -46,7 +46,7 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 - `ui.key {key, command?, shift?, alt?, ctrl?}` (flags may also be grouped under `modifiers`): press and release a key, e.g. `{"key": "ArrowLeft", "shift": true}`
 - `ui.type {text}`: type text (goes to the focused widget, or to the canvas while the Type tool is editing)
 - `ui.resize {width, height}`: resize the main window
-- `ui.gpu.simulateLoss {error?}`: act as if the wgpu device was lost (or reported an error with `error: true`). The app switches to the CPU renderer for the rest of the session and shows the same notice as on a real loss. Returns `wasActive` and `gpuInfo`. For testing the fallback
+- `ui.gpu.simulateLoss {error?}`: act as if the wgpu device was lost (or reported an error with `error: true`). The app switches to the CPU image compositor for the rest of the session and shows the same recovery warning as on a real loss. `gpuFallbackNotice` in `ui.inspect` contains the reason while the warning is open. Keep Using CPU saves CPU compatibility for the next launch; Retry GPU saves GPU mode and asks the user to save and restart. The window renderer still requires a working graphics or software adapter. Returns `wasActive` and `gpuInfo`. For testing the fallback
 - `ui.screenshot {path?, focus?}`: capture the main window (PNG). With no path the reply contains
   base64 PNG data; a path is relative to the automation write root. Raises the window first
   (default) because occluded macOS windows stop rendering
@@ -265,3 +265,13 @@ accounting, compositor scratch-space accounting, command cancellation/duration l
 general per-method capabilities. Desktop screenshot capture/encoding and document import/export
 still need their own operation budgets; the desktop reply ceiling applies after the UI creates
 its response. A bounded output does not imply bounded command cost.
+
+### Rendering modes
+
+`performance.renderingMode` accepts `auto`, `gpu`, or `cpu`. Automatic is the default for new
+settings; older `useGpu: false` or `gpuBackend: cpu` preferences continue to select CPU mode
+until an explicit mode is saved. Changes apply at the next launch. Automatic and GPU both
+fall back on graphics errors rather than risk documents. CPU compatibility composites images
+on the CPU and prefers software window adapters, when available. macOS still uses Metal for
+the window. A failed window renderer initialization retries once in CPU compatibility mode;
+a driver process crash is detected by the startup marker on the next launch.

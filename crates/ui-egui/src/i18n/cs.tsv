@@ -1996,3 +1996,20 @@
 	Opening…	Otevírání…
 	Reading…	Načítání…
 	Working…	Zpracování…
+
+# Rendering mode and recovery
+	Rendering Mode	Režim vykreslování
+	Automatic (recommended)	Automaticky (doporučeno)
+	CPU / Compatibility	CPU / Kompatibilita
+	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	Automatický režim používá dostupnou GPU a při chybě přejde na CPU.
+	Switched to CPU rendering	Přepnuto na vykreslování CPU
+	GPU acceleration could not continue. Your documents are unchanged.	Akcelerace GPU nemohla pokračovat. Dokumenty zůstaly nezměněny.
+	PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.	PhotoCraft skládá obraz pomocí CPU. Okno může nadále používat grafický adaptér.
+	Retry GPU requires a restart. Save your work first.	Opakování GPU vyžaduje restart. Nejprve uložte práci.
+	Keep Using CPU	Pokračovat s CPU
+	Retry GPU	Zkusit GPU znovu
+	Advanced	Pokročilé
+	GPU Backend	Backend GPU
+	Details	Podrobnosti
+
+	Rendering mode	Režim vykreslování

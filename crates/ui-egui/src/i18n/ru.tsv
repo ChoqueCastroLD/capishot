@@ -2264,3 +2264,20 @@
 	Opening…	Открытие…
 	Reading…	Чтение…
 	Working…	Обработка…
+
+# Rendering mode and recovery
+	Rendering Mode	Режим отрисовки
+	Automatic (recommended)	Автоматически (рекомендуется)
+	CPU / Compatibility	CPU / Совместимость
+	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	Автоматический режим использует GPU, когда он доступен, и переходит на CPU при ошибках.
+	Switched to CPU rendering	Включена отрисовка на CPU
+	GPU acceleration could not continue. Your documents are unchanged.	Ускорение GPU остановлено. Документы не изменены.
+	PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.	PhotoCraft обрабатывает изображения на CPU. Окно может продолжать использовать графический адаптер.
+	Retry GPU requires a restart. Save your work first.	Для повтора GPU нужен перезапуск. Сначала сохраните работу.
+	Keep Using CPU	Продолжить с CPU
+	Retry GPU	Повторить GPU
+	GPU Backend	Бэкенд GPU
+	Details	Подробности
+	GPU	GPU
+
+	Rendering mode	Режим отрисовки
