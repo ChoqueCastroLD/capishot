@@ -145,7 +145,9 @@ pub struct ExportSettings {
 
 /// Encode a document: (file bytes, warnings about anything approximated or dropped).
 pub type ExportFn = Box<dyn Fn(&Document, &str, &ExportSettings) -> Result<(Vec<u8>, Vec<String>), String>>;
-pub type PickOpenFn = Box<dyn FnMut() -> Option<(String, Vec<u8>)>>;
+/// The picked file's name and its bytes, or why it could not be read (shown like any other open
+/// failure); `None` when the dialog was cancelled.
+pub type PickOpenFn = Box<dyn FnMut() -> Option<(String, Result<Vec<u8>, String>)>>;
 pub type PickSaveFn = Box<dyn FnMut(&str) -> Option<String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 /// Read bytes through the desktop control session's authorized read root.
@@ -689,12 +691,17 @@ impl PhotocraftApp {
     /// File › Open: the platform dialog returns the chosen file's path (native; the web delivers
     /// picks through the inbox instead).
     pub fn open_dialog_file(&mut self) {
-        let picked = self.services.pick_open.as_mut().and_then(|f| f());
-        if let Some((path, bytes)) = picked
-            && let Err(e) = self.open_file(&path, &bytes)
-        {
+        let Some((path, bytes)) = self.services.pick_open.as_mut().and_then(|f| f()) else { return };
+        if let Err(e) = bytes.and_then(|bytes| self.open_file(&path, &bytes)) {
             self.open_failed(&file_open::display_name(&path), &e);
         }
+    }
+
+    /// Show the open dialog for a file a command reads (a script, notes, a placed image, presets):
+    /// `None` when cancelled, else its name and bytes or the read error.
+    pub(crate) fn pick_file_bytes(&mut self) -> Option<Result<(String, Vec<u8>), String>> {
+        let (name, bytes) = self.services.pick_open.as_mut().and_then(|f| f())?;
+        Some(bytes.map(|b| (name.clone(), b)).map_err(|e| format!("{}: {e}", file_open::display_name(&name))))
     }
 
     /// Save the active document to `path` (or a path chosen in the save dialog); returns the path
