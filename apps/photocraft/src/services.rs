@@ -160,6 +160,13 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             let bytes = photocraft_format::read_file(&path).map_err(|e| e.to_string());
             Some((path.to_string_lossy().to_string(), bytes))
         })),
+        pick_open_paths: Some(Box::new(|| {
+            rfd::FileDialog::new()
+                .add_filter("All Formats", OPEN_EXTS)
+                .add_filter("PhotoCraft", &["pcraft"])
+                .pick_files()
+                .map(|paths| paths.into_iter().map(|path| path.to_string_lossy().into_owned()).collect())
+        })),
         pick_save: Some(Box::new(|suggested: &str| {
             let p = std::path::Path::new(suggested);
             let mut d = rfd::FileDialog::new();
