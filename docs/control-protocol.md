@@ -32,7 +32,7 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 
 ## Methods
 
-- `engine.execute {command, params}`: run any engine or UI command by id. Engine commands run directly with their default params and never open a dialog. Use `ui.menu.invoke` for menu-click behaviour, which opens a command's dialog when no params are given
+- `engine.execute {command, params}`: run any engine or UI command by id. Engine commands run directly with their default params and never open a dialog. Use `ui.menu.invoke` for menu-click behaviour, which opens a command's dialog when no params are given. `params` must be a JSON object (omit it or pass `null` for none); an array, string, number or boolean is an error naming the command, in every transport (control channel, `serve`, MCP and the CLI)
 - `engine.commands`: list commands with enablement
 - `ui.inspect`: full UI state (tool, panels, views, dialogs, windows, window size). The menu tree is not included; use `ui.menu.list`. `view` holds the View/Window/Type preferences: `screen_mode`, `extras`, `show` and `snap_to` flags, `flip_horizontal`, `arrange` (Window › Arrange layout), pixel aspect, font preview size, language options. `perf.timings.gpuInfo` holds the graphics adapter, backend, driver, the backend chosen at launch and why, the canvas renderer (`gpu`/`cpu`) and, after a device loss, `lost` (`help.systemInfo` returns the same as `info`)
 - `ui.set {tool?, panels?, dockTabs?, dock?, dockWidth?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSize?, brushSection?, brushTab?, brushesView?}`: change UI state; any other field is an error, checked before anything changes (`theme` is `pro`, `proMedium`, `studio`, `studioLight` or `classic`; `selectionMode` is the selection tools' options-bar mode, 0 New, 1 Add, 2 Subtract, 3 Intersect; `brushSection` indexes the Brush Settings sections, `brushTab` 0 = Brush Settings, 1 = Brushes; `dock` is `{order: ["layers", …], heights: {"properties": 180}, collapsed: ["color"]}`, the right-dock groups top to bottom, their heights in points and the groups collapsed to their tab strip; `dockWidth` sets the right dock width in points, clamped to 250..520)
@@ -195,7 +195,7 @@ no MCP framing, no app start-up per command. Configure its file access with the 
 | Method | Params |
 |---|---|
 | `engine.execute` | `{command, params?, wait?}`: any engine command (`wait: false` starts a long one as a background job: `{job, pending}`) |
-| `jobs.list` / `jobs.cancel` | `{}` / `{job?}`: background jobs (applying finished ones); cancel one or all |
+| `jobs.list` / `jobs.cancel` | `{}` / `{job?}`: background jobs; cancel one or all. Every request (and MCP tool call) first applies the jobs that finished, so `doc.save`, `doc.inspect`, `doc.render` and `session.list` include a finished job's result without polling `jobs.list` first |
 | `engine.commands` | `{filter?}`: registry with params docs and enablement |
 | `session.list` | open documents and the active index |
 | `doc.open` / `doc.new` | `{path}` / `file.new` params |
@@ -230,8 +230,16 @@ The desktop and headless TCP listeners currently enforce:
 
 An oversized line, excess connection, unauthenticated request, or unauthorized filesystem path is
 rejected before command dispatch or file effects. The headless JSON-lines stdio server also
-enforces the request and reply byte ceilings. MCP tool results are checked as encoded JSON,
+enforces the request and reply byte ceilings; MCP over stdio (`photocraft-cli mcp`) does not
+cap request bytes, because the MCP SDK reads its own request lines (only MCP tool results are
+checked). A TCP connection is closed after an oversized
+line; on stdio an oversized or non-UTF-8 line gets one error reply (`id: null`), the rest of that
+line is skipped without being dispatched, and the session and its open documents keep serving. MCP tool results are checked as encoded JSON,
 including the text/image content envelope, and the MCP bridge bounds incoming desktop replies.
+A `batch` or `command_batch` stops at the first step whose result no longer fits the reply budget
+(that step may have run; later ones do not). MCP charges each result at its size escaped inside
+the text content, so the reply still lists `completed`, `failed` and every result so far, ending
+with the budget error.
 
 Headless automation previews (`doc.render` / MCP `doc_render_preview`) allow a maximum requested
 edge of 2048 pixels and a source document of at most 67,108,864 pixels. `maxSide: 0` (MCP
