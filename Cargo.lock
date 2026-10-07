@@ -2031,6 +2031,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "heic-rs"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adf9dde634bb6d5b718bacd01bef80192f2334306b2f785519a0136cca7b9618"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3503,6 +3512,7 @@ dependencies = [
  "image",
  "image-webp",
  "jpeg-encoder",
+ "photocraft-heif",
  "png 0.18.1",
  "proptest",
  "rayon",
@@ -3616,6 +3626,13 @@ dependencies = [
  "pollster 1.0.1",
  "rayon",
  "wgpu",
+]
+
+[[package]]
+name = "photocraft-heif"
+version = "0.3.0"
+dependencies = [
+ "heic-rs",
 ]
 
 [[package]]

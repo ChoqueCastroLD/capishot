@@ -1,4 +1,5 @@
 pub(crate) mod exr;
+pub(crate) mod heif;
 pub(crate) mod jpeg;
 pub(crate) mod png;
 pub(crate) mod pnm;

@@ -152,6 +152,10 @@ fn wasm_set() -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// Optional features that official builds enable and the web app ships, also checked for wasm32:
+/// (package, feature).
+const WASM_FEATURES: &[(&str, &str)] = &[("photocraft-codecs", "heif")];
+
 fn cmd_wasm() -> Result<(), String> {
     let set = wasm_set()?;
     let mut results = Vec::new();
@@ -160,6 +164,12 @@ fn cmd_wasm() -> Result<(), String> {
         c.args(["check", "--target", "wasm32-unknown-unknown", "-p", pkg]);
         let ok = run(c, &format!("cargo check --target wasm32-unknown-unknown -p {pkg}")).is_ok();
         results.push((pkg.clone(), ok));
+    }
+    for (pkg, feature) in WASM_FEATURES {
+        let mut c = cargo();
+        c.args(["check", "--target", "wasm32-unknown-unknown", "-p", pkg, "--features", feature]);
+        let ok = run(c, &format!("cargo check --target wasm32-unknown-unknown -p {pkg} --features {feature}")).is_ok();
+        results.push((format!("{pkg} --features {feature}"), ok));
     }
     println!("\nwasm32-unknown-unknown check:");
     for (p, ok) in &results {

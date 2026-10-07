@@ -31,7 +31,7 @@ pub use crate::options::{DecodeOptions, EncodeOptions, ExrCompression, Limits, P
 pub use crate::orientation::{exif_orientation, upright_exif, upright_xmp};
 pub use half::f16;
 
-use crate::codecs::{exr, jpeg, png, pnm, tiff, via_image, webp};
+use crate::codecs::{exr, heif, jpeg, png, pnm, tiff, via_image, webp};
 
 /// Detect the format and decode with default [`Limits`].
 pub fn decode(bytes: &[u8]) -> Result<Image, CodecError> {
@@ -51,7 +51,8 @@ pub fn decode_as(format: Format, bytes: &[u8]) -> Result<Image, CodecError> {
 
 /// Decode as a specific format.
 pub fn decode_as_with(format: Format, bytes: &[u8], opts: &DecodeOptions) -> Result<Image, CodecError> {
-    if !caps(format).read {
+    // HEIF without the `heif` feature: its decoder stub says what is missing from this build.
+    if !caps(format).read && format != Format::Heif {
         return Err(CodecError::unsupported(format, "decoding is not available for this format"));
     }
     let l = &opts.limits;
@@ -62,6 +63,7 @@ pub fn decode_as_with(format: Format, bytes: &[u8], opts: &DecodeOptions) -> Res
         Format::WebP => webp::decode(bytes, l),
         Format::Pnm => pnm::decode(bytes, l),
         Format::OpenExr => exr::decode(bytes, l),
+        Format::Heif => heif::decode(bytes, l, opts.keep_orientation),
         Format::Gif | Format::Bmp | Format::Tga | Format::Ico | Format::Qoi | Format::Hdr | Format::Avif => via_image::decode(format, bytes, l),
     }?;
     // Final guard for decoders whose header we could not pre-inspect.
@@ -70,9 +72,11 @@ pub fn decode_as_with(format: Format, bytes: &[u8], opts: &DecodeOptions) -> Res
         return Ok(img);
     }
     // Turn the pixels upright, like Photoshop: a TIFF records it in its own IFD0, the others
-    // in their EXIF block. The metadata is rewritten to Orientation = 1 on the way.
+    // in their EXIF block. The metadata is rewritten to Orientation = 1 on the way. HEIF keeps it
+    // in its container, and its decoder has already applied it.
     let o = match format {
         Format::Tiff => exif_orientation(bytes),
+        Format::Heif => 1,
         _ => img.meta.exif.as_deref().map_or(1, exif_orientation),
     };
     // Orientations 5–8 swap width and height: with asymmetric limits a stored landscape
@@ -106,6 +110,7 @@ pub fn encode(image: &Image, format: Format, opts: &EncodeOptions) -> Result<Vec
         Format::WebP => webp::encode(image, plan, opts),
         Format::Pnm => pnm::encode(image, plan, opts),
         Format::OpenExr => exr::encode(image, plan, opts),
+        Format::Heif => Err(CodecError::unsupported(format, "encoding is not available in this build")),
         Format::Gif | Format::Bmp | Format::Tga | Format::Ico | Format::Qoi | Format::Hdr | Format::Avif => via_image::encode(format, image, plan, opts),
     }
 }
