@@ -26,6 +26,7 @@ const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("PhotoCraft", &["pcraft"]),
     ("PNG", &["png"]),
     ("JPEG", &["jpg"]),
+    ("WebP", &["webp"]),
     ("TIFF", &["tif"]),
     ("Targa", &["tga"]),
     ("OpenEXR", &["exr"]),
@@ -301,6 +302,14 @@ mod tests {
     use photocraft_format::list_recovery;
     use photocraft_ui_egui::{PhotocraftApp, prefs_ui};
     use serde_json::json;
+
+    /// "Export As" formats must lead with their own filter, or the save panel appends the first one's extension (`photo.webp.psd`).
+    #[test]
+    fn save_filters_lead_with_every_export_format() {
+        for ext in ["png", "jpg", "webp", "tif", "tga"] {
+            assert!(save_filters(&format!("photo.{ext}"))[0].1.contains(&ext), "{ext}");
+        }
+    }
 
     const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
     const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
