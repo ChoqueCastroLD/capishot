@@ -1135,6 +1135,9 @@
 	Midtones	中间调
 	Midtones from:	中间调下限：
 	Midtones to:	中间调上限：
+	Mix	混合
+	Mixer Brush	混合笔刷
+	Mixer Brush Tool	混合画笔工具
 	Minimum Depth	最小深度
 	Minimum Diameter	最小直径
 	Minimum Roundness	最小圆度
@@ -1665,6 +1668,7 @@
 	Web Minimum	Web 最小尺寸
 	Web Most Common	Web 常用尺寸
 	WebP (lossless)	WebP（无损）
+	Wet	湿度
 	Wet Edges	湿边
 	Yellows	黄色
 	Zoom Tool	缩放工具

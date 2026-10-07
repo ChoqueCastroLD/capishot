@@ -538,4 +538,19 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn mixer_brush_ui_strings_have_translations_in_every_registered_language() {
+        const STRINGS: &[&str] = &["Mixer Brush", "Mixer Brush Tool", "Wet", "Load", "Mix", "Flow", "Sample All Layers"];
+        for lang in Lang::all() {
+            for source in STRINGS {
+                let translated = tr(lang, source);
+                if lang == Lang::EN {
+                    assert_eq!(translated, *source, "English source string {source}");
+                } else {
+                    assert_ne!(translated, *source, "{} is missing {source:?}", lang.code());
+                }
+            }
+        }
+    }
 }
