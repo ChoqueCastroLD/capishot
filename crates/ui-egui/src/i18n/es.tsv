@@ -1995,6 +1995,10 @@
 	Opening…	Abriendo…
 	Reading…	Leyendo…
 	Working…	Procesando…
+	3 x 3	3 × 3
+	4 x 4	4 × 4
+	5 x 5	5 × 5
+	Grid:	Rejilla:
 
 # Tool, filter, warp-style, path, layer-comp and metadata names that fell outside the `tl!` test.
 # Spanish follows the tool wording used above (Herramienta X).
