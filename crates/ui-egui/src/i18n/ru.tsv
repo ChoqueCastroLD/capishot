@@ -1554,6 +1554,7 @@
 
 # Transform / warp overlays
 	Free Transform	Свободное трансформирование
+	Free Transform a Copy	Свободное трансформирование копии
 	Transform	Трансформирование
 	Transform Selection	Трансформировать выделение
 	Switch between free transform and warp modes	Переключение между свободным трансформированием и деформаци
