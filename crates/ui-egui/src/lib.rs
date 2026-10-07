@@ -340,8 +340,8 @@ pub struct PhotocraftApp {
     pub(crate) transform_preview: Option<transform_tool::TransformPreview>,
     /// Move-tool ⇧/⌥ drag state (move_mods).
     pub(crate) move_mods: move_mods::MoveDrag,
-    /// Live Layer Style dialog preview: (key over revision + style fields, document with the style applied).
-    pub(crate) style_preview: Option<(u64, Option<std::sync::Arc<Document>>)>,
+    /// Live Layer Style dialog preview: (key over revision + style fields, preview or validation error).
+    pub(crate) style_preview: Option<(u64, Result<std::sync::Arc<Document>, String>)>,
     /// Liquify dialog, Puppet Warp and Perspective Warp sessions (distort_ui).
     pub(crate) distort: distort_ui::Distort,
     /// Gradient tool live-mode drags and previews (gradient_ui).
