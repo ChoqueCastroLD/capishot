@@ -1662,8 +1662,18 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // (Preferences › Tools, `paint_mouse`).
         crate::paint_mouse::sync_tool_smoothing(app);
         let mut buttons = crate::paint_mouse::canvas_buttons(app, &response, tool);
+        // Right-click while transforming: switch the box's mode (Free Transform, Scale, Rotate,
+        // Skew, Distort, Perspective).
+        let transforming = app.ui.transform.as_ref().is_some_and(|t| t.warp.is_none());
+        if response.secondary_clicked()
+            && transforming
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            crate::canvas_tool_menu::open_transform(app, [p.x, p.y]);
+        }
         // Right-click with the Move tool, or ⌘/Ctrl+right-click: the layers under the pointer.
         if response.secondary_clicked()
+            && !transforming
             && crate::layer_pick_ui::is_gesture(tool, mods)
             && let Some(p) = response.interact_pointer_pos()
         {
@@ -1672,6 +1682,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             crate::layer_pick_ui::open(app, [p.x, p.y], d[0], d[1]);
         }
         if response.secondary_clicked()
+            && !transforming
             && !crate::layer_pick_ui::is_gesture(tool, mods)
             && let Some(p) = response.interact_pointer_pos()
         {
@@ -2249,7 +2260,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     // View › Snap / Snap To and smart guides (snap_ui.rs).
     let raw = ev;
     let ev = crate::snap_ui::filter_event(app, ev, mods);
-    if crate::transform_tool::pointer(app, ev, mods) {
+    // Free Transform picks the handle under the press where the user clicked: the snapped press
+    // can land outside the corner's grab area and turn a corner drag into a move of the whole box.
+    let transform_ev = if matches!(raw, ToolEvent::Down { .. }) { raw } else { ev };
+    if crate::transform_tool::pointer(app, transform_ev, mods) {
         return;
     }
     if crate::distort_ui::pointer(app, ev, mods) {
