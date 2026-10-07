@@ -1827,6 +1827,7 @@
 	Show only crosshair while painting	Mostrar solo la retícula al pintar
 	Show slice numbers	Mostrar los números de sección
 	Show tooltips	Mostrar las descripciones emergentes
+	Show bounding box when dragging layer	Mostrar el cuadro delimitador al arrastrar la capa
 	Show transformation values	Mostrar los valores de transformación
 	Slice color	Color de las secciones
 	Smart guide color	Color de las guías inteligentes

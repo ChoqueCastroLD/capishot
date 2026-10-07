@@ -2230,6 +2230,7 @@
 	Show only crosshair while painting	Только перекрестье при рисовании
 	Show slice numbers	Показывать номера фрагментов
 	Show tooltips	Показывать подсказки
+	Show bounding box when dragging layer	Показывать рамку при перетаскивании слоя
 	Show transformation values	Показывать значения трансформации
 	Slice color	Цвет фрагмента
 	Smart guide color	Цвет умных направляющих

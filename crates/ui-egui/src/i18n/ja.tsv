@@ -1832,6 +1832,7 @@
 	Show only crosshair while painting	描画中は十字線のみ表示
 	Show slice numbers	スライス番号を表示
 	Show tooltips	ツールチップを表示
+	Show bounding box when dragging layer	レイヤーのドラッグ中にバウンディングボックスを表示
 	Show transformation values	変形値を表示
 	Slice color	スライスの色
 	Smart guide color	スマートガイドの色
