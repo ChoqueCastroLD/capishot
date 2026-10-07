@@ -2053,3 +2053,5 @@ cameraRaw	Color	カラー
 	Edit Type	文字を編集
 	No patterns	パターンなし
 	Enable {name}	{name}を有効にする
+	Hold Alt while drawing for straight segments	描画中に Alt を押すと直線セグメントになります
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	ドラッグまたは多角形の点をクリック · なげなわ中に Alt で直線セグメント · {add} 追加 · 描画前の {sub} で削除

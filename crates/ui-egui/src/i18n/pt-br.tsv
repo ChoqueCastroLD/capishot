@@ -2510,3 +2510,5 @@ cameraRaw	Roughness	Aspereza
 cameraRaw	Whites	Brancos
 	No patterns	Nenhum padrão
 	Enable {name}	Ativar {name}
+	Hold Alt while drawing for straight segments	Segure Alt ao desenhar para segmentos retos
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Arraste ou clique nos pontos do polígono · segure Alt durante o laço para segmentos retos · {add} adicionar · {sub} antes de desenhar subtrai

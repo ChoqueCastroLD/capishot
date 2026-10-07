@@ -2079,3 +2079,5 @@ cameraRaw	Blending	混合
 	Edit Type	编辑文字
 	No patterns	无图案
 	Enable {name}	启用{name}
+	Hold Alt while drawing for straight segments	绘制中按住 Alt 可逐点连接直线
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	拖动圈选或逐点绘制 · 圈选中按住 Alt 画直线 · {add} 添加 · 起笔前按 {sub} 减去

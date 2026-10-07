@@ -2650,3 +2650,5 @@ cameraRaw	Color	색상
 	Wrap	감싸기
 	Zigzag	지그재그
 @id	filter.sharpen.sharpen	선명하게
+	Hold Alt while drawing for straight segments	그리는 중 Alt를 누르면 직선 구간
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	드래그하거나 다각형 점 클릭 · 올가미 중 Alt를 누르면 직선 구간 · {add} 추가 · 그리기 전 {sub} 빼기

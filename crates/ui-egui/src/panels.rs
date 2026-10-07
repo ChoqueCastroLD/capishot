@@ -592,7 +592,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         if widgets::secondary_button(ui, tl!("Select and Mask…"), 0.0).clicked() {
                             let _ = crate::menus::invoke(app, ui.ctx(), "select.selectAndMask", json!({}));
                         }
-                        if app.ui.tool == Tool::PolygonLasso && !app.ui.polygon.is_empty() {
+                        if crate::lasso_ui::active(app) || (app.ui.tool == Tool::PolygonLasso && !app.ui.polygon.is_empty()) {
                             hint(
                                 ui,
                                 &crate::i18n::fmt(
@@ -600,6 +600,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                     &[("key", &crate::shortcuts::pretty("Enter"))],
                                 ),
                             );
+                        } else if app.ui.tool == Tool::Lasso {
+                            hint(ui, tl!("Hold Alt while drawing for straight segments"));
                         }
                     }
                     Tool::MagicWand => {
@@ -792,7 +794,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     Tool::Lasso | Tool::PolygonLasso => hint(
                         ui,
                         &crate::i18n::fmt(
-                            tl!("Drag (lasso) or click points (polygonal) · {add} add · {sub} subtract"),
+                            tl!("Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts"),
                             &[("add", &crate::shortcuts::pretty("Shift")), ("sub", &crate::shortcuts::pretty("Alt"))],
                         ),
                     ),

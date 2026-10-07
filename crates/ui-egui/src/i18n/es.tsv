@@ -2147,3 +2147,5 @@ cameraRaw	Amount	Cantidad
 	Edit Type	Editar texto
 	No patterns	Sin motivos
 	Enable {name}	Activar {name}
+	Hold Alt while drawing for straight segments	Mantenga Alt al dibujar para segmentos rectos
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Arrastre o haga clic en los puntos del polígono · mantenga Alt durante el lazo para segmentos rectos · {add} añadir · {sub} antes de dibujar resta

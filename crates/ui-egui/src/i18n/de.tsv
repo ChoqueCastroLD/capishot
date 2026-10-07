@@ -2111,3 +2111,5 @@
 	300%	300 %
 	No patterns	Keine Muster
 	Enable {name}	{name} aktivieren
+	Hold Alt while drawing for straight segments	Beim Zeichnen Alt gedrückt halten für gerade Segmente
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Ziehen oder Polygonpunkte klicken · Alt während des Lassos halten für gerade Segmente · {add} hinzufügen · {sub} vor dem Zeichnen zieht ab

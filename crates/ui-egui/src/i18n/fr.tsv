@@ -2500,3 +2500,5 @@ cameraRaw	Blending	Fusion
 	Edit Type	Modifier le texte
 	No patterns	Aucun motif
 	Enable {name}	Activer {name}
+	Hold Alt while drawing for straight segments	Maintenez Alt en dessinant pour des segments droits
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Faites glisser ou cliquez des points de polygone · maintenez Alt pendant le lasso pour des segments droits · {add} ajouter · {sub} avant de dessiner soustrait
