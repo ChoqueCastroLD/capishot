@@ -57,6 +57,11 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 
 ## Engine commands
 
+Change the UI language without restarting with `prefs.set`:
+`{"path":"interface.language","value":"fr"}`. Supported codes and preview/apply behaviour
+are documented in [UI localisation](localization.md). `prefs.get` and the existing preference
+store expose and persist the same setting; scripts keep using canonical command IDs.
+
 `engine.execute` runs any command by id. `engine.commands` (or the engine command `command.list`) lists them all, with labels, menu paths, shortcuts, a parameter description, and whether each is currently enabled. Examples:
 
 | Command | Params |

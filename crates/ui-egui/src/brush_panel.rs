@@ -263,7 +263,12 @@ fn section_list(app: &mut PhotocraftApp, ui: &mut egui::Ui, b: &mut BrushSetting
             }
             let color = if sel { t.text } else { t.text_dim };
             let font = if i == 0 { theme::semibold(12.0) } else { theme::medium(12.0) };
-            ui.painter().text(egui::pos2(x, r.center().y), egui::Align2::LEFT_CENTER, tl!(name), font, color);
+            let mut job = egui::text::LayoutJob::simple_singleline(tl!(name).to_string(), font, color);
+            job.wrap = egui::text::TextWrapping::truncate_at_width((r.right() - 22.0 - x).max(0.0));
+            let galley = ui.painter().layout_job(job);
+            let elided = galley.elided;
+            ui.painter().galley(egui::pos2(x, r.center().y - galley.size().y / 2.0), galley, color);
+            let resp = if elided { resp.on_hover_text(tl!(name)) } else { resp };
             let mut lock_clicked = false;
             if let Some(lock) = section_lock(b, i) {
                 let lr = egui::Rect::from_center_size(egui::pos2(r.right() - 11.0, r.center().y), vec2(18.0, 18.0));
@@ -300,7 +305,8 @@ fn settings_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         widgets::vline(ui, 482.0);
         ui.vertical(|ui| {
             ui.set_width(WIDTH - 190.0);
-            ui.label(RichText::new(tl!(SECTIONS[section].0)).font(theme::semibold(12.5)).color(t.text));
+            let name = SECTIONS.get(section).map_or("Brush Tip Shape", |entry| entry.0);
+            ui.label(RichText::new(tl!(name)).font(theme::semibold(12.5)).color(t.text));
             ui.add_space(6.0);
             let on = section_flag(&mut b, section).is_none_or(|f| *f);
             egui::ScrollArea::vertical().id_salt(("brush-section", section)).max_height(450.0).auto_shrink([false, false]).show(ui, |ui| {

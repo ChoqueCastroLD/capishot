@@ -66,6 +66,12 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let dialogs = app.ui.dialogs.clone();
     let mut shown = Vec::new();
     for d in dialogs {
+        let lang = if crate::prefs_ui::is_preferences(&d.fields) {
+            crate::i18n::Lang::from_pref(d.fields.get("values").and_then(|v| v.pointer("/interface/language")).and_then(Value::as_str).unwrap_or("auto"))
+        } else {
+            crate::i18n::current()
+        };
+        let _language = crate::i18n::language_scope(lang);
         let mut fields = d.fields.clone();
         let mut outcome: Option<bool> = None; // Some(true)=OK, Some(false)=Cancel
         let mut apply_requested = false;

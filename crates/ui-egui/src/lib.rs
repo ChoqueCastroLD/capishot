@@ -881,6 +881,8 @@ impl eframe::App for PhotocraftApp {
         self.issue_screenshots(ctx);
         prefs_ui::tick(self, ctx);
         monitor_status::poll(self, ctx);
+        // Control requests and persisted preferences can change the language in this frame.
+        i18n::sync_context(ctx, &self.session.prefs().interface.language);
         // A window bigger than its display (1440 × 900 on 1366 × 768) runs under the taskbar:
         // maximize it into the work area once (#315).
         work_area::fit_window(ctx);
@@ -914,6 +916,7 @@ impl eframe::App for PhotocraftApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
         if !self.fonts_ready {
             ctx.request_repaint();
