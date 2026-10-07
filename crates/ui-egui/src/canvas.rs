@@ -2248,6 +2248,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 && let Some(e) = app.ui.text_edit.as_mut()
             {
                 e.dragging = false;
+                e.resize = None;
             }
             if tool == Tool::Pen {
                 crate::vector_ui::pen_up(app);
