@@ -100,6 +100,7 @@ fn choose_recovery(app: &mut PhotocraftApp, retry: bool) -> Result<(), String> {
             "GPU retry scheduled",
             vec!["Save your work and restart PhotoCraft to retry GPU acceleration. CPU rendering remains active for this session.".into()],
             false,
+            None,
         );
     }
     Ok(())

@@ -224,7 +224,7 @@ fn dropped_files_open_with_path_and_recent() {
 fn notices_are_capped_and_dismissable_state_round_trips() {
     let (mut app, _) = app_with(None, None);
     for i in 0..10 {
-        notices::post(&mut app, format!("n{i}"), vec![], false);
+        notices::post(&mut app, format!("n{i}"), vec![], false, None);
     }
     assert_eq!(app.ui.notices.len(), notices::MAX_NOTICES);
     assert_eq!(app.ui.notices.last().map(|n| n.title.as_str()), Some("n9"));
@@ -238,7 +238,7 @@ fn notices_are_capped_and_dismissable_state_round_trips() {
 #[test]
 fn notices_render_without_panicking() {
     let (mut app, _) = app_with(None, None);
-    notices::post(&mut app, "Opened a.psd with 9 warnings", (0..9).map(|i| format!("warning {i}")).collect(), false);
+    notices::post(&mut app, "Opened a.psd with 9 warnings", (0..9).map(|i| format!("warning {i}")).collect(), false, None);
     notices::error(&mut app, "Couldn't open b.psd: not an image".into());
     let ctx = egui::Context::default();
     let mut out = ctx.run_ui(Default::default(), |ui| notices::show(&mut app, ui.ctx()));

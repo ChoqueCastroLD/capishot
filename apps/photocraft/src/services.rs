@@ -191,6 +191,7 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         os_events: None,
         // Set by main, which starts loading the store before the window opens.
         preset_store: None,
+        is_wayland: false,
         ..recovery_services(recovery_dir())
     }
 }

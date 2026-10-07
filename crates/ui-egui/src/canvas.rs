@@ -1181,7 +1181,7 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             });
             ui.add_space(22.0);
             ui.horizontal(|ui| {
-                let msg = tl!("Drop an image or PSD anywhere to open it.");
+                let msg = start_screen_drop_hint(app.services.is_wayland);
                 let g = ui.painter().layout_no_wrap(msg.into(), egui::FontId::proportional(12.5), t.text_faint);
                 ui.add_space(((card.width() - g.size().x - 24.0) / 2.0).max(0.0));
                 let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), Sense::hover());
@@ -1198,6 +1198,10 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             crate::links::link_row(app, ui);
         });
     });
+}
+
+fn start_screen_drop_hint(is_wayland: bool) -> &'static str {
+    if is_wayland { tl!("Use File › Open to open an image.") } else { tl!("Drop an image or PSD anywhere to open it.") }
 }
 
 /// Recent files listed on the Home screen.
@@ -2495,6 +2499,11 @@ fn hex(c: [f32; 4]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wayland_start_screen_hint_does_not_claim_file_drop_works() {
+        assert_ne!(start_screen_drop_hint(true), start_screen_drop_hint(false));
+    }
 
     #[test]
     fn pointer_moves_are_bounded_by_the_press_and_release() {

@@ -292,7 +292,7 @@ fn persist(app: &mut PhotocraftApp, now: f64) -> Option<f64> {
                 app.ui.status_error = true;
             } else if failures == SAVE_NOTICE_AFTER {
                 let lines = vec![e, "PhotoCraft keeps retrying; until a save succeeds, preference changes are lost when it closes.".into()];
-                let id = crate::notices::post(app, "Preferences can't be saved", lines, true);
+                let id = crate::notices::post(app, "Preferences can't be saved", lines, true, None);
                 app.prefs_rt.save_retry.notice = Some(id);
             }
             Some(delay)

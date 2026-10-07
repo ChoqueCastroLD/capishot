@@ -965,9 +965,12 @@
 	Drag to move the active shape's path or the Work Path	拖动以移动当前形状的路径或工作路径
 	Draw with the Pen tool (P) or make a work path from a selection.	使用钢笔工具（P）绘制，或从选区创建工作路径。
 	Drop an image or PSD anywhere to open it.	将图像或 PSD 拖放到任意位置即可打开。
+	Native file drag-and-drop is unavailable	Wayland 上不支持原生文件拖放
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Wayland 尚不支持原生文件拖放。请使用“文件 › 打开”，或通过 `WAYLAND_DISPLAY= photocraft` 在 XWayland 下运行 PhotoCraft。
 	Duplicate Layers…	复制图层…
 	Duplicate style	复制样式
 	Edit Toolbar…	编辑工具栏…
+	Use File › Open to open an image.	使用“文件 › 打开”打开图像。
 	Edit in Quick Mask Mode  (Q)	在快速蒙版模式下编辑  （Q）
 	Edit in Standard Mode  (Q)	在标准模式下编辑  （Q）
 	Effects	效果

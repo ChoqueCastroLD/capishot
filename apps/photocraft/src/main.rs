@@ -184,6 +184,12 @@ fn main() -> eframe::Result {
             let automation = control.as_ref().map(|(_, _, workspace)| workspace.clone());
             let mut services = services::native(automation);
             services.preset_store = presets;
+            #[cfg(target_os = "linux")]
+            let display = tablet::DisplayKind::of(cc);
+            #[cfg(target_os = "linux")]
+            {
+                services.is_wayland = display == Some(tablet::DisplayKind::Wayland);
+            }
             let mut app = PhotocraftApp::new(Session::new(), services);
             app.integrated_titlebar = cfg!(target_os = "macos");
             // Long commands and file opens run as background jobs with progress and Cancel (#210).
@@ -264,12 +270,12 @@ fn main() -> eframe::Result {
             // and the X11 reader write into this feed.
             app.stylus.feed = stylus_feed;
             #[cfg(target_os = "linux")]
-            tablet::spawn_x11(&app.stylus.feed, tablet::DisplayKind::of(cc));
+            tablet::spawn_x11(&app.stylus.feed, display);
             // Paths on the command line (Linux/Windows file associations, `photocraft a.psd`).
             app.open_paths(&files);
             // Portable marker found but its data folder isn't writable (#228): say where settings went.
             if let Some(w) = &app_dirs::current().warning {
-                photocraft_ui_egui::notices::post(&mut app, "Portable mode is off", vec![w.clone()], false);
+                photocraft_ui_egui::notices::post(&mut app, "Portable mode is off", vec![w.clone()], false, None);
             }
             Ok(Box::new(app))
         }),
