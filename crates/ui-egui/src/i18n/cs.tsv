@@ -2065,6 +2065,7 @@ cameraRaw	Color	Barvy
 	Patch:	Záplata:
 	Lasso around an area, then drag the selection	Obtáhněte oblast lasem a pak přetáhněte výběr
 	Edit Type	Upravit text
+	Full-resolution preview unavailable	Náhled v plném rozlišení není dostupný
 	No patterns	Žádné vzorky
 	Enable {name}	Povolit {name}
 	Hold Alt while drawing for straight segments	Podržením Alt při kreslení vytvoříte rovné úseky

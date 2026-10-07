@@ -44,6 +44,22 @@ pub struct CameraRawScopeState {
     pub floating_rect: Option<[f32; 4]>,
 }
 
+/// Camera Raw navigation, separate from filter settings. Reset for each opened image.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CameraRawPreviewState {
+    /// None fits the image; Some is physical display pixels per source pixel.
+    pub zoom: Option<f32>,
+    pub center: [f32; 2],
+    pub hand: bool,
+}
+
+impl Default for CameraRawPreviewState {
+    fn default() -> Self {
+        Self { zoom: None, center: [0.5, 0.5], hand: false }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tool {
     Move,
@@ -782,6 +798,8 @@ pub struct UiState {
     pub chrome: crate::chrome_ui::ChromeState,
     #[serde(default)]
     pub camera_raw_scope: CameraRawScopeState,
+    #[serde(default)]
+    pub camera_raw_preview: CameraRawPreviewState,
 }
 
 impl Default for UiState {
@@ -838,6 +856,7 @@ impl Default for UiState {
             gpu_fallback_notice: None,
             chrome: Default::default(),
             camera_raw_scope: Default::default(),
+            camera_raw_preview: Default::default(),
         }
     }
 }

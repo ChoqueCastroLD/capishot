@@ -2034,6 +2034,7 @@ cameraRaw	Color	색상
 	175%	175%
 	250%	250%
 	300%	300%
+	Full-resolution preview unavailable	전체 해상도 미리보기를 사용할 수 없습니다
 
 # Additional generated filter labels and Photoshop-aligned UI terminology.
 @id	select.all	모두 선택

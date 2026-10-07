@@ -306,7 +306,7 @@ a driver process crash is detected by the startup marker on the next launch.
 RGB/Grayscale layer. `params: {"smartFilter": {"layer": id, "index": i}}` opens it on an existing
 Camera Raw smart filter instead (as double-clicking the filter in the Layers panel does): the
 stored settings over the pixels below that filter, previewed through the filter mask; commit
-then runs `layer.smartFilter.setParams` with every setting. `params.ui` accepts `set` (filter settings), `before`, `scope`, `commit` and
+then runs `layer.smartFilter.setParams` with every setting. `params.ui` accepts `set` (filter settings), `before`, `scope`, `view`, `commit` and
 `cancel`. All parts of one request are validated before any is applied; a rejected request
 leaves the settings, view state, preferences and document unchanged (and closes a dialog it
 opened). Unknown `ui` or settings properties, non-boolean `before` / `commit` / `cancel`, and
@@ -339,6 +339,38 @@ The response and `ui.inspect.cameraRaw` contain:
 - `hoverSample`: `position`, `rgb` (histogram domain) and `hueSaturation` (turns, 0–1; only
   while the vectorscope is shown), or null.
 - `hoveredZone`, `previewRect`, `scopeRect`, `vectorscopeRect`.
+- `view` (`zoom: null` for fit, or a numeric factor where 1 = 100%, `center: [u,v]`,
+  `hand`), `zoom` (effective factor, null before layout), `sourceSize`, `viewportRect`.
+  At 100%, one source pixel maps to one physical display pixel, including on HiDPI displays.
+- `previewApproximate`, `detailPending`, `detailError`: whether the visible image still uses
+  the proxy, whether full-resolution refinement is running, and any refinement error.
+
+`params.ui.view` changes navigation only: `zoom: "fit" | 0.0001..=16`, `center: [u,v]`
+(finite coordinates in 0..=1, clamped to keep the image within view), `hand: bool`. Fit recentres
+and follows window resizing; navigation resets when opening a different Camera Raw dialog.
+Invalid mixed requests are atomic, just like scope and filter settings. View requests do not
+re-develop the proxy or change filter parameters/history.
+
+With the Zoom tool (Z), click toggles Fit / 100%; click-drag right/left scrubs in/out.
+Ctrl-drag (Command on macOS) fits a rectangular region. H selects Hand; Space temporarily pans,
+including while placing colour samplers. Alt/Option + wheel zooms at the pointer; an unmodified
+wheel pans. Pinch zooms. Ctrl/Command +/- zoom, 0 fits, and Alt/Option + Ctrl/Command + 0 shows
+100%; Ctrl/Command+Shift-click also selects 100%. Right-click opens Fit / 100% / preset
+percentages. Tool double-clicks fit the image.
+Text fields retain their keys and wheel gestures over the settings panel still scroll it.
+
+The proxy remains the fast path while changing settings. Where more source pixels are needed,
+Camera Raw lazily refines with the **same engine Camera Raw pipeline** at pixelScale=1 and the
+same selection/filter-mask coverage. Native refinement runs off the UI thread (one revision at
+a time); stale results are discarded. Only a bounded visible crop is uploaded to the GPU, and
+pan/zoom reuse developed pixels. Before and neutral settings read the original pixels directly.
+Absurd proxy domains (over 512 MP, including distant sparse off-canvas pixels) are rejected
+before reading pixels. Full-resolution refinement is capped at 64 MP to bound the existing full-image engine pipeline;
+above that it explicitly reports unavailability and keeps the proxy. Oversized viewport crops
+also retain the proxy. Without a browser worker, wasm explicitly retains the filtered proxy
+rather than block its UI; Before and neutral settings still crop the original source pixels.
+The histogram and vectorscope continue to analyse the bounded proxy; readouts and clipping
+warnings use the full-resolution pixels once refinement is visible.
 
 `params.ui.scope` changes presentation only: `shadows` / `highlights` (clipping warnings, U / O),
 `lab`, `samplerTool` (S), `vectorscope`, `selectedRegion` (requires a document selection),
