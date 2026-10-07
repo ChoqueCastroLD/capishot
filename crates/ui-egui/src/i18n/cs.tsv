@@ -181,8 +181,13 @@
 	Lab Color	Barvy Lab
 	Multichannel	Vícekanálový
 	8 Bits/Channel	8 bitů/kanál
+	8 bit	8 bitů
+	Integer	Celé číslo
 	16 Bits/Channel	16 bitů/kanál
+	16 bit	16 bitů
 	32 Bits/Channel	32 bitů/kanál
+	32 bit (float)	32 bitů (float)
+	Floating point	Číslo s plovoucí desetinnou čárkou
 	Color Table…	Tabulka barev…
 	Bitmap…	Bitmapa…
 	Duotone…	Dvoutón…

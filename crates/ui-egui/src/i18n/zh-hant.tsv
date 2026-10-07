@@ -181,8 +181,13 @@
 	Lab Color	Lab 色彩
 	Multichannel	多重色版
 	8 Bits/Channel	8 位元/色版
+	8 bit	8 位元
+	Integer	整數
 	16 Bits/Channel	16 位元/色版
+	16 bit	16 位元
 	32 Bits/Channel	32 位元/色版
+	32 bit (float)	32 位元（浮點）
+	Floating point	浮點數
 	Color Table…	色彩表…
 	Bitmap…	點陣圖…
 	Duotone…	雙色調…

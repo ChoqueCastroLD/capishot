@@ -106,6 +106,11 @@
 	16 Bits/Channel	16 бит/канал
 	32 Bits/Channel	32 бита/канал
 	8 Bits/Channel	8 бит/канал
+	8 bit	8 бит
+	Integer	Целое число
+	16 bit	16 бит
+	32 bit (float)	32 бит (float)
+	Floating point	С плавающей точкой
 	Mode	Режим
 	Grayscale	Градации серого
 	RGB Color	RGB

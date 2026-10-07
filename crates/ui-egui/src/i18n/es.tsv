@@ -173,8 +173,13 @@
 	Lab Color	Color Lab
 	Multichannel	Multicanal
 	8 Bits/Channel	8 bits/canal
+	8 bit	8 bits
+	Integer	Entero
 	16 Bits/Channel	16 bits/canal
+	16 bit	16 bits
 	32 Bits/Channel	32 bits/canal
+	32 bit (float)	32 bits (float)
+	Floating point	Punto flotante
 	Color Table…	Tabla de colores…
 	Bitmap…	Mapa de bits…
 	Duotone…	Duotono…

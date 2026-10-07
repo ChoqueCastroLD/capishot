@@ -177,8 +177,13 @@
 	Lab Color	Lab カラー
 	Multichannel	マルチチャンネル
 	8 Bits/Channel	8 ビット/チャンネル
+	8 bit	8 ビット
+	Integer	整数
 	16 Bits/Channel	16 ビット/チャンネル
+	16 bit	16 ビット
 	32 Bits/Channel	32 ビット/チャンネル
+	32 bit (float)	32 ビット（float）
+	Floating point	浮動小数点
 	Color Table…	カラーテーブル…
 	Bitmap…	ビットマップ…
 	Duotone…	ダブルトーン…
