@@ -903,8 +903,6 @@
 	Create new pattern from the selection	从选区创建图案
 	Create new shape from the current path	从当前路径创建形状
 	Create new snapshot	创建快照
-	Create new style (from the selected type)	创建样式（基于选中的文字）
-	Create new style from the selected layer	从选中的图层创建样式
 	Create new tool preset	创建工具预设
 	Crop Factor	裁切系数
 	Ctrl	Ctrl
@@ -2075,6 +2073,16 @@ cameraRaw	Blending	混合
 	Details	详细信息
 	Rendering mode	渲染模式
 	Edit Type	编辑文字
+
+
+	New Style…	新建样式…
+	Style {name} saved	已保存样式 {name}
+
+	Create new style (from the selected type)	新建样式（基于所选文本）
+	Create new style from the selected layer	从所选图层新建样式
+
+	Make Default	设为默认
+	Reset to Default	重置为默认
 	Full-resolution preview unavailable	全分辨率预览不可用
 	No patterns	无图案
 	Enable {name}	启用{name}

@@ -904,8 +904,6 @@
 	Create new pattern from the selection	選択範囲から新規パターンを作成
 	Create new shape from the current path	現在のパスから新規シェイプを作成
 	Create new snapshot	新規スナップショットを作成
-	Create new style (from the selected type)	新規スタイルを作成(選択した文字から)
-	Create new style from the selected layer	選択したレイヤーから新規スタイルを作成
 	Create new tool preset	新規ツールプリセットを作成
 	Crop Factor	切り抜き係数
 	Ctrl	Ctrl
@@ -2049,6 +2047,16 @@ cameraRaw	Color	カラー
 	Patch:	パッチ:
 	Lasso around an area, then drag the selection	投げ縄で範囲を囲み、選択範囲をドラッグします
 	Edit Type	文字を編集
+
+
+	New Style…	新規スタイル…
+	Style {name} saved	スタイル {name} を保存しました
+
+	Create new style (from the selected type)	新規スタイルを作成（選択したテキストから）
+	Create new style from the selected layer	選択したレイヤーから新規スタイルを作成
+
+	Make Default	既定に設定
+	Reset to Default	既定値に戻す
 	Vertical Type Tool	縦書き文字ツール
 	Full-resolution preview unavailable	フル解像度のプレビューを利用できません
 	No patterns	パターンなし

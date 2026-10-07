@@ -486,10 +486,13 @@ fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>
     }
     // Layer Style dialog: show its effects live (Cancel just drops the preview).
     let style = app.ui.dialogs.iter().find(|d| d.kind == crate::state::DialogKind::LayerStyle);
-    if style.is_none() {
+    // The Preview checkbox off shows the document as it was when the dialog opened;
+    // edits still land in the dialog state and OK applies them whatever it says.
+    let preview_on = style.and_then(|d| d.fields.get("preview")).and_then(serde_json::Value::as_bool).unwrap_or(true);
+    if style.is_none() || !preview_on {
         app.style_preview = None;
     }
-    if let Some(d) = style
+    if let Some(d) = style.filter(|_| preview_on)
         && app.session.active_index() == Some(idx)
     {
         let key = (crate::layer_style::preview_hash(&d.fields) ^ st.revision.wrapping_mul(0x9e37_79b9_7f4a_7c15)) | 1 << 63;
@@ -3267,7 +3270,10 @@ mod tests {
         let id = crate::layer_style::open(&mut app, Some("colorOverlay")).unwrap();
         let (shown, key) = display_doc(&mut app, 0);
         assert_eq!((fx(&shown), fx(&app.session.documents()[0].doc)), (1, 0), "previewed, not committed");
-        app.ui.dialog_mut(id).unwrap().fields.insert("on:stroke".into(), json!(true));
+        // Adding a stroke through the dialog's instance list re-renders the canvas.
+        if let Some(d) = app.ui.dialog_mut(id) {
+            d.fields["effects"].as_array_mut().unwrap().push(json!({"id": "fx9", "kind": "stroke", "on": true, "params": {"size": 3}}));
+        }
         let (shown, key2) = display_doc(&mut app, 0);
         assert_eq!(fx(&shown), 2);
         assert_ne!(key, key2, "an edit re-renders the canvas");
