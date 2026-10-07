@@ -471,6 +471,7 @@ mod tests {
             "filter.distort.displace",
             "filter.pixelate.mezzotint",
             "filter.render.lightingEffects",
+            "filter.render.relight",
         ] {
             assert!(has_dialog(id), "{id}");
         }
