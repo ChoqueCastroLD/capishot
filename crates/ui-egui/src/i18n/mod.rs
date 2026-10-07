@@ -34,7 +34,7 @@ pub struct LangInfo {
     /// Catalog file contents (empty for the built-in English).
     pub source: &'static str,
     /// Plural form index for a count (English: 0 = one, 1 = other; Japanese and Chinese: always 0;
-    /// Czech: 0 = one, 1 = few (2–4), 2 = other). A catalog's `@plural` entries list one form per
+    /// Czech: 0 = one, 1 = few (2–4), 2 = other; French: 0 = one (0 and 1), 1 = other). A catalog's `@plural` entries list one form per
     /// index.
     pub plural: fn(u64) -> usize,
     /// Must the catalog cover every menu string? (checked by the tests)
@@ -69,8 +69,13 @@ fn plural_cs(n: u64) -> usize {
     }
 }
 
+/// French: 0 and 1 take the singular, everything else the plural.
+fn plural_fr(n: u64) -> usize {
+    usize::from(n > 1)
+}
+
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 7] = [
+pub static LANGUAGES: [LangInfo; 8] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo {
@@ -84,6 +89,7 @@ pub static LANGUAGES: [LangInfo; 7] = [
     LangInfo { code: "es", name: "Español", source: include_str!("es.tsv"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "ru", name: "Русский", source: include_str!("ru.tsv"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "cs", name: "Čeština", source: include_str!("cs.tsv"), plural: plural_cs, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "fr", name: "Français", source: include_str!("fr.tsv"), plural: plural_fr, complete_menus: true, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -295,7 +301,7 @@ mod tests {
         assert_eq!(lang_from_tag("POSIX"), Some(Lang::EN));
         assert_eq!(lang_from_tag("cs_CZ.UTF-8"), Some(CS()));
         assert_eq!(lang_from_tag("cs-CZ"), Some(CS()));
-        assert_eq!(lang_from_tag("fr_FR"), None);
+        assert_eq!(lang_from_tag("de_DE"), None);
         // Traditional Chinese: by region, by script, and with a region after the script.
         assert_eq!(lang_from_tag("zh_TW.UTF-8"), Some(ZH()));
         assert_eq!(lang_from_tag("zh-TW"), Some(ZH()));
@@ -324,7 +330,7 @@ mod tests {
     #[test]
     fn macos_language_list_is_parsed() {
         assert_eq!(first_supported("(\n    \"ja-JP\",\n    \"en-US\"\n)\n"), Some(JA()));
-        assert_eq!(first_supported("(\n    \"fr-FR\",\n    \"en-US\"\n)\n"), Some(Lang::EN));
+        assert_eq!(first_supported("(\n    \"de-DE\",\n    \"en-US\"\n)\n"), Some(Lang::EN));
         assert_eq!(first_supported("(\n    \"zh-Hant-TW\",\n    \"en-US\"\n)\n"), Some(ZH()));
         assert_eq!(first_supported("("), None);
     }
@@ -428,6 +434,22 @@ mod tests {
         assert_eq!(fmt("{b} before {a}", &[("a", "x"), ("b", "y"), ("c", "z")]), "y before x");
         assert_eq!(fmt("{missing}", &[]), "{missing}");
         assert_eq!(placeholders("a {x} b {y} {"), ["x", "y"]);
+    }
+
+    #[test]
+    fn french_resolves_and_pluralises() {
+        let fr = Lang::from_code("fr").expect("fr registered");
+        for tag in ["fr", "fr_FR.UTF-8", "fr-CA", "fr_BE", "fr-CH"] {
+            assert_eq!(lang_from_tag(tag), Some(fr), "{tag}");
+        }
+        assert_eq!(tr(fr, "Layer"), "Calque");
+        assert_eq!(tr_id(fr, "select.all", "All"), "Tout sélectionner", "an id override wins over the plain label");
+        assert_eq!(tr(fr, "All"), "Tout");
+        let forms: Vec<usize> = [0, 1, 2, 5, 100, u64::MAX].into_iter().map(plural_fr).collect();
+        assert_eq!(forms, [0, 0, 1, 1, 1, 1]);
+        assert_eq!(trn(fr, 0, "{n} item", "{n} items"), "0 élément");
+        assert_eq!(trn(fr, 1, "{n} item", "{n} items"), "1 élément");
+        assert_eq!(trn(fr, 3, "{n} item", "{n} items"), "3 éléments");
     }
 
     #[test]
