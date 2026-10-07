@@ -476,7 +476,7 @@ members = ["crates/*", "apps/*", "xtask"]
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"        # decision pending, see §16
-rust-version = "1.90"
+rust-version = "1.95"
 
 [workspace.dependencies]
 # foundation
