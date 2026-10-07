@@ -821,7 +821,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "fileHandling.lowercaseExtension",
     "fileHandling.saveInBackground",
     "fileHandling.ignoreExifProfileTag",
-    "fileHandling.askBeforeSavingLayeredTiff",
     "fileHandling.maximizePsdCompatibility",
     "performance.cacheLevels",
     "performance.effectCacheMb",

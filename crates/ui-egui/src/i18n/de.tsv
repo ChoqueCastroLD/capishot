@@ -2113,3 +2113,9 @@
 	Enable {name}	{name} aktivieren
 	Hold Alt while drawing for straight segments	Beim Zeichnen Alt gedrückt halten für gerade Segmente
 	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Ziehen oder Polygonpunkte klicken · Alt während des Lassos halten für gerade Segmente · {add} hinzufügen · {sub} vor dem Zeichnen zieht ab
+	TIFF Options	TIFF-Optionen
+	Including layers will increase file size.	Das Einbeziehen von Ebenen vergrößert die Datei.
+	Discard Layers and Save a Copy	Ebenen verwerfen und Kopie speichern
+	Don't show again	Nicht mehr anzeigen
+	Save failed: {error}	Speichern fehlgeschlagen: {error}
+	Save cancelled	Speichern abgebrochen
