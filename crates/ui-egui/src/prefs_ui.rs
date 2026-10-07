@@ -210,6 +210,7 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         app.session.prefs.edit(|p| p.interface.theme = t);
         app.prefs_rt.theme_pref = Some(t);
     }
+    crate::theme::set_ui_font_size(ctx, app.session.prefs().interface.ui_font_size);
     presets_store(app);
     sync_tooltips(app, ctx);
     app.sync_recent();
@@ -1604,6 +1605,31 @@ mod tests {
     }
 
     #[test]
+    fn ui_font_size_commands_follow_themes_and_dpi_and_reset_live() {
+        let (mut app, _) = app_with_store();
+        let ctx = egui::Context::default();
+        PhotocraftApp::setup_context(&ctx, ThemeKind::Pro);
+        let mut input = egui::RawInput::default();
+        input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(1.5);
+        for (theme, scale, expected) in
+            [("pro", "100", 1.0), ("studio", "auto", 1.5), ("studioLight", "200", 2.0), ("proMedium", "100", 1.0), ("classic", "auto", 1.5)]
+        {
+            app.run("prefs.set", json!({"values": {"interface.uiFontSize": "large", "interface.theme": theme, "interface.uiScale": scale}})).unwrap();
+            for _ in 0..3 {
+                ctx.run_ui(input.clone(), |ui| tick(&mut app, ui.ctx())).textures_delta.clear();
+            }
+            assert!((ctx.pixels_per_point() - expected).abs() < 1e-4);
+            assert_eq!(ctx.fonts(|f| f.definitions().font_data["Inter"].tweak.scale), 16.0 / 12.0);
+        }
+        app.run("prefs.reset", json!({"path": "interface.uiFontSize"})).unwrap();
+        for _ in 0..2 {
+            ctx.run_ui(input.clone(), |ui| tick(&mut app, ui.ctx())).textures_delta.clear();
+        }
+        assert_eq!(ctx.fonts(|f| f.definitions().font_data["Inter"].tweak.scale), 1.0);
+        assert!((ctx.pixels_per_point() - 1.5).abs() < 1e-4, "resetting font size keeps UI Scale");
+    }
+
+    #[test]
     fn recent_files_survive_a_restart_and_honour_the_count() {
         let (mut app, store) = app_with_store();
         let ctx = egui::Context::default();
@@ -1664,6 +1690,7 @@ mod tests {
         assert!(prefs::is_hidden("rawDefaults.applyAutoTone"));
         assert!(!prefs::is_hidden("general.autoShowHomeScreen"));
         assert!(!prefs::is_hidden("interface.uiScale"));
+        assert!(!prefs::is_hidden("interface.uiFontSize"));
         // Hidden values still round-trip through the dialog untouched.
         let (mut app, _) = app_with_store();
         app.run("prefs.set", json!({"values": {"type.smartQuotes": false}})).unwrap();
@@ -1760,6 +1787,7 @@ mod tests {
 
         let values = h.state_mut().ui.dialog_mut(id).unwrap().fields.get_mut("values").unwrap();
         values["interface"]["theme"] = json!("studioLight");
+        values["interface"]["uiFontSize"] = json!("large");
         values["performance"]["historyStates"] = json!(12);
         h.run_steps(2);
         assert!(!h.get_by_label("Apply").accesskit_node().is_disabled());
@@ -1768,6 +1796,7 @@ mod tests {
 
         assert_eq!(h.state().session.prefs().performance.history_states, 12);
         assert_eq!(h.state().ui.theme, ThemeKind::StudioLight);
+        assert_eq!(h.ctx.fonts(|f| f.definitions().font_data["Inter"].tweak.scale), 16.0 / 12.0);
         assert!(!h.state().session.prefs().type_.smart_quotes, "hidden settings round-trip unchanged");
         let d = h.state().ui.dialogs.iter().find(|d| d.id == id).unwrap();
         assert_eq!(d.fields["section"], "interface");
@@ -1776,6 +1805,7 @@ mod tests {
         let saved: Value = serde_json::from_str(store.lock().unwrap().as_ref().unwrap()).unwrap();
         assert_eq!(saved["performance"]["historyStates"], 12);
         assert_eq!(saved["interface"]["theme"], "studioLight");
+        assert_eq!(saved["interface"]["uiFontSize"], "large");
 
         // Repeated Apply starts from the validated values, not the dialog's original snapshot.
         h.state_mut().ui.dialog_mut(id).unwrap().fields.get_mut("values").unwrap()["performance"]["historyStates"] = json!(22);
@@ -1784,16 +1814,19 @@ mod tests {
         h.run_steps(4);
         assert_eq!(h.state().session.prefs().performance.history_states, 22);
         h.state_mut().ui.dialog_mut(id).unwrap().fields.get_mut("values").unwrap()["performance"]["historyStates"] = json!(33);
+        h.state_mut().ui.dialog_mut(id).unwrap().fields.get_mut("values").unwrap()["interface"]["uiFontSize"] = json!("tiny");
         h.run_steps(2);
         h.get_by_label("Cancel").click();
         h.run_steps(4);
         assert!(h.state().ui.dialogs.iter().all(|d| d.id != id));
         assert_eq!(h.state().session.prefs().performance.history_states, 22);
+        assert_eq!(h.ctx.fonts(|f| f.definitions().font_data["Inter"].tweak.scale), 16.0 / 12.0);
         let saved = store.lock().unwrap().clone().unwrap();
         let (mut restarted, _) = app_with_saved(Some(saved));
         tick(&mut restarted, &egui::Context::default());
         assert_eq!(restarted.session.prefs().performance.history_states, 22);
         assert_eq!(restarted.ui.theme, ThemeKind::StudioLight);
+        assert_eq!(restarted.session.prefs().interface.ui_font_size, prefs::UiFontSize::Large);
     }
 
     #[test]
