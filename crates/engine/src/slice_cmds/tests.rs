@@ -197,6 +197,29 @@ fn layer_based_slice_follows_the_layer_and_its_effects() {
 }
 
 #[test]
+fn layer_slice_outsets_saturate_when_a_layer_moves_near_coordinate_limits() {
+    for offset in [i32::MIN + 100, i32::MAX - 100] {
+        let mut s = session(8);
+        let layer = add_square(&mut s, Rect::new(10, 10, 30, 20));
+        let slice = s.execute("layer.newLayerBasedSlice", json!({})).unwrap()["slice"].as_u64().unwrap() as u32;
+        s.execute("slice.set", json!({"slice": slice, "outsets": [10_000, 10_000, 10_000, 10_000]})).unwrap();
+        let before = doc(&s).slices.clone();
+        s.execute("layer.translate", json!({"layer": layer.0, "dx": offset, "dy": offset})).unwrap();
+        let moved = doc(&s).slices.get(slice).unwrap().rect;
+        let content = layer_bounds(doc(&s).layer(layer).unwrap());
+        assert_eq!(moved, content.inflate(10_000));
+        assert!(moved.contains_rect(&content));
+        s.execute("slice.list", json!({})).unwrap();
+        assert_eq!(doc(&s).slices.get(slice).unwrap().rect, moved);
+        assert!(s.undo());
+        assert_eq!(doc(&s).slices, before);
+        assert!(s.redo());
+        s.execute("slice.list", json!({})).unwrap();
+        assert_eq!(doc(&s).slices.get(slice).unwrap().rect, moved);
+    }
+}
+
+#[test]
 fn slices_round_trip_through_psd_and_pcraft() {
     let mut s = session(8);
     add_square(&mut s, Rect::new(50, 40, 70, 60));
