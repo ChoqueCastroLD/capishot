@@ -1817,7 +1817,7 @@ fn layer_row(
     // Photoshop's default (medium) thumbnails: 32 pt rows.
     let row_h = if t.pro { 32.0 } else { 46.0 };
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
-    layer_drag_and_drop(ctx, ui, l, rect, &resp, actions);
+    layer_drag_and_drop(app, ctx, ui, l, rect, &resp, actions);
     if resp.drag_started() {
         crate::layer_transfer::begin_from_panel(app, ctx, l.id);
     }
@@ -2676,9 +2676,19 @@ fn brush_preset_chip(ui: &mut egui::Ui, b: &photocraft_engine::BrushSettings, st
     }
 }
 
-/// Drag a layer row to reorder: drop on the upper/lower half to place above/below, or on the middle
-/// of a group to move into it. One `layer.moveTo` command (one undo step).
-fn layer_drag_and_drop(ctx: &egui::Context, ui: &egui::Ui, l: &Layer, rect: Rect, resp: &egui::Response, actions: &mut Vec<(String, Value)>) {
+/// A drag from within a multi-selection moves the whole selection, not only the grabbed
+/// row. Dragging an unselected row keeps the existing single-layer behavior.
+fn layer_drop_payload(dragged: u64, target: LayerId, position: &str, selected: &[LayerId]) -> Value {
+    if selected.len() > 1 && selected.contains(&LayerId(dragged)) {
+        json!({"layers": selected.iter().map(|id| id.0).collect::<Vec<_>>(), "target": target.0, "position": position})
+    } else {
+        json!({"layer": dragged, "target": target.0, "position": position})
+    }
+}
+
+/// Drag a layer row to reorder: drop above, below, or inside an existing group.
+/// Multi-layer moves are atomic (one undo step), using the engine's stable document order.
+fn layer_drag_and_drop(app: &PhotocraftApp, ctx: &egui::Context, ui: &egui::Ui, l: &Layer, rect: Rect, resp: &egui::Response, actions: &mut Vec<(String, Value)>) {
     let t = Tokens::get(ctx);
     let key = egui::Id::new("layer-drag");
     if resp.drag_started() {
@@ -2719,7 +2729,8 @@ fn layer_drag_and_drop(ctx: &egui::Context, ui: &egui::Ui, l: &Layer, rect: Rect
         }
     }
     if released {
-        actions.push(("layer.moveTo".into(), json!({"layer": dragged, "target": l.id.0, "position": position})));
+        let selected = app.session.active().map(|st| st.selected_layers()).unwrap_or_default();
+        actions.push(("layer.moveTo".into(), layer_drop_payload(dragged, l.id, position, &selected)));
     }
 }
 
