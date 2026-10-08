@@ -341,12 +341,13 @@ fn content_aware_fill_as(s: &mut Session, p: &Value, cmd: &'static str, label: &
     if hb.is_empty() {
         return Err(bad(cmd, "the selection is outside the canvas"));
     }
-    let ext = hb.width().max(hb.height()) as i32;
+    // The canvas is at most i32 wide, so the extent fits; saturate anyway rather than wrap (#963).
+    let ext = i32::try_from(hb.width().max(hb.height())).unwrap_or(i32::MAX);
     let sampling = str_or(p, "sampling", "auto").to_string();
     let custom_mask: Option<Surface> = p.get("channel").and_then(|v| channel_mask(&doc, v)).cloned();
     let custom_rect = if p.get("area").is_some() { Some(rect_param(p, "area", cmd)?) } else { None };
     let window = match sampling.as_str() {
-        "auto" => hb.inflate((ext * 3 / 4).max(32)),
+        "auto" => hb.inflate(crate::fill_cmds::sampling_margin(hb)),
         "rectangular" => hb.inflate(int(p, "margin").map_or(ext.max(16), |m| m.clamp(0, 100_000) as i32)),
         "custom" => {
             let r = match (custom_rect, custom_mask.as_ref()) {
@@ -373,7 +374,8 @@ fn content_aware_fill_as(s: &mut Session, p: &Value, cmd: &'static str, label: &
     let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
     let fmt = surf.format();
     let n = fmt.channels();
-    let (w, h) = (window.width() as usize, window.height() as usize);
+    // Refuse a window too large to read before allocating for it, whatever the sampling (#963).
+    let (w, h) = crate::fill_cmds::window_size(window)?;
     // A background job when started with `Session::start` (#210): reading the window and the
     // PatchMatch fill run on a worker against the document snapshot, cancellable per row band.
     crate::jobs::run(
