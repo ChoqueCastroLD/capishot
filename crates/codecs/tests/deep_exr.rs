@@ -496,6 +496,41 @@ fn without_alpha_front_sample_is_opaque() {
     assert!((px[0] - 0.4).abs() < 1e-6 && (px[1] - 0.2).abs() < 1e-6 && (px[2] - 0.9).abs() < 1e-6);
 }
 
+/// Grayscale deep files (Y + Z) flatten to opaque gray, Y + A + Z keeps its alpha: the alpha
+/// must land in the GrayA alpha slot, not a luminance copy (that was the bug).
+#[test]
+fn grayscale_deep_keeps_its_alpha() {
+    let channels = [Chan { name: "A", ty: 2 }, Chan { name: "Y", ty: 2 }, Chan { name: "Z", ty: 2 }];
+    let bytes = gen_deep(4, 4, &channels, 0, None, COUNTS_ONE, &|p, ci| {
+        match ci {
+            0 => vec![0.5],      // A
+            1 => vec![0.5],      // Y, premultiplied: straight 1.0 × 0.5
+            _ => vec![p as f32], // Z
+        }
+    });
+    let img = decode(&bytes).expect("decodes");
+    assert_eq!(img.layout(), photocraft_codecs::ChannelLayout::GrayA);
+    let px = img.to_f32_samples().expect("f32");
+    for (p, s) in px.chunks(2).enumerate() {
+        let (y, a) = (s[0], s[1]);
+        assert!((a - 0.5).abs() < 1e-6, "pixel {p}: alpha {a}, want 0.5");
+        assert!((y - 1.0).abs() < 1e-6, "pixel {p}: luminance {y}, want the un-premultiplied 1.0");
+    }
+
+    // Without an alpha channel the same file is opaque gray.
+    let channels = [Chan { name: "Y", ty: 2 }, Chan { name: "Z", ty: 2 }];
+    let bytes = gen_deep(4, 4, &channels, 0, None, COUNTS_ONE, &|p, ci| match ci {
+        0 => vec![0.4],
+        _ => vec![p as f32],
+    });
+    let img = decode(&bytes).expect("decodes");
+    assert_eq!(img.layout(), photocraft_codecs::ChannelLayout::Gray);
+    let px = img.to_f32_samples().expect("f32");
+    for (p, v) in px.iter().enumerate() {
+        assert!((v - 0.4).abs() < 1e-6, "pixel {p}: {v}, want 0.4");
+    }
+}
+
 /// decode_deep returns the counts and channels in file order.
 #[test]
 fn decode_deep_structure() {
