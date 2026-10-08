@@ -1179,7 +1179,3 @@ pub(crate) fn translate_layer(doc: &Document, l: &mut Layer, dx: i32, dy: i32) {
     }
 }
 
-/// Does `l` (or any descendant) have id `target`?
-fn contains_layer(l: &Layer, target: LayerId) -> bool {
-    l.id == target || l.children().is_some_and(|c| c.iter().any(|c| contains_layer(c, target)))
-}
