@@ -425,6 +425,7 @@ pub struct PhotocraftApp {
     pub(crate) clip_read_for_paste: bool,
     /// Pointer position over the canvas (document px), for the Info panel and status bar.
     pub(crate) hover_doc: Option<[f64; 2]>,
+    pub(crate) clone_preview: Option<crate::canvas::ClonePreviewCache>,
     /// Info panel sample cache: ((x, y, revision), composite RGBA).
     info_sample: Option<((i32, i32, u64), [f32; 4])>,
     /// Guide being dragged (from a ruler or with the Move tool).
@@ -524,6 +525,7 @@ impl PhotocraftApp {
             guide_drag: None,
             crop: Default::default(),
             hover_doc: None,
+            clone_preview: None,
             info_sample: None,
             os_clip_sig: None,
             clip_external: false,

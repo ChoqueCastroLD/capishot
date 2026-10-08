@@ -15,6 +15,81 @@ use crate::state::{Tool, View};
 /// Largest texture side we upload; bigger documents display downsampled until the GPU path lands.
 pub const MAX_TEXTURE: u32 = 4096;
 
+pub(crate) struct ClonePreviewCache {
+    key: String,
+    texture: egui::TextureHandle,
+}
+
+/// A transient source image beneath the brush outline; never part of the document render.
+fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, at: [f64; 2], output: Option<u32>) {
+    use photocraft_engine::presets::clone_source::{Mapping, transform_matrix};
+    let overlay = app.session.presets.clone.overlay.clone();
+    if app.ui.tool != Tool::CloneStamp || !overlay.show || (overlay.auto_hide && app.drag.is_some()) {
+        return;
+    }
+    let slot = app.session.presets.clone.active().clone();
+    let Some(source) = slot.source else { return };
+    let radius = f64::from(app.session.tools.brush.size) / 2.0;
+    if !radius.is_finite() || radius <= 0.0 || radius > 500.0 || !at.iter().all(|v| v.is_finite() && v.abs() < 1_000_000.0) {
+        return;
+    }
+    let stroke_start = app.drag.as_ref().map(|d| d.start);
+    let anchor = if app.ui.tool_options.clone_aligned { slot.anchor.or(stroke_start) } else { stroke_start }.unwrap_or(at);
+    let map =
+        Mapping { source: (source[0], source[1]), anchor: (anchor[0], anchor[1]), m: transform_matrix(slot.scale, slot.rotation, slot.flip_h, slot.flip_v) };
+    let rect = DRect::new((at[0] - radius).floor() as i32, (at[1] - radius).floor() as i32, (at[0] + radius).ceil() as i32, (at[1] + radius).ceil() as i32);
+    let Some(st) = app.session.active() else { return };
+    let (display, display_key) = canvas_display(app, &st.doc, output);
+    let key = format!(
+        "{:?}:{}:{:?}:{rect:?}:{map:?}:{}:{}:{}",
+        st.doc.id, st.revision, st.active_layer, app.ui.tool_options.clone_sample, display_key, overlay.invert
+    );
+    if app.clone_preview.as_ref().is_none_or(|c| c.key != key) {
+        let Ok(mut buf) = photocraft_engine::retouch_cmds::clone_preview(&app.session, rect, &map, &app.ui.tool_options.clone_sample) else { return };
+        if overlay.invert {
+            for px in &mut buf.px {
+                for c in px.iter_mut().take(3) {
+                    *c = 1.0 - *c;
+                }
+            }
+        }
+        let image = display_image(display.as_deref(), &buf);
+        match app.clone_preview.as_mut() {
+            Some(cache) => {
+                cache.texture.set(image, TextureOptions::LINEAR);
+                cache.key = key;
+            }
+            None => app.clone_preview = Some(ClonePreviewCache { key, texture: painter.ctx().load_texture("clone-preview", image, TextureOptions::LINEAR) }),
+        }
+    }
+    let Some(cache) = &app.clone_preview else { return };
+    let tint = Color32::from_white_alpha((overlay.opacity.clamp(0.0, 100.0) * 2.55).round() as u8);
+    // A textured triangle fan provides a circular clip, including mirrored canvas views.
+    let mut mesh = egui::Mesh::with_texture(cache.texture.id());
+    let vertex = |x: f64, y: f64| egui::epaint::Vertex {
+        pos: xf.to_screen(x as f32, y as f32),
+        uv: pos2((x - f64::from(rect.x0)) as f32 / rect.width() as f32, (y - f64::from(rect.y0)) as f32 / rect.height() as f32),
+        color: tint,
+    };
+    if !overlay.clipped {
+        for (x, y) in [(rect.x0, rect.y0), (rect.x1, rect.y0), (rect.x1, rect.y1), (rect.x0, rect.y1)] {
+            mesh.vertices.push(vertex(f64::from(x), f64::from(y)));
+        }
+        mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+        painter.add(egui::Shape::mesh(mesh));
+        return;
+    }
+    mesh.vertices.push(vertex(at[0], at[1]));
+    for i in 0..=64 {
+        let angle = f64::from(i) * std::f64::consts::TAU / 64.0;
+        mesh.vertices.push(vertex(at[0] + radius * angle.cos(), at[1] + radius * angle.sin()));
+    }
+    for i in 1..=64 {
+        mesh.indices.extend_from_slice(&[0, i, i + 1]);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
 pub struct CanvasCache {
     pub revision: u64,
     pub texture: Option<egui::TextureHandle>,
@@ -2032,6 +2107,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
         } else if let Some(p) = response.hover_pos() {
             let alt = ui.input(|i| i.modifiers.alt);
+            if !resizing && !alt && !app.ui.shell.sticky_alt {
+                draw_clone_preview(app, &painter, &xf, xf.to_doc(p), output);
+            }
             let icon = match tool {
                 // Resizing the brush: the circle stays where the drag began (`brush_resize`).
                 t if resizing && crate::brush_resize::applies(t) => egui::CursorIcon::None,
@@ -3162,6 +3240,45 @@ mod tests {
         crate::menus::invoke(&mut app, &egui::Context::default(), id, params).unwrap();
         assert!(app.discard.is_some(), "close others must ask before discarding the edited tab");
         assert_eq!(app.session.documents().len(), 2);
+    }
+
+    #[test]
+    fn clone_overlay_is_circular_and_respects_visibility() {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+        app.run("cloneSource.set", json!({"source": [16,16]})).unwrap();
+        app.ui.tool = Tool::CloneStamp;
+        app.session.tools.brush.size = 20.0;
+        let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false };
+        let revision = app.session.active().unwrap().revision;
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            let ctx = ui.ctx();
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
+            draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
+        });
+        output.textures_delta.clear();
+        let mesh = output
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Mesh(m) => Some(m),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(mesh.indices.len(), 64 * 3);
+        let center = xf.to_screen(32.0, 32.0);
+        assert!(mesh.vertices.iter().all(|v| v.pos.distance(center) <= 10.01));
+        assert_eq!(app.session.active().unwrap().revision, revision);
+        assert!(app.session.presets.clone.active().anchor.is_none());
+        app.session.presets.clone.overlay.show = false;
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            let ctx = ui.ctx();
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
+            draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
+        });
+        output.textures_delta.clear();
+        assert!(output.shapes.iter().all(|s| !matches!(s.shape, egui::Shape::Mesh(_))));
     }
 
     #[test]
