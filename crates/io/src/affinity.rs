@@ -535,10 +535,10 @@ impl Builder {
         let format = if channels == 1 { PixelFormat::GRAY8 } else { self.format };
         let mut out = if channels == 1 { Surface::with_default(format, &[0.0]) } else { Surface::new(format) };
         let r = self.bbox(m, af::Rect { x0: 0.0, y0: 0.0, x1: f64::from(w), y1: f64::from(h) });
-        if r.width() <= 0 || r.height() <= 0 {
+        if r.width() == 0 || r.height() == 0 {
             return Some(out);
         }
-        if u64::from(r.width() as u32) * u64::from(r.height() as u32) > MAX_PIXELS {
+        if u64::from(r.width()) * u64::from(r.height()) > MAX_PIXELS {
             self.warn("images larger than 64 megapixels on the canvas were left out");
             return None;
         }
