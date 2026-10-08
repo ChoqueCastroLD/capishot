@@ -92,9 +92,9 @@ note = "Only brush.defineFromSelection and brush.presets.importAbr"
 [[item]]
 id = "TOOL-213-13"
 target = "Brush regression tests: no seams, hard edge, zero-scatter defaults, ABR never black"
-status = "partial"
+status = "done"
 issue = 213
-note = "Missing-pattern ABR test (abr_map/tests.rs:181), hardness test; no seam/black tests"
+note = "Seam, hard-edge and zero-scatter tests in brush_tests.rs; ABR tip colour test in abr_map/tests.rs"
 
 [[item]]
 id = "TOOL-213-14"

@@ -94,6 +94,25 @@ fn hardness_profile_is_monotonic() {
 }
 
 #[test]
+fn hard_edge_is_sharp() {
+    // A hardness of 1 is a steep rim: fully opaque inside the nominal radius, empty just past
+    // it, with only the anti-aliasing band in between.
+    let b = BrushSettings { hardness: 1.0, ..brush() };
+    let r = raster(&b, &Dab::round(Point::new(50.0, 50.0), 20.0, 1.0));
+    let prof: Vec<f32> = (0..22).map(|i| at(&r, 50 + i, 50)).collect();
+    let band = prof.iter().filter(|&&a| (0.01..0.99).contains(&a)).count();
+    assert!(band <= 3, "hardness 1 rim is {band} px wide: {prof:?}");
+    assert!(prof[17] > 0.99, "translucent inside the rim: {prof:?}");
+    assert_eq!(*prof.last().unwrap(), 0.0);
+    // A soft tip spreads the same crossing over many pixels instead.
+    let soft = BrushSettings { hardness: 0.0, ..brush() };
+    let rs = raster(&soft, &Dab::round(Point::new(50.0, 50.0), 20.0, 1.0));
+    let profs: Vec<f32> = (0..22).map(|i| at(&rs, 50 + i, 50)).collect();
+    let soft_band = profs.iter().filter(|&&a| (0.01..0.99).contains(&a)).count();
+    assert!(soft_band >= 10, "soft rim is only {soft_band} px: {profs:?}");
+}
+
+#[test]
 fn sampled_tip_is_scaled_and_oriented() {
     // Tip: left half painted.
     let tip = GrayTile::from_fn(16, 16, |x, _| if x < 8 { 1.0 } else { 0.0 });
@@ -180,6 +199,22 @@ fn spacing_sets_dab_count() {
     assert_eq!(dabs_of(&b, &pts).len(), 21);
     let d = dabs_of(&b, &pts);
     assert!(d.windows(2).all(|w| ((w[1].center.x - w[0].center.x) - 10.0).abs() < 1e-6));
+}
+
+#[test]
+fn stroke_has_no_seams() {
+    // Overlapping dabs must fuse into one solid band: a seam is a periodic gap or a darker
+    // join, so the minimum coverage inside the stroke stays at the opacity.
+    for spacing in [0.1f32, 0.25, 0.5] {
+        let b = BrushSettings { spacing, size: 20.0, ..brush() };
+        let s = paint(&b, &line(20.0, 180.0, 100.5), 200, 200);
+        for y in 98..=102 {
+            for x in 40..=160 {
+                let a = s.rgba(x, y)[3];
+                assert!(a > 0.99, "spacing {spacing} seam at ({x},{y}): {a}");
+            }
+        }
+    }
 }
 
 // ---------- dynamics ----------
@@ -315,6 +350,21 @@ fn scattering_stays_in_bounds() {
         } else {
             assert!(d.iter().any(|x| (x.center.x / 5.0 - (x.center.x / 5.0).round()).abs() > 0.1));
         }
+    }
+}
+
+#[test]
+fn zero_scatter_keeps_dabs_on_the_stroke() {
+    // Scatter at 0 % must not move a dab, even with the section switched on.
+    let on = BrushSettings { scattering: Scattering { enabled: true, ..Default::default() }, ..brush() };
+    for b in [brush(), on] {
+        let d = dabs_of(&b, &line(10.0, 90.0, 40.5));
+        assert!(d.len() > 4);
+        assert!(
+            d.iter().all(|x| (x.center.y - 40.5).abs() < 1e-9),
+            "scatter moved dabs off the stroke: {:?}",
+            d.iter().map(|x| x.center.y).collect::<Vec<_>>()
+        );
     }
 }
 

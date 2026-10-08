@@ -26,3 +26,7 @@ sync_github_name = false
 real_name = "Gert Pellin"
 display_name = "Gert Pellin"
 sync_github_name = false
+
+[people.reynold-hu]
+real_name = "Reynold Hu"
+sync_github_name = true
