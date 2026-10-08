@@ -28,11 +28,16 @@ readiness; treat it as an upper bound.
 
 **Menu parity: 532 / 625 (85.1%)** on 2026-10-01, up from 224 (35.8%) the day before. See [`parity.md`](parity.md).
 
-2026-10-08: Affinity `.af` import has an initial, bounded **embedded-preview-only** path
-([format notes](../crates/affinity/README.md)). Some version-12 documents open at the preview's
-dimensions with an explicit warning and without a source save path. Previewless files and
-legacy containers remain unsupported; native layers, document colour settings, full-resolution
-content and Affinity writing are still missing. This does not raise editable-format parity.
+2026-10-08: Affinity `.af`, `.afdesign`, `.afphoto` and `.afpub` documents (container versions
+8–12) open **natively** ([format notes](../crates/affinity/README.md)): pages and artboards, layers
+and groups, curves and geometric shapes with fills, gradients and strokes, text as type layers,
+placed images as smart objects, pixel layers and masks, as an 8-bit RGB document without a source
+save path. Measured against the thumbnail Affinity embeds in each file, 21 pinned public documents
+(`cargo xtask corpus --affinity`) differ by 0–4.6 of 255 on average. Layer effects, adjustments,
+live filters, brush strokes, special shapes, master pages and CMYK/Lab/16-bit document colour are
+approximated or left out, each with a warning; damaged or unknown files fall back to the embedded
+preview. Affinity writing is not implemented: no Affinity installation was available to check
+written files, so `.af` export stays unsupported.
 
 ## Honest parity assessment (2026-10-05)
 

@@ -181,9 +181,9 @@ pub(crate) fn import(name: &str, bytes: &[u8]) -> Result<Document> {
     let r = photocraft_io::import(name, bytes).map_err(|e| EngineError::Other(format!("{name}: {e}")))?;
     // Auxiliary imports return only a document and cannot surface the preview's fidelity warning.
     // Open has its own warning-preserving path; never silently place or process a thumbnail.
-    if r.source_read_only {
+    if r.preview_only {
         return Err(EngineError::Other(format!(
-            "{name}: only an Affinity preview is available; open it with File › Open to see the warning, or export PSD or PNG from Affinity before using it here"
+            "{name}: only this Affinity file's embedded preview could be read; open it with File › Open to see the warning, or export PSD or PNG from Affinity before using it here"
         )));
     }
     Ok(r.document)

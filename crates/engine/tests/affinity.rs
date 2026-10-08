@@ -1,4 +1,5 @@
-//! A preview is a new document, never a save target for the Affinity source.
+//! An Affinity document is never a save target for its source; a native one can be placed, a
+//! preview fallback cannot.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::sync::Arc;
@@ -66,7 +67,7 @@ fn background_preview_retains_the_source_protection_and_warning() {
         Started::Job(id) => s.wait_job(id).unwrap(),
         Started::Done(v) => v,
     };
-    assert!(result["warnings"].to_string().contains("Native layers"));
+    assert!(result["warnings"].to_string().contains("no layers"));
     assert!(s.active().unwrap().source_read_only);
     assert!(s.active().unwrap().path.is_none());
 }
@@ -78,7 +79,45 @@ fn warningless_auxiliary_paths_cannot_silently_use_a_thumbnail() {
     s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
     let layers = s.active().unwrap().doc.layers.len();
     let error = photocraft_engine::file_cmds::place_bytes(&mut s, "source.af", bytes.clone(), None, &json!({})).unwrap_err().to_string();
-    assert!(error.contains("only an Affinity preview"), "{error}");
+    assert!(error.contains("embedded preview could be read"), "{error}");
     assert_eq!(s.active().unwrap().doc.layers.len(), layers);
     assert!(photocraft_engine::smart_cmds::decode_source("source.af", &bytes).unwrap_err().to_string().contains("export PSD or PNG"));
+}
+
+/// A minimal native document: one 10×10 px red square at (5, 5) on a 40×20 page.
+fn native() -> Vec<u8> {
+    use photocraft_affinity::synth::{self, F, Method, tag};
+    let node = |x: f64, y: f64| {
+        let mut r = x.to_le_bytes().to_vec();
+        r.extend(y.to_le_bytes());
+        r.extend([1, 0]);
+        r
+    };
+    let red = F::Struct([1.0f32, 0.0, 0.0, 1.0].iter().flat_map(|v| v.to_le_bytes()).collect());
+    let square = F::Def(
+        3,
+        vec![tag(b"PCrv")],
+        vec![
+            (tag(b"Crvs"), F::Obj(tag(b"PCvD"), vec![(tag(b"Data"), F::Pos(vec![F::U8(0), F::U32(1), F::Bool(true), F::Records(18, vec![node(5.0, 5.0), node(15.0, 5.0), node(15.0, 15.0), node(5.0, 15.0), node(5.0, 5.0)])]))])),
+            (tag(b"BFFl"), F::Shared(vec![F::Def(4, vec![tag(b"FDsc")], vec![(tag(b"FDeF"), F::Def(5, vec![tag(b"FilS")], vec![(tag(b"Colr"), F::Def(6, vec![tag(b"RGBA")], vec![(tag(b"_col"), red)]))]))])])),
+        ],
+    );
+    let spread = F::Def(2, vec![tag(b"Sprd")], vec![(tag(b"SprB"), F::F64s(vec![0.0, 0.0, 40.0, 20.0])), (tag(b"SprT"), F::Bool(true)), (tag(b"Chld"), F::Shared(vec![square]))]);
+    let doc = synth::stream(&[(tag(b"DocR"), F::Def(1, vec![tag(b"DocN")], vec![(tag(b"Chld"), F::Shared(vec![spread]))]))]);
+    synth::container(&[("doc.dat", &doc, Method::Zstd)], None)
+}
+
+#[test]
+fn native_documents_open_read_only_and_can_be_placed() {
+    let bytes = native();
+    let mut s = Session::new();
+    let r = open_bytes_as(&mut s, "art.af", &bytes, None, Some("/source/art.af".into())).unwrap();
+    assert!(!r["warnings"].to_string().contains("preview"), "{r}");
+    let st = s.active().unwrap();
+    assert!(st.path.is_none() && st.source_read_only);
+    assert_eq!((st.doc.size.width, st.doc.size.height), (40, 20));
+    s.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
+    let before = s.active().unwrap().doc.layers.len();
+    photocraft_engine::file_cmds::place_bytes(&mut s, "art.af", bytes, None, &json!({})).unwrap();
+    assert_eq!(s.active().unwrap().doc.layers.len(), before + 1);
 }

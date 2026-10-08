@@ -37,6 +37,7 @@ blake3 = { version = "1.8", default-features = false, features = ["pure"] }
 
 [dev-dependencies]
 crc32fast = "1.5"
+photocraft-affinity = { workspace = true, features = ["synth"] }
 flate2 = { workspace = true }
 photocraft-psd = { workspace = true, features = ["testgen"] }
 photocraft-raw = { workspace = true, features = ["testgen"] }

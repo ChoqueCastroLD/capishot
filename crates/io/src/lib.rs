@@ -90,8 +90,11 @@ pub struct ImportResult {
     pub document: Document,
     /// Human-readable notes about anything approximated or dropped.
     pub warnings: Vec<String>,
-    /// An Affinity preview must not retain a Save path to its native source.
+    /// Save must not write back to the source (an Affinity document: PhotoCraft can't write it).
     pub source_read_only: bool,
+    /// Only a stand-in picture of the file (an Affinity document whose native data couldn't be
+    /// read): Open shows it with its warning; Place and other auxiliary imports refuse it.
+    pub preview_only: bool,
 }
 
 /// Result of [`export`].
@@ -163,7 +166,7 @@ pub fn import_with(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt)
 fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt) -> Result<ImportResult, IoError> {
     // A declared native extension must reach its loader so malformed bundles retain format errors.
     if has_extension(name, photocraft_format::EXTENSION) || photocraft_format::is_pcraft(bytes) {
-        return Ok(ImportResult { document: photocraft_format::load_from_bytes(bytes)?, warnings: Vec::new(), source_read_only: false });
+        return Ok(ImportResult { document: photocraft_format::load_from_bytes(bytes)?, warnings: Vec::new(), source_read_only: false, preview_only: false });
     }
     if is_psd(bytes) {
         let file = PsdFile::from_bytes(bytes)?;
@@ -176,7 +179,7 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt) -
         ctl.progress(0.05);
         let (mut document, warnings) = psd_import::psd_to_document_with(&file, ctl).ok_or(IoError::Cancelled)?;
         document.name = name.to_string();
-        return Ok(ImportResult { document, warnings, source_read_only: false });
+        return Ok(ImportResult { document, warnings, source_read_only: false, preview_only: false });
     }
     if affinity::is_affinity(bytes) || affinity::has_extension(name) {
         return affinity::import(name, bytes);
