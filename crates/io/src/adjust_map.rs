@@ -607,7 +607,10 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             let n = *size as usize;
             let cube = lut.as_deref().zip(photocraft_doc::adjust::lut3d_len(*size)).and_then(|(table, len)| table.get(..len)).filter(|_| n <= 256);
             let (file, dither) = match cube {
-                Some(cube) => (photocraft_cms::lutfile::LutFile { title: String::new(), size: n, data: cube.to_vec() }, *dither),
+                Some(cube) => (
+                    photocraft_cms::lutfile::LutFile { title: String::new(), size: n, data: cube.to_vec(), domain_min: [0.0; 3], domain_max: [1.0; 3] },
+                    *dither,
+                ),
                 _ => (photocraft_cms::lutfile::LutFile { title: String::new(), ..photocraft_cms::lutfile::LutFile::identity(2) }, false),
             };
             let en =

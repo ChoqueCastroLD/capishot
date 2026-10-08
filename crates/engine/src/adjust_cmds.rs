@@ -96,6 +96,15 @@ pub fn lookup_from_params(p: &Value, base: Option<&Adjustment>) -> Result<Adjust
         loaded = Some((f, base_name(path)));
     }
     if let Some((f, label)) = loaded {
+        if !f.domain_is_default() {
+            return Err(bad(
+                CMD,
+                format!(
+                    "`{}` declares DOMAIN_MIN {:?} / DOMAIN_MAX {:?}: Color Lookup applies the plain 0..1 domain, so the look would shift; honouring a custom domain is not supported yet",
+                    label, f.domain_min, f.domain_max
+                ),
+            ));
+        }
         name = label;
         size = f.size as u32;
         lut = Some(std::sync::Arc::new(f.data));
