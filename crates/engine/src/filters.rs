@@ -4,7 +4,9 @@
 //! smart object, recording a smart filter), respects the selection, and is
 //! undoable. `filter.lastFilter` re-runs the most recent filter command.
 
-use photocraft_algo::{self as algo, Distribution, FilterParams, PolarMode, Preserve, RadialMethod, RippleSize, SpherizeMode, UndefinedAreas, WaveType};
+use photocraft_algo::{
+    self as algo, Distribution, FilterParams, PolarMode, Preserve, RadialMethod, RadialQuality, RippleSize, SpherizeMode, UndefinedAreas, WaveType,
+};
 use photocraft_doc::{LayerContent, SmartFilter};
 use serde_json::{Value, json};
 
@@ -65,6 +67,12 @@ pub fn params_for(id: &str, p: &Value) -> Option<FilterParams> {
         "filter.blur.radialBlur" => FilterParams::RadialBlur {
             amount: f(p, "amount", 10.0).clamp(1.0, 100.0),
             method: if s(p, "method", "spin") == "zoom" { RadialMethod::Zoom } else { RadialMethod::Spin },
+            quality: match s(p, "quality", "good") {
+                "draft" => RadialQuality::Draft,
+                "best" => RadialQuality::Best,
+                "good" => RadialQuality::Good,
+                _ => RadialQuality::Good,
+            },
             center_x: f(p, "centerX", 0.5),
             center_y: f(p, "centerY", 0.5),
         },
@@ -315,7 +323,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "filter.blur.radialBlur",
             "Radial Blur…",
             ["Filter", "Blur"],
-            r##"{"amount":1..100=10,"method":"spin|zoom","centerX":0..1=0.5,"centerY":0..1=0.5}"##
+            r##"{"amount":1..100=10,"method":"spin|zoom","quality":"draft|good|best"="good","centerX":0..1=0.5,"centerY":0..1=0.5}"##
         ),
         filter_cmd!("filter.blur.surfaceBlur", "Surface Blur…", ["Filter", "Blur"], r##"{"radius":1..100=5,"threshold":2..255=15}"##),
         filter_cmd!(
@@ -585,6 +593,10 @@ mod tests {
     #[test]
     fn params_map_to_algorithm_units() {
         assert_eq!(params_for("filter.blur.gaussianBlur", &json!({"radius": 4.5})), Some(FilterParams::GaussianBlur { radius: 4.5 }));
+        assert_eq!(
+            params_for("filter.blur.radialBlur", &json!({"quality": "best"})),
+            Some(FilterParams::RadialBlur { amount: 10.0, method: RadialMethod::Spin, quality: RadialQuality::Best, center_x: 0.5, center_y: 0.5 })
+        );
         assert_eq!(
             params_for("filter.noise.addNoise", &json!({"amount": 10, "distribution": "gaussian", "monochromatic": true})),
             Some(FilterParams::AddNoise { amount: 10.0, distribution: Distribution::Gaussian, monochromatic: true, seed: 0 })
