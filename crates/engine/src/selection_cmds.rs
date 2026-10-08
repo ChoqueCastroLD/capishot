@@ -302,10 +302,11 @@ fn modify(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
         _ => 500.0,
     };
     let r = f(p, "radius", 1.0);
-    if !r.is_finite() || r > max {
+    // A negative radius is refused too (#993): it used to be clamped to 0, which left the
+    // selection alone (Expand, Contract) or cleared it (Border) while reporting success.
+    if !r.is_finite() || !(0.0..=max).contains(&r) {
         return Err(EngineError::BadParams { cmd: format!("select.modify.{op}"), msg: format!("radius must be a number in 0..{max}") });
     }
-    let r = r.max(0.0);
     // Photoshop's "Apply effect at canvas bounds": when on, the canvas edge is a selection edge
     // (Select All then Contract shrinks from the edges); when off, the selection is taken to
     // continue past the canvas. Border has no such option: its band always follows the canvas edge,
@@ -746,7 +747,7 @@ mod tests {
         assert!(!s.is_enabled("select.nothing"));
         // Out-of-range or non-finite radii are refused and leave the selection alone.
         for op in ["feather", "smooth", "expand", "contract", "border"] {
-            for r in [json!(1e300), json!(5000), json!(f64::MAX)] {
+            for r in [json!(1e300), json!(5000), json!(f64::MAX), json!(-5), json!(-0.5), json!(f64::MIN)] {
                 assert!(s.execute(&format!("select.modify.{op}"), json!({"radius": r})).is_err(), "{op} {r}");
             }
         }
