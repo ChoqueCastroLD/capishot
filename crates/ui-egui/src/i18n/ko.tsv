@@ -2731,3 +2731,16 @@ cameraRaw	Color	색상
 	Apply At Canvas Bounds	캔버스 경계에 효과 적용
 	Good	좋음
 	Best	최적
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	내용:
+	Custom Pattern:	사용자 정의 패턴:
+	Foreground Color	전경색
+	Color…	색상…
+	50% Gray	50% 회색
+	Color Adaptation	색상 적응
+	{size} (was {old})	{size} (이전 {old})
+	Cone (Inverted)	원뿔(반전)
+	Domed	돔
+	Domed (Inverted)	돔(반전)
+	Diagonal (Descending)	대각선(내림)

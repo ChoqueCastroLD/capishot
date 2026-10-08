@@ -2145,3 +2145,17 @@ cameraRaw	Color	Barvy
 	Lines +/−	Řádky +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR: {prs}, commity: {commits}, řádky +{added} / −{deleted} (Δ {delta}), binární soubory +{binAdded} / −{binDeleted}, {first} – {last}
 	Apply At Canvas Bounds	Použít efekt na hranicích plátna
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Obsah:
+	Custom Pattern:	Vlastní vzorek:
+	Foreground Color	Barva popředí
+	Color…	Barva…
+	50% Gray	50% šedá
+	Color Adaptation	Přizpůsobení barev
+	{size} (was {old})	{size} (dříve {old})
+	Cone	Kužel
+	Cone (Inverted)	Kužel (obrácený)
+	Domed	Kopule
+	Domed (Inverted)	Kopule (obrácená)
+	Diagonal (Descending)	Diagonála (sestupná)

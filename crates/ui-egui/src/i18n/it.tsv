@@ -2218,3 +2218,16 @@ cameraRaw	Amount	Quantità
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commit, +{added} / −{deleted} righe (Δ {delta}), +{binAdded} / −{binDeleted} risorse binarie, {first} – {last}
 	Convert to Layers	Converti in livelli
 	Apply At Canvas Bounds	Applica effetto ai limiti dell’area di lavoro
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Contenuto:
+	Custom Pattern:	Pattern personalizzato:
+	Foreground Color	Colore primo piano
+	Color…	Colore…
+	50% Gray	Grigio 50%
+	{size} (was {old})	{size} (prima {old})
+	Cone	Cono
+	Cone (Inverted)	Cono (invertito)
+	Domed	Bombato
+	Domed (Inverted)	Bombato (invertito)
+	Diagonal (Descending)	Diagonale (discendente)

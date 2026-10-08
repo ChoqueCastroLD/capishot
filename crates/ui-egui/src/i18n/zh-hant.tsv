@@ -2122,3 +2122,17 @@ cameraRaw	Blending	混合
 	Lines +/−	行數 +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}：{prs} 個 PR，{commits} 次提交，行 +{added} / −{deleted}（Δ {delta}），二進位檔 +{binAdded} / −{binDeleted}，{first} – {last}
 	Apply At Canvas Bounds	套用效果至版面邊界
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	內容：
+	Custom Pattern:	自訂圖樣：
+	Foreground Color	前景色
+	Color…	顏色…
+	50% Gray	50% 灰色
+	Color Adaptation	顏色適應
+	{size} (was {old})	{size}（原為 {old}）
+	Cone	錐形
+	Cone (Inverted)	錐形（反轉）
+	Domed	圓頂
+	Domed (Inverted)	圓頂（反轉）
+	Diagonal (Descending)	對角線（下降）

@@ -2216,3 +2216,16 @@ cameraRaw	Amount	Cantidad
 	Lines +/−	Líneas +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commits, +{added} / −{deleted} líneas (Δ {delta}), +{binAdded} / −{binDeleted} archivos binarios, {first} – {last}
 	Apply At Canvas Bounds	Aplicar efecto en los límites del lienzo
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Contenido:
+	Custom Pattern:	Patrón personalizado:
+	Foreground Color	Color frontal
+	Color…	Color…
+	50% Gray	Gris al 50%
+	{size} (was {old})	{size} (antes {old})
+	Cone	Cono
+	Cone (Inverted)	Cono (invertido)
+	Domed	Abovedado
+	Domed (Inverted)	Abovedado (invertido)
+	Diagonal (Descending)	Diagonal (descendente)

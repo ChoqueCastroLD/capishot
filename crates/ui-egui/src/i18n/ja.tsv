@@ -2128,3 +2128,17 @@ cameraRaw	Color	カラー
 	Lines +/−	行数 +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR {prs} 件、コミット {commits} 件、行 +{added} / −{deleted} (Δ {delta})、バイナリ +{binAdded} / −{binDeleted}、{first} – {last}
 	Apply At Canvas Bounds	カンバスの境界に効果を適用
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	内容:
+	Custom Pattern:	カスタムパターン:
+	Foreground Color	描画色
+	Color…	カラー…
+	50% Gray	50% グレー
+	Color Adaptation	カラー適応
+	{size} (was {old})	{size}(変更前 {old})
+	Cone	円錐
+	Cone (Inverted)	円錐 (反転)
+	Domed	ドーム
+	Domed (Inverted)	ドーム (反転)
+	Diagonal (Descending)	斜め (下降)

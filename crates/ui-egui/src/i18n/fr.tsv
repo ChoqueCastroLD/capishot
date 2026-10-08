@@ -2576,3 +2576,16 @@ cameraRaw	Blending	Fusion
 	Lines +/−	Lignes +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login} : {prs} PR, {commits} commits, +{added} / −{deleted} lignes (Δ {delta}), +{binAdded} / −{binDeleted} fichiers binaires, {first} – {last}
 	Apply At Canvas Bounds	Appliquer l’effet aux limites de la zone de travail
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Contenu :
+	Custom Pattern:	Motif personnalisé :
+	Foreground Color	Couleur de premier plan
+	Color…	Couleur…
+	50% Gray	Gris 50 %
+	{size} (was {old})	{size} (auparavant {old})
+	Cone	Cône
+	Cone (Inverted)	Cône (inversé)
+	Domed	Bombé
+	Domed (Inverted)	Bombé (inversé)
+	Diagonal (Descending)	Diagonale (descendante)

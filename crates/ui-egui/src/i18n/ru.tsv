@@ -2422,3 +2422,17 @@ cameraRaw	Roughness	Неровность
 	Lines +/−	Строки +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR: {prs}, коммиты: {commits}, строки +{added} / −{deleted} (Δ {delta}), двоичные файлы +{binAdded} / −{binDeleted}, {first} – {last}
 	Apply At Canvas Bounds	Применить эффект на границах холста
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Содержимое:
+	Custom Pattern:	Свой узор:
+	Foreground Color	Основной цвет
+	Color…	Цвет…
+	50% Gray	50% серого
+	{size} (was {old})	{size} (было {old})
+	Cone	Конус
+	Cone (Inverted)	Конус (инвертированный)
+	Domed	Купол
+	Domed (Inverted)	Купол (инвертированный)
+	Diagonal (Descending)	Диагональ (нисходящая)
+	Linear	Линейный
