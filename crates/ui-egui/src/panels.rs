@@ -1528,6 +1528,8 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
                 crate::smart_ui::filter_rows(app, ui, l, depth, &mut actions);
             }
+            // ⌥-click the line between two layers: clip / release the upper one (#967).
+            crate::clip_line_ui::show(ui, &doc, &mut actions);
             // A rename whose row is gone (deleted, filtered out, inside a closed group) ends,
             // committed: nothing else could commit or cancel it.
             if let Some(layer) = crate::layer_row_ui::renaming(ui.ctx())

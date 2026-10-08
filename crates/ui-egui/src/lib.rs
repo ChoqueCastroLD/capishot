@@ -39,6 +39,7 @@ pub mod channel_view;
 pub mod channels_panel;
 pub mod chrome_ui;
 pub mod cjk_fonts;
+pub mod clip_line_ui;
 pub mod color_picker_ui;
 pub mod color_range_ui;
 pub mod comps_ui;
