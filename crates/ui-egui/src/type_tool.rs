@@ -34,15 +34,16 @@ pub fn layout(app: &mut PhotocraftApp, id: LayerId) -> Option<(Arc<TextLayout>, 
     let st = app.session.active()?;
     let (doc, rev) = (st.doc.clone(), st.revision);
     let t = text_layer(&doc, id)?;
+    let transform = crate::type_transform::current_transform(app, id).unwrap_or(t.transform);
     let key = (doc.id.0, rev, id.0);
     if let Some((k, l)) = &app.type_layout
         && *k == key
     {
-        return Some((l.clone(), t.transform, t.text.clone()));
+        return Some((l.clone(), transform, t.text.clone()));
     }
     let l = Arc::new(photocraft_text::shared().lock().ok()?.layout(t, doc.resolution_dpi));
     app.type_layout = Some((key, l.clone()));
-    Some((l, t.transform, t.text.clone()))
+    Some((l, transform, t.text.clone()))
 }
 
 fn to_text(aff: &Affine, x: f64, y: f64) -> (f32, f32) {
@@ -145,7 +146,7 @@ fn handle_sides(i: u8) -> (bool, bool, bool, bool) {
     }
 }
 
-fn box_shape(app: &PhotocraftApp, id: LayerId) -> Option<(f32, f32, f32, f32)> {
+pub(crate) fn box_shape(app: &PhotocraftApp, id: LayerId) -> Option<(f32, f32, f32, f32)> {
     match app.session.active().and_then(|s| text_layer(&s.doc, id).map(|t| t.shape))? {
         photocraft_doc::text::TextShape::Box { x, y, width, height } => Some((x, y, width, height)),
         _ => None,
@@ -153,7 +154,7 @@ fn box_shape(app: &PhotocraftApp, id: LayerId) -> Option<(f32, f32, f32, f32)> {
 }
 
 /// The paragraph-box handle under the document point, if the layer is paragraph text.
-fn box_handle_at(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> Option<u8> {
+pub(crate) fn box_handle_at(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> Option<u8> {
     let (bx, by, w, h) = box_shape(app, id)?;
     let (_, aff, _) = layout(app, id)?;
     let (r, b) = (bx + w, by + h);
@@ -300,6 +301,7 @@ fn insert(app: &mut PhotocraftApp, s: &str) {
     if a == b && s.is_empty() {
         return;
     }
+    crate::type_transform::finish(app);
     if app.run("type.edit", json!({"layer": ed.layer, "replace": {"start": a, "end": b, "text": s}, "coalesce": ed.session})).is_ok()
         && let Some(e) = app.ui.text_edit.as_mut()
     {
@@ -317,6 +319,7 @@ fn kern_pair(app: &mut PhotocraftApp, id: LayerId, caret: usize, by: f32) {
     if before.is_none_or(|c| c == '\n') || after.is_none_or(|c| c == '\n') {
         return;
     }
+    crate::type_transform::finish(app);
     let _ = app.run("type.edit", json!({"layer": id.0, "kernPair": {"at": caret, "by": by}}));
 }
 
@@ -338,6 +341,7 @@ fn ime_update(app: &mut PhotocraftApp, s: &str, commit: bool) {
         return;
     }
     let len = s.chars().count();
+    crate::type_transform::finish(app);
     if app.run("type.edit", json!({"layer": ed.layer, "replace": {"start": start, "end": end, "text": s}, "coalesce": ed.session})).is_ok()
         && let Some(e) = app.ui.text_edit.as_mut()
     {
@@ -407,6 +411,10 @@ fn line_edge(app: &mut PhotocraftApp, id: LayerId, caret: usize, end: bool) -> u
 /// Keyboard input while editing. Returns true when a type edit session is active (single-key
 /// tool shortcuts must then be skipped). Handled events are removed from the frame's input.
 pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
+    crate::type_transform::cancel_stale(app);
+    if !ctx.input(|i| i.focused) {
+        crate::type_transform::cancel_drag(app);
+    }
     let Some(ed) = app.ui.text_edit.clone() else { return false };
     let id = LayerId(ed.layer);
     let Some(text) = current_text(app, id) else {
@@ -511,6 +519,7 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                     }
                     Key::Enter if m.command => commit(app),
                     Key::Enter => insert(app, "\n"),
+                    Key::Escape if crate::type_transform::active(app) => crate::type_transform::cancel_drag(app),
                     Key::Escape => commit(app),
                     Key::A if m.command => {
                         if let Some(e) = app.ui.text_edit.as_mut() {
@@ -524,7 +533,12 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                         let _ = crate::menus::invoke(app, ctx, "window.panel.character", json!({}));
                     }
                     // Other command shortcuts (⌘Z, ⌘S, …) pass through to the menus.
-                    _ if m.command => handled[k] = false,
+                    _ if m.command => {
+                        if *key == Key::Z {
+                            crate::type_transform::cancel_drag(app);
+                        }
+                        handled[k] = false;
+                    }
                     _ => {}
                 }
             }
@@ -547,6 +561,10 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
 
 /// End the editing session. A new layer left empty is deleted; a new layer is named after its text.
 pub fn commit(app: &mut PhotocraftApp) {
+    if app.ui.tool.is_type() {
+        crate::type_transform::finish(app);
+    }
+    crate::type_transform::reset(app);
     let Some(ed) = app.ui.text_edit.take() else { return };
     let Some(text) = current_text(app, LayerId(ed.layer)) else { return };
     if text.trim().is_empty() && ed.created {
@@ -583,6 +601,10 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
         });
     }
     // Frame: paragraph text shows its box with handles; point text an underline per line.
+    let mods = crate::workspace_ui::sticky_mods(app, painter.ctx().input(|i| i.modifiers));
+    if crate::type_transform::draw(app, painter, xf, mods) {
+        return;
+    }
     let shape = app.session.active().and_then(|s| text_layer(&s.doc, id).map(|t| t.shape));
     let frame = Stroke::new(1.0, t.accent);
     match shape {
@@ -1346,6 +1368,7 @@ fn type_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// Cancel the editing session: undo it back to where it started (removes a new layer).
 pub fn cancel(app: &mut PhotocraftApp) {
+    crate::type_transform::reset(app);
     let Some(ed) = app.ui.text_edit.take() else { return };
     let coalesced = app.session.active().is_some_and(|s| s.coalesce.as_deref() == Some(ed.session.as_str()));
     if coalesced {

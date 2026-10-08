@@ -45,6 +45,22 @@ curl -sfL -o assets/icons/<name>.svg https://raw.githubusercontent.com/lucide-ic
 | Layer masks | `panels.rs` | Clicking the mask thumbnail targets the mask (corner-bracket frame; the tab reads "Layer, Layer Mask/8"). Brush, eraser (paints background colour), gradient and bucket then send `"target": "mask"`. Adjustment and fill layers target their mask automatically. |
 | Levels / Curves | `tone.rs` | Histogram of the image *below* the adjustment. Curves: click to add a point, drag out to delete. Every change is a coalesced `layer.setAdjustment`, so one drag = one undo step and the canvas updates at full resolution on the GPU. |
 
+While editing type, hold Ctrl (Windows/Linux) or Command (macOS) for an oriented transform
+frame. Drag inside to move, a corner to scale (Shift keeps proportions; Alt/Option scales about
+the reference point), a middle handle to skew, or just outside the frame to rotate (Shift snaps
+to 15°). Drag the reference point to move the rotation centre. These Type gestures follow
+[Adobe's type guide](https://helpx.adobe.com/photoshop/using/creating-type.html), independently
+of the Free Transform preference: Ctrl/Cmd never distorts a Type corner.
+
+Without Ctrl/Cmd, paragraph handles resize the container and reflow its text. Temporary
+transforms keep its logical dimensions and all character/paragraph styles. A drag begun with
+Ctrl/Cmd owns the pointer until button release, even if the modifier is released first. Its
+preview does not change the document; release applies one coalesced `type.edit`, and typing
+continues in the same layer. Escape during a drag cancels that preview; focus loss or changes
+to its source also discard it. Holding the modifier, moving the reference point, or returning
+the pointer to its start creates no history entry. Ctrl/Cmd+T while typing still toggles the
+Character panel.
+
 Where the font lacks a symbol (e.g. ∠ ↦ ▔), draw it with the painter or use a Lucide icon; never ship
 missing-glyph boxes. Check every new panel with the offscreen snapshot tool (`docs/development.md`).
 

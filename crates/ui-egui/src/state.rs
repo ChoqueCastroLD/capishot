@@ -666,6 +666,16 @@ pub struct TextEdit {
     pub preedit: Option<(usize, usize)>,
 }
 
+/// Temporary Type-tool drag. The document is unchanged until release; this frame is view state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TypeTransform {
+    pub document: u64,
+    pub revision: u64,
+    pub original: photocraft_geom::Affine,
+    pub frame: TransformSession,
+    pub(crate) gesture: crate::transform_tool::Gesture,
+}
+
 /// View-menu overlays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -715,6 +725,12 @@ pub struct UiState {
     /// Inline type editing session, if any.
     #[serde(default)]
     pub text_edit: Option<TextEdit>,
+    /// Ctrl/Cmd Type-tool gesture, exposed to automation but never restored as a held pointer.
+    #[serde(default, skip_deserializing)]
+    pub type_transform: Option<TypeTransform>,
+    /// Reference point for the current type editing session (document coordinates).
+    #[serde(skip)]
+    pub type_transform_pivot: Option<[f64; 2]>,
     /// Free Transform session, if any.
     #[serde(default)]
     pub transform: Option<TransformSession>,
@@ -858,6 +874,8 @@ impl Default for UiState {
             tool: Tool::Brush,
             recent_files: Vec::new(),
             text_edit: None,
+            type_transform: None,
+            type_transform_pivot: None,
             transform: None,
             mask_target: false,
             vector_mask_target: false,

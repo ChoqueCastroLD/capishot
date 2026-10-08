@@ -133,6 +133,7 @@ pub mod transform_tex;
 pub mod transform_tool;
 pub mod type_panels_ui;
 pub mod type_tool;
+mod type_transform;
 mod variables_ui;
 pub mod vector_ui;
 pub mod view_cmds;
@@ -439,6 +440,7 @@ pub struct PhotocraftApp {
     pub(crate) crop: crop_ui::CropState,
     /// Type tool layout cache: ((doc, revision, layer), layout).
     pub(crate) type_layout: Option<((u64, u64, u64), std::sync::Arc<photocraft_text::TextLayout>)>,
+    pub(crate) type_transform_preview: Option<type_transform::Preview>,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
     channel_thumbs: Option<(DocId, std::sync::Weak<Document>, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
@@ -527,6 +529,7 @@ impl PhotocraftApp {
             channel_thumbs: None,
             channel_views: HashMap::new(),
             type_layout: None,
+            type_transform_preview: None,
             guide_drag: None,
             crop: Default::default(),
             hover_doc: None,
@@ -695,6 +698,7 @@ impl PhotocraftApp {
     /// Keep one view per document, in tab order: a view and its windows stay with their document
     /// when tabs move (`document.move`) or close.
     pub fn sync_views(&mut self) {
+        type_transform::cancel_stale(self);
         crate::lasso_ui::cancel_stale(self);
         let ids: Vec<DocId> = self.session.documents().iter().map(|d| d.doc.id).collect();
         // Where the document of view `i` is now. Views not tracked yet keep their index.

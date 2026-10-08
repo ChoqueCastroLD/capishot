@@ -626,6 +626,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "toolOptions": app.ui.tool_options,
         "magnetic": app.ui.magnetic,
         "textEdit": app.ui.text_edit,
+        "typeTransform": app.ui.type_transform,
         "layerMenu": app.ui.layer_menu,
         "canvasToolMenu": app.ui.canvas_tool_menu.as_ref().map(|menu| {
             json!({
