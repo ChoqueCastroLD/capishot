@@ -725,6 +725,40 @@ fn distort_allows(mode: TransformMode, h: Hit) -> bool {
     mode != TransformMode::Distort || !matches!(h, Hit::Outside | Hit::Edge(_))
 }
 
+/// The turn at each corner of a quad (cross products of consecutive edges): all the same sign
+/// for a convex quad, mixed for a concave or self-intersecting one.
+fn turns(q: &[[f64; 2]; 4]) -> [f64; 4] {
+    std::array::from_fn(|k| {
+        let (a, b, c) = (q[k], q[(k + 1) % 4], q[(k + 2) % 4]);
+        (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+    })
+}
+
+/// Is `q` convex with the orientation `sign`, every corner turning by more than a sliver?
+fn convex(q: &[[f64; 2]; 4], sign: f64, min_turn: f64) -> bool {
+    turns(q).iter().all(|t| t * sign > min_turn)
+}
+
+/// Distort and Perspective stop a corner where the box would turn concave or fold over itself,
+/// as Photoshop does (#1323): the result moves from `from` towards `to` as far as the quad stays
+/// convex. A box that is not convex to begin with is left free.
+fn keep_convex(from: [[f64; 2]; 4], to: [[f64; 2]; 4]) -> [[f64; 2]; 4] {
+    let t0 = turns(&from);
+    let sign = t0[0].signum();
+    // A sliver: a thousandth of the starting box's smallest turn, so the stop is short of flat.
+    let min_turn = t0.iter().map(|t| t.abs()).fold(f64::INFINITY, f64::min) * 1e-3;
+    if !(min_turn.is_finite() && min_turn > 0.0) || !convex(&from, sign, 0.0) || convex(&to, sign, min_turn) {
+        return to;
+    }
+    let lerp = |t: f64| -> [[f64; 2]; 4] { std::array::from_fn(|k| [from[k][0] + (to[k][0] - from[k][0]) * t, from[k][1] + (to[k][1] - from[k][1]) * t]) };
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    for _ in 0..40 {
+        let mid = (lo + hi) / 2.0;
+        if convex(&lerp(mid), sign, min_turn) { lo = mid } else { hi = mid }
+    }
+    lerp(lo)
+}
+
 fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods: egui::Modifiers) {
     let (dx, dy) = (p[0] - g.start[0], p[1] - g.start[1]);
     match g.hit {
@@ -776,13 +810,16 @@ fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods: egui::Mod
                 _ => 1,
             };
             let (mx, my) = if horizontal { (dx, 0.0) } else { (0.0, dy) };
-            s.quad[i] = [g.quad0[i][0] + mx, g.quad0[i][1] + my];
-            s.quad[j] = [g.quad0[j][0] - mx, g.quad0[j][1] - my];
+            let mut q = g.quad0;
+            q[i] = [g.quad0[i][0] + mx, g.quad0[i][1] + my];
+            q[j] = [g.quad0[j][0] - mx, g.quad0[j][1] - my];
+            s.quad = keep_convex(g.quad0, q);
         }
         Hit::Corner(i) if mods.command => {
-            // Distort: move the corner freely.
-            s.quad = g.quad0;
-            s.quad[i] = [g.quad0[i][0] + dx, g.quad0[i][1] + dy];
+            // Distort: move the corner freely, up to where the box would fold over (#1323).
+            let mut q = g.quad0;
+            q[i] = [g.quad0[i][0] + dx, g.quad0[i][1] + dy];
+            s.quad = keep_convex(g.quad0, q);
         }
         Hit::Edge(i) if mods.command => {
             // Skew: the edge's two corners move together (⇧: only along the edge).
@@ -1904,6 +1941,37 @@ mod tests {
         // Free Transform from the menu switches the live box back.
         crate::menus::invoke(&mut app, &ctx, "edit.freeTransform", json!({})).unwrap();
         assert_eq!(app.ui.transform.as_ref().unwrap().mode, TransformMode::Free);
+    }
+
+    #[test]
+    fn a_distort_corner_stops_before_the_box_folds_over() {
+        // #1323: dragging a corner across the opposite diagonal stops short of it, so the box
+        // stays convex instead of folding into a bow tie.
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        app.ui.extras.snap = false;
+        let ctx = egui::Context::default();
+        crate::menus::invoke(&mut app, &ctx, "edit.transform.distort", json!({})).unwrap();
+        let q0 = app.ui.transform.as_ref().unwrap().quad;
+        // Top-left far past the bottom-right corner.
+        press_drag(&mut app, q0[0], [60.0, 60.0], egui::Modifiers::NONE);
+        let q = app.ui.transform.as_ref().unwrap().quad;
+        let sign = turns(&q0)[0].signum();
+        assert!(turns(&q).iter().all(|t| t * sign > 0.0), "still convex: {q:?}");
+        assert_eq!([q[1], q[2], q[3]], [q0[1], q0[2], q0[3]], "the other corners stay put");
+        // It went as far as it could along the drag: up to the TR–BL diagonal (x + y = 32).
+        assert!(q[0][0] > 15.0 && q[0][0] < 16.0 && (q[0][0] - q[0][1]).abs() < 1e-6, "{q:?}");
+        // A drag that keeps the box convex is not held back.
+        press_drag(&mut app, q[0], [2.0, 4.0], egui::Modifiers::NONE);
+        assert_eq!(app.ui.transform.as_ref().unwrap().quad[0], [2.0, 4.0]);
+    }
+
+    #[test]
+    fn keep_convex_leaves_a_degenerate_start_alone() {
+        let flat = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]];
+        let to = [[5.0, 5.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]];
+        assert_eq!(keep_convex(flat, to), to);
+        let nan = [[f64::NAN, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let _ = keep_convex(nan, to);
     }
 
     #[test]
