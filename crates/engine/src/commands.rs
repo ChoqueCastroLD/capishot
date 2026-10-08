@@ -719,45 +719,15 @@ fn build() -> Vec<CommandSpec> {
             })?;
             Ok(Value::Null)
         }),
-        cmd!("layer.moveTo", "Reorder Layer", [], None, r##"{"layer":id?,"target":id,"position":"above|below|into"="above"}"##, has_layer, |s, p| {
-            let id = layer_param(s, p)?;
-            let target = LayerId(p.get("target").and_then(Value::as_u64).ok_or_else(|| bad("layer.moveTo", "missing `target`"))?);
-            let pos = p.get("position").and_then(Value::as_str).unwrap_or("above").to_string();
-            if id == target {
-                return Ok(Value::Null);
-            }
-            s.edit("Reorder Layers", |doc, active| {
-                // Refuse to move a group into itself or its descendants.
-                if doc.layer(id).is_some_and(|l| contains_layer(l, target)) {
-                    return Err(EngineError::Other("can't move a group into itself".into()));
-                }
-                let layer = doc.remove(id).ok_or(EngineError::NoLayer(id))?;
-                let path = doc.path_of(target).ok_or(EngineError::NoLayer(target))?;
-                match pos.as_str() {
-                    "into" => {
-                        let g = doc.layer_at_mut(&path).and_then(|t| t.children_mut()).ok_or_else(|| EngineError::Other("target is not a group".into()))?;
-                        g.push(layer);
-                    }
-                    other => {
-                        let (&last, parent) = path.split_last().ok_or(EngineError::NoLayer(target))?;
-                        let sib = if parent.is_empty() {
-                            &mut doc.layers
-                        } else {
-                            doc.layer_at_mut(parent)
-                                .and_then(|t| t.children_mut())
-                                .ok_or_else(|| EngineError::Other("target's parent is not a group".into()))?
-                        };
-                        let at = if other == "below" { last } else { last + 1 };
-                        sib.insert(at.min(sib.len()), layer);
-                    }
-                }
-                // Moving a group into (or beside) a deeply nested layer can pass the nesting cap.
-                crate::layer_multi_cmds::check_group_depth(doc, "Reorder Layer")?;
-                *active = Some(id);
-                Ok(())
-            })?;
-            Ok(Value::Null)
-        }),
+        cmd!(
+            "layer.moveTo",
+            "Reorder Layer",
+            [],
+            None,
+            r##"{"layer":id?| "layers":[id,…]?, "target":id,"position":"above|below|into"="above"} (layers: one undoable move, document order preserved)"##,
+            has_layer,
+            crate::layer_multi_cmds::move_to
+        ),
         cmd!(
             "layer.translate",
             "Move Layer",
