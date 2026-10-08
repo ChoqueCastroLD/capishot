@@ -155,7 +155,7 @@ pub struct DocState {
     /// Anchor of ⇧-click range selection (the last plainly or ⌘-clicked layer).
     pub layer_anchor: Option<LayerId>,
     pub path: Option<String>,
-    /// An Affinity preview must not acquire the native source as its Save path.
+    /// An Affinity document (or its preview) must not acquire the native source as its Save path.
     pub source_read_only: bool,
     /// Increments on every change; UIs re-render when it moves.
     pub revision: u64,

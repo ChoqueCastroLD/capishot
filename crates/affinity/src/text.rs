@@ -54,11 +54,7 @@ pub(crate) fn read(r: &mut Reader, id: ObjId, world: Affine) -> Option<Text> {
             }
         }
         if align.is_none() {
-            align = s
-                .obj(block, b"PAtt")
-                .and_then(|p| s.objs(p, b"Runs").first().copied())
-                .and_then(|run| s.obj(run, b"Item"))
-                .map(|p| paragraph_align(r, p));
+            align = s.obj(block, b"PAtt").and_then(|p| s.objs(p, b"Runs").first().copied()).and_then(|run| s.obj(run, b"Item")).map(|p| paragraph_align(r, p));
         }
     }
     if placeholders {

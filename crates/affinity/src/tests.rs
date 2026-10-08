@@ -201,10 +201,7 @@ mod archive {
             (tag(b"Same"), F::Ref(7)),
             (tag(b"Null"), F::Null),
             (tag(b"Kids"), F::Shared(vec![F::Def(8, vec![tag(b"Grup"), tag(b"Node")], vec![(tag(b"Desc"), F::Str("g".into()))]), F::Ref(8)])),
-            (
-                tag(b"Crvs"),
-                F::Obj(tag(b"PCvD"), vec![(tag(b"Data"), F::Pos(vec![F::U8(0), F::U32(1), F::Bool(true), F::Records(18, vec![vec![0; 18]; 4])]))]),
-            ),
+            (tag(b"Crvs"), F::Obj(tag(b"PCvD"), vec![(tag(b"Data"), F::Pos(vec![F::U8(0), F::U32(1), F::Bool(true), F::Records(18, vec![vec![0; 18]; 4])]))])),
             (tag(b"Enum"), F::Enum(2, 1)),
             (tag(b"Tile"), F::Entry("d/3".into())),
             (tag(b"Stat"), F::U8s(vec![4, 0, 2])),

@@ -151,7 +151,13 @@ pub const AFFINITY: PinnedCorpus = PinnedCorpus {
     name: "affinity",
     dest: "affinity",
     upstreams: &[
-        Upstream { prefix: "vector-art/", repo: "samuel-etver/vector-art", commit: VECTOR_ART_COMMIT, subdir: "simple", extras: &[("LICENSE", "vector-art/LICENSE")] },
+        Upstream {
+            prefix: "vector-art/",
+            repo: "samuel-etver/vector-art",
+            commit: VECTOR_ART_COMMIT,
+            subdir: "simple",
+            extras: &[("LICENSE", "vector-art/LICENSE")],
+        },
         Upstream {
             prefix: "afdesignload/",
             repo: "NickBeeuwsaert/AFDesignLoad",

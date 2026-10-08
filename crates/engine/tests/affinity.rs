@@ -98,11 +98,36 @@ fn native() -> Vec<u8> {
         3,
         vec![tag(b"PCrv")],
         vec![
-            (tag(b"Crvs"), F::Obj(tag(b"PCvD"), vec![(tag(b"Data"), F::Pos(vec![F::U8(0), F::U32(1), F::Bool(true), F::Records(18, vec![node(5.0, 5.0), node(15.0, 5.0), node(15.0, 15.0), node(5.0, 15.0), node(5.0, 5.0)])]))])),
-            (tag(b"BFFl"), F::Shared(vec![F::Def(4, vec![tag(b"FDsc")], vec![(tag(b"FDeF"), F::Def(5, vec![tag(b"FilS")], vec![(tag(b"Colr"), F::Def(6, vec![tag(b"RGBA")], vec![(tag(b"_col"), red)]))]))])])),
+            (
+                tag(b"Crvs"),
+                F::Obj(
+                    tag(b"PCvD"),
+                    vec![(
+                        tag(b"Data"),
+                        F::Pos(vec![
+                            F::U8(0),
+                            F::U32(1),
+                            F::Bool(true),
+                            F::Records(18, vec![node(5.0, 5.0), node(15.0, 5.0), node(15.0, 15.0), node(5.0, 15.0), node(5.0, 5.0)]),
+                        ]),
+                    )],
+                ),
+            ),
+            (
+                tag(b"BFFl"),
+                F::Shared(vec![F::Def(
+                    4,
+                    vec![tag(b"FDsc")],
+                    vec![(tag(b"FDeF"), F::Def(5, vec![tag(b"FilS")], vec![(tag(b"Colr"), F::Def(6, vec![tag(b"RGBA")], vec![(tag(b"_col"), red)]))]))],
+                )]),
+            ),
         ],
     );
-    let spread = F::Def(2, vec![tag(b"Sprd")], vec![(tag(b"SprB"), F::F64s(vec![0.0, 0.0, 40.0, 20.0])), (tag(b"SprT"), F::Bool(true)), (tag(b"Chld"), F::Shared(vec![square]))]);
+    let spread = F::Def(
+        2,
+        vec![tag(b"Sprd")],
+        vec![(tag(b"SprB"), F::F64s(vec![0.0, 0.0, 40.0, 20.0])), (tag(b"SprT"), F::Bool(true)), (tag(b"Chld"), F::Shared(vec![square]))],
+    );
     let doc = synth::stream(&[(tag(b"DocR"), F::Def(1, vec![tag(b"DocN")], vec![(tag(b"Chld"), F::Shared(vec![spread]))]))]);
     synth::container(&[("doc.dat", &doc, Method::Zstd)], None)
 }

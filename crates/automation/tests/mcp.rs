@@ -342,7 +342,7 @@ async fn affinity_preview_warns_and_requires_a_new_save_path() {
     let client = connect(headless_in(&dir)).await;
     for name in ["source.af", "renamed.psd"] {
         let opened = json_of(&call(&client, "doc_open", json!({"path": name})).await);
-        assert!(opened["warnings"].to_string().contains("Native layers"));
+        assert!(opened["warnings"].to_string().contains("only its embedded 16×8 PNG preview"));
         assert_eq!(opened["width"], 16);
         let refused = call(&client, "doc_save", json!({})).await;
         assert_eq!(refused.is_error, Some(true), "{}", text(&refused));

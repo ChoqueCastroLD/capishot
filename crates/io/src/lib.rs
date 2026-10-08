@@ -15,8 +15,9 @@
 //!   layer; unsupported raw variants fall back to the embedded JPEG preview.
 //! * Layered TIFFs (Photoshop layer data in tags 37724 and 34377) open with their
 //!   layers through the PSD path and are written back the same way; see `tiff_layers`.
-//! * Some Affinity version-12 containers open as their indexed PNG preview, with
-//!   an explicit fidelity warning and no source save path; see `affinity`.
+//! * Affinity documents (`.af`, `.afdesign`, `.afphoto`, `.afpub`) open natively
+//!   with no source save path, what isn't imported listed in the warnings; a file
+//!   whose native data can't be read opens as its embedded preview; see `affinity`.
 //! * Every other format goes through `photocraft-codecs` as a single
 //!   "Background" layer (depth and Gray/RGB/CMYK model preserved).
 //!

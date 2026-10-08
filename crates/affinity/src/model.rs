@@ -77,11 +77,7 @@ impl Path {
             subpaths: self
                 .subpaths
                 .iter()
-                .map(|s| SubPath {
-                    start: m.apply(s.start),
-                    segments: s.segments.iter().map(|seg| seg.map(|p| m.apply(p))).collect(),
-                    closed: s.closed,
-                })
+                .map(|s| SubPath { start: m.apply(s.start), segments: s.segments.iter().map(|seg| seg.map(|p| m.apply(p))).collect(), closed: s.closed })
                 .collect(),
         }
     }
@@ -332,8 +328,7 @@ impl<'s, 'a, 'b> Reader<'s, 'a, 'b> {
                 continue;
             }
             let pages = pages(s, spread);
-            let default_size =
-                s.floats::<2>(doc, b"DfSz").filter(|[w, h]| *w > 0.0 && *h > 0.0).map(|[w, h]| Rect { x0: 0.0, y0: 0.0, x1: w, y1: h });
+            let default_size = s.floats::<2>(doc, b"DfSz").filter(|[w, h]| *w > 0.0 && *h > 0.0).map(|[w, h]| Rect { x0: 0.0, y0: 0.0, x1: w, y1: h });
             let bounds = s.floats::<4>(spread, b"SprB").map(rect).or_else(|| pages.iter().copied().reduce(union)).or(default_size).unwrap_or(Rect {
                 x0: 0.0,
                 y0: 0.0,
@@ -524,8 +519,7 @@ impl<'s, 'a, 'b> Reader<'s, 'a, 'b> {
     fn artboard(&mut self, id: ObjId, world: Affine) -> Kind {
         let s = self.s;
         let b = s.floats::<4>(id, b"ShpB").map(rect).unwrap_or(Rect { x0: 0.0, y0: 0.0, x1: 0.0, y1: 0.0 });
-        let corners =
-            [Point { x: b.x0, y: b.y0 }, Point { x: b.x1, y: b.y0 }, Point { x: b.x1, y: b.y1 }, Point { x: b.x0, y: b.y1 }].map(|p| world.apply(p));
+        let corners = [Point { x: b.x0, y: b.y0 }, Point { x: b.x1, y: b.y0 }, Point { x: b.x1, y: b.y1 }, Point { x: b.x0, y: b.y1 }].map(|p| world.apply(p));
         let [a, b2, c, d, ..] = world.0;
         if b2.abs() > 1e-9 || c.abs() > 1e-9 || a <= 0.0 || d <= 0.0 {
             self.warn("a rotated or flipped artboard (imported at its bounding box)");
@@ -547,8 +541,7 @@ impl<'s, 'a, 'b> Reader<'s, 'a, 'b> {
 /// equal pages (Publisher 1 facing spreads).
 fn pages(s: &Stream, spread: ObjId) -> Vec<Rect> {
     if let Some(md) = s.obj(spread, b"SpMd") {
-        let v: Vec<Rect> =
-            s.objs(md, b"PagR").into_iter().filter_map(|p| s.floats::<4>(p, b"rctp").map(rect)).filter(|r| r.x1 > r.x0 && r.y1 > r.y0).collect();
+        let v: Vec<Rect> = s.objs(md, b"PagR").into_iter().filter_map(|p| s.floats::<4>(p, b"rctp").map(rect)).filter(|r| r.x1 > r.x0 && r.y1 > r.y0).collect();
         if !v.is_empty() {
             return v;
         }
