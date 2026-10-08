@@ -1520,6 +1520,9 @@ mod move_auto_select_tests;
 mod hidden_layer_tests;
 
 #[cfg(test)]
+mod blend_dropdown_keys_tests;
+
+#[cfg(test)]
 mod marquee_tests;
 
 #[cfg(test)]
