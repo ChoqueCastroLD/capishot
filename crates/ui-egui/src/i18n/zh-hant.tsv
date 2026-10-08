@@ -2089,6 +2089,7 @@ cameraRaw	Blending	混合
 	Frequency	頻率
 	Use tablet pressure to change pen width	使用繪圖板壓力以變更鋼筆寬度
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	關於
 	Contributors	貢獻者
@@ -2136,3 +2137,9 @@ cameraRaw	Blending	混合
 	Domed	圓頂
 	Domed (Inverted)	圓頂（反轉）
 	Diagonal (Descending)	對角線（下降）
+
+	Red Eye Tool	紅眼工具
+	Red Eye	紅眼
+	Pupil Size	瞳孔大小
+	Darken Amount	變暗程度
+	Click a red pupil to neutralize it	按一下紅色瞳孔以消除反光

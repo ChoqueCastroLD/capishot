@@ -2112,6 +2112,7 @@ cameraRaw	Color	Barvy
 	Frequency	Frekvence
 	Use tablet pressure to change pen width	Měnit šířku pera přítlakem tabletu
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	O aplikaci
 	Contributors	Přispěvatelé
@@ -2159,3 +2160,9 @@ cameraRaw	Color	Barvy
 	Domed	Kopule
 	Domed (Inverted)	Kopule (obrácená)
 	Diagonal (Descending)	Diagonála (sestupná)
+
+	Red Eye Tool	Nástroj červené oči
+	Red Eye	Červené oči
+	Pupil Size	Velikost zornice
+	Darken Amount	Míra ztmavení
+	Click a red pupil to neutralize it	Klepněte na červenou zornici

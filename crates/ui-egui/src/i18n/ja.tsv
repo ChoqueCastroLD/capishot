@@ -2095,6 +2095,7 @@ cameraRaw	Color	カラー
 	Frequency	頻度
 	Use tablet pressure to change pen width	タブレットの筆圧を使用してペンの幅を変更
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	バージョン情報
 	Contributors	コントリビューター
@@ -2142,3 +2143,9 @@ cameraRaw	Color	カラー
 	Domed	ドーム
 	Domed (Inverted)	ドーム (反転)
 	Diagonal (Descending)	斜め (下降)
+
+	Red Eye Tool	赤目ツール
+	Red Eye	赤目
+	Pupil Size	瞳のサイズ
+	Darken Amount	暗くする量
+	Click a red pupil to neutralize it	赤い瞳をクリックして補正します

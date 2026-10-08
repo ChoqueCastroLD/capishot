@@ -2697,6 +2697,7 @@ cameraRaw	Color	색상
 	Frequency	빈도
 	Use tablet pressure to change pen width	태블릿 압력을 사용하여 펜 폭 변경
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	정보
 	Contributors	기여자
@@ -2744,3 +2745,9 @@ cameraRaw	Color	색상
 	Domed	돔
 	Domed (Inverted)	돔(반전)
 	Diagonal (Descending)	대각선(내림)
+
+	Red Eye Tool	적목 현상 도구
+	Red Eye	적목 현상
+	Pupil Size	동공 크기
+	Darken Amount	어둡게 하기 정도
+	Click a red pupil to neutralize it	빨간 동공을 클릭하여 보정합니다

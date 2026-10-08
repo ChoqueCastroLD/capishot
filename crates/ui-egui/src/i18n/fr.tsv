@@ -2544,6 +2544,7 @@ cameraRaw	Blending	Fusion
 	Frequency	Fréquence
 	Use tablet pressure to change pen width	Utiliser la pression de la tablette pour modifier la largeur de la plume
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	À propos
 	Contributors	Contributeurs
@@ -2589,3 +2590,8 @@ cameraRaw	Blending	Fusion
 	Domed	Bombé
 	Domed (Inverted)	Bombé (inversé)
 	Diagonal (Descending)	Diagonale (descendante)
+
+	Red Eye Tool	Outil Yeux rouges
+	Pupil Size	Taille de la pupille
+	Darken Amount	Quantité d'assombrissement
+	Click a red pupil to neutralize it	Cliquez sur une pupille rouge pour la corriger

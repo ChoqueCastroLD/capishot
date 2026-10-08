@@ -2390,6 +2390,7 @@ cameraRaw	Roughness	Неровность
 	Frequency	Частота
 	Use tablet pressure to change pen width	Использовать нажим планшета для изменения ширины пера
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	О программе
 	Contributors	Участники
@@ -2436,3 +2437,8 @@ cameraRaw	Roughness	Неровность
 	Domed (Inverted)	Купол (инвертированный)
 	Diagonal (Descending)	Диагональ (нисходящая)
 	Linear	Линейный
+
+	Red Eye Tool	Инструмент «Красные глаза»
+	Pupil Size	Размер зрачка
+	Darken Amount	Степень затемнения
+	Click a red pupil to neutralize it	Щёлкните по красному зрачку, чтобы убрать блик

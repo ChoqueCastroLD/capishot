@@ -2551,6 +2551,7 @@ cameraRaw	Whites	Brancos
 	Magnetic Lasso Tool	Ferramenta Laço magnético
 	Frequency	Frequência
 	Use tablet pressure to change pen width	Usar a pressão da mesa digitalizadora para alterar a largura da caneta
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	Sobre
 	Contributors	Colaboradores
@@ -2596,3 +2597,8 @@ cameraRaw	Whites	Brancos
 	Domed	Abaulado
 	Domed (Inverted)	Abaulado (invertido)
 	Diagonal (Descending)	Diagonal (descendente)
+
+	Red Eye Tool	Ferramenta Olhos vermelhos
+	Pupil Size	Tamanho da pupila
+	Darken Amount	Quantidade de escurecimento
+	Click a red pupil to neutralize it	Clique em uma pupila vermelha para corrigi-la

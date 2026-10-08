@@ -90,6 +90,7 @@ pub enum Tool {
     Healing,
     Patch,
     ContentAwareMove,
+    RedEye,
     CloneStamp,
     HistoryBrush,
     Blur,
@@ -114,7 +115,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 49] = [
+    pub const ALL: [Tool; 50] = [
         Tool::Move,
         Tool::RectMarquee,
         Tool::EllipseMarquee,
@@ -143,6 +144,7 @@ impl Tool {
         Tool::Healing,
         Tool::Patch,
         Tool::ContentAwareMove,
+        Tool::RedEye,
         Tool::CloneStamp,
         Tool::HistoryBrush,
         Tool::Blur,
@@ -198,6 +200,7 @@ impl Tool {
             Tool::Healing => "Healing Brush Tool",
             Tool::Patch => "Patch Tool",
             Tool::ContentAwareMove => "Content-Aware Move Tool",
+            Tool::RedEye => "Red Eye Tool",
             Tool::CloneStamp => "Clone Stamp Tool",
             Tool::HistoryBrush => "History Brush Tool",
             Tool::Blur => "Blur Tool",
@@ -259,7 +262,7 @@ impl Tool {
             Tool::Type | Tool::VerticalType => 'T',
             Tool::Hand => 'H',
             Tool::Zoom => 'Z',
-            Tool::SpotHealing | Tool::Healing | Tool::Patch | Tool::ContentAwareMove => 'J',
+            Tool::SpotHealing | Tool::Healing | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye => 'J',
             Tool::CloneStamp => 'S',
             Tool::HistoryBrush => 'Y',
             Tool::Blur | Tool::Sharpen | Tool::Smudge => '\0',
@@ -494,6 +497,11 @@ pub struct ToolOptions {
     pub magnetic_contrast: f32,
     pub magnetic_frequency: f32,
     pub magnetic_pressure: bool,
+    /// Red Eye: pupil search size (1–100) and how far corrected pixels darken (0–100).
+    #[serde(default = "fifty")]
+    pub red_eye_pupil_size: f32,
+    #[serde(default = "fifty")]
+    pub red_eye_darken: f32,
 }
 
 fn yes() -> bool {
@@ -510,6 +518,10 @@ fn default_marquee_style() -> String {
 
 fn one() -> f32 {
     1.0
+}
+
+fn fifty() -> f32 {
+    50.0
 }
 
 impl Default for ToolOptions {
@@ -573,6 +585,8 @@ impl Default for ToolOptions {
             magnetic_contrast: 10.0,
             magnetic_frequency: 57.0,
             magnetic_pressure: false,
+            red_eye_pupil_size: 50.0,
+            red_eye_darken: 50.0,
         }
     }
 }
@@ -972,6 +986,11 @@ mod tests {
         assert_eq!(Tool::from_name("Eraser Tool"), Some(Tool::Eraser));
         assert_eq!(Tool::from_name("mixerBrush"), Some(Tool::MixerBrush));
         assert_eq!(Tool::from_name("Mixer Brush Tool"), Some(Tool::MixerBrush));
+        assert_eq!(Tool::from_name("redEye"), Some(Tool::RedEye));
+        assert_eq!(Tool::from_name("Red Eye Tool"), Some(Tool::RedEye));
+        assert_eq!(Tool::RedEye.key(), 'J');
+        assert!(!Tool::RedEye.is_brushlike());
+        assert_eq!(Tool::ALL.len(), 50);
         assert_eq!(Tool::from_name("nope"), None);
     }
 

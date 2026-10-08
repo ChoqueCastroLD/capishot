@@ -2184,6 +2184,7 @@ cameraRaw	Amount	Cantidad
 	Frequency	Frecuencia
 	Use tablet pressure to change pen width	Usar la presión de la tableta para cambiar la anchura del lápiz
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	Acerca de
 	Contributors	Colaboradores
@@ -2229,3 +2230,9 @@ cameraRaw	Amount	Cantidad
 	Domed	Abovedado
 	Domed (Inverted)	Abovedado (invertido)
 	Diagonal (Descending)	Diagonal (descendente)
+
+	Red Eye Tool	Herramienta Ojos rojos
+	Red Eye	Ojos rojos
+	Pupil Size	Tamaño de pupila
+	Darken Amount	Cantidad de oscurecimiento
+	Click a red pupil to neutralize it	Haga clic en una pupila roja para corregirla

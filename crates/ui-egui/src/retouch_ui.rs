@@ -216,7 +216,7 @@ fn pct(ui: &mut egui::Ui, label: &str, v: &mut f32) {
 
 /// Options bar for the retouching and smart-selection tools. Returns false for other tools.
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bool {
-    if !tool.is_brushlike() && !matches!(tool, Tool::QuickSelection | Tool::ObjectSelection | Tool::Patch | Tool::ContentAwareMove)
+    if !tool.is_brushlike() && !matches!(tool, Tool::QuickSelection | Tool::ObjectSelection | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye)
         || matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser)
     {
         return false;
@@ -311,6 +311,14 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
             if crate::widgets::secondary_button(ui, tl!("Select Subject"), 0.0).clicked() {
                 let _ = app.run("select.subject", json!({}));
             }
+        }
+        Tool::RedEye => {
+            opt(ui, tl!("Pupil Size"));
+            crate::widgets::value_field(ui, &mut o.red_eye_pupil_size, 1.0..=100.0, "", 50.0);
+            opt(ui, tl!("Darken Amount"));
+            crate::widgets::value_field(ui, &mut o.red_eye_darken, 0.0..=100.0, "", 50.0);
+            crate::widgets::vline(ui, 22.0);
+            opt(ui, tl!("Click a red pupil to neutralize it"));
         }
         _ => {}
     }
@@ -524,5 +532,57 @@ mod tests {
             let sel = app.session.active().unwrap().doc.selection.as_ref().unwrap();
             assert!(sel.sample_channel(72, 30, 0) > 0.0 && sel.sample_channel(22, 30, 0) == 0.0, "{mode}: the selection follows");
         }
+    }
+
+    #[test]
+    fn red_eye_click_corrects_a_pupil_and_errors_on_a_miss() {
+        let mut app = app();
+        app.run("paint.pencil", json!({"points": [[50, 30]], "size": 18, "hardness": 100, "color": "#f21818"})).unwrap();
+        let before = active(&app).surface().unwrap().rgba(50, 30);
+        assert!(before[0] > before[1] + 0.4, "{before:?}");
+        app.ui.tool = Tool::RedEye;
+        // Pupil Size 15 → search radius 22 px, so a click at (8,8) cannot reach the blob at (50,30).
+        app.ui.tool_options.red_eye_pupil_size = 15.0;
+        tool_event(&mut app, ToolEvent::Down { x: 50.0, y: 30.0, pressure: 1.0 }, egui::Modifiers::NONE);
+        tool_event(&mut app, ToolEvent::Up { x: 50.0, y: 30.0 }, egui::Modifiers::NONE);
+        assert!(!app.ui.status_error, "{}", app.ui.status);
+        assert_eq!(app.session.journal.last().map(|(id, _)| id.as_str()), Some("paint.redEye"));
+        let after = active(&app).surface().unwrap().rgba(50, 30);
+        assert!(after[0] < before[0] - 0.15, "before {before:?} after {after:?}");
+        tool_event(&mut app, ToolEvent::Down { x: 8.0, y: 8.0, pressure: 1.0 }, egui::Modifiers::NONE);
+        tool_event(&mut app, ToolEvent::Up { x: 8.0, y: 8.0 }, egui::Modifiers::NONE);
+        assert!(app.ui.status_error);
+        assert!(app.ui.status.contains("no red-eye pixels"), "{}", app.ui.status);
+    }
+
+    #[test]
+    fn red_eye_options_bar_shows_pupil_size_and_darken() {
+        use crate::theme::ThemeKind;
+        use egui::vec2;
+        use egui_kittest::kittest::Queryable;
+        let mut app = app();
+        app.ui.tool = Tool::RedEye;
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1400.0, 60.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                crate::panels::options_bar(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, ThemeKind::Studio);
+        h.run_steps(4);
+        h.get_by_label("Pupil Size");
+        h.get_by_label("Darken Amount");
+        assert_eq!(h.state().ui.tool_options.red_eye_pupil_size, 50.0);
+        assert_eq!(h.state().ui.tool_options.red_eye_darken, 50.0);
+    }
+
+    #[test]
+    fn red_eye_is_in_the_j_flyout() {
+        let j = [Tool::SpotHealing, Tool::Healing, Tool::Patch, Tool::ContentAwareMove, Tool::RedEye];
+        assert!(j.contains(&Tool::RedEye));
+        assert!(j.iter().all(|t| t.key() == 'J'));
     }
 }

@@ -2389,6 +2389,18 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 }
                 Tool::Type | Tool::VerticalType => egui::CursorIcon::Text,
                 Tool::MagneticLasso => crate::magnetic_lasso_ui::cursor(app, &painter, p, view.zoom),
+                Tool::RedEye => {
+                    let pupil = app.ui.tool_options.red_eye_pupil_size.clamp(1.0, 100.0);
+                    let r_doc = photocraft_algo::redeye::search_radius(pupil);
+                    let r = (r_doc * view.zoom).max(2.0);
+                    painter.circle_stroke(p, r + 0.5, Stroke::new(1.0, Color32::from_black_alpha(140)));
+                    painter.circle_stroke(p, r, Stroke::new(1.0, Color32::from_white_alpha(220)));
+                    for (w, c) in [(2.5, Color32::from_black_alpha(140)), (1.0, Color32::from_white_alpha(220))] {
+                        painter.line_segment([p - vec2(3.0, 0.0), p + vec2(3.0, 0.0)], Stroke::new(w, c));
+                        painter.line_segment([p - vec2(0.0, 3.0), p + vec2(0.0, 3.0)], Stroke::new(w, c));
+                    }
+                    egui::CursorIcon::None
+                }
                 _ => egui::CursorIcon::Crosshair,
             };
             let icon = visible_crosshair(icon, &painter, p, cfg!(target_os = "windows"));
@@ -2956,6 +2968,20 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                     let o = app.ui.tool_options.clone();
                     let contents = if o.bucket_fill_pattern { "pattern" } else { "foreground" };
                     let _ = app.run("paint.bucket", json!({"x": x.floor(), "y": y.floor(), "tolerance": o.tolerance, "contiguous": o.contiguous, "antiAlias": o.anti_alias, "opacity": o.fill_opacity, "contents": contents, "target": paint_target(app)}));
+                    return;
+                }
+                Tool::RedEye => {
+                    let o = app.ui.tool_options.clone();
+                    let _ = app.run(
+                        "paint.redEye",
+                        json!({
+                            "x": x.floor(),
+                            "y": y.floor(),
+                            "pupilSize": o.red_eye_pupil_size.clamp(1.0, 100.0),
+                            "darken": o.red_eye_darken.clamp(0.0, 100.0),
+                            "target": paint_target(app),
+                        }),
+                    );
                     return;
                 }
                 Tool::PolygonLasso => {

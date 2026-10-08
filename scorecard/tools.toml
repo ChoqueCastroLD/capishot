@@ -214,3 +214,10 @@ target = "Liquify: redo (Cmd+Shift+Z)"
 status = "done"
 issue = 214
 note = "liquify_ui.rs supports bounded redo through Cmd+Shift+Z and the control channel; new strokes clear redo"
+
+[[item]]
+id = "TOOL-213-17"
+target = "Red Eye tool: click a pupil to neutralize the red reflection"
+status = "done"
+issue = 213
+note = "paint.redEye (redeye_cmds.rs) + Tool::RedEye in the J flyout; Pupil Size and Darken Amount; catchlights kept; a miss is an error"

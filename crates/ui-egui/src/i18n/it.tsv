@@ -2185,6 +2185,7 @@ cameraRaw	Amount	Quantità
 	Frequency	Frequenza
 	Use tablet pressure to change pen width	Usa pressione tavoletta per cambiare la larghezza della penna
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	Informazioni
 	Contributors	Collaboratori
@@ -2216,6 +2217,7 @@ cameraRaw	Amount	Quantità
 	% of all commits	% di tutti i commit
 	Lines +/−	Righe +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commit, +{added} / −{deleted} righe (Δ {delta}), +{binAdded} / −{binDeleted} risorse binarie, {first} – {last}
+
 	Convert to Layers	Converti in livelli
 	Apply At Canvas Bounds	Applica effetto ai limiti dell’area di lavoro
 
@@ -2231,3 +2233,8 @@ cameraRaw	Amount	Quantità
 	Domed	Bombato
 	Domed (Inverted)	Bombato (invertito)
 	Diagonal (Descending)	Diagonale (discendente)
+	Red Eye Tool	Strumento Occhi rossi
+	Red Eye	Occhi rossi
+	Pupil Size	Dimensione pupilla
+	Darken Amount	Quantità di scurimento
+	Click a red pupil to neutralize it	Fai clic su una pupilla rossa per correggerla

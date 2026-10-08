@@ -70,6 +70,7 @@ pub mod preset_store;
 pub mod presets;
 pub mod print_cmds;
 pub mod proof_sim;
+pub mod redeye_cmds;
 pub mod render_cmds;
 pub mod retouch_cmds;
 pub mod select_extra_cmds;

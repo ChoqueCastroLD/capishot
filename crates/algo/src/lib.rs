@@ -53,6 +53,7 @@ pub mod poisson;
 pub mod puppet;
 pub mod pyramid;
 pub mod quantize;
+pub mod redeye;
 mod relight;
 mod render;
 pub mod render2;
