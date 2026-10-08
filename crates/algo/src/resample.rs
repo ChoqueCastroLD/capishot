@@ -287,12 +287,7 @@ fn resize_with_budget(s: &Surface, sx: f64, sy: f64, filter: Resample, edge: Opt
 
 /// Moves a surface by whole pixels (default pixel kept).
 pub fn translate_surface(s: &Surface, dx: i32, dy: i32) -> Surface {
-    let mut out = Surface::with_default(s.format(), &s.default_pixel());
-    let r = s.content_bounds();
-    if !r.is_empty() {
-        out.write_interleaved(r.translate(dx, dy), &s.to_interleaved(r));
-    }
-    out
+    s.translated(dx, dy, s.content_bounds())
 }
 
 /// Keeps only the pixels inside `keep` (others become the default pixel).
