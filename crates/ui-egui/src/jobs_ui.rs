@@ -177,6 +177,7 @@ fn on_event(app: &mut PhotocraftApp, e: JobEvent) {
             app.ui.panels.brush_settings = true;
             app.ui.brush_tab = 1;
         }
+        JobOutcome::Done(v) if e.command == "lut.installPack" => crate::lut_library_ui::report(app, &v),
         JobOutcome::Done(_) => {
             app.sync_views();
             app.ui.status = e.label;

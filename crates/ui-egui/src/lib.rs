@@ -80,6 +80,7 @@ mod layer_transfer;
 pub mod layer_tree_ui;
 pub mod links;
 pub mod liquify_ui;
+pub mod lut_library_ui;
 pub mod magnetic_lasso_ui;
 pub mod mask_thumbs_ui;
 pub mod menu_catalog;
@@ -1083,6 +1084,7 @@ impl eframe::App for PhotocraftApp {
             self.automation_input = false;
             return;
         }
+        lut_library_ui::end_stale_preview(self, &ctx);
         let t0 = gpu_canvas::now_ms();
         // View › Screen Mode › Full Screen Mode: only the image, on black (F or Esc returns).
         let chrome = !self.ui.view.hides_chrome();

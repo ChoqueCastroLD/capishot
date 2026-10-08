@@ -138,6 +138,11 @@ impl PhotocraftApp {
         };
         for f in files {
             let name = dropped_name(&f);
+            // A folder or .zip of LUTs installs as a pack wherever it lands.
+            if crate::lut_library_ui::is_pack_drop(self, f.path()) {
+                crate::lut_library_ui::install_path(self, &f.path().to_string_lossy());
+                continue;
+            }
             if target == DropTarget::Canvas && !crate::preset_files_ui::is_preset_file(&name) {
                 self.drop_places.push_back(f);
                 continue;

@@ -91,9 +91,9 @@ pub fn lookup_from_params(p: &Value, base: Option<&Adjustment>) -> Result<Adjust
         loaded = Some((f, base_name(file_name)));
     }
     if let Some(path) = p.get("file").and_then(Value::as_str).filter(|s| !s.is_empty()) {
-        let bytes = read_file(path).ok_or_else(|| bad(CMD, format!("can't read {path}")))?;
-        let f = photocraft_cms::lutfile::parse(path, &bytes).map_err(|e| bad(CMD, format!("{path}: {}", e.0)))?;
-        loaded = Some((f, base_name(path)));
+        // Previews rebuild the adjustment every frame, so parsed files are cached (same errors).
+        let f = crate::lut_library::cache::load(path, read_file).map_err(|e| bad(CMD, e))?;
+        loaded = Some(((*f).clone(), base_name(path)));
     }
     if let Some((f, label)) = loaded {
         if !f.domain_is_default() {
