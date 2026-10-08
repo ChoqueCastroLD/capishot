@@ -134,6 +134,20 @@ impl TaggedBlock {
         TaggedBlock { signature: *b"8BIM", key, data, padding: None }
     }
 
+    /// `true` for `MIB8` / `46B8`: the signatures [`crate::tiff`] gives a block whose data was
+    /// kept verbatim from a little-endian TIFF because its layout is unknown. Such a block is
+    /// written back exactly into a little-endian TIFF, and cannot go into a big-endian file
+    /// (a PSD) without being dropped: see [`Self::is_foreign_order`].
+    pub fn is_foreign_order_signature(b: &[u8]) -> bool {
+        b.starts_with(b"MIB8") || b.starts_with(b"46B8")
+    }
+
+    /// Whether this block's data is in little-endian layout (see
+    /// [`Self::is_foreign_order_signature`]).
+    pub fn is_foreign_order(&self) -> bool {
+        Self::is_foreign_order_signature(&self.signature)
+    }
+
     /// Key as a string (lossy).
     pub fn key_str(&self) -> String {
         String::from_utf8_lossy(&self.key).into_owned()
@@ -384,8 +398,10 @@ fn parse_section(d: &[u8]) -> Result<SectionDivider> {
     Ok(SectionDivider { kind, blend_mode, sub_type })
 }
 
+/// `8BIM` / `8B64`, or the markers `MIB8` / `46B8` that [`crate::tiff`] gives a block kept
+/// verbatim from a little-endian TIFF when its layout is unknown (its data is in that order).
 fn is_sig(b: &[u8]) -> bool {
-    b.starts_with(b"8BIM") || b.starts_with(b"8B64")
+    b.starts_with(b"8BIM") || b.starts_with(b"8B64") || TaggedBlock::is_foreign_order_signature(b)
 }
 
 /// Reads tagged blocks until the reader is exhausted. Bytes that do not form

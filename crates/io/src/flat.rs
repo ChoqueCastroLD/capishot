@@ -314,13 +314,20 @@ pub fn export_flat(doc: &Document, format: Format, opts: &ExportOptions) -> Resu
             warnings.push(format!("colours converted to sRGB; {format:?} can't embed the document's colour profile"));
         }
     }
-    for w in codecs::fidelity_warnings_with(&img, format, &opts.encode) {
+    encode_image(&img, format, opts, warnings)
+}
+
+/// Encodes a flat codec image as `format`: the fidelity warnings, then the codec. The end of
+/// every flat export, and of a layered TIFF (whose composite is a flat image to other readers),
+/// so export-wide policies on the image's metadata apply to both.
+pub(crate) fn encode_image(img: &Image, format: Format, opts: &ExportOptions, mut warnings: Vec<String>) -> Result<ExportResult, IoError> {
+    for w in codecs::fidelity_warnings_with(img, format, &opts.encode) {
         if w.is_fatal() {
             return Err(IoError::Unsupported(w.to_string()));
         }
         warnings.push(w.to_string());
     }
-    let bytes = codecs::encode(&img, format, &opts.encode)?;
+    let bytes = codecs::encode(img, format, &opts.encode)?;
     Ok(ExportResult { bytes, warnings })
 }
 

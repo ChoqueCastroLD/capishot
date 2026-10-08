@@ -120,6 +120,13 @@ const OPENABLE: &[&str] = &[
     "hif", "dng", "cr2", "nef", "nrw", "arw", "pef", "svg", "svgz",
 ];
 
+/// Whether saving `doc` as a TIFF writes Photoshop layer data (anything beyond a lone
+/// Background layer). The UI asks before such a save when the "ask before saving layered TIFF"
+/// preference is on; see `photocraft_io::tiff_layers`.
+pub fn tiff_would_write_layers(doc: &Document) -> bool {
+    photocraft_io::tiff_layers::would_write_layers(doc)
+}
+
 pub(crate) fn file_name(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
