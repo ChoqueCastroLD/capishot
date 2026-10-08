@@ -3576,6 +3576,7 @@ dependencies = [
  "photocraft-io",
  "serde_json",
  "tokio",
+ "winresource",
 ]
 
 [[package]]
