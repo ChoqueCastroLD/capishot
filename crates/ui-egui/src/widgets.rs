@@ -669,7 +669,7 @@ pub fn dropdown<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, op
 pub fn dropdown_hovered<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, options: &[(T, &str)], width: f32) -> (bool, Option<T>) {
     let label = options.iter().find(|(v, _)| v == current).map(|(_, l)| tl!(l)).unwrap_or("—");
     let (mut changed, mut hovered) = (false, None);
-    egui::ComboBox::from_id_salt(id).selected_text(label).width(width).height(420.0).icon(chevron_icon).show_ui(ui, |ui| {
+    let response = egui::ComboBox::from_id_salt(id).selected_text(label).width(width).height(420.0).icon(chevron_icon).show_ui(ui, |ui| {
         for (v, l) in options {
             let item = ui.selectable_label(v == current, tl!(l));
             if item.hovered() {
@@ -681,7 +681,36 @@ pub fn dropdown_hovered<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &m
             }
         }
     });
-    (changed, hovered)
+    let stepped = combo_box_arrow_keys(ui, response.response.id, &response.response, current, options);
+    (changed || stepped, hovered)
+}
+
+/// Give a dropdown keyboard focus when it opens, then use the arrow keys to move through its
+/// choices. `egui::ComboBox` opens a popup but leaves focus on the canvas by default, which makes
+/// controls such as the Layers panel's Blend Mode dropdown unreachable from the keyboard.
+fn combo_box_arrow_keys<T: PartialEq + Clone>(ui: &mut Ui, combo_id: egui::Id, response: &Response, current: &mut T, options: &[(T, &str)]) -> bool {
+    if response.clicked() {
+        response.request_focus();
+    }
+    // The popup, rather than its button, becomes the focused egui layer after it opens. While it
+    // is open it owns its navigation keys, even though `response.has_focus()` is then false.
+    if !egui::ComboBox::is_open(ui.ctx(), combo_id) || options.is_empty() {
+        return false;
+    }
+    let step = if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+        1
+    } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+        -1
+    } else {
+        return false;
+    };
+    let index = options.iter().position(|(value, _)| value == current).unwrap_or(0);
+    let next = if step > 0 { (index + 1).min(options.len() - 1) } else { index.saturating_sub(1) };
+    if next == index {
+        return false;
+    }
+    *current = options[next].0.clone();
+    true
 }
 
 /// The body of a right-click menu: as tall as its items up to the part of the window that can be
@@ -1080,5 +1109,27 @@ mod tests {
         assert_eq!(super::fmt_num(100.0), "100");
         assert_eq!(super::fmt_num(12.46), "12.5");
         assert_eq!(super::fmt_num(-3.0), "-3");
+    }
+
+    #[test]
+    fn dropdown_opens_with_focus_and_arrow_keys_change_the_value() {
+        use egui::accesskit::Role;
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let mut h = Harness::builder().with_size(egui::vec2(300.0, 100.0)).build_ui_state(
+            |ui, selected: &mut usize| {
+                let options = [(0, "Normal"), (1, "Multiply"), (2, "Screen")];
+                super::dropdown(ui, "blend-mode", selected, &options, 120.0);
+            },
+            0,
+        );
+        h.get_by_role(Role::ComboBox).click();
+        h.run();
+        h.key_press(egui::Key::ArrowDown);
+        h.run();
+        assert_eq!(*h.state(), 1);
+        h.key_press(egui::Key::ArrowUp);
+        h.run();
+        assert_eq!(*h.state(), 0);
     }
 }
