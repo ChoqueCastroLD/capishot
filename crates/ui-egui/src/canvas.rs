@@ -3071,11 +3071,9 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
         Tool::Gradient => {
             if (end[0] - d.start[0]).abs() + (end[1] - d.start[1]).abs() >= 2.0 {
                 let o = app.ui.tool_options.clone();
-                let fg = app.session.tools.foreground;
-                let bg = app.session.tools.background;
                 let _ = app.run(
                     "paint.gradient",
-                    json!({"from": [d.start[0], d.start[1]], "to": [end[0], end[1]], "style": o.gradient_style, "reverse": o.gradient_reverse, "dither": o.gradient_dither, "colors": [hex(fg), hex(bg)], "opacity": o.fill_opacity, "mode": o.gradient_blend_mode.label(), "target": paint_target(app)}),
+                    json!({"from": [d.start[0], d.start[1]], "to": [end[0], end[1]], "style": o.gradient_style, "reverse": o.gradient_reverse, "dither": o.gradient_dither, "opacity": o.fill_opacity, "mode": o.gradient_blend_mode.label(), "target": paint_target(app)}),
                 );
             }
         }
@@ -3189,12 +3187,6 @@ pub fn paint_target(app: &PhotocraftApp) -> serde_json::Value {
     // Viewing the mask (⌥-click its thumbnail, #196) paints the mask.
     let viewing = photocraft_engine::mask_view_cmds::current(st).is_some();
     json!(if (app.ui.mask_target || viewing) && has_mask { "mask" } else { "pixels" })
-}
-
-/// `#rrggbb` for an sRGB colour (the engine's colour parameter notation).
-fn hex(c: [f32; 4]) -> String {
-    let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    format!("#{:02x}{:02x}{:02x}", b(c[0]), b(c[1]), b(c[2]))
 }
 
 #[cfg(test)]
