@@ -44,6 +44,7 @@ pub mod control;
 pub mod credits;
 pub mod crop_ui;
 pub mod dialogs;
+pub mod direct_select;
 pub mod discard_ui;
 pub mod distort_ui;
 pub mod doc_props_ui;

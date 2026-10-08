@@ -965,6 +965,7 @@
 	Drag a rectangle around the object	Trascina un rettangolo attorno all'oggetto
 	Drag on the image to add a constraint; Shift for horizontal/vertical; right-click to delete.	Trascina sull'immagine per aggiungere un vincolo; Maiusc per orizz/vert; click destro per eliminare.
 	Drag to move the active shape's path or the Work Path	Trascina per spostare il tracciato forma attiva o il Tracciato di lavoro
+	Click: select anchor · Drag: move anchor, handle or segment · {shift}-click: add · {alt}-click: whole subpath	Clic: seleziona punto · Trascina: sposta punto, maniglia o segmento · {shift}-clic: aggiungi · {alt}-clic: intero sottotracciato
 	Draw with the Pen tool (P) or make a work path from a selection.	Disegna con Penna (P) o crea un tracciato di lavoro da una selezione.
 	Drop an image or PSD anywhere to open it.	Trascina un'immagine o PSD ovunque per aprirlo.
 	Native file drag-and-drop is unavailable	Il drag-and-drop nativo file non è disponibile su Wayland
@@ -1593,6 +1594,7 @@
 	Paint Bucket Tool	Strumento Secchiello
 	Paints from the document's opening state	Dipinge dallo stato di apertura del documento
 	Path Selection Tool	Strumento Selezione tracciato
+	Direct Selection Tool	Strumento Selezione diretta
 	Pattern Overlay	Sovrapposizione pattern
 	Pen Pressure	Pressione penna
 	Pen Tilt	Inclinazione penna
