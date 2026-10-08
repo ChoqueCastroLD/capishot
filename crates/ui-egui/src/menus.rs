@@ -268,6 +268,12 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 "view.fitOnScreen" => v.fit_pending = true,
                 _ => v.zoom = 1.0,
             }
+            if id == "view.fitOnScreen" {
+                v.fill_pending = false;
+            } else {
+                v.fit_pending = false;
+                v.fill_pending = false;
+            }
             Ok(Value::Null)
         }
         "window.newWindowForDocument" => {
