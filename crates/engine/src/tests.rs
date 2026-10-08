@@ -557,8 +557,10 @@ fn damage_is_reported_for_strokes_only() {
     s.execute("paint.stroke", json!({"points": [[10, 10], [20, 10]], "size": 4})).unwrap();
     let d = s.active().unwrap().last_damage.unwrap();
     assert!(d.contains(15, 10) && d.width() < 30);
+    // Undo reports the same bounded area back, not a whole-canvas recomposite.
     s.execute("edit.undo", json!({})).unwrap();
-    assert_eq!(s.active().unwrap().last_damage, None);
+    let d = s.active().unwrap().last_damage.unwrap();
+    assert!(d.contains(15, 10) && d.width() < 30);
 }
 
 #[test]

@@ -500,10 +500,13 @@ impl Session {
         st.coalesce = None;
         match st.history.undo(st.doc.clone()) {
             Some((d, layers)) => {
+                // Pixels this step can have touched, so the canvas recomposites only that
+                // (it recomposited everything before).
+                let damage = layer_multi_cmds::step_damage(&d, &st.doc);
                 st.doc = d;
                 restore_target(st, layers);
                 st.revision += 1;
-                st.last_damage = None;
+                st.last_damage = damage;
                 true
             }
             None => false,
@@ -518,10 +521,11 @@ impl Session {
         st.coalesce = None;
         match st.history.redo(st.doc.clone()) {
             Some((d, layers)) => {
+                let damage = layer_multi_cmds::step_damage(&st.doc, &d);
                 st.doc = d;
                 restore_target(st, layers);
                 st.revision += 1;
-                st.last_damage = None;
+                st.last_damage = damage;
                 true
             }
             None => false,
