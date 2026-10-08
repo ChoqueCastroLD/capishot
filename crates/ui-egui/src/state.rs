@@ -730,9 +730,13 @@ pub struct UiState {
     /// tools edit it (#196). Never set together with `mask_target`.
     #[serde(default)]
     pub vector_mask_target: bool,
-    /// Brush Preset picker opened by a right-click on the canvas: its screen position (points).
+    /// Brush Preset picker opened by a right-click on the canvas or the options-bar brush chip:
+    /// its screen position (points).
     #[serde(default)]
     pub brush_picker: Option<[f32; 2]>,
+    /// The Brush Preset picker's preset list: search, collapsed groups, view, a rename in progress.
+    #[serde(default = "crate::brush_picker::list_state")]
+    pub brush_picker_list: crate::brush_panel::BrushesPanelState,
     /// Layers under the pointer, listed by a right-click on the canvas with the Move tool or
     /// ⌘/Ctrl+right-click with any tool (`layer_pick_ui`, #307).
     #[serde(default)]
@@ -858,6 +862,7 @@ impl Default for UiState {
             mask_target: false,
             vector_mask_target: false,
             brush_picker: None,
+            brush_picker_list: crate::brush_picker::list_state(),
             layer_menu: None,
             canvas_tool_menu: None,
             smoothing_tool: None,

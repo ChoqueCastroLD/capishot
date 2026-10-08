@@ -8,7 +8,7 @@
 //! - `engine.commands`: list commands with enablement
 //! - `ui.inspect`: full UI state (tool, panels, views, dialogs, windows, window size); the menu
 //!   tree is `ui.menu.list`
-//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushSize?}`:
+//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushPicker?, brushPickerView?, brushSize?}`:
 //!   change UI state; any other field is an error ([`UI_SET_FIELDS`])
 //! - `ui.menu.invoke {id, wait?}` / `ui.menu.list`: activate a menu item by id; list the menu tree
 //! - `ui.dialog.open {kind, fields?}` (kinds: newDocument, about, layerStyle {effect?}, colorPicker {target: foreground|background}, command {command}) / `ui.dialog.set {dialog, field, value}` / `ui.dialog.confirm {dialog, wait?}` / `ui.dialog.cancel {dialog}`
@@ -70,7 +70,7 @@ pub enum Outcome {
 
 /// The fields `ui.set` reads. Anything else is rejected before a field is applied, so a typo or
 /// a field the method doesn't have can't reply with success while nothing changes (#412).
-pub const UI_SET_FIELDS: [&str; 19] = [
+pub const UI_SET_FIELDS: [&str; 21] = [
     "tool",
     "panels",
     "dock",
@@ -87,6 +87,8 @@ pub const UI_SET_FIELDS: [&str; 19] = [
     "brushSection",
     "brushTab",
     "brushesView",
+    "brushPicker",
+    "brushPickerView",
     "brushSize",
     "gradientBlendMode",
     "gradientClassic",
@@ -328,6 +330,18 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 match serde_json::from_value(v) {
                     Ok(v) => app.ui.brushes_panel.view = v,
                     Err(e) => return err(format!("brushesView: {e} (list, grid)")),
+                }
+            }
+            if let Some(v) = p.get("brushPickerView").cloned() {
+                match serde_json::from_value(v) {
+                    Ok(v) => app.ui.brush_picker_list.view = v,
+                    Err(e) => return err(format!("brushPickerView: {e} (list, grid)")),
+                }
+            }
+            if let Some(v) = p.get("brushPicker").cloned() {
+                match serde_json::from_value::<Option<[f32; 2]>>(v) {
+                    Ok(at) if at.is_none_or(|[x, y]| x.is_finite() && y.is_finite()) => app.ui.brush_picker = at,
+                    _ => return err("brushPicker must be [x, y] in screen points, or null to close it"),
                 }
             }
             if let Some(size) = p.get("brushSize").and_then(Value::as_f64)
@@ -786,6 +800,23 @@ mod tests {
         let bad = call(&mut app, &ctx, "ui.set", json!({"gradientBlendMode": "nonsense", "gradientClassic": false}));
         assert_eq!(bad["ok"], false, "{bad}");
         assert!(app.ui.tool_options.gradient_classic, "invalid mode must not change options");
+    }
+
+    #[test]
+    fn ui_set_opens_the_brush_preset_picker_and_sets_its_view() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        assert_eq!(app.ui.brush_picker_list.view, crate::brush_panel::BrushesView::Grid, "tip thumbnails by default");
+        let r = call(&mut app, &ctx, "ui.set", json!({"tool": "brush", "brushPicker": [120, 80], "brushPickerView": "list"}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(app.ui.brush_picker, Some([120.0, 80.0]));
+        assert_eq!(app.ui.brush_picker_list.view, crate::brush_panel::BrushesView::List);
+        for bad in [json!({"brushPicker": [1]}), json!({"brushPicker": "here"}), json!({"brushPickerView": "tiles"})] {
+            assert_eq!(call(&mut app, &ctx, "ui.set", bad.clone())["ok"], false, "{bad}");
+        }
+        assert_eq!(app.ui.brush_picker, Some([120.0, 80.0]), "a bad value leaves the picker alone");
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"brushPicker": null}))["ok"], true);
+        assert_eq!(app.ui.brush_picker, None);
     }
 
     #[test]

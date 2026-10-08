@@ -492,11 +492,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 let tool = app.ui.tool;
                 // Brush edits here go through `tools.setBrush`, one journal entry per gesture (Rule 1).
                 if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser)) || tool == Tool::QuickSelection {
-                    let before = app.session.tools.brush.clone();
-                    let mut b = before.clone();
-                    let pick = brush_preset_chip(ui, &mut b, &app.session.tools.presets);
-                    crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &b);
-                    crate::brush_picker::apply(app, ui.ctx(), pick);
+                    brush_preset_chip(ui, &app.session.tools.brush, &mut app.ui);
                     crate::brush_picker::settings_toggle(app, ui);
                     widgets::vline(ui, 22.0);
                 }
@@ -512,10 +508,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 let brush_before = app.session.tools.brush.clone();
                 let mut brush = brush_before.clone();
                 let b = &mut brush;
-                let mut picked = None;
                 match app.ui.tool {
                     Tool::Brush | Tool::Eraser if t.pro => {
-                        picked = brush_preset_chip(ui, b, &app.session.tools.presets);
+                        brush_preset_chip(ui, b, &mut app.ui);
                         crate::brush_picker::settings_toggle(app, ui);
                         widgets::vline(ui, 22.0);
                         opt_label(ui, tl!("Mode"));
@@ -544,7 +539,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     }
                     // Pencil: Photoshop's options (no hardness or flow: the pencil is always hard).
                     Tool::Pencil => {
-                        picked = brush_preset_chip(ui, b, &app.session.tools.presets);
+                        brush_preset_chip(ui, b, &mut app.ui);
                         crate::brush_picker::settings_toggle(app, ui);
                         widgets::vline(ui, 22.0);
                         if !t.pro {
@@ -565,7 +560,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         widgets::checkbox(ui, &mut app.ui.tool_options.pencil_auto_erase, tl!("Auto Erase"));
                     }
                     Tool::Brush | Tool::Eraser => {
-                        picked = brush_preset_chip(ui, b, &app.session.tools.presets);
+                        brush_preset_chip(ui, b, &mut app.ui);
                         crate::brush_picker::settings_toggle(app, ui);
                         widgets::vline(ui, 22.0);
                         opt_label(ui, tl!("Size"));
@@ -581,7 +576,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
                     }
                     Tool::MixerBrush => {
-                        picked = brush_preset_chip(ui, b, &app.session.tools.presets);
+                        brush_preset_chip(ui, b, &mut app.ui);
                         crate::brush_picker::settings_toggle(app, ui);
                         widgets::vline(ui, 22.0);
                         for (label, value) in [
@@ -932,7 +927,6 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     _ => {}
                 }
                 crate::brush_panel::commit_gesture(app, ui.ctx(), &brush_before, &brush);
-                crate::brush_picker::apply(app, ui.ctx(), picked);
             });
         });
 }
@@ -2628,16 +2622,13 @@ fn symmetry_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     });
 }
 
-/// Options-bar brush chip; opens Photoshop's Brush Preset picker (size, hardness, the preset
-/// library). Returns what the picker asked for beyond the size and hardness edits in `b`.
-fn brush_preset_chip(
-    ui: &mut egui::Ui,
-    b: &mut photocraft_engine::BrushSettings,
-    presets: &[photocraft_engine::paint::BrushPreset],
-) -> Option<crate::brush_picker::Pick> {
+/// Options-bar brush chip: a click shows or hides Photoshop's Brush Preset picker below it (size,
+/// hardness, the preset library), the one a right-click on the canvas opens.
+fn brush_preset_chip(ui: &mut egui::Ui, b: &photocraft_engine::BrushSettings, state: &mut crate::state::UiState) {
     let t = Tokens::get(ui.ctx());
-    let (r, resp) = ui.allocate_exact_size(vec2(44.0, 30.0), Sense::click());
-    if resp.hovered() {
+    let (r, _) = ui.allocate_exact_size(vec2(44.0, 30.0), Sense::hover());
+    let resp = ui.interact(r, crate::brush_picker::chip_id(), Sense::click());
+    if resp.hovered() || state.brush_picker.is_some() {
         ui.painter().rect_filled(r, t.radius_sm, t.hover);
     }
     let c = pos2(r.left() + 14.0, r.top() + 11.0);
@@ -2645,11 +2636,13 @@ fn brush_preset_chip(
     ui.painter().text(pos2(c.x, r.bottom() - 5.0), Align2::CENTER_CENTER, format!("{}", b.size.round() as i64), egui::FontId::proportional(9.5), t.text_dim);
     icons::paint(ui, Rect::from_center_size(pos2(r.right() - 9.0, c.y), vec2(10.0, 10.0)), "chevron-down", 9.0, t.text_faint);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Brush Preset picker")));
-    let resp = resp.on_hover_text(tl!("Brush Preset picker"));
-    egui::Popup::from_toggle_button_response(&resp)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| crate::brush_picker::body(ui, b, presets))
-        .and_then(|r| r.inner)
+    if resp.on_hover_text(tl!("Brush Preset picker")).clicked() {
+        if state.brush_picker.is_some() {
+            crate::brush_picker::close(state);
+        } else {
+            state.brush_picker = Some([r.left(), r.bottom() + 2.0]);
+        }
+    }
 }
 
 /// Drag a layer row to reorder: drop on the upper/lower half to place above/below, or on the middle

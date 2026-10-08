@@ -174,7 +174,8 @@ pub struct MenuParams {
 pub struct UiSetParams {
     /// Fields for the control method `ui.set`: tool, panels, dock, dockTabs, dockWidth, maskTarget,
     /// vectorMaskTarget, selectionMode, zoom, center, fit, theme (pro, proMedium, studio,
-    /// studioLight, classic), brushSection, brushTab, brushesView, brushSize. Other fields are an
+    /// studioLight, classic), brushSection, brushTab, brushesView, brushPicker ([x, y] opens the
+    /// Brush Preset picker there, null closes it), brushPickerView, brushSize. Other fields are an
     /// error.
     pub fields: Value,
 }
