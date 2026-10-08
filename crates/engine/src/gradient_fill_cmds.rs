@@ -13,7 +13,7 @@
 
 use photocraft_color::Color;
 use photocraft_compose::gradient_fill as gf;
-use photocraft_doc::{Document, Fill, GradientStyle, Layer, LayerContent, LayerId, LayerMask};
+use photocraft_doc::{Document, Fill, GradientStyle, Layer, LayerContent, LayerId};
 use photocraft_geom::Rect;
 use serde_json::{Value, json};
 
@@ -307,9 +307,7 @@ pub fn new_layer(s: &Session, doc: &Document, p: &Value) -> Result<Layer> {
     let mut l = Layer::new(doc.next_layer_name("Gradient Fill"), LayerContent::Fill(fill));
     l.opacity = opacity;
     l.blend = blend;
-    if let Some(sel) = &doc.selection {
-        l.mask = Some(LayerMask { surface: sel.clone(), ..LayerMask::reveal_all() });
-    }
+    l.mask = crate::commands::selection_mask(doc);
     Ok(l)
 }
 

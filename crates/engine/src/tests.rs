@@ -123,6 +123,55 @@ fn adjustment_layers_change_composite() {
 }
 
 #[test]
+fn new_adjustment_and_fill_layers_are_masked_by_the_selection() {
+    // #1250: as in Photoshop, a new adjustment or fill layer made while a selection is active
+    // gets the selection as its layer mask, so it acts on the selected area only.
+    for depth in [8, 16, 32] {
+        // (command, params, whether it turns the white canvas black inside the selection)
+        for (id, params, blackens) in [
+            ("layer.newAdjustmentLayer.invert", json!({}), true),
+            ("layer.newAdjustmentLayer.hueSaturation", json!({"hue": 40, "saturation": 20}), false),
+            ("layer.newFillLayer.solidColor", json!({"color": "#000000"}), true),
+            ("layer.newFillLayer.gradient", json!({"from": "#000000", "to": "#000000"}), true),
+            ("layer.newFillLayer.pattern", json!({"pattern": "Checkerboard"}), false),
+        ] {
+            let mut s = Session::new();
+            s.execute("file.new", json!({"width": 64, "height": 48, "depth": depth})).unwrap();
+            s.execute("select.rect", json!({"x": 8, "y": 8, "width": 16, "height": 16})).unwrap();
+            let layer = LayerId(s.execute(id, params).unwrap()["layer"].as_u64().unwrap());
+            let d = s.active().unwrap();
+            let mask = d.doc.layer(layer).unwrap().mask.as_ref().unwrap_or_else(|| panic!("{id} at {depth}-bit: no layer mask"));
+            assert_eq!(mask.value(10, 10), 1.0, "{id} at {depth}-bit: the mask hides the selected area");
+            assert_eq!(mask.value(2, 2), 0.0, "{id} at {depth}-bit: the mask reveals outside the selection");
+            assert!(mask.linked && mask.enabled, "{id}");
+            // The selection stays, as after Layer › Layer Mask › Reveal Selection.
+            assert!(d.doc.selection.is_some(), "{id} dropped the selection");
+            // The white canvas is untouched outside the selection.
+            assert_eq!(px(&mut s, 2, 2), vec![1.0, 1.0, 1.0, 1.0], "{id} at {depth}-bit changed pixels outside the selection");
+            if blackens {
+                assert_eq!(px(&mut s, 10, 10)[..3], [0.0, 0.0, 0.0][..], "{id} at {depth}-bit: no effect inside the selection");
+            }
+            s.execute("edit.undo", json!({})).unwrap();
+            assert!(s.active().unwrap().doc.layer(layer).is_none(), "{id}: undo keeps the layer");
+        }
+    }
+}
+
+#[test]
+fn new_adjustment_and_fill_layers_have_no_mask_without_a_selection() {
+    let mut s = session_with_doc();
+    for (id, params) in [
+        ("layer.newAdjustmentLayer.invert", json!({})),
+        ("layer.newFillLayer.solidColor", json!({"color": "#000000"})),
+        ("layer.newFillLayer.gradient", json!({})),
+        ("layer.newFillLayer.pattern", json!({"pattern": "Checkerboard"})),
+    ] {
+        let layer = LayerId(s.execute(id, params).unwrap()["layer"].as_u64().unwrap());
+        assert!(s.active().unwrap().doc.layer(layer).unwrap().mask.is_none(), "{id} got a mask with no selection");
+    }
+}
+
+#[test]
 fn every_adjustment_command_runs() {
     let mut s = session_with_doc();
     let ids: Vec<&str> =
