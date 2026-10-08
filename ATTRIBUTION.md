@@ -79,6 +79,7 @@ next to the files:
 | `corpus/psd-tools/` (309 files) | psd-tools test set | Kota Yamaguchi and contributors | [psd-tools `tests/psd_files`](https://github.com/psd-tools/psd-tools/tree/main/tests/psd_files) | MIT, Copyright (c) 2019 Kota Yamaguchi |
 | `corpus/psd/` (170 files) | Small selection of the psd-tools and ag-psd test files | Kota Yamaguchi; Agamnentzar | psd-tools (above) and [ag-psd `test/`](https://github.com/Agamnentzar/ag-psd/tree/master/test) | MIT (both) |
 | `corpus/heif/` (9 files, 0.1 MB) | HEIC/HEIF test files: `heic-rs/` checkerboards, RGB strips and a grid-tiled photo with EXIF and XMP (synthetic pixels encoded by macOS `sips`, each `.ref.png` Apple's decode); `pillow-heif/` the 10-bit RGBA `RGBA_10__29x100.heif` and its source `RGBA_16__29x100.png` | Thomas Braun (heic-rs); Pillow-Heif contributors | [heic-rs `tests/fixtures`](https://github.com/tbraun96/heic-rs/tree/main/tests/fixtures), [pillow-heif `tests/images`](https://github.com/bigcat88/pillow_heif/tree/master/tests/images) | MIT OR Apache-2.0 (heic-rs); BSD-3-Clause (pillow-heif) |
+| `corpus/exr/` (5 files, 2.3 MB) | The deep OpenEXR test images `11`, `42`, `64`, `multivariate` and `objectid.deep.exr` | Contributors to the OpenEXR Project | [openexr `src/test/bin/test_images`](https://github.com/AcademySoftwareFoundation/openexr/tree/main/src/test/bin/test_images) | BSD-3-Clause |
 | `corpus/pngsuite/` | PngSuite | Willem van Schaik | <http://www.schaik.com/pngsuite/> | Public domain |
 
 Files copied into `corpus/` by hand (tiff, exr, raw) must be MIT, BSD or CC0.
