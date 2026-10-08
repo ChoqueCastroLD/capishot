@@ -161,9 +161,13 @@ fn display_scale(pref: prefs::UiScale, native: Option<f32>, monitor_px: Option<e
     let native = native.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
     match pref {
         prefs::UiScale::Auto => {
-            // A 4K display needs at least 200%; preserve larger system scales.
+            // Follow the system's scale, fractional ones included (125%, 150%, 175%: #1072).
+            // Only when the system reports no scaling at all (100%) does a 4K display fall back
+            // to 200%, since unscaled 4K controls are unreadably small (#225). Overriding a scale
+            // the user picked in their desktop settings left only "too small" or "too big".
+            let unscaled = (native - 1.0).abs() < 0.01;
             let is_4k = monitor_px.is_some_and(|s| s.x.is_finite() && s.y.is_finite() && s.x.min(s.y) >= 2160.0 && s.x.max(s.y) >= 3840.0);
-            if is_4k { native.max(2.0) } else { native }
+            if unscaled && is_4k { 2.0 } else { native }
         }
         fixed => fixed.name().parse::<f32>().map_or(1.0, |pct| pct / 100.0),
     }
@@ -1652,12 +1656,20 @@ mod tests {
     }
 
     #[test]
-    fn auto_scale_detects_4k_and_preserves_larger_system_dpi() {
+    fn auto_scale_detects_4k_and_preserves_system_scale() {
         use prefs::UiScale::Auto;
         for size in [vec2(3840.0, 2160.0), vec2(4096.0, 2160.0), vec2(2160.0, 3840.0)] {
             assert_eq!(display_scale(Auto, Some(1.0), Some(size)), 2.0);
-            for dpi in [1.25, 1.5, 2.0] {
-                assert_eq!(display_scale(Auto, Some(dpi), Some(size)), 2.0);
+            // A fractional system scale is the user's choice and is kept as is (#1072).
+            for dpi in [1.25, 1.5, 1.75, 2.0, 2.5] {
+                assert_eq!(display_scale(Auto, Some(dpi), Some(size)), dpi);
+            }
+        }
+        // Below 100% is a system choice too, even on 4K.
+        assert_eq!(display_scale(Auto, Some(0.75), Some(vec2(3840.0, 2160.0))), 0.75);
+        for size in [vec2(1920.0, 1080.0), vec2(2560.0, 1440.0)] {
+            for dpi in [1.25, 1.5, 1.75] {
+                assert_eq!(display_scale(Auto, Some(dpi), Some(size)), dpi);
             }
         }
         assert_eq!(display_scale(Auto, Some(3.0), Some(vec2(3840.0, 2160.0))), 3.0);
@@ -1691,7 +1703,10 @@ mod tests {
                 step(vec2(3840.0, 2160.0), 1.0, 2.0);
             }
             step(vec2(1920.0, 1080.0), 1.0, 1.0);
-            step(vec2(3840.0, 2160.0), 1.5, 2.0);
+            step(vec2(3840.0, 2160.0), 1.5, 1.5);
+            step(vec2(3840.0, 2160.0), 1.25, 1.25);
+            step(vec2(2560.0, 1440.0), 1.75, 1.75);
+            step(vec2(3840.0, 2160.0), 1.0, 2.0);
         }
         for (pref, expected) in [("200", 2.0), ("125", 1.25), ("150", 1.5), ("100", 1.0), ("auto", 1.5)] {
             app.run("prefs.set", json!({"values": {"interface.uiScale": pref}})).unwrap();
