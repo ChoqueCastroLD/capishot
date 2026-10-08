@@ -293,6 +293,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn export_document_scales_height_when_rounded_width_is_unchanged() {
+        use photocraft_doc::{Color, ColorMode, SampleType, Size};
+
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            for (width, height, scale, expected) in [
+                (1, 100, 50, (1, 50)),
+                (1, 200, 50, (1, 100)),
+                (10, 100, 99, (10, 99)),
+                (10, 100, 101, (10, 101)),
+                (400, 300, 50, (200, 150)),
+                (400, 300, 100, (400, 300)),
+            ] {
+                let doc = Document::with_background("x", Size::new(width, height), ColorMode::Rgb, depth, Color::WHITE);
+                let before = doc.clone();
+                let mut f = Map::new();
+                f.insert("format".into(), json!("png"));
+                f.insert("scale".into(), json!(scale));
+                let out = export_document(&doc, &f, None).unwrap();
+                assert_eq!((out.size.width, out.size.height), expected, "{width} × {height} at {scale}%, {depth:?}");
+                assert_eq!(out.depth, depth, "export preserves the document's depth");
+                assert_eq!(doc, before, "export leaves the source document unchanged");
+            }
+        }
+    }
+
+    #[test]
+    fn export_document_proxy_limits_both_dimensions_before_rounding() {
+        use photocraft_doc::{Color, ColorMode, SampleType, Size};
+
+        for (width, height, scale, max_side, expected) in
+            [(1, 1000, 100, 360, (1, 360)), (1, 1000, 50, 360, (1, 360)), (1, 1000, 25, 360, (1, 250)), (13, 20, 50, 8, (5, 8)), (20, 13, 50, 8, (8, 5))]
+        {
+            let doc = Document::with_background("x", Size::new(width, height), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+            let before = doc.clone();
+            let mut f = Map::new();
+            f.insert("format".into(), json!("png"));
+            f.insert("scale".into(), json!(scale));
+            let out = export_document(&doc, &f, Some(max_side)).unwrap();
+            assert_eq!((out.size.width, out.size.height), expected, "{width} × {height} at {scale}%, proxy limit {max_side}");
+            assert!(out.size.width.max(out.size.height) <= max_side, "proxy respects its longest-side limit");
+            assert_eq!(doc, before, "preview leaves the source document unchanged");
+        }
+    }
+
+    #[test]
     fn export_document_scales_and_flattens() {
         let doc = Document::with_background(
             "x",
