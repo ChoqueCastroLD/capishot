@@ -386,7 +386,15 @@ impl Session {
             self.cancel_jobs_on(id);
         }
         let d = self.docs.remove(index);
-        self.active = if self.docs.is_empty() { None } else { Some(index.min(self.docs.len() - 1)) };
+        self.active = if self.docs.is_empty() {
+            None
+        } else {
+            Some(match self.active {
+                Some(active) if active > index => active - 1,
+                Some(active) if active < index => active,
+                _ => index.min(self.docs.len() - 1),
+            })
+        };
         Some(d)
     }
 
