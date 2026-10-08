@@ -523,6 +523,99 @@ fn distribute(s: &mut Session, kind: &str) -> Result<Value> {
     Ok(json!({"moved": moved}))
 }
 
+/// Reorder one or multiple layers to a single destination in one undoable edit.
+///
+/// Explicit `layers` are ordered according to the source document, not caller ordering.
+/// Selected descendants of a moved group remain inside their parent; only top-level
+/// selected nodes are detached, and every reference is validated before editing.
+pub fn move_to(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "layer.moveTo";
+    let target = LayerId(p.get("target").and_then(Value::as_u64).ok_or_else(|| bad(CMD, "missing `target`"))?);
+    let pos = p.get("position").and_then(Value::as_str).unwrap_or("above");
+    if !matches!(pos, "above" | "below" | "into") {
+        return Err(bad(CMD, "position must be above, below, or into"));
+    }
+
+    let batch = p.get("layers");
+    if batch.is_some() && p.get("layer").is_some() {
+        return Err(bad(CMD, "give either `layer` or `layers`, not both"));
+    }
+    let requested = if let Some(raw) = batch {
+        let arr = raw.as_array().filter(|a| !a.is_empty()).ok_or_else(|| bad(CMD, "`layers` must be a nonempty array of ids"))?;
+        let mut ids = Vec::with_capacity(arr.len());
+        for item in arr {
+            let id = LayerId(item.as_u64().ok_or_else(|| bad(CMD, "every layer id must be an unsigned integer"))?);
+            if ids.contains(&id) {
+                return Err(bad(CMD, "duplicate layer id"));
+            }
+            ids.push(id);
+        }
+        ids
+    } else {
+        vec![crate::commands::layer_param(s, p)?]
+    };
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let doc = &st.doc;
+    let target_path = doc.path_of(target).ok_or(EngineError::NoLayer(target))?;
+    for &id in &requested {
+        if doc.layer(id).is_none() {
+            return Err(EngineError::NoLayer(id));
+        }
+    }
+    let moved_ids = top_level(doc, &requested);
+    if moved_ids.len() == 1 && moved_ids[0] == target && batch.is_none() {
+        // Preserve single-layer drag-to-self semantics.
+        return Ok(Value::Null);
+    }
+    // Also rejects dragging a selected group onto any of its descendants.
+    for id in &moved_ids {
+        let path = doc.path_of(*id).ok_or(EngineError::NoLayer(*id))?;
+        if target_path.starts_with(&path) {
+            return Err(bad(CMD, "target cannot be one of the moved layers or its descendant"));
+        }
+    }
+    if pos == "into" && doc.layer(target).is_none_or(|l| !l.is_group()) {
+        return Err(bad(CMD, "target is not a group"));
+    }
+
+    let original_active = st.active_layer;
+    let count = s.edit("Reorder Layers", |doc, active| {
+        let mut moved = Vec::with_capacity(moved_ids.len());
+        for &id in &moved_ids {
+            moved.push(doc.remove(id).ok_or(EngineError::NoLayer(id))?);
+        }
+        // Look up the destination AFTER removing every source: its indices may have shifted.
+        let path = doc.path_of(target).ok_or(EngineError::NoLayer(target))?;
+        if pos == "into" {
+            let children = doc.layer_at_mut(&path).and_then(Layer::children_mut).ok_or_else(|| bad(CMD, "target is not a group"))?;
+            children.extend(moved);
+        } else {
+            let (&idx, parent) = path.split_last().ok_or(EngineError::NoLayer(target))?;
+            let siblings = if parent.is_empty() {
+                &mut doc.layers
+            } else {
+                doc.layer_at_mut(parent).and_then(Layer::children_mut).ok_or_else(|| bad(CMD, "target's parent is not a group"))?
+            };
+            let at = if pos == "below" { idx } else { idx + 1 };
+            siblings.splice(at..at, moved);
+        }
+        check_group_depth(doc, "Reorder Layer")?;
+        *active = if batch.is_some() {
+            original_active.filter(|id| requested.contains(id)).or_else(|| requested.last().copied())
+        } else {
+            moved_ids.first().copied()
+        };
+        Ok(moved_ids.len())
+    })?;
+    if batch.is_some() {
+        let active = original_active.filter(|id| requested.contains(id)).or_else(|| requested.last().copied());
+        reselect(s, requested, active);
+        Ok(json!({"moved": count}))
+    } else {
+        Ok(Value::Null)
+    }
+}
+
 // ---------- structural commands ----------
 
 fn link_layers(s: &mut Session) -> Result<Value> {
