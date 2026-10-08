@@ -457,7 +457,7 @@ fn apply_content_aware_fill(
             }
             "duplicate" => {
                 let mut dup = doc.layer(id).ok_or(EngineError::NoLayer(id))?.duplicate();
-                dup.name = format!("{} copy", dup.name);
+                dup.name = doc.copy_name(&dup.name);
                 let nid = doc.insert_above(Some(id), dup);
                 *active = Some(nid);
                 nid
