@@ -254,10 +254,19 @@ fn alt_scroll_zooms_gently_around_the_pointer() {
     assert_eq!(zoom(&h), z2, "a plain scroll never zooms");
     assert!(h.state().ui.views[0].center[1] > c2[1], "a plain scroll pans");
 
-    // ⌘/Ctrl + scroll is still the faster gesture zoom.
-    wheel(&h, 1.0, Modifiers::COMMAND);
-    h.run_steps(40);
-    assert!(zoom(&h) / z2 > 1.05, "⌘-scroll zooms in bigger steps: {z2} -> {}", zoom(&h));
+    // ⌘/Ctrl + scroll pans sideways (#635), on Windows (Ctrl) and macOS (⌘) alike.
+    for m in [Modifiers { ctrl: true, command: true, ..Modifiers::NONE }, Modifiers { mac_cmd: true, command: true, ..Modifiers::NONE }] {
+        let c = h.state().ui.views[0].center;
+        wheel(&h, -1.0, m);
+        h.run_steps(40);
+        let c1 = h.state().ui.views[0].center;
+        assert_eq!(zoom(&h), z2, "⌘/Ctrl-scroll never zooms");
+        assert!(c1[0] > c[0] && c1[1] == c[1], "⌘/Ctrl-scroll pans sideways: {c:?} -> {c1:?}");
+    }
+    // A pinch zooms around the pointer.
+    h.event(egui::Event::Zoom(1.25));
+    h.run_steps(2);
+    assert!((zoom(&h) / z2 - 1.25).abs() < 1e-3, "pinch zooms: {z2} -> {}", zoom(&h));
 }
 
 #[test]

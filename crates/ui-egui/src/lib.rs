@@ -1043,6 +1043,10 @@ impl eframe::App for PhotocraftApp {
             menu.raw_input(raw_input);
         }
         shortcuts::clipboard_keys(ctx, ctx.text_edit_focused() || self.ui.text_edit.is_some(), raw_input);
+        // Windows sends a touchpad pinch as Ctrl + wheel; make it a pinch again (wheel_nav.rs).
+        if cfg!(target_os = "windows") {
+            wheel_nav::fold_legacy_pinch(ctx, raw_input);
+        }
         raw_input.events.extend(self.take_synthetic_step());
     }
 
@@ -1314,6 +1318,8 @@ impl PhotocraftApp {
         // egui's own ⌘+ / ⌘- / ⌘0 scale the whole interface; PhotoCraft zooms the canvas instead
         // (shortcuts.rs), like Photoshop.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        // ⌘/Ctrl + wheel scrolls sideways, as in Photoshop; only a pinch zooms (wheel_nav.rs).
+        wheel_nav::configure(ctx);
     }
 }
 
