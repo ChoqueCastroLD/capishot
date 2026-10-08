@@ -1338,12 +1338,15 @@ fn color_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         crate::type_tool::foreground_changed(app);
     }
     let [r, g, b, _] = hsva.to_srgba_unmultiplied();
-    let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
         let (sw, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
         ui.painter().rect_filled(sw, 6.0, Color32::from_rgb(r, g, b));
-        ui.label(RichText::new(format!("#{r:02X}{g:02X}{b:02X}")).font(theme::mono(12.5)).color(t.text));
-        ui.label(RichText::new(format!("RGB {r} {g} {b}")).font(theme::mono(11.5)).color(t.text_faint));
+        let mut c = app.session.tools.foreground;
+        if color_readout(ui, ui.id().with("color-panel"), &mut c) {
+            app.session.tools.foreground = c;
+            ui.data_mut(|d| d.insert_temp(key, srgb_hsva(c)));
+            crate::type_tool::foreground_changed(app);
+        }
     });
 }
 
@@ -2425,11 +2428,22 @@ fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             ui.data_mut(|d| d.insert_temp(key, hsva.h));
         }
     });
-    let [r, g, b, _] = hsva.to_srgba_unmultiplied();
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("#{r:02X}{g:02X}{b:02X}")).font(theme::mono(12.0)).color(t.text));
-        ui.label(RichText::new(format!("R {r}  G {g}  B {b}")).font(theme::mono(11.0)).color(t.text_faint));
+        let mut c = if bg_active { app.session.tools.background } else { app.session.tools.foreground };
+        if color_readout(ui, ui.id().with(("color-field", bg_active)), &mut c) {
+            if bg_active {
+                app.session.tools.background = c;
+            } else {
+                app.session.tools.foreground = c;
+                crate::type_tool::foreground_changed(app);
+            }
+            // Keep the hue for greys, so the field marker doesn't jump to red.
+            let h = srgb_hsva(c);
+            if h.s >= 0.01 && h.v >= 0.01 {
+                ui.data_mut(|d| d.insert_temp(key, h.h));
+            }
+        }
     });
 }
 
@@ -2447,6 +2461,65 @@ fn srgb_hsva(c: [f32; 4]) -> egui::ecolor::Hsva {
 fn hsva_srgb(h: egui::ecolor::Hsva) -> [f32; 4] {
     let [r, g, b] = h.to_srgb();
     [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
+}
+
+/// The Color panel's editable colour readout: a hex field and R, G, B fields, all drawn like the
+/// dock's [`widgets::value_field`] so they sit in the theme. Editing any of them sets `color`
+/// (sRGB-encoded floats) and returns `true`.
+fn color_readout(ui: &mut egui::Ui, id: egui::Id, color: &mut [f32; 4]) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let mut changed = false;
+    // Wrapped so the fields fold onto a second line in a narrow dock instead of being clipped.
+    ui.horizontal_wrapped(|ui| {
+        // Docks zero the item spacing; keep the fields apart.
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.label(RichText::new("#").font(theme::mono(12.0)).color(t.text_faint));
+        changed = hex_edit(ui, id.with("hex"), color);
+        let [mut r, mut g, mut b] = srgb_bytes(*color).map(f32::from);
+        let mut rgb = false;
+        for (label, v) in [("R", &mut r), ("G", &mut g), ("B", &mut b)] {
+            ui.label(RichText::new(label).font(theme::mono(11.0)).color(t.text_faint));
+            rgb |= widgets::value_field(ui, v, 0.0..=255.0, "", 38.0).changed();
+        }
+        if rgb {
+            *color = [r / 255.0, g / 255.0, b / 255.0, 1.0];
+            changed = true;
+        }
+    });
+    changed
+}
+
+/// The hex field of [`color_readout`]: type a colour with or without the leading `#`. Valid input
+/// sets `color` and returns `true`. While it has focus it shows exactly what is typed, so partial
+/// or invalid input isn't overwritten by the colour; an invalid entry snaps back when focus leaves.
+fn hex_edit(ui: &mut egui::Ui, id: egui::Id, color: &mut [f32; 4]) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(64.0, 24.0), Sense::hover());
+    widgets::surface(ui, rect, t.field, false);
+    if !t.bevel {
+        ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
+    }
+    let [r, g, b] = srgb_bytes(*color);
+    let typing = if ui.memory(|m| m.has_focus(id)) { ui.data(|d| d.get_temp::<String>(id)) } else { None };
+    let mut text = typing.unwrap_or_else(|| format!("{r:02X}{g:02X}{b:02X}"));
+    let field = rect.shrink2(vec2(5.0, 2.0));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    // Room for a pasted "#rrggbb"; the parse trims it, and the field shows plain digits otherwise.
+    // `Frame::NONE`: the themed surface above is this field's frame.
+    let resp =
+        child.add(egui::TextEdit::singleline(&mut text).id(id).char_limit(7).desired_width(field.width()).frame(egui::Frame::NONE).font(theme::mono(12.0)));
+    if resp.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text.clone()));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(id));
+    }
+    if resp.changed()
+        && let Some(c) = crate::color_picker_ui::parse_hex(&text)
+    {
+        *color = [c[0], c[1], c[2], 1.0];
+        return true;
+    }
+    false
 }
 
 /// Photoshop's brush preset picker chip: a soft/hard round tip preview with the size underneath.
@@ -2695,6 +2768,103 @@ mod color_tests {
                 assert!((back[i] - c[i]).abs() <= 1.0 / 255.0, "{c:?} -> {back:?}");
             }
         }
+    }
+
+    /// Click the hex field, select its text and type `text` one key per frame.
+    fn type_hex(h: &mut egui_kittest::Harness<'static, PhotocraftApp>, text: &str) {
+        use egui_kittest::kittest::Queryable;
+        h.get_by_role(egui::accesskit::Role::TextInput).click();
+        h.run_steps(1);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run_steps(1);
+        for ch in text.chars() {
+            h.event(egui::Event::Text(ch.to_string()));
+            h.run_steps(1);
+        }
+    }
+
+    /// The Color panel's hex readout is editable, with or without the leading `#`.
+    #[test]
+    fn color_panel_hex_field_takes_a_typed_hex() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.tools.foreground = [1.0, 1.0, 1.0, 1.0];
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    color_picker(app, ui);
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+        h.run_steps(2);
+        type_hex(&mut h, "003300");
+        assert_eq!(srgb_bytes(h.state().session.tools.foreground), [0x00, 0x33, 0x00]);
+        // A leading '#' is accepted too.
+        type_hex(&mut h, "#ff8000");
+        assert_eq!(srgb_bytes(h.state().session.tools.foreground), [0xff, 0x80, 0x00]);
+    }
+
+    /// An incomplete entry never changes the colour and the field snaps back when focus leaves.
+    #[test]
+    fn color_panel_hex_field_ignores_partial_input() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.tools.foreground = [0.2, 0.4, 0.6, 1.0];
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    color_picker(app, ui);
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+        h.run_steps(2);
+        let fg = h.state().session.tools.foreground;
+        h.get_by_role(egui::accesskit::Role::TextInput).click();
+        h.run_steps(1);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run_steps(1);
+        for ch in "12zz".chars() {
+            h.event(egui::Event::Text(ch.to_string()));
+            h.run_steps(1);
+        }
+        assert_eq!(h.state().session.tools.foreground, fg, "invalid input changes nothing");
+        h.key_press(egui::Key::Tab);
+        h.run_steps(2);
+        assert_eq!(h.get_by_role(egui::accesskit::Role::TextInput).value().as_deref(), Some("336699"), "snaps back to the colour");
+    }
+
+    /// The R, G and B fields next to the hex are editable, like the hex field.
+    #[test]
+    fn color_readout_rgb_fields_take_values() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.tools.foreground = [0.0, 0.0, 0.0, 1.0];
+        let mut h = field_harness(app);
+        // The only spin buttons are R, G and B, in that order.
+        h.query_all_by_role(egui::accesskit::Role::SpinButton).nth(1).unwrap().click();
+        h.run_steps(1);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run_steps(1);
+        for ch in "128".chars() {
+            h.event(egui::Event::Text(ch.to_string()));
+            h.run_steps(1);
+        }
+        h.key_press(egui::Key::Tab);
+        h.run_steps(2);
+        assert_eq!(srgb_bytes(h.state().session.tools.foreground), [0x00, 0x80, 0x00]);
+    }
+
+    /// The pro Color panel's hex readout edits the foreground too.
+    #[test]
+    fn color_field_hex_field_takes_a_typed_hex() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.tools.foreground = [1.0, 1.0, 1.0, 1.0];
+        let mut h = field_harness(app);
+        type_hex(&mut h, "003300");
+        assert_eq!(srgb_bytes(h.state().session.tools.foreground), [0x00, 0x33, 0x00]);
     }
 
     #[test]
