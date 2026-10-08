@@ -1933,7 +1933,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         match (wheel, pointer) {
             (Some(crate::wheel_nav::Wheel::Zoom(f)), Some(p)) => {
                 let nz = (view.zoom * f).clamp(0.01, 64.0);
-                zoom_about(&mut view, &xf, p, nz);
+                zoom_about(&mut view, &xf, p, nz, false);
             }
             (Some(crate::wheel_nav::Wheel::Pan(scroll)), _) => {
                 view.center[0] -= scroll.x / view.zoom * if flip { -1.0 } else { 1.0 };
@@ -2128,7 +2128,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             match tool {
                 Tool::Zoom => {
                     let nz = zoom_step(view.zoom, if zoom_out(click_mods.alt) { -1 } else { 1 });
-                    zoom_about(&mut view, &xf, p, nz);
+                    let center = app.session.prefs().tools.zoom_clicked_point_to_center;
+                    zoom_about(&mut view, &xf, p, nz, center);
                 }
                 // A click with the (temporary) Hand does nothing, never the tool underneath.
                 Tool::Hand => {}
@@ -2330,9 +2331,16 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     view
 }
 
-fn zoom_about(view: &mut View, xf: &ViewXform, p: Pos2, new_zoom: f32) {
+/// Zoom to `new_zoom` about the pointer `p`. By default the document point under it stays under
+/// it; with Preferences › Tools › Zoom Clicked Point to Center (`center_on_point`) it moves to the
+/// centre of the view instead (#204).
+fn zoom_about(view: &mut View, xf: &ViewXform, p: Pos2, new_zoom: f32, center_on_point: bool) {
     let before = xf.to_doc(p);
     view.zoom = new_zoom;
+    if center_on_point {
+        view.center = [before[0] as f32, before[1] as f32];
+        return;
+    }
     let d = (p - xf.rect.center()) / new_zoom;
     let dx = if xf.flip { -d.x } else { d.x };
     view.center = [before[0] as f32 - dx, before[1] as f32 - d.y];
@@ -3772,6 +3780,25 @@ mod tests {
         assert_eq!(view.zoom, 3.0, "the short edge fills the available height");
         assert_eq!(view.center, [200.0, 100.0]);
         assert!(!view.fill_pending);
+    }
+
+    #[test]
+    fn zoom_about_centres_the_clicked_point_with_the_preference() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let xf = ViewXform { rect, zoom: 1.0, center: [400.0, 300.0], flip: false };
+        let p = pos2(600.0, 200.0);
+        let doc = xf.to_doc(p);
+        // Off: the document point under the pointer stays under it.
+        let mut view = View { zoom: 1.0, center: [400.0, 300.0], ..Default::default() };
+        zoom_about(&mut view, &xf, p, 2.0, false);
+        let after = ViewXform { rect, zoom: 2.0, center: view.center, flip: false };
+        let s = after.to_screen(doc[0] as f32, doc[1] as f32);
+        assert!((s - p).length() < 0.5, "{s:?} vs {p:?}");
+        // On: the clicked point is the view centre.
+        let mut view = View { zoom: 1.0, center: [400.0, 300.0], ..Default::default() };
+        zoom_about(&mut view, &xf, p, 2.0, true);
+        assert!((view.center[0] - doc[0] as f32).abs() < 0.5, "{:?}", view.center);
+        assert!((view.center[1] - doc[1] as f32).abs() < 0.5, "{:?}", view.center);
     }
 
     #[test]
