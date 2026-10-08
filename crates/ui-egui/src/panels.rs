@@ -54,9 +54,9 @@ fn slot_tool(ui: &egui::Ui, current: Tool, slot: &[Tool], key: egui::Id) -> Tool
 pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let (w1, bx, m) = if t.pro { (40.0, 30.0, 5i8) } else { (50.0, 36.0, 7i8) };
-    // Photoshop switches to a double-column toolbar only when one column doesn't fit.
+    // Two columns when the header chevron asks for them, or when one column doesn't fit.
     let slots: usize = TOOL_SECTIONS.iter().map(|g| g.len()).sum();
-    let double = toolbar_needs_double(slots, TOOL_SECTIONS.len(), bx, t.pro, ui.available_rect_before_wrap().height());
+    let double = app.ui.panels.toolbar_double || toolbar_needs_double(slots, TOOL_SECTIONS.len(), bx, t.pro, ui.available_rect_before_wrap().height());
     let w = if double { w1 + bx + 2.0 } else { w1 };
     egui::Panel::left("toolbar").resizable(false).exact_size(w).frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(m, 8))).show(
         ui,
@@ -64,9 +64,13 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if t.pro {
                 let r = ui.max_rect();
                 ui.painter().line_segment([r.right_top() + vec2(m as f32, -8.0), r.right_bottom() + vec2(m as f32, 8.0)], Stroke::new(1.0, t.separator));
-                // collapse chevrons like Photoshop's toolbar header
-                let (cr, _) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::hover());
-                icons::paint(ui, cr, "chevrons-right", 11.0, t.text_faint);
+                // Photoshop's toolbar header chevrons switch between one and two columns.
+                let (cr, resp) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::click());
+                icons::paint(ui, cr, if double { "chevrons-left" } else { "chevrons-right" }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
+                if resp.clicked() {
+                    app.ui.panels.toolbar_double = !app.ui.panels.toolbar_double;
+                }
                 ui.add_space(4.0);
             }
             // Subtle violet wash at the bottom of the toolbar.
@@ -91,7 +95,10 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ui.data_mut(|d| d.remove::<egui::Id>(held_id));
             }
             let mut slot_index = 0usize;
-            for (si, section) in TOOL_SECTIONS.iter().enumerate() {
+            // Pro has no group dividers, so its two columns fill every row across groups.
+            let flat: Vec<&[Tool]> = TOOL_SECTIONS.iter().flat_map(|s| s.iter().copied()).collect();
+            let sections: Vec<&[&[Tool]]> = if t.pro { vec![&flat[..]] } else { TOOL_SECTIONS.to_vec() };
+            for (si, section) in sections.iter().enumerate() {
                 // Photoshop 2026 draws one uninterrupted column (no group dividers).
                 if si > 0 && !t.pro {
                     ui.add_space(4.0);
@@ -3221,5 +3228,42 @@ mod properties_card_tests {
         h.run_steps(3);
         let doc = &h.state().session.active().unwrap().doc;
         assert_eq!(ids.iter().map(|&id| doc.layer(id).unwrap().opacity).collect::<Vec<_>>(), [0.25, 0.25]);
+    }
+}
+
+#[cfg(test)]
+mod toolbar_tests {
+    use super::*;
+    use egui_kittest::kittest::Queryable;
+
+    /// #1197: the header chevron switches the toolbar between one and two columns.
+    #[test]
+    fn header_chevron_toggles_two_columns() {
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(800.0, 1400.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    toolbar(app, ui);
+                    let left = ui.available_rect_before_wrap().left();
+                    ui.data_mut(|d| d.insert_temp(egui::Id::new("toolbar-test-left"), left));
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Pro);
+        h.run_steps(2);
+        let left = |h: &egui_kittest::Harness<'_, PhotocraftApp>| h.ctx.data(|d| d.get_temp::<f32>(egui::Id::new("toolbar-test-left"))).unwrap_or(0.0);
+        let single = left(&h);
+        assert!(!h.state().ui.panels.toolbar_double);
+
+        h.get_by_label("Toolbar").click();
+        h.run_steps(2);
+        assert!(h.state().ui.panels.toolbar_double);
+        assert!(left(&h) > single + 20.0, "the toolbar did not widen: {single} -> {}", left(&h));
+
+        h.get_by_label("Toolbar").click();
+        h.run_steps(2);
+        assert!(!h.state().ui.panels.toolbar_double);
+        assert_eq!(left(&h), single);
     }
 }
