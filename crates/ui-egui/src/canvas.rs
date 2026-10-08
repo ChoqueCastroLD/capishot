@@ -1140,6 +1140,7 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     let (mut activate, mut close) = (None, None);
     let mut tab_action = None;
     let tab_count = app.session.documents().len();
+    let mac = ui.ctx().os() == egui::os::OperatingSystem::Mac;
     let (strip, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), Sense::hover());
     ui.painter().rect_filled(strip, 0.0, t.tab_strip);
     let mut x = strip.left();
@@ -1165,10 +1166,13 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
             ui.painter().rect_filled(r, 0.0, t.hover.gamma_multiply(0.35));
         }
         ui.painter().line_segment([r.right_top(), r.right_bottom()], Stroke::new(1.0, t.separator));
-        let xr = Rect::from_center_size(egui::pos2(r.left() + 13.0, r.center().y), egui::vec2(14.0, 14.0));
+        let (xr, at) = pro_tab_layout(r, g.size().y, mac);
         let xresp = ui.interact(xr, ui.id().with(("ptabx", i)), Sense::click());
+        // Painted: name the tab and its × for accessibility (and so tests and agents can find them).
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, sel, g.text()));
+        xresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Close")));
         crate::icons::paint(ui, xr, "x", 10.0, if xresp.hovered() { t.text } else { t.text_faint });
-        ui.painter().galley_with_override_text_color(egui::pos2(r.left() + 26.0, r.center().y - g.size().y / 2.0), g, if sel { t.text } else { t.text_faint });
+        ui.painter().galley_with_override_text_color(at, g, if sel { t.text } else { t.text_faint });
         if xresp.clicked() {
             close = Some(i);
         } else if resp.clicked() {
@@ -1194,10 +1198,10 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         }
         ui.painter().line_segment([r.right_top(), r.right_bottom()], Stroke::new(1.0, t.separator));
         crate::jobs_ui::tab_underline(ui, r, frac, &t);
-        let xr = Rect::from_center_size(egui::pos2(r.left() + 13.0, r.center().y), egui::vec2(14.0, 14.0));
+        let (xr, at) = pro_tab_layout(r, g.size().y, mac);
         let xresp = ui.interact(xr, ui.id().with(("ptabjobx", job.0)), Sense::click());
         crate::icons::paint(ui, xr, "x", 10.0, if xresp.hovered() { t.text } else { t.text_faint });
-        ui.painter().galley_with_override_text_color(egui::pos2(r.left() + 26.0, r.center().y - g.size().y / 2.0), g, if sel { t.text } else { t.text_faint });
+        ui.painter().galley_with_override_text_color(at, g, if sel { t.text } else { t.text_faint });
         if xresp.on_hover_text(tl!("Cancel opening")).clicked() {
             cancel_open = Some(job);
         } else if resp.clicked() {
@@ -1244,6 +1248,13 @@ fn drop_slot_line(app: &mut PhotocraftApp, ui: &egui::Ui) {
     let Some(tabs) = app.tab_strip.as_ref().map(|s| &s.tabs) else { return };
     let Some((r, after)) = tabs.get(slot).map(|r| (*r, false)).or_else(|| tabs.last().map(|r| (*r, true))) else { return };
     crate::widgets::drop_line(ui, r, after, true, &crate::theme::Tokens::get(ui.ctx()));
+}
+
+/// A Photoshop-style tab's close button and where its title starts. Photoshop puts the × after the
+/// title on Windows (and so Linux) and before it on macOS (#619).
+fn pro_tab_layout(tab: Rect, title_height: f32, mac: bool) -> (Rect, egui::Pos2) {
+    let (x, title) = if mac { (tab.left() + 13.0, tab.left() + 26.0) } else { (tab.right() - 13.0, tab.left() + 16.0) };
+    (Rect::from_center_size(egui::pos2(x, tab.center().y), egui::vec2(14.0, 14.0)), egui::pos2(title, tab.center().y - title_height / 2.0))
 }
 
 /// Photoshop-style zoom label: "33.3", "100", "12.5".
@@ -2919,6 +2930,38 @@ mod tests {
         assert_eq!(items[2].2, json!({}));
         assert!(!tab_context_items(0, 1)[1].3);
         assert!(items.iter().all(|(_, id, _, _)| photocraft_engine::commands::find(id).is_some()));
+    }
+
+    /// Photoshop's document tab × is after the title on Windows and Linux, before it on macOS (#619).
+    #[test]
+    fn document_tab_close_button_sits_on_the_platform_side() {
+        use egui::os::OperatingSystem as Os;
+        use egui_kittest::kittest::Queryable;
+        for (os, after_title) in [(Os::Windows, true), (Os::Nix, true), (Os::Mac, false)] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+            app.sync_views();
+            // Drawn from the second frame, once the Pro theme is set.
+            let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(600.0, 40.0)).build_ui_state(
+                |ui, (app, ready): &mut (PhotocraftApp, bool)| {
+                    if *ready {
+                        tabs(app, ui);
+                    }
+                },
+                (app, false),
+            );
+            PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Pro);
+            h.ctx.set_os(os);
+            h.state_mut().1 = true;
+            h.run_steps(2);
+            let tab = h.get_by_label_contains("Untitled @").rect();
+            let x = h.get_by_label("Close").rect();
+            assert!(tab.contains_rect(x), "{os:?}: the × is inside its tab");
+            assert_eq!(x.center().x > tab.center().x, after_title, "{os:?}: × at {x:?} in tab {tab:?}");
+            h.get_by_label("Close").click();
+            h.run_steps(2);
+            assert!(h.state().0.session.documents().is_empty(), "{os:?}: the × closes the document");
+        }
     }
 
     #[test]
