@@ -104,26 +104,18 @@ fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer 
     if rect.width() as i32 <= tile && rect.height() as i32 <= tile {
         return photocraft_color::convert::with_cmyk_space(cmyk, || {
             let mut buf = multichannel::backdrop(doc, rect);
-            psblend::LAB_MIX.with(|l| l.set(lab));
-            composite_stack(&doc.layers, &mut buf, cx);
-            psblend::LAB_MIX.with(|l| l.set(false));
+            psblend::with_lab_mix(lab, || composite_stack(&doc.layers, &mut buf, cx));
             buf
         });
     }
     // Effect maps are built once, here, before any tile needs them (#276).
     prepare_effects(&doc.layers, rect, cx, |f| {
-        photocraft_color::convert::with_cmyk_space(cmyk, || {
-            psblend::LAB_MIX.with(|l| l.set(lab));
-            f();
-            psblend::LAB_MIX.with(|l| l.set(false));
-        });
+        photocraft_color::convert::with_cmyk_space(cmyk, || psblend::with_lab_mix(lab, f));
     });
     let run = |t: Rect| {
         photocraft_color::convert::with_cmyk_space(cmyk, || {
             let mut b = multichannel::backdrop(doc, t);
-            psblend::LAB_MIX.with(|l| l.set(lab));
-            composite_stack(&doc.layers, &mut b, cx);
-            psblend::LAB_MIX.with(|l| l.set(false));
+            psblend::with_lab_mix(lab, || composite_stack(&doc.layers, &mut b, cx));
             b
         })
     };
