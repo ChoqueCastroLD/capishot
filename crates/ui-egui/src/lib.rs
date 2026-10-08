@@ -1430,6 +1430,18 @@ impl PhotocraftApp {
         }
     }
 
+    /// File › New's fields: the defaults, plus the Clipboard preset (the clipboard image's size,
+    /// selected) when the clipboard holds an image. Opening the dialog is an explicit request, so
+    /// the OS clipboard is read here, as for a paste.
+    pub(crate) fn new_document_fields(&mut self) -> serde_json::Map<String, serde_json::Value> {
+        let mut f = crate::state::UiState::new_document_fields();
+        self.import_os_clipboard();
+        if let Some(c) = self.session.clipboard.as_ref().filter(|c| !c.bounds.is_empty()) {
+            crate::new_doc_ui::set_clipboard(&mut f, c.bounds.width(), c.bounds.height());
+        }
+        f
+    }
+
     /// If the OS clipboard holds an image that isn't the one we put there, make it the session
     /// clipboard (so ⌘V pastes screenshots and images copied in other apps, like Photoshop).
     /// Returns true when a new external image was imported.

@@ -1403,7 +1403,8 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ui.add_space(((card.width() - 2.0 * 190.0 - 12.0) / 2.0).max(0.0));
                 ui.spacing_mut().item_spacing.x = 12.0;
                 if crate::widgets::primary_button(ui, &new_label, 190.0).clicked() {
-                    app.ui.open_dialog(crate::state::DialogKind::NewDocument, crate::state::UiState::new_document_fields());
+                    let fields = app.new_document_fields();
+                    app.ui.open_dialog(crate::state::DialogKind::NewDocument, fields);
                 }
                 if crate::widgets::secondary_button(ui, &open_label, 190.0).clicked() {
                     app.open_dialog_file();
