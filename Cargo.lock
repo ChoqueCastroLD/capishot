@@ -3526,6 +3526,7 @@ dependencies = [
  "rfd",
  "ron",
  "serde_json",
+ "winit",
  "winresource",
  "winsafe",
  "x11rb",
