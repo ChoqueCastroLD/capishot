@@ -840,8 +840,15 @@ impl PhotocraftApp {
             return Ok(("smart object".into(), Vec::new()));
         }
         let st = self.session.active().ok_or("no document")?;
-        // Documents are named after their file ("cat.png"): suggest "cat.psd", not "cat.png.psd".
-        let suggested = st.path.clone().unwrap_or_else(|| format!("{}.psd", st.doc.name.rsplit_once('.').map_or(st.doc.name.as_str(), |(stem, _)| stem)));
+        // Suggest the file's own name if Save As can write its format, otherwise switch to .psd.
+        let ext = st.path.as_deref().and_then(|p| std::path::Path::new(p).extension()).map(|e| e.to_string_lossy().to_ascii_lowercase());
+        let writable = ext.is_some_and(|e| {
+            matches!(e.as_str(), photocraft_format::EXTENSION | "psd" | "psb") || photocraft_codecs::from_extension(&e).is_some_and(|f| f.caps().write)
+        });
+        let suggested = match &st.path {
+            Some(p) if writable => p.clone(),
+            p => std::path::Path::new(p.as_deref().unwrap_or(&st.doc.name)).with_extension("psd").to_string_lossy().into_owned(),
+        };
         let path = match path {
             Some(p) => p,
             None => self.services.pick_save.as_mut().and_then(|f| f(&suggested)).ok_or("cancelled")?,
