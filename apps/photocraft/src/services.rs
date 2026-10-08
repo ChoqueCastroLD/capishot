@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-/// Everything File › Open reads: PhotoCraft and Photoshop documents, flat images, and Photoshop
+/// Everything File › Open reads: PhotoCraft, Photoshop and Affinity preview documents, flat images, and Photoshop
 /// brushes (.abr) and gradients (.grd), which go to the preset libraries.
 const OPEN_EXTS: &[&str] = &[
     "pcraft", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam",
-    "pfm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd",
+    "pfm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "af",
 ];
 
 /// File › Save As formats: (filter name, extensions). The filter matching the suggested name's

@@ -28,6 +28,12 @@ readiness; treat it as an upper bound.
 
 **Menu parity: 532 / 625 (85.1%)** on 2026-10-01, up from 224 (35.8%) the day before. See [`parity.md`](parity.md).
 
+2026-10-08: Affinity `.af` import has an initial, bounded **embedded-preview-only** path
+([format notes](../crates/affinity/README.md)). Some version-12 documents open at the preview's
+dimensions with an explicit warning and without a source save path. Previewless files and
+legacy containers remain unsupported; native layers, document colour settings, full-resolution
+content and Affinity writing are still missing. This does not raise editable-format parity.
+
 ## Honest parity assessment (2026-10-05)
 
 This is the reference answer to "how close are we to Photoshop parity, really". Agents: read it
@@ -149,4 +155,3 @@ Each milestone has a **definition of done (DoD)** and must leave `main` green on
 | **M10** | Smart features | `ml` (ort native / ort-web on the web), Select Subject/Object/Sky, Remove BG, Remove tool, content-aware fill, healing, AI denoise, RAW develop | Quality benchmarks on a public dataset; timing budgets |
 | **M11** | Automation + formats | MCP server, batch, scripting, remaining formats (JP2, DICOM, DPX…), C2PA | An agent completes 10 scripted edit tasks via MCP |
 | **M12** | Pro parity | CMYK/Lab UI, print, HDR display, photomerge/HDR merge, timeline, layer comps, artboards, symmetry, neural filters | `xtask parity` ≥ 90% of Photoshop menu checklist |
-

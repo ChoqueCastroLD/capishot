@@ -21,6 +21,7 @@
 - [Overview](formats/overview.md)
 - [PSD and PSB](formats/psd-psb.md)
 - [Raster formats](formats/raster-formats.md)
+- [Affinity previews](formats/affinity.md)
 - [The `.pcraft` format](formats/pcraft.md)
 
 # Automation
