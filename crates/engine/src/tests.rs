@@ -635,6 +635,89 @@ fn move_to_reorders_and_nests() {
 }
 
 #[test]
+fn move_selected_layers_into_existing_group_preserves_order_selection_and_one_undo() {
+    let mut s = session_with_doc();
+    let a = s.execute("layer.new.layer", json!({"name": "A"})).unwrap()["layer"].as_u64().unwrap();
+    let b = s.execute("layer.new.layer", json!({"name": "B"})).unwrap()["layer"].as_u64().unwrap();
+    let c = s.execute("layer.new.layer", json!({"name": "C"})).unwrap()["layer"].as_u64().unwrap();
+    let g = s.execute("layer.new.group", json!({"name": "Existing Group"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("layer.select", json!({"layer": a})).unwrap();
+    s.execute("layer.select", json!({"layer": c, "mode": "add"})).unwrap();
+
+    let past = s.active().unwrap().history.past_len();
+    // Pass reversed IDs deliberately. The document order (A below C) must win.
+    let r = s.execute("layer.moveTo", json!({"layers": [c, a], "target": g, "position": "into"})).unwrap();
+    assert_eq!(r["moved"], 2);
+    let st = s.active().unwrap();
+    let root: Vec<_> = st.doc.layers.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(root, ["Background", "B", "Existing Group"]);
+    let names: Vec<_> = st.doc.layer(LayerId(g)).unwrap().children().unwrap().iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(names, ["A", "C"]);
+    assert_eq!(st.history.past_len(), past + 1, "one drag = one undo step");
+    assert_eq!(st.active_layer, Some(LayerId(c)), "preserve the active member");
+    assert!(st.selected_layers().contains(&LayerId(a)));
+    assert!(st.selected_layers().contains(&LayerId(c)));
+
+    s.execute("edit.undo", json!({})).unwrap();
+    let root: Vec<_> = s.active().unwrap().doc.layers.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(root, ["Background", "A", "B", "C", "Existing Group"]);
+    assert!(s.active().unwrap().doc.layer(LayerId(g)).unwrap().children().unwrap().is_empty());
+    s.execute("edit.redo", json!({})).unwrap();
+    assert_eq!(s.active().unwrap().doc.layer(LayerId(g)).unwrap().children().unwrap().len(), 2);
+    assert_eq!(b, s.active().unwrap().doc.layers[1].id.0);
+}
+
+#[test]
+fn move_selected_layers_keeps_selected_group_children_and_supports_above_below() {
+    let mut s = session_with_doc();
+    let a = s.execute("layer.new.layer", json!({"name": "A"})).unwrap()["layer"].as_u64().unwrap();
+    let b = s.execute("layer.new.layer", json!({"name": "B"})).unwrap()["layer"].as_u64().unwrap();
+    let c = s.execute("layer.new.layer", json!({"name": "C"})).unwrap()["layer"].as_u64().unwrap();
+    let group = s.execute("layer.new.group", json!({"name": "G"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("layer.moveTo", json!({"layer": b, "target": group, "position": "into"})).unwrap();
+    let target = s.execute("layer.new.group", json!({"name": "Target"})).unwrap()["layer"].as_u64().unwrap();
+
+    let r = s.execute("layer.moveTo", json!({"layers": [b, group, a], "target": target, "position": "into"})).unwrap();
+    assert_eq!(r["moved"], 2, "moving a group already carries its selected child");
+    let target_children = s.active().unwrap().doc.layer(LayerId(target)).unwrap().children().unwrap();
+    assert_eq!(target_children.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["A", "G"]);
+    assert_eq!(target_children[1].children().unwrap()[0].id.0, b);
+    assert!(s.active().unwrap().selected_layers().contains(&LayerId(b)), "nested selected child is still selected");
+
+    s.execute("layer.moveTo", json!({"layers": [group, a], "target": c, "position": "above"})).unwrap();
+    assert_eq!(s.active().unwrap().doc.layers.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["Background", "C", "A", "G", "Target"]);
+    s.execute("layer.moveTo", json!({"layers": [group, a], "target": c, "position": "below"})).unwrap();
+    assert_eq!(s.active().unwrap().doc.layers.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["Background", "A", "G", "C", "Target"]);
+}
+
+#[test]
+fn move_selected_layers_invalid_targets_leave_document_and_history_unchanged() {
+    let mut s = session_with_doc();
+    let a = s.execute("layer.new.layer", json!({"name": "A"})).unwrap()["layer"].as_u64().unwrap();
+    let g = s.execute("layer.new.group", json!({"name": "G"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("layer.moveTo", json!({"layer": a, "target": g, "position": "into"})).unwrap();
+    let outside = s.execute("layer.new.layer", json!({"name": "Outside"})).unwrap()["layer"].as_u64().unwrap();
+    let root = s.active().unwrap().doc.layers.clone();
+    let past = s.active().unwrap().history.past_len();
+    for params in [
+        json!({"layers": [g, a], "target": a, "position": "into"}),
+        json!({"layers": [g], "target": g, "position": "above"}),
+        json!({"layers": [g, outside], "target": g, "position": "into"}),
+        json!({"layers": [g, outside], "target": a, "position": "below"}),
+        json!({"layers": [a], "target": outside, "position": "into"}),
+        json!({"layers": [a, a], "target": outside}),
+        json!({"layers": [a, "bogus"], "target": outside}),
+        json!({"layers": [], "target": outside}),
+        json!({"layers": [u64::MAX], "target": outside}),
+        json!({"layers": [a], "target": outside, "position": "sideways"}),
+    ] {
+        assert!(s.execute("layer.moveTo", params.clone()).is_err(), "{params}");
+        assert_eq!(s.active().unwrap().history.past_len(), past, "{params}: no history step");
+        assert_eq!(s.active().unwrap().doc.layers, root, "{params}: layers unchanged");
+    }
+}
+
+#[test]
 fn selecting_a_layer_does_not_dirty_the_document() {
     let mut s = session_with_doc();
     let bg = s.active().unwrap().doc.layers[0].id;
