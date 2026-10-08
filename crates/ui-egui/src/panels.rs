@@ -3344,3 +3344,32 @@ mod layer_drag_edge_scroll_tests {
         assert_eq!(layer_drag_edge_scroll(Some(pos2(10.0, 20.0)), viewport, true, 0.016), 0.0);
     }
 }
+
+#[cfg(test)]
+mod group_drag_selection_tests {
+    use super::*;
+
+    #[test]
+    fn dragging_a_selected_layer_moves_the_complete_selection_into_a_group() {
+        let a = LayerId(10);
+        let b = LayerId(11);
+        let group = LayerId(20);
+        let payload = layer_drop_payload(a.0, group, "into", &[a, b]);
+        assert_eq!(payload, json!({"layers": [10, 11], "target": 20, "position": "into"}));
+        assert_eq!(payload.get("layer"), None, "batch drops must not also send a single layer");
+
+        // Above/below use the same batch route; engine preserves the document stack order.
+        assert_eq!(layer_drop_payload(b.0, group, "above", &[a, b])["position"], "above");
+        assert_eq!(layer_drop_payload(b.0, group, "below", &[a, b])["position"], "below");
+    }
+
+    #[test]
+    fn dragging_unselected_or_singular_row_remains_a_single_layer_move() {
+        let a = LayerId(10);
+        let b = LayerId(11);
+        let group = LayerId(20);
+        assert_eq!(layer_drop_payload(9, group, "into", &[a, b]), json!({"layer": 9, "target": 20, "position": "into"}));
+        assert_eq!(layer_drop_payload(a.0, group, "above", &[a]), json!({"layer": 10, "target": 20, "position": "above"}));
+        assert_eq!(layer_drop_payload(a.0, group, "below", &[]), json!({"layer": 10, "target": 20, "position": "below"}));
+    }
+}
