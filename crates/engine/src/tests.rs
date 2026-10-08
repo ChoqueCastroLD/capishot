@@ -674,8 +674,9 @@ fn move_selected_layers_keeps_selected_group_children_and_supports_above_below()
     let b = s.execute("layer.new.layer", json!({"name": "B"})).unwrap()["layer"].as_u64().unwrap();
     let c = s.execute("layer.new.layer", json!({"name": "C"})).unwrap()["layer"].as_u64().unwrap();
     let group = s.execute("layer.new.group", json!({"name": "G"})).unwrap()["layer"].as_u64().unwrap();
-    s.execute("layer.moveTo", json!({"layer": b, "target": group, "position": "into"})).unwrap();
+    // Made before B moves into G: a new group goes above the active layer, which would then be inside G.
     let target = s.execute("layer.new.group", json!({"name": "Target"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("layer.moveTo", json!({"layer": b, "target": group, "position": "into"})).unwrap();
 
     let r = s.execute("layer.moveTo", json!({"layers": [b, group, a], "target": target, "position": "into"})).unwrap();
     assert_eq!(r["moved"], 2, "moving a group already carries its selected child");
