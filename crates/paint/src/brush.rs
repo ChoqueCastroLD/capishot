@@ -367,7 +367,7 @@ pub struct BrushSettings {
     /// Spacing between dabs as a fraction of the diameter.
     pub spacing: f32,
     /// Photoshop's Spacing checkbox. Off: the pointer's speed sets the spacing (one dab every
-    /// [`crate::dynamics::SPEED_SPACING_MS`] of stroke time; without timestamps, one per input point).
+    /// [`crate::dynamics::SPEED_SPACING_MS`] of stroke time; without timestamps, by distance).
     pub spacing_enabled: bool,
     /// Maximum coverage for the whole stroke.
     pub opacity: f32,

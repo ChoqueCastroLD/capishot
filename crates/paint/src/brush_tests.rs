@@ -801,9 +801,11 @@ fn spacing_off_spaces_dabs_by_pointer_speed() {
     assert_eq!((slow, fast), (51, 6));
     // Never denser than half a pixel, however slow.
     assert!(dabs_of(&b, &timed(1.0e9)).len() <= 201);
-    // No timestamps: one dab per input point.
-    let pts: Vec<StrokePoint> = (0..7).map(|i| StrokePoint::new(f64::from(i) * 15.0, 10.0, 1.0)).collect();
-    assert_eq!(dabs_of(&b, &pts).len(), 7);
+    // No timestamps (a ⇧-click line): spaced by distance like Spacing on, not a dab per point.
+    let pts = [StrokePoint::new(0.0, 10.0, 1.0), StrokePoint::new(90.0, 10.0, 1.0), StrokePoint::new(100.0, 10.0, 1.0)];
+    let checked = BrushSettings { spacing_enabled: true, ..b.clone() };
+    assert_eq!(dabs_of(&b, &pts).len(), dabs_of(&checked, &pts).len());
+    assert!(dabs_of(&b, &pts).len() > 3);
     // Checked: fixed spacing (25 % of 20 px = 5 px) whatever the speed.
     b.spacing_enabled = true;
     assert_eq!(dabs_of(&b, &timed(400.0)).len(), dabs_of(&b, &timed(40.0)).len());
