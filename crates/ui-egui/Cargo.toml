@@ -21,6 +21,8 @@ photocraft-plugins = { workspace = true }
 photocraft-algo = { workspace = true }
 photocraft-text = { workspace = true }
 photocraft-vector = { workspace = true }
+# Only MAX_BRUSH_SIZE: `ui.set brushSize` validates against the Brush Settings range up front.
+photocraft-paint = { workspace = true }
 # Reading files to open them (bounded reads, a clear error for files larger than memory).
 photocraft-format = { workspace = true }
 # Decoding the brand mark's PNG (`brand.rs`); already linked through photocraft-io.
