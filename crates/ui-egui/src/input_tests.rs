@@ -366,3 +366,26 @@ fn kerning_field_values() {
         assert_eq!(crate::type_tool::parse_kerning(s), None, "{s}");
     }
 }
+
+/// Sampling shows a pipette instead of the crosshair: the Eyedropper tool, and a painting tool
+/// with ⌥ held. Preferences › Cursors › Other Cursors = Precise keeps the crosshair.
+#[test]
+fn eyedropper_and_alt_sampling_show_a_pipette() {
+    let mut h = harness();
+    let p = h.state().last_canvas_rect.center();
+    let cursor = |h: &mut Harness<'static, PhotocraftApp>| {
+        h.hover_at(p);
+        h.run_steps(2);
+        h.output().platform_output.cursor_icon
+    };
+    h.state_mut().ui.tool = crate::state::Tool::Eyedropper;
+    assert_eq!(cursor(&mut h), egui::CursorIcon::None, "the pipette replaces the pointer");
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    h.event(egui::Event::ModifiersChanged(Modifiers::ALT));
+    assert_eq!(cursor(&mut h), egui::CursorIcon::None, "⌥ samples with a pipette");
+    h.state_mut().run("prefs.set", json!({"values": {"cursors.other": "precise"}})).unwrap();
+    assert_eq!(cursor(&mut h), egui::CursorIcon::Crosshair, "Precise keeps the crosshair");
+    h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    h.state_mut().ui.tool = crate::state::Tool::Eyedropper;
+    assert_eq!(cursor(&mut h), egui::CursorIcon::Crosshair);
+}
