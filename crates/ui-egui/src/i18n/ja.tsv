@@ -2117,3 +2117,4 @@ cameraRaw	Color	カラー
 	% of all commits	全コミットに占める割合 (%)
 	Lines +/−	行数 +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR {prs} 件、コミット {commits} 件、行 +{added} / −{deleted} (Δ {delta})、バイナリ +{binAdded} / −{binDeleted}、{first} – {last}
+	Apply At Canvas Bounds	カンバスの境界に効果を適用

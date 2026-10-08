@@ -2718,3 +2718,4 @@ cameraRaw	Color	색상
 	% of all commits	전체 커밋 대비 %
 	Lines +/−	줄 +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR {prs}개, 커밋 {commits}개, 줄 +{added} / −{deleted} (Δ {delta}), 바이너리 +{binAdded} / −{binDeleted}, {first} – {last}
+	Apply At Canvas Bounds	캔버스 경계에 효과 적용

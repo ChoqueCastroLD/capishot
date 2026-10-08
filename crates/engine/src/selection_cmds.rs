@@ -244,8 +244,15 @@ fn modify(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
     let (w, h) = (area.width() as usize, area.height() as usize);
     // Feather reaches 3σ = 1.5 r; the others reach r. A margin past that keeps the canvas edge out of
     // reach. A selection clear of the canvas edge needs none: both readings agree there.
-    let pad = if touches_edge(&m, w, h) { (r * 2.0).ceil() as usize + 2 } else { 0 };
-    let (pw, ph) = (w + 2 * pad, h + 2 * pad);
+    let reach = if op == "feather" { r * 1.5 } else { r };
+    let pad = if touches_edge(&m, w, h) { reach.ceil() as usize + 2 } else { 0 };
+    let grown = |n: usize| pad.checked_mul(2).and_then(|p| n.checked_add(p));
+    let (Some(pw), Some(ph)) = (grown(w), grown(h)) else {
+        return Err(EngineError::BadParams { cmd: format!("select.modify.{op}"), msg: "the selection is too large to modify".into() });
+    };
+    if pw.checked_mul(ph).is_none_or(|n| n > MAX_MODIFY_PIXELS) {
+        return Err(EngineError::BadParams { cmd: format!("select.modify.{op}"), msg: "the selection is too large to modify".into() });
+    }
     let padded = pad_mask(&m, w, h, pad, at_bounds);
     let out = match op {
         "expand" => sel::expand(&padded, pw, ph, r),
@@ -264,6 +271,10 @@ fn modify(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
     };
     set_selection(s, label, area, out, SelectionMode::Replace)
 }
+
+/// The largest padded mask Modify works on (a 300000 × 300000 canvas is 9e10 pixels; this caps a
+/// padded copy at ~4 GB of f32, beyond which the edit is refused rather than aborting on allocation).
+const MAX_MODIFY_PIXELS: usize = 1 << 30;
 
 /// Whether any pixel on the outermost rows or columns of `m` (`w`×`h`) is selected.
 fn touches_edge(m: &[f32], w: usize, h: usize) -> bool {
