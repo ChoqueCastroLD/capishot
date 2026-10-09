@@ -212,8 +212,7 @@ pub(crate) fn read_plane(t: &Tiff, ifd: &Ifd, limits: &Limits, layout: JpegLayou
         return Err(RawError::unsupported("planar raw data"));
     }
     match compression {
-        1 | 7 | 8 | JPEG_XL => {}
-        34892 => return Err(RawError::unsupported("lossy-compressed DNG")),
+        1 | 7 | 8 | 34892 | JPEG_XL => {}
         34713 => return Err(RawError::unsupported("Nikon compressed NEF")),
         32767 => return Err(RawError::unsupported("Sony compressed ARW")),
         65535 => return Err(RawError::unsupported("Pentax compressed PEF")),
@@ -254,6 +253,19 @@ pub(crate) fn read_plane(t: &Tiff, ifd: &Ifd, limits: &Limits, layout: JpegLayou
                 let mut v = jxl::decode(src, s.w, coded_rows, samples, bits, limits)?;
                 v.resize(s.w * s.h * samples, 0);
                 Ok(v)
+            }
+            34892 => {
+                // Adobe DNG compression 34892: baseline JPEG tiles (lossy, 8-bit). The tile is
+                // a complete JPEG stream; zune-jpeg decodes it to gray (CFA) samples.
+                let options = zune_core::options::DecoderOptions::default().jpeg_set_out_colorspace(zune_core::colorspace::ColorSpace::Luma);
+                let mut dec = zune_jpeg::JpegDecoder::new_with_options(zune_core::bytestream::ZCursor::new(src), options);
+                let decoded = dec.decode().map_err(|e| RawError::malformed(format!("lossy JPEG tile: {e:?}")))?;
+                let f = dec.info().ok_or_else(|| RawError::malformed("lossy JPEG tile has no header"))?;
+                if (f.width as usize, f.height as usize) != (s.w, rows) {
+                    return Err(RawError::malformed(format!("lossy JPEG tile is {}x{}, expected {}x{}", f.width, f.height, s.w, rows)));
+                }
+                // The 8-bit samples widen to the document's 16-bit range (0xFF -> 0xFFFF).
+                Ok(decoded.into_iter().map(|b| u16::from(b) * 257).collect())
             }
             _ => {
                 let need = s.w * rows * samples;

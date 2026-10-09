@@ -559,4 +559,35 @@ fn profile_gain_table_map_is_reported() {
     assert!(!gain_table(&sensor(&spec.build())));
     spec.profile_gain_table_map = Some(vec![0; 64]);
     assert!(gain_table(&sensor(&spec.build())));
+
+/// Adobe DNG compression 34892 (lossy baseline JPEG, 8-bit luma tiles): decodes to the tile
+/// samples widened to 16 bits, within the JPEG quality band (Q60 artifacts are mild but real).
+#[test]
+fn lossy_jpeg_tiles_decode() {
+    let (w, h) = (32, 32);
+    // A smooth ramp: baseline JPEG at Q60 keeps it within a few quantisation steps.
+    let data: Vec<u16> = (0..w * h).map(|i| 4096 + (i / w) as u16 * 16).collect();
+    let mut spec = DngSpec::cfa(w, h, data.clone());
+    spec.storage = DngStorage::LossyJpegTiles { width: 16, height: 16 };
+    let s = sensor(&spec.build());
+    assert_eq!((s.width, s.height, s.samples), (w, h, 1));
+    let mut worst = 0u32;
+    for (got, want) in s.data.iter().zip(&data) {
+        // The tile was written 8-bit (>>8), so the quantised expectation is (want>>8)<<8.
+        let quant = u32::from(*want >> 8) << 8;
+        worst = worst.max(u32::from(got.abs_diff(quant as u16)));
+    }
+    assert!(worst <= 4 * 256, "worst deviation from the 8-bit quantisation: {worst}");
 }
+
+/// A lossy JPEG tile cut mid-stream fails cleanly.
+#[test]
+fn lossy_jpeg_tiles_hostile() {
+    let (w, h) = (32, 32);
+    let data: Vec<u16> = (0..w * h).map(|_i| 8192u16).collect();
+    let mut spec = DngSpec::cfa(w, h, data);
+    spec.storage = DngStorage::LossyJpegTiles { width: 32, height: 32 };
+    let bytes = spec.build();
+    let at = bytes.windows(2).position(|w| w == [0xFF, 0xD8]).expect("jpeg SOI") + 2;
+    let cut = &bytes[..at + (bytes.len() - at) / 2];
+    assert!(decode(cut, &Limits::default()).is_err(), "a cut JPEG tile must not decode");}
