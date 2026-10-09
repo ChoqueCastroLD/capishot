@@ -2167,6 +2167,14 @@ cameraRaw	Color	Barvy
 	Channels:	Kanály:
 	Knockout	Vyřazení
 	Apply At Canvas Bounds	Použít efekt na hranicích plátna
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Výběr barvy (Barva textu)
+	Pick screen color	Vybrat barvu obrazovky
+	Sample a pixel anywhere on the screen	Vzorkovat pixel kdekoli na obrazovce
+	Click to pick · Esc to cancel	Kliknutí vybere · Esc zruší
+	Pick a screen pixel or press Esc to cancel	Vyberte pixel obrazovky nebo stiskněte Esc pro zrušení
+	Scroll to zoom	Rolováním přibližujte
 	Show/Hide All Panels	Zobrazit/skrýt všechny panely
 	Show/Hide Panels	Zobrazit/skrýt panely
 	Could not open	Nelze otevřít

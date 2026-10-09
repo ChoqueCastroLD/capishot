@@ -2605,6 +2605,14 @@ cameraRaw	Whites	Brancos
 	Channels:	Canais:
 	Knockout	Vazado
 	Apply At Canvas Bounds	Aplicar efeito nos limites da tela
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Seletor de cores (Cor do texto)
+	Pick screen color	Escolher cor da tela
+	Sample a pixel anywhere on the screen	Amostrar um pixel em qualquer lugar da tela
+	Click to pick · Esc to cancel	Clique para escolher · Esc para cancelar
+	Pick a screen pixel or press Esc to cancel	Escolha um pixel da tela ou pressione Esc para cancelar
+	Scroll to zoom	Role para ampliar
 	Show/Hide All Panels	Mostrar/ocultar todos os painéis
 	Show/Hide Panels	Mostrar/ocultar painéis
 	Could not open	Não foi possível abrir

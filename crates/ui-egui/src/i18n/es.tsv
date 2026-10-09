@@ -2238,6 +2238,14 @@ cameraRaw	Amount	Cantidad
 	Channels:	Canales:
 	Knockout	Cobertura
 	Apply At Canvas Bounds	Aplicar efecto en los límites del lienzo
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Selector de color (Color del texto)
+	Pick screen color	Elegir color de pantalla
+	Sample a pixel anywhere on the screen	Tomar un píxel en cualquier lugar de la pantalla
+	Click to pick · Esc to cancel	Clic para elegir · Esc para cancelar
+	Pick a screen pixel or press Esc to cancel	Elige un píxel de pantalla o pulsa Esc para cancelar
+	Scroll to zoom	Desplaza para ampliar
 	Show/Hide All Panels	Mostrar/ocultar todos los paneles
 	Show/Hide Panels	Mostrar/ocultar paneles
 	Could not open	No se pudo abrir

@@ -2207,6 +2207,14 @@
 	Channels:	Kanäle:
 	Knockout	Aussparung
 	Apply At Canvas Bounds	Effekt an Arbeitsflächenbegrenzungen anwenden
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Farbwähler (Textfarbe)
+	Pick screen color	Bildschirmfarbe auswählen
+	Sample a pixel anywhere on the screen	Ein Pixel an beliebiger Stelle auf dem Bildschirm auswählen
+	Click to pick · Esc to cancel	Klicken zum Auswählen · Esc zum Abbrechen
+	Pick a screen pixel or press Esc to cancel	Ein Bildschirmpixel auswählen oder mit Esc abbrechen
+	Scroll to zoom	Zum Zoomen scrollen
 	Show/Hide All Panels	Alle Bedienfelder ein-/ausblenden
 	Show/Hide Panels	Bedienfelder ein-/ausblenden
 	Could not open	Öffnen nicht möglich

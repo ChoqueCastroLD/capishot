@@ -2241,6 +2241,14 @@ cameraRaw	Amount	Quantità
 	Add to Swatches	Aggiungi ai campioni
 	Convert to Layers	Converti in livelli
 	Apply At Canvas Bounds	Applica effetto ai limiti dell’area di lavoro
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Selettore colore (Colore del testo)
+	Pick screen color	Scegli colore dallo schermo
+	Sample a pixel anywhere on the screen	Campiona un pixel in qualsiasi punto dello schermo
+	Click to pick · Esc to cancel	Clic per scegliere · Esc per annullare
+	Pick a screen pixel or press Esc to cancel	Scegli un pixel dello schermo o premi Esc per annullare
+	Scroll to zoom	Scorri per ingrandire
 	Show/Hide All Panels	Mostra/nascondi tutti i pannelli
 	Show/Hide Panels	Mostra/nascondi pannelli
 	Could not open	Impossibile aprire

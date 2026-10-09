@@ -112,6 +112,7 @@ pub mod rasterize_prompt;
 pub mod retouch_ui;
 mod rgb_histogram;
 pub mod rulers;
+pub mod screen_picker;
 pub mod scrollbars;
 pub mod shortcut_dispatch;
 pub mod shortcuts;
@@ -236,6 +237,8 @@ pub type CursorPosFn = Box<dyn FnMut(&egui::Context) -> Option<egui::Pos2>>;
 /// I/O dependencies.
 #[derive(Default)]
 pub struct Services {
+    /// User-initiated desktop/browser pixel sampling.
+    pub screen_pick: Option<screen_picker::Service>,
     /// Decode a file's bytes into a document (PSD, PNG, JPEG, …).
     pub import: Option<ImportFn>,
     /// Encode a document for a file name (format chosen by extension).
@@ -1052,8 +1055,10 @@ impl eframe::App for PhotocraftApp {
         discard_ui::guard_window_close(self, ctx);
         // Background jobs: apply finished ones, keep frames coming, Esc cancels (before the
         // shortcuts see Esc).
-        jobs_ui::tick(self, ctx);
-        shortcuts::handle(self, ctx);
+        if !screen_picker::tick(self, ctx) {
+            jobs_ui::tick(self, ctx);
+            shortcuts::handle(self, ctx);
+        }
         let arrived: Vec<(String, Vec<u8>)> =
             self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
         for (name, bytes) in arrived {
@@ -1106,6 +1111,22 @@ impl eframe::App for PhotocraftApp {
         }
         let t0 = gpu_canvas::now_ms();
         // View › Screen Mode › Full Screen Mode: only the image, on black (F or Esc returns).
+        screen_picker::show(&ctx);
+        if screen_picker::busy(&ctx) && screen_picker::showing(&ctx) {
+            egui::Modal::new(egui::Id::new("screen-color-wait")).show(&ctx, |ui| {
+                ui.spinner();
+                ui.label(tl!("Pick a screen pixel or press Esc to cancel"));
+                if ui.button(tl!("Cancel")).clicked() {
+                    screen_picker::cancel(&ctx);
+                }
+            });
+            self.automation_input = false;
+            return;
+        }
+        if screen_picker::busy(&ctx) {
+            ui.disable();
+            ui.set_opacity(1.0);
+        }
         let chrome = !self.ui.view.hides_chrome();
         if !chrome && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = menus::invoke(self, &ctx, "view.screenMode.standard", serde_json::json!({}));
@@ -1155,6 +1176,11 @@ impl eframe::App for PhotocraftApp {
         gpu_status::check(self, &ctx);
         self.automation_input = false;
         native_menu::sync(self, &ctx);
+        if screen_picker::busy(&ctx) {
+            // Block input without a backdrop: the worker may still be capturing the screen.
+            egui::Modal::new(egui::Id::new("screen-color-wait")).frame(egui::Frame::NONE).backdrop_color(egui::Color32::TRANSPARENT).show(&ctx, |_| {});
+            ctx.set_cursor_icon(egui::CursorIcon::Wait);
+        }
         self.perf.frame(gpu_canvas::now_ms() - t0);
         // Synthetic input is injected one press/release step per frame: keep frames coming until
         // the queue is empty, then release control replies waiting on it.

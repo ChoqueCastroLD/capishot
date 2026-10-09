@@ -134,7 +134,7 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
         if let ArtboardBackground::Custom(c) = a.background {
             let [r8, g8, b8, _] = c.to_rgba8();
             let mut rgb = [r8, g8, b8];
-            if ui.color_edit_button_srgb(&mut rgb).changed() {
+            if crate::widgets::color_edit_button_srgb(ui, &mut rgb).changed() {
                 edit = Some(json!({"layer": layer.id.0, "background": "custom", "color": format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]), "coalesce": key("color")}));
             }
         }

@@ -1014,7 +1014,7 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
                     let c = prefs::parse_hex(s).unwrap_or([128, 128, 128]);
                     let mut rgb = c;
                     ui.horizontal(|ui| {
-                        ui.color_edit_button_srgb(&mut rgb);
+                        crate::widgets::color_edit_button_srgb(ui, &mut rgb);
                         hex_field(ui, &path, &mut rgb);
                     });
                     obj.insert(k, json!(format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])));

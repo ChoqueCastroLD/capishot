@@ -589,11 +589,15 @@ fn swatch(ui: &mut egui::Ui, fill: Option<&photocraft_doc::Fill>, tip: &str) -> 
     };
     ui.painter().rect_stroke(r, 2.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Outside);
     let resp = resp.on_hover_text(tip);
-    let mut out = None;
+    let screen_id = resp.id.with("screen-color");
+    let mut out = crate::screen_picker::take(ui.ctx(), screen_id).map(crate::color_picker_ui::hex);
     crate::widgets::swatch_popup(&resp).show(|ui| {
         let mut c = current.unwrap_or(Color32::BLACK);
         if egui::color_picker::color_picker_color32(ui, &mut c, egui::color_picker::Alpha::Opaque) {
             out = Some(format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b()));
+        }
+        if let Some(rgb) = crate::screen_picker::button(ui, screen_id) {
+            out = Some(crate::color_picker_ui::hex(rgb));
         }
         if fill.is_some() && ui.button(tl!("No Color")).clicked() {
             out = Some("none".into());

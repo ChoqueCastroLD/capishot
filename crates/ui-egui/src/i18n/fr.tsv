@@ -2598,6 +2598,14 @@ cameraRaw	Blending	Fusion
 	Channels:	Couches :
 	Knockout	Masquage
 	Apply At Canvas Bounds	Appliquer l’effet aux limites de la zone de travail
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Sélecteur de couleurs (Couleur du texte)
+	Pick screen color	Choisir une couleur à l’écran
+	Sample a pixel anywhere on the screen	Prélever un pixel n’importe où sur l’écran
+	Click to pick · Esc to cancel	Cliquer pour choisir · Échap pour annuler
+	Pick a screen pixel or press Esc to cancel	Choisissez un pixel à l’écran ou appuyez sur Échap pour annuler
+	Scroll to zoom	Défiler pour zoomer
 	Show/Hide All Panels	Afficher/masquer tous les panneaux
 	Show/Hide Panels	Afficher/masquer les panneaux
 	Could not open	Impossible d’ouvrir
