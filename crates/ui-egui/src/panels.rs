@@ -1560,7 +1560,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     crate::layer_reveal::scroll_to_row(ui, top);
                 }
                 if !l.effects.items.is_empty() && fx_collapsed.iter().all(|id| *id != l.id) {
-                    effect_rows(app, ui, l, depth);
+                    effect_rows(app, ui, l, depth, &mut actions);
                 }
                 crate::smart_ui::filter_rows(app, ui, l, depth, &mut actions);
             }
@@ -2772,8 +2772,9 @@ fn layer_drag_and_drop(
     }
 }
 
-/// Photoshop shows a layer's effects as indented sub-rows ("Effects", then each effect).
-fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usize) {
+/// Photoshop shows a layer's effects as indented sub-rows ("Effects", then each effect). The eye
+/// on "Effects" shows or hides them all, the eye on an effect's row just that one (#1622).
+fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usize, actions: &mut Vec<(String, Value)>) {
     let t = Tokens::get(ui.ctx());
     let indent = 30.0 + depth as f32 * 14.0 + 34.0;
     let mut rows: Vec<(String, bool, Option<&'static str>)> = vec![("Effects".into(), l.effects.enabled, None)];
@@ -2793,8 +2794,18 @@ fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usi
             ui.painter().line_segment([pos2(rect.left() + 30.0, rect.top()), pos2(rect.left() + 30.0, rect.bottom())], Stroke::new(1.0, t.separator));
         }
         let eye = Rect::from_min_size(pos2(rect.left() + 6.0, rect.center().y - 9.0), vec2(18.0, 18.0));
+        // A hidden effect's eye box is left empty (still clickable), like a hidden layer's.
         if on {
             icons::paint(ui, eye, "eye", 12.0, t.icon);
+        }
+        // The whole eye column of the row takes the click, so it never opens the Layer Style dialog.
+        let eye_cell = Rect::from_min_max(rect.left_top(), pos2((rect.left() + 30.0).min(rect.right()), rect.bottom()));
+        if ui.interact(eye_cell, ui.id().with(("fx-eye", l.id.0, i)), Sense::click()).clicked() {
+            let mut params = json!({"layer": l.id.0, "visible": !on});
+            if let (Some(index), Some(o)) = (i.checked_sub(1), params.as_object_mut()) {
+                o.insert("index".into(), json!(index));
+            }
+            actions.push(("layer.setEffectsVisible".into(), params));
         }
         let x = rect.left() + indent + if i == 0 { 0.0 } else { 16.0 };
         if i == 0 {
