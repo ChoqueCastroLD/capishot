@@ -1194,6 +1194,16 @@ pub(crate) fn build_maps_prepared(
 /// Far outside any shape (distance fill for cropped distance fields).
 const FAR: f32 = 1.0e9;
 
+/// Keep an exterior effect behind the layer's shape when Fill is partly or wholly
+/// transparent. The visible part beneath a fully opaque fill is already covered by the
+/// layer, so avoid attenuating anti-aliased edges twice in that case.
+fn knock_out_exterior(map: &mut Map, shape: &Map, fill_opacity: f32) {
+    let see_through = 1.0 - fill_opacity.clamp(0.0, 1.0);
+    for (coverage, alpha) in map.v.iter_mut().zip(&shape.v) {
+        *coverage *= 1.0 - alpha * see_through;
+    }
+}
+
 /// Composites `content` (the layer's own pixels over `big`, alpha already
 /// masked, clipped layers applied) plus its effects into `backdrop`.
 pub fn composite_with_effects(layer: &Layer, content: &Buffer, backdrop: &mut Buffer, maps: &FxMaps, layer_bounds: Rect, patterns: &[Pattern]) {
@@ -1255,17 +1265,18 @@ pub(crate) fn composite_with_effects_prepared(
                 // The layer hides the shadow beneath it only where its fill is see-through: at
                 // 100 % fill the layer covers it anyway (and anti-aliased edges are not
                 // attenuated twice), at 0 % the shape shows the bare backdrop.
-                let see_through = 1.0 - layer.fill_opacity.clamp(0.0, 1.0);
-                for (v, a) in m.v.iter_mut().zip(&shape.v) {
-                    *v *= 1.0 - a * see_through;
-                }
+                knock_out_exterior(&mut m, &shape, layer.fill_opacity);
             }
             paint_color(&mut work, &m, rgb(&s.color), s.common.blend, s.common.opacity);
         }
     }
     for (i, e) in rev() {
         if let Effect::OuterGlow(g) = e {
-            paint_glow(&mut work, &fx(i, 0), g, sb, anchor, big, patterns);
+            let mut m = fx(i, 0);
+            // The glow is behind the shape, not painted across its interior when Fill is 0 %.
+            // Preserve the existing anti-aliased edge when the fill is fully opaque.
+            knock_out_exterior(&mut m, &shape, layer.fill_opacity);
+            paint_glow(&mut work, &m, g, sb, anchor, big, patterns);
         }
     }
 

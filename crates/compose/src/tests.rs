@@ -1758,3 +1758,43 @@ fn clipped_brightness_and_desaturation_whiten_a_lighter_color_logo() {
     assert!(p[..3].iter().all(|v| *v * 255.0 >= 252.0), "logo whitened: {p:?}");
     assert!(close4(px(&d, 1, 0), yellow), "the yellow beside it is untouched");
 }
+
+#[test]
+fn outer_glow_does_not_paint_through_a_zero_fill_layer() {
+    use photocraft_doc::{Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique};
+
+    let background = [0.18, 0.42, 0.85, 1.0];
+    let rect = Rect::new(24, 24, 72, 72);
+    for technique in [GlowTechnique::Softer, GlowTechnique::Precise] {
+        let mut d = doc_white(96, 96);
+        let bounds = d.bounds();
+        d.layers[0].surface_mut().unwrap().fill_rect(bounds, &background);
+        let mut layer = solid_layer("glow", rect, [1.0, 0.92, 0.25, 1.0]);
+        layer.fill_opacity = 0.0;
+        layer.effects.items.push(Effect::OuterGlow(Glow {
+            common: FxCommon::new(BlendMode::Normal, 1.0),
+            paint: FxPaint::Color(Color::rgb(1.0, 0.94, 0.28)),
+            technique,
+            spread: 0.5,
+            size: 12.0,
+            contour: Contour::Linear,
+            anti_alias: false,
+            range: 0.5,
+            jitter: 0.0,
+            noise: 0.0,
+            source: GlowSource::Edge,
+        }));
+        d.layers.push(layer);
+
+        let center = px(&d, 48, 48);
+        assert!(close4(center, background), "{technique:?}: glow leaked into fully transparent fill: {center:?}");
+        let distant = px(&d, 5, 5);
+        assert!(close4(distant, background), "{technique:?}: changed distant background: {distant:?}");
+        let halo = px(&d, 22, 48);
+        assert!(halo[0] > background[0] + 0.1, "{technique:?}: exterior halo disappeared: {halo:?}");
+
+        d.layers[1].fill_opacity = 1.0;
+        let opaque = px(&d, 48, 48);
+        assert!(opaque[0] > 0.9 && opaque[1] > 0.8, "{technique:?}: opaque fill disappeared: {opaque:?}");
+    }
+}

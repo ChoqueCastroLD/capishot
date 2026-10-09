@@ -1019,7 +1019,10 @@ impl<'a> Planner<'a> {
         for &(i, e) in &rev {
             if let Effect::OuterGlow(g) = e {
                 let paint = self.glow_paint(g, anchor);
-                w = self.paint(w, content, Cov::Map(map(i, 0), 0.0), &paint, g.common.blend, g.common.opacity, 0, clip, sb);
+                // Match CPU exterior knockout: a see-through fill must not reveal the
+                // glow through its own shape. The shader applies m × (1 − alpha × k).
+                let see_through = 1.0 - layer.fill_opacity.clamp(0.0, 1.0);
+                w = self.paint_k(w, content, Cov::Map(map(i, 0), 0.0), &paint, g.common.blend, g.common.opacity, F_KNOCKOUT, clip, sb, see_through);
             }
         }
 
@@ -1634,6 +1637,41 @@ mod tests {
     use super::*;
     use photocraft_color::{Color, ColorMode, SampleType};
     use photocraft_geom::Size;
+
+    #[test]
+    fn outer_glow_plan_knocks_out_see_through_fill() {
+        use photocraft_doc::{Contour, FxCommon, GlowSource, GlowTechnique};
+
+        for fill in [0.0, 0.4, 1.0] {
+            let mut d = Document::with_background("glow", Size::new(64, 64), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+            let mut layer = Layer::raster("frame", d.pixel_format());
+            layer.surface_mut().unwrap().fill_rect(Rect::new(16, 16, 48, 48), &[1.0, 0.0, 0.0, 1.0]);
+            layer.fill_opacity = fill;
+            layer.effects.items.push(Effect::OuterGlow(Glow {
+                common: FxCommon::new(BlendMode::Normal, 1.0),
+                paint: FxPaint::Color(Color::rgb(1.0, 1.0, 0.0)),
+                technique: GlowTechnique::Softer,
+                spread: 0.3,
+                size: 8.0,
+                contour: Contour::Linear,
+                anti_alias: false,
+                range: 0.5,
+                jitter: 0.0,
+                noise: 0.0,
+                source: GlowSource::Edge,
+            }));
+            d.layers.push(layer);
+            let planned = plan(&d).unwrap();
+            let glow = planned
+                .passes
+                .iter()
+                .find(|pass| {
+                    pass.kernel == Kernel::FxPaint && pass.flags & F_KNOCKOUT != 0 && pass.color[0] > 0.9 && pass.color[1] > 0.9 && pass.color[2] < 0.1
+                })
+                .expect("outer glow paint pass");
+            assert!((glow.extra[3] - (1.0 - fill)).abs() < 1e-6, "fill {fill}");
+        }
+    }
 
     #[test]
     fn color_lookup_with_an_overflowing_stored_size_uploads_no_table() {
