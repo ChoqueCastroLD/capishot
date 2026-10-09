@@ -225,5 +225,6 @@ pub const AFFINITY: PinnedCorpus = PinnedCorpus {
     },
 };
 
-/// Every pinned corpus, in fetch order.
-pub const ALL: &[&PinnedCorpus] = &[&PSD_MIXED, &PSD_TOOLS, &PHOTOSHOP, &HEIF, &EXR, &AFFINITY];
+/// Every pinned corpus `--all` fetches (and CI downloads), in fetch order. [`AFFINITY`] is
+/// fetched only on request (`--affinity`) until its files move to photocraft-corpus.
+pub const ALL: &[&PinnedCorpus] = &[&PSD_MIXED, &PSD_TOOLS, &PHOTOSHOP, &HEIF, &EXR];

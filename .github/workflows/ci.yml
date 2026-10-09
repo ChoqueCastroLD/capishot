@@ -206,8 +206,6 @@ jobs:
           - { crate: codecs, name: decode_tiff }
           - { crate: codecs, name: decode_exr }
           - { crate: codecs, name: decode_heif }
-          - { crate: affinity, name: preview }
-          - { crate: affinity, name: import_preview, args: "--features io" }
           - { crate: format, name: load }
     steps:
       - uses: actions/checkout@v4
@@ -219,7 +217,7 @@ jobs:
         run: cargo install cargo-fuzz --locked
       - name: Fuzz
         working-directory: crates/${{ matrix.target.crate }}
-        run: cargo fuzz run ${{ matrix.target.name }} ${{ matrix.target.args }} -- -max_total_time=${{ inputs.fuzz_seconds }}
+        run: cargo fuzz run ${{ matrix.target.name }} -- -max_total_time=${{ inputs.fuzz_seconds }}
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4
