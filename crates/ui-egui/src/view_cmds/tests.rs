@@ -174,6 +174,18 @@ fn engine_commands_open_their_dialogs() {
 }
 
 #[test]
+fn apply_image_and_calculations_open_dialogs_without_editing() {
+    for id in ["image.applyImage", "image.calculations"] {
+        let (mut app, ctx) = app_with(1);
+        let revision = app.session.active().unwrap().revision;
+        let dialog = menu(&mut app, &ctx, id, json!({})).unwrap()["dialog"].as_u64().unwrap_or_else(|| panic!("{id} did not open a dialog"));
+        let fields = &app.ui.dialog_mut(dialog).unwrap().fields;
+        assert_eq!(fields["__command"], id, "{id} opened the wrong dialog");
+        assert_eq!(app.session.active().unwrap().revision, revision, "{id} edited before confirmation");
+    }
+}
+
+#[test]
 fn new_guide_layout_remembers_successful_values_not_cancelled_edits() {
     let (mut app, ctx) = app_with(1);
     let first = menu(&mut app, &ctx, "view.newGuideLayout", json!({})).unwrap()["dialog"].as_u64().unwrap();

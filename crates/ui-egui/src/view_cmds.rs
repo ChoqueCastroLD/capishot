@@ -444,6 +444,8 @@ fn wraps(id: &str) -> bool {
             | "view.newGuideLayout"
             | "type.warpText"
             | "type.pasteLoremIpsum"
+            | "image.applyImage"
+            | "image.calculations"
     )
 }
 
