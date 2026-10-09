@@ -116,6 +116,31 @@ fn masked_layer_and_group_convert_within_rounding() {
 }
 
 #[test]
+fn pattern_fill_converts_to_editable_smart_object_without_losing_its_pattern() {
+    let mut s = session(8);
+    s.execute("layer.newFillLayer.pattern", json!({"pattern": "Bricks"})).unwrap();
+    let before = flat(&s);
+    let pattern_id = s.active().unwrap().doc.patterns[0].id.clone();
+    assert!(before.iter().any(|p| p[3] > 0.0), "the pattern fill is visible");
+
+    convert(&mut s);
+    assert!(max_diff(&flat(&s), &before) < 1e-6, "conversion keeps every pattern pixel");
+    let sm = active_smart(&s);
+    let SmartSource::Embedded { file_name, bytes } = &sm.source else { panic!("not embedded") };
+    let inner = decode_source(file_name, bytes).unwrap();
+    assert!(inner.patterns.iter().any(|p| p.id == pattern_id), "the embedded source keeps the pattern resource");
+
+    // The smart object's source remains live after opening and editing its contents.
+    let child = s.execute("layer.smartObjects.editContents", json!({})).unwrap()["document"].as_u64().unwrap() as usize;
+    assert_eq!(s.active_index(), Some(child));
+    assert!(s.active().unwrap().doc.patterns.iter().any(|p| p.id == pattern_id));
+    s.set_active(0);
+    assert!(max_diff(&flat(&s), &before) < 1e-6);
+    s.undo();
+    assert!(max_diff(&flat(&s), &before) < 1e-6);
+}
+
+#[test]
 fn empty_layer_cannot_be_converted() {
     let mut s = session(8);
     assert!(s.execute("layer.smartObjects.convertToSmartObject", json!({})).is_err());
