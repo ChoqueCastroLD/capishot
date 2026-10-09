@@ -363,7 +363,7 @@ cargo xtask corpus                 # where each corpus lives, its pin, present o
 cargo xtask corpus --all           # fetch everything missing or stale (cold: about 15 s; verified copies are left alone)
 cargo xtask test-corpus            # fetch, then cargo test --release --features corpus (+ heif on codecs, io) on psd, codecs, io, engine
 cargo xtask test-corpus -p io      # narrow to one crate (repeat -p for more)
-cargo xtask test-corpus --changed  # only if psd, io, codecs, compose, gpu, text or format changed vs origin/main
+cargo xtask test-corpus --changed  # only if psd, io, codecs, compose, gpu, text, format or affinity changed vs origin/main
 cargo xtask test-corpus -- --nocapture   # pass arguments to the test binaries (per-file tables)
 scripts/fetch-corpus.sh            # the same as cargo xtask corpus --all
 ```
