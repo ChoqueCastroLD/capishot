@@ -248,8 +248,11 @@ lines are visible. The protocol is unencrypted and must remain on loopback; do n
 it to an untrusted host.
 
 Filesystem access fails closed unless launch-time read and/or write roots are granted with
-`--automation-read-root` and `--automation-write-root` (or
-`PHOTOCRAFT_AUTOMATION_READ_ROOT` / `PHOTOCRAFT_AUTOMATION_WRITE_ROOT`). Request paths must be
+`--automation-read-root` and `--automation-write-root`. The environment-variable equivalents
+(`PHOTOCRAFT_AUTOMATION_READ_ROOT` / `PHOTOCRAFT_AUTOMATION_WRITE_ROOT`) are supported by
+the desktop `photocraft` process, but not by headless `photocraft-cli mcp` or `serve`;
+for those CLI modes, supply the flags explicitly. In MCP bridge mode, configure roots on the
+desktop process rather than on the bridging CLI. Request paths must be
 non-empty, forward-slash relative paths beneath the applicable root. Absolute paths, parent
 traversal, alternate separators, drive/device/stream prefixes, malformed components, and link
 escapes are rejected before file effects. Read and write authority are independent; the parent of
