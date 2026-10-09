@@ -51,6 +51,8 @@ pub struct CardResponse {
     pub tab_clicked: bool,
     /// A tab was double-clicked (Photoshop collapses the group).
     pub tab_double_clicked: bool,
+    /// Right-click action selected for a visible tab.
+    pub tab_context: Option<crate::tab_strip::TabContextAction>,
     /// Rects of the tabs on the strip, `(tab index, rect)`; tabs that don't fit are in the
     /// chevron menu instead (#151).
     pub tabs: Vec<(usize, Rect)>,
@@ -92,6 +94,7 @@ pub fn card_ex(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, colla
                 menu,
                 tab_clicked: tabs_out.clicked,
                 tab_double_clicked: tabs_out.double_clicked,
+                tab_context: tabs_out.context,
                 tabs: tabs_out.tabs,
                 chevron: tabs_out.chevron,
             }
@@ -163,6 +166,7 @@ fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, collaps
         menu: mresp,
         tab_clicked: tabs_out.clicked,
         tab_double_clicked: tabs_out.double_clicked,
+        tab_context: tabs_out.context,
         tabs: tabs_out.tabs,
         chevron: tabs_out.chevron,
     }
