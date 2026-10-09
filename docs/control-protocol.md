@@ -228,7 +228,7 @@ How each MCP tool maps onto control methods in bridge mode:
 | `doc_new {…}` | `engine.execute {command: "file.new", params}` |
 | `doc_inspect` | `engine.execute {command: "document.inspect"}` |
 | `doc_open {path}` | `app.open {path}` |
-| `doc_save {path}` / `doc_export {path}` | `app.save {path}` |
+| `doc_save {path?}` / `doc_export {path}` | `app.save {path?}` |
 | `doc_render_preview {max_side?}` | `ui.screenshot`, returned directly as PNG image content |
 | `session_list`, `ui_inspect` | `ui.inspect` |
 | `ui_screenshot {max_side?}` | `ui.screenshot`, returned as PNG image content |

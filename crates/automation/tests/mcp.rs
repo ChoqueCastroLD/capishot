@@ -288,6 +288,20 @@ async fn bridge_doc_save_rejects_headless_only_options_instead_of_saving_with_de
     }
 }
 
+/// #946: like headless mode, a bridged `doc_save` without `path` reaches the app's `app.save`,
+/// which writes back to the document's own PSD, PSB or .pcraft file or refuses with its own error.
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_doc_save_without_path_forwards_app_save_for_write_back() {
+    let (addr, app) = fake_app().await;
+    let client = connect(PhotocraftMcp::bridge(&addr, CONTROL_TOKEN).unwrap()).await;
+    let saved = json_of(&call(&client, "doc_save", json!({})).await);
+    assert_eq!(saved, json!({"saved": {}}), "no `path` is sent, not even null");
+    let saved = json_of(&call(&client, "doc_save", json!({"path": "out.psd"})).await);
+    assert_eq!(saved, json!({"saved": {"path": "out.psd"}}));
+    client.cancel().await.unwrap();
+    app.abort();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn bridge_response_budget_drops_connection_without_retrying_the_operation() {
     use photocraft_automation::{BridgeClient, budgets::MAX_RESPONSE_BYTES};
@@ -486,6 +500,7 @@ async fn fake_app_with_screenshot(screenshot_png: Option<Vec<u8>>) -> (String, t
                 "engine.execute" => {
                     json!({"id": id, "ok": true, "result": {"ran": req["params"]["command"], "params": req["params"]["params"], "wait": req["params"]["wait"]}})
                 }
+                "app.save" => json!({"id": id, "ok": true, "result": {"saved": req["params"]}}),
                 "engine.commands" => {
                     json!({"id": id, "ok": true, "result": [{"id": "file.new", "label": "New…", "enabled": true}]})
                 }
