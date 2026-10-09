@@ -2184,3 +2184,13 @@ cameraRaw	Color	カラー
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	レイヤーの描画モード、不透明度、表示/非表示など、ドキュメント全体に関わる編集では全体が再描画されます。
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	レイヤーがGPUメモリの予算に収まりません。環境設定 › パフォーマンスのメモリ使用量を増やすと、このコンピューターのメモリの4分の1まで予算が増えます。
 	The GPU compositor wasn't used: {reason}	GPUコンポジターは使用されませんでした：{reason}
+fontWeight	Thin	極細
+fontWeight	ExtraLight	特細
+fontWeight	Light	細字
+fontWeight	Regular	標準
+fontWeight	Medium	中間
+fontWeight	SemiBold	中太
+fontWeight	Bold	太字
+fontWeight	ExtraBold	特太
+fontWeight	Black	極太
+fontWeight	Italic	斜体

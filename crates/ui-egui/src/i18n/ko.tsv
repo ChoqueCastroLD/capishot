@@ -2784,3 +2784,13 @@ cameraRaw	Color	색상
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	레이어의 혼합 모드, 불투명도, 표시 여부처럼 문서 전체를 바꾸는 편집은 문서 전체를 다시 그립니다.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	레이어가 GPU 메모리 예산에 맞지 않습니다. 환경 설정 › 성능에서 메모리 사용량을 늘리면 이 컴퓨터 메모리의 4분의 1까지 예산이 늘어납니다.
 	The GPU compositor wasn't used: {reason}	GPU 합성기를 사용하지 않았습니다: {reason}
+fontWeight	Thin	아주 가늘게
+fontWeight	ExtraLight	더 가늘게
+fontWeight	Light	가늘게
+fontWeight	Regular	보통
+fontWeight	Medium	중간
+fontWeight	SemiBold	반굵게
+fontWeight	Bold	굵게
+fontWeight	ExtraBold	더 굵게
+fontWeight	Black	아주 굵게
+fontWeight	Italic	기울임

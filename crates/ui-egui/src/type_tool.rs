@@ -711,6 +711,13 @@ pub fn styles(family: &str) -> Vec<String> {
     if v.is_empty() { vec![tl!("Regular").into()] } else { v }
 }
 
+/// Localized style label for the dropdown. The raw string stays the engine's `fontStyle` key;
+/// the words (weights and "Italic") are translated in the `fontWeight` context, where "Light"
+/// means a weight — unlike the Camera Raw "Light" section.
+pub fn style_label(style: &str) -> String {
+    style.split(' ').map(|w| crate::i18n::tr_ctx(crate::i18n::current(), "fontWeight", w)).collect::<Vec<_>>().join(" ")
+}
+
 /// Searchable font-family combo box.
 fn font_picker(ui: &mut egui::Ui, current: &mut String, width: f32) -> bool {
     let mut changed = false;
@@ -820,7 +827,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         app.ui.tool_options.type_style = style.clone();
         apply(app, ui.ctx(), json!({"font": fam, "fontStyle": style}));
     }
-    let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), s)).collect();
+    let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), style_label(&s))).collect();
     let opts_ref: Vec<(String, &str)> = opts.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
     if crate::widgets::dropdown(ui, "type-style", &mut style, &opts_ref, 110.0) {
         app.ui.tool_options.type_style = style.clone();
@@ -1126,7 +1133,7 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
         });
         row(ui, &mut |ui| {
             let mut style = if c.font_style.is_empty() { "Regular".to_string() } else { c.font_style.clone() };
-            let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), s)).collect();
+            let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), style_label(&s))).collect();
             let opts_ref: Vec<(String, &str)> = opts.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
             if crate::widgets::dropdown(ui, "props-type-style", &mut style, &opts_ref, full) {
                 apply(app, ui.ctx(), json!({"fontStyle": style}));

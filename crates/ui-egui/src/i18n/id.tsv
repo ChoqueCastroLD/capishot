@@ -2616,3 +2616,13 @@ cameraRaw	Blending	Pembauran
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Suntingan yang mengubah seluruh dokumen, seperti mode campuran, opasitas, atau visibilitas layer, menggambar ulang semuanya.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Layer tidak muat dalam anggaran memori GPU. Menaikkan Pemakaian memori di Preferensi › Performa menaikkan anggaran, hingga seperempat memori komputer ini.
 	The GPU compositor wasn't used: {reason}	Kompositor GPU tidak digunakan: {reason}
+fontWeight	Thin	Sangat Tipis
+fontWeight	ExtraLight	Ekstra Tipis
+fontWeight	Light	Tipis
+fontWeight	Regular	Reguler
+fontWeight	Medium	Sedang
+fontWeight	SemiBold	SemiTebal
+fontWeight	Bold	Tebal
+fontWeight	ExtraBold	Ekstra Tebal
+fontWeight	Black	Sangat Tebal
+fontWeight	Italic	Miring

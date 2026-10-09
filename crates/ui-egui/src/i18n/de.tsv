@@ -2240,3 +2240,14 @@ layerLabel	No Color	Keine Farbe
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Änderungen, die das ganze Dokument betreffen, etwa Füllmethode, Deckkraft oder Sichtbarkeit einer Ebene, zeichnen es vollständig neu.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Die Ebenen passen nicht in das GPU-Speicherbudget. Eine höhere Speichernutzung unter Voreinstellungen › Leistung erhöht das Budget, bis zu einem Viertel des Arbeitsspeichers dieses Computers.
 	The GPU compositor wasn't used: {reason}	Der GPU-Compositor wurde nicht verwendet: {reason}
+cameraRaw	Light	Licht
+fontWeight	Thin	Haarfein
+fontWeight	ExtraLight	Extraleicht
+fontWeight	Light	Leicht
+fontWeight	Regular	Normal
+fontWeight	Medium	Medium
+fontWeight	SemiBold	Halbfett
+fontWeight	Bold	Fett
+fontWeight	ExtraBold	Extrafett
+fontWeight	Black	Schwarz
+fontWeight	Italic	Kursiv

@@ -2636,3 +2636,13 @@ cameraRaw	Whites	Brancos
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Edições que mudam o documento inteiro, como modo de mesclagem, opacidade ou visibilidade de uma camada, redesenham tudo.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	As camadas não cabem no orçamento de memória da GPU. Aumentar Uso de memória em Preferências › Desempenho eleva o orçamento, até um quarto da memória deste computador.
 	The GPU compositor wasn't used: {reason}	O compositor de GPU não foi usado: {reason}
+fontWeight	Thin	Fina
+fontWeight	ExtraLight	Extrafina
+fontWeight	Light	Leve
+fontWeight	Regular	Normal
+fontWeight	Medium	Médio
+fontWeight	SemiBold	Seminegrito
+fontWeight	Bold	Negrito
+fontWeight	ExtraBold	Extranegrito
+fontWeight	Black	Ultraniegra
+fontWeight	Italic	Itálico

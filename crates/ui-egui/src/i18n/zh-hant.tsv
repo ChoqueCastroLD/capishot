@@ -2178,3 +2178,13 @@ cameraRaw	Blending	混合
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	變更整份文件的編輯（例如圖層的混合模式、不透明度或可見度）會重繪整份文件。
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	圖層超出 GPU 記憶體預算。在 偏好設定 › 效能 中提高記憶體使用量可增加預算，最多為本機記憶體的四分之一。
 	The GPU compositor wasn't used: {reason}	未使用 GPU 合成器：{reason}
+fontWeight	Thin	極細
+fontWeight	ExtraLight	特細
+fontWeight	Light	細體
+fontWeight	Regular	常規
+fontWeight	Medium	中等
+fontWeight	SemiBold	半粗
+fontWeight	Bold	粗體
+fontWeight	ExtraBold	特粗
+fontWeight	Black	黑體
+fontWeight	Italic	斜體

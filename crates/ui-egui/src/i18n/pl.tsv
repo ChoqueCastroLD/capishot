@@ -2510,6 +2510,16 @@
 	Tone Histogram	Histogram tonalny
 	Show Selected Region	Pokaż zaznaczony region
 cameraRaw	Light	Światło
+fontWeight	Thin	Cienki
+fontWeight	ExtraLight	Ekstra cienki
+fontWeight	Light	Lekki
+fontWeight	Regular	Zwykły
+fontWeight	Medium	Średni
+fontWeight	SemiBold	Półgruby
+fontWeight	Bold	Pogrubiony
+fontWeight	ExtraBold	Ekstra gruby
+fontWeight	Black	Czarny
+fontWeight	Italic	Kursywa
 	Camera Raw Filter ({layer})	Filtr Camera Raw ({layer})
 cameraRaw	Lights	Jasne tony
 cameraRaw	Darks	Ciemne tony
