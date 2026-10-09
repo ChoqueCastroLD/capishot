@@ -1800,9 +1800,13 @@ mod tests {
         assert!(has_visible_fields(&values, "general"));
         assert!(has_visible_fields(&values, "fileHandling"));
         // Every setting of these sections is still unimplemented.
-        for section in ["type", "enhancedControls", "integrations", "scratchDisks"] {
+        for section in ["type", "integrations", "scratchDisks"] {
             assert!(!has_visible_fields(&values, section), "{section}");
         }
+        // Rotate View with Trackpad is live; the other Enhanced Controls rows stay hidden.
+        assert!(has_visible_fields(&values, "enhancedControls"));
+        assert!(!prefs::is_hidden("enhancedControls.rotateViewWithTrackpad"));
+        assert!(prefs::is_hidden("enhancedControls.zoomWithTrackpadPinch"));
         // Camera Raw Defaults shows only "Open in Camera Raw" so far.
         assert!(has_visible_fields(&values, "rawDefaults"));
         assert!(!prefs::is_hidden("rawDefaults.openInCameraRaw"));

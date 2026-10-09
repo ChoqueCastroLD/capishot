@@ -2199,6 +2199,7 @@
 	Down	Κάτω
 	Drag (lasso) or click points (polygonal) · {add} add · {sub} subtract	Σύρετε για λάσο ή κάντε κλικ για πολυγωνική επιλογή · {add} προσθήκη · {sub} αφαίρεση
 	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · {commit} commits · Esc cancels	Σύρετε για περιοχή περικοπής · σύρετε στο εσωτερικό για μετακίνηση · από τα άκρα αλλάζει μέγεθος ({ratio} αναλογία, {centre} κέντρο) · Space για μετακίνηση κατά τη σχεδίαση · {commit} εφαρμογή · Esc ακύρωση
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Σύρετε γύρω από το κέντρο για να περιστρέψετε την προβολή  ·  Shift περιορίζει στις 15°
 	Drag on the image to add a constraint; Shift for horizontal/vertical; right-click to delete.	Σύρετε πάνω στην εικόνα για προσθήκη περιορισμού· Shift για οριζόντιο/κατακόρυφο· δεξί κλικ για διαγραφή.
 	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Σύρετε ή κάντε κλικ για πολυγωνικά σημεία · κρατήστε Alt κατά το λάσο για ευθείες · {add} προσθήκη · {sub} αφαίρεση πριν από τη σχεδίαση
 	Drag to draw a gradient	Σύρετε για να σχεδιάσετε διαβάθμιση
@@ -2780,6 +2781,7 @@
 	Reset GPU Backend	Επαναφορά συστήματος απόδοσης GPU
 	Reset Section	Επαναφορά ενότητας
 	Reset Transform	Επαναφορά μετασχηματισμού
+	Reset View	Επαναφορά προβολής
 	Reset Workspace	Επαναφορά χώρου εργασίας
 	Reset to defaults	Επαναφορά προεπιλογών
 	Resize image during place	Αλλαγή μεγέθους εικόνας κατά την τοποθέτηση
@@ -2802,6 +2804,8 @@
 	Roman Hanging Punctuation	Κρεμαστή στίξη όρθιας γραφής
 	Rotate Auto	Αυτόματη περιστροφή
 	Rotate Fixed	Σταθερή περιστροφή
+	Rotate View	Περιστροφή προβολής
+	Rotate View Tool	Εργαλείο περιστροφής προβολής
 	Rotate view with trackpad	Περιστροφή προβολής με επιφάνεια αφής
 	Rotate:	Περιστροφή:
 	Rough Pastels	Τραχιά παστέλ

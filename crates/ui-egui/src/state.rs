@@ -85,6 +85,7 @@ pub enum Tool {
     Type,
     VerticalType,
     Hand,
+    RotateView,
     Zoom,
     SpotHealing,
     Healing,
@@ -116,7 +117,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 51] = [
+    pub const ALL: [Tool; 52] = [
         Tool::Move,
         Tool::RectMarquee,
         Tool::EllipseMarquee,
@@ -140,6 +141,7 @@ impl Tool {
         Tool::Type,
         Tool::VerticalType,
         Tool::Hand,
+        Tool::RotateView,
         Tool::Zoom,
         Tool::SpotHealing,
         Tool::Healing,
@@ -197,6 +199,7 @@ impl Tool {
             Tool::Type => "Horizontal Type Tool",
             Tool::VerticalType => "Vertical Type Tool",
             Tool::Hand => "Hand Tool",
+            Tool::RotateView => "Rotate View Tool",
             Tool::Zoom => "Zoom Tool",
             Tool::SpotHealing => "Spot Healing Brush Tool",
             Tool::Healing => "Healing Brush Tool",
@@ -265,6 +268,7 @@ impl Tool {
             Tool::Gradient | Tool::PaintBucket => 'G',
             Tool::Type | Tool::VerticalType => 'T',
             Tool::Hand => 'H',
+            Tool::RotateView => 'R',
             Tool::Zoom => 'Z',
             Tool::SpotHealing | Tool::Healing | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye => 'J',
             Tool::CloneStamp | Tool::PatternStamp => 'S',
@@ -293,6 +297,7 @@ impl Tool {
             Tool::Gradient | Tool::PaintBucket => "G",
             Tool::Type | Tool::VerticalType => "T",
             Tool::Hand => "✋",
+            Tool::RotateView => "🧭",
             Tool::Zoom => "🔍",
             _ => "•",
         }
@@ -388,11 +393,14 @@ pub struct View {
     /// Document size this view last showed; a change (Image/Canvas Size, crop) re-centres it.
     #[serde(default)]
     pub doc_size: [u32; 2],
+    /// Canvas camera rotation in degrees, wrapped to (−180, 180]. Turns the view, not the pixels.
+    #[serde(default)]
+    pub rotation: f32,
 }
 
 impl Default for View {
     fn default() -> Self {
-        Self { zoom: 1.0, center: [0.0, 0.0], fit_pending: true, fill_pending: false, doc_size: [0, 0] }
+        Self { zoom: 1.0, center: [0.0, 0.0], fit_pending: true, fill_pending: false, doc_size: [0, 0], rotation: 0.0 }
     }
 }
 
@@ -1024,7 +1032,10 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 51);
+        assert_eq!(Tool::ALL.len(), 52);
+        assert_eq!(Tool::from_name("RotateView"), Some(Tool::RotateView));
+        assert_eq!(Tool::from_name("Rotate View Tool"), Some(Tool::RotateView));
+        assert_eq!(Tool::RotateView.key(), 'R');
         assert_eq!(Tool::from_name("nope"), None);
     }
 
