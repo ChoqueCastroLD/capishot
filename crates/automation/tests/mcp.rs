@@ -202,6 +202,38 @@ async fn command_ids_in_tool_schemas_exist() {
     client.cancel().await.unwrap();
 }
 
+/// `UI_SET_FIELDS` in `crates/ui-egui/src/control.rs`, read from source. The desktop shell owns the
+/// list; this crate describes it over MCP without depending on the UI crate (both are L6).
+/// Anchored on the declaration, not on the doc comment that mentions it first, and checked against
+/// the declared array length so a mis-parse fails loudly instead of testing the wrong names.
+fn ui_set_fields() -> Vec<String> {
+    let src =
+        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui-egui/src/control.rs")).expect("ui-egui control.rs");
+    let (_, rest) = src.split_once("UI_SET_FIELDS: [&str; ").expect("UI_SET_FIELDS is declared");
+    let declared: usize = rest.split_once(']').expect("declared length").0.parse().expect("declared length");
+    let body = rest.split_once('[').expect("field array").1.split_once("];").expect("terminated array").0;
+    let fields: Vec<String> = body.split('"').skip(1).step_by(2).map(str::to_string).collect();
+    assert_eq!(fields.len(), declared, "parsed {fields:?} from UI_SET_FIELDS; its source shape changed");
+    fields
+}
+
+/// #1548: `ui_set` must name every field `ui.set` accepts. An agent copies this list out of
+/// `tools/list`, and it ends "Other fields are an error", so an omission reads as a rejection of
+/// a field that in fact works. This guards the whole list against future drift, not only the
+/// three fields missing when the issue was filed.
+#[tokio::test(flavor = "multi_thread")]
+async fn ui_set_description_names_every_accepted_field() {
+    let client = connect(PhotocraftMcp::headless()).await;
+    let tools = client.list_all_tools().await.unwrap();
+    let tool = tools.iter().find(|t| t.name == "ui_set").expect("ui_set tool");
+    let schema = Value::Object((*tool.input_schema).clone());
+    let description = schema["properties"]["fields"]["description"].as_str().expect("ui_set fields description").to_string();
+    for field in ui_set_fields() {
+        assert!(description.contains(&field), "ui_set's description omits `{field}`, which ui.set accepts:\n{description}");
+    }
+    client.cancel().await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn errors_are_tool_errors_not_crashes() {
     let client = connect(PhotocraftMcp::headless()).await;
