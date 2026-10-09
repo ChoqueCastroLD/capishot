@@ -114,12 +114,33 @@ macro_rules! cmd {
 }
 
 pub fn command_specs() -> &'static [CommandSpec] {
-    static SPECS: std::sync::OnceLock<Vec<CommandSpec>> = std::sync::OnceLock::new();
-    SPECS.get_or_init(build)
+    &registry().specs
 }
 
 pub fn find(id: &str) -> Option<&'static CommandSpec> {
-    command_specs().iter().find(|c| c.id == id)
+    let registry = registry();
+    registry.by_id.get(id).and_then(|&index| registry.specs.get(index))
+}
+
+struct Registry {
+    specs: Vec<CommandSpec>,
+    by_id: std::collections::HashMap<&'static str, usize>,
+}
+
+impl Registry {
+    fn new(specs: Vec<CommandSpec>) -> Self {
+        let mut by_id = std::collections::HashMap::with_capacity(specs.len());
+        for (index, spec) in specs.iter().enumerate() {
+            // Preserve the linear lookup's first-match behavior if an id is duplicated.
+            by_id.entry(spec.id).or_insert(index);
+        }
+        Self { specs, by_id }
+    }
+}
+
+fn registry() -> &'static Registry {
+    static REGISTRY: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| Registry::new(build()))
 }
 
 // ---------- param helpers ----------
@@ -1262,4 +1283,21 @@ pub(crate) fn layer_copy(doc: &Document, id: LayerId) -> Result<Layer> {
         dup.locks = Default::default();
     }
     Ok(dup)
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_ids_keep_the_first_spec_and_listing_order() {
+        let mut built = build().into_iter();
+        let first = built.next().unwrap();
+        let mut second = built.next().unwrap();
+        let id = first.id;
+        second.id = id;
+        let registry = Registry::new(vec![first, second]);
+        assert_eq!(registry.by_id.get(id), Some(&0));
+        assert_eq!(registry.specs.len(), 2);
+    }
 }

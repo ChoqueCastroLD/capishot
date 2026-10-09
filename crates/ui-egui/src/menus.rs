@@ -654,8 +654,9 @@ pub struct MenuItem {
 /// Is `id` implemented by the engine or the shell (a live menu item)? Shared by the menus and
 /// the parity report ([`crate::parity`]).
 pub fn is_live(id: &str) -> bool {
+    static UI_IDS: std::sync::OnceLock<std::collections::HashSet<&'static str>> = std::sync::OnceLock::new();
     photocraft_engine::commands::find(id).is_some()
-        || UI_COMMANDS.iter().any(|c| c.0 == id)
+        || UI_IDS.get_or_init(|| UI_COMMANDS.iter().map(|c| c.0).collect()).contains(id)
         || panel_alias(id).is_some()
         || workspace_name(id).is_some()
         || proof_preset(id).is_some()
@@ -1175,6 +1176,19 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_lookup_finds_engine_and_shell_commands() {
+        for command in photocraft_engine::commands::command_specs() {
+            assert!(is_live(command.id), "{}", command.id);
+        }
+        for &(id, ..) in UI_COMMANDS {
+            assert!(is_live(id), "{id}");
+        }
+        for id in ["", "missing.command", "💾"] {
+            assert!(!is_live(id));
+        }
+    }
 
     #[test]
     fn select_menu_contains_every_selection_context_action_and_more() {
