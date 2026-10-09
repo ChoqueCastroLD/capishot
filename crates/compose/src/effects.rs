@@ -706,10 +706,17 @@ fn paint_glow(dst: &mut Buffer, m: &Map, g: &Glow, shape_bounds: Rect, anchor: (
     paint(dst, &strength, |i| prepared.sample(1.0 - m.v.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0)), g.common.blend, g.common.opacity);
 }
 
+/// A box width as the blurs use it: at least 1, at most [`MAX_REACH`] (an effect never reaches
+/// further, see [`margin`]), and 1 for NaN. A size or softness from a command or a file can be
+/// anything, and an unbounded width sizes the kernel and its buffers (#1543).
+fn box_width(w: f32) -> f32 {
+    if w.is_nan() { 1.0 } else { w.clamp(1.0, MAX_REACH) }
+}
+
 /// Normalised weights of a centred box of (fractional) width `w`: tap `i` gets the overlap of
 /// `[i - 0.5, i + 0.5]` with `[-w/2, w/2]`.
 fn box_weights(w: f32) -> Vec<f32> {
-    let w = w.max(1.0);
+    let w = box_width(w);
     let half = w / 2.0;
     let r = (half - 0.5).ceil().max(0.0) as i64;
     let v: Vec<f32> = (-r..=r).map(|i| ((i as f32 + 0.5).min(half) - (i as f32 - 0.5).max(-half)).max(0.0)).collect();
@@ -735,10 +742,11 @@ pub fn tent_kernel(w: f32) -> (i32, Vec<f32>) {
 /// Box geometry for a (fractional) width: (`r`, end-tap weight `f`, 1 / width) — the
 /// [`box_weights`] taps are `r - 1` full ones each side of the centre plus the two end taps at `f`.
 fn box_geom(bw: f32) -> (i64, f64, f64) {
-    let half = bw.max(1.0) / 2.0;
+    let bw = box_width(bw);
+    let half = bw / 2.0;
     let r = (half - 0.5).ceil().max(0.0) as i64;
     let f = f64::from((half - (r as f32 - 0.5)).clamp(0.0, 1.0));
-    (r, f, 1.0 / f64::from(bw.max(1.0)))
+    (r, f, 1.0 / f64::from(bw))
 }
 
 /// One box pass over `src` (zero outside it) evaluated at `x0 .. x0 + dst.len()`, as a running
@@ -1691,6 +1699,11 @@ mod tests {
         assert_eq!(r, 4);
         assert!(k[0] > 0.0 && k[0] < 1.0 / 25.0);
         assert_eq!(tent_kernel(1.0), (0, vec![1.0]));
+        // #1543: a huge, infinite or NaN width is capped, not turned into a kernel of 2^62 taps.
+        for w in [1e30, f32::INFINITY, f32::MAX] {
+            assert_eq!(tent_kernel(w), tent_kernel(MAX_REACH), "{w}");
+        }
+        assert_eq!(tent_kernel(f32::NAN), (0, vec![1.0]));
     }
 
     fn no_tex() -> TextureCtx<'static> {
