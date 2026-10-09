@@ -672,7 +672,18 @@ impl PhotocraftApp {
         }
         // Long commands become background jobs when enabled (`jobs_ui`); the rest run inline.
         let params = self.with_mask_target(id, params);
+        let params = vector_ui::with_active_path(self, id, params);
+        let path_mask = vector_ui::takes_path_mask(id) && params.get("path").is_some_and(|v| !v.is_null());
         let r = jobs_ui::run(self, id, params);
+        if r.is_ok() && id == "select.toWorkPath" {
+            // Make Work Path selects the new work path in the Paths panel, as in Photoshop.
+            self.ui.selected_path = Some("work".into());
+        }
+        if r.is_ok() && path_mask {
+            // The new layer's vector mask becomes the active path, as in Photoshop: the path it
+            // was made from is no longer selected, so the next fill layer isn't masked by it too.
+            self.ui.selected_path = Some("layer".into());
+        }
         if r.is_ok() && matches!(id, "edit.copy" | "edit.cut" | "edit.copyMerged") {
             self.clip_external = false;
             self.export_os_clipboard();

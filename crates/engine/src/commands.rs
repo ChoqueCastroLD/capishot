@@ -220,12 +220,36 @@ pub(crate) fn selection_mask(doc: &Document) -> Option<LayerMask> {
     doc.selection.as_ref().map(|sel| LayerMask { surface: sel.clone(), ..LayerMask::reveal_all() })
 }
 
-fn new_adjustment(s: &mut Session, adj: Adjustment) -> Result<Value> {
+/// Mask a fill or adjustment layer being created, as Photoshop does: the path selected in the
+/// Paths panel (`"path"`: `"work"`, a saved path's name or a path object) becomes its vector
+/// mask, which makes a Solid Color fill a shape (#1419); without one, the selection becomes its
+/// layer mask ([`selection_mask`]). A path that isn't there is an error.
+pub(crate) fn mask_new_layer(doc: &Document, l: &mut Layer, p: &Value, cmd: &str) -> Result<()> {
+    let path = match p.get("path") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(n)) if crate::vector_cmds::is_work(Some(n)) => Some(doc.work_path.clone().ok_or_else(|| bad(cmd, "no work path"))?),
+        Some(Value::String(n)) => {
+            Some(doc.paths.iter().find(|sp| sp.name == *n).map(|sp| sp.path.clone()).ok_or_else(|| bad(cmd, format!("no path named \"{n}\"")))?)
+        }
+        Some(v) => Some(crate::vector_cmds::parse_path(v).map_err(|e| bad(cmd, e))?),
+    };
+    match path {
+        Some(path) => l.vector_mask = Some(photocraft_doc::VectorMask::new(path)),
+        None => l.mask = selection_mask(doc),
+    }
+    Ok(())
+}
+
+/// The `"path"` param of the new fill and adjustment layer commands ([`mask_new_layer`]).
+pub(crate) const NEW_LAYER_PATH: &str =
+    r##""path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask)"##;
+
+fn new_adjustment(s: &mut Session, adj: Adjustment, p: &Value, cmd: &str) -> Result<Value> {
     let label = format!("New {} Layer", adj.label());
     let name = adj.label().to_string();
     let id = s.edit(&label, |doc, active| {
         let mut l = Layer::new(doc.next_layer_name(&name), LayerContent::Adjustment(adj));
-        l.mask = selection_mask(doc);
+        mask_new_layer(doc, &mut l, p, cmd)?;
         let id = doc.insert_above(*active, l);
         *active = Some(id);
         Ok(id)
@@ -678,23 +702,31 @@ fn build() -> Vec<CommandSpec> {
             })?;
             Ok(Value::Null)
         }),
-        cmd!("layer.newFillLayer.solidColor", "Solid Color…", ["Layer", "New Fill Layer"], None, r##"{"color":"#rrggbb"=foreground}"##, has_doc, |s, p| {
-            let c = color_param(p, "color", s.tools.foreground);
-            let id = s.edit("New Color Fill Layer", |doc, active| {
-                let mut l = Layer::new(doc.next_layer_name("Color Fill"), LayerContent::Fill(Fill::Solid(Color::rgba(c[0], c[1], c[2], c[3]))));
-                l.mask = selection_mask(doc);
-                let id = doc.insert_above(*active, l);
-                *active = Some(id);
-                Ok(id)
-            })?;
-            Ok(json!({ "layer": id.0 }))
-        }),
+        cmd!(
+            "layer.newFillLayer.solidColor",
+            "Solid Color…",
+            ["Layer", "New Fill Layer"],
+            None,
+            r##"{"color":"#rrggbb"=foreground,"path":"work"|saved path name|{…path}? (the active path: becomes the vector mask, making a shape; else the selection is the layer mask)}"##,
+            has_doc,
+            |s, p| {
+                let c = color_param(p, "color", s.tools.foreground);
+                let id = s.edit("New Color Fill Layer", |doc, active| {
+                    let mut l = Layer::new(doc.next_layer_name("Color Fill"), LayerContent::Fill(Fill::Solid(Color::rgba(c[0], c[1], c[2], c[3]))));
+                    mask_new_layer(doc, &mut l, p, "layer.newFillLayer.solidColor")?;
+                    let id = doc.insert_above(*active, l);
+                    *active = Some(id);
+                    Ok(id)
+                })?;
+                Ok(json!({ "layer": id.0 }))
+            }
+        ),
         cmd!(
             "layer.newFillLayer.gradient",
             "Gradient…",
             ["Layer", "New Fill Layer"],
             None,
-            r##"{"from":"#rrggbb","to":"#rrggbb","angle":deg=90,"style":"linear|radial|angle|reflected|diamond","reverse":bool}"##,
+            r##"{"from":"#rrggbb","to":"#rrggbb","angle":deg=90,"style":"linear|radial|angle|reflected|diamond","reverse":bool,"path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask)}"##,
             has_doc,
             |s, p| {
                 let a = color_param(p, "from", s.tools.foreground);
@@ -711,7 +743,7 @@ fn build() -> Vec<CommandSpec> {
                         reverse,
                     );
                     let mut l = Layer::new(doc.next_layer_name("Gradient Fill"), LayerContent::Fill(fill));
-                    l.mask = selection_mask(doc);
+                    mask_new_layer(doc, &mut l, p, "layer.newFillLayer.gradient")?;
                     let id = doc.insert_above(*active, l);
                     *active = Some(id);
                     Ok(id)
@@ -976,7 +1008,7 @@ fn build() -> Vec<CommandSpec> {
             label,
             menu: &["Layer", "New Adjustment Layer"],
             shortcut: None,
-            params,
+            params: Box::leak(format!("{params} + {{{NEW_LAYER_PATH}}}").into_boxed_str()),
             enabled: has_doc,
             run: |s, p| {
                 let kind = p.get("__kind").and_then(Value::as_str).unwrap_or("invert").to_string();
@@ -985,7 +1017,7 @@ fn build() -> Vec<CommandSpec> {
                     Some(adj) => adj,
                     None => crate::adjust_params::from_params(&kind, p, None, doc_mode(s))?,
                 };
-                new_adjustment(s, adj)
+                new_adjustment(s, adj, p, &format!("layer.newAdjustmentLayer.{kind}"))
             },
             journal: true,
         });

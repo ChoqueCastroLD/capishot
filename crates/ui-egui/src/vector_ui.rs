@@ -175,7 +175,8 @@ pub fn pen_commit(app: &mut PhotocraftApp, closed: bool) {
         }
         app.run("layer.vectorMask.edit", json!({"layer": id, "path": p}))
     } else {
-        app.run("path.set", json!({"name": "work", "path": path}))
+        // The drawn work path is selected in the Paths panel, as in Photoshop.
+        app.run("path.set", json!({"name": "work", "path": path})).inspect(|_| app.ui.selected_path = Some("work".into()))
     };
     if let Err(e) = r {
         app.ui.status = e;
@@ -195,6 +196,38 @@ pub fn active_path_name(app: &PhotocraftApp) -> Option<String> {
     };
     let selected = app.ui.selected_path.as_deref().filter(|s| rows.iter().any(|r| key(r) == *s)).map(str::to_string);
     selected.or_else(|| rows.iter().find(|r| r.kind == PathRow::Work).map(key)).or_else(|| rows.iter().find(|r| r.kind == PathRow::Layer).map(key))
+}
+
+/// The commands that create a fill or adjustment layer and take a `"path"` as its vector mask.
+pub fn takes_path_mask(id: &str) -> bool {
+    id.starts_with("layer.newFillLayer.") || id.starts_with("layer.newAdjustmentLayer.")
+}
+
+/// New fill and adjustment layers take the path selected in the Paths panel as their vector mask,
+/// as in Photoshop (#1419): the command gets it as `"path"` unless the caller set one (`null`
+/// opts out). Only an explicitly selected work or saved path counts; deselect it by clicking the
+/// panel's empty area.
+pub fn with_active_path(app: &PhotocraftApp, id: &str, params: Value) -> Value {
+    if !takes_path_mask(id) || params.get("path").is_some() {
+        return params;
+    }
+    let Some(st) = app.session.active() else { return params };
+    let Some(sel) = app.ui.selected_path.as_deref() else { return params };
+    let listed = path_rows(&st.doc, st.active_layer).iter().any(|r| match r.kind {
+        PathRow::Work => sel == "work",
+        PathRow::Saved => r.name == sel,
+        PathRow::Layer => false,
+    });
+    if !listed {
+        return params;
+    }
+    match params {
+        Value::Object(mut m) => {
+            m.insert("path".into(), json!(sel));
+            Value::Object(m)
+        }
+        _ => json!({ "path": sel }),
+    }
 }
 
 /// ⌘↩ / Ctrl+Enter (#306): load a path as a selection, like Photoshop with a Pen or Path
@@ -825,6 +858,13 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 });
                 ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.separator));
             }
+            // Clicking the empty area deselects the path, as in Photoshop: new fill and
+            // adjustment layers then take the selection as their mask instead (#1419).
+            let rest = ui.available_rect_before_wrap();
+            let rest = rest.intersect(Rect::from_min_size(rest.min, vec2(rest.width(), rest.height().min(4000.0))));
+            if rest.is_positive() && ui.interact(rest, ui.id().with("paths-empty"), Sense::click()).clicked() {
+                app.ui.selected_path = None;
+            }
         },
     );
     ui.add_space(4.0);
@@ -1002,6 +1042,59 @@ mod tests {
         path_selection_finish(&mut app, [50.0, 50.0], [60.0, 55.0]);
         let wp = app.session.active().unwrap().doc.work_path.clone().unwrap();
         assert_eq!((wp.subpaths[0].knots[0].anchor.x, wp.subpaths[0].knots[0].anchor.y), (30.0, 25.0));
+    }
+
+    /// #1419: Solid Color (and every new fill or adjustment layer) made while a path is selected
+    /// in the Paths panel takes it as its vector mask; with the path deselected, the selection
+    /// is its layer mask again.
+    #[test]
+    fn new_fill_layer_takes_the_selected_path_as_its_vector_mask() {
+        let mut app = app();
+        let layer = |app: &PhotocraftApp, r: Result<Value, String>| {
+            let id = photocraft_doc::LayerId(r.unwrap()["layer"].as_u64().unwrap());
+            app.session.active().unwrap().doc.layer(id).unwrap().clone()
+        };
+        // Drawing a work path with the Pen selects it.
+        app.ui.tool = Tool::Pen;
+        for (x, y) in [(20.0, 20.0), (120.0, 20.0), (120.0, 120.0)] {
+            pen_down(&mut app, x, y);
+            pen_up(&mut app);
+        }
+        pen_down(&mut app, 20.5, 20.5);
+        assert_eq!(app.ui.selected_path.as_deref(), Some("work"));
+        let wp = app.session.active().unwrap().doc.work_path.clone().unwrap();
+        app.run("select.rect", json!({"x": 150, "y": 150, "width": 20, "height": 20})).unwrap();
+        for id in ["layer.newFillLayer.solidColor", "layer.newFillLayer.gradient", "layer.newAdjustmentLayer.invert"] {
+            app.ui.selected_path = Some("work".into());
+            let r = app.run(id, json!({}));
+            let l = layer(&app, r);
+            assert_eq!(l.vector_mask.as_ref().map(|v| &v.path), Some(&wp), "{id}: the work path is the vector mask");
+            assert!(l.mask.is_none(), "{id}: the path wins over the selection");
+            // The new layer's vector mask is now the active path, not the work path.
+            assert_eq!(app.ui.selected_path.as_deref(), Some("layer"), "{id}");
+        }
+        // So the next fill layer isn't masked by the work path again.
+        let r = app.run("layer.newFillLayer.solidColor", json!({}));
+        assert!(layer(&app, r).vector_mask.is_none());
+        // A caller can opt out.
+        let r = app.run("layer.newFillLayer.solidColor", json!({"path": null}));
+        assert!(layer(&app, r).vector_mask.is_none());
+        // A selected saved path is used.
+        app.run("path.set", json!({"name": "Saved", "path": {"subpaths": [{"closed": true, "knots": [[0, 0], [9, 0], [9, 9]]}]}})).unwrap();
+        app.ui.selected_path = Some("Saved".into());
+        let saved = app.session.active().unwrap().doc.paths[0].path.clone();
+        let r = app.run("layer.newFillLayer.solidColor", json!({}));
+        assert_eq!(layer(&app, r).vector_mask.map(|v| v.path), Some(saved));
+        // Deselected (or a stale name): the selection is the layer mask, no vector mask.
+        for sel in [None, Some("Gone".to_string())] {
+            app.ui.selected_path = sel;
+            let r = app.run("layer.newFillLayer.solidColor", json!({}));
+            let l = layer(&app, r);
+            assert!(l.vector_mask.is_none() && l.mask.is_some());
+        }
+        // Make Work Path selects the new work path.
+        app.run("select.toWorkPath", json!({"tolerance": 2.0})).unwrap();
+        assert_eq!(app.ui.selected_path.as_deref(), Some("work"));
     }
 
     /// #534: dragging in a shape's fill picker, opened from the Properties panel at the right edge

@@ -674,7 +674,7 @@ fn shape_rasterize(s: &mut Session, p: &Value) -> Result<Value> {
 // Document paths
 // ---------------------------------------------------------------------------
 
-fn is_work(name: Option<&str>) -> bool {
+pub(crate) fn is_work(name: Option<&str>) -> bool {
     name.is_none_or(|n| n.is_empty() || n.eq_ignore_ascii_case("work") || n == "Work Path")
 }
 
