@@ -15,9 +15,9 @@ note = "Fill (fill_ui.rs:72) and Liquify (liquify_ui.rs:64, #418) keep their set
 [[item]]
 id = "UI-217-2"
 target = "Window size and dock width remembered across restarts"
-status = "missing"
+status = "done"
 issue = 217
-note = "main.rs:46 native_options(): fixed 1440x900, centred on the main monitor (#419); dock.rs:529 snapshot omits the width"
+note = "eframe persistence (ui.ron): persist_window for the window, egui memory for the dock panel width; window_and_panel_geometry_survive_a_restart asserts the round trip (apps/photocraft/src/main.rs; b07a2e5b, #587)"
 
 [[item]]
 id = "UI-217-3"
