@@ -29,6 +29,7 @@ mod budget;
 pub mod cache;
 mod hashes;
 pub mod meta;
+mod read;
 pub mod state;
 mod zip;
 

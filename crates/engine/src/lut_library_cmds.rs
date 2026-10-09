@@ -4,7 +4,8 @@
 //!   as one pack, leaving out LUTs already installed in another pack. It runs as a background job
 //!   when started with [`Session::start`], cancellable between files.
 //! - `lut.library` lists the installed packs and LUTs, favourites and recently used (read only;
-//!   each LUT's absolute `location` is what Color Lookup's `file` param takes).
+//!   a LUT's `id` is what Color Lookup's `lut` param takes, which is how agents apply one; its
+//!   absolute `location` is for trusted callers that use the `file` param).
 //! - `lut.removePack` deletes a pack; `lut.favorite` stars or unstars a LUT; `lut.used` records
 //!   one as recently used; `lut.rescan` notices files added or removed by hand.
 //!
@@ -162,7 +163,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "LUT Library",
             menu: &[],
             shortcut: None,
-            params: r##"{"pack":string? (only this pack)} → {available, dir, rev, favorites:[id], recent:[id], packs:[{name, count, bytes, luts:[{id, name, file, location, bytes, favorite}]}]}; a LUT's location is what Color Lookup loads"##,
+            params: r##"{"pack":string? (only this pack)} → {available, dir, rev, favorites:[id], recent:[id], packs:[{name, count, bytes, luts:[{id, name, file, location, bytes, favorite}]}]}; apply a LUT with Color Lookup's `lut` param set to its id (agents cannot use `file`); location is the file on disk, for trusted callers"##,
             enabled: always,
             run: library,
             journal: false,

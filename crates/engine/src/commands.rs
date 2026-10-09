@@ -1034,7 +1034,7 @@ fn build() -> Vec<CommandSpec> {
         (
             "colorLookup",
             "Color Lookup…",
-            r##"{"lut":"none|warm|cool|tealOrange|bleachBypass|fadedFilm|dayForNight|monoContrast|crossProcess"="none","file":text,"interpolation":"trilinear|tetrahedral"="trilinear","dither":bool=false,"data":json} (file: .cube/.3dl/.look path; data: file text + "fileName")"##,
+            r##"{"lut":"none|warm|cool|tealOrange|bleachBypass|fadedFilm|dayForNight|monoContrast|crossProcess"="none" | an installed LUT's id "Pack/Name.cube" as listed by lut.library,"file":text,"interpolation":"trilinear|tetrahedral"="trilinear","dither":bool=false,"data":json} (lut: a built-in look or a library id, the table is embedded in the layer; file: .cube/.3dl/.look path, refused for agents; data: file text + "fileName")"##,
         ),
     ];
     for &(kind, label, params) in ADJ {

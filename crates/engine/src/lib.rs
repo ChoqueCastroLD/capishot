@@ -53,6 +53,7 @@ pub mod layer_multi_cmds;
 pub mod layer_nav_cmds;
 pub mod layer_style;
 pub mod lens_cmds;
+mod lut_id_params;
 pub mod lut_library;
 pub mod lut_library_cmds;
 pub mod magnetic_cmds;

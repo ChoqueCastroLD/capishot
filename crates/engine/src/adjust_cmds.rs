@@ -63,10 +63,11 @@ pub fn selective_from_params(p: &Value, base: Option<&Adjustment>) -> Adjustment
     Adjustment::SelectiveColor { relative, adjustments: adj }
 }
 
-/// Color Lookup from params: `"lut"` (a built-in look id or `"none"`), `"file"` (a .cube / .3dl /
-/// .look path, native only) or `"data"` (the file's text, with `"fileName"` naming its format),
-/// `"interpolation":"trilinear|tetrahedral"`, `"dither":bool`. The table is embedded in the
-/// layer, as Photoshop does. Unspecified fields keep `base`'s values.
+/// Color Lookup from params: `"lut"` (a built-in look id or `"none"`; an installed LUT's library id
+/// such as `Pack/Name.cube` is turned into `"data"` before this runs, see `lut_id_params`),
+/// `"file"` (a .cube / .3dl / .look path, native only) or `"data"` (the file's text, with
+/// `"fileName"` naming its format), `"interpolation":"trilinear|tetrahedral"`, `"dither":bool`.
+/// The table is embedded in the layer, as Photoshop does. Unspecified fields keep `base`'s values.
 pub fn lookup_from_params(p: &Value, base: Option<&Adjustment>) -> Result<Adjustment> {
     const CMD: &str = "colorLookup";
     let (mut name, mut lut, mut size, mut tetrahedral, mut dither) = match base {
@@ -80,7 +81,9 @@ pub fn lookup_from_params(p: &Value, base: Option<&Adjustment>) -> Result<Adjust
             lut = None;
             size = 0;
         } else {
-            let f = photocraft_cms::lutfile::builtin(id).ok_or_else(|| bad(CMD, format!("unknown look `{id}` (built-ins: {})", builtin_ids())))?;
+            let f = photocraft_cms::lutfile::builtin(id).ok_or_else(|| {
+                bad(CMD, format!("unknown look `{id}` (built-ins: {}; or a LUT library id such as Pack/Name.cube, see lut.library)", builtin_ids()))
+            })?;
             let label = f.title.clone();
             loaded = Some((f, label));
         }

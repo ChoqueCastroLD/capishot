@@ -28,7 +28,7 @@ fn read_sidecar(dir: &Path) -> Option<Vec<(String, String)>> {
 /// The content of a LUT file added by hand, or `None` when it is unreadable or larger than
 /// [`MAX_LUT_BYTES`] (install refuses those too). The length is checked before the file is opened
 /// and again while reading, in case it grew in between.
-fn read_bounded(path: &Path) -> Option<Vec<u8>> {
+pub(super) fn read_bounded(path: &Path) -> Option<Vec<u8>> {
     if fs::metadata(path).ok()?.len() > MAX_LUT_BYTES {
         return None;
     }
