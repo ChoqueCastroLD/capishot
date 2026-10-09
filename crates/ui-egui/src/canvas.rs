@@ -1996,11 +1996,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     }
 
     // Pixel grid at high zoom (the GPU path draws its own).
-    if !on_gpu && pixel_grid && view.zoom >= 12.0 {
+    if !on_gpu && pixel_grid && view.zoom > 5.0 {
         let vis = img_rect.intersect(rect);
         let a = xf.to_doc(vis.min);
         let b = xf.to_doc(vis.max);
-        let grid = Stroke::new(1.0, Color32::from_white_alpha(40));
+        let grid = Stroke::new(1.0, Color32::from_white_alpha(64));
         for x in (a[0].floor() as i32)..=(b[0].ceil() as i32) {
             let sx = xf.to_screen(x as f32, 0.0).x;
             painter.line_segment([pos2(sx, vis.top()), pos2(sx, vis.bottom())], grid);
