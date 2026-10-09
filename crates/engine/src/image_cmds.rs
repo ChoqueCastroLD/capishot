@@ -280,6 +280,9 @@ fn canvas_size(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "width": nw, "height": nh, "offset": [dx, dy] }))
 }
 
+/// The largest side an explicit crop may give the canvas (the `file.new` and Canvas Size limit).
+const MAX_CROP_SIDE: i32 = 300_000;
+
 /// Image → Crop (to the selection bounds).
 fn crop(s: &mut Session, p: &Value) -> Result<Value> {
     let delete = p.get("deleteCroppedPixels").and_then(Value::as_bool).unwrap_or(true);
@@ -292,6 +295,12 @@ fn crop(s: &mut Session, p: &Value) -> Result<Value> {
         crate::commands::int_i32("image.crop", p, "height")?,
     ) {
         (Some(x), Some(y), Some(w), Some(h)) if w > 0 && h > 0 => {
+            // The new canvas size: refuse what File › New, Image Size and Canvas Size won't make,
+            // before anything changes. Unbounded, a following full-canvas flatten (Trim, Duplicate
+            // Merged) aborted on allocation (#960).
+            if w > MAX_CROP_SIDE || h > MAX_CROP_SIDE {
+                return Err(bad("image.crop", format!("{w} x {h} exceeds the {MAX_CROP_SIDE} px limit per side")));
+            }
             // A far edge past i32::MAX used to saturate, silently cropping less than asked (#959).
             let end = |o: i32, len: i32, ko: &str, kl: &str| {
                 o.checked_add(len)
@@ -670,6 +679,23 @@ mod tests {
         s.execute("image.crop", json!({"x": -10, "y": 0, "width": 60, "height": 20})).unwrap();
         assert_eq!(doc(&s).size, Size::new(60, 20));
         assert_eq!(doc(&s).layers[1].surface().unwrap().pixel(20, 5), vec![1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn crop_refuses_a_canvas_side_past_the_new_document_limit() {
+        // #960: an unbounded explicit crop left a canvas that a later Trim or Duplicate Merged
+        // could only abort on allocating.
+        for (w, h) in [(100_000_000, 100_000_000), (300_001, 10), (10, 300_001)] {
+            let mut s = session();
+            let (size, past) = (doc(&s).size, s.active().unwrap().history.past_len());
+            let err = s.execute("image.crop", json!({"x": 0, "y": 0, "width": w, "height": h})).unwrap_err();
+            assert!(err.to_string().contains("300000 px limit"), "{w} x {h}: {err}");
+            assert_eq!((doc(&s).size, s.active().unwrap().history.past_len()), (size, past), "{w} x {h}: nothing changed");
+        }
+        // At the limit it still extends the canvas (the tiles stay lazy).
+        let mut s = session();
+        s.execute("image.crop", json!({"x": 0, "y": 0, "width": 300_000, "height": 2})).unwrap();
+        assert_eq!(doc(&s).size, Size::new(300_000, 2));
     }
 
     #[test]
