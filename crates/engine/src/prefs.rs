@@ -870,7 +870,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "type.useEscToCommit",
     "type.textEngine",
     "type.fontPreview",
-    "type.fillNewTypeLayersWithPlaceholder",
     "type.recentFonts",
     "enhancedControls.scrubbySliderAcceleration",
     "enhancedControls.touchGestures",
