@@ -865,7 +865,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "enhancedControls.scrubbySliderAcceleration",
     "enhancedControls.touchGestures",
     "enhancedControls.zoomWithTrackpadPinch",
-    "enhancedControls.rotateViewWithTrackpad",
     "rawDefaults.colorSpace",
     "rawDefaults.bitDepth",
     "rawDefaults.resolution",

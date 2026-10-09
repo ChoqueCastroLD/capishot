@@ -48,7 +48,13 @@ fn new_app() -> PhotocraftApp {
 
 fn xf(app: &PhotocraftApp) -> ViewXform {
     let v = &app.ui.views[0];
-    ViewXform { rect: crate::rulers::content_rect(app, app.last_canvas_rect), zoom: v.zoom, center: v.center, flip: app.ui.view.flip_horizontal }
+    ViewXform {
+        rect: crate::rulers::content_rect(app, app.last_canvas_rect),
+        zoom: v.zoom,
+        center: v.center,
+        flip: app.ui.view.flip_horizontal,
+        rotation: v.rotation,
+    }
 }
 
 /// Screen position of a text-space point of layer `id`.

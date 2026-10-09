@@ -111,6 +111,7 @@ pub mod quick_pick;
 pub mod rasterize_prompt;
 pub mod retouch_ui;
 mod rgb_histogram;
+pub mod rotate_view;
 pub mod rulers;
 pub mod screen_picker;
 pub mod scrollbars;

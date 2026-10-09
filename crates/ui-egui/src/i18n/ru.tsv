@@ -2511,3 +2511,6 @@ fontWeight	Italic	Курсив
 # Pattern Stamp tool
 	Pattern Stamp Tool	Инструмент узорный штамп
 	Impressionist	Импрессионист
+	Rotate View Tool	Инструмент поворота вида
+	Reset View	Сбросить вид
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Перетащите вокруг центра, чтобы повернуть вид  ·  Shift фиксирует шаг 15°
