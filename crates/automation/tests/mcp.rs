@@ -508,6 +508,59 @@ async fn bridge_forwards_to_control_protocol() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn bridge_lost_reply_does_not_replay_an_edit_and_next_call_reconnects() {
+    use photocraft_automation::{BridgeClient, Headless};
+    use std::time::Duration;
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let app = tokio::spawn(async move {
+            let mut backend = Headless::new();
+            backend.handle("doc.new", json!({"width": 8, "height": 8})).unwrap();
+            let initial_layers = backend.session.active().unwrap().doc.layer_count();
+            let initial_history = backend.session.active().unwrap().history.past_len();
+            let mut seen = Vec::new();
+            for connection in 0..2 {
+                let (socket, _) = listener.accept().await.unwrap();
+                let (read, mut write) = socket.into_split();
+                let mut reader = BufReader::new(read);
+                let mut line = String::new();
+                reader.read_line(&mut line).await.unwrap();
+                let (auth, authenticated) = photocraft_automation::security::authentication_reply(&line, CONTROL_TOKEN);
+                assert!(authenticated, "each connection must authenticate");
+                write.write_all(format!("{auth}\n").as_bytes()).await.unwrap();
+                line.clear();
+                reader.read_line(&mut line).await.unwrap();
+                let request: Value = serde_json::from_str(&line).unwrap();
+                seen.push(request["params"]["command"].as_str().unwrap().to_owned());
+                let result = backend.handle(request["method"].as_str().unwrap(), request["params"].clone()).unwrap();
+                if connection == 0 {
+                    // The edit has completed, but both socket halves close before its reply.
+                    continue;
+                }
+                let reply = json!({"id": request["id"], "ok": true, "result": result});
+                write.write_all(format!("{reply}\n").as_bytes()).await.unwrap();
+            }
+            let document = backend.session.active().unwrap();
+            assert_eq!(document.doc.layer_count(), initial_layers + 1, "the edit was applied once");
+            assert_eq!(document.history.past_len(), initial_history + 1, "one undo step");
+            seen
+        });
+        let bridge = BridgeClient::new(&addr, CONTROL_TOKEN).unwrap();
+        let result = bridge.call("engine.execute", json!({"command": "layer.new.layer", "params": {"name": "Once"}})).await;
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("operation may have completed"), "{error}");
+        assert!(error.contains("inspect"), "{error}");
+        let document = bridge.call("engine.execute", json!({"command": "document.inspect"})).await.unwrap();
+        assert_eq!(document["layers"].as_array().unwrap().len(), 2);
+        assert_eq!(app.await.unwrap(), ["layer.new.layer", "document.inspect"]);
+    })
+    .await
+    .expect("bridge lost-reply regression must finish");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn bridge_previews_downscale_before_enforcing_the_png_budget() {
     use photocraft_automation::budgets::MAX_PNG_BYTES;
 

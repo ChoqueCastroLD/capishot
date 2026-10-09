@@ -170,7 +170,7 @@ magenta alignment lines. `ui.pointer` drives the same code, so agents get identi
 - **Headless** (`photocraft-cli mcp`): an in-process `photocraft_engine::Session`. There is no window.
 - **Bridge** (`photocraft-cli mcp --bridge 127.0.0.1:7878 --control-token-file <path>`): every tool is forwarded to a running `photocraft --control 7878 --control-token-file <path>` over this protocol, so agents see and drive the live app.
 
-The bridge keeps one authenticated TCP connection open. It reconnects and authenticates once if a request fails, and it skips reply lines whose `id` doesn't match the request (for example, stale replies to requests that timed out). It only accepts loopback addresses, because the app only listens on loopback. Supply its bearer token with `--control-token-file`, `--control-token`, `PHOTOCRAFT_CONTROL_TOKEN_FILE`, or `PHOTOCRAFT_CONTROL_TOKEN`:
+The bridge keeps one authenticated TCP connection open. A transport failure while sending a request or waiting for its reply, including a reply timeout, drops the connection and reports that the operation may have completed; inspect the document before retrying an edit. It never automatically resends the failed request. The next separate call reconnects and authenticates, and reply lines whose `id` does not match the request are skipped. It only accepts loopback addresses, because the app only listens on loopback. Supply its bearer token with `--control-token-file`, `--control-token`, `PHOTOCRAFT_CONTROL_TOKEN_FILE`, or `PHOTOCRAFT_CONTROL_TOKEN`:
 
 ```sh
 photocraft-cli mcp --bridge 127.0.0.1:7878 \
