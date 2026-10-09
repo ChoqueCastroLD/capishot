@@ -82,6 +82,19 @@ pub fn selection_mode(tool: Tool, bar: u8, m: egui::Modifiers) -> &'static str {
     }
 }
 
+/// [`selection_mode`] for the active document: with nothing selected, ⌥ (or ⇧⌥) has nothing to
+/// subtract from or intersect with, so it draws a new selection, as in Photoshop (where ⌥ then
+/// only draws a marquee from its centre). An options-bar Subtract or Intersect is kept (#1106).
+pub fn document_selection_mode(app: &PhotocraftApp, tool: Tool, m: egui::Modifiers) -> &'static str {
+    let mode = selection_mode(tool, app.ui.selection_mode, m);
+    let selected = app.session.active().and_then(|st| st.doc.selection.as_ref()).is_some_and(|s| !s.content_bounds().is_empty());
+    if m.alt && !selected && matches!(mode, "subtract" | "intersect") && selection_mode(tool, app.ui.selection_mode, egui::Modifiers::NONE) == "replace" {
+        "replace"
+    } else {
+        mode
+    }
+}
+
 /// The badge the cursor of `tool` shows with modifiers `m` (None for non-selection tools or New).
 pub fn badge(app: &PhotocraftApp, tool: Tool, m: egui::Modifiers) -> Option<Badge> {
     if !is_selection_tool(tool) {

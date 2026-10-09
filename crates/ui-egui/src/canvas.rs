@@ -3281,7 +3281,7 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// Selection mode from the options bar, overridden by modifier keys (⇧ add, ⌥ subtract, ⇧⌥ intersect).
 /// The cursor badge announces the same mode (`tool_feedback`).
 pub(crate) fn selection_mode(app: &PhotocraftApp, m: egui::Modifiers) -> &'static str {
-    crate::tool_feedback::selection_mode(Tool::Lasso, app.ui.selection_mode, m)
+    crate::tool_feedback::document_selection_mode(app, Tool::Lasso, m)
 }
 
 /// A polygonal lasso click adds a vertex; clicking near the first vertex closes the polygon. The

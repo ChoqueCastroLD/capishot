@@ -303,3 +303,25 @@ fn cmd_alt_drag_floats_a_copy() {
     assert!(alpha(&d, 12, 20) == 1.0, "the original stays");
     assert!(alpha(&d, 50, 20) == 1.0, "the copy dropped 25 px right");
 }
+
+#[test]
+fn alt_with_nothing_selected_draws_a_new_selection() {
+    // #1106: with no selection, ⌥ has nothing to subtract from, so a marquee drawn with it held
+    // still selects (Photoshop: ⌥ then only draws from the centre). With a selection it subtracts.
+    let mut h = harness(Tool::RectMarquee);
+    mods(&mut h, Modifiers::ALT);
+    press_at(&mut h, 100.0, 100.0, Modifiers::ALT);
+    move_to(&mut h, 140.0, 130.0);
+    release_at(&mut h, 140.0, 130.0, Modifiers::ALT);
+    mods(&mut h, Modifiers::NONE);
+    assert!(h.state().session.active().unwrap().doc.selection.as_ref().is_some_and(|s| !s.content_bounds().is_empty()), "a selection was made");
+    // Now ⌥ subtracts from it.
+    let before = selection(&h);
+    mods(&mut h, Modifiers::ALT);
+    press_at(&mut h, 0.0, 0.0, Modifiers::ALT);
+    move_to(&mut h, 400.0, 400.0);
+    release_at(&mut h, 400.0, 400.0, Modifiers::ALT);
+    mods(&mut h, Modifiers::NONE);
+    let after = h.state().session.active().unwrap().doc.selection.as_ref().map(|s| s.content_bounds());
+    assert!(after.is_none_or(|r| r.is_empty() || r != before), "⌥ subtracted: {before:?} -> {after:?}");
+}
