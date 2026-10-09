@@ -239,6 +239,11 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
         }
         "engine.execute" | "ui.menu.invoke" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
+            // A control-channel menu click must respect the same modal gate as the native menu.
+            // engine.execute is deliberately not subject to the UI's menu-click semantics.
+            if req.method == "ui.menu.invoke" && !crate::menus::modal_allows(app, id) {
+                return err("menu command is unavailable while a modal dialog is open");
+            }
             let params = p.get("params").cloned().unwrap_or(json!({}));
             if let Some(authorize) = app.services.automation_command.as_ref()
                 && let Err(error) = authorize(id, &params)
@@ -953,6 +958,38 @@ mod tests {
         let r = call(&mut app, &ctx, "ui.menu.invoke", json!({"id": "filter.blur.gaussianBlur"}));
         assert!(r.to_string().contains("dialog"), "ui.menu.invoke should open the dialog: {r}");
         assert_eq!(app.session.active().unwrap().revision, rev, "opening a dialog must not edit the document");
+    }
+
+    #[test]
+    fn menu_invoke_cannot_edit_document_behind_an_open_dialog() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
+
+        let opened = call(&mut app, &ctx, "ui.menu.invoke", json!({"id": "image.imageSize"}));
+        assert_eq!(opened["ok"], true, "{opened}");
+        let dialog = opened["result"]["dialog"].as_u64().unwrap();
+        let revision = app.session.active().unwrap().revision;
+        let before = call(&mut app, &ctx, "ui.inspect", json!({}));
+        let fields = before["result"]["dialogs"][0]["fields"].clone();
+
+        for params in [json!({"id": "image.imageRotation.90cw"}), json!({"id": "image.imageRotation.90cw", "params": {}})] {
+            let blocked = call(&mut app, &ctx, "ui.menu.invoke", params);
+            assert_eq!(blocked["ok"], false, "{blocked}");
+            assert_eq!(app.session.active().unwrap().revision, revision);
+            let snapshot = call(&mut app, &ctx, "ui.inspect", json!({}));
+            assert_eq!(snapshot["result"]["dialogs"][0]["id"], dialog);
+            assert_eq!(snapshot["result"]["dialogs"][0]["fields"], fields);
+        }
+
+        // View navigation stays permitted by the same policy as native menus and shortcuts.
+        assert!(crate::menus::modal_allows(&app, "view.zoomIn"));
+        assert!(!crate::menus::modal_allows(&app, "image.imageRotation.90cw"));
+
+        assert_eq!(call(&mut app, &ctx, "ui.dialog.cancel", json!({"dialog": dialog}))["ok"], true);
+        let rotated = call(&mut app, &ctx, "ui.menu.invoke", json!({"id": "image.imageRotation.90cw"}));
+        assert_eq!(rotated["ok"], true, "{rotated}");
+        assert!(app.session.active().unwrap().revision > revision);
     }
 
     #[test]
