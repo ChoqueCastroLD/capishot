@@ -10,8 +10,8 @@
 //!   the same as the cursor. Both only *preview* on the canvas (no history); a click or Enter
 //!   applies the LUT through Color Lookup's `file` / `lut` params, so the document embeds the table
 //!   and never depends on the library afterwards.
-//! - A folder or `.zip` dropped on the window installs as a pack; files added by hand show up
-//!   within a couple of seconds.
+//! - A folder or `.zip` dropped on the window while this list is showing installs as a pack (drops
+//!   at any other time open as usual); files added by hand show up within a couple of seconds.
 //!
 //! The listing and each pack's folder tree are cached in egui memory by library revision. Only open
 //! sections produce rows, and the list is virtualised, so a pack of thousands of LUTs costs nothing
@@ -128,6 +128,7 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
     let ctx = ui.ctx().clone();
     let scans = Scans::get(&ctx);
     let has_library = app.session.lut_library.is_some();
+    install::mark_shown(&ctx);
 
     // Files added or removed by hand show up without a restart.
     if let (Some(l), Some(lib)) = (rows::listing(app, ui), app.session.lut_library.as_ref()) {

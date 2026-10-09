@@ -133,11 +133,70 @@ fn a_picked_lut_shows_up_under_recent_and_a_starred_one_under_favorites() {
     assert!(h.query_by_label("Favorites (1)").is_some());
 }
 
+#[derive(Debug)]
+struct Drop(std::path::PathBuf);
+
+impl egui::DroppedFile for Drop {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        Err("a dropped folder is never read through egui".into())
+    }
+}
+
+fn drop_on(h: &mut Harness<'_, PhotocraftApp>, path: &std::path::Path) {
+    let ctx = h.ctx.clone();
+    h.state_mut().open_dropped(&ctx, vec![std::sync::Arc::new(Drop(path.to_path_buf()))], None);
+}
+
+fn pack_names(h: &Harness<'_, PhotocraftApp>) -> Vec<String> {
+    h.state().session.lut_library.as_ref().and_then(|l| l.list().ok()).unwrap_or_default().into_iter().map(|p| p.name).collect()
+}
+
 #[test]
-fn a_folder_dropped_on_the_window_installs_as_a_pack() {
-    let library = LutLibrary::new(temp("drop-lib"));
-    let h = harness(library);
+fn a_folder_dropped_on_the_lut_list_installs_as_a_pack() {
+    let mut h = harness(LutLibrary::new(temp("drop-lib")));
     let dir = pack_source("drop-src");
-    assert!(crate::lut_library_ui::is_pack_drop(h.state(), &dir));
-    assert!(!crate::lut_library_ui::is_pack_drop(h.state(), &dir.join("Small.cube")));
+    let ctx = h.ctx.clone();
+    assert!(crate::lut_library_ui::is_pack_drop(h.state(), &ctx, &dir));
+    assert!(!crate::lut_library_ui::is_pack_drop(h.state(), &ctx, &dir.join("Small.cube")));
+    drop_on(&mut h, &dir);
+    let names = pack_names(&h);
+    assert!(names.len() == 1 && names[0].ends_with("drop-src"), "the list was showing, so the folder installed: {names:?}");
+}
+
+#[test]
+fn a_folder_dropped_when_the_lut_list_is_not_showing_is_not_installed() {
+    // A document with no Color Lookup layer: the list is never drawn.
+    let mut h = Harness::builder().with_size(vec2(1440.0, 900.0)).with_max_steps(64).build_eframe(|cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 32, "height": 32})).unwrap();
+        s.lut_library = Some(LutLibrary::new(temp("nodrop-lib")));
+        PhotocraftApp::new(s, crate::Services::default())
+    });
+    h.run_steps(8);
+    let dir = pack_source("nodrop-src");
+    let ctx = h.ctx.clone();
+    assert!(!crate::lut_library_ui::is_pack_drop(h.state(), &ctx, &dir));
+    drop_on(&mut h, &dir);
+    assert!(pack_names(&h).is_empty(), "nothing was installed");
+    // It went down the old route instead: a folder is not an image, so opening it fails.
+    assert!(h.state().ui.status_error, "{}", h.state().ui.status);
+}
+
+#[test]
+fn the_lut_list_stops_taking_drops_two_frames_after_it_was_last_drawn() {
+    let h = harness(LutLibrary::new(temp("stale-lib")));
+    let dir = pack_source("stale-src");
+    let ctx = egui::Context::default();
+    assert!(!crate::lut_library_ui::is_pack_drop(h.state(), &ctx, &dir), "never drawn");
+    super::install::mark_shown(&ctx);
+    assert!(crate::lut_library_ui::is_pack_drop(h.state(), &ctx, &dir));
+    let pass = || ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
+    pass();
+    assert!(crate::lut_library_ui::is_pack_drop(h.state(), &ctx, &dir), "one frame later still counts");
+    pass();
+    assert!(!crate::lut_library_ui::is_pack_drop(h.state(), &ctx, &dir));
 }

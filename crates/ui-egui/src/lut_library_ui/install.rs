@@ -36,9 +36,31 @@ pub fn install_path(app: &mut PhotocraftApp, path: &str) {
     }
 }
 
-/// Whether a dropped file is a LUT pack (a folder or a `.zip`) and this session has a library.
-pub fn is_pack_drop(app: &PhotocraftApp, path: &Path) -> bool {
-    app.session.lut_library.is_some() && path.is_absolute() && (path.is_dir() || path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")))
+/// The frame the LUT browser was last drawn in, kept in egui memory.
+const SHOWN: &str = "lutlib-shown";
+
+/// Called by the browser every frame it is drawn, so a drop can tell whether it landed on it.
+pub(super) fn mark_shown(ctx: &egui::Context) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(Id::new(SHOWN), frame));
+}
+
+/// Whether the LUT browser was drawn in the previous frame or this one. A drop is read at the start
+/// of a frame, before the panel is drawn, so "the previous frame" is the one the user was looking at.
+fn browser_visible(ctx: &egui::Context) -> bool {
+    let seen: Option<u64> = ctx.data(|d| d.get_temp(Id::new(SHOWN)));
+    seen.is_some_and(|seen| ctx.cumulative_frame_nr() <= seen.saturating_add(1))
+}
+
+/// Whether a dropped file is a LUT pack: a folder or a `.zip`, dropped while Color Lookup's LUT
+/// browser is showing, in a session that has a library. Anywhere else a folder or archive is not
+/// ours to take (a folder of photos with one stray `.cube` must not install silently), so it opens
+/// like any other drop.
+pub fn is_pack_drop(app: &PhotocraftApp, ctx: &egui::Context, path: &Path) -> bool {
+    app.session.lut_library.is_some()
+        && browser_visible(ctx)
+        && path.is_absolute()
+        && (path.is_dir() || path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")))
 }
 
 pub(super) fn install_dialog(app: &mut PhotocraftApp) {
