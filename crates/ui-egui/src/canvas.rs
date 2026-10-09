@@ -1258,7 +1258,7 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
             let cut = name_g.size().x + 0.5 < natural_w - STUDIO_TAB_PAD + STUDIO_TAB_GAP - meta_g.size().x;
             let resp = ui.interact(r, ui.id().with(("dtab", i)), Sense::click());
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, sel, &st.doc.name));
-            doc_tabs.push(r);
+            doc_tabs.push((i, r));
             if sel {
                 ui.painter().rect_filled(r, t.radius_sm, t.card);
                 ui.painter().rect_stroke(r, t.radius_sm, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
@@ -1481,7 +1481,7 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         resp.context_menu(|ui| {
             tab_action = tab_context_menu(ui, i, tab_count);
         });
-        doc_tabs.push(r);
+        doc_tabs.push((i, r));
     }
     for &(i, r) in placed.iter().filter(|(i, _)| *i >= tab_count) {
         let Some((job, _, frac)) = opening.get(i - tab_count) else { continue };
@@ -1540,14 +1540,19 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TabStrip {
     pub rect: Rect,
-    /// The document tabs, left to right.
-    pub tabs: Vec<Rect>,
+    /// The document tabs shown, left to right, with their document index. When the tabs overflow
+    /// into the » menu, some documents have no tab here.
+    pub tabs: Vec<(usize, Rect)>,
 }
 
 impl TabStrip {
-    /// The tab position a drop at `x` opens at: before the first tab whose middle is right of it.
+    /// The document position a drop at `x` opens at: before the first shown tab whose middle is
+    /// right of it, else after the last shown tab.
     pub fn slot(&self, x: f32) -> usize {
-        self.tabs.iter().filter(|r| r.center().x < x).count()
+        match self.tabs.iter().find(|(_, r)| r.center().x >= x) {
+            Some(&(i, _)) => i,
+            None => self.tabs.last().map_or(0, |&(i, _)| i.saturating_add(1)),
+        }
     }
 }
 
@@ -1559,7 +1564,9 @@ fn drop_slot_line(app: &mut PhotocraftApp, ui: &egui::Ui) {
     let at = app.services.cursor_pos.as_mut().and_then(|f| f(ui.ctx()));
     let crate::file_open::DropTarget::Tabs(slot) = app.drop_target(ui.ctx(), at) else { return };
     let Some(tabs) = app.tab_strip.as_ref().map(|s| &s.tabs) else { return };
-    let Some((r, after)) = tabs.get(slot).map(|r| (*r, false)).or_else(|| tabs.last().map(|r| (*r, true))) else { return };
+    let Some((r, after)) = tabs.iter().find(|(i, _)| *i == slot).map(|&(_, r)| (r, false)).or_else(|| tabs.last().map(|&(_, r)| (r, true))) else {
+        return;
+    };
     crate::widgets::drop_line(ui, r, after, true, &crate::theme::Tokens::get(ui.ctx()));
 }
 

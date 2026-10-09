@@ -441,7 +441,7 @@ fn files_dropped_on_the_tabs_open_at_that_slot() {
     // One tab at (100, 20)–(200, 46): its left half is slot 0, its right half and beyond slot 1.
     let tab = egui::Rect::from_min_max(egui::pos2(100.0, 20.0), egui::pos2(200.0, 46.0));
     let strip = egui::Rect::from_min_max(egui::pos2(92.0, 14.0), egui::pos2(700.0, 50.0));
-    app.tab_strip = Some(crate::canvas::TabStrip { rect: strip, tabs: vec![tab] });
+    app.tab_strip = Some(crate::canvas::TabStrip { rect: strip, tabs: vec![(0, tab)] });
     assert_eq!(app.drop_target(&ctx, Some(egui::pos2(120.0, 30.0))), crate::file_open::DropTarget::Tabs(0));
     assert_eq!(app.drop_target(&ctx, Some(egui::pos2(180.0, 30.0))), crate::file_open::DropTarget::Tabs(1));
     assert_eq!(app.drop_target(&ctx, Some(egui::pos2(600.0, 30.0))), crate::file_open::DropTarget::Tabs(1));
@@ -452,10 +452,25 @@ fn files_dropped_on_the_tabs_open_at_that_slot() {
     assert_eq!(app.ui.views.len(), 3);
     assert_eq!(app.ui.views[2].zoom, 3.0, "views move with their documents");
     // Past the last tab: opened at the end.
-    let tabs = (0..3).map(|i| tab.translate(egui::vec2(104.0 * i as f32, 0.0))).collect();
+    let tabs = (0..3).map(|i| (i, tab.translate(egui::vec2(104.0 * i as f32, 0.0)))).collect();
     app.tab_strip = Some(crate::canvas::TabStrip { rect: strip, tabs });
     app.open_dropped(&ctx, vec![dropped("last.png", Ok(b"x".to_vec()))], Some(egui::pos2(600.0, 30.0)));
     assert_eq!(app.session.documents().last().map(|d| d.doc.name.as_str()), Some("last.png"));
+}
+
+#[test]
+fn a_drop_slot_counts_documents_not_the_tabs_shown() {
+    // #1276: when the tabs overflow into the » menu, the shown tabs aren't documents 0, 1, 2…
+    // Documents 4, 5 and 6 shown: a drop before document 5's tab opens at position 5.
+    let tab = |i: usize, x: f32| (i, egui::Rect::from_min_max(egui::pos2(x, 20.0), egui::pos2(x + 100.0, 46.0)));
+    let strip = crate::canvas::TabStrip {
+        rect: egui::Rect::from_min_max(egui::pos2(0.0, 14.0), egui::pos2(700.0, 50.0)),
+        tabs: vec![tab(4, 0.0), tab(5, 104.0), tab(6, 208.0)],
+    };
+    assert_eq!(strip.slot(20.0), 4);
+    assert_eq!(strip.slot(130.0), 5);
+    assert_eq!(strip.slot(500.0), 7, "past the last shown tab: after it");
+    assert_eq!(crate::canvas::TabStrip { rect: strip.rect, tabs: vec![] }.slot(10.0), 0);
 }
 
 /// The whole app (eframe harness, real layout): over the tab strip, the pointer read from the OS
@@ -483,7 +498,7 @@ fn drag_and_drop_in_the_running_app() {
     let strip = h.state().tab_strip.clone().expect("the tab strip is drawn");
     assert_eq!(strip.tabs.len(), 2);
     // Hovering over the first tab's left half: slot 0.
-    let over_first = egui::pos2(strip.tabs[0].left() + 4.0, strip.tabs[0].center().y);
+    let over_first = egui::pos2(strip.tabs[0].1.left() + 4.0, strip.tabs[0].1.center().y);
     pointer.set(over_first);
     h.input_mut().hovered_files.push(egui::HoveredFile { path: Some(file.clone()), ..Default::default() });
     h.step();

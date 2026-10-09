@@ -41,7 +41,7 @@ fn overflowing_tabs_stay_on_the_strip_and_the_rest_move_to_the_menu() {
     assert_eq!(h.state().session.documents().len(), 14);
     let s = strip(&h);
     assert!(s.tabs.len() < 14, "some tabs must overflow into the menu: {} shown", s.tabs.len());
-    for r in &s.tabs {
+    for (_, r) in &s.tabs {
         assert!(s.rect.contains_rect(*r), "a tab runs past the strip: {r:?} in {:?}", s.rect);
     }
     assert!(has_menu(&h), "the strip carries a » menu while tabs are hidden");
@@ -78,7 +78,7 @@ fn studio_tabs_overflow_into_the_same_menu() {
     let h = harness(14, ThemeKind::Studio);
     let s = strip(&h);
     assert!(s.tabs.len() < 14, "{} shown", s.tabs.len());
-    for r in &s.tabs {
+    for (_, r) in &s.tabs {
         assert!(s.rect.contains_rect(*r), "a tab runs past the strip: {r:?} in {:?}", s.rect);
     }
     assert!(has_menu(&h), "the Studio strip carries a » menu too");
