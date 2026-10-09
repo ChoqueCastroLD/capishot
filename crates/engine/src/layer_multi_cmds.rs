@@ -1501,8 +1501,9 @@ mod tests {
             assert_eq!(sel(&s), vec![m]);
             s.undo();
             assert_eq!(doc(&s).layer_count(), before);
-            assert_eq!(sel(&s), vec![c], "undo leaves a valid selection");
+            assert_eq!(sel(&s), vec![a, c], "undo selects the layers that were merged");
             // One layer selected: Merge Down.
+            s.execute("layer.select", json!({"layer": c.0})).unwrap();
             s.execute("layer.mergeLayers", json!({})).unwrap();
             assert_eq!(doc(&s).layer_count(), before - 1);
         }
