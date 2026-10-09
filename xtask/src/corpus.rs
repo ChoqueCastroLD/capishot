@@ -83,7 +83,7 @@ pub fn fetch_all(local: bool, update: bool) -> Result<(), String> {
 /// `corpus/photoshop` when `local`.
 fn fetch_pinned(local: bool, update: bool, mut fetch: impl FnMut(&PinnedCorpus, bool, bool) -> Result<(), String>) -> Result<(), String> {
     for c in corpus_pins::ALL {
-        fetch(*c, local && std::ptr::eq(*c, &corpus_pins::PHOTOSHOP), update)?;
+        fetch(c, local && std::ptr::eq(*c, &corpus_pins::PHOTOSHOP), update)?;
     }
     Ok(())
 }
