@@ -470,6 +470,9 @@ pub fn preview_document(doc: &Document, active: Option<photocraft_doc::LayerId>,
 pub struct FilterPreview {
     pub key: FilterPreviewKey,
     pub result: Option<Arc<Document>>,
+    /// OK was pressed and the filter runs as a background job: the preview stays on screen until
+    /// the job lands, so the canvas doesn't flash the unfiltered image in between.
+    pub committing: bool,
 }
 
 /// Match the full request before accepting a worker result, including a reopened dialog.

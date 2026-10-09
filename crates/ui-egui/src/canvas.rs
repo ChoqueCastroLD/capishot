@@ -1101,6 +1101,9 @@ fn gpu_budget(app: &mut PhotocraftApp, gpu: &crate::gpu_canvas::GpuCanvas, idx: 
 /// the deterministic inline path (#1676), which also lets headless/CPU tests inspect previews
 /// without a GPU texture.
 fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &egui::Context) -> Option<(u32, u64, [u32; 2])> {
+    if let Some(held) = committed_filter_preview(app, idx) {
+        return held;
+    }
     // Command dialogs always edit the active document. Never show their preview in another tab.
     if app.session.active_index() != Some(idx) {
         return None;
@@ -1134,7 +1137,7 @@ fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &egui::Contex
             match computed {
                 Ok(computed) => publish_filter_preview(app, idx, finished, computed.result, computed.ms),
                 Err(error) => {
-                    app.filter_preview = Some(crate::filter_dialog::FilterPreview { key: finished, result: None });
+                    app.filter_preview = Some(crate::filter_dialog::FilterPreview { key: finished, result: None, committing: false });
                     crate::notices::error(app, error);
                 }
             }
@@ -1151,7 +1154,7 @@ fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &egui::Contex
                 });
                 crate::filter_preview_worker::Computed { result, ms: crate::gpu_canvas::now_ms() - t0 }
             }) {
-                app.filter_preview = Some(crate::filter_dialog::FilterPreview { key: request.clone(), result: None });
+                app.filter_preview = Some(crate::filter_dialog::FilterPreview { key: request.clone(), result: None, committing: false });
                 crate::notices::error(app, error);
             }
         }
@@ -1215,7 +1218,28 @@ fn publish_filter_preview(
         app.perf.record("filter-preview", result.size.area(), ms, crate::gpu_canvas::now_ms() - t0);
         Some(result)
     });
-    app.filter_preview = Some(crate::filter_dialog::FilterPreview { key: request, result });
+    app.filter_preview = Some(crate::filter_dialog::FilterPreview { key: request, result, committing: false });
+}
+
+/// After a filter dialog's OK: `Some(shown)` while its preview stands in for the background job
+/// that commits it (the document unchanged and the job still running, for this document's views),
+/// `None` otherwise (other documents' views included). A job that lands, fails or is cancelled
+/// drops it.
+pub(crate) fn committed_filter_preview(app: &mut PhotocraftApp, idx: usize) -> Option<Option<(u32, u64, [u32; 2])>> {
+    let p = app.filter_preview.as_ref().filter(|p| p.committing)?;
+    let st = app.session.documents().get(idx)?;
+    if st.doc.id != p.key.doc {
+        return None;
+    }
+    let size = p.result.as_ref().map(|r| [r.size.width, r.size.height]);
+    if let Some(size) = size
+        && st.revision == p.key.revision
+        && app.session.job_on(p.key.doc).is_some()
+    {
+        return Some(Some((p.key.k, p.key.doc.0 ^ (1u64 << 61), size)));
+    }
+    app.filter_preview = None;
+    Some(None)
 }
 
 /// The document pixels a view shows, with a margin for filtering. Uses all four canvas corners
