@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::corpus_pins::{self, AG_PSD_COMMIT, HEIC_RS_COMMIT, OPENEXR_COMMIT, PHOTOCRAFT_CORPUS_COMMIT, PILLOW_HEIF_COMMIT, PNGSUITE_URL, PSD_TOOLS_COMMIT};
-use crate::pinned::USER_AGENT;
+use crate::pinned::{PinnedCorpus, USER_AGENT};
 use crate::{cargo, root, run};
 
 /// Crates with corpus tests (behind their `corpus` feature).
@@ -22,7 +22,7 @@ pub fn cmd(args: &[&str]) -> Result<(), String> {
     let update = args.contains(&"--update-manifest");
     let mut did = false;
     if args.contains(&"--all") {
-        return fetch_all(args.contains(&"--local"));
+        return fetch_all(args.contains(&"--local"), update);
     }
     if args.contains(&"--pngsuite") || args.contains(&"--download") {
         fetch_pngsuite()?;
@@ -70,18 +70,26 @@ fn local_clone() -> Result<PathBuf, String> {
 }
 
 /// Fetches every corpus that is missing or stale (verified ones are left alone). With `local`,
-/// `corpus/photoshop` is copied from the authoring clone of photocraft-corpus instead.
-pub fn fetch_all(local: bool) -> Result<(), String> {
+/// `corpus/photoshop` is copied from the authoring clone of photocraft-corpus instead. With
+/// `update`, every pinned corpus is refetched and its manifest rewritten (`--update-manifest`).
+pub fn fetch_all(local: bool, update: bool) -> Result<(), String> {
     fetch_pngsuite()?;
-    for c in corpus_pins::ALL {
-        if local && std::ptr::eq(*c, &corpus_pins::PHOTOSHOP) {
-            c.fetch_local(&local_clone()?, false)?;
-        } else {
-            c.fetch(false)?;
-        }
-    }
+    fetch_pinned(local, update, fetch_one)?;
     println!("all corpora present and verified under {}", root().join("corpus").display());
     Ok(())
+}
+
+/// Calls `fetch(corpus, from_clone, update)` for every pinned corpus; `from_clone` is set for
+/// `corpus/photoshop` when `local`.
+fn fetch_pinned(local: bool, update: bool, mut fetch: impl FnMut(&PinnedCorpus, bool, bool) -> Result<(), String>) -> Result<(), String> {
+    for c in corpus_pins::ALL {
+        fetch(*c, local && std::ptr::eq(*c, &corpus_pins::PHOTOSHOP), update)?;
+    }
+    Ok(())
+}
+
+fn fetch_one(c: &PinnedCorpus, from_clone: bool, update: bool) -> Result<(), String> {
+    if from_clone { c.fetch_local(&local_clone()?, update) } else { c.fetch(update) }
 }
 
 fn status(present: bool) -> &'static str {
@@ -200,7 +208,7 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
     if crates.is_empty() {
         crates = CORPUS_CRATES.iter().map(|s| (*s).to_string()).collect();
     }
-    fetch_all(ours.contains(&"--local"))?;
+    fetch_all(ours.contains(&"--local"), false)?;
     let mut c = cargo();
     c.args(["test", "--release", "--lib", "--tests"]);
     for k in &crates {
@@ -213,4 +221,34 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
         c.arg("--").args(passthrough);
     }
     run(c, &format!("cargo test --release --features corpus,heif ({})", crates.join(", ")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The flags each pinned corpus is fetched with by `fetch_all(local, update)`.
+    fn calls(local: bool, update: bool) -> Vec<(&'static str, bool)> {
+        let mut seen = Vec::new();
+        let r = fetch_pinned(local, update, |c, _, u| {
+            seen.push((c.name, u));
+            Ok(())
+        });
+        assert_eq!(r, Ok(()));
+        seen
+    }
+
+    #[test]
+    fn all_with_update_manifest_updates_every_pinned_corpus() {
+        for local in [false, true] {
+            let seen = calls(local, true);
+            assert_eq!(seen.len(), corpus_pins::ALL.len());
+            assert!(seen.iter().all(|(_, u)| *u), "--all --update-manifest dropped the flag: {seen:?}");
+        }
+    }
+
+    #[test]
+    fn all_without_update_manifest_only_verifies() {
+        assert!(calls(false, false).iter().all(|(_, u)| !*u));
+    }
 }
