@@ -5,8 +5,8 @@
 //! with `"erase": true`, so one undo step, with the pen pressure and tilt of a normal stroke.
 
 use egui::{PointerButton, Response};
-use photocraft_engine::prefs::RightClickPaint;
 use photocraft_engine::BrushSettings;
+use photocraft_engine::prefs::RightClickPaint;
 
 use crate::PhotocraftApp;
 use crate::state::Tool;
