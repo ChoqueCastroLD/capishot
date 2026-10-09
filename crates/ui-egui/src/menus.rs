@@ -885,7 +885,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                         if top == "Help" {
                             // The search field scrolls with the rows, as part of the menu's content.
                             crate::menu_nav::level(ui, 1, &mut nav, |ui, nav| {
-                                help_search(ui, items, &mut clicked, nav);
+                                help_search(ui, items, opening, &mut clicked, nav);
                                 render_level_rows(ui, &mine, 1, &mut clicked, nav);
                             });
                         } else {
@@ -1014,7 +1014,8 @@ pub fn search_items<'a>(items: &'a [MenuItem], query: &str, lang: crate::i18n::L
 
 /// Help › Search : a field at the top of the Help menu that finds any menu command
 /// by name. Results show their menu path; click, ↓ then ↩, or ↩ in the field runs one.
-fn help_search(ui: &mut egui::Ui, items: &[MenuItem], clicked: &mut Option<String>, nav: &mut crate::menu_nav::Nav) {
+/// `opening`: this frame's release ends the click on the Help title that opened the menu.
+fn help_search(ui: &mut egui::Ui, items: &[MenuItem], opening: bool, clicked: &mut Option<String>, nav: &mut crate::menu_nav::Nav) {
     let ctx = ui.ctx().clone();
     let lang = crate::i18n::current();
     let text_id = egui::Id::new("help-menu-search");
@@ -1025,7 +1026,9 @@ fn help_search(ui: &mut egui::Ui, items: &[MenuItem], clicked: &mut Option<Strin
     ctx.data_mut(|d| d.insert_temp(pass_id, pass));
     let mut query: String = if reopened { String::new() } else { ctx.data(|d| d.get_temp(text_id)).unwrap_or_default() };
     let field = ui.add(egui::TextEdit::singleline(&mut query).id(text_id.with("field")).hint_text(crate::i18n::tr(lang, "Search menus")).desired_width(220.0));
-    if reopened {
+    // The menu opens on the press; the release a frame later completes a click on the title,
+    // outside the field, and egui takes the focus away from it again (#1447, #1438).
+    if reopened || opening {
         field.request_focus();
     }
     let results = search_items(items, &query, lang);
@@ -1327,6 +1330,62 @@ mod tests {
         assert!(!ids("calque").is_empty(), "French menu name");
         assert!(ids("distort").contains(&"edit.transform.distort".to_string()), "English still matches");
         assert!(ids("zzzzqqq").is_empty());
+    }
+
+    /// #1447, #1438: a click on Help leaves its search field focused, so typing searches at once,
+    /// and clicking into the field and typing keeps the menu open. Whole app, real clicks (press
+    /// and release in separate frames), with the custom title bar (Windows, Linux) and without.
+    #[test]
+    fn help_search_takes_typing_and_clicks_without_closing_the_menu() {
+        use egui::{Event, Modifiers, PointerButton};
+        use egui_kittest::{Harness, kittest::Queryable};
+        for (custom, doc, scale) in [(true, false, 1.0), (true, true, 1.25), (false, true, 1.5)] {
+            let what = format!("custom title bar {custom}, document {doc}, scale {scale}");
+            let mut h = Harness::builder().with_size(egui::vec2(1200.0 / scale, 800.0 / scale)).with_pixels_per_point(scale).with_max_steps(64).build_eframe(
+                move |cc| {
+                    PhotocraftApp::setup_context(&cc.egui_ctx, crate::theme::ThemeKind::ALL[0]);
+                    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+                    app.custom_titlebar = custom;
+                    if doc {
+                        app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
+                    }
+                    app
+                },
+            );
+            h.run_steps(4);
+            let click = |h: &mut Harness<'_, PhotocraftApp>, at: egui::Pos2| {
+                h.event(Event::PointerMoved(at));
+                h.run_steps(1);
+                h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+                h.run_steps(1);
+                h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+                h.run_steps(3);
+            };
+            let typing = |h: &mut Harness<'_, PhotocraftApp>, text: &str| {
+                for c in text.chars() {
+                    h.event(Event::Text(c.to_string()));
+                    h.run_steps(1);
+                }
+                h.run_steps(3);
+            };
+            let open = |h: &Harness<'_, PhotocraftApp>| h.query_by_label_contains("About PhotoCraft").is_some();
+            let field_id = egui::Id::new("help-menu-search").with("field");
+            let help = h.get_by_label("Help").rect().center();
+            click(&mut h, help);
+            assert!(open(&h), "Help opened ({what})");
+            assert_eq!(h.ctx.memory(|m| m.focused()), Some(field_id), "the click on Help leaves the search field focused ({what})");
+            typing(&mut h, "lev");
+            assert!(open(&h), "typing keeps Help open ({what})");
+            assert!(h.query_all_by_label_contains("› Levels").next().is_some(), "typing right away searches ({what})");
+            let field = h.query_all_by_role(egui::accesskit::Role::TextInput).find(|n| n.is_focused()).map(|n| n.rect().center());
+            let field = field.unwrap_or_else(|| panic!("the search field is in the accessibility tree ({what})"));
+            click(&mut h, field);
+            assert!(open(&h), "clicking the search field keeps Help open ({what})");
+            assert_eq!(h.ctx.memory(|m| m.focused()), Some(field_id), "and focused ({what})");
+            typing(&mut h, "els");
+            assert!(open(&h), "typing after the click keeps Help open ({what})");
+            assert!(h.query_all_by_label_contains("› Levels").next().is_some(), "and lists the matches ({what})");
+        }
     }
 
     #[test]
