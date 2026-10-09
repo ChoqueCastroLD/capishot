@@ -134,7 +134,8 @@ fn list() {
   corpus/affinity/   [{}] 21 public Affinity 1–3 documents (CC0, MIT): vector-art, AFDesignLoad,
                      Jac21/Branding, AssetStoreTemplate; manifest xtask/affinity-corpus.sha256. Fetch: --affinity
   corpus/pngsuite/   [{}] PngSuite (public domain), {PNGSUITE_URL}. Fetch: --pngsuite
-  corpus/tiff/, corpus/raw/   optional, copied in by hand
+  corpus/pixls/      [opt-in] real camera raws from raw.pixls.us (public domain), one per decode
+                     path plus the known-unsupported packed ORF. Fetch: --pixls (opt-in)
 
 Pins: xtask/src/corpus_pins.rs. Moving one: change it, then --<name> --update-manifest.",
         corpus.display(),
@@ -195,6 +196,7 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
         Some(i) => (&args[..i], &args[i + 1..]),
         None => (args, &[][..]),
     };
+    let mut raw_changed = false;
     if ours.contains(&"--changed") {
         let changed = changed_files()?;
         let hits: Vec<&String> = changed.iter().filter(|f| CRITICAL.iter().any(|c| f.starts_with(c))).collect();
@@ -203,6 +205,7 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
             return Ok(());
         }
         println!("test-corpus --changed: {} critical files changed (e.g. {}); running the corpus tests", hits.len(), hits[0]);
+        raw_changed = hits.iter().any(|f| f.starts_with("crates/raw/"));
     }
     let mut crates: Vec<String> = Vec::new();
     let mut it = ours.iter();
@@ -223,10 +226,13 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
     if crates.is_empty() {
         crates = CORPUS_CRATES.iter().map(|s| (*s).to_string()).collect();
     }
-    // `--pixls` opts in (and fetches): the raw corpus tests are not part of CI until a
-    // maintainer decides they belong there.
-    if ours.contains(&"--pixls") || crates.iter().any(|c| PIXLS_CRATES.contains(&c.as_str())) {
+    // `--pixls` opts in (and fetches), and a raw change under --changed does too: the raw
+    // corpus tests are not part of the default set until a maintainer decides otherwise.
+    let wants_pixls = ours.contains(&"--pixls") || crates.iter().any(|c| PIXLS_CRATES.contains(&c.as_str())) || raw_changed;
+    if wants_pixls && !crates.iter().any(|c| c == "photocraft-raw") {
         crates.push("photocraft-raw".to_string());
+    }
+    if wants_pixls {
         crate::pinned::fetch_pixls(false)?;
     }
     fetch_all(ours.contains(&"--local"))?;
