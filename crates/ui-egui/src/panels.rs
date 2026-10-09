@@ -971,6 +971,19 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         });
 }
 
+/// Width of the Layers panel's Opacity and Fill fields, with room for their pop-up slider's ▾.
+const LAYER_PCT_W: f32 = 66.0 + widgets::POPUP_ARROW_W;
+
+/// The `layer.setProps` edit of a Layers panel Opacity or Fill (`key`) field at `pct` percent. A
+/// drag of the pop-up slider (`drag`) coalesces into one history step, as in Photoshop.
+fn pct_action(l: &Layer, key: &str, pct: f32, drag: Option<u64>) -> (String, Value) {
+    let mut p = json!({"layer": l.id.0, key: pct / 100.0});
+    if let Some(n) = drag {
+        p["coalesce"] = json!(format!("layer-{key}-slider:{n}"));
+    }
+    ("layer.setProps".into(), p)
+}
+
 fn label(ui: &mut egui::Ui, s: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(RichText::new(s).color(t.text_dim));
@@ -1430,7 +1443,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 // Leave room for the Opacity label and field: a translated label ("Непрозрачность:")
                 // can be much wider than the English one, and must not slide under the dropdown.
                 let opacity_label = if t.pro { tl!("Opacity:") } else { tl!("Opacity") };
-                let right = (body_text_width(ui, opacity_label) + 66.0 + 2.0 * ui.spacing().item_spacing.x + 16.0).max(150.0);
+                let right = (body_text_width(ui, opacity_label) + LAYER_PCT_W + 2.0 * ui.spacing().item_spacing.x + 16.0).max(150.0);
                 let w = ui.available_width() - right;
                 let (chosen, hovered) = widgets::dropdown_hovered(ui, "blend", &mut m, &blend_options(l.is_group()), w.max(100.0));
                 if chosen {
@@ -1440,8 +1453,9 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 crate::blend_preview::hover(app, l.id, hovered.filter(|_| !chosen));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let mut o = l.opacity * 100.0;
-                    if widgets::value_field(ui, &mut o, 0.0..=100.0, "%", 66.0).changed() {
-                        actions.push(("layer.setProps".into(), json!({"layer": l.id.0, "opacity": o / 100.0})));
+                    let r = widgets::popup_value_field(ui, opacity_label, &mut o, 0.0..=100.0, "%", LAYER_PCT_W);
+                    if r.changed {
+                        actions.push(pct_action(l, "opacity", o, r.drag));
                     }
                     label(ui, opacity_label);
                 });
@@ -1456,7 +1470,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             // their tooltips) rather than let the Fill label run over the lock icons.
             let gap = ui.spacing().item_spacing.x;
             let icons_w = if t.pro { 5.0 * 20.0 } else { 22.0 + gap };
-            let fits = body_text_width(ui, lock_label) + icons_w + body_text_width(ui, fill_label) + 66.0 + 2.0 * gap <= ui.available_width();
+            let fits = body_text_width(ui, lock_label) + icons_w + body_text_width(ui, fill_label) + LAYER_PCT_W + 2.0 * gap <= ui.available_width();
             if fits {
                 label(ui, lock_label);
             }
@@ -1484,8 +1498,9 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             ui.add_enabled_ui(!bg, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let mut f = l.fill_opacity * 100.0;
-                    if widgets::value_field(ui, &mut f, 0.0..=100.0, "%", 66.0).changed() {
-                        actions.push(("layer.setProps".into(), json!({"layer": l.id.0, "fill": f / 100.0})));
+                    let r = widgets::popup_value_field(ui, fill_label, &mut f, 0.0..=100.0, "%", LAYER_PCT_W);
+                    if r.changed {
+                        actions.push(pct_action(l, "fill", f, r.drag));
                     }
                     label(ui, fill_label);
                 })
@@ -3060,6 +3075,10 @@ mod history_transform_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "layer_pct_slider_tests.rs"]
+mod layer_pct_slider_tests;
 
 #[cfg(test)]
 mod lock_tests {
