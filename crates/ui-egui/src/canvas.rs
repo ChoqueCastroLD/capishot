@@ -755,6 +755,7 @@ fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>
 
 /// Longest side of the Navigator panel's image (about twice the panel's width, for HiDPI).
 pub const NAVIGATOR_SIDE: u32 = 512;
+pub(crate) type NavigatorCache = (std::sync::Weak<Document>, u64, egui::TextureHandle);
 /// How long adjustment-dialog settings must stay unchanged before the navigator shows them.
 const NAVIGATOR_SETTLE_MS: f64 = 200.0;
 
@@ -770,9 +771,7 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     let (doc, preview_key) = display_doc(app, idx);
     let (display, display_key) = canvas_display(app, &doc, None);
     let preview_key = preview_key ^ display_key;
-    let key = egui::Id::new(("navigator", id.0));
-    type Cached = (std::sync::Weak<Document>, u64, egui::TextureHandle);
-    let cached: Option<Cached> = ctx.data(|d| d.get_temp(key));
+    let cached = app.navigator_textures.get(&id).cloned();
     if let Some((r, p, t)) = &cached
         && r.ptr_eq(&snapshot)
         && *p == preview_key
@@ -804,7 +803,7 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
         None => ctx.load_texture(format!("navigator-{}", id.0), image, TextureOptions::LINEAR),
     };
     app.perf.span("navigator", crate::gpu_canvas::now_ms() - t0);
-    ctx.data_mut(|d| d.insert_temp(key, (snapshot, preview_key, tex.clone())));
+    app.navigator_textures.insert(id, (snapshot, preview_key, tex.clone()));
     Some(tex.id())
 }
 
@@ -3682,6 +3681,68 @@ mod tests {
             Display { id: 4, name: "B".into(), frame: [100.0, 0.0, 100.0, 100.0], profile_name: None, icc: icc("display-p3") },
         ]));
         app
+    }
+
+    #[test]
+    #[ignore = "manual texture-retention measurement on six 6 MP documents"]
+    fn closed_canvas_memory_measurement() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let ctx = egui::Context::default();
+        ctx.input_mut(|i| i.max_texture_side = 8192);
+        for cycle in 1..=6 {
+            app.run("file.new", json!({"width":3000,"height":2000})).unwrap();
+            ensure_texture(&mut app, &ctx, 0, None).unwrap();
+            // Drain uploaded image deltas just as a renderer does; count live texture owners.
+            ctx.tex_manager().write().take_delta().clear();
+            app.run("file.close", json!({})).unwrap();
+            let bytes: usize = ctx.tex_manager().read().allocated().map(|(_, m)| m.bytes_used()).sum();
+            println!("closed cycle={cycle} texture_bytes={bytes} rss={:?}", photocraft_testkit::perf::current_rss_bytes());
+        }
+    }
+
+    #[test]
+    fn closed_documents_release_navigator_but_keep_open_document_textures() {
+        let mut app = app_on_two_displays();
+        let ctx = egui::Context::default();
+        let first = app.session.active().unwrap().doc.clone();
+        let a = ensure_texture(&mut app, &ctx, 0, Some(1)).unwrap().0;
+        // The same handle ownership as navigator_texture, without requiring a GPU adapter.
+        let tex = ctx.load_texture("navigator-test", egui::ColorImage::filled([64, 64], egui::Color32::WHITE), TextureOptions::LINEAR);
+        let nav = tex.id();
+        app.navigator_textures.insert(first.id, (std::sync::Arc::downgrade(&first), 0, tex));
+        app.run("file.new", json!({"width":32,"height":32})).unwrap();
+        let other = app.session.active().unwrap().doc.id;
+        let b = ensure_texture(&mut app, &ctx, 1, Some(1)).unwrap().0;
+        drop(app.session.close(0));
+        app.sync_views();
+        assert!(ctx.tex_manager().read().meta(a).is_none());
+        assert!(ctx.tex_manager().read().meta(nav).is_none());
+        assert!(ctx.tex_manager().read().meta(b).is_some());
+        assert!(app.canvases.keys().all(|(id, _)| *id == other));
+        assert!(app.navigator_textures.is_empty());
+        app.session.add_document((*first).clone(), None);
+        app.sync_views();
+        assert_ne!(ensure_texture(&mut app, &ctx, 1, Some(1)).unwrap().0, a, "reopening a preserved ID creates a fresh texture");
+    }
+
+    #[test]
+    fn closed_documents_release_cpu_canvas_textures() {
+        let mut app = app_on_two_displays();
+        let ctx = egui::Context::default();
+        let original = app.session.active().unwrap().doc.clone();
+        for cycle in 0..12 {
+            if cycle > 0 {
+                app.session.add_document((*original).clone(), None);
+                app.sync_views();
+            }
+            let a = ensure_texture(&mut app, &ctx, 0, Some(1)).unwrap().0;
+            let b = ensure_texture(&mut app, &ctx, 0, Some(4)).unwrap().0;
+            assert_ne!(a, b);
+            app.run("file.close", json!({})).unwrap();
+            assert!(app.canvases.is_empty(), "closed canvas metadata retained at cycle {cycle}");
+            assert!(ctx.tex_manager().read().meta(a).is_none(), "first display texture retained");
+            assert!(ctx.tex_manager().read().meta(b).is_none(), "second display texture retained");
+        }
     }
 
     #[test]
