@@ -396,6 +396,8 @@ pub struct DngSpec {
     pub default_crop: Option<([u32; 2], [u32; 2])>,
     /// Double-precision origin override for malformed-metadata regression tests.
     pub default_crop_origin_double: Option<[f64; 2]>,
+    /// A DefaultCropSize with no DefaultCropOrigin (`default_crop` must be `None`).
+    pub default_crop_size_only: Option<[u32; 2]>,
     pub linearization: Option<Vec<u16>>,
     /// (illuminant code, ColorMatrix row-major)
     pub color_matrix1: Option<(u16, [f64; 9])>,
@@ -429,6 +431,7 @@ impl DngSpec {
             active_area: None,
             default_crop: None,
             default_crop_origin_double: None,
+            default_crop_size_only: None,
             linearization: None,
             color_matrix1: None,
             color_matrix2: None,
@@ -564,6 +567,8 @@ impl DngSpec {
             raw.push((50720, Val::Long(s.to_vec())));
         } else if let Some(origin) = self.default_crop_origin_double {
             raw.push((50719, Val::Double(origin.to_vec())));
+        } else if let Some(size) = self.default_crop_size_only {
+            raw.push((50720, Val::Long(size.to_vec())));
         }
         if let Some(o) = &self.opcode_list2 {
             raw.push((51009, Val::Undefined(o.clone())));
