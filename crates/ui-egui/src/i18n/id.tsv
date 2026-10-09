@@ -2671,3 +2671,7 @@ fontWeight	Italic	Miring
 	All Layers No Adjustments	Semua Layer Tanpa Penyesuaian
 	Current & Below No Adjustments	Saat Ini & Di Bawahnya Tanpa Penyesuaian
 	Show Sampling Ring	Tampilkan Cincin Sampel
+
+# Color Picker warnings
+	Out of gamut for printing: click for the nearest printable colour	Di luar gamut cetak: klik untuk warna cetak terdekat
+	Not a web colour: click for the nearest web colour	Bukan warna web: klik untuk warna web terdekat

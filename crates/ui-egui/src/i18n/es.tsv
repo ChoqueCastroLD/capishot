@@ -2330,3 +2330,7 @@ fontWeight	Italic	Cursiva
 	All Layers No Adjustments	Todas las capas sin ajustes
 	Current & Below No Adjustments	Actual e inferiores sin ajustes
 	Show Sampling Ring	Mostrar anillo de muestreo
+
+# Color Picker warnings
+	Out of gamut for printing: click for the nearest printable colour	Fuera de la gama de impresión: haga clic para el color imprimible más cercano
+	Not a web colour: click for the nearest web colour	No es un color web: haga clic para el color web más cercano

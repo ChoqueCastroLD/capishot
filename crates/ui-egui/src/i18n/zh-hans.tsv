@@ -2269,3 +2269,7 @@ fontWeight	Italic	斜体
 	All Layers No Adjustments	所有图层（不含调整）
 	Current & Below No Adjustments	当前及下方图层（不含调整）
 	Show Sampling Ring	显示采样环
+
+# Color Picker warnings
+	Out of gamut for printing: click for the nearest printable colour	超出打印色域：单击使用最接近的可打印颜色
+	Not a web colour: click for the nearest web colour	不是 Web 颜色：单击使用最接近的 Web 颜色
