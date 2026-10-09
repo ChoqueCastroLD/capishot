@@ -678,6 +678,22 @@ fn save_new_style(app: &mut PhotocraftApp, f: &Map<String, Value>) {
 }
 
 /// Dialog body (left list, right parameters).
+/// The enable checkbox of an effect row.
+fn fx_checkbox_rect(row: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_size(row.min + vec2(6.0, 6.0), vec2(14.0, 14.0))
+}
+
+/// An effect row's checkbox: an accent box with a tick when on, an outline when off.
+fn fx_checkbox(p: &egui::Painter, cb: egui::Rect, on: bool, t: &Tokens) {
+    if on {
+        p.rect_filled(cb, 2.0, t.accent);
+        p.line_segment([cb.left_center() + vec2(3.0, 0.5), cb.center_bottom() + vec2(-1.0, -3.5)], Stroke::new(1.8, Color32::WHITE));
+        p.line_segment([cb.center_bottom() + vec2(-1.0, -3.5), cb.right_top() + vec2(-3.0, 3.5)], Stroke::new(1.8, Color32::WHITE));
+    } else {
+        p.rect_stroke(cb, 2.0, Stroke::new(1.5, t.text_faint), StrokeKind::Inside);
+    }
+}
+
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     let selected = f.get("selected").and_then(Value::as_str).unwrap_or("dropShadow").to_string();
@@ -716,11 +732,13 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                     .filter_map(|e| e.get("id").and_then(Value::as_str).map(str::to_string))
                     .collect();
                 if ids.is_empty() {
-                    // The effect isn't on the layer: a greyed row that adds it.
+                    // The effect isn't on the layer: a greyed row with an empty checkbox, as in
+                    // Photoshop (#1357); a click on either adds it, turned on.
                     let (rect, resp) = ui.allocate_exact_size(vec2(190.0, 26.0), Sense::click());
                     if resp.hovered() {
                         ui.painter().rect_filled(rect, t.radius_sm, t.hover.gamma_multiply(0.5));
                     }
+                    fx_checkbox(ui.painter(), fx_checkbox_rect(rect), false, &t);
                     ui.painter().text(
                         rect.left_center() + vec2(28.0, 0.0),
                         egui::Align2::LEFT_CENTER,
@@ -745,15 +763,9 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                     } else if resp.hovered() {
                         ui.painter().rect_filled(rect, t.radius_sm, t.hover.gamma_multiply(0.5));
                     }
-                    let cb = egui::Rect::from_min_size(rect.min + vec2(6.0, 6.0), vec2(14.0, 14.0));
+                    let cb = fx_checkbox_rect(rect);
                     let cresp = ui.interact(cb, ui.id().with(("fxcb", kind, id)), Sense::click());
-                    if on {
-                        ui.painter().rect_filled(cb, 2.0, t.accent);
-                        ui.painter().line_segment([cb.left_center() + vec2(3.0, 0.5), cb.center_bottom() + vec2(-1.0, -3.5)], Stroke::new(1.8, Color32::WHITE));
-                        ui.painter().line_segment([cb.center_bottom() + vec2(-1.0, -3.5), cb.right_top() + vec2(-3.0, 3.5)], Stroke::new(1.8, Color32::WHITE));
-                    } else {
-                        ui.painter().rect_stroke(cb, 2.0, Stroke::new(1.5, t.text_faint), StrokeKind::Inside);
-                    }
+                    fx_checkbox(ui.painter(), cb, on, &t);
                     ui.painter().text(
                         rect.left_center() + vec2(28.0, 0.0),
                         egui::Align2::LEFT_CENTER,
@@ -1352,6 +1364,41 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// #1357: every effect row has its checkbox from the start, also for the effects not on the
+    /// layer yet (an empty box), not only after one was turned on and off again.
+    #[test]
+    fn every_effect_row_shows_a_checkbox() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        let l = Layer::raster("x", photocraft_doc::PixelFormat::RGBA8);
+        let fields = initial_fields(&l, Some(BLENDING), 120.0);
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(900.0, 700.0)).build_ui_state(
+            move |ui, app: &mut PhotocraftApp| {
+                if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                let mut f = fields.clone();
+                body(app, ui, &mut f);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ProMedium);
+        h.run_steps(3);
+        let boxes: Vec<egui::Rect> = h
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Rect(r) if r.rect.size() == vec2(14.0, 14.0) && r.stroke.width > 0.0 => Some(r.rect),
+                _ => None,
+            })
+            .collect();
+        // The effect list is the leftmost column; the selected pane draws checkboxes of its own.
+        let column = boxes.iter().map(|r| r.min.x).fold(f32::INFINITY, f32::min);
+        let rows = boxes.iter().filter(|r| (r.min.x - column).abs() < 0.5).count();
+        assert_eq!(rows, KINDS.len(), "one empty checkbox per effect row");
     }
 
     #[test]
