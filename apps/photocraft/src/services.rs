@@ -158,11 +158,12 @@ fn with_store<R>(store: &SharedRecovery, f: impl FnOnce(&mut RecoveryStore) -> R
 /// until a newer autosave replaces them or they're saved or closed (see [`RecoveryStore`]).
 fn recovery_services(dir: Option<PathBuf>) -> Services {
     let store: SharedRecovery = Rc::new(RefCell::new(dir.map(RecoveryStore::new)));
-    let (s1, s2, s3) = (store.clone(), store.clone(), store.clone());
+    let (s1, s2, s3, s4) = (store.clone(), store.clone(), store.clone(), store.clone());
     Services {
         autosave: Some(Box::new(move |doc: &Arc<Document>, revision: u64, path: Option<&str>| {
-            with_store(&s1, |s| s.autosave(doc, revision, path.map(str::to_string)))
+            with_store(&s1, |s| s.autosave_checked(doc, revision, path.map(str::to_string)))?
         })),
+        autosave_results: Some(Box::new(move || with_store(&s4, |s| s.take_completed()).unwrap_or_default())),
         discard_autosave: Some(Box::new(move |id: u64| {
             let _ = with_store(&s2, |s| s.discard(id));
         })),
@@ -573,6 +574,54 @@ mod tests {
         assert!(list_recovery(&dir).is_empty());
         drop(app);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_background_autosave_is_reported_and_retried_without_another_edit() {
+        let dir = temp("autosave-retry");
+        let recovery = dir.join("Recovery");
+        // A regular file prevents creation of the recovery bundle directory.
+        std::fs::write(&recovery, b"blocked").unwrap();
+        let ctx = egui::Context::default();
+        let mut app = launch(&recovery);
+        new_doc(&mut app, "#ff0000");
+        let revision = app.session.active().unwrap().revision;
+        autosave(&mut app, &ctx);
+
+        let mut failed = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            prefs_ui::tick(&mut app, &ctx);
+            if app.ui.status.starts_with("Autosave failed:") {
+                failed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(failed, "background write failures must reach the UI");
+        assert!(app.ui.status_error);
+        assert!(list_recovery(&recovery).is_empty());
+
+        // No edit occurs: retrying this very same revision must still work.
+        std::fs::remove_file(&recovery).unwrap();
+        std::fs::create_dir(&recovery).unwrap();
+        autosave(&mut app, &ctx);
+        let mut recovered = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            prefs_ui::tick(&mut app, &ctx);
+            recovered = list_recovery(&recovery);
+            if !recovered.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(recovered.len(), 1, "unchanged revision should retry after failure");
+        assert_eq!(recovered[0].info.revision, revision);
+        let restored = photocraft_format::recover(&recovered[0]).unwrap();
+        assert_eq!(photocraft_compose::flatten(&restored).px.first().copied(), Some(RED));
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     use std::sync::atomic::{AtomicUsize, Ordering};

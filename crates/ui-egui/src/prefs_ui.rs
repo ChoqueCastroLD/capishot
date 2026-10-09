@@ -30,7 +30,10 @@ pub struct Runtime {
     save_retry: SaveRetry,
     theme_pref: Option<Theme>,
     next_autosave_ms: f64,
+    /// Last revision whose recovery file was actually written successfully.
     autosaved: HashMap<DocId, u64>,
+    /// Queued writes must not masquerade as durable snapshots.
+    autosave_pending: HashMap<DocId, u64>,
     log_len: usize,
     /// Snapping state of the drag in progress (see `snap_ui`).
     pub(crate) snap: Option<crate::snap_ui::ActiveSnap>,
@@ -368,12 +371,34 @@ fn autosave(app: &mut PhotocraftApp) {
     if app.services.autosave.is_none() {
         return;
     }
+    // A successful queue operation is not a successful disk write. Poll each frame,
+    // including frames before the next autosave interval, so failures are visible.
+    if let Some(results) = app.services.autosave_results.as_mut() {
+        for (raw_id, revision, result) in results() {
+            let id = DocId(raw_id);
+            if app.prefs_rt.autosave_pending.get(&id) != Some(&revision) {
+                continue;
+            }
+            app.prefs_rt.autosave_pending.remove(&id);
+            match result {
+                Ok(()) => {
+                    app.prefs_rt.autosaved.insert(id, revision);
+                }
+                Err(e) => {
+                    app.ui.status = format!("Autosave failed: {e}");
+                    app.ui.status_error = true;
+                }
+            }
+        }
+    }
     let now = crate::gpu_canvas::now_ms();
     // Saved or closed documents drop their recovery data.
     let live: HashMap<DocId, bool> = app.session.documents().iter().map(|d| (d.doc.id, d.is_dirty())).collect();
-    let stale: Vec<DocId> = app.prefs_rt.autosaved.keys().filter(|id| live.get(id) != Some(&true)).copied().collect();
+    let mut stale: Vec<DocId> = app.prefs_rt.autosaved.keys().filter(|id| live.get(id) != Some(&true)).copied().collect();
+    stale.extend(app.prefs_rt.autosave_pending.keys().filter(|id| live.get(*id) != Some(&true) && !app.prefs_rt.autosaved.contains_key(*id)).copied());
     for id in stale {
         app.prefs_rt.autosaved.remove(&id);
+        app.prefs_rt.autosave_pending.remove(&id);
         if let Some(d) = app.services.discard_autosave.as_mut() {
             d(id.0);
         }
@@ -394,16 +419,24 @@ fn autosave(app: &mut PhotocraftApp) {
         .session
         .documents()
         .iter()
-        .filter(|d| d.is_dirty() && app.prefs_rt.autosaved.get(&d.doc.id) != Some(&d.revision))
+        .filter(|d| d.is_dirty() && app.prefs_rt.autosaved.get(&d.doc.id) != Some(&d.revision) && !app.prefs_rt.autosave_pending.contains_key(&d.doc.id))
         .map(|d| (d.doc.clone(), d.revision, d.path.clone()))
         .collect();
     for (doc, rev, path) in jobs {
         if let Some(save) = app.services.autosave.as_mut() {
             match save(&doc, rev, path.as_deref()) {
                 Ok(()) => {
-                    app.prefs_rt.autosaved.insert(doc.id, rev);
+                    if app.services.autosave_results.is_some() {
+                        app.prefs_rt.autosave_pending.insert(doc.id, rev);
+                    } else {
+                        // Synchronous or mocked services report completion on return.
+                        app.prefs_rt.autosaved.insert(doc.id, rev);
+                    }
                 }
-                Err(e) => app.ui.status = format!("Autosave failed: {e}"),
+                Err(e) => {
+                    app.ui.status = format!("Autosave failed: {e}");
+                    app.ui.status_error = true;
+                }
             }
         }
     }

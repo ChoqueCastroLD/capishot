@@ -210,6 +210,8 @@ pub type LoadTextFn = Box<dyn FnMut() -> Option<String>>;
 pub type SaveTextFn = Box<dyn FnMut(&str) -> Result<(), String>>;
 /// Autosave a document snapshot for crash recovery: (snapshot, revision, original path).
 pub type AutosaveFn = Box<dyn FnMut(&std::sync::Arc<Document>, u64, Option<&str>) -> Result<(), String>>;
+/// Poll successful or failed background writes: (document id, revision, result).
+pub type AutosaveResultsFn = Box<dyn FnMut() -> Vec<(u64, u64, Result<(), String>)>>;
 /// Drop the recovery data of a document (by `DocId` value) once it is saved or closed.
 pub type DiscardAutosaveFn = Box<dyn FnMut(u64)>;
 /// Load recoverable documents left by a previous session. Their recovery data stays until the
@@ -277,6 +279,8 @@ pub struct Services {
     pub xwayland_command: Option<String>,
     /// Crash-recovery autosave (Preferences › File Handling) and recovery at launch.
     pub autosave: Option<AutosaveFn>,
+    /// None for services that report synchronous success through `autosave`.
+    pub autosave_results: Option<AutosaveResultsFn>,
     pub discard_autosave: Option<DiscardAutosaveFn>,
     pub recover: Option<RecoverFn>,
     pub adopt_autosave: Option<AdoptAutosaveFn>,
