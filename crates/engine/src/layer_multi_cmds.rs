@@ -258,6 +258,10 @@ pub fn translate(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let moves: Vec<_> = ids.iter().map(|&id| (id, dx, dy)).collect();
         move_layers(doc, &moves)?;
+        // A board moved past the right or bottom edge grows the canvas, as a new one does (#1531).
+        if ids.iter().any(|id| doc.layer(*id).is_some_and(|l| l.artboard().is_some())) {
+            crate::artboard_cmds::fit_canvas(doc);
+        }
         Ok(ids)
     })?;
     note_damage(s, &before, &ids);
@@ -1068,8 +1072,9 @@ pub fn delete_selected(s: &mut Session) -> Result<Value> {
 }
 
 /// Duplicate Layer with several layers selected: each copy goes above its original and the
-/// copies become the selection.
-pub fn duplicate_selected(s: &mut Session) -> Result<Value> {
+/// copies become the selection. Artboard copies go beside their boards unless `in_place`
+/// ([`crate::artboard_cmds::place_copy`]).
+pub fn duplicate_selected(s: &mut Session, in_place: bool) -> Result<Value> {
     let sel = selected(s);
     let old_active = s.active().and_then(|d| d.active_layer);
     let (copies, active) = s.edit("Duplicate Layers", |doc, active| {
@@ -1079,6 +1084,9 @@ pub fn duplicate_selected(s: &mut Session) -> Result<Value> {
             let mut dup = doc.layer(id).ok_or(EngineError::NoLayer(id))?.duplicate();
             dup.name = doc.copy_name(&dup.name);
             let nid = doc.insert_above(Some(id), dup);
+            if !in_place {
+                crate::artboard_cmds::place_copy(doc, nid)?;
+            }
             if Some(id) == old_active {
                 new_active = Some(nid);
             }

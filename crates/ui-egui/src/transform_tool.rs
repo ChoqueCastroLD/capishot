@@ -201,7 +201,8 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
 /// its selected pixels, as Layer via Copy) and transforms the copy (#352).
 pub fn begin_copy(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String> {
     let selection = app.session.active().is_some_and(|d| d.doc.selection.is_some());
-    app.run(if selection { "layer.new.layerViaCopy" } else { "layer.duplicate" }, json!({}))?;
+    let params = if selection { json!({}) } else { json!({"inPlace": true}) };
+    app.run(if selection { "layer.new.layerViaCopy" } else { "layer.duplicate" }, params)?;
     let made = app.session.active().and_then(|st| st.active_layer.map(|layer| (st.doc.id, layer)));
     if let Err(e) = begin(app, ctx) {
         if let Some((document, layer)) = made {

@@ -3057,7 +3057,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             // selections.
             if command_moves_layer(app, tool, [x, y], mods) {
                 if mods.alt
-                    && let Err(e) = app.run("layer.duplicate", json!({}))
+                    && let Err(e) = app.run("layer.duplicate", json!({"inPlace": true}))
                 {
                     app.ui.status = e;
                     app.ui.status_error = true;

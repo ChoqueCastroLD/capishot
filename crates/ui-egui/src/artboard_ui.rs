@@ -225,6 +225,44 @@ mod tests {
         }
     }
 
+    fn drag(app: &mut PhotocraftApp, from: [f64; 2], by: [f64; 2], mods: egui::Modifiers) {
+        use crate::canvas::{ToolEvent, tool_event};
+        tool_event(app, ToolEvent::Down { x: from[0], y: from[1], pressure: 1.0 }, mods);
+        for t in [0.5, 1.0] {
+            tool_event(app, ToolEvent::Move { x: from[0] + by[0] * t, y: from[1] + by[1] * t, pressure: 1.0 }, mods);
+        }
+        tool_event(app, ToolEvent::Up { x: from[0] + by[0], y: from[1] + by[1] }, mods);
+    }
+
+    fn boards(app: &PhotocraftApp) -> Vec<photocraft_geom::Rect> {
+        app.session.active().unwrap().doc.artboards().iter().map(|b| b.2.rect).collect()
+    }
+
+    /// #1531: the Move tool drags a board by an empty spot on it (Auto-Select picks the board, not
+    /// the Background under it), and ⌥-drag drags a copy off the original.
+    #[test]
+    fn move_tool_drags_an_artboard_by_its_empty_area() {
+        let (mut app, _) = app();
+        app.run("layer.new.artboard", json!({"rect": [0, 0, 40, 40]})).unwrap();
+        let bg = app.session.active().unwrap().doc.layers[0].id.0;
+        app.run("layer.select", json!({"layer": bg})).unwrap();
+        app.ui.tool = crate::state::Tool::Move;
+        app.ui.extras.snap = false;
+        app.ui.view.show.smart_guides = false;
+        drag(&mut app, [20.0, 20.0], [10.0, 5.0], egui::Modifiers::NONE);
+        assert_eq!(boards(&app), vec![photocraft_geom::Rect::new(10, 5, 50, 45)]);
+        let st = app.session.active().unwrap();
+        assert_eq!(st.active_layer, Some(st.doc.artboards()[0].0));
+        // ⌥-drag: the copy follows the pointer, the original stays.
+        drag(&mut app, [20.0, 20.0], [50.0, 0.0], egui::Modifiers::ALT);
+        let mut got = boards(&app);
+        got.sort_by_key(|r| r.x0);
+        assert_eq!(got, vec![photocraft_geom::Rect::new(10, 5, 50, 45), photocraft_geom::Rect::new(60, 5, 100, 45)]);
+        // One undo step takes the copy back.
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(boards(&app).len(), 1);
+    }
+
     #[test]
     fn comp_target_follows_selection_then_last_applied() {
         let (mut app, _) = app();
