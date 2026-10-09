@@ -419,6 +419,8 @@ fn main() -> eframe::Result {
             #[cfg(target_os = "macos")]
             {
                 app.services.os_events = Some(apple_events.connect(&cc.egui_ctx));
+                // Quit through AppKit, not by closing the window (Touch Bar Macs, #1575, #1458).
+                app.services.quit = Some(Box::new(mac_window::terminate_later));
                 // The macOS menu bar, installed now so winit's default menu doesn't stay up.
                 if !in_window_menus {
                     app.services.native_menu = mac_menu::install(&cc.egui_ctx, &app);
