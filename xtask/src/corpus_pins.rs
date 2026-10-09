@@ -23,6 +23,9 @@ pub const AG_PSD_COMMIT: &str = "387049670cb89b88fb8fe1b7c01aeacf98dd2e3b";
 pub const HEIC_RS_COMMIT: &str = "4f0d4df474c773dfc3b14fa80e7219be6898866e";
 /// https://github.com/bigcat88/pillow_heif (BSD-3-Clause): `tests/images` (master, 2026-09-25).
 pub const PILLOW_HEIF_COMMIT: &str = "b16be1196dfa465a342d68894696e685ca3655cb";
+/// https://github.com/AcademySoftwareFoundation/openexr (BSD-3-Clause): `src/test/bin/test_images`
+/// at the v3.5.2 tag (2026-10-03).
+pub const OPENEXR_COMMIT: &str = "69b2604fc76e370615438bdc8d2cd95b9349c12e";
 /// https://github.com/samuel-etver/vector-art (CC0-1.0): `simple/`, four Affinity 3 `.af` files and
 /// Designer `.afdesign` files (main, 2026-04-22).
 pub const VECTOR_ART_COMMIT: &str = "255f8add3c8f0740196e22bd59502b811b532f0b";
@@ -143,6 +146,32 @@ pub const HEIF: PinnedCorpus = PinnedCorpus {
     },
 };
 
+/// `corpus/exr`: the deep OpenEXR test images (scanline and tiled deep data, several channel
+/// types) the deep decoder was verified against. The manifest selects the files.
+pub const EXR: PinnedCorpus = PinnedCorpus {
+    name: "exr",
+    dest: "exr",
+    upstreams: &[Upstream {
+        prefix: "",
+        repo: "AcademySoftwareFoundation/openexr",
+        commit: OPENEXR_COMMIT,
+        subdir: "src/test/bin/test_images",
+        extras: &[("LICENSE.md", "LICENSE.md")],
+    }],
+    manifest: "xtask/exr-corpus.sha256",
+    exts: &["exr"],
+    subset: true,
+    sources_md: |c| {
+        format!(
+            "# Deep OpenEXR test corpus
+
+The `*.deep.exr` files of https://github.com/AcademySoftwareFoundation/openexr/tree/{OPENEXR_COMMIT}/src/test/bin/test_images,              unmodified. BSD-3-Clause, Copyright Contributors to the OpenEXR Project (see `LICENSE.md`). Selected by and sha256-verified              against `{}` by `cargo xtask corpus --exr`. Gitignored; never commit these files.
+",
+            c.manifest
+        )
+    },
+};
+
 /// `corpus/affinity`: public Affinity documents saved by Affinity 1.x to 3.x, chosen for having no
 /// personal paths in their metadata. Each embeds Affinity's own render of itself (its thumbnail),
 /// the oracle `photocraft-io`'s corpus test compares the imported document against. The manifest
@@ -197,4 +226,4 @@ pub const AFFINITY: PinnedCorpus = PinnedCorpus {
 };
 
 /// Every pinned corpus, in fetch order.
-pub const ALL: &[&PinnedCorpus] = &[&PSD_MIXED, &PSD_TOOLS, &PHOTOSHOP, &HEIF, &AFFINITY];
+pub const ALL: &[&PinnedCorpus] = &[&PSD_MIXED, &PSD_TOOLS, &PHOTOSHOP, &HEIF, &EXR, &AFFINITY];

@@ -40,8 +40,12 @@ pub(crate) fn import(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> 
             b.document(&d)?;
             let mut warnings: Vec<String> = d.warnings.iter().map(|w| format!("Affinity: not imported or approximated: {w}.")).collect();
             warnings.extend(b.warnings.iter().map(|w| format!("Affinity: {w}.")));
+            // Type layers draw from their model, within the import's raster bound: the sizes and
+            // frames come from an untrusted file.
+            let mut document = b.doc;
+            crate::text_import::prepare(&mut document);
             // Save never writes back over the Affinity file.
-            Ok(ImportResult { document: b.doc, warnings, source_read_only: true, preview_only: false })
+            Ok(ImportResult { document, warnings, source_read_only: true, preview_only: false })
         }
         Err(native) => preview(name, bytes, &native),
     }
@@ -474,9 +478,6 @@ impl Builder {
         if let Some(f) = t.frame {
             layer.shape = TextShape::Box { x: 0.0, y: 0.0, width: ((f.x1 - f.x0) * k) as f32, height: ((f.y1 - f.y0) * k) as f32 };
         }
-        let engine = photocraft_text::shared();
-        let mut e = engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        e.render_layer(&mut layer, self.doc.resolution_dpi, self.format);
         layer
     }
 

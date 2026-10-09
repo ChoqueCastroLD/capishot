@@ -674,7 +674,7 @@ fn shape_rasterize(s: &mut Session, p: &Value) -> Result<Value> {
 // Document paths
 // ---------------------------------------------------------------------------
 
-fn is_work(name: Option<&str>) -> bool {
+pub(crate) fn is_work(name: Option<&str>) -> bool {
     name.is_none_or(|n| n.is_empty() || n.eq_ignore_ascii_case("work") || n == "Work Path")
 }
 
@@ -964,8 +964,12 @@ fn path_fill(s: &mut Session, p: &Value) -> Result<Value> {
         if feather > 0.0 {
             cov = sel::feather(&cov, area.width() as usize, area.height() as usize, feather);
         }
-        let lock = doc.effective_locks(id).transparency;
+        let locks = doc.effective_locks(id);
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+        if locks.pixels || locks.all {
+            return Err(EngineError::Other(format!("Could not complete your request because the layer \"{}\" is locked", l.name)));
+        }
+        let lock = locks.transparency;
         let surf = l.surface_mut().ok_or_else(|| EngineError::Other("Fill Path needs a pixel layer".into()))?;
         paint_coverage(surf, area, &cov, src, opacity, mode, lock);
         Ok(())
@@ -1016,7 +1020,7 @@ fn path_stroke(s: &mut Session, p: &Value) -> Result<Value> {
         "brush" | "eraser" => {}
         o => return Err(bad("path.stroke", format!("unknown tool `{o}` (brush|pencil|eraser)"))),
     }
-    crate::brush_cmds::validate_brush_size(&brush, "path.stroke")?;
+    crate::brush_cmds::validate_brush(&brush, "path.stroke")?;
     let lines = vector::flatten_path(&path, 0.1);
     let id = layer_id(s, p)?;
     let bg = s.tools.background;
