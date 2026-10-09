@@ -123,7 +123,7 @@ pub(crate) fn bake(stops: Vec<(f32, Color)>, midpoints: &[f32], smoothness: f32,
     let plain_mids = midpoints.iter().all(|m| (m - 0.5).abs() < 1e-3);
     // Classic interpolates in the stops' own model: Lab stops (Lab documents) blend in L*a*b*, which the
     // compositors' sRGB interpolation can't reproduce (psd-tools 4x4_16bit_lab).
-    let lab = method == Method::Classic && stops.iter().all(|(_, c)| c.mode == ColorMode::Lab);
+    let lab = matches!(method, Method::Classic | Method::Smooth) && stops.iter().all(|(_, c)| c.mode == ColorMode::Lab);
     if stops.len() < 2 || (smoothness <= 0.0 && method == Method::Classic && plain_mids && !lab) {
         return stops;
     }
