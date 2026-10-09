@@ -76,8 +76,9 @@ thread_local! {
     /// (Photoshop composites Lab documents in Lab; an anti-aliased edge between two colours
     /// differs by up to 14 / 255 from an sRGB mix: psd-tools stroke-color-descriptors-lab).
     pub static LAB_MIX: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// Set while rendering a 32-bit float document: Linear Dodge (Add) and Divide don't clip at 1
-    /// ([`generic::blend_rgb_hdr`]), as in Photoshop's 32-bit mode; integer depths clip.
+    /// Set while rendering a 32-bit float document: Linear Dodge (Add) and Divide don't clip at 1,
+    /// and Hue, Saturation, Color and Luminosity keep values above 1 ([`generic::blend_rgb_hdr`]),
+    /// as in Photoshop's 32-bit mode; integer depths clip.
     pub static HDR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -272,6 +273,20 @@ mod tests {
         assert_eq!(color_dodge(1e-6, 1.0), 0.0);
         assert!((color_burn(0.5, 0.5) - 0.0).abs() < 1e-6);
         assert!((color_dodge(0.25, 0.5) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hdr_nests_and_restores() {
+        let bright = |m| blend_rgb(m, [0.5, 0.5, 0.5], [1.0, 0.0, 0.0])[0];
+        with_hdr(true, || {
+            // A 32-bit document keeps Color's red above 1.
+            assert!(bright(BlendMode::Color) > 1.1);
+            // Another tile's (or document's) scope run inside this one doesn't reset it.
+            with_hdr(false, || assert!(bright(BlendMode::Color) <= 1.0));
+            assert!(HDR.get());
+        });
+        assert!(!HDR.get());
+        assert!(bright(BlendMode::Color) <= 1.0);
     }
 
     #[test]
