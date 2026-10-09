@@ -190,7 +190,7 @@ fn refine_edge(s: &mut Session, p: &Value) -> Result<Value> {
             let src_layer = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
             let src = src_layer
                 .surface()
-                .ok_or_else(|| EngineError::Other(format!("the active layer is a {} layer without pixels", src_layer.content.kind_name())))?;
+                .ok_or_else(|| EngineError::Other(format!("the active layer is {} {} layer without pixels", src_layer.content.article(), src_layer.content.kind_name())))?;
             let name = d.doc.copy_name(&src_layer.name);
             let empty = Region { bbox: Rect::EMPTY, mask: Vec::new() };
             let reg = region.as_ref().unwrap_or(&empty);

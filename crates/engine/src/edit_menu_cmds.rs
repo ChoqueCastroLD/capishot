@@ -112,7 +112,7 @@ fn pixel_layer(s: &Session) -> std::result::Result<LayerId, String> {
     let id = d.active_layer.ok_or("no active layer")?;
     let l = d.doc.layer(id).ok_or("no active layer")?;
     if !matches!(l.content, LayerContent::Raster(_)) {
-        return Err(format!("active layer is a {} layer, not a pixel layer", l.content.kind_name()));
+        return Err(format!("active layer is {} {} layer, not a pixel layer", l.content.article(), l.content.kind_name()));
     }
     let locks = d.doc.effective_locks(id);
     if locks.all || locks.pixels {

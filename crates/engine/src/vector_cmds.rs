@@ -503,7 +503,7 @@ fn shape_info(s: &Session, id: LayerId) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let l = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
     let LayerContent::Shape(sh) = &l.content else {
-        return Err(EngineError::Other(format!("layer {} is a {} layer, not a shape layer", id.0, l.content.kind_name())));
+        return Err(EngineError::Other(format!("layer {} is {} {} layer, not a shape layer", id.0, l.content.article(), l.content.kind_name())));
     };
     let bounds = sh.cache.as_ref().map(|c| c.content_bounds()).filter(|r| !r.is_empty()).map(|r| json!([r.x0, r.y0, r.width(), r.height()]));
     Ok(json!({
@@ -523,7 +523,7 @@ pub(crate) fn with_shape<R>(s: &mut Session, id: LayerId, label: &str, f: impl F
         let snapshot = doc.clone();
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         if !matches!(l.content, LayerContent::Shape(_)) {
-            return Err(EngineError::Other(format!("layer {} is a {} layer, not a shape layer", id.0, l.content.kind_name())));
+            return Err(EngineError::Other(format!("layer {} is {} {} layer, not a shape layer", id.0, l.content.article(), l.content.kind_name())));
         }
         let LayerContent::Shape(mut sh) = std::mem::replace(&mut l.content, LayerContent::Fill(Fill::Solid(Color::BLACK))) else {
             return Err(EngineError::Other(format!("layer {} is not a shape layer", id.0)));

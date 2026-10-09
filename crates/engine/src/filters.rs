@@ -195,7 +195,7 @@ pub(crate) fn has_filterable_layer(s: &Session) -> std::result::Result<(), Strin
     match &l.content {
         LayerContent::Raster(_) => Ok(()),
         LayerContent::Smart(sm) if sm.cache.is_some() => Ok(()),
-        other => Err(format!("filters need a pixel layer (active layer is a {} layer)", other.kind_name())),
+        other => Err(format!("filters need a pixel layer (active layer is {} {} layer)", other.article(), other.kind_name())),
     }
 }
 

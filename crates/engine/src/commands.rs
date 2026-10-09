@@ -39,7 +39,7 @@ fn has_layer(s: &Session) -> std::result::Result<(), String> {
 }
 fn has_pixel_layer(s: &Session) -> std::result::Result<(), String> {
     let l = crate::active_layer_of(s)?;
-    if matches!(l.content, LayerContent::Raster(_)) { Ok(()) } else { Err(format!("active layer is a {} layer, not a pixel layer", l.content.kind_name())) }
+    if matches!(l.content, LayerContent::Raster(_)) { Ok(()) } else { Err(format!("active layer is {} {} layer, not a pixel layer", l.content.article(), l.content.kind_name())) }
 }
 /// A pixel layer, or a targeted alpha channel / Quick Mask (adjustments and fills apply to it).
 fn has_pixel_or_channel(s: &Session) -> std::result::Result<(), String> {
@@ -57,7 +57,7 @@ pub(crate) fn has_paintable(s: &Session) -> std::result::Result<(), String> {
     if matches!(l.content, LayerContent::Raster(_)) || l.mask.is_some() {
         Ok(())
     } else {
-        Err(format!("active layer is a {} layer without a mask", l.content.kind_name()))
+        Err(format!("active layer is {} {} layer without a mask", l.content.article(), l.content.kind_name()))
     }
 }
 
