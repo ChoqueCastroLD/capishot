@@ -266,15 +266,23 @@ fn resize_with_budget(s: &Surface, sx: f64, sy: f64, filter: Resample, edge: Opt
         unpremultiply(&mut res, n, alpha);
         (Rect::new(dst.x0, dst.y0 + b0 as i32, dst.x1, dst.y0 + b1 as i32), res)
     };
+    // Bands go into the output a group at a time, so the `f32` rows held at once are bounded by
+    // the group, not by the whole destination (#1544).
     #[cfg(not(target_arch = "wasm32"))]
-    let parts: Vec<(Rect, Vec<f32>)> = {
-        use rayon::prelude::*;
-        bands.par_iter().map(run).collect()
-    };
+    let group = rayon::current_num_threads().max(1) * 2;
     #[cfg(target_arch = "wasm32")]
-    let parts: Vec<(Rect, Vec<f32>)> = bands.iter().map(run).collect();
-    for (r, d) in parts {
-        out.write_region(r, &d);
+    let group = 1;
+    for chunk in bands.chunks(group) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let parts: Vec<(Rect, Vec<f32>)> = {
+            use rayon::prelude::*;
+            chunk.par_iter().map(run).collect()
+        };
+        #[cfg(target_arch = "wasm32")]
+        let parts: Vec<(Rect, Vec<f32>)> = chunk.iter().map(run).collect();
+        for (r, d) in parts {
+            out.write_region(r, &d);
+        }
     }
     if filter == Resample::PreserveDetails && (sx > 1.0 || sy > 1.0) {
         let p = crate::FilterParams::UnsharpMask { amount: 30.0, radius: 0.6 * sx.max(sy) as f32, threshold: 0.0 };

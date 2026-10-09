@@ -108,6 +108,9 @@ fn parse_resample(s: &str) -> Option<Resample> {
     })
 }
 
+/// The largest raster Image Size resamples to: the decoders' default allocation budget.
+const MAX_RESAMPLE_BYTES: u64 = if cfg!(target_pointer_width = "64") { 8 << 30 } else { 2 << 30 };
+
 /// Image → Image Size.
 fn image_size(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
@@ -123,6 +126,20 @@ fn image_size(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => (ow as f64, oh as f64),
     };
     let (nw, nh) = (nw.round().clamp(1.0, 300_000.0) as u32, nh.round().clamp(1.0, 300_000.0) as u32);
+    // Each side may reach 300000 px, but resampling writes real pixels: refuse a canvas whose
+    // raster alone would pass the budget, before allocating any of it (#1544).
+    let bytes = u64::from(nw).saturating_mul(u64::from(nh)).saturating_mul(d.doc.pixel_format().bytes_per_pixel() as u64);
+    if resample.is_some() && (nw, nh) != (ow, oh) && bytes > MAX_RESAMPLE_BYTES {
+        let mp = |w: u32, h: u32| u64::from(w) * u64::from(h) / 1_000_000;
+        let max_mp = MAX_RESAMPLE_BYTES / d.doc.pixel_format().bytes_per_pixel().max(1) as u64 / 1_000_000;
+        return Err(bad(
+            "image.imageSize",
+            format!(
+                "{nw} x {nh} px is {} megapixels; resampling at this bit depth is limited to {max_mp} megapixels. Choose a smaller size, or turn Resample off to change only the resolution",
+                mp(nw, nh)
+            ),
+        ));
+    }
     let dpi = p.get("resolution").and_then(Value::as_f64).map(|v| v as f32);
     s.edit("Image Size", |doc, _| {
         if let Some(r) = dpi {
@@ -574,6 +591,22 @@ mod tests {
 
     /// The canvas border stays opaque after Image Size (it used to fade into transparency, so a
     /// Background or a 200 % export got a translucent frame), and a full selection stays full.
+    /// #1544: 64 x 48 to 300000 x 300000 (90 billion pixels) started allocating resampled bands
+    /// without a budget. It is refused before any allocation and the document is untouched; a
+    /// change of resolution only, and an ordinary resize, still work.
+    #[test]
+    fn image_size_refuses_a_raster_past_the_budget() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 64, "height": 48})).unwrap();
+        let before = (doc(&s).size, s.active().unwrap().history.past_len());
+        let err = s.execute("image.imageSize", json!({"width": 300_000, "height": 300_000})).unwrap_err().to_string();
+        assert!(err.contains("megapixels"), "{err}");
+        assert_eq!((doc(&s).size, s.active().unwrap().history.past_len()), before);
+        s.execute("image.imageSize", json!({"width": 300_000, "height": 300_000, "resample": "none", "resolution": 300})).unwrap();
+        s.execute("image.imageSize", json!({"width": 128, "height": 96})).unwrap();
+        assert_eq!(doc(&s).size, Size::new(128, 96));
+    }
+
     #[test]
     fn image_size_keeps_canvas_edges_opaque() {
         for depth in [8, 16, 32] {
