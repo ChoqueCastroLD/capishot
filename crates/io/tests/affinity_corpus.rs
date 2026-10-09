@@ -3,9 +3,7 @@
 //! Affinity rendered when saving it. Each file's mean difference from that thumbnail (0–255 per
 //! channel, both flattened on white, at the smaller of the two sizes) must stay under its ceiling,
 //! set just above the difference measured when the importer landed.
-//!
-//! Opt-in on its own (`--features corpus-affinity`): `corpus --all` and CI don't fetch these files.
-#![cfg(feature = "corpus-affinity")]
+#![cfg(feature = "corpus")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;

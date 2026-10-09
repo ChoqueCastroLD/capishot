@@ -114,11 +114,9 @@ The same reader is shared, as an independent copy, with VectorCraft's `vectorcra
   (CC0), at pinned commits, each checked against `xtask/affinity-corpus.sha256`. `tests/real_files.rs`
   parses them; `photocraft-io`'s `tests/affinity_corpus.rs` imports and flattens each one and
   compares it with the thumbnail Affinity saved in it (mean difference 0–4.6 of 255, with a
-  ceiling per file). This corpus is opt-in on its own: `corpus --all` and CI don't fetch it, so
-  run `cargo xtask corpus --affinity`, then
-  `cargo test -p photocraft-io --release --features corpus-affinity --test affinity_corpus`.
+  ceiling per file).
 * `fuzz/` has `cargo-fuzz` targets for the whole reader (`preview`), the object stream (`stream`)
-  and the I/O import (`import_preview`), run locally (they aren't in CI's fuzz matrix):
+  and the I/O import (`import_preview`); CI's fuzz job runs `preview` and `import_preview`:
 
   ```sh
   cd crates/affinity/fuzz

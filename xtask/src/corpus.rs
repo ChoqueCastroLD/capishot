@@ -116,7 +116,7 @@ fn list() {
   corpus/exr/        [{}] the deep OpenEXR test images (BSD-3-Clause), openexr@{}
                      manifest xtask/exr-corpus.sha256. Fetch: --exr
   corpus/affinity/   [{}] 21 public Affinity 1–3 documents (CC0, MIT): vector-art, AFDesignLoad,
-                     Jac21/Branding, AssetStoreTemplate; manifest xtask/affinity-corpus.sha256. Fetch: --affinity (not --all)
+                     Jac21/Branding, AssetStoreTemplate; manifest xtask/affinity-corpus.sha256. Fetch: --affinity
   corpus/pngsuite/   [{}] PngSuite (public domain), {PNGSUITE_URL}. Fetch: --pngsuite
   corpus/tiff/, corpus/raw/   optional, copied in by hand
 
