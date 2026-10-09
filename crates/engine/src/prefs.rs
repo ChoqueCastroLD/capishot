@@ -861,7 +861,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "unitsAndRulers.columnWidth",
     "unitsAndRulers.gutter",
     "unitsAndRulers.printResolution",
-    "unitsAndRulers.screenResolution",
     "plugIns.showExtensionPanels",
     "plugIns.allowScriptsToConnect",
     "plugIns.generatorEnabled",
