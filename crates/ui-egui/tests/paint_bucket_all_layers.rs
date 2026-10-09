@@ -74,7 +74,7 @@ fn screen(h: &Harness, x: f32, y: f32) -> Pos2 {
         flip: app.ui.view.flip_horizontal,
         rotation: v.rotation,
     }
-        .to_screen(x, y)
+    .to_screen(x, y)
 }
 
 fn pixels(h: &Harness, layer: LayerId) -> Vec<[f32; 4]> {
