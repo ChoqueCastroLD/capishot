@@ -2289,14 +2289,14 @@ fontWeight	Italic	Kursiv
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Ansicht drehen: im Bogen ziehen · Umschalt: 15°-Schritte
 
 # Eyedropper Sample Size and Sample (#1649).
-	Point Sample	Punktprobe
-	3 by 3 Average	3 × 3 Durchschnitt
-	5 by 5 Average	5 × 5 Durchschnitt
-	11 by 11 Average	11 × 11 Durchschnitt
-	31 by 31 Average	31 × 31 Durchschnitt
-	51 by 51 Average	51 × 51 Durchschnitt
-	101 by 101 Average	101 × 101 Durchschnitt
-	Sample Size:	Probengröße:
-	All Layers No Adjustments	Alle Ebenen ohne Anpassungen
-	Current & Below No Adjustments	Aktuelle und darunter ohne Anpassungen
-	Show Sampling Ring	Probenring anzeigen
+	Point Sample	1 Pixel
+	3 by 3 Average	3 x 3 Pixel Durchschnitt
+	5 by 5 Average	5 x 5 Pixel Durchschnitt
+	11 by 11 Average	11 x 11 Pixel Durchschnitt
+	31 by 31 Average	31 x 31 Pixel Durchschnitt
+	51 by 51 Average	51 x 51 Pixel Durchschnitt
+	101 by 101 Average	101 x 101 Pixel Durchschnitt
+	Sample Size:	Aufnahmebereich:
+	All Layers No Adjustments	Alle Ebenen ohne Einstellungen
+	Current & Below No Adjustments	Aktuelle und darunter ohne Einstellungen
+	Show Sampling Ring	Aufnahmering anzeigen
