@@ -2039,11 +2039,14 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         let tl = xf.to_doc(rect.min);
         let br = xf.to_doc(rect.max);
         let q = 256 * step as i32; // quantise the region so small pans reuse the cache
+        // The view centre can be any finite number (`ui.set`, #980). Past ±2³⁰ there is no document
+        // to outline, and the padding below (at most 2 · 256 · 64) can't overflow i32 from there.
+        let px = |v: f64| v.clamp(-f64::from(1 << 30), f64::from(1 << 30)) as i32;
         let vis = photocraft_geom::Rect::new(
-            (tl[0].floor() as i32).div_euclid(q) * q - q,
-            (tl[1].floor() as i32).div_euclid(q) * q - q,
-            ((br[0].ceil() as i32).div_euclid(q) + 2) * q,
-            ((br[1].ceil() as i32).div_euclid(q) + 2) * q,
+            px(tl[0].floor()).div_euclid(q) * q - q,
+            px(tl[1].floor()).div_euclid(q) * q - q,
+            (px(br[0].ceil()).div_euclid(q) + 2) * q,
+            (px(br[1].ceil()).div_euclid(q) + 2) * q,
         );
         let key = crate::surface_fingerprint(sel)
             ^ (step as u64) << 56
@@ -4153,6 +4156,34 @@ mod tests {
         let egui::FullOutput { mut textures_delta, shapes, .. } = out;
         textures_delta.clear();
         shapes
+    }
+
+    #[test]
+    fn a_huge_view_centre_draws_the_selection_outline_without_overflow() {
+        // #980: `ui.set` takes any finite centre, and the outline's visible region was quantised
+        // with unchecked i32 arithmetic: the frame panicked ("attempt to multiply/subtract with
+        // overflow") and release builds wrapped to an inverted region.
+        let ctx = egui::Context::default();
+        // Zoomed far out the quantisation step, and so the padding, is largest (64 · 256 px).
+        let cases = [([1e30, 1e30], false), ([-1e30, -1e30], false), ([3e9, -3e9], false), ([512.0, 512.0], true)];
+        for ((centre, traced), zoom) in cases.into_iter().flat_map(|c| [(c, 1.0), (c, 1.0 / 64.0)]) {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+            app.run("file.new", json!({"width": 1024, "height": 1024})).unwrap();
+            app.run("select.rect", json!({"x": 0, "y": 0, "width": 512, "height": 512})).unwrap();
+            app.sync_views();
+            let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({ "center": centre, "zoom": zoom }));
+            let _ = crate::control::handle(&mut app, &ctx, &req);
+            let view = app.ui.views[0].clone();
+            assert_eq!(view.zoom, zoom, "ui.set applied the zoom");
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                canvas_view(&mut app, ui, 0, Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0)), view.clone(), false);
+            });
+            out.textures_delta.clear();
+            // Control: a centre on the selection's corner still traces the outline (the selection
+            // spans several 64 px trace cells even zoomed out).
+            let segs = app.outline_cache.as_ref().map_or(0, |(_, _, s)| s.len());
+            assert_eq!(segs > 0, traced, "{centre:?} at zoom {zoom}");
+        }
     }
 
     #[test]
