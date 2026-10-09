@@ -88,14 +88,23 @@ impl PhotocraftApp {
     }
 }
 
-/// Called once per frame: holds back a window close request while there is unsaved work.
+/// Called once per frame: holds back a window close request while there is unsaved work. Every
+/// way of leaving (File › Exit / Quit, the close button, the OS's quit event, `app.quit`) ends up
+/// here as a close request.
 pub fn guard_window_close(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    if app.allow_close || !ctx.input(|i| i.viewport().close_requested()) {
+    if !ctx.input(|i| i.viewport().close_requested()) {
         return;
     }
-    if intercept(app, EXIT, &Value::Null) {
+    if !app.allow_close && intercept(app, EXIT, &Value::Null) {
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        return;
+    }
+    // Leaving: through the platform's own quit where there is one (see `Services::quit`), with
+    // the window left open for it to close.
+    if let Some(quit) = app.services.quit.as_mut() {
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        quit();
     }
 }
 
@@ -516,15 +525,20 @@ mod tests {
         assert!(h.state().session.documents().is_empty());
     }
 
-    /// One frame with the window's close button pressed; whether the guard cancelled the close.
-    fn press_window_close(app: &mut PhotocraftApp) -> bool {
+    /// One frame with the window's close button pressed; the commands the guard sent.
+    fn window_close_commands(app: &mut PhotocraftApp) -> Vec<egui::ViewportCommand> {
         let mut info = egui::ViewportInfo::default();
         info.events.push(egui::ViewportEvent::Close);
         let mut input = egui::RawInput::default();
         input.viewports.insert(egui::ViewportId::ROOT, info);
         let mut out = egui::Context::default().run_ui(input, |ui| guard_window_close(app, ui.ctx()));
         out.textures_delta.clear();
-        let commands = &out.viewport_output[&egui::ViewportId::ROOT].commands;
+        out.viewport_output.remove(&egui::ViewportId::ROOT).map(|o| o.commands).unwrap_or_default()
+    }
+
+    /// One frame with the window's close button pressed; whether the guard cancelled the close.
+    fn press_window_close(app: &mut PhotocraftApp) -> bool {
+        let commands = &window_close_commands(app);
         let cancelled = commands.iter().any(|c| matches!(c, egui::ViewportCommand::CancelClose));
         assert_eq!(commands.iter().any(|c| matches!(c, egui::ViewportCommand::Focus)), cancelled);
         cancelled
@@ -556,5 +570,34 @@ mod tests {
         app.allow_close = true;
         assert!(!press_window_close(&mut app));
         assert!(app.discard.is_none());
+    }
+
+    /// With a platform quit (macOS), leaving runs it and keeps the window open for it to close;
+    /// unsaved work still asks first.
+    #[test]
+    fn leaving_runs_the_platform_quit_instead_of_closing_the_window() {
+        use std::{cell::Cell, rc::Rc};
+        let quits = Rc::new(Cell::new(0));
+        let mut app = app_with_docs(1);
+        let counted = quits.clone();
+        app.services.quit = Some(Box::new(move || counted.set(counted.get() + 1)));
+        // The close is cancelled for the quit to do it, with no prompt brought forward.
+        let cancels_only = |c: &[egui::ViewportCommand]| {
+            c.iter().any(|c| matches!(c, egui::ViewportCommand::CancelClose)) && !c.iter().any(|c| matches!(c, egui::ViewportCommand::Focus))
+        };
+
+        assert!(cancels_only(&window_close_commands(&mut app)), "the window stays for the quit to close");
+        assert_eq!(quits.get(), 1);
+
+        make_dirty(&mut app, 0);
+        assert!(press_window_close(&mut app), "unsaved work asks first");
+        assert_eq!(quits.get(), 1, "no quit while the prompt is up");
+        assert!(app.discard.is_some());
+
+        // Don't Save: the prompt confirms, and the close it sends quits.
+        app.discard = None;
+        app.allow_close = true;
+        assert!(cancels_only(&window_close_commands(&mut app)));
+        assert_eq!(quits.get(), 2);
     }
 }
