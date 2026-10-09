@@ -1,5 +1,6 @@
 //! The browser shell: web `Services`, drag-and-drop, and the eframe web runner.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
@@ -56,7 +57,9 @@ pub fn start() {
                         log::info!("photocraft-web: wgpu backend {:?}", rs.adapter.get_info().backend);
                         app.set_wgpu(rs);
                     }
-                    Ok(Box::new(WebShell { app, inbox }))
+                    let unsaved = Arc::new(AtomicBool::new(false));
+                    guard_unload(unsaved.clone());
+                    Ok(Box::new(WebShell { app, inbox, unsaved }))
                 }),
             )
             .await;
@@ -99,6 +102,24 @@ fn listen_pen(target: &web_sys::HtmlCanvasElement, feed: photocraft_ui_egui::sty
     }
 }
 
+/// Closing or reloading the tab while a document has unsaved changes asks first, as closing the
+/// desktop window does: the browser shows its own "Leave site?" prompt (#1380). `unsaved` is
+/// refreshed every frame by [`WebShell`].
+fn guard_unload(unsaved: Arc<AtomicBool>) {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let cb = Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(move |e: web_sys::BeforeUnloadEvent| {
+        if unsaved.load(Ordering::Relaxed) {
+            e.prevent_default();
+            // Older browsers show the prompt only when a return value is set.
+            e.set_return_value("");
+        }
+    });
+    if window.add_event_listener_with_callback("beforeunload", cb.as_ref().unchecked_ref()).is_ok() {
+        cb.forget();
+    }
+}
+
 fn query() -> String {
     web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
 }
@@ -108,6 +129,8 @@ fn query() -> String {
 struct WebShell {
     app: PhotocraftApp,
     inbox: Inbox,
+    /// Read by the `beforeunload` listener ([`guard_unload`]).
+    unsaved: Arc<AtomicBool>,
 }
 
 impl eframe::App for WebShell {
@@ -128,6 +151,7 @@ impl eframe::App for WebShell {
             });
         }
         self.app.logic(ctx, frame);
+        self.unsaved.store(self.app.has_unsaved_work(), Ordering::Relaxed);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {

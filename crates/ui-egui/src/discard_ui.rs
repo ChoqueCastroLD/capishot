@@ -80,6 +80,14 @@ pub fn intercept(app: &mut PhotocraftApp, id: &str, params: &Value) -> bool {
     true
 }
 
+impl PhotocraftApp {
+    /// Whether closing now would lose work: a document has unsaved changes and closing wasn't
+    /// confirmed. The web build has the browser ask before leaving the page while this holds (#1380).
+    pub fn has_unsaved_work(&self) -> bool {
+        !self.allow_close && self.session.documents().iter().any(|d| d.is_dirty())
+    }
+}
+
 /// Called once per frame: holds back a window close request while there is unsaved work.
 pub fn guard_window_close(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.allow_close || !ctx.input(|i| i.viewport().close_requested()) {
@@ -459,6 +467,16 @@ mod tests {
         make_dirty(&mut app, 0);
         assert!(press_window_close(&mut app));
         assert!(app.discard.is_some());
+    }
+
+    #[test]
+    fn unsaved_work_is_any_dirty_document_until_closing_is_confirmed() {
+        let mut app = app_with_docs(2);
+        assert!(!app.has_unsaved_work());
+        make_dirty(&mut app, 1);
+        assert!(app.has_unsaved_work(), "a dirty document that isn't the active one counts");
+        app.allow_close = true;
+        assert!(!app.has_unsaved_work());
     }
 
     #[test]
