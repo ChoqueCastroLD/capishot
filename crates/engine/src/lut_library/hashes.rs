@@ -4,9 +4,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
-use super::{LutLibrary, collect};
+use super::{LutLibrary, MAX_LUT_BYTES, collect};
 
 const HASH_FILE: &str = ".hashes";
 
@@ -24,17 +25,37 @@ fn read_sidecar(dir: &Path) -> Option<Vec<(String, String)>> {
     Some(text.lines().filter_map(|l| l.split_once('\t')).map(|(h, f)| (h.to_string(), f.to_string())).collect())
 }
 
-/// Hash every LUT in `dir` (pack-relative paths) and keep the result next to them.
+/// The content of a LUT file added by hand, or `None` when it is unreadable or larger than
+/// [`MAX_LUT_BYTES`] (install refuses those too). The length is checked before the file is opened
+/// and again while reading, in case it grew in between.
+fn read_bounded(path: &Path) -> Option<Vec<u8>> {
+    if fs::metadata(path).ok()?.len() > MAX_LUT_BYTES {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(path).ok()?.take(MAX_LUT_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() as u64 <= MAX_LUT_BYTES).then_some(bytes)
+}
+
+/// Pack-relative paths of the LUTs in `dir` that can have a hash (not over [`MAX_LUT_BYTES`]), so
+/// an oversize file does not make the sidecar look stale and force a rebuild on every scan.
+fn hashable(dir: &Path) -> HashSet<String> {
+    let Ok(found) = collect(dir) else { return HashSet::new() };
+    found.iter().filter(|f| fs::metadata(&f.path).is_ok_and(|m| m.len() <= MAX_LUT_BYTES)).map(|f| f.rel.join("/")).collect()
+}
+
+/// Hash every LUT in `dir` (pack-relative paths) and keep the result next to them. Files over
+/// [`MAX_LUT_BYTES`] are left out: they cannot be loaded, so they never need a hash.
 fn rebuild(dir: &Path) -> Vec<(String, String)> {
     let Ok(found) = collect(dir) else { return Vec::new() };
-    let hashes: Vec<(String, String)> = found.iter().filter_map(|f| fs::read(&f.path).ok().map(|b| (hash_bytes(&b), f.rel.join("/")))).collect();
+    let hashes: Vec<(String, String)> = found.iter().filter_map(|f| read_bounded(&f.path).map(|b| (hash_bytes(&b), f.rel.join("/")))).collect();
     write_sidecar(dir, &hashes);
     hashes
 }
 
 /// `(content hashes, deepest folder level)` of the pack in `dir`.
 fn pack_hashes(dir: &Path) -> (HashSet<String>, usize) {
-    let present: HashSet<String> = collect(dir).map(|f| f.iter().map(|x| x.rel.join("/")).collect()).unwrap_or_default();
+    let present = hashable(dir);
     let mut hashes = read_sidecar(dir).unwrap_or_default();
     if hashes.len() != present.len() || hashes.iter().any(|(_, f)| !present.contains(f)) {
         hashes = rebuild(dir);
@@ -80,7 +101,7 @@ impl LutLibrary {
                 continue;
             }
             let dir = entry.path();
-            let present: HashSet<String> = collect(&dir).map(|f| f.iter().map(|x| x.rel.join("/")).collect()).unwrap_or_default();
+            let present = hashable(&dir);
             let mut hashes = read_sidecar(&dir).unwrap_or_default();
             // A pack edited by hand (or installed by an older build) no longer matches its sidecar.
             if hashes.len() != present.len() || hashes.iter().any(|(_, f)| !present.contains(f)) {
@@ -91,5 +112,48 @@ impl LutLibrary {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("photocraft-lut-hashes-{name}-{}", super::super::unique_suffix()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn rebuild_skips_a_file_over_the_size_cap_without_reading_it() {
+        let dir = temp("oversize");
+        fs::write(dir.join("small.cube"), b"TITLE \"x\"\n").unwrap();
+        // A sparse file: the length is set, nothing is written, so a read would allocate 64 MiB.
+        let big = fs::File::create(dir.join("huge.cube")).unwrap();
+        big.set_len(MAX_LUT_BYTES + 1).unwrap();
+        drop(big);
+        assert!(read_bounded(&dir.join("huge.cube")).is_none());
+        let hashes = rebuild(&dir);
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].1, "small.cube");
+        // The sidecar is written without the oversize file too.
+        assert_eq!(read_sidecar(&dir).map(|h| h.len()), Some(1));
+        // And that sidecar is not stale, so it is not rebuilt on the next scan.
+        assert_eq!(pack_hashes(&dir).0.len(), 1);
+        fs::write(dir.join(HASH_FILE), "abc\tsmall.cube\n").unwrap();
+        assert!(pack_hashes(&dir).0.contains("abc"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_under_the_cap_is_read() {
+        let dir = temp("atcap");
+        let f = fs::File::create(dir.join("edge.cube")).unwrap();
+        f.set_len(1024).unwrap();
+        drop(f);
+        assert_eq!(read_bounded(&dir.join("edge.cube")).map(|b| b.len()), Some(1024));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

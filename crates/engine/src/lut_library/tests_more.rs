@@ -168,6 +168,35 @@ fn bad_archives_are_errors() {
 }
 
 #[test]
+fn a_zip_larger_than_the_remaining_budget_is_refused_before_it_is_unpacked() {
+    let (a, b) = (write_cube(&LutFile::identity(5)), write_cube(&LutFile::identity(6)));
+    let each = a.len().max(b.len()) as u64;
+    let base = temp("zipbudget");
+    fs::write(base.join("Big.zip"), make_zip(&[("a.cube", a.as_bytes(), false), ("b.cube", b.as_bytes(), true)])).unwrap();
+
+    // The extractor stops at the first file that does not fit and writes nothing for it.
+    let out = base.join("out");
+    let err = zip::extract(&base.join("Big.zip"), &out, each / 2, 1 << 30, &mut |_, _| true).unwrap_err();
+    assert!(err.contains("the LUT library would grow past 1 GiB; remove a pack first"), "{err}");
+    assert_eq!(collect(&out).map(|f| f.len()).unwrap_or(0), 0);
+
+    // Through install: refused with the library untouched and nothing left in the library root.
+    let lib = LutLibrary::new(base.join("lib"));
+    let opts = InstallOptions::default();
+    let err = lib.install_capped(&base.join("Big.zip"), &opts, each, &mut |_, _| true).unwrap_err();
+    assert!(err.contains("would grow past"), "{err}");
+    assert!(lib.list().unwrap().is_empty());
+
+    // Room for both: installs.
+    let ok = lib.install_capped(&base.join("Big.zip"), &opts, a.len() as u64 + b.len() as u64, &mut |_, _| true).unwrap();
+    assert_eq!(ok.installed.len(), 2);
+    // Replacing the pack gets its own size back, so the same archive still fits at the same cap.
+    let again = lib.install_capped(&base.join("Big.zip"), &opts, a.len() as u64 + b.len() as u64, &mut |_, _| true).unwrap();
+    assert!(again.replaced);
+    assert_eq!(again.installed.len(), 2);
+}
+
+#[test]
 fn favourites_and_recent_survive_a_restart_and_a_removed_pack() {
     let src = temp("fav-src");
     put(&src, "a.cube", &write_cube(&LutFile::identity(3)));

@@ -76,8 +76,9 @@ fn safe_parts(name: &str) -> Option<Vec<String>> {
 }
 
 /// Extract the LUT files of the archive `zip` into `dest` (created). `budget` bounds the total
-/// extracted size. `progress` returns `false` to cancel.
-pub(super) fn extract(zip: &Path, dest: &Path, budget: u64, progress: &mut dyn FnMut(f32, &str) -> bool) -> Result<(), String> {
+/// extracted size; going over it refuses with the library-size message for `cap`. `progress`
+/// returns `false` to cancel.
+pub(super) fn extract(zip: &Path, dest: &Path, budget: u64, cap: u64, progress: &mut dyn FnMut(f32, &str) -> bool) -> Result<(), String> {
     let mut f = fs::File::open(zip).map_err(|e| format!("{}: {e}", zip.display()))?;
     let entries = central_directory(&mut f).map_err(|e| format!("{}: {e}", zip.display()))?;
     let wanted: Vec<(&Entry, Vec<String>)> = entries.iter().filter_map(|e| safe_parts(&e.name).map(|p| (e, p))).collect();
@@ -115,7 +116,7 @@ pub(super) fn extract(zip: &Path, dest: &Path, budget: u64, progress: &mut dyn F
         }
         used = used.saturating_add(data.len() as u64);
         if used > budget {
-            return Err("the archive is too large".into());
+            return Err(super::budget::grow_error(cap));
         }
         let mut path = parts.iter().fold(dest.to_path_buf(), |p, part| p.join(part));
         let mut n = 2;

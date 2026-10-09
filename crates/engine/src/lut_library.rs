@@ -25,6 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod budget;
 pub mod cache;
 mod hashes;
 pub mod meta;
@@ -224,18 +225,6 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     })
 }
 
-fn dir_bytes(dir: &Path) -> u64 {
-    let Ok(entries) = fs::read_dir(dir) else { return 0 };
-    entries
-        .flatten()
-        .map(|e| match e.file_type() {
-            Ok(k) if k.is_dir() => dir_bytes(&e.path()),
-            Ok(k) if k.is_file() => e.metadata().map_or(0, |m| m.len()),
-            _ => 0,
-        })
-        .sum()
-}
-
 /// What staging a pack produced.
 #[derive(Default)]
 struct Staged {
@@ -332,28 +321,43 @@ impl LutLibrary {
     /// Install LUTs from a folder or a `.zip`. `progress(fraction, message)` is called before each
     /// file and returns `false` to cancel. The library only changes when the whole pack installed.
     pub fn install_with(&self, src: &Path, opts: &InstallOptions, progress: &mut dyn FnMut(f32, &str) -> bool) -> Result<InstallReport, String> {
+        self.install_capped(src, opts, MAX_LIBRARY_BYTES, progress)
+    }
+
+    /// [`install_with`](Self::install_with) with the library size limit as a parameter, so tests can
+    /// use a small one.
+    pub(crate) fn install_capped(
+        &self,
+        src: &Path,
+        opts: &InstallOptions,
+        cap: u64,
+        progress: &mut dyn FnMut(f32, &str) -> bool,
+    ) -> Result<InstallReport, String> {
         let meta = fs::symlink_metadata(src).map_err(|e| format!("{}: {e}", src.display()))?;
         if meta.is_file() && src.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
             // Outside the library, so the extracted folder is never mistaken for part of it.
             let unzipped = std::env::temp_dir().join(format!("photocraft-luts-unzip-{}", unique_suffix()));
-            let result = zip::extract(src, &unzipped, MAX_LIBRARY_BYTES, progress).and_then(|()| {
-                let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("LUTs");
-                let named = InstallOptions { pack: opts.pack.clone().or_else(|| Some(stem.to_string())), ..opts.clone() };
-                self.install_dir(&unzipped, &named, progress)
-            });
+            let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("LUTs");
+            let named = InstallOptions { pack: opts.pack.clone().or_else(|| Some(stem.to_string())), ..opts.clone() };
+            // Cap the unpacking at what the library has room for, so an archive that cannot fit is
+            // refused before it fills the temp directory. LUTs that install_dir later skips as
+            // duplicates still count toward this early cap, so it is slightly conservative.
+            self.remove_stale();
+            let budget = self.budget_for(&self.root.join(budget::pack_name(&named, stem)), cap);
+            let result = zip::extract(src, &unzipped, budget, cap, progress).and_then(|()| self.install_dir(&unzipped, &named, cap, progress));
             let _ = fs::remove_dir_all(&unzipped);
             return result;
         }
-        self.install_dir(src, opts, progress)
+        self.install_dir(src, opts, cap, progress)
     }
 
-    fn install_dir(&self, src: &Path, opts: &InstallOptions, progress: &mut dyn FnMut(f32, &str) -> bool) -> Result<InstallReport, String> {
+    fn install_dir(&self, src: &Path, opts: &InstallOptions, cap: u64, progress: &mut dyn FnMut(f32, &str) -> bool) -> Result<InstallReport, String> {
         let meta = fs::symlink_metadata(src).map_err(|e| format!("{}: {e}", src.display()))?;
         if !meta.is_dir() {
             return Err(format!("{}: not a folder or .zip", src.display()));
         }
         let fallback = src.file_name().and_then(|n| n.to_str()).unwrap_or("LUTs");
-        let pack = clean_component(opts.pack.as_deref().map(str::trim).filter(|p| !p.is_empty()).unwrap_or(fallback));
+        let pack = budget::pack_name(opts, fallback);
         if pack.starts_with('.') {
             return Err(format!("`{pack}` is not a valid pack name"));
         }
@@ -374,11 +378,11 @@ impl LutLibrary {
         }
         fs::create_dir_all(&self.root).map_err(|e| format!("{}: {e}", self.root.display()))?;
         self.remove_stale();
-        let budget = MAX_LIBRARY_BYTES.saturating_sub(dir_bytes(&self.root).saturating_sub(if replaced { dir_bytes(&dest) } else { 0 }));
+        let budget = self.budget_for(&dest, cap);
         let known = if opts.allow_duplicates { HashMap::new() } else { self.known_hashes(Some(&pack)) };
         let stage = self.root.join(format!(".installing-{}", unique_suffix()));
         fs::create_dir_all(&stage).map_err(|e| format!("{}: {e}", stage.display()))?;
-        let staged = match self.fill_stage(&found, &stage, budget, &known, progress) {
+        let staged = match self.fill_stage(&found, &stage, budget, cap, &known, progress) {
             Ok(s) if !s.installed.is_empty() => s,
             Ok(s) => {
                 let _ = fs::remove_dir_all(&stage);
@@ -428,6 +432,7 @@ impl LutLibrary {
         found: &[Found],
         stage: &Path,
         budget: u64,
+        cap: u64,
         known: &HashMap<String, (String, String)>,
         progress: &mut dyn FnMut(f32, &str) -> bool,
     ) -> Result<Staged, String> {
@@ -464,7 +469,7 @@ impl LutLibrary {
             }
             used = used.saturating_add(bytes.len() as u64);
             if used > budget {
-                return Err(format!("the LUT library would grow past {} GiB; remove a pack first", MAX_LIBRARY_BYTES >> 30));
+                return Err(budget::grow_error(cap));
             }
             let rel = pack_path(&f.rel, &mut taken);
             let target = rel.split('/').fold(stage.to_path_buf(), |p, part| p.join(part));
