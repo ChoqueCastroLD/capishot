@@ -14,8 +14,9 @@ it into the checkpoint's slot is sufficient to execute the remaining passes. No 
 placed inside a group, clipping unit or adjustment program.
 
 Blend-If currently returns `Unsupported` from the GPU planner and uses the existing CPU path.
-Reuse must never bypass planning or support checks, including after adding Blend-If to a warm
-document. A later GPU implementation of advanced blending must preserve the boundary invariant.
+The same holds for Advanced Blending (on main since b0680fd): it must keep falling back to the
+CPU, or keep the checkpoint boundary rule — a later GPU implementation of advanced blending
+preserves the boundary invariant either way.
 
 ## Invalidation
 
@@ -32,9 +33,13 @@ chunks and render once to populate it. Subsequent edits above that checkpoint re
 with the boundary before the last root unit. Validate the planner's starting layer, pass offset
 and root slot too: an opaque layer above the checkpoint can change occlusion pruning.
 
-Cache chunks by their exact document rectangle, in the compositor's accumulation format.
-Partial damage with a different rectangle misses conservatively; it does not overwrite a larger
-cached rectangle. A lower-prefix change invalidates every rectangle, including offscreen chunks.
+Admit only whole grid chunks — rectangles aligned to the compositor's chunk grid — keyed by
+their grid position, in the compositor's accumulation format. Partial damage is served, not
+missed: a damage rectangle maps to the whole chunks it intersects, and a partial rectangle is
+copied as a sub-rect of the cached whole chunk, so brush strokes (a new partial rect every
+frame) populate whole chunks instead of filling the budget with entries keyed to exact damage
+rects that never hit again. A lower-prefix change invalidates every chunk, including offscreen
+ones.
 Switching documents, closing the cached document, resizing, changing the texture limit or losing
 the device releases or invalidates the cache. Undo/redo is covered by snapshot comparison.
 
