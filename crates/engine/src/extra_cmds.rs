@@ -338,6 +338,12 @@ fn paste_into(s: &mut Session, p: &Value, outside: bool) -> Result<Value> {
     Ok(r)
 }
 
+/// The canvas grown to every layer's pixels: Image › Reveal All's new canvas, and what the Crop
+/// tool shows while a frame is edited.
+pub fn reveal_all_bounds(doc: &Document) -> Rect {
+    doc.walk().into_iter().filter_map(|(_, _, l)| l.surface().map(|s| s.content_bounds())).fold(doc.bounds(), |a, b| a.union(&b))
+}
+
 // ---------- layers ----------
 
 fn layer_from_background(s: &mut Session) -> Result<Value> {
@@ -652,9 +658,8 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("image.adjustments.equalize", "Equalize", &["Image", "Adjustments"], None, "{}", has_pixels, |s, _| equalize(s)),
         spec!("image.revealAll", "Reveal All", &["Image"], None, "{}", has_doc, |s, _| {
             let d = s.active().ok_or(EngineError::NoDocument)?;
-            let canvas = d.doc.bounds();
-            let all = d.doc.walk().into_iter().filter_map(|(_, _, l)| l.surface().map(|s| s.content_bounds())).fold(canvas, |a, b| a.union(&b));
-            if all == canvas {
+            let all = reveal_all_bounds(&d.doc);
+            if all == d.doc.bounds() {
                 return Ok(json!({"changed": false}));
             }
             s.execute("image.crop", json!({"x": all.x0, "y": all.y0, "width": all.width(), "height": all.height(), "deleteCroppedPixels": false}))?;
@@ -1037,6 +1042,7 @@ mod tests {
         let mut s = session(8);
         s.execute("layer.translate", json!({"dx": 0, "dy": 0})).ok();
         paint_square(&mut s, Rect::new(-5, 0, 10, 10), [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(reveal_all_bounds(doc(&s)), Rect::new(-5, 0, 40, 30));
         s.execute("image.revealAll", json!({})).unwrap();
         assert_eq!((doc(&s).size.width, doc(&s).size.height), (45, 30));
         assert_eq!(s.execute("image.revealAll", json!({})).unwrap()["changed"], false);

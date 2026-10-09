@@ -1896,6 +1896,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let drop_shadow = border == photocraft_engine::prefs::CanvasBorder::DropShadow;
     // Drop shadow, checkerboard, document image.
     let img_rect = xf.doc_rect(doc.bounds());
+    // Crop tool: the layers' pixels past the canvas while a frame is edited, under the canvas
+    // (whose edge blends into them) and without its shadow.
+    let beyond = draw_beyond_canvas(app, &painter, &xf, idx, output);
+    let drop_shadow = drop_shadow && !beyond;
     // Live adjustment previews on big documents use a downsampled proxy (see proxy.rs), unless
     // Preferences › Performance › Low Resolution Previews is off.
     let mut on_gpu = false;
@@ -2173,6 +2177,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // (Preferences › Tools, `paint_mouse`).
         crate::paint_mouse::sync_tool_smoothing(app);
         let mut buttons = crate::paint_mouse::canvas_buttons(app, &response, tool);
+        // The Crop tool's frame is edited from the press (before egui's drag threshold), so the
+        // pixels past the canvas show at once, as in Photoshop.
+        if tool == Tool::Crop && response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down()) && crate::crop_ui::press(app) {
+            ctx.request_repaint();
+        }
         // Capture temporary Type transforms at the actual press, before egui's drag threshold.
         // Releasing Command before the first recognised move must not turn it into text selection.
         let type_press = egui::Id::new("type-pointer-press-modifiers");
@@ -2395,7 +2404,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         crate::layer_pick_ui::show(app, &ctx);
         crate::canvas_tool_menu::show(app, &ctx);
         crate::snap_ui::draw(app, &painter, &xf);
-        if border == photocraft_engine::prefs::CanvasBorder::Line {
+        // The canvas edge isn't outlined while the pixels past it show (Photoshop's crop preview).
+        if border == photocraft_engine::prefs::CanvasBorder::Line && !beyond {
             painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, Color32::from_gray(20)), egui::StrokeKind::Outside);
         }
         crate::type_tool::draw_overlay(app, &painter, &xf);
@@ -2680,6 +2690,139 @@ fn crop_overlay(painter: &egui::Painter, r: Rect) {
         let e = if horizontal { vec2(lx, 0.0) } else { vec2(0.0, ly) };
         painter.line_segment([c - e, c + e], h);
     }
+}
+
+/// What the Crop tool shows past the canvas, cached per document state ([`draw_beyond_canvas`]).
+#[derive(Clone)]
+struct BeyondCanvas {
+    snapshot: std::sync::Weak<Document>,
+    key: u64,
+    /// Every layer's pixels and the canvas (`extra_cmds::reveal_all_bounds`).
+    extent: DRect,
+    /// The composite around the canvas: each band, the area its texture covers, the texture.
+    bands: Vec<(DRect, DRect, egui::TextureHandle)>,
+}
+
+/// Band `r` around the canvas `c` (on screen) pushed a point under the canvas's edge, so that the
+/// edge's anti-aliased pixels blend with the band rather than with the pasteboard.
+fn under_canvas(mut r: Rect, c: Rect) -> Rect {
+    let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+    if near(r.max.y, c.min.y) {
+        r.max.y += 1.0;
+    }
+    if near(r.min.y, c.max.y) {
+        r.min.y -= 1.0;
+    }
+    if near(r.max.x, c.min.x) {
+        r.max.x += 1.0;
+    }
+    if near(r.min.x, c.max.x) {
+        r.min.x -= 1.0;
+    }
+    r
+}
+
+/// `outer` minus `inner`: the bands above, below, left and right of it (empty ones dropped).
+fn ring(outer: DRect, inner: DRect) -> Vec<DRect> {
+    let i = inner.intersect(&outer);
+    if i.is_empty() {
+        return if outer.is_empty() { Vec::new() } else { vec![outer] };
+    }
+    [
+        DRect::new(outer.x0, outer.y0, outer.x1, i.y0),
+        DRect::new(outer.x0, i.y1, outer.x1, outer.y1),
+        DRect::new(outer.x0, i.y0, i.x0, i.y1),
+        DRect::new(i.x1, i.y0, outer.x1, i.y1),
+    ]
+    .into_iter()
+    .filter(|r| !r.is_empty())
+    .collect()
+}
+
+/// Crop tool, while a frame is edited (`crop_ui::shows_beyond_canvas`): like Photoshop's crop
+/// preview, the canvas grows to every layer's pixels (a crop with Delete Cropped Pixels off keeps
+/// them; a moved layer reaches past the edges) and to the frame, transparency drawn as the
+/// checkerboard, all under the shield `crop_overlay` adds. Only the ring around the canvas is
+/// composited, on the CPU, once per document state: at most `MAX_TEXTURE` texels per side, from a
+/// downsampled proxy past that (so a far-off layer costs no more than a 16 MP composite).
+/// Drawn before the canvas, each band reaching a point under its edge. Returns whether anything
+/// past the canvas was drawn.
+fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, idx: usize, output: Option<u32>) -> bool {
+    let ctx = painter.ctx().clone();
+    let Some((snapshot, id)) = app.session.documents().get(idx).map(|st| (std::sync::Arc::downgrade(&st.doc), st.doc.id)) else { return false };
+    let key = egui::Id::new(("crop-beyond-canvas", id.0, output));
+    let frame =
+        app.ui.crop_rect.filter(|f| f.iter().all(|v| v.is_finite()) && app.session.active_index() == Some(idx) && crate::crop_ui::shows_beyond_canvas(app));
+    let Some(f) = frame else {
+        ctx.data_mut(|d| d.remove::<BeyondCanvas>(key));
+        return false;
+    };
+    let (doc, preview_key) = display_doc(app, idx);
+    if doc.has_artboards() {
+        return false;
+    }
+    let (display, display_key) = canvas_display(app, &doc, output);
+    let doc_key = preview_key ^ display_key;
+    let cached: Option<BeyondCanvas> = ctx.data(|d| d.get_temp(key));
+    let c = match cached.filter(|c| c.snapshot.ptr_eq(&snapshot) && c.key == doc_key) {
+        Some(c) => c,
+        None => {
+            let t0 = crate::gpu_canvas::now_ms();
+            let extent = photocraft_engine::extra_cmds::reveal_all_bounds(&doc);
+            // One texel per `k` document pixels keeps every texture within MAX_TEXTURE.
+            let k = extent.width().max(extent.height()).div_ceil(MAX_TEXTURE).max(1);
+            let proxy = (k > 1).then(|| photocraft_compose::proxy::proxy_document(&doc, k));
+            let src = proxy.as_ref().unwrap_or(&*doc);
+            let k = k as i32;
+            let opts = TextureOptions { magnification: egui::TextureFilter::Nearest, ..TextureOptions::LINEAR };
+            let bands = ring(extent, doc.bounds())
+                .into_iter()
+                .map(|b| {
+                    // The proxy pixels over `b`: document pixels / k, rounded outwards.
+                    let up = |v: i32| v.div_euclid(k) + i32::from(v.rem_euclid(k) != 0);
+                    let p = DRect::new(b.x0.div_euclid(k), b.y0.div_euclid(k), up(b.x1), up(b.y1));
+                    let buf = photocraft_compose::render_reduced_rect(src, p, p.width(), p.height());
+                    let tex = ctx.load_texture("crop-beyond-canvas", display_image(display.as_deref(), &buf), opts);
+                    (b, DRect::new(p.x0.saturating_mul(k), p.y0.saturating_mul(k), p.x1.saturating_mul(k), p.y1.saturating_mul(k)), tex)
+                })
+                .collect();
+            app.perf.span("crop-beyond-canvas", crate::gpu_canvas::now_ms() - t0);
+            let c = BeyondCanvas { snapshot, key: doc_key, extent, bands };
+            ctx.data_mut(|d| d.insert_temp(key, c.clone()));
+            c
+        }
+    };
+    // Transparency out to the frame, in phase with the canvas's own checkerboard.
+    let canvas = xf.doc_rect(doc.bounds());
+    let fr = DRect::new(f[0].floor() as i32, f[1].floor() as i32, f[2].ceil() as i32, f[3].ceil() as i32);
+    let square = app.session.prefs().transparency_and_gamut.square();
+    let checker_id = square.map(|_| checker(app, &ctx));
+    let around = ring(c.extent.union(&fr), doc.bounds());
+    for &b in &around {
+        let r = under_canvas(xf.doc_rect(b), canvas);
+        match square.zip(checker_id) {
+            Some((sq, id)) => {
+                let uv = Rect::from_min_max(((r.min - canvas.min) / (2.0 * sq)).to_pos2(), ((r.max - canvas.min) / (2.0 * sq)).to_pos2());
+                painter.image(id, r, uv, Color32::WHITE);
+            }
+            None => {
+                painter.rect_filled(r, 0.0, Color32::WHITE);
+            }
+        }
+    }
+    for (b, t, tex) in &c.bands {
+        let part = |a: i32, o: i32, len: u32| (i64::from(a) - i64::from(o)) as f32 / len.max(1) as f32;
+        let (mut u0, mut u1) = (part(b.x0, t.x0, t.width()), part(b.x1, t.x0, t.width()));
+        if xf.flip {
+            (u0, u1) = (u1, u0);
+        }
+        let uv = Rect::from_min_max(pos2(u0, part(b.y0, t.y0, t.height())), pos2(u1, part(b.y1, t.y0, t.height())));
+        // The texture's edge texels stretch over the point under the canvas.
+        let (r, e) = (xf.doc_rect(*b), under_canvas(xf.doc_rect(*b), canvas));
+        let at = |p: Pos2| uv.min + (p - r.min) / r.size() * uv.size();
+        painter.image(tex.id(), e, Rect::from_min_max(at(e.min), at(e.max)), Color32::WHITE);
+    }
+    !around.is_empty()
 }
 
 /// Overlays that persist between gestures: polygonal or magnetic lasso in progress, pending crop box.
