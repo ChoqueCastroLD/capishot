@@ -96,8 +96,10 @@ pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
 
 fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer {
     let tile = tile.max(1);
-    // Lab documents mix Normal blending in CIELAB, as Photoshop does (psblend::LAB_MIX).
+    // Lab documents mix Normal blending in CIELAB, as Photoshop does (psblend::LAB_MIX); 32-bit
+    // documents don't clip Add / Divide at 1 (psblend::HDR).
     let lab = doc.mode == photocraft_color::ColorMode::Lab;
+    let hdr = doc.depth == photocraft_color::SampleType::F32;
     // CMYK layers are read through the document's own CMYK profile (thread-local scope).
     let cmyk = cmyk_space(doc);
     let cmyk = cmyk.as_ref();
@@ -107,18 +109,18 @@ fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer 
     if rect.width() as i32 <= tile && rect.height() as i32 <= tile {
         return photocraft_color::convert::with_cmyk_space(cmyk, || {
             let mut buf = multichannel::backdrop(doc, rect);
-            psblend::with_lab_mix(lab, || composite_stack_at(&doc.layers, &mut buf, cx, advanced::Scope::ROOT));
+            in_blend_space(lab, hdr, || composite_stack_at(&doc.layers, &mut buf, cx, advanced::Scope::ROOT));
             buf
         });
     }
     // Effect maps are built once, here, before any tile needs them (#276).
     prepare_effects(&doc.layers, rect, cx, |f| {
-        photocraft_color::convert::with_cmyk_space(cmyk, || psblend::with_lab_mix(lab, f));
+        photocraft_color::convert::with_cmyk_space(cmyk, || in_blend_space(lab, hdr, f));
     });
     let run = |t: Rect| {
         photocraft_color::convert::with_cmyk_space(cmyk, || {
             let mut b = multichannel::backdrop(doc, t);
-            psblend::with_lab_mix(lab, || composite_stack_at(&doc.layers, &mut b, cx, advanced::Scope::ROOT));
+            in_blend_space(lab, hdr, || composite_stack_at(&doc.layers, &mut b, cx, advanced::Scope::ROOT));
             b
         })
     };
@@ -176,6 +178,13 @@ fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer 
         }
     }
     out
+}
+
+/// Runs `f` with this thread's document blend flags set ([`psblend::LAB_MIX`], [`psblend::HDR`]),
+/// then restores the values they had (also on unwind): a nested rayon job can run another tile
+/// on this thread mid-composite, and clearing the flags there broke the outer tile (#1112).
+fn in_blend_space<R>(lab: bool, hdr: bool, f: impl FnOnce() -> R) -> R {
+    psblend::with_lab_mix(lab, || psblend::with_hdr(hdr, f))
 }
 
 /// The document's own CMYK profile for reading its CMYK pixels (`None`: not a CMYK document,
