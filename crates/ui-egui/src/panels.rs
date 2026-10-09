@@ -789,7 +789,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             }
                         });
                     }
-                    Tool::Type | Tool::VerticalType if t.pro => crate::type_tool::options_bar(app, ui),
+                    // Every theme gets the font, style and size controls (#1387), as with Auto-Select (#1275).
+                    Tool::Type | Tool::VerticalType => crate::type_tool::options_bar(app, ui),
                     Tool::Move if t.pro => {
                         let o = &mut app.ui.tool_options;
                         widgets::checkbox(ui, &mut o.move_auto_select, tl!("Auto-Select:"));
@@ -922,7 +923,6 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     ),
                     Tool::Gradient => hint(ui, tl!("Drag to draw a gradient")),
                     Tool::PaintBucket => hint(ui, tl!("Click to fill similar colours")),
-                    Tool::Type | Tool::VerticalType => hint(ui, tl!("Click to add text")),
                     // Retouching and smart-selection tools draw their bar in `retouch_ui::options_bar`.
                     _ => {}
                 }
