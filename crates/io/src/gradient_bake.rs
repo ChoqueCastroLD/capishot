@@ -15,6 +15,9 @@ pub(crate) enum Method {
     Classic,
     Perceptual,
     Linear,
+    /// Photoshop's 'Smoo' method. The RGB model is not measured independently;
+    /// opacity is baked with its observed convex response in the importer.
+    Smooth,
 }
 
 impl Method {
@@ -22,6 +25,7 @@ impl Method {
         match code {
             Some(b"Perc") => Method::Perceptual,
             Some(b"Lnr ") => Method::Linear,
+            Some(b"Smoo") => Method::Smooth,
             _ => Method::Classic,
         }
     }
@@ -61,7 +65,7 @@ fn from_oklab(p: [f32; 3]) -> [f32; 3] {
 
 fn into_space(m: Method, rgb: [f32; 3]) -> [f32; 3] {
     match m {
-        Method::Classic => rgb,
+        Method::Classic | Method::Smooth => rgb,
         Method::Linear => rgb.map(lin),
         Method::Perceptual => to_oklab(rgb),
     }
@@ -69,7 +73,7 @@ fn into_space(m: Method, rgb: [f32; 3]) -> [f32; 3] {
 
 fn out_of_space(m: Method, p: [f32; 3]) -> [f32; 3] {
     match m {
-        Method::Classic => p.map(|v| v.clamp(0.0, 1.0)),
+        Method::Classic | Method::Smooth => p.map(|v| v.clamp(0.0, 1.0)),
         Method::Linear => p.map(enc),
         Method::Perceptual => from_oklab(p),
     }
@@ -156,6 +160,16 @@ mod tests {
         let u = (t - a.0) / (b.0 - a.0);
         let (x, y) = (a.1.to_rgb(), b.1.to_rgb());
         std::array::from_fn(|c| x[c] + (y[c] - x[c]) * u)
+    }
+
+    #[test]
+    fn reads_smooth_method_without_conflating_other_codes() {
+        assert_eq!(Method::from_code(Some(b"Smoo")), Method::Smooth);
+        assert_eq!(Method::from_code(Some(b"Perc")), Method::Perceptual);
+        assert_eq!(Method::from_code(Some(b"Lnr ")), Method::Linear);
+        assert_eq!(Method::from_code(Some(b"Gcls")), Method::Classic);
+        assert_eq!(Method::from_code(Some(b"Strp")), Method::Classic);
+        assert_eq!(Method::from_code(None), Method::Classic);
     }
 
     #[test]
