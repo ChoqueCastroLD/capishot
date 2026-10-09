@@ -528,7 +528,10 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                     Key::Enter if m.command => commit(app),
                     Key::Enter => insert(app, "\n"),
                     Key::Escape if crate::type_transform::active(app) => crate::type_transform::cancel_drag(app),
-                    Key::Escape => commit(app),
+                    // Preferences ▸ Type: with "Use Escape to Commit" off, Escape cancels the
+                    // session (undoes it, removing a just-created layer) like the Cancel button.
+                    Key::Escape if app.session.prefs().type_.use_esc_to_commit => commit(app),
+                    Key::Escape => cancel(app),
                     Key::A if m.command => {
                         if let Some(e) = app.ui.text_edit.as_mut() {
                             e.anchor = 0;

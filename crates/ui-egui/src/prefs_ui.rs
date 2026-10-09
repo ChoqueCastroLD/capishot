@@ -1851,9 +1851,10 @@ mod tests {
         for section in ["integrations", "scratchDisks"] {
             assert!(!has_visible_fields(&values, section), "{section}");
         }
-        // "Fill new type layers with placeholder text" is live; other Type rows stay hidden.
+        // "Fill new type layers with placeholder text" and "Use Escape to Commit" are live; other Type rows stay hidden.
         assert!(has_visible_fields(&values, "type"));
         assert!(!prefs::is_hidden("type.fillNewTypeLayersWithPlaceholder"));
+        assert!(!prefs::is_hidden("type.useEscToCommit"));
         assert!(prefs::is_hidden("type.smartQuotes"));
         // Rotate View with Trackpad is live; the other Enhanced Controls rows stay hidden.
         assert!(has_visible_fields(&values, "enhancedControls"));

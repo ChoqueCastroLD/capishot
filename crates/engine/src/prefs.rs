@@ -867,7 +867,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "type.smartQuotes",
     "type.missingGlyphProtection",
     "type.showFontNamesInEnglish",
-    "type.useEscToCommit",
     "type.textEngine",
     "type.fontPreview",
     "type.recentFonts",
