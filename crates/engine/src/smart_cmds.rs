@@ -890,7 +890,7 @@ fn active_smart(s: &Session) -> std::result::Result<&SmartObject, String> {
     let id = d.active_layer.ok_or("no active layer")?;
     match &d.doc.layer(id).ok_or("no active layer")?.content {
         LayerContent::Smart(sm) => Ok(sm),
-        other => Err(format!("the active layer is a {} layer, not a smart object", other.kind_name())),
+        other => Err(format!("the active layer is {} {} layer, not a smart object", other.article(), other.kind_name())),
     }
 }
 fn has_smart(s: &Session) -> std::result::Result<(), String> {

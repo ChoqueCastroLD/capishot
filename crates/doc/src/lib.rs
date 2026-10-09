@@ -543,6 +543,14 @@ impl LayerContent {
             LayerContent::Smart(_) => "Smart Object",
         }
     }
+
+    /// English indefinite article for this layer kind ("an" for Adjustment, "a" for all others).
+    pub fn article(&self) -> &'static str {
+        match self {
+            LayerContent::Adjustment(_) => "an",
+            _ => "a",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1223,6 +1231,14 @@ mod tests {
         let bg = d.layers[0].id;
         d.layer_mut(bg).unwrap().surface_mut().unwrap().write_pixel(0, 0, &[0.0, 0.0, 0.0, 1.0]);
         assert_eq!(snap.layers[0].surface().unwrap().pixel(0, 0), vec![1.0; 4]);
+    }
+
+    #[test]
+    fn layer_content_article_and_kind_name() {
+        assert_eq!(LayerContent::Adjustment(Adjustment::Invert).article(), "an");
+        assert_eq!(LayerContent::Adjustment(Adjustment::Invert).kind_name(), "Adjustment");
+        assert_eq!(LayerContent::Raster(Surface::new(PixelFormat::RGBA8)).article(), "a");
+        assert_eq!(LayerContent::Group(Group { children: Vec::new(), expanded: true, artboard: None }).article(), "a");
     }
 }
 

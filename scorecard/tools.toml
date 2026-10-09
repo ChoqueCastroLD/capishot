@@ -228,3 +228,10 @@ target = "Red Eye tool: click a pupil to neutralize the red reflection"
 status = "done"
 issue = 213
 note = "paint.redEye (redeye_cmds.rs) + Tool::RedEye in the J flyout; Pupil Size and Darken Amount; catchlights kept; a miss is an error"
+
+[[item]]
+id = "TOOL-214-17"
+target = "Rotate View tool: drag to turn the view, Reset View, Match Rotation copies the angle"
+status = "done"
+issue = 214
+note = "Tool::RotateView in the Hand flyout; view.rotateView / view.resetView; Match Rotation copies views[].rotation; enhanced_controls.rotate_view_with_trackpad is read"

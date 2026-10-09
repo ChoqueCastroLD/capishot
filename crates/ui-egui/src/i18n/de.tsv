@@ -1468,6 +1468,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ Navigieren   {key} Ausführen   Esc Schließen
 	Version {version}	Version {version}
 	New Document	Neues Dokument
+	Save Preset…	Vorgabe speichern…
+	Preset Name	Name der Vorgabe
+	No saved presets yet.	Noch keine gespeicherten Vorgaben.
 	Error	Fehler
 	Command	Befehl
 	Adjustment layers have nothing to transform	Anpassungsebenen haben nichts zu transformieren
@@ -2207,6 +2210,14 @@
 	Channels:	Kanäle:
 	Knockout	Aussparung
 	Apply At Canvas Bounds	Effekt an Arbeitsflächenbegrenzungen anwenden
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Farbwähler (Textfarbe)
+	Pick screen color	Bildschirmfarbe auswählen
+	Sample a pixel anywhere on the screen	Ein Pixel an beliebiger Stelle auf dem Bildschirm auswählen
+	Click to pick · Esc to cancel	Klicken zum Auswählen · Esc zum Abbrechen
+	Pick a screen pixel or press Esc to cancel	Ein Bildschirmpixel auswählen oder mit Esc abbrechen
+	Scroll to zoom	Zum Zoomen scrollen
 	Show/Hide All Panels	Alle Bedienfelder ein-/ausblenden
 	Show/Hide Panels	Bedienfelder ein-/ausblenden
 	Could not open	Öffnen nicht möglich
@@ -2269,3 +2280,7 @@ fontWeight	Italic	Kursiv
 	Pattern Stamp Tool	Musterstempel-Werkzeug
 	Pattern Stamp	Musterstempel
 	Impressionist	Impressionistisch
+	Rotate View	Ansicht drehen
+	Rotate View Tool	Ansicht drehen-Werkzeug
+	Reset View	Ansicht zurücksetzen
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Ziehen Sie um die Mitte, um die Ansicht zu drehen  ·  Umschalt rastet auf 15° ein

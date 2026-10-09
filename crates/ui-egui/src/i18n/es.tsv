@@ -1469,6 +1469,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navegar   {key} ejecutar   esc cerrar
 	Version {version}	Versión {version}
 	New Document	Documento nuevo
+	Save Preset…	Guardar ajuste preestablecido…
+	Preset Name	Nombre del ajuste preestablecido
+	No saved presets yet.	Todavía no hay ajustes preestablecidos guardados.
 	Error	Error
 	Command	Comando
 
@@ -2238,6 +2241,14 @@ cameraRaw	Amount	Cantidad
 	Channels:	Canales:
 	Knockout	Cobertura
 	Apply At Canvas Bounds	Aplicar efecto en los límites del lienzo
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Selector de color (Color del texto)
+	Pick screen color	Elegir color de pantalla
+	Sample a pixel anywhere on the screen	Tomar un píxel en cualquier lugar de la pantalla
+	Click to pick · Esc to cancel	Clic para elegir · Esc para cancelar
+	Pick a screen pixel or press Esc to cancel	Elige un píxel de pantalla o pulsa Esc para cancelar
+	Scroll to zoom	Desplaza para ampliar
 	Show/Hide All Panels	Mostrar/ocultar todos los paneles
 	Show/Hide Panels	Mostrar/ocultar paneles
 	Could not open	No se pudo abrir
@@ -2299,3 +2310,7 @@ fontWeight	Italic	Cursiva
 	Pattern Stamp Tool	Herramienta Sello de motivo
 	Pattern Stamp	Sello de motivo
 	Impressionist	Impresionista
+	Rotate View	Rotar vista
+	Rotate View Tool	Herramienta Rotar vista
+	Reset View	Restablecer vista
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Arrastre alrededor del centro para rotar la vista  ·  Mayús fija a 15°

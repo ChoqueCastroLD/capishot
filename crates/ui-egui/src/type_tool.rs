@@ -830,6 +830,23 @@ fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, props: serde_json::Value)
     let _ = app.run("type.setStyle", p);
 }
 
+/// Open the shared Color Picker with a snapshot of the text target. Sampling or cancelling
+/// the dialog never changes the text selection, tool colours, or document history.
+pub fn open_color_picker(app: &mut PhotocraftApp, rgb: [f32; 3]) -> u64 {
+    if let Some((layer, range)) = target(app) {
+        let mut params = json!({"layer": layer});
+        if let Some(range) = range {
+            params["range"] = json!(range);
+        }
+        if let Some(ed) = &app.ui.text_edit {
+            params["coalesce"] = json!(ed.session);
+        }
+        crate::color_picker_ui::open_for_command(app, "Color Picker (Text Color)", rgb, "type.setStyle", params)
+    } else {
+        crate::color_picker_ui::open(app, "foreground")
+    }
+}
+
 /// While characters are selected in a type layer, a new foreground colour (Color and Swatches
 /// panels, the Color Picker) recolours them, in the editing session's history step.
 pub fn foreground_changed(app: &mut PhotocraftApp) {
@@ -849,7 +866,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let run = tl.char_runs().into_iter().next().map(|r| r.style);
         // The size at the selection (else the first run), as the layer shows it (#124).
         let size = styles_at(app).map_or(tl.size_pt, |(c, _)| c.size_pt) * shown_scale(app);
-        Some((tl.font_family.clone(), run.as_ref().map(|s| s.font_style.clone()).unwrap_or_default(), size, tl.color))
+        Some((tl.font_family.clone(), run.as_ref().map(|s| s.font_style.clone()).unwrap_or_default(), size, styles_at(app).map_or(tl.color, |(c, _)| c.color)))
     });
     let o = app.ui.tool_options.clone();
     let (mut fam, mut style, mut size) = match &shown {
@@ -929,12 +946,10 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(q(c[0]), q(c[1]), q(c[2])));
     ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Outside);
     let resp = resp.on_hover_text(tl!("Set the text color"));
-    crate::widgets::swatch_popup(&resp).show(|ui| {
-        let mut col = Color32::from_rgb(q(c[0]), q(c[1]), q(c[2]));
-        if egui::color_picker::color_picker_color32(ui, &mut col, egui::color_picker::Alpha::Opaque) {
-            apply(app, ui.ctx(), json!({"color": format!("#{:02x}{:02x}{:02x}", col.r(), col.g(), col.b())}));
-        }
-    });
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Set the text color")));
+    if resp.clicked() {
+        open_color_picker(app, [c[0], c[1], c[2]]);
+    }
     if app.ui.text_edit.is_some() {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(8.0);
@@ -1234,12 +1249,10 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
                 ui.painter().rect_filled(rect, t.radius_sm, Color32::from_rgb(q(rgb[0]), q(rgb[1]), q(rgb[2])));
                 ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
                 let resp = resp.on_hover_text(tl!("Text color"));
-                crate::widgets::swatch_popup(&resp).show(|ui| {
-                    let mut col = Color32::from_rgb(q(rgb[0]), q(rgb[1]), q(rgb[2]));
-                    if egui::color_picker::color_picker_color32(ui, &mut col, egui::color_picker::Alpha::Opaque) {
-                        apply(app, ui.ctx(), json!({"color": format!("#{:02x}{:02x}{:02x}", col.r(), col.g(), col.b())}));
-                    }
-                });
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Text color")));
+                if resp.clicked() {
+                    open_color_picker(app, rgb);
+                }
             });
         });
         // Faux styles: T (bold)  T (italic)  TT  Tᴛ  T̲  T̶, sharing the row evenly.

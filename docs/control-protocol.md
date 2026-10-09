@@ -85,15 +85,42 @@ store expose and persist the same setting; scripts keep using canonical command 
 | `select.rect` | `{"x":0,"y":0,"width":100,"height":50,"mode":"add","ellipse":false}` |
 | `document.inspect` | `{}`: layer tree, history, selection bounds |
 | `document.pixel` | `{"x":10,"y":10}`: composite RGBA |
+| `document.presets.list` | `{}` → `{presets:[{name,settings}]}`: saved New Document configurations |
+| `document.presets.save` | `{"name":"Product square","settings":{"width":1600,"height":1600,"background":"transparent"}}`: save a snapshot; names are trimmed, 1–255 characters, and ASCII case-insensitive duplicates are rejected |
+| `document.presets.get` | `{"name":"Product square"}` → `{preset,params}`: fetch settings; pass `params` to `file.new` to create a document, optionally adding a document `name` |
+| `document.presets.delete` | `{"name":"Product square"}`: delete the named saved configuration |
 | `type.hitTest` | `{"layer":id?,"x":px,"y":px}`: character under a document point. No `layer` picks the topmost visible type layer there. Result `{"layer","index","line","inside"}` |
 | `type.caret` | `{"layer":id?,"index":char}`: caret segment in document pixels, `{"index","line","segment":[[x,y],[x,y]]}` (rotated and vertical type included) |
 | `type.navigate` | `{"layer":id?,"index":char,"move":"wordPrev\|wordNext\|linePrev\|lineNext\|lineStart\|lineEnd\|start\|end","x":px?}`: neighbouring caret. `x` keeps the column across line moves. Result `{"index"}` |
 | `actions.list` | `{}` → `{actions:[{name, steps}], recording}` (the name being recorded, or null) |
 | `actions.get` | `{"action": name or index}` → `{name, steps:[[id, params], …]}`, the shape `file.automate.batch` and droplets take |
 | `actions.record` | `{"name":"Red"}` starts a new action (default name `Action N`). `{"action": name or index}` appends to one that exists |
-| `actions.stop` | `{}` → `{action, steps}`. Copies replayable journal entries since `actions.record` (queries and `actions.*` omitted) |
-| `actions.play` | `{"action": name or index, "from": step?}`. `from` and `failed.step` are 0-based. Returns `{action, ran, failed?:{step, id, error}}` and still returns ok when a step fails, so a partial run is reported. Leaves one history step per step that ran. Refuses to play while a play is already running. On an untrusted session each step is authorized the same way as a top-level command |
-| `actions.delete` | `{"action": name or index}` → `{deleted}`. Refused while recording |
+| `actions.stop` | `{}` → `{action, steps}`. Copies replayable journal entries since `actions.record` (queries and action-editing commands omitted) |
+| `actions.play` | `{"action": name or index, "from": step?}`. `from` and `failed.step` are 0-based. Returns `{action, ran, failed?:{step, id, error}}` and still returns ok when a step fails, so a partial run is reported. Leaves one history step per step that ran. Supports nested action calls up to 16 levels, rejecting cycles. While recording, playing another action appends one named `actions.play` step instead of its expanded commands. On an untrusted session each step is authorized the same way as a top-level command |
+| `actions.move` | `{"action": name or index, "step": index?, "to": index}` moves a step within its action, or moves the whole action when `step` is omitted. `to` is the final zero-based index. Pending steps can be reordered while recording; invalid moves leave the list unchanged. |
+| `actions.delete` | `{"action": name or index, "step": index?}`. With a zero-based `step`: `{action, deletedStep, steps}`, also allowed while recording. Without `step`: `{deleted}`, refused while recording |
+
+The Actions panel shows replayable steps immediately while recording. Click an individual
+step to select it, then use the trash button to remove that step; selecting the action
+heading instead targets the whole action. Step deletion also works during recording
+and does not undo the document edit. The control equivalent is
+`actions.delete {"action": "Name", "step": 0}` (zero-based). Omitting `step` deletes
+the whole action, which still requires recording to be stopped.
+
+Desktop actions also record and replay View › Fit on Screen (`view.fitOnScreen`),
+100% (`view.actualPixels`), Zoom In and Zoom Out through their menu commands or shortcuts.
+Select an action and press Record to append steps; the plus button starts a new action.
+A final `["view.fitOnScreen", {}]` step fits the resized document when the canvas is laid out.
+Headless playback reports unsupported view commands as failed steps.
+
+In the desktop Actions panel, right-click an action to assign a function key (F1–F12),
+or choose None to remove it. The binding follows the action name, regardless of the selected
+row, and is saved in preferences. For example, the existing `edit.keyboardShortcuts` command
+accepts `{"set":{"actions.play:My action":"F6"},"allowUnknown":true,"removeConflicts":false}`.
+A named action takes precedence over the ordinary menu shortcut while it exists and is bound;
+removing its binding or deleting it restores that menu shortcut. The panel moves a key away
+from another action when assigning it. Action playback still checks each nested command's
+automation permissions.
 
 UI-level commands (`view.zoomIn`, `window.theme.pro`, `edit.search`, …) are also accepted by `engine.execute` and `ui.menu.invoke`.
 
@@ -156,6 +183,16 @@ are never written. The Actions list is `actions.json` in that same folder and su
 Headless CLI/MCP sessions and the web build keep brush presets and the action list for the session
 only, unless a store is attached. Gradient presets (including imported `.grd` groups) persist with
 the preferences.
+
+Named New Document presets also persist with preferences (`presets.documents`) on desktop and
+web. File › New › Save Preset… saves the current form; the Saved tab selects a configuration or
+deletes it. Selection only fills the form: Create still runs `file.new`, and the document name
+is independent of the preset name. Settings include pixel width/height, resolution in ppi,
+mode, depth, background, and display `unit` (`px`, `in`, `cm`, `mm`, `pt`, `pica`) and
+`resolutionUnit` (`in`, `cm`). The defaults match File › New. Background Color captures the
+toolbox colour as `backgroundColor: [r,g,b]` (0..1), so reusing it does not follow later toolbox
+changes. Up to 256 presets are kept. Invalid saved entries are skipped independently; other
+presets and preferences still load. Automatic Recent configurations are separate follow-up work.
 
 ## Snapping
 
@@ -238,7 +275,7 @@ no MCP framing, no app start-up per command. Configure its file access with the 
 | `engine.commands` | `{filter?}`: registry with params docs and enablement |
 | `session.list` | open documents and the active index |
 | `doc.open` / `doc.new` | `{path}` / `file.new` params |
-| `doc.save` | `{path?, format?, quality?, index?}` (`.pcraft` native, else export by extension). Without `path` only a PSD, PSB or `.pcraft` document is written back to its own file, in its own format; anything else is an error and the file is left unchanged |
+| `doc.save` | `{path?, format?, quality?, index?}` (`.pcraft` native, else export by extension). Without `path` only a PSD, PSB or `.pcraft` document is written back to its own file, in its own format; anything else is an error and the file is left unchanged. A successful layered save (PSD, PSB or `.pcraft`) records the current revision as saved and makes the file the document's path, so `session.list` reports `dirty: false`; a flat export is a copy and leaves the document dirty |
 | `doc.inspect` | `{index?}`: same JSON as `document.inspect` |
 | `doc.render` | `{index?, maxSide? (1024; 0 = full), path?}`: PNG to `path`, else `{mime, base64}` |
 | `doc.select` / `doc.close` | `{index}` / `{index?}` |
@@ -418,3 +455,19 @@ and region changes rebuild only the dependent analysis. Display options and the 
 geometry persist in preferences `dialogs["filter.cameraRaw.scope"]`; probes and vectorscope
 visibility reset when the dialog opens. HDR scopes are not implemented. See
 [camera-raw-histogram.md](camera-raw-histogram.md).
+
+### Editing and composing actions
+
+Creating an action scrolls its row into view; newly recorded steps are revealed immediately.
+Drag a step above or below another step in the same action to reorder it. Drag an action header
+to reorder the action list. The insertion line marks the drop position; dragging near the rows'
+top or bottom scrolls the list. Reordering is saved with the actions and does not undo image edits.
+
+While recording, press a function key assigned to another action (or play it from the panel).
+The recorder adds **Play Action: <name>** as one step, and the called action still executes.
+Playback resolves the name each time, so editing or moving the called action does not freeze or
+retarget the caller. Reassigning F6 later does not change an already recorded named call.
+Missing actions, recursive calls and nesting beyond 16 levels fail visibly; a child failure stops
+the parent before its next step. Every nested command retains the normal automation permission check.
+Existing recordings containing expanded commands remain unchanged; remove those steps and record
+the named call again if desired.

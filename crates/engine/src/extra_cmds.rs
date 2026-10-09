@@ -29,7 +29,7 @@ fn has_layer(s: &Session) -> std::result::Result<(), String> {
 fn has_pixels(s: &Session) -> std::result::Result<(), String> {
     match active_layer(s)?.content {
         LayerContent::Raster(_) => Ok(()),
-        ref c => Err(format!("active layer is a {} layer, not a pixel layer", c.kind_name())),
+        ref c => Err(format!("active layer is {} {} layer, not a pixel layer", c.article(), c.kind_name())),
     }
 }
 

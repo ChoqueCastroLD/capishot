@@ -2413,7 +2413,13 @@ mod tests {
             let t0 = std::time::Instant::now();
             let _ = ctx.run_ui(egui::RawInput { max_texture_side: Some(16384), ..Default::default() }, |ui| {
                 let painter = ui.ctx().layer_painter(egui::LayerId::background());
-                let xf = ViewXform { rect: egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0)), zoom, center: [3000.0, 2000.0], flip: false };
+                let xf = ViewXform {
+                    rect: egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0)),
+                    zoom,
+                    center: [3000.0, 2000.0],
+                    flip: false,
+                    rotation: 0.0,
+                };
                 draw_overlay(&app, &painter, &xf);
             });
             t0.elapsed().as_secs_f64() * 1e3

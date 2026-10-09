@@ -169,7 +169,7 @@ fn color32(c: [f32; 3]) -> Color32 {
 /// A colour swatch button (egui's picker); returns the edit.
 fn color_button(ui: &mut egui::Ui, c: &mut [f32; 3]) -> Edit {
     let mut srgb = [c[0], c[1], c[2]].map(|x| (x.clamp(0.0, 1.0) * 255.0).round() as u8);
-    let r = ui.color_edit_button_srgb(&mut srgb);
+    let r = crate::widgets::color_edit_button_srgb(ui, &mut srgb);
     if r.changed() {
         *c = srgb.map(|x| f32::from(x) / 255.0);
     }

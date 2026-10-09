@@ -37,6 +37,7 @@ mod mac_window;
 mod linux_libs;
 mod logging;
 mod monitor_profile;
+mod screen_color;
 mod services;
 // Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
@@ -427,6 +428,7 @@ fn main() -> eframe::Result {
             let _ = in_window_menus;
             // Where file drags and drops are (winit 0.30 doesn't say).
             app.services.cursor_pos = cursor::service(cc);
+            app.services.screen_pick = screen_color::service(cc, app.services.is_wayland);
             // Tablet pressure/tilt/eraser (winit drops them): the macOS monitor and the X11 reader
             // write into the stylus feed. The monitor goes in here, not before the event loop:
             // AppKit's shared application only exists once winit created it (#759).

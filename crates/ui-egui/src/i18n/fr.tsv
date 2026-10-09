@@ -1454,6 +1454,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ naviguer   {key} exécuter   échap fermer
 	Version {version}	Version {version}
 	New Document	Nouveau document
+	Preset Name	Nom du préréglage
+	No saved presets yet.	Aucun préréglage enregistré pour le moment.
 	Error	Erreur
 	Command	Commande
 	Adjustment layers have nothing to transform	Les calques d'ajustement n'ont rien à transformer
@@ -2347,7 +2349,6 @@
 	Color Profile	Profil colorimétrique
 	Units	Unités
 	Columns	Colonnes
-	Do you want to save you made to “{name}” before quitting?	Voulez-vous enregistrer les modifications apportées à « {name} » avant de quitter ?
 	Create new count group	Créer un nouveau groupe de comptage
 	Adjustment Layer	Calque d'ajustement
 	Pencil Tool	Outil Crayon
@@ -2598,6 +2599,14 @@ cameraRaw	Blending	Fusion
 	Channels:	Couches :
 	Knockout	Masquage
 	Apply At Canvas Bounds	Appliquer l’effet aux limites de la zone de travail
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Sélecteur de couleurs (Couleur du texte)
+	Pick screen color	Choisir une couleur à l’écran
+	Sample a pixel anywhere on the screen	Prélever un pixel n’importe où sur l’écran
+	Click to pick · Esc to cancel	Cliquer pour choisir · Échap pour annuler
+	Pick a screen pixel or press Esc to cancel	Choisissez un pixel à l’écran ou appuyez sur Échap pour annuler
+	Scroll to zoom	Défiler pour zoomer
 	Show/Hide All Panels	Afficher/masquer tous les panneaux
 	Show/Hide Panels	Afficher/masquer les panneaux
 	Could not open	Impossible d’ouvrir
@@ -2656,3 +2665,6 @@ fontWeight	Italic	Italique
 # Pattern Stamp tool
 	Pattern Stamp Tool	Outil Tampon de motif
 	Impressionist	Impressionniste
+	Rotate View Tool	Outil Rotation de la vue
+	Reset View	Réinitialiser la vue
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Faites glisser autour du centre pour tourner la vue  ·  Maj contraint à 15°

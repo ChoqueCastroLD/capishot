@@ -110,9 +110,9 @@ impl MacMenu {
                 }
                 Node::Standard(item) => {
                     let p = match item {
-                        Standard::Services => PredefinedMenuItem::services(None),
-                        Standard::HideOthers => PredefinedMenuItem::hide_others(None),
-                        Standard::ShowAll => PredefinedMenuItem::show_all(None),
+                        Standard::Services => PredefinedMenuItem::services(Some(photocraft_ui_egui::i18n::t("Services"))),
+                        Standard::HideOthers => PredefinedMenuItem::hide_others(Some(photocraft_ui_egui::i18n::t("Hide Others"))),
+                        Standard::ShowAll => PredefinedMenuItem::show_all(Some(photocraft_ui_egui::i18n::t("Show All"))),
                         Standard::Minimize => PredefinedMenuItem::minimize(None),
                         Standard::Zoom => PredefinedMenuItem::maximize(Some(photocraft_ui_egui::i18n::t("Zoom"))),
                         Standard::BringAllToFront => PredefinedMenuItem::bring_all_to_front(None),

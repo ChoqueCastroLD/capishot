@@ -4,7 +4,7 @@
 //! update only their damage rectangle (`set_partial`). The wgpu compositor (M5) will replace this
 //! with direct GPU rendering behind the same `CanvasCache` interface.
 
-use egui::{Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureOptions, Vec2, pos2, vec2};
+use egui::{Color32, Mesh, PointerButton, Pos2, Rect, Sense, Stroke, TextureOptions, Vec2, pos2, vec2};
 use photocraft_doc::{Document, LayerContent};
 use photocraft_geom::Rect as DRect;
 use serde_json::json;
@@ -195,6 +195,17 @@ pub fn marquee_corners(o: &crate::state::ToolOptions, d: &Drag, end: [f64; 2]) -
     ([d.start[0] - hx, d.start[1] - hy], [d.start[0] + hx, d.start[1] + hy])
 }
 
+/// The pixel rectangle a Rectangular/Elliptical Marquee drag selects so far: shown live (ants
+/// and readout) exactly as the release commits it, on whole pixel edges as in Photoshop.
+pub(crate) fn marquee_preview_px(o: &crate::state::ToolOptions, d: &Drag) -> Option<[f64; 4]> {
+    if !matches!(d.tool, Tool::RectMarquee | Tool::EllipseMarquee) {
+        return None;
+    }
+    let last = d.points.last().map_or(d.start, |p| [p[0], p[1]]);
+    let (a, b) = marquee_corners(o, d, last);
+    Some(marquee_px(a, b))
+}
+
 /// The pixel rectangle `[x0, y0, x1, y1]` a marquee between two corners selects.
 pub fn marquee_px(a: [f64; 2], b: [f64; 2]) -> [f64; 4] {
     [a[0].min(b[0]).floor(), a[1].min(b[1]).floor(), a[0].max(b[0]).ceil(), a[1].max(b[1]).ceil()]
@@ -342,20 +353,13 @@ pub(crate) fn stroke_command(tool: Tool) -> &'static str {
 }
 
 /// Windows' crosshair cursor inverts the pixels under it, so over mid-grey (the pasteboard, many
-/// photos) it vanishes (#737). There the canvas draws a black-and-white crosshair itself, like
-/// Photoshop's, and hides the system one.
+/// photos) it vanishes (#737). Use a black-and-white bitmap, carried by the OS on Windows so
+/// its movement does not wait for the canvas to render.
 fn visible_crosshair(icon: egui::CursorIcon, painter: &egui::Painter, p: Pos2, draw: bool) -> egui::CursorIcon {
     if !draw || icon != egui::CursorIcon::Crosshair {
         return icon;
     }
-    let p = pos2(p.x.round() + 0.5, p.y.round() + 0.5);
-    let (gap, len) = (2.0, 8.0);
-    for (w, c) in [(3.0, Color32::from_black_alpha(160)), (1.0, Color32::from_white_alpha(235))] {
-        for d in [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)] {
-            painter.line_segment([p + d * gap, p + d * len], Stroke::new(w, c));
-        }
-    }
-    egui::CursorIcon::None
+    crate::tool_cursor::crosshair(painter, p, 8.0, 2.0)
 }
 
 /// The Pencil's cursor at `doc` (document pixels): the whole-pixel square its dab fills
@@ -555,25 +559,68 @@ pub struct ViewXform {
     pub center: [f32; 2],
     /// View › Flip Horizontal: the view is mirrored left-right (the document is not).
     pub flip: bool,
+    /// Camera rotation in degrees around [`Self::center`]. Clockwise (Y-down) is positive; applied
+    /// before flip.
+    pub rotation: f32,
 }
 
 impl ViewXform {
     /// The main canvas's mapping for the active document as last laid out (inside the rulers).
     pub fn active(app: &PhotocraftApp) -> Option<Self> {
         let v = app.ui.views.get(app.session.active_index()?)?;
-        Some(Self { rect: crate::rulers::content_rect(app, app.last_canvas_rect), zoom: v.zoom, center: v.center, flip: app.ui.view.flip_horizontal })
+        Some(Self {
+            rect: crate::rulers::content_rect(app, app.last_canvas_rect),
+            zoom: v.zoom,
+            center: v.center,
+            flip: app.ui.view.flip_horizontal,
+            rotation: v.rotation,
+        })
     }
+
+    fn sincos(self) -> (f32, f32) {
+        if self.rotation.abs() < 1e-8 {
+            (1.0, 0.0)
+        } else {
+            let r = self.rotation.to_radians();
+            (r.cos(), r.sin())
+        }
+    }
+
+    /// Unflip then unrotate a screen-space vector (no zoom). Hand pan and zoom-about use this.
+    pub fn unmap_vec(self, d: Vec2) -> Vec2 {
+        let d = if self.flip { vec2(-d.x, d.y) } else { d };
+        let (c, s) = self.sincos();
+        vec2(d.x * c + d.y * s, -d.x * s + d.y * c)
+    }
+
     pub fn to_screen(&self, x: f32, y: f32) -> Pos2 {
+        let (c, s) = self.sincos();
+        let dx = x - self.center[0];
+        let dy = y - self.center[1];
+        let rx = dx * c - dy * s;
+        let ry = dx * s + dy * c;
         let sx = if self.flip { -1.0 } else { 1.0 };
-        self.rect.center() + vec2((x - self.center[0]) * self.zoom * sx, (y - self.center[1]) * self.zoom)
+        self.rect.center() + vec2(rx * self.zoom * sx, ry * self.zoom)
     }
     pub fn to_doc(&self, p: Pos2) -> [f64; 2] {
         let d = (p - self.rect.center()) / self.zoom;
-        let dx = if self.flip { -d.x } else { d.x };
-        [(dx + self.center[0]) as f64, (d.y + self.center[1]) as f64]
+        let u = self.unmap_vec(d);
+        [(u.x + self.center[0]) as f64, (u.y + self.center[1]) as f64]
     }
     pub fn doc_rect(&self, r: DRect) -> Rect {
-        Rect::from_two_pos(self.to_screen(r.x0 as f32, r.y0 as f32), self.to_screen(r.x1 as f32, r.y1 as f32))
+        let pts = [
+            self.to_screen(r.x0 as f32, r.y0 as f32),
+            self.to_screen(r.x1 as f32, r.y0 as f32),
+            self.to_screen(r.x1 as f32, r.y1 as f32),
+            self.to_screen(r.x0 as f32, r.y1 as f32),
+        ];
+        let mut min = pts[0];
+        let mut max = pts[0];
+        for p in pts {
+            min = min.min(p);
+            max = max.max(p);
+        }
+        Rect::from_min_max(min, max)
     }
 }
 
@@ -1086,11 +1133,23 @@ fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u6
     Some((preview.k, key, [result.size.width, result.size.height]))
 }
 
-/// The document pixels a (non-rotated) view shows, with a margin for filtering.
+/// The document pixels a view shows, with a margin for filtering. Uses all four canvas corners
+/// so a rotated camera still covers the visible tiles.
 fn visible_doc_rect(xf: &ViewXform) -> DRect {
-    let (a, b) = (xf.to_doc(xf.rect.min), xf.to_doc(xf.rect.max));
+    let r = xf.rect;
+    let docs = [xf.to_doc(r.min), xf.to_doc(pos2(r.max.x, r.min.y)), xf.to_doc(r.max), xf.to_doc(pos2(r.min.x, r.max.y))];
+    let mut x0 = docs[0][0];
+    let mut y0 = docs[0][1];
+    let mut x1 = x0;
+    let mut y1 = y0;
+    for d in docs {
+        x0 = x0.min(d[0]);
+        y0 = y0.min(d[1]);
+        x1 = x1.max(d[0]);
+        y1 = y1.max(d[1]);
+    }
     let c = |v: f64| v.clamp(-1e9, 1e9) as i32;
-    DRect::new(c(a[0].min(b[0]).floor()) - 2, c(a[1].min(b[1]).floor()) - 2, c(a[0].max(b[0]).ceil()) + 2, c(a[1].max(b[1]).ceil()) + 2)
+    DRect::new(c(x0.floor()) - 2, c(y0.floor()) - 2, c(x1.ceil()) + 2, c(y1.ceil()) + 2)
 }
 
 /// Zoomed-out Image › Adjustments preview on a large document: the wgpu compositor renders the
@@ -1880,7 +1939,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         ctx.request_repaint();
     }
     let flip = app.ui.view.flip_horizontal;
-    let xf = ViewXform { rect, zoom: view.zoom, center: view.center, flip };
+    let xf = ViewXform { rect, zoom: view.zoom, center: view.center, flip, rotation: view.rotation };
     let pixel_grid = app.ui.view.shows(app.ui.view.show.pixel_grid);
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
@@ -1903,8 +1962,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // Preferences › Performance › Low Resolution Previews is off.
     let mut on_gpu = false;
     // A flipped view draws through the CPU path (the GPU canvas shader has no mirroring).
+    // Rotation stays on the GPU: it is a view uniform, not a CPU blit.
+    let gpu_ok = crate::gpu_canvas::gpu_view_ok(flip, view.rotation);
     if app.gpu.is_some()
-        && !flip
+        && gpu_ok
         && let Some((k, key, preview_size)) = ensure_adjust_proxy(app, idx, view.zoom * ctx.pixels_per_point())
             .or_else(|| ensure_filter_preview(app, idx))
             .or_else(|| ensure_proxy_preview(app, idx))
@@ -1920,6 +1981,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 view.center[0] / k as f32 + (preview_size[0] as f32 - original_size[0] as f32) / 2.0,
                 view.center[1] / k as f32 + (preview_size[1] as f32 - original_size[1] as f32) / 2.0,
             ],
+            rotation: if view.rotation.is_finite() { view.rotation.to_radians() } else { 0.0 },
             shadow: {
                 let t = crate::theme::Tokens::get(&ctx);
                 !t.bevel && !t.pro && drop_shadow
@@ -1931,7 +1993,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             hdr: hdr_preview(app, &doc),
         };
         crate::gpu_canvas::GpuCanvas::paint(&painter, rect, params);
-    } else if !flip && ensure_gpu(app, idx, visible_doc_rect(&xf)) {
+    } else if gpu_ok && ensure_gpu(app, idx, visible_doc_rect(&xf)) {
         on_gpu = true;
         app.perf.gpu = true;
         // Shadow, checkerboard, document and pixel grid in one custom shader (gpu_canvas.rs).
@@ -1940,6 +2002,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             doc_size: [doc.size.width, doc.size.height],
             zoom: view.zoom,
             center: view.center,
+            rotation: if view.rotation.is_finite() { view.rotation.to_radians() } else { 0.0 },
             shadow: {
                 let t = crate::theme::Tokens::get(&ctx);
                 !t.bevel && !t.pro && drop_shadow
@@ -1955,25 +2018,51 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if !crate::theme::Tokens::get(&ctx).bevel && drop_shadow {
             painter.add(egui::Shadow { offset: [0, 8], blur: 28, spread: 0, color: Color32::from_black_alpha(150) }.as_shape(img_rect, 0));
         }
+        let rotated = view.rotation.abs() > 0.05;
+        let size = [doc.size.width as f32, doc.size.height as f32];
         match app.session.prefs().transparency_and_gamut.square() {
             Some(square) => {
                 let checker_id = checker(app, &ctx);
-                let tiles = img_rect.size() / (2.0 * square);
-                painter.image(checker_id, img_rect, Rect::from_min_max(Pos2::ZERO, pos2(tiles.x, tiles.y)), Color32::WHITE);
+                if rotated {
+                    let tiles = vec2(size[0], size[1]) / (2.0 * square);
+                    paint_mapped_image(&painter, &xf, checker_id, Rect::from_min_max(Pos2::ZERO, pos2(tiles.x, tiles.y)), size, Color32::WHITE);
+                } else {
+                    let tiles = img_rect.size() / (2.0 * square);
+                    painter.image(checker_id, img_rect, Rect::from_min_max(Pos2::ZERO, pos2(tiles.x, tiles.y)), Color32::WHITE);
+                }
             }
             None => {
-                painter.rect_filled(img_rect, 0.0, Color32::WHITE);
+                if rotated {
+                    paint_mapped_quad(&painter, &xf, size, Color32::WHITE);
+                } else {
+                    painter.rect_filled(img_rect, 0.0, Color32::WHITE);
+                }
             }
         }
         if let Some((tex, _scale)) = ensure_texture(app, &ctx, idx, output) {
-            let uv = if flip { Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)) } else { Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)) };
-            painter.image(tex, img_rect, uv, Color32::WHITE);
+            if rotated {
+                paint_mapped_image(&painter, &xf, tex, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), size, Color32::WHITE);
+            } else {
+                let uv = if flip { Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)) } else { Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)) };
+                painter.image(tex, img_rect, uv, Color32::WHITE);
+            }
         }
     }
     // Channels panel: alpha / Quick Mask overlays and single-channel views (channel_view.rs).
     if let Some(tex) = crate::channel_view::ensure(app, &ctx, idx) {
-        let uv = if flip { Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)) } else { Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)) };
-        painter.image(tex, img_rect, uv, Color32::WHITE);
+        if view.rotation.abs() > 0.05 {
+            paint_mapped_image(
+                &painter,
+                &xf,
+                tex,
+                Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+                [doc.size.width as f32, doc.size.height as f32],
+                Color32::WHITE,
+            );
+        } else {
+            let uv = if flip { Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)) } else { Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)) };
+            painter.image(tex, img_rect, uv, Color32::WHITE);
+        }
     }
     crate::color_range_ui::paint_selection_preview(app, &ctx, &painter, doc.id, img_rect, flip);
     // Artboards: pasteboard between the boards, outlines and names (artboard_ui.rs).
@@ -2008,16 +2097,24 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // Pixel grid at high zoom (the GPU path draws its own).
     if !on_gpu && pixel_grid && view.zoom > 5.0 {
         let vis = img_rect.intersect(rect);
-        let a = xf.to_doc(vis.min);
-        let b = xf.to_doc(vis.max);
-        let grid = Stroke::new(1.0, Color32::from_white_alpha(64));
-        for x in (a[0].floor() as i32)..=(b[0].ceil() as i32) {
-            let sx = xf.to_screen(x as f32, 0.0).x;
-            painter.line_segment([pos2(sx, vis.top()), pos2(sx, vis.bottom())], grid);
+        let corners = [vis.min, pos2(vis.max.x, vis.min.y), vis.max, pos2(vis.min.x, vis.max.y)];
+        let docs = [xf.to_doc(corners[0]), xf.to_doc(corners[1]), xf.to_doc(corners[2]), xf.to_doc(corners[3])];
+        let mut x0 = docs[0][0];
+        let mut y0 = docs[0][1];
+        let mut x1 = x0;
+        let mut y1 = y0;
+        for d in docs {
+            x0 = x0.min(d[0]);
+            y0 = y0.min(d[1]);
+            x1 = x1.max(d[0]);
+            y1 = y1.max(d[1]);
         }
-        for y in (a[1].floor() as i32)..=(b[1].ceil() as i32) {
-            let sy = xf.to_screen(0.0, y as f32).y;
-            painter.line_segment([pos2(vis.left(), sy), pos2(vis.right(), sy)], grid);
+        let grid = Stroke::new(1.0, Color32::from_white_alpha(64));
+        for x in (x0.floor() as i32)..=(x1.ceil() as i32) {
+            painter.line_segment([xf.to_screen(x as f32, y0 as f32), xf.to_screen(x as f32, y1 as f32)], grid);
+        }
+        for y in (y0.floor() as i32)..=(y1.ceil() as i32) {
+            painter.line_segment([xf.to_screen(x0 as f32, y as f32), xf.to_screen(x1 as f32, y as f32)], grid);
         }
     }
 
@@ -2035,17 +2132,27 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // Trace at display resolution over the visible part only; key by the mask's tile identity
         // (not the document revision) so unrelated edits don't re-trace it.
         let step = (1.0 / view.zoom.max(1e-3)).log2().floor().exp2().clamp(1.0, 64.0) as u32;
-        let tl = xf.to_doc(rect.min);
-        let br = xf.to_doc(rect.max);
+        let corners = [rect.min, pos2(rect.max.x, rect.min.y), rect.max, pos2(rect.min.x, rect.max.y)];
+        let docs = [xf.to_doc(corners[0]), xf.to_doc(corners[1]), xf.to_doc(corners[2]), xf.to_doc(corners[3])];
+        let mut x0 = docs[0][0];
+        let mut y0 = docs[0][1];
+        let mut x1 = x0;
+        let mut y1 = y0;
+        for d in docs {
+            x0 = x0.min(d[0]);
+            y0 = y0.min(d[1]);
+            x1 = x1.max(d[0]);
+            y1 = y1.max(d[1]);
+        }
         let q = 256 * step as i32; // quantise the region so small pans reuse the cache
         // The view centre can be any finite number (`ui.set`, #980). Past ±2³⁰ there is no document
         // to outline, and the padding below (at most 2 · 256 · 64) can't overflow i32 from there.
         let px = |v: f64| v.clamp(-f64::from(1 << 30), f64::from(1 << 30)) as i32;
         let vis = photocraft_geom::Rect::new(
-            px(tl[0].floor()).div_euclid(q) * q - q,
-            px(tl[1].floor()).div_euclid(q) * q - q,
-            (px(br[0].ceil()).div_euclid(q) + 2) * q,
-            (px(br[1].ceil()).div_euclid(q) + 2) * q,
+            px(x0.floor()).div_euclid(q) * q - q,
+            px(y0.floor()).div_euclid(q) * q - q,
+            (px(x1.ceil()).div_euclid(q) + 2) * q,
+            (px(y1.ceil()).div_euclid(q) + 2) * q,
         );
         let key = crate::surface_fingerprint(sel)
             ^ (step as u64) << 56
@@ -2090,10 +2197,18 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 zoom_about(&mut view, &xf, p, nz, false);
             }
             (Some(crate::wheel_nav::Wheel::Pan(scroll)), _) => {
-                view.center[0] -= scroll.x / view.zoom * if flip { -1.0 } else { 1.0 };
-                view.center[1] -= scroll.y / view.zoom;
+                let d = xf.unmap_vec(scroll) / view.zoom;
+                view.center[0] -= d.x;
+                view.center[1] -= d.y;
             }
             _ => {}
+        }
+        let rotate_trackpad = app.session.prefs().enhanced_controls.rotate_view_with_trackpad;
+        if let Some(delta) = crate::rotate_view::trackpad_delta(&ctx, rotate_trackpad) {
+            let next = view.rotation + delta;
+            if next.is_finite() {
+                view.rotation = crate::rotate_view::wrap_deg(next);
+            }
         }
     }
 
@@ -2139,8 +2254,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             primary && app.ui.dialogs.last().is_some_and(|d| crate::color_range_ui::owns(&d.fields) && crate::color_range_ui::controls(&d.fields).sampling);
         let hand = app.ui.tool == Tool::Hand && !picking && !range_picking;
         if let Some(d) = crate::dialogs::pan_delta(&ctx, rect, hand) {
-            view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
-            view.center[1] -= d.y / view.zoom;
+            let d = xf.unmap_vec(d) / view.zoom;
+            view.center[0] -= d.x;
+            view.center[1] -= d.y;
             ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
         } else if free_hover && (space_pan || hand) {
             ctx.set_cursor_icon(egui::CursorIcon::Grab);
@@ -2170,9 +2286,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
     }
     if tool == Tool::Hand && response.dragged() {
-        let d = response.drag_delta();
-        view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
-        view.center[1] -= d.y / view.zoom;
+        let d = xf.unmap_vec(response.drag_delta()) / view.zoom;
+        view.center[0] -= d.x;
+        view.center[1] -= d.y;
     } else if primary {
         let mods = ui.input(|i| i.modifiers);
         // Tools follow the left button; the right one opens the Brush Preset picker or erases
@@ -2245,6 +2361,12 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // The (temporary) Hand pans above; its gestures never reach the tool underneath.
         if tool == Tool::Hand {
             (buttons.started, buttons.dragged, buttons.stopped) = (false, false, false);
+        }
+        // Rotate View: drag around the view centre. Compass clicks are not a rotate drag.
+        let over_compass = crate::rotate_view::compass_visible(view.rotation)
+            && response.interact_pointer_pos().is_some_and(|p| crate::rotate_view::compass_rect(xf.rect).contains(p));
+        if tool == Tool::RotateView && !over_compass && crate::rotate_view::drag(&ctx, &mut view, &xf, &buttons, response.interact_pointer_pos()) {
+            (buttons.started, buttons.dragged, buttons.stopped, buttons.clicked) = (false, false, false, false);
         }
         // Zoom tool drags: scrubby zoom or a zoom rectangle (zoom_tool.rs); clicks step below.
         if tool == Tool::Zoom && crate::zoom_tool::drag(app, &ctx, &mut view, &xf, &buttons, response.interact_pointer_pos()) {
@@ -2360,7 +2482,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     zoom_about(&mut view, &xf, p, nz, center);
                 }
                 // A click with the (temporary) Hand does nothing, never the tool underneath.
-                Tool::Hand => {}
+                Tool::Hand | Tool::RotateView => {}
                 // Double-clicking closes the polygonal lasso: the first click placed the last
                 // vertex (or already closed it), so the second never starts a new polygon. egui
                 // reports it as a triple click when a vertex went down shortly before.
@@ -2468,22 +2590,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     let brush = &app.session.tools.brush;
                     let full = (brush.size / 2.0 * view.zoom).max(1.0);
                     let r = if cur.painting == PaintingCursor::NormalTip { (full * (0.5 + 0.5 * brush.hardness.clamp(0.0, 1.0))).max(1.0) } else { full };
-                    let crosshair = |len: f32| {
-                        for (w, c) in [(2.5, Color32::from_black_alpha(140)), (1.0, Color32::from_white_alpha(220))] {
-                            painter.line_segment([p - vec2(len, 0.0), p + vec2(len, 0.0)], Stroke::new(w, c));
-                            painter.line_segment([p - vec2(0.0, len), p + vec2(0.0, len)], Stroke::new(w, c));
-                        }
-                    };
                     match cur.painting {
                         PaintingCursor::Standard => egui::CursorIcon::Default,
-                        PaintingCursor::Precise => {
-                            crosshair(6.0);
-                            egui::CursorIcon::None
-                        }
-                        _ if painting && cur.show_only_crosshair_while_painting => {
-                            crosshair(5.0);
-                            egui::CursorIcon::None
-                        }
+                        PaintingCursor::Precise => crate::tool_cursor::crosshair(&painter, p, 6.0, 0.0),
+                        _ if painting && cur.show_only_crosshair_while_painting => crate::tool_cursor::crosshair(&painter, p, 5.0, 0.0),
                         // The Pencil: the square of whole pixels its dab fills, on the pixel grid.
                         _ if tool == Tool::Pencil => {
                             let ppp = painter.ctx().pixels_per_point();
@@ -2493,17 +2603,13 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                             painter.rect_stroke(sq, 0.0, Stroke::new(px, Color32::from_white_alpha(230)), egui::StrokeKind::Inside);
                             // Too small to see where it is: the hotspot as well.
                             if cur.show_crosshair_in_brush_tip || sq.width() < 6.0 {
-                                crosshair(4.0);
+                                crate::tool_cursor::crosshair(&painter, p, 4.0, 0.0);
                             }
                             egui::CursorIcon::None
                         }
                         _ => {
-                            painter.circle_stroke(p, r + 0.5, Stroke::new(1.0, Color32::from_black_alpha(140)));
-                            painter.circle_stroke(p, r, Stroke::new(1.0, Color32::from_white_alpha(220)));
-                            if brush_tip_centre(tool, alt || app.ui.shell.sticky_alt, cur.show_crosshair_in_brush_tip, r) {
-                                crosshair(3.0);
-                            }
-                            egui::CursorIcon::None
+                            let centre = brush_tip_centre(tool, alt || app.ui.shell.sticky_alt, cur.show_crosshair_in_brush_tip, r);
+                            crate::tool_cursor::circle(&painter, p, r, centre)
                         }
                     }
                 }
@@ -2530,6 +2636,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                         egui::CursorIcon::Grab
                     }
                 }
+                Tool::RotateView => crate::rotate_view::cursor(response.dragged()),
                 Tool::Zoom => {
                     if zoom_out(alt) {
                         egui::CursorIcon::ZoomOut
@@ -2582,6 +2689,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     if primary && app.ui.extras.rulers {
         crate::rulers::draw_rulers(app, ui, full, &xf);
     }
+    crate::rotate_view::overlay(app, &ctx, &painter, &xf, &mut view, &response);
     if primary {
         app.ui.views[idx] = view.clone();
     }
@@ -2598,9 +2706,28 @@ fn zoom_about(view: &mut View, xf: &ViewXform, p: Pos2, new_zoom: f32, center_on
         view.center = [before[0] as f32, before[1] as f32];
         return;
     }
-    let d = (p - xf.rect.center()) / new_zoom;
-    let dx = if xf.flip { -d.x } else { d.x };
-    view.center = [before[0] as f32 - dx, before[1] as f32 - d.y];
+    let u = xf.unmap_vec((p - xf.rect.center()) / new_zoom);
+    view.center = [before[0] as f32 - u.x, before[1] as f32 - u.y];
+}
+
+/// Textured document quad whose corners follow [`ViewXform`] (rotation + flip).
+fn paint_mapped_image(painter: &egui::Painter, xf: &ViewXform, tex: egui::TextureId, uv: Rect, size: [f32; 2], tint: Color32) {
+    let [w, h] = size;
+    let pts = [xf.to_screen(0.0, 0.0), xf.to_screen(w, 0.0), xf.to_screen(w, h), xf.to_screen(0.0, h)];
+    let uvs = [uv.min, pos2(uv.max.x, uv.min.y), uv.max, pos2(uv.min.x, uv.max.y)];
+    let mut mesh = Mesh::with_texture(tex);
+    for i in 0..4 {
+        mesh.vertices.push(egui::epaint::Vertex { pos: pts[i], uv: uvs[i], color: tint });
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+fn paint_mapped_quad(painter: &egui::Painter, xf: &ViewXform, size: [f32; 2], color: Color32) {
+    let [w, h] = size;
+    let pts = vec![xf.to_screen(0.0, 0.0), xf.to_screen(w, 0.0), xf.to_screen(w, h), xf.to_screen(0.0, h)];
+    painter.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
 }
 
 /// Draw boundary segments as marching ants: white base, black dashes phased along x + y.
@@ -2907,9 +3034,9 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
         return;
     }
     let last = d.points.last().map(|p| [p[0], p[1]]).unwrap_or(d.start);
-    let marquee = matches!(d.tool, Tool::RectMarquee | Tool::EllipseMarquee).then(|| marquee_corners(&app.ui.tool_options, d, last));
-    if let Some((a, b)) = marquee {
-        draw_marquee_readout(painter.ctx(), xf.to_screen(last[0] as f32, last[1] as f32), marquee_readout(marquee_px(a, b)));
+    let marquee = marquee_preview_px(&app.ui.tool_options, d);
+    if let Some(r) = marquee {
+        draw_marquee_readout(painter.ctx(), xf.to_screen(last[0] as f32, last[1] as f32), marquee_readout(r));
     }
     match d.tool {
         // The canvas shows the live stroke itself (`LiveStroke`); a stroke that couldn't start one
@@ -2929,7 +3056,7 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
         t if crate::vector_ui::is_shape_tool(t) => crate::vector_ui::draw_shape_preview(app, painter, xf, t, d.start, last, d.live),
         Tool::RectMarquee | Tool::EllipseMarquee | Tool::ObjectSelection => {
             // Marching ants, visible on any pixels (#172).
-            let (a, b) = marquee.unwrap_or((d.start, last));
+            let (a, b) = marquee.map_or((d.start, last), |[x0, y0, x1, y1]| ([x0, y0], [x1, y1]));
             let r = Rect::from_two_pos(xf.to_screen(a[0] as f32, a[1] as f32), xf.to_screen(b[0] as f32, b[1] as f32));
             let r = Rect::from_min_max(r.min.round() + vec2(0.5, 0.5), r.max.round() + vec2(0.5, 0.5));
             let pts = if d.tool == Tool::EllipseMarquee {
@@ -3655,8 +3782,8 @@ mod tabs_tests;
 #[cfg(test)]
 mod tests {
     #[test]
-    fn windows_draws_its_own_crosshair() {
-        // #737: Windows' inverting crosshair vanishes over mid-grey; the canvas draws one instead.
+    fn windows_uses_a_visible_crosshair() {
+        // #737: Windows' inverting crosshair vanishes over mid-grey; use a black/white glyph.
         let ctx = egui::Context::default();
         let painter = egui::Painter::new(ctx, egui::LayerId::background(), egui::Rect::EVERYTHING);
         let p = egui::pos2(10.0, 10.0);
@@ -3865,7 +3992,7 @@ mod tests {
         app.run("cloneSource.set", json!({"source": [16,16]})).unwrap();
         app.ui.tool = Tool::CloneStamp;
         app.session.tools.brush.size = 20.0;
-        let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false };
+        let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false, rotation: 0.0 };
         let revision = app.session.active().unwrap().revision;
         let mut output = ctx.run_ui(Default::default(), |ui| {
             let ctx = ui.ctx();
@@ -3969,7 +4096,7 @@ mod tests {
     #[test]
     fn view_transform_roundtrip() {
         for flip in [false, true] {
-            let xf = ViewXform { rect: Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 600.0)), zoom: 2.5, center: [320.0, 240.0], flip };
+            let xf = ViewXform { rect: Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 600.0)), zoom: 2.5, center: [320.0, 240.0], flip, rotation: 0.0 };
             let s = xf.to_screen(10.0, 20.0);
             let d = xf.to_doc(s);
             assert!((d[0] - 10.0).abs() < 1e-3 && (d[1] - 20.0).abs() < 1e-3);
@@ -4211,7 +4338,7 @@ mod tests {
             let ctx = ui.ctx();
             let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
             let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(rect);
-            let xf = ViewXform { rect, zoom, center: [60.0, 30.0], flip: false };
+            let xf = ViewXform { rect, zoom, center: [60.0, 30.0], flip: false, rotation: 0.0 };
             draw_drag_preview(app, &painter, &xf);
         });
         let egui::FullOutput { mut textures_delta, shapes, .. } = out;
@@ -4358,13 +4485,13 @@ mod tests {
     #[test]
     fn zoom_about_centres_the_clicked_point_with_the_preference() {
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
-        let xf = ViewXform { rect, zoom: 1.0, center: [400.0, 300.0], flip: false };
+        let xf = ViewXform { rect, zoom: 1.0, center: [400.0, 300.0], flip: false, rotation: 0.0 };
         let p = pos2(600.0, 200.0);
         let doc = xf.to_doc(p);
         // Off: the document point under the pointer stays under it.
         let mut view = View { zoom: 1.0, center: [400.0, 300.0], ..Default::default() };
         zoom_about(&mut view, &xf, p, 2.0, false);
-        let after = ViewXform { rect, zoom: 2.0, center: view.center, flip: false };
+        let after = ViewXform { rect, zoom: 2.0, center: view.center, flip: false, rotation: 0.0 };
         let s = after.to_screen(doc[0] as f32, doc[1] as f32);
         assert!((s - p).length() < 0.5, "{s:?} vs {p:?}");
         // On: the clicked point is the view centre.
@@ -4406,7 +4533,7 @@ mod transform_controls_tests {
         app.ui.tool = Tool::Move;
         app.ui.tool_options.move_show_transform = true;
 
-        let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0)), zoom: 1.0, center: [100.0, 100.0], flip: false };
+        let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0)), zoom: 1.0, center: [100.0, 100.0], flip: false, rotation: 0.0 };
         let r = transform_controls_rect(&app, &xf).expect("shape layers have transform bounds");
         assert!(transform_controls_hit(r, r.right_bottom()));
 

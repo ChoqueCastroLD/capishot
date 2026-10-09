@@ -134,7 +134,7 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
         if let ArtboardBackground::Custom(c) = a.background {
             let [r8, g8, b8, _] = c.to_rgba8();
             let mut rgb = [r8, g8, b8];
-            if ui.color_edit_button_srgb(&mut rgb).changed() {
+            if crate::widgets::color_edit_button_srgb(ui, &mut rgb).changed() {
                 edit = Some(json!({"layer": layer.id.0, "background": "custom", "color": format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]), "coalesce": key("color")}));
             }
         }
@@ -165,7 +165,7 @@ mod tests {
         app.run("layer.new.artboard", json!({"rect": [0, 0, 40, 50]})).unwrap();
         app.run("layer.new.artboard", json!({"rect": [60, 10, 40, 30]})).unwrap();
         let doc = app.session.active().unwrap().doc.clone();
-        let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(100.0, 50.0)), zoom: 1.0, center: [50.0, 25.0], flip: false };
+        let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(100.0, 50.0)), zoom: 1.0, center: [50.0, 25.0], flip: false, rotation: 0.0 };
         let rects = pasteboard_rects(&xf, &doc);
         let area: f32 = rects.iter().map(|r| r.area()).sum();
         // 100×50 canvas − 40×50 − 40×30 boards.

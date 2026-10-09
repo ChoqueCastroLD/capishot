@@ -1086,3 +1086,37 @@ fn move_document_reorders_tabs_and_keeps_the_active_one() {
     }
     assert_eq!(names(&s), first);
 }
+
+#[test]
+fn adjustment_layer_disabled_diagnostics_use_grammatical_article() {
+    let mut s = session_with_doc();
+    s.execute("layer.newAdjustmentLayer.curves", json!({})).unwrap();
+
+    let err_blur = s.execute("filter.blur.gaussianBlur", json!({"radius": 2})).unwrap_err().to_string();
+    assert!(err_blur.contains("an Adjustment layer"), "expected 'an Adjustment layer', got: {err_blur}");
+    assert!(!err_blur.contains("a Adjustment layer"), "found 'a Adjustment layer': {err_blur}");
+
+    let err_equalize = s.execute("image.adjustments.equalize", json!({})).unwrap_err().to_string();
+    assert!(err_equalize.contains("an Adjustment layer"), "expected 'an Adjustment layer', got: {err_equalize}");
+    assert!(!err_equalize.contains("a Adjustment layer"), "found 'a Adjustment layer': {err_equalize}");
+
+    let err_clear = s.execute("edit.clear", json!({})).unwrap_err().to_string();
+    assert!(err_clear.contains("an Adjustment layer"), "expected 'an Adjustment layer', got: {err_clear}");
+    assert!(!err_clear.contains("a Adjustment layer"), "found 'a Adjustment layer': {err_clear}");
+}
+
+#[test]
+fn document_inspect_and_activate_invalid_index() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 2, "height": 2, "name": "first"})).unwrap();
+    s.execute("file.new", json!({"width": 2, "height": 2, "name": "second"})).unwrap();
+
+    assert!(s.execute("document.inspect", json!({})).is_ok());
+    assert!(s.execute("document.inspect", json!({"document": 0})).is_ok());
+
+    let err = s.execute("document.inspect", json!({"document": 9})).unwrap_err();
+    assert_eq!(err.to_string(), "no document at index 9");
+
+    let err_act = s.execute("document.activate", json!({"document": 9})).unwrap_err();
+    assert_eq!(err_act.to_string(), "no document at index 9");
+}

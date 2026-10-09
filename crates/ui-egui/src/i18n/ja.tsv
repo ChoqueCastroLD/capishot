@@ -1474,6 +1474,10 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 移動   {key} 実行   esc 閉じる
 	Version {version}	バージョン {version}
 	New Document	新規ドキュメント
+	Saved	保存済み
+	Save Preset…	プリセットを保存…
+	Preset Name	プリセット名
+	No saved presets yet.	保存済みのプリセットはありません。
 	Error	エラー
 	Command	コマンド
 
@@ -2150,6 +2154,14 @@ cameraRaw	Color	カラー
 	Channels:	チャンネル:
 	Knockout	ノックアウト
 	Apply At Canvas Bounds	カンバスの境界に効果を適用
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	カラーピッカー（文字色）
+	Pick screen color	画面の色を選択
+	Sample a pixel anywhere on the screen	画面上の任意のピクセルから色を取得
+	Click to pick · Esc to cancel	クリックで選択 · Escでキャンセル
+	Pick a screen pixel or press Esc to cancel	画面のピクセルを選択するか、Escでキャンセル
+	Scroll to zoom	スクロールしてズーム
 	Show/Hide All Panels	すべてのパネルを表示/非表示
 	Show/Hide Panels	パネルを表示/非表示
 	Could not open	開けませんでした
@@ -2212,3 +2224,7 @@ fontWeight	Italic	斜体
 	Pattern Stamp Tool	パターンスタンプツール
 	Pattern Stamp	パターンスタンプ
 	Impressionist	印象派
+	Rotate View	表示を回転
+	Rotate View Tool	表示回転ツール
+	Reset View	表示をリセット
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	中心の周りをドラッグして表示を回転  ·  Shift で 15° 単位

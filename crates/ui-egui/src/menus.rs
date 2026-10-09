@@ -37,6 +37,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("view.zoomOut", "Zoom Out", &["View"], Some("Cmd+-")),
     ("view.fitOnScreen", "Fit on Screen", &["View"], Some("Cmd+0")),
     ("view.actualPixels", "100%", &["View"], Some("Cmd+1")),
+    ("view.rotateView", "Rotate View", &[], None),
+    ("view.resetView", "Reset View", &["View"], None),
     ("window.newWindowForDocument", "New Window for Document", &["Window", "Arrange"], None),
     ("window.toggle.layers", "Layers", &["Window"], Some("F7")),
     ("window.toggle.history", "History", &["Window"], None),
@@ -261,23 +263,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             }
         }
         "file.saveAs" => app.save_as(params.get("path").and_then(Value::as_str).map(str::to_string)),
-        "view.zoomIn" | "view.zoomOut" | "view.fitOnScreen" | "view.actualPixels" => {
-            let i = app.session.active_index().ok_or("no document")?;
-            let v = &mut app.ui.views[i];
-            match id {
-                "view.zoomIn" => v.zoom = crate::canvas::zoom_step(v.zoom, 1),
-                "view.zoomOut" => v.zoom = crate::canvas::zoom_step(v.zoom, -1),
-                "view.fitOnScreen" => v.fit_pending = true,
-                _ => v.zoom = 1.0,
-            }
-            if id == "view.fitOnScreen" {
-                v.fill_pending = false;
-            } else {
-                v.fit_pending = false;
-                v.fill_pending = false;
-            }
-            Ok(Value::Null)
-        }
+        "view.zoomIn" | "view.zoomOut" | "view.fitOnScreen" | "view.actualPixels" => app.run(id, params),
         "window.newWindowForDocument" => {
             let doc = app.session.active_index().ok_or("no document")?;
             let wid = app.ui.alloc_id();
@@ -670,8 +656,9 @@ pub struct MenuItem {
 /// Is `id` implemented by the engine or the shell (a live menu item)? Shared by the menus and
 /// the parity report ([`crate::parity`]).
 pub fn is_live(id: &str) -> bool {
+    static UI_IDS: std::sync::OnceLock<std::collections::HashSet<&'static str>> = std::sync::OnceLock::new();
     photocraft_engine::commands::find(id).is_some()
-        || UI_COMMANDS.iter().any(|c| c.0 == id)
+        || UI_IDS.get_or_init(|| UI_COMMANDS.iter().map(|c| c.0).collect()).contains(id)
         || panel_alias(id).is_some()
         || workspace_name(id).is_some()
         || proof_preset(id).is_some()
@@ -685,7 +672,8 @@ pub fn is_live(id: &str) -> bool {
 }
 
 /// Commands outside the catalogue that belong right after a catalogue item: `(id, after)`.
-const PLACE_AFTER: &[(&str, &str)] = &[("file.newFromClipboard", "file.new"), ("filter.render.relight", "filter.render.lightingEffects")];
+const PLACE_AFTER: &[(&str, &str)] =
+    &[("file.newFromClipboard", "file.new"), ("filter.render.relight", "filter.render.lightingEffects"), ("view.resetView", "view.flipHorizontal")];
 
 pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
     // 1) Photoshop's full menu tree, in Photoshop order; live where we implement the command.
@@ -1191,6 +1179,19 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_lookup_finds_engine_and_shell_commands() {
+        for command in photocraft_engine::commands::command_specs() {
+            assert!(is_live(command.id), "{}", command.id);
+        }
+        for &(id, ..) in UI_COMMANDS {
+            assert!(is_live(id), "{id}");
+        }
+        for id in ["", "missing.command", "💾"] {
+            assert!(!is_live(id));
+        }
+    }
 
     #[test]
     fn select_menu_contains_every_selection_context_action_and_more() {

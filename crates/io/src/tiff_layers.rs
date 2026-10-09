@@ -220,7 +220,10 @@ pub(crate) fn export_layered(doc: &Document, opts: &ExportOptions) -> Result<Exp
     let mut img = Image::from_raw(w, h, layout, sample, data)?;
     img.icc = doc.icc_profile.as_ref().map(|i| i.to_vec());
     img.meta = codecs::Metadata {
-        exif: doc.metadata.exif.as_ref().map(|e| e.to_vec()),
+        // EXIF is deliberately not set here: the TIFF codec has no EXIF directory, so the tags
+        // above carry it as resource 1058 and the importer reads them back from there. Handing the
+        // codec a second copy in `meta.exif` bought nothing and made the export claim it would
+        // drop metadata it had in fact kept (#1545).
         xmp: doc.metadata.xmp.clone().filter(|_| opts.xmp == crate::XmpEmbed::All),
         dpi: Some((doc.resolution_dpi, doc.resolution_dpi)),
         photoshop_resources: Some(resources),
