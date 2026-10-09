@@ -39,3 +39,8 @@ real_name = "Arthur Vinicius"
 
 [people.SckraT]
 sync_github_name = true
+
+[people.GamerWil26]
+real_name = "Willy Foo"
+display_name = "Willy Foo"
+sync_github_name = false
