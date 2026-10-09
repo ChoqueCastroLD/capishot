@@ -91,7 +91,11 @@ pub fn badge(app: &PhotocraftApp, tool: Tool, m: egui::Modifiers) -> Option<Badg
     if m.command && app.drag.is_none() {
         return None;
     }
-    let m = app.drag.as_ref().filter(|d| d.tool == Tool::Lasso && tool == Tool::Lasso).map_or(m, |d| d.modifiers);
+    let mut m = app.drag.as_ref().filter(|d| d.tool == Tool::Lasso && tool == Tool::Lasso).map_or(m, |d| d.modifiers);
+    // The Lasso's Alt with nothing selected draws straight segments; it subtracts nothing.
+    if matches!(tool, Tool::Lasso | Tool::PolygonLasso) && app.drag.is_none() && app.session.active().is_none_or(|st| st.doc.selection.is_none()) {
+        m.alt = false;
+    }
     Badge::from_mode(selection_mode(tool, app.ui.selection_mode, m))
 }
 
@@ -212,12 +216,18 @@ mod tests {
         let none = egui::Modifiers::NONE;
         let (shift, alt) = (egui::Modifiers::SHIFT, egui::Modifiers::ALT);
         let both = egui::Modifiers { shift: true, alt: true, ..Default::default() };
+        app.run("file.new", serde_json::json!({"width": 40, "height": 30})).unwrap();
+        app.run("select.rect", serde_json::json!({"x": 5, "y": 5, "width": 10, "height": 10})).unwrap();
         for t in [Tool::RectMarquee, Tool::EllipseMarquee, Tool::Lasso, Tool::PolygonLasso, Tool::MagicWand] {
             assert_eq!(badge(&app, t, none), None, "{t:?}: New selection has no badge");
             assert_eq!(badge(&app, t, shift), Some(Badge::Add));
             assert_eq!(badge(&app, t, alt), Some(Badge::Subtract));
             assert_eq!(badge(&app, t, both), Some(Badge::Intersect));
         }
+        // With nothing selected the Lasso's Alt draws straight segments: no − badge.
+        app.run("select.deselect", serde_json::json!({})).unwrap();
+        assert_eq!(badge(&app, Tool::Lasso, alt), None);
+        assert_eq!(badge(&app, Tool::RectMarquee, alt), Some(Badge::Subtract));
         // The options bar's mode shows without any key held; keys still override it.
         app.ui.selection_mode = 2;
         assert_eq!(badge(&app, Tool::Lasso, none), Some(Badge::Subtract));

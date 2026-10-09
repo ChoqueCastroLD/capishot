@@ -285,3 +285,24 @@ fn cmd_drag_inside_the_selection_floats_it_with_the_polygonal_lasso() {
     ev(&mut app, "up", 35.0, 20.0, Modifiers::NONE);
     assert_eq!(app.ui.polygon.len(), 1);
 }
+
+/// ⌥ held: a drag draws freehand into the polygon; releasing ⌥ goes back to straight segments,
+/// and the polygon stays open (a new selection, even though ⌥ was held at the first click).
+#[test]
+fn alt_drags_draw_freehand_and_releasing_alt_keeps_the_polygon_open() {
+    let mut app = polygon_app();
+    let alt = Modifiers::ALT;
+    ev(&mut app, "down", 50.0, 50.0, alt);
+    for x in [70.0, 90.0, 110.0, 130.0, 150.0] {
+        ev(&mut app, "move", x, 50.0 + (x - 50.0) / 4.0, alt);
+    }
+    ev(&mut app, "up", 150.0, 75.0, alt);
+    assert!(app.ui.polygon.len() >= 6, "freehand points: {}", app.ui.polygon.len());
+    assert_eq!(app.ui.polygon_mode, "replace", "⌥ with nothing selected doesn't subtract");
+    // ⌥ released: clicks add straight segments, nothing closes.
+    ev(&mut app, "down", 150.0, 200.0, Modifiers::NONE);
+    ev(&mut app, "up", 150.0, 200.0, Modifiers::NONE);
+    assert!(!app.ui.polygon.is_empty() && app.session.active().unwrap().doc.selection.is_none());
+    crate::canvas::commit_polygon(&mut app);
+    assert!(app.session.active().unwrap().doc.selection.as_ref().unwrap().sample_channel(110, 100, 0) > 0.5);
+}
