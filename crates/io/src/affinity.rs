@@ -524,7 +524,7 @@ impl Builder {
 
     fn mask(&mut self, img: &af::Image, to_doc: Affine) -> Option<Surface> {
         let (w, h, rgba) = self.pixels(img)?;
-        let grey: Vec<u8> = rgba.chunks_exact(4).map(|p| p[0]).collect();
+        let grey: Vec<u8> = rgba.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
         let m = to_doc.mul(&affine(img.transform));
         self.resample(w, h, &grey, m, 1)
     }
