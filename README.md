@@ -199,7 +199,7 @@ Every screenshot here is the real app at work on public-domain art, rendered off
     </td>
     <td width="33%" valign="top">
       <h4>🗂️ Formats</h4>
-      PSD and PSB, layered TIFF (Photoshop's layer data in the TIFF, read and written in either byte order), SVG (opens as shape layers, places as a vector Smart Object), plus flat PNG, JPEG, TIFF, WebP (lossy and lossless), GIF, BMP, TGA, ICO, QOI, PNM, OpenEXR, Radiance HDR and AVIF, with symmetric read and write at 8, 16 and 32 bits, HEIC photos from iPhone and Mac (read; in official builds, an optional <code>--features heif</code> build feature), and the native <code>.pcraft</code> format.
+      PSD and PSB, layered TIFF (Photoshop's layer data in the TIFF, read and written in either byte order), SVG (opens as shape layers, places as a vector Smart Object), plus flat PNG, JPEG, TIFF, WebP (lossy and lossless), GIF, BMP, TGA, ICO, QOI, PNM, OpenEXR, Radiance HDR and AVIF, with symmetric read and write at 8, 16 and 32 bits, HEIC photos from iPhone and Mac (read; in official builds, an optional <code>--features heif</code> build feature), and the native <code>.pcraft</code> format. Affinity documents (<code>.af</code>, <code>.afdesign</code>, <code>.afphoto</code>, <code>.afpub</code>) open natively, read only, with artboards, layers, vectors, text, images and masks; effects, adjustments and other unsupported parts are listed in a warning, and Affinity export is unavailable.
     </td>
     <td width="33%" valign="top">
       <h4>🪄 The everyday essentials</h4>
