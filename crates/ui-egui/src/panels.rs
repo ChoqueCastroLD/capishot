@@ -1587,9 +1587,14 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .min_scrolled_height(if fill { rows_h } else { 0.0 })
         .auto_shrink([false, !fill])
         .show(ui, |ui| {
-            // The drag key is set only by actual layer-row drags, not clicks or
+            // The drag keys are set only by actual layer-row and fx drags, not clicks or
             // ordinary scrolling. The ScrollArea applies this to its own content.
-            let dragging = ctx.data(|d| d.get_temp::<u64>(egui::Id::new("layer-drag"))).is_some() && ctx.input(|i| i.pointer.primary_down());
+            // An fx drag that never saw its release (the panel was hidden) must not outlive the button.
+            if !ctx.input(|i| i.pointer.primary_down() || i.pointer.any_released()) {
+                ctx.data_mut(|d| d.remove::<FxDrag>(fx_drag_key()));
+            }
+            let held = ctx.data(|d| d.get_temp::<u64>(egui::Id::new("layer-drag")).is_some() || d.get_temp::<FxDrag>(fx_drag_key()).is_some());
+            let dragging = held && ctx.input(|i| i.pointer.primary_down());
             let pointer = ctx.input(|i| i.pointer.interact_pos());
             let delta = layer_drag_edge_scroll(pointer, ui.clip_rect(), dragging, ctx.input(|i| i.stable_dt));
             if delta != 0.0 {
@@ -1645,9 +1650,11 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let in_selection = selection.iter().any(|s| s.0 == id);
         (id, in_selection)
     });
+    fx_drag_feedback(&ctx, &doc);
     // End any layer drag after every row has had a chance to accept the drop.
     if ctx.input(|i| i.pointer.any_released()) {
         ctx.data_mut(|d| d.remove::<u64>(egui::Id::new("layer-drag")));
+        ctx.data_mut(|d| d.remove::<FxDrag>(fx_drag_key()));
     }
     widgets::panel_footer(ui, |ui| {
         let trash = icons::button(ui, "trash", 26.0, false, tl!("Delete layer"));
@@ -1887,6 +1894,7 @@ fn layer_row(
     let row_h = if t.pro { 32.0 } else { 46.0 };
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
     layer_drag_and_drop(app, ctx, ui, l, rect, &resp, actions);
+    fx_drop(ctx, ui, l, rect, actions);
     if resp.drag_started() {
         crate::layer_transfer::begin_from_panel(app, ctx, l.id);
     }
@@ -1978,6 +1986,13 @@ fn layer_row(
     // Right-hand indicators first; the name gets what is left and ends in "…" (#144).
     let fx_open = app.session.active().is_none_or(|d| !d.fx_collapsed.contains(&l.id));
     let (name_right, indicators, fx_toggled) = crate::layer_row_ui::indicators(ui, &painter, rect, x, l, fx_open, actions);
+    // Dragging the fx badge drags all the layer's effects, not the layer (Photoshop). Like the eye,
+    // it takes the drag from the row; clicks still reach the row.
+    if let Some(&(_, badge)) = indicators.iter().find(|(k, _)| *k == crate::layer_row_ui::Indicator::Fx)
+        && ui.interact(badge, ui.id().with(("fx-badge", l.id.0)), Sense::drag()).drag_started()
+    {
+        start_fx_drag(ctx, l.id, None);
+    }
     let name_color = if l.visible { t.text } else { t.text_faint };
     let font = if selected && !t.pro { theme::medium(13.0) } else { egui::FontId::proportional(if t.pro { 12.0 } else { 13.0 }) };
     // Photoshop before 2026 set the Background layer's name in italics; 2026 sets it upright.
@@ -2826,6 +2841,60 @@ fn layer_drag_and_drop(
     }
 }
 
+/// An fx row being dragged: the layer it belongs to and the effect index (`None` = the "Effects"
+/// row, all of them).
+type FxDrag = (u64, Option<usize>);
+
+fn fx_drag_key() -> egui::Id {
+    egui::Id::new("fx-drag")
+}
+
+/// Start dragging the effects of `layer`: one (`effect`) or all of them.
+fn start_fx_drag(ctx: &egui::Context, layer: LayerId, effect: Option<usize>) {
+    ctx.data_mut(|d| d.insert_temp::<FxDrag>(fx_drag_key(), (layer.0, effect)));
+}
+
+/// While effects are dragged: their name by the pointer, and the copy cursor while ⌥ is held.
+fn fx_drag_feedback(ctx: &egui::Context, doc: &photocraft_doc::Document) {
+    let Some((from, effect)) = ctx.data(|d| d.get_temp::<FxDrag>(fx_drag_key())) else { return };
+    let Some(p) = ctx.input(|i| i.pointer.interact_pos()) else { return };
+    let label = match effect {
+        Some(i) => doc.layer(LayerId(from)).and_then(|l| l.effects.items.get(i)).map_or("", |e| e.label()),
+        None => "Effects",
+    };
+    crate::layer_transfer::ghost(ctx, p, label);
+    if ctx.input(|i| i.modifiers.alt) {
+        ctx.set_cursor_icon(egui::CursorIcon::Copy);
+    }
+}
+
+/// The command for dropping effects of layer `from` on `target`: they move there, or with ⌥ held
+/// on release are copied (Photoshop). `effect` is one effect row, or all effects when `None`.
+fn fx_drop_action(from: u64, effect: Option<usize>, target: LayerId, copy: bool) -> (String, Value) {
+    let mut payload = json!({"from": from, "to": target.0, "copy": copy});
+    if let Some(o) = payload.as_object_mut()
+        && let Some(i) = effect
+    {
+        o.insert("effect".into(), json!(i));
+    }
+    ("layer.layerStyle.transferEffects".into(), payload)
+}
+
+/// A layer row accepts the fx row being dragged: outlined while the pointer is over it, dropped
+/// on release.
+fn fx_drop(ctx: &egui::Context, ui: &egui::Ui, l: &Layer, rect: Rect, actions: &mut Vec<(String, Value)>) {
+    let Some((from, effect)) = ctx.data(|d| d.get_temp::<FxDrag>(fx_drag_key())) else { return };
+    let Some(p) = ctx.input(|i| i.pointer.interact_pos()) else { return };
+    if from == l.id.0 || !rect.contains(p) {
+        return;
+    }
+    let t = Tokens::get(ctx);
+    ui.painter().rect_stroke(rect.shrink(1.0), t.radius_sm, Stroke::new(2.0, t.accent), StrokeKind::Inside);
+    if ctx.input(|i| i.pointer.any_released()) {
+        actions.push(fx_drop_action(from, effect, l.id, ctx.input(|i| i.modifiers.alt)));
+    }
+}
+
 /// Photoshop shows a layer's effects as indented sub-rows ("Effects", then each effect). The eye
 /// on "Effects" shows or hides them all, the eye on an effect's row just that one (#1622).
 fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usize, actions: &mut Vec<(String, Value)>) {
@@ -2837,7 +2906,11 @@ fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usi
         rows.push((e.label().to_string(), e.enabled(), kind));
     }
     for (i, (name, on, kind)) in rows.into_iter().enumerate() {
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
+        // Drag the row onto another layer to move its effects there, ⌥-drag to copy them.
+        if resp.drag_started() {
+            start_fx_drag(ui.ctx(), l.id, i.checked_sub(1));
+        }
         if !ui.is_rect_visible(rect) {
             continue;
         }
@@ -3172,6 +3245,10 @@ mod history_transform_tests {
 #[cfg(test)]
 #[path = "layer_pct_slider_tests.rs"]
 mod layer_pct_slider_tests;
+
+#[cfg(test)]
+#[path = "fx_drag_tests.rs"]
+mod fx_drag_tests;
 
 #[cfg(test)]
 mod lock_tests {
