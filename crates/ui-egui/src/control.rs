@@ -8,14 +8,14 @@
 //! - `engine.commands`: list commands with enablement
 //! - `ui.inspect`: full UI state (tool, panels, views, dialogs, windows, window size); the menu
 //!   tree is `ui.menu.list`
-//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushPicker?, brushPickerView?, brushSize?}`:
-//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushSize?}`:
+//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, rotation?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushPicker?, brushPickerView?, brushSize?}`:
 //!   change UI state; any other field is an error ([`UI_SET_FIELDS`])
 //! - `ui.dialog.open {kind, fields?}` (kinds: newDocument, about, layerStyle {effect?}, colorPicker {target: foreground|background}, command {command}) / `ui.dialog.set {dialog, field, value}` / `ui.dialog.confirm {dialog, wait?}` / `ui.dialog.cancel {dialog}`
 //! - `ui.dialog.apply {dialog}`: commit Preferences changes without closing the dialog
 //! - `ui.window.open {document?}` / `ui.window.close {window}`: extra document windows
 //! - `ui.pointer {events: [{kind: down|move|up, x, y, pressure?, tiltX?, tiltY?, rotation?}], modifiers?, button?}`: drive the active tool in document coordinates (`button: "secondary"` opens the tool's canvas context menu or Brush Preset picker, or erases with Preferences › Tools › Right-click with painting tools = erase)
 //! - `ui.click {x, y, button?, count?}` / `ui.move {x, y}`: synthetic pointer input in screen points
+//!   (`count` at most [`MAX_CLICKS`])
 //! - `ui.key {key, command?, shift?, alt?, ctrl?}` / `ui.type {text}`: synthetic keyboard input
 //! - `ui.resize {width, height}`: resize the main window
 //! - `ui.gpu.simulateLoss {error?}`: act as if the wgpu device was lost (or, with `error: true`,
@@ -45,12 +45,14 @@ pub struct ControlRequest {
     pub method: String,
     pub params: Value,
     pub reply: Sender<ControlResponse>,
+    /// Requests still queued at this instant are rejected; already dispatched work continues.
+    pub deadline: Option<std::time::Instant>,
 }
 
 impl ControlRequest {
     pub fn new(method: impl Into<String>, params: Value) -> (Self, std::sync::mpsc::Receiver<ControlResponse>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        (Self { method: method.into(), params, reply: tx }, rx)
+        (Self { method: method.into(), params, reply: tx, deadline: None }, rx)
     }
 }
 
@@ -72,7 +74,7 @@ pub enum Outcome {
 /// field's value is validated before the first one is applied, so a typo, an unknown field, a
 /// bad value or a bad nested key can't reply with success while nothing — or only half of it —
 /// changed (#412).
-pub const UI_SET_FIELDS: [&str; 21] = [
+pub const UI_SET_FIELDS: [&str; 22] = [
     "tool",
     "panels",
     "dock",
@@ -84,6 +86,7 @@ pub const UI_SET_FIELDS: [&str; 21] = [
     "selectionMode",
     "zoom",
     "center",
+    "rotation",
     "fit",
     "theme",
     "brushSection",
@@ -95,6 +98,11 @@ pub const UI_SET_FIELDS: [&str; 21] = [
     "gradientBlendMode",
     "gradientClassic",
 ];
+
+/// Most clicks one `ui.click` may queue (#982). Each click is a press and a release that the app
+/// feeds in its own frame before replying, so `count` sizes both the input queue and the wait;
+/// the same ceiling as the steps of one batch request.
+pub const MAX_CLICKS: u64 = 256;
 
 fn ok(v: Value) -> Outcome {
     Outcome::Done(json!({"ok": true, "result": v}))
@@ -300,6 +308,10 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 let color_panel = whole_object(&app.ui.color_panel, p.get("colorPanel"), "colorPanel")?;
                 let dock_width = num_field(p, "dockWidth")?;
                 let zoom = num_field(p, "zoom")?;
+                let rotation = num_field(p, "rotation")?;
+                if rotation.is_some() && app.session.active_index().is_none() {
+                    return Err("no document open".into());
+                }
                 let center = match p.get("center") {
                     Some(v) => {
                         let a = v.as_array().ok_or_else(|| "center must be [x, y]".to_string())?;
@@ -417,6 +429,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     if fit {
                         app.ui.views[i].fit_pending = true;
                         app.ui.views[i].fill_pending = false;
+                    }
+                    if let Some(r) = rotation {
+                        app.ui.views[i].rotation = crate::rotate_view::wrap_deg(r as f32);
                     }
                 }
                 if let Some(k) = theme {
@@ -626,13 +641,14 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 "middle" => egui::PointerButton::Middle,
                 _ => egui::PointerButton::Primary,
             };
+            let clicks = if req.method == "ui.click" { u("count").unwrap_or(1) } else { 0 };
+            if clicks > MAX_CLICKS {
+                return err(format!("`count` must be at most {MAX_CLICKS} (got {clicks})"));
+            }
             app.synthetic.push(egui::Event::PointerMoved(pos));
-            if req.method == "ui.click" {
-                let clicks = p.get("count").and_then(Value::as_u64).unwrap_or(1);
-                for _ in 0..clicks {
-                    app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers: Default::default() });
-                    app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: Default::default() });
-                }
+            for _ in 0..clicks {
+                app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers: Default::default() });
+                app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: Default::default() });
             }
             ctx.request_repaint();
             Outcome::AfterInput
@@ -814,6 +830,45 @@ mod tests {
             Outcome::Done(v) => v,
             _ => panic!("{method}: expected an immediate reply"),
         }
+    }
+
+    #[test]
+    fn expired_queued_edit_does_not_run_and_a_live_retry_runs_once() {
+        use std::time::{Duration, Instant};
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let before = app.session.active().unwrap();
+        let layers = before.doc.layers.len();
+        let steps = before.history.past_len();
+        let (tx, rx) = std::sync::mpsc::channel();
+        app = app.with_control(rx);
+        let (mut expired, expired_reply) = ControlRequest::new("engine.execute", json!({"command": "layer.new.layer"}));
+        expired.deadline = Some(Instant::now() - Duration::from_secs(1));
+        tx.send(expired).unwrap();
+        let (mut retry, retry_reply) = ControlRequest::new("engine.execute", json!({"command": "layer.new.layer"}));
+        retry.deadline = Some(Instant::now() + Duration::from_secs(60));
+        tx.send(retry).unwrap();
+        app.drain_control(&egui::Context::default());
+        assert_eq!(expired_reply.try_recv().unwrap(), json!({"ok": false, "error": "timeout"}));
+        assert_eq!(retry_reply.try_recv().unwrap()["ok"], true);
+        let after = app.session.active().unwrap();
+        assert_eq!(after.doc.layers.len(), layers + 1, "only the live retry adds a layer");
+        assert_eq!(after.history.past_len(), steps + 1, "the expired edit adds no undo step");
+    }
+
+    #[test]
+    fn deadline_free_requests_run_even_after_the_receiver_is_dropped() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let layers = app.session.active().unwrap().doc.layers.len();
+        let (tx, rx) = std::sync::mpsc::channel();
+        app = app.with_control(rx);
+        let (req, reply) = ControlRequest::new("engine.execute", json!({"command": "layer.new.layer"}));
+        assert!(req.deadline.is_none());
+        drop(reply);
+        tx.send(req).unwrap();
+        app.drain_control(&egui::Context::default());
+        assert_eq!(app.session.active().unwrap().doc.layers.len(), layers + 1);
     }
 
     #[test]
@@ -1201,5 +1256,29 @@ mod tests {
         app.session.execute("file.new", json!({"width": 4, "height": 4})).unwrap();
         let r = app.run("actions.play", json!({"action": "Open"})).unwrap();
         assert_eq!(r["ran"], 1, "{r}");
+    }
+
+    #[test]
+    fn huge_click_count_is_rejected() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        // #982: a huge count used to queue a press and a release per click before replying.
+        for count in [json!(MAX_CLICKS + 1), json!(1_000_000_000u64), json!(u64::MAX)] {
+            let r = call(&mut app, &ctx, "ui.click", json!({"x": 10, "y": 10, "count": count}));
+            assert_eq!(r["ok"], false, "{r}");
+            assert!(r["error"].as_str().unwrap().contains("`count` must be at most 256"), "{r}");
+            assert!(app.synthetic.is_empty(), "a rejected click queues nothing");
+        }
+        // Single, double and the largest allowed clicks still queue a move plus a press and a release each.
+        for (count, events) in [(None, 3), (Some(2), 5), (Some(MAX_CLICKS), 2 * MAX_CLICKS as usize + 1)] {
+            let params = match count {
+                Some(n) => json!({"x": 10, "y": 10, "count": n}),
+                None => json!({"x": 10, "y": 10}),
+            };
+            let (req, _rx) = ControlRequest::new("ui.click", params);
+            assert!(matches!(handle(&mut app, &ctx, &req), Outcome::AfterInput));
+            assert_eq!(app.synthetic.len(), events);
+            app.synthetic.clear();
+        }
     }
 }

@@ -172,6 +172,64 @@ fn new_adjustment_and_fill_layers_have_no_mask_without_a_selection() {
 }
 
 #[test]
+fn new_fill_and_adjustment_layers_take_the_active_path_as_their_vector_mask() {
+    // #1419: as in Photoshop, the path selected in the Paths panel becomes the vector mask of a
+    // new fill or adjustment layer (a Solid Color fill becomes a shape) and wins over a selection.
+    let square = json!({"subpaths": [{"closed": true, "knots": [[8, 8], [24, 8], [24, 24], [8, 24]]}]});
+    for depth in [8, 16, 32] {
+        for (id, params, blackens) in [
+            ("layer.newFillLayer.solidColor", json!({"color": "#000000"}), true),
+            ("layer.newFillLayer.gradient", json!({"from": "#000000", "to": "#000000"}), true),
+            ("layer.newFillLayer.pattern", json!({"pattern": "Checkerboard"}), false),
+            ("layer.newAdjustmentLayer.invert", json!({}), true),
+        ] {
+            for (path_name, setup) in [("work", "work"), ("Saved", "Saved")] {
+                let mut s = Session::new();
+                s.execute("file.new", json!({"width": 64, "height": 48, "depth": depth})).unwrap();
+                s.execute("path.set", json!({"name": setup, "path": square})).unwrap();
+                // A selection elsewhere: the path wins, as in Photoshop.
+                s.execute("select.rect", json!({"x": 40, "y": 30, "width": 8, "height": 8})).unwrap();
+                let mut p = params.clone();
+                p["path"] = json!(path_name);
+                let layer = LayerId(s.execute(id, p).unwrap()["layer"].as_u64().unwrap());
+                let d = s.active().unwrap();
+                let l = d.doc.layer(layer).unwrap();
+                let vm = l.vector_mask.as_ref().unwrap_or_else(|| panic!("{id} ({path_name}) at {depth}-bit: no vector mask"));
+                let want = if path_name == "work" { d.doc.work_path.clone().unwrap() } else { d.doc.paths[0].path.clone() };
+                assert_eq!(vm.path, want, "{id}: the vector mask is the path");
+                assert!(l.mask.is_none(), "{id}: the path wins over the selection");
+                for (x, y) in [(2, 2), (42, 32), (30, 30)] {
+                    assert_eq!(px(&mut s, x, y), vec![1.0, 1.0, 1.0, 1.0], "{id} ({path_name}) at {depth}-bit changed pixels outside the path at ({x}, {y})");
+                }
+                if blackens {
+                    assert_eq!(px(&mut s, 16, 16)[..3], [0.0, 0.0, 0.0][..], "{id} ({path_name}) at {depth}-bit: no effect inside the path");
+                }
+                s.execute("edit.undo", json!({})).unwrap();
+                assert!(s.active().unwrap().doc.layer(layer).is_none(), "{id}: undo keeps the layer");
+            }
+        }
+    }
+}
+
+#[test]
+fn new_fill_layer_with_a_missing_path_fails_without_a_layer() {
+    let mut s = session_with_doc();
+    let before = s.active().unwrap().doc.layers.len();
+    for (id, params) in [
+        ("layer.newFillLayer.solidColor", json!({"path": "work"})),
+        ("layer.newFillLayer.solidColor", json!({"path": "Nope"})),
+        ("layer.newFillLayer.gradient", json!({"path": "Nope"})),
+        ("layer.newFillLayer.pattern", json!({"pattern": "Checkerboard", "path": "Nope"})),
+        ("layer.newAdjustmentLayer.invert", json!({"path": "Nope"})),
+        ("layer.newFillLayer.solidColor", json!({"path": 42})),
+        ("layer.newFillLayer.solidColor", json!({"path": {"subpaths": "x"}})),
+    ] {
+        assert!(s.execute(id, params.clone()).is_err(), "{id} {params}: no error");
+        assert_eq!(s.active().unwrap().doc.layers.len(), before, "{id} {params}: added a layer");
+    }
+}
+
+#[test]
 fn every_adjustment_command_runs() {
     let mut s = session_with_doc();
     let ids: Vec<&str> =
@@ -1027,4 +1085,38 @@ fn move_document_reorders_tabs_and_keeps_the_active_one() {
         assert!(s.execute("document.move", bad.clone()).is_err(), "{bad}");
     }
     assert_eq!(names(&s), first);
+}
+
+#[test]
+fn adjustment_layer_disabled_diagnostics_use_grammatical_article() {
+    let mut s = session_with_doc();
+    s.execute("layer.newAdjustmentLayer.curves", json!({})).unwrap();
+
+    let err_blur = s.execute("filter.blur.gaussianBlur", json!({"radius": 2})).unwrap_err().to_string();
+    assert!(err_blur.contains("an Adjustment layer"), "expected 'an Adjustment layer', got: {err_blur}");
+    assert!(!err_blur.contains("a Adjustment layer"), "found 'a Adjustment layer': {err_blur}");
+
+    let err_equalize = s.execute("image.adjustments.equalize", json!({})).unwrap_err().to_string();
+    assert!(err_equalize.contains("an Adjustment layer"), "expected 'an Adjustment layer', got: {err_equalize}");
+    assert!(!err_equalize.contains("a Adjustment layer"), "found 'a Adjustment layer': {err_equalize}");
+
+    let err_clear = s.execute("edit.clear", json!({})).unwrap_err().to_string();
+    assert!(err_clear.contains("an Adjustment layer"), "expected 'an Adjustment layer', got: {err_clear}");
+    assert!(!err_clear.contains("a Adjustment layer"), "found 'a Adjustment layer': {err_clear}");
+}
+
+#[test]
+fn document_inspect_and_activate_invalid_index() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 2, "height": 2, "name": "first"})).unwrap();
+    s.execute("file.new", json!({"width": 2, "height": 2, "name": "second"})).unwrap();
+
+    assert!(s.execute("document.inspect", json!({})).is_ok());
+    assert!(s.execute("document.inspect", json!({"document": 0})).is_ok());
+
+    let err = s.execute("document.inspect", json!({"document": 9})).unwrap_err();
+    assert_eq!(err.to_string(), "no document at index 9");
+
+    let err_act = s.execute("document.activate", json!({"document": 9})).unwrap_err();
+    assert_eq!(err_act.to_string(), "no document at index 9");
 }

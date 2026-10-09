@@ -17,6 +17,10 @@
 	Layer	Livello
 	Type	Testo
 	Select	Selezione
+	Top Left	In alto a sinistra
+	Top Right	In alto a destra
+	Bottom Left	In basso a sinistra
+	Bottom Right	In basso a destra
 	Filter	Filtro
 	View	Vista
 	Window	Finestra
@@ -1480,6 +1484,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ naviga {key} esegui esc chiudi
 	Version {version}	Versione {version}
 	New Document	Nuovo documento
+	Save Preset…	Salva predefinito…
+	Preset Name	Nome del predefinito
+	No saved presets yet.	Nessun predefinito salvato.
 	Error	Errore
 	Command	Comando
 
@@ -2253,6 +2260,14 @@ cameraRaw	Amount	Quantità
 	Add to Swatches	Aggiungi ai campioni
 	Convert to Layers	Converti in livelli
 	Apply At Canvas Bounds	Applica effetto ai limiti dell’area di lavoro
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Selettore colore (Colore del testo)
+	Pick screen color	Scegli colore dallo schermo
+	Sample a pixel anywhere on the screen	Campiona un pixel in qualsiasi punto dello schermo
+	Click to pick · Esc to cancel	Clic per scegliere · Esc per annullare
+	Pick a screen pixel or press Esc to cancel	Scegli un pixel dello schermo o premi Esc per annullare
+	Scroll to zoom	Scorri per ingrandire
 	Show/Hide All Panels	Mostra/nascondi tutti i pannelli
 	Show/Hide Panels	Mostra/nascondi pannelli
 	Could not open	Impossibile aprire
@@ -2312,4 +2327,7 @@ fontWeight	Italic	Corsivo
 	Pattern Stamp Tool	Strumento Timbro motivo
 	Pattern Stamp	Timbro motivo
 	Impressionist	Impressionista
-
+	Rotate View	Ruota vista
+	Rotate View Tool	Strumento Ruota vista
+	Reset View	Reimposta vista
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Trascina intorno al centro per ruotare la vista  ·  Maiusc vincola a 15°

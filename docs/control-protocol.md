@@ -28,6 +28,8 @@ Each reply is one JSON line with the same `id`:
 {"id": 2, "ok": false, "error": "unknown tool `foo`"}
 ```
 
+The desktop server waits up to 60 seconds for a reply. A request still queued at that deadline is rejected before dispatch; a timeout does not cancel work that has already started.
+
 The transport is `apps/photocraft/src/control_server.rs`, and the handlers are in `crates/ui-egui/src/control.rs`. The MCP server (`photocraft-cli mcp --bridge 127.0.0.1:<port>`, crate `photocraft-automation`) wraps this same protocol. See [MCP bridge](#mcp-bridge) below.
 
 ## Methods
@@ -49,6 +51,7 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 - `ui.window.open {document?}` / `ui.window.close {window}`: extra document windows
 - `ui.pointer {events: [{kind: down|move|up, x, y, pressure?, tiltX?, tiltY?, rotation?}], modifiers?, button?}`: drive the active tool in document coordinates (pressure 0..1, tilt in degrees -90..90, barrel rotation 0..360: a simulated pen). Modifier flags (`shift`, `alt`, `command`, `ctrl`, `space`) go either at the top level or grouped under `modifiers`; when `modifiers` is present, top-level flags are ignored. `space: true` holds Space (the Crop frame, marquee, lasso or shape being drawn then moves instead of growing). `button: "right"` (or `"secondary"`) is the right button: with the Move tool (or `command: true` with any tool) it opens the canvas layer menu (`layerMenu` in `ui.inspect` lists the layers there, topmost first; select one with `layer.select`); with Marquee, Lasso, Magic Wand, Object Selection, or Pen it opens a tool context menu (`canvasToolMenu` in `ui.inspect`, with ordered command ids, separators, and enabled states); with a painting tool it opens the Brush Preset picker, or erases with Preferences › Tools › Right-click with painting tools = erase. The menus open at the screen position of the pressed document point. Use `ui.context.choose {id}` for enabled tool-context actions. The Pen menu is documented in `docs/context-menu-parity.md`. With a Color Picker as the top dialog, `down` and `move` sample the image into its new colour instead (its eyedropper, like a click on the canvas) and the tool is not driven.
   - Magnetic Lasso (`tool: "magneticLasso"`): a `down`/`up` pair is a click. The first sets the first fastening point (its modifiers set the selection mode); later clicks fasten a point, or close the border on the first point. `move` events trace the border with or without a button held, fastening points by themselves; with `alt: true` a click draws a straight segment and a drag a freehand one. `ui.inspect` shows the border in progress under `magnetic` (`path`, `anchors`, `live`, `mode`). `ui.key` Enter closes it along the edges, Backspace removes the last fastening point, Escape cancels. To select along edges in one call instead, use the `select.magneticLasso` command with rough points around the shape.
+- `ui.click {x, y, button?, count?}` / `ui.move {x, y}`: synthetic pointer input in screen points (`button`: `left` (default), `right` or `middle`). `count` (default 1, `2` for a double-click) is at most 256; a larger one is an error and queues nothing
 - `ui.key {key, command?, shift?, alt?, ctrl?}` (flags may also be grouped under `modifiers`): press and release a key, e.g. `{"key": "ArrowLeft", "shift": true}`
 - `ui.type {text}`: type text (goes to the focused widget, or to the canvas while the Type tool is editing)
 - `ui.resize {width, height}`: resize the main window
@@ -82,15 +85,42 @@ store expose and persist the same setting; scripts keep using canonical command 
 | `select.rect` | `{"x":0,"y":0,"width":100,"height":50,"mode":"add","ellipse":false}` |
 | `document.inspect` | `{}`: layer tree, history, selection bounds |
 | `document.pixel` | `{"x":10,"y":10}`: composite RGBA |
+| `document.presets.list` | `{}` → `{presets:[{name,settings}]}`: saved New Document configurations |
+| `document.presets.save` | `{"name":"Product square","settings":{"width":1600,"height":1600,"background":"transparent"}}`: save a snapshot; names are trimmed, 1–255 characters, and ASCII case-insensitive duplicates are rejected |
+| `document.presets.get` | `{"name":"Product square"}` → `{preset,params}`: fetch settings; pass `params` to `file.new` to create a document, optionally adding a document `name` |
+| `document.presets.delete` | `{"name":"Product square"}`: delete the named saved configuration |
 | `type.hitTest` | `{"layer":id?,"x":px,"y":px}`: character under a document point. No `layer` picks the topmost visible type layer there. Result `{"layer","index","line","inside"}` |
 | `type.caret` | `{"layer":id?,"index":char}`: caret segment in document pixels, `{"index","line","segment":[[x,y],[x,y]]}` (rotated and vertical type included) |
 | `type.navigate` | `{"layer":id?,"index":char,"move":"wordPrev\|wordNext\|linePrev\|lineNext\|lineStart\|lineEnd\|start\|end","x":px?}`: neighbouring caret. `x` keeps the column across line moves. Result `{"index"}` |
 | `actions.list` | `{}` → `{actions:[{name, steps}], recording}` (the name being recorded, or null) |
 | `actions.get` | `{"action": name or index}` → `{name, steps:[[id, params], …]}`, the shape `file.automate.batch` and droplets take |
 | `actions.record` | `{"name":"Red"}` starts a new action (default name `Action N`). `{"action": name or index}` appends to one that exists |
-| `actions.stop` | `{}` → `{action, steps}`. Copies replayable journal entries since `actions.record` (queries and `actions.*` omitted) |
-| `actions.play` | `{"action": name or index, "from": step?}`. `from` and `failed.step` are 0-based. Returns `{action, ran, failed?:{step, id, error}}` and still returns ok when a step fails, so a partial run is reported. Leaves one history step per step that ran. Refuses to play while a play is already running. On an untrusted session each step is authorized the same way as a top-level command |
-| `actions.delete` | `{"action": name or index}` → `{deleted}`. Refused while recording |
+| `actions.stop` | `{}` → `{action, steps}`. Copies replayable journal entries since `actions.record` (queries and action-editing commands omitted) |
+| `actions.play` | `{"action": name or index, "from": step?}`. `from` and `failed.step` are 0-based. Returns `{action, ran, failed?:{step, id, error}}` and still returns ok when a step fails, so a partial run is reported. Leaves one history step per step that ran. Supports nested action calls up to 16 levels, rejecting cycles. While recording, playing another action appends one named `actions.play` step instead of its expanded commands. On an untrusted session each step is authorized the same way as a top-level command |
+| `actions.move` | `{"action": name or index, "step": index?, "to": index}` moves a step within its action, or moves the whole action when `step` is omitted. `to` is the final zero-based index. Pending steps can be reordered while recording; invalid moves leave the list unchanged. |
+| `actions.delete` | `{"action": name or index, "step": index?}`. With a zero-based `step`: `{action, deletedStep, steps}`, also allowed while recording. Without `step`: `{deleted}`, refused while recording |
+
+The Actions panel shows replayable steps immediately while recording. Click an individual
+step to select it, then use the trash button to remove that step; selecting the action
+heading instead targets the whole action. Step deletion also works during recording
+and does not undo the document edit. The control equivalent is
+`actions.delete {"action": "Name", "step": 0}` (zero-based). Omitting `step` deletes
+the whole action, which still requires recording to be stopped.
+
+Desktop actions also record and replay View › Fit on Screen (`view.fitOnScreen`),
+100% (`view.actualPixels`), Zoom In and Zoom Out through their menu commands or shortcuts.
+Select an action and press Record to append steps; the plus button starts a new action.
+A final `["view.fitOnScreen", {}]` step fits the resized document when the canvas is laid out.
+Headless playback reports unsupported view commands as failed steps.
+
+In the desktop Actions panel, right-click an action to assign a function key (F1–F12),
+or choose None to remove it. The binding follows the action name, regardless of the selected
+row, and is saved in preferences. For example, the existing `edit.keyboardShortcuts` command
+accepts `{"set":{"actions.play:My action":"F6"},"allowUnknown":true,"removeConflicts":false}`.
+A named action takes precedence over the ordinary menu shortcut while it exists and is bound;
+removing its binding or deleting it restores that menu shortcut. The panel moves a key away
+from another action when assigning it. Action playback still checks each nested command's
+automation permissions.
 
 UI-level commands (`view.zoomIn`, `window.theme.pro`, `edit.search`, …) are also accepted by `engine.execute` and `ui.menu.invoke`.
 
@@ -165,6 +195,16 @@ Headless CLI/MCP sessions and the web build keep brush presets and the action li
 only, unless a store is attached. Gradient presets (including imported `.grd` groups) persist with
 the preferences.
 
+Named New Document presets also persist with preferences (`presets.documents`) on desktop and
+web. File › New › Save Preset… saves the current form; the Saved tab selects a configuration or
+deletes it. Selection only fills the form: Create still runs `file.new`, and the document name
+is independent of the preset name. Settings include pixel width/height, resolution in ppi,
+mode, depth, background, and display `unit` (`px`, `in`, `cm`, `mm`, `pt`, `pica`) and
+`resolutionUnit` (`in`, `cm`). The defaults match File › New. Background Color captures the
+toolbox colour as `backgroundColor: [r,g,b]` (0..1), so reusing it does not follow later toolbox
+changes. Up to 256 presets are kept. Invalid saved entries are skipped independently; other
+presets and preferences still load. Automatic Recent configurations are separate follow-up work.
+
 ## Snapping
 
 With View › Snap on, tool gestures snap to the View › Snap To targets (guides and grid while they
@@ -181,7 +221,7 @@ magenta alignment lines. `ui.pointer` drives the same code, so agents get identi
 - **Headless** (`photocraft-cli mcp`): an in-process `photocraft_engine::Session`. There is no window.
 - **Bridge** (`photocraft-cli mcp --bridge 127.0.0.1:7878 --control-token-file <path>`): every tool is forwarded to a running `photocraft --control 7878 --control-token-file <path>` over this protocol, so agents see and drive the live app.
 
-The bridge keeps one authenticated TCP connection open. It reconnects and authenticates once if a request fails, and it skips reply lines whose `id` doesn't match the request (for example, stale replies to requests that timed out). It only accepts loopback addresses, because the app only listens on loopback. Supply its bearer token with `--control-token-file`, `--control-token`, `PHOTOCRAFT_CONTROL_TOKEN_FILE`, or `PHOTOCRAFT_CONTROL_TOKEN`:
+The bridge keeps one authenticated TCP connection open. A transport failure while sending a request or waiting for its reply, including a reply timeout, drops the connection and reports that the operation may have completed; inspect the document before retrying an edit. It never automatically resends the failed request. The next separate call reconnects and authenticates, and reply lines whose `id` does not match the request are skipped. It only accepts loopback addresses, because the app only listens on loopback. Supply its bearer token with `--control-token-file`, `--control-token`, `PHOTOCRAFT_CONTROL_TOKEN_FILE`, or `PHOTOCRAFT_CONTROL_TOKEN`:
 
 ```sh
 photocraft-cli mcp --bridge 127.0.0.1:7878 \
@@ -206,6 +246,8 @@ How each MCP tool maps onto control methods in bridge mode:
 | `ui_menu_invoke {id}` | `ui.menu.invoke` |
 | `ui_set {fields}` | `ui.set` |
 | `control_call {method, params}` | any method, passed through unchanged |
+
+Bridge previews capture the app window; passing `index` is an error. Headless `doc_render_preview` supports `index` without changing the active document.
 
 `doc_select` and `doc_close` work only in headless mode. The `ui_*` tools and `control_call` work only in bridge mode; in headless mode they return a tool error that explains how to start bridge mode.
 
@@ -244,7 +286,7 @@ no MCP framing, no app start-up per command. Configure its file access with the 
 | `engine.commands` | `{filter?}`: registry with params docs and enablement |
 | `session.list` | open documents and the active index |
 | `doc.open` / `doc.new` | `{path}` / `file.new` params |
-| `doc.save` | `{path?, format?, quality?, index?}` (`.pcraft` native, else export by extension). Without `path` only a PSD, PSB or `.pcraft` document is written back to its own file, in its own format; anything else is an error and the file is left unchanged |
+| `doc.save` | `{path?, format?, quality?, index?}` (`.pcraft` native, else export by extension). Without `path` only a PSD, PSB or `.pcraft` document is written back to its own file, in its own format; anything else is an error and the file is left unchanged. A successful layered save (PSD, PSB or `.pcraft`) records the current revision as saved and makes the file the document's path, so `session.list` reports `dirty: false`; a flat export is a copy and leaves the document dirty |
 | `doc.inspect` | `{index?}`: same JSON as `document.inspect` |
 | `doc.render` | `{index?, maxSide? (1024; 0 = full), path?}`: PNG to `path`, else `{mime, base64}` |
 | `doc.select` / `doc.close` | `{index}` / `{index?}` |
@@ -424,3 +466,19 @@ and region changes rebuild only the dependent analysis. Display options and the 
 geometry persist in preferences `dialogs["filter.cameraRaw.scope"]`; probes and vectorscope
 visibility reset when the dialog opens. HDR scopes are not implemented. See
 [camera-raw-histogram.md](camera-raw-histogram.md).
+
+### Editing and composing actions
+
+Creating an action scrolls its row into view; newly recorded steps are revealed immediately.
+Drag a step above or below another step in the same action to reorder it. Drag an action header
+to reorder the action list. The insertion line marks the drop position; dragging near the rows'
+top or bottom scrolls the list. Reordering is saved with the actions and does not undo image edits.
+
+While recording, press a function key assigned to another action (or play it from the panel).
+The recorder adds **Play Action: <name>** as one step, and the called action still executes.
+Playback resolves the name each time, so editing or moving the called action does not freeze or
+retarget the caller. Reassigning F6 later does not change an already recorded named call.
+Missing actions, recursive calls and nesting beyond 16 levels fail visibly; a child failure stops
+the parent before its next step. Every nested command retains the normal automation permission check.
+Existing recordings containing expanded commands remain unchanged; remove those steps and record
+the named call again if desired.

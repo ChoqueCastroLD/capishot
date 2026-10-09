@@ -201,7 +201,8 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
 /// its selected pixels, as Layer via Copy) and transforms the copy (#352).
 pub fn begin_copy(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String> {
     let selection = app.session.active().is_some_and(|d| d.doc.selection.is_some());
-    app.run(if selection { "layer.new.layerViaCopy" } else { "layer.duplicate" }, json!({}))?;
+    let params = if selection { json!({}) } else { json!({"inPlace": true}) };
+    app.run(if selection { "layer.new.layerViaCopy" } else { "layer.duplicate" }, params)?;
     let made = app.session.active().and_then(|st| st.active_layer.map(|layer| (st.doc.id, layer)));
     if let Err(e) = begin(app, ctx) {
         if let Some((document, layer)) = made {
@@ -846,12 +847,14 @@ pub(crate) fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods
             q[i] = [g.quad0[i][0] + mx, g.quad0[i][1] + my];
             q[j] = [g.quad0[j][0] - mx, g.quad0[j][1] - my];
             s.quad = keep_convex(g.quad0, q);
+            s.pivot = carry_pivot(g.quad0, s.quad, g.pivot0);
         }
         Hit::Corner(i) if mods.command => {
             // Distort: move the corner freely, up to where the box would fold over (#1323).
             let mut q = g.quad0;
             q[i] = [g.quad0[i][0] + dx, g.quad0[i][1] + dy];
             s.quad = keep_convex(g.quad0, q);
+            s.pivot = carry_pivot(g.quad0, s.quad, g.pivot0);
         }
         Hit::Edge(i) if mods.command => {
             // Skew: the edge's two corners move together (⇧: only along the edge).
@@ -872,6 +875,7 @@ pub(crate) fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods
                 s.quad[c] = [g.quad0[c][0] - mx, g.quad0[c][1] - my];
                 s.quad[d] = [g.quad0[d][0] - mx, g.quad0[d][1] - my];
             }
+            s.pivot = carry_pivot(g.quad0, s.quad, g.pivot0);
         }
         Hit::Corner(_) | Hit::Edge(_) => {
             // Work in the box's own (unit) frame so rotated/skewed boxes scale along their axes.
@@ -950,10 +954,23 @@ pub(crate) fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods
                 [x, y]
             };
             s.quad = [map(r[0], r[1]), map(r[2], r[1]), map(r[2], r[3]), map(r[0], r[3])];
-            let (x, y) = h.apply(pu, pv);
-            s.pivot = [x, y];
+            // ⌥ scales about the reference point, so it stays put; otherwise it rides along with
+            // the box, keeping its place in it (#1329).
+            s.pivot = if mods.alt { g.pivot0 } else { carry_pivot(g.quad0, s.quad, g.pivot0) };
         }
     }
+}
+
+/// Where the reference point lands when the box goes from `quad0` to `quad`: the same place
+/// within the box, as in Photoshop, where it is attached to the bounding box (#1329). A box
+/// that has collapsed leaves it where it was.
+fn carry_pivot(quad0: [[f64; 2]; 4], quad: [[f64; 2]; 4], pivot0: [f64; 2]) -> [f64; 2] {
+    let unit = [0.0, 0.0, 1.0, 1.0];
+    let (Some(h0), Some(h1)) = (Homography::rect_to_quad(unit, quad0), Homography::rect_to_quad(unit, quad)) else { return pivot0 };
+    let Some(inv) = h0.inverse() else { return pivot0 };
+    let (u, v) = inv.apply(pivot0[0], pivot0[1]);
+    let (x, y) = h1.apply(u, v);
+    if x.is_finite() && y.is_finite() { [x, y] } else { pivot0 }
 }
 
 /// An anchor or a handle on a section line. The inner control points of a patch are not shown.
@@ -1887,6 +1904,54 @@ mod tests {
         assert!(close(s.quad, corners([0.0, 0.0, 100.0, 80.0])), "{:?}", s.quad);
     }
 
+    fn near(a: [f64; 2], b: [f64; 2]) -> bool {
+        (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6
+    }
+
+    /// The reference point is attached to the box (#1329): scaling, skewing, distorting and
+    /// perspective carry it along to the same place within the box; ⌥-scaling about it and
+    /// rotating about it leave it put.
+    #[test]
+    fn the_reference_point_moves_with_the_box() {
+        // Corner scale down: the centre stays the centre.
+        let mut s = session();
+        drag(&mut s, [100.0, 50.0], [50.0, 25.0], egui::Modifiers::NONE);
+        assert!(close(s.quad, corners([0.0, 0.0, 50.0, 25.0])), "{:?}", s.quad);
+        assert!(near(s.pivot, [25.0, 12.5]), "{:?}", s.pivot);
+        // A reference point set to a corner stays at that corner; an edge drag carries it too.
+        let mut s = session();
+        s.pivot = [100.0, 0.0];
+        drag(&mut s, [50.0, 50.0], [50.0, 80.0], egui::Modifiers::NONE);
+        assert!(near(s.pivot, [100.0, 0.0]), "{:?}", s.pivot);
+        drag(&mut s, [100.0, 40.0], [150.0, 40.0], egui::Modifiers::NONE);
+        assert!(near(s.pivot, s.quad[1]), "{:?} {:?}", s.pivot, s.quad);
+        // Skew: the centre follows the box's centre.
+        let mut s = session();
+        drag(&mut s, [50.0, 0.0], [70.0, 0.0], egui::Modifiers::COMMAND);
+        assert!(near(s.pivot, [60.0, 25.0]), "{:?}", s.pivot);
+        // Distort: a corner reference point stays on its corner.
+        let mut s = session();
+        s.pivot = [0.0, 50.0];
+        drag(&mut s, [0.0, 50.0], [-20.0, 70.0], egui::Modifiers::COMMAND);
+        assert!(near(s.pivot, [-20.0, 70.0]), "{:?}", s.pivot);
+        // Perspective: the centre stays inside the box, on the box's own centre lines.
+        let mut s = session();
+        drag(&mut s, [100.0, 0.0], [120.0, 0.0], egui::Modifiers { command: true, alt: true, shift: true, ..Default::default() });
+        let h = Homography::rect_to_quad([0.0, 0.0, 1.0, 1.0], s.quad).unwrap();
+        let (x, y) = h.apply(0.5, 0.5);
+        assert!(near(s.pivot, [x, y]), "{:?} vs {:?}", s.pivot, [x, y]);
+        // ⌥ scales about the reference point: it stays where it is.
+        let mut s = session();
+        drag(&mut s, [100.0, 50.0], [150.0, 75.0], egui::Modifiers::ALT);
+        assert!(near(s.pivot, [50.0, 25.0]), "{:?}", s.pivot);
+        // Rotation turns about it.
+        let mut s = session();
+        drag(&mut s, [150.0, 25.0], [50.0, 125.0], egui::Modifiers::NONE);
+        assert!(near(s.pivot, [50.0, 25.0]), "{:?}", s.pivot);
+        // From a box collapsed to a point there is no place within it to keep: it stays put.
+        assert_eq!(carry_pivot([[0.0, 0.0]; 4], corners([0.0, 0.0, 10.0, 10.0]), [5.0, 5.0]), [5.0, 5.0]);
+    }
+
     #[test]
     fn move_rotate_and_distort() {
         let mut s = session();
@@ -2348,7 +2413,13 @@ mod tests {
             let t0 = std::time::Instant::now();
             let _ = ctx.run_ui(egui::RawInput { max_texture_side: Some(16384), ..Default::default() }, |ui| {
                 let painter = ui.ctx().layer_painter(egui::LayerId::background());
-                let xf = ViewXform { rect: egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0)), zoom, center: [3000.0, 2000.0], flip: false };
+                let xf = ViewXform {
+                    rect: egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0)),
+                    zoom,
+                    center: [3000.0, 2000.0],
+                    flip: false,
+                    rotation: 0.0,
+                };
                 draw_overlay(&app, &painter, &xf);
             });
             t0.elapsed().as_secs_f64() * 1e3

@@ -1405,7 +1405,7 @@ fn reference_reduce(doc: &Document, w: usize, h: usize) -> Vec<[f32; 4]> {
 fn reduced_render_matches_the_full_composite_averaged() {
     let d = tall_doc(53, 1000);
     for (w, h, band) in [(10, 190, 0), (7, 33, 256), (53, 999, 512), (1, 1, 256)] {
-        let got = render_reduced_in_bands(&d, w, h, None, band);
+        let got = render_reduced_in_bands(&d, d.bounds(), w, h, None, band);
         assert_eq!((got.rect.width(), got.rect.height()), (w, h));
         assert_eq!(got.px, reference_reduce(&d, w as usize, h as usize), "{w}x{h} band {band}");
     }
@@ -1421,9 +1421,9 @@ fn reduced_damage_matches_the_whole_reduction() {
     // whole reduction's, for uneven factors, damage on span edges and bands smaller than the area.
     let d = tall_doc(53, 1000);
     for (w, h, band) in [(10, 190, 0), (7, 33, 256), (53, 999, 64), (53, 1000, 0), (1, 1, 256)] {
-        let all = render_reduced_in_bands(&d, w, h, None, band);
+        let all = render_reduced_in_bands(&d, d.bounds(), w, h, None, band);
         for dmg in [Rect::new(0, 0, 1, 1), Rect::new(5, 17, 6, 18), Rect::new(12, 300, 40, 701), Rect::new(-9, 990, 80, 2000), Rect::new(0, 0, 53, 1000)] {
-            let part = render_reduced_in_bands(&d, w, h, Some(dmg), band);
+            let part = render_reduced_in_bands(&d, d.bounds(), w, h, Some(dmg), band);
             let r = part.rect;
             assert!(!r.is_empty() && r.x0 >= 0 && r.y0 >= 0 && r.x1 as u32 <= w && r.y1 as u32 <= h, "{w}x{h} {dmg:?} -> {r:?}");
             for y in r.y0..r.y1 {
@@ -1442,8 +1442,38 @@ fn reduced_damage_matches_the_whole_reduction() {
                 }
             }
         }
-        assert!(render_reduced_in_bands(&d, w, h, Some(Rect::new(60, 0, 70, 10)), band).rect.is_empty());
+        assert!(render_reduced_in_bands(&d, d.bounds(), w, h, Some(Rect::new(60, 0, 70, 10)), band).rect.is_empty());
     }
+}
+
+#[test]
+fn reduced_render_of_an_area_past_the_canvas() {
+    // The Crop tool shows layer pixels beyond the canvas: rendered in place, they must equal the
+    // same pixels on a canvas that holds them (adjustment layers apply out there too).
+    let paint = |d: &mut Document, dx: i32, dy: i32| {
+        let mut l = Layer::raster("big", PixelFormat::RGBA8);
+        let s = l.surface_mut().unwrap();
+        for y in -10..40 {
+            for x in -20..60 {
+                let a = if x < 0 || y >= 30 { 0.6 } else { 1.0 };
+                s.fill_rect(Rect::new(x + dx, y + dy, x + dx + 1, y + dy + 1), &[(x + 20) as f32 / 80.0, (y + 10) as f32 / 50.0, 0.5, a]);
+            }
+        }
+        d.layers.push(l);
+        d.layers.push(Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert)));
+    };
+    let mut d = Document::new("d", Size::new(40, 30), ColorMode::Rgb, SampleType::U8);
+    paint(&mut d, 0, 0);
+    let mut whole = Document::new("w", Size::new(80, 50), ColorMode::Rgb, SampleType::U8);
+    paint(&mut whole, 20, 10);
+    let area = Rect::new(-20, -10, 60, 40);
+    for (w, h) in [(80, 50), (8, 5), (27, 13), (1, 1)] {
+        let got = render_reduced_rect(&d, area, w, h);
+        assert_eq!(got.rect, Rect::new(0, 0, w as i32, h as i32));
+        assert_eq!(got.px, render_reduced(&whole, w, h).px, "{w}x{h}");
+    }
+    // Past every layer there is nothing to show.
+    assert!(render_reduced_rect(&d, Rect::new(100, 100, 120, 110), 20, 10).px.iter().all(|p| p[3] == 0.0));
 }
 
 #[test]

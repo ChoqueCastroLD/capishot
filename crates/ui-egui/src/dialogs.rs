@@ -133,7 +133,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             crate::widgets::hairline(ui);
             ui.add_space(8.0);
             match d.kind {
-                DialogKind::NewDocument => crate::new_doc_ui::body(ui, &mut fields),
+                DialogKind::NewDocument => crate::new_doc_ui::body(app, ui, &mut fields),
                 DialogKind::About if fields.get("systemInfo").and_then(Value::as_bool) == Some(true) => {
                     let lines = crate::gpu_status::system_info(app);
                     for l in &lines {

@@ -17,6 +17,10 @@
 	Layer	图层
 	Type	文字
 	Select	选择
+	Top Left	左上
+	Top Right	右上
+	Bottom Left	左下
+	Bottom Right	右下
 	Filter	滤镜
 	View	视图
 	Window	窗口
@@ -1492,6 +1496,10 @@
 	↑↓ navigate   ↵ run   esc close	↑↓ 导航   ↵ 运行   esc 关闭
 	Version {version}	版本 {version}
 	New Document	新建文档
+	Saved	已保存
+	Save Preset…	保存预设…
+	Preset Name	预设名称
+	No saved presets yet.	尚无已保存的预设。
 	Error	错误
 	Command	命令
 	Adds grain to the soft edges of the brush tip.	在笔尖的柔软边缘添加颗粒。
@@ -2187,6 +2195,14 @@ cameraRaw	Blending	混合
 	Channels:	通道:
 	Knockout	挖空
 	Apply At Canvas Bounds	应用画布边界的效果
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	拾色器（文字颜色）
+	Pick screen color	选取屏幕颜色
+	Sample a pixel anywhere on the screen	在屏幕任意位置采样像素
+	Click to pick · Esc to cancel	单击选取 · Esc 取消
+	Pick a screen pixel or press Esc to cancel	选取屏幕像素或按 Esc 取消
+	Scroll to zoom	滚动以缩放
 	Show/Hide All Panels	显示/隐藏所有面板
 	Show/Hide Panels	显示/隐藏面板
 	Could not open	无法打开
@@ -2249,3 +2265,7 @@ fontWeight	Italic	斜体
 	Pattern Stamp Tool	图案图章工具
 	Pattern Stamp	图案图章
 	Impressionist	印象派
+	Rotate View	旋转视图
+	Rotate View Tool	旋转视图工具
+	Reset View	重置视图
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	绕中心拖动以旋转视图  ·  Shift 限制为 15°

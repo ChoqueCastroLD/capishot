@@ -112,7 +112,9 @@ pub mod quick_pick;
 pub mod rasterize_prompt;
 pub mod retouch_ui;
 mod rgb_histogram;
+pub mod rotate_view;
 pub mod rulers;
+pub mod screen_picker;
 pub mod scrollbars;
 pub mod shortcut_dispatch;
 pub mod shortcuts;
@@ -131,6 +133,7 @@ pub mod tiff_options_ui;
 mod timeline_ui;
 mod titlebar;
 pub mod tone;
+mod tool_cursor;
 pub mod tool_feedback;
 pub mod transform_tex;
 pub mod transform_tool;
@@ -208,6 +211,8 @@ pub type LoadTextFn = Box<dyn FnMut() -> Option<String>>;
 pub type SaveTextFn = Box<dyn FnMut(&str) -> Result<(), String>>;
 /// Autosave a document snapshot for crash recovery: (snapshot, revision, original path).
 pub type AutosaveFn = Box<dyn FnMut(&std::sync::Arc<Document>, u64, Option<&str>) -> Result<(), String>>;
+/// Poll successful or failed background writes: (document id, revision, result).
+pub type AutosaveResultsFn = Box<dyn FnMut() -> Vec<(u64, u64, Result<(), String>)>>;
 /// Drop the recovery data of a document (by `DocId` value) once it is saved or closed.
 pub type DiscardAutosaveFn = Box<dyn FnMut(u64)>;
 /// Load recoverable documents left by a previous session. Their recovery data stays until the
@@ -236,6 +241,8 @@ pub type CursorPosFn = Box<dyn FnMut(&egui::Context) -> Option<egui::Pos2>>;
 /// I/O dependencies.
 #[derive(Default)]
 pub struct Services {
+    /// User-initiated desktop/browser pixel sampling.
+    pub screen_pick: Option<screen_picker::Service>,
     /// Decode a file's bytes into a document (PSD, PNG, JPEG, …).
     pub import: Option<ImportFn>,
     /// Encode a document for a file name (format chosen by extension).
@@ -273,6 +280,8 @@ pub struct Services {
     pub xwayland_command: Option<String>,
     /// Crash-recovery autosave (Preferences › File Handling) and recovery at launch.
     pub autosave: Option<AutosaveFn>,
+    /// None for services that report synchronous success through `autosave`.
+    pub autosave_results: Option<AutosaveResultsFn>,
     pub discard_autosave: Option<DiscardAutosaveFn>,
     pub recover: Option<RecoverFn>,
     pub adopt_autosave: Option<AdoptAutosaveFn>,
@@ -305,6 +314,8 @@ pub struct PhotocraftApp {
     /// Canvas caches per (document, display): CPU textures hold monitor values; the GPU
     /// canvas state is shared (`canvas::GPU_OUTPUT`).
     canvases: HashMap<(DocId, u32), canvas::CanvasCache>,
+    /// Navigator textures belong to open documents, not the lifetime of the egui context.
+    navigator_textures: HashMap<DocId, canvas::NavigatorCache>,
     /// Display profile readings (#569).
     monitors: monitor_status::State,
     checker: Option<egui::TextureHandle>,
@@ -483,6 +494,7 @@ impl PhotocraftApp {
             ui: UiState::default(),
             services,
             canvases: HashMap::new(),
+            navigator_textures: HashMap::new(),
             monitors: Default::default(),
             checker: None,
             drag: None,
@@ -673,7 +685,24 @@ impl PhotocraftApp {
         }
         // Long commands become background jobs when enabled (`jobs_ui`); the rest run inline.
         let params = self.with_mask_target(id, params);
-        let r = jobs_ui::run(self, id, params);
+        let params = vector_ui::with_active_path(self, id, params);
+        let path_mask = vector_ui::takes_path_mask(id) && params.get("path").is_some_and(|v| !v.is_null());
+        let r = if id == "actions.play" {
+            actions::play(self, &params)
+        } else if photocraft_engine::actions_cmds::shell_view_command(id) {
+            actions::run_view(self, id, params)
+        } else {
+            jobs_ui::run(self, id, params)
+        };
+        if r.is_ok() && id == "select.toWorkPath" {
+            // Make Work Path selects the new work path in the Paths panel, as in Photoshop.
+            self.ui.selected_path = Some("work".into());
+        }
+        if r.is_ok() && path_mask {
+            // The new layer's vector mask becomes the active path, as in Photoshop: the path it
+            // was made from is no longer selected, so the next fill layer isn't masked by it too.
+            self.ui.selected_path = Some("layer".into());
+        }
         if r.is_ok() && matches!(id, "edit.copy" | "edit.cut" | "edit.copyMerged") {
             self.clip_external = false;
             self.export_os_clipboard();
@@ -718,6 +747,8 @@ impl PhotocraftApp {
         }
         self.ui.views = views.into_iter().map(Option::unwrap_or_default).collect();
         self.ui.windows.retain_mut(|w| now(w.document).map(|d| w.document = d).is_some());
+        self.canvases.retain(|(doc, _), _| ids.contains(doc));
+        self.navigator_textures.retain(|doc, _| ids.contains(doc));
         self.view_docs = ids;
         self.prune_thumbs();
         self.sync_mask_targets();
@@ -932,6 +963,10 @@ impl PhotocraftApp {
         let Some(rx) = self.control_rx.take() else { return };
         while let Ok(req) = rx.try_recv() {
             let reply = req.reply.clone();
+            if req.deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                let _ = reply.send(serde_json::json!({"ok": false, "error": "timeout"}));
+                continue;
+            }
             match control::handle(self, ctx, &req) {
                 control::Outcome::Done(v) => {
                     let _ = reply.send(v);
@@ -1032,8 +1067,10 @@ impl eframe::App for PhotocraftApp {
         discard_ui::guard_window_close(self, ctx);
         // Background jobs: apply finished ones, keep frames coming, Esc cancels (before the
         // shortcuts see Esc).
-        jobs_ui::tick(self, ctx);
-        shortcuts::handle(self, ctx);
+        if !screen_picker::tick(self, ctx) {
+            jobs_ui::tick(self, ctx);
+            shortcuts::handle(self, ctx);
+        }
         let arrived: Vec<(String, Vec<u8>)> =
             self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
         for (name, bytes) in arrived {
@@ -1087,6 +1124,22 @@ impl eframe::App for PhotocraftApp {
         lut_library_ui::end_stale_preview(self, &ctx);
         let t0 = gpu_canvas::now_ms();
         // View › Screen Mode › Full Screen Mode: only the image, on black (F or Esc returns).
+        screen_picker::show(&ctx);
+        if screen_picker::busy(&ctx) && screen_picker::showing(&ctx) {
+            egui::Modal::new(egui::Id::new("screen-color-wait")).show(&ctx, |ui| {
+                ui.spinner();
+                ui.label(tl!("Pick a screen pixel or press Esc to cancel"));
+                if ui.button(tl!("Cancel")).clicked() {
+                    screen_picker::cancel(&ctx);
+                }
+            });
+            self.automation_input = false;
+            return;
+        }
+        if screen_picker::busy(&ctx) {
+            ui.disable();
+            ui.set_opacity(1.0);
+        }
         let chrome = !self.ui.view.hides_chrome();
         if !chrome && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = menus::invoke(self, &ctx, "view.screenMode.standard", serde_json::json!({}));
@@ -1136,6 +1189,11 @@ impl eframe::App for PhotocraftApp {
         gpu_status::check(self, &ctx);
         self.automation_input = false;
         native_menu::sync(self, &ctx);
+        if screen_picker::busy(&ctx) {
+            // Block input without a backdrop: the worker may still be capturing the screen.
+            egui::Modal::new(egui::Id::new("screen-color-wait")).frame(egui::Frame::NONE).backdrop_color(egui::Color32::TRANSPARENT).show(&ctx, |_| {});
+            ctx.set_cursor_icon(egui::CursorIcon::Wait);
+        }
         self.perf.frame(gpu_canvas::now_ms() - t0);
         // Synthetic input is injected one press/release step per frame: keep frames coming until
         // the queue is empty, then release control replies waiting on it.
@@ -1340,6 +1398,7 @@ impl PhotocraftApp {
     /// Install fonts, image loaders and the theme. Call from the app creator when possible so the
     /// very first frame renders; otherwise `logic` does it and the first frame is skipped.
     pub fn setup_context(ctx: &egui::Context, kind: theme::ThemeKind) {
+        ctx.add_plugin(tool_cursor::CursorLifecycle);
         theme::install_fonts(ctx);
         egui_extras::install_image_loaders(ctx);
         theme::apply(ctx, kind);

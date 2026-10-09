@@ -96,8 +96,9 @@ pub(crate) fn image_to_document(name: &str, img: &Image) -> Result<ImportResult,
     doc.icc_profile = img.icc.clone().map(Arc::new);
     doc.metadata.exif = img.meta.exif.clone().map(Arc::new);
     doc.metadata.xmp = img.meta.xmp.clone();
-    if let Some((x, _)) = img.meta.dpi {
+    if let Some((x, y)) = img.meta.dpi {
         doc.resolution_dpi = x;
+        warnings.extend(crate::unequal_resolution_warning(f64::from(x), f64::from(y)));
     }
     if !img.meta.text.is_empty() {
         warnings.push(format!("{} text metadata entries are not kept in the document", img.meta.text.len()));

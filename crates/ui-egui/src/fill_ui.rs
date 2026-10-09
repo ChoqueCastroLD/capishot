@@ -146,7 +146,7 @@ pub fn body(app: &PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) 
             ui.horizontal(|ui| {
                 label(ui, tl!("Color:"));
                 let mut rgb = parse_hex(&get_str(f, "color", "#000000"));
-                if egui::color_picker::color_edit_button_srgb(ui, &mut rgb).changed() {
+                if crate::widgets::color_edit_button_srgb(ui, &mut rgb).changed() {
                     f.insert("color".into(), json!(format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])));
                 }
             });

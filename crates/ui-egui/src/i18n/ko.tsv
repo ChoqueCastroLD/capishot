@@ -1462,6 +1462,10 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 이동   {key} 실행   esc 닫기
 	Version {version}	버전 {version}
 	New Document	새 문서
+	Saved	저장됨
+	Save Preset…	사전 설정 저장…
+	Preset Name	사전 설정 이름
+	No saved presets yet.	저장된 사전 설정이 없습니다.
 	Error	오류
 	Command	명령
 	Adjustment layers have nothing to transform	조정 레이어에는 변형할 내용이 없습니다
@@ -2769,6 +2773,14 @@ cameraRaw	Color	색상
 	Channels:	채널:
 	Knockout	녹아웃
 	Apply At Canvas Bounds	캔버스 경계에 효과 적용
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	색상 선택기 (텍스트 색상)
+	Pick screen color	화면 색상 선택
+	Sample a pixel anywhere on the screen	화면의 아무 픽셀에서 색상 추출
+	Click to pick · Esc to cancel	클릭하여 선택 · Esc로 취소
+	Pick a screen pixel or press Esc to cancel	화면 픽셀을 선택하거나 Esc를 눌러 취소
+	Scroll to zoom	스크롤하여 확대/축소
 	Show/Hide All Panels	모든 패널 표시/숨기기
 	Show/Hide Panels	패널 표시/숨기기
 	Could not open	열 수 없음
@@ -2824,3 +2836,7 @@ fontWeight	Italic	기울임
 	Pattern Stamp Tool	패턴 스탬프 도구
 	Pattern Stamp	패턴 스탬프
 	Impressionist	인상파
+	Rotate View	보기 회전
+	Rotate View Tool	보기 회전 도구
+	Reset View	보기 재설정
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	중심 주위를 드래그해 보기를 회전합니다  ·  Shift는 15°로 제한

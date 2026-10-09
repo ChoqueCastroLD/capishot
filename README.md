@@ -122,7 +122,7 @@ Every screenshot here is the real app at work on public-domain art, rendered off
       <br>
       <sub>A headline edited in place, with a byline and a paragraph of body text.<br><i>Among the Sierra Nevada, California</i>, Albert Bierstadt, 1868</sub>
       <h3>Type that sets beautifully</h3>
-      Point and paragraph text, edited right on the canvas, with full Character and Paragraph controls: font, weight, size, leading, tracking, alignment and colour.
+      Point and paragraph text, edited right on the canvas, with full Character and Paragraph controls: font, weight, size, leading, tracking, alignment and colour. The <a href="docs/color-picker.md">full Type Color Picker</a> also supports screen sampling with a pixel loupe.
       <br><br>
       Type layers stay editable, take layer styles, and round-trip through PSD.
     </td>
@@ -303,6 +303,8 @@ Maintainers: [`docs/releasing.md`](docs/releasing.md) explains how releases are 
 ## Documentation
 
 Developer, architecture, automation, format, and security documentation is maintained in the [PhotoCraft documentation book](book/).
+
+To self-host the browser version with Docker, see [Docker web hosting](packaging/web/README.md#docker).
 
 ## Security
 

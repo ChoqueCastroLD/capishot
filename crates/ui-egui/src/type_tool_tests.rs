@@ -48,7 +48,13 @@ fn new_app() -> PhotocraftApp {
 
 fn xf(app: &PhotocraftApp) -> ViewXform {
     let v = &app.ui.views[0];
-    ViewXform { rect: crate::rulers::content_rect(app, app.last_canvas_rect), zoom: v.zoom, center: v.center, flip: app.ui.view.flip_horizontal }
+    ViewXform {
+        rect: crate::rulers::content_rect(app, app.last_canvas_rect),
+        zoom: v.zoom,
+        center: v.center,
+        flip: app.ui.view.flip_horizontal,
+        rotation: v.rotation,
+    }
 }
 
 /// Screen position of a text-space point of layer `id`.
@@ -457,6 +463,57 @@ fn command_t_while_typing_toggles_the_character_panel() {
     assert!(h.state().ui.transform.is_none(), "no Free Transform while typing");
     assert!(h.state().ui.text_edit.is_some(), "still editing");
     assert_ne!(crate::view_cmds::checked(h.state(), "window.panel.character"), before, "the Character panel toggled");
+}
+
+#[test]
+fn text_color_dialog_edits_only_the_selected_range_and_cancel_is_inert() {
+    let mut app = new_app();
+    let id = LayerId(app.run("type.create", json!({"text":"Hello world","size":40,"color":"#000000"})).unwrap()["layer"].as_u64().unwrap());
+    app.ui.text_edit = Some(crate::state::TextEdit {
+        layer: id.0,
+        caret: 11,
+        anchor: 6,
+        session: "text-color-dialog-test".into(),
+        created: false,
+        dragging: false,
+        resize: None,
+        preedit: None,
+    });
+    let foreground = app.session.tools.foreground;
+    let before = app.session.active().unwrap().history.entries().len();
+    let selection = app.ui.text_edit.clone();
+    let dialog = super::open_color_picker(&mut app, [0.0; 3]);
+    app.ui.dialogs.last_mut().unwrap().fields.insert("color".into(), json!("#ff0000"));
+    app.ui.close_dialog(dialog).unwrap();
+    assert_eq!(rgb_at(&app, id, 6), [0, 0, 0, 255]);
+    assert_eq!(app.session.active().unwrap().history.entries().len(), before);
+    assert_eq!(app.ui.text_edit, selection);
+    let dialog = super::open_color_picker(&mut app, [0.0; 3]);
+    assert_eq!(app.ui.dialogs.last().unwrap().fields["__label"], "Color Picker (Text Color)");
+    app.ui.dialogs.last_mut().unwrap().fields.insert("color".into(), json!("#00ff00"));
+    crate::dialogs::confirm(&mut app, dialog).unwrap();
+    assert_eq!(rgb_at(&app, id, 0), [0, 0, 0, 255]);
+    assert_eq!(rgb_at(&app, id, 5), [0, 0, 0, 255]);
+    assert_eq!(rgb_at(&app, id, 6), [0, 255, 0, 255]);
+    assert_eq!(rgb_at(&app, id, 10), [0, 255, 0, 255]);
+    assert_eq!(app.session.tools.foreground, foreground, "text-only picker leaves the foreground alone");
+    assert_eq!(app.ui.text_edit, selection, "dialog preserves the caret and selection");
+    assert_eq!(app.session.active().unwrap().history.entries().len(), before + 1);
+    let dialog = super::open_color_picker(&mut app, [0.0, 1.0, 0.0]);
+    app.ui.dialogs.last_mut().unwrap().fields.insert("color".into(), json!("#0000ff"));
+    crate::dialogs::confirm(&mut app, dialog).unwrap();
+    assert_eq!(app.session.active().unwrap().history.entries().len(), before + 1, "one editing-session undo step");
+}
+
+#[test]
+fn text_color_dialog_without_a_selection_edits_the_whole_layer() {
+    let mut app = new_app();
+    let id = LayerId(app.run("type.create", json!({"text":"Hello","color":"#000000"})).unwrap()["layer"].as_u64().unwrap());
+    let dialog = super::open_color_picker(&mut app, [0.0; 3]);
+    app.ui.dialogs.last_mut().unwrap().fields.insert("color".into(), json!("#ff8800"));
+    crate::dialogs::confirm(&mut app, dialog).unwrap();
+    assert_eq!(rgb_at(&app, id, 0), [255, 136, 0, 255]);
+    assert_eq!(rgb_at(&app, id, 4), [255, 136, 0, 255]);
 }
 
 /// #1381: on Wayland the input method sends an empty preedit (and sometimes an empty commit)
