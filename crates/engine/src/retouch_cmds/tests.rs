@@ -316,6 +316,7 @@ fn history_brush_errors_when_layer_is_new() {
 fn retouch_commands_are_registered_and_need_a_pixel_layer() {
     let ids = [
         "paint.cloneStamp",
+        "paint.patternStamp",
         "paint.healingBrush",
         "paint.spotHealing",
         "paint.dodge",
@@ -341,8 +342,9 @@ fn retouch_commands_are_registered_and_need_a_pixel_layer() {
 // Paint target (#207): mask, alpha channel, Quick Mask
 // ---------------------------------------------------------------------------------------------
 
-const RETOUCH_IDS: [&str; 10] = [
+const RETOUCH_IDS: [&str; 11] = [
     "paint.cloneStamp",
+    "paint.patternStamp",
     "paint.healingBrush",
     "paint.spotHealing",
     "paint.dodge",
@@ -925,4 +927,166 @@ fn clone_and_heal_with_a_far_source_are_plain_errors() {
         s.execute(cmd, json!({"points": [[10, 10]], "source": [1e6, 1e6]})).unwrap();
         s.execute(cmd, json!({"points": [[10, 10], [30, 10]], "source": [2147483000, 0]})).unwrap();
     }
+}
+
+fn stamp(s: &mut Session, extra: Value) -> Result<Value> {
+    let mut p = json!({"points": [[16, 16]], "size": 16, "hardness": 100, "pattern": "Checkerboard", "scale": 100, "aligned": true});
+    if let Some(obj) = extra.as_object() {
+        for (k, v) in obj {
+            p[k] = v.clone();
+        }
+    }
+    s.execute("paint.patternStamp", p)
+}
+
+fn checker_at(x: i32, y: i32) -> f32 {
+    if (x.div_euclid(8) + y.div_euclid(8)).rem_euclid(2) == 0 { 0.8 } else { 1.0 }
+}
+
+#[test]
+fn pattern_stamp_paints_the_tile_at_every_depth_and_undoes() {
+    for depth in DEPTHS {
+        let mut s = session(64, 48, depth, "rgb");
+        let before = rgba(&s, 16, 16);
+        let r = stamp(&mut s, json!({"points": [[16, 16]]})).unwrap();
+        assert_eq!(r["aligned"], json!(true));
+        assert_eq!(r["phase"], json!([0.0, 0.0]));
+        assert!(r["pattern"].as_str().is_some_and(|id| !id.is_empty()), "{r}");
+        let got = rgba(&s, 16, 16);
+        let want = checker_at(16, 16);
+        for c in 0..3 {
+            assert!((got[c] - want).abs() <= tol(depth), "depth {depth} {got:?} want {want}");
+        }
+        assert!(got[3] > 0.99, "{got:?}");
+        assert_ne!(got, before);
+        assert!(s.active().unwrap().doc.patterns.iter().any(|p| p.name == "Checkerboard"));
+        assert!(s.undo());
+        assert!((rgba(&s, 16, 16)[0] - before[0]).abs() <= tol(depth));
+        assert!(s.redo());
+        assert!((rgba(&s, 16, 16)[0] - want).abs() <= tol(depth));
+    }
+    let mut g = session(48, 32, 16, "gray");
+    stamp(&mut g, json!({"points": [[16, 16]]})).unwrap();
+    let p = rgba(&g, 16, 16);
+    assert!((p[0] - checker_at(16, 16)).abs() <= tol(16), "{p:?}");
+}
+
+#[test]
+fn pattern_stamp_integer_scale_reproduces_the_tile_in_the_dab() {
+    let mut s = session(32, 32, 8, "rgb");
+    stamp(&mut s, json!({"points": [[8, 8]], "size": 16, "hardness": 100, "phase": [0, 0]})).unwrap();
+    for (x, y) in [(8, 8), (10, 8), (8, 12)] {
+        let got = rgba(&s, x, y);
+        let want = checker_at(x, y);
+        assert!((got[0] - want).abs() <= tol(8) && (got[1] - want).abs() <= tol(8), "({x},{y}) {got:?} want {want}");
+    }
+}
+
+#[test]
+fn pattern_stamp_scaled_tiles_have_no_gaps() {
+    for scale in [50.0, 200.0] {
+        let mut s = session(64, 48, 8, "rgb");
+        stamp(&mut s, json!({"points": [[24, 24]], "size": 24, "hardness": 100, "scale": scale, "phase": [0, 0]})).unwrap();
+        let mut holes = 0;
+        for y in 20..28 {
+            for x in 20..28 {
+                if rgba(&s, x, y)[3] < 0.5 {
+                    holes += 1;
+                }
+            }
+        }
+        assert_eq!(holes, 0, "scale {scale}: transparent holes inside the dab");
+    }
+}
+
+#[test]
+fn pattern_stamp_aligned_keeps_document_phase_across_strokes() {
+    let mut s = session(80, 40, 8, "rgb");
+    stamp(&mut s, json!({"points": [[10, 16]], "size": 8, "hardness": 100, "aligned": true, "phase": [0, 0]})).unwrap();
+    let a = rgba(&s, 10, 16);
+    stamp(&mut s, json!({"points": [[18, 16]], "size": 8, "hardness": 100, "aligned": true, "phase": [0, 0]})).unwrap();
+    let b = rgba(&s, 18, 16);
+    assert!((a[0] - checker_at(10, 16)).abs() <= tol(8), "{a:?}");
+    assert!((b[0] - checker_at(18, 16)).abs() <= tol(8), "{b:?}");
+    assert!((a[0] - b[0]).abs() > 0.05, "aligned wallpaper: (10,16) and (18,16) sit on different cells");
+}
+
+#[test]
+fn pattern_stamp_unaligned_restarts_at_each_stroke() {
+    let mut s = session(80, 40, 8, "rgb");
+    let r1 = stamp(&mut s, json!({"points": [[10, 16]], "size": 8, "hardness": 100, "aligned": false})).unwrap();
+    assert_eq!(r1["phase"], json!([10.0, 16.0]));
+    let a = rgba(&s, 10, 16);
+    let r2 = stamp(&mut s, json!({"points": [[40, 16]], "size": 8, "hardness": 100, "aligned": false})).unwrap();
+    assert_eq!(r2["phase"], json!([40.0, 16.0]));
+    let b = rgba(&s, 40, 16);
+    assert!((a[0] - b[0]).abs() <= tol(8), "each stroke's first point is the tile origin: {a:?} vs {b:?}");
+}
+
+#[test]
+fn pattern_stamp_impressionist_is_seeded_and_replayable() {
+    let pts = json!([[20, 20], [36, 22], [52, 20]]);
+    let params = json!({"points": pts, "size": 12, "hardness": 80, "pattern": "Bricks", "impressionist": true, "aligned": true});
+    let mut a = session(80, 40, 8, "rgb");
+    a.execute("paint.patternStamp", params.clone()).unwrap();
+    let mut samples = [[0.0f32; 4]; 3];
+    for (i, x) in [20, 36, 52].into_iter().enumerate() {
+        samples[i] = rgba(&a, x, 20);
+    }
+    assert!(a.undo());
+    a.execute("paint.patternStamp", params.clone()).unwrap();
+    for (i, x) in [20, 36, 52].into_iter().enumerate() {
+        let got = rgba(&a, x, 20);
+        for c in 0..4 {
+            assert!((got[c] - samples[i][c]).abs() < 1e-6, "replay x={x} {got:?} vs {:?}", samples[i]);
+        }
+    }
+    let mut b = session(80, 40, 8, "rgb");
+    let mut off = params.clone();
+    off["impressionist"] = json!(false);
+    b.execute("paint.patternStamp", off).unwrap();
+    let smooth = rgba(&b, 36, 20);
+    let noisy = samples[1];
+    assert!((noisy[0] - smooth[0]).abs() > 1e-4 || (noisy[1] - smooth[1]).abs() > 1e-4, "impressionist should jitter the phase: {noisy:?} vs {smooth:?}");
+}
+
+#[test]
+fn pattern_stamp_tile_seam_matches_an_untilled_reference() {
+    let mut s = session(96, 96, 8, "rgb");
+    stamp(&mut s, json!({"points": [[64, 48]], "size": 32, "hardness": 100, "phase": [0, 0]})).unwrap();
+    let pat = s.patterns.items.iter().find(|p| p.name == "Checkerboard").cloned().expect("builtin");
+    let tile = photocraft_compose::pattern::Tile::new(&pat).expect("tile");
+    let place = photocraft_compose::pattern::Placement::new(photocraft_geom::Rect::EMPTY, false, (0.0, 0.0), 1.0, 0.0);
+    let col = photocraft_geom::Rect::new(64, 40, 65, 56);
+    let reference = photocraft_compose::pattern::render(&tile, &place, col);
+    for (i, y) in (40..56).enumerate() {
+        let got = rgba(&s, 64, y);
+        let want = reference[i];
+        for c in 0..3 {
+            assert!((got[c] - want[c]).abs() <= tol(8), "y={y} {got:?} vs {want:?}");
+        }
+    }
+}
+
+#[test]
+fn pattern_stamp_rejects_hostile_input() {
+    let mut s = session(64, 48, 8, "rgb");
+    assert!(s.execute("paint.patternStamp", json!({"points": [], "pattern": "Checkerboard"})).is_err());
+    assert!(s.execute("paint.patternStamp", json!({"pattern": "Checkerboard"})).is_err());
+    assert!(s.execute("paint.patternStamp", json!({"points": [[16, 16]], "pattern": "no-such-pattern"})).is_err());
+    assert!(s.execute("paint.patternStamp", json!({"points": [[16, 16]], "pattern": "Checkerboard", "size": 1e30})).is_err());
+    assert!(s.execute("paint.patternStamp", json!({"points": [[1e7, 0]], "pattern": "Checkerboard", "size": 8})).is_err());
+    assert!(s.execute("paint.patternStamp", json!({"points": [[f64::NAN, 0]], "pattern": "Checkerboard", "size": 8})).is_err());
+    assert!(s.execute("paint.patternStamp", json!({"points": [[0, 0], [9000, 9000]], "pattern": "Checkerboard", "size": 5000, "hardness": 100})).is_err());
+    let fmt = photocraft_color::PixelFormat::new(photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8, false);
+    s.patterns.items.push(photocraft_doc::Pattern {
+        id: "empty-pat".into(),
+        name: "EmptyTile".into(),
+        width: 0,
+        height: 0,
+        surface: photocraft_raster::Surface::new(fmt),
+    });
+    assert!(s.execute("paint.patternStamp", json!({"points": [[8, 8]], "pattern": "EmptyTile", "size": 8})).is_err());
+    s.execute("layer.setProps", json!({"locks": {"pixels": true}})).unwrap();
+    assert!(stamp(&mut s, json!({"points": [[16, 16]]})).is_err());
 }

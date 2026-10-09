@@ -1104,6 +1104,7 @@ mod tests {
         assert_eq!(app.ui.tool, Tool::Eraser);
         assert_eq!(app.session.tools.brush.size, 60.0);
         assert_eq!(tool_id(Tool::CloneStamp), "cloneStamp");
+        assert_eq!(tool_id(Tool::PatternStamp), "patternStamp");
         assert_eq!(Tool::from_name(&tool_id(Tool::CustomShape)), Some(Tool::CustomShape));
     }
 

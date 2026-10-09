@@ -2282,3 +2282,9 @@ fontWeight	Bold	Grassetto
 fontWeight	ExtraBold	Extra-grassetto
 fontWeight	Black	Nero
 fontWeight	Italic	Corsivo
+
+# Pattern Stamp tool
+	Pattern Stamp Tool	Strumento Timbro motivo
+	Pattern Stamp	Timbro motivo
+	Impressionist	Impressionista
+

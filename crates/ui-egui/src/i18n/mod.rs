@@ -725,6 +725,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn pattern_stamp_ui_strings_have_translations_in_every_registered_language() {
+        const STRINGS: &[&str] = &["Pattern Stamp Tool", "Pattern Stamp", "Impressionist", "Aligned"];
+        for lang in Lang::all() {
+            for source in STRINGS {
+                let translated = tr(lang, source);
+                if lang == Lang::EN {
+                    assert_eq!(translated, *source, "English source string {source}");
+                } else {
+                    assert_ne!(translated, *source, "{} is missing {source:?}", lang.code());
+                }
+            }
+        }
+    }
+
     /// Camera Raw includes dynamic colour-band labels and contextual labels that the generic
     /// tl! scanner cannot see. Cover the partial catalog too, without claiming whole-app coverage.
     #[test]

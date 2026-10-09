@@ -1,5 +1,5 @@
-//! Retouching tools as commands: Clone Stamp, Healing Brush, Spot Healing Brush, Patch,
-//! Content-Aware Move, Dodge, Burn, Sponge, Blur, Sharpen, Smudge and History Brush.
+//! Retouching tools as commands: Clone Stamp, Pattern Stamp, Healing Brush, Spot Healing Brush,
+//! Patch, Content-Aware Move, Dodge, Burn, Sponge, Blur, Sharpen, Smudge and History Brush.
 //!
 //! Every command takes a Photoshop-style brush (`points`, `size`, `hardness`, `opacity`, `flow`,
 //! `spacing`, `layer`), respects the active selection as a mask and the layer's transparency lock, and
@@ -25,6 +25,7 @@ use crate::{EngineError, Result, Session};
 
 mod content_aware_move;
 mod patch;
+mod pattern_stamp;
 pub use patch::preview as patch_preview;
 
 fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
@@ -79,6 +80,10 @@ fn parse_brush(s: &Session, p: &Value, cmd: &str) -> Result<(Stroke, Option<Laye
         .collect();
     if pts.is_empty() {
         return Err(bad(cmd, "`points` is empty"));
+    }
+    // A stroke runs dab by dab along its length: an absurd coordinate would mean billions of dabs.
+    if pts.iter().any(|q| !(q.x.abs() <= crate::brush_cmds::MAX_COORD && q.y.abs() <= crate::brush_cmds::MAX_COORD)) {
+        return Err(bad(cmd, format!("point coordinates must be finite and within ±{}", crate::brush_cmds::MAX_COORD)));
     }
     let base = s.tools.brush.clone();
     let pct = |k: &str, d: f32, lo: f32, hi: f32| num(p, k, d).clamp(lo, hi) / 100.0;
@@ -707,6 +712,18 @@ pub fn specs() -> Vec<CommandSpec> {
             ),
             enabled: has_pixel_layer,
             run: clone_stamp,
+            journal: true,
+        },
+        CommandSpec {
+            id: "paint.patternStamp",
+            label: "Pattern Stamp",
+            menu: &[],
+            shortcut: None,
+            params: brush_params!(
+                r#","pattern":id|name?=Patterns panel current,"scale":1..1000 %=100,"angle":deg=0,"aligned":bool=true,"impressionist":bool=false,"mode":"normal|multiply|…"="normal","phase":[px,py]? → {"damage","phase","aligned","pattern"}"#
+            ),
+            enabled: pattern_stamp::enabled,
+            run: pattern_stamp::run,
             journal: true,
         },
         CommandSpec {

@@ -2025,7 +2025,7 @@
 	Magnetic Lasso	Magnetic Lasso
 	History Brush	History Brush
 	Art History Brush	Art History Brush
-	Pattern Stamp	Pattern Stamp
+	Pattern Stamp	Stempel Pola
 	Spot Healing	Spot Healing
 	Red Eye	Red Eye
 	Patch	Patch
@@ -2626,3 +2626,7 @@ fontWeight	Bold	Tebal
 fontWeight	ExtraBold	Ekstra Tebal
 fontWeight	Black	Sangat Tebal
 fontWeight	Italic	Miring
+
+# Pattern Stamp tool
+	Pattern Stamp Tool	Alat Stempel Pola
+	Impressionist	Impresionis

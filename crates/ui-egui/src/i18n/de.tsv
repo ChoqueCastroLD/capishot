@@ -2251,3 +2251,8 @@ fontWeight	Bold	Fett
 fontWeight	ExtraBold	Extrafett
 fontWeight	Black	Schwarz
 fontWeight	Italic	Kursiv
+
+# Pattern Stamp tool
+	Pattern Stamp Tool	Musterstempel-Werkzeug
+	Pattern Stamp	Musterstempel
+	Impressionist	Impressionistisch

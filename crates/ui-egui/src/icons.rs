@@ -89,6 +89,7 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::ContentAwareMove => "arrow-left-right",
         Tool::RedEye => "eye",
         Tool::CloneStamp => "stamp",
+        Tool::PatternStamp => "grid-3x3",
         Tool::HistoryBrush => "clock",
         Tool::Blur => "droplet",
         Tool::Sharpen => "triangle",

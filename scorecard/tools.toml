@@ -104,6 +104,13 @@ issue = 213
 note = "Brush tools set CursorIcon::None (canvas.rs:1259-1275); not verified per OS"
 
 [[item]]
+id = "TOOL-213-18"
+target = "Pattern Stamp tool: sibling of Clone Stamp in the S flyout"
+status = "done"
+issue = 213
+note = "Tool::PatternStamp in the S group; paint.patternStamp stamps the Patterns-panel tile with Aligned and Impressionist (an approximation: it jitters each dab's tile phase, not Photoshop's smeared impressionist look); engine tests cover depths, seams, hostile input"
+
+[[item]]
 id = "TOOL-214-1"
 target = "Select and Mask workspace: view modes, Refine Edge brush, 6 outputs"
 status = "partial"
