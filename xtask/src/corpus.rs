@@ -9,7 +9,9 @@ use crate::pinned::USER_AGENT;
 use crate::{cargo, root, run};
 
 /// Crates with corpus tests (behind their `corpus` feature).
-pub const CORPUS_CRATES: &[&str] = &["photocraft-psd", "photocraft-codecs", "photocraft-io", "photocraft-engine", "photocraft-raw"];
+pub const CORPUS_CRATES: &[&str] = &["photocraft-psd", "photocraft-codecs", "photocraft-io", "photocraft-engine"];
+/// Opt-in corpus crates: fetched and tested only with `test-corpus --pixls`.
+pub const PIXLS_CRATES: &[&str] = &["photocraft-raw"];
 
 /// Corpus crates with a `heif` feature: test-corpus enables it so the HEIF corpus tests run.
 const HEIF_CRATES: &[&str] = &["photocraft-codecs", "photocraft-io"];
@@ -27,7 +29,7 @@ const CRITICAL: &[&str] = &[
     "crates/affinity/",
     "crates/raw/",
 ];
-/// `cargo xtask corpus [--all | --pngsuite | --download | --psd | --psd-tools | --heif | --exr | --affinity | --photoshop [--local]] [--update-manifest]`
+/// `cargo xtask corpus [--all | --pngsuite | --download | --psd | --psd-tools | --heif | --exr | --pixls | --affinity | --photoshop [--local]] [--update-manifest]`
 pub fn cmd(args: &[&str]) -> Result<(), String> {
     let update = args.contains(&"--update-manifest");
     let mut did = false;
@@ -51,7 +53,7 @@ pub fn cmd(args: &[&str]) -> Result<(), String> {
         did = true;
     }
     if args.contains(&"--pixls") {
-        fetch_pixls(update)?;
+        crate::pinned::fetch_pixls(update)?;
         did = true;
     }
     if args.contains(&"--exr") {
@@ -91,7 +93,6 @@ fn local_clone() -> Result<PathBuf, String> {
 /// `corpus/photoshop` is copied from the authoring clone of photocraft-corpus instead.
 pub fn fetch_all(local: bool) -> Result<(), String> {
     fetch_pngsuite()?;
-    fetch_pixls(false)?;
     for c in corpus_pins::ALL {
         if local && std::ptr::eq(*c, &corpus_pins::PHOTOSHOP) {
             c.fetch_local(&local_clone()?, false)?;
@@ -210,17 +211,23 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
             "-p" | "--package" => {
                 let name = it.next().ok_or("-p needs a crate name")?;
                 let full = if name.starts_with("photocraft-") { (*name).to_string() } else { format!("photocraft-{name}") };
-                if !CORPUS_CRATES.contains(&full.as_str()) {
-                    return Err(format!("{full} has no corpus tests (crates: {})", CORPUS_CRATES.join(", ")));
+                if !CORPUS_CRATES.contains(&full.as_str()) && !PIXLS_CRATES.contains(&full.as_str()) {
+                    return Err(format!("{full} has no corpus tests (crates: {} or the opt-in {})", CORPUS_CRATES.join(", "), PIXLS_CRATES.join(", ")));
                 }
                 crates.push(full);
             }
-            "--changed" | "--local" => {}
+            "--changed" | "--local" | "--pixls" => {}
             other => return Err(format!("test-corpus: unknown argument `{other}`")),
         }
     }
     if crates.is_empty() {
         crates = CORPUS_CRATES.iter().map(|s| (*s).to_string()).collect();
+    }
+    // `--pixls` opts in (and fetches): the raw corpus tests are not part of CI until a
+    // maintainer decides they belong there.
+    if ours.contains(&"--pixls") || crates.iter().any(|c| PIXLS_CRATES.contains(&c.as_str())) {
+        crates.push("photocraft-raw".to_string());
+        crate::pinned::fetch_pixls(false)?;
     }
     fetch_all(ours.contains(&"--local"))?;
     let mut c = cargo();
@@ -235,56 +242,4 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
         c.arg("--").args(passthrough);
     }
     run(c, &format!("cargo test --release --features corpus,heif ({})", crates.join(", ")))
-}
-
-/// Fetches `corpus/pixls` (raw.pixls.us single files) and verifies it against
-/// `xtask/pixls.sha256`. With `update`, re-hashes the files instead.
-pub fn fetch_pixls(update: bool) -> Result<(), String> {
-    let dest = root().join("corpus").join("pixls");
-    std::fs::create_dir_all(&dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
-    let manifest = root().join("xtask").join("pixls.sha256");
-    if update {
-        let mut out = String::new();
-        let mut names: Vec<&str> = corpus_pins::PIXLS_FILES.iter().map(|(_, n)| *n).collect();
-        names.sort_unstable();
-        for name in names {
-            let p = dest.join(name);
-            let sum = file_sha256(&p).map_err(|e| format!("{}: {e}", p.display()))?;
-            out.push_str(&format!("{sum}  {name}\n"));
-        }
-        std::fs::write(&manifest, out).map_err(|e| format!("write {}: {e}", manifest.display()))?;
-        println!("pixls: re-hashed {} files into {}", corpus_pins::PIXLS_FILES.len(), manifest.display());
-        return Ok(());
-    }
-    let want: std::collections::HashMap<String, String> = std::fs::read_to_string(&manifest)
-        .map_err(|e| format!("read {}: {e} (run `cargo xtask corpus --all` once)", manifest.display()))?
-        .lines()
-        .filter_map(|l| l.split_once("  ").map(|(s, n)| (n.to_string(), s.to_string())))
-        .collect();
-    for (path, name) in corpus_pins::PIXLS_FILES {
-        let file = dest.join(name);
-        let have = file_sha256(&file).ok();
-        if have.as_deref() == want.get(*name).map(String::as_str) {
-            continue;
-        }
-        let url = format!("{}{}", corpus_pins::PIXLS_BASE, path);
-        let mut curl = Command::new("curl");
-        curl.args(["-fsSL", "--retry", "3", "-A", USER_AGENT, "-o"]).arg(&file).arg(&url);
-        run(curl, &format!("curl {url}"))?;
-        let got = file_sha256(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-        if Some(got.as_str()) != want.get(*name).map(String::as_str) {
-            return Err(format!("pixls {name}: sha256 mismatch (pin the file you meant, then --update-manifest)"));
-        }
-    }
-    println!("pixls: {} files verified in {}", corpus_pins::PIXLS_FILES.len(), dest.display());
-    Ok(())
-}
-
-/// Hex sha256 of a file (Windows-friendly: no `sha256sum` dependency).
-fn file_sha256(path: &std::path::Path) -> Result<String, String> {
-    use sha2::{Digest, Sha256};
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    let mut h = Sha256::new();
-    h.update(&bytes);
-    Ok(h.finalize().into_iter().map(|b| format!("{b:02x}")).collect())
 }

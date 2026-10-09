@@ -10,8 +10,6 @@ workspace = true
 
 [dependencies]
 serde_json = { workspace = true }
-# corpus manifests (MIT OR Apache-2.0).
-sha2 = "0.10"
 serde = { workspace = true }
 # perf/budgets.toml and scorecard/*.toml (MIT OR Apache-2.0).
 toml = "1"
