@@ -2601,3 +2601,9 @@ cameraRaw	Blending	Fusion
 	Click a red pupil to neutralize it	Cliquez sur une pupille rouge pour la corriger
 	open source	code source ouvert
 	…and {n} more	…et {n} de plus
+
+	Eyedroppers:	Pipettes :
+	Set Black Point	Définir le point noir
+	Set Neutral Gray Point	Définir le point gris neutre
+	Set White Point	Définir le point blanc
+	Unavailable in this color mode	Indisponible dans ce mode colorimétrique

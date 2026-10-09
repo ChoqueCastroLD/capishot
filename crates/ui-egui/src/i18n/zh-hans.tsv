@@ -2180,3 +2180,9 @@ cameraRaw	Blending	混合
 	Click a red pupil to neutralize it	单击红色瞳孔以消除反光
 	open source	开源
 	…and {n} more	…以及另外 {n} 项
+
+	Eyedroppers:	吸管：
+	Set Black Point	设置黑场
+	Set Neutral Gray Point	设置中性灰场
+	Set White Point	设置白场
+	Unavailable in this color mode	此颜色模式下不可用

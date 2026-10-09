@@ -2609,3 +2609,9 @@ cameraRaw	Whites	Brancos
 	Click a red pupil to neutralize it	Clique em uma pupila vermelha para corrigi-la
 	open source	código aberto
 	…and {n} more	…e mais {n}
+
+	Eyedroppers:	Conta-gotas:
+	Set Black Point	Definir ponto preto
+	Set Neutral Gray Point	Definir ponto cinza neutro
+	Set White Point	Definir ponto branco
+	Unavailable in this color mode	Indisponível neste modo de cor

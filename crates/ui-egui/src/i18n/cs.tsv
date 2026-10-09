@@ -2172,3 +2172,9 @@ cameraRaw	Color	Barvy
 	Click a red pupil to neutralize it	Klepněte na červenou zornici
 	open source	otevřený zdrojový kód
 	…and {n} more	…a dalších {n}
+
+	Eyedroppers:	Kapátka:
+	Set Black Point	Nastavit černý bod
+	Set Neutral Gray Point	Nastavit neutrální šedý bod
+	Set White Point	Nastavit bílý bod
+	Unavailable in this color mode	V tomto barevném režimu není k dispozici

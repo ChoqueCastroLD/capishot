@@ -2034,9 +2034,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     };
 
     if under_dialog {
-        // With the Color Picker on top the image is its eyedropper, whatever the tool; Space and
-        // the middle button still pan (`color_picker_ui::sample_at`).
-        let picking = primary && crate::color_picker_ui::top(app).is_some();
+        // With a colour dialog picker armed the image is its eyedropper, whatever the tool; Space
+        // and the middle button still pan. Curves uses the same merged-composite sampler as the
+        // Color Picker, never the reduced adjustment preview.
+        let curves_picking = crate::adjust_dialog::picker_armed(app);
+        let picking = primary && (crate::color_picker_ui::top(app).is_some() || curves_picking);
         let hand = app.ui.tool == Tool::Hand && !picking;
         if let Some(d) = crate::dialogs::pan_delta(&ctx, rect, hand) {
             view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
@@ -2052,7 +2054,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             }
             if let Some(p) = crate::dialogs::free_press(&ctx, rect) {
                 let d = xf.to_doc(p);
-                crate::color_picker_ui::sample_at(app, d[0], d[1]);
+                if curves_picking {
+                    crate::adjust_dialog::sample_at(app, d[0], d[1]);
+                } else {
+                    crate::color_picker_ui::sample_at(app, d[0], d[1]);
+                }
             }
         } else if primary
             && !middle

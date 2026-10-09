@@ -15,6 +15,107 @@ use crate::adjust_editors::{self, EditorCx};
 use crate::tone::{self, HistSource};
 
 const PREFIX: &str = "image.adjustments.";
+const CURVE_PICKER: &str = "__curvePicker";
+const CURVE_PICKER_BASE: &str = "__curvePickerBase";
+
+fn picker(value: Option<&Value>) -> Option<photocraft_engine::adjust_params::CurvesEyedropper> {
+    use photocraft_engine::adjust_params::CurvesEyedropper;
+    match value.and_then(Value::as_str) {
+        Some("black") => Some(CurvesEyedropper::Black),
+        Some("gray") => Some(CurvesEyedropper::NeutralGray),
+        Some("white") => Some(CurvesEyedropper::White),
+        _ => None,
+    }
+}
+
+fn picker_supported(mode: photocraft_doc::ColorMode, eyedropper: photocraft_engine::adjust_params::CurvesEyedropper) -> bool {
+    use photocraft_engine::adjust_params::CurvesEyedropper;
+    mode == photocraft_doc::ColorMode::Rgb || (mode == photocraft_doc::ColorMode::Grayscale && eyedropper != CurvesEyedropper::NeutralGray)
+}
+
+fn is_curves(fields: &Map<String, Value>) -> bool {
+    fields.get("__adjust").and_then(Value::as_str) == Some("curves")
+}
+
+/// Whether the top modal has a supported Curves eyedropper armed.
+pub fn picker_armed(app: &PhotocraftApp) -> bool {
+    let Some(dialog) = app.ui.dialogs.last().filter(|d| is_curves(&d.fields)) else { return false };
+    let Some(eyedropper) = picker(dialog.fields.get(CURVE_PICKER)) else { return false };
+    app.session.active().is_some_and(|s| picker_supported(s.doc.mode, eyedropper))
+}
+
+/// Sample the committed merged document through the regular canvas sampler and update only the
+/// open Curves dialog. Returns true when an armed Curves picker consumed the pointer event, even
+/// if the point was outside the image or transparent.
+pub fn sample_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
+    let Some((id, eyedropper, base)) = app.ui.dialogs.last().and_then(|dialog| {
+        let eyedropper = is_curves(&dialog.fields).then(|| picker(dialog.fields.get(CURVE_PICKER))).flatten()?;
+        let base = dialog.fields.get(CURVE_PICKER_BASE).cloned().unwrap_or_else(|| crate::filter_dialog::params_of(&dialog.fields));
+        Some((dialog.id, eyedropper, base))
+    }) else {
+        return false;
+    };
+    let Some(mode) = app.session.active().map(|s| s.doc.mode) else { return true };
+    if !picker_supported(mode, eyedropper) {
+        return true;
+    }
+    let Some(sample) = crate::canvas::composite_color(app, x, y) else { return true };
+    let params = match photocraft_engine::adjust_params::curves_eyedropper(&base, eyedropper, sample, mode) {
+        Ok(adjustment) => photocraft_engine::adjust_params::to_params(&adjustment),
+        Err(error) => {
+            app.ui.status = error.to_string();
+            return true;
+        }
+    };
+    let Some(dialog) = app.ui.dialog_mut(id) else { return true };
+    dialog.fields.insert(CURVE_PICKER_BASE.into(), base);
+    if let Value::Object(params) = params {
+        dialog.fields.retain(|key, _| key.starts_with("__"));
+        dialog.fields.extend(params);
+    }
+    true
+}
+
+fn picker_button(ui: &mut egui::Ui, selected: bool, enabled: bool, tooltip: &str, color: egui::Color32) -> egui::Response {
+    let response = ui.add_enabled_ui(enabled, |ui| crate::icons::button(ui, "pipette", 28.0, selected, tooltip)).inner;
+    let tokens = crate::theme::Tokens::get(ui.ctx());
+    ui.painter().circle_filled(response.rect.right_bottom() - egui::vec2(5.5, 5.5), 3.5, color);
+    ui.painter().circle_stroke(response.rect.right_bottom() - egui::vec2(5.5, 5.5), 3.5, egui::Stroke::new(1.0, tokens.field_border));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, tooltip));
+    response
+}
+
+fn curves_picker_controls(ui: &mut egui::Ui, fields: &mut Map<String, Value>, mode: photocraft_doc::ColorMode) {
+    use photocraft_engine::adjust_params::CurvesEyedropper;
+    let current = picker(fields.get(CURVE_PICKER));
+    let mut chosen = None;
+    ui.horizontal(|ui| {
+        let tokens = crate::theme::Tokens::get(ui.ctx());
+        ui.label(egui::RichText::new(tl!("Eyedroppers:")).color(tokens.text_dim).size(12.0));
+        // The swatch is the tone the picker maps the sample to (image data, like the Curves
+        // gradient bars), not chrome, so it is the same in every theme; its ring is a token.
+        for (id, eyedropper, label, tone) in [
+            ("black", CurvesEyedropper::Black, tl!("Set Black Point"), 0),
+            ("gray", CurvesEyedropper::NeutralGray, tl!("Set Neutral Gray Point"), 128),
+            ("white", CurvesEyedropper::White, tl!("Set White Point"), 255),
+        ] {
+            let enabled = picker_supported(mode, eyedropper);
+            if picker_button(ui, current == Some(eyedropper), enabled, label, egui::Color32::from_gray(tone)).clicked() {
+                chosen = Some((id, eyedropper));
+            }
+        }
+        if !matches!(mode, photocraft_doc::ColorMode::Rgb | photocraft_doc::ColorMode::Grayscale) {
+            ui.label(egui::RichText::new(tl!("Unavailable in this color mode")).color(tokens.text_faint).size(11.0));
+        }
+    });
+    if let Some((id, selected)) = chosen
+        && current != Some(selected)
+    {
+        let base = crate::filter_dialog::params_of(fields);
+        fields.insert(CURVE_PICKER.into(), json!(id));
+        fields.insert(CURVE_PICKER_BASE.into(), base);
+    }
+}
 
 /// Whether `command` opens an adjustment dialog (when run without params).
 pub fn has_dialog(command: &str) -> bool {
@@ -46,6 +147,11 @@ pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
 /// Dialog body: the kind's editor over the fields, then the Preview checkbox.
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, fields: &mut Map<String, Value>) {
     let kind = fields.get("__adjust").and_then(Value::as_str).unwrap_or_default().to_string();
+    let mode = app.session.active().map_or(photocraft_doc::ColorMode::Rgb, |s| s.doc.mode);
+    if kind == "curves" {
+        curves_picker_controls(ui, fields, mode);
+        ui.add_space(4.0);
+    }
     let mut values = crate::filter_dialog::params_of(fields);
     let active = app.session.active().and_then(|s| s.active_layer);
     let gray = app.session.active().is_some_and(|s| adjust_editors::is_gray(s.doc.mode));
@@ -61,6 +167,10 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, fields: &mut Map<String,
         // Replace the parameter keys (an editor may remove one), keep the private ones.
         fields.retain(|k, _| k.starts_with("__"));
         fields.extend(v);
+        if picker(fields.get(CURVE_PICKER)).is_some() {
+            let base = crate::filter_dialog::params_of(fields);
+            fields.insert(CURVE_PICKER_BASE.into(), base);
+        }
     }
     let mut preview = fields.get("__preview").and_then(Value::as_bool).unwrap_or(true);
     ui.add_space(6.0);
@@ -73,6 +183,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, fields: &mut Map<String,
 mod tests {
     use super::*;
     use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT, Queryable};
 
     fn app_with_image() -> PhotocraftApp {
         let mut s = photocraft_engine::Session::new();
@@ -81,6 +192,37 @@ mod tests {
         s.execute("edit.fill", json!({"color": "#b04020"})).unwrap();
         s.execute("select.deselect", json!({})).unwrap();
         PhotocraftApp::new(s, crate::Services::default())
+    }
+
+    fn app_in_mode(mode: &str) -> PhotocraftApp {
+        let mut session = photocraft_engine::Session::new();
+        session.execute("file.new", json!({"width": 32, "height": 24, "mode": mode})).unwrap();
+        PhotocraftApp::new(session, crate::Services::default())
+    }
+
+    fn arm(app: &mut PhotocraftApp, id: u64, picker: &str) {
+        let base = app.ui.dialog_mut(id).map(|dialog| crate::filter_dialog::params_of(&dialog.fields)).unwrap();
+        let dialog = app.ui.dialog_mut(id).unwrap();
+        dialog.fields.insert(CURVE_PICKER.into(), json!(picker));
+        dialog.fields.insert(CURVE_PICKER_BASE.into(), base);
+    }
+
+    fn channel_points(app: &PhotocraftApp, key: &str) -> Vec<[f64; 2]> {
+        app.ui
+            .dialogs
+            .last()
+            .and_then(|dialog| dialog.fields.get(key))
+            .and_then(Value::as_array)
+            .map(|points| {
+                points
+                    .iter()
+                    .filter_map(|point| {
+                        let point = point.as_array()?;
+                        Some([point.first()?.as_f64()?, point.get(1)?.as_f64()?])
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     #[test]
@@ -204,5 +346,163 @@ mod tests {
                 assert!(std::sync::Arc::ptr_eq(&original, &h.state().session.active().unwrap().doc));
             }
         }
+    }
+
+    #[test]
+    fn curves_eyedroppers_sample_repeatedly_without_editing_the_document() {
+        let mut app = app_with_image();
+        let original = app.session.active().unwrap().doc.clone();
+        let revision = app.session.active().unwrap().revision;
+        let steps = app.session.active().unwrap().history.past_len();
+        let id = open(&mut app, "image.adjustments.curves").unwrap();
+        arm(&mut app, id, "black");
+        assert!(picker_armed(&app));
+        assert!(sample_at(&mut app, 8.0, 8.0));
+        let first = channel_points(&app, "red");
+        assert!((first[0][0] - 176.0).abs() < 0.6 && first[0][1] == 0.0, "{first:?}");
+        assert!(sample_at(&mut app, 8.0, 8.0));
+        assert_eq!(channel_points(&app, "red"), first, "the same repeated sample is deterministic");
+        assert!(sample_at(&mut app, 48.0, 8.0));
+        assert_ne!(channel_points(&app, "red"), first);
+        assert!(sample_at(&mut app, 8.0, 8.0));
+        assert_eq!(channel_points(&app, "red"), first, "repeated samples resolve from the armed baseline");
+        let st = app.session.active().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&st.doc, &original));
+        assert_eq!(st.revision, revision);
+        assert_eq!(st.history.past_len(), steps);
+    }
+
+    #[test]
+    fn curves_picker_controls_arm_and_disable_by_document_mode() {
+        let harness = |app| {
+            let mut h = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(|ui, app| crate::dialogs::show(app, ui.ctx()), app);
+            PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+            open(h.state_mut(), "image.adjustments.curves").unwrap();
+            h.run_steps(3);
+            h
+        };
+        let mut rgb = harness(app_in_mode("rgb"));
+        for label in ["Set Black Point", "Set Neutral Gray Point", "Set White Point"] {
+            assert!(!rgb.get_by_label(label).accesskit_node().is_disabled(), "{label}");
+        }
+        rgb.get_by_label("Set Black Point").click();
+        rgb.run_steps(2);
+        assert!(picker_armed(rgb.state()));
+        assert_eq!(rgb.state().ui.dialogs.last().and_then(|d| d.fields.get(CURVE_PICKER)).and_then(Value::as_str), Some("black"));
+
+        let gray = harness(app_in_mode("gray"));
+        assert!(!gray.get_by_label("Set Black Point").accesskit_node().is_disabled());
+        assert!(gray.get_by_label("Set Neutral Gray Point").accesskit_node().is_disabled());
+        assert!(!gray.get_by_label("Set White Point").accesskit_node().is_disabled());
+
+        for mode in ["cmyk", "lab"] {
+            let h = harness(app_in_mode(mode));
+            for label in ["Set Black Point", "Set Neutral Gray Point", "Set White Point"] {
+                assert!(h.get_by_label(label).accesskit_node().is_disabled(), "{mode}: {label}");
+            }
+        }
+    }
+
+    #[test]
+    fn curves_picker_rejects_outside_and_transparent_samples() {
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 32, "height": 24, "background": "transparent"})).unwrap();
+        let mut app = PhotocraftApp::new(s, crate::Services::default());
+        let id = open(&mut app, "image.adjustments.curves").unwrap();
+        arm(&mut app, id, "white");
+        let before = crate::filter_dialog::params_of(&app.ui.dialog_mut(id).unwrap().fields);
+        assert!(sample_at(&mut app, -1.0, 4.0));
+        assert_eq!(crate::filter_dialog::params_of(&app.ui.dialog_mut(id).unwrap().fields), before);
+        assert!(sample_at(&mut app, 4.0, 4.0));
+        assert_eq!(crate::filter_dialog::params_of(&app.ui.dialog_mut(id).unwrap().fields), before);
+        assert!(picker_armed(&app), "an invalid sample does not disarm the picker");
+    }
+
+    #[test]
+    fn curves_picker_cancel_and_confirm_keep_one_transaction() {
+        for confirm in [false, true] {
+            let mut app = app_with_image();
+            let original = app.session.active().unwrap().doc.clone();
+            let steps = app.session.active().unwrap().history.past_len();
+            let id = open(&mut app, "image.adjustments.curves").unwrap();
+            arm(&mut app, id, "white");
+            assert!(sample_at(&mut app, 8.0, 8.0));
+            assert!(std::sync::Arc::ptr_eq(&app.session.active().unwrap().doc, &original));
+            assert_eq!(app.session.active().unwrap().history.past_len(), steps);
+            if confirm {
+                crate::dialogs::confirm(&mut app, id).unwrap();
+                let committed = app.session.active().unwrap().doc.clone();
+                assert!(!std::sync::Arc::ptr_eq(&committed, &original));
+                assert_eq!(app.session.active().unwrap().history.past_len(), steps + 1);
+                app.run("edit.undo", json!({})).unwrap();
+                assert!(std::sync::Arc::ptr_eq(&app.session.active().unwrap().doc, &original));
+                app.run("edit.redo", json!({})).unwrap();
+                assert!(std::sync::Arc::ptr_eq(&app.session.active().unwrap().doc, &committed));
+            } else {
+                app.ui.close_dialog(id);
+                assert!(std::sync::Arc::ptr_eq(&app.session.active().unwrap().doc, &original));
+                assert_eq!(app.session.active().unwrap().history.past_len(), steps);
+            }
+        }
+    }
+
+    #[test]
+    fn curves_picker_modes_and_depths_are_explicit() {
+        use photocraft_engine::adjust_params::CurvesEyedropper;
+        assert!(picker_supported(photocraft_doc::ColorMode::Rgb, CurvesEyedropper::NeutralGray));
+        assert!(picker_supported(photocraft_doc::ColorMode::Grayscale, CurvesEyedropper::Black));
+        assert!(picker_supported(photocraft_doc::ColorMode::Grayscale, CurvesEyedropper::White));
+        assert!(!picker_supported(photocraft_doc::ColorMode::Grayscale, CurvesEyedropper::NeutralGray));
+        assert!(!picker_supported(photocraft_doc::ColorMode::Cmyk, CurvesEyedropper::Black));
+        assert!(!picker_supported(photocraft_doc::ColorMode::Lab, CurvesEyedropper::White));
+
+        for depth in [8, 16, 32] {
+            let mut s = photocraft_engine::Session::new();
+            s.execute("file.new", json!({"width": 16, "height": 16, "depth": depth})).unwrap();
+            s.execute("edit.fill", json!({"color": [0.3142, 0.4821, 0.7137]})).unwrap();
+            let mut app = PhotocraftApp::new(s, crate::Services::default());
+            let sampled = crate::canvas::composite_color(&mut app, 4.0, 4.0).unwrap();
+            let id = open(&mut app, "image.adjustments.curves").unwrap();
+            arm(&mut app, id, "gray");
+            assert!(sample_at(&mut app, 4.0, 4.0), "RGB @{depth}");
+            let red = channel_points(&app, "red");
+            let target_level = (f64::from(sampled[0]) * 0.2126 + f64::from(sampled[1]) * 0.7152 + f64::from(sampled[2]) * 0.0722) * 255.0;
+            let sample_level = f64::from(sampled[0]) * 255.0;
+            let serialized_sample_level = (sample_level * 100.0).round() / 100.0;
+            let neutral_anchor = red.iter().find(|point| (point[0] - serialized_sample_level).abs() < 1e-5).unwrap();
+            let serialized_target_level = (target_level * 100.0).round() / 100.0;
+            assert!((neutral_anchor[1] - serialized_target_level).abs() < 1e-5, "depth={depth} anchor={neutral_anchor:?} sampled={sampled:?}");
+            assert!((neutral_anchor[0] - sample_level).abs() <= 0.0051, "depth={depth} anchor={neutral_anchor:?} sampled={}", sampled[0]);
+            if depth == 16 || depth == 32 {
+                assert!(
+                    (sampled[0] * 255.0 - (sampled[0] * 255.0).round()).abs() > 0.01,
+                    "depth={depth} sample was quantized to an 8-bit level: {}",
+                    sampled[0]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ui_pointer_drives_an_armed_curves_picker() {
+        let mut app = app_with_image();
+        let id = open(&mut app, "image.adjustments.curves").unwrap();
+        arm(&mut app, id, "black");
+        let context = egui::Context::default();
+        let before = channel_points(&app, "red");
+        let (request, _receiver) = crate::control::ControlRequest::new("ui.pointer", json!({"events": [{"kind": "move", "x": 48, "y": 8}]}));
+        let _ = crate::control::handle(&mut app, &context, &request);
+        assert_eq!(channel_points(&app, "red"), before, "pointer move does not sample");
+
+        let (request, _receiver) = crate::control::ControlRequest::new("ui.pointer", json!({"events": [{"kind": "down", "x": 8, "y": 8}]}));
+        let _ = crate::control::handle(&mut app, &context, &request);
+        let red = channel_points(&app, "red");
+        assert!((red[0][0] - 176.0).abs() < 0.6 && red[0][1] == 0.0, "{red:?}");
+        assert_ne!(red, before, "pointer down samples");
+
+        let (request, _receiver) = crate::control::ControlRequest::new("ui.pointer", json!({"events": [{"kind": "up", "x": 48, "y": 8}]}));
+        let _ = crate::control::handle(&mut app, &context, &request);
+        assert_eq!(channel_points(&app, "red"), red, "pointer up does not sample again");
+        assert!(picker_armed(&app));
     }
 }

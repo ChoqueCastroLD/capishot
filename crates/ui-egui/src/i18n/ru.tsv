@@ -2448,3 +2448,9 @@ cameraRaw	Roughness	Неровность
 	Click a red pupil to neutralize it	Щёлкните по красному зрачку, чтобы убрать блик
 	open source	открытый исходный код
 	…and {n} more	…и ещё {n}
+
+	Eyedroppers:	Пипетки:
+	Set Black Point	Задать точку чёрного
+	Set Neutral Gray Point	Задать нейтральную серую точку
+	Set White Point	Задать точку белого
+	Unavailable in this color mode	Недоступно в этом цветовом режиме

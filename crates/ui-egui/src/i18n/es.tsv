@@ -2242,3 +2242,9 @@ cameraRaw	Amount	Cantidad
 	Click a red pupil to neutralize it	Haga clic en una pupila roja para corregirla
 	open source	código abierto
 	…and {n} more	…y {n} más
+
+	Eyedroppers:	Cuentagotas:
+	Set Black Point	Definir punto negro
+	Set Neutral Gray Point	Definir punto gris neutro
+	Set White Point	Definir punto blanco
+	Unavailable in this color mode	No disponible en este modo de color

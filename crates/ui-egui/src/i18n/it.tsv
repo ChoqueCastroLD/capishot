@@ -2244,3 +2244,9 @@ cameraRaw	Amount	Quantità
 	Click a red pupil to neutralize it	Fai clic su una pupilla rossa per correggerla
 	open source	open source
 	…and {n} more	…e altri {n}
+
+	Eyedroppers:	Contagocce:
+	Set Black Point	Imposta punto nero
+	Set Neutral Gray Point	Imposta il punto grigio neutro
+	Set White Point	Imposta punto bianco
+	Unavailable in this color mode	Non disponibile in questa modalità colore

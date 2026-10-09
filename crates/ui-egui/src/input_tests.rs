@@ -259,6 +259,49 @@ fn color_picker_samples_the_image_under_its_pipette() {
     assert_eq!(h.state().session.tools.foreground, [1.0, 0.0, 0.0, 1.0]);
 }
 
+#[test]
+fn curves_picker_samples_document_coordinates_through_the_view_transform() {
+    let mut h = harness();
+    h.state_mut().run("select.rect", json!({"x": 0, "y": 0, "width": 200, "height": 300})).unwrap();
+    h.state_mut().run("edit.fill", json!({"color": "#804020"})).unwrap();
+    h.state_mut().run("select.rect", json!({"x": 200, "y": 0, "width": 200, "height": 300})).unwrap();
+    h.state_mut().run("edit.fill", json!({"color": "#20a0e0"})).unwrap();
+    h.state_mut().run("select.deselect", json!({})).unwrap();
+    let committed = h.state().session.active().unwrap().doc.clone();
+    let history = h.state().session.active().unwrap().history.past_len();
+    let view = &mut h.state_mut().ui.views[0];
+    (view.zoom, view.center, view.fit_pending) = (4.0, [200.0, 150.0], false);
+    h.state_mut().ui.view.flip_horizontal = true;
+    let dialog = crate::adjust_dialog::open(h.state_mut(), "image.adjustments.curves").unwrap();
+    h.state_mut().ui.dialog_mut(dialog).unwrap().fields.insert("__curvePicker".into(), json!("black"));
+    h.run_steps(3);
+    let canvas = h.state().last_canvas_rect;
+    let left = pos2(canvas.left() + 60.0, canvas.center().y);
+    h.hover_at(left);
+    h.run_steps(1);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::None);
+    press(&mut h, left, true);
+    press(&mut h, left, false);
+    h.run_steps(3);
+    assert!(std::sync::Arc::ptr_eq(&h.state().session.active().unwrap().doc, &committed));
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), history);
+    assert!(crate::adjust_preview::display_doc(h.state_mut(), 0).is_some(), "the new curve is visible only through the preview");
+    let red = h
+        .state()
+        .ui
+        .dialogs
+        .iter()
+        .find(|candidate| candidate.id == dialog)
+        .and_then(|candidate| candidate.fields.get("red"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|points| points.first())
+        .and_then(serde_json::Value::as_array)
+        .and_then(|point| point.first())
+        .and_then(serde_json::Value::as_f64)
+        .unwrap();
+    assert!((red - 32.0).abs() < 0.6, "sampled document-right blue patch through the flipped 400% view: {red}");
+}
+
 /// Type tool (#206): Alt+←/→ at a collapsed caret kerns the pair before it by 20/1000 em (100
 /// with ⌘/Ctrl), one history step per press; ⌘/Ctrl+←/→ moves by word; Alt+Shift+→ extends
 /// the selection by a word.

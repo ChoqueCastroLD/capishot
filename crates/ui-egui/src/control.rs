@@ -559,6 +559,14 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     }
                     continue;
                 }
+                // Curves' modal eyedroppers use document coordinates here, matching the native
+                // canvas path after its ViewXform conversion. Sample on press only.
+                if !matches!(s("button"), Some("secondary" | "right")) && crate::adjust_dialog::picker_armed(app) {
+                    if matches!(ev, ToolEvent::Down { .. }) {
+                        crate::adjust_dialog::sample_at(app, x, y);
+                    }
+                    continue;
+                }
                 if matches!(s("button"), Some("secondary" | "right")) {
                     let down = matches!(ev, ToolEvent::Down { .. });
                     // Right-click with the Move tool, or ⌘/Ctrl+right-click: list the layers there.

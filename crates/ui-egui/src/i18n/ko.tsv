@@ -2044,6 +2044,11 @@ cameraRaw	Color	색상
 
 # Type layer thumbnails (#598)
 	Edit Type	문자 편집
+	Eyedroppers:	스포이드:
+	Set Black Point	검은점 설정
+	Set Neutral Gray Point	중성 회색점 설정
+	Set White Point	흰점 설정
+	Unavailable in this color mode	이 색상 모드에서는 사용할 수 없음
 
 # UI scale steps (#611)
 	75%	75%
