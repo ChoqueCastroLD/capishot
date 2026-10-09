@@ -570,6 +570,17 @@ fn outer_and_inner_glow_regions() {
     assert!(close4(px(&d, 5, 20), [1.0; 4]));
 }
 
+// A Precise inner glow from the centre is brightest in the middle and fades towards the edge,
+// like the Softer one; it used to paint nothing at all (#966).
+#[test]
+fn precise_inner_glow_from_center_paints_the_middle() {
+    let d = fx_doc(vec![Effect::InnerGlow(glow(GlowTechnique::Precise, GlowSource::Center))]);
+    let (center, edge) = (px(&d, 20, 20), px(&d, 10, 20));
+    assert!(center[1] > 0.9 && center[0] < 0.1, "green in the middle: {center:?}");
+    assert!(edge[0] > center[0] && edge[1] < center[1], "fades towards the edge: {edge:?} vs {center:?}");
+    assert!(close4(px(&d, 5, 20), [1.0; 4]));
+}
+
 // A glow gradient runs along the glow, not across the canvas: the first stop hugs the shape on
 // every side and later stops lie further out, opaque until the glow fades (#443).
 #[test]
