@@ -167,8 +167,8 @@ impl Manifest {
         format!("{{{}}}", parts.join(","))
     }
 
-    /// Validates user `params` against the schema: missing keys take their defaults, numbers are
-    /// clamped into range, unknown keys are dropped; a value of the wrong type is an error.
+    /// Validates user `params` against the schema: missing keys take their defaults, numbers (defaults
+    /// included) are clamped into range, unknown keys are dropped; a value of the wrong type is an error.
     pub fn resolve_params(&self, params: &Value) -> Result<Map<String, Value>> {
         let given = match params {
             Value::Null => &Map::new(),
@@ -181,11 +181,11 @@ impl Manifest {
             let wrong = |what: &str| Error::Params(format!("`{k}` must be {what}"));
             let resolved = match spec {
                 ParamSpec::Number { min, max, default } => match v {
-                    None => json!(default),
+                    None => json!((*default).clamp(*min, *max)),
                     Some(v) => json!(v.as_f64().filter(|f| f.is_finite()).ok_or_else(|| wrong("a number"))?.clamp(*min, *max)),
                 },
                 ParamSpec::Int { min, max, default } => match v {
-                    None => json!(default),
+                    None => json!((*default).clamp(*min, *max)),
                     Some(v) => {
                         let f = v.as_f64().filter(|f| f.is_finite()).ok_or_else(|| wrong("a number"))?;
                         json!((f.round().clamp(*min as f64, *max as f64)) as i64)
@@ -285,6 +285,28 @@ mod tests {
         assert!(m.resolve_params(&json!({"mono": 1})).is_err());
         assert!(m.resolve_params(&json!([1, 2])).is_err());
         assert!(m.resolve_params(&Value::Null).is_ok());
+    }
+
+    #[test]
+    fn out_of_range_defaults_are_clamped() {
+        // Issue #1012: a missing value fell back to a default outside the declared range unclamped.
+        let m = Manifest::parse(
+            br#"{"id":"org.example.tone","name":"Tone","kind":"filter",
+                "params":{"amount":{"type":"number","min":0,"max":100,"default":1000},
+                          "steps":{"type":"int","min":1,"max":16,"default":1000},
+                          "low":{"type":"number","min":-1,"max":1,"default":-5},
+                          "count":{"type":"int","min":3,"max":9}}}"#,
+        )
+        .unwrap();
+        let resolved = json!({"amount": 100.0, "steps": 16, "low": -1.0, "count": 3});
+        assert_eq!(Value::Object(m.resolve_params(&json!({})).unwrap()), resolved);
+        assert_eq!(Value::Object(m.resolve_params(&Value::Null).unwrap()), resolved);
+        assert_eq!(Value::Object(m.resolve_params(&json!({"amount": null, "steps": null})).unwrap()), resolved);
+        let given = m.resolve_params(&json!({"amount": 500, "steps": 500, "low": 0.5, "count": 5})).unwrap();
+        assert_eq!(Value::Object(given), json!({"amount": 100.0, "steps": 16, "low": 0.5, "count": 5}));
+        // In-range defaults are unchanged.
+        let full = Manifest::parse(FULL.as_bytes()).unwrap();
+        assert_eq!(Value::Object(full.resolve_params(&json!({})).unwrap()), json!({"amount": 50.0, "mode": "hard", "mono": false, "seed": 0}));
     }
 
     #[test]
