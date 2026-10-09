@@ -33,3 +33,6 @@ sync_github_name = true
 
 [people.ArthurViniciusBA1]
 real_name = "Arthur Vinicius"
+
+[people.SckraT]
+sync_github_name = true
