@@ -574,6 +574,27 @@ impl StrokeRenderer {
         }
     }
 
+    /// The coverage tiles touched since the last call (or `composite`), as one rectangle clipped to
+    /// the stroke bounds, and forget them: what a live preview that composites its own paint has
+    /// to redraw.
+    pub fn take_dirty_rect(&mut self) -> Rect {
+        let r = self
+            .cov
+            .take_dirty()
+            .into_iter()
+            .fold(Rect::EMPTY, |acc, (tx, ty)| acc.union(&Rect::new(tx * COV_TILE, ty * COV_TILE, (tx + 1) * COV_TILE, (ty + 1) * COV_TILE)));
+        if let Some(d) = self.dual.as_mut() {
+            d.dirty.clear();
+        }
+        r.intersect(&self.bounds())
+    }
+
+    /// Final coverage over `r`, one value per pixel in rows (as [`dense_coverage`](Self::dense_coverage)
+    /// over its bounds).
+    pub fn coverage_in(&self, r: Rect) -> Vec<f32> {
+        (r.y0..r.y1).flat_map(|y| (r.x0..r.x1).map(move |x| (x, y))).map(|(x, y)| self.coverage_at(x, y)).collect()
+    }
+
     /// Final stroke coverage at a pixel (stroke-level masks applied, before opacity/selection).
     pub fn coverage_at(&self, x: i32, y: i32) -> f32 {
         let c = self.cov.get(x, y);

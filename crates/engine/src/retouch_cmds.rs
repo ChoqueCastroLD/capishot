@@ -303,6 +303,97 @@ fn clone_stamp(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(clone_result(dmg, off, aligned, p, &stroke))
 }
 
+/// A Clone Stamp stroke shown while it is drawn: the dabs so far composited from the clone source
+/// onto a copy of the active document, as `paint.cloneStamp` with the same params commits them
+/// (the same coverage, sampling and blend; a smoothing catch-up appears on release).
+pub struct LiveClone {
+    /// The active document with the stroke so far.
+    pub doc: std::sync::Arc<Document>,
+    renderer: photocraft_paint::StrokeRenderer,
+    pre: std::sync::Arc<Document>,
+    pre_surf: Surface,
+    id: Option<LayerId>,
+    params: Value,
+    which: SampleLayers,
+    map: crate::presets::clone_source::Mapping,
+    mode: BlendMode,
+    opacity: f32,
+    sel: Option<Surface>,
+    lock: bool,
+    /// Where the doc shows what finishing the stroke now would add (a lone first dab, the
+    /// smoothing catch-up), redrawn on every step as the Brush's live stroke does.
+    tail: Rect,
+}
+
+impl LiveClone {
+    /// Start from `paint.cloneStamp` params; their `points` are rendered.
+    pub fn begin(s: &Session, p: &Value) -> Result<Self> {
+        const CMD: &str = "paint.cloneStamp";
+        has_pixel_layer(s).map_err(EngineError::Other)?;
+        let (stroke, id) = parse_brush(s, p, CMD)?;
+        let which = sample_layers(p, CMD)?;
+        let mode = blend_param(p, CMD)?;
+        let f = *stroke.points.first().ok_or_else(|| bad(CMD, "`points` is empty"))?;
+        let (map, _) = crate::presets::clone_source::resolve(s, p, (f.x, f.y), CMD)?;
+        let pre = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
+        let mut doc = (*pre).clone();
+        let sel = doc.selection.clone();
+        let (surf, lock) = crate::channel_cmds::target_surface(&mut doc, id, p)?;
+        let pre_surf = surf.clone();
+        // As `stroke_coverage`, which the commit uses.
+        let renderer = photocraft_paint::StrokeRenderer::new(&stroke.brush, None, 1.0);
+        let opacity = stroke.brush.opacity;
+        let mut live =
+            Self { doc: std::sync::Arc::new(doc), renderer, pre, pre_surf, id, params: p.clone(), which, map, mode, opacity, sel, lock, tail: Rect::EMPTY };
+        live.push(&stroke.points)?;
+        Ok(live)
+    }
+
+    /// Everything the stroke has touched so far.
+    pub fn bounds(&self) -> Rect {
+        self.renderer.bounds().union(&self.tail)
+    }
+
+    /// Render more points; returns the rectangle that changed. Each changed area is redrawn from
+    /// the pre-stroke pixels with the stroke's coverage so far, so overlapping dabs build up as in
+    /// the commit, and pixels painted earlier in the stroke are never re-cloned. What finishing
+    /// the stroke now would add is drawn too (a lone first dab shows on the press), and redrawn on
+    /// every step.
+    pub fn push(&mut self, pts: &[StrokePoint]) -> Result<Rect> {
+        self.renderer.push(pts);
+        let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
+        let mut dmg = Rect::EMPTY;
+        if !old.is_empty() {
+            // Back to the stroke without the previous tail.
+            let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.id, &self.params)?;
+            surf.write_region(old, &self.pre_surf.read_region(old));
+            self.renderer.mark_dirty(old);
+            dmg = old;
+        }
+        let r = self.renderer.take_dirty_rect();
+        let cov = self.renderer.coverage_in(r);
+        dmg = dmg.union(&self.composite(r, &cov)?);
+        if let Some(mut tail) = self.renderer.tail_preview() {
+            let r = tail.take_dirty_rect();
+            let cov = tail.coverage_in(r);
+            self.tail = self.composite(r, &cov)?;
+            dmg = dmg.union(&self.tail);
+        }
+        Ok(dmg)
+    }
+
+    /// Redraw `r` from the pre-stroke pixels with the clone source through coverage `cov`.
+    fn composite(&mut self, r: Rect, cov: &[f32]) -> Result<Rect> {
+        if r.is_empty() {
+            return Ok(r);
+        }
+        let paint = clone_sample(&self.pre, self.id, &self.pre_surf, self.which, r, &self.map, "paint.cloneStamp")?;
+        let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.id, &self.params)?;
+        surf.write_region(r, &self.pre_surf.read_region(r));
+        Ok(apply_coverage(surf, r, cov, self.opacity, self.sel.as_ref(), self.lock, &paint, self.mode).union(&r))
+    }
+}
+
 /// Grow a stroke's coverage map by `m` pixels of zero coverage (a Dirichlet boundary for the solve).
 fn pad_coverage(bounds: Rect, cov: &[f32], m: i32) -> (Rect, Vec<f32>) {
     let g = bounds.inflate(m);

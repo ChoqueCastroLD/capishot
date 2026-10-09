@@ -322,6 +322,9 @@ pub struct PhotocraftApp {
     /// While a batch of recovered pointer samples is replayed, defer the live-stroke update to one
     /// call for the whole frame (see `canvas::canvas_view`).
     defer_live_stroke: bool,
+    /// A live painting stroke started on the press (`canvas_view`): the drag egui recognises later,
+    /// or the click, continues or ends it rather than starting another.
+    press_stroke: bool,
     /// End of the last painting stroke: ⇧-click draws a straight line from it (#178).
     last_stroke_end: Option<(DocId, [f64; 2])>,
     /// Control+Alt-drag brush resize in progress (`brush_resize`, #231).
@@ -487,6 +490,7 @@ impl PhotocraftApp {
             magnetic: Default::default(),
             secondary_erase: false,
             defer_live_stroke: false,
+            press_stroke: false,
             last_stroke_end: None,
             brush_resize: None,
             quick_pick: false,
