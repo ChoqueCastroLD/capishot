@@ -248,7 +248,8 @@ pub(crate) fn selection_mask(doc: &Document) -> Option<LayerMask> {
 /// Mask a fill or adjustment layer being created, as Photoshop does: the path selected in the
 /// Paths panel (`"path"`: `"work"`, a saved path's name or a path object) becomes its vector
 /// mask, which makes a Solid Color fill a shape (#1419); without one, the selection becomes its
-/// layer mask ([`selection_mask`]). A path that isn't there is an error.
+/// layer mask ([`selection_mask`]); without either, a white mask reveals the whole layer (#1768).
+/// A path that isn't there is an error.
 pub(crate) fn mask_new_layer(doc: &Document, l: &mut Layer, p: &Value, cmd: &str) -> Result<()> {
     let path = match p.get("path") {
         None | Some(Value::Null) => None,
@@ -260,14 +261,14 @@ pub(crate) fn mask_new_layer(doc: &Document, l: &mut Layer, p: &Value, cmd: &str
     };
     match path {
         Some(path) => l.vector_mask = Some(photocraft_doc::VectorMask::new(path)),
-        None => l.mask = selection_mask(doc),
+        None => l.mask = Some(selection_mask(doc).unwrap_or_else(LayerMask::reveal_all)),
     }
     Ok(())
 }
 
 /// The `"path"` param of the new fill and adjustment layer commands ([`mask_new_layer`]).
 pub(crate) const NEW_LAYER_PATH: &str =
-    r##""path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask)"##;
+    r##""path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask, or white with no selection)"##;
 
 fn new_adjustment(s: &mut Session, adj: Adjustment, p: &Value, cmd: &str) -> Result<Value> {
     let label = format!("New {} Layer", adj.label());
