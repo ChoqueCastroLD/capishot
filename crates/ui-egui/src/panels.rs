@@ -147,6 +147,12 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             if resp.clicked() && ui.data(|d| d.get_temp::<egui::Id>(held_id)) != Some(key) {
                                 app.ui.tool = tool;
                             }
+                            // Double-clicking the Hand tool fits the image on screen (Photoshop).
+                            if resp.double_clicked() && tool == Tool::Hand {
+                                app.ui.tool = tool;
+                                // With no document open there is nothing to fit.
+                                let _ = app.run("view.fitOnScreen", json!({}));
+                            }
                             // Right-click or long-press opens the flyout (Photoshop).
                             let held_for = resp.is_pointer_button_down_on().then(|| ui.input(|i| i.pointer.press_start_time().map(|t0| i.time - t0))).flatten();
                             if slot.len() > 1
@@ -3564,6 +3570,74 @@ mod toolbar_tests {
         h.run_steps(2);
         assert!(!h.state().ui.panels.toolbar_double);
         assert_eq!(left(&h), single);
+    }
+
+    fn click(h: &mut egui_kittest::Harness<'_, PhotocraftApp>, p: egui::Pos2) {
+        h.hover_at(p);
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            h.run_steps(1);
+        }
+    }
+
+    /// The Hand tool's toolbar button: tool buttons have no label, so find it by slot order.
+    fn hand_button(h: &egui_kittest::Harness<'_, PhotocraftApp>) -> egui::Pos2 {
+        let size = egui::Vec2::splat(if Tokens::get(&h.ctx).pro { 30.0 } else { 36.0 });
+        let buttons: Vec<Rect> = h.ctx.viewport(|v| {
+            v.prev_pass.widgets.layers().flat_map(|(_, w)| w.iter()).filter(|w| w.rect.size() == size && w.sense.senses_click()).map(|w| w.rect).collect()
+        });
+        let index = TOOL_SECTIONS.iter().flat_map(|section| section.iter()).position(|slot| slot.contains(&Tool::Hand)).unwrap();
+        buttons[index].center()
+    }
+
+    fn toolbar_harness(app: PhotocraftApp) -> egui_kittest::Harness<'static, PhotocraftApp> {
+        // 60 fps steps, so two clicks a few frames apart are a double-click.
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(800.0, 1400.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    toolbar(app, ui);
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+        h.run_steps(2);
+        h
+    }
+
+    /// Double-clicking the Hand tool fits the image on screen (Photoshop); a single click only
+    /// picks the tool.
+    #[test]
+    fn double_clicking_the_hand_tool_fits_on_screen() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+        app.ui.tool = Tool::Move;
+        app.ui.views[0].fit_pending = false;
+        let mut h = toolbar_harness(app);
+        let p = hand_button(&h);
+        click(&mut h, p);
+        assert_eq!(h.state().ui.tool, Tool::Hand);
+        assert!(!h.state().ui.views[0].fit_pending, "a single click doesn't fit");
+        // Past the double-click window, so the next two clicks are a fresh double-click.
+        h.run_steps(40);
+        click(&mut h, p);
+        click(&mut h, p);
+        assert_eq!(h.state().ui.tool, Tool::Hand);
+        assert!(h.state().ui.views[0].fit_pending, "a double-click fits on screen");
+    }
+
+    /// With no document open the double-click still picks the tool and doesn't panic.
+    #[test]
+    fn double_clicking_the_hand_tool_without_a_document_is_harmless() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.ui.tool = Tool::Move;
+        let mut h = toolbar_harness(app);
+        let p = hand_button(&h);
+        click(&mut h, p);
+        click(&mut h, p);
+        assert_eq!(h.state().ui.tool, Tool::Hand);
+        assert!(h.state().session.active().is_none());
     }
 }
 
