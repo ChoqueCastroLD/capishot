@@ -1105,3 +1105,18 @@ fn adjustment_layer_disabled_diagnostics_use_grammatical_article() {
     assert!(!err_clear.contains("a Adjustment layer"), "found 'a Adjustment layer': {err_clear}");
 }
 
+#[test]
+fn document_inspect_and_activate_invalid_index() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 2, "height": 2, "name": "first"})).unwrap();
+    s.execute("file.new", json!({"width": 2, "height": 2, "name": "second"})).unwrap();
+
+    assert!(s.execute("document.inspect", json!({})).is_ok());
+    assert!(s.execute("document.inspect", json!({"document": 0})).is_ok());
+
+    let err = s.execute("document.inspect", json!({"document": 9})).unwrap_err();
+    assert_eq!(err.to_string(), "no document at index 9");
+
+    let err_act = s.execute("document.activate", json!({"document": 9})).unwrap_err();
+    assert_eq!(err_act.to_string(), "no document at index 9");
+}

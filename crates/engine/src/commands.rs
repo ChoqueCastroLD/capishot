@@ -39,7 +39,11 @@ fn has_layer(s: &Session) -> std::result::Result<(), String> {
 }
 fn has_pixel_layer(s: &Session) -> std::result::Result<(), String> {
     let l = crate::active_layer_of(s)?;
-    if matches!(l.content, LayerContent::Raster(_)) { Ok(()) } else { Err(format!("active layer is {} {} layer, not a pixel layer", l.content.article(), l.content.kind_name())) }
+    if matches!(l.content, LayerContent::Raster(_)) {
+        Ok(())
+    } else {
+        Err(format!("active layer is {} {} layer, not a pixel layer", l.content.article(), l.content.kind_name()))
+    }
 }
 /// A pixel layer, or a targeted alpha channel / Quick Mask (adjustments and fills apply to it).
 fn has_pixel_or_channel(s: &Session) -> std::result::Result<(), String> {
@@ -889,8 +893,13 @@ fn build() -> Vec<CommandSpec> {
             params: r##"{"document":index?}"##,
             enabled: has_doc,
             run: |s, p| {
-                let i = p.get("document").and_then(Value::as_u64).map(|v| v as usize).or(s.active_index()).ok_or(EngineError::NoDocument)?;
-                let d = s.documents().get(i).ok_or(EngineError::NoDocument)?;
+                let d = match p.get("document") {
+                    Some(v) => {
+                        let i = v.as_u64().and_then(|v| usize::try_from(v).ok()).ok_or_else(|| bad("document.inspect", "`document` must be an index"))?;
+                        s.documents().get(i).ok_or_else(|| EngineError::Other(format!("no document at index {i}")))?
+                    }
+                    None => s.active().ok_or(EngineError::NoDocument)?,
+                };
                 Ok(inspect::document(d))
             },
             journal: false,
@@ -904,7 +913,8 @@ fn build() -> Vec<CommandSpec> {
             enabled: has_doc,
             run: |s, p| {
                 let i = p.get("document").and_then(Value::as_u64).ok_or_else(|| bad("document.activate", "missing `document`"))?;
-                if s.set_active(i as usize) { Ok(Value::Null) } else { Err(EngineError::NoDocument) }
+                let idx = usize::try_from(i).map_err(|_| bad("document.activate", "`document` out of range"))?;
+                if s.set_active(idx) { Ok(Value::Null) } else { Err(EngineError::Other(format!("no document at index {idx}"))) }
             },
             journal: false,
         },
