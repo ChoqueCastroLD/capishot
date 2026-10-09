@@ -20,6 +20,8 @@
 //! * Raws that carry no colour description (NEF) take a camera profile we
 //!   measured from the camera's own output when there is one (`cameras.rs`:
 //!   image area, levels, ForwardMatrix, tone curve; the Nikon D4 so far).
+//!   Bodies whose full profile is not measured yet can still carry a measured
+//!   image area (the D800E, the ILCE-7).
 //!
 //! Decoded today: DNG (uncompressed and lossless-JPEG, strips and tiles, CFA
 //! and LinearRaw), CR2 (lossless JPEG with Canon slices), uncompressed or
