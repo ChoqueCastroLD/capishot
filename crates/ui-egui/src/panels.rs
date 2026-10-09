@@ -1434,20 +1434,22 @@ fn blend_options(groups: bool) -> Vec<(BlendMode, &'static str)> {
     std::iter::once(BlendMode::PassThrough).filter(|_| groups).chain(BlendMode::LAYER_MODES).map(|m| (m, m.label())).collect()
 }
 
-/// Scroll the Layers panel while holding a layer drag over its top/bottom edge.
+/// Scroll the Layers panel while holding a layer drag over its top/bottom edge or past them.
 ///
 /// Returns the *content* displacement in points for this frame, so positive moves the
 /// list downward (reveals rows above) and negative upward (reveals rows below).
-/// The speed ramps with proximity to the edge and uses elapsed time instead of
-/// assuming a particular refresh rate.
+/// The speed ramps with proximity to the edge and clamps to the maximum speed when
+/// dragged outside, using elapsed time instead of assuming a particular refresh rate.
 fn layer_drag_edge_scroll(pointer: Option<Pos2>, viewport: Rect, dragging: bool, dt: f32) -> f32 {
-    if !dragging || viewport.width() <= 0.0 || viewport.height() <= 0.0 {
+    if !dragging || viewport.width() <= 0.0 || viewport.height() <= 0.0 || dt.is_nan() || dt <= 0.0 {
         return 0.0;
     }
-    let Some(pointer) = pointer.filter(|p| viewport.contains(*p)) else { return 0.0 };
+    let Some(pointer) = pointer.filter(|p| p.x.is_finite() && p.y.is_finite() && p.x >= viewport.left() && p.x <= viewport.right()) else {
+        return 0.0;
+    };
     let edge = 32.0_f32.min(viewport.height() * 0.25);
-    let top = (edge - (pointer.y - viewport.top())).max(0.0) / edge;
-    let bottom = (edge - (viewport.bottom() - pointer.y)).max(0.0) / edge;
+    let top = ((edge - (pointer.y - viewport.top())) / edge).clamp(0.0, 1.0);
+    let bottom = ((edge - (viewport.bottom() - pointer.y)) / edge).clamp(0.0, 1.0);
     let direction = top - bottom;
     if direction == 0.0 {
         return 0.0;
@@ -3486,7 +3488,7 @@ mod layer_drag_edge_scroll_tests {
     use super::*;
 
     #[test]
-    fn scrolls_both_edges_with_distance_dependent_velocity() {
+    fn inside_edge_scrolls_proportional_to_proximity() {
         let viewport = Rect::from_min_max(pos2(10.0, 30.0), pos2(310.0, 330.0));
         let point = |y| Some(pos2(100.0, y));
         let near_top = layer_drag_edge_scroll(point(33.0), viewport, true, 1.0 / 60.0);
@@ -3500,18 +3502,45 @@ mod layer_drag_edge_scroll_tests {
     }
 
     #[test]
-    fn scrolling_stops_outside_or_after_the_drag_finishes() {
+    fn outside_edges_scroll_in_drag_direction() {
+        let viewport = Rect::from_min_max(pos2(10.0, 30.0), pos2(310.0, 330.0));
+        let above = layer_drag_edge_scroll(Some(pos2(100.0, 20.0)), viewport, true, 1.0 / 60.0);
+        let below = layer_drag_edge_scroll(Some(pos2(100.0, 335.0)), viewport, true, 1.0 / 60.0);
+        assert!(above > 0.0, "dragging past the top continues scrolling upward");
+        assert!(below < 0.0, "dragging past the bottom continues scrolling downward");
+    }
+
+    #[test]
+    fn clamp_bounds_speed_outside_edges_and_across_frame_times() {
+        let viewport = Rect::from_min_max(pos2(10.0, 30.0), pos2(310.0, 330.0));
+        let at_top = layer_drag_edge_scroll(Some(pos2(100.0, 30.0)), viewport, true, 1.0 / 60.0);
+        let past_top = layer_drag_edge_scroll(Some(pos2(100.0, 15.0)), viewport, true, 1.0 / 60.0);
+        let far_past_top = layer_drag_edge_scroll(Some(pos2(100.0, -50.0)), viewport, true, 1.0 / 60.0);
+        assert_eq!(past_top, at_top, "speed past top edge is clamped to maximum edge speed");
+        assert_eq!(far_past_top, at_top, "speed far past top edge remains clamped");
+
+        let at_bottom = layer_drag_edge_scroll(Some(pos2(100.0, 330.0)), viewport, true, 1.0 / 60.0);
+        let past_bottom = layer_drag_edge_scroll(Some(pos2(100.0, 345.0)), viewport, true, 1.0 / 60.0);
+        let far_past_bottom = layer_drag_edge_scroll(Some(pos2(100.0, 500.0)), viewport, true, 1.0 / 60.0);
+        assert_eq!(past_bottom, at_bottom, "speed past bottom edge is clamped to maximum edge speed");
+        assert_eq!(far_past_bottom, at_bottom, "speed far past bottom edge remains clamped");
+
+        let active = Some(pos2(100.0, 325.0));
+        let step = layer_drag_edge_scroll(active, viewport, true, 1.0 / 60.0);
+        let twice = layer_drag_edge_scroll(active, viewport, true, 2.0 / 60.0);
+        assert!((twice - step * 2.0).abs() < 1e-4, "time-based scrolling scales across refresh rates");
+        assert!(layer_drag_edge_scroll(active, viewport, true, 0.5).abs() <= 30.0, "long frames have a bounded step");
+    }
+
+    #[test]
+    fn zero_when_no_drag_or_outside_horizontal_bounds() {
         let viewport = Rect::from_min_max(pos2(10.0, 30.0), pos2(310.0, 330.0));
         let active = Some(pos2(100.0, 325.0));
         assert_eq!(layer_drag_edge_scroll(active, viewport, false, 1.0 / 60.0), 0.0);
         assert_eq!(layer_drag_edge_scroll(None, viewport, true, 1.0 / 60.0), 0.0);
         assert_eq!(layer_drag_edge_scroll(Some(pos2(9.0, 325.0)), viewport, true, 1.0 / 60.0), 0.0);
-        assert_eq!(layer_drag_edge_scroll(Some(pos2(100.0, 335.0)), viewport, true, 1.0 / 60.0), 0.0);
+        assert_eq!(layer_drag_edge_scroll(Some(pos2(311.0, 325.0)), viewport, true, 1.0 / 60.0), 0.0);
         assert_eq!(layer_drag_edge_scroll(active, viewport, true, 0.0), 0.0);
-        let step = layer_drag_edge_scroll(active, viewport, true, 1.0 / 60.0);
-        let twice = layer_drag_edge_scroll(active, viewport, true, 2.0 / 60.0);
-        assert!((twice - step * 2.0).abs() < 1e-4, "time-based scrolling scales across refresh rates");
-        assert!(layer_drag_edge_scroll(active, viewport, true, 0.5).abs() <= 30.0, "long frames have a bounded step");
     }
 
     #[test]
