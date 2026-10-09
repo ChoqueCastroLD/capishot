@@ -2234,6 +2234,8 @@ cameraRaw	Amount	Cantidad
 	Channels:	Canales:
 	Knockout	Cobertura
 	Apply At Canvas Bounds	Aplicar efecto en los límites del lienzo
+	Show/Hide All Panels	Mostrar/ocultar todos los paneles
+	Show/Hide Panels	Mostrar/ocultar paneles
 	Could not open	No se pudo abrir
 	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: la ruta no es Unicode válido; cambia el nombre del archivo y vuelve a abrirlo.
 

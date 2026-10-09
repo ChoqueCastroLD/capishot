@@ -2440,6 +2440,8 @@ cameraRaw	Roughness	Неровность
 	Channels:	Каналы:
 	Knockout	Просвечивание
 	Apply At Canvas Bounds	Применить эффект на границах холста
+	Show/Hide All Panels	Показать/скрыть все панели
+	Show/Hide Panels	Показать/скрыть панели
 	Could not open	Не удалось открыть
 	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: путь не является допустимым Unicode; переименуйте файл и откройте его снова.
 

@@ -2140,6 +2140,8 @@ cameraRaw	Blending	混合
 	Channels:	色版:
 	Knockout	去底色
 	Apply At Canvas Bounds	套用效果至版面邊界
+	Show/Hide All Panels	顯示/隱藏所有面板
+	Show/Hide Panels	顯示/隱藏面板
 	Could not open	無法開啟
 	{path}: the path is not valid Unicode; rename the file and open it again.	{path}：路徑不是有效的 Unicode；請重新命名檔案後再開啟。
 

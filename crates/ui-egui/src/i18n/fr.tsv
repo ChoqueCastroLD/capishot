@@ -2594,6 +2594,8 @@ cameraRaw	Blending	Fusion
 	Channels:	Couches :
 	Knockout	Masquage
 	Apply At Canvas Bounds	Appliquer l’effet aux limites de la zone de travail
+	Show/Hide All Panels	Afficher/masquer tous les panneaux
+	Show/Hide Panels	Afficher/masquer les panneaux
 	Could not open	Impossible d’ouvrir
 	{path}: the path is not valid Unicode; rename the file and open it again.	{path} : le chemin n’est pas un Unicode valide ; renommez le fichier puis rouvrez-le.
 

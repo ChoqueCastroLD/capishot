@@ -192,17 +192,24 @@ pub fn dispatch_pressed(app: &mut PhotocraftApp, ctx: &egui::Context, focus: Foc
     let table: Vec<(String, KeyboardShortcut)> =
         bindings(app).into_iter().filter(|(id, sc)| focus.allows(sc) && !(editing && TEXT_OWNED.contains(&id.as_str()))).collect();
     let command = |e: &egui::Event| match e {
-        egui::Event::Key { key, pressed: true, modifiers, .. } => table.iter().find(|(_, sc)| key_matches(sc, *key, *modifiers)).map(|(id, _)| id.clone()),
+        egui::Event::Key { key, pressed: true, modifiers, .. } => {
+            table.iter().find(|(_, sc)| key_matches(sc, *key, *modifiers)).map(|(id, _)| (id.clone(), *key == Key::Tab))
+        }
         _ => None,
     };
     let mut ran = false;
     loop {
         let next = ctx.input_mut(|i| {
-            let (at, id) = i.events.iter().enumerate().find_map(|(at, e)| Some((at, command(e)?)))?;
+            let (at, hit) = i.events.iter().enumerate().find_map(|(at, e)| Some((at, command(e)?)))?;
             i.events.remove(at);
-            Some(id)
+            Some(hit)
         });
-        let Some(id) = next else { break };
+        let Some((id, tab)) = next else { break };
+        if tab {
+            // egui already read this Tab as "focus the next widget" (Photoshop's Tab hides the
+            // panels instead, #1313): the shortcut took it, so cancel that move.
+            ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+        }
         let id = delete_key_command(app, id);
         let owner = key_owner(app, ctx);
         dispatch(app, ctx, &id);

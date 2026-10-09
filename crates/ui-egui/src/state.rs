@@ -325,6 +325,12 @@ pub struct Panels {
     /// The toolbar's header chevron: two columns even when one fits (#1197).
     #[serde(default)]
     pub toolbar_double: bool,
+    /// The right-hand panel dock. ⇧Tab hides and shows it, as in Photoshop (#1313).
+    #[serde(default = "yes")]
+    pub dock: bool,
+    /// What Tab hid (toolbar, options bar, dock), so a second Tab brings back just those.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden_by_tab: Option<[bool; 3]>,
 }
 
 impl Default for Panels {
@@ -341,6 +347,8 @@ impl Default for Panels {
             brush_settings: false,
             character: false,
             toolbar_double: false,
+            dock: true,
+            hidden_by_tab: None,
         }
     }
 }

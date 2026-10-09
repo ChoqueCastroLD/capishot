@@ -45,6 +45,9 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.toggle.brushSettings", "Brush Settings", &["Window"], Some("F5")),
     ("window.toggle.navigator", "Navigator", &["Window"], None),
     ("window.toggle.toolbar", "Tools", &["Window"], None),
+    // Photoshop's Tab and ⇧Tab: all panels (Tools, options bar and the dock), or only the dock.
+    ("window.togglePanels", "Show/Hide All Panels", &[], Some("Tab")),
+    ("window.toggle.dock", "Show/Hide Panels", &[], Some("Shift+Tab")),
     ("window.toggle.options", "Options", &["Window"], None),
     ("window.theme.toggle", "Next Theme", &["Window"], None),
     ("window.theme.pro", "Pro Theme", &["Window", "Theme"], None),
@@ -429,6 +432,21 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         a if crate::adjust_dialog::has_dialog(a) && params.as_object().is_none_or(|o| o.is_empty()) => {
             Ok(json!({"dialog": crate::adjust_dialog::open(app, a).ok_or("no document")?}))
         }
+        "window.togglePanels" => {
+            // Tab hides the Tools panel, the options bar and the dock; Tab again shows what it hid.
+            let p = &mut app.ui.panels;
+            match p.hidden_by_tab.take() {
+                Some([toolbar, options, dock]) if !(p.toolbar || p.options_bar || p.dock) => {
+                    (p.toolbar, p.options_bar, p.dock) = (toolbar, options, dock);
+                }
+                _ if p.toolbar || p.options_bar || p.dock => {
+                    p.hidden_by_tab = Some([p.toolbar, p.options_bar, p.dock]);
+                    (p.toolbar, p.options_bar, p.dock) = (false, false, false);
+                }
+                _ => (p.toolbar, p.options_bar, p.dock) = (true, true, true),
+            }
+            Ok(Value::Null)
+        }
         t if t.starts_with("window.toggle.") => {
             // A shown but collapsed dock group is expanded rather than hidden (#129).
             if let Some(g) = crate::dock::Group::from_key(&t["window.toggle.".len()..]).filter(|g| g.shown(&app.ui.panels) && app.ui.dock.is_collapsed(*g)) {
@@ -445,6 +463,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 "toolbar" => &mut p.toolbar,
                 "options" => &mut p.options_bar,
                 "brushSettings" => &mut p.brush_settings,
+                "dock" => &mut p.dock,
                 _ => return Err(format!("unknown panel in {t}")),
             };
             *slot = !*slot;
@@ -500,6 +519,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
             app.session.active().is_some() && app.services.export.is_some()
         }
         i if i.starts_with("window.toggle.") => true,
+        "window.togglePanels" => true,
         i if panel_alias(i).is_some() || workspace_name(i).is_some() => true,
         i if proof_preset(i).is_some() => app.session.active().is_some(),
         // "Custom…" is the full Proof Setup dialog.
@@ -614,6 +634,8 @@ fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
         "window.toggle.color" => p.color,
         "window.toggle.navigator" => p.navigator,
         "window.toggle.toolbar" => p.toolbar,
+        "window.toggle.dock" => p.dock,
+        "window.togglePanels" => p.toolbar || p.options_bar || p.dock,
         "window.toggle.options" => p.options_bar,
         "window.toggle.brushSettings" => p.brush_settings,
         _ => return None,

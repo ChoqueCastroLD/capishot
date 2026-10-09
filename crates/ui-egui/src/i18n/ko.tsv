@@ -2753,6 +2753,8 @@ cameraRaw	Color	색상
 	Channels:	채널:
 	Knockout	녹아웃
 	Apply At Canvas Bounds	캔버스 경계에 효과 적용
+	Show/Hide All Panels	모든 패널 표시/숨기기
+	Show/Hide Panels	패널 표시/숨기기
 	Could not open	열 수 없음
 	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: 경로가 올바른 유니코드가 아닙니다. 파일 이름을 바꾼 뒤 다시 여세요.
 	Good	좋음

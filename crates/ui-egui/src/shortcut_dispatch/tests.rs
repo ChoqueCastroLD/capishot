@@ -3,7 +3,7 @@
 //! realistic layered document, from the places focus usually is.
 
 use egui::accesskit::Role;
-use egui::{Key, Modifiers, PointerButton, Pos2, vec2};
+use egui::{Modifiers, PointerButton, Pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use photocraft_doc::LayerContent;
@@ -91,7 +91,8 @@ enum Place {
     LayersRow,
     /// Just after clicking into the Layers panel's Opacity field (a text field now).
     OpacityField,
-    /// A non-text widget focused (Tab from nothing focuses the first one, as egui does).
+    /// A non-text widget focused (a Layers panel row, through accessibility focus: Tab from
+    /// nothing focused is Photoshop's Show/Hide All Panels, #1313).
     FocusedWidget,
 }
 
@@ -123,9 +124,11 @@ fn put_focus(h: &mut Harness<'_, PhotocraftApp>, place: Place) {
             assert_eq!(Focus::of(&h.ctx), Focus::Text, "clicking a value field edits it");
         }
         Place::FocusedWidget => {
-            h.event(egui::Event::Key { key: Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+            h.get_by_role_and_label(Role::Button, "paint").scroll_to_me();
+            h.run_steps(4);
+            h.get_by_role_and_label(Role::Button, "paint").focus();
             h.run_steps(2);
-            assert_eq!(Focus::of(&h.ctx), Focus::Widget, "Tab focused a widget");
+            assert_eq!(Focus::of(&h.ctx), Focus::Widget, "a widget is focused");
         }
     }
     take_log(&h.ctx);
