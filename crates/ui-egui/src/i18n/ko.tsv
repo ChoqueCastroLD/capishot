@@ -1995,8 +1995,10 @@
 	Floating point	부동 소수점
 	Use Global Light	전체 조명 사용
 	Native file drag-and-drop is unavailable	파일 드래그 앤 드롭을 사용할 수 없습니다
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Wayland에서는 아직 파일 드래그 앤 드롭을 지원하지 않습니다. 파일 › 열기를 사용하거나 `WAYLAND_DISPLAY= photocraft`로 XWayland에서 PhotoCraft를 실행하세요.
-	Use File › Open to open an image.	파일 › 열기에서 이미지를 여세요.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Wayland에서는 아직 파일 드래그 앤 드롭을 지원하지 않습니다. 파일 › 열기를 사용하거나, 파일 관리자에서 이미지를 복사한 뒤 {paste}(으)로 붙여넣으세요.
+	To drop files, start PhotoCraft under XWayland: `{command}`	파일을 끌어다 놓으려면 XWayland에서 PhotoCraft를 실행하세요: `{command}`
+	Edit › Paste	편집 › 붙여넣기
+	Use File › Open, or paste a copied image with {paste}.	파일 › 열기를 사용하거나, 복사한 이미지를 {paste}(으)로 붙여넣으세요.
 	Invalid {mode} profile	유효하지 않은 {mode} 프로파일
 	Unnamed {mode} profile	이름 없는 {mode} 프로파일
 	Show bounding box when dragging layer	레이어를 드래그할 때 테두리 상자 표시

@@ -2453,8 +2453,10 @@
 	Floating point	Titik mengambang
 	Use Global Light	Gunakan Cahaya Global
 	Native file drag-and-drop is unavailable	Seret dan lepas berkas native tidak tersedia
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Seret dan lepas berkas native belum didukung di Wayland. Gunakan Berkas › Buka, atau jalankan PhotoCraft di XWayland dengan `WAYLAND_DISPLAY= photocraft`.
-	Use File › Open to open an image.	Gunakan Berkas › Buka untuk membuka gambar.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Seret dan lepas berkas native belum didukung di Wayland. Gunakan Berkas › Buka, atau salin gambar di pengelola berkas lalu tempel dengan {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Untuk menjatuhkan berkas, jalankan PhotoCraft di XWayland: `{command}`
+	Edit › Paste	Edit › Tempel
+	Use File › Open, or paste a copied image with {paste}.	Gunakan Berkas › Buka, atau tempel gambar yang disalin dengan {paste}.
 	Mixer Brush Tool	Alat Kuas Pencampur
 	Invalid {mode} profile	Profil {mode} tidak valid
 	Unnamed {mode} profile	Profil {mode} tanpa nama

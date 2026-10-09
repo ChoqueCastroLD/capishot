@@ -974,11 +974,13 @@
 	Draw with the Pen tool (P) or make a work path from a selection.	Zeichne mit dem Stift-Werkzeug (P) oder erzeuge einen Arbeitspfad aus einer Auswahl.
 	Drop an image or PSD anywhere to open it.	Ziehe ein Bild oder PSD an eine beliebige Stelle, um es zu öffnen.
 	Native file drag-and-drop is unavailable	Natives Ziehen und Ablegen von Dateien ist nicht verfügbar
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Natives Ziehen und Ablegen von Dateien wird unter Wayland noch nicht unterstützt. Nutze Datei › Öffnen oder starte PhotoCraft unter XWayland mit `WAYLAND_DISPLAY= photocraft`.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Natives Ziehen und Ablegen von Dateien wird unter Wayland noch nicht unterstützt. Nutze Datei › Öffnen oder kopiere das Bild im Dateimanager und füge es mit {paste} ein.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Um Dateien abzulegen, starte PhotoCraft unter XWayland: `{command}`
+	Edit › Paste	Bearbeiten › Einfügen
 	Duplicate Layers…	Ebenen duplizieren…
 	Duplicate style	Stil duplizieren
 	Edit Toolbar…	Werkzeugleiste bearbeiten…
-	Use File › Open to open an image.	Nutze Datei › Öffnen, um ein Bild zu öffnen.
+	Use File › Open, or paste a copied image with {paste}.	Nutze Datei › Öffnen oder füge ein kopiertes Bild mit {paste} ein.
 	Edit in Quick Mask Mode  (Q)	Im Schnellmaskenmodus bearbeiten  (Q)
 	Edit in Standard Mode  (Q)	Im Standardmodus bearbeiten  (Q)
 	Effects	Effekte

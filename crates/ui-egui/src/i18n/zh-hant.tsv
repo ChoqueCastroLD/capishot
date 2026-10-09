@@ -981,11 +981,13 @@
 	Draw with the Pen tool (P) or make a work path from a selection.	使用筆型工具 (P) 繪製，或從選取範圍建立工作路徑。
 	Drop an image or PSD anywhere to open it.	將影像或 PSD 拖放到任何位置即可開啟。
 	Native file drag-and-drop is unavailable	Wayland 不支援原生檔案拖放
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Wayland 尚未支援原生檔案拖放。請使用「檔案 › 開啟」，或透過 `WAYLAND_DISPLAY= photocraft` 在 XWayland 下執行 PhotoCraft。
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Wayland 尚未支援原生檔案拖放。請使用「檔案 › 開啟」，或在檔案管理員中複製影像後使用 {paste} 貼上。
+	To drop files, start PhotoCraft under XWayland: `{command}`	若要拖放檔案，請在 XWayland 下啟動 PhotoCraft：`{command}`
+	Edit › Paste	「編輯 › 貼上」
 	Duplicate Layers…	複製圖層…
 	Duplicate style	複製樣式
 	Edit Toolbar…	編輯工具列…
-	Use File › Open to open an image.	使用「檔案 › 開啟」開啟影像。
+	Use File › Open, or paste a copied image with {paste}.	請使用「檔案 › 開啟」，或使用 {paste} 貼上複製的影像。
 	Edit in Quick Mask Mode  (Q)	在快速遮色片模式下編輯 (Q)
 	Edit in Standard Mode  (Q)	在標準模式下編輯 (Q)
 	Effects	效果

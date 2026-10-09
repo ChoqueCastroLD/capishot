@@ -990,11 +990,13 @@
 	Draw with the Pen tool (P) or make a work path from a selection.	Kreslete nástrojem pero (P) nebo vytvořte pracovní cestu z výběru.
 	Drop an image or PSD anywhere to open it.	Přetáhněte sem obrázek nebo PSD a otevře se.
 	Native file drag-and-drop is unavailable	Nativní přetahování souborů ve Waylandu není dostupné
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Nativní přetahování souborů ve Waylandu zatím není podporováno. Použijte Soubor › Otevřít nebo spusťte PhotoCraft v XWayland s `WAYLAND_DISPLAY= photocraft`.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Nativní přetahování souborů ve Waylandu zatím není podporováno. Použijte Soubor › Otevřít, nebo obrázek zkopírujte ve správci souborů a vložte ho pomocí {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Chcete-li soubory přetahovat, spusťte PhotoCraft v XWayland: `{command}`
+	Edit › Paste	Úpravy › Vložit
 	Duplicate Layers…	Duplikovat vrstvy…
 	Duplicate style	Duplikovat styl
 	Edit Toolbar…	Upravit panel nástrojů…
-	Use File › Open to open an image.	Obrázek otevřete přes Soubor › Otevřít.
+	Use File › Open, or paste a copied image with {paste}.	Použijte Soubor › Otevřít, nebo vložte zkopírovaný obrázek pomocí {paste}.
 	Edit in Quick Mask Mode  (Q)	Upravit v režimu rychlé masky  (Q)
 	Edit in Standard Mode  (Q)	Upravit ve standardním režimu  (Q)
 	Effects	Efekty

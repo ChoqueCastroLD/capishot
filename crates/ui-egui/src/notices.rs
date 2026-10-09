@@ -27,12 +27,23 @@ pub struct Notice {
     /// Preference key to set when this notice is dismissed.
     #[serde(default)]
     pub dismiss_pref: Option<String>,
+    /// `{name}` values filled into the title and lines after they are translated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<(String, String)>,
+}
+
+impl Notice {
+    /// `s` (the title or a line) in the current language, with [`Notice::args`] filled in.
+    pub fn text(&self, s: &str) -> String {
+        let args: Vec<(&str, &str)> = self.args.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        crate::i18n::fmt(crate::i18n::t(s), &args)
+    }
 }
 
 /// Show a notice (newest last); returns its id.
 pub fn post(app: &mut PhotocraftApp, title: impl Into<String>, lines: Vec<String>, error: bool, dismiss_pref: Option<&str>) -> u64 {
     let id = app.ui.alloc_id();
-    app.ui.notices.push(Notice { id, title: title.into(), lines, error, dismiss_pref: dismiss_pref.map(str::to_owned) });
+    app.ui.notices.push(Notice { id, title: title.into(), lines, error, dismiss_pref: dismiss_pref.map(str::to_owned), args: Vec::new() });
     cap_notices(app);
     id
 }
@@ -44,7 +55,14 @@ fn cap_notices(app: &mut PhotocraftApp) {
     }
 }
 
-/// Show the Wayland-specific fallback guidance unless the user dismissed it in preferences.
+/// How to paste in hints: Edit › Paste's effective shortcut (`Ctrl+V`), else the menu path.
+pub(crate) fn paste_hint(app: &PhotocraftApp) -> String {
+    crate::shortcuts::shortcut_label(app, "edit.paste").unwrap_or_else(|| tl!("Edit › Paste").to_string())
+}
+
+/// Show the Wayland-specific fallback guidance unless the user dismissed it in preferences: winit
+/// 0.30 delivers no file drops on Wayland, so point at File › Open, pasting a copied file, and the
+/// command that starts this install under XWayland (where drops work), when there is one.
 pub fn wayland_file_drop_guidance(app: &mut PhotocraftApp) {
     if !app.services.is_wayland
         || app.session.prefs().dialogs.get(WAYLAND_FILE_DROP_DISMISSED).and_then(serde_json::Value::as_bool) == Some(true)
@@ -52,16 +70,20 @@ pub fn wayland_file_drop_guidance(app: &mut PhotocraftApp) {
     {
         return;
     }
-    post(
-        app,
-        "Native file drag-and-drop is unavailable",
-        vec![
-            "Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`."
-                .into(),
-        ],
-        false,
-        Some(WAYLAND_FILE_DROP_DISMISSED),
-    );
+    // English templates, translated and filled in when drawn, so the notice follows a language change.
+    let mut lines = vec![
+        "Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}."
+            .to_owned(),
+    ];
+    let mut args = vec![("paste".to_owned(), paste_hint(app))];
+    if let Some(command) = &app.services.xwayland_command {
+        lines.push("To drop files, start PhotoCraft under XWayland: `{command}`".to_owned());
+        args.push(("command".to_owned(), command.clone()));
+    }
+    let id = post(app, "Native file drag-and-drop is unavailable", lines, false, Some(WAYLAND_FILE_DROP_DISMISSED));
+    if let Some(notice) = app.ui.notices.iter_mut().find(|notice| notice.id == id) {
+        notice.args = args;
+    }
 }
 
 /// A full refresh of document `doc` fell back to the CPU compositor (`reason`, the GPU's) and took
@@ -140,7 +162,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     .show(ui, |ui| {
                         ui.set_width(340.0);
                         ui.horizontal(|ui| {
-                            let title = egui::RichText::new(crate::i18n::t(&n.title)).strong().color(if n.error { t.warning } else { t.text });
+                            let title = egui::RichText::new(n.text(&n.title)).strong().color(if n.error { t.warning } else { t.text });
                             ui.add(egui::Label::new(title).wrap());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                                 if ui.add(egui::Button::new(egui::RichText::new("×").color(t.text_dim)).frame(false)).on_hover_text(tl!("Dismiss")).clicked() {
@@ -149,7 +171,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                             });
                         });
                         for line in n.lines.iter().take(MAX_LINES) {
-                            let line = crate::i18n::t(line);
+                            let line = n.text(line);
                             ui.add(egui::Label::new(egui::RichText::new(format!("• {line}")).color(t.text_dim)).wrap());
                         }
                         if n.lines.len() > MAX_LINES {
@@ -174,8 +196,10 @@ mod tests {
 
     #[test]
     fn wayland_guidance_follows_language_changes_after_startup() {
-        let app = PhotocraftApp::new(Session::new(), Services { is_wayland: true, ..Default::default() });
+        let command = Some("WAYLAND_DISPLAY= photocraft".to_string());
+        let app = PhotocraftApp::new(Session::new(), Services { is_wayland: true, xwayland_command: command, ..Default::default() });
         let notice = &app.ui.notices[0];
+        assert!(notice.lines.iter().all(|line| crate::i18n::tr(crate::i18n::Lang::from_code("es").unwrap(), line) != line), "every line is a catalog template");
         // the notice keeps its English source text and is translated when drawn (`i18n::t` with
         // the current language); `tr` with an explicit language leaves the process-wide language,
         // which other tests running in parallel draw with, untouched
@@ -185,17 +209,26 @@ mod tests {
         assert_eq!(crate::i18n::tr(crate::i18n::Lang::EN, &notice.title), "Native file drag-and-drop is unavailable");
     }
 
+    /// A notice's lines in English with their arguments filled in.
+    fn english(notice: &Notice) -> String {
+        let args: Vec<(&str, &str)> = notice.args.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        notice.lines.iter().map(|line| crate::i18n::fmt(line, &args)).collect::<Vec<_>>().join(" ")
+    }
+
     #[test]
     fn wayland_guidance_is_only_shown_in_wayland_sessions() {
-        let mut app = PhotocraftApp::new(Session::new(), Services { is_wayland: true, ..Default::default() });
+        let command = Some("WAYLAND_DISPLAY= '/apps/Photo Craft.AppImage'".to_string());
+        let mut app = PhotocraftApp::new(Session::new(), Services { is_wayland: true, xwayland_command: command, ..Default::default() });
         assert_eq!(app.ui.notices.len(), 1);
         assert_eq!(app.ui.notices[0].title, "Native file drag-and-drop is unavailable");
-        let guidance = app.ui.notices[0].lines.join(" ");
+        let guidance = english(&app.ui.notices[0]);
         assert!(guidance.contains("not supported on Wayland yet"));
         assert!(guidance.contains("File › Open"));
-        assert!(!guidance.contains("Ctrl+V"));
-        assert!(guidance.contains("XWayland"));
-        assert!(guidance.contains("WAYLAND_DISPLAY= photocraft"));
+        // Pasting a copied file works on Wayland (#338), so the notice offers it.
+        let paste = paste_hint(&app);
+        assert!(guidance.contains(&format!("paste it with {paste}")), "{guidance}");
+        // The relaunch command is the one for this install (an AppImage here), not a guess.
+        assert!(guidance.contains("under XWayland: `WAYLAND_DISPLAY= '/apps/Photo Craft.AppImage'`"), "{guidance}");
         assert_eq!(app.ui.notices[0].dismiss_pref.as_deref(), Some(WAYLAND_FILE_DROP_DISMISSED));
         for i in 0..MAX_NOTICES {
             post(&mut app, format!("Transient {i}"), Vec::new(), false, None);
@@ -205,6 +238,24 @@ mod tests {
 
         let app = PhotocraftApp::new(Session::new(), Services::default());
         assert!(app.ui.notices.is_empty());
+    }
+
+    #[test]
+    fn wayland_guidance_without_an_x_server_does_not_suggest_xwayland() {
+        let app = PhotocraftApp::new(Session::new(), Services { is_wayland: true, ..Default::default() });
+        let guidance = english(&app.ui.notices[0]);
+        assert!(guidance.contains("File › Open"));
+        assert!(!guidance.contains("XWayland"), "{guidance}");
+    }
+
+    #[test]
+    fn paste_hint_follows_the_shortcut_and_falls_back_to_the_menu() {
+        let mut app = PhotocraftApp::new(Session::new(), Services::default());
+        assert_eq!(paste_hint(&app), crate::shortcuts::shortcut_label(&app, "edit.paste").unwrap());
+        app.session.prefs.edit(|prefs| {
+            prefs.shortcuts.insert("edit.paste".into(), String::new());
+        });
+        assert_eq!(paste_hint(&app), "Edit › Paste");
     }
 
     #[test]

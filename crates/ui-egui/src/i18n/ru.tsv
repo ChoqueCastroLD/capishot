@@ -1387,9 +1387,11 @@
 	BLANK DOCUMENT PRESETS ({n})	НАБОРЫ ПУСТЫХ ДОКУМЕНТОВ ({n})
 	Create a new document or open an existing file.	Создайте новый документ или откройте существующий файл.
 	Drop an image or PSD anywhere to open it.	Перетащите изображение или PSD в любое место окна, чтобы открыть.
-	Use File › Open to open an image.	Чтобы открыть изображение, выберите Файл › Открыть.
+	Use File › Open, or paste a copied image with {paste}.	Выберите Файл › Открыть или вставьте скопированное изображение с помощью {paste}.
 	Native file drag-and-drop is unavailable	Нативное перетаскивание файлов в Wayland недоступно
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Нативное перетаскивание файлов в Wayland пока не поддерживается. Откройте файл через Файл › Открыть или запустите PhotoCraft в XWayland с `WAYLAND_DISPLAY= photocraft`.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Нативное перетаскивание файлов в Wayland пока не поддерживается. Откройте файл через Файл › Открыть или скопируйте изображение в файловом менеджере и вставьте его с помощью {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Чтобы перетаскивать файлы, запустите PhotoCraft в XWayland: `{command}`
+	Edit › Paste	Редактирование › Вставить
 	Photo	Фото
 	Print	Печать
 	Art & Illustration	Искусство и иллюстрация

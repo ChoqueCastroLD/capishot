@@ -2460,8 +2460,10 @@
 	Floating point	Ponto flutuante
 	Use Global Light	Usar luz global
 	Native file drag-and-drop is unavailable	Arrastar e soltar arquivos nativo indisponível
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Arrastar e soltar arquivos nativo ainda não é compatível com Wayland. Use Arquivo › Abrir ou execute o PhotoCraft no XWayland com `WAYLAND_DISPLAY= photocraft`.
-	Use File › Open to open an image.	Use Arquivo › Abrir para abrir uma imagem.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Arrastar e soltar arquivos nativo ainda não é compatível com Wayland. Use Arquivo › Abrir ou copie a imagem no gerenciador de arquivos e cole-a com {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Para soltar arquivos, execute o PhotoCraft no XWayland: `{command}`
+	Edit › Paste	Editar › Colar
+	Use File › Open, or paste a copied image with {paste}.	Use Arquivo › Abrir ou cole uma imagem copiada com {paste}.
 	Mixer Brush Tool	Ferramenta Pincel misturador
 	Invalid {mode} profile	Perfil {mode} inválido
 	Unnamed {mode} profile	Perfil {mode} sem nome

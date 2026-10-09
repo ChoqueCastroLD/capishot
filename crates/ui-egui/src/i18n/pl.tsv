@@ -3194,6 +3194,10 @@ cameraRaw	Roughness	Chropowatość
 	More documents	Więcej dokumentów
 	Developing {name}	Wywoływanie {name}
 	Camera Raw ({name})	Camera Raw ({name})
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Natywne przeciąganie i upuszczanie plików nie jest jeszcze obsługiwane w Wayland. Użyj Plik › Otwórz albo skopiuj obraz w menedżerze plików i wklej go za pomocą {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Aby upuszczać pliki, uruchom PhotoCraft pod XWayland: `{command}`
+	Edit › Paste	Edycja › Wklej
+	Use File › Open, or paste a copied image with {paste}.	Użyj Plik › Otwórz albo wklej skopiowany obraz za pomocą {paste}.
 
 # Swatches panel
 	Create new swatch	Utwórz nową próbkę

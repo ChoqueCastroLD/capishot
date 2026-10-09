@@ -1711,8 +1711,8 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             });
             ui.add_space(22.0);
             ui.horizontal(|ui| {
-                let msg = start_screen_drop_hint(app.services.is_wayland);
-                let g = ui.painter().layout_no_wrap(msg.into(), egui::FontId::proportional(12.5), t.text_faint);
+                let msg = start_screen_drop_hint(app);
+                let g = ui.painter().layout_no_wrap(msg.to_string(), egui::FontId::proportional(12.5), t.text_faint);
                 ui.add_space(((card.width() - g.size().x - 24.0) / 2.0).max(0.0));
                 let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), Sense::hover());
                 crate::icons::paint(ui, r, "image", 15.0, t.text_faint);
@@ -1730,8 +1730,13 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     });
 }
 
-fn start_screen_drop_hint(is_wayland: bool) -> &'static str {
-    if is_wayland { tl!("Use File › Open to open an image.") } else { tl!("Drop an image or PSD anywhere to open it.") }
+/// Wayland has no native file drops (winit 0.30, #386), so the hint offers File › Open and paste.
+fn start_screen_drop_hint(app: &PhotocraftApp) -> std::borrow::Cow<'static, str> {
+    if app.services.is_wayland {
+        crate::i18n::fmt(tl!("Use File › Open, or paste a copied image with {paste}."), &[("paste", &crate::notices::paste_hint(app))]).into()
+    } else {
+        tl!("Drop an image or PSD anywhere to open it.").into()
+    }
 }
 
 /// Recent files listed on the Home screen.
@@ -3656,7 +3661,13 @@ mod tests {
 
     #[test]
     fn wayland_start_screen_hint_does_not_claim_file_drop_works() {
-        assert_ne!(start_screen_drop_hint(true), start_screen_drop_hint(false));
+        let x11 = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let wayland = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services { is_wayland: true, ..Default::default() });
+        assert!(start_screen_drop_hint(&x11).starts_with("Drop"));
+        // Pasting a copied image file works on Wayland (#338): the hint says how.
+        let hint = start_screen_drop_hint(&wayland);
+        assert!(!hint.contains("Drop"), "{hint}");
+        assert!(hint.ends_with(&format!("paste a copied image with {}.", crate::notices::paste_hint(&wayland))), "{hint}");
     }
 
     #[test]
