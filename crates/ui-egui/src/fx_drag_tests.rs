@@ -69,14 +69,16 @@ fn dragging_effects_onto_a_layer_moves_them_and_alt_copies() {
 
     // ⌥-drag one effect row onto `b`: just that effect is copied.
     let from = effect_row(&h, a, "Color Overlay").center();
-    drag(&mut h, from, row(&h, b).row.center(), Modifiers::ALT);
+    let to = row(&h, b).row.center();
+    drag(&mut h, from, to, Modifiers::ALT);
     assert_eq!(effects(&h, a), ["Drop Shadow", "Color Overlay"]);
     assert_eq!(effects(&h, b), ["Color Overlay"]);
     assert_eq!(h.state().session.active().unwrap().history.past_len(), steps + 1, "one history step");
 
     // Drag the fx badge onto `b`: all of `a`'s effects move there, replacing `b`'s.
     let badge = row(&h, a).indicators.into_iter().find(|(k, _)| *k == Indicator::Fx).unwrap().1;
-    drag(&mut h, badge.center(), row(&h, b).row.center(), Modifiers::NONE);
+    let to = row(&h, b).row.center();
+    drag(&mut h, badge.center(), to, Modifiers::NONE);
     assert!(effects(&h, a).is_empty(), "the effects moved off `a`");
     assert_eq!(effects(&h, b), ["Drop Shadow", "Color Overlay"]);
     // The drag moved effects, not the layer: `b` is still above `a`.
