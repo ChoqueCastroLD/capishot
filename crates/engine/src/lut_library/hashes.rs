@@ -25,16 +25,25 @@ fn read_sidecar(dir: &Path) -> Option<Vec<(String, String)>> {
     Some(text.lines().filter_map(|l| l.split_once('\t')).map(|(h, f)| (h.to_string(), f.to_string())).collect())
 }
 
-/// The content of a LUT file added by hand, or `None` when it is unreadable or larger than
+/// The content of a LUT file, or why it cannot be used: unreadable, or larger than
 /// [`MAX_LUT_BYTES`] (install refuses those too). The length is checked before the file is opened
-/// and again while reading, in case it grew in between.
-pub(super) fn read_bounded(path: &Path) -> Option<Vec<u8>> {
-    if fs::metadata(path).ok()?.len() > MAX_LUT_BYTES {
-        return None;
+/// and again while reading, so a file that grows in between is still capped.
+pub(super) fn read_capped(path: &Path) -> Result<Vec<u8>, String> {
+    let len = fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if len > MAX_LUT_BYTES {
+        return Err(format!("file too large ({len} bytes)"));
     }
     let mut bytes = Vec::new();
-    fs::File::open(path).ok()?.take(MAX_LUT_BYTES + 1).read_to_end(&mut bytes).ok()?;
-    (bytes.len() as u64 <= MAX_LUT_BYTES).then_some(bytes)
+    fs::File::open(path).and_then(|f| f.take(MAX_LUT_BYTES + 1).read_to_end(&mut bytes)).map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_LUT_BYTES {
+        return Err(format!("file too large (over {MAX_LUT_BYTES} bytes)"));
+    }
+    Ok(bytes)
+}
+
+/// [`read_capped`] without the reason, for callers that only skip what they cannot read.
+pub(super) fn read_bounded(path: &Path) -> Option<Vec<u8>> {
+    read_capped(path).ok()
 }
 
 /// Pack-relative paths of the LUTs in `dir` that can have a hash (not over [`MAX_LUT_BYTES`]), so
@@ -124,6 +133,19 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn read_capped_says_why_it_refused() {
+        let dir = temp("capped");
+        fs::write(dir.join("ok.cube"), b"TITLE \"x\"\n").unwrap();
+        assert_eq!(read_capped(&dir.join("ok.cube")).map(|b| b.len()), Ok(10));
+        let big = fs::File::create(dir.join("huge.cube")).unwrap();
+        big.set_len(MAX_LUT_BYTES + 1).unwrap();
+        drop(big);
+        assert!(read_capped(&dir.join("huge.cube")).unwrap_err().contains("too large"));
+        assert!(read_capped(&dir.join("missing.cube")).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

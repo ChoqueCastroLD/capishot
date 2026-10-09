@@ -446,15 +446,10 @@ impl LutLibrary {
             if !progress(i as f32 / total, &shown) {
                 return Err("cancelled".into());
             }
-            let len = fs::metadata(&f.path).map_err(|e| format!("{shown}: {e}"))?.len();
-            if len > MAX_LUT_BYTES {
-                out.skipped.push((shown, format!("file too large ({len} bytes)")));
-                continue;
-            }
-            let bytes = match fs::read(&f.path) {
+            let bytes = match hashes::read_capped(&f.path) {
                 Ok(b) => b,
                 Err(e) => {
-                    out.skipped.push((shown, e.to_string()));
+                    out.skipped.push((shown, e));
                     continue;
                 }
             };

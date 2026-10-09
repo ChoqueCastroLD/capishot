@@ -166,6 +166,19 @@ fn a_hand_added_oversize_file_is_refused() {
 }
 
 #[test]
+fn a_library_lut_that_is_not_utf8_is_refused_rather_than_changed() {
+    let (mut s, base) = fixture("not-utf8");
+    // A valid table with one stray Latin-1 byte in a comment: lossy decoding would accept it.
+    let mut bytes = b"# caf\xe9\n".to_vec();
+    bytes.extend_from_slice(invert_cube().as_bytes());
+    fs::write(base.join("lib").join("Pack").join("Latin1.cube"), bytes).unwrap();
+    for entry in ENTRY_POINTS {
+        let e = run(&mut s, entry, json!({"lut": "Pack/Latin1.cube"})).unwrap_err().to_string();
+        assert!(e.contains("UTF-8"), "{entry}: {e}");
+    }
+}
+
+#[test]
 fn a_broken_installed_file_is_a_parse_error_not_a_panic() {
     let (mut s, base) = fixture("broken");
     fs::write(base.join("lib").join("Pack").join("Junk.cube"), b"\xff\xfe not a lut").unwrap();
