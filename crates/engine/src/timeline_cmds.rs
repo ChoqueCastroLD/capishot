@@ -32,6 +32,7 @@ fn has_timeline(s: &Session) -> std::result::Result<(), String> {
 fn with_timeline(s: &mut Session, f: impl FnOnce(&mut Option<Timeline>)) -> Result<Value> {
     let st = s.active_mut().ok_or(EngineError::NoDocument)?;
     let mut doc = (*st.doc).clone();
+    crate::video_cmds::store(&mut doc);
     f(&mut doc.timeline);
     if let Some(t) = &mut doc.timeline {
         t.clamp();
