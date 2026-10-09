@@ -16,6 +16,7 @@
 //! - `ui.window.open {document?}` / `ui.window.close {window}`: extra document windows
 //! - `ui.pointer {events: [{kind: down|move|up, x, y, pressure?, tiltX?, tiltY?, rotation?}], modifiers?, button?}`: drive the active tool in document coordinates (`button: "secondary"` opens the tool's canvas context menu or Brush Preset picker, or erases with Preferences › Tools › Right-click with painting tools = erase)
 //! - `ui.click {x, y, button?, count?}` / `ui.move {x, y}`: synthetic pointer input in screen points
+//!   (`count` at most [`MAX_CLICKS`])
 //! - `ui.key {key, command?, shift?, alt?, ctrl?}` / `ui.type {text}`: synthetic keyboard input
 //! - `ui.resize {width, height}`: resize the main window
 //! - `ui.gpu.simulateLoss {error?}`: act as if the wgpu device was lost (or, with `error: true`,
@@ -97,6 +98,11 @@ pub const UI_SET_FIELDS: [&str; 21] = [
     "gradientBlendMode",
     "gradientClassic",
 ];
+
+/// Most clicks one `ui.click` may queue (#982). Each click is a press and a release that the app
+/// feeds in its own frame before replying, so `count` sizes both the input queue and the wait;
+/// the same ceiling as the steps of one batch request.
+pub const MAX_CLICKS: u64 = 256;
 
 fn ok(v: Value) -> Outcome {
     Outcome::Done(json!({"ok": true, "result": v}))
@@ -628,13 +634,14 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 "middle" => egui::PointerButton::Middle,
                 _ => egui::PointerButton::Primary,
             };
+            let clicks = if req.method == "ui.click" { u("count").unwrap_or(1) } else { 0 };
+            if clicks > MAX_CLICKS {
+                return err(format!("`count` must be at most {MAX_CLICKS} (got {clicks})"));
+            }
             app.synthetic.push(egui::Event::PointerMoved(pos));
-            if req.method == "ui.click" {
-                let clicks = p.get("count").and_then(Value::as_u64).unwrap_or(1);
-                for _ in 0..clicks {
-                    app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers: Default::default() });
-                    app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: Default::default() });
-                }
+            for _ in 0..clicks {
+                app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers: Default::default() });
+                app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: Default::default() });
             }
             ctx.request_repaint();
             Outcome::AfterInput
@@ -1242,5 +1249,29 @@ mod tests {
         app.session.execute("file.new", json!({"width": 4, "height": 4})).unwrap();
         let r = app.run("actions.play", json!({"action": "Open"})).unwrap();
         assert_eq!(r["ran"], 1, "{r}");
+    }
+
+    #[test]
+    fn huge_click_count_is_rejected() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        // #982: a huge count used to queue a press and a release per click before replying.
+        for count in [json!(MAX_CLICKS + 1), json!(1_000_000_000u64), json!(u64::MAX)] {
+            let r = call(&mut app, &ctx, "ui.click", json!({"x": 10, "y": 10, "count": count}));
+            assert_eq!(r["ok"], false, "{r}");
+            assert!(r["error"].as_str().unwrap().contains("`count` must be at most 256"), "{r}");
+            assert!(app.synthetic.is_empty(), "a rejected click queues nothing");
+        }
+        // Single, double and the largest allowed clicks still queue a move plus a press and a release each.
+        for (count, events) in [(None, 3), (Some(2), 5), (Some(MAX_CLICKS), 2 * MAX_CLICKS as usize + 1)] {
+            let params = match count {
+                Some(n) => json!({"x": 10, "y": 10, "count": n}),
+                None => json!({"x": 10, "y": 10}),
+            };
+            let (req, _rx) = ControlRequest::new("ui.click", params);
+            assert!(matches!(handle(&mut app, &ctx, &req), Outcome::AfterInput));
+            assert_eq!(app.synthetic.len(), events);
+            app.synthetic.clear();
+        }
     }
 }
