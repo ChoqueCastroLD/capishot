@@ -39,10 +39,22 @@ fn open_starts_in_the_last_used_folder() {
     menus::invoke(&mut app, &ctx, "file.open", json!({})).unwrap();
     app.poll_file_dialog(&ctx, None);
     assert!(
-        matches!(open.borrow().as_slice(), [(FileDialogRequest::Open { multiple: true, initial_dir: Some(dir) }, _)] if dir == "/pics"),
+        matches!(open.borrow().as_slice(), [(FileDialogRequest::Open { multiple: true, initial_dir: Some(dir), extensions: None }, _)] if dir == "/pics"),
         "{:?}",
         open.borrow().first().map(|(r, _)| r.clone())
     );
+}
+
+#[test]
+fn filtered_picker_requests_only_the_given_extensions() {
+    let (mut app, open, _) = app();
+    app.pick_file_bytes_filtered(&["cube", "3dl", "look"], |_, _, _| Ok(Value::Null)).unwrap();
+    app.poll_file_dialog(&egui::Context::default(), None);
+    assert!(matches!(
+        open.borrow().first().map(|(r, _)| r),
+        Some(FileDialogRequest::Open { multiple: false, extensions: Some(exts), .. })
+            if exts.iter().map(String::as_str).collect::<Vec<_>>() == ["cube", "3dl", "look"]
+    ));
 }
 
 #[test]
