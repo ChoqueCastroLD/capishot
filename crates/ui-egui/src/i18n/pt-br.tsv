@@ -1453,6 +1453,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navegar   {key} executar   esc fechar
 	Version {version}	Versão {version}
 	New Document	Novo documento
+	Preset Name	Nome da predefinição
+	No saved presets yet.	Nenhuma predefinição salva ainda.
 	Error	Erro
 	Command	Comando
 	Adjustment layers have nothing to transform	Camadas de ajuste não têm nada a transformar

@@ -1468,6 +1468,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ naviga {key} esegui esc chiudi
 	Version {version}	Versione {version}
 	New Document	Nuovo documento
+	Save Preset…	Salva predefinito…
+	Preset Name	Nome del predefinito
+	No saved presets yet.	Nessun predefinito salvato.
 	Error	Errore
 	Command	Comando
 

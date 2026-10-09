@@ -1480,6 +1480,10 @@
 	↑↓ navigate   ↵ run   esc close	↑↓ 导航   ↵ 运行   esc 关闭
 	Version {version}	版本 {version}
 	New Document	新建文档
+	Saved	已保存
+	Save Preset…	保存预设…
+	Preset Name	预设名称
+	No saved presets yet.	尚无已保存的预设。
 	Error	错误
 	Command	命令
 	Adds grain to the soft edges of the brush tip.	在笔尖的柔软边缘添加颗粒。

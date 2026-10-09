@@ -1475,6 +1475,10 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 瀏覽   {key} 執行   esc 關閉
 	Version {version}	版本 {version}
 	New Document	新增文件
+	Saved	已儲存
+	Save Preset…	儲存預設…
+	Preset Name	預設集名稱
+	No saved presets yet.	尚無已儲存的預設集。
 	Error	錯誤
 	Command	指令
 	Adjustment layers have nothing to transform	調整圖層沒有可變形的內容

@@ -1454,6 +1454,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ naviguer   {key} exécuter   échap fermer
 	Version {version}	Version {version}
 	New Document	Nouveau document
+	Preset Name	Nom du préréglage
+	No saved presets yet.	Aucun préréglage enregistré pour le moment.
 	Error	Erreur
 	Command	Commande
 	Adjustment layers have nothing to transform	Les calques d'ajustement n'ont rien à transformer

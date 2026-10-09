@@ -85,6 +85,10 @@ store expose and persist the same setting; scripts keep using canonical command 
 | `select.rect` | `{"x":0,"y":0,"width":100,"height":50,"mode":"add","ellipse":false}` |
 | `document.inspect` | `{}`: layer tree, history, selection bounds |
 | `document.pixel` | `{"x":10,"y":10}`: composite RGBA |
+| `document.presets.list` | `{}` → `{presets:[{name,settings}]}`: saved New Document configurations |
+| `document.presets.save` | `{"name":"Product square","settings":{"width":1600,"height":1600,"background":"transparent"}}`: save a snapshot; names are trimmed, 1–255 characters, and ASCII case-insensitive duplicates are rejected |
+| `document.presets.get` | `{"name":"Product square"}` → `{preset,params}`: fetch settings; pass `params` to `file.new` to create a document, optionally adding a document `name` |
+| `document.presets.delete` | `{"name":"Product square"}`: delete the named saved configuration |
 | `type.hitTest` | `{"layer":id?,"x":px,"y":px}`: character under a document point. No `layer` picks the topmost visible type layer there. Result `{"layer","index","line","inside"}` |
 | `type.caret` | `{"layer":id?,"index":char}`: caret segment in document pixels, `{"index","line","segment":[[x,y],[x,y]]}` (rotated and vertical type included) |
 | `type.navigate` | `{"layer":id?,"index":char,"move":"wordPrev\|wordNext\|linePrev\|lineNext\|lineStart\|lineEnd\|start\|end","x":px?}`: neighbouring caret. `x` keeps the column across line moves. Result `{"index"}` |
@@ -156,6 +160,16 @@ are never written. The Actions list is `actions.json` in that same folder and su
 Headless CLI/MCP sessions and the web build keep brush presets and the action list for the session
 only, unless a store is attached. Gradient presets (including imported `.grd` groups) persist with
 the preferences.
+
+Named New Document presets also persist with preferences (`presets.documents`) on desktop and
+web. File › New › Save Preset… saves the current form; the Saved tab selects a configuration or
+deletes it. Selection only fills the form: Create still runs `file.new`, and the document name
+is independent of the preset name. Settings include pixel width/height, resolution in ppi,
+mode, depth, background, and display `unit` (`px`, `in`, `cm`, `mm`, `pt`, `pica`) and
+`resolutionUnit` (`in`, `cm`). The defaults match File › New. Background Color captures the
+toolbox colour as `backgroundColor: [r,g,b]` (0..1), so reusing it does not follow later toolbox
+changes. Up to 256 presets are kept. Invalid saved entries are skipped independently; other
+presets and preferences still load. Automatic Recent configurations are separate follow-up work.
 
 ## Snapping
 

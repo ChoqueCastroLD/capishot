@@ -85,9 +85,9 @@ note = "theme.rs:28 five themes"
 [[item]]
 id = "UI-217-12"
 target = "Save custom New Document presets; a real Recent category"
-status = "missing"
+status = "partial"
 issue = 217
-note = "new_doc_ui.rs:17 'Recent' is a static list"
+note = "document_preset_cmds.rs and new_doc_ui.rs: named presets save/select/delete through preferences; Recent remains a static list plus Clipboard"
 
 [[item]]
 id = "UI-217-13"

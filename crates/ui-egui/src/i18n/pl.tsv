@@ -1469,6 +1469,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ nawigacja   {key} uruchom   esc zamknij
 	Version {version}	Wersja {version}
 	New Document	Nowy dokument
+	Preset Name	Nazwa ustawienia wstępnego
+	No saved presets yet.	Nie ma jeszcze zapisanych ustawień wstępnych.
 	Error	Błąd
 	Command	Polecenie
 

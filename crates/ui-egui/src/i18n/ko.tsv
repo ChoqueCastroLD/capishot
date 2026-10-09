@@ -1446,6 +1446,10 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 이동   {key} 실행   esc 닫기
 	Version {version}	버전 {version}
 	New Document	새 문서
+	Saved	저장됨
+	Save Preset…	사전 설정 저장…
+	Preset Name	사전 설정 이름
+	No saved presets yet.	저장된 사전 설정이 없습니다.
 	Error	오류
 	Command	명령
 	Adjustment layers have nothing to transform	조정 레이어에는 변형할 내용이 없습니다

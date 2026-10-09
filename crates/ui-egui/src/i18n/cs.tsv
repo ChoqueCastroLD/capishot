@@ -1484,6 +1484,10 @@
 	↑↓ navigate   {key} run   esc close	↑↓ pohyb   {key} spustit   esc zavřít
 	Version {version}	Verze {version}
 	New Document	Nový dokument
+	Saved	Uložené
+	Save Preset…	Uložit předvolbu…
+	Preset Name	Název předvolby
+	No saved presets yet.	Zatím nejsou uloženy žádné předvolby.
 	Error	Chyba
 	Command	Příkaz
 

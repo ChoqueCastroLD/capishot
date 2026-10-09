@@ -26,6 +26,7 @@ pub mod comps_cmds;
 pub mod cutout_cmds;
 pub mod display_color;
 pub mod distort_cmds;
+pub mod document_preset_cmds;
 pub mod edit_cmds;
 pub mod edit_menu_cmds;
 pub mod eraser_cmds;

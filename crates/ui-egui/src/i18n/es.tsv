@@ -1469,6 +1469,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navegar   {key} ejecutar   esc cerrar
 	Version {version}	Versión {version}
 	New Document	Documento nuevo
+	Save Preset…	Guardar ajuste preestablecido…
+	Preset Name	Nombre del ajuste preestablecido
+	No saved presets yet.	Todavía no hay ajustes preestablecidos guardados.
 	Error	Error
 	Command	Comando
 

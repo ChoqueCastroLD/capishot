@@ -1474,6 +1474,10 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 移動   {key} 実行   esc 閉じる
 	Version {version}	バージョン {version}
 	New Document	新規ドキュメント
+	Saved	保存済み
+	Save Preset…	プリセットを保存…
+	Preset Name	プリセット名
+	No saved presets yet.	保存済みのプリセットはありません。
 	Error	エラー
 	Command	コマンド
 

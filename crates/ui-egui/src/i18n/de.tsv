@@ -1468,6 +1468,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ Navigieren   {key} Ausführen   Esc Schließen
 	Version {version}	Version {version}
 	New Document	Neues Dokument
+	Save Preset…	Vorgabe speichern…
+	Preset Name	Name der Vorgabe
+	No saved presets yet.	Noch keine gespeicherten Vorgaben.
 	Error	Fehler
 	Command	Befehl
 	Adjustment layers have nothing to transform	Anpassungsebenen haben nichts zu transformieren

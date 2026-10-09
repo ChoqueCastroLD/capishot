@@ -1448,6 +1448,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navigasi   {key} jalankan   esc tutup
 	Version {version}	Versi {version}
 	New Document	Dokumen Baru
+	Preset Name	Nama Preset
+	No saved presets yet.	Belum ada preset tersimpan.
 	Error	Error
 	Command	Perintah
 	Adjustment layers have nothing to transform	Layer penyesuaian tidak ada yang bisa ditransformasi

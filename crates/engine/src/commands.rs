@@ -167,7 +167,7 @@ pub(crate) fn color_param(p: &Value, key: &str, default: [f32; 4]) -> [f32; 4] {
         _ => default,
     }
 }
-fn parse_hex(s: &str) -> Option<[f32; 4]> {
+pub(crate) fn parse_hex(s: &str) -> Option<[f32; 4]> {
     let s = s.trim_start_matches('#');
     let b = |i: usize| u8::from_str_radix(s.get(i..i + 2)?, 16).ok().map(|v| v as f32 / 255.0);
     match s.len() {
@@ -314,35 +314,29 @@ fn build() -> Vec<CommandSpec> {
             "New…",
             ["File"],
             Some("Cmd+N"),
-            r##"{"width":u32=1920,"height":u32=1080,"mode":"rgb|gray|cmyk|lab"="rgb","depth":8|16|32=8,"background":"white|black|backgroundColor|transparent|#rrggbb"="white","resolution":ppi=72,"name":str}"##,
+            r##"{"width":u32=1920,"height":u32=1080,"mode":"rgb|gray|cmyk|lab"="rgb","depth":8|16|32=8,"background":"white|black|backgroundColor|transparent|#rrggbb"="white","backgroundColor":[r,g,b]? (0..1; defaults to toolbox colour),"resolution":ppi=72,"name":str}"##,
             always,
             |s, p| {
+                use crate::document_preset_cmds::{MAX_DIMENSION, MAX_RESOLUTION, background_color, color_mode, sample_type};
                 // A size given as a float (`512.0`, as JSON from a UI field) is still that size (#254).
                 let px = |k: &str, d: u32| match p.get(k) {
                     Some(v) => v
                         .as_u64()
-                        .map(|n| n.clamp(1, 300_000) as u32)
-                        .or_else(|| v.as_f64().filter(|f| f.is_finite()).map(|f| f.round().clamp(1.0, 300_000.0) as u32))
+                        .map(|n| n.clamp(1, MAX_DIMENSION as u64) as u32)
+                        .or_else(|| v.as_f64().filter(|f| f.is_finite()).map(|f| f.round().clamp(1.0, MAX_DIMENSION as f64) as u32))
                         .unwrap_or(d),
                     None => d,
                 };
                 let (w, h) = (px("width", 1920), px("height", 1080));
-                let mode = match p.get("mode").and_then(Value::as_str).unwrap_or("rgb") {
-                    "gray" | "grayscale" => ColorMode::Grayscale,
-                    "cmyk" => ColorMode::Cmyk,
-                    "lab" => ColorMode::Lab,
-                    _ => ColorMode::Rgb,
-                };
-                let depth = match p.get("depth").and_then(Value::as_u64).unwrap_or(8) {
-                    16 => SampleType::U16,
-                    32 => SampleType::F32,
-                    _ => SampleType::U8,
-                };
+                let mode = color_mode(p.get("mode").and_then(Value::as_str).unwrap_or("rgb")).unwrap_or(ColorMode::Rgb);
+                let depth = sample_type(p.get("depth").and_then(Value::as_u64).unwrap_or(8)).unwrap_or(SampleType::U8);
                 let name = p.get("name").and_then(Value::as_str).unwrap_or("Untitled").to_string();
-                let res = p.get("resolution").and_then(Value::as_f64).unwrap_or(72.0).clamp(1.0, 30_000.0) as f32;
-                let bgc = s.tools.background;
+                let res = p.get("resolution").and_then(Value::as_f64).unwrap_or(72.0).clamp(1.0, MAX_RESOLUTION) as f32;
                 let mut doc = match p.get("background").and_then(Value::as_str).unwrap_or("white") {
-                    "backgroundColor" => Document::with_background(name, Size::new(w, h), mode, depth, Color::rgba(bgc[0], bgc[1], bgc[2], 1.0)),
+                    "backgroundColor" => {
+                        let bgc = background_color(p, s.tools.background, "file.new")?;
+                        Document::with_background(name, Size::new(w, h), mode, depth, Color::rgba(bgc[0], bgc[1], bgc[2], 1.0))
+                    }
                     "transparent" => {
                         let mut d = Document::new(name, Size::new(w, h), mode, depth);
                         d.layers.push(Layer::raster("Layer 1", d.pixel_format()));
@@ -1121,6 +1115,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::notes_cmds::specs());
     v.extend(crate::proof_sim::specs());
     v.extend(crate::presets::specs());
+    v.extend(crate::document_preset_cmds::specs());
     v.extend(crate::render_cmds::specs());
     v.extend(crate::slice_cmds::specs());
     v.extend(crate::web_cmds::specs());
