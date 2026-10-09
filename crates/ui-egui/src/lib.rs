@@ -55,6 +55,7 @@ pub mod dock;
 pub mod enable_rules;
 pub mod eraser_ui;
 pub mod export_dialog;
+pub mod file_dialog;
 pub mod file_open;
 pub mod file_ui;
 pub mod fill_ui;
@@ -110,7 +111,9 @@ pub mod quick_pick;
 pub mod rasterize_prompt;
 pub mod retouch_ui;
 mod rgb_histogram;
+pub mod rotate_view;
 pub mod rulers;
+pub mod screen_picker;
 pub mod scrollbars;
 pub mod shortcut_dispatch;
 pub mod shortcuts;
@@ -122,17 +125,20 @@ pub mod state;
 pub mod stroke_constraint;
 pub mod stroke_trail;
 pub mod stylus;
+pub mod swatches_ui;
 mod tab_strip;
 pub mod theme;
 pub mod tiff_options_ui;
 mod timeline_ui;
 mod titlebar;
 pub mod tone;
+mod tool_cursor;
 pub mod tool_feedback;
 pub mod transform_tex;
 pub mod transform_tool;
 pub mod type_panels_ui;
 pub mod type_tool;
+mod type_transform;
 mod variables_ui;
 pub mod vector_ui;
 pub mod view_cmds;
@@ -151,6 +157,7 @@ use photocraft_engine::Session;
 use serde_json::Value;
 
 pub use control::{ControlRequest, ControlResponse};
+pub use file_dialog::{FileDialogAnswer, FileDialogFn, FileDialogReply, FileDialogRequest};
 pub use file_open::OsEvent;
 pub use state::{Tool, UiState};
 
@@ -181,12 +188,6 @@ impl Default for ExportSettings {
 
 /// Encode a document: (file bytes, warnings about anything approximated or dropped).
 pub type ExportFn = Box<dyn Fn(&Document, &str, &ExportSettings) -> Result<(Vec<u8>, Vec<String>), String>>;
-/// The picked file's name and its bytes, or why it could not be read (shown like any other open
-/// failure); `None` when the dialog was cancelled.
-pub type PickOpenFn = Box<dyn FnMut() -> Option<(String, Result<Vec<u8>, String>)>>;
-/// File › Open's multi-file picker: the selected paths, `None` when cancelled.
-pub type PickOpenPathsFn = Box<dyn FnMut() -> Option<Vec<String>>>;
-pub type PickSaveFn = Box<dyn FnMut(&str) -> Option<String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 /// Read bytes through the desktop control session's authorized read root.
 pub type AutomationReadFn = Box<dyn FnMut(&str) -> Result<(String, Vec<u8>), String>>;
@@ -209,6 +210,8 @@ pub type LoadTextFn = Box<dyn FnMut() -> Option<String>>;
 pub type SaveTextFn = Box<dyn FnMut(&str) -> Result<(), String>>;
 /// Autosave a document snapshot for crash recovery: (snapshot, revision, original path).
 pub type AutosaveFn = Box<dyn FnMut(&std::sync::Arc<Document>, u64, Option<&str>) -> Result<(), String>>;
+/// Poll successful or failed background writes: (document id, revision, result).
+pub type AutosaveResultsFn = Box<dyn FnMut() -> Vec<(u64, u64, Result<(), String>)>>;
 /// Drop the recovery data of a document (by `DocId` value) once it is saved or closed.
 pub type DiscardAutosaveFn = Box<dyn FnMut(u64)>;
 /// Load recoverable documents left by a previous session. Their recovery data stays until the
@@ -230,6 +233,8 @@ pub struct Recovered {
 pub type AppendTextFn = Box<dyn FnMut(&str, &str) -> Result<(), String>>;
 /// Requests from the operating system since the last call (see [`OsEvent`]).
 pub type OsEventsFn = Box<dyn FnMut() -> Vec<OsEvent>>;
+/// Ends the app the platform's own way (see [`Services::quit`]).
+pub type QuitFn = Box<dyn FnMut()>;
 /// Where the OS pointer is now, in egui points within the window; `None` when unknown.
 pub type CursorPosFn = Box<dyn FnMut(&egui::Context) -> Option<egui::Pos2>>;
 
@@ -237,20 +242,18 @@ pub type CursorPosFn = Box<dyn FnMut(&egui::Context) -> Option<egui::Pos2>>;
 /// I/O dependencies.
 #[derive(Default)]
 pub struct Services {
+    /// User-initiated desktop/browser pixel sampling.
+    pub screen_pick: Option<screen_picker::Service>,
     /// Decode a file's bytes into a document (PSD, PNG, JPEG, …).
     pub import: Option<ImportFn>,
     /// Encode a document for a file name (format chosen by extension).
     pub export: Option<ExportFn>,
-    /// Show a single-file picker for commands that import one file (Open As, presets, scripts).
-    pub pick_open: Option<PickOpenFn>,
-    /// Show File › Open's multi-file picker; returns the selected paths.
-    pub pick_open_paths: Option<PickOpenPathsFn>,
-    /// Show a "save file" dialog; returns a path/name to write.
-    pub pick_save: Option<PickSaveFn>,
+    /// Show an Open or Save dialog without waiting for it (see `file_dialog`).
+    pub file_dialog: Option<FileDialogFn>,
     /// Write bytes to a path (native) or trigger a download (web).
     pub write: Option<WriteFn>,
     /// File access used only by control/MCP requests. Interactive dialogs keep
-    /// using `pick_open`, `pick_save` and `write` with the user's authority.
+    /// using `file_dialog` and `write` with the user's authority.
     pub automation_read: Option<AutomationReadFn>,
     pub automation_write: Option<AutomationWriteFn>,
     pub automation_command: Option<AutomationCommandFn>,
@@ -262,7 +265,7 @@ pub struct Services {
     pub encode_png: Option<EncodePngFn>,
     /// Open a URL in the system browser (native). Falls back to `ctx.open_url` (web) when unset.
     pub open_url: Option<OpenUrlFn>,
-    /// Files delivered asynchronously (web file pickers, drag-and-drop): drained every frame.
+    /// Files delivered asynchronously (web drag-and-drop): drained every frame.
     pub inbox: Option<Inbox>,
     /// OS clipboard images: copies go out, screenshots and images from other apps come in.
     pub clipboard_set_image: Option<ClipboardSetFn>,
@@ -273,8 +276,13 @@ pub struct Services {
     pub save_prefs: Option<SaveTextFn>,
     /// The native window is connected directly to a Wayland compositor.
     pub is_wayland: bool,
+    /// On Wayland, the shell command that starts this install under XWayland, where native file
+    /// drops work (#386); `None` when there is no X server to run it on.
+    pub xwayland_command: Option<String>,
     /// Crash-recovery autosave (Preferences › File Handling) and recovery at launch.
     pub autosave: Option<AutosaveFn>,
+    /// None for services that report synchronous success through `autosave`.
+    pub autosave_results: Option<AutosaveResultsFn>,
     pub discard_autosave: Option<DiscardAutosaveFn>,
     pub recover: Option<RecoverFn>,
     pub adopt_autosave: Option<AdoptAutosaveFn>,
@@ -294,6 +302,11 @@ pub struct Services {
     pub read_displays: Option<monitor_status::ReadDisplaysFn>,
     /// The macOS menu bar, when the desktop app installed one; the in-window menus are hidden then.
     pub native_menu: Option<native_menu::NativeMenu>,
+    /// Ends the app once leaving is settled (nothing unsaved, or the prompt answered), instead of
+    /// letting eframe close the window. macOS: `-[NSApplication terminate:]`. Closing the window
+    /// while AppKit's run loop is still going crashes or hangs Touch Bar Macs (#1575, #1458).
+    /// Without one, eframe closes the window and the app ends with it.
+    pub quit: Option<QuitFn>,
 }
 
 /// A document histogram being computed off the UI thread: (document, revision, receiver of
@@ -307,6 +320,8 @@ pub struct PhotocraftApp {
     /// Canvas caches per (document, display): CPU textures hold monitor values; the GPU
     /// canvas state is shared (`canvas::GPU_OUTPUT`).
     canvases: HashMap<(DocId, u32), canvas::CanvasCache>,
+    /// Navigator textures belong to open documents, not the lifetime of the egui context.
+    navigator_textures: HashMap<DocId, canvas::NavigatorCache>,
     /// Display profile readings (#569).
     monitors: monitor_status::State,
     checker: Option<egui::TextureHandle>,
@@ -328,6 +343,9 @@ pub struct PhotocraftApp {
     /// While a batch of recovered pointer samples is replayed, defer the live-stroke update to one
     /// call for the whole frame (see `canvas::canvas_view`).
     defer_live_stroke: bool,
+    /// A live painting stroke started on the press (`canvas_view`): the drag egui recognises later,
+    /// or the click, continues or ends it rather than starting another.
+    press_stroke: bool,
     /// End of the last painting stroke: ⇧-click draws a straight line from it (#178).
     last_stroke_end: Option<(DocId, [f64; 2])>,
     /// Control+Alt-drag brush resize in progress (`brush_resize`, #231).
@@ -439,6 +457,7 @@ pub struct PhotocraftApp {
     pub(crate) crop: crop_ui::CropState,
     /// Type tool layout cache: ((doc, revision, layer), layout).
     pub(crate) type_layout: Option<((u64, u64, u64), std::sync::Arc<photocraft_text::TextLayout>)>,
+    pub(crate) type_transform_preview: Option<type_transform::Preview>,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
     channel_thumbs: Option<(DocId, std::sync::Weak<Document>, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
@@ -456,6 +475,8 @@ pub struct PhotocraftApp {
     pub(crate) prefs_rt: prefs_ui::Runtime,
     /// Close, Revert or Exit parked behind the unsaved-changes prompt (see `discard_ui`).
     pub(crate) discard: Option<discard_ui::Prompt>,
+    /// The Open or Save dialog in progress, and the action waiting on it (see `file_dialog`).
+    pub(crate) file_dialog: Option<file_dialog::Pending>,
     /// A Save As to a layered TIFF parked behind the TIFF Options prompt (see `tiff_options_ui`).
     pub(crate) tiff_options: Option<tiff_options_ui::Prompt>,
     /// Set once the user has agreed to quit, so the resulting close request goes through.
@@ -479,6 +500,7 @@ impl PhotocraftApp {
             ui: UiState::default(),
             services,
             canvases: HashMap::new(),
+            navigator_textures: HashMap::new(),
             monitors: Default::default(),
             checker: None,
             drag: None,
@@ -490,6 +512,7 @@ impl PhotocraftApp {
             magnetic: Default::default(),
             secondary_erase: false,
             defer_live_stroke: false,
+            press_stroke: false,
             last_stroke_end: None,
             brush_resize: None,
             quick_pick: false,
@@ -527,6 +550,7 @@ impl PhotocraftApp {
             channel_thumbs: None,
             channel_views: HashMap::new(),
             type_layout: None,
+            type_transform_preview: None,
             guide_drag: None,
             crop: Default::default(),
             hover_doc: None,
@@ -552,6 +576,7 @@ impl PhotocraftApp {
             perf: Default::default(),
             prefs_rt: Default::default(),
             discard: None,
+            file_dialog: None,
             tiff_options: None,
             allow_close: false,
             stylus: Default::default(),
@@ -666,7 +691,24 @@ impl PhotocraftApp {
         }
         // Long commands become background jobs when enabled (`jobs_ui`); the rest run inline.
         let params = self.with_mask_target(id, params);
-        let r = jobs_ui::run(self, id, params);
+        let params = vector_ui::with_active_path(self, id, params);
+        let path_mask = vector_ui::takes_path_mask(id) && params.get("path").is_some_and(|v| !v.is_null());
+        let r = if id == "actions.play" {
+            actions::play(self, &params)
+        } else if photocraft_engine::actions_cmds::shell_view_command(id) {
+            actions::run_view(self, id, params)
+        } else {
+            jobs_ui::run(self, id, params)
+        };
+        if r.is_ok() && id == "select.toWorkPath" {
+            // Make Work Path selects the new work path in the Paths panel, as in Photoshop.
+            self.ui.selected_path = Some("work".into());
+        }
+        if r.is_ok() && path_mask {
+            // The new layer's vector mask becomes the active path, as in Photoshop: the path it
+            // was made from is no longer selected, so the next fill layer isn't masked by it too.
+            self.ui.selected_path = Some("layer".into());
+        }
         if r.is_ok() && matches!(id, "edit.copy" | "edit.cut" | "edit.copyMerged") {
             self.clip_external = false;
             self.export_os_clipboard();
@@ -695,6 +737,7 @@ impl PhotocraftApp {
     /// Keep one view per document, in tab order: a view and its windows stay with their document
     /// when tabs move (`document.move`) or close.
     pub fn sync_views(&mut self) {
+        type_transform::cancel_stale(self);
         crate::lasso_ui::cancel_stale(self);
         let ids: Vec<DocId> = self.session.documents().iter().map(|d| d.doc.id).collect();
         // Where the document of view `i` is now. Views not tracked yet keep their index.
@@ -710,6 +753,8 @@ impl PhotocraftApp {
         }
         self.ui.views = views.into_iter().map(Option::unwrap_or_default).collect();
         self.ui.windows.retain_mut(|w| now(w.document).map(|d| w.document = d).is_some());
+        self.canvases.retain(|(doc, _), _| ids.contains(doc));
+        self.navigator_textures.retain(|doc, _| ids.contains(doc));
         self.view_docs = ids;
         self.prune_thumbs();
         self.sync_mask_targets();
@@ -830,35 +875,17 @@ impl PhotocraftApp {
         Ok(warnings)
     }
 
-    /// File › Open: native platforms return all selected paths; the web delivers its pick through
-    /// the single-file service/inbox instead.
-    pub fn open_dialog_file(&mut self) {
-        if let Some(pick_paths) = self.services.pick_open_paths.as_mut() {
-            if let Some(paths) = pick_paths() {
-                self.open_paths(&paths);
-            }
-            return;
-        }
-        let Some((path, bytes)) = self.services.pick_open.as_mut().and_then(|f| f()) else { return };
-        if let Err(e) = bytes.and_then(|bytes| self.open_file(&path, &bytes)) {
-            self.open_failed(&file_open::display_name(&path), &e);
-        }
-    }
-
-    /// Show the open dialog for a file a command reads (a script, notes, a placed image, presets):
-    /// `None` when cancelled, else its name and bytes or the read error.
-    pub(crate) fn pick_file_bytes(&mut self) -> Option<Result<(String, Vec<u8>), String>> {
-        let (name, bytes) = self.services.pick_open.as_mut().and_then(|f| f())?;
-        Some(bytes.map(|b| (name.clone(), b)).map_err(|e| format!("{}: {e}", file_open::display_name(&name))))
-    }
-
-    /// Save the active document to `path` (or a path chosen in the save dialog); returns the path
-    /// and the export warnings (also shown to the user).
-    pub fn save_as(&mut self, path: Option<String>) -> Result<(String, Vec<String>), String> {
+    /// Save the active document to `path`, or to a path chosen in the save dialog (which
+    /// continues on a later frame, see `file_dialog`). Returns `{"path", "warnings"}` (the export
+    /// warnings are also shown to the user).
+    pub fn save_as(&mut self, path: Option<String>) -> Result<Value, String> {
         // Edit Contents documents save back into their smart object.
         if path.is_none() && self.session.is_enabled("layer.smartObjects.saveContents") {
             self.run("layer.smartObjects.saveContents", serde_json::json!({}))?;
-            return Ok(("smart object".into(), Vec::new()));
+            return Ok(serde_json::json!({"path": "smart object", "warnings": []}));
+        }
+        if let Some(path) = path {
+            return self.save_to(path);
         }
         let st = self.session.active().ok_or("no document")?;
         // Suggest the file's own name if Save As can write its format, otherwise switch to .psd.
@@ -870,17 +897,23 @@ impl PhotocraftApp {
             Some(p) if writable => p.clone(),
             p => std::path::Path::new(p.as_deref().unwrap_or(&st.doc.name)).with_extension("psd").to_string_lossy().into_owned(),
         };
-        let path = match path {
-            Some(p) => p,
-            None => self.services.pick_save.as_mut().and_then(|f| f(&suggested)).ok_or("cancelled")?,
-        };
+        let doc = st.doc.id;
+        self.pick_save(&suggested, move |app, path| {
+            app.refocus(doc)?;
+            app.save_to(path)
+        })
+    }
+
+    /// [`Self::save_as`] once the path is known.
+    fn save_to(&mut self, path: String) -> Result<Value, String> {
         // A layered TIFF asks about its layers first (Preferences › File Handling); the save
         // continues from the prompt.
         if tiff_options_ui::wants_prompt(self, &path) {
             tiff_options_ui::park(self, path.clone());
-            return Ok((path, Vec::new()));
+            return Ok(serde_json::json!({"path": path, "warnings": []}));
         }
-        self.write_document(path, &ExportSettings::default())
+        let (path, warnings) = self.write_document(path, &ExportSettings::default())?;
+        Ok(serde_json::json!({"path": path, "warnings": warnings}))
     }
 
     /// Encodes the active document with `settings` and writes it to `path`, which becomes the
@@ -936,6 +969,10 @@ impl PhotocraftApp {
         let Some(rx) = self.control_rx.take() else { return };
         while let Ok(req) = rx.try_recv() {
             let reply = req.reply.clone();
+            if req.deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                let _ = reply.send(serde_json::json!({"ok": false, "error": "timeout"}));
+                continue;
+            }
             match control::handle(self, ctx, &req) {
                 control::Outcome::Done(v) => {
                     let _ = reply.send(v);
@@ -994,7 +1031,7 @@ impl PhotocraftApp {
 }
 
 impl eframe::App for PhotocraftApp {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         if !self.styled {
             Self::setup_context(ctx, self.ui.theme);
@@ -1036,8 +1073,10 @@ impl eframe::App for PhotocraftApp {
         discard_ui::guard_window_close(self, ctx);
         // Background jobs: apply finished ones, keep frames coming, Esc cancels (before the
         // shortcuts see Esc).
-        jobs_ui::tick(self, ctx);
-        shortcuts::handle(self, ctx);
+        if !screen_picker::tick(self, ctx) {
+            jobs_ui::tick(self, ctx);
+            shortcuts::handle(self, ctx);
+        }
         let arrived: Vec<(String, Vec<u8>)> =
             self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
         for (name, bytes) in arrived {
@@ -1063,6 +1102,7 @@ impl eframe::App for PhotocraftApp {
         if !self.pending_screenshots.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
+        self.poll_file_dialog(ctx, Some(frame));
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
@@ -1078,7 +1118,7 @@ impl eframe::App for PhotocraftApp {
         raw_input.events.extend(self.take_synthetic_step());
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
@@ -1088,7 +1128,26 @@ impl eframe::App for PhotocraftApp {
             return;
         }
         let t0 = gpu_canvas::now_ms();
+        // Each painting tool keeps its own brush (#218), so switch the active tool's brush in
+        // before anything this frame reads it (the cursor, the options bar, a stroke).
+        paint_mouse::sync_tool_brush(self);
         // View › Screen Mode › Full Screen Mode: only the image, on black (F or Esc returns).
+        screen_picker::show(&ctx);
+        if screen_picker::busy(&ctx) && screen_picker::showing(&ctx) {
+            egui::Modal::new(egui::Id::new("screen-color-wait")).show(&ctx, |ui| {
+                ui.spinner();
+                ui.label(tl!("Pick a screen pixel or press Esc to cancel"));
+                if ui.button(tl!("Cancel")).clicked() {
+                    screen_picker::cancel(&ctx);
+                }
+            });
+            self.automation_input = false;
+            return;
+        }
+        if screen_picker::busy(&ctx) {
+            ui.disable();
+            ui.set_opacity(1.0);
+        }
         let chrome = !self.ui.view.hides_chrome();
         if !chrome && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = menus::invoke(self, &ctx, "view.screenMode.standard", serde_json::json!({}));
@@ -1105,7 +1164,7 @@ impl eframe::App for PhotocraftApp {
         if chrome && self.ui.panels.toolbar {
             panels::toolbar(self, ui);
         }
-        if chrome {
+        if chrome && self.ui.panels.dock {
             panels::right_dock(self, ui);
         }
         let t = theme::Tokens::get(&ctx);
@@ -1138,6 +1197,11 @@ impl eframe::App for PhotocraftApp {
         gpu_status::check(self, &ctx);
         self.automation_input = false;
         native_menu::sync(self, &ctx);
+        if screen_picker::busy(&ctx) {
+            // Block input without a backdrop: the worker may still be capturing the screen.
+            egui::Modal::new(egui::Id::new("screen-color-wait")).frame(egui::Frame::NONE).backdrop_color(egui::Color32::TRANSPARENT).show(&ctx, |_| {});
+            ctx.set_cursor_icon(egui::CursorIcon::Wait);
+        }
         self.perf.frame(gpu_canvas::now_ms() - t0);
         // Synthetic input is injected one press/release step per frame: keep frames coming until
         // the queue is empty, then release control replies waiting on it.
@@ -1148,6 +1212,8 @@ impl eframe::App for PhotocraftApp {
                 let _ = w.send(serde_json::json!({"ok": true, "result": null}));
             }
         }
+        // Menus and buttons in this frame may have asked for a file dialog.
+        self.poll_file_dialog(&ctx, Some(frame));
     }
 }
 
@@ -1340,6 +1406,7 @@ impl PhotocraftApp {
     /// Install fonts, image loaders and the theme. Call from the app creator when possible so the
     /// very first frame renders; otherwise `logic` does it and the first frame is skipped.
     pub fn setup_context(ctx: &egui::Context, kind: theme::ThemeKind) {
+        ctx.add_plugin(tool_cursor::CursorLifecycle);
         theme::install_fonts(ctx);
         egui_extras::install_image_loaders(ctx);
         theme::apply(ctx, kind);
@@ -1514,6 +1581,9 @@ mod move_auto_select_tests;
 
 #[cfg(test)]
 mod hidden_layer_tests;
+
+#[cfg(test)]
+mod blend_dropdown_keys_tests;
 
 #[cfg(test)]
 mod marquee_tests;

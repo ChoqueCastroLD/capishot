@@ -29,7 +29,7 @@ fn has_layer(s: &Session) -> std::result::Result<(), String> {
 fn has_pixels(s: &Session) -> std::result::Result<(), String> {
     match active_layer(s)?.content {
         LayerContent::Raster(_) => Ok(()),
-        ref c => Err(format!("active layer is a {} layer, not a pixel layer", c.kind_name())),
+        ref c => Err(format!("active layer is {} {} layer, not a pixel layer", c.article(), c.kind_name())),
     }
 }
 
@@ -336,6 +336,12 @@ fn paste_into(s: &mut Session, p: &Value, outside: bool) -> Result<Value> {
     s.coalesce_request = None;
     r2?;
     Ok(r)
+}
+
+/// The canvas grown to every layer's pixels: Image › Reveal All's new canvas, and what the Crop
+/// tool shows while a frame is edited.
+pub fn reveal_all_bounds(doc: &Document) -> Rect {
+    doc.walk().into_iter().filter_map(|(_, _, l)| l.surface().map(|s| s.content_bounds())).fold(doc.bounds(), |a, b| a.union(&b))
 }
 
 // ---------- layers ----------
@@ -652,9 +658,8 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("image.adjustments.equalize", "Equalize", &["Image", "Adjustments"], None, "{}", has_pixels, |s, _| equalize(s)),
         spec!("image.revealAll", "Reveal All", &["Image"], None, "{}", has_doc, |s, _| {
             let d = s.active().ok_or(EngineError::NoDocument)?;
-            let canvas = d.doc.bounds();
-            let all = d.doc.walk().into_iter().filter_map(|(_, _, l)| l.surface().map(|s| s.content_bounds())).fold(canvas, |a, b| a.union(&b));
-            if all == canvas {
+            let all = reveal_all_bounds(&d.doc);
+            if all == d.doc.bounds() {
                 return Ok(json!({"changed": false}));
             }
             s.execute("image.crop", json!({"x": all.x0, "y": all.y0, "width": all.width(), "height": all.height(), "deleteCroppedPixels": false}))?;
@@ -664,7 +669,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("layer.layerStyle.copyLayerStyle", "Copy Layer Style", &["Layer", "Layer Style"], None, r##"{"layer":id?}"##, has_layer, |s, p| {
             let id = layer_param(s, p)?;
             let l = s.active().and_then(|d| d.doc.layer(id)).ok_or(EngineError::NoLayer(id))?;
-            let style = (l.effects.clone(), l.blend, l.fill_opacity);
+            let style = (l.effects.clone(), l.blend, l.fill_opacity, l.advanced);
             s.style_clipboard = Some(style);
             Ok(Value::Null)
         }),
@@ -680,12 +685,13 @@ pub fn specs() -> Vec<CommandSpec> {
             },
             |s, p| {
                 let id = layer_param(s, p)?;
-                let (fx, blend, fill) = s.style_clipboard.clone().ok_or(EngineError::Other("no layer style has been copied".into()))?;
+                let (fx, blend, fill, advanced) = s.style_clipboard.clone().ok_or(EngineError::Other("no layer style has been copied".into()))?;
                 s.edit("Paste Layer Style", |doc, _| {
                     let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
                     l.effects = fx;
                     l.blend = blend;
                     l.fill_opacity = fill;
+                    l.advanced = advanced;
                     Ok(())
                 })?;
                 Ok(Value::Null)
@@ -1036,6 +1042,7 @@ mod tests {
         let mut s = session(8);
         s.execute("layer.translate", json!({"dx": 0, "dy": 0})).ok();
         paint_square(&mut s, Rect::new(-5, 0, 10, 10), [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(reveal_all_bounds(doc(&s)), Rect::new(-5, 0, 40, 30));
         s.execute("image.revealAll", json!({})).unwrap();
         assert_eq!((doc(&s).size.width, doc(&s).size.height), (45, 30));
         assert_eq!(s.execute("image.revealAll", json!({})).unwrap()["changed"], false);

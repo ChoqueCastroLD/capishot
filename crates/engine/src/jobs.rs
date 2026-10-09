@@ -704,13 +704,18 @@ impl Session {
         };
         self.coalesce_request = None;
         self.color_restrict = None;
+        // Finish successful command bookkeeping on the document the job edited.
+        // Restoring the viewed document first would attribute Fade and slice updates
+        // to that document instead, when the user switched tabs mid-job.
+        if r.is_ok() {
+            self.after_command(command, params.clone(), *journal);
+        }
         // Keep the user's active document unless the job opened a new one.
+        // This also restores the selection when the apply step returned an error.
         if target.is_some() && self.active == target {
             self.active = prev_active.filter(|i| *i < self.docs.len()).or(self.active);
         }
-        let v = r?;
-        self.after_command(command, params.clone(), *journal);
-        Ok(v)
+        r
     }
 
     fn end_job(&mut self, job: &Running, outcome: JobOutcome) {

@@ -24,6 +24,10 @@
 	Layer	Calque
 	Type	Texte
 	Select	Sélection
+	Top Left	En haut à gauche
+	Top Right	En haut à droite
+	Bottom Left	En bas à gauche
+	Bottom Right	En bas à droite
 	Filter	Filtre
 	View	Affichage
 	Window	Fenêtre
@@ -1450,6 +1454,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ naviguer   {key} exécuter   échap fermer
 	Version {version}	Version {version}
 	New Document	Nouveau document
+	Preset Name	Nom du préréglage
+	No saved presets yet.	Aucun préréglage enregistré pour le moment.
 	Error	Erreur
 	Command	Commande
 	Adjustment layers have nothing to transform	Les calques d'ajustement n'ont rien à transformer
@@ -1781,6 +1787,7 @@
 	Maximize psd compatibility	Maximiser la compatibilité PSD
 	Medium gray	Gris moyen
 	Memory usage mb	Utilisation de la mémoire (Mo)
+	Low resolution previews	Aperçus en basse résolution
 	Missing glyph protection	Protection contre les glyphes manquants
 	Modern	Moderne
 	Nearest neighbor	Au plus proche
@@ -1932,6 +1939,8 @@
 	Brush Settings…  (F5): every option of this brush	Paramètres du pinceau…  (F5) : toutes les options de ce pinceau
 	Rename Brush…	Renommer le pinceau…
 	Delete Brush	Supprimer le pinceau
+	New Brush Preset…	Nouveau préréglage de pinceau…
+	Brush Preset Options	Options des préréglages de pinceau
 	Group name	Nom du groupe
 	Brush name	Nom du pinceau
 	Grid view	Vue en grille
@@ -1972,6 +1981,8 @@
 	CPU (no GPU acceleration)	CPU (sans accélération GPU)
 	DirectX 12	DirectX 12
 	GPU backend	Moteur GPU
+	Linux display server	Serveur d'affichage Linux
+	X11	X11
 	Metal	Metal
 	OpenGL	OpenGL
 	Use tablet pressure	Utiliser la pression de la tablette
@@ -2340,7 +2351,6 @@
 	Color Profile	Profil colorimétrique
 	Units	Unités
 	Columns	Colonnes
-	Do you want to save you made to “{name}” before quitting?	Voulez-vous enregistrer les modifications apportées à « {name} » avant de quitter ?
 	Create new count group	Créer un nouveau groupe de comptage
 	Adjustment Layer	Calque d'ajustement
 	Pencil Tool	Outil Crayon
@@ -2461,8 +2471,11 @@
 	Floating point	Virgule flottante
 	Use Global Light	Utiliser la lumière globale
 	Native file drag-and-drop is unavailable	Le glisser-déposer natif de fichiers n'est pas disponible
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Le glisser-déposer natif de fichiers n'est pas encore pris en charge sous Wayland. Utilisez Fichier › Ouvrir, ou lancez PhotoCraft sous XWayland avec `WAYLAND_DISPLAY= photocraft`.
-	Use File › Open to open an image.	Utilisez Fichier › Ouvrir pour ouvrir une image.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Le glisser-déposer natif de fichiers n'est pas encore pris en charge sous Wayland. Utilisez Fichier › Ouvrir, ou copiez l'image dans votre gestionnaire de fichiers et collez-la avec {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Pour déposer des fichiers, lancez PhotoCraft sous XWayland : `{command}`
+	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	Ou réglez Préférences › Performances › Serveur d'affichage Linux sur X11 : PhotoCraft démarre alors toujours sous XWayland.
+	Edit › Paste	Édition › Coller
+	Use File › Open, or paste a copied image with {paste}.	Utilisez Fichier › Ouvrir, ou collez une image copiée avec {paste}.
 	Mixer Brush Tool	Outil Pinceau mélangeur
 	Invalid {mode} profile	Profil {mode} non valide
 	Unnamed {mode} profile	Profil {mode} sans nom
@@ -2541,6 +2554,7 @@ cameraRaw	Blending	Fusion
 	Frequency	Fréquence
 	Use tablet pressure to change pen width	Utiliser la pression de la tablette pour modifier la largeur de la plume
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	À propos
 	Contributors	Contributeurs
@@ -2572,4 +2586,88 @@ cameraRaw	Blending	Fusion
 	% of all commits	% de tous les commits
 	Lines +/−	Lignes +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login} : {prs} PR, {commits} commits, +{added} / −{deleted} lignes (Δ {delta}), +{binAdded} / −{binDeleted} fichiers binaires, {first} – {last}
+
+# Swatches panel
+	Create new swatch	Créer une nouvelle nuance
+	New Swatch…	Nouvelle nuance…
+	New Swatch Group…	Nouveau groupe de nuances…
+	Import Swatches…	Importer des nuances…
+	Replace Swatches…	Remplacer les nuances…
+	Export Swatches…	Exporter les nuances…
+	Export Swatches for Exchange…	Exporter les nuances pour l'échange…
+	Reset Swatches	Réinitialiser les nuances
+	Add to Swatches	Ajouter au nuancier
+# Layer Style > Blending Options (Advanced Blending)
+	Blend If:	Fusion si :
+	Channels:	Couches :
+	Knockout	Masquage
 	Apply At Canvas Bounds	Appliquer l’effet aux limites de la zone de travail
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Sélecteur de couleurs (Couleur du texte)
+	Pick screen color	Choisir une couleur à l’écran
+	Sample a pixel anywhere on the screen	Prélever un pixel n’importe où sur l’écran
+	Click to pick · Esc to cancel	Cliquer pour choisir · Échap pour annuler
+	Pick a screen pixel or press Esc to cancel	Choisissez un pixel à l’écran ou appuyez sur Échap pour annuler
+	Scroll to zoom	Défiler pour zoomer
+	Show/Hide All Panels	Afficher/masquer tous les panneaux
+	Show/Hide Panels	Afficher/masquer les panneaux
+	Could not open	Impossible d’ouvrir
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path} : le chemin n’est pas un Unicode valide ; renommez le fichier puis rouvrez-le.
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Contenu :
+	Custom Pattern:	Motif personnalisé :
+	Foreground Color	Couleur de premier plan
+	Color…	Couleur…
+	50% Gray	Gris 50 %
+	{size} (was {old})	{size} (auparavant {old})
+	Cone	Cône
+	Cone (Inverted)	Cône (inversé)
+	Domed	Bombé
+	Domed (Inverted)	Bombé (inversé)
+	Diagonal (Descending)	Diagonale (descendante)
+
+	Red Eye Tool	Outil Yeux rouges
+	Pupil Size	Taille de la pupille
+	Darken Amount	Quantité d'assombrissement
+	Click a red pupil to neutralize it	Cliquez sur une pupille rouge pour la corriger
+	open source	code source ouvert
+	…and {n} more	…et {n} de plus
+
+	Eyedroppers:	Pipettes :
+	Set Black Point	Définir le point noir
+	Set Neutral Gray Point	Définir le point gris neutre
+	Set White Point	Définir le point blanc
+	Unavailable in this color mode	Indisponible dans ce mode colorimétrique
+	Selection Preview:	Aperçu de la sélection :
+	Black Matte	Fond noir
+	White Matte	Fond blanc
+
+# Layer colour labels.
+	Seafoam	Écume de mer
+	Indigo	Indigo
+	Fuchsia	Fuchsia
+	Violet	Violet
+	Large document: redrawing on the CPU	Document volumineux : redessin sur le CPU
+	This redraw took {seconds} s on the CPU.	Ce redessin sur le CPU a pris {seconds} s.
+	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Les modifications qui touchent tout le document, comme le mode de fusion, l'opacité ou la visibilité d'un calque, le redessinent entièrement.
+	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Les calques dépassent le budget de mémoire GPU. Augmenter Utilisation de la mémoire dans Préférences › Performances relève ce budget, jusqu'au quart de la mémoire de cet ordinateur.
+	The GPU compositor wasn't used: {reason}	Le compositeur GPU n'a pas été utilisé : {reason}
+fontWeight	Thin	Ultrafin
+fontWeight	ExtraLight	Extrafin
+fontWeight	Light	Maigre
+fontWeight	Regular	Normal
+fontWeight	Medium	Moyen
+fontWeight	SemiBold	Demi-gras
+fontWeight	Bold	Gras
+fontWeight	ExtraBold	Extra-gras
+fontWeight	Black	Noir
+fontWeight	Italic	Italique
+
+# Pattern Stamp tool
+	Pattern Stamp Tool	Outil Tampon de motif
+	Impressionist	Impressionniste
+	Rotate View Tool	Outil Rotation de la vue
+	Reset View	Réinitialiser la vue
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Faites glisser autour du centre pour tourner la vue  ·  Maj contraint à 15°

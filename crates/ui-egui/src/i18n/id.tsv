@@ -17,6 +17,10 @@
 	Layer	Layer
 	Type	Teks
 	Select	Seleksi
+	Top Left	Kiri atas
+	Top Right	Kanan atas
+	Bottom Left	Kiri bawah
+	Bottom Right	Kanan bawah
 	Filter	Filter
 	View	Tampilan
 	Window	Jendela
@@ -1444,6 +1448,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navigasi   {key} jalankan   esc tutup
 	Version {version}	Versi {version}
 	New Document	Dokumen Baru
+	Preset Name	Nama Preset
+	No saved presets yet.	Belum ada preset tersimpan.
 	Error	Error
 	Command	Perintah
 	Adjustment layers have nothing to transform	Layer penyesuaian tidak ada yang bisa ditransformasi
@@ -1775,6 +1781,7 @@
 	Maximize psd compatibility	Maksimalkan kompatibilitas PSD
 	Medium gray	Abu-abu sedang
 	Memory usage mb	Pemakaian memori MB
+	Low resolution previews	Pratinjau resolusi rendah
 	Missing glyph protection	Perlindungan glyph hilang
 	Modern	Modern
 	Nearest neighbor	Nearest neighbor
@@ -1926,6 +1933,8 @@
 	Brush Settings…  (F5): every option of this brush	Pengaturan Kuas…  (F5): semua opsi kuas ini
 	Rename Brush…	Ganti Nama Kuas…
 	Delete Brush	Hapus Kuas
+	New Brush Preset…	Preset Kuas Baru…
+	Brush Preset Options	Opsi Preset Kuas
 	Group name	Nama grup
 	Brush name	Nama kuas
 	Grid view	Tampilan grid
@@ -1966,6 +1975,8 @@
 	CPU (no GPU acceleration)	CPU (tanpa akselerasi GPU)
 	DirectX 12	DirectX 12
 	GPU backend	Backend GPU
+	Linux display server	Server tampilan Linux
+	X11	X11
 	Metal	Metal
 	OpenGL	OpenGL
 	Use tablet pressure	Pakai tekanan tablet
@@ -2022,7 +2033,7 @@
 	Magnetic Lasso	Magnetic Lasso
 	History Brush	History Brush
 	Art History Brush	Art History Brush
-	Pattern Stamp	Pattern Stamp
+	Pattern Stamp	Stempel Pola
 	Spot Healing	Spot Healing
 	Red Eye	Red Eye
 	Patch	Patch
@@ -2331,7 +2342,6 @@
 	Color Profile	Profil Warna
 	Units	Satuan
 	Columns	Kolom
-	Do you want to save you made to “{name}” before quitting?	Mau simpan perubahan yang kamu buat di “{name}” sebelum keluar?
 	Create new count group	Buat grup hitungan baru
 	Adjustment Layer	Layer Penyesuaian
 	Pencil Tool	Alat Pensil
@@ -2450,8 +2460,11 @@
 	Floating point	Titik mengambang
 	Use Global Light	Gunakan Cahaya Global
 	Native file drag-and-drop is unavailable	Seret dan lepas berkas native tidak tersedia
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Seret dan lepas berkas native belum didukung di Wayland. Gunakan Berkas › Buka, atau jalankan PhotoCraft di XWayland dengan `WAYLAND_DISPLAY= photocraft`.
-	Use File › Open to open an image.	Gunakan Berkas › Buka untuk membuka gambar.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Seret dan lepas berkas native belum didukung di Wayland. Gunakan Berkas › Buka, atau salin gambar di pengelola berkas lalu tempel dengan {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Untuk menjatuhkan berkas, jalankan PhotoCraft di XWayland: `{command}`
+	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	Atau atur Preferensi › Performa › Server tampilan Linux ke X11: PhotoCraft lalu selalu berjalan di XWayland.
+	Edit › Paste	Edit › Tempel
+	Use File › Open, or paste a copied image with {paste}.	Gunakan Berkas › Buka, atau tempel gambar yang disalin dengan {paste}.
 	Mixer Brush Tool	Alat Kuas Pencampur
 	Invalid {mode} profile	Profil {mode} tidak valid
 	Unnamed {mode} profile	Profil {mode} tanpa nama
@@ -2528,6 +2541,7 @@ cameraRaw	Blending	Pembauran
 	Frequency	Frekuensi
 	Use tablet pressure to change pen width	Gunakan tekanan tablet untuk mengubah lebar pena
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	Tentang
 	Contributors	Kontributor
@@ -2559,4 +2573,88 @@ cameraRaw	Blending	Pembauran
 	% of all commits	% dari semua commit
 	Lines +/−	Baris +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commit, +{added} / −{deleted} baris (Δ {delta}), +{binAdded} / −{binDeleted} berkas biner, {first} – {last}
+
+# Swatches panel
+	Create new swatch	Buat swatch baru
+	New Swatch…	Swatch Baru…
+	New Swatch Group…	Grup Swatch Baru…
+	Import Swatches…	Impor Swatch…
+	Replace Swatches…	Ganti Swatch…
+	Export Swatches…	Ekspor Swatch…
+	Export Swatches for Exchange…	Ekspor Swatch untuk Pertukaran…
+	Reset Swatches	Atur Ulang Swatch
+	Add to Swatches	Tambahkan ke Swatch
+# Layer Style > Blending Options (Advanced Blending)
+	Blend If:	Blend If:
+	Channels:	Channel:
+	Knockout	Knockout
 	Apply At Canvas Bounds	Terapkan efek di batas kanvas
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Pemilih Warna (Warna Teks)
+	Pick screen color	Pilih warna layar
+	Sample a pixel anywhere on the screen	Ambil sampel piksel di mana saja pada layar
+	Click to pick · Esc to cancel	Klik untuk memilih · Esc untuk membatalkan
+	Pick a screen pixel or press Esc to cancel	Pilih piksel layar atau tekan Esc untuk membatalkan
+	Scroll to zoom	Gulir untuk memperbesar
+	Show/Hide All Panels	Tampilkan/Sembunyikan Semua Panel
+	Show/Hide Panels	Tampilkan/Sembunyikan Panel
+	Could not open	Tidak dapat membuka
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: jalur bukan Unicode yang valid; ganti nama file lalu buka lagi.
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Isi:
+	Custom Pattern:	Pola Kustom:
+	Foreground Color	Warna Foreground
+	Color…	Warna…
+	50% Gray	Abu-abu 50%
+	{size} (was {old})	{size} (sebelumnya {old})
+	Cone	Kerucut
+	Cone (Inverted)	Kerucut (Terbalik)
+	Domed	Kubah
+	Domed (Inverted)	Kubah (Terbalik)
+	Diagonal (Descending)	Diagonal (Menurun)
+
+	Red Eye Tool	Alat Mata Merah
+	Pupil Size	Ukuran pupil
+	Darken Amount	Jumlah penggelapan
+	Click a red pupil to neutralize it	Klik pupil merah untuk memperbaikinya
+	open source	sumber terbuka
+	…and {n} more	…dan {n} lagi
+
+	Eyedroppers:	Eyedropper:
+	Set Black Point	Atur Titik Hitam
+	Set Neutral Gray Point	Atur Titik Abu-abu Netral
+	Set White Point	Atur Titik Putih
+	Unavailable in this color mode	Tidak tersedia dalam mode warna ini
+	Selection Preview:	Pratinjau Seleksi:
+	Black Matte	Latar Hitam
+	White Matte	Latar Putih
+
+# Layer colour labels.
+	Seafoam	Busa Laut
+	Indigo	Nila
+	Fuchsia	Fuksia
+	Violet	Ungu
+	Large document: redrawing on the CPU	Dokumen besar: menggambar ulang di CPU
+	This redraw took {seconds} s on the CPU.	Penggambaran ulang di CPU ini memakan waktu {seconds} dtk.
+	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Suntingan yang mengubah seluruh dokumen, seperti mode campuran, opasitas, atau visibilitas layer, menggambar ulang semuanya.
+	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Layer tidak muat dalam anggaran memori GPU. Menaikkan Pemakaian memori di Preferensi › Performa menaikkan anggaran, hingga seperempat memori komputer ini.
+	The GPU compositor wasn't used: {reason}	Kompositor GPU tidak digunakan: {reason}
+fontWeight	Thin	Sangat Tipis
+fontWeight	ExtraLight	Ekstra Tipis
+fontWeight	Light	Tipis
+fontWeight	Regular	Reguler
+fontWeight	Medium	Sedang
+fontWeight	SemiBold	SemiTebal
+fontWeight	Bold	Tebal
+fontWeight	ExtraBold	Ekstra Tebal
+fontWeight	Black	Sangat Tebal
+fontWeight	Italic	Miring
+
+# Pattern Stamp tool
+	Pattern Stamp Tool	Alat Stempel Pola
+	Impressionist	Impresionis
+	Rotate View Tool	Alat Putar Tampilan
+	Reset View	Atur Ulang Tampilan
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Seret di sekitar pusat untuk memutar tampilan  ·  Shift membatasi ke 15°

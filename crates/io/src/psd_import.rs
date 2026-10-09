@@ -246,6 +246,9 @@ impl Ctx<'_> {
         if let Some(b) = rec.block(b"brst") {
             l.excluded_channels = crate::blocks::parse_brst(&b.data);
         }
+        // Advanced Blending (`knko`, `infx`, `clbl`, `tsly`, `lmgm`, `vmgm`); the blocks stay in
+        // `psd_blocks`, where export rewrites them from the field in place.
+        l.advanced = crate::blocks::advanced_from_blocks(|k| rec.block(k).map(|b| b.data.as_slice()));
         // Blend If lives in the layer record's blending ranges.
         l.blend_if = crate::blocks::blend_if_from_ranges(&rec.blending_ranges);
         l.psd_id = rec.layer_id();
@@ -289,7 +292,15 @@ impl Ctx<'_> {
             if let Some(txt2) = &self.txt2 {
                 photocraft_text::psd::apply_txt2(&mut t, &data, txt2);
             }
-            t.cache = Some(self.record_surface(rec, &name));
+            // Photoshop's pixels are the cache only when the file has some: ag-psd, GIMP and
+            // other writers leave type layers without image data (Photoshop re-renders them on
+            // open), and an empty cache would show nothing until the layer is edited; the import
+            // renders such a layer from its model instead (`text_import::prepare`). When the
+            // engine text itself is blank, Photoshop draws nothing either: keep the empty pixels
+            // (corpus: text/path-wave-open.psd).
+            let cache = self.record_surface(rec, &name);
+            let drawn = !cache.content_bounds().is_empty() || photocraft_text::psd::engine_text_is_blank(&data);
+            t.cache = drawn.then_some(cache);
             t.psd_raw = principal(b"TySh");
             LayerContent::Text(t)
         } else if let Some(k) = smart_key {
@@ -529,8 +540,10 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
         match r.id {
             ids::RESOLUTION_INFO => {
                 if let Ok(ri) = photocraft_psd::ResolutionInfo::from_bytes(&r.data) {
-                    let f = if ri.h_res_unit == 2 { 2.54 } else { 1.0 };
-                    doc.resolution_dpi = (ri.h_res() * f) as f32;
+                    let ppi = |res: f64, unit: u16| if unit == 2 { res * 2.54 } else { res };
+                    let (x, y) = (ppi(ri.h_res(), ri.h_res_unit), ppi(ri.v_res(), ri.v_res_unit));
+                    doc.resolution_dpi = x as f32;
+                    warnings.extend(crate::unequal_resolution_warning(x, y));
                 }
             }
             ids::ICC_PROFILE => doc.icc_profile = Some(Arc::new(r.data.clone())),

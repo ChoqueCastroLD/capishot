@@ -43,7 +43,13 @@ fn harness() -> Harness<'static, PhotocraftApp> {
 fn screen(h: &Harness<'static, PhotocraftApp>, x: f32, y: f32) -> Pos2 {
     let app = h.state();
     let v = &app.ui.views[0];
-    let xf = ViewXform { rect: crate::rulers::content_rect(app, app.last_canvas_rect), zoom: v.zoom, center: v.center, flip: app.ui.view.flip_horizontal };
+    let xf = ViewXform {
+        rect: crate::rulers::content_rect(app, app.last_canvas_rect),
+        zoom: v.zoom,
+        center: v.center,
+        flip: app.ui.view.flip_horizontal,
+        rotation: v.rotation,
+    };
     xf.to_screen(x, y)
 }
 
@@ -284,4 +290,57 @@ fn cmd_drag_inside_the_selection_floats_it_with_the_polygonal_lasso() {
     ev(&mut app, "down", 35.0, 20.0, Modifiers::NONE);
     ev(&mut app, "up", 35.0, 20.0, Modifiers::NONE);
     assert_eq!(app.ui.polygon.len(), 1);
+}
+
+#[test]
+fn backspace_delete_and_right_click_remove_the_last_vertex() {
+    // #1229: ⌫ took Edit › Clear and wiped the layer while a polygon was being drawn.
+    let mut h = harness();
+    for (x, y) in [(50.0, 50.0), (150.0, 50.0), (150.0, 120.0)] {
+        click(&mut h, x, y, Modifiers::NONE);
+        // Past egui's double-click window, so each click adds a vertex.
+        h.run_steps(20);
+    }
+    assert_eq!(h.state().ui.polygon.len(), 3);
+    let st = h.state().session.active().unwrap();
+    let (layer, steps) = (st.active_layer.unwrap(), st.history.past_len());
+    for key in [egui::Key::Backspace, egui::Key::Delete] {
+        h.event(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+        h.run_steps(2);
+    }
+    assert_eq!(h.state().ui.polygon.len(), 1);
+    // A right-click removes the last one and cancels the polygon, without a context menu.
+    let p = screen(&h, 90.0, 90.0);
+    h.event(egui::Event::PointerMoved(p));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Secondary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Secondary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(2);
+    assert!(h.state().ui.polygon.is_empty() && h.state().ui.polygon_mode.is_empty());
+    assert!(h.state().ui.canvas_tool_menu.is_none());
+    let st = h.state().session.active().unwrap();
+    assert!(st.doc.layer(layer).is_some(), "the layer survives");
+    assert_eq!(st.history.past_len(), steps, "nothing was edited");
+}
+
+/// ⌥ held: a drag draws freehand into the polygon; releasing ⌥ goes back to straight segments,
+/// and the polygon stays open (a new selection, even though ⌥ was held at the first click).
+#[test]
+fn alt_drags_draw_freehand_and_releasing_alt_keeps_the_polygon_open() {
+    let mut app = polygon_app();
+    let alt = Modifiers::ALT;
+    ev(&mut app, "down", 50.0, 50.0, alt);
+    for x in [70.0, 90.0, 110.0, 130.0, 150.0] {
+        ev(&mut app, "move", x, 50.0 + (x - 50.0) / 4.0, alt);
+    }
+    ev(&mut app, "up", 150.0, 75.0, alt);
+    assert!(app.ui.polygon.len() >= 6, "freehand points: {}", app.ui.polygon.len());
+    assert_eq!(app.ui.polygon_mode, "replace", "⌥ with nothing selected doesn't subtract");
+    // ⌥ released: clicks add straight segments, nothing closes.
+    ev(&mut app, "down", 150.0, 200.0, Modifiers::NONE);
+    ev(&mut app, "up", 150.0, 200.0, Modifiers::NONE);
+    assert!(!app.ui.polygon.is_empty() && app.session.active().unwrap().doc.selection.is_none());
+    crate::canvas::commit_polygon(&mut app);
+    assert!(app.session.active().unwrap().doc.selection.as_ref().unwrap().sample_channel(110, 100, 0) > 0.5);
 }

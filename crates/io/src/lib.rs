@@ -42,6 +42,7 @@ pub mod raw;
 pub mod slices_map;
 pub mod smart_map;
 pub mod svg;
+mod text_import;
 pub mod text_styles_map;
 pub mod tiff_layers;
 pub mod vector_map;
@@ -91,6 +92,14 @@ pub struct ImportResult {
     pub document: Document,
     /// Human-readable notes about anything approximated or dropped.
     pub warnings: Vec<String>,
+}
+
+/// The import note for a file whose horizontal and vertical resolutions (`x`, `y`, in pixels per
+/// inch) differ: a document has one resolution, so it keeps the horizontal one and saves it on
+/// both axes (#1018). Differences under 0.01 ppi are below what the warning can show.
+pub(crate) fn unequal_resolution_warning(x: f64, y: f64) -> Option<String> {
+    ((x - y).abs() >= 0.01)
+        .then(|| format!("the vertical resolution ({y:.2} ppi) differs from the horizontal ({x:.2} ppi); the document keeps {x:.2} ppi for both"))
 }
 
 /// Result of [`export`].
@@ -175,6 +184,7 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt) -
         ctl.progress(0.05);
         let (mut document, warnings) = psd_import::psd_to_document_with(&file, ctl).ok_or(IoError::Cancelled)?;
         document.name = name.to_string();
+        text_import::prepare(&mut document);
         return Ok(ImportResult { document, warnings });
     }
     if raw::is_raw(bytes) {
@@ -207,7 +217,8 @@ pub fn export(doc: &Document, name_or_ext: &str, opts: &ExportOptions) -> Result
     }
     if ext == "psd" || ext == "psb" {
         let o = PsdExportOptions { force_psb: opts.force_psb || ext == "psb", ..Default::default() };
-        let (file, warnings) = document_to_psd_with(doc, &o);
+        let (mut file, mut warnings) = document_to_psd_with(doc, &o);
+        warnings.extend(tiff_layers::strip_foreign_order_blocks(&mut file));
         // Never write a header the reader would refuse (e.g. a zero-sized canvas).
         file.header.validate()?;
         let bytes = file.to_bytes()?;

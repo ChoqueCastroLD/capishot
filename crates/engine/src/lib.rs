@@ -26,6 +26,7 @@ pub mod comps_cmds;
 pub mod cutout_cmds;
 pub mod display_color;
 pub mod distort_cmds;
+pub mod document_preset_cmds;
 pub mod edit_cmds;
 pub mod edit_menu_cmds;
 pub mod eraser_cmds;
@@ -46,6 +47,7 @@ pub mod image_cmds;
 pub mod inspect;
 pub mod jobs;
 pub mod layer_copy_cmds;
+pub mod layer_label_cmds;
 pub mod layer_menu_cmds;
 pub mod layer_multi_cmds;
 pub mod layer_nav_cmds;
@@ -70,6 +72,7 @@ pub mod preset_store;
 pub mod presets;
 pub mod print_cmds;
 pub mod proof_sim;
+pub mod redeye_cmds;
 pub mod render_cmds;
 pub mod retouch_cmds;
 pub mod select_extra_cmds;
@@ -79,6 +82,7 @@ pub mod smart_cmds;
 pub mod smartselect_cmds;
 pub mod snap;
 pub mod stamp_cmds;
+pub mod swatch_cmds;
 pub mod symmetry_cmds;
 mod timeline_cmds;
 pub mod transform_cmds;
@@ -151,7 +155,7 @@ pub struct DocState {
     pub active_layer: Option<LayerId>,
     /// Every selected layer in the Layers panel (⌘/⇧-click), in selection order. Like
     /// `active_layer`, selecting is not a history step, but undo and redo restore the layers each
-    /// state targeted when it was created; see [`DocState::selected_layers`].
+    /// state targeted when the next step was taken; see [`DocState::selected_layers`].
     pub selected_layers: Vec<LayerId>,
     /// Anchor of ⇧-click range selection (the last plainly or ⌘-clicked layer).
     pub layer_anchor: Option<LayerId>,
@@ -271,8 +275,9 @@ pub struct Session {
     coalesce_request: Option<String>,
     /// Pixels copied with Edit › Copy / Cut (shared by all documents, like Photoshop).
     pub clipboard: Option<edit_cmds::Clip>,
-    /// Layer › Layer Style › Copy Layer Style: effects, blend mode and fill opacity.
-    pub style_clipboard: Option<(photocraft_doc::Effects, photocraft_color::BlendMode, f32)>,
+    /// Layer › Layer Style › Copy Layer Style: effects, blend mode, fill opacity and the Advanced
+    /// Blending switches.
+    pub style_clipboard: Option<(photocraft_doc::Effects, photocraft_color::BlendMode, f32, photocraft_doc::AdvancedBlending)>,
     /// Shape path context menu: copied vector fill and stroke styles.
     pub path_fill_clipboard: Option<photocraft_doc::Fill>,
     pub path_stroke_clipboard: Option<photocraft_doc::ShapeStroke>,
@@ -386,7 +391,15 @@ impl Session {
             self.cancel_jobs_on(id);
         }
         let d = self.docs.remove(index);
-        self.active = if self.docs.is_empty() { None } else { Some(index.min(self.docs.len() - 1)) };
+        self.active = if self.docs.is_empty() {
+            None
+        } else {
+            Some(match self.active {
+                Some(active) if active > index => active - 1,
+                Some(active) if active < index => active,
+                _ => index.min(self.docs.len() - 1),
+            })
+        };
         Some(d)
     }
 
@@ -439,6 +452,9 @@ impl Session {
         let restrict = self.color_restrict;
         let st = self.active_mut().ok_or(EngineError::NoDocument)?;
         let before = st.doc.clone();
+        // Selecting layers is not a step, so the state this edit leaves behind targets what was
+        // selected just before it (#1356): undoing a stroke keeps the painted layer active.
+        let prior = st.layer_target();
         let mut doc = (*before).clone();
         let mut active = st.active_layer;
         let r = f(&mut doc, &mut active)?;
@@ -453,6 +469,7 @@ impl Session {
         let st = self.active_mut().ok_or(EngineError::NoDocument)?;
         let layers = st.layer_target();
         if key.is_none() || st.coalesce != key || !st.history.can_undo() {
+            st.history.set_current_layers(prior);
             st.history.record(label, before, layers);
             st.history.trim(&st.doc);
         } else {
@@ -492,10 +509,13 @@ impl Session {
         st.coalesce = None;
         match st.history.undo(st.doc.clone()) {
             Some((d, layers)) => {
+                // Pixels this step can have touched, so the canvas recomposites only that
+                // (it recomposited everything before).
+                let damage = layer_multi_cmds::step_damage(&d, &st.doc);
                 st.doc = d;
                 restore_target(st, layers);
                 st.revision += 1;
-                st.last_damage = None;
+                st.last_damage = damage;
                 true
             }
             None => false,
@@ -510,10 +530,11 @@ impl Session {
         st.coalesce = None;
         match st.history.redo(st.doc.clone()) {
             Some((d, layers)) => {
+                let damage = layer_multi_cmds::step_damage(&st.doc, &d);
                 st.doc = d;
                 restore_target(st, layers);
                 st.revision += 1;
-                st.last_damage = None;
+                st.last_damage = damage;
                 true
             }
             None => false,

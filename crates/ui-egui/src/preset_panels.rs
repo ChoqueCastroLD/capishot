@@ -106,7 +106,7 @@ pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
     float_flag(&mut p, id).map(|f| *f)
 }
 
-fn run(app: &mut PhotocraftApp, id: &str, p: Value) -> Option<Value> {
+pub(crate) fn run(app: &mut PhotocraftApp, id: &str, p: Value) -> Option<Value> {
     match app.run(id, p) {
         Ok(v) => Some(v),
         Err(e) => {
@@ -205,17 +205,17 @@ fn shape_texture(ctx: &egui::Context, sh: &photocraft_engine::presets::shapes::S
 
 // ------------------------------------------------------------------ the browser
 
-struct ItemView {
-    key: String,
-    name: String,
+pub(crate) struct ItemView {
+    pub(crate) key: String,
+    pub(crate) name: String,
 }
 
-struct GroupView {
-    name: String,
-    items: Vec<ItemView>,
+pub(crate) struct GroupView {
+    pub(crate) name: String,
+    pub(crate) items: Vec<ItemView>,
 }
 
-enum Ev {
+pub(crate) enum Ev {
     Select(String),
     Activate(String),
     Drop(String, Pos2),
@@ -229,18 +229,19 @@ enum Ev {
 }
 
 fn group_open(st: &PresetUi, panel: &str, gi: usize, name: &str) -> bool {
-    (gi == 0) != st.toggled.contains(&format!("{panel}/{name}"))
+    // Swatch groups are small and all start open (Photoshop); other panels open the first only.
+    (gi == 0 || panel == crate::swatches_ui::PANEL) != st.toggled.contains(&format!("{panel}/{name}"))
 }
 
 /// Draws the folders and footer; `thumb` paints item `(group, item)` into a rect.
 /// Where a browser sits: the canvas (drop target), its height cap and the New button's tooltip.
-struct Place<'a> {
-    canvas: Rect,
-    max_h: f32,
-    new_tip: &'a str,
+pub(crate) struct Place<'a> {
+    pub(crate) canvas: Rect,
+    pub(crate) max_h: f32,
+    pub(crate) new_tip: &'a str,
 }
 
-fn browser(
+pub(crate) fn browser(
     ui: &mut egui::Ui,
     st: &mut PresetUi,
     panel: &str,
@@ -474,7 +475,7 @@ fn empty(ui: &mut egui::Ui, s: &str) {
 fn doc_point(app: &PhotocraftApp, pos: Pos2) -> Option<[f64; 2]> {
     let i = app.session.active_index()?;
     let v = app.ui.views.get(i)?;
-    let xf = crate::canvas::ViewXform { rect: app.last_canvas_rect, zoom: v.zoom, center: v.center, flip: app.ui.view.flip_horizontal };
+    let xf = crate::canvas::ViewXform { rect: app.last_canvas_rect, zoom: v.zoom, center: v.center, flip: app.ui.view.flip_horizontal, rotation: v.rotation };
     Some(xf.to_doc(pos))
 }
 
@@ -812,6 +813,12 @@ pub fn select_tool_preset(app: &mut PhotocraftApp, name: &str) {
     let Some(r) = run(app, "tool.presets.select", json!({"preset": name})) else { return };
     if let Some(tool) = r["tool"].as_str().and_then(Tool::from_name) {
         app.ui.tool = tool;
+        // Each tool keeps its own brush (#218), so switch it in before the preset's brush lands
+        // on it, and re-apply the brush the command just set for the old tool.
+        crate::paint_mouse::sync_tool_brush(app);
+        if let Some(b) = r["options"].get("brush").filter(|b| b.is_object()) {
+            let _ = app.run("tools.setBrush", json!({"brush": b}));
+        }
     }
     if let Some(o) = r["options"].get("toolOptions").and_then(Value::as_object) {
         let mut cur = serde_json::to_value(&app.ui.tool_options).unwrap_or_default();
@@ -1103,6 +1110,7 @@ mod tests {
         assert_eq!(app.ui.tool, Tool::Eraser);
         assert_eq!(app.session.tools.brush.size, 60.0);
         assert_eq!(tool_id(Tool::CloneStamp), "cloneStamp");
+        assert_eq!(tool_id(Tool::PatternStamp), "patternStamp");
         assert_eq!(Tool::from_name(&tool_id(Tool::CustomShape)), Some(Tool::CustomShape));
     }
 

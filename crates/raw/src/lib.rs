@@ -17,6 +17,9 @@
 //!   orientation.
 //! * [`embedded_preview`] finds the camera's full-size JPEG preview, for
 //!   formats whose sensor data is not decoded yet.
+//! * Raws that carry no colour description (NEF) take a camera profile we
+//!   measured from the camera's own output when there is one (`cameras.rs`:
+//!   image area, levels, ForwardMatrix, tone curve; the Nikon D4 so far).
 //!
 //! Decoded today: DNG (uncompressed and lossless-JPEG, strips and tiles, CFA
 //! and LinearRaw), CR2 (lossless JPEG with Canon slices), uncompressed or
@@ -31,6 +34,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod cameras;
 mod color;
 mod cr2;
 mod demosaic;

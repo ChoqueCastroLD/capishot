@@ -5,17 +5,19 @@ use photocraft_color::{ColorMode, SampleType};
 use photocraft_doc::{Document, Layer, Size};
 use photocraft_format::RecoveryStore;
 use photocraft_geom::Rect;
-use photocraft_ui_egui::{Recovered, Services};
+use photocraft_ui_egui::{FileDialogAnswer, FileDialogReply, FileDialogRequest, Recovered, Services};
 use std::cell::RefCell;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 
 /// Everything File › Open reads: PhotoCraft and Photoshop documents, flat images, and Photoshop
-/// brushes (.abr) and gradients (.grd), which go to the preset libraries.
+/// brushes (.abr), gradients (.grd) and swatches (.aco, .ase), which go to the preset libraries.
 const OPEN_EXTS: &[&str] = &[
     "pcraft", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam",
-    "pfm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz",
+    "pfm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "ase",
 ];
 
 /// File › Save As formats: (filter name, extensions). The filter matching the suggested name's
@@ -32,9 +34,16 @@ const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("OpenEXR", &["exr"]),
 ];
 
+/// Non-document files the shell saves (Swatches panel exports): offered alone, so the dialog
+/// never swaps their extension for a document format's.
+const OTHER_SAVE_FILTERS: &[(&str, &[&str])] = &[("Color Swatches", &["aco"]), ("Swatch Exchange", &["ase"])];
+
 /// Lists the save dialog's file types with the `suggested` type first (added if unlisted), so the dialog keeps that extension instead of .psd.
 fn save_filters(suggested: &str) -> Vec<(String, Vec<String>)> {
     let ext = Path::new(suggested).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if let Some((name, exts)) = OTHER_SAVE_FILTERS.iter().find(|(_, exts)| exts.contains(&ext.as_str())) {
+        return vec![(name.to_string(), exts.iter().map(|e| e.to_string()).collect())];
+    }
     let mut v: Vec<(String, Vec<String>)> = SAVE_FILTERS.iter().map(|(name, exts)| (name.to_string(), exts.iter().map(|e| e.to_string()).collect())).collect();
     match v.iter().position(|(_, exts)| exts.contains(&ext)) {
         Some(i) => {
@@ -45,6 +54,66 @@ fn save_filters(suggested: &str) -> Vec<(String, Vec<String>)> {
         None => {}
     }
     v
+}
+
+/// Shows an Open or Save dialog without blocking the event loop (#673, #574): rfd's async dialog
+/// is created here, on the main thread, with the window as its parent (a sheet on macOS, an owned
+/// modal window elsewhere), and a helper thread waits for it and hands the answer to the app.
+fn show_file_dialog(request: FileDialogRequest, parent: Option<&eframe::Frame>, reply: FileDialogReply) {
+    let mut dialog = rfd::AsyncFileDialog::new();
+    if let Some(parent) = parent {
+        dialog = dialog.set_parent(parent);
+    }
+    let answer: Pin<Box<dyn Future<Output = Option<FileDialogAnswer>> + Send>> = match request {
+        FileDialogRequest::Open { multiple } => {
+            let dialog = dialog.add_filter("All Formats", OPEN_EXTS).add_filter("PhotoCraft", &["pcraft"]);
+            if multiple {
+                let picked = dialog.pick_files();
+                Box::pin(async move { picked.await.map(|files| FileDialogAnswer::Paths(files.iter().map(path_of).collect())) })
+            } else {
+                let picked = dialog.pick_file();
+                Box::pin(async move { picked.await.map(|file| FileDialogAnswer::Paths(vec![path_of(&file)])) })
+            }
+        }
+        FileDialogRequest::Save { suggested } => {
+            for (name, exts) in save_filters(&suggested) {
+                dialog = dialog.add_filter(name, &exts);
+            }
+            if let Some(name) = Path::new(&suggested).file_name() {
+                dialog = dialog.set_file_name(name.to_string_lossy());
+            }
+            let picked = dialog.save_file();
+            Box::pin(async move { picked.await.map(|file| FileDialogAnswer::SaveTo(path_of(&file))) })
+        }
+    };
+    // Without the thread the reply is dropped unanswered, which the app takes as Cancel.
+    if let Err(e) = std::thread::Builder::new().name("file dialog".into()).spawn(move || reply.send(block_on(answer))) {
+        log::error!("couldn't wait for the file dialog: {e}");
+    }
+}
+
+fn path_of(file: &rfd::FileHandle) -> String {
+    file.path().to_string_lossy().into_owned()
+}
+
+/// Runs `future` to completion on this thread, sleeping until it is woken.
+fn block_on<T>(future: impl Future<Output = T>) -> T {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::task::Waker::from(Arc::new(Unpark(std::thread::current())));
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        if let std::task::Poll::Ready(value) = future.as_mut().poll(&mut cx) {
+            return value;
+        }
+        // Spurious wake-ups just poll again.
+        std::thread::park();
+    }
 }
 
 /// Per-user settings directory: `PHOTOCRAFT_CONFIG_DIR`, else `<exe dir>/PhotoCraftData` in
@@ -89,11 +158,12 @@ fn with_store<R>(store: &SharedRecovery, f: impl FnOnce(&mut RecoveryStore) -> R
 /// until a newer autosave replaces them or they're saved or closed (see [`RecoveryStore`]).
 fn recovery_services(dir: Option<PathBuf>) -> Services {
     let store: SharedRecovery = Rc::new(RefCell::new(dir.map(RecoveryStore::new)));
-    let (s1, s2, s3) = (store.clone(), store.clone(), store.clone());
+    let (s1, s2, s3, s4) = (store.clone(), store.clone(), store.clone(), store.clone());
     Services {
         autosave: Some(Box::new(move |doc: &Arc<Document>, revision: u64, path: Option<&str>| {
-            with_store(&s1, |s| s.autosave(doc, revision, path.map(str::to_string)))
+            with_store(&s1, |s| s.autosave_checked(doc, revision, path.map(str::to_string)))?
         })),
+        autosave_results: Some(Box::new(move || with_store(&s4, |s| s.take_completed()).unwrap_or_default())),
         discard_autosave: Some(Box::new(move |id: u64| {
             let _ = with_store(&s2, |s| s.discard(id));
         })),
@@ -129,6 +199,25 @@ fn image_from_files(paths: &[PathBuf]) -> Option<(u32, u32, Vec<u8>)> {
         let img = photocraft_codecs::decode(&std::fs::read(&path).ok()?).ok()?;
         Some((img.width(), img.height(), img.to_rgba8()))
     })
+}
+
+/// The shell command that starts this install under XWayland, where winit delivers file drops
+/// (winit 0.30 has none on Wayland, #386). A Flatpak gets the X11 socket only without the Wayland
+/// one, an AppImage relaunches by its own path, and anything else is `photocraft` on the PATH.
+/// `None` outside Flatpak when there is no X server (`DISPLAY` unset) to run on.
+#[cfg(any(target_os = "linux", test))]
+pub fn xwayland_command(flatpak_id: Option<&str>, appimage: Option<&str>, x_display: bool) -> Option<String> {
+    if let Some(id) = flatpak_id.filter(|id| !id.is_empty()) {
+        return Some(format!("flatpak run --nosocket=wayland --socket=x11 {}", shell_word(id)));
+    }
+    let exe = appimage.filter(|path| !path.is_empty()).map_or_else(|| "photocraft".to_string(), shell_word);
+    x_display.then(|| format!("WAYLAND_DISPLAY= {exe}"))
+}
+
+/// `s` as one POSIX shell word: bare when every character is safe there, else single-quoted.
+#[cfg(any(target_os = "linux", test))]
+fn shell_word(s: &str) -> String {
+    if s.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-+:,@".contains(&b)) { s.to_string() } else { format!("'{}'", s.replace('\'', r"'\''")) }
 }
 
 pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) -> Services {
@@ -167,30 +256,7 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             opts.xmp = if settings.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
             crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string()))
         })),
-        pick_open: Some(Box::new(|| {
-            let path = rfd::FileDialog::new().add_filter("All Formats", OPEN_EXTS).add_filter("PhotoCraft", &["pcraft"]).pick_file()?;
-            // A read failure goes back to the app, which reports it like any other open failure.
-            let bytes = photocraft_format::read_file(&path).map_err(|e| e.to_string());
-            Some((path.to_string_lossy().to_string(), bytes))
-        })),
-        pick_open_paths: Some(Box::new(|| {
-            rfd::FileDialog::new()
-                .add_filter("All Formats", OPEN_EXTS)
-                .add_filter("PhotoCraft", &["pcraft"])
-                .pick_files()
-                .map(|paths| paths.into_iter().map(|path| path.to_string_lossy().into_owned()).collect())
-        })),
-        pick_save: Some(Box::new(|suggested: &str| {
-            let p = std::path::Path::new(suggested);
-            let mut d = rfd::FileDialog::new();
-            for (name, exts) in save_filters(suggested) {
-                d = d.add_filter(name, &exts);
-            }
-            if let Some(name) = p.file_name() {
-                d = d.set_file_name(name.to_string_lossy());
-            }
-            Some(d.save_file()?.to_string_lossy().to_string())
-        })),
+        file_dialog: Some(Box::new(show_file_dialog)),
         write: Some(Box::new(|path: &str, bytes: &[u8]| write_atomic(Path::new(path), bytes))),
         automation_read,
         automation_write,
@@ -316,28 +382,54 @@ mod tests {
     use photocraft_ui_egui::{PhotocraftApp, prefs_ui};
     use serde_json::{Value, json};
 
+    #[test]
+    fn xwayland_command_matches_how_photocraft_was_installed() {
+        // Flatpak: WAYLAND_DISPLAY doesn't reach the sandbox's socket choice; flatpak's flags do.
+        let flatpak = xwayland_command(Some("ai.storyteller.photocraft"), None, false);
+        assert_eq!(flatpak.as_deref(), Some("flatpak run --nosocket=wayland --socket=x11 ai.storyteller.photocraft"));
+        // AppImage: its own path, quoted for the shell (spaces, quotes).
+        let appimage = xwayland_command(None, Some("/home/me/My Apps/it's.AppImage"), true);
+        assert_eq!(appimage.as_deref(), Some(r"WAYLAND_DISPLAY= '/home/me/My Apps/it'\''s.AppImage'"));
+        let bare = xwayland_command(None, Some("/opt/photocraft-0.3.0-linux-x86_64.AppImage"), true);
+        assert_eq!(bare.as_deref(), Some("WAYLAND_DISPLAY= /opt/photocraft-0.3.0-linux-x86_64.AppImage"));
+        // deb, rpm, AUR, tarball: the binary on the PATH.
+        assert_eq!(xwayland_command(None, None, true).as_deref(), Some("WAYLAND_DISPLAY= photocraft"));
+        assert_eq!(xwayland_command(Some(""), Some(""), true).as_deref(), Some("WAYLAND_DISPLAY= photocraft"));
+        // No X server (XWayland disabled): nothing to suggest.
+        assert_eq!(xwayland_command(None, Some("/opt/p.AppImage"), false), None);
+    }
+
     /// Tests every native save dialog and records the suggested file name. Each name's file type must come first
     /// in the save panel, or the panel appends the first type's extension (`photo.webp.psd`, `photo.gif.psd`).
     #[test]
     fn every_save_dialog_leads_with_its_own_extension() {
         let asked: Rc<RefCell<Vec<String>>> = Rc::default();
         let log = asked.clone();
+        // Record each save dialog's suggested name and cancel it, as the user would.
         let services = Services {
-            pick_save: Some(Box::new(move |s: &str| {
-                log.borrow_mut().push(s.to_string());
-                None
+            file_dialog: Some(Box::new(move |request, _parent, reply| {
+                if let FileDialogRequest::Save { suggested } = request {
+                    log.borrow_mut().push(suggested);
+                }
+                reply.send(None);
             })),
             ..Default::default()
         };
         let mut app = PhotocraftApp::new(Session::new(), services);
         let ctx = egui::Context::default();
-        let invoke = |app: &mut PhotocraftApp, id: &str| photocraft_ui_egui::menus::invoke(app, &ctx, id, json!({}));
+        // Dialogs are shown on the next frame: poll once so each is answered before the next asks.
+        let invoke = |app: &mut PhotocraftApp, id: &str| {
+            let r = photocraft_ui_egui::menus::invoke(app, &ctx, id, json!({}));
+            app.poll_file_dialog(&ctx, None);
+            r
+        };
         let dialog = |app: &mut PhotocraftApp, id: &str, fields: Value| {
             let d = invoke(app, id).unwrap()["dialog"].as_u64().unwrap();
             for (k, v) in fields.as_object().unwrap() {
                 app.ui.dialog_mut(d).unwrap().fields.insert(k.clone(), v.clone());
             }
             let _ = photocraft_ui_egui::dialogs::confirm(app, d);
+            app.poll_file_dialog(&ctx, None);
         };
         new_doc(&mut app, "#ff0000");
         // Save As, Save a Copy.
@@ -383,6 +475,23 @@ mod tests {
             assert!(save_filters(name)[0].1.iter().any(|e| e == ext), "{name}: {:?}", save_filters(name)[0]);
         }
         assert_eq!(save_filters("Untitled")[0].0, "Photoshop", "no extension keeps the default");
+    }
+
+    #[test]
+    fn block_on_waits_for_a_wake_from_another_thread() {
+        let (tx, rx) = std::sync::mpsc::channel::<std::task::Waker>();
+        let mut woken = false;
+        let ready = std::future::poll_fn(move |cx| {
+            if woken {
+                return std::task::Poll::Ready(7);
+            }
+            woken = true;
+            let _ = tx.send(cx.waker().clone());
+            std::task::Poll::Pending
+        });
+        let waker = std::thread::spawn(move || rx.recv().unwrap().wake());
+        assert_eq!(block_on(ready), 7);
+        waker.join().unwrap();
     }
 
     const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
@@ -465,6 +574,54 @@ mod tests {
         assert!(list_recovery(&dir).is_empty());
         drop(app);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_background_autosave_is_reported_and_retried_without_another_edit() {
+        let dir = temp("autosave-retry");
+        let recovery = dir.join("Recovery");
+        // A regular file prevents creation of the recovery bundle directory.
+        std::fs::write(&recovery, b"blocked").unwrap();
+        let ctx = egui::Context::default();
+        let mut app = launch(&recovery);
+        new_doc(&mut app, "#ff0000");
+        let revision = app.session.active().unwrap().revision;
+        autosave(&mut app, &ctx);
+
+        let mut failed = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            prefs_ui::tick(&mut app, &ctx);
+            if app.ui.status.starts_with("Autosave failed:") {
+                failed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(failed, "background write failures must reach the UI");
+        assert!(app.ui.status_error);
+        assert!(list_recovery(&recovery).is_empty());
+
+        // No edit occurs: retrying this very same revision must still work.
+        std::fs::remove_file(&recovery).unwrap();
+        std::fs::create_dir(&recovery).unwrap();
+        autosave(&mut app, &ctx);
+        let mut recovered = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            prefs_ui::tick(&mut app, &ctx);
+            recovered = list_recovery(&recovery);
+            if !recovered.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(recovered.len(), 1, "unchanged revision should retry after failure");
+        assert_eq!(recovered[0].info.revision, revision);
+        let restored = photocraft_format::recover(&recovered[0]).unwrap();
+        assert_eq!(photocraft_compose::flatten(&restored).px.first().copied(), Some(RED));
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     use std::sync::atomic::{AtomicUsize, Ordering};

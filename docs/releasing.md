@@ -85,6 +85,9 @@ in `ci.yml`. Rules: `../craftrules/standards/fonts.md`; build option: `docs/deve
   ticket is stapled to the app. The app goes on a DMG (`hdiutil`, with an `Applications` link
   to drag onto). The DMG is signed, notarized and stapled too. The script checks the results
   with `codesign --verify --strict`, `stapler validate` and `spctl -a -vvv`.
+  Its Finder window (background, icon size and positions) comes from
+  [`packaging/macos/dmg/`](../packaging/macos/dmg/README.md), and its volume is named `PhotoCraft`
+  without the version, which the window's background needs; the DMG file name keeps the version.
 - **CLI:** the universal `photocraft-cli` is signed with the same Developer ID, the hardened
   runtime and a secure timestamp (identifier `ai.storyteller.photocraft-cli`), zipped, and the zip
   is sent to `notarytool`. Only `.app`, `.dmg` and `.pkg` can hold a stapled ticket, not a bare

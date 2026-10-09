@@ -9,6 +9,10 @@
 //! ↵ commits (`image.crop`, see `canvas::commit_crop`) and Esc cancels. The pending frame lives in
 //! `UiState::crop_rect`, so the control channel reads it. `image.crop` has no angle, so dragging
 //! outside the frame draws a new one rather than rotating it.
+//!
+//! As in Photoshop, from the first press until the crop is committed or cancelled the canvas also
+//! shows the layers' pixels past its edges (kept by a crop with Delete Cropped Pixels off, or moved
+//! out), with transparency out to the frame, under the shield ([`shows_beyond_canvas`]).
 
 use egui::{CursorIcon, Modifiers};
 
@@ -32,6 +36,8 @@ pub struct CropState {
     pub default_frame: bool,
     /// The document (index and size) the default frame was made for.
     frame_for: Option<(usize, u32, u32)>,
+    /// The frame is being edited (pressed since it was made): the canvas shows what lies past it.
+    pub editing: bool,
 }
 
 /// A crop gesture in progress. Rects are `[x0, y0, x1, y1]` in document coordinates.
@@ -158,6 +164,7 @@ pub fn set_space(app: &mut PhotocraftApp, down: bool) {
 /// cancelled or committed, it frames the selection's bounds, or the whole canvas.
 pub fn ensure_frame(app: &mut PhotocraftApp) {
     if app.ui.tool != Tool::Crop {
+        app.crop.editing = false;
         // Leaving the tool drops an untouched default frame (a drawn one stays pending).
         if app.crop.default_frame {
             app.ui.crop_rect = None;
@@ -183,11 +190,28 @@ pub fn ensure_frame(app: &mut PhotocraftApp) {
     app.ui.crop_rect = Some([f64::from(r.x0), f64::from(r.y0), f64::from(r.x1), f64::from(r.y1)]);
     app.crop.default_frame = true;
     app.crop.frame_for = key;
+    app.crop.editing = false;
 }
 
 /// A crop gesture is in progress: Space repositions the frame rather than panning.
 pub fn active(app: &PhotocraftApp) -> bool {
     app.ui.tool == Tool::Crop && app.crop.drag.is_some()
+}
+
+/// The frame is being edited, so the canvas shows the pixels past its edges (Photoshop's crop
+/// preview): from the first press with the tool until the crop is committed or cancelled.
+pub fn shows_beyond_canvas(app: &PhotocraftApp) -> bool {
+    app.ui.tool == Tool::Crop && app.ui.crop_rect.is_some() && (app.crop.editing || app.crop.drag.is_some())
+}
+
+/// The button went down on the canvas with the Crop tool: the frame is being edited from now on.
+/// Returns true when that is new.
+pub fn press(app: &mut PhotocraftApp) -> bool {
+    let new = app.ui.tool == Tool::Crop && app.ui.crop_rect.is_some() && !app.crop.editing;
+    if new {
+        app.crop.editing = true;
+    }
+    new
 }
 
 fn tolerance(app: &PhotocraftApp) -> f64 {
@@ -208,6 +232,7 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: Modifiers) -> bool 
     }
     match ev {
         ToolEvent::Down { .. } => {
+            app.crop.editing = true;
             let frame = app.ui.crop_rect.filter(|r| r.iter().all(|v| v.is_finite()));
             app.crop.drag = Some(match frame.map(|r| (r, hit(r, p, tolerance(app)))) {
                 Some((rect, Hit::Handle(hx, hy))) => CropDrag::Resize { hx, hy, start: p, rect },
@@ -351,6 +376,36 @@ mod tests {
     }
 
     #[test]
+    fn the_frame_is_edited_from_a_press_until_commit_cancel_or_another_tool() {
+        let mut app = app(SampleType::U8);
+        ensure_frame(&mut app);
+        assert!(!shows_beyond_canvas(&app), "a new frame is not being edited");
+        assert!(press(&mut app));
+        assert!(shows_beyond_canvas(&app));
+        assert!(!press(&mut app), "only the first press is news");
+        // A click on the frame keeps it edited.
+        drag(&mut app, &[[50.0, 50.0]], NONE);
+        assert!(shows_beyond_canvas(&app));
+        // Esc drops the frame: the new default one isn't edited.
+        app.ui.crop_rect = None;
+        ensure_frame(&mut app);
+        assert!(!shows_beyond_canvas(&app));
+        // A drawn frame is edited until it is committed.
+        drag(&mut app, &[[10.0, 10.0], [60.0, 40.0]], NONE);
+        assert!(shows_beyond_canvas(&app));
+        crate::canvas::commit_crop(&mut app);
+        ensure_frame(&mut app);
+        assert_eq!(app.ui.crop_rect, Some([0.0, 0.0, 50.0, 30.0]));
+        assert!(!shows_beyond_canvas(&app));
+        // Or until another tool is picked.
+        drag(&mut app, &[[5.0, 5.0], [20.0, 20.0]], NONE);
+        app.ui.tool = Tool::Brush;
+        ensure_frame(&mut app);
+        assert!(!app.crop.editing && !shows_beyond_canvas(&app));
+        assert!(!press(&mut app), "no frame without the Crop tool");
+    }
+
+    #[test]
     fn hit_test_finds_handles_inside_and_outside() {
         let r = [10.0, 10.0, 110.0, 60.0];
         assert_eq!(hit(r, [10.0, 10.0], 4.0), Hit::Handle(-1, -1));
@@ -447,7 +502,7 @@ mod tests {
     fn space_on_the_canvas_moves_the_frame_not_the_view() {
         use egui::{Event, Key, PointerButton, pos2};
         let mut a = app(SampleType::U8);
-        let view = crate::state::View { zoom: 2.0, center: [100.0, 50.0], fit_pending: false, fill_pending: false, doc_size: [200, 100] };
+        let view = crate::state::View { zoom: 2.0, center: [100.0, 50.0], fit_pending: false, fill_pending: false, doc_size: [200, 100], rotation: 0.0 };
         a.ui.views = vec![view.clone()];
         let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(600.0, 400.0)).build_ui_state(
             |ui, app: &mut PhotocraftApp| {

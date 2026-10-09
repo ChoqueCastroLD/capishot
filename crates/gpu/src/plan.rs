@@ -489,9 +489,21 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
+    /// Blending Options › Advanced Blending (knockout, clipped layers blended individually, blend
+    /// interior effects as group, transparency shapes off, masks hiding effects) has no GPU pass:
+    /// documents using it are composited on the CPU (`photocraft_compose::advanced`). Layers at
+    /// Photoshop's defaults pass this check for free.
+    fn check_advanced(&self, layer: &Layer, clipped: &[Layer]) -> Result<(), Unsupported> {
+        if photocraft_compose::advanced_active(layer, clipped) {
+            return Err(Unsupported(format!("Advanced Blending on `{}` (composited on the CPU)", layer.name)));
+        }
+        Ok(())
+    }
+
     /// composite_layer, honouring the layer's channel restrictions.
     fn layer(&mut self, layer: &'a Layer, clipped: &'a [Layer], backdrop: Slot) -> Result<Slot, Unsupported> {
         self.check_blend_if(layer)?;
+        self.check_advanced(layer, clipped)?;
         match photocraft_compose::channel_weights(layer, self.cx.mode) {
             Some(w) => {
                 let before = self.retain(backdrop);
@@ -629,7 +641,7 @@ impl<'a> Planner<'a> {
 
         if let LayerContent::Shape(sh) = &layer.content
             && !visible_clipped.is_empty()
-            && let Some((fill, stroke)) = photocraft_compose::shape_split::split(sh, self.cx.canvas)
+            && let Some((fill, stroke)) = photocraft_compose::shape_split::split(sh, self.cx.canvas, self.cx.depth)
         {
             // The vector stroke goes above the clipped layers: the fill is the clipping base,
             // the stroke is laid over the clipped result, then the masks apply to both
@@ -665,6 +677,7 @@ impl<'a> Planner<'a> {
             // Nothing to draw (an empty layer, or a group of them).
             for c in &visible_clipped {
                 self.check_blend_if(c)?;
+                self.check_advanced(c, &[])?;
             }
             return Ok(backdrop);
         }
@@ -836,6 +849,7 @@ impl<'a> Planner<'a> {
     /// layer's channel restrictions.
     fn atop(&mut self, layer: &'a Layer, base: Slot) -> Result<Slot, Unsupported> {
         self.check_blend_if(layer)?;
+        self.check_advanced(layer, &[])?;
         match photocraft_compose::channel_weights(layer, self.cx.mode) {
             Some(w) => {
                 let before = self.retain(base);
@@ -898,7 +912,7 @@ impl<'a> Planner<'a> {
         // A stroked shape's vector stroke goes above its clipped layers and interior effects
         // (compose::split_parts): the fill and the stroke unmasked, the masks applied after.
         let split = match &layer.content {
-            LayerContent::Shape(sh) if sh.stroke.is_some() => photocraft_compose::shape_split::split(sh, canvas),
+            LayerContent::Shape(sh) if sh.stroke.is_some() => photocraft_compose::shape_split::split(sh, canvas, self.cx.depth),
             _ => None,
         };
         let (mut content, vstroke) = match split {
@@ -1487,7 +1501,12 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, depth: photocraf
             }
         }
         Adjustment::Vibrance { vibrance, saturation } => {
-            p[0] = [vibrance / 100.0, saturation / 100.0, 0.0, 0.0];
+            // compose::adjust::vibrance_px; 32-bit samples aren't clipped at 1.
+            let hi = if depth == photocraft_color::SampleType::F32 { f32::MAX } else { 1.0 };
+            p[0] = [vibrance / 100.0, saturation / 100.0, transfer_exponent(transfer), hi];
+            let b = adjust::VIBRANCE_BOOST;
+            p[1] = [b[0], b[1], b[2], b[3]];
+            p[2] = [b[4], b[5], b[6], 0.0];
             (9, p, None)
         }
         Adjustment::ChannelMixer { matrix, monochrome } => {
@@ -1733,5 +1752,36 @@ mod tests {
         d.layers[1].blend_if = Default::default();
         d.layers.push(l);
         assert!(plan(&d).is_err());
+    }
+
+    #[test]
+    fn advanced_blending_falls_back_to_the_cpu() {
+        use photocraft_doc::Knockout;
+        let mut d = Document::with_background("t", Size::new(8, 8), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        let mut l = Layer::raster("ko", d.pixel_format());
+        l.surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(0, 0, 4, 4), &[1.0, 0.0, 0.0, 1.0]);
+        d.layers.push(l.clone());
+        assert!(plan(&d).is_ok(), "defaults stay on the GPU");
+        // Switches with nothing to act on (no effects, no clipped layers) stay on the GPU too.
+        d.layers[1].advanced.blend_interior = true;
+        d.layers[1].advanced.blend_clipped = false;
+        assert!(plan(&d).is_ok());
+        d.layers[1].advanced.knockout = Knockout::Deep;
+        assert!(plan(&d).unwrap_err().0.contains("Advanced Blending"));
+        // Inside groups and clipping groups.
+        d.layers[1].advanced.knockout = Knockout::None;
+        let mut c = l.clone();
+        c.clipped = true;
+        d.layers.push(c.clone());
+        assert!(plan(&d).is_err(), "clipped layers blended individually");
+        d.layers[1].advanced.blend_clipped = true;
+        assert!(plan(&d).is_ok());
+        d.layers[2].advanced.knockout = Knockout::Shallow;
+        assert!(plan(&d).is_err(), "clipped knockout");
+        d.layers.truncate(1);
+        let mut inner = l;
+        inner.advanced.knockout = Knockout::Shallow;
+        d.layers.push(Layer::group("g", vec![inner]));
+        assert!(plan(&d).is_err(), "knockout inside a group");
     }
 }

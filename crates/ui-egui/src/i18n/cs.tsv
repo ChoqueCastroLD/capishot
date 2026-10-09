@@ -25,6 +25,10 @@
 	Layer	Vrstva
 	Type	Text
 	Select	Výběr
+	Top Left	Vlevo nahoře
+	Top Right	Vpravo nahoře
+	Bottom Left	Vlevo dole
+	Bottom Right	Vpravo dole
 	Filter	Filtr
 	View	Zobrazení
 	Window	Okno
@@ -990,11 +994,14 @@
 	Draw with the Pen tool (P) or make a work path from a selection.	Kreslete nástrojem pero (P) nebo vytvořte pracovní cestu z výběru.
 	Drop an image or PSD anywhere to open it.	Přetáhněte sem obrázek nebo PSD a otevře se.
 	Native file drag-and-drop is unavailable	Nativní přetahování souborů ve Waylandu není dostupné
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Nativní přetahování souborů ve Waylandu zatím není podporováno. Použijte Soubor › Otevřít nebo spusťte PhotoCraft v XWayland s `WAYLAND_DISPLAY= photocraft`.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Nativní přetahování souborů ve Waylandu zatím není podporováno. Použijte Soubor › Otevřít, nebo obrázek zkopírujte ve správci souborů a vložte ho pomocí {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Chcete-li soubory přetahovat, spusťte PhotoCraft v XWayland: `{command}`
+	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	Nebo nastavte Předvolby › Výkon › Zobrazovací server Linuxu na X11: PhotoCraft se pak vždy spustí v XWayland.
+	Edit › Paste	Úpravy › Vložit
 	Duplicate Layers…	Duplikovat vrstvy…
 	Duplicate style	Duplikovat styl
 	Edit Toolbar…	Upravit panel nástrojů…
-	Use File › Open to open an image.	Obrázek otevřete přes Soubor › Otevřít.
+	Use File › Open, or paste a copied image with {paste}.	Použijte Soubor › Otevřít, nebo vložte zkopírovaný obrázek pomocí {paste}.
 	Edit in Quick Mask Mode  (Q)	Upravit v režimu rychlé masky  (Q)
 	Edit in Standard Mode  (Q)	Upravit ve standardním režimu  (Q)
 	Effects	Efekty
@@ -1478,6 +1485,10 @@
 	↑↓ navigate   {key} run   esc close	↑↓ pohyb   {key} spustit   esc zavřít
 	Version {version}	Verze {version}
 	New Document	Nový dokument
+	Saved	Uložené
+	Save Preset…	Uložit předvolbu…
+	Preset Name	Název předvolby
+	No saved presets yet.	Zatím nejsou uloženy žádné předvolby.
 	Error	Chyba
 	Command	Příkaz
 
@@ -1817,6 +1828,7 @@
 	Maximize psd compatibility	Maximalizovat kompatibilitu PSD
 	Medium gray	Středně šedá
 	Memory usage mb	Využití paměti (MB)
+	Low resolution previews	Náhledy v nízkém rozlišení
 	Missing glyph protection	Ochrana proti chybějícím glyfům
 	Modern	Moderní
 	Nearest neighbor	Nejbližší soused
@@ -1974,6 +1986,8 @@
 	Brush Settings…  (F5): every option of this brush	Nastavení štětce…  (F5): všechny možnosti tohoto štětce
 	Rename Brush…	Přejmenovat štětec…
 	Delete Brush	Odstranit štětec
+	New Brush Preset…	Nová předvolba štětce…
+	Brush Preset Options	Možnosti přednastavení štětců
 	Group name	Název skupiny
 	Brush name	Název štětce
 	Grid view	Zobrazení mřížky
@@ -2015,6 +2029,8 @@
 	CPU (no GPU acceleration)	CPU (bez akcelerace GPU)
 	DirectX 12	DirectX 12
 	GPU backend	Grafický backend
+	Linux display server	Zobrazovací server Linuxu
+	X11	X11
 	Metal	Metal
 	OpenGL	OpenGL
 	Use tablet pressure	Použít přítlak tabletu
@@ -2109,6 +2125,7 @@ cameraRaw	Color	Barvy
 	Frequency	Frekvence
 	Use tablet pressure to change pen width	Měnit šířku pera přítlakem tabletu
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	O aplikaci
 	Contributors	Přispěvatelé
@@ -2141,4 +2158,93 @@ cameraRaw	Color	Barvy
 	% of all commits	% všech commitů
 	Lines +/−	Řádky +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR: {prs}, commity: {commits}, řádky +{added} / −{deleted} (Δ {delta}), binární soubory +{binAdded} / −{binDeleted}, {first} – {last}
+
+# Swatches panel
+	Create new swatch	Vytvořit nový vzorek
+	New Swatch…	Nový vzorek…
+	New Swatch Group…	Nová skupina vzorků…
+	Import Swatches…	Importovat vzorky…
+	Replace Swatches…	Nahradit vzorky…
+	Export Swatches…	Exportovat vzorky…
+	Export Swatches for Exchange…	Exportovat vzorky pro výměnu…
+	Reset Swatches	Obnovit vzorky
+	Add to Swatches	Přidat do vzorníku
+# Layer Style > Blending Options (Advanced Blending)
+	Blend If:	Prolnout, pokud:
+	Channels:	Kanály:
+	Knockout	Vyřazení
 	Apply At Canvas Bounds	Použít efekt na hranicích plátna
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Výběr barvy (Barva textu)
+	Pick screen color	Vybrat barvu obrazovky
+	Sample a pixel anywhere on the screen	Vzorkovat pixel kdekoli na obrazovce
+	Click to pick · Esc to cancel	Kliknutí vybere · Esc zruší
+	Pick a screen pixel or press Esc to cancel	Vyberte pixel obrazovky nebo stiskněte Esc pro zrušení
+	Scroll to zoom	Rolováním přibližujte
+	Show/Hide All Panels	Zobrazit/skrýt všechny panely
+	Show/Hide Panels	Zobrazit/skrýt panely
+	Could not open	Nelze otevřít
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: cesta není platný Unicode; přejmenujte soubor a otevřete jej znovu.
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Obsah:
+	Custom Pattern:	Vlastní vzorek:
+	Foreground Color	Barva popředí
+	Color…	Barva…
+	50% Gray	50% šedá
+	Color Adaptation	Přizpůsobení barev
+	{size} (was {old})	{size} (dříve {old})
+	Cone	Kužel
+	Cone (Inverted)	Kužel (obrácený)
+	Domed	Kopule
+	Domed (Inverted)	Kopule (obrácená)
+	Diagonal (Descending)	Diagonála (sestupná)
+
+	Red Eye Tool	Nástroj červené oči
+	Red Eye	Červené oči
+	Pupil Size	Velikost zornice
+	Darken Amount	Míra ztmavení
+	Click a red pupil to neutralize it	Klepněte na červenou zornici
+	open source	otevřený zdrojový kód
+	…and {n} more	…a dalších {n}
+
+	Eyedroppers:	Kapátka:
+	Set Black Point	Nastavit černý bod
+	Set Neutral Gray Point	Nastavit neutrální šedý bod
+	Set White Point	Nastavit bílý bod
+	Unavailable in this color mode	V tomto barevném režimu není k dispozici
+	Selection Preview:	Náhled výběru:
+	Black Matte	Černý podklad
+	White Matte	Bílý podklad
+
+# Layer colour labels.
+	Seafoam	Mořská pěna
+	Indigo	Indigová
+	Fuchsia	Fuchsiová
+	Violet	Fialová
+	Reset	Obnovit
+	Large document: redrawing on the CPU	Velký dokument: překreslování na CPU
+	This redraw took {seconds} s on the CPU.	Toto překreslení na CPU trvalo {seconds} s.
+	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Úpravy, které mění celý dokument, například režim prolnutí, krytí nebo viditelnost vrstvy, jej překreslí celý.
+	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Vrstvy se nevejdou do rozpočtu paměti GPU. Zvýšením hodnoty Využití paměti v Předvolbách › Výkon se rozpočet zvětší, nejvýše na čtvrtinu paměti tohoto počítače.
+	The GPU compositor wasn't used: {reason}	Kompozitor GPU nebyl použit: {reason}
+fontWeight	Thin	Jemná
+fontWeight	ExtraLight	Extrajemná
+fontWeight	Light	Světlá
+fontWeight	Regular	Normální
+fontWeight	Medium	Střední
+fontWeight	SemiBold	Polotučná
+fontWeight	Bold	Tučná
+fontWeight	ExtraBold	Extratučná
+fontWeight	Black	Černá
+fontWeight	Italic	Kurzíva
+
+# Pattern Stamp tool
+	Pattern Stamp Tool	Nástroj razítko vzorku
+	Pattern Stamp	Razítko vzorku
+	Impressionist	Impresionista
+	Rotate View	Otočit zobrazení
+	Rotate View Tool	Nástroj otočení zobrazení
+	Reset View	Obnovit zobrazení
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Tažením kolem středu otočíte zobrazení  ·  Shift omezí na 15°

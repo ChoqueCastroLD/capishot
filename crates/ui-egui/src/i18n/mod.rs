@@ -96,7 +96,7 @@ fn plural_polish(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 14] = [
+pub static LANGUAGES: [LangInfo; 15] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo {
@@ -124,6 +124,7 @@ pub static LANGUAGES: [LangInfo; 14] = [
         complete_menus: true,
         catalog: OnceLock::new(),
     },
+    LangInfo { code: "el", name: "Ελληνικά", source: include_str!("el.tsv"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "it", name: "Italiano", source: include_str!("it.tsv"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
 ];
 
@@ -667,6 +668,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn layer_color_names_are_translated() {
+        for lang in Lang::all().filter(|l| l.complete_menus()) {
+            for color in photocraft_doc::LabelColor::ALL {
+                let cat = lang.0.catalog();
+                assert!(
+                    cat.contextual("layerLabel", color.label()).or_else(|| cat.plain(color.label())).is_some(),
+                    "{} missing {}",
+                    lang.code(),
+                    color.label()
+                );
+            }
+        }
+        let de = lang_from_tag("de").unwrap();
+        assert_eq!(tr_ctx(de, "layerLabel", "No Color"), "Keine Farbe");
+        assert_eq!(tr_ctx(de, "layerLabel", "Seafoam"), "Meeresschaum");
+        assert_eq!(tr(Lang::EN, "Seafoam"), "Seafoam");
+    }
+
+    /// Font style labels are built from dynamic words (weights, "Italic"), so the literal
+    /// scanner cannot cover them; "Light" there is a weight, distinct from the Camera Raw
+    /// "Light" section (`type_tool::style_label`).
+    #[test]
+    fn font_weight_names_are_translated() {
+        const TERMS: &[&str] = &["Thin", "ExtraLight", "Light", "Regular", "Medium", "SemiBold", "Bold", "ExtraBold", "Black", "Italic"];
+        for lang in Lang::all().filter(|l| l.complete_menus()) {
+            for t in TERMS {
+                assert!(lang.0.catalog().contextual("fontWeight", t).is_some(), "{} missing font weight: {t}", lang.code());
+            }
+            assert_ne!(tr_ctx(lang, "cameraRaw", "Light"), tr_ctx(lang, "fontWeight", "Light"), "{}: Camera Raw Light vs the font weight", lang.code());
+        }
+    }
+
     /// Blend mode names come from the colour crate; each must be translated.
     #[test]
     fn blend_mode_names_are_translated() {
@@ -680,6 +714,21 @@ mod tests {
     #[test]
     fn mixer_brush_ui_strings_have_translations_in_every_registered_language() {
         const STRINGS: &[&str] = &["Mixer Brush", "Mixer Brush Tool", "Wet", "Load", "Mix", "Flow", "Sample All Layers"];
+        for lang in Lang::all() {
+            for source in STRINGS {
+                let translated = tr(lang, source);
+                if lang == Lang::EN {
+                    assert_eq!(translated, *source, "English source string {source}");
+                } else {
+                    assert_ne!(translated, *source, "{} is missing {source:?}", lang.code());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pattern_stamp_ui_strings_have_translations_in_every_registered_language() {
+        const STRINGS: &[&str] = &["Pattern Stamp Tool", "Pattern Stamp", "Impressionist", "Aligned"];
         for lang in Lang::all() {
             for source in STRINGS {
                 let translated = tr(lang, source);

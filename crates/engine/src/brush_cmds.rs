@@ -48,7 +48,7 @@ fn always(_: &Session) -> std::result::Result<(), String> {
 }
 
 /// Largest stroke coordinate accepted (a few times the largest document side, 300 000 px).
-const MAX_COORD: f64 = 1_000_000.0;
+pub(crate) const MAX_COORD: f64 = 1_000_000.0;
 
 /// Parse `points`: arrays `[x, y, pressure?, tiltX?, tiltY?, rotation?, timeMs?, wheel?]` or
 /// objects `{"x":…, "y":…, "pressure":…, "tiltX":…, …, "time":…}`.

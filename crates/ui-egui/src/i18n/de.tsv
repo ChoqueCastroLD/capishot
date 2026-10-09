@@ -21,6 +21,10 @@
 	Layer	Ebene
 	Type	Text
 	Select	Auswahl
+	Top Left	Oben links
+	Top Right	Oben rechts
+	Bottom Left	Unten links
+	Bottom Right	Unten rechts
 	Filter	Filter
 	View	Ansicht
 	Window	Fenster
@@ -807,6 +811,7 @@
 	Cache Level:	Cache-Stufe:
 	Camera Raw isn't open	Camera Raw ist nicht geöffnet
 	Cancel	Abbrechen
+	Reset	Zurücksetzen
 	Cancel (Esc)	Abbrechen (Esc)
 	Cancel any current edits (Esc)	Aktuelle Bearbeitungen abbrechen (Esc)
 	Cancel current crop operation  (Esc)	Aktuelle Freistellung abbrechen  (Esc)
@@ -973,11 +978,14 @@
 	Draw with the Pen tool (P) or make a work path from a selection.	Zeichne mit dem Stift-Werkzeug (P) oder erzeuge einen Arbeitspfad aus einer Auswahl.
 	Drop an image or PSD anywhere to open it.	Ziehe ein Bild oder PSD an eine beliebige Stelle, um es zu öffnen.
 	Native file drag-and-drop is unavailable	Natives Ziehen und Ablegen von Dateien ist nicht verfügbar
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Natives Ziehen und Ablegen von Dateien wird unter Wayland noch nicht unterstützt. Nutze Datei › Öffnen oder starte PhotoCraft unter XWayland mit `WAYLAND_DISPLAY= photocraft`.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Natives Ziehen und Ablegen von Dateien wird unter Wayland noch nicht unterstützt. Nutze Datei › Öffnen oder kopiere das Bild im Dateimanager und füge es mit {paste} ein.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Um Dateien abzulegen, starte PhotoCraft unter XWayland: `{command}`
+	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	Oder stelle Voreinstellungen › Leistung › Linux-Anzeigeserver auf X11: PhotoCraft startet dann immer unter XWayland.
+	Edit › Paste	Bearbeiten › Einfügen
 	Duplicate Layers…	Ebenen duplizieren…
 	Duplicate style	Stil duplizieren
 	Edit Toolbar…	Werkzeugleiste bearbeiten…
-	Use File › Open to open an image.	Nutze Datei › Öffnen, um ein Bild zu öffnen.
+	Use File › Open, or paste a copied image with {paste}.	Nutze Datei › Öffnen oder füge ein kopiertes Bild mit {paste} ein.
 	Edit in Quick Mask Mode  (Q)	Im Schnellmaskenmodus bearbeiten  (Q)
 	Edit in Standard Mode  (Q)	Im Standardmodus bearbeiten  (Q)
 	Effects	Effekte
@@ -1461,6 +1469,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ Navigieren   {key} Ausführen   Esc Schließen
 	Version {version}	Version {version}
 	New Document	Neues Dokument
+	Save Preset…	Vorgabe speichern…
+	Preset Name	Name der Vorgabe
+	No saved presets yet.	Noch keine gespeicherten Vorgaben.
 	Error	Fehler
 	Command	Befehl
 	Adjustment layers have nothing to transform	Anpassungsebenen haben nichts zu transformieren
@@ -1794,6 +1805,7 @@
 	Maximize psd compatibility	PSD-Kompatibilität maximieren
 	Medium gray	Mittelgrau
 	Memory usage mb	Speichernutzung (MB)
+	Low resolution previews	Vorschau in niedriger Auflösung
 	Missing glyph protection	Schutz vor fehlenden Glyphen
 	Modern	Modern
 	Nearest neighbor	Nächster Nachbar
@@ -1947,6 +1959,8 @@
 	Brush Settings…  (F5): every option of this brush	Pinseleinstellungen…  (F5): jede Option dieses Pinsels
 	Rename Brush…	Pinsel umbenennen…
 	Delete Brush	Pinsel löschen
+	New Brush Preset…	Neue Pinselvorgabe…
+	Brush Preset Options	Pinselvorgaben-Optionen
 	Group name	Gruppenname
 	Brush name	Pinselname
 	Grid view	Rasteransicht
@@ -1988,6 +2002,8 @@
 	CPU (no GPU acceleration)	CPU (keine GPU-Beschleunigung)
 	DirectX 12	DirectX 12
 	GPU backend	GPU-Backend
+	Linux display server	Linux-Anzeigeserver
+	X11	X11
 	Metal	Metal
 	OpenGL	OpenGL
 	Use tablet pressure	Tablettdruck verwenden
@@ -2149,6 +2165,7 @@
 	Magnetic Lasso Tool	Magnetisches-Lasso-Werkzeug
 	Frequency	Frequenz
 	Use tablet pressure to change pen width	Tablettdruck zum Ändern der Stiftbreite verwenden
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	Über
 	Contributors	Mitwirkende
@@ -2180,4 +2197,93 @@
 	% of all commits	% aller Commits
 	Lines +/−	Zeilen +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PRs, {commits} Commits, +{added} / −{deleted} Zeilen (Δ {delta}), +{binAdded} / −{binDeleted} Binärdateien, {first} – {last}
+
+# Swatches panel
+	Create new swatch	Neues Farbfeld erstellen
+	New Swatch…	Neues Farbfeld…
+	New Swatch Group…	Neue Farbfeldgruppe…
+	Import Swatches…	Farbfelder importieren…
+	Replace Swatches…	Farbfelder ersetzen…
+	Export Swatches…	Farbfelder exportieren…
+	Export Swatches for Exchange…	Farbfelder für Austausch exportieren…
+	Reset Swatches	Farbfelder zurücksetzen
+	Add to Swatches	Zu Farbfeldern hinzufügen
+# Layer Style > Blending Options (Advanced Blending)
+	Blend If:	Farbbereich:
+	Channels:	Kanäle:
+	Knockout	Aussparung
 	Apply At Canvas Bounds	Effekt an Arbeitsflächenbegrenzungen anwenden
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Farbwähler (Textfarbe)
+	Pick screen color	Bildschirmfarbe auswählen
+	Sample a pixel anywhere on the screen	Ein Pixel an beliebiger Stelle auf dem Bildschirm auswählen
+	Click to pick · Esc to cancel	Klicken zum Auswählen · Esc zum Abbrechen
+	Pick a screen pixel or press Esc to cancel	Ein Bildschirmpixel auswählen oder mit Esc abbrechen
+	Scroll to zoom	Zum Zoomen scrollen
+	Show/Hide All Panels	Alle Bedienfelder ein-/ausblenden
+	Show/Hide Panels	Bedienfelder ein-/ausblenden
+	Could not open	Öffnen nicht möglich
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: Der Pfad ist kein gültiges Unicode; benennen Sie die Datei um und öffnen Sie sie erneut.
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Inhalt:
+	Custom Pattern:	Eigenes Muster:
+	Foreground Color	Vordergrundfarbe
+	Color…	Farbe…
+	50% Gray	50 % Grau
+	{size} (was {old})	{size} (vorher {old})
+	Cone	Kegel
+	Cone (Inverted)	Kegel (umgekehrt)
+	Domed	Gewölbt
+	Domed (Inverted)	Gewölbt (umgekehrt)
+	Diagonal (Descending)	Diagonal (absteigend)
+
+	Red Eye Tool	Rote-Augen-Werkzeug
+	Red Eye	Rote Augen
+	Pupil Size	Pupillengröße
+	Darken Amount	Abdunklungsgrad
+	Click a red pupil to neutralize it	Klicken Sie auf eine rote Pupille
+	open source	Open Source
+	…and {n} more	…und {n} weitere
+
+	Eyedroppers:	Pipetten:
+	Set Black Point	Schwarzpunkt festlegen
+	Set Neutral Gray Point	Neutralen Graupunkt festlegen
+	Set White Point	Weißpunkt festlegen
+	Unavailable in this color mode	In diesem Farbmodus nicht verfügbar
+	Selection Preview:	Auswahlvorschau:
+	Black Matte	Schwarzer Hintergrund
+	White Matte	Weißer Hintergrund
+
+# Layer colour labels.
+layerLabel	No Color	Keine Farbe
+	Seafoam	Meeresschaum
+	Indigo	Indigo
+	Fuchsia	Fuchsia
+	Violet	Violett
+	Large document: redrawing on the CPU	Großes Dokument: Neuzeichnen auf der CPU
+	This redraw took {seconds} s on the CPU.	Dieses Neuzeichnen auf der CPU dauerte {seconds} s.
+	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Änderungen, die das ganze Dokument betreffen, etwa Füllmethode, Deckkraft oder Sichtbarkeit einer Ebene, zeichnen es vollständig neu.
+	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Die Ebenen passen nicht in das GPU-Speicherbudget. Eine höhere Speichernutzung unter Voreinstellungen › Leistung erhöht das Budget, bis zu einem Viertel des Arbeitsspeichers dieses Computers.
+	The GPU compositor wasn't used: {reason}	Der GPU-Compositor wurde nicht verwendet: {reason}
+cameraRaw	Light	Licht
+fontWeight	Thin	Haarfein
+fontWeight	ExtraLight	Extraleicht
+fontWeight	Light	Leicht
+fontWeight	Regular	Normal
+fontWeight	Medium	Medium
+fontWeight	SemiBold	Halbfett
+fontWeight	Bold	Fett
+fontWeight	ExtraBold	Extrafett
+fontWeight	Black	Schwarz
+fontWeight	Italic	Kursiv
+
+# Pattern Stamp tool
+	Pattern Stamp Tool	Musterstempel-Werkzeug
+	Pattern Stamp	Musterstempel
+	Impressionist	Impressionistisch
+	Rotate View	Ansicht drehen
+	Rotate View Tool	Ansicht drehen-Werkzeug
+	Reset View	Ansicht zurücksetzen
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Ziehen Sie um die Mitte, um die Ansicht zu drehen  ·  Umschalt rastet auf 15° ein

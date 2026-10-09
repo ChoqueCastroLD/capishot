@@ -255,6 +255,12 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) -> Option<bool> {
                 f.insert("__webOnly".into(), json!(web));
                 set_rgb(f, current(f).rgb, Keep::Nothing);
             }
+            // Under the colour field, not in the action column: the dialog must still fit a
+            // 760 x 480 window.
+            ui.add_space(6.0);
+            if let Some(rgb) = crate::screen_picker::button(ui, ui.id().with("screen-color")) {
+                set_rgb(f, rgb, Keep::Nothing);
+            }
         });
         ui.vertical(|ui| {
             ui.horizontal_top(|ui| {
@@ -267,6 +273,11 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) -> Option<bool> {
                     ui.add_space(6.0);
                     if widgets::secondary_button(ui, tl!("Cancel"), button_width).clicked() {
                         outcome = Some(false);
+                    }
+                    ui.add_space(6.0);
+                    // Handled by the dialog host, which has the app (`take_add_swatch`).
+                    if widgets::secondary_button(ui, tl!("Add to Swatches"), button_width).clicked() {
+                        f.insert("__addSwatch".into(), json!(true));
                     }
                 });
             });
@@ -444,6 +455,13 @@ fn fields(ui: &mut egui::Ui, f: &mut Map<String, Value>, mode: &str, now: &Compo
     }
     if let Some((c, keep)) = edit {
         set_rgb(f, c, keep);
+    }
+}
+
+/// Add to Swatches was clicked: add the picked colour to the Swatches panel.
+pub fn take_add_swatch(app: &mut PhotocraftApp, f: &mut Map<String, Value>) {
+    if f.remove("__addSwatch").and_then(|v| v.as_bool()) == Some(true) {
+        crate::swatches_ui::add_from_picker(app, f);
     }
 }
 
@@ -704,5 +722,50 @@ mod tests {
         app.ui.close_dialog(about);
         sample_at(&mut app, 25.0, 5.0);
         assert_eq!(dialog_color(&app, id), "#00ff00");
+    }
+}
+
+#[cfg(test)]
+mod screen_integration_tests {
+    use super::*;
+    use crate::screen_picker::{Capture, Pending};
+    use egui_kittest::{Harness, kittest::Queryable};
+    #[test]
+    fn text_swatch_opens_full_dialog_and_screen_pick_waits_for_ok() {
+        let mut session = photocraft_engine::Session::new();
+        session.execute("file.new", json!({"width":160,"height":120})).unwrap();
+        let id = session.execute("type.create", json!({"text":"Hello world","color":"#000000","size":24,"x":10,"y":60})).unwrap()["layer"].as_u64().unwrap();
+        let services = crate::Services {
+            screen_pick: Some(Box::new(|_| {
+                let (tx, receiver) = std::sync::mpsc::channel();
+                tx.send(Ok(Capture::Color(Some([1.0, 136.0 / 255.0, 0.0])))).unwrap();
+                Pending { receiver, cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)) }
+            })),
+            ..Default::default()
+        };
+        let mut h = Harness::builder().with_size(vec2(1440.0, 900.0)).with_max_steps(64).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            let mut app = PhotocraftApp::new(session, services);
+            app.ui.tool = crate::state::Tool::Type;
+            app
+        });
+        h.run_steps(8);
+        let before = h.state().session.active().unwrap().history.entries().len();
+        let fg = h.state().session.tools.foreground;
+        h.get_by_label("Set the text color").click();
+        h.run_steps(6);
+        assert_eq!(h.state().ui.dialogs.last().unwrap().fields["__label"], "Color Picker (Text Color)");
+        h.get_by_label("Pick screen color").click();
+        h.run_steps(6);
+        assert_eq!(h.state().ui.dialogs.last().unwrap().fields["color"], "#ff8800");
+        assert_eq!(h.state().session.active().unwrap().history.entries().len(), before, "sampling is only a dialog field change");
+        assert_eq!(h.state().session.tools.foreground, fg);
+        h.get_by_label("OK").click();
+        h.run_steps(4);
+        let doc = &h.state().session.active().unwrap().doc;
+        let layer = doc.layer(photocraft_doc::LayerId(id)).unwrap();
+        let photocraft_doc::LayerContent::Text(text) = &layer.content else { panic!("not text") };
+        assert_eq!(text.color.to_rgba8(), [255, 136, 0, 255]);
+        assert_eq!(h.state().session.active().unwrap().history.entries().len(), before + 1);
     }
 }

@@ -258,6 +258,10 @@ pub fn translate(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let moves: Vec<_> = ids.iter().map(|&id| (id, dx, dy)).collect();
         move_layers(doc, &moves)?;
+        // A board moved past the right or bottom edge grows the canvas, as a new one does (#1531).
+        if ids.iter().any(|id| doc.layer(*id).is_some_and(|l| l.artboard().is_some())) {
+            crate::artboard_cmds::fit_canvas(doc);
+        }
         Ok(ids)
     })?;
     note_damage(s, &before, &ids);
@@ -363,6 +367,254 @@ pub(crate) fn note_damage(s: &mut Session, before: &Document, ids: &[LayerId]) {
         return;
     }
     st.last_damage = layers_damage(before, &st.doc, ids);
+}
+
+/// Whether two surfaces hold identical pixels: same format and default pixel, and the same
+/// copy-on-write tile pointers at the same coordinates. Both documents stay alive during the
+/// comparison, so tile addresses cannot be reused under it.
+fn surfaces_equal(a: &photocraft_raster::Surface, b: &photocraft_raster::Surface) -> bool {
+    a.format() == b.format()
+        && a.default_pixel() == b.default_pixel()
+        && a.tile_count() == b.tile_count()
+        && a.tiles().zip(b.tiles()).all(|((ca, ta), (cb, tb))| ca == cb && std::sync::Arc::ptr_eq(ta, tb))
+}
+
+/// Byte blobs kept in `Arc`s (PSD raw blocks, embedded smart-object sources): pointer-identical
+/// or content-equal (they are small compared to pixels, and undo steps rarely re-parse them).
+fn blob_equal(x: &std::sync::Arc<Vec<u8>>, y: &std::sync::Arc<Vec<u8>>) -> bool {
+    std::sync::Arc::ptr_eq(x, y) || (x.len() == y.len() && x.as_slice() == y.as_slice())
+}
+
+fn blobs_equal(a: &Option<std::sync::Arc<Vec<u8>>>, b: &Option<std::sync::Arc<Vec<u8>>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => blob_equal(x, y),
+        _ => false,
+    }
+}
+
+/// Layer masks (also the smart-filter mask): scalars plus tile-pointer surface identity.
+fn masks_equal(a: &Option<photocraft_doc::LayerMask>, b: &Option<photocraft_doc::LayerMask>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => {
+            x.enabled == y.enabled && x.linked == y.linked && x.density == y.density && x.feather == y.feather && surfaces_equal(&x.surface, &y.surface)
+        }
+        _ => false,
+    }
+}
+
+fn texts_equal(a: &photocraft_doc::TextLayer, b: &photocraft_doc::TextLayer) -> bool {
+    a.text == b.text
+        && a.font_family == b.font_family
+        && a.size_pt == b.size_pt
+        && a.color == b.color
+        && a.transform == b.transform
+        && a.runs == b.runs
+        && a.paragraphs == b.paragraphs
+        && a.shape == b.shape
+        && a.orientation == b.orientation
+        && a.antialias == b.antialias
+        && a.warp == b.warp
+        && match (&a.cache, &b.cache) {
+            (None, None) => true,
+            (Some(x), Some(y)) => surfaces_equal(x, y),
+            _ => false,
+        }
+        && blobs_equal(&a.psd_raw, &b.psd_raw)
+}
+
+fn smarts_equal(a: &photocraft_doc::SmartObject, b: &photocraft_doc::SmartObject) -> bool {
+    a.filters_enabled == b.filters_enabled
+        && a.transform == b.transform
+        && a.smart_filters == b.smart_filters
+        && a.stack_mode == b.stack_mode
+        && a.perspective == b.perspective
+        && a.warp == b.warp
+        && match (&a.source, &b.source) {
+            (photocraft_doc::SmartSource::Embedded { file_name: x, bytes: xb }, photocraft_doc::SmartSource::Embedded { file_name: y, bytes: yb }) => {
+                x == y && blob_equal(xb, yb)
+            }
+            (photocraft_doc::SmartSource::Linked { path: x }, photocraft_doc::SmartSource::Linked { path: y }) => x == y,
+            _ => false,
+        }
+        && match (&a.cache, &b.cache) {
+            (None, None) => true,
+            (Some(x), Some(y)) => surfaces_equal(x, y),
+            _ => false,
+        }
+        && blobs_equal(&a.psd_raw, &b.psd_raw)
+        && masks_equal(&a.filter_mask, &b.filter_mask)
+}
+
+/// Extra alpha/spot channels (the image itself in Multichannel mode).
+fn alpha_channels_equal(a: &photocraft_doc::AlphaChannel, b: &photocraft_doc::AlphaChannel) -> bool {
+    a.name == b.name && a.spot == b.spot && a.color == b.color && a.opacity == b.opacity && a.indicates == b.indicates && surfaces_equal(&a.surface, &b.surface)
+}
+
+/// Whether two layers render to identical pixels in place. Everything the compositor reads is
+/// compared structurally — no hashing, a hash collision would under-report damage; pixels are
+/// identified by their copy-on-write tile pointers. Group children are deliberately *not*
+/// compared here: the caller walks into them, so an edit inside a group damages only the
+/// edited child's extent, not the whole group's. The destructure is exhaustive, so a new
+/// `Layer` field fails to compile until it is classified: compared, or explicitly ignored
+/// (name, locks, label, `psd_blocks`, `psd_id`, link group — none of them composite; video
+/// bails out earlier in the walk).
+fn layer_pixels_equal(a: &Layer, b: &Layer) -> bool {
+    let Layer {
+        id,
+        name: _,
+        visible,
+        locks: _,
+        blend,
+        opacity,
+        fill_opacity,
+        clipped,
+        mask,
+        vector_mask,
+        effects,
+        label: _,
+        content,
+        psd_blocks: _,
+        psd_id: _,
+        fill_cache,
+        link_group: _,
+        excluded_channels,
+        blend_if,
+        advanced,
+        video: _,
+    } = a;
+    *id == b.id
+        && *visible == b.visible
+        && *blend == b.blend
+        && *opacity == b.opacity
+        && *fill_opacity == b.fill_opacity
+        && *clipped == b.clipped
+        && masks_equal(mask, &b.mask)
+        && *vector_mask == b.vector_mask
+        && *effects == b.effects
+        && *excluded_channels == b.excluded_channels
+        && *blend_if == b.blend_if
+        && *advanced == b.advanced
+        && match (content, &b.content) {
+            (LayerContent::Raster(x), LayerContent::Raster(y)) => surfaces_equal(x, y),
+            // Children are walked separately; only the group's own clipping frame counts.
+            (LayerContent::Group(x), LayerContent::Group(y)) => x.artboard == y.artboard,
+            (LayerContent::Fill(x), LayerContent::Fill(y)) => x == y,
+            (LayerContent::Adjustment(x), LayerContent::Adjustment(y)) => x == y,
+            (LayerContent::Text(x), LayerContent::Text(y)) => texts_equal(x, y),
+            (LayerContent::Shape(x), LayerContent::Shape(y)) => x == y,
+            (LayerContent::Smart(x), LayerContent::Smart(y)) => smarts_equal(x, y),
+            _ => false,
+        }
+        && match (fill_cache, &b.fill_cache) {
+            (None, None) => true,
+            (Some(x), Some(y)) => x.fill == y.fill && surfaces_equal(&x.surface, &y.surface),
+            _ => false,
+        }
+}
+
+/// Document-level fields the compositor reads: all must match for a bounded damage claim. The
+/// destructure is exhaustive, so a new `Document` field fails to compile until it is classified
+/// here — compared when it composites, or explicitly ignored (the pixel-irrelevant allowlist:
+/// identity, name, selection, guides, paths, layer comps, annotations, automation state).
+fn doc_pixels_equal(a: &Document, b: &Document) -> bool {
+    let Document {
+        id: _,
+        name: _,
+        size,
+        resolution_dpi,
+        mode,
+        depth,
+        icc_profile,
+        layers: _,
+        channels,
+        guides: _,
+        selection: _,
+        metadata: _,
+        global_light,
+        paths: _,
+        work_path: _,
+        clipping_path: _,
+        quick_mask,
+        patterns,
+        color_table,
+        duotone,
+        layer_comps: _,
+        last_applied_comp: _,
+        last_document_state: _,
+        measurement: _,
+        notes: _,
+        text_styles: _,
+        slices: _,
+        variables: _,
+        timeline: _,
+    } = a;
+    *size == b.size
+        && resolution_dpi.to_bits() == b.resolution_dpi.to_bits()
+        && *mode == b.mode
+        && *depth == b.depth
+        && icc_profile.as_deref() == b.icc_profile.as_deref()
+        && channels.len() == b.channels.len()
+        && channels.iter().zip(&b.channels).all(|(x, y)| alpha_channels_equal(x, y))
+        && *global_light == b.global_light
+        && match (quick_mask, &b.quick_mask) {
+            (None, None) => true,
+            (Some(x), Some(y)) => alpha_channels_equal(x, y),
+            _ => false,
+        }
+        && *patterns == b.patterns
+        && *color_table == b.color_table
+        && *duotone == b.duotone
+}
+
+/// Pixels a single history step can have changed between `a` and `b` (the documents on either
+/// side of an undo or redo): the union of the change bounds of every layer whose pixels
+/// differ, so undoing a local edit recomposites only that area instead of the whole canvas.
+/// `None` (composite everything, as before) when the step touched anything the layer walk
+/// cannot bound: document-level fields the compositor reads (canvas size, mode, depth,
+/// profile, global light, patterns, channels, palettes), the layer structure (order,
+/// additions, removals, kind changes), layer properties that reach outside their own bounds
+/// (clipping, excluded channels — what `layer.setProps` already reports as unbounded), and
+/// video layers.
+pub fn step_damage(a: &Document, b: &Document) -> Option<Rect> {
+    if !doc_pixels_equal(a, b) {
+        return None;
+    }
+    fn walk(xs: &[Layer], ys: &[Layer], a: &Document, b: &Document, out: &mut Rect) -> bool {
+        if xs.len() != ys.len() {
+            return false;
+        }
+        for (x, y) in xs.iter().zip(ys) {
+            if x.id != y.id || x.video.is_some() || y.video.is_some() {
+                return false;
+            }
+            // Clipping and channel exclusion change how *other* layers render, outside this
+            // layer's own bounds; they have no bounded damage.
+            if x.clipped != y.clipped || x.excluded_channels != y.excluded_channels {
+                return false;
+            }
+            if !layer_pixels_equal(x, y) {
+                // Both sides' extents: a move changes pixels where it left and where it landed.
+                let (Some(bx), Some(by)) = (photocraft_compose::change_bounds(x, a.bounds()), photocraft_compose::change_bounds(y, b.bounds())) else {
+                    return false;
+                };
+                *out = if out.is_empty() { bx.union(&by) } else { out.union(&bx).union(&by) };
+            }
+            match (x.children(), y.children()) {
+                (Some(xc), Some(yc)) => {
+                    if !walk(xc, yc, a, b, out) {
+                        return false;
+                    }
+                }
+                (None, None) => {}
+                _ => return false,
+            }
+        }
+        true
+    }
+    let mut out = Rect::EMPTY;
+    if walk(&a.layers, &b.layers, a, b, &mut out) { Some(out) } else { None }
 }
 
 /// Content bounds used by Align/Distribute: the layer's pixels (type and shape layers use their
@@ -521,6 +773,115 @@ fn distribute(s: &mut Session, kind: &str) -> Result<Value> {
         Ok(moves.iter().filter(|m| m.1 != 0 || m.2 != 0).count())
     })?;
     Ok(json!({"moved": moved}))
+}
+
+/// Reorder one or multiple layers to a single destination in one undoable edit.
+///
+/// Explicit `layers` are ordered according to the source document, not caller ordering.
+/// Selected descendants of a moved group remain inside their parent; only top-level
+/// selected nodes are detached, and every reference is validated before editing.
+pub fn move_to(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "layer.moveTo";
+    let target = LayerId(p.get("target").and_then(Value::as_u64).ok_or_else(|| bad(CMD, "missing `target`"))?);
+    let pos = p.get("position").and_then(Value::as_str).unwrap_or("above");
+    if !matches!(pos, "above" | "below" | "into") {
+        return Err(bad(CMD, "position must be above, below, or into"));
+    }
+    // ⌥-drag in the Layers panel: duplicates land at the target and the layers stay put.
+    let copy = p.get("copy").and_then(Value::as_bool).unwrap_or(false);
+
+    let batch = p.get("layers");
+    if batch.is_some() && p.get("layer").is_some() {
+        return Err(bad(CMD, "give either `layer` or `layers`, not both"));
+    }
+    let requested = if let Some(raw) = batch {
+        let arr = raw.as_array().filter(|a| !a.is_empty()).ok_or_else(|| bad(CMD, "`layers` must be a nonempty array of ids"))?;
+        let mut ids = Vec::with_capacity(arr.len());
+        for item in arr {
+            let id = LayerId(item.as_u64().ok_or_else(|| bad(CMD, "every layer id must be an unsigned integer"))?);
+            if ids.contains(&id) {
+                return Err(bad(CMD, "duplicate layer id"));
+            }
+            ids.push(id);
+        }
+        ids
+    } else {
+        vec![crate::commands::layer_param(s, p)?]
+    };
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let doc = &st.doc;
+    let target_path = doc.path_of(target).ok_or(EngineError::NoLayer(target))?;
+    for &id in &requested {
+        if doc.layer(id).is_none() {
+            return Err(EngineError::NoLayer(id));
+        }
+    }
+    let moved_ids = top_level(doc, &requested);
+    if moved_ids.len() == 1 && moved_ids[0] == target && batch.is_none() && !copy {
+        // Preserve single-layer drag-to-self semantics.
+        return Ok(Value::Null);
+    }
+    // Also rejects dragging a selected group onto any of its descendants.
+    for id in &moved_ids {
+        let path = doc.path_of(*id).ok_or(EngineError::NoLayer(*id))?;
+        // A copy may land beside its own source (not inside it).
+        let beside_itself = copy && *id == target && pos != "into";
+        if target_path.starts_with(&path) && !beside_itself {
+            return Err(bad(CMD, "target cannot be one of the moved layers or its descendant"));
+        }
+    }
+    if pos == "into" && doc.layer(target).is_none_or(|l| !l.is_group()) {
+        return Err(bad(CMD, "target is not a group"));
+    }
+
+    let original_active = st.active_layer;
+    let (count, copies) = s.edit(if copy { "Duplicate Layer" } else { "Reorder Layers" }, |doc, active| {
+        let mut moved = Vec::with_capacity(moved_ids.len());
+        for &id in &moved_ids {
+            moved.push(if copy { crate::commands::layer_copy(doc, id)? } else { doc.remove(id).ok_or(EngineError::NoLayer(id))? });
+        }
+        let copies: Vec<LayerId> = if copy { moved.iter().map(|l| l.id).collect() } else { Vec::new() };
+        // Look up the destination AFTER removing every source: its indices may have shifted.
+        let path = doc.path_of(target).ok_or(EngineError::NoLayer(target))?;
+        if pos == "into" {
+            let children = doc.layer_at_mut(&path).and_then(Layer::children_mut).ok_or_else(|| bad(CMD, "target is not a group"))?;
+            children.extend(moved);
+        } else {
+            let (&idx, parent) = path.split_last().ok_or(EngineError::NoLayer(target))?;
+            let siblings = if parent.is_empty() {
+                &mut doc.layers
+            } else {
+                doc.layer_at_mut(parent).and_then(Layer::children_mut).ok_or_else(|| bad(CMD, "target's parent is not a group"))?
+            };
+            let at = if pos == "below" { idx } else { idx + 1 };
+            siblings.splice(at..at, moved);
+        }
+        check_group_depth(doc, "Reorder Layer")?;
+        *active = if copy {
+            copies.last().copied()
+        } else if batch.is_some() {
+            original_active.filter(|id| requested.contains(id)).or_else(|| requested.last().copied())
+        } else {
+            moved_ids.first().copied()
+        };
+        Ok((moved_ids.len(), copies))
+    })?;
+    if copy {
+        let ids: Vec<u64> = copies.iter().map(|id| id.0).collect();
+        if batch.is_some() {
+            let active = copies.last().copied();
+            reselect(s, copies, active);
+            return Ok(json!({"moved": count, "layers": ids}));
+        }
+        return Ok(json!({"layer": ids.first()}));
+    }
+    if batch.is_some() {
+        let active = original_active.filter(|id| requested.contains(id)).or_else(|| requested.last().copied());
+        reselect(s, requested, active);
+        Ok(json!({"moved": count}))
+    } else {
+        Ok(Value::Null)
+    }
 }
 
 // ---------- structural commands ----------
@@ -711,8 +1072,9 @@ pub fn delete_selected(s: &mut Session) -> Result<Value> {
 }
 
 /// Duplicate Layer with several layers selected: each copy goes above its original and the
-/// copies become the selection.
-pub fn duplicate_selected(s: &mut Session) -> Result<Value> {
+/// copies become the selection. Artboard copies go beside their boards unless `in_place`
+/// ([`crate::artboard_cmds::place_copy`]).
+pub fn duplicate_selected(s: &mut Session, in_place: bool) -> Result<Value> {
     let sel = selected(s);
     let old_active = s.active().and_then(|d| d.active_layer);
     let (copies, active) = s.edit("Duplicate Layers", |doc, active| {
@@ -722,6 +1084,9 @@ pub fn duplicate_selected(s: &mut Session) -> Result<Value> {
             let mut dup = doc.layer(id).ok_or(EngineError::NoLayer(id))?.duplicate();
             dup.name = doc.copy_name(&dup.name);
             let nid = doc.insert_above(Some(id), dup);
+            if !in_place {
+                crate::artboard_cmds::place_copy(doc, nid)?;
+            }
             if Some(id) == old_active {
                 new_active = Some(nid);
             }
@@ -1136,8 +1501,9 @@ mod tests {
             assert_eq!(sel(&s), vec![m]);
             s.undo();
             assert_eq!(doc(&s).layer_count(), before);
-            assert_eq!(sel(&s), vec![c], "undo leaves a valid selection");
+            assert_eq!(sel(&s), vec![a, c], "undo selects the layers that were merged");
             // One layer selected: Merge Down.
+            s.execute("layer.select", json!({"layer": c.0})).unwrap();
             s.execute("layer.mergeLayers", json!({})).unwrap();
             assert_eq!(doc(&s).layer_count(), before - 1);
         }
@@ -1332,6 +1698,75 @@ mod tests {
         for id in [c, d] {
             assert_eq!(doc(&s).layer(id).unwrap().link_group, Some(u64::MAX), "the existing group is untouched");
         }
+    }
+
+    #[test]
+    fn undo_and_redo_report_only_the_edited_area() {
+        let mut s = session(8);
+        let a = rect_layer(&mut s, Rect::new(10, 10, 20, 20));
+        select_all(&mut s, &[a]);
+        // A pixel edit on one layer is bounded by that layer's extent on both sides.
+        s.edit("paint", |doc, _| {
+            doc.layer_mut(a).unwrap().surface_mut().unwrap().fill_rect(Rect::new(12, 12, 14, 14), &[0.0, 0.0, 1.0, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.undo();
+        assert_eq!(damage(&s), Some(Rect::new(10, 10, 20, 20)));
+        s.redo();
+        assert_eq!(damage(&s), Some(Rect::new(10, 10, 20, 20)));
+        // A move reports where the layer was and where it landed.
+        s.execute("layer.translate", json!({"dx": 5, "dy": 0})).unwrap();
+        s.undo();
+        assert_eq!(damage(&s), Some(Rect::new(10, 10, 25, 20)), "union of where the layer was and is");
+        s.redo();
+        assert_eq!(damage(&s), Some(Rect::new(10, 10, 25, 20)));
+    }
+
+    #[test]
+    fn undo_of_document_wide_steps_still_composites_everything() {
+        let mut s = session(8);
+        let _ = rect_layer(&mut s, Rect::new(10, 10, 20, 20));
+        // A canvas change has no bounded damage.
+        s.execute("image.crop", json!({"x": 0, "y": 0, "width": 30, "height": 25})).unwrap();
+        assert_ne!(doc(&s).size, photocraft_doc::Size::new(100, 80));
+        s.undo();
+        assert_eq!(damage(&s), None, "a size change recomposites the whole canvas");
+        // A structural change (a layer removed and restored) neither.
+        let b = rect_layer(&mut s, Rect::new(0, 0, 5, 5));
+        select_all(&mut s, &[b]);
+        s.execute("layer.delete", json!({})).unwrap();
+        s.undo();
+        assert_eq!(damage(&s), None);
+    }
+
+    #[test]
+    fn undo_of_compositor_read_document_fields_composites_everything() {
+        let mut s = session(8);
+        let _ = rect_layer(&mut s, Rect::new(10, 10, 20, 20));
+        // Global Light changes every effect's angle across the document.
+        s.execute("layer.layerStyle.globalLight", json!({"angle": 90.0})).unwrap();
+        s.undo();
+        assert_eq!(damage(&s), None, "a global-light change recomposites everything");
+        // A mode change that keeps the pixel format (RGB → Indexed maps to RGB) neither.
+        s.execute("image.mode.indexedColor", json!({})).unwrap();
+        s.undo();
+        assert_eq!(damage(&s), None, "a mode change recomposites everything");
+    }
+
+    #[test]
+    fn undo_of_clipping_or_channel_exclusion_composites_everything() {
+        let mut s = session(8);
+        let _ = rect_layer(&mut s, Rect::new(10, 10, 20, 20));
+        let b = rect_layer(&mut s, Rect::new(12, 12, 30, 30));
+        select_all(&mut s, &[b]);
+        // Clipping reaches the layers clipped above, outside this layer's bounds.
+        s.execute("layer.setProps", json!({"clipped": true})).unwrap();
+        s.undo();
+        assert_eq!(damage(&s), None, "a clipping change recomposites everything");
+        s.execute("layer.setProps", json!({"channels": [true, false, true]})).unwrap();
+        s.undo();
+        assert_eq!(damage(&s), None, "an excluded-channel change recomposites everything");
     }
 
     #[test]

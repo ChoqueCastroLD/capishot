@@ -30,7 +30,10 @@ pub struct Runtime {
     save_retry: SaveRetry,
     theme_pref: Option<Theme>,
     next_autosave_ms: f64,
+    /// Last revision whose recovery file was actually written successfully.
     autosaved: HashMap<DocId, u64>,
+    /// Queued writes must not masquerade as durable snapshots.
+    autosave_pending: HashMap<DocId, u64>,
     log_len: usize,
     /// Snapping state of the drag in progress (see `snap_ui`).
     pub(crate) snap: Option<crate::snap_ui::ActiveSnap>,
@@ -368,12 +371,34 @@ fn autosave(app: &mut PhotocraftApp) {
     if app.services.autosave.is_none() {
         return;
     }
+    // A successful queue operation is not a successful disk write. Poll each frame,
+    // including frames before the next autosave interval, so failures are visible.
+    if let Some(results) = app.services.autosave_results.as_mut() {
+        for (raw_id, revision, result) in results() {
+            let id = DocId(raw_id);
+            if app.prefs_rt.autosave_pending.get(&id) != Some(&revision) {
+                continue;
+            }
+            app.prefs_rt.autosave_pending.remove(&id);
+            match result {
+                Ok(()) => {
+                    app.prefs_rt.autosaved.insert(id, revision);
+                }
+                Err(e) => {
+                    app.ui.status = format!("Autosave failed: {e}");
+                    app.ui.status_error = true;
+                }
+            }
+        }
+    }
     let now = crate::gpu_canvas::now_ms();
     // Saved or closed documents drop their recovery data.
     let live: HashMap<DocId, bool> = app.session.documents().iter().map(|d| (d.doc.id, d.is_dirty())).collect();
-    let stale: Vec<DocId> = app.prefs_rt.autosaved.keys().filter(|id| live.get(id) != Some(&true)).copied().collect();
+    let mut stale: Vec<DocId> = app.prefs_rt.autosaved.keys().filter(|id| live.get(id) != Some(&true)).copied().collect();
+    stale.extend(app.prefs_rt.autosave_pending.keys().filter(|id| live.get(*id) != Some(&true) && !app.prefs_rt.autosaved.contains_key(*id)).copied());
     for id in stale {
         app.prefs_rt.autosaved.remove(&id);
+        app.prefs_rt.autosave_pending.remove(&id);
         if let Some(d) = app.services.discard_autosave.as_mut() {
             d(id.0);
         }
@@ -394,16 +419,24 @@ fn autosave(app: &mut PhotocraftApp) {
         .session
         .documents()
         .iter()
-        .filter(|d| d.is_dirty() && app.prefs_rt.autosaved.get(&d.doc.id) != Some(&d.revision))
+        .filter(|d| d.is_dirty() && app.prefs_rt.autosaved.get(&d.doc.id) != Some(&d.revision) && !app.prefs_rt.autosave_pending.contains_key(&d.doc.id))
         .map(|d| (d.doc.clone(), d.revision, d.path.clone()))
         .collect();
     for (doc, rev, path) in jobs {
         if let Some(save) = app.services.autosave.as_mut() {
             match save(&doc, rev, path.as_deref()) {
                 Ok(()) => {
-                    app.prefs_rt.autosaved.insert(doc.id, rev);
+                    if app.services.autosave_results.is_some() {
+                        app.prefs_rt.autosave_pending.insert(doc.id, rev);
+                    } else {
+                        // Synchronous or mocked services report completion on return.
+                        app.prefs_rt.autosaved.insert(doc.id, rev);
+                    }
                 }
-                Err(e) => app.ui.status = format!("Autosave failed: {e}"),
+                Err(e) => {
+                    app.ui.status = format!("Autosave failed: {e}");
+                    app.ui.status_error = true;
+                }
             }
         }
     }
@@ -1014,7 +1047,7 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
                     let c = prefs::parse_hex(s).unwrap_or([128, 128, 128]);
                     let mut rgb = c;
                     ui.horizontal(|ui| {
-                        ui.color_edit_button_srgb(&mut rgb);
+                        crate::widgets::color_edit_button_srgb(ui, &mut rgb);
                         hex_field(ui, &path, &mut rgb);
                     });
                     obj.insert(k, json!(format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])));
@@ -1313,7 +1346,7 @@ fn presets_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, 
         }
         // Load Photoshop brushes (.abr) into the library.
         if kind == "brushes" && ui.button(tl!("Load…")).on_hover_text(tl!("Import Photoshop brushes (.abr)")).clicked() {
-            app.open_dialog_file();
+            let _ = app.open_dialog_file();
         }
     });
     f.insert("kind".into(), json!(kind));
@@ -1410,17 +1443,19 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
         "presetsIO" => {
             let kinds: Vec<&str> = ["brushes", "customShapes"].into_iter().filter(|k| f.get(*k).and_then(Value::as_bool).unwrap_or(true)).collect();
             if f.get("action").and_then(Value::as_str) == Some("import") {
-                let (name, bytes) = app.pick_file_bytes().ok_or_else(|| "cancelled".to_string())??;
-                let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not a preset file"))?;
-                app.run("edit.presets.exportImportPresets", json!({"action": "import", "kinds": kinds, "data": text}))
+                app.pick_file_bytes(move |app, name, bytes| {
+                    let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not a preset file"))?;
+                    app.run("edit.presets.exportImportPresets", json!({"action": "import", "kinds": kinds, "data": text}))
+                })
             } else {
                 let out = app.run("edit.presets.exportImportPresets", json!({"action": "export", "kinds": kinds}))?;
                 let text = serde_json::to_string_pretty(&out["data"]).map_err(|e| e.to_string())?;
-                let path = app.services.pick_save.as_mut().and_then(|p| p("Presets.pcpresets")).ok_or("cancelled")?;
-                let write = app.services.write.as_mut().ok_or("no writer configured")?;
-                write(&path, text.as_bytes())?;
-                app.ui.status = format!("Exported presets to {path}");
-                Ok(json!({"path": path}))
+                app.pick_save("Presets.pcpresets", move |app, path| {
+                    let write = app.services.write.as_mut().ok_or("no writer configured")?;
+                    write(&path, text.as_bytes())?;
+                    app.ui.status = format!("Exported presets to {path}");
+                    Ok(json!({"path": path}))
+                })
             }
         }
         "mismatch" => {
@@ -1798,9 +1833,13 @@ mod tests {
         assert!(has_visible_fields(&values, "general"));
         assert!(has_visible_fields(&values, "fileHandling"));
         // Every setting of these sections is still unimplemented.
-        for section in ["type", "enhancedControls", "integrations", "scratchDisks"] {
+        for section in ["type", "integrations", "scratchDisks"] {
             assert!(!has_visible_fields(&values, section), "{section}");
         }
+        // Rotate View with Trackpad is live; the other Enhanced Controls rows stay hidden.
+        assert!(has_visible_fields(&values, "enhancedControls"));
+        assert!(!prefs::is_hidden("enhancedControls.rotateViewWithTrackpad"));
+        assert!(prefs::is_hidden("enhancedControls.zoomWithTrackpadPinch"));
         // Camera Raw Defaults shows only "Open in Camera Raw" so far.
         assert!(has_visible_fields(&values, "rawDefaults"));
         assert!(!prefs::is_hidden("rawDefaults.openInCameraRaw"));

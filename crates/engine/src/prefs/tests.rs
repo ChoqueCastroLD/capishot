@@ -188,6 +188,19 @@ fn json_round_trip_tolerates_unknown_and_missing_keys() {
 }
 
 #[test]
+fn low_resolution_previews_default_on_and_switch_off() {
+    // A preferences file from before the setting keeps the fast previews.
+    let mut s = Session::new();
+    s.load_prefs_json(r#"{"performance": {"historyStates": 20}}"#).unwrap();
+    assert!(s.prefs().performance.low_resolution_previews);
+    s.execute("prefs.set", json!({"path": "performance.lowResolutionPreviews", "value": false})).unwrap();
+    assert!(!s.prefs().performance.low_resolution_previews);
+    let mut t = Session::new();
+    t.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert!(!t.prefs().performance.low_resolution_previews);
+}
+
+#[test]
 fn units_convert_both_ways() {
     for u in [Unit::Pixels, Unit::Inches, Unit::Centimeters, Unit::Millimeters, Unit::Points, Unit::Picas, Unit::Percent] {
         let v = u.from_px(450.0, 300.0, 900.0, 72.0);
@@ -349,4 +362,11 @@ fn gpu_backend_round_trips_and_validates() {
     for n in GpuBackend::NAMES {
         assert_eq!(GpuBackend::parse(n).map(GpuBackend::name), Some(*n));
     }
+}
+
+#[test]
+fn linux_only_preferences_show_only_on_linux() {
+    assert_eq!(is_hidden("performance.linuxDisplayServer"), !cfg!(target_os = "linux"));
+    assert!(!is_hidden("performance.gpuBackend"));
+    assert!(LINUX_ONLY.iter().all(|p| choices(p).is_some()), "every Linux-only preference is a real one");
 }

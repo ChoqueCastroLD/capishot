@@ -131,6 +131,21 @@ fn color_range_eyedropper_picks_on_the_canvas() {
     // ⇧-click adds another sample; the dialog never closes.
     click(&mut h, screen([60.5, 40.5]), Modifiers::SHIFT);
     assert_eq!(points(&h).0, 2);
+    click(&mut h, screen([60.5, 40.5]), Modifiers::ALT);
+    assert_eq!(h.state().ui.dialogs.last().unwrap().fields["subtractPoints"].as_array().unwrap().len(), 1);
+    // A stationary held button must not subtract again on every redraw.
+    let p = screen([60.5, 40.5]);
+    h.event_modifiers(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::ALT }, Modifiers::ALT);
+    h.run_steps(4);
+    assert_eq!(h.state().ui.dialogs.last().unwrap().fields["subtractPoints"].as_array().unwrap().len(), 2);
+    h.event_modifiers(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::ALT }, Modifiers::ALT);
+    h.run_steps(2);
+    // The modal eyedropper overrides a previously selected Hand tool.
+    h.state_mut().ui.tool = crate::state::Tool::Hand;
+    let center = h.state().ui.views[0].center;
+    click(&mut h, screen([30.5, 40.5]), Modifiers::NONE);
+    assert_eq!(points(&h).0, 1);
+    assert_eq!(h.state().ui.views[0].center, center);
     assert_eq!(h.state().ui.dialogs.len(), 1);
     // The document is untouched until OK.
     assert!(h.state().session.active().unwrap().doc.selection.is_none());
@@ -257,6 +272,49 @@ fn color_picker_samples_the_image_under_its_pipette() {
     h.run_steps(2);
     assert!(h.state().ui.dialogs.is_empty());
     assert_eq!(h.state().session.tools.foreground, [1.0, 0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn curves_picker_samples_document_coordinates_through_the_view_transform() {
+    let mut h = harness();
+    h.state_mut().run("select.rect", json!({"x": 0, "y": 0, "width": 200, "height": 300})).unwrap();
+    h.state_mut().run("edit.fill", json!({"color": "#804020"})).unwrap();
+    h.state_mut().run("select.rect", json!({"x": 200, "y": 0, "width": 200, "height": 300})).unwrap();
+    h.state_mut().run("edit.fill", json!({"color": "#20a0e0"})).unwrap();
+    h.state_mut().run("select.deselect", json!({})).unwrap();
+    let committed = h.state().session.active().unwrap().doc.clone();
+    let history = h.state().session.active().unwrap().history.past_len();
+    let view = &mut h.state_mut().ui.views[0];
+    (view.zoom, view.center, view.fit_pending) = (4.0, [200.0, 150.0], false);
+    h.state_mut().ui.view.flip_horizontal = true;
+    let dialog = crate::adjust_dialog::open(h.state_mut(), "image.adjustments.curves").unwrap();
+    h.state_mut().ui.dialog_mut(dialog).unwrap().fields.insert("__curvePicker".into(), json!("black"));
+    h.run_steps(3);
+    let canvas = h.state().last_canvas_rect;
+    let left = pos2(canvas.left() + 60.0, canvas.center().y);
+    h.hover_at(left);
+    h.run_steps(1);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::None);
+    press(&mut h, left, true);
+    press(&mut h, left, false);
+    h.run_steps(3);
+    assert!(std::sync::Arc::ptr_eq(&h.state().session.active().unwrap().doc, &committed));
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), history);
+    assert!(crate::adjust_preview::display_doc(h.state_mut(), 0).is_some(), "the new curve is visible only through the preview");
+    let red = h
+        .state()
+        .ui
+        .dialogs
+        .iter()
+        .find(|candidate| candidate.id == dialog)
+        .and_then(|candidate| candidate.fields.get("red"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|points| points.first())
+        .and_then(serde_json::Value::as_array)
+        .and_then(|point| point.first())
+        .and_then(serde_json::Value::as_f64)
+        .unwrap();
+    assert!((red - 32.0).abs() < 0.6, "sampled document-right blue patch through the flipped 400% view: {red}");
 }
 
 /// Type tool (#206): Alt+←/→ at a collapsed caret kerns the pair before it by 20/1000 em (100
@@ -430,8 +488,15 @@ fn eyedropper_and_alt_sampling_show_a_pipette() {
     h.event(egui::Event::ModifiersChanged(Modifiers::ALT));
     assert_eq!(cursor(&mut h), egui::CursorIcon::None, "⌥ samples with a pipette");
     h.state_mut().run("prefs.set", json!({"values": {"cursors.other": "precise"}})).unwrap();
-    assert_eq!(cursor(&mut h), egui::CursorIcon::Crosshair, "Precise keeps the crosshair");
+    // Every platform reports the crosshair. Windows also hands the OS a black-and-white bitmap
+    // for it (`tool_cursor`, #1160), with `Crosshair` underneath as the fallback.
+    let precise = |h: &mut Harness<'static, PhotocraftApp>| {
+        let icon = cursor(h);
+        (icon, h.output().platform_output.cursor_image.is_some())
+    };
+    let windows = cfg!(target_os = "windows");
+    assert_eq!(precise(&mut h), (egui::CursorIcon::Crosshair, windows), "Precise keeps the crosshair");
     h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
     h.state_mut().ui.tool = crate::state::Tool::Eyedropper;
-    assert_eq!(cursor(&mut h), egui::CursorIcon::Crosshair);
+    assert_eq!(precise(&mut h), (egui::CursorIcon::Crosshair, windows));
 }

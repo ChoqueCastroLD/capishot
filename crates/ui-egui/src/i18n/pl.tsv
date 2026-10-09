@@ -1469,6 +1469,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ nawigacja   {key} uruchom   esc zamknij
 	Version {version}	Wersja {version}
 	New Document	Nowy dokument
+	Preset Name	Nazwa ustawienia wstępnego
+	No saved presets yet.	Nie ma jeszcze zapisanych ustawień wstępnych.
 	Error	Błąd
 	Command	Polecenie
 
@@ -1695,7 +1697,6 @@
 	Revert “{name}” to the last saved version? Your changes will be lost.	Przywrócić „{name}” do ostatnio zapisanej wersji? Zmiany zostaną utracone.
 	Do you want to save the changes you made to “{name}” before quitting?	Czy zapisać zmiany wprowadzone w „{name}” przed zakończeniem?
 	Do you want to save the changes you made to “{name}” before closing?	Czy zapisać zmiany wprowadzone w „{name}” przed zamknięciem?
-	Do you want to save you made to “{name}” before quitting?	Czy zapisać zmiany wprowadzone w „{name}” przed zakończeniem?
 	Doc: {flat}/{layered}	Dok.: {flat}/{layered}
 	Scratch: {size}	Dysk rob.: {size}
 	Untagged {mode}	{mode} bez profilu
@@ -1802,6 +1803,7 @@
 	Language	Język
 	Large tabs	Duże karty
 	Legacy compositing	Starszy sposób komponowania
+	Low resolution previews	Podglądy w niskiej rozdzielczości
 	Light gray	Jasnoszary
 	Line	Linia
 	Lines	Linie
@@ -2005,6 +2007,8 @@
 	CPU (no GPU acceleration)	CPU (bez akceleracji GPU)
 	DirectX 12	DirectX 12
 	GPU backend	Backend GPU
+	Linux display server	Serwer wyświetlania Linuksa
+	X11	X11
 	Metal	Metal
 	OpenGL	OpenGL
 	Use tablet pressure	Użyj nacisku tabletu
@@ -2509,6 +2513,16 @@
 	Tone Histogram	Histogram tonalny
 	Show Selected Region	Pokaż zaznaczony region
 cameraRaw	Light	Światło
+fontWeight	Thin	Cienki
+fontWeight	ExtraLight	Ekstra cienki
+fontWeight	Light	Lekki
+fontWeight	Regular	Zwykły
+fontWeight	Medium	Średni
+fontWeight	SemiBold	Półgruby
+fontWeight	Bold	Pogrubiony
+fontWeight	ExtraBold	Ekstra gruby
+fontWeight	Black	Czarny
+fontWeight	Italic	Kursywa
 	Camera Raw Filter ({layer})	Filtr Camera Raw ({layer})
 cameraRaw	Lights	Jasne tony
 cameraRaw	Darks	Ciemne tony
@@ -3178,8 +3192,83 @@ cameraRaw	Roughness	Chropowatość
 	% of all commits	% wszystkich commitów
 	Lines +/−	Wiersze +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR: {prs}, commity: {commits}, wiersze +{added} / −{deleted} (Δ {delta}), pliki binarne +{binAdded} / −{binDeleted}, {first} – {last}
+
+# Text Color Picker and screen sampling
+	Color Picker (Text Color)	Próbnik kolorów (Kolor tekstu)
+	Pick screen color	Wybierz kolor z ekranu
+	Sample a pixel anywhere on the screen	Pobierz kolor piksela w dowolnym miejscu ekranu
+	Click to pick · Esc to cancel	Kliknij, aby wybrać · Esc, aby anulować
+	Pick a screen pixel or press Esc to cancel	Wybierz piksel ekranu lub naciśnij Esc, aby anulować
+	Scroll to zoom	Przewijaj, aby zmieniać powiększenie
 	Open in camera raw	Otwórz w Camera Raw
 	System title bar	Systemowy pasek tytułu
 	More documents	Więcej dokumentów
 	Developing {name}	Wywoływanie {name}
 	Camera Raw ({name})	Camera Raw ({name})
+	Show/Hide All Panels	Pokaż/ukryj wszystkie panele
+	Show/Hide Panels	Pokaż/ukryj panele
+	Could not open	Nie można otworzyć
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: ścieżka nie jest prawidłowym Unicode; zmień nazwę pliku i otwórz go ponownie.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Natywne przeciąganie i upuszczanie plików nie jest jeszcze obsługiwane w Wayland. Użyj Plik › Otwórz albo skopiuj obraz w menedżerze plików i wklej go za pomocą {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Aby upuszczać pliki, uruchom PhotoCraft pod XWayland: `{command}`
+	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	Albo ustaw Preferencje › Wydajność › Serwer wyświetlania Linuksa na X11: PhotoCraft będzie wtedy zawsze uruchamiany pod XWayland.
+	Edit › Paste	Edycja › Wklej
+	Use File › Open, or paste a copied image with {paste}.	Użyj Plik › Otwórz albo wklej skopiowany obraz za pomocą {paste}.
+
+# Swatches panel
+	Create new swatch	Utwórz nową próbkę
+	New Swatch…	Nowa próbka…
+	New Swatch Group…	Nowa grupa próbek…
+	Import Swatches…	Importuj próbki…
+	Replace Swatches…	Zastąp próbki…
+	Export Swatches…	Eksportuj próbki…
+	Export Swatches for Exchange…	Eksportuj próbki do wymiany…
+	Reset Swatches	Resetuj próbki
+	Add to Swatches	Dodaj do próbek
+	Blend If:	Mieszaj, jeśli:
+	Channels:	Kanały:
+	Knockout	Wycięcie
+	New Brush Preset…	Nowe ustawienie wstępne pędzla…
+	Brush Preset Options	Opcje ustawień wstępnych pędzla
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Zawartość:
+	Custom Pattern:	Własny wzór:
+	Foreground Color	Kolor pierwszego planu
+	Color…	Kolor…
+	50% Gray	50% szarości
+	{size} (was {old})	{size} (wcześniej {old})
+	Cone (Inverted)	Stożek (odwrócony)
+	Domed	Kopuła
+	Domed (Inverted)	Kopuła (odwrócona)
+	Diagonal (Descending)	Przekątna (malejąca)
+	Red Eye Tool	Narzędzie Czerwone oczy
+	Pupil Size	Rozmiar źrenicy
+	Darken Amount	Stopień przyciemnienia
+	Click a red pupil to neutralize it	Kliknij czerwoną źrenicę, aby ją zneutralizować
+	open source	otwarte oprogramowanie
+	…and {n} more	…i {n} więcej
+	Eyedroppers:	Zakraplacze:
+	Set Black Point	Ustaw punkt czerni
+	Set Neutral Gray Point	Ustaw punkt neutralnej szarości
+	Set White Point	Ustaw punkt bieli
+	Unavailable in this color mode	Niedostępne w tym trybie koloru
+	Selection Preview:	Podgląd zaznaczenia:
+	Black Matte	Czarne tło
+	White Matte	Białe tło
+
+# Layer colour labels.
+	Seafoam	Morski
+	Indigo	Indygo
+	Fuchsia	Fuksja
+	Large document: redrawing on the CPU	Duży dokument: odświeżanie na CPU
+	This redraw took {seconds} s on the CPU.	To odświeżenie na CPU trwało {seconds} s.
+	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Zmiany obejmujące cały dokument, takie jak tryb mieszania, krycie lub widoczność warstwy, odświeżają go w całości.
+	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Warstwy nie mieszczą się w budżecie pamięci GPU. Zwiększenie wartości Użycie pamięci w Preferencje › Wydajność zwiększa budżet, maksymalnie do jednej czwartej pamięci tego komputera.
+	The GPU compositor wasn't used: {reason}	Kompozytor GPU nie został użyty: {reason}
+# Pattern Stamp tool
+	Pattern Stamp Tool	Narzędzie Pieczątka wzoru
+	Impressionist	Impresjonistyczny
+	Rotate View Tool	Narzędzie Obróć widok
+	Reset View	Resetuj widok
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Przeciągnij wokół środka, aby obrócić widok  ·  Shift ogranicza do 15°

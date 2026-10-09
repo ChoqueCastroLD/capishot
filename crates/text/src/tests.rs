@@ -669,6 +669,48 @@ fn psd_round_trips_antialias_opentype_and_warp() {
     }
 }
 
+/// #1469: Some older PSD writers combine a zero PointBase with an enormous local ink origin.
+/// The TySh transform cancels that origin, so importing it as a zero-based layout puts text far
+/// off-canvas. Fold the descriptor origin into the imported transform and preserve it on a TySh
+/// round trip so every editing and export path uses the same position.
+#[test]
+fn legacy_tysh_point_origin_imports_and_round_trips_on_canvas() {
+    use photocraft_psd::descriptor::{Descriptor, Id, Value as D};
+
+    let source = styled("Name", CharStyle { font_family: "Inter".into(), size_pt: 120.0, ..Default::default() });
+    let mut tysh = crate::psd::parse_tysh(&crate::psd::build_tysh(&source, 72.0, None)).unwrap();
+    tysh.transform = Affine { m: [4.1667, 0.0, 0.0, 4.1667, -32375.0, -32887.5] };
+    let ink = [8050.0, 8160.0, 8220.0, 8300.0];
+    let rect = |class| {
+        D::Descriptor(
+            Descriptor::new(class)
+                .with("Left", D::UnitFloat { unit: *b"#Pnt", value: ink[0] })
+                .with("Top ", D::UnitFloat { unit: *b"#Pnt", value: ink[1] })
+                .with("Rght", D::UnitFloat { unit: *b"#Pnt", value: ink[2] })
+                .with("Btom", D::UnitFloat { unit: *b"#Pnt", value: ink[3] }),
+        )
+    };
+    tysh.text.items.retain(|(key, _)| !key.is("bounds") && !key.is("boundingBox"));
+    tysh.text.items.push((Id::new("bounds"), rect("bounds")));
+    tysh.text.items.push((Id::new("boundingBox"), rect("boundingBox")));
+    let data = crate::psd::write_tysh(&tysh);
+
+    let imported = crate::psd::text_layer_from_tysh(&data, 72.0).unwrap();
+    let expected = [4.1667, 0.0, 0.0, 4.1667, 1166.935, 1112.772];
+    for (got, want) in imported.transform.m.iter().zip(expected) {
+        assert!((got - want).abs() < 0.001, "{:?}", imported.transform.m);
+    }
+    let (_, rendered) = TextEngine::new().render(&imported, 72.0, PixelFormat::RGBA8);
+    let placed = rendered.surface.content_bounds();
+    assert!(!placed.is_empty(), "the normalized layer renders");
+    assert!((1000..3000).contains(&placed.x0) && (500..2000).contains(&placed.y0), "{placed:?}");
+
+    let round_trip = crate::psd::text_layer_from_tysh(&crate::psd::build_tysh(&imported, 72.0, Some(ink.map(|v| v as f32))), 72.0).unwrap();
+    for (got, want) in round_trip.transform.m.iter().zip(expected) {
+        assert!((got - want).abs() < 0.001, "{:?}", round_trip.transform.m);
+    }
+}
+
 /// Regression: a PSD whose text engine data has no `EngineDict` (or isn't a dictionary)
 /// panicked with `expect("EngineDict")` when the layer was written back (PSD export).
 #[test]

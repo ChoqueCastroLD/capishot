@@ -37,6 +37,7 @@ mod mac_window;
 mod linux_libs;
 mod logging;
 mod monitor_profile;
+mod screen_color;
 mod services;
 // Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
@@ -204,10 +205,29 @@ fn main() -> eframe::Result {
         }
     }
 
+    // The display server to open the window on: Xwayland for a pen on Wayland, which gives this
+    // app no pen input (#639).
+    #[cfg(target_os = "linux")]
+    let session = tablet::display_session();
+    // Preferences › Performance › Linux display server = X11: Xwayland on a Wayland session too,
+    // where native file drops work (winit 0.30 has none on Wayland, #386). Only when Xwayland can
+    // run the window ($DISPLAY set, X11 libraries installed); otherwise the session's own.
+    #[cfg(target_os = "linux")]
+    let session = if session == linux_libs::DisplaySession::Wayland
+        && gpu_startup::read_display_server(services::prefs_file().as_deref()) == photocraft_engine::prefs::LinuxDisplayServer::X11
+        && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())
+        && linux_libs::available(linux_libs::DisplaySession::X11)
+    {
+        eprintln!("photocraft: opening the window through Xwayland (Preferences › Performance › Linux display server)");
+        linux_libs::DisplaySession::X11
+    } else {
+        session
+    };
+
     // winit and wgpu dlopen the windowing and GPU libraries, and some of those crates panic when
     // one is missing (issue #201). Name the package to install and exit instead.
     #[cfg(target_os = "linux")]
-    if let Err(message) = linux_libs::preflight() {
+    if let Err(message) = linux_libs::preflight(session) {
         eprint!("{message}");
         std::process::exit(1);
     }
@@ -246,12 +266,12 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     let apple_events = &apple_events;
 
-    // Pen tablet samples on macOS (AppKit event monitor, before winit sees each event) and X11
-    // (started once eframe says which display server it is on). The monitor lives until the event
-    // loop returns.
-    let stylus_feed = photocraft_ui_egui::stylus::StylusFeed::default();
+    // The macOS pen tablet monitor (installed once eframe created the app, see below); it lives
+    // until the event loop returns.
     #[cfg(target_os = "macos")]
-    let _tablet = tablet::install_macos(&stylus_feed);
+    let tablet_monitor = std::cell::OnceCell::new();
+    #[cfg(target_os = "macos")]
+    let tablet_monitor = &tablet_monitor;
 
     // Read the displays' ICC profiles while the window opens (colour-managed canvas; `None`
     // where the platform has no reader).
@@ -260,6 +280,14 @@ fn main() -> eframe::Result {
     let presets = services::presets_dir().map(photocraft_engine::preset_store::open_dir_async);
     let custom_titlebar = custom_titlebar(services::prefs_file().as_deref());
     let mut options = native_options(custom_titlebar);
+    // winit picks Wayland whenever `WAYLAND_DISPLAY` is set; open on X11 when that was chosen.
+    #[cfg(target_os = "linux")]
+    if session == linux_libs::DisplaySession::X11 {
+        use winit::platform::x11::EventLoopBuilderExtX11 as _;
+        options.event_loop_builder = Some(Box::new(|builder| {
+            builder.with_x11();
+        }));
+    }
     // eframe restores the saved window layout before our code runs; drop values that would crash it.
     ui_state::sanitize(options.persistence_path.as_deref());
     // Crash-safe GPU startup (#4): pick the backend (a marker left by a start that died in the
@@ -293,6 +321,7 @@ fn main() -> eframe::Result {
     let sentinel_ms = t_sentinel.elapsed().as_secs_f64() * 1000.0;
     log::info!("GPU startup: {:?} ({sentinel_ms:.2} ms)", plan);
     let retry_cpu = !safe_gpu && plan.backend != photocraft_engine::prefs::GpuBackend::Cpu;
+    let keep_marker = gpu_startup::keep_marker_after_error(&plan, os);
     let app_created = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let created_in_callback = app_created.clone();
     let started_sentinel = sentinel.clone();
@@ -309,6 +338,11 @@ fn main() -> eframe::Result {
             #[cfg(target_os = "linux")]
             {
                 services.is_wayland = display == Some(tablet::DisplayKind::Wayland);
+                if services.is_wayland {
+                    let var = |name| std::env::var(name).ok();
+                    services.xwayland_command =
+                        services::xwayland_command(var("FLATPAK_ID").as_deref(), var("APPIMAGE").as_deref(), std::env::var_os("DISPLAY").is_some());
+                }
             }
             let mut app = PhotocraftApp::new(Session::new(), services);
             app.integrated_titlebar = cfg!(target_os = "macos");
@@ -399,6 +433,8 @@ fn main() -> eframe::Result {
             #[cfg(target_os = "macos")]
             {
                 app.services.os_events = Some(apple_events.connect(&cc.egui_ctx));
+                // Quit through AppKit, not by closing the window (Touch Bar Macs, #1575, #1458).
+                app.services.quit = Some(Box::new(mac_window::terminate_later));
                 // The macOS menu bar, installed now so winit's default menu doesn't stay up.
                 if !in_window_menus {
                     app.services.native_menu = mac_menu::install(&cc.egui_ctx, &app);
@@ -408,16 +444,23 @@ fn main() -> eframe::Result {
             let _ = in_window_menus;
             // Where file drags and drops are (winit 0.30 doesn't say).
             app.services.cursor_pos = cursor::service(cc);
-            // Tablet pressure/tilt/eraser (winit drops them): the macOS monitor installed above
-            // and the X11 reader write into this feed.
-            app.stylus.feed = stylus_feed;
+            app.services.screen_pick = screen_color::service(cc, app.services.is_wayland);
+            // Tablet pressure/tilt/eraser (winit drops them): the macOS monitor and the X11 reader
+            // write into the stylus feed. The monitor goes in here, not before the event loop:
+            // AppKit's shared application only exists once winit created it (#759).
+            #[cfg(target_os = "macos")]
+            if let Some(monitor) = tablet::install_macos(&app.stylus.feed) {
+                let _ = tablet_monitor.set(monitor);
+            }
             #[cfg(target_os = "linux")]
             tablet::spawn_x11(&app.stylus.feed, display);
             // Paths on the command line (Linux/Windows file associations, `photocraft a.psd`).
             app.open_paths(&files);
             if !unreadable_paths.is_empty() {
-                let lines = unreadable_paths.iter().map(|p| format!("{p}: the path is not valid Unicode; rename the file and open it again.")).collect();
-                photocraft_ui_egui::notices::post(&mut app, "Could not open", lines, true, None);
+                use photocraft_ui_egui::i18n;
+                let line = i18n::t("{path}: the path is not valid Unicode; rename the file and open it again.");
+                let lines = unreadable_paths.iter().map(|p| i18n::fmt(line, &[("path", p.as_str())])).collect();
+                photocraft_ui_egui::notices::post(&mut app, i18n::t("Could not open"), lines, true, None);
             }
             // Portable marker found but its data folder isn't writable (#228): say where settings went.
             if let Some(w) = &app_dirs::current().warning {
@@ -426,12 +469,15 @@ fn main() -> eframe::Result {
             Ok(Box::new(app))
         }),
     );
-    // Closed or failed outside graphics initialization: not a driver crash. A renderer
-    // error keeps the marker, so the next start tries a safer backend.
-    if !gpu_startup::keep_marker_after_run(&result)
+    // Closed or failed outside graphics initialization: not a driver crash. A renderer error
+    // keeps the marker, so the next start tries a safer backend, unless there is no safer one:
+    // a failed CPU start would otherwise pin every later start to CPU.
+    let renderer_error = gpu_startup::keep_marker_after_run(&result);
+    if !(renderer_error && keep_marker)
         && let Some(mut s) = sentinel.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
     {
         if result.is_err()
+            && !renderer_error
             && let Some(marker) = previous.crashed()
         {
             // This failure supplies no new graphics-crash evidence: retain the previous

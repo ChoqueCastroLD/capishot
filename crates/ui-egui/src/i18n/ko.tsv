@@ -794,6 +794,7 @@
 	Cache Level:	캐시 레벨:
 	Camera Raw isn't open	Camera Raw가 열려 있지 않습니다
 	Cancel	취소
+	Reset	재설정
 	Cancel (Esc)	취소 (Esc)
 	Cancel any current edits (Esc)	현재 편집 취소 (Esc)
 	Cancel current crop operation  (Esc)	현재 자르기 작업 취소  (Esc)
@@ -1445,6 +1446,10 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 이동   {key} 실행   esc 닫기
 	Version {version}	버전 {version}
 	New Document	새 문서
+	Saved	저장됨
+	Save Preset…	사전 설정 저장…
+	Preset Name	사전 설정 이름
+	No saved presets yet.	저장된 사전 설정이 없습니다.
 	Error	오류
 	Command	명령
 	Adjustment layers have nothing to transform	조정 레이어에는 변형할 내용이 없습니다
@@ -1776,6 +1781,7 @@
 	Maximize psd compatibility	PSD 호환성 최대화
 	Medium gray	중간 회색
 	Memory usage mb	메모리 사용량(MB)
+	Low resolution previews	저해상도 미리 보기
 	Missing glyph protection	누락된 글리프 보호
 	Modern	현대적
 	Nearest neighbor	최근접 이웃
@@ -1927,6 +1933,8 @@
 	Brush Settings…  (F5): every option of this brush	브러시 설정…  (F5): 이 브러시의 모든 옵션
 	Rename Brush…	브러시 이름 바꾸기…
 	Delete Brush	브러시 삭제
+	New Brush Preset…	새 브러시 사전 설정…
+	Brush Preset Options	브러시 사전 설정 옵션
 	Group name	그룹 이름
 	Brush name	브러시 이름
 	Grid view	격자 보기
@@ -1967,6 +1975,8 @@
 	CPU (no GPU acceleration)	CPU(GPU 가속 없음)
 	DirectX 12	DirectX 12
 	GPU backend	GPU 백엔드
+	Linux display server	Linux 디스플레이 서버
+	X11	X11
 	Metal	Metal
 	OpenGL	OpenGL
 	Use tablet pressure	태블릿 필압 사용
@@ -1991,8 +2001,11 @@
 	Floating point	부동 소수점
 	Use Global Light	전체 조명 사용
 	Native file drag-and-drop is unavailable	파일 드래그 앤 드롭을 사용할 수 없습니다
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Wayland에서는 아직 파일 드래그 앤 드롭을 지원하지 않습니다. 파일 › 열기를 사용하거나 `WAYLAND_DISPLAY= photocraft`로 XWayland에서 PhotoCraft를 실행하세요.
-	Use File › Open to open an image.	파일 › 열기에서 이미지를 여세요.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Wayland에서는 아직 파일 드래그 앤 드롭을 지원하지 않습니다. 파일 › 열기를 사용하거나, 파일 관리자에서 이미지를 복사한 뒤 {paste}(으)로 붙여넣으세요.
+	To drop files, start PhotoCraft under XWayland: `{command}`	파일을 끌어다 놓으려면 XWayland에서 PhotoCraft를 실행하세요: `{command}`
+	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	또는 환경 설정 › 성능 › Linux 디스플레이 서버를 X11로 설정하면 PhotoCraft가 항상 XWayland에서 시작됩니다.
+	Edit › Paste	편집 › 붙여넣기
+	Use File › Open, or paste a copied image with {paste}.	파일 › 열기를 사용하거나, 복사한 이미지를 {paste}(으)로 붙여넣으세요.
 	Invalid {mode} profile	유효하지 않은 {mode} 프로파일
 	Unnamed {mode} profile	이름 없는 {mode} 프로파일
 	Show bounding box when dragging layer	레이어를 드래그할 때 테두리 상자 표시
@@ -2041,6 +2054,11 @@ cameraRaw	Color	색상
 
 # Type layer thumbnails (#598)
 	Edit Type	문자 편집
+	Eyedroppers:	스포이드:
+	Set Black Point	검은점 설정
+	Set Neutral Gray Point	중성 회색점 설정
+	Set White Point	흰점 설정
+	Unavailable in this color mode	이 색상 모드에서는 사용할 수 없음
 
 # UI scale steps (#611)
 	75%	75%
@@ -2694,6 +2712,7 @@ cameraRaw	Color	색상
 	Frequency	빈도
 	Use tablet pressure to change pen width	태블릿 압력을 사용하여 펜 폭 변경
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	정보
 	Contributors	기여자
@@ -2725,4 +2744,86 @@ cameraRaw	Color	색상
 	% of all commits	전체 커밋 대비 %
 	Lines +/−	줄 +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR {prs}개, 커밋 {commits}개, 줄 +{added} / −{deleted} (Δ {delta}), 바이너리 +{binAdded} / −{binDeleted}, {first} – {last}
+
+# Swatches panel
+	Create new swatch	새 색상 견본 만들기
+	New Swatch…	새 색상 견본…
+	New Swatch Group…	새 색상 견본 그룹…
+	Import Swatches…	색상 견본 가져오기…
+	Replace Swatches…	색상 견본 바꾸기…
+	Export Swatches…	색상 견본 내보내기…
+	Export Swatches for Exchange…	교환용 색상 견본 내보내기…
+	Reset Swatches	색상 견본 재설정
+	Add to Swatches	색상 견본에 추가
+# Layer Style > Blending Options (Advanced Blending)
+	Blend If:	혼합 조건:
+	Channels:	채널:
+	Knockout	녹아웃
 	Apply At Canvas Bounds	캔버스 경계에 효과 적용
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	색상 선택기 (텍스트 색상)
+	Pick screen color	화면 색상 선택
+	Sample a pixel anywhere on the screen	화면의 아무 픽셀에서 색상 추출
+	Click to pick · Esc to cancel	클릭하여 선택 · Esc로 취소
+	Pick a screen pixel or press Esc to cancel	화면 픽셀을 선택하거나 Esc를 눌러 취소
+	Scroll to zoom	스크롤하여 확대/축소
+	Show/Hide All Panels	모든 패널 표시/숨기기
+	Show/Hide Panels	패널 표시/숨기기
+	Could not open	열 수 없음
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: 경로가 올바른 유니코드가 아닙니다. 파일 이름을 바꾼 뒤 다시 여세요.
+	Good	좋음
+	Best	최적
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	내용:
+	Custom Pattern:	사용자 정의 패턴:
+	Foreground Color	전경색
+	Color…	색상…
+	50% Gray	50% 회색
+	Color Adaptation	색상 적응
+	{size} (was {old})	{size} (이전 {old})
+	Cone (Inverted)	원뿔(반전)
+	Domed	돔
+	Domed (Inverted)	돔(반전)
+	Diagonal (Descending)	대각선(내림)
+
+	Red Eye Tool	적목 현상 도구
+	Red Eye	적목 현상
+	Pupil Size	동공 크기
+	Darken Amount	어둡게 하기 정도
+	Click a red pupil to neutralize it	빨간 동공을 클릭하여 보정합니다
+	open source	오픈 소스
+	…and {n} more	…외 {n}개
+	Selection Preview:	선택 영역 미리 보기:
+	Black Matte	검정 배경
+	White Matte	흰색 배경
+
+# Layer colour labels.
+	Seafoam	바다 거품색
+	Indigo	남색
+	Fuchsia	자홍색
+	Large document: redrawing on the CPU	큰 문서: CPU에서 다시 그리는 중
+	This redraw took {seconds} s on the CPU.	이번 다시 그리기는 CPU에서 {seconds}초 걸렸습니다.
+	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	레이어의 혼합 모드, 불투명도, 표시 여부처럼 문서 전체를 바꾸는 편집은 문서 전체를 다시 그립니다.
+	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	레이어가 GPU 메모리 예산에 맞지 않습니다. 환경 설정 › 성능에서 메모리 사용량을 늘리면 이 컴퓨터 메모리의 4분의 1까지 예산이 늘어납니다.
+	The GPU compositor wasn't used: {reason}	GPU 합성기를 사용하지 않았습니다: {reason}
+fontWeight	Thin	아주 가늘게
+fontWeight	ExtraLight	더 가늘게
+fontWeight	Light	가늘게
+fontWeight	Regular	보통
+fontWeight	Medium	중간
+fontWeight	SemiBold	반굵게
+fontWeight	Bold	굵게
+fontWeight	ExtraBold	더 굵게
+fontWeight	Black	아주 굵게
+fontWeight	Italic	기울임
+
+# Pattern Stamp tool
+	Pattern Stamp Tool	패턴 스탬프 도구
+	Pattern Stamp	패턴 스탬프
+	Impressionist	인상파
+	Rotate View	보기 회전
+	Rotate View Tool	보기 회전 도구
+	Reset View	보기 재설정
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	중심 주위를 드래그해 보기를 회전합니다  ·  Shift는 15°로 제한

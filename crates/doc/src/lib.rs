@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod adjust;
+pub mod advanced;
 pub mod analysis;
 pub mod blend_if;
 pub mod comps;
@@ -26,6 +27,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use adjust::Adjustment;
+pub use advanced::{AdvancedBlending, Knockout};
 pub use analysis::{CountGroup, Measurement, MeasurementScale, Note, Ruler};
 pub use blend_if::{BlendIf, BlendRange};
 pub use comps::{Artboard, ArtboardBackground, CompAppearance, CompLayerState, LayerComp};
@@ -110,6 +112,97 @@ pub enum LabelColor {
     Blue,
     Violet,
     Gray,
+    Seafoam,
+    Indigo,
+    Magenta,
+    Fuchsia,
+}
+
+impl LabelColor {
+    /// Display order, independent of the PSD sheet-colour indices.
+    pub const ALL: [Self; 12] = [
+        Self::None,
+        Self::Red,
+        Self::Orange,
+        Self::Yellow,
+        Self::Green,
+        Self::Seafoam,
+        Self::Blue,
+        Self::Indigo,
+        Self::Magenta,
+        Self::Fuchsia,
+        Self::Violet,
+        Self::Gray,
+    ];
+
+    /// Stable, language-independent command and inspection value.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Red => "red",
+            Self::Orange => "orange",
+            Self::Yellow => "yellow",
+            Self::Green => "green",
+            Self::Seafoam => "seafoam",
+            Self::Blue => "blue",
+            Self::Indigo => "indigo",
+            Self::Magenta => "magenta",
+            Self::Fuchsia => "fuchsia",
+            Self::Violet => "violet",
+            Self::Gray => "gray",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "No Color",
+            Self::Red => "Red",
+            Self::Orange => "Orange",
+            Self::Yellow => "Yellow",
+            Self::Green => "Green",
+            Self::Seafoam => "Seafoam",
+            Self::Blue => "Blue",
+            Self::Indigo => "Indigo",
+            Self::Magenta => "Magenta",
+            Self::Fuchsia => "Fuchsia",
+            Self::Violet => "Violet",
+            Self::Gray => "Gray",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.id() == id)
+    }
+}
+
+#[cfg(test)]
+mod label_color_tests {
+    use super::LabelColor;
+
+    #[test]
+    fn layer_color_ids_and_existing_serialized_names_stay_stable() {
+        for (name, color) in [
+            ("None", LabelColor::None),
+            ("Red", LabelColor::Red),
+            ("Orange", LabelColor::Orange),
+            ("Yellow", LabelColor::Yellow),
+            ("Green", LabelColor::Green),
+            ("Blue", LabelColor::Blue),
+            ("Violet", LabelColor::Violet),
+            ("Gray", LabelColor::Gray),
+        ] {
+            assert_eq!(serde_json::to_value(color).unwrap(), name);
+            assert_eq!(serde_json::from_value::<LabelColor>(serde_json::json!(name)).unwrap(), color);
+        }
+        for c in LabelColor::ALL {
+            assert_eq!(LabelColor::from_id(c.id()), Some(c));
+            assert_eq!(serde_json::from_value::<LabelColor>(serde_json::to_value(c).unwrap()).unwrap(), c);
+        }
+        for id in ["", "Red", "0", "unknown", "🔴"] {
+            assert_eq!(LabelColor::from_id(id), None);
+        }
+        assert!(serde_json::from_value::<LabelColor>(serde_json::json!("Unknown")).is_err());
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -450,6 +543,14 @@ impl LayerContent {
             LayerContent::Smart(_) => "Smart Object",
         }
     }
+
+    /// English indefinite article for this layer kind ("an" for Adjustment, "a" for all others).
+    pub fn article(&self) -> &'static str {
+        match self {
+            LayerContent::Adjustment(_) => "an",
+            _ => "a",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -495,6 +596,9 @@ pub struct Layer {
     /// outside which the layer's pixels are hidden. Default = everything blends. PSD layer-record
     /// blending ranges.
     pub blend_if: BlendIf,
+    /// Blending Options › Advanced Blending: knockout, blend interior effects / clipped layers as
+    /// group, transparency shapes layer, layer / vector mask hides effects. Default = Photoshop's.
+    pub advanced: AdvancedBlending,
     /// Layer › Video Layers frame stack (None for a normal layer).
     pub video: Option<VideoData>,
 }
@@ -521,6 +625,7 @@ impl Layer {
             link_group: None,
             excluded_channels: 0,
             blend_if: BlendIf::default(),
+            advanced: AdvancedBlending::default(),
             video: None,
         }
     }
@@ -1126,6 +1231,14 @@ mod tests {
         let bg = d.layers[0].id;
         d.layer_mut(bg).unwrap().surface_mut().unwrap().write_pixel(0, 0, &[0.0, 0.0, 0.0, 1.0]);
         assert_eq!(snap.layers[0].surface().unwrap().pixel(0, 0), vec![1.0; 4]);
+    }
+
+    #[test]
+    fn layer_content_article_and_kind_name() {
+        assert_eq!(LayerContent::Adjustment(Adjustment::Invert).article(), "an");
+        assert_eq!(LayerContent::Adjustment(Adjustment::Invert).kind_name(), "Adjustment");
+        assert_eq!(LayerContent::Raster(Surface::new(PixelFormat::RGBA8)).article(), "a");
+        assert_eq!(LayerContent::Group(Group { children: Vec::new(), expanded: true, artboard: None }).article(), "a");
     }
 }
 

@@ -1405,7 +1405,7 @@ fn reference_reduce(doc: &Document, w: usize, h: usize) -> Vec<[f32; 4]> {
 fn reduced_render_matches_the_full_composite_averaged() {
     let d = tall_doc(53, 1000);
     for (w, h, band) in [(10, 190, 0), (7, 33, 256), (53, 999, 512), (1, 1, 256)] {
-        let got = render_reduced_in_bands(&d, w, h, None, band);
+        let got = render_reduced_in_bands(&d, d.bounds(), w, h, None, band);
         assert_eq!((got.rect.width(), got.rect.height()), (w, h));
         assert_eq!(got.px, reference_reduce(&d, w as usize, h as usize), "{w}x{h} band {band}");
     }
@@ -1421,9 +1421,9 @@ fn reduced_damage_matches_the_whole_reduction() {
     // whole reduction's, for uneven factors, damage on span edges and bands smaller than the area.
     let d = tall_doc(53, 1000);
     for (w, h, band) in [(10, 190, 0), (7, 33, 256), (53, 999, 64), (53, 1000, 0), (1, 1, 256)] {
-        let all = render_reduced_in_bands(&d, w, h, None, band);
+        let all = render_reduced_in_bands(&d, d.bounds(), w, h, None, band);
         for dmg in [Rect::new(0, 0, 1, 1), Rect::new(5, 17, 6, 18), Rect::new(12, 300, 40, 701), Rect::new(-9, 990, 80, 2000), Rect::new(0, 0, 53, 1000)] {
-            let part = render_reduced_in_bands(&d, w, h, Some(dmg), band);
+            let part = render_reduced_in_bands(&d, d.bounds(), w, h, Some(dmg), band);
             let r = part.rect;
             assert!(!r.is_empty() && r.x0 >= 0 && r.y0 >= 0 && r.x1 as u32 <= w && r.y1 as u32 <= h, "{w}x{h} {dmg:?} -> {r:?}");
             for y in r.y0..r.y1 {
@@ -1442,8 +1442,38 @@ fn reduced_damage_matches_the_whole_reduction() {
                 }
             }
         }
-        assert!(render_reduced_in_bands(&d, w, h, Some(Rect::new(60, 0, 70, 10)), band).rect.is_empty());
+        assert!(render_reduced_in_bands(&d, d.bounds(), w, h, Some(Rect::new(60, 0, 70, 10)), band).rect.is_empty());
     }
+}
+
+#[test]
+fn reduced_render_of_an_area_past_the_canvas() {
+    // The Crop tool shows layer pixels beyond the canvas: rendered in place, they must equal the
+    // same pixels on a canvas that holds them (adjustment layers apply out there too).
+    let paint = |d: &mut Document, dx: i32, dy: i32| {
+        let mut l = Layer::raster("big", PixelFormat::RGBA8);
+        let s = l.surface_mut().unwrap();
+        for y in -10..40 {
+            for x in -20..60 {
+                let a = if x < 0 || y >= 30 { 0.6 } else { 1.0 };
+                s.fill_rect(Rect::new(x + dx, y + dy, x + dx + 1, y + dy + 1), &[(x + 20) as f32 / 80.0, (y + 10) as f32 / 50.0, 0.5, a]);
+            }
+        }
+        d.layers.push(l);
+        d.layers.push(Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert)));
+    };
+    let mut d = Document::new("d", Size::new(40, 30), ColorMode::Rgb, SampleType::U8);
+    paint(&mut d, 0, 0);
+    let mut whole = Document::new("w", Size::new(80, 50), ColorMode::Rgb, SampleType::U8);
+    paint(&mut whole, 20, 10);
+    let area = Rect::new(-20, -10, 60, 40);
+    for (w, h) in [(80, 50), (8, 5), (27, 13), (1, 1)] {
+        let got = render_reduced_rect(&d, area, w, h);
+        assert_eq!(got.rect, Rect::new(0, 0, w as i32, h as i32));
+        assert_eq!(got.px, render_reduced(&whole, w, h).px, "{w}x{h}");
+    }
+    // Past every layer there is nothing to show.
+    assert!(render_reduced_rect(&d, Rect::new(100, 100, 120, 110), 20, 10).px.iter().all(|p| p[3] == 0.0));
 }
 
 #[test]
@@ -1584,4 +1614,89 @@ fn rendering_restores_the_lab_mix_flag_it_found() {
             }
         }
     }
+}
+
+/// Vibrance of an 8-bit sRGB colour (0–255 in and out).
+fn vibrance_255(c: [f32; 3], vibrance: f32, saturation: f32) -> [f32; 3] {
+    let mut buf = Buffer::filled(Rect::new(0, 0, 1, 1), [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0]);
+    adjust::apply(&Adjustment::Vibrance { vibrance, saturation }, &mut buf);
+    let p = buf.px[0];
+    [p[0] * 255.0, p[1] * 255.0, p[2] * 255.0]
+}
+
+fn assert_near_255(got: [f32; 3], want: [f32; 3], tol: f32, what: &str) {
+    assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() <= tol), "{what}: got {got:?}, Photoshop {want:?}");
+}
+
+// Photoshop 25.4 references (16-bit runs of 8-bit colours in an sRGB document).
+
+#[test]
+fn vibrance_saturation_matches_photoshop() {
+    // −100 greys to 0.288 R + 0.712 G in linear light: blue has no weight, yellow stays bright.
+    for (c, g) in [([251.0, 201.0, 0.0], 217.0), ([255.0, 0.0, 0.0], 146.0), ([0.0, 255.0, 0.0], 219.4), ([0.0, 0.0, 255.0], 0.0), ([255.0, 255.0, 0.0], 255.0)]
+    {
+        assert_near_255(vibrance_255(c, 0.0, -100.0), [g; 3], 0.5, "saturation -100");
+    }
+    for (c, s, want) in [
+        ([255.0, 128.0, 0.0], -50.0, [220.7, 155.2, 129.4]),
+        ([224.0, 176.0, 144.0], -50.0, [208.6, 183.9, 169.9]),
+        ([64.0, 128.0, 192.0], 50.0, [0.0, 134.3, 218.7]),
+        ([224.0, 176.0, 144.0], 100.0, [251.3, 158.5, 51.7]),
+        ([32.0, 96.0, 64.0], 100.0, [0.0, 106.8, 32.8]),
+    ] {
+        assert_near_255(vibrance_255(c, 0.0, s), want, 0.5, "saturation");
+    }
+}
+
+#[test]
+fn negative_vibrance_matches_photoshop() {
+    for (c, v, want) in [
+        ([255.0, 0.0, 0.0], -100.0, [255.0, 137.0, 137.0]),
+        ([128.0, 0.0, 0.0], -100.0, [128.0, 65.7, 65.7]),
+        ([224.0, 176.0, 144.0], -100.0, [213.2, 197.4, 188.8]),
+        ([64.0, 128.0, 192.0], -100.0, [124.4, 149.0, 185.0]),
+        ([255.0, 128.0, 0.0], -50.0, [255.0, 152.0, 99.1]),
+        ([251.0, 201.0, 0.0], -50.0, [251.0, 208.1, 97.4]),
+        ([32.0, 96.0, 64.0], -50.0, [50.1, 91.7, 68.6]),
+    ] {
+        assert_near_255(vibrance_255(c, v, 0.0), want, 0.6, "vibrance");
+    }
+    // Vibrance applies first, then Saturation.
+    assert_near_255(vibrance_255([64.0, 128.0, 192.0], 50.0, -50.0), [86.5, 117.8, 158.4], 3.0, "vibrance then saturation");
+}
+
+#[test]
+fn positive_vibrance_follows_photoshop_closely() {
+    // A fit, not exact: within a few levels, saturated colours untouched, skin damped.
+    for (c, v, want, tol) in [
+        ([255.0, 128.0, 0.0], 50.0, [255.0, 128.0, 0.0], 0.5),
+        ([144.0, 160.0, 176.0], 100.0, [121.2, 152.6, 180.5], 1.5),
+        ([64.0, 128.0, 192.0], 50.0, [50.6, 125.1, 192.8], 4.0),
+        ([224.0, 176.0, 144.0], 50.0, [224.9, 173.4, 138.0], 3.0),
+        ([224.0, 176.0, 144.0], 100.0, [226.6, 166.8, 122.4], 5.0),
+    ] {
+        assert_near_255(vibrance_255(c, v, 0.0), want, tol, "vibrance");
+    }
+}
+
+#[test]
+fn clipped_brightness_and_desaturation_whiten_a_lighter_color_logo() {
+    // постер.psd: a yellow logo in Lighter Color over the same yellow, with Brightness/Contrast +150
+    // and Vibrance › Saturation −100 clipped to it. Photoshop shows it white (254); 0.5.0 left it
+    // yellow (its Saturation −100 greyed (255, 255, 0) to 128, darker than the yellow beneath).
+    let yellow = [251.0 / 255.0, 201.0 / 255.0, 0.0, 1.0];
+    let mut d = doc_white(2, 1);
+    d.layers[0].surface_mut().unwrap().fill_rect(Rect::new(0, 0, 2, 1), &yellow);
+    let mut logo = solid_layer("logo", Rect::new(0, 0, 1, 1), yellow);
+    logo.blend = BlendMode::LighterColor;
+    d.layers.push(logo);
+    for adj in [Adjustment::BrightnessContrast { brightness: 150.0, contrast: 0.0, legacy: false }, Adjustment::Vibrance { vibrance: 0.0, saturation: -100.0 }]
+    {
+        let mut l = Layer::new("adj", LayerContent::Adjustment(adj));
+        l.clipped = true;
+        d.layers.push(l);
+    }
+    let p = px(&d, 0, 0);
+    assert!(p[..3].iter().all(|v| *v * 255.0 >= 252.0), "logo whitened: {p:?}");
+    assert!(close4(px(&d, 1, 0), yellow), "the yellow beside it is untouched");
 }

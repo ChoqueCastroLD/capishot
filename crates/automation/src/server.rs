@@ -92,10 +92,21 @@ pub struct SaveParams {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct PreviewParams {
+    /// Headless mode only: document index (default: the active document).
+    /// Bridge previews capture the app window and reject `index`.
     #[serde(default)]
     pub index: Option<usize>,
     /// Longest side of a headless preview (default 1024, maximum 2048).
     /// Zero requests full size within that ceiling. Bridge mode returns the window screenshot.
+    #[serde(default)]
+    pub max_side: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenshotParams {
+    /// Downscale the window screenshot to this longest side (maximum 2048).
+    /// Omit or pass zero to keep the original size.
     #[serde(default)]
     pub max_side: Option<u32>,
 }
@@ -172,9 +183,12 @@ pub struct MenuParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UiSetParams {
-    /// Fields for the control method `ui.set`: tool, panels, dock, dockTabs, dockWidth, maskTarget,
-    /// vectorMaskTarget, selectionMode, zoom, center, fit, theme (pro, proMedium, studio,
-    /// studioLight, classic), brushSection, brushTab, brushesView, brushSize. Other fields are an
+    /// Fields for the control method `ui.set`: tool, panels, dock, dockTabs, dockWidth, colorPanel
+    /// ({background: bool} picks which swatch the Color panel edits), maskTarget,
+    /// vectorMaskTarget, selectionMode, zoom, center, rotation (view angle in degrees), fit, theme (pro, proMedium, studio,
+    /// studioLight, classic), brushSection, brushTab, brushesView, brushPicker ([x, y] opens the
+    /// Brush Preset picker there, null closes it), brushPickerView, brushSize, gradientBlendMode
+    /// (a blend mode name, for the Gradient tool), gradientClassic (bool). Other fields are an
     /// error.
     pub fields: Value,
 }
@@ -446,6 +460,9 @@ impl PhotocraftMcp {
         let Some(b) = self.bridge_client() else {
             return Ok(no_backend());
         };
+        if p.index.is_some() {
+            return Ok(fail("`index` is only supported in headless mode; bridge previews capture the app window"));
+        }
         self.screenshot(b, Some(max)).await
     }
 
@@ -570,7 +587,7 @@ impl PhotocraftMcp {
     }
 
     #[tool(description = "Bridge mode: screenshot of the live app window as PNG.")]
-    async fn ui_screenshot(&self, Parameters(p): Parameters<PreviewParams>) -> Result<CallToolResult, McpError> {
+    async fn ui_screenshot(&self, Parameters(p): Parameters<ScreenshotParams>) -> Result<CallToolResult, McpError> {
         match self.bridge_client() {
             Some(b) => self.screenshot(b, p.max_side).await,
             None => bridge_only("ui_screenshot"),

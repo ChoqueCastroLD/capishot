@@ -50,9 +50,9 @@ note = "doc lib.rs:312 SmartObject.transform is an Affine"
 [[item]]
 id = "FILE-215-7"
 target = "Layered TIFF read and write (tag 37724), honouring the ask-before-saving pref"
-status = "done"
+status = "partial"
 issue = 215
-note = "psd tiff.rs (ImageSourceData, both byte orders), io tiff_layers.rs, ui tiff_options_ui.rs (Discard Layers and Save a Copy); extra alpha channels are not written (one transparency sample)"
+note = "psd tiff.rs (ImageSourceData, both byte orders), io tiff_layers.rs, ui tiff_options_ui.rs (Discard Layers and Save a Copy); extra alpha channels and a Quick Mask are not written (the TIFF codec holds one transparency sample)"
 
 [[item]]
 id = "FILE-215-8"
@@ -99,9 +99,9 @@ note = "format convert.rs:89 + tests/roundtrip.rs:282 persist frames; no PSD vid
 [[item]]
 id = "FILE-215-14"
 target = "User swatch model with ACO/ASE import and export"
-status = "missing"
+status = "done"
 issue = 215
-note = "panels.rs:954 const SWATCHES: [[u8; 3]; 40]"
+note = "engine presets/swatches.rs (RGB/HSB/CMYK/Lab/Gray + verbatim colour books, persisted in prefs) + swatch_cmds.rs (swatches.*); psd aco.rs (v1/v2) and ase.rs (groups, spot/global) read+write; ui swatches_ui.rs, Color Picker Add to Swatches"
 
 [[item]]
 id = "FILE-215-15"
@@ -113,9 +113,9 @@ note = "doc effects.rs:57 Contour model only"
 [[item]]
 id = "FILE-215-16"
 target = "Advanced Blending (knockout, blend as group, mask hides effects) end to end"
-status = "missing"
+status = "partial"
 issue = 215
-note = "No knockout / blend_interior / transparency_shapes in doc, compose or io"
+note = "doc advanced.rs + .pcraft + PSD/layered TIFF (knko infx clbl tsly lmgm vmgm), CPU compose advanced.rs (GPU falls back), blendingOptions command + dialog; 7 psd-tools knockout oracles now pass; knockout-isolated-groups (0.45 % AA edges), advanced-blending, blend-and-clipping still differ"
 
 [[item]]
 id = "FILE-215-17"

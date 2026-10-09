@@ -568,6 +568,7 @@ fn routed(id: &str) -> bool {
         || matches!(
             id,
             "paint.cloneStamp"
+                | "paint.patternStamp"
                 | "paint.healingBrush"
                 | "paint.spotHealing"
                 | "paint.dodge"
@@ -577,6 +578,7 @@ fn routed(id: &str) -> bool {
                 | "paint.sharpen"
                 | "paint.smudge"
                 | "paint.historyBrush"
+                | "paint.redEye"
         )
 }
 
@@ -1647,6 +1649,6 @@ fn has_apply_target(s: &Session) -> std::result::Result<(), String> {
     if matches!(l.content, LayerContent::Raster(_)) {
         Ok(())
     } else {
-        Err(format!("Apply Image needs a pixel layer (active layer is a {} layer)", l.content.kind_name()))
+        Err(format!("Apply Image needs a pixel layer (active layer is {} {} layer)", l.content.article(), l.content.kind_name()))
     }
 }

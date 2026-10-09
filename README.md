@@ -122,7 +122,7 @@ Every screenshot here is the real app at work on public-domain art, rendered off
       <br>
       <sub>A headline edited in place, with a byline and a paragraph of body text.<br><i>Among the Sierra Nevada, California</i>, Albert Bierstadt, 1868</sub>
       <h3>Type that sets beautifully</h3>
-      Point and paragraph text, edited right on the canvas, with full Character and Paragraph controls: font, weight, size, leading, tracking, alignment and colour.
+      Point and paragraph text, edited right on the canvas, with full Character and Paragraph controls: font, weight, size, leading, tracking, alignment and colour. The <a href="docs/color-picker.md">full Type Color Picker</a> also supports screen sampling with a pixel loupe.
       <br><br>
       Type layers stay editable, take layer styles, and round-trip through PSD.
     </td>
@@ -277,6 +277,8 @@ flatpak run ai.storyteller.photocraft
 
 The AppImage needs no install: the first run registers its launcher icon and menu entry in `~/.local/share` so the dock shows PhotoCraft's icon on Wayland. Set `PHOTOCRAFT_NO_DESKTOP_INTEGRATION=1` to skip that, and see [`docs/releasing.md`](docs/releasing.md) › Linux to undo it.
 
+On a Wayland session, files dropped on the window don't open yet: winit 0.30, the windowing library under egui, has no Wayland drag and drop (#386). Use File › Open, or copy the image in your file manager and paste it with Ctrl+V. To drag and drop, start PhotoCraft under XWayland: `WAYLAND_DISPLAY= photocraft`, `WAYLAND_DISPLAY= ./photocraft-<version>-linux-x86_64.AppImage`, or `flatpak run --nosocket=wayland --socket=x11 ai.storyteller.photocraft`. On Wayland, PhotoCraft shows the command for your install in a notice until you dismiss it.
+
 On macOS, the command-line tool comes as `photocraft-cli-<version>-macos-universal.zip`. The binary is signed with the same Developer ID as the app and notarized by Apple. A bare binary can't carry a stapled notarization ticket the way the DMG does, so the first time you run it macOS checks the notarization online. You can confirm it yourself:
 
 ```sh
@@ -301,6 +303,8 @@ Maintainers: [`docs/releasing.md`](docs/releasing.md) explains how releases are 
 ## Documentation
 
 Developer, architecture, automation, format, and security documentation is maintained in the [PhotoCraft documentation book](book/).
+
+To self-host the browser version with Docker, see [Docker web hosting](packaging/web/README.md#docker).
 
 ## Security
 
