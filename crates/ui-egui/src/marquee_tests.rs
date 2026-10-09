@@ -291,6 +291,64 @@ fn mouse_drag_inside_the_selection_moves_it() {
     assert_eq!(selection(&h), Rect::new(120, 90, 220, 170), "moved by (20, 10)");
 }
 
+/// #1428: hovering inside the ants with a marquee shows the move cursor (a press there drags the
+/// outline); outside it is the marquee's own cursor.
+#[test]
+fn hovering_inside_the_selection_shows_the_move_cursor() {
+    for tool in [Tool::RectMarquee, Tool::EllipseMarquee] {
+        let mut h = harness(tool);
+        press_at(&mut h, 100.0, 80.0, Modifiers::NONE);
+        release_at(&mut h, 200.0, 160.0, Modifiers::NONE);
+        move_to(&mut h, 150.0, 120.0);
+        assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::Move, "{tool:?} inside");
+        move_to(&mut h, 300.0, 250.0);
+        assert_ne!(h.output().platform_output.cursor_icon, egui::CursorIcon::Move, "{tool:?} outside");
+    }
+}
+
+/// #1428: with a marquee, the arrow keys nudge the selection outline 1 px, ⇧ 10 px (Photoshop);
+/// each press is one undoable step.
+#[test]
+fn arrow_keys_nudge_the_selection_outline() {
+    use egui::Key;
+    for tool in [Tool::RectMarquee, Tool::EllipseMarquee] {
+        let mut h = harness(tool);
+        press_at(&mut h, 100.0, 80.0, Modifiers::NONE);
+        release_at(&mut h, 200.0, 160.0, Modifiers::NONE);
+        let drawn = selection(&h);
+        assert!(!drawn.is_empty(), "{tool:?} drew");
+        let shifted = |dx: i32, dy: i32| Rect::new(drawn.x0 + dx, drawn.y0 + dy, drawn.x1 + dx, drawn.y1 + dy);
+        let steps = h.state().session.active().unwrap().history.past_len();
+        h.key_press(Key::ArrowRight);
+        h.run_steps(1);
+        assert_eq!(selection(&h), shifted(1, 0), "{tool:?} right 1 px");
+        h.key_press(Key::ArrowUp);
+        h.run_steps(1);
+        assert_eq!(selection(&h), shifted(1, -1), "{tool:?} up 1 px");
+        h.key_press_modifiers(Modifiers::SHIFT, Key::ArrowDown);
+        h.run_steps(1);
+        assert_eq!(selection(&h), shifted(1, 9), "{tool:?} shift-down 10 px");
+        h.key_press_modifiers(Modifiers::SHIFT, Key::ArrowLeft);
+        h.run_steps(1);
+        assert_eq!(selection(&h), shifted(-9, 9), "{tool:?} shift-left 10 px");
+        assert_eq!(h.state().session.active().unwrap().history.past_len(), steps + 4, "one step per press");
+        h.state_mut().session.undo();
+        assert_eq!(selection(&h), shifted(1, 9), "{tool:?} undo takes back one nudge");
+    }
+}
+
+/// Arrow keys with a marquee but no selection change nothing and report no error.
+#[test]
+fn arrow_keys_without_a_selection_do_nothing() {
+    let mut h = harness(Tool::RectMarquee);
+    let steps = h.state().session.active().unwrap().history.past_len();
+    h.key_press(egui::Key::ArrowRight);
+    h.run_steps(1);
+    assert_eq!(selection(&h), Rect::EMPTY);
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), steps);
+    assert!(!h.state().ui.status_error);
+}
+
 /// ⌘⌥-drag copies the selected pixels instead of cutting them: the original stays.
 #[test]
 fn cmd_alt_drag_floats_a_copy() {
