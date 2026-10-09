@@ -232,20 +232,21 @@ pub type AutosaveFn = Box<dyn FnMut(&std::sync::Arc<Document>, u64, Option<&str>
 pub type AutosaveResultsFn = Box<dyn FnMut() -> Vec<(u64, u64, Result<(), String>)>>;
 /// Drop the recovery data of a document (by `DocId` value) once it is saved or closed.
 pub type DiscardAutosaveFn = Box<dyn FnMut(u64)>;
-/// Load recoverable documents left by a previous session. Their recovery data stays until the
-/// documents are saved or closed.
-pub type RecoverFn = Box<dyn FnMut() -> Vec<Recovered>>;
+/// List recoverable documents without decoding them. Their data stays until the documents are
+/// saved or closed; the shell runs each entry's loader on a background worker.
+pub type RecoverFn = Box<dyn FnMut() -> Vec<Recoverable>>;
 /// A recovered document (by `DocId` value, once open) takes over its recovery entry (by key):
 /// its autosaves replace the entry, and saving or closing it drops the entry.
 pub type AdoptAutosaveFn = Box<dyn FnMut(u64, &str)>;
 
-/// A document [`RecoverFn`] found.
-pub struct Recovered {
-    /// The recovery entry it was loaded from (see [`AdoptAutosaveFn`]).
+/// A recovery entry [`RecoverFn`] found; its loader owns only the data it needs to read.
+pub struct Recoverable {
+    /// The recovery entry to adopt once loading succeeds (see [`AdoptAutosaveFn`]).
     pub key: String,
+    pub name: String,
     /// Where the user last saved it, if anywhere.
     pub path: Option<String>,
-    pub doc: Document,
+    pub load: Box<dyn FnOnce() -> Result<Document, String> + Send + 'static>,
 }
 /// Append text to a file (History Log).
 pub type AppendTextFn = Box<dyn FnMut(&str, &str) -> Result<(), String>>;
@@ -632,7 +633,7 @@ impl PhotocraftApp {
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
         };
-        // Saved preferences (and recovered documents) are in place before the first frame.
+        // Saved preferences are in place before the first frame; recovery starts in upkeep.
         prefs_ui::load(&mut app);
         notices::wayland_file_drop_guidance(&mut app);
         // File › Scripts › Script Events Manager: "Start Application".
