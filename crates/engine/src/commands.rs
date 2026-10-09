@@ -176,6 +176,31 @@ fn parse_hex(s: &str) -> Option<[f32; 4]> {
         _ => None,
     }
 }
+/// Layer › Create / Release Clipping Mask. With a `layer` param, just that layer. Otherwise, as in
+/// Photoshop, the selection (#1248): Create clips every selected layer except the lowest, which
+/// becomes the base; Release releases every selected layer. One history step either way.
+fn set_clipped(s: &mut Session, p: &Value, clip: bool) -> Result<Value> {
+    let label = if clip { "Create Clipping Mask" } else { "Release Clipping Mask" };
+    let ids: Vec<LayerId> = if p.get("layer").is_some() {
+        vec![layer_param(s, p)?]
+    } else {
+        let selected = s.active().ok_or(EngineError::NoDocument)?.selected_layers();
+        match (clip, selected.as_slice()) {
+            (_, []) => vec![layer_param(s, p)?],
+            (_, [one]) => vec![*one],
+            (true, [_base, rest @ ..]) => rest.to_vec(),
+            (false, all) => all.to_vec(),
+        }
+    };
+    s.edit(label, |doc, _| {
+        for id in &ids {
+            doc.layer_mut(*id).ok_or(EngineError::NoLayer(*id))?.clipped = clip;
+        }
+        Ok(())
+    })?;
+    Ok(json!({"layers": ids.iter().map(|id| id.0).collect::<Vec<_>>()}))
+}
+
 pub(crate) fn layer_param(s: &Session, p: &Value) -> Result<LayerId> {
     match p.get("layer").and_then(Value::as_u64) {
         Some(id) => Ok(LayerId(id)),
@@ -579,22 +604,24 @@ fn build() -> Vec<CommandSpec> {
             p,
             i32::MIN
         )),
-        cmd!("layer.createClippingMask", "Create Clipping Mask", ["Layer"], Some("Cmd+Alt+G"), r##"{"layer":id?}"##, has_layer, |s, p| {
-            let id = layer_param(s, p)?;
-            s.edit("Create Clipping Mask", |doc, _| {
-                doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?.clipped = true;
-                Ok(())
-            })?;
-            Ok(Value::Null)
-        }),
-        cmd!("layer.releaseClippingMask", "Release Clipping Mask", ["Layer"], None, r##"{"layer":id?}"##, has_layer, |s, p| {
-            let id = layer_param(s, p)?;
-            s.edit("Release Clipping Mask", |doc, _| {
-                doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?.clipped = false;
-                Ok(())
-            })?;
-            Ok(Value::Null)
-        }),
+        cmd!(
+            "layer.createClippingMask",
+            "Create Clipping Mask",
+            ["Layer"],
+            Some("Cmd+Alt+G"),
+            r##"{"layer":id?} (no layer: every selected layer but the lowest clips to the layer below it)"##,
+            has_layer,
+            |s, p| set_clipped(s, p, true)
+        ),
+        cmd!(
+            "layer.releaseClippingMask",
+            "Release Clipping Mask",
+            ["Layer"],
+            None,
+            r##"{"layer":id?} (no layer: every selected layer)"##,
+            has_layer,
+            |s, p| set_clipped(s, p, false)
+        ),
         cmd!("layer.layerMask.revealAll", "Reveal All", ["Layer", "Layer Mask"], None, r##"{"layer":id?}"##, has_layer, |s, p| set_mask(
             s,
             p,

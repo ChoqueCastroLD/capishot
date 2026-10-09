@@ -341,6 +341,32 @@ fn clipping_and_merge_and_flatten() {
 }
 
 #[test]
+fn clipping_masks_apply_to_every_selected_layer() {
+    // #1248: with several layers selected, Create Clipping Mask clips all but the lowest (the
+    // base) and Release releases them all, each as one history step.
+    let mut s = session_with_doc();
+    let ids: Vec<u64> = ["A", "B", "C"].iter().map(|n| s.execute("layer.new.layer", json!({"name": n})).unwrap()["layer"].as_u64().unwrap()).collect();
+    s.execute("layer.select", json!({"layer": ids[0]})).unwrap();
+    for id in &ids[1..] {
+        s.execute("layer.select", json!({"layer": id, "mode": "add"})).unwrap();
+    }
+    let clipped = |s: &Session| ids.iter().map(|id| s.active().unwrap().doc.layer(LayerId(*id)).unwrap().clipped).collect::<Vec<_>>();
+    let steps = s.active().unwrap().history.past_len();
+    let r = s.execute("layer.createClippingMask", json!({})).unwrap();
+    assert_eq!(r["layers"], json!([ids[1], ids[2]]));
+    assert_eq!(clipped(&s), [false, true, true], "the lowest selected layer is the base");
+    assert_eq!(s.active().unwrap().history.past_len(), steps + 1);
+    s.execute("layer.releaseClippingMask", json!({})).unwrap();
+    assert_eq!(clipped(&s), [false, false, false]);
+    s.undo();
+    assert_eq!(clipped(&s), [false, true, true], "release is one step");
+    // A `layer` param still acts on that layer alone.
+    s.execute("layer.releaseClippingMask", json!({"layer": ids[2]})).unwrap();
+    assert_eq!(clipped(&s), [false, true, false]);
+    assert!(s.execute("layer.createClippingMask", json!({"layer": 999_999})).is_err());
+}
+
+#[test]
 fn arrange_and_group() {
     let mut s = session_with_doc();
     let a = s.execute("layer.new.layer", json!({"name": "A"})).unwrap()["layer"].as_u64().unwrap();
