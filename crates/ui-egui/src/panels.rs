@@ -1101,8 +1101,8 @@ pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     let (w, h, mode, bits, layers) =
                         (st.doc.size.width, st.doc.size.height, crate::canvas::mode_label(&st.doc), st.doc.depth.bits(), st.doc.layer_count());
                     let mut pct = app.ui.views[i].zoom * 100.0;
-                    if widgets::value_field(ui, &mut pct, 1.0..=3200.0, "%", 78.0).changed() {
-                        app.ui.views[i].zoom = pct / 100.0;
+                    if widgets::value_field(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", 78.0).changed() {
+                        app.ui.views[i].zoom = crate::zoom_levels::clamp(pct / 100.0, app.ui.views[i].doc_size);
                         app.ui.views[i].fit_pending = false;
                     }
                     widgets::vline(ui, 16.0);
@@ -1361,9 +1361,11 @@ fn navigator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         });
     });
-    let mut lz = v.zoom.max(0.01).log2();
-    if widgets::slider(ui, &mut lz, -6.64..=5.0, None).changed() {
-        app.ui.views[idx].zoom = 2f32.powf(lz);
+    // The whole zoom range, and always the current zoom: a narrower slider would pull it back.
+    let (lo, hi) = (crate::zoom_levels::min(v.doc_size).min(v.zoom).log2(), crate::zoom_levels::MAX.max(v.zoom).log2());
+    let mut lz = v.zoom.log2();
+    if lz.is_finite() && widgets::slider(ui, &mut lz, lo..=hi, None).changed() {
+        app.ui.views[idx].zoom = crate::zoom_levels::clamp(2f32.powf(lz), v.doc_size);
         app.ui.views[idx].fit_pending = false;
     }
 }

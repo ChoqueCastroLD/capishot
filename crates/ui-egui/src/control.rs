@@ -425,7 +425,8 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 }
                 if let Some(i) = app.session.active_index() {
                     if let Some(z) = zoom {
-                        app.ui.views[i].zoom = (z as f32).clamp(0.01, 64.0);
+                        let size = app.session.documents().get(i).map_or([0, 0], |st| [st.doc.size.width, st.doc.size.height]);
+                        app.ui.views[i].zoom = crate::zoom_levels::clamp(z as f32, size);
                         app.ui.views[i].fit_pending = false;
                         app.ui.views[i].fill_pending = false;
                     }

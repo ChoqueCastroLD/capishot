@@ -626,7 +626,7 @@ impl ViewXform {
 
 pub fn fit_view(view: &mut View, doc: &Document, area: Vec2) {
     let (w, h) = (doc.size.width as f32, doc.size.height as f32);
-    let zoom = ((area.x - 40.0) / w).min((area.y - 40.0) / h).clamp(0.01, 1.0);
+    let zoom = crate::zoom_levels::clamp(((area.x - 40.0) / w).min((area.y - 40.0) / h).min(1.0), [doc.size.width, doc.size.height]);
     view.zoom = zoom;
     view.center = [w / 2.0, h / 2.0];
     view.fit_pending = false;
@@ -637,18 +637,11 @@ pub fn fit_view(view: &mut View, doc: &Document, area: Vec2) {
 /// viewport, matching the Hand tool's Fill Screen action.
 pub fn fill_view(view: &mut View, doc: &Document, area: Vec2) {
     let (w, h) = (doc.size.width as f32, doc.size.height as f32);
-    let zoom = (area.x / w).max(area.y / h).clamp(0.01, 32.0);
+    let zoom = crate::zoom_levels::clamp((area.x / w).max(area.y / h), [doc.size.width, doc.size.height]);
     view.zoom = zoom;
     view.center = [w / 2.0, h / 2.0];
     view.fit_pending = false;
     view.fill_pending = false;
-}
-
-/// Zoom steps like Photoshop's (⌘+ / ⌘−).
-pub fn zoom_step(z: f32, dir: i32) -> f32 {
-    const STEPS: [f32; 22] =
-        [0.01, 0.02, 0.03, 0.05, 0.0667, 0.1, 0.125, 0.1667, 0.25, 0.333, 0.5, 0.6667, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 12.0, 16.0, 32.0];
-    if dir > 0 { STEPS.iter().copied().find(|s| *s > z * 1.001).unwrap_or(32.0) } else { STEPS.iter().rev().copied().find(|s| *s < z * 0.999).unwrap_or(0.01) }
 }
 
 fn checker(app: &mut PhotocraftApp, ctx: &egui::Context) -> egui::TextureId {
@@ -2286,8 +2279,12 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         let pointer = ui.input(|i| i.pointer.hover_pos());
         match (wheel, pointer) {
             (Some(crate::wheel_nav::Wheel::Zoom(f)), Some(p)) => {
-                let nz = (view.zoom * f).clamp(0.01, 64.0);
-                zoom_about(&mut view, &xf, p, nz, false);
+                // At a limit the view stays put, as in Photoshop: a notch past 12800 % neither
+                // zooms nor slides the image towards the pointer.
+                let nz = crate::zoom_levels::clamp(view.zoom * f, view.doc_size);
+                if nz != view.zoom {
+                    zoom_about(&mut view, &xf, p, nz, false);
+                }
             }
             (Some(crate::wheel_nav::Wheel::Pan(scroll)), _) => {
                 let d = xf.unmap_vec(scroll) / view.zoom;
@@ -2570,7 +2567,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             let d = xf.to_doc(p);
             match tool {
                 Tool::Zoom => {
-                    let nz = zoom_step(view.zoom, if zoom_out(click_mods.alt) { -1 } else { 1 });
+                    let nz = crate::zoom_levels::step(view.zoom, if zoom_out(click_mods.alt) { -1 } else { 1 }, view.doc_size);
                     let center = app.session.prefs().tools.zoom_clicked_point_to_center;
                     zoom_about(&mut view, &xf, p, nz, center);
                 }
@@ -4626,14 +4623,6 @@ mod tests {
         let (shown, key) = display_doc(&mut app, 0);
         assert_eq!((fx(&shown), key), (0, 0));
         assert!(app.style_preview.is_none());
-    }
-
-    #[test]
-    fn zoom_steps_monotone() {
-        assert_eq!(zoom_step(1.0, 1), 2.0);
-        assert_eq!(zoom_step(1.0, -1), 0.6667);
-        assert_eq!(zoom_step(0.4, 1), 0.5);
-        assert_eq!(zoom_step(32.0, 1), 32.0);
     }
 
     #[test]

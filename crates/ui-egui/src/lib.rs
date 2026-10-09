@@ -149,6 +149,7 @@ pub mod wide_angle_ui;
 pub mod widgets;
 pub mod work_area;
 pub mod workspace_ui;
+pub mod zoom_levels;
 pub mod zoom_tool;
 
 use std::collections::HashMap;
