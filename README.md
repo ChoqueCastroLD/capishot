@@ -304,6 +304,8 @@ Maintainers: [`docs/releasing.md`](docs/releasing.md) explains how releases are 
 
 Developer, architecture, automation, format, and security documentation is maintained in the [PhotoCraft documentation book](book/).
 
+To self-host the browser version with Docker, see [Docker web hosting](packaging/web/README.md#docker).
+
 ## Security
 
 Security architecture, threat modeling, parser hardening, fuzzing, and vulnerability reporting are covered in the [security documentation](book/src/security/) and the repository [security policy](SECURITY.md).

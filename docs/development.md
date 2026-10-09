@@ -303,6 +303,16 @@ Any static file server works for `dist/web`, for example `python3 -m http.server
 
 URL flags: `?webgl` forces the WebGL2 backend, and `?cpu` forces the CPU canvas path.
 
+To build and serve the web app entirely in Docker, run from the repository root:
+
+```sh
+docker build --load -t photocraft-web:local .
+docker run --rm -p 8080:8080 photocraft-web:local
+```
+
+Open http://localhost:8080/. See [Docker hosting](../packaging/web/README.md#docker) for
+HTTPS/reverse-proxy deployment and browser limitations.
+
 How the web shell (`apps/photocraft-web/src/web.rs`) differs from desktop:
 
 - **Open** uses `rfd::AsyncFileDialog`. The bytes arrive asynchronously in `Services::inbox`, which the app drains every frame.
