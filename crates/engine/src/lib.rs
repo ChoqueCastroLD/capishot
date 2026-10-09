@@ -81,6 +81,7 @@ pub mod smart_cmds;
 pub mod smartselect_cmds;
 pub mod snap;
 pub mod stamp_cmds;
+pub mod swatch_cmds;
 pub mod symmetry_cmds;
 mod timeline_cmds;
 pub mod transform_cmds;

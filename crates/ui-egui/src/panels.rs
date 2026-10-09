@@ -1,6 +1,6 @@
 //! Chrome around the canvas: title bar, options bar, toolbar, status bar, dock cards, Properties.
 
-use egui::{Align2, Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use photocraft_color::BlendMode;
 use photocraft_doc::{Layer, LayerContent, LayerId};
 use serde_json::{Value, json};
@@ -1130,8 +1130,8 @@ fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate::dock::Gro
         (Group::Color, 2) => crate::preset_panels::gradients_panel(app, ui),
         (Group::Color, 3) => crate::preset_panels::patterns_panel(app, ui),
         (Group::Color, 0) if pro => color_field(app, ui),
-        (Group::Color, _) if pro => swatches(app, ui),
-        (Group::Color, 0) => swatches(app, ui),
+        (Group::Color, _) if pro => crate::swatches_ui::panel(app, ui),
+        (Group::Color, 0) => crate::swatches_ui::panel(app, ui),
         (Group::Color, _) => color_picker(app, ui),
         (Group::Properties, 0) => properties_body(app, ui),
         (Group::Properties, _) => adjustments_grid(app, ui),
@@ -1278,78 +1278,6 @@ fn empty(ui: &mut egui::Ui, s: &str) {
     ui.add_space(6.0);
     ui.label(RichText::new(s).color(t.text_faint));
     ui.add_space(6.0);
-}
-
-const SWATCHES: [[u8; 3]; 40] = [
-    [0, 0, 0],
-    [26, 26, 26],
-    [51, 51, 51],
-    [77, 77, 77],
-    [102, 102, 102],
-    [128, 128, 128],
-    [153, 153, 153],
-    [179, 179, 179],
-    [204, 204, 204],
-    [255, 255, 255],
-    [236, 128, 128],
-    [244, 176, 132],
-    [250, 224, 128],
-    [214, 240, 128],
-    [150, 232, 150],
-    [128, 232, 200],
-    [128, 220, 240],
-    [128, 176, 244],
-    [168, 144, 244],
-    [232, 144, 232],
-    [230, 40, 40],
-    [245, 120, 30],
-    [250, 210, 30],
-    [160, 220, 40],
-    [40, 200, 80],
-    [30, 200, 170],
-    [30, 170, 230],
-    [40, 100, 230],
-    [120, 70, 220],
-    [210, 50, 180],
-    [120, 20, 20],
-    [130, 60, 10],
-    [130, 110, 10],
-    [80, 120, 20],
-    [20, 100, 40],
-    [10, 100, 90],
-    [10, 80, 120],
-    [20, 50, 120],
-    [60, 30, 110],
-    [110, 20, 90],
-];
-
-fn swatches(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
-    let cols = 10;
-    let gap = 4.0;
-    let w = ui.available_width();
-    let cell = ((w - gap * (cols as f32 - 1.0)) / cols as f32).floor();
-    let rows = SWATCHES.len().div_ceil(cols);
-    let (area, _) = ui.allocate_exact_size(vec2(w, rows as f32 * (cell + gap)), Sense::hover());
-    for (i, s) in SWATCHES.iter().enumerate() {
-        let (cx, cy) = ((i % cols) as f32, (i / cols) as f32);
-        let r = Rect::from_min_size(area.min + vec2(cx * (cell + gap), cy * (cell + gap)), Vec2::splat(cell));
-        let resp = ui.interact(r, ui.id().with(("sw", i)), Sense::click());
-        ui.painter().rect_filled(r, 4.0, Color32::from_rgb(s[0], s[1], s[2]));
-        if resp.hovered() {
-            ui.painter().rect_stroke(r, 4.0, Stroke::new(1.5, t.text), StrokeKind::Outside);
-        }
-        let c = [s[0] as f32 / 255.0, s[1] as f32 / 255.0, s[2] as f32 / 255.0, 1.0];
-        if resp.clicked() {
-            app.session.tools.foreground = c;
-            crate::type_tool::foreground_changed(app);
-        }
-        if resp.secondary_clicked() {
-            app.session.tools.background = c;
-        }
-    }
-    ui.add_space(2.0);
-    ui.label(RichText::new(tl!("Click sets foreground · right-click sets background")).small().color(t.text_faint));
 }
 
 fn color_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
@@ -3169,36 +3097,7 @@ mod lock_tests {
 #[cfg(test)]
 mod swatch_type_tests {
     use super::*;
-    use egui::Modifiers;
     use egui_kittest::Harness;
-
-    /// Clicking a swatch while characters are selected recolours them, not just the foreground.
-    #[test]
-    fn clicking_a_swatch_recolours_selected_type() {
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        app.run("file.new", json!({"width": 400, "height": 200})).unwrap();
-        let id = app.run("type.create", json!({"text": "Hello world", "size": 40, "x": 20, "y": 100, "color": "#ffffff"})).unwrap()["layer"].as_u64().unwrap();
-        app.ui.tool = Tool::Type;
-        app.ui.text_edit =
-            Some(crate::state::TextEdit { layer: id, caret: 0, anchor: 5, session: "s".into(), created: false, dragging: false, resize: None, preedit: None });
-        let mut h = Harness::builder().with_size(vec2(300.0, 200.0)).build_ui_state(|ui, app: &mut PhotocraftApp| swatches(app, ui), app);
-        h.run_steps(2);
-        // The first swatch is the top-left cell of the panel's content.
-        let p = h.ctx.input(|i| i.viewport_rect()).min + vec2(12.0, 12.0);
-        h.hover_at(p);
-        h.run_steps(1);
-        h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
-        h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
-        h.run_steps(2);
-        let s = SWATCHES[0];
-        assert_eq!(h.state().session.tools.foreground, [s[0] as f32 / 255.0, s[1] as f32 / 255.0, s[2] as f32 / 255.0, 1.0]);
-        let st = h.state().session.active().unwrap();
-        let Some(photocraft_doc::LayerContent::Text(t)) = st.doc.layer(photocraft_doc::LayerId(id)).map(|l| &l.content) else { panic!("type layer") };
-        let runs = t.char_runs();
-        assert_eq!(runs[0].len, 5, "the selection is its own run");
-        assert_eq!(runs[0].style.color.to_rgba8(), [s[0], s[1], s[2], 255]);
-        assert_eq!(runs[1].style.color.to_rgba8(), [255, 255, 255, 255]);
-    }
 
     /// The HSB sliders only act on an edit. Their h/s/v round trip isn't exact for every colour
     /// (#D8452E isn't), and comparing values used to rewrite the foreground every frame, which
@@ -3249,7 +3148,7 @@ mod type_flyout_tests {
                 .widgets
                 .layers()
                 .flat_map(|(_, w)| w.iter())
-                .filter(|w| w.rect.size() == Vec2::splat(bx) && w.sense.senses_click())
+                .filter(|w| w.rect.size() == egui::Vec2::splat(bx) && w.sense.senses_click())
                 .map(|w| w.rect)
                 .collect()
         });

@@ -99,9 +99,9 @@ note = "format convert.rs:89 + tests/roundtrip.rs:282 persist frames; no PSD vid
 [[item]]
 id = "FILE-215-14"
 target = "User swatch model with ACO/ASE import and export"
-status = "missing"
+status = "done"
 issue = 215
-note = "panels.rs:954 const SWATCHES: [[u8; 3]; 40]"
+note = "engine presets/swatches.rs (RGB/HSB/CMYK/Lab/Gray + verbatim colour books, persisted in prefs) + swatch_cmds.rs (swatches.*); psd aco.rs (v1/v2) and ase.rs (groups, spot/global) read+write; ui swatches_ui.rs, Color Picker Add to Swatches"
 
 [[item]]
 id = "FILE-215-15"

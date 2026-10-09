@@ -106,7 +106,7 @@ pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
     float_flag(&mut p, id).map(|f| *f)
 }
 
-fn run(app: &mut PhotocraftApp, id: &str, p: Value) -> Option<Value> {
+pub(crate) fn run(app: &mut PhotocraftApp, id: &str, p: Value) -> Option<Value> {
     match app.run(id, p) {
         Ok(v) => Some(v),
         Err(e) => {
@@ -205,17 +205,17 @@ fn shape_texture(ctx: &egui::Context, sh: &photocraft_engine::presets::shapes::S
 
 // ------------------------------------------------------------------ the browser
 
-struct ItemView {
-    key: String,
-    name: String,
+pub(crate) struct ItemView {
+    pub(crate) key: String,
+    pub(crate) name: String,
 }
 
-struct GroupView {
-    name: String,
-    items: Vec<ItemView>,
+pub(crate) struct GroupView {
+    pub(crate) name: String,
+    pub(crate) items: Vec<ItemView>,
 }
 
-enum Ev {
+pub(crate) enum Ev {
     Select(String),
     Activate(String),
     Drop(String, Pos2),
@@ -229,18 +229,19 @@ enum Ev {
 }
 
 fn group_open(st: &PresetUi, panel: &str, gi: usize, name: &str) -> bool {
-    (gi == 0) != st.toggled.contains(&format!("{panel}/{name}"))
+    // Swatch groups are small and all start open (Photoshop); other panels open the first only.
+    (gi == 0 || panel == crate::swatches_ui::PANEL) != st.toggled.contains(&format!("{panel}/{name}"))
 }
 
 /// Draws the folders and footer; `thumb` paints item `(group, item)` into a rect.
 /// Where a browser sits: the canvas (drop target), its height cap and the New button's tooltip.
-struct Place<'a> {
-    canvas: Rect,
-    max_h: f32,
-    new_tip: &'a str,
+pub(crate) struct Place<'a> {
+    pub(crate) canvas: Rect,
+    pub(crate) max_h: f32,
+    pub(crate) new_tip: &'a str,
 }
 
-fn browser(
+pub(crate) fn browser(
     ui: &mut egui::Ui,
     st: &mut PresetUi,
     panel: &str,
