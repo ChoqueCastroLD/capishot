@@ -2232,6 +2232,10 @@ fontWeight	Italic	斜体
 	Reset View	表示をリセット
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	中心の周りをドラッグして表示を回転  ·  Shift で 15° 単位
 
+# Color Picker warnings
+	Out of gamut for printing: click for the nearest printable colour	印刷の色域外：クリックすると最も近い印刷可能な色になります
+	Not a web colour: click for the nearest web colour	Web カラーではありません：クリックすると最も近い Web カラーになります
+
 # Generated labels: filter/gallery parameter names, option choices and gallery names (camelCase keys shown as words) (added 2026-10, checked against the code)
 	Accented Edges	輪郭の強調
 	Adjust Interval For Loops	ループ用に間隔を調整
