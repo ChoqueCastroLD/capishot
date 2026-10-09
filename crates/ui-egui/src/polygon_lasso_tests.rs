@@ -286,6 +286,38 @@ fn cmd_drag_inside_the_selection_floats_it_with_the_polygonal_lasso() {
     assert_eq!(app.ui.polygon.len(), 1);
 }
 
+#[test]
+fn backspace_delete_and_right_click_remove_the_last_vertex() {
+    // #1229: ⌫ took Edit › Clear and wiped the layer while a polygon was being drawn.
+    let mut h = harness();
+    for (x, y) in [(50.0, 50.0), (150.0, 50.0), (150.0, 120.0)] {
+        click(&mut h, x, y, Modifiers::NONE);
+        // Past egui's double-click window, so each click adds a vertex.
+        h.run_steps(20);
+    }
+    assert_eq!(h.state().ui.polygon.len(), 3);
+    let st = h.state().session.active().unwrap();
+    let (layer, steps) = (st.active_layer.unwrap(), st.history.past_len());
+    for key in [egui::Key::Backspace, egui::Key::Delete] {
+        h.event(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+        h.run_steps(2);
+    }
+    assert_eq!(h.state().ui.polygon.len(), 1);
+    // A right-click removes the last one and cancels the polygon, without a context menu.
+    let p = screen(&h, 90.0, 90.0);
+    h.event(egui::Event::PointerMoved(p));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Secondary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Secondary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(2);
+    assert!(h.state().ui.polygon.is_empty() && h.state().ui.polygon_mode.is_empty());
+    assert!(h.state().ui.canvas_tool_menu.is_none());
+    let st = h.state().session.active().unwrap();
+    assert!(st.doc.layer(layer).is_some(), "the layer survives");
+    assert_eq!(st.history.past_len(), steps, "nothing was edited");
+}
+
 /// ⌥ held: a drag draws freehand into the polygon; releasing ⌥ goes back to straight segments,
 /// and the polygon stays open (a new selection, even though ⌥ was held at the first click).
 #[test]

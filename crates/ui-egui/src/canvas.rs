@@ -2113,7 +2113,12 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         {
             crate::canvas_tool_menu::open_transform(app, [p.x, p.y]);
         }
-        let lasso_retracted = tool == Tool::Lasso && response.secondary_clicked() && crate::lasso_ui::undo_last_vertex(app);
+        let lasso_retracted = response.secondary_clicked()
+            && match tool {
+                Tool::Lasso => crate::lasso_ui::undo_last_vertex(app),
+                Tool::PolygonLasso => polygon_retract(app),
+                _ => false,
+            };
         if tool == Tool::Lasso {
             crate::lasso_ui::canvas_input(app, &ctx, &xf, &response);
             (buttons.started, buttons.dragged, buttons.stopped, buttons.clicked) = (false, false, false, false);
@@ -3308,6 +3313,18 @@ fn polygon_click(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers)
         app.ui.polygon_mode = selection_mode(app, intent).into();
     }
     app.ui.polygon.push([x, y]);
+}
+
+/// Remove the Polygonal Lasso's last vertex (⌫, Delete or a right-click while drawing, #1229);
+/// removing the only one cancels the polygon. False when no polygon is being drawn.
+pub fn polygon_retract(app: &mut PhotocraftApp) -> bool {
+    if app.ui.polygon.pop().is_none() {
+        return false;
+    }
+    if app.ui.polygon.is_empty() {
+        app.ui.polygon_mode.clear();
+    }
+    true
 }
 
 /// A new-selection polygonal (or magnetic) lasso is being drawn, so the selection it will replace
