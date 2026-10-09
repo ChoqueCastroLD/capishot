@@ -387,12 +387,24 @@ fn smoothed_opacity_stops(grad: &Descriptor, method: Option<&[u8]>) -> Vec<(f32,
     let mids: Vec<f32> = order.iter().skip(1).filter_map(|i| mids.get(*i).copied()).collect();
     let smooth = num(grad.get("Intr")).map_or(0.0, |v| (v / 4096.0) as f32);
     let smooth_method = crate::gradient_bake::Method::from_code(method) == crate::gradient_bake::Method::Smooth;
+    let mut source: Vec<(f32, f32)> = stops.iter().map(|(t, c)| (*t, c.to_rgb()[0])).collect();
+    source.sort_by(|a, b| a.0.total_cmp(&b.0));
     let baked = if stops.len() >= 2 { crate::gradient_bake::bake(stops, &mids, smooth, crate::gradient_bake::Method::Classic) } else { stops };
     let mut opacity: Vec<(f32, f32)> = baked.into_iter().map(|(t, c)| {
         let a = c.to_rgb()[0].clamp(0.0, 1.0);
-        // Photoshop's 'Smoo' opacity decays significantly faster than Classic.
-        // At the reported sample points, Classic^1.7 tracks the measured alpha.
-        (t, if smooth_method { a.powf(1.7) } else { a })
+        // Smooth is a convex *interpolation*, not a power applied to the whole
+        // alpha value. Preserve every stop's original opacity, including a constant
+        // 50% stop; ease only between stops. Fitted to #1954's alpha measurements.
+        let eased = if smooth_method {
+            source.windows(2).find(|w| t >= w[0].0 && t <= w[1].0).map_or(a, |w| {
+                let (a0, a1) = (w[0].1, w[1].1);
+                let u = if (a1 - a0).abs() > 1e-6 { ((a - a0) / (a1 - a0)).clamp(0.0, 1.0) } else { 0.0 };
+                a0 + (a1 - a0) * (1.0 - (1.0 - u).powf(1.7))
+            })
+        } else {
+            a
+        };
+        (t, eased.clamp(0.0, 1.0))
     }).collect();
     if opacity.iter().all(|(_, a)| *a >= 1.0 - 1e-4) {
         opacity.clear();
@@ -870,6 +882,26 @@ mod more_tests {
         assert!((near(&smooth) - 0.5f32.powf(1.7)).abs() < 0.02);
         assert_eq!(smooth.first().unwrap().1, 1.0);
         assert_eq!(smooth.last().unwrap().1, 0.0);
+    }
+
+    #[test]
+    fn smooth_opacity_preserves_non_extreme_stop_values() {
+        let stop = |location: i32, opacity: f32| Value::Descriptor(
+            Descriptor::new("TrnS")
+                .with("Lctn", Value::Integer(location))
+                .with("Opct", Value::UnitFloat { unit: *b"#Prc", value: f64::from(opacity) })
+                .with("Mdpn", Value::Integer(50)),
+        );
+        let grad = Descriptor::new("Grdn")
+            .with("Trns", Value::List(vec![stop(0, 60.0), stop(4096, 20.0)]))
+            .with("Intr", Value::Integer(0));
+        let eased = smoothed_opacity_stops(&grad, Some(b"Smoo"));
+        assert!((eased.first().unwrap().1 - 0.6).abs() < 1e-5);
+        assert!((eased.last().unwrap().1 - 0.2).abs() < 1e-5);
+        let middle = eased.iter().min_by(|a, b| (a.0 - 0.5).abs().total_cmp(&(b.0 - 0.5).abs())).unwrap().1;
+        assert!(middle < 0.4 && middle > 0.2);
+        let single = Descriptor::new("Grdn").with("Trns", Value::List(vec![stop(0, 50.0)]));
+        assert_eq!(smoothed_opacity_stops(&single, Some(b"Smoo")), vec![(0.0, 0.5)]);
     }
 
     #[test]
