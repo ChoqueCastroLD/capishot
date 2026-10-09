@@ -408,9 +408,9 @@ impl Sentinel {
     }
 }
 
-/// Read the policy leniently at startup, including old settings without renderingMode.
 /// The Linux display-server preference (`performance.linuxDisplayServer`) from the preferences
 /// file, read before the window opens; `Auto` when the file or value is missing or unknown.
+#[cfg(any(target_os = "linux", test))]
 pub fn read_display_server(path: Option<&Path>) -> photocraft_engine::prefs::LinuxDisplayServer {
     let v: Value = path.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     v.get("performance")
@@ -419,6 +419,7 @@ pub fn read_display_server(path: Option<&Path>) -> photocraft_engine::prefs::Lin
         .unwrap_or_default()
 }
 
+/// Read the policy leniently at startup, including old settings without renderingMode.
 pub fn read_rendering_prefs(path: Option<&Path>) -> (GpuBackend, RenderingMode) {
     let v: Value = path.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     let perf = v.get("performance");
