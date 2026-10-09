@@ -726,22 +726,61 @@ pub fn style_label(style: &str) -> String {
 
 /// Searchable font-family combo box.
 fn font_picker(ui: &mut egui::Ui, current: &mut String, width: f32) -> bool {
+    font_picker_in(ui, current, width, families())
+}
+
+/// Maximum height of the font menu.
+const FONT_MENU_HEIGHT: f32 = 460.0;
+
+/// [`font_picker`] over a given family list (tests pass their own).
+fn font_picker_in(ui: &mut egui::Ui, current: &mut String, width: f32, families: &[String]) -> bool {
     let mut changed = false;
     let search_id = ui.id().with("font-search");
-    egui::ComboBox::from_id_salt("type-font").selected_text(current.as_str()).width(width).height(460.0).icon(crate::widgets::chevron_icon).show_ui(ui, |ui| {
+    let combo = egui::ComboBox::from_id_salt("type-font")
+        .selected_text(current.as_str())
+        .width(width)
+        .height(FONT_MENU_HEIGHT)
+        .icon(crate::widgets::chevron_icon)
+        // Clicks inside the menu (the search field, the scroll bar) must not close it (#1369);
+        // picking a font closes it explicitly below.
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    combo.show_ui(ui, |ui| {
+        let (pass_id, focus_id, height_id) = (search_id.with("pass"), search_id.with("focus"), search_id.with("height"));
+        let pass = ui.ctx().cumulative_pass_nr();
+        let last_pass: Option<u64> = ui.data(|d| d.get_temp(pass_id));
+        // Freshly opened (not drawn last pass): focus the search field whatever the query, and keep
+        // asking until it has focus (the first pass is egui's invisible sizing pass) (#1369).
+        let opened = last_pass.is_none_or(|p| p.saturating_add(1) < pass);
+        let mut focus = opened || ui.data(|d| d.get_temp(focus_id)).unwrap_or(false);
         let mut q: String = ui.data(|d| d.get_temp(search_id)).unwrap_or_default();
         let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text(tl!("Search fonts")).desired_width(200.0));
-        if !r.has_focus() && q.is_empty() {
+        if r.has_focus() {
+            focus = false;
+        } else if focus {
             r.request_focus();
         }
-        ui.data_mut(|d| d.insert_temp(search_id, q.clone()));
+        ui.data_mut(|d| {
+            d.insert_temp(pass_id, pass);
+            d.insert_temp(focus_id, focus);
+            d.insert_temp(search_id, q.clone());
+        });
         let ql = q.to_lowercase();
-        for f in families().iter().filter(|f| ql.is_empty() || f.to_lowercase().contains(&ql)) {
+        for f in families.iter().filter(|f| ql.is_empty() || f.to_lowercase().contains(&ql)) {
             if ui.selectable_label(f == current, f).clicked() {
                 *current = f.clone();
                 changed = true;
                 ui.data_mut(|d| d.remove::<String>(search_id));
+                ui.close();
             }
+        }
+        // egui measures a popup only when it opens and never lets it grow back, so a filtered
+        // list would leave the menu short after the query is cleared (#1369). Keep the unfiltered
+        // height while searching.
+        if ql.is_empty() {
+            let h = ui.min_rect().height();
+            ui.data_mut(|d| d.insert_temp(height_id, h));
+        } else if let Some(h) = ui.data(|d| d.get_temp::<f32>(height_id)) {
+            ui.set_min_height(h.min(FONT_MENU_HEIGHT));
         }
     });
     changed
@@ -1392,6 +1431,10 @@ pub fn cancel(app: &mut PhotocraftApp) {
 #[cfg(test)]
 #[path = "type_tool_tests.rs"]
 mod canvas_tests;
+
+#[cfg(test)]
+#[path = "type_font_picker_tests.rs"]
+mod font_picker_tests;
 
 #[cfg(test)]
 mod tests {
