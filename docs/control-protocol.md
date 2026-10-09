@@ -28,6 +28,8 @@ Each reply is one JSON line with the same `id`:
 {"id": 2, "ok": false, "error": "unknown tool `foo`"}
 ```
 
+The desktop server waits up to 60 seconds for a reply. A request still queued at that deadline is rejected before dispatch; a timeout does not cancel work that has already started.
+
 The transport is `apps/photocraft/src/control_server.rs`, and the handlers are in `crates/ui-egui/src/control.rs`. The MCP server (`photocraft-cli mcp --bridge 127.0.0.1:<port>`, crate `photocraft-automation`) wraps this same protocol. See [MCP bridge](#mcp-bridge) below.
 
 ## Methods

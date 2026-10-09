@@ -942,6 +942,10 @@ impl PhotocraftApp {
         let Some(rx) = self.control_rx.take() else { return };
         while let Ok(req) = rx.try_recv() {
             let reply = req.reply.clone();
+            if req.deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                let _ = reply.send(serde_json::json!({"ok": false, "error": "timeout"}));
+                continue;
+            }
             match control::handle(self, ctx, &req) {
                 control::Outcome::Done(v) => {
                     let _ = reply.send(v);

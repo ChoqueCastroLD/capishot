@@ -45,12 +45,14 @@ pub struct ControlRequest {
     pub method: String,
     pub params: Value,
     pub reply: Sender<ControlResponse>,
+    /// Requests still queued at this instant are rejected; already dispatched work continues.
+    pub deadline: Option<std::time::Instant>,
 }
 
 impl ControlRequest {
     pub fn new(method: impl Into<String>, params: Value) -> (Self, std::sync::mpsc::Receiver<ControlResponse>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        (Self { method: method.into(), params, reply: tx }, rx)
+        (Self { method: method.into(), params, reply: tx, deadline: None }, rx)
     }
 }
 
@@ -814,6 +816,45 @@ mod tests {
             Outcome::Done(v) => v,
             _ => panic!("{method}: expected an immediate reply"),
         }
+    }
+
+    #[test]
+    fn expired_queued_edit_does_not_run_and_a_live_retry_runs_once() {
+        use std::time::{Duration, Instant};
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let before = app.session.active().unwrap();
+        let layers = before.doc.layers.len();
+        let steps = before.history.past_len();
+        let (tx, rx) = std::sync::mpsc::channel();
+        app = app.with_control(rx);
+        let (mut expired, expired_reply) = ControlRequest::new("engine.execute", json!({"command": "layer.new.layer"}));
+        expired.deadline = Some(Instant::now() - Duration::from_secs(1));
+        tx.send(expired).unwrap();
+        let (mut retry, retry_reply) = ControlRequest::new("engine.execute", json!({"command": "layer.new.layer"}));
+        retry.deadline = Some(Instant::now() + Duration::from_secs(60));
+        tx.send(retry).unwrap();
+        app.drain_control(&egui::Context::default());
+        assert_eq!(expired_reply.try_recv().unwrap(), json!({"ok": false, "error": "timeout"}));
+        assert_eq!(retry_reply.try_recv().unwrap()["ok"], true);
+        let after = app.session.active().unwrap();
+        assert_eq!(after.doc.layers.len(), layers + 1, "only the live retry adds a layer");
+        assert_eq!(after.history.past_len(), steps + 1, "the expired edit adds no undo step");
+    }
+
+    #[test]
+    fn deadline_free_requests_run_even_after_the_receiver_is_dropped() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let layers = app.session.active().unwrap().doc.layers.len();
+        let (tx, rx) = std::sync::mpsc::channel();
+        app = app.with_control(rx);
+        let (req, reply) = ControlRequest::new("engine.execute", json!({"command": "layer.new.layer"}));
+        assert!(req.deadline.is_none());
+        drop(reply);
+        tx.send(req).unwrap();
+        app.drain_control(&egui::Context::default());
+        assert_eq!(app.session.active().unwrap().doc.layers.len(), layers + 1);
     }
 
     #[test]
