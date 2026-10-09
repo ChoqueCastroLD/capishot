@@ -70,8 +70,10 @@ pub(crate) fn import_layered(name: &str, img: &Image, layers: &[u8]) -> Result<I
     // The profile, resolution, XMP and EXIF are the TIFF's own tags; they win over any copy
     // in the resources.
     set_resource(&mut resources, ids::ICC_PROFILE, img.icc.clone());
-    if let Some((x, _)) = img.meta.dpi.filter(|d| d.0 > 0.0) {
-        set_resource(&mut resources, ids::RESOLUTION_INFO, Some(ResolutionInfo::from_dpi(f64::from(x)).to_bytes()));
+    if let Some((x, y)) = img.meta.dpi.filter(|d| d.0 > 0.0) {
+        // Both axes, so the PSD import notes a vertical resolution the document can't keep.
+        let ri = ResolutionInfo { v_res_fixed: ResolutionInfo::from_dpi(f64::from(y)).v_res_fixed, ..ResolutionInfo::from_dpi(f64::from(x)) };
+        set_resource(&mut resources, ids::RESOLUTION_INFO, Some(ri.to_bytes()));
     }
     if let Some(xmp) = &img.meta.xmp {
         set_resource(&mut resources, ids::XMP, Some(xmp.as_bytes().to_vec()));

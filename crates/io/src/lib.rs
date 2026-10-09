@@ -94,6 +94,14 @@ pub struct ImportResult {
     pub warnings: Vec<String>,
 }
 
+/// The import note for a file whose horizontal and vertical resolutions (`x`, `y`, in pixels per
+/// inch) differ: a document has one resolution, so it keeps the horizontal one and saves it on
+/// both axes (#1018). Differences under 0.01 ppi are below what the warning can show.
+pub(crate) fn unequal_resolution_warning(x: f64, y: f64) -> Option<String> {
+    ((x - y).abs() >= 0.01)
+        .then(|| format!("the vertical resolution ({y:.2} ppi) differs from the horizontal ({x:.2} ppi); the document keeps {x:.2} ppi for both"))
+}
+
 /// Result of [`export`].
 #[derive(Debug, Clone)]
 pub struct ExportResult {
