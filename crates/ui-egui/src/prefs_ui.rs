@@ -1130,7 +1130,11 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
         ui.add(egui::TextEdit::singleline(&mut filter).desired_width(260.0).hint_text(tl!("command or shortcut")));
     });
     f.insert("filter".into(), json!(filter));
-    let mut overrides: BTreeMap<String, String> = f.get("overrides").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+    // A malformed map (set over automation) is left as it is, so OK rejects it instead of
+    // saving the empty map drawn in its place.
+    let parsed = f.get("overrides").map(|v| serde_json::from_value::<BTreeMap<String, String>>(v.clone()));
+    let overrides_ok = parsed.as_ref().is_none_or(Result::is_ok);
+    let mut overrides = parsed.and_then(Result::ok).unwrap_or_default();
     let mut hidden: Vec<String> = f.get("hidden").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
     let mut colors: BTreeMap<String, String> = f.get("colors").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
     let mut selected = f.get("selected").and_then(Value::as_str).unwrap_or("").to_string();
@@ -1275,7 +1279,9 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
     if !message.is_empty() {
         ui.label(RichText::new(&message).color(if message.contains("already in use") { t.warning } else { t.text_dim }));
     }
-    f.insert("overrides".into(), json!(overrides));
+    if overrides_ok {
+        f.insert("overrides".into(), json!(overrides));
+    }
     f.insert("hidden".into(), json!(hidden));
     f.insert("colors".into(), json!(colors));
     f.insert("selected".into(), json!(selected));
@@ -1409,7 +1415,9 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
             let overrides = f.get("overrides").cloned().unwrap_or(json!({}));
             // Shortcuts moved to another command are taken from their old owner (shell
             // commands included, which the engine doesn't know).
-            let mut ov: BTreeMap<String, String> = serde_json::from_value(overrides).unwrap_or_default();
+            // The map replaces every stored override, so a malformed one is an error, not "none".
+            let mut ov: BTreeMap<String, String> =
+                serde_json::from_value(overrides).map_err(|e| format!("overrides must map command IDs to shortcut strings: {e}"))?;
             let items = shortcut_items(app);
             // Newly assigned shortcuts are checked first and take theirs from any holder, custom
             // overrides included; unchanged overrides only take theirs from defaults.
@@ -2075,6 +2083,35 @@ mod tests {
         assert_eq!(effective_shortcut(&app, "layer.new.layer", None).as_deref(), Some("Cmd+O"));
         assert_eq!(effective_shortcut(&app, "layer.new.group", None), None, "taken back from the group");
         assert_eq!(effective_shortcut(&app, "file.open", Some("Cmd+O")), None, "File › Open stays cleared");
+    }
+
+    #[test]
+    fn shortcut_dialog_rejects_malformed_overrides() {
+        // #956: a non-map `overrides` was read as "no overrides" and wiped every custom shortcut.
+        let (mut app, _) = app_with_store();
+        let ctx = egui::Context::default();
+        app.run("edit.keyboardShortcuts", json!({"set": {"file.new": "Ctrl+Shift+N"}})).unwrap();
+        let before = app.session.prefs().shortcuts.clone();
+        assert!(!before.is_empty());
+        for bad in [json!("bogus"), json!(["file.new"]), json!({"file.new": 5})] {
+            let id = crate::menus::invoke(&mut app, &ctx, "edit.keyboardShortcuts", json!({})).unwrap()["dialog"].as_u64().unwrap();
+            app.ui.dialog_mut(id).unwrap().fields.insert("overrides".into(), bad.clone());
+            assert!(crate::dialogs::confirm(&mut app, id).is_err(), "{bad} accepted");
+            assert_eq!(app.session.prefs().shortcuts, before, "{bad} changed the shortcuts");
+        }
+
+        // Drawing the open dialog keeps the malformed value for OK to reject, instead of
+        // replacing it with the empty map it shows.
+        let id = crate::menus::invoke(&mut app, &ctx, "edit.keyboardShortcuts", json!({})).unwrap()["dialog"].as_u64().unwrap();
+        app.ui.dialog_mut(id).unwrap().fields.insert("overrides".into(), json!("bogus"));
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1280.0, 800.0)).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            app
+        });
+        h.run_steps(4);
+        assert_eq!(h.state().ui.dialogs.iter().find(|d| d.id == id).unwrap().fields["overrides"], json!("bogus"));
+        assert!(crate::dialogs::confirm(h.state_mut(), id).is_err());
+        assert_eq!(h.state().session.prefs().shortcuts, before);
     }
 
     #[test]

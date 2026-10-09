@@ -806,6 +806,13 @@ pub(crate) type NavigatorCache = (std::sync::Weak<Document>, u64, egui::TextureH
 /// How long adjustment-dialog settings must stay unchanged before the navigator shows them.
 const NAVIGATOR_SETTLE_MS: f64 = 200.0;
 
+/// While a Move or Patch drag or a live paint stroke is under way, the navigator keeps its image
+/// of document `idx` and catches up on release: each step of the drag is a new preview, and a
+/// thumbnail composite of the whole document per step makes painting lag on large images.
+fn navigator_waits_for_drag(app: &PhotocraftApp, idx: usize) -> bool {
+    crate::move_ui::showing(app) || crate::patch_preview::showing(app) || live_stroke(app, idx).is_some()
+}
+
 /// The Navigator panel's image of document `idx`. With the CPU canvas that is the canvas texture
 /// itself; with the GPU canvas a thumbnail cached per revision, so an edit to a huge document
 /// doesn't also pay a full-resolution CPU composite for the navigator.
@@ -825,9 +832,8 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     {
         return Some(t.id());
     }
-    // While a Move or Patch drag is under way the navigator keeps its image and catches up on release.
     if let Some((_, _, t)) = &cached
-        && (crate::move_ui::showing(app) || crate::patch_preview::showing(app))
+        && navigator_waits_for_drag(app, idx)
     {
         return Some(t.id());
     }
@@ -4286,6 +4292,27 @@ mod tests {
         assert!(partial, "the handover refreshes only the stroke");
         let p = app.session.journal.iter().rev().find(|(id, _)| id == "paint.stroke").map(|(_, p)| p.clone()).unwrap();
         assert!(p.get("smoothing").is_none(), "the commit uses the session brush's smoothing, not a hard-coded one");
+    }
+
+    #[test]
+    fn navigator_keeps_its_image_during_a_live_brush_stroke() {
+        // #1631: every step of a live stroke is a new preview key, so a navigator keyed by it
+        // re-composited the whole document per frame while painting. It waits for the release.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 200, "height": 80, "background": "transparent"})).unwrap();
+        app.ui.tool = Tool::Brush;
+        let m = egui::Modifiers::NONE;
+        assert!(!navigator_waits_for_drag(&app, 0));
+        tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 40.0, pressure: 1.0 }, m);
+        let mut keys = Vec::new();
+        for x in [40.0, 70.0, 100.0] {
+            tool_event(&mut app, ToolEvent::Move { x, y: 40.0, pressure: 1.0 }, m);
+            keys.push(display_doc(&mut app, 0).1);
+            assert!(navigator_waits_for_drag(&app, 0), "painting at x = {x}");
+        }
+        assert!(keys.windows(2).all(|k| k[0] != k[1]), "each step is a new preview: {keys:?}");
+        tool_event(&mut app, ToolEvent::Up { x: 100.0, y: 40.0 }, m);
+        assert!(!navigator_waits_for_drag(&app, 0), "the navigator catches up on release");
     }
 
     #[test]
