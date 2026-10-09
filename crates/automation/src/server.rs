@@ -92,10 +92,21 @@ pub struct SaveParams {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct PreviewParams {
+    /// Headless mode only: document index (default: the active document).
+    /// Bridge previews capture the app window and reject `index`.
     #[serde(default)]
     pub index: Option<usize>,
     /// Longest side of a headless preview (default 1024, maximum 2048).
     /// Zero requests full size within that ceiling. Bridge mode returns the window screenshot.
+    #[serde(default)]
+    pub max_side: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenshotParams {
+    /// Downscale the window screenshot to this longest side (maximum 2048).
+    /// Omit or pass zero to keep the original size.
     #[serde(default)]
     pub max_side: Option<u32>,
 }
@@ -447,6 +458,9 @@ impl PhotocraftMcp {
         let Some(b) = self.bridge_client() else {
             return Ok(no_backend());
         };
+        if p.index.is_some() {
+            return Ok(fail("`index` is only supported in headless mode; bridge previews capture the app window"));
+        }
         self.screenshot(b, Some(max)).await
     }
 
@@ -571,7 +585,7 @@ impl PhotocraftMcp {
     }
 
     #[tool(description = "Bridge mode: screenshot of the live app window as PNG.")]
-    async fn ui_screenshot(&self, Parameters(p): Parameters<PreviewParams>) -> Result<CallToolResult, McpError> {
+    async fn ui_screenshot(&self, Parameters(p): Parameters<ScreenshotParams>) -> Result<CallToolResult, McpError> {
         match self.bridge_client() {
             Some(b) => self.screenshot(b, p.max_side).await,
             None => bridge_only("ui_screenshot"),

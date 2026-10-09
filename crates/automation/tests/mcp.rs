@@ -598,6 +598,60 @@ async fn bridge_previews_downscale_before_enforcing_the_png_budget() {
     app.abort();
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_previews_reject_document_indices() {
+    let (addr, app) = fake_app().await;
+    let client = connect(PhotocraftMcp::bridge(&addr, CONTROL_TOKEN).unwrap()).await;
+    let mut errors = Vec::new();
+    for tool in ["ui_screenshot", "doc_render_preview"] {
+        let args = json!({"index": 0, "max_side": 20}).as_object().unwrap().clone();
+        let result = client.call_tool(CallToolRequestParams::new(tool).with_arguments(args)).await;
+        let error = match result {
+            Err(error) => Some(error.to_string()),
+            Ok(reply) if reply.is_error == Some(true) => Some(text(&reply)),
+            Ok(_) => None,
+        };
+        errors.push((tool, error));
+
+        let reply = call(&client, tool, json!({"max_side": 20})).await;
+        assert_ne!(reply.is_error, Some(true), "{tool}: {}", text(&reply));
+        let image = reply.content.iter().find_map(|content| content.as_image()).expect("screenshot");
+        let png = base64::engine::general_purpose::STANDARD.decode(&image.data).unwrap();
+        assert_eq!(photocraft_codecs::decode(&png).unwrap().dimensions(), (20, 10), "{tool}");
+    }
+    let tools = client.list_all_tools().await.unwrap();
+    let schema = &tools.iter().find(|tool| tool.name == "ui_screenshot").unwrap().input_schema;
+    client.cancel().await.unwrap();
+    let seen = tokio::time::timeout(std::time::Duration::from_secs(5), app).await.unwrap().unwrap();
+
+    assert!(errors.iter().all(|(_, error)| error.as_ref().is_some_and(|error| error.contains("index"))), "{errors:?}");
+    assert_eq!(seen.iter().filter(|request| request["method"] == "ui.screenshot").count(), 2, "rejected indices must not reach the app");
+    assert!(schema["properties"].get("index").is_none(), "{schema:?}");
+    assert!(schema["properties"].get("max_side").is_some(), "{schema:?}");
+    assert_eq!(schema.get("additionalProperties"), Some(&json!(false)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn headless_previews_preserve_document_indices() {
+    let client = connect(PhotocraftMcp::headless()).await;
+    json_of(&call(&client, "doc_new", json!({"width": 12, "height": 6, "background": "white"})).await);
+    json_of(&call(&client, "doc_new", json!({"width": 6, "height": 12, "background": "black"})).await);
+    for (args, dimensions, pixel) in [(json!({"index": 0, "max_side": 6}), (6, 3), [255, 255, 255, 255]), (json!({"max_side": 6}), (3, 6), [0, 0, 0, 255])] {
+        let reply = call(&client, "doc_render_preview", args).await;
+        assert_ne!(reply.is_error, Some(true), "{}", text(&reply));
+        let image = reply.content.iter().find_map(|content| content.as_image()).expect("preview");
+        let png = base64::engine::general_purpose::STANDARD.decode(&image.data).unwrap();
+        let image = photocraft_codecs::decode(&png).unwrap();
+        assert_eq!(image.dimensions(), dimensions);
+        assert!(image.to_rgba8().chunks_exact(4).all(|actual| actual == pixel));
+    }
+    assert_eq!(json_of(&call(&client, "session_list", json!({})).await)["active"], 1);
+    let tools = client.list_all_tools().await.unwrap();
+    let schema = &tools.iter().find(|tool| tool.name == "doc_render_preview").unwrap().input_schema;
+    assert!(schema["properties"].get("index").is_some(), "{schema:?}");
+    client.cancel().await.unwrap();
+}
+
 #[test]
 fn bridge_rejects_non_loopback() {
     assert!(PhotocraftMcp::bridge("10.0.0.5:7878", CONTROL_TOKEN).is_err());

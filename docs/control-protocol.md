@@ -199,6 +199,8 @@ How each MCP tool maps onto control methods in bridge mode:
 | `ui_set {fields}` | `ui.set` |
 | `control_call {method, params}` | any method, passed through unchanged |
 
+Bridge previews capture the app window; passing `index` is an error. Headless `doc_render_preview` supports `index` without changing the active document.
+
 `doc_select` and `doc_close` work only in headless mode. The `ui_*` tools and `control_call` work only in bridge mode; in headless mode they return a tool error that explains how to start bridge mode.
 
 **Security note:** TCP control uses a bearer token, not client identity or general per-method
