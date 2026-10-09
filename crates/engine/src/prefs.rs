@@ -848,7 +848,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "tools.showTransformationValues",
     "tools.doubleClickLayerMaskLaunchesSelectAndMask",
     "fileHandling.imagePreviews",
-    "fileHandling.lowercaseExtension",
     "fileHandling.saveInBackground",
     "fileHandling.ignoreExifProfileTag",
     "fileHandling.maximizePsdCompatibility",
