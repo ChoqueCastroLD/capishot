@@ -125,7 +125,8 @@ pub struct Drag {
     /// sizing it (marquees, lasso, shapes; `hold_keys`).
     pub reposition: bool,
     /// A marquee or lasso drag that started inside the selection moves it instead of drawing:
-    /// `Some(false)` moves the outline, `Some(true)` moves the floating piece (`select.float`).
+    /// `Some(false)` moves the outline, `Some(true)` moves the floating piece (`select.float`), as
+    /// every Move-tool drag with a selection does (`move_ui::moves_selected_pixels`).
     pub sel_move: Option<bool>,
     pub lasso: Option<crate::lasso_ui::Lasso>,
 }
@@ -2791,9 +2792,11 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     }
     // View › Snap / Snap To and smart guides (snap_ui.rs).
     let raw = ev;
-    // A press anywhere but on the floating piece (or with ⇧ / ⌥, to draw) drops it first.
+    // A press anywhere but on the floating piece (or with ⇧ / ⌥, to draw) drops it first; the
+    // Move tool drags it from anywhere.
     if let ToolEvent::Down { x, y, .. } = raw
         && app.session.active().is_some_and(|st| photocraft_engine::float_cmds::floating(st).is_some())
+        && !crate::move_ui::moves_selected_pixels(app)
         && selection_drag_kind(app, app.ui.tool, [x, y], mods) != Some(true)
     {
         let _ = app.run("select.drop", json!({}));
@@ -2865,9 +2868,19 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     }
     // Move tool over a guide drags the guide (off the canvas deletes it).
     match ev {
-        ToolEvent::Down { x, y, .. } if tool == Tool::Move => {
+        ToolEvent::Down { x, y, pressure } if tool == Tool::Move => {
             if let Some((vertical, i)) = crate::rulers::guide_at(app, x, y) {
                 app.guide_drag = Some(crate::rulers::GuideDrag { vertical, index: Some(i), pos: if vertical { x } else { y } });
+                return;
+            }
+            // With a selection: cut the selected pixels (⌥ copies them) and drag them as a floating
+            // piece, from anywhere, as a marquee ⌘-drag does (no Auto-Select pick).
+            if crate::move_ui::moves_selected_pixels(app) {
+                if crate::move_ui::float_selected(app, mods.alt, 0.0, 0.0) {
+                    let mut d = Drag::new(tool, [x, y], vec![[x, y, pressure as f64]], mods, false);
+                    d.sel_move = Some(true);
+                    app.drag = Some(d);
+                }
                 return;
             }
             // Auto-Select (or ⌘-click while it is off) picks the layer under the pointer first.
@@ -3048,6 +3061,9 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             if d.tool == Tool::Move && d.points.len() < 2 && matches!(raw, ToolEvent::Up { x, y } if [x, y] == d.start) {
                 app.move_preview = None;
                 crate::move_mods::finish(app);
+                if d.sel_move.is_some() {
+                    finish_selection_drag(app, true, d.start, d.start);
+                }
                 return;
             }
             if d.points.last().is_none_or(|p| p[0] != x || p[1] != y) {
@@ -3133,10 +3149,13 @@ fn selection_shown_offset(app: &PhotocraftApp) -> Option<(i32, i32)> {
 }
 
 /// End of a selection drag: move the outline, or the floating piece. A click without moving
-/// deselects, like a marquee click (a click on a floating piece leaves it floating).
+/// deselects, like a marquee click (a click on a floating piece leaves it floating, unless it never
+/// moved: then it is put back, so Undo isn't spent on it).
 fn finish_selection_drag(app: &mut PhotocraftApp, floating: bool, start: [f64; 2], end: [f64; 2]) {
     let (dx, dy) = ((end[0] - start[0]).round(), (end[1] - start[1]).round());
+    let unmoved = app.session.active().and_then(photocraft_engine::float_cmds::floating).is_some_and(|f| f.offset == (0, 0));
     let r = match (floating, dx == 0.0 && dy == 0.0) {
+        (true, true) if unmoved => app.run("select.drop", json!({})),
         (true, true) => return,
         (false, true) if app.session.is_enabled("select.deselect") => app.run("select.deselect", json!({})),
         (false, true) => return,

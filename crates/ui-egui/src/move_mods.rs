@@ -9,6 +9,8 @@
 //!   history step ("Duplicate + Move"). ⇧⌥ combines both.
 //! - Arrow keys nudge the selected layers 1 px (⇧: 10 px); ⌥ duplicates first. While Free
 //!   Transform is active they nudge the box instead.
+//! - With a selection the drag and the arrow keys move the selected pixels (`move_ui`): ⇧ locks
+//!   the drag to multiples of 45° and ⌥ copies the pixels instead of duplicating the layer.
 //!
 //! The hooks are small and local: [`filter_event`] rewrites pointer events before the Move tool
 //! sees them and [`finish`] folds the history after the drag, so the Move drag pipeline itself is
@@ -22,7 +24,8 @@ use crate::state::Tool;
 
 /// Directions ⇧ locks a Move-tool drag to: horizontal and vertical (Photoshop's Move tool).
 pub const MOVE_DIRECTIONS: u32 = 4;
-/// Directions ⇧ locks a Free Transform body drag to: the axes and the 45° diagonals.
+/// Directions ⇧ locks a Free Transform body drag, or a Move-tool drag of selected pixels, to: the
+/// axes and the 45° diagonals.
 pub const TRANSFORM_DIRECTIONS: u32 = 8;
 /// Extra angle (degrees) the pointer must pass the half-way line by before the locked axis
 /// switches, so it doesn't flicker when dragging near the diagonal.
@@ -131,13 +134,15 @@ pub fn filter_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifier
 
 fn drag_to(app: &mut PhotocraftApp, p: [f64; 2], mods: egui::Modifiers) -> [f64; 2] {
     let Some(start) = app.move_mods.start.filter(|_| moving(app)) else { return p };
+    // Selected pixels (`move_ui`): ⌥ copied them at the press.
+    let pixels = app.drag.as_ref().is_some_and(|d| d.sel_move.is_some());
     let mut d = [p[0] - start[0], p[1] - start[1]];
     if mods.shift {
-        d = constrain(d, app.move_mods.last, MOVE_DIRECTIONS);
+        d = constrain(d, app.move_mods.last, if pixels { TRANSFORM_DIRECTIONS } else { MOVE_DIRECTIONS });
     }
     app.move_mods.last = Some(d);
     let zoom = f64::from(app.current_zoom().max(0.01));
-    if app.move_mods.alt && app.move_mods.dup_from.is_none() && d[0].hypot(d[1]) * zoom >= DUPLICATE_THRESHOLD {
+    if app.move_mods.alt && !pixels && app.move_mods.dup_from.is_none() && d[0].hypot(d[1]) * zoom >= DUPLICATE_THRESHOLD {
         app.move_mods.dup_from = duplicate(app);
         // Only once per drag, even if duplicating failed.
         app.move_mods.alt = false;
@@ -181,7 +186,8 @@ pub fn arrow_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
     false
 }
 
-/// Moves the selected layers (or the Free Transform box) by `(dx, dy)` pixels.
+/// Moves the selected layers (or the Free Transform box, or the selected pixels) by `(dx, dy)`
+/// pixels.
 pub fn nudge(app: &mut PhotocraftApp, dx: f64, dy: f64, duplicate_first: bool) {
     if let Some(t) = app.ui.transform.as_mut() {
         if t.warp.is_none() {
@@ -191,6 +197,10 @@ pub fn nudge(app: &mut PhotocraftApp, dx: f64, dy: f64, duplicate_first: bool) {
         return;
     }
     if app.drag.is_some() {
+        return;
+    }
+    if crate::move_ui::moves_selected_pixels(app) {
+        crate::move_ui::float_selected(app, duplicate_first, dx, dy);
         return;
     }
     let from = if duplicate_first { duplicate(app) } else { None };
