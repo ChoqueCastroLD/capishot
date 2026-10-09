@@ -17,6 +17,10 @@
 	Layer	Livello
 	Type	Testo
 	Select	Selezione
+	Top Left	In alto a sinistra
+	Top Right	In alto a destra
+	Bottom Left	In basso a sinistra
+	Bottom Right	In basso a destra
 	Filter	Filtro
 	View	Vista
 	Window	Finestra

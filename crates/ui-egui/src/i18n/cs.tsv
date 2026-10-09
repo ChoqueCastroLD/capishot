@@ -25,6 +25,10 @@
 	Layer	Vrstva
 	Type	Text
 	Select	Výběr
+	Top Left	Vlevo nahoře
+	Top Right	Vpravo nahoře
+	Bottom Left	Vlevo dole
+	Bottom Right	Vpravo dole
 	Filter	Filtr
 	View	Zobrazení
 	Window	Okno

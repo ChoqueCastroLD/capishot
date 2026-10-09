@@ -17,6 +17,10 @@
 	Layer	Capa
 	Type	Texto
 	Select	Selección
+	Top Left	Superior izquierda
+	Top Right	Superior derecha
+	Bottom Left	Inferior izquierda
+	Bottom Right	Inferior derecha
 	Filter	Filtro
 	View	Ver
 	Window	Ventana

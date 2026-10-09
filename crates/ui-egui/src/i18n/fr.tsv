@@ -24,6 +24,10 @@
 	Layer	Calque
 	Type	Texte
 	Select	Sélection
+	Top Left	En haut à gauche
+	Top Right	En haut à droite
+	Bottom Left	En bas à gauche
+	Bottom Right	En bas à droite
 	Filter	Filtre
 	View	Affichage
 	Window	Fenêtre

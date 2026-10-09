@@ -21,6 +21,10 @@
 	Layer	Ebene
 	Type	Text
 	Select	Auswahl
+	Top Left	Oben links
+	Top Right	Oben rechts
+	Bottom Left	Unten links
+	Bottom Right	Unten rechts
 	Filter	Filter
 	View	Ansicht
 	Window	Fenster

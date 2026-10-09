@@ -17,6 +17,10 @@
 	Layer	图层
 	Type	文字
 	Select	选择
+	Top Left	左上
+	Top Right	右上
+	Bottom Left	左下
+	Bottom Right	右下
 	Filter	滤镜
 	View	视图
 	Window	窗口

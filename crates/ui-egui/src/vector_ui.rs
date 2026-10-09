@@ -602,6 +602,16 @@ fn swatch(ui: &mut egui::Ui, fill: Option<&photocraft_doc::Fill>, tip: &str) -> 
     out
 }
 
+/// One corner of the live rectangle, preserving the other three radii.
+/// The engine takes the full [top-left, top-right, bottom-right, bottom-left] array.
+fn corner_radii_patch(radii: [f64; 4], corner: usize, radius: f32) -> Value {
+    let mut next = radii;
+    if let Some(r) = next.get_mut(corner) {
+        *r = f64::from(radius.max(0.0));
+    }
+    json!({"radii": next})
+}
+
 /// Properties panel for a shape layer: Appearance (fill, stroke) and live shape geometry.
 pub fn shape_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: photocraft_doc::LayerId) {
     let Some(sh) = app.session.active().and_then(|s| s.doc.layer(id)).and_then(|l| match &l.content {
@@ -669,28 +679,49 @@ pub fn shape_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: photocra
             }
             photocraft_doc::vector::LiveShape::Line { .. } => {}
         }
-        ui.horizontal(|ui| match live {
+        ui.vertical(|ui| match live {
             photocraft_doc::vector::LiveShape::Rect { radii, .. } => {
-                let mut r = radii[0] as f32;
-                if num(ui, tl!("Corner radius"), &mut r, 0.0..=100000.0, "px") {
-                    edit = Some(json!({"radii": r, "coalesce": key("radius")}));
+                // Keep the uniform workflow available after independent corner edits too.
+                ui.horizontal(|ui| {
+                    let mut all = radii[0] as f32;
+                    if num(ui, tl!("Corner radius"), &mut all, 0.0..=100000.0, "px") {
+                        edit = Some(json!({"radii": all, "coalesce": key("radius-all")}));
+                    }
+                });
+                // Separate rows also fit the narrow Properties dock. The labels use the
+                // localized corner names, rather than untranslated abbreviations.
+                for (index, label) in [(0, tl!("Top Left")), (1, tl!("Top Right")), (3, tl!("Bottom Left")), (2, tl!("Bottom Right"))] {
+                    ui.horizontal(|ui| {
+                        let mut radius = radii[index] as f32;
+                        if num(ui, label, &mut radius, 0.0..=100000.0, "px") {
+                            let mut patch = corner_radii_patch(*radii, index, radius);
+                            patch["coalesce"] = json!(key(&format!("radius-{index}")));
+                            edit = Some(patch);
+                        }
+                    });
                 }
             }
             photocraft_doc::vector::LiveShape::Polygon { sides, star_ratio, .. } => {
-                let mut n = *sides as f32;
-                if num(ui, tl!("Sides"), &mut n, 3.0..=100.0, "") {
-                    edit = Some(json!({"sides": n.round() as u32, "coalesce": key("sides")}));
-                }
-                let mut sr = (*star_ratio * 100.0) as f32;
-                if num(ui, tl!("Star ratio"), &mut sr, 1.0..=100.0, "%") {
-                    edit = Some(json!({"starRatio": sr as f64 / 100.0, "coalesce": key("star")}));
-                }
+                ui.horizontal(|ui| {
+                    let mut n = *sides as f32;
+                    if num(ui, tl!("Sides"), &mut n, 3.0..=100.0, "") {
+                        edit = Some(json!({"sides": n.round() as u32, "coalesce": key("sides")}));
+                    }
+                    let mut sr = (*star_ratio * 100.0) as f32;
+                    if num(ui, tl!("Star ratio"), &mut sr, 1.0..=100.0, "%") {
+                        edit = Some(json!({"starRatio": sr as f64 / 100.0, "coalesce": key("star")}));
+                    }
+                })
+                .inner
             }
             photocraft_doc::vector::LiveShape::Line { weight, .. } => {
-                let mut w = *weight as f32;
-                if num(ui, tl!("Weight"), &mut w, 1.0..=10000.0, "px") {
-                    edit = Some(json!({"weight": w, "coalesce": key("weight")}));
-                }
+                ui.horizontal(|ui| {
+                    let mut w = *weight as f32;
+                    if num(ui, tl!("Weight"), &mut w, 1.0..=10000.0, "px") {
+                        edit = Some(json!({"weight": w, "coalesce": key("weight")}));
+                    }
+                })
+                .inner
             }
             _ => {}
         });
@@ -1198,6 +1229,51 @@ mod tests {
         let legacy: PenPath = serde_json::from_value(json!({"knots": [[[10, 10], [10, 10], [10, 10]]]})).unwrap();
         assert!(legacy.unlinked.is_empty());
         assert!(!legacy.dragging && !legacy.adjusting_last);
+    }
+
+    /// #1520: changing one corner through the Properties command must keep the other three
+    /// independent, remain a live rectangle, and undo/redo as one geometry edit.
+    #[test]
+    fn live_rectangle_corner_radius_edit_preserves_other_corners_and_history() {
+        let mut app = app();
+        let created = app.run("shape.create", json!({"kind": "roundedRect", "rect": [10, 10, 150, 100], "radii": [5, 10, 15, 20]})).unwrap();
+        let id = created["layer"].as_u64().unwrap();
+        let get_radii = |app: &PhotocraftApp| {
+            let st = app.session.active().unwrap();
+            let shape = st.doc.layer(photocraft_doc::LayerId(id)).unwrap();
+            match &shape.content {
+                LayerContent::Shape(sh) => match &sh.live {
+                    Some(photocraft_doc::vector::LiveShape::Rect { radii, .. }) => *radii,
+                    _ => panic!("rectangle must remain a live shape"),
+                },
+                _ => panic!("expected shape layer"),
+            }
+        };
+        assert_eq!(get_radii(&app), [5.0, 10.0, 15.0, 20.0]);
+        let mut patch = corner_radii_patch(get_radii(&app), 1, 30.0);
+        patch["layer"] = json!(id);
+        app.run("shape.edit", patch).unwrap();
+        assert_eq!(get_radii(&app), [5.0, 30.0, 15.0, 20.0]);
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(get_radii(&app), [5.0, 10.0, 15.0, 20.0]);
+        app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(get_radii(&app), [5.0, 30.0, 15.0, 20.0]);
+        for corner in 0..4 {
+            let before = get_radii(&app);
+            let radius = 35.0 + corner as f32;
+            let mut expected = before;
+            expected[corner] = f64::from(radius);
+            let mut patch = corner_radii_patch(before, corner, radius);
+            patch["layer"] = json!(id);
+            app.run("shape.edit", patch).unwrap();
+            assert_eq!(get_radii(&app), expected);
+            app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(get_radii(&app), before);
+            app.run("edit.redo", json!({})).unwrap();
+            assert_eq!(get_radii(&app), expected);
+        }
+        app.run("shape.edit", json!({"layer": id, "radii": 12})).unwrap();
+        assert_eq!(get_radii(&app), [12.0; 4]);
     }
 
     /// #534: dragging in a shape's fill picker, opened from the Properties panel at the right edge

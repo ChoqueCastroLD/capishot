@@ -24,6 +24,10 @@
 	Layer	Слой
 	Type	Текст
 	Select	Выделение
+	Top Left	Верхний левый
+	Top Right	Верхний правый
+	Bottom Left	Нижний левый
+	Bottom Right	Нижний правый
 	Filter	Фильтр
 	View	Просмотр
 	Window	Окно

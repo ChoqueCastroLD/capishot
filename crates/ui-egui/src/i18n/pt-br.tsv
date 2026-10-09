@@ -21,6 +21,10 @@
 	Layer	Camada
 	Type	Tipo
 	Select	Selecionar
+	Top Left	Superior esquerdo
+	Top Right	Superior direito
+	Bottom Left	Inferior esquerdo
+	Bottom Right	Inferior direito
 	Filter	Filtro
 	View	Visualizar
 	Window	Janela

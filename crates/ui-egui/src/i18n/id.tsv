@@ -17,6 +17,10 @@
 	Layer	Layer
 	Type	Teks
 	Select	Seleksi
+	Top Left	Kiri atas
+	Top Right	Kanan atas
+	Bottom Left	Kiri bawah
+	Bottom Right	Kanan bawah
 	Filter	Filter
 	View	Tampilan
 	Window	Jendela

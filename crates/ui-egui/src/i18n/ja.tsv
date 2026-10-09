@@ -21,6 +21,10 @@
 	Layer	レイヤー
 	Type	文字
 	Select	選択
+	Top Left	左上
+	Top Right	右上
+	Bottom Left	左下
+	Bottom Right	右下
 	Filter	フィルター
 	View	表示
 	Window	ウィンドウ
