@@ -163,7 +163,7 @@ Unread: `general.color_picker`, `general.beep_when_done`, `general.export_clipbo
 
 | Id | Target | Status | Issue | Note |
 |---|---|---|---|---|
-| UI-217-1 | Tool options, last Export As / Save for Web / Fill settings and font recents persist | partial | [#217](https://github.com/storytold/photocraft/issues/217) | Fill (fill_ui.rs:72) and Liquify (liquify_ui.rs:64, #418) keep their settings in Preferences (prefs.dialogs); no tool_options/export fields in Preferences; export_dialog.rs:21 png/85 |
+| UI-217-1 | Tool options, last Export As / Save for Web / Fill settings and font recents persist | partial | [#217](https://github.com/storytold/photocraft/issues/217) | Fill (fill_ui.rs:72) and Liquify (liquify_ui.rs:64, #418) keep their settings in Preferences (prefs.dialogs); no tool_options/export fields in Preferences; export_dialog.rs:21 png/85. Each painting tool keeps its own brush (paint_mouse.rs sync_tool_brush, #218), but those live in UiState, so they are lost at quit like the other tool options |
 | UI-217-2 | Window size and dock width remembered across restarts | missing | [#217](https://github.com/storytold/photocraft/issues/217) | main.rs:46 native_options(): fixed 1440x900, centred on the main monitor (#419); dock.rs:529 snapshot omits the width |
 | UI-217-3 | File > Open starts in the last-used folder | missing | [#217](https://github.com/storytold/photocraft/issues/217) | services.rs:110 FileDialog::new() without set_directory |
 | UI-217-4 | Preferences all take effect; recent files persist and honour recent_file_count (#204) | missing | [#217](https://github.com/storytold/photocraft/issues/217) | See the prefs audit and BUG-204-* |

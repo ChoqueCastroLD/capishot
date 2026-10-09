@@ -375,6 +375,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 // Apply (nothing below can fail).
                 if let Some(t) = tool {
                     app.ui.tool = t;
+                    // Each tool keeps its own brush (#218), so switch it in before `brushSize`
+                    // below sets the new tool's size.
+                    crate::paint_mouse::sync_tool_brush(app);
                 }
                 let gradient_before = app.ui.tool_options.clone();
                 if let Some(mode) = gradient_blend {
@@ -1087,6 +1090,16 @@ mod tests {
             assert_eq!(app.session.tools.brush.size, 42.5);
             assert_eq!(app.session.journal.len(), journal_len);
         }
+
+        // Each tool keeps its own brush (#218), so `tool` + `brushSize` in one call sets the new
+        // tool's size rather than the one it was carrying.
+        call(&mut app, &ctx, "ui.set", json!({"tool": "eraser", "brushSize": 12.0}));
+        assert_eq!(app.session.tools.brush.size, 12.0, "the Eraser's own size");
+        call(&mut app, &ctx, "ui.set", json!({"tool": "brush"}));
+        assert_eq!(app.session.tools.brush.size, 42.5, "the Brush gets its own back");
+        call(&mut app, &ctx, "ui.set", json!({"tool": "eraser"}));
+        assert_eq!(app.session.tools.brush.size, 12.0);
+        call(&mut app, &ctx, "ui.set", json!({"tool": "brush", "brushSize": 42.5}));
 
         // Values that cannot be represented by BrushSettings must report the command error and
         // leave both the brush and journal unchanged instead of mutating tool state directly.
