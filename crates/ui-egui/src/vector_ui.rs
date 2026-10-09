@@ -18,8 +18,14 @@ use crate::theme::Tokens;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PenPath {
     pub knots: Vec<[[f64; 2]; 3]>,
+    /// Indices of cusp knots whose incoming and outgoing handles are not linked.
+    #[serde(default)]
+    pub unlinked: Vec<usize>,
     #[serde(skip)]
     pub dragging: bool,
+    /// Re-dragging the final anchor changes its outgoing control only; the incoming curve stays put.
+    #[serde(skip)]
+    pub adjusting_last: bool,
 }
 
 pub fn is_shape_tool(t: Tool) -> bool {
@@ -120,10 +126,11 @@ pub fn draw_shape_preview(app: &PhotocraftApp, painter: &egui::Painter, xf: &Vie
 // Pen
 
 fn pen_to_json(pen: &PenPath, closed: bool) -> Value {
-    json!({"subpaths": [{"closed": closed, "knots": pen.knots.iter().map(|k| json!({"anchor": k[0], "in": k[1], "out": k[2], "smooth": k[1] != k[0] || k[2] != k[0]})).collect::<Vec<_>>()}]})
+    json!({"subpaths": [{"closed": closed, "knots": pen.knots.iter().enumerate().map(|(i, k)| json!({"anchor": k[0], "in": k[1], "out": k[2], "smooth": !pen.unlinked.contains(&i) && (k[1] != k[0] || k[2] != k[0])})).collect::<Vec<_>>()}]})
 }
 
-/// Pen press: close on the first anchor, else add an anchor (dragging pulls smooth handles).
+/// Pen press: close on the first anchor, reshape the last anchor's outgoing handle,
+/// or add a new anchor (dragging a new anchor pulls symmetrical handles).
 pub fn pen_down(app: &mut PhotocraftApp, x: f64, y: f64) {
     let tol = 6.0 / app.current_zoom().max(0.01) as f64;
     let pen = app.ui.pen.get_or_insert_with(PenPath::default);
@@ -134,24 +141,44 @@ pub fn pen_down(app: &mut PhotocraftApp, x: f64, y: f64) {
         pen_commit(app, true);
         return;
     }
+    // Clicking the last anchor breaks its outgoing handle without throwing away the incoming
+    // curve. Dragging from that anchor then sets the outgoing handle independently (#1482).
+    // This must precede adding a point, or a re-click creates a zero-length segment.
+    if let Some((i, last)) = pen.knots.len().checked_sub(1).zip(pen.knots.last_mut())
+        && (last[0][0] - x).hypot(last[0][1] - y) < tol
+    {
+        last[2] = last[0];
+        if !pen.unlinked.contains(&i) {
+            pen.unlinked.push(i);
+        }
+        pen.dragging = true;
+        pen.adjusting_last = true;
+        return;
+    }
     pen.knots.push([[x, y]; 3]);
     pen.dragging = true;
+    pen.adjusting_last = false;
 }
 
 pub fn pen_move(app: &mut PhotocraftApp, x: f64, y: f64) {
     if let Some(pen) = app.ui.pen.as_mut()
         && pen.dragging
-        && let Some(k) = pen.knots.last_mut()
     {
-        let a = k[0];
-        k[2] = [x, y];
-        k[1] = [2.0 * a[0] - x, 2.0 * a[1] - y];
+        let adjusting_last = pen.adjusting_last;
+        if let Some(k) = pen.knots.last_mut() {
+            let a = k[0];
+            k[2] = [x, y];
+            if !adjusting_last {
+                k[1] = [2.0 * a[0] - x, 2.0 * a[1] - y];
+            }
+        }
     }
 }
 
 pub fn pen_up(app: &mut PhotocraftApp) {
     if let Some(pen) = app.ui.pen.as_mut() {
         pen.dragging = false;
+        pen.adjusting_last = false;
     }
 }
 
@@ -1095,6 +1122,82 @@ mod tests {
         // Make Work Path selects the new work path.
         app.run("select.toWorkPath", json!({"tolerance": 2.0})).unwrap();
         assert_eq!(app.ui.selected_path.as_deref(), Some("work"));
+    }
+
+    /// #1482: clicking an existing final Pen anchor breaks its outgoing handle without
+    /// deleting the preceding curve or creating another knot; dragging changes only that handle.
+    #[test]
+    fn pen_last_anchor_can_be_broken_and_reshaped_while_drawing() {
+        use crate::canvas::{ToolEvent, tool_event};
+        let mut app = app();
+        app.ui.tool = Tool::Pen;
+        let down = |app: &mut PhotocraftApp, x, y| tool_event(app, ToolEvent::Down { x, y, pressure: 1.0 }, egui::Modifiers::NONE);
+        let move_to = |app: &mut PhotocraftApp, x, y| tool_event(app, ToolEvent::Move { x, y, pressure: 1.0 }, egui::Modifiers::NONE);
+        let up = |app: &mut PhotocraftApp, x, y| tool_event(app, ToolEvent::Up { x, y }, egui::Modifiers::NONE);
+
+        down(&mut app, 20.0, 20.0);
+        up(&mut app, 20.0, 20.0);
+        down(&mut app, 100.0, 20.0);
+        move_to(&mut app, 120.0, 40.0);
+        up(&mut app, 120.0, 40.0);
+        let original = app.ui.pen.as_ref().unwrap().knots[1];
+        assert_eq!(original, [[100.0, 20.0], [80.0, 0.0], [120.0, 40.0]]);
+
+        // Bare click breaks the outgoing handle, preserving the preceding segment's tangent.
+        down(&mut app, 100.0, 20.0);
+        up(&mut app, 100.0, 20.0);
+        let pen = app.ui.pen.as_ref().unwrap();
+        assert_eq!(pen.knots.len(), 2);
+        assert_eq!(pen.knots[1], [[100.0, 20.0], [80.0, 0.0], [100.0, 20.0]]);
+        assert!(!pen.dragging && !pen.adjusting_last);
+
+        // Re-dragging the same final anchor moves only its outgoing handle (a cusp).
+        down(&mut app, 100.0, 20.0);
+        move_to(&mut app, 110.0, 60.0);
+        up(&mut app, 110.0, 60.0);
+        let pen = app.ui.pen.as_ref().unwrap();
+        assert_eq!(pen.knots.len(), 2);
+        assert_eq!(pen.knots[1], [[100.0, 20.0], [80.0, 0.0], [110.0, 60.0]]);
+
+        // Drawing on still adds a separate next anchor and keeps the cusp in the work path.
+        down(&mut app, 150.0, 100.0);
+        up(&mut app, 150.0, 100.0);
+        assert_eq!(app.ui.pen.as_ref().unwrap().knots.len(), 3);
+        pen_commit(&mut app, false);
+        let work = app.session.active().unwrap().doc.work_path.as_ref().unwrap();
+        let k = &work.subpaths[0].knots[1];
+        assert_eq!([k.in_ctrl.x, k.in_ctrl.y], [80.0, 0.0]);
+        assert_eq!([k.out_ctrl.x, k.out_ctrl.y], [110.0, 60.0]);
+        assert!(!k.smooth, "breaking the handle must persist as an unlinked PSD/vector knot");
+    }
+
+    #[test]
+    fn pen_last_anchor_hit_tolerance_tracks_zoom_and_draft_round_trips() {
+        for zoom in [0.25, 1.0, 4.0] {
+            let mut app = app();
+            app.ui.views[0].zoom = zoom;
+            pen_down(&mut app, 20.0, 20.0);
+            pen_up(&mut app);
+            pen_down(&mut app, 100.0, 100.0);
+            pen_move(&mut app, 110.0, 120.0);
+            pen_up(&mut app);
+            let incoming = app.ui.pen.as_ref().unwrap().knots[1][1];
+            pen_down(&mut app, 100.0 + 5.0 / f64::from(zoom), 100.0);
+            pen_up(&mut app);
+            let pen = app.ui.pen.as_ref().unwrap();
+            assert_eq!(pen.knots.len(), 2);
+            assert_eq!(pen.knots[1][1], incoming);
+            assert_eq!(pen.knots[1][2], pen.knots[1][0]);
+            let saved = serde_json::to_value(pen).unwrap();
+            let restored: PenPath = serde_json::from_value(saved).unwrap();
+            assert_eq!(restored, *pen);
+            assert_eq!(pen_to_json(&restored, false)["subpaths"][0]["knots"][1]["smooth"], false);
+            pen_down(&mut app, 100.0 + 7.0 / f64::from(zoom), 100.0);
+            assert_eq!(app.ui.pen.as_ref().unwrap().knots.len(), 3);
+        }
+        let legacy: PenPath = serde_json::from_value(json!({"knots": [[[10, 10], [10, 10], [10, 10]]]})).unwrap();
+        assert!(legacy.unlinked.is_empty());
+        assert!(!legacy.dragging && !legacy.adjusting_last);
     }
 
     /// #534: dragging in a shape's fill picker, opened from the Properties panel at the right edge
