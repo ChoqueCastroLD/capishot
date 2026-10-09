@@ -48,6 +48,19 @@ fn registering_fonts_moves_the_generation() {
 }
 
 #[test]
+fn literal_psd_tabs_shape_as_whitespace_without_shifting_text_offsets() {
+    let mut e = TextEngine::new();
+    let src = "A\tB";
+    let l = e.layout(&point(src, 20.0), 72.0);
+    let plain = e.layout(&point("AB", 20.0), 72.0);
+    assert_eq!(l.lines.len(), 1);
+    assert!(l.glyphs.iter().all(|g| g.id != 0), "a tab must not render a tofu glyph");
+    assert!(width(&l) > width(&plain), "the tab reserves whitespace");
+    assert!(l.clusters.iter().all(|c| c.range.end <= src.len()), "the source byte offsets stay valid");
+    assert!(l.caret(2).0 > l.caret(1).0, "caret moves across the tab");
+}
+
+#[test]
 fn metrics_are_stable_and_scale_with_dpi() {
     let mut e = TextEngine::new();
     let a = e.layout(&point("Hamburgefonstiv", 12.0), 72.0);
