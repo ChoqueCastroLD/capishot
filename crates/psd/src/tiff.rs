@@ -776,8 +776,8 @@ pub mod transcode {
                         self.u32()?;
                     }
                 }
-                // lyvr layer version, sn2P and vowv (shape and vector flags), lmgm.
-                b"lyid" | b"lspf" | b"lyvr" | b"sn2P" | b"vowv" | b"lmgm" => {
+                // lyvr layer version, sn2P and vowv (shape and vector flags).
+                b"lyid" | b"lspf" | b"lyvr" | b"sn2P" | b"vowv" => {
                     self.u32()?;
                 }
                 // Text-engine global data: a textual structure, no byte order.
@@ -785,7 +785,9 @@ pub mod transcode {
                 b"lnsr" => {
                     self.key()?;
                 }
-                b"clbl" | b"infx" | b"knko" | b"tsly" | b"iOpa" => {
+                // Advanced Blending flags and fill opacity: one byte, then padding (Adobe spec,
+                // "Additional Layer Information"; `lmgm`/`vmgm` = layer/vector mask hides effects).
+                b"clbl" | b"infx" | b"knko" | b"tsly" | b"lmgm" | b"vmgm" | b"iOpa" => {
                     self.u8()?;
                 }
                 b"lclr" => self.u16s_upto(4)?,
@@ -1895,6 +1897,13 @@ mod tests {
             (*b"lspf", vec![0, 0, 0, 5]),
             (*b"lnsr", b"layr".to_vec()),
             (*b"knko", vec![1, 0, 0, 0]),
+            (*b"knko", vec![2, 0, 0, 0]),
+            (*b"infx", vec![1, 0, 0, 0]),
+            (*b"clbl", vec![0, 0, 0, 0]),
+            (*b"tsly", vec![0, 0, 0, 0]),
+            (*b"lmgm", vec![1, 0, 0, 0]),
+            (*b"vmgm", vec![1, 0, 0, 0]),
+            (*b"iOpa", vec![128, 0, 0, 0]),
         ] {
             let (big, little) = block_rt(key, data.clone());
             if data.len() >= 2 && key != *b"nvrt" {

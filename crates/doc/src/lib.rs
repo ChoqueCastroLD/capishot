@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod adjust;
+pub mod advanced;
 pub mod analysis;
 pub mod blend_if;
 pub mod comps;
@@ -26,6 +27,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use adjust::Adjustment;
+pub use advanced::{AdvancedBlending, Knockout};
 pub use analysis::{CountGroup, Measurement, MeasurementScale, Note, Ruler};
 pub use blend_if::{BlendIf, BlendRange};
 pub use comps::{Artboard, ArtboardBackground, CompAppearance, CompLayerState, LayerComp};
@@ -495,6 +497,9 @@ pub struct Layer {
     /// outside which the layer's pixels are hidden. Default = everything blends. PSD layer-record
     /// blending ranges.
     pub blend_if: BlendIf,
+    /// Blending Options › Advanced Blending: knockout, blend interior effects / clipped layers as
+    /// group, transparency shapes layer, layer / vector mask hides effects. Default = Photoshop's.
+    pub advanced: AdvancedBlending,
     /// Layer › Video Layers frame stack (None for a normal layer).
     pub video: Option<VideoData>,
 }
@@ -521,6 +526,7 @@ impl Layer {
             link_group: None,
             excluded_channels: 0,
             blend_if: BlendIf::default(),
+            advanced: AdvancedBlending::default(),
             video: None,
         }
     }

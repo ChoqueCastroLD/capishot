@@ -477,6 +477,7 @@ fn layer_pixels_equal(a: &Layer, b: &Layer) -> bool {
         link_group: _,
         excluded_channels,
         blend_if,
+        advanced,
         video: _,
     } = a;
     *id == b.id
@@ -490,6 +491,7 @@ fn layer_pixels_equal(a: &Layer, b: &Layer) -> bool {
         && *effects == b.effects
         && *excluded_channels == b.excluded_channels
         && *blend_if == b.blend_if
+        && *advanced == b.advanced
         && match (content, &b.content) {
             (LayerContent::Raster(x), LayerContent::Raster(y)) => surfaces_equal(x, y),
             // Children are walked separately; only the group's own clipping frame counts.

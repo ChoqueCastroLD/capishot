@@ -497,6 +497,8 @@ impl Ex {
             },
             None => raw.retain(|(k, _)| k != b"brst"),
         }
+        // Advanced Blending: written from the field (in place when the block was imported).
+        crate::blocks::put_advanced(&l.advanced, &mut raw);
         if !matches!(l.content, LayerContent::Shape(_)) {
             self.vector_mask_block(l, &mut raw);
         }

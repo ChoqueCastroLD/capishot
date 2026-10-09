@@ -112,6 +112,10 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId]) -> Value {
     if l.excluded_channels != 0 {
         v["channels"] = json!((0..4).map(|i| l.excluded_channels & (1 << i) == 0).collect::<Vec<_>>());
     }
+    // Blending Options › Advanced Blending switches (only when one differs from Photoshop's default).
+    if !l.advanced.is_default() {
+        v["advancedBlending"] = serde_json::to_value(l.advanced).unwrap_or(Value::Null);
+    }
     // Blending Options › Blend If (only when set): range index (0 = Gray, then the mode's
     // channels) with This Layer / Underlying Layer as [blackLo, blackHi, whiteLo, whiteHi].
     if !l.blend_if.is_default() {

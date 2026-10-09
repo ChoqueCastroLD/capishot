@@ -115,8 +115,14 @@ pub enum BlockData<'a> {
     BlendClippedAsGroup(bool),
     /// `infx`
     BlendInteriorElements(bool),
-    /// `knko`
+    /// `knko`: 0 none, 1 shallow, 2 deep.
     Knockout(u8),
+    /// `tsly`: Transparency Shapes Layer.
+    TransparencyShapes(bool),
+    /// `lmgm`: Layer Mask Hides Effects ("layer mask as global mask").
+    LayerMaskHidesEffects(bool),
+    /// `vmgm`: Vector Mask Hides Effects.
+    VectorMaskHidesEffects(bool),
     /// `lspf`: bit 0 transparency, bit 1 composite, bit 2 position locked.
     Protection(u32),
     /// `lclr`: sheet color index (0 none, 1 red, 2 orange, 3 yellow, 4 green,
@@ -170,6 +176,9 @@ impl TaggedBlock {
             b"clbl" => r.u8().map(|v| BlockData::BlendClippedAsGroup(v != 0)),
             b"infx" => r.u8().map(|v| BlockData::BlendInteriorElements(v != 0)),
             b"knko" => r.u8().map(BlockData::Knockout),
+            b"tsly" => r.u8().map(|v| BlockData::TransparencyShapes(v != 0)),
+            b"lmgm" => r.u8().map(|v| BlockData::LayerMaskHidesEffects(v != 0)),
+            b"vmgm" => r.u8().map(|v| BlockData::VectorMaskHidesEffects(v != 0)),
             b"lspf" => r.u32().map(BlockData::Protection),
             b"lclr" => r.u16().map(BlockData::SheetColor),
             b"iOpa" => r.u8().map(BlockData::FillOpacity),
@@ -224,6 +233,18 @@ impl TaggedBlock {
     /// `knko` block.
     pub fn knockout(v: u8) -> Self {
         Self::flag(*b"knko", v)
+    }
+    /// `tsly` block.
+    pub fn transparency_shapes(v: bool) -> Self {
+        Self::flag(*b"tsly", u8::from(v))
+    }
+    /// `lmgm` block.
+    pub fn layer_mask_hides_effects(v: bool) -> Self {
+        Self::flag(*b"lmgm", u8::from(v))
+    }
+    /// `vmgm` block.
+    pub fn vector_mask_hides_effects(v: bool) -> Self {
+        Self::flag(*b"vmgm", u8::from(v))
     }
     /// `lspf` block.
     pub fn protection(flags: u32) -> Self {
@@ -507,6 +528,11 @@ mod tests {
         assert_eq!(TaggedBlock::blend_clipped_as_group(true).parsed(), Some(Ok(BlockData::BlendClippedAsGroup(true))));
         assert_eq!(TaggedBlock::blend_interior_elements(false).parsed(), Some(Ok(BlockData::BlendInteriorElements(false))));
         assert_eq!(TaggedBlock::knockout(2).parsed(), Some(Ok(BlockData::Knockout(2))));
+        assert_eq!(TaggedBlock::transparency_shapes(false).parsed(), Some(Ok(BlockData::TransparencyShapes(false))));
+        assert_eq!(TaggedBlock::layer_mask_hides_effects(true).parsed(), Some(Ok(BlockData::LayerMaskHidesEffects(true))));
+        assert_eq!(TaggedBlock::vector_mask_hides_effects(true).parsed(), Some(Ok(BlockData::VectorMaskHidesEffects(true))));
+        assert_eq!(TaggedBlock::vector_mask_hides_effects(true).data, vec![1, 0, 0, 0]);
+        assert!(matches!(TaggedBlock::new(*b"tsly", vec![]).parsed(), Some(Err(_))), "truncated flag is an error, not a panic");
         assert_eq!(TaggedBlock::protection(0x8000_0000).parsed(), Some(Ok(BlockData::Protection(0x8000_0000))));
         assert_eq!(TaggedBlock::sheet_color(3).parsed(), Some(Ok(BlockData::SheetColor(3))));
         assert_eq!(TaggedBlock::fill_opacity(128).parsed(), Some(Ok(BlockData::FillOpacity(128))));

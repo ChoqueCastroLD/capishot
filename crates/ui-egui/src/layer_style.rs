@@ -9,7 +9,9 @@
 //!   snapshot with `params` (engine-side overlay), so everything the dialog
 //!   doesn't model — gradient strokes, imported contours, PSD data — survives.
 //!   An entry without `fx` is a new instance built from `params`.
-//! - `p:blendingOptions`: the layer's blend mode, opacity and fill opacity.
+//! - `p:blendingOptions`: the parameters of `layer.layerStyle.blendingOptions` (blend mode,
+//!   opacity, fill opacity, channels, knockout, the Advanced Blending switches, Blend If) plus
+//!   the page-only `blendIfChannel`; `channelNames`: the document's colour channels.
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, vec2};
 use photocraft_doc::effects::{FxPaint, StrokePosition};
@@ -445,10 +447,7 @@ pub fn initial_fields(layer: &Layer, select: Option<&str>, light: f32) -> Map<St
     f.insert("layer".into(), json!(layer.id.0));
     f.insert("globalLight".into(), json!(light));
     f.insert("preview".into(), json!(true));
-    f.insert(
-        format!("p:{BLENDING}"),
-        json!({"blend": layer.blend.label(), "opacity": (layer.opacity * 100.0).round(), "fillOpacity": (layer.fill_opacity * 100.0).round()}),
-    );
+    set_blending_fields(&mut f, layer, photocraft_color::ColorMode::Rgb);
     let mut effects = Vec::new();
     for (i, e) in layer.effects.items.iter().enumerate() {
         effects.push(json!({
@@ -491,7 +490,10 @@ pub fn open(app: &mut PhotocraftApp, select: Option<&str>) -> Option<u64> {
     let st = app.session.active()?;
     let layer = st.doc.layer(st.active_layer?)?.clone();
     let light = st.doc.global_light.angle;
+    let mode = st.doc.mode;
     let mut f = initial_fields(&layer, select, light);
+    // Channels and Blend If list the document's own colour channels.
+    set_blending_fields(&mut f, &layer, mode);
     f.insert("patternList".into(), pattern_list(app));
     Some(app.ui.open_dialog(crate::state::DialogKind::LayerStyle, f))
 }
@@ -548,10 +550,11 @@ fn apply(f: &Map<String, Value>, mut run: impl FnMut(&str, Value) -> Result<Valu
     let layer = f.get("layer").cloned().unwrap_or(Value::Null);
     let initial_light_angle = f.get("globalLight").and_then(Value::as_f64);
     if let Some(bo) = f.get(&format!("p:{BLENDING}")).and_then(Value::as_object) {
-        let mut p = Value::Object(bo.clone());
-        if let Some(params) = p.as_object_mut() {
-            params.insert("layer".into(), layer.clone());
-        }
+        let mut bo = bo.clone();
+        // Which Blend If channel the page shows is dialog state, not a parameter.
+        bo.remove("blendIfChannel");
+        bo.insert("layer".into(), layer.clone());
+        let p = Value::Object(bo);
         run("layer.layerStyle.blendingOptions", p)?;
     }
     let mut entries = Vec::new();
@@ -849,6 +852,15 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                 ui.colored_label(t.danger, error);
                 return;
             }
+            if selected == BLENDING {
+                // General Blending, Advanced Blending and Blend If, laid out like Photoshop's page.
+                let names = channel_names_of(f);
+                let key = format!("p:{BLENDING}");
+                let Some(mut p) = f.get(&key).filter(|v| v.is_object()).cloned() else { return };
+                blending_page(ui, &mut p, &names);
+                f.insert(key, p);
+                return;
+            }
             // The page shows the factory defaults under the instance's values,
             // but only real edits reach the stored params.
             let disp = if selected == BLENDING {
@@ -983,6 +995,274 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     if new_style {
         save_new_style(app, f);
     }
+}
+
+/// Colour channel names of a document mode, as Blending Options lists them (Channels, Blend If).
+pub fn channel_names(mode: photocraft_color::ColorMode) -> Vec<&'static str> {
+    use photocraft_color::ColorMode as M;
+    match mode {
+        M::Rgb | M::Indexed | M::Multichannel => vec!["R", "G", "B"],
+        M::Cmyk => vec!["C", "M", "Y", "K"],
+        M::Lab => vec!["L", "a", "b"],
+        _ => vec!["Gray"],
+    }
+}
+
+const KNOCKOUT: &[(&str, &str)] = &[("none", "None"), ("shallow", "Shallow"), ("deep", "Deep")];
+
+/// (parameter key, label) of the Advanced Blending check boxes, in Photoshop's order.
+const ADVANCED_CHECKS: &[(&str, &str)] = &[
+    ("blendInteriorEffectsAsGroup", "Blend Interior Effects as Group"),
+    ("blendClippedLayersAsGroup", "Blend Clipped Layers as Group"),
+    ("transparencyShapesLayer", "Transparency Shapes Layer"),
+    ("layerMaskHidesEffects", "Layer Mask Hides Effects"),
+    ("vectorMaskHidesEffects", "Vector Mask Hides Effects"),
+];
+
+/// The Blending Options page's fields for `layer` in a `mode` document (the parameters of
+/// `layer.layerStyle.blendingOptions`, plus the page's Blend If channel), and the channel names.
+pub fn set_blending_fields(f: &mut Map<String, Value>, layer: &Layer, mode: photocraft_color::ColorMode) {
+    let names = channel_names(mode);
+    let n = names.len();
+    let a = &layer.advanced;
+    // Blend If entries in the command's form: index 0 is Gray for colour documents; a one-channel
+    // document's Gray is its channel's own entry (index 1).
+    let first = if n == 1 { 1 } else { 0 };
+    let blend_if: Vec<Value> = (first..=n)
+        .map(|i| {
+            let [this, under] = layer.blend_if.get(i);
+            json!({"channel": i, "thisLayer": this.to_bytes(), "underlying": under.to_bytes()})
+        })
+        .collect();
+    f.insert(
+        format!("p:{BLENDING}"),
+        json!({
+            "blend": layer.blend.label(),
+            "opacity": (layer.opacity * 100.0).round(),
+            "fillOpacity": (layer.fill_opacity * 100.0).round(),
+            "channels": (0..n).map(|i| layer.excluded_channels & (1 << i) == 0).collect::<Vec<_>>(),
+            "knockout": a.knockout.name(),
+            "blendInteriorEffectsAsGroup": a.blend_interior,
+            "blendClippedLayersAsGroup": a.blend_clipped,
+            "transparencyShapesLayer": a.transparency_shapes,
+            "layerMaskHidesEffects": a.layer_mask_hides_effects,
+            "vectorMaskHidesEffects": a.vector_mask_hides_effects,
+            "blendIfChannel": 0,
+            "blendIf": blend_if,
+        }),
+    );
+    f.insert("channelNames".into(), json!(names));
+}
+
+fn channel_names_of(f: &Map<String, Value>) -> Vec<String> {
+    f.get("channelNames")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| ["R", "G", "B"].iter().map(|s| (*s).to_string()).collect())
+}
+
+/// The Blending Options page: General Blending, Advanced Blending and Blend If, as in Photoshop.
+fn blending_page(ui: &mut egui::Ui, p: &mut Value, names: &[String]) {
+    let t = Tokens::get(ui.ctx());
+    let num = |p: &Value, k: &str, d: f64| p.get(k).and_then(Value::as_f64).unwrap_or(d) as f32;
+    widgets::section_label(ui, "General Blending");
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tl!("Blend Mode")).color(t.text_dim));
+        let mut cur = p.get("blend").and_then(Value::as_str).unwrap_or("Normal").to_string();
+        let opts: Vec<(String, &str)> = photocraft_color::BlendMode::LAYER_MODES.iter().map(|m| (m.label().to_string(), m.label())).collect();
+        if widgets::dropdown(ui, "fx-blend-blendingOptions", &mut cur, &opts, 150.0) {
+            p["blend"] = json!(cur);
+        }
+    });
+    let mut v = num(p, "opacity", 100.0);
+    if widgets::slider_row(ui, "Opacity", &mut v, 0.0..=100.0, "%", None).changed() {
+        p["opacity"] = json!(v.round());
+    }
+    widgets::hairline(ui);
+    widgets::section_label(ui, "Advanced Blending");
+    let mut v = num(p, "fillOpacity", 100.0);
+    if widgets::slider_row(ui, "Fill Opacity", &mut v, 0.0..=100.0, "%", None).changed() {
+        p["fillOpacity"] = json!(v.round());
+    }
+    // Channels: one check box per colour channel (checked = blends).
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tl!("Channels:")).color(t.text_dim));
+        let mut ch: Vec<bool> =
+            p.get("channels").and_then(Value::as_array).map(|a| a.iter().map(|v| v.as_bool().unwrap_or(true)).collect()).unwrap_or_default();
+        ch.resize(names.len(), true);
+        let mut changed = false;
+        for (i, name) in names.iter().enumerate() {
+            if let Some(c) = ch.get_mut(i) {
+                changed |= widgets::checkbox(ui, c, name).changed();
+            }
+        }
+        if changed {
+            p["channels"] = json!(ch);
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tl!("Knockout")).color(t.text_dim));
+        let mut cur = p.get("knockout").and_then(Value::as_str).unwrap_or("none").to_string();
+        let opts: Vec<(String, &str)> = KNOCKOUT.iter().map(|(v, l)| (v.to_string(), *l)).collect();
+        if widgets::dropdown(ui, "fx-blendingOptions-knockout", &mut cur, &opts, 150.0) {
+            p["knockout"] = json!(cur);
+        }
+    });
+    for &(key, label) in ADVANCED_CHECKS {
+        let default = matches!(key, "blendClippedLayersAsGroup" | "transparencyShapesLayer");
+        let mut b = p.get(key).and_then(Value::as_bool).unwrap_or(default);
+        if widgets::checkbox(ui, &mut b, label).changed() {
+            p[key] = json!(b);
+        }
+    }
+    widgets::hairline(ui);
+    // Blend If: the channel, then This Layer / Underlying Layer split sliders (Alt-drag splits).
+    let entries = p.get("blendIf").and_then(Value::as_array).map_or(0, Vec::len);
+    if entries == 0 {
+        return;
+    }
+    let sel = p.get("blendIfChannel").and_then(Value::as_u64).map_or(0, |v| v as usize).min(entries - 1);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tl!("Blend If:")).color(t.text_dim));
+        // A colour document lists Gray first; a one-channel document only its channel (Gray).
+        let label = |i: usize| -> String {
+            if entries == names.len() {
+                names.get(i).cloned().unwrap_or_default()
+            } else if i == 0 {
+                "Gray".to_string()
+            } else {
+                names.get(i - 1).cloned().unwrap_or_default()
+            }
+        };
+        let labels: Vec<String> = (0..entries).map(label).collect();
+        let opts: Vec<(usize, &str)> = labels.iter().enumerate().map(|(i, l)| (i, l.as_str())).collect();
+        let mut cur = sel;
+        if widgets::dropdown(ui, "fx-blendingOptions-blendIf", &mut cur, &opts, 110.0) {
+            p["blendIfChannel"] = json!(cur);
+        }
+    });
+    for (key, label) in [("thisLayer", "This Layer:"), ("underlying", "Underlying Layer:")] {
+        let mut q = blend_quad(p.get("blendIf").and_then(|a| a.get(sel)).and_then(|e| e.get(key)));
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tl!(label)).color(t.text_dim));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let side = |lo: u8, hi: u8| if lo == hi { lo.to_string() } else { format!("{lo} / {hi}") };
+                ui.label(RichText::new(format!("{}    {}", side(q[0], q[1]), side(q[2], q[3]))).color(t.text));
+            });
+        });
+        if blend_if_bar(ui, ui.id().with(("blendIf", key)), &mut q)
+            && let Some(e) = p.get_mut("blendIf").and_then(|a| a.get_mut(sel))
+        {
+            e[key] = json!(q);
+        }
+        ui.add_space(4.0);
+    }
+}
+
+/// A Blend If range from the dialog's JSON (`[blackLo, blackHi, whiteLo, whiteHi]`), full when absent.
+fn blend_quad(v: Option<&Value>) -> [u8; 4] {
+    let mut q = [0u8, 0, 255, 255];
+    if let Some(a) = v.and_then(Value::as_array) {
+        for (dst, x) in q.iter_mut().zip(a) {
+            *dst = x.as_f64().map_or(*dst, |f| f.clamp(0.0, 255.0).round() as u8);
+        }
+    }
+    // The sliders never cross.
+    for i in 1..4 {
+        q[i] = q[i].max(q[i - 1]);
+    }
+    q
+}
+
+/// A Blend If slider: a black-to-white ramp with a black and a white handle, each split in two
+/// halves by Alt-dragging (the layer fades between them). Returns whether `q` changed.
+fn blend_if_bar(ui: &mut egui::Ui, id: egui::Id, q: &mut [u8; 4]) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let w = ui.available_width().clamp(120.0, 320.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 26.0), Sense::click_and_drag());
+    let ramp = egui::Rect::from_min_size(rect.min + vec2(6.0, 0.0), vec2(w - 12.0, 12.0));
+    let x_of = |v: u8| ramp.left() + ramp.width() * f32::from(v) / 255.0;
+    let v_of = |x: f32| (((x - ramp.left()) / ramp.width().max(1.0)) * 255.0).round().clamp(0.0, 255.0) as u8;
+    // The ramp, drawn as vertical strips.
+    let strips = 32;
+    for s in 0..strips {
+        let x0 = ramp.left() + ramp.width() * s as f32 / strips as f32;
+        let x1 = ramp.left() + ramp.width() * (s + 1) as f32 / strips as f32;
+        let g = (255.0 * (s as f32 + 0.5) / strips as f32) as u8;
+        ui.painter().rect_filled(egui::Rect::from_x_y_ranges(x0..=x1, ramp.y_range()), 0.0, Color32::from_gray(g));
+    }
+    ui.painter().rect_stroke(ramp, 0.0, Stroke::new(1.0, t.field_border), StrokeKind::Outside);
+    // Handles: triangles under the ramp; a split handle shows two half triangles.
+    let mut changed = false;
+    let drag_key = id.with("handle");
+    if resp.drag_started()
+        && let Some(pos) = resp.interact_pointer_pos()
+    {
+        let near = (0..4).min_by(|a, b| (x_of(q[*a]) - pos.x).abs().total_cmp(&(x_of(q[*b]) - pos.x).abs())).unwrap_or(0);
+        // Between two coinciding halves, pick by the side of the pointer.
+        let near = match near {
+            0 | 1 if q[0] == q[1] => usize::from(pos.x > x_of(q[0])),
+            2 | 3 if q[2] == q[3] => 2 + usize::from(pos.x > x_of(q[2])),
+            n => n,
+        };
+        ui.data_mut(|d| d.insert_temp(drag_key, near));
+    }
+    if resp.dragged()
+        && let (Some(h), Some(pos)) = (ui.data(|d| d.get_temp::<usize>(drag_key)), resp.interact_pointer_pos())
+        && let Some(cur) = q.get(h).copied()
+    {
+        let target = v_of(pos.x);
+        let split = ui.input(|i| i.modifiers.alt);
+        let mut n = *q;
+        let pair = if h < 2 { 0 } else { 2 };
+        if split {
+            n[h] = target;
+        } else {
+            // Unsplit: the pair moves together, keeping its spread.
+            let delta = i16::from(target) - i16::from(cur);
+            for v in &mut n[pair..pair + 2] {
+                *v = (i16::from(*v) + delta).clamp(0, 255) as u8;
+            }
+        }
+        // Keep the order black low <= black high <= white low <= white high, pushing the others.
+        for i in 0..4 {
+            if i < h {
+                n[i] = n[i].min(n[h]);
+            } else if i > h {
+                n[i] = n[i].max(n[h]);
+            }
+        }
+        for i in 1..4 {
+            n[i] = n[i].max(n[i - 1]);
+        }
+        if n != *q {
+            *q = n;
+            changed = true;
+        }
+    }
+    let base = ramp.bottom() + 1.0;
+    let tri = |x: f32, half: i8, fill: Color32| {
+        let (l, r) = match half {
+            -1 => (x - 5.0, x),
+            1 => (x, x + 5.0),
+            _ => (x - 5.0, x + 5.0),
+        };
+        let pts = vec![egui::pos2(x, base), egui::pos2(r, base + 10.0), egui::pos2(l, base + 10.0)];
+        ui.painter().add(egui::Shape::convex_polygon(pts, fill, Stroke::new(1.0, t.text_dim)));
+    };
+    let dark = Color32::from_gray(20);
+    let light = Color32::from_gray(240);
+    for (pair, fill) in [(0usize, dark), (2, light)] {
+        let (a, b) = (q[pair], q[pair + 1]);
+        if a == b {
+            tri(x_of(a), 0, fill);
+        } else {
+            tri(x_of(a), -1, fill);
+            tri(x_of(b), 1, fill);
+        }
+    }
+    changed
 }
 
 /// Light direction uses document angles: counter-clockwise from three o'clock.
@@ -1268,6 +1548,32 @@ mod tests {
     }
 
     #[test]
+    fn blending_page_renders_for_every_mode_and_odd_fields() {
+        let ctx = egui::Context::default();
+        PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let mut layer = photocraft_doc::Layer::new("L", photocraft_doc::LayerContent::Adjustment(photocraft_doc::Adjustment::Invert));
+        layer.advanced.knockout = photocraft_doc::Knockout::Deep;
+        for mode in
+            [photocraft_color::ColorMode::Rgb, photocraft_color::ColorMode::Cmyk, photocraft_color::ColorMode::Lab, photocraft_color::ColorMode::Grayscale]
+        {
+            let mut f = initial_fields(&layer, Some(BLENDING), 120.0);
+            set_blending_fields(&mut f, &layer, mode);
+            let mut out = ctx.run_ui(Default::default(), |ui| body(&mut app, ui, &mut f));
+            out.textures_delta.clear();
+            assert_eq!(f["p:blendingOptions"]["knockout"], "deep", "{mode:?}");
+            // Hostile dialog state (only reachable through `ui.dialog.set`) still renders.
+            let bo = f.get_mut("p:blendingOptions").unwrap();
+            bo["blendIfChannel"] = json!(99);
+            bo["channels"] = json!("x");
+            bo["blendIf"] = json!([{"thisLayer": [300, -5, "a"]}]);
+            f.insert("channelNames".into(), json!([]));
+            let mut out = ctx.run_ui(Default::default(), |ui| body(&mut app, ui, &mut f));
+            out.textures_delta.clear();
+        }
+    }
+
+    #[test]
     fn confirm_rejects_invalid_params_and_applies_valid_effects() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         app.run("file.new", json!({"width": 16, "height": 16})).unwrap();
@@ -1282,6 +1588,55 @@ mod tests {
         let valid = initial_fields(&layer, Some("colorOverlay"), 0.0);
         confirm(&mut app, &valid).unwrap();
         assert_eq!(app.session.active().unwrap().doc.layer(layer.id).unwrap().effects.items.len(), 1);
+    }
+
+    #[test]
+    fn blending_page_round_trips_advanced_blending_and_blend_if() {
+        use photocraft_doc::{BlendRange, Knockout};
+        for mode in ["rgb", "cmyk", "grayscale"] {
+            let mut s = photocraft_engine::Session::new();
+            s.execute("file.new", json!({"width": 16, "height": 16, "mode": mode})).unwrap();
+            s.execute("layer.new.layer", json!({})).unwrap();
+            let st = s.active().unwrap();
+            let id = st.active_layer.unwrap();
+            let mut l = st.doc.layer(id).unwrap().clone();
+            l.advanced.knockout = Knockout::Shallow;
+            l.advanced.blend_clipped = false;
+            l.excluded_channels = 0b1;
+            let gray = if st.doc.mode.color_channels() == 1 { 1 } else { 0 };
+            l.blend_if.set(gray, [BlendRange { black: [10, 30], white: [255, 255] }, BlendRange::FULL]);
+            let mut f = initial_fields(&l, None, 120.0);
+            set_blending_fields(&mut f, &l, st.doc.mode);
+            let names = channel_names(st.doc.mode);
+            assert_eq!(f["channelNames"], json!(names), "{mode}");
+            let p = &f[&format!("p:{BLENDING}")];
+            assert_eq!(p["knockout"], "shallow");
+            assert_eq!(p["blendClippedLayersAsGroup"], false);
+            assert_eq!(p["transparencyShapesLayer"], true);
+            assert_eq!(p["channels"].as_array().unwrap().len(), names.len());
+            assert_eq!(p["channels"][0], false);
+            assert_eq!(p["blendIf"][0]["thisLayer"], json!([10, 30, 255, 255]), "{mode}");
+            // Applying the page sets every switch through the engine command.
+            let mut f2 = f.clone();
+            let bo = f2.get_mut(&format!("p:{BLENDING}")).unwrap();
+            bo["knockout"] = json!("deep");
+            bo["vectorMaskHidesEffects"] = json!(true);
+            bo["blendIfChannel"] = json!(names.len().min(1));
+            let shown = preview_document(&st.doc, &s.patterns, &f2).unwrap();
+            let got = shown.layer(id).unwrap();
+            assert_eq!(got.advanced.knockout, Knockout::Deep, "{mode}");
+            assert!(got.advanced.vector_mask_hides_effects);
+            assert!(!got.advanced.blend_clipped);
+            assert_eq!(got.excluded_channels, 0b1);
+            assert_eq!(got.blend_if.get(gray)[0], BlendRange { black: [10, 30], white: [255, 255] }, "{mode}");
+        }
+    }
+
+    #[test]
+    fn blend_if_values_stay_ordered() {
+        assert_eq!(blend_quad(Some(&json!([200, 10, 5, 300]))), [200, 200, 200, 255]);
+        assert_eq!(blend_quad(None), [0, 0, 255, 255]);
+        assert_eq!(blend_quad(Some(&json!(["x", null]))), [0, 0, 255, 255]);
     }
 
     #[test]

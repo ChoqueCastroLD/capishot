@@ -2422,6 +2422,10 @@ cameraRaw	Roughness	Неровность
 	% of all commits	% от всех коммитов
 	Lines +/−	Строки +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR: {prs}, коммиты: {commits}, строки +{added} / −{deleted} (Δ {delta}), двоичные файлы +{binAdded} / −{binDeleted}, {first} – {last}
+# Layer Style > Blending Options (Advanced Blending)
+	Blend If:	Изображение если:
+	Channels:	Каналы:
+	Knockout	Просвечивание
 	Apply At Canvas Bounds	Применить эффект на границах холста
 
 # Fill dialog, layer style contours and Image Size

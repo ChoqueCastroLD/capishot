@@ -664,7 +664,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("layer.layerStyle.copyLayerStyle", "Copy Layer Style", &["Layer", "Layer Style"], None, r##"{"layer":id?}"##, has_layer, |s, p| {
             let id = layer_param(s, p)?;
             let l = s.active().and_then(|d| d.doc.layer(id)).ok_or(EngineError::NoLayer(id))?;
-            let style = (l.effects.clone(), l.blend, l.fill_opacity);
+            let style = (l.effects.clone(), l.blend, l.fill_opacity, l.advanced);
             s.style_clipboard = Some(style);
             Ok(Value::Null)
         }),
@@ -680,12 +680,13 @@ pub fn specs() -> Vec<CommandSpec> {
             },
             |s, p| {
                 let id = layer_param(s, p)?;
-                let (fx, blend, fill) = s.style_clipboard.clone().ok_or(EngineError::Other("no layer style has been copied".into()))?;
+                let (fx, blend, fill, advanced) = s.style_clipboard.clone().ok_or(EngineError::Other("no layer style has been copied".into()))?;
                 s.edit("Paste Layer Style", |doc, _| {
                     let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
                     l.effects = fx;
                     l.blend = blend;
                     l.fill_opacity = fill;
+                    l.advanced = advanced;
                     Ok(())
                 })?;
                 Ok(Value::Null)
