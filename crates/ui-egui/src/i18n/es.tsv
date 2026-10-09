@@ -2259,6 +2259,9 @@ cameraRaw	Amount	Cantidad
 	Set Neutral Gray Point	Definir punto gris neutro
 	Set White Point	Definir punto blanco
 	Unavailable in this color mode	No disponible en este modo de color
+	Selection Preview:	Previsualización de selección:
+	Black Matte	Fondo negro
+	White Matte	Fondo blanco
 
 # Layer colour labels.
 	Seafoam	Espuma de mar

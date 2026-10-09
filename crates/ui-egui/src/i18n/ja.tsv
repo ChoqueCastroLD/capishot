@@ -2172,6 +2172,9 @@ cameraRaw	Color	カラー
 	Set Neutral Gray Point	中間調のグレーポイントを設定
 	Set White Point	白色点を設定
 	Unavailable in this color mode	このカラーモードでは使用できません
+	Selection Preview:	選択範囲のプレビュー:
+	Black Matte	黒の背景
+	White Matte	白の背景
 
 # Layer colour labels.
 	Seafoam	シーフォーム

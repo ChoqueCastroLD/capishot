@@ -2166,6 +2166,9 @@ cameraRaw	Blending	混合
 	Set Neutral Gray Point	設定中性灰點
 	Set White Point	設定白點
 	Unavailable in this color mode	此色彩模式無法使用
+	Selection Preview:	選取範圍預視：
+	Black Matte	黑色背景
+	White Matte	白色背景
 
 # Layer colour labels.
 	Seafoam	海沫色

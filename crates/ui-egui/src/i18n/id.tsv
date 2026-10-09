@@ -2605,6 +2605,9 @@ cameraRaw	Blending	Pembauran
 	Set Neutral Gray Point	Atur Titik Abu-abu Netral
 	Set White Point	Atur Titik Putih
 	Unavailable in this color mode	Tidak tersedia dalam mode warna ini
+	Selection Preview:	Pratinjau Seleksi:
+	Black Matte	Latar Hitam
+	White Matte	Latar Putih
 
 # Layer colour labels.
 	Seafoam	Busa Laut

@@ -2465,6 +2465,10 @@ cameraRaw	Roughness	Неровность
 	Set Neutral Gray Point	Задать нейтральную серую точку
 	Set White Point	Задать точку белого
 	Unavailable in this color mode	Недоступно в этом цветовом режиме
+	Selection Preview:	Просмотр выделения:
+	Black Matte	На чёрном фоне
+	White Matte	На белом фоне
+	Quick Mask	Быстрая маска
 
 # Layer colour labels.
 	Seafoam	Морская пена
