@@ -7,6 +7,18 @@ use crate::image::{Edge, Image, premultiply, unpremultiply};
 use crate::photo_util::{par_map, par_rows};
 use crate::{Ctx, FilterParams, RadialMethod, RadialQuality};
 
+#[cfg(test)]
+use self::motion as motion_rows;
+
+pub(crate) mod motion_apply;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod motion_bench;
+mod motion_fft;
+#[cfg(test)]
+mod motion_fft_tests;
+#[cfg(test)]
+mod motion_tests;
+
 /// Normalized Gaussian kernel with standard deviation `sigma` (radius 3σ).
 pub(crate) fn gaussian_kernel(sigma: f32) -> Vec<f32> {
     if sigma < 0.05 {

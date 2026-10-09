@@ -82,6 +82,19 @@ Confidence: moderate — the next users of 0.2.x will move these numbers either 
 | Platforms | macOS (notarized), Windows, Linux (AppImage/deb/rpm/Flatpak bundle), web | medium-high | Flathub later (#173); Windows signing material pending. |
 | Localisation | 2026-10-07: 10 UI languages; menu, `tl!`, blend mode, preference and brush-section coverage enforced by tests; live switching and scoped Preferences previews | medium | Engine errors/status messages still partly English; CJK web fonts, browser-locale detection, and RTL remain open. |
 
+2026-10-08: Motion Blur adds adaptive FFT convolution for wide streaks while retaining the
+row kernel merged in [#902](https://github.com/storytold/photocraft/pull/902) for shorter
+streaks and unsupported cases. Native release medians of three paired runs on an Intel
+i7-9750H with 12 Rayon workers, synthetic RGBA8 at 30° / distance 1000: 24 MP
+22.594 → 9.785 s (2.31×), and 1.5 MP
+2.455 → 0.592 s (4.15×).
+Full-image comparisons differ by at most one U8 code level; distance 64/256 retain the
+byte-identical row output. These measure decode/halo/filter/write/prune, excluding UI proxy
+creation, compositing and upload; the UI remains synchronous. FFT work is scheduled within
+a conservative 512 MiB working-set estimate, excluding stored Surface tiles and row fallback
+memory. The crossover is a heuristic; images dominated by near-cutoff alpha can need extra
+scalar work. These measurements do not establish Photoshop filter parity.
+
 2026-10-08: the tools update above is checked against the current toolbar groups in
 [`panels.rs`](../crates/ui-egui/src/panels.rs), the Pencil and tool-cycle tests in
 [`pencil_tests.rs`](../crates/ui-egui/src/pencil_tests.rs), Patch's live-preview test in
