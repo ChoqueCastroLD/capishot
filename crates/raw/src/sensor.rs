@@ -256,14 +256,17 @@ pub(crate) fn read_plane(t: &Tiff, ifd: &Ifd, limits: &Limits, layout: JpegLayou
             }
             34892 => {
                 // Adobe DNG compression 34892: baseline JPEG tiles (lossy, 8-bit). The tile is
-                // a complete JPEG stream; zune-jpeg decodes it to gray (CFA) samples.
+                // a complete JPEG stream; zune-jpeg decodes it to gray (CFA) samples. The header
+                // is decoded and size-checked before any pixel allocation, so a hostile tile
+                // cannot size the decoder's buffers (up to 16384x16384) with a fake SOF.
                 let options = zune_core::options::DecoderOptions::default().jpeg_set_out_colorspace(zune_core::colorspace::ColorSpace::Luma);
                 let mut dec = zune_jpeg::JpegDecoder::new_with_options(zune_core::bytestream::ZCursor::new(src), options);
-                let decoded = dec.decode().map_err(|e| RawError::malformed(format!("lossy JPEG tile: {e:?}")))?;
+                dec.decode_headers().map_err(|e| RawError::malformed(format!("lossy JPEG tile header: {e:?}")))?;
                 let f = dec.info().ok_or_else(|| RawError::malformed("lossy JPEG tile has no header"))?;
                 if (f.width as usize, f.height as usize) != (s.w, rows) {
                     return Err(RawError::malformed(format!("lossy JPEG tile is {}x{}, expected {}x{}", f.width, f.height, s.w, rows)));
                 }
+                let decoded = dec.decode().map_err(|e| RawError::malformed(format!("lossy JPEG tile: {e:?}")))?;
                 // The 8-bit samples widen to the document's 16-bit range (0xFF -> 0xFFFF).
                 Ok(decoded.into_iter().map(|b| u16::from(b) * 257).collect())
             }

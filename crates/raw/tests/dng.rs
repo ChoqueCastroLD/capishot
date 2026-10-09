@@ -559,6 +559,7 @@ fn profile_gain_table_map_is_reported() {
     assert!(!gain_table(&sensor(&spec.build())));
     spec.profile_gain_table_map = Some(vec![0; 64]);
     assert!(gain_table(&sensor(&spec.build())));
+}
 
 /// Adobe DNG compression 34892 (lossy baseline JPEG, 8-bit luma tiles): decodes to the tile
 /// samples widened to 16 bits, within the JPEG quality band (Q60 artifacts are mild but real).
@@ -590,4 +591,31 @@ fn lossy_jpeg_tiles_hostile() {
     let bytes = spec.build();
     let at = bytes.windows(2).position(|w| w == [0xFF, 0xD8]).expect("jpeg SOI") + 2;
     let cut = &bytes[..at + (bytes.len() - at) / 2];
-    assert!(decode(cut, &Limits::default()).is_err(), "a cut JPEG tile must not decode");}
+    assert!(decode(cut, &Limits::default()).is_err(), "a cut JPEG tile must not decode");
+}
+
+/// A tile JPEG whose header lies about its size fails the header check, before any pixel
+/// decode (a hostile SOF must not be able to size the decoder's buffers first).
+#[test]
+fn lossy_jpeg_tile_dimension_mismatch_errors() {
+    use image::ImageEncoder as _;
+    let (w, h) = (32, 32);
+    let data: Vec<u16> = (0..w * h).map(|i| 4096 + (i / w) as u16 * 16).collect();
+    let mut spec = DngSpec::cfa(w, h, data);
+    spec.storage = DngStorage::LossyJpegTiles { width: 32, height: 32 };
+    let mut bytes = spec.build();
+    // Swap the 32x32 tile JPEG for a 16x16 one, inside the same segment (the trailing bytes
+    // after its EOI stay; the JPEG decoder stops at EOI).
+    let small = {
+        let img = image::GrayImage::from_fn(16, 16, |x, _| image::Luma([(x as u16 * 16) as u8]));
+        let mut j = Vec::new();
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut j, 60);
+        enc.write_image(img.as_raw(), 16, 16, image::ExtendedColorType::L8).unwrap();
+        j
+    };
+    let soi = bytes.windows(3).position(|w| w == [0xFF, 0xD8, 0xFF]).expect("SOI");
+    let eoi = soi + bytes[soi..].windows(2).position(|w| w == [0xFF, 0xD9]).expect("EOI") + 2;
+    bytes.splice(soi..eoi, small);
+    let err = decode(&bytes, &Limits::default()).unwrap_err().to_string();
+    assert!(err.contains("16x16") && err.contains("32x32"), "{err}");
+}
