@@ -22,9 +22,9 @@ note = "eframe persistence (ui.ron): persist_window for the window, egui memory 
 [[item]]
 id = "UI-217-3"
 target = "File > Open starts in the last-used folder"
-status = "missing"
+status = "done"
 issue = 217
-note = "services.rs:110 FileDialog::new() without set_directory"
+note = "file_dialog.rs last_used_dir: open dialogs ask with initial_dir (the most recent file's folder) and apps services.rs passes it to rfd set_directory; open_starts_in_the_last_used_folder + last_used_dir_takes_the_most_recent_parent"
 
 [[item]]
 id = "UI-217-4"
