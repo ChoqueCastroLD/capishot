@@ -130,6 +130,7 @@ pub mod tiff_options_ui;
 mod timeline_ui;
 mod titlebar;
 pub mod tone;
+mod tool_cursor;
 pub mod tool_feedback;
 pub mod transform_tex;
 pub mod transform_tool;
@@ -1358,6 +1359,7 @@ impl PhotocraftApp {
     /// Install fonts, image loaders and the theme. Call from the app creator when possible so the
     /// very first frame renders; otherwise `logic` does it and the first frame is skipped.
     pub fn setup_context(ctx: &egui::Context, kind: theme::ThemeKind) {
+        ctx.add_plugin(tool_cursor::CursorLifecycle);
         theme::install_fonts(ctx);
         egui_extras::install_image_loaders(ctx);
         theme::apply(ctx, kind);

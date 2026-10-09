@@ -342,20 +342,13 @@ pub(crate) fn stroke_command(tool: Tool) -> &'static str {
 }
 
 /// Windows' crosshair cursor inverts the pixels under it, so over mid-grey (the pasteboard, many
-/// photos) it vanishes (#737). There the canvas draws a black-and-white crosshair itself, like
-/// Photoshop's, and hides the system one.
+/// photos) it vanishes (#737). Use a black-and-white bitmap, carried by the OS on Windows so
+/// its movement does not wait for the canvas to render.
 fn visible_crosshair(icon: egui::CursorIcon, painter: &egui::Painter, p: Pos2, draw: bool) -> egui::CursorIcon {
     if !draw || icon != egui::CursorIcon::Crosshair {
         return icon;
     }
-    let p = pos2(p.x.round() + 0.5, p.y.round() + 0.5);
-    let (gap, len) = (2.0, 8.0);
-    for (w, c) in [(3.0, Color32::from_black_alpha(160)), (1.0, Color32::from_white_alpha(235))] {
-        for d in [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)] {
-            painter.line_segment([p + d * gap, p + d * len], Stroke::new(w, c));
-        }
-    }
-    egui::CursorIcon::None
+    crate::tool_cursor::crosshair(painter, p, 8.0, 2.0)
 }
 
 /// The Pencil's cursor at `doc` (document pixels): the whole-pixel square its dab fills
@@ -2468,22 +2461,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     let brush = &app.session.tools.brush;
                     let full = (brush.size / 2.0 * view.zoom).max(1.0);
                     let r = if cur.painting == PaintingCursor::NormalTip { (full * (0.5 + 0.5 * brush.hardness.clamp(0.0, 1.0))).max(1.0) } else { full };
-                    let crosshair = |len: f32| {
-                        for (w, c) in [(2.5, Color32::from_black_alpha(140)), (1.0, Color32::from_white_alpha(220))] {
-                            painter.line_segment([p - vec2(len, 0.0), p + vec2(len, 0.0)], Stroke::new(w, c));
-                            painter.line_segment([p - vec2(0.0, len), p + vec2(0.0, len)], Stroke::new(w, c));
-                        }
-                    };
                     match cur.painting {
                         PaintingCursor::Standard => egui::CursorIcon::Default,
-                        PaintingCursor::Precise => {
-                            crosshair(6.0);
-                            egui::CursorIcon::None
-                        }
-                        _ if painting && cur.show_only_crosshair_while_painting => {
-                            crosshair(5.0);
-                            egui::CursorIcon::None
-                        }
+                        PaintingCursor::Precise => crate::tool_cursor::crosshair(&painter, p, 6.0, 0.0),
+                        _ if painting && cur.show_only_crosshair_while_painting => crate::tool_cursor::crosshair(&painter, p, 5.0, 0.0),
                         // The Pencil: the square of whole pixels its dab fills, on the pixel grid.
                         _ if tool == Tool::Pencil => {
                             let ppp = painter.ctx().pixels_per_point();
@@ -2493,17 +2474,13 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                             painter.rect_stroke(sq, 0.0, Stroke::new(px, Color32::from_white_alpha(230)), egui::StrokeKind::Inside);
                             // Too small to see where it is: the hotspot as well.
                             if cur.show_crosshair_in_brush_tip || sq.width() < 6.0 {
-                                crosshair(4.0);
+                                crate::tool_cursor::crosshair(&painter, p, 4.0, 0.0);
                             }
                             egui::CursorIcon::None
                         }
                         _ => {
-                            painter.circle_stroke(p, r + 0.5, Stroke::new(1.0, Color32::from_black_alpha(140)));
-                            painter.circle_stroke(p, r, Stroke::new(1.0, Color32::from_white_alpha(220)));
-                            if brush_tip_centre(tool, alt || app.ui.shell.sticky_alt, cur.show_crosshair_in_brush_tip, r) {
-                                crosshair(3.0);
-                            }
-                            egui::CursorIcon::None
+                            let centre = brush_tip_centre(tool, alt || app.ui.shell.sticky_alt, cur.show_crosshair_in_brush_tip, r);
+                            crate::tool_cursor::circle(&painter, p, r, centre)
                         }
                     }
                 }
@@ -3655,8 +3632,8 @@ mod tabs_tests;
 #[cfg(test)]
 mod tests {
     #[test]
-    fn windows_draws_its_own_crosshair() {
-        // #737: Windows' inverting crosshair vanishes over mid-grey; the canvas draws one instead.
+    fn windows_uses_a_visible_crosshair() {
+        // #737: Windows' inverting crosshair vanishes over mid-grey; use a black/white glyph.
         let ctx = egui::Context::default();
         let painter = egui::Painter::new(ctx, egui::LayerId::background(), egui::Rect::EVERYTHING);
         let p = egui::pos2(10.0, 10.0);
