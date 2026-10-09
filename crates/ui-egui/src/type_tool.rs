@@ -54,7 +54,7 @@ fn to_text(aff: &Affine, x: f64, y: f64) -> (f32, f32) {
 /// Topmost visible type layer whose laid-out text contains the document point.
 fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<LayerId> {
     let doc = app.session.active()?.doc.clone();
-    let slop = 6.0 / app.current_zoom().max(0.01);
+    let slop = 6.0 / app.point_zoom().max(0.01);
     let mut ids: Vec<LayerId> =
         doc.walk().into_iter().filter(|(_, _, l)| l.visible && matches!(l.content, LayerContent::Text(_))).map(|(_, _, l)| l.id).collect();
     ids.reverse(); // walk() is bottom-up; hit the topmost first
@@ -160,7 +160,7 @@ pub(crate) fn box_handle_at(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64
     let (r, b) = (bx + w, by + h);
     let (mx, my) = (bx + w / 2.0, by + h / 2.0);
     let spots = [(bx, by), (r, by), (r, b), (bx, b), (mx, by), (r, my), (mx, b), (bx, my)];
-    let tol = f64::from(6.0 / app.current_zoom().max(0.01));
+    let tol = f64::from(6.0 / app.point_zoom().max(0.01));
     spots
         .iter()
         .position(|&(sx, sy)| {
@@ -254,7 +254,7 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         return;
     }
     let (w, h) = ((end[0] - start[0]).abs(), (end[1] - start[1]).abs());
-    let min = 4.0 / app.current_zoom().max(0.01) as f64;
+    let min = 4.0 / app.point_zoom().max(0.01) as f64;
     let o = app.ui.tool_options.clone();
     // Preferences ▸ Type: "Fill new type layers with placeholder text" (on by default).
     let text = if app.session.prefs().type_.fill_new_type_layers_with_placeholder { PLACEHOLDER } else { "" };

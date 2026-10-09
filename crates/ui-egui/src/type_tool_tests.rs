@@ -50,7 +50,7 @@ fn xf(app: &PhotocraftApp) -> ViewXform {
     let v = &app.ui.views[0];
     ViewXform {
         rect: crate::rulers::content_rect(app, app.last_canvas_rect),
-        zoom: v.zoom,
+        zoom: v.zoom / app.canvas_ppp(),
         center: v.center,
         flip: app.ui.view.flip_horizontal,
         rotation: v.rotation,
@@ -616,7 +616,8 @@ fn frame_point(app: &PhotocraftApp, p: [f64; 2]) -> Pos2 {
 
 fn assert_affine(a: Affine, b: Affine) {
     for (x, y) in a.m.into_iter().zip(b.m) {
-        assert!((x - y).abs() < 2e-4, "{a:?} != {b:?}");
+        // Translations around 500 doc px at a scaled ppp cancel to ~2.7e-4 in f32 rounding.
+        assert!((x - y).abs() < 1e-3, "{a:?} != {b:?}");
     }
 }
 

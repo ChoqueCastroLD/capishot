@@ -1468,8 +1468,9 @@ fn navigator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // Visible-area rectangle.
     let v = app.ui.views[idx].clone();
     let canvas = app.last_canvas_rect;
-    let vw = canvas.width() / v.zoom * s;
-    let vh = canvas.height() / v.zoom * s;
+    let point_zoom = (v.zoom / app.canvas_ppp()).max(1e-6);
+    let vw = canvas.width() / point_zoom * s;
+    let vh = canvas.height() / point_zoom * s;
     let c = pos2(rect.min.x + v.center[0] * s, rect.min.y + v.center[1] * s);
     let vr = Rect::from_center_size(c, vec2(vw, vh)).intersect(frame.shrink(1.0));
     ui.painter().rect_stroke(vr, 2.0, Stroke::new(1.5, Color32::from_rgb(255, 84, 84)), StrokeKind::Middle);

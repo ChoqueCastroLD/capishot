@@ -396,6 +396,10 @@ pub struct PhotocraftApp {
     fonts_ready: bool,
     /// Screen rect of the main canvas last frame (for overlays and the navigator).
     pub last_canvas_rect: egui::Rect,
+    /// Physical pixels per egui point of the canvas last frame (`ctx.pixels_per_point`). The
+    /// canvas maps document pixels to physical pixels, so point-space geometry divides the view
+    /// zoom by this (see [`Self::point_zoom`]).
+    pub ppp: f32,
     /// The document area showing the active document's canvas last frame (not the tabs, the
     /// start screen or an opening file's card): files dropped here are placed as layers.
     pub(crate) drop_canvas_rect: Option<egui::Rect>,
@@ -549,6 +553,7 @@ impl PhotocraftApp {
             last_window_title: String::new(),
             fonts_ready: false,
             last_canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
+            ppp: 1.0,
             drop_canvas_rect: None,
             tab_strip: None,
             drop_places: Default::default(),
@@ -1478,9 +1483,22 @@ impl PhotocraftApp {
 }
 
 impl PhotocraftApp {
-    /// Zoom of the active document's main view (screen points per document pixel).
+    /// Zoom of the active document's main view: screen (device) pixels per document pixel, the
+    /// user-facing factor (`100%` is `1.0`).
     pub fn current_zoom(&self) -> f32 {
         self.session.active_index().and_then(|i| self.ui.views.get(i)).map_or(1.0, |v| v.zoom)
+    }
+
+    /// Screen (device) pixels per egui point of the canvas (`ctx.pixels_per_point`), as of the
+    /// last canvas frame. `1.0` before the first frame.
+    pub fn canvas_ppp(&self) -> f32 {
+        if self.ppp.is_finite() && self.ppp > 0.0 { self.ppp } else { 1.0 }
+    }
+
+    /// The active view's zoom in egui points per document pixel: the unit every screen-space
+    /// distance, tolerance and texture-level choice on the canvas is measured in.
+    pub fn point_zoom(&self) -> f32 {
+        self.current_zoom() / self.canvas_ppp()
     }
 }
 

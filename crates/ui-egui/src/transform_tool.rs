@@ -77,7 +77,7 @@ pub const HANDLE_PX: f64 = 12.0;
 
 /// [`HANDLE_PX`] in document pixels at the current zoom.
 pub fn handle_tolerance(app: &PhotocraftApp) -> f64 {
-    HANDLE_PX / app.current_zoom().max(0.01) as f64
+    HANDLE_PX / app.point_zoom().max(0.01) as f64
 }
 
 /// The box as one undo step restores it.

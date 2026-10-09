@@ -385,7 +385,7 @@ pub fn press(app: &mut PhotocraftApp) -> bool {
 }
 
 fn tolerance(app: &PhotocraftApp) -> f64 {
-    HANDLE_PX / (app.current_zoom() as f64).max(0.01)
+    HANDLE_PX / (app.point_zoom() as f64).max(0.01)
 }
 
 /// The pending frame's angle (degrees), 0 when it isn't a finite number.

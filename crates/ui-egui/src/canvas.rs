@@ -325,7 +325,7 @@ fn live_stroke(app: &PhotocraftApp, idx: usize) -> Option<&LiveStroke> {
 /// `paint.stroke` params for a Brush/Eraser drag (shared by the live preview and the commit). The
 /// stroke smoothing is the session brush's (the options bar's Smoothing %).
 fn stroke_params(app: &PhotocraftApp, tool: Tool, erase: bool, points: &[Vec<f64>]) -> serde_json::Value {
-    let mut p = json!({ "points": points, "erase": erase, "zoom": app.current_zoom(), "target": paint_target(app) });
+    let mut p = json!({ "points": points, "erase": erase, "zoom": app.point_zoom(), "target": paint_target(app) });
     if tool == Tool::Pencil {
         p["autoErase"] = json!(app.ui.tool_options.pencil_auto_erase);
     }
@@ -573,7 +573,7 @@ impl ViewXform {
         let v = app.ui.views.get(app.session.active_index()?)?;
         Some(Self {
             rect: crate::rulers::content_rect(app, app.last_canvas_rect),
-            zoom: v.zoom,
+            zoom: v.zoom / app.canvas_ppp(),
             center: v.center,
             flip: app.ui.view.flip_horizontal,
             rotation: v.rotation,
@@ -627,9 +627,12 @@ impl ViewXform {
     }
 }
 
-pub fn fit_view(view: &mut View, doc: &Document, area: Vec2) {
+/// Fit the document into `area` (egui points) for a display with `ppp` physical pixels per
+/// point; `View::zoom` is stored in physical pixels per document pixel.
+pub fn fit_view(view: &mut View, doc: &Document, area: Vec2, ppp: f32) {
     let (w, h) = (doc.size.width as f32, doc.size.height as f32);
-    let zoom = crate::zoom_levels::clamp(((area.x - 40.0) / w).min((area.y - 40.0) / h).min(1.0), [doc.size.width, doc.size.height]);
+    let points = ((area.x - 40.0) / w).min((area.y - 40.0) / h).min(1.0);
+    let zoom = crate::zoom_levels::clamp(points * ppp, [doc.size.width, doc.size.height]);
     view.zoom = zoom;
     view.center = [w / 2.0, h / 2.0];
     view.fit_pending = false;
@@ -638,9 +641,10 @@ pub fn fit_view(view: &mut View, doc: &Document, area: Vec2) {
 
 /// Centre the document and zoom until it fills the canvas. One axis can extend beyond the
 /// viewport, matching the Hand tool's Fill Screen action.
-pub fn fill_view(view: &mut View, doc: &Document, area: Vec2) {
+pub fn fill_view(view: &mut View, doc: &Document, area: Vec2, ppp: f32) {
     let (w, h) = (doc.size.width as f32, doc.size.height as f32);
-    let zoom = crate::zoom_levels::clamp((area.x / w).max(area.y / h), [doc.size.width, doc.size.height]);
+    let points = (area.x / w).max(area.y / h);
+    let zoom = crate::zoom_levels::clamp(points * ppp, [doc.size.width, doc.size.height]);
     view.zoom = zoom;
     view.center = [w / 2.0, h / 2.0];
     view.fit_pending = false;
@@ -2104,6 +2108,14 @@ fn hdr_preview(app: &PhotocraftApp, doc: &photocraft_doc::Document) -> Option<[f
 /// Draw one canvas view and handle its input. `primary` = main window (tools active).
 pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect: Rect, mut view: View, primary: bool) -> View {
     let ctx = ui.ctx().clone();
+    // `View::zoom` is device pixels per document pixel; this canvas's geometry is in its own
+    // viewport's egui points. A document window can sit on another display with a different
+    // scale, so only the primary canvas records `app.ppp` for the frame's shared helpers
+    // (`point_zoom`, the navigator, control-channel coordinate mapping).
+    let ppp = ctx.pixels_per_point();
+    if primary {
+        app.ppp = ppp;
+    }
     // The display this window is on: its monitor profile (#569). A document window on a display
     // the last reading didn't know asks for a new one.
     let output = crate::monitor_status::view_display(app, &ctx);
@@ -2122,17 +2134,19 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         view.doc_size = size;
     }
     if view.fit_pending && rect.width() > 50.0 {
-        fit_view(&mut view, &doc, rect.size());
+        fit_view(&mut view, &doc, rect.size(), ppp);
     }
     if view.fill_pending && rect.width() > 50.0 {
-        fill_view(&mut view, &doc, rect.size());
+        fill_view(&mut view, &doc, rect.size(), ppp);
     }
     // Preferences › Tools › Overscroll off: clamp before anything is drawn (scrollbars.rs).
-    if !app.session.prefs().tools.overscroll && crate::scrollbars::clamp_view(&mut view, rect.size()) {
+    if !app.session.prefs().tools.overscroll && crate::scrollbars::clamp_view(&mut view, rect.size(), ppp) {
         ctx.request_repaint();
     }
     let flip = app.ui.view.flip_horizontal;
-    let xf = ViewXform { rect, zoom: view.zoom, center: view.center, flip, rotation: view.rotation };
+    // Canvas geometry (ViewXform, ViewParams, painter rects) is in egui points.
+    let point_zoom = view.zoom / ppp;
+    let xf = ViewXform { rect, zoom: point_zoom, center: view.center, flip, rotation: view.rotation };
     let pixel_grid = app.ui.view.shows(app.ui.view.show.pixel_grid);
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
@@ -2159,16 +2173,15 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let gpu_ok = crate::gpu_canvas::gpu_view_ok(flip, view.rotation);
     if app.gpu.is_some()
         && gpu_ok
-        && let Some((k, key, preview_size)) = ensure_adjust_proxy(app, idx, view.zoom * ctx.pixels_per_point())
-            .or_else(|| ensure_filter_preview(app, idx, &ctx))
-            .or_else(|| ensure_proxy_preview(app, idx))
+        && let Some((k, key, preview_size)) =
+            ensure_adjust_proxy(app, idx, view.zoom).or_else(|| ensure_filter_preview(app, idx, &ctx)).or_else(|| ensure_proxy_preview(app, idx))
     {
         on_gpu = true;
         let original_size = [doc.size.width.div_ceil(k), doc.size.height.div_ceil(k)];
         let params = crate::gpu_canvas::ViewParams {
             doc: key,
             doc_size: preview_size,
-            zoom: view.zoom * k as f32,
+            zoom: view.zoom * k as f32 / ppp,
             // A size-changing preview grows around the old image center; keep the view's pan.
             center: [
                 view.center[0] / k as f32 + (preview_size[0] as f32 - original_size[0] as f32) / 2.0,
@@ -2193,7 +2206,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         let params = crate::gpu_canvas::ViewParams {
             doc: doc.id.0,
             doc_size: [doc.size.width, doc.size.height],
-            zoom: view.zoom,
+            zoom: point_zoom,
             center: view.center,
             rotation: if view.rotation.is_finite() { view.rotation.to_radians() } else { 0.0 },
             shadow: {
@@ -2304,7 +2317,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // Selection outline: true boundary, animated marching ants (cached per revision).
     if let Some(sel) = doc.selection.as_ref().filter(|_| app.ui.view.shows(app.ui.view.show.selection_edges) && !polygon_replaces_selection(app)) {
         // Trace at display resolution over the visible part only; key by the mask's tile identity
-        // (not the document revision) so unrelated edits don't re-trace it.
+        // (not the document revision) so unrelated edits don't re-trace it. The step is in
+        // device pixels per document pixel (`View::zoom`, not the point zoom), so a 1 px
+        // selection still traces at 100% on a scaled display.
         let step = (1.0 / view.zoom.max(1e-3)).log2().floor().exp2().clamp(1.0, 64.0) as u32;
         let corners = [rect.min, pos2(rect.max.x, rect.min.y), rect.max, pos2(rect.min.x, rect.max.y)];
         let docs = [xf.to_doc(corners[0]), xf.to_doc(corners[1]), xf.to_doc(corners[2]), xf.to_doc(corners[3])];
@@ -2373,11 +2388,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 // zooms nor slides the image towards the pointer.
                 let nz = crate::zoom_levels::clamp(view.zoom * f, view.doc_size);
                 if nz != view.zoom {
-                    zoom_about(&mut view, &xf, p, nz, false);
+                    zoom_about(&mut view, &xf, p, nz, false, ppp);
                 }
             }
             (Some(crate::wheel_nav::Wheel::Pan(scroll)), _) => {
-                let d = xf.unmap_vec(scroll) / view.zoom;
+                let d = xf.unmap_vec(scroll) / (view.zoom / ppp);
                 view.center[0] -= d.x;
                 view.center[1] -= d.y;
             }
@@ -2436,7 +2451,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             primary && app.ui.dialogs.last().is_some_and(|d| crate::color_range_ui::owns(&d.fields) && crate::color_range_ui::controls(&d.fields).sampling);
         let hand = app.ui.tool == Tool::Hand && !picking && !range_picking;
         if let Some(d) = crate::dialogs::pan_delta(&ctx, rect, hand) {
-            let d = xf.unmap_vec(d) / view.zoom;
+            let d = xf.unmap_vec(d) / (view.zoom / ppp);
             view.center[0] -= d.x;
             view.center[1] -= d.y;
             ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -2468,7 +2483,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
     }
     if tool == Tool::Hand && response.dragged() {
-        let d = xf.unmap_vec(response.drag_delta()) / view.zoom;
+        let d = xf.unmap_vec(response.drag_delta()) / (view.zoom / ppp);
         view.center[0] -= d.x;
         view.center[1] -= d.y;
     } else if primary {
@@ -2667,7 +2682,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 Tool::Zoom => {
                     let nz = crate::zoom_levels::step(view.zoom, if zoom_out(click_mods.alt) { -1 } else { 1 }, view.doc_size);
                     let center = app.session.prefs().tools.zoom_clicked_point_to_center;
-                    zoom_about(&mut view, &xf, p, nz, center);
+                    zoom_about(&mut view, &xf, p, nz, center, ppp);
                 }
                 // A click with the (temporary) Hand does nothing, never the tool underneath.
                 Tool::Hand | Tool::RotateView => {}
@@ -2793,7 +2808,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     let cur = app.session.prefs().cursors.clone();
                     let painting = app.drag.is_some();
                     let brush = &app.session.tools.brush;
-                    let full = (brush.size / 2.0 * view.zoom).max(1.0);
+                    let full = (brush.size / 2.0 * xf.zoom).max(1.0);
                     let r = if cur.painting == PaintingCursor::NormalTip { (full * (0.5 + 0.5 * brush.hardness.clamp(0.0, 1.0))).max(1.0) } else { full };
                     match cur.painting {
                         PaintingCursor::Standard => egui::CursorIcon::Default,
@@ -2850,11 +2865,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     }
                 }
                 Tool::Type | Tool::VerticalType => egui::CursorIcon::Text,
-                Tool::MagneticLasso => crate::magnetic_lasso_ui::cursor(app, &painter, p, view.zoom),
+                Tool::MagneticLasso => crate::magnetic_lasso_ui::cursor(app, &painter, p, xf.zoom),
                 Tool::RedEye => {
                     let pupil = app.ui.tool_options.red_eye_pupil_size.clamp(1.0, 100.0);
                     let r_doc = photocraft_algo::redeye::search_radius(pupil);
-                    let r = (r_doc * view.zoom).max(2.0);
+                    let r = (r_doc * xf.zoom).max(2.0);
                     painter.circle_stroke(p, r + 0.5, Stroke::new(1.0, Color32::from_black_alpha(140)));
                     painter.circle_stroke(p, r, Stroke::new(1.0, Color32::from_white_alpha(220)));
                     for (w, c) in [(2.5, Color32::from_black_alpha(140)), (1.0, Color32::from_white_alpha(220))] {
@@ -2904,14 +2919,16 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
 /// Zoom to `new_zoom` about the pointer `p`. By default the document point under it stays under
 /// it; with Preferences › Tools › Zoom Clicked Point to Center (`center_on_point`) it moves to the
 /// centre of the view instead (#204).
-fn zoom_about(view: &mut View, xf: &ViewXform, p: Pos2, new_zoom: f32, center_on_point: bool) {
+fn zoom_about(view: &mut View, xf: &ViewXform, p: Pos2, new_zoom: f32, center_on_point: bool, ppp: f32) {
     let before = xf.to_doc(p);
     view.zoom = new_zoom;
     if center_on_point {
         view.center = [before[0] as f32, before[1] as f32];
         return;
     }
-    let u = xf.unmap_vec((p - xf.rect.center()) / new_zoom);
+    // `new_zoom` is device px per document pixel; the pointer vector is in egui points.
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    let u = xf.unmap_vec((p - xf.rect.center()) / (new_zoom / ppp));
     view.center = [before[0] as f32 - u.x, before[1] as f32 - u.y];
 }
 
@@ -3448,7 +3465,7 @@ fn tool_move(app: &mut PhotocraftApp, x: f64, y: f64, pressure: f32, mods: egui:
     if tool == Tool::Pen {
         crate::vector_ui::pen_move(app, x, y);
     }
-    let zoom = app.current_zoom();
+    let zoom = app.point_zoom();
     if let Some(d) = app.drag.as_mut().filter(|d| d.reposition) {
         d.track(mods);
         d.shift_to([x, y]);
@@ -3735,7 +3752,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             if tool == Tool::Pen {
                 crate::vector_ui::pen_up(app);
             }
-            let zoom = app.current_zoom();
+            let zoom = app.point_zoom();
             let Some(mut d) = app.drag.take() else { return };
             d.track(mods);
             if d.reposition {
@@ -3987,7 +4004,7 @@ fn polygon_click(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers)
         .ui
         .polygon
         .first()
-        .is_some_and(|p0| app.ui.polygon.len() >= 3 && ((p0[0] - x).powi(2) + (p0[1] - y).powi(2)).sqrt() < 8.0 / app.current_zoom().max(0.01) as f64);
+        .is_some_and(|p0| app.ui.polygon.len() >= 3 && ((p0[0] - x).powi(2) + (p0[1] - y).powi(2)).sqrt() < 8.0 / app.point_zoom().max(0.01) as f64);
     if close {
         commit_polygon(app);
         return;
@@ -4906,6 +4923,57 @@ mod tests {
     }
 
     #[test]
+    fn a_one_pixel_selection_traces_at_hundred_percent_on_a_scaled_display() {
+        // #1943 review: the outline step is display resolution in device pixels, not points, so a
+        // 1 px selection still traces at 100 % on a 2x display (a points-based step sampled every
+        // second pixel and lost it: zero segments).
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 200, "height": 200})).unwrap();
+        app.run("select.rect", json!({"x": 50, "y": 50, "width": 1, "height": 100})).unwrap();
+        app.run("view.actualPixels", json!({})).unwrap();
+        app.sync_views();
+        let view = app.ui.views[0].clone();
+        let mut input = egui::RawInput::default();
+        input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(2.0);
+        let mut out = ctx.run_ui(input, |ui| {
+            canvas_view(&mut app, ui, 0, Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0)), view.clone(), true);
+        });
+        out.textures_delta.clear();
+        assert_eq!(app.ppp, 2.0, "the primary canvas records the display scale");
+        let segs = app.outline_cache.as_ref().map_or(0, |(_, _, s)| s.len());
+        assert!(segs > 0, "a 1 px selection traces at 100 % on a 2x display");
+    }
+
+    #[test]
+    fn a_secondary_canvas_does_not_overwrite_the_main_canvas_scale() {
+        // #1943 review: a document window can sit on a display with another scale; only the
+        // primary canvas records `app.ppp`, so the main mapping doesn't change under it.
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
+        app.run("view.actualPixels", json!({})).unwrap();
+        app.sync_views();
+        let view = app.ui.views[0].clone();
+        let frame = |app: &mut PhotocraftApp, ppp: f32, primary: bool| {
+            let mut input = egui::RawInput::default();
+            input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+            let mut out = ctx.run_ui(input, |ui| {
+                canvas_view(app, ui, 0, Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0)), view.clone(), primary);
+            });
+            out.textures_delta.clear();
+        };
+        frame(&mut app, 2.0, true);
+        assert_eq!(app.ppp, 2.0);
+        frame(&mut app, 1.0, false);
+        assert_eq!(app.ppp, 2.0, "a secondary window's scale doesn't replace the main canvas's");
+        // The main canvas mapping still uses its own scale: 100 % is 1 doc px per physical px.
+        let xf = ViewXform::active(&app).unwrap();
+        let step = xf.to_screen(1.0, 0.0) - xf.to_screen(0.0, 0.0);
+        assert!((step.x - 0.5).abs() < 1e-3, "{step:?}");
+    }
+
+    #[test]
     fn brush_drags_paint_no_stand_in_shape_over_the_canvas() {
         // #189: v0.1 drew the stroke being dragged as a foreground-coloured egui polyline as wide
         // as the brush; zoomed in, egui tessellated it into hard black wedges fanning out from the
@@ -4998,30 +5066,66 @@ mod tests {
         let doc = app.session.active().unwrap().doc.clone();
         let mut view = View { fill_pending: true, ..View::default() };
 
-        fill_view(&mut view, &doc, vec2(600.0, 600.0));
+        fill_view(&mut view, &doc, vec2(600.0, 600.0), 1.0);
 
         assert_eq!(view.zoom, 3.0, "the short edge fills the available height");
         assert_eq!(view.center, [200.0, 100.0]);
         assert!(!view.fill_pending);
+
+        // A scaled display stores the physical factor: the same point zoom is 2× the device px.
+        let mut view = View { fill_pending: true, ..View::default() };
+        fill_view(&mut view, &doc, vec2(600.0, 600.0), 2.0);
+        assert_eq!(view.zoom, 6.0);
+
+        // Fit never magnifies past the 1 point-per-pixel cap; on a scaled display the cap is 2.
+        let mut view = View { fit_pending: true, ..View::default() };
+        fit_view(&mut view, &doc, vec2(600.0, 600.0), 1.0);
+        assert_eq!(view.zoom, 1.0);
+        let mut view = View { fit_pending: true, ..View::default() };
+        fit_view(&mut view, &doc, vec2(600.0, 600.0), 2.0);
+        assert_eq!(view.zoom, 2.0);
+    }
+
+    #[test]
+    fn a_hundred_percent_is_one_physical_pixel_per_document_pixel() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 400, "height": 200})).unwrap();
+        app.sync_views();
+        for ppp in [1.0f32, 1.25, 2.0] {
+            app.ppp = ppp;
+            let xf = ViewXform::active(&app).unwrap();
+            // 100% zoom: one document pixel is one physical pixel, i.e. 1/ppp egui points.
+            let step = xf.to_screen(1.0, 0.0) - xf.to_screen(0.0, 0.0);
+            // `to_screen` differences around the view centre cancel in f32; 1e-3 is still exact
+            // enough to see a wrong ppp factor (which would be a 20–100% error).
+            assert!((step.x - 1.0 / ppp).abs() < 1e-3, "ppp {ppp}: {step:?} want {:?}", 1.0 / ppp);
+            assert!((app.point_zoom() - 1.0 / ppp).abs() < 1e-5, "ppp {ppp}: {}", app.point_zoom());
+            // Screen ↔ document stays an exact round trip.
+            let back = xf.to_doc(xf.to_screen(123.0, 45.0));
+            assert!((back[0] - 123.0).abs() < 1e-3 && (back[1] - 45.0).abs() < 1e-3, "ppp {ppp}: {back:?}");
+        }
     }
 
     #[test]
     fn zoom_about_centres_the_clicked_point_with_the_preference() {
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
-        let xf = ViewXform { rect, zoom: 1.0, center: [400.0, 300.0], flip: false, rotation: 0.0 };
         let p = pos2(600.0, 200.0);
-        let doc = xf.to_doc(p);
-        // Off: the document point under the pointer stays under it.
-        let mut view = View { zoom: 1.0, center: [400.0, 300.0], ..Default::default() };
-        zoom_about(&mut view, &xf, p, 2.0, false);
-        let after = ViewXform { rect, zoom: 2.0, center: view.center, flip: false, rotation: 0.0 };
-        let s = after.to_screen(doc[0] as f32, doc[1] as f32);
-        assert!((s - p).length() < 0.5, "{s:?} vs {p:?}");
-        // On: the clicked point is the view centre.
-        let mut view = View { zoom: 1.0, center: [400.0, 300.0], ..Default::default() };
-        zoom_about(&mut view, &xf, p, 2.0, true);
-        assert!((view.center[0] - doc[0] as f32).abs() < 0.5, "{:?}", view.center);
-        assert!((view.center[1] - doc[1] as f32).abs() < 0.5, "{:?}", view.center);
+        for ppp in [1.0f32, 2.0] {
+            // `View::zoom` is physical; the transform works in points.
+            let xf = ViewXform { rect, zoom: 1.0 / ppp, center: [400.0, 300.0], flip: false, rotation: 0.0 };
+            let doc = xf.to_doc(p);
+            // Off: the document point under the pointer stays under it.
+            let mut view = View { zoom: 1.0, center: [400.0, 300.0], ..Default::default() };
+            zoom_about(&mut view, &xf, p, 2.0, false, ppp);
+            let after = ViewXform { rect, zoom: 2.0 / ppp, center: view.center, flip: false, rotation: 0.0 };
+            let s = after.to_screen(doc[0] as f32, doc[1] as f32);
+            assert!((s - p).length() < 0.5, "ppp {ppp}: {s:?} vs {p:?}");
+            // On: the clicked point is the view centre.
+            let mut view = View { zoom: 1.0, center: [400.0, 300.0], ..Default::default() };
+            zoom_about(&mut view, &xf, p, 2.0, true, ppp);
+            assert!((view.center[0] - doc[0] as f32).abs() < 0.5, "ppp {ppp}: {:?}", view.center);
+            assert!((view.center[1] - doc[1] as f32).abs() < 0.5, "ppp {ppp}: {:?}", view.center);
+        }
     }
 
     #[test]
