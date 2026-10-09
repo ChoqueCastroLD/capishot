@@ -1440,6 +1440,7 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     let mut activate = None;
     let mut close = None;
     let mut tab_action = None;
+    let mut tab_move = None;
     let (mut focus_open, mut cancel_open) = (None, None);
     let focused_open = app.jobs.focus.is_some();
     // Layers dragged over a tab show its document (`layer_transfer`).
@@ -1494,7 +1495,7 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
             let name_g = crate::tab_strip::elided(ui, &name, font.clone(), t.text, name_max);
             // The title was cut: the tooltip has the rest of it.
             let cut = name_g.size().x + 0.5 < natural_w - STUDIO_TAB_PAD + STUDIO_TAB_GAP - meta_g.size().x;
-            let resp = ui.interact(r, ui.id().with(("dtab", i)), Sense::click());
+            let resp = ui.interact(r, ui.id().with(("dtab", i)), Sense::click_and_drag());
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, sel, &st.doc.name));
             doc_tabs.push((i, r));
             if sel {
@@ -1523,8 +1524,22 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
             } else if resp.clicked() {
                 activate = Some(i);
             }
+            // Drag a tab sideways to reorder it (#217); a line shows where it will land.
+            if resp.dragged()
+                && let Some(p) = resp.interact_pointer_pos()
+            {
+                tab_drop_line(ui, &placed, p.x, &t);
+            }
+            if resp.drag_stopped() {
+                let x = resp.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.interact_pos())).map_or(r.center().x, |p| p.x);
+                let to = tab_move_target(i, tab_drop_index(&placed, x));
+                if to != i {
+                    tab_move = Some((i, to));
+                }
+            }
+            let has_path = st.path.is_some();
             resp.context_menu(|ui| {
-                tab_action = tab_context_menu(ui, i, tab_count);
+                tab_action = tab_context_menu(ui, i, tab_count, has_path);
             });
         }
         // Files opening in the background: a tab with a progress underline; × cancels.
@@ -1577,6 +1592,12 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     if let Some(i) = close {
         let _ = crate::menus::invoke(app, ui.ctx(), "file.close", json!({"document": i}));
     }
+    if let Some((from, to)) = tab_move
+        && let Err(e) = crate::menus::invoke(app, ui.ctx(), "document.move", json!({"document": from, "to": to}))
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
     if let Some((id, params)) = tab_action
         && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, params)
     {
@@ -1588,18 +1609,19 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
 
 /// All tab actions go through the same guarded File commands as the menu bar, including the
 /// unsaved-changes prompt. The clicked tab is explicit even when another document is active.
-fn tab_context_items(index: usize, count: usize) -> [(&'static str, &'static str, serde_json::Value, bool); 3] {
+fn tab_context_items(index: usize, count: usize, has_path: bool) -> [(&'static str, &'static str, serde_json::Value, bool); 4] {
     [
         ("Close", "file.close", json!({"document": index}), true),
         ("Close Others", "file.closeOthers", json!({"document": index}), count > 1),
         ("Close All", "file.closeAll", json!({}), true),
+        ("Reveal in Finder", "file.revealInFinder", json!({"document": index}), has_path),
     ]
 }
 
-fn tab_context_menu(ui: &mut egui::Ui, index: usize, count: usize) -> Option<(&'static str, serde_json::Value)> {
+fn tab_context_menu(ui: &mut egui::Ui, index: usize, count: usize, has_path: bool) -> Option<(&'static str, serde_json::Value)> {
     crate::widgets::menu_scroll(ui, |ui| {
         ui.set_min_width(170.0);
-        for (label, id, params, enabled) in tab_context_items(index, count) {
+        for (label, id, params, enabled) in tab_context_items(index, count, has_path) {
             if ui.add_enabled(enabled, egui::Button::new(tl!(label))).clicked() {
                 ui.close();
                 return Some((id, params));
@@ -1607,6 +1629,33 @@ fn tab_context_menu(ui: &mut egui::Ui, index: usize, count: usize) -> Option<(&'
         }
         None
     })
+}
+
+/// Where a tab dragged to `x` would land: before the first shown tab whose middle is right of
+/// `x`, else after the last shown tab (its document index + 1), like [`TabStrip::slot`].
+fn tab_drop_index(placed: &[(usize, Rect)], x: f32) -> usize {
+    match placed.iter().find(|(_, r)| r.center().x >= x) {
+        Some(&(i, _)) => i,
+        None => placed.last().map_or(0, |&(i, _)| i.saturating_add(1)),
+    }
+}
+
+/// The `document.move` target for dropping the tab at `from` at insertion index `k`: the slot
+/// shifts down when the dragged tab itself is removed first; next to itself it stays put.
+fn tab_move_target(from: usize, k: usize) -> usize {
+    if k > from { k - 1 } else { k }
+}
+
+/// The insertion line shown while a tab is dragged to reorder it.
+fn tab_drop_line(ui: &egui::Ui, placed: &[(usize, Rect)], x: f32, t: &crate::theme::Tokens) {
+    match placed.iter().find(|(_, r)| r.center().x >= x) {
+        Some(&(_, r)) => crate::widgets::drop_line(ui, r, false, true, t),
+        None => {
+            if let Some(&(_, r)) = placed.last() {
+                crate::widgets::drop_line(ui, r, true, true, t);
+            }
+        }
+    }
 }
 
 /// Apply tab-strip clicks: a document tab shows that document, an opening tab its progress, and
@@ -1658,6 +1707,7 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     let active = app.session.active_index().filter(|_| app.jobs.focus.is_none());
     let (mut activate, mut close) = (None, None);
     let mut tab_action = None;
+    let mut tab_move = None;
     let tab_count = app.session.documents().len();
     let dragging = crate::layer_transfer::pointer_if_armed(app, ui.ctx());
     let mut drag_over = None;
@@ -1690,7 +1740,7 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     for &(i, r) in placed.iter().filter(|(i, _)| *i < tab_count) {
         let Some(title) = titles.get(i) else { continue };
         let g = crate::tab_strip::elided(ui, title, font.clone(), t.text, (r.width() - DOC_TAB_PAD).max(1.0));
-        let resp = ui.interact(r, ui.id().with(("ptab", i)), Sense::click());
+        let resp = ui.interact(r, ui.id().with(("ptab", i)), Sense::click_and_drag());
         let sel = Some(i) == active;
         if sel {
             ui.painter().rect_filled(r, 0.0, t.chrome);
@@ -1716,8 +1766,22 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         } else if resp.clicked() {
             activate = Some(i);
         }
+        // Drag a tab sideways to reorder it (#217); a line shows where it will land.
+        if resp.dragged()
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            tab_drop_line(ui, &placed, p.x, &t);
+        }
+        if resp.drag_stopped() {
+            let x = resp.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.interact_pos())).map_or(r.center().x, |p| p.x);
+            let to = tab_move_target(i, tab_drop_index(&placed, x));
+            if to != i {
+                tab_move = Some((i, to));
+            }
+        }
+        let has_path = app.session.documents().get(i).is_some_and(|d| d.path.is_some());
         resp.context_menu(|ui| {
-            tab_action = tab_context_menu(ui, i, tab_count);
+            tab_action = tab_context_menu(ui, i, tab_count, has_path);
         });
         doc_tabs.push((i, r));
     }
@@ -1763,6 +1827,12 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     }
     if let Some(i) = close {
         let _ = crate::menus::invoke(app, ui.ctx(), "file.close", json!({"document": i}));
+    }
+    if let Some((from, to)) = tab_move
+        && let Err(e) = crate::menus::invoke(app, ui.ctx(), "document.move", json!({"document": from, "to": to}))
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
     }
     if let Some((id, params)) = tab_action
         && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, params)
@@ -4178,12 +4248,15 @@ mod tests {
 
     #[test]
     fn tab_context_uses_clicked_document_and_existing_close_commands() {
-        let items = tab_context_items(2, 3);
-        assert_eq!(items.iter().map(|(_, id, _, _)| *id).collect::<Vec<_>>(), ["file.close", "file.closeOthers", "file.closeAll"]);
+        let items = tab_context_items(2, 3, true);
+        assert_eq!(items.iter().map(|(_, id, _, _)| *id).collect::<Vec<_>>(), ["file.close", "file.closeOthers", "file.closeAll", "file.revealInFinder"]);
         assert_eq!(items[0].2, json!({"document": 2}));
         assert_eq!(items[1].2, json!({"document": 2}));
         assert_eq!(items[2].2, json!({}));
-        assert!(!tab_context_items(0, 1)[1].3);
+        assert_eq!(items[3].2, json!({"document": 2}));
+        assert!(items[3].3, "a saved document can be revealed in the file manager");
+        assert!(!tab_context_items(2, 3, false)[3].3, "an unsaved document cannot");
+        assert!(!tab_context_items(0, 1, false)[1].3);
         assert!(items.iter().all(|(_, id, _, _)| photocraft_engine::commands::find(id).is_some()));
     }
 
@@ -4226,10 +4299,62 @@ mod tests {
         app.run("file.new", json!({"width": 8, "height": 8, "name": "Edited"})).unwrap();
         app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
         assert_eq!(app.session.active_index(), Some(1));
-        let (_, id, params, _) = tab_context_items(0, 2)[1].clone();
+        let (_, id, params, _) = tab_context_items(0, 2, false)[1].clone();
         crate::menus::invoke(&mut app, &egui::Context::default(), id, params).unwrap();
         assert!(app.discard.is_some(), "close others must ask before discarding the edited tab");
         assert_eq!(app.session.documents().len(), 2);
+    }
+
+    /// The pure half of tab drag-to-reorder (UI-217-6): where a drop lands and which
+    /// `document.move` target that is.
+    #[test]
+    fn tab_drop_index_and_move_target_cover_reorder_drops() {
+        let r = |x: f32| Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(100.0, 26.0));
+        let placed = vec![(0, r(0.0)), (1, r(100.0)), (2, r(200.0))];
+        assert_eq!(tab_drop_index(&placed, 10.0), 0);
+        assert_eq!(tab_drop_index(&placed, 160.0), 2);
+        assert_eq!(tab_drop_index(&placed, 350.0), 3, "past the end lands after the last shown tab");
+        assert_eq!(tab_move_target(0, 3), 2);
+        assert_eq!(tab_move_target(2, 0), 0);
+        assert_eq!(tab_move_target(1, 1), 1, "before itself: no move");
+        assert_eq!(tab_move_target(1, 2), 1, "just after itself: no move");
+        assert_eq!(tab_move_target(0, 1), 0);
+    }
+
+    /// Dragging a tab onto another's slot reorders the open documents (UI-217-6), in both the
+    /// studio and the Photoshop-style strips.
+    #[test]
+    fn dragging_a_tab_reorders_the_documents() {
+        use egui_kittest::kittest::Queryable;
+        for kind in [crate::theme::ThemeKind::Studio, crate::theme::ThemeKind::Pro] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            for name in ["a", "b", "c"] {
+                app.run("file.new", json!({"width": 8, "height": 8, "name": name})).unwrap();
+            }
+            app.sync_views();
+            let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(700.0, 40.0)).build_ui_state(
+                |ui, (app, ready): &mut (PhotocraftApp, bool)| {
+                    if *ready {
+                        tabs(app, ui);
+                    }
+                },
+                (app, false),
+            );
+            PhotocraftApp::setup_context(&h.ctx, kind);
+            h.state_mut().1 = true;
+            h.run_steps(2);
+            let b = h.get_by_label_contains("b").rect();
+            let a = h.get_by_label_contains("a").rect();
+            let target = egui::pos2(a.left() + 2.0, a.center().y);
+            h.drag_at(b.center());
+            h.run_steps(1);
+            h.hover_at(target);
+            h.run_steps(1);
+            h.drop_at(target);
+            h.run_steps(2);
+            let names: Vec<String> = h.state().0.session.documents().iter().map(|d| d.doc.name.clone()).collect();
+            assert_eq!(names, ["b", "a", "c"], "{kind:?}: the dragged tab took the dropped slot");
+        }
     }
 
     #[test]
