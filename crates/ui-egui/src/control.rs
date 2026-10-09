@@ -767,6 +767,10 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "textEdit": app.ui.text_edit,
         "typeTransform": app.ui.type_transform,
         "layerMenu": app.ui.layer_menu,
+        "brushPicker": app.ui.brush_picker.map(|pos| json!({
+            "pos": pos,
+            "list": app.ui.brush_picker_list,
+        })),
         "canvasToolMenu": app.ui.canvas_tool_menu.as_ref().map(|menu| {
             json!({
                 "pos": menu.pos,
@@ -1042,6 +1046,40 @@ mod tests {
         assert_eq!(app.ui.brush_picker, Some([120.0, 80.0]), "a bad value leaves the picker alone");
         assert_eq!(call(&mut app, &ctx, "ui.set", json!({"brushPicker": null}))["ok"], true);
         assert_eq!(app.ui.brush_picker, None);
+    }
+
+    #[test]
+    fn ui_inspect_tracks_brush_picker_open_and_closed() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 128, "height": 128})).unwrap();
+
+        let closed = call(&mut app, &ctx, "ui.inspect", json!({}));
+        assert!(closed["result"]["brushPicker"].is_null());
+
+        // A right-click on the canvas with Brush opens the same picker as the options bar.
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"tool": "brush"}))["ok"], true);
+        let click = call(
+            &mut app,
+            &ctx,
+            "ui.pointer",
+            json!({
+                "button": "right",
+                "events": [{"kind": "down", "x": 64, "y": 64}, {"kind": "up", "x": 64, "y": 64}]
+            }),
+        );
+        assert_eq!(click["ok"], true, "{click}");
+        let open = call(&mut app, &ctx, "ui.inspect", json!({}));
+        assert!(open["result"]["brushPicker"]["pos"].is_array(), "{open}");
+        assert_eq!(open["result"]["brushPicker"]["list"]["view"], "grid");
+
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"brushPickerView": "list"}))["ok"], true);
+        let changed = call(&mut app, &ctx, "ui.inspect", json!({}));
+        assert_eq!(changed["result"]["brushPicker"]["list"]["view"], "list");
+
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"brushPicker": null}))["ok"], true);
+        let closed_again = call(&mut app, &ctx, "ui.inspect", json!({}));
+        assert!(closed_again["result"]["brushPicker"].is_null());
     }
 
     #[test]
