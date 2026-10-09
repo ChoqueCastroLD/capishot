@@ -1452,7 +1452,6 @@
 	Cancel transform (Esc)	Отменить трансформацию (Esc)
 	Cancel warp (Esc)	Отменить деформацию (Esc)
 	Do you want to save the changes you made to “{name}” before closing?	Сохранить изменения в документе «{name}» перед закрытием?
-	Do you want to save you made to “{name}” before quitting?	Сохранить изменения в документе «{name}» перед выходом?
 	Revert “{name}” to the last saved version? Your changes will be lost.	Вернуть «{name}» к последней сохранённой версии? Изменения будут потеряны.
 	{key} to subtract	{key} — вычесть
 	↑↓ navigate   {key} run   esc close	↑↓ переход   {key} выполнить   esc закрыть

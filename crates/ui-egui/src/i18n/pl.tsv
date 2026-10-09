@@ -1695,7 +1695,6 @@
 	Revert “{name}” to the last saved version? Your changes will be lost.	Przywrócić „{name}” do ostatnio zapisanej wersji? Zmiany zostaną utracone.
 	Do you want to save the changes you made to “{name}” before quitting?	Czy zapisać zmiany wprowadzone w „{name}” przed zakończeniem?
 	Do you want to save the changes you made to “{name}” before closing?	Czy zapisać zmiany wprowadzone w „{name}” przed zamknięciem?
-	Do you want to save you made to “{name}” before quitting?	Czy zapisać zmiany wprowadzone w „{name}” przed zakończeniem?
 	Doc: {flat}/{layered}	Dok.: {flat}/{layered}
 	Scratch: {size}	Dysk rob.: {size}
 	Untagged {mode}	{mode} bez profilu
