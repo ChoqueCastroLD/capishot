@@ -439,7 +439,7 @@ fn names(h: &Harness<'_, PhotocraftApp>) -> Vec<String> {
 /// pixel layer on an adjustment layer.
 #[test]
 fn delete_without_a_selection_deletes_the_selected_layer() {
-    for place in [Place::Canvas, Place::LayersRow] {
+    for place in [Place::Canvas, Place::LayersRow, Place::FocusedWidget] {
         for key in ["Delete", "Backspace"] {
             let mut h = harness();
             put_focus(&mut h, place);

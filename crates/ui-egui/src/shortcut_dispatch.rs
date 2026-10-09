@@ -104,7 +104,22 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
 pub enum Focus {
     None,
     Widget,
+    /// A focused widget that edits with ⌫ / Delete itself (a Curves graph deletes its selected
+    /// point), see [`claim_delete_keys`].
+    DeletingWidget,
     Text,
+}
+
+/// Where [`claim_delete_keys`] keeps the id of the widget that owns ⌫ / Delete while focused.
+fn delete_owner_id() -> egui::Id {
+    egui::Id::new("shortcut_dispatch::delete_owner")
+}
+
+/// Called by a widget that has keyboard focus and uses ⌫ / Delete itself (the Curves graph):
+/// while it keeps focus those keys reach it instead of Edit › Clear or Delete Layer. Every other
+/// focused widget (a Layers row, a slider) leaves them to the shortcuts, as in Photoshop (#1534).
+pub fn claim_delete_keys(ctx: &egui::Context, id: egui::Id) {
+    ctx.data_mut(|d| d.insert_temp(delete_owner_id(), id));
 }
 
 impl Focus {
@@ -113,14 +128,15 @@ impl Focus {
         if ctx.text_edit_focused() || crate::layer_row_ui::rename_active(ctx) {
             Focus::Text
         } else if ctx.egui_wants_keyboard_input() {
-            Focus::Widget
+            let owner = ctx.data(|d| d.get_temp::<egui::Id>(delete_owner_id()));
+            if owner.is_some() && ctx.memory(|m| m.focused()) == owner { Focus::DeletingWidget } else { Focus::Widget }
         } else {
             Focus::None
         }
     }
 
     /// May `sc` fire with this focus? A focused widget keeps its navigation keys (arrows, ↩,
-    /// Space, Delete…); a text field keeps everything but ⌘ shortcuts (minus its own editing
+    /// Space, Esc…, plus ⌫ / Delete when it claimed them); a text field keeps everything but ⌘ shortcuts (minus its own editing
     /// ones: select all, clipboard, undo) and the function keys.
     pub fn allows(self, sc: &KeyboardShortcut) -> bool {
         let k = sc.logical_key;
@@ -152,8 +168,6 @@ impl Focus {
                 | Key::Space
                 | Key::Tab
                 | Key::Escape
-                | Key::Backspace
-                | Key::Delete
                 | Key::Home
                 | Key::End
                 | Key::PageUp
@@ -162,8 +176,11 @@ impl Focus {
         match self {
             Focus::None => true,
             Focus::Widget => sc.modifiers.command || !navigation,
+            Focus::DeletingWidget => sc.modifiers.command || !(navigation || matches!(k, Key::Backspace | Key::Delete)),
             Focus::Text => {
-                let text_edit = !sc.modifiers.alt && matches!(k, Key::A | Key::C | Key::X | Key::V | Key::Z | Key::Y) || navigation;
+                let text_edit = !sc.modifiers.alt && matches!(k, Key::A | Key::C | Key::X | Key::V | Key::Z | Key::Y)
+                    || navigation
+                    || matches!(k, Key::Backspace | Key::Delete);
                 function || (sc.modifiers.command && !text_edit)
             }
         }
