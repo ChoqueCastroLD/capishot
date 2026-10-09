@@ -2256,3 +2256,16 @@ fontWeight	Italic	斜体
 	Rotate View Tool	旋转视图工具
 	Reset View	重置视图
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	绕中心拖动以旋转视图  ·  Shift 限制为 15°
+
+# Eyedropper Sample Size and Sample (#1649).
+	Point Sample	采样点
+	3 by 3 Average	3 × 3 平均
+	5 by 5 Average	5 × 5 平均
+	11 by 11 Average	11 × 11 平均
+	31 by 31 Average	31 × 31 平均
+	51 by 51 Average	51 × 51 平均
+	101 by 101 Average	101 × 101 平均
+	Sample Size:	采样大小：
+	All Layers No Adjustments	所有图层（不含调整）
+	Current & Below No Adjustments	当前及下方图层（不含调整）
+	Show Sampling Ring	显示采样环

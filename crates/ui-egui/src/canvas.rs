@@ -396,7 +396,7 @@ fn display_color(c: [f32; 3]) -> Color32 {
 /// (what a click would pick) and the current foreground, or `None` where there is no colour
 /// to sample (#213).
 pub(crate) fn eyedropper_ring_colors(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<(Color32, Color32)> {
-    let new = composite_color(app, x, y)?;
+    let new = eyedropper_color(app, x, y)?;
     let fg = app.session.tools.foreground;
     Some((display_color(new), display_color([fg[0], fg[1], fg[2]])))
 }
@@ -407,7 +407,8 @@ pub(crate) fn eyedropper_ring_colors(app: &mut PhotocraftApp, x: f64, y: f64) ->
 /// crosshair and samples nothing. `None` when not held, there is nothing to sample, or the
 /// Precise-cursor preference wants the plain crosshair.
 fn eyedropper_ring(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, p: Pos2, held: bool) -> Option<egui::CursorIcon> {
-    if !held || app.session.prefs().cursors.other == photocraft_engine::prefs::OtherCursor::Precise {
+    // The options bar's Show Sampling Ring turns it off (#1649).
+    if !held || !app.ui.tool_options.eyedropper_ring || app.session.prefs().cursors.other == photocraft_engine::prefs::OtherCursor::Precise {
         return None;
     }
     let [x, y] = xf.to_doc(p);
@@ -3138,23 +3139,39 @@ fn alt_eyedropper(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
 }
 
 fn sample_eyedropper(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers) {
-    if let Some([r, g, b]) = composite_color(app, x, y) {
+    if let Some([r, g, b]) = eyedropper_color(app, x, y) {
         let key = if mods.alt { "background" } else { "foreground" };
         let _ = app.run("tools.setColors", json!({ key: [r, g, b, 1.0] }));
     }
 }
 
-/// The active document's composite colour at document point (x, y): what the Eyedropper picks.
+/// The colour at document point (x, y) with the Eyedropper's Sample Size (the composite pixel,
+/// or the average of the square around it) from the layers `sample_layer` names (`document.sampleColor`).
 /// `None` off the image or over transparency.
-pub(crate) fn composite_color(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<[f32; 3]> {
+fn sample_color(app: &mut PhotocraftApp, x: f64, y: f64, sample_layer: &str) -> Option<[f32; 3]> {
     if !(x.is_finite() && y.is_finite()) {
         return None;
     }
-    let v = app.run("document.pixel", json!({"x": x.floor(), "y": y.floor()})).ok()?;
+    let size = app.ui.tool_options.eyedropper_size;
+    let v = app.run("document.sampleColor", json!({"x": x, "y": y, "size": size, "sampleLayer": sample_layer})).ok()?;
     match serde_json::from_value::<Vec<f32>>(v).ok()?[..] {
         [r, g, b, a] if a > 0.0 => Some([r, g, b]),
         _ => None,
     }
+}
+
+/// What the Eyedropper tool (and a painting tool's ⌥-click) picks at document point (x, y): its
+/// options bar's Sample Size and Sample (#1649).
+pub(crate) fn eyedropper_color(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<[f32; 3]> {
+    let layers = app.ui.tool_options.eyedropper_sample.clone();
+    sample_color(app, x, y, &layers)
+}
+
+/// The active document's composite colour at document point (x, y), averaged over the
+/// Eyedropper's Sample Size as Photoshop's dialog eyedroppers (Curves, Color Picker) do.
+/// `None` off the image or over transparency.
+pub(crate) fn composite_color(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<[f32; 3]> {
+    sample_color(app, x, y, "all")
 }
 
 /// The body of a `Move` for every tool: tracked position, ⇧ constraint, the moving layer, and so

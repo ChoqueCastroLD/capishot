@@ -2248,3 +2248,16 @@ fontWeight	Italic	Kurzíva
 	Rotate View Tool	Nástroj otočení zobrazení
 	Reset View	Obnovit zobrazení
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Tažením kolem středu otočíte zobrazení  ·  Shift omezí na 15°
+
+# Eyedropper Sample Size and Sample (#1649).
+	Point Sample	Bodový vzorek
+	3 by 3 Average	Průměr 3 × 3
+	5 by 5 Average	Průměr 5 × 5
+	11 by 11 Average	Průměr 11 × 11
+	31 by 31 Average	Průměr 31 × 31
+	51 by 51 Average	Průměr 51 × 51
+	101 by 101 Average	Průměr 101 × 101
+	Sample Size:	Velikost vzorku:
+	All Layers No Adjustments	Všechny vrstvy bez korekcí
+	Current & Below No Adjustments	Aktuální a pod ní bez korekcí
+	Show Sampling Ring	Zobrazit vzorkovací kroužek

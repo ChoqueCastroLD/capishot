@@ -872,13 +872,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         widgets::checkbox(ui, &mut app.ui.tool_options.move_auto_select, tl!("Auto-Select:"));
                         hint(ui, tl!("Drag to move the active layer"));
                     }
-                    Tool::Eyedropper => hint(
-                        ui,
-                        &crate::i18n::fmt(
-                            tl!("Click to sample the foreground colour  ·  {key}-click for background"),
-                            &[("key", &crate::shortcuts::pretty("Alt"))],
-                        ),
-                    ),
+                    Tool::Eyedropper => crate::eyedropper_ui::options(app, ui),
                     Tool::Zoom => {
                         widgets::checkbox(ui, &mut app.ui.tool_options.zoom_scrubby, tl!("Scrubby Zoom"));
                         hint(
@@ -1199,15 +1193,18 @@ fn info_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .hover_doc
         .map(|p| (p[0].floor() as i32, p[1].floor() as i32))
         .filter(|(x, y)| *x >= 0 && *y >= 0 && *x < size.width as i32 && *y < size.height as i32);
+    // The readout averages the Eyedropper's Sample Size, as in Photoshop (#1649).
+    let sample_size = app.ui.tool_options.eyedropper_size;
     let rgba = pos.and_then(|(x, y)| {
-        if let Some(((cx, cy, cr), v)) = app.info_sample
-            && (cx, cy, cr) == (x, y, rev)
+        if let Some(((cx, cy, cr, cs), v)) = app.info_sample
+            && (cx, cy, cr, cs) == (x, y, rev, sample_size)
         {
             return Some(v);
         }
-        let v: Vec<f32> = serde_json::from_value(app.session.execute("document.pixel", json!({"x": x, "y": y})).ok()?).ok()?;
-        let v = [v[0], v[1], v[2], v[3]];
-        app.info_sample = Some(((x, y, rev), v));
+        let params = json!({"x": f64::from(x) + 0.5, "y": f64::from(y) + 0.5, "size": sample_size});
+        let v: Vec<f32> = serde_json::from_value(app.session.execute("document.sampleColor", params).ok()?).ok()?;
+        let v = [*v.first()?, *v.get(1)?, *v.get(2)?, *v.get(3)?];
+        app.info_sample = Some(((x, y, rev, sample_size), v));
         Some(v)
     });
     let mono = theme::mono(11.5);

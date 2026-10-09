@@ -3361,3 +3361,16 @@ fontWeight	Thin	Πολύ λεπτά
 # Saved New Document presets (#1516)
 	Preset Name	Όνομα προεπιλογής
 	No saved presets yet.	Δεν υπάρχουν ακόμη αποθηκευμένες προεπιλογές.
+
+# Eyedropper Sample Size and Sample (#1649).
+	Point Sample	Σημειακό δείγμα
+	3 by 3 Average	Μέσος όρος 3 × 3
+	5 by 5 Average	Μέσος όρος 5 × 5
+	11 by 11 Average	Μέσος όρος 11 × 11
+	31 by 31 Average	Μέσος όρος 31 × 31
+	51 by 51 Average	Μέσος όρος 51 × 51
+	101 by 101 Average	Μέσος όρος 101 × 101
+	Sample Size:	Μέγεθος δείγματος:
+	All Layers No Adjustments	Όλα τα επίπεδα χωρίς προσαρμογές
+	Current & Below No Adjustments	Τρέχον και υποκείμενα χωρίς προσαρμογές
+	Show Sampling Ring	Εμφάνιση δακτυλίου δειγματοληψίας
