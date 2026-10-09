@@ -140,9 +140,11 @@ fn sampled_document(doc: &Document, active: Option<LayerId>, which: SampleLayers
     let mut copy = doc.clone();
     let walk: Vec<(Vec<usize>, LayerId, bool)> = doc.walk().into_iter().map(|(p, _, l)| (p, l.id, matches!(l.content, LayerContent::Adjustment(_)))).collect();
     if matches!(which, SampleLayers::CurrentAndBelow | SampleLayers::CurrentAndBelowNoAdjustments) {
-        // Everything composited after (above) the active layer in the bottom-to-top walk.
+        // Everything composited after (above) the active layer in the bottom-to-top walk, except
+        // its own contents: the walk lists a group before its children.
         let pos = walk.iter().position(|(_, id, _)| Some(*id) == active)?;
-        for (path, _, _) in walk.get(pos + 1..).unwrap_or_default() {
+        let own = walk.get(pos).map(|(p, _, _)| p.clone()).unwrap_or_default();
+        for (path, _, _) in walk.get(pos + 1..).unwrap_or_default().iter().filter(|(p, _, _)| !p.starts_with(&own)) {
             if let Some(l) = copy.layer_at_mut(path) {
                 l.visible = false;
             }
@@ -374,6 +376,21 @@ mod tests {
                 // Off the canvas: nothing.
                 assert_eq!(sample_color(&d, None, -1.0, 4.0, 11, all), [0.0; 4]);
             }
+        }
+    }
+
+    #[test]
+    fn current_and_below_keeps_an_active_groups_contents() {
+        // A white background and a group holding a red layer; the group is the active layer.
+        let mut d = doc(3, 3, ColorMode::Rgb, SampleType::U8, |_, _| [1.0; 4]);
+        let mut red = Layer::raster("red", d.pixel_format());
+        red.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 3, 3), &[1.0, 0.0, 0.0, 1.0]);
+        let group = Layer::group("group", vec![red]);
+        let gid = group.id;
+        d.layers.push(group);
+        for which in [SampleLayers::CurrentAndBelow, SampleLayers::CurrentAndBelowNoAdjustments] {
+            let c = sample_color(&d, Some(gid), 1.5, 1.5, 1, which);
+            assert!(close(c, [1.0, 0.0, 0.0, 1.0], 1.5 / 255.0), "{which:?}: {c:?}");
         }
     }
 
