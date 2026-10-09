@@ -10,15 +10,26 @@ use crate::{cargo, root, run};
 
 /// Crates with corpus tests (behind their `corpus` feature).
 pub const CORPUS_CRATES: &[&str] = &["photocraft-psd", "photocraft-codecs", "photocraft-io", "photocraft-engine"];
+/// Opt-in corpus crates: fetched and tested only with `test-corpus --pixls`.
+pub const PIXLS_CRATES: &[&str] = &["photocraft-raw"];
 
 /// Corpus crates with a `heif` feature: test-corpus enables it so the HEIF corpus tests run.
 const HEIF_CRATES: &[&str] = &["photocraft-codecs", "photocraft-io"];
 
 /// Paths whose changes make `test-corpus --changed` run (the file-format and rendering crates).
-const CRITICAL: &[&str] =
-    &["crates/psd/", "crates/io/", "crates/codecs/", "crates/heif/", "crates/compose/", "crates/gpu/", "crates/text/", "crates/format/", "crates/affinity/"];
-
-/// `cargo xtask corpus [--all | --pngsuite | --download | --psd | --psd-tools | --heif | --exr | --affinity | --photoshop [--local]] [--update-manifest]`
+const CRITICAL: &[&str] = &[
+    "crates/psd/",
+    "crates/io/",
+    "crates/codecs/",
+    "crates/heif/",
+    "crates/compose/",
+    "crates/gpu/",
+    "crates/text/",
+    "crates/format/",
+    "crates/affinity/",
+    "crates/raw/",
+];
+/// `cargo xtask corpus [--all | --pngsuite | --download | --psd | --psd-tools | --heif | --exr | --pixls | --affinity | --photoshop [--local]] [--update-manifest]`
 pub fn cmd(args: &[&str]) -> Result<(), String> {
     let update = args.contains(&"--update-manifest");
     let mut did = false;
@@ -39,6 +50,10 @@ pub fn cmd(args: &[&str]) -> Result<(), String> {
     }
     if args.contains(&"--heif") {
         corpus_pins::HEIF.fetch(update)?;
+        did = true;
+    }
+    if args.contains(&"--pixls") {
+        crate::pinned::fetch_pixls(update)?;
         did = true;
     }
     if args.contains(&"--exr") {
@@ -119,7 +134,8 @@ fn list() {
   corpus/affinity/   [{}] 21 public Affinity 1–3 documents (CC0, MIT): vector-art, AFDesignLoad,
                      Jac21/Branding, AssetStoreTemplate; manifest xtask/affinity-corpus.sha256. Fetch: --affinity
   corpus/pngsuite/   [{}] PngSuite (public domain), {PNGSUITE_URL}. Fetch: --pngsuite
-  corpus/tiff/, corpus/raw/   optional, copied in by hand
+  corpus/pixls/      [opt-in] real camera raws from raw.pixls.us (public domain), one per decode
+                     path plus the known-unsupported packed ORF. Fetch: --pixls (opt-in)
 
 Pins: xtask/src/corpus_pins.rs. Moving one: change it, then --<name> --update-manifest.",
         corpus.display(),
@@ -180,6 +196,7 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
         Some(i) => (&args[..i], &args[i + 1..]),
         None => (args, &[][..]),
     };
+    let mut raw_changed = false;
     if ours.contains(&"--changed") {
         let changed = changed_files()?;
         let hits: Vec<&String> = changed.iter().filter(|f| CRITICAL.iter().any(|c| f.starts_with(c))).collect();
@@ -188,6 +205,7 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
             return Ok(());
         }
         println!("test-corpus --changed: {} critical files changed (e.g. {}); running the corpus tests", hits.len(), hits[0]);
+        raw_changed = hits.iter().any(|f| f.starts_with("crates/raw/"));
     }
     let mut crates: Vec<String> = Vec::new();
     let mut it = ours.iter();
@@ -196,17 +214,26 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
             "-p" | "--package" => {
                 let name = it.next().ok_or("-p needs a crate name")?;
                 let full = if name.starts_with("photocraft-") { (*name).to_string() } else { format!("photocraft-{name}") };
-                if !CORPUS_CRATES.contains(&full.as_str()) {
-                    return Err(format!("{full} has no corpus tests (crates: {})", CORPUS_CRATES.join(", ")));
+                if !CORPUS_CRATES.contains(&full.as_str()) && !PIXLS_CRATES.contains(&full.as_str()) {
+                    return Err(format!("{full} has no corpus tests (crates: {} or the opt-in {})", CORPUS_CRATES.join(", "), PIXLS_CRATES.join(", ")));
                 }
                 crates.push(full);
             }
-            "--changed" | "--local" => {}
+            "--changed" | "--local" | "--pixls" => {}
             other => return Err(format!("test-corpus: unknown argument `{other}`")),
         }
     }
     if crates.is_empty() {
         crates = CORPUS_CRATES.iter().map(|s| (*s).to_string()).collect();
+    }
+    // `--pixls` opts in (and fetches), and a raw change under --changed does too: the raw
+    // corpus tests are not part of the default set until a maintainer decides otherwise.
+    let wants_pixls = ours.contains(&"--pixls") || crates.iter().any(|c| PIXLS_CRATES.contains(&c.as_str())) || raw_changed;
+    if wants_pixls && !crates.iter().any(|c| c == "photocraft-raw") {
+        crates.push("photocraft-raw".to_string());
+    }
+    if wants_pixls {
+        crate::pinned::fetch_pixls(false)?;
     }
     fetch_all(ours.contains(&"--local"))?;
     let mut c = cargo();
