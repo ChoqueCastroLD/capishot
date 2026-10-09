@@ -381,7 +381,9 @@ pub enum DialogKind {
 /// Per-document view (camera) state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct View {
-    /// Screen pixels per document pixel.
+    /// Screen (device) pixels per document pixel: the user-facing zoom (`100%` is `1.0`).
+    /// Canvas geometry works in egui points and divides by `ctx.pixels_per_point`
+    /// (`PhotocraftApp::point_zoom`), so a scaled display doesn't magnify the image.
     pub zoom: f32,
     /// Document-space point shown at the canvas centre.
     pub center: [f32; 2],
@@ -504,6 +506,14 @@ pub struct ToolOptions {
     pub crop_ratio: String,
     #[serde(default = "yes")]
     pub crop_delete: bool,
+    /// Crop overlay (#1919): the guide in the crop box, when it shows and its orientation
+    /// (Photoshop's defaults: Rule of Thirds, Auto Show Overlay). See `crop_overlay`.
+    #[serde(default)]
+    pub crop_overlay: crate::crop_overlay::CropOverlay,
+    #[serde(default)]
+    pub crop_overlay_show: crate::crop_overlay::OverlayShow,
+    #[serde(default)]
+    pub crop_overlay_orientation: u8,
     /// Magic Eraser opacity % (tolerance, anti-alias, contiguous and sample-all are shared with the
     /// Magic Wand and Paint Bucket).
     pub magic_eraser_opacity: f32,
@@ -530,6 +540,18 @@ pub struct ToolOptions {
     pub red_eye_pupil_size: f32,
     #[serde(default = "fifty")]
     pub red_eye_darken: f32,
+    /// Eyedropper › Sample Size: 1 = Point Sample, else the side of the averaged square (3, 5,
+    /// 11, 31, 51, 101; `photocraft_engine::sample_cmds::SAMPLE_SIZES`). Shared, as in Photoshop,
+    /// with the ⌥-click eyedropper of the painting tools, the dialog eyedroppers and the Info panel.
+    #[serde(default = "one_u32")]
+    pub eyedropper_size: u32,
+    /// Eyedropper › Sample: current | currentAndBelow | all | allNoAdjustments |
+    /// currentAndBelowNoAdjustments (`document.sampleColor`'s `sampleLayer`).
+    #[serde(default = "default_eyedropper_sample")]
+    pub eyedropper_sample: String,
+    /// Eyedropper › Show Sampling Ring.
+    #[serde(default = "yes")]
+    pub eyedropper_ring: bool,
 }
 
 fn yes() -> bool {
@@ -555,6 +577,14 @@ fn fifty() -> f32 {
 /// The session brush starts out as the Brush's (the tool the app opens with).
 fn default_brush_tool() -> Tool {
     Tool::Brush
+}
+
+fn one_u32() -> u32 {
+    1
+}
+
+fn default_eyedropper_sample() -> String {
+    "all".into()
 }
 
 impl Default for ToolOptions {
@@ -611,6 +641,9 @@ impl Default for ToolOptions {
             move_show_transform: false,
             crop_ratio: String::new(),
             crop_delete: true,
+            crop_overlay: Default::default(),
+            crop_overlay_show: Default::default(),
+            crop_overlay_orientation: 0,
             magic_eraser_opacity: 100.0,
             bg_sampling: "continuous".into(),
             bg_limits: "contiguous".into(),
@@ -624,6 +657,9 @@ impl Default for ToolOptions {
             magnetic_pressure: false,
             red_eye_pupil_size: 50.0,
             red_eye_darken: 50.0,
+            eyedropper_size: 1,
+            eyedropper_sample: default_eyedropper_sample(),
+            eyedropper_ring: true,
         }
     }
 }
@@ -677,6 +713,10 @@ pub struct TransformSession {
     /// the Quick Mask by itself (`None`: the layer, with its linked masks).
     #[serde(default)]
     pub target: Option<serde_json::Value>,
+    /// Free Transform Path: `path.transform`'s `name` (and `layer`) when the box moves a
+    /// path's anchors and handles instead of pixels.
+    #[serde(default)]
+    pub path: Option<serde_json::Value>,
     /// The layer was made for this session (⌥⌘T's copy, #352; a file dropped on the canvas), so
     /// Cancel takes it back and OK folds it into one history step with the transform.
     #[serde(default)]
@@ -785,6 +825,9 @@ pub struct UiState {
     /// Free Transform session, if any.
     #[serde(default)]
     pub transform: Option<TransformSession>,
+    /// Temporary symmetry-axis editing, exposed to automation but never restored from settings.
+    #[serde(default, skip_deserializing)]
+    pub symmetry_transform: Option<crate::symmetry_ui::Transform>,
     /// Clone Stamp / Healing source point (⌥-click) and the aligned offset once a stroke started.
     #[serde(default)]
     pub clone_source: Option<[f64; 2]>,
@@ -902,6 +945,10 @@ pub struct UiState {
     /// Crop tool rectangle being edited [x0, y0, x1, y1] (document coordinates).
     #[serde(default)]
     pub crop_rect: Option<[f64; 4]>,
+    /// The crop frame's turn in degrees, clockwise on screen about its centre (`crop_rect` is the
+    /// frame before the turn); 0 when upright. Committing passes it as `image.crop`'s `angle`.
+    #[serde(default)]
+    pub crop_angle: f64,
     pub next_id: u64,
     /// Last status message (errors from commands, hints).
     pub status: String,
@@ -935,6 +982,7 @@ impl Default for UiState {
             type_transform: None,
             type_transform_pivot: None,
             transform: None,
+            symmetry_transform: None,
             mask_target: false,
             vector_mask_target: false,
             brush_picker: None,
@@ -979,6 +1027,7 @@ impl Default for UiState {
             polygon_mode: String::new(),
             magnetic: Default::default(),
             crop_rect: None,
+            crop_angle: 0.0,
             next_id: 1,
             status: String::new(),
             status_error: false,

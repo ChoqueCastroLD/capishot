@@ -11,10 +11,12 @@ default = []
 # Synthetic raw-file generators (DNG / CR2 / TIFF-EP writers and a lossless-JPEG
 # encoder) for tests and fuzz seeds.
 testgen = []
-# Real-file corpus tests (opt-in; `cargo xtask test-corpus`), defined with the corpus PR.
+# Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
 corpus = []
 
 [dependencies]
+# Adobe DNG compression 8: zlib (RFC 1950) with the TIFF predictor (pure-Rust backend).
+flate2 = { workspace = true }
 
 # Parallel bands on native; wasm builds stay single-threaded.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

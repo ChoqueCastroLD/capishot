@@ -4173,6 +4173,7 @@ dependencies = [
  "photocraft-geom",
  "photocraft-raster",
  "proptest",
+ "rustix 1.1.5",
  "ruzstd",
  "serde",
  "serde_json",
@@ -4296,6 +4297,7 @@ dependencies = [
 name = "photocraft-raw"
 version = "0.5.0"
 dependencies = [
+ "flate2",
  "photocraft-raw",
  "png 0.18.1",
  "rayon",

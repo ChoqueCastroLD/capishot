@@ -21,6 +21,8 @@
 	Layer	Ebene
 	Type	Text
 	Select	Auswahl
+	Selected	Ausgewählt
+	Scope	Umfang
 	Top Left	Oben links
 	Top Right	Oben rechts
 	Bottom Left	Unten links
@@ -766,7 +768,7 @@
 	All Caps	Großbuchstaben
 	All Slices	Alle Slices
 	All User Slices	Alle Benutzer-Slices
-	All shortcuts reset to Photoshop defaults.	Alle Kurzbefehle wurden auf die Photoshop-Standards zurückgesetzt.
+	All shortcuts reset to PhotoCraft defaults.	Alle Kurzbefehle wurden auf die PhotoCraft-Standards zurückgesetzt.
 	Alt	Alt
 	Always use pressure for opacity	Druck immer für Deckkraft verwenden
 	Always use pressure for size	Druck immer für Größe verwenden
@@ -1090,7 +1092,7 @@
 	Ignore All	Alle ignorieren
 	Image Size	Bildgröße
 	Import Brushes…	Pinsel importieren…
-	Import Photoshop brushes (.abr)	Photoshop-Pinsel (.abr) importieren
+	Import brushes (.abr)	Pinsel (.abr) importieren
 	Import Presets	Vorgaben importieren
 	Imported	Importiert
 	Indent First	Erste Zeile einrücken
@@ -1140,7 +1142,6 @@
 	Liquify is not open	Verflüssigen ist nicht geöffnet
 	Load	Laden
 	Load 3D LUT…	3D-LUT laden…
-	Load Photoshop brushes (.abr)	Photoshop-Pinsel (.abr) laden
 	Load channel as selection	Kanal als Auswahl laden
 	Load…	Laden…
 	Localized Color Clusters	Lokalisierte Farbcluster
@@ -1407,6 +1408,8 @@
 	Stroke	Kontur
 	Stroke Catch-up	Strich nachführen
 	Stroke:	Kontur:
+	Location	Position
+	Location:	Position:
 	Style	Stil
 	Style Options	Stiloptionen
 	Style Options…	Stiloptionen…
@@ -1531,7 +1534,7 @@
 	Current Tool	Aktuelles Werkzeug
 	Custom Shape Tool	Werkzeug für benutzerdefinierte Formen
 	Cyans	Cyantöne
-	Default Photoshop Size	Standard-Photoshop-Größe
+	Default PhotoCraft Size	Standard-PhotoCraft-Größe
 	Delete Workspace	Arbeitsbereich löschen
 	Diamond	Raute
 	Dimensions:	Abmessungen:
@@ -2092,7 +2095,7 @@
 	Pixel	Pixel
 	Adjustment	Anpassung
 	Drag (lasso) or click points (polygonal) · {add} add · {sub} subtract	Ziehen (Lasso) oder Punkte klicken (polygonal) · {add} hinzufügen · {sub} abziehen
-	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · {commit} commits · Esc cancels	Freistellrahmen ziehen · innen ziehen verschiebt · Kanten skalieren ({ratio} Verhältnis, {centre} zentriert) · Leertaste verschiebt beim Zeichnen · {commit} übernimmt · Esc bricht ab
+	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels	Freistellrahmen ziehen · innen ziehen verschiebt · Kanten skalieren ({ratio} Verhältnis, {centre} zentriert) · Leertaste verschiebt beim Zeichnen · Pfeiltasten verschieben · X tauscht Ausrichtung · {commit} übernimmt · Esc bricht ab
 	{mode} Color · {bits} bit	{mode}-Farbe · {bits} Bit
 	Scrubby Zoom	Schleppzoom
 	Auto Erase	Automatisch löschen
@@ -2144,6 +2147,7 @@
 	Grid:	Raster:
 	Highlight Clipping Warning (O)	Lichter-Abschneidewarnung (O)
 	Lasso around an area, then drag the selection	Lasso um einen Bereich ziehen, dann die Auswahl verschieben
+	Now drag the selection onto another area	Jetzt die Auswahl auf einen anderen Bereich ziehen
 	Patch:	Korrektur:
 	Shadow Clipping Warning (U)	Tiefen-Abschneidewarnung (U)
 	Show Lab Color Readouts	Lab-Farbwerte anzeigen
@@ -2232,6 +2236,10 @@
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Farbwähler (Textfarbe)
+	Color Picker (Fill Color)	Farbwähler (Füllfarbe)
+	Fill color	Füllfarbe
+	Color Picker (Stroke Color)	Farbwähler (Konturfarbe)
+	Stroke color	Konturfarbe
 	Pick screen color	Bildschirmfarbe auswählen
 	Sample a pixel anywhere on the screen	Ein Pixel an beliebiger Stelle auf dem Bildschirm auswählen
 	Click to pick · Esc to cancel	Klicken zum Auswählen · Esc zum Abbrechen
@@ -2303,3 +2311,39 @@ fontWeight	Italic	Kursiv
 	Rotate View Tool	Ansicht-drehen-Werkzeug
 	Reset View	Ansicht zurücksetzen
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Ansicht drehen: im Bogen ziehen · Umschalt: 15°-Schritte
+
+# Painting symmetry presets.
+	Dual Axis	Duale Achse
+	Diagonal	Diagonal
+	Transform Symmetry	Symmetrie transformieren
+
+# Eyedropper Sample Size and Sample (#1649).
+	Point Sample	1 Pixel
+	3 by 3 Average	3 x 3 Pixel Durchschnitt
+	5 by 5 Average	5 x 5 Pixel Durchschnitt
+	11 by 11 Average	11 x 11 Pixel Durchschnitt
+	31 by 31 Average	31 x 31 Pixel Durchschnitt
+	51 by 51 Average	51 x 51 Pixel Durchschnitt
+	101 by 101 Average	101 x 101 Pixel Durchschnitt
+	Sample Size:	Aufnahmebereich:
+	All Layers No Adjustments	Alle Ebenen ohne Einstellungen
+	Current & Below No Adjustments	Aktuelle und darunter ohne Einstellungen
+	Show Sampling Ring	Aufnahmering anzeigen
+
+# Color Picker warnings
+	Out of gamut for printing: click for the nearest printable colour	Außerhalb des Druckfarbumfangs: Klicken für die nächstliegende druckbare Farbe
+	Not a web colour: click for the nearest web colour	Keine Webfarbe: Klicken für die nächstliegende Webfarbe
+	Color to Alpha…	Farbe zu Alpha…
+	Transparency Threshold	Transparenz-Schwellenwert
+	Opacity Threshold	Deckkraft-Schwellenwert
+	Rule of Thirds	Drittel-Regel
+	Triangle	Dreieck
+	Golden Ratio	Goldener Schnitt
+	Golden Spiral	Goldene Spirale
+	Auto Show Overlay	Überlagerung automatisch anzeigen
+	Always Show Overlay	Überlagerung immer anzeigen
+	Never Show Overlay	Überlagerung nie anzeigen
+	Cycle Overlay	Überlagerung wechseln
+	Cycle Orientation	Ausrichtung wechseln
+	Set the overlay options for the Crop tool	Überlagerungsoptionen für das Freistellungswerkzeug festlegen
+	Alt-click went to the desktop, which moves windows with Alt-drag. Set its window-move key to Super, or latch Alt in Window › Modifier Keys.	Der Alt-Klick ging an die Arbeitsumgebung, die Fenster mit Alt-Ziehen verschiebt. Stelle dort die Taste zum Verschieben von Fenstern auf Super oder raste Alt unter Fenster › Modifikatortasten ein.

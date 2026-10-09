@@ -17,6 +17,8 @@
 	Layer	Layer
 	Type	Teks
 	Select	Seleksi
+	Selected	Terpilih
+	Scope	Cakupan
 	Top Left	Kiri atas
 	Top Right	Kanan atas
 	Bottom Left	Kiri bawah
@@ -753,7 +755,7 @@
 	All Caps	Huruf Kapital Semua
 	All Slices	Semua Slice
 	All User Slices	Semua Slice Pengguna
-	All shortcuts reset to Photoshop defaults.	Semua pintasan direset ke default Photoshop.
+	All shortcuts reset to PhotoCraft defaults.	Semua pintasan direset ke default PhotoCraft.
 	Alt	Alt
 	Alt-click to define a source point to clone from	Alt-klik untuk menentukan titik sumber yang mau di-clone
 	Always use pressure for opacity	Selalu pakai tekanan untuk opasitas
@@ -1069,7 +1071,7 @@
 	Ignore All	Abaikan Semua
 	Image Size	Ukuran Gambar
 	Import Brushes…	Impor Kuas…
-	Import Photoshop brushes (.abr)	Impor kuas Photoshop (.abr)
+	Import brushes (.abr)	Impor kuas (.abr)
 	Import Presets	Impor Preset
 	Imported	Diimpor
 	Indent First	Indentasi Pertama
@@ -1119,7 +1121,6 @@
 	Liquify is not open	Liquify tidak terbuka
 	Load	Muat
 	Load 3D LUT…	Muat 3D LUT…
-	Load Photoshop brushes (.abr)	Muat kuas Photoshop (.abr)
 	Load channel as selection	Muat channel sebagai seleksi
 	Load…	Muat…
 	Localized Color Clusters	Klaster Warna Lokal
@@ -1386,6 +1387,7 @@
 	Stroke	Stroke
 	Stroke Catch-up	Stroke Catch-up
 	Stroke:	Stroke:
+	Location:	Lokasi:
 	Style	Gaya
 	Style Options	Opsi Gaya
 	Style Options…	Opsi Gaya…
@@ -1509,7 +1511,7 @@
 	Current Tool	Alat Saat Ini
 	Custom Shape Tool	Alat Bentuk Kustom
 	Cyans	Cyan
-	Default Photoshop Size	Ukuran Default Photoshop
+	Default PhotoCraft Size	Ukuran Default PhotoCraft
 	Delete Workspace	Hapus Ruang Kerja
 	Diamond	Diamond
 	Dimensions:	Dimensi:
@@ -2364,7 +2366,7 @@
 	Pixel	Piksel
 	Adjustment	Penyesuaian
 	Drag (lasso) or click points (polygonal) · {add} add · {sub} subtract	Seret (lasso) atau klik titik (polygonal) · {add} tambah · {sub} kurangi
-	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · {commit} commits · Esc cancels	Seret kotak crop · seret di dalam untuk memindah · tepi mengubah ukuran (rasio {ratio}, tengah {centre}) · Space memindah saat menggambar · {commit} menerapkan · Esc batal
+	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels	Seret kotak crop · seret di dalam untuk memindah · tepi mengubah ukuran (rasio {ratio}, tengah {centre}) · Space memindah saat menggambar · panah menggeser · X menukar orientasi · {commit} menerapkan · Esc batal
 	{mode} Color · {bits} bit	Warna {mode} · {bits} bit
 	Drag to move the layer	Seret untuk memindah layer
 	Scrubby Zoom	Zoom Scrubby
@@ -2508,6 +2510,7 @@ cameraRaw	Blending	Pembauran
 	Patch Tool	Alat Patch
 	Patch:	Patch:
 	Lasso around an area, then drag the selection	Lingkari area dengan lasso, lalu seret seleksinya
+	Now drag the selection onto another area	Sekarang seret seleksi ke area lain
 	Rendering Mode	Mode Rendering
 	Automatic (recommended)	Otomatis (disarankan)
 	CPU / Compatibility	CPU / Kompatibilitas
@@ -2608,6 +2611,10 @@ cameraRaw	Blending	Pembauran
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Pemilih Warna (Warna Teks)
+	Color Picker (Fill Color)	Pemilih Warna (Warna Isian)
+	Fill color	Warna isian
+	Color Picker (Stroke Color)	Pemilih Warna (Warna Stroke)
+	Stroke color	Warna stroke
 	Pick screen color	Pilih warna layar
 	Sample a pixel anywhere on the screen	Ambil sampel piksel di mana saja pada layar
 	Click to pick · Esc to cancel	Klik untuk memilih · Esc untuk membatalkan
@@ -2674,3 +2681,39 @@ fontWeight	Italic	Miring
 	Rotate View Tool	Alat Putar Tampilan
 	Reset View	Atur Ulang Tampilan
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Seret di sekitar pusat untuk memutar tampilan  ·  Shift membatasi ke 15°
+
+# Painting symmetry presets.
+	Dual Axis	Sumbu Ganda
+	Diagonal	Diagonal
+	Transform Symmetry	Transformasi Simetri
+
+# Eyedropper Sample Size and Sample (#1649).
+	Point Sample	Sampel Titik
+	3 by 3 Average	Rata-rata 3 × 3
+	5 by 5 Average	Rata-rata 5 × 5
+	11 by 11 Average	Rata-rata 11 × 11
+	31 by 31 Average	Rata-rata 31 × 31
+	51 by 51 Average	Rata-rata 51 × 51
+	101 by 101 Average	Rata-rata 101 × 101
+	Sample Size:	Ukuran Sampel:
+	All Layers No Adjustments	Semua Layer Tanpa Penyesuaian
+	Current & Below No Adjustments	Saat Ini & Di Bawahnya Tanpa Penyesuaian
+	Show Sampling Ring	Tampilkan Cincin Sampel
+
+# Color Picker warnings
+	Out of gamut for printing: click for the nearest printable colour	Di luar gamut cetak: klik untuk warna cetak terdekat
+	Not a web colour: click for the nearest web colour	Bukan warna web: klik untuk warna web terdekat
+	Color to Alpha…	Warna ke Alpha…
+	Transparency Threshold	Ambang transparansi
+	Opacity Threshold	Ambang opasitas
+	Rule of Thirds	Aturan Sepertiga
+	Triangle	Segitiga
+	Golden Ratio	Rasio Emas
+	Golden Spiral	Spiral Emas
+	Auto Show Overlay	Tampilkan Overlay Otomatis
+	Always Show Overlay	Selalu Tampilkan Overlay
+	Never Show Overlay	Jangan Tampilkan Overlay
+	Cycle Overlay	Ganti Overlay
+	Cycle Orientation	Ganti Orientasi
+	Set the overlay options for the Crop tool	Atur opsi overlay untuk alat Crop
+	Alt-click went to the desktop, which moves windows with Alt-drag. Set its window-move key to Super, or latch Alt in Window › Modifier Keys.	Alt-klik diambil oleh desktop, yang memindahkan jendela dengan Alt-seret. Atur tombol pemindah jendelanya ke Super, atau kunci Alt di Jendela › Tombol Pengubah.
