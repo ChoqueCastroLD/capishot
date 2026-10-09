@@ -76,12 +76,6 @@ impl Listing {
         let packs = infos.into_iter().map(|info| Pack { root: build_tree(&info), info }).collect();
         Listing { rev: lib.rev, packs: Arc::new(packs), ids: Arc::new(ids) }
     }
-
-    /// Whether the files on disk differ from this listing.
-    pub(super) fn is_stale(&self, lib: &LutLibrary) -> bool {
-        let fresh = lib.list().unwrap_or_default();
-        fresh.len() != self.packs.len() || fresh.iter().zip(self.packs.iter()).any(|(a, b)| *a != b.info)
-    }
 }
 
 /// Everything the row builder reads.

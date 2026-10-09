@@ -1,5 +1,6 @@
 //! Background and cached lookups for the LUT list: the header details shown in a row's tooltip, and
-//! the scan that finds packs another pack already contains. Both are cached in egui memory, and the
+//! the scan that finds packs another pack already contains, and the check for files changed by hand
+//! ([`stale`]). The first two are cached in egui memory, and the
 //! scan reads every LUT the first time, so it runs on a thread and its answer arrives a moment later.
 
 use std::collections::HashMap;
@@ -7,6 +8,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::{Context, Id};
 use photocraft_engine::lut_library::meta::{self, Header};
+
+mod stale;
 
 /// Headers read per frame.
 const HEADERS_PER_FRAME: usize = 24;
@@ -17,6 +20,8 @@ struct Inner {
     /// Library revision the duplicate scan last started for, and its result.
     scan_rev: Option<u64>,
     redundant: HashMap<String, String>,
+    /// The check for files added or removed by hand ([`stale`]).
+    stale: stale::Check,
 }
 
 /// The header and duplicate-scan caches (shared with the worker thread).

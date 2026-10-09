@@ -200,3 +200,22 @@ fn the_lut_list_stops_taking_drops_two_frames_after_it_was_last_drawn() {
     pass();
     assert!(!crate::lut_library_ui::is_pack_drop(h.state(), &ctx, &dir));
 }
+
+#[test]
+fn a_lut_added_by_hand_shows_up_without_a_restart() {
+    let root = temp("hand-lib");
+    let library = LutLibrary::new(&root);
+    library.install(&pack_source("hand-src"), Some("Packs"), true, &mut |_, _| true).unwrap();
+    let mut h = harness(library);
+    assert!(h.query_by_label("Packs (3)").is_some());
+    std::fs::write(root.join("Packs").join("Extra.cube"), write_cube(&LutFile::identity(4))).unwrap();
+    // The check runs on a worker every two seconds of UI time; give it a few real moments too.
+    for _ in 0..200 {
+        h.run_steps(2);
+        if h.query_by_label("Packs (4)").is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(h.query_by_label("Packs (4)").is_some(), "the new file is listed");
+}

@@ -130,14 +130,16 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
     let has_library = app.session.lut_library.is_some();
     install::mark_shown(&ctx);
 
-    // Files added or removed by hand show up without a restart.
-    if let (Some(l), Some(lib)) = (rows::listing(app, ui), app.session.lut_library.as_ref()) {
+    // Files added or removed by hand show up without a restart. The check lists the whole library,
+    // so a worker thread does it; this thread only starts it and reads the answer.
+    if let (Some(l), Some(root)) = (rows::listing(app, ui), app.session.lut_library.as_ref().map(|lib| lib.root().to_path_buf())) {
+        if scans.take_stale(l.rev) {
+            let _ = app.run("lut.rescan", json!({}));
+        }
         let (now, scan_id) = (ui.input(|i| i.time), Id::new("lutlib-scan"));
         if now - memory::<f64>(ui, scan_id).unwrap_or(0.0) > 2.0 {
             remember(ui, scan_id, now);
-            if l.is_stale(lib) {
-                let _ = app.run("lut.rescan", json!({}));
-            }
+            scans.start_stale_check(&ctx, root, l.rev, l.packs.clone());
         }
         ctx.request_repaint_after(std::time::Duration::from_secs(2));
     }
