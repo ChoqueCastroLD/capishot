@@ -184,6 +184,7 @@ pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
     }
     for p in parse_spec(spec.params) {
         let v = match &p.kind {
+            Kind::Range { default, .. } if command == "image.mode.indexedColor" && p.key == "colors" => json!(default.round().clamp(2.0, 256.0) as u32),
             Kind::Range { default, .. } => json!(default),
             Kind::Choice(c) => json!(c.first().cloned().unwrap_or_default()),
             Kind::Bool(default) => json!(default),
@@ -292,6 +293,12 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
         match p.kind {
             Kind::Range { min, max, default } => {
                 let mut v = f.get(&p.key).and_then(Value::as_f64).unwrap_or(default as f64) as f32;
+                if cmd == "image.mode.indexedColor" && p.key == "colors" {
+                    let mut count = v.round().clamp(2.0, 256.0) as u32;
+                    crate::widgets::color_count_row(ui, &label(&p.key), &mut count);
+                    f.insert(p.key, json!(count));
+                    continue;
+                }
                 let unit = if is_pixel_param(&p.key) {
                     "px"
                 } else if p.key == "angle" {
@@ -456,11 +463,20 @@ pub fn preview_document(doc: &Document, active: Option<photocraft_doc::LayerId>,
 
 /// Cached preview state on the app.
 pub struct FilterPreview {
+    pub key: FilterPreviewKey,
+    pub result: Option<Arc<Document>>,
+}
+
+/// Match the full request before accepting a worker result, including a reopened dialog.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FilterPreviewKey {
     pub doc: photocraft_doc::DocId,
     pub revision: u64,
-    pub hash: u64,
+    pub dialog: u64,
+    pub active: Option<photocraft_doc::LayerId>,
+    pub command: String,
+    pub params: Value,
     pub k: u32,
-    pub result: Option<Arc<Document>>,
 }
 
 #[cfg(test)]
@@ -492,6 +508,25 @@ mod tests {
         f.insert("__command".into(), json!("edit.autoAlignLayers"));
         egui::Context::default().run_ui(Default::default(), |ui| body(ui, &mut f)).textures_delta.clear();
         assert!(!params_of(&f).as_object().unwrap().contains_key("reference"), "{f:?}");
+    }
+
+    #[test]
+    fn indexed_counts_are_integer_json_while_dither_amounts_keep_their_decimals() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        open(&mut app, "image.mode.indexedColor").unwrap();
+        let mut defaults = app.ui.dialogs.first().unwrap().fields.clone();
+        let before = params_of(&defaults)["colors"].clone();
+        egui::Context::default().run_ui(Default::default(), |ui| body(ui, &mut defaults)).textures_delta.clear();
+        assert_eq!(before.as_u64(), Some(256));
+        assert_eq!(params_of(&defaults)["colors"], before, "opening a preview must not schedule a second job just to normalize its count");
+        let mut fields = Map::new();
+        fields.insert("__command".into(), json!("image.mode.indexedColor"));
+        fields.insert("colors".into(), json!(17));
+        fields.insert("amount".into(), json!(37.5));
+        egui::Context::default().run_ui(Default::default(), |ui| body(ui, &mut fields)).textures_delta.clear();
+        let params = params_of(&fields);
+        assert_eq!(params["colors"].as_u64(), Some(17));
+        assert_eq!(params["amount"].as_f64(), Some(37.5));
     }
 
     #[test]

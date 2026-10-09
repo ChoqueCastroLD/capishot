@@ -60,6 +60,8 @@ pub mod file_open;
 pub mod file_ui;
 pub mod fill_ui;
 pub mod filter_dialog;
+#[cfg(not(target_arch = "wasm32"))]
+mod filter_preview_worker;
 pub mod gallery_ui;
 pub mod gpu_canvas;
 pub mod gpu_status;
@@ -403,6 +405,8 @@ pub struct PhotocraftApp {
     /// Selection outline cache: (doc, revision, segments).
     /// Live filter preview (proxy document with the filter applied).
     pub(crate) filter_preview: Option<filter_dialog::FilterPreview>,
+    #[cfg(not(target_arch = "wasm32"))]
+    filter_preview_worker: filter_preview_worker::Worker,
     /// Select › Color Range dialog preview (proxy document + mask / image textures).
     pub(crate) color_range: Option<color_range_ui::Preview>,
     /// Image › Adjustments dialog preview through a temporary clipped adjustment layer.
@@ -543,6 +547,8 @@ impl PhotocraftApp {
             proxy_uploaded: None,
             outline_cache: None,
             filter_preview: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            filter_preview_worker: Default::default(),
             color_range: None,
             adjust_preview: None,
             synthetic: Vec::new(),
@@ -1086,6 +1092,8 @@ impl eframe::App for PhotocraftApp {
         // shortcuts see Esc).
         if !screen_picker::tick(self, ctx) {
             jobs_ui::tick(self, ctx);
+            #[cfg(not(target_arch = "wasm32"))]
+            filter_preview_worker::discard_closed(self);
             shortcuts::handle(self, ctx);
         }
         let arrived: Vec<(String, Vec<u8>)> =
