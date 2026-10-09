@@ -459,6 +459,32 @@ fn command_t_while_typing_toggles_the_character_panel() {
     assert_ne!(crate::view_cmds::checked(h.state(), "window.panel.character"), before, "the Character panel toggled");
 }
 
+/// #1381: on Wayland the input method sends an empty preedit (and sometimes an empty commit)
+/// whenever the caret rectangle moves, e.g. while ⌘A, ⇧-arrows or a drag select text. With
+/// nothing being composed that must leave the text and the selection alone; a real composition
+/// still replaces the selection, and clearing it removes only the composed text.
+#[test]
+fn empty_ime_events_never_delete_the_selection() {
+    let mut app = new_app();
+    let id = LayerId(app.run("type.create", json!({"text": "Hello", "size": 40, "x": 300, "y": 420})).unwrap()["layer"].as_u64().unwrap());
+    app.ui.text_edit =
+        Some(crate::state::TextEdit { layer: id.0, caret: 5, anchor: 0, session: "s".into(), created: false, dragging: false, resize: None, preedit: None });
+    let mut h = harness(1.0, app);
+    let ime = |h: &mut Harness<'static, PhotocraftApp>, e: egui::ImeEvent| {
+        h.event(egui::Event::Ime(e));
+        h.run_steps(1);
+    };
+    ime(&mut h, egui::ImeEvent::Preedit { text: String::new(), active_range_chars: None });
+    ime(&mut h, egui::ImeEvent::Commit(String::new()));
+    assert_eq!(text(h.state(), id).text, "Hello", "empty IME events keep the text");
+    assert_eq!(selection(&h), (0, 5), "and the selection");
+    // Composing replaces the selection; cancelling the composition leaves the rest.
+    ime(&mut h, egui::ImeEvent::Preedit { text: "か".into(), active_range_chars: None });
+    assert_eq!(text(h.state(), id).text, "か");
+    ime(&mut h, egui::ImeEvent::Preedit { text: String::new(), active_range_chars: None });
+    assert_eq!(text(h.state(), id).text, "");
+}
+
 fn type_command() -> Modifiers {
     Modifiers { command: true, ctrl: true, ..Modifiers::NONE }
 }

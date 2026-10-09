@@ -330,6 +330,12 @@ fn ime_update(app: &mut PhotocraftApp, s: &str, commit: bool) {
     let Some(text) = current_text(app, LayerId(ed.layer)) else { return };
     let n = text.chars().count();
     let s = s.replace("\r\n", "\n").replace('\r', "\n");
+    // An empty preedit or commit while nothing is being composed changes nothing. Wayland input
+    // methods send one on every state change (the caret rectangle moving as a selection grows),
+    // and it used to replace the selection, deleting the text as it was selected (#1381).
+    if s.is_empty() && ed.preedit.is_none() {
+        return;
+    }
     let (start, end) = match ed.preedit {
         Some((p, l)) if p.saturating_add(l) <= n => (p, p + l),
         _ => (ed.caret.min(ed.anchor).min(n), ed.caret.max(ed.anchor).min(n)),
