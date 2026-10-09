@@ -2253,6 +2253,11 @@ fontWeight	Italic	Kurzíva
 	Reset View	Obnovit zobrazení
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Tažením kolem středu otočíte zobrazení  ·  Shift omezí na 15°
 
+# Painting symmetry presets.
+	Dual Axis	Dvojitá osa
+	Diagonal	Diagonální
+	Transform Symmetry	Transformovat symetrii
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	Bodový vzorek
 	3 by 3 Average	Průměr 3 × 3

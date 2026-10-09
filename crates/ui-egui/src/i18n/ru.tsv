@@ -2524,6 +2524,12 @@ fontWeight	Italic	Курсив
 	Reset View	Сбросить вид
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Перетащите вокруг центра, чтобы повернуть вид  ·  Shift фиксирует шаг 15°
 
+# Painting symmetry presets.
+	Dual Axis	Две оси
+	Diagonal	Диагональная
+	Transform Symmetry	Трансформировать симметрию
+	Set painting symmetry options	Настроить параметры симметричного рисования
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	Точечная выборка
 	3 by 3 Average	Среднее 3 × 3

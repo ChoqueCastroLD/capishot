@@ -2321,6 +2321,11 @@ fontWeight	Italic	Cursiva
 	Reset View	Restablecer vista
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Arrastre alrededor del centro para rotar la vista  ·  Mayús fija a 15°
 
+# Painting symmetry presets.
+	Dual Axis	Doble eje
+	Diagonal	Diagonal
+	Transform Symmetry	Transformar simetría
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	Muestra puntual
 	3 by 3 Average	Promedio de 3 × 3

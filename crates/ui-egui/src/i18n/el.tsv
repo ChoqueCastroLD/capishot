@@ -3364,6 +3364,11 @@ fontWeight	Thin	Πολύ λεπτά
 	Preset Name	Όνομα προεπιλογής
 	No saved presets yet.	Δεν υπάρχουν ακόμη αποθηκευμένες προεπιλογές.
 
+# Painting symmetry presets.
+	Dual Axis	Διπλός άξονας
+	Diagonal	Διαγώνια
+	Transform Symmetry	Μετασχηματισμός συμμετρίας
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	Σημειακό δείγμα
 	3 by 3 Average	Μέσος όρος 3 × 3

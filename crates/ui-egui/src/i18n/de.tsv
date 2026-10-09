@@ -2291,6 +2291,11 @@ fontWeight	Italic	Kursiv
 	Reset View	Ansicht zurücksetzen
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Ansicht drehen: im Bogen ziehen · Umschalt: 15°-Schritte
 
+# Painting symmetry presets.
+	Dual Axis	Duale Achse
+	Diagonal	Diagonal
+	Transform Symmetry	Symmetrie transformieren
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	1 Pixel
 	3 by 3 Average	3 x 3 Pixel Durchschnitt

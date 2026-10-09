@@ -133,6 +133,7 @@ pub mod stroke_trail;
 pub mod stroke_ui;
 pub mod stylus;
 pub mod swatches_ui;
+pub mod symmetry_ui;
 mod tab_strip;
 pub mod theme;
 pub mod tiff_options_ui;
@@ -682,6 +683,9 @@ impl PhotocraftApp {
     }
 
     fn run_command(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if matches!(id, "paint.setSymmetry" | "paint.symmetryFromPath" | "paint.symmetryDisable") {
+            self.ui.symmetry_transform = None;
+        }
         let clip_read = std::mem::take(&mut self.clip_read_for_paste);
         if self.automation_input
             && let Some(authorize) = self.services.automation_command.as_ref()

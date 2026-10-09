@@ -2261,6 +2261,11 @@ fontWeight	Italic	斜体
 	Reset View	重置视图
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	绕中心拖动以旋转视图  ·  Shift 限制为 15°
 
+# Painting symmetry presets.
+	Dual Axis	双轴
+	Diagonal	对角线
+	Transform Symmetry	变换对称轴
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	采样点
 	3 by 3 Average	3 × 3 平均

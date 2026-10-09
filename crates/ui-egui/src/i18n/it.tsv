@@ -2322,6 +2322,11 @@ fontWeight	Italic	Corsivo
 	Reset View	Reimposta vista
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Trascina intorno al centro per ruotare la vista  ·  Maiusc vincola a 15°
 
+# Painting symmetry presets.
+	Dual Axis	Doppio asse
+	Diagonal	Diagonale
+	Transform Symmetry	Trasforma simmetria
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	Campione puntiforme
 	3 by 3 Average	Media 3 × 3

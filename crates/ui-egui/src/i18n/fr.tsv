@@ -2674,6 +2674,11 @@ fontWeight	Italic	Italique
 	Reset View	Réinitialiser la vue
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Faites glisser autour du centre pour tourner la vue  ·  Maj contraint à 15°
 
+# Painting symmetry presets.
+	Dual Axis	Deux axes
+	Diagonal	Diagonale
+	Transform Symmetry	Transformer la symétrie
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	Échantillon ponctuel
 	3 by 3 Average	Moyenne 3 × 3

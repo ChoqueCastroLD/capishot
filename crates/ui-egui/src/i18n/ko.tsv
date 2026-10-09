@@ -2832,6 +2832,11 @@ fontWeight	Italic	기울임
 	Reset View	보기 재설정
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	중심 주위를 드래그해 보기를 회전합니다  ·  Shift는 15°로 제한
 
+# Painting symmetry presets.
+	Dual Axis	이중 축
+	Diagonal	대각선
+	Transform Symmetry	대칭 변형
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	포인트 샘플
 	3 by 3 Average	3 × 3 평균

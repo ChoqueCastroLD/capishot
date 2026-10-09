@@ -2234,6 +2234,11 @@ fontWeight	Italic	斜体
 	Reset View	表示をリセット
 	Drag around the centre to rotate the view  ·  Shift constrains to 15°	中心の周りをドラッグして表示を回転  ·  Shift で 15° 単位
 
+# Painting symmetry presets.
+	Dual Axis	二軸
+	Diagonal	斜め
+	Transform Symmetry	対称軸を変形
+
 # Eyedropper Sample Size and Sample (#1649).
 	Point Sample	ポイントサンプル
 	3 by 3 Average	3 × 3 平均
