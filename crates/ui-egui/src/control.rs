@@ -8,8 +8,7 @@
 //! - `engine.commands`: list commands with enablement
 //! - `ui.inspect`: full UI state (tool, panels, views, dialogs, windows, window size); the menu
 //!   tree is `ui.menu.list`
-//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushPicker?, brushPickerView?, brushSize?}`:
-//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushSize?}`:
+//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, rotation?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushPicker?, brushPickerView?, brushSize?}`:
 //!   change UI state; any other field is an error ([`UI_SET_FIELDS`])
 //! - `ui.dialog.open {kind, fields?}` (kinds: newDocument, about, layerStyle {effect?}, colorPicker {target: foreground|background}, command {command}) / `ui.dialog.set {dialog, field, value}` / `ui.dialog.confirm {dialog, wait?}` / `ui.dialog.cancel {dialog}`
 //! - `ui.dialog.apply {dialog}`: commit Preferences changes without closing the dialog
@@ -75,7 +74,7 @@ pub enum Outcome {
 /// field's value is validated before the first one is applied, so a typo, an unknown field, a
 /// bad value or a bad nested key can't reply with success while nothing — or only half of it —
 /// changed (#412).
-pub const UI_SET_FIELDS: [&str; 21] = [
+pub const UI_SET_FIELDS: [&str; 22] = [
     "tool",
     "panels",
     "dock",
@@ -87,6 +86,7 @@ pub const UI_SET_FIELDS: [&str; 21] = [
     "selectionMode",
     "zoom",
     "center",
+    "rotation",
     "fit",
     "theme",
     "brushSection",
@@ -308,6 +308,10 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 let color_panel = whole_object(&app.ui.color_panel, p.get("colorPanel"), "colorPanel")?;
                 let dock_width = num_field(p, "dockWidth")?;
                 let zoom = num_field(p, "zoom")?;
+                let rotation = num_field(p, "rotation")?;
+                if rotation.is_some() && app.session.active_index().is_none() {
+                    return Err("no document open".into());
+                }
                 let center = match p.get("center") {
                     Some(v) => {
                         let a = v.as_array().ok_or_else(|| "center must be [x, y]".to_string())?;
@@ -425,6 +429,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     if fit {
                         app.ui.views[i].fit_pending = true;
                         app.ui.views[i].fill_pending = false;
+                    }
+                    if let Some(r) = rotation {
+                        app.ui.views[i].rotation = crate::rotate_view::wrap_deg(r as f32);
                     }
                 }
                 if let Some(k) = theme {

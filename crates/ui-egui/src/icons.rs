@@ -83,6 +83,7 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::PaintBucket => "paint-bucket",
         Tool::Type | Tool::VerticalType => "type",
         Tool::Hand => "hand",
+        Tool::RotateView => "compass",
         Tool::Zoom => "zoom-in",
         Tool::SpotHealing | Tool::Healing => "bandage",
         Tool::Patch => "lasso-select",

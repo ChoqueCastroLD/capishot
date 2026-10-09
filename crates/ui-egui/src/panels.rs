@@ -39,7 +39,7 @@ const TOOL_SECTIONS: &[&[&[Tool]]] = &[
         &[Tool::PathSelection, Tool::DirectSelection],
         &[Tool::Rectangle, Tool::EllipseShape, Tool::Triangle, Tool::Polygon, Tool::Line, Tool::CustomShape],
     ],
-    &[&[Tool::Hand], &[Tool::Zoom]],
+    &[&[Tool::Hand, Tool::RotateView], &[Tool::Zoom]],
 ];
 
 /// The tool a slot shows: the current tool if it belongs to the slot, else the last one used.
@@ -895,6 +895,23 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             && let Some(i) = app.session.active_index()
                         {
                             app.ui.views[i].zoom = 1.0;
+                        }
+                    }
+                    Tool::RotateView => {
+                        hint(ui, tl!("Drag around the centre to rotate the view  ·  Shift constrains to 15°"));
+                        if let Some(i) = app.session.active_index() {
+                            ui.label(tl!("Angle"));
+                            let mut angle = app.ui.views.get(i).map(|v| v.rotation).unwrap_or(0.0);
+                            if widgets::value_field(ui, &mut angle, -180.0..=180.0, "°", 56.0).changed()
+                                && let Some(v) = app.ui.views.get_mut(i)
+                            {
+                                v.rotation = crate::rotate_view::wrap_deg(angle);
+                            }
+                            if widgets::secondary_button(ui, tl!("Reset View"), 0.0).clicked()
+                                && let Some(v) = app.ui.views.get_mut(i)
+                            {
+                                v.rotation = 0.0;
+                            }
                         }
                     }
                     Tool::Hand => {
@@ -3211,6 +3228,13 @@ mod type_flyout_tests {
         frame(&mut app, &ctx, 2.0, vec![egui::Event::PointerMoved(row), pointer(row, true)]);
         frame(&mut app, &ctx, 2.05, vec![pointer(row, false)]);
         assert_eq!(app.ui.tool, Tool::PatternStamp);
+    }
+
+    #[test]
+    fn rotate_view_is_in_the_hand_flyout() {
+        let hand = TOOL_SECTIONS.iter().flat_map(|section| section.iter()).find(|slot| slot.contains(&Tool::Hand)).expect("Hand group");
+        assert_eq!(*hand, [Tool::Hand, Tool::RotateView]);
+        assert_eq!(Tool::RotateView.key(), 'R');
     }
 }
 

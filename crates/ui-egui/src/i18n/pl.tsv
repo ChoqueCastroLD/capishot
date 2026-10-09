@@ -3266,3 +3266,6 @@ cameraRaw	Roughness	Chropowatość
 # Pattern Stamp tool
 	Pattern Stamp Tool	Narzędzie Pieczątka wzoru
 	Impressionist	Impresjonistyczny
+	Rotate View Tool	Narzędzie Obróć widok
+	Reset View	Resetuj widok
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Przeciągnij wokół środka, aby obrócić widok  ·  Shift ogranicza do 15°
