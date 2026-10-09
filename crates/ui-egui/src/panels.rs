@@ -513,6 +513,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     return;
                 }
                 let tool = app.ui.tool;
+                // The options bar shows the active tool's brush: switch it in before drawing the
+                // chip, so a tool change swaps the brush with it (Photoshop keeps one per tool).
+                crate::paint_mouse::sync_tool_brush(app);
                 // Brush edits here go through `tools.setBrush`, one journal entry per gesture (Rule 1).
                 if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser)) || tool == Tool::QuickSelection {
                     brush_preset_chip(ui, &app.session.tools.brush, &mut app.ui);
@@ -527,7 +530,6 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 {
                     return;
                 }
-                crate::paint_mouse::sync_tool_smoothing(app);
                 let brush_before = app.session.tools.brush.clone();
                 let mut brush = brush_before.clone();
                 let b = &mut brush;

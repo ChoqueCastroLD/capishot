@@ -234,6 +234,8 @@ pub struct Recovered {
 pub type AppendTextFn = Box<dyn FnMut(&str, &str) -> Result<(), String>>;
 /// Requests from the operating system since the last call (see [`OsEvent`]).
 pub type OsEventsFn = Box<dyn FnMut() -> Vec<OsEvent>>;
+/// Ends the app the platform's own way (see [`Services::quit`]).
+pub type QuitFn = Box<dyn FnMut()>;
 /// Where the OS pointer is now, in egui points within the window; `None` when unknown.
 pub type CursorPosFn = Box<dyn FnMut(&egui::Context) -> Option<egui::Pos2>>;
 
@@ -301,6 +303,11 @@ pub struct Services {
     pub read_displays: Option<monitor_status::ReadDisplaysFn>,
     /// The macOS menu bar, when the desktop app installed one; the in-window menus are hidden then.
     pub native_menu: Option<native_menu::NativeMenu>,
+    /// Ends the app once leaving is settled (nothing unsaved, or the prompt answered), instead of
+    /// letting eframe close the window. macOS: `-[NSApplication terminate:]`. Closing the window
+    /// while AppKit's run loop is still going crashes or hangs Touch Bar Macs (#1575, #1458).
+    /// Without one, eframe closes the window and the app ends with it.
+    pub quit: Option<QuitFn>,
 }
 
 /// A document histogram being computed off the UI thread: (document, revision, receiver of
@@ -1123,6 +1130,9 @@ impl eframe::App for PhotocraftApp {
         }
         lut_library_ui::end_stale_preview(self, &ctx);
         let t0 = gpu_canvas::now_ms();
+        // Each painting tool keeps its own brush (#218), so switch the active tool's brush in
+        // before anything this frame reads it (the cursor, the options bar, a stroke).
+        paint_mouse::sync_tool_brush(self);
         // View › Screen Mode › Full Screen Mode: only the image, on black (F or Esc returns).
         screen_picker::show(&ctx);
         if screen_picker::busy(&ctx) && screen_picker::showing(&ctx) {

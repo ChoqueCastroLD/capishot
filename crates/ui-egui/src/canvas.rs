@@ -2293,7 +2293,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         let mods = ui.input(|i| i.modifiers);
         // Tools follow the left button; the right one opens the Brush Preset picker or erases
         // (Preferences › Tools, `paint_mouse`).
-        crate::paint_mouse::sync_tool_smoothing(app);
+        crate::paint_mouse::sync_tool_brush(app);
         let mut buttons = crate::paint_mouse::canvas_buttons(app, &response, tool);
         // The Crop tool's frame is edited from the press (before egui's drag threshold), so the
         // pixels past the canvas show at once, as in Photoshop.
@@ -3411,7 +3411,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 Tool::Type | Tool::VerticalType if crate::type_tool::pointer_down(app, x, y, mods.shift) => return,
                 _ => {}
             }
-            crate::paint_mouse::sync_tool_smoothing(app);
+            crate::paint_mouse::sync_tool_brush(app);
             let erase = tool == Tool::Eraser || std::mem::take(&mut app.secondary_erase);
             // ⇧-click after a stroke: a straight line from where it ended (stroke_constraint.rs).
             let active = app.session.active().map(|st| st.doc.id);
