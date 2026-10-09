@@ -2,7 +2,8 @@
 //! backends that sample masks from textures (the GPU compositor) and for feathered masks on the
 //! CPU. Rasterising a vector mask costs a path coverage pass and feathering a blur, so results
 //! are cached per mask state; unchanged masks return the same tiles (cheap to clone, and the
-//! GPU sees no change).
+//! GPU sees no change). Retention is bounded by both entry count and accounted pixel bytes;
+//! [`purge_cache`] drops cached masks and prevents older builds from refilling the cache.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -15,26 +16,94 @@ use photocraft_raster::Surface;
 
 const FORMAT: PixelFormat = PixelFormat { mode: ColorMode::Grayscale, sample: SampleType::F32, alpha: false };
 
-struct Cache {
-    map: HashMap<u64, CacheEntry>,
-    tick: u64,
-}
-
 struct CacheEntry {
     surface: Surface,
     tick: u64,
+    bytes: usize,
     // The key contains input tile addresses. Keep those tiles alive until eviction:
     // edits must copy them, and the allocator cannot reuse their addresses for new tiles.
     _pixel_input: Option<Surface>,
 }
 
+#[derive(Default)]
+struct Cache {
+    map: HashMap<u64, CacheEntry>,
+    tick: u64,
+    bytes: usize,
+    generation: u64,
+}
+
+impl Cache {
+    fn get(&mut self, key: u64) -> Option<Surface> {
+        self.tick = self.tick.saturating_add(1);
+        let entry = self.map.get_mut(&key)?;
+        entry.tick = self.tick;
+        Some(entry.surface.clone())
+    }
+
+    fn insert(&mut self, key: u64, surface: Surface, pixel_input: Option<Surface>, bytes: usize, budget: usize, generation: u64) {
+        // A large result can still be used by its caller without keeping it globally. A purge
+        // also invalidates admission by computations that were already running.
+        if bytes > budget || generation != self.generation {
+            return;
+        }
+        if let Some(previous) = self.map.remove(&key) {
+            self.bytes = self.bytes.saturating_sub(previous.bytes);
+        }
+        while self.map.len() >= CAPACITY || self.bytes > budget.saturating_sub(bytes) {
+            let Some(old) = self.map.iter().min_by_key(|(_, entry)| entry.tick).map(|(&key, _)| key) else { break };
+            if let Some(entry) = self.map.remove(&old) {
+                self.bytes = self.bytes.saturating_sub(entry.bytes);
+            }
+        }
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.tick = self.tick.saturating_add(1);
+        self.map.insert(key, CacheEntry { surface, tick: self.tick, bytes, _pixel_input: pixel_input });
+    }
+
+    fn clear(&mut self) -> usize {
+        let bytes = self.bytes;
+        self.map.clear();
+        self.bytes = 0;
+        self.tick = 0;
+        self.generation = self.generation.wrapping_add(1);
+        bytes
+    }
+}
+
 fn cache() -> &'static Mutex<Cache> {
     static C: OnceLock<Mutex<Cache>> = OnceLock::new();
-    C.get_or_init(|| Mutex::new(Cache { map: HashMap::new(), tick: 0 }))
+    C.get_or_init(|| Mutex::new(Cache::default()))
 }
 
 /// Entries kept (least recently used dropped first).
 const CAPACITY: usize = 64;
+
+/// Accounted pixel-byte limit of the combined-mask cache. One 36 MP float input and result
+/// fit; larger individual results remain usable but are not retained in the cache.
+pub const CACHE_BUDGET: usize = 512 << 20;
+
+fn surface_bytes(surface: &Surface) -> usize {
+    surface.tiles().fold(surface.default_bytes().len(), |bytes, (_, tile)| bytes.saturating_add(tile.bytes().len()))
+}
+
+fn entry_bytes(surface: &Surface, pixel_input: Option<&Surface>) -> usize {
+    // Charge the whole source as well as the result, including off-canvas tiles. Shared tiles
+    // are deliberately charged per entry rather than relying on their current owners.
+    surface_bytes(surface).saturating_add(pixel_input.map_or(0, surface_bytes))
+}
+
+/// Pixel bytes accounted for by the combined-mask cache. This conservatively includes source
+/// tiles and counts tiles shared across entries more than once; it is not process memory use.
+pub fn cache_bytes() -> usize {
+    cache().lock().unwrap_or_else(|e| e.into_inner()).bytes
+}
+
+/// Drop every cached combined mask (Edit › Purge › All), returning its accounted pixel bytes.
+/// Callers may still hold returned surfaces, so this is not a measure of freed process memory.
+pub fn purge_cache() -> usize {
+    cache().lock().unwrap_or_else(|e| e.into_inner()).clear()
+}
 
 fn key(layer: &Layer, canvas: Rect) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -112,15 +181,13 @@ pub fn combined_mask(layer: &Layer, canvas: Rect) -> Option<Surface> {
         return None;
     }
     let k = key(layer, canvas);
-    {
+    let generation = {
         let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
-        c.tick += 1;
-        let tick = c.tick;
-        if let Some(e) = c.map.get_mut(&k) {
-            e.tick = tick;
-            return Some(e.surface.clone());
+        if let Some(surface) = c.get(k) {
+            return Some(surface);
         }
-    }
+        c.generation
+    };
     // Far outside the path the vector mask is constant.
     let far = Rect::from_xywh(canvas.x0 - 1_000_000, canvas.y0 - 1_000_000, 1, 1);
     let v_out = vm.map_or(1.0, |vm| photocraft_vector::vector_mask_values(vm, far)[0]);
@@ -170,14 +237,9 @@ pub fn combined_mask(layer: &Layer, canvas: Rect) -> Option<Surface> {
         }
         s.write_region(area, &v);
     }
-    let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
-    if c.map.len() >= CAPACITY
-        && let Some(old) = c.map.iter().min_by_key(|e| e.1.tick).map(|e| *e.0)
-    {
-        c.map.remove(&old);
-    }
-    let tick = c.tick;
-    c.map.insert(k, CacheEntry { surface: s.clone(), tick, _pixel_input: layer.mask.as_ref().map(|m| m.surface.clone()) });
+    let pixel_input = layer.mask.as_ref().map(|m| m.surface.clone());
+    let bytes = entry_bytes(&s, pixel_input.as_ref());
+    cache().lock().unwrap_or_else(|e| e.into_inner()).insert(k, s.clone(), pixel_input, bytes, CACHE_BUDGET, generation);
     Some(s)
 }
 
@@ -186,6 +248,116 @@ mod tests {
     use super::*;
     use photocraft_doc::LayerMask;
     use photocraft_doc::vector::{Knot, Path, Subpath, VectorMask};
+
+    fn one_tile(sample: SampleType) -> Surface {
+        let mut surface = Surface::with_default(PixelFormat { mode: ColorMode::Grayscale, sample, alpha: false }, &[1.0]);
+        surface.fill_rect(Rect::new(0, 0, 1, 1), &[0.0]);
+        surface
+    }
+
+    #[test]
+    fn charges_input_and_output_at_every_depth_including_off_canvas_tiles() {
+        let result = one_tile(SampleType::F32);
+        for sample in SampleType::ALL {
+            let mut input = one_tile(sample);
+            input.fill_rect(Rect::new(1024, 1024, 1025, 1025), &[0.0]);
+            let tile_pixels = (photocraft_geom::TILE_SIZE * photocraft_geom::TILE_SIZE) as usize;
+            let expected = tile_pixels * (4 + 2 * sample.bytes()) + 4 + sample.bytes();
+            let bytes = entry_bytes(&result, Some(&input));
+            assert_eq!(bytes, expected, "{sample:?}");
+            let mut cache = Cache::default();
+            cache.insert(1, result.clone(), None, bytes, bytes * 2, cache.generation);
+            cache.insert(2, result.clone(), None, bytes, bytes * 2, cache.generation);
+            assert_eq!(cache.bytes, bytes * 2, "shared tiles are conservatively charged per entry");
+        }
+    }
+
+    #[test]
+    fn byte_budget_evicts_the_least_recently_used_entry() {
+        let surface = one_tile(SampleType::F32);
+        let bytes = entry_bytes(&surface, None);
+        let mut cache = Cache::default();
+        cache.insert(1, surface.clone(), None, bytes, bytes * 2, cache.generation);
+        cache.insert(2, surface.clone(), None, bytes, bytes * 2, cache.generation);
+        assert!(cache.get(1).is_some());
+        cache.insert(3, surface, None, bytes, bytes * 2, cache.generation);
+        assert!(cache.get(2).is_none());
+        assert!(cache.get(1).is_some());
+        assert!(cache.get(3).is_some());
+        assert_eq!(cache.bytes, bytes * 2);
+    }
+
+    #[test]
+    fn entry_limit_also_bounds_masks_with_no_tiles() {
+        let surface = Surface::new(FORMAT);
+        let bytes = entry_bytes(&surface, None);
+        let mut cache = Cache::default();
+        for key in 0..CAPACITY as u64 {
+            cache.insert(key, surface.clone(), None, bytes, CACHE_BUDGET, cache.generation);
+        }
+        assert!(cache.get(0).is_some());
+        cache.insert(CAPACITY as u64, surface, None, bytes, CACHE_BUDGET, cache.generation);
+        assert_eq!(cache.map.len(), CAPACITY);
+        assert!(cache.get(1).is_none());
+        assert!(cache.get(0).is_some());
+        assert_eq!(cache.bytes, bytes * CAPACITY);
+    }
+
+    #[test]
+    fn oversized_results_are_usable_without_retention_or_other_eviction() {
+        let surface = one_tile(SampleType::F32);
+        let bytes = entry_bytes(&surface, None);
+        let mut cache = Cache::default();
+        let small = Surface::new(FORMAT);
+        let small_bytes = entry_bytes(&small, None);
+        cache.insert(1, small, None, small_bytes, bytes - 1, cache.generation);
+        let tile = surface.tiles().next().unwrap().1.clone();
+        let owners = Arc::strong_count(&tile);
+        cache.insert(2, surface.clone(), None, bytes, bytes - 1, cache.generation);
+        assert!(cache.get(2).is_none());
+        assert!(cache.get(1).is_some());
+        assert_eq!(cache.bytes, small_bytes);
+        assert_eq!(Arc::strong_count(&tile), owners);
+        assert_eq!(surface.pixel(0, 0), vec![0.0]);
+    }
+
+    #[test]
+    fn replacement_and_purge_release_accounted_bytes_and_tile_references() {
+        let first = one_tile(SampleType::U8);
+        let second = one_tile(SampleType::F32);
+        let first_bytes = entry_bytes(&first, None);
+        let second_bytes = entry_bytes(&second, None);
+        let first_tile = first.tiles().next().unwrap().1.clone();
+        let second_tile = second.tiles().next().unwrap().1.clone();
+        let mut cache = Cache::default();
+        cache.insert(1, first.clone(), None, first_bytes, CACHE_BUDGET, cache.generation);
+        assert_eq!(Arc::strong_count(&first_tile), 3);
+        cache.insert(1, second.clone(), None, second_bytes, CACHE_BUDGET, cache.generation);
+        assert_eq!(cache.bytes, second_bytes);
+        assert_eq!(cache.map.len(), 1);
+        assert_eq!(Arc::strong_count(&first_tile), 2);
+        assert_eq!(Arc::strong_count(&second_tile), 3);
+        assert_eq!(cache.clear(), second_bytes);
+        assert_eq!(cache.bytes, 0);
+        assert!(cache.map.is_empty());
+        assert_eq!(Arc::strong_count(&second_tile), 2);
+        assert_eq!(cache.clear(), 0);
+    }
+
+    #[test]
+    fn a_build_started_before_purge_cannot_refill_the_cache() {
+        let surface = one_tile(SampleType::F32);
+        let bytes = entry_bytes(&surface, None);
+        let mut cache = Cache::default();
+        assert!(cache.get(1).is_none());
+        let generation_before_purge = cache.generation;
+        cache.clear();
+        cache.insert(1, surface.clone(), None, bytes, CACHE_BUDGET, generation_before_purge);
+        assert!(cache.map.is_empty());
+        assert_eq!(cache.bytes, 0);
+        cache.insert(1, surface, None, bytes, CACHE_BUDGET, cache.generation);
+        assert!(cache.get(1).is_some());
+    }
 
     #[test]
     fn pixel_edits_refresh_cached_masks_at_every_depth() {
