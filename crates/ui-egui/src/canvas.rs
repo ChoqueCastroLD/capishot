@@ -1051,7 +1051,7 @@ fn gpu_budget(app: &mut PhotocraftApp, gpu: &crate::gpu_canvas::GpuCanvas, idx: 
 }
 
 /// Live preview for an open filter dialog: run the filter on the proxy and upload it.
-fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u64)> {
+fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u64, [u32; 2])> {
     if crate::adjust_preview::on_layer(app, idx) {
         return None;
     }
@@ -1082,7 +1082,9 @@ fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u6
         }
         app.filter_preview = Some(crate::filter_dialog::FilterPreview { doc: doc_id, revision, hash, k, result });
     }
-    app.filter_preview.as_ref().filter(|p| p.result.is_some()).map(|p| (p.k, key))
+    let preview = app.filter_preview.as_ref()?;
+    let result = preview.result.as_ref()?;
+    Some((preview.k, key, [result.size.width, result.size.height]))
 }
 
 /// The document pixels a (non-rotated) view shows, with a margin for filtering.
@@ -1094,8 +1096,8 @@ fn visible_doc_rect(xf: &ViewXform) -> DRect {
 
 /// Zoomed-out Image › Adjustments preview on a large document: the wgpu compositor renders the
 /// reduced preview document (`adjust_preview::gpu_proxy`) into its own texture, over the target's
-/// area after the first frame. Returns (factor, gpu key) to draw.
-fn ensure_adjust_proxy(app: &mut PhotocraftApp, idx: usize, zoom: f32) -> Option<(u32, u64)> {
+/// area after the first frame. Returns (factor, gpu key, dimensions) to draw.
+fn ensure_adjust_proxy(app: &mut PhotocraftApp, idx: usize, zoom: f32) -> Option<(u32, u64, [u32; 2])> {
     let frame = crate::adjust_preview::gpu_proxy(app, idx, zoom)?;
     let key = frame.doc.id.0;
     let size = [frame.doc.size.width, frame.doc.size.height];
@@ -1107,12 +1109,12 @@ fn ensure_adjust_proxy(app: &mut PhotocraftApp, idx: usize, zoom: f32) -> Option
         app.perf.record(if r.kind.starts_with("gpu") { "gpu-adjust-proxy" } else { "adjust-proxy" }, r.px, r.composite_ms, r.upload_ms);
         crate::adjust_preview::proxy_drawn(app, &frame);
     }
-    Some((frame.k, key))
+    Some((frame.k, key, size))
 }
 
 /// If a live adjustment preview is active on a large document, composite it on the proxy and upload
-/// it under its own GPU key. Returns (factor, gpu key) when the proxy should be drawn.
-fn ensure_proxy_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u64)> {
+/// it under its own GPU key. Returns (factor, gpu key, dimensions) when the proxy should be drawn.
+fn ensure_proxy_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u64, [u32; 2])> {
     let (layer, params) = app.live_adjust.clone()?;
     let (doc_id, revision, doc) = {
         let st = app.session.documents().get(idx)?;
@@ -1147,7 +1149,7 @@ fn ensure_proxy_preview(app: &mut PhotocraftApp, idx: usize) -> Option<(u32, u64
         app.perf.record("proxy", p.size.area(), t1 - t0, crate::gpu_canvas::now_ms() - t1);
         app.proxy_uploaded = Some((doc_id, hash));
     }
-    Some((k, key))
+    Some((k, key, [proxy.size.width, proxy.size.height]))
 }
 
 /// A CPU composite as the GPU canvas texture stores it (sRGB-encoded for linear documents).
@@ -1900,16 +1902,21 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // A flipped view draws through the CPU path (the GPU canvas shader has no mirroring).
     if app.gpu.is_some()
         && !flip
-        && let Some((k, key)) = ensure_adjust_proxy(app, idx, view.zoom * ctx.pixels_per_point())
+        && let Some((k, key, preview_size)) = ensure_adjust_proxy(app, idx, view.zoom * ctx.pixels_per_point())
             .or_else(|| ensure_filter_preview(app, idx))
             .or_else(|| ensure_proxy_preview(app, idx))
     {
         on_gpu = true;
+        let original_size = [doc.size.width.div_ceil(k), doc.size.height.div_ceil(k)];
         let params = crate::gpu_canvas::ViewParams {
             doc: key,
-            doc_size: [doc.size.width.div_ceil(k), doc.size.height.div_ceil(k)],
+            doc_size: preview_size,
             zoom: view.zoom * k as f32,
-            center: [view.center[0] / k as f32, view.center[1] / k as f32],
+            // A size-changing preview grows around the old image center; keep the view's pan.
+            center: [
+                view.center[0] / k as f32 + (preview_size[0] as f32 - original_size[0] as f32) / 2.0,
+                view.center[1] / k as f32 + (preview_size[1] as f32 - original_size[1] as f32) / 2.0,
+            ],
             shadow: {
                 let t = crate::theme::Tokens::get(&ctx);
                 !t.bevel && !t.pro && drop_shadow
