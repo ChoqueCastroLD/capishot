@@ -2128,6 +2128,7 @@
 	Grid:	Raster:
 	Highlight Clipping Warning (O)	Lichter-Abschneidewarnung (O)
 	Lasso around an area, then drag the selection	Lasso um einen Bereich ziehen, dann die Auswahl verschieben
+	Now drag the selection onto another area	Jetzt die Auswahl auf einen anderen Bereich ziehen
 	Patch:	Korrektur:
 	Shadow Clipping Warning (U)	Tiefen-Abschneidewarnung (U)
 	Show Lab Color Readouts	Lab-Farbwerte anzeigen

@@ -1970,6 +1970,7 @@ cameraRaw	Blending	混合
 	Patch Tool	修补工具
 	Patch:	修补：
 	Lasso around an area, then drag the selection	用套索圈出区域，然后拖动选区
+	Now drag the selection onto another area	现在将选区拖动到另一个区域
 # Current shell labels and shortcut templates. Keep {key} platform-dependent.
 	Add a mask  (from the selection; {key} inverts)	添加蒙版  （基于选区；{key} 反相）
 	Add to selection  ({key})	添加到选区  （{key}）

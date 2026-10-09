@@ -2077,6 +2077,7 @@ cameraRaw	Color	カラー
 	Patch Tool	パッチツール
 	Patch:	パッチ:
 	Lasso around an area, then drag the selection	投げ縄で範囲を囲み、選択範囲をドラッグします
+	Now drag the selection onto another area	選択範囲を別の場所へドラッグします
 	Edit Type	文字を編集
 
 

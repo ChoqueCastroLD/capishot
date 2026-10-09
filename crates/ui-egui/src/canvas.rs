@@ -3728,7 +3728,11 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
                 let o = &app.ui.tool_options;
                 // The Patch and Content-Aware Move tools have no Feather in their options bar.
                 let feather = if d.tool == Tool::Lasso { o.feather } else { 0.0 };
-                let _ = app.run("select.lasso", json!({"points": pts, "mode": mode, "antiAlias": o.anti_alias, "feather": feather}));
+                let made = app.run("select.lasso", json!({"points": pts, "mode": mode, "antiAlias": o.anti_alias, "feather": feather}));
+                // The lasso only outlines the patch; say that it is dragged next (#1715).
+                if made.is_ok() && d.tool != Tool::Lasso {
+                    crate::retouch_ui::patch_hint(app);
+                }
             } else if app.session.is_enabled("select.deselect") {
                 let _ = app.run("select.deselect", json!({}));
             }

@@ -2518,6 +2518,7 @@ cameraRaw	Blending	Fusion
 	Patch Tool	Outil Pièce
 	Patch:	Pièce :
 	Lasso around an area, then drag the selection	Entourez une zone au lasso, puis faites glisser la sélection
+	Now drag the selection onto another area	Faites maintenant glisser la sélection vers une autre zone
 
 # Warp grid presets (#388)
 	3 x 3	3 × 3

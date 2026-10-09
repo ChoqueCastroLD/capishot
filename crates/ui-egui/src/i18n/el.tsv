@@ -1596,6 +1596,7 @@
 	Click to apply, ⌥-click to clear overrides, double-click for Style Options	Κλικ για εφαρμογή, ⌥-κλικ για εκκαθάριση παρακάμψεων, διπλό κλικ για επιλογές στυλ
 	Click: corner · Drag: smooth · Click first point: close · ↩ finish · Esc cancel	Κλικ: γωνία · Σύρσιμο: ομαλή καμπύλη · Κλικ στο πρώτο σημείο: κλείσιμο · ↩ ολοκλήρωση · Esc ακύρωση
 	Lasso around an area, then drag the selection	Σχεδιάστε επιλογή με το Lasso γύρω από μια περιοχή και σύρετέ την
+	Now drag the selection onto another area	Τώρα σύρετε την επιλογή σε άλλη περιοχή
 	Rulers  (⌘R)	Χάρακες  (⌘R)
 	Show Guides  (⌘;)	Εμφάνιση οδηγών  (⌘;)
 	Grid  (⌘')	Πλέγμα  (⌘')

@@ -2492,6 +2492,7 @@ cameraRaw	Blending	Pembauran
 	Patch Tool	Alat Patch
 	Patch:	Patch:
 	Lasso around an area, then drag the selection	Lingkari area dengan lasso, lalu seret seleksinya
+	Now drag the selection onto another area	Sekarang seret seleksi ke area lain
 	Rendering Mode	Mode Rendering
 	Automatic (recommended)	Otomatis (disarankan)
 	CPU / Compatibility	CPU / Kompatibilitas
