@@ -146,9 +146,8 @@ impl Headless {
         // record the current revision as saved so the session stops reporting `dirty`, and make
         // the file the document's path. A flat export (PNG, JPEG, …) is a copy and leaves both
         // alone (#1547).
-        let ext = format
-            .map(|f| f.trim_start_matches('.').to_ascii_lowercase())
-            .or_else(|| target.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()));
+        let ext =
+            format.map(|f| f.trim_start_matches('.').to_ascii_lowercase()).or_else(|| target.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()));
         let layered = matches!(ext.as_deref(), Some("psd" | "psb")) || ext.as_deref() == Some(photocraft_format::EXTENSION);
         if layered {
             // Saving by index must not retarget the next automation command.
