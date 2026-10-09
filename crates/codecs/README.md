@@ -114,8 +114,12 @@ the same.
   * CMYK is always written 4:4:4 (subsampled CMYK is not portable) as Adobe-inverted CMYK with an
     APP14 marker.
   * Text is not written because there is no COM-segment support.
-  * EXIF and XMP must each fit in one 64 KiB APP1 segment, otherwise the encoder returns an error.
-    Extended XMP is not written.
+  * EXIF and XMP must each fit in one APP1 segment (65 533 bytes with its header). Metadata that
+    doesn't fit is dropped and the export still succeeds, with a
+    `MetadataTooLarge` warning ("EXIF (… bytes) is too large for the format; it will be dropped").
+    Before dropping XMP, the encoder first removes the layered-document properties
+    (`DocumentAncestors`, `TextLayers`) that mean nothing in a flat JPEG. Extended XMP is not
+    written.
 * **TIFF decode**
   * Classic TIFF and BigTIFF (version 43, 8-byte offsets), both byte orders, strips or tiles,
     planar configuration 1 or 2.
@@ -140,7 +144,11 @@ the same.
 * **EXR**
   * Reads the first valid layer at full resolution, from its data window.
   * Channel names are matched by suffix, so `layer.R` counts as `R`.
-  * Subsampled channels and deep data are unsupported.
+  * Subsampled channels are unsupported.
+  * Deep data (scanlines or single-level tiles, compressed NONE, RLE or ZIPS) opens as a flat
+    image: each pixel's samples are composited into one, with
+    `DecodeWarning::DeepFlattened` because per-pixel depth is not kept. Deep ZIP (16-line
+    blocks) and deep mip-map or rip-map tiles return `Unsupported`.
   * Only lossless compressions are offered for writing: None, RLE, ZIP1, ZIP16 and PIZ.
 * **Netpbm writing** picks the subtype from the image: float gives PFM, gray gives P5, RGB gives
   P6, and anything with alpha or CMYK gives P7 (PAM). Writing a `.pbm` file therefore produces
