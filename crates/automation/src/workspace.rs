@@ -607,7 +607,10 @@ mod tests {
                 | "layer.combineShapes.intersectShapeAreas"
                 | "layer.combineShapes.excludeOverlappingShapes"
                 | "layer.combineShapes.mergeShapeComponents"
-        ) {
+        ) || id.starts_with("layer.newFillLayer.")
+            || id.starts_with("layer.newAdjustmentLayer.")
+        {
+            // New fill and adjustment layers take a vector path as their vector mask (#1419).
             return false;
         }
         params.to_ascii_lowercase().contains("path")
