@@ -347,6 +347,14 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             app.ui.dock_tabs.properties = 0;
             Ok(r)
         }
+        // Edit › Stroke…: open its full options dialog when called from menus/context
+        // menus. Explicit params from Actions, CLI, MCP and control channel execute directly.
+        crate::stroke_ui::COMMAND if params.as_object().is_none_or(|o| o.is_empty()) => {
+            if let Some(Err(why)) = photocraft_engine::commands::find(id).map(|c| (c.enabled)(&app.session)) {
+                return Err(why);
+            }
+            Ok(json!({"dialog": crate::stroke_ui::open(app)}))
+        }
         // Photoshop's "Select and Mask…" is the engine's select.refineEdge.
         // Select › Color Range… from the menu: the dialog (with params: the engine directly).
         "select.colorRange" if params.as_object().is_none_or(|o| o.is_empty()) => Ok(json!({"dialog": crate::color_range_ui::open(app)})),
