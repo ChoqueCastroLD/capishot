@@ -92,8 +92,9 @@ Nikon's compression tables by black-box analysis of CC0 sample files (see their 
   plausible wrong data.
 * **Meaning fitted to Affinity's own pictures.** What shapes, paints, text and pixel data mean was
   worked out by comparing our render with the thumbnail every Affinity document embeds (Affinity's
-  render of itself), on 189 distinct public documents saved by Affinity 1.x, 2.x and 3.0/3.1 on
-  Windows, macOS and iPad, all of which the reader opens. Most are published under CC0, MIT, BSD, Apache-2.0 or CC BY (-SA); the others
+  render of itself), on 176 public documents saved by Affinity 1.x, 2.x and 3.0/3.1 on Windows,
+  macOS and iPad. The collection has since grown to 189 distinct documents, and the reader opens
+  all of them. Most are published under CC0, MIT, BSD, Apache-2.0 or CC BY (-SA); the others
   (no licence stated, or GPL or non-commercial terms) were only opened locally to compare
   pictures, never committed or redistributed. The corpus test keeps the comparison for the pinned
   files, which are CC0, MIT or Apache-2.0 only.
