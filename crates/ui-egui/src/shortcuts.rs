@@ -393,9 +393,7 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if pressed(Key::Escape) {
             app.ui.polygon.clear();
             app.ui.polygon_mode.clear();
-            app.ui.crop_rect = None;
-            app.ui.crop_angle = 0.0;
-            app.crop.drag = None;
+            crate::crop_ui::cancel(app);
             return;
         }
     }

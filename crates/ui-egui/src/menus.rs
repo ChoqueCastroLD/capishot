@@ -7,9 +7,10 @@ use crate::state::DialogKind;
 
 /// Shared gate for native menu clicks and control-channel `ui.menu.invoke`.
 /// Dialogs and unsaved-changes prompts block edits, but allow the four view-navigation
-/// commands also usable through shortcuts. Camera Raw blocks menu commands entirely.
+/// commands also usable through shortcuts. Camera Raw blocks menu commands entirely, and a pending
+/// crop blocks the commands Photoshop greys during one (`crop_ui::blocks`).
 pub(crate) fn modal_allows(app: &PhotocraftApp, id: &str) -> bool {
-    if app.camera_raw.is_some() {
+    if app.camera_raw.is_some() || crate::crop_ui::blocks(app, id) {
         return false;
     }
     (app.ui.dialogs.is_empty() && app.discard.is_none()) || crate::shortcuts::NAV_COMMANDS.contains(&id)
@@ -141,6 +142,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     // A pending Pen anchor is gesture state; Edit › Undo must match the keyboard.
     if id == "edit.undo" && crate::vector_ui::pen_undo_last_point(app) {
         return Ok(Value::Null);
+    }
+    // Image › Crop while the Crop tool has a pending frame commits that frame (#1918).
+    if id == "image.crop" && crate::crop_ui::pending(app) {
+        crate::canvas::commit_crop(app);
+        return Ok(json!({"committed": true}));
     }
     // Help › Discord, website, GitHub, Report an Issue.
     if let Some(url) = crate::links::url_for(id) {
@@ -514,6 +520,10 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     }
     // Photoshop greys these for the Background layer, other layer kinds or single-layer documents.
     if crate::enable_rules::disabled(app, id) {
+        return false;
+    }
+    // A pending crop greys what Photoshop greys during one (#1918).
+    if crate::crop_ui::blocks(app, id) {
         return false;
     }
     if let Some(e) = crate::workspace_ui::is_enabled(app, id) {

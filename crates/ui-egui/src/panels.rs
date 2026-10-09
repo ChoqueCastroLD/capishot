@@ -1003,8 +1003,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                 crate::canvas::commit_crop(app);
                             }
                             if icons::button(ui, "ban", 26.0, false, tl!("Cancel current crop operation  (Esc)")).clicked() {
-                                app.ui.crop_rect = None;
-                                app.ui.crop_angle = 0.0;
+                                crate::crop_ui::cancel(app);
                             }
                         });
                     }
