@@ -368,6 +368,9 @@ fn urat(v: f64) -> (u32, u32) {
 pub enum DngStorage {
     /// One strip per `rows` rows, uncompressed at `bits` per sample (8, 12, 16…).
     Strips { rows: usize },
+    /// Adobe DNG compression 8: zlib streams with the TIFF predictor (1 = none, 2 = horizontal
+    /// differencing) applied before compressing.
+    DeflateStrips { rows: usize, predictor: u16 },
     /// Lossless-JPEG tiles of this size (2 components per JPEG row, as Adobe writes CFA tiles).
     Lj92Tiles { width: usize, height: usize },
     /// Lossless-JPEG strips of this many rows, 1 component.
@@ -496,6 +499,42 @@ impl DngSpec {
             raw.push((50711, Val::Short(vec![1])));
         }
         match self.storage {
+            DngStorage::DeflateStrips { rows, predictor } => {
+                use std::io::Write;
+                let mut offs = Vec::new();
+                let mut lens = Vec::new();
+                for y in (0..self.height).step_by(rows) {
+                    let r = (y + rows).min(self.height) - y;
+                    let n = self.width * self.samples;
+                    let mut v: Vec<u16> = self.data[y * n..(y + r) * n].to_vec();
+                    if predictor == 2 {
+                        // Horizontal differencing on the sample values, before byte packing
+                        // (the reader undoes predictor after unpacking, per row, per channel).
+                        let plane = if self.samples.is_multiple_of(3) { 3 } else { 1 };
+                        for row in v.chunks_mut(n) {
+                            for i in (plane..row.len()).rev() {
+                                row[i] = row[i].wrapping_sub(row[i - plane]);
+                            }
+                        }
+                    }
+                    // Pack the delta'd values with the file's byte order and bit depth.
+                    let bytes: Vec<u8> = match self.bits {
+                        8 => v.iter().map(|&x| x as u8).collect(),
+                        16 => v.iter().flat_map(|&x| if self.big_endian { x.to_be_bytes() } else { x.to_le_bytes() }).collect(),
+                        _ => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
+                    };
+                    let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+                    e.write_all(&bytes).expect("zlib");
+                    let z = e.finish().expect("zlib");
+                    lens.push(z.len() as u32);
+                    offs.push(t.blob(z));
+                }
+                raw.push((259, Val::Short(vec![8])));
+                raw.push((317, Val::Short(vec![predictor])));
+                raw.push((278, Val::Long(vec![rows as u32])));
+                raw.push((273, Val::Blobs(offs)));
+                raw.push((279, Val::Long(lens)));
+            }
             DngStorage::Strips { rows } => {
                 let mut offs = Vec::new();
                 let mut lens = Vec::new();

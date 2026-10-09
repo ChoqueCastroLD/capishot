@@ -371,3 +371,82 @@ fn limits_are_enforced_before_allocating() {
     let tiny = Limits { max_alloc: 1000, ..Limits::default() };
     assert!(matches!(decode(&b, &tiny), Err(RawError::LimitExceeded(_))));
 }
+
+/// Adobe DNG compression 8 (zlib): with and without the horizontal-differencing predictor,
+/// with and without 12-bit packing, and both byte orders — each decodes to the exact samples.
+#[test]
+fn deflate_strips_round_trip() {
+    let (w, h) = (48, 40);
+    for (name, bits, storage, be) in [
+        ("deflate 16-bit", 16, DngStorage::DeflateStrips { rows: 16, predictor: 1 }, false),
+        ("deflate 16-bit predictor 2", 16, DngStorage::DeflateStrips { rows: 16, predictor: 2 }, false),
+        ("deflate 12-bit predictor 2", 12, DngStorage::DeflateStrips { rows: 12, predictor: 2 }, false),
+        ("deflate 16-bit predictor 2 BE", 16, DngStorage::DeflateStrips { rows: 16, predictor: 2 }, true),
+        ("deflate LinearRaw predictor 2", 16, DngStorage::DeflateStrips { rows: 40, predictor: 2 }, false),
+    ] {
+        let samples = if name.contains("LinearRaw") { 3 } else { 1 };
+        let data = noise(w * h * samples, bits);
+        let mut spec = DngSpec::cfa(w, h, data.clone());
+        spec.samples = samples;
+        spec.bits = bits;
+        spec.storage = storage;
+        spec.big_endian = be;
+        spec.white = (1 << bits) - 1;
+        let s = sensor(&spec.build());
+        assert_eq!((s.width, s.height, s.samples), (w, h, samples), "{name}");
+        assert_eq!(s.data, data, "{name}");
+    }
+}
+
+/// A zlib stream cut short must fail cleanly (decompression comes up short or errors), and a
+/// declared-but-absent giant tile must trip the limits instead of allocating.
+#[test]
+fn deflate_hostile_fails_cleanly() {
+    let (w, h) = (32, 32);
+    let data = noise(w * h, 16);
+    let mut spec = DngSpec::cfa(w, h, data);
+    spec.storage = DngStorage::DeflateStrips { rows: 32, predictor: 2 };
+    let bytes = spec.build();
+    assert_eq!(sensor(&bytes).data.len(), w * h);
+    // Locate the zlib stream (78 9c header of the single strip) and cut it mid-stream.
+    let at = bytes.windows(2).position(|w| w == [0x78, 0x9c]).expect("zlib header") + 2;
+    let cut = &bytes[..at + (bytes.len() - at) / 2];
+    assert!(decode(cut, &Limits::default()).is_err(), "a cut zlib stream must not decode");
+}
+
+/// Predictor 2 on 8-bit samples wraps at 8 bits, and 12-bit samples bit-packed inside the zlib
+/// stream (not in 16-bit containers) decode too.
+#[test]
+fn deflate_8_bit_predictor_and_packed_12_bit() {
+    use std::io::Write as _;
+    let (w, h) = (16usize, 4usize);
+    let zlib = |bytes: &[u8]| {
+        let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        e.write_all(bytes).unwrap();
+        e.finish().unwrap()
+    };
+    // 8-bit, predictor 2: a row falling from 250 to 10 has deltas that wrap mod 256.
+    let data8: Vec<u16> = (0..w * h).map(|i| if i % w < w / 2 { 250 } else { 10 }).collect();
+    let mut spec = DngSpec::cfa(w, h, data8.clone());
+    spec.bits = 8;
+    spec.white = 255;
+    spec.storage = DngStorage::DeflateStrips { rows: h, predictor: 2 };
+    assert_eq!(sensor(&spec.build()).data, data8, "8-bit predictor 2");
+    // 12-bit packed: two samples in three bytes, MSB first. Swap the testgen's 16-bit
+    // containers for a packed stream of the same samples.
+    let data12: Vec<u16> = (0..w * h).map(|i| (i as u16 * 61) & 0xFFF).collect();
+    let mut spec = DngSpec::cfa(w, h, data12.clone());
+    spec.bits = 12;
+    spec.white = 4095;
+    spec.storage = DngStorage::DeflateStrips { rows: h, predictor: 1 };
+    let mut bytes = spec.build();
+    let containers: Vec<u8> = data12.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let old = zlib(&containers);
+    let packed: Vec<u8> = data12.chunks(2).flat_map(|p| [(p[0] >> 4) as u8, ((p[0] & 0xF) << 4 | p[1] >> 8) as u8, p[1] as u8]).collect();
+    let mut new = zlib(&packed);
+    let at = bytes.windows(old.len()).position(|c| c == old.as_slice()).expect("the strip");
+    assert!(new.len() <= old.len());
+    new.resize(old.len(), 0); // trailing bytes after the zlib stream are ignored
+    bytes[at..at + old.len()].copy_from_slice(&new);
+    assert_eq!(sensor(&bytes).data, data12, "12-bit packed");
+}

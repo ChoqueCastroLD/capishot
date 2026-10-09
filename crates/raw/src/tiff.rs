@@ -13,6 +13,7 @@ pub(crate) mod tag {
     pub const IMAGE_LENGTH: u16 = 257;
     pub const BITS_PER_SAMPLE: u16 = 258;
     pub const COMPRESSION: u16 = 259;
+    pub const PREDICTOR: u16 = 317;
     pub const PHOTOMETRIC: u16 = 262;
     pub const MAKE: u16 = 271;
     pub const MODEL: u16 = 272;
