@@ -2237,6 +2237,8 @@ cameraRaw	Amount	Quantità
 	Add to Swatches	Aggiungi ai campioni
 	Convert to Layers	Converti in livelli
 	Apply At Canvas Bounds	Applica effetto ai limiti dell’area di lavoro
+	Could not open	Impossibile aprire
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: il percorso non è Unicode valido; rinomina il file e riaprilo.
 
 # Fill dialog, layer style contours and Image Size
 	Contents:	Contenuto:

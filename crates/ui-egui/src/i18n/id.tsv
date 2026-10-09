@@ -2581,6 +2581,8 @@ cameraRaw	Blending	Pembauran
 	Channels:	Channel:
 	Knockout	Knockout
 	Apply At Canvas Bounds	Terapkan efek di batas kanvas
+	Could not open	Tidak dapat membuka
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: jalur bukan Unicode yang valid; ganti nama file lalu buka lagi.
 
 # Fill dialog, layer style contours and Image Size
 	Contents:	Isi:

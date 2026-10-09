@@ -2601,6 +2601,8 @@ cameraRaw	Whites	Brancos
 	Channels:	Canais:
 	Knockout	Vazado
 	Apply At Canvas Bounds	Aplicar efeito nos limites da tela
+	Could not open	Não foi possível abrir
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: o caminho não é Unicode válido; renomeie o arquivo e abra-o novamente.
 
 # Fill dialog, layer style contours and Image Size
 	Contents:	Conteúdo:

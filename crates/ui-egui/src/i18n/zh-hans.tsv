@@ -2171,6 +2171,8 @@ cameraRaw	Blending	混合
 	Channels:	通道:
 	Knockout	挖空
 	Apply At Canvas Bounds	应用画布边界的效果
+	Could not open	无法打开
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}：路径不是有效的 Unicode；请重命名文件后再打开。
 
 # Fill dialog, layer style contours and Image Size
 	Contents:	内容：

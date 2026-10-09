@@ -2163,6 +2163,8 @@ cameraRaw	Color	Barvy
 	Channels:	Kanály:
 	Knockout	Vyřazení
 	Apply At Canvas Bounds	Použít efekt na hranicích plátna
+	Could not open	Nelze otevřít
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: cesta není platný Unicode; přejmenujte soubor a otevřete jej znovu.
 
 # Fill dialog, layer style contours and Image Size
 	Contents:	Obsah:

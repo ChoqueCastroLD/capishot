@@ -2203,6 +2203,8 @@
 	Channels:	Kanäle:
 	Knockout	Aussparung
 	Apply At Canvas Bounds	Effekt an Arbeitsflächenbegrenzungen anwenden
+	Could not open	Öffnen nicht möglich
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: Der Pfad ist kein gültiges Unicode; benennen Sie die Datei um und öffnen Sie sie erneut.
 
 # Fill dialog, layer style contours and Image Size
 	Contents:	Inhalt:
