@@ -643,7 +643,7 @@ async fn headless_previews_preserve_document_indices() {
         let png = base64::engine::general_purpose::STANDARD.decode(&image.data).unwrap();
         let image = photocraft_codecs::decode(&png).unwrap();
         assert_eq!(image.dimensions(), dimensions);
-        assert!(image.to_rgba8().chunks_exact(4).all(|actual| actual == pixel));
+        assert!(image.to_rgba8().as_chunks::<4>().0.iter().all(|actual| actual[..] == pixel[..]));
     }
     assert_eq!(json_of(&call(&client, "session_list", json!({})).await)["active"], 1);
     let tools = client.list_all_tools().await.unwrap();
