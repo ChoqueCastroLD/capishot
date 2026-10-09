@@ -237,37 +237,42 @@ pub(crate) fn draw_readout(ctx: &egui::Context, id: &str, cursor: Pos2, labels: 
     });
 }
 
-/// The engine's live stroke of a tool: the Brush, Pencil and Eraser paint dabs, the Clone Stamp
-/// composites its source.
+/// The engine's live stroke of a tool: the Brush, Pencil and Eraser paint dabs; the Clone Stamp,
+/// Healing Brush and History Brush composite their source.
 enum EngineStroke {
     Brush(Box<photocraft_engine::brush_cmds::LiveStroke>),
-    Clone(Box<photocraft_engine::retouch_cmds::LiveClone>),
+    Retouch(photocraft_engine::retouch_cmds::LiveRetouch),
+    Dab(photocraft_engine::retouch_cmds::LiveDab),
 }
 
 impl EngineStroke {
     fn doc(&self) -> &std::sync::Arc<photocraft_doc::Document> {
         match self {
             Self::Brush(s) => &s.doc,
-            Self::Clone(s) => &s.doc,
+            Self::Retouch(s) => &s.doc,
+            Self::Dab(s) => &s.doc,
         }
     }
     fn bounds(&self) -> DRect {
         match self {
             Self::Brush(s) => s.bounds(),
-            Self::Clone(s) => s.bounds(),
+            Self::Retouch(s) => s.bounds(),
+            Self::Dab(s) => s.bounds(),
         }
     }
     fn push(&mut self, pts: &[photocraft_engine::paint::StrokePoint]) -> photocraft_engine::Result<DRect> {
         match self {
             Self::Brush(s) => s.push(pts),
-            Self::Clone(s) => s.push(pts),
+            Self::Retouch(s) => s.push(pts),
+            Self::Dab(s) => s.push(pts),
         }
     }
     /// The jitter seed the commit must reuse (the Clone Stamp's comes from the session brush).
     fn seed(&self) -> Option<u64> {
         match self {
             Self::Brush(s) => Some(s.seed),
-            Self::Clone(_) => None,
+            Self::Retouch(_) => None,
+            Self::Dab(_) => None,
         }
     }
 }
@@ -316,7 +321,19 @@ fn stroke_params(app: &PhotocraftApp, tool: Tool, erase: bool, points: &[Vec<f64
 
 /// Tools whose strokes the engine renders while they are drawn (`LiveStroke`).
 pub(crate) fn strokes_live(tool: Tool) -> bool {
-    matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser | Tool::CloneStamp)
+    matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser | Tool::Blur | Tool::Sharpen | Tool::Smudge | Tool::Dodge | Tool::Burn | Tool::Sponge)
+        || live_retouch_command(tool).is_some()
+}
+
+/// The retouching tools drawn live (`LiveRetouch`), by the command their live stroke previews.
+/// The Healing Brush shows its texture while drawing; the blend comes on release.
+fn live_retouch_command(tool: Tool) -> Option<&'static str> {
+    match tool {
+        Tool::CloneStamp => Some("paint.cloneStamp"),
+        Tool::Healing => Some("paint.healingBrush"),
+        Tool::HistoryBrush => Some("paint.historyBrush"),
+        _ => None,
+    }
 }
 
 /// The command a live-stroking tool commits: the Pencil's `paint.pencil`, else `paint.stroke`.
@@ -416,12 +433,17 @@ fn begin_live_stroke(app: &PhotocraftApp) -> Option<LiveStroke> {
     static STROKES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let st = app.session.active()?;
     let d = app.drag.as_ref()?;
-    let stroke = if d.tool == Tool::CloneStamp {
-        // The params `retouch_ui::finish_stroke` commits.
-        let mut p = crate::retouch_ui::clone_params(app)?;
+    let stroke = if let Some((cmd, mut p)) = crate::retouch_ui::dab_params(app, d.tool) {
+        // The params `retouch_ui::finish_stroke` commits; Sample All Layers isn't previewed.
         p["points"] = json!(d.points);
         p["target"] = paint_target(app);
-        EngineStroke::Clone(Box::new(photocraft_engine::retouch_cmds::LiveClone::begin(&app.session, &p).ok()?))
+        EngineStroke::Dab(photocraft_engine::retouch_cmds::LiveDab::begin(&app.session, cmd, &p).ok()?)
+    } else if let Some(cmd) = live_retouch_command(d.tool) {
+        // The params `retouch_ui::finish_stroke` commits.
+        let mut p = if d.tool == Tool::HistoryBrush { json!({}) } else { crate::retouch_ui::clone_params(app)? };
+        p["points"] = json!(d.points);
+        p["target"] = paint_target(app);
+        EngineStroke::Retouch(photocraft_engine::retouch_cmds::LiveRetouch::begin(&app.session, cmd, &p).ok()?)
     } else {
         let p = stroke_params(app, d.tool, d.erase, &app.stylus.stroke_points(&d.points));
         EngineStroke::Brush(Box::new(photocraft_engine::brush_cmds::LiveStroke::begin_with(&app.session, stroke_command(d.tool), &p).ok()?))
@@ -2738,8 +2760,9 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
         draw_marquee_readout(painter.ctx(), xf.to_screen(last[0] as f32, last[1] as f32), marquee_readout(marquee_px(a, b)));
     }
     match d.tool {
-        // The canvas shows the live stroke itself (`LiveStroke`).
-        t if strokes_live(t) => {}
+        // The canvas shows the live stroke itself (`LiveStroke`); a stroke that couldn't start one
+        // (Sample All Layers, say) keeps the trail.
+        t if strokes_live(t) && app.live_stroke.is_some() => {}
         t if t.is_brushlike() || t == Tool::QuickSelection => {
             // Retouching strokes preview as a translucent trail of the brush footprint: a mask,
             // not a brush-wide egui polyline (which zoomed in tessellates into wedges, #189).
@@ -3283,7 +3306,7 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
         app.last_stroke_end = Some((st.doc.id, [end[0], end[1]]));
     }
     // A live Clone Stamp preview ends here; the commit below replaces it.
-    if d.tool == Tool::CloneStamp {
+    if live_retouch_command(d.tool).is_some() || crate::retouch_ui::dab_params(app, d.tool).is_some() {
         app.live_stroke = None;
     }
     if crate::eraser_ui::finish_stroke(app, d.tool, &d.points) || crate::retouch_ui::finish_stroke(app, d.tool, &d.points, d.modifiers) {
@@ -4013,7 +4036,8 @@ mod tests {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         app.run("file.new", json!({"width": 120, "height": 60})).unwrap();
         app.run("tools.setBrush", json!({"brush": {"size": 30}})).unwrap();
-        app.ui.tool = Tool::Dodge;
+        // Spot Healing: the dab tools draw their stroke live instead of a trail.
+        app.ui.tool = Tool::SpotHealing;
         tool_event(&mut app, ToolEvent::Down { x: 20.0, y: 30.0, pressure: 1.0 }, egui::Modifiers::NONE);
         let mut pts = vec![[20.0, 30.0]];
         for i in 1..80 {

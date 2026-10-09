@@ -1099,7 +1099,8 @@ fn live_clone_matches_the_commit() {
     paint_layer(&mut s, texture);
     let p = json!({"points": [[50, 30], [60, 34], [70, 30], [80, 36]], "source": [20, 20], "size": 14, "hardness": 40, "opacity": 70});
     let pts = |v: &[[f64; 2]]| v.iter().map(|q| StrokePoint::new(q[0], q[1], 1.0)).collect::<Vec<_>>();
-    let mut live = LiveClone::begin(&s, &json!({"points": [[50, 30]], "source": [20, 20], "size": 14, "hardness": 40, "opacity": 70})).unwrap();
+    let mut live =
+        LiveRetouch::begin(&s, "paint.cloneStamp", &json!({"points": [[50, 30]], "source": [20, 20], "size": 14, "hardness": 40, "opacity": 70})).unwrap();
     live.push(&pts(&[[60.0, 34.0], [70.0, 30.0]])).unwrap();
     live.push(&pts(&[[80.0, 36.0]])).unwrap();
     let shown = live.doc.clone();
