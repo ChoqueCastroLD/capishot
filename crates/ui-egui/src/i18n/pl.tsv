@@ -3212,3 +3212,8 @@ cameraRaw	Roughness	Chropowatość
 	Set Neutral Gray Point	Ustaw punkt neutralnej szarości
 	Set White Point	Ustaw punkt bieli
 	Unavailable in this color mode	Niedostępne w tym trybie koloru
+
+# Layer colour labels.
+	Seafoam	Morski
+	Indigo	Indygo
+	Fuchsia	Fuksja

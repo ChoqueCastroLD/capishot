@@ -46,6 +46,7 @@ pub mod image_cmds;
 pub mod inspect;
 pub mod jobs;
 pub mod layer_copy_cmds;
+pub mod layer_label_cmds;
 pub mod layer_menu_cmds;
 pub mod layer_multi_cmds;
 pub mod layer_nav_cmds;

@@ -667,6 +667,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn layer_color_names_are_translated() {
+        for lang in Lang::all().filter(|l| l.complete_menus()) {
+            for color in photocraft_doc::LabelColor::ALL {
+                let cat = lang.0.catalog();
+                assert!(
+                    cat.contextual("layerLabel", color.label()).or_else(|| cat.plain(color.label())).is_some(),
+                    "{} missing {}",
+                    lang.code(),
+                    color.label()
+                );
+            }
+        }
+        let de = lang_from_tag("de").unwrap();
+        assert_eq!(tr_ctx(de, "layerLabel", "No Color"), "Keine Farbe");
+        assert_eq!(tr_ctx(de, "layerLabel", "Seafoam"), "Meeresschaum");
+        assert_eq!(tr(Lang::EN, "Seafoam"), "Seafoam");
+    }
+
     /// Blend mode names come from the colour crate; each must be translated.
     #[test]
     fn blend_mode_names_are_translated() {

@@ -74,6 +74,7 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId]) -> Value {
         "name": l.name,
         "kind": l.content.kind_name(),
         "visible": l.visible,
+        "labelColor": l.label.id(),
         "opacity": l.opacity,
         "fill": l.fill_opacity,
         "blend": l.blend.label(),

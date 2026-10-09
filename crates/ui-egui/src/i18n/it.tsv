@@ -2250,3 +2250,9 @@ cameraRaw	Amount	Quantità
 	Set Neutral Gray Point	Imposta il punto grigio neutro
 	Set White Point	Imposta punto bianco
 	Unavailable in this color mode	Non disponibile in questa modalità colore
+
+# Layer colour labels.
+	Seafoam	Schiuma marina
+	Indigo	Indaco
+	Fuchsia	Fucsia
+	Violet	Viola

@@ -2607,3 +2607,9 @@ cameraRaw	Blending	Fusion
 	Set Neutral Gray Point	Définir le point gris neutre
 	Set White Point	Définir le point blanc
 	Unavailable in this color mode	Indisponible dans ce mode colorimétrique
+
+# Layer colour labels.
+	Seafoam	Écume de mer
+	Indigo	Indigo
+	Fuchsia	Fuchsia
+	Violet	Violet

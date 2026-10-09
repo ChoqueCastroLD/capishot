@@ -1836,14 +1836,20 @@ fn layer_row(
         } else if resp.hovered() {
             painter.rect_filled(rect, 0.0, t.hover.gamma_multiply(0.5));
         }
-        // eye column divider + row divider, as in Photoshop
-        painter.line_segment([pos2(rect.left() + 30.0, rect.top()), pos2(rect.left() + 30.0, rect.bottom())], Stroke::new(1.0, t.separator));
-        painter.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.separator));
     } else if selected {
         painter.rect_filled(rect, t.radius, t.hover);
         painter.rect_stroke(rect, t.radius, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
     } else if resp.hovered() {
         painter.rect_filled(rect, t.radius, t.hover.gamma_multiply(0.5));
+    }
+    let eye_cell = Rect::from_min_max(rect.left_top(), pos2((rect.left() + 30.0).min(rect.right()), rect.bottom()));
+    if let Some((_, background)) = t.layer_label_colors(l.label) {
+        painter.rect_filled(eye_cell, 0.0, background);
+    }
+    if t.pro {
+        // Paint dividers over the label so the eye column stays distinct.
+        painter.line_segment([pos2(rect.left() + 30.0, rect.top()), pos2(rect.left() + 30.0, rect.bottom())], Stroke::new(1.0, t.separator));
+        painter.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.separator));
     }
     let mut x = rect.left() + 6.0;
     let eye = Rect::from_min_size(pos2(x, rect.center().y - 11.0), vec2(22.0, 22.0));
@@ -1852,7 +1858,8 @@ fn layer_row(
     let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), Sense::click_and_drag());
     // A hidden layer's eye box is left empty (still clickable).
     if l.visible {
-        icons::paint(ui, eye, "eye", 15.0, t.icon);
+        // Centre the drawing in the column while preserving the visibility hit area.
+        icons::paint(ui, eye_cell, "eye", 15.0, t.layer_label_icon(l.label));
     }
     eye_sweep(ctx, l, rect, &eye_resp, actions);
     if eye_resp.clicked() {

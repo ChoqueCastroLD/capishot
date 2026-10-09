@@ -2186,3 +2186,9 @@ cameraRaw	Blending	混合
 	Set Neutral Gray Point	设置中性灰场
 	Set White Point	设置白场
 	Unavailable in this color mode	此颜色模式下不可用
+
+# Layer colour labels.
+	Seafoam	海沫色
+	Indigo	靛蓝色
+	Fuchsia	紫红色
+	Violet	紫罗兰色

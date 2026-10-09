@@ -2217,3 +2217,10 @@
 	Set Neutral Gray Point	Neutralen Graupunkt festlegen
 	Set White Point	Weißpunkt festlegen
 	Unavailable in this color mode	In diesem Farbmodus nicht verfügbar
+
+# Layer colour labels.
+layerLabel	No Color	Keine Farbe
+	Seafoam	Meeresschaum
+	Indigo	Indigo
+	Fuchsia	Fuchsia
+	Violet	Violett

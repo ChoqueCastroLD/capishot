@@ -2615,3 +2615,9 @@ cameraRaw	Whites	Brancos
 	Set Neutral Gray Point	Definir ponto cinza neutro
 	Set White Point	Definir ponto branco
 	Unavailable in this color mode	Indisponível neste modo de cor
+
+# Layer colour labels.
+	Seafoam	Espuma do mar
+	Indigo	Índigo
+	Fuchsia	Fúcsia
+	Violet	Violeta

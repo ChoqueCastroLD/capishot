@@ -311,6 +311,31 @@ impl Tokens {
         self.histogram_color(mask).gamma_multiply(0.3)
     }
 
+    /// Semantic label hues stay recognisable across themes; None keeps the normal row surface.
+    pub fn layer_label_colors(&self, label: photocraft_doc::LabelColor) -> Option<(Color32, Color32)> {
+        use photocraft_doc::LabelColor;
+        let (swatch, eye) = match label {
+            LabelColor::None => return None,
+            LabelColor::Red => ([0xFC, 0x5D, 0x5B], [0x9F, 0x2F, 0x30]),
+            LabelColor::Orange => ([0xF7, 0x97, 0x44], [0x93, 0x4F, 0x0C]),
+            LabelColor::Yellow => ([0xDC, 0xD6, 0x4B], [0x99, 0x78, 0x0C]),
+            LabelColor::Green => ([0x85, 0xDC, 0x6A], [0x4E, 0x71, 0x2E]),
+            LabelColor::Seafoam => ([0x1C, 0x84, 0x88], [0x0B, 0x54, 0x4F]),
+            LabelColor::Blue => ([0x78, 0xAD, 0xF6], [0x41, 0x5B, 0x87]),
+            LabelColor::Indigo => ([0x54, 0x4B, 0xE7], [0x36, 0x34, 0x8E]),
+            LabelColor::Magenta => ([0xCC, 0x1A, 0x7E], [0x98, 0x1B, 0x51]),
+            LabelColor::Fuchsia => ([0xB0, 0x14, 0xC0], [0x71, 0x0F, 0x74]),
+            LabelColor::Violet => ([0x91, 0x76, 0xD5], [0x5D, 0x3F, 0x8E]),
+            LabelColor::Gray => ([0x9C, 0x9C, 0x9C], [0x57, 0x57, 0x57]),
+        };
+        let rgb = |[r, g, b]: [u8; 3]| Color32::from_rgb(r, g, b);
+        Some((rgb(swatch), rgb(eye)))
+    }
+
+    pub fn layer_label_icon(&self, label: photocraft_doc::LabelColor) -> Color32 {
+        if label == photocraft_doc::LabelColor::None { self.icon } else { Color32::from_gray(226) }
+    }
+
     /// Analysis colours are semantic hues, independent of the application accent palette.
     pub fn scope_hue(&self, h: f32, s: f32) -> Color32 {
         let v = f32::from(self.histogram_level) / 255.0;

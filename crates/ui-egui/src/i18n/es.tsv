@@ -2248,3 +2248,9 @@ cameraRaw	Amount	Cantidad
 	Set Neutral Gray Point	Definir punto gris neutro
 	Set White Point	Definir punto blanco
 	Unavailable in this color mode	No disponible en este modo de color
+
+# Layer colour labels.
+	Seafoam	Espuma de mar
+	Indigo	Índigo
+	Fuchsia	Fucsia
+	Violet	Violeta
