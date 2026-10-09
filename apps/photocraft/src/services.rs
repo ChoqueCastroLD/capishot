@@ -5,9 +5,11 @@ use photocraft_color::{ColorMode, SampleType};
 use photocraft_doc::{Document, Layer, Size};
 use photocraft_format::RecoveryStore;
 use photocraft_geom::Rect;
-use photocraft_ui_egui::{Recovered, Services};
+use photocraft_ui_egui::{FileDialogAnswer, FileDialogReply, FileDialogRequest, Recovered, Services};
 use std::cell::RefCell;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -52,6 +54,66 @@ fn save_filters(suggested: &str) -> Vec<(String, Vec<String>)> {
         None => {}
     }
     v
+}
+
+/// Shows an Open or Save dialog without blocking the event loop (#673, #574): rfd's async dialog
+/// is created here, on the main thread, with the window as its parent (a sheet on macOS, an owned
+/// modal window elsewhere), and a helper thread waits for it and hands the answer to the app.
+fn show_file_dialog(request: FileDialogRequest, parent: Option<&eframe::Frame>, reply: FileDialogReply) {
+    let mut dialog = rfd::AsyncFileDialog::new();
+    if let Some(parent) = parent {
+        dialog = dialog.set_parent(parent);
+    }
+    let answer: Pin<Box<dyn Future<Output = Option<FileDialogAnswer>> + Send>> = match request {
+        FileDialogRequest::Open { multiple } => {
+            let dialog = dialog.add_filter("All Formats", OPEN_EXTS).add_filter("PhotoCraft", &["pcraft"]);
+            if multiple {
+                let picked = dialog.pick_files();
+                Box::pin(async move { picked.await.map(|files| FileDialogAnswer::Paths(files.iter().map(path_of).collect())) })
+            } else {
+                let picked = dialog.pick_file();
+                Box::pin(async move { picked.await.map(|file| FileDialogAnswer::Paths(vec![path_of(&file)])) })
+            }
+        }
+        FileDialogRequest::Save { suggested } => {
+            for (name, exts) in save_filters(&suggested) {
+                dialog = dialog.add_filter(name, &exts);
+            }
+            if let Some(name) = Path::new(&suggested).file_name() {
+                dialog = dialog.set_file_name(name.to_string_lossy());
+            }
+            let picked = dialog.save_file();
+            Box::pin(async move { picked.await.map(|file| FileDialogAnswer::SaveTo(path_of(&file))) })
+        }
+    };
+    // Without the thread the reply is dropped unanswered, which the app takes as Cancel.
+    if let Err(e) = std::thread::Builder::new().name("file dialog".into()).spawn(move || reply.send(block_on(answer))) {
+        log::error!("couldn't wait for the file dialog: {e}");
+    }
+}
+
+fn path_of(file: &rfd::FileHandle) -> String {
+    file.path().to_string_lossy().into_owned()
+}
+
+/// Runs `future` to completion on this thread, sleeping until it is woken.
+fn block_on<T>(future: impl Future<Output = T>) -> T {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::task::Waker::from(Arc::new(Unpark(std::thread::current())));
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        if let std::task::Poll::Ready(value) = future.as_mut().poll(&mut cx) {
+            return value;
+        }
+        // Spurious wake-ups just poll again.
+        std::thread::park();
+    }
 }
 
 /// Per-user settings directory: `PHOTOCRAFT_CONFIG_DIR`, else `<exe dir>/PhotoCraftData` in
@@ -174,30 +236,7 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             opts.xmp = if settings.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
             crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string()))
         })),
-        pick_open: Some(Box::new(|| {
-            let path = rfd::FileDialog::new().add_filter("All Formats", OPEN_EXTS).add_filter("PhotoCraft", &["pcraft"]).pick_file()?;
-            // A read failure goes back to the app, which reports it like any other open failure.
-            let bytes = photocraft_format::read_file(&path).map_err(|e| e.to_string());
-            Some((path.to_string_lossy().to_string(), bytes))
-        })),
-        pick_open_paths: Some(Box::new(|| {
-            rfd::FileDialog::new()
-                .add_filter("All Formats", OPEN_EXTS)
-                .add_filter("PhotoCraft", &["pcraft"])
-                .pick_files()
-                .map(|paths| paths.into_iter().map(|path| path.to_string_lossy().into_owned()).collect())
-        })),
-        pick_save: Some(Box::new(|suggested: &str| {
-            let p = std::path::Path::new(suggested);
-            let mut d = rfd::FileDialog::new();
-            for (name, exts) in save_filters(suggested) {
-                d = d.add_filter(name, &exts);
-            }
-            if let Some(name) = p.file_name() {
-                d = d.set_file_name(name.to_string_lossy());
-            }
-            Some(d.save_file()?.to_string_lossy().to_string())
-        })),
+        file_dialog: Some(Box::new(show_file_dialog)),
         write: Some(Box::new(|path: &str, bytes: &[u8]| write_atomic(Path::new(path), bytes))),
         automation_read,
         automation_write,
@@ -329,22 +368,31 @@ mod tests {
     fn every_save_dialog_leads_with_its_own_extension() {
         let asked: Rc<RefCell<Vec<String>>> = Rc::default();
         let log = asked.clone();
+        // Record each save dialog's suggested name and cancel it, as the user would.
         let services = Services {
-            pick_save: Some(Box::new(move |s: &str| {
-                log.borrow_mut().push(s.to_string());
-                None
+            file_dialog: Some(Box::new(move |request, _parent, reply| {
+                if let FileDialogRequest::Save { suggested } = request {
+                    log.borrow_mut().push(suggested);
+                }
+                reply.send(None);
             })),
             ..Default::default()
         };
         let mut app = PhotocraftApp::new(Session::new(), services);
         let ctx = egui::Context::default();
-        let invoke = |app: &mut PhotocraftApp, id: &str| photocraft_ui_egui::menus::invoke(app, &ctx, id, json!({}));
+        // Dialogs are shown on the next frame: poll once so each is answered before the next asks.
+        let invoke = |app: &mut PhotocraftApp, id: &str| {
+            let r = photocraft_ui_egui::menus::invoke(app, &ctx, id, json!({}));
+            app.poll_file_dialog(&ctx, None);
+            r
+        };
         let dialog = |app: &mut PhotocraftApp, id: &str, fields: Value| {
             let d = invoke(app, id).unwrap()["dialog"].as_u64().unwrap();
             for (k, v) in fields.as_object().unwrap() {
                 app.ui.dialog_mut(d).unwrap().fields.insert(k.clone(), v.clone());
             }
             let _ = photocraft_ui_egui::dialogs::confirm(app, d);
+            app.poll_file_dialog(&ctx, None);
         };
         new_doc(&mut app, "#ff0000");
         // Save As, Save a Copy.
@@ -390,6 +438,23 @@ mod tests {
             assert!(save_filters(name)[0].1.iter().any(|e| e == ext), "{name}: {:?}", save_filters(name)[0]);
         }
         assert_eq!(save_filters("Untitled")[0].0, "Photoshop", "no extension keeps the default");
+    }
+
+    #[test]
+    fn block_on_waits_for_a_wake_from_another_thread() {
+        let (tx, rx) = std::sync::mpsc::channel::<std::task::Waker>();
+        let mut woken = false;
+        let ready = std::future::poll_fn(move |cx| {
+            if woken {
+                return std::task::Poll::Ready(7);
+            }
+            woken = true;
+            let _ = tx.send(cx.waker().clone());
+            std::task::Poll::Pending
+        });
+        let waker = std::thread::spawn(move || rx.recv().unwrap().wake());
+        assert_eq!(block_on(ready), 7);
+        waker.join().unwrap();
     }
 
     const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];

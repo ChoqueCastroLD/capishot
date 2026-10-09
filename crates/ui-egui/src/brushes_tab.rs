@@ -477,7 +477,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 run_or_status(app, "brush.presets.save", json!({ "name": name }));
             }
             if icons::button(ui, "folder-open", 24.0, false, "Import Brushes… (.abr)").clicked() {
-                app.open_dialog_file();
+                let _ = app.open_dialog_file();
             }
         });
     });

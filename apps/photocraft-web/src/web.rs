@@ -7,7 +7,7 @@ use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::Document;
 use photocraft_engine::Session;
 use photocraft_ui_egui::theme::ThemeKind;
-use photocraft_ui_egui::{PhotocraftApp, Services};
+use photocraft_ui_egui::{FileDialogAnswer, FileDialogRequest, PhotocraftApp, Services};
 use wasm_bindgen::JsCast as _;
 
 type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
@@ -48,7 +48,7 @@ pub fn start() {
                 Box::new(move |cc| {
                     PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);
                     let inbox: Inbox = Arc::default();
-                    let mut app = PhotocraftApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone()));
+                    let mut app = PhotocraftApp::new(Session::new(), services(inbox.clone()));
                     listen_pen(&pen_target, app.stylus.feed.clone());
                     app.set_theme(&cc.egui_ctx, ThemeKind::Pro);
                     if let Some(rs) = cc.wgpu_render_state.clone()
@@ -159,8 +159,7 @@ impl eframe::App for WebShell {
     }
 }
 
-fn services(inbox: Inbox, ctx: egui::Context) -> Services {
-    let open_inbox = inbox.clone();
+fn services(inbox: Inbox) -> Services {
     Services {
         import: Some(Box::new(|name: &str, bytes: &[u8]| photocraft_io::import(name, bytes).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string()))),
         export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
@@ -176,23 +175,21 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
             opts.xmp = if settings.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
             photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
-        pick_open: Some(Box::new(move || {
-            let inbox = open_inbox.clone();
-            let ctx = ctx.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                let Some(file) = rfd::AsyncFileDialog::new().add_filter("All Formats", OPEN_EXTS).pick_file().await else {
-                    return;
+        file_dialog: Some(Box::new(|request, _parent, reply| match request {
+            // The browser's file picker hands over the file's contents, not a path.
+            FileDialogRequest::Open { .. } => wasm_bindgen_futures::spawn_local(async move {
+                let picked = rfd::AsyncFileDialog::new().add_filter("All Formats", OPEN_EXTS).pick_file().await;
+                let answer = match picked {
+                    Some(file) => Some(FileDialogAnswer::Contents(file.file_name(), file.read().await)),
+                    None => None,
                 };
-                let bytes = file.read().await;
-                inbox.lock().unwrap_or_else(|e| e.into_inner()).push((file.file_name(), bytes));
-                ctx.request_repaint();
-            });
-            None
-        })),
-        // No save dialog on the web: the suggested name becomes the download name.
-        pick_save: Some(Box::new(|suggested: &str| {
-            let name = std::path::Path::new(suggested).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| suggested.to_string());
-            Some(name)
+                reply.send(answer);
+            }),
+            // No save dialog on the web: the suggested name becomes the download name.
+            FileDialogRequest::Save { suggested } => {
+                let name = std::path::Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());
+                reply.send(Some(FileDialogAnswer::SaveTo(name)));
+            }
         })),
         write: Some(Box::new(|path: &str, bytes: &[u8]| download(path, bytes))),
         encode_png: Some(Box::new(|w, h, rgba| {

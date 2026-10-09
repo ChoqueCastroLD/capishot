@@ -1663,7 +1663,7 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     app.ui.open_dialog(crate::state::DialogKind::NewDocument, fields);
                 }
                 if crate::widgets::secondary_button(ui, &open_label, 190.0).clicked() {
-                    app.open_dialog_file();
+                    let _ = app.open_dialog_file();
                 }
             });
             ui.add_space(22.0);

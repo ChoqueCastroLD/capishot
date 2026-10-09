@@ -223,8 +223,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             if let Some(path) = params.get("path").and_then(Value::as_str) {
                 open_path(app, path)
             } else {
-                app.open_dialog_file();
-                Ok(Value::Null)
+                app.open_dialog_file()
             }
         }
         "file.save" => {
@@ -234,7 +233,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .or_else(|| app.session.active().and_then(|d| d.path.clone()).filter(|p| photocraft_engine::file_cmds::saves_in_place(p)));
-            app.save_as(path).map(|(p, w)| json!({"path": p, "warnings": w}))
+            app.save_as(path)
         }
         "file.exit" => {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -258,7 +257,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 Err("Open Recent is unavailable on the web".to_string())
             }
         }
-        "file.saveAs" => app.save_as(params.get("path").and_then(Value::as_str).map(str::to_string)).map(|(p, w)| json!({"path": p, "warnings": w})),
+        "file.saveAs" => app.save_as(params.get("path").and_then(Value::as_str).map(str::to_string)),
         "view.zoomIn" | "view.zoomOut" | "view.fitOnScreen" | "view.actualPixels" => {
             let i = app.session.active_index().ok_or("no document")?;
             let v = &mut app.ui.views[i];

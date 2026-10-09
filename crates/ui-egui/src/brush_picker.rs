@@ -85,7 +85,9 @@ pub fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, picks: Vec<Pick>) {
                     app.ui.brush_picker_list.renaming = Some(Renaming { group: false, name, text: String::new() });
                 }
             }
-            Pick::Import => app.open_dialog_file(),
+            Pick::Import => {
+                let _ = app.open_dialog_file();
+            }
         }
     }
 }

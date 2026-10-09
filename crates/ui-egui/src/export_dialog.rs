@@ -248,16 +248,18 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
     let stem = doc.name.rsplit_once('.').map_or(doc.name.as_str(), |(a, _)| a).to_string();
     let ext = s_fmt(f);
     let suggested = format!("{stem}.{ext}");
-    let path = app.services.pick_save.as_mut().and_then(|p| p(&suggested)).ok_or("cancelled")?;
-    let out = export_document(&doc, f, None)?;
-    let export = app.services.export.as_ref().ok_or("no exporter configured")?;
-    let (bytes, warnings) = export(&out, &path, &settings(f))?;
-    let write = app.services.write.as_mut().ok_or("no writer configured")?;
-    write(&path, &bytes)?;
-    app.ui.status = format!("Exported {path} ({})", crate::sizing::human_bytes(bytes.len() as f64));
-    app.ui.status_error = false;
-    crate::notices::io_warnings(app, &format!("Exported {}", crate::file_open::display_name(&path)), &warnings);
-    Ok(json!({"path": path, "bytes": bytes.len(), "warnings": warnings}))
+    let (f, settings) = (f.clone(), settings(f));
+    app.pick_save(&suggested, move |app, path| {
+        let out = export_document(&doc, &f, None)?;
+        let export = app.services.export.as_ref().ok_or("no exporter configured")?;
+        let (bytes, warnings) = export(&out, &path, &settings)?;
+        let write = app.services.write.as_mut().ok_or("no writer configured")?;
+        write(&path, &bytes)?;
+        app.ui.status = format!("Exported {path} ({})", crate::sizing::human_bytes(bytes.len() as f64));
+        app.ui.status_error = false;
+        crate::notices::io_warnings(app, &format!("Exported {}", crate::file_open::display_name(&path)), &warnings);
+        Ok(json!({"path": path, "bytes": bytes.len(), "warnings": warnings}))
+    })
 }
 
 /// File › Export › Quick Export as PNG: the format, quality, metadata, colour space and location
@@ -269,23 +271,29 @@ pub fn quick_export_png(app: &mut PhotocraftApp) -> Result<Value, String> {
         let fmt = serde_json::to_value(prefs.quick_export_format).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| "png".into());
         let same = serde_json::to_value(prefs.quick_export_location).ok().is_some_and(|v| v == "sameFolder");
         let saved = app.session.active().is_some_and(|d| d.path.is_some());
-        let p = if same && saved {
-            json!({})
-        } else {
-            let st = app.session.active().ok_or("no document")?;
-            let stem = st.doc.name.rsplit_once('.').map_or(st.doc.name.as_str(), |(a, _)| a).to_string();
-            let path = app.services.pick_save.as_mut().and_then(|p| p(&format!("{stem}.{fmt}"))).ok_or("cancelled")?;
-            json!({"path": path})
-        };
-        let r = app.run("file.export.quickExport", p)?;
-        app.ui.status = format!("Exported {}", r["path"].as_str().unwrap_or_default());
-        return Ok(r);
+        if same && saved {
+            return quick_export(app, json!({}));
+        }
+        let st = app.session.active().ok_or("no document")?;
+        let stem = st.doc.name.rsplit_once('.').map_or(st.doc.name.as_str(), |(a, _)| a);
+        let (suggested, doc) = (format!("{stem}.{fmt}"), st.doc.id);
+        return app.pick_save(&suggested, move |app, path| {
+            app.refocus(doc)?;
+            quick_export(app, json!({"path": path}))
+        });
     }
     let mut f = Map::new();
     f.insert("format".into(), json!("png"));
     f.insert("transparency".into(), json!(true));
     f.insert("scale".into(), json!(100));
     confirm(app, &f)
+}
+
+/// Runs Quick Export with `p` (an explicit `path`, or none for the document's folder).
+fn quick_export(app: &mut PhotocraftApp, p: Value) -> Result<Value, String> {
+    let r = app.run("file.export.quickExport", p)?;
+    app.ui.status = format!("Exported {}", r["path"].as_str().unwrap_or_default());
+    Ok(r)
 }
 
 #[cfg(test)]

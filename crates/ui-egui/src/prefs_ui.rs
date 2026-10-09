@@ -1313,7 +1313,7 @@ fn presets_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, 
         }
         // Load Photoshop brushes (.abr) into the library.
         if kind == "brushes" && ui.button(tl!("Load…")).on_hover_text(tl!("Import Photoshop brushes (.abr)")).clicked() {
-            app.open_dialog_file();
+            let _ = app.open_dialog_file();
         }
     });
     f.insert("kind".into(), json!(kind));
@@ -1410,17 +1410,19 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
         "presetsIO" => {
             let kinds: Vec<&str> = ["brushes", "customShapes"].into_iter().filter(|k| f.get(*k).and_then(Value::as_bool).unwrap_or(true)).collect();
             if f.get("action").and_then(Value::as_str) == Some("import") {
-                let (name, bytes) = app.pick_file_bytes().ok_or_else(|| "cancelled".to_string())??;
-                let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not a preset file"))?;
-                app.run("edit.presets.exportImportPresets", json!({"action": "import", "kinds": kinds, "data": text}))
+                app.pick_file_bytes(move |app, name, bytes| {
+                    let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not a preset file"))?;
+                    app.run("edit.presets.exportImportPresets", json!({"action": "import", "kinds": kinds, "data": text}))
+                })
             } else {
                 let out = app.run("edit.presets.exportImportPresets", json!({"action": "export", "kinds": kinds}))?;
                 let text = serde_json::to_string_pretty(&out["data"]).map_err(|e| e.to_string())?;
-                let path = app.services.pick_save.as_mut().and_then(|p| p("Presets.pcpresets")).ok_or("cancelled")?;
-                let write = app.services.write.as_mut().ok_or("no writer configured")?;
-                write(&path, text.as_bytes())?;
-                app.ui.status = format!("Exported presets to {path}");
-                Ok(json!({"path": path}))
+                app.pick_save("Presets.pcpresets", move |app, path| {
+                    let write = app.services.write.as_mut().ok_or("no writer configured")?;
+                    write(&path, text.as_bytes())?;
+                    app.ui.status = format!("Exported presets to {path}");
+                    Ok(json!({"path": path}))
+                })
             }
         }
         "mismatch" => {
