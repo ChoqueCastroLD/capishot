@@ -488,10 +488,15 @@ fn eyedropper_and_alt_sampling_show_a_pipette() {
     h.event(egui::Event::ModifiersChanged(Modifiers::ALT));
     assert_eq!(cursor(&mut h), egui::CursorIcon::None, "⌥ samples with a pipette");
     h.state_mut().run("prefs.set", json!({"values": {"cursors.other": "precise"}})).unwrap();
-    // Windows draws the crosshair on the canvas and hides the OS cursor (`visible_crosshair`).
-    let crosshair = if cfg!(target_os = "windows") { egui::CursorIcon::None } else { egui::CursorIcon::Crosshair };
-    assert_eq!(cursor(&mut h), crosshair, "Precise keeps the crosshair");
+    // Every platform reports the crosshair. Windows also hands the OS a black-and-white bitmap
+    // for it (`tool_cursor`, #1160), with `Crosshair` underneath as the fallback.
+    let precise = |h: &mut Harness<'static, PhotocraftApp>| {
+        let icon = cursor(h);
+        (icon, h.output().platform_output.cursor_image.is_some())
+    };
+    let windows = cfg!(target_os = "windows");
+    assert_eq!(precise(&mut h), (egui::CursorIcon::Crosshair, windows), "Precise keeps the crosshair");
     h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
     h.state_mut().ui.tool = crate::state::Tool::Eyedropper;
-    assert_eq!(cursor(&mut h), crosshair);
+    assert_eq!(precise(&mut h), (egui::CursorIcon::Crosshair, windows));
 }
