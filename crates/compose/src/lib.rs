@@ -97,7 +97,7 @@ pub fn render_tiled(doc: &Document, rect: Rect, tile: i32) -> Buffer {
 fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer {
     let tile = tile.max(1);
     // Lab documents mix Normal blending in CIELAB, as Photoshop does (psblend::LAB_MIX); 32-bit
-    // documents don't clip Add / Divide at 1 (psblend::HDR).
+    // documents don't clip Add / Divide or Hue / Saturation / Color / Luminosity at 1 (psblend::HDR).
     let lab = doc.mode == photocraft_color::ColorMode::Lab;
     let hdr = doc.depth == photocraft_color::SampleType::F32;
     // CMYK layers are read through the document's own CMYK profile (thread-local scope).

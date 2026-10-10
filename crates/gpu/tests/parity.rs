@@ -1448,6 +1448,72 @@ fn blend_mode_extremes() {
     }
 }
 
+/// Colours for the non-separable modes: in gamut, greys and near-greys above 1 (lum ≈ max, where
+/// ClipColor divided by rounding noise), saturated colours above 1, negatives and mixes. All are
+/// exact in half floats (the GPU's layer textures of 16/32-bit documents), so both compositors
+/// see the same inputs.
+const NONSEP_COLORS: [[f32; 3]; 12] = [
+    [0.25, 0.5, 0.75],
+    [1.0, 1.0, 1.0],
+    [0.0, 0.0, 0.0],
+    [1.5, 1.5, 1.5],
+    [2.0, 2.0, 2.0],
+    [4.0, 4.0, 4.0],
+    [2.0, 2.0, 1.996_093_8],
+    [4.0, 3.992_187_5, 4.0],
+    [3.0, 0.25, 0.125],
+    [0.125, 2.5, 0.375],
+    [1.25, 0.875, 3.75],
+    [-0.25, 0.5, 1.375],
+];
+
+/// Every pair of `colors` (backdrop column, source row) as one opaque pixel, in `mode`.
+fn nonsep_doc(mode: BlendMode, depth: SampleType, colors: &[[f32; 3]]) -> Document {
+    let n = colors.len() as u32;
+    let mut d = Document::new("x", Size::new(n, n), ColorMode::Rgb, depth);
+    let fmt = d.pixel_format();
+    let mut bg = Layer::raster("bg", fmt);
+    let mut top = Layer::raster("top", fmt);
+    for (i, b) in colors.iter().enumerate() {
+        for (j, s) in colors.iter().enumerate() {
+            let r = Rect::from_xywh(i as i32, j as i32, 1, 1);
+            bg.surface_mut().unwrap().fill_rect(r, &photocraft_raster::from_rgba(&fmt, [b[0], b[1], b[2], 1.0]));
+            top.surface_mut().unwrap().fill_rect(r, &photocraft_raster::from_rgba(&fmt, [s[0], s[1], s[2], 1.0]));
+        }
+    }
+    top.blend = mode;
+    d.layers.push(bg);
+    d.layers.push(top);
+    d
+}
+
+const NONSEP_MODES: [BlendMode; 6] =
+    [BlendMode::Hue, BlendMode::Saturation, BlendMode::Color, BlendMode::Luminosity, BlendMode::DarkerColor, BlendMode::LighterColor];
+
+#[test]
+fn non_separable_modes_on_hdr_values() {
+    // 32-bit documents hold values above 1 (and below 0): Hue / Saturation / Color / Luminosity
+    // used to divide by the rounding noise of `max − lum` in ClipColor there, which the CPU and
+    // GPU round differently (Hue over a grey of 2: CPU 1.0, GPU 2.82).
+    let Some(mut g) = gpu() else { return };
+    let mut failures = Vec::new();
+    for mode in NONSEP_MODES {
+        if let Err(e) = diff_rect(&mut g, &nonsep_doc(mode, SampleType::F32, &NONSEP_COLORS), Rect::new(0, 0, 12, 12), &format!("hdr {mode:?}")) {
+            failures.push(e);
+        }
+    }
+    // Integer documents store 0..1 only.
+    let in_gamut: Vec<[f32; 3]> = NONSEP_COLORS.iter().map(|c| c.map(|v| v.clamp(0.0, 1.0))).collect();
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        for mode in NONSEP_MODES {
+            if let Err(e) = diff_rect(&mut g, &nonsep_doc(mode, depth, &in_gamut), Rect::new(0, 0, 12, 12), &format!("in gamut {mode:?} {depth:?}")) {
+                failures.push(e);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn float_documents_blend_past_white() {
     // 32-bit documents hold values above 1; Linear Dodge (Add) and Divide don't clip them there
