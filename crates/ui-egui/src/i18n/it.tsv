@@ -33,6 +33,11 @@
 	Open…	Apri…
 	Open as Deep…	Apri come deep…
 	Open As…	Apri come…
+	Open EXR Parts…	Apri parti EXR…
+	Add beauty precomp from the AOVs	Aggiungi la precomposizione della bellezza dagli AOV
+	Both	Entrambe
+	Left	Sinistra
+	Right	Destra
 	Open Recent	Apri recenti
 	Clear Recent Files	Cancella file recenti
 	Close	Chiudi
@@ -826,7 +831,6 @@
 	Blending Options	Opzioni di fusione
 	Blue	Blu
 	Blue, Red, Yellow	Blu, rosso, giallo
-	Both	Entrambi
 	Both Axes	Entrambi gli assi
 	Bottom	In basso
 	Brightness	Luminosità
@@ -1147,7 +1151,6 @@
 	Leading	Interlinea
 	Leading (set to the font size × auto-leading when Auto)	Interlinea (impostata a dimensione font × interlinea auto quando Auto)
 	Leave as is (don't color manage)	Lascia com'è (non gestire colore)
-	Left	Sinistra
 	Left align text	Allinea testo a sinistra
 	Length:	Lunghezza:
 	Level	Livello
@@ -1357,7 +1360,6 @@
 	Restore All	Ripristina tutto
 	Restore Defaults	Ripristina predefiniti
 	Restrictive (Web)	Restrittivo (web)
-	Right	Destra
 	Right align text	Allinea testo a destra
 	Rigid	Rigido
 	Rotate:	Rotazione:

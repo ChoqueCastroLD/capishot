@@ -41,6 +41,11 @@
 	Open…	Otevřít…
 	Open as Deep…	Otevřít jako deep…
 	Open As…	Otevřít jako…
+	Open EXR Parts…	Otevřít části EXR…
+	Add beauty precomp from the AOVs	Přidat předběžnou kompozici krásy z AOV
+	Both	Obě
+	Left	Vlevo
+	Right	Vpravo
 	Open Recent	Otevřít nedávné
 	Clear Recent Files	Vymazat nedávné soubory
 	Close	Zavřít
@@ -843,7 +848,6 @@
 	Blending Options	Možnosti prolnutí
 	Blue	Modrá
 	Blue, Red, Yellow	Modrá, červená, žlutá
-	Both	Obojí
 	Both Axes	Obě osy
 	Bottom	Dole
 	Brightness	Jas
@@ -1163,7 +1167,6 @@
 	Leading	Proklad
 	Leading (set to the font size × auto-leading when Auto)	Proklad (při volbě Automaticky velikost písma × automatický proklad)
 	Leave as is (don't color manage)	Ponechat beze změny (bez správy barev)
-	Left	Vlevo
 	Left align text	Zarovnat text vlevo
 	Length:	Délka:
 	Level	Úroveň
@@ -1373,7 +1376,6 @@
 	Restore All	Obnovit vše
 	Restore Defaults	Obnovit výchozí
 	Restrictive (Web)	Omezená (web)
-	Right	Vpravo
 	Right align text	Zarovnat text vpravo
 	Rigid	Tuhý
 	Rotate:	Otočení:
