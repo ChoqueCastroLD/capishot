@@ -83,3 +83,28 @@ fn cmyk_to_png_is_colour_managed_and_tagged_srgb() {
     let back = import("l.png", &r.bytes).unwrap().document;
     assert_eq!(Profile::parse(back.icc_profile.as_ref().unwrap()).unwrap().color_space, ColorSpace::Rgb);
 }
+
+#[test]
+fn cmyk_fill_pixels_use_the_embedded_profile() {
+    use photocraft_cms::{Intent, Transform, synth};
+    use photocraft_doc::{Document, Fill, Layer, LayerContent};
+    let profile = synth::cmyk_profile(&synth::CmykParams { tvi: [0.26, 0.26, 0.26, 0.3], grid_a2b: 5, grid_b2a: 9, ..Default::default() });
+    let profile = Profile::parse(&profile.to_bytes()).unwrap();
+    let rgb = [0.2, 0.4, 0.6];
+    let mut expected = [0.0; 4];
+    Transform::new(Builtin::Srgb.profile(), &profile, Intent::RelativeColorimetric, true).unwrap().eval_fast(&rgb, &mut expected);
+    for depth in [SampleType::U8, SampleType::U16] {
+        let mut doc = Document::new("Fill", photocraft_geom::Size::new(1, 1), ColorMode::Cmyk, depth);
+        doc.icc_profile = Some(profile.to_bytes());
+        doc.layers.push(Layer::new("Fill", LayerContent::Fill(Fill::Solid(photocraft_color::Color::rgb(rgb[0], rgb[1], rgb[2])))));
+        let bytes = export(&doc, "x.psd", &ExportOptions::default()).unwrap().bytes;
+        let back = import("x.psd", &bytes).unwrap().document;
+        let cache = &back.layers[0].fill_cache.as_ref().unwrap().surface;
+        let samples = cache.read_region(back.bounds());
+        let quantum = if depth == SampleType::U8 { 255.0 } else { 65535.0 };
+        for (actual, expected) in samples.iter().zip(expected) {
+            assert!((actual - expected).abs() <= 1.0 / quantum, "{depth:?}: {samples:?} vs {expected:?}");
+        }
+        assert_eq!(back.icc_profile, doc.icc_profile);
+    }
+}
