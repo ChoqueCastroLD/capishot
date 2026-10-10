@@ -128,7 +128,7 @@ pub struct Drag {
     pub reposition: bool,
     /// A marquee or lasso drag that started inside the selection moves it instead of drawing:
     /// `Some(false)` moves the outline, `Some(true)` moves the floating piece (`select.float`), as
-    /// every Move-tool drag with a selection does (`move_ui::moves_selected_pixels`).
+    /// every Move-tool drag with a selection does (`move_ui::moves_selected_pixels_with`).
     pub sel_move: Option<bool>,
     pub lasso: Option<crate::lasso_ui::Lasso>,
 }
@@ -3787,10 +3787,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     // View › Snap / Snap To and smart guides (snap_ui.rs).
     let raw = ev;
     // A press anywhere but on the floating piece (or with ⇧ / ⌥, to draw) drops it first; the
-    // Move tool drags it from anywhere.
+    // Move tool (⌘ with a painting tool too, `event_tool`) drags it from anywhere.
     if let ToolEvent::Down { x, y, .. } = raw
         && app.session.active().is_some_and(|st| photocraft_engine::float_cmds::floating(st).is_some())
-        && !crate::move_ui::moves_selected_pixels(app)
+        && !crate::move_ui::moves_selected_pixels_with(app, event_tool(app, mods))
         && selection_drag_kind(app, app.ui.tool, [x, y], mods) != Some(true)
     {
         let _ = app.run("select.drop", json!({}));
@@ -3896,7 +3896,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             }
             // Auto-Select (or ⌘-click while it is off) picks the layer under the pointer first
             // (not when the selected pixels move: those are the active layer's).
-            if !crate::move_ui::moves_selected_pixels(app) && app.ui.tool_options.move_auto_select != mods.command {
+            if !crate::move_ui::moves_selected_pixels_with(app, tool) && app.ui.tool_options.move_auto_select != mods.command {
                 let target = app.ui.tool_options.move_target.clone();
                 let mode = if mods.shift { "add" } else { "replace" };
                 let before = app.session.active().map(|st| st.selected_layers());
@@ -3913,7 +3913,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             }
             // With a selection: cut the selected pixels (⌥ copies them) and drag them as a floating
             // piece, from anywhere, as a marquee ⌘-drag does.
-            if crate::move_ui::moves_selected_pixels(app) {
+            if crate::move_ui::moves_selected_pixels_with(app, tool) {
                 if crate::move_ui::float_selected(app, mods.alt, 0.0, 0.0) {
                     let mut d = Drag::new(tool, [x, y], vec![[x, y, pressure as f64]], mods, false);
                     d.sel_move = Some(true);
@@ -4206,7 +4206,7 @@ pub enum SelCursor {
 
 /// The cursor at document point `p` with `tool` in effect and `mods` held (`None`: not over a
 /// selection the press would move). The Move tool moves the selected pixels from anywhere
-/// (`move_ui::moves_selected_pixels`); a selection tool from inside the selection, or on the
+/// (`move_ui::moves_selected_pixels_with`); a selection tool from inside the selection, or on the
 /// floating piece (`selection_drag_kind`).
 pub fn selection_cursor(app: &PhotocraftApp, tool: Tool, p: [f64; 2], mods: egui::Modifiers) -> Option<SelCursor> {
     if let Some(d) = &app.drag {
