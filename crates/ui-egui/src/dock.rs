@@ -558,6 +558,12 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
                 ui.close();
             }
             ui.separator();
+            if ui.button(tl!("Close")).clicked() {
+                if let Some(&tab) = indices.get(sel) {
+                    actions.push(Action::CloseTab(g, tab));
+                }
+                ui.close();
+            }
             if ui.button(tl!("Close Tab Group")).clicked() {
                 actions.push(Action::Close(g));
                 ui.close();
@@ -694,7 +700,7 @@ fn resize(layout: &mut DockLayout, heights: &[(Group, f32)], i: usize, dy: f32) 
 
 /// What `prefs.panelLayout` holds: the live layout and open panels.
 fn snapshot(app: &PhotocraftApp) -> Value {
-    json!({"workspace": app.ui.workspace, "panels": app.ui.panels, "dockTabs": app.ui.dock_tabs, "dock": app.ui.dock, "timelineOpen": app.ui.timeline.open})
+    json!({"workspace": app.ui.workspace, "panels": app.ui.panels, "dockTabs": app.ui.dock_tabs, "dock": app.ui.dock, "layersPanelOptions": app.ui.layers_panel_options, "timelineOpen": app.ui.timeline.open})
 }
 
 /// Remember the layout in the preferences once the user lets go of the mouse (Workspace ›
@@ -736,6 +742,9 @@ pub fn apply(app: &mut PhotocraftApp, v: &Value) {
     }
     if let Some(d) = v.get("dock").and_then(|d| serde_json::from_value(d.clone()).ok()) {
         app.ui.dock = d;
+    }
+    if let Some(opts) = v.get("layersPanelOptions").and_then(|o| serde_json::from_value(o.clone()).ok()) {
+        app.ui.layers_panel_options = opts;
     }
     app.ui.timeline.open = v.get("timelineOpen").and_then(Value::as_bool).unwrap_or(false);
     if !app.ui.timeline.open {

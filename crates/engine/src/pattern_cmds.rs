@@ -308,11 +308,12 @@ pub(crate) fn placement(p: &Value) -> (f32, f32, bool, (f32, f32)) {
 fn new_fill_layer(s: &mut Session, p: &Value) -> Result<Value> {
     let pat = resolve_param(s, "layer.newFillLayer.pattern", p)?;
     let (scale, angle, link, phase) = placement(p);
+    let default_mask = crate::commands::layer_panel_option(s, "useDefaultMasksOnFillLayers", true);
     let id = s.edit("New Pattern Fill Layer", |doc, active| {
         ensure_in_doc(doc, &pat);
         let fill = Fill::Pattern { name: pat.name.clone(), scale, id: pat.id.clone(), angle, link, phase };
         let mut l = Layer::new(doc.next_layer_name("Pattern Fill"), LayerContent::Fill(fill));
-        crate::commands::mask_new_layer(doc, &mut l, p, "layer.newFillLayer.pattern")?;
+        crate::commands::mask_new_layer(doc, &mut l, p, "layer.newFillLayer.pattern", default_mask)?;
         let id = doc.insert_above(*active, l);
         *active = Some(id);
         Ok(id)

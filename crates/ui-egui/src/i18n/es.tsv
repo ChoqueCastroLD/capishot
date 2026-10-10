@@ -2514,3 +2514,23 @@ fontWeight	Italic	Cursiva
 	Front Image	Imagen frontal
 	Search settings…	Buscar ajustes…
 	No matching settings	No hay ajustes que coincidan
+	Animation Options	Opciones de animación
+	Entire Document	Documento entero
+	Filter Options	Opciones de filtro
+	Layer Bounds	Límites de capa
+	Layers Panel Options	Opciones del panel Capas
+	Lock Layers	Bloquear capas
+	New Artboard…	Nueva mesa de trabajo…
+	New Group…	Nuevo grupo…
+	New Layer	Nueva capa
+	New Layer…	Nueva capa…
+	Panel Options…	Opciones de panel…
+	Prevent Auto-Nesting	Impedir anidación automática
+	Show Layers	Mostrar capas
+	Thumbnail Contents	Contenido de miniaturas
+	Thumbnail Size	Tamaño de miniaturas
+	Use Default Masks on Fill Layers	Usar máscaras predeterminadas en capas de relleno
+	Expand New Effects	Expandir nuevos efectos
+	Add “copy” to Copied Layers and Groups	Añadir «copia» a las capas y grupos duplicados
+	Preview on canvas when reordering layers	Previsualizar en el lienzo al reordenar capas
+	Show layer mask badges	Mostrar insignias de máscaras de capa
