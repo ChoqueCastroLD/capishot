@@ -1940,6 +1940,9 @@ mod hidden_layer_tests;
 mod blend_dropdown_keys_tests;
 
 #[cfg(test)]
+mod warp_text_dialog_tests;
+
+#[cfg(test)]
 mod blend_dropdown_wheel_tests;
 
 #[cfg(test)]
