@@ -3387,3 +3387,7 @@ cameraRaw	Roughness	Chropowatość
 	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Ta wersja przeglądarkowa przechowuje historię cofania w pamięci. Ustawienia dysków roboczych dotyczą aplikacji komputerowej.
 	Memory budget (MiB)	Limit pamięci (MiB)
 	Undo disk budget (MiB)	Limit dysku dla cofania (MiB)
+	No subject found — try Object Selection or the Lasso	Nie znaleziono obiektu — spróbuj Zaznaczania obiektu lub Lassa
+	Quick Selection found nothing there	Szybkie zaznaczanie nic tam nie znalazło
+	Object Selection found nothing there — try a tighter rectangle	Zaznaczanie obiektu nic tam nie znalazło — spróbuj ciaśniejszego prostokąta
+	No subject found — try a rectangle around the object	Nie znaleziono obiektu — spróbuj prostokąta wokół obiektu

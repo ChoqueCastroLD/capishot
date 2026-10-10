@@ -3475,3 +3475,7 @@ fontWeight	Thin	Πολύ λεπτά
 	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Αυτή η έκδοση προγράμματος περιήγησης κρατά το ιστορικό αναίρεσης στη μνήμη. Οι ρυθμίσεις δίσκων εργασίας ισχύουν για την εφαρμογή υπολογιστή.
 	Memory budget (MiB)	Όριο μνήμης (MiB)
 	Undo disk budget (MiB)	Όριο δίσκου για αναίρεση (MiB)
+	No subject found — try Object Selection or the Lasso	Δεν βρέθηκε θέμα — δοκιμάστε την Επιλογή αντικειμένου ή το Λάσο
+	Quick Selection found nothing there	Η Γρήγορη επιλογή δεν βρήκε τίποτα εκεί
+	Object Selection found nothing there — try a tighter rectangle	Η Επιλογή αντικειμένου δεν βρήκε τίποτα εκεί — δοκιμάστε ένα πιο στενό ορθογώνιο
+	No subject found — try a rectangle around the object	Δεν βρέθηκε θέμα — δοκιμάστε ένα ορθογώνιο γύρω από το αντικείμενο

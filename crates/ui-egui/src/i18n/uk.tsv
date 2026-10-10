@@ -3474,3 +3474,7 @@ cameraRaw	Masking	Маскування
 	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Ця браузерна версія зберігає історію скасування в пам’яті. Налаштування робочих дисків стосуються настільної програми.
 	Memory budget (MiB)	Ліміт пам’яті (MiB)
 	Undo disk budget (MiB)	Ліміт диска для скасування (MiB)
+	No subject found — try Object Selection or the Lasso	Об'єкт не знайдено — спробуйте «Виділення об'єктів» або «Ласо»
+	Quick Selection found nothing there	Швидке виділення нічого тут не знайшло
+	Object Selection found nothing there — try a tighter rectangle	Виділення об'єктів нічого тут не знайшло — спробуйте вужчий прямокутник
+	No subject found — try a rectangle around the object	Об'єкт не знайдено — спробуйте прямокутник навколо об'єкта
