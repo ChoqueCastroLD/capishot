@@ -39,11 +39,13 @@ pub(crate) struct Run {
 impl Session {
     pub(crate) fn compact_translation(&mut self, before: &Arc<Document>, layers: &[LayerId], dx: i32, dy: i32) {
         // Other content has rendering, canvas fitting or mask semantics: keep its exact snapshots.
-        if !layers.iter().all(|id| {
-            before
-                .layer(*id)
-                .is_some_and(|l| matches!(l.content, LayerContent::Raster(_)) && l.mask.is_none() && l.vector_mask.is_none() && l.effects.reference.is_none())
-        }) {
+        if !before.slices.list.is_empty()
+            || !layers.iter().all(|id| {
+                before.layer(*id).is_some_and(|l| {
+                    matches!(l.content, LayerContent::Raster(_)) && l.mask.is_none() && l.vector_mask.is_none() && l.effects.reference.is_none()
+                })
+            })
+        {
             self.compact_move = None;
             return;
         }

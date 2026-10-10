@@ -254,12 +254,21 @@ pub fn translate(s: &mut Session, p: &Value) -> Result<Value> {
     for id in move_targets(&before, &roots) {
         if let Some(layer) = before.layer(id) {
             for surface in layer.surface().into_iter().chain(layer.mask.as_ref().filter(|mask| mask.linked).map(|mask| &mask.surface)) {
-                for (coord, _) in surface.tiles() {
-                    let x = i64::from(coord.tx) * i64::from(photocraft_geom::TILE_SIZE);
-                    let y = i64::from(coord.ty) * i64::from(photocraft_geom::TILE_SIZE);
-                    if [x, y, x + i64::from(dx), y + i64::from(dy)].into_iter().any(|value| !(-1_000_000_000..=1_000_000_000).contains(&value)) {
-                        return Err(EngineError::BadParams { cmd: "layer.translate".into(), msg: "move exceeds supported pixel coordinates".into() });
-                    }
+                let invalid_tiles = surface.tiles().any(|(coord, _)| {
+                    [i64::from(coord.tx) * i64::from(photocraft_geom::TILE_SIZE), i64::from(coord.ty) * i64::from(photocraft_geom::TILE_SIZE)]
+                        .into_iter()
+                        .any(|value| i32::try_from(value).is_err())
+                });
+                if invalid_tiles {
+                    return Err(EngineError::BadParams { cmd: "layer.translate".into(), msg: "invalid tile coordinates".into() });
+                }
+                let bounds = photocraft_compose::bounds::content_bounds(surface);
+                if !bounds.is_empty()
+                    && [bounds.x0.checked_add(dx), bounds.x1.checked_add(dx), bounds.y0.checked_add(dy), bounds.y1.checked_add(dy)]
+                        .into_iter()
+                        .any(|value| value.is_none())
+                {
+                    return Err(EngineError::BadParams { cmd: "layer.translate".into(), msg: "move exceeds supported pixel coordinates".into() });
                 }
             }
         }
