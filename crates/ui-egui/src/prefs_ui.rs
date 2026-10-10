@@ -85,6 +85,8 @@ fn theme_kind(t: Theme) -> ThemeKind {
         Theme::Studio => ThemeKind::Studio,
         Theme::StudioLight => ThemeKind::StudioLight,
         Theme::Classic => ThemeKind::Classic,
+        Theme::Adwaita => ThemeKind::Adwaita,
+        Theme::AdwaitaDark => ThemeKind::AdwaitaDark,
         Theme::SolarizedDark => ThemeKind::SolarizedDark,
     }
 }
@@ -96,6 +98,8 @@ fn theme_pref(k: ThemeKind) -> Theme {
         ThemeKind::Studio => Theme::Studio,
         ThemeKind::StudioLight => Theme::StudioLight,
         ThemeKind::Classic => Theme::Classic,
+        ThemeKind::Adwaita => Theme::Adwaita,
+        ThemeKind::AdwaitaDark => Theme::AdwaitaDark,
         ThemeKind::SolarizedDark => Theme::SolarizedDark,
     }
 }

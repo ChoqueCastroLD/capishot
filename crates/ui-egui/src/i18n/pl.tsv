@@ -672,6 +672,8 @@
 	Pro Medium Gray Theme	Motyw Pro (średni szary)
 	Studio Theme	Motyw Studio
 	Studio Light Theme	Motyw Studio (jasny)
+	Adwaita Light Theme	Motyw Adwaita (jasny)
+	Adwaita Dark Theme	Motyw Adwaita (ciemny)
 	Classic Theme	Motyw klasyczny
 	Solarized dark	Solarized ciemny
 	Solarized Dark Theme	Ciemny motyw Solarized
@@ -1869,6 +1871,8 @@
 	Standard	Standardowy
 	Studio	Studio
 	Studio light	Studio jasny
+	Adwaita	Adwaita
+	Adwaita dark	Adwaita ciemny
 	Subdivisions	Podziały
 	System	Systemowy
 	Text engine	Silnik tekstu

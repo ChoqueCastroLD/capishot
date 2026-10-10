@@ -655,6 +655,8 @@
 	Pro Medium Gray Theme	Tema Pro Abu-abu Sedang
 	Studio Theme	Tema Studio
 	Studio Light Theme	Tema Studio Terang
+	Adwaita Light Theme	Tema Adwaita Terang
+	Adwaita Dark Theme	Tema Adwaita Gelap
 	Classic Theme	Tema Klasik
 	Solarized dark	Solarized gelap
 	Solarized Dark Theme	Tema Solarized Gelap
@@ -1838,6 +1840,8 @@
 	Standard	Standar
 	Studio	Studio
 	Studio light	Studio terang
+	Adwaita	Adwaita
+	Adwaita dark	Adwaita gelap
 	Subdivisions	Subdivisi
 	System	Sistem
 	Text engine	Mesin teks
