@@ -1,5 +1,5 @@
 //! Retouching tools as commands: Clone Stamp, Pattern Stamp, Healing Brush, Spot Healing Brush,
-//! Patch, Content-Aware Move, Dodge, Burn, Sponge, Blur, Sharpen, Smudge and History Brush.
+//! Patch, Content-Aware Move, Remove, Dodge, Burn, Sponge, Blur, Sharpen, Smudge and History Brush.
 //!
 //! Every command takes a Photoshop-style brush (`points`, `size`, `hardness`, `opacity`, `flow`,
 //! `spacing`, `layer`), respects the active selection as a mask and the layer's transparency lock, and
@@ -26,6 +26,7 @@ use crate::{EngineError, Result, Session};
 mod content_aware_move;
 mod patch;
 mod pattern_stamp;
+mod remove;
 pub use patch::preview as patch_preview;
 
 fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
@@ -65,6 +66,23 @@ fn point(p: &Value, k: &str) -> Option<(f64, f64)> {
     Some((a.first()?.as_f64()?, a.get(1)?.as_f64()?))
 }
 
+/// The brush a retouching stroke paints with: the tool's brush (`base`, its tip, hardness and
+/// shape dynamics) with the shared params of `p` applied. UI previews of a stroke (the Spot Healing
+/// Brush's trail) render their coverage with it, so they match what the command changes.
+pub fn stroke_brush(base: &BrushSettings, p: &Value) -> BrushSettings {
+    let pct = |k: &str, d: f32, lo: f32, hi: f32| num(p, k, d).clamp(lo, hi) / 100.0;
+    BrushSettings {
+        size: num(p, "size", base.size).max(1.0),
+        hardness: pct("hardness", base.hardness * 100.0, 0.0, 100.0),
+        opacity: pct("opacity", 100.0, 1.0, 100.0),
+        flow: pct("flow", 100.0, 1.0, 100.0),
+        // Brush Settings › Brush Tip Shape › Spacing, as the Brush uses it (#2140).
+        spacing: pct("spacing", base.spacing * 100.0, 1.0, 1000.0),
+        erase: false,
+        ..base.clone()
+    }
+}
+
 /// Parse the shared brush params into a stroke on a layer (`None` when an alpha channel or the
 /// Quick Mask is targeted).
 fn parse_brush(s: &Session, p: &Value, cmd: &str) -> Result<(Stroke, Option<LayerId>)> {
@@ -82,18 +100,7 @@ fn parse_brush(s: &Session, p: &Value, cmd: &str) -> Result<(Stroke, Option<Laye
         return Err(bad(cmd, "`points` is empty"));
     }
     crate::brush_cmds::check_coords(&pts, cmd)?;
-    let base = s.tools.brush.clone();
-    let pct = |k: &str, d: f32, lo: f32, hi: f32| num(p, k, d).clamp(lo, hi) / 100.0;
-    let brush = BrushSettings {
-        size: num(p, "size", base.size).max(1.0),
-        hardness: pct("hardness", base.hardness * 100.0, 0.0, 100.0),
-        opacity: pct("opacity", 100.0, 1.0, 100.0),
-        flow: pct("flow", 100.0, 1.0, 100.0),
-        // Brush Settings › Brush Tip Shape › Spacing, as the Brush uses it (#2140).
-        spacing: pct("spacing", base.spacing * 100.0, 1.0, 1000.0),
-        erase: false,
-        ..base
-    };
+    let brush = stroke_brush(&s.tools.brush, p);
     crate::brush_cmds::validate_brush(&brush, cmd)?;
     if crate::channel_cmds::is_channel_target(p) {
         return Ok((Stroke { brush, points: pts }, None));
@@ -1102,6 +1109,18 @@ pub fn specs() -> Vec<CommandSpec> {
             params: r#"{"offset":[dx,dy] (how far the selection was dragged),"mode":"move|extend"="move","structure":1..7=4 (3..7 copy the content exactly but for a band about a patch wide along its edge; 2 widens the band, 1 re-synthesises the content too),"color":0..10=0 (0 keeps the content's level; higher values bring it towards its new place, by up to about 0.04 × color),"sampleAllLayers":bool=false,"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target} → {"damage","offset","mode"} (a background job; the selection moves with the content)"#,
             enabled: content_aware_move::enabled,
             run: content_aware_move::content_aware_move,
+            journal: true,
+        },
+        CommandSpec {
+            id: "paint.remove",
+            label: "Remove",
+            menu: &[],
+            shortcut: None,
+            params: brush_params!(
+                r#","closeLoops":bool=true (a stroke around an object removes what it encloses),"sampleAllLayers":bool=false → {"damage"} (a background job)"#
+            ),
+            enabled: has_pixel_layer,
+            run: remove::remove,
             journal: true,
         },
         CommandSpec {

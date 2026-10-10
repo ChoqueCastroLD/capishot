@@ -562,7 +562,7 @@ impl Session {
 
     /// Running jobs followed by the last few that ended (newest last), for `jobs.list`.
     pub fn jobs_with_recent(&self) -> Vec<JobInfo> {
-        self.jobs.recent.iter().cloned().chain(self.jobs()).collect()
+        self.jobs().into_iter().chain(self.jobs.recent.iter().cloned()).collect()
     }
 
     /// The running job that locks document `doc`, if any.
@@ -618,6 +618,7 @@ impl Session {
         if id == "file.new" {
             crate::document_preset_cmds::validate_new_params(self, &params)?;
         }
+        crate::filters::validate_params(id, &params)?;
         // A floating selection drops before any other command (Undo puts it back instead).
         if let Some(v) = crate::float_cmds::before_command(self, id)? {
             return Ok(Started::Done(v));
