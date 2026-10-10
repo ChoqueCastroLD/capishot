@@ -979,16 +979,7 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
             let fields = app.ui.view.guide_layout.clone();
             dialog(app, fields, json!({}))
         }
-        "type.warpText" => {
-            let styles: Vec<&str> = std::iter::once("none").chain(photocraft_text::warp::STYLES.iter().map(|(_, s)| *s)).collect();
-            let mut fields = json!({"style": "arc", "orientation": "horizontal", "bend": 50.0, "horizontalDistortion": 0.0, "verticalDistortion": 0.0});
-            if let Some(Value::Object(target)) = crate::type_tool::formatting_params(app) {
-                for (key, value) in target {
-                    fields[key] = value;
-                }
-            }
-            dialog(app, fields, json!({"style": styles, "orientation": ["horizontal", "vertical"]}))
-        }
+        "type.warpText" => Some(Ok(json!({"dialog": crate::dialogs::open_command_dialog(app, id, label)}))),
         "file.export.layersToFiles" => {
             let (_, _, name) = doc?;
             dialog(
