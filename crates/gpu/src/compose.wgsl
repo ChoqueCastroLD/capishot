@@ -48,7 +48,7 @@ const F_STROKE_OUT: u32 = 1024u; // effect paint: outside stroke band
 const F_FIRST: u32 = 2048u;      // outside strokes: nothing accumulated yet
 const F_CHANNELS: u32 = 4096u;   // lerp: per-channel weights in p0 (channel restrictions)
 const F_LAB: u32 = 65536u;      // Lab document: Normal mixes in CIELAB
-const F_HDR: u32 = 262144u;     // 32-bit float document: Add / Divide don't clip at 1
+const F_HDR: u32 = 262144u;     // 32-bit float document: Add / Divide and Hue/Saturation/Color/Luminosity don't clip at 1
 const F_QUANT: u32 = 32768u;    // lerp: A rounded to p0.x steps (adjustment results, integer docs)
 const F_ADD_DIFF: u32 = 16384u;  // lerp: A + (B - C) premultiplied (clips on pass-through groups)
 const F_TEXT_GAMMA: u32 = 8192u; // blend / atop / fx merge: type layer, mix coverage at gamma p4.w
@@ -216,22 +216,24 @@ fn blend_channel(mode: i32, cb: f32, cs: f32) -> f32 {
 
 fn lum(c: vec3<f32>) -> f32 { return 0.3 * c.r + 0.59 * c.g + 0.11 * c.b; }
 
-fn clip_color(c: vec3<f32>) -> vec3<f32> {
+// photocraft_color::blend::clip_color: towards grey until within 0..top; a luminosity outside
+// that range has no in-gamut colour (and max − lum is rounding noise), so it gives its grey.
+fn clip_color(c: vec3<f32>, top: f32) -> vec3<f32> {
     let l = lum(c);
     let n = min(min(c.r, c.g), c.b);
     let x = max(max(c.r, c.g), c.b);
     var out = c;
     if (n < 0.0) {
         let d = l - n;
-        if (abs(d) < 1e-12) { out = vec3(l); } else { out = l + (out - l) * l / d; }
+        if (l > 0.0 && d > 0.0) { out = l + (out - l) * l / d; } else { out = vec3(l); }
     }
-    if (x > 1.0) {
+    if (x > top) {
         let d = x - l;
-        if (abs(d) < 1e-12) { out = vec3(l); } else { out = l + (out - l) * (1.0 - l) / d; }
+        if (l < top && d > 0.0) { out = l + (out - l) * (top - l) / d; } else { out = vec3(l); }
     }
     return out;
 }
-fn set_lum(c: vec3<f32>, l: f32) -> vec3<f32> { return clip_color(c + (l - lum(c))); }
+fn set_lum(c: vec3<f32>, l: f32, top: f32) -> vec3<f32> { return clip_color(c + (l - lum(c)), top); }
 fn sat(c: vec3<f32>) -> f32 { return max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b); }
 fn set_sat(c: vec3<f32>, s: f32) -> vec3<f32> {
     let mx = max(max(c.r, c.g), c.b);
@@ -241,11 +243,13 @@ fn set_sat(c: vec3<f32>, s: f32) -> vec3<f32> {
 }
 
 fn blend_rgb(mode: i32, cb: vec3<f32>, cs: vec3<f32>) -> vec3<f32> {
+    // blend_rgb_within: 32-bit documents keep values above 1 (f32::MAX).
+    let top = select(1.0, F32_MAX, (op.flags & F_HDR) != 0u);
     switch mode {
-        case 24: { return set_lum(set_sat(cs, sat(cb)), lum(cb)); } // Hue
-        case 25: { return set_lum(set_sat(cb, sat(cs)), lum(cb)); } // Saturation
-        case 26: { return set_lum(cs, lum(cb)); }                  // Color
-        case 27: { return set_lum(cb, lum(cs)); }                  // Luminosity
+        case 24: { return set_lum(set_sat(cs, sat(cb)), lum(cb), top); } // Hue
+        case 25: { return set_lum(set_sat(cb, sat(cs)), lum(cb), top); } // Saturation
+        case 26: { return set_lum(cs, lum(cb), top); }                  // Color
+        case 27: { return set_lum(cb, lum(cs), top); }                  // Luminosity
         case 7: { return select(cb, cs, lum(cs) < lum(cb)); }      // DarkerColor
         case 12: { return select(cb, cs, lum(cs) > lum(cb)); }     // LighterColor
         default: {
@@ -608,7 +612,7 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             let g = p3.y;
             let lin = vec3(t_decode(c.r, g), t_decode(c.g, g), t_decode(c.b, g));
             var f = vec3(t_encode(dot(p0.xyz, lin), g), t_encode(dot(p1.xyz, lin), g), t_encode(dot(p2.xyz, lin), g));
-            if (p3.x > 0.5) { f = set_lum(f, lum(c)); }
+            if (p3.x > 0.5) { f = set_lum(f, lum(c), 1.0); }
             return clamp(f, vec3(0.0), vec3(1.0));
         }
         case 12: {                                                             // Black & White
