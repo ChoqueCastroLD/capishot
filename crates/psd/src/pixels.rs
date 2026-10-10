@@ -208,6 +208,9 @@ impl<'a> Layer<'a> {
         let rect = self.record.rect;
         let (w, h) = rect.size()?;
         let n = w.checked_mul(h).ok_or(PsdError::LimitExceeded("layer size overflow"))?;
+        if n.checked_mul(4).is_none_or(|len| len as u64 > crate::compression::MAX_DECODED_BYTES) {
+            return Err(PsdError::LimitExceeded("RGBA output exceeds MAX_DECODED_BYTES"));
+        }
         let depth = self.header.depth;
         let mode = self.header.color_mode;
         let cc = color_channel_count(mode)?;
@@ -336,6 +339,13 @@ mod tests {
         file.image_data = crate::ImageData::encode(crate::Compression::Raw, &native, &file.header).unwrap();
         assert_eq!(file.composite_rgba8().unwrap().data, [0, 128, 255, 64]);
         assert_eq!(file.decode_merged().unwrap(), native);
+    }
+
+    #[test]
+    fn oversized_layer_preview_rejects_missing_channels_before_allocating() {
+        let mut file = crate::testgen::small(Version::Psb, crate::Compression::Raw);
+        file.layers_mut().push(LayerRecord { rect: Rect::from_xywh(0, 0, 300000, 300000), ..Default::default() });
+        assert!(matches!(file.iter_layers().last().unwrap().rgba8(), Err(PsdError::LimitExceeded(_))));
     }
 
     #[test]
