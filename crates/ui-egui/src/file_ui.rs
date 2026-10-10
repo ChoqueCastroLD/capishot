@@ -593,7 +593,34 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
     ] {
         f.entry(k.to_string()).or_insert(v);
     }
+    // Windows: the system's printers, and the paper from the chosen printer's driver settings.
+    if let Ok(list) = photocraft_winprint::printers() {
+        f.insert("__printers".into(), json!(list.iter().map(|p| p.name.clone()).collect::<Vec<_>>()));
+        let known = |n: &str| list.iter().any(|p| p.name == n);
+        if !known(&s(&f, "printer", "")) {
+            let fallback = list.iter().find(|p| p.default).or(list.first()).map(|p| p.name.clone()).unwrap_or_default();
+            f.insert("printer".into(), json!(fallback));
+            f.remove("printerSettings");
+        }
+        driver_page(&mut f);
+    }
     app.ui.open_dialog(DialogKind::Command, f)
+}
+
+/// Takes the paper from the printer's driver settings (Windows), as Photoshop does.
+fn driver_page(f: &mut Map<String, Value>) {
+    let printer = s(f, "printer", "");
+    let settings = f.get("printerSettings").and_then(Value::as_str).and_then(|h| photocraft_winprint::DevMode::from_hex(h).ok());
+    match photocraft_winprint::page(&printer, settings.as_ref()) {
+        Ok(pg) => {
+            f.insert("paper".into(), json!([pg.paper.0, pg.paper.1]));
+            f.insert("orientation".into(), json!("portrait"));
+            f.remove("__pageError");
+        }
+        Err(e) => {
+            f.insert("__pageError".into(), json!(e.to_string()));
+        }
+    }
 }
 
 /// Points per unit for the Position and Size fields.
@@ -702,19 +729,61 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                 ui.label(egui::RichText::new(s).font(crate::theme::semibold(12.0)).color(t.text));
             };
             head(ui, tl!("Printer Setup"));
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
-                let mut pr = s(f, "printer", "");
-                if ui.add(egui::TextEdit::singleline(&mut pr).hint_text(tl!("Default printer")).desired_width(180.0)).changed() {
-                    f.insert("printer".into(), json!(pr));
+            let printers: Option<Vec<String>> =
+                f.get("__printers").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect());
+            if let Some(printers) = &printers {
+                // Windows: Photoshop's Printer menu and Print Settings… (the driver's own dialog).
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
+                    let before = s(f, "printer", "");
+                    let opts: Vec<(&str, &str)> = printers.iter().map(|n| (n.as_str(), n.as_str())).collect();
+                    dropdown_str(ui, "print-printer", f, "printer", &opts, 220.0);
+                    if s(f, "printer", "") != before {
+                        f.remove("printerSettings");
+                        driver_page(f);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
+                    if ui.button(tl!("Print Settings…")).clicked() {
+                        let printer = s(f, "printer", "");
+                        let current = f.get("printerSettings").and_then(Value::as_str).and_then(|h| photocraft_winprint::DevMode::from_hex(h).ok());
+                        match photocraft_winprint::settings_dialog(&printer, current.as_ref(), None) {
+                            Ok(Some(dm)) => {
+                                f.insert("printerSettings".into(), json!(dm.to_hex()));
+                                driver_page(f);
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                f.insert("__pageError".into(), json!(e.to_string()));
+                            }
+                        }
+                    }
+                });
+                let paper = p.get("paper").and_then(Value::as_array).map(|a| (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64)));
+                let text = match paper {
+                    Some((Some(w), Some(h))) => format!("{:.0} × {:.0} mm  ·  {}", w / 72.0 * 25.4, h / 72.0 * 25.4, tl!("set in Print Settings…")),
+                    _ => String::new(),
+                };
+                ui.label(egui::RichText::new(text).color(t.text_dim).size(11.0));
+                if let Some(e) = f.get("__pageError").and_then(Value::as_str) {
+                    ui.label(egui::RichText::new(e).color(t.warning).size(11.0));
                 }
-            });
-            number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
-            ui.horizontal(|ui| {
-                let papers: Vec<(&str, &str)> = photocraft_engine::print_cmds::PAPERS.iter().map(|p| (p.0, p.0)).collect();
-                dropdown_str(ui, "print-paper", f, "paper", &papers, 110.0);
-                dropdown_str(ui, "print-orient", f, "orientation", &[("portrait", tl!("Portrait")), ("landscape", tl!("Landscape"))], 110.0);
-            });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
+                    let mut pr = s(f, "printer", "");
+                    if ui.add(egui::TextEdit::singleline(&mut pr).hint_text(tl!("Default printer")).desired_width(180.0)).changed() {
+                        f.insert("printer".into(), json!(pr));
+                    }
+                });
+                number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
+                ui.horizontal(|ui| {
+                    let papers: Vec<(&str, &str)> = photocraft_engine::print_cmds::PAPERS.iter().map(|p| (p.0, p.0)).collect();
+                    dropdown_str(ui, "print-paper", f, "paper", &papers, 110.0);
+                    dropdown_str(ui, "print-orient", f, "orientation", &[("portrait", tl!("Portrait")), ("landscape", tl!("Landscape"))], 110.0);
+                });
+            }
             head(ui, tl!("Color Management"));
             dropdown_str(
                 ui,
@@ -766,6 +835,11 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                     );
                     check(ui, f, "bpc", tl!("Black Point Compensation"), true);
                 });
+                if printers.is_some() {
+                    ui.label(
+                        egui::RichText::new(tl!("Remember to turn off the printer's own colour management in Print Settings…")).color(t.warning).size(11.0),
+                    );
+                }
             }
             head(ui, tl!("Position and Size"));
             dropdown_str(ui, "print-units", f, "units", &[("cm", tl!("Centimeters")), ("mm", tl!("Millimeters")), ("in", tl!("Inches"))], 130.0);
@@ -829,6 +903,9 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
             });
             head(ui, tl!("Functions"));
             check(ui, f, "emulsionDown", tl!("Emulsion Down"), false);
+            if b(f, "emulsionDown", false) && printers.is_some() {
+                ui.label(egui::RichText::new(tl!("Don't also tick Mirror Image in Print Settings…: the two flips cancel out.")).color(t.text_dim).size(11.0));
+            }
             head(ui, tl!("Save as PDF"));
             let mut out = s(f, "output", "");
             if ui.add(egui::TextEdit::singleline(&mut out).hint_text(tl!("(print to the printer)")).desired_width(300.0)).changed() {
@@ -839,8 +916,16 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
 }
 
 fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
-    let r = app.run("file.print", params(f))?;
-    app.ui.status = if r["sent"] == json!(true) {
+    let mut p = params(f);
+    // The Print button prints (an empty Save as PDF path means the printer).
+    if s(f, "output", "").is_empty() {
+        p["send"] = json!(true);
+    }
+    let r = app.run("file.print", p)?;
+    app.ui.status = if let Some(printer) = r["spooler"]["printer"].as_str() {
+        let skipped = if r["spooler"]["marksSkipped"] == json!(true) { " (printer marks and labels are only in Save as PDF)" } else { "" };
+        format!("Sent to {printer}{skipped}")
+    } else if r["sent"] == json!(true) {
         let template = "Sent to the printer ({spooler})";
         crate::i18n::fmt(tl!(template), &[("spooler", r["spooler"].as_str().unwrap_or(""))])
     } else {

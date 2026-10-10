@@ -133,6 +133,41 @@ fn emulsion_down_mirrors_the_whole_page() {
     }
 }
 
+fn page_of(channels: usize, data: Vec<u8>, emulsion_down: bool) -> PrintPage {
+    PrintPage {
+        paper: (600.0, 800.0),
+        image: PrintImage { width: 2, height: 1, channels, data, icc: None },
+        rect: (100.0, 200.0, 144.0, 72.0),
+        marks: Marks::default(),
+        description: None,
+        label: None,
+        emulsion_down,
+    }
+}
+
+#[test]
+fn windows_print_image_is_rgb_mirrored_for_emulsion_down() {
+    assert_eq!(page_rgb(&page_of(3, vec![1, 2, 3, 4, 5, 6], false)).unwrap(), [1, 2, 3, 4, 5, 6]);
+    assert_eq!(page_rgb(&page_of(3, vec![1, 2, 3, 4, 5, 6], true)).unwrap(), [4, 5, 6, 1, 2, 3]);
+    assert_eq!(page_rgb(&page_of(1, vec![7, 9], true)).unwrap(), [9, 9, 9, 7, 7, 7]);
+    assert!(page_rgb(&page_of(4, vec![0; 8], false)).is_err(), "CMYK can't go to a GDI printer");
+    assert!(page_rgb(&page_of(3, vec![0; 5], false)).is_err(), "short data");
+    // GDI's origin is the sheet's top-left; Emulsion Down moves the box to the mirrored side.
+    assert_eq!(page_rect_top_left(&page_of(3, vec![0; 6], false)), (100.0, 528.0, 144.0, 72.0));
+    assert_eq!(page_rect_top_left(&page_of(3, vec![0; 6], true)), (356.0, 528.0, 144.0, 72.0));
+}
+
+#[test]
+fn printer_commands_answer_without_a_document_and_reject_bad_settings() {
+    let mut s = Session::new();
+    let r = s.execute("file.print.printers", json!({})).unwrap();
+    assert_eq!(r["supported"], cfg!(windows));
+    assert!(r["printers"].is_array());
+    assert!(s.execute("file.print.page", json!({"printer": "Anything", "printerSettings": "zz"})).is_err());
+    let mut s = session("rgb", 8);
+    assert!(s.execute("file.print", json!({"printer": "Anything", "printerSettings": "0102", "send": true})).is_err());
+}
+
 #[test]
 fn printer_profile_can_be_an_installed_icc_file() {
     let dir = tmp("icc");
