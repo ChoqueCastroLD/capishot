@@ -70,7 +70,7 @@ fn char_at(text: &str, bi: usize) -> usize {
 }
 
 /// `range: [start, end]` in characters → byte range (whole text when absent).
-fn range_param(text: &str, p: &Value) -> (usize, usize) {
+pub(crate) fn range_param(text: &str, p: &Value) -> (usize, usize) {
     match p.get("range").and_then(Value::as_array) {
         Some(r) if r.len() == 2 => {
             let a = r[0].as_u64().unwrap_or(0) as usize;

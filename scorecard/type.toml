@@ -42,9 +42,9 @@ note = "Type > OpenType toggles (type_extra_cmds.rs:512); no panel buttons or su
 [[item]]
 id = "TYPE-218-6"
 target = "Manual pair kerning (Alt+arrows), optical kerning rendered, both round-trip PSD (#206)"
-status = "missing"
+status = "done"
 issue = 218
-note = "Optical renders as Metrics (text.rs:21); Alt+arrow moves by word"
+note = "Alt+←/→ kerns the pair at the caret (±20, Ctrl ±100) and tracks a selection (type.nudge); optical kerning rendered (text/optical.rs); both round-trip PSD (io/tests/psd_kerning.rs); type_keys_tests.rs"
 
 [[item]]
 id = "TYPE-218-7"
@@ -56,13 +56,13 @@ note = "view_cmds.rs:834 always seeds arc, bend 50"
 [[item]]
 id = "TYPE-218-8"
 target = "Text editing: select all, double/triple/quadruple-click selection, paste, with tests"
-status = "partial"
+status = "done"
 issue = 218
-note = "Cmd+A, paste and double-click exist; no triple/quadruple click, no tests"
+note = "Double/triple/quadruple/quintuple click select word/line/paragraph/all (type_tool::Clicks); Cmd+A; paste; tests in type_keys_tests.rs"
 
 [[item]]
 id = "TYPE-218-9"
 target = "Offer 'Rasterize and continue?' for Distort/Perspective/Warp on live type"
-status = "missing"
+status = "done"
 issue = 218
-note = "No such prompt"
+note = "Edit > Transform > Distort/Perspective/Warp on type asks 'Rasterize the type?'; OK rasterizes and starts the mode (rasterize_prompt.rs, tests)"
