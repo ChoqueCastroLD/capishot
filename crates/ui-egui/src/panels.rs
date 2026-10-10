@@ -2332,6 +2332,7 @@ fn layer_row(
     }
     // Right-click context menu.
     resp.context_menu(|ui| {
+        crate::widgets::style_spectrum_popup_menu(ui);
         // Right-clicking inside a multi-selection keeps it and acts on every selected layer.
         let on_set = row.multi && selected;
         if crate::layer_menu_ui::show(app, ui, l, on_set, actions)
