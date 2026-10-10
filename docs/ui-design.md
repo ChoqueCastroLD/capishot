@@ -82,6 +82,11 @@ The app's top bar (`panels::title_bar`) starts with the brand mark (the app icon
 
 ## Menus
 
+An embedding application's `panels.menu_bar` and `panels.rail` flags belong to its current
+session. Restoring a saved workspace or remembered panel layout preserves both flags, including
+when the serialized layout contains their values. Panel visibility, dock layout, tabs and Timeline
+visibility follow the saved layout.
+
 The Pro status bar's Document Dimensions readout follows Preferences › Units & Rulers › Rulers,
 including changes made from a ruler's context menu. It uses the document resolution for physical
 units, each side's own extent for percentages and the selected point-size convention for points
