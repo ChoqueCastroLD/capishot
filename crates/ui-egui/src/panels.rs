@@ -566,10 +566,14 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     {
                         app.ui.palette_open = !app.ui.palette_open;
                     }
-                    let theme_icon = if t.dark() { "sun" } else { "moon" };
-                    if icons_shown >= 2 && icons::button(ui, theme_icon, 28.0, false, tl!("Switch theme")).clicked() {
-                        let next = app.ui.theme.next();
-                        app.set_theme(ui.ctx(), next);
+                    let (theme_icon, appearance_label) = match app.session.prefs().interface.appearance_mode {
+                        photocraft_engine::prefs::AppearanceMode::Auto => ("monitor", tl!("Auto")),
+                        photocraft_engine::prefs::AppearanceMode::Dark => ("moon", tl!("Dark")),
+                        photocraft_engine::prefs::AppearanceMode::Light => ("sun", tl!("Light")),
+                    };
+                    let appearance_tip = format!("{}: {}", tl!("Appearance Mode"), appearance_label);
+                    if icons_shown >= 2 && icons::button(ui, theme_icon, 28.0, false, &appearance_tip).clicked() {
+                        crate::prefs_ui::cycle_appearance(app, ui.ctx());
                     }
                     // The community Discord, one click away while the bar has room for it
                     // (narrow windows drop it first; it is also Help › Discord).

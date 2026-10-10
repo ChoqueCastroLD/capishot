@@ -1,6 +1,6 @@
 //! Design system: themes, colour tokens, radii, typography.
 //!
-//! - **Studio** (default): near-black surfaces, rounded cards, Inter + JetBrains Mono, soft violet
+//! - **Studio**: near-black surfaces, rounded cards, Inter + JetBrains Mono, soft violet
 //!   accent. Modelled on the look of modern pro editors (such as Photoshop 2025).
 //! - **Studio Light**: the same system on light surfaces.
 //! - **Classic**: a deliberately Windows-2000-era look (grey bevels, square corners, navy selection)

@@ -23,6 +23,46 @@ fn defaults_match_photoshop() {
 }
 
 #[test]
+fn appearance_defaults_and_legacy_theme_migrate() {
+    let p = Preferences::default();
+    // New users keep Photoshop's default; following the system is opt-in.
+    assert_eq!(p.interface.appearance_mode, AppearanceMode::Dark);
+    assert_eq!(p.interface.dark_theme, DarkTheme::ProMedium);
+    assert_eq!(p.interface.light_theme, LightTheme::StudioLight);
+    for (theme, mode, dark, light) in
+        [("pro", AppearanceMode::Dark, DarkTheme::Pro, LightTheme::StudioLight), ("classic", AppearanceMode::Light, DarkTheme::ProMedium, LightTheme::Classic)]
+    {
+        let mut s = Session::new();
+        s.load_prefs_json(&json!({"interface": {"theme": theme}}).to_string()).unwrap();
+        assert_eq!(s.prefs().interface.appearance_mode, mode);
+        assert_eq!(s.prefs().interface.dark_theme, dark);
+        assert_eq!(s.prefs().interface.light_theme, light);
+    }
+}
+
+#[test]
+fn appearance_choices_validate_and_legacy_theme_still_selects() {
+    let mut s = Session::new();
+    s.execute("prefs.set", json!({"values": {"interface.appearanceMode": "auto", "interface.darkTheme": "studio", "interface.lightTheme": "classic"}}))
+        .unwrap();
+    assert_eq!(s.prefs().interface.appearance_mode, AppearanceMode::Auto);
+    assert_eq!(s.prefs().interface.dark_theme, DarkTheme::Studio);
+    assert_eq!(s.prefs().interface.light_theme, LightTheme::Classic);
+    let mut restarted = Session::new();
+    restarted.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert_eq!(restarted.prefs().interface, s.prefs().interface);
+    assert!(s.execute("prefs.set", json!({"path": "interface.darkTheme", "value": "classic"})).is_err());
+    s.execute("prefs.set", json!({"path": "interface.theme", "value": "pro"})).unwrap();
+    assert_eq!(s.prefs().interface.appearance_mode, AppearanceMode::Dark);
+    assert_eq!(s.prefs().interface.dark_theme, DarkTheme::Pro);
+    assert_eq!(s.prefs().interface.light_theme, LightTheme::Classic);
+    s.execute("prefs.set", json!({"path": "interface", "value": {"theme": "studioLight"}})).unwrap();
+    assert_eq!(s.prefs().interface.appearance_mode, AppearanceMode::Light);
+    assert_eq!(s.prefs().interface.light_theme, LightTheme::StudioLight);
+    assert_eq!(s.prefs().interface.dark_theme, DarkTheme::Pro);
+}
+
+#[test]
 fn get_set_reset_by_path() {
     let mut s = session();
     assert_eq!(s.execute("prefs.get", json!({"path": "performance.historyStates"})).unwrap(), json!(50));
