@@ -145,7 +145,7 @@ fn dragging_opacity_and_fill_labels_scrubs_percentages_in_one_history_step() {
         let mut h = harness();
         // The label, not the adjacent spin button or popup arrow, is the drag target.
         let rect = h
-            .query_all_by_role(Role::StaticText)
+            .query_all_by_role(Role::Label)
             .find(|node| {
                 let label = node.accesskit_node().label();
                 let with_colon = format!("{name}:");
