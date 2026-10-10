@@ -900,6 +900,13 @@ fn humanize(key: &str) -> String {
     if key == "webpQuality" {
         return "Quality".into();
     }
+    // The auto-hide notice settings read best with their own labels (Interface › Notification, #2022).
+    if key == "notificationAutoHide" {
+        return "Auto Hide Notifications".into();
+    }
+    if key == "notificationDurationSeconds" {
+        return "Notification Duration (seconds)".into();
+    }
     let mut s = String::new();
     for (i, ch) in key.chars().enumerate() {
         if i == 0 {

@@ -238,6 +238,11 @@ pub struct Interface {
     /// own one-row title bar (tiling window managers, desktops that draw their own decorations;
     /// #1271, #1316). Read when the app starts. macOS always uses the system's.
     pub system_title_bar: bool,
+    /// Notices (the lower-right cards) hide themselves after
+    /// [`Interface::notification_duration_seconds`] unless the pointer rests on them (#2022).
+    pub notification_auto_hide: bool,
+    /// Seconds a notice stays on screen before it hides itself (Auto Hide Notifications).
+    pub notification_duration_seconds: u32,
 }
 
 impl Default for Interface {
@@ -259,6 +264,8 @@ impl Default for Interface {
             show_tooltips: true,
             show_bounding_box_when_dragging_layer: false,
             system_title_bar: false,
+            notification_auto_hide: true,
+            notification_duration_seconds: 6,
         }
     }
 }
@@ -945,6 +952,7 @@ pub fn range(path: &str) -> Option<(f64, f64)> {
     Some(match path {
         "fileHandling.autosaveMinutes" => (1.0, 240.0),
         "fileHandling.recentFileCount" => (0.0, 100.0),
+        "interface.notificationDurationSeconds" => (1.0, 120.0),
         "export.jpegQuality" | "export.webpQuality" => (1.0, 100.0),
         "performance.memoryUsageMb" => (256.0, 1_048_576.0),
         "performance.historyStates" => (1.0, 1000.0),

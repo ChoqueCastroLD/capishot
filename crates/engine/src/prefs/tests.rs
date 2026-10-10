@@ -404,6 +404,36 @@ fn gpu_backend_round_trips_and_validates() {
     }
 }
 
+/// #2022: notices auto-hide after a user-set delay by default; both settings round-trip.
+#[test]
+fn notification_autohide_preferences() {
+    let p = Preferences::default();
+    assert!(p.interface.notification_auto_hide);
+    assert_eq!(p.interface.notification_duration_seconds, 6);
+    assert_eq!(range("interface.notificationDurationSeconds"), Some((1.0, 120.0)));
+
+    let mut s = Session::new();
+    s.execute("prefs.set", json!({"path": "interface.notificationAutoHide", "value": false})).unwrap();
+    s.execute("prefs.set", json!({"path": "interface.notificationDurationSeconds", "value": 30})).unwrap();
+    assert!(!s.prefs().interface.notification_auto_hide);
+    assert_eq!(s.prefs().interface.notification_duration_seconds, 30);
+    // Out-of-range and wrong-typed values are rejected and change nothing.
+    for bad in [json!(0), json!(121), json!("soon")] {
+        assert!(s.execute("prefs.set", json!({"path": "interface.notificationDurationSeconds", "value": bad})).is_err());
+    }
+    assert_eq!(s.prefs().interface.notification_duration_seconds, 30);
+
+    let mut t = Session::new();
+    t.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert!(!t.prefs().interface.notification_auto_hide);
+    assert_eq!(t.prefs().interface.notification_duration_seconds, 30);
+    // Older files without the settings keep the defaults.
+    let mut u = Session::new();
+    u.load_prefs_json(r#"{"interface": {"theme": "studio"}}"#).unwrap();
+    assert!(u.prefs().interface.notification_auto_hide);
+    assert_eq!(u.prefs().interface.notification_duration_seconds, 6);
+}
+
 #[test]
 fn linux_only_preferences_show_only_on_linux() {
     assert_eq!(is_hidden("performance.linuxDisplayServer"), !cfg!(target_os = "linux"));

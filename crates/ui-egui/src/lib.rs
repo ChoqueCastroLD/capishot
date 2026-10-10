@@ -408,6 +408,10 @@ pub struct PhotocraftApp {
     pub live_adjust: Option<(photocraft_doc::LayerId, Value)>,
     /// Frames rendered (for tests and the status bar).
     pub frame: u64,
+    /// The pointer rested on the notice stack last frame. Used to give a fresh auto-hide delay in
+    /// the frame the pointer leaves, so a long stationary hover never counts as elapsed time
+    /// (#2022); set by `notices::show`.
+    pub(crate) notices_hovered: bool,
     /// Apply theme on first frame.
     styled: bool,
     /// Whether the window uses an integrated (transparent) macOS title bar.
@@ -574,6 +578,7 @@ impl PhotocraftApp {
             input_waiters: Vec::new(),
             live_adjust: None,
             frame: 0,
+            notices_hovered: false,
             styled: false,
             integrated_titlebar: false,
             custom_titlebar: false,
