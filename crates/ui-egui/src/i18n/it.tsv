@@ -2430,6 +2430,8 @@ fontWeight	Italic	Corsivo
 	Create Ellipse	Crea ellisse
 	Create Triangle	Crea triangolo
 	Create Polygon	Crea poligono
+	Pressure curve	Curva di pressione
+	Click to add a point, right-click to remove	Fai clic per aggiungere un punto, clic destro per rimuoverlo
 	Some brush presets could not be loaded	Impossibile caricare alcuni predefiniti pennello
 	Retry saving presets	Riprova a salvare i predefiniti
 	Brush preset changes are not saved: {error}	Le modifiche ai predefiniti pennello non sono salvate: {error}

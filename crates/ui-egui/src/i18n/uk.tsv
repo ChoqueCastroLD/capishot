@@ -3468,6 +3468,8 @@ cameraRaw	Masking	Маскування
 	Create Ellipse	Створити еліпс
 	Create Triangle	Створити трикутник
 	Create Polygon	Створити багатокутник
+	Pressure curve	Крива натиску
+	Click to add a point, right-click to remove	Клацніть, щоб додати точку; клацання правою кнопкою вилучає її
 	Some brush presets could not be loaded	Не вдалося завантажити деякі набори пензлів
 	Retry saving presets	Повторити збереження наборів
 	Brush preset changes are not saved: {error}	Зміни наборів пензлів не збережено: {error}

@@ -2360,6 +2360,8 @@ fontWeight	Italic	Kurzíva
 	Create Ellipse	Vytvořit elipsu
 	Create Triangle	Vytvořit trojúhelník
 	Create Polygon	Vytvořit mnohoúhelník
+	Pressure curve	Křivka přítlaku
+	Click to add a point, right-click to remove	Kliknutím přidáte bod, pravým tlačítkem bod odeberete
 	Some brush presets could not be loaded	Některé předvolby štětců se nepodařilo načíst
 	Retry saving presets	Zkusit znovu uložit předvolby
 	Brush preset changes are not saved: {error}	Změny předvoleb štětců nejsou uloženy: {error}

@@ -2768,6 +2768,8 @@ fontWeight	Italic	Miring
 	Create Ellipse	Buat Elips
 	Create Triangle	Buat Segitiga
 	Create Polygon	Buat Poligon
+	Pressure curve	Kurva tekanan
+	Click to add a point, right-click to remove	Klik untuk menambah titik, klik kanan untuk menghapusnya
 	Some brush presets could not be loaded	Beberapa preset kuas tidak dapat dimuat
 	Retry saving presets	Coba simpan preset lagi
 	Brush preset changes are not saved: {error}	Perubahan preset kuas belum disimpan: {error}

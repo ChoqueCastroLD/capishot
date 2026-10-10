@@ -3384,6 +3384,8 @@ fontWeight	Italic	斜体
 	Create Ellipse	楕円を作成
 	Create Triangle	三角形を作成
 	Create Polygon	多角形を作成
+	Pressure curve	筆圧カーブ
+	Click to add a point, right-click to remove	クリックでポイントを追加、右クリックで削除
 	Some brush presets could not be loaded	一部のブラシプリセットを読み込めませんでした
 	Retry saving presets	プリセットの保存を再試行
 	Brush preset changes are not saved: {error}	ブラシプリセットの変更は保存されていません：{error}

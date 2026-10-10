@@ -3471,6 +3471,8 @@ fontWeight	Thin	Πολύ λεπτά
 	Create Ellipse	Δημιουργία έλλειψης
 	Create Triangle	Δημιουργία τριγώνου
 	Create Polygon	Δημιουργία πολυγώνου
+	Pressure curve	Καμπύλη πίεσης
+	Click to add a point, right-click to remove	Κάντε κλικ για να προσθέσετε σημείο, δεξί κλικ για να το αφαιρέσετε
 	Some brush presets could not be loaded	Ορισμένες προεπιλογές πινέλων δεν ήταν δυνατό να φορτωθούν
 	Retry saving presets	Επανάληψη αποθήκευσης προεπιλογών
 	Brush preset changes are not saved: {error}	Οι αλλαγές στις προεπιλογές πινέλων δεν αποθηκεύτηκαν: {error}

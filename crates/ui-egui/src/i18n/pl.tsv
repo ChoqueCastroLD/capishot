@@ -3383,6 +3383,8 @@ cameraRaw	Roughness	Chropowatość
 	Create Ellipse	Utwórz elipsę
 	Create Triangle	Utwórz trójkąt
 	Create Polygon	Utwórz wielokąt
+	Pressure curve	Krzywa nacisku
+	Click to add a point, right-click to remove	Kliknij, aby dodać punkt; kliknij prawym przyciskiem, aby go usunąć
 	Some brush presets could not be loaded	Nie udało się wczytać niektórych ustawień predefiniowanych pędzli
 	Retry saving presets	Ponów zapisywanie ustawień predefiniowanych
 	Brush preset changes are not saved: {error}	Zmiany w ustawieniach predefiniowanych pędzli nie zostały zapisane: {error}

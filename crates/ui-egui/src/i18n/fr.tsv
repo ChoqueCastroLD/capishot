@@ -2781,6 +2781,8 @@ fontWeight	Italic	Italique
 	Create Ellipse	Créer une ellipse
 	Create Triangle	Créer un triangle
 	Create Polygon	Créer un polygone
+	Pressure curve	Courbe de pression
+	Click to add a point, right-click to remove	Cliquez pour ajouter un point, clic droit pour le supprimer
 	Some brush presets could not be loaded	Certains paramètres prédéfinis de forme n'ont pas pu être chargés
 	Retry saving presets	Réessayer d'enregistrer les paramètres prédéfinis
 	Brush preset changes are not saved: {error}	Les modifications des paramètres prédéfinis de forme ne sont pas enregistrées : {error}

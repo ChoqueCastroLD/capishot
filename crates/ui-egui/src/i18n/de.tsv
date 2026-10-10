@@ -2399,6 +2399,8 @@ fontWeight	Italic	Kursiv
 	Create Ellipse	Ellipse erstellen
 	Create Triangle	Dreieck erstellen
 	Create Polygon	Polygon erstellen
+	Pressure curve	Druckkurve
+	Click to add a point, right-click to remove	Klicken fügt einen Punkt hinzu, Rechtsklick entfernt ihn
 	Some brush presets could not be loaded	Einige Pinselvorgaben konnten nicht geladen werden
 	Retry saving presets	Speichern der Vorgaben erneut versuchen
 	Brush preset changes are not saved: {error}	Änderungen an Pinselvorgaben sind nicht gespeichert: {error}
