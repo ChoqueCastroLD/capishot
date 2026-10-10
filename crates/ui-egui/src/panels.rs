@@ -979,7 +979,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                 ),
                             );
                         } else if app.ui.tool == Tool::Lasso {
-                            hint(ui, tl!("Hold Alt while drawing for straight segments"));
+                            hint(ui, &crate::shortcuts::os_text(tl!("Hold Alt while drawing for straight segments")));
                         }
                         if app.ui.tool == Tool::MagneticLasso && app.ui.magnetic.active() {
                             hint(
@@ -1224,7 +1224,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     Tool::Lasso | Tool::PolygonLasso => hint(
                         ui,
                         &crate::i18n::fmt(
-                            tl!("Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts"),
+                            &crate::shortcuts::os_text(tl!("Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts")),
                             &[("add", &crate::shortcuts::pretty("Shift")), ("sub", &crate::shortcuts::pretty("Alt"))],
                         ),
                     ),
