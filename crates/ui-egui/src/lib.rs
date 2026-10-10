@@ -109,6 +109,7 @@ mod opacity_keys;
 pub mod outline;
 pub mod paint_mouse;
 pub mod palette;
+mod panel_docking;
 pub mod panels;
 pub mod parity;
 pub mod patch_preview;
@@ -763,6 +764,9 @@ impl PhotocraftApp {
             && let Some(authorize) = self.services.automation_command.as_ref()
         {
             authorize(id, &params)?;
+        }
+        if let Some(result) = panel_docking::command(self, id, &params) {
+            return result;
         }
         if let Some(r) = transform_tool::intercept(self, id) {
             return r;
@@ -1464,7 +1468,7 @@ impl PhotocraftApp {
             if self.ui.vector_mask_target && !mask_thumbs_ui::has_vector_mask(st) {
                 self.ui.vector_mask_target = false;
             }
-            if self.ui.mask_target && !st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| l.mask.is_some()) {
+            if self.ui.mask_target && st.active_layer.and_then(|id| st.doc.layer(id)).is_none_or(|l| l.mask.is_none()) {
                 self.ui.mask_target = false;
             }
         }
@@ -1513,6 +1517,7 @@ impl PhotocraftApp {
 
     pub(crate) fn apply_theme(&mut self, ctx: &egui::Context, kind: theme::ThemeKind) {
         self.ui.theme = kind;
+        panel_docking::sync_visibility(self);
         theme::apply(ctx, kind);
         self.checker = None;
     }

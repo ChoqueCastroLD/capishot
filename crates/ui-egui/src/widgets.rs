@@ -56,6 +56,7 @@ pub struct CardResponse {
     /// Rects of the tabs on the strip, `(tab index, rect)`; tabs that don't fit are in the
     /// chevron menu instead (#151).
     pub tabs: Vec<(usize, Rect)>,
+    pub responses: Vec<(usize, Response)>,
     /// The » overflow button, when some tabs didn't fit.
     pub chevron: Option<Rect>,
 }
@@ -96,6 +97,7 @@ pub fn card_ex(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, colla
                 tab_double_clicked: tabs_out.double_clicked,
                 tab_context: tabs_out.context,
                 tabs: tabs_out.tabs,
+                responses: tabs_out.responses,
                 chevron: tabs_out.chevron,
             }
         })
@@ -168,6 +170,7 @@ fn pro_panel(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize, collaps
         tab_double_clicked: tabs_out.double_clicked,
         tab_context: tabs_out.context,
         tabs: tabs_out.tabs,
+        responses: tabs_out.responses,
         chevron: tabs_out.chevron,
     }
 }

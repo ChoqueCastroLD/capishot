@@ -2984,3 +2984,15 @@ fontWeight	Italic	기울임
 	Quick Selection found nothing there	빠른 선택으로 해당 위치에서 아무것도 찾지 못했습니다
 	Object Selection found nothing there — try a tighter rectangle	개체 선택으로 해당 위치에서 아무것도 찾지 못했습니다 — 더 좁은 사각형을 사용해 보세요
 	No subject found — try a rectangle around the object	피사체를 찾을 수 없습니다 — 개체 주위에 사각형을 그려 보세요
+# Shared panel docking
+	Activate Panel	패널 활성화
+	Change Panel Group	패널 그룹 변경
+	Change Panel Layout	패널 레이아웃 변경
+	Close Panel	패널 닫기
+	Dock Panel	패널 도킹
+	Float Panel	패널 띄우기
+	Move Panel	패널 이동
+	Group with	다음과 그룹화
+	Panel menu	패널 메뉴
+	Resize panel window	패널 창 크기 조절
+	Resize panels	패널 크기 조절

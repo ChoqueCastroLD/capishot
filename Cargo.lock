@@ -1122,6 +1122,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-ui"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=b1406e3e6a6f48a88509df6bbcdb0d07ab91cc2f#b1406e3e6a6f48a88509df6bbcdb0d07ab91cc2f"
+dependencies = [
+ "egui",
+ "serde",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4554,6 +4563,7 @@ name = "photocraft-ui-egui"
 version = "0.6.0"
 dependencies = [
  "base64",
+ "craft-ui",
  "eframe",
  "egui",
  "egui_extras",

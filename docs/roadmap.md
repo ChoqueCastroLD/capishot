@@ -1,5 +1,11 @@
 # Roadmap
 
+- UI.5: Panels can detach, join other tab groups, split, resize and redock through shared docking transactions. Custom layouts persist with workspaces, respect workspace locking, and retain collapse flags for intact native groups.
+
+- UI.3: Shared icons, accessible icon buttons and panel tabs come from the pinned `craft-ui` library. Tab overflow stays within narrow panels; document tiling uses bounded shared geometry. Palettes and document commands remain app-owned. Existing strict-Clippy boolean/range warnings are corrected.
+
+- UI.4: Compact toolbars keep colour and mode controls visible while tool rows scroll. Long tool-options rows scroll horizontally and reveal keyboard focus; offscreen geometry and interaction regressions cover all themes and 1×/1.5×/2× display scales.
+
 Status legend: ✅ done · 🟡 in progress · ⬜ not started. Updated 2026-10-08.
 
 **Parity metrics.** `cargo xtask parity` measures how much of Photoshop's menu tree is *wired to a

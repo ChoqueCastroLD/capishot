@@ -2474,3 +2474,15 @@ fontWeight	Italic	Cursiva
 	Quick Selection found nothing there	Selección rápida no encontró nada ahí
 	Object Selection found nothing there — try a tighter rectangle	Selección de objeto no encontró nada ahí — pruebe un rectángulo más ajustado
 	No subject found — try a rectangle around the object	No se encontró ningún sujeto — pruebe un rectángulo alrededor del objeto
+# Shared panel docking
+	Activate Panel	Activar panel
+	Change Panel Group	Cambiar grupo de paneles
+	Change Panel Layout	Cambiar disposición de paneles
+	Close Panel	Cerrar panel
+	Dock Panel	Acoplar panel
+	Float Panel	Panel flotante
+	Move Panel	Mover panel
+	Group with	Agrupar con
+	Panel menu	Menú del panel
+	Resize panel window	Cambiar tamaño de la ventana del panel
+	Resize panels	Cambiar tamaño de los paneles
