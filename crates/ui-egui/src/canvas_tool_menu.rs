@@ -24,7 +24,9 @@ pub struct CanvasToolMenu {
 /// One menu row: label and command id. `None` is a separator.
 pub type Row = Option<(&'static str, &'static str)>;
 
-/// Right-click while transforming: what the box's handles do.
+/// Right-click while transforming, in Photoshop's order: what the box's handles do, Warp,
+/// Content-Aware Scale (applies the box first), and the turns and flips, which act on the box
+/// (`transform_tool::BOX_PRESETS`).
 pub const TRANSFORM_MENU: &[Row] = &[
     Some(("Free Transform", "edit.freeTransform")),
     Some(("Scale", "edit.transform.scale")),
@@ -32,6 +34,16 @@ pub const TRANSFORM_MENU: &[Row] = &[
     Some(("Skew", "edit.transform.skew")),
     Some(("Distort", "edit.transform.distort")),
     Some(("Perspective", "edit.transform.perspective")),
+    Some(("Warp", "edit.transform.warp")),
+    None,
+    Some(("Content-Aware Scale", "edit.contentAwareScale")),
+    None,
+    Some(("Rotate 180°", "edit.transform.rotate180")),
+    Some(("Rotate 90° Clockwise", "edit.transform.rotate90Cw")),
+    Some(("Rotate 90° Counter Clockwise", "edit.transform.rotate90Ccw")),
+    None,
+    Some(("Flip Horizontal", "edit.transform.flipHorizontal")),
+    Some(("Flip Vertical", "edit.transform.flipVertical")),
 ];
 
 /// Photoshop's selection-tool context menu with an active selection, in its order. Its Generative
@@ -140,9 +152,14 @@ pub fn available(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) -> b
 /// Is `command` the transform box's current mode (checked in the transform menu)?
 /// Scale and Rotate are Free Transform's mode, so only Free Transform shows it checked.
 fn mode_checked(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) -> bool {
-    menu.transform
-        && !matches!(command, "edit.transform.scale" | "edit.transform.rotate")
-        && app.ui.transform.as_ref().is_some_and(|t| t.mode == crate::state::TransformMode::for_command(command))
+    let Some(t) = app.ui.transform.as_ref().filter(|_| menu.transform) else { return false };
+    match command {
+        "edit.transform.warp" => t.warp.is_some(),
+        "edit.freeTransform" | "edit.transform.skew" | "edit.transform.distort" | "edit.transform.perspective" => {
+            t.warp.is_none() && t.mode == crate::state::TransformMode::for_command(command)
+        }
+        _ => false,
+    }
 }
 
 /// Right-click over a Free Transform box: its modes.
@@ -212,6 +229,10 @@ pub fn choose(app: &mut PhotocraftApp, ctx: &Context, command: &str) {
     let Some(menu) = app.ui.canvas_tool_menu.take() else { return };
     if !available(app, &menu, command) {
         return;
+    }
+    // Content-Aware Scale is its own mode: the box's transform is applied first.
+    if menu.transform && command == "edit.contentAwareScale" {
+        crate::transform_tool::commit(app);
     }
     let result = if menu.tool == Tool::Pen && !menu.transform {
         choose_pen(app, ctx, &menu, command)
