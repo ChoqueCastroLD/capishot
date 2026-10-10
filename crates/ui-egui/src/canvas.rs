@@ -3352,7 +3352,17 @@ fn draw_tool_state(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform,
     if !app.ui.polygon.is_empty() {
         let mut pts: Vec<Pos2> = app.ui.polygon.iter().map(|p| xf.to_screen(p[0] as f32, p[1] as f32)).collect();
         if let Some(h) = hover {
-            pts.push(h);
+            // The rubber-band preview must use the same constrained point as the click,
+            // including when the canvas is zoomed, rotated or flipped.
+            let mods = painter.ctx().input(|i| i.modifiers);
+            if app.ui.tool == Tool::PolygonLasso && mods.shift && !mods.alt {
+                let raw = xf.to_doc(h);
+                let last = app.ui.polygon.last().copied().unwrap_or(raw);
+                let snapped = constrained_polygon_point(last, raw);
+                pts.push(xf.to_screen(snapped[0] as f32, snapped[1] as f32));
+            } else {
+                pts.push(h);
+            }
         }
         // Just the outline and its rubber band: the vertices aren't handles to grab.
         crate::tool_feedback::draw_ants(painter, &pts, false);
@@ -4216,6 +4226,22 @@ pub(crate) fn selection_mode(app: &PhotocraftApp, m: egui::Modifiers) -> &'stati
     crate::tool_feedback::document_selection_mode(app, Tool::Lasso, m)
 }
 
+/// Shift constrains a Polygonal Lasso segment to Photoshop's 45° directions.
+/// Work in document coordinates so zoom, view rotation and mirroring cannot skew it.
+pub(crate) fn constrained_polygon_point(from: [f64; 2], point: [f64; 2]) -> [f64; 2] {
+    let dx = point[0] - from[0];
+    let dy = point[1] - from[1];
+    if !dx.is_finite() || !dy.is_finite() {
+        return point;
+    }
+    let length = dx.hypot(dy);
+    if length == 0.0 {
+        return point;
+    }
+    let angle = (dy.atan2(dx) / std::f64::consts::FRAC_PI_4).round() * std::f64::consts::FRAC_PI_4;
+    [from[0] + length * angle.cos(), from[1] + length * angle.sin()]
+}
+
 /// A polygonal lasso click adds a vertex; clicking near the first vertex closes the polygon. The
 /// first click fixes the selection mode; a new-selection polygon hides the old outline while it is
 /// drawn, and replaces it in one history step when it closes.
@@ -4235,7 +4261,10 @@ fn polygon_click(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers)
         let intent = if nothing_selected { egui::Modifiers { alt: false, ..mods } } else { mods };
         app.ui.polygon_mode = selection_mode(app, intent).into();
     }
-    app.ui.polygon.push([x, y]);
+    // Only constrain segments after the first vertex; the first click still sets selection intent.
+    // Alt-drag is freehand and must not snap to an angle.
+    let point = if mods.shift && !mods.alt { app.ui.polygon.last().copied().map_or([x, y], |last| constrained_polygon_point(last, [x, y])) } else { [x, y] };
+    app.ui.polygon.push(point);
 }
 
 /// Remove the Polygonal Lasso's last vertex (⌫, Delete or a right-click while drawing, #1229);
