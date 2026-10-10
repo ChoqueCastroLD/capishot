@@ -8,6 +8,23 @@ use crate::theme::{self, Tokens};
 mod color_count;
 pub use color_count::color_count_row;
 
+/// Match the Spectrum application-menu padding and blue/white hover state in
+/// secondary menus (status bar, dock hamburger, layer context menus; #2187).
+/// The setting is local to this popup's Ui and leaves other themes unchanged.
+pub fn style_spectrum_popup_menu(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    if !t.pro {
+        return;
+    }
+    ui.spacing_mut().button_padding = vec2(10.0, 4.0);
+    let v = &mut ui.style_mut().visuals;
+    v.widgets.hovered.weak_bg_fill = t.accent;
+    v.widgets.hovered.bg_fill = t.accent;
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+    v.widgets.hovered.bg_stroke = Stroke::NONE;
+    v.widgets.hovered.corner_radius = CornerRadius::same(3);
+}
+
 /// An accent insertion line on one edge of `r` while a drag hovers it (vertical: on its left or,
 /// `after`, right edge; else on its top or bottom).
 pub fn drop_line(ui: &Ui, r: Rect, after: bool, vertical: bool, t: &Tokens) {
