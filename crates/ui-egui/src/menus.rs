@@ -448,6 +448,14 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             *slot = !*slot;
             Ok(json!(*slot))
         }
+        // Distort / Perspective / Warp of live type: "Rasterize the type?" first, as Photoshop.
+        t if crate::rasterize_prompt::TRANSFORM_COMMANDS.contains(&t)
+            && params.as_object().is_none_or(|o| o.is_empty())
+            && crate::rasterize_prompt::transform_needs(app).is_some() =>
+        {
+            let layer = crate::rasterize_prompt::transform_needs(app).ok_or("no type layer")?;
+            Ok(json!({"dialog": crate::rasterize_prompt::open_for_transform(app, layer, t)}))
+        }
         "edit.freeTransform"
         | "edit.transform.scale"
         | "edit.transform.rotate"
