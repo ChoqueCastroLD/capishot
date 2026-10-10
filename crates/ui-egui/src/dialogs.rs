@@ -161,7 +161,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ui.add_space(8.0);
             crate::field_tab::begin(ui.ctx());
             match d.kind {
-                DialogKind::NewDocument => crate::new_doc_ui::body(app, ui, &mut fields),
+                DialogKind::NewDocument => {
+                    if crate::new_doc_ui::body(app, ui, &mut fields) {
+                        outcome = Some(true);
+                    }
+                }
                 DialogKind::About if fields.get("systemInfo").and_then(Value::as_bool) == Some(true) => {
                     let lines = crate::gpu_status::system_info(app);
                     for l in &lines {
