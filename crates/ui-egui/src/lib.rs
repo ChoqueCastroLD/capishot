@@ -880,6 +880,10 @@ impl PhotocraftApp {
         }
         self.canvases.retain(|(doc, _), _| ids.contains(doc));
         self.navigator_textures.retain(|doc, _| ids.contains(doc));
+        // Preferences › Units & Rulers › Show Rulers in New Documents.
+        if self.session.prefs().units_and_rulers.show_rulers_in_new_documents && ids.iter().any(|id| !self.view_docs.contains(id)) {
+            self.ui.extras.rulers = true;
+        }
         self.view_docs = ids;
         self.prune_thumbs();
         self.sync_mask_targets();

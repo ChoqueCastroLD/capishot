@@ -2692,3 +2692,4 @@ fontWeight	Italic	Курсив
 	Layer deleted, but confirmation preference could not be saved: {error}	Слой удалён, но не удалось сохранить настройку подтверждения: {error}
 	Copy Layers	Копировать слои
 	Paste Layers	Вставить слои
+	Show rulers in new documents	Показывать линейки в новых документах
