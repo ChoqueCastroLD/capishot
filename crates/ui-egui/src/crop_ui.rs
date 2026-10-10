@@ -1200,6 +1200,7 @@ mod tests {
             "file.new",
             "file.open",
             "file.openAs",
+            "file.openExrParts",
             "file.closeAll",
             "file.revert",
             "file.export.exportAs",
