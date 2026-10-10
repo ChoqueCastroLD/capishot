@@ -295,6 +295,28 @@ fn current_text(app: &PhotocraftApp, id: LayerId) -> Option<String> {
     Some(text_layer(&app.session.active()?.doc, id)?.text.clone())
 }
 
+/// The selected characters, clamped after undo/redo may have shortened the text.
+pub(crate) fn selected_range(app: &PhotocraftApp) -> Option<[usize; 2]> {
+    let ed = app.ui.text_edit.as_ref()?;
+    let n = text_layer(&app.session.active()?.doc, LayerId(ed.layer))?.text.chars().count();
+    let (a, b) = (ed.caret.min(ed.anchor).min(n), ed.caret.max(ed.anchor).min(n));
+    (a < b).then_some([a, b])
+}
+
+/// Shared by the clipboard Cut event and Edit > Cut during a type edit.
+pub(crate) fn cut_selection(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let Some([a, b]) = selected_range(app) else { return };
+    let Some(ed) = app.ui.text_edit.as_ref() else { return };
+    let Some(st) = app.session.active() else { return };
+    let Some(text) = text_layer(&st.doc, LayerId(ed.layer)) else { return };
+    ctx.copy_text(text.text.chars().skip(a).take(b - a).collect());
+    if let Some(ed) = app.ui.text_edit.as_mut() {
+        ed.anchor = a;
+        ed.caret = b;
+    }
+    insert(app, "");
+}
+
 /// Replace the selection with `s`.
 fn insert(app: &mut PhotocraftApp, s: &str) {
     let Some(ed) = app.ui.text_edit.clone() else { return };
@@ -460,14 +482,12 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
             egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => ime_update(app, text, false),
             egui::Event::Ime(egui::ImeEvent::Commit(s)) => ime_update(app, s, true),
             egui::Event::Ime(_) => {}
-            egui::Event::Copy | egui::Event::Cut => {
+            egui::Event::Copy => {
                 if a < b {
                     ctx.copy_text(text.chars().skip(a).take(b - a).collect());
-                    if matches!(ev, egui::Event::Cut) {
-                        insert(app, "");
-                    }
                 }
             }
+            egui::Event::Cut => cut_selection(app, ctx),
             egui::Event::Key { key, pressed: true, modifiers: m, .. } => {
                 use egui::Key;
                 let key = &flow_key(*key, vertical_flow);
