@@ -227,6 +227,26 @@ fn the_hand_tool_does_not_steal_a_free_transform_drag() {
     assert!(width(&h) > 150, "the committed resize applied: {}", width(&h));
 }
 
+/// Holding Space (the temporary Hand, #249) still pans the view while a Free Transform box is open,
+/// rather than resizing it (#2302 review): only the selected Hand yields to the box.
+#[test]
+fn holding_space_still_pans_while_transforming() {
+    let mut h = harness();
+    begin(&mut h);
+    let q0 = quad(&h);
+    let center0 = h.state().ui.views[0].center;
+    let space = |h: &mut Harness<'static, PhotocraftApp>, down: bool| {
+        h.event(egui::Event::Key { key: Key::Space, physical_key: None, pressed: down, repeat: false, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+    };
+    space(&mut h, true);
+    drag(&mut h, q0[2], [300.0, 220.0]);
+    space(&mut h, false);
+    h.run_steps(2);
+    assert!(close(quad(&h), q0), "the space-drag did not touch the box: {:?}", quad(&h));
+    assert_ne!(h.state().ui.views[0].center, center0, "the view panned instead");
+}
+
 /// A transform started by dragging a Move-tool control: that first drag is undoable too.
 #[test]
 fn the_first_drag_from_the_move_tools_controls_undoes() {
