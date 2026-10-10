@@ -2345,6 +2345,7 @@ fontWeight	Italic	斜体
 	Color to Alpha…	颜色转为 Alpha…
 	Transparency Threshold	透明度阈值
 	Opacity Threshold	不透明度阈值
+	PhotoCraft — Screen Color Picker	PhotoCraft — 屏幕取色器
 
 	Rasterize svg groups deeper than	栅格化超过此深度的 SVG 组
 	0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized.	设为 0 可关闭此阈值；嵌套超过 100 层的 SVG 组始终会被栅格化。
