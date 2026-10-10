@@ -40,8 +40,8 @@ pub(crate) fn resolve(s: &Session, id: &str, mut p: Value) -> Result<Value> {
     let found = lib.read_by_id(&lut).map_err(|msg| EngineError::BadParams { cmd: "colorLookup".into(), msg })?;
     let Some((file_name, bytes)) = found else { return Ok(p) };
     // Refuse invalid UTF-8 rather than let the parser's lossy conversion silently change the table.
-    let text = String::from_utf8(bytes)
-        .map_err(|_| EngineError::BadParams { cmd: "colorLookup".into(), msg: format!("{file_name}: LUT must contain UTF-8 text") })?;
+    let text =
+        String::from_utf8(bytes).map_err(|_| EngineError::BadParams { cmd: "colorLookup".into(), msg: format!("{file_name}: LUT must contain UTF-8 text") })?;
     if let Some(obj) = p.as_object_mut() {
         obj.remove("lut");
         obj.insert("data".into(), Value::String(text));
