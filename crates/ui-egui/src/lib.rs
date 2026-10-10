@@ -132,6 +132,7 @@ mod sizing;
 pub mod slice_ui;
 pub mod smart_ui;
 pub mod snap_ui;
+pub(crate) mod solid_fill_ui;
 pub mod state;
 pub mod stroke_constraint;
 pub mod stroke_trail;
@@ -468,6 +469,7 @@ pub struct PhotocraftApp {
     pub(crate) move_mods: move_mods::MoveDrag,
     /// Live Layer Style dialog preview: (key over revision + style fields, preview or validation error).
     pub(crate) style_preview: Option<(u64, Result<std::sync::Arc<Document>, String>)>,
+    pub(crate) solid_fill_preview: Option<solid_fill_ui::Preview>,
     /// Liquify dialog, Puppet Warp and Perspective Warp sessions (distort_ui).
     pub(crate) distort: distort_ui::Distort,
     /// Gradient tool live-mode drags and previews (gradient_ui).
@@ -610,6 +612,7 @@ impl PhotocraftApp {
             transform_preview: None,
             move_mods: Default::default(),
             style_preview: None,
+            solid_fill_preview: None,
             distort: Default::default(),
             gradient: Default::default(),
             camera_raw: None,
@@ -744,6 +747,12 @@ impl PhotocraftApp {
         let params = self.with_mask_target(id, params);
         let params = vector_ui::with_active_path(self, id, params);
         let path_mask = vector_ui::takes_path_mask(id) && params.get("path").is_some_and(|v| !v.is_null());
+        let creates_active_mask =
+            matches!(id, "layer.layerMask.revealAll" | "layer.layerMask.hideAll" | "layer.layerMask.revealSelection" | "layer.layerMask.hideSelection")
+                && self
+                    .session
+                    .active()
+                    .is_some_and(|st| st.active_layer.is_some_and(|layer| params.get("layer").and_then(Value::as_u64).is_none_or(|target| target == layer.0)));
         let r = if id == "actions.play" {
             actions::play(self, &params)
         } else if photocraft_engine::actions_cmds::shell_view_command(id) {
@@ -759,6 +768,11 @@ impl PhotocraftApp {
             // The new layer's vector mask becomes the active path, as in Photoshop: the path it
             // was made from is no longer selected, so the next fill layer isn't masked by it too.
             self.ui.selected_path = Some("layer".into());
+        }
+        if r.is_ok() && creates_active_mask {
+            // Adding a mask selects its thumbnail: the next brush or footer Delete targets it.
+            self.ui.mask_target = true;
+            self.ui.vector_mask_target = false;
         }
         if r.is_ok() && matches!(id, "edit.copy" | "edit.cut" | "edit.copyMerged") {
             self.clip_external = false;
@@ -1357,6 +1371,9 @@ impl PhotocraftApp {
         }
         if self.ui.vector_mask_target && !mask_thumbs_ui::has_vector_mask(st) {
             self.ui.vector_mask_target = false;
+        }
+        if self.ui.mask_target && !st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| l.mask.is_some()) {
+            self.ui.mask_target = false;
         }
     }
 

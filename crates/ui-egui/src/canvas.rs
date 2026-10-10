@@ -761,6 +761,9 @@ pub(crate) const GPU_OUTPUT: u32 = u32::MAX;
 
 /// The document to render: the committed one, or a clone with the live adjustment preview applied.
 pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>, u64) {
+    if let Some(shown) = crate::solid_fill_ui::display_doc(app, idx) {
+        return shown;
+    }
     if let Some(shown) = crate::type_transform::display_doc(app, idx) {
         return shown;
     }
