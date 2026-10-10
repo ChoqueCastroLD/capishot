@@ -22,6 +22,9 @@ use crate::PhotocraftApp;
 use crate::state::DialogKind;
 use crate::theme::{ThemeKind, Tokens};
 
+#[cfg(not(target_arch = "wasm32"))]
+type DiscoveryResult = std::sync::Arc<std::sync::Mutex<Option<(Vec<crate::Recoverable>, Vec<String>)>>>;
+
 /// Shell runtime state for preferences, autosave and snapping (not serialised).
 #[derive(Default)]
 pub struct Runtime {
@@ -36,7 +39,7 @@ pub struct Runtime {
     #[cfg(not(target_arch = "wasm32"))]
     discovery_pending: Option<JobId>,
     #[cfg(not(target_arch = "wasm32"))]
-    discovery_result: std::sync::Arc<std::sync::Mutex<Option<(Vec<crate::Recoverable>, Vec<String>)>>>,
+    discovery_result: DiscoveryResult,
     recovery_queue: VecDeque<crate::Recoverable>,
     recovery_pending: Option<(JobId, String)>,
     autosaved: HashMap<DocId, CheckpointStamp>,
@@ -319,10 +322,9 @@ fn finish_recovery(app: &mut PhotocraftApp, key: &str, v: &Value) {
         let context: RecoveryContext = serde_json::from_value(v.get("context").cloned().unwrap_or(Value::Null)).unwrap_or_default();
         if let Some(view) =
             context.view.filter(|view| view.zoom.is_finite() && view.zoom > 0.0 && view.zoom <= 64.0 && view.center.iter().all(|n| n.is_finite()))
+            && let Some(target) = app.ui.views.get_mut(index)
         {
-            if let Some(target) = app.ui.views.get_mut(index) {
-                *target = view;
-            }
+            *target = view;
         }
         if context.active {
             app.session.set_active(index);
