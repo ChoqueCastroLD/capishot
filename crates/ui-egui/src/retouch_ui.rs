@@ -27,6 +27,10 @@ pub(crate) fn alt_flipped(tool: Tool, alt: bool) -> Tool {
 pub(crate) fn clone_params(app: &PhotocraftApp) -> Option<Value> {
     let o = &app.ui.tool_options;
     let mut p = json!({"aligned": o.clone_aligned, "sampleLayer": o.clone_sample});
+    if app.ui.tool == Tool::CloneStamp {
+        p["opacity"] = json!(app.session.tools.brush.opacity * 100.0);
+        p["flow"] = json!(app.session.tools.brush.flow * 100.0);
+    }
     // The Clone Source panel's active slot (set by ⌥-click) drives the stroke: the engine keeps
     // the aligned pairing and applies the slot's scale/rotation/flip.
     let slot = app.session.presets.clone.active().source.is_some();
@@ -480,6 +484,25 @@ mod tests {
             assert_eq!(app.session.journal.last().map(|(id, _)| id.as_str()), Some(cmd), "{tool:?} with ⌥");
             assert_eq!(app.ui.tool, tool, "the selected tool stays {tool:?}");
         }
+    }
+
+    #[test]
+    fn clone_stamp_brush_opacity_and_flow_reach_the_painted_pixels() {
+        let mut app = app();
+        app.run("paint.pencil", json!({"points": [[10, 10]], "size": 16, "color": "#ff0000"})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.ui.tool = Tool::CloneStamp;
+        app.ui.clone_source = Some([10.0, 10.0]);
+        app.ui.tool_options.clone_sample = "all".into();
+        app.run("tools.setBrush", json!({"brush": {"opacity": 0.5, "flow": 0.5}})).unwrap();
+        assert!(finish_stroke(&mut app, Tool::CloneStamp, &[[50.0, 30.0, 1.0]], egui::Modifiers::NONE));
+        assert!(!app.ui.status_error, "{}", app.ui.status);
+        let pixel = active(&app).surface().unwrap().rgba(50, 30);
+        assert!(pixel[0] > 0.9 && pixel[3] > 0.0 && pixel[3] < 0.5, "partial-opacity, partial-flow red stamp: {pixel:?}");
+        let (id, params) = app.session.journal.last().unwrap();
+        assert_eq!(id, "paint.cloneStamp");
+        assert_eq!(params["opacity"], 50.0);
+        assert_eq!(params["flow"], 50.0);
     }
 
     #[test]
