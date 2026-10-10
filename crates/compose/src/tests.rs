@@ -309,6 +309,32 @@ fn hue_saturation_roundtrips_and_desaturates() {
 }
 
 #[test]
+fn hue_saturation_colorize_zero_saturation_is_grey() {
+    // Photoshop colourises to grey when the Saturation slider is at 0%, whatever the Hue (#2326).
+    let c = [0.8, 0.3, 0.1];
+    let (_, _, l) = adjust::rgb_to_hsl(c);
+    for hue in [0.0, 200.0, 359.0] {
+        let mut buf = Buffer::filled(Rect::new(0, 0, 1, 1), [c[0], c[1], c[2], 1.0]);
+        adjust::apply(
+            &Adjustment::HueSaturation { hue, saturation: 0.0, lightness: 0.0, colorize: true, ranges: photocraft_doc::adjust::HueRange::defaults() },
+            &mut buf,
+        );
+        let p = buf.px[0];
+        assert!((p[0] - p[1]).abs() < 1e-5 && (p[1] - p[2]).abs() < 1e-5, "hue {hue}: colourless, got {p:?}");
+        assert!((p[0] - l).abs() < 1e-5, "hue {hue}: lightness preserved");
+    }
+    // A low saturation is taken literally, not floored: the result keeps exactly that saturation.
+    let mut buf = Buffer::filled(Rect::new(0, 0, 1, 1), [c[0], c[1], c[2], 1.0]);
+    adjust::apply(
+        &Adjustment::HueSaturation { hue: 200.0, saturation: 10.0, lightness: 0.0, colorize: true, ranges: photocraft_doc::adjust::HueRange::defaults() },
+        &mut buf,
+    );
+    let (h, s, _) = adjust::rgb_to_hsl([buf.px[0][0], buf.px[0][1], buf.px[0][2]]);
+    assert!((s - 0.1).abs() < 1e-4, "saturation 10% honoured, got {s}");
+    assert!((h - 200.0 / 360.0).abs() < 1e-4);
+}
+
+#[test]
 fn solid_and_gradient_fill_layers() {
     let mut d = doc_white(10, 1);
     d.layers.push(Layer::new("fill", LayerContent::Fill(Fill::Solid(Color::rgb(0.0, 0.0, 1.0)))));

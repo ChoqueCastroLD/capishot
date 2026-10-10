@@ -308,7 +308,7 @@ pub fn hue_saturation(c: [f32; 3], hue: f32, s: f32, l: f32, colorize: bool) -> 
     let (mut hh, mut ss, ll) = rgb_to_hsl(c);
     if colorize {
         hh = hue.rem_euclid(360.0) / 360.0;
-        ss = s.abs().max(0.25);
+        ss = s.clamp(0.0, 1.0);
     } else {
         hh = (hh + hue / 360.0).rem_euclid(1.0);
         ss = (ss * (1.0 + s)).clamp(0.0, 1.0);
