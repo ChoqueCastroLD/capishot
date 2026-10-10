@@ -102,6 +102,7 @@ pub mod menu_catalog;
 pub mod menu_nav;
 pub mod menus;
 pub mod monitor_status;
+pub mod move_hover;
 pub mod move_lock;
 pub mod move_mods;
 pub mod move_ui;
@@ -424,6 +425,8 @@ pub struct PhotocraftApp {
     pub(crate) menu_cache: Option<menus::ItemCache>,
     /// Move tool drag shown live (`move_ui`).
     pub(crate) move_preview: Option<move_ui::MovePreview>,
+    /// Move tool › Show Highlight on Rollover: the last hover answer (`move_hover`).
+    pub(crate) move_hover: Option<move_hover::Hover>,
     /// A blend mode hovered in the Layers panel, shown live (`blend_preview`).
     pub(crate) blend_preview: Option<blend_preview::BlendPreview>,
     /// Layers panel drag: temporary reordered document displayed until mouse release.
@@ -630,6 +633,7 @@ impl PhotocraftApp {
             trail: None,
             menu_cache: None,
             move_preview: None,
+            move_hover: None,
             blend_preview: None,
             reorder_preview: None,
             reorder_preview_hit: false,
