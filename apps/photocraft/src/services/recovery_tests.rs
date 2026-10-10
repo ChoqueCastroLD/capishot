@@ -26,7 +26,7 @@ fn recovery_discovers_metadata_before_decoding_and_keeps_a_failed_snapshot() {
     let metadata = std::fs::read(&sidecar).unwrap();
     let mut services = recovery_services(Some(dir.clone()));
 
-    let mut found = services.discover_recovery.as_mut().unwrap()().0;
+    let mut found = services.discover_recovery.as_mut().unwrap()()().0;
     assert_eq!(found.len(), 1, "discovery lists metadata without decoding the corrupt pixels");
     let pending = found.pop().unwrap();
     assert_eq!(pending.key, entry.info.key);
@@ -45,7 +45,7 @@ fn recovery_discovers_metadata_before_decoding_and_keeps_a_failed_snapshot() {
 fn deferred_recovery_preserves_pixels_and_metadata_until_the_adopted_entry_is_discarded() {
     let (dir, doc, entry) = snapshot("valid");
     let mut services = recovery_services(Some(dir.clone()));
-    let mut found = services.discover_recovery.as_mut().unwrap()().0;
+    let mut found = services.discover_recovery.as_mut().unwrap()()().0;
     assert_eq!(found.len(), 1);
     let pending = found.pop().unwrap();
     assert_eq!(pending.key, entry.info.key);

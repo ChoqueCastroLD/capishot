@@ -204,14 +204,37 @@ fn save_file(
     Ok(r.warnings)
 }
 
+fn with_recovery<T>(
+    manager: &std::sync::Mutex<crate::recovery::RecoveryManager>,
+    f: impl FnOnce(&mut crate::recovery::RecoveryManager) -> T,
+) -> Result<T, String> {
+    let mut slot = match manager.try_lock() {
+        Ok(slot) => slot,
+        Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return Err("Recovery discovery is busy; retry shortly".into()),
+    };
+    Ok(f(&mut slot))
+}
+
 fn recovery_services(dir: Option<PathBuf>) -> Services {
-    let manager = Rc::new(RefCell::new(crate::recovery::RecoveryManager::new(dir)));
+    let manager = Arc::new(std::sync::Mutex::new(crate::recovery::RecoveryManager::new(dir.clone())));
     let (queue, discard, poll) = (manager.clone(), manager.clone(), manager.clone());
     Services {
-        autosave: Some(Box::new(move |doc, history, revision, path, key, context| queue.borrow_mut().queue(doc, history, revision, path, key, context))),
-        discard_autosave: Some(Box::new(move |id, key| discard.borrow_mut().discard(id, key))),
-        poll_autosave: Some(Box::new(move || poll.borrow_mut().poll())),
-        discover_recovery: Some(Box::new(move || manager.borrow_mut().discover())),
+        autosave: Some(Box::new(move |doc, history, revision, path, key, context| {
+            with_recovery(&queue, |manager| manager.queue(doc, history, revision, path, key, context))?
+        })),
+        discard_autosave: Some(Box::new(move |id, key| with_recovery(&discard, |manager| manager.discard(id, key))?)),
+        poll_autosave: Some(Box::new(move || with_recovery(&poll, |manager| manager.poll()).unwrap_or_default())),
+        discover_recovery: Some(Box::new(move || {
+            let manager = manager.clone();
+            let dir = dir.clone();
+            Box::new(move || {
+                let Some(dir) = dir else { return (Vec::new(), Vec::new()) };
+                // Large descriptors are parsed on the discovery worker outside the manager lock.
+                let (entries, errors) = photocraft_format::list_recovery_checked(&dir);
+                manager.lock().unwrap_or_else(std::sync::PoisonError::into_inner).claim_discovery(entries, errors)
+            })
+        })),
         ..Default::default()
     }
 }

@@ -37,9 +37,17 @@ impl RecoveryManager {
         Self { dir, prefix: format!("session-{}-{stamp}-{serial}", std::process::id()), next_key: 0, owned: HashMap::new(), locks: HashMap::new() }
     }
 
+    #[cfg(test)]
     pub(crate) fn discover(&mut self) -> (Vec<photocraft_ui_egui::Recoverable>, Vec<String>) {
         let Some(dir) = self.dir.clone() else { return (Vec::new(), Vec::new()) };
-        let (entries, mut errors) = photocraft_format::list_recovery_checked(&dir);
+        let (entries, errors) = photocraft_format::list_recovery_checked(&dir);
+        self.claim_discovery(entries, errors)
+    }
+    pub(crate) fn claim_discovery(
+        &mut self,
+        entries: Vec<photocraft_format::RecoveryEntry>,
+        mut errors: Vec<String>,
+    ) -> (Vec<photocraft_ui_egui::Recoverable>, Vec<String>) {
         let mut documents = Vec::new();
         for entry in entries {
             if let Err(error) = self.lock_key(&entry.info.key) {

@@ -33,6 +33,8 @@ pub struct Runtime {
     save_retry: SaveRetry,
     next_autosave_ms: f64,
     recovery_started: bool,
+    discovery_pending: Option<JobId>,
+    discovery_result: std::sync::Arc<std::sync::Mutex<Option<(Vec<crate::Recoverable>, Vec<String>)>>>,
     recovery_queue: VecDeque<crate::Recoverable>,
     recovery_pending: Option<(JobId, String)>,
     autosaved: HashMap<DocId, CheckpointStamp>,
@@ -55,7 +57,7 @@ pub struct Runtime {
 }
 
 /// Logical history changes such as Purge can occur without a document revision.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 struct CheckpointStamp {
     revision: u64,
     undo: usize,
@@ -188,9 +190,30 @@ fn recovery(app: &mut PhotocraftApp) {
         if app.session.prefs().file_handling.recover_on_launch
             && let Some(discover) = app.services.discover_recovery.as_mut()
         {
-            let (entries, errors) = discover();
-            app.prefs_rt.recovery_queue.extend(entries);
-            app.prefs_rt.recovery_error = (!errors.is_empty()).then(|| errors.join("; "));
+            let discover = discover();
+            let result = app.prefs_rt.discovery_result.clone();
+            let started = app.session.start_job(
+                "file.recoverDiscover",
+                json!({}),
+                "Discovering recovery checkpoints",
+                false,
+                move |ctx| {
+                    ctx.check()?;
+                    ctx.progress(0.0, "Inspecting recovery storage");
+                    let batch = discover();
+                    ctx.check()?;
+                    Ok(batch)
+                },
+                move |_, batch| {
+                    *result.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(batch);
+                    Ok(json!({}))
+                },
+            );
+            match started {
+                Ok(Started::Job(job)) => app.prefs_rt.discovery_pending = Some(job),
+                Ok(Started::Done(_)) => finish_discovery(app),
+                Err(error) => crate::notices::error(app, format!("Recovery discovery failed: {error}")),
+            }
         } else if app.session.prefs().file_handling.recover_on_launch
             && let Some(recover) = app.services.recover.as_mut()
         {
@@ -205,6 +228,15 @@ fn recovery(app: &mut PhotocraftApp) {
                 });
             }
         }
+    }
+    start_next_recovery(app);
+}
+
+fn finish_discovery(app: &mut PhotocraftApp) {
+    let batch = app.prefs_rt.discovery_result.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    if let Some((entries, errors)) = batch {
+        app.prefs_rt.recovery_queue.extend(entries);
+        app.prefs_rt.recovery_error = (!errors.is_empty()).then(|| errors.join("; "));
     }
     start_next_recovery(app);
 }
@@ -244,10 +276,11 @@ fn start_next_recovery(app: &mut PhotocraftApp) {
                 let st = s.active_mut().ok_or(photocraft_engine::EngineError::NoDocument)?;
                 st.saved_revision = 0;
                 let (id, revision) = (st.doc.id, st.revision);
+                let admitted_stamp = CheckpointStamp::of(st, doc.context.clone());
                 if let Some(index) = active.and_then(|id| s.documents().iter().position(|st| st.doc.id == id)) {
                     s.set_active(index);
                 }
-                Ok(json!({"documentId": id.0, "revision": revision, "firstDocument": first, "context": doc.context}))
+                Ok(json!({"documentId": id.0, "revision": revision, "firstDocument": first, "context": doc.context, "admittedStamp": admitted_stamp}))
             },
         );
         match started {
@@ -287,9 +320,19 @@ fn finish_recovery(app: &mut PhotocraftApp, key: &str, v: &Value) {
             }
         }
     }
-    if let Some(index) = app.session.documents().iter().position(|st| st.doc.id == id) {
-        let st = &app.session.documents()[index];
-        app.prefs_rt.autosaved.insert(id, CheckpointStamp::of(st, recovery_context(app, index, st)));
+    if let Some(captured) = v.get("admittedStamp").cloned().and_then(|value| serde_json::from_value::<CheckpointStamp>(value).ok()) {
+        let matches = app.session.documents().iter().find(|st| st.doc.id == id).is_some_and(|st| {
+            let (undo, redo, label) = st.history.checkpoint_signature();
+            st.revision == captured.revision && undo == captured.undo && redo == captured.redo && label == captured.label && st.path == captured.path
+        });
+        if matches {
+            app.prefs_rt.autosaved.insert(id, captured);
+        } else {
+            app.prefs_rt.autosaved.remove(&id);
+            app.prefs_rt.catch_up.insert(id);
+        }
+    } else {
+        app.prefs_rt.catch_up.insert(id);
     }
     let _ = revision;
     if v.get("firstDocument").and_then(Value::as_bool) == Some(true) {
@@ -303,6 +346,19 @@ fn finish_recovery(app: &mut PhotocraftApp, key: &str, v: &Value) {
 /// Recovery uses the existing job polling/progress/cancel path. Its successful result adopts
 /// the original entry on the UI thread, using identity rather than a mutable tab position.
 pub(crate) fn on_recovery_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
+    if app.prefs_rt.discovery_pending == Some(e.id) {
+        app.prefs_rt.discovery_pending = None;
+        match &e.outcome {
+            JobOutcome::Done(_) => finish_discovery(app),
+            JobOutcome::Failed(error) => crate::notices::error(app, format!("Recovery discovery failed: {error}")),
+            JobOutcome::Cancelled => {
+                app.prefs_rt.discovery_result.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+                app.ui.status = "Cancelled recovery discovery".into();
+            }
+        }
+        return true;
+    }
+
     if !app.prefs_rt.recovery_pending.as_ref().is_some_and(|(job, _)| *job == e.id) {
         return false;
     }
@@ -2897,11 +2953,19 @@ mod tests {
         let mut pending = Some(record);
         let services = crate::Services {
             discover_recovery: Some(Box::new(move || {
-                let Some(record) = pending.take() else { return (Vec::new(), Vec::new()) };
-                (
-                    vec![crate::Recoverable { key: record.key.clone(), name: record.document.name.clone(), path: None, load: Box::new(move || Ok(record)) }],
-                    Vec::new(),
-                )
+                let record = pending.take();
+                Box::new(move || {
+                    let Some(record) = record else { return (Vec::new(), Vec::new()) };
+                    (
+                        vec![crate::Recoverable {
+                            key: record.key.clone(),
+                            name: record.document.name.clone(),
+                            path: None,
+                            load: Box::new(move || Ok(record)),
+                        }],
+                        Vec::new(),
+                    )
+                })
             })),
             ..Default::default()
         };

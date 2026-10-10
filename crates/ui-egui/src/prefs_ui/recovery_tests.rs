@@ -26,7 +26,10 @@ fn services(entries: Vec<Recoverable>) -> (Services, RecoveryLog) {
     let discarded = log.clone();
     (
         Services {
-            discover_recovery: Some(Box::new(move || (entries.take().unwrap_or_default(), Vec::new()))),
+            discover_recovery: Some(Box::new(move || {
+                let entries = entries.take().unwrap_or_default();
+                Box::new(move || (entries, Vec::new()))
+            })),
             discard_autosave: Some(Box::new(move |id, _| {
                 discarded.lock().unwrap().push(format!("discard {id}"));
                 Ok(())
@@ -80,7 +83,7 @@ fn recovery_is_deferred_until_after_app_construction() {
     let services = Services {
         discover_recovery: Some(Box::new(move || {
             called.fetch_add(1, Ordering::SeqCst);
-            (Vec::new(), Vec::new())
+            Box::new(|| (Vec::new(), Vec::new()))
         })),
         ..Default::default()
     };
@@ -100,7 +103,15 @@ fn recovery_keeps_frames_and_editing_live_and_adopts_the_admitted_document() {
     let ctx = egui::Context::default();
     assert!(app.session.documents().is_empty());
     frame(&mut app, &ctx);
-    started.recv_timeout(Duration::from_secs(10)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        frame(&mut app, &ctx);
+        if started.try_recv().is_ok() {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
     assert!(app.session.has_jobs());
     assert!(log.lock().unwrap().is_empty());
     // Opening a copy while decoding exercises ID collision handling as well as focus retention.
@@ -143,7 +154,15 @@ fn cancelling_recovery_skips_the_queue_and_never_adopts_a_late_result() {
     let mut app = PhotocraftApp::new(Session::new(), services);
     let ctx = egui::Context::default();
     frame(&mut app, &ctx);
-    started.recv_timeout(Duration::from_secs(10)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        frame(&mut app, &ctx);
+        if started.try_recv().is_ok() {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
     let job = app.session.jobs()[0].id;
     crate::jobs_ui::cancel(&mut app, job);
     frame(&mut app, &ctx);
@@ -184,7 +203,7 @@ fn disabled_recovery_never_discovers_or_decodes_entries() {
         Services {
             discover_recovery: Some(Box::new(move || {
                 called.fetch_add(1, Ordering::SeqCst);
-                (vec![entry("disabled", document("Disabled"))], Vec::new())
+                Box::new(|| (vec![entry("disabled", document("Disabled"))], Vec::new()))
             })),
             ..Default::default()
         },
@@ -196,4 +215,62 @@ fn disabled_recovery_never_discovers_or_decodes_entries() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert!(!app.session.has_jobs());
     assert!(app.session.documents().is_empty());
+}
+
+#[test]
+fn delayed_admission_event_never_acknowledges_later_edit_or_history_purge() {
+    for purge in [false, true] {
+        let queued = Arc::new(Mutex::new(Vec::new()));
+        let saves = queued.clone();
+        let services = Services {
+            autosave: Some(Box::new(move |_, _, revision, _, _, _| {
+                saves.lock().unwrap().push(revision);
+                Ok(())
+            })),
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(Session::new(), services);
+        app.session.add_document(document("Recovered"), None);
+        app.session.execute("edit.fill", json!({"color":"#ff0000"})).unwrap();
+        app.sync_views();
+        let st = app.session.active().unwrap();
+        let id = st.doc.id;
+        let captured = CheckpointStamp::of(st, json!({}));
+        let revision = st.revision;
+        if purge {
+            app.session.active_mut().unwrap().history.clear();
+        } else {
+            app.session.execute("edit.fill", json!({"color":"#0000ff"})).unwrap();
+        }
+        finish_recovery(&mut app, "durable", &json!({"documentId":id.0,"revision":revision,"admittedStamp":captured,"context":{}}));
+        assert!(!app.prefs_rt.autosaved.contains_key(&id));
+        assert!(app.prefs_rt.catch_up.contains(&id));
+        autosave_now(&mut app);
+        tick(&mut app, &egui::Context::default());
+        assert!(!queued.lock().unwrap().is_empty(), "changed state requires a new durable checkpoint");
+    }
+}
+
+#[test]
+fn descriptor_discovery_runs_on_worker_and_frames_remain_live() {
+    let ui_thread = std::thread::current().id();
+    let (started, start) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let mut task = Some(Box::new(move || {
+        assert_ne!(std::thread::current().id(), ui_thread);
+        started.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(10)).unwrap();
+        (Vec::new(), Vec::new())
+    }) as crate::RecoveryDiscovery);
+    let services = Services { discover_recovery: Some(Box::new(move || task.take().unwrap())), ..Default::default() };
+    let mut app = PhotocraftApp::new(Session::new(), services);
+    let ctx = egui::Context::default();
+    frame(&mut app, &ctx);
+    start.recv_timeout(Duration::from_secs(10)).unwrap();
+    for _ in 0..3 {
+        frame(&mut app, &ctx);
+        assert!(app.session.has_jobs());
+    }
+    release.send(()).unwrap();
+    settle(&mut app, &ctx);
 }

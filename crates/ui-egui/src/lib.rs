@@ -237,7 +237,8 @@ pub struct Recoverable {
     pub path: Option<String>,
     pub load: Box<dyn FnOnce() -> Result<RecoveredDocument, String> + Send + 'static>,
 }
-pub type DiscoverRecoveryFn = Box<dyn FnMut() -> (Vec<Recoverable>, Vec<String>)>;
+pub type RecoveryDiscovery = Box<dyn FnOnce() -> (Vec<Recoverable>, Vec<String>) + Send>;
+pub type DiscoverRecoveryFn = Box<dyn FnMut() -> RecoveryDiscovery>;
 /// Queue an immutable document/history checkpoint. Success means accepted, not saved.
 pub type AutosaveFn =
     Box<dyn FnMut(&std::sync::Arc<Document>, photocraft_ops::HistoryCheckpoint, u64, Option<&str>, Option<&str>, serde_json::Value) -> Result<(), String>>;
