@@ -2829,6 +2829,18 @@ fn field_chips(app: &mut PhotocraftApp, ui: &mut egui::Ui, chips: Rect) {
     }
 }
 
+/// Where the dock tells the Color field how tall its group body is.
+pub(crate) fn color_field_fill_id() -> egui::Id {
+    egui::Id::new("color-field-fill-height")
+}
+
+/// Height of the Color field: the group body's height (when docked) less the hex/RGB readout,
+/// which folds onto a second line in a narrow dock. 120 pt when nothing sets a height.
+fn color_field_height(avail: Option<f32>, width: f32) -> f32 {
+    let reserve = 32.0 + if width < 280.0 { 26.0 } else { 0.0 };
+    avail.filter(|a| a.is_finite()).map_or(120.0, |a| (a - reserve).clamp(120.0, 2000.0))
+}
+
 /// Photoshop Color panel: saturation/brightness field + hue strip, drawn as shaded meshes.
 fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
@@ -2842,7 +2854,9 @@ fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     let w = ui.available_width();
     let strip_w = 14.0;
-    let h = 120.0;
+    // Photoshop's Color panel field fills the panel: take the height the dock offers, less the
+    // hex/RGB readout (which folds onto a second line in a narrow dock). Without a dock, 120 pt.
+    let h = color_field_height(ui.data(|d| d.get_temp::<f32>(color_field_fill_id())), w);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let (chips, _) = ui.allocate_exact_size(vec2(38.0, h), Sense::hover());
@@ -3459,6 +3473,17 @@ mod color_tests {
             h.run_steps(2);
         }
         assert_eq!(srgb_bytes(h.state().session.tools.foreground), [0, 255, 0]);
+    }
+
+    /// The Color field fills the dock group, never shrinks below 120 pt, and ignores a bad height.
+    #[test]
+    fn color_field_height_fills_the_group() {
+        assert_eq!(color_field_height(None, 300.0), 120.0);
+        assert_eq!(color_field_height(Some(500.0), 300.0), 468.0);
+        assert_eq!(color_field_height(Some(500.0), 200.0), 442.0);
+        assert_eq!(color_field_height(Some(60.0), 300.0), 120.0);
+        assert_eq!(color_field_height(Some(f32::NAN), 300.0), 120.0);
+        assert_eq!(color_field_height(Some(1.0e9), 300.0), 2000.0);
     }
 
     fn field_harness(app: PhotocraftApp) -> egui_kittest::Harness<'static, PhotocraftApp> {
