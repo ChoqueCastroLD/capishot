@@ -480,9 +480,11 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     autosave(app);
     if let Some(error) = &app.prefs_rt.recovery_error {
         app.ui.status.clone_from(error);
+        app.ui.status_error = true;
     }
     if let Some(error) = app.prefs_rt.autosave_errors.values().next() {
         app.ui.status.clone_from(error);
+        app.ui.status_error = true;
     }
     if app.services.autosave.is_some() {
         let delay = if app.prefs_rt.pending_autosaves.is_empty() && app.prefs_rt.retiring.is_empty() { 1_000 } else { 100 };
@@ -679,6 +681,7 @@ fn autosave(app: &mut PhotocraftApp) {
                             && app.ui.status == error
                         {
                             app.ui.status = "Recovery checkpoint removed".into();
+                            app.ui.status_error = false;
                         }
                     }
                     Err(e) => {
@@ -700,6 +703,7 @@ fn autosave(app: &mut PhotocraftApp) {
                             && app.ui.status == error
                         {
                             app.ui.status = "Recovery checkpoint saved".into();
+                            app.ui.status_error = false;
                         }
                     }
                     Err(e) => {
@@ -2839,6 +2843,7 @@ mod tests {
         complete(&completed, id, revision, Err("disk full".into()));
         tick(&mut app, &ctx);
         assert!(app.ui.status.contains("disk full"));
+        assert!(app.ui.status_error);
         assert!(!app.prefs_rt.autosaved.contains_key(&id));
         autosave_now(&mut app);
         tick(&mut app, &ctx);
@@ -2854,6 +2859,7 @@ mod tests {
         tick(&mut app, &ctx);
         assert!(app.prefs_rt.autosave_errors.is_empty());
         assert!(!app.ui.status.contains("disk full"), "a completed retry clears the displayed failure");
+        assert!(!app.ui.status_error);
         assert!(app.prefs_rt.autosaved.contains_key(&id));
     }
     #[test]

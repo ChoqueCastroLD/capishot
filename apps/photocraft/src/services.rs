@@ -728,7 +728,8 @@ mod tests {
         std::fs::create_dir(&recovery).unwrap();
         autosave(&mut app, &ctx);
         let mut recovered = Vec::new();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        // Recovery retries use a 30-second backoff; allow its deadline plus worker completion.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(45);
         while std::time::Instant::now() < deadline {
             prefs_ui::tick(&mut app, &ctx);
             recovered = list_recovery(&recovery);
@@ -737,6 +738,11 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        while app.ui.status.starts_with("Autosave failed:") && std::time::Instant::now() < deadline {
+            prefs_ui::tick(&mut app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!app.ui.status.starts_with("Autosave failed:"), "a durable retry clears its matching error: {}", app.ui.status);
         assert_eq!(recovered.len(), 1, "unchanged revision should retry after failure");
         assert_eq!(recovered[0].info.revision, revision);
         let restored = photocraft_format::recover(&recovered[0]).unwrap();
