@@ -2388,10 +2388,8 @@ mod tests {
         let values = prefs::Preferences::default().to_json();
         assert!(has_visible_fields(&values, "general"));
         assert!(has_visible_fields(&values, "fileHandling"));
-        // Every setting of these sections is still unimplemented.
-        for section in ["integrations"] {
-            assert!(!has_visible_fields(&values, section), "{section}");
-        }
+        // Every setting of this section is still unimplemented.
+        assert!(!has_visible_fields(&values, "integrations"));
         // "Fill new type layers with placeholder text" and "Use Escape to Commit" are live; other Type rows stay hidden.
         assert!(has_visible_fields(&values, "type"));
         assert!(!prefs::is_hidden("type.fillNewTypeLayersWithPlaceholder"));
