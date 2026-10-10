@@ -2576,10 +2576,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if tool == Tool::Crop && response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down()) && crate::crop_ui::press(app) {
             ctx.request_repaint();
         }
-        // Capture temporary Type transforms at the actual press, before egui's drag threshold.
-        // Releasing Command before the first recognised move must not turn it into text selection.
-        let type_press = egui::Id::new("type-pointer-press-modifiers");
-        if tool.is_type()
+        // Capture intent at the press, before egui's drag threshold: Type transforms keep
+        // Command, and marquee add/subtract must not become a live Shift/Alt constraint.
+        let capture_press = tool.is_type() || matches!(tool, Tool::RectMarquee | Tool::EllipseMarquee);
+        let tool_press = egui::Id::new(("tool-pointer-press-modifiers", idx));
+        if capture_press
             && let Some((p, press_mods)) = ui.input(|i| {
                 i.events.iter().find_map(|e| match e {
                     egui::Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers } if rect.contains(*pos) => {
@@ -2590,8 +2591,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             })
         {
             let press_mods = crate::workspace_ui::sticky_mods(app, press_mods);
-            ctx.data_mut(|d| d.insert_temp(type_press, press_mods));
-            if press_mods.command && app.ui.text_edit.is_some() {
+            ctx.data_mut(|d| d.insert_temp(tool_press, press_mods));
+            if tool.is_type() && press_mods.command && app.ui.text_edit.is_some() {
                 let d = xf.to_doc(p);
                 tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: app.stylus.pressure() }, press_mods);
             }
@@ -2682,7 +2683,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 begin_transform_controls_at(app, &ctx, &xf, p);
             }
             let d = xf.to_doc(p);
-            let press_mods = if tool.is_type() { ctx.data(|d| d.get_temp(type_press)).unwrap_or(mods) } else { mods };
+            let press_mods = if capture_press { ctx.data(|d| d.get_temp(tool_press)).unwrap_or(mods) } else { mods };
             tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: app.stylus.pressure() }, press_mods);
         }
         // A stroke started on the press takes its moves from the press on, not only once egui
