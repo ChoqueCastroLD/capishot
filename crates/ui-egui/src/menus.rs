@@ -1147,15 +1147,8 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
     // Rows touch, as in native menus: the dialog spacing between them made long menus a fifth
     // taller than they need to be (#402).
     ui.spacing_mut().item_spacing.y = 0.0;
-    if t.pro {
-        // Spectrum/macOS menus: blue highlight row with white text.
-        let v = &mut ui.style_mut().visuals;
-        v.widgets.hovered.weak_bg_fill = t.accent;
-        v.widgets.hovered.bg_fill = t.accent;
-        v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
-        v.widgets.hovered.corner_radius = egui::CornerRadius::same(3);
-        ui.spacing_mut().button_padding = egui::vec2(10.0, 4.0);
-    }
+    // Secondary menus use the exact same Spectrum hover contrast and spacing.
+    crate::widgets::style_spectrum_popup_menu(ui);
     // Walk in Photoshop order: leaves and separators at this depth; a submenu appears at the position
     // of its first child.
     let mut shown_subs: Vec<&str> = Vec::new();
