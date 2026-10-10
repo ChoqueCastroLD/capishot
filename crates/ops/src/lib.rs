@@ -177,6 +177,7 @@ impl History {
             current_label: checkpoint.current_label,
             current_layers: checkpoint.current_layers,
             current_archive: None,
+            current_archive_document: None,
             max_states: checkpoint.max_states,
             max_bytes: checkpoint.max_bytes,
         })
