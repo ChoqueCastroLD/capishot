@@ -39,6 +39,7 @@
 	New…	Nový…
 	New from Clipboard	Nový ze schránky
 	Open…	Otevřít…
+	Open as Deep…	Otevřít jako deep…
 	Open As…	Otevřít jako…
 	Open Recent	Otevřít nedávné
 	Clear Recent Files	Vymazat nedávné soubory
@@ -1047,6 +1048,7 @@
 	Filter for pixel layers	Filtrovat pixelové vrstvy
 	Filter for shape layers	Filtrovat vrstvy tvarů
 	Filter for smart objects	Filtrovat chytré objekty
+	Filter for deep layers	Filtrovat hluboké vrstvy
 	Filter for type layers	Filtrovat textové vrstvy
 	Filter:	Filtr:
 	Finger Painting	Malování prstem

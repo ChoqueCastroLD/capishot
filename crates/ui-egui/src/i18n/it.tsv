@@ -31,6 +31,7 @@
 	New…	Nuovo…
 	New from Clipboard	Nuovo dagli appunti
 	Open…	Apri…
+	Open as Deep…	Apri come deep…
 	Open As…	Apri come…
 	Open Recent	Apri recenti
 	Clear Recent Files	Cancella file recenti
@@ -1031,6 +1032,7 @@
 	Filter for pixel layers	Filtra per livelli pixel
 	Filter for shape layers	Filtra per livelli forma
 	Filter for smart objects	Filtra per oggetti avanzati
+	Filter for deep layers	Filtra livelli deep
 	Filter for type layers	Filtra per livelli testo
 	Filter:	Filtro:
 	Finger Painting	Pittura con dita
