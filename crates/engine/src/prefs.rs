@@ -683,6 +683,9 @@ pub struct UnitsAndRulers {
     pub screen_resolution: f64,
     pub point_size: PointSize,
 }
+    /// View › Rulers (⌘R) comes on for every new or opened document (UI-217-20). Off: the rulers
+    /// keep whatever state ⌘R last left them in.
+    pub show_rulers_in_new_documents: bool,
 
 impl Default for UnitsAndRulers {
     fn default() -> Self {
@@ -695,6 +698,7 @@ impl Default for UnitsAndRulers {
             screen_resolution: 72.0,
             point_size: PointSize::PostScript,
         }
+            show_rulers_in_new_documents: false,
     }
 }
 

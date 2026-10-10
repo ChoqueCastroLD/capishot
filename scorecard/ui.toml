@@ -141,9 +141,9 @@ note = "shortcuts::pretty renders Cmd as Ctrl+ on Windows/Linux and glyphs on ma
 [[item]]
 id = "UI-217-20"
 target = "'Show rulers in new documents' preference; guides stored as f64"
-status = "missing"
+status = "partial"
 issue = 217
-note = "No rulers pref; doc lib.rs:523 guides are Vec<f32>"
+note = "Preferences > Units & Rulers > Show Rulers in New Documents (unitsAndRulers.showRulersInNewDocuments, lib.rs sync_views; show_rulers_in_new_documents_preference); guides are dragged out of the rulers (rulers.rs). Still open: doc guides are Vec<f32>"
 
 [[item]]
 id = "UI-217-21"
