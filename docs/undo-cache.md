@@ -41,7 +41,7 @@ spilling toward a 90% low-water mark to avoid oscillating at the threshold.
   the current document and adjacent undo remain. Failures appear in the status
   area and through `Session::take_history_cache_notice()`.
 
-Scratch storage is ephemeral, separate from autosave/recovery. Normal session
+Scratch storage is ephemeral, separate from [durable autosave/recovery](recovery.md). Recovery captures cold history handles and writes complete undo/redo checkpoints on its background worker. Normal session
 shutdown cleans the private directory. A process crash can leave its temporary
 directory behind; automatic crash-leftover cleanup is a follow-up, not permission
 to delete another running application's files. Permissions/deletion failures

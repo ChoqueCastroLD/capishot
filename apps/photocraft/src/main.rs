@@ -40,6 +40,7 @@ mod linux_libs;
 mod logging;
 mod monitor_profile;
 mod photoshop_settings;
+mod recovery;
 mod screen_color;
 mod services;
 #[cfg(all(unix, not(target_os = "macos")))]
