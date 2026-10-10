@@ -207,6 +207,11 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) -> boo
         }
         if hit_layer(app, x, y) == Some(id) {
             let off = hit_offset(app, id, x, y);
+            let clicks = count_click(app, x, y);
+            if clicks >= 2 && !shift {
+                select_unit(app, id, off, (x, y), clicks);
+                return true;
+            }
             if let Some(e) = app.ui.text_edit.as_mut() {
                 e.caret = off;
                 if !shift {
@@ -216,10 +221,12 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) -> boo
             }
             return true;
         }
+        app.type_clicks.reset();
         commit(app);
         return true; // Photoshop: a click outside commits without starting new text
     }
     if let Some(id) = hit_layer(app, x, y) {
+        count_click(app, x, y);
         let _ = app.session.select_layer(id);
         let key = session_key(app);
         if begin_edit(app, id, &key).is_err() {
@@ -229,7 +236,105 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) -> boo
         app.ui.text_edit = Some(TextEdit { layer: id.0, caret: off, anchor: off, session: key, created: false, dragging: true, resize: None, preedit: None });
         return true;
     }
+    app.type_clicks.reset();
     false
+}
+
+/// Longest gap between the presses of one multi-click (the usual system double-click time).
+pub(crate) const MULTI_CLICK_SECONDS: f64 = 0.5;
+
+/// Successive presses at one spot: 1 for a click, 2 for a double-click … 5 for a quintuple
+/// click; the next press starts over at 1. `now` is the frame clock, set by the canvas.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Clicks {
+    pub now: f64,
+    last: f64,
+    at: [f64; 2],
+    count: u8,
+}
+
+impl Clicks {
+    /// Count a press at `at` (document px); `slop` is how far it may be from the previous one.
+    pub(crate) fn press(&mut self, at: [f64; 2], slop: f64) -> u8 {
+        let dt = self.now - self.last;
+        let near = (at[0] - self.at[0]).abs() <= slop && (at[1] - self.at[1]).abs() <= slop;
+        self.count = if self.count > 0 && near && (0.0..=MULTI_CLICK_SECONDS).contains(&dt) { self.count % 5 + 1 } else { 1 };
+        (self.last, self.at) = (self.now, at);
+        self.count
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.count = 0;
+    }
+}
+
+fn count_click(app: &mut PhotocraftApp, x: f64, y: f64) -> u8 {
+    let slop = f64::from(4.0 / app.point_zoom().max(0.01));
+    app.type_clicks.press([x, y], slop)
+}
+
+/// Characters of the word at caret `off` (letters and digits, the rule of word movement);
+/// between words, the run of other characters there, so a double-click always selects something.
+pub(crate) fn word_at(text: &str, off: usize) -> (usize, usize) {
+    let chars: Vec<char> = text.chars().collect();
+    let off = off.min(chars.len());
+    let word = |c: &char| c.is_alphanumeric() || matches!(c, '_' | '\'' | '\u{2019}');
+    // A word on either side of the caret wins (a click on a word's last letter puts the caret
+    // after it); else the character after the caret, else the one before.
+    let after = chars.get(off).filter(|c| **c != '\n');
+    let before = off.checked_sub(1).and_then(|i| chars.get(i)).filter(|c| **c != '\n');
+    let probe = after.filter(|c| word(c)).or(before.filter(|c| word(c))).or(after).or(before);
+    let Some(&c) = probe else { return (off, off) };
+    let class = |x: &char| if word(x) { 0 } else if x.is_whitespace() { 1 } else { 2 };
+    let k = class(&c);
+    let same = |x: &char| *x != '\n' && class(x) == k;
+    let (mut a, mut b) = (off, off);
+    while a > 0 && chars.get(a - 1).is_some_and(same) {
+        a -= 1;
+    }
+    while chars.get(b).is_some_and(same) {
+        b += 1;
+    }
+    (a, b)
+}
+
+/// Characters of the paragraph holding caret `off`, without its paragraph break.
+pub(crate) fn paragraph_at(text: &str, off: usize) -> (usize, usize) {
+    let chars: Vec<char> = text.chars().collect();
+    let off = off.min(chars.len());
+    let a = chars.get(..off).and_then(|c| c.iter().rposition(|c| *c == '\n')).map_or(0, |i| i + 1);
+    let b = chars.get(off..).and_then(|c| c.iter().position(|c| *c == '\n')).map_or(chars.len(), |i| off + i);
+    (a, b)
+}
+
+/// Characters of the laid-out line nearest to the document point (a column in vertical type).
+fn line_at(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> Option<(usize, usize)> {
+    let (l, aff, text) = layout(app, id)?;
+    let (tx, ty) = to_text(&aff, x, y);
+    let (_, ly) = l.to_line(tx, ty);
+    let d = |ln: &photocraft_text::layout::LineInfo| {
+        let (top, bot) = (ln.baseline - ln.ascent, ln.baseline + ln.descent);
+        if ly < top { top - ly } else if ly > bot { ly - bot } else { 0.0 }
+    };
+    let ln = l.lines.iter().min_by(|p, q| d(p).total_cmp(&d(q)))?;
+    let ci = |b: usize| text.get(..b.min(text.len())).map_or(0, |s| s.chars().count());
+    Some((ci(ln.range.start), ci(ln.range.end)))
+}
+
+/// Photoshop's multi-click selection: double-click a word, triple-click a line, quadruple-click
+/// the paragraph, quintuple-click all the text.
+fn select_unit(app: &mut PhotocraftApp, id: LayerId, off: usize, (x, y): (f64, f64), clicks: u8) {
+    let Some(text) = current_text(app, id) else { return };
+    let (a, b) = match clicks {
+        2 => word_at(&text, off),
+        3 => line_at(app, id, x, y).unwrap_or((off, off)),
+        4 => paragraph_at(&text, off),
+        _ => (0, text.chars().count()),
+    };
+    if let Some(e) = app.ui.text_edit.as_mut() {
+        (e.anchor, e.caret) = (a, b);
+        e.dragging = false;
+    }
 }
 
 pub fn pointer_move(app: &mut PhotocraftApp, x: f64, y: f64) {
@@ -394,6 +499,63 @@ fn kern_pair(app: &mut PhotocraftApp, id: LayerId, caret: usize, by: f32) {
     let _ = app.run("type.edit", json!({"layer": id.0, "kernPair": {"at": caret, "by": by}}));
 }
 
+/// Apply a formatting command to the edit scope (the selection, else the whole layer) in the
+/// editing session's history step, so Cancel reverts it with the typing. `paragraph`: a collapsed
+/// caret formats its own paragraph, not the whole layer (Photoshop's paragraph settings).
+fn format_key(app: &mut PhotocraftApp, cmd: &str, props: serde_json::Value, paragraph: bool) {
+    let Some(mut p) = formatting_params(app) else { return };
+    if let Some(props) = props.as_object() {
+        for (key, value) in props {
+            p[key] = value.clone();
+        }
+    }
+    if paragraph
+        && p.get("range").is_none()
+        && let Some(ed) = &app.ui.text_edit
+    {
+        p["range"] = json!([ed.caret, ed.caret]);
+    }
+    crate::type_transform::finish(app);
+    let _ = app.run(cmd, p);
+}
+
+/// Photoshop's ⇧⌘ type-formatting shortcuts while editing (Adobe's default shortcut list, "Keys
+/// for formatting type"). Returns false for keys that aren't one, so they reach the menus.
+/// L / C / R align left / center / right (top / center / bottom in vertical type), J justifies
+/// with the last line left, F justifies all; K all caps, H small caps, ⌥H hyphenation, U
+/// underline, / strikethrough, B faux bold, I faux italic; X horizontal and ⌥X vertical scale
+/// 100%, ⌥A auto leading, Q tracking 0.
+pub(crate) fn format_shortcut(app: &mut PhotocraftApp, key: egui::Key, m: egui::Modifiers) -> bool {
+    use egui::Key;
+    if !(m.command && m.shift) || app.ui.text_edit.is_none() {
+        return false;
+    }
+    let align = |a: &str| ("type.setStyle", json!({ "align": a }), true);
+    let toggle = |s: &str| ("type.toggleStyle", json!({ "style": s }), s == "hyphenate");
+    let set = |v: serde_json::Value| ("type.setStyle", v, false);
+    let (cmd, props, paragraph) = match (key, m.alt) {
+        (Key::L, false) => align("left"),
+        (Key::C, false) => align("center"),
+        (Key::R, false) => align("right"),
+        (Key::J, false) => align("justifyLeft"),
+        (Key::F, false) => align("justifyAll"),
+        (Key::K, false) => toggle("allCaps"),
+        (Key::H, false) => toggle("smallCaps"),
+        (Key::H, true) => toggle("hyphenate"),
+        (Key::U, false) => toggle("underline"),
+        (Key::Slash | Key::Questionmark, false) => toggle("strikethrough"),
+        (Key::B, false) => toggle("fauxBold"),
+        (Key::I, false) => toggle("fauxItalic"),
+        (Key::X, false) => set(json!({"horizontalScale": 100})),
+        (Key::X, true) => set(json!({"verticalScale": 100})),
+        (Key::A, true) => set(json!({"leading": "auto"})),
+        (Key::Q, false) => set(json!({"tracking": 0})),
+        _ => return false,
+    };
+    format_key(app, cmd, props, paragraph);
+    true
+}
+
 /// IME composition. The preedit text is written into the layer (so it lays out and reflows like
 /// typed text) and replaced by every update; `commit` makes the result final.
 fn ime_update(app: &mut PhotocraftApp, s: &str, commit: bool) {
@@ -431,23 +593,6 @@ fn ime_update(app: &mut PhotocraftApp, s: &str, commit: bool) {
 /// Character index of the previous / next word boundary (shared with `type.navigate`).
 fn word_boundary(text: &str, from: usize, forward: bool) -> usize {
     photocraft_text::word_boundary(text, from, forward)
-}
-
-/// Double-click: select the word under the caret.
-pub fn select_word(app: &mut PhotocraftApp) {
-    let Some(ed) = app.ui.text_edit.clone() else { return };
-    let Some(text) = current_text(app, LayerId(ed.layer)) else { return };
-    let chars: Vec<char> = text.chars().collect();
-    let (mut a, mut b) = (ed.caret.min(chars.len()), ed.caret.min(chars.len()));
-    while a > 0 && chars[a - 1].is_alphanumeric() {
-        a -= 1;
-    }
-    while b < chars.len() && chars[b].is_alphanumeric() {
-        b += 1;
-    }
-    if let Some(e) = app.ui.text_edit.as_mut() {
-        (e.anchor, e.caret) = (a, b);
-    }
 }
 
 /// Caret on the neighbouring line (±1; a column in vertical type), keeping the position
@@ -530,6 +675,13 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
             egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => ime_update(app, text, false),
             egui::Event::Ime(egui::ImeEvent::Commit(s)) => ime_update(app, s, true),
             egui::Event::Ime(_) => {}
+            // egui-winit turns ⇧⌘C and ⇧⌘X into Copy / Cut events: Align Center and the
+            // horizontal (⌥: vertical) scale reset while editing type.
+            egui::Event::Copy | egui::Event::Cut if ctx.input(|i| i.modifiers.shift) => {
+                let m = ctx.input(|i| i.modifiers);
+                let key = if matches!(ev, egui::Event::Copy) { egui::Key::C } else { egui::Key::X };
+                handled[k] = format_shortcut(app, key, m);
+            }
             egui::Event::Copy => {
                 if a < b {
                     ctx.copy_text(text.chars().skip(a).take(b - a).collect());
@@ -540,6 +692,12 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                 use egui::Key;
                 let key = &flow_key(*key, vertical_flow);
                 match key {
+                    // Photoshop: ⌥⌫ fills the selected type with the foreground colour, ⌘⌫ with
+                    // the background colour (without a selection they delete as usual).
+                    Key::Backspace if a < b && (m.alt || m.command) && !m.shift => {
+                        let c = if m.alt { app.session.tools.foreground } else { app.session.tools.background };
+                        format_key(app, "type.setStyle", json!({"color": hex(c)}), false);
+                    }
                     Key::Backspace | Key::Delete => {
                         if a == b {
                             let fwd = *key == Key::Delete;
@@ -561,10 +719,24 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                         }
                     }
                     // Photoshop: Alt/Option+←/→ at a collapsed caret kerns the pair before it by
-                    // 20/1000 em (100 with ⌘/Ctrl), one history step per press.
-                    Key::ArrowLeft | Key::ArrowRight if m.alt && !m.shift && a == b => {
+                    // 20/1000 em (100 with ⌘/Ctrl), one history step per press; over a selection
+                    // it changes the tracking of the selected characters by the same steps.
+                    Key::ArrowLeft | Key::ArrowRight if m.alt && !m.shift => {
                         let step = if m.command { 100.0 } else { 20.0 };
-                        kern_pair(app, id, ed.caret, if *key == Key::ArrowRight { step } else { -step });
+                        let by = if *key == Key::ArrowRight { step } else { -step };
+                        if a == b {
+                            kern_pair(app, id, ed.caret, by);
+                        } else {
+                            format_key(app, "type.nudge", json!({"tracking": by}), false);
+                        }
+                    }
+                    // Alt+↑/↓: leading ±2 pt; Alt+Shift+↑/↓: baseline shift ±2 pt (±10 with ⌘/Ctrl),
+                    // as the layer appears. Across the lines in vertical type, like the caret.
+                    Key::ArrowUp | Key::ArrowDown if m.alt => {
+                        let step = if m.command { 10.0 } else { 2.0 };
+                        let by = if *key == Key::ArrowUp { step } else { -step };
+                        let what = if m.shift { "baselineShift" } else { "leading" };
+                        format_key(app, "type.nudge", json!({what: by, "metricsAsShown": true}), false);
                     }
                     Key::ArrowLeft | Key::ArrowRight => {
                         let fwd = *key == Key::ArrowRight;
@@ -600,7 +772,8 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                     // session (undoes it, removing a just-created layer) like the Cancel button.
                     Key::Escape if app.session.prefs().type_.use_esc_to_commit => commit(app),
                     Key::Escape => cancel(app),
-                    Key::A if m.command => {
+                    _ if m.command && m.shift && format_shortcut(app, *key, *m) => {}
+                    Key::A if m.command && !m.shift => {
                         if let Some(e) = app.ui.text_edit.as_mut() {
                             e.anchor = 0;
                             e.caret = n;
@@ -718,11 +891,13 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
             }
         }
     }
-    // Selection: per line, the clusters inside [a, b).
+    // Selection: per line, the clusters inside [a, b). View › Extras off (⌘H) hides the
+    // highlight, as in Photoshop, to judge the selected type's colour and spacing.
     let (a, b) = (byte_of(&text, ed.caret.min(ed.anchor)), byte_of(&text, ed.caret.max(ed.anchor)));
+    let highlight = app.ui.view.extras;
     if a < b {
         let fill = Color32::from_rgba_unmultiplied(t.accent.r(), t.accent.g(), t.accent.b(), 110);
-        for (li, ln) in l.lines.iter().enumerate() {
+        for (li, ln) in l.lines.iter().enumerate().filter(|_| highlight) {
             let xs: Vec<(f32, f32)> =
                 l.clusters.iter().filter(|c| c.line == li && c.range.start >= a && c.range.end <= b).map(|c| (c.x, c.x + c.advance)).collect();
             let (mut x0, mut x1) = xs.iter().fold((f32::MAX, f32::MIN), |(lo, hi), (p, q)| (lo.min(*p), hi.max(*q)));
@@ -1651,6 +1826,10 @@ mod canvas_tests;
 #[cfg(test)]
 #[path = "type_font_picker_tests.rs"]
 mod font_picker_tests;
+
+#[cfg(test)]
+#[path = "type_keys_tests.rs"]
+mod keys_tests;
 
 #[cfg(test)]
 mod tests {

@@ -557,6 +557,10 @@ pub struct PhotocraftApp {
     /// Type tool layout cache: ((doc, revision, layer), layout).
     pub(crate) type_layout: Option<((u64, u64, u64), std::sync::Arc<photocraft_text::TextLayout>)>,
     pub(crate) type_transform_preview: Option<type_transform::Preview>,
+    /// Type tool multi-click counter (double: word, triple: line, quadruple: paragraph, quintuple: all).
+    pub(crate) type_clicks: type_tool::Clicks,
+    /// Transform to start once the "Rasterize the type?" prompt was answered OK (`rasterize_prompt`).
+    pub(crate) after_rasterize: Option<String>,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
     channel_thumbs: Option<(DocId, std::sync::Weak<Document>, bool, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
@@ -663,6 +667,8 @@ impl PhotocraftApp {
             channel_views: HashMap::new(),
             type_layout: None,
             type_transform_preview: None,
+            type_clicks: Default::default(),
+            after_rasterize: None,
             guide_drag: None,
             crop: Default::default(),
             hover_doc: None,
@@ -1267,6 +1273,7 @@ impl eframe::App for PhotocraftApp {
             self.checker = None;
         }
         self.drain_control(ctx);
+        rasterize_prompt::run_pending(self, ctx);
         native_menu::run(self, ctx);
         if self.ui.text_edit.is_some() && !self.ui.tool.is_type() {
             type_tool::commit(self);
