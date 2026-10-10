@@ -35,6 +35,13 @@ pub struct HistoryState {
 /// Engine-owned immutable scratch archive. Loading must preserve the complete document.
 pub trait ArchivedDocument: std::fmt::Debug + Send + Sync {
     fn load(&self) -> Result<Arc<Document>, String>;
+    fn metadata_bytes(&self) -> usize {
+        0
+    }
+    /// Resident backing for compact replay states; counted once, never mistaken for disk.
+    fn resident(&self) -> Option<&Arc<Document>> {
+        None
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -53,7 +60,7 @@ impl StoredDocument {
     fn resident(&self) -> Option<&Arc<Document>> {
         match self {
             Self::Resident(doc) => Some(doc),
-            Self::Archived(_) => None,
+            Self::Archived(archive) => archive.resident(),
         }
     }
 }
@@ -71,6 +78,7 @@ pub struct History {
     current_label: String,
     /// The layers targeted when the current document was created (opened or edited).
     current_layers: LayerTarget,
+    current_archive: Option<Arc<dyn ArchivedDocument>>,
 }
 
 impl Default for History {
@@ -88,12 +96,14 @@ impl History {
             max_bytes: 0,
             current_label: "Open".into(),
             current_layers: LayerTarget::default(),
+            current_archive: None,
         }
     }
 
     /// Record that `before` was replaced by a new current document via step `label`, which left
     /// `layers` targeted.
     pub fn record(&mut self, label: impl Into<String>, before: Arc<Document>, layers: LayerTarget) {
+        self.current_archive = None;
         let prev_label = std::mem::replace(&mut self.current_label, label.into());
         let prev_layers = std::mem::replace(&mut self.current_layers, layers);
         self.undo.push_back(HistoryState {
@@ -136,7 +146,16 @@ impl History {
         let Some(prev) = self.undo.pop_back() else { return Ok(None) };
         let label = std::mem::replace(&mut self.current_label, prev.label);
         let layers = std::mem::replace(&mut self.current_layers, prev.layers.clone());
-        self.redo.push(HistoryState { label, has_selection: current.selection.is_some(), document: StoredDocument::Resident(current), layers });
+        self.redo.push(HistoryState {
+            label,
+            has_selection: current.selection.is_some(),
+            document: self.current_archive.take().map_or_else(|| StoredDocument::Resident(current), StoredDocument::Archived),
+            layers,
+        });
+        self.current_archive = match prev.document {
+            StoredDocument::Archived(archive) => Some(archive),
+            _ => None,
+        };
         Ok(Some((restored, prev.layers)))
     }
 
@@ -146,7 +165,16 @@ impl History {
         let Some(next) = self.redo.pop() else { return Ok(None) };
         let label = std::mem::replace(&mut self.current_label, next.label);
         let layers = std::mem::replace(&mut self.current_layers, next.layers.clone());
-        self.undo.push_back(HistoryState { label, has_selection: current.selection.is_some(), document: StoredDocument::Resident(current), layers });
+        self.undo.push_back(HistoryState {
+            label,
+            has_selection: current.selection.is_some(),
+            document: self.current_archive.take().map_or_else(|| StoredDocument::Resident(current), StoredDocument::Archived),
+            layers,
+        });
+        self.current_archive = match next.document {
+            StoredDocument::Archived(archive) => Some(archive),
+            _ => None,
+        };
         Ok(Some((restored, next.layers)))
     }
 
@@ -179,7 +207,10 @@ impl History {
     }
 
     pub fn resident_state(&self, i: usize) -> Option<Arc<Document>> {
-        self.undo.get(i).and_then(|state| state.document.resident().cloned())
+        self.undo.get(i).and_then(|state| match &state.document {
+            StoredDocument::Resident(doc) => Some(doc.clone()),
+            _ => None,
+        })
     }
 
     pub fn try_state(&self, i: usize) -> Result<Option<Arc<Document>>, String> {
@@ -188,16 +219,63 @@ impl History {
 
     /// Resident snapshots only; this never reads scratch storage.
     pub fn resident_states(&self) -> Vec<Arc<Document>> {
-        self.undo.iter().chain(self.redo.iter()).filter_map(|state| state.document.resident().cloned()).collect()
+        let mut seen = HashSet::new();
+        self.undo
+            .iter()
+            .chain(self.redo.iter())
+            .filter_map(|state| state.document.resident().cloned())
+            .chain(self.current_archive.iter().filter_map(|archive| archive.resident().cloned()))
+            .filter(|doc| seen.insert(Arc::as_ptr(doc) as usize))
+            .collect()
+    }
+
+    /// Concrete snapshots eligible for scratch serialization. Compact replay backing stays resident.
+    pub fn spillable_states(&self) -> Vec<Arc<Document>> {
+        self.undo
+            .iter()
+            .chain(self.redo.iter())
+            .filter_map(|state| match &state.document {
+                StoredDocument::Resident(doc) => Some(doc.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// State descriptors and compact replay records, separate from pixel payload accounting.
+    pub fn metadata_bytes(&self) -> usize {
+        let mut total = self.current_label.capacity().saturating_add(self.current_layers.selected.capacity().saturating_mul(std::mem::size_of::<LayerId>()));
+        for state in self.undo.iter().chain(self.redo.iter()) {
+            total = total
+                .saturating_add(std::mem::size_of::<HistoryState>())
+                .saturating_add(state.label.capacity())
+                .saturating_add(state.layers.selected.capacity().saturating_mul(std::mem::size_of::<LayerId>()));
+            if let StoredDocument::Archived(archive) = &state.document {
+                total = total.saturating_add(archive.metadata_bytes());
+            }
+        }
+        if let Some(archive) = &self.current_archive {
+            total = total.saturating_add(archive.metadata_bytes());
+        }
+        total
     }
 
     pub fn archived_states(&self) -> usize {
-        self.undo.iter().chain(self.redo.iter()).filter(|state| matches!(state.document, StoredDocument::Archived(_))).count()
+        self.undo
+            .iter()
+            .chain(self.redo.iter())
+            .filter(|state| matches!(&state.document, StoredDocument::Archived(archive) if archive.resident().is_none()))
+            .count()
     }
 
     /// Adjacent resident snapshots pinned for immediate undo/redo.
     pub fn hot_states(&self) -> Vec<Arc<Document>> {
-        self.undo.back().into_iter().chain(self.redo.last()).filter_map(|state| state.document.resident().cloned()).collect()
+        self.undo
+            .back()
+            .into_iter()
+            .chain(self.redo.last())
+            .filter_map(|state| state.document.resident().cloned())
+            .chain(self.current_archive.iter().filter_map(|archive| archive.resident().cloned()))
+            .collect()
     }
 
     /// Whether this allocation is the immediate undo or redo state.
@@ -225,7 +303,7 @@ impl History {
     pub fn replace_resident(&mut self, doc: &Arc<Document>, archive: Arc<dyn ArchivedDocument>) -> bool {
         let mut replaced = false;
         for state in self.undo.iter_mut().chain(self.redo.iter_mut()) {
-            if state.document.resident().is_some_and(|resident| Arc::ptr_eq(resident, doc)) {
+            if matches!(&state.document, StoredDocument::Resident(resident) if Arc::ptr_eq(resident, doc)) {
                 state.document = StoredDocument::Archived(archive.clone());
                 replaced = true;
             }
@@ -294,7 +372,12 @@ impl History {
         self.redo.clear();
     }
 
+    pub fn set_current_archive(&mut self, archive: Arc<dyn ArchivedDocument>) {
+        self.current_archive = Some(archive);
+    }
+
     pub fn clear(&mut self) {
+        self.current_archive = None;
         self.undo.clear();
         self.redo.clear();
     }

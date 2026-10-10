@@ -75,7 +75,7 @@ fn disk_disabled_retires_cold_history_and_keeps_current() {
     assert!(!s.history_cache_busy());
     assert!(s.active().unwrap().history.past_len() <= 1);
     assert!(s.undo(), "adjacent undo stays available");
-    assert_eq!(s.active().unwrap().doc.name, "three");
+    assert_eq!(s.active().unwrap().doc.name, "four");
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -92,18 +92,22 @@ fn spilled_history_restores_all_sample_depths() {
         }
         assert!(s.history_disk_bytes() > 0, "older states must reach scratch");
         assert!(s.active().unwrap().history.archived_states() > 0);
-        for (index, name) in [(2, "two"), (1, "one"), (0, "original")] {
+        for index in [2, 1, 0] {
             assert!(s.undo());
-            assert_eq!(s.active().unwrap().doc.name, name);
+            assert_eq!(s.active().unwrap().doc.name, "three");
             assert_eq!(s.active().unwrap().doc.depth, depth);
-            assert_eq!(s.active().unwrap().doc.as_ref(), expected[index].as_ref());
+            let mut expected_doc = (*expected[index]).clone();
+            expected_doc.name = "three".into();
+            assert_eq!(s.active().unwrap().doc.as_ref(), &expected_doc);
             drain(&mut s);
         }
-        for (index, name) in [(1, "one"), (2, "two"), (3, "three")] {
+        for index in [1, 2, 3] {
             assert!(s.redo());
-            assert_eq!(s.active().unwrap().doc.name, name);
+            assert_eq!(s.active().unwrap().doc.name, "three");
             assert_eq!(s.active().unwrap().doc.depth, depth);
-            assert_eq!(s.active().unwrap().doc.as_ref(), expected[index].as_ref());
+            let mut expected_doc = (*expected[index]).clone();
+            expected_doc.name = "three".into();
+            assert_eq!(s.active().unwrap().doc.as_ref(), &expected_doc);
             drain(&mut s);
         }
     }
@@ -125,7 +129,7 @@ fn invalid_scratch_path_never_loses_the_completed_edit() {
     assert_eq!(s.history_disk_bytes(), 0);
     assert!(s.take_history_cache_notice().is_some());
     assert!(s.undo());
-    assert_eq!(s.active().unwrap().doc.name, "two");
+    assert_eq!(s.active().unwrap().doc.name, "three");
     std::fs::remove_file(sentinel).unwrap();
 }
 
@@ -221,4 +225,64 @@ fn slow_scratch_write_does_not_accumulate_an_unbounded_edit_backlog() {
     drain(&mut s);
     assert_eq!(s.active().unwrap().doc.name, "six");
     assert!(!s.history_cache_busy());
+}
+
+#[test]
+fn ten_thousand_nudges_keep_individual_steps_without_pixel_copies() {
+    for (depth, steps) in [(SampleType::U8, 10_000), (SampleType::U16, 1_000), (SampleType::F32, 1_000)] {
+        let mut s = Session::new();
+        s.execute("prefs.set", serde_json::json!({"path":"performance.historyStates", "value":10000})).unwrap();
+        let mut doc = Document::with_background("nudges", Size::new(512, 512), ColorMode::Rgb, depth, Color::WHITE);
+        let layer = doc.layers.first_mut().unwrap();
+        layer.locks = Default::default();
+        let surface = layer.surface_mut().unwrap();
+        surface.write_pixel(20, 20, &[0.2, 0.4, 0.6, 1.0]);
+        s.add_document(doc, None);
+        let initial = s.active().unwrap().doc.clone();
+        let one = s.history_resident_bytes();
+        let started = std::time::Instant::now();
+        for i in 0..steps {
+            s.execute("layer.translate", serde_json::json!({"dx": if i % 2 == 0 { 1 } else { -1 }, "dy":0})).unwrap();
+        }
+        assert_eq!(s.active().unwrap().history.past_len(), steps);
+        assert!(s.history_resident_bytes() <= 3 * one, "moves retain a source and current pixels, not one image per keypress");
+        assert_eq!(s.history_disk_bytes(), 0);
+        assert!(s.history_metadata_bytes() < steps * 256 + 1024, "compact step descriptors stay small");
+        eprintln!("descriptor_bytes={} for {steps} steps", s.history_metadata_bytes());
+        let final_doc = s.active().unwrap().doc.clone();
+        for _ in 0..steps {
+            assert!(s.try_undo().unwrap());
+        }
+        assert_eq!(s.active().unwrap().doc.as_ref(), initial.as_ref());
+        for _ in 0..steps {
+            assert!(s.try_redo().unwrap());
+        }
+        assert_eq!(s.active().unwrap().doc.as_ref(), final_doc.as_ref());
+        eprintln!("nudge depth={depth:?} steps={steps} payload={} initial={} elapsed={:?}", s.history_resident_bytes(), one, started.elapsed());
+    }
+}
+
+#[test]
+fn a_large_stroke_remains_one_exact_step_between_compact_moves() {
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        let mut s = Session::new();
+        let mut doc = document("stroke", depth);
+        doc.layers.first_mut().unwrap().locks = Default::default();
+        s.add_document(doc, None);
+        s.execute("layer.translate", serde_json::json!({"dx":1})).unwrap();
+        let before = s.active().unwrap().doc.clone();
+        let payload = s.history_resident_bytes();
+        let points: Vec<_> = (0..16).map(|i| serde_json::json!([if i % 2 == 0 { 0 } else { 500 }, i * 32, 1.0])).collect();
+        s.execute("paint.stroke", serde_json::json!({"points":points,"size":32,"smoothing":0,"color":[0.9,0.1,0.3,1.0]})).unwrap();
+        let painted = s.active().unwrap().doc.clone();
+        assert!(s.history_resident_bytes() > payload, "paint must retain changed tiles");
+        assert_eq!(s.active().unwrap().history.past_len(), 2);
+        s.execute("layer.translate", serde_json::json!({"dx":-1})).unwrap();
+        assert!(s.try_undo().unwrap());
+        assert_eq!(s.active().unwrap().doc.as_ref(), painted.as_ref());
+        assert!(s.try_undo().unwrap());
+        assert_eq!(s.active().unwrap().doc.as_ref(), before.as_ref());
+        assert!(s.try_redo().unwrap());
+        assert_eq!(s.active().unwrap().doc.as_ref(), painted.as_ref());
+    }
 }

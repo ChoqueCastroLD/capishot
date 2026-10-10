@@ -10,6 +10,7 @@ pub fn session(s: &Session) -> Value {
         "active": s.active_index(),
         "historyCache": {
             "residentBytes": s.history_resident_bytes(),
+            "metadataBytes": s.history_metadata_bytes(),
             "diskBytes": s.history_disk_bytes(),
             "busy": s.history_cache_busy(),
             "memoryBudgetMiB": s.prefs().performance.memory_usage_mb,

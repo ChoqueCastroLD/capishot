@@ -124,3 +124,29 @@ these four crates passes. The adversarial command check and layering pass;
 the dedicated release-mode workload and initial WebAssembly CI pass. Both
 preference dialogs were rendered offscreen and visually inspected. Final
 cross-platform/corpus CI is linked from the PR.
+
+## Small moves and detailed strokes
+
+Simple integer raster-layer moves retain a shared immutable source and a small
+absolute-offset record for each step. A thousand or ten thousand nudges remain
+independently undoable: this does not group separate keypresses into one step.
+Undo and redo materialize the selected position from the source. Pixel storage
+therefore depends on the source and current drawing rather than the number of
+nudges. Descriptor storage still grows with the number of steps; `session.inspect`
+reports it separately as `historyCache.metadataBytes`. The history-count preference
+allows up to 10,000 states; its default remains 50.
+
+Masks, vector content, effect reference positions, and moves near coordinate
+saturation retain ordinary exact snapshots. The replay source is resident and
+cannot be reclaimed while dependent moves survive. Source handles for subsequent
+moves are weak so closing a document or purging history releases them.
+
+Painting keeps exact changed COW tiles. One intricate stroke is one history step
+but may retain many tiles; step count is not a byte estimate. The
+`undo_edit_costs` example compares 1,000 and 10,000 separate nudges with one long
+zigzag brush stroke on a synthetic 6000×4000 canvas, checks stroke undo/redo, and
+reports elapsed time, payload bytes, descriptor bytes and scratch bytes. Its initial
+art is sparse and its repeated moves alternate direction; it is not a dense-photo
+move-performance claim. Regression tests additionally cover monotonic nudges,
+negative tile boundaries, interrupted edits, coalesced gestures, source lifetimes
+and saturation fallback at U8/U16/F32.

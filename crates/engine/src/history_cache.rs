@@ -76,6 +76,11 @@ impl Session {
         total
     }
 
+    /// Descriptor bytes for retained history states and compact replay records.
+    pub fn history_metadata_bytes(&self) -> usize {
+        self.docs.iter().fold(0usize, |n, st| n.saturating_add(st.history.metadata_bytes()))
+    }
+
     /// Actual compressed scratch bytes (never the configured capacity).
     pub fn history_disk_bytes(&self) -> u64 {
         #[cfg(not(target_arch = "wasm32"))]
@@ -255,7 +260,7 @@ impl Session {
     fn trim_history_memory(&mut self, target: usize) -> bool {
         let mut shortened = false;
         while self.history_resident_bytes() > target {
-            let Some(index) = (0..self.docs.len()).find(|index| self.history_spill_candidate(*index).is_some()) else { break };
+            let Some(index) = (0..self.docs.len()).find(|index| self.history_memory_candidate(*index).is_some()) else { break };
             if !self.docs.get_mut(index).is_some_and(|st| st.history.drop_oldest()) {
                 break;
             }
@@ -283,6 +288,14 @@ impl Session {
     }
 
     fn history_spill_candidate(&self, index: usize) -> Option<Arc<Document>> {
+        self.history_candidate(index, true)
+    }
+
+    fn history_memory_candidate(&self, index: usize) -> Option<Arc<Document>> {
+        self.history_candidate(index, false)
+    }
+
+    fn history_candidate(&self, index: usize, disk: bool) -> Option<Arc<Document>> {
         let mut pinned = HashSet::new();
         for st in &self.docs {
             document_bytes(&st.doc, &mut pinned);
@@ -291,7 +304,8 @@ impl Session {
             }
         }
         let st = self.docs.get(index)?;
-        st.history.resident_states().into_iter().find(|doc| {
+        let candidates = if disk { st.history.spillable_states() } else { st.history.resident_states() };
+        candidates.into_iter().find(|doc| {
             !self.docs.iter().any(|state| Arc::ptr_eq(&state.doc, doc) || state.history.is_hot(doc)) && document_bytes(doc, &mut pinned.clone()) > 0
         })
     }
