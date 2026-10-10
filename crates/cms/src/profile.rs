@@ -160,6 +160,10 @@ pub struct Profile {
     pub class: ProfileClass,
     pub color_space: ColorSpace,
     pub pcs: Pcs,
+    /// DeviceLink profiles map device→device: for that class the header's PCS field (bytes
+    /// 20..24) carries the **output** colour space instead of a PCS (ICC.1:2010 §10.4).
+    /// Parsed for that class only; `None` for every other class.
+    pub link_output: Option<ColorSpace>,
     pub rendering_intent: Intent,
     pub description: String,
     pub copyright: String,
@@ -448,10 +452,12 @@ fn parse_profile(bytes: &[u8]) -> Result<Profile, CmsError> {
     let version = (r.u8(8)?, r.u8(9)?);
     let class = ProfileClass::from_sig(r.u32(12)?);
     let color_space = ColorSpace::from_sig(r.u32(16)?);
-    let pcs = match &r.u32(20)?.to_be_bytes() {
+    let pcs_sig = r.u32(20)?;
+    let pcs = match &pcs_sig.to_be_bytes() {
         b"Lab " => Pcs::Lab,
         _ => Pcs::Xyz,
     };
+    let link_output = (class == ProfileClass::DeviceLink).then(|| ColorSpace::from_sig(pcs_sig));
     let rendering_intent = Intent::from_u32(r.u32(64)? & 0xFFFF).unwrap_or(Intent::Perceptual);
     let count = r.u32(128)? as usize;
     if count > 1024 {
@@ -525,6 +531,7 @@ fn parse_profile(bytes: &[u8]) -> Result<Profile, CmsError> {
         class,
         color_space,
         pcs,
+        link_output,
         rendering_intent,
         description,
         copyright,
@@ -539,16 +546,22 @@ fn parse_profile(bytes: &[u8]) -> Result<Profile, CmsError> {
         bytes: None,
         hash: Default::default(),
     };
-    // Validate channel counts of LUTs against the header.
+    // Validate channel counts of LUTs against the header. A DeviceLink ends in its output space
+    // (the header's PCS field), not in a 3-channel PCS; other classes go through the PCS.
     let dev = p.color_space.channels();
+    let out = p.link_output.map_or(3, ColorSpace::channels);
+    let spaces = match p.link_output {
+        Some(cs) => format!("{:?}→{:?}", p.color_space, cs),
+        None => format!("{:?}", p.color_space),
+    };
     for l in p.a2b.iter().flatten() {
-        if dev != 0 && l.inputs != dev || l.outputs != 3 {
-            return Err(CmsError::Invalid(format!("AToB tag has {}→{} channels for a {:?} profile", l.inputs, l.outputs, p.color_space)));
+        if dev != 0 && l.inputs != dev || out != 0 && l.outputs != out {
+            return Err(CmsError::Invalid(format!("AToB tag has {}→{} channels for a {spaces} profile", l.inputs, l.outputs)));
         }
     }
     for l in p.b2a.iter().flatten() {
-        if l.inputs != 3 || dev != 0 && l.outputs != dev {
-            return Err(CmsError::Invalid(format!("BToA tag has {}→{} channels for a {:?} profile", l.inputs, l.outputs, p.color_space)));
+        if out != 0 && l.inputs != out || dev != 0 && l.outputs != dev {
+            return Err(CmsError::Invalid(format!("BToA tag has {}→{} channels for a {spaces} profile", l.inputs, l.outputs)));
         }
     }
     Ok(p)

@@ -176,6 +176,8 @@ struct LoadFetch<'a> {
     opts: LoadOptions,
     total: u64,
     blobs: HashMap<String, Arc<Vec<u8>>>,
+    tile_cache: Option<&'a mut HashMap<String, Weak<Tile>>>,
+    blob_cache: Option<&'a mut HashMap<String, Weak<Vec<u8>>>>,
 }
 
 impl LoadFetch<'_> {
@@ -189,6 +191,18 @@ impl LoadFetch<'_> {
 }
 
 impl Fetch for LoadFetch<'_> {
+    fn shared_tile(&mut self, hash: &str, len: usize) -> Result<Option<Arc<Tile>>> {
+        let tile = self.tile_cache.as_deref().and_then(|c| c.get(hash)).and_then(Weak::upgrade).filter(|t| t.bytes().len() == len);
+        if tile.is_some() {
+            self.account(len)?;
+        }
+        Ok(tile)
+    }
+    fn cache_tile(&mut self, hash: &str, tile: &Arc<Tile>) {
+        if let Some(cache) = self.tile_cache.as_deref_mut() {
+            cache.insert(hash.to_owned(), Arc::downgrade(tile));
+        }
+    }
     fn tile(&mut self, hash: &str, len: usize) -> Result<Vec<u8>> {
         if !is_valid_hash(hash) {
             return Err(FormatError::corrupt(format!("invalid tile hash `{hash}`")));
@@ -210,6 +224,14 @@ impl Fetch for LoadFetch<'_> {
         if !is_valid_hash(hash) {
             return Err(FormatError::corrupt(format!("invalid blob hash `{hash}`")));
         }
+        if let Some(data) = self.blob_cache.as_deref().and_then(|cache| cache.get(hash)).and_then(Weak::upgrade) {
+            if data.len() > self.opts.max_blob_bytes {
+                return Err(FormatError::LimitExceeded("shared scratch blob exceeds max_blob_bytes".into()));
+            }
+            self.account(data.len())?;
+            self.blobs.insert(hash.to_owned(), data.clone());
+            return Ok(data);
+        }
         let path = blob_path(hash);
         let z = self.src.get(&path, self.opts.max_blob_bytes)?;
         // Blob length is not in the manifest; the frame header bounds it and
@@ -226,13 +248,25 @@ impl Fetch for LoadFetch<'_> {
         }
         let data = Arc::new(data);
         self.blobs.insert(hash.to_owned(), data.clone());
+        if let Some(cache) = self.blob_cache.as_deref_mut() {
+            cache.insert(hash.to_owned(), Arc::downgrade(&data));
+        }
         Ok(data)
     }
 }
 
 pub(crate) fn load(src: &dyn Source, opts: &LoadOptions) -> Result<Document> {
+    load_cached(src, opts, None, None)
+}
+
+pub(crate) fn load_cached(
+    src: &dyn Source,
+    opts: &LoadOptions,
+    tile_cache: Option<&mut HashMap<String, Weak<Tile>>>,
+    blob_cache: Option<&mut HashMap<String, Weak<Vec<u8>>>>,
+) -> Result<Document> {
     let m = read_manifest(src, opts)?;
-    let mut fetch = LoadFetch { src, opts: *opts, total: 0, blobs: HashMap::new() };
+    let mut fetch = LoadFetch { src, opts: *opts, total: 0, blobs: HashMap::new(), tile_cache, blob_cache };
     let mut loader = Loader {
         fetch: &mut fetch,
         preserve_ids: opts.preserve_ids,
@@ -269,10 +303,12 @@ struct Collect<'c> {
     tiles: BTreeMap<Hash, (Arc<Tile>, SampleType)>,
     blobs: BTreeMap<Hash, Arc<Vec<u8>>>,
     hash_cache: Option<&'c mut HashMap<usize, (Weak<Tile>, Hash)>>,
+    total_tile_bytes: u64,
 }
 
 impl Sink for Collect<'_> {
     fn tile(&mut self, format: PixelFormat, tile: &Arc<Tile>) -> Hash {
+        self.total_tile_bytes = self.total_tile_bytes.saturating_add(tile.bytes().len() as u64);
         let key = Arc::as_ptr(tile) as usize;
         if let Some(cache) = self.hash_cache.as_deref_mut()
             && let Some((w, h)) = cache.get(&key)
@@ -331,7 +367,7 @@ pub const DEFAULT_REVERIFY_BUDGET: u64 = 16 * 1024 * 1024;
 /// [`Self::set_reverify_budget`]). Over enough saves every object is read again, and a damaged
 /// one is rewritten.
 pub struct PcraftWriter {
-    hash_cache: HashMap<usize, (Weak<Tile>, Hash)>,
+    pub(crate) hash_cache: HashMap<usize, (Weak<Tile>, Hash)>,
     /// Compressed objects by bundle path (ZIP mode).
     compressed: HashMap<String, Arc<Vec<u8>>>,
     verified_directory: Option<DirectoryVerificationCache>,
@@ -369,20 +405,21 @@ struct FileSignature {
     unix: (u64, u64, i64, i64),
 }
 
-struct Prepared {
-    manifest: Vec<u8>,
-    objects: BTreeMap<String, Object>,
+pub(crate) struct Prepared {
+    pub(crate) manifest: Vec<u8>,
+    pub(crate) objects: BTreeMap<String, Object>,
+    pub(crate) decoded_bytes: u64,
     previews: Vec<(&'static str, Vec<u8>)>,
     stats: SaveStats,
 }
 
-enum Object {
+pub(crate) enum Object {
     Tile(Arc<Tile>, SampleType),
     Blob(Arc<Vec<u8>>),
 }
 
 impl Object {
-    fn compressed(&self) -> Vec<u8> {
+    pub(crate) fn compressed(&self) -> Vec<u8> {
         match self {
             Object::Tile(t, s) => compress(&tile_le(t, *s)),
             Object::Blob(b) => compress(b),
@@ -500,7 +537,7 @@ impl PcraftWriter {
         self.reverify_budget = bytes;
     }
 
-    fn prepare(&mut self, doc: &Document, opts: &SaveOptions) -> Result<Prepared> {
+    pub(crate) fn prepare(&mut self, doc: &Document, opts: &SaveOptions) -> Result<Prepared> {
         self.hash_cache.retain(|_, (w, _)| w.strong_count() > 0);
         convert::check_nesting(&doc.layers)?;
         let mut c = Collect { hash_cache: Some(&mut self.hash_cache), ..Default::default() };
@@ -528,6 +565,7 @@ impl PcraftWriter {
         let manifest = serde_json::to_vec_pretty(&manifest)?;
         check_manifest_depth(&manifest)?;
         let stats = SaveStats { tiles_total: c.tiles.len(), blobs_total: c.blobs.len(), manifest_bytes: manifest.len(), ..Default::default() };
+        let decoded_bytes = c.blobs.values().fold(c.total_tile_bytes, |sum, blob| sum.saturating_add(blob.len() as u64));
         let mut objects = BTreeMap::new();
         for (h, (t, s)) in c.tiles {
             objects.insert(tile_path(&h), Object::Tile(t, s));
@@ -535,7 +573,7 @@ impl PcraftWriter {
         for (h, b) in c.blobs {
             objects.insert(blob_path(&h), Object::Blob(b));
         }
-        Ok(Prepared { manifest, objects, previews, stats })
+        Ok(Prepared { manifest, objects, decoded_bytes, previews, stats })
     }
 
     /// Save as a ZIP bundle in memory.
@@ -580,9 +618,13 @@ impl PcraftWriter {
     pub fn save_dir(&mut self, doc: &Document, dir: &Path, opts: &SaveOptions) -> Result<SaveStats> {
         let p = self.prepare(doc, opts)?;
         let mut stats = p.stats;
+        // A directory bundle owns only paths beneath its root. Reject symlinked
+        // subdirectories and object/output files before writing or cleaning up.
+        check_bundle_symlinks(dir)?;
         for sub in ["tiles", "blobs", "composite"] {
             std::fs::create_dir_all(dir.join(sub))?;
         }
+        check_bundle_symlinks(dir)?;
         let canonical_dir = std::fs::canonicalize(dir)?;
         if self.verified_directory.as_ref().is_none_or(|cache| cache.directory != canonical_dir) {
             self.verified_directory = Some(DirectoryVerificationCache { directory: canonical_dir, ..Default::default() });
@@ -627,7 +669,7 @@ impl PcraftWriter {
                 Object::Tile(..) => stats.tiles_written += 1,
                 Object::Blob(_) => stats.blobs_written += 1,
             }
-            write_atomic(&object_path, &obj.compressed())?;
+            write_bundle_file(&object_path, &obj.compressed())?;
             let written = path_signature(&object_path)?;
             if let Some(cache) = &mut self.verified_directory {
                 match written {
@@ -641,14 +683,14 @@ impl PcraftWriter {
             }
         }
         for (name, data) in &p.previews {
-            write_atomic(&dir.join(name), data)?;
+            write_bundle_file(&dir.join(name), data)?;
         }
         for stale in [THUMB, COMPOSITE] {
             if !p.previews.iter().any(|(n, _)| *n == stale) {
                 let _ = std::fs::remove_file(dir.join(stale));
             }
         }
-        write_atomic(&dir.join(MANIFEST), &p.manifest)?;
+        write_bundle_file(&dir.join(MANIFEST), &p.manifest)?;
         for path in existing {
             if !p.objects.contains_key(&path) {
                 std::fs::remove_file(dir.join(&path))?;
@@ -698,6 +740,48 @@ impl PcraftWriter {
     }
 }
 
+/// Refuse links at any bundle-managed destination. Symlinks must never let a
+/// save inspect or replace files outside the chosen directory bundle.
+fn reject_bundle_symlink(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => Err(FormatError::Unsupported(format!("directory bundle contains a symbolic link at {}", path.display()))),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Check every directory and file that a bundle save may write or remove.
+/// In particular, tiles/ and blobs/ must be actual directories, not links.
+fn check_bundle_symlinks(dir: &Path) -> Result<()> {
+    reject_bundle_symlink(dir)?;
+    for sub in ["tiles", "blobs", "composite"] {
+        let subdir = dir.join(sub);
+        reject_bundle_symlink(&subdir)?;
+        if sub != "composite" && subdir.is_dir() {
+            for entry in std::fs::read_dir(&subdir)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.strip_suffix(".zst").is_some_and(is_valid_hash) {
+                    reject_bundle_symlink(&entry.path())?;
+                }
+            }
+        }
+    }
+    for name in [MANIFEST, THUMB, COMPOSITE] {
+        reject_bundle_symlink(&dir.join(name))?;
+    }
+    Ok(())
+}
+
+/// Directory bundles never follow the final path's symlink when replacing files,
+/// even if one appears after the initial path checks.
+fn write_bundle_file(path: &Path, data: &[u8]) -> Result<()> {
+    crate::atomic::atomic_write_no_follow(path, data)?;
+    Ok(())
+}
+
 fn list_objects(dir: &Path) -> Result<HashSet<String>> {
     let mut out = HashSet::new();
     for sub in ["tiles", "blobs"] {
@@ -705,7 +789,7 @@ fn list_objects(dir: &Path) -> Result<HashSet<String>> {
         for e in rd {
             let e = e?;
             let name = e.file_name().to_string_lossy().into_owned();
-            if name.ends_with(".zst") {
+            if name.strip_suffix(".zst").is_some_and(is_valid_hash) {
                 out.insert(format!("{sub}/{name}"));
             }
         }

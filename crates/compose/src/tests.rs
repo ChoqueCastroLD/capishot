@@ -14,6 +14,49 @@ fn doc_white(w: u32, h: u32) -> Document {
     Document::with_background("t", Size::new(w, h), ColorMode::Rgb, SampleType::U8, Color::WHITE)
 }
 
+#[test]
+fn prepared_tones_match_fresh_tables_and_stay_bounded() {
+    use photocraft_doc::adjust::ToneSpace;
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        for space in [ToneSpace::Rgb, ToneSpace::Cmyk, ToneSpace::Lab] {
+            for mut adj in [Adjustment::identity_levels(), Adjustment::identity_curves()] {
+                match &mut adj {
+                    Adjustment::Levels { master, space: s, .. } => {
+                        master.gamma = 1.4;
+                        *s = space;
+                    }
+                    Adjustment::Curves { master, space: s, .. } => {
+                        master[1].output = 0.8;
+                        *s = space;
+                    }
+                    _ => {}
+                }
+                let mut doc = Document::new("tones", Size::new(2, 1), ColorMode::Rgb, depth);
+                doc.layers.push(Layer::group("group", vec![Layer::new("tone", LayerContent::Adjustment(adj.clone()))]));
+                let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
+                let cx = Ctx::for_doc(&doc, &patterns);
+                let cached_adj = cx.tone_luts[0].0;
+                let input = Buffer { rect: doc.bounds(), px: vec![[0.2, 0.4, 0.7, 0.6], [2.0, -0.2, 0.5, 0.0]] };
+                let mut expected = input.clone();
+                adjust::apply_depth(&adj, &mut expected, cx.transfer, Some(depth));
+                for a in [cached_adj, cached_adj, &adj] {
+                    let mut actual = input.clone();
+                    cx.apply_adjustment(a, &mut actual);
+                    assert_eq!(actual.px, expected.px);
+                }
+                assert!(cx.tone_luts[0].1.get().is_some());
+            }
+        }
+    }
+    let mut layers: Vec<_> = (0..20).map(|_| Layer::new("tone", LayerContent::Adjustment(Adjustment::identity_levels()))).collect();
+    layers[0].visible = false;
+    let tables = prepare_tones(&layers, 0);
+    assert_eq!(tables.len(), 16);
+    assert!(tables.iter().all(|(_, cell)| cell.get().is_none()));
+    assert!(matches!(&layers[1].content, LayerContent::Adjustment(a) if std::ptr::eq(tables[0].0, a)));
+    assert!(prepare_tones(&[Layer::group("deep", layers)], PREPARE_DEPTH).is_empty());
+}
+
 fn solid_layer(name: &str, rect: Rect, rgba: [f32; 4]) -> Layer {
     let mut l = Layer::raster(name, PixelFormat::RGBA8);
     l.surface_mut().unwrap().fill_rect(rect, &rgba);
@@ -84,6 +127,57 @@ fn every_blend_mode_matches_reference_on_opaque_pixels() {
             assert!((got[i] - want[i]).abs() < 1e-5, "{mode:?}: {got:?} vs {want:?}");
         }
         assert!((got[3] - 1.0).abs() < 1e-6);
+    }
+}
+
+/// One opaque pixel: `top` in `mode` over `bottom`, in a document of `depth`.
+fn blend_px(depth: SampleType, mode: BlendMode, bottom: [f32; 3], top: [f32; 3]) -> [f32; 4] {
+    let mut d = Document::new("b", Size::new(1, 1), ColorMode::Rgb, depth);
+    let fmt = d.pixel_format();
+    let mut b = Layer::raster("b", fmt);
+    b.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 1, 1), &photocraft_raster::from_rgba(&fmt, [bottom[0], bottom[1], bottom[2], 1.0]));
+    let mut t = Layer::raster("t", fmt);
+    t.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 1, 1), &photocraft_raster::from_rgba(&fmt, [top[0], top[1], top[2], 1.0]));
+    t.blend = mode;
+    d.layers = vec![b, t];
+    px(&d, 0, 0)
+}
+
+#[test]
+fn non_separable_modes_keep_values_above_one_in_32_bit() {
+    use photocraft_color::blend::{blend_rgb_within, lum};
+    let modes = [BlendMode::Hue, BlendMode::Saturation, BlendMode::Color, BlendMode::Luminosity];
+    // Hue over a grey of 2: the grey (the backdrop has no saturation), not ClipColor dividing
+    // by the rounding noise of `max − lum` (Hue over (4, 3.9999, 4) gave 27.7 in blue).
+    for bg in [[2.0, 2.0, 2.0], [2.0, 2.0, 1.999_99], [4.0, 3.999_9, 4.0]] {
+        for m in modes {
+            for top in [[3.0, 0.25, 0.125], [2.0, 2.0, 2.0], [4.0, 3.999_9, 4.0]] {
+                let got = blend_px(SampleType::F32, m, bg, top);
+                let want = blend_rgb_within(m, bg, top, f32::MAX);
+                assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() <= 1e-4 * w.abs().max(1.0)), "{m:?} {bg:?} {top:?}: {got:?} vs {want:?}");
+                assert!(got.iter().all(|v| v.is_finite() && *v >= -1e-5), "{m:?} {bg:?} {top:?}: {got:?}");
+            }
+        }
+    }
+    // A saturated colour keeps its brightness above 1 in 32-bit, and is clipped into 0..1
+    // (exactly as before) in 8/16-bit.
+    let (bg, top) = ([0.5, 0.5, 0.5], [1.0, 0.0, 0.0]);
+    let hdr = blend_px(SampleType::F32, BlendMode::Color, bg, top);
+    assert!((hdr[0] - 1.2).abs() < 1e-4 && (lum([hdr[0], hdr[1], hdr[2]]) - 0.5).abs() < 1e-4, "{hdr:?}");
+    for depth in [SampleType::U8, SampleType::U16] {
+        for m in modes {
+            let got = blend_px(depth, m, bg, top);
+            let want = photocraft_color::blend::blend_rgb(m, bg, top);
+            assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() <= 1.0 / 255.0), "{m:?} {depth:?}: {got:?} vs {want:?}");
+        }
+        let got = blend_px(depth, BlendMode::Color, bg, top);
+        assert!(got[0] <= 1.0 && got[0] > 0.9, "{depth:?}: {got:?}");
+    }
+    // A 32-bit document's in-range colours that stay in range are unchanged.
+    for m in modes {
+        let got = blend_px(SampleType::F32, m, [0.6, 0.3, 0.2], [0.2, 0.7, 0.5]);
+        let want = photocraft_color::blend::blend_rgb(m, [0.6, 0.3, 0.2], [0.2, 0.7, 0.5]);
+        assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() <= 1e-5), "{m:?}: {got:?} vs {want:?}");
     }
 }
 
@@ -306,6 +400,32 @@ fn hue_saturation_roundtrips_and_desaturates() {
         &mut buf,
     );
     assert!(close4(buf.px[0], [0.0, 1.0, 0.0, 1.0]));
+}
+
+#[test]
+fn hue_saturation_colorize_zero_saturation_is_grey() {
+    // Photoshop colourises to grey when the Saturation slider is at 0%, whatever the Hue (#2326).
+    let c = [0.8, 0.3, 0.1];
+    let (_, _, l) = adjust::rgb_to_hsl(c);
+    for hue in [0.0, 200.0, 359.0] {
+        let mut buf = Buffer::filled(Rect::new(0, 0, 1, 1), [c[0], c[1], c[2], 1.0]);
+        adjust::apply(
+            &Adjustment::HueSaturation { hue, saturation: 0.0, lightness: 0.0, colorize: true, ranges: photocraft_doc::adjust::HueRange::defaults() },
+            &mut buf,
+        );
+        let p = buf.px[0];
+        assert!((p[0] - p[1]).abs() < 1e-5 && (p[1] - p[2]).abs() < 1e-5, "hue {hue}: colourless, got {p:?}");
+        assert!((p[0] - l).abs() < 1e-5, "hue {hue}: lightness preserved");
+    }
+    // A low saturation is taken literally, not floored: the result keeps exactly that saturation.
+    let mut buf = Buffer::filled(Rect::new(0, 0, 1, 1), [c[0], c[1], c[2], 1.0]);
+    adjust::apply(
+        &Adjustment::HueSaturation { hue: 200.0, saturation: 10.0, lightness: 0.0, colorize: true, ranges: photocraft_doc::adjust::HueRange::defaults() },
+        &mut buf,
+    );
+    let (h, s, _) = adjust::rgb_to_hsl([buf.px[0][0], buf.px[0][1], buf.px[0][2]]);
+    assert!((s - 0.1).abs() < 1e-4, "saturation 10% honoured, got {s}");
+    assert!((h - 200.0 / 360.0).abs() < 1e-4);
 }
 
 #[test]

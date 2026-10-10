@@ -552,6 +552,11 @@ pub(crate) fn link_stages(src: &Profile, dst: &Profile, intent: Intent, bpc: boo
         if matches!(p.class, ProfileClass::DeviceLink | ProfileClass::NamedColor | ProfileClass::Abstract) && p.color_space != ColorSpace::Lab {
             return Err(CmsError::Unsupported(format!("{:?} profiles cannot be used as a source or destination", p.class)));
         }
+        // A Lab-input DeviceLink parses, but only one ending in a PCS space can be linked: its
+        // LUT output is decoded as a PCS (the header's PCS field carries the output space).
+        if p.class == ProfileClass::DeviceLink && !matches!(p.link_output, None | Some(ColorSpace::Lab | ColorSpace::Xyz)) {
+            return Err(CmsError::Unsupported("DeviceLink profiles with a non-PCS output cannot be used as a source or destination".into()));
+        }
     }
     let (mut stages, s_pcs) = src.device_to_pcs(intent)?;
     let (d_stages, d_pcs) = dst.pcs_to_device(intent)?;

@@ -35,7 +35,13 @@
 	New…	新規…
 	New from Clipboard	クリップボードから新規作成
 	Open…	開く…
+	Open as Deep…	ディープとして開く…
 	Open As…	形式を指定して開く…
+	Open EXR Parts…	EXRパートを開く…
+	Add beauty precomp from the AOVs	AOVからビューティーをプリコンポーズして追加
+	Both	両方
+	Left	左
+	Right	右
 	Open Recent	最近使ったファイルを開く
 	Clear Recent Files	最近使ったファイルを消去
 	Close	閉じる
@@ -85,6 +91,8 @@
 	Import	読み込み
 	Browse…	参照…
 	Reveal in Finder	Finder で表示
+	Show in Explorer	エクスプローラーで表示
+	Show in Folder	フォルダーで表示
 	File Info…	ファイル情報…
 	Print…	プリント…
 	Print One Copy	1 部プリント
@@ -736,6 +744,22 @@
 	+ Add variable	+ 変数を追加
 	30 frames @ 30 fps	30 フレーム @ 30 fps
 	3D LUT File	3D LUT ファイル
+	Install Pack…	パックをインストール…
+	Remove Pack	パックを削除
+	Built-in	内蔵
+	Favorites	お気に入り
+	Duplicate of	重複:
+	3D cube	3Dキューブ
+	1D cube	1Dキューブ
+	LUT look	LUTルック
+	{kind}, size {n}	{kind}、サイズ {n}
+	Title: {title}	タイトル: {title}
+	Declares an input range other than 0 to 1	0〜1以外の入力範囲を指定しています
+	The name suggests a technical conversion, not a creative look	名前から、クリエイティブなルックではなく技術的な変換と思われます
+	LUTs installed into {pack}: {n}	{pack} にインストールした LUT: {n}
+	{n} skipped	{n} 件スキップ
+	{n} already installed	{n} 件はインストール済み
+	Choosing a folder is not available here; use the lut.installPack command	ここではフォルダーを選択できません。lut.installPack コマンドを使ってください
 	Absolute	絶対
 	Absolute Colorimetric	絶対的な色域を維持
 	Action	アクション
@@ -803,6 +827,9 @@
 	Bend:	曲げ:
 	Bicubic	バイキュービック
 	Bicubic (smooth gradients)	バイキュービック(滑らかな階調)
+	Automatic	自動
+	Bicubic Smoother (enlargement)	バイキュービック法 - 滑らか(拡大)
+	Bicubic Sharper (reduction)	バイキュービック法 - シャープ(縮小)
 	Bilinear	バイリニア
 	Black	黒
 	Black & White	白黒
@@ -813,7 +840,6 @@
 	Blending Options	描画オプション
 	Blue	青
 	Blue, Red, Yellow	青、赤、黄
-	Both	両方
 	Both Axes	両方の軸
 	Bottom	下
 	Brightness	明るさ
@@ -1037,6 +1063,7 @@
 	Filter for pixel layers	ピクセルレイヤーで絞り込み
 	Filter for shape layers	シェイプレイヤーで絞り込み
 	Filter for smart objects	スマートオブジェクトで絞り込み
+	Filter for deep layers	ディープレイヤーを絞り込む
 	Filter for type layers	文字レイヤーで絞り込み
 	Filter:	フィルター:
 	Finger Painting	指先で描画
@@ -1132,7 +1159,6 @@
 	Leading	行送り
 	Leading (set to the font size × auto-leading when Auto)	行送り(自動のときはフォントサイズ × 自動行送り)
 	Leave as is (don't color manage)	そのまま(カラーマネジメントしない)
-	Left	左
 	Left align text	左揃え
 	Length:	長さ:
 	Level	レベル
@@ -1341,7 +1367,6 @@
 	Restore All	すべて復元
 	Restore Defaults	既定に戻す
 	Restrictive (Web)	制限(Web)
-	Right	右
 	Right align text	右揃え
 	Rigid	剛体
 	Rotate:	回転:
@@ -2202,6 +2227,7 @@ cameraRaw	Color	カラー
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	カラーピッカー（文字色）
+	Color Picker ({name})	カラーピッカー（{name}）
 	Color Picker (Fill Color)	カラーピッカー（塗りつぶしカラー）
 	Fill color	塗りつぶしカラー
 	Color Picker (Stroke Color)	カラーピッカー（線のカラー）
@@ -3422,7 +3448,26 @@ fontWeight	Italic	斜体
 	Dash offset	破線のオフセット
 	Open paths use centered strokes	開いたパスの線は中央に配置されます
 	Use finite lengths and a positive pattern total	有限の長さと正のパターン合計を使用してください
+
+# Undo cache budgets
+	Memory budget (MiB)	メモリ上限 (MiB)
+	Undo disk budget (MiB)	取り消し用ディスク上限 (MiB)
+	Budget mb	容量上限 (MiB)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	メモリ上限はドキュメントの画素、埋め込みデータ、取り消し履歴で共有します。必要に応じて増加し、アプリのその他のメモリは別途使用されます。
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	取り消し用ディスク容量は必要なときだけ、この上限まで増加します。0 にするとディスクキャッシュを無効にします。保存先は次のキャッシュセッションから適用されます。
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	ブラウザー版では取り消し履歴をメモリに保持します。スクラッチディスク設定はデスクトップ版に適用されます。
 	No subject found — try Object Selection or the Lasso	被写体が見つかりません — オブジェクト選択ツールまたはなげなわツールを試してください
 	Quick Selection found nothing there	クイック選択ではそこに何も見つかりませんでした
 	Object Selection found nothing there — try a tighter rectangle	オブジェクト選択ではそこに何も見つかりませんでした — より狭い長方形で試してください
 	No subject found — try a rectangle around the object	被写体が見つかりません — オブジェクトを囲む長方形を試してください
+	Next Document	次のドキュメント
+	Previous Document	前のドキュメント
+	Appearance Settings…	外観設定…
+	Add to favorites	お気に入りに追加
+	Remove from favorites	お気に入りから削除
+	Capishot — Screen Color Picker	Capishot — スクリーンカラーピッカー
+	Float Panel	パネルを分離
+	Float Panel Group	パネルグループを分離
+	Dock Panel Group	パネルグループをドッキング
+	Use Classic Mode	クラシックモードを使用
+	Auto Center Preview	プレビューを自動的に中央に配置

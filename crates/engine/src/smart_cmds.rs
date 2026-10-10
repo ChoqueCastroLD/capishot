@@ -528,10 +528,14 @@ fn detach_psd(l: &mut Layer) {
 
 // ---------- conversion ----------
 
-/// Moves a layer (any kind) by whole pixels without re-rendering anything.
-fn shift_layer(l: &mut Layer, dx: i32, dy: i32) {
+/// Moves a layer (any kind) by whole pixels without re-rendering anything. Refuses a shift
+/// that would push any pixel store outside the i32 coordinate range.
+fn shift_layer(l: &mut Layer, dx: i32, dy: i32) -> Result<()> {
     if dx == 0 && dy == 0 {
-        return;
+        return Ok(());
+    }
+    if !crate::image_cmds::layer_shift_fits(l, dx, dy) {
+        return Err(other(format!("moving the layer by ({dx}, {dy}) would push pixels outside the 32-bit coordinate range")));
     }
     let a = Affine::translate(dx as f64, dy as f64);
     let mv = |s: &Surface| translate_surface(s, dx, dy);
@@ -546,6 +550,10 @@ fn shift_layer(l: &mut Layer, dx: i32, dy: i32) {
     }
     match &mut l.content {
         LayerContent::Raster(s) => *s = mv(s),
+        LayerContent::Deep(d) => {
+            d.x += dx;
+            d.y += dy;
+        }
         LayerContent::Text(t) => {
             t.transform = a.mul(&t.transform);
             if let Some(c) = &mut t.cache {
@@ -559,9 +567,14 @@ fn shift_layer(l: &mut Layer, dx: i32, dy: i32) {
             }
         }
         LayerContent::Smart(sm) => shift_smart(sm, dx, dy),
-        LayerContent::Group(g) => g.children.iter_mut().for_each(|c| shift_layer(c, dx, dy)),
+        LayerContent::Group(g) => {
+            for c in g.children.iter_mut() {
+                shift_layer(c, dx, dy)?;
+            }
+        }
         LayerContent::Adjustment(_) | LayerContent::Fill(_) => {}
     }
+    Ok(())
 }
 
 fn subtree_bounds(l: &Layer, canvas: Rect) -> Rect {
@@ -626,7 +639,7 @@ pub fn layer_to_smart(doc: &Document, l: &Layer) -> Result<Layer> {
     cache = photocraft_algo::resample::crop_surface(&cache, b);
     cache.prune();
 
-    shift_layer(&mut sub.layers[0], -b.x0, -b.y0);
+    shift_layer(&mut sub.layers[0], -b.x0, -b.y0)?;
     sub.size = Size::new(b.width(), b.height());
     let bytes = encode_source(&sub)?;
     // Seed the decode cache with the composite we already have.
@@ -740,16 +753,25 @@ fn set_shared_source(s: &mut Session, id: LayerId, label: &str, keep_psd: bool, 
 fn replace_contents(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_param("layer.smartObjects.replaceContents", p)?.to_string();
     let bytes = photocraft_format::read_file(std::path::Path::new(&path)).map_err(|e| other(format!("can't read {path}: {e}")))?;
-    let name = base_name(&path);
-    decode_source(&name, &bytes)?; // fail before touching the document
-    set_source(s, p, "Replace Contents", false, |_, _| Ok(SmartSource::Embedded { file_name: name, bytes: Arc::new(bytes) }))
+    let id = layer_param(s, p)?;
+    replace_contents_bytes(s, id, &base_name(&path), bytes)
+}
+
+/// Replace Contents from a file's name and bytes: what the desktop and web file pickers hand over.
+pub fn replace_contents_bytes(s: &mut Session, id: LayerId, file_name: &str, bytes: Vec<u8>) -> Result<Value> {
+    decode_source(file_name, &bytes)?; // fail before touching the document
+    set_shared_source(s, id, "Replace Contents", false, SmartSource::Embedded { file_name: file_name.to_string(), bytes: Arc::new(bytes) })
+}
+
+/// The file name and bytes of smart object `id`'s contents.
+pub fn contents_of(doc: &Document, id: LayerId) -> Result<(String, Arc<Vec<u8>>)> {
+    source_bytes(&doc.metadata, &smart(doc, id)?.source).ok_or_else(|| other("the smart object's contents are unavailable"))
 }
 
 fn export_contents(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_param("layer.smartObjects.exportContents", p)?;
     let id = layer_param(s, p)?;
-    let st = s.active().ok_or(EngineError::NoDocument)?;
-    let (name, bytes) = source_bytes(&st.doc.metadata, &smart(&st.doc, id)?.source).ok_or_else(|| other("the smart object's contents are unavailable"))?;
+    let (name, bytes) = contents_of(&s.active().ok_or(EngineError::NoDocument)?.doc, id)?;
     crate::file_cmds::write_file(path, &bytes)?;
     Ok(json!({"path": path, "fileName": name, "bytes": bytes.len()}))
 }

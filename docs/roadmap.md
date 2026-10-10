@@ -39,6 +39,12 @@ approximated or left out, each with a warning; damaged or unknown files fall bac
 preview. Affinity writing is not implemented: no Affinity installation was available to check
 written files, so `.af` export stays unsupported.
 
+2026-10-10: current `.af` artboard properties (`phrp`/`aprp`) are recognized alongside the
+legacy flag, including converted curve boards. Synthetic two-board regressions check separate
+bounds, overflow clipping, `.pcraft`/PSD board and pixel round trips, and moving one board with its
+children through undo/redo. Nested boards remain masked groups; rotated/curved board outlines
+still import at their bounding rectangle.
+
 2026-10-09: `corpus/affinity/` now has 39 pinned documents and 21 PNGs (20 rendered references and
 one bitmap-fill texture): the prior 21 public documents plus 18 CC0 samples for #1606. The new
 samples compare against their exported PNGs;
@@ -48,6 +54,13 @@ now import as parametric shapes; the special-shapes sample measures 5.68/255 aga
 remaining gaps in #1606 stay tracked with per-sample corpus ceilings.
 
 ## Honest parity assessment (2026-10-05)
+
+2026-10-06 infrastructure update: undo now has demand-grown compressed scratch
+storage with shared 4 GiB managed-RAM / 8 GiB disk defaults. Exact restoration,
+quota/error atomicity and asynchronous cleanup are covered by regression tests;
+current working documents themselves remain resident. See [undo-cache.md](undo-cache.md)
+for the synthetic 24 MP result (12 retained steps in 7.36 MiB scratch, cold undo p50 37.8 ms) and the limits of the memory target.
+
 
 This is the reference answer to "how close are we to Photoshop parity, really". Agents: read it
 before picking work. Update it (with dated measurements) when the numbers move; don't restate the
@@ -71,11 +84,27 @@ i7-9750H, 12 workers, 24 MP RGBA8, Good quality, amount 1: Spin 66.10 → 16.43 
 (4.02×), Zoom 19.19 → 5.35 s (3.59×), one paired run each, exact output equality.
 These are local measurements at amount 1; see [method and limits](radial-blur-performance.md).
 
+2026-10-10: Iris Blur pin preparation, saturated-distance evaluation and trailing
+Gaussian-level halo trimming measure 1.18–1.76× faster across eight local 24 MP
+RGB U8/U16/F32 cases (Ryzen 7 9700X, Windows, eight workers). Default blur 15:
+626.8 → 426.9 ms; two pins: 1789.9 → 1016.2 ms. The default 1500×1000 filtered
+proxy for 24 MP, document blur 15/80: 28.7/51.8 → 24.9/42.6 ms. At 36 MP,
+two pins: 2595.8 → 1822.8 ms; small/medium U8 gains are inconclusive.
+Differential tests preserve exact finite pixel bits.
+These are computation timings, not GUI frame latency or new Photoshop parity;
+see [measurements, upstream SIMD findings and limits](iris-blur-performance.md).
+
 2026-10-10: native selection distance transforms measured 7.59–10.57x faster on six
 24–36 MP synthetic masks on an AWS c7i.4xlarge (16 workers, three paired release runs).
 The transform also corrects f32 envelope errors past coordinate 4096, including nonzero
 distances at selected pixels. The parallel path needs an additional four bytes per pixel;
 see [measurements, correctness and limits](selection-distance-performance.md).
+
+2026-10-10: Quick Selection object strokes through raster surfaces measured
+3.46-3.70x faster at 8-bit, 16-bit and 32f on 24-36 MP documents (AWS
+c7i.4xlarge, five paired release runs), with identical region bounds and mask bytes.
+Hybrid FIFO push/relabel and sparse edge enumeration preserve the fitted energy.
+See [stroke measurements and reproduction](quick-selection-performance.md).
 
 **Bottom line.** Two days after 0.2.0 we had merged ~96 PRs and closed ~48 issues, but **real
 Photoshop parity is still well below 50%**. The biggest gaps are AI, missing tools, professional
@@ -114,7 +143,7 @@ filled bar. This extends UI reachability and does not claim Photoshop-authored s
 | Colour management | Colour-managed canvas (document → monitor), embedded CMYK profiles, linear EXR/HDR, 16-bit float canvas | medium-high | Monitor profile follows only at launch. |
 | Performance | 14k+ px on the GPU at ~⅓ the memory; adjustment preview 285 ms → 4–9 ms; font-size edits 297 ms → 4.6 ms; 2026-10-07: 30 MP TIFF open (banded, parallel strip/tile decode) Deflate 345 → 32 ms, LZW 428 → 43 ms, BigTIFF and every IFD readable; 2026-10-09: 4.2 MP Indexed Color, 256 colours, full-resolution CPU preview p50 3018 → 1061 ms (Ryzen AI 7 350, three measured runs; GPU upload excluded) | medium-high on rasters | Complex layout documents still laggy (#125/#128); >16384 px GPU tiling in progress (#49). Native Indexed Color previews run on one background worker with stale-result rejection; large palettes can still take about a second to compute. Web previews remain synchronous. |
 | Stability | Never-crash lint series, crash guard, `panic_hunt` fuzzing in the gate | medium-high | No field crash data yet. |
-| Camera RAW | DNG, CR2, Sony ARW (lossless + compressed), Nikon NEF (lossless + lossy compressed), RW2, uncompressed ORF; 2026-10-09: uncompressed Fujifilm RAF, Bayer and X-Trans (edge-directed X-Trans demosaic; 26 MP X-Trans develop 306 ms on 12 cores) | medium | CR3, compressed RAF, Nikon "lossy after split" and calibrated colour for non-DNG cameras (no Fuji colour calibration: neutral fallback) still open (#50). |
+| Camera RAW | DNG, CR2, Sony ARW (lossless + compressed), Nikon NEF (lossless + lossy compressed), RW2, uncompressed ORF; 2026-10-09: uncompressed Fujifilm RAF, Bayer and X-Trans (edge-directed X-Trans demosaic; 26 MP X-Trans develop 306 ms on 12 cores) | medium | CR3, compressed RAF and Nikon "lossy after split" still open (#50). Non-DNG cameras have no calibration: their colour (matrix + tone curve) is fitted per file to the camera's embedded JPEG, with the neutral sRGB-primaries fallback when the fit doesn't clearly help (2026-10-08: 8 D3200 NEFs, mean ΔE vs the camera JPEG 11.6–26.0 → 1.0–7.5); measured per-model calibration still open. |
 | AI / generative | none | ~0% | Deferred by decision (#41). |
 | Ecosystem | Sandboxed WebAssembly plug-ins instead of .8BF; no ExtendScript/UXP/.atn; no Adobe Fonts/Libraries/cloud docs | low | By design for 8BF; scripting compatibility open. |
 | Platforms | macOS (notarized), Windows, Linux (AppImage/deb/rpm/Flatpak bundle), web | medium-high | Flathub later (#173); Windows signing material pending. |
@@ -157,6 +186,15 @@ creation and undo test in [`type_tool_tests.rs`](../crates/ui-egui/src/type_tool
 These implementations remove the tools from the missing list; they do not establish Photoshop
 behavioural parity. The historical estimates and corpus measurements in this assessment are
 unchanged; current measured floors remain in the scorecard.
+2026-10-08: GPU lower-stack checkpoints reuse unchanged composites after property edits.
+On a dense 24 MP / 12-layer stack, warm top-layer opacity edits at 8/16/32-bit depth measured
+p50 229/228/186 → 31/25/26 ms (AMD Radeon 860M, Windows, Vulkan; synchronized compositor only,
+`bench_stack_reuse`). Gains in the existing 20 MP P2–P5 canvas fixture were small and
+run-order sensitive: a reversed-order repeat measured p50
+13.2/13.2/12.0/8.2 → 12.5/12.2/12.0/8.0 ms; P5 p95 remains 13.7 ms, above its 10 ms budget.
+One checkpoint is capped at 512 MiB within the existing total budget;
+the 24 MP run held 384 MB. Planning and output/mipmap work remain. These local comparisons
+do not replace the published baseline or enable budget enforcement on other hardware.
 
 2026-10-07: Camera Raw PSD mapping covers relative custom white balance, Light/Presence,
 parametric and four point curves, HSL, Color Grading, sharpening/noise detail, grain and numeric
@@ -180,6 +218,16 @@ circular soft-mask kernels improve 20.76-172.16x at 24-36 MP, radii 4-64.
 Bounded halo tiles reduce the large-mask workspace allocation bound from 192/288 MB
 to about 115/163 MB, including output and 16 workers' scratch, excluding the source.
 See [method and results](octagonal-mask-performance.md).
+
+2026-10-10: Pixelate's Facet shares exact 3x3 quadrant statistics and Color Halftone
+shares dot radii within each rotated screen grid. Full tiled CPU application at 24 MP
+on a 16-vCPU m7i.4xlarge improves Facet from 0.684 s to 0.312 s in RGB8
+(2.20x), and from 7.888 s to 0.574 s in CMYK8 (13.74x).
+Color Halftone improves from 1.137 s to 0.604 s in RGB8 (1.88x)
+and from 3.589 s to 0.718 s in Lab8 (5.00x).
+Three alternating paired release runs also cover 36 MP RGB, 16/32-bit storage,
+and screen radii 2/8/64. All 36 complete output comparisons match exactly.
+See [method, raw timings and checks](pixelate-performance.md).
 
 ### Where we're going (priority order)
 

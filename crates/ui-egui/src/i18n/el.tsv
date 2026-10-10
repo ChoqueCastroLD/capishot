@@ -18,6 +18,12 @@
 	New from Clipboard	Νέο από το πρόχειρο
 	Open…	Άνοιγμα…
 	Open As…	Άνοιγμα ως…
+	Open as Deep…	Άνοιγμα ως βάθος…
+	Open EXR Parts…	Άνοιγμα τμημάτων EXR…
+	Add beauty precomp from the AOVs	Προσθήκη προ-σύνθεσης ομορφιάς από τα AOV
+	Both	Και τα δύο
+	Left	Αριστερά
+	Right	Δεξιά
 	Open Recent	Πρόσφατα αρχεία
 	Clear Recent Files	Εκκαθάριση πρόσφατων αρχείων
 	Close	Κλείσιμο
@@ -67,6 +73,8 @@
 	Import	Εισαγωγή
 	Browse…	Περιήγηση…
 	Reveal in Finder	Εμφάνιση στο Finder
+	Show in Explorer	Εμφάνιση στην Εξερεύνηση αρχείων
+	Show in Folder	Εμφάνιση στον φάκελο
 	File Info…	Πληροφορίες αρχείου…
 	Print…	Εκτύπωση…
 	Print One Copy	Εκτύπωση ενός αντιγράφου
@@ -436,8 +444,6 @@
 	Alignment	Στοίχιση
 	Align	Στοίχιση
 	Distribute	Κατανομή
-	Left	Αριστερά
-	Right	Δεξιά
 	Center	Κέντρο
 	Top	Πάνω
 	Bottom	Κάτω
@@ -1020,6 +1026,7 @@
 	No Layer Comps	Δεν υπάρχουν συνθέσεις επιπέδων
 	Add to selection  (⇧)	Προσθήκη στην επιλογή  (⇧)
 	Click to zoom in  ·  ⌥-click to zoom out	Κλικ για μεγέθυνση · ⌥-κλικ για σμίκρυνση
+	Filter for deep layers	Φίλτρο για βαθιές στιβάδες
 	Commit Perspective Warp (↩)	Εφαρμογή παραμόρφωσης προοπτικής (↩)
 	Commit Puppet Warp (↩)	Εφαρμογή παραμόρφωσης μαριονέτας (↩)
 	Commit any current edits (⌘↩)	Εφαρμογή τρεχουσών αλλαγών (⌘↩)
@@ -2003,6 +2010,8 @@
 	Bend:	Καμπυλότητα:
 	Bicubic	Δικυβικό
 	Bicubic (smooth gradients)	Δικυβική (ομαλές διαβαθμίσεις)
+	Bicubic Smoother (enlargement)	Δικυβική πιο ομαλή (μεγέθυνση)
+	Bicubic Sharper (reduction)	Δικυβική πιο ευκρινής (σμίκρυνση)
 	Bilinear	Διγραμμική
 	Black Point Compensation	Αντιστάθμιση μαύρου σημείου
 	Black, White	Μαύρο, λευκό
@@ -2015,7 +2024,6 @@
 	Bold Italic	Έντονα πλάγια
 	Border	Περίγραμμα
 	Border…	Περίγραμμα…
-	Both	Και τα δύο
 	Both Axes	Και οι δύο άξονες
 	Box Blur	Θόλωση πλαισίου
 	Box Blur…	Θόλωση πλαισίου…
@@ -2529,6 +2537,22 @@
 	Liquify is not open	Το Liquify δεν είναι ανοιχτό
 	Liquify…	Ρευστοποίηση…
 	Load 3D LUT…	Φόρτωση 3D LUT…
+	Install Pack…	Εγκατάσταση πακέτου…
+	Remove Pack	Αφαίρεση πακέτου
+	Built-in	Ενσωματωμένα
+	Favorites	Αγαπημένα
+	Duplicate of	Αντίγραφο του
+	3D cube	Κύβος 3D
+	1D cube	Κύβος 1D
+	LUT look	Εμφάνιση LUT
+	{kind}, size {n}	{kind}, μέγεθος {n}
+	Title: {title}	Τίτλος: {title}
+	Declares an input range other than 0 to 1	Δηλώνει εύρος εισόδου διαφορετικό από 0 έως 1
+	The name suggests a technical conversion, not a creative look	Το όνομα παραπέμπει σε τεχνική μετατροπή και όχι σε δημιουργική εμφάνιση
+	LUTs installed into {pack}: {n}	LUT που εγκαταστάθηκαν στο {pack}: {n}
+	{n} skipped	{n} παραλείφθηκαν
+	{n} already installed	{n} είναι ήδη εγκατεστημένα
+	Choosing a folder is not available here; use the lut.installPack command	Η επιλογή φακέλου δεν είναι διαθέσιμη εδώ· χρησιμοποιήστε την εντολή lut.installPack
 	Load Default Type Styles	Φόρτωση προεπιλεγμένων στυλ κειμένου
 	Load Files into Stack…	Φόρτωση αρχείων σε στοίβα…
 	Load Selection…	Φόρτωση επιλογής…
@@ -3453,6 +3477,7 @@ fontWeight	Thin	Πολύ λεπτά
 
 # Shared text style Color Picker (#2015)
 	Color Picker (Text Color)	Επιλογέας χρώματος (χρώμα κειμένου)
+	Color Picker ({name})	Επιλογέας χρώματος ({name})
 	Auto Hide Notifications	Αυτόματη απόκρυψη ειδοποιήσεων
 	Notification Duration (seconds)	Διάρκεια ειδοποίησης (δευτερόλεπτα)
 	Appearance Mode	Λειτουργία εμφάνισης
@@ -3510,7 +3535,26 @@ fontWeight	Thin	Πολύ λεπτά
 	Dash offset	Μετατόπιση παύλας
 	Open paths use centered strokes	Οι ανοικτές διαδρομές χρησιμοποιούν κεντραρισμένα περιγράμματα
 	Use finite lengths and a positive pattern total	Χρησιμοποιήστε πεπερασμένα μήκη και θετικό άθροισμα μοτίβου
+
+# Undo cache budgets
+	Budget mb	Όριο (MiB)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	Τα εικονοστοιχεία εγγράφων, τα ενσωματωμένα δεδομένα και το ιστορικό αναίρεσης μοιράζονται το όριο μνήμης. Η μνήμη δεσμεύεται όταν χρειάζεται· η υπόλοιπη μνήμη της εφαρμογής είναι πρόσθετη.
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	Ο χώρος δίσκου για αναίρεση χρησιμοποιείται μόνο όταν χρειάζεται, μέχρι αυτό το όριο. Το μηδέν απενεργοποιεί την προσωρινή αποθήκευση στον δίσκο. Οι διαδρομές δίσκων εργασίας ισχύουν στην επόμενη συνεδρία προσωρινής αποθήκευσης.
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Αυτή η έκδοση προγράμματος περιήγησης κρατά το ιστορικό αναίρεσης στη μνήμη. Οι ρυθμίσεις δίσκων εργασίας ισχύουν για την εφαρμογή υπολογιστή.
+	Memory budget (MiB)	Όριο μνήμης (MiB)
+	Undo disk budget (MiB)	Όριο δίσκου για αναίρεση (MiB)
 	No subject found — try Object Selection or the Lasso	Δεν βρέθηκε θέμα — δοκιμάστε την Επιλογή αντικειμένου ή το Λάσο
 	Quick Selection found nothing there	Η Γρήγορη επιλογή δεν βρήκε τίποτα εκεί
 	Object Selection found nothing there — try a tighter rectangle	Η Επιλογή αντικειμένου δεν βρήκε τίποτα εκεί — δοκιμάστε ένα πιο στενό ορθογώνιο
 	No subject found — try a rectangle around the object	Δεν βρέθηκε θέμα — δοκιμάστε ένα ορθογώνιο γύρω από το αντικείμενο
+	Next Document	Επόμενο έγγραφο
+	Previous Document	Προηγούμενο έγγραφο
+	Appearance Settings…	Ρυθμίσεις εμφάνισης…
+	Add to favorites	Προσθήκη στα αγαπημένα
+	Remove from favorites	Αφαίρεση από τα αγαπημένα
+	Capishot — Screen Color Picker	Capishot — Επιλογή χρώματος οθόνης
+	Float Panel	Αποδέσμευση πίνακα
+	Float Panel Group	Αποδέσμευση ομάδας πινάκων
+	Dock Panel Group	Αγκύρωση ομάδας πινάκων
+	Use Classic Mode	Χρήση κλασικής λειτουργίας
+	Auto Center Preview	Αυτόματο κεντράρισμα προεπισκόπησης

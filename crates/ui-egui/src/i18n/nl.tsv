@@ -28,6 +28,12 @@
 	New from Clipboard	Nieuw vanaf klembord
 	Open…	Openen…
 	Open As…	Openen als…
+	Open as Deep…	Openen als deep…
+	Open EXR Parts…	EXR-delen openen…
+	Add beauty precomp from the AOVs	Schoonheidsvoorcompositie toevoegen vanuit de AOV's
+	Both	Beide
+	Left	Links
+	Right	Rechts
 	Open Recent	Recent geopend
 	Clear Recent Files	Recente bestanden wissen
 	Close	Sluiten
@@ -77,6 +83,8 @@
 	Import	Importeren
 	Browse…	Bladeren…
 	Reveal in Finder	Weergeven in Finder
+	Show in Explorer	Weergeven in Verkenner
+	Show in Folder	Weergeven in map
 	File Info…	Bestandsinformatie…
 	Print…	Afdrukken…
 	Print One Copy	Eén exemplaar afdrukken
@@ -722,6 +730,22 @@
 	+ Add variable	+ Variabele toevoegen
 	30 frames @ 30 fps	30 frames @ 30 fps
 	3D LUT File	3D LUT-bestand
+	Install Pack…	Pakket installeren…
+	Remove Pack	Pakket verwijderen
+	Built-in	Ingebouwd
+	Favorites	Favorieten
+	Duplicate of	Duplicaat van
+	3D cube	3D-kubus
+	1D cube	1D-kubus
+	LUT look	LUT-look
+	{kind}, size {n}	{kind}, grootte {n}
+	Title: {title}	Titel: {title}
+	Declares an input range other than 0 to 1	Geeft een ander invoerbereik op dan 0 tot 1
+	The name suggests a technical conversion, not a creative look	De naam wijst op een technische conversie, niet op een creatieve look
+	LUTs installed into {pack}: {n}	LUT's geïnstalleerd in {pack}: {n}
+	{n} skipped	{n} overgeslagen
+	{n} already installed	{n} al geïnstalleerd
+	Choosing a folder is not available here; use the lut.installPack command	Een map kiezen is hier niet beschikbaar; gebruik de opdracht lut.installPack
 	Absolute	Absoluut
 	Absolute Colorimetric	Absoluut colorimetrisch
 	Action	Actie
@@ -788,6 +812,8 @@
 	Bend:	Buiging:
 	Bicubic	Bicubisch
 	Bicubic (smooth gradients)	Bicubisch (vloeiende verlopen)
+	Bicubic Smoother (enlargement)	Bicubisch vloeiender (vergroten)
+	Bicubic Sharper (reduction)	Bicubisch scherper (verkleinen)
 	Bilinear	Bilineair
 	Black	Zwart
 	Black & White	Zwart-wit
@@ -798,7 +824,6 @@
 	Blending Options	Overvloeiopties
 	Blue	Blauw
 	Blue, Red, Yellow	Blauw, rood, geel
-	Both	Beide
 	Both Axes	Beide assen
 	Bottom	Onder
 	Brightness	Helderheid
@@ -1023,6 +1048,7 @@
 	Fill:	Vulling:
 	Filter for adjustment layers	Filter op aanpassingslagen
 	Filter for pixel layers	Filter op pixellagen
+	Filter for deep layers	Filter op dieptelagen
 	Filter for shape layers	Filter op vormlagen
 	Filter for smart objects	Filter op slimme objecten
 	Filter for type layers	Filter op tekstlagen
@@ -1120,7 +1146,6 @@
 	Leading	Interlinie
 	Leading (set to the font size × auto-leading when Auto)	Interlinie (bij Automatisch: lettergrootte × automatische interlinie)
 	Leave as is (don't color manage)	Ongewijzigd laten (geen kleurbeheer)
-	Left	Links
 	Left align text	Tekst links uitlijnen
 	Length:	Lengte:
 	Level	Niveau
@@ -1329,7 +1354,6 @@
 	Restore All	Alles herstellen
 	Restore Defaults	Standaardwaarden herstellen
 	Restrictive (Web)	Beperkt (web)
-	Right	Rechts
 	Right align text	Tekst rechts uitlijnen
 	Rigid	Star
 	Rotate:	Roteren:
@@ -2240,6 +2264,7 @@
 	Knockout	Uitsparing
 	Apply At Canvas Bounds	Toepassen op canvasgrenzen
 	Color Picker (Text Color)	Kleurkiezer (tekstkleur)
+	Color Picker ({name})	Kleurkiezer ({name})
 	Color Picker (Fill Color)	Kleurkiezer (vulkleur)
 	Fill color	Vulkleur
 	Color Picker (Stroke Color)	Kleurkiezer (lijnkleur)
@@ -3581,7 +3606,25 @@ cameraRaw	Whites	Witten
 	Dash offset	Streepverschuiving
 	Open paths use centered strokes	Open paden gebruiken gecentreerde lijnen
 	Use finite lengths and a positive pattern total	Gebruik eindige lengtes en een positief patroontotaal
+
+# Undo cache budgets
+	Budget mb	Limiet (MiB)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	Documentpixels, ingesloten gegevens en de geschiedenis voor ongedaan maken delen de geheugenlimiet. Geheugen wordt naar behoefte gebruikt; ander app-geheugen komt daarbovenop.
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	Schijfruimte voor ongedaan maken wordt alleen naar behoefte gebruikt, tot deze limiet. Nul schakelt de schijfcache uit. Werkschijfpaden gelden vanaf de volgende cachesessie.
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Deze browserversie bewaart de geschiedenis voor ongedaan maken in het geheugen. Werkschijfinstellingen gelden voor de desktop-app.
+	Memory budget (MiB)	Geheugenlimiet (MiB)
+	Undo disk budget (MiB)	Schijflimiet voor ongedaan maken (MiB)
 	No subject found — try Object Selection or the Lasso	Geen onderwerp gevonden — probeer Objectselectie of de Lasso
 	Quick Selection found nothing there	Snelle selectie heeft daar niets gevonden
 	Object Selection found nothing there — try a tighter rectangle	Objectselectie heeft daar niets gevonden — probeer een krappere rechthoek
 	No subject found — try a rectangle around the object	Geen onderwerp gevonden — probeer een rechthoek rond het object
+	Next Document	Volgend document
+	Previous Document	Vorig document
+	Appearance Settings…	Weergave-instellingen…
+	Add to favorites	Toevoegen aan favorieten
+	Remove from favorites	Verwijderen uit favorieten
+	Float Panel	Paneel losmaken
+	Float Panel Group	Paneelgroep losmaken
+	Dock Panel Group	Paneelgroep vastzetten
+	Use Classic Mode	Klassieke modus gebruiken
+	Auto Center Preview	Voorvertoning automatisch centreren

@@ -149,6 +149,12 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                     // With no document open there is nothing to fit.
                                     let _ = app.run("view.fitOnScreen", json!({}));
                                 }
+                                // Double-clicking the Zoom tool zooms to 100% (Photoshop).
+                                if resp.double_clicked() && tool == Tool::Zoom {
+                                    app.ui.tool = tool;
+                                    // With no document open there is nothing to zoom.
+                                    let _ = app.run("view.actualPixels", json!({}));
+                                }
                                 // Right-click or long-press opens the flyout (Photoshop).
                                 let held_for =
                                     resp.is_pointer_button_down_on().then(|| ui.input(|i| i.pointer.press_start_time().map(|t0| i.time - t0))).flatten();
@@ -572,8 +578,12 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         photocraft_engine::prefs::AppearanceMode::Light => ("sun", tl!("Light")),
                     };
                     let appearance_tip = format!("{}: {}", tl!("Appearance Mode"), appearance_label);
-                    if icons_shown >= 2 && icons::button(ui, theme_icon, 28.0, false, &appearance_tip).clicked() {
-                        crate::prefs_ui::cycle_appearance(app, ui.ctx());
+                    if icons_shown >= 2 {
+                        let button = icons::button(ui, theme_icon, 28.0, false, &appearance_tip);
+                        if button.clicked() {
+                            crate::prefs_ui::cycle_appearance(app, ui.ctx());
+                        }
+                        button.context_menu(|ui| crate::prefs_ui::appearance_context_menu(app, ui));
                     }
                     ui.min_rect().left()
                 };
@@ -1274,6 +1284,37 @@ fn label(ui: &mut egui::Ui, s: &str) {
     ui.label(RichText::new(s).color(t.text_dim));
 }
 
+/// Photoshop's scrubby Opacity/Fill labels: drag horizontally to change the percentage without
+/// hitting the small number field. The unique drag ID coalesces every frame into one undo step.
+fn scrub_pct_label(ui: &mut egui::Ui, text: &str, percent: &mut f32) -> widgets::PopupFieldResponse {
+    let t = Tokens::get(ui.ctx());
+    let resp = ui
+        .add(egui::Label::new(RichText::new(text).color(t.text_dim)).sense(Sense::click_and_drag()))
+        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+    let key = resp.id.with("percent-label-drag");
+    if resp.drag_started() {
+        let stamp = ui.ctx().cumulative_pass_nr();
+        ui.data_mut(|d| d.insert_temp(key, (*percent, stamp)));
+    }
+    let mut out = widgets::PopupFieldResponse::default();
+    if resp.dragged()
+        && let Some((start, stamp)) = ui.data(|d| d.get_temp::<(f32, u64)>(key))
+        && let (Some(origin), Some(pos)) = (ui.input(|i| i.pointer.press_origin()), resp.interact_pointer_pos())
+    {
+        // Match DragValue's 0.5 percentage-point per screen point; do not jump on press.
+        let next = (start + (pos.x - origin.x) * 0.5).clamp(0.0, 100.0);
+        if next.is_finite() && next != *percent {
+            *percent = next;
+            out.changed = true;
+            out.drag = Some(stamp);
+        }
+    }
+    if resp.drag_stopped() {
+        ui.data_mut(|d| d.remove::<(f32, u64)>(key));
+    }
+    out
+}
+
 /// Width of `s` as [`label`] draws it (body text).
 fn body_text_width(ui: &egui::Ui, s: &str) -> f32 {
     let font = egui::TextStyle::Body.resolve(ui.style());
@@ -1357,6 +1398,7 @@ pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 // ----------------------------------------------------------------------------- dock
 
 pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    crate::panel_docking::begin(app, ui.ctx());
     let t = Tokens::get(ui.ctx());
     let p = app.ui.panels.clone();
     if t.pro {
@@ -1381,8 +1423,12 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ];
                 for (icon, name, g) in entries {
                     // Studio floats Properties outside the dock.
-                    let docked = t.pro || g != Group::Properties;
-                    let on = g.shown(&p) && !(docked && app.ui.dock.is_collapsed(g));
+                    let docked = t.pro || app.ui.dock.arrangement.groups.is_some() || g != Group::Properties;
+                    let default_on = g.shown(&p) && !(docked && app.ui.dock.is_collapsed(g));
+                    let mut tabs = app.ui.dock_tabs;
+                    let on = crate::panel_docking::PanelTab::from_source(g, *g.tab_mut(&mut tabs), t.pro)
+                        .and_then(|panel| crate::panel_docking::visible(app, panel))
+                        .unwrap_or(default_on);
                     if icons::rail_button(ui, icon, rb, on, name).clicked() {
                         crate::dock::rail_click(app, g, docked);
                     }
@@ -1393,6 +1439,8 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if !t.pro {
         dock_panels(app, ui, &p, &t);
     }
+    crate::panel_docking::floating(app, ui.ctx());
+    crate::panel_docking::finish(app, ui.ctx());
     crate::dock::persist(app, ui.ctx());
 }
 
@@ -1414,14 +1462,14 @@ fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Pan
     // Floating in Studio, Properties docks only in Pro (Photoshop).
     let shown: Vec<Group> = [
         (Group::Color, p.color),
-        (Group::Properties, t.pro && p.properties),
+        (Group::Properties, (t.pro || app.ui.dock.arrangement.groups.is_some()) && p.properties),
         (Group::Character, p.character),
         (Group::Navigator, p.navigator),
         (Group::History, p.history),
         (Group::Layers, p.layers),
     ]
     .into_iter()
-    .filter_map(|(g, on)| on.then_some(g))
+    .filter_map(|(g, on)| (on && !app.ui.dock.arrangement.tabs(g, t.pro).is_empty()).then_some(g))
     .collect();
     if shown.is_empty() {
         return;
@@ -1438,7 +1486,7 @@ fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Pan
 }
 
 /// One dock group's tab content; `dock` bounds it and scrolls it when it's taller.
-fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate::dock::Group, tab: usize) {
+pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate::dock::Group, tab: usize) {
     use crate::dock::Group;
     let pro = Tokens::get(ui.ctx()).pro;
     match (group, tab) {
@@ -1612,12 +1660,14 @@ fn color_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut s = hsva0.s * 100.0;
     let mut v = hsva0.v * 100.0;
     let hue = widgets::hue_stops();
-    let mut changed = widgets::slider_row(ui, tl!("Hue"), &mut h, 0.0..=360.0, "°", Some(&hue)).changed();
+    // Preferences ▸ Interface ▸ Dynamic Color Sliders: off, the tracks are the plain ones.
+    let dynamic = app.session.prefs().interface.dynamic_color_sliders;
+    let mut changed = widgets::slider_row(ui, tl!("Hue"), &mut h, 0.0..=360.0, "°", dynamic.then_some(&hue)).changed();
     let sat_stops =
         [egui::ecolor::Hsva::new(hsva0.h, 0.0, hsva0.v.max(0.2), 1.0), egui::ecolor::Hsva::new(hsva0.h, 1.0, hsva0.v.max(0.2), 1.0)].map(Color32::from);
-    changed |= widgets::slider_row(ui, tl!("Saturation"), &mut s, 0.0..=100.0, "%", Some(&sat_stops)).changed();
+    changed |= widgets::slider_row(ui, tl!("Saturation"), &mut s, 0.0..=100.0, "%", dynamic.then_some(&sat_stops)).changed();
     let val_stops = [Color32::BLACK, Color32::from(egui::ecolor::Hsva::new(hsva0.h, hsva0.s, 1.0, 1.0))];
-    changed |= widgets::slider_row(ui, tl!("Brightness"), &mut v, 0.0..=100.0, "%", Some(&val_stops)).changed();
+    changed |= widgets::slider_row(ui, tl!("Brightness"), &mut v, 0.0..=100.0, "%", dynamic.then_some(&val_stops)).changed();
     let hsva = egui::ecolor::Hsva::new(h / 360.0, s / 100.0, v / 100.0, 1.0);
     // Only an edit counts: the h/s/v round trip isn't exact, so comparing values would rewrite
     // the foreground (and recolour selected type) every frame.
@@ -1717,6 +1767,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ("type", "type", tl!("Filter for type layers")),
                 ("shape", "square", tl!("Filter for shape layers")),
                 ("smart", "app-window", tl!("Filter for smart objects")),
+                ("deep", "layers", tl!("Filter for deep layers")),
             ] {
                 let on = app.ui.layer_filter.iter().any(|k| k == kind);
                 if icons::button(ui, icon, 22.0, on, tip).clicked() {
@@ -1750,11 +1801,11 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 crate::blend_preview::hover(app, l.id, hovered.filter(|_| chosen.is_empty()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let mut o = l.opacity * 100.0;
-                    let r = widgets::popup_value_field(ui, opacity_label, &mut o, 0.0..=100.0, "%", LAYER_PCT_W);
-                    if r.changed {
-                        actions.push(pct_action(l, "opacity", o, r.drag));
+                    let field = widgets::popup_value_field(ui, opacity_label, &mut o, 0.0..=100.0, "%", LAYER_PCT_W);
+                    let scrub = scrub_pct_label(ui, opacity_label, &mut o);
+                    if field.changed || scrub.changed {
+                        actions.push(pct_action(l, "opacity", o, scrub.drag.or(field.drag)));
                     }
-                    label(ui, opacity_label);
                 });
             });
         });
@@ -1799,11 +1850,11 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             ui.add_enabled_ui(!bg, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let mut f = l.fill_opacity * 100.0;
-                    let r = widgets::popup_value_field(ui, fill_label, &mut f, 0.0..=100.0, "%", LAYER_PCT_W);
-                    if r.changed {
-                        actions.push(pct_action(l, "fill", f, r.drag));
+                    let field = widgets::popup_value_field(ui, fill_label, &mut f, 0.0..=100.0, "%", LAYER_PCT_W);
+                    let scrub = scrub_pct_label(ui, fill_label, &mut f);
+                    if field.changed || scrub.changed {
+                        actions.push(pct_action(l, "fill", f, scrub.drag.or(field.drag)));
                     }
-                    label(ui, fill_label);
                 })
             });
         });
@@ -1814,8 +1865,8 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let rows = crate::layer_tree_ui::display_rows(&doc, !app.ui.layer_filter.is_empty());
     let ctx = ui.ctx().clone();
     let footer = widgets::footer_height(ui) + ui.spacing().item_spacing.y;
-    let fill = ui.available_height() > footer + 60.0;
-    let rows_h = if fill { ui.available_height() - footer } else { f32::INFINITY };
+    let fill = true;
+    let rows_h = (ui.available_height() - footer).max(0.0);
     egui::ScrollArea::vertical()
         .id_salt("layer-rows")
         .max_height(rows_h)
@@ -1839,6 +1890,9 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let filter = app.ui.layer_filter.clone();
             let fx_collapsed = app.session.active().map(|d| d.fx_collapsed.clone()).unwrap_or_default();
             crate::layer_row_ui::begin(ui.ctx());
+            // The drawn rows, top to bottom (#1721): the space between them and below the last
+            // one is a drop zone too.
+            let mut drawn: Vec<(LayerId, Rect)> = Vec::new();
             for &(depth, l) in &rows {
                 // Select › Isolate Layers.
                 if !photocraft_engine::select_extra_cmds::isolation_shows(&doc, &isolated, l.id) {
@@ -1851,6 +1905,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         LayerContent::Text(_) => "type",
                         LayerContent::Shape(_) => "shape",
                         LayerContent::Smart(_) => "smart",
+                        LayerContent::Deep(_) => "deep",
                         LayerContent::Group(_) => "",
                     };
                     if !filter.iter().any(|k| k == kind) {
@@ -1859,7 +1914,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
                 let row = RowSel { selected: selection.contains(&l.id), primary: active == Some(l.id), multi: selection.len() > 1 };
                 let top = ui.cursor().top();
-                layer_row(app, &ctx, ui, &doc, l, depth, row, &mut actions);
+                drawn.push((l.id, layer_row(app, &ctx, ui, &doc, l, depth, row, &mut actions)));
                 if reveal == Some(l.id) {
                     crate::layer_reveal::scroll_to_row(ui, top);
                 }
@@ -1867,6 +1922,17 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     effect_rows(app, ui, l, depth, &mut actions);
                 }
                 crate::smart_ui::filter_rows(app, ui, l, depth, &mut actions);
+            }
+            // #1721: the list takes drops everywhere, not only on a row (Photoshop): the space
+            // between two rows lands above the lower one, the empty space below the bottom-most
+            // row below it. Both copy with ⌥ held, move without.
+            for w in drawn.windows(2) {
+                let gap = Rect::from_min_max(pos2(w[0].1.left(), w[0].1.bottom()), pos2(w[0].1.right(), w[1].1.top()));
+                layer_drop_zone(app, &ctx, ui, gap, (w[1].0, w[1].1), "above", &mut actions);
+            }
+            if let Some(&(last, last_rect)) = drawn.last() {
+                let below = Rect::from_min_max(pos2(last_rect.left(), last_rect.bottom()), pos2(last_rect.right(), ui.clip_rect().bottom()));
+                layer_drop_zone(app, &ctx, ui, below, (last, last_rect), "below", &mut actions);
             }
             // ⌥-click the line between two layers: clip / release the upper one (#967).
             crate::clip_line_ui::show(ui, &doc, &mut actions);
@@ -1977,11 +2043,13 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         if id == "ui.maskTarget" {
             app.ui.mask_target = p.as_bool().unwrap_or(false);
             app.ui.vector_mask_target = false;
+            app.sync_mask_targets();
             continue;
         }
         if id == "ui.vectorMaskTarget" {
             app.ui.vector_mask_target = p.as_bool().unwrap_or(false);
             app.ui.mask_target = false;
+            app.sync_mask_targets();
             continue;
         }
         if p.is_null() {
@@ -2127,7 +2195,7 @@ fn layer_row(
     depth: usize,
     row: RowSel,
     actions: &mut Vec<(String, Value)>,
-) {
+) -> Rect {
     let selected = row.selected;
     let t = Tokens::get(ctx);
     // Photoshop's default (medium) thumbnails: 32 pt rows.
@@ -2144,7 +2212,7 @@ fn layer_row(
     // otherwise lay out names, icons and thumbnails every frame. Group rows stay whole: their
     // disclosure triangle is a widget (accessibility, scroll-to).
     if !ui.is_rect_visible(rect) && !l.is_group() && !resp.context_menu_opened() && crate::layer_row_ui::renaming(ctx) != Some(l.id.0) {
-        return;
+        return rect;
     }
     let painter = ui.painter_at(rect.expand(1.0));
     if t.pro {
@@ -2273,6 +2341,7 @@ fn layer_row(
     } else if let Some(cmd) = mask_toggle {
         actions.push(cmd);
     } else if resp.clicked() && !eye_resp.clicked() && !toggled && !fx_toggled && !masks.clicked {
+        resp.request_focus();
         let mode = select_mode(ui.input(|i| i.modifiers));
         actions.push(("layer.select".into(), json!({"layer": l.id.0, "mode": mode})));
         // A thumbnail explicitly selects content or a mask. Selecting an adjustment/fill row
@@ -2339,6 +2408,7 @@ fn layer_row(
     }
     // Right-click context menu.
     resp.context_menu(|ui| {
+        crate::widgets::style_spectrum_popup_menu(ui);
         // Right-clicking inside a multi-selection keeps it and acts on every selected layer.
         let on_set = row.multi && selected;
         if crate::layer_menu_ui::show(app, ui, l, on_set, actions)
@@ -2347,6 +2417,7 @@ fn layer_row(
             actions.push(done);
         }
     });
+    rect
 }
 
 /// Screen rect and UVs for a layer thumbnail: the document-shaped part of the square cell and of
@@ -2432,7 +2503,7 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let all = entries.iter().map(|e| (e.clone(), false)).chain(redo.iter().map(|e| (e.clone(), true)));
     // The dock gives History a fixed height: the rows scroll above the footer.
     let footer = if t.pro { widgets::footer_height(ui) + ui.spacing().item_spacing.y } else { 0.0 };
-    let max_h = (ui.available_height() - footer).max(40.0);
+    let max_h = (ui.available_height() - footer).max(0.0);
     egui::ScrollArea::vertical().id_salt("history-rows").max_height(max_h).auto_shrink([false, false]).show(ui, |ui| {
         for (i, (e, is_redo)) in all.enumerate() {
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
@@ -2501,7 +2572,7 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 /// Floating Properties card anchored to the canvas' top-right corner.
 pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // Pro (Photoshop) docks Properties; Studio floats it over the canvas.
-    if !app.ui.panels.properties || Tokens::get(ctx).pro {
+    if !app.ui.panels.properties || Tokens::get(ctx).pro || app.ui.dock.arrangement.groups.is_some() {
         return;
     }
     let Some(st) = app.session.active() else { return };
@@ -2614,6 +2685,8 @@ fn adjustment_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, 
         let _ = app.run("layer.setAdjustment", params);
         app.live_adjust = None;
     }
+    // The Color Lookup list sizes itself to the room left above everything drawn after it.
+    crate::lut_library_ui::finish(ui, id);
 }
 
 fn layer_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
@@ -2761,6 +2834,18 @@ fn field_chips(app: &mut PhotocraftApp, ui: &mut egui::Ui, chips: Rect) {
     }
 }
 
+/// Where the dock tells the Color field how tall its group body is.
+pub(crate) fn color_field_fill_id() -> egui::Id {
+    egui::Id::new("color-field-fill-height")
+}
+
+/// Height of the Color field: the group body's height (when docked) less the hex/RGB readout,
+/// which folds onto a second line in a narrow dock. 120 pt when nothing sets a height.
+fn color_field_height(avail: Option<f32>, width: f32) -> f32 {
+    let reserve = 32.0 + if width < 280.0 { 26.0 } else { 0.0 };
+    avail.filter(|a| a.is_finite()).map_or(120.0, |a| (a - reserve).clamp(120.0, 2000.0))
+}
+
 /// Photoshop Color panel: saturation/brightness field + hue strip, drawn as shaded meshes.
 fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
@@ -2774,7 +2859,9 @@ fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     let w = ui.available_width();
     let strip_w = 14.0;
-    let h = 120.0;
+    // Photoshop's Color panel field fills the panel: take the height the dock offers, less the
+    // hex/RGB readout (which folds onto a second line in a narrow dock). Without a dock, 120 pt.
+    let h = color_field_height(ui.data(|d| d.get_temp::<f32>(color_field_fill_id())), w);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let (chips, _) = ui.allocate_exact_size(vec2(38.0, h), Sense::hover());
@@ -3039,6 +3126,28 @@ fn layer_drag_and_drop(
         if copy {
             ctx.set_cursor_icon(egui::CursorIcon::Copy);
         }
+        // #1721: with ⌥ held the row also takes the drop onto itself — the only drop target a
+        // single-layer document has. The copy lands above or below it (never into a group's own
+        // centre). A multi-selection is left alone: the engine copies it beside each of its own
+        // layers, not onto one of them.
+        let selected = app.session.active().map(|st| st.selected_layers()).unwrap_or_default();
+        let in_multi = selected.len() > 1 && selected.contains(&l.id);
+        if copy && !in_multi && let Some(p) = pointer.filter(|p| rect.contains(*p)) {
+            let position = if (p.y - rect.top()) / rect.height() < 0.5 { "above" } else { "below" };
+            let painter = ui.painter();
+            if position == "above" {
+                painter.line_segment([rect.left_top(), rect.right_top()], Stroke::new(2.0, t.accent));
+            } else {
+                painter.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(2.0, t.accent));
+            }
+            if released {
+                let mut payload = layer_drop_payload(dragged, l.id, position, &selected);
+                if let Some(o) = payload.as_object_mut() {
+                    o.insert("copy".into(), json!(true));
+                }
+                actions.push(("layer.moveTo".into(), payload));
+            }
+        }
         return;
     }
     let Some(p) = pointer else { return };
@@ -3075,6 +3184,46 @@ fn layer_drag_and_drop(
     }
 }
 
+/// #1721: the drop zones no row owns — the space between two rows and the empty space below the
+/// bottom-most one. The drop lands on `target` at `position` (`above` or `below` its row): a copy
+/// with ⌥ held on release (Photoshop), a move without. A multi-selection dropped on the row it
+/// was grabbed from is left alone: the engine can only copy it beside each of its own layers.
+fn layer_drop_zone(
+    app: &PhotocraftApp,
+    ctx: &egui::Context,
+    ui: &egui::Ui,
+    zone: Rect,
+    target: (LayerId, Rect),
+    position: &'static str,
+    actions: &mut Vec<(String, Value)>,
+) {
+    let Some(dragged) = ctx.data(|d| d.get_temp::<u64>(egui::Id::new("layer-drag"))) else { return };
+    let selected = app.session.active().map(|st| st.selected_layers()).unwrap_or_default();
+    if target.0 == LayerId(dragged) && selected.len() > 1 && selected.contains(&target.0) {
+        return;
+    }
+    let Some(p) = ctx.input(|i| i.pointer.interact_pos()) else { return };
+    if !zone.contains(p) {
+        return;
+    }
+    let t = Tokens::get(ctx);
+    let line = if position == "above" {
+        [target.1.left_top(), target.1.right_top()]
+    } else {
+        [target.1.left_bottom(), target.1.right_bottom()]
+    };
+    ui.painter().line_segment(line, Stroke::new(2.0, t.accent));
+    if ctx.input(|i| i.pointer.any_released()) {
+        let mut payload = layer_drop_payload(dragged, target.0, position, &selected);
+        if ctx.input(|i| i.modifiers.alt)
+            && let Some(o) = payload.as_object_mut()
+        {
+            o.insert("copy".into(), json!(true));
+        }
+        actions.push(("layer.moveTo".into(), payload));
+    }
+}
+
 /// An fx row being dragged: the layer it belongs to and the effect index (`None` = the "Effects"
 /// row, all of them).
 type FxDrag = (u64, Option<usize>);
@@ -3096,7 +3245,7 @@ fn fx_drag_feedback(ctx: &egui::Context, doc: &photocraft_doc::Document) {
         Some(i) => doc.layer(LayerId(from)).and_then(|l| l.effects.items.get(i)).map_or("", |e| e.label()),
         None => "Effects",
     };
-    crate::layer_transfer::ghost(ctx, p, label);
+    crate::layer_transfer::ghost(ctx, p, tl!(label));
     if ctx.input(|i| i.modifiers.alt) {
         ctx.set_cursor_icon(egui::CursorIcon::Copy);
     }
@@ -3134,10 +3283,10 @@ fn fx_drop(ctx: &egui::Context, ui: &egui::Ui, l: &Layer, rect: Rect, actions: &
 fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usize, actions: &mut Vec<(String, Value)>) {
     let t = Tokens::get(ui.ctx());
     let indent = 30.0 + depth as f32 * 14.0 + 34.0;
-    let mut rows: Vec<(String, bool, Option<&'static str>)> = vec![("Effects".into(), l.effects.enabled, None)];
+    let mut rows: Vec<(String, bool, Option<&'static str>)> = vec![(tl!("Effects").into(), l.effects.enabled, None)];
     for e in &l.effects.items {
         let kind = crate::layer_style::KINDS.iter().find(|k| k.1 == e.label()).map(|k| k.0);
-        rows.push((e.label().to_string(), e.enabled(), kind));
+        rows.push((tl!(e.label()).to_string(), e.enabled(), kind));
     }
     for (i, (name, on, kind)) in rows.into_iter().enumerate() {
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
@@ -3391,6 +3540,17 @@ mod color_tests {
             h.run_steps(2);
         }
         assert_eq!(srgb_bytes(h.state().session.tools.foreground), [0, 255, 0]);
+    }
+
+    /// The Color field fills the dock group, never shrinks below 120 pt, and ignores a bad height.
+    #[test]
+    fn color_field_height_fills_the_group() {
+        assert_eq!(color_field_height(None, 300.0), 120.0);
+        assert_eq!(color_field_height(Some(500.0), 300.0), 468.0);
+        assert_eq!(color_field_height(Some(500.0), 200.0), 442.0);
+        assert_eq!(color_field_height(Some(60.0), 300.0), 120.0);
+        assert_eq!(color_field_height(Some(f32::NAN), 300.0), 120.0);
+        assert_eq!(color_field_height(Some(1.0e9), 300.0), 2000.0);
     }
 
     fn field_harness(app: PhotocraftApp) -> egui_kittest::Harness<'static, PhotocraftApp> {
@@ -3883,14 +4043,18 @@ mod toolbar_tests {
         }
     }
 
-    /// The Hand tool's toolbar button: tool buttons have no label, so find it by slot order.
-    fn hand_button(h: &egui_kittest::Harness<'_, PhotocraftApp>) -> egui::Pos2 {
+    /// A tool's toolbar button: tool buttons have no label, so find it by slot order.
+    fn tool_button(h: &egui_kittest::Harness<'_, PhotocraftApp>, tool: Tool) -> egui::Pos2 {
         let size = egui::Vec2::splat(if Tokens::get(&h.ctx).pro { 30.0 } else { 36.0 });
         let buttons: Vec<Rect> = h.ctx.viewport(|v| {
             v.prev_pass.widgets.layers().flat_map(|(_, w)| w.iter()).filter(|w| w.rect.size() == size && w.sense.senses_click()).map(|w| w.rect).collect()
         });
-        let index = TOOL_SECTIONS.iter().flat_map(|section| section.iter()).position(|slot| slot.contains(&Tool::Hand)).unwrap();
+        let index = TOOL_SECTIONS.iter().flat_map(|section| section.iter()).position(|slot| slot.contains(&tool)).unwrap();
         buttons[index].center()
+    }
+
+    fn hand_button(h: &egui_kittest::Harness<'_, PhotocraftApp>) -> egui::Pos2 {
+        tool_button(h, Tool::Hand)
     }
 
     fn toolbar_harness(app: PhotocraftApp) -> egui_kittest::Harness<'static, PhotocraftApp> {
@@ -3939,6 +4103,41 @@ mod toolbar_tests {
         click(&mut h, p);
         click(&mut h, p);
         assert_eq!(h.state().ui.tool, Tool::Hand);
+        assert!(h.state().session.active().is_none());
+    }
+
+    /// Double-clicking the Zoom tool zooms to 100% (Photoshop); a single click only picks the tool.
+    #[test]
+    fn double_clicking_the_zoom_tool_zooms_to_actual_pixels() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+        app.ui.tool = Tool::Move;
+        app.ui.views[0].fit_pending = true;
+        app.ui.views[0].zoom = 0.25;
+        let mut h = toolbar_harness(app);
+        let p = tool_button(&h, Tool::Zoom);
+        click(&mut h, p);
+        assert_eq!(h.state().ui.tool, Tool::Zoom);
+        assert_eq!(h.state().ui.views[0].zoom, 0.25, "a single click doesn't zoom");
+        // Past the double-click window, so the next two clicks are a fresh double-click.
+        h.run_steps(40);
+        click(&mut h, p);
+        click(&mut h, p);
+        assert_eq!(h.state().ui.tool, Tool::Zoom);
+        assert_eq!(h.state().ui.views[0].zoom, 1.0, "a double-click zooms to 100%");
+        assert!(!h.state().ui.views[0].fit_pending, "100% replaces a pending fit");
+    }
+
+    /// With no document open the double-click still picks the tool and doesn't panic.
+    #[test]
+    fn double_clicking_the_zoom_tool_without_a_document_is_harmless() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.ui.tool = Tool::Move;
+        let mut h = toolbar_harness(app);
+        let p = tool_button(&h, Tool::Zoom);
+        click(&mut h, p);
+        click(&mut h, p);
+        assert_eq!(h.state().ui.tool, Tool::Zoom);
         assert!(h.state().session.active().is_none());
     }
 }
@@ -4103,3 +4302,30 @@ mod group_drag_selection_tests {
 #[cfg(test)]
 #[path = "mask_props_ui_tests.rs"]
 mod mask_properties_tests;
+
+#[cfg(test)]
+mod effect_localization_tests {
+    use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn effect_rows_draw_in_the_selected_language() {
+        crate::i18n::with_language(crate::i18n::Lang::from_code("zh-hans").unwrap(), || {
+            let mut session = photocraft_engine::Session::new();
+            session.execute("file.new", serde_json::json!({"width": 64, "height": 48})).unwrap();
+            session.execute("layer.new.layer", serde_json::json!({})).unwrap();
+            session.execute("layer.layerStyle.dropShadow", serde_json::json!({})).unwrap();
+            let layer = session.active().unwrap().doc.layer(session.active().unwrap().active_layer.unwrap()).unwrap().clone();
+            let mut actions = Vec::new();
+            let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(320.0, 180.0)).build_ui_state(
+                move |ui, app: &mut crate::PhotocraftApp| super::effect_rows(app, ui, &layer, 0, &mut actions),
+                crate::PhotocraftApp::new(session, crate::Services::default()),
+            );
+            crate::PhotocraftApp::setup_context(&h.ctx, Default::default());
+            h.run_steps(2);
+            h.get_by_label("效果");
+            h.get_by_label("投影");
+            assert!(h.query_by_label("Effects").is_none());
+            assert!(h.query_by_label("Drop Shadow").is_none());
+        });
+    }
+}

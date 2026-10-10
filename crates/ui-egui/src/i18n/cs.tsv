@@ -39,7 +39,13 @@
 	New…	Nový…
 	New from Clipboard	Nový ze schránky
 	Open…	Otevřít…
+	Open as Deep…	Otevřít jako deep…
 	Open As…	Otevřít jako…
+	Open EXR Parts…	Otevřít části EXR…
+	Add beauty precomp from the AOVs	Přidat předběžnou kompozici krásy z AOV
+	Both	Obě
+	Left	Vlevo
+	Right	Vpravo
 	Open Recent	Otevřít nedávné
 	Clear Recent Files	Vymazat nedávné soubory
 	Close	Zavřít
@@ -89,6 +95,8 @@
 	Import	Import
 	Browse…	Procházet…
 	Reveal in Finder	Zobrazit ve Finderu
+	Show in Explorer	Zobrazit v Průzkumníkovi
+	Show in Folder	Zobrazit ve složce
 	File Info…	Informace o souboru…
 	Print…	Tisk…
 	Print One Copy	Vytisknout jednu kopii
@@ -747,6 +755,22 @@
 	+ Add variable	+ Přidat proměnnou
 	30 frames @ 30 fps	30 snímků při 30 fps
 	3D LUT File	Soubor 3D LUT
+	Install Pack…	Nainstalovat balíček…
+	Remove Pack	Odebrat balíček
+	Built-in	Vestavěné
+	Favorites	Oblíbené
+	Duplicate of	Duplikát
+	3D cube	3D kostka
+	1D cube	1D kostka
+	LUT look	Vzhled LUT
+	{kind}, size {n}	{kind}, velikost {n}
+	Title: {title}	Název: {title}
+	Declares an input range other than 0 to 1	Udává vstupní rozsah jiný než 0 až 1
+	The name suggests a technical conversion, not a creative look	Název napovídá technický převod, ne kreativní vzhled
+	LUTs installed into {pack}: {n}	LUT nainstalováno do {pack}: {n}
+	{n} skipped	{n} přeskočeno
+	{n} already installed	{n} již nainstalováno
+	Choosing a folder is not available here; use the lut.installPack command	Výběr složky tu není dostupný; použijte příkaz lut.installPack
 	Absolute	Absolutní
 	Absolute Colorimetric	Absolutní kolorimetrický
 	Action	Akce
@@ -813,6 +837,9 @@
 	Bend:	Ohyb:
 	Bicubic	Bikubická
 	Bicubic (smooth gradients)	Bikubická (plynulé přechody)
+	Automatic	Automaticky
+	Bicubic Smoother (enlargement)	Bikubická hladší (zvětšení)
+	Bicubic Sharper (reduction)	Bikubická ostřejší (zmenšení)
 	Bilinear	Bilineární
 	Black	Černá
 	Black & White	Černobílá
@@ -823,7 +850,6 @@
 	Blending Options	Možnosti prolnutí
 	Blue	Modrá
 	Blue, Red, Yellow	Modrá, červená, žlutá
-	Both	Obojí
 	Both Axes	Obě osy
 	Bottom	Dole
 	Brightness	Jas
@@ -1047,6 +1073,7 @@
 	Filter for pixel layers	Filtrovat pixelové vrstvy
 	Filter for shape layers	Filtrovat vrstvy tvarů
 	Filter for smart objects	Filtrovat chytré objekty
+	Filter for deep layers	Filtrovat hluboké vrstvy
 	Filter for type layers	Filtrovat textové vrstvy
 	Filter:	Filtr:
 	Finger Painting	Malování prstem
@@ -1142,7 +1169,6 @@
 	Leading	Proklad
 	Leading (set to the font size × auto-leading when Auto)	Proklad (při volbě Automaticky velikost písma × automatický proklad)
 	Leave as is (don't color manage)	Ponechat beze změny (bez správy barev)
-	Left	Vlevo
 	Left align text	Zarovnat text vlevo
 	Length:	Délka:
 	Level	Úroveň
@@ -1352,7 +1378,6 @@
 	Restore All	Obnovit vše
 	Restore Defaults	Obnovit výchozí
 	Restrictive (Web)	Omezená (web)
-	Right	Vpravo
 	Right align text	Zarovnat text vpravo
 	Rigid	Tuhý
 	Rotate:	Otočení:
@@ -2224,6 +2249,7 @@ cameraRaw	Color	Barvy
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Výběr barvy (Barva textu)
+	Color Picker ({name})	Výběr barvy ({name})
 	Color Picker (Fill Color)	Výběr barvy (Barva výplně)
 	Fill color	Barva výplně
 	Color Picker (Stroke Color)	Výběr barvy (Barva tahu)
@@ -2402,7 +2428,26 @@ fontWeight	Italic	Kurzíva
 	Dash offset	Posun čárek
 	Open paths use centered strokes	Otevřené cesty používají vystředěné tahy
 	Use finite lengths and a positive pattern total	Použijte konečné délky a kladný součet vzoru
+
+# Undo cache budgets
+	Memory budget (MiB)	Limit paměti (MiB)
+	Undo disk budget (MiB)	Limit disku pro historii (MiB)
+	Budget mb	Limit (MiB)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	Limit paměti je společný pro pixely dokumentů, vložená data a historii změn. Paměť se přiděluje podle potřeby; ostatní paměť aplikace je navíc.
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	Místo na disku pro historii roste pouze podle potřeby až do tohoto limitu. Nula vypíná diskovou mezipaměť. Cesty odkládacích disků se použijí při příští relaci mezipaměti.
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Tato verze pro prohlížeč uchovává historii změn v paměti. Nastavení odkládacích disků platí pro aplikaci pro počítač.
 	No subject found — try Object Selection or the Lasso	Nebyl nalezen žádný objekt — zkuste Výběr objektu nebo Laso
 	Quick Selection found nothing there	Rychlý výběr zde nic nenašel
 	Object Selection found nothing there — try a tighter rectangle	Výběr objektu zde nic nenašel — zkuste těsnější obdélník
 	No subject found — try a rectangle around the object	Nebyl nalezen žádný objekt — zkuste obdélník kolem objektu
+	Next Document	Další dokument
+	Previous Document	Předchozí dokument
+	Appearance Settings…	Nastavení vzhledu…
+	Add to favorites	Přidat do oblíbených
+	Remove from favorites	Odebrat z oblíbených
+	Capishot — Screen Color Picker	Capishot — Výběr barvy obrazovky
+	Float Panel	Uvolnit panel
+	Float Panel Group	Uvolnit skupinu panelů
+	Dock Panel Group	Ukotvit skupinu panelů
+	Use Classic Mode	Použít klasický režim
+	Auto Center Preview	Automaticky vystředit náhled

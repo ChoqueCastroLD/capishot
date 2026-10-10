@@ -31,7 +31,13 @@
 	New…	Nuovo…
 	New from Clipboard	Nuovo dagli appunti
 	Open…	Apri…
+	Open as Deep…	Apri come deep…
 	Open As…	Apri come…
+	Open EXR Parts…	Apri parti EXR…
+	Add beauty precomp from the AOVs	Aggiungi la precomposizione della bellezza dagli AOV
+	Both	Entrambe
+	Left	Sinistra
+	Right	Destra
 	Open Recent	Apri recenti
 	Clear Recent Files	Cancella file recenti
 	Close	Chiudi
@@ -81,6 +87,8 @@
 	Import	Importa
 	Browse…	Sfoglia…
 	Reveal in Finder	Mostra nel Finder
+	Show in Explorer	Mostra in Esplora file
+	Show in Folder	Mostra nella cartella
 	File Info…	Info file…
 	Print…	Stampa…
 	Print One Copy	Stampa una copia
@@ -730,6 +738,22 @@
 	+ Add variable	+ Aggiungi variabile
 	30 frames @ 30 fps	30 fotogrammi @ 30 fps
 	3D LUT File	File LUT 3D
+	Install Pack…	Installa pacchetto…
+	Remove Pack	Rimuovi pacchetto
+	Built-in	Integrati
+	Favorites	Preferiti
+	Duplicate of	Duplicato di
+	3D cube	Cubo 3D
+	1D cube	Cubo 1D
+	LUT look	Look LUT
+	{kind}, size {n}	{kind}, dimensione {n}
+	Title: {title}	Titolo: {title}
+	Declares an input range other than 0 to 1	Dichiara un intervallo di ingresso diverso da 0–1
+	The name suggests a technical conversion, not a creative look	Il nome suggerisce una conversione tecnica, non un look creativo
+	LUTs installed into {pack}: {n}	LUT installati in {pack}: {n}
+	{n} skipped	{n} saltati
+	{n} already installed	{n} già installati
+	Choosing a folder is not available here; use the lut.installPack command	La scelta della cartella non è disponibile qui; usa il comando lut.installPack
 	Absolute	Assoluto
 	Absolute Colorimetric	Colorimetrico assoluto
 	Action	Azione
@@ -796,6 +820,9 @@
 	Bend:	Curvatura:
 	Bicubic	Bicubica
 	Bicubic (smooth gradients)	Bicubica (sfumature morbide)
+	Automatic	Automatico
+	Bicubic Smoother (enlargement)	Bicubica più morbida (ingrandimento)
+	Bicubic Sharper (reduction)	Bicubica più nitida (riduzione)
 	Bilinear	Bilineare
 	Black	Nero
 	Black & White	Bianco e nero
@@ -806,7 +833,6 @@
 	Blending Options	Opzioni di fusione
 	Blue	Blu
 	Blue, Red, Yellow	Blu, rosso, giallo
-	Both	Entrambi
 	Both Axes	Entrambi gli assi
 	Bottom	In basso
 	Brightness	Luminosità
@@ -1031,6 +1057,7 @@
 	Filter for pixel layers	Filtra per livelli pixel
 	Filter for shape layers	Filtra per livelli forma
 	Filter for smart objects	Filtra per oggetti avanzati
+	Filter for deep layers	Filtra livelli deep
 	Filter for type layers	Filtra per livelli testo
 	Filter:	Filtro:
 	Finger Painting	Pittura con dita
@@ -1126,7 +1153,6 @@
 	Leading	Interlinea
 	Leading (set to the font size × auto-leading when Auto)	Interlinea (impostata a dimensione font × interlinea auto quando Auto)
 	Leave as is (don't color manage)	Lascia com'è (non gestire colore)
-	Left	Sinistra
 	Left align text	Allinea testo a sinistra
 	Length:	Lunghezza:
 	Level	Livello
@@ -1336,7 +1362,6 @@
 	Restore All	Ripristina tutto
 	Restore Defaults	Ripristina predefiniti
 	Restrictive (Web)	Restrittivo (web)
-	Right	Destra
 	Right align text	Allinea testo a destra
 	Rigid	Rigido
 	Rotate:	Rotazione:
@@ -2297,6 +2322,7 @@ cameraRaw	Amount	Quantità
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Selettore colore (Colore del testo)
+	Color Picker ({name})	Selettore colore ({name})
 	Color Picker (Fill Color)	Selettore colore (Colore di riempimento)
 	Fill color	Colore di riempimento
 	Color Picker (Stroke Color)	Selettore colore (Colore della traccia)
@@ -2472,7 +2498,26 @@ fontWeight	Italic	Corsivo
 	Dash offset	Scostamento tratteggio
 	Open paths use centered strokes	I tracciati aperti usano tracce centrate
 	Use finite lengths and a positive pattern total	Usa lunghezze finite e un totale del motivo positivo
+
+# Undo cache budgets
+	Budget mb	Budget (MiB)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	I pixel dei documenti, i dati incorporati e la cronologia di annullamento condividono il budget memoria. La memoria viene allocata quando serve; la restante memoria dell’app si aggiunge.
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	Lo spazio disco per annullamento viene utilizzato solo quando serve, entro questo limite. Zero disattiva la cache su disco. I percorsi dei dischi di memoria virtuale valgono dalla prossima sessione di cache.
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Questa versione browser conserva la cronologia di annullamento in memoria. Le impostazioni dei dischi di memoria virtuale valgono per l’app desktop.
+	Memory budget (MiB)	Budget memoria (MiB)
+	Undo disk budget (MiB)	Budget disco per annullamento (MiB)
 	No subject found — try Object Selection or the Lasso	Nessun soggetto trovato — prova Selezione oggetto o il Lazo
 	Quick Selection found nothing there	Selezione rapida non ha trovato nulla lì
 	Object Selection found nothing there — try a tighter rectangle	Selezione oggetto non ha trovato nulla lì — prova un rettangolo più stretto
 	No subject found — try a rectangle around the object	Nessun soggetto trovato — prova un rettangolo attorno all'oggetto
+	Next Document	Documento successivo
+	Previous Document	Documento precedente
+	Appearance Settings…	Impostazioni aspetto…
+	Add to favorites	Aggiungi ai preferiti
+	Remove from favorites	Rimuovi dai preferiti
+	Capishot — Screen Color Picker	Capishot — Selettore colore schermo
+	Float Panel	Sgancia pannello
+	Float Panel Group	Sgancia gruppo di pannelli
+	Dock Panel Group	Aggancia gruppo di pannelli
+	Use Classic Mode	Usa modalità classica
+	Auto Center Preview	Centra anteprima automaticamente

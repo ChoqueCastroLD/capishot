@@ -22,6 +22,33 @@ fn defaults_match_photoshop() {
     }
 }
 
+/// #2264: the Studio workspace dot pattern can be hidden without changing themes.
+#[test]
+fn canvas_dot_grid_can_be_disabled_persisted_and_reset() {
+    let mut s = Session::new();
+    assert!(s.prefs().interface.show_canvas_dots, "existing Studio appearance stays unchanged by default");
+    assert_eq!(s.execute("prefs.get", json!({"path": "interface.showCanvasDots"})).unwrap(), json!(true));
+
+    s.execute("prefs.set", json!({"path": "interface.showCanvasDots", "value": false})).unwrap();
+    assert!(!s.prefs().interface.show_canvas_dots);
+    assert_eq!(s.execute("prefs.get", json!({"path": "interface.showCanvasDots"})).unwrap(), json!(false));
+
+    let mut restored = Session::new();
+    restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert!(!restored.prefs().interface.show_canvas_dots, "disabling the pattern must survive restart");
+
+    // Older preference files without the new key retain the original dotted workspace.
+    let mut legacy = Session::new();
+    legacy.load_prefs_json(r#"{"interface": {"theme": "studio"}}"#).unwrap();
+    assert!(legacy.prefs().interface.show_canvas_dots);
+
+    assert!(s.execute("prefs.set", json!({"path": "interface.showCanvasDots", "value": "no"})).is_err());
+    assert!(!s.prefs().interface.show_canvas_dots, "an invalid type must not change the preference");
+
+    s.execute("prefs.reset", json!({"path": "interface.showCanvasDots"})).unwrap();
+    assert!(s.prefs().interface.show_canvas_dots);
+}
+
 #[test]
 fn appearance_defaults_and_legacy_theme_migrate() {
     let p = Preferences::default();
@@ -60,6 +87,22 @@ fn appearance_choices_validate_and_legacy_theme_still_selects() {
     assert_eq!(s.prefs().interface.appearance_mode, AppearanceMode::Light);
     assert_eq!(s.prefs().interface.light_theme, LightTheme::StudioLight);
     assert_eq!(s.prefs().interface.dark_theme, DarkTheme::Pro);
+}
+
+#[test]
+fn favorite_themes_persist_and_reject_invalid_lists() {
+    let mut s = Session::new();
+    assert!(s.prefs().interface.favorite_themes.is_empty());
+    s.execute("prefs.set", json!({"path": "interface.favoriteThemes", "value": ["classic", "studio"]})).unwrap();
+    assert_eq!(s.prefs().interface.favorite_themes, vec![Theme::Classic, Theme::Studio]);
+    s.execute("prefs.set", json!({"path": "interface.theme", "value": "pro"})).unwrap();
+    let mut restored = Session::new();
+    restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert_eq!(restored.prefs().interface.favorite_themes, vec![Theme::Classic, Theme::Studio]);
+    for invalid in [json!("classic"), json!(["unknown"]), json!(["classic", "classic"]), json!([23])] {
+        assert!(s.execute("prefs.set", json!({"path": "interface.favoriteThemes", "value": invalid})).is_err());
+        assert_eq!(s.prefs().interface.favorite_themes, vec![Theme::Classic, Theme::Studio]);
+    }
 }
 
 #[test]
@@ -455,6 +498,60 @@ fn linux_only_preferences_show_only_on_linux() {
 }
 
 #[test]
+fn history_cache_preferences_default_and_round_trip() {
+    let defaults = Preferences::default();
+    assert_eq!(defaults.performance.memory_usage_mb, 4096);
+    assert_eq!(defaults.scratch_disks.budget_mb, 8192);
+    assert_eq!(defaults.scratch_disks.disks.len(), 1);
+    assert_eq!(defaults.scratch_disks.disks[0].path, "(system temp)");
+    let mut s = Session::new();
+    s.execute(
+        "prefs.set",
+        json!({"values": {
+            "performance.memoryUsageMb": 512,
+            "scratchDisks.budgetMb": 1024,
+            "scratchDisks.disks": [{"path": "/test-scratch", "enabled": true}]
+        }}),
+    )
+    .unwrap();
+    let mut restored = Session::new();
+    restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert_eq!(restored.prefs().performance.memory_usage_mb, 512);
+    assert_eq!(restored.prefs().scratch_disks, s.prefs().scratch_disks);
+    restored.execute("prefs.set", json!({"path": "scratchDisks.budgetMb", "value": 0})).unwrap();
+    assert_eq!(restored.prefs().scratch_disks.budget_mb, 0, "zero disables spill");
+}
+
+#[test]
+fn legacy_preferences_gain_disk_budget_without_replacing_user_memory() {
+    let mut s = Session::new();
+    s.load_prefs_json(r#"{"performance":{"memoryUsageMb":3072},"scratchDisks":{"disks":[{"path":"/existing","enabled":false}]}}"#).unwrap();
+    assert_eq!(s.prefs().performance.memory_usage_mb, 3072);
+    assert_eq!(s.prefs().scratch_disks.budget_mb, 8192);
+    assert_eq!(s.prefs().scratch_disks.disks[0].path, "/existing");
+    assert!(!s.prefs().scratch_disks.disks[0].enabled);
+}
+
+#[test]
+fn scratch_budget_rejects_invalid_values_atomically() {
+    let mut s = Session::new();
+    for value in [json!(-1), json!(1_048_577), json!("eight"), json!(true), json!(1.5), Value::Null] {
+        let before = s.prefs().clone();
+        assert!(
+            s.execute(
+                "prefs.set",
+                json!({"values": {
+                    "performance.memoryUsageMb": 512,
+                    "scratchDisks.budgetMb": value
+                }})
+            )
+            .is_err()
+        );
+        assert_eq!(*s.prefs(), before);
+    }
+}
+
+#[test]
 fn the_default_pressure_curve_is_linear() {
     let c = PressureCurve::new(&Preferences::default().tools.pressure_curve);
     assert!(c.is_linear());
@@ -520,4 +617,36 @@ fn prefs_set_validates_the_pressure_curve() {
         assert!(p.set("tools.pressureCurve", bad.clone()).is_err(), "{bad}");
     }
     assert_eq!(p.tools.pressure_curve, vec![[0.0, 0.1], [0.5, 0.7], [1.0, 1.0]], "a refused value changes nothing");
+}
+
+/// #2434: each unit's readout keeps Photoshop's precision, rounded half away from zero and
+/// without trailing zeros, so 0.7995 in reads 0.8 rather than 0.799 or 0.800.
+#[test]
+fn ruler_units_round_to_their_own_decimal_places() {
+    use super::{Unit, fmt_decimals};
+    assert_eq!(Unit::Pixels.decimals(), 0);
+    assert_eq!(Unit::Points.decimals(), 1);
+    for u in [Unit::Millimeters, Unit::Centimeters, Unit::Picas] {
+        assert_eq!(u.decimals(), 2, "{u:?}");
+    }
+    assert_eq!(Unit::Inches.decimals(), 3);
+    // Rounded to the unit's places, then trailing zeros dropped.
+    assert_eq!(fmt_decimals(0.7995, 3), "0.8");
+    assert_eq!(fmt_decimals(0.799, 3), "0.799");
+    assert_eq!(fmt_decimals(0.799, 2), "0.8");
+    assert_eq!(fmt_decimals(2.0, 3), "2");
+    assert_eq!(fmt_decimals(1234.5678, 2), "1234.57");
+    // Half away from zero, both signs, and no "-0".
+    assert_eq!(fmt_decimals(0.125, 2), "0.13");
+    assert_eq!(fmt_decimals(-0.125, 2), "-0.13");
+    assert_eq!(fmt_decimals(-0.004, 2), "0");
+    // A whole number keeps its zeros: 550 px is not 55.
+    assert_eq!(fmt_decimals(550.0, 0), "550");
+    // A 1500 px side at 300 dpi is 5 in / 12.7 cm / 127 mm / 360 pt / 30 pica.
+    let r = super::UnitsAndRulers { rulers: Unit::Inches, ..Default::default() };
+    assert_eq!(r.format(1500.0, 300.0, 1500.0), "5");
+    let r = super::UnitsAndRulers { rulers: Unit::Centimeters, ..Default::default() };
+    assert_eq!(r.format(1500.0, 300.0, 1500.0), "12.7");
+    let r = super::UnitsAndRulers { rulers: Unit::Inches, ..Default::default() };
+    assert_eq!(r.format(100.0, 300.0, 1500.0), "0.333");
 }
