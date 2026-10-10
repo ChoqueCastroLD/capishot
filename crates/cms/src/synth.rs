@@ -426,6 +426,7 @@ pub fn cmyk_profile(p: &CmykParams) -> Profile {
         class: ProfileClass::Output,
         color_space: ColorSpace::Cmyk,
         pcs: Pcs::Lab,
+        link_output: None,
         rendering_intent: Intent::Perceptual,
         description: p.description.clone(),
         copyright: crate::builtin::COPYRIGHT.into(),

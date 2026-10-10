@@ -3,7 +3,7 @@
 //! oracle (moxcms, dev-dependency only).
 
 use photocraft_cms::math::{self, delta_e76};
-use photocraft_cms::{Builtin, Clut, ColorSpace, Intent, Lut3d, Profile, Transform, TransformOptions};
+use photocraft_cms::{Builtin, Clut, CmsError, ColorSpace, Intent, Lut3d, Profile, ProfileClass, Transform, TransformOptions};
 
 fn lab() -> &'static Profile {
     Builtin::LabD50.profile()
@@ -448,6 +448,64 @@ fn malformed_profiles_are_rejected_without_panicking() {
             let _ = Transform::new(&p, srgb(), Intent::Perceptual, true);
         }
     }
+}
+
+/// A minimal ICC v4 DeviceLink: CMYK → CMYK with 4→4 `mft2` A2B0/B2A0 tags. For a DeviceLink
+/// the header's PCS field (bytes 20..24) carries the output space, not a PCS (ICC.1:2010 §10.4).
+fn devicelink_cmyk() -> Vec<u8> {
+    fn lut16() -> Vec<u8> {
+        let mut d = b"mft2\0\0\0\0".to_vec();
+        d.extend_from_slice(&[4, 4, 2, 0]); // 4 in, 4 out, 2 grid points per axis
+        for k in 0..9 {
+            d.extend_from_slice(&(if k % 4 == 0 { 0x10000i32 } else { 0 }).to_be_bytes()); // identity matrix
+        }
+        d.extend_from_slice(&[0, 2, 0, 2]); // 2-entry input and output curves
+        for _ in 0..4 {
+            d.extend_from_slice(&[0, 0, 0xFF, 0xFF]); // input curves: 4 × 2 × u16
+        }
+        d.extend_from_slice(&[0x40u8; 128]); // CLUT: 2⁴ nodes × 4 outputs × u16
+        for _ in 0..4 {
+            d.extend_from_slice(&[0, 0, 0xFF, 0xFF]); // output curves
+        }
+        d
+    }
+    let mut icc = vec![0u8; 132];
+    icc[8] = 4; // version 4.x
+    icc[12..16].copy_from_slice(b"link");
+    icc[16..20].copy_from_slice(b"CMYK");
+    icc[20..24].copy_from_slice(b"CMYK"); // output space, not a PCS
+    icc[36..40].copy_from_slice(b"acsp");
+    icc[128..132].copy_from_slice(&2u32.to_be_bytes());
+    let (a, b) = (lut16(), lut16());
+    let (oa, ob) = (156usize, 156 + a.len());
+    for (sig, off, len) in [(b"A2B0", oa, a.len()), (b"B2A0", ob, b.len())] {
+        icc.extend_from_slice(sig);
+        icc.extend_from_slice(&(off as u32).to_be_bytes());
+        icc.extend_from_slice(&(len as u32).to_be_bytes());
+    }
+    icc.extend_from_slice(&a);
+    icc.extend_from_slice(&b);
+    let size = icc.len() as u32;
+    icc[..4].copy_from_slice(&size.to_be_bytes());
+    icc
+}
+
+/// Regression (#2337): a valid CMYK→CMYK press link was rejected as "invalid" because the
+/// AToB/BToA channel check hard-coded a 3-channel PCS, so the clear Unsupported error for
+/// DeviceLink profiles in `link_stages` was unreachable.
+#[test]
+fn devicelink_profiles_parse() {
+    let p = Profile::parse(&devicelink_cmyk()).unwrap_or_else(|e| panic!("a CMYK→CMYK press link is well-formed: {e}"));
+    assert_eq!(p.class, ProfileClass::DeviceLink);
+    assert_eq!(p.link_output, Some(ColorSpace::Cmyk));
+    assert!(p.a2b[0].is_some() && p.b2a[0].is_some());
+    // Usable as a link, not as a source or destination: a clear Unsupported, not "invalid".
+    let e = Transform::new(&p, srgb(), Intent::RelativeColorimetric, false).unwrap_err();
+    assert!(matches!(e, CmsError::Unsupported(_)), "{e}");
+    // A link whose LUT output does not match its output space is still rejected.
+    let mut bad = devicelink_cmyk();
+    bad[156 + 9] = 3; // A2B0 output channels 4 → 3
+    assert!(matches!(Profile::parse(&bad), Err(CmsError::Invalid(_))));
 }
 
 /// Parses every profile the OS ships (macOS ColorSync; read-only, nothing is copied) and

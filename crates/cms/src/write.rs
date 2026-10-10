@@ -315,10 +315,15 @@ pub fn encode(p: &Profile) -> Vec<u8> {
     o.extend_from_slice(&[4, 0x30, 0, 0]); // version 4.3
     o.extend_from_slice(&p.class.sig().to_be_bytes());
     o.extend_from_slice(&p.color_space.sig().to_be_bytes());
-    o.extend_from_slice(match p.pcs {
-        Pcs::Xyz => b"XYZ ",
-        Pcs::Lab => b"Lab ",
-    });
+    // For a DeviceLink the header's PCS field carries the output space, not a PCS.
+    let pcs_sig = match p.link_output {
+        Some(cs) => cs.sig().to_be_bytes(),
+        None => match p.pcs {
+            Pcs::Xyz => *b"XYZ ",
+            Pcs::Lab => *b"Lab ",
+        },
+    };
+    o.extend_from_slice(&pcs_sig);
     for v in [2026u16, 1, 1, 0, 0, 0] {
         o.extend_from_slice(&v.to_be_bytes());
     }
