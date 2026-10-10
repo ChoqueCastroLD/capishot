@@ -4327,7 +4327,7 @@ pub(crate) fn selection_mode(app: &PhotocraftApp, m: egui::Modifiers) -> &'stati
 
 /// Shift constrains a Polygonal Lasso segment to Photoshop's 45° directions.
 /// Work in document coordinates so zoom, view rotation and mirroring cannot skew it.
-fn constrained_polygon_point(from: [f64; 2], point: [f64; 2]) -> [f64; 2] {
+pub(crate) fn constrained_polygon_point(from: [f64; 2], point: [f64; 2]) -> [f64; 2] {
     let dx = point[0] - from[0];
     let dy = point[1] - from[1];
     if !dx.is_finite() || !dy.is_finite() {
