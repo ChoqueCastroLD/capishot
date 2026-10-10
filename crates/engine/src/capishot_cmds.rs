@@ -2,6 +2,7 @@
 //! File › Export › Compile PSD… (the active document) and File › Automate › Compile Folder…
 //! (every PSD/PSB of a folder, e.g. a chapter). Desktop only.
 
+#[cfg_attr(target_arch = "wasm32", allow(unused_imports))]
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;

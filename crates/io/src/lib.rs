@@ -297,6 +297,7 @@ pub fn export(doc: &Document, name_or_ext: &str, opts: &ExportOptions) -> Result
         warnings.extend(tiff_layers::strip_foreign_order_blocks(&mut file));
         // Never write a header the reader would refuse (e.g. a zero-sized canvas).
         file.header.validate()?;
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut bytes = file.to_bytes()?;
         // Capishot's seal: the merged image comes from psd-compiler (see `psdc`).
         #[cfg(not(target_arch = "wasm32"))]

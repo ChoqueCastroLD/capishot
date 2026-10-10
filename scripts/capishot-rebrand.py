@@ -77,7 +77,9 @@ def binaries_and_dirs():
         ('root.join("home/.config/photocraft")', 'root.join("home/.config/capishot")'),
     ])
     sub_file('apps/photocraft/src/main.rs', [('const APP_ID: &str = "ai.storyteller.photocraft";', 'const APP_ID: &str = "io.github.choquecastrold.capishot";')])
-    sub_file('apps/photocraft/tests/startup_without_display.rs', [('CARGO_BIN_EXE_photocraft")', 'CARGO_BIN_EXE_capishot")')])
+    for t in sorted(os.listdir('apps/photocraft/tests')):
+        if t.endswith('.rs'):
+            sub_file(os.path.join('apps/photocraft/tests', t), [('CARGO_BIN_EXE_photocraft")', 'CARGO_BIN_EXE_capishot")')])
     # The CLI binary name in usage text, docs comments and tests (not the package name).
     for p in ['apps/photocraft-cli/src/lib.rs', 'apps/photocraft-cli/tests/cli.rs', 'apps/photocraft-cli/tests/orientation.rs',
               'crates/automation/src/lib.rs', 'crates/automation/src/rpc.rs', 'crates/automation/src/server.rs',
