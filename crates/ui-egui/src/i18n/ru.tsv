@@ -2714,3 +2714,5 @@ fontWeight	Italic	Курсив
 	Invalid delete command	Недопустимая команда удаления
 	Layer deleted, but confirmation preference could not be saved: {error}	Слой удалён, но не удалось сохранить настройку подтверждения: {error}
 	Filter for deep layers	Фильтр по глубоким слоям
+	Next Document	Следующий документ
+	Previous Document	Предыдущий документ
