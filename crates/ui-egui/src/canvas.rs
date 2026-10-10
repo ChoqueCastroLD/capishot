@@ -2551,7 +2551,13 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             crate::color_range_ui::canvas_eyedropper(app, &ctx, p, press);
         }
     }
-    if tool == Tool::Hand && response.dragged() {
+    // The selected Hand yields to an open Free Transform box in this (primary) window: the box
+    // owns the pointer, so the tool behind it cannot steal the resize drag (#2302). The held Hand
+    // (Space) and a middle-button drag still pan, and a secondary window's Hand never stops, as the
+    // box is only drawn and driven on the primary canvas.
+    let transform_owns_pointer = primary && app.ui.transform.is_some() && temporary.is_none() && !middle;
+    let hand_pan = tool == Tool::Hand && !transform_owns_pointer;
+    if hand_pan && response.dragged() {
         let d = xf.unmap_vec(response.drag_delta()) / (view.zoom / ppp);
         view.center[0] -= d.x;
         view.center[1] -= d.y;
@@ -2628,8 +2634,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         {
             crate::canvas_tool_menu::open(app, tool, [p.x, p.y]);
         }
-        // The (temporary) Hand pans above; its gestures never reach the tool underneath.
-        if tool == Tool::Hand {
+        // The (temporary) Hand pans above; its gestures never reach the tool underneath. While a
+        // Free Transform box is open the Hand does not pan, so the box gets these events (#2302).
+        if hand_pan {
             (buttons.started, buttons.dragged, buttons.stopped) = (false, false, false);
         }
         // Rotate View: drag around the view centre. Compass clicks are not a rotate drag.
@@ -5339,6 +5346,50 @@ mod tests {
         let xf = ViewXform::active(&app).unwrap();
         let step = xf.to_screen(1.0, 0.0) - xf.to_screen(0.0, 0.0);
         assert!((step.x - 0.5).abs() < 1e-3, "{step:?}");
+    }
+
+    #[test]
+    fn a_secondary_canvas_hand_pans_while_a_transform_is_open() {
+        // #2302 review: `app.ui.transform` is global, but only the primary canvas draws and drives
+        // the box. A secondary window's Hand must still pan while the main window transforms.
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("select.rect", json!({"x": 100, "y": 100, "width": 100, "height": 60})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        app.run("select.deselect", json!({})).unwrap();
+        app.run("view.actualPixels", json!({})).unwrap();
+        app.ui.tool = Tool::Hand;
+        app.sync_views();
+        crate::transform_tool::begin(&mut app, &ctx).expect("a transform starts");
+        let mut view0 = app.ui.views[0].clone();
+        view0.zoom = 1.0;
+        view0.center = [200.0, 150.0];
+        view0.fit_pending = false;
+        view0.fill_pending = false;
+        let center0 = view0.center;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0));
+        let frame = |app: &mut PhotocraftApp, events: Vec<egui::Event>| -> View {
+            let input = egui::RawInput { screen_rect: Some(rect), events, ..Default::default() };
+            let mut seen = view0.clone();
+            let mut out = ctx.run_ui(input, |ui| {
+                seen = canvas_view(app, ui, 0, rect, view0.clone(), false);
+            });
+            out.textures_delta.clear();
+            seen
+        };
+        let start = Pos2::new(200.0, 150.0);
+        let press =
+            |pos: Pos2, pressed: bool| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        frame(&mut app, vec![egui::Event::PointerMoved(start)]);
+        frame(&mut app, vec![press(start, true)]);
+        for dx in [10.0, 20.0, 40.0] {
+            frame(&mut app, vec![egui::Event::PointerMoved(start + vec2(dx, 0.0))]);
+        }
+        let dragged = frame(&mut app, vec![egui::Event::PointerMoved(start + vec2(60.0, 0.0))]);
+        frame(&mut app, vec![press(start + vec2(60.0, 0.0), false)]);
+        assert_ne!(dragged.center, center0, "a secondary window's Hand pans while transforming");
     }
 
     #[test]
