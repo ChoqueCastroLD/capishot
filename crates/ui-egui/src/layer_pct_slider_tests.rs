@@ -148,7 +148,8 @@ fn dragging_opacity_and_fill_labels_scrubs_percentages_in_one_history_step() {
             .query_all_by_role(Role::StaticText)
             .find(|node| {
                 let label = node.accesskit_node().label();
-                label.as_deref() == Some(name) || label.as_deref() == Some(&format!("{name}:"))
+                let with_colon = format!("{name}:");
+                label.as_deref() == Some(name) || label.as_deref() == Some(with_colon.as_str())
             })
             .unwrap_or_else(|| panic!("missing {name} text label"))
             .rect();
