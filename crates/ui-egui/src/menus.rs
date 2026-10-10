@@ -63,6 +63,9 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.togglePanels", "Show/Hide All Panels", &[], Some("Tab")),
     ("window.toggle.dock", "Show/Hide Panels", &[], Some("Shift+Tab")),
     ("window.toggle.options", "Options", &["Window"], None),
+    // Photoshop's Ctrl+Tab and Ctrl+Shift+Tab, on macOS too (⌘Tab belongs to the system, #2340).
+    ("window.nextDocument", "Next Document", &[], Some("Ctrl+Tab")),
+    ("window.previousDocument", "Previous Document", &[], Some("Ctrl+Shift+Tab")),
     ("window.theme.toggle", "Next Appearance Mode", &["Window"], None),
     ("window.theme.pro", "Pro Theme", &["Window", "Theme"], None),
     ("window.theme.proMedium", "Pro Medium Gray Theme", &["Window", "Theme"], None),
@@ -511,6 +514,15 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             }
             Ok(Value::Null)
         }
+        "window.nextDocument" | "window.previousDocument" => {
+            // Tabs are in document order, so the next tab is the next document, wrapping around.
+            let n = app.session.documents().len();
+            let at = app.session.active_index().ok_or("no document open")?;
+            let to = if id == "window.nextDocument" { (at + 1) % n } else { (at + n - 1) % n };
+            app.session.set_active(to);
+            app.jobs.focus = None;
+            Ok(json!({"document": to}))
+        }
         t if t.starts_with("window.toggle.") => {
             // A shown but collapsed dock group is expanded rather than hidden (#129).
             if let Some(g) = crate::dock::Group::from_key(&t["window.toggle.".len()..]).filter(|g| g.shown(&app.ui.panels) && app.ui.dock.is_collapsed(*g)) {
@@ -595,6 +607,8 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         }
         i if i.starts_with("window.toggle.") => true,
         "window.togglePanels" => true,
+        // With one document open the key stays quiet, as in Photoshop, rather than reporting why.
+        "window.nextDocument" | "window.previousDocument" => app.session.active().is_some(),
         i if panel_alias(i).is_some() || workspace_name(i).is_some() => true,
         i if proof_preset(i).is_some() => app.session.active().is_some(),
         // "Custom…" is the full Proof Setup dialog.
