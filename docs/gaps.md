@@ -1,6 +1,6 @@
 # Where PhotoCraft falls short of Photoshop
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (first version: every known shortfall ranked, from the 2026-10-10 re-measure) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (adaptive Unsharp Mask CPU performance evidence added; beta gap and budget counts unchanged) · **Target:** Adobe Photoshop 2026
 
 Every known shortfall against Photoshop 2026 (27.11.0), one entry each, ranked by user impact
 on the way to beta. This is the work list agents pick from: take the highest-ranked entry that
@@ -157,6 +157,14 @@ what an agent can't finish alone.
 - **Estimate:** 150–250 h.
 
 ### G2. Interactive performance
+- **Measured progress (2026-10-11):** native adaptive Unsharp Mask uses FFT convolution and
+  reads each needed real row once. At threshold 0, 24 MP RGBA8 full CPU application improves
+  19.87 s → 534 ms at radius 300 (37.22x), and 79.47 s → 778 ms at radius 1000 (102.17x),
+  on a Ryzen 7 9700X with eight workers. Measured u8 differences are at most one level;
+  16-bit/HDR checks also pass. Positive thresholds and unstable inputs retain the exact
+  streamed path, whose 220 paired outputs match byte for byte. This does not close a published
+  performance budget or establish GUI latency / Photoshop parity. See
+  [method, upstream research and limits](unsharp-mask-performance.md).
 - **Missing:** 22 of 25 budgeted scenarios are over budget (baseline 2026-10-05, a heavily
   loaded machine): layer move with styles 321 ms p50 against 25 ms, opacity change 276 ms
   against 20 ms, paste 12 MP 1.2 s against 100 ms, layer move on 15000×10000 16-bit 2.7 s,
@@ -211,5 +219,6 @@ what an agent can't finish alone.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | G2: recorded adaptive Unsharp Mask speedups, numerical limits and exact fallback; budget counts and beta gap unchanged |
 | 2026-10-10 | minor | Checked against the alpha gate (no alpha blockers); #2374 marked closed |
 | 2026-10-10 | major | First version, from the full re-measure against Photoshop 2026 27.11.0 and the open issues |
