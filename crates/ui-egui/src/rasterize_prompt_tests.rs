@@ -165,3 +165,76 @@ fn the_control_channel_sees_and_confirms_the_prompt() {
     assert_eq!(r["ok"], json!(true), "{r}");
     assert_eq!(active_content(&app), "Pixel");
 }
+
+/// TYPE-218-9: Distort, Perspective and Warp of live type ask "Rasterize the type?" first, like
+/// Photoshop. OK rasterizes it and starts that transform; Cancel leaves the type alone.
+#[test]
+fn distort_perspective_and_warp_of_type_ask_to_rasterize_and_continue() {
+    use crate::state::TransformMode;
+    let ctx = egui::Context::default();
+    for cmd in TRANSFORM_COMMANDS {
+        let mut app = app_with(Kind::Type);
+        let before = past(&app);
+        let r = crate::menus::invoke(&mut app, &ctx, cmd, json!({})).unwrap();
+        let d = prompt(&app).unwrap_or_else(|| panic!("{cmd}: no prompt"));
+        assert_eq!(r["dialog"], json!(d.id));
+        assert_eq!(d.fields["message"], json!(Kind::Type.message()));
+        assert!(app.ui.transform.is_none(), "{cmd}: nothing starts before the answer");
+        assert_eq!((active_content(&app), past(&app)), ("Type", before));
+        // Cancel: still type, no transform.
+        let id = d.id;
+        crate::dialogs::cancel(&mut app, id).unwrap();
+        crate::rasterize_prompt::run_pending(&mut app, &ctx);
+        assert!(app.ui.transform.is_none() && prompt(&app).is_none());
+        assert_eq!(active_content(&app), "Type");
+        // OK: rasterized (one step), then the transform runs in its mode.
+        crate::menus::invoke(&mut app, &ctx, cmd, json!({})).unwrap();
+        let id = prompt(&app).unwrap().id;
+        let r = crate::dialogs::confirm(&mut app, id).unwrap();
+        assert_eq!(r["then"], json!(cmd));
+        assert_eq!((active_content(&app), past(&app)), ("Pixel", before + 1));
+        crate::rasterize_prompt::run_pending(&mut app, &ctx);
+        let t = app.ui.transform.as_ref().unwrap_or_else(|| panic!("{cmd}: no transform"));
+        match cmd {
+            "edit.transform.warp" => assert!(t.warp.is_some()),
+            "edit.transform.distort" => assert_eq!(t.mode, TransformMode::Distort),
+            _ => assert_eq!(t.mode, TransformMode::Perspective),
+        }
+        // Pixel layers aren't asked again.
+        crate::transform_tool::cancel(&mut app);
+        crate::menus::invoke(&mut app, &ctx, cmd, json!({})).unwrap();
+        assert!(prompt(&app).is_none() && app.ui.transform.is_some(), "{cmd}");
+    }
+    // Scale / Rotate / Skew / Free Transform keep the type live.
+    for cmd in ["edit.freeTransform", "edit.transform.scale", "edit.transform.rotate", "edit.transform.skew"] {
+        let mut app = app_with(Kind::Type);
+        crate::menus::invoke(&mut app, &ctx, cmd, json!({})).unwrap();
+        assert!(prompt(&app).is_none() && app.ui.transform.is_some(), "{cmd}");
+    }
+}
+
+/// Switching an open Free Transform of type to Distort keeps what was transformed so far: the
+/// box is applied to the type, then the type is rasterized and Distort starts on its pixels.
+#[test]
+fn distort_during_free_transform_of_type_applies_the_box_first() {
+    use crate::state::TransformMode;
+    let ctx = egui::Context::default();
+    let mut app = app_with(Kind::Type);
+    crate::menus::invoke(&mut app, &ctx, "edit.freeTransform", json!({})).unwrap();
+    let layer = app.session.active().unwrap().active_layer.unwrap();
+    let t = app.ui.transform.as_mut().unwrap();
+    for p in t.quad.iter_mut() {
+        p[0] += 7.0;
+    }
+    let moved = t.quad;
+    crate::menus::invoke(&mut app, &ctx, "edit.transform.distort", json!({})).unwrap();
+    let id = prompt(&app).expect("prompt").id;
+    crate::dialogs::confirm(&mut app, id).unwrap();
+    crate::rasterize_prompt::run_pending(&mut app, &ctx);
+    assert_eq!(active_content(&app), "Pixel");
+    let t = app.ui.transform.as_ref().expect("distort");
+    assert_eq!((t.layer, t.mode), (layer.0, TransformMode::Distort));
+    assert!((t.rect[0] - moved[0][0]).abs() <= 2.0, "the box moved with the type: {:?} vs {moved:?}", t.rect);
+    let steps = app.session.active().unwrap().history.entries();
+    assert!(steps.iter().any(|s| s.contains("Rasterize")), "{steps:?}");
+}
