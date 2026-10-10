@@ -2943,3 +2943,7 @@ fontWeight	Italic	기울임
 	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	이 브라우저 버전은 실행 취소 기록을 메모리에 유지합니다. 스크래치 디스크 설정은 데스크톱 앱에 적용됩니다.
 	Memory budget (MiB)	메모리 한도 (MiB)
 	Undo disk budget (MiB)	실행 취소 디스크 한도 (MiB)
+	No subject found — try Object Selection or the Lasso	피사체를 찾을 수 없습니다 — 개체 선택 또는 올가미를 사용해 보세요
+	Quick Selection found nothing there	빠른 선택으로 해당 위치에서 아무것도 찾지 못했습니다
+	Object Selection found nothing there — try a tighter rectangle	개체 선택으로 해당 위치에서 아무것도 찾지 못했습니다 — 더 좁은 사각형을 사용해 보세요
+	No subject found — try a rectangle around the object	피사체를 찾을 수 없습니다 — 개체 주위에 사각형을 그려 보세요

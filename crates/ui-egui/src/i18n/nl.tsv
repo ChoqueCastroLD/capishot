@@ -3547,3 +3547,7 @@ cameraRaw	Whites	Witten
 	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Deze browserversie bewaart de geschiedenis voor ongedaan maken in het geheugen. Werkschijfinstellingen gelden voor de desktop-app.
 	Memory budget (MiB)	Geheugenlimiet (MiB)
 	Undo disk budget (MiB)	Schijflimiet voor ongedaan maken (MiB)
+	No subject found — try Object Selection or the Lasso	Geen onderwerp gevonden — probeer Objectselectie of de Lasso
+	Quick Selection found nothing there	Snelle selectie heeft daar niets gevonden
+	Object Selection found nothing there — try a tighter rectangle	Objectselectie heeft daar niets gevonden — probeer een krappere rechthoek
+	No subject found — try a rectangle around the object	Geen onderwerp gevonden — probeer een rechthoek rond het object

@@ -1009,7 +1009,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         widgets::checkbox(ui, &mut app.ui.tool_options.sample_all_layers, tl!("Sample All Layers"));
                         widgets::vline(ui, 22.0);
                         if widgets::secondary_button(ui, tl!("Select Subject"), 0.0).clicked() {
-                            let _ = app.run("select.subject", json!({}));
+                            let r = app.run("select.subject", json!({}));
+                            crate::retouch_ui::report_smart_result(app, r, tl!("No subject found — try Object Selection or the Lasso"));
                         }
                         if widgets::secondary_button(ui, tl!("Select and Mask…"), 0.0).clicked() {
                             let _ = crate::menus::invoke(app, ui.ctx(), "select.selectAndMask", json!({}));
@@ -1775,25 +1776,29 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             // In a narrow panel with long translated labels, drop the "Lock:" text (the icons keep
             // their tooltips) rather than let the Fill label run over the lock icons.
             let gap = ui.spacing().item_spacing.x;
-            let icons_w = if t.pro { 5.0 * 20.0 } else { 22.0 + gap };
+            let icons_w = if t.pro { 5.0 * 20.0 + gap } else { 22.0 + gap };
             let fits = body_text_width(ui, lock_label) + icons_w + body_text_width(ui, fill_label) + LAYER_PCT_W + 2.0 * gap <= ui.available_width();
             if fits {
                 label(ui, lock_label);
             }
             if t.pro {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                let lk = l.locks;
-                for (key, icon, tip, on) in [
-                    ("transparency", "grid-3x3", tl!("Lock transparent pixels"), lk.transparency),
-                    ("pixels", "brush", tl!("Lock image pixels"), lk.pixels),
-                    ("position", "move", tl!("Lock position"), lk.position),
-                    ("artboard", "scan", tl!("Prevent auto-nesting in and out of Artboards and Frames"), lk.artboard),
-                    ("all", "lock", tl!("Lock all"), lk.all),
-                ] {
-                    if icons::button(ui, icon, 20.0, on, tip).clicked() {
-                        actions.push(("layer.setProps".into(), json!({"layer": l.id.0, "locks": { key: !on }})));
+                // The lock icons touch, but only they: the Fill label keeps the same gap before its
+                // field as Opacity's, so both stack in one right-aligned column (#2085).
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    let lk = l.locks;
+                    for (key, icon, tip, on) in [
+                        ("transparency", "grid-3x3", tl!("Lock transparent pixels"), lk.transparency),
+                        ("pixels", "brush", tl!("Lock image pixels"), lk.pixels),
+                        ("position", "move", tl!("Lock position"), lk.position),
+                        ("artboard", "scan", tl!("Prevent auto-nesting in and out of Artboards and Frames"), lk.artboard),
+                        ("all", "lock", tl!("Lock all"), lk.all),
+                    ] {
+                        if icons::button(ui, icon, 20.0, on, tip).clicked() {
+                            actions.push(("layer.setProps".into(), json!({"layer": l.id.0, "locks": { key: !on }})));
+                        }
                     }
-                }
+                });
             }
             if !t.pro {
                 let locked = l.locks.transparency || l.locks.position || l.locks.all;
