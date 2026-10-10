@@ -10,8 +10,12 @@ fn document(name: &str) -> Document {
     Document::with_background(name, Size::new(4, 3), ColorMode::Rgb, SampleType::U16, Color::WHITE)
 }
 
+fn recovered(doc: Document) -> crate::RecoveredDocument {
+    crate::RecoveredDocument { key: "pending".into(), path: Some("original.psb".into()), document: doc, history: None, context: json!({}) }
+}
+
 fn entry(key: &str, doc: Document) -> Recoverable {
-    Recoverable { key: key.into(), name: doc.name.clone(), path: Some("original.psb".into()), load: Box::new(move || Ok(doc)) }
+    Recoverable { key: key.into(), name: doc.name.clone(), path: Some("original.psb".into()), load: Box::new(move || Ok(recovered(doc))) }
 }
 
 type RecoveryLog = Arc<Mutex<Vec<String>>>;
@@ -19,12 +23,14 @@ type RecoveryLog = Arc<Mutex<Vec<String>>>;
 fn services(entries: Vec<Recoverable>) -> (Services, RecoveryLog) {
     let mut entries = Some(entries);
     let log: RecoveryLog = Arc::default();
-    let (adopted, discarded) = (log.clone(), log.clone());
+    let discarded = log.clone();
     (
         Services {
-            recover: Some(Box::new(move || entries.take().unwrap_or_default())),
-            adopt_autosave: Some(Box::new(move |id, key| adopted.lock().unwrap().push(format!("adopt {id} {key}")))),
-            discard_autosave: Some(Box::new(move |id| discarded.lock().unwrap().push(format!("discard {id}")))),
+            discover_recovery: Some(Box::new(move || (entries.take().unwrap_or_default(), Vec::new()))),
+            discard_autosave: Some(Box::new(move |id, _| {
+                discarded.lock().unwrap().push(format!("discard {id}"));
+                Ok(())
+            })),
             ..Default::default()
         },
         log,
@@ -41,7 +47,7 @@ fn gated(doc: Document) -> (Recoverable, mpsc::Receiver<()>, mpsc::Sender<()>, m
         let _ = started.send(());
         wait.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())?;
         let _ = finished.send(());
-        Ok(doc)
+        Ok(recovered(doc))
     });
     (item, start, release, finish)
 }
@@ -72,9 +78,9 @@ fn recovery_is_deferred_until_after_app_construction() {
     let calls = Arc::new(AtomicUsize::new(0));
     let called = calls.clone();
     let services = Services {
-        recover: Some(Box::new(move || {
+        discover_recovery: Some(Box::new(move || {
             called.fetch_add(1, Ordering::SeqCst);
-            Vec::new()
+            (Vec::new(), Vec::new())
         })),
         ..Default::default()
     };
@@ -115,8 +121,8 @@ fn recovery_keeps_frames_and_editing_live_and_adopts_the_admitted_document() {
     assert_eq!(recovered.path.as_deref(), Some("original.psb"));
     assert!(recovered.is_dirty());
     assert_eq!(recovered.doc.layers, original.layers);
-    assert_eq!(app.prefs_rt.autosaved.get(&recovered.doc.id), Some(&recovered.revision));
-    assert_eq!(*log.lock().unwrap(), [format!("adopt {} pending", recovered.doc.id.0)]);
+    assert_eq!(app.prefs_rt.autosaved.get(&recovered.doc.id).map(|stamp| stamp.revision), Some(recovered.revision));
+    assert_eq!(app.prefs_rt.recovery_keys.get(&recovered.doc.id).map(String::as_str), Some("pending"));
 }
 
 #[test]
@@ -130,7 +136,7 @@ fn cancelling_recovery_skips_the_queue_and_never_adopts_a_late_result() {
         path: None,
         load: Box::new(move || {
             calls.fetch_add(1, Ordering::SeqCst);
-            Ok(document("Second"))
+            Ok(recovered(document("Second")))
         }),
     };
     let (services, log) = services(vec![pending, second]);
@@ -163,7 +169,8 @@ fn failed_recovery_reports_the_error_and_continues_to_the_next_entry() {
     assert_eq!(app.session.documents().len(), 1);
     assert!(app.ui.chrome.home.is_none(), "the first recovered document should be visible");
     assert!(app.ui.notices.iter().any(|n| n.error && (n.title.contains("corrupt tile") || n.lines.iter().any(|l| l.contains("corrupt tile")))));
-    assert_eq!(*log.lock().unwrap(), [format!("adopt {} good", app.session.active().unwrap().doc.id.0)]);
+    assert_eq!(app.prefs_rt.recovery_keys.get(&app.session.active().unwrap().doc.id).map(String::as_str), Some("good"));
+    assert!(log.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -175,9 +182,9 @@ fn disabled_recovery_never_discovers_or_decodes_entries() {
     let mut app = PhotocraftApp::new(
         session,
         Services {
-            recover: Some(Box::new(move || {
+            discover_recovery: Some(Box::new(move || {
                 called.fetch_add(1, Ordering::SeqCst);
-                vec![entry("disabled", document("Disabled"))]
+                (vec![entry("disabled", document("Disabled"))], Vec::new())
             })),
             ..Default::default()
         },

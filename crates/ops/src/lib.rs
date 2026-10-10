@@ -12,7 +12,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
-use photocraft_doc::{Document, LayerId};
+use photocraft_doc::{DocId, Document, LayerId};
 
 /// The layers a state targeted when it was created: the active ("key") layer and every selected
 /// layer. Undo and redo bring them back with the state's document, as the reference app does;
@@ -32,6 +32,41 @@ pub struct HistoryState {
     pub layers: LayerTarget,
 }
 
+impl HistoryState {
+    /// Build a resident recovery state without copying pixel data.
+    pub fn from_document(label: impl Into<String>, document: Arc<Document>) -> Self {
+        Self { label: label.into(), has_selection: document.selection.is_some(), document: StoredDocument::Resident(document), layers: LayerTarget::default() }
+    }
+
+    /// Build a lazily restored recovery state. `has_selection` is metadata for
+    /// selection menus, which must not read storage merely to draw themselves.
+    pub fn from_archive(label: impl Into<String>, has_selection: bool, archive: Arc<dyn ArchivedDocument>) -> Self {
+        Self { label: label.into(), has_selection, document: StoredDocument::Archived(archive), layers: LayerTarget::default() }
+    }
+
+    /// May read storage for a cold state; recovery writers call this on a worker.
+    pub fn load_document(&self) -> Result<Arc<Document>, String> {
+        self.document.load()
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.has_selection
+    }
+}
+
+/// Immutable handles and navigation metadata captured alongside the current
+/// document. Undo is oldest first; redo's last entry is the next redo state.
+/// Capturing this value never hydrates archived documents.
+#[derive(Clone, Debug)]
+pub struct HistoryCheckpoint {
+    pub undo: Vec<HistoryState>,
+    pub redo: Vec<HistoryState>,
+    pub current_label: String,
+    pub max_states: usize,
+    pub max_bytes: usize,
+    pub current_layers: LayerTarget,
+}
+
 /// Engine-owned immutable scratch archive. Loading must preserve the complete document.
 pub trait ArchivedDocument: std::fmt::Debug + Send + Sync {
     fn load(&self) -> Result<Arc<Document>, String>;
@@ -41,6 +76,25 @@ pub trait ArchivedDocument: std::fmt::Debug + Send + Sync {
     /// Resident backing for compact replay states; counted once, never mistaken for disk.
     fn resident(&self) -> Option<&Arc<Document>> {
         None
+    }
+}
+
+#[derive(Debug)]
+struct RemappedDocument {
+    source: Arc<dyn ArchivedDocument>,
+    id: DocId,
+}
+impl ArchivedDocument for RemappedDocument {
+    fn metadata_bytes(&self) -> usize {
+        std::mem::size_of::<Self>().saturating_add(self.source.metadata_bytes())
+    }
+    fn resident(&self) -> Option<&Arc<Document>> {
+        self.source.resident()
+    }
+    fn load(&self) -> Result<Arc<Document>, String> {
+        let mut doc = self.source.load()?;
+        Arc::make_mut(&mut doc).id = self.id;
+        Ok(doc)
     }
 }
 
@@ -88,6 +142,45 @@ impl Default for History {
 }
 
 impl History {
+    pub fn checkpoint(&self) -> HistoryCheckpoint {
+        HistoryCheckpoint {
+            undo: self.undo.iter().cloned().collect(),
+            redo: self.redo.clone(),
+            current_label: self.current_label.clone(),
+            current_layers: self.current_layers.clone(),
+            max_states: self.max_states,
+            max_bytes: self.max_bytes,
+        }
+    }
+
+    /// Restore the exact navigation cursor without reading document storage.
+    /// Recovery metadata has independent admission limits; preference limits
+    /// may subsequently be applied explicitly through `enforce_state_limit`.
+    pub fn from_checkpoint(checkpoint: HistoryCheckpoint) -> Result<Self, String> {
+        const MAX_RECOVERY_STATES: usize = 10_000;
+        const MAX_LABEL_BYTES: usize = 4096;
+        if checkpoint.undo.len().saturating_add(checkpoint.redo.len()) > MAX_RECOVERY_STATES {
+            return Err("Recovery history exceeds 10000 states".into());
+        }
+        if checkpoint.current_label.len() > MAX_LABEL_BYTES
+            || checkpoint.undo.iter().chain(checkpoint.redo.iter()).any(|state| state.label.len() > MAX_LABEL_BYTES)
+        {
+            return Err("Recovery history label exceeds 4096 bytes".into());
+        }
+        if checkpoint.max_states == 0 || checkpoint.max_states > MAX_RECOVERY_STATES {
+            return Err("Recovery history state limit must be between 1 and 10000".into());
+        }
+        Ok(Self {
+            undo: checkpoint.undo.into(),
+            redo: checkpoint.redo,
+            current_label: checkpoint.current_label,
+            current_layers: checkpoint.current_layers,
+            current_archive: None,
+            max_states: checkpoint.max_states,
+            max_bytes: checkpoint.max_bytes,
+        })
+    }
+
     pub fn new(max_states: usize) -> Self {
         Self {
             undo: VecDeque::new(),
@@ -100,8 +193,29 @@ impl History {
         }
     }
 
-    /// Record that `before` was replaced by a new current document via step `label`, which left
-    /// `layers` targeted.
+    /// Metadata-only stamp for logical history changes (including Purge).
+    pub fn checkpoint_signature(&self) -> (usize, usize, &str) {
+        (self.undo.len(), self.redo.len(), &self.current_label)
+    }
+
+    /// A duplicate recovered tab can be admitted under a fresh identity.
+    /// Cold states are remapped only when restored, without reading disk here.
+    pub fn remap_document_id(&mut self, id: DocId) {
+        for state in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            match &mut state.document {
+                StoredDocument::Resident(doc) => {
+                    if doc.id != id {
+                        Arc::make_mut(doc).id = id;
+                    }
+                }
+                StoredDocument::Archived(source) => {
+                    *source = Arc::new(RemappedDocument { source: source.clone(), id });
+                }
+            }
+        }
+    }
+
+    /// Record that `before` was replaced by a new current document via step `label`.
     pub fn record(&mut self, label: impl Into<String>, before: Arc<Document>, layers: LayerTarget) {
         self.current_archive = None;
         let prev_label = std::mem::replace(&mut self.current_label, label.into());
@@ -676,6 +790,99 @@ mod tests {
         fn load(&self) -> Result<Arc<Document>, String> {
             self.0.clone()
         }
+    }
+
+    #[test]
+    fn recovery_checkpoint_preserves_cursor_labels_and_both_stack_orders() {
+        let mut history = History::new(37);
+        history.max_bytes = 1234;
+        let mut current = Arc::new(base());
+        for name in ["A", "B", "C", "D"] {
+            edit(&mut history, &mut current, name, |doc| doc.name = name.into());
+        }
+        current = history.try_undo(current).unwrap().unwrap().0;
+        current = history.try_undo(current).unwrap().unwrap().0;
+        assert_eq!(current.name, "B");
+        let checkpoint = history.checkpoint();
+        assert_eq!(checkpoint.current_label, "B");
+        assert_eq!(checkpoint.undo.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["Open", "A"]);
+        assert_eq!(checkpoint.redo.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["D", "C"]);
+        let mut recovered = History::from_checkpoint(checkpoint).unwrap();
+        assert_eq!(recovered.max_states, 37);
+        assert_eq!(recovered.max_bytes, 1234);
+        for expected in ["C", "D"] {
+            current = recovered.try_redo(current).unwrap().unwrap().0;
+            assert_eq!(current.name, expected);
+        }
+        for expected in ["C", "B", "A"] {
+            current = recovered.try_undo(current).unwrap().unwrap().0;
+            assert_eq!(current.name, expected);
+        }
+        assert_eq!(recovered.redo_label(), Some("B"));
+    }
+
+    #[test]
+    fn recovery_checkpoint_keeps_cold_states_lazy_and_failed_navigation_atomic() {
+        let mut checkpoint = History::new(50).checkpoint();
+        checkpoint.current_label = "Current".into();
+        checkpoint.undo.push(HistoryState::from_archive("Before", true, Arc::new(Archive(Err("unreadable recovery".into())))));
+        checkpoint.redo.push(HistoryState::from_document("After", Arc::new(base())));
+        let mut history = History::from_checkpoint(checkpoint).unwrap();
+        let captured = history.checkpoint();
+        assert!(captured.undo.first().unwrap().has_selection());
+        assert!(captured.undo.first().unwrap().load_document().is_err());
+        assert_eq!(history.archived_states(), 1);
+        assert!(history.has_past_selection());
+        assert!(history.try_undo(Arc::new(base())).is_err());
+        assert_eq!(history.entries(), ["Before", "Current"]);
+        assert_eq!(history.redo_label(), Some("After"));
+        assert_eq!(history.past_len(), 1);
+    }
+
+    #[test]
+    fn recovered_identity_remaps_resident_and_cold_states_without_changing_sources() {
+        let original = Arc::new(base());
+        let old_id = original.id;
+        let new_id = DocId::fresh();
+        let mut checkpoint = History::default().checkpoint();
+        checkpoint.undo.push(HistoryState::from_archive("Cold", false, Arc::new(Archive(Ok(original.clone())))));
+        checkpoint.redo.push(HistoryState::from_document("Resident", original.clone()));
+        let mut history = History::from_checkpoint(checkpoint).unwrap();
+        history.remap_document_id(new_id);
+        assert_eq!(history.archived_states(), 1, "remapping does not hydrate cold history");
+        let checkpoint = history.checkpoint();
+        assert_eq!(checkpoint.undo[0].load_document().unwrap().id, new_id);
+        assert_eq!(checkpoint.redo[0].load_document().unwrap().id, new_id);
+        assert_eq!(original.id, old_id, "other tabs retain their identities");
+    }
+
+    #[test]
+    fn recovery_checkpoint_preserves_targeting_across_undo_and_redo() {
+        let before = Arc::new(base());
+        let first = before.layers.first().unwrap().id;
+        let target = LayerTarget { active: Some(first), selected: vec![first] };
+        let mut history = History::default();
+        history.set_current_layers(target.clone());
+        history.record("Move", before.clone(), target.clone());
+        let mut restored = History::from_checkpoint(history.checkpoint()).unwrap();
+        let (doc, layers) = restored.try_undo(before).unwrap().unwrap();
+        assert_eq!(layers, target);
+        assert_eq!(restored.try_redo(doc).unwrap().unwrap().1, target);
+    }
+
+    #[test]
+    fn recovery_checkpoint_rejects_oversized_metadata() {
+        let mut checkpoint = History::new(50).checkpoint();
+        checkpoint.current_label = "x".repeat(4097);
+        assert!(History::from_checkpoint(checkpoint).is_err());
+        let mut checkpoint = History::new(50).checkpoint();
+        let state = HistoryState::from_document("State", Arc::new(base()));
+        checkpoint.undo = vec![state.clone(); 10_000];
+        checkpoint.redo.push(state);
+        assert!(History::from_checkpoint(checkpoint).is_err());
+        let mut checkpoint = History::new(50).checkpoint();
+        checkpoint.max_states = 0;
+        assert!(History::from_checkpoint(checkpoint).is_err());
     }
 
     #[test]
