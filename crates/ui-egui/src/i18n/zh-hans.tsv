@@ -31,7 +31,13 @@
 	New…	新建…
 	New from Clipboard	从剪贴板新建
 	Open…	打开…
+	Open as Deep…	以深度方式打开…
 	Open As…	打开为…
+	Open EXR Parts…	打开 EXR 分段…
+	Add beauty precomp from the AOVs	从 AOV 预合成美丽通道
+	Both	两者
+	Left	左
+	Right	右
 	Open Recent	打开最近文件
 	Clear Recent Files	清除最近文件
 	Close	关闭
@@ -81,6 +87,8 @@
 	Import	导入
 	Browse…	浏览…
 	Reveal in Finder	在 Finder 中显示
+	Show in Explorer	在文件资源管理器中显示
+	Show in Folder	在文件夹中显示
 	File Info…	文件信息…
 	Print…	打印…
 	Print One Copy	打印一份
@@ -734,6 +742,22 @@
 	+ Add variable	+ 添加变量
 	30 frames @ 30 fps	30 帧 @ 30 fps
 	3D LUT File	3D LUT 文件
+	Install Pack…	安装包…
+	Remove Pack	移除包
+	Built-in	内置
+	Favorites	收藏
+	Duplicate of	重复于
+	3D cube	3D 立方体
+	1D cube	1D 立方体
+	LUT look	LUT 风格
+	{kind}, size {n}	{kind}，大小 {n}
+	Title: {title}	标题：{title}
+	Declares an input range other than 0 to 1	声明了 0 到 1 以外的输入范围
+	The name suggests a technical conversion, not a creative look	名称看起来是技术性转换，而非创意风格
+	LUTs installed into {pack}: {n}	已安装到 {pack} 的 LUT：{n}
+	{n} skipped	跳过 {n} 个
+	{n} already installed	{n} 个已安装
+	Choosing a folder is not available here; use the lut.installPack command	此处无法选择文件夹；请使用 lut.installPack 命令
 	Absolute	绝对
 	Absolute Colorimetric	绝对比色
 	Action	动作
@@ -802,6 +826,9 @@
 	Bend:	弯曲：
 	Bicubic	双三次
 	Bicubic (smooth gradients)	双三次（平滑渐变）
+	Automatic	自动
+	Bicubic Smoother (enlargement)	双三次（较平滑）（扩大）
+	Bicubic Sharper (reduction)	双三次（较锐利）（缩减）
 	Bilinear	双线性
 	Black	黑色
 	Black & White	黑白
@@ -812,7 +839,6 @@
 	Blending Options	混合选项
 	Blue	蓝色
 	Blue, Red, Yellow	蓝色、红色、黄色
-	Both	两者
 	Both Axes	双轴
 	Bottom	底部
 	Brightness	亮度
@@ -1037,6 +1063,7 @@
 	Filter for pixel layers	筛选像素图层
 	Filter for shape layers	筛选形状图层
 	Filter for smart objects	筛选智能对象
+	Filter for deep layers	筛选深度图层
 	Filter for type layers	筛选文字图层
 	Filter:	筛选：
 	Finger Painting	手指绘画
@@ -1134,7 +1161,6 @@
 	Leading	行距
 	Leading (set to the font size × auto-leading when Auto)	行距（自动时为字号 × 自动行距系数）
 	Leave as is (don't color manage)	保持原样（不进行色彩管理）
-	Left	左
 	Left align text	文字左对齐
 	Length:	长度：
 	Level	级别
@@ -1346,7 +1372,6 @@
 	Restore All	全部还原
 	Restore Defaults	还原默认值
 	Restrictive (Web)	限定（Web）
-	Right	右
 	Right align text	文字右对齐
 	Rigid	刚性
 	Rotate:	旋转：
@@ -2232,6 +2257,7 @@ cameraRaw	Blending	混合
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	拾色器（文字颜色）
+	Color Picker ({name})	拾色器（{name}）
 	Color Picker (Fill Color)	拾色器（填充颜色）
 	Fill color	填充颜色
 	Color Picker (Stroke Color)	拾色器（描边颜色）
@@ -2410,7 +2436,30 @@ fontWeight	Italic	斜体
 	Dash offset	虚线偏移
 	Open paths use centered strokes	开放路径使用居中描边
 	Use finite lengths and a positive pattern total	请使用有限长度和正数图案总长度
+
+# Undo cache budgets
+	Memory budget (MiB)	内存上限 (MiB)
+	Undo disk budget (MiB)	撤销磁盘上限 (MiB)
+	Budget mb	容量上限 (MiB)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	文档像素、嵌入数据和撤销历史共用内存上限。内存按需增长；应用的其他内存另行使用。
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	撤销磁盘空间仅在需要时增长，不超过此上限。设为零可禁用磁盘缓存。暂存路径将在下一个缓存会话中生效。
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	浏览器版将撤销历史保存在内存中。暂存盘设置适用于桌面应用。
 	No subject found — try Object Selection or the Lasso	未找到主体 — 请尝试对象选择工具或套索工具
 	Quick Selection found nothing there	快速选择在该处未找到任何内容
 	Object Selection found nothing there — try a tighter rectangle	对象选择在该处未找到任何内容 — 请尝试更紧凑的矩形
 	No subject found — try a rectangle around the object	未找到主体 — 请尝试在对象周围绘制矩形
+
+# Background file-open stages (engine messages translated by the shell).
+	Reading	正在读取
+	Decoding	正在解码
+	Next Document	下一个文档
+	Previous Document	上一个文档
+	Appearance Settings…	外观设置…
+	Add to favorites	添加到收藏
+	Remove from favorites	从收藏中移除
+	Capishot — Screen Color Picker	Capishot — 屏幕取色器
+	Float Panel	浮动面板
+	Float Panel Group	浮动面板组
+	Dock Panel Group	停靠面板组
+	Use Classic Mode	使用经典模式
+	Auto Center Preview	自动居中预览

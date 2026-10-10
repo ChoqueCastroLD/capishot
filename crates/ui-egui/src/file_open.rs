@@ -62,6 +62,21 @@ impl PhotocraftApp {
         Ok(warnings)
     }
 
+    /// File › Open as Deep: like [`open_path`](Self::open_path), but deep EXRs keep their
+    /// depth data as a deep layer. The decode always runs as an open job (worker on native,
+    /// inline on wasm): the reading stays off the UI thread for big files either way.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_path_deep(&mut self, path: &str) -> Result<Vec<String>, String> {
+        crate::jobs_ui::start_open_deep(self, &display_name(path), Some(path.to_string()), photocraft_engine::jobs::OpenSource::Path(path.to_string()))?;
+        Ok(Vec::new())
+    }
+
+    /// The web counterpart of [`open_path_deep`](Self::open_path_deep): paths do not exist there.
+    #[cfg(target_arch = "wasm32")]
+    pub fn open_path_deep(&mut self, path: &str) -> Result<Vec<String>, String> {
+        Err(format!("cannot open paths on the web: {path}"))
+    }
+
     /// Record that the active document was just opened from `path`: File › Save writes back to it
     /// (unless it's a template or derivative preview) and it goes to the top of Open Recent.
     pub(crate) fn opened_from(&mut self, path: &str) {
@@ -139,6 +154,12 @@ impl PhotocraftApp {
         };
         for f in files {
             let name = dropped_name(&f);
+            // A folder or .zip of LUTs installs as a pack only while Color Lookup's LUT list is
+            // showing; anywhere else it opens (or fails to) like any other drop.
+            if crate::lut_library_ui::is_pack_drop(self, ctx, f.path()) {
+                crate::lut_library_ui::install_path(self, &f.path().to_string_lossy());
+                continue;
+            }
             if target == DropTarget::Canvas && !crate::preset_files_ui::is_preset_file(&name) {
                 self.drop_places.push_back(f);
                 continue;

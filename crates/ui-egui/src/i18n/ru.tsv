@@ -40,8 +40,14 @@
 	New from Clipboard	Создать из буфера обмена
 	New	Создать
 	Open…	Открыть…
+	Open as Deep…	Открыть как deep…
 	Open	Открыть
 	Open As…	Открыть как…
+	Open EXR Parts…	Открыть части EXR…
+	Add beauty precomp from the AOVs	Добавить предкомпозит красоты из AOV
+	Both	Оба
+	Left	Левый
+	Right	Правый
 	Open Recent	Открыть недавние
 	Clear Recent Files	Очистить список недавних файлов
 	Close	Закрыть
@@ -741,6 +747,22 @@
 	Color Lookup…	Калибровка цвета…
 	Color Lookup Tables…	Таблицы перекодировки цвета…
 	3D LUT File	Файл 3D LUT
+	Install Pack…	Установить набор…
+	Remove Pack	Удалить набор
+	Built-in	Встроенные
+	Favorites	Избранное
+	Duplicate of	Дубликат:
+	3D cube	3D-куб
+	1D cube	1D-куб
+	LUT look	Образ LUT
+	{kind}, size {n}	{kind}, размер {n}
+	Title: {title}	Название: {title}
+	Declares an input range other than 0 to 1	Задаёт диапазон входных значений, отличный от 0–1
+	The name suggests a technical conversion, not a creative look	Название похоже на техническое преобразование, а не на творческий образ
+	LUTs installed into {pack}: {n}	LUT установлено в {pack}: {n}
+	{n} skipped	пропущено: {n}
+	{n} already installed	уже установлено: {n}
+	Choosing a folder is not available here; use the lut.installPack command	Выбор папки здесь недоступен; используйте команду lut.installPack
 	Load 3D LUT…	Загрузить 3D LUT…
 	Invert…	Инверсия…
 	Invert	Инверсия
@@ -1078,8 +1100,6 @@
 	Single Word Justification	Выключка одного слова
 	Alignment	Выравнивание
 	Indent First	Отступ первой строки
-	Left	По левому краю
-	Right	По правому краю
 	Center	По центру
 	Justify	По ширине
 
@@ -1613,6 +1633,8 @@
 	Open a document to select a colour range.	Откройте документ, чтобы выбрать цветовой диапазон.
 	Saved	Сохранено
 	Reveal in Finder	Показать в Finder
+	Show in Explorer	Показать в Проводнике
+	Show in Folder	Показать в папке
 	Before (Y)	До (Y)
 	After (X)	После (X)
 	Original	Оригинал
@@ -1925,10 +1947,12 @@
 	Baseline	Базовая линия
 	Bicubic	Бикубическая
 	Bicubic (smooth gradients)	Бикубическая (плавные градиенты)
+	Automatic	Автоматически
+	Bicubic Smoother (enlargement)	Бикубическая, глаже (увеличение)
+	Bicubic Sharper (reduction)	Бикубическая, чётче (уменьшение)
 	Bilinear	Билинейная
 	Black, White	Чёрный, белый
 	Blue, Red, Yellow	Синий, красный, жёлтый
-	Both	Оба
 	Bottom	Снизу
 	Brightness Jitter	Колебание яркости
 	Brush Reconstruct Options	Параметры восстановления кисти
@@ -2498,6 +2522,7 @@ cameraRaw	Roughness	Неровность
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Палитра цветов (Цвет текста)
+	Color Picker ({name})	Палитра цветов ({name})
 	Color Picker (Fill Color)	Палитра цветов (Цвет заливки)
 	Fill color	Цвет заливки
 	Color Picker (Stroke Color)	Палитра цветов (Цвет обводки)
@@ -2676,6 +2701,14 @@ fontWeight	Italic	Курсив
 	Dash offset	Смещение штрихов
 	Open paths use centered strokes	Открытые контуры используют обводку по центру
 	Use finite lengths and a positive pattern total	Используйте конечные длины и положительную сумму шаблона
+
+# Undo cache budgets
+	Memory budget (MiB)	Лимит памяти (МиБ)
+	Undo disk budget (MiB)	Лимит диска для отмены (МиБ)
+	Budget mb	Лимит (МиБ)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	Лимит памяти общий для пикселей документа, встроенных данных и истории отмены. Память выделяется по мере необходимости; остальные нужды приложения требуют дополнительной памяти.
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	Место на диске для отмены используется только по мере необходимости, до этого лимита. Ноль отключает дисковый кэш. Пути рабочих дисков применяются со следующего сеанса кэша.
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Версия для браузера хранит историю отмены в памяти. Настройки рабочих дисков применяются к настольному приложению.
 	No subject found — try Object Selection or the Lasso	Объект не найден — попробуйте «Выделение объектов» или «Лассо»
 	Quick Selection found nothing there	Быстрое выделение ничего здесь не нашло
 	Object Selection found nothing there — try a tighter rectangle	Выделение объектов ничего здесь не нашло — попробуйте более узкий прямоугольник
@@ -2690,3 +2723,15 @@ fontWeight	Italic	Курсив
 	Missing delete command	Отсутствует команда удаления
 	Invalid delete command	Недопустимая команда удаления
 	Layer deleted, but confirmation preference could not be saved: {error}	Слой удалён, но не удалось сохранить настройку подтверждения: {error}
+	Filter for deep layers	Фильтр по глубоким слоям
+	Next Document	Следующий документ
+	Previous Document	Предыдущий документ
+	Appearance Settings…	Настройки оформления…
+	Add to favorites	Добавить в избранное
+	Remove from favorites	Удалить из избранного
+	Capishot — Screen Color Picker	Capishot — Пипетка цвета экрана
+	Float Panel	Открепить панель
+	Float Panel Group	Открепить группу панелей
+	Dock Panel Group	Закрепить группу панелей
+	Use Classic Mode	Использовать классический режим
+	Auto Center Preview	Автоматически центрировать просмотр

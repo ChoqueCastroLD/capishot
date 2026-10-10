@@ -42,6 +42,10 @@ pub(crate) trait Fetch {
     /// Canonical (little-endian) tile bytes of the given expected length.
     fn tile(&mut self, hash: &str, len: usize) -> Result<Vec<u8>>;
     fn blob(&mut self, hash: &str) -> Result<Arc<Vec<u8>>>;
+    fn shared_tile(&mut self, _hash: &str, _len: usize) -> Result<Option<Arc<Tile>>> {
+        Ok(None)
+    }
+    fn cache_tile(&mut self, _hash: &str, _tile: &Arc<Tile>) {}
 }
 
 pub(crate) fn hex(bytes: &[u8]) -> String {
@@ -173,6 +177,21 @@ fn layer_m(l: &Layer, sink: &mut dyn Sink) -> LayerM {
             warp: s.warp.clone(),
             stack_mode: s.stack_mode,
             perspective: s.perspective,
+        },
+        LayerContent::Deep(d) => ContentM::Deep {
+            x: d.x,
+            y: d.y,
+            width: d.width,
+            height: d.height,
+            channels: d
+                .channels
+                .iter()
+                .map(|c| crate::manifest::DeepChannelM {
+                    name: c.name.clone(),
+                    samples: sink.blob(&std::sync::Arc::new(c.samples.iter().flat_map(|v| v.to_le_bytes()).collect())),
+                })
+                .collect(),
+            counts: sink.blob(&std::sync::Arc::new(d.counts.iter().flat_map(|v| v.to_le_bytes()).collect())),
         },
     };
     LayerM {
@@ -332,9 +351,16 @@ impl Loader<'_> {
             if s.tile(c).is_some() {
                 return Err(FormatError::corrupt(format!("duplicate tile ({}, {})", t.tx, t.ty)));
             }
+            if let Some(tile) = self.fetch.shared_tile(&t.hash, len)? {
+                s.put_tiles(std::iter::once((c, tile)));
+                continue;
+            }
             let mut bytes = self.fetch.tile(&t.hash, len)?;
             swap_to_le(&mut bytes, f.sample);
             s.tile_mut(c).bytes_mut().copy_from_slice(&bytes);
+            if let Some(tile) = s.tile(c) {
+                self.fetch.cache_tile(&t.hash, tile);
+            }
         }
         Ok(s)
     }
@@ -475,6 +501,47 @@ impl Loader<'_> {
                     stack_mode: *stack_mode,
                     perspective: perspective.filter(|p| p.iter().all(|v| v.is_finite())),
                 })
+            }
+            ContentM::Deep { x, y, width, height, channels, counts } => {
+                let counts_bytes = self.fetch.blob(counts)?;
+                let counts_v: Vec<u64> = counts_bytes.as_chunks::<8>().0.iter().map(|c| u64::from_le_bytes(*c)).collect();
+                let npx = usize::try_from(*width).unwrap_or(usize::MAX / 2).saturating_mul(usize::try_from(*height).unwrap_or(0));
+                // Before any `npx + 1`: on a 32-bit target a saturating width*height can sit at
+                // usize::MAX, where the +1 would overflow.
+                if npx > 1 << 28 {
+                    return Err(crate::FormatError::LimitExceeded(format!("deep grid of {npx} pixels is too large")));
+                }
+                if counts_v.len() != npx + 1 {
+                    return Err(crate::FormatError::LimitExceeded(format!(
+                        "deep counts hold {} entries, expected width*height+1 = {}",
+                        counts_v.len(),
+                        npx + 1
+                    )));
+                }
+                if counts_v.windows(2).any(|w| w[1] < w[0]) {
+                    return Err(crate::FormatError::LimitExceeded("deep sample counts must not decrease".into()));
+                }
+                let total = usize::try_from(counts_v.last().copied().unwrap_or(0))
+                    .map_err(|_| crate::FormatError::LimitExceeded("the deep sample count is too large for this platform".into()))?;
+                let mut channels_v = Vec::with_capacity(channels.len());
+                for c in channels {
+                    let bytes = self.fetch.blob(&c.samples)?;
+                    let want =
+                        total.checked_mul(4).ok_or_else(|| crate::FormatError::LimitExceeded(format!("deep channel `{}` declares {total} samples", c.name)))?;
+                    if bytes.len() != want {
+                        return Err(crate::FormatError::LimitExceeded(format!(
+                            "deep channel `{}` holds {} samples, expected {}",
+                            c.name,
+                            bytes.len() / 4,
+                            total
+                        )));
+                    }
+                    channels_v.push(photocraft_doc::DeepChannel {
+                        name: c.name.clone(),
+                        samples: bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect(),
+                    });
+                }
+                LayerContent::Deep(photocraft_doc::DeepData { x: *x, y: *y, width: *width, height: *height, channels: channels_v, counts: counts_v })
             }
         };
         let mask = match &m.mask {

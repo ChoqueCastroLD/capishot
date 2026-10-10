@@ -40,12 +40,16 @@ mod linux_libs;
 mod logging;
 mod monitor_profile;
 mod photoshop_settings;
+mod recovery;
 mod screen_color;
 mod services;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod single_instance;
 // Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 mod tablet;
 mod ui_state;
+mod window_frame;
 
 use photocraft_engine::Session;
 use photocraft_ui_egui::PhotocraftApp;
@@ -88,6 +92,8 @@ fn native_options(custom_titlebar: bool) -> eframe::NativeOptions {
         // eframe saves native window geometry and egui panel/window sizes on exit.
         // Keep that state beside preferences, including config overrides and portable mode.
         persistence_path: services::config_dir().map(|dir| dir.join("ui.ron")),
+        // Pointer feedback should not wait behind a second queued canvas frame.
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY),
         ..Default::default()
     }
 }
@@ -157,6 +163,7 @@ fn main() -> eframe::Result {
     let mut unreadable_paths: Vec<String> = Vec::new();
     let mut safe_gpu = false;
     let mut in_window_menus = std::env::var_os("PHOTOCRAFT_IN_WINDOW_MENUS").is_some_and(|v| !v.is_empty() && v != "0");
+    let mut new_instance = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(a) = args.next() {
         match a.to_str() {
@@ -177,6 +184,7 @@ fn main() -> eframe::Result {
             Some("--automation-write-root") => automation_write_root = args.next().map(std::path::PathBuf::from),
             Some("--safe-gpu") => safe_gpu = true,
             Some("--in-window-menus") => in_window_menus = true,
+            Some("--new-instance") => new_instance = true,
             Some("--version") => {
                 println!("photocraft {}", photocraft_engine::build_info::long_version());
                 return Ok(());
@@ -197,6 +205,32 @@ fn main() -> eframe::Result {
         }
         std::process::exit(code);
     }
+
+    // Linux/BSD: hand the files to a window that's already open, as Open With from a file manager
+    // expects (#1540); otherwise become the instance later launches hand theirs to.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let single_instance = {
+        let socket =
+            single_instance::socket_path(std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).as_deref(), services::config_dir().as_deref());
+        let forward = single_instance::should_forward(new_instance, std::env::var_os("PHOTOCRAFT_NEW_INSTANCE"), control_port.is_some());
+        match socket {
+            // Paths that aren't valid Unicode are reported by this launch's own window instead.
+            Some(socket) if forward && unreadable_paths.is_empty() => {
+                let paths: Vec<std::path::PathBuf> = files.iter().map(|f| std::path::absolute(f).unwrap_or_else(|_| std::path::PathBuf::from(f))).collect();
+                if single_instance::forward(&socket, &paths) == single_instance::Forward::Delivered {
+                    return Ok(());
+                }
+                single_instance::listen(&socket)
+            }
+            _ => None,
+        }
+    };
+    // Only the inbox goes into the app: eframe drops the creator closure once the app exists, and
+    // the server (whose drop removes the socket) has to live until the event loop returns.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let instance_inbox = single_instance.as_ref().map(|s| s.inbox.clone());
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    let _ = new_instance;
 
     // The log file lives under the settings directory; opened after the arguments, so `--version`
     // and usage errors leave no file behind. Records logged until now are written to it first.
@@ -347,7 +381,9 @@ fn main() -> eframe::Result {
                         services::xwayland_command(var("FLATPAK_ID").as_deref(), var("APPIMAGE").as_deref(), std::env::var_os("DISPLAY").is_some());
                 }
             }
-            let mut app = PhotocraftApp::new(Session::new(), services);
+            let mut session = Session::new();
+            session.lut_library = services::luts_dir().map(photocraft_engine::lut_library::LutLibrary::new);
+            let mut app = PhotocraftApp::new(session, services);
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;
             // Only the title bar's free gap drags the window, never the menus (mac_window.rs).
@@ -447,6 +483,9 @@ fn main() -> eframe::Result {
             let _ = in_window_menus;
             // Where file drags and drops are (winit 0.30 doesn't say).
             app.services.cursor_pos = cursor::service(cc);
+            // The custom title bar's undecorated window must stay borderless, or its caption and
+            // border offset the content and the pointer on some Windows systems (#2246).
+            app.services.window_frame = window_frame::service(cc, custom_titlebar);
             // Caps Lock state (X11/Windows/macOS; `None` on native Wayland): the canvas shows the
             // precise crosshair for painting tools while it is toggled on (#1758).
             app.services.caps_lock = caps_lock::service(cc);
@@ -460,6 +499,11 @@ fn main() -> eframe::Result {
             }
             #[cfg(target_os = "linux")]
             tablet::spawn_x11(&app.stylus.feed, display);
+            // Files later launches hand over (#1540) arrive like macOS's Apple events.
+            #[cfg(all(unix, not(target_os = "macos")))]
+            if let Some(inbox) = &instance_inbox {
+                app.services.os_events = Some(inbox.connect(&cc.egui_ctx));
+            }
             // Paths on the command line (Linux/Windows file associations, `photocraft a.psd`).
             app.open_paths(&files);
             if !unreadable_paths.is_empty() {
@@ -502,6 +546,9 @@ fn main() -> eframe::Result {
         if let Some(s) = sentinel.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
             s.finish();
         }
+        // Stop listening first, or the relaunch would hand its files to this exiting process.
+        #[cfg(all(unix, not(target_os = "macos")))]
+        drop(single_instance);
         if let Ok(exe) = std::env::current_exe() {
             let launched = std::process::Command::new(exe)
                 .args(std::env::args_os().skip(1))
@@ -586,5 +633,12 @@ mod tests {
             assert_eq!(super::native_options(true).viewport.decorations, Some(false));
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn presentation_prioritizes_pointer_latency() {
+        let surface = super::native_options(false).wgpu_options.surface;
+        assert_eq!(surface.desired_maximum_frame_latency, Some(1));
+        assert_eq!(surface.present_mode, eframe::wgpu::PresentMode::AutoVsync);
     }
 }

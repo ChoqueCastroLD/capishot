@@ -34,7 +34,14 @@
 	New…	Nowy…
 	New from Clipboard	Nowy ze schowka
 	Open…	Otwórz…
+	Open as Deep…	Otwórz jako dane głębi…
+	Filter for deep layers	Filtr dla warstw głębi
 	Open As…	Otwórz jako…
+	Open EXR Parts…	Otwórz części EXR…
+	Add beauty precomp from the AOVs	Dodaj wstępną kompozycję piękna z AOV-ów
+	Both	Obie
+	Left	Lewa
+	Right	Prawa
 	Open Recent	Otwórz ostatnie
 	Clear Recent Files	Wyczyść listę ostatnich plików
 	Close	Zamknij
@@ -84,6 +91,8 @@
 	Import	Importuj
 	Browse…	Przeglądaj…
 	Reveal in Finder	Pokaż w Finderze
+	Show in Explorer	Pokaż w Eksploratorze
+	Show in Folder	Pokaż w folderze
 	File Info…	Informacje o pliku…
 	Print…	Drukuj…
 	Print One Copy	Drukuj jedną kopię
@@ -734,6 +743,22 @@
 	+ Add variable	+ Dodaj zmienną
 	30 frames @ 30 fps	30 klatek @ 30 kl./s
 	3D LUT File	Plik 3D LUT
+	Install Pack…	Zainstaluj pakiet…
+	Remove Pack	Usuń pakiet
+	Built-in	Wbudowane
+	Favorites	Ulubione
+	Duplicate of	Duplikat pakietu
+	3D cube	Kostka 3D
+	1D cube	Kostka 1D
+	LUT look	Wygląd LUT
+	{kind}, size {n}	{kind}, rozmiar {n}
+	Title: {title}	Tytuł: {title}
+	Declares an input range other than 0 to 1	Deklaruje zakres wejściowy inny niż od 0 do 1
+	The name suggests a technical conversion, not a creative look	Nazwa wskazuje na konwersję techniczną, a nie na kreatywny wygląd
+	LUTs installed into {pack}: {n}	LUT zainstalowane w {pack}: {n}
+	{n} skipped	Pominięte: {n}
+	{n} already installed	Już zainstalowane: {n}
+	Choosing a folder is not available here; use the lut.installPack command	Wybór folderu nie jest tu dostępny; użyj polecenia lut.installPack
 	Absolute	Bezwzględny
 	Absolute Colorimetric	Kolorymetryczny bezwzględny
 	Action	Akcja
@@ -800,6 +825,9 @@
 	Bend:	Zgięcie:
 	Bicubic	Dwusześcienna
 	Bicubic (smooth gradients)	Dwusześcienna (gładkie gradienty)
+	Automatic	Automatycznie
+	Bicubic Smoother (enlargement)	Dwusześcienna wygładzona (powiększanie)
+	Bicubic Sharper (reduction)	Dwusześcienna wyostrzona (zmniejszanie)
 	Bilinear	Dwuliniowa
 	Black	Czarny
 	Black & White	Czerń i biel
@@ -810,7 +838,6 @@
 	Blending Options	Opcje mieszania
 	Blue	Niebieski
 	Blue, Red, Yellow	Niebieski, czerwony, żółty
-	Both	Oba
 	Both Axes	Obie osie
 	Bottom	Dół
 	Brightness	Jasność
@@ -1127,7 +1154,6 @@
 	Leading	Interlinia
 	Leading (set to the font size × auto-leading when Auto)	Interlinia (przy ustawieniu Automatycznie: rozmiar czcionki × automatyczna interlinia)
 	Leave as is (don't color manage)	Pozostaw bez zmian (bez zarządzania kolorami)
-	Left	Lewo
 	Left align text	Wyrównaj tekst do lewej
 	Length:	Długość:
 	Level	Poziom
@@ -1336,7 +1362,6 @@
 	Restore All	Przywróć wszystko
 	Restore Defaults	Przywróć domyślne
 	Restrictive (Web)	Ograniczona (Internet)
-	Right	Prawo
 	Right align text	Wyrównaj tekst do prawej
 	Rigid	Sztywne
 	Rotate:	Obrót:
@@ -3241,6 +3266,7 @@ cameraRaw	Roughness	Chropowatość
 
 # Text Color Picker and screen sampling
 	Color Picker (Text Color)	Próbnik kolorów (Kolor tekstu)
+	Color Picker ({name})	Próbnik kolorów ({name})
 	Color Picker (Fill Color)	Próbnik kolorów (Kolor wypełnienia)
 	Fill color	Kolor wypełnienia
 	Color Picker (Stroke Color)	Próbnik kolorów (Kolor obrysu)
@@ -3422,7 +3448,26 @@ cameraRaw	Roughness	Chropowatość
 	Dash offset	Przesunięcie kresek
 	Open paths use centered strokes	Otwarte ścieżki używają wyśrodkowanych obrysów
 	Use finite lengths and a positive pattern total	Użyj skończonych długości i dodatniej sumy wzoru
+
+# Undo cache budgets
+	Budget mb	Limit (MiB)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	Piksele dokumentów, osadzone dane i historia cofania współdzielą limit pamięci. Pamięć jest przydzielana w razie potrzeby; inne zużycie pamięci aplikacji jest dodatkowe.
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	Miejsce na dysku dla cofania jest używane tylko w razie potrzeby, do tego limitu. Zero wyłącza pamięć podręczną na dysku. Ścieżki dysków roboczych obowiązują od następnej sesji pamięci podręcznej.
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Ta wersja przeglądarkowa przechowuje historię cofania w pamięci. Ustawienia dysków roboczych dotyczą aplikacji komputerowej.
+	Memory budget (MiB)	Limit pamięci (MiB)
+	Undo disk budget (MiB)	Limit dysku dla cofania (MiB)
 	No subject found — try Object Selection or the Lasso	Nie znaleziono obiektu — spróbuj Zaznaczania obiektu lub Lassa
 	Quick Selection found nothing there	Szybkie zaznaczanie nic tam nie znalazło
 	Object Selection found nothing there — try a tighter rectangle	Zaznaczanie obiektu nic tam nie znalazło — spróbuj ciaśniejszego prostokąta
 	No subject found — try a rectangle around the object	Nie znaleziono obiektu — spróbuj prostokąta wokół obiektu
+	Next Document	Następny dokument
+	Previous Document	Poprzedni dokument
+	Appearance Settings…	Ustawienia wyglądu…
+	Add to favorites	Dodaj do ulubionych
+	Remove from favorites	Usuń z ulubionych
+	Capishot — Screen Color Picker	Capishot — Próbnik kolorów ekranu
+	Float Panel	Odłącz panel
+	Float Panel Group	Odłącz grupę paneli
+	Dock Panel Group	Zadokuj grupę paneli
+	Use Classic Mode	Użyj trybu klasycznego
+	Auto Center Preview	Automatycznie wyśrodkuj podgląd

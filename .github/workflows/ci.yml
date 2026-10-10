@@ -153,6 +153,13 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo xtask scorecard --check
 
+      # The prerequisites manifest (xtask/src/prereqs.rs) is the single source of truth for the
+      # tools, targets, data checkouts and system libraries a checkout needs; --check fails if the
+      # generated docs/prerequisites.md is stale, so the page cannot drift from the code (the
+      # environment itself is reported by `cargo xtask doctor`, not asserted in CI).
+      - name: Toolchain prerequisites
+        run: cargo xtask doctor --check
+
   corpus:
     # Real-file corpus tests (cargo feature `corpus`), on every PR and on main. The corpora are
     # pinned in xtask/src/corpus_pins.rs and sha256-verified (xtask/*.sha256) after both a cache
@@ -225,7 +232,7 @@ jobs:
           curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
             | tar -xz -C "$HOME/.cargo/bin" trunk
           trunk --version
-      # package.sh runs Trunk's release build, validates relative URLs, checks the 24 MiB
+      # package.sh runs Trunk's release build, validates relative URLs, checks the 25 MiB
       # wasm limit and exercises the same packaging step used by release.yml.
       - name: Build and verify browser release
         run: packaging/web/package.sh
@@ -241,7 +248,7 @@ jobs:
               [ -f "$wasm" ] || continue
               bytes=$(wc -c < "$wasm" | tr -d ' ')
               mib=$(awk -v n="$bytes" 'BEGIN { printf "%.2f", n / 1048576 }')
-              echo "| $(basename "$wasm") | $bytes | $mib | 24 MiB |"
+              echo "| $(basename "$wasm") | $bytes | $mib | 25 MiB |"
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -257,6 +264,7 @@ jobs:
           - { crate: psd, name: parse }
           - { crate: psd, name: descriptor }
           - { crate: psd, name: image_source_data }
+          - { crate: adobe-assets, name: atn }
           - { crate: codecs, name: decode_any }
           - { crate: codecs, name: decode_png }
           - { crate: codecs, name: decode_jpeg }

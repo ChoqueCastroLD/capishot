@@ -12,6 +12,7 @@
 //!
 //! One dialog at a time: asking while one is open is refused.
 
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 
 use photocraft_doc::DocId;
@@ -28,6 +29,9 @@ pub enum FileDialogRequest {
     Open { multiple: bool, initial_dir: Option<String>, extensions: Option<Vec<String>> },
     /// Where to write, starting from `suggested` (a file name, or the document's own path).
     Save { suggested: String },
+    /// A folder (Color Lookup › Install Pack…); answered with its path in `Paths`. The web has
+    /// no folder picker and answers Cancel.
+    Folder,
 }
 
 /// The user's choice (a cancelled dialog answers `None`).
@@ -98,6 +102,7 @@ impl PhotocraftApp {
         let kind = match request {
             FileDialogRequest::Open { .. } => "open",
             FileDialogRequest::Save { .. } => "save",
+            FileDialogRequest::Folder => "folder",
         };
         let then: Then = Box::new(move |app, answer| answer.map_or_else(|| Err(CANCELLED.into()), |a| then(app, a)));
         self.file_dialog = Some(Pending { request: Some(request), answer: None, then });
@@ -106,17 +111,35 @@ impl PhotocraftApp {
 
     /// Ask where to save: `then` gets the chosen path, with a lowercase extension when
     /// Preferences ▸ File Handling › Lowercase Extension is on (its default).
+    ///
+    /// A bare file name (export dialogs, an untitled document) starts in the folder the active
+    /// document was last saved or exported to through a dialog, else beside the document
+    /// (#1826, #1866). A caller's explicit directory is kept. The chosen folder is remembered for
+    /// the document the dialog was asked for.
     pub(crate) fn pick_save(&mut self, suggested: &str, then: impl FnOnce(&mut Self, String) -> Result<Value, String> + 'static) -> Result<Value, String> {
         let mut suggested = std::path::PathBuf::from(suggested);
-        // Export dialogs usually provide only a file name. Start beside the source document,
-        // while preserving a caller's explicit directory and the untitled-document fallback.
+        let doc = self.session.active().map(|d| d.doc.id);
+        // Closed documents' folders are no longer needed.
+        let open: Vec<_> = self.session.documents().iter().map(|d| d.doc.id).collect();
+        self.save_dirs.retain(|id, _| open.contains(id));
         if suggested.parent().is_some_and(|p| p.as_os_str().is_empty())
-            && let Some(dir) = self.session.active().and_then(|d| d.path.as_deref()).and_then(|p| std::path::Path::new(p).parent())
+            && let Some(dir) = doc
+                .and_then(|d| self.save_dirs.get(&d).cloned())
+                .or_else(|| self.session.active().and_then(|d| d.path.as_deref()).and_then(|p| std::path::Path::new(p).parent()).map(Path::to_path_buf))
         {
             suggested = dir.join(suggested);
         }
         self.ask_file(FileDialogRequest::Save { suggested: suggested.to_string_lossy().into_owned() }, move |app, answer| match answer {
-            FileDialogAnswer::SaveTo(path) => then(app, Self::lowercased_extension(app, path)),
+            FileDialogAnswer::SaveTo(path) => {
+                let path = Self::lowercased_extension(app, path);
+                // The web answers a download name, which has no folder to remember.
+                if let Some(doc) = doc
+                    && let Some(dir) = Path::new(&path).parent().filter(|p| !p.as_os_str().is_empty())
+                {
+                    app.save_dirs.insert(doc, dir.to_path_buf());
+                }
+                then(app, path)
+            }
             _ => Err(UNEXPECTED.into()),
         })
     }
@@ -155,6 +178,14 @@ impl PhotocraftApp {
         })
     }
 
+    /// Ask for a folder: `then` gets its path.
+    pub(crate) fn pick_folder(&mut self, then: impl FnOnce(&mut Self, String) -> Result<Value, String> + 'static) -> Result<Value, String> {
+        self.ask_file(FileDialogRequest::Folder, move |app, answer| match answer {
+            FileDialogAnswer::Paths(paths) => paths.into_iter().next().map_or_else(|| Err(CANCELLED.into()), |dir| then(app, dir)),
+            _ => Err(UNEXPECTED.into()),
+        })
+    }
+
     /// File › Open: opens every chosen file, reporting each failure (see [`Self::open_paths`]).
     pub fn open_dialog_file(&mut self) -> Result<Value, String> {
         let initial_dir = last_used_dir(&self.ui.recent_files);
@@ -167,6 +198,29 @@ impl PhotocraftApp {
                     if let Err(e) = app.open_bytes(&name, &bytes) {
                         app.open_failed(&name, &e);
                     }
+                }
+                FileDialogAnswer::SaveTo(_) => return Err(UNEXPECTED.into()),
+            }
+            Ok(Value::Null)
+        })
+    }
+
+    /// File › Open as Deep: [`Self::open_dialog_file`]'s picker, keeping every chosen file's
+    /// depth. Web dialogs hand over contents, which the deep importer has no bytes path for.
+    pub(crate) fn open_dialog_file_deep(&mut self) -> Result<Value, String> {
+        let initial_dir = last_used_dir(&self.ui.recent_files);
+        let extensions = Some(vec!["exr".to_string()]);
+        self.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions }, |app, answer| {
+            match answer {
+                FileDialogAnswer::Paths(paths) => {
+                    for path in paths {
+                        if let Err(e) = app.open_path_deep(&path) {
+                            app.open_failed(&crate::file_open::display_name(&path), &e);
+                        }
+                    }
+                }
+                FileDialogAnswer::Contents(name, _) => {
+                    app.open_failed(&name, "opening as deep needs the file on disk");
                 }
                 FileDialogAnswer::SaveTo(_) => return Err(UNEXPECTED.into()),
             }

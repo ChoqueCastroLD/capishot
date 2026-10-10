@@ -402,7 +402,8 @@ pub enum DialogKind {
 pub struct View {
     /// Screen (device) pixels per document pixel: the user-facing zoom (`100%` is `1.0`).
     /// Canvas geometry works in egui points and divides by `ctx.pixels_per_point`
-    /// (`PhotocraftApp::point_zoom`), so a scaled display doesn't magnify the image.
+    /// (`PhotocraftApp::point_zoom`), so neither the display scale nor Interface › UI Scale
+    /// magnifies the image (#1943, #2121).
     pub zoom: f32,
     /// Document-space point shown at the canvas centre.
     pub center: [f32; 2],
@@ -974,6 +975,9 @@ pub struct UiState {
     /// In-progress polygonal lasso vertices (document coordinates).
     #[serde(default)]
     pub polygon: Vec<[f64; 2]>,
+    /// The document owning the unfinished polygon; never restored across sessions.
+    #[serde(skip)]
+    pub polygon_document: Option<photocraft_doc::DocId>,
     /// The selection mode the polygonal lasso started in ("replace", "add", ...), set by the
     /// modifiers held at its first click.
     #[serde(default)]
@@ -1068,6 +1072,7 @@ impl Default for UiState {
             selection_mode: 0,
             tool_options: ToolOptions::default(),
             polygon: Vec::new(),
+            polygon_document: None,
             polygon_mode: String::new(),
             magnetic: Default::default(),
             crop_rect: None,

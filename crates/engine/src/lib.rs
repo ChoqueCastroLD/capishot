@@ -23,6 +23,7 @@ pub mod channel_cmds;
 pub mod color_cmds;
 pub mod color_to_alpha_cmds;
 pub mod commands;
+mod compact_move;
 pub mod comps_cmds;
 pub mod cutout_cmds;
 pub mod display_color;
@@ -31,6 +32,7 @@ pub mod document_preset_cmds;
 pub mod edit_cmds;
 pub mod edit_menu_cmds;
 pub mod eraser_cmds;
+pub mod exr_cmds;
 pub mod extra_cmds;
 pub mod file_cmds;
 pub mod fill_cmds;
@@ -45,6 +47,7 @@ pub mod gallery_cmds;
 pub mod gradient_fill_cmds;
 pub mod group_view_cmds;
 pub mod hidden_target;
+mod history_cache;
 pub mod history_cmds;
 pub mod image_cmds;
 pub mod inspect;
@@ -58,6 +61,9 @@ pub mod layer_multi_cmds;
 pub mod layer_nav_cmds;
 pub mod layer_style;
 pub mod lens_cmds;
+mod lut_id_params;
+pub mod lut_library;
+pub mod lut_library_cmds;
 pub mod magnetic_cmds;
 pub mod mask_view_cmds;
 mod migrate_cmds;
@@ -353,6 +359,9 @@ pub struct Session {
     /// Persistent brush preset store (desktop only; `None` keeps presets session-only, as in
     /// headless and test sessions). See `preset_store`. The same store holds the Actions list.
     pub preset_store: Option<preset_store::PresetStore>,
+    /// Installed LUT packs for Color Lookup (desktop only; `None` in headless, test and web
+    /// sessions). See `lut_library`.
+    pub lut_library: Option<lut_library::LutLibrary>,
     /// Window › Actions. The list persists with the preset store when one is attached.
     pub actions: actions_cmds::ActionState,
     /// Gate for every command the session runs, including the ones a command runs on its own
@@ -362,6 +371,8 @@ pub struct Session {
     pub authorize: Option<fn(&str, &serde_json::Value) -> Result<()>>,
     /// Background jobs (see [`jobs`]).
     jobs: jobs::Jobs,
+    history_cache: history_cache::Cache,
+    compact_move: Option<compact_move::Run>,
 }
 
 /// Move item `i` of `v` to position `to`, clamped to the end. Returns where it went; `None` when
@@ -421,10 +432,13 @@ impl Session {
         }
         let mut st = DocState::new(doc, path);
         st.history.max_states = self.prefs.get().performance.history_states.max(1) as usize;
-        st.history.max_bytes = self.prefs.get().performance.history_budget_bytes();
+        // Session-wide accounting replaces per-document trimming.
+        st.history.max_bytes = 0;
         self.docs.push(st);
         let i = self.docs.len() - 1;
         self.active = Some(i);
+        self.history_cache.dirty = true;
+        self.poll_history_cache();
         i
     }
 
@@ -446,6 +460,8 @@ impl Session {
                 _ => index.min(self.docs.len() - 1),
             })
         };
+        self.history_cache.dirty = true;
+        self.poll_history_cache();
         Some(d)
     }
 
@@ -490,11 +506,25 @@ impl Session {
 
     /// The command's own precondition for a call with `params` (their target filled in).
     fn precondition(&self, spec: &commands::CommandSpec, params: &Value) -> std::result::Result<(), String> {
+        if self.names_existing_layer(spec.id, params) {
+            return Ok(());
+        }
         channel_cmds::mask_target_enabled(self, spec.id, params).unwrap_or_else(|| (spec.enabled)(self))
+    }
+
+    /// Whether `id` is a layer command whose `"layer"` param names an existing layer, so it needs no
+    /// active layer (#2457). Matches how `layer_param` resolves the layer when the command runs.
+    fn names_existing_layer(&self, id: &str, params: &Value) -> bool {
+        matches!(id, "layer.hideLayers" | "layer.showLayers" | "layer.renameLayer")
+            && params.get("layer").and_then(Value::as_u64).is_some_and(|l| self.active().is_some_and(|st| st.doc.layer(LayerId(l)).is_some()))
     }
 
     /// Apply an undoable edit to the active document.
     pub fn edit<R>(&mut self, label: &str, f: impl FnOnce(&mut Document, &mut Option<LayerId>) -> Result<R>) -> Result<R> {
+        self.edit_with_cache(label, true, f)
+    }
+
+    pub(crate) fn edit_with_cache<R>(&mut self, label: &str, poll: bool, f: impl FnOnce(&mut Document, &mut Option<LayerId>) -> Result<R>) -> Result<R> {
         let restrict = self.color_restrict;
         let st = self.active_mut().ok_or(EngineError::NoDocument)?;
         let before = st.doc.clone();
@@ -519,16 +549,20 @@ impl Session {
         let key = self.coalesce_request.clone();
         let st = self.active_mut().ok_or(EngineError::NoDocument)?;
         let layers = st.layer_target();
+        st.history.clear_current_archive();
         if key.is_none() || st.coalesce != key || !st.history.can_undo() {
             st.history.set_current_layers(prior);
             st.history.record(label, before, layers);
-            st.history.trim(&st.doc);
         } else {
             st.history.set_current_layers(layers);
         }
         st.coalesce = key;
         st.revision += 1;
         st.last_damage = unchanged.then_some(photocraft_geom::Rect::EMPTY);
+        self.history_cache.dirty = true;
+        if poll {
+            self.poll_history_cache();
+        }
         Ok(r)
     }
 
@@ -593,52 +627,54 @@ impl Session {
         busy
     }
 
+    pub fn try_undo(&mut self) -> Result<bool> {
+        self.move_history(false)
+    }
+
+    pub fn try_redo(&mut self) -> Result<bool> {
+        self.move_history(true)
+    }
+
+    /// Legacy convenience API; errors remain available as a cache notice.
     pub fn undo(&mut self) -> bool {
-        // A background job is computing from the current state: it must not move under it.
-        if self.active_job().is_some() {
-            return false;
-        }
-        let Some(st) = self.active_mut() else { return false };
-        st.coalesce = None;
-        match st.history.undo(st.doc.clone()) {
-            Some((mut d, layers)) => {
-                // Save As changes file identity outside history, just like the saved path.
-                if d.name != st.doc.name {
-                    Arc::make_mut(&mut d).name.clone_from(&st.doc.name);
-                }
-                // Pixels this step can have touched, so the canvas recomposites only that
-                // (it recomposited everything before).
-                let damage = layer_multi_cmds::step_damage(&d, &st.doc);
-                st.doc = d;
-                restore_target(st, layers);
-                st.revision += 1;
-                st.last_damage = damage;
-                true
+        match self.try_undo() {
+            Ok(changed) => changed,
+            Err(error) => {
+                self.history_cache.notice = Some(error.to_string());
+                false
             }
-            None => false,
         }
     }
 
     pub fn redo(&mut self) -> bool {
-        if self.active_job().is_some() {
-            return false;
-        }
-        let Some(st) = self.active_mut() else { return false };
-        st.coalesce = None;
-        match st.history.redo(st.doc.clone()) {
-            Some((mut d, layers)) => {
-                if d.name != st.doc.name {
-                    Arc::make_mut(&mut d).name.clone_from(&st.doc.name);
-                }
-                let damage = layer_multi_cmds::step_damage(&st.doc, &d);
-                st.doc = d;
-                restore_target(st, layers);
-                st.revision += 1;
-                st.last_damage = damage;
-                true
+        match self.try_redo() {
+            Ok(changed) => changed,
+            Err(error) => {
+                self.history_cache.notice = Some(error.to_string());
+                false
             }
-            None => false,
         }
+    }
+
+    fn move_history(&mut self, redo: bool) -> Result<bool> {
+        if self.active_job().is_some() {
+            return Ok(false);
+        }
+        let Some(st) = self.active_mut() else { return Ok(false) };
+        let restored = if redo { st.history.try_redo(st.doc.clone()) } else { st.history.try_undo(st.doc.clone()) }.map_err(EngineError::Other)?;
+        let Some((mut doc, layers)) = restored else { return Ok(false) };
+        if doc.name != st.doc.name {
+            Arc::make_mut(&mut doc).name.clone_from(&st.doc.name);
+        }
+        let damage = layer_multi_cmds::step_damage(&st.doc, &doc);
+        st.coalesce = None;
+        st.doc = doc;
+        restore_target(st, layers);
+        st.revision += 1;
+        st.last_damage = damage;
+        self.history_cache.dirty = true;
+        self.poll_history_cache();
+        Ok(true)
     }
 }
 

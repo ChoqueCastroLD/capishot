@@ -295,6 +295,28 @@ fn current_text(app: &PhotocraftApp, id: LayerId) -> Option<String> {
     Some(text_layer(&app.session.active()?.doc, id)?.text.clone())
 }
 
+/// The selected characters, clamped after undo/redo may have shortened the text.
+pub(crate) fn selected_range(app: &PhotocraftApp) -> Option<[usize; 2]> {
+    let ed = app.ui.text_edit.as_ref()?;
+    let n = text_layer(&app.session.active()?.doc, LayerId(ed.layer))?.text.chars().count();
+    let (a, b) = (ed.caret.min(ed.anchor).min(n), ed.caret.max(ed.anchor).min(n));
+    (a < b).then_some([a, b])
+}
+
+/// Shared by the clipboard Cut event and Edit > Cut during a type edit.
+pub(crate) fn cut_selection(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let Some([a, b]) = selected_range(app) else { return };
+    let Some(ed) = app.ui.text_edit.as_ref() else { return };
+    let Some(st) = app.session.active() else { return };
+    let Some(text) = text_layer(&st.doc, LayerId(ed.layer)) else { return };
+    ctx.copy_text(text.text.chars().skip(a).take(b - a).collect());
+    if let Some(ed) = app.ui.text_edit.as_mut() {
+        ed.anchor = a;
+        ed.caret = b;
+    }
+    insert(app, "");
+}
+
 /// Replace the selection with `s`.
 fn insert(app: &mut PhotocraftApp, s: &str) {
     let Some(ed) = app.ui.text_edit.clone() else { return };
@@ -310,6 +332,53 @@ fn insert(app: &mut PhotocraftApp, s: &str) {
         e.caret = a + s.chars().count();
         e.anchor = e.caret;
     }
+}
+
+/// Typed text (not a paste): with Preferences ▸ Type ▸ Use Smart Quotes, straight quotes become
+/// typographic (Photoshop does not rewrite pasted text).
+fn insert_typed(app: &mut PhotocraftApp, s: &str) {
+    if !app.session.prefs().type_.smart_quotes {
+        return insert(app, s);
+    }
+    let prev = app.ui.text_edit.clone().and_then(|ed| {
+        let at = ed.caret.min(ed.anchor);
+        let text = current_text(app, LayerId(ed.layer))?;
+        (at > 0).then(|| text.chars().nth(at - 1)).flatten()
+    });
+    insert(app, &smart_quotes(s, prev));
+}
+
+/// Straight quotes become “ ” and ‘ ’: opening after whitespace, a bracket or a dash (or at the
+/// start of the text), closing next to a letter or another quote. `prev` is the character before
+/// the caret.
+fn smart_quotes(s: &str, mut prev: Option<char>) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        let c = match c {
+            '"' => {
+                if opens_quote(prev) {
+                    '\u{201c}'
+                } else {
+                    '\u{201d}'
+                }
+            }
+            '\'' => {
+                if opens_quote(prev) {
+                    '\u{2018}'
+                } else {
+                    '\u{2019}'
+                }
+            }
+            _ => c,
+        };
+        out.push(c);
+        prev = Some(c);
+    }
+    out
+}
+
+fn opens_quote(prev: Option<char>) -> bool {
+    prev.is_none_or(|p| p.is_whitespace() || matches!(p, '(' | '[' | '{' | '-' | '\u{2013}' | '\u{2014}'))
 }
 
 /// Alt+←/→: kern the pair before the caret by `by` (1/1000 em). No pair (caret at a text or line
@@ -454,20 +523,19 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
         };
         handled[k] = true;
         match ev {
-            egui::Event::Text(s) | egui::Event::Paste(s) => insert(app, s),
+            egui::Event::Text(s) => insert_typed(app, s),
+            egui::Event::Paste(s) => insert(app, s),
             // A bare line break from the IME is the Enter key, which the key arm handles.
             egui::Event::Ime(egui::ImeEvent::Preedit { text: s, .. } | egui::ImeEvent::Commit(s)) if s == "\n" || s == "\r" => handled[k] = false,
             egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => ime_update(app, text, false),
             egui::Event::Ime(egui::ImeEvent::Commit(s)) => ime_update(app, s, true),
             egui::Event::Ime(_) => {}
-            egui::Event::Copy | egui::Event::Cut => {
+            egui::Event::Copy => {
                 if a < b {
                     ctx.copy_text(text.chars().skip(a).take(b - a).collect());
-                    if matches!(ev, egui::Event::Cut) {
-                        insert(app, "");
-                    }
                 }
             }
+            egui::Event::Cut => cut_selection(app, ctx),
             egui::Event::Key { key, pressed: true, modifiers: m, .. } => {
                 use egui::Key;
                 let key = &flow_key(*key, vertical_flow);
@@ -892,6 +960,12 @@ fn target(app: &PhotocraftApp) -> Option<(u64, Option<[usize; 2]>)> {
     Some((id.0, None))
 }
 
+/// The type layer whose properties the Type controls and dialogs show (see [`target`]).
+pub(crate) fn target_text(app: &PhotocraftApp) -> Option<&TextLayer> {
+    let (id, _) = target(app)?;
+    text_layer(&app.session.active()?.doc, LayerId(id))
+}
+
 /// Snapshot the mutation scope separately from the representative used to display properties.
 /// An inline edit remains on its layer/range; layer selection formats every selected type layer.
 pub(crate) fn formatting_params(app: &PhotocraftApp) -> Option<serde_json::Value> {
@@ -918,6 +992,17 @@ fn shown_scale(app: &PhotocraftApp) -> f32 {
     if k.is_finite() && k > 1e-3 { k } else { 1.0 }
 }
 
+/// The display unit for type metrics (Preferences ▸ Units & Rulers ▸ Type): the multiplier from
+/// the model's points to the unit, and its label. Pixels follow the document's resolution.
+pub(crate) fn type_unit(app: &PhotocraftApp) -> (f32, &'static str) {
+    let dpi = app.session.active().map_or(72.0, |d| d.doc.resolution_dpi.max(1.0));
+    match app.session.prefs().units_and_rulers.type_units {
+        photocraft_engine::prefs::TypeUnit::Points => (1.0, "pt"),
+        photocraft_engine::prefs::TypeUnit::Pixels => (dpi / 72.0, "px"),
+        photocraft_engine::prefs::TypeUnit::Millimeters => (25.4 / 72.0, "mm"),
+    }
+}
+
 /// Coalesce key while a field is being scrubbed: every step of one drag shares one history step
 /// (Photoshop's single step per scrub, #124). Unique per press, so two drags are two steps.
 fn drag_key(ctx: &egui::Context) -> Option<String> {
@@ -938,6 +1023,20 @@ fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, props: serde_json::Value)
         p["coalesce"] = json!(key);
     }
     let _ = app.run("type.setStyle", p);
+}
+
+/// `props` aimed at the type target: its layer, the selected characters while typing, and the
+/// typing session's undo step. `None` without a type target.
+pub(crate) fn with_target(app: &PhotocraftApp, mut props: serde_json::Value) -> Option<serde_json::Value> {
+    let (layer, range) = target(app)?;
+    props["layer"] = json!(layer);
+    if let Some(r) = range {
+        props["range"] = json!(r);
+    }
+    if let Some(key) = app.ui.text_edit.as_ref().map(|ed| ed.session.clone()) {
+        props["coalesce"] = json!(key);
+    }
+    Some(props)
 }
 
 /// Open the shared Color Picker with a snapshot of the text target. Sampling or cancelling
@@ -972,7 +1071,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         Some((tl.font_family.clone(), run.as_ref().map(selected_style).unwrap_or_default(), size, styles_at(app).map_or(tl.color, |(c, _)| c.color)))
     });
     let o = app.ui.tool_options.clone();
-    let (mut fam, mut style, mut size) = match &shown {
+    let (mut fam, mut style, size) = match &shown {
         Some((f, s, z, _)) => (f.clone(), if s.is_empty() { "Regular".into() } else { s.clone() }, *z),
         None => (o.type_font.clone(), o.type_style.clone(), o.type_size),
     };
@@ -1001,7 +1100,10 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 22.0), egui::Sense::hover());
     crate::icons::paint(ui, r, "type", 13.0, t.icon);
-    if crate::widgets::value_field(ui, &mut size, 1.0..=1296.0, "pt", 66.0).changed() {
+    let (unit, label) = type_unit(app);
+    let mut display = size * unit;
+    if crate::widgets::value_field(ui, &mut display, unit..=1296.0 * unit, label, 66.0).changed() {
+        let size = display / unit;
         app.ui.tool_options.type_size = size;
         apply(app, ui.ctx(), json!({"size": size, "metricsAsShown": true}));
     }
@@ -1586,6 +1688,20 @@ mod tests {
         assert!(app.ui.text_edit.is_none());
     }
 
+    /// Preferences ▸ Units & Rulers ▸ Type switches the display unit of type metrics: points by
+    /// default, pixels by the document's resolution, or millimetres.
+    #[test]
+    fn type_unit_follows_the_units_and_rulers_preference() {
+        let mut app = app();
+        assert_eq!(type_unit(&app), (1.0, "pt"));
+        app.run("prefs.set", json!({"path": "unitsAndRulers.typeUnits", "value": "pixels"})).unwrap();
+        assert_eq!(type_unit(&app), (1.0, "px"), "a 72 ppi document: 1 pt is 1 px");
+        app.run("image.imageSize", json!({"resolution": 144, "resample": "none"})).unwrap();
+        assert_eq!(type_unit(&app), (2.0, "px"), "144 ppi: a point is two pixels");
+        app.run("prefs.set", json!({"path": "unitsAndRulers.typeUnits", "value": "mm"})).unwrap();
+        assert!((type_unit(&app).0 - 25.4 / 72.0).abs() < 1e-6, "millimetres ignore the resolution");
+    }
+
     /// Preferences ▸ Type ▸ Fill new type layers with placeholder text: off, a click creates an
     /// empty layer (nothing selected) and committing without typing removes it again.
     #[test]
@@ -1600,6 +1716,29 @@ mod tests {
         commit(&mut app);
         assert_eq!(app.session.active().unwrap().doc.layers.len(), 1, "an empty type layer is removed on commit");
         assert!(app.ui.text_edit.is_none());
+    }
+
+    /// Pure smart-quote mapping: opening after whitespace, a bracket or a dash, closing next to a
+    /// letter or another quote.
+    #[test]
+    fn smart_quotes_are_typographic() {
+        assert_eq!(smart_quotes("\"Hello\"", None), "\u{201c}Hello\u{201d}");
+        assert_eq!(smart_quotes("don't", None), "don\u{2019}t");
+        assert_eq!(smart_quotes("(\"x\")", None), "(\u{201c}x\u{201d})");
+        assert_eq!(smart_quotes("--'x'", None), "--\u{2018}x\u{2019}", "a dash stays a dash, the quote opens after it");
+        assert_eq!(smart_quotes("\"\"", None), "\u{201c}\u{201d}");
+    }
+
+    /// Preferences ▸ Type ▸ Use Smart Quotes switches typed quotes (typed text only, not paste).
+    #[test]
+    fn smart_quotes_preference_controls_typed_quotes() {
+        for (smart, expected) in [(true, "hi \u{201c}you\u{201d}"), (false, "hi \"you\"")] {
+            let mut app = app();
+            app.run("prefs.set", json!({"path": "type.smartQuotes", "value": smart})).unwrap();
+            pointer_up(&mut app, [50.0, 100.0], [50.0, 100.0]);
+            insert_typed(&mut app, "hi \"you\"");
+            assert_eq!(layer_text(&app), expected, "smartQuotes={smart}");
+        }
     }
 
     #[test]

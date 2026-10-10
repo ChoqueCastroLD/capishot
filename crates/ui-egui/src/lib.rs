@@ -24,6 +24,7 @@ pub mod analysis_ui;
 pub mod artboard_ui;
 pub(crate) mod blend_preview;
 mod brand;
+pub(crate) mod brush_cursor;
 pub mod brush_panel;
 pub mod brush_picker;
 pub mod brush_preview;
@@ -46,6 +47,7 @@ pub mod color_range_ui;
 pub mod comps_ui;
 pub mod control;
 pub mod credits;
+pub mod crop_mode;
 pub mod crop_overlay;
 pub mod crop_shield;
 pub mod crop_straighten;
@@ -62,6 +64,7 @@ pub mod enable_rules;
 pub mod eraser_ui;
 pub mod export_dialog;
 pub mod eyedropper_ui;
+pub mod field_tab;
 pub mod file_dialog;
 pub mod file_open;
 pub mod file_ui;
@@ -81,6 +84,7 @@ pub mod icons;
 pub mod jobs_ui;
 pub mod kys_import;
 pub mod lasso_ui;
+pub(crate) mod last_brush;
 pub mod layer_menu_ui;
 pub mod layer_pick_ui;
 pub mod layer_props_ui;
@@ -91,6 +95,7 @@ mod layer_transfer;
 pub mod layer_tree_ui;
 pub mod links;
 pub mod liquify_ui;
+pub mod lut_library_ui;
 pub mod magnetic_lasso_ui;
 mod mask_props_ui;
 pub mod mask_thumbs_ui;
@@ -109,6 +114,7 @@ mod opacity_keys;
 pub mod outline;
 pub mod paint_mouse;
 pub mod palette;
+mod panel_docking;
 pub mod panels;
 pub mod parity;
 pub mod patch_preview;
@@ -236,33 +242,42 @@ pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 pub type LoadTextFn = Box<dyn FnMut() -> Option<String>>;
 /// Persist the preferences text.
 pub type SaveTextFn = Box<dyn FnMut(&str) -> Result<(), String>>;
-/// Platform appearance when egui cannot detect it (for example, Wayland without a theme event).
 pub type SystemThemeFn = Box<dyn Fn(&egui::Context) -> Option<egui::Theme>>;
-/// Autosave a document snapshot for crash recovery: (snapshot, revision, original path).
-pub type AutosaveFn = Box<dyn FnMut(&std::sync::Arc<Document>, u64, Option<&str>) -> Result<(), String>>;
-/// Poll successful or failed background writes: (document id, revision, result).
-pub type AutosaveResultsFn = Box<dyn FnMut() -> Vec<(u64, u64, Result<(), String>)>>;
-/// Drop the recovery data of a document (by `DocId` value) once it is saved or closed.
-pub type DiscardAutosaveFn = Box<dyn FnMut(u64)>;
-/// List recoverable documents without decoding them. Their data stays until the documents are
-/// saved or closed; the shell runs each entry's loader on a background worker.
-pub type RecoverFn = Box<dyn FnMut() -> Vec<Recoverable>>;
-/// Photoshop's own keyboard shortcut set on this machine, as (source path, `.kys` XML text):
-/// the newest install's live `Keyboard Shortcuts.psp` on the desktop, `None` without one.
 pub type PhotoshopShortcutsFn = Box<dyn FnMut() -> Option<(String, String)>>;
-/// A recovered document (by `DocId` value, once open) takes over its recovery entry (by key):
-/// its autosaves replace the entry, and saving or closing it drops the entry.
-pub type AdoptAutosaveFn = Box<dyn FnMut(u64, &str)>;
-
-/// A recovery entry [`RecoverFn`] found; its loader owns only the data it needs to read.
 pub struct Recoverable {
-    /// The recovery entry to adopt once loading succeeds (see [`AdoptAutosaveFn`]).
     pub key: String,
     pub name: String,
-    /// Where the user last saved it, if anywhere.
     pub path: Option<String>,
-    pub load: Box<dyn FnOnce() -> Result<Document, String> + Send + 'static>,
+    pub load: Box<dyn FnOnce() -> Result<RecoveredDocument, String> + Send + 'static>,
 }
+pub type RecoveryDiscovery = Box<dyn FnOnce() -> (Vec<Recoverable>, Vec<String>) + Send>;
+pub type DiscoverRecoveryFn = Box<dyn FnMut() -> RecoveryDiscovery>;
+/// Queue an immutable document/history checkpoint. Success means accepted, not saved.
+pub type AutosaveFn =
+    Box<dyn FnMut(&std::sync::Arc<Document>, photocraft_ops::HistoryCheckpoint, u64, Option<&str>, Option<&str>, serde_json::Value) -> Result<(), String>>;
+/// Retire a closed document's checkpoint off the UI thread; inherited keys remain owned until completion.
+pub type DiscardAutosaveFn = Box<dyn FnMut(u64, Option<&str>) -> Result<(), String>>;
+pub struct AutosaveCompletion {
+    pub document_id: u64,
+    pub revision: u64,
+    pub result: Result<(), String>,
+    pub retired: bool,
+}
+pub type PollAutosaveFn = Box<dyn FnMut() -> Vec<AutosaveCompletion>>;
+pub struct RecoveredDocument {
+    pub key: String,
+    pub path: Option<String>,
+    pub document: Document,
+    pub history: Option<photocraft_ops::HistoryCheckpoint>,
+    pub context: serde_json::Value,
+}
+#[derive(Default)]
+pub struct RecoveryBatch {
+    pub documents: Vec<RecoveredDocument>,
+    pub errors: Vec<String>,
+}
+/// Load recoverable checkpoints without consuming their durable originals.
+pub type RecoverFn = Box<dyn FnMut() -> RecoveryBatch>;
 /// Append text to a file (History Log).
 pub type AppendTextFn = Box<dyn FnMut(&str, &str) -> Result<(), String>>;
 /// Requests from the operating system since the last call (see [`OsEvent`]).
@@ -274,6 +289,9 @@ pub type CursorPosFn = Box<dyn FnMut(&egui::Context) -> Option<egui::Pos2>>;
 /// Whether Caps Lock is toggled on, read from the OS. `None` where the platform cannot
 /// report it (native Wayland): the cursor then follows the cursor preference (#1758).
 pub type CapsLockFn = Box<dyn FnMut() -> bool>;
+/// Keeps an undecorated window's OS frame from offsetting its content and pointer (#2246).
+/// Called once per frame; `None` when the window is decorated or the platform needs no fixing.
+pub type WindowFrameFn = Box<dyn FnMut()>;
 
 /// Platform services injected by the app binary (file dialogs, codecs), keeping this crate free of
 /// I/O dependencies.
@@ -324,11 +342,10 @@ pub struct Services {
     pub xwayland_command: Option<String>,
     /// Crash-recovery autosave (Preferences › File Handling) and recovery at launch.
     pub autosave: Option<AutosaveFn>,
-    /// None for services that report synchronous success through `autosave`.
-    pub autosave_results: Option<AutosaveResultsFn>,
     pub discard_autosave: Option<DiscardAutosaveFn>,
+    pub poll_autosave: Option<PollAutosaveFn>,
     pub recover: Option<RecoverFn>,
-    pub adopt_autosave: Option<AdoptAutosaveFn>,
+    pub discover_recovery: Option<DiscoverRecoveryFn>,
     /// History Log text file output.
     pub append_text: Option<AppendTextFn>,
     /// OS requests (macOS open-documents / quit Apple events), polled every frame.
@@ -339,6 +356,10 @@ pub struct Services {
     /// Caps Lock toggled on (desktop; `None` on Wayland and the web). Read once per frame, so
     /// the canvas can show the precise crosshair for painting tools, whatever the preference.
     pub caps_lock: Option<CapsLockFn>,
+    /// Keeps the undecorated window borderless, so the content and the pointer stay aligned
+    /// (Windows custom title bar, #2246). Called once per frame; `None` when the window is
+    /// decorated or the platform needs no fixing.
+    pub window_frame: Option<WindowFrameFn>,
     /// The persistent brush preset store, loading in the background (desktop; see
     /// `photocraft_engine::preset_store`). Attached to the session once it arrives; without
     /// one, brush presets are session-only unless the shell attached a store before startup.
@@ -385,6 +406,8 @@ pub struct PhotocraftApp {
     live_stroke: Option<canvas::LiveStroke>,
     /// Footprint trail of a retouching drag (see `stroke_trail`).
     trail: Option<stroke_trail::Trail>,
+    /// The open menus' items, reused between frames (`menus::ItemCache`).
+    pub(crate) menu_cache: Option<menus::ItemCache>,
     /// Move tool drag shown live (`move_ui`).
     pub(crate) move_preview: Option<move_ui::MovePreview>,
     /// A blend mode hovered in the Layers panel, shown live (`blend_preview`).
@@ -446,9 +469,10 @@ pub struct PhotocraftApp {
     fonts_ready: bool,
     /// Screen rect of the main canvas last frame (for overlays and the navigator).
     pub last_canvas_rect: egui::Rect,
-    /// Physical pixels per egui point of the canvas last frame (`ctx.pixels_per_point`). The
-    /// canvas maps document pixels to physical pixels, so point-space geometry divides the view
-    /// zoom by this (see [`Self::point_zoom`]).
+    /// Physical pixels per egui point of the canvas last frame (`ctx.pixels_per_point`, which
+    /// folds in both the display scale and Interface › UI Scale). The canvas maps document pixels
+    /// to physical pixels, so point-space geometry divides the view zoom by this (see
+    /// [`Self::point_zoom`]).
     pub ppp: f32,
     /// The document area showing the active document's canvas last frame (not the tabs, the
     /// start screen or an opening file's card): files dropped here are placed as layers.
@@ -554,6 +578,9 @@ pub struct PhotocraftApp {
     pub(crate) file_dialog: Option<file_dialog::Pending>,
     /// A Save As to a layered TIFF parked behind the TIFF Options prompt (see `tiff_options_ui`).
     pub(crate) tiff_options: Option<tiff_options_ui::Prompt>,
+    /// Where each document was last saved or exported to through a dialog (#1826): its next Save
+    /// As or export dialog starts there rather than beside the document. Session-only.
+    pub(crate) save_dirs: HashMap<photocraft_doc::DocId, std::path::PathBuf>,
     /// Set once the user has agreed to quit, so the resulting close request goes through.
     pub(crate) allow_close: bool,
     /// Pen pressure/tilt from the platform (see `stylus`).
@@ -583,6 +610,7 @@ impl PhotocraftApp {
             tool_override: None,
             live_stroke: None,
             trail: None,
+            menu_cache: None,
             move_preview: None,
             blend_preview: None,
             patch_preview: None,
@@ -664,6 +692,7 @@ impl PhotocraftApp {
             discard: None,
             file_dialog: None,
             tiff_options: None,
+            save_dirs: HashMap::new(),
             allow_close: false,
             stylus: Default::default(),
             background_jobs: false,
@@ -800,7 +829,9 @@ impl PhotocraftApp {
         } else {
             jobs_ui::run(self, id, params)
         };
-        if r.is_ok() && ADDS_LAYER_MASK.contains(&id) {
+        let creates_adjustment_or_fill =
+            id.starts_with("layer.newAdjustmentLayer.") || id.starts_with("layer.newFillLayer.");
+        if r.is_ok() && (ADDS_LAYER_MASK.contains(&id) || creates_adjustment_or_fill) {
             // Adding a layer mask targets it, as in Photoshop (#2166).
             self.ui.mask_target = true;
             self.ui.vector_mask_target = false;
@@ -1291,6 +1322,11 @@ impl eframe::App for PhotocraftApp {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // An undecorated window gets its caption back when the toolkit changes its flags
+        // (maximize, restore, …): take it off again before the frame is laid out (#2246).
+        if let Some(window_frame) = self.services.window_frame.as_mut() {
+            window_frame();
+        }
         // Native menu key equivalents become the key presses they were (see `native_menu`).
         if let Some(menu) = self.services.native_menu.as_mut() {
             menu.raw_input(raw_input);
@@ -1315,6 +1351,7 @@ impl eframe::App for PhotocraftApp {
             self.automation_input = false;
             return;
         }
+        lut_library_ui::end_stale_preview(self, &ctx);
         let t0 = gpu_canvas::now_ms();
         // Each painting tool keeps its own brush (#218), so switch the active tool's brush in
         // before anything this frame reads it (the cursor, the options bar, a stroke).
@@ -1392,6 +1429,8 @@ impl eframe::App for PhotocraftApp {
         // remembered once the pointer is up. Here, after every panel, rather than in the
         // picker's own code: the control channel can set it while the picker is closed.
         brush_picker::persist(self, &ctx);
+        // The tool's brush (settings and tip references) is remembered the same way.
+        last_brush::persist(self, &ctx);
         self.automation_input = false;
         native_menu::sync(self, &ctx);
         if screen_picker::busy(&ctx) {
@@ -1454,7 +1493,7 @@ impl PhotocraftApp {
     /// Viewing a layer mask (#196) targets it; a vector-mask target needs a vector mask on the
     /// active layer (a shape layer's path is its content, not a mask). Targeting a mask or the
     /// pixels brings back that target's foreground/background pair, as in Photoshop (#2166).
-    fn sync_mask_targets(&mut self) {
+    pub(crate) fn sync_mask_targets(&mut self) {
         if let Some(st) = self.session.active() {
             if photocraft_engine::mask_view_cmds::current(st).is_some() {
                 self.ui.mask_target = true;
@@ -1872,6 +1911,9 @@ impl PhotocraftApp {
 }
 
 #[cfg(test)]
+mod color_swatch_tests;
+
+#[cfg(test)]
 mod input_tests;
 
 #[cfg(test)]
@@ -1887,6 +1929,9 @@ mod save_identity_tests;
 mod move_auto_select_tests;
 
 #[cfg(test)]
+mod move_outline_tests;
+
+#[cfg(test)]
 mod mask_thumb_refresh_tests;
 
 #[cfg(test)]
@@ -1897,6 +1942,9 @@ mod hidden_layer_tests;
 
 #[cfg(test)]
 mod blend_dropdown_keys_tests;
+
+#[cfg(test)]
+mod warp_text_dialog_tests;
 
 #[cfg(test)]
 mod blend_dropdown_wheel_tests;
@@ -1920,6 +1968,9 @@ mod stroke_timing_tests;
 
 #[cfg(test)]
 mod polygon_lasso_tests;
+
+#[cfg(test)]
+mod window_frame_tests;
 
 #[cfg(test)]
 mod clipboard_tests {

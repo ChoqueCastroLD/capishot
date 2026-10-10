@@ -120,11 +120,7 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
             })
         }
         Adjustment::Levels { space, .. } | Adjustment::Curves { space, .. } => {
-            let luts = tone_luts_depth(adj, depth);
-            match space {
-                ToneSpace::Rgb => map_rgb(buf, |c| std::array::from_fn(|i| lut(&luts[i], c[i]))),
-                ToneSpace::Cmyk | ToneSpace::Lab => map_rgb(buf, |c| tone_in_space(*space, &luts, c)),
-            }
+            apply_tone(buf, *space, &tone_luts_depth(adj, depth));
         }
         Adjustment::HueSaturation { hue, saturation, lightness, colorize, ranges } => {
             let table = (!*colorize && ranges.iter().any(|r| !r.is_neutral())).then(|| hue_range_tables(ranges));
@@ -218,6 +214,13 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
     }
 }
 
+pub(crate) fn apply_tone(buf: &mut Buffer, space: ToneSpace, luts: &[Vec<f32>; 4]) {
+    match space {
+        ToneSpace::Rgb => map_rgb(buf, |c| std::array::from_fn(|i| lut(&luts[i], c[i]))),
+        ToneSpace::Cmyk | ToneSpace::Lab => map_rgb(buf, |c| tone_in_space(space, luts, c)),
+    }
+}
+
 /// Per-channel LUTs of a Levels or Curves adjustment: each channel's record first, then the
 /// master (composite) record, as Photoshop does (psd-tools levels_rgb.psd and curves_rgb.psd,
 /// #975). Four rows: the three `per_channel` channels then black
@@ -308,7 +311,7 @@ pub fn hue_saturation(c: [f32; 3], hue: f32, s: f32, l: f32, colorize: bool) -> 
     let (mut hh, mut ss, ll) = rgb_to_hsl(c);
     if colorize {
         hh = hue.rem_euclid(360.0) / 360.0;
-        ss = s.abs().max(0.25);
+        ss = s.clamp(0.0, 1.0);
     } else {
         hh = (hh + hue / 360.0).rem_euclid(1.0);
         ss = (ss * (1.0 + s)).clamp(0.0, 1.0);

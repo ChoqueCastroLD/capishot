@@ -20,6 +20,7 @@
 //! `--right-click-at X,Y` opens a screen-space context menu after the script, including panel
 //! and document-tab menus that are outside the document-coordinate control pointer.
 //! `--click-at X,Y` opens a screen-space menu (for example the top Select menu) after the script.
+//! `--drag-from X,Y --drag-to X,Y` captures a screen-space drag with the button held.
 
 use photocraft_ui_egui::control::{ControlRequest, Outcome, handle};
 use photocraft_ui_egui::{PhotocraftApp, Services};
@@ -40,7 +41,7 @@ fn main() {
     let script: Vec<(String, Value)> =
         arg(&args, "--script").map(|s| serde_json::from_str::<Vec<(String, Value)>>(&s).expect("--script must be [[method, params], …]")).unwrap_or_default();
 
-    let services = Services {
+    let mut services = Services {
         import: Some(Box::new(|name: &str, bytes: &[u8], depth: usize| {
             photocraft_io::import_with_svg_group_depth(name, bytes, depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
         })),
@@ -58,6 +59,30 @@ fn main() {
         write: Some(Box::new(|path: &str, bytes: &[u8]| photocraft_format::atomic_write(std::path::Path::new(path), bytes).map_err(|e| e.to_string()))),
         ..Default::default()
     };
+    // Exercise the actual autosave error/status path without a server or window.
+    let recovery_error = arg(&args, "--recovery-error");
+    if let Some(error) = recovery_error.clone() {
+        services.autosave = Some(Box::new(move |_, _, _, _, _, _| Err(error.clone())));
+    }
+    if let Some(dir) = arg(&args, "--recover-dir") {
+        services.recover = Some(Box::new(move || {
+            let (entries, errors) = photocraft_format::list_recovery_checked(std::path::Path::new(&dir));
+            let mut batch = photocraft_ui_egui::RecoveryBatch { documents: Vec::new(), errors };
+            for entry in entries {
+                match photocraft_format::recover_checkpoint_with_context(&entry) {
+                    Ok((document, history, context)) => batch.documents.push(photocraft_ui_egui::RecoveredDocument {
+                        key: entry.info.key,
+                        path: entry.info.original_path,
+                        document,
+                        history: Some(history),
+                        context,
+                    }),
+                    Err(error) => batch.errors.push(error.to_string()),
+                }
+            }
+            batch
+        }));
+    }
     let open = arg(&args, "--open");
     let safe_gpu = args.iter().any(|a| a == "--safe-gpu");
     // `--background-jobs`: long commands run as background jobs, as in the desktop app (#210).
@@ -148,6 +173,20 @@ fn main() {
         harness.step();
         harness.event(egui::Event::PointerButton { pos, button, pressed: false, modifiers: egui::Modifiers::NONE });
         harness.run_steps(4);
+    }
+    let point = |name| arg(&args, name).and_then(|s| s.split_once(',').and_then(|(x, y)| Some(egui::pos2(x.parse().ok()?, y.parse().ok()?))));
+    if let (Some(from), Some(to)) = (point("--drag-from"), point("--drag-to")) {
+        harness.event(egui::Event::PointerMoved(from));
+        harness.step();
+        harness.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        harness.step();
+        for step in 1..=6 {
+            harness.event(egui::Event::PointerMoved(from.lerp(to, step as f32 / 6.0)));
+            harness.step();
+        }
+    }
+    if recovery_error.is_some() {
+        photocraft_ui_egui::prefs_ui::autosave_now(harness.state_mut());
     }
     let t_settle = std::time::Instant::now();
     while t_settle.elapsed() < std::time::Duration::from_millis(settle_ms) {

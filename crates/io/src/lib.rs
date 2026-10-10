@@ -38,6 +38,7 @@ pub mod blocks;
 mod channel_map;
 pub mod comps_map;
 pub mod effects_map;
+pub mod exr_parts;
 mod flat;
 mod gradient_bake;
 pub mod linked;
@@ -60,11 +61,11 @@ pub mod tiff_layers;
 pub mod vector_map;
 
 use photocraft_codecs::{CodecError, EncodeOptions};
-use photocraft_doc::Document;
+use photocraft_doc::{ColorMode, Document, Layer};
 use photocraft_psd::{PsdError, PsdFile};
 
 pub use adjust_map::ADJUSTMENT_KEYS;
-pub use flat::{document_to_image, import_tiff_page};
+pub use flat::{document_to_image, import_tiff_page, tga_alpha_channel_to_transparency};
 pub use psd_export::{PsdExportOptions, document_to_psd, document_to_psd_with};
 pub use psd_import::{psd_to_document, psd_to_document_with};
 
@@ -183,6 +184,31 @@ pub fn is_psd(bytes: &[u8]) -> bool {
 /// else is decoded with `photocraft-codecs`.
 pub fn import(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
     import_with_svg_group_depth(name, bytes, photocraft_doc::MAX_GROUP_DEPTH)
+}
+
+/// Imports a deep OpenEXR file (`deepscanline`/`deeptile`) **with its depth data**: the
+/// document holds one [`photocraft_doc::LayerContent::Deep`] layer that depth-composites
+/// (samples sorted by Z, front-to-back) wherever it is rendered. `import` opens the same
+/// files flattened; this is the entry point for keeping deep data around (stacking deep
+/// layers, editing with depth).
+pub fn import_deep_exr(name: &str, bytes: &[u8], limits: &photocraft_codecs::Limits) -> Result<ImportResult, IoError> {
+    let img = photocraft_codecs::decode_deep_exr(bytes, limits)?;
+    let stem = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let stem = stem.strip_suffix(".exr").unwrap_or(stem);
+    let mut doc = Document::new(stem, photocraft_doc::Size::new(img.width, img.height), ColorMode::Rgb, photocraft_color::SampleType::F32);
+    doc.layers.clear();
+    doc.layers.push(Layer::new(
+        stem,
+        photocraft_doc::LayerContent::Deep(photocraft_doc::DeepData {
+            x: 0,
+            y: 0,
+            width: img.width,
+            height: img.height,
+            channels: img.channels.into_iter().map(|c| photocraft_doc::DeepChannel { name: c.name, samples: c.samples }).collect(),
+            counts: img.counts,
+        }),
+    ));
+    Ok(ImportResult { document: doc, warnings: Vec::new(), source_read_only: false, preview_only: false })
 }
 
 /// [`import`] for a background open: checks `ctl` between stages (and per layer for PSD/PSB) and
@@ -319,8 +345,42 @@ pub fn export(doc: &Document, name_or_ext: &str, opts: &ExportOptions) -> Result
 /// with the document pixel model and un-matted from white (Photoshop mattes
 /// the merged image of transparent documents). Used as the compositing oracle.
 pub fn merged_composite(file: &PsdFile) -> Result<Vec<[f32; 4]>, IoError> {
-    let img = file.composite_rgba8().ok();
     let h = &file.header;
+    h.validate()?;
+    if h.color_mode == photocraft_psd::ColorMode::Rgb && file.merged_has_alpha() {
+        // Preserve native sample precision before removing the white matte.
+        let raw = file.decode_merged()?;
+        let plane = raw.len() / usize::from(h.channels);
+        let planes = raw
+            .chunks_exact(plane)
+            .take(4)
+            .map(|bytes| match h.depth {
+                32 => Ok(photocraft_psd::pixels::samples_f32(bytes)),
+                16 => Ok(photocraft_psd::pixels::samples_u16(bytes).into_iter().map(|v| f32::from(v) / 65535.0).collect()),
+                _ => photocraft_psd::pixels::plane_to_u8(bytes, h.depth, h.width as usize, h.height as usize)
+                    .map(|values| values.into_iter().map(|v| f32::from(v) / 255.0).collect()),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let [r, g, b, a] = planes.as_slice() else { return Err(PsdError::Invalid("missing RGB composite channels".into()).into()) };
+        return Ok(r
+            .iter()
+            .zip(g)
+            .zip(b)
+            .zip(a)
+            .map(|(((&r, &g), &b), &a)| {
+                let mut pixel = [r, g, b, a];
+                let alpha = pixel[3];
+                for c in pixel.iter_mut().take(3) {
+                    *c = pixels::unmatte(*c, alpha, 1.0);
+                    if h.depth != 32 {
+                        *c = c.clamp(0.0, 1.0);
+                    }
+                }
+                pixel
+            })
+            .collect());
+    }
+    let img = file.composite_rgba8().ok();
     // CMYK goes through the colour-managed model conversion (the PSD crate's RGBA preview is a
     // naive, profile-free conversion).
     if let (Some(img), false) = (img, matches!(h.color_mode, photocraft_psd::ColorMode::Lab | photocraft_psd::ColorMode::Cmyk)) {

@@ -37,7 +37,13 @@
 	(coming soon)	(bientôt disponible)
 	New…	Nouveau…
 	Open…	Ouvrir…
+	Open as Deep…	Ouvrir en profondeur…
 	Open As…	Ouvrir en tant que…
+	Open EXR Parts…	Ouvrir les parties EXR…
+	Add beauty precomp from the AOVs	Ajouter la précomposition de la beauté depuis les AOV
+	Both	Les deux
+	Left	Gauche
+	Right	Droite
 	Open Recent	Ouvrir un fichier récent
 	Clear Recent Files	Effacer la liste des fichiers récents
 	Close	Fermer
@@ -87,6 +93,8 @@
 	Import	Importer
 	Browse…	Parcourir…
 	Reveal in Finder	Afficher dans le Finder
+	Show in Explorer	Afficher dans l'Explorateur
+	Show in Folder	Afficher dans le dossier
 	File Info…	Informations sur le fichier…
 	Print…	Imprimer…
 	Print One Copy	Imprimer un exemplaire
@@ -722,6 +730,22 @@
 	+ Add variable	+ Ajouter une variable
 	30 frames @ 30 fps	30 images à 30 i/s
 	3D LUT File	Fichier LUT 3D
+	Install Pack…	Installer un pack…
+	Remove Pack	Retirer le pack
+	Built-in	Intégrés
+	Favorites	Favoris
+	Duplicate of	Doublon de
+	3D cube	Cube 3D
+	1D cube	Cube 1D
+	LUT look	Look LUT
+	{kind}, size {n}	{kind}, taille {n}
+	Title: {title}	Titre : {title}
+	Declares an input range other than 0 to 1	Déclare une plage d'entrée différente de 0 à 1
+	The name suggests a technical conversion, not a creative look	Le nom évoque une conversion technique, pas un look créatif
+	LUTs installed into {pack}: {n}	LUT installés dans {pack} : {n}
+	{n} skipped	{n} ignorés
+	{n} already installed	{n} déjà installés
+	Choosing a folder is not available here; use the lut.installPack command	Le choix d'un dossier n'est pas disponible ici ; utilisez la commande lut.installPack
 	Absolute	Absolu
 	Absolute Colorimetric	Colorimétrie absolue
 	Action	Action
@@ -788,6 +812,9 @@
 	Bend:	Courbure :
 	Bicubic	Bicubique
 	Bicubic (smooth gradients)	Bicubique (dégradés lisses)
+	Automatic	Automatique
+	Bicubic Smoother (enlargement)	Bicubique plus lisse (agrandissement)
+	Bicubic Sharper (reduction)	Bicubique plus net (réduction)
 	Bilinear	Bilinéaire
 	Black	Noir
 	Black & White	Noir et blanc
@@ -798,7 +825,6 @@
 	Blending Options	Options de fusion
 	Blue	Bleu
 	Blue, Red, Yellow	Bleu, rouge, jaune
-	Both	Les deux
 	Both Axes	Deux axes
 	Bottom	Bas
 	Brightness	Luminosité
@@ -1016,6 +1042,7 @@
 	Filter for pixel layers	Filtrer les calques de pixels
 	Filter for shape layers	Filtrer les calques de forme
 	Filter for smart objects	Filtrer les objets intelligents
+	Filter for deep layers	Filtrer les calques de profondeur
 	Filter for type layers	Filtrer les calques de texte
 	Filter:	Filtre :
 	Finger Painting	Peinture au doigt
@@ -1111,7 +1138,6 @@
 	Leading	Interlignage
 	Leading (set to the font size × auto-leading when Auto)	Interlignage (en Auto : taille de police × interlignage automatique)
 	Leave as is (don't color manage)	Laisser tel quel (sans gestion des couleurs)
-	Left	Gauche
 	Left align text	Aligner le texte à gauche
 	Length:	Longueur :
 	Level	Niveau
@@ -1321,7 +1347,6 @@
 	Restore All	Tout restaurer
 	Restore Defaults	Rétablir les valeurs par défaut
 	Restrictive (Web)	Restrictive (Web)
-	Right	Droite
 	Right align text	Aligner le texte à droite
 	Rigid	Rigide
 	Rotate:	Rotation :
@@ -2649,6 +2674,7 @@ cameraRaw	Blending	Fusion
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Sélecteur de couleurs (Couleur du texte)
+	Color Picker ({name})	Sélecteur de couleurs ({name})
 	Color Picker (Fill Color)	Sélecteur de couleurs (Couleur de remplissage)
 	Fill color	Couleur de remplissage
 	Color Picker (Stroke Color)	Sélecteur de couleurs (Couleur du contour)
@@ -2821,7 +2847,26 @@ fontWeight	Italic	Italique
 	Dash offset	Décalage des tirets
 	Open paths use centered strokes	Les tracés ouverts utilisent des contours centrés
 	Use finite lengths and a positive pattern total	Utiliser des longueurs finies et un total de motif positif
+
+# Undo cache budgets
+	Budget mb	Budget (MiB)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	Les pixels des documents, les données intégrées et l’historique d’annulation partagent le budget mémoire. La mémoire est allouée selon les besoins ; les autres usages de l’application s’y ajoutent.
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	L’espace disque pour l’annulation est utilisé selon les besoins, dans cette limite. Zéro désactive le cache disque. Les chemins des disques de travail s’appliquent à la prochaine session de cache.
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Cette version navigateur conserve l’historique d’annulation en mémoire. Les réglages des disques de travail concernent l’application de bureau.
+	Memory budget (MiB)	Budget mémoire (MiB)
+	Undo disk budget (MiB)	Budget disque pour l’annulation (MiB)
 	No subject found — try Object Selection or the Lasso	Aucun sujet trouvé — essayez la Sélection d'objet ou le Lasso
 	Quick Selection found nothing there	La Sélection rapide n'a rien trouvé à cet endroit
 	Object Selection found nothing there — try a tighter rectangle	La Sélection d'objet n'a rien trouvé à cet endroit — essayez un rectangle plus serré
 	No subject found — try a rectangle around the object	Aucun sujet trouvé — essayez un rectangle autour de l'objet
+	Next Document	Document suivant
+	Previous Document	Document précédent
+	Appearance Settings…	Réglages d’apparence…
+	Add to favorites	Ajouter aux favoris
+	Remove from favorites	Retirer des favoris
+	Capishot — Screen Color Picker	Capishot — Sélecteur de couleur d'écran
+	Float Panel	Détacher le panneau
+	Float Panel Group	Détacher le groupe de panneaux
+	Dock Panel Group	Ancrer le groupe de panneaux
+	Use Classic Mode	Utiliser le mode classique
+	Auto Center Preview	Centrer automatiquement l'aperçu

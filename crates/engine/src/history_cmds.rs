@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, int};
-use crate::image_cmds::for_each_layer;
+use crate::image_cmds::reidentify_copied_layers;
 use crate::{EngineError, Result, Session};
 
 fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
@@ -40,7 +40,7 @@ fn delete_state(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Step back to the state before `i`; the steps from `i` on are then redo states.
     for _ in i..=current {
-        if !s.undo() {
+        if !s.try_undo()? {
             return Err(EngineError::Other("the history can't step back right now".into()));
         }
     }
@@ -56,7 +56,7 @@ fn new_document(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "history.newDocument";
     let (i, current) = state_index(s, CMD, p)?;
     let st = s.active().ok_or(EngineError::NoDocument)?;
-    let src = if i == current { Some(st.doc.clone()) } else { st.history.state(i) };
+    let src = if i == current { Some(st.doc.clone()) } else { st.history.try_state(i).map_err(EngineError::Other)? };
     let src = src.ok_or_else(|| bad(CMD, format!("state {i} is not held")))?;
     let label = st.history.entries().get(i).cloned().unwrap_or_default();
     let mut doc = (*src).clone();
@@ -66,7 +66,7 @@ fn new_document(s: &mut Session, p: &Value) -> Result<Value> {
         _ if !label.trim().is_empty() => label,
         _ => format!("{} copy", doc.name),
     };
-    for_each_layer(&mut doc.layers, &mut |l| l.id = photocraft_doc::LayerId::fresh());
+    reidentify_copied_layers(&mut doc);
     let name = doc.name.clone();
     let index = s.add_document(doc, None);
     Ok(json!({ "document": index, "name": name }))

@@ -7,20 +7,23 @@
 //! change them with `prefs.get` / `prefs.set`); this module only edits a working copy in a dialog
 //! and commits it with those commands on Apply or OK.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use egui::{Color32, RichText, Sense, vec2};
 use photocraft_doc::DocId;
 use photocraft_engine::jobs::{JobEvent, JobId, JobOutcome, Started};
 #[cfg(test)]
 use photocraft_engine::prefs::Theme;
-use photocraft_engine::prefs::{self, AppearanceMode, DarkTheme, LightTheme, SECTIONS};
+use photocraft_engine::prefs::{self, AppearanceMode, DarkTheme, LightTheme, SECTIONS, Theme as SavedTheme};
 use photocraft_engine::snap::{SnapLine, SnapTargets};
 use serde_json::{Map, Value, json};
 
 use crate::PhotocraftApp;
 use crate::state::DialogKind;
 use crate::theme::{ThemeKind, Tokens};
+
+#[cfg(not(target_arch = "wasm32"))]
+type DiscoveryResult = std::sync::Arc<std::sync::Mutex<Option<(Vec<crate::Recoverable>, Vec<String>)>>>;
 
 /// Shell runtime state for preferences, autosave and snapping (not serialised).
 #[derive(Default)]
@@ -32,13 +35,21 @@ pub struct Runtime {
     saved_value: Option<Value>,
     save_retry: SaveRetry,
     next_autosave_ms: f64,
-    /// Last revision whose recovery file was actually written successfully.
-    autosaved: HashMap<DocId, u64>,
-    /// Queued writes must not masquerade as durable snapshots.
-    autosave_pending: HashMap<DocId, u64>,
     recovery_started: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    discovery_pending: Option<JobId>,
+    #[cfg(not(target_arch = "wasm32"))]
+    discovery_result: DiscoveryResult,
     recovery_queue: VecDeque<crate::Recoverable>,
     recovery_pending: Option<(JobId, String)>,
+    autosaved: HashMap<DocId, CheckpointStamp>,
+    pending_autosaves: HashMap<DocId, CheckpointStamp>,
+    recovery_keys: HashMap<DocId, String>,
+    retiring: HashSet<DocId>,
+    catch_up: HashSet<DocId>,
+    retry_after: HashMap<DocId, f64>,
+    recovery_error: Option<String>,
+    autosave_errors: HashMap<DocId, String>,
     log_len: usize,
     /// Snapping state of the drag in progress (see `snap_ui`).
     pub(crate) snap: Option<crate::snap_ui::ActiveSnap>,
@@ -48,6 +59,41 @@ pub struct Runtime {
     pub(crate) checker_key: Option<[[u8; 3]; 2]>,
     /// Style last sent to the GPU canvas.
     pub(crate) gpu_style: Option<crate::gpu_canvas::CanvasStyle>,
+}
+
+/// Logical history changes such as Purge can occur without a document revision.
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct CheckpointStamp {
+    revision: u64,
+    undo: usize,
+    redo: usize,
+    label: String,
+    context: Value,
+    path: Option<String>,
+}
+impl CheckpointStamp {
+    fn of(st: &photocraft_engine::DocState, context: Value) -> Self {
+        let (undo, redo, label) = st.history.checkpoint_signature();
+        Self { revision: st.revision, undo, redo, label: label.to_owned(), context, path: st.path.clone() }
+    }
+}
+
+/// Durable navigation context, excluding unfinished gestures and modal dialogs.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct RecoveryContext {
+    active_layer: Option<photocraft_doc::LayerId>,
+    selected_layers: Vec<photocraft_doc::LayerId>,
+    layer_anchor: Option<photocraft_doc::LayerId>,
+    view: Option<crate::state::View>,
+    tool: Option<crate::state::Tool>,
+    tab_order: usize,
+    active: bool,
+}
+fn recovery_context(app: &PhotocraftApp, index: usize, st: &photocraft_engine::DocState) -> Value {
+    json!({"activeLayer": st.active_layer, "selectedLayers": st.selected_layers,
+        "layerAnchor": st.layer_anchor, "view": app.ui.views.get(index), "tool": app.ui.tool,
+        "tabOrder": index, "active": app.session.active_index() == Some(index)})
 }
 
 /// The GPU canvas colours from Preferences › Transparency & Gamut.
@@ -118,6 +164,50 @@ pub(crate) fn cycle_appearance(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
+const LIGHT_THEME_OPTIONS: &[(&str, ThemeKind)] = &[("studioLight", ThemeKind::StudioLight), ("classic", ThemeKind::Classic), ("adwaita", ThemeKind::Adwaita)];
+const DARK_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
+    ("proMedium", ThemeKind::ProMedium),
+    ("pro", ThemeKind::Pro),
+    ("studio", ThemeKind::Studio),
+    ("solarizedDark", ThemeKind::SolarizedDark),
+    ("adwaitaDark", ThemeKind::AdwaitaDark),
+];
+
+fn favorite_theme_groups(favorites: &[SavedTheme]) -> (Vec<ThemeKind>, Vec<ThemeKind>) {
+    let group = |options: &[(&str, ThemeKind)]| {
+        options.iter().filter_map(|(id, kind)| SavedTheme::parse(id).filter(|theme| favorites.contains(theme)).map(|_| *kind)).collect()
+    };
+    (group(LIGHT_THEME_OPTIONS), group(DARK_THEME_OPTIONS))
+}
+
+/// Right-click menu on the top-right appearance button. A plain click still cycles modes.
+pub(crate) fn appearance_context_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    if ui.button(tl!("Appearance Settings…")).clicked() {
+        open_preferences(app, "interface");
+        ui.close();
+    }
+    let (light, dark) = favorite_theme_groups(&app.session.prefs().interface.favorite_themes);
+    let has_light = !light.is_empty();
+    if !light.is_empty() || !dark.is_empty() {
+        ui.separator();
+    }
+    for kind in light {
+        if ui.selectable_label(app.ui.theme == kind, tl!(kind.label())).clicked() {
+            app.set_theme(ui.ctx(), kind);
+            ui.close();
+        }
+    }
+    if has_light && !dark.is_empty() {
+        ui.separator();
+    }
+    for kind in dark {
+        if ui.selectable_label(app.ui.theme == kind, tl!(kind.label())).clicked() {
+            app.set_theme(ui.ctx(), kind);
+            ui.close();
+        }
+    }
+}
+
 fn system_theme(app: &PhotocraftApp, ctx: &egui::Context) -> Option<egui::Theme> {
     app.services.system_theme.as_ref().and_then(|read| read(ctx)).or_else(|| ctx.system_theme())
 }
@@ -137,6 +227,7 @@ pub fn load(app: &mut PhotocraftApp) {
     }
     crate::dock::restore(app);
     crate::brush_picker::restore(app);
+    crate::last_brush::restore(app);
     app.sync_recent();
     app.prefs_rt.saved_rev = app.session.prefs.rev();
     app.prefs_rt.saved_value = Some(app.session.prefs_value());
@@ -147,11 +238,65 @@ pub fn load(app: &mut PhotocraftApp) {
 fn recovery(app: &mut PhotocraftApp) {
     if !app.prefs_rt.recovery_started {
         app.prefs_rt.recovery_started = true;
+        #[cfg(not(target_arch = "wasm32"))]
+        let discovery_requested = app.session.prefs().file_handling.recover_on_launch && app.services.discover_recovery.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let discovery_requested = false;
+        // Native recovery descriptors live on disk; the browser has no discovery service.
+        #[cfg(not(target_arch = "wasm32"))]
         if app.session.prefs().file_handling.recover_on_launch
+            && let Some(discover) = app.services.discover_recovery.as_mut()
+        {
+            let discover = discover();
+            let result = app.prefs_rt.discovery_result.clone();
+            let started = app.session.start_job(
+                "file.recoverDiscover",
+                json!({}),
+                "Discovering recovery checkpoints",
+                false,
+                move |ctx| {
+                    ctx.check()?;
+                    ctx.progress(0.0, "Inspecting recovery storage");
+                    let batch = discover();
+                    ctx.check()?;
+                    Ok(batch)
+                },
+                move |_, batch| {
+                    *result.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(batch);
+                    Ok(json!({}))
+                },
+            );
+            match started {
+                Ok(Started::Job(job)) => app.prefs_rt.discovery_pending = Some(job),
+                Ok(Started::Done(_)) => finish_discovery(app),
+                Err(error) => crate::notices::error(app, format!("Recovery discovery failed: {error}")),
+            }
+        }
+        if !discovery_requested
+            && app.session.prefs().file_handling.recover_on_launch
             && let Some(recover) = app.services.recover.as_mut()
         {
-            app.prefs_rt.recovery_queue.extend(recover());
+            let batch = recover();
+            app.prefs_rt.recovery_error = (!batch.errors.is_empty()).then(|| batch.errors.join("; "));
+            for record in batch.documents {
+                app.prefs_rt.recovery_queue.push_back(crate::Recoverable {
+                    key: record.key.clone(),
+                    name: record.document.name.clone(),
+                    path: record.path.clone(),
+                    load: Box::new(move || Ok(record)),
+                });
+            }
         }
+    }
+    start_next_recovery(app);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn finish_discovery(app: &mut PhotocraftApp) {
+    let batch = app.prefs_rt.discovery_result.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    if let Some((entries, errors)) = batch {
+        app.prefs_rt.recovery_queue.extend(entries);
+        app.prefs_rt.recovery_error = (!errors.is_empty()).then(|| errors.join("; "));
     }
     start_next_recovery(app);
 }
@@ -175,14 +320,27 @@ fn start_next_recovery(app: &mut PhotocraftApp) {
             move |s, doc| {
                 let active = s.active().map(|st| st.doc.id);
                 let first = s.documents().is_empty();
-                s.add_document(doc, r.path);
+                let history = doc.history.map(photocraft_ops::History::from_checkpoint).transpose().map_err(photocraft_engine::EngineError::Other)?;
+                let context: RecoveryContext = serde_json::from_value(doc.context.clone()).unwrap_or_default();
+                s.add_document(doc.document, doc.path);
+                let st = s.active_mut().ok_or(photocraft_engine::EngineError::NoDocument)?;
+                if let Some(mut history) = history {
+                    history.remap_document_id(st.doc.id);
+                    st.history = history;
+                }
+                if doc.context.get("activeLayer").is_some() {
+                    st.active_layer = context.active_layer.filter(|id| st.doc.layer(*id).is_some());
+                    st.selected_layers = context.selected_layers.into_iter().filter(|id| st.doc.layer(*id).is_some()).collect();
+                    st.layer_anchor = context.layer_anchor.filter(|id| st.doc.layer(*id).is_some());
+                }
                 let st = s.active_mut().ok_or(photocraft_engine::EngineError::NoDocument)?;
                 st.saved_revision = 0;
                 let (id, revision) = (st.doc.id, st.revision);
+                let admitted_stamp = CheckpointStamp::of(st, doc.context.clone());
                 if let Some(index) = active.and_then(|id| s.documents().iter().position(|st| st.doc.id == id)) {
                     s.set_active(index);
                 }
-                Ok(json!({"documentId": id.0, "revision": revision, "firstDocument": first}))
+                Ok(json!({"documentId": id.0, "revision": revision, "firstDocument": first, "context": doc.context, "admittedStamp": admitted_stamp}))
             },
         );
         match started {
@@ -204,10 +362,38 @@ fn finish_recovery(app: &mut PhotocraftApp, key: &str, v: &Value) {
         return;
     };
     // Track the admitted snapshot's revision, even if another job has already edited it.
-    app.prefs_rt.autosaved.insert(id, revision);
-    if let Some(adopt) = app.services.adopt_autosave.as_mut() {
-        adopt(id.0, key);
+    app.sync_views();
+    app.prefs_rt.recovery_keys.insert(id, key.to_string());
+    if let Some(index) = app.session.documents().iter().position(|st| st.doc.id == id) {
+        let context: RecoveryContext = serde_json::from_value(v.get("context").cloned().unwrap_or(Value::Null)).unwrap_or_default();
+        if let Some(view) =
+            context.view.filter(|view| view.zoom.is_finite() && view.zoom > 0.0 && view.zoom <= 64.0 && view.center.iter().all(|n| n.is_finite()))
+            && let Some(target) = app.ui.views.get_mut(index)
+        {
+            *target = view;
+        }
+        if context.active {
+            app.session.set_active(index);
+            if let Some(tool) = context.tool {
+                app.ui.tool = tool;
+            }
+        }
     }
+    if let Some(captured) = v.get("admittedStamp").cloned().and_then(|value| serde_json::from_value::<CheckpointStamp>(value).ok()) {
+        let matches = app.session.documents().iter().find(|st| st.doc.id == id).is_some_and(|st| {
+            let (undo, redo, label) = st.history.checkpoint_signature();
+            st.revision == captured.revision && undo == captured.undo && redo == captured.redo && label == captured.label && st.path == captured.path
+        });
+        if matches {
+            app.prefs_rt.autosaved.insert(id, captured);
+        } else {
+            app.prefs_rt.autosaved.remove(&id);
+            app.prefs_rt.catch_up.insert(id);
+        }
+    } else {
+        app.prefs_rt.catch_up.insert(id);
+    }
+    let _ = revision;
     if v.get("firstDocument").and_then(Value::as_bool) == Some(true) {
         app.ui.chrome.home = None;
     }
@@ -219,6 +405,20 @@ fn finish_recovery(app: &mut PhotocraftApp, key: &str, v: &Value) {
 /// Recovery uses the existing job polling/progress/cancel path. Its successful result adopts
 /// the original entry on the UI thread, using identity rather than a mutable tab position.
 pub(crate) fn on_recovery_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.prefs_rt.discovery_pending == Some(e.id) {
+        app.prefs_rt.discovery_pending = None;
+        match &e.outcome {
+            JobOutcome::Done(_) => finish_discovery(app),
+            JobOutcome::Failed(error) => crate::notices::error(app, format!("Recovery discovery failed: {error}")),
+            JobOutcome::Cancelled => {
+                app.prefs_rt.discovery_result.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+                app.ui.status = "Cancelled recovery discovery".into();
+            }
+        }
+        return true;
+    }
+
     if !app.prefs_rt.recovery_pending.as_ref().is_some_and(|(job, _)| *job == e.id) {
         return false;
     }
@@ -333,6 +533,18 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         app.prefs_rt.gpu_style = Some(style);
     }
     autosave(app);
+    if let Some(error) = &app.prefs_rt.recovery_error {
+        app.ui.status.clone_from(error);
+        app.ui.status_error = true;
+    }
+    if let Some(error) = app.prefs_rt.autosave_errors.values().next() {
+        app.ui.status.clone_from(error);
+        app.ui.status_error = true;
+    }
+    if app.services.autosave.is_some() {
+        let delay = if app.prefs_rt.pending_autosaves.is_empty() && app.prefs_rt.retiring.is_empty() { 1_000 } else { 100 };
+        ctx.request_repaint_after(std::time::Duration::from_millis(delay));
+    }
     history_log(app);
 }
 
@@ -465,78 +677,149 @@ pub(crate) fn save_preferences(app: &mut PhotocraftApp) -> Result<(), String> {
     Ok(())
 }
 
-/// Background autosave of documents with unsaved changes every N minutes (File Handling).
+/// Checkpoint every open document, including its history after a normal Save.
+/// Retire checkpoints only after the user has accepted the entire quit action.
+pub(crate) fn retire_all(app: &mut PhotocraftApp) {
+    retire_checkpoints(app, true);
+}
+
+fn retire_checkpoints(app: &mut PhotocraftApp, quitting: bool) {
+    let now = crate::gpu_canvas::now_ms();
+    let live: HashSet<DocId> = if quitting { HashSet::new() } else { app.session.documents().iter().map(|d| d.doc.id).collect() };
+    let owned: HashSet<DocId> = app
+        .prefs_rt
+        .recovery_keys
+        .keys()
+        .chain(app.prefs_rt.autosaved.keys())
+        .chain(app.prefs_rt.pending_autosaves.keys())
+        .chain(app.prefs_rt.autosave_errors.keys())
+        .copied()
+        .collect();
+    for id in owned {
+        if live.contains(&id) || app.prefs_rt.retiring.contains(&id) || (!quitting && app.prefs_rt.retry_after.get(&id).is_some_and(|time| now < *time)) {
+            continue;
+        }
+        if let Some(discard) = app.services.discard_autosave.as_mut() {
+            match discard(id.0, app.prefs_rt.recovery_keys.get(&id).map(String::as_str)) {
+                Ok(()) => {
+                    app.prefs_rt.retiring.insert(id);
+                }
+                Err(e) => {
+                    app.prefs_rt.retry_after.insert(id, now + 30_000.0);
+                    app.prefs_rt.autosave_errors.insert(id, format!("Could not remove recovery checkpoint: {e}"));
+                }
+            }
+        }
+    }
+}
+
 fn autosave(app: &mut PhotocraftApp) {
-    let fh = &app.session.prefs().file_handling;
-    let (on, minutes) = (fh.autosave, fh.autosave_minutes.max(1));
-    if app.services.autosave.is_none() {
+    if app.allow_close {
         return;
     }
     // A successful queue operation is not a successful disk write. Poll each frame,
     // including frames before the next autosave interval, so failures are visible.
-    if let Some(results) = app.services.autosave_results.as_mut() {
-        for (raw_id, revision, result) in results() {
-            let id = DocId(raw_id);
-            if app.prefs_rt.autosave_pending.get(&id) != Some(&revision) {
+    let now = crate::gpu_canvas::now_ms();
+    if let Some(poll) = app.services.poll_autosave.as_mut() {
+        for completion in poll() {
+            let id = DocId(completion.document_id);
+            if completion.retired {
+                app.prefs_rt.retiring.remove(&id);
+                match completion.result {
+                    Ok(()) => {
+                        app.prefs_rt.recovery_keys.remove(&id);
+                        app.prefs_rt.autosaved.remove(&id);
+                        app.prefs_rt.pending_autosaves.remove(&id);
+                        app.prefs_rt.catch_up.remove(&id);
+                        app.prefs_rt.retry_after.remove(&id);
+                        if let Some(error) = app.prefs_rt.autosave_errors.remove(&id)
+                            && app.ui.status == error
+                        {
+                            app.ui.status = "Recovery checkpoint removed".into();
+                            app.ui.status_error = false;
+                        }
+                    }
+                    Err(e) => {
+                        app.prefs_rt.retry_after.insert(id, now + 30_000.0);
+                        app.prefs_rt.autosave_errors.insert(id, format!("Could not remove recovery checkpoint: {e}"));
+                    }
+                }
                 continue;
             }
-            app.prefs_rt.autosave_pending.remove(&id);
-            match result {
-                Ok(()) => {
-                    app.prefs_rt.autosaved.insert(id, revision);
-                }
-                Err(e) => {
-                    app.ui.status = format!("Autosave failed: {e}");
-                    app.ui.status_error = true;
+            // A result acknowledges exactly the captured RAM snapshot, never the live revision.
+            let pending = app.prefs_rt.pending_autosaves.get(&id).filter(|stamp| stamp.revision == completion.revision).cloned();
+            if let Some(stamp) = pending {
+                app.prefs_rt.pending_autosaves.remove(&id);
+                match completion.result {
+                    Ok(()) => {
+                        app.prefs_rt.autosaved.insert(id, stamp);
+                        app.prefs_rt.retry_after.remove(&id);
+                        if let Some(error) = app.prefs_rt.autosave_errors.remove(&id)
+                            && app.ui.status == error
+                        {
+                            app.ui.status = "Recovery checkpoint saved".into();
+                            app.ui.status_error = false;
+                        }
+                    }
+                    Err(e) => {
+                        app.prefs_rt.retry_after.insert(id, now + 30_000.0);
+                        app.prefs_rt.autosave_errors.insert(id, format!("Autosave failed: {e}. Your document remains open; save a copy or free disk space."));
+                    }
                 }
             }
         }
     }
-    let now = crate::gpu_canvas::now_ms();
-    // Saved or closed documents drop their recovery data.
-    let live: HashMap<DocId, bool> = app.session.documents().iter().map(|d| (d.doc.id, d.is_dirty())).collect();
-    let mut stale: Vec<DocId> = app.prefs_rt.autosaved.keys().filter(|id| live.get(id) != Some(&true)).copied().collect();
-    stale.extend(app.prefs_rt.autosave_pending.keys().filter(|id| live.get(*id) != Some(&true) && !app.prefs_rt.autosaved.contains_key(*id)).copied());
-    for id in stale {
-        app.prefs_rt.autosaved.remove(&id);
-        app.prefs_rt.autosave_pending.remove(&id);
-        if let Some(d) = app.services.discard_autosave.as_mut() {
-            d(id.0);
-        }
-    }
-    if !on {
+    retire_checkpoints(app, false);
+    let fh = &app.session.prefs().file_handling;
+    if !fh.autosave || app.services.autosave.is_none() {
         return;
     }
-    let interval = minutes as f64 * 60_000.0;
+    let interval = f64::from(fh.autosave_minutes.max(1)) * 60_000.0;
     if app.prefs_rt.next_autosave_ms == 0.0 || app.prefs_rt.next_autosave_ms > now + interval {
         app.prefs_rt.next_autosave_ms = now + interval;
+    }
+    let due = now >= app.prefs_rt.next_autosave_ms;
+    if due {
+        app.prefs_rt.next_autosave_ms = now + interval;
+    }
+    if due {
+        for (index, st) in app.session.documents().iter().enumerate() {
+            if app.prefs_rt.pending_autosaves.get(&st.doc.id).is_some_and(|pending| *pending != CheckpointStamp::of(st, recovery_context(app, index, st))) {
+                app.prefs_rt.catch_up.insert(st.doc.id);
+            }
+        }
+    }
+    if !due && app.prefs_rt.catch_up.is_empty() && !app.prefs_rt.retry_after.values().any(|time| now >= *time) {
         return;
     }
-    if now < app.prefs_rt.next_autosave_ms {
-        return;
-    }
-    app.prefs_rt.next_autosave_ms = now + interval;
     let jobs: Vec<_> = app
         .session
         .documents()
         .iter()
-        .filter(|d| d.is_dirty() && app.prefs_rt.autosaved.get(&d.doc.id) != Some(&d.revision) && !app.prefs_rt.autosave_pending.contains_key(&d.doc.id))
-        .map(|d| (d.doc.clone(), d.revision, d.path.clone()))
+        .enumerate()
+        .filter_map(|(index, st)| {
+            let stamp = CheckpointStamp::of(st, recovery_context(app, index, st));
+            let retry_due = app.prefs_rt.retry_after.get(&st.doc.id).is_some_and(|time| now >= *time);
+            if (!due && !retry_due && !app.prefs_rt.catch_up.contains(&st.doc.id))
+                || app.prefs_rt.pending_autosaves.contains_key(&st.doc.id)
+                || app.prefs_rt.autosaved.get(&st.doc.id) == Some(&stamp)
+                || app.prefs_rt.retry_after.get(&st.doc.id).is_some_and(|time| now < *time)
+            {
+                return None;
+            }
+            Some((st.doc.clone(), st.history.checkpoint(), stamp, st.path.clone()))
+        })
         .collect();
-    for (doc, rev, path) in jobs {
+    for (doc, history, stamp, path) in jobs {
         if let Some(save) = app.services.autosave.as_mut() {
-            match save(&doc, rev, path.as_deref()) {
+            match save(&doc, history, stamp.revision, path.as_deref(), app.prefs_rt.recovery_keys.get(&doc.id).map(String::as_str), stamp.context.clone()) {
                 Ok(()) => {
-                    if app.services.autosave_results.is_some() {
-                        app.prefs_rt.autosave_pending.insert(doc.id, rev);
-                    } else {
-                        // Synchronous or mocked services report completion on return.
-                        app.prefs_rt.autosaved.insert(doc.id, rev);
-                    }
+                    app.prefs_rt.pending_autosaves.insert(doc.id, stamp);
+                    app.prefs_rt.catch_up.remove(&doc.id);
                 }
                 Err(e) => {
-                    app.ui.status = format!("Autosave failed: {e}");
-                    app.ui.status_error = true;
+                    app.prefs_rt.retry_after.insert(doc.id, now + 30_000.0);
+                    app.prefs_rt.autosave_errors.insert(doc.id, format!("Autosave failed: {e}. Your document remains open; save a copy or free disk space."));
                 }
             }
         }
@@ -1047,6 +1330,10 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
     });
     f.insert("section".into(), json!(section));
     f.insert("values".into(), values);
+    // A colour swatch was clicked: open the Color Picker on that value (#2144).
+    if let Some((path, name)) = ctx_take_pick(ui) {
+        crate::color_picker_ui::request_field(f, &format!("/values/{}", path.replace('.', "/")), &crate::color_picker_ui::title_for(&name));
+    }
 }
 
 /// Preferences › Performance: what the app renders with now, and a reset of the GPU backend
@@ -1154,7 +1441,7 @@ fn theme_preview(ui: &mut egui::Ui, kind: ThemeKind, width: f32) {
     painter.rect_stroke(art, 0.0, egui::Stroke::new(1.0, p.card_border), egui::StrokeKind::Inside);
 }
 
-fn theme_card(ui: &mut egui::Ui, title: &str, active: bool, selected: &mut String, options: &[(&str, ThemeKind)], width: f32) {
+fn theme_card(ui: &mut egui::Ui, title: &str, active: bool, selected: &mut String, favorites: &mut Vec<SavedTheme>, options: &[(&str, ThemeKind)], width: f32) {
     let Some((_, first_kind)) = options.first() else { return };
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
@@ -1178,7 +1465,37 @@ fn theme_card(ui: &mut egui::Ui, title: &str, active: bool, selected: &mut Strin
             ui.add_space(6.0);
             for (id, _) in options {
                 let label = choice_label(id);
-                ui.radio_value(selected, (*id).to_string(), tl!(&label));
+                let row = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 24.0));
+                let hovered = ui.ctx().pointer_hover_pos().is_some_and(|p| row.contains(p));
+                ui.horizontal(|ui| {
+                    ui.radio_value(selected, (*id).to_string(), tl!(&label));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(theme) = SavedTheme::parse(id) {
+                            let favorite = favorites.contains(&theme);
+                            let (icon, tint) = if favorite { ("star-filled", t.accent) } else { ("star", t.text_dim) };
+                            let star = egui::Button::image(crate::icons::image(icon, 15.0, tint)).frame(false);
+                            let response = ui.add_visible(favorite || hovered, star).on_hover_text(if favorite {
+                                tl!("Remove from favorites")
+                            } else {
+                                tl!("Add to favorites")
+                            });
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    true,
+                                    format!("{}: {}", if favorite { tl!("Remove from favorites") } else { tl!("Add to favorites") }, tl!(&label)),
+                                )
+                            });
+                            if response.clicked() {
+                                if favorite {
+                                    favorites.retain(|saved| *saved != theme);
+                                } else {
+                                    favorites.push(theme);
+                                }
+                            }
+                        }
+                    });
+                });
             }
         });
 }
@@ -1199,43 +1516,34 @@ fn appearance_rows(ui: &mut egui::Ui, obj: &mut Map<String, Value>, system: Opti
     let width = ((ui.available_width() - 10.0) / 2.0).max(190.0);
     let mut light = obj.get("lightTheme").and_then(Value::as_str).unwrap_or("studioLight").to_string();
     let mut dark = obj.get("darkTheme").and_then(Value::as_str).unwrap_or("proMedium").to_string();
+    let mut favorites: Vec<SavedTheme> = obj.get("favoriteThemes").cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
     ui.horizontal_top(|ui| {
         ui.set_min_width(width * 2.0 + 10.0);
         ui.allocate_ui_with_layout(vec2(width, 300.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-            theme_card(
-                ui,
-                "Light Theme",
-                light_active,
-                &mut light,
-                &[("studioLight", ThemeKind::StudioLight), ("classic", ThemeKind::Classic), ("adwaita", ThemeKind::Adwaita)],
-                width,
-            );
+            theme_card(ui, "Light Theme", light_active, &mut light, &mut favorites, LIGHT_THEME_OPTIONS, width);
         });
         ui.add_space(10.0);
         ui.allocate_ui_with_layout(vec2(width, 300.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-            theme_card(
-                ui,
-                "Dark Theme",
-                !light_active,
-                &mut dark,
-                &[
-                    ("proMedium", ThemeKind::ProMedium),
-                    ("pro", ThemeKind::Pro),
-                    ("studio", ThemeKind::Studio),
-                    ("solarizedDark", ThemeKind::SolarizedDark),
-                    ("adwaitaDark", ThemeKind::AdwaitaDark),
-                ],
-                width,
-            );
+            theme_card(ui, "Dark Theme", !light_active, &mut dark, &mut favorites, DARK_THEME_OPTIONS, width);
         });
     });
     obj.insert("lightTheme".into(), json!(light));
     obj.insert("darkTheme".into(), json!(dark));
+    obj.insert("favoriteThemes".into(), json!(favorites));
     ui.add_space(12.0);
 }
 
 /// Generic editor for a section's fields: checkboxes, dropdowns for choices, colour swatches,
 /// number fields with the preference's range, text fields.
+/// Where a clicked colour swatch leaves its preference path and label for the dialog body, which
+/// holds the fields the Color Picker request goes in.
+const PICK_ID: &str = "prefs-pick-color";
+
+/// The colour swatch clicked this frame, if any: (preference path, label).
+fn ctx_take_pick(ui: &egui::Ui) -> Option<(String, String)> {
+    ui.ctx().data_mut(|d| d.remove_temp::<(String, String)>(egui::Id::new(PICK_ID)))
+}
+
 fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, order: &[String], lang: crate::i18n::Lang, system: Option<egui::Theme>) {
     let t = Tokens::get(ui.ctx());
     if section == "interface" {
@@ -1243,6 +1551,13 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
     }
     if section == "performance" {
         rendering_mode_row(ui, obj);
+        ui.label(tl!("The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional."));
+    }
+    if section == "scratchDisks" {
+        #[cfg(not(target_arch = "wasm32"))]
+        ui.label(tl!("Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session."));
+        #[cfg(target_arch = "wasm32")]
+        ui.label(tl!("This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app."));
     }
     let mut keys: Vec<String> = order.iter().filter(|k| obj.contains_key(*k)).cloned().collect();
     keys.extend(obj.keys().filter(|k| !order.contains(k)).cloned());
@@ -1251,7 +1566,7 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
             let path = format!("{section}.{k}");
             // Settings nothing reads yet stay out of the dialog (issue #204); their stored values
             // pass through untouched.
-            if (section == "interface" && matches!(k.as_str(), "theme" | "appearanceMode" | "darkTheme" | "lightTheme"))
+            if (section == "interface" && matches!(k.as_str(), "theme" | "appearanceMode" | "darkTheme" | "lightTheme" | "favoriteThemes"))
                 || prefs::is_hidden(&path)
                 || (section == "performance" && matches!(k.as_str(), "useGpu" | "gpuBackend" | "renderingMode"))
                 || (section == "export" && !export_field_visible(obj, &k))
@@ -1259,7 +1574,11 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
                 continue;
             }
             let v = obj.get(&k).cloned().unwrap_or(Value::Null);
-            let human = humanize(&k);
+            let human = match path.as_str() {
+                "performance.memoryUsageMb" => "Memory budget (MiB)".to_string(),
+                "scratchDisks.budgetMb" => "Undo disk budget (MiB)".to_string(),
+                _ => humanize(&k),
+            };
             let label = tl!(&human).to_string();
             match &v {
                 Value::Bool(b) => {
@@ -1297,7 +1616,10 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
                     let c = prefs::parse_hex(s).unwrap_or([128, 128, 128]);
                     let mut rgb = c;
                     ui.horizontal(|ui| {
-                        crate::widgets::color_edit_button_srgb(ui, &mut rgb);
+                        // Capishot's Color Picker, as everywhere else (#2144).
+                        if crate::widgets::color_swatch_button(ui, egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]), &label).clicked() {
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(PICK_ID), (path.clone(), label.clone())));
+                        }
                         hex_field(ui, &path, &mut rgb);
                     });
                     obj.insert(k, json!(format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])));
@@ -1362,7 +1684,7 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
 }
 
 /// Keyboard Shortcuts and Menus: a searchable list of commands by menu with editable shortcuts
-/// (click a shortcut, press keys; ⌫ removes it), menu visibility and colours, toolbar tools.
+/// (click a shortcut, press keys; "Delete Shortcut" removes it), menu visibility and colours, toolbar tools.
 fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     let mut tab = f.get("tab").and_then(Value::as_u64).unwrap_or(0);
@@ -1423,10 +1745,6 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
             });
             if key == egui::Key::Escape {
                 capture = false;
-            } else if matches!(key, egui::Key::Backspace | egui::Key::Delete) && m.is_none() {
-                overrides.insert(selected.clone(), String::new());
-                capture = false;
-                message = tl!("Shortcut removed.").into();
             } else if let Some(sc) = shortcut_text(key, m) {
                 let clash: Vec<String> = items
                     .iter()
@@ -1802,6 +2120,34 @@ mod tests {
     }
 
     #[test]
+    fn confirmed_quit_retires_checkpoints_but_cancel_keeps_them() {
+        let (mut app, _, _) = checkpoint_app();
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let id = app.session.documents()[0].doc.id;
+        let retired = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = retired.clone();
+        app.services.discard_autosave = Some(Box::new(move |id, key| {
+            recorded.lock().unwrap().push((id, key.map(str::to_owned)));
+            Ok(())
+        }));
+        app.prefs_rt.recovery_keys.insert(id, "restored-key".into());
+        app.run("layer.new.layer", json!({})).unwrap();
+        let ctx = egui::Context::default();
+        crate::menus::invoke(&mut app, &ctx, "file.exit", Value::Null).unwrap();
+        assert!(retired.lock().unwrap().is_empty());
+        app.discard = None; // Cancel the prompt.
+        assert!(retired.lock().unwrap().is_empty());
+        crate::menus::invoke(&mut app, &ctx, "file.exit", Value::Null).unwrap();
+        app.discard = None;
+        let st = app.session.active_mut().unwrap();
+        st.saved_revision = st.revision;
+        crate::menus::invoke(&mut app, &ctx, "file.exit", Value::Null).unwrap();
+        assert_eq!(*retired.lock().unwrap(), vec![(id.0, Some("restored-key".into()))]);
+        crate::prefs_ui::retire_all(&mut app);
+        assert_eq!(retired.lock().unwrap().len(), 1);
+    }
+
+    #[test]
     fn rendering_mode_display_respects_explicit_mode_and_legacy_disable() {
         let legacy = serde_json::json!({"useGpu": false, "gpuBackend": "auto"});
         assert_eq!(super::rendering_mode_value(legacy.as_object().unwrap()), "cpu");
@@ -2054,6 +2400,29 @@ mod tests {
         assert_eq!(reloaded.lock().unwrap().as_ref(), Some(&saved));
     }
 
+    #[test]
+    fn theme_star_saves_favorite_and_menu_groups_it() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let (mut app, _) = app_with_store();
+        open_preferences(&mut app, "interface");
+        let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            app
+        });
+        h.run_steps(4);
+        h.get_by_label("Classic").hover();
+        h.run_steps(2);
+        h.get_by_label("Add to favorites: Classic").click();
+        h.run_steps(2);
+        h.get_by_label("Apply").click();
+        h.run_steps(2);
+        assert_eq!(h.state().session.prefs().interface.favorite_themes, vec![SavedTheme::Classic]);
+        assert!(h.query_by_label("Remove from favorites: Classic").is_some());
+        let (light, dark) = favorite_theme_groups(&[SavedTheme::Studio, SavedTheme::Classic, SavedTheme::Adwaita]);
+        assert_eq!(light, vec![ThemeKind::Classic, ThemeKind::Adwaita]);
+        assert_eq!(dark, vec![ThemeKind::Studio]);
+    }
+
     /// Every generated preference label, section title and choice label has an entry in each
     /// language that claims complete menus (Japanese, Traditional Chinese, ...).
     #[test]
@@ -2068,6 +2437,9 @@ mod tests {
                 }
                 let Some(obj) = v.get(sec).and_then(Value::as_object) else { continue };
                 for k in obj.keys() {
+                    if sec == "interface" && k == "favoriteThemes" {
+                        continue; // Rendered as star controls beside the theme choices.
+                    }
                     let mut labels = vec![humanize(k)];
                     labels.extend(prefs::choices(&format!("{sec}.{k}")).into_iter().flatten().map(|c| choice_label(c)));
                     missing.extend(labels.into_iter().filter(|l| !crate::i18n::has(lang, l)));
@@ -2375,15 +2747,13 @@ mod tests {
         let values = prefs::Preferences::default().to_json();
         assert!(has_visible_fields(&values, "general"));
         assert!(has_visible_fields(&values, "fileHandling"));
-        // Every setting of these sections is still unimplemented.
-        for section in ["integrations", "scratchDisks"] {
-            assert!(!has_visible_fields(&values, section), "{section}");
-        }
+        // Every setting of this section is still unimplemented.
+        assert!(!has_visible_fields(&values, "integrations"));
         // "Fill new type layers with placeholder text" and "Use Escape to Commit" are live; other Type rows stay hidden.
         assert!(has_visible_fields(&values, "type"));
         assert!(!prefs::is_hidden("type.fillNewTypeLayersWithPlaceholder"));
         assert!(!prefs::is_hidden("type.useEscToCommit"));
-        assert!(prefs::is_hidden("type.smartQuotes"));
+        assert!(!prefs::is_hidden("type.smartQuotes"));
         // Rotate View with Trackpad is live; the other Enhanced Controls rows stay hidden.
         assert!(has_visible_fields(&values, "enhancedControls"));
         assert!(!prefs::is_hidden("enhancedControls.rotateViewWithTrackpad"));
@@ -2391,6 +2761,10 @@ mod tests {
         // Camera Raw Defaults shows only "Open in Camera Raw" so far.
         assert!(has_visible_fields(&values, "rawDefaults"));
         assert!(!prefs::is_hidden("rawDefaults.openInCameraRaw"));
+
+        assert!(has_visible_fields(&values, "scratchDisks"));
+        assert!(!prefs::is_hidden("scratchDisks.disks"));
+        assert!(!prefs::is_hidden("scratchDisks.budgetMb"));
         assert!(prefs::is_hidden("rawDefaults.applyAutoTone"));
         assert!(!prefs::is_hidden("general.autoShowHomeScreen"));
         assert!(!prefs::is_hidden("interface.uiScale"));
@@ -2719,71 +3093,239 @@ mod tests {
         assert!(!crate::menus::menu_items(&app).iter().any(|i| i.id == "edit.fade"));
     }
 
-    #[test]
-    fn autosave_runs_for_dirty_documents() {
-        type Saved = Arc<Mutex<Vec<(u64, u64)>>>;
-        let saved: Saved = Arc::default();
-        let s2 = saved.clone();
+    type Queued = Arc<Mutex<Vec<(u64, u64, usize, usize)>>>;
+    type Completed = Arc<Mutex<Vec<crate::AutosaveCompletion>>>;
+    fn checkpoint_app() -> (PhotocraftApp, Queued, Completed) {
+        let queued: Queued = Arc::default();
+        let completed: Completed = Arc::default();
+        let q = queued.clone();
+        let c = completed.clone();
         let services = crate::Services {
-            autosave: Some(Box::new(move |doc: &Arc<photocraft_doc::Document>, rev: u64, _path: Option<&str>| {
-                s2.lock().unwrap().push((doc.id.0, rev));
+            autosave: Some(Box::new(move |doc, history, rev, _path, _key, _context| {
+                q.lock().unwrap().push((doc.id.0, rev, history.undo.len(), history.redo.len()));
                 Ok(())
             })),
+            poll_autosave: Some(Box::new(move || std::mem::take(&mut *c.lock().unwrap()))),
             ..Default::default()
         };
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        (PhotocraftApp::new(photocraft_engine::Session::new(), services), queued, completed)
+    }
+    fn complete(c: &Completed, id: DocId, revision: u64, result: Result<(), String>) {
+        c.lock().unwrap().push(crate::AutosaveCompletion { document_id: id.0, revision, result, retired: false });
+    }
+    #[test]
+    fn autosave_acknowledges_disk_completion_and_keeps_live_ram_fresh() {
+        let (mut app, queued, completed) = checkpoint_app();
         let ctx = egui::Context::default();
         app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
-        tick(&mut app, &ctx);
         autosave_now(&mut app);
         tick(&mut app, &ctx);
-        assert!(saved.lock().unwrap().is_empty(), "clean documents are not autosaved");
+        let id = app.session.active().unwrap().doc.id;
+        assert_eq!(queued.lock().unwrap().len(), 1, "clean open docs also retain recovery");
+        assert!(app.prefs_rt.autosaved.is_empty(), "enqueue is not durability");
+        let revision = app.session.active().unwrap().revision;
         app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        let fresh = app.session.active().unwrap().doc.clone();
+        complete(&completed, id, revision, Ok(()));
+        tick(&mut app, &ctx);
+        assert!(Arc::ptr_eq(&fresh, &app.session.active().unwrap().doc));
+        assert_eq!(app.prefs_rt.autosaved.get(&id).unwrap().revision, revision);
         autosave_now(&mut app);
         tick(&mut app, &ctx);
-        assert_eq!(saved.lock().unwrap().len(), 1);
+        assert_eq!(queued.lock().unwrap().len(), 2, "newer RAM revision still needs a checkpoint");
+        let revision = app.session.active().unwrap().revision;
+        complete(&completed, id, revision, Ok(()));
+        tick(&mut app, &ctx);
         autosave_now(&mut app);
         tick(&mut app, &ctx);
-        assert_eq!(saved.lock().unwrap().len(), 1, "unchanged since the last autosave");
-
-        // Loaded copies can have the same persisted identity and dirty revision.
-        let original = app.session.active().unwrap().doc.clone();
-        let original_id = original.id;
-        app.session.add_document(original.as_ref().clone(), None);
+        assert_eq!(queued.lock().unwrap().len(), 2, "unchanged checkpoints are skipped");
+        app.session.active_mut().unwrap().saved_revision = revision;
+        tick(&mut app, &ctx);
+        assert!(app.prefs_rt.autosaved.contains_key(&id), "normal Save must preserve undo recovery");
+        app.run("prefs.set", json!({"path": "fileHandling.autosave", "value": false})).unwrap();
         app.run("edit.fill", json!({"color": "#0000ff"})).unwrap();
         autosave_now(&mut app);
         tick(&mut app, &ctx);
-        {
-            let saved = saved.lock().unwrap();
-            assert_eq!(saved.len(), 2, "both dirty copies need independent autosaves");
-            assert_eq!(saved[0].0, original_id.0);
-            assert_ne!(saved[0].0, saved[1].0, "recovery ownership must be distinct");
-            assert_eq!(saved[0].1, saved[1].1, "the revisions must match to reproduce suppression");
-        }
-        app.run("prefs.set", json!({"path": "fileHandling.autosave", "value": false})).unwrap();
-        app.run("edit.fill", json!({"color": "#00ff00"})).unwrap();
+        assert_eq!(queued.lock().unwrap().len(), 2);
+    }
+    #[test]
+    fn slow_checkpoint_catches_up_and_save_as_updates_recovery_path() {
+        let (mut app, queued, completed) = checkpoint_app();
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
         autosave_now(&mut app);
         tick(&mut app, &ctx);
-        assert_eq!(saved.lock().unwrap().len(), 2, "autosave off");
+        let id = app.session.active().unwrap().doc.id;
+        let old = app.session.active().unwrap().revision;
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        assert_eq!(queued.lock().unwrap().len(), 1, "only one request per document is in flight");
+        complete(&completed, id, old, Ok(()));
+        tick(&mut app, &ctx);
+        assert_eq!(queued.lock().unwrap().len(), 2, "overdue fresh RAM checkpoint starts immediately");
+        let current = app.session.active().unwrap().revision;
+        complete(&completed, id, current, Ok(()));
+        tick(&mut app, &ctx);
+        app.session.active_mut().unwrap().path = Some("/renamed.pcraft".into());
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        assert_eq!(queued.lock().unwrap().len(), 3);
+        assert_eq!(app.prefs_rt.pending_autosaves.get(&id).unwrap().path.as_deref(), Some("/renamed.pcraft"));
     }
 
     #[test]
-    fn recovered_documents_adopt_their_entries_until_saved_or_closed() {
-        type Log = Arc<Mutex<Vec<String>>>;
-        let log: Log = Arc::default();
-        let (l1, l2, l3) = (log.clone(), log.clone(), log.clone());
-        use photocraft_doc::{Color, ColorMode, Document, SampleType, Size};
-        let doc = || Document::with_background("R", Size::new(4, 4), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+    fn autosave_failure_retries_same_revision_with_backoff() {
+        let (mut app, queued, completed) = checkpoint_app();
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        let st = app.session.active().unwrap();
+        let (id, revision) = (st.doc.id, st.revision);
+        complete(&completed, id, revision, Err("disk full".into()));
+        tick(&mut app, &ctx);
+        assert!(app.ui.status.contains("disk full"));
+        assert!(app.ui.status_error);
+        assert!(!app.prefs_rt.autosaved.contains_key(&id));
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        assert_eq!(queued.lock().unwrap().len(), 1, "failed saves cannot busy-loop");
+        app.prefs_rt.retry_after.insert(id, 0.0);
+        tick(&mut app, &ctx);
+        assert_eq!(queued.lock().unwrap().len(), 2);
+        {
+            let requests = queued.lock().unwrap();
+            assert_eq!(requests[0].1, requests[1].1);
+        }
+        complete(&completed, id, revision, Ok(()));
+        tick(&mut app, &ctx);
+        assert!(app.prefs_rt.autosave_errors.is_empty());
+        assert!(!app.ui.status.contains("disk full"), "a completed retry clears the displayed failure");
+        assert!(!app.ui.status_error);
+        assert!(app.prefs_rt.autosaved.contains_key(&id));
+    }
+    #[test]
+    fn autosave_captures_redo_and_history_purge_without_revision_change() {
+        let (mut app, queued, completed) = checkpoint_app();
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        app.run("edit.fill", json!({"color": "#0000ff"})).unwrap();
+        app.run("edit.undo", json!({})).unwrap();
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        let st = app.session.active().unwrap();
+        let (id, revision) = (st.doc.id, st.revision);
+        assert_eq!(queued.lock().unwrap()[0].3, 1);
+        complete(&completed, id, revision, Ok(()));
+        tick(&mut app, &ctx);
+        app.session.active_mut().unwrap().history.clear();
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        assert_eq!(queued.lock().unwrap().len(), 2);
+        assert_eq!(queued.lock().unwrap()[1], (id.0, revision, 0, 0));
+    }
+    #[test]
+    fn startup_restores_history_and_retains_ownership_until_close_completes() {
+        let mut session = photocraft_engine::Session::new();
+        session.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+        session.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        session.execute("edit.fill", json!({"color": "#0000ff"})).unwrap();
+        session.execute("edit.undo", json!({})).unwrap();
+        let original = session.active().unwrap().clone();
+        let record = crate::RecoveredDocument {
+            key: "retained".into(),
+            path: Some("/a.pcraft".into()),
+            document: original.doc.as_ref().clone(),
+            history: Some(original.history.checkpoint()),
+            context: json!({"active": true, "view": {"zoom": 2.0, "center": [3.0, 4.0], "fit_pending": false, "doc_size": [8,8]}, "tool": "Brush", "activeLayer": original.active_layer, "selectedLayers": original.selected_layers}),
+        };
+        let mut record = Some(record);
+        let retired = Arc::new(Mutex::new(Vec::new()));
+        let r = retired.clone();
+        let completions: Completed = Arc::default();
+        let c = completions.clone();
         let services = crate::Services {
-            autosave: Some(Box::new(move |d: &Arc<Document>, _: u64, _: Option<&str>| {
-                l1.lock().unwrap().push(format!("save {}", d.id.0));
+            recover: Some(Box::new(move || crate::RecoveryBatch {
+                documents: record.take().into_iter().collect(),
+                errors: vec!["Broken checkpoint retained".into()],
+            })),
+            discard_autosave: Some(Box::new(move |id, key| {
+                r.lock().unwrap().push((id, key.map(str::to_owned)));
                 Ok(())
             })),
-            discard_autosave: Some(Box::new(move |id: u64| l2.lock().unwrap().push(format!("discard {id}")))),
-            recover: Some(Box::new(move || {
-                ["a", "b"].map(|key| crate::Recoverable { key: key.into(), name: "R".into(), path: None, load: Box::new(move || Ok(doc())) }).into()
+            poll_autosave: Some(Box::new(move || std::mem::take(&mut *c.lock().unwrap()))),
+            ..Default::default()
+        };
+        // Existing duplicate forces an admitted identity change.
+        let mut target = photocraft_engine::Session::new();
+        target.add_document(original.doc.as_ref().clone(), None);
+        let mut app = PhotocraftApp::new(target, services);
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while app.session.has_jobs() && std::time::Instant::now() < deadline {
+            crate::jobs_ui::tick(&mut app, &ctx);
+            std::thread::yield_now();
+        }
+        assert!(!app.session.has_jobs());
+
+        let recovered = app.session.active().unwrap();
+        let id = recovered.doc.id;
+        assert_ne!(id, original.doc.id);
+        assert!(recovered.is_dirty());
+        assert!(recovered.history.can_redo());
+        assert_eq!(app.ui.views.last().unwrap().zoom, 2.0);
+        assert_eq!(app.ui.tool, crate::state::Tool::Brush);
+        assert_eq!(recovered.history.entries(), original.history.entries());
+        app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(app.session.active().unwrap().doc.id, id);
+        tick(&mut app, &ctx);
+        assert!(app.ui.status.contains("Broken checkpoint retained"));
+        assert!(retired.lock().unwrap().is_empty());
+        let index = app.session.active_index().unwrap();
+        app.session.close(index);
+        tick(&mut app, &ctx);
+        assert_eq!(retired.lock().unwrap().as_slice(), &[(id.0, Some("retained".into()))]);
+        assert!(app.prefs_rt.recovery_keys.contains_key(&id), "cleanup acceptance is not completion");
+        completions.lock().unwrap().push(crate::AutosaveCompletion { document_id: id.0, revision: 0, result: Ok(()), retired: true });
+        tick(&mut app, &ctx);
+        assert!(!app.prefs_rt.recovery_keys.contains_key(&id));
+    }
+
+    #[test]
+    fn deferred_recovery_admits_checkpoint_history_and_tracks_its_key() {
+        let record = crate::RecoveredDocument {
+            key: "retained".into(),
+            path: None,
+            document: photocraft_doc::Document::with_background(
+                "R",
+                photocraft_doc::Size::new(4, 4),
+                photocraft_doc::ColorMode::Rgb,
+                photocraft_doc::SampleType::U8,
+                photocraft_doc::Color::WHITE,
+            ),
+            history: Some(photocraft_ops::History::default().checkpoint()),
+            context: json!({}),
+        };
+        let mut pending = Some(record);
+        let services = crate::Services {
+            discover_recovery: Some(Box::new(move || {
+                let record = pending.take();
+                Box::new(move || {
+                    let Some(record) = record else { return (Vec::new(), Vec::new()) };
+                    (
+                        vec![crate::Recoverable {
+                            key: record.key.clone(),
+                            name: record.document.name.clone(),
+                            path: None,
+                            load: Box::new(move || Ok(record)),
+                        }],
+                        Vec::new(),
+                    )
+                })
             })),
-            adopt_autosave: Some(Box::new(move |id: u64, key: &str| l3.lock().unwrap().push(format!("adopt {id} {key}")))),
             ..Default::default()
         };
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
@@ -2794,22 +3336,10 @@ mod tests {
             crate::jobs_ui::tick(&mut app, &ctx);
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        assert!(!app.session.has_jobs(), "recovery finished");
-        let ids: Vec<u64> = app.session.documents().iter().map(|d| d.doc.id.0).collect();
-        assert!(app.session.documents().iter().all(|d| d.is_dirty()), "recovered documents are unsaved");
-        let take = || std::mem::take(&mut *log.lock().unwrap());
-        assert_eq!(take(), [format!("adopt {} a", ids[0]), format!("adopt {} b", ids[1])]);
-        // Their entries are current: nothing to autosave until they change.
-        tick(&mut app, &ctx);
-        autosave_now(&mut app);
-        tick(&mut app, &ctx);
-        assert!(take().is_empty());
-        // Closing one drops its entry; editing the other autosaves over its own.
-        app.run("file.close", json!({"document": 0})).unwrap();
-        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
-        autosave_now(&mut app);
-        tick(&mut app, &ctx);
-        assert_eq!(take(), [format!("discard {}", ids[0]), format!("save {}", ids[1])]);
+        assert!(!app.session.has_jobs());
+        let st = app.session.active().unwrap();
+        assert!(st.is_dirty());
+        assert_eq!(app.prefs_rt.recovery_keys.get(&st.doc.id).map(String::as_str), Some("retained"));
     }
 
     #[test]

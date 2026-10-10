@@ -30,7 +30,13 @@
 	(coming soon)	(segera hadir)
 	New…	Baru…
 	Open…	Buka…
+	Open as Deep…	Buka sebagai deep…
 	Open As…	Buka Sebagai…
+	Open EXR Parts…	Buka bagian EXR…
+	Add beauty precomp from the AOVs	Tambahkan prakomposisi beauty dari AOV
+	Both	Keduanya
+	Left	Kiri
+	Right	Kanan
 	Open Recent	Terakhir Dibuka
 	Clear Recent Files	Hapus Daftar Berkas Terakhir
 	Close	Tutup
@@ -80,6 +86,8 @@
 	Import	Impor
 	Browse…	Telusuri…
 	Reveal in Finder	Tampilkan di Finder
+	Show in Explorer	Tampilkan di Explorer
+	Show in Folder	Tampilkan di Folder
 	File Info…	Info Berkas…
 	Print…	Cetak…
 	Print One Copy	Cetak Satu Salinan
@@ -715,6 +723,22 @@
 	+ Add variable	+ Tambah variabel
 	30 frames @ 30 fps	30 frame @ 30 fps
 	3D LUT File	Berkas LUT 3D
+	Install Pack…	Pasang paket…
+	Remove Pack	Hapus paket
+	Built-in	Bawaan
+	Favorites	Favorit
+	Duplicate of	Duplikat dari
+	3D cube	Kubus 3D
+	1D cube	Kubus 1D
+	LUT look	Look LUT
+	{kind}, size {n}	{kind}, ukuran {n}
+	Title: {title}	Judul: {title}
+	Declares an input range other than 0 to 1	Menyatakan rentang masukan selain 0 hingga 1
+	The name suggests a technical conversion, not a creative look	Nama ini menyiratkan konversi teknis, bukan tampilan kreatif
+	LUTs installed into {pack}: {n}	LUT terpasang di {pack}: {n}
+	{n} skipped	{n} dilewati
+	{n} already installed	{n} sudah terpasang
+	Choosing a folder is not available here; use the lut.installPack command	Memilih folder tidak tersedia di sini; gunakan perintah lut.installPack
 	Absolute	Absolut
 	Absolute Colorimetric	Absolute Colorimetric
 	Action	Action
@@ -782,6 +806,9 @@
 	Bend:	Lengkung:
 	Bicubic	Bicubic
 	Bicubic (smooth gradients)	Bicubic (gradien halus)
+	Automatic	Otomatis
+	Bicubic Smoother (enlargement)	Bicubic lebih halus (pembesaran)
+	Bicubic Sharper (reduction)	Bicubic lebih tajam (pengecilan)
 	Bilinear	Bilinear
 	Black	Hitam
 	Black & White	Hitam & Putih
@@ -792,7 +819,6 @@
 	Blending Options	Opsi Blending
 	Blue	Biru
 	Blue, Red, Yellow	Biru, Merah, Kuning
-	Both	Keduanya
 	Both Axes	Kedua Sumbu
 	Bottom	Bawah
 	Brightness	Kecerahan
@@ -1010,6 +1036,7 @@
 	Filter for pixel layers	Filter untuk layer piksel
 	Filter for shape layers	Filter untuk layer bentuk
 	Filter for smart objects	Filter untuk smart object
+	Filter for deep layers	Saring lapisan deep
 	Filter for type layers	Filter untuk layer teks
 	Filter:	Filter:
 	Finger Painting	Lukis Jari
@@ -1105,7 +1132,6 @@
 	Leading	Leading
 	Leading (set to the font size × auto-leading when Auto)	Leading (diatur ke ukuran font × auto-leading saat Auto)
 	Leave as is (don't color manage)	Biarkan apa adanya (tanpa manajemen warna)
-	Left	Kiri
 	Left align text	Teks rata kiri
 	Length:	Panjang:
 	Level	Level
@@ -1315,7 +1341,6 @@
 	Restore All	Pulihkan Semua
 	Restore Defaults	Pulihkan Default
 	Restrictive (Web)	Restriktif (Web)
-	Right	Kanan
 	Right align text	Teks rata kanan
 	Rigid	Kaku
 	Rotate:	Putar:
@@ -2636,6 +2661,7 @@ cameraRaw	Blending	Pembauran
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Pemilih Warna (Warna Teks)
+	Color Picker ({name})	Pemilih Warna ({name})
 	Color Picker (Fill Color)	Pemilih Warna (Warna Isian)
 	Fill color	Warna isian
 	Color Picker (Stroke Color)	Pemilih Warna (Warna Stroke)
@@ -2808,7 +2834,26 @@ fontWeight	Italic	Miring
 	Dash offset	Offset garis
 	Open paths use centered strokes	Jalur terbuka menggunakan goresan tengah
 	Use finite lengths and a positive pattern total	Gunakan panjang terbatas dan total pola positif
+
+# Undo cache budgets
+	Budget mb	Batas (MiB)
+	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	Piksel dokumen, data tersemat, dan riwayat urungkan berbagi batas memori. Memori dialokasikan sesuai kebutuhan; penggunaan memori aplikasi lainnya dihitung terpisah.
+	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	Ruang disk untuk urungkan hanya digunakan saat diperlukan, hingga batas ini. Nol menonaktifkan cache disk. Jalur disk sementara berlaku pada sesi cache berikutnya.
+	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Versi browser ini menyimpan riwayat urungkan di memori. Pengaturan disk sementara berlaku untuk aplikasi desktop.
+	Memory budget (MiB)	Batas memori (MiB)
+	Undo disk budget (MiB)	Batas disk untuk urungkan (MiB)
 	No subject found — try Object Selection or the Lasso	Subjek tidak ditemukan — coba Seleksi Objek atau Laso
 	Quick Selection found nothing there	Seleksi Cepat tidak menemukan apa pun di sana
 	Object Selection found nothing there — try a tighter rectangle	Seleksi Objek tidak menemukan apa pun di sana — coba persegi panjang yang lebih rapat
 	No subject found — try a rectangle around the object	Subjek tidak ditemukan — coba persegi panjang di sekitar objek
+	Next Document	Dokumen Berikutnya
+	Previous Document	Dokumen Sebelumnya
+	Appearance Settings…	Pengaturan Tampilan…
+	Add to favorites	Tambahkan ke favorit
+	Remove from favorites	Hapus dari favorit
+	Capishot — Screen Color Picker	Capishot — Pemilih Warna Layar
+	Float Panel	Lepaskan panel
+	Float Panel Group	Lepaskan grup panel
+	Dock Panel Group	Tambatkan grup panel
+	Use Classic Mode	Gunakan Mode Klasik
+	Auto Center Preview	Pusatkan Pratinjau Otomatis
