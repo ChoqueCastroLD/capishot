@@ -98,6 +98,37 @@ fn readout(h: &Harness<'static, PhotocraftApp>, w: i32, ht: i32) -> bool {
 }
 
 #[test]
+fn marquee_intent_is_captured_before_the_drag_threshold() {
+    for tool in [Tool::RectMarquee, Tool::EllipseMarquee] {
+        for at_press in [Modifiers::NONE, Modifiers::SHIFT] {
+            let mut h = harness(tool);
+            h.state_mut().ui.extras.snap = false;
+            h.state_mut().run("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap();
+            mods(&mut h, at_press);
+            move_to(&mut h, 100.0, 100.0);
+            let start = screen(&h, 100.0, 100.0);
+            button(&mut h, start, true, at_press);
+            assert!(h.state().drag.is_none(), "still below the drag threshold");
+            // Change Shift while the pointer is still at the press, before egui starts a drag.
+            let during = if at_press.shift { Modifiers::NONE } else { Modifiers::SHIFT };
+            mods(&mut h, during);
+            move_to(&mut h, 180.0, 130.0);
+            assert!(readout(&h, 80, if at_press.shift { 30 } else { 80 }), "{tool:?}, Shift at press: {}", at_press.shift);
+            release_at(&mut h, 180.0, 130.0, during);
+            let st = h.state().session.active().unwrap();
+            let sel = st.doc.selection.as_ref().unwrap();
+            if at_press.shift {
+                assert!(sel.sample_channel(20, 20, 0) > 0.99, "Shift at the press keeps Add mode");
+                assert_eq!(selection(&h), Rect::new(10, 10, 180, 130));
+            } else {
+                assert!(sel.sample_channel(20, 20, 0) < 0.01, "Shift after the press constrains a replacement");
+                assert_eq!(selection(&h), Rect::new(100, 100, 180, 180));
+            }
+        }
+    }
+}
+
+#[test]
 fn shift_during_the_drag_draws_a_square_and_the_readout_follows() {
     let mut h = harness(Tool::RectMarquee);
     press_at(&mut h, 50.0, 50.0, Modifiers::NONE);
