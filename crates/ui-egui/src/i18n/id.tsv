@@ -30,6 +30,7 @@
 	(coming soon)	(segera hadir)
 	New…	Baru…
 	Open…	Buka…
+	Open as Deep…	Buka sebagai deep…
 	Open As…	Buka Sebagai…
 	Open Recent	Terakhir Dibuka
 	Clear Recent Files	Hapus Daftar Berkas Terakhir
@@ -1010,6 +1011,7 @@
 	Filter for pixel layers	Filter untuk layer piksel
 	Filter for shape layers	Filter untuk layer bentuk
 	Filter for smart objects	Filter untuk smart object
+	Filter for deep layers	Saring lapisan deep
 	Filter for type layers	Filter untuk layer teks
 	Filter:	Filter:
 	Finger Painting	Lukis Jari

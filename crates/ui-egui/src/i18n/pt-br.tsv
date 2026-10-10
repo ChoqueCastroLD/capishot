@@ -34,6 +34,7 @@
 	(coming soon)	(em breve)
 	New…	Novo…
 	Open…	Abrir…
+	Open as Deep…	Abrir como deep…
 	Open As…	Abrir como…
 	Open Recent	Abrir recentes
 	Clear Recent Files	Limpar arquivos recentes
@@ -1015,6 +1016,7 @@
 	Filter for pixel layers	Filtrar camadas de pixels
 	Filter for shape layers	Filtrar camadas de forma
 	Filter for smart objects	Filtrar objetos inteligentes
+	Filter for deep layers	Filtrar camadas deep
 	Filter for type layers	Filtrar camadas de texto
 	Filter:	Filtro:
 	Finger Painting	Pintura com o dedo

@@ -40,6 +40,7 @@
 	New from Clipboard	Создать из буфера обмена
 	New	Создать
 	Open…	Открыть…
+	Open as Deep…	Открыть как deep…
 	Open	Открыть
 	Open As…	Открыть как…
 	Open Recent	Открыть недавние
@@ -2690,3 +2691,4 @@ fontWeight	Italic	Курсив
 	Missing delete command	Отсутствует команда удаления
 	Invalid delete command	Недопустимая команда удаления
 	Layer deleted, but confirmation preference could not be saved: {error}	Слой удалён, но не удалось сохранить настройку подтверждения: {error}
+	Filter for deep layers	Фильтр по глубоким слоям
