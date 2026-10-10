@@ -151,7 +151,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         crate::canvas::commit_crop(app);
         return Ok(json!({"committed": true}));
     }
-    // Help › GitHub, Report an Issue, psd-compiler, PhotoCraft.
+    // Help › GitHub, Report an Issue, psd-compiler, upstream project.
     if let Some(url) = crate::links::url_for(id) {
         return Ok(crate::links::open(app, ctx, url));
     }
