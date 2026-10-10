@@ -1002,10 +1002,21 @@ impl PhotocraftApp {
         }
         let st = self.session.active().ok_or("no document")?;
         // PDN imports default to our native format, which preserves Paint.NET's blend modes.
-        // Other files keep their format when writable, otherwise switch to .psd.
+        // Other files keep their format only when it can retain their layers. A plain raster
+        // (including an unlocked transparent PNG) can keep its flat format; editable contents,
+        // masks and layer appearance settings need a layered format even with just one layer.
+        let plain_raster = matches!(st.doc.layers.as_slice(), [layer]
+            if matches!(layer.content, photocraft_doc::LayerContent::Raster(_))
+                && layer.visible && layer.opacity >= 1.0 && layer.fill_opacity >= 1.0
+                && layer.mask.is_none() && layer.vector_mask.is_none()
+                && layer.effects.items.is_empty() && layer.effects.psd_raw.is_none()
+                && matches!(layer.blend, photocraft_color::BlendMode::Normal | photocraft_color::BlendMode::PassThrough)
+                && photocraft_compose::channel_weights(layer, st.doc.mode).is_none()
+                && !photocraft_compose::blend_if_active(layer, st.doc.mode));
         let ext = st.path.as_deref().and_then(|p| std::path::Path::new(p).extension()).map(|e| e.to_string_lossy().to_ascii_lowercase());
         let writable = ext.is_some_and(|e| {
-            matches!(e.as_str(), photocraft_format::EXTENSION | "psd" | "psb") || photocraft_codecs::from_extension(&e).is_some_and(|f| f.caps().write)
+            matches!(e.as_str(), photocraft_format::EXTENSION | "psd" | "psb" | "tif" | "tiff")
+                || (plain_raster && photocraft_codecs::from_extension(&e).is_some_and(|f| f.caps().write))
         });
         let suggested = match &st.path {
             Some(p) if writable => p.clone(),
