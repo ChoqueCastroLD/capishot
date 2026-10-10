@@ -33,7 +33,9 @@ pub struct Runtime {
     save_retry: SaveRetry,
     next_autosave_ms: f64,
     recovery_started: bool,
+    #[cfg(not(target_arch = "wasm32"))]
     discovery_pending: Option<JobId>,
+    #[cfg(not(target_arch = "wasm32"))]
     discovery_result: std::sync::Arc<std::sync::Mutex<Option<(Vec<crate::Recoverable>, Vec<String>)>>>,
     recovery_queue: VecDeque<crate::Recoverable>,
     recovery_pending: Option<(JobId, String)>,
@@ -187,6 +189,12 @@ pub fn load(app: &mut PhotocraftApp) {
 fn recovery(app: &mut PhotocraftApp) {
     if !app.prefs_rt.recovery_started {
         app.prefs_rt.recovery_started = true;
+        #[cfg(not(target_arch = "wasm32"))]
+        let discovery_requested = app.session.prefs().file_handling.recover_on_launch && app.services.discover_recovery.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let discovery_requested = false;
+        // Native recovery descriptors live on disk; the browser has no discovery service.
+        #[cfg(not(target_arch = "wasm32"))]
         if app.session.prefs().file_handling.recover_on_launch
             && let Some(discover) = app.services.discover_recovery.as_mut()
         {
@@ -214,7 +222,9 @@ fn recovery(app: &mut PhotocraftApp) {
                 Ok(Started::Done(_)) => finish_discovery(app),
                 Err(error) => crate::notices::error(app, format!("Recovery discovery failed: {error}")),
             }
-        } else if app.session.prefs().file_handling.recover_on_launch
+        }
+        if !discovery_requested
+            && app.session.prefs().file_handling.recover_on_launch
             && let Some(recover) = app.services.recover.as_mut()
         {
             let batch = recover();
@@ -232,6 +242,7 @@ fn recovery(app: &mut PhotocraftApp) {
     start_next_recovery(app);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn finish_discovery(app: &mut PhotocraftApp) {
     let batch = app.prefs_rt.discovery_result.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
     if let Some((entries, errors)) = batch {
@@ -346,6 +357,7 @@ fn finish_recovery(app: &mut PhotocraftApp, key: &str, v: &Value) {
 /// Recovery uses the existing job polling/progress/cancel path. Its successful result adopts
 /// the original entry on the UI thread, using identity rather than a mutable tab position.
 pub(crate) fn on_recovery_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
     if app.prefs_rt.discovery_pending == Some(e.id) {
         app.prefs_rt.discovery_pending = None;
         match &e.outcome {

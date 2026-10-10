@@ -42,11 +42,11 @@ use photocraft_doc::Document;
 use photocraft_raster::Rgba8Image;
 
 pub use atomic::atomic_write;
-pub use convert::MAX_GROUP_DEPTH;
 pub use autosave::{
     AutosaveCompletion, Autosaver, RecoveryEntry, discard_recovery, list_recovery, list_recovery_checked, recover, recover_checkpoint,
     recover_checkpoint_with_context,
 };
+pub use convert::MAX_GROUP_DEPTH;
 pub use manifest::{FORMAT_VERSION, Manifest};
 pub use read::read_file;
 pub use store::{DEFAULT_REVERIFY_BUDGET, PcraftWriter, SaveStats};

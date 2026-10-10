@@ -40,8 +40,8 @@ mod linux_libs;
 mod logging;
 mod monitor_profile;
 mod photoshop_settings;
-mod screen_color;
 mod recovery;
+mod screen_color;
 mod services;
 // Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
