@@ -481,6 +481,8 @@ pub struct PhotocraftApp {
     pub(crate) transform_preview: Option<transform_tool::TransformPreview>,
     /// Move-tool ⇧/⌥ drag state (move_mods).
     pub(crate) move_mods: move_mods::MoveDrag,
+    /// Cached document for a modal text Style Options color preview.
+    pub(crate) text_style_preview: Option<type_panels_ui::color_picker::Preview>,
     /// Live Layer Style dialog preview: (key over revision + style fields, preview or validation error).
     pub(crate) style_preview: Option<(u64, Result<std::sync::Arc<Document>, String>)>,
     pub(crate) solid_fill_preview: Option<solid_fill_ui::Preview>,
@@ -627,6 +629,7 @@ impl PhotocraftApp {
             transform_preview: None,
             move_mods: Default::default(),
             style_preview: None,
+            text_style_preview: None,
             solid_fill_preview: None,
             distort: Default::default(),
             gradient: Default::default(),

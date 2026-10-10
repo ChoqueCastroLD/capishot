@@ -3425,6 +3425,12 @@ fontWeight	Thin	Πολύ λεπτά
 	Cycle Orientation	Εναλλαγή προσανατολισμού
 	Set the overlay options for the Crop tool	Ορισμός επιλογών επικάλυψης για το εργαλείο Περικοπή
 	Alt-click went to the desktop, which moves windows with Alt-drag. Set its window-move key to Super, or latch Alt in Window › Modifier Keys.	Το Alt-κλικ πήγε στο περιβάλλον εργασίας, που μετακινεί παράθυρα με Alt-σύρσιμο. Ορίστε το πλήκτρο μετακίνησης παραθύρων του σε Super ή κλειδώστε το Alt στο Παράθυρο › Πλήκτρα τροποποίησης.
+
+# Shared Layer Style color picker
+	Color Picker (Layer Style Color)	Επιλογέας χρώματος (χρώμα στυλ επιπέδου)
+
+# Shared text style Color Picker (#2015)
+	Color Picker (Text Color)	Επιλογέας χρώματος (χρώμα κειμένου)
 	Auto Hide Notifications	Αυτόματη απόκρυψη ειδοποιήσεων
 	Notification Duration (seconds)	Διάρκεια ειδοποίησης (δευτερόλεπτα)
 	Appearance Mode	Λειτουργία εμφάνισης

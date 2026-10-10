@@ -3339,6 +3339,9 @@ fontWeight	Italic	斜体
 	Cycle Orientation	方向を切り替え
 	Set the overlay options for the Crop tool	切り抜きツールのオーバーレイオプションを設定
 	Alt-click went to the desktop, which moves windows with Alt-drag. Set its window-move key to Super, or latch Alt in Window › Modifier Keys.	Alt+クリックはデスクトップに取られました（Alt+ドラッグでウィンドウを移動する設定です）。デスクトップのウィンドウ移動キーを Super に変更するか、ウィンドウ › 修飾キーで Alt を固定してください。
+
+# Shared Layer Style color picker
+	Color Picker (Layer Style Color)	カラーピッカー（レイヤースタイルの色）
 	Auto Hide Notifications	通知を自動的に隠す
 	Notification Duration (seconds)	通知の表示時間（秒）
 	Appearance Mode	外観モード
