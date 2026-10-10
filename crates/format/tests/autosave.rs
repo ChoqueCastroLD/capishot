@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use common::*;
 use photocraft_color::{ColorMode, SampleType};
-use photocraft_doc::Document;
 use photocraft_format::*;
 
 #[test]
@@ -41,8 +40,8 @@ fn background_save_outcomes_report_failure_then_recovery() {
     let receive = |saver: &Autosaver| {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while std::time::Instant::now() < deadline {
-            if let Some(outcome) = saver.take_completed().into_iter().next() {
-                return outcome;
+            if let Some(outcome) = saver.take_completion() {
+                return (outcome.revision, outcome.result);
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
