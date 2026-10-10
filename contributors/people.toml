@@ -83,4 +83,7 @@ sync_github_name = true
 [people.alexanderalber]
 real_name = "Alexander Alber"
 display_name = "Alexander Alber"
+[people.itsF4LCON]
+real_name = "Ran Geerts"
+display_name = "Ran Geerts"
 sync_github_name = false
