@@ -3471,3 +3471,9 @@ fontWeight	Italic	斜体
 	Dock Panel Group	パネルグループをドッキング
 	Use Classic Mode	クラシックモードを使用
 	Auto Center Preview	プレビューを自動的に中央に配置
+# Capishot
+	Compile PSD…	PSD をコンパイル…
+	Compile Folder…	フォルダーをコンパイル…
+	psd-compiler on GitHub	GitHub の psd-compiler
+	Based on PhotoCraft	PhotoCraft がベース
+	psd-compiler	psd-compiler

@@ -61,7 +61,8 @@ fn deferred_recovery_preserves_pixels_and_metadata_until_the_adopted_entry_is_di
 
     services.discard_autosave.as_mut().unwrap()(restored.document.id.0, Some(&pending.key)).unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !list_recovery(&dir).is_empty() && std::time::Instant::now() < deadline {
+    // The sidecar goes first and the bundle after it, in the background: wait for both.
+    while (!list_recovery(&dir).is_empty() || entry.bundle.exists()) && std::time::Instant::now() < deadline {
         services.poll_autosave.as_mut().unwrap()();
         std::thread::sleep(std::time::Duration::from_millis(1));
     }

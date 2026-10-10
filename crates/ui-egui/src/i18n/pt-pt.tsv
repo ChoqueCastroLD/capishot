@@ -2833,3 +2833,9 @@ fontWeight	Italic	Itálico
 	Quick Selection found nothing there	A Seleção rápida não encontrou nada nessa zona
 	Object Selection found nothing there — try a tighter rectangle	A Seleção de objetos não encontrou nada nessa zona — tente um retângulo mais apertado
 	No subject found — try a rectangle around the object	Não foi encontrado nenhum objeto — tente um retângulo à volta do objeto
+# Capishot
+	Compile PSD…	Compilar PSD…
+	Compile Folder…	Compilar pasta…
+	psd-compiler on GitHub	psd-compiler no GitHub
+	Based on PhotoCraft	Baseado no PhotoCraft
+	psd-compiler	psd-compiler
