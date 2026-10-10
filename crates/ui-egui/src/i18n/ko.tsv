@@ -3029,3 +3029,9 @@ fontWeight	Italic	기울임
 	Dock Panel Group	패널 그룹 도킹
 	Use Classic Mode	클래식 모드 사용
 	Auto Center Preview	미리 보기 자동 가운데 맞춤
+# Capishot
+	Compile PSD…	PSD 컴파일…
+	Compile Folder…	폴더 컴파일…
+	psd-compiler on GitHub	GitHub의 psd-compiler
+	Based on PhotoCraft	PhotoCraft 기반
+	psd-compiler	psd-compiler

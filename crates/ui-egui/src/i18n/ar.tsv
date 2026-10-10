@@ -2788,3 +2788,9 @@ fontWeight	Italic	مائل
 	Quick Selection found nothing there	لم يجد التحديد السريع شيئاً هناك
 	Object Selection found nothing there — try a tighter rectangle	لم يجد تحديد الكائن شيئاً هناك — جرب مستطيلاً أضيق
 	No subject found — try a rectangle around the object	لم يتم العثور على موضوع — جرب مستطيلاً حول الكائن
+# Capishot
+	Compile PSD…	ترجمة PSD…
+	Compile Folder…	ترجمة مجلد…
+	psd-compiler on GitHub	psd-compiler على GitHub
+	Based on PhotoCraft	مبني على PhotoCraft
+	psd-compiler	psd-compiler
