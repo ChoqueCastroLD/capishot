@@ -67,14 +67,16 @@ fn a_historical_state_uses_its_own_saved_comp_and_fresh_layer_ids() {
 #[test]
 fn nested_group_states_are_remapped_but_genuinely_missing_layers_stay_missing() {
     let (mut s, _) = scene();
-    let (group, child) = s.edit("Add nested group", |doc, _| {
-        let child = Layer::raster("Child", doc.pixel_format());
-        let child_id = child.id;
-        let group = Layer::group("Group", vec![child]);
-        let group_id = group.id;
-        doc.layers.push(group);
-        Ok((group_id, child_id))
-    }).unwrap();
+    let (group, child) = s
+        .edit("Add nested group", |doc, _| {
+            let child = Layer::raster("Child", doc.pixel_format());
+            let child_id = child.id;
+            let group = Layer::group("Group", vec![child]);
+            let group_id = group.id;
+            doc.layers.push(group);
+            Ok((group_id, child_id))
+        })
+        .unwrap();
     s.execute("layerComp.new", json!({"name": "Nested"})).unwrap();
     // An old comp may already refer to a deleted layer before duplication.
     // Copying should not silently rewrite that warning to an unrelated new id.
@@ -83,7 +85,8 @@ fn nested_group_states_are_remapped_but_genuinely_missing_layers_stay_missing() 
         let comp = doc.layer_comps.iter_mut().find(|c| c.name == "Nested").unwrap();
         comp.states.push(CompLayerState { layer: missing, visible: Some(false), position: None, appearance: None });
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
     s.execute("layer.setProps", json!({"layer": child.0, "visible": false})).unwrap();
     s.execute("image.duplicate", json!({})).unwrap();
 
