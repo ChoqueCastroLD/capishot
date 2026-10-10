@@ -92,6 +92,7 @@ pub mod layer_tree_ui;
 pub mod links;
 pub mod liquify_ui;
 pub mod magnetic_lasso_ui;
+mod mask_props_ui;
 pub mod mask_thumbs_ui;
 pub mod menu_catalog;
 pub mod menu_nav;
