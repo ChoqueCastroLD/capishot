@@ -39,6 +39,12 @@ approximated or left out, each with a warning; damaged or unknown files fall bac
 preview. Affinity writing is not implemented: no Affinity installation was available to check
 written files, so `.af` export stays unsupported.
 
+2026-10-10: current `.af` artboard properties (`phrp`/`aprp`) are recognized alongside the
+legacy flag, including converted curve boards. Synthetic two-board regressions check separate
+bounds, overflow clipping, `.pcraft`/PSD board and pixel round trips, and moving one board with its
+children through undo/redo. Nested boards remain masked groups; rotated/curved board outlines
+still import at their bounding rectangle.
+
 2026-10-09: `corpus/affinity/` now has 39 pinned documents and 21 PNGs (20 rendered references and
 one bitmap-fill texture): the prior 21 public documents plus 18 CC0 samples for #1606. The new
 samples compare against their exported PNGs;
