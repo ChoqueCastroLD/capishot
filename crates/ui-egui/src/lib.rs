@@ -92,11 +92,13 @@ pub mod layer_tree_ui;
 pub mod links;
 pub mod liquify_ui;
 pub mod magnetic_lasso_ui;
+mod mask_props_ui;
 pub mod mask_thumbs_ui;
 pub mod menu_catalog;
 pub mod menu_nav;
 pub mod menus;
 pub mod monitor_status;
+pub mod move_lock;
 pub mod move_mods;
 pub mod move_ui;
 pub mod native_menu;
@@ -117,6 +119,7 @@ pub mod prefs_ui;
 pub mod preset_files_ui;
 pub mod preset_panels;
 pub mod press_menu;
+mod pressure_curve_ui;
 pub mod props_layout;
 pub mod proxy;
 pub mod puppet_ui;
@@ -181,7 +184,7 @@ pub use file_open::OsEvent;
 pub use state::{Tool, UiState};
 
 /// Decode a file: (document, warnings about anything approximated or dropped).
-pub type ImportFn = Box<dyn Fn(&str, &[u8]) -> Result<(Document, Vec<String>), String>>;
+pub type ImportFn = Box<dyn Fn(&str, &[u8], usize) -> Result<(Document, Vec<String>), String>>;
 /// Encoder settings chosen in Export As (the file format comes from the name's extension).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExportSettings {
@@ -370,6 +373,12 @@ pub struct PhotocraftApp {
     monitors: monitor_status::State,
     checker: Option<egui::TextureHandle>,
     drag: Option<canvas::Drag>,
+    /// A Move-tool press landed on a locked layer: the first pointer move shows Photoshop's
+    /// message (`move_lock`), a plain click shows nothing.
+    pub(crate) move_blocked: bool,
+    /// The tool pointer events go to this frame when it isn't the selected one: the Move tool
+    /// while ⌘ is held (`hold_keys::cmd_moves`). Set by the canvas for its gestures, never saved.
+    pub(crate) tool_override: Option<state::Tool>,
     /// Brush/Eraser stroke being drawn, rendered by the engine (see `canvas::LiveStroke`).
     live_stroke: Option<canvas::LiveStroke>,
     /// Footprint trail of a retouching drag (see `stroke_trail`).
@@ -567,6 +576,8 @@ impl PhotocraftApp {
             monitors: Default::default(),
             checker: None,
             drag: None,
+            move_blocked: false,
+            tool_override: None,
             live_stroke: None,
             trail: None,
             move_preview: None,
@@ -831,6 +842,12 @@ impl PhotocraftApp {
 
     /// Keep one view per document, in tab order: a view and its windows stay with their document
     /// when tabs move (`document.move`) or close.
+    /// The tool pointer events go to: a held temporary tool when there is one (⌘ is the Move
+    /// tool, `hold_keys::cmd_moves`), else the selected tool.
+    pub fn active_tool(&self) -> state::Tool {
+        self.tool_override.unwrap_or(self.ui.tool)
+    }
+
     pub fn sync_views(&mut self) {
         type_transform::cancel_stale(self);
         crate::lasso_ui::cancel_stale(self);
@@ -923,7 +940,8 @@ impl PhotocraftApp {
             return Ok(Vec::new());
         }
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
-        let (doc, warnings) = import(name, bytes)?;
+        let max_svg_group_depth = self.session.prefs().file_handling.rasterize_svg_groups_deeper_than as usize;
+        let (doc, warnings) = import(name, bytes, max_svg_group_depth)?;
         // Edit › Color Settings policies apply on open; mismatches can ask what to do.
         // No path yet: a bare name isn't a location to save back to (`open_file` sets the path).
         let (_, color) = self.session.open_document(doc, None);
@@ -972,7 +990,8 @@ impl PhotocraftApp {
     /// events and no Color Settings policy (which may read user-configured profile paths).
     fn import_automation_document(&mut self, name: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
-        let (doc, warnings) = import(name, bytes)?;
+        let max_svg_group_depth = self.session.prefs().file_handling.rasterize_svg_groups_deeper_than as usize;
+        let (doc, warnings) = import(name, bytes, max_svg_group_depth)?;
         // The caller records the path it read from.
         self.session.add_document(doc, None);
         if let Some(st) = self.session.active_mut() {
@@ -1278,6 +1297,9 @@ impl eframe::App for PhotocraftApp {
             wheel_nav::fold_legacy_pinch(ctx, raw_input);
         }
         raw_input.events.extend(self.take_synthetic_step());
+        if self.custom_titlebar {
+            titlebar::release_after_os_resize(ctx, raw_input);
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
