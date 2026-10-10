@@ -247,11 +247,42 @@ impl Region {
 /// byte mark per pixel, then anti-aliases just the edges inside the touched bounding box.
 /// Matches [`magic_wand`] for 8-bit sources. `None` if the seed is outside `area`.
 pub fn wand_region(img: &[[u8; 4]], area: Rect, seed: (i32, i32), tolerance: f32, contiguous: bool, anti_alias: bool) -> Option<Region> {
+    wand_region_sampled(img, area, seed, 1, tolerance, contiguous, anti_alias)
+}
+
+/// The colour a Magic Wand click compares against: the seed pixel (`sample` 1, Point Sample), or
+/// the average of the `sample × sample` square around it (3 × 3 Average … 101 × 101 Average),
+/// clipped to `area`. `None` if the seed is outside `area` or `img` doesn't cover it.
+pub fn wand_reference(img: &[[u8; 4]], area: Rect, seed: (i32, i32), sample: u32) -> Option<[u8; 4]> {
     if !area.contains(seed.0, seed.1) {
         return None;
     }
+    let w = area.width() as usize;
+    let h = i32::try_from(sample.clamp(1, 101) / 2).ok()?;
+    let r = Rect::new(seed.0 - h, seed.1 - h, seed.0 + h + 1, seed.1 + h + 1).intersect(&area);
+    let (mut sum, mut n) = ([0u64; 4], 0u64);
+    for y in r.y0..r.y1 {
+        for x in r.x0..r.x1 {
+            let p = img.get((y - area.y0) as usize * w + (x - area.x0) as usize)?;
+            for c in 0..4 {
+                sum[c] += u64::from(p[c]);
+            }
+            n += 1;
+        }
+    }
+    if n == 0 {
+        return None;
+    }
+    Some(sum.map(|v| ((v + n / 2) / n) as u8))
+}
+
+/// [`wand_region`] comparing against [`wand_reference`] with Sample Size `sample`.
+pub fn wand_region_sampled(img: &[[u8; 4]], area: Rect, seed: (i32, i32), sample: u32, tolerance: f32, contiguous: bool, anti_alias: bool) -> Option<Region> {
+    if !area.contains(seed.0, seed.1) || img.len() < area.width() as usize * area.height() as usize {
+        return None;
+    }
     let (w, h) = (area.width() as usize, area.height() as usize);
-    let target = img[(seed.1 - area.y0) as usize * w + (seed.0 - area.x0) as usize];
+    let target = wand_reference(img, area, seed, sample)?;
     let tol = (tolerance + 1e-3).floor().max(0.0) as i32;
     // Copying a selection can leave RGB under zero alpha. Those invisible colours must not
     // split a transparent region into pieces, as if the copied source were still visible.
@@ -1247,6 +1278,32 @@ mod tests {
             }
         }
         assert!(wand_region(&img, area, (0, 0), 10.0, true, true).is_none());
+    }
+
+    #[test]
+    fn wand_sample_size_averages_around_the_click() {
+        // A noisy flat area (alternating 100 / 140 grey) next to black.
+        let area = Rect::new(0, 0, 20, 10);
+        let img: Vec<[u8; 4]> = (0..200)
+            .map(|i| {
+                let (x, y) = (i % 20, i / 20);
+                let v = if x >= 15 { 0 } else if (x + y) % 2 == 0 { 100 } else { 140 };
+                [v, v, v, 255]
+            })
+            .collect();
+        let count = |r: &Region| (0..10).flat_map(|y| (0..20).map(move |x| (x, y))).filter(|&(x, y)| r.at(x, y) > 0.5).count();
+        // Point Sample on a 100 pixel with tolerance 25 takes only the 100s (non-contiguous).
+        let point = wand_region_sampled(&img, area, (4, 4), 1, 25.0, false, false).unwrap();
+        assert_eq!(count(&point), 75);
+        // 3 × 3 Average compares with ~120: both greys, not the black.
+        assert_eq!(wand_reference(&img, area, (4, 4), 3), Some([118, 118, 118, 255]));
+        let avg = wand_region_sampled(&img, area, (4, 4), 3, 25.0, true, false).unwrap();
+        assert_eq!(count(&avg), 150);
+        // Clipped at the canvas edge; the point sample is the plain wand.
+        assert_eq!(wand_reference(&img, area, (0, 0), 101), Some([90, 90, 90, 255]));
+        assert_eq!(wand_reference(&img, area, (40, 0), 3), None);
+        assert_eq!(wand_region(&img, area, (4, 4), 25.0, false, false).map(|r| count(&r)), Some(75));
+        assert!(wand_region_sampled(&img[..10], area, (4, 4), 3, 25.0, true, false).is_none());
     }
 
     #[test]
