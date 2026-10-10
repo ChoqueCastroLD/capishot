@@ -366,7 +366,7 @@ fn bridge_only(name: &str) -> Result<CallToolResult, McpError> {
     Ok(fail(format!(
         "`{name}` drives the live GUI and needs bridge mode: start the app with \
          `photocraft --control <port> --control-token-file <path>`, then run \
-         `photocraft-cli mcp --bridge 127.0.0.1:<port> --control-token-file <path>`"
+         `capishot-cli mcp --bridge 127.0.0.1:<port> --control-token-file <path>`"
     )))
 }
 
