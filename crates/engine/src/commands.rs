@@ -1150,6 +1150,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::smart_cmds::specs());
     v.extend(crate::layer_multi_cmds::specs());
     v.extend(crate::layer_copy_cmds::specs());
+    v.extend(crate::layer_key_cmds::specs());
     v.extend(crate::prefs::specs());
     v.extend(crate::edit_menu_cmds::specs());
     v.extend(crate::fill_key_cmds::specs());

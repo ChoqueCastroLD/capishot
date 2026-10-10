@@ -274,7 +274,15 @@ pub fn clipboard_keys(ctx: &egui::Context, typing: bool, raw: &mut egui::RawInpu
     raw.events = out;
 }
 
+/// Where the last tool used in a tool group (by its key) is remembered.
+fn group_last_id(key: char) -> egui::Id {
+    egui::Id::new(("pc-tool-group-last", key))
+}
+
 pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    // The current tool is its group's last-used one (what its key picks from another group).
+    let tool = app.ui.tool;
+    ctx.data_mut(|d| d.insert_temp(group_last_id(tool.key()), tool));
     // Camera Raw is modal like Photoshop's filter dialog: no application shortcut (Save, Undo,
     // tools) runs beneath it, and it handles its own keys (Y, U, O, S). Unlike the other dialogs
     // below it covers the canvas, so canvas zoom keys are blocked too.
@@ -411,6 +419,10 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if crate::crop_shield::keys(app, ctx) {
         return;
     }
+    // ⇧⌥ + letter and ⇧+ / ⇧- set the blending mode (`blend_keys`), before ⇧ + a tool key.
+    if crate::blend_keys::handle(app, ctx) {
+        return;
+    }
     // Single-key tools (no modifiers). D and X (`tools.defaultColors` / `tools.swapColors`) and the
     // brush keys [ ] ⇧[ ⇧] (`tools.decreaseBrushSize`…) are commands, dispatched above with any
     // Keyboard Shortcuts override.
@@ -443,19 +455,20 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
             return;
         }
     }
-    // Tool keys; pressing the key of the current group cycles within it. With Preferences ›
-    // Tools › Use Shift Key for Tool Switch, only ⇧+key cycles and the plain key keeps the
-    // group's current tool.
+    // Tool keys. With Preferences › Tools › Use Shift Key for Tool Switch (on by default, as in
+    // Photoshop) ⇧+key cycles the group and the plain key keeps the group's current tool; without
+    // it the plain key cycles. From another group the key picks the group's last-used tool.
     let shift_switch = app.session.prefs().tools.use_shift_key_for_tool_switch;
     for t in Tool::ALL {
         let Some(k) = Key::from_name(&t.key().to_string()) else { continue };
         let cycle_shift = shift_switch && ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, k));
         if cycle_shift || pressed(k) {
             let group: Vec<Tool> = Tool::ALL.iter().copied().filter(|x| x.key() == t.key()).collect();
+            let Some(&first) = group.first() else { return };
             app.ui.tool = match group.iter().position(|x| *x == app.ui.tool) {
                 Some(i) if shift_switch && !cycle_shift => group[i],
                 Some(i) => group[(i + 1) % group.len()],
-                None => group[0],
+                None => ctx.data(|d| d.get_temp::<Tool>(group_last_id(t.key()))).filter(|x| group.contains(x)).unwrap_or(first),
             };
             return;
         }
@@ -584,6 +597,15 @@ mod tests {
     }
 
     #[test]
+    fn prose_names_the_platform_modifiers() {
+        assert_eq!(os_text_for("Hold Alt while drawing", true), "Hold Option while drawing");
+        assert_eq!(os_text_for("Alt-drag to thaw · Ctrl+click", true), "Option-drag to thaw · Command+click");
+        assert_eq!(os_text_for("Altitude and Ctrls stay", true), "Altitude and Ctrls stay", "whole words only");
+        assert_eq!(os_text_for("Hold Alt while drawing", false), "Hold Alt while drawing");
+        assert_eq!(os_text("Alt-drag"), if cfg!(target_os = "macos") { "Option-drag" } else { "Alt-drag" });
+    }
+
+    #[test]
     fn labels_show_the_effective_shortcut_in_platform_notation() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         let new = command_label(&app, "New document…", "file.new");
@@ -596,15 +618,6 @@ mod tests {
         // A user override is picked up…
         app.session.prefs.edit(|p| p.shortcuts.insert("file.new".into(), "Cmd+Shift+N".into()));
         assert_eq!(command_label(&app, "New document…", "file.new"), format!("New document…     {}", pretty("Cmd+Shift+N")));
-    #[test]
-    fn prose_names_the_platform_modifiers() {
-        assert_eq!(os_text_for("Hold Alt while drawing", true), "Hold Option while drawing");
-        assert_eq!(os_text_for("Alt-drag to thaw · Ctrl+click", true), "Option-drag to thaw · Command+click");
-        assert_eq!(os_text_for("Altitude and Ctrls stay", true), "Altitude and Ctrls stay", "whole words only");
-        assert_eq!(os_text_for("Hold Alt while drawing", false), "Hold Alt while drawing");
-        assert_eq!(os_text("Alt-drag"), if cfg!(target_os = "macos") { "Option-drag" } else { "Alt-drag" });
-    }
-
         // …and a removed binding hides the shortcut entirely.
         app.session.prefs.edit(|p| p.shortcuts.insert("file.new".into(), String::new()));
         assert_eq!(command_label(&app, "New document…", "file.new"), "New document…");

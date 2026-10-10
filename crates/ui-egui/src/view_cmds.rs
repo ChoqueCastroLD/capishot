@@ -251,7 +251,7 @@ pub fn handles(id: &str) -> bool {
         return snap_slot(&mut SnapTo::default(), k).is_some() || k == "all" || k == "none";
     }
     if let Some(k) = id.strip_prefix("view.screenMode.") {
-        return SCREEN_MODES.contains(&k) || k == "cycle";
+        return SCREEN_MODES.contains(&k) || k == "cycle" || k == "cyclePrevious";
     }
     if let Some(k) = id.strip_prefix("view.pixelAspectRatio.") {
         return PIXEL_ASPECTS.contains(&k);
@@ -316,7 +316,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
     }
     let doc = app.session.active().is_some();
     Some(match id {
-        "view.screenMode.cycle" => app.ui.text_edit.is_none(),
+        "view.screenMode.cycle" | "view.screenMode.cyclePrevious" => app.ui.text_edit.is_none(),
         "view.twoHundredPercent" | "view.printSize" | "view.fitLayersOnScreen" | "view.rotateView" | "view.resetView" => doc,
         "view.fitArtboardOnScreen" => app.session.active().is_some_and(|d| d.doc.has_artboards()),
         i if i.starts_with("window.arrange.") => match &i["window.arrange.".len()..] {
@@ -523,9 +523,11 @@ fn run(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, p: &Value) -> Res
         return Ok(json!(*slot));
     }
     if let Some(k) = id.strip_prefix("view.screenMode.") {
-        let next = if k == "cycle" {
+        // F cycles forward, ⇧F backward (Photoshop).
+        let next = if k == "cycle" || k == "cyclePrevious" {
+            let n = SCREEN_MODES.len();
             let i = SCREEN_MODES.iter().position(|m| *m == o.screen_mode).unwrap_or(0);
-            SCREEN_MODES[(i + 1) % SCREEN_MODES.len()]
+            SCREEN_MODES[if k == "cycle" { (i + 1) % n } else { (i + n - 1) % n }]
         } else {
             k
         };

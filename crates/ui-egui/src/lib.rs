@@ -105,6 +105,8 @@ pub mod native_menu;
 pub mod new_doc_ui;
 pub mod notices;
 mod numeric_expression;
+mod blend_keys;
+mod view_scroll;
 mod opacity_keys;
 pub mod outline;
 pub mod paint_mouse;

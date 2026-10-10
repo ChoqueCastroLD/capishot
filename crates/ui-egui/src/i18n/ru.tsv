@@ -2692,4 +2692,11 @@ fontWeight	Italic	Курсив
 	Layer deleted, but confirmation preference could not be saved: {error}	Слой удалён, но не удалось сохранить настройку подтверждения: {error}
 	Copy Layers	Копировать слои
 	Paste Layers	Вставить слои
+	Cycle Screen Mode Backwards	Переключить режим экрана в обратном порядке
+	Scroll Up One Screen	Прокрутить на экран вверх
+	Scroll Down One Screen	Прокрутить на экран вниз
+	Scroll Left One Screen	Прокрутить на экран влево
+	Scroll Right One Screen	Прокрутить на экран вправо
+	Scroll to Upper-Left Corner	Прокрутить в левый верхний угол
+	Scroll to Lower-Right Corner	Прокрутить в правый нижний угол
 	Show rulers in new documents	Показывать линейки в новых документах
