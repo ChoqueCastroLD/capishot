@@ -2568,6 +2568,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
         // Capture temporary Type transforms at the actual press, before egui's drag threshold.
         // Releasing Command before the first recognised move must not turn it into text selection.
+        // The Type tool counts successive clicks (word, line, paragraph, all) on this clock.
+        app.type_clicks.now = ui.input(|i| i.time);
         let type_press = egui::Id::new("type-pointer-press-modifiers");
         if tool.is_type()
             && let Some((p, press_mods)) = ui.input(|i| {
@@ -2808,9 +2810,6 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // Crop: a double-click inside the frame commits it, as ↵ does (#1792).
         if tool == Tool::Crop && response.double_clicked() && response.interact_pointer_pos().is_some_and(|p| crate::crop_ui::commits_at(app, xf.to_doc(p))) {
             commit_crop(app);
-        }
-        if tool.is_type() && response.double_clicked() && !crate::type_transform::visible(app, crate::workspace_ui::sticky_mods(app, mods)) {
-            crate::type_tool::select_word(app);
         }
         if app.ui.extras.grid && app.ui.view.extras {
             crate::rulers::draw_grid(app, &painter, &xf, &doc);

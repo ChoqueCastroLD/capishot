@@ -503,15 +503,36 @@ fn type_tool_alt_arrows_kern_the_pair() {
     h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, Key::ArrowRight);
     h.run_steps(2);
     assert_eq!(h.state().ui.text_edit.as_ref().map(|e| (e.anchor, e.caret)), Some((3, 6)));
-    // With a selection Alt+→ moves by word instead of kerning; at the text end there's no pair.
+    // With a selection Alt+→ tracks the selected characters (Photoshop), in the editing
+    // session's history step; the pair kerning stays.
     let before = kern(&h);
     h.key_press_modifiers(Modifiers::ALT, Key::ArrowRight);
     h.run_steps(2);
     h.key_press_modifiers(Modifiers::ALT, Key::ArrowRight);
     h.run_steps(2);
-    assert_eq!(kern(&h), before);
-    assert_eq!(steps(&h), s0 + 3);
-    // Undo walks back one press at a time.
+    assert_eq!((kern(&h).0, kern(&h).1), (before.0, before.1));
+    let tracking = |h: &Harness<'static, PhotocraftApp>, b: usize| {
+        let t = text(h);
+        let mut end = 0;
+        t.char_runs().into_iter().find(|r| {
+            end += r.len;
+            b < end
+        }).unwrap().style.tracking
+    };
+    assert_eq!((tracking(&h, 2), tracking(&h, 3), tracking(&h, 5)), (0.0, 40.0, 40.0));
+    assert_eq!(steps(&h), s0 + 4);
+    assert_eq!(h.state().ui.text_edit.as_ref().map(|e| (e.anchor, e.caret)), Some((3, 6)), "the selection stays");
+    // At the text end there's no pair: nothing happens.
+    if let Some(e) = h.state_mut().ui.text_edit.as_mut() {
+        (e.anchor, e.caret) = (6, 6);
+    }
+    h.key_press_modifiers(Modifiers::ALT, Key::ArrowRight);
+    h.run_steps(2);
+    assert_eq!(steps(&h), s0 + 4);
+    // Undo walks back the tracking, then one kerning press at a time.
+    assert!(h.state_mut().session.undo());
+    h.run_steps(1);
+    assert_eq!(tracking(&h, 3), 0.0);
     assert!(h.state_mut().session.undo());
     h.run_steps(1);
     assert_eq!(kern(&h).1, metric + 120.0);
