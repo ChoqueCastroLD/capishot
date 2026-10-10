@@ -66,9 +66,9 @@ pub mod file_open;
 pub mod file_ui;
 pub mod fill_ui;
 pub mod filter_dialog;
-mod font_preview;
 #[cfg(not(target_arch = "wasm32"))]
 mod filter_preview_worker;
+mod font_preview;
 pub mod gallery_ui;
 pub mod gpu_canvas;
 pub mod gpu_status;
@@ -78,6 +78,7 @@ pub mod i18n;
 mod icon_data;
 pub mod icons;
 pub mod jobs_ui;
+pub mod kys_import;
 pub mod lasso_ui;
 pub mod layer_menu_ui;
 pub mod layer_pick_ui;
@@ -239,6 +240,9 @@ pub type DiscardAutosaveFn = Box<dyn FnMut(u64)>;
 /// List recoverable documents without decoding them. Their data stays until the documents are
 /// saved or closed; the shell runs each entry's loader on a background worker.
 pub type RecoverFn = Box<dyn FnMut() -> Vec<Recoverable>>;
+/// Photoshop's own keyboard shortcut set on this machine, as (source path, `.kys` XML text):
+/// the newest install's live `Keyboard Shortcuts.psp` on the desktop, `None` without one.
+pub type PhotoshopShortcutsFn = Box<dyn FnMut() -> Option<(String, String)>>;
 /// A recovered document (by `DocId` value, once open) takes over its recovery entry (by key):
 /// its autosaves replace the entry, and saving or closing it drops the entry.
 pub type AdoptAutosaveFn = Box<dyn FnMut(u64, &str)>;
@@ -303,6 +307,8 @@ pub struct Services {
     /// the web (see `prefs_ui`).
     pub load_prefs: Option<LoadTextFn>,
     pub save_prefs: Option<SaveTextFn>,
+    /// Photoshop's live keyboard shortcut set, imported once at first launch (`kys_import`).
+    pub photoshop_shortcuts: Option<PhotoshopShortcutsFn>,
     pub system_theme: Option<SystemThemeFn>,
     /// The native window is connected directly to a Wayland compositor.
     pub is_wayland: bool,
@@ -647,6 +653,8 @@ impl PhotocraftApp {
         };
         // Saved preferences are in place before the first frame; recovery starts in upkeep.
         prefs_ui::load(&mut app);
+        // After the saved preferences and their revision mark, so the imported set is saved.
+        kys_import::auto_import(&mut app);
         notices::wayland_file_drop_guidance(&mut app);
         // File › Scripts › Script Events Manager: "Start Application".
         photocraft_engine::automate_cmds::fire_event(&mut app.session, "startApplication");
