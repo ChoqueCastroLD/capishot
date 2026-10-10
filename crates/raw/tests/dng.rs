@@ -619,3 +619,29 @@ fn lossy_jpeg_tile_dimension_mismatch_errors() {
     let err = decode(&bytes, &Limits::default()).unwrap_err().to_string();
     assert!(err.contains("16x16") && err.contains("32x32"), "{err}");
 }
+
+/// A 3-sample LinearRaw lossy DNG (YCbCr on disk, as real camera files are) decodes to RGB
+/// tiles widened to 16 bits, within the JPEG quality band; a LinearizationTable maps the
+/// decoded samples in the develop stage, so the sensor sees the raw widened values.
+#[test]
+fn lossy_jpeg_rgb_linearraw_decodes() {
+    let (w, h) = (32, 32);
+    // Channel offsets of 64 8-bit steps survive JPEG chroma quantisation at Q60.
+    let data: Vec<u16> = (0..w * h * 3).map(|i| 4096 + ((i / (w * 3)) as u16 * 16) + (i % 3) as u16 * 64 * 256).collect();
+    let mut spec = DngSpec::cfa(w, h, data.clone());
+    spec.samples = 3;
+    spec.storage = DngStorage::LossyJpegTiles { width: 16, height: 16 };
+    let s = sensor(&spec.build());
+    assert_eq!((s.width, s.height, s.samples), (w, h, 3));
+    let mut worst = 0u32;
+    for (got, want) in s.data.iter().zip(&data) {
+        let quant = u32::from(*want >> 8) << 8;
+        worst = worst.max(u32::from(got.abs_diff(quant as u16)));
+    }
+    assert!(worst <= 8 * 256, "worst deviation from the 8-bit quantisation: {worst}");
+    // Each channel carries its own level: R and B stay apart everywhere.
+    for p in 0..w * h {
+        let (r, b) = (s.data[p * 3], s.data[p * 3 + 2]);
+        assert!(r.abs_diff(b) >= 64 * 256 - 8 * 256, "channels collapsed at pixel {p}");
+    }
+}

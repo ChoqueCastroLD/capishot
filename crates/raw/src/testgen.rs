@@ -569,19 +569,23 @@ impl DngSpec {
                 let s = self.samples;
                 for ty in (0..self.height).step_by(th) {
                     for tx in (0..self.width).step_by(tw) {
-                        // Edge tiles are padded by repeating the last row / column.
-                        let mut tile = vec![0u8; tw * th];
+                        // Edge tiles are padded by repeating the last row / column. A 3-sample
+                        // (LinearRaw) spec writes RGB tiles, a CFA spec gray ones.
+                        let mut tile = vec![0u8; tw * th * s];
                         for y in 0..th {
                             for x in 0..tw {
                                 let sy = (ty + y).min(self.height - 1);
                                 let sx = (tx + x).min(self.width - 1);
-                                tile[y * tw + x] = (self.data[(sy * self.width + sx) * s] >> 8) as u8;
+                                for c in 0..s {
+                                    tile[(y * tw + x) * s + c] = (self.data[(sy * self.width + sx) * s + c] >> 8) as u8;
+                                }
                             }
                         }
+                        let colour = if s == 3 { image::ExtendedColorType::Rgb8 } else { image::ExtendedColorType::L8 };
                         let mut j = Vec::new();
                         let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut j, 60);
                         use image::ImageEncoder as _;
-                        enc.write_image(&tile, tw as u32, th as u32, image::ExtendedColorType::L8).expect("jpeg tile");
+                        enc.write_image(&tile, tw as u32, th as u32, colour).expect("jpeg tile");
                         lens.push(j.len() as u32);
                         offs.push(t.blob(j));
                     }
