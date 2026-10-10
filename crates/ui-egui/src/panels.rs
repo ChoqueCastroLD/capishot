@@ -1742,12 +1742,14 @@ fn color_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut s = hsva0.s * 100.0;
     let mut v = hsva0.v * 100.0;
     let hue = widgets::hue_stops();
-    let mut changed = widgets::slider_row(ui, tl!("Hue"), &mut h, 0.0..=360.0, "°", Some(&hue)).changed();
+    // Preferences ▸ Interface ▸ Dynamic Color Sliders: off, the tracks are the plain ones.
+    let dynamic = app.session.prefs().interface.dynamic_color_sliders;
+    let mut changed = widgets::slider_row(ui, tl!("Hue"), &mut h, 0.0..=360.0, "°", dynamic.then_some(&hue)).changed();
     let sat_stops =
         [egui::ecolor::Hsva::new(hsva0.h, 0.0, hsva0.v.max(0.2), 1.0), egui::ecolor::Hsva::new(hsva0.h, 1.0, hsva0.v.max(0.2), 1.0)].map(Color32::from);
-    changed |= widgets::slider_row(ui, tl!("Saturation"), &mut s, 0.0..=100.0, "%", Some(&sat_stops)).changed();
+    changed |= widgets::slider_row(ui, tl!("Saturation"), &mut s, 0.0..=100.0, "%", dynamic.then_some(&sat_stops)).changed();
     let val_stops = [Color32::BLACK, Color32::from(egui::ecolor::Hsva::new(hsva0.h, hsva0.s, 1.0, 1.0))];
-    changed |= widgets::slider_row(ui, tl!("Brightness"), &mut v, 0.0..=100.0, "%", Some(&val_stops)).changed();
+    changed |= widgets::slider_row(ui, tl!("Brightness"), &mut v, 0.0..=100.0, "%", dynamic.then_some(&val_stops)).changed();
     let hsva = egui::ecolor::Hsva::new(h / 360.0, s / 100.0, v / 100.0, 1.0);
     // Only an edit counts: the h/s/v round trip isn't exact, so comparing values would rewrite
     // the foreground (and recolour selected type) every frame.
