@@ -118,12 +118,12 @@ Preferences verified offscreen on Apple M1 Max / Metal:
 
 ![Demand-grown scratch disk budget](images/undo-scratch-preferences.png)
 
-Coordinator verification: Rust 1.99 local tests pass (617 engine, 29 format,
-16 history/ops, 554 UI; 13 existing ignored tests). Strict all-target Clippy for
-these four crates passes. The adversarial command check and layering pass;
-the dedicated release-mode workload and initial WebAssembly CI pass. Both
-preference dialogs were rendered offscreen and visually inspected. Final
-cross-platform/corpus CI is linked from the PR.
+Linux SSH validation at `3e215e63` with Rust 1.99 passed 1,097 engine, 42 format,
+17 history/ops and 1,483 UI unit tests, strict all-target Clippy, adversarial
+commands, layering, L0–L6 WebAssembly and the changed corpus (2,486 tests across
+107 suites). Both preference dialogs were rendered offscreen and visually
+inspected. Exact-head cross-platform CI is linked from the PR; these local
+results do not certify a later integration head.
 
 ## Small moves and detailed strokes
 
@@ -150,3 +150,19 @@ art is sparse and its repeated moves alternate direction; it is not a dense-phot
 move-performance claim. Regression tests additionally cover monotonic nudges,
 negative tile boundaries, interrupted edits, coalesced gestures, source lifetimes
 and saturation fallback at U8/U16/F32.
+
+Release measurement on the Linux build box at `3e215e63`, with the history
+limit explicitly set to 10,000:
+
+| Operation | Retained steps | Managed pixel payload | History descriptors | Scratch bytes | Elapsed |
+|---|---:|---:|---:|---:|---:|
+| 1,000 nudges | 1,000 | 111,411,200 B | 148,060 B | 0 | 14.86 s |
+| 10,000 nudges | 10,000 | 111,411,200 B | 1,480,060 B | 0 | 153.44 s |
+| One 64 px, 16-row zigzag stroke after the nudges | 10,000 | 207,355,904 B | 1,479,970 B | 0 | 349.47 ms |
+
+The nudges kept the same pixel payload at both checkpoints. The stroke added
+91.5 MiB of pixel payload. Exact document equality passed after stroke undo and
+redo; undo took 4.94 ms. The initial sparse canvas used 10,747,904 bytes: the
+first shifts materialize additional current-image tiles. These are managed
+payload and descriptor measurements, not process RSS or a hard memory ceiling.
+The default history limit is still 50.
