@@ -430,7 +430,7 @@ fn layer_from_background(s: &mut Session) -> Result<Value> {
     Ok(json!({"layer": id.0}))
 }
 
-fn unlock_background(l: &mut Layer) {
+pub(crate) fn unlock_background(l: &mut Layer) {
     l.name = "Layer 0".into();
     l.locks.transparency = false;
     l.locks.position = false;
