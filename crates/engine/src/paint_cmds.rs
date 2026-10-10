@@ -1,6 +1,6 @@
 //! Paint helpers: Paint Bucket and Gradient tool.
 
-use photocraft_algo::paint::{GradientShape, bucket_fill, bucket_fill_region_src, bucket_fill_src, paint_gradient};
+use photocraft_algo::paint::{GradientShape, bucket_fill_region_blend, paint_gradient};
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, blend_from_str};
@@ -61,32 +61,41 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         None
     };
+    // The options bar's Mode.
+    let mode = match p.get("mode").and_then(Value::as_str) {
+        None => photocraft_color::BlendMode::Normal,
+        Some(m) => crate::commands::blend_from_str(m).ok_or_else(|| EngineError::BadParams { cmd: "paint.bucket".into(), msg: format!("unknown blend mode `{m}`") })?,
+    };
     let filled = s.edit("Paint Bucket", |doc, active| {
         let area = doc.bounds();
         let sel = doc.selection.clone();
         let (surf, lock) = crate::channel_cmds::target_surface(doc, *active, p)?;
-        let ok = if all && region.is_none() {
-            false
-        } else if let Some((tile, scale, angle, phase)) = &pattern {
-            // Render the pattern over the canvas once, then sample it at each filled pixel.
-            let place = photocraft_compose::pattern::Placement::new(photocraft_geom::Rect::EMPTY, false, *phase, *scale, *angle);
-            let rendered = photocraft_compose::pattern::render(tile, &place, area);
-            let w = area.width() as usize;
-            let src = |px: i32, py: i32| rendered[(py - area.y0) as usize * w + (px - area.x0) as usize];
-            if let Some(region) = &region {
-                bucket_fill_region_src(surf, region, opacity, sel.as_ref(), lock, src);
-                true
-            } else {
-                bucket_fill_src(surf, area, (x, y), tol, contiguous, aa, opacity, sel.as_ref(), lock, src)
-            }
-        } else if let Some(region) = &region {
-            bucket_fill_region_src(surf, region, opacity, sel.as_ref(), lock, |_, _| c);
-            true
+        // The region: from the visible layers (All Layers), or from the target's own pixels.
+        let region = if all {
+            region
+        } else if area.contains(x, y) {
+            let img = photocraft_algo::selection::rgba8_image(surf, area);
+            photocraft_algo::selection::wand_region(&img, area, (x, y), tol, contiguous, aa)
         } else {
-            bucket_fill(surf, area, (x, y), tol, contiguous, aa, c, opacity, sel.as_ref(), lock)
+            None
         };
+        let Some(region) = region else { return Ok(false) };
+        if let Some((tile, scale, angle, phase)) = &pattern {
+            // Render the pattern over the filled box once, then sample it at each filled pixel.
+            let place = photocraft_compose::pattern::Placement::new(photocraft_geom::Rect::EMPTY, false, *phase, *scale, *angle);
+            let b = region.bbox;
+            let rendered = photocraft_compose::pattern::render(tile, &place, b);
+            let w = b.width() as usize;
+            let src = |px: i32, py: i32| {
+                let i = (py - b.y0) as usize * w + (px - b.x0) as usize;
+                rendered.get(i).copied().unwrap_or([0.0; 4])
+            };
+            bucket_fill_region_blend(surf, &region, opacity, mode, sel.as_ref(), lock, src);
+        } else {
+            bucket_fill_region_blend(surf, &region, opacity, mode, sel.as_ref(), lock, |_, _| c);
+        }
         surf.prune();
-        Ok(ok)
+        Ok(true)
     })?;
     Ok(json!({ "filled": filled }))
 }
@@ -136,7 +145,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Paint Bucket",
             menu: &[],
             shortcut: None,
-            params: r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"sampleAllLayers":bool=false,"contents":"foreground|pattern"="foreground","color":"#rrggbb"=foreground,"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"opacity":1..100=100,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
+            params: r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"sampleAllLayers":bool=false,"contents":"foreground|pattern"="foreground","color":"#rrggbb"=foreground,"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"opacity":1..100=100,"mode":"normal|multiply|…"="normal","target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
             enabled: crate::commands::has_paintable,
             run: bucket,
             journal: true,
@@ -328,6 +337,28 @@ mod tests {
         assert_eq!(px(&s, 15, 5), vec![1.0, 1.0, 1.0, 1.0]);
         s.execute("paint.bucket", json!({"x": 2, "y": 2, "color": "#0000ff", "contiguous": false, "antiAlias": false, "tolerance": 0})).unwrap();
         assert_eq!(px(&s, 5, 5), vec![0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn bucket_fill_blends_in_its_mode() {
+        // Multiply a grey over the white region: white × grey = grey; Darken of white over the
+        // black wall's neighbourhood leaves nothing darker changed.
+        let mut s = session();
+        s.edit("wall", |doc, _| {
+            doc.layers[0].surface_mut().unwrap().fill_rect(Rect::new(0, 0, 10, 10), &[0.6, 0.6, 0.6, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("paint.bucket", json!({"x": 2, "y": 2, "color": "#808080", "antiAlias": false, "tolerance": 0, "mode": "multiply"})).unwrap();
+        let v = px(&s, 5, 5)[0];
+        assert!((v - 0.6 * 128.0 / 255.0).abs() < 0.01, "multiplied: {v}");
+        assert_eq!(px(&s, 15, 5), vec![1.0, 1.0, 1.0, 1.0], "outside the region");
+        s.execute("paint.bucket", json!({"x": 15, "y": 5, "color": "#ffffff", "antiAlias": false, "mode": "lighten", "opacity": 50})).unwrap();
+        assert_eq!(px(&s, 15, 5), vec![1.0, 1.0, 1.0, 1.0], "lighten with white over white");
+        assert!(s.execute("paint.bucket", json!({"x": 2, "y": 2, "mode": "nope"})).is_err());
+        // A click off the canvas fills nothing.
+        let r = s.execute("paint.bucket", json!({"x": -5, "y": 2})).unwrap();
+        assert_eq!(r["filled"], json!(false));
     }
 
     #[test]
