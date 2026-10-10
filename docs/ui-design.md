@@ -88,6 +88,17 @@ Menus never run off the window: the menu bar's menus and submenus scroll with ar
 
 Use `ui.click {x,y}`, `ui.move`, `ui.key` and `ui.type` (synthetic input in screen points) to open menus, popups and context menus, then `ui.screenshot`.
 
+## Font menus
+
+The Type options bar, Character panel, Character/Paragraph Style editors and Glyphs panel
+share a searchable family picker. Each visible row shows an `AaBbCc` sample rendered by
+PhotoCraft's text engine in that family (script/symbol fonts use characters they support).
+Samples are cached with a bounded cache and follow display scale and theme text colour.
+Builds without system fonts preview the bundled fonts.
+While the menu is open, Up/Down applies the previous/next matching family and scrolls it into
+view; Enter accepts the selection and closes the menu. Escape closes it, keeping already
+applied changes (Edit › Undo restores text-layer font changes).
+
 ## Preferences
 
 Preferences has **Apply**, **OK** and **Cancel**. Apply saves the edited sections and keeps the
