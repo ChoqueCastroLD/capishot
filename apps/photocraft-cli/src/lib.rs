@@ -18,6 +18,12 @@ USAGE:
       Convert between formats (.pcraft, .psd, .png, .jpg, .tif, .webp, .exr, …).
       TIFF output is flat unless --tiff-layers keeps the layers (Photoshop layer data).
       --quality sets the JPEG or WebP quality; a WebP written with a quality is lossy, without one lossless.
+  capishot-cli compile <in.psd|folder> [--out <file|folder>] [--format <png|jpg|webp|tif>] [--quality <1-100>]
+      [--fonts <folder>]… [--keep-text] [--no-system-fonts]
+      Render PSD/PSB files with psd-compiler (Photoshop-accurate): one file, or every PSD/PSB of a
+      folder (e.g. a chapter) on all cores. Type layers are re-rendered from their text with the
+      fonts found in --fonts folders and the system; --keep-text uses the stored type rasters.
+      Default output: <in> with the format's extension, or <folder>/compiled for a folder.
   capishot-cli info <file> [--compact]
       Print the document as JSON (size, mode, depth, layer tree).
   capishot-cli run (<file> | --new <json>) --cmd <id> [--params <json>] [--cmd …] [--out <file>] [--format <ext>] [--quality <1-100>] [--tiff-layers]
@@ -63,6 +69,7 @@ struct Subcommand {
 const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand { name: "convert", values: &["--format", "--quality"], bare: &["--tiff-layers"], run: convert },
     Subcommand { name: "info", values: &[], bare: &["--compact"], run: |a, out, _| info(a, out) },
+    Subcommand { name: "compile", values: &["--out", "--format", "--quality", "--fonts"], bare: &["--keep-text", "--no-system-fonts"], run: compile },
     Subcommand { name: "run", values: &["--new", "--cmd", "--params", "--out", "--format", "--quality"], bare: &["--tiff-layers"], run: run_cmds },
     Subcommand { name: "batch", values: &["--actions", "--in", "--out", "--format", "--quality"], bare: &["--in-place", "--tiff-layers"], run: batch },
     Subcommand { name: "droplet", values: &["--out"], bare: &[], run: droplet },
@@ -224,6 +231,53 @@ fn convert(a: &Args, _out: &mut dyn Write, err: &mut dyn Write) -> R {
     warn_all(err, &missing_font_warnings(photocraft_engine::type_extra_cmds::missing_fonts(&o.document)));
     let ws = files::save(&o.document, Path::new(output), a.get("--format"), &opts, None).map_err(|e| e.to_string())?;
     warn_all(err, &ws);
+    Ok(())
+}
+
+fn compile(a: &Args, out: &mut dyn Write, err: &mut dyn Write) -> R {
+    let [input] = a.positional.as_slice() else {
+        return Err("compile needs <in.psd|folder>".into());
+    };
+    let quality = match a.get("--quality") {
+        None => None,
+        Some(q) => Some(q.parse::<u8>().ok().filter(|q| (1..=100).contains(q)).ok_or_else(|| format!("bad --quality `{q}`: expected a whole number from 1 to 100"))?),
+    };
+    let fonts: Vec<String> = a.flags.iter().filter(|(k, _)| k == "--fonts").filter_map(|(_, v)| v.clone()).collect();
+    let rerender = !a.has("--keep-text");
+    let system = !a.has("--no-system-fonts");
+    let in_path = Path::new(input);
+    if in_path.is_dir() {
+        let format = a.get("--format").unwrap_or("png");
+        let output = a.get("--out").map(str::to_string).unwrap_or_else(|| in_path.join("compiled").to_string_lossy().into_owned());
+        let mut params = json!({"input": input, "output": output, "format": format, "rerenderText": rerender, "fonts": fonts, "systemFonts": system});
+        if let Some(q) = quality {
+            params["quality"] = json!(q);
+        }
+        let mut s = photocraft_engine::Session::new();
+        let r = s.execute("file.automate.compileFolder", params).map_err(|e| e.to_string())?;
+        for w in r["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            let _ = writeln!(err, "warning: {w}");
+        }
+        for f in r["failed"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            let _ = writeln!(err, "error: {f}");
+        }
+        let files = r["files"].as_array().map_or(0, Vec::len);
+        let failed = r["failed"].as_array().map_or(0, Vec::len);
+        let _ = writeln!(out, "compiled {files} file(s) into {output}");
+        return if failed == 0 { Ok(()) } else { Err(format!("{failed} file(s) failed")) };
+    }
+    let ext = match (a.get("--format"), a.get("--out")) {
+        (Some(f), _) => f.trim_start_matches('.').to_ascii_lowercase(),
+        (None, Some(o)) => Path::new(o).extension().and_then(|e| e.to_str()).unwrap_or("png").to_ascii_lowercase(),
+        (None, None) => "png".into(),
+    };
+    let output = a.get("--out").map(std::path::PathBuf::from).unwrap_or_else(|| in_path.with_extension(&ext));
+    let bytes = std::fs::read(in_path).map_err(|e| format!("{input}: {e}"))?;
+    let opts = photocraft_io::psdc::CompileOptions { rerender_text: rerender, font_dirs: fonts.iter().map(Into::into).collect(), system_fonts: system };
+    let c = photocraft_io::psdc::compile(&bytes, &opts).map_err(|e| format!("{input}: {e}"))?;
+    warn_all(err, &c.warnings);
+    let encoded = c.encode(&ext, quality).map_err(|e| e.to_string())?;
+    std::fs::write(&output, encoded).map_err(|e| format!("{}: {e}", output.display()))?;
     Ok(())
 }
 

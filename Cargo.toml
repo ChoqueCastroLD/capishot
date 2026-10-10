@@ -37,6 +37,8 @@ photocraft-testkit = { path = "crates/testkit" }
 photocraft-tablet = { path = "crates/tablet" }
 
 # external
+# Capishot's PSD renderer (MIT): writes the merged image of PSDs and powers File › Export › Compile.
+psd-compiler = { git = "https://github.com/ChoqueCastroLD/psd-compiler-cli", rev = "cf3d3dc", default-features = false }
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
