@@ -25,7 +25,7 @@
 //!   (depth and Gray/RGB/CMYK model preserved): a locked "Background" when the
 //!   image is opaque, a normal "Layer 0" when it has transparency.
 //!
-//! Exports to PSD render the merged composite with
+//! Exports to PSD render the merged composite with psd-compiler (8-bit RGB; see [`psdc`]) or
 //! `photocraft_compose::flatten`; flat exports report what is lost.
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -48,6 +48,8 @@ mod pdn;
 pub mod pixels;
 mod psd_export;
 mod psd_import;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod psdc;
 pub mod raw;
 pub mod slices_map;
 pub mod smart_map;
@@ -161,11 +163,14 @@ pub struct ExportOptions {
     /// PSD/PSB always keep XMP; `.pcraft` keeps both. Everything by default, as Save As does;
     /// Export As offers None.
     pub xmp: XmpEmbed,
+    /// PSD/PSB: write the merged image of 8-bit RGB documents with psd-compiler (see [`psdc`]).
+    /// On by default; `false` keeps `photocraft_compose`'s composite.
+    pub psdc_composite: bool,
 }
 
 impl Default for ExportOptions {
     fn default() -> Self {
-        ExportOptions { encode: EncodeOptions::default(), force_psb: false, tiff_layers: false, xmp: XmpEmbed::All }
+        ExportOptions { encode: EncodeOptions::default(), force_psb: false, tiff_layers: false, xmp: XmpEmbed::All, psdc_composite: true }
     }
 }
 
@@ -292,7 +297,14 @@ pub fn export(doc: &Document, name_or_ext: &str, opts: &ExportOptions) -> Result
         warnings.extend(tiff_layers::strip_foreign_order_blocks(&mut file));
         // Never write a header the reader would refuse (e.g. a zero-sized canvas).
         file.header.validate()?;
-        let bytes = file.to_bytes()?;
+        let mut bytes = file.to_bytes()?;
+        // Capishot's seal: the merged image comes from psd-compiler (see `psdc`).
+        #[cfg(not(target_arch = "wasm32"))]
+        match if opts.psdc_composite { psdc::recomposite(&mut file, &bytes) } else { Ok(false) } {
+            Ok(true) => bytes = file.to_bytes()?,
+            Ok(false) => {}
+            Err(e) => warnings.push(format!("the merged image was not compiled with psd-compiler: {e}")),
+        }
         return Ok(ExportResult { bytes, warnings });
     }
     let format = photocraft_codecs::from_extension(&ext).ok_or_else(|| IoError::UnknownFormat(name_or_ext.to_string()))?;

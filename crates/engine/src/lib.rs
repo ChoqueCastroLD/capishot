@@ -103,6 +103,7 @@ mod variables_cmds;
 pub mod vector_cmds;
 mod video_cmds;
 pub use video_cmds::render_video_with;
+pub mod capishot_cmds;
 pub mod vp_cmds;
 pub mod warp_cmds;
 pub mod web_cmds;

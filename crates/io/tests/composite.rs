@@ -11,7 +11,8 @@ use photocraft_psd::{PixelData, PsdBuilder, PsdFile};
 const TOL: f32 = 1.0 / 255.0 + 1e-4;
 
 fn check_export_oracle(d: &photocraft_doc::Document, tol: f32) {
-    let r = export(d, "x.psd", &ExportOptions::default()).unwrap();
+    // The merged image photocraft-compose writes; psd-compiler's is checked in `psdc_agrees_*`.
+    let r = export(d, "x.psd", &ExportOptions { psdc_composite: false, ..Default::default() }).unwrap();
     let f = PsdFile::from_bytes(&r.bytes).unwrap();
     let merged = merged_composite(&f).unwrap();
     let d2 = import("x.psd", &r.bytes).unwrap().document;
@@ -48,6 +49,21 @@ oracle!(oracle_cmyk8, ColorMode::Cmyk, SampleType::U8, Features::PIXELS, 3.0 / 2
 // Lab: one 8-bit Lab quantization step is amplified up to ~15/255 near the sRGB gamut
 // edge (the sRGB toe has slope 12.92), so the tolerance is wider.
 oracle!(oracle_lab8, ColorMode::Lab, SampleType::U8, Features::PIXELS, 16.0 / 255.0);
+
+/// psd-compiler writes the merged image of 8-bit RGB saves. On layers, groups, masks, clipping,
+/// every blend mode and fill layers it must agree with photocraft-compose (two independent
+/// renderers). Adjustments are left out: psd-compiler's are fitted to Photoshop's renders and
+/// photocraft-compose's still differ on some (Vibrance, Color Balance, Photo Filter, Black & White).
+#[test]
+fn psdc_agrees_with_the_compositor_on_layers_and_blends() {
+    let f = Features { groups: true, masks: true, adjustments: false, fills: true, all_blends: true, extras: true };
+    let d = gen_doc(ColorMode::Rgb, SampleType::U8, f);
+    let r = export(&d, "x.psd", &ExportOptions::default()).unwrap();
+    let merged = merged_composite(&PsdFile::from_bytes(&r.bytes).unwrap()).unwrap();
+    let ours = photocraft_compose::flatten(&import("x.psd", &r.bytes).unwrap().document).px;
+    let m = max_diff(&ours, &merged);
+    assert!(m <= 3.0 / 255.0 + 1e-4, "max diff {m}");
+}
 
 /// Builds a PSD with the *builder* (independent writer) whose merged image
 /// is produced by photocraft-compose, then checks import + flatten against it.

@@ -581,3 +581,28 @@ fn a_non_unicode_argument_is_a_usage_error_not_a_panic() {
         assert!(!err.contains("panicked"), "{err}");
     }
 }
+
+#[test]
+fn compile_renders_a_psd_and_a_folder_with_psd_compiler() {
+    let d = tmp("compile");
+    let chapter = d.join("chapter");
+    std::fs::create_dir_all(&chapter).unwrap();
+    let png = d.join("in.png");
+    write_png(&png, 16, 12, 7);
+    for n in ["01", "02"] {
+        ok(bin().args(["convert", png.to_str().unwrap(), chapter.join(format!("{n}.psd")).to_str().unwrap()]));
+    }
+    let one = chapter.join("01.psd");
+    ok(bin().args(["compile", one.to_str().unwrap(), "--keep-text"]));
+    assert!(chapter.join("01.png").is_file());
+    let jpg = d.join("page.jpg");
+    ok(bin().args(["compile", one.to_str().unwrap(), "--out", jpg.to_str().unwrap(), "--quality", "90"]));
+    assert!(std::fs::read(&jpg).unwrap().starts_with(&[0xFF, 0xD8]));
+    let (out, _) = ok(bin().args(["compile", chapter.to_str().unwrap(), "--format", "webp"]));
+    assert!(out.contains("compiled 2 file(s)"), "{out}");
+    assert!(chapter.join("compiled/02.webp").is_file());
+    let o = bin().args(["compile", d.join("missing.psd").to_str().unwrap()]).output().unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    let o = bin().args(["compile", one.to_str().unwrap(), "--quality", "0"]).output().unwrap();
+    assert_eq!(o.status.code(), Some(1));
+}
