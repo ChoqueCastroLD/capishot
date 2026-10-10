@@ -328,6 +328,8 @@ pub struct Session {
     pub path_fill_clipboard: Option<photocraft_doc::Fill>,
     pub path_stroke_clipboard: Option<photocraft_doc::ShapeStroke>,
     /// Colour management: proofing state, monitor profile, display transforms.
+    /// Whole layers copied with `layer.copyLayers`, for `layer.pasteLayers` in any document.
+    pub layer_clipboard: Option<layer_copy_cmds::LayerClip>,
     pub color: color_cmds::ColorState,
     /// Open Edit Contents documents and the smart objects they update.
     pub smart_links: Vec<smart_cmds::SmartLink>,

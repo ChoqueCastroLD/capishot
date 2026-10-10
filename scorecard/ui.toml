@@ -162,6 +162,6 @@ note = "Only layer.mergeVisible (edit_cmds.rs:416)"
 [[item]]
 id = "UI-217-23"
 target = "Layer clipboard: copy/paste whole layers (masks, styles, type) between documents"
-status = "missing"
+status = "done"
 issue = 217
-note = "Only copy/paste layer style (extra_cmds.rs:592)"
+note = "layer_copy_cmds.rs: layer.copyLayers / layer.pasteLayers (Layers panel context menu) keep masks, styles, type and smart objects, convert colour and depth like a drag, one history step; Edit > Purge > Clipboard empties it (layer_clipboard_pastes_whole_layers_into_any_document); dragging layers onto another tab is layer.copyToDocument (#589)"
