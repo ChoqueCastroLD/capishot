@@ -107,3 +107,30 @@ fn purge_and_close_release_compact_source_backing() {
     drop(session.close(0));
     assert!(next_source.upgrade().is_none());
 }
+
+#[test]
+fn coalesced_non_move_edit_invalidates_previous_replay() {
+    let mut session = session_at(0, 0);
+    let original = session.active().unwrap().doc.clone();
+    session.execute("layer.translate", json!({"dx": 1, "dy": 0, "coalesce": "drag"})).unwrap();
+    session.execute("layer.renameLayer", json!({"name": "later edit", "coalesce": "drag"})).unwrap();
+    let expected = session.active().unwrap().doc.clone();
+    assert_eq!(session.active().unwrap().history.past_len(), 1);
+    assert!(session.undo());
+    same_document(&session.active().unwrap().doc, &original);
+    assert!(session.redo());
+    same_document(&session.active().unwrap().doc, &expected);
+}
+
+#[test]
+fn non_history_metadata_edit_cannot_reuse_stale_current_replay() {
+    let mut session = session_at(0, 0);
+    session.execute("layer.translate", json!({"dx": 1, "dy": 0})).unwrap();
+    let layer = session.active().unwrap().active_layer.unwrap();
+    session.execute("image.variables.define", json!({"defs": [{"name": "Visible", "layer": layer.0, "type": "visibility"}]})).unwrap();
+    let expected = session.active().unwrap().doc.clone();
+    assert_eq!(expected.variables.defs.len(), 1);
+    assert!(session.undo());
+    assert!(session.redo());
+    same_document(&session.active().unwrap().doc, &expected);
+}
