@@ -9,7 +9,7 @@
 //!   agents can also inspect, screenshot and click the live UI.
 //! * [`Headless`]: the synchronous session + file I/O core, shared with the CLI.
 //! * [`rpc`]: a headless JSON-lines server (stdio or loopback TCP) with the
-//!   control protocol's envelope, used by `photocraft-cli serve`.
+//!   control protocol's envelope, used by `capishot-cli serve`.
 //! * [`files`]: open/save any supported format, `.pcraft` natively.
 //!
 //! L6, no UI-toolkit dependencies.

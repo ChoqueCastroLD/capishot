@@ -1,4 +1,4 @@
-//! EXIF orientation end to end through the `photocraft-cli` binary (#285): a
+//! EXIF orientation end to end through the `capishot-cli` binary (#285): a
 //! phone-style JPEG (stored landscape, Orientation = 6) converts to an upright
 //! portrait, an explicit rotation turns it back, and a `.pcraft` round trip
 //! changes nothing.
@@ -10,7 +10,7 @@ use photocraft_codecs::{ChannelLayout, DecodeOptions, EncodeOptions, Format, Ima
 use serde_json::Value;
 
 fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_photocraft-cli"))
+    Command::new(env!("CARGO_BIN_EXE_capishot-cli"))
 }
 
 fn tmp(name: &str) -> PathBuf {

@@ -1,4 +1,4 @@
-//! Windows only: embed the app icon and version info (VERSIONINFO) into `photocraft.exe`.
+//! Windows only: embed the app icon and version info (VERSIONINFO) into `capishot.exe`.
 //!
 //! On every other target this does nothing. A missing resource compiler is a warning, so a
 //! cross-compile from macOS or Linux still links, unless `PHOTOCRAFT_REQUIRE_WINRES=1` (set by the
@@ -13,16 +13,16 @@ fn main() {
     }
     let mut res = winresource::WindowsResource::new();
     res.set_icon("../../assets/app-icon/photocraft.ico")
-        .set("ProductName", "PhotoCraft")
-        .set("FileDescription", "PhotoCraft image editor")
+        .set("ProductName", "Capishot")
+        .set("FileDescription", "Capishot image editor")
         .set("CompanyName", "Learning Machines LLC")
-        .set("LegalCopyright", "Copyright (c) the PhotoCraft authors. MIT OR Apache-2.0.")
-        .set("OriginalFilename", "photocraft.exe")
-        .set("InternalName", "photocraft");
+        .set("LegalCopyright", "Copyright (c) the Capishot and PhotoCraft authors. MIT OR Apache-2.0.")
+        .set("OriginalFilename", "capishot.exe")
+        .set("InternalName", "capishot");
     if let Err(e) = res.compile() {
         if std::env::var_os("PHOTOCRAFT_REQUIRE_WINRES").is_some() {
             panic!("embedding Windows resources failed: {e}");
         }
-        println!("cargo:warning=photocraft.exe built without icon/version resources: {e}");
+        println!("cargo:warning=capishot.exe built without icon/version resources: {e}");
     }
 }

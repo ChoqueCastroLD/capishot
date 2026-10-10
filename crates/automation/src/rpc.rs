@@ -1,7 +1,7 @@
 //! Headless JSON-lines server: the control protocol's envelope
 //! (`{"id","method","params"}` → `{"id","ok","result"|"error"}`) over a
 //! [`Headless`] session, so scripts and agents can keep one editing session
-//! open without MCP or the GUI. `photocraft-cli serve` runs it on stdio or a
+//! open without MCP or the GUI. `capishot-cli serve` runs it on stdio or a
 //! loopback TCP port.
 //!
 //! Methods (camelCase params):
