@@ -981,7 +981,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "plugIns.showExtensionPanels",
     "plugIns.allowScriptsToConnect",
     "plugIns.generatorEnabled",
-    "type.smartQuotes",
     "type.missingGlyphProtection",
     "type.showFontNamesInEnglish",
     "type.textEngine",
