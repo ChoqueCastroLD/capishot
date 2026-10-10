@@ -2986,4 +2986,11 @@ fontWeight	Italic	기울임
 	No subject found — try a rectangle around the object	피사체를 찾을 수 없습니다 — 개체 주위에 사각형을 그려 보세요
 	Copy Layers	레이어 복사
 	Paste Layers	레이어 붙여넣기
+	Cycle Screen Mode Backwards	화면 모드 역순환
+	Scroll Up One Screen	한 화면 위로 스크롤
+	Scroll Down One Screen	한 화면 아래로 스크롤
+	Scroll Left One Screen	한 화면 왼쪽으로 스크롤
+	Scroll Right One Screen	한 화면 오른쪽으로 스크롤
+	Scroll to Upper-Left Corner	왼쪽 위 모서리로 스크롤
+	Scroll to Lower-Right Corner	오른쪽 아래 모서리로 스크롤
 	Show rulers in new documents	새 문서에 눈금자 표시

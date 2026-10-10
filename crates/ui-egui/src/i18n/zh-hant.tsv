@@ -2385,4 +2385,11 @@ fontWeight	Italic	斜體
 	No subject found — try a rectangle around the object	找不到主體 — 請嘗試在物件周圍繪製矩形
 	Copy Layers	拷貝圖層
 	Paste Layers	貼上圖層
+	Cycle Screen Mode Backwards	反向循環切換螢幕模式
+	Scroll Up One Screen	向上捲動一個畫面
+	Scroll Down One Screen	向下捲動一個畫面
+	Scroll Left One Screen	向左捲動一個畫面
+	Scroll Right One Screen	向右捲動一個畫面
+	Scroll to Upper-Left Corner	捲動到左上角
+	Scroll to Lower-Right Corner	捲動到右下角
 	Show rulers in new documents	在新文件中顯示尺標
