@@ -84,7 +84,7 @@ impl Session {
         let archive = Arc::new(Moved { source: source.clone(), layers: layers.to_vec(), dx: x, dy: y });
         let Some(st) = self.active_mut() else { return };
         st.history.replace_resident(before, archive);
-        st.history.set_current_archive(Arc::new(Moved { source: source.clone(), layers: layers.to_vec(), dx: next_x, dy: next_y }));
+        st.history.set_current_archive(&st.doc, Arc::new(Moved { source: source.clone(), layers: layers.to_vec(), dx: next_x, dy: next_y }));
         self.compact_move = Some(Run { source: Arc::downgrade(&source), current: Arc::downgrade(&st.doc), layers: layers.to_vec(), dx: next_x, dy: next_y });
     }
 }

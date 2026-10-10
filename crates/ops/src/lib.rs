@@ -79,6 +79,7 @@ pub struct History {
     /// The layers targeted when the current document was created (opened or edited).
     current_layers: LayerTarget,
     current_archive: Option<Arc<dyn ArchivedDocument>>,
+    current_archive_document: Option<std::sync::Weak<Document>>,
 }
 
 impl Default for History {
@@ -97,13 +98,14 @@ impl History {
             current_label: "Open".into(),
             current_layers: LayerTarget::default(),
             current_archive: None,
+            current_archive_document: None,
         }
     }
 
     /// Record that `before` was replaced by a new current document via step `label`, which left
     /// `layers` targeted.
     pub fn record(&mut self, label: impl Into<String>, before: Arc<Document>, layers: LayerTarget) {
-        self.current_archive = None;
+        self.clear_current_archive();
         let prev_label = std::mem::replace(&mut self.current_label, label.into());
         let prev_layers = std::mem::replace(&mut self.current_layers, layers);
         self.undo.push_back(HistoryState {
@@ -146,16 +148,14 @@ impl History {
         let Some(prev) = self.undo.pop_back() else { return Ok(None) };
         let label = std::mem::replace(&mut self.current_label, prev.label);
         let layers = std::mem::replace(&mut self.current_layers, prev.layers.clone());
-        self.redo.push(HistoryState {
-            label,
-            has_selection: current.selection.is_some(),
-            document: self.current_archive.take().map_or_else(|| StoredDocument::Resident(current), StoredDocument::Archived),
-            layers,
-        });
+        let has_selection = current.selection.is_some();
+        let document = self.take_current_document(current);
+        self.redo.push(HistoryState { label, has_selection, document, layers });
         self.current_archive = match prev.document {
             StoredDocument::Archived(archive) => Some(archive),
             _ => None,
         };
+        self.current_archive_document = self.current_archive.as_ref().map(|_| Arc::downgrade(&restored));
         Ok(Some((restored, prev.layers)))
     }
 
@@ -165,16 +165,14 @@ impl History {
         let Some(next) = self.redo.pop() else { return Ok(None) };
         let label = std::mem::replace(&mut self.current_label, next.label);
         let layers = std::mem::replace(&mut self.current_layers, next.layers.clone());
-        self.undo.push_back(HistoryState {
-            label,
-            has_selection: current.selection.is_some(),
-            document: self.current_archive.take().map_or_else(|| StoredDocument::Resident(current), StoredDocument::Archived),
-            layers,
-        });
+        let has_selection = current.selection.is_some();
+        let document = self.take_current_document(current);
+        self.undo.push_back(HistoryState { label, has_selection, document, layers });
         self.current_archive = match next.document {
             StoredDocument::Archived(archive) => Some(archive),
             _ => None,
         };
+        self.current_archive_document = self.current_archive.as_ref().map(|_| Arc::downgrade(&restored));
         Ok(Some((restored, next.layers)))
     }
 
@@ -372,12 +370,26 @@ impl History {
         self.redo.clear();
     }
 
-    pub fn set_current_archive(&mut self, archive: Arc<dyn ArchivedDocument>) {
+    pub fn clear_current_archive(&mut self) {
+        self.current_archive = None;
+        self.current_archive_document = None;
+    }
+
+    pub fn set_current_archive(&mut self, current: &Arc<Document>, archive: Arc<dyn ArchivedDocument>) {
+        self.current_archive_document = Some(Arc::downgrade(current));
         self.current_archive = Some(archive);
     }
 
+    fn take_current_document(&mut self, current: Arc<Document>) -> StoredDocument {
+        let matches = self.current_archive_document.take().and_then(|bound| bound.upgrade()).is_some_and(|bound| Arc::ptr_eq(&bound, &current));
+        match self.current_archive.take() {
+            Some(archive) if matches => StoredDocument::Archived(archive),
+            _ => StoredDocument::Resident(current),
+        }
+    }
+
     pub fn clear(&mut self) {
-        self.current_archive = None;
+        self.clear_current_archive();
         self.undo.clear();
         self.redo.clear();
     }
