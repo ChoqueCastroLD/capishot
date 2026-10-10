@@ -28,6 +28,11 @@
 	New from Clipboard	Nieuw vanaf klembord
 	Open…	Openen…
 	Open As…	Openen als…
+	Open EXR Parts…	EXR-delen openen…
+	Add beauty precomp from the AOVs	Schoonheidsvoorcompositie toevoegen vanuit de AOV's
+	Both	Beide
+	Left	Links
+	Right	Rechts
 	Open Recent	Recent geopend
 	Clear Recent Files	Recente bestanden wissen
 	Close	Sluiten
@@ -798,7 +803,6 @@
 	Blending Options	Overvloeiopties
 	Blue	Blauw
 	Blue, Red, Yellow	Blauw, rood, geel
-	Both	Beide
 	Both Axes	Beide assen
 	Bottom	Onder
 	Brightness	Helderheid
@@ -1120,7 +1124,6 @@
 	Leading	Interlinie
 	Leading (set to the font size × auto-leading when Auto)	Interlinie (bij Automatisch: lettergrootte × automatische interlinie)
 	Leave as is (don't color manage)	Ongewijzigd laten (geen kleurbeheer)
-	Left	Links
 	Left align text	Tekst links uitlijnen
 	Length:	Lengte:
 	Level	Niveau
@@ -1329,7 +1332,6 @@
 	Restore All	Alles herstellen
 	Restore Defaults	Standaardwaarden herstellen
 	Restrictive (Web)	Beperkt (web)
-	Right	Rechts
 	Right align text	Tekst rechts uitlijnen
 	Rigid	Star
 	Rotate:	Roteren:

@@ -18,6 +18,11 @@
 	New from Clipboard	Νέο από το πρόχειρο
 	Open…	Άνοιγμα…
 	Open As…	Άνοιγμα ως…
+	Open EXR Parts…	Άνοιγμα τμημάτων EXR…
+	Add beauty precomp from the AOVs	Προσθήκη προ-σύνθεσης ομορφιάς από τα AOV
+	Both	Και τα δύο
+	Left	Αριστερά
+	Right	Δεξιά
 	Open Recent	Πρόσφατα αρχεία
 	Clear Recent Files	Εκκαθάριση πρόσφατων αρχείων
 	Close	Κλείσιμο
@@ -436,8 +441,6 @@
 	Alignment	Στοίχιση
 	Align	Στοίχιση
 	Distribute	Κατανομή
-	Left	Αριστερά
-	Right	Δεξιά
 	Center	Κέντρο
 	Top	Πάνω
 	Bottom	Κάτω
@@ -2015,7 +2018,6 @@
 	Bold Italic	Έντονα πλάγια
 	Border	Περίγραμμα
 	Border…	Περίγραμμα…
-	Both	Και τα δύο
 	Both Axes	Και οι δύο άξονες
 	Box Blur	Θόλωση πλαισίου
 	Box Blur…	Θόλωση πλαισίου…

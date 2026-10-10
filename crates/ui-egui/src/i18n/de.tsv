@@ -36,6 +36,11 @@
 	New from Clipboard	Neu aus Zwischenablage
 	Open…	Öffnen…
 	Open As…	Öffnen als…
+	Open EXR Parts…	EXR-Teile öffnen…
+	Add beauty precomp from the AOVs	Schönheits-Vorkomposition aus den AOVs hinzufügen
+	Both	Beide
+	Left	Links
+	Right	Rechts
 	Open Recent	Zuletzt geöffnete Dateien
 	Clear Recent Files	Zuletzt geöffnete Dateien leeren
 	Close	Schließen
@@ -804,7 +809,6 @@
 	Blending Options	Fusionsoptionen
 	Blue	Blau
 	Blue, Red, Yellow	Blau, Rot, Gelb
-	Both	Beide
 	Both Axes	Beide Achsen
 	Bottom	Unten
 	Brightness	Helligkeit
@@ -1126,7 +1130,6 @@
 	Leading	Zeilenabstand
 	Leading (set to the font size × auto-leading when Auto)	Zeilenabstand (bei „Automatisch“ auf Schriftgröße × automatischer Zeilenabstand gesetzt)
 	Leave as is (don't color manage)	Unverändert lassen (keine Farbverwaltung)
-	Left	Links
 	Left align text	Text links ausrichten
 	Length:	Länge:
 	Level	Stufe
@@ -1336,7 +1339,6 @@
 	Restore All	Alle wiederherstellen
 	Restore Defaults	Standardwerte wiederherstellen
 	Restrictive (Web)	Restriktiv (Web)
-	Right	Rechts
 	Right align text	Text rechts ausrichten
 	Rigid	Starr
 	Rotate:	Drehen:

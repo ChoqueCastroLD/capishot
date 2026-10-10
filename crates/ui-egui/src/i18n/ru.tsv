@@ -42,6 +42,11 @@
 	Open…	Открыть…
 	Open	Открыть
 	Open As…	Открыть как…
+	Open EXR Parts…	Открыть части EXR…
+	Add beauty precomp from the AOVs	Добавить предкомпозит красоты из AOV
+	Both	Оба
+	Left	Левый
+	Right	Правый
 	Open Recent	Открыть недавние
 	Clear Recent Files	Очистить список недавних файлов
 	Close	Закрыть
@@ -1078,8 +1083,6 @@
 	Single Word Justification	Выключка одного слова
 	Alignment	Выравнивание
 	Indent First	Отступ первой строки
-	Left	По левому краю
-	Right	По правому краю
 	Center	По центру
 	Justify	По ширине
 
@@ -1928,7 +1931,6 @@
 	Bilinear	Билинейная
 	Black, White	Чёрный, белый
 	Blue, Red, Yellow	Синий, красный, жёлтый
-	Both	Оба
 	Bottom	Снизу
 	Brightness Jitter	Колебание яркости
 	Brush Reconstruct Options	Параметры восстановления кисти

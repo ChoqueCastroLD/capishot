@@ -31,6 +31,11 @@
 	New…	Baru…
 	Open…	Buka…
 	Open As…	Buka Sebagai…
+	Open EXR Parts…	Buka bagian EXR…
+	Add beauty precomp from the AOVs	Tambahkan prakomposisi beauty dari AOV
+	Both	Keduanya
+	Left	Kiri
+	Right	Kanan
 	Open Recent	Terakhir Dibuka
 	Clear Recent Files	Hapus Daftar Berkas Terakhir
 	Close	Tutup
@@ -792,7 +797,6 @@
 	Blending Options	Opsi Blending
 	Blue	Biru
 	Blue, Red, Yellow	Biru, Merah, Kuning
-	Both	Keduanya
 	Both Axes	Kedua Sumbu
 	Bottom	Bawah
 	Brightness	Kecerahan
@@ -1105,7 +1109,6 @@
 	Leading	Leading
 	Leading (set to the font size × auto-leading when Auto)	Leading (diatur ke ukuran font × auto-leading saat Auto)
 	Leave as is (don't color manage)	Biarkan apa adanya (tanpa manajemen warna)
-	Left	Kiri
 	Left align text	Teks rata kiri
 	Length:	Panjang:
 	Level	Level
@@ -1315,7 +1318,6 @@
 	Restore All	Pulihkan Semua
 	Restore Defaults	Pulihkan Default
 	Restrictive (Web)	Restriktif (Web)
-	Right	Kanan
 	Right align text	Teks rata kanan
 	Rigid	Kaku
 	Rotate:	Putar:

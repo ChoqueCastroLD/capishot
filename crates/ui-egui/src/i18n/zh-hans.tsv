@@ -32,6 +32,11 @@
 	New from Clipboard	从剪贴板新建
 	Open…	打开…
 	Open As…	打开为…
+	Open EXR Parts…	打开 EXR 分段…
+	Add beauty precomp from the AOVs	从 AOV 预合成美丽通道
+	Both	两者
+	Left	左
+	Right	右
 	Open Recent	打开最近文件
 	Clear Recent Files	清除最近文件
 	Close	关闭
@@ -812,7 +817,6 @@
 	Blending Options	混合选项
 	Blue	蓝色
 	Blue, Red, Yellow	蓝色、红色、黄色
-	Both	两者
 	Both Axes	双轴
 	Bottom	底部
 	Brightness	亮度
@@ -1134,7 +1138,6 @@
 	Leading	行距
 	Leading (set to the font size × auto-leading when Auto)	行距（自动时为字号 × 自动行距系数）
 	Leave as is (don't color manage)	保持原样（不进行色彩管理）
-	Left	左
 	Left align text	文字左对齐
 	Length:	长度：
 	Level	级别
@@ -1346,7 +1349,6 @@
 	Restore All	全部还原
 	Restore Defaults	还原默认值
 	Restrictive (Web)	限定（Web）
-	Right	右
 	Right align text	文字右对齐
 	Rigid	刚性
 	Rotate:	旋转：
