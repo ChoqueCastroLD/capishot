@@ -1901,6 +1901,9 @@ impl PhotocraftApp {
 }
 
 #[cfg(test)]
+mod color_swatch_tests;
+
+#[cfg(test)]
 mod input_tests;
 
 #[cfg(test)]
