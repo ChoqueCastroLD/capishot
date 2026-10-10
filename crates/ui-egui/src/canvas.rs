@@ -5014,7 +5014,8 @@ mod tests {
             seen
         };
         let start = Pos2::new(200.0, 150.0);
-        let press = |pos: Pos2, pressed: bool| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let press =
+            |pos: Pos2, pressed: bool| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
         frame(&mut app, vec![egui::Event::PointerMoved(start)]);
         frame(&mut app, vec![press(start, true)]);
         for dx in [10.0, 20.0, 40.0] {
