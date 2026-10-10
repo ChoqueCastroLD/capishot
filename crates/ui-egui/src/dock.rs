@@ -468,6 +468,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         }
         egui::Popup::menu(&resp.menu).show(|ui| {
+            crate::widgets::style_spectrum_popup_menu(ui);
             ui.set_min_width(170.0);
             if tabs.get(sel) == Some(&"Layers") {
                 crate::layer_row_ui::panel_menu(app, ui);

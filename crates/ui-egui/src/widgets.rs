@@ -8,6 +8,23 @@ use crate::theme::{self, Tokens};
 mod color_count;
 pub use color_count::color_count_row;
 
+/// Match the Spectrum application-menu padding and blue/white hover state in
+/// secondary menus (status bar, dock hamburger, layer context menus; #2187).
+/// The setting is local to this popup's Ui and leaves other themes unchanged.
+pub fn style_spectrum_popup_menu(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    if !t.pro {
+        return;
+    }
+    ui.spacing_mut().button_padding = vec2(10.0, 4.0);
+    let v = &mut ui.style_mut().visuals;
+    v.widgets.hovered.weak_bg_fill = t.accent;
+    v.widgets.hovered.bg_fill = t.accent;
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+    v.widgets.hovered.bg_stroke = Stroke::NONE;
+    v.widgets.hovered.corner_radius = CornerRadius::same(3);
+}
+
 /// An accent insertion line on one edge of `r` while a drag hovers it (vertical: on its left or,
 /// `after`, right edge; else on its top or bottom).
 pub fn drop_line(ui: &Ui, r: Rect, after: bool, vertical: bool, t: &Tokens) {
@@ -1145,6 +1162,29 @@ fn clean(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use egui::{Key, Modifiers};
+
+    #[test]
+    fn spectrum_popup_style_matches_main_menu_and_preserves_studio() {
+        for kind in [crate::theme::ThemeKind::Pro, crate::theme::ThemeKind::ProMedium, crate::theme::ThemeKind::Studio, crate::theme::ThemeKind::StudioLight] {
+            let ctx = egui::Context::default();
+            crate::theme::apply(&ctx, kind);
+            let tokens = crate::theme::Tokens::for_kind(kind);
+            let mut out = ctx.run_ui(Default::default(), |ui| {
+                let original_padding = ui.spacing().button_padding;
+                let original_hover = ui.visuals().widgets.hovered.fg_stroke;
+                super::style_spectrum_popup_menu(ui);
+                if tokens.pro {
+                    assert_eq!(ui.spacing().button_padding, egui::vec2(10.0, 4.0));
+                    assert_eq!(ui.visuals().widgets.hovered.bg_fill, tokens.accent);
+                    assert_eq!(ui.visuals().widgets.hovered.fg_stroke.color, egui::Color32::WHITE);
+                } else {
+                    assert_eq!(ui.spacing().button_padding, original_padding);
+                    assert_eq!(ui.visuals().widgets.hovered.fg_stroke, original_hover);
+                }
+            });
+            out.textures_delta.clear();
+        }
+    }
     use egui_kittest::{Harness, kittest::Queryable};
 
     /// Sets up a test with one value field. Its state is its value and how many times it changed.
