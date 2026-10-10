@@ -2411,3 +2411,5 @@ fontWeight	Italic	斜體
 # Background file-open stages (engine messages translated by the shell).
 	Reading	正在讀取
 	Decoding	正在解碼
+	Next Document	下一個文件
+	Previous Document	上一個文件
