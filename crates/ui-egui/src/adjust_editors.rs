@@ -194,7 +194,9 @@ fn sliders(ui: &mut egui::Ui, v: &mut Value, rows: &[(&str, &str, f32, f32, f32,
     let mut e = Edit::default();
     for &(key, text, min, max, default, unit) in rows {
         let mut x = num(v, key, default).clamp(min, max);
-        let r = widgets::slider_row(ui, text, &mut x, min..=max, unit, None);
+        // A double-click on the slider puts it back to its default (Photoshop).
+        let gestures = widgets::RowGestures { reset: Some(default), wheel_step: None };
+        let r = widgets::slider_row_with(ui, text, &mut x, min..=max, unit, None, gestures);
         if r.changed() {
             v[key] = json!(if max - min <= 10.0 { round(x, 0.01) } else { x.round() });
         }

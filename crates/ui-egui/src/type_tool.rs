@@ -1719,7 +1719,8 @@ fn icon_label(ui: &mut egui::Ui, icon: &str, tip: &str) {
     let t = crate::theme::Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(egui::vec2(crate::props_layout::LABEL_W, 22.0), egui::Sense::hover());
     crate::icons::paint(ui, r, icon, 12.0, t.text_dim);
-    resp.on_hover_text(tip);
+    // Photoshop's Character panel icons scrub the field beside them.
+    crate::widgets::scrub_label(ui, &resp.on_hover_text(tip));
 }
 
 /// Labelled numeric field (Photoshop's icon + value pairs). Returns the new value when edited.
@@ -1731,7 +1732,7 @@ fn num_field(ui: &mut egui::Ui, label: &str, tip: &str, v: f32, range: std::ops:
         ui.spacing_mut().item_spacing.x = 4.0;
         let (r, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
         ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, label, crate::theme::semibold(10.0), t.text_dim);
-        resp.on_hover_text(tip);
+        crate::widgets::scrub_label(ui, &resp.on_hover_text(tip));
         if crate::widgets::value_field(ui, &mut v, range, unit, width).changed() {
             out = Some(v);
         }

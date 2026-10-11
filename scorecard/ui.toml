@@ -92,9 +92,9 @@ note = "document_preset_cmds.rs and new_doc_ui.rs: named presets save/select/del
 [[item]]
 id = "UI-217-13"
 target = "Numeric fields accept arithmetic and units; scrubby labels; double-click resets a slider"
-status = "partial"
+status = "done"
 issue = 217
-note = "widgets.rs:132 DragValue scrubs and takes + - * / arithmetic; no units in expressions, label scrub or reset"
+note = "widgets::value_field: arithmetic plus units (1in, 5mm, 72pt, 50%) converted at the document resolution (#3099); widgets::scrub_label makes options-bar, slider-row and Character labels scrubby (Shift x10, Alt fine); slider rows with a known default reset on double-click"
 
 [[item]]
 id = "UI-217-14"

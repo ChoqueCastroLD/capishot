@@ -1490,10 +1490,12 @@ fn body_text_width(ui: &egui::Ui, s: &str) -> f32 {
 }
 
 /// Options-bar label: Photoshop writes "Size:" with a colon.
+/// An options-bar label; one right before a value field scrubs it when dragged (Photoshop).
 fn opt_label(ui: &mut egui::Ui, s: &str) {
     let t = Tokens::get(ui.ctx());
     let text = if t.pro && !s.ends_with(':') { format!("{s}:") } else { s.to_string() };
-    ui.label(RichText::new(tl!(&text)).color(t.text_dim));
+    let label = ui.label(RichText::new(tl!(&text)).color(t.text_dim));
+    widgets::scrub_label(ui, &label);
 }
 
 fn percent_field(ui: &mut egui::Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, width: f32) {
