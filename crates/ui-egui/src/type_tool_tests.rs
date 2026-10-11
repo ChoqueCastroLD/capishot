@@ -19,7 +19,17 @@ fn harness(ppp: f32, app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
 }
 
 fn make_harness(ppp: f32, app: PhotocraftApp, render: bool) -> Harness<'static, PhotocraftApp> {
-    let builder = Harness::builder().with_size(vec2(1200.0, 800.0)).with_pixels_per_point(ppp);
+    make_harness_with(Harness::builder(), ppp, app, render)
+}
+
+/// 60 frames a second: every queued event is a frame, and the default quarter-second step puts
+/// the second click of a double-click past egui's double-click delay.
+fn fast_harness(app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
+    make_harness_with(Harness::builder().with_step_dt(1.0 / 60.0), 1.0, app, false)
+}
+
+fn make_harness_with(builder: egui_kittest::HarnessBuilder<PhotocraftApp>, ppp: f32, app: PhotocraftApp, render: bool) -> Harness<'static, PhotocraftApp> {
+    let builder = builder.with_size(vec2(1200.0, 800.0)).with_pixels_per_point(ppp);
     let builder = if render { builder.wgpu() } else { builder };
     let mut h = builder.build_ui_state(
         |ui, app: &mut PhotocraftApp| {
@@ -87,6 +97,16 @@ fn click(h: &mut Harness<'static, PhotocraftApp>, p: Pos2) {
     press(h, p, true);
     press(h, p, false);
     h.run_steps(1);
+}
+
+/// Two clicks within egui's double-click delay (use [`fast_harness`]).
+fn double_click(h: &mut Harness<'static, PhotocraftApp>, p: Pos2) {
+    h.hover_at(p);
+    h.run_steps(1);
+    for pressed in [true, false, true, false] {
+        h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+    }
+    h.run_steps(2);
 }
 
 fn drag(h: &mut Harness<'static, PhotocraftApp>, a: Pos2, b: Pos2) {
@@ -1520,6 +1540,36 @@ mod multi_layer_formatting {
             assert_eq!(style(h.state(), id, 0), expected);
         }
     }
+}
+
+/// #1132: with the Move tool, double-clicking type on the canvas edits it (Photoshop CC 2019+):
+/// the Type tool takes over with the caret on the glyph under the pointer, on whichever type
+/// layer was double-clicked, even when another layer is active. Elsewhere it does nothing.
+#[test]
+fn move_tool_double_click_on_type_edits_it() {
+    let mut app = new_app();
+    let id = LayerId(app.run("type.create", json!({"text": "HOHOHO", "size": 120, "x": 300, "y": 420})).unwrap()["layer"].as_u64().unwrap());
+    app.run("layer.new.layer", json!({})).unwrap();
+    app.ui.tool = crate::state::Tool::Move;
+    let mut h = fast_harness(app);
+    let p = glyph(&mut h, id, 2, 0.2);
+    let steps = h.state().session.active().unwrap().history.entries().len();
+    double_click(&mut h, p);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Type, "the Type tool takes over");
+    assert_eq!(h.state().ui.text_edit.as_ref().map(|e| e.layer), Some(id.0));
+    assert_eq!(selection(&h), (2, 2), "the caret sits on the double-clicked glyph");
+    assert_eq!(h.state().session.active().unwrap().active_layer, Some(id));
+    assert_eq!(h.state().session.active().unwrap().history.entries().len(), steps, "nothing moved");
+    super::insert(h.state_mut(), "x");
+    assert_eq!(text(h.state(), id).text, "HOxHOHO");
+    // Off the text, a double-click stays with the Move tool.
+    super::commit(h.state_mut());
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    h.run_steps(2);
+    let empty = screen(&mut h, id, -400.0, -300.0);
+    double_click(&mut h, empty);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Move);
+    assert!(h.state().ui.text_edit.is_none());
 }
 
 fn selection_bounds(app: &PhotocraftApp) -> Option<photocraft_geom::Rect> {

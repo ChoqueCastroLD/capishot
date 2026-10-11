@@ -126,6 +126,29 @@ pub fn edit_active(app: &mut PhotocraftApp) -> Result<(), String> {
     Ok(())
 }
 
+/// Double-click with the Move tool (Photoshop CC 2019+): edit the type layer under document
+/// point (`x`, `y`) with the caret on the glyph there, switching to the Type tool. False when no
+/// type is there.
+pub fn edit_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
+    let Some(id) = hit_layer(app, x, y) else { return false };
+    commit(app);
+    if app.session.select_layer(id).is_err() {
+        return false;
+    }
+    let key = session_key(app);
+    if begin_edit(app, id, &key).is_err() {
+        return false;
+    }
+    let off = hit_offset(app, id, x, y);
+    app.ui.text_edit =
+        Some(TextEdit { layer: id.0, caret: off, anchor: off, session: key, created: false, mask: false, dragging: false, resize: None, preedit: None });
+    let vertical = app.session.active().and_then(|st| text_layer(&st.doc, id)).is_some_and(|t| t.orientation == photocraft_doc::text::Orientation::Vertical);
+    app.ui.tool = if vertical { crate::state::Tool::VerticalType } else { crate::state::Tool::Type };
+    app.ui.mask_target = false;
+    app.ui.vector_mask_target = false;
+    true
+}
+
 fn hit_offset(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> usize {
     let Some((l, aff, text)) = layout(app, id) else { return 0 };
     let (tx, ty) = to_text(&aff, x, y);
