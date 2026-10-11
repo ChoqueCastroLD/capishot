@@ -163,6 +163,9 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
     if let Some((params, path)) = crate::vector_ui::free_transform_path(app) {
         return begin_path(app, ctx, params, path);
     }
+    if app.session.active().is_some_and(|st| photocraft_engine::float_cmds::floating(st).is_some()) {
+        app.run("select.drop", json!({}))?;
+    }
     let target = crate::canvas::paint_target(app);
     let st = app.session.active().ok_or("no document")?;
     let (doc, revision) = (st.doc.clone(), st.revision);
