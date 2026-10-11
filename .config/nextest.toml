@@ -13,3 +13,10 @@ gpu = { max-threads = 4 }
 [[profile.default.overrides]]
 filter = 'package(photocraft-gpu) | (package(photocraft-ui-egui) & (kind(test) | test(/canvas|gpu|mip|type_tool/)))'
 test-group = 'gpu'
+
+# CI (`--profile ci`): the GPU tests run on WARP, the software adapter, on the Windows runner, and
+# under load one occasionally hits that same timeout (1 in ~40 runs while measuring #2933). Retry
+# them; nextest reports a test that passes on retry as FLAKY, so it stays visible.
+[[profile.ci.overrides]]
+filter = 'package(photocraft-gpu) | (package(photocraft-ui-egui) & (kind(test) | test(/canvas|gpu|mip|type_tool/)))'
+retries = 2
