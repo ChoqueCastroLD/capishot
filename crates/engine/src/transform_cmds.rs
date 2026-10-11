@@ -123,12 +123,23 @@ pub fn split_gray_selected(s: &Surface, sel: &Surface) -> Result<Option<(Surface
 /// [`warp_gray`] limited to a selection: only the selected values move (the vacated area reads as
 /// the default), as the selected pixels of the layer do.
 pub(crate) fn warp_gray_selected(s: &Surface, sel: &Surface, h: &Homography, interp: Interp) -> Result<Surface> {
-    let Some((lifted, mut out)) = split_gray_selected(s, sel)? else { return warp_gray(s, h, interp) };
+    move_gray_selected(s, sel, &|lifted, src| Ok(warp_surface(lifted, src, h, interp)?), &|s| warp_gray(s, h, interp))
+}
+
+/// [`warp_gray_selected`] with any geometric warp: `warp` moves the lifted grey + alpha values
+/// (given their bounds), `whole` moves `s` when it isn't a single grey channel.
+pub(crate) fn move_gray_selected(
+    s: &Surface,
+    sel: &Surface,
+    warp: &dyn Fn(&Surface, Rect) -> Result<Surface>,
+    whole: &dyn Fn(&Surface) -> Result<Surface>,
+) -> Result<Surface> {
+    let Some((lifted, mut out)) = split_gray_selected(s, sel)? else { return whole(s) };
     let src = lifted.content_bounds();
     if src.is_empty() {
         return Ok(out);
     }
-    let w = warp_surface(&lifted, src, h, interp)?;
+    let w = warp(&lifted, src)?;
     let b = w.content_bounds();
     if !b.is_empty() {
         let moved = crate::allocation::read_region(&w, b, "compositing transformed mask pixels")?;
