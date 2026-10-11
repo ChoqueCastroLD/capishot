@@ -2576,6 +2576,18 @@ cameraData	Lens	Objektiv
 	Search settings…	Hledat nastavení…
 	No matching settings	Žádná odpovídající nastavení
 	Loading fonts…	Načítání písem…
+	Tool	Nástroj
+	Simulate Pressure	Simulovat přítlak
+	Stroke Path…	Vytáhnout cestu…
+	Background Eraser	Guma pozadí
+	Clone Stamp	Klonovací razítko
+	Healing Brush	Retušovací štětec
+	Spot Healing Brush	Bodový retušovací štětec
+	History Brush	Štětec historie
+	Smudge	Rozmazání
+	Dodge	Zesvětlení
+	Burn	Ztmavení
+	Sponge	Houba
 # Select and Mask view modes (#1754)
 	Onion Skin	Cibulová slupka
 	Marching Ants	Pochodující mravenci

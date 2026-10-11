@@ -806,6 +806,7 @@ mod tests {
                 | "path.deleteAnchor"
                 | "path.clippingPath.set"
                 | "path.rename"
+                | "path.stroke"
                 | "select.toWorkPath"
                 | "layer.vectorMask.add"
                 | "layer.vectorMask.edit"
