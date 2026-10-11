@@ -131,7 +131,7 @@ jobs:
       # never run (Clippy's `--all-targets` still checks they compile). nextest skips doctests, so
       # they get their own step.
       - name: Test
-        run: cargo nextest run --workspace --locked --features heif --lib --bins --tests
+        run: cargo nextest run --workspace --locked --features heif --lib --bins --tests --no-fail-fast
 
       - name: Doctests
         run: cargo test --workspace --locked --features heif --doc
@@ -161,7 +161,7 @@ jobs:
         env:
           CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
           CRAFT_FONTS_REQUIRED: "1"
-        run: cargo nextest run --workspace --locked --features heif --lib --bins --tests
+        run: cargo nextest run --workspace --locked --features heif --lib --bins --tests --no-fail-fast
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked --features heif -- -D warnings
