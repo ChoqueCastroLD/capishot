@@ -2834,6 +2834,9 @@ cameraData	Lens	Объектив
 	Previous Document	Предыдущий документ
 	W x H x Resolution	Ш x В x Разрешение
 	Front Image	Изображение переднего плана
+	Frame Tool	Рамка
+	Create a new rectangular frame	Создать прямоугольную рамку
+	Create a new elliptical frame	Создать эллиптическую рамку
 	Include in playback	Включить в воспроизведение
 	Perspective Crop Tool	Кадрирование перспективы
 	Show Grid	Показать сетку

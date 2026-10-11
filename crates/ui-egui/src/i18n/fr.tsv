@@ -2907,6 +2907,9 @@ cameraData	Lens	Objectif
 	Previous Document	Document précédent
 	W x H x Resolution	L x H x Résolution
 	Front Image	Image de premier plan
+	Frame Tool	Outil Cadre
+	Create a new rectangular frame	Créer un cadre rectangulaire
+	Create a new elliptical frame	Créer un cadre elliptique
 	Include in playback	Inclure dans la lecture
 	Perspective Crop Tool	Outil Recadrage perspective
 	Show Grid	Afficher la grille

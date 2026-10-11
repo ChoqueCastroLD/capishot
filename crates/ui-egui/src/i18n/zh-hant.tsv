@@ -2473,6 +2473,9 @@ cameraData	Lens	鏡頭
 	Previous Document	上一個文件
 	W x H x Resolution	寬 x 高 x 解析度
 	Front Image	前面的影像
+	Frame Tool	影格工具
+	Create a new rectangular frame	建立新的矩形影格
+	Create a new elliptical frame	建立新的橢圓形影格
 	Include in playback	包含在播放中
 	Perspective Crop Tool	透視裁切工具
 	Show Grid	顯示格點

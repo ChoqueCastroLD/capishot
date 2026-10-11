@@ -3074,6 +3074,9 @@ cameraData	Lens	렌즈
 	Previous Document	이전 문서
 	W x H x Resolution	폭 x 높이 x 해상도
 	Front Image	전면 이미지
+	Frame Tool	프레임 도구
+	Create a new rectangular frame	새 사각형 프레임 만들기
+	Create a new elliptical frame	새 타원형 프레임 만들기
 	Include in playback	재생에 포함
 	Perspective Crop Tool	원근 자르기 도구
 	Show Grid	격자 표시

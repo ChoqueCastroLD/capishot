@@ -2529,6 +2529,9 @@ cameraData	Lens	Objektiv
 	Previous Document	Vorheriges Dokument
 	W x H x Resolution	B x H x Auflösung
 	Front Image	Vorderes Bild
+	Frame Tool	Rahmenwerkzeug
+	Create a new rectangular frame	Neuen rechteckigen Rahmen erstellen
+	Create a new elliptical frame	Neuen elliptischen Rahmen erstellen
 	Include in playback	In Wiedergabe einbeziehen
 	Perspective Crop Tool	Perspektivisches Freistellungswerkzeug
 	Show Grid	Raster einblenden

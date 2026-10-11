@@ -3508,6 +3508,9 @@ cameraData	Lens	レンズ
 	Previous Document	前のドキュメント
 	W x H x Resolution	幅 x 高さ x 解像度
 	Front Image	前面の画像
+	Frame Tool	フレームツール
+	Create a new rectangular frame	新しい長方形フレームを作成
+	Create a new elliptical frame	新しい楕円形フレームを作成
 	Include in playback	再生に含める
 	Perspective Crop Tool	遠近法の切り抜きツール
 	Show Grid	グリッドを表示
