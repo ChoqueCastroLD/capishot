@@ -1070,6 +1070,21 @@ mod tests {
         assert!(missing.is_empty(), "missing Korean dynamic labels: {missing:#?}");
     }
 
+    /// Select and Mask's Output To lists all six of Photoshop's targets, each translated.
+    #[test]
+    fn select_and_mask_output_choices_are_translated() {
+        let spec = photocraft_engine::commands::find("select.refineEdge").unwrap().params;
+        let p = parse_spec(spec).into_iter().find(|p| p.key == "output").unwrap();
+        let Kind::Choice { options: choices, .. } = p.kind else { panic!("output is not a choice") };
+        let labels: Vec<String> = choices.iter().map(|c| source_label(c)).collect();
+        assert_eq!(labels, ["Selection", "Layer Mask", "New Layer", "New Layer With Mask", "New Document", "New Document With Mask"]);
+        for lang in crate::i18n::Lang::all().filter(|l| l.code() != "en") {
+            for label in &labels {
+                assert!(crate::i18n::has(lang, label), "{}: untranslated {label}", lang.code());
+            }
+        }
+    }
+
     #[test]
     fn preview_runs_engine_command_on_proxy() {
         let mut doc = Document::with_background(

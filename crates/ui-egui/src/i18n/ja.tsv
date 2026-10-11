@@ -1545,6 +1545,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 移動   {key} 実行   esc 閉じる
 	Version {version}	バージョン {version}
 	New Document	新規ドキュメント
+	New Document With Mask	新規ドキュメント（マスク付き）
+	New Layer With Mask	新規レイヤー（マスク付き）
 	Saved	保存済み
 	Save Preset…	プリセットを保存…
 	Preset Name	プリセット名

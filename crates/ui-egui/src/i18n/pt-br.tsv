@@ -1525,6 +1525,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navegar   {key} executar   esc fechar
 	Version {version}	Versão {version}
 	New Document	Novo documento
+	New Document With Mask	Novo documento com máscara
+	New Layer With Mask	Nova camada com máscara
 	Preset Name	Nome da predefinição
 	No saved presets yet.	Nenhuma predefinição salva ainda.
 	Error	Erro

@@ -1521,6 +1521,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navigasi   {key} jalankan   esc tutup
 	Version {version}	Versi {version}
 	New Document	Dokumen Baru
+	New Document With Mask	Dokumen Baru dengan Mask
+	New Layer With Mask	Layer Baru dengan Mask
+	New Layer	Layer Baru
 	Preset Name	Nama Preset
 	No saved presets yet.	Belum ada preset tersimpan.
 	Error	Error

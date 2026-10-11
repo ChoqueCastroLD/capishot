@@ -1516,6 +1516,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 이동   {key} 실행   esc 닫기
 	Version {version}	버전 {version}
 	New Document	새 문서
+	New Document With Mask	새 문서(마스크 포함)
+	New Layer With Mask	새 레이어(마스크 포함)
 	Saved	저장됨
 	Save Preset…	사전 설정 저장…
 	Preset Name	사전 설정 이름

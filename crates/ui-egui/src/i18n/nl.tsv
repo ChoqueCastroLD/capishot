@@ -1527,6 +1527,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navigeren   {key} uitvoeren   esc sluiten
 	Version {version}	Versie {version}
 	New Document	Nieuw document
+	New Document With Mask	Nieuw document met masker
+	New Layer With Mask	Nieuwe laag met masker
 	Save Preset…	Voorinstelling opslaan…
 	Preset Name	Naam voorinstelling
 	No saved presets yet.	Nog geen opgeslagen voorinstellingen.

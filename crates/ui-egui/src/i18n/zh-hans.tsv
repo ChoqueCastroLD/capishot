@@ -1558,6 +1558,9 @@
 	↑↓ navigate   ↵ run   esc close	↑↓ 导航   ↵ 运行   esc 关闭
 	Version {version}	版本 {version}
 	New Document	新建文档
+	New Document With Mask	带蒙版的新建文档
+	New Layer With Mask	带蒙版的新建图层
+	New Layer	新建图层
 	Saved	已保存
 	Save Preset…	保存预设…
 	Preset Name	预设名称

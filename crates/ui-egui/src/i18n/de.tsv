@@ -1540,6 +1540,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ Navigieren   {key} Ausführen   Esc Schließen
 	Version {version}	Version {version}
 	New Document	Neues Dokument
+	New Document With Mask	Neues Dokument mit Maske
+	New Layer With Mask	Neue Ebene mit Maske
+	New Layer	Neue Ebene
 	Save Preset…	Vorgabe speichern…
 	Preset Name	Name der Vorgabe
 	No saved presets yet.	Noch keine gespeicherten Vorgaben.

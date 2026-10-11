@@ -1546,6 +1546,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navegar   {key} ejecutar   esc cerrar
 	Version {version}	Versión {version}
 	New Document	Documento nuevo
+	New Document With Mask	Documento nuevo con máscara
+	New Layer With Mask	Nueva capa con máscara
+	New Layer	Nueva capa
 	Save Preset…	Guardar ajuste preestablecido…
 	Preset Name	Nombre del ajuste preestablecido
 	No saved presets yet.	Todavía no hay ajustes preestablecidos guardados.

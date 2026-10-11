@@ -1552,6 +1552,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 瀏覽   {key} 執行   esc 關閉
 	Version {version}	版本 {version}
 	New Document	新增文件
+	New Document With Mask	含遮色片的新增文件
+	New Layer With Mask	含遮色片的新增圖層
+	New Layer	新增圖層
 	Saved	已儲存
 	Save Preset…	儲存預設…
 	Preset Name	預設集名稱
