@@ -681,6 +681,15 @@ impl Session {
 
 /// Undo / redo: target the layers the restored state targeted, as far as they still exist.
 fn restore_target(st: &mut DocState, layers: LayerTarget) {
+    // Deselect Layers is a valid history target, not a missing layer to replace with the top
+    // layer. An edit after deselection must undo back to no active or selected layers (#3042).
+    if layers.active.is_none() && layers.selected.is_empty() {
+        st.active_layer = None;
+        st.selected_layers.clear();
+        st.layer_anchor = None;
+        channel_cmds::fix_view(st);
+        return;
+    }
     if layers.active.is_some_and(|id| st.doc.layer(id).is_some()) {
         st.active_layer = layers.active;
         st.selected_layers = layers.selected;
