@@ -2745,3 +2745,24 @@ cameraData	Lens	Objetivo
 	Emulsion Down	Emulsión hacia abajo
 	Functions	Funciones
 	Print Resolution:	Resolución de impresión:
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Herramienta Pincel de muestreo
+	Sampling Area Overlay	Superposición del área de muestreo
+	Show Sampling Area	Mostrar área de muestreo
+	Indicates	Indica
+	Sampling Area	Área de muestreo
+	Excluded Area	Área excluida
+	Sampling Area Options	Opciones del área de muestreo
+	Rectangular	Rectangular
+	Fill Settings	Ajustes de relleno
+	Rotation Adaptation	Adaptación de rotación
+	Very High	Muy alta
+	High	Alta
+	Low	Baja
+	Full	Completa
+	Mirror	Reflejar
+	Output Settings	Ajustes de salida
+	Output To	Salida a
+	New Layer	Capa nueva
+	Duplicate Layer	Duplicar capa
+	Contract	Contraer
