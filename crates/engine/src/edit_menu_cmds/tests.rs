@@ -465,3 +465,64 @@ fn find_in_the_active_layer_finds_nothing_when_it_is_not_type() {
     let r = s.execute("edit.findAndReplaceText", json!({"find": "abc", "allLayers": false, "action": "find"})).unwrap();
     assert_eq!((r["found"]["layer"].as_u64(), r["found"]["text"].as_str()), (Some(id), Some("abc")));
 }
+
+/// The exact layer bits Content-Aware Fill leaves with a feathered selection, for every way of
+/// choosing where to sample (auto, rectangular, a custom area, a saved channel), at each depth:
+/// pinned so that reading the masks faster can't change them.
+#[test]
+fn content_aware_fill_output_bits_are_pinned() {
+    let mut got = Vec::new();
+    for depth in [8, 16, 32] {
+        let mut s = session(depth);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.edit("paint", |doc, active| {
+            let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+            for y in 0..48 {
+                for x in 0..64 {
+                    let v = |k: i32| {
+                        (((x as u32).wrapping_mul(73_856_093) ^ (y as u32).wrapping_mul(19_349_663) ^ (k as u32).wrapping_mul(83_492_791)) % 997) as f32 / 997.0
+                    };
+                    let stripe = if (x / 3) % 2 == 0 { 0.2 } else { 0.0 };
+                    surf.write_pixel(x, y, &[v(0) * 0.6 + stripe, v(1) * 0.5 + 0.2, v(2) * 0.4 + stripe, 1.0]);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+        // A saved channel covering the right half (the custom sampling mask).
+        s.execute("select.rect", json!({"x": 32, "y": 0, "width": 32, "height": 48})).unwrap();
+        s.execute("select.saveSelection", json!({"name": "right"})).unwrap();
+        s.execute("select.rect", json!({"x": 22, "y": 15, "width": 16, "height": 14, "ellipse": true})).unwrap();
+        s.execute("select.modify.feather", json!({"radius": 2})).unwrap();
+        for params in [
+            json!({}),
+            json!({"sampling": "rectangular", "seed": 3}),
+            json!({"sampling": "custom", "area": [0, 6, 30, 26], "colorAdaptation": "none"}),
+            json!({"sampling": "custom", "channel": "right", "rotationAdaptation": "low"}),
+        ] {
+            let before = active(&s).surface().unwrap().read_region(Rect::new(0, 0, 64, 48));
+            s.execute("edit.contentAwareFill", params.clone()).unwrap();
+            let surf = active(&s).surface().unwrap();
+            assert_ne!(surf.read_region(Rect::new(0, 0, 64, 48)), before, "depth {depth}, {params}: the fill changed the layer");
+            let bits = surf.read_region(Rect::new(0, 0, 64, 48)).into_iter().flat_map(|v| v.to_bits().to_le_bytes());
+            got.push(bits.fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)));
+            s.undo();
+        }
+    }
+    assert_eq!(got, CAF_PINNED);
+}
+
+const CAF_PINNED: [u64; 12] = [
+    0x079b_9699_b360_1be0,
+    0x6a3a_2ce1_1402_495e,
+    0xe5ca_3d30_2bd6_f57f,
+    0xcdfe_3a24_7fa6_117a,
+    0x2ae6_94fd_d262_b8b9,
+    0x9304_6d7d_c7ca_fa64,
+    0xf468_1ff6_5454_4714,
+    0x58cb_99c8_12ba_ffd6,
+    0x8702_41e1_3f79_09c9,
+    0x1472_eaf1_ca2f_45b4,
+    0xdd33_02dd_a463_fdcc,
+    0xcef9_7e0a_6b9c_61ad,
+];
