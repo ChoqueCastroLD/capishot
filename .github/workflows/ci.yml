@@ -121,6 +121,26 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' && matrix.part != 'unit' }}
           cache-on-failure: true
 
+      # sccache caches the workspace crates' compiled libraries, which rust-cache leaves out:
+      # warm, each Windows leg built 4.5 min faster. Like rust-cache, only main writes (PRs read
+      # main's entries); a full set is ~90 MB, so it barely touches the 10 GB budget (#2688).
+      # Test executables can't be cached, so a PR still links its tests.
+      - name: Install sccache (Windows)
+        if: runner.os == 'Windows'
+        uses: Mozilla-Actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.18.0
+
+      - name: Use sccache (Windows)
+        if: runner.os == 'Windows'
+        env:
+          MAIN: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          if [ "$MAIN" != true ]; then echo "SCCACHE_GHA_RW_MODE=READ_ONLY" >> "$GITHUB_ENV"; fi
+        shell: bash
+
       - name: Format
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
