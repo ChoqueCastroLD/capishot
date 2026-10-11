@@ -676,6 +676,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     if let Some(e) = crate::transform_tool::is_enabled(app, id) {
         return e;
     }
+    if let Some(e) = crate::crop_ui::is_enabled(app, id) {
+        return e;
+    }
     match id {
         "window.panel.activate" | "window.panel.layout" => true,
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
