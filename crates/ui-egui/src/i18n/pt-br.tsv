@@ -2988,6 +2988,12 @@ cameraData	Lens	Lente
 	Show Edge	Mostrar borda
 	Show Original	Mostrar original
 	F cycles the views; hold X to see the image	F alterna as visualizações; segure X para ver a imagem
+# Select and Mask Refine Edge Brush (#2972)
+	Refine Edge Brush (R)	Pincel de refinamento de borda (R)
+	Expand Detection Area	Expandir área de detecção
+	Restore Original Edge	Restaurar borda original
+	Paint over hair or fur on the image; Alt paints the other mode	Pinte sobre cabelo ou pelo na imagem; Alt pinta no outro modo
+	Clear Brush Strokes	Limpar traços do pincel
 	Show rulers	Mostrar réguas
 
 # Color Sampler (added with the i18n coverage repair)
