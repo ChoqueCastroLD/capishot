@@ -366,6 +366,17 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
             return;
         }
     }
+    // Content-Aware Move's Transform On Drop box: ↩ computes the move, Esc drops it.
+    if crate::cam_transform::active(app) {
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
+            crate::cam_transform::commit(app);
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            crate::cam_transform::cancel(app);
+            return;
+        }
+    }
     // Crop tool with a pending frame: arrows nudge it (⇧ ×10) and X swaps its orientation, before
     // the selection / layer nudge and the X colour swap (#1919).
     if focus == Focus::None && crate::crop_ui::keys(app, ctx) {

@@ -2165,6 +2165,8 @@ cameraRaw	Color	색상
 	Patch Tool	패치 도구
 	Patch:	패치:
 	Lasso around an area, then drag the selection	올가미로 영역을 둘러싼 다음 선택 영역을 드래그하세요
+	Transform On Drop	놓을 때 변형
+	Scale or rotate the moved area, then press {key}	이동한 영역의 크기를 조절하거나 회전한 다음 {key} 키를 누르세요
 	Now drag the selection onto another area	이제 선택 영역을 다른 영역으로 드래그하세요
 
 # Warp grid presets merged on main in #388.

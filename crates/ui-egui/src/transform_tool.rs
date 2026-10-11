@@ -1209,7 +1209,7 @@ fn scale_not_distort(mode: TransformMode, hit: Hit, mut mods: egui::Modifiers) -
 /// Preferences › General › Use Legacy Free Transform, Photoshop's scaling before CC 2019: corner
 /// drags stretch freely and ⇧ keeps the proportions, edge drags stretch their one axis whatever
 /// the keys. The default is proportional for both, with ⇧ freeing them.
-fn legacy_mods(legacy: bool, hit: Hit, mut mods: egui::Modifiers) -> egui::Modifiers {
+pub(crate) fn legacy_mods(legacy: bool, hit: Hit, mut mods: egui::Modifiers) -> egui::Modifiers {
     if legacy && !mods.command {
         match hit {
             Hit::Corner(_) => mods.shift = !mods.shift,

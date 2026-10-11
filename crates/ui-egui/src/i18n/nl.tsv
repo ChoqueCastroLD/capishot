@@ -2229,6 +2229,8 @@
 	Grid:	Raster:
 	Highlight Clipping Warning (O)	Waarschuwing afsnijden hooglichten (O)
 	Lasso around an area, then drag the selection	Trek een lasso rond een gebied en sleep daarna de selectie
+	Transform On Drop	Transformeren bij neerzetten
+	Scale or rotate the moved area, then press {key}	Schaal of draai het verplaatste gebied en druk daarna op {key}
 	Patch:	Lap:
 	Shadow Clipping Warning (U)	Waarschuwing afsnijden schaduwen (U)
 	Show Lab Color Readouts	Lab-kleurwaarden tonen

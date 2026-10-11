@@ -2714,7 +2714,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 app.perf.span("outline", crate::gpu_canvas::now_ms() - t0);
                 app.outline_cache = Some((doc.id, key, std::sync::Arc::new(segs)));
             }
-            if let Some((_, _, segs)) = &app.outline_cache {
+            // Under Content-Aware Move's Transform On Drop box the ants are drawn where it puts them.
+            if let Some((_, _, segs)) = app.outline_cache.as_ref().filter(|_| !crate::cam_transform::active(app)) {
                 let time = ui.input(|i| i.time);
                 // A floating piece (and a selection being dragged) draws its ants where it is shown.
                 let mut shown = xf;
@@ -3173,6 +3174,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if app.ui.transform.is_some() && response.double_clicked() {
             crate::transform_tool::commit(app);
         }
+        if crate::cam_transform::active(app) && response.double_clicked() {
+            crate::cam_transform::commit(app);
+        }
         // Crop: a double-click inside the frame commits it, as ↵ does (#1792).
         if tool == Tool::Crop && response.double_clicked() && response.interact_pointer_pos().is_some_and(|p| crate::crop_ui::commits_at(app, xf.to_doc(p))) {
             commit_crop(app);
@@ -3248,6 +3252,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
         crate::type_tool::draw_overlay(app, &painter, &xf);
         crate::transform_tool::draw_overlay(app, &painter, &xf);
+        crate::cam_transform::draw(app, &painter, &xf);
         crate::distort_ui::draw_overlay(app, &painter, &xf);
         crate::perspective_crop_ui::draw_overlay(app, &painter, &xf);
         crate::retouch_ui::draw_source_marker(app, &painter, &xf);
@@ -3271,6 +3276,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         } else if let Some(c) =
             response.hover_pos().and_then(|p| crate::transform_tool::cursor(app, xf.to_doc(p), ui.input(|i| i.modifiers.alt || i.modifiers.command)))
         {
+            ui.ctx().set_cursor_icon(c);
+        } else if let Some(c) = response.hover_pos().and_then(|p| crate::cam_transform::cursor(app, &ctx, &xf, p)) {
             ui.ctx().set_cursor_icon(c);
         } else if let Some(c) = response.hover_pos().and_then(|p| transform_controls_rect(app, &xf).and_then(|r| transform_controls_cursor(r, p))) {
             // The Move tool draws handles without opening a Free Transform session.
@@ -3593,14 +3600,20 @@ fn paint_mapped_quad(painter: &egui::Painter, xf: &ViewXform, size: [f32; 2], co
 
 /// Draw boundary segments as marching ants: white base, black dashes phased along x + y.
 fn marching_ants_segments(painter: &egui::Painter, xf: &ViewXform, segs: &[crate::outline::Segment], time: f64) {
+    marching_ants_mapped(painter, segs, time, |p| xf.to_screen(p[0] as f32, p[1] as f32));
+}
+
+/// [`marching_ants_segments`] with each outline point placed on screen by `to_screen` (a
+/// transformed outline: Content-Aware Move's Transform On Drop).
+pub(crate) fn marching_ants_mapped(painter: &egui::Painter, segs: &[crate::outline::Segment], time: f64, to_screen: impl Fn([i32; 2]) -> Pos2) {
     let dash = 4.0f32;
     let phase = ((time * 10.0) % (dash as f64 * 2.0)) as f32;
     let white = Stroke::new(1.0, Color32::WHITE);
     let black = Stroke::new(1.0, Color32::BLACK);
     let clip = painter.clip_rect();
     for (a, b) in segs {
-        let pa = xf.to_screen(a[0] as f32, a[1] as f32);
-        let pb = xf.to_screen(b[0] as f32, b[1] as f32);
+        let pa = to_screen(*a);
+        let pb = to_screen(*b);
         if !clip.intersects(Rect::from_two_pos(pa, pb).expand(1.0)) {
             continue;
         }
@@ -4257,6 +4270,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     crate::transform_tool::end_if_left(app);
     let mods = crate::workspace_ui::sticky_mods(app, mods);
     if app.ui.transform.is_none() && crate::type_transform::pointer(app, ev, mods) {
+        return;
+    }
+    // Content-Aware Move's Transform On Drop box takes every press until ↩ or Esc.
+    if crate::cam_transform::pointer(app, ev, mods) {
         return;
     }
     // View › Snap / Snap To and smart guides (snap_ui.rs).

@@ -548,6 +548,8 @@ pub struct ToolOptions {
     pub cam_mode: String,
     pub cam_structure: f32,
     pub cam_color: f32,
+    /// Content-Aware Move: Transform On Drop (a transform box on the dropped patch).
+    pub cam_transform_on_drop: bool,
     /// Dodge/Burn: shadows | midtones | highlights, exposure %, protect tones.
     pub tone_range: String,
     pub exposure: f32,
@@ -758,6 +760,7 @@ impl Default for ToolOptions {
             cam_mode: "move".into(),
             cam_structure: 4.0,
             cam_color: 0.0,
+            cam_transform_on_drop: false,
             tone_range: "midtones".into(),
             exposure: 50.0,
             protect_tones: true,
@@ -926,6 +929,19 @@ pub struct TypeTransform {
     pub(crate) gesture: crate::transform_tool::Gesture,
 }
 
+/// Content-Aware Move with Transform On Drop: the box on the dropped patch. The document is
+/// unchanged until it is committed; this is view state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CamTransform {
+    pub document: u64,
+    pub revision: u64,
+    /// How far the selection was dragged; the box's `rect` is the selection's bounds there.
+    pub offset: [i32; 2],
+    pub frame: TransformSession,
+    #[serde(skip)]
+    pub(crate) gesture: Option<crate::transform_tool::Gesture>,
+}
+
 /// View-menu overlays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -985,6 +1001,9 @@ pub struct UiState {
     /// Reference point for the current type editing session (document coordinates).
     #[serde(skip)]
     pub type_transform_pivot: Option<[f64; 2]>,
+    /// Content-Aware Move's Transform On Drop box, waiting for ↩ / Esc.
+    #[serde(default, skip_deserializing)]
+    pub cam_transform: Option<CamTransform>,
     /// Free Transform session, if any.
     #[serde(default)]
     pub transform: Option<TransformSession>,
@@ -1181,6 +1200,7 @@ impl Default for UiState {
             text_edit: None,
             type_transform: None,
             type_transform_pivot: None,
+            cam_transform: None,
             transform: None,
             symmetry_transform: None,
             mask_target: false,

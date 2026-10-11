@@ -2291,6 +2291,8 @@ cameraRaw	Amount	Cantidad
 	Patch Tool	Herramienta Parche
 	Patch:	Parche:
 	Lasso around an area, then drag the selection	Rodee un área con el lazo y arrastre la selección
+	Transform On Drop	Transformar al soltar
+	Scale or rotate the moved area, then press {key}	Escale o gire el área movida y pulse {key}
 	Now drag the selection onto another area	Ahora arrastre la selección a otra área
 	Edit Type	Editar texto
 

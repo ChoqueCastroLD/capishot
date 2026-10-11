@@ -2672,6 +2672,8 @@ cameraRaw	Roughness	Chropowatość
 	Patch Tool	Narzędzie Łatka
 	Patch:	Łatka:
 	Lasso around an area, then drag the selection	Zakreśl obszar lassem, a następnie przeciągnij zaznaczenie
+	Transform On Drop	Przekształć po upuszczeniu
+	Scale or rotate the moved area, then press {key}	Przeskaluj lub obróć przeniesiony obszar, a następnie naciśnij {key}
 	Now drag the selection onto another area	Teraz przeciągnij zaznaczenie na inny obszar
 	Edit Type	Edytuj tekst
 	Make Default	Ustaw jako domyślne

@@ -2464,6 +2464,8 @@ cameraRaw	Roughness	Шорсткість
 	Patch Tool	Інструмент «Латка»
 	Patch:	Латка:
 	Lasso around an area, then drag the selection	Обведіть область ласо, потім перетягніть виділення
+	Transform On Drop	Трансформувати після відпускання
+	Scale or rotate the moved area, then press {key}	Змініть масштаб або поверніть переміщену область, потім натисніть {key}
 	Edit Type	Редагувати текст
 
 

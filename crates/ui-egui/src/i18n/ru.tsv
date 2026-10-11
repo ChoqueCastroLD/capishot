@@ -2491,6 +2491,8 @@ cameraRaw	Roughness	Неровность
 	Patch Tool	Заплатка
 	Patch:	Заплатка:
 	Lasso around an area, then drag the selection	Обведите область лассо, затем перетащите выделение
+	Transform On Drop	Трансформировать при отпускании
+	Scale or rotate the moved area, then press {key}	Масштабируйте или поверните перемещённую область, затем нажмите {key}
 	Now drag the selection onto another area	Теперь перетащите выделение на другую область
 	Edit Type	Редактировать текст
 

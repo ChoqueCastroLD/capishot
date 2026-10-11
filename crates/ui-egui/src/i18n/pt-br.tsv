@@ -2630,6 +2630,8 @@ cameraRaw	Blending	Mesclagem
 	Patch Tool	Ferramenta Correção
 	Patch:	Correção:
 	Lasso around an area, then drag the selection	Contorne uma área com o laço e arraste a seleção
+	Transform On Drop	Transformar ao soltar
+	Scale or rotate the moved area, then press {key}	Dimensione ou gire a área movida e pressione {key}
 	Now drag the selection onto another area	Agora arraste a seleção para outra área
 	3 x 3	3 × 3
 	4 x 4	4 × 4

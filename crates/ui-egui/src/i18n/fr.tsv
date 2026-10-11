@@ -2638,6 +2638,8 @@ cameraRaw	Blending	Fusion
 	Patch Tool	Outil Pièce
 	Patch:	Pièce :
 	Lasso around an area, then drag the selection	Entourez une zone au lasso, puis faites glisser la sélection
+	Transform On Drop	Transformer au dépôt
+	Scale or rotate the moved area, then press {key}	Mettez à l'échelle ou faites pivoter la zone déplacée, puis appuyez sur {key}
 	Now drag the selection onto another area	Faites maintenant glisser la sélection vers une autre zone
 
 # Warp grid presets (#388)

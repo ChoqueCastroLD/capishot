@@ -2298,6 +2298,8 @@ cameraRaw	Amount	Quantità
 	Patch Tool	Strumento Toppa
 	Patch:	Toppa:
 	Lasso around an area, then drag the selection	Seleziona un'area con lazo, poi trascina la selezione
+	Transform On Drop	Trasforma al rilascio
+	Scale or rotate the moved area, then press {key}	Ridimensiona o ruota l'area spostata, poi premi {key}
 	Now drag the selection onto another area	Ora trascina la selezione su un'altra area
 	Edit Type	Modifica testo
 
