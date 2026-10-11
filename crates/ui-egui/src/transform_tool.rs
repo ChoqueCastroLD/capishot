@@ -2425,13 +2425,15 @@ fn transform_actions(app: &mut PhotocraftApp, ui: &mut egui::Ui, warping: bool) 
         crate::i18n::fmt(tl!("Commit transform ({key})"), &[("key", &crate::shortcuts::pretty("Enter"))])
     };
     let commit_btn = crate::icons::button(ui, "check", 26.0, false, &commit_tip);
-    commit_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Commit transform"));
+    let label = "Commit transform";
+    commit_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!(label)));
     if commit_btn.clicked() {
         commit(app);
     }
     let cancel_tip = if warping { tl!("Cancel warp (Esc)") } else { tl!("Cancel transform (Esc)") };
     let cancel_btn = crate::icons::button(ui, "ban", 26.0, false, cancel_tip);
-    cancel_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Cancel transform"));
+    let label = "Cancel transform";
+    cancel_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!(label)));
     if cancel_btn.clicked() {
         cancel(app);
     }

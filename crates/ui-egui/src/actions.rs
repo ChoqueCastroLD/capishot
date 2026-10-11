@@ -179,14 +179,15 @@ fn begin_recording(app: &mut PhotocraftApp, append: bool) {
 pub(crate) fn report_play(app: &mut PhotocraftApp, v: &Value) {
     let Some(failed) = v.get("failed").filter(|f| f.is_object()) else {
         let ran = v.get("ran").and_then(Value::as_u64).unwrap_or(0);
-        app.ui.status = format!("Played {ran} steps");
+        app.ui.status = crate::i18n::trn(crate::i18n::current(), ran, "Played {n} step", "Played {n} steps");
         app.ui.status_error = false;
         return;
     };
     let step = failed.get("step").and_then(Value::as_u64).unwrap_or(0);
     let id = failed.get("id").and_then(Value::as_str).unwrap_or("");
     let error = failed.get("error").and_then(Value::as_str).unwrap_or("");
-    app.ui.status = format!("Step {} ({id}) failed: {error}", step + 1);
+    let template = "Step {step} ({id}) failed: {error}";
+    app.ui.status = crate::i18n::fmt(tl!(template), &[("step", &(step + 1).to_string()), ("id", id), ("error", error)]);
     app.ui.status_error = true;
 }
 
@@ -196,7 +197,12 @@ fn visible_steps(app: &PhotocraftApp, action: usize) -> Vec<(String, Value)> {
 
 /// "3 steps", or "2/3 steps" when some are switched off (Photoshop shows a red partial check).
 fn step_count(steps: usize, disabled: usize) -> String {
-    if disabled == 0 { format!("{steps} steps") } else { format!("{}/{steps} steps", steps.saturating_sub(disabled)) }
+    if disabled == 0 {
+        crate::i18n::trn(crate::i18n::current(), steps as u64, "{n} step", "{n} steps")
+    } else {
+        let count = crate::i18n::trn(crate::i18n::current(), steps as u64, "{n} step", "{n} steps");
+        format!("{}/{count}", steps.saturating_sub(disabled))
+    }
 }
 
 fn paint_check(ui: &egui::Ui, rect: Rect, on: bool, t: &Tokens) {
@@ -312,7 +318,8 @@ fn rename_field(app: &mut PhotocraftApp, ui: &mut egui::Ui, index: usize, rect: 
 
 fn rename_action(app: &mut PhotocraftApp, index: usize, name: String) {
     if let Err(e) = app.run("actions.rename", json!({"action": index, "name": name})) {
-        app.ui.status = format!("Could not rename the action: {e}");
+        let template = "Could not rename the action: {error}";
+        app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
         app.ui.status_error = true;
     }
 }
@@ -530,7 +537,8 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         match app.run("actions.play", json!({"action": i})) {
             Ok(v) => report_play(app, &v),
             Err(e) => {
-                app.ui.status = format!("Action playback failed: {e}");
+                let template = "Action playback failed: {error}";
+                app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
                 app.ui.status_error = true;
             }
         }

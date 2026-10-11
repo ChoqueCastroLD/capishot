@@ -628,7 +628,14 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             egui::RichText::new(tl!("Discord")).color(t.text_dim).size(12.0),
                         )
                         .frame(false);
-                        if ui.add(discord).on_hover_text(format!("Join the ArtCraft Discord ({})", crate::links::DISCORD)).clicked() {
+                        if ui
+                            .add(discord)
+                            .on_hover_text({
+                                let template = "Join the ArtCraft Discord ({url})";
+                                crate::i18n::fmt(tl!(template), &[("url", crate::links::DISCORD)])
+                            })
+                            .clicked()
+                        {
                             crate::links::open(app, ui.ctx(), crate::links::DISCORD);
                         }
                     }
@@ -950,7 +957,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         ui.add_enabled_ui(!block && !crate::eraser_ui::pencil_mode(app, app.ui.tool), |ui| {
                             percent_field(ui, tl!("Flow"), &mut b.flow, 1.0..=100.0, 62.0);
                             let airbrush = icons::button(ui, "sparkles", 24.0, b.build_up, tl!("Enable airbrush-style build-up effects"));
-                            if crate::brush_picker::named(airbrush, tl!("Enable airbrush-style build-up effects")).clicked() {
+                            if crate::brush_picker::named(airbrush, "Enable airbrush-style build-up effects").clicked() {
                                 b.build_up = !b.build_up;
                             }
                         });
@@ -1838,7 +1845,7 @@ fn navigator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let controls = ui.vertical(|ui| {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            label(ui, tl!("Zoom"));
+            label(ui, crate::i18n::tr_ctx(crate::i18n::current(), "navigator", "Zoom"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 for (lbl, z) in [("200%", 2.0), ("100%", 1.0)] {
                     if widgets::pill_tab(ui, lbl, (v.zoom - z).abs() < 1e-3).clicked() {
@@ -3423,7 +3430,7 @@ fn smoothing_field(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings, 
 /// like the Smoothing % (so they stay per tool and reach the live stroke and the commit).
 fn smoothing_options(ui: &mut egui::Ui, b: &mut photocraft_engine::BrushSettings) {
     let resp = icons::button(ui, "settings", 24.0, false, tl!("Set additional smoothing options"));
-    let resp = crate::brush_picker::named(resp, tl!("Set additional smoothing options"));
+    let resp = crate::brush_picker::named(resp, "Set additional smoothing options");
     egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let s = &mut b.smoothing;
         widgets::checkbox(ui, &mut s.pulled_string, tl!("Pulled String Mode"));

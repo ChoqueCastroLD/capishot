@@ -326,7 +326,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             #[cfg(target_arch = "wasm32")]
             {
                 let _ = app;
-                Err("Open Recent is unavailable on the web".to_string())
+                let message = "Open Recent is unavailable on the web";
+                Err(tl!(message).to_string())
             }
         }
         "file.saveAs" => {

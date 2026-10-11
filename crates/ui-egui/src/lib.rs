@@ -895,7 +895,8 @@ impl PhotocraftApp {
             }
             if self.session.clipboard.is_none() && self.services.clipboard_get_image.is_some() {
                 // Enabled on the strength of the OS clipboard, which held no image: a quiet no-op.
-                self.ui.status = "Nothing to paste: the clipboard holds no image".into();
+                let message = "Nothing to paste: the clipboard holds no image";
+                self.ui.status = tl!(message).into();
                 self.ui.status_error = false;
                 return Ok(serde_json::json!({"pasted": false}));
             }
@@ -953,7 +954,7 @@ impl PhotocraftApp {
                 if removed > 0 {
                     // A canvas-size change (crop, Canvas Size, Image Size, rotation) dropped Color
                     // Sampler points that fell outside the new canvas (#1046).
-                    self.ui.status = if removed == 1 { "1 sample point removed".into() } else { format!("{removed} sample points removed") };
+                    self.ui.status = crate::i18n::trn(crate::i18n::current(), removed as u64, "{n} sample point removed", "{n} sample points removed");
                     self.ui.status_error = false;
                 }
                 if self.ui.status_error {
@@ -1088,13 +1089,13 @@ impl PhotocraftApp {
             st.source_read_only = photocraft_io::affinity::is_affinity(bytes);
         }
         self.sync_views();
-        self.ui.status = format!("Opened {name}");
+        self.ui.status = crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]);
         self.ui.status_error = false;
         if camera_raw_ui::wants_open_dialog(self, &warnings) {
             camera_raw_ui::queue_open_dialog(self, name, None, Some(bytes));
-            notices::io_warnings(self, &format!("Opened {name}"), &camera_raw_ui::without_develop_note(&warnings));
+            notices::io_warnings(self, &crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]), &camera_raw_ui::without_develop_note(&warnings));
         } else {
-            notices::io_warnings(self, &format!("Opened {name}"), &warnings);
+            notices::io_warnings(self, &crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]), &warnings);
         }
         // Script events bound to "Open Document".
         photocraft_engine::automate_cmds::document_opened(&mut self.session);
@@ -1137,9 +1138,9 @@ impl PhotocraftApp {
             st.source_read_only = photocraft_io::affinity::is_affinity(bytes);
         }
         self.sync_views();
-        self.ui.status = format!("Opened {name}");
+        self.ui.status = crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]);
         self.ui.status_error = false;
-        notices::io_warnings(self, &format!("Opened {name}"), &warnings);
+        notices::io_warnings(self, &crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]), &warnings);
         Ok(warnings)
     }
 
@@ -1341,7 +1342,11 @@ impl PhotocraftApp {
                     && let Some(i) = app.session.active_index()
                     && let Some(r) = photocraft_engine::automate_cmds::document_saved(&mut app.session, i)
                 {
-                    app.ui.status = format!("Saved {path}; {} image assets in {}", r["files"].as_array().map_or(0, Vec::len), r["dir"].as_str().unwrap_or(""));
+                    let template = "Saved {path}; image assets: {n} in {dir}";
+                    app.ui.status = crate::i18n::fmt(
+                        tl!(template),
+                        &[("path", path), ("n", &r["files"].as_array().map_or(0, Vec::len).to_string()), ("dir", r["dir"].as_str().unwrap_or(""))],
+                    );
                 }
                 Ok(())
             });

@@ -275,9 +275,12 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
         let (bytes, warnings) = export(&out, &path, &settings)?;
         let write = app.services.write.as_mut().ok_or("no writer configured")?;
         write(&path, &bytes)?;
-        app.ui.status = format!("Exported {path} ({})", crate::sizing::human_bytes(bytes.len() as f64));
+        let template = "Exported {path} ({size})";
+        app.ui.status = crate::i18n::fmt(tl!(template), &[("path", &path), ("size", &crate::sizing::human_bytes(bytes.len() as f64))]);
         app.ui.status_error = false;
-        crate::notices::io_warnings(app, &format!("Exported {}", crate::file_open::display_name(&path)), &warnings);
+        let template = "Exported {path}";
+        let what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(&path))]);
+        crate::notices::io_warnings(app, &what, &warnings);
         Ok(json!({"path": path, "bytes": bytes.len(), "warnings": warnings}))
     })
 }
@@ -312,7 +315,8 @@ pub fn quick_export_png(app: &mut PhotocraftApp) -> Result<Value, String> {
 /// Runs Quick Export with `p` (an explicit `path`, or none for the document's folder).
 fn quick_export(app: &mut PhotocraftApp, p: Value) -> Result<Value, String> {
     let r = app.run("file.export.quickExport", p)?;
-    app.ui.status = format!("Exported {}", r["path"].as_str().unwrap_or_default());
+    let template = "Exported {path}";
+    app.ui.status = crate::i18n::fmt(tl!(template), &[("path", r["path"].as_str().unwrap_or_default())]);
     Ok(r)
 }
 
