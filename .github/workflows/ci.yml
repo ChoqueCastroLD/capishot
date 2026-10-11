@@ -84,6 +84,11 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(needs.platforms.outputs.os) }}
+    env:
+      # No debuginfo on Windows: writing PDBs for ~200 test binaries cost 2.2 of ~21 build minutes.
+      # A panic still names its file and line; only backtrace frames lose theirs (Linux keeps
+      # line-tables-only, so a backtrace with lines is one OS away).
+      CARGO_PROFILE_DEV_DEBUG: ${{ startsWith(matrix.os, 'windows') && '0' || 'line-tables-only' }}
     steps:
       - uses: actions/checkout@v4
 
