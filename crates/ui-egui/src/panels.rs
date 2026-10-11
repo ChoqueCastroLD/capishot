@@ -2178,7 +2178,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
 
     // Top of the stack first, groups above their contents, closed groups' contents hidden (#126).
-    let rows = crate::layer_tree_ui::display_rows(&doc, !app.ui.layer_filter.is_empty());
+    let rows = crate::layer_tree_ui::panel_rows(app, &doc);
     let ctx = ui.ctx().clone();
     let footer = widgets::footer_height(ui) + ui.spacing().item_spacing.y;
     let fill = ui.available_height() > footer + 60.0;
