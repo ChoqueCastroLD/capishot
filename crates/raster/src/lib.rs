@@ -509,6 +509,50 @@ impl Surface {
         }
     }
 
+    /// Lock transparency after an edit: give every pixel of the tiles that changed since `old`
+    /// (tiles not shared with it, and tiles only `old` has) its alpha in `old`, keeping its other
+    /// channels. Copies the alpha samples' bytes, which is what decoding, replacing the alpha and
+    /// re-encoding would store. Then prunes. Nothing happens unless both have the same format with
+    /// alpha.
+    pub fn copy_alpha_from(&mut self, old: &Surface) {
+        if old.format != self.format || !self.format.alpha {
+            return;
+        }
+        let size = self.format.sample.bytes();
+        let bpp = self.format.bytes_per_pixel();
+        let at = bpp - size;
+        let mut coords: Vec<TileCoord> = self.tiles.iter().filter(|(c, t)| old.tiles.get(c).is_none_or(|o| !Arc::ptr_eq(o, t))).map(|(c, _)| *c).collect();
+        coords.extend(old.tiles.keys().filter(|c| !self.tiles.contains_key(c)));
+        // The tiles are independent: take them out, fix them in parallel, put them back.
+        let mut work: Vec<(TileCoord, Arc<Tile>)> = coords
+            .into_iter()
+            .map(|c| {
+                let t = self.tiles.remove(&c).unwrap_or_else(|| Arc::new(Tile::filled(&self.format, &self.default_pixel)));
+                (c, t)
+            })
+            .collect();
+        let default = &old.default_pixel[at..];
+        let fix = |(c, t): &mut (TileCoord, Arc<Tile>)| {
+            let t = Arc::make_mut(t);
+            match old.tiles.get(c) {
+                Some(o) => match size {
+                    1 => t.data.iter_mut().skip(at).step_by(bpp).zip(o.data.iter().skip(at).step_by(bpp)).for_each(|(d, s)| *d = *s),
+                    _ => t.data.chunks_exact_mut(bpp).zip(o.data.chunks_exact(bpp)).for_each(|(d, s)| d[at..].copy_from_slice(&s[at..])),
+                },
+                None => t.data.chunks_exact_mut(bpp).for_each(|d| d[at..].copy_from_slice(default)),
+            }
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use rayon::prelude::*;
+            work.par_iter_mut().for_each(fix);
+        }
+        #[cfg(target_arch = "wasm32")]
+        work.iter_mut().for_each(fix);
+        self.tiles.extend(work);
+        self.prune();
+    }
+
     /// Take the tiles covering `r` out of the surface (missing ones filled with the default
     /// pixel), so they can be edited elsewhere, e.g. in parallel: `Arc::unwrap_or_clone` copies a
     /// tile only if an undo snapshot still shares it. Give them back with [`Surface::put_tiles`].
@@ -911,6 +955,76 @@ mod tests {
                     "{sample:?} decode from {first}"
                 );
             }
+        }
+    }
+
+    /// The old decode-replace-encode way of putting `old`'s alpha back into the tiles that changed.
+    fn copy_alpha_reference(old: &Surface, new: &mut Surface) {
+        if old.format() != new.format() || !new.format().alpha {
+            return;
+        }
+        let mut coords: Vec<_> = new.tiles().filter(|(c, t)| old.tile(**c).is_none_or(|o| !Arc::ptr_eq(o, t))).map(|(c, _)| *c).collect();
+        coords.extend(old.tiles().filter(|(c, _)| new.tile(**c).is_none()).map(|(c, _)| *c));
+        let n = new.channels();
+        for c in coords {
+            let r = c.rect();
+            let o = old.read_region(r);
+            let mut v = new.read_region(r);
+            for (pn, po) in v.chunks_exact_mut(n).zip(o.chunks_exact(n)) {
+                if let (Some(a), Some(b)) = (pn.last_mut(), po.last()) {
+                    *a = *b;
+                }
+            }
+            new.write_region(r, &v);
+        }
+        new.prune();
+    }
+
+    /// Byte copies of the alpha give exactly the old result: changed, shared, new-only and
+    /// old-only tiles, non-zero default pixels, every depth, colour models, out-of-range floats.
+    #[test]
+    fn copy_alpha_matches_decode_and_encode() {
+        let cmyk16 = PixelFormat::new(ColorMode::Cmyk, SampleType::U16, true);
+        let lab32 = PixelFormat::new(ColorMode::Lab, SampleType::F32, true);
+        for fmt in [
+            PixelFormat::RGBA8,
+            PixelFormat::RGBA16,
+            PixelFormat::RGBA32F,
+            PixelFormat::GRAYA8,
+            PixelFormat::CMYKA8,
+            cmyk16,
+            lab32,
+            PixelFormat::new(ColorMode::Rgb, SampleType::U8, false),
+        ] {
+            let n = fmt.channels();
+            let mut seed = 9u32;
+            let mut val = || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                (seed % 1000) as f32 / 900.0 - 0.05
+            };
+            let mut old = Surface::with_default(fmt, &vec![0.3; n]);
+            for (x, y) in [(5, 5), (300, 10), (700, 600), (-40, -3)] {
+                let px: Vec<f32> = (0..n).map(|_| val()).collect();
+                old.fill_rect(Rect::new(x, y, x + 40, y + 30), &px);
+            }
+            let mut new = old.clone();
+            new.default_pixel.copy_from_slice(&{
+                let mut b = vec![0u8; fmt.bytes_per_pixel()];
+                encode_pixel(&fmt, &vec![0.6; n], &mut b);
+                b
+            });
+            // Change some tiles (one shared tile stays as it is), add new ones, drop one.
+            for (x, y) in [(10, 8), (900, 900), (-30, 0)] {
+                let px: Vec<f32> = (0..n).map(|_| val()).collect();
+                new.fill_rect(Rect::new(x, y, x + 25, y + 20), &px);
+            }
+            new.tiles.remove(&TileCoord { tx: 2, ty: 2 });
+            let mut want = new.clone();
+            copy_alpha_reference(&old, &mut want);
+            new.copy_alpha_from(&old);
+            assert!(new == want, "{fmt:?}");
         }
     }
 
