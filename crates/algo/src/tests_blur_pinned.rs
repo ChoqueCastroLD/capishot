@@ -185,3 +185,14 @@ const SMALL: [u64; 32] = [
     0x4cd3_9783_e932_1686,
     0xa323_b6c9_682a_c125,
 ];
+
+/// The box blur's column bands start where they always have (multiples of 64 px), whatever the
+/// strip width: the horizontal running sums start at a band's edge, so moving the edges changes
+/// the bits of every large blur. The formula is the one the bands were cut by before.
+#[test]
+fn band_edges_do_not_move() {
+    for column_bytes in (1..20_000).map(|k| k * 977).chain([1, 63, 64, 1 << 20, 1 << 28, usize::MAX]) {
+        let before = i32::try_from(RESULT_BUDGET / column_bytes.max(1)).unwrap_or(i32::MAX).max(64) / 64 * 64;
+        assert_eq!(band_width(column_bytes), before, "{column_bytes}");
+    }
+}
