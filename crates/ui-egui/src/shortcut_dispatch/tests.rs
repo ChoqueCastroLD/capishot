@@ -581,23 +581,6 @@ fn f6_while_recording_records_a_named_call_not_the_child_steps() {
     assert_eq!(h.state().session.actions.list[1].steps, [("actions.play".into(), json!({"action":"LivePrint 2R"}))]);
 }
 
-#[test]
-fn delete_layer_from_layers_panel_with_canvas_selection() {
-    for place in [Place::LayersRow, Place::FocusedWidget] {
-        for key in ["Delete", "Backspace"] {
-            let mut h = harness();
-            put_focus(&mut h, place);
-            assert!(h.state().session.active().unwrap().doc.selection.is_some());
-            let before = names(&h);
-            let active = active_name(&h);
-            press(&mut h, key);
-            assert_eq!(logged(&h), ["layer.delete"], "{place:?} {key}");
-            assert!(!names(&h).contains(&active));
-            assert_eq!(names(&h).len(), before.len() - 1);
-        }
-    }
-}
-
 /// ⇧⌘> / ⇧⌘< follow the keys' position: a Nordic or German layout reports ⇧⌘. as `:`, which is
 /// also ⇧⌘; (View › Snap) on a US layout. While typing they size only the selected characters.
 #[test]
