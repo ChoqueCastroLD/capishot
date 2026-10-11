@@ -345,7 +345,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     let mut renamed = None;
     let mut toggled = None;
-    let max_h = (ui.available_height() - 70.0).clamp(80.0, 320.0);
+    let max_h = (ui.available_height() - 38.0).max(0.0);
     let mut play_idx = None;
     let mut moved = None;
     let recording_row = recording.and_then(|(_, i)| rows.get(i).map(|(_, steps, _)| (i, steps.len())));
@@ -357,7 +357,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             *expanded = true;
         }
     }
-    egui::ScrollArea::vertical().id_salt("actions-rows").max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("actions-rows").max_height(max_h).min_scrolled_height(max_h).auto_shrink([false, false]).show(ui, |ui| {
         if rows.is_empty() {
             ui.label(egui::RichText::new(tl!("Record ● a sequence of edits, then play ▶ it on any document.")).color(t.text_faint).size(11.5));
         }
@@ -550,6 +550,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn actions_list_grows_with_panel_and_keeps_footer_visible() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let bottom = |height: f32| {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            for i in 0..50 {
+                app.session.actions.list.push(Action { name: format!("Action {i}"), steps: vec![], disabled: Default::default() });
+            }
+            let mut h = Harness::builder().with_size(vec2(320.0, height)).build_ui_state(|ui, app| panel(app, ui), app);
+            h.run_steps(3);
+            let rect = h.get_by_label("Play selection").rect();
+            assert!(rect.bottom() <= height, "footer must fit: {rect:?}");
+            rect.top()
+        };
+        assert!(bottom(700.0) - bottom(300.0) > 350.0, "list uses the additional panel height instead of stopping at 320 px");
+        assert!(crate::dock::Group::History.scrolls_itself(1));
+    }
+
+    #[test]
     fn double_clicking_an_action_name_renames_it_in_place() {
         use egui_kittest::{Harness, kittest::Queryable};
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -658,14 +676,14 @@ mod tests {
         begin_recording(h.state_mut(), false);
         h.run_steps(20);
         let rect = h.get_by_label("Action 31").rect();
-        assert!(rect.top() >= 0.0 && rect.bottom() <= 205.0, "new action visible: {rect:?}");
+        assert!(rect.top() >= 0.0 && rect.bottom() <= h.get_by_label("Play selection").rect().top(), "new action visible: {rect:?}");
         for _ in 0..20 {
             h.state_mut().run("view.zoomOut", json!({})).unwrap();
         }
         h.state_mut().run("view.fitOnScreen", json!({})).unwrap();
         h.run_steps(20);
         let rect = h.get_by_label("Fit on Screen").rect();
-        assert!(rect.top() >= 0.0 && rect.bottom() <= 205.0, "latest step visible: {rect:?}");
+        assert!(rect.top() >= 0.0 && rect.bottom() <= h.get_by_label("Play selection").rect().top(), "latest step visible: {rect:?}");
     }
 
     #[test]
