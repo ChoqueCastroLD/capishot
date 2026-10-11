@@ -584,6 +584,9 @@ impl Surface {
                     // tile it lives in (the shift crosses source tiles as x runs).
                     let (sx, sy) = (x - i64::from(dx), y - i64::from(dy));
                     let (tx, ty) = (sx.div_euclid(i64::from(TILE_SIZE)), sy.div_euclid(i64::from(TILE_SIZE)));
+                    // A missing source tile inside the content holds the default pixel, not
+                    // zeros: fill the span from the default row instead of skipping it
+                    // (echelon's white-mask-with-sparse-tiles case).
                     let st = match cached.take() {
                         Some((ctx, cty, t)) if ctx == tx && cty == ty => {
                             cached = Some((ctx, cty, t));
@@ -595,7 +598,15 @@ impl Surface {
                                 t
                             }
                             None => {
-                                x = ((tx + 1) * i64::from(TILE_SIZE) + i64::from(dx)).max(x + 1);
+                                let span_end = ((tx + 1) * i64::from(TILE_SIZE) + i64::from(dx)).min(x_end).max(x + 1);
+                                if !default_row.is_empty() {
+                                    let at = (x - tx0) as usize * bpp;
+                                    let len = (span_end - x) as usize * bpp;
+                                    if let Some(d) = row.get_mut(at..at + len) {
+                                        d.copy_from_slice(&default_row[at..at + len]);
+                                    }
+                                }
+                                x = span_end;
                                 continue;
                             }
                         },
@@ -988,5 +999,62 @@ mod tests {
         s.fill_rect(Rect::new(0, 0, 2000, 1500), &[1.0]);
         s.fill_rect(Rect::new(-700, 4000, -699, 4001), &[0.5]);
         assert_eq!(s.content_bounds(), Rect::new(-700, 0, 2000, 4001));
+    }
+}
+
+#[cfg(test)]
+mod echelon_case {
+    use super::*;
+
+    #[test]
+    fn sparse_missing_tiles_read_the_default_after_a_shift() {
+        let mut s = Surface::with_default(PixelFormat::GRAY8, &[1.0]);
+        s.fill_rect(Rect::new(0, 0, 10, 10), &[0.0]);
+        s.fill_rect(Rect::new(600, 0, 610, 10), &[0.0]);
+        let t = s.translated(5, 0, Rect::new(0, 0, 768, 256));
+        assert_eq!(t.pixel(305, 20), vec![1.0]);
+    }
+
+    /// The rewrite must not change output: the misaligned path is compared against a
+    /// straightforward reference gather (read each pixel, write it shifted) over randomized
+    /// formats, default pixels, sparse tiles and shifts that cross tile boundaries.
+    #[test]
+    fn randomized_shifts_match_a_reference_gather() {
+        let mut rng: u64 = 0x1234_5678_9abc_def0;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        for case in 0..200u32 {
+            let fmt = [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F, PixelFormat::GRAY8, PixelFormat::GRAYA8][(next() % 5) as usize];
+            let def: Vec<f32> = (0..fmt.channels()).map(|i| if case % 3 == 0 { 0.0 } else { ((i + case as usize) % 7) as f32 / 6.0 }).collect();
+            let mut s = Surface::with_default(fmt, &def);
+            // Sparse content: a few small patches at random positions.
+            for _ in 0..(1 + next() % 4) {
+                let x = (next() % 1600) as i32 - 800;
+                let y = (next() % 1200) as i32 - 600;
+                let w = 1 + (next() % 90) as i32;
+                let h = 1 + (next() % 70) as i32;
+                let v: Vec<f32> = (0..fmt.channels()).map(|i| ((i as u64 + next()) % 251) as f32 / 250.0).collect();
+                s.fill_rect(Rect::new(x, y, x + w, y + h), &v);
+            }
+            let content = Rect::new(-900, -700, 1700, 1300);
+            let (dx, dy) = ((next() % 1200) as i32 - 600, (next() % 900) as i32 - 450);
+            let t = s.translated(dx, dy, content);
+            // Reference: every pixel of the moved extent reads the source at (x-dx, y-dy),
+            // inside the content, through the surface's default-aware reader.
+            for _ in 0..64 {
+                let x = (next() % 1500) as i32 - 750 + dx;
+                let y = (next() % 1100) as i32 - 550 + dy;
+                if !content.translate(dx, dy).contains(x, y) {
+                    continue;
+                }
+                let want = if content.contains(x - dx, y - dy) { s.pixel(x - dx, y - dy) } else { s.default_pixel() };
+                let got = t.pixel(x, y);
+                assert_eq!(got, want, "case {case} fmt {fmt:?} shift ({dx},{dy}) at ({x},{y})");
+            }
+        }
     }
 }
