@@ -283,6 +283,31 @@ fn content_aware_scale_keeps_subject() {
     }
 }
 
+/// Scaling a selection down clears the part of the selection the result no longer covers (the
+/// strips right of and below it), keeps the pixels outside the selection, and fills the result.
+#[test]
+fn content_aware_scale_clears_what_it_leaves() {
+    for (to_w, to_h) in [(30, 32), (48, 20), (30, 20), (60, 40)] {
+        let mut s = session(8);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.edit("paint", |doc, active| {
+            doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap().fill_rect(Rect::new(0, 0, 64, 48), &[0.2, 0.7, 0.4, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("select.rect", json!({"x": 8, "y": 8, "width": 48, "height": 32})).unwrap();
+        s.execute("edit.contentAwareScale", json!({"width": to_w, "height": to_h})).unwrap();
+        let (sel, dst) = (Rect::new(8, 8, 56, 40), Rect::from_xywh(8, 8, to_w, to_h));
+        for y in 0..48 {
+            for x in 0..64 {
+                let a = px(&s, x, y)[3];
+                let want = if dst.contains(x, y) || !sel.contains(x, y) { 1.0 } else { 0.0 };
+                assert_eq!(a, want, "{to_w}x{to_h}: alpha at ({x}, {y})");
+            }
+        }
+    }
+}
+
 #[test]
 fn content_aware_scale_params() {
     let mut s = session(8);

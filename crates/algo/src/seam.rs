@@ -46,8 +46,8 @@ pub fn energy(w: usize, h: usize, ch: usize, img: &[f32]) -> Vec<f32> {
     e
 }
 
-/// [`energy`] of one pixel of a `cw`-wide image whose rows are `stride` pixels apart. Shared by
-/// the full map and the per-seam updates so both give bit-identical values.
+/// [`energy`] of one pixel of a `cw`-wide image whose rows are `stride` pixels apart. The
+/// carver's per-seam updates use the same arithmetic, so both give bit-identical values.
 #[inline]
 fn energy_at(img: &[f32], stride: usize, cw: usize, h: usize, ch: usize, x: usize, y: usize) -> f32 {
     let (xl, xr) = (x.saturating_sub(1), (x + 1).min(cw - 1));
@@ -67,177 +67,429 @@ pub fn find_seam(w: usize, h: usize, energy: &[f32]) -> Vec<usize> {
     if w == 0 || h == 0 || energy.len() < w * h {
         return vec![0; h];
     }
-    Dp::default().seam(w, w, h, energy)
+    let (mut cost, mut from) = (vec![0.0f32; w * h], vec![0u8; w * h]);
+    full_dp(w, h, &|y| y * w, energy, &mut cost, &mut from);
+    backtrack(w, h, &|y| y * w, &cost, &from)
 }
 
-/// Scratch buffers for the seam search, reused across seams.
-#[derive(Default)]
-struct Dp {
-    cost: Vec<f32>,
-    next: Vec<f32>,
-    /// Per pixel, where the cheapest path came from: 0 = up-left, 1 = up, 2 = up-right.
-    from: Vec<u8>,
-}
-
-impl Dp {
-    /// The lowest-energy seam of a `cw`-wide, `h`-tall energy map with rows `stride` apart.
-    /// Ties go to the pixel straight up, then up-left, then up-right; at the bottom, to the
-    /// leftmost end.
-    fn seam(&mut self, stride: usize, cw: usize, h: usize, energy: &[f32]) -> Vec<usize> {
-        self.cost.clear();
-        self.cost.extend_from_slice(&energy[..cw]);
-        self.next.resize(cw, 0.0);
-        self.from.resize(cw * h, 0);
-        for y in 1..h {
-            let (cost, next) = (&self.cost[..cw], &mut self.next[..cw]);
-            let e = &energy[y * stride..y * stride + cw];
-            let from = &mut self.from[y * cw..(y + 1) * cw];
-            if cw == 1 {
-                (next[0], from[0]) = (cost[0] + e[0], 1);
-            } else {
-                let (b, d) = if cost[1] < cost[0] { (cost[1], 2) } else { (cost[0], 1) };
-                (next[0], from[0]) = (b + e[0], d);
-                // The interior has all three parents: no edge tests in the hot loop.
-                let inner = next[1..cw - 1].iter_mut().zip(&mut from[1..cw - 1]).zip(&e[1..cw - 1]).zip(cost.windows(3));
-                for (((n, f), &ev), c) in inner {
-                    let (b, d) = if c[0] < c[1] { (c[0], 0) } else { (c[1], 1) };
-                    let (b, d) = if c[2] < b { (c[2], 2) } else { (b, d) };
-                    (*n, *f) = (b + ev, d);
-                }
-                let (b, d) = if cost[cw - 2] < cost[cw - 1] { (cost[cw - 2], 0) } else { (cost[cw - 1], 1) };
-                (next[cw - 1], from[cw - 1]) = (b + e[cw - 1], d);
-            }
-            std::mem::swap(&mut self.cost, &mut self.next);
+/// One row of the cumulative-cost DP: `out[x - lo]` and `dir[x - lo]` for `x` in `lo..hi` of a
+/// `cw`-wide row, from the previous row's costs (`prev[x - plo]`, covering `lo - 1..hi + 1`
+/// within the row) and this row's energy (`e[x - elo]`, covering `lo..hi`). `dir` is where the
+/// cheapest path came from: 0 = up-left, 1 = up, 2 = up-right; ties go to the pixel straight
+/// up, then up-left, then up-right.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn dp_row(prev: &[f32], plo: usize, e: &[f32], elo: usize, cw: usize, lo: usize, hi: usize, out: &mut [f32], dir: &mut [u8]) {
+    let (p, ev) = (|x: usize| prev[x - plo], |x: usize| e[x - elo]);
+    if cw == 1 {
+        (out[0], dir[0]) = (p(0) + ev(0), 1);
+        return;
+    }
+    if lo == 0 {
+        let (b, d) = if p(1) < p(0) { (p(1), 2) } else { (p(0), 1) };
+        (out[0], dir[0]) = (b + ev(0), d);
+    }
+    // The interior has all three parents: no edge tests in the hot loop.
+    let (ilo, ihi) = (lo.max(1), hi.min(cw - 1));
+    if ilo < ihi {
+        let cells = out[ilo - lo..ihi - lo]
+            .iter_mut()
+            .zip(&mut dir[ilo - lo..ihi - lo])
+            .zip(&e[ilo - elo..ihi - elo])
+            .zip(prev[ilo - 1 - plo..ihi + 1 - plo].windows(3));
+        for (((n, f), &ev), c) in cells {
+            let (b, d) = if c[0] < c[1] { (c[0], 0) } else { (c[1], 1) };
+            let (b, d) = if c[2] < b { (c[2], 2) } else { (b, d) };
+            (*n, *f) = (b + ev, d);
         }
-        let cost = &self.cost[..cw];
-        let mut x = (0..cw).min_by(|a, b| cost[*a].total_cmp(&cost[*b])).unwrap_or(0);
-        let mut seam = vec![0usize; h];
-        for y in (0..h).rev() {
-            seam[y] = x;
-            if y > 0 {
-                x = match self.from[y * cw + x] {
-                    0 => x - 1,
-                    2 => x + 1,
-                    _ => x,
-                };
-            }
-        }
-        seam
+    }
+    if hi == cw {
+        let (b, d) = if p(cw - 2) < p(cw - 1) { (p(cw - 2), 0) } else { (p(cw - 1), 1) };
+        (out[cw - 1 - lo], dir[cw - 1 - lo]) = (b + ev(cw - 1), d);
     }
 }
 
-/// Shrinks an image one seam at a time in place. Rows keep their original stride, so removing a
-/// seam shifts only the rest of each row (in parallel), and the energy map is updated only next
-/// to the removed seam instead of being recomputed: the gradient of a pixel changes only when a
-/// neighbour does, which happens within a pixel of the seam in its own row and the rows around it.
-struct Carver {
+/// The whole DP of a `cw`-wide, `h`-tall energy map whose row `y` starts at `at(y)` in `energy`,
+/// `cost` and `from` alike.
+fn full_dp(cw: usize, h: usize, at: &dyn Fn(usize) -> usize, energy: &[f32], cost: &mut [f32], from: &mut [u8]) {
+    cost[at(0)..at(0) + cw].copy_from_slice(&energy[at(0)..at(0) + cw]);
+    for y in 1..h {
+        let (p, r) = (at(y - 1), at(y));
+        let (before, row) = cost.split_at_mut(r);
+        dp_row(&before[p..p + cw], 0, &energy[r..r + cw], 0, cw, 0, cw, &mut row[..cw], &mut from[r..r + cw]);
+    }
+}
+
+/// The seam ending at the cheapest bottom pixel (the leftmost of equals), traced up `from`.
+fn backtrack(cw: usize, h: usize, at: &dyn Fn(usize) -> usize, cost: &[f32], from: &[u8]) -> Vec<usize> {
+    let last = &cost[at(h - 1)..at(h - 1) + cw];
+    let mut x = (0..cw).min_by(|a, b| last[*a].total_cmp(&last[*b])).unwrap_or(0);
+    let mut seam = vec![0usize; h];
+    for y in (0..h).rev() {
+        seam[y] = x;
+        if y > 0 {
+            x = match from[at(y) + x] {
+                0 => x - 1,
+                2 => x + 1,
+                _ => x,
+            };
+        }
+    }
+    seam
+}
+
+/// Cells per chunk of a carver row.
+const CHUNK: usize = 256;
+
+#[cfg(test)]
+thread_local! {
+    /// Chunk size for tests, so small images get many chunks.
+    static TEST_CHUNK: std::cell::Cell<usize> = const { std::cell::Cell::new(CHUNK) };
+}
+
+/// Where each row's remaining cells are: a row's `stride` slots are cut into chunks of
+/// [`CHUNK`] slots, each holding its first `len` cells, so removing a cell shifts only the rest
+/// of its chunk instead of the rest of the row.
+struct Layout {
     stride: usize,
+    /// Slots per chunk ([`CHUNK`]).
+    chunk: usize,
+    /// Chunks per row.
+    nck: usize,
+    /// Cells in each chunk, `nck` per row.
+    lens: Vec<u16>,
+}
+
+impl Layout {
+    fn new(w: usize, h: usize) -> Self {
+        #[cfg(test)]
+        let chunk = TEST_CHUNK.with(std::cell::Cell::get).clamp(1, CHUNK);
+        #[cfg(not(test))]
+        let chunk = CHUNK;
+        let nck = w.div_ceil(chunk).max(1);
+        let row: Vec<u16> = (0..nck).map(|k| chunk.min(w.saturating_sub(k * chunk)) as u16).collect();
+        Layout { stride: w, chunk, nck, lens: row.repeat(h) }
+    }
+
+    /// The chunk holding cell `x` of a row with chunk lengths `lens`, and its index there.
+    fn locate(lens: &[u16], mut x: usize) -> (usize, usize) {
+        for (k, &l) in lens.iter().enumerate() {
+            if x < l as usize {
+                return (k, x);
+            }
+            x -= l as usize;
+        }
+        (lens.len().saturating_sub(1), 0)
+    }
+
+    /// The slot of cell `x` of row `y`.
+    fn slot(&self, y: usize, x: usize) -> usize {
+        let (k, i) = Self::locate(&self.lens[y * self.nck..(y + 1) * self.nck], x);
+        y * self.stride + k * self.chunk + i
+    }
+
+    /// Calls `f(first slot, count)` for the runs of slots holding cells `lo..hi` of row `y`, in
+    /// order.
+    fn runs(&self, y: usize, lo: usize, hi: usize, mut f: impl FnMut(usize, usize)) {
+        let mut at = 0;
+        for (k, &l) in self.lens[y * self.nck..(y + 1) * self.nck].iter().enumerate() {
+            let (a, b) = (lo.max(at), hi.min(at + l as usize));
+            if a < b {
+                f(y * self.stride + k * self.chunk + a - at, b - a);
+            }
+            at += l as usize;
+            if at >= hi {
+                break;
+            }
+        }
+    }
+
+    /// Cells `lo..hi` of row `y` of `arr`, in order, into `out`.
+    fn gather<T: Copy>(&self, arr: &[T], y: usize, lo: usize, hi: usize, out: &mut Vec<T>) {
+        out.clear();
+        self.runs(y, lo, hi, |s, n| out.extend_from_slice(&arr[s..s + n]));
+    }
+
+    /// `src` into cells `lo..` of row `y` of `arr`.
+    fn scatter<T: Copy>(&self, arr: &mut [T], y: usize, lo: usize, src: &[T]) {
+        let mut i = 0;
+        self.runs(y, lo, lo + src.len(), |s, n| {
+            arr[s..s + n].copy_from_slice(&src[i..i + n]);
+            i += n;
+        });
+    }
+}
+
+/// One row of each per-cell map of a [`Carver`] (energy, columns, costs, directions), its chunk
+/// lengths and the column to delete.
+type RowMaps<'a> = ((((&'a mut [f32], &'a mut [u32]), &'a mut [f32]), &'a mut [u8]), (&'a mut [u16], &'a usize));
+
+/// Shrinks an image one seam at a time, exactly as recomputing everything per seam would.
+///
+/// - The pixels never move: each row keeps a map from its remaining columns to the original ones.
+/// - Removing a seam deletes one cell from each row of the maps it keeps (energy, cumulative cost,
+///   directions, columns), shifting only the rest of that cell's chunk ([`Layout`]).
+/// - Only energies next to the seam change (a gradient changes only when a neighbour does), and
+///   only the cumulative costs those reach: per row, the cells near the seam (new energy or new
+///   neighbours) and below the cells that changed in the row above. Everything else keeps its
+///   value bit for bit, so the DP is redone only there, typically a few percent of the map.
+struct Carver {
     cw: usize,
     h: usize,
     ch: usize,
+    /// The original pixels, `stride × h × ch`, never moved.
     img: Vec<f32>,
     prot: Option<Vec<f32>>,
+    lay: Layout,
     /// Energy plus protection, as the seam search sees it.
     e: Vec<f32>,
-    /// Original column of each pixel, when the caller needs to know which ones were removed.
-    idx: Option<Vec<usize>>,
-    dp: Dp,
+    /// Cumulative cost of the cheapest path from the top to each cell, and where it came from.
+    cost: Vec<f32>,
+    from: Vec<u8>,
+    /// Original column of each remaining cell.
+    col: Vec<u32>,
+    /// Per row, the cells whose energy the last seam changed.
+    changed: Vec<(usize, usize)>,
+    scratch: Scratch,
+}
+
+#[derive(Default)]
+struct Scratch {
+    prev: Vec<f32>,
+    e: Vec<f32>,
+    old: Vec<f32>,
+    out: Vec<f32>,
+    dir: Vec<u8>,
 }
 
 impl Carver {
-    fn new(w: usize, h: usize, ch: usize, img: Vec<f32>, prot: Option<Vec<f32>>, track: bool) -> Self {
+    fn new(w: usize, h: usize, ch: usize, img: Vec<f32>, prot: Option<Vec<f32>>) -> Self {
         let mut e = energy(w, h, ch, &img);
         if let Some(p) = &prot {
             for (e, p) in e.iter_mut().zip(p) {
                 *e += p.clamp(0.0, 1.0) * PROTECT_ENERGY;
             }
         }
-        let idx = track.then(|| (0..h).flat_map(|_| 0..w).collect());
-        Carver { stride: w, cw: w, h, ch, img, prot, e, idx, dp: Dp::default() }
+        // Every chunk starts full, so cell x of row y is slot y * w + x.
+        let (mut cost, mut from) = (vec![0.0f32; w * h], vec![0u8; w * h]);
+        full_dp(w, h, &|y| y * w, &e, &mut cost, &mut from);
+        let col = (0..h).flat_map(|_| 0..w as u32).collect();
+        Carver { cw: w, h, ch, img, prot, lay: Layout::new(w, h), e, cost, from, col, changed: vec![(0, 0); h], scratch: Scratch::default() }
     }
 
-    /// Remove the lowest-energy seam. Returns, per row, the removed column (the original column
-    /// when tracking).
+    /// Remove the lowest-energy seam. Returns, per row, the removed pixel's original column.
     fn remove_seam(&mut self) -> Vec<usize> {
-        let (stride, cw, h, ch) = (self.stride, self.cw, self.h, self.ch);
-        let seam = self.dp.seam(stride, cw, h, &self.e);
-        let removed = match &self.idx {
-            Some(idx) => seam.iter().enumerate().map(|(y, &x)| idx[y * stride + x]).collect(),
-            None => seam.clone(),
-        };
-        shift_rows(&mut self.img, stride * ch, &seam, ch, cw);
-        shift_rows(&mut self.e, stride, &seam, 1, cw);
-        if let Some(p) = &mut self.prot {
-            shift_rows(p, stride, &seam, 1, cw);
+        let (cw, h) = (self.cw, self.h);
+        // The cheapest bottom cell (the leftmost of equals), traced up the directions.
+        let last = &mut self.scratch.prev;
+        self.lay.gather(&self.cost, h - 1, 0, cw, last);
+        let mut x = (0..cw).min_by(|a, b| last[*a].total_cmp(&last[*b])).unwrap_or(0);
+        let mut seam = vec![0usize; h];
+        for y in (0..h).rev() {
+            seam[y] = x;
+            if y > 0 {
+                x = match self.from[self.lay.slot(y, x)] {
+                    0 => x - 1,
+                    2 => x + 1,
+                    _ => x,
+                };
+            }
         }
-        if let Some(idx) = &mut self.idx {
-            shift_rows(idx, stride, &seam, 1, cw);
-        }
+        let removed = seam.iter().enumerate().map(|(y, &x)| self.col[self.lay.slot(y, x)] as usize).collect();
+        self.delete(&seam);
         self.cw -= 1;
-        self.update_energy(&seam);
+        if self.cw > 0 {
+            self.update_energy(&seam);
+            self.update_cost(&seam);
+        }
         removed
     }
 
-    /// Recompute the energy of the pixels whose neighbours changed when `seam` was removed: in
-    /// row y, from one left of the leftmost of the seam's x in rows y-1..=y+1 to the rightmost.
-    fn update_energy(&mut self, seam: &[usize]) {
-        let (stride, cw, h, ch) = (self.stride, self.cw, self.h, self.ch);
-        if cw == 0 {
-            return;
-        }
-        let (img, prot) = (&self.img, self.prot.as_deref());
-        let row = |(y, e): (usize, &mut [f32])| {
-            let near = &seam[y.saturating_sub(1)..(y + 2).min(h)];
-            let lo = near.iter().min().map_or(0, |&s| s.saturating_sub(1));
-            let hi = near.iter().max().map_or(0, |&s| s.min(cw - 1));
-            for x in lo..=hi {
-                let mut v = energy_at(img, stride, cw, h, ch, x, y);
-                if let Some(p) = prot {
-                    v += p[y * stride + x].clamp(0.0, 1.0) * PROTECT_ENERGY;
-                }
-                e[x] = v;
+    /// Delete cell `seam[y]` of every row of the per-cell maps.
+    fn delete(&mut self, seam: &[usize]) {
+        let (stride, nck, chunk) = (self.lay.stride, self.lay.nck, self.lay.chunk);
+        let row = |((((e, c), m), f), (lens, &x)): RowMaps| {
+            let (k, i) = Layout::locate(lens, x);
+            let (base, len) = (k * chunk, lens[k] as usize);
+            if i < len {
+                e.copy_within(base + i + 1..base + len, base + i);
+                c.copy_within(base + i + 1..base + len, base + i);
+                m.copy_within(base + i + 1..base + len, base + i);
+                f.copy_within(base + i + 1..base + len, base + i);
+                lens[k] -= 1;
             }
         };
         #[cfg(not(target_arch = "wasm32"))]
         {
             use rayon::prelude::*;
-            self.e.par_chunks_mut(stride).enumerate().for_each(row);
+            let maps =
+                self.e.par_chunks_mut(stride).zip(self.col.par_chunks_mut(stride)).zip(self.cost.par_chunks_mut(stride)).zip(self.from.par_chunks_mut(stride));
+            maps.zip(self.lay.lens.par_chunks_mut(nck).zip(seam.par_iter())).for_each(row);
         }
         #[cfg(target_arch = "wasm32")]
-        self.e.chunks_mut(stride).enumerate().for_each(row);
+        {
+            let maps = self.e.chunks_mut(stride).zip(self.col.chunks_mut(stride)).zip(self.cost.chunks_mut(stride)).zip(self.from.chunks_mut(stride));
+            maps.zip(self.lay.lens.chunks_mut(nck).zip(seam)).for_each(row);
+        }
+    }
+
+    /// Recompute the energy of the pixels whose neighbours changed when `seam` was removed: in
+    /// row y, from one left of the leftmost of the seam's x in rows y-1..=y+1 to the rightmost.
+    fn update_energy(&mut self, seam: &[usize]) {
+        let (cw, h, ch) = (self.cw, self.h, self.ch);
+        let (img, prot, col, lay) = (&self.img, self.prot.as_deref(), &self.col, &self.lay);
+        let stride = lay.stride;
+        let row = |((y, e), span): ((usize, &mut [f32]), &mut (usize, usize))| {
+            let near = &seam[y.saturating_sub(1)..(y + 2).min(h)];
+            let lo = near.iter().min().map_or(0, |&s| s.saturating_sub(1));
+            let hi = near.iter().max().map_or(0, |&s| s.min(cw - 1));
+            // Original columns of this row and the rows around it, cells lo - 1..=hi + 1.
+            let (glo, ghi) = (lo.saturating_sub(1), (hi + 2).min(cw));
+            let mut cols = [Vec::new(), Vec::new(), Vec::new()];
+            for (c, yy) in cols.iter_mut().zip([y.saturating_sub(1), y, (y + 1).min(h - 1)]) {
+                lay.gather(col, yy, glo, ghi, c);
+            }
+            let mut vals = Vec::with_capacity(hi + 1 - lo);
+            for x in lo..=hi {
+                let (xl, xr) = (x.saturating_sub(1), (x + 1).min(cw - 1));
+                let at = |r: usize, xx: usize, c: usize| {
+                    let yy = [y.saturating_sub(1), y, (y + 1).min(h - 1)][r];
+                    img[(yy * stride + cols[r][xx - glo] as usize) * ch + c]
+                };
+                let mut v = 0.0;
+                for c in 0..ch {
+                    let p = at(1, x, c);
+                    v += (at(1, xr, c) - p).abs() + (p - at(1, xl, c)).abs();
+                    v += (at(2, x, c) - p).abs() + (p - at(0, x, c)).abs();
+                }
+                v *= 0.5;
+                if let Some(pr) = prot {
+                    v += pr[y * stride + cols[1][x - glo] as usize].clamp(0.0, 1.0) * PROTECT_ENERGY;
+                }
+                vals.push(v);
+            }
+            // `e` is this row's slots only.
+            let mut i = 0;
+            lay.runs(y, lo, hi + 1, |s, n| {
+                let s = s - y * stride;
+                e[s..s + n].copy_from_slice(&vals[i..i + n]);
+                i += n;
+            });
+            *span = (lo, hi + 1);
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use rayon::prelude::*;
+            self.e.par_chunks_mut(stride).enumerate().zip(self.changed.par_iter_mut()).for_each(row);
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.e.chunks_mut(stride).enumerate().zip(self.changed.iter_mut()).for_each(row);
+    }
+
+    /// Redo the DP where it can differ after removing `seam` (pre-removal columns): per row, the
+    /// cells with new energy, the cells whose three parents are no longer the same cells (between
+    /// the seam's x in this row and the row above), and the cells below any cost that changed in
+    /// the row above. A cell outside these has the same parents with the same costs and the same
+    /// energy, so it keeps its bits.
+    fn update_cost(&mut self, seam: &[usize]) {
+        let (cw, h) = (self.cw, self.h);
+        let Scratch { prev, e, old, out, dir } = &mut self.scratch;
+        // The cells of the row above whose cost changed, as a half-open range (empty: lo >= hi).
+        let mut dirty = (0usize, 0usize);
+        for y in 0..h {
+            let (mut lo, mut hi) = self.changed[y];
+            if y > 0 {
+                // New parents: already inside the energy span, kept so correctness doesn't hang
+                // on how wide that span is.
+                let (a, b) = (seam[y - 1].min(seam[y]), seam[y - 1].max(seam[y]));
+                (lo, hi) = (lo.min(a.saturating_sub(2)), hi.max(b + 3));
+                if dirty.0 < dirty.1 {
+                    (lo, hi) = (lo.min(dirty.0.saturating_sub(1)), hi.max(dirty.1 + 1));
+                }
+            }
+            let (lo, hi) = (lo.min(cw), hi.min(cw));
+            dirty = (usize::MAX, 0);
+            if lo >= hi {
+                continue;
+            }
+            self.lay.gather(&self.e, y, lo, hi, e);
+            out.resize(hi - lo, 0.0);
+            dir.resize(hi - lo, 0);
+            if y == 0 {
+                out.copy_from_slice(e);
+                dir.fill(0);
+            } else {
+                let plo = lo.saturating_sub(1);
+                self.lay.gather(&self.cost, y - 1, plo, (hi + 1).min(cw), prev);
+                dp_row(prev, plo, e, lo, cw, lo, hi, out, dir);
+            }
+            self.lay.gather(&self.cost, y, lo, hi, old);
+            let same = |(a, b): (&f32, &f32)| a.to_bits() == b.to_bits();
+            if let Some(first) = old.iter().zip(out.iter()).position(|p| !same(p)) {
+                let last = old.iter().zip(out.iter()).rposition(|p| !same(p)).unwrap_or(first);
+                dirty = (lo + first, lo + last + 1);
+                self.lay.scatter(&mut self.cost, y, lo, out);
+            }
+            self.lay.scatter(&mut self.from, y, lo, dir);
+        }
     }
 
     /// The carved pixels, `cw × h × ch`, rows packed.
     fn into_pixels(self) -> Vec<f32> {
-        let (row, used) = (self.stride * self.ch, self.cw * self.ch);
-        if row == used {
+        let (stride, cw, ch) = (self.lay.stride, self.cw, self.ch);
+        if cw == stride {
             return self.img;
         }
-        self.img.chunks(row).flat_map(|r| &r[..used]).copied().collect()
+        let mut out = vec![0.0f32; cw * self.h * ch];
+        let (img, col, lay) = (&self.img, &self.col, &self.lay);
+        let row = |(y, o): (usize, &mut [f32])| {
+            let mut px = o.chunks_exact_mut(ch);
+            lay.runs(y, 0, cw, |s, n| {
+                for (&c, p) in col[s..s + n].iter().zip(px.by_ref()) {
+                    let at = (y * stride + c as usize) * ch;
+                    p.copy_from_slice(&img[at..at + ch]);
+                }
+            });
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use rayon::prelude::*;
+            out.par_chunks_mut((cw * ch).max(1)).enumerate().for_each(row);
+        }
+        #[cfg(target_arch = "wasm32")]
+        out.chunks_mut((cw * ch).max(1)).enumerate().for_each(row);
+        out
     }
 }
 
-/// Remove pixel `seam[y]` (of `n` values) from each `row_len`-long row whose first `cw` pixels
-/// are in use, by shifting the rest of the row left.
-fn shift_rows<T: Copy + Send>(buf: &mut [T], row_len: usize, seam: &[usize], n: usize, cw: usize) {
-    let shift = |(r, &x): (&mut [T], &usize)| r.copy_within((x + 1) * n..cw * n, x * n);
+/// `img` (`w × h`) turned so its columns become rows, in 32-pixel tiles so both sides stay in
+/// cache, rows of the result in parallel.
+fn transpose(w: usize, h: usize, ch: usize, img: &[f32]) -> Vec<f32> {
+    const T: usize = 32;
+    let mut out = vec![0.0f32; img.len()];
+    if w == 0 || h == 0 || ch == 0 {
+        return out;
+    }
+    // A band of T result rows is T source columns.
+    let band = |(b, o): (usize, &mut [f32])| {
+        let x0 = b * T;
+        let x1 = (x0 + T).min(w);
+        for y0 in (0..h).step_by(T) {
+            for x in x0..x1 {
+                for y in y0..(y0 + T).min(h) {
+                    let (s, d) = ((y * w + x) * ch, ((x - x0) * h + y) * ch);
+                    o[d..d + ch].copy_from_slice(&img[s..s + ch]);
+                }
+            }
+        }
+    };
     #[cfg(not(target_arch = "wasm32"))]
     {
         use rayon::prelude::*;
-        buf.par_chunks_mut(row_len).zip(seam.par_iter()).for_each(shift);
+        out.par_chunks_mut(T * h * ch).enumerate().for_each(band);
     }
     #[cfg(target_arch = "wasm32")]
-    buf.chunks_mut(row_len).zip(seam).for_each(shift);
-}
-
-fn transpose(w: usize, h: usize, ch: usize, img: &[f32]) -> Vec<f32> {
-    let mut out = vec![0.0f32; img.len()];
-    for y in 0..h {
-        for x in 0..w {
-            let (s, d) = ((y * w + x) * ch, (x * h + y) * ch);
-            out[d..d + ch].copy_from_slice(&img[s..s + ch]);
-        }
-    }
+    out.chunks_mut(T * h * ch).enumerate().for_each(band);
     out
 }
 
@@ -258,7 +510,7 @@ pub fn carve_width_with(w: usize, h: usize, ch: usize, img: &[f32], protect: Opt
         if h >= PROXY_SHRINK_MIN_HEIGHT && w - new_w >= PROXY_SHRINK_MIN_SEAMS {
             return carve_width_proxy_height(w, h, ch, img, protect, new_w, ctl);
         }
-        let mut carver = Carver::new(w, h, ch, img.to_vec(), protect.map(<[f32]>::to_vec), false);
+        let mut carver = Carver::new(w, h, ch, img.to_vec(), protect.map(<[f32]>::to_vec));
         while carver.cw > new_w {
             ctl.check()?;
             ctl.progress((w - carver.cw) as f32 / seams);
@@ -272,7 +524,7 @@ pub fn carve_width_with(w: usize, h: usize, ch: usize, img: &[f32], protect: Opt
     while cw < new_w {
         let k = (new_w - cw).min((cw / 2).max(1));
         // Find k seams on a shrinking copy, mapping each back to original columns.
-        let mut carver = Carver::new(cw, h, ch, cur.clone(), prot.clone(), true);
+        let mut carver = Carver::new(cw, h, ch, cur.clone(), prot.clone());
         let mut dup: Vec<Vec<usize>> = vec![Vec::with_capacity(k); h];
         for _ in 0..k {
             // A 1 px wide image's only seam is its one column: take it, so it is duplicated.
@@ -359,7 +611,7 @@ fn carve_width_proxy_height(w: usize, h: usize, ch: usize, img: &[f32], protect:
     });
 
     let seam_count = w - new_w;
-    let mut carver = Carver::new(w, proxy_h, ch, proxy, proxy_protect, true);
+    let mut carver = Carver::new(w, proxy_h, ch, proxy, proxy_protect);
     let mut removed = Vec::with_capacity(seam_count);
     while carver.cw > new_w {
         ctl.check()?;
@@ -443,10 +695,10 @@ pub fn carve_with(
 /// Plain bilinear resize (the non-content-aware part of the Amount blend).
 pub fn resize_bilinear(w: usize, h: usize, ch: usize, img: &[f32], nw: usize, nh: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; nw * nh * ch];
-    if w == 0 || h == 0 {
+    if w == 0 || h == 0 || nw == 0 || ch == 0 {
         return out;
     }
-    for y in 0..nh {
+    let row = |(y, o): (usize, &mut [f32])| {
         let fy = ((y as f32 + 0.5) * h as f32 / nh as f32 - 0.5).clamp(0.0, (h - 1) as f32);
         let (y0, ty) = (fy.floor() as usize, fy.fract());
         let y1 = (y0 + 1).min(h - 1);
@@ -458,10 +710,17 @@ pub fn resize_bilinear(w: usize, h: usize, ch: usize, img: &[f32], nw: usize, nh
                 let p = |xx: usize, yy: usize| img[(yy * w + xx) * ch + c];
                 let top = p(x0, y0) + (p(x1, y0) - p(x0, y0)) * tx;
                 let bot = p(x0, y1) + (p(x1, y1) - p(x0, y1)) * tx;
-                out[(y * nw + x) * ch + c] = top + (bot - top) * ty;
+                o[x * ch + c] = top + (bot - top) * ty;
             }
         }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        out.par_chunks_mut(nw * ch).enumerate().for_each(row);
     }
+    #[cfg(target_arch = "wasm32")]
+    out.chunks_mut(nw * ch).enumerate().for_each(row);
     out
 }
 
@@ -654,6 +913,14 @@ mod tests {
     /// protection, shrinking, enlarging past half the width and both axes at once.
     #[test]
     fn carver_matches_reference() {
+        for chunk in [CHUNK, 1, 2, 3, 7] {
+            TEST_CHUNK.with(|c| c.set(chunk));
+            matches_reference(chunk);
+        }
+        TEST_CHUNK.with(|c| c.set(CHUNK));
+    }
+
+    fn matches_reference(chunk: usize) {
         let mut seed = 1u32;
         let mut next = |n: usize| {
             seed ^= seed << 13;
@@ -670,7 +937,7 @@ mod tests {
             let got = carve(w, h, ch, &img, protect.as_deref(), nw, nh);
             let want = reference::carve(w, h, ch, &img, protect.as_deref(), nw, nh);
             let bits = |v: &[f32]| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
-            assert_eq!(bits(&got), bits(&want), "case {case}: {w}x{h}x{ch} -> {nw}x{nh}, levels {levels}, protect {}", protect.is_some());
+            assert_eq!(bits(&got), bits(&want), "chunk {chunk}, case {case}: {w}x{h}x{ch} -> {nw}x{nh}, levels {levels}, protect {}", protect.is_some());
         }
         // The seam search alone, on raw energy maps full of ties.
         for case in 0..200u32 {
@@ -680,6 +947,33 @@ mod tests {
             let img = noise(w * h * 3, 7, 3 + case);
             let bits = |v: Vec<f32>| v.into_iter().map(f32::to_bits).collect::<Vec<_>>();
             assert_eq!(bits(energy(w, h, 3, &img)), bits(reference::energy(w, h, 3, &img)), "energy case {case}");
+        }
+    }
+
+    /// A wide image (parallel row passes, long seams, many rows shifted from either side) carves
+    /// exactly like the reference.
+    #[test]
+    fn wide_carve_matches_reference() {
+        let (w, h, ch) = (1100, 420, 3);
+        let img = noise(w * h * ch, 9, 77);
+        let got = carve(w, h, ch, &img, None, w - 6, h);
+        let want = reference::carve(w, h, ch, &img, None, w - 6, h);
+        assert!(got.iter().map(|f| f.to_bits()).eq(want.iter().map(|f| f.to_bits())));
+    }
+
+    /// The tiled transpose moves every pixel where the plain double loop does, for sizes around
+    /// and across its tile.
+    #[test]
+    fn transpose_matches_naive() {
+        for (w, h, ch) in [(1, 1, 1), (31, 33, 3), (64, 32, 4), (70, 5, 1), (5, 97, 2)] {
+            let img: Vec<f32> = (0..w * h * ch).map(|i| i as f32).collect();
+            let mut want = vec![0.0f32; img.len()];
+            for y in 0..h {
+                for x in 0..w {
+                    want[(x * h + y) * ch..(x * h + y + 1) * ch].copy_from_slice(&img[(y * w + x) * ch..(y * w + x + 1) * ch]);
+                }
+            }
+            assert_eq!(transpose(w, h, ch, &img), want, "{w}x{h}x{ch}");
         }
     }
 

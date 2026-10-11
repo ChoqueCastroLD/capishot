@@ -207,9 +207,7 @@ impl Surface {
             for y in tr.y0..tr.y1 {
                 let src = (((y - r.y0) as usize) * r.width() as usize + (tr.x0 - r.x0) as usize) * n;
                 let dst = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (tr.x0 - tc.tx * TILE_SIZE) as usize) * n;
-                for (i, v) in data[src..src + span].iter().enumerate() {
-                    write_sample(&mut t.data, sample, dst + i, *v);
-                }
+                encode_span(&mut t.data, sample, dst, &data[src..src + span]);
             }
         }
         Ok(())
@@ -364,9 +362,7 @@ impl Surface {
                 match tile {
                     Some(t) => {
                         let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (tr.x0 - tc.tx * TILE_SIZE) as usize) * n;
-                        for (i, d) in dst.iter_mut().enumerate() {
-                            *d = read_sample(&t.data, self.format.sample, base + i);
-                        }
+                        decode_span(&t.data, self.format.sample, base, dst);
                     }
                     None => {
                         for px in dst.chunks_exact_mut(n) {
@@ -490,28 +486,8 @@ impl Surface {
 
     /// Read a rectangle as interleaved normalised floats (`w*h*channels`).
     pub fn read_region(&self, r: Rect) -> Vec<f32> {
-        let n = self.channels();
-        let w = r.width() as usize;
-        let mut out = vec![0.0f32; w * r.height() as usize * n];
-        let dp = self.default_pixel();
-        for tc in r.tiles() {
-            let tr = tc.rect().intersect(&r);
-            let tile = self.tiles.get(&tc);
-            for y in tr.y0..tr.y1 {
-                for x in tr.x0..tr.x1 {
-                    let o = (((y - r.y0) as usize) * w + (x - r.x0) as usize) * n;
-                    match tile {
-                        Some(t) => {
-                            let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (x - tc.tx * TILE_SIZE) as usize) * n;
-                            for i in 0..n {
-                                out[o + i] = read_sample(&t.data, self.format.sample, base + i);
-                            }
-                        }
-                        None => out[o..o + n].copy_from_slice(&dp),
-                    }
-                }
-            }
-        }
+        let mut out = Vec::new();
+        self.read_region_into(r, &mut out);
         out
     }
 
@@ -524,14 +500,11 @@ impl Surface {
         for tc in r.tiles() {
             let tr = tc.rect().intersect(&r);
             let t = self.tile_mut(tc);
+            let span = tr.width() as usize * n;
             for y in tr.y0..tr.y1 {
-                for x in tr.x0..tr.x1 {
-                    let o = (((y - r.y0) as usize) * w + (x - r.x0) as usize) * n;
-                    let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (x - tc.tx * TILE_SIZE) as usize) * n;
-                    for i in 0..n {
-                        write_sample(&mut t.data, sample, base + i, data[o + i]);
-                    }
-                }
+                let o = (((y - r.y0) as usize) * w + (tr.x0 - r.x0) as usize) * n;
+                let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (tr.x0 - tc.tx * TILE_SIZE) as usize) * n;
+                encode_span(&mut t.data, sample, base, &data[o..o + span]);
             }
         }
     }
@@ -759,6 +732,41 @@ impl Surface {
     }
 }
 
+/// Decode `out.len()` consecutive samples starting at sample `first` of `bytes`, with the same
+/// arithmetic as [`read_sample`] but one type dispatch per span, so the loop vectorises.
+fn decode_span(bytes: &[u8], sample: SampleType, first: usize, out: &mut [f32]) {
+    let size = sample.bytes();
+    let Some(src) = bytes.get(first * size..(first + out.len()) * size) else {
+        // Out of range: the per-sample path behaves as before.
+        for (i, o) in out.iter_mut().enumerate() {
+            *o = read_sample(bytes, sample, first + i);
+        }
+        return;
+    };
+    match sample {
+        SampleType::U8 => out.iter_mut().zip(src).for_each(|(o, &b)| *o = b as f32 / 255.0),
+        SampleType::U16 => out.iter_mut().zip(src.as_chunks::<2>().0).for_each(|(o, b)| *o = u16::from_ne_bytes(*b) as f32 / 65535.0),
+        SampleType::F32 => out.iter_mut().zip(src.as_chunks::<4>().0).for_each(|(o, b)| *o = f32::from_ne_bytes(*b)),
+    }
+}
+
+/// Encode `src` into consecutive samples starting at sample `first` of `bytes`, with the same
+/// clamping and rounding as [`write_sample`] but one type dispatch per span.
+fn encode_span(bytes: &mut [u8], sample: SampleType, first: usize, src: &[f32]) {
+    let size = sample.bytes();
+    let Some(dst) = bytes.get_mut(first * size..(first + src.len()) * size) else {
+        for (i, v) in src.iter().enumerate() {
+            write_sample(bytes, sample, first + i, *v);
+        }
+        return;
+    };
+    match sample {
+        SampleType::U8 => dst.iter_mut().zip(src).for_each(|(d, &v)| *d = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8),
+        SampleType::U16 => dst.as_chunks_mut::<2>().0.iter_mut().zip(src).for_each(|(d, &v)| *d = ((v.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16).to_ne_bytes()),
+        SampleType::F32 => dst.as_chunks_mut::<4>().0.iter_mut().zip(src).for_each(|(d, &v)| *d = v.to_ne_bytes()),
+    }
+}
+
 /// Encode normalised floats into one pixel's bytes.
 pub fn encode_pixel(format: &PixelFormat, px: &[f32], out: &mut [u8]) {
     for (i, v) in px.iter().enumerate().take(format.channels()) {
@@ -877,6 +885,32 @@ mod tests {
             let mut buf = [0.0f32; 8];
             let n = from_rgba_into(&fmt, [0.2, 0.5, 0.7, 0.4], &mut buf);
             assert_eq!(&buf[..n], &from_rgba(&fmt, [0.2, 0.5, 0.7, 0.4])[..]);
+        }
+    }
+
+    /// The span conversions give exactly what the per-sample ones do, for every sample type,
+    /// out-of-range and in-between values, and any start.
+    #[test]
+    fn span_conversions_match_per_sample() {
+        let vals: Vec<f32> = (0..97).map(|i| (i as f32 - 10.0) / 77.0).chain([f32::NAN, -0.0, 1.0, 0.5 / 255.0, 0.5 / 65535.0]).collect();
+        for sample in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            for first in [0, 1, 3] {
+                let len = (first + vals.len()) * sample.bytes();
+                let (mut a, mut b) = (vec![0u8; len], vec![0u8; len]);
+                encode_span(&mut a, sample, first, &vals);
+                for (i, v) in vals.iter().enumerate() {
+                    write_sample(&mut b, sample, first + i, *v);
+                }
+                assert_eq!(a, b, "{sample:?} encode from {first}");
+                let mut got = vec![0.0f32; vals.len()];
+                decode_span(&a, sample, first, &mut got);
+                let want: Vec<f32> = (0..vals.len()).map(|i| read_sample(&a, sample, first + i)).collect();
+                assert_eq!(
+                    got.iter().map(|f| f.to_bits()).collect::<Vec<_>>(),
+                    want.iter().map(|f| f.to_bits()).collect::<Vec<_>>(),
+                    "{sample:?} decode from {first}"
+                );
+            }
         }
     }
 
