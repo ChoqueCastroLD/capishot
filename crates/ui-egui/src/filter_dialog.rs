@@ -330,7 +330,8 @@ pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
     fields.insert("__command".into(), json!(command));
     fields.insert("__label".into(), json!(spec.label));
     fields.insert("__filter".into(), json!(true));
-    if command.starts_with("filter.") || PREVIEWED.contains(&command) {
+    // Select and Mask previews in its view modes (`select_mask_view`), not as the command's result.
+    if command.starts_with("filter.") || PREVIEWED.contains(&command) || command == crate::select_mask_view::COMMAND {
         fields.insert("__preview".into(), json!(true));
     }
     for p in parse_spec(spec.params) {
@@ -476,6 +477,9 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             None => return,
         },
     };
+    if crate::select_mask_view::owns(f) {
+        crate::select_mask_view::controls(ui, f);
+    }
     for p in parse_spec(&spec) {
         match p.kind {
             Kind::Range { min, max, default } => {
@@ -646,6 +650,9 @@ pub fn preview_document_with(
     k: u32,
     cancel: Option<&photocraft_engine::jobs::JobCtx>,
 ) -> Option<Document> {
+    if command == crate::select_mask_view::COMMAND {
+        return crate::select_mask_view::preview_document(doc, active, params, k, cancel);
+    }
     // Warp Text renders the type again from the layer model (font size, position), which a
     // reduced proxy doesn't scale: it runs at full size and the result is reduced (#218).
     let (run_k, reduce_k) = if command == "type.warpText" { (1, k) } else { (k, 1) };

@@ -2634,4 +2634,13 @@ cameraData	Lens	Objetivo
 	Snap to Origin	Ajustar a origen
 	Search settings…	Buscar ajustes…
 	No matching settings	No hay ajustes que coincidan
+# Select and Mask view modes (#1754)
+	Onion Skin	Papel cebolla
+	Marching Ants	Hormigas en marcha
+	On Black	Sobre negro
+	On White	Sobre blanco
+	On Layers	Sobre capas
+	Show Edge	Mostrar borde
+	Show Original	Mostrar original
+	F cycles the views; hold X to see the image	F alterna las vistas; mantén X para ver la imagen
 	Show rulers	Mostrar reglas

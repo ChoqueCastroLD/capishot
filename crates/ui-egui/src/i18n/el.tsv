@@ -3654,4 +3654,13 @@ cameraData	Lens	Φακός
 	Snap to Origin	Προσκόλληση στην αρχή
 	Search settings…	Αναζήτηση ρυθμίσεων…
 	No matching settings	Δεν βρέθηκαν ρυθμίσεις
+# Select and Mask view modes (#1754)
+	Onion Skin	Φλούδα κρεμμυδιού
+	Marching Ants	Κινούμενο περίγραμμα
+	On Black	Σε μαύρο
+	On White	Σε λευκό
+	On Layers	Σε επίπεδα
+	Show Edge	Εμφάνιση άκρης
+	Show Original	Εμφάνιση αρχικού
+	F cycles the views; hold X to see the image	Το F εναλλάσσει τις προβολές· κρατήστε το X για να δείτε την εικόνα
 	Show rulers	Εμφάνιση χαράκων
