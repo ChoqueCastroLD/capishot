@@ -323,13 +323,33 @@ pub(crate) fn selected_range(app: &PhotocraftApp) -> Option<[usize; 2]> {
     (a < b).then_some([a, b])
 }
 
+/// Copy the selected characters to the system clipboard. Returns the copied range. Shared by the
+/// clipboard Copy event and Edit > Copy during a type edit.
+pub(crate) fn copy_selection(app: &PhotocraftApp, ctx: &egui::Context) -> Option<[usize; 2]> {
+    let [a, b] = selected_range(app)?;
+    let ed = app.ui.text_edit.as_ref()?;
+    let text = text_layer(&app.session.active()?.doc, LayerId(ed.layer))?;
+    ctx.copy_text(text.text.chars().skip(a).take(b - a).collect());
+    Some([a, b])
+}
+
+/// Edit > Paste during a type edit: ask the window for the clipboard text, which arrives as a
+/// Paste event next frame and replaces the selection there (like ⌘V).
+pub(crate) fn request_paste(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+}
+
+/// Select > All during a type edit selects every character (like ⌘A).
+pub(crate) fn select_all(app: &mut PhotocraftApp) {
+    let Some(n) = app.ui.text_edit.as_ref().and_then(|ed| current_text(app, LayerId(ed.layer))).map(|t| t.chars().count()) else { return };
+    if let Some(e) = app.ui.text_edit.as_mut() {
+        (e.anchor, e.caret) = (0, n);
+    }
+}
+
 /// Shared by the clipboard Cut event and Edit > Cut during a type edit.
 pub(crate) fn cut_selection(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let Some([a, b]) = selected_range(app) else { return };
-    let Some(ed) = app.ui.text_edit.as_ref() else { return };
-    let Some(st) = app.session.active() else { return };
-    let Some(text) = text_layer(&st.doc, LayerId(ed.layer)) else { return };
-    ctx.copy_text(text.text.chars().skip(a).take(b - a).collect());
+    let Some([a, b]) = copy_selection(app, ctx) else { return };
     if let Some(ed) = app.ui.text_edit.as_mut() {
         ed.anchor = a;
         ed.caret = b;
@@ -551,9 +571,7 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
             egui::Event::Ime(egui::ImeEvent::Commit(s)) => ime_update(app, s, true),
             egui::Event::Ime(_) => {}
             egui::Event::Copy => {
-                if a < b {
-                    ctx.copy_text(text.chars().skip(a).take(b - a).collect());
-                }
+                copy_selection(app, ctx);
             }
             egui::Event::Cut => cut_selection(app, ctx),
             egui::Event::Key { key, pressed: true, modifiers: m, .. } => {

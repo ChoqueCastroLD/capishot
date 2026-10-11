@@ -467,8 +467,21 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "select.transformSelection" if params.as_object().is_none_or(|o| o.is_empty()) => {
             crate::transform_tool::begin_selection(app, ctx).map(|_| json!({"transform": app.ui.transform}))
         }
+        // While editing type, the clipboard rows and Select > All work on the text (#1355, #2893).
         "edit.cut" if app.ui.text_edit.is_some() => {
             crate::type_tool::cut_selection(app, ctx);
+            Ok(Value::Null)
+        }
+        "edit.copy" if app.ui.text_edit.is_some() => {
+            crate::type_tool::copy_selection(app, ctx);
+            Ok(Value::Null)
+        }
+        "edit.paste" if app.ui.text_edit.is_some() => {
+            crate::type_tool::request_paste(ctx);
+            Ok(Value::Null)
+        }
+        "select.all" if app.ui.text_edit.is_some() => {
+            crate::type_tool::select_all(app);
             Ok(Value::Null)
         }
         "edit.paste" if params.as_object().is_none_or(|o| o.is_empty()) => {
@@ -668,7 +681,8 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         // "Custom…" is the full Proof Setup dialog.
         "view.proofSetup.custom" => app.session.active().is_some(),
         "view.rulers" | "view.show.grid" | "view.show.guides" | "view.snap" | "view.lockGuides" => true,
-        "edit.cut" if app.ui.text_edit.is_some() => crate::type_tool::selected_range(app).is_some(),
+        "edit.cut" | "edit.copy" if app.ui.text_edit.is_some() => crate::type_tool::selected_range(app).is_some(),
+        "edit.paste" | "select.all" if app.ui.text_edit.is_some() => true,
         // An image copied in another app can only be seen by reading the OS clipboard, which happens
         // on an explicit paste: with a clipboard service these stay enabled. Paste and New from
         // Clipboard need no document (with none open, Paste makes one); Paste in Place does.
