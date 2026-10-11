@@ -1240,9 +1240,10 @@ mod tests {
     #[test]
     fn destructive_levels_dont_clip_in_32_bit() {
         // Input 15..230, gamma 1.3, output 10..245: black and white land on the output range in
-        // integer documents, but in a 32-bit document the curve runs on past it (then 0..1).
+        // integer documents, but in a 32-bit document the curve runs on past it, preserving HDR.
         let params = json!({"inBlack": 15, "inWhite": 230, "gamma": 1.3, "outBlack": 10, "outWhite": 245});
-        for (depth, low, high) in [(8, 10.0, 245.0), (16, 10.0, 245.0), (32, 0.0, 255.0)] {
+        // Independent signed-power expectations for black and white in the float document.
+        for (depth, low, high) in [(8, 10.0 / 255.0, 245.0 / 255.0), (16, 10.0 / 255.0, 245.0 / 255.0), (32, -0.0796427, 1.042158)] {
             let mut s = crate::Session::new();
             s.execute("file.new", json!({"width": 16, "height": 16, "depth": depth, "background": "white"})).unwrap();
             s.execute("select.rect", json!({"x": 0, "y": 0, "width": 8, "height": 16})).unwrap();
@@ -1250,8 +1251,12 @@ mod tests {
             s.execute("select.deselect", json!({})).unwrap();
             s.execute("image.adjustments.levels", params.clone()).unwrap();
             let px = pixels(&s);
-            assert!((px[0][0] * 255.0 - low).abs() < 0.6, "black @{depth}: {:?}", px[0]);
-            assert!((px[1][0] * 255.0 - high).abs() < 0.6, "white @{depth}: {:?}", px[1]);
+            let tolerance = if depth == 32 { 1e-5 } else { 0.6 / 255.0 };
+            if depth == 32 {
+                assert!(px[0][0] < 0.0 && px[1][0] > 1.0, "unclipped HDR: {px:?}");
+            }
+            assert!((px[0][0] - low).abs() < tolerance, "black @{depth}: {:?}", px[0]);
+            assert!((px[1][0] - high).abs() < tolerance, "white @{depth}: {:?}", px[1]);
         }
     }
 
