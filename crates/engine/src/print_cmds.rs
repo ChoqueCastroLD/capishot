@@ -444,17 +444,20 @@ pub fn page_rect_top_left(page: &PrintPage) -> (f64, f64, f64, f64) {
     (x, ph - y - h, w, h)
 }
 
-/// Prints `page` on a Windows printer. Printer marks, description and labels are PDF-only.
+/// Prints `page` on a Windows printer. Corner/centre crop and registration marks are drawn with
+/// GDI vector calls, matching the PDF path's geometry; description and label text are still
+/// PDF-only (no font/text layout in the GDI path yet).
 fn print_windows(page: &PrintPage, p: &Value, title: &str, copies: i64) -> Result<Value> {
     let printer = printer_name(p)?;
     let settings = printer_settings(p)?;
     let rgb = page_rgb(page)?;
     let image = photocraft_winprint::RgbImage { width: page.image.width, height: page.image.height, data: &rgb };
-    let job = photocraft_winprint::Job { printer: &printer, settings: settings.as_ref(), title, output_file: None, copies: copies.clamp(1, 999) as u32 };
+    let marks = photocraft_winprint::Marks { corner_crop: page.marks.corner_crop, center_crop: page.marks.center_crop, registration: page.marks.registration };
+    let job = photocraft_winprint::Job { printer: &printer, settings: settings.as_ref(), title, output_file: None, copies: copies.clamp(1, 999) as u32, marks };
     let done = photocraft_winprint::print(&job, &image, page_rect_top_left(page)).map_err(other)?;
-    let marks = page.marks.corner_crop || page.marks.center_crop || page.marks.registration || page.description.is_some() || page.label.is_some();
+    let text_skipped = page.description.is_some() || page.label.is_some();
     Ok(
-        json!({"printer": printer, "dpi": [done.dpi.0, done.dpi.1], "deviceRect": [done.device_rect.0, done.device_rect.1, done.device_rect.2, done.device_rect.3], "marksSkipped": marks}),
+        json!({"printer": printer, "dpi": [done.dpi.0, done.dpi.1], "deviceRect": [done.device_rect.0, done.device_rect.1, done.device_rect.2, done.device_rect.3], "textSkipped": text_skipped}),
     )
 }
 

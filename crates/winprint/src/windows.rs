@@ -6,9 +6,9 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDCW, DEVMODEW, DIB_RGB_COLORS, DM_IN_BUFFER, DM_IN_PROMPT, DM_OUT_BUFFER, DeleteDC, GetDeviceCaps, HALFTONE,
-    HDC, HORZRES, LOGPIXELSX, LOGPIXELSY, PHYSICALHEIGHT, PHYSICALOFFSETX, PHYSICALOFFSETY, PHYSICALWIDTH, SRCCOPY, SetBrushOrgEx, SetStretchBltMode,
-    StretchDIBits, VERTRES,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDCW, CreatePen, DEVMODEW, DIB_RGB_COLORS, DM_IN_BUFFER, DM_IN_PROMPT, DM_OUT_BUFFER, DeleteDC, DeleteObject,
+    Ellipse, GetDeviceCaps, GetStockObject, HALFTONE, HDC, HOLLOW_BRUSH, HORZRES, LOGPIXELSX, LOGPIXELSY, LineTo, MoveToEx, PHYSICALHEIGHT, PHYSICALOFFSETX,
+    PHYSICALOFFSETY, PHYSICALWIDTH, PS_SOLID, SRCCOPY, SelectObject, SetBrushOrgEx, SetStretchBltMode, StretchDIBits, VERTRES,
 };
 use windows_sys::Win32::Graphics::Printing::{
     ClosePrinter, DocumentPropertiesW, EnumPrintersW, GetDefaultPrinterW, OpenPrinterW, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_HANDLE,
@@ -17,7 +17,7 @@ use windows_sys::Win32::Graphics::Printing::{
 use windows_sys::Win32::Storage::Xps::{AbortDoc, DOCINFOW, EndDoc, EndPage, StartDocW, StartPage};
 use windows_sys::Win32::UI::ColorSystem::{ICM_OFF, SetICMMode};
 
-use crate::{DevMode, Job, Page, PrintError, Printed, Printer, Result, RgbImage};
+use crate::{DevMode, Job, Marks, Page, PrintError, Printed, Printer, Result, RgbImage};
 
 const IDOK: i32 = 1;
 const IDCANCEL: i32 = 2;
@@ -264,6 +264,61 @@ fn dib(image: &RgbImage<'_>) -> Result<(BITMAPINFO, Vec<u8>)> {
     Ok((BITMAPINFO { bmiHeader: header, bmiColors: [Default::default()] }, bits))
 }
 
+/// Vector marks around the image box `(x, y, w, h)` (device pixels, origin top-left, as GDI
+/// draws). Same geometry as `photocraft_engine::print_cmds::marks_ops`'s PDF content stream, with
+/// the vertical sense flipped (PDF's origin is bottom-left; GDI's is top-left), scaled from points
+/// to device pixels with `dpi` instead of PDF's user-space points.
+///
+/// # Safety
+/// `dc` is a valid, selected device context for the current page.
+unsafe fn draw_marks(dc: HDC, marks: Marks, (x, y, w, h): (i32, i32, i32, i32), dpi: (u32, u32)) -> Result<()> {
+    let (sx, sy) = (f64::from(dpi.0) / 72.0, f64::from(dpi.1) / 72.0);
+    let px = |v: f64| v.round() as i32;
+    let (gap_x, gap_y) = (px(6.0 * sx), px(6.0 * sy));
+    let (len_x, len_y) = (px(18.0 * sx), px(18.0 * sy));
+    let pen_width = px(0.3 * sx).max(1);
+    // SAFETY: `dc` is valid; the pen and brush are deleted/restored before returning.
+    let pen = unsafe { CreatePen(PS_SOLID, pen_width, 0x0000_0000) };
+    let hollow = unsafe { GetStockObject(HOLLOW_BRUSH) };
+    let old_pen = unsafe { SelectObject(dc, pen) };
+    let old_brush = unsafe { SelectObject(dc, hollow) };
+    let ok = std::cell::Cell::new(true);
+    let line = |x0: i32, y0: i32, x1: i32, y1: i32| {
+        // SAFETY: `dc` is valid for the duration of this call.
+        ok.set(ok.get() && unsafe { MoveToEx(dc, x0, y0, null_mut()) != 0 && LineTo(dc, x1, y1) != 0 });
+    };
+    if marks.corner_crop {
+        for (cx, cy, dx, dy) in [(x, y, -1, -1), (x + w, y, 1, -1), (x, y + h, -1, 1), (x + w, y + h, 1, 1)] {
+            line(cx + dx * gap_x, cy, cx + dx * (gap_x + len_x), cy);
+            line(cx, cy + dy * gap_y, cx, cy + dy * (gap_y + len_y));
+        }
+    }
+    if marks.center_crop {
+        let (mx, my) = (x + w / 2, y + h / 2);
+        line(mx, y - gap_y, mx, y - gap_y - len_y);
+        line(mx, y + h + gap_y, mx, y + h + gap_y + len_y);
+        line(x - gap_x, my, x - gap_x - len_x, my);
+        line(x + w + gap_x, my, x + w + gap_x + len_x, my);
+    }
+    if marks.registration {
+        let (rx, ry) = (px(5.0 * sx), px(5.0 * sy));
+        let (off_x, off_y) = (gap_x + len_x / 2, gap_y + len_y / 2);
+        for (cx, cy) in [(x + w / 2, y - off_y), (x + w / 2, y + h + off_y), (x - off_x, y + h / 2), (x + w + off_x, y + h / 2)] {
+            // SAFETY: `dc` is valid for the duration of this call.
+            ok.set(ok.get() && unsafe { Ellipse(dc, cx - rx, cy - ry, cx + rx, cy + ry) != 0 });
+            line(cx - (rx as f64 * 1.6) as i32, cy, cx + (rx as f64 * 1.6) as i32, cy);
+            line(cx, cy - (ry as f64 * 1.6) as i32, cx, cy + (ry as f64 * 1.6) as i32);
+        }
+    }
+    // SAFETY: restores the DC's previous pen/brush, then frees the ones created above.
+    unsafe {
+        SelectObject(dc, old_pen);
+        SelectObject(dc, old_brush);
+        DeleteObject(pen);
+    }
+    if ok.get() { Ok(()) } else { Err(last_error("drawing printer marks")) }
+}
+
 pub fn print(job: &Job<'_>, image: &RgbImage<'_>, rect: (f64, f64, f64, f64)) -> Result<Printed> {
     if image.width > i32::MAX as u32 || image.height > i32::MAX as u32 {
         return Err(PrintError::Invalid("image too large".into()));
@@ -310,6 +365,12 @@ pub fn print(job: &Job<'_>, image: &RgbImage<'_>, rect: (f64, f64, f64, f64)) ->
             unsafe { StretchDIBits(dc.0, x, y, w, h, 0, 0, image.width as i32, image.height as i32, bits.as_ptr().cast(), &bmi, DIB_RGB_COLORS, SRCCOPY) };
         if lines <= 0 {
             return Err(fail("sending the image to the printer"));
+        }
+        if job.marks.any() {
+            // SAFETY: `dc.0` is the valid, started page's device context.
+            if let Err(e) = unsafe { draw_marks(dc.0, job.marks, (x, y, w, h), page.dpi) } {
+                return Err(fail(&e.to_string()));
+            }
         }
         // SAFETY: closes the page started above.
         if unsafe { EndPage(dc.0) } <= 0 {
@@ -385,12 +446,20 @@ mod tests {
         let (w, h) = (300u32, 200u32);
         let data: Vec<u8> = (0..w * h).flat_map(|i| if (i % w) < w / 2 { [220, 30, 30] } else { [30, 30, 220] }).collect();
         let out_s = out.to_string_lossy().into_owned();
-        let job = Job { printer: "Microsoft Print to PDF", settings: Some(&settings), title: "PhotoCraft test", output_file: Some(&out_s), copies: 2 };
+        let marks = crate::Marks { corner_crop: true, center_crop: true, registration: true };
+        let job = Job { printer: "Microsoft Print to PDF", settings: Some(&settings), title: "PhotoCraft test", output_file: Some(&out_s), copies: 2, marks };
         let done = crate::print(&job, &RgbImage { width: w, height: h, data: &data }, (72.0, 72.0, 216.0, 144.0)).unwrap();
         assert_eq!(done.device_rect.2, done.dpi.0 as i32 * 3, "3 inches wide");
         let pdf = std::fs::read(&out).unwrap();
         assert!(pdf.starts_with(b"%PDF"), "the driver wrote a PDF");
         assert!(pdf.len() > 1000, "the page has content");
+        // The driver vectorises our GDI line/ellipse calls as real PDF content: a job with every
+        // mark on is meaningfully bigger than the same image with marks off.
+        let no_marks_job = Job { marks: crate::Marks::default(), ..job };
+        let done2 = crate::print(&no_marks_job, &RgbImage { width: w, height: h, data: &data }, (72.0, 72.0, 216.0, 144.0)).unwrap();
+        let _ = done2;
+        let pdf_no_marks = std::fs::read(&out).unwrap();
+        assert!(pdf.len() > pdf_no_marks.len() + 100, "marks add vector content: {} vs {}", pdf.len(), pdf_no_marks.len());
         let _ = std::fs::remove_file(&out);
     }
 

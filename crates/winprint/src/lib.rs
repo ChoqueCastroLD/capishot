@@ -2,6 +2,9 @@
 //! dialog (paper, paper type, quality, the driver's colour correction and mirror), the page
 //! geometry it implies, and printing an 8-bit RGB image through GDI with ICM off, so colours
 //! converted with a printer profile ("PhotoCraft Manages Colors") reach the driver unchanged.
+//! Corner/centre crop marks and registration marks are drawn around the image with GDI vector
+//! calls (`MoveToEx`/`LineTo`/`Ellipse`), the same geometry as the PDF path's content stream.
+//! Description and label text stay PDF-only (no font/text layout here yet).
 //!
 //! The driver settings travel as an opaque DEVMODE blob ([`DevMode`]), validated before use.
 //! Everything here is a safe API; the Win32 calls live in `windows.rs`. Other platforms get
@@ -107,6 +110,23 @@ pub struct RgbImage<'a> {
     pub data: &'a [u8],
 }
 
+/// Printer marks drawn around the image box: corner and centre crop marks, and registration
+/// marks. Matches [`photocraft_engine`]'s PDF `Marks`, mirrored here so this crate stays
+/// independent of the engine; GDI draws the same geometry with vector line/ellipse calls instead
+/// of PDF content stream operators.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Marks {
+    pub corner_crop: bool,
+    pub center_crop: bool,
+    pub registration: bool,
+}
+
+impl Marks {
+    pub(crate) fn any(self) -> bool {
+        self.corner_crop || self.center_crop || self.registration
+    }
+}
+
 /// One print job.
 pub struct Job<'a> {
     pub printer: &'a str,
@@ -116,6 +136,7 @@ pub struct Job<'a> {
     /// Print to this file instead of the device (drivers that write files, and tests).
     pub output_file: Option<&'a str>,
     pub copies: u32,
+    pub marks: Marks,
 }
 
 /// Where a job went: the image box in device pixels and the device resolution.
@@ -254,7 +275,7 @@ mod tests {
 
     #[test]
     fn print_rejects_empty_or_short_images_before_any_system_call() {
-        let job = Job { printer: "x", settings: None, title: "t", output_file: None, copies: 1 };
+        let job = Job { printer: "x", settings: None, title: "t", output_file: None, copies: 1, marks: Marks::default() };
         let short = RgbImage { width: 2, height: 2, data: &[0; 11] };
         assert!(matches!(print(&job, &short, (0.0, 0.0, 10.0, 10.0)), Err(PrintError::Invalid(_))));
         let ok = RgbImage { width: 2, height: 2, data: &[0; 12] };

@@ -923,8 +923,12 @@ fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Valu
     }
     let r = app.run("file.print", p)?;
     app.ui.status = if let Some(printer) = r["spooler"]["printer"].as_str() {
-        let skipped = if r["spooler"]["marksSkipped"] == json!(true) { " (printer marks and labels are only in Save as PDF)" } else { "" };
-        format!("Sent to {printer}{skipped}")
+        let template = if r["spooler"]["textSkipped"] == json!(true) {
+            "Sent to {printer} (description and label text are only in Save as PDF)"
+        } else {
+            "Sent to {printer}"
+        };
+        crate::i18n::fmt(tl!(template), &[("printer", printer)])
     } else if r["sent"] == json!(true) {
         let template = "Sent to the printer ({spooler})";
         crate::i18n::fmt(tl!(template), &[("spooler", r["spooler"].as_str().unwrap_or(""))])
