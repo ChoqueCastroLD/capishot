@@ -2995,6 +2995,9 @@ cameraData	Lens	Objectif
 	Spot Healing Brush	Correcteur localisé
 	Smudge	Doigt
 	Sponge	Éponge
+	Amount:	Quantité :
+	Protect:	Protéger :
+	Protect skin tones	Protéger les tons chair
 # Select and Mask view modes (#1754)
 	Onion Skin	Pelure d'oignon
 	Marching Ants	Fourmis en marche

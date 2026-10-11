@@ -3441,6 +3441,9 @@ layerLabel	No Color	Žádná barva
 	Dodge	Zesvětlení
 	Burn	Ztmavení
 	Sponge	Houba
+	Amount:	Míra:
+	Protect:	Chránit:
+	Protect skin tones	Chránit tóny pleti
 # Select and Mask view modes (#1754)
 	Onion Skin	Cibulová slupka
 	Marching Ants	Pochodující mravenci

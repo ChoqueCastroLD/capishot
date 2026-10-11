@@ -2591,6 +2591,9 @@ cameraData	Lens	镜头
 	Dodge	减淡
 	Burn	加深
 	Sponge	海绵
+	Amount:	数量：
+	Protect:	保护：
+	Protect skin tones	保护肤色
 # Select and Mask view modes (#1754)
 	Onion Skin	洋葱皮
 	Marching Ants	蚂蚁线

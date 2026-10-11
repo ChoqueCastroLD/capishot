@@ -2918,6 +2918,9 @@ cameraData	Lens	Объектив
 	Spot Healing Brush	Точечная восстанавливающая кисть
 	Smudge	Палец
 	Sponge	Губка
+	Amount:	Эффект:
+	Protect:	Защитить:
+	Protect skin tones	Защищать тона кожи
 # Select and Mask view modes (#1754)
 	Onion Skin	Калька
 	Marching Ants	Бегущие муравьи

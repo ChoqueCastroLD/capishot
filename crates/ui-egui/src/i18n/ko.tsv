@@ -3162,6 +3162,9 @@ cameraData	Lens	렌즈
 	Smudge	손가락
 	Dodge	닷지
 	Burn	번
+	Amount:	양:
+	Protect:	보호:
+	Protect skin tones	피부톤 보호
 # Select and Mask view modes (#1754)
 	Onion Skin	어니언 스킨
 	Marching Ants	점선 윤곽

@@ -3734,6 +3734,9 @@ cameraData	Lens	Lens
 	Healing Brush	Herstelpenseel
 	Spot Healing Brush	Snel herstelpenseel
 	Smudge	Uitsmeren
+	Amount:	Hoeveelheid:
+	Protect:	Beschermen:
+	Protect skin tones	Huidtinten beschermen
 # Select and Mask view modes (#1754)
 	Onion Skin	Uienschil
 	Marching Ants	Mierenmars

@@ -2617,6 +2617,9 @@ cameraData	Lens	Objektiv
 	Spot Healing Brush	Punktkorrektur-Pinsel
 	Smudge	Wischfinger
 	Sponge	Schwamm
+	Amount:	Stärke:
+	Protect:	Schützen:
+	Protect skin tones	Hauttöne schützen
 # Select and Mask view modes (#1754)
 	Onion Skin	Zwiebelschicht
 	Marching Ants	Laufende Ameisen

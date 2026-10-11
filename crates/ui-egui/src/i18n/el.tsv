@@ -3678,6 +3678,9 @@ cameraData	Lens	Φακός
 	Dodge	Φωτισμός
 	Burn	Σκοτείνιασμα
 	Sponge	Σφουγγάρι
+	Amount:	Ποσότητα:
+	Protect:	Προστασία:
+	Protect skin tones	Προστασία τόνων δέρματος
 # Select and Mask view modes (#1754)
 	Onion Skin	Φλούδα κρεμμυδιού
 	Marching Ants	Κινούμενο περίγραμμα

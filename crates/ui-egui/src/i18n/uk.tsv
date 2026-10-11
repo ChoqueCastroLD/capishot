@@ -3665,6 +3665,9 @@ cameraData	Lens	Об'єктив
 	Healing Brush	Відновлювальний пензель
 	Spot Healing Brush	Точковий відновлювальний пензель
 	Smudge	Розмазування
+	Amount:	Величина:
+	Protect:	Захистити:
+	Protect skin tones	Захистити тони шкіри
 # Select and Mask view modes (#1754)
 	Onion Skin	Калька
 	Marching Ants	Мурашки
