@@ -2487,3 +2487,9 @@ cameraData	Lens	镜头
 	Front Image	前面的图像
 	Search settings…	搜索设置…
 	No matching settings	没有匹配的设置
+	New Crop Preset…	新建裁剪预设…
+	Delete Crop Preset…	删除裁剪预设…
+	Select the crop presets to delete:	选择要删除的裁剪预设：
+	Select the crop presets to delete	选择要删除的裁剪预设
+	Enter a name for the crop preset	输入裁剪预设的名称
+	There is no crop size or ratio to save	没有可保存的裁剪大小或比例
