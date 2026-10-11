@@ -12,13 +12,21 @@
 # and wasm-bindgen-cli at the version of the wasm-bindgen crate in Cargo.lock:
 #   cargo install --locked wasm-bindgen-cli --version <version>
 # wasm-opt (binaryen) comes from PATH, or is downloaded once into target/tools.
-# Override the toolchain with PHOTOCRAFT_WEB_TOOLCHAIN (default: nightly).
+# Override the toolchain with PHOTOCRAFT_WEB_TOOLCHAIN (default: nightly); PHOTOCRAFT_WEB_FALLBACK
+# sets where a browser without cross-origin isolation goes (the single-threaded build).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HERE="$ROOT/packaging/web-threads"
 cd "$ROOT"
 
 TC="${PHOTOCRAFT_WEB_TOOLCHAIN:-nightly}"
+# Where the page sends a browser that isn't cross-origin isolated: the single-threaded build's URL
+# relative to the page (for example `st/` with Trunk's dist/web copied there), or empty to show an
+# error instead.
+FALLBACK="${PHOTOCRAFT_WEB_FALLBACK:-}"
+case "$FALLBACK" in
+  *[\'\"\|\\\<\>]*) echo "error: PHOTOCRAFT_WEB_FALLBACK must be a plain relative URL" >&2; exit 1 ;;
+esac
 PROFILE=wasm-release
 OUT="$ROOT/dist/web-threads"
 # Its own target dir: the std rebuild and RUSTFLAGS differ from every other build.
@@ -91,7 +99,7 @@ raw=$(wc -c <"$OUT/photocraft_bg.wasm" | tr -d ' ')
 gzip -9 -n "$OUT/photocraft_bg.wasm"
 # The page loads the glue and the wasm with ?v=<content hash>, so both can be cached forever.
 version=$(cat "$OUT/photocraft.js" "$OUT/photocraft_bg.wasm.gz" | sha256sum | cut -c1-16)
-sed "s/__PHOTOCRAFT_VERSION__/$version/g" "$HERE/index.html" >"$OUT/index.html"
+sed -e "s/__PHOTOCRAFT_VERSION__/$version/g" -e "s|__PHOTOCRAFT_FALLBACK__|$FALLBACK|g" "$HERE/index.html" >"$OUT/index.html"
 cp "$HERE/_headers" "$OUT/"
 
 # Cloudflare Workers/Pages reject any single file over 25 MiB; fail well before that.

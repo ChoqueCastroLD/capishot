@@ -30,7 +30,7 @@ def sub_file(path, pairs, regex=False):
 
 def product_name():
     changed = 0
-    for root in ('apps', 'crates', 'xtask'):
+    for root in ('apps', 'crates', 'xtask', 'packaging/web-threads'):
         for dp, dn, fn in os.walk(root):
             dn[:] = [d for d in dn if d != 'target']
             if dp.startswith(SKIP_DIRS):
