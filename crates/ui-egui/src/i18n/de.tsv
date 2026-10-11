@@ -2523,6 +2523,7 @@ cameraData	Lens	Objektiv
 	Previous Document	Vorheriges Dokument
 	W x H x Resolution	B x H x Auflösung
 	Front Image	Vorderes Bild
+	Include in playback	In Wiedergabe einbeziehen
 	Perspective Crop Tool	Perspektivisches Freistellungswerkzeug
 	Show Grid	Raster einblenden
 	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Rahmen ziehen oder vier Ecken klicken · Ecken auf die Kanten einer schrägen Form ziehen · {commit} übernimmt · Esc bricht ab

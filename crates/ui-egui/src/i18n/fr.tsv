@@ -2901,6 +2901,7 @@ cameraData	Lens	Objectif
 	Previous Document	Document précédent
 	W x H x Resolution	L x H x Résolution
 	Front Image	Image de premier plan
+	Include in playback	Inclure dans la lecture
 	Perspective Crop Tool	Outil Recadrage perspective
 	Show Grid	Afficher la grille
 	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Tracez un cadre ou cliquez sur quatre coins · faites glisser les coins sur les bords d'une forme inclinée · {commit} valide · Échap annule
