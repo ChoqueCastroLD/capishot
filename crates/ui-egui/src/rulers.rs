@@ -70,9 +70,9 @@ fn unit_menu_items(current: Unit) -> Vec<(String, &'static str, bool)> {
     UNITS.iter().map(|&u| (tl!(unit_label(u)).to_string(), u.name(), u == current)).collect()
 }
 
-/// Right-clicking a ruler offers the length units; the chosen one's name is returned (`None` if the
-/// menu is dismissed without a pick).
-fn ruler_unit_menu(ui: &mut egui::Ui, current: Unit) -> Option<&'static str> {
+/// The length units menu that right-clicking a ruler (or Free Transform's W and H fields) opens;
+/// the chosen unit's name is returned (`None` if the menu is dismissed without a pick).
+pub(crate) fn unit_menu(ui: &mut egui::Ui, current: Unit) -> Option<&'static str> {
     crate::widgets::menu_scroll(ui, |ui| {
         ui.set_min_width(150.0);
         let mut chosen = None;
@@ -367,7 +367,7 @@ pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &
             finish_drag(app, d);
         }
         resp.context_menu(|ui| {
-            if let Some(name) = ruler_unit_menu(ui, unit) {
+            if let Some(name) = unit_menu(ui, unit) {
                 chosen_unit = Some(name);
             }
         });
