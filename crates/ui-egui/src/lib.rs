@@ -1806,6 +1806,12 @@ impl PhotocraftApp {
     }
 
     pub(crate) fn apply_theme(&mut self, ctx: &egui::Context, kind: theme::ThemeKind) {
+        // Color and Swatches trade indices between Pro and Studio layouts.
+        if let Some(selected) = dock::Group::Color.tabs(theme::Tokens::for_kind(self.ui.theme).pro).get(self.ui.dock_tabs.color)
+            && let Some(tab) = dock::Group::Color.tabs(theme::Tokens::for_kind(kind).pro).iter().position(|name| name == selected)
+        {
+            self.ui.dock_tabs.color = tab;
+        }
         self.ui.theme = kind;
         panel_docking::sync_visibility(self);
         theme::apply(ctx, kind);

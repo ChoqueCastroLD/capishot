@@ -634,6 +634,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 if let Some(m) = selection_mode {
                     app.ui.selection_mode = m.min(3) as u8;
                 }
+                if let Some(k) = theme {
+                    app.set_theme(ctx, k);
+                }
                 if let Some(v) = dock_tabs {
                     app.ui.dock_tabs = v;
                 }
@@ -670,9 +673,6 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     if let Some(r) = rotation {
                         app.ui.views[i].rotation = crate::rotate_view::wrap_deg(r as f32);
                     }
-                }
-                if let Some(k) = theme {
-                    app.set_theme(ctx, k);
                 }
                 if let Some(i) = brush_section {
                     app.ui.brush_section = (i as usize).min(crate::brush_panel::SECTIONS.len() - 1);
@@ -1959,6 +1959,17 @@ mod tests {
         assert_eq!(serde_json::to_value(&app.ui.panels).unwrap_or_default(), panels_before, "nothing was applied");
         // Non-numeric brushSize keeps the API's historical silent no-op (see the dispatch test).
         assert_eq!(call(&mut app, &ctx, "ui.set", json!({"brushSize": "large"}))["ok"], true);
+    }
+
+    #[test]
+    fn ui_set_theme_keeps_explicit_dock_tab_indices() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        for theme in ["adwaitaDark", "pro"] {
+            let r = call(&mut app, &ctx, "ui.set", json!({"theme": theme, "dockTabs": {"color": 0}}));
+            assert_eq!(r["ok"], true, "{r}");
+            assert_eq!(app.ui.dock_tabs.color, 0, "{theme}: explicit tab index changed");
+        }
     }
 
     #[test]
