@@ -29,6 +29,7 @@ mod caps_lock;
 mod control_server;
 mod crash_guard;
 mod cursor;
+mod file_dialog_probe;
 mod gpu_startup;
 #[cfg(target_os = "macos")]
 mod mac_menu;
@@ -357,6 +358,7 @@ fn main() -> eframe::Result {
             #[cfg(target_os = "linux")]
             {
                 services.is_wayland = display == Some(tablet::DisplayKind::Wayland);
+                file_dialog_probe::start();
                 if services.is_wayland {
                     let var = |name| std::env::var(name).ok();
                     services.xwayland_command =
