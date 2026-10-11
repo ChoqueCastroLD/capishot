@@ -60,7 +60,88 @@ pub(crate) fn median(src: &Image, out: Rect, radius: f32, threshold: Option<f32>
     if r >= 2 {
         return median_ranked(src, out, r, t);
     }
-    median_direct(src, out, r, t)
+    median_3x3(src, out, t)
+}
+
+/// `f32::total_cmp` order as plain integer order (and back: the map is its own inverse).
+#[inline]
+fn total_key(k: i32) -> i32 {
+    k ^ (((k >> 31) as u32) >> 1) as i32
+}
+
+/// Sorts enough of `p` that `p[4]` is its median: Paeth's 19-exchange median-of-9 network.
+#[inline]
+fn median9(p: &mut [i32; 9]) {
+    const OPS: [(usize, usize); 19] = [
+        (1, 2),
+        (4, 5),
+        (7, 8),
+        (0, 1),
+        (3, 4),
+        (6, 7),
+        (1, 2),
+        (4, 5),
+        (7, 8),
+        (0, 3),
+        (5, 8),
+        (4, 7),
+        (3, 6),
+        (1, 4),
+        (2, 5),
+        (4, 7),
+        (4, 2),
+        (6, 4),
+        (4, 2),
+    ];
+    for (a, b) in OPS {
+        let (lo, hi) = (p[a].min(p[b]), p[a].max(p[b]));
+        (p[a], p[b]) = (lo, hi);
+    }
+}
+
+/// [`median`] of radius 1, whose disc is the 3×3 square: a median-of-9 network on the samples'
+/// `total_cmp` keys, a row at a time. It picks the sample the selection picks (equal keys are
+/// equal bits), so the output is identical.
+fn median_3x3(src: &Image, out: Rect, t: Option<f32>) -> Vec<f32> {
+    let n = src.ch;
+    let win = out.inflate(1);
+    let (ww, wh) = (win.width() as usize, win.height() as usize);
+    let (ow, oh) = (out.width() as usize, out.height() as usize);
+    let key = |v: f32| total_key(v.to_bits() as i32);
+    let value = |k: i32| f32::from_bits(total_key(k) as u32);
+    let mut res = vec![0.0f32; ow * oh * n];
+    let mut plane = vec![0i32; ww * wh];
+    let mut med = vec![0i32; ow];
+    let inside = win.intersect(&src.rect);
+    for c in 0..n {
+        // Window samples of this channel; outside the source reads as 0, as `Image::get` does.
+        plane.fill(key(0.0));
+        if !inside.is_empty() {
+            for y in inside.y0..inside.y1 {
+                let o = (y - win.y0) as usize * ww + (inside.x0 - win.x0) as usize;
+                let row = src.row(Rect::new(inside.x0, y, inside.x1, y + 1));
+                for (k, px) in plane[o..o + inside.width() as usize].iter_mut().zip(row.chunks_exact(n)) {
+                    *k = key(px[c]);
+                }
+            }
+        }
+        for oy in 0..oh {
+            let (a, b, d) = (&plane[oy * ww..(oy + 1) * ww], &plane[(oy + 1) * ww..(oy + 2) * ww], &plane[(oy + 2) * ww..(oy + 3) * ww]);
+            for (x, m) in med.iter_mut().enumerate() {
+                let mut p = [a[x], a[x + 1], a[x + 2], b[x], b[x + 1], b[x + 2], d[x], d[x + 1], d[x + 2]];
+                median9(&mut p);
+                *m = p[4];
+            }
+            for (x, &m) in med.iter().enumerate() {
+                let (m, o) = (value(m), value(b[x + 1]));
+                res[(oy * ow + x) * n + c] = match t {
+                    Some(t) if (o - m).abs() <= t => o,
+                    _ => m,
+                };
+            }
+        }
+    }
+    res
 }
 
 /// Half-width of the median disc on each row `dy` in `-r..=r`: the largest `dx` with
@@ -99,6 +180,14 @@ fn median_ranked(src: &Image, out: Rect, r: i32, t: Option<f32>) -> Vec<f32> {
     let (ow, oh) = (out.width() as usize, out.height() as usize);
     let ru = r as usize;
     let mut res = vec![0.0f32; ow * oh * n];
+    // Per disc row j (half-width hw), the pixels a one-step move swaps, as offsets: right and
+    // left from the centre's row-start-of-disc (`(cy - r) * ww + cx`), down from the top-left of
+    // the previous disc's bounding box (`(cy - 1 - r) * ww + cx - r`).
+    let (ww_i, r_i) = (ww as isize, r as isize);
+    let right: Vec<(isize, isize)> = rows.iter().enumerate().map(|(j, &hw)| (j as isize * ww_i - 1 - hw as isize, j as isize * ww_i + hw as isize)).collect();
+    let left: Vec<(isize, isize)> = rows.iter().enumerate().map(|(j, &hw)| (j as isize * ww_i + 1 + hw as isize, j as isize * ww_i - hw as isize)).collect();
+    let down: Vec<(isize, isize)> =
+        rows.iter().enumerate().map(|(j, &hw)| ((r_i - hw as isize) * ww_i + j as isize, (r_i + 1 + hw as isize) * ww_i + j as isize)).collect();
     let mut plane = vec![0u32; ww * wh];
     let mut values = Vec::new();
     let (mut hist, mut blocks) = (Vec::new(), Vec::new());
@@ -151,29 +240,29 @@ fn median_ranked(src: &Image, out: Rect, r: i32, t: Option<f32>) -> Vec<f32> {
                 let ox = if oy % 2 == 0 { step } else { ow - 1 - step };
                 // Window pixel at the disc's centre, and the two ends of each row or column.
                 let (cx, cy) = (ox + ru, oy + ru);
-                let moves = rows.iter().enumerate().map(|(j, &hw)| {
-                    let hw = hw as usize;
-                    if step == 0 {
-                        // Down from (cx, cy - 1): column cx - r + j loses its top, gains a bottom.
-                        let x = cx + j - ru;
-                        ((cy - 1 - hw) * ww + x, (cy + hw) * ww + x)
-                    } else if oy % 2 == 0 {
-                        // Right from (cx - 1, cy).
-                        let y = (cy + j - ru) * ww;
-                        (y + cx - 1 - hw, y + cx + hw)
-                    } else {
-                        // Left from (cx + 1, cy).
-                        let y = (cy + j - ru) * ww;
-                        (y + cx + 1 + hw, y + cx - hw)
-                    }
-                });
+                // The move's (leaving, joining) pixels, relative to the disc's top-left corner.
+                let (base, offs) = if step == 0 {
+                    ((cy * ww + cx).wrapping_sub(ww + ru * ww + ru), &down)
+                } else if oy % 2 == 0 {
+                    ((cy - ru) * ww + cx, &right)
+                } else {
+                    ((cy - ru) * ww + cx, &left)
+                };
+                let moves = offs.iter().map(|&(g, a)| (base.wrapping_add_signed(g), base.wrapping_add_signed(a)));
                 if oy > 0 || step > 0 {
                     for (gone, new) in moves {
                         let (gone, new) = (plane[gone] as usize, plane[new] as usize);
+                        // A sample swapped for one of the same rank changes nothing; within one
+                        // block, the block count doesn't change.
+                        if gone == new {
+                            continue;
+                        }
                         hist[gone] -= 1;
-                        blocks[gone >> shift] -= 1;
                         hist[new] += 1;
-                        blocks[new >> shift] += 1;
+                        if gone >> shift != new >> shift {
+                            blocks[gone >> shift] -= 1;
+                            blocks[new >> shift] += 1;
+                        }
                         below -= usize::from(gone < m);
                         below += usize::from(new < m);
                     }
@@ -211,6 +300,7 @@ fn median_ranked(src: &Image, out: Rect, r: i32, t: Option<f32>) -> Vec<f32> {
 }
 
 /// [`median`] by selecting the middle of every disc's samples.
+#[cfg(test)]
 fn median_direct(src: &Image, out: Rect, r: i32, t: Option<f32>) -> Vec<f32> {
     let n = src.ch;
     let offs: Vec<(i32, i32)> = (-r..=r).flat_map(|dy| (-r..=r).map(move |dx| (dx, dy))).filter(|(dx, dy)| dx * dx + dy * dy <= r * r + r).collect();
@@ -269,10 +359,10 @@ mod tests {
         let out = Rect::new(-14, -3, 30, 34);
         for kind in 0..3 {
             let img = noisy(src_rect, kind);
-            for r in [2, 3, 7, 16] {
+            for r in [1, 2, 3, 7, 16] {
                 for t in [None, Some(0.0), Some(10.0 / 255.0), Some(1.0)] {
                     let bits = |v: Vec<f32>| v.into_iter().map(f32::to_bits).collect::<Vec<_>>();
-                    let fast = bits(median_ranked(&img, out, r, t));
+                    let fast = bits(if r == 1 { median_3x3(&img, out, t) } else { median_ranked(&img, out, r, t) });
                     assert_eq!(fast, bits(median_direct(&img, out, r, t)), "kind {kind} r {r} threshold {t:?}");
                 }
             }
