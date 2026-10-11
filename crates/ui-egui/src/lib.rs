@@ -420,6 +420,9 @@ pub struct PhotocraftApp {
     pub(crate) tool_override: Option<state::Tool>,
     /// Brush/Eraser stroke being drawn, rendered by the engine (see `canvas::LiveStroke`).
     live_stroke: Option<canvas::LiveStroke>,
+    /// A live stroke just committed with its own pixels: the canvas caches that showed it
+    /// refresh only what it drew after the step they showed (`canvas::damage_since`).
+    committed_stroke: Option<canvas::CommittedStroke>,
     /// Footprint trail of a retouching drag (see `stroke_trail`).
     trail: Option<stroke_trail::Trail>,
     /// The open menus' items, reused between frames (`menus::ItemCache`).
@@ -629,6 +632,7 @@ impl PhotocraftApp {
             move_blocked: false,
             tool_override: None,
             live_stroke: None,
+            committed_stroke: None,
             trail: None,
             menu_cache: None,
             move_preview: None,
