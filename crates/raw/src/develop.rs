@@ -38,7 +38,14 @@ pub struct DevelopOptions {
 
 impl Default for DevelopOptions {
     fn default() -> Self {
-        DevelopOptions { demosaic: Demosaic::default(), white_balance: WhiteBalance::default(), exposure: 0.0, orient: true, limits: Limits::default(), camera_look: None }
+        DevelopOptions {
+            demosaic: Demosaic::default(),
+            white_balance: WhiteBalance::default(),
+            exposure: 0.0,
+            orient: true,
+            limits: Limits::default(),
+            camera_look: None,
+        }
     }
 }
 

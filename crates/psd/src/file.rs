@@ -208,6 +208,18 @@ impl PsdFile {
         self.resources.iter().find(|r| r.id == id)
     }
 
+    /// The global `Lr16` / `Lr32` / `Layr` block that should have held the layers but could not
+    /// be parsed, with the parse error. [`Self::from_bytes`] keeps such a block verbatim in
+    /// [`Self::global_blocks`] and leaves [`Self::layer_info`] `None`, so the file reads as
+    /// flattened; this tells a reader that its layers were lost rather than absent.
+    pub fn unreadable_layer_block(&self) -> Option<(&TaggedBlock, PsdError)> {
+        if self.layer_info.is_some() {
+            return None;
+        }
+        let block = self.global_blocks.iter().find(|b| matches!(&b.key, b"Lr16" | b"Lr32" | b"Layr"))?;
+        LayerInfo::read_body(&block.data, self.header.version).err().map(|e| (block, e))
+    }
+
     /// First global block with the given key.
     pub fn global_block(&self, key: &[u8; 4]) -> Option<&TaggedBlock> {
         self.global_blocks.iter().find(|b| &b.key == key)
@@ -324,6 +336,19 @@ mod write_tests {
                 }
             }
         }
+    }
+
+    /// #2926: a PSB whose ZIP merged image declares more than `MAX_DECODED_BYTES` opens without
+    /// inflating that stream (its layers are still usable); decoding the composite reports the limit.
+    #[test]
+    fn over_budget_zip_merged_image_opens_without_inflating() {
+        let mut bytes = testgen::small(Version::Psb, Compression::Zip).to_bytes().unwrap();
+        // Header: height at 14, width at 18 (big-endian u32).
+        bytes[14..18].copy_from_slice(&300_000u32.to_be_bytes());
+        bytes[18..22].copy_from_slice(&300_000u32.to_be_bytes());
+        let file = PsdFile::from_bytes(&bytes).unwrap();
+        assert!(!file.layers().is_empty());
+        assert!(matches!(file.decode_merged(), Err(PsdError::LimitExceeded(_))));
     }
 
     #[test]
