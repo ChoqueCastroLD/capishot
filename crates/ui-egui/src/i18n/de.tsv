@@ -893,6 +893,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Klicken vergrößert  ·  {key}-Klick verkleinert  ·  nach rechts/links ziehen zoomt rein/raus
 	Click with the Note tool to add a note.	Klicke mit dem Notiz-Werkzeug, um eine Notiz hinzuzufügen.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Klick: Ecke · Ziehen: weich · Ersten Punkt klicken: schließen · {key} fertig · Esc abbrechen
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Klick: Ecke · Ziehen: weich · {alt}-Ziehen: Griff trennen · Ersten Punkt klicken oder ziehen: schließen · {key} fertig · Esc abbrechen
 	Clip to layer below	Auf darunterliegende Ebene begrenzen
 	Clipped	Beschnitten
 	Close Style Options	Stiloptionen schließen

@@ -900,6 +900,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Click per ingrandire · {key}-click per ridurre · trascina dx/sx per zoom
 	Click with the Note tool to add a note.	Fai click con lo strumento Nota per aggiungere una nota.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Click: angolo · Trascina: morbido · Click primo punto: chiudi · {key} termina · Esc annulla
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Click: angolo · Trascina: morbido · {alt}+trascina: spezza maniglia · Click o trascina sul primo punto: chiudi · {key} termina · Esc annulla
 	Clip to layer below	Ritaglia al livello sotto
 	Clipped	Ritagliato
 	Close Style Options	Chiudi opzioni stile

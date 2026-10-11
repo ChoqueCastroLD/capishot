@@ -1516,6 +1516,7 @@
 	Click to add a point · drag off or {key}-click or Delete to remove	Щёлкните, чтобы добавить точку · уведите или {key}-клик, либо Delete — удалить
 	Click to apply, {key}-click to clear overrides, double-click for Style Options	Щёлкните, чтобы применить · {key}-клик сбрасывает переопределения · двойной клик — параметры стиля
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Клик: угол · перетаскивание: гладкая · клик по первой точке: замкнуть · {key} завершить · Esc отмена
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Клик: угол · перетаскивание: гладкая · {alt}+перетаскивание: разбить маркер · клик или перетаскивание первой точки: замкнуть · {key} завершить · Esc отмена
 	Commit Perspective Warp ({key})	Принять перспективную деформацию ({key})
 	Commit Puppet Warp ({key})	Принять кукольную деформацию ({key})
 	Commit any current edits ({key})	Принять все текущие правки ({key})

@@ -2124,6 +2124,7 @@
 	Click to sample the foreground colour  ·  {key}-click for background	Κλικ για δειγματοληψία χρώματος προσκηνίου · {key}-κλικ για φόντο
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Κλικ για μεγέθυνση · {key}-κλικ για σμίκρυνση · σύρσιμο δεξιά/αριστερά για αλλαγή μεγέθυνσης
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Κλικ: γωνία · Σύρσιμο: εξομάλυνση · Κλικ στο πρώτο σημείο: κλείσιμο · {key}: τέλος · Esc: ακύρωση
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Κλικ: γωνία · Σύρσιμο: εξομάλυνση · {alt}+σύρσιμο: διάσπαση λαβής · Κλικ ή σύρσιμο στο πρώτο σημείο: κλείσιμο · {key}: τέλος · Esc: ακύρωση
 	Click: select anchor · Drag: move anchor, handle or segment · {shift}-click: add · {alt}-click: whole subpath	Κλικ: επιλογή σημείου αγκύρωσης · Σύρσιμο: μετακίνηση σημείου, λαβής ή τμήματος · {shift}-κλικ: προσθήκη · {alt}-κλικ: ολόκληρη υποδιαδρομή
 	Clip to layer below	Περικοπή στο υποκείμενο επίπεδο
 	Clipped	Περικομμένο

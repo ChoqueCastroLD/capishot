@@ -906,6 +906,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	按一下放大  ·  {key}+按一下縮小  ·  向右/向左拖曳以放大/縮小
 	Click with the Note tool to add a note.	使用註解工具按一下以新增註解。
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	按一下：轉角 · 拖曳：平滑 · 按一下第一點：閉合 · {key} 完成 · Esc 取消
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	按一下：轉角 · 拖曳：平滑 · {alt}+拖曳：分離控制點 · 按一下或拖曳第一點：閉合 · {key} 完成 · Esc 取消
 	Clip to layer below	剪裁至下方圖層
 	Clipped	已剪裁
 	Close Style Options	關閉樣式選項

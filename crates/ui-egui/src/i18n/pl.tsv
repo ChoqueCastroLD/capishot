@@ -899,6 +899,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Kliknij, aby powiększyć  ·  kliknij z {key}, aby pomniejszyć  ·  przeciągnij w prawo/lewo, aby powiększyć/pomniejszyć
 	Click with the Note tool to add a note.	Kliknij narzędziem Notatka, aby dodać notatkę.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Klik: narożnik · Przeciągnięcie: gładki · Klik w pierwszy punkt: zamknij · {key} zakończ · Esc anuluj
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Klik: narożnik · Przeciągnięcie: gładki · {alt}+przeciągnięcie: rozdziel uchwyt · Klik lub przeciągnięcie pierwszego punktu: zamknij · {key} zakończ · Esc anuluj
 	Clip to layer below	Przytnij do warstwy poniżej
 	Clipped	Przycięta
 	Close Style Options	Zamknij opcje stylu

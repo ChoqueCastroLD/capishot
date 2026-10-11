@@ -889,6 +889,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Cliquez pour zoomer  ·  {key}-clic pour dézoomer  ·  faites glisser vers la droite/gauche pour zoomer/dézoomer
 	Click with the Note tool to add a note.	Cliquez avec l'outil Note pour ajouter une note.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Clic : angle · Glisser : lisse · Clic sur le premier point : fermer · {key} : terminer · Échap : annuler
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Clic : angle · Glisser : lisse · {alt}+glisser : briser la poignée · Clic ou glisser sur le premier point : fermer · {key} : terminer · Échap : annuler
 	Clip to layer below	Découper selon le calque inférieur
 	Clipped	Découpé
 	Close Style Options	Fermer les options de style

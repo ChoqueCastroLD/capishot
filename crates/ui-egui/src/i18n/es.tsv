@@ -901,6 +901,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Clic para acercar  ·  {key}-clic para alejar  ·  arrastre a la derecha/izquierda para acercar/alejar
 	Click with the Note tool to add a note.	Haga clic con la herramienta Nota para añadir una nota.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Clic: esquina · Arrastrar: suavizar · Clic en el primer punto: cerrar · {key}: terminar · Esc: cancelar
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Clic: esquina · Arrastrar: suavizar · {alt}+arrastrar: romper manejador · Clic o arrastrar en el primer punto: cerrar · {key}: terminar · Esc: cancelar
 	Clip to layer below	Recortar a la capa inferior
 	Clipped	Recortado
 	Close Style Options	Cerrar opciones de estilo

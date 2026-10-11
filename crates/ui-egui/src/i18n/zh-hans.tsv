@@ -2083,6 +2083,7 @@ cameraRaw	Blending	混合
 	Click to apply, {key}-click to clear overrides, double-click for Style Options	单击应用，按 {key} 单击清除覆盖设置，双击打开样式选项
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	单击放大  ·  按 {key} 单击缩小  ·  向右或向左拖动以放大或缩小
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	单击：角点 · 拖动：平滑点 · 单击起点：闭合 · {key} 完成 · Esc 取消
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	单击：角点 · 拖动：平滑点 · {alt}+拖动：断开手柄 · 单击或拖动起点：闭合 · {key} 完成 · Esc 取消
 	Commit Perspective Warp ({key})	应用透视变形（{key}）
 	Commit Puppet Warp ({key})	应用操控变形（{key}）
 	Commit any current edits ({key})	应用当前所有编辑（{key}）
