@@ -2850,6 +2850,18 @@ fontWeight	Italic	Italique
 	Quick Selection found nothing there	La Sélection rapide n'a rien trouvé à cet endroit
 	Object Selection found nothing there — try a tighter rectangle	La Sélection d'objet n'a rien trouvé à cet endroit — essayez un rectangle plus serré
 	No subject found — try a rectangle around the object	Aucun sujet trouvé — essayez un rectangle autour de l'objet
+# Shared panel docking
+	Activate Panel	Activer le panneau
+	Change Panel Group	Modifier le groupe de panneaux
+	Change Panel Layout	Modifier la disposition des panneaux
+	Close Panel	Fermer le panneau
+	Dock Panel	Ancrer le panneau
+	Float Panel	Panneau flottant
+	Move Panel	Déplacer le panneau
+	Group with	Grouper avec
+	Panel menu	Menu du panneau
+	Resize panel window	Redimensionner la fenêtre du panneau
+	Resize panels	Redimensionner les panneaux
 	Use Classic Mode	Utiliser le mode classique
 	Auto Center Preview	Centrer automatiquement l'aperçu
 	Next Document	Document suivant

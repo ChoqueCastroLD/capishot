@@ -3540,6 +3540,18 @@ fontWeight	Thin	Πολύ λεπτά
 	Quick Selection found nothing there	Η Γρήγορη επιλογή δεν βρήκε τίποτα εκεί
 	Object Selection found nothing there — try a tighter rectangle	Η Επιλογή αντικειμένου δεν βρήκε τίποτα εκεί — δοκιμάστε ένα πιο στενό ορθογώνιο
 	No subject found — try a rectangle around the object	Δεν βρέθηκε θέμα — δοκιμάστε ένα ορθογώνιο γύρω από το αντικείμενο
+# Shared panel docking
+	Activate Panel	Ενεργοποίηση πάνελ
+	Change Panel Group	Αλλαγή ομάδας πάνελ
+	Change Panel Layout	Αλλαγή διάταξης πάνελ
+	Close Panel	Κλείσιμο πάνελ
+	Dock Panel	Αγκύρωση πάνελ
+	Float Panel	Αιωρούμενο πάνελ
+	Move Panel	Μετακίνηση πάνελ
+	Group with	Ομαδοποίηση με
+	Panel menu	Μενού πάνελ
+	Resize panel window	Αλλαγή μεγέθους παραθύρου πάνελ
+	Resize panels	Αλλαγή μεγέθους πάνελ
 	Use Classic Mode	Χρήση κλασικής λειτουργίας
 	Auto Center Preview	Αυτόματο κεντράρισμα προεπισκόπησης
 	Next Document	Επόμενο έγγραφο
