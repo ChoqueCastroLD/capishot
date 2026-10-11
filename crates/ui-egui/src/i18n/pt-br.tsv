@@ -1768,6 +1768,7 @@
 	Cache tile size	Tamanho do bloco do cache
 	Camera Raw Defaults	Padrões do Camera Raw
 	Canvas border	Borda da tela de pintura
+	Show canvas dots	Mostrar pontos da tela de pintura
 	Canvas color	Cor da tela de pintura
 	Canvas custom color	Cor personalizada da tela de pintura
 	Color picker	Seletor de cores

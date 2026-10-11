@@ -1762,6 +1762,7 @@
 	Cache tile size	캐시 타일 크기
 	Camera Raw Defaults	Camera Raw 기본값
 	Canvas border	캔버스 테두리
+	Show canvas dots	캔버스 점 표시
 	Canvas color	캔버스 색상
 	Canvas custom color	캔버스 사용자 정의 색상
 	Color picker	색상 피커

@@ -1806,6 +1806,7 @@
 	Cache tile size	缓存图块大小
 	Camera Raw Defaults	Camera Raw 默认设置
 	Canvas border	画布边框
+	Show canvas dots	显示画布圆点
 	Canvas color	画布颜色
 	Canvas custom color	画布自定颜色
 	Color picker	拾色器
