@@ -3376,7 +3376,7 @@ fn brush_preset_chip(ui: &mut egui::Ui, b: &photocraft_engine::BrushSettings, st
         if state.brush_picker.is_some() {
             crate::brush_picker::close(state);
         } else {
-            state.brush_picker = Some([r.left(), r.bottom() + 2.0]);
+            crate::brush_picker::open(state, ui.ctx(), [r.left(), r.bottom() + 2.0]);
         }
     }
 }

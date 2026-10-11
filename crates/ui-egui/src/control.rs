@@ -941,7 +941,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     // Right-click while transforming: the box's menu, as on the canvas.
                     if app.ui.transform.as_ref().is_some_and(|t| t.warp.is_none()) {
                         if down {
-                            crate::canvas_tool_menu::open_transform(app, screen_point(app, x, y));
+                            crate::canvas_tool_menu::open_transform(app, ctx, screen_point(app, x, y));
                         }
                         continue;
                     }
@@ -949,23 +949,23 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     if crate::layer_pick_ui::is_gesture(app.ui.tool, mods) {
                         if down {
                             app.ui.canvas_tool_menu = None;
-                            crate::layer_pick_ui::open(app, screen_point(app, x, y), x, y);
+                            crate::layer_pick_ui::open(app, ctx, screen_point(app, x, y), x, y);
                         }
                         continue;
                     }
                     if crate::canvas_tool_menu::pasteboard_at(app, app.ui.tool, [x, y]) {
                         if down {
-                            crate::canvas_tool_menu::open_pasteboard(app, app.ui.tool, screen_point(app, x, y));
+                            crate::canvas_tool_menu::open_pasteboard(app, ctx, app.ui.tool, screen_point(app, x, y));
                         }
                         continue;
                     }
                     if crate::canvas_tool_menu::applies(app.ui.tool) {
                         if down {
-                            crate::canvas_tool_menu::open(app, app.ui.tool, screen_point(app, x, y));
+                            crate::canvas_tool_menu::open(app, ctx, app.ui.tool, screen_point(app, x, y));
                         }
                         continue;
                     }
-                    if !crate::paint_mouse::pointer_secondary(app, down, mods, screen_point(app, x, y)) {
+                    if !crate::paint_mouse::pointer_secondary(app, ctx, down, mods, screen_point(app, x, y)) {
                         continue;
                     }
                 }
