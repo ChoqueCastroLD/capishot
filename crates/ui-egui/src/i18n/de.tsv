@@ -2594,7 +2594,7 @@ cameraData	Lens	Objektiv
 	Freeform Pen Tool	Freiform-Stift-Werkzeug
 	Curvature Pen Tool	Rundungsstift-Werkzeug
 	Curve Fit:	Kurvenanpassung:
-	Drag: draw freehand · Release on the start point: close	Ziehen: frei zeichnen · Am Startpunkt loslassen: schließen
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Ziehen: frei zeichnen · {alt}-Klick: gerades Segment · Am Startpunkt loslassen: schließen
 	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Klick: weicher Punkt · Doppelklick: Ecke · Punkt ziehen: verschieben · Ersten Punkt klicken: schließen · {key} fertig
 	New Crop Preset…	Neue Freistellungsvorgabe…
 	Delete Crop Preset…	Freistellungsvorgabe löschen…

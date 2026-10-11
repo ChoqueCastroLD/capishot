@@ -3714,7 +3714,7 @@ cameraData	Lens	Lens
 	Freeform Pen Tool	Pengereedschap Vrije vorm
 	Curvature Pen Tool	Pengereedschap Kromming
 	Curve Fit:	Curve aanpassen:
-	Drag: draw freehand · Release on the start point: close	Slepen: uit de vrije hand tekenen · Loslaten op beginpunt: sluiten
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Slepen: uit de vrije hand tekenen · {alt}-klik: recht segment · Loslaten op beginpunt: sluiten
 	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Klik: vloeiend punt · Dubbelklik: hoek · Punt slepen: verplaatsen · Klik op eerste punt: sluiten · {key} voltooien
 	New Crop Preset…	Nieuwe uitsnijvoorinstelling…
 	Delete Crop Preset…	Uitsnijvoorinstelling verwijderen…

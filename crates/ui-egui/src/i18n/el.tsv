@@ -3654,7 +3654,7 @@ cameraData	Lens	Φακός
 	Freeform Pen Tool	Πένα ελεύθερης σχεδίασης
 	Curvature Pen Tool	Πένα καμπυλότητας
 	Curve Fit:	Προσαρμογή καμπύλης:
-	Drag: draw freehand · Release on the start point: close	Σύρσιμο: ελεύθερη σχεδίαση · Άφημα στο αρχικό σημείο: κλείσιμο
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Σύρσιμο: ελεύθερη σχεδίαση · {alt}-κλικ: ευθύ τμήμα · Άφημα στο αρχικό σημείο: κλείσιμο
 	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Κλικ: ομαλό σημείο · Διπλό κλικ: γωνία · Σύρσιμο σημείου: μετακίνηση · Κλικ στο πρώτο σημείο: κλείσιμο · {key}: τέλος
 	New Crop Preset…	Νέα προεπιλογή περικοπής…
 	Delete Crop Preset…	Διαγραφή προεπιλογής περικοπής…

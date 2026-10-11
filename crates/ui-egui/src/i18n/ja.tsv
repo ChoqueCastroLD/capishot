@@ -3568,7 +3568,7 @@ cameraData	Lens	レンズ
 	Freeform Pen Tool	フリーフォームペンツール
 	Curvature Pen Tool	曲線ペンツール
 	Curve Fit:	カーブフィット:
-	Drag: draw freehand · Release on the start point: close	ドラッグ: フリーハンドで描画 · 始点で離す: 閉じる
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	ドラッグ: フリーハンドで描画 · {alt}+クリック: 直線セグメント · 始点で離す: 閉じる
 	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	クリック: スムーズポイント · ダブルクリック: 角 · 点をドラッグ: 移動 · 最初の点をクリック: 閉じる · {key} 完了
 	New Crop Preset…	新規切り抜きプリセット…
 	Delete Crop Preset…	切り抜きプリセットを削除…

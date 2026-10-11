@@ -2635,7 +2635,7 @@ cameraData	Lens	Objetivo
 	Freeform Pen Tool	Herramienta Pluma de forma libre
 	Curvature Pen Tool	Herramienta Pluma de curvatura
 	Curve Fit:	Ajuste de curva:
-	Drag: draw freehand · Release on the start point: close	Arrastrar: dibujar a mano alzada · Soltar en el punto inicial: cerrar
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Arrastrar: dibujar a mano alzada · {alt}-clic: segmento recto · Soltar en el punto inicial: cerrar
 	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Clic: punto suave · Doble clic: esquina · Arrastrar un punto: mover · Clic en el primer punto: cerrar · {key}: terminar
 	New Crop Preset…	Nuevo ajuste preestablecido de recorte…
 	Delete Crop Preset…	Eliminar ajuste preestablecido de recorte…

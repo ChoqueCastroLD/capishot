@@ -2899,7 +2899,7 @@ cameraData	Lens	Объектив
 	Freeform Pen Tool	Свободное перо
 	Curvature Pen Tool	Перо кривизны
 	Curve Fit:	Точность кривой:
-	Drag: draw freehand · Release on the start point: close	Перетаскивание: рисовать от руки · отпустить на начальной точке: замкнуть
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Перетаскивание: рисовать от руки · {alt}-щелчок: прямой сегмент · отпустить на начальной точке: замкнуть
 	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Клик: гладкая точка · двойной клик: угол · перетаскивание точки: переместить · клик по первой точке: замкнуть · {key} завершить
 	Scale:	Масштаб:
 	Snap to Origin	Привязать к началу координат
