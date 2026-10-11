@@ -22,8 +22,8 @@ env:
   PHOTOCRAFT_NO_PRINT: "1"
   LPDEST: photocraft-no-such-printer
   # Debug and test builds keep line tables (file:line in panic backtraces) but drop the rest of the
-  # debug info: faster codegen and links (Windows PDBs most of all), and a target dir small enough
-  # for the Linux job's second, craft-fonts build (it ran out of disk with full debug info).
+  # debug info: faster codegen and links, and a smaller target dir (the Linux test job ran out of
+  # disk with full debug info). The Windows test legs drop debuginfo entirely (see the test job).
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 # A newer push to a PR branch cancels its older run. Runs on main are never cancelled: a merge

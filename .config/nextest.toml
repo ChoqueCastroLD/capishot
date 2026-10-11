@@ -1,5 +1,6 @@
 # cargo-nextest (https://nexte.st): runs every test in its own process, in parallel across test
-# binaries. Optional for local runs; `cargo test` keeps working and stays what CI runs (#2204).
+# binaries. CI runs it (`--profile ci`, below); locally it's optional and `cargo test` keeps working
+# (#2204).
 #
 #   cargo nextest run --workspace        # all tests except doctests
 #   cargo test --doc --workspace         # nextest does not run doctests
