@@ -1099,6 +1099,11 @@ fn open_kind(app: &mut PhotocraftApp, kind: &str, label: &str, fields: Value) ->
     app.ui.open_dialog(DialogKind::Command, f)
 }
 
+/// Open one of the dialogs this module renders (also for `fonts_ui`).
+pub fn open_dialog(app: &mut PhotocraftApp, kind: &str, label: &str, fields: Value) -> u64 {
+    open_kind(app, kind, label, fields)
+}
+
 /// Is this a dialog rendered by this module?
 pub fn owns(fields: &Map<String, Value>) -> bool {
     fields.contains_key("__prefsui")
@@ -1140,6 +1145,7 @@ pub fn width(fields: &Map<String, Value>, available: f32) -> Option<f32> {
     match fields.get("__prefsui").and_then(Value::as_str)? {
         "prefs" => Some(available.clamp(380.0, 1040.0)),
         "shortcuts" => Some(720.0),
+        "fontsManage" | "fontsMissing" => Some(520.0),
         _ => Some(460.0),
     }
 }
@@ -1218,9 +1224,14 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     match f.get("__prefsui").and_then(Value::as_str).unwrap_or("") {
         "prefs" => {
             f.insert("__gpuInfo".into(), json!(app.perf.gpu_info.lines()));
+            f.insert("__fonts".into(), json!(crate::fonts_ui::available(app)));
             let system = system_theme(app, ui.ctx());
             prefs_body(ui, f, system);
+            if f.remove("__manageFonts").is_some() {
+                crate::fonts_ui::open_manage(app);
+            }
         }
+        "fontsManage" | "fontsMissing" => crate::fonts_ui::body(app, ui, f),
         "shortcuts" => shortcuts_body(app, ui, f),
         "presets" => presets_body(app, ui, f),
         "presetsIO" => presets_io_body(ui, f),
@@ -1344,6 +1355,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
         section = (*first).to_string();
     }
     ui.add_space(6.0);
+    let mut manage_fonts = false;
     ui.horizontal_top(|ui| {
         // Section list.
         ui.vertical(|ui| {
@@ -1408,6 +1420,10 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
                     if section == "performance" {
                         gpu_status_rows(ui, f.get("__gpuInfo"), obj);
                     }
+                    if section == "type" && f.get("__fonts").and_then(Value::as_bool) == Some(true) {
+                        ui.add_space(8.0);
+                        manage_fonts = crate::widgets::secondary_button(ui, tl!("Manage downloaded fonts…"), 220.0).clicked();
+                    }
                     ui.add_space(8.0);
                 }
                 if search.trim().is_empty()
@@ -1426,6 +1442,9 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
     // A colour swatch was clicked: open the Color Picker on that value (#2144).
     if let Some((path, name)) = ctx_take_pick(ui) {
         crate::color_picker_ui::request_field(f, &format!("/values/{}", path.replace('.', "/")), &crate::color_picker_ui::title_for(&name));
+    }
+    if manage_fonts {
+        f.insert("__manageFonts".into(), json!(true));
     }
 }
 
@@ -2159,6 +2178,7 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
                 })
             }
         }
+        "fontsManage" | "fontsMissing" => crate::fonts_ui::confirm(app, f),
         "mismatch" => {
             let action = f.get("action").and_then(Value::as_str).unwrap_or("preserve");
             let applied = f.get("applied").and_then(Value::as_str).unwrap_or("preserve");
@@ -2911,6 +2931,7 @@ mod tests {
         assert!(!prefs::is_hidden("type.useEscToCommit"));
         assert!(!prefs::is_hidden("type.smartQuotes"));
         assert!(!prefs::is_hidden("type.showFontNamesInEnglish"));
+        assert!(!prefs::is_hidden("type.allowOnlineFonts"));
         // Rotate View with Trackpad and the pinch zoom are live; the other Enhanced Controls rows
         // stay hidden.
         assert!(has_visible_fields(&values, "enhancedControls"));

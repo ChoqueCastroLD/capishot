@@ -8,7 +8,7 @@
 //! - `engine.commands`: list commands with enablement
 //! - `ui.inspect`: full UI state (tool, panels, views, dialogs, windows, window size); the menu
 //!   tree is `ui.menu.list`
-//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, rotation?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushPicker?, brushPickerName?, brushPickerStroke?, brushPickerTip?, brushPickerScale?, brushSize?}`:
+//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, rotation?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushPicker?, brushPickerName?, brushPickerStroke?, brushPickerTip?, brushPickerScale?, brushSize?, fonts?}`:
 //!   change UI state; any other field is an error ([`UI_SET_FIELDS`])
 //! - `ui.dialog.open {kind, fields?}` (kinds: newDocument, about, layerStyle {effect?}, colorPicker {target: foreground|background}, command {command}) / `ui.dialog.set {dialog, field, value}` / `ui.dialog.confirm {dialog, wait?}` / `ui.dialog.cancel {dialog}`
 //! - `ui.dialog.apply {dialog}`: commit Preferences changes without closing the dialog
@@ -89,7 +89,7 @@ pub enum Outcome {
 /// field's value is validated before the first one is applied, so a typo, an unknown field, a
 /// bad value or a bad nested key can't reply with success while nothing — or only half of it —
 /// changed (#412).
-pub const UI_SET_FIELDS: [&str; 33] = [
+pub const UI_SET_FIELDS: [&str; 34] = [
     "tool",
     "panels",
     "dock",
@@ -123,6 +123,7 @@ pub const UI_SET_FIELDS: [&str; 33] = [
     "cropOverlayOrientation",
     "cropShield",
     "shapeStroke",
+    "fonts",
 ];
 
 /// Most clicks one `ui.click` may queue (#982). Each click is a press and a release that the app
@@ -566,6 +567,11 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     }
                     None => None,
                 };
+                // The font picker's view state (#412: validated here, assigned below).
+                let fonts = match p.get("fonts") {
+                    Some(v) => Some(crate::fonts_ui::parse_set(&app.ui.fonts, v)?),
+                    None => None,
+                };
 
                 let bridge_pro = matches!(theme.unwrap_or(app.ui.theme), crate::theme::ThemeKind::Pro | crate::theme::ThemeKind::ProMedium);
                 let legacy_update = crate::panel_docking::prepare_legacy_update(app, p, panels.as_ref(), dock_tabs.as_ref(), dock.as_ref(), bridge_pro)?;
@@ -704,6 +710,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 }
                 if let Some(size) = brush_size {
                     app.run("tools.setBrush", json!({"brush": {"size": size}})).map_err(|e| e.to_string())?;
+                }
+                if let Some(next) = fonts {
+                    app.ui.fonts = next;
                 }
                 Ok(Value::Null)
             })();
@@ -1176,6 +1185,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "magnetic": app.ui.magnetic,
         "textEdit": app.ui.text_edit,
         "typeTransform": app.ui.type_transform,
+        "fonts": app.ui.fonts,
         "layerMenu": app.ui.layer_menu,
         "brushPicker": app.ui.brush_picker.map(|pos| json!({
             "pos": pos,
@@ -1941,6 +1951,20 @@ mod tests {
             assert_eq!(r["ok"], false, "{params}: {r}");
             assert_eq!(app.ui.tool, before, "{params}: a rejected call applies none of its fields");
         }
+        // A bad `fonts` value is validated up front too, so it applies nothing else.
+        let fonts_before = serde_json::to_value(&app.ui.fonts).unwrap_or_default();
+        for params in [json!({"tool": "move", "fonts": {"tab": "bogus"}}), json!({"tool": "move", "fonts": {"nope": 1}}), json!({"tool": "move", "fonts": "x"})] {
+            let r = call(&mut app, &ctx, "ui.set", params.clone());
+            assert_eq!(r["ok"], false, "{params}: {r}");
+            assert_eq!(app.ui.tool, before, "{params}: a rejected call applies none of its fields");
+            assert_eq!(serde_json::to_value(&app.ui.fonts).unwrap_or_default(), fonts_before, "{params}");
+        }
+        // A valid `fonts` value together with other fields applies all of them.
+        let r = call(&mut app, &ctx, "ui.set", json!({"tool": "move", "fonts": {"tab": "findMore", "query": "roboto"}}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(app.ui.tool, Tool::Move);
+        assert_eq!(app.ui.fonts.query, "roboto");
+        assert_eq!(serde_json::to_value(app.ui.fonts.tab).unwrap_or_default(), json!("findMore"));
         // Wrong types and unknown nested keys are errors, not silent no-ops with ok:true.
         for params in [
             json!({"panels": "x"}),
