@@ -143,7 +143,8 @@ fn sample(src: Src, x: f32, y: f32, out: &mut [f32]) -> bool {
 }
 
 /// Transformed copy of the source: rotation (degrees) and scale about the centre, optional mirror.
-fn variant(src: Src, deg: f32, scale: f32, mirror: bool) -> Variant {
+/// Rows in parallel, checking `ctl` per row.
+fn variant(src: Src, deg: f32, scale: f32, mirror: bool, ctl: &photocraft_raster::Interrupt) -> Result<Variant, photocraft_raster::Cancelled> {
     let Src { w, h, ch, .. } = src;
     let (s, c) = (-deg.to_radians()).sin_cos();
     // Output size: the rotated, scaled bounding box.
@@ -153,8 +154,11 @@ fn variant(src: Src, deg: f32, scale: f32, mirror: bool) -> Variant {
     let (icx, icy) = ((w as f32 - 1.0) / 2.0, (h as f32 - 1.0) / 2.0);
     let (ocx, ocy) = ((ow as f32 - 1.0) / 2.0, (oh as f32 - 1.0) / 2.0);
     let mut out = Variant { w: ow, h: oh, img: vec![0.0; ow * oh * ch], ok: vec![false; ow * oh] };
-    let mut px = vec![0.0f32; ch];
-    for y in 0..oh {
+    let row = |(y, (img, ok)): (usize, (&mut [f32], &mut [bool]))| {
+        if ctl.cancelled() {
+            return;
+        }
+        let mut px = vec![0.0f32; ch];
         for x in 0..ow {
             let (dx, dy) = ((x as f32 - ocx) / scale, (y as f32 - ocy) / scale);
             let mut sx = icx + dx * c - dy * s;
@@ -163,13 +167,20 @@ fn variant(src: Src, deg: f32, scale: f32, mirror: bool) -> Variant {
                 sx = (w as f32 - 1.0) - sx;
             }
             if sample(src, sx, sy, &mut px) {
-                let i = y * ow + x;
-                out.ok[i] = true;
-                out.img[i * ch..(i + 1) * ch].copy_from_slice(&px);
+                ok[x] = true;
+                img[x * ch..(x + 1) * ch].copy_from_slice(&px);
             }
         }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        out.img.par_chunks_mut(ow * ch.max(1)).zip(out.ok.par_chunks_mut(ow)).enumerate().for_each(row);
     }
-    out
+    #[cfg(target_arch = "wasm32")]
+    out.img.chunks_mut(ow * ch.max(1)).zip(out.ok.chunks_mut(ow)).enumerate().for_each(row);
+    ctl.check()?;
+    Ok(out)
 }
 
 /// Fill `hole` in `img`, copying only from pixels where `source` is true (and not in the hole).
@@ -205,14 +216,14 @@ pub fn fill_with(
     // Variants: the identity (which holds the hole) first, then the adaptations.
     let mut extra: Vec<Variant> = Vec::new();
     if opts.mirror {
-        extra.push(variant(src, 0.0, 1.0, true));
+        extra.push(variant(src, 0.0, 1.0, true, ctl)?);
     }
     for &deg in &opts.rotations {
-        extra.push(variant(src, deg, 1.0, false));
+        extra.push(variant(src, deg, 1.0, false, ctl)?);
     }
     if opts.scale {
-        extra.push(variant(src, 0.0, 0.8, false));
-        extra.push(variant(src, 0.0, 1.25, false));
+        extra.push(variant(src, 0.0, 0.8, false, ctl)?);
+        extra.push(variant(src, 0.0, 1.25, false, ctl)?);
     }
     // Mosaic: identity at the left, variants in a column to its right, gaps that are no image.
     let col_w = extra.iter().map(|v| v.w).max().unwrap_or(0);
@@ -221,32 +232,47 @@ pub fn fill_with(
     let mh = h.max(col_h);
     let mut mimg = vec![0.0f32; mw * mh * ch];
     let mut roles = vec![Px::Void; mw * mh];
-    for y in 0..h {
-        for x in 0..w {
-            let (s, d) = (y * w + x, y * mw + x);
-            mimg[d * ch..(d + 1) * ch].copy_from_slice(&img[s * ch..(s + 1) * ch]);
-            roles[d] = if hole[s] {
-                Px::Hole
-            } else if ok[s] {
-                Px::Source
-            } else {
-                Px::Known
-            };
+    // Mosaic row y: the identity's row, then whichever variant covers it. Rows in parallel,
+    // checking `ctl` per row.
+    let starts: Vec<usize> = extra.iter().scan(0, |oy, v| Some(std::mem::replace(oy, *oy + v.h + gap))).collect();
+    let row = |(y, (mrow, rrow)): (usize, (&mut [f32], &mut [Px]))| {
+        if ctl.cancelled() {
+            return;
         }
-    }
-    let mut oy = 0;
-    for v in &extra {
-        for y in 0..v.h {
+        if y < h {
+            mrow[..w * ch].copy_from_slice(&img[y * w * ch..(y + 1) * w * ch]);
+            let (hrow, orow) = (&hole[y * w..(y + 1) * w], &ok[y * w..(y + 1) * w]);
+            for ((r, &hl), &o) in rrow[..w].iter_mut().zip(hrow).zip(orow) {
+                *r = if hl {
+                    Px::Hole
+                } else if o {
+                    Px::Source
+                } else {
+                    Px::Known
+                };
+            }
+        }
+        for (v, &oy) in extra.iter().zip(&starts) {
+            if y < oy || y >= oy + v.h {
+                continue;
+            }
+            let vy = y - oy;
+            let d0 = w + gap;
+            mrow[d0 * ch..(d0 + v.w) * ch].copy_from_slice(&v.img[vy * v.w * ch..(vy + 1) * v.w * ch]);
             for x in 0..v.w {
-                let (s, d) = (y * v.w + x, (oy + y) * mw + w + gap + x);
-                mimg[d * ch..(d + 1) * ch].copy_from_slice(&v.img[s * ch..(s + 1) * ch]);
-                if v.ok[s] {
-                    roles[d] = Px::Source;
+                if v.ok[vy * v.w + x] {
+                    rrow[d0 + x] = Px::Source;
                 }
             }
         }
-        oy += v.h + gap;
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        mimg.par_chunks_mut(mw * ch.max(1)).zip(roles.par_chunks_mut(mw)).enumerate().for_each(row);
     }
+    #[cfg(target_arch = "wasm32")]
+    mimg.chunks_mut(mw * ch.max(1)).zip(roles.chunks_mut(mw)).enumerate().for_each(row);
     ctl.check()?;
     // The completion is nearly all the work.
     let cancel = || ctl.cancelled();
@@ -305,32 +331,68 @@ const AUTO_SIDE: usize = 384;
 /// pixels that may be copied from (never the hole). Falls back to everything outside the hole
 /// when the area would be too small to copy from.
 pub fn auto_sampling(w: usize, h: usize, ch: usize, img: &[f32], hole: &[bool]) -> Vec<bool> {
-    use crate::segment::{FREE, HARD_FG, RgbImage, grid_cut_with};
+    // Never cancelled; the fallback is unreachable.
+    auto_sampling_with(w, h, ch, img, hole, &photocraft_raster::Interrupt::NONE).unwrap_or_else(|_| hole.iter().map(|h| !h).collect())
+}
+
+/// [`auto_sampling`] that can be cancelled: checked per band of rows while the window is reduced
+/// and while the area is cut.
+pub fn auto_sampling_with(
+    w: usize,
+    h: usize,
+    ch: usize,
+    img: &[f32],
+    hole: &[bool],
+    ctl: &photocraft_raster::Interrupt,
+) -> Result<Vec<bool>, photocraft_raster::Cancelled> {
+    use crate::segment::{FREE, HARD_FG, RgbImage, grid_cut_until};
     assert_eq!(img.len(), w * h * ch);
     assert_eq!(hole.len(), w * h);
     let everything: Vec<bool> = hole.iter().map(|h| !h).collect();
     if w == 0 || h == 0 || ch == 0 || !hole.iter().any(|h| *h) {
-        return everything;
+        return Ok(everything);
     }
     // Work at a reduced scale for big windows (the area is smooth at this scale).
     let k = w.max(h).div_ceil(AUTO_SIDE).max(1);
     let (sw, sh) = (w.div_ceil(k), h.div_ceil(k));
     let nc = ch.min(3);
-    let mut planes = vec![vec![0.0f32; sw * sh]; nc];
-    let mut shole = vec![false; sw * sh];
-    let mut cnt = vec![0.0f32; sw * sh];
-    for y in 0..h {
-        for x in 0..w {
-            let i = (y / k) * sw + x / k;
-            let p = y * w + x;
-            if hole[p] {
-                shole[i] = true;
-            }
-            for (c, pl) in planes.iter_mut().enumerate() {
-                pl[i] += img[p * ch + c];
-            }
-            cnt[i] += 1.0;
+    // Each reduced row sums its k source rows, in the same order a single sweep would.
+    let reduce = |sy: usize| {
+        let mut planes = vec![vec![0.0f32; sw]; nc];
+        let (mut shole, mut cnt) = (vec![false; sw], vec![0.0f32; sw]);
+        if ctl.cancelled() {
+            return None;
         }
+        for y in sy * k..((sy + 1) * k).min(h) {
+            for x in 0..w {
+                let (i, p) = (x / k, y * w + x);
+                if hole[p] {
+                    shole[i] = true;
+                }
+                for (c, pl) in planes.iter_mut().enumerate() {
+                    pl[i] += img[p * ch + c];
+                }
+                cnt[i] += 1.0;
+            }
+        }
+        Some((planes, shole, cnt))
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let rows: Vec<_> = {
+        use rayon::prelude::*;
+        (0..sh).into_par_iter().map(reduce).collect()
+    };
+    #[cfg(target_arch = "wasm32")]
+    let rows: Vec<_> = (0..sh).map(reduce).collect();
+    ctl.check()?;
+    let mut planes = vec![Vec::with_capacity(sw * sh); nc];
+    let (mut shole, mut cnt) = (Vec::with_capacity(sw * sh), Vec::with_capacity(sw * sh));
+    for (rp, rh, rc) in rows.into_iter().flatten() {
+        for (pl, r) in planes.iter_mut().zip(rp) {
+            pl.extend(r);
+        }
+        shole.extend(rh);
+        cnt.extend(rc);
     }
     for pl in &mut planes {
         pl.iter_mut().zip(&cnt).for_each(|(v, n)| *v /= n.max(1.0));
@@ -354,7 +416,7 @@ pub fn auto_sampling(w: usize, h: usize, ch: usize, img: &[f32], hole: &[bool]) 
     let ring_w = 6.0f32 / k as f32 + 1.0;
     let ring: Vec<usize> = (0..sw * sh).filter(|&i| !shole[i] && dist[i] <= ring_w).collect();
     if ring.is_empty() {
-        return everything;
+        return Ok(everything);
     }
     // A few cluster centres of the ring's features (k-means, deterministic start).
     let kc = 6.min(ring.len());
@@ -410,7 +472,10 @@ pub fn auto_sampling(w: usize, h: usize, ch: usize, img: &[f32], hole: &[bool]) 
     // Contrast-sensitive smoothness (the weight of a squared colour difference). The scale of
     // "similar" and this weight were fitted to Photoshop's Auto overlays (mean IoU 0.92 on ten
     // synthetic and public-domain cases).
-    let area = grid_cut_with(&rgb, &cost_fg, &cost_bg, &fixed, |d2| 8.0 * (-d2 / (2.0 * 0.05 * 0.05)).exp() + 0.05);
+    ctl.check()?;
+    let stop = || ctl.cancelled();
+    let area =
+        grid_cut_until(&rgb, &cost_fg, &cost_bg, &fixed, |d2| 8.0 * (-d2 / (2.0 * 0.05 * 0.05)).exp() + 0.05, &stop).ok_or(photocraft_raster::Cancelled)?;
     let mut out = vec![false; w * h];
     for y in 0..h {
         for x in 0..w {
@@ -421,9 +486,9 @@ pub fn auto_sampling(w: usize, h: usize, ch: usize, img: &[f32], hole: &[bool]) 
     // Too little to copy from (fewer source pixels than twice the hole): sample everything.
     let n_hole = hole.iter().filter(|h| **h).count();
     if out.iter().filter(|o| **o).count() < 2 * n_hole.max(64) {
-        return everything;
+        return Ok(everything);
     }
-    out
+    Ok(out)
 }
 
 /// The Patch Tool's and the Content-Aware Move Tool's Color option (0–10) as the colour adaptation
@@ -465,6 +530,10 @@ pub fn level_transform(ch: usize, from: &[f32], to: &[f32], a: Adapt) -> Vec<(f3
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "content_aware_pinned_tests.rs"]
+mod pinned_tests;
 
 #[cfg(test)]
 mod tests {
@@ -671,9 +740,10 @@ mod tests {
         let img = vec![0.5f32; 10 * 6];
         let ok = vec![true; 60];
         let src = Src { w: 10, h: 6, ch: 1, img: &img, ok: &ok };
-        let v = variant(src, 90.0, 1.0, false);
+        let none = photocraft_raster::Interrupt::NONE;
+        let v = variant(src, 90.0, 1.0, false, &none).unwrap();
         assert_eq!((v.w, v.h), (6, 10));
-        let v = variant(src, 0.0, 0.8, true);
+        let v = variant(src, 0.0, 0.8, true, &none).unwrap();
         assert_eq!((v.w, v.h), (8, 5));
         assert!(v.ok.iter().filter(|o| **o).count() > 20);
     }

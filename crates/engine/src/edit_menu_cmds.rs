@@ -347,7 +347,7 @@ fn delete_and_fill(s: &mut Session, _: &Value) -> Result<Value> {
 }
 
 fn content_aware_fill_as(s: &mut Session, p: &Value, cmd: &'static str, label: &'static str) -> Result<Value> {
-    use photocraft_algo::content_aware::{FillOptions, auto_sampling, color_level, fill_with, rotation_level};
+    use photocraft_algo::content_aware::{FillOptions, auto_sampling_with, color_level, fill_with, rotation_level};
     let id = pixel_layer(s).map_err(EngineError::Other)?;
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let doc = st.doc.clone();
@@ -404,31 +404,37 @@ fn content_aware_fill_as(s: &mut Session, p: &Value, cmd: &'static str, label: &
             ctx.progress(0.0, label);
             let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
             let img = surf.read_region(window);
-            let mut cover = vec![0.0f32; w * h];
-            let mut hole = vec![false; w * h];
+            let mut cover = Vec::with_capacity(w * h);
             let mut source = vec![true; w * h];
-            for y in 0..h {
-                if y % 64 == 0 {
-                    ctx.check()?;
-                }
-                for x in 0..w {
-                    let (dx, dy) = (window.x0 + x as i32, window.y0 + y as i32);
-                    let i = y * w + x;
-                    cover[i] = sel.sample_channel(dx, dy, 0);
-                    hole[i] = cover[i] > 0.0;
-                    if sampling == "custom" {
-                        source[i] = match (custom_rect, custom_mask.as_ref()) {
-                            (Some(r), _) => r.contains(dx, dy),
-                            (None, Some(m)) => m.sample_channel(dx, dy, 0) > 0.5,
-                            _ => true,
-                        };
+            // The selection's (and a custom sampling mask's) first channel, a band of rows at a
+            // time: whole-row reads instead of a lookup per pixel.
+            let first = |m: &Surface, r: Rect| {
+                let n = m.channels().max(1);
+                m.read_region(r).chunks_exact(n).map(|p| p[0]).collect::<Vec<f32>>()
+            };
+            for y0 in (window.y0..window.y1).step_by(128) {
+                ctx.check()?;
+                let band = Rect::new(window.x0, y0, window.x1, (y0 + 128).min(window.y1));
+                cover.extend(first(&sel, band));
+                if sampling == "custom" {
+                    let at = (y0 - window.y0) as usize * w;
+                    let dst = &mut source[at..at + w * band.height() as usize];
+                    match (custom_rect, custom_mask.as_ref()) {
+                        (Some(r), _) => {
+                            for (i, s) in dst.iter_mut().enumerate() {
+                                *s = r.contains(window.x0 + (i % w) as i32, y0 + (i / w) as i32);
+                            }
+                        }
+                        (None, Some(m)) => dst.iter_mut().zip(first(m, band)).for_each(|(s, v)| *s = v > 0.5),
+                        _ => {}
                     }
                 }
             }
+            let hole: Vec<bool> = cover.iter().map(|c| *c > 0.0).collect();
             ctx.check()?;
             // Auto: only what looks like the selection's surroundings.
             if sampling == "auto" {
-                source = auto_sampling(w, h, n, &img, &hole);
+                source = ctx.stage(0.0, 0.05, label, |ctl| auto_sampling_with(w, h, n, &img, &hole, ctl)).map_err(|_| EngineError::Cancelled)?;
             }
             ctx.check()?;
             let filled = ctx.stage(0.05, 1.0, label, |ctl| fill_with(w, h, n, &img, &hole, &source, &opts, ctl)).map_err(|_| EngineError::Cancelled)?;

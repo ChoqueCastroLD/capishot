@@ -783,11 +783,13 @@ pub fn complete_masked(
     let hole: Vec<bool> = px.iter().map(|k| *k == Px::Hole).collect();
     let Some((bx0, by0, bx1, by1)) = hole_bbox(w, h, &hole) else { return Ok(Some(img.to_vec())) };
     drop(hole);
+    ctl.check()?;
     let r = p.patch_radius.max(1);
     let psz = 2 * r + 1;
     // Pyramid: shrink until the hole is about four patches across (a deeper pyramid decides the
     // structure where the texture has averaged out, and fills flat).
     let mut levels = vec![Level { w, h, img: img.to_vec(), px: px.to_vec() }];
+    ctl.check()?;
     let mut ext = (bx1 - bx0).max(by1 - by0);
     let mut exts = vec![ext];
     while let Some(l) = levels.last() {
