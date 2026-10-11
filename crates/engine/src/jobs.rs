@@ -615,6 +615,15 @@ impl Session {
         if let Some(gate) = self.authorize {
             gate(id, &params)?;
         }
+        // Last Filter runs as the filter it repeats: journaled, recorded in an action, faded and
+        // run as a job like that filter, so a recorded step replays the same filter anywhere
+        // (#3089), as Transform Again records its transform (#1440). With no filter yet it falls
+        // through to its own precondition.
+        if id == "filter.lastFilter"
+            && let Some((filter, p)) = crate::filters::last_filter(self).filter(|(f, _)| f != id)
+        {
+            return self.dispatch(&filter, p, background);
+        }
         if id == "file.new" {
             crate::document_preset_cmds::validate_new_params(self, &params)?;
         }
