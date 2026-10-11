@@ -167,6 +167,7 @@ pub mod tone;
 mod tool_cursor;
 pub mod tool_feedback;
 pub(crate) mod tool_memory;
+mod tool_reset;
 pub mod transform_tex;
 pub mod transform_tool;
 mod type_font_preview;
