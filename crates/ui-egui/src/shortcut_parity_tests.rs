@@ -21,12 +21,9 @@ const TABLE: &str = include_str!("shortcut_parity/photoshop_defaults.tsv");
 /// Rows (by action) that don't match yet, and why. Keep it short: fix rows rather than list them.
 const KNOWN_GAPS: &[(&str, &str)] = &[
     ("Frame", "no Frame tool"),
+    ("Cut (function key)", "upstream PhotoCraft #2366 gives F2 to Layer › Rename Layer (Photoshop has no default key for it)"),
     ("Behind (painting tools)", "the brush has no Behind painting mode"),
     ("Clear (painting tools)", "the brush has no Clear painting mode"),
-    ("Next document", "Ctrl+Tab lands with upstream PhotoCraft #2353"),
-    ("Previous document", "Ctrl+Shift+Tab lands with upstream PhotoCraft #2353"),
-    ("Increase type size", "lands with upstream PhotoCraft #2402"),
-    ("Decrease type size", "lands with upstream PhotoCraft #2402"),
 ];
 
 #[derive(Debug)]
