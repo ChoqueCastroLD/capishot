@@ -92,6 +92,13 @@ fn place_id(d: &Dialog) -> egui::Id {
     }
 }
 
+/// Whether another dialog is drawn above `live` (egui's layer order, back to front).
+fn older_dialog_above(ctx: &egui::Context, live: egui::LayerId, dialogs: &[Dialog]) -> bool {
+    let others: Vec<egui::LayerId> =
+        dialogs.iter().map(|d| egui::LayerId::new(egui::Order::Foreground, egui::Id::new(("dialog", d.id)))).filter(|l| *l != live).collect();
+    ctx.memory(|m| m.layer_ids().skip_while(|l| *l != live).skip(1).any(|l| others.contains(&l)))
+}
+
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     crate::layer_style::color_picker::prune(app);
     crate::type_panels_ui::color_picker::prune(app);
@@ -124,6 +131,14 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             Some(offset) => egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, offset),
             None => egui::Modal::default_area(id),
         };
+        // Only the last dialog takes input, and egui only lets the modal drawn on top take input,
+        // so the last one must be drawn above the others. egui can raise an older one (it raises an
+        // area that is pressed or wasn't drawn the frame before), which left a greyed-out dialog
+        // in front and the live one unreachable behind it. Raise the live one only then: every
+        // frame would also cover its own popups.
+        if interactive && older_dialog_above(ctx, area.layer(), &app.ui.dialogs) {
+            ctx.move_to_top(area.layer());
+        }
         let color_picker = crate::color_picker_ui::owns(&fields);
         let mut modal = egui::Modal::new(id).area(area).backdrop_color(egui::Color32::TRANSPARENT);
         if color_picker {
