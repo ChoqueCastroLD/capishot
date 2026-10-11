@@ -1154,16 +1154,16 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         if o.crop_ratio == crate::crop_size::WHR {
                             crate::crop_size::fields(o, ui);
                         } else {
-                            // Custom ratio fields (Photoshop shows the preset's numbers here).
-                            let (mut rw, mut rh) = crate::chrome_ui::crop_ratio(&o.crop_ratio, 0.0, 0.0).map_or((0.0, 0.0), |(w, h)| (w as f32, h as f32));
+                            // Keep partial edits in ToolOptions so the first side survives a frame.
+                            let (mut rw, mut rh) = crate::crop_size::custom_ratio_fields(o);
                             let cw = widgets::value_field(ui, &mut rw, 0.0..=99_999.0, "", 54.0).changed();
                             let swap = icons::button(ui, "arrow-left-right", 22.0, false, tl!("Swaps height and width")).clicked();
                             let ch = widgets::value_field(ui, &mut rh, 0.0..=99_999.0, "", 54.0).changed();
                             if swap {
                                 std::mem::swap(&mut rw, &mut rh);
                             }
-                            if (cw || ch || swap) && rw > 0.0 && rh > 0.0 {
-                                o.crop_ratio = format!("{}:{}", widgets::fmt_num(rw as f64), widgets::fmt_num(rh as f64));
+                            if cw || ch || swap {
+                                crate::crop_size::set_custom_ratio_fields(o, rw, rh);
                             }
                         }
                         widgets::vline(ui, 22.0);

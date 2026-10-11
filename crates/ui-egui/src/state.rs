@@ -545,6 +545,12 @@ pub struct ToolOptions {
     /// Delete Cropped Pixels.
     #[serde(default)]
     pub crop_ratio: String,
+    /// In-progress custom crop ratio fields. Kept separately because entering one side before the
+    /// other must survive a frame while the ratio itself remains unconstrained.
+    #[serde(default)]
+    pub crop_custom_ratio_width: f32,
+    #[serde(default)]
+    pub crop_custom_ratio_height: f32,
     #[serde(default = "yes")]
     pub crop_delete: bool,
     /// Crop W x H x Resolution (`crop_ratio` = "whr", #2443): width and height as typed lengths
@@ -719,6 +725,8 @@ impl Default for ToolOptions {
             move_target: default_move_target(),
             move_show_transform: false,
             crop_ratio: String::new(),
+            crop_custom_ratio_width: 0.0,
+            crop_custom_ratio_height: 0.0,
             crop_delete: true,
             crop_width: String::new(),
             crop_height: String::new(),

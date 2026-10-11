@@ -172,8 +172,12 @@ pub fn dropdown(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             app.ui.tool_options.crop_ratio = k;
             // A size preset or Front Image fills W x H x Resolution (#2443).
             crop_size::chosen(app);
+            sync_custom_ratio_fields(app);
         }
-        Some(Choice::User(name)) => select(app, &name),
+        Some(Choice::User(name)) => {
+            select(app, &name);
+            sync_custom_ratio_fields(app);
+        }
         Some(Choice::New) => {
             open_new(app);
         }
@@ -181,6 +185,13 @@ pub fn dropdown(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             open_delete(app);
         }
         None => {}
+    }
+}
+
+/// A newly chosen ratio fills the editable custom W/H fields (free Ratio clears them, #3188).
+fn sync_custom_ratio_fields(app: &mut PhotocraftApp) {
+    if app.ui.tool_options.crop_ratio != crop_size::WHR {
+        crop_size::select_custom_ratio(&mut app.ui.tool_options);
     }
 }
 
