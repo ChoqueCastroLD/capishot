@@ -127,25 +127,21 @@ impl Drop for OpenPrinter {
     }
 }
 
-/// Settings the driver can take as input: `current`, copied aligned, when it is this printer's.
-fn input_settings(printer: &str, current: Option<&DevMode>) -> Option<Vec<u64>> {
-    let d = current?;
-    let b = d.as_bytes();
-    // dmDeviceName: the first 32 wide chars (31 + NUL), so long names are truncated.
-    let device: Vec<u16> = b.get(..64)?.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).take_while(|c| *c != 0).collect();
-    let want: Vec<u16> = printer.encode_utf16().take(31).collect();
-    if device != want {
-        return None;
-    }
+/// `settings` copied into an aligned buffer the driver can read.
+///
+/// There is deliberately no check of the printer name stored in the settings: Windows keeps only
+/// 31 characters of it, and drivers fill it differently, so a long queue name ("Sublimation -
+/// EPSON ET-18100 Series") failed such a check and the settings were silently dropped. The driver
+/// itself validates them instead (see [`Dc::create`]).
+fn aligned_copy(settings: &DevMode) -> Vec<u64> {
+    let b = settings.as_bytes();
     let mut buf = aligned(b.len());
-    for (i, chunk) in b.chunks(8).enumerate() {
+    for (slot, chunk) in buf.iter_mut().zip(b.chunks(8)) {
         let mut w = [0u8; 8];
         w[..chunk.len()].copy_from_slice(chunk);
-        if let Some(slot) = buf.get_mut(i) {
-            *slot = u64::from_le_bytes(w);
-        }
+        *slot = u64::from_le_bytes(w);
     }
-    Some(buf)
+    buf
 }
 
 pub fn properties(printer: &str, current: Option<&DevMode>, parent: Option<isize>, prompt: bool) -> Result<Option<DevMode>> {
@@ -158,7 +154,7 @@ pub fn properties(printer: &str, current: Option<&DevMode>, parent: Option<isize
         return Err(last_error("reading the printer's settings"));
     }
     let mut out = aligned(needed as usize);
-    let input = input_settings(printer, current);
+    let input = current.map(aligned_copy);
     let mut mode = DM_OUT_BUFFER;
     if input.is_some() {
         mode |= DM_IN_BUFFER;
@@ -188,7 +184,16 @@ struct Dc(HDC);
 impl Dc {
     fn create(printer: &str, settings: Option<&DevMode>) -> Result<Self> {
         let name = wide(printer)?;
-        let dm = input_settings(printer, settings);
+        // The driver validates and completes the settings first (DM_IN_BUFFER | DM_OUT_BUFFER, no
+        // dialog). If it refuses them, that is an error: never print on the defaults instead.
+        let merged = match settings {
+            Some(s) => Some(
+                properties(printer, Some(s), None, false)?
+                    .ok_or_else(|| PrintError::Invalid(format!("printer “{printer}” refused these settings; choose Print Settings… again")))?,
+            ),
+            None => None,
+        };
+        let dm = merged.as_ref().map(aligned_copy);
         let dmp: *const DEVMODEW = dm.as_ref().map_or(null(), |b| b.as_ptr().cast());
         // SAFETY: `name` is NUL-terminated; `dmp` is null or aligned settings from this
         // printer's driver, alive for the call.
@@ -335,16 +340,38 @@ mod tests {
     }
 
     #[test]
-    fn settings_from_another_printer_are_not_passed_to_the_driver() {
-        let mut b = vec![0u8; 220];
-        for (i, c) in "Printer A".encode_utf16().enumerate() {
-            b[i * 2..i * 2 + 2].copy_from_slice(&c.to_le_bytes());
-        }
+    fn settings_are_copied_aligned_and_intact() {
+        let mut b: Vec<u8> = (0..230u32).map(|i| (i * 7) as u8).collect();
         b[68..70].copy_from_slice(&220u16.to_le_bytes());
-        let d = DevMode::from_bytes(b).unwrap();
-        assert!(input_settings("Printer A", Some(&d)).is_some());
-        assert!(input_settings("Printer B", Some(&d)).is_none());
-        assert!(input_settings("Printer A", None).is_none());
+        b[70..72].copy_from_slice(&10u16.to_le_bytes());
+        let d = DevMode::from_bytes(b.clone()).unwrap();
+        let buf = aligned_copy(&d);
+        assert_eq!(buf.as_ptr().align_offset(std::mem::align_of::<DEVMODEW>()), 0);
+        assert_eq!(bytes_of(&buf, b.len()), b, "no name check, no truncation: the bytes go through as chosen");
+    }
+
+    /// Settings chosen for a printer are what the driver prints with: paper and resolution survive
+    /// the driver's own validation (needs "Microsoft Print to PDF"; run by hand).
+    #[test]
+    #[ignore]
+    fn chosen_settings_reach_the_device_context() {
+        let printer = "Microsoft Print to PDF";
+        let d = crate::default_settings(printer).unwrap();
+        let mut b = d.as_bytes().to_vec();
+        // dmPaperSize = DMPAPER_A3 (8); dmFields |= DM_PAPERSIZE (2).
+        b[78..80].copy_from_slice(&8i16.to_le_bytes());
+        let fields = u32::from_le_bytes([b[72], b[73], b[74], b[75]]) | 2;
+        b[72..76].copy_from_slice(&fields.to_le_bytes());
+        let a3 = DevMode::from_bytes(b).unwrap();
+        let pg = crate::page(printer, Some(&a3)).unwrap();
+        assert!((pg.paper.0 - 841.9).abs() < 2.0 && (pg.paper.1 - 1190.6).abs() < 2.0, "A3, not the default: {:?}", pg.paper);
+        // Landscape (dmOrientation = 2, DM_ORIENTATION = 1): the page comes back wide.
+        let mut b = a3.as_bytes().to_vec();
+        b[76..78].copy_from_slice(&2i16.to_le_bytes());
+        let fields = u32::from_le_bytes([b[72], b[73], b[74], b[75]]) | 1;
+        b[72..76].copy_from_slice(&fields.to_le_bytes());
+        let pg = crate::page(printer, Some(&DevMode::from_bytes(b).unwrap())).unwrap();
+        assert!((pg.paper.0 - 1190.6).abs() < 2.0 && (pg.paper.1 - 841.9).abs() < 2.0, "landscape A3: {:?}", pg.paper);
     }
 
     /// A real job through Windows' "Microsoft Print to PDF" driver, written to a file (needs that
