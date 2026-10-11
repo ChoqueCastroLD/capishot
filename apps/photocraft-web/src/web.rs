@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::Document;
-#[cfg(target_feature = "atomics")]
 use photocraft_engine::Session;
 use photocraft_ui_egui::i18n;
 use photocraft_ui_egui::served_fonts;
@@ -55,30 +54,42 @@ pub fn start_threads() {
     start();
 }
 
-/// Threads build diagnostic, for checking that a browser really runs Capishot's parallel code on
+/// Parallelism diagnostic, for checking that a browser really runs Capishot's parallel code on
 /// the worker pool: a busy loop spread over rayon reports how many workers took part and how long it
 /// took (pure parallel work, so it shows the pool's scaling), then a Gaussian blur (radius 20) runs
 /// through the engine on a noisy `width`×`height` document and an image that size is encoded as
-/// PNG (deflated in parallel bands). The page
-/// exposes the module as `photocraft`, so from the console: `photocraft.parallelSelfTest(4000, 3000)`.
-/// Compare with the page opened as `?threads=1`.
-#[cfg(target_feature = "atomics")]
+/// PNG (deflated in parallel bands). The threads page exposes the module as `photocraft`, so from
+/// the console: `photocraft.parallelSelfTest(4000, 3000)`. Compare with the page opened as
+/// `?threads=1`, or with the single-threaded build (Trunk's page exposes it as
+/// `wasmBindings.parallelSelfTest`), where the same steps run on the page's one thread.
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = parallelSelfTest)]
 pub fn parallel_self_test(width: u32, height: u32) -> Result<String, String> {
-    use rayon::prelude::*;
     use serde_json::json;
+    let spin = |i: u64| {
+        let mut x = i;
+        for _ in 0..500_000 {
+            x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        }
+        std::hint::black_box(x);
+    };
     let t0 = js_sys::Date::now();
-    let workers: std::collections::BTreeSet<usize> = (0..1024u64)
-        .into_par_iter()
-        .filter_map(|i| {
-            let mut x = i;
-            for _ in 0..500_000 {
-                x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
-            }
-            std::hint::black_box(x);
-            rayon::current_thread_index()
-        })
-        .collect();
+    #[cfg(target_feature = "atomics")]
+    let (pool_threads, workers_used) = {
+        use rayon::prelude::*;
+        let workers: std::collections::BTreeSet<usize> = (0..1024u64)
+            .into_par_iter()
+            .filter_map(|i| {
+                spin(i);
+                rayon::current_thread_index()
+            })
+            .collect();
+        (rayon::current_num_threads(), workers.len())
+    };
+    #[cfg(not(target_feature = "atomics"))]
+    let (pool_threads, workers_used) = {
+        (0..1024u64).for_each(spin);
+        (1usize, 0usize)
+    };
     let loop_ms = js_sys::Date::now() - t0;
     let mut s = Session::new();
     let err = |e: photocraft_engine::EngineError| e.to_string();
@@ -101,7 +112,7 @@ pub fn parallel_self_test(width: u32, height: u32) -> Result<String, String> {
     let png = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())?;
     let png_ms = js_sys::Date::now() - t0;
     Ok(json!({
-        "poolThreads": rayon::current_num_threads(), "workersUsed": workers.len(), "loopMs": loop_ms.round(),
+        "poolThreads": pool_threads, "workersUsed": workers_used, "loopMs": loop_ms.round(),
         "blurMs": blur_ms.round(), "pngMs": png_ms.round(), "pngBytes": png.len(),
     })
     .to_string())
