@@ -35,6 +35,7 @@ mod camera_raw_preview_ui;
 mod camera_raw_scope_ui;
 pub mod camera_raw_ui;
 pub mod canvas;
+pub(crate) mod clone_overlay;
 pub mod canvas_tool_menu;
 pub mod channel_view;
 pub mod channels_panel;
@@ -1876,6 +1877,9 @@ mod input_tests;
 
 #[cfg(test)]
 mod pencil_tests;
+
+#[cfg(test)]
+mod retouch_live_tests;
 
 #[cfg(test)]
 mod transform_undo_tests;

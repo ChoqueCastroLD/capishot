@@ -476,6 +476,20 @@ pub struct ToolOptions {
     pub clone_sample: String,
     /// Spot Healing: contentAware | createTexture | proximityMatch
     pub spot_type: String,
+    /// Options-bar Mode of the Clone Stamp, Pattern Stamp, Healing Brush and Spot Healing Brush
+    /// (`paint.*` "mode": a blend mode, or "replace" for the healing tools).
+    pub clone_mode: String,
+    pub pattern_stamp_mode: String,
+    pub healing_mode: String,
+    pub spot_mode: String,
+    /// Magic Wand Sample Size: 1 = Point Sample, else the side of the averaged square (3..101).
+    pub wand_sample_size: u32,
+    /// Paint Bucket Mode.
+    pub bucket_mode: photocraft_color::BlendMode,
+    /// Eraser Mode: brush (soft, `paint.stroke`) | pencil (aliased, `paint.pencil`).
+    pub eraser_mode: String,
+    /// Eraser: Erase to History (paint back the History Brush's state instead of erasing).
+    pub erase_to_history: bool,
     /// Patch: source (repair the selection) | destination (repair where it is dragged).
     pub patch_mode: String,
     /// Patch: Content-Aware instead of Normal, with its Structure 1..7 and Color 0..10.
@@ -642,6 +656,14 @@ impl Default for ToolOptions {
             pattern_stamp_angle: 0.0,
             clone_sample: "current".into(),
             spot_type: "contentAware".into(),
+            clone_mode: "normal".into(),
+            pattern_stamp_mode: "normal".into(),
+            healing_mode: "normal".into(),
+            spot_mode: "normal".into(),
+            wand_sample_size: 1,
+            bucket_mode: photocraft_color::BlendMode::Normal,
+            eraser_mode: "brush".into(),
+            erase_to_history: false,
             patch_mode: "source".into(),
             patch_content_aware: false,
             patch_structure: 4.0,
