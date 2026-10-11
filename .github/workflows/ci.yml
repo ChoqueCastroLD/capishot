@@ -42,7 +42,7 @@ jobs:
     name: select platforms
     runs-on: ubuntu-latest
     outputs:
-      os: ${{ steps.pick.outputs.os }}
+      legs: ${{ steps.pick.outputs.legs }}
       web: ${{ steps.pick.outputs.web }}
     steps:
       - uses: actions/checkout@v4
@@ -56,9 +56,12 @@ jobs:
         run: |
           # No macOS on PRs or main: the org's 5 macOS slots are kept for release builds, and
           # release.yml builds and tests macOS (a failing release is fixed and rebuilt).
-          all='["ubuntu-latest","windows-latest"]'
+          # Windows tests run as two legs in parallel (unit tests, integration tests): together they
+          # took ~28 min on the Windows runner, each leg takes ~18.
+          linux='{"os":"ubuntu-latest","part":"all"}'
+          all="[$linux,{\"os\":\"windows-latest\",\"part\":\"unit\"},{\"os\":\"windows-latest\",\"part\":\"integration\"}]"
           if [ "$EVENT" != pull_request ] || [ "$FULL" = true ]; then
-            echo "os=$all" >> "$GITHUB_OUTPUT"
+            echo "legs=$all" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -71,19 +74,19 @@ jobs:
             echo "web=false" >> "$GITHUB_OUTPUT"
           fi
           if git diff --name-only "$BASE" HEAD | grep -Eq '^(apps/|crates/(ui-egui|text|gpu|tablet|heif)/|Cargo\.lock$|(.*/)?build\.rs$|\.github/workflows/ci\.yml$)'; then
-            echo "os=$all" >> "$GITHUB_OUTPUT"
+            echo "legs=$all" >> "$GITHUB_OUTPUT"
           else
-            echo 'os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo "legs=[$linux]" >> "$GITHUB_OUTPUT"
           fi
 
   test:
-    name: test (${{ matrix.os }})
+    name: test (${{ matrix.os }}${{ matrix.part != 'all' && format(', {0}', matrix.part) || '' }})
     needs: platforms
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(needs.platforms.outputs.os) }}
+        include: ${{ fromJSON(needs.platforms.outputs.legs) }}
     env:
       # No debuginfo on Windows: writing PDBs for ~200 test binaries cost 2.2 of ~21 build minutes.
       # A panic still names its file and line; only backtrace frames lose theirs (Linux keeps
@@ -111,9 +114,11 @@ jobs:
       # Only main saves caches; PRs restore main's. Every PR used to save its own set (up to
       # 3.8 GB), usable by that PR only, so the repo's 10 GB cache budget kept evicting main's.
       # A failing test still saves: the cache holds compiled dependencies, not test results.
+      # The two Windows legs share one key (same dependencies); the integration leg saves it,
+      # because it also runs Clippy and so leaves Clippy's dependency metadata in it.
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.part != 'unit' }}
           cache-on-failure: true
 
       - name: Format
@@ -130,16 +135,32 @@ jobs:
       # `--lib --bins --tests` leaves out the examples, which cargo test would build and link but
       # never run (Clippy's `--all-targets` still checks they compile). nextest skips doctests, so
       # they get their own step.
+      #
+      # On Windows the unit leg runs `--lib --bins` and the integration leg `--test '*'` (every
+      # integration-test target); the feature selection stays the same, so both legs share the
+      # dependency cache.
       - name: Test
-        run: cargo nextest run --workspace --locked --features heif --lib --bins --tests --no-fail-fast
+        env:
+          PART: ${{ matrix.part }}
+        run: |
+          case "$PART" in
+            unit) targets=(--lib --bins) ;;
+            integration) targets=(--test '*') ;;
+            *) targets=(--lib --bins --tests) ;;
+          esac
+          cargo nextest run --workspace --locked --features heif "${targets[@]}" --no-fail-fast
+        shell: bash
 
       - name: Doctests
+        if: matrix.part != 'integration'
         run: cargo test --workspace --locked --features heif --doc
 
       - name: Clippy
+        if: matrix.part != 'unit'
         run: cargo clippy --workspace --all-targets --locked --features heif -- -D warnings
 
       - name: Dependency layering
+        if: matrix.part != 'unit'
         run: cargo xtask layers
 
       # docs/scorecard.md must match its sources (checklists, budgets, baseline, corpus floors,
