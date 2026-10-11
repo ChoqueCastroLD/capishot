@@ -1,4 +1,4 @@
-# PhotoCraft for the web, multithreaded
+# Capishot for the web, multithreaded
 
 A second browser build next to the single-threaded one (`apps/photocraft-web` + Trunk,
 `packaging/web/`). It is the same app, compiled with WebAssembly
@@ -56,8 +56,17 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-Without them the page reports that it is not cross-origin isolated and stops (browsers only allow
-shared WebAssembly memory on isolated pages). `_headers` sets them for Cloudflare Workers static
+Without them the page is not cross-origin isolated (browsers only allow shared WebAssembly memory
+on isolated pages): it reports that and stops, or, when built with a fallback, loads the
+single-threaded build instead. Host both builds side by side for that:
+
+```sh
+(cd apps/photocraft-web && trunk build --release)              # -> dist/web
+PHOTOCRAFT_WEB_FALLBACK=st/ packaging/web-threads/build.sh    # -> dist/web-threads
+cp -R dist/web dist/web-threads/st
+```
+
+`_headers` sets them for Cloudflare Workers static
 assets and Cloudflare/Netlify Pages, along with caching: `photocraft.js` and `photocraft_bg.wasm.gz`
 are requested as `?v=<content hash>` and cached for a year; everything else revalidates.
 

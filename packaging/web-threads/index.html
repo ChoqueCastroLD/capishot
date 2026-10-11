@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <title>PhotoCraft</title>
+  <title>Capishot</title>
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #262626; }
     #photocraft_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -21,8 +21,8 @@
 <body>
   <canvas id="photocraft_canvas"></canvas>
   <div id="photocraft_loading">
-    <p id="photocraft_status">Loading PhotoCraft&hellip;</p>
-    <p id="photocraft_stalled">This is taking longer than usual. If PhotoCraft doesn't start, its files may have failed to
+    <p id="photocraft_status">Loading Capishot&hellip;</p>
+    <p id="photocraft_stalled">This is taking longer than usual. If Capishot doesn't start, its files may have failed to
       download or come from a different version of this page. <a href="">Reload</a> to try again; the browser
       console lists what failed.</p>
   </div>
@@ -55,29 +55,39 @@
       status.textContent = msg;
       document.getElementById('photocraft_stalled').remove();
     };
-    try {
-      if (!self.crossOriginIsolated) {
-        throw new Error('This page is not cross-origin isolated, so WebAssembly threads (SharedArrayBuffer) are ' +
-          'unavailable. The server must send Cross-Origin-Opener-Policy: same-origin and ' +
-          'Cross-Origin-Embedder-Policy: require-corp.');
+    // Where the single-threaded build sits relative to this page (build.sh: PHOTOCRAFT_WEB_FALLBACK),
+    // or empty. Without cross-origin isolation (a host that doesn't send COOP + COEP, or a browser
+    // that doesn't honour them) the page goes there instead of stopping.
+    const fallback = '__PHOTOCRAFT_FALLBACK__';
+    const isolated = self.crossOriginIsolated === true;
+    if (!isolated && fallback) {
+      console.warn('photocraft-web: not cross-origin isolated; loading the single-threaded build');
+      location.replace(new URL(fallback, location.href).href + location.search + location.hash);
+    } else {
+      try {
+        if (!isolated) {
+          throw new Error('This page is not cross-origin isolated, so WebAssembly threads (SharedArrayBuffer) are ' +
+            'unavailable. The server must send Cross-Origin-Opener-Policy: same-origin and ' +
+            'Cross-Origin-Embedder-Policy: require-corp.');
+        }
+        const pc = await import(`./photocraft.js?v=${version}`);
+        await pc.default({ module_or_path: await wasmResponse(`./photocraft_bg.wasm.gz?v=${version}`) });
+        // One worker per core but one (the UI thread spins while it waits for them), at most 16.
+        // ?threads=N overrides it (1 runs every parallel step on one worker; useful to compare).
+        const asked = Number(new URLSearchParams(location.search).get('threads'));
+        const cores = navigator.hardwareConcurrency || 4;
+        const threads = asked > 0 ? Math.min(Math.floor(asked), 64) : Math.max(1, Math.min(cores - 1, 16));
+        status.textContent = `Starting ${threads} worker thread${threads === 1 ? '' : 's'}…`;
+        await pc.initThreadPool(threads);
+        self.photocraft = pc; // the module, for diagnostics: photocraft.parallelSelfTest(4000, 3000)
+        self.photocraftThreads = threads;
+        console.info(`photocraft-web: rayon pool of ${threads} Web Workers`);
+        status.textContent = 'Loading Capishot…';
+        pc.start();
+      } catch (e) {
+        console.error(e);
+        fail(`Capishot could not start:\n${e && e.message ? e.message : e}`);
       }
-      const pc = await import(`./photocraft.js?v=${version}`);
-      await pc.default({ module_or_path: await wasmResponse(`./photocraft_bg.wasm.gz?v=${version}`) });
-      // One worker per core but one (the UI thread spins while it waits for them), at most 16.
-      // ?threads=N overrides it (1 runs every parallel step on one worker; useful to compare).
-      const asked = Number(new URLSearchParams(location.search).get('threads'));
-      const cores = navigator.hardwareConcurrency || 4;
-      const threads = asked > 0 ? Math.min(Math.floor(asked), 64) : Math.max(1, Math.min(cores - 1, 16));
-      status.textContent = `Starting ${threads} worker thread${threads === 1 ? '' : 's'}…`;
-      await pc.initThreadPool(threads);
-      self.photocraft = pc; // the module, for diagnostics: photocraft.parallelSelfTest(4000, 3000)
-      self.photocraftThreads = threads;
-      console.info(`photocraft-web: rayon pool of ${threads} Web Workers`);
-      status.textContent = 'Loading PhotoCraft…';
-      pc.start();
-    } catch (e) {
-      console.error(e);
-      fail(`PhotoCraft could not start:\n${e && e.message ? e.message : e}`);
     }
   </script>
 </body>
