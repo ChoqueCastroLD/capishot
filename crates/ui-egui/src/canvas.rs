@@ -1336,11 +1336,17 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
         }
         return true;
     }
+    // Display textures for a canvas this large would not fit the GPU: the reduced CPU canvas
+    // draws it (checked before the memory budget, which walks the history, every frame).
+    if !gpu.fits_canvas(&doc) {
+        return false;
+    }
     let partial = present && damage.is_some();
     gpu_budget(app, &gpu, idx, partial, visible);
     let r = gpu.refresh(id.0, &doc, if partial { damage } else { None }, display.as_deref());
-    if r.kind == "lost" {
-        // The device is gone: draw this frame on the CPU path; `gpu_status` drops the GPU canvas.
+    if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
+        // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
+        // texture budget: draw this frame on the CPU path.
         return false;
     }
     if let Some(e) = &r.fallback
