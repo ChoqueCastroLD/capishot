@@ -429,7 +429,7 @@ fn begin_path(app: &mut PhotocraftApp, ctx: &egui::Context, params: serde_json::
 }
 
 /// The affine map taking `rect`'s corners to `quad`'s; `None` when the box was distorted out of a
-/// parallelogram (Distort, Perspective), which an affine path transform can't follow.
+/// parallelogram (Distort, Perspective): the path then goes as a `quad`.
 fn rect_to_quad_affine(r: [f64; 4], q: [[f64; 2]; 4]) -> Option<photocraft_geom::Affine> {
     let (w, h) = (r[2] - r[0], r[3] - r[1]);
     if w <= 0.0 || h <= 0.0 {
@@ -532,12 +532,13 @@ pub fn enter_warp(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let existing =
         app.session.active().and_then(|d| d.doc.layer(LayerId(app.ui.transform.as_ref()?.layer)).and_then(photocraft_engine::warp_cmds::smart_warp_doc_space));
     let Some(t) = app.ui.transform.as_mut() else { return };
-    // Warp moves layers only: a lone mask, channel or path keeps the box.
-    if t.warp.is_some() || t.target.is_some() || t.path.is_some() {
+    // Warp moves layers and paths (#3027): a lone mask or channel keeps the box.
+    if t.warp.is_some() || t.target.is_some() {
         return;
     }
     if t.quad == corners(t.rect)
         && !t.selection
+        && t.path.is_none()
         && let Some(w) = existing
     {
         t.rect = w.bounds;
@@ -861,15 +862,20 @@ pub fn commit(app: &mut PhotocraftApp) {
         return;
     }
     if let Some(target) = t.path {
-        if t.warp.is_some() || t.quad == corners(t.rect) {
-            return;
-        }
-        let Some(a) = rect_to_quad_affine(t.rect, t.quad) else {
-            app.ui.status = "Distort and Perspective can't be applied to a path".into();
-            return;
-        };
         let mut p = target;
-        p["matrix"] = json!(a.m);
+        match &t.warp {
+            Some(w) if w.is_identity() => return,
+            Some(w) => p["warp"] = json!(w),
+            None if t.quad == corners(t.rect) => return,
+            // Distort and Perspective map the path through the box (#3027).
+            None => match rect_to_quad_affine(t.rect, t.quad) {
+                Some(a) => p["matrix"] = json!(a.m),
+                None => {
+                    p["rect"] = json!(t.rect);
+                    p["quad"] = json!(t.quad);
+                }
+            },
+        }
         if let Err(e) = app.run("path.transform", p) {
             app.ui.status = e;
         }
@@ -1988,6 +1994,18 @@ fn draw_warp(painter: &egui::Painter, xf: &ViewXform, t: &TransformSession, w: &
         a.draw(painter, xf);
     }
     let accent = crate::theme::Tokens::get(painter.ctx()).accent;
+    // Transform Path › Warp: the path drawn through the warp.
+    if let Some(path) = &pv.path {
+        crate::vector_ui::draw_outline(
+            painter,
+            path,
+            &|q| {
+                let (x, y) = w.map(q[0], q[1]);
+                xf.to_screen(x as f32, y as f32)
+            },
+            accent,
+        );
+    }
     let line = Stroke::new(1.0, accent);
     let thin = Stroke::new(0.75, accent.gamma_multiply(0.7));
     let curve = |fixed_u: Option<f64>, fixed_v: Option<f64>| -> Vec<Pos2> {
@@ -3559,14 +3577,15 @@ mod tests {
     }
 
     #[test]
-    fn right_click_menu_warp_row_is_off_for_a_lone_path() {
+    fn right_click_menu_offers_warp_for_a_path() {
+        // Photoshop's Transform Path menu has Warp too (#3027).
         let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
         let ctx = egui::Context::default();
         begin(&mut app, &ctx).unwrap();
         app.ui.transform.as_mut().unwrap().path = Some(json!({}));
         assert!(crate::canvas_tool_menu::open_transform(&mut app, &ctx, [10.0, 10.0]));
         let menu = app.ui.canvas_tool_menu.clone().unwrap();
-        assert!(!crate::canvas_tool_menu::available(&app, &menu, "edit.transform.warp"));
+        assert!(crate::canvas_tool_menu::available(&app, &menu, "edit.transform.warp"));
     }
 
     fn app_with_square(size: u32, fill: photocraft_geom::Rect) -> PhotocraftApp {
@@ -4138,12 +4157,25 @@ mod tests {
         assert_eq!(anchors, vec![[10.0, 15.0], [50.0, 15.0], [50.0, 25.0], [10.0, 25.0]]);
         assert_eq!(st.doc.layers[0].surface().cloned(), pixels, "the pixels stay put");
 
-        // A box pulled out of a parallelogram (Distort) can't be applied to a path: an error, no step.
+        // ⌘-drag of a corner (Distort) maps the path onto the box (#3027): one step.
         crate::menus::invoke(&mut app, &ctx, "edit.freeTransform", json!({})).unwrap();
         app.ui.transform.as_mut().unwrap().quad[2] = [70.0, 40.0];
         commit(&mut app);
-        assert_eq!(app.session.active().unwrap().history.past_len(), steps + 1);
-        assert!(!app.ui.status.is_empty());
+        let st = app.session.active().unwrap();
+        assert_eq!(st.history.past_len(), steps + 2, "one step: {}", app.ui.status);
+        let anchors: Vec<[f64; 2]> = st.doc.work_path.as_ref().unwrap().subpaths[0].knots.iter().map(|k| [k.anchor.x, k.anchor.y]).collect();
+        let want = [[10.0, 15.0], [50.0, 15.0], [70.0, 40.0], [10.0, 25.0]];
+        assert!(anchors.iter().zip(want).all(|(a, b)| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9), "{anchors:?}");
+
+        // Edit › Transform Path › Warp bends it: one more step.
+        crate::menus::invoke(&mut app, &ctx, "edit.transform.warp", json!({})).unwrap();
+        let t = app.ui.transform.as_mut().unwrap();
+        assert!(t.warp.is_some(), "Warp mode on a path");
+        t.warp = Some(Warp { style: WarpStyle::Arc, bend: 50.0, ..Warp::none(t.rect) });
+        commit(&mut app);
+        let st = app.session.active().unwrap();
+        assert_eq!(st.history.past_len(), steps + 3, "one step: {}", app.ui.status);
+        assert!(st.doc.work_path.as_ref().unwrap().subpaths[0].knots.len() > 4, "the warp bends the edges");
 
         // Without a path tool, ⌘T is the pixel transform again.
         app.ui.tool = Tool::Move;

@@ -917,11 +917,62 @@ fn clipping_path_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     Ok(Value::Null)
 }
 
+/// The path `path.transform` edits: `layer`'s shape path or vector mask, else the work path or a
+/// saved path.
+fn transform_target(s: &Session, name: &str, layer: Option<LayerId>) -> Result<Path> {
+    let Some(id) = layer else { return resolve_path(s, Some(name)) };
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let l = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+    match &l.content {
+        LayerContent::Shape(sh) => Ok(sh.path.clone()),
+        _ => l.vector_mask.as_ref().map(|v| v.path.clone()).ok_or_else(|| EngineError::Other("target layer has no shape path or vector mask".into())),
+    }
+}
+
+/// `n` numbers at `key` (`[x0, y0, x1, y1]` or `[[x, y] × 4]`, flattened): finite, magnitude at
+/// most 1000000. `None` when `key` is absent.
+fn coords(p: &Value, key: &str, n: usize) -> Result<Option<Vec<f64>>> {
+    const CMD: &str = "path.transform";
+    let Some(v) = p.get(key) else { return Ok(None) };
+    let flat: Vec<&Value> = match v.as_array() {
+        Some(a) if a.iter().all(Value::is_array) => a.iter().filter_map(Value::as_array).flatten().collect(),
+        Some(a) => a.iter().collect(),
+        None => Vec::new(),
+    };
+    let nums: Vec<f64> = flat.iter().filter_map(|v| v.as_f64()).filter(|x| x.is_finite() && x.abs() <= 1_000_000.0).collect();
+    if flat.len() != n || nums.len() != n {
+        return Err(bad(CMD, format!("`{key}` must hold {n} finite numbers with magnitude at most 1000000")));
+    }
+    Ok(Some(nums))
+}
+
+/// How `path.transform` moves the path.
+enum PathMap {
+    Affine(Affine),
+    /// Distort / Perspective: the box's corners go to a quad.
+    Projective(photocraft_algo::transform::Homography),
+    Warp(Box<photocraft_geom::warp::Warp>),
+}
+
 fn path_transform(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "path.transform";
     let name = p.get("name").and_then(Value::as_str).unwrap_or("work").to_owned();
     let layer_id = if name == "layer" { Some(layer_id(s, p)?) } else { None };
-    let transform = if let Some(values) = p.get("matrix") {
+    // The box Distort, Perspective and Warp frame: `rect`, else the path's control bounds.
+    let frame = |s: &Session| -> Result<[f64; 4]> {
+        let r = match coords(p, "rect", 4)? {
+            Some(r) => [r[0], r[1], r[2], r[3]],
+            None => {
+                let (x0, y0, x1, y1) = transform_target(s, &name, layer_id)?.control_bounds().ok_or_else(|| bad(CMD, "path has no points to transform"))?;
+                [x0, y0, x1, y1]
+            }
+        };
+        if r[2] - r[0] <= 0.0 || r[3] - r[1] <= 0.0 {
+            return Err(bad(CMD, "`rect` must have a positive width and height (a straight path needs a `rect`)"));
+        }
+        Ok(r)
+    };
+    let map = if let Some(values) = p.get("matrix") {
         let values = values.as_array().filter(|values| values.len() == 6).ok_or_else(|| bad(CMD, "`matrix` must contain six numbers"))?;
         let mut m = [0.0; 6];
         for (slot, value) in m.iter_mut().zip(values) {
@@ -930,7 +981,26 @@ fn path_transform(s: &mut Session, p: &Value) -> Result<Value> {
                 .filter(|number| number.is_finite() && number.abs() <= 1_000_000.0)
                 .ok_or_else(|| bad(CMD, "matrix entries must be finite numbers with magnitude at most 1000000"))?;
         }
-        Affine { m }
+        PathMap::Affine(Affine { m })
+    } else if let Some(q) = coords(p, "quad", 8)? {
+        // Distort and Perspective (#3027): where the frame's corners go, clockwise from top-left.
+        let quad = [[q[0], q[1]], [q[2], q[3]], [q[4], q[5]], [q[6], q[7]]];
+        let h = photocraft_algo::transform::Homography::rect_to_quad(frame(s)?, quad)
+            .filter(|h| h.0.iter().all(|v| v.is_finite()) && h.inverse().is_some())
+            .ok_or_else(|| bad(CMD, "degenerate quad"))?;
+        let [a, b, c, d, e, f, g, hh, i] = h.0;
+        if g.abs() < 1e-12 && hh.abs() < 1e-12 && i.abs() > 1e-12 {
+            // A parallelogram is affine: a live shape stays live.
+            PathMap::Affine(Affine { m: [a / i, d / i, b / i, e / i, c / i, f / i] })
+        } else {
+            PathMap::Projective(h)
+        }
+    } else if ["warp", "style", "mesh"].iter().any(|key| p.get(*key).is_some()) {
+        let w = crate::warp_cmds::warp_from_params(CMD, p, frame(s)?)?;
+        if [w.bend, w.h_distort, w.v_distort].iter().chain(w.bounds.iter()).any(|v| !v.is_finite() || v.abs() > 1_000_000.0) {
+            return Err(bad(CMD, "warp values must be finite numbers with magnitude at most 1000000"));
+        }
+        PathMap::Warp(Box::new(w))
     } else {
         let number = |key: &str, default: f64| -> Result<f64> {
             match p.get(key) {
@@ -942,50 +1012,51 @@ fn path_transform(s: &mut Session, p: &Value) -> Result<Value> {
             }
         };
         if !["translateX", "translateY", "scaleX", "scaleY", "angle"].iter().any(|key| p.get(*key).is_some()) {
-            return Err(bad(CMD, "pass `matrix` or translate/scale/angle parameters"));
+            return Err(bad(CMD, "pass `matrix`, `quad`, a warp (`style`, `mesh` or `warp`) or translate/scale/angle parameters"));
         }
         let (tx, ty) = (number("translateX", 0.0)?, number("translateY", 0.0)?);
         let (sx, sy) = (number("scaleX", 1.0)?, number("scaleY", 1.0)?);
         let angle = number("angle", 0.0)?;
-        // An explicit `layer` parameter must determine both the transformed path and its
-        // pivot. resolve_path("layer") otherwise reads the currently active layer (#3062).
-        let path = if let Some(id) = layer_id {
-            let layer = s.active().and_then(|st| st.doc.layer(id)).ok_or(EngineError::NoLayer(id))?;
-            match &layer.content {
-                LayerContent::Shape(shape) => shape.path.clone(),
-                _ => layer
-                    .vector_mask
-                    .as_ref()
-                    .map(|mask| mask.path.clone())
-                    .ok_or_else(|| EngineError::Other("target layer has no shape path or vector mask".into()))?,
-            }
-        } else {
-            resolve_path(s, Some(&name))?
-        };
+        // An explicit `layer` parameter determines both the transformed path and its pivot (#3062).
+        let path = transform_target(s, &name, layer_id)?;
         let (x0, y0, x1, y1) = path.control_bounds().ok_or_else(|| bad(CMD, "path has no points to transform"))?;
         let (cx, cy) = ((x0 + x1) * 0.5, (y0 + y1) * 0.5);
-        Affine::translate(-cx, -cy)
-            .then(&Affine { m: [sx, 0.0, 0.0, sy, 0.0, 0.0] })
-            .then(&Affine::rotate(angle.to_radians()))
-            .then(&Affine::translate(cx + tx, cy + ty))
+        PathMap::Affine(
+            Affine::translate(-cx, -cy)
+                .then(&Affine { m: [sx, 0.0, 0.0, sy, 0.0, 0.0] })
+                .then(&Affine::rotate(angle.to_radians()))
+                .then(&Affine::translate(cx + tx, cy + ty)),
+        )
     };
-    let m = transform.m;
+    let out = match &map {
+        PathMap::Affine(a) => json!({ "name": name, "matrix": a.m }),
+        PathMap::Projective(h) => json!({ "name": name, "homography": h.0 }),
+        PathMap::Warp(_) => json!({ "name": name, "warp": true }),
+    };
     if let Some(id) = layer_id
         && s.active().and_then(|d| d.doc.layer(id)).is_some_and(|layer| matches!(layer.content, LayerContent::Shape(_)))
     {
         with_shape(s, id, "Transform Path", |shape, _| {
-            transform_shape(shape, &transform);
+            match &map {
+                PathMap::Affine(a) => transform_shape(shape, a),
+                PathMap::Projective(h) => map_shape(shape, Some(h), None)?,
+                PathMap::Warp(w) => map_shape(shape, None, Some(w))?,
+            }
             shape.psd_raw = None;
             Ok(())
         })?;
-        return Ok(json!({ "name": name, "matrix": m }));
+        return Ok(out);
     }
     s.edit("Transform Path", |doc, _| {
         let path = path_mut(doc, &name, layer_id)?;
-        *path = path.transform(&transform);
+        *path = match &map {
+            PathMap::Affine(a) => path.transform(a),
+            PathMap::Projective(h) => map_path(path, Some(h), None)?,
+            PathMap::Warp(w) => map_path(path, None, Some(w))?,
+        };
         Ok(())
     })?;
-    Ok(json!({ "name": name, "matrix": m }))
+    Ok(out)
 }
 
 fn path_rename(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1562,7 +1633,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "path.transform",
             "Free Transform Path",
             [],
-            r##"{"name":str|"work"|"layer"="work","layer":id? (with layer target),"matrix":[a,b,c,d,e,f] | "translateX":px?,"translateY":px?,"scaleX":factor?,"scaleY":factor?,"angle":degrees?} (numeric transforms pivot on path bounds center)"##,
+            r##"{"name":str|"work"|"layer"="work","layer":id? (with layer target),"matrix":[a,b,c,d,e,f] | "quad":[[x,y]×4] (Distort/Perspective: where the frame's corners go, clockwise from top-left) | "style"|"mesh"|"warp":… (Warp, as edit.transform.warp) | "translateX":px?,"translateY":px?,"scaleX":factor?,"scaleY":factor?,"angle":degrees?,"rect":[x0,y0,x1,y1]? (the quad's or warp's frame; default = path control bounds)} (numeric transforms pivot on path bounds center)"##,
             has_doc,
             path_transform
         ),

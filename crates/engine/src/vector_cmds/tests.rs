@@ -467,6 +467,37 @@ fn transform_work_saved_and_shape_paths() {
     assert!(shape(&s, id).cache.is_some());
 }
 
+/// Distort / Perspective and Warp of a path (#3027): the anchors land on the quad's corners, one
+/// undo step; hostile quads and warps are refused without a step.
+#[test]
+fn transform_path_distort_and_warp() {
+    let mut s = session(100, 100, 8);
+    s.execute("path.set", json!({"path":{"subpaths":[{"closed":true,"knots":[[10,10],[30,10],[30,20],[10,20]]}]}})).unwrap();
+    let steps = s.active().unwrap().history.past_len();
+    for bad in [
+        json!({"quad":[[0,0],[0,0],[0,0],[0,0]]}),
+        json!({"quad":[[10,10],[40,5],[45,30]]}),
+        json!({"quad":[[10,10],[40,5],[45,30],[5,"x"]]}),
+        json!({"quad":[[10,10],[40,5],[45,30],[5,1e30]]}),
+        json!({"quad":[[10,10],[40,5],[45,30],[5,25]],"rect":[10,10,10,20]}),
+        json!({"style":"nope"}),
+        json!({"style":"arc","rect":[0,0,1e30,1]}),
+    ] {
+        assert!(s.execute("path.transform", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(s.active().unwrap().history.past_len(), steps);
+    let quad = [[12.0, 8.0], [40.0, 5.0], [45.0, 30.0], [5.0, 25.0]];
+    s.execute("path.transform", json!({ "quad": quad })).unwrap();
+    assert_eq!(s.active().unwrap().history.past_len(), steps + 1, "one step");
+    let anchors: Vec<[f64; 2]> = doc(&s).work_path.as_ref().unwrap().subpaths[0].knots.iter().map(|k| [k.anchor.x, k.anchor.y]).collect();
+    assert_eq!(anchors.len(), 4);
+    for (a, q) in anchors.iter().zip(quad) {
+        assert!((a[0] - q[0]).abs() < 1e-9 && (a[1] - q[1]).abs() < 1e-9, "{anchors:?}");
+    }
+    s.execute("path.transform", json!({"style":"arc","bend":50})).unwrap();
+    assert!(doc(&s).work_path.as_ref().unwrap().subpaths[0].knots.len() > 4, "the warp bends the edges");
+}
+
 #[test]
 fn copy_and_paste_shape_fill_and_stroke() {
     let mut s = session(100, 100, 8);
