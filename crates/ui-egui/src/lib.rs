@@ -1920,6 +1920,9 @@ mod view_sync_tests;
 mod stamp_tests;
 
 #[cfg(test)]
+mod shortcut_parity_tests;
+
+#[cfg(test)]
 mod alt_click_tests;
 #[cfg(test)]
 mod stroke_timing_tests;
