@@ -139,6 +139,7 @@ pub fn reset_options(o: &mut ToolOptions, tool: Tool) {
             crop_custom_ratio_width,
             crop_custom_ratio_height,
         ),
+        Tool::PerspectiveCrop => reset!(crop_width, crop_height, crop_resolution, crop_resolution_unit, perspective_crop_grid),
         Tool::Eyedropper => reset!(eyedropper_size, eyedropper_sample, eyedropper_ring),
         Tool::Pencil => reset!(pencil_auto_erase),
         Tool::BackgroundEraser => reset!(bg_sampling, bg_limits, bg_tolerance, bg_protect_fg),

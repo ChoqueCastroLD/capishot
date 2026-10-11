@@ -76,6 +76,7 @@ pub enum Tool {
     MagneticLasso,
     MagicWand,
     Crop,
+    PerspectiveCrop,
     Eyedropper,
     Ruler,
     Note,
@@ -132,7 +133,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 63] = [
+    pub const ALL: [Tool; 64] = [
         Tool::Move,
         Tool::Artboard,
         Tool::RectMarquee,
@@ -144,6 +145,7 @@ impl Tool {
         Tool::MagneticLasso,
         Tool::MagicWand,
         Tool::Crop,
+        Tool::PerspectiveCrop,
         Tool::Eyedropper,
         Tool::Ruler,
         Tool::Note,
@@ -222,6 +224,7 @@ impl Tool {
             Tool::MagneticLasso => "Magnetic Lasso Tool",
             Tool::MagicWand => "Magic Wand Tool",
             Tool::Crop => "Crop Tool",
+            Tool::PerspectiveCrop => "Perspective Crop Tool",
             Tool::Slice => "Slice Tool",
             Tool::SliceSelect => "Slice Select Tool",
             Tool::Gradient => "Gradient Tool",
@@ -311,7 +314,7 @@ impl Tool {
             Tool::Eyedropper | Tool::Ruler | Tool::Note | Tool::Count => 'I',
             Tool::Lasso | Tool::PolygonLasso | Tool::MagneticLasso => 'L',
             Tool::MagicWand => 'W',
-            Tool::Crop | Tool::Slice | Tool::SliceSelect => 'C',
+            Tool::Crop | Tool::PerspectiveCrop | Tool::Slice | Tool::SliceSelect => 'C',
             Tool::Gradient | Tool::PaintBucket => 'G',
             Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => 'T',
             Tool::Hand => 'H',
@@ -597,6 +600,9 @@ pub struct ToolOptions {
     pub crop_resolution: String,
     #[serde(default = "default_crop_resolution_unit")]
     pub crop_resolution_unit: String,
+    /// Perspective Crop's Show Grid (`perspective_crop_ui`); it shares W, H and the resolution above.
+    #[serde(default = "yes")]
+    pub perspective_crop_grid: bool,
     /// Crop overlay (#1919): the guide in the crop box, when it shows and its orientation
     /// (Photoshop's defaults: Rule of Thirds, Auto Show Overlay). See `crop_overlay`.
     #[serde(default)]
@@ -770,6 +776,7 @@ impl Default for ToolOptions {
             crop_height: String::new(),
             crop_resolution: String::new(),
             crop_resolution_unit: default_crop_resolution_unit(),
+            perspective_crop_grid: true,
             crop_overlay: Default::default(),
             crop_overlay_show: Default::default(),
             crop_overlay_orientation: 0,
@@ -1115,6 +1122,9 @@ pub struct UiState {
     /// frame before the turn); 0 when upright. Committing passes it as `image.crop`'s `angle`.
     #[serde(default)]
     pub crop_angle: f64,
+    /// Perspective Crop quad being edited: TL, TR, BR, BL (document coordinates).
+    #[serde(default)]
+    pub perspective_crop: Option<[[f64; 2]; 4]>,
     pub next_id: u64,
     /// Last status message (errors from commands, hints).
     pub status: String,
@@ -1206,6 +1216,7 @@ impl Default for UiState {
             magnetic: Default::default(),
             crop_rect: None,
             crop_angle: 0.0,
+            perspective_crop: None,
             next_id: 1,
             status: String::new(),
             status_error: false,
@@ -1282,7 +1293,7 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 63);
+        assert_eq!(Tool::ALL.len(), 64);
         assert_eq!(Tool::from_name("Vertical Type Mask Tool"), Some(Tool::VerticalTypeMask));
         assert_eq!(Tool::from_name("addAnchorPoint"), Some(Tool::AddAnchorPoint));
         assert_eq!(Tool::from_name("Delete Anchor Point Tool"), Some(Tool::DeleteAnchorPoint));

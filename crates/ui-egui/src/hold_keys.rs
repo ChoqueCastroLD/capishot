@@ -77,6 +77,7 @@ pub fn cmd_moves(t: Tool) -> bool {
                 | Tool::RotateView
                 | Tool::Zoom
                 | Tool::Crop
+                | Tool::PerspectiveCrop
                 | Tool::Slice
                 | Tool::SliceSelect
                 | Tool::PathSelection

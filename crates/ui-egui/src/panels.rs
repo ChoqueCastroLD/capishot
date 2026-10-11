@@ -20,7 +20,7 @@ const TOOL_SECTIONS: &[&[&[Tool]]] = &[
         &[Tool::RectMarquee, Tool::EllipseMarquee, Tool::SingleRowMarquee, Tool::SingleColumnMarquee],
         &[Tool::Lasso, Tool::PolygonLasso, Tool::MagneticLasso],
         &[Tool::ObjectSelection, Tool::QuickSelection, Tool::MagicWand],
-        &[Tool::Crop, Tool::Slice, Tool::SliceSelect],
+        &[Tool::Crop, Tool::PerspectiveCrop, Tool::Slice, Tool::SliceSelect],
         &[Tool::Eyedropper, Tool::Ruler, Tool::Note, Tool::Count],
     ],
     &[
@@ -1168,6 +1168,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         // Live mode: the options also change a selected gradient fill layer.
                         crate::gradient_ui::options_changed(app, &before);
                     }
+                    Tool::PerspectiveCrop if t.pro => crate::perspective_crop_ui::options_bar(app, ui),
                     Tool::Crop if t.pro => {
                         let before_ratio = crate::crop_ui::preset_ratio(app);
                         let doc_size = app.session.active().map_or((0.0, 0.0), |s| (f64::from(s.doc.size.width), f64::from(s.doc.size.height)));
@@ -1375,6 +1376,13 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                 ("centre", &crate::shortcuts::pretty("Alt")),
                                 ("commit", &crate::shortcuts::pretty("Enter")),
                             ],
+                        ),
+                    ),
+                    Tool::PerspectiveCrop => hint(
+                        ui,
+                        &crate::i18n::fmt(
+                            tl!("Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels"),
+                            &[("commit", &crate::shortcuts::pretty("Enter"))],
                         ),
                     ),
                     Tool::Gradient => hint(ui, tl!("Drag to draw a gradient")),

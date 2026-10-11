@@ -2830,6 +2830,9 @@ cameraData	Lens	Объектив
 	Previous Document	Предыдущий документ
 	W x H x Resolution	Ш x В x Разрешение
 	Front Image	Изображение переднего плана
+	Perspective Crop Tool	Кадрирование перспективы
+	Show Grid	Показать сетку
+	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Растяните рамку или щёлкните четыре угла · перетащите углы на края наклонной фигуры · {commit} применяет · Esc отменяет
 	Artboard Tool	Монтажная область (инструмент)
 	Make Portrait	Сделать книжной
 	Make Landscape	Сделать альбомной

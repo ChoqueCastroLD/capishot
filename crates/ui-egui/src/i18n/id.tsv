@@ -2888,6 +2888,9 @@ cameraData	Lens	Lensa
 	Previous Document	Dokumen Sebelumnya
 	W x H x Resolution	L x T x Resolusi
 	Front Image	Gambar Depan
+	Perspective Crop Tool	Alat Crop Perspektif
+	Show Grid	Tampilkan Grid
+	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Seret kotak atau klik empat sudut · seret sudut ke tepi bentuk yang miring · {commit} menerapkan · Esc membatalkan
 	Artboard Tool	Alat Artboard
 	Make Portrait	Jadikan Potret
 	Make Landscape	Jadikan Lanskap

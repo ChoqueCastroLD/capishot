@@ -3588,6 +3588,9 @@ cameraData	Lens	Об'єктив
 	Previous Document	Попередній документ
 	W x H x Resolution	Ш x В x Роздільна здатність
 	Front Image	Зображення переднього плану
+	Perspective Crop Tool	Інструмент «Перспективне кадрування»
+	Show Grid	Показати сітку
+	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Розтягніть рамку або клацніть чотири кути · перетягніть кути на краї похилої фігури · {commit} застосовує · Esc скасовує
 	Artboard Tool	Інструмент «Монтажна область»
 	Make Portrait	Зробити портретною
 	Make Landscape	Зробити альбомною
