@@ -325,11 +325,23 @@ fn color_table(s: &mut Session, p: &Value) -> Result<Value> {
             let mut data = surf.read_region(r);
             for q in data.chunks_exact_mut(n) {
                 let c = photocraft_raster::to_rgba(&fmt, q);
-                if c[3] <= 0.0 {
-                    continue;
-                }
-                let i = old.nearest([c[0], c[1], c[2]]);
-                let alpha = if table.transparent == Some(i as u8) { 0.0 } else { c[3] };
+                let rgb = [c[0], c[1], c[2]];
+                let i = if c[3] <= 0.0 {
+                    let Some(i) = old.transparent.map(usize::from) else { continue };
+                    if i >= old.colors.len() || old.rgb(i) != rgb {
+                        continue;
+                    }
+                    i
+                } else {
+                    old.nearest(rgb)
+                };
+                let alpha = if table.transparent == Some(i as u8) {
+                    0.0
+                } else if c[3] <= 0.0 {
+                    1.0
+                } else {
+                    c[3]
+                };
                 let nc = if i < table.colors.len() { table.rgb(i) } else { table.rgb(table.nearest([c[0], c[1], c[2]])) };
                 let mut enc = [0.0f32; 8];
                 let m = photocraft_raster::from_rgba_into(&fmt, [nc[0], nc[1], nc[2], alpha], &mut enc);

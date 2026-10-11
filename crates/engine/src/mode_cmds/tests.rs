@@ -193,6 +193,35 @@ fn color_table_presets_and_entries() {
 }
 
 #[test]
+fn clearing_color_table_transparency_restores_indexed_pixels() {
+    let pixel = |s: &mut Session| -> [f32; 4] { serde_json::from_value(s.execute("document.pixel", json!({"x": 5, "y": 8})).unwrap()).unwrap() };
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 16, "height": 16, "background": "#ff0000"})).unwrap();
+    s.execute("image.mode.indexedColor", json!({"palette": "exact", "colors": 2, "forced": "none", "dither": "none"})).unwrap();
+    assert_eq!(doc(&s).color_table.as_ref().unwrap().colors, vec![[255, 0, 0]]);
+    assert_eq!(pixel(&mut s), [1.0, 0.0, 0.0, 1.0]);
+
+    s.execute("image.mode.colorTable", json!({"transparent": 0})).unwrap();
+    assert_eq!(pixel(&mut s), [0.0; 4]);
+    s.execute("image.mode.colorTable", json!({"transparent": null})).unwrap();
+    assert_eq!(doc(&s).layers[0].surface().unwrap().rgba(5, 8), [1.0, 0.0, 0.0, 1.0], "clearing the transparent palette entry should restore the stored pixel");
+    assert_eq!(pixel(&mut s), [1.0, 0.0, 0.0, 1.0]);
+    s.execute("image.mode.rgb", json!({})).unwrap();
+    assert_eq!(pixel(&mut s), [1.0, 0.0, 0.0, 1.0]);
+
+    let mut control = Session::new();
+    control.execute("file.new", json!({"width": 16, "height": 16, "background": "#ff0000"})).unwrap();
+    control.execute("image.mode.indexedColor", json!({"palette": "exact", "colors": 2, "forced": "none", "dither": "none"})).unwrap();
+    control.execute("image.mode.colorTable", json!({"entries": {"0": "#0000ff"}})).unwrap();
+    let blue: [f32; 4] = serde_json::from_value(control.execute("document.pixel", json!({"x": 5, "y": 8})).unwrap()).unwrap();
+    assert_eq!(blue, [0.0, 0.0, 1.0, 1.0]);
+    control.execute("image.mode.colorTable", json!({"transparent": 0})).unwrap();
+    control.execute("edit.undo", json!({})).unwrap();
+    let restored: [f32; 4] = serde_json::from_value(control.execute("document.pixel", json!({"x": 5, "y": 8})).unwrap()).unwrap();
+    assert_eq!(restored, [0.0, 0.0, 1.0, 1.0]);
+}
+
+#[test]
 fn bitmap_methods_need_grayscale() {
     let mut s = session(32, 32, 16, "rgb");
     assert!(!s.is_enabled("image.mode.bitmap"));
