@@ -1024,7 +1024,9 @@ impl ItemCache {
     }
 }
 
-/// Draws the menu bar; returns the right edge of the last menu title (the bar itself fills the row).
+/// Draws the menu bar; returns the inner edge of the menu titles, facing the rest of the title bar
+/// (the right edge of the last title, or its left edge in a right-to-left UI, where File is at the
+/// right). The bar itself fills the row.
 pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
     // Built only while a menu is open: every item's enabled/checked state scales with the
     // document (layer lookups), which cost milliseconds per frame on large layouts (#125). While
@@ -1032,7 +1034,8 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
     let kept = std::cell::Cell::new(app.menu_cache.take());
     let built: std::cell::OnceCell<ItemCache> = std::cell::OnceCell::new();
     let app_ref: &PhotocraftApp = app;
-    let mut right = ui.cursor().left();
+    let rtl = crate::direction::is_rtl();
+    let mut edge = if rtl { ui.cursor().right() } else { ui.cursor().left() };
     let lang = crate::i18n::current();
     let mut clicked: Option<String> = None;
     let t = crate::theme::Tokens::get(ui.ctx());
@@ -1045,6 +1048,9 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
         v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, t.text_dim);
         v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
         egui::MenuBar::new().ui(ui, |ui| {
+            // egui lays the bar out left to right; a right-to-left UI starts it at the right.
+            let mut mirrored = rtl.then(|| ui.new_child(egui::UiBuilder::new().layout(crate::direction::row())));
+            let ui = mirrored.as_mut().unwrap_or(ui);
             ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
             nav.bar_bottom = Some(ui.max_rect().bottom());
             let mut buttons = Vec::with_capacity(TOP_MENUS.len());
@@ -1070,6 +1076,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                     config.close_behavior
                 };
                 egui::Popup::menu(&title)
+                    .align(crate::direction::below())
                     .open_memory(open)
                     .close_behavior(close)
                     .style(config.style.clone())
@@ -1100,9 +1107,13 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                     });
                 buttons.push(title);
             }
-            right = buttons.iter().map(|b| b.rect.right()).fold(right, f32::max);
+            edge = if rtl { buttons.iter().map(|b| b.rect.left()).fold(edge, f32::min) } else { buttons.iter().map(|b| b.rect.right()).fold(edge, f32::max) };
             switch_on_hover(ui.ctx(), &buttons);
-            let tops: Vec<egui::Id> = buttons.iter().map(egui::Popup::default_response_id).collect();
+            // ← and → step to the menu on that side, so in screen order.
+            let mut tops: Vec<egui::Id> = buttons.iter().map(egui::Popup::default_response_id).collect();
+            if rtl {
+                tops.reverse();
+            }
             nav.keys(ui.ctx(), &tops, &mut clicked);
         });
     });
@@ -1121,7 +1132,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
             app.ui.status_error = true;
         }
     }
-    right
+    edge
 }
 
 fn press_gesture_id() -> egui::Id {

@@ -60,6 +60,7 @@ pub mod delete_layer_prompt;
 pub mod dialog_blend_ui;
 pub mod dialogs;
 pub mod direct_select;
+pub mod direction;
 pub mod discard_ui;
 pub mod distort_ui;
 pub mod doc_props_ui;
