@@ -922,6 +922,9 @@ impl PhotocraftApp {
             // Adding a layer mask targets it, as in Photoshop (#2166).
             self.ui.mask_target = true;
             self.ui.vector_mask_target = false;
+            // Properties still shows the new adjustment or fill layer's settings, not its mask,
+            // as in Photoshop (#3369): clicking the mask thumbnail switches it to the mask.
+            self.ui.properties_layer = if creates_adjustment_or_fill { self.session.active().and_then(|st| st.active_layer).map(|l| l.0) } else { None };
         }
         if r.is_ok() && id == "select.toWorkPath" {
             // Make Work Path selects the new work path in the Paths panel, as in Photoshop.
@@ -1754,6 +1757,9 @@ impl PhotocraftApp {
             }
             if !self.ui.mask_target && st.channel_view.target == photocraft_engine::channel_cmds::ChannelTarget::LayerMask {
                 st.channel_view.target = photocraft_engine::channel_cmds::ChannelTarget::Composite;
+            }
+            if !self.ui.mask_target || self.ui.properties_layer != st.active_layer.map(|l| l.0) {
+                self.ui.properties_layer = None;
             }
         }
         let mask = self.layer_mask_targeted();
