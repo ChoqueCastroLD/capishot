@@ -39,7 +39,7 @@ mod proximity_integral;
 use proximity_integral::HoleIntegral;
 
 /// Below this many grid cells a level runs single-threaded (thread hand-off costs more than it saves).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 const PAR_MIN: usize = 128 * 128;
 
 /// SplitMix64: tiny deterministic RNG.
@@ -430,7 +430,7 @@ impl Solver<'_> {
                 }
             }
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         if w * self.h >= PAR_MIN {
             use rayon::prelude::*;
             nnf.par_chunks_mut(BAND * w).zip(cost.par_chunks_mut(BAND * w)).enumerate().for_each(|(bi, (nn, co))| band_fn(bi, nn, co));
@@ -455,7 +455,7 @@ impl Solver<'_> {
                 }
             }
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         if w * self.h >= PAR_MIN {
             use rayon::prelude::*;
             cost.par_chunks_mut(w).enumerate().for_each(row);
@@ -491,14 +491,14 @@ impl Solver<'_> {
                     }
                 }
             };
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             if w * h >= PAR_MIN {
                 use rayon::prelude::*;
                 gb.par_chunks_mut(w * ch).enumerate().for_each(row);
             } else {
                 gb.chunks_mut(w * ch).enumerate().for_each(row);
             }
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
             gb.chunks_mut(w * ch).enumerate().for_each(row);
             gb
         } else {
@@ -553,14 +553,14 @@ impl Solver<'_> {
             }
             out
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         let rows: Vec<Vec<(usize, Vec<f32>)>> = if w * h >= PAR_MIN {
             use rayon::prelude::*;
             (0..h).into_par_iter().map(row).collect()
         } else {
             (0..h).map(row).collect()
         };
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         let rows: Vec<Vec<(usize, Vec<f32>)>> = (0..h).map(row).collect();
         for (y, r) in rows.into_iter().enumerate() {
             for (x, v) in r {
@@ -618,12 +618,12 @@ fn onion_peel(w: usize, h: usize, ch: usize, r: i32, img: &mut [f32], px: &[Px],
             let si = (best.1.1 as usize * w + best.1.0 as usize) * ch;
             img[si..si + ch].to_vec()
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         let vals: Vec<Vec<f32>> = {
             use rayon::prelude::*;
             front.par_iter().map(best).collect()
         };
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         let vals: Vec<Vec<f32>> = front.iter().map(best).collect();
         for (&i, v) in front.iter().zip(vals) {
             img[i * ch..(i + 1) * ch].copy_from_slice(&v);
