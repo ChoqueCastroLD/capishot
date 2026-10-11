@@ -99,9 +99,9 @@ note = "widgets::value_field: arithmetic plus units (1in, 5mm, 72pt, 50%) conver
 [[item]]
 id = "UI-217-14"
 target = "Layers panel: wheel steps blend modes, drop on New/Trash duplicates/deletes, checker behind art"
-status = "partial"
+status = "done"
 issue = 217
-note = "panels.rs: the wheel steps the blend-mode dropdown (widgets::dropdown_wheel_hovered, #1747); trash is click-only, no drop on New/Trash, no checker behind art"
+note = "panels.rs: the wheel steps the blend-mode dropdown (widgets::dropdown_wheel_hovered, #1747); rows dropped on New Layer/Group/Delete duplicate/group/delete them (footer_drop, #736), effect rows dropped on Delete delete that effect or the whole style (fx_trash_drop, #3102); pixel thumbnails draw widgets::checker behind the art; Shift+Plus/Minus step the layer's or the painting tool's blend mode (blend_keys.rs, #3102)"
 
 [[item]]
 id = "UI-217-15"

@@ -2268,6 +2268,8 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let in_selection = selection.iter().any(|s| s.0 == id);
         (id, in_selection)
     });
+    // An effect row can be dropped on Delete too (#3102).
+    let fx_footer_drag = ctx.data(|d| d.get_temp::<FxDrag>(fx_drag_key()));
     fx_drag_feedback(&ctx, &doc);
     // End any layer drag after every row has had a chance to accept the drop.
     if ctx.input(|i| i.pointer.any_released()) {
@@ -2291,6 +2293,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             actions.push((delete.into(), params));
         }
         actions.extend(footer_drop(ui, &trash, footer_drag, "layer.delete"));
+        actions.extend(fx_trash_drop(ui, &trash, fx_footer_drag));
         // A click follows the selected thumbnail; name that action for screen readers even
         // though dropping a whole layer row onto the same button always deletes the layer.
         trash.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!(label)));
@@ -2403,16 +2406,32 @@ fn footer_drop(ui: &egui::Ui, button: &egui::Response, drag: Option<(u64, bool)>
     // Named for screen readers (and tests) after the command a drop runs.
     button.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, footer_label(command)));
     let (layer, in_selection) = drag?;
-    let p = ui.ctx().input(|i| i.pointer.interact_pos())?;
+    dropped_on(ui, button).then(|| (command.into(), if in_selection { json!({}) } else { json!({"layer": layer}) }))
+}
+
+/// While something is dragged over a footer `button`: highlights it, and is true on the release.
+fn dropped_on(ui: &egui::Ui, button: &egui::Response) -> bool {
+    let Some(p) = ui.ctx().input(|i| i.pointer.interact_pos()) else { return false };
     if !button.rect.contains(p) {
-        return None;
+        return false;
     }
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_stroke(button.rect, t.radius_sm, Stroke::new(2.0, t.accent), StrokeKind::Inside);
-    if !ui.ctx().input(|i| i.pointer.any_released()) {
+    ui.ctx().input(|i| i.pointer.any_released())
+}
+
+/// Effects dragged onto the footer's Delete button, as in Photoshop (#3102): the "Effects" row
+/// clears the layer style, an effect's row deletes just that effect.
+fn fx_trash_drop(ui: &egui::Ui, button: &egui::Response, drag: Option<FxDrag>) -> Option<(String, Value)> {
+    let (layer, effect) = drag?;
+    if !dropped_on(ui, button) {
         return None;
     }
-    Some((command.into(), if in_selection { json!({}) } else { json!({"layer": layer}) }))
+    let params = match effect {
+        Some(i) => json!({"layer": layer, "effect": i}),
+        None => json!({"layer": layer}),
+    };
+    Some(("layer.layerStyle.clear".into(), params))
 }
 
 fn footer_label(command: &str) -> &'static str {
