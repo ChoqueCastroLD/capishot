@@ -125,6 +125,35 @@ fn half_selection_mixes_halfway() {
 }
 
 #[test]
+fn selection_mix_preserves_sparse_mask_coverage_at_tile_boundaries() {
+    let area = Rect::new(-257, -1, 1, 1);
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        let src = flat(depth, area, [0.2, 0.4, 0.6, 0.8]);
+        let orig = Image::read(&src, area);
+        for mask_depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let mask_fmt = PixelFormat::new(ColorMode::Grayscale, mask_depth, false);
+            let mut sel = Surface::with_default(mask_fmt, &[1.0]);
+            sel.fill_rect(Rect::new(-256, -256, 0, 0), &[0.0]);
+            sel.write_pixel(-256, -1, &[0.5]);
+            sel.write_pixel(-1, -1, &[1.0]);
+            // Whole rows and the left/right edge pixels still read an absent tile's default.
+            let coverage = sel.read_region(area);
+            let filtered = [0.8, 0.6, 0.4, 0.2];
+            let mut data = filtered.repeat(coverage.len());
+            mix_selection(&mut data, area, &sel, &orig);
+            for ((result, original), k) in data.as_chunks::<4>().0.iter().zip(orig.data.as_chunks::<4>().0.iter()).zip(coverage) {
+                let expected = std::array::from_fn::<_, 4, _>(|c| match k {
+                    0.0 => original[c],
+                    1.0 => filtered[c],
+                    _ => original[c] + (filtered[c] - original[c]) * k,
+                });
+                assert_eq!(*result, expected, "source {depth:?}, mask {mask_depth:?}, coverage {k}");
+            }
+        }
+    }
+}
+
+#[test]
 fn gaussian_identity_at_tiny_radius() {
     let s = pattern(SampleType::U8, R);
     let out = run(&s, &FilterParams::GaussianBlur { radius: 0.01 });
