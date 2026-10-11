@@ -22,7 +22,6 @@ pub mod bg_erase;
 pub mod brush;
 pub mod dynamics;
 pub mod mixer;
-pub mod outline;
 pub mod presets;
 pub mod procedural;
 pub mod render;
@@ -154,6 +153,16 @@ pub fn tip_falloff(d: f32, radius: f32, hardness: f32) -> f32 {
     let s = 1.0 - t * t;
     let s2 = s * s;
     s2 * s2
+}
+
+/// Distance from the centre where [`tip_falloff`] drops to 50 %: the contour Preferences ›
+/// Cursors › Normal Brush Tip outlines. It inverts `(1 - t²)⁴ = ½`, so `t = √(1 - ½^¼) ≈ 0.399`
+/// of the way from the hard core (`hardness · radius`) to the edge.
+#[inline]
+pub fn half_coverage_radius(radius: f32, hardness: f32) -> f32 {
+    let h = if hardness.is_nan() { 0.0 } else { hardness.clamp(0.0, 1.0) };
+    let t = (1.0 - 0.5f32.sqrt().sqrt()).sqrt();
+    radius * (h + t * (1.0 - h))
 }
 
 /// Coverage of a round dab at distance `d` from its centre (anti-aliased edge, hardness falloff).

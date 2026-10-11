@@ -132,9 +132,17 @@ pub fn color_lookup_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: Layer
         params = Some(json!({"dither": d}));
     }
     if let Some(mut p) = params {
+        if p.get("lut").is_none()
+            && let Some((layer, preview)) = &app.live_adjust
+            && *layer == id
+            && let Some(lut) = preview.get("lut")
+        {
+            p["lut"] = lut.clone();
+        }
         p["layer"] = json!(id.0);
         // Errors (an unreadable LUT file) land in the status bar.
         let _ = app.run("layer.setAdjustment", p);
+        app.live_adjust = None;
     }
 }
 
