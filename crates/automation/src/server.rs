@@ -245,8 +245,9 @@ pub struct UiSetParams {
     /// cropOverlayOrientation (0..3), cropShield (an object patching show_cropped_area, enabled,
     /// color ("matchCanvas" or "custom"), custom_color ([r, g, b]), opacity (0..100),
     /// auto_adjust, classic_mode and auto_center_preview), shapeStroke (an object patching width, align, cap, join, miterLimit,
-    /// dashes, dashOffset and opacity; null disables the stroke). Shape stroke fields use
-    /// `shape.edit` names and units; colour comes from `tools.setColors`. Other fields are an error.
+    /// dashes, dashOffset and opacity; null disables the stroke), fonts ({tab, query, category,
+    /// subset}: the font picker's Find More view). Shape stroke fields use `shape.edit` names and
+    /// units; colour comes from `tools.setColors`. Other fields are an error.
     pub fields: Value,
 }
 

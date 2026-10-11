@@ -1100,6 +1100,11 @@ pub fn families() -> Arc<Vec<String>> {
     v
 }
 
+/// Forget the cached family list: a font was downloaded or removed.
+pub fn invalidate_families() {
+    photocraft_text::fonts::bump_generation();
+}
+
 /// Where [`sync_font_names`] leaves the font menus' localized labels for this frame.
 fn font_labels_id() -> egui::Id {
     egui::Id::new("photocraft-font-menu-localized-names")
@@ -1322,8 +1327,23 @@ pub(crate) fn fonts_ready(ui: &mut egui::Ui, width: f32) -> bool {
 }
 
 /// Searchable font-family combo box.
-fn font_picker(ui: &mut egui::Ui, current: &mut String, width: f32, preview: photocraft_engine::prefs::FontPreview) -> bool {
-    family_picker_in(ui, "type-font", current, width, &families(), preview)
+fn font_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &mut String, width: f32, preview: photocraft_engine::prefs::FontPreview) -> bool {
+    let list = families();
+    // The Find More tab replaces the family list; picking a font there closes the menu.
+    let mut top = |ui: &mut egui::Ui, current: &mut String| -> Option<bool> {
+        crate::fonts_ui::tabs(app, ui);
+        if app.ui.fonts.tab != crate::fonts_ui::PickerTab::FindMore {
+            return None;
+        }
+        let mut changed = false;
+        if let Some(f) = crate::fonts_ui::find_more(app, ui, current) {
+            *current = f;
+            changed = true;
+            ui.close();
+        }
+        Some(changed)
+    };
+    family_picker_with(ui, "type-font", current, width, &list, preview, &mut top)
 }
 
 /// Maximum height of the font menu.
@@ -1345,6 +1365,20 @@ pub(crate) fn family_picker_in(
     families: &[String],
     preview: photocraft_engine::prefs::FontPreview,
 ) -> bool {
+    family_picker_with(ui, salt, current, width, families, preview, &mut |_, _| None)
+}
+
+/// [`family_picker_in`] with a hook run first inside the menu: `Some(changed)` means the hook drew
+/// the whole menu (the Find More tab) and the family list is skipped.
+fn family_picker_with(
+    ui: &mut egui::Ui,
+    salt: &str,
+    current: &mut String,
+    width: f32,
+    families: &[String],
+    preview: photocraft_engine::prefs::FontPreview,
+    top: &mut dyn FnMut(&mut egui::Ui, &mut String) -> Option<bool>,
+) -> bool {
     let mut changed = false;
     let search_id = ui.id().with(("font-search", salt));
     // The list opens on the press, so a press-drag-release picks a font too (#2735).
@@ -1362,6 +1396,10 @@ pub(crate) fn family_picker_in(
         .close_behavior(if matches!(close, egui::PopupCloseBehavior::IgnoreClicks) { close } else { egui::PopupCloseBehavior::CloseOnClickOutside });
 
     let response = combo.show_ui(ui, |ui| {
+        if let Some(c) = top(ui, current) {
+            changed = c;
+            return None;
+        }
         let (pass_id, focus_id, height_id) = (search_id.with("pass"), search_id.with("focus"), search_id.with("height"));
         let pass = ui.ctx().cumulative_pass_nr();
         let last_pass: Option<u64> = ui.data(|d| d.get_temp(pass_id));
@@ -1606,7 +1644,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     // Font family and style menus (one placeholder in their place while the fonts load).
     if fonts_ready(ui, 170.0 + ui.spacing().item_spacing.x + 110.0) {
-        if font_picker(ui, &mut fam, 170.0, app.session.prefs().type_.font_preview) {
+        let preview = app.session.prefs().type_.font_preview;
+        if font_picker(app, ui, &mut fam, 170.0, preview) {
             app.ui.tool_options.type_font = fam.clone();
             let st = styles(&fam);
             style = if st.contains(&style) { style } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
@@ -1921,7 +1960,8 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
         let mut ready = true;
         row(ui, &mut |ui| {
             ready = fonts_ready(ui, full);
-            if ready && font_picker(ui, &mut fam, full, app.session.prefs().type_.font_preview) {
+            let preview = app.session.prefs().type_.font_preview;
+            if ready && font_picker(app, ui, &mut fam, full, preview) {
                 app.ui.tool_options.type_font = fam.clone();
                 apply(app, ui.ctx(), json!({"font": fam}));
             }

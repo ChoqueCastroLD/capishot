@@ -3,12 +3,12 @@
 //! fonts found by scanning the platform font directories (no fontconfig), user-registered font
 //! data, and PostScript-name lookup for PSD import.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use parley::FontContext;
-use parley::fontique::{Blob, Collection, CollectionOptions, FontInfoOverride, FontStyle, FontWeight, FontWidth, GenericFamily, SourceCache};
+use parley::fontique::{Blob, Collection, CollectionOptions, FamilyId, FontInfoOverride, FontStyle, FontWeight, FontWidth, GenericFamily, SourceCache};
 use skrifa::raw::{FileRef, TableProvider, types::Tag};
 use skrifa::{MetadataProvider, string::StringId};
 
@@ -93,6 +93,12 @@ pub fn generation() -> u64 {
     GENERATION.load(Ordering::Relaxed)
 }
 
+/// Marks the font list changed (a downloaded font was registered or removed), so caches keyed
+/// on [`generation`] rebuild.
+pub fn bump_generation() {
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+}
+
 /// One face in the database (for font menus).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaceInfo {
@@ -126,6 +132,31 @@ pub struct FontDb {
     fallbacks: Vec<String>,
     face_cache: HashMap<String, Vec<FaceInfo>>,
     face_aliases: HashMap<(String, usize), String>,
+    /// Font files registered from the downloaded-fonts store (see [`FontDb::register_managed`]),
+    /// by store key.
+    managed: HashMap<String, Managed>,
+    /// Lower-case names of families whose every face was unregistered: fontique keeps the (now
+    /// empty) family name, so lists and lookups hide it.
+    retired: HashSet<String>,
+}
+
+/// A face as fontique's `unregister_font` identifies it.
+type FaceKey = (FamilyId, FontWidth, FontStyle, FontWeight);
+
+/// Faces a managed font set added: exactly what has to be unregistered again.
+struct Managed {
+    files: Vec<std::path::PathBuf>,
+    faces: Vec<FaceKey>,
+}
+
+/// Outcome of [`FontDb::register_managed`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Registered {
+    /// The font files were added; these are the family names they provide.
+    Families(Vec<String>),
+    /// The family already exists (bundled, system or craft font), so the files were not
+    /// registered: merging would make removal ambiguous, and the existing family wins.
+    AlreadyAvailable,
 }
 
 impl Default for FontDb {
@@ -145,6 +176,8 @@ impl FontDb {
             fallbacks: Vec::new(),
             face_cache: HashMap::new(),
             face_aliases: HashMap::new(),
+            managed: HashMap::new(),
+            retired: HashSet::new(),
         };
         for (_, bytes) in BUNDLED {
             db.register_static_font(bytes.as_slice());
@@ -257,7 +290,9 @@ impl FontDb {
     /// All family names, sorted.
     pub fn families(&mut self) -> Vec<String> {
         // Private system faces (a leading '.', e.g. macOS ".SF NS") are hidden, as in Photoshop.
-        let mut v: Vec<String> = self.fcx.collection.family_names().filter(|n| !is_hidden_family(n)).map(str::to_string).collect();
+        let retired = &self.retired;
+        let mut v: Vec<String> =
+            self.fcx.collection.family_names().filter(|n| !is_hidden_family(n) && (retired.is_empty() || !retired.contains(&n.to_lowercase()))).map(str::to_string).collect();
         v.sort_by_key(|s| s.to_lowercase());
         v.dedup();
         v
@@ -295,7 +330,118 @@ impl FontDb {
     }
 
     pub fn has_family(&mut self, name: &str) -> bool {
-        self.fcx.collection.family_id(name).is_some()
+        !self.retired.contains(&name.to_lowercase()) && self.fcx.collection.family_id(name).is_some()
+    }
+
+    /// Registers font files that belong to the downloaded-fonts store under `key` (the store's
+    /// folder name). The files are memory-mapped lazily by fontique, not read into memory.
+    /// Registering an already registered `key` replaces it. `family` is the family the files
+    /// provide, as the store records it. Native only (the web build has no file paths).
+    pub fn register_managed(&mut self, key: &str, family: &str, files: &[std::path::PathBuf]) -> Result<Registered, String> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (key, family, files);
+            Err("registering font files is not supported in this build".into())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Already registered from exactly these files (a second session in one process, a
+            // batch of files): nothing to do.
+            if self.managed.get(key).is_some_and(|m| m.files == files) {
+                return Ok(Registered::Families(self.managed_families(key)));
+            }
+            self.unregister_managed(key);
+            if self.has_family(family) {
+                return Ok(Registered::AlreadyAvailable);
+            }
+            for f in files {
+                self.fcx.collection.load_fonts_from_paths([f]);
+            }
+            let (faces, names) = self.faces_from(files);
+            if faces.is_empty() {
+                return Err(format!("`{family}` could not be registered: its font files have no usable face"));
+            }
+            for n in &names {
+                self.retired.remove(&n.to_lowercase());
+            }
+            self.managed.insert(key.to_string(), Managed { files: files.to_vec(), faces });
+            self.ps_cache.clear();
+            self.face_cache.clear();
+            self.refresh_generics();
+            GENERATION.fetch_add(1, Ordering::Relaxed);
+            Ok(Registered::Families(names))
+        }
+    }
+
+    /// Unregisters what [`FontDb::register_managed`] added for `key` (never any other font).
+    /// Returns the families that lost their faces.
+    pub fn unregister_managed(&mut self, key: &str) -> Vec<String> {
+        let Some(m) = self.managed.remove(key) else { return Vec::new() };
+        let mut names = Vec::new();
+        for (id, width, style, weight) in m.faces {
+            if let Some(n) = self.fcx.collection.family_name(id).map(str::to_string)
+                && !names.contains(&n)
+            {
+                names.push(n);
+            }
+            self.fcx.collection.unregister_font(id, width, style, weight);
+        }
+        for n in &names {
+            if self.fcx.collection.family_by_name(n).is_none_or(|f| f.fonts().is_empty()) {
+                self.retired.insert(n.to_lowercase());
+            }
+        }
+        self.ps_cache.clear();
+        self.face_cache.clear();
+        self.refresh_generics();
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+        names
+    }
+
+    /// The family names registered under `key` (empty when it isn't registered).
+    pub fn managed_families(&mut self, key: &str) -> Vec<String> {
+        let ids: Vec<FamilyId> = self.managed.get(key).map(|m| m.faces.iter().map(|f| f.0).collect()).unwrap_or_default();
+        let mut names: Vec<String> = Vec::new();
+        for id in ids {
+            if let Some(n) = self.fcx.collection.family_name(id)
+                && !names.iter().any(|x| x == n)
+            {
+                names.push(n.to_string());
+            }
+        }
+        names.sort_by_key(|n| n.to_lowercase());
+        names
+    }
+
+    /// Is a downloaded-fonts set registered under `key`?
+    pub fn is_managed(&self, key: &str) -> bool {
+        self.managed.contains_key(key)
+    }
+
+    /// The faces (and their family names) whose font source is one of `files`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn faces_from(&mut self, files: &[std::path::PathBuf]) -> (Vec<FaceKey>, Vec<String>) {
+        use parley::fontique::SourceKind;
+        let all: Vec<String> = self.fcx.collection.family_names().map(str::to_string).collect();
+        let (mut faces, mut names) = (Vec::new(), Vec::new());
+        for name in all {
+            let Some(id) = self.fcx.collection.family_id(&name) else { continue };
+            let Some(info) = self.fcx.collection.family(id) else { continue };
+            let mut any = false;
+            for f in info.fonts() {
+                if let SourceKind::Path(p) = &f.source().kind
+                    && files.iter().any(|x| x.as_path() == &**p)
+                {
+                    faces.push((id, f.width(), f.style(), f.weight()));
+                    any = true;
+                }
+            }
+            if any {
+                names.push(name);
+            }
+        }
+        names.sort_by_key(|n| n.to_lowercase());
+        (faces, names)
     }
 
     /// Whether the face selected for a character style exposes an OpenType GSUB feature.
@@ -472,6 +618,26 @@ fn fallback_style(weight: f32, italic: bool) -> String {
         (_, true) => format!("{name} Italic"),
         (_, false) => name.into(),
     }
+}
+
+/// Checks that `bytes` is a real font (TrueType/OpenType, or a collection of them) with glyphs
+/// and a family name, before it is stored or registered. Returns the number of faces.
+pub fn validate_font(bytes: &[u8]) -> Result<usize, String> {
+    use skrifa::raw::TableProvider;
+    let file = FileRef::new(bytes).map_err(|e| format!("not a font file ({e})"))?;
+    let mut n = 0;
+    for font in file.fonts() {
+        let font = font.map_err(|e| format!("unreadable font ({e})"))?;
+        let glyphs = font.maxp().map_err(|e| format!("font has no glyph table ({e})"))?.num_glyphs();
+        if glyphs == 0 {
+            return Err("font has no glyphs".into());
+        }
+        if font.localized_strings(StringId::FAMILY_NAME).english_or_first().is_none() {
+            return Err("font has no family name".into());
+        }
+        n += 1;
+    }
+    if n == 0 { Err("font file has no faces".into()) } else { Ok(n) }
 }
 
 /// Number of faces in a font file (1 for TTF/OTF, n for TTC/OTC, 0 if unreadable).
@@ -686,6 +852,96 @@ mod tests {
         assert_eq!(super::localized_name("Arial", &names(&[("Arial", Some("en-GB")), ("Arial", Some("de-DE"))])), None);
         assert_eq!(super::localized_name("X", &names(&[("Y", None), ("  ", Some("ja-JP"))])), None);
         assert_eq!(super::localized_name("X", &[]), None);
+    }
+
+    /// `Inter-Regular.ttf` with the 5-letter family name "Inter" replaced (every name-table copy),
+    /// so each test registers a family nobody else uses.
+    fn renamed_inter(name: &str) -> Vec<u8> {
+        assert_eq!(name.chars().count(), 5);
+        let enc = |s: &str| s.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<u8>>();
+        let (from, to) = (enc("Inter"), enc(name));
+        let mut b = super::INTER_REGULAR.to_vec();
+        let mut i = 0;
+        while i + from.len() <= b.len() {
+            if b[i..i + from.len()] == from[..] {
+                b[i..i + from.len()].copy_from_slice(&to);
+                i += from.len();
+            } else {
+                i += 1;
+            }
+        }
+        b
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("photocraft-fonts-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        // A failure shows up as the test's own write failing.
+        let _ = std::fs::create_dir_all(&d);
+        d
+    }
+
+    #[test]
+    fn managed_fonts_register_and_unregister_without_touching_others() {
+        let dir = temp_dir("managed");
+        let file = dir.join("Zqxvk-Regular.ttf");
+        std::fs::write(&file, renamed_inter("Zqxvk")).unwrap();
+        let mut db = super::FontDb::new();
+        let before = db.families();
+        let inter_faces = db.faces("Inter").len();
+        assert!(before.iter().any(|f| f == "Inter"));
+        let r = db.register_managed("zqxvk", "Zqxvk", std::slice::from_ref(&file)).unwrap();
+        assert_eq!(r, super::Registered::Families(vec!["Zqxvk".into()]));
+        assert!(db.has_family("Zqxvk") && db.is_managed("zqxvk"));
+        assert!(db.families().iter().any(|f| f == "Zqxvk"));
+        assert_eq!(db.faces("Zqxvk").len(), 1);
+        // Registering again is a no-op; registering other files under the key replaces them.
+        assert_eq!(db.register_managed("zqxvk", "Zqxvk", std::slice::from_ref(&file)).unwrap(), super::Registered::Families(vec!["Zqxvk".into()]));
+        assert_eq!(db.faces("Zqxvk").len(), 1);
+        let second = dir.join("Zqxvk-Copy.ttf");
+        std::fs::write(&second, renamed_inter("Zqxvk")).unwrap();
+        db.register_managed("zqxvk", "Zqxvk", &[second]).unwrap();
+        assert_eq!(db.faces("Zqxvk").len(), 1);
+        db.register_managed("zqxvk", "Zqxvk", std::slice::from_ref(&file)).unwrap();
+        assert_eq!(db.faces("Zqxvk").len(), 1);
+        // A family that already exists is not registered again and is never unregistered.
+        let inter = dir.join("Inter-Regular.ttf");
+        std::fs::write(&inter, super::INTER_REGULAR.as_slice()).unwrap();
+        assert_eq!(db.register_managed("inter", "Inter", &[inter]).unwrap(), super::Registered::AlreadyAvailable);
+        assert!(db.unregister_managed("inter").is_empty());
+        assert_eq!(db.faces("Inter").len(), inter_faces);
+        // Unregister: the family disappears from lists and lookups, the rest is untouched.
+        assert_eq!(db.unregister_managed("zqxvk"), ["Zqxvk"]);
+        assert!(!db.has_family("Zqxvk") && !db.is_managed("zqxvk"));
+        assert!(!db.families().iter().any(|f| f == "Zqxvk"));
+        assert_eq!(db.families(), before);
+        assert!(db.unregister_managed("zqxvk").is_empty());
+        // And it can come back.
+        db.register_managed("zqxvk", "Zqxvk", &[file]).unwrap();
+        assert!(db.families().iter().any(|f| f == "Zqxvk"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn managed_registration_rejects_non_fonts_and_missing_files() {
+        let dir = temp_dir("badfont");
+        let bad = dir.join("Bad.ttf");
+        std::fs::write(&bad, b"not a font").unwrap();
+        let mut db = super::FontDb::new();
+        assert!(db.register_managed("bad", "Bad Font", &[bad, dir.join("missing.ttf")]).is_err());
+        assert!(!db.is_managed("bad") && !db.has_family("Bad Font"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_font_accepts_fonts_only() {
+        assert_eq!(super::validate_font(super::INTER_REGULAR.as_slice()), Ok(1));
+        assert!(super::validate_font(b"").is_err());
+        assert!(super::validate_font(b"<html>not found</html>").is_err());
+        assert!(super::validate_font(&super::INTER_REGULAR[..200]).is_err());
+        let mut sfnt_header_only = vec![0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        sfnt_header_only.resize(64, 0);
+        assert!(super::validate_font(&sfnt_header_only).is_err());
     }
 
     #[test]
