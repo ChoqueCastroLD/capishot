@@ -415,6 +415,7 @@ pub struct LiveStroke {
     params: Value,
     /// Where the doc shows the stroke's end as finishing it would draw it (see `push`).
     tail: Rect,
+    push_count: u32,
     /// The document's CMYK profile the commit enters (`stroke_with`), so the preview shows the
     /// pixels a `paint.stroke` with `seed` will write.
     cmyk: Option<std::sync::Arc<photocraft_color::convert::CmykSpace>>,
@@ -509,6 +510,7 @@ impl LiveStroke {
             cmyk: doc_cmyk_space(s),
             points: Vec::new(),
             base,
+            push_count: 0,
         };
         live.push(&pts)?;
         Ok(live)
@@ -516,6 +518,9 @@ impl LiveStroke {
 
     /// The stroke as its commit would take it over (see [`LiveCommit`]).
     pub fn into_commit(mut self) -> Result<LiveCommit> {
+        // The tail throttle may have skipped the last catch-up preview: the commit takes these
+        // pixels as they are, so bring it up to date first.
+        self.finalize_tail()?;
         let bounds = self.bounds();
         let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
         Ok(LiveCommit { cmd: self.cmd, base: self.base, params: self.params, seed: self.seed, points: self.points, surface: surf.clone(), bounds })
@@ -580,20 +585,50 @@ impl LiveStroke {
                 self.tail = bounds;
                 return Ok(damage.union(&bounds));
             }
+            // Tail throttle: the smoothing catch-up tail is redrawn on the first and every second
+            // push only; `finalize_tail` brings it up to date before anything reads the pixels.
+            self.push_count = self.push_count.wrapping_add(1);
+            let update_tail = self.push_count <= 1 || self.push_count.is_multiple_of(2);
             let mut dmg = Rect::EMPTY;
-            let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
-            if !old.is_empty() {
-                // Back to the stroke without the previous tail.
-                surf.write_region(old, &self.pre.read_region(old));
-                self.renderer.mark_dirty(old);
-                dmg = old;
+            if update_tail {
+                let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
+                if !old.is_empty() {
+                    // Back to the stroke without the previous tail.
+                    surf.write_region(old, &self.pre.read_region(old));
+                    self.renderer.mark_dirty(old);
+                    dmg = old;
+                }
             }
             dmg = dmg.union(&self.renderer.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false));
-            if let Some(mut tail) = self.renderer.tail_preview() {
+            if update_tail && let Some(mut tail) = self.renderer.tail_preview() {
                 self.tail = tail.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false);
                 dmg = dmg.union(&self.tail);
             }
             Ok(dmg)
+        })
+    }
+
+    /// Ensure the tail preview is up to date (undo the throttle skip so the surface shows the
+    /// correct smoothing catch-up). Call before reading pixels from `self.doc`.
+    pub fn finalize_tail(&mut self) -> Result<Rect> {
+        // Symmetry strokes redraw every pass on each push; only the plain path is throttled.
+        if self.mirror_distinct.iter().any(|d| *d) {
+            return Ok(Rect::EMPTY);
+        }
+        let cmyk = self.cmyk.clone();
+        photocraft_color::convert::with_cmyk_space(cmyk.as_ref(), || {
+            let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
+            let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
+            if !old.is_empty() {
+                surf.write_region(old, &self.pre.read_region(old));
+                self.renderer.mark_dirty(old);
+            }
+            let mut dmg = self.renderer.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false);
+            if let Some(mut tail) = self.renderer.tail_preview() {
+                self.tail = tail.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false);
+                dmg = dmg.union(&self.tail);
+            }
+            Ok(dmg.union(&old))
         })
     }
 }
