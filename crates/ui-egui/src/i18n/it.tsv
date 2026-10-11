@@ -2528,3 +2528,13 @@ fontWeight	Italic	Corsivo
 	Based on PhotoCraft	Basato su PhotoCraft
 	psd-compiler	psd-compiler
 	Show canvas dots	Mostra punti della tela
+	Copy Layers	Copia livelli
+	Paste Layers	Incolla livelli
+	Cycle Screen Mode Backwards	Cambia modalità schermo all'indietro
+	Scroll Up One Screen	Scorri in alto di una schermata
+	Scroll Down One Screen	Scorri in basso di una schermata
+	Scroll Left One Screen	Scorri a sinistra di una schermata
+	Scroll Right One Screen	Scorri a destra di una schermata
+	Scroll to Upper-Left Corner	Scorri all'angolo superiore sinistro
+	Scroll to Lower-Right Corner	Scorri all'angolo inferiore destro
+	Show rulers in new documents	Mostra righelli nei nuovi documenti

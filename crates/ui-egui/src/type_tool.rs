@@ -1591,7 +1591,7 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
             let shown = kerning_label(kerning_at(app).unwrap_or((c.kerning, c.kern)));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = LABEL_GAP;
-                icon_label(ui, "text-cursor", "Kerning: Metrics, Optical or a value in 1/1000 em (Alt+←/→ at the caret)");
+                icon_label(ui, "text-cursor", &crate::shortcuts::os_text("Kerning: Metrics, Optical or a value in 1/1000 em (Alt+←/→ at the caret)"));
                 if let Some(v) = kerning_field(ui, &shown, w) {
                     apply_kerning(app, ui.ctx(), v);
                 }

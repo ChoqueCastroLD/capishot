@@ -141,9 +141,9 @@ note = "move_mods.rs covers Shift/Alt/arrows only"
 [[item]]
 id = "TOOL-214-5"
 target = "Right-click menu during Free Transform (scale, rotate, skew, warp, flip, rotate 90/180)"
-status = "missing"
+status = "done"
 issue = 214
-note = "No context menu in canvas.rs or transform_tool.rs"
+note = "canvas_tool_menu.rs TRANSFORM_MENU: Free Transform, Scale, Rotate, Skew, Distort, Perspective, Warp, Content-Aware Scale, Rotate 180/90 CW/90 CCW, Flip H/V; the turns and flips act on the open box about its reference point from the menu bar too (transform_tool::BOX_PRESETS; transform_menu_turns_and_flips_the_box)"
 
 [[item]]
 id = "TOOL-214-6"

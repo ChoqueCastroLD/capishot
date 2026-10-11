@@ -2497,3 +2497,13 @@ fontWeight	Italic	Kursiv
 	Based on PhotoCraft	Basiert auf PhotoCraft
 	psd-compiler	psd-compiler
 	Show canvas dots	Punkte auf der Arbeitsfläche anzeigen
+	Copy Layers	Ebenen kopieren
+	Paste Layers	Ebenen einfügen
+	Cycle Screen Mode Backwards	Bildschirmmodus rückwärts durchschalten
+	Scroll Up One Screen	Einen Bildschirm nach oben blättern
+	Scroll Down One Screen	Einen Bildschirm nach unten blättern
+	Scroll Left One Screen	Einen Bildschirm nach links blättern
+	Scroll Right One Screen	Einen Bildschirm nach rechts blättern
+	Scroll to Upper-Left Corner	Zur oberen linken Ecke blättern
+	Scroll to Lower-Right Corner	Zur unteren rechten Ecke blättern
+	Show rulers in new documents	Lineale in neuen Dokumenten einblenden
