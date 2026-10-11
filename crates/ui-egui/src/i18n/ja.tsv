@@ -3502,6 +3502,10 @@ cameraData	Lens	レンズ
 	Previous Document	前のドキュメント
 	W x H x Resolution	幅 x 高さ x 解像度
 	Front Image	前面の画像
+	Artboard Tool	アートボードツール
+	Make Portrait	縦向きにする
+	Make Landscape	横向きにする
+	Add New Artboard	新規アートボードを追加
 	Freeform Pen Tool	フリーフォームペンツール
 	Curvature Pen Tool	曲線ペンツール
 	Curve Fit:	カーブフィット:

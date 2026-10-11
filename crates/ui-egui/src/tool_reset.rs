@@ -179,7 +179,8 @@ pub fn reset_options(o: &mut ToolOptions, tool: Tool) {
         | Tool::Slice
         | Tool::SliceSelect
         | Tool::AddAnchorPoint
-        | Tool::DeleteAnchorPoint => {}
+        | Tool::DeleteAnchorPoint
+        | Tool::Artboard => {}
     }
 }
 

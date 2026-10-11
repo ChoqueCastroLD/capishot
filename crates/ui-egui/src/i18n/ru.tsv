@@ -2830,6 +2830,10 @@ cameraData	Lens	Объектив
 	Previous Document	Предыдущий документ
 	W x H x Resolution	Ш x В x Разрешение
 	Front Image	Изображение переднего плана
+	Artboard Tool	Монтажная область (инструмент)
+	Make Portrait	Сделать книжной
+	Make Landscape	Сделать альбомной
+	Add New Artboard	Добавить монтажную область
 	Freeform Pen Tool	Свободное перо
 	Curvature Pen Tool	Перо кривизны
 	Curve Fit:	Точность кривой:

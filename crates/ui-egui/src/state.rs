@@ -63,6 +63,7 @@ impl Default for CameraRawPreviewState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tool {
     Move,
+    Artboard,
     RectMarquee,
     EllipseMarquee,
     /// Selects one pixel row across the whole canvas at the clicked y (Photoshop's flyout only:
@@ -131,8 +132,9 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 62] = [
+    pub const ALL: [Tool; 63] = [
         Tool::Move,
+        Tool::Artboard,
         Tool::RectMarquee,
         Tool::EllipseMarquee,
         Tool::SingleRowMarquee,
@@ -199,6 +201,7 @@ impl Tool {
     pub fn label(self) -> &'static str {
         match self {
             Tool::Move => "Move Tool",
+            Tool::Artboard => "Artboard Tool",
             Tool::RectMarquee => "Rectangular Marquee Tool",
             Tool::EllipseMarquee => "Elliptical Marquee Tool",
             Tool::SingleRowMarquee => "Single Row Marquee Tool",
@@ -301,7 +304,7 @@ impl Tool {
     /// Photoshop default single-key shortcut (`'\0'` = none, e.g. the Blur group).
     pub fn key(self) -> char {
         match self {
-            Tool::Move => 'V',
+            Tool::Move | Tool::Artboard => 'V',
             Tool::RectMarquee | Tool::EllipseMarquee => 'M',
             Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::ColorReplacement => 'B',
             Tool::Eraser | Tool::BackgroundEraser | Tool::MagicEraser => 'E',
@@ -1041,6 +1044,9 @@ pub struct UiState {
     /// Slice and Slice Select tools (see `slice_ui`).
     #[serde(default)]
     pub slices: crate::slice_ui::SliceUi,
+    /// Artboard tool (see `artboard_tool`).
+    #[serde(default)]
+    pub artboard_tool: crate::artboard_tool::ArtboardToolUi,
     /// Modifier Keys panel, custom pixel aspect ratios, workspace dialogs (see `workspace_ui`).
     #[serde(default)]
     pub shell: crate::workspace_ui::ShellUi,
@@ -1168,6 +1174,7 @@ impl Default for UiState {
             analysis: Default::default(),
             timeline: Default::default(),
             slices: Default::default(),
+            artboard_tool: Default::default(),
             shell: Default::default(),
             layer_filter: Vec::new(),
             pen: None,
@@ -1275,7 +1282,7 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 62);
+        assert_eq!(Tool::ALL.len(), 63);
         assert_eq!(Tool::from_name("Vertical Type Mask Tool"), Some(Tool::VerticalTypeMask));
         assert_eq!(Tool::from_name("addAnchorPoint"), Some(Tool::AddAnchorPoint));
         assert_eq!(Tool::from_name("Delete Anchor Point Tool"), Some(Tool::DeleteAnchorPoint));
