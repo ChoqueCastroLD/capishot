@@ -4,6 +4,8 @@ Shape stroke defaults are drivable with `ui.set {shapeStroke: {width, align, cap
 miterLimit, dashes, dashOffset, opacity}}`; partial fields merge, null disables the stroke.
 Values use the existing `shape.edit` names and units. Colour uses `tools.setColors`.
 `ui.inspect` exposes `toolOptions.shape_stroke`, `stroke_width`, and `strokeEditor`.
+Stroke Options applies valid UI edits immediately; `strokeEditor` is the open editor state,
+not an uncommitted document preview. Escape/outside clicks close it without reverting edits.
 See [Shape stroke options](shape-strokes.md) for limits, preview and persistence behavior.
 
 The desktop app listens on `127.0.0.1:<port>` (loopback only). Start it with a token file so the credential is not exposed in the process command line:
