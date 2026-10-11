@@ -1288,7 +1288,7 @@ fn blend_if_bar(ui: &mut egui::Ui, id: egui::Id, q: &mut [u8; 4]) -> bool {
 }
 
 /// Light direction uses document angles: counter-clockwise from three o'clock.
-fn angle_row(ui: &mut egui::Ui, label: &str, angle: &mut f32) -> egui::Response {
+pub(crate) fn angle_row(ui: &mut egui::Ui, label: &str, angle: &mut f32) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
         ui.label(RichText::new(tl!(label)).color(t.text_dim));

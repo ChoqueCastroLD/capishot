@@ -3120,5 +3120,7 @@ cameraData	Lens	렌즈
 	Select the crop presets to delete	삭제할 자르기 사전 설정을 선택하십시오
 	Enter a name for the crop preset	자르기 사전 설정의 이름을 입력하십시오
 	There is no crop size or ratio to save	저장할 자르기 크기나 비율이 없습니다
+	Scale:	비율:
+	Snap to Origin	원점에 스냅
 	Search settings…	설정 검색…
 	No matching settings	일치하는 설정 없음

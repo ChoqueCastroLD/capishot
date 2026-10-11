@@ -2544,6 +2544,8 @@ cameraData	Lens	镜头
 	Curve Fit:	曲线拟合：
 	Drag: draw freehand · Release on the start point: close	拖动：自由绘制 · 在起点松开：闭合
 	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	单击：平滑点 · 双击：角点 · 拖动点：移动 · 单击起点：闭合 · {key} 完成
+	Scale:	缩放：
+	Snap to Origin	贴紧原点
 	Search settings…	搜索设置…
 	No matching settings	没有匹配的设置
 	New Crop Preset…	新建裁剪预设…
