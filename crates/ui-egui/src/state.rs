@@ -111,6 +111,8 @@ pub enum Tool {
     QuickSelection,
     ObjectSelection,
     Pen,
+    FreeformPen,
+    CurvaturePen,
     AddAnchorPoint,
     DeleteAnchorPoint,
     PathSelection,
@@ -126,7 +128,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 58] = [
+    pub const ALL: [Tool; 60] = [
         Tool::Move,
         Tool::RectMarquee,
         Tool::EllipseMarquee,
@@ -173,6 +175,8 @@ impl Tool {
         Tool::QuickSelection,
         Tool::ObjectSelection,
         Tool::Pen,
+        Tool::FreeformPen,
+        Tool::CurvaturePen,
         Tool::AddAnchorPoint,
         Tool::DeleteAnchorPoint,
         Tool::PathSelection,
@@ -237,6 +241,8 @@ impl Tool {
             Tool::QuickSelection => "Quick Selection Tool",
             Tool::ObjectSelection => "Object Selection Tool",
             Tool::Pen => "Pen Tool",
+            Tool::FreeformPen => "Freeform Pen Tool",
+            Tool::CurvaturePen => "Curvature Pen Tool",
             Tool::AddAnchorPoint => "Add Anchor Point Tool",
             Tool::DeleteAnchorPoint => "Delete Anchor Point Tool",
             Tool::PathSelection => "Path Selection Tool",
@@ -301,7 +307,7 @@ impl Tool {
             Tool::SingleRowMarquee | Tool::SingleColumnMarquee => '\0',
             Tool::Dodge | Tool::Burn | Tool::Sponge => 'O',
             Tool::QuickSelection | Tool::ObjectSelection => 'W',
-            Tool::Pen | Tool::AddAnchorPoint | Tool::DeleteAnchorPoint => 'P',
+            Tool::Pen | Tool::FreeformPen | Tool::CurvaturePen | Tool::AddAnchorPoint | Tool::DeleteAnchorPoint => 'P',
             Tool::PathSelection | Tool::DirectSelection => 'A',
             Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line | Tool::CustomShape => 'U',
         }
@@ -532,6 +538,9 @@ pub struct ToolOptions {
     pub corner_radius: f32,
     pub polygon_sides: u32,
     pub line_weight: f32,
+    /// Freeform Pen › Curve Fit: how far (px) the fitted path may stray from the pointer trace.
+    #[serde(default = "default_curve_fit")]
+    pub curve_fit: f32,
     /// Marquee options bar: "normal" | "fixedRatio" | "fixedSize", with the ratio or size.
     #[serde(default = "default_marquee_style")]
     pub marquee_style: String,
@@ -645,6 +654,10 @@ fn default_move_target() -> String {
     "layer".into()
 }
 
+fn default_curve_fit() -> f32 {
+    2.0
+}
+
 fn default_eraser_mode() -> String {
     "brush".into()
 }
@@ -724,6 +737,7 @@ impl Default for ToolOptions {
             corner_radius: 0.0,
             polygon_sides: 5,
             line_weight: 3.0,
+            curve_fit: default_curve_fit(),
             marquee_style: default_marquee_style(),
             marquee_width: 1.0,
             marquee_height: 1.0,
@@ -1243,7 +1257,7 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 58);
+        assert_eq!(Tool::ALL.len(), 60);
         assert_eq!(Tool::from_name("addAnchorPoint"), Some(Tool::AddAnchorPoint));
         assert_eq!(Tool::from_name("Delete Anchor Point Tool"), Some(Tool::DeleteAnchorPoint));
         assert_eq!(Tool::DeleteAnchorPoint.key(), 'P');

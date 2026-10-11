@@ -2828,6 +2828,11 @@ cameraData	Lens	Объектив
 	Previous Document	Предыдущий документ
 	W x H x Resolution	Ш x В x Разрешение
 	Front Image	Изображение переднего плана
+	Freeform Pen Tool	Свободное перо
+	Curvature Pen Tool	Перо кривизны
+	Curve Fit:	Точность кривой:
+	Drag: draw freehand · Release on the start point: close	Перетаскивание: рисовать от руки · отпустить на начальной точке: замкнуть
+	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Клик: гладкая точка · двойной клик: угол · перетаскивание точки: переместить · клик по первой точке: замкнуть · {key} завершить
 	Rasterize Layer Style	Растрировать стиль слоя
 	Search settings…	Поиск настроек…
 	No matching settings	Нет подходящих настроек

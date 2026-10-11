@@ -3501,6 +3501,11 @@ cameraData	Lens	Obiektyw
 	Previous Document	Poprzedni dokument
 	W x H x Resolution	Szer. x Wys. x Rozdzielczość
 	Front Image	Obraz na wierzchu
+	Freeform Pen Tool	Narzędzie Pióro dowolne
+	Curvature Pen Tool	Narzędzie Pióro krzywizny
+	Curve Fit:	Dopasowanie krzywej:
+	Drag: draw freehand · Release on the start point: close	Przeciągnięcie: rysowanie odręczne · Puszczenie w punkcie początkowym: zamknij
+	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Klik: punkt gładki · Dwuklik: narożnik · Przeciągnięcie punktu: przesuń · Klik w pierwszy punkt: zamknij · {key} zakończ
 	New Crop Preset…	Nowe ustawienie kadrowania…
 	Delete Crop Preset…	Usuń ustawienie kadrowania…
 	Select the crop presets to delete:	Wybierz ustawienia kadrowania do usunięcia:

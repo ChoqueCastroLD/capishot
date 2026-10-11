@@ -46,7 +46,11 @@ fn click(app: &mut PhotocraftApp, at: [f64; 2], mods: Modifiers) {
 #[test]
 fn both_tools_join_the_pen_group() {
     let group: Vec<Tool> = Tool::ALL.iter().copied().filter(|t| t.key() == 'P').collect();
-    assert_eq!(group, vec![Tool::Pen, Tool::AddAnchorPoint, Tool::DeleteAnchorPoint], "P cycles Pen → Add → Delete");
+    assert_eq!(
+        group,
+        vec![Tool::Pen, Tool::FreeformPen, Tool::CurvaturePen, Tool::AddAnchorPoint, Tool::DeleteAnchorPoint],
+        "P cycles Pen → Freeform → Curvature → Add → Delete"
+    );
     let mut app = app(Tool::Brush);
     app.ui.tool = Tool::from_name("addAnchorPoint").unwrap();
     assert_eq!(app.ui.tool, Tool::AddAnchorPoint);
