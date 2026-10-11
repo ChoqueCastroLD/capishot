@@ -48,6 +48,8 @@ pub struct Runtime {
     pub(crate) checker_key: Option<[[u8; 3]; 2]>,
     /// Style last sent to the GPU canvas.
     pub(crate) gpu_style: Option<crate::gpu_canvas::CanvasStyle>,
+    /// `unitsAndRulers.showRulers` as last applied to View › Rulers.
+    show_rulers: Option<bool>,
     /// Tool options as last remembered in the preferences (see `tool_memory`).
     pub(crate) tool_options: Option<crate::state::ToolOptions>,
 }
@@ -180,6 +182,24 @@ fn system_theme(app: &PhotocraftApp, ctx: &egui::Context) -> Option<egui::Theme>
     app.services.system_theme.as_ref().and_then(|read| read(ctx)).or_else(|| ctx.system_theme())
 }
 
+/// View › Rulers follows `unitsAndRulers.showRulers` when the preference changes (at launch, from
+/// `prefs.set` or a reset), so documents open with the rulers as last set.
+fn sync_rulers(app: &mut PhotocraftApp) {
+    let want = app.session.prefs().units_and_rulers.show_rulers;
+    if app.prefs_rt.show_rulers != Some(want) {
+        app.ui.extras.rulers = want;
+        app.prefs_rt.show_rulers = Some(want);
+    }
+}
+
+/// View › Rulers was toggled: remember it for the next launch (Photoshop keeps the last state).
+pub(crate) fn remember_rulers(app: &mut PhotocraftApp, on: bool) {
+    if app.session.prefs().units_and_rulers.show_rulers != on {
+        app.session.prefs.edit(|p| p.units_and_rulers.show_rulers = on);
+    }
+    app.prefs_rt.show_rulers = Some(on);
+}
+
 // ------------------------------------------------------------------ lifecycle
 
 /// Load saved preferences once, when the app is created. Recovery starts during frame upkeep.
@@ -195,6 +215,7 @@ pub fn load(app: &mut PhotocraftApp) {
     }
     crate::dock::restore(app);
     crate::brush_picker::restore(app);
+    sync_rulers(app);
     crate::tool_memory::restore(app);
     app.sync_recent();
     app.prefs_rt.saved_rev = app.session.prefs.rev();
@@ -375,6 +396,7 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         load(app);
     }
     recovery(app);
+    sync_rulers(app);
     sync_display_scale(app, ctx);
     sync_appearance(app, ctx);
     crate::theme::set_ui_font_size(ctx, app.session.prefs().interface.ui_font_size);
@@ -1425,6 +1447,8 @@ fn section_fields(
             // Settings nothing reads yet stay out of the dialog (issue #204); their stored values
             // pass through untouched.
             if (section == "interface" && matches!(k.as_str(), "theme" | "appearanceMode" | "darkTheme" | "lightTheme" | "favoriteThemes"))
+                // View › Rulers (⌘R) sets it, as in Photoshop.
+                || path == "unitsAndRulers.showRulers"
                 || prefs::is_hidden(&path)
                 || (section == "performance" && matches!(k.as_str(), "useGpu" | "gpuBackend" | "renderingMode"))
                 || (section == "export" && !export_field_visible(obj, &k))
