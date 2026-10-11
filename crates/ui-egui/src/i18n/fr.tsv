@@ -2095,6 +2095,7 @@
 	Developing {name}	Développement de {name}
 	Cancelled {label}	{label} : annulé
 	Esc to cancel	Échap pour annuler
+	Opened {name}	Ouvert : {name}
 	Opening {name}	Ouverture de {name}
 	Saved {name}	Enregistré : {name}
 	Saving {name}	Enregistrement de {name}

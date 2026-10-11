@@ -2412,6 +2412,7 @@
 	Developing {name}	Обработка {name}
 	Cancelled {label}	{label}: отменено
 	Esc to cancel	Esc — отмена
+	Opened {name}	Открыто: {name}
 	Opening {name}	Открытие {name}
 	Saved {name}	Сохранено: {name}
 	Saving {name}	Сохранение {name}

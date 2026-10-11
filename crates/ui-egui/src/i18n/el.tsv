@@ -1568,6 +1568,7 @@
 	Cancelled opening {name}	Ακυρώθηκε το άνοιγμα του {name}
 	Cancelled {label}	Ακυρώθηκε: {label}
 	Esc to cancel	Esc για ακύρωση
+	Opened {name}	Άνοιξε το {name}
 	Opening {name}	Άνοιγμα του {name}
 	Saved {name}	Αποθηκεύτηκε το {name}
 	Saving {name}	Αποθήκευση του {name}

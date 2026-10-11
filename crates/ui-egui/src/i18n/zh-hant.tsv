@@ -2132,6 +2132,7 @@
 	Developing {name}	正在處理 {name}
 	Cancelled {label}	已取消 {label}
 	Esc to cancel	按 Esc 取消
+	Opened {name}	已開啟 {name}
 	Opening {name}	正在開啟 {name}
 	Saved {name}	已儲存 {name}
 	Saving {name}	正在儲存 {name}
