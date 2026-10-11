@@ -1242,6 +1242,33 @@ fn variable_faces_list_the_weights_of_their_axis() {
     assert_eq!(super::style_names(&[face(700.0, false, Vec::new())]), ["Bold"]);
 }
 
+/// A variable font's axes become sliders (optical size excepted: it follows the type size), and
+/// each shows the style's value for it, or what the layout draws without one (#2985).
+#[test]
+fn variable_font_axes_become_sliders_with_the_drawn_value() {
+    use photocraft_doc::text::{CharStyle, FontVariation};
+    let face = |italic: bool, axes: Vec<super::Axis>| photocraft_text::FaceInfo {
+        family: "Roboto Flex".into(),
+        style: "Regular".into(),
+        postscript_name: None,
+        weight: 400.0,
+        italic,
+        axes,
+    };
+    let ax = |tag: &str, min: f32, def: f32, max: f32| (tag.to_string(), min, def, max);
+    let faces = [
+        face(false, vec![ax("opsz", 8.0, 14.0, 144.0), ax("wght", 100.0, 400.0, 1000.0), ax("wdth", 25.0, 100.0, 151.0)]),
+        face(true, vec![ax("slnt", -10.0, 0.0, 0.0)]),
+    ];
+    let tags = |v: Vec<super::Axis>| v.into_iter().map(|a| a.0).collect::<Vec<_>>();
+    assert_eq!(tags(super::slider_axes(&faces, false)), ["wght", "wdth"]);
+    assert_eq!(tags(super::slider_axes(&faces, true)), ["slnt"]);
+    let c = CharStyle { weight: 700, variations: vec![FontVariation { axis: "wdth".into(), value: 300.0 }], ..Default::default() };
+    assert_eq!(super::axis_value(&c, &ax("wght", 100.0, 400.0, 1000.0)), 700.0, "the style's weight");
+    assert_eq!(super::axis_value(&c, &ax("wdth", 25.0, 100.0, 151.0)), 151.0, "its own value, within the range");
+    assert_eq!(super::axis_value(&c, &ax("GRAD", -200.0, 0.0, 150.0)), 0.0, "the axis default");
+}
+
 /// Families the host serves are in the font menu before they are fetched.
 #[test]
 fn the_font_menu_lists_served_families() {
