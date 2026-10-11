@@ -1228,6 +1228,9 @@ mod tests_ext;
 #[cfg(test)]
 mod tests_mosaic;
 
+#[cfg(test)]
+mod tests_blur_pinned;
+
 /// The current upstream sampler through the identical source/selection/tile pipeline.
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
