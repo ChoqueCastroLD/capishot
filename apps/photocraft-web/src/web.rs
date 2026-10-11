@@ -58,8 +58,8 @@ pub fn start_threads() {
 /// the worker pool: a busy loop spread over rayon reports how many workers took part and how long it
 /// took (pure parallel work, so it shows the pool's scaling), then a Gaussian blur (radius 20) runs
 /// through the engine on a noisy `width`×`height` document and an image that size is encoded as
-/// PNG (deflated in parallel bands). The threads page exposes the module as `photocraft`, so from
-/// the console: `photocraft.parallelSelfTest(4000, 3000)`. Compare with the page opened as
+/// PNG (deflated in parallel bands). The threads page exposes the module as `photocraftModule`, so
+/// from the console: `photocraftModule.parallelSelfTest(4000, 3000)`. Compare with the page opened as
 /// `?threads=1`, or with the single-threaded build (Trunk's page exposes it as
 /// `wasmBindings.parallelSelfTest`), where the same steps run on the page's one thread.
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = parallelSelfTest)]
