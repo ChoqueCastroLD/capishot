@@ -54,8 +54,8 @@ what an agent can't finish alone.
   scripted check there) is the only real oracle.
 
 ### G6. Missing tools
-- **Missing (6 of 68):** Color Sampler (#1046), Color Replacement (engine command exists), Art
-  History Brush, Add Anchor Point, Delete Anchor Point, Convert Point (only as Pen + ⌥). Freeform
+- **Missing (5 of 68):** Color Sampler (#1046), Color Replacement (engine command exists), Art
+  History Brush, Add Anchor Point, Delete Anchor Point. Convert Point landed (#3204). Freeform
   Pen and Curvature Pen landed (#1054); Horizontal and Vertical Type Mask landed (#1055,
   `type.createSelection`); Perspective Crop landed (#1043, `image.perspectiveCrop`); Frame landed
   (#2914).
