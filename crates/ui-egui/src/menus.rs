@@ -394,7 +394,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             if l == "layer.exportAs" {
                 Ok(json!({"dialog": crate::export_dialog::open_layer(app, layer)?}))
             } else {
-                crate::export_dialog::quick_export_layer_png(app, layer)
+                crate::export_dialog::quick_export_selected_layers_png(app)
             }
         }
         "layer.layerStyle.blendingOptions" if params.as_object().is_none_or(|o| o.is_empty()) => {
