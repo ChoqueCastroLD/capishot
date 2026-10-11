@@ -65,6 +65,11 @@ pub enum Tool {
     Move,
     RectMarquee,
     EllipseMarquee,
+    /// Selects one pixel row across the whole canvas at the clicked y (Photoshop's flyout only:
+    /// no key, not in the ⇧M cycle).
+    SingleRowMarquee,
+    /// Selects one pixel column down the whole canvas at the clicked x.
+    SingleColumnMarquee,
     Lasso,
     PolygonLasso,
     MagneticLasso,
@@ -118,10 +123,12 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 53] = [
+    pub const ALL: [Tool; 55] = [
         Tool::Move,
         Tool::RectMarquee,
         Tool::EllipseMarquee,
+        Tool::SingleRowMarquee,
+        Tool::SingleColumnMarquee,
         Tool::Lasso,
         Tool::PolygonLasso,
         Tool::MagneticLasso,
@@ -179,6 +186,8 @@ impl Tool {
             Tool::Move => "Move Tool",
             Tool::RectMarquee => "Rectangular Marquee Tool",
             Tool::EllipseMarquee => "Elliptical Marquee Tool",
+            Tool::SingleRowMarquee => "Single Row Marquee Tool",
+            Tool::SingleColumnMarquee => "Single Column Marquee Tool",
             Tool::Brush => "Brush Tool",
             Tool::Pencil => "Pencil Tool",
             Tool::MixerBrush => "Mixer Brush Tool",
@@ -278,6 +287,8 @@ impl Tool {
             Tool::CloneStamp | Tool::PatternStamp => 'S',
             Tool::HistoryBrush => 'Y',
             Tool::Blur | Tool::Sharpen | Tool::Smudge => '\0',
+            // In the Marquee flyout, but M cycles only the Rectangular and Elliptical Marquee.
+            Tool::SingleRowMarquee | Tool::SingleColumnMarquee => '\0',
             Tool::Dodge | Tool::Burn | Tool::Sponge => 'O',
             Tool::QuickSelection | Tool::ObjectSelection => 'W',
             Tool::Pen => 'P',
@@ -532,6 +543,17 @@ pub struct ToolOptions {
     pub crop_ratio: String,
     #[serde(default = "yes")]
     pub crop_delete: bool,
+    /// Crop W x H x Resolution (`crop_ratio` = "whr", #2443): width and height as typed lengths
+    /// with their unit ("4 in", "1024 px"; empty = unset), the resolution ("" = the document's)
+    /// and its unit ("px/in" or "px/cm"). See `crop_size`.
+    #[serde(default)]
+    pub crop_width: String,
+    #[serde(default)]
+    pub crop_height: String,
+    #[serde(default)]
+    pub crop_resolution: String,
+    #[serde(default = "default_crop_resolution_unit")]
+    pub crop_resolution_unit: String,
     /// Crop overlay (#1919): the guide in the crop box, when it shows and its orientation
     /// (Photoshop's defaults: Rule of Thirds, Auto Show Overlay). See `crop_overlay`.
     #[serde(default)]
@@ -558,6 +580,10 @@ pub struct ToolOptions {
     /// Pencil › Auto Erase: a stroke that starts on the foreground colour paints the background colour.
     #[serde(default)]
     pub pencil_auto_erase: bool,
+    /// Eraser › Mode: `brush` (soft, anti-aliased) or `pencil` (hard, aliased pixels, through
+    /// `paint.pencil`), as in Photoshop's options bar (#2662).
+    #[serde(default = "default_eraser_mode")]
+    pub eraser_mode: String,
     /// Magnetic Lasso: detection width (px, 1..256), edge contrast (%, 1..100), how often it
     /// fastens points by itself (0..100), and whether pen pressure narrows the width.
     pub magnetic_width: f32,
@@ -587,8 +613,16 @@ fn yes() -> bool {
     true
 }
 
+fn default_crop_resolution_unit() -> String {
+    crate::crop_size::PX_PER_IN.into()
+}
+
 fn default_move_target() -> String {
     "layer".into()
+}
+
+fn default_eraser_mode() -> String {
+    "brush".into()
 }
 
 fn default_marquee_style() -> String {
@@ -674,6 +708,10 @@ impl Default for ToolOptions {
             move_show_transform: false,
             crop_ratio: String::new(),
             crop_delete: true,
+            crop_width: String::new(),
+            crop_height: String::new(),
+            crop_resolution: String::new(),
+            crop_resolution_unit: default_crop_resolution_unit(),
             crop_overlay: Default::default(),
             crop_overlay_show: Default::default(),
             crop_overlay_orientation: 0,
@@ -685,6 +723,7 @@ impl Default for ToolOptions {
             bg_protect_fg: false,
             zoom_scrubby: true,
             pencil_auto_erase: false,
+            eraser_mode: default_eraser_mode(),
             magnetic_width: 10.0,
             magnetic_contrast: 10.0,
             magnetic_frequency: 57.0,
@@ -844,6 +883,10 @@ pub struct ColorPanelState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UiState {
     pub tool: Tool,
+    /// The last tool used in each shortcut group (the tools sharing a key, [`Tool::key`]), at most
+    /// one per group: the group's key brings it back, as in Photoshop (#2608).
+    #[serde(default)]
+    pub group_tools: Vec<Tool>,
     /// Recently opened file paths, most-recent first (File › Open Recent). Capped; de-duplicated.
     #[serde(default)]
     pub recent_files: Vec<String>,
@@ -1034,6 +1077,7 @@ impl Default for UiState {
     fn default() -> Self {
         Self {
             tool: Tool::Brush,
+            group_tools: Vec::new(),
             recent_files: Vec::new(),
             text_edit: None,
             type_transform: None,
@@ -1107,6 +1151,20 @@ impl Default for UiState {
 }
 
 impl UiState {
+    /// Records the current tool as the last one used in its shortcut group.
+    pub fn remember_group_tool(&mut self) {
+        let tool = self.tool;
+        if !self.group_tools.contains(&tool) {
+            self.group_tools.retain(|t| t.key() != tool.key());
+            self.group_tools.push(tool);
+        }
+    }
+
+    /// The last tool used in the shortcut group of `key`, if any.
+    pub fn group_tool(&self, key: char) -> Option<Tool> {
+        self.group_tools.iter().copied().find(|t| t.key() == key)
+    }
+
     pub fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -1152,7 +1210,7 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 53);
+        assert_eq!(Tool::ALL.len(), 55);
         assert_eq!(Tool::from_name("Remove Tool"), Some(Tool::Remove));
         assert_eq!(Tool::Remove.key(), 'J');
         assert!(Tool::Remove.is_brushlike());

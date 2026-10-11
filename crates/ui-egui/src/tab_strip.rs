@@ -2,6 +2,7 @@
 //! the panel menu button they shrink, eliding their labels with '…', and once they are at their
 //! minimum width the ones that still don't fit move into a » chevron menu at the end of the
 //! strip. The selected tab always stays on the strip, and no tab ever runs under the menu button.
+//! On a reorderable strip a tab dragged along the strip moves to where it is dropped (#2272).
 
 use egui::{CornerRadius, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
@@ -40,6 +41,13 @@ pub struct StripOut {
     pub responses: Vec<(usize, Response)>,
     /// The » overflow button, when some tabs didn't fit.
     pub chevron: Option<Rect>,
+    /// A tab was dragged along the strip and dropped: `(tab, before)`, draw `tab` just before
+    /// tab `before` (`None`: last).
+    pub reorder: Option<(usize, Option<usize>)>,
+    /// A tab is being dragged away from the strip (the dock moves the whole group then).
+    pub dragging_out: bool,
+    /// A tab drag ended away from the strip.
+    pub dropped_out: bool,
 }
 
 /// Width of the » overflow button.
@@ -83,6 +91,7 @@ fn tabs_in(
     font: egui::FontId,
     pad: f32,
     min_w: f32,
+    reorderable: bool,
     active: impl Fn(usize) -> bool,
     mut paint_tab: impl FnMut(&Ui, Rect, usize, std::sync::Arc<egui::Galley>, &Response, bool),
 ) -> StripOut {
@@ -100,18 +109,33 @@ fn tabs_in(
         tabs: Vec::with_capacity(f.shown.len()),
         responses: Vec::with_capacity(f.shown.len()),
         chevron: None,
+        reorder: None,
+        dragging_out: false,
+        dropped_out: false,
     };
+    // Without reordering, drags on a tab fall through to the strip behind it.
+    let sense = if reorderable { Sense::click_and_drag() } else { Sense::click() };
+    let mut drag: Option<(usize, bool)> = None;
     for &(i, w) in &f.shown {
         let Some(name) = tabs.get(i) else { continue };
         let r = Rect::from_min_size(pos2(x, area.top()), vec2(w, area.height()));
         // The padding gives way (down to a third) before the label is cut.
         let galley = elided(ui, name, font.clone(), t.text, (w - pad / 3.0).max(1.0));
         let cut = galley.size().x + pad + 0.5 < natural.get(i).copied().unwrap_or(0.0) && galley.size().x + pad / 3.0 >= w - 0.5;
-        let resp = craft_ui::tabs::Tab::new(id.with(("tab", i)), name, i == *selected)
-            .sense(Sense::click_and_drag())
-            .focus_stroke(Stroke::new(1.0, t.accent))
-            .show_at(ui, r, |ui, resp| paint_tab(ui, r, i, galley, resp, active(i)));
+        let resp = craft_ui::tabs::Tab::new(id.with(("tab", i)), name, i == *selected).sense(sense).focus_stroke(Stroke::new(1.0, t.accent)).show_at(
+            ui,
+            r,
+            |ui, resp| paint_tab(ui, r, i, galley, resp, active(i)),
+        );
         let resp = if cut { resp.on_hover_text(*name) } else { resp };
+        if resp.drag_started() {
+            *selected = i;
+        }
+        if resp.dragged() {
+            drag = Some((i, false));
+        } else if resp.drag_stopped() {
+            drag = Some((i, true));
+        }
         out.double_clicked |= resp.double_clicked();
         if resp.clicked() {
             out.clicked = true;
@@ -143,12 +167,43 @@ fn tabs_in(
         }
         out.chevron = Some(r);
     }
+    if let Some((tab, released)) = drag
+        && let Some(p) = ui.ctx().pointer_interact_pos().or_else(|| ui.ctx().pointer_latest_pos())
+    {
+        match drop_slot(&out.tabs, area, p) {
+            Some(slot) => {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                let before = match out.tabs.get(slot) {
+                    Some((b, _)) => Some(*b),
+                    // After the last tab on the strip: before the first overflowing one, if any.
+                    None => out.tabs.last().map(|(l, _)| l + 1).filter(|b| *b < tabs.len()),
+                };
+                if released {
+                    out.reorder = Some((tab, before));
+                } else if let Some((_, r)) = out.tabs.get(slot.min(out.tabs.len().saturating_sub(1))) {
+                    crate::widgets::drop_line(ui, *r, slot >= out.tabs.len(), true, &t);
+                }
+            }
+            None if released => out.dropped_out = true,
+            None => out.dragging_out = true,
+        }
+    }
     out
+}
+
+/// Where a tab dragged to `p` lands: before the `n`th tab on the strip (`tabs.len()`: after the
+/// last), or `None` once the pointer has left the strip.
+pub fn drop_slot(tabs: &[(usize, Rect)], area: Rect, p: egui::Pos2) -> Option<usize> {
+    if !area.expand2(vec2(24.0, area.height())).contains(p) {
+        return None;
+    }
+    Some(tabs.iter().filter(|(_, r)| r.center().x < p.x).count())
 }
 
 /// Photoshop-grammar strip (Pro themes): flat tabs on the dark strip; `menu_left` is where the
 /// panel menu button starts.
-pub fn pro_tabs(ui: &mut Ui, id: egui::Id, strip: Rect, menu_left: f32, tabs: &[&str], selected: &mut usize, collapsed: bool) -> StripOut {
+#[allow(clippy::too_many_arguments)]
+pub fn pro_tabs(ui: &mut Ui, id: egui::Id, strip: Rect, menu_left: f32, tabs: &[&str], selected: &mut usize, collapsed: bool, reorderable: bool) -> StripOut {
     let t = Tokens::get(ui.ctx());
     let area = Rect::from_min_max(strip.min, pos2(menu_left.max(strip.left()), strip.bottom()));
     let sel = *selected;
@@ -161,6 +216,7 @@ pub fn pro_tabs(ui: &mut Ui, id: egui::Id, strip: Rect, menu_left: f32, tabs: &[
         egui::FontId::proportional(11.5),
         22.0,
         40.0,
+        reorderable,
         |i| i == sel && !collapsed,
         |ui, r, i, galley, resp, active| {
             if active {
@@ -181,7 +237,7 @@ pub fn pro_tabs(ui: &mut Ui, id: egui::Id, strip: Rect, menu_left: f32, tabs: &[
 }
 
 /// Studio strip: pill tabs in `area` (the row minus the menu button).
-pub fn pill_tabs(ui: &mut Ui, id: egui::Id, area: Rect, tabs: &[&str], selected: &mut usize) -> StripOut {
+pub fn pill_tabs(ui: &mut Ui, id: egui::Id, area: Rect, tabs: &[&str], selected: &mut usize, reorderable: bool) -> StripOut {
     let t = Tokens::get(ui.ctx());
     let sel = *selected;
     tabs_in(
@@ -193,6 +249,7 @@ pub fn pill_tabs(ui: &mut Ui, id: egui::Id, area: Rect, tabs: &[&str], selected:
         theme::medium(12.5),
         20.0,
         44.0,
+        reorderable,
         |i| i == sel,
         |ui, r, _, galley, resp, active| {
             // 2 pt between pills, as the old horizontal layout had.
@@ -270,7 +327,8 @@ mod tests {
             let area = Rect::from_min_size(pos2(20.0, 20.0), vec2(width, 26.0));
             let mut selected = 3;
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                let out = pro_tabs(ui, ui.id().with("tiny-tabs"), area, area.right(), &["Color", "Swatches", "Gradients", "Patterns"], &mut selected, false);
+                let out =
+                    pro_tabs(ui, ui.id().with("tiny-tabs"), area, area.right(), &["Color", "Swatches", "Gradients", "Patterns"], &mut selected, false, false);
                 assert!(out.tabs.iter().any(|(i, _)| *i == 3));
                 for (_, rect) in &out.tabs {
                     assert!(rect.left() >= area.left() && rect.right() <= area.right() + 0.001, "{width}: {rect:?}");

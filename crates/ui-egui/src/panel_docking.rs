@@ -371,14 +371,18 @@ pub(crate) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> bool {
         previous.is_some_and(|generation| generation != app.ui.docking_generation)
     });
     if changed_workspace || stale_origin {
+        ui.ctx().data_mut(|data| data.insert_temp(area.with("legacy-suppressed"), true));
         craft_ui::docking::cancel_drag::<String>(ui.ctx(), area);
         ui.ctx().data_mut(|data| data.remove::<LegacyDrag>(area.with("legacy-origin")));
     }
 
     let cancelled =
         ui.input(|input| !input.focused || input.key_pressed(egui::Key::Escape) || (!input.pointer.primary_down() && !input.pointer.any_released()));
-    if cancelled && cancel_legacy_drag(app, ui.ctx()) && app.ui.docking.is_none() {
-        return false;
+    if cancelled && cancel_legacy_drag(app, ui.ctx()) {
+        ui.ctx().data_mut(|data| data.insert_temp(area.with("legacy-suppressed"), true));
+        if app.ui.docking.is_none() {
+            return false;
+        }
     }
     let Some(layout) = app.ui.docking.as_ref() else { return false };
     if !valid(layout) {
@@ -487,11 +491,20 @@ pub(crate) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> bool {
 }
 
 pub(crate) fn legacy_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, panel: &str, response: &egui::Response) {
-    if app.session.prefs().workspace_locked {
+    let suppressed = egui::Id::new("photocraft-panel-docking").with("legacy-suppressed");
+    if ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary)) {
+        ui.ctx().data_mut(|data| data.remove::<bool>(suppressed));
+    }
+    if ui.ctx().data(|data| data.get_temp::<bool>(suppressed)).unwrap_or(false) || app.session.prefs().workspace_locked {
         return;
     }
     let Some(panel) = normalize(panel) else { return };
-    if response.drag_started()
+    // Native tab reordering and vertical whole-group moves stay in the dock.
+    // Crossing the dock column horizontally detaches through the shared layout.
+    let strip = egui::Rect::from_min_max(egui::pos2(ui.max_rect().left(), response.rect.top()), egui::pos2(ui.max_rect().right(), response.rect.bottom()));
+    if response.dragged()
+        && ui.input(|input| input.focused && input.pointer.primary_down() && !input.key_pressed(egui::Key::Escape))
+        && ui.ctx().pointer_interact_pos().is_some_and(|position| position.x < strip.left() - 24.0 || position.x > strip.right() + 24.0)
         && let Some(id) = normalize(panel)
     {
         let mut layout = app.ui.docking.clone().unwrap_or_else(|| legacy(app));
