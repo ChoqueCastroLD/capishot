@@ -2642,6 +2642,7 @@ mod tests {
         assert!(!prefs::is_hidden("type.fillNewTypeLayersWithPlaceholder"));
         assert!(!prefs::is_hidden("type.useEscToCommit"));
         assert!(!prefs::is_hidden("type.smartQuotes"));
+        assert!(!prefs::is_hidden("type.showFontNamesInEnglish"));
         // Rotate View with Trackpad and the pinch zoom are live; the other Enhanced Controls rows
         // stay hidden.
         assert!(has_visible_fields(&values, "enhancedControls"));

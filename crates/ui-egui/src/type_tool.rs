@@ -4,6 +4,7 @@
 //! typing session is one "Edit Type" history step and automation sees exactly what the user does.
 //! Offsets in [`TextEdit`] are character indices (the engine's unit); the layout works in bytes.
 
+use std::collections::HashMap;
 use std::sync::{Arc, PoisonError};
 
 use egui::{Color32, Pos2, Stroke};
@@ -883,6 +884,57 @@ pub fn families() -> Arc<Vec<String>> {
     v
 }
 
+/// Where [`sync_font_names`] leaves the font menus' localized labels for this frame.
+fn font_labels_id() -> egui::Id {
+    egui::Id::new("photocraft-font-menu-localized-names")
+}
+
+/// Preferences ▸ Type ▸ Show Font Names in English: when off, font menus list a family that has a
+/// localized (native-language) name by that name, as Photoshop does ("MS Gothic" reads
+/// "ＭＳ ゴシック"). Called once a frame; the menus read the labels from the context.
+pub fn sync_font_names(ctx: &egui::Context, show_in_english: bool) {
+    let labels = (!show_in_english).then(localized_families);
+    ctx.data_mut(|d| {
+        if let Some(labels) = labels {
+            d.insert_temp(font_labels_id(), labels);
+        } else {
+            d.remove::<Arc<HashMap<String, String>>>(font_labels_id());
+        }
+    });
+}
+
+/// The fonts' localized family names, keyed by family. Cached until fonts are registered.
+fn localized_families() -> Arc<HashMap<String, String>> {
+    type Cached = Option<(u64, Arc<HashMap<String, String>>)>;
+    static LOCALIZED: std::sync::Mutex<Cached> = std::sync::Mutex::new(None);
+    let key = photocraft_text::fonts::generation();
+    let mut cached = LOCALIZED.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((k, v)) = cached.as_ref()
+        && *k == key
+    {
+        return v.clone();
+    }
+    let v = Arc::new(photocraft_text::shared().lock().map(|mut e| e.fonts.localized_family_names()).unwrap_or_default());
+    *cached = Some((key, v.clone()));
+    v
+}
+
+/// The font menu's rows: each family with the label it shows (its localized name when `labels`
+/// has one, else the family), matching `query` (lowercase) by either name. With localized labels
+/// the rows sort by label, so the menu stays alphabetical as shown.
+fn font_menu_rows<'a>(families: &'a [String], labels: Option<&'a HashMap<String, String>>, query: &str) -> Vec<(&'a String, &'a str)> {
+    let label = |f: &'a String| labels.and_then(|l| l.get(f)).map_or(f.as_str(), String::as_str);
+    let mut rows: Vec<(&String, &str)> = families
+        .iter()
+        .map(|f| (f, label(f)))
+        .filter(|(f, l)| query.is_empty() || f.to_lowercase().contains(query) || l.to_lowercase().contains(query))
+        .collect();
+    if labels.is_some_and(|l| !l.is_empty()) {
+        rows.sort_by_cached_key(|(_, l)| l.to_lowercase());
+    }
+    rows
+}
+
 fn weight_name(w: f32) -> &'static str {
     match w.round() as i32 {
         ..=150 => "Thin",
@@ -979,8 +1031,11 @@ pub(crate) fn family_picker_in(
     let search_id = ui.id().with(("font-search", salt));
     // The list opens on the press, so a press-drag-release picks a font too (#2735).
     let (press, close) = crate::press_menu::PressCombo::before(ui, salt);
+    let labels: Option<Arc<HashMap<String, String>>> = ui.ctx().data(|d| d.get_temp(font_labels_id()));
+    let labels = labels.as_deref();
+    let shown = labels.and_then(|l| l.get(current.as_str())).unwrap_or(current).clone();
     let combo = egui::ComboBox::from_id_salt(salt)
-        .selected_text(current.as_str())
+        .selected_text(shown)
         .width(width)
         .height(FONT_MENU_HEIGHT)
         .icon(crate::widgets::chevron_icon)
@@ -1013,23 +1068,23 @@ pub(crate) fn family_picker_in(
             d.insert_temp(search_id, q.clone());
         });
         let ql = q.to_lowercase();
-        let filtered: Vec<&String> = families.iter().filter(|f| ql.is_empty() || f.to_lowercase().contains(&ql)).collect();
+        let rows = font_menu_rows(families, labels, &ql);
         if down || up {
-            let index = filtered.iter().position(|f| *f == current);
+            let index = rows.iter().position(|(f, _)| *f == current);
             let next = match index {
-                Some(i) if down => i.saturating_add(1).min(filtered.len().saturating_sub(1)),
+                Some(i) if down => i.saturating_add(1).min(rows.len().saturating_sub(1)),
                 Some(i) => i.saturating_sub(1),
                 None if down => 0,
-                None => filtered.len().saturating_sub(1),
+                None => rows.len().saturating_sub(1),
             };
-            if let Some(f) = filtered.get(next) {
+            if let Some((f, _)) = rows.get(next) {
                 changed = **f != *current;
                 current.clone_from(f);
                 // A served family not fetched yet: start now, as a click does.
                 photocraft_text::served::request(f);
             }
         }
-        let accept = enter && filtered.iter().any(|f| *f == current);
+        let accept = enter && rows.iter().any(|(f, _)| *f == current);
         if accept {
             ui.data_mut(|d| d.remove::<String>(search_id));
             ui.close();
@@ -1038,8 +1093,8 @@ pub(crate) fn family_picker_in(
         let row_h = preview.map_or(28.0, |(_, [_, h])| (h + 4.0).max(28.0));
 
         let mut hovered: Option<String> = None;
-        for f in filtered {
-            let mut button = egui::Button::selectable(f == current, f).truncate();
+        for (f, label) in rows {
+            let mut button = egui::Button::selectable(f == current, label).truncate();
             if let Some((size, [_, h])) = preview {
                 button =
                     button.right_text(egui::Atom::custom(ui.id().with(("font-sample", f)), egui::vec2(crate::font_preview::slot_width(ui.ctx(), f, size), h)));
