@@ -116,6 +116,7 @@ pub mod move_mods;
 pub mod move_ui;
 pub mod native_menu;
 pub mod new_doc_ui;
+pub mod new_layer_ui;
 pub mod notices;
 mod numeric_expression;
 mod opacity_keys;
@@ -2218,6 +2219,9 @@ mod move_auto_select_tests;
 
 #[cfg(test)]
 mod new_group_button_tests;
+
+#[cfg(test)]
+mod new_layer_button_tests;
 
 #[cfg(test)]
 mod move_outline_tests;
