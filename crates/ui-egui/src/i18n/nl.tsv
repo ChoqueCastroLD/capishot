@@ -1177,6 +1177,7 @@
 	Magenta	Magenta
 	Magenta  ·  Green	Magenta  ·  Groen
 	Maintain aspect ratio	Hoogte-breedteverhouding behouden
+	Maintain Aspect Ratio	Hoogte-breedteverhouding behouden
 	Marker Size	Markeringsgrootte
 	Mask All	Alles maskeren
 	Mask Options	Maskeropties
@@ -3645,3 +3646,4 @@ cameraRaw	Whites	Witten
 	Scroll to Upper-Left Corner	Naar linkerbovenhoek schuiven
 	Scroll to Lower-Right Corner	Naar rechteronderhoek schuiven
 	Show rulers in new documents	Linialen tonen in nieuwe documenten
+	Capishot — Screen Color Picker	Capishot — Schermkleurkiezer

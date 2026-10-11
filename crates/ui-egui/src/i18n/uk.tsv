@@ -631,6 +631,7 @@
 	Constrain proportions	Зберігати пропорції
 	Link width and height	Пов'язати ширину та висоту
 	Maintain aspect ratio	Зберігати співвідношення сторін
+	Maintain Aspect Ratio	Зберігати співвідношення сторін
 	Current Size	Поточний розмір
 	New Size	Новий розмір
 	Fit	Умістити
@@ -3574,3 +3575,4 @@ cameraRaw	Masking	Маскування
 	Scroll to Upper-Left Corner	Прокрутити до лівого верхнього кута
 	Scroll to Lower-Right Corner	Прокрутити до правого нижнього кута
 	Show rulers in new documents	Показувати лінійки в нових документах
+	Capishot — Screen Color Picker	Capishot — Піпетка кольору екрана
