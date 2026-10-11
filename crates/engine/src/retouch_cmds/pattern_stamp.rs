@@ -76,6 +76,52 @@ pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
+/// The tiling an aligned (non-Impressionist) Pattern Stamp stroke paints through its coverage,
+/// for the live preview: the same pattern, phase, scale and angle the commit resolves.
+pub(super) struct LivePattern {
+    tile: Tile,
+    place: Placement,
+    fmt: PixelFormat,
+}
+
+impl LivePattern {
+    pub(super) fn new(s: &Session, p: &Value, stroke: &Stroke, fmt: PixelFormat) -> Result<Self> {
+        const CMD: &str = "paint.patternStamp";
+        if flag(p, "impressionist", false) {
+            return Err(bad(CMD, "Impressionist strokes preview dab by dab (LiveDab)"));
+        }
+        let (tile, phase, scale, angle) = resolve_live(s, p, stroke)?;
+        Ok(Self { tile, place: placement(phase, scale, angle), fmt })
+    }
+
+    /// The pattern over `r`, in the target's channels.
+    pub(super) fn paint(&self, r: Rect) -> Region {
+        rgba_to_region(&self.fmt, r, &render(&self.tile, &self.place, r))
+    }
+}
+
+/// The pattern tile, phase, scale and angle of a stroke, as `run` resolves them.
+fn resolve_live(s: &Session, p: &Value, stroke: &Stroke) -> Result<(Tile, (f32, f32), f32, f32)> {
+    const CMD: &str = "paint.patternStamp";
+    let pat = crate::pattern_cmds::resolve_param(s, CMD, p)?;
+    let tile = Tile::new(&pat).ok_or_else(|| bad(CMD, "the pattern is empty"))?;
+    let first = stroke.points.first().ok_or_else(|| bad(CMD, "`points` is empty"))?;
+    let phase = stamp_phase(p, CMD, flag(p, "aligned", true), first)?;
+    Ok((tile, phase, stamp_scale(p, CMD)?, stamp_angle(p, CMD)?))
+}
+
+/// The per-dab effect of an Impressionist Pattern Stamp stroke for the live preview, with the
+/// seed the commit must be given (`"seed"`) to paint the same jitter.
+pub(super) fn impressionist_effect(s: &Session, p: &Value, stroke: &Stroke, fmt: PixelFormat) -> Result<super::DabEffect> {
+    const CMD: &str = "paint.patternStamp";
+    let mode = blend_param(p, CMD)?;
+    let pat = crate::pattern_cmds::resolve_param(s, CMD, p)?;
+    let (tile, phase, scale, angle) = resolve_live(s, p, stroke)?;
+    let seed = p.get("seed").and_then(Value::as_u64).ok_or_else(|| bad(CMD, "a live Impressionist stroke needs the `seed` its commit uses"))?;
+    let (tw, th) = (pat.width as f32 * scale, pat.height as f32 * scale);
+    Ok(Box::new(move |work, fp| stamp_dab(work, &fmt, &tile, fp, phase, scale, angle, seed, tw, th, mode)))
+}
+
 fn stamp_scale(p: &Value, cmd: &str) -> Result<f32> {
     match p.get("scale") {
         None => Ok(1.0),
