@@ -491,6 +491,23 @@ fn uses_logarithmic_slider(min: f32, max: f32) -> bool {
     min > 0.0 && max / min > 500.0
 }
 
+/// Commands whose `angle` is a direction in document angles (counter-clockwise from three
+/// o'clock): a light or a blur direction, edited on a dial as in Photoshop's Motion Blur, Emboss
+/// and Global Light (#3152). Rotation amounts (Twirl, Rotate Arbitrary, Crop, Lens Correction,
+/// the Blur Gallery shapes) and angles with another zero (Flame's points up) keep the slider.
+const ANGLE_DIAL: &[&str] = &[
+    "filter.blur.motionBlur",
+    "filter.stylize.emboss",
+    "filter.stylize.oilPaint",
+    "filter.render.lightingEffects",
+    "filter.render.relight",
+    "layer.layerStyle.globalLight",
+];
+
+fn uses_angle_dial(command: &str, key: &str) -> bool {
+    key == "angle" && ANGLE_DIAL.contains(&command)
+}
+
 /// Dialog body for filter commands.
 pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
@@ -525,7 +542,10 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                 } else {
                     ""
                 };
-                if uses_logarithmic_slider(min, max) {
+                if uses_angle_dial(&cmd, &p.key) {
+                    crate::widgets::angle_dial_row(ui, &label(&p.key), &mut v, min..=max);
+                    ui.add_space(4.0);
+                } else if uses_logarithmic_slider(min, max) {
                     // Keep one numeric field for direct entry and one log-scaled slider for
                     // wide ranges. slider_row would add a second, linear slider (#146).
                     ui.horizontal(|ui| {
@@ -740,6 +760,26 @@ pub struct FilterPreviewKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_direction_angles_get_the_dial() {
+        // Every listed command still has a degree `angle` range, so the list cannot go stale.
+        for cmd in ANGLE_DIAL {
+            let spec = photocraft_engine::commands::find(cmd).unwrap_or_else(|| panic!("{cmd} is not a command")).params;
+            assert!(
+                parse_spec(spec).iter().any(|p| p.key == "angle" && matches!(p.kind, Kind::Range { min, max, .. } if min >= -360.0 && max <= 360.0)),
+                "{cmd} has no angle range"
+            );
+            assert!(uses_angle_dial(cmd, "angle"));
+            assert!(!uses_angle_dial(cmd, "distance"));
+        }
+        // Rotation amounts and angles with another zero keep their slider.
+        for cmd in
+            ["filter.distort.twirl", "image.rotation.arbitrary", "image.crop", "filter.blurGallery.tiltShift", "filter.lensCorrection", "filter.render.flame"]
+        {
+            assert!(!uses_angle_dial(cmd, "angle"), "{cmd}");
+        }
+    }
 
     #[test]
     fn restores_only_valid_previous_filter_choices() {
