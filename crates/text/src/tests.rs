@@ -1419,3 +1419,18 @@ fn a_served_script_fallback_joins_the_fallback_stack_once_it_arrives() {
     db.register_font_data(cairo.bytes.to_vec());
     assert!(db.fallback_stack().any(|f| f == "Cairo"), "{:?}", db.fallback_stack().collect::<Vec<_>>());
 }
+
+#[test]
+fn translate_tysh_moves_only_the_translation() {
+    let mut t = point("Hello!", 26.0);
+    t.transform = Affine { m: [1.5, 0.0, 0.0, 1.5, 80.0, 340.0] };
+    let tysh = crate::psd::build_tysh(&t, 72.0, Some([0.0, -20.0, 300.0, 4.0]));
+    let moved = crate::psd::translate_tysh(&tysh, -8.0, -279.0).unwrap();
+    let back = crate::psd::parse_tysh(&moved).unwrap();
+    assert_eq!(back.transform.m, [1.5, 0.0, 0.0, 1.5, 72.0, 61.0]);
+    // Everything but the 16 translation bytes is unchanged.
+    assert_eq!(moved.len(), tysh.len());
+    assert_eq!((&moved[..34], &moved[50..]), (&tysh[..34], &tysh[50..]));
+    assert_eq!(crate::psd::parse_tysh(&tysh).unwrap().bounds, back.bounds, "bounds are in text space");
+    assert!(crate::psd::translate_tysh(&tysh[..40], 1.0, 1.0).is_none(), "a truncated block is refused");
+}

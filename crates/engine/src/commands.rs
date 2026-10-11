@@ -1346,7 +1346,18 @@ pub(crate) fn translate_layer(doc: &Document, l: &mut Layer, dx: i32, dy: i32) {
         LayerContent::Raster(s) => *s = translate_surface(s, dx, dy),
         LayerContent::Text(t) => {
             t.transform = photocraft_geom::Affine::translate(dx as f64, dy as f64).mul(&t.transform);
-            crate::type_cmds::refresh(doc, t);
+            // A whole-pixel move shifts the rendered text and its PSD position as they are.
+            // Re-rendering would replace Photoshop's rendering of imported type, and drop the
+            // text when its font is missing (artboard export, moving type with the Move tool).
+            let raw = t.psd_raw.as_deref().map(|r| photocraft_text::psd::translate_tysh(r, f64::from(dx), f64::from(dy)));
+            match (&mut t.cache, raw) {
+                (Some(c), Some(Some(r))) => {
+                    *c = translate_surface(c, dx, dy);
+                    t.psd_raw = Some(std::sync::Arc::new(r));
+                }
+                (Some(c), None) => *c = translate_surface(c, dx, dy),
+                _ => crate::type_cmds::refresh(doc, t),
+            }
         }
         LayerContent::Group(g) => {
             // Moving an artboard moves the board with its contents.
