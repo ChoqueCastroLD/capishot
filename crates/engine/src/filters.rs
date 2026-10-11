@@ -296,16 +296,34 @@ fn keep_alpha(old: &photocraft_raster::Surface, new: &mut photocraft_raster::Sur
     let mut coords: Vec<_> = new.tiles().filter(|(c, t)| old.tile(**c).is_none_or(|o| !std::sync::Arc::ptr_eq(o, t))).map(|(c, _)| *c).collect();
     coords.extend(old.tiles().filter(|(c, _)| new.tile(**c).is_none()).map(|(c, _)| *c));
     let n = new.channels();
-    for c in coords {
-        let r = c.rect();
-        let o = old.read_region(r);
-        let mut v = new.read_region(r);
+    // Each changed tile is patched on its own (in parallel; the browser threads build too): taken
+    // out into a one-tile surface, given the old alpha, and put back.
+    let (fmt, default) = (new.format(), new.default_pixel());
+    let mut work: Vec<(photocraft_geom::Rect, photocraft_raster::Surface)> = coords
+        .iter()
+        .map(|c| {
+            let r = c.rect();
+            let mut one = photocraft_raster::Surface::with_default(fmt, &default);
+            one.put_tiles(new.take_tiles(r));
+            (r, one)
+        })
+        .collect();
+    let patch = |(r, one): &mut (photocraft_geom::Rect, photocraft_raster::Surface)| {
+        let o = old.read_region(*r);
+        let mut v = one.read_region(*r);
         for (pn, po) in v.chunks_exact_mut(n).zip(o.chunks_exact(n)) {
             if let (Some(a), Some(b)) = (pn.last_mut(), po.last()) {
                 *a = *b;
             }
         }
-        new.write_region(r, &v);
+        one.write_region(*r, &v);
+    };
+    {
+        use rayon::prelude::*;
+        work.par_iter_mut().for_each(patch);
+    }
+    for (r, mut one) in work {
+        new.put_tiles(one.take_tiles(r));
     }
     new.prune();
 }
