@@ -155,3 +155,70 @@ fn bad_params_and_states_fail_without_changing_anything() {
     s.close(1);
     assert!(!s.is_enabled(cmd));
 }
+
+/// UI-217-23: whole layers through the layer clipboard, between documents and later on: masks,
+/// styles and type come along, converted to the destination like a drag.
+#[test]
+fn layer_clipboard_pastes_whole_layers_into_any_document() {
+    let (mut s, paint) = two_docs(40, 30, 8);
+    s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+    s.execute("layer.layerStyle.dropShadow", json!({})).unwrap();
+    assert!(!doc(&s, 0).layer(paint).unwrap().effects.items.is_empty());
+    let typed = LayerId(s.execute("type.create", json!({"x": 5, "y": 20, "text": "Hi"})).unwrap()["layer"].as_u64().unwrap());
+    s.execute("layer.select", json!({"layer": paint.0})).unwrap();
+    s.execute("layer.select", json!({"layer": typed.0, "mode": "add"})).unwrap();
+    assert!(!s.is_enabled("layer.pasteLayers"), "nothing copied yet");
+    let before = doc(&s, 0).clone();
+    let history = s.active().unwrap().history.past_len();
+    let r = s.execute("layer.copyLayers", json!({})).unwrap();
+    assert_eq!(r["layers"], 2);
+    assert_eq!(*doc(&s, 0), before, "copying leaves the document alone");
+    assert_eq!(s.active().unwrap().history.past_len(), history, "and adds no history step");
+    // Into the other document, in place, as one step.
+    s.set_active(1);
+    let r = s.execute("layer.pasteLayers", json!({})).unwrap();
+    let ids: Vec<LayerId> = r["layers"].as_array().unwrap().iter().map(|v| LayerId(v.as_u64().unwrap())).collect();
+    assert_eq!(ids.len(), 2);
+    let d = doc(&s, 1);
+    let names: Vec<&str> = d.layers.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(names, ["Background", "paint", "Hi"], "order kept, above the active layer");
+    let pasted = d.layer(ids[0]).unwrap();
+    assert!(pasted.mask.is_some(), "the mask came along");
+    assert_eq!(pasted.effects, before.layer(paint).unwrap().effects, "and the layer style");
+    assert!(matches!(d.layer(ids[1]).unwrap().content, photocraft_doc::LayerContent::Text(_)), "type stays editable");
+    assert_eq!(bounds(&s, 1, ids[0]), Rect::new(4, 6, 14, 16));
+    assert!(s.undo());
+    assert_eq!(doc(&s, 1).layers.len(), 1, "one history step");
+    // The clipboard outlives the source and pastes again (and into the source itself).
+    s.close(0);
+    s.execute("layer.pasteLayers", json!({"center": true})).unwrap();
+    assert_eq!(doc(&s, 0).layers.len(), 3);
+    s.execute("file.new", json!({"width": 20, "height": 20, "mode": "gray", "depth": 16})).unwrap();
+    let r = s.execute("layer.pasteLayers", json!({"offset": [-4, -6]})).unwrap();
+    let id = copied(&r);
+    let surf = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap();
+    assert_eq!(surf.format(), PixelFormat::new(ColorMode::Grayscale, SampleType::U16, true), "converted like a drag");
+    // Edit › Purge › Clipboard empties it.
+    s.execute("edit.purge.clipboard", json!({})).unwrap();
+    assert!(!s.is_enabled("layer.pasteLayers"));
+}
+
+#[test]
+fn layer_clipboard_bad_params_fail_without_changing_anything() {
+    let (mut s, _) = two_docs(40, 30, 8);
+    assert!(s.execute("layer.pasteLayers", json!({})).is_err(), "nothing copied");
+    for p in [json!({"layers": [999_999]}), json!({"layers": "all"}), json!({"layers": []}), json!([1]), json!("x")] {
+        assert!(s.execute("layer.copyLayers", p.clone()).is_err(), "{p}");
+        assert!(s.layer_clipboard.is_none(), "{p}");
+    }
+    s.execute("layer.copyLayers", Value::Null).unwrap();
+    let layers = doc(&s, 0).layers.len();
+    for p in [json!({"at": [1.0]}), json!({"at": [f64::MAX, 0.0]}), json!({"offset": ["a", 2]}), json!([]), json!(3)] {
+        assert!(s.execute("layer.pasteLayers", p.clone()).is_err(), "{p}");
+        assert_eq!(doc(&s, 0).layers.len(), layers, "{p}");
+    }
+    s.close(1);
+    s.close(0);
+    assert!(s.execute("layer.copyLayers", json!({})).is_err(), "no document");
+    assert!(s.execute("layer.pasteLayers", json!({})).is_err(), "no document");
+}

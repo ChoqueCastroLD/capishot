@@ -621,7 +621,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         for tool in LiquifyTool::ALL {
             let tip = match tool {
                 // The lasso works on the same freeze mask as Freeze/Thaw.
-                LiquifyTool::LassoMask => tl!("Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)").to_string(),
+                LiquifyTool::LassoMask => crate::shortcuts::os_text(tl!("Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)")),
                 _ => format!("{} ({})", tl!(tool.label()), shortcut(tool)),
             };
             if crate::icons::button(&mut strip, tool_icon(tool), 34.0, d.opts.tool == tool, &tip).clicked() {

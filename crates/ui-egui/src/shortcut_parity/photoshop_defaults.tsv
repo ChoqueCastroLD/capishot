@@ -1,0 +1,248 @@
+# Photoshop's DEFAULT keyboard shortcuts (Windows and macOS), as test data for
+# `shortcut_parity_tests.rs`.
+#
+# Source: Adobe, "Default keyboard shortcuts in Adobe Photoshop",
+# https://helpx.adobe.com/photoshop/using/default-keyboard-shortcuts.html (sections Popular
+# shortcuts, Function keys, Keys for selecting tools, Keys for viewing images, Keys for selecting
+# and moving objects, Keys for transforming selections, Keys for painting objects, Keys for
+# blending modes, Keys for the Layers panel, Keys for using panels), cross-checked against the
+# shortcuts Photoshop's own menus print. Used only as a list of facts (which key does what); no
+# text, code or assets were copied. (On 2026-10-10 helpx.adobe.com answered 403 to this build
+# server and the Wayback copy was rate-limited, so the rows were transcribed from the list as
+# published and from Photoshop's menus; re-check them against the page when it is reachable.)
+#
+# Columns (tab-separated): area, action, Windows keys, macOS keys, what Capishot must do.
+# Keys are written the way Adobe writes them (Ctrl/Alt on Windows, Command/Option on macOS;
+# "Delete" on macOS is the Mac's delete key, i.e. Backspace). The last column is checked by
+# pressing the key through the real shortcut handler (`shortcuts::handle`):
+#   cmd:<id>         the press dispatches this command (dry run; disabled still counts)
+#   tool:<Tool>      the press selects a tool of that tool's group
+#   cycle:<Tool>     with that tool current, the press switches to another tool of its group
+#   hold:<id>        the temporary (held) tool with that binding id is on this key
+#   opacity:<n>      with the Brush, the press sets its opacity to n %
+#   flow:<n>         with the Brush, the press sets its flow to n %
+#   blend:<mode>     with the Move tool, the press sets the active layer's blend mode
+#   brushblend:<m>   with the Brush, the press sets the brush's blend mode
+#   transform:<what> during Free Transform, the press commits or cancels it
+#   nudge:<px>       with the Move tool, the press moves the active layer right by px
+#
+# area	action	windows	macos	target
+File	New	Ctrl+N	Command+N	cmd:file.new
+File	Open	Ctrl+O	Command+O	cmd:file.open
+File	Close	Ctrl+W	Command+W	cmd:file.close
+File	Close All	Ctrl+Alt+W	Command+Option+W	cmd:file.closeAll
+File	Close Others	Ctrl+Alt+P	Command+Option+P	cmd:file.closeOthers
+File	Save	Ctrl+S	Command+S	cmd:file.save
+File	Save As	Ctrl+Shift+S	Command+Shift+S	cmd:file.saveAs
+File	Save a Copy	Ctrl+Alt+S	Command+Option+S	cmd:file.saveACopy
+File	Revert	F12	F12	cmd:file.revert
+File	Export As	Ctrl+Alt+Shift+W	Command+Option+Shift+W	cmd:file.export.exportAs
+File	Save for Web (Legacy)	Ctrl+Alt+Shift+S	Command+Option+Shift+S	cmd:file.export.saveForWebLegacy
+File	File Info	Ctrl+Alt+Shift+I	Command+Option+Shift+I	cmd:file.fileInfo
+File	Print	Ctrl+P	Command+P	cmd:file.print
+File	Print One Copy	Ctrl+Alt+Shift+P	Command+Option+Shift+P	cmd:file.printOneCopy
+File	Exit / Quit	Ctrl+Q	Command+Q	cmd:file.exit
+Edit	Undo	Ctrl+Z	Command+Z	cmd:edit.undo
+Edit	Redo	Ctrl+Shift+Z	Command+Shift+Z	cmd:edit.redo
+Edit	Toggle Last State	Ctrl+Alt+Z	Command+Option+Z	cmd:edit.toggleLastState
+Edit	Fade	Ctrl+Shift+F	Command+Shift+F	cmd:edit.fade
+Edit	Cut	Ctrl+X	Command+X	cmd:edit.cut
+Edit	Copy	Ctrl+C	Command+C	cmd:edit.copy
+Edit	Copy Merged	Ctrl+Shift+C	Command+Shift+C	cmd:edit.copyMerged
+Edit	Paste	Ctrl+V	Command+V	cmd:edit.paste
+Edit	Paste in Place	Ctrl+Shift+V	Command+Shift+V	cmd:edit.pasteSpecial.pasteInPlace
+Edit	Paste Into	Ctrl+Alt+Shift+V	Command+Option+Shift+V	cmd:edit.pasteSpecial.pasteInto
+Edit	Cut (function key)	F2	F2	cmd:edit.cut
+Edit	Copy (function key)	F3	F3	cmd:edit.copy
+Edit	Paste (function key)	F4	F4	cmd:edit.paste
+Edit	Search	Ctrl+F	Command+F	cmd:edit.search
+Edit	Fill	Shift+F5	Shift+F5	cmd:edit.fill
+Edit	Fill (second key)	Shift+Backspace	Shift+Delete	cmd:edit.fill
+Edit	Fill with foreground colour	Alt+Backspace	Option+Delete	cmd:edit.fillForeground
+Edit	Fill with background colour	Ctrl+Backspace	Command+Delete	cmd:edit.fillBackground
+Edit	Fill with foreground, preserve transparency	Alt+Shift+Backspace	Option+Shift+Delete	cmd:edit.fillForegroundPreserve
+Edit	Fill with background, preserve transparency	Ctrl+Shift+Backspace	Command+Shift+Delete	cmd:edit.fillBackgroundPreserve
+Edit	Content-Aware Scale	Ctrl+Alt+Shift+C	Command+Option+Shift+C	cmd:edit.contentAwareScale
+Edit	Free Transform	Ctrl+T	Command+T	cmd:edit.freeTransform
+Edit	Transform Again	Ctrl+Shift+T	Command+Shift+T	cmd:edit.transform.again
+Edit	Free Transform with a duplicate	Ctrl+Alt+T	Command+Option+T	cmd:edit.freeTransformCopy
+Edit	Color Settings	Ctrl+Shift+K	Command+Shift+K	cmd:edit.colorSettings
+Edit	Keyboard Shortcuts	Ctrl+Alt+Shift+K	Command+Option+Shift+K	cmd:edit.keyboardShortcuts
+Edit	Menus	Ctrl+Alt+Shift+M	Command+Option+Shift+M	cmd:edit.menus
+Edit	Preferences	Ctrl+K	Command+K	cmd:edit.preferences.general
+Image	Levels	Ctrl+L	Command+L	cmd:image.adjustments.levels
+Image	Curves	Ctrl+M	Command+M	cmd:image.adjustments.curves
+Image	Hue/Saturation	Ctrl+U	Command+U	cmd:image.adjustments.hueSaturation
+Image	Color Balance	Ctrl+B	Command+B	cmd:image.adjustments.colorBalance
+Image	Black & White	Ctrl+Alt+Shift+B	Command+Option+Shift+B	cmd:image.adjustments.blackWhite
+Image	Invert	Ctrl+I	Command+I	cmd:image.adjustments.invert
+Image	Desaturate	Ctrl+Shift+U	Command+Shift+U	cmd:image.adjustments.desaturate
+Image	Auto Tone	Ctrl+Shift+L	Command+Shift+L	cmd:image.autoTone
+Image	Auto Contrast	Ctrl+Alt+Shift+L	Command+Option+Shift+L	cmd:image.autoContrast
+Image	Auto Color	Ctrl+Shift+B	Command+Shift+B	cmd:image.autoColor
+Image	Image Size	Ctrl+Alt+I	Command+Option+I	cmd:image.imageSize
+Image	Canvas Size	Ctrl+Alt+C	Command+Option+C	cmd:image.canvasSize
+Layer	New Layer	Ctrl+Shift+N	Command+Shift+N	cmd:layer.new.layer
+Layer	New Layer without the dialog	Ctrl+Alt+Shift+N	Command+Option+Shift+N	cmd:layer.new.layerSilent
+Layer	Layer via Copy	Ctrl+J	Command+J	cmd:layer.new.layerViaCopy
+Layer	Layer via Cut	Ctrl+Shift+J	Command+Shift+J	cmd:layer.new.layerViaCut
+Layer	Group Layers	Ctrl+G	Command+G	cmd:layer.groupLayers
+Layer	Ungroup Layers	Ctrl+Shift+G	Command+Shift+G	cmd:layer.ungroupLayers
+Layer	Create/Release Clipping Mask	Ctrl+Alt+G	Command+Option+G	cmd:layer.createClippingMask
+Layer	Merge Layers / Merge Down	Ctrl+E	Command+E	cmd:layer.mergeLayers
+Layer	Merge Visible	Ctrl+Shift+E	Command+Shift+E	cmd:layer.mergeVisible
+Layer	Stamp Visible (merge a copy of all visible layers into a new layer)	Ctrl+Alt+Shift+E	Command+Option+Shift+E	cmd:layer.stampVisible
+Layer	Stamp Down (merge a copy of the layer into the one below)	Ctrl+Alt+E	Command+Option+E	cmd:layer.stampDown
+Layer	Bring to Front	Ctrl+Shift+]	Command+Shift+]	cmd:layer.arrange.bringToFront
+Layer	Bring Forward	Ctrl+]	Command+]	cmd:layer.arrange.bringForward
+Layer	Send Backward	Ctrl+[	Command+[	cmd:layer.arrange.sendBackward
+Layer	Send to Back	Ctrl+Shift+[	Command+Shift+[	cmd:layer.arrange.sendToBack
+Layer	Select next layer up	Alt+]	Option+]	cmd:layer.selectAbove
+Layer	Select next layer down	Alt+[	Option+[	cmd:layer.selectBelow
+Layer	Select top layer	Alt+.	Option+.	cmd:layer.selectTop
+Layer	Select bottom layer	Alt+,	Option+,	cmd:layer.selectBottom
+Layer	Add next layer up to the selection	Shift+Alt+]	Shift+Option+]	cmd:layer.addAboveToSelection
+Layer	Add next layer down to the selection	Shift+Alt+[	Shift+Option+[	cmd:layer.addBelowToSelection
+Layer	Hide Layers	Ctrl+,	Command+,	cmd:layer.hideLayers
+Layer	Lock Layers	Ctrl+/	Command+/	cmd:layer.lockLayers
+Layer	Toggle lock transparent pixels	/	/	cmd:layer.toggleLockTransparency
+Layer	Quick Export as PNG	Ctrl+Shift+'	Command+Shift+'	cmd:layer.quickExportAsPng
+Layer	Export As (layer)	Ctrl+Alt+Shift+'	Command+Option+Shift+'	cmd:layer.exportAs
+Select	All	Ctrl+A	Command+A	cmd:select.all
+Select	Deselect	Ctrl+D	Command+D	cmd:select.deselect
+Select	Reselect	Ctrl+Shift+D	Command+Shift+D	cmd:select.reselect
+Select	Inverse	Ctrl+Shift+I	Command+Shift+I	cmd:select.inverse
+Select	Inverse (function key)	Shift+F7	Shift+F7	cmd:select.inverse
+Select	All Layers	Ctrl+Alt+A	Command+Option+A	cmd:select.allLayers
+Select	Find Layers	Ctrl+Alt+Shift+F	Command+Option+Shift+F	cmd:select.findLayers
+Select	Select and Mask	Ctrl+Alt+R	Command+Option+R	cmd:select.selectAndMask
+Select	Feather	Shift+F6	Shift+F6	cmd:select.modify.feather
+Select	Edit in Quick Mask Mode	Q	Q	cmd:select.editInQuickMaskMode
+Filter	Last Filter	Ctrl+Alt+F	Command+Option+F	cmd:filter.lastFilter
+Filter	Camera Raw Filter	Ctrl+Shift+A	Command+Shift+A	cmd:filter.cameraRaw
+Filter	Adaptive Wide Angle	Ctrl+Alt+Shift+A	Command+Option+Shift+A	cmd:filter.adaptiveWideAngle
+Filter	Lens Correction	Ctrl+Shift+R	Command+Shift+R	cmd:filter.lensCorrection
+Filter	Liquify	Ctrl+Shift+X	Command+Shift+X	cmd:filter.liquify
+Filter	Vanishing Point	Ctrl+Alt+V	Command+Option+V	cmd:filter.vanishingPoint
+View	Proof Colors	Ctrl+Y	Command+Y	cmd:view.proofColors
+View	Gamut Warning	Ctrl+Shift+Y	Command+Shift+Y	cmd:view.gamutWarning
+View	Zoom In	Ctrl++	Command++	cmd:view.zoomIn
+View	Zoom In (= key)	Ctrl+=	Command+=	cmd:view.zoomIn
+View	Zoom Out	Ctrl+-	Command+-	cmd:view.zoomOut
+View	Fit on Screen	Ctrl+0	Command+0	cmd:view.fitOnScreen
+View	100%	Ctrl+1	Command+1	cmd:view.actualPixels
+View	Extras	Ctrl+H	Command+H	cmd:view.extras
+View	Target Path	Ctrl+Shift+H	Command+Shift+H	cmd:view.show.targetPath
+View	Grid	Ctrl+'	Command+'	cmd:view.show.grid
+View	Guides	Ctrl+;	Command+;	cmd:view.show.guides
+View	Rulers	Ctrl+R	Command+R	cmd:view.rulers
+View	Snap	Ctrl+Shift+;	Command+Shift+;	cmd:view.snap
+View	Lock Guides	Ctrl+Alt+;	Command+Option+;	cmd:view.lockGuides
+View	Cycle screen modes	F	F	cmd:view.screenMode.cycle
+View	Cycle screen modes backwards	Shift+F	Shift+F	cmd:view.screenMode.cyclePrevious
+View	Show/hide all panels	Tab	Tab	cmd:window.togglePanels
+View	Show/hide all panels except the toolbox and options bar	Shift+Tab	Shift+Tab	cmd:window.toggle.dock
+View	Hand tool while held	Space	Space	hold:tools.temporary.hand
+View	Zoom in while held	Ctrl+Space	Command+Space	hold:tools.temporary.zoomIn
+View	Zoom out while held	Ctrl+Alt+Space	Command+Option+Space	hold:tools.temporary.zoomOut
+View	Scroll up one screen	Page Up	Page Up	cmd:view.scroll.pageUp
+View	Scroll down one screen	Page Down	Page Down	cmd:view.scroll.pageDown
+View	Scroll left one screen	Ctrl+Page Up	Command+Page Up	cmd:view.scroll.pageLeft
+View	Scroll right one screen	Ctrl+Page Down	Command+Page Down	cmd:view.scroll.pageRight
+View	Move view to upper-left corner	Home	Home	cmd:view.scroll.home
+View	Move view to lower-right corner	End	End	cmd:view.scroll.end
+View	Target composite channel	Ctrl+2	Command+2	cmd:channel.target.composite
+View	Target first channel (red)	Ctrl+3	Command+3	cmd:channel.target.slot3
+View	Target second channel (green)	Ctrl+4	Command+4	cmd:channel.target.slot4
+View	Target third channel (blue)	Ctrl+5	Command+5	cmd:channel.target.slot5
+Window	Brush Settings	F5	F5	cmd:window.toggle.brushSettings
+Window	Color	F6	F6	cmd:window.toggle.color
+Window	Layers	F7	F7	cmd:window.toggle.layers
+Window	Info	F8	F8	cmd:window.panel.info
+Window	Actions	Alt+F9	Option+F9	cmd:window.panel.actions
+Window	Next document	Ctrl+Tab	Control+Tab	cmd:window.nextDocument
+Window	Previous document	Ctrl+Shift+Tab	Control+Shift+Tab	cmd:window.previousDocument
+Tools	Move	V	V	tool:Move
+Tools	Marquee	M	M	tool:RectMarquee
+Tools	Cycle Marquee tools	Shift+M	Shift+M	cycle:RectMarquee
+Tools	Lasso	L	L	tool:Lasso
+Tools	Cycle Lasso tools	Shift+L	Shift+L	cycle:Lasso
+Tools	Object Selection / Quick Selection / Magic Wand	W	W	tool:MagicWand
+Tools	Cycle selection tools	Shift+W	Shift+W	cycle:MagicWand
+Tools	Crop / Slice	C	C	tool:Crop
+Tools	Cycle Crop and Slice tools	Shift+C	Shift+C	cycle:Crop
+Tools	Eyedropper / Ruler / Note / Count	I	I	tool:Eyedropper
+Tools	Cycle Eyedropper tools	Shift+I	Shift+I	cycle:Eyedropper
+Tools	Healing tools	J	J	tool:SpotHealing
+Tools	Cycle healing tools	Shift+J	Shift+J	cycle:SpotHealing
+Tools	Brush / Pencil / Mixer Brush	B	B	tool:Brush
+Tools	Cycle brush tools	Shift+B	Shift+B	cycle:Brush
+Tools	Clone Stamp / Pattern Stamp	S	S	tool:CloneStamp
+Tools	Cycle stamp tools	Shift+S	Shift+S	cycle:CloneStamp
+Tools	History Brush	Y	Y	tool:HistoryBrush
+Tools	Eraser tools	E	E	tool:Eraser
+Tools	Cycle eraser tools	Shift+E	Shift+E	cycle:Eraser
+Tools	Gradient / Paint Bucket	G	G	tool:Gradient
+Tools	Cycle Gradient and Paint Bucket	Shift+G	Shift+G	cycle:Gradient
+Tools	Dodge / Burn / Sponge	O	O	tool:Dodge
+Tools	Cycle toning tools	Shift+O	Shift+O	cycle:Dodge
+Tools	Pen	P	P	tool:Pen
+Tools	Type	T	T	tool:Type
+Tools	Cycle type tools	Shift+T	Shift+T	cycle:Type
+Tools	Path Selection / Direct Selection	A	A	tool:PathSelection
+Tools	Cycle path selection tools	Shift+A	Shift+A	cycle:PathSelection
+Tools	Shape tools	U	U	tool:Rectangle
+Tools	Cycle shape tools	Shift+U	Shift+U	cycle:Rectangle
+Tools	Hand	H	H	tool:Hand
+Tools	Rotate View	R	R	tool:RotateView
+Tools	Zoom	Z	Z	tool:Zoom
+Tools	Frame	K	K	tool:Frame
+Tools	Default foreground/background colours	D	D	cmd:tools.defaultColors
+Tools	Switch foreground/background colours	X	X	cmd:tools.swapColors
+Painting	Decrease brush size	[	[	cmd:tools.decreaseBrushSize
+Painting	Increase brush size	]	]	cmd:tools.increaseBrushSize
+Painting	Decrease brush hardness	Shift+[	Shift+[	cmd:tools.decreaseBrushHardness
+Painting	Increase brush hardness	Shift+]	Shift+]	cmd:tools.increaseBrushHardness
+Painting	Previous brush	,	,	cmd:tools.previousBrush
+Painting	Next brush	.	.	cmd:tools.nextBrush
+Painting	First brush	Shift+,	Shift+,	cmd:tools.firstBrush
+Painting	Last brush	Shift+.	Shift+.	cmd:tools.lastBrush
+Painting	Opacity 10 %	1	1	opacity:10
+Painting	Opacity 50 %	5	5	opacity:50
+Painting	Opacity 100 %	0	0	opacity:100
+Painting	Flow 10 %	Shift+1	Shift+1	flow:10
+Painting	Flow 50 %	Shift+5	Shift+5	flow:50
+Painting	Flow 100 %	Shift+0	Shift+0	flow:100
+Blending	Next blending mode	Shift++	Shift++	blend:next
+Blending	Previous blending mode	Shift+-	Shift+-	blend:previous
+Blending	Normal	Shift+Alt+N	Shift+Option+N	blend:normal
+Blending	Dissolve	Shift+Alt+I	Shift+Option+I	blend:dissolve
+Blending	Darken	Shift+Alt+K	Shift+Option+K	blend:darken
+Blending	Multiply	Shift+Alt+M	Shift+Option+M	blend:multiply
+Blending	Color Burn	Shift+Alt+B	Shift+Option+B	blend:colorBurn
+Blending	Linear Burn	Shift+Alt+A	Shift+Option+A	blend:linearBurn
+Blending	Lighten	Shift+Alt+G	Shift+Option+G	blend:lighten
+Blending	Screen	Shift+Alt+S	Shift+Option+S	blend:screen
+Blending	Color Dodge	Shift+Alt+D	Shift+Option+D	blend:colorDodge
+Blending	Linear Dodge (Add)	Shift+Alt+W	Shift+Option+W	blend:linearDodge
+Blending	Overlay	Shift+Alt+O	Shift+Option+O	blend:overlay
+Blending	Soft Light	Shift+Alt+F	Shift+Option+F	blend:softLight
+Blending	Hard Light	Shift+Alt+H	Shift+Option+H	blend:hardLight
+Blending	Vivid Light	Shift+Alt+V	Shift+Option+V	blend:vividLight
+Blending	Linear Light	Shift+Alt+J	Shift+Option+J	blend:linearLight
+Blending	Pin Light	Shift+Alt+Z	Shift+Option+Z	blend:pinLight
+Blending	Hard Mix	Shift+Alt+L	Shift+Option+L	blend:hardMix
+Blending	Difference	Shift+Alt+E	Shift+Option+E	blend:difference
+Blending	Exclusion	Shift+Alt+X	Shift+Option+X	blend:exclusion
+Blending	Hue	Shift+Alt+U	Shift+Option+U	blend:hue
+Blending	Saturation	Shift+Alt+T	Shift+Option+T	blend:saturation
+Blending	Color	Shift+Alt+C	Shift+Option+C	blend:color
+Blending	Luminosity	Shift+Alt+Y	Shift+Option+Y	blend:luminosity
+Blending	Behind (painting tools)	Shift+Alt+Q	Shift+Option+Q	brushblend:behind
+Blending	Clear (painting tools)	Shift+Alt+R	Shift+Option+R	brushblend:clear
+Transform	Commit the transformation	Enter	Return	transform:commit
+Transform	Cancel the transformation	Esc	Esc	transform:cancel
+Move	Nudge the layer 1 pixel	Right Arrow	Right Arrow	nudge:1
+Move	Nudge the layer 10 pixels	Shift+Right Arrow	Shift+Right Arrow	nudge:10
+Type	Increase type size	Ctrl+Shift+.	Command+Shift+.	cmd:type.increaseSize
+Type	Decrease type size	Ctrl+Shift+,	Command+Shift+,	cmd:type.decreaseSize
