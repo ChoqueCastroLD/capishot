@@ -630,6 +630,8 @@ pub struct PhotocraftApp {
     pub(crate) pcrop: perspective_crop_ui::PerspectiveCrop,
     /// Type tool layout cache: ((doc, revision, layer), layout).
     pub(crate) type_layout: Option<((u64, u64, u64), std::sync::Arc<photocraft_text::TextLayout>)>,
+    /// Type tool: (layer, clicks in the current run) for word / line / paragraph / all selection.
+    pub(crate) type_clicks: Option<(u64, u32)>,
     pub(crate) type_transform_preview: Option<type_transform::Preview>,
     /// A font hovered in the Type tool's font picker, shown live (`type_font_preview`).
     pub(crate) type_font_preview: Option<type_font_preview::TypeFontPreview>,
@@ -741,6 +743,7 @@ impl PhotocraftApp {
             channel_thumbs: None,
             channel_views: HashMap::new(),
             type_layout: None,
+            type_clicks: None,
             type_transform_preview: None,
             type_font_preview: None,
             guide_drag: None,

@@ -3176,8 +3176,24 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if tool == Tool::Crop && response.double_clicked() && response.interact_pointer_pos().is_some_and(|p| crate::crop_ui::commits_at(app, xf.to_doc(p))) {
             commit_crop(app);
         }
-        if tool.is_type() && response.double_clicked() && !crate::type_transform::visible(app, crate::workspace_ui::sticky_mods(app, mods)) {
-            crate::type_tool::select_word(app);
+        // Type: 2 clicks select a word, 3 the line, 4 the paragraph, 5 all text (Photoshop).
+        if tool.is_type()
+            && response.clicked()
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            if crate::type_transform::visible(app, crate::workspace_ui::sticky_mods(app, mods)) {
+                app.type_clicks = None;
+            } else {
+                let n = if response.triple_clicked() {
+                    3
+                } else if response.double_clicked() {
+                    2
+                } else {
+                    1
+                };
+                let d = xf.to_doc(p);
+                crate::type_tool::multi_click(app, n, d[0], d[1]);
+            }
         }
     }
     if crop_camera && let (Some((center, rotation)), Some(now)) = (camera, app.ui.views.get(idx)) {
