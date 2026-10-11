@@ -243,6 +243,14 @@ pub(crate) fn transform_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut L
     if locks.position || locks.all {
         return Err(EngineError::Other(format!("layer \"{}\" is locked", l.name)));
     }
+    if h.is_identity() {
+        if let LayerContent::Group(g) = &mut l.content {
+            for c in g.children.iter_mut() {
+                transform_layer(None, locks, c, h, affine, interp)?;
+            }
+        }
+        return Ok(());
+    }
     // With a selection only the selected pixels move, and so only the same region of a linked
     // mask (#205). Groups, type, shapes and smart objects move whole.
     let mask_sel = doc_sel.filter(|_| !moves_whole(l));
@@ -470,13 +478,15 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         let sel = doc.selection.clone();
         if lone {
             // A targeted unlinked mask, alpha channel or Quick Mask transforms by itself.
-            let (surf, _) = crate::channel_cmds::target_surface(doc, id, p)?;
-            *surf = match &sel {
-                Some(sel) => warp_gray_selected(surf, sel, &h, interp)?,
-                None => warp_gray(surf, &h, interp)?,
-            };
-            if let Some(sel) = &doc.selection {
-                doc.selection = Some(warp_gray(sel, &h, Interp::Bilinear)?).filter(|s| !s.content_bounds().is_empty());
+            if !h.is_identity() {
+                let (surf, _) = crate::channel_cmds::target_surface(doc, id, p)?;
+                *surf = match &sel {
+                    Some(sel) => warp_gray_selected(surf, sel, &h, interp)?,
+                    None => warp_gray(surf, &h, interp)?,
+                };
+                if let Some(sel) = &doc.selection {
+                    doc.selection = Some(warp_gray(sel, &h, Interp::Bilinear)?).filter(|s| !s.content_bounds().is_empty());
+                }
             }
             return Ok(());
         }
@@ -485,14 +495,16 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         let group = group_locks(doc, id);
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         transform_layer(if is_group { None } else { sel.as_ref() }, group, l, &h, affine, interp)?;
-        // Type layers re-render from their new transform.
-        let snapshot = doc.clone();
-        if let Some(l) = doc.layer_mut(id) {
-            refresh_text(&snapshot, l);
-        }
-        // The selection outline moves with the pixels.
-        if let Some(sel) = &doc.selection {
-            doc.selection = Some(warp_gray(sel, &h, Interp::Bilinear)?).filter(|s| !s.content_bounds().is_empty());
+        if !h.is_identity() {
+            // Type layers re-render from their new transform.
+            let snapshot = doc.clone();
+            if let Some(l) = doc.layer_mut(id) {
+                refresh_text(&snapshot, l);
+            }
+            // The selection outline moves with the pixels.
+            if let Some(sel) = &doc.selection {
+                doc.selection = Some(warp_gray(sel, &h, Interp::Bilinear)?).filter(|s| !s.content_bounds().is_empty());
+            }
         }
         Ok(())
     })?;
@@ -876,5 +888,43 @@ mod tests {
         s.execute("select.rect", json!({"x": 10, "y": 10, "width": 5, "height": 10})).unwrap();
         let st = s.active().unwrap();
         assert_eq!(transform_bounds(&st.doc, st.doc.layer(st.active_layer.unwrap()).unwrap()), Rect::new(10, 10, 15, 20));
+    }
+
+    #[test]
+    fn feathered_selection_identity_transform_preserves_pixels() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 16, "height": 16, "background": "transparent"})).unwrap();
+        s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        s.execute("select.rect", json!({"x": 4, "y": 4, "width": 8, "height": 8})).unwrap();
+        s.execute("select.modify.feather", json!({"radius": 1})).unwrap();
+
+        let mut before_px = Vec::new();
+        for y in 0..16 {
+            for x in 0..16 {
+                before_px.push(s.execute("document.pixel", json!({"x": x, "y": y})).unwrap());
+            }
+        }
+
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 0, 0], "interpolation": "nearest"})).unwrap();
+
+        let mut after_px = Vec::new();
+        for y in 0..16 {
+            for x in 0..16 {
+                after_px.push(s.execute("document.pixel", json!({"x": x, "y": y})).unwrap());
+            }
+        }
+
+        assert_eq!(before_px, after_px, "feathered selection identity transform must preserve all pixels");
+        let p4_8 = s.execute("document.pixel", json!({"x": 4, "y": 8})).unwrap();
+        assert_eq!(p4_8, json!([1.0, 0.0, 0.0, 1.0]), "(4,8) must remain opaque red");
+
+        // Undo restores original document.
+        s.execute("edit.undo", json!({})).unwrap();
+        let undo_p4_8 = s.execute("document.pixel", json!({"x": 4, "y": 8})).unwrap();
+        assert_eq!(undo_p4_8, json!([1.0, 0.0, 0.0, 1.0]));
+
+        // Locked layer still refuses transform even if identity.
+        s.execute("layer.setProps", json!({"locks": {"position": true}})).unwrap();
+        assert!(s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 0, 0]})).is_err(), "locked layer refuses identity transform");
     }
 }
