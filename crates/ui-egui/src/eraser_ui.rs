@@ -35,8 +35,27 @@ pub fn click(app: &mut PhotocraftApp, tool: Tool, x: f64, y: f64) -> bool {
     true
 }
 
-/// Finishes a Background Eraser stroke. Returns false for other tools.
+/// The Eraser with Erase to History on: its strokes paint the History Brush's state back, as
+/// `paint.historyBrush` with the Eraser's brush (shown live as the History Brush is).
+pub fn erases_to_history(app: &PhotocraftApp, tool: Tool) -> bool {
+    tool == Tool::Eraser && app.ui.tool_options.erase_to_history
+}
+
+/// The command an Eraser stroke commits in the options bar's Mode: Pencil erases aliased.
+pub fn eraser_command(app: &PhotocraftApp) -> &'static str {
+    if app.ui.tool_options.eraser_mode == "pencil" { "paint.pencil" } else { "paint.stroke" }
+}
+
+/// Finishes a Background Eraser stroke, or an Eraser stroke with Erase to History. Returns false
+/// for other tools.
 pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]]) -> bool {
+    if erases_to_history(app, tool) {
+        app.live_stroke = None;
+        let p = json!({"points": points, "target": crate::canvas::paint_target(app)});
+        let r = app.run("paint.historyBrush", p);
+        report(app, r);
+        return true;
+    }
     if tool != Tool::BackgroundEraser {
         return false;
     }
