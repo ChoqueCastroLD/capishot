@@ -103,8 +103,14 @@ impl Frame {
 
 /// Topmost visible type layer under the point. `walk` is bottom-up; the Type tool hits the top first.
 fn topmost(doc: &Document, x: f64, y: f64) -> Option<Frame> {
-    let mut ids: Vec<LayerId> =
-        doc.walk().into_iter().filter(|(_, _, l)| l.visible && matches!(l.content, LayerContent::Text(_))).map(|(_, _, l)| l.id).collect();
+    let mut ids: Vec<LayerId> = doc
+        .walk()
+        .into_iter()
+        .filter(|(path, _, layer)| {
+            matches!(layer.content, LayerContent::Text(_)) && (1..=path.len()).all(|n| doc.layer_at(&path[..n]).is_some_and(|ancestor| ancestor.visible))
+        })
+        .map(|(_, _, layer)| layer.id)
+        .collect();
     ids.reverse();
     ids.into_iter().find_map(|id| {
         let f = frame(doc, id, "type.hitTest").ok()?;
@@ -403,6 +409,30 @@ mod tests {
         for mov in ["wordNext", "wordPrev", "lineNext", "linePrev", "lineStart", "lineEnd", "start", "end"] {
             assert_eq!(go(&mut s, empty, 0, mov, None), 0, "{mov}");
         }
+    }
+
+    #[test]
+    fn automatic_hit_test_skips_hidden_parent_groups() {
+        let mut s = session();
+        let text = create(&mut s, json!({"x": 50, "y": 80, "text": "AB", "size": 36}));
+        let caret = s.execute("type.caret", json!({"layer": text, "index": 1})).unwrap();
+        let x = (caret["segment"][0][0].as_f64().unwrap() + caret["segment"][1][0].as_f64().unwrap()) / 2.0;
+        let y = (caret["segment"][0][1].as_f64().unwrap() + caret["segment"][1][1].as_f64().unwrap()) / 2.0;
+
+        assert_eq!(u(&s.execute("type.hitTest", json!({"x": x, "y": y})).unwrap(), "layer"), text);
+        s.execute("layer.new.groupFromLayers", json!({"name": "Inner"})).unwrap();
+        s.execute("layer.new.groupFromLayers", json!({"name": "Outer"})).unwrap();
+        s.execute("layer.setProps", json!({"visible": false})).unwrap();
+
+        assert!(s.execute("type.hitTest", json!({"x": x, "y": y})).is_err(), "hidden ancestor must suppress automatic targeting");
+        assert_eq!(
+            u(&s.execute("type.hitTest", json!({"layer": text, "x": x, "y": y})).unwrap(), "layer"),
+            text,
+            "explicit targeting of hidden text is still allowed"
+        );
+
+        s.execute("layer.setProps", json!({"visible": true})).unwrap();
+        assert_eq!(u(&s.execute("type.hitTest", json!({"x": x, "y": y})).unwrap(), "layer"), text);
     }
 
     #[test]
