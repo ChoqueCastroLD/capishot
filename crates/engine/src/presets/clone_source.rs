@@ -33,11 +33,15 @@ pub struct CloneSource {
     pub rotation: f64,
     pub flip_h: bool,
     pub flip_v: bool,
+    /// The panel's link between W and H (Maintain Aspect Ratio): changing one scales the other
+    /// by the same factor.
+    #[serde(default)]
+    pub link: bool,
 }
 
 impl Default for CloneSource {
     fn default() -> Self {
-        CloneSource { source: None, anchor: None, layer: None, scale: [100.0, 100.0], rotation: 0.0, flip_h: false, flip_v: false }
+        CloneSource { source: None, anchor: None, layer: None, scale: [100.0, 100.0], rotation: 0.0, flip_h: false, flip_v: false, link: false }
     }
 }
 
@@ -57,6 +61,7 @@ impl CloneSource {
         json!({
             "index": i, "source": self.source, "anchor": self.anchor, "offset": self.offset(), "layer": self.layer,
             "width": self.scale[0], "height": self.scale[1], "rotation": self.rotation, "flipH": self.flip_h, "flipV": self.flip_v,
+            "link": self.link,
         })
     }
 }
@@ -289,15 +294,25 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         slot.anchor = Some(a);
         slot.source = Some([a[0] + dx, a[1] + dy]);
     }
+    if let Some(b) = p.get("link").and_then(Value::as_bool) {
+        slot.link = b;
+    }
     if let Some(a) = p.get("scale").and_then(Value::as_array) {
         slot.scale = [a.first().and_then(Value::as_f64).unwrap_or(100.0), a.get(1).and_then(Value::as_f64).unwrap_or(100.0)];
     }
-    let num = |k: &str| p.get(k).and_then(Value::as_f64);
-    if let Some(w) = num("width") {
-        slot.scale[0] = w;
-    }
-    if let Some(h) = num("height") {
-        slot.scale[1] = h;
+    let num = |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite());
+    match (num("width"), num("height")) {
+        // Linked: one of W/H changes the other by the same factor (a sign is a flip and stays).
+        (Some(w), None) if slot.link => slot.scale = linked_scale(slot.scale, 0, w),
+        (None, Some(h)) if slot.link => slot.scale = linked_scale(slot.scale, 1, h),
+        (w, h) => {
+            if let Some(w) = w {
+                slot.scale[0] = w;
+            }
+            if let Some(h) = h {
+                slot.scale[1] = h;
+            }
+        }
     }
     if slot.scale.iter().any(|v| !(1.0..=1000.0).contains(&v.abs())) {
         slot.scale = slot.scale.map(|v| v.clamp(1.0, 1000.0));
@@ -318,6 +333,15 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         s.presets.clone.active = i;
     }
     Ok(s.presets.clone.slots[i].to_json(i))
+}
+
+/// W/H after setting side `k` to `v` with the link on: the other side scales by the same factor.
+fn linked_scale(scale: [f64; 2], k: usize, v: f64) -> [f64; 2] {
+    let (old, other) = (scale[k], scale[1 - k]);
+    let mut out = scale;
+    out[k] = v;
+    out[1 - k] = if old.abs() > 1e-9 { other * (v / old).abs() } else { other.signum() * v.abs() };
+    out
 }
 
 fn reset_transform(s: &mut Session, p: &Value) -> Result<Value> {
@@ -361,7 +385,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Clone Sources",
             menu: &[],
             shortcut: None,
-            params: "{} → {active,sources:[{index,source,anchor,offset,layer,width,height,rotation,flipH,flipV}],overlay}",
+            params: "{} → {active,sources:[{index,source,anchor,offset,layer,width,height,rotation,flipH,flipV,link}],overlay}",
             enabled: always,
             run: list,
             journal: false,
@@ -381,7 +405,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Set Clone Source",
             menu: &[],
             shortcut: None,
-            params: r##"{"index":0..4?=active,"source":[x,y]? (⌥-click; re-pairs with the next stroke),"offset":[dx,dy]?,"width":%?,"height":%?|"scale":[w%,h%]?,"rotation":deg?,"flipH":bool?,"flipV":bool?,"layer":id?,"clear":bool?,"select":bool=true}"##,
+            params: r##"{"index":0..4?=active,"source":[x,y]? (⌥-click; re-pairs with the next stroke),"offset":[dx,dy]?,"width":%?,"height":%?|"scale":[w%,h%]?,"rotation":deg?,"flipH":bool?,"flipV":bool?,"link":bool? (W/H linked: width or height alone scales both),"layer":id?,"clear":bool?,"select":bool=true}"##,
             enabled: always,
             run: set,
             journal: true,
@@ -424,6 +448,30 @@ mod tests {
         let m = Mapping { source: (-3_000_000_000.0, 0.0), anchor: (10.0, 10.0), m: transform_matrix([100.0, 100.0], 45.0, false, false) };
         let r = m.source_rect(Rect::new(0, 0, 24, 16));
         assert!(r.x0 <= r.x1 && r.y0 <= r.y1, "rect must stay ordered: {r:?}");
+    }
+
+    #[test]
+    fn linked_width_and_height_scale_together() {
+        let mut s = Session::new();
+        s.execute("cloneSource.set", json!({"source": [10, 10], "width": 120, "height": 60})).unwrap();
+        // Unlinked: each side on its own.
+        let r = s.execute("cloneSource.set", json!({"width": 150})).unwrap();
+        assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(150.0), Some(60.0)));
+        // Linked: the other side follows by the same factor, a flip keeps its sign.
+        s.execute("cloneSource.set", json!({"link": true, "height": -60})).unwrap();
+        let r = s.execute("cloneSource.set", json!({"width": 300})).unwrap();
+        assert_eq!((r["width"].as_f64(), r["height"].as_f64(), r["link"].as_bool()), (Some(300.0), Some(-120.0), Some(true)));
+        let r = s.execute("cloneSource.set", json!({"height": -60})).unwrap();
+        assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(150.0), Some(-60.0)));
+        // Both given: both taken as they are; Reset Transform keeps the link.
+        let r = s.execute("cloneSource.set", json!({"width": 100, "height": 50})).unwrap();
+        assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(100.0), Some(50.0)));
+        let r = s.execute("cloneSource.resetTransform", json!({})).unwrap();
+        assert_eq!((r["width"].as_f64(), r["height"].as_f64(), r["link"].as_bool()), (Some(100.0), Some(100.0), Some(true)));
+        // Clamped like any scale; a zero side can't divide.
+        assert_eq!(linked_scale([0.0, 50.0], 0, 200.0), [200.0, 200.0]);
+        let r = s.execute("cloneSource.set", json!({"width": 5000})).unwrap();
+        assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(1000.0), Some(1000.0)));
     }
 
     #[test]

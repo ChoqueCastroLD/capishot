@@ -15,79 +15,11 @@ use crate::state::{Tool, View};
 /// Largest texture side we upload; bigger documents display downsampled until the GPU path lands.
 pub const MAX_TEXTURE: u32 = 4096;
 
-pub(crate) struct ClonePreviewCache {
-    key: String,
-    texture: egui::TextureHandle,
-}
+pub(crate) use crate::clone_overlay::ClonePreviewCache;
 
 /// A transient source image beneath the brush outline; never part of the document render.
 fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, at: [f64; 2], output: Option<u32>) {
-    use photocraft_engine::presets::clone_source::{Mapping, transform_matrix};
-    let overlay = app.session.presets.clone.overlay.clone();
-    if app.ui.tool != Tool::CloneStamp || !overlay.show || (overlay.auto_hide && app.drag.is_some()) {
-        return;
-    }
-    let slot = app.session.presets.clone.active().clone();
-    let Some(source) = slot.source else { return };
-    let radius = f64::from(app.session.tools.brush.size) / 2.0;
-    if !radius.is_finite() || radius <= 0.0 || radius > 500.0 || !at.iter().all(|v| v.is_finite() && v.abs() < 1_000_000.0) {
-        return;
-    }
-    let stroke_start = app.drag.as_ref().map(|d| d.start);
-    let anchor = if app.ui.tool_options.clone_aligned { slot.anchor.or(stroke_start) } else { stroke_start }.unwrap_or(at);
-    let map =
-        Mapping { source: (source[0], source[1]), anchor: (anchor[0], anchor[1]), m: transform_matrix(slot.scale, slot.rotation, slot.flip_h, slot.flip_v) };
-    let rect = DRect::new((at[0] - radius).floor() as i32, (at[1] - radius).floor() as i32, (at[0] + radius).ceil() as i32, (at[1] + radius).ceil() as i32);
-    let Some(st) = app.session.active() else { return };
-    let (display, display_key) = canvas_display(app, &st.doc, output);
-    let key = format!(
-        "{:?}:{}:{:?}:{rect:?}:{map:?}:{}:{}:{}",
-        st.doc.id, st.revision, st.active_layer, app.ui.tool_options.clone_sample, display_key, overlay.invert
-    );
-    if app.clone_preview.as_ref().is_none_or(|c| c.key != key) {
-        let Ok(mut buf) = photocraft_engine::retouch_cmds::clone_preview(&app.session, rect, &map, &app.ui.tool_options.clone_sample) else { return };
-        if overlay.invert {
-            for px in &mut buf.px {
-                for c in px.iter_mut().take(3) {
-                    *c = 1.0 - *c;
-                }
-            }
-        }
-        let image = display_image(display.as_deref(), &buf);
-        match app.clone_preview.as_mut() {
-            Some(cache) => {
-                cache.texture.set(image, TextureOptions::LINEAR);
-                cache.key = key;
-            }
-            None => app.clone_preview = Some(ClonePreviewCache { key, texture: painter.ctx().load_texture("clone-preview", image, TextureOptions::LINEAR) }),
-        }
-    }
-    let Some(cache) = &app.clone_preview else { return };
-    let tint = Color32::from_white_alpha((overlay.opacity.clamp(0.0, 100.0) * 2.55).round() as u8);
-    // A textured triangle fan provides a circular clip, including mirrored canvas views.
-    let mut mesh = egui::Mesh::with_texture(cache.texture.id());
-    let vertex = |x: f64, y: f64| egui::epaint::Vertex {
-        pos: xf.to_screen(x as f32, y as f32),
-        uv: pos2((x - f64::from(rect.x0)) as f32 / rect.width() as f32, (y - f64::from(rect.y0)) as f32 / rect.height() as f32),
-        color: tint,
-    };
-    if !overlay.clipped {
-        for (x, y) in [(rect.x0, rect.y0), (rect.x1, rect.y0), (rect.x1, rect.y1), (rect.x0, rect.y1)] {
-            mesh.vertices.push(vertex(f64::from(x), f64::from(y)));
-        }
-        mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
-        painter.add(egui::Shape::mesh(mesh));
-        return;
-    }
-    mesh.vertices.push(vertex(at[0], at[1]));
-    for i in 0..=64 {
-        let angle = f64::from(i) * std::f64::consts::TAU / 64.0;
-        mesh.vertices.push(vertex(at[0] + radius * angle.cos(), at[1] + radius * angle.sin()));
-    }
-    for i in 1..=64 {
-        mesh.indices.extend_from_slice(&[0, i, i + 1]);
-    }
-    painter.add(egui::Shape::mesh(mesh));
+    crate::clone_overlay::draw(app, painter, xf, at, output);
 }
 
 pub struct CanvasCache {
@@ -255,7 +187,8 @@ pub(crate) fn draw_readout<const N: usize>(ctx: &egui::Context, id: &str, cursor
 }
 
 /// The engine's live stroke of a tool: the Brush, Pencil and Eraser paint dabs; the Clone Stamp,
-/// Healing Brush and History Brush composite their source.
+/// Healing Brush, History Brush and Pattern Stamp composite their source; the toning, focus and
+/// Smudge tools (and an Impressionist Pattern Stamp) run their dabs in order.
 enum EngineStroke {
     Brush(Box<photocraft_engine::brush_cmds::LiveStroke>),
     Retouch(photocraft_engine::retouch_cmds::LiveRetouch),
@@ -335,6 +268,12 @@ fn live_stroke(app: &PhotocraftApp, idx: usize) -> Option<&LiveStroke> {
     app.live_stroke.as_ref().filter(|l| app.drag.is_some() && l.doc == st.doc.id && l.revision == st.revision)
 }
 
+/// The document the live stroke on the active document shows (tests compare it with the commit).
+#[cfg(test)]
+pub(crate) fn live_doc(app: &PhotocraftApp) -> Option<std::sync::Arc<photocraft_doc::Document>> {
+    live_stroke(app, app.session.active_index()?).map(|l| l.stroke.doc().clone())
+}
+
 /// `paint.stroke` params for a Brush/Eraser drag (shared by the live preview and the commit). The
 /// stroke smoothing is the session brush's (the options bar's Smoothing %).
 fn stroke_params(app: &PhotocraftApp, tool: Tool, erase: bool, points: &[Vec<f64>]) -> serde_json::Value {
@@ -352,12 +291,15 @@ pub(crate) fn strokes_live(tool: Tool) -> bool {
 }
 
 /// The retouching tools drawn live (`LiveRetouch`), by the command their live stroke previews.
-/// The Healing Brush shows its texture while drawing; the blend comes on release.
+/// The Healing Brush heals as it is drawn, as Photoshop CC's does. The Spot Healing Brush isn't
+/// here on purpose: like Photoshop's it shows a dark footprint while drawing and heals on release
+/// (its fill needs the whole stroke).
 fn live_retouch_command(tool: Tool) -> Option<&'static str> {
     match tool {
         Tool::CloneStamp => Some("paint.cloneStamp"),
         Tool::Healing => Some("paint.healingBrush"),
         Tool::HistoryBrush => Some("paint.historyBrush"),
+        Tool::PatternStamp => Some("paint.patternStamp"),
         _ => None,
     }
 }
@@ -365,6 +307,11 @@ fn live_retouch_command(tool: Tool) -> Option<&'static str> {
 /// The command a live-stroking tool commits: the Pencil's `paint.pencil`, else `paint.stroke`.
 pub(crate) fn stroke_command(tool: Tool) -> &'static str {
     if tool == Tool::Pencil { "paint.pencil" } else { "paint.stroke" }
+}
+
+/// [`stroke_command`] with the Eraser's Mode (Pencil erases with `paint.pencil`).
+fn tool_stroke_command(app: &PhotocraftApp, tool: Tool) -> &'static str {
+    if tool == Tool::Eraser { crate::eraser_ui::eraser_command(app) } else { stroke_command(tool) }
 }
 
 /// Windows' crosshair cursor inverts the pixels under it, so over mid-grey (the pasteboard, many
@@ -453,20 +400,31 @@ fn begin_live_stroke(app: &PhotocraftApp) -> Option<LiveStroke> {
     static STROKES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let st = app.session.active()?;
     let d = app.drag.as_ref()?;
+    let impressionist = d.tool == Tool::PatternStamp && app.ui.tool_options.pattern_stamp_impressionist;
     let stroke = if let Some((cmd, mut p)) = crate::retouch_ui::dab_params(app, d.tool) {
-        // The params `retouch_ui::finish_stroke` commits; Sample All Layers isn't previewed.
+        // The params `retouch_ui::finish_stroke` commits.
         p["points"] = json!(d.points);
         p["target"] = paint_target(app);
         EngineStroke::Dab(photocraft_engine::retouch_cmds::LiveDab::begin(&app.session, cmd, &p).ok()?)
-    } else if let Some(cmd) = live_retouch_command(d.tool) {
-        // The params `retouch_ui::finish_stroke` commits.
-        let mut p = if d.tool == Tool::HistoryBrush { json!({}) } else { crate::retouch_ui::clone_params(app)? };
+    } else if let Some(cmd) = live_retouch_command(d.tool).or_else(|| crate::eraser_ui::erases_to_history(app, d.tool).then_some("paint.historyBrush")) {
+        // The params `retouch_ui::finish_stroke` (or `eraser_ui::finish_stroke`) commits.
+        let first = d.points.first().copied().unwrap_or([d.start[0], d.start[1], 1.0]);
+        let mut p = match d.tool {
+            Tool::HistoryBrush | Tool::Eraser => json!({}),
+            Tool::PatternStamp => crate::retouch_ui::pattern_stamp_params(app, first),
+            _ => crate::retouch_ui::clone_params(app)?,
+        };
         p["points"] = json!(d.points);
         p["target"] = paint_target(app);
-        EngineStroke::Retouch(photocraft_engine::retouch_cmds::LiveRetouch::begin(&app.session, cmd, &p).ok()?)
+        if impressionist {
+            // Impressionist jitters each dab: it runs dab by dab, with the seed the commit uses.
+            EngineStroke::Dab(photocraft_engine::retouch_cmds::LiveDab::begin(&app.session, cmd, &p).ok()?)
+        } else {
+            EngineStroke::Retouch(photocraft_engine::retouch_cmds::LiveRetouch::begin(&app.session, cmd, &p).ok()?)
+        }
     } else {
         let p = stroke_params(app, d.tool, d.erase, &app.stylus.stroke_points(&d.points));
-        EngineStroke::Brush(Box::new(photocraft_engine::brush_cmds::LiveStroke::begin_with(&app.session, stroke_command(d.tool), &p).ok()?))
+        EngineStroke::Brush(Box::new(photocraft_engine::brush_cmds::LiveStroke::begin_with(&app.session, tool_stroke_command(app, d.tool), &p).ok()?))
     };
     let n = STROKES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) & 0xff_ffff;
     let damage = vec![stroke.bounds()];
@@ -729,7 +687,7 @@ fn buffer_to_image(buf: &photocraft_compose::Buffer) -> egui::ColorImage {
 
 /// A composite as monitor pixels: document profile → monitor profile (nothing to do in the
 /// common sRGB-on-sRGB case).
-fn display_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>, buf: &photocraft_compose::Buffer) -> egui::ColorImage {
+pub(crate) fn display_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>, buf: &photocraft_compose::Buffer) -> egui::ColorImage {
     match display {
         Some(d) if !d.is_identity() => {
             let img = d.to_rgba8(buf);
@@ -742,7 +700,7 @@ fn display_image(display: Option<&photocraft_engine::display_color::CanvasDispla
 /// The canvas display of `doc` on `display` (`None`: the main window's) and a key that changes
 /// with it (folded into the canvas caches' preview keys, so a monitor or profile change
 /// re-renders).
-fn canvas_display(app: &PhotocraftApp, doc: &Document, display: Option<u32>) -> (Option<std::sync::Arc<photocraft_engine::display_color::CanvasDisplay>>, u64) {
+pub(crate) fn canvas_display(app: &PhotocraftApp, doc: &Document, display: Option<u32>) -> (Option<std::sync::Arc<photocraft_engine::display_color::CanvasDisplay>>, u64) {
     match app.session.color.canvas_display_for(doc, display.or(app.session.color.main_display)) {
         Ok(d) => {
             let k = d.key;
@@ -2975,6 +2933,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                         pipette_cursor(ui.ctx(), p)
                     }
                 }
+                // ⌥ with the Clone Stamp or Healing Brush: the target that sets the source.
+                t if crate::clone_overlay::wants_target_cursor(t, alt || app.ui.shell.sticky_alt, app.drag.is_some()) => {
+                    crate::clone_overlay::draw_target(&painter, p)
+                }
                 t if t.is_brushlike() || t == Tool::QuickSelection => {
                     // Preferences › Cursors: brush tip outline (normal = the 50% contour, or
                     // full size), precise crosshair, or the standard pointer.
@@ -3557,6 +3519,9 @@ fn draw_transform_controls(app: &mut PhotocraftApp, painter: &egui::Painter, xf:
     }
 }
 
+/// The Spot Healing Brush's footprint while it is drawn: translucent black.
+const SPOT_HEALING_TRAIL: Color32 = Color32::from_black_alpha(110);
+
 fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
     draw_tool_state(app, painter, xf, painter.ctx().input(|i| i.pointer.hover_pos()));
     let Some(d) = &app.drag else {
@@ -3583,6 +3548,9 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
                 Tool::QuickSelection => Color32::from_white_alpha(40),
                 // The Remove Tool tints what it will remove, like Photoshop's.
                 Tool::Remove => crate::theme::Tokens::get(painter.ctx()).danger.gamma_multiply(0.45),
+                // The Spot Healing Brush darkens what it will heal, like Photoshop's, so the
+                // stroke reads on white bubbles and screentone alike.
+                Tool::SpotHealing => SPOT_HEALING_TRAIL,
                 _ => Color32::from_white_alpha(60),
             };
             let Some(st) = app.session.active() else { return };
@@ -3973,7 +3941,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 Tool::MagicWand => {
                     let o = app.ui.tool_options.clone();
                     let mode = selection_mode(app, mods);
-                    let _ = app.run("select.magicWand", json!({"x": x.floor(), "y": y.floor(), "tolerance": o.tolerance, "contiguous": o.contiguous, "antiAlias": o.anti_alias, "sampleAllLayers": o.sample_all_layers, "mode": mode}));
+                    let _ = app.run(
+                        "select.magicWand",
+                        json!({"x": x.floor(), "y": y.floor(), "tolerance": o.tolerance, "contiguous": o.contiguous, "antiAlias": o.anti_alias, "sampleAllLayers": o.sample_all_layers, "sampleSize": o.wand_sample_size, "mode": mode}),
+                    );
                     return;
                 }
                 Tool::MagicEraser => {
@@ -3983,7 +3954,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 Tool::PaintBucket => {
                     let o = app.ui.tool_options.clone();
                     let contents = if o.bucket_fill_pattern { "pattern" } else { "foreground" };
-                    let _ = app.run("paint.bucket", json!({"x": x.floor(), "y": y.floor(), "tolerance": o.tolerance, "contiguous": o.contiguous, "antiAlias": o.anti_alias, "sampleAllLayers": o.sample_all_layers, "opacity": o.fill_opacity, "contents": contents, "target": paint_target(app)}));
+                    let _ = app.run(
+                        "paint.bucket",
+                        json!({"x": x.floor(), "y": y.floor(), "tolerance": o.tolerance, "contiguous": o.contiguous, "antiAlias": o.anti_alias, "sampleAllLayers": o.sample_all_layers, "opacity": o.fill_opacity, "mode": o.bucket_mode.label(), "contents": contents, "target": paint_target(app)}),
+                    );
                     return;
                 }
                 Tool::RedEye => {
@@ -4253,7 +4227,7 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
             }
             // The canvas already shows the stroke: let the commit's damage rect refresh it rather
             // than recompositing the whole document.
-            if app.run(stroke_command(d.tool), p).is_ok()
+            if app.run(tool_stroke_command(app, d.tool), p).is_ok()
                 && let Some(l) = live
             {
                 // Raw preview key 0 = the document itself (its colour display folded in).

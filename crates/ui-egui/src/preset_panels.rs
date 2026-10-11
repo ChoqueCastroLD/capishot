@@ -1015,7 +1015,7 @@ pub fn clone_source_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let (mut ox, mut oy) = (off[0] as f32, off[1] as f32);
     let (mut w, mut h) = (slot.scale[0] as f32, slot.scale[1] as f32);
     let mut rot = slot.rotation as f32;
-    egui::Grid::new("clone-src-grid").num_columns(4).spacing(vec2(6.0, 4.0)).show(ui, |ui| {
+    egui::Grid::new("clone-src-grid").num_columns(5).spacing(vec2(6.0, 4.0)).show(ui, |ui| {
         lbl(ui, "X:");
         if crate::widgets::value_field(ui, &mut ox, -30000.0..=30000.0, "px", 72.0).changed() && slot.source.is_some() {
             action = Some(json!({"offset": [ox, oy]}));
@@ -1023,6 +1023,11 @@ pub fn clone_source_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         lbl(ui, "W:");
         if crate::widgets::value_field(ui, &mut w, -1000.0..=1000.0, "%", 64.0).changed() {
             action = Some(json!({"width": w}));
+        }
+        // Maintain Aspect Ratio: W and H scale together (`cloneSource.set` "link").
+        let linked = slot.link;
+        if crate::icons::button(ui, if linked { "link" } else { "unlink" }, 22.0, linked, tl!("Maintain Aspect Ratio")).clicked() {
+            action = Some(json!({"link": !linked}));
         }
         ui.end_row();
         lbl(ui, "Y:");

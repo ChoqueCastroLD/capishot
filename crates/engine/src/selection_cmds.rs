@@ -72,7 +72,15 @@ pub(crate) fn sample_rgba8(s: &Session, all_layers: bool) -> Result<(Rect, Vec<[
 fn magic_wand(s: &mut Session, p: &Value) -> Result<Value> {
     let (x, y) = (f(p, "x", 0.0).floor() as i32, f(p, "y", 0.0).floor() as i32);
     let (area, img) = sample_rgba8(s, b(p, "sampleAllLayers", false))?;
-    let region = sel::wand_region(&img, area, (x, y), f(p, "tolerance", 32.0), b(p, "contiguous", true), b(p, "antiAlias", true));
+    // Sample Size: Point Sample (1) or an N × N average around the click (3, 5, 11, 31, 51, 101).
+    let sample = match p.get("sampleSize") {
+        None => 1,
+        Some(v) => match v.as_u64() {
+            Some(n @ (1 | 3 | 5 | 11 | 31 | 51 | 101)) => n as u32,
+            _ => return Err(EngineError::BadParams { cmd: "select.magicWand".into(), msg: format!("sampleSize {v} (1|3|5|11|31|51|101)") }),
+        },
+    };
+    let region = sel::wand_region_sampled(&img, area, (x, y), sample, f(p, "tolerance", 32.0), b(p, "contiguous", true), b(p, "antiAlias", true));
     drop(img);
     let m = mode(p);
     let selected = s.edit("Magic Wand", |doc, _| {
@@ -542,7 +550,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "select.magicWand",
             "Magic Wand",
             [],
-            r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"sampleAllLayers":bool=false,"mode":"replace|add|subtract|intersect"="replace"}"##,
+            r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"sampleAllLayers":bool=false,"sampleSize":1|3|5|11|31|51|101=1 (Point Sample or an N×N average around the click),"mode":"replace|add|subtract|intersect"="replace"}"##,
             has_doc,
             magic_wand
         ),
@@ -625,6 +633,24 @@ mod tests {
         assert_eq!(coverage(&s, 10, 10), 0.0);
         s.execute("select.magicWand", json!({"x": 7, "y": 7, "contiguous": false, "antiAlias": false})).unwrap();
         assert_eq!(coverage(&s, 30, 10), 1.0);
+    }
+
+    #[test]
+    fn magic_wand_sample_size_averages_around_the_click() {
+        // Point Sample on the red square's corner takes the red square.
+        let mut s = session();
+        s.execute("select.magicWand", json!({"x": 5, "y": 5, "antiAlias": false})).unwrap();
+        assert_eq!((coverage(&s, 10, 10), coverage(&s, 0, 0)), (1.0, 0.0));
+        // 101 × 101 Average there (the whole canvas: a sixth red) compares with a light pink,
+        // within 50 of the white around it and far from the red.
+        s.execute("select.magicWand", json!({"x": 5, "y": 5, "antiAlias": false, "tolerance": 50, "sampleSize": 101})).unwrap();
+        assert_eq!((coverage(&s, 10, 10), coverage(&s, 0, 0)), (0.0, 1.0));
+        // Inside a flat area every size agrees.
+        s.execute("select.magicWand", json!({"x": 10, "y": 10, "antiAlias": false, "sampleSize": 3})).unwrap();
+        assert_eq!((coverage(&s, 12, 12), coverage(&s, 0, 0)), (1.0, 0.0));
+        for bad in [json!(0), json!(4), json!(-3), json!("11"), json!(1e9)] {
+            assert!(s.execute("select.magicWand", json!({"x": 10, "y": 10, "sampleSize": bad})).is_err(), "{bad}");
+        }
     }
 
     #[test]
