@@ -305,27 +305,22 @@ impl eframe::App for WebShell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let error = self.presets.error();
-        if error.is_some() || self.presets.unsaved() {
+        if let Some(error) = self.presets.error() {
             egui::Panel::top("browser_preset_storage").show(ui, |ui| {
-                if let Some(error) = error {
-                    let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
-                    // Put retry first so floating brush windows cannot cover the control.
-                    ui.horizontal_wrapped(|ui| {
-                        if self.database.is_some() && ui.button(i18n::t("Retry saving presets")).clicked() {
-                            self.presets.retry();
-                            ui.ctx().request_repaint();
-                        }
-                        ui.colored_label(tokens.warning, i18n::fmt(i18n::t("Brush preset changes are not saved: {error}"), &[("error", &error)]));
-                    });
-                    ui.label(if self.database.is_some() {
-                        i18n::t("Keep this tab open to retain your brushes.")
-                    } else {
-                        i18n::t("Browser storage is unavailable; brushes are session-only. Keep this tab open to retain them.")
-                    });
+                let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
+                // Put retry first so floating brush windows cannot cover the control.
+                ui.horizontal_wrapped(|ui| {
+                    if self.database.is_some() && ui.button(i18n::t("Retry saving presets")).clicked() {
+                        self.presets.retry();
+                        ui.ctx().request_repaint();
+                    }
+                    ui.colored_label(tokens.warning, i18n::fmt(i18n::t("Brush preset changes are not saved: {error}"), &[("error", &error)]));
+                });
+                ui.label(if self.database.is_some() {
+                    i18n::t("Keep this tab open to retain your brushes.")
                 } else {
-                    ui.label(i18n::t("Saving brush presets… Keep this tab open until saving finishes."));
-                }
+                    i18n::t("Browser storage is unavailable; brushes are session-only. Keep this tab open to retain them.")
+                });
             });
         }
         self.app.ui(ui, frame);
