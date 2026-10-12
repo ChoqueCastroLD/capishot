@@ -1206,6 +1206,7 @@
 	Magenta	Magenta
 	Magenta  ·  Green	Magenta  ·  Hijau
 	Maintain aspect ratio	Pertahankan rasio aspek
+	Maintain Aspect Ratio	Pertahankan rasio aspek
 	Marker Size	Ukuran Penanda
 	Mask All	Mask Semua
 	Mask Options	Opsi Mask
@@ -3115,3 +3116,14 @@ cameraData	Lens	Lensa
 	Downloading {file}	Mengunduh {file}
 	Downloading the licence	Mengunduh lisensi
 	Loading the font index	Memuat indeks font
+	Show canvas dots	Tampilkan titik kanvas
+	Copy Layers	Salin Layer
+	Paste Layers	Tempel Layer
+	Cycle Screen Mode Backwards	Ganti Mode Layar Mundur
+	Scroll Up One Screen	Gulir Naik Satu Layar
+	Scroll Down One Screen	Gulir Turun Satu Layar
+	Scroll Left One Screen	Gulir Kiri Satu Layar
+	Scroll Right One Screen	Gulir Kanan Satu Layar
+	Scroll to Upper-Left Corner	Gulir ke Sudut Kiri Atas
+	Scroll to Lower-Right Corner	Gulir ke Sudut Kanan Bawah
+	Show rulers in new documents	Tampilkan penggaris di dokumen baru

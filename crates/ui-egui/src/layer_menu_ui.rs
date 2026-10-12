@@ -56,6 +56,9 @@ pub fn entries(l: &Layer, multi: bool, has_selection: bool) -> Vec<Entry> {
     v.push(None);
     v.push(Some((if multi { tl!("Duplicate Layers…") } else { tl!("Duplicate Layer…") }, "layer.duplicate")));
     v.push(Some((if multi { tl!("Delete Layers") } else { tl!("Delete Layer") }, "layer.delete")));
+    // The layer clipboard (UI-217-23): whole layers into this or any other document.
+    v.push(Some((tl!("Copy Layers"), "layer.copyLayers")));
+    v.push(Some((tl!("Paste Layers"), "layer.pasteLayers")));
     if !multi {
         v.push(Some((tl!("Group from Layers…"), "layer.groupLayers")));
     }

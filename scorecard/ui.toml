@@ -127,16 +127,16 @@ note = "panels.rs:1837 single field + hex/RGB readout"
 [[item]]
 id = "UI-217-18"
 target = "Alt+wheel zooms in gentle ~5 % steps; zoom controls uncramped"
-status = "missing"
+status = "done"
 issue = 217
-note = "canvas.rs:1107-1125 no Alt handling"
+note = "wheel_nav.rs: Alt+wheel zooms around the pointer one exact x1.1 step per notch, the step measured frame by frame on a Photoshop screen recording (a01a3eb2, #1718; ba9272be first shipped 5 %), applied the frame the notch arrives; alt_scroll_zooms_ten_percent_per_notch"
 
 [[item]]
 id = "UI-217-19"
 target = "Shortcut hints rendered per platform; Reveal label per OS"
 status = "done"
 issue = 217
-note = "hints and tooltips go through shortcuts::pretty (6266b7a9, #262; pretty_uses_the_platform_notation); menus::reveal_label names Reveal in Finder per OS (Show in Explorer / Show in Folder) in the Smart Objects menu and the tab menu; reveal_label_names_the_platform_file_manager + smart_objects_reveal_item_names_the_platform_file_manager"
+note = "hints and tooltips go through shortcuts::pretty (6266b7a9, #262; pretty_uses_the_platform_notation); menus::reveal_label names Reveal in Finder per OS (Show in Explorer / Show in Folder) in the Smart Objects menu and the tab menu; reveal_label_names_the_platform_file_manager + smart_objects_reveal_item_names_the_platform_file_manager; shortcuts::os_text turns the prose hints (Liquify Freeze Lasso, Lasso hints, Kerning tip) into Option/Command on macOS (prose_names_the_platform_modifiers)"
 
 [[item]]
 id = "UI-217-20"
@@ -157,11 +157,11 @@ id = "UI-217-22"
 target = "Stamp Visible into a new layer keeping originals; Alt+Merge keeps originals"
 status = "done"
 issue = 217
-note = "stamp_cmds.rs layer.stampVisible (Cmd+Alt+Shift+E) merges every visible layer into a new layer above the active one and keeps the originals; layer.stampDown (Cmd+Alt+E) too. As in Photoshop they have no menu item of their own: Alt + Layer > Merge Visible / Merge Down / Merge Layers run them (stamp_cmds::alt_variant, menus.rs); stamp_tests.rs alt_click_on_merge_items_stamps and cmd_alt_shift_e_stamps_visible_and_can_be_rebound"
+note = "stamp_cmds.rs: layer.stampVisible (Cmd+Alt+Shift+E) and layer.stampDown (Cmd+Alt+E); menus::alt_click runs them for Alt + Merge Down / Merge Layers / Merge Visible (90a46d3f, #356; stamp_tests.rs); both keys checked by shortcut_parity_tests"
 
 [[item]]
 id = "UI-217-23"
 target = "Layer clipboard: copy/paste whole layers (masks, styles, type) between documents"
-status = "partial"
+status = "done"
 issue = 217
-note = "layer.copyToDocument copies layers into another open document keeping names, content, masks, styles and blending, converting to the destination's profile and depth, as one history step (layer_copy_cmds.rs, #589). It is the command a drag between documents dispatches; there is still no copy/paste layer clipboard"
+note = "layer_copy_cmds.rs: layer.copyLayers / layer.pasteLayers (Layers panel context menu) keep masks, styles, type and smart objects, convert colour and depth like a drag, one history step; Edit > Purge > Clipboard empties it (layer_clipboard_pastes_whole_layers_into_any_document); dragging layers onto another tab is layer.copyToDocument (#589)"

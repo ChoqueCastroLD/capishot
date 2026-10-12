@@ -73,6 +73,39 @@ pub fn pretty(s: &str) -> String {
         .join(if mac { "" } else { "+" })
 }
 
+/// Prose that names modifier keys (`Alt-drag to thaw`, `hold Alt…`), in the platform's words:
+/// on macOS `Alt` is `Option` and `Ctrl` (the command modifier) is `Command`, as Photoshop's Mac
+/// hints say; elsewhere unchanged. Whole words only, so translations that keep the key names work.
+pub fn os_text(s: &str) -> String {
+    os_text_for(s, cfg!(target_os = "macos"))
+}
+
+fn os_text_for(s: &str, mac: bool) -> String {
+    if !mac {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        out.push_str(match word.as_str() {
+            "Alt" => "Option",
+            "Ctrl" => "Command",
+            w => w,
+        });
+        word.clear();
+    };
+    for c in s.chars() {
+        if c.is_alphanumeric() {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
+}
+
 /// The command's effective shortcut in the platform's notation (`Ctrl+N`), or `None` when
 /// the command has no binding (the user removed it in Edit › Keyboard Shortcuts).
 pub fn shortcut_label(app: &PhotocraftApp, command: &str) -> Option<String> {
@@ -462,6 +495,10 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if crate::crop_size::keys(app, ctx) {
         return;
     }
+    // ⇧⌥ + letter and ⇧+ / ⇧- set the blending mode (`blend_keys`), before ⇧ + a tool key.
+    if crate::blend_keys::handle(app, ctx) {
+        return;
+    }
     // Single-key tools (no modifiers). D and X (`tools.defaultColors` / `tools.swapColors`) and the
     // brush keys [ ] ⇧[ ⇧] (`tools.decreaseBrushSize`…) are commands, dispatched above with any
     // Keyboard Shortcuts override.
@@ -530,10 +567,11 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let cycle_shift = shift_switch && ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, k));
         if cycle_shift || pressed(k) {
             let group: Vec<Tool> = Tool::ALL.iter().copied().filter(|x| x.key() == t.key()).collect();
+            let Some(&first) = group.first() else { return };
             app.ui.tool = match group.iter().position(|x| *x == app.ui.tool) {
                 Some(i) if shift_switch && !cycle_shift => group[i],
                 Some(i) => group[(i + 1) % group.len()],
-                None => app.ui.group_tool(t.key()).unwrap_or(group[0]),
+                None => app.ui.group_tool(t.key()).unwrap_or(first),
             };
             return;
         }
@@ -706,6 +744,15 @@ mod tests {
         assert_eq!(pretty("Shift+Alt"), if mac { "⇧⌥" } else { "Shift+Alt" });
         assert_eq!(pretty("Enter"), if mac { "↩" } else { "Enter" });
         assert_eq!(pretty("Cmd+Enter"), if mac { "⌘↩" } else { "Ctrl+Enter" });
+    }
+
+    #[test]
+    fn prose_names_the_platform_modifiers() {
+        assert_eq!(os_text_for("Hold Alt while drawing", true), "Hold Option while drawing");
+        assert_eq!(os_text_for("Alt-drag to thaw · Ctrl+click", true), "Option-drag to thaw · Command+click");
+        assert_eq!(os_text_for("Altitude and Ctrls stay", true), "Altitude and Ctrls stay", "whole words only");
+        assert_eq!(os_text_for("Hold Alt while drawing", false), "Hold Alt while drawing");
+        assert_eq!(os_text("Alt-drag"), if cfg!(target_os = "macos") { "Option-drag" } else { "Alt-drag" });
     }
 
     #[test]
