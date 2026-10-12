@@ -45,12 +45,12 @@ fn tiled(src: &[f32], w: usize, h: usize, r: usize, grow: bool) -> Vec<f32> {
             }
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         out.par_chunks_mut(w * h.min(128)).enumerate().for_each(|(band, rows)| run(band, rows));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     out.chunks_mut(w * h.min(128)).enumerate().for_each(|(band, rows)| run(band, rows));
     out
 }
@@ -82,7 +82,7 @@ fn dense(src: &[f32], w: usize, h: usize, r: usize, grow: bool) -> Vec<f32> {
 }
 
 fn square_extreme(src: &[f32], w: usize, h: usize, r: usize, grow: bool) -> Vec<f32> {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     if src.len() >= 262144 {
         return parallel_square(src, w, h, r, grow);
     }
@@ -91,7 +91,7 @@ fn square_extreme(src: &[f32], w: usize, h: usize, r: usize, grow: bool) -> Vec<
 
 /// Two full-size work planes, reused across blocked transposes. Filtering each
 /// column contiguously avoids the full-photo stride of the serial square pass.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 fn parallel_square(src: &[f32], w: usize, h: usize, r: usize, grow: bool) -> Vec<f32> {
     use rayon::prelude::*;
     let mut rows = vec![0.0; src.len()];

@@ -363,7 +363,7 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
     let mut done = Vec::new();
     done.try_reserve_exact(tiles.len()).map_err(|_| photocraft_raster::AllocationError::NotEnoughMemory { bytes: result_bytes })?;
     let done = std::sync::Mutex::new(done);
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         tiles.into_par_iter().try_for_each(|tile| -> Result<(), photocraft_raster::AllocationError> {
@@ -373,7 +373,7 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
             Ok(())
         })?;
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     for tile in tiles {
         if let Some(result) = work(&tile)? {
             done.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(result);

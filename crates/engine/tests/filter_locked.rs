@@ -96,3 +96,24 @@ fn filters_keep_alpha_on_a_transparency_locked_layer() {
     assert_eq!(alpha(&s, 12, 6), edge, "the blur changed alpha at the stroke edge");
     assert_eq!(alpha(&s, 12, 2), outside, "the blur spread into the transparent area");
 }
+
+#[test]
+fn filters_keep_alpha_across_tiles_on_a_transparency_locked_layer() {
+    // Several tile columns and rows, a stroke crossing them, and transparent tiles the blur spreads
+    // into: the alpha (patched tile by tile, in parallel) must come back exactly everywhere.
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 700, "height": 600})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("paint.stroke", json!({"points": [[20, 300], [680, 280], [350, 20]], "size": 30, "hardness": 0.5, "color": "#2060ff"})).unwrap();
+    s.execute("layer.lockLayers", json!({"transparency": true})).unwrap();
+    let pixels = |s: &Session| {
+        let st = s.active().unwrap();
+        st.active_layer.and_then(|id| st.doc.layer(id)).unwrap().surface().unwrap().read_region(Rect::new(0, 0, 700, 600))
+    };
+    let before = pixels(&s);
+    s.execute("filter.blur.gaussianBlur", json!({"radius": 12})).unwrap();
+    let after = pixels(&s);
+    let alpha = |v: &[f32]| v.iter().skip(3).step_by(4).copied().collect::<Vec<_>>();
+    assert_eq!(alpha(&after), alpha(&before), "the blur changed alpha");
+    assert!(before != after, "the blur changed nothing");
+}
