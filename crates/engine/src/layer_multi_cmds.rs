@@ -628,6 +628,7 @@ fn doc_pixels_equal(a: &Document, b: &Document) -> bool {
         slices: _,
         variables: _,
         timeline: _,
+        file_encoding: _,
     } = a;
     *size == b.size
         && resolution_dpi.to_bits() == b.resolution_dpi.to_bits()

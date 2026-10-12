@@ -1284,10 +1284,19 @@ impl PhotocraftApp {
 
     /// What a save writes by default under the preferences: File Handling › Image Previews
     /// decides whether a PSD/PSB gets its thumbnail. Ask When Saving has no Save As checkbox
-    /// here yet, so it saves the preview, as Photoshop's checkbox starts on.
+    /// here yet, so it saves the preview, as Photoshop's checkbox starts on. A JPEG or WebP
+    /// is written the way the active document's file was (its JPEG quality, a WebP lossy at
+    /// its quality or lossless), as Photoshop's Save and Save As options start there.
     pub(crate) fn save_settings(&self) -> ExportSettings {
         let previews = self.session.prefs().file_handling.image_previews != photocraft_engine::prefs::Ask::Never;
-        ExportSettings { image_previews: previews, ..ExportSettings::default() }
+        let mut settings = ExportSettings { image_previews: previews, ..ExportSettings::default() };
+        if let Some(st) = self.session.active() {
+            let e = &st.doc.file_encoding;
+            settings.jpeg_quality = e.jpeg_quality.map(|q| q.clamp(1, 100));
+            settings.webp_lossless = e.webp_lossless.unwrap_or(settings.webp_lossless);
+            settings.webp_quality = e.webp_quality.map(|q| q.min(100));
+        }
+        settings
     }
 
     /// Whether saving the active document to `path` writes a copy. `tiff_layers` is the TIFF

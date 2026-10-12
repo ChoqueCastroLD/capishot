@@ -22,6 +22,7 @@ mod image;
 mod options;
 pub mod orientation;
 pub mod resolution;
+pub mod source_settings;
 pub mod web;
 
 pub use crate::codecs::exr_cryptomatte::{cryptomatte_id, cryptomatte_key, cryptomatte_preview_color};
@@ -39,6 +40,7 @@ pub use crate::image::{
 pub use crate::options::{DecodeOptions, EncodeOptions, ExrCompression, Limits, PngCompression, TiffCompression};
 pub use crate::orientation::{exif_orientation, upright_exif, upright_xmp};
 pub use crate::resolution::{exif_resolution, export_exif, export_xmp, photoshop_resolution, xmp_resolution};
+pub use crate::source_settings::{WebpEncoding, jpeg_quality, webp_encoding};
 pub use half::f16;
 
 use crate::codecs::{exr, fits, heif, jpeg, png, pnm, tiff, via_image, webp};
