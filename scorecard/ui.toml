@@ -106,9 +106,9 @@ note = "panels.rs: the wheel steps the blend-mode dropdown (widgets::dropdown_wh
 [[item]]
 id = "UI-217-15"
 target = "Curves: smoothing / pencil mode, black/grey/white eyedroppers, tooltips"
-status = "partial"
+status = "done"
 issue = 217
-note = "Curves editor (adjust_editors.rs, dialog and Properties): Edit points / Draw (pencil) buttons and Smooth, all with tooltips; pencil curves are 256-level maps (Adjustment::Curves pencil, params pencil/smooth, PSD curv map form and smart-filter Mpng; #3088). The Image > Adjustments > Curves dialog has the black/gray/white eyedroppers (adjust_dialog.rs, #873); the adjustment layer's Properties panel has none yet"
+note = "Curves editor (adjust_editors.rs, dialog and Properties): Edit points / Draw (pencil) buttons and Smooth, all with tooltips; pencil curves are 256-level maps (Adjustment::Curves pencil, params pencil/smooth, PSD curv map form and smart-filter Mpng; #3088). Set Black/Neutral Gray/White Point eyedroppers in the Image > Adjustments > Curves dialog (adjust_dialog.rs, #873) and in a Curves adjustment layer's Properties panel (layer_picker.rs: a click on the image is one layer.setAdjustment with the eyedropper param, sampling below the layer; Esc or another tool disarms; #3110)"
 
 [[item]]
 id = "UI-217-16"

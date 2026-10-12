@@ -761,18 +761,52 @@ pub fn curves_eyedropper(base: &Value, picker: CurvesEyedropper, sample: [f32; 3
 
 /// The `eyedropper` param of the Curves commands, so agents and the CLI can drive the dialog's
 /// Set Black/Neutral Gray/White Point pickers: `{"point":"black"|"gray"|"white","at":[x,y]}`
-/// samples the merged composite at document pixel (x, y), or `"color":[r,g,b]` (0–1) gives the
-/// sample directly. The rest of `p` is the curve the picker edits. `None` without the key.
+/// samples the merged composite at document pixel (x, y) (`"size"`: the Eyedropper's Sample
+/// Size, 1 = Point Sample), or `"color":[r,g,b]` (0–1) gives the sample directly. The rest of `p`
+/// is the curve the picker edits. `None` without the key.
 pub fn curves_eyedropper_from_params(s: &crate::Session, p: &Value) -> Result<Option<Adjustment>> {
-    const CMD: &str = "curves eyedropper";
     let Some(e) = p.get("eyedropper") else { return Ok(None) };
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let (picker, sample) = eyedropper_sample(&d.doc, None, e)?;
+    let mut base = p.clone();
+    if let Some(o) = base.as_object_mut() {
+        o.remove("eyedropper");
+    }
+    curves_eyedropper(&base, picker, sample, d.doc.mode).map(Some)
+}
+
+/// The `eyedropper` param of `layer.setAdjustment` on Curves adjustment layer `layer`: the
+/// Properties panel's Set Black/Neutral Gray/White Point pickers. `at` samples the image the
+/// layer adjusts (the composite with the layer hidden, like its Properties histogram), so clicking
+/// the same pixel again maps it the same way. The picker edits the layer's curve with the other
+/// keys of `p` merged over it. `None` without the key.
+pub fn layer_curves_eyedropper(s: &crate::Session, layer: photocraft_doc::LayerId, p: &Value) -> Result<Option<Adjustment>> {
+    let Some(e) = p.get("eyedropper") else { return Ok(None) };
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let l = d.doc.layer(layer).ok_or(EngineError::NoLayer(layer))?;
+    let photocraft_doc::LayerContent::Adjustment(adj @ Adjustment::Curves { .. }) = &l.content else {
+        return Err(bad(EYEDROPPER, "`eyedropper` applies to Curves adjustment layers only"));
+    };
+    let mut rest = p.clone();
+    if let Some(o) = rest.as_object_mut() {
+        o.remove("eyedropper");
+    }
+    let current = if user_keys(&rest).is_empty() { adj.clone() } else { from_params("curves", &rest, Some(adj), d.doc.mode)? };
+    let (picker, sample) = eyedropper_sample(&d.doc, Some(layer), e)?;
+    curves_eyedropper(&to_params(&current), picker, sample, d.doc.mode).map(Some)
+}
+
+const EYEDROPPER: &str = "curves eyedropper";
+
+/// The picker and sample of an `eyedropper` param; `at` samples `doc` with layer `hide` hidden.
+fn eyedropper_sample(doc: &photocraft_doc::Document, hide: Option<photocraft_doc::LayerId>, e: &Value) -> Result<(CurvesEyedropper, [f32; 3])> {
+    const CMD: &str = EYEDROPPER;
     let picker = match e.get("point").and_then(Value::as_str) {
         Some("black") => CurvesEyedropper::Black,
         Some("gray") => CurvesEyedropper::NeutralGray,
         Some("white") => CurvesEyedropper::White,
         _ => return Err(bad(CMD, "`eyedropper.point` must be \"black\", \"gray\" or \"white\"")),
     };
-    let d = s.active().ok_or(EngineError::NoDocument)?;
     let triple = |v: &Value| -> Option<[f64; 3]> {
         let a = v.as_array().filter(|a| a.len() == 3)?;
         Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
@@ -783,12 +817,22 @@ pub fn curves_eyedropper_from_params(s: &crate::Session, p: &Value) -> Result<Op
     } else if let Some(at) = e.get("at") {
         let xy = at.as_array().filter(|a| a.len() == 2).and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?]));
         let [x, y] = xy.filter(|xy| xy.iter().all(|v| v.is_finite())).ok_or_else(|| bad(CMD, "`eyedropper.at` must be [x, y] in document pixels"))?;
-        let (w, h) = (f64::from(d.doc.size.width), f64::from(d.doc.size.height));
+        let (w, h) = (f64::from(doc.size.width), f64::from(doc.size.height));
         if x < 0.0 || y < 0.0 || x >= w || y >= h {
             return Err(bad(CMD, "`eyedropper.at` is outside the image"));
         }
-        let rect = photocraft_geom::Rect::from_xywh(x.floor() as i32, y.floor() as i32, 1, 1);
-        let [r, g, b, a] = photocraft_compose::render(&d.doc, rect).px.first().copied().unwrap_or_default();
+        let size = crate::sample_cmds::size_param(CMD, e)?;
+        let all = crate::sample_cmds::SampleLayers::All;
+        let [r, g, b, a] = match hide {
+            Some(id) => {
+                let mut below = doc.clone();
+                if let Some(l) = below.layer_mut(id) {
+                    l.visible = false;
+                }
+                crate::sample_cmds::sample_color(&below, None, x, y, size, all)
+            }
+            None => crate::sample_cmds::sample_color(doc, None, x, y, size, all),
+        };
         if a <= 0.0 {
             return Err(bad(CMD, "the sampled pixel is transparent"));
         }
@@ -796,11 +840,7 @@ pub fn curves_eyedropper_from_params(s: &crate::Session, p: &Value) -> Result<Op
     } else {
         return Err(bad(CMD, "`eyedropper` needs `at` [x, y] or `color` [r, g, b]"));
     };
-    let mut base = p.clone();
-    if let Some(o) = base.as_object_mut() {
-        o.remove("eyedropper");
-    }
-    curves_eyedropper(&base, picker, sample, d.doc.mode).map(Some)
+    Ok((picker, sample))
 }
 
 /// `[[in, out], …]` in 0..255: sorted by input, duplicates collapsed, 2..=19 points.
@@ -1312,6 +1352,34 @@ mod tests {
         ] {
             assert!(s.execute("image.adjustments.curves", json!({"eyedropper": bad})).is_err(), "{bad}");
         }
+    }
+
+    /// The Properties panel's pickers on a Curves adjustment layer (UI-217-15): one undoable step
+    /// that samples the image below the layer, so a repeated click keeps the same curve.
+    #[test]
+    fn layer_eyedropper_samples_below_the_curves_layer() {
+        let mut s = crate::Session::new();
+        s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+        s.execute("edit.fill", json!({"color": [0.6, 0.5, 0.4]})).unwrap();
+        s.execute("layer.newAdjustmentLayer.curves", json!({})).unwrap();
+        let steps = s.active().unwrap().history.past_len();
+        let pick = json!({"eyedropper": {"point": "white", "at": [2, 2], "size": 3}});
+        s.execute("layer.setAdjustment", pick.clone()).unwrap();
+        assert_eq!(s.active().unwrap().history.past_len(), steps + 1);
+        let px: Vec<f32> = serde_json::from_value(s.execute("document.pixel", json!({"x": 2, "y": 2})).unwrap()).unwrap();
+        assert!(px.iter().take(3).all(|v| *v > 0.99), "the sample becomes white: {px:?}");
+        let curve = s.active().unwrap().doc.clone();
+        s.execute("layer.setAdjustment", pick).unwrap();
+        let same = |a: &photocraft_doc::Document, b: &photocraft_doc::Document| a.layers.last().map(|l| &l.content) == b.layers.last().map(|l| &l.content);
+        assert!(same(&curve, &s.active().unwrap().doc), "sampled below the layer, not through it");
+        s.execute("edit.undo", json!({})).unwrap();
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(s.active().unwrap().history.past_len(), steps);
+        for bad in [json!({"point": "black", "at": [99, 1]}), json!({"point": "black", "at": [1, 1], "size": 2}), json!({"point": "x", "at": [1, 1]})] {
+            assert!(s.execute("layer.setAdjustment", json!({"eyedropper": bad})).is_err(), "{bad}");
+        }
+        s.execute("layer.newAdjustmentLayer.levels", json!({})).unwrap();
+        assert!(s.execute("layer.setAdjustment", json!({"eyedropper": {"point": "white", "at": [1, 1]}})).is_err(), "Curves only");
     }
 
     #[test]

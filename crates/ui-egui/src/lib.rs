@@ -97,6 +97,7 @@ pub mod kys_import;
 pub mod lasso_ui;
 pub mod layer_menu_ui;
 pub mod layer_pick_ui;
+pub mod layer_picker;
 pub mod layer_props_ui;
 mod layer_reveal;
 pub mod layer_row_ui;

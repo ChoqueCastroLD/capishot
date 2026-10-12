@@ -818,26 +818,37 @@ fn build() -> Vec<CommandSpec> {
                 Ok(json!({ "layer": id.0 }))
             }
         ),
-        cmd!("layer.setAdjustment", "Adjustment Properties", [], None, r##"{"layer":id?, …params of that adjustment kind}"##, has_layer, |s, p| {
-            let id = layer_param(s, p)?;
-            s.edit("Modify Adjustment", |doc, _| {
-                let mode = doc.mode;
-                let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-                let LayerContent::Adjustment(adj) = &mut l.content else { return Err(EngineError::Other("not an adjustment layer".into())) };
-                if matches!(adj, Adjustment::Unsupported { .. }) {
-                    return Err(EngineError::Other("this adjustment can't be edited (kept as imported)".into()));
-                }
-                let kind = adjustment_kind(adj);
-                // No params resets to the defaults; otherwise params merge over the current values.
-                *adj = if crate::adjust_params::user_keys(p).is_empty() {
-                    crate::adjust_params::default_for(kind, mode)?
-                } else {
-                    crate::adjust_params::from_params(kind, p, Some(adj), mode)?
-                };
-                Ok(())
-            })?;
-            Ok(Value::Null)
-        }),
+        cmd!(
+            "layer.setAdjustment",
+            "Adjustment Properties",
+            [],
+            None,
+            r##"{"layer":id?, …params of that adjustment kind} (Curves: "eyedropper":{"point":"black|gray|white","at":[x,y],"size":1..101=1} or {"point",…,"color":[r,g,b] 0..1} = the Properties panel's Set Black/Neutral Gray/White Point, sampling the image below the layer, RGB and Grayscale (no gray) only)"##,
+            has_layer,
+            |s, p| {
+                let id = layer_param(s, p)?;
+                let eyedropped = crate::adjust_params::layer_curves_eyedropper(s, id, p)?;
+                s.edit("Modify Adjustment", |doc, _| {
+                    let mode = doc.mode;
+                    let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+                    let LayerContent::Adjustment(adj) = &mut l.content else { return Err(EngineError::Other("not an adjustment layer".into())) };
+                    if matches!(adj, Adjustment::Unsupported { .. }) {
+                        return Err(EngineError::Other("this adjustment can't be edited (kept as imported)".into()));
+                    }
+                    let kind = adjustment_kind(adj);
+                    // No params resets to the defaults; otherwise params merge over the current values.
+                    *adj = if let Some(eyedropped) = eyedropped {
+                        eyedropped
+                    } else if crate::adjust_params::user_keys(p).is_empty() {
+                        crate::adjust_params::default_for(kind, mode)?
+                    } else {
+                        crate::adjust_params::from_params(kind, p, Some(adj), mode)?
+                    };
+                    Ok(())
+                })?;
+                Ok(Value::Null)
+            }
+        ),
         cmd!(
             "layer.moveTo",
             "Reorder Layer",
@@ -1034,7 +1045,7 @@ fn build() -> Vec<CommandSpec> {
         (
             "curves",
             "Curves…",
-            r##"{"points":json,"red":json,"green":json,"blue":json,"pencil":bool=false,"smooth":0..10=0,"eyedropper":json} (curves as [[in,out],…] in 0..255, 2..19 points: points = composite; red/green/blue, gray, cyan/magenta/yellow/black or lightness/a/b per channel; pencil = drawn curves (Draw to modify the curve): each curve is 256 output levels in 0..255 (point curves given are drawn in, and turning pencil off fits points to the drawing); smooth = Smooth passes over the drawn curves; eyedropper = the dialog's Set Black/Neutral Gray/White Point picker {"point":"black|gray|white","at":[x,y]} or {"point",…,"color":[r,g,b] 0..1}, RGB and Grayscale (no gray) only, applied over the given curves)"##,
+            r##"{"points":json,"red":json,"green":json,"blue":json,"pencil":bool=false,"smooth":0..10=0,"eyedropper":json} (curves as [[in,out],…] in 0..255, 2..19 points: points = composite; red/green/blue, gray, cyan/magenta/yellow/black or lightness/a/b per channel; pencil = drawn curves (Draw to modify the curve): each curve is 256 output levels in 0..255 (point curves given are drawn in, and turning pencil off fits points to the drawing); smooth = Smooth passes over the drawn curves; eyedropper = the dialog's Set Black/Neutral Gray/White Point picker {"point":"black|gray|white","at":[x,y],"size":1..101=1} or {"point",…,"color":[r,g,b] 0..1}, RGB and Grayscale (no gray) only, applied over the given curves)"##,
         ),
         ("exposure", "Exposure…", r##"{"exposure":-20..20=0,"offset":-0.5..0.5=0,"gamma":0.01..9.99=1}"##),
         ("vibrance", "Vibrance…", r##"{"vibrance":-100..100=0,"saturation":-100..100=0}"##),

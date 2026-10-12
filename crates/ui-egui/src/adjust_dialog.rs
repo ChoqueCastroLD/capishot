@@ -28,7 +28,7 @@ fn picker(value: Option<&Value>) -> Option<photocraft_engine::adjust_params::Cur
     }
 }
 
-fn picker_supported(mode: photocraft_doc::ColorMode, eyedropper: photocraft_engine::adjust_params::CurvesEyedropper) -> bool {
+pub(crate) fn picker_supported(mode: photocraft_doc::ColorMode, eyedropper: photocraft_engine::adjust_params::CurvesEyedropper) -> bool {
     use photocraft_engine::adjust_params::CurvesEyedropper;
     mode == photocraft_doc::ColorMode::Rgb || (mode == photocraft_doc::ColorMode::Grayscale && eyedropper != CurvesEyedropper::NeutralGray)
 }
@@ -76,7 +76,7 @@ pub fn sample_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
     true
 }
 
-fn picker_button(ui: &mut egui::Ui, selected: bool, enabled: bool, tooltip: &str, color: egui::Color32) -> egui::Response {
+pub(crate) fn picker_button(ui: &mut egui::Ui, selected: bool, enabled: bool, tooltip: &str, color: egui::Color32) -> egui::Response {
     let response = ui.add_enabled_ui(enabled, |ui| crate::icons::button(ui, "pipette", 28.0, selected, tooltip)).inner;
     let tokens = crate::theme::Tokens::get(ui.ctx());
     ui.painter().circle_filled(response.rect.right_bottom() - egui::vec2(5.5, 5.5), 3.5, color);
