@@ -1725,6 +1725,8 @@ impl eframe::App for PhotocraftApp {
         brush_picker::persist(self, &ctx);
         // Tool options are remembered between launches the same way (#2814).
         tool_memory::persist(self, &ctx);
+        // So are View › Extras, Show and Snap To (#3762).
+        view_cmds::persist(self, &ctx);
         self.automation_input = false;
         shape_stroke_ui::finish_frame(self, &ctx);
         native_menu::sync(self, &ctx);
