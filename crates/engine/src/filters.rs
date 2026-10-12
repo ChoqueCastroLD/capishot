@@ -290,24 +290,7 @@ pub(crate) fn run_filter(s: &mut Session, id: &str, p: &Value) -> Result<Value> 
 
 /// Lock transparency: put the layer's alpha back after a filter, in the tiles it changed.
 fn keep_alpha(old: &photocraft_raster::Surface, new: &mut photocraft_raster::Surface) {
-    if old.format() != new.format() || !new.format().alpha {
-        return;
-    }
-    let mut coords: Vec<_> = new.tiles().filter(|(c, t)| old.tile(**c).is_none_or(|o| !std::sync::Arc::ptr_eq(o, t))).map(|(c, _)| *c).collect();
-    coords.extend(old.tiles().filter(|(c, _)| new.tile(**c).is_none()).map(|(c, _)| *c));
-    let n = new.channels();
-    for c in coords {
-        let r = c.rect();
-        let o = old.read_region(r);
-        let mut v = new.read_region(r);
-        for (pn, po) in v.chunks_exact_mut(n).zip(o.chunks_exact(n)) {
-            if let (Some(a), Some(b)) = (pn.last_mut(), po.last()) {
-                *a = *b;
-            }
-        }
-        new.write_region(r, &v);
-    }
-    new.prune();
+    new.copy_alpha_from(old);
 }
 
 macro_rules! filter_cmd {

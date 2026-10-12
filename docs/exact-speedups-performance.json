@@ -1,0 +1,311 @@
+{
+ "base": "64ec252dbe1a780764e30d27fa88a6835f7f6ce2",
+ "machine": "Apple M2 Pro (6P+4E), 16 GB, macOS, rustc 1.99.0, release profile",
+ "order": "three pairs: before/after, after/before, before/after",
+ "cases": [
+  {
+   "level": "algo",
+   "case": "scale",
+   "before": [
+    5951.7,
+    5913.9,
+    5963.6
+   ],
+   "after": [
+    1923.1,
+    1895.9,
+    1913.1
+   ],
+   "hash_before": "1be31c8e10b73afd",
+   "hash_after": "1be31c8e10b73afd"
+  },
+  {
+   "level": "algo",
+   "case": "blur 4",
+   "before": [
+    362.8,
+    367.3,
+    414.7
+   ],
+   "after": [
+    137.7,
+    139.6,
+    138.8
+   ],
+   "hash_before": "8a1287338b882a81",
+   "hash_after": "8a1287338b882a81"
+  },
+  {
+   "level": "algo",
+   "case": "blur 40",
+   "before": [
+    221.0,
+    223.2,
+    210.6
+   ],
+   "after": [
+    150.3,
+    138.6,
+    159.0
+   ],
+   "hash_before": "d8367c08f8f7af55",
+   "hash_after": "d8367c08f8f7af55"
+  },
+  {
+   "level": "algo",
+   "case": "blur 250",
+   "before": [
+    278.1,
+    239.7,
+    256.5
+   ],
+   "after": [
+    165.6,
+    162.0,
+    160.7
+   ],
+   "hash_before": "c414081f0afbf665",
+   "hash_after": "c414081f0afbf665"
+  },
+  {
+   "level": "algo",
+   "case": "median 1",
+   "before": [
+    1587.9,
+    1638.6,
+    1617.8
+   ],
+   "after": [
+    58.5,
+    58.6,
+    60.5
+   ],
+   "hash_before": "0a6f45c448f60650",
+   "hash_after": "0a6f45c448f60650"
+  },
+  {
+   "level": "algo",
+   "case": "median 3",
+   "before": [
+    701.9,
+    942.6,
+    1005.2
+   ],
+   "after": [
+    475.7,
+    489.6,
+    504.3
+   ],
+   "hash_before": "f31389f5f9ac4b00",
+   "hash_after": "f31389f5f9ac4b00"
+  },
+  {
+   "level": "algo",
+   "case": "median 10",
+   "before": [
+    1840.1,
+    1784.5,
+    1766.0
+   ],
+   "after": [
+    1332.7,
+    1147.0,
+    1094.7
+   ],
+   "hash_before": "d1fffa0be3a62f7b",
+   "hash_after": "d1fffa0be3a62f7b"
+  },
+  {
+   "level": "algo",
+   "case": "median 30",
+   "before": [
+    4987.9,
+    5676.0,
+    5602.3
+   ],
+   "after": [
+    2903.9,
+    3581.1,
+    3450.0
+   ],
+   "hash_before": "0ab2da5b8f641350",
+   "hash_after": "0ab2da5b8f641350"
+  },
+  {
+   "level": "algo",
+   "case": "median 100",
+   "before": [
+    17013.9,
+    15788.6,
+    15717.6
+   ],
+   "after": [
+    10407.3,
+    10120.2,
+    9925.8
+   ],
+   "hash_before": "13df3263e692af38",
+   "hash_after": "13df3263e692af38"
+  },
+  {
+   "level": "algo",
+   "case": "auto",
+   "before": [
+    185.5,
+    189.5,
+    180.3
+   ],
+   "after": [
+    141.7,
+    132.4,
+    124.1
+   ],
+   "hash_before": "c18aed32a101951e",
+   "hash_after": "c18aed32a101951e"
+  },
+  {
+   "level": "algo",
+   "case": "fill",
+   "before": [
+    1961.0,
+    1921.9,
+    1937.6
+   ],
+   "after": [
+    1885.8,
+    1900.3,
+    1889.7
+   ],
+   "hash_before": "55c89abe19bd2109",
+   "hash_after": "55c89abe19bd2109"
+  },
+  {
+   "level": "engine",
+   "case": "Content-Aware Scale 24 MP",
+   "before": [
+    6611.13,
+    6640.97,
+    7002.47
+   ],
+   "after": [
+    2610.31,
+    2487.31,
+    2781.3
+   ],
+   "hash_before": "-",
+   "hash_after": "-"
+  },
+  {
+   "level": "engine",
+   "case": "cancel Content-Aware Fill job on 24 MP",
+   "before": [
+    18.62,
+    19.13,
+    16.58
+   ],
+   "after": [
+    0.37,
+    2.71,
+    1.57
+   ],
+   "hash_before": "-",
+   "hash_after": "-"
+  },
+  {
+   "level": "engine",
+   "case": "Content-Aware Fill 10 MP",
+   "before": [
+    270.46,
+    263.07,
+    255.1
+   ],
+   "after": [
+    245.8,
+    248.1,
+    251.36
+   ],
+   "hash_before": "-",
+   "hash_after": "-"
+  },
+  {
+   "level": "engine",
+   "case": "open 20 MP",
+   "before": [
+    422.23,
+    474.48,
+    488.25
+   ],
+   "after": [
+    415.64,
+    404.64,
+    478.07
+   ],
+   "hash_before": "-",
+   "hash_after": "-"
+  },
+  {
+   "level": "engine",
+   "case": "Gaussian Blur r 4",
+   "before": [
+    782.1,
+    818.3,
+    774.5
+   ],
+   "after": [
+    219.8,
+    217.1,
+    187.4
+   ],
+   "hash_before": "-",
+   "hash_after": "-"
+  },
+  {
+   "level": "engine",
+   "case": "Gaussian Blur r 40",
+   "before": [
+    602.0,
+    606.5,
+    599.8
+   ],
+   "after": [
+    204.0,
+    182.0,
+    175.9
+   ],
+   "hash_before": "-",
+   "hash_after": "-"
+  },
+  {
+   "level": "engine",
+   "case": "Gaussian Blur r 250",
+   "before": [
+    658.6,
+    665.2,
+    657.9
+   ],
+   "after": [
+    216.6,
+    218.6,
+    222.2
+   ],
+   "hash_before": "-",
+   "hash_after": "-"
+  },
+  {
+   "level": "engine",
+   "case": "cancel Content-Aware Fill job on 24 MP (max of 8 cancels)",
+   "before": [
+    245.02,
+    216.05,
+    212.5
+   ],
+   "after": [
+    94.05,
+    17.32,
+    7.83
+   ],
+   "hash_before": "-",
+   "hash_after": "-"
+  }
+ ]
+}

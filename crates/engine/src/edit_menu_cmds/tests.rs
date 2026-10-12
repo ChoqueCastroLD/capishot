@@ -329,6 +329,31 @@ fn content_aware_scale_keeps_subject() {
     }
 }
 
+/// Scaling a selection down clears the part of the selection the result no longer covers (the
+/// strips right of and below it), keeps the pixels outside the selection, and fills the result.
+#[test]
+fn content_aware_scale_clears_what_it_leaves() {
+    for (to_w, to_h) in [(30, 32), (48, 20), (30, 20), (60, 40)] {
+        let mut s = session(8);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.edit("paint", |doc, active| {
+            doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap().fill_rect(Rect::new(0, 0, 64, 48), &[0.2, 0.7, 0.4, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("select.rect", json!({"x": 8, "y": 8, "width": 48, "height": 32})).unwrap();
+        s.execute("edit.contentAwareScale", json!({"width": to_w, "height": to_h})).unwrap();
+        let (sel, dst) = (Rect::new(8, 8, 56, 40), Rect::from_xywh(8, 8, to_w, to_h));
+        for y in 0..48 {
+            for x in 0..64 {
+                let a = px(&s, x, y)[3];
+                let want = if dst.contains(x, y) || !sel.contains(x, y) { 1.0 } else { 0.0 };
+                assert_eq!(a, want, "{to_w}x{to_h}: alpha at ({x}, {y})");
+            }
+        }
+    }
+}
+
 #[test]
 fn content_aware_scale_params() {
     let mut s = session(8);
@@ -486,3 +511,65 @@ fn find_in_the_active_layer_finds_nothing_when_it_is_not_type() {
     let r = s.execute("edit.findAndReplaceText", json!({"find": "abc", "allLayers": false, "action": "find"})).unwrap();
     assert_eq!((r["found"]["layer"].as_u64(), r["found"]["text"].as_str()), (Some(id), Some("abc")));
 }
+
+/// The exact layer bits Content-Aware Fill leaves with a feathered selection, for every way of
+/// choosing where to sample (auto, rectangular, a custom area, a saved channel), at each depth:
+/// pinned so that reading the masks faster can't change them.
+#[test]
+fn content_aware_fill_output_bits_are_pinned() {
+    let mut got = Vec::new();
+    for depth in [8, 16, 32] {
+        let mut s = session(depth);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.edit("paint", |doc, active| {
+            let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+            for y in 0..48 {
+                for x in 0..64 {
+                    let v = |k: i32| {
+                        (((x as u32).wrapping_mul(73_856_093) ^ (y as u32).wrapping_mul(19_349_663) ^ (k as u32).wrapping_mul(83_492_791)) % 997) as f32 / 997.0
+                    };
+                    let stripe = if (x / 3) % 2 == 0 { 0.2 } else { 0.0 };
+                    surf.write_pixel(x, y, &[v(0) * 0.6 + stripe, v(1) * 0.5 + 0.2, v(2) * 0.4 + stripe, 1.0]);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+        // A saved channel covering the right half (the custom sampling mask).
+        s.execute("select.rect", json!({"x": 32, "y": 0, "width": 32, "height": 48})).unwrap();
+        s.execute("select.saveSelection", json!({"name": "right"})).unwrap();
+        s.execute("select.rect", json!({"x": 22, "y": 15, "width": 16, "height": 14, "ellipse": true})).unwrap();
+        s.execute("select.modify.feather", json!({"radius": 2})).unwrap();
+        for params in [
+            json!({}),
+            json!({"sampling": "rectangular", "seed": 3}),
+            json!({"sampling": "custom", "area": [0, 6, 30, 26], "colorAdaptation": "none"}),
+            json!({"sampling": "custom", "channel": "right", "rotationAdaptation": "low"}),
+        ] {
+            let before = active(&s).surface().unwrap().read_region(Rect::new(0, 0, 64, 48));
+            s.execute("edit.contentAwareFill", params.clone()).unwrap();
+            let surf = active(&s).surface().unwrap();
+            assert_ne!(surf.read_region(Rect::new(0, 0, 64, 48)), before, "depth {depth}, {params}: the fill changed the layer");
+            let bits = surf.read_region(Rect::new(0, 0, 64, 48)).into_iter().flat_map(|v| v.to_bits().to_le_bytes());
+            got.push(bits.fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)));
+            s.undo();
+        }
+    }
+    assert_eq!(got, CAF_PINNED);
+}
+
+// Re-pinned for the Content-Aware Fill workspace (#2376); the speed-ups leave these bits unchanged.
+const CAF_PINNED: [u64; 12] = [
+    0x079b_9699_b360_1be0,
+    0x6a3a_2ce1_1402_495e,
+    0xe5ca_3d30_2bd6_f57f,
+    0xcdfe_3a24_7fa6_117a,
+    0x627d_d242_f093_e44f,
+    0xa058_8526_bc02_4be8,
+    0x37d4_ffd4_c136_8163,
+    0x6a7a_39a9_4af2_e8cc,
+    0xf4fd_a9a7_4712_3a15,
+    0x4cf1_4261_33a2_e622,
+    0x1ef9_0fc3_294d_b100,
+    0x73ce_ceae_c4c0_8381,
+];
