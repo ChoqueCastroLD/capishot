@@ -598,6 +598,8 @@ mod tests {
             handle(app, &ctx);
             ctx.end_pass().textures_delta.clear();
         };
+        // The plain key cycles with Use Shift Key for Tool Switch off (on by default).
+        app.session.prefs.edit(|p| p.tools.use_shift_key_for_tool_switch = false);
         // Polygonal Lasso picked from the toolbar flyout, then the Brush (#2608).
         app.ui.tool = Tool::PolygonLasso;
         press(&mut app, Key::B, Modifiers::NONE);

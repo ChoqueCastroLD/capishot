@@ -3116,7 +3116,6 @@ cameraData	Lens	Lensa
 	Downloading {file}	Mengunduh {file}
 	Downloading the licence	Mengunduh lisensi
 	Loading the font index	Memuat indeks font
-	Show canvas dots	Tampilkan titik kanvas
 	Copy Layers	Salin Layer
 	Paste Layers	Tempel Layer
 	Cycle Screen Mode Backwards	Ganti Mode Layar Mundur
@@ -3127,3 +3126,6 @@ cameraData	Lens	Lensa
 	Scroll to Upper-Left Corner	Gulir ke Sudut Kiri Atas
 	Scroll to Lower-Right Corner	Gulir ke Sudut Kanan Bawah
 	Show rulers in new documents	Tampilkan penggaris di dokumen baru
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	Hapus ke Riwayat
+	Sample Size	Ukuran Sampel

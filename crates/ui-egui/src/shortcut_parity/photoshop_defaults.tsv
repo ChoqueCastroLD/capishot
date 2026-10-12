@@ -144,7 +144,7 @@ View	Show/hide all panels	Tab	Tab	cmd:window.togglePanels
 View	Show/hide all panels except the toolbox and options bar	Shift+Tab	Shift+Tab	cmd:window.toggle.dock
 View	Hand tool while held	Space	Space	hold:tools.temporary.hand
 View	Zoom in while held	Ctrl+Space	Command+Space	hold:tools.temporary.zoomIn
-View	Zoom out while held	Ctrl+Alt+Space	Command+Option+Space	hold:tools.temporary.zoomOut
+View	Zoom out while held	Alt+Space	Option+Space	hold:tools.temporary.zoomOut
 View	Scroll up one screen	Page Up	Page Up	cmd:view.scroll.pageUp
 View	Scroll down one screen	Page Down	Page Down	cmd:view.scroll.pageDown
 View	Scroll left one screen	Ctrl+Page Up	Command+Page Up	cmd:view.scroll.pageLeft

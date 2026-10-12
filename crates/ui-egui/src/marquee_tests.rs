@@ -762,6 +762,8 @@ fn single_row_and_column_marquee_select_one_pixel_lines() {
 fn m_cycles_only_the_rectangular_and_elliptical_marquee() {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
     let ctx = egui::Context::default();
+    // The plain key cycles with Use Shift Key for Tool Switch off (on by default, as in Photoshop).
+    app.session.prefs.edit(|p| p.tools.use_shift_key_for_tool_switch = false);
     app.ui.tool = Tool::SingleRowMarquee;
     let mut seen = Vec::new();
     for _ in 0..4 {

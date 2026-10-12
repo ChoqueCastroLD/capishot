@@ -2733,7 +2733,6 @@ cameraData	Lens	镜头
 	Downloading {file}	正在下载 {file}
 	Downloading the licence	正在下载许可证
 	Loading the font index	正在加载字体索引
-	Show canvas dots	显示画布圆点
 	Copy Layers	拷贝图层
 	Paste Layers	粘贴图层
 	Cycle Screen Mode Backwards	反向循环切换屏幕模式
@@ -2744,3 +2743,6 @@ cameraData	Lens	镜头
 	Scroll to Upper-Left Corner	滚动到左上角
 	Scroll to Lower-Right Corner	滚动到右下角
 	Show rulers in new documents	在新文档中显示标尺
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	抹到历史记录
+	Sample Size	取样大小

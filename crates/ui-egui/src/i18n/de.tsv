@@ -2753,7 +2753,6 @@ cameraData	Lens	Objektiv
 	Downloading {file}	{file} wird heruntergeladen
 	Downloading the licence	Lizenz wird heruntergeladen
 	Loading the font index	Schriftindex wird geladen
-	Show canvas dots	Punkte auf der Arbeitsfläche anzeigen
 	Copy Layers	Ebenen kopieren
 	Paste Layers	Ebenen einfügen
 	Cycle Screen Mode Backwards	Bildschirmmodus rückwärts durchschalten
@@ -2764,3 +2763,6 @@ cameraData	Lens	Objektiv
 	Scroll to Upper-Left Corner	Zur oberen linken Ecke blättern
 	Scroll to Lower-Right Corner	Zur unteren rechten Ecke blättern
 	Show rulers in new documents	Lineale in neuen Dokumenten einblenden
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	Auf Protokoll löschen
+	Sample Size	Aufnahmebereich

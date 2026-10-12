@@ -3808,7 +3808,6 @@ cameraData	Lens	Φακός
 @plural	{n} style|{n} styles	{n} στυλ|{n} στυλ
 @plural	{n} text layer|{n} text layers	{n} επίπεδο κειμένου|{n} επίπεδα κειμένου
 @plural	{n} open document|{n} open documents	{n} ανοιχτό έγγραφο|{n} ανοιχτά έγγραφα
-	Show canvas dots	Εμφάνιση κουκκίδων καμβά
 	Copy Layers	Αντιγραφή επιπέδων
 	Paste Layers	Επικόλληση επιπέδων
 	Cycle Screen Mode Backwards	Εναλλαγή λειτουργίας οθόνης προς τα πίσω
@@ -3819,3 +3818,5 @@ cameraData	Lens	Φακός
 	Scroll to Upper-Left Corner	Κύλιση στην πάνω αριστερή γωνία
 	Scroll to Lower-Right Corner	Κύλιση στην κάτω δεξιά γωνία
 	Show rulers in new documents	Εμφάνιση χαράκων σε νέα έγγραφα
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	Διαγραφή στο ιστορικό
