@@ -89,11 +89,13 @@ what an agent can't finish alone.
 ### G11. Actions and scripting
 - **Missing:** document-independent action recording (AUTO-219-1), Batch recursion and naming
   (AUTO-219-5), ExtendScript/UXP compatibility. `.atn` steps outside the
-  90 mapped events (Transform with scale or rotation, Apply Image, Save for Web, Place, smart
-  object edits, Generative Fill…) load as kept Photoshop steps that fail at playback by name.
+  mapped events (Place, Image Size in percent, paths, conditionals, Generative Fill…) load as
+  kept Photoshop steps that fail at playback by name.
 - **Done 2026-10-12:** Load/Save Actions `.atn` in the panel menu, `batch --actions set.atn`
-  and `actions.load`/`actions.save`; 92 Photoshop events map to commands both ways, Play and
-  Stop steps included; layer steps replay by layer name in any document. The panel groups actions
+  and `actions.load`/`actions.save`; 105 Photoshop events map to commands both ways (Transform,
+  Apply Image, Save for Web, smart-object edits, Gradient Map, Quick Mask and polygon selections
+  since the third PR), Play and Stop steps included; layer steps replay by layer name in any
+  document. The panel groups actions
   in set folders, has the dialog toggle column (playback pauses on the step's dialog and resumes
   on OK) and Insert Stop…; `actions.insert`, `actions.dialog`, `actions.assignSet` for agents
   (AUTO-219-2 done).
