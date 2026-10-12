@@ -256,8 +256,19 @@ pub fn blend_from_str(s: &str) -> Option<BlendMode> {
 /// The active selection as the mask of a layer being created, or None without a selection.
 /// Photoshop masks a new adjustment or fill layer with the selection, so the adjustment acts on
 /// the selected area only (#1250); the selection itself stays, as Reveal Selection leaves it.
-pub(crate) fn selection_mask(doc: &Document) -> Option<LayerMask> {
-    doc.selection.as_ref().map(|sel| LayerMask { surface: sel.clone(), ..LayerMask::reveal_all() })
+pub(crate) fn selection_mask(doc: &Document) -> Result<Option<LayerMask>> {
+    doc.selection.as_ref().map(|sel| mask_at_depth(LayerMask { surface: sel.clone(), ..LayerMask::reveal_all() }, doc.depth)).transpose()
+}
+
+/// New pixel masks use the document's depth, as PSD saves/imports do. Otherwise a later soft
+/// brush stroke quantizes differently depending on whether the document reopened as PSD or
+/// native. Converting a selection keeps its coverage and does not alter the selection itself.
+fn mask_at_depth(mut mask: LayerMask, depth: SampleType) -> Result<LayerMask> {
+    let format = mask.surface.format().with_sample(depth);
+    if mask.surface.format() != format {
+        mask.surface = mask.surface.try_convert(format)?;
+    }
+    Ok(mask)
 }
 
 /// Mask a fill or adjustment layer being created, as Photoshop does: the path selected in the
@@ -276,7 +287,7 @@ pub(crate) fn mask_new_layer(doc: &Document, l: &mut Layer, p: &Value, cmd: &str
     };
     match path {
         Some(path) => l.vector_mask = Some(photocraft_doc::VectorMask::new(path)),
-        None => l.mask = Some(selection_mask(doc).unwrap_or_else(LayerMask::reveal_all)),
+        None => l.mask = Some(mask_at_depth(selection_mask(doc)?.unwrap_or_else(LayerMask::reveal_all), doc.depth)?),
     }
     Ok(())
 }
@@ -1339,6 +1350,7 @@ fn arrange(s: &mut Session, p: &Value, delta: i32) -> Result<Value> {
 fn set_mask(s: &mut Session, p: &Value, label: &str, mask: Option<LayerMask>) -> Result<Value> {
     let ids = if mask.is_some() { crate::layer_multi_cmds::mask_targets(s, p)? } else { vec![layer_param(s, p)?] };
     s.edit(label, |doc, _| {
+        let mask = mask.clone().map(|mask| mask_at_depth(mask, doc.depth)).transpose()?;
         for id in &ids {
             if mask.is_some() {
                 crate::extra_cmds::background_to_layer_for_mask(doc, *id);
