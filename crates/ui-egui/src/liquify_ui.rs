@@ -605,7 +605,8 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) {
     }
 }
 
-pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
+/// Ctrl+Z / Ctrl+Shift+Z inside Liquify, including while a slider's text field is focused.
+pub fn history_keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some(d) = app.distort.liquify.as_mut() else { return };
     let cmd_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
     if ctx.input_mut(|i| i.consume_key(cmd_shift, egui::Key::Z)) {
@@ -613,6 +614,11 @@ pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
         d.undo();
     }
+}
+
+pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    history_keys(app, ctx);
+    let Some(d) = app.distort.liquify.as_mut() else { return };
     // Ctrl+H (Hide Extras) toggles the red freeze-mask overlay; the mask itself stays active.
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::H)) {
         d.opts.show_mask = !d.opts.show_mask;
@@ -625,10 +631,11 @@ pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
         d.global(LiquifyTool::ThawAll, None);
     }
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::OpenBracket)) {
-        d.opts.size = (d.opts.size * 0.9).max(1.0);
+        // At least one pixel, or 2 px * 0.9 rounds back to 2 and `[` never reaches 1.
+        d.opts.size = (d.opts.size * 0.9).round().min(d.opts.size - 1.0).clamp(1.0, 15000.0);
     }
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::CloseBracket)) {
-        d.opts.size = (d.opts.size * 1.1).min(15000.0);
+        d.opts.size = (d.opts.size * 1.1).round().max(d.opts.size + 1.0).min(15000.0);
     }
     let tools = [
         (egui::Key::W, LiquifyTool::ForwardWarp),

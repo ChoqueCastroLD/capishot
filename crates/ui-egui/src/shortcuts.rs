@@ -335,8 +335,14 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // Liquify is a full-window custom dialog with focusable sliders. egui can therefore claim
     // keyboard input before the distortion-mode handler below runs. Give Liquify's local
     // shortcuts first refusal (Undo, brush size, tool keys), but never steal keys from text edits.
-    if app.distort.liquify.is_some() && !ctx.text_edit_focused() {
-        crate::liquify_ui::keys(app, ctx);
+    if app.distort.liquify.is_some() {
+        // Undo and redo still apply while a numeric field (Size, Pressure, …) has focus.
+        // Other Liquify keys must not steal characters from that field (#4027).
+        if ctx.text_edit_focused() {
+            crate::liquify_ui::history_keys(app, ctx);
+        } else {
+            crate::liquify_ui::keys(app, ctx);
+        }
     }
     use crate::shortcut_dispatch::{Focus, dispatch_pressed};
     let focus = Focus::of(ctx);
