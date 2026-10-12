@@ -28,6 +28,8 @@ mod embed;
 mod embed_protocol;
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+mod wheel_guard;
 
 #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
 fn main() {

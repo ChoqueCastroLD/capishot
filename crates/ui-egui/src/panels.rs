@@ -1831,7 +1831,7 @@ fn navigator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     // The Navigator has its own zoom target: an unmodified wheel over the preview
     // should zoom even when the document canvas is configured to scroll on wheel.
-    // Use the canvas wheel classifier to honour one ×1.1 step per notch without
+    // Use the canvas wheel classifier to honour one ×1.12 step per notch without
     // applying egui's smoothed wheel tail a second time.
     let pinch_zooms = app.session.prefs().enhanced_controls.zoom_with_trackpad_pinch;
     if resp.hovered()
@@ -1947,7 +1947,7 @@ mod navigator_wheel_tests {
         frame(&mut app, &ctx, pos2(50.0, 55.0), 0.0);
         let center = app.ui.views[0].center;
         frame(&mut app, &ctx, pos2(50.0, 55.0), 1.0);
-        assert!((app.ui.views[0].zoom - 1.1).abs() < 1e-4, "one wheel notch zooms once");
+        assert!((app.ui.views[0].zoom - crate::wheel_nav::NOTCH).abs() < 1e-4, "one wheel notch zooms once");
         assert_eq!(app.ui.views[0].center, center, "Navigator wheel must not pan");
         frame(&mut app, &ctx, pos2(50.0, 55.0), -1.0);
         assert!((app.ui.views[0].zoom - 1.0).abs() < 1e-4);
