@@ -1527,7 +1527,8 @@ fn effect_region(layer: &Layer, rect: Rect, cx: &Ctx) -> (Rect, bool) {
 fn effect_maps(layer: &Layer, rect: Rect, cx: &Ctx) -> std::sync::Arc<effects::FxMaps> {
     use std::hash::{Hash, Hasher};
     let (region, clipped) = effect_region(layer, rect, cx);
-    if std::env::var_os("PHOTOCRAFT_FX_NOCACHE").is_some() {
+    static NO_CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *NO_CACHE.get_or_init(|| std::env::var_os("PHOTOCRAFT_FX_NOCACHE").is_some()) {
         let shape = if region.is_empty() { Vec::new() } else { effect_shape(layer, region, cx) };
         return std::sync::Arc::new(effects::build_maps_prepared(layer, shape, region, &cx.light, &texture_ctx(layer, region, cx), cx.patterns));
     }
