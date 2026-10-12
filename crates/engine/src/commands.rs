@@ -564,17 +564,21 @@ fn build() -> Vec<CommandSpec> {
             "Duplicate Layer…",
             ["Layer"],
             None,
-            r##"{"layer":id?,"inPlace":bool=false (artboards: keep the copy on the original instead of beside it)} (no layer: every selected layer)"##,
+            r##"{"layer":id?,"inPlace":bool=false (artboards: keep the copy on the original instead of beside it),"name":str? (one layer: the copy's name)} (no layer: every selected layer)"##,
             has_layer,
             |s, p| {
                 let in_place = p.get("inPlace").and_then(Value::as_bool).unwrap_or(false);
+                let name = p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string);
                 if crate::layer_multi_cmds::multi(s, p) {
                     return crate::layer_multi_cmds::duplicate_selected(s, in_place, "Duplicate Layers");
                 }
                 let id = layer_param(s, p)?;
                 let before = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
                 let nid = s.edit("Duplicate Layer", |doc, active| {
-                    let dup = layer_copy(doc, id)?;
+                    let mut dup = layer_copy(doc, id)?;
+                    if let Some(name) = &name {
+                        dup.name.clone_from(name);
+                    }
                     let nid = doc.insert_above(Some(id), dup);
                     if !in_place {
                         crate::artboard_cmds::place_copy(doc, nid)?;
