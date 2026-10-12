@@ -114,3 +114,6 @@ sync_github_name = true
 
 [people.Losminek]
 sync_github_name = true
+
+[people.FredApps]
+sync_github_name = true
