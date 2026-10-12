@@ -4599,6 +4599,7 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "toml",
+ "winsafe",
 ]
 
 [[package]]
