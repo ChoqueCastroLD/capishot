@@ -204,6 +204,7 @@ pub fn resolve_brush(s: &Session, p: &Value, cmd: &str) -> Result<BrushSettings>
         b.smoothing.amount = v.clamp(0.0, 1.0);
     }
     b.color = color(p.get("color"), s.tools.foreground);
+    b.color_cmyk = s.tools.picked_cmyk([b.color[0], b.color[1], b.color[2]]).map(|k| ([b.color[0], b.color[1], b.color[2]], k));
     b.background = s.tools.background;
     b.erase = flag(p, "erase", false);
     b.seed = match p.get("seed").and_then(Value::as_u64) {
@@ -367,6 +368,7 @@ fn block_brush(b: BrushSettings, p: &Value) -> Result<BrushSettings> {
         pressure_opacity: false,
         spacing: 0.25,
         color: b.color,
+        color_cmyk: b.color_cmyk,
         background: b.background,
         erase: b.erase,
         smoothing: b.smoothing,
