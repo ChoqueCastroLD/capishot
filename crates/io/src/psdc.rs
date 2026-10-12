@@ -130,7 +130,13 @@ pub fn compile(bytes: &[u8], opts: &CompileOptions) -> Result<Compiled, IoError>
 
 /// Compiles `doc`: writes it as a PSD in memory, then renders that with psd-compiler.
 pub fn compile_document(doc: &Document, opts: &CompileOptions) -> Result<Compiled, IoError> {
-    let (file, _) = crate::document_to_psd_with(doc, &crate::PsdExportOptions { force_psb: !fits_psd(doc), ..Default::default() });
+    // psd-compiler renders the layers, so the file needs no merged image of its own (rendering
+    // one would composite the whole document for nothing); only a file without layers shows it.
+    let o = crate::PsdExportOptions { force_psb: !fits_psd(doc), merged_image: false, ..Default::default() };
+    let (mut file, _) = crate::document_to_psd_with(doc, &o);
+    if file.layer_info.as_ref().is_none_or(|l| l.layers.is_empty()) {
+        file = crate::document_to_psd_with(doc, &crate::PsdExportOptions { merged_image: true, ..o }).0;
+    }
     file.header.validate()?;
     compile(&file.to_bytes()?, opts)
 }
@@ -139,40 +145,95 @@ fn fits_psd(doc: &Document) -> bool {
     doc.size.width <= 30_000 && doc.size.height <= 30_000
 }
 
-/// Replaces the merged image of `file` (already written as `bytes`) with psd-compiler's render,
-/// keeping its alpha channels. Only 8-bit RGB files are rewritten; returns whether `file` changed.
-/// The stored type rasters are used, so the merged image shows the type as the canvas does.
-pub(crate) fn recomposite(file: &mut PsdFile, bytes: &[u8]) -> Result<bool, IoError> {
+/// Whether a PSD/PSB save of `doc` takes its merged image from psd-compiler ([`recomposite`]):
+/// 8-bit RGB documents with layers. The save then skips photocraft-compose's merged image.
+pub(crate) fn renders_merged(doc: &Document) -> bool {
+    let f = doc.pixel_format();
+    doc.mode != photocraft_color::ColorMode::Multichannel
+        && f.mode == photocraft_color::ColorMode::Rgb
+        && f.sample == photocraft_color::SampleType::U8
+        && !doc.layers.is_empty()
+}
+
+/// Fills in the merged image of `file`, written as `bytes` with a black placeholder (no alpha
+/// channel; see `PsdExportOptions::merged_image`), with psd-compiler's render of its layers,
+/// keeping its alpha channels. Returns the file's new bytes, or `None` when psd-compiler doesn't
+/// apply (not 8-bit RGB, no layers, a size mismatch, no channel left for the transparency): the
+/// caller then writes the compositor's merged image instead.
+///
+/// The merged image gets an alpha channel when psd-compiler's render is translucent anywhere,
+/// with the colours matted against white as Photoshop does. Without one only the image data
+/// section changes, so the bytes are patched in place of a second full serialization. The stored
+/// type rasters are used, so the merged image shows the type as the canvas does.
+pub(crate) fn recomposite(file: &mut PsdFile, bytes: &[u8]) -> Result<Option<Vec<u8>>, IoError> {
     let h = &file.header;
-    if h.depth != 8 || h.color_mode != ColorMode::Rgb || file.layer_info.as_ref().is_none_or(|l| l.layers.is_empty()) {
-        return Ok(false);
+    if h.depth != 8 || h.color_mode != ColorMode::Rgb || file.layer_info.as_ref().is_none_or(|l| l.layers.is_empty()) || file.merged_has_alpha() {
+        return Ok(None);
     }
     let compiled = compile(bytes, &CompileOptions::default())?;
-    if compiled.width != h.width || compiled.height != h.height {
-        return Ok(false);
-    }
     let n = (h.width as usize).saturating_mul(h.height as usize);
-    let mut planes = file.image_data.decode(h)?;
-    let has_alpha = file.merged_has_alpha();
-    let replaced = if has_alpha { 4 } else { 3 };
-    if planes.len() < n.saturating_mul(replaced) || compiled.rgba.len() < n.saturating_mul(4) {
-        return Ok(false);
+    if compiled.width != h.width || compiled.height != h.height || compiled.rgba.len() < n.saturating_mul(4) {
+        return Ok(None);
     }
-    for (i, px) in compiled.rgba.as_chunks::<4>().0.iter().take(n).enumerate() {
-        let a = f32::from(px[3]) / 255.0;
-        for (c, &v) in px.iter().take(3).enumerate() {
-            // With an alpha channel Photoshop mattes the merged colours against white.
-            let v = if has_alpha { crate::pixels::matte(f32::from(v), a, 255.0).round().clamp(0.0, 255.0) as u8 } else { v };
-            if let Some(slot) = planes.get_mut(c * n + i) {
-                *slot = v;
-            }
+    let px = compiled.rgba.as_chunks::<4>().0.get(..n).unwrap_or_default();
+    let has_alpha = crate::pixels::par_map(crate::pixels::bands(n), |r| px.get(r).unwrap_or_default().iter().any(|p| p[3] < 255)).into_iter().any(|t| t);
+    let extra = usize::from(h.channels).saturating_sub(3);
+    // Photoshop's limit of 56 channels: the transparency would need one more.
+    if has_alpha && 3 + 1 + extra > 56 {
+        return Ok(None);
+    }
+    let merged = if has_alpha { 4 } else { 3 };
+    let mut planes = vec![0u8; n.saturating_mul(merged + extra)];
+    if extra > 0 {
+        // The alpha channels written after the placeholder's colour planes.
+        let old = file.image_data.decode(h)?;
+        let (Some(src), Some(dst)) = (old.get(3 * n..), planes.get_mut(merged * n..)) else { return Ok(None) };
+        if src.len() != dst.len() {
+            return Ok(None);
         }
-        if has_alpha && let Some(slot) = planes.get_mut(3 * n + i) {
-            *slot = px[3];
+        dst.copy_from_slice(src);
+    }
+    // One plane per thread.
+    let jobs: Vec<(usize, &mut [u8])> = planes.chunks_mut(n.max(1)).take(merged).enumerate().collect();
+    crate::pixels::par_map(jobs, |(c, out)| {
+        for (o, p) in out.iter_mut().zip(px) {
+            *o = if c < 3 && has_alpha {
+                // With an alpha channel Photoshop mattes the merged colours against white.
+                crate::pixels::matte(f32::from(p[c]), f32::from(p[3]) / 255.0, 255.0).round().clamp(0.0, 255.0) as u8
+            } else {
+                p[c]
+            };
+        }
+    });
+    if has_alpha {
+        file.header.channels += 1;
+        if let Some(info) = &mut file.layer_info {
+            info.merged_alpha = true;
+        }
+        // The Quick Mask channel's index moves up past the transparency.
+        if let Some(r) = file.resources.iter_mut().find(|r| r.id == crate::channel_map::QUICK_MASK_INFO)
+            && let Some(id) = r.data.get(..2).map(|b| u16::from_be_bytes([b[0], b[1]]))
+        {
+            r.data.splice(..2, id.saturating_add(1).to_be_bytes());
         }
     }
-    file.image_data = photocraft_psd::ImageData::encode(file.image_data.compression, &planes, h)?;
-    Ok(true)
+    let image_data = photocraft_psd::ImageData::encode(file.image_data.compression, &planes, &file.header)?;
+    let old = std::mem::replace(&mut file.image_data, image_data);
+    if has_alpha {
+        file.header.validate()?;
+        return Ok(Some(file.to_bytes()?));
+    }
+    // Only the image data, the end of the file, changed: its compression code, then the data.
+    let at = bytes.len().checked_sub(old.data.len() + 2);
+    let tail_is_old =
+        at.and_then(|at| bytes.get(at..)).is_some_and(|t| t.get(..2) == Some(&old.compression.as_u16().to_be_bytes()[..]) && t.get(2..) == Some(&old.data[..]));
+    let Some(head) = at.and_then(|at| bytes.get(..at)).filter(|_| tail_is_old) else { return Ok(Some(file.to_bytes()?)) };
+    let mut out = Vec::new();
+    out.try_reserve_exact(head.len() + 2 + file.image_data.data.len()).map_err(|_| IoError::Unsupported("not enough memory for the PSD".into()))?;
+    out.extend_from_slice(head);
+    out.extend_from_slice(&file.image_data.compression.as_u16().to_be_bytes());
+    out.extend_from_slice(&file.image_data.data);
+    Ok(Some(out))
 }
 
 #[cfg(test)]
@@ -181,6 +242,7 @@ mod tests {
     use photocraft_color::{ColorMode, SampleType};
     use photocraft_doc::Layer;
     use photocraft_geom::{Rect, Size};
+    use photocraft_raster::Surface;
 
     /// (51, 102, 204) under 50 % red: (153, 51, 102) wherever both cover.
     fn two_layer_doc() -> Document {
@@ -240,6 +302,106 @@ mod tests {
             assert!(c.rgba[..4].iter().zip([153u8, 51, 102, 255]).all(|(g, w)| g.abs_diff(w) <= 1), "{:?}", &c.rgba[..4]);
         }
         assert!(compiler.compile(b"nope").is_err());
+    }
+
+    /// `doc` saved the way it was before psd-compiler filled in a placeholder: the compositor's
+    /// merged image, then psd-compiler's render over it. The reference the saves are held to.
+    fn compiled_over_compositor(doc: &Document) -> (PsdFile, Compiled) {
+        let (file, _) = crate::document_to_psd_with(doc, &crate::PsdExportOptions::default());
+        let c = compile(&file.to_bytes().unwrap(), &CompileOptions::default()).unwrap();
+        (file, c)
+    }
+
+    /// Opaque, translucent (no background), with alpha channels and a Quick Mask.
+    fn save_cases() -> Vec<(&'static str, Document)> {
+        let opaque = two_layer_doc();
+        let mut translucent = two_layer_doc();
+        translucent.layers.remove(0);
+        translucent.layers[0].surface_mut().unwrap().fill_rect(Rect::new(10, 10, 20, 12), &[0.0; 4]);
+        let mut channels = two_layer_doc();
+        let mut alpha = Surface::new(photocraft_color::PixelFormat::GRAY8);
+        alpha.fill_rect(Rect::new(0, 0, 30, 20), &[1.0, 1.0]);
+        channels.channels.push(photocraft_doc::AlphaChannel::new("Alpha 1", alpha.clone()));
+        channels.quick_mask = Some(photocraft_doc::AlphaChannel::new("Quick Mask", alpha));
+        let mut both = channels.clone();
+        both.layers.remove(0);
+        vec![("opaque", opaque), ("translucent", translucent), ("channels", channels), ("translucent with channels", both)]
+    }
+
+    /// The merged image of a save is psd-compiler's render, as when it was rendered over the
+    /// compositor's merged image (before that was skipped): same channels, same pixels within
+    /// one level, the alpha channels and the Quick Mask kept in their places.
+    #[test]
+    fn saved_merged_image_matches_the_compiled_composite() {
+        for (name, doc) in save_cases() {
+            let out = crate::export(&doc, "x.psd", &Default::default()).unwrap();
+            assert!(out.warnings.is_empty(), "{name}: {:?}", out.warnings);
+            let file = PsdFile::from_bytes(&out.bytes).unwrap();
+            let (old, c) = compiled_over_compositor(&doc);
+            let translucent = c.rgba.as_chunks::<4>().0.iter().any(|p| p[3] < 255);
+            assert_eq!(file.merged_has_alpha(), translucent, "{name}");
+            assert_eq!(usize::from(file.header.channels), 3 + usize::from(translucent) + doc.channels.len() + usize::from(doc.quick_mask.is_some()), "{name}");
+            let n = 64 * 48;
+            let planes = file.image_data.decode(&file.header).unwrap();
+            for (i, p) in c.rgba.as_chunks::<4>().0.iter().enumerate() {
+                let a = f32::from(p[3]) / 255.0;
+                for ch in 0..3 {
+                    let want = if translucent { crate::pixels::matte(f32::from(p[ch]), a, 255.0).round() as u8 } else { p[ch] };
+                    assert!(planes[ch * n + i].abs_diff(want) <= 1, "{name}: pixel {i} channel {ch}");
+                }
+                if translucent {
+                    assert_eq!(planes[3 * n + i], p[3], "{name}: alpha {i}");
+                }
+            }
+            // The alpha channels follow the merged image, as the compositor's file had them.
+            let old_planes = old.image_data.decode(&old.header).unwrap();
+            let extra = doc.channels.len() + usize::from(doc.quick_mask.is_some());
+            let at = |has_alpha: bool| (3 + usize::from(has_alpha)) * n;
+            assert_eq!(planes[at(translucent)..], old_planes[at(old.merged_has_alpha())..], "{name}");
+            assert_eq!(planes.len(), at(translucent) + extra * n, "{name}");
+            // And they read back: the alpha channel and the Quick Mask in their places.
+            let back = crate::import("x.psd", &out.bytes).unwrap().document;
+            assert_eq!(back.channels.len(), doc.channels.len(), "{name}");
+            assert_eq!(back.quick_mask.is_some(), doc.quick_mask.is_some(), "{name}");
+            if let (Some(a), Some(b)) = (&back.quick_mask, &doc.quick_mask) {
+                assert_eq!(a.surface.pixel(5, 5), b.surface.pixel(5, 5), "{name}");
+                assert_eq!(a.surface.pixel(40, 30), b.surface.pixel(40, 30), "{name}");
+            }
+            assert_eq!(back.layers.len(), doc.layers.len(), "{name}");
+        }
+    }
+
+    /// The placeholder never reaches a file: the bytes `recomposite` patches are the file's own.
+    #[test]
+    fn patched_bytes_are_the_serialized_file() {
+        for (name, doc) in save_cases() {
+            let o = crate::PsdExportOptions { merged_image: false, ..Default::default() };
+            let (mut file, _) = crate::document_to_psd_with(&doc, &o);
+            assert!(!file.merged_has_alpha());
+            let bytes = file.to_bytes().unwrap();
+            let out = recomposite(&mut file, &bytes).unwrap().expect("8-bit RGB with layers");
+            assert_eq!(out, file.to_bytes().unwrap(), "{name}");
+        }
+    }
+
+    /// No layers (psd-compiler would show the placeholder), not 8-bit RGB, or psd-compiler off:
+    /// the compositor's merged image, exactly as before.
+    #[test]
+    fn saves_psd_compiler_does_not_render_keep_the_compositor_image() {
+        let empty = Document::new("t", Size::new(8, 8), ColorMode::Rgb, SampleType::U8);
+        let mut deep = two_layer_doc();
+        let f16 = photocraft_color::PixelFormat::new(ColorMode::Rgb, SampleType::U16, true);
+        deep.layers.iter_mut().for_each(|l| *l.surface_mut().unwrap() = l.surface().unwrap().convert(f16));
+        deep.depth = SampleType::U16;
+        let off = crate::ExportOptions { psdc_composite: false, ..Default::default() };
+        for (name, doc, opts) in [("no layers", empty, Default::default()), ("16-bit", deep, Default::default()), ("off", two_layer_doc(), off)] {
+            assert!(!renders_merged(&doc) || !opts.psdc_composite, "{name}");
+            let out = crate::export(&doc, "x.psd", &opts).unwrap();
+            let file = PsdFile::from_bytes(&out.bytes).unwrap();
+            let (want, _) = crate::document_to_psd_with(&doc, &crate::PsdExportOptions::default());
+            assert_eq!(file.header, want.header, "{name}");
+            assert_eq!(file.image_data, want.image_data, "{name}");
+        }
     }
 
     #[test]
