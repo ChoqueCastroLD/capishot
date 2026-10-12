@@ -49,8 +49,8 @@ mod pdn;
 pub mod pixels;
 mod psd_export;
 mod psd_import;
-pub mod psdc;
 pub mod psd_thumbnail;
+pub mod psdc;
 pub mod raw;
 pub mod slices_map;
 pub mod smart_map;
@@ -177,7 +177,15 @@ pub struct ExportOptions {
 
 impl Default for ExportOptions {
     fn default() -> Self {
-        ExportOptions { encode: EncodeOptions::default(), force_psb: false, tiff_layers: false, xmp: XmpEmbed::All, tga_bits: None, image_previews: true, psdc_composite: true }
+        ExportOptions {
+            encode: EncodeOptions::default(),
+            force_psb: false,
+            tiff_layers: false,
+            xmp: XmpEmbed::All,
+            tga_bits: None,
+            image_previews: true,
+            psdc_composite: true,
+        }
     }
 }
 
@@ -347,33 +355,46 @@ pub fn export(doc: &Document, name_or_ext: &str, opts: &ExportOptions) -> Result
         return Ok(ExportResult { bytes: photocraft_format::save_to_bytes(doc, &previews)?, warnings: Vec::new() });
     }
     if ext == "psd" || ext == "psb" {
-        let o = PsdExportOptions { force_psb: opts.force_psb || ext == "psb", ..Default::default() };
-        let (mut file, mut warnings) = document_to_psd_with(doc, &o);
-        if !doc.metadata.text.is_empty() {
-            warnings.push("free-form text metadata is not supported by PSD/PSB; it will be dropped".into());
-        }
-        warnings.extend(tiff_layers::strip_foreign_order_blocks(&mut file));
-        if opts.image_previews {
-            match psd_thumbnail::resource(doc) {
-                // Beside the other resources Photoshop writes ahead of the version info.
-                Ok(r) => {
-                    let at = file.resources.iter().position(|r| r.id == photocraft_psd::resources::ids::VERSION_INFO).unwrap_or(file.resources.len());
-                    file.resources.insert(at, r);
-                }
-                Err(e) => warnings.push(format!("image preview not saved: {e}")),
-            }
-        }
-        // Never write a header the reader would refuse (e.g. a zero-sized canvas).
-        file.header.validate()?;
-        let mut bytes = file.to_bytes()?;
         // Capishot's seal: the merged image comes from psd-compiler (see `psdc`), on the desktop
-        // and in the browser alike.
-        match if opts.psdc_composite { psdc::recomposite(&mut file, &bytes) } else { Ok(false) } {
-            Ok(true) => bytes = file.to_bytes()?,
-            Ok(false) => {}
-            Err(e) => warnings.push(format!("the merged image was not compiled with psd-compiler: {e}")),
+        // and in the browser alike. The file is then written without the compositor's merged
+        // image (it would be rendered only to be replaced) and psd-compiler fills it in.
+        let psdc = opts.psdc_composite && psdc::renders_merged(doc);
+        let build = |merged_image: bool| -> Result<(PsdFile, Vec<String>), IoError> {
+            let o = PsdExportOptions { force_psb: opts.force_psb || ext == "psb", merged_image, ..Default::default() };
+            let (mut file, mut warnings) = document_to_psd_with(doc, &o);
+            if !doc.metadata.text.is_empty() {
+                warnings.push("free-form text metadata is not supported by PSD/PSB; it will be dropped".into());
+            }
+            warnings.extend(tiff_layers::strip_foreign_order_blocks(&mut file));
+            if opts.image_previews {
+                match psd_thumbnail::resource(doc) {
+                    // Beside the other resources Photoshop writes ahead of the version info.
+                    Ok(r) => {
+                        let at = file.resources.iter().position(|r| r.id == photocraft_psd::resources::ids::VERSION_INFO).unwrap_or(file.resources.len());
+                        file.resources.insert(at, r);
+                    }
+                    Err(e) => warnings.push(format!("image preview not saved: {e}")),
+                }
+            }
+            // Never write a header the reader would refuse (e.g. a zero-sized canvas).
+            file.header.validate()?;
+            Ok((file, warnings))
+        };
+        let (mut file, mut warnings) = build(!psdc)?;
+        let bytes = file.to_bytes()?;
+        if !psdc {
+            return Ok(ExportResult { bytes, warnings });
         }
-        return Ok(ExportResult { bytes, warnings });
+        let failed = match psdc::recomposite(&mut file, &bytes) {
+            Ok(Some(bytes)) => return Ok(ExportResult { bytes, warnings }),
+            Ok(None) => None,
+            Err(e) => Some(format!("the merged image was not compiled with psd-compiler: {e}")),
+        };
+        // psd-compiler didn't render it: the compositor's merged image after all.
+        let (file, w) = build(true)?;
+        warnings = w;
+        warnings.extend(failed);
+        return Ok(ExportResult { bytes: file.to_bytes()?, warnings });
     }
     let format = photocraft_codecs::from_extension(&ext).ok_or_else(|| IoError::UnknownFormat(name_or_ext.to_string()))?;
     if format == photocraft_codecs::Format::Tiff && opts.tiff_layers && tiff_layers::would_write_layers(doc) {

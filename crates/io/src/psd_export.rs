@@ -30,11 +30,15 @@ pub struct PsdExportOptions {
     pub merged_matte: bool,
     /// Compression of the merged image (32-bit float documents are always written raw).
     pub merged_compression: Compression,
+    /// Render the merged image with photocraft-compose. `false` writes a black placeholder
+    /// without an alpha channel (and skips the full-document composite), for a caller that
+    /// renders the merged image itself (psd-compiler, see `psdc`).
+    pub merged_image: bool,
 }
 
 impl Default for PsdExportOptions {
     fn default() -> Self {
-        PsdExportOptions { force_psb: false, merged_matte: true, merged_compression: Compression::Rle }
+        PsdExportOptions { force_psb: false, merged_matte: true, merged_compression: Compression::Rle, merged_image: true }
     }
 }
 
@@ -1372,11 +1376,19 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32) -
     // Merged composite, rendered and encoded in bands (no full-size float composite). Matting
     // against white only changes pixels with alpha < 1; if some are slightly translucent but all
     // round to opaque (so no alpha channel is written), encode once more without the matte.
-    let (mut planes, has_alpha, translucent) = merged_planes(doc, &fmt, cmyk_of(&fmt), opts.merged_matte);
-    if !has_alpha && translucent && opts.merged_matte {
-        planes = merged_planes(doc, &fmt, cmyk_of(&fmt), false).0;
-    }
     let n = doc.size.area() as usize;
+    let (mut planes, has_alpha) = if opts.merged_image {
+        let (mut planes, has_alpha, translucent) = merged_planes(doc, &fmt, cmyk_of(&fmt), opts.merged_matte);
+        if !has_alpha && translucent && opts.merged_matte {
+            planes = merged_planes(doc, &fmt, cmyk_of(&fmt), false).0;
+        }
+        (planes, has_alpha)
+    } else if doc.channels.is_empty() && doc.quick_mask.is_none() {
+        // Only the colour planes, written below straight as RLE of zeros.
+        (Vec::new(), false)
+    } else {
+        (vec![0u8; cc * n * sample.bytes()], false)
+    };
     if !has_alpha {
         planes.truncate(cc * n * sample.bytes());
     }
@@ -1407,9 +1419,18 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32) -
     let channels = (cc + usize::from(has_alpha) + extra.len()) as u16;
     let header = Header::new(version, doc.size.width, doc.size.height, channels, psd_depth(sample), psd_mode(fmt.mode));
     let mcomp = if sample == SampleType::F32 { Compression::Raw } else { opts.merged_compression };
-    let image_data = ImageData::encode(mcomp, &planes, &header)
-        .or_else(|_| ImageData::encode(Compression::Raw, &planes, &header))
-        .unwrap_or(ImageData { compression: Compression::Raw, data: planes });
+    let blank = if opts.merged_image || !planes.is_empty() { None } else { ImageData::blank_rle(&header).ok() };
+    let image_data = match blank {
+        Some(blank) => blank,
+        None => {
+            if planes.is_empty() {
+                planes = vec![0u8; cc * n * sample.bytes()];
+            }
+            ImageData::encode(mcomp, &planes, &header)
+                .or_else(|_| ImageData::encode(Compression::Raw, &planes, &header))
+                .unwrap_or(ImageData { compression: Compression::Raw, data: planes })
+        }
+    };
 
     // Resources.
     let mut resources = vec![
