@@ -3804,3 +3804,4 @@ layerLabel	No Color	Sem cor
 	(No neutral color exists for {mode} mode.)	(Não existe cor neutra para o modo {mode}.)
 	Apply mask to layer before removing?	Aplicar a máscara à camada antes de removê-la?
 	The layer or its mask changed. Drag the mask onto the Trash again.	A camada ou a máscara mudou. Arraste a máscara para a Lixeira novamente.
+	Delete the vector mask?	Excluir a máscara vetorial?
