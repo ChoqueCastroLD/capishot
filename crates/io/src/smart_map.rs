@@ -817,6 +817,28 @@ pub fn uuid_from(seed: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    fn count(hay: &[u8], needle: &[u8]) -> usize {
+        hay.windows(needle.len()).filter(|w| *w == needle).count()
+    }
+
+    /// A freshly built placed layer writes `warp` (key and class) as a length-4 string, as
+    /// Photoshop does; the code form is a different key to Photoshop.
+    #[test]
+    fn fresh_placed_warp_is_a_string_id() {
+        let spec =
+            PlacedSpec { idnt: "id", placed: "id", transform: Affine::IDENTITY, perspective: None, size: (10.0, 10.0), dpi: 72.0, warp: None, filter_fx: None };
+        let mut warnings = Vec::new();
+        let sold = sold_bytes(None, &spec, &mut warnings);
+        let plld = plld_bytes(&spec, &mut warnings);
+        // `SoLd`: the `warp` key and the warp descriptor's class; `PlLd`: the descriptor's class.
+        for (bytes, n) in [(&sold, 2), (&plld, 1)] {
+            assert_eq!(count(bytes, b"\0\0\0\x04warp"), n);
+            assert_eq!(count(bytes, b"\0\0\0\0warp"), 0);
+        }
+        let d = sold_descriptor(&sold).unwrap();
+        assert!(matches!(d.get("warp"), Some(Value::Descriptor(w)) if w.class_id == Id::Str(b"warp".to_vec())));
+    }
+
     fn sf(command: &str, params: J) -> SmartFilter {
         SmartFilter { command: command.into(), params, blend: BlendMode::Normal, opacity: 1.0, visible: true }
     }
