@@ -160,6 +160,37 @@ impl Unit {
             Unit::Inches => 3,
         }
     }
+    /// A length as typed in Photoshop's numeric fields: a number with an optional unit suffix
+    /// ("50%", "2.5 cm", "12pt", "3pc", "1,5 in", "100"). Returns the number and its unit (`None`
+    /// when there is no suffix, so the caller picks the default), or `None` if the text is not a
+    /// finite number followed by a known unit.
+    pub fn parse_length(text: &str) -> Option<(f64, Option<Unit>)> {
+        let t = text.trim();
+        let end = t.find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '+'))).unwrap_or(t.len());
+        let (number, suffix) = t.split_at(end);
+        let v: f64 = number.trim().replace(',', ".").parse().ok()?;
+        if !v.is_finite() {
+            return None;
+        }
+        let suffix = suffix.trim();
+        let unit = if suffix.is_empty() { None } else { Some(Unit::from_suffix(suffix)?) };
+        Some((v, unit))
+    }
+    /// The unit a typed suffix names, in any case: `px`, `in` or `"`, `cm`, `mm`, `pt`, `pc` or
+    /// `pica`, `%`, and their long forms (`pixels`, `inches`, `centimetres`…). The one table every
+    /// length field reads.
+    pub fn from_suffix(suffix: &str) -> Option<Unit> {
+        Some(match suffix.to_ascii_lowercase().as_str() {
+            "px" | "pixel" | "pixels" => Unit::Pixels,
+            "in" | "inch" | "inches" | "\"" => Unit::Inches,
+            "cm" | "centimeter" | "centimeters" | "centimetre" | "centimetres" => Unit::Centimeters,
+            "mm" | "millimeter" | "millimeters" | "millimetre" | "millimetres" => Unit::Millimeters,
+            "pt" | "point" | "points" => Unit::Points,
+            "pc" | "pica" | "picas" => Unit::Picas,
+            "%" | "percent" => Unit::Percent,
+            _ => return None,
+        })
+    }
 }
 
 impl PointSize {

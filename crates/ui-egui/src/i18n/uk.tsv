@@ -3740,3 +3740,8 @@ curves	Smooth	Згладити
 @plural	{n} step|{n} steps	{n} крок|{n} кроки|{n} кроків
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (і ще {n} попередження щодо наборів пензлів)|{warning} (і ще {n} попередження щодо наборів пензлів)|{warning} (і ще {n} попереджень щодо наборів пензлів)
 @plural	{what} with {n} warning|{what} with {n} warnings	{what}: {n} попередження|{what}: {n} попередження|{what}: {n} попереджень
+# View › Guides › New Guide… › Color
+	Light Blue	Світло-синій
+	Light Red	Світло-червоний
+	Medium Blue	Середньо-синій
+	Light Gray	Світло-сірий

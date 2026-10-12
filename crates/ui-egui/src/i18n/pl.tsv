@@ -3639,3 +3639,8 @@ curves	Smooth	Wygładź
 	Apply mask to layer before removing?	Zastosować maskę do warstwy przed usunięciem?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Warstwa lub jej maska uległa zmianie. Przeciągnij maskę ponownie do kosza.
 	Delete the vector mask?	Usunąć maskę wektorową?
+# View › Guides › New Guide… › Color
+	Light Blue	Jasnoniebieski
+	Light Red	Jasnoczerwony
+	Medium Blue	Średnioniebieski
+	Light Gray	Jasnoszary

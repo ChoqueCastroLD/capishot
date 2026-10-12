@@ -2632,3 +2632,8 @@ curves	Smooth	平滑
 @plural	{n} step|{n} steps	{n} 個步驟
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (另有 {n} 個筆刷預設集警告)
 @plural	{what} with {n} warning|{what} with {n} warnings	{what} ({n} 個警告)
+# View › Guides › New Guide… › Color
+	Light Blue	淺藍色
+	Light Red	淺紅色
+	Medium Blue	中藍色
+	Light Gray	淺灰色

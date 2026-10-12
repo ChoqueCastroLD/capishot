@@ -3652,3 +3652,8 @@ curves	Smooth	スムーズ
 @plural	{n} step|{n} steps	{n} ステップ
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning}(ほかにブラシプリセットの警告 {n} 件)
 @plural	{what} with {n} warning|{what} with {n} warnings	{what}(警告 {n} 件)
+# View › Guides › New Guide… › Color
+	Light Blue	ライトブルー
+	Light Red	ライトレッド
+	Medium Blue	ミディアムブルー
+	Light Gray	ライトグレー
