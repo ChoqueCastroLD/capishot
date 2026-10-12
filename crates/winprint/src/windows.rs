@@ -458,6 +458,11 @@ mod tests {
         let out = std::env::temp_dir().join(format!("pc-winprint-{}.pdf", std::process::id()));
         let _ = std::fs::remove_file(&out);
         let settings = crate::default_settings("Microsoft Print to PDF").unwrap();
+        let mut bytes = settings.as_bytes().to_vec();
+        bytes[86..88].copy_from_slice(&5i16.to_le_bytes());
+        let fields = u32::from_le_bytes(bytes[72..76].try_into().unwrap()) | 0x100;
+        bytes[72..76].copy_from_slice(&fields.to_le_bytes());
+        let settings = DevMode::from_bytes(bytes).unwrap();
         let (w, h) = (300u32, 200u32);
         let data: Vec<u8> = (0..w * h).flat_map(|i| if (i % w) < w / 2 { [220, 30, 30] } else { [30, 30, 220] }).collect();
         let out_s = out.to_string_lossy().into_owned();
@@ -475,6 +480,12 @@ mod tests {
         let _ = done2;
         let pdf_no_marks = std::fs::read(&out).unwrap();
         assert!(pdf.len() > pdf_no_marks.len() + 100, "marks add vector content: {} vs {}", pdf.len(), pdf_no_marks.len());
+        if let Ok(evidence) = std::env::var("PHOTOCRAFT_WINPRINT_TEST_EVIDENCE") {
+            let evidence = std::path::Path::new(&evidence);
+            std::fs::create_dir_all(evidence).unwrap();
+            std::fs::write(evidence.join("copies2-driver5-marks.pdf"), &pdf).unwrap();
+            std::fs::write(evidence.join("copies2-driver5-no-marks.pdf"), &pdf_no_marks).unwrap();
+        }
         let _ = std::fs::remove_file(&out);
     }
 

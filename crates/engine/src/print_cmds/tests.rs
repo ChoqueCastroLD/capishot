@@ -176,6 +176,21 @@ fn windows_print_image_is_rgb_mirrored_for_emulsion_down() {
 }
 
 #[test]
+fn native_rgb_route_preserves_pdf_only_color_and_page_content() {
+    let mut page = page_of(3, vec![0; 6], false);
+    assert!(native_rgb_compatible(&page));
+    page.label = Some("Print Me".into());
+    assert!(!native_rgb_compatible(&page));
+    page.label = None;
+    page.description = Some("Proof description".into());
+    assert!(!native_rgb_compatible(&page));
+    page.description = Some(String::new());
+    assert!(native_rgb_compatible(&page));
+    assert!(!native_rgb_compatible(&page_of(4, vec![0; 8], false)));
+    assert!(native_rgb_compatible(&page_of(1, vec![0; 2], false)));
+}
+
+#[test]
 fn printer_commands_answer_without_a_document_and_reject_bad_settings() {
     let mut s = Session::new();
     let r = s.execute("file.print.printers", json!({})).unwrap();

@@ -391,12 +391,15 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
     // Windows has no `lp`: print through the driver (GDI, ICM off) instead of spooling a PDF.
     // Sending follows the shared command contract; fuzz tests explicitly request dryRun.
     // The worker returns its result before repeat settings and hooks are applied once.
-    if cfg!(windows) && send && !dry && output.is_none() {
+    if cfg!(windows) && send && !dry && output.is_none() && native_rgb_compatible(&page) {
         let printed = print_windows(&page, p, &doc.name, copies)?;
         return Ok(json!({
             "pdf": Value::Null, "paper": [pw, ph], "imageRect": [x, y, w, h], "emulsionDown": emulsion_down, "scale": scale * 100.0,
             "copies": copies, "command": Value::Null, "sent": true, "spooler": printed, "color": color,
         }));
+    }
+    if cfg!(windows) && send && !dry && output.is_none() && printer_settings(p)?.is_some() {
+        return Err(other("CMYK profiles and description/label text use PDF composition; these native driver settings cannot be applied. Save as PDF, or clear the driver settings to use PDF printing."));
     }
     let pdf = print_pdf(&page);
     let job = craft_print::Job {
@@ -425,6 +428,14 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
     Ok(
         json!({"pdf": pdf_path, "bytes": pdf.len(), "paper": [pw, ph], "imageRect": [x, y, w, h], "emulsionDown": emulsion_down, "scale": scale * 100.0, "copies": copies, "command": command, "sent": sent, "spooler": spool, "color": color}),
     )
+}
+
+/// Keep CMYK output profiles and page text on the existing PDF composition path. GDI currently
+/// draws RGB/gray and vector marks only; it must never silently omit requested page content.
+fn native_rgb_compatible(page: &PrintPage) -> bool {
+    matches!(page.image.channels, 1 | 3)
+        && page.description.as_deref().is_none_or(str::is_empty)
+        && page.label.as_deref().is_none_or(str::is_empty)
 }
 
 /// Print One Copy repeats these.
@@ -490,14 +501,17 @@ pub fn page_rect_top_left(page: &PrintPage) -> (f64, f64, f64, f64) {
 fn print_windows(page: &PrintPage, p: &Value, title: &str, copies: u32) -> Result<Value> {
     let printer = printer_name(p)?;
     let settings = printer_settings(p)?;
+    let device_page = photocraft_winprint::page(&printer, settings.as_ref()).map_err(other)?;
+    if (device_page.paper.0 - page.paper.0).abs() > 2.0 || (device_page.paper.1 - page.paper.1).abs() > 2.0 {
+        return Err(other("the driver paper or orientation differs from the print layout; choose the matching paper in Print Settings before printing"));
+    }
     let rgb = page_rgb(page)?;
     let image = photocraft_winprint::RgbImage { width: page.image.width, height: page.image.height, data: &rgb };
     let marks = photocraft_winprint::Marks { corner_crop: page.marks.corner_crop, center_crop: page.marks.center_crop, registration: page.marks.registration };
     let job = photocraft_winprint::Job { printer: &printer, settings: settings.as_ref(), title, output_file: None, copies: copies.clamp(1, 999), marks };
     let done = photocraft_winprint::print(&job, &image, page_rect_top_left(page)).map_err(other)?;
-    let text_skipped = page.description.is_some() || page.label.is_some();
     Ok(
-        json!({"printer": printer, "dpi": [done.dpi.0, done.dpi.1], "deviceRect": [done.device_rect.0, done.device_rect.1, done.device_rect.2, done.device_rect.3], "textSkipped": text_skipped}),
+        json!({"printer": printer, "dpi": [done.dpi.0, done.dpi.1], "deviceRect": [done.device_rect.0, done.device_rect.1, done.device_rect.2, done.device_rect.3]}),
     )
 }
 
