@@ -44,7 +44,8 @@ fn prepared_tones_match_fresh_tables_and_stay_bounded() {
                     cx.apply_adjustment(a, &mut actual);
                     assert_eq!(actual.px, expected.px);
                 }
-                assert!(cx.tone_luts[0].1.get().is_some());
+                // Float documents take apply_depth's unbounded paths (#2580 merge), never the table.
+                assert_eq!(cx.tone_luts[0].1.get().is_some(), depth != SampleType::F32, "{depth:?}");
             }
         }
     }
