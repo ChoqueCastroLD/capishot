@@ -381,6 +381,41 @@ fn styles_change_pixels() {
     assert!(hrect.width() as f32 > prect.width() as f32 * 1.7);
 }
 
+/// #3705: Faux bold dilation must scale with horizontal and vertical glyph scaling.
+#[test]
+fn faux_bold_scales_with_glyph_scaling() {
+    let mut e = TextEngine::new();
+    let base = CharStyle { size_pt: 40.0, ..Default::default() };
+    let ink = |e: &mut TextEngine, s: CharStyle| {
+        let (_, r) = e.render(&TextLayer { transform: Affine::translate(5.0, 50.0), ..styled("Hi", s) }, 72.0, PixelFormat::RGBA8);
+        (alpha_sum(&r.surface, r.rect), r.rect)
+    };
+    let (_plain, prect) = ink(&mut e, base.clone());
+    let (_bold, brect) = ink(&mut e, CharStyle { faux_bold: true, ..base.clone() });
+    let unscaled_extra_w = brect.width() - prect.width();
+    let unscaled_extra_h = brect.height() - prect.height();
+
+    // With 2x horizontal scale, the horizontal dilation scales with the glyph:
+    let hscaled = CharStyle { size_pt: 40.0, horizontal_scale: 2.0, ..Default::default() };
+    let (_, phrect) = ink(&mut e, hscaled.clone());
+    let (_, bhrect) = ink(&mut e, CharStyle { faux_bold: true, ..hscaled });
+    let hscaled_extra_w = bhrect.width() - phrect.width();
+    assert!(
+        hscaled_extra_w >= unscaled_extra_w * 2 - 1 && hscaled_extra_w <= unscaled_extra_w * 2 + 1,
+        "hscaled extra width {hscaled_extra_w} vs unscaled {unscaled_extra_w}"
+    );
+
+    // With 2x vertical scale, the vertical dilation scales with the glyph:
+    let vscaled = CharStyle { size_pt: 40.0, vertical_scale: 2.0, ..Default::default() };
+    let (_, pvrect) = ink(&mut e, vscaled.clone());
+    let (_, bvrect) = ink(&mut e, CharStyle { faux_bold: true, ..vscaled });
+    let vscaled_extra_h = bvrect.height() - pvrect.height();
+    assert!(
+        vscaled_extra_h >= unscaled_extra_h * 2 - 1 && vscaled_extra_h <= unscaled_extra_h * 2 + 1,
+        "vscaled extra height {vscaled_extra_h} vs unscaled {unscaled_extra_h}"
+    );
+}
+
 #[test]
 fn multicolor_runs() {
     let mut e = TextEngine::new();
