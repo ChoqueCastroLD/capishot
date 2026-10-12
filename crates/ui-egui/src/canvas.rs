@@ -3734,9 +3734,21 @@ fn marching_ants_segments(painter: &egui::Painter, xf: &ViewXform, segs: &[crate
 pub(crate) fn marching_ants_mapped(painter: &egui::Painter, segs: &[crate::outline::Segment], time: f64, to_screen: impl Fn([i32; 2]) -> Pos2) {
     let dash = 4.0f32;
     let phase = ((time * 10.0) % (dash as f64 * 2.0)) as f32;
-    let white = Stroke::new(1.0, Color32::WHITE);
-    let black = Stroke::new(1.0, Color32::BLACK);
     let clip = painter.clip_rect();
+    // Horizontal and vertical segments go in one mesh of 1 px quads, which egui draws as it is: a
+    // line shape per dash took egui ~35 ms a frame to tessellate for a speckled selection seen
+    // whole (about 10⁵ segments), ten frames a second while the selection is shown. A slanted
+    // segment (a transformed outline) stays a line shape, which egui antialiases.
+    let mut mesh = egui::Mesh::default();
+    // A 1 px wide quad from `a` to `b` (`side` is half a pixel across the line).
+    let mut quad = |a: egui::Pos2, b: egui::Pos2, side: egui::Vec2, color: Color32| {
+        let i = mesh.vertices.len() as u32;
+        for p in [a + side, a - side, b - side, b + side] {
+            mesh.colored_vertex(p, color);
+        }
+        mesh.add_triangle(i, i + 1, i + 2);
+        mesh.add_triangle(i, i + 2, i + 3);
+    };
     for (a, b) in segs {
         let pa = to_screen(*a);
         let pb = to_screen(*b);
@@ -3745,12 +3757,19 @@ pub(crate) fn marching_ants_mapped(painter: &egui::Painter, segs: &[crate::outli
         }
         let pa = pos2(pa.x.round() + 0.5, pa.y.round() + 0.5);
         let pb = pos2(pb.x.round() + 0.5, pb.y.round() + 0.5);
-        painter.line_segment([pa, pb], white);
         let len = pa.distance(pb);
         if len < 0.5 {
             continue;
         }
         let dir = (pb - pa) / len;
+        let side = dir.rot90() * 0.5;
+        let straight = pa.x == pb.x || pa.y == pb.y;
+        if straight {
+            // The white base runs half a pixel past both ends, so joined segments meet at corners.
+            quad(pa - dir * 0.5, pb + dir * 0.5, side, Color32::WHITE);
+        } else {
+            painter.line_segment([pa, pb], Stroke::new(1.0, Color32::WHITE));
+        }
         // Phase by screen position so dashes line up across joined segments.
         let start = (pa.x + pa.y + phase).rem_euclid(dash * 2.0);
         let mut t = -start;
@@ -3758,10 +3777,17 @@ pub(crate) fn marching_ants_mapped(painter: &egui::Painter, segs: &[crate::outli
             let s0 = t.max(0.0);
             let s1 = (t + dash).min(len);
             if s1 > s0 {
-                painter.line_segment([pa + dir * s0, pa + dir * s1], black);
+                if straight {
+                    quad(pa + dir * s0, pa + dir * s1, side, Color32::BLACK);
+                } else {
+                    painter.line_segment([pa + dir * s0, pa + dir * s1], Stroke::new(1.0, Color32::BLACK));
+                }
             }
             t += dash * 2.0;
         }
+    }
+    if !mesh.is_empty() {
+        painter.add(egui::Shape::mesh(mesh));
     }
 }
 
