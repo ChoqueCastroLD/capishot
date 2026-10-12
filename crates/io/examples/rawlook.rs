@@ -75,8 +75,10 @@ fn lab(p: &[f32]) -> [f64; 3] {
 
 fn mean_de(a: &[f32], b: &[f32]) -> f64 {
     let n = a.len() / 3;
-    a.chunks_exact(3)
-        .zip(b.chunks_exact(3))
+    a.as_chunks::<3>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<3>().0)
         .map(|(p, q)| {
             let (x, y) = (lab(p), lab(q));
             ((x[0] - y[0]).powi(2) + (x[1] - y[1]).powi(2) + (x[2] - y[2]).powi(2)).sqrt()

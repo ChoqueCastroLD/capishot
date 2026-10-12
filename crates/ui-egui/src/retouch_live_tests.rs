@@ -49,7 +49,8 @@ fn layer_px(doc: &photocraft_doc::Document, x: i32, y: i32) -> [f32; 4] {
 
 #[test]
 fn every_brush_retouch_tool_previews_its_stroke_live() {
-    let setups: Vec<(Tool, Box<dyn Fn(&mut PhotocraftApp)>)> = vec![
+    type Setup = Box<dyn Fn(&mut PhotocraftApp)>;
+    let setups: Vec<(Tool, Setup)> = vec![
         (Tool::CloneStamp, Box::new(|a| crate::retouch_ui::set_source(a, 20.0, 20.0))),
         (Tool::Healing, Box::new(|a| crate::retouch_ui::set_source(a, 20.0, 20.0))),
         (Tool::HistoryBrush, Box::new(|_| {})),
