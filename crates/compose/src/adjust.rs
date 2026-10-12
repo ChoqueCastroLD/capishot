@@ -188,7 +188,9 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
         Adjustment::BlackWhite { weights, tint } => map_rgb(buf, |c| {
             let g = black_white_gray(c, weights);
             match tint {
-                Some(t) => std::array::from_fn(|i| (g * t[i] * 2.0).clamp(0.0, 1.0) * 0.5 + g * 0.5),
+                // Photoshop tints like the Color blend mode: the tint's hue and saturation at the
+                // grey's luminosity (SetLum + ClipColor), measured in Photoshop 27.11.
+                Some(t) => photocraft_color::blend::set_lum(*t, g).map(|v| v.clamp(0.0, 1.0)),
                 None => [g; 3],
             }
         }),
@@ -1292,6 +1294,31 @@ mod tone_tests {
         let mut w = d;
         w[0] = 100.0;
         assert!(black_white_gray([1.0, 0.0, 0.0], &w) > black_white_gray([1.0, 0.0, 0.0], &d));
+    }
+
+    /// Photoshop 27.11, measured: Black & White (default weights) with Tint over greys. The tint
+    /// is blended like the Color blend mode: its hue and saturation at the grey's luminosity.
+    #[test]
+    fn black_white_tint_matches_photoshop() {
+        let weights = [40.0, 60.0, 40.0, 60.0, 20.0, 80.0];
+        let measured: [([u8; 3], u8, [u8; 3]); 6] = [
+            ([255, 0, 0], 24, [81, 1, 1]),
+            ([255, 0, 0], 120, [255, 64, 64]),
+            ([255, 0, 0], 240, [255, 235, 235]),
+            ([0xe1, 0xd3, 0xb3], 120, [133, 119, 87]),
+            ([0xe1, 0xd3, 0xb3], 24, [33, 24, 1]),
+            ([0x40, 0x20, 0x10], 120, [144, 112, 96]),
+        ];
+        for (tint, grey, want) in measured {
+            let tint = Some(tint.map(|v| v as f32 / 255.0));
+            let mut b = Buffer { rect: Rect::new(0, 0, 1, 1), px: vec![[grey as f32 / 255.0; 4]] };
+            b.px[0][3] = 1.0;
+            apply(&Adjustment::BlackWhite { weights, tint }, &mut b);
+            for (i, w) in want.iter().enumerate() {
+                let got = b.px[0][i] * 255.0;
+                assert!((got - *w as f32).abs() <= 2.5, "tint {tint:?} grey {grey} channel {i}: {got} vs {w}");
+            }
+        }
     }
 
     #[test]
