@@ -43,13 +43,9 @@ fn has_clip_and_selection(s: &Session) -> std::result::Result<(), String> {
     d.doc.selection.as_ref().map(|_| ()).ok_or_else(|| "Paste Into needs a selection".into())
 }
 
-pub(crate) fn is_background(l: &Layer) -> bool {
-    l.name == "Background" && l.locks.transparency && l.locks.position && matches!(l.content, LayerContent::Raster(_))
-}
-
 fn has_background(s: &Session) -> std::result::Result<(), String> {
     let d = s.active().ok_or("no document open")?;
-    d.doc.layers.first().filter(|l| is_background(l)).map(|_| ()).ok_or_else(|| "the document has no Background layer".into())
+    d.doc.background().map(|_| ()).ok_or_else(|| "the document has no Background layer".into())
 }
 
 /// The layers a layer-style command acts on: as [`crate::layer_multi_cmds::targets`], but with
@@ -60,7 +56,7 @@ pub(crate) fn style_targets(s: &Session, p: &Value, fits: impl Fn(&Layer) -> boo
         return Ok(ids);
     }
     let d = s.active().ok_or(EngineError::NoDocument)?;
-    let ids: Vec<LayerId> = ids.into_iter().filter(|id| d.doc.layer(*id).is_some_and(|l| !is_background(l) && fits(l))).collect();
+    let ids: Vec<LayerId> = ids.into_iter().filter(|id| d.doc.layer(*id).is_some_and(|l| !d.doc.is_background(l.id) && fits(l))).collect();
     if ids.is_empty() {
         return Err(EngineError::Other("none of the selected layers can take this layer style change".into()));
     }
@@ -441,7 +437,7 @@ pub fn reveal_all_bounds(doc: &Document) -> Rect {
 
 fn layer_from_background(s: &mut Session) -> Result<Value> {
     let id = s.edit("Layer From Background", |doc, active| {
-        let l = doc.layers.first_mut().filter(|l| is_background(l)).ok_or(EngineError::Other("the document has no Background layer".into()))?;
+        let l = doc.background_mut().ok_or(EngineError::Other("the document has no Background layer".into()))?;
         unlock_background(l);
         *active = Some(l.id);
         Ok(l.id)
@@ -458,7 +454,14 @@ pub(crate) fn unlock_background(l: &mut Layer) {
 /// Before `id` gets a layer mask: the Background can't have one, so it becomes a normal layer
 /// first ("Layer 0"), as when adding a mask to it in Photoshop. Other layers are left alone.
 pub(crate) fn background_to_layer_for_mask(doc: &mut photocraft_doc::Document, id: photocraft_doc::LayerId) {
-    if let Some(l) = doc.layers.first_mut().filter(|l| l.id == id && is_background(l)) {
+    background_to_layer(doc, id);
+}
+
+/// If `id` is the Background ([`photocraft_doc::Document::background`], whatever its name), turns
+/// it into a normal layer ("Layer 0"), as Photoshop does before an edit the Background can't
+/// take (moving, transforming, exposing transparency, a style). Other layers are left alone.
+pub(crate) fn background_to_layer(doc: &mut photocraft_doc::Document, id: photocraft_doc::LayerId) {
+    if let Some(l) = doc.background_mut().filter(|l| l.id == id) {
         unlock_background(l);
     }
 }

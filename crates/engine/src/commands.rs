@@ -1416,7 +1416,7 @@ pub(crate) fn translate_layer(doc: &Document, l: &mut Layer, dx: i32, dy: i32) {
 pub(crate) fn layer_copy(doc: &Document, id: LayerId) -> Result<Layer> {
     let src = doc.layer(id).ok_or(EngineError::NoLayer(id))?;
     // A copy of the Background layer is an ordinary, unlocked layer (Photoshop).
-    let from_background = src.name == "Background" && src.locks.transparency && doc.layers.first().is_some_and(|b| b.id == id);
+    let from_background = doc.is_background(id);
     let mut dup = src.duplicate();
     dup.name = doc.copy_name(&dup.name);
     if from_background {
