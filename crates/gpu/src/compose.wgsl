@@ -1178,7 +1178,7 @@ fn fs_mfinish(in: VOut) -> @location(0) vec4<f32> {
 }
 
 // Chiselled bevel height from A = dist_inside, B = dist_outside (`effects::bevel_chisel_h`):
-// p0 = (paint (0 outer, 1 both / emboss, 2 inner), size).
+// p0 = (paint (0 outer, 1 both / emboss, 2 inner), size, Chisel Soft).
 @fragment
 fn fs_mbevelh(in: VOut) -> @location(0) vec4<f32> {
     let p = local(in.pos);
@@ -1186,16 +1186,33 @@ fn fs_mbevelh(in: VOut) -> @location(0) vec4<f32> {
     let dout = textureLoad(tex_b, p, 0).r;
     let size = op.p0.y;
     var h: f32;
+    // The ramp spans size + 1 px, from half a pixel beyond the edge (`effects::bevel_chisel_h`).
+    let ramp = size + 1.0;
+    let soft = op.p0.z > 0.5;
     switch i32(op.p0.x) {
-        case 0: { h = 1.0 - clamp(dout / size, 0.0, 1.0); }
-        case 1: {
-            if (din > 0.0) {
-                h = 0.5 + 0.5 * clamp(din / (size / 2.0), 0.0, 1.0);
+        case 0: {
+            if (soft) {
+                h = select((size + 2.0) / ramp, 1.0 - clamp((dout + 0.5) / ramp, 0.0, 1.0), dout > 0.0);
             } else {
-                h = 0.5 - 0.5 * clamp(dout / (size / 2.0), 0.0, 1.0);
+                let top = (size + 2.0) / ramp;
+                h = select(top, clamp((size + 1.5 - dout) / ramp, 0.0, top), dout > 0.0);
             }
         }
-        default: { h = clamp(din / size, 0.0, 1.0); }
+        case 1: {
+            let half = size / 2.0 + 0.5;
+            if (din > 0.0) {
+                h = 0.5 + 0.5 * clamp(din / half, 0.0, 1.0);
+            } else {
+                h = 0.5 - 0.5 * clamp(dout / half, 0.0, 1.0);
+            }
+        }
+        default: {
+            if (soft) {
+                h = select(0.0, clamp((din + 1.5) / ramp, 0.0, (size + 2.0) / ramp), din > 0.0);
+            } else {
+                h = select(0.0, clamp((din + 0.5) / ramp, 0.0, 1.0), din > 0.0);
+            }
+        }
     }
     return mout(h);
 }
@@ -1209,7 +1226,8 @@ fn fs_mbevelshade(in: VOut) -> @location(0) vec4<f32> {
     // effects::bevel_maps' on_bevel: the height above BEVEL_H_EPS (emboss styles: or a
     // 4-neighbour's).
     var hmax = ra(p);
-    if (op.p1.y > 1.5) {
+    // p3.x: an outer chisel bevel, which also reaches one pixel past its ramp.
+    if (op.p1.y > 1.5 || op.p3.x > 0.5) {
         hmax = max(max(hmax, max(ra(p + vec2(1, 0)), ra(p - vec2(1, 0)))), max(ra(p + vec2(0, 1)), ra(p - vec2(0, 1))));
     }
     let outside = select(0.0, 1.0, s < 1.0 - INSIDE_EPS && hmax > 1e-5);
