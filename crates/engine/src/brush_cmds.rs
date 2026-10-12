@@ -417,6 +417,8 @@ pub struct LiveStroke {
     /// Where the doc shows the stroke's end as finishing it would draw it (see `push`).
     tail: Rect,
     push_count: u32,
+    /// The last push skipped the tail preview (throttle); `finalize_tail` redraws it.
+    tail_stale: bool,
     /// The document's CMYK profile the commit enters (`stroke_with`), so the preview shows the
     /// pixels a `paint.stroke` with `seed` will write.
     cmyk: Option<std::sync::Arc<photocraft_color::convert::CmykSpace>>,
@@ -512,6 +514,7 @@ impl LiveStroke {
             points: Vec::new(),
             base,
             push_count: 0,
+            tail_stale: false,
         };
         live.push(&pts)?;
         Ok(live)
@@ -584,6 +587,7 @@ impl LiveStroke {
             // push only; `finalize_tail` brings it up to date before anything reads the pixels.
             self.push_count = self.push_count.wrapping_add(1);
             let update_tail = self.push_count <= 1 || self.push_count.is_multiple_of(2);
+            self.tail_stale = !update_tail;
             let mut dmg = Rect::EMPTY;
             if update_tail {
                 let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
@@ -607,9 +611,10 @@ impl LiveStroke {
     /// correct smoothing catch-up). Call before reading pixels from `self.doc`.
     pub fn finalize_tail(&mut self) -> Result<Rect> {
         // Symmetry strokes redraw every pass on each push; only the plain path is throttled.
-        if self.mirror_distinct.iter().any(|d| *d) {
+        if !self.tail_stale || self.mirror_distinct.iter().any(|d| *d) {
             return Ok(Rect::EMPTY);
         }
+        self.tail_stale = false;
         let cmyk = self.cmyk.clone();
         photocraft_color::convert::with_cmyk_space(cmyk.as_ref(), || {
             let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
