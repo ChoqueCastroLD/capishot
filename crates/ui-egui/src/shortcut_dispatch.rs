@@ -40,8 +40,10 @@ pub fn take_log(ctx: &egui::Context) -> Vec<(String, Outcome)> {
 }
 
 /// Alternative default shortcuts Photoshop gives some commands besides the one its menu shows:
-/// (command, shortcut). Edit › Fill… is Shift+F5 and also Shift+Backspace (Shift+Delete on a Mac).
-pub const SECONDARY: &[(&str, &str)] = &[("edit.fill", "Shift+Backspace")];
+/// (command, shortcut). Edit › Fill… is Shift+F5 and also Shift+Backspace (Shift+Delete on a Mac);
+/// the function keys F2 / F3 / F4 cut, copy and paste, and Shift+F7 inverts the selection.
+pub const SECONDARY: &[(&str, &str)] =
+    &[("edit.fill", "Shift+Backspace"), ("edit.cut", "F2"), ("edit.copy", "F3"), ("edit.paste", "F4"), ("select.inverse", "Shift+F7")];
 
 /// Every key binding, most modifiers first (so ⇧⌘Z wins over ⌘Z), each key owned by one command:
 /// command and shell shortcuts, then the menu catalogue's for live items without their own,

@@ -265,8 +265,8 @@ pub fn available(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) -> b
 }
 
 /// Is `command` the transform box's current mode (checked in the transform menu)?
-/// Scale and Rotate are Free Transform's mode, so only Free Transform shows it checked. Warp is
-/// not a box mode (it is its own session), and `for_command` would read it as Free.
+/// Scale and Rotate are Free Transform's mode, so only Free Transform shows it checked; Warp is
+/// checked while the box warps.
 pub(crate) fn mode_checked(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) -> bool {
     if menu.pasteboard {
         return pasteboard_choice(command) == Some(app.session.prefs().interface.canvas_color);
@@ -274,9 +274,14 @@ pub(crate) fn mode_checked(app: &PhotocraftApp, menu: &CanvasToolMenu, command: 
     if menu.text {
         return type_checked(app, command);
     }
-    menu.transform
-        && matches!(command, "edit.freeTransform" | "edit.transform.skew" | "edit.transform.distort" | "edit.transform.perspective")
-        && app.ui.transform.as_ref().is_some_and(|t| t.mode == crate::state::TransformMode::for_command(command))
+    let Some(t) = app.ui.transform.as_ref().filter(|_| menu.transform) else { return false };
+    match command {
+        "edit.transform.warp" => t.warp.is_some(),
+        "edit.freeTransform" | "edit.transform.skew" | "edit.transform.distort" | "edit.transform.perspective" => {
+            t.warp.is_none() && t.mode == crate::state::TransformMode::for_command(command)
+        }
+        _ => false,
+    }
 }
 
 /// The type edit menu's checkmarks: the faux styles at the selection, the layer's orientation and
@@ -502,6 +507,10 @@ pub fn choose(app: &mut PhotocraftApp, ctx: &Context, command: &str) {
     let Some(menu) = app.ui.canvas_tool_menu.take() else { return };
     if !available(app, &menu, command) {
         return;
+    }
+    // Content-Aware Scale is its own mode: the box's transform is applied first.
+    if menu.transform && command == "edit.contentAwareScale" {
+        crate::transform_tool::commit(app);
     }
     let result = if menu.pasteboard {
         choose_pasteboard(app, &menu, command)

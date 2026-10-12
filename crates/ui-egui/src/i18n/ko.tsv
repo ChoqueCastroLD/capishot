@@ -1200,6 +1200,7 @@
 	Magenta	마젠타
 	Magenta  ·  Green	마젠타 · 초록
 	Maintain aspect ratio	종횡비 유지
+	Maintain Aspect Ratio	종횡비 유지
 	Marker Size	마커 크기
 	Mask All	모두 마스크
 	Mask Options	마스크 옵션
@@ -3291,3 +3292,14 @@ cameraData	Lens	렌즈
 	Downloading {file}	{file} 다운로드 중
 	Downloading the licence	라이선스 다운로드 중
 	Loading the font index	글꼴 색인 불러오는 중
+	Show canvas dots	캔버스 점 표시
+	Copy Layers	레이어 복사
+	Paste Layers	레이어 붙여넣기
+	Cycle Screen Mode Backwards	화면 모드 역순환
+	Scroll Up One Screen	한 화면 위로 스크롤
+	Scroll Down One Screen	한 화면 아래로 스크롤
+	Scroll Left One Screen	한 화면 왼쪽으로 스크롤
+	Scroll Right One Screen	한 화면 오른쪽으로 스크롤
+	Scroll to Upper-Left Corner	왼쪽 위 모서리로 스크롤
+	Scroll to Lower-Right Corner	오른쪽 아래 모서리로 스크롤
+	Show rulers in new documents	새 문서에 눈금자 표시

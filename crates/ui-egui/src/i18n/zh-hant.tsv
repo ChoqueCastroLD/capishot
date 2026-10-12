@@ -1235,6 +1235,7 @@
 	Magenta	洋紅
 	Magenta  ·  Green	洋紅  ·  綠色
 	Maintain aspect ratio	維持外觀比例
+	Maintain Aspect Ratio	維持外觀比例
 	Marker Size	標記大小
 	Mask All	遮住全部
 	Mask Options	遮色片選項
@@ -2702,3 +2703,14 @@ cameraData	Lens	鏡頭
 	Downloading {file}	正在下載 {file}
 	Downloading the licence	正在下載授權
 	Loading the font index	正在載入字型索引
+	Show canvas dots	顯示畫布圓點
+	Copy Layers	拷貝圖層
+	Paste Layers	貼上圖層
+	Cycle Screen Mode Backwards	反向循環切換螢幕模式
+	Scroll Up One Screen	向上捲動一個畫面
+	Scroll Down One Screen	向下捲動一個畫面
+	Scroll Left One Screen	向左捲動一個畫面
+	Scroll Right One Screen	向右捲動一個畫面
+	Scroll to Upper-Left Corner	捲動到左上角
+	Scroll to Lower-Right Corner	捲動到右下角
+	Show rulers in new documents	在新文件中顯示尺標

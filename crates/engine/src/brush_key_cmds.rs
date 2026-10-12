@@ -34,6 +34,31 @@ fn hardness(s: &mut Session, up: bool) -> Result<Value> {
     crate::brush_cmds::set_brush(s, &json!({ "brush": { "hardness": hardness } }))
 }
 
+/// Which preset `,` / `.` / ⇧, / ⇧. pick: the previous, next, first or last one.
+#[derive(Clone, Copy)]
+enum Nav {
+    Previous,
+    Next,
+    First,
+    Last,
+}
+
+/// Photoshop's `,` / `.` (previous / next brush) and ⇧, / ⇧. (first / last), in the Brushes
+/// panel's order. From a brush not picked from a preset, previous and next start at the first.
+fn step_preset(s: &mut Session, nav: Nav) -> Result<Value> {
+    let names: Vec<String> = s.tools.presets.iter().map(|p| p.name.clone()).collect();
+    let last = names.len().checked_sub(1).ok_or_else(|| crate::EngineError::Other("there are no brush presets".into()))?;
+    let at = s.tools.current_preset.as_ref().and_then(|c| names.iter().position(|n| n.eq_ignore_ascii_case(c)));
+    let to = match (nav, at) {
+        (Nav::First, _) | (Nav::Previous | Nav::Next, None) => 0,
+        (Nav::Last, _) => last,
+        (Nav::Previous, Some(i)) => i.saturating_sub(1),
+        (Nav::Next, Some(i)) => (i + 1).min(last),
+    };
+    let name = names.get(to).cloned().unwrap_or_default();
+    crate::brush_cmds::set_brush(s, &json!({ "preset": name }))
+}
+
 macro_rules! key_cmd {
     ($id:literal, $label:literal, $sc:literal, $run:expr) => {
         CommandSpec { id: $id, label: $label, menu: &[], shortcut: Some($sc), params: "{}", enabled: always, run: $run, journal: true }
@@ -46,12 +71,40 @@ pub fn specs() -> Vec<CommandSpec> {
         key_cmd!("tools.increaseBrushSize", "Increase Brush Size", "]", |s, _| size(s, true)),
         key_cmd!("tools.decreaseBrushHardness", "Decrease Brush Hardness", "Shift+[", |s, _| hardness(s, false)),
         key_cmd!("tools.increaseBrushHardness", "Increase Brush Hardness", "Shift+]", |s, _| hardness(s, true)),
+        key_cmd!("tools.previousBrush", "Previous Brush", ",", |s, _| step_preset(s, Nav::Previous)),
+        key_cmd!("tools.nextBrush", "Next Brush", ".", |s, _| step_preset(s, Nav::Next)),
+        key_cmd!("tools.firstBrush", "First Brush", "Shift+,", |s, _| step_preset(s, Nav::First)),
+        key_cmd!("tools.lastBrush", "Last Brush", "Shift+.", |s, _| step_preset(s, Nav::Last)),
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn comma_and_period_step_through_the_brush_presets() {
+        let mut s = Session::new();
+        let names: Vec<String> = s.tools.presets.iter().map(|p| p.name.clone()).collect();
+        assert!(names.len() >= 3, "built-in presets");
+        let current = |s: &Session| s.tools.current_preset.clone().unwrap_or_default();
+        s.execute("tools.nextBrush", json!({})).unwrap();
+        assert_eq!(current(&s), names[0], "from no preset: the first");
+        s.execute("tools.nextBrush", json!({})).unwrap();
+        assert_eq!(current(&s), names[1]);
+        s.execute("tools.previousBrush", json!({})).unwrap();
+        s.execute("tools.previousBrush", json!({})).unwrap();
+        assert_eq!(current(&s), names[0], "stops at the first");
+        s.execute("tools.lastBrush", json!({})).unwrap();
+        assert_eq!(current(&s), names[names.len() - 1]);
+        s.execute("tools.nextBrush", json!({})).unwrap();
+        assert_eq!(current(&s), names[names.len() - 1], "stops at the last");
+        s.execute("tools.firstBrush", json!({})).unwrap();
+        assert_eq!(current(&s), names[0]);
+        assert_eq!(s.tools.brush.size, s.tools.presets[0].brush.size, "the preset's brush is loaded");
+        s.tools.presets.clear();
+        assert!(s.execute("tools.nextBrush", json!({})).is_err(), "no presets");
+    }
 
     #[test]
     fn steps_like_photoshop() {

@@ -1234,6 +1234,7 @@
 	Magenta	洋红
 	Magenta  ·  Green	洋红  ·  绿色
 	Maintain aspect ratio	保持长宽比
+	Maintain Aspect Ratio	保持长宽比
 	Marker Size	标记大小
 	Mask All	蒙版覆盖全部
 	Mask Options	蒙版选项
@@ -2732,3 +2733,14 @@ cameraData	Lens	镜头
 	Downloading {file}	正在下载 {file}
 	Downloading the licence	正在下载许可证
 	Loading the font index	正在加载字体索引
+	Show canvas dots	显示画布圆点
+	Copy Layers	拷贝图层
+	Paste Layers	粘贴图层
+	Cycle Screen Mode Backwards	反向循环切换屏幕模式
+	Scroll Up One Screen	向上滚动一屏
+	Scroll Down One Screen	向下滚动一屏
+	Scroll Left One Screen	向左滚动一屏
+	Scroll Right One Screen	向右滚动一屏
+	Scroll to Upper-Left Corner	滚动到左上角
+	Scroll to Lower-Right Corner	滚动到右下角
+	Show rulers in new documents	在新文档中显示标尺

@@ -667,6 +667,7 @@
 	Constrain proportions	Зберігати пропорції
 	Link width and height	Пов'язати ширину та висоту
 	Maintain aspect ratio	Зберігати співвідношення сторін
+	Maintain Aspect Ratio	Зберігати співвідношення сторін
 	Current Size	Поточний розмір
 	New Size	Новий розмір
 	Fit	Умістити
@@ -3812,3 +3813,15 @@ cameraData	Lens	Об'єктив
 @plural	{n} style|{n} styles	{n} начерк|{n} начерки|{n} начерків
 @plural	{n} text layer|{n} text layers	{n} текстовий шар|{n} текстові шари|{n} текстових шарів
 @plural	{n} open document|{n} open documents	{n} відкритий документ|{n} відкриті документи|{n} відкритих документів
+	Show canvas dots	Показувати точки полотна
+	Copy Layers	Копіювати шари
+	Paste Layers	Вставити шари
+	Cycle Screen Mode Backwards	Перемкнути режим екрана у зворотному порядку
+	Scroll Up One Screen	Прокрутити на екран угору
+	Scroll Down One Screen	Прокрутити на екран униз
+	Scroll Left One Screen	Прокрутити на екран ліворуч
+	Scroll Right One Screen	Прокрутити на екран праворуч
+	Scroll to Upper-Left Corner	Прокрутити до лівого верхнього кута
+	Scroll to Lower-Right Corner	Прокрутити до правого нижнього кута
+	Show rulers in new documents	Показувати лінійки в нових документах
+	Capishot — Screen Color Picker	Capishot — Піпетка кольору екрана

@@ -60,6 +60,7 @@ pub mod installed_profiles;
 pub mod jobs;
 pub mod kys;
 pub mod layer_copy_cmds;
+pub mod layer_key_cmds;
 pub mod layer_label_cmds;
 pub mod layer_mask_props_cmds;
 pub mod layer_menu_cmds;
@@ -357,6 +358,8 @@ pub struct Session {
     /// Shape path context menu: copied vector fill and stroke styles.
     pub path_fill_clipboard: Option<photocraft_doc::Fill>,
     pub path_stroke_clipboard: Option<photocraft_doc::ShapeStroke>,
+    /// Whole layers copied with `layer.copyLayers`, for `layer.pasteLayers` in any document.
+    pub layer_clipboard: Option<layer_copy_cmds::LayerClip>,
     /// Colour management: proofing state, monitor profile, display transforms.
     pub color: color_cmds::ColorState,
     /// Open Edit Contents documents and the smart objects they update.

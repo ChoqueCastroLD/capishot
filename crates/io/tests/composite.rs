@@ -54,10 +54,29 @@ oracle!(oracle_lab8, ColorMode::Lab, SampleType::U8, Features::PIXELS, 16.0 / 25
 /// every blend mode and fill layers it must agree with photocraft-compose (two independent
 /// renderers). Adjustments are left out: psd-compiler's are fitted to Photoshop's renders and
 /// photocraft-compose's still differ on some (Vibrance, Color Balance, Photo Filter, Black & White).
+///
+/// Knockout is left out too. The generated "Outer" group knocks out (Deep) at 100% Fill over
+/// layers between it and the Background, and its children are semi-transparent. psd-compiler
+/// composites a knockout as Photoshop does (the PDF knockout formula: at full Fill a pixel's own
+/// alpha is its knockout shape, so the target only shows where Fill is lowered), while
+/// photocraft-compose also reveals the target in proportion to a pixel's transparency
+/// (advanced.rs `knockout`), up to 44/255 here. Photoshop's stored composites agree with
+/// psd-compiler: on psd-tools' knockout-isolated-groups.psd (Shallow, Fill 100%, anti-aliased
+/// edges) psd-compiler is within 2/255 and photocraft-compose 64/255 off along the edges; the
+/// other eight psd-tools knockout files (Fill 50%) match both exactly. Scorecard FILE-215-16.
 #[test]
 fn psdc_agrees_with_the_compositor_on_layers_and_blends() {
+    fn no_knockout(layers: &mut [photocraft_doc::Layer]) {
+        for l in layers {
+            l.advanced.knockout = photocraft_doc::Knockout::None;
+            if let photocraft_doc::LayerContent::Group(g) = &mut l.content {
+                no_knockout(&mut g.children);
+            }
+        }
+    }
     let f = Features { groups: true, masks: true, adjustments: false, fills: true, all_blends: true, extras: true };
-    let d = gen_doc(ColorMode::Rgb, SampleType::U8, f);
+    let mut d = gen_doc(ColorMode::Rgb, SampleType::U8, f);
+    no_knockout(&mut d.layers);
     let r = export(&d, "x.psd", &ExportOptions::default()).unwrap();
     let merged = merged_composite(&PsdFile::from_bytes(&r.bytes).unwrap()).unwrap();
     let ours = photocraft_compose::flatten(&import("x.psd", &r.bytes).unwrap().document).px;

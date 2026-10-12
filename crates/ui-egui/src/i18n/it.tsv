@@ -1229,6 +1229,7 @@
 	Magenta	Magenta
 	Magenta  ·  Green	Magenta · Verde
 	Maintain aspect ratio	Mantieni proporzioni
+	Maintain Aspect Ratio	Mantieni proporzioni
 	Marker Size	Dimensione indicatore
 	Mask All	Maschera tutto
 	Mask Options	Opzioni maschera
@@ -2784,3 +2785,14 @@ cameraData	Lens	Obiettivo
 	Downloading {file}	Download di {file}
 	Downloading the licence	Download della licenza
 	Loading the font index	Caricamento dell'indice dei font
+	Show canvas dots	Mostra punti della tela
+	Copy Layers	Copia livelli
+	Paste Layers	Incolla livelli
+	Cycle Screen Mode Backwards	Cambia modalità schermo all'indietro
+	Scroll Up One Screen	Scorri in alto di una schermata
+	Scroll Down One Screen	Scorri in basso di una schermata
+	Scroll Left One Screen	Scorri a sinistra di una schermata
+	Scroll Right One Screen	Scorri a destra di una schermata
+	Scroll to Upper-Left Corner	Scorri all'angolo superiore sinistro
+	Scroll to Lower-Right Corner	Scorri all'angolo inferiore destro
+	Show rulers in new documents	Mostra righelli nei nuovi documenti

@@ -223,6 +223,9 @@ fn b_cycles_brush_pencil_mixer_brush_and_color_replacement() {
         app
     });
     h.state_mut().ui.tool = Tool::Move;
+    // Photoshop's default is Use Shift Key for Tool Switch on; without it B itself cycles.
+    assert!(h.state().session.prefs().tools.use_shift_key_for_tool_switch);
+    h.state_mut().session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = false);
     h.run_steps(4);
     let press = |h: &mut Harness<'_, PhotocraftApp>, m: Modifiers| {
         h.event(egui::Event::Key { key: Key::B, physical_key: None, pressed: true, repeat: false, modifiers: m });
