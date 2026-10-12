@@ -8,9 +8,13 @@
 //! * File › Export › Compile PSD and `capishot-cli compile` ([`compile`]), which can also
 //!   re-render type layers from their text with the given fonts.
 //!
-//! Desktop only: psd-compiler reads fonts from disk and renders on all cores.
+//! Every target: on the desktop psd-compiler reads font folders and renders on all cores; in the
+//! browser it gets the font bytes the app holds ([`CompileOptions::with_app_fonts`]) and its rayon
+//! work runs on the calling thread unless the page set up a thread pool.
 
 use std::path::PathBuf;
+
+pub use photocraft_text::fonts::FontData;
 
 use photocraft_doc::Document;
 use photocraft_psd::{ColorMode, PsdFile};
@@ -25,8 +29,72 @@ pub struct CompileOptions {
     pub rerender_text: bool,
     /// Extra font folders, searched before the system fonts.
     pub font_dirs: Vec<PathBuf>,
-    /// Also search the system font folders.
+    /// Also search the system font folders (none on the web).
     pub system_fonts: bool,
+    /// Font files on disk, searched after the folders (the downloaded-fonts store).
+    pub font_files: Vec<PathBuf>,
+    /// Font files in memory, searched last: the bundled, craft-fonts and served fonts. The only
+    /// fonts there are in the browser.
+    pub font_data: Vec<FontData>,
+}
+
+impl CompileOptions {
+    /// Adds the fonts the app's text engine holds ([`photocraft_text::shared`]): its in-memory
+    /// files (bundled, craft-fonts, fonts served to the web build) and its downloaded-fonts
+    /// store files. They come after the folders and system fonts, which keep winning name clashes.
+    pub fn with_app_fonts(mut self) -> Self {
+        let eng = photocraft_text::shared().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.font_files.extend(eng.fonts.managed_font_files());
+        self.font_data.extend(eng.fonts.font_data());
+        self
+    }
+}
+
+/// psd-compiler with its fonts loaded once, for compiling many files (a chapter) with the same
+/// options. Shareable between threads.
+pub struct Compiler {
+    fonts: psd_compiler::FontDb,
+    rerender_text: bool,
+}
+
+impl Compiler {
+    /// Loads the fonts of `opts` (only when type is re-rendered: the stored rasters need none).
+    pub fn new(opts: &CompileOptions) -> Self {
+        let mut fonts = psd_compiler::FontDb::new();
+        if opts.rerender_text {
+            for dir in &opts.font_dirs {
+                fonts.add_dir(dir);
+            }
+            if opts.system_fonts {
+                fonts.add_system_fonts();
+            }
+            for file in &opts.font_files {
+                fonts.add_file(file);
+            }
+            for data in &opts.font_data {
+                fonts.add_font_data(data.clone());
+            }
+        }
+        Compiler { fonts, rerender_text: opts.rerender_text }
+    }
+
+    /// Number of font faces loaded.
+    pub fn font_faces(&self) -> usize {
+        self.fonts.len()
+    }
+
+    /// Renders PSD/PSB `bytes`.
+    pub fn compile(&self, bytes: &[u8]) -> Result<Compiled, IoError> {
+        let doc = psd_compiler::Document::parse(bytes).map_err(|e| IoError::Unsupported(format!("psd-compiler: {e}")))?;
+        let options = psd_compiler::RenderOptions { keep_text_raster: !self.rerender_text, ..Default::default() };
+        let out = psd_compiler::render(&doc, &self.fonts, &options);
+        Ok(Compiled {
+            width: out.image.width,
+            height: out.image.height,
+            rgba: out.image.data,
+            warnings: out.warnings.iter().map(ToString::to_string).collect(),
+        })
+    }
 }
 
 /// A compiled image: straight 8-bit RGBA, row-major.
@@ -55,26 +123,9 @@ impl Compiled {
     }
 }
 
-/// Renders PSD/PSB `bytes` with psd-compiler.
+/// Renders PSD/PSB `bytes` with psd-compiler (one file; see [`Compiler`] for many).
 pub fn compile(bytes: &[u8], opts: &CompileOptions) -> Result<Compiled, IoError> {
-    let doc = psd_compiler::Document::parse(bytes).map_err(|e| IoError::Unsupported(format!("psd-compiler: {e}")))?;
-    let mut fonts = psd_compiler::FontDb::new();
-    if opts.rerender_text {
-        for dir in &opts.font_dirs {
-            fonts.add_dir(dir);
-        }
-        if opts.system_fonts {
-            fonts.add_system_fonts();
-        }
-    }
-    let options = psd_compiler::RenderOptions { keep_text_raster: !opts.rerender_text, ..Default::default() };
-    let out = psd_compiler::render(&doc, &fonts, &options);
-    Ok(Compiled {
-        width: out.image.width,
-        height: out.image.height,
-        rgba: out.image.data,
-        warnings: out.warnings.iter().map(ToString::to_string).collect(),
-    })
+    Compiler::new(opts).compile(bytes)
 }
 
 /// Compiles `doc`: writes it as a PSD in memory, then renders that with psd-compiler.
@@ -164,6 +215,31 @@ mod tests {
         let file = PsdFile::from_bytes(&out.bytes).unwrap();
         let rgba = file.composite_rgba8().unwrap();
         assert!(rgba.data[..4].iter().zip([153u8, 51, 102, 255]).all(|(g, w)| g.abs_diff(w) <= 1), "{:?}", &rgba.data[..4]);
+    }
+
+    #[test]
+    fn app_fonts_reach_psd_compiler_only_when_type_is_rerendered() {
+        let bare = CompileOptions { rerender_text: true, ..Default::default() };
+        assert_eq!(Compiler::new(&bare).font_faces(), 0);
+        let app = bare.clone().with_app_fonts();
+        // The bundled Inter and JetBrains Mono at least; in the browser these are all there is.
+        assert!(app.font_data.len() >= photocraft_text::fonts::BUNDLED.len());
+        assert!(Compiler::new(&app).font_faces() >= photocraft_text::fonts::BUNDLED.len());
+        let stored = CompileOptions { rerender_text: false, ..app };
+        assert_eq!(Compiler::new(&stored).font_faces(), 0);
+    }
+
+    #[test]
+    fn one_compiler_compiles_many_files() {
+        let doc = two_layer_doc();
+        let (file, _) = crate::document_to_psd_with(&doc, &crate::PsdExportOptions::default());
+        let bytes = file.to_bytes().unwrap();
+        let compiler = Compiler::new(&CompileOptions::default());
+        for _ in 0..2 {
+            let c = compiler.compile(&bytes).unwrap();
+            assert!(c.rgba[..4].iter().zip([153u8, 51, 102, 255]).all(|(g, w)| g.abs_diff(w) <= 1), "{:?}", &c.rgba[..4]);
+        }
+        assert!(compiler.compile(b"nope").is_err());
     }
 
     #[test]
