@@ -766,7 +766,7 @@ fn m_cycles_only_the_rectangular_and_elliptical_marquee() {
     let mut seen = Vec::new();
     for _ in 0..4 {
         let raw = egui::RawInput {
-            events: vec![egui::Event::Key { key: egui::Key::M, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }],
+            events: vec![egui::Event::Key { key: egui::Key::M, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::SHIFT }],
             ..Default::default()
         };
         ctx.begin_pass(raw);

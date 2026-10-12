@@ -2106,6 +2106,7 @@
 	Opening {name}	{name} 여는 중
 	Saved {name}	{name} 저장됨
 	Saving {name}	{name} 저장 중
+	Saving {percent}	저장 중 {percent}
 	A save to {name} is still running; try again when it finishes	{name}에 저장하는 작업이 아직 진행 중입니다. 완료된 후 다시 시도하세요
 	{label} is writing the file and can no longer be cancelled	{label}: 파일을 쓰는 중이므로 더 이상 취소할 수 없습니다
 	Opening {name}…	{name} 여는 중…
@@ -3212,3 +3213,8 @@ curves	Smooth	매끄럽게
 	Apply mask to layer before removing?	제거하기 전에 마스크를 레이어에 적용하시겠습니까?
 	The layer or its mask changed. Drag the mask onto the Trash again.	레이어 또는 마스크가 변경되었습니다. 마스크를 휴지통으로 다시 드래그하세요.
 	Delete the vector mask?	벡터 마스크를 삭제하시겠습니까?
+# View › Guides › New Guide… › Color
+	Light Blue	연한 파랑
+	Light Red	연한 빨강
+	Medium Blue	중간 파랑
+	Light Gray	연한 회색

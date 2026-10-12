@@ -2212,6 +2212,7 @@ cameraRaw	Blending	混合
 	Opening {name}	正在打开 {name}
 	Saved {name}	已保存 {name}
 	Saving {name}	正在保存 {name}
+	Saving {percent}	正在保存 {percent}
 	A save to {name} is still running; try again when it finishes	仍在保存到 {name}；请在完成后重试
 	{label} is writing the file and can no longer be cancelled	{label} 正在写入文件，已无法取消
 	Opening {name}…	正在打开 {name}…
@@ -2647,3 +2648,8 @@ curves	Smooth	平滑
 	Apply mask to layer before removing?	移去之前将蒙版应用到图层吗？
 	The layer or its mask changed. Drag the mask onto the Trash again.	图层或其蒙版已更改。请再次将蒙版拖到垃圾桶。
 	Delete the vector mask?	要删除矢量蒙版吗？
+# View › Guides › New Guide… › Color
+	Light Blue	浅蓝色
+	Light Red	浅红色
+	Medium Blue	中蓝色
+	Light Gray	浅灰色

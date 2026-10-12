@@ -2151,6 +2151,7 @@
 	Opening {name}	Apertura {name}
 	Saved {name}	Salvato: {name}
 	Saving {name}	Salvataggio {name}
+	Saving {percent}	Salvataggio {percent}
 	A save to {name} is still running; try again when it finishes	Un salvataggio in {name} è ancora in corso; riprova quando termina
 	{label} is writing the file and can no longer be cancelled	{label} sta scrivendo il file e non può più essere annullato
 	Opening {name}…	Apertura {name}…
@@ -2714,3 +2715,8 @@ curves	Smooth	Leviga
 @plural	{n} step|{n} steps	{n} passaggio|{n} passaggi
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} altro avviso sui predefiniti pennello)|{warning} (+{n} altri avvisi sui predefiniti pennello)
 @plural	{what} with {n} warning|{what} with {n} warnings	{what} con {n} avviso|{what} con {n} avvisi
+# View › Guides › New Guide… › Color
+	Light Blue	Blu chiaro
+	Light Red	Rosso chiaro
+	Medium Blue	Blu medio
+	Light Gray	Grigio chiaro

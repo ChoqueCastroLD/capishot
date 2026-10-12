@@ -1583,6 +1583,7 @@
 	Opening {name}	Άνοιγμα του {name}
 	Saved {name}	Αποθηκεύτηκε το {name}
 	Saving {name}	Αποθήκευση του {name}
+	Saving {percent}	Αποθήκευση {percent}
 	A save to {name} is still running; try again when it finishes	Η αποθήκευση στο {name} βρίσκεται ακόμη σε εξέλιξη· δοκιμάστε ξανά όταν ολοκληρωθεί
 	{label} is writing the file and can no longer be cancelled	{label}: γίνεται εγγραφή του αρχείου και δεν μπορεί πλέον να ακυρωθεί
 	Opening {name}…	Άνοιγμα του {name}…
@@ -3740,3 +3741,8 @@ curves	Smooth	Εξομάλυνση
 @plural	{n} step|{n} steps	{n} βήμα|{n} βήματα
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} ακόμη προειδοποίηση προεπιλογών πινέλων)|{warning} (+{n} ακόμη προειδοποιήσεις προεπιλογών πινέλων)
 @plural	{what} with {n} warning|{what} with {n} warnings	{what} με {n} προειδοποίηση|{what} με {n} προειδοποιήσεις
+# View › Guides › New Guide… › Color
+	Light Blue	Ανοιχτό μπλε
+	Light Red	Ανοιχτό κόκκινο
+	Medium Blue	Μεσαίο μπλε
+	Light Gray	Ανοιχτό γκρι

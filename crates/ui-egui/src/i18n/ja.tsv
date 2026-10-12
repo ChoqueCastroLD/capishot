@@ -2148,6 +2148,7 @@
 	Opening {name}	{name} を開いています
 	Saved {name}	{name} を保存しました
 	Saving {name}	{name} を保存しています
+	Saving {percent}	保存中 {percent}
 	A save to {name} is still running; try again when it finishes	{name} への保存がまだ実行中です。完了してからもう一度お試しください
 	{label} is writing the file and can no longer be cancelled	{label} はファイルを書き込み中のため、キャンセルできません
 	Opening {name}…	{name} を開いています…
@@ -3652,3 +3653,8 @@ curves	Smooth	スムーズ
 @plural	{n} step|{n} steps	{n} ステップ
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning}(ほかにブラシプリセットの警告 {n} 件)
 @plural	{what} with {n} warning|{what} with {n} warnings	{what}(警告 {n} 件)
+# View › Guides › New Guide… › Color
+	Light Blue	ライトブルー
+	Light Red	ライトレッド
+	Medium Blue	ミディアムブルー
+	Light Gray	ライトグレー

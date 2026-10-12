@@ -37,10 +37,11 @@ fn print_dry_run_renders_a_pdf_and_reports_the_platform_backend() {
     let dir = tmp("print");
     for depth in [8, 16, 32] {
         let mut s = session("rgb", depth);
+        let out = format!("{dir}/rgb-{depth}.pdf");
         let r = s
             .execute(
                 "file.print",
-                json!({"dryRun": true, "printer": "Office", "copies": 2, "paper": "a4", "cornerCropMarks": true, "registrationMarks": true, "labels": true}),
+                json!({"output": out, "send": true, "dryRun": true, "printer": "Office", "copies": 2, "paper": "a4", "cornerCropMarks": true, "registrationMarks": true, "labels": true}),
             )
             .unwrap();
         let cmd: Vec<String> = serde_json::from_value(r["command"].clone()).unwrap();
@@ -48,12 +49,13 @@ fn print_dry_run_renders_a_pdf_and_reports_the_platform_backend() {
         {
             assert_eq!(&cmd[..5], &["lp", "-d", "Office", "-n", "2"]);
             assert!(cmd.contains(&"fit-to-page=false".into()));
-            assert!(!cmd.contains(&r["pdf"].as_str().unwrap().to_string()), "PDF is streamed, not passed as a file");
+            assert!(!cmd.contains(&out), "PDF bytes are streamed instead of passing a path");
         }
         #[cfg(windows)]
         assert!(cmd.last().unwrap().contains("craft-print PDF spooler"));
         assert_eq!(r["sent"], false);
-        let pdf = std::fs::read(r["pdf"].as_str().unwrap()).unwrap();
+        assert_eq!(r["pdf"], out);
+        let pdf = std::fs::read(&out).unwrap();
         assert!(pdf.starts_with(b"%PDF-1.4"));
         assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 595.28 841.89]"));
         let (w, h, cs, data) = pdf_image(&pdf);
@@ -63,7 +65,6 @@ fn print_dry_run_renders_a_pdf_and_reports_the_platform_backend() {
         // 300 px at 72 ppi = 300 pt, centred.
         let rect: Vec<f64> = serde_json::from_value(r["imageRect"].clone()).unwrap();
         assert!((rect[2] - 300.0).abs() < 1e-6 && (rect[0] - (595.28 - 300.0) / 2.0).abs() < 1e-6);
-        let _ = std::fs::remove_file(r["pdf"].as_str().unwrap());
     }
     // Print to PDF: no spooling by default.
     let mut s = session("gray", 8);
@@ -82,14 +83,15 @@ fn print_dry_run_renders_a_pdf_and_reports_the_platform_backend() {
 #[test]
 fn photocraft_manages_colors_converts_to_the_printer_profile() {
     let mut s = session("rgb", 8);
+    let out = format!("{}/managed.pdf", tmp("managed"));
     let r = s
         .execute(
             "file.print",
-            json!({"dryRun": true, "colorHandling": "photocraftManages", "printerProfile": "coated-cmyk", "intent": "perceptual", "bpc": false}),
+            json!({"output": out, "dryRun": true, "colorHandling": "photocraftManages", "printerProfile": "coated-cmyk", "intent": "perceptual", "bpc": false}),
         )
         .unwrap();
     assert_eq!(r["color"]["intent"], "perceptual");
-    let pdf = std::fs::read(r["pdf"].as_str().unwrap()).unwrap();
+    let pdf = std::fs::read(&out).unwrap();
     let (_, _, cs, data) = pdf_image(&pdf);
     assert_eq!(cs, "[/ICCBased 7 0 R]");
     assert!(String::from_utf8_lossy(&pdf).contains("/N 4 /Alternate /DeviceCMYK"));
@@ -98,7 +100,6 @@ fn photocraft_manages_colors_converts_to_the_printer_profile() {
     assert!(data[0] > 150 && data[2] < 60, "{:?}", &data[..4]);
     // The document itself is untouched.
     assert_eq!(s.active().unwrap().doc.mode, ColorMode::Rgb);
-    let _ = std::fs::remove_file(r["pdf"].as_str().unwrap());
 }
 
 /// The inflated page content stream (object 4).
@@ -115,9 +116,18 @@ fn pdf_content(pdf: &[u8]) -> String {
 #[test]
 fn emulsion_down_mirrors_the_whole_page() {
     let mut s = session("rgb", 8);
-    let plain = s.execute("file.print", json!({"dryRun": true, "paper": "a4", "center": false, "left": 1.0, "top": 1.0, "labels": true})).unwrap();
+    let dir = tmp("emulsion");
+    let plain_path = format!("{dir}/plain.pdf");
+    let mirrored_path = format!("{dir}/mirrored.pdf");
+    let again_path = format!("{dir}/again.pdf");
+    let plain = s
+        .execute("file.print", json!({"output": plain_path, "dryRun": true, "paper": "a4", "center": false, "left": 1.0, "top": 1.0, "labels": true}))
+        .unwrap();
     let mirrored = s
-        .execute("file.print", json!({"dryRun": true, "paper": "a4", "center": false, "left": 1.0, "top": 1.0, "labels": true, "emulsionDown": true}))
+        .execute(
+            "file.print",
+            json!({"output": mirrored_path, "dryRun": true, "paper": "a4", "center": false, "left": 1.0, "top": 1.0, "labels": true, "emulsionDown": true}),
+        )
         .unwrap();
     assert_eq!(plain["emulsionDown"], false);
     assert_eq!(mirrored["emulsionDown"], true);
@@ -133,20 +143,24 @@ fn emulsion_down_mirrors_the_whole_page() {
     // The pixels themselves are not touched (the transform mirrors them).
     assert_eq!(pdf_image(&p).3, pdf_image(&m).3);
     // Print One Copy keeps it.
-    let again = s.execute("file.printOneCopy", json!({"dryRun": true})).unwrap();
+    let again = s.execute("file.printOneCopy", json!({"output": again_path, "dryRun": true})).unwrap();
     assert_eq!(again["emulsionDown"], true);
     for r in [plain, mirrored, again] {
         let _ = std::fs::remove_file(r["pdf"].as_str().unwrap());
     }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn printer_profile_can_be_an_installed_icc_file() {
     let dir = tmp("icc");
     let icc = format!("{dir}/My Paper.icc");
+    let output = format!("{dir}/managed.pdf");
     std::fs::write(&icc, photocraft_cms::Builtin::CoatedCmyk.profile().to_bytes().as_slice()).unwrap();
     let mut s = session("rgb", 16);
-    let r = s.execute("file.print", json!({"dryRun": true, "colorHandling": "photocraftManages", "printerProfile": icc, "emulsionDown": true})).unwrap();
+    let r = s
+        .execute("file.print", json!({"output": output, "dryRun": true, "colorHandling": "photocraftManages", "printerProfile": icc, "emulsionDown": true}))
+        .unwrap();
     assert_eq!(r["color"]["printerProfile"], json!(icc));
     let (_, _, cs, data) = pdf_image(&std::fs::read(r["pdf"].as_str().unwrap()).unwrap());
     assert_eq!(cs, "[/ICCBased 7 0 R]");
@@ -160,7 +174,7 @@ fn printer_profile_can_be_an_installed_icc_file() {
 fn print_one_copy_repeats_the_last_settings() {
     let mut s = session("rgb", 8);
     let first = s.execute("file.print", json!({"dryRun": true, "copies": 3, "paper": "a5", "scale": 50})).unwrap();
-    std::fs::remove_file(first["pdf"].as_str().unwrap()).unwrap();
+    assert!(first["pdf"].is_null());
     let r = s.execute("file.printOneCopy", json!({"dryRun": true})).unwrap();
     assert_eq!(r["copies"], 1);
     assert_eq!(r["paper"], json!([419.53, 595.28]));
@@ -170,7 +184,7 @@ fn print_one_copy_repeats_the_last_settings() {
     assert_eq!(&cmd[..3], &["lp", "-n", "1"]);
     #[cfg(windows)]
     assert!(cmd.last().unwrap().contains("craft-print PDF spooler"));
-    let _ = std::fs::remove_file(r["pdf"].as_str().unwrap());
+    assert!(r["pdf"].is_null());
 }
 
 #[test]
@@ -236,7 +250,36 @@ fn paths_export_as_illustrator_postscript() {
     assert!(s.execute("file.export.pathsToIllustrator", json!({"paths": "Nope"})).is_err());
 }
 
-/// Launch the command in a subprocess with a fake CUPS binary: the parent process's PATH and
+#[test]
+fn print_dry_run_without_output_retains_no_pdf() {
+    let mut s = session("rgb", 8);
+    let result = s.execute("file.print", json!({"dryRun": true})).unwrap();
+    assert!(result["pdf"].is_null());
+    assert_eq!(result["sent"], false);
+    assert!(result["bytes"].as_u64().unwrap() > 100);
+    assert!(result["command"].is_array());
+    assert!(s.file_menu.last_print.as_ref().unwrap().get("dryRun").is_none());
+}
+
+#[test]
+fn print_without_sending_requires_output_unless_dry_run_and_forgets_send_override() {
+    let mut s = session("rgb", 8);
+    let before = s.file_menu.last_print.clone();
+    let err = s.execute("file.print", json!({"send": false})).unwrap_err();
+    assert!(err.to_string().contains("needs an output path"), "{err}");
+    assert_eq!(s.file_menu.last_print, before);
+    let result = s.execute("file.print", json!({"send": false, "dryRun": true})).unwrap();
+    assert!(result["pdf"].is_null());
+    assert!(result["command"].is_null());
+    assert!(s.file_menu.last_print.as_ref().unwrap().get("send").is_none());
+    let out = format!("{}/export.pdf", tmp("non-sending-export"));
+    let result = s.execute("file.print", json!({"output": out, "send": false})).unwrap();
+    assert_eq!(result["sent"], false);
+    assert!(std::fs::read(&out).unwrap().starts_with(b"%PDF-1.4"));
+    assert!(s.file_menu.last_print.as_ref().unwrap().get("send").is_none());
+    s.execute("file.print", json!({"output": out, "send": true, "dryRun": true})).unwrap();
+    assert!(s.file_menu.last_print.as_ref().unwrap().get("send").is_none());
+}
 /// parallel tests are untouched, and the real spool boundary still consumes the PDF bytes.
 #[cfg(unix)]
 #[test]
@@ -278,6 +321,16 @@ fn spool_transport_streams_pdf_and_propagates_refusal() {
         assert!(err.to_string().contains("queue refused"), "{err}");
         assert!(std::fs::read(&explicit).unwrap().starts_with(b"%PDF-1.4"), "explicit export survives a spool refusal");
         assert_eq!(s.file_menu.last_print, remembered, "failed printing does not replace repeat settings");
+        // Export-only choices must not disable submission when Print One Copy repeats settings.
+        let export = format!("{dir}/export-only.pdf");
+        s.execute("file.print", json!({"printer": "Office", "output": export, "send": false})).unwrap();
+        let remembered = s.file_menu.last_print.as_ref().unwrap();
+        assert!(remembered.get("send").is_none() && remembered.get("output").is_none());
+        let repeat = s.execute("file.printOneCopy", json!({})).unwrap();
+        assert_eq!(repeat["sent"], true);
+        assert_eq!(repeat["copies"], 1);
+        assert!(repeat["pdf"].is_null());
+        assert!(!std::fs::read_to_string(format!("{dir}/args")).unwrap().contains(".pdf"));
         return;
     }
     use std::os::unix::fs::PermissionsExt;

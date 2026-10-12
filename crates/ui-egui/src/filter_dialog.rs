@@ -281,7 +281,6 @@ pub fn has_dialog(command: &str) -> bool {
         || matches!(
             command,
             "image.trim"
-                | "view.newGuide"
                 | "select.refineEdge"
                 | "edit.assignProfile"
                 | "edit.convertToProfile"
