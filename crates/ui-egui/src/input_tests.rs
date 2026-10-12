@@ -7,6 +7,7 @@ use egui_kittest::Harness;
 use serde_json::json;
 
 use crate::PhotocraftApp;
+use crate::wheel_nav::NOTCH;
 
 fn harness() -> Harness<'static, PhotocraftApp> {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -69,6 +70,26 @@ fn ctrl_plus_zooms_the_canvas_not_the_interface() {
     h.run_steps(3);
     assert!((zoom(&h) - z0).abs() < 1e-3, "⌘0 fits on screen: {} vs {z0}", zoom(&h));
     assert_eq!(h.ctx.zoom_factor(), 1.0, "the interface must never scale");
+}
+
+/// ⌘+ / ⌘− keep Photoshop's preset steps, however smooth the wheel is: 100 % → 200 % → 100 % →
+/// 66.7 %.
+#[test]
+fn keyboard_zoom_keeps_the_preset_steps() {
+    let mut h = harness();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    h.run_steps(2);
+    assert_eq!(zoom(&h), 1.0);
+    for (key, m, want) in [
+        (Key::Equals, Modifiers::COMMAND, 2.0),
+        (Key::Minus, Modifiers::COMMAND, 1.0),
+        (Key::Minus, Modifiers::COMMAND, 2.0 / 3.0),
+        (Key::Plus, Modifiers::COMMAND | Modifiers::SHIFT, 1.0),
+    ] {
+        h.key_press_modifiers(m, key);
+        h.run_steps(2);
+        assert!((zoom(&h) - want).abs() < 1e-6, "{key:?}: {} vs {want}", zoom(&h));
+    }
 }
 
 #[test]
@@ -381,10 +402,10 @@ fn the_wheel_reaches_12800_percent_and_stops_dead_there() {
     }
     assert_eq!(zoom(&h), crate::zoom_levels::MAX);
     assert_eq!(h.state().ui.views[0].center, c, "at the limit the image doesn't move");
-    // One notch back: 12800 / 1.1, still around the pointer.
+    // One notch back: 12800 / 1.12, still around the pointer.
     wheel(&h, -1.0, Modifiers::ALT);
     h.run_steps(30);
-    assert!((zoom(&h) - crate::zoom_levels::MAX / 1.1).abs() < 1e-2, "{}", zoom(&h));
+    assert!((zoom(&h) - crate::zoom_levels::MAX / NOTCH).abs() < 1e-2, "{}", zoom(&h));
     let d2 = doc_at(&h, p);
     assert!((d2[0] - d0[0]).abs() < 0.02 && (d2[1] - d0[1]).abs() < 0.02, "{d0:?} -> {d2:?}");
 }
@@ -397,7 +418,7 @@ fn alt_scroll_zooms_in_steps_around_the_pointer() {
     h.hover_at(p);
     h.run_steps(2);
     let (z0, d0) = (zoom(&h), doc_at(&h, p));
-    // One notch with ⌥ held: ×1.1 (Photoshop), the point under the pointer stays put. The modifiers are
+    // One notch with ⌥ held: ×1.12, the point under the pointer stays put. The modifiers are
     // released right after the event, while egui still smooths the notch over later frames, which
     // must neither ease the zoom nor turn into a pan (#1490).
     wheel(&h, 1.0, Modifiers::ALT);
@@ -405,13 +426,13 @@ fn alt_scroll_zooms_in_steps_around_the_pointer() {
     let at_once = zoom(&h);
     h.run_steps(40);
     let (z1, d1) = (zoom(&h), doc_at(&h, p));
-    assert!((z1 / z0 - 1.1).abs() < 1e-3, "one ⌥ notch is ×1.1: {z0} -> {z1}");
+    assert!((z1 / z0 - NOTCH).abs() < 1e-3, "one ⌥ notch is ×1.12: {z0} -> {z1}");
     assert_eq!(at_once, z1, "the notch is applied the frame it arrives, with no easing");
     assert!((d1[0] - d0[0]).abs() < 0.05 && (d1[1] - d0[1]).abs() < 0.05, "centred on the pointer: {d0:?} -> {d1:?}");
     // Three notches back out.
     wheel(&h, -3.0, Modifiers::ALT);
     h.run_steps(40);
-    assert!((zoom(&h) / z1 - 1.1f32.powi(-3)).abs() < 1e-3, "{z1} -> {}", zoom(&h));
+    assert!((zoom(&h) / z1 - NOTCH.powi(-3)).abs() < 1e-3, "{z1} -> {}", zoom(&h));
 
     // A plain notch still pans, and does not zoom.
     let (z2, c2) = (zoom(&h), h.state().ui.views[0].center);
@@ -420,19 +441,71 @@ fn alt_scroll_zooms_in_steps_around_the_pointer() {
     assert_eq!(zoom(&h), z2, "a plain scroll never zooms");
     assert!(h.state().ui.views[0].center[1] > c2[1], "a plain scroll pans");
 
-    // ⌘/Ctrl + scroll pans sideways (#635), on Windows (Ctrl) and macOS (⌘) alike.
+    // ⌘/Ctrl + scroll zooms around the pointer too, on Windows (Ctrl) and macOS (⌘) alike, and
+    // never pans.
     for m in [Modifiers { ctrl: true, command: true, ..Modifiers::NONE }, Modifiers { mac_cmd: true, command: true, ..Modifiers::NONE }] {
-        let c = h.state().ui.views[0].center;
+        let (z, d) = (zoom(&h), doc_at(&h, p));
         wheel(&h, -1.0, m);
         h.run_steps(40);
-        let c1 = h.state().ui.views[0].center;
-        assert_eq!(zoom(&h), z2, "⌘/Ctrl-scroll never zooms");
-        assert!(c1[0] > c[0] && c1[1] == c[1], "⌘/Ctrl-scroll pans sideways: {c:?} -> {c1:?}");
+        let d1 = doc_at(&h, p);
+        assert!((zoom(&h) * NOTCH / z - 1.0).abs() < 1e-3, "{m:?}: one notch out is ÷1.12: {z} -> {}", zoom(&h));
+        assert!((d1[0] - d[0]).abs() < 0.05 && (d1[1] - d[1]).abs() < 0.05, "{m:?}: centred on the pointer: {d:?} -> {d1:?}");
     }
+    let z2 = zoom(&h);
     // A pinch zooms around the pointer.
     h.event(egui::Event::Zoom(1.25));
     h.run_steps(2);
     assert!((zoom(&h) / z2 - 1.25).abs() < 1e-3, "pinch zooms: {z2} -> {}", zoom(&h));
+}
+
+/// A trackpad (or a high-resolution wheel) sends ⌘/Ctrl + scroll as many small pixel deltas:
+/// each frame zooms a little, they add up to ×1.12 per 100 px, and the document point under the
+/// pointer stays under it to a fraction of a screen pixel.
+#[test]
+fn ctrl_scroll_in_small_pixel_deltas_zooms_smoothly_around_the_pointer() {
+    let mut h = harness();
+    let r = h.state().last_canvas_rect;
+    let p = pos2(r.center().x - 90.0, r.center().y + 60.0);
+    h.hover_at(p);
+    h.run_steps(2);
+    let (z0, d0) = (zoom(&h), doc_at(&h, p));
+    let ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
+    let mut last = z0;
+    for _ in 0..25 {
+        h.event_modifiers(
+            egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(0.0, 4.0), phase: egui::TouchPhase::Move, modifiers: ctrl },
+            ctrl,
+        );
+        h.run_steps(1);
+        let z = zoom(&h);
+        assert!(z > last && z / last < 1.01, "every 4 px step is a small zoom in: {last} -> {z}");
+        last = z;
+    }
+    h.run_steps(20);
+    let (z1, d1) = (zoom(&h), doc_at(&h, p));
+    assert!((z1 / z0 - NOTCH).abs() < 1e-3, "100 px in all is ×1.12: {z0} -> {z1}");
+    let drift = ((d1[0] - d0[0]).powi(2) + (d1[1] - d0[1]).powi(2)).sqrt() * z1;
+    assert!(drift < 0.5, "the point under the pointer moved {drift} screen px: {d0:?} -> {d1:?}");
+}
+
+/// ⌘/Ctrl + wheel stops on the zoom limits: far out it lands on the document's minimum and stays.
+#[test]
+fn ctrl_wheel_stops_at_the_minimum_zoom() {
+    let mut h = harness();
+    let p = h.state().last_canvas_rect.center();
+    h.hover_at(p);
+    h.run_steps(2);
+    let ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
+    for _ in 0..80 {
+        wheel(&h, -1.0, ctrl);
+        h.run_steps(2);
+    }
+    let min = crate::zoom_levels::min([400, 300]);
+    assert!((zoom(&h) - min).abs() < 1e-6, "{} vs {min}", zoom(&h));
+    let c = h.state().ui.views[0].center;
+    wheel(&h, -1.0, ctrl);
+    h.run_steps(4);
+    assert_eq!(h.state().ui.views[0].center, c, "at the limit the image doesn't move");
 }
 
 #[test]
@@ -447,7 +520,7 @@ fn alt_scroll_zooms_while_a_temporary_tool_is_held() {
     let z0 = zoom(&h);
     wheel(&h, 2.0, Modifiers::ALT);
     h.run_steps(40);
-    assert!((zoom(&h) / z0 - 1.1f32.powi(2)).abs() < 1e-3, "{z0} -> {}", zoom(&h));
+    assert!((zoom(&h) / z0 - NOTCH.powi(2)).abs() < 1e-3, "{z0} -> {}", zoom(&h));
     h.event(egui::Event::Key { key: Key::Space, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE });
     h.run_steps(2);
     assert_eq!(h.state().ui.tool, crate::state::Tool::Brush);

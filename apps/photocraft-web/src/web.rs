@@ -151,6 +151,8 @@ pub fn start() {
                 (None, bridge, Vec::new())
             }
         };
+        // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
+        crate::wheel_guard::install();
         let pen_target = canvas.clone();
         let result = eframe::WebRunner::new()
             .start(
@@ -367,6 +369,10 @@ impl WebShell {
 }
 
 impl eframe::App for WebShell {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        crate::wheel_guard::restore(raw_input);
+    }
+
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
