@@ -292,6 +292,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 app.open_dialog_file()
             }
         }
+        "file.import.videoFramesToLayers" if params.get("path").and_then(Value::as_str).is_none() => {
+            app.ask_folder(|app, path| app.run("file.import.videoFramesToLayers", json!({"path": path})).map_err(|e| e.to_string()))
+        }
         "file.save" => {
             // Writes back only to a layered file; a flat one goes through Save As.
             let tga_bits = crate::targa_options_ui::bits_param(&params, id)?;

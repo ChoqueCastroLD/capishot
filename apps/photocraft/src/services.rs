@@ -115,6 +115,13 @@ fn show_file_dialog(request: FileDialogRequest, parent: Option<&eframe::Frame>, 
                 Box::pin(async move { picked.await.map(|file| FileDialogAnswer::Paths(vec![path_of(&file)])) })
             }
         }
+        FileDialogRequest::Folder { initial_dir } => {
+            if let Some(dir) = initial_dir {
+                dialog = dialog.set_directory(dir);
+            }
+            let picked = dialog.pick_folder();
+            Box::pin(async move { picked.await.map(|folder| FileDialogAnswer::FolderTo(path_of(&folder))) })
+        }
         FileDialogRequest::Save { suggested } => {
             for (name, exts) in save_filters(&suggested) {
                 dialog = dialog.add_filter(name, &exts);
