@@ -129,6 +129,7 @@ fn orientation_6_jpeg_converts_upright_and_rotates_back() {
     let info = |p: &Path| {
         let mut v = serde_json::from_str::<Value>(&ok(bin().arg("info").arg(p))).unwrap();
         v.as_object_mut().unwrap().remove("file");
+        v.as_object_mut().unwrap().remove("path");
         v
     };
     let (ia, ib) = (info(&a), info(&b));
