@@ -138,6 +138,26 @@ pub struct FontDb {
     /// Lower-case names of families whose every face was unregistered: fontique keeps the (now
     /// empty) family name, so lists and lookups hide it.
     retired: HashSet<String>,
+    /// The bytes of every font registered from memory (bundled, craft-fonts, served or loaded
+    /// fonts), shared with fontique, for other renderers ([`FontDb::font_data`]).
+    data: Vec<FontData>,
+}
+
+/// The bytes of a font file the database holds in memory: embedded in the binary, or registered
+/// at run time. Cheap to clone (shared, never copied).
+#[derive(Clone, Debug)]
+pub enum FontData {
+    Static(&'static [u8]),
+    Shared(Arc<Vec<u8>>),
+}
+
+impl AsRef<[u8]> for FontData {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            FontData::Static(b) => b,
+            FontData::Shared(b) => b.as_slice(),
+        }
+    }
 }
 
 /// A face as fontique's `unregister_font` identifies it.
@@ -145,8 +165,7 @@ type FaceKey = (FamilyId, FontWidth, FontStyle, FontWeight);
 
 /// Faces a managed font set added: exactly what has to be unregistered again.
 struct Managed {
-    // Compared on native re-registration only; the web build registers no font files.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    // Compared on native re-registration and handed to psd-compiler; empty on the web.
     files: Vec<std::path::PathBuf>,
     faces: Vec<FaceKey>,
 }
@@ -180,6 +199,7 @@ impl FontDb {
             face_aliases: HashMap::new(),
             managed: HashMap::new(),
             retired: HashSet::new(),
+            data: Vec::new(),
         };
         for (_, bytes) in BUNDLED {
             db.register_static_font(bytes.as_slice());
@@ -229,12 +249,38 @@ impl FontDb {
 
     /// Registers font data (TTF/OTF, or every face of a TTC/OTC). Returns the family names added.
     pub fn register_font_data(&mut self, bytes: Vec<u8>) -> Vec<String> {
-        self.register_blob(Blob::new(Arc::new(bytes)))
+        let bytes = Arc::new(bytes);
+        let names = self.register_blob(Blob::new(bytes.clone()));
+        if !names.is_empty() {
+            self.data.push(FontData::Shared(bytes));
+        }
+        names
     }
 
     /// Registers embedded font data without copying it.
     fn register_static_font(&mut self, bytes: &'static [u8]) -> Vec<String> {
-        self.register_blob(Blob::new(Arc::new(bytes)))
+        let names = self.register_blob(Blob::new(Arc::new(bytes)));
+        if !names.is_empty() {
+            self.data.push(FontData::Static(bytes));
+        }
+        names
+    }
+
+    /// The font files this database holds in memory, in registration order: the bundled fonts,
+    /// craft-fonts, then every file registered with [`FontDb::register_font_data`] (on the web,
+    /// the served fonts that arrived). System and managed fonts are files on disk and not
+    /// included (see [`FontDb::managed_font_files`]). Sharing, not copying: psd-compiler renders
+    /// type with these in the browser.
+    pub fn font_data(&self) -> Vec<FontData> {
+        self.data.clone()
+    }
+
+    /// The files of every registered downloaded-fonts store entry ([`FontDb::register_managed`]);
+    /// always empty on the web.
+    pub fn managed_font_files(&self) -> Vec<std::path::PathBuf> {
+        let mut keys: Vec<&String> = self.managed.keys().collect();
+        keys.sort();
+        keys.into_iter().filter_map(|k| self.managed.get(k)).flat_map(|m| m.files.iter().cloned()).collect()
     }
 
     fn register_blob(&mut self, blob: Blob<u8>) -> Vec<String> {
@@ -884,6 +930,24 @@ mod tests {
     }
 
     #[test]
+    fn font_data_shares_the_bundled_and_registered_bytes() {
+        let mut db = super::FontDb::new();
+        let bundled = db.font_data();
+        assert!(bundled.len() >= super::BUNDLED.len());
+        assert!(bundled.iter().any(|d| d.as_ref() == super::INTER_REGULAR.as_slice()));
+        // Not a font: not registered, not handed on.
+        assert!(db.register_font_data(b"not a font".to_vec()).is_empty());
+        assert_eq!(db.font_data().len(), bundled.len());
+        let zq = renamed_inter("Zqxvk");
+        assert_eq!(db.register_font_data(zq.clone()), ["Zqxvk"]);
+        let data = db.font_data();
+        assert_eq!(data.len(), bundled.len() + 1);
+        assert_eq!(data.last().map(|d| d.as_ref() == zq.as_slice()), Some(true));
+        // Shared with fontique, not copied.
+        assert!(matches!(data.last(), Some(super::FontData::Shared(a)) if std::sync::Arc::strong_count(a) >= 3));
+    }
+
+    #[test]
     fn managed_fonts_register_and_unregister_without_touching_others() {
         let dir = temp_dir("managed");
         let file = dir.join("Zqxvk-Regular.ttf");
@@ -897,6 +961,7 @@ mod tests {
         assert!(db.has_family("Zqxvk") && db.is_managed("zqxvk"));
         assert!(db.families().iter().any(|f| f == "Zqxvk"));
         assert_eq!(db.faces("Zqxvk").len(), 1);
+        assert_eq!(db.managed_font_files(), std::slice::from_ref(&file));
         // Registering again is a no-op; registering other files under the key replaces them.
         assert_eq!(db.register_managed("zqxvk", "Zqxvk", std::slice::from_ref(&file)).unwrap(), super::Registered::Families(vec!["Zqxvk".into()]));
         assert_eq!(db.faces("Zqxvk").len(), 1);
@@ -918,6 +983,7 @@ mod tests {
         assert!(!db.families().iter().any(|f| f == "Zqxvk"));
         assert_eq!(db.families(), before);
         assert!(db.unregister_managed("zqxvk").is_empty());
+        assert!(db.managed_font_files().is_empty());
         // And it can come back.
         db.register_managed("zqxvk", "Zqxvk", &[file]).unwrap();
         assert!(db.families().iter().any(|f| f == "Zqxvk"));
