@@ -2135,6 +2135,7 @@
 	Opening {name}	Öffne {name}
 	Saved {name}	Gespeichert: {name}
 	Saving {name}	Speichere {name}
+	Saving {percent}	Speichern {percent}
 	A save to {name} is still running; try again when it finishes	{name} wird noch gespeichert; versuchen Sie es erneut, wenn der Vorgang abgeschlossen ist
 	{label} is writing the file and can no longer be cancelled	{label} schreibt die Datei und kann nicht mehr abgebrochen werden
 	Opening {name}…	Öffne {name}…

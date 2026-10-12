@@ -2403,6 +2403,7 @@
 	Opening {name}	Відкриття {name}
 	Saved {name}	Збережено: {name}
 	Saving {name}	Збереження {name}
+	Saving {percent}	Збереження {percent}
 	A save to {name} is still running; try again when it finishes	Збереження в {name} ще триває; спробуйте ще раз, коли воно завершиться
 	{label} is writing the file and can no longer be cancelled	{label}: триває запис файлу, скасувати вже не можна
 	Opening {name}…	Відкриття {name}…

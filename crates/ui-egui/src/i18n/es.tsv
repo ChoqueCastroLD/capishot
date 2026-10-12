@@ -2151,6 +2151,7 @@
 	Opening {name}	Abriendo {name}
 	Saved {name}	Guardado: {name}
 	Saving {name}	Guardando {name}
+	Saving {percent}	Guardando {percent}
 	A save to {name} is still running; try again when it finishes	Todavía se está guardando {name}; inténtelo de nuevo cuando termine
 	{label} is writing the file and can no longer be cancelled	{label} está escribiendo el archivo y ya no se puede cancelar
 	Opening {name}…	Abriendo {name}…

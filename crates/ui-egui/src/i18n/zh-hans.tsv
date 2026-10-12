@@ -2211,6 +2211,7 @@ cameraRaw	Blending	混合
 	Opening {name}	正在打开 {name}
 	Saved {name}	已保存 {name}
 	Saving {name}	正在保存 {name}
+	Saving {percent}	正在保存 {percent}
 	A save to {name} is still running; try again when it finishes	仍在保存到 {name}；请在完成后重试
 	{label} is writing the file and can no longer be cancelled	{label} 正在写入文件，已无法取消
 	Opening {name}…	正在打开 {name}…
