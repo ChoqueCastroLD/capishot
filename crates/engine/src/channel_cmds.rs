@@ -125,10 +125,10 @@ pub(crate) fn fix_view(st: &mut DocState) {
         match v.target {
             ChannelTarget::Alpha(i) if i >= n => v.target = ChannelTarget::Composite,
             ChannelTarget::Color(k) if k >= colors || colors < 2 => v.target = ChannelTarget::Composite,
-            ChannelTarget::LayerMask if !st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| l.mask.is_some()) => {
+            ChannelTarget::LayerMask if st.active_layer.and_then(|id| st.doc.layer(id)).is_none_or(|l| l.mask.is_none()) => {
                 v.target = ChannelTarget::Composite;
             }
-            ChannelTarget::VectorMask if !st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| l.vector_mask.is_some()) => {
+            ChannelTarget::VectorMask if st.active_layer.and_then(|id| st.doc.layer(id)).is_none_or(|l| l.vector_mask.is_none()) => {
                 v.target = ChannelTarget::Composite;
             }
             _ => {}
