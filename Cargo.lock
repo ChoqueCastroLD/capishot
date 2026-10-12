@@ -4383,6 +4383,7 @@ name = "photocraft-format"
 version = "0.7.0"
 dependencies = [
  "blake3",
+ "crc32fast",
  "flate2",
  "photocraft-codecs",
  "photocraft-color",
