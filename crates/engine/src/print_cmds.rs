@@ -330,6 +330,7 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
 fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = d.doc.clone();
+    let doc_id = doc.id;
     let params = p.clone();
     let worker_params = params.clone();
     let command = cmd.to_string();
@@ -347,7 +348,16 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
             },
             move |s, result| {
                 remember_print(s, &params);
-                crate::automate_cmds::fire_event(s, "print");
+                // A user can switch tabs while printing. Hooks belong to the source document;
+                // a closed source has no document left to modify, as for background saves.
+                let viewed = s.active().map(|st| st.doc.id);
+                if let Some(index) = s.documents().iter().position(|st| st.doc.id == doc_id) {
+                    s.set_active(index);
+                    crate::automate_cmds::fire_event(s, "print");
+                    if let Some(index) = viewed.and_then(|id| s.documents().iter().position(|st| st.doc.id == id)) {
+                        s.set_active(index);
+                    }
+                }
                 Ok(result)
             },
         );

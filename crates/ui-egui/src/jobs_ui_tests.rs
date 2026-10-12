@@ -615,12 +615,17 @@ fn printing_keeps_drawing_and_reports_only_the_final_spooler_result() {
         h.key_press(egui::Key::Escape);
         h.run_steps(2);
         assert!(h.state().session.job(id).is_some(), "Esc cannot retract a submitted job");
+        let st = h.state_mut().session.active_mut().unwrap();
+        st.saved_revision = st.revision;
+        assert!(press_window_close(h.state_mut()), "quit waits for print submission");
+        assert!(h.state().jobs.close_after_saves);
         gate.store(true, Ordering::Relaxed);
         let deadline = Instant::now() + Duration::from_secs(10);
         while h.state().session.has_jobs() && Instant::now() < deadline {
             h.step();
         }
         assert!(!h.state().session.has_jobs());
+        assert!(!h.state().jobs.close_after_saves, "close repeats on success or is cleared for a visible error");
         if success {
             assert!(h.state().ui.status.contains("Office-42"), "{}", h.state().ui.status);
             assert!(!h.state().ui.status_error);

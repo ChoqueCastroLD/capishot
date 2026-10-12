@@ -348,7 +348,7 @@ fn finish_save(app: &mut PhotocraftApp, ctx: &egui::Context, save: SaveJob, labe
 /// no save worker is left.
 fn close_after_saves(app: &mut PhotocraftApp, ctx: &egui::Context) {
     app.jobs.saves.retain(|s| !(s.ended && s.state.finished()));
-    if !app.saving() && std::mem::take(&mut app.jobs.close_after_saves) {
+    if !app.saving() && !app.printing() && std::mem::take(&mut app.jobs.close_after_saves) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 }
@@ -363,8 +363,8 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.jobs.focus.is_some_and(|j| !app.jobs.opens.iter().any(|o| o.job == j)) {
         app.jobs.focus = app.jobs.opens.last().map(|o| o.job);
     }
-    if app.saving() {
-        close_after_saves(app, ctx);
+    close_after_saves(app, ctx);
+    if app.saving() || app.printing() {
         // Keep checking on a cancelled save's worker until it returns.
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
@@ -493,6 +493,9 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.ui.status_error = false;
         }
         JobOutcome::Failed(err) => {
+            if matches!(e.command.as_str(), "file.print" | "file.printOneCopy") {
+                app.jobs.close_after_saves = false;
+            }
             app.sync_views();
             notices::error(app, format!("{}: {err}", e.label));
         }

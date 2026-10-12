@@ -244,11 +244,19 @@ fn spool_transport_streams_pdf_and_propagates_refusal() {
     const CHILD: &str = "PHOTOCRAFT_TEST_PRINT_TRANSPORT";
     if let Ok(dir) = std::env::var(CHILD) {
         let mut s = session("rgb", 8);
+        let source = s.active().unwrap().doc.id;
+        s.execute("file.scripts.scriptEventsManager", json!({"add": {"event": "print", "steps": [["image.imageRotation.90cw", {}]]}})).unwrap();
         let crate::jobs::Started::Job(job) = s.start("file.print", json!({"printer": "Office", "copies": 3, "paper": "a4", "scale": 50})).unwrap() else {
             panic!("desktop printing must start on a worker");
         };
         assert!(!s.cancel_job(job), "queue side effects must not be reported as cancelled");
+        s.execute("file.new", json!({"width": 40, "height": 10})).unwrap();
+        let viewed = s.active().unwrap().doc.id;
         let out = s.wait_job(job).unwrap();
+        assert_eq!(s.active().unwrap().doc.id, viewed, "completion keeps the user's tab");
+        assert_eq!(s.active().unwrap().doc.size.width, 40, "print hook must not act on the newly viewed document");
+        let printed = &s.documents().iter().find(|st| st.doc.id == source).unwrap().doc;
+        assert_eq!((printed.size.width, printed.size.height), (150, 300), "print hook ran on the source document");
         assert_eq!(out["sent"], true);
         assert_eq!(out["spooler"], "request id is Office-42");
         assert!(out["pdf"].is_null(), "spool-only printing leaves no diagnostic PDF");
