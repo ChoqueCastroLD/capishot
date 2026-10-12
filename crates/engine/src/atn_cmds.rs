@@ -164,8 +164,9 @@ fn class(c: &str) -> Class {
     Class { name: UnicodeString::new_nul(""), class_id: code(c) }
 }
 
-/// The pixel unit of a `UntF` value.
+/// The pixel and percent units of a `UntF` value.
 const PX: [u8; 4] = *b"#Pxl";
+const PCT: [u8; 4] = *b"#Prc";
 
 fn px(v: f64) -> D {
     D::UnitFloat { unit: PX, value: v }
@@ -1338,6 +1339,69 @@ fn clear_to(id: &str, p: &Value) -> Option<Descriptor> {
     }
 }
 
+/// `placeEvent`: File › Place Embedded / Linked, with the file and the recorded scale.
+fn place_from(d: &Descriptor) -> Mapped {
+    let Some(path) = d.get("null").and_then(path_text) else { return Mapped::Unsupported { harmless: false } };
+    let mut p = json!({"path": path});
+    if let Some(w) = get_num(d, "Wdth") {
+        p["scale"] = json!(w);
+    }
+    step(if get_bool(d, "Lnkd") == Some(true) { "file.placeLinked" } else { "file.placeEmbedded" }, p)
+}
+
+fn place_to(id: &str, p: &Value) -> Option<Descriptor> {
+    let mut d = desc("null").with("null", path_value(jstr(p, "path")?)).with("FTcs", enm("QCSt", "Qcsa"));
+    if let Some(s) = jnum(p, "scale") {
+        d = d.with("Wdth", pct(s)).with("Hght", pct(s));
+    }
+    Some(d.with("Lnkd", D::Boolean(id == "file.placeLinked")).with("Antl", D::Boolean(true)))
+}
+
+/// `open`: File › Open of a recorded path.
+fn open_from(d: &Descriptor) -> Mapped {
+    match d.get("null").and_then(path_text) {
+        Some(path) => step("file.openAs", json!({"path": path})),
+        None => Mapped::Unsupported { harmless: false },
+    }
+}
+
+fn open_to(_: &str, p: &Value) -> Option<Descriptor> {
+    Some(desc("null").with("null", path_value(jstr(p, "path")?)))
+}
+
+/// Photoshop's four-character condition codes that differ from the string ids.
+const CONDITION_CODES: &[(&str, &str)] = &[("Lyrs", "hasLayers")];
+
+/// `conditional`: Insert Conditional, with its Then and Else actions by name.
+fn conditional_from(d: &Descriptor) -> Mapped {
+    let Some(c) = get_enum(d, "null") else { return Mapped::Unsupported { harmless: false } };
+    let condition = lookup(CONDITION_CODES, &c).unwrap_or(c.as_str());
+    if !crate::actions_edit_cmds::CONDITIONS.contains(&condition) {
+        return Mapped::Unsupported { harmless: false };
+    }
+    let branch = |key: &str| match get_ref(d, key).map(target) {
+        Some(Target::Name(n)) => Some(n),
+        _ => None,
+    };
+    step("actions.conditional", json!({"if": condition, "then": branch("then"), "else": branch("else")}))
+}
+
+fn conditional_to(_: &str, p: &Value) -> Option<Descriptor> {
+    let condition = jstr(p, "if")?;
+    let code = lookup_back(CONDITION_CODES, condition).unwrap_or(condition);
+    let mut d = desc("null").with("null", enm("Cndt", code));
+    for key in ["then", "else"] {
+        if let Some(name) = jstr(p, key) {
+            let mut items = vec![ReferenceItem::Name { class: class("Actn"), name: UnicodeString::new_nul(name) }];
+            if let Some(set) = jstr(p, "set") {
+                items.push(ReferenceItem::Name { class: class("ASet"), name: UnicodeString::new_nul(set) });
+            }
+            d = d.with(key, D::Reference(items));
+        }
+    }
+    Some(d)
+}
+
 /// `close`: Photoshop's Save prompt answer becomes a Save step before the Close.
 fn close_from(d: &Descriptor) -> Mapped {
     if get_enum(d, "Svng").as_deref() == Some("Ys") { steps(vec![("file.save", json!({})), ("file.close", json!({}))]) } else { none("file.close") }
@@ -1712,9 +1776,36 @@ fn play_to(_: &str, p: &Value) -> Option<Descriptor> {
 }
 
 fn fill_from(d: &Descriptor) -> Mapped {
-    if d.get("From").is_some() {
-        // The Paint Bucket tool's click, not Edit › Fill.
-        return Mapped::Unsupported { harmless: false };
+    if let Some(from) = get_obj(d, "From") {
+        // The Paint Bucket tool's click: its point is in pixels, or in percent of the canvas
+        // (not replayable without the document size).
+        let in_px = |k: &str| matches!(from.get(k), Some(D::UnitFloat { unit: PX, .. }));
+        let (Some(x), Some(y)) = (get_num(from, "Hrzn"), get_num(from, "Vrtc")) else { return Mapped::Unsupported { harmless: false } };
+        if !in_px("Hrzn") || !in_px("Vrtc") {
+            return Mapped::Unsupported { harmless: false };
+        }
+        let mut p = json!({"x": x.round(), "y": y.round()});
+        match get_enum(d, "Usng").as_deref() {
+            Some("FrgC") | None => {}
+            Some("Pttn") => p["contents"] = json!("pattern"),
+            Some(_) => return Mapped::Unsupported { harmless: false },
+        }
+        if let Some(t) = get_num(d, "Tlrn") {
+            p["tolerance"] = json!(t);
+        }
+        if let Some(c) = get_bool(d, "Cntg") {
+            p["contiguous"] = json!(c);
+        }
+        if let Some(a) = get_bool(d, "AntA") {
+            p["antiAlias"] = json!(a);
+        }
+        if let Some(m) = get_bool(d, "Mrgd") {
+            p["sampleAllLayers"] = json!(m);
+        }
+        if let Some(o) = get_num(d, "Opct") {
+            p["opacity"] = json!(o);
+        }
+        return step("paint.bucket", p);
     }
     let Some(contents) = get_enum(d, "Usng").and_then(|u| lookup(FILL_CONTENTS, &u)) else { return Mapped::Unsupported { harmless: false } };
     let mut p = json!({"contents": contents});
@@ -1739,7 +1830,20 @@ fn fill_from(d: &Descriptor) -> Mapped {
     step("edit.fill", p)
 }
 
-fn fill_to(_: &str, p: &Value) -> Option<Descriptor> {
+fn fill_to(id: &str, p: &Value) -> Option<Descriptor> {
+    if id == "paint.bucket" {
+        let mut d = desc("null").with("From", D::Descriptor(desc("Pnt ").with("Hrzn", px(jnum(p, "x")?)).with("Vrtc", px(jnum(p, "y")?))));
+        d = d.with("Tlrn", long(jnum(p, "tolerance").unwrap_or(32.0))).with("AntA", D::Boolean(jbool(p, "antiAlias").unwrap_or(true)));
+        d = d.with("Usng", enm("FlCn", if jstr(p, "contents") == Some("pattern") { "Pttn" } else { "FrgC" }));
+        if let Some(o) = jnum(p, "opacity") {
+            d = d.with("Opct", pct(o));
+        }
+        d = d.with("Cntg", D::Boolean(jbool(p, "contiguous").unwrap_or(true)));
+        if let Some(m) = jbool(p, "sampleAllLayers") {
+            d = d.with("Mrgd", D::Boolean(m));
+        }
+        return Some(d);
+    }
     let contents = jstr(p, "contents").unwrap_or("color");
     let mut d = desc("null").with("Usng", enm("FlCn", lookup_back(FILL_CONTENTS, contents)?));
     if contents == "color" {
@@ -1935,15 +2039,24 @@ fn canvas_size_to(_: &str, p: &Value) -> Option<Descriptor> {
 
 fn image_size_from(d: &Descriptor) -> Mapped {
     let mut p = Map::new();
+    let mut percent: Option<f64> = None;
     for (k, param) in [("Wdth", "width"), ("Hght", "height")] {
         match d.get(k) {
             Some(D::UnitFloat { unit: PX, value }) => {
                 p.insert(param.into(), value.round().into());
             }
-            // Percent or physical units need the document's size: not replayable headlessly.
+            // Percent scales both sides at playback; two different percentages, or physical
+            // units, need the document's size and resolution and stay unsupported.
+            Some(D::UnitFloat { unit: PCT, value }) => match percent {
+                Some(other) if (other - value).abs() > 1e-9 => return Mapped::Unsupported { harmless: false },
+                _ => percent = Some(*value),
+            },
             Some(_) => return Mapped::Unsupported { harmless: false },
             None => {}
         }
+    }
+    if let Some(pc) = percent {
+        p.insert("percent".into(), pc.into());
     }
     if let Some(r) = get_num(d, "Rslt") {
         p.insert("resolution".into(), r.into());
@@ -1955,7 +2068,7 @@ fn image_size_from(d: &Descriptor) -> Mapped {
             }
             None => return Mapped::Unsupported { harmless: false },
         }
-    } else if p.contains_key("resolution") && !p.contains_key("width") && !p.contains_key("height") {
+    } else if p.contains_key("resolution") && !p.contains_key("width") && !p.contains_key("height") && !p.contains_key("percent") {
         p.insert("resample".into(), "none".into());
     }
     if p.is_empty() {
@@ -1966,6 +2079,9 @@ fn image_size_from(d: &Descriptor) -> Mapped {
 
 fn image_size_to(_: &str, p: &Value) -> Option<Descriptor> {
     let mut d = desc("null");
+    if let Some(pc) = jnum(p, "percent") {
+        d = d.with("Wdth", pct(pc)).with("Hght", pct(pc)).with("CnsP", D::Boolean(true));
+    }
     if let Some(w) = jnum(p, "width") {
         d = d.with("Wdth", px(w));
     }
@@ -2459,7 +2575,7 @@ const EVENTS: &[Event] = &[
     ev!("Grow", "grow", "Grow", "select.grow", &[F("Tlrn", "tolerance", Kind::Long)]),
     ev!("Smlr", "similar", "Similar", "select.similar", &[F("Tlrn", "tolerance", Kind::Long)]),
     // Edit.
-    Event { code: "Fl  ", name: "fill", label: "Fill", ids: &["edit.fill"], from: fill_from, to: fill_to },
+    Event { code: "Fl  ", name: "fill", label: "Fill", ids: &["edit.fill", "paint.bucket"], from: fill_from, to: fill_to },
     ev!("Strk", "stroke", "Stroke", "edit.stroke", STROKE),
     ev!("copy", "copyEvent", "Copy", "edit.copy", &[]),
     ev!("CpyM", "copyMerged", "Copy Merged", "edit.copyMerged", &[]),
@@ -2494,6 +2610,9 @@ const EVENTS: &[Event] = &[
     // File and actions.
     Event { code: "Cls ", name: "close", label: "Close", ids: &["file.close"], from: close_from, to: close_to },
     Event { code: "Expr", name: "export", label: "Export", ids: &["file.export.saveForWebLegacy"], from: export_from, to: export_to },
+    Event { code: "Plc ", name: "placeEvent", label: "Place", ids: &["file.placeEmbedded", "file.placeLinked"], from: place_from, to: place_to },
+    Event { code: "Opn ", name: "open", label: "Open", ids: &["file.openAs"], from: open_from, to: open_to },
+    Event { code: "", name: "conditional", label: "If", ids: &["actions.conditional"], from: conditional_from, to: conditional_to },
     ev!("save", "save", "Save", "file.save", &[]),
     ev!("Rvrt", "revert", "Revert", "file.revert", &[]),
     Event { code: "Ply ", name: "play", label: "Play", ids: &["actions.play"], from: play_from, to: play_to },
@@ -2630,7 +2749,7 @@ fn export_item(id: &str, params: &Value, set: &str) -> Option<AtnItem> {
         return Some(AtnItem { event, dictionary: jstr(params, "name").unwrap_or("").to_string(), descriptor, ..Default::default() });
     }
     let mut params = params.clone();
-    if id == "actions.play" && params.get("set").is_none() {
+    if (id == "actions.play" || id == "actions.conditional") && params.get("set").is_none() {
         params["set"] = json!(set);
     }
     let (e, descriptor) = event_and_descriptor(id, &params)?;

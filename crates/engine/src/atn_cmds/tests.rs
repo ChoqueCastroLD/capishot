@@ -286,6 +286,13 @@ fn every_mapped_command_exports_and_imports_back() {
         ("layer.smartObjects.convertToSmartObject", json!({})),
         ("layer.smartObjects.editContents", json!({})),
         ("layer.smartObjects.updateModifiedContent", json!({})),
+        ("paint.bucket", json!({"x": 10, "y": 20, "tolerance": 32, "antiAlias": true, "contiguous": false, "opacity": 100})),
+        ("image.imageSize", json!({"percent": 200, "resample": "bicubicAutomatic"})),
+        ("file.placeEmbedded", json!({"path": "/tmp/logo.png", "scale": 50})),
+        ("file.placeLinked", json!({"path": "/tmp/logo.png"})),
+        ("file.openAs", json!({"path": "/tmp/a.psd"})),
+        ("actions.conditional", json!({"if": "hasLayers", "then": "FS8-Layers", "else": "FS8-No-Layers", "set": "S"})),
+        ("actions.conditional", json!({"if": "landscape", "then": "Wide", "else": null, "set": "S"})),
         ("actions.play", json!({"action": "Other", "set": "S"})),
         (STOP_MESSAGE, json!({"message": "Hi", "allowContinue": false})),
     ];
@@ -303,7 +310,7 @@ fn every_mapped_command_exports_and_imports_back() {
                 assert_eq!(steps[0].0, *id, "{id} came back as another command");
                 let mut back = steps[0].1.clone();
                 normalise(&mut back);
-                if *id == "actions.play" {
+                if *id == "actions.play" || *id == "actions.conditional" {
                     back["set"] = json!("S");
                 }
                 assert_eq!(back, *params, "{id}");
@@ -401,10 +408,15 @@ fn every_mapped_command_exports_and_imports_back() {
 
 #[test]
 fn unsupported_shapes_become_photoshop_steps_not_errors() {
-    // Percent image size, a Paint Bucket fill, a move in points, an unknown adjustment class.
+    // Image size in two different percentages, a Paint Bucket click in percent of the canvas, a
+    // move in points, an unknown adjustment class.
     let items = vec![
-        item("ImgS", "Image Size", Some(desc("null").with("Wdth", pct(200.0)))),
-        item("Fl  ", "Fill", Some(desc("null").with("From", D::Descriptor(desc("Pnt "))).with("Usng", enm("FlCn", "FrgC")))),
+        item("ImgS", "Image Size", Some(desc("null").with("Wdth", pct(200.0)).with("Hght", pct(150.0)))),
+        item(
+            "Fl  ",
+            "Fill",
+            Some(desc("null").with("From", D::Descriptor(desc("Pnt ").with("Hrzn", pct(0.0)).with("Vrtc", pct(0.0)))).with("Usng", enm("FlCn", "FrgC"))),
+        ),
         item(
             "move",
             "Move",
@@ -661,6 +673,62 @@ fn remaining_events_import_in_their_photoshop_shapes() {
     assert_eq!(steps[12].1, json!({"on": false}));
     assert_eq!(steps[13].1, json!({"points": [[1, 2], [30, 2], [15, 40]]}));
     assert_eq!(imp.unsupported.len(), 2);
+
+    // The frequency-separation set's own conditional, a percent Image Size, a Paint Bucket
+    // click in pixels (percent stays unsupported) and a Place.
+    let cond = desc("null")
+        .with("null", enm("Cndt", "Lyrs"))
+        .with(
+            "then",
+            D::Reference(vec![
+                ReferenceItem::Name { class: class("Actn"), name: UnicodeString::new_nul("FS8-Layers") },
+                ReferenceItem::Name { class: class("ASet"), name: UnicodeString::new_nul("FS") },
+            ]),
+        )
+        .with("else", D::Reference(vec![ReferenceItem::Name { class: class("Actn"), name: UnicodeString::new_nul("FS8-No-Layers") }]));
+    let size = desc("null")
+        .with("Wdth", pct(200.0))
+        .with("scaleStyles", D::Boolean(true))
+        .with("CnsP", D::Boolean(true))
+        .with("Intr", enm("Intp", "bicubicAutomatic"));
+    let bucket_px = desc("null")
+        .with("From", D::Descriptor(desc("Pnt ").with("Hrzn", px(0.0)).with("Vrtc", px(0.0))))
+        .with("Tlrn", long(32.0))
+        .with("Usng", enm("FlCn", "FrgC"))
+        .with("Cntg", D::Boolean(false));
+    let bucket_pct = desc("null")
+        .with("From", D::Descriptor(desc("Pnt ").with("Hrzn", pct(0.0)).with("Vrtc", pct(0.0))))
+        .with("Tlrn", long(32.0))
+        .with("Usng", enm("FlCn", "FrgC"));
+    let place = desc("null")
+        .with("null", path_value("/Users/me/logo.png"))
+        .with("FTcs", enm("QCSt", "Qcsa"))
+        .with("Wdth", pct(50.0))
+        .with("Hght", pct(50.0))
+        .with("Lnkd", D::Boolean(false));
+    let items = vec![
+        item("conditional", "If", Some(cond)),
+        item("imageSize", "Image Size", Some(size)),
+        item("fill", "Fill", Some(bucket_px)),
+        item("fill", "Fill", Some(bucket_pct)),
+        item("placeEvent", "Place", Some(place)),
+        item("Opn ", "Open", Some(desc("null").with("null", path_value("/Users/me/in.psd")))),
+    ];
+    let file = AtnFile {
+        name: UnicodeString::new_nul("Rest"),
+        expanded: false,
+        actions: vec![AtnAction { name: UnicodeString::new_nul("A"), items, ..Default::default() }],
+        warnings: vec![],
+    };
+    let rest = import(&atn::write(&file).unwrap()).unwrap();
+    let rest_steps = &rest.actions[0].steps;
+    let rest_ids: Vec<&str> = rest_steps.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(rest_ids, ["actions.conditional", "image.imageSize", "paint.bucket", PHOTOSHOP_STEP, "file.placeEmbedded", "file.openAs"]);
+    assert_eq!(rest_steps[0].1, json!({"if": "hasLayers", "then": "FS8-Layers", "else": "FS8-No-Layers"}));
+    assert_eq!(rest_steps[1].1, json!({"percent": 200, "resample": "bicubicAutomatic"}));
+    assert_eq!(rest_steps[2].1, json!({"x": 0, "y": 0, "tolerance": 32, "contiguous": false}));
+    assert_eq!(rest_steps[4].1, json!({"path": "/Users/me/logo.png", "scale": 50}));
+    assert_eq!(rest_steps[5].1, json!({"path": "/Users/me/in.psd"}));
 
     // The Photoshop path record round-trips and rejects other shapes.
     assert_eq!(path_text(&path_value("/a/b c.png")).as_deref(), Some("/a/b c.png"));
