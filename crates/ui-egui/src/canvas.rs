@@ -2779,7 +2779,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 // zooms nor slides the image towards the pointer.
                 let nz = crate::zoom_levels::clamp(view.zoom * f, view.doc_size);
                 if nz != view.zoom {
-                    zoom_about(&mut view, &xf, p, nz, false, ppp);
+                    // Over the pasteboard the anchor is the image's nearest point (#3720).
+                    let at = wheel_anchor(&xf, p, view.doc_size);
+                    zoom_about(&mut view, &xf, at, nz, false, ppp);
                 }
             }
             (Some(crate::wheel_nav::Wheel::Pan(scroll)), _) => {
@@ -3557,6 +3559,20 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
 /// Zoom to `new_zoom` about the pointer `p`. By default the document point under it stays under
 /// it; with Preferences › Tools › Zoom Clicked Point to Center (`center_on_point`) it moves to the
 /// centre of the view instead (#204).
+/// Where a wheel or pinch zoom anchors for a pointer at `p`: the pointer itself over the image,
+/// otherwise the nearest point of the image (#3720). Anchoring on a pointer out on the gray
+/// pasteboard slid the image away from it, out of the window after a few notches; Photoshop keeps
+/// the image in view. Clamped in document space, so a rotated or flipped view behaves the same.
+fn wheel_anchor(xf: &ViewXform, p: Pos2, doc_size: [u32; 2]) -> Pos2 {
+    let [w, h] = doc_size;
+    let d = xf.to_doc(p);
+    if w == 0 || h == 0 || !(d[0].is_finite() && d[1].is_finite()) {
+        return p;
+    }
+    let c = [d[0].clamp(0.0, f64::from(w)), d[1].clamp(0.0, f64::from(h))];
+    if c == d { p } else { xf.to_screen(c[0] as f32, c[1] as f32) }
+}
+
 fn zoom_about(view: &mut View, xf: &ViewXform, p: Pos2, new_zoom: f32, center_on_point: bool, ppp: f32) {
     let before = xf.to_doc(p);
     view.zoom = new_zoom;
@@ -6685,6 +6701,23 @@ mod tests {
             let back = xf.to_doc(xf.to_screen(123.0, 45.0));
             assert!((back[0] - 123.0).abs() < 1e-3 && (back[1] - 45.0).abs() < 1e-3, "ppp {ppp}: {back:?}");
         }
+    }
+
+    #[test]
+    fn wheel_anchor_is_the_pointer_over_the_image_and_the_nearest_image_point_off_it() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        for (rotation, flip) in [(0.0, false), (30.0, false), (90.0, true)] {
+            let xf = ViewXform { rect, zoom: 0.5, center: [400.0, 300.0], flip, rotation, aspect: 1.0 };
+            let inside = xf.to_screen(100.0, 200.0);
+            assert_eq!(wheel_anchor(&xf, inside, [800, 600]), inside);
+            for (p, want) in [((-300.0, -200.0), [0.0, 0.0]), ((1200.0, 300.0), [800.0, 300.0]), ((400.0, 900.0), [400.0, 600.0])] {
+                let a = xf.to_doc(wheel_anchor(&xf, xf.to_screen(p.0, p.1), [800, 600]));
+                assert!((a[0] - want[0]).abs() < 0.01 && (a[1] - want[1]).abs() < 0.01, "rot {rotation}: {p:?} -> {a:?}");
+            }
+        }
+        let p = pos2(5.0, 5.0);
+        let xf = ViewXform { rect, zoom: 1.0, center: [400.0, 300.0], flip: false, rotation: 0.0, aspect: 1.0 };
+        assert_eq!(wheel_anchor(&xf, p, [0, 0]), p, "no document: the pointer");
     }
 
     #[test]
