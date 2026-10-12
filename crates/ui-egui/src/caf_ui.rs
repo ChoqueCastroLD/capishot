@@ -211,6 +211,14 @@ struct Base {
     base: Vec<bool>,
 }
 
+impl Base {
+    /// The index into `hole` and `base` of document point `(x, y)`, when it is inside `rect`.
+    fn index(&self, x: f64, y: f64) -> Option<usize> {
+        let (xi, yi) = (x.floor() as i32, y.floor() as i32);
+        self.rect.contains(xi, yi).then(|| (yi - self.rect.y0) as usize * self.rect.width() as usize + (xi - self.rect.x0) as usize)
+    }
+}
+
 /// A computed preview: the filled rectangle as an image, or why it failed.
 #[cfg(not(target_arch = "wasm32"))]
 type PreviewResult = Result<(Rect, egui::ColorImage), String>;
@@ -318,14 +326,11 @@ impl CafWorkspace {
     /// The sampling state of document pixel `(x, y)` from the base and the strokes so far.
     fn sampled_at(&self, x: f64, y: f64) -> bool {
         let b = &self.base;
-        let (xi, yi) = (x.floor() as i32, y.floor() as i32);
-        if b.rect.contains(xi, yi) {
-            let i = (yi - b.rect.y0) as usize * b.rect.width() as usize + (xi - b.rect.x0) as usize;
-            if b.hole[i] {
-                return false;
-            }
+        let i = b.index(x, y);
+        if i.is_some_and(|i| b.hole.get(i).copied().unwrap_or(false)) {
+            return false;
         }
-        let mut on = b.rect.contains(xi, yi) && b.base[(yi - b.rect.y0) as usize * b.rect.width() as usize + (xi - b.rect.x0) as usize];
+        let mut on = i.is_some_and(|i| b.base.get(i).copied().unwrap_or(false));
         for s in self.strokes.iter().chain(self.cur.iter()) {
             if covers(s, x, y) {
                 on = s.add;
@@ -336,8 +341,7 @@ impl CafWorkspace {
 
     fn in_hole(&self, x: f64, y: f64) -> bool {
         let b = &self.base;
-        let (xi, yi) = (x.floor() as i32, y.floor() as i32);
-        b.rect.contains(xi, yi) && b.hole[(yi - b.rect.y0) as usize * b.rect.width() as usize + (xi - b.rect.x0) as usize]
+        b.index(x, y).is_some_and(|i| b.hole.get(i).copied().unwrap_or(false))
     }
 
     /// Recompute the proxy's per-pixel state inside proxy rect `r` (x0, y0, x1, y1).
@@ -442,7 +446,7 @@ fn compute_base(app: &PhotocraftApp, w: &CafWorkspace) -> Result<Base, String> {
 fn outline(b: &Base) -> Option<Vec<[[f32; 2]; 2]>> {
     let (w, h) = (b.rect.width() as usize, b.rect.height() as usize);
     let (ox, oy) = (b.rect.x0 as f32, b.rect.y0 as f32);
-    let at = |x: i64, y: i64| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && b.hole[y as usize * w + x as usize];
+    let at = |x: i64, y: i64| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && b.hole.get(y as usize * w + x as usize).copied().unwrap_or(false);
     let mut out = Vec::new();
     for y in 0..h as i64 {
         for x in 0..w as i64 {
@@ -872,19 +876,23 @@ fn wait_preview(app: &mut PhotocraftApp) -> Result<(), String> {
 
 /// The filled rectangle as an image (what Apply would write there).
 fn compute_preview(doc: &photocraft_doc::Document, layer: LayerId, p: &Value, ctl: &photocraft_raster::Interrupt) -> Result<(Rect, egui::ColorImage), String> {
-    let plan = photocraft_engine::edit_menu_cmds::content_aware_plan(doc, layer, p, CMD).map_err(|e| e.to_string())?;
+    let plan = photocraft_engine::edit_menu_cmds::content_aware_plan_with(doc, layer, p, CMD, ctl).map_err(|e| match e {
+        photocraft_engine::EngineError::Cancelled => "cancelled".to_string(),
+        e => e.to_string(),
+    })?;
     let (w, h) = (plan.rect.width() as usize, plan.rect.height() as usize);
     let n = plan.fmt.channels();
     let filled =
         photocraft_algo::content_aware::fill_with(w, h, n, &plan.img, &plan.hole, &plan.source, &plan.opts, ctl).map_err(|_| "cancelled".to_string())?;
+    let own = plan.layer_pixels();
     let mut px = Vec::with_capacity(w * h);
     for i in 0..w * h {
-        let src = if plan.hole[i] { &filled[i * n..(i + 1) * n] } else { &plan.layer_px[i * n..(i + 1) * n] };
+        let src = if plan.hole[i] { &filled[i * n..(i + 1) * n] } else { &own[i * n..(i + 1) * n] };
         let mut c = photocraft_raster::to_rgba(&plan.fmt, src);
         if plan.hole[i] {
             // A partly selected pixel shows the fill by its coverage.
             let k = plan.cover[i];
-            let under = photocraft_raster::to_rgba(&plan.fmt, &plan.layer_px[i * n..(i + 1) * n]);
+            let under = photocraft_raster::to_rgba(&plan.fmt, &own[i * n..(i + 1) * n]);
             for j in 0..4 {
                 c[j] = under[j] + (c[j] - under[j]) * k;
             }
