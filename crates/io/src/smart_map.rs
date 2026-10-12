@@ -526,7 +526,9 @@ pub struct PlacedSpec<'a> {
     pub filter_fx: Option<Descriptor>,
 }
 
-/// Where the source corners land (top-left, top-right, bottom-right, bottom-left), as x, y pairs.
+/// Where the frame corners land (top-left, top-right, bottom-right, bottom-left), as x, y pairs.
+/// The frame is [`crate::blocks::placed_frame`] for an affine placement (the inverse of
+/// `parse_smart`), the source rect for a projective one (as `parse_smart_perspective` reads it).
 fn quad_points(s: &PlacedSpec<'_>) -> [f64; 8] {
     let (w, h) = s.size;
     let [a, b, c, d, e, f] = s.transform.m;
@@ -534,8 +536,9 @@ fn quad_points(s: &PlacedSpec<'_>) -> [f64; 8] {
         Some(p) => photocraft_algo::transform::Homography(*p).apply(x, y),
         None => (a * x + c * y + e, b * x + d * y + f),
     };
+    let [x0, y0, x1, y1] = if s.perspective.is_some() { [0.0, 0.0, w, h] } else { crate::blocks::placed_frame(s.warp, w, h) };
     let mut out = [0.0; 8];
-    for (i, (x, y)) in [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)].into_iter().enumerate() {
+    for (i, (x, y)) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().enumerate() {
         (out[2 * i], out[2 * i + 1]) = map(x, y);
     }
     out
@@ -1078,6 +1081,28 @@ mod tests {
             assert_eq!(crate::blocks::parse_placed_warp(b"SoLd", &sold), back);
             assert_eq!(warnings.len(), usize::from(w.is_some() && back.is_none()));
         }
+    }
+
+    /// Export writes `Trnf` as the image of the custom warp's control-point box, the inverse of
+    /// import: a spilled mesh comes back with the same transform and the quad Photoshop expects.
+    #[test]
+    fn warp_control_box_quad_round_trips() {
+        use photocraft_geom::warp::BezierMesh;
+        let mut mesh = BezierMesh::identity([0.0, 0.0, 50.0, 25.0], 1, 1);
+        mesh.points[0] = [-10.0, -5.0];
+        mesh.points[15] = [60.0, 25.0];
+        let mut warp = Warp::preset(WarpStyle::Custom, 0.0, [0.0, 0.0, 50.0, 25.0]);
+        warp.mesh = Some(mesh);
+        let transform = Affine { m: [2.0, 0.0, 0.0, 2.0, 120.0, 210.0] };
+        let spec = PlacedSpec { idnt: "i", placed: "p", transform, perspective: None, size: (50.0, 25.0), dpi: 72.0, warp: Some(&warp), filter_fx: None };
+        let sold = sold_bytes(None, &spec, &mut Vec::new());
+        let p = parse_sold(&sold).expect("parses");
+        let Some(Value::List(q)) = p.descriptor.get("Trnf") else { panic!("no Trnf") };
+        let q: Vec<f64> = q.iter().filter_map(|v| num(Some(v))).collect();
+        assert_eq!(q, [100.0, 200.0, 240.0, 200.0, 240.0, 260.0, 100.0, 260.0]);
+        assert_eq!(p.transform, transform);
+        // The imported quad reads as unmoved, so the template's `Trnf` is kept as stored.
+        assert!(!quad_moved(&p.descriptor, &spec));
     }
 
     #[test]
