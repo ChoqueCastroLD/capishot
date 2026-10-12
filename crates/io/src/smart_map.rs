@@ -18,6 +18,9 @@
 //! to their command id and dialog parameters; any other filter becomes a
 //! [`UNSUPPORTED_FILTER`] entry that keeps its descriptor verbatim (hex in `params.psd`), so it is
 //! listed, can be hidden, reordered or deleted, and is written back unchanged.
+//!
+//! Camera Raw and Displace keep their whole item as a template next to the editable settings
+//! (Displace's carries the embedded displacement map, see `displace_map.rs`).
 
 use photocraft_color::{BlendMode, ColorMode, PixelFormat, SampleType};
 use photocraft_doc::{LayerMask, SmartFilter};
@@ -34,6 +37,10 @@ use crate::blocks::{enum_of, get_desc, num};
 
 #[path = "camera_raw_map.rs"]
 mod camera_raw;
+#[path = "displace_map.rs"]
+mod displace;
+
+pub use displace::embedded_map as displace_embedded_map;
 
 /// Command id of a Photoshop smart filter PhotoCraft does not implement. Its params hold the
 /// filter's name, Photoshop filter id and descriptor (`psd`, hex); it renders as a pass-through.
@@ -312,10 +319,10 @@ pub fn filter_from_item(item: &Descriptor) -> SmartFilter {
     let class = fltr.map(|f| String::from_utf8_lossy(f.class_id.as_bytes()).into_owned());
     let filter_id = int(item, "filterID").unwrap_or(0);
     let class = class.or_else(|| KNOWN.iter().find(|k| k.filter_id == filter_id).map(|k| k.class.to_string()));
-    let known = if class.as_deref() == Some(camera_raw::CLASS) {
-        camera_raw::import_params(item).map(|p| (camera_raw::COMMAND, p))
-    } else {
-        class.as_deref().and_then(|c| known_params(c, fltr))
+    let known = match class.as_deref() {
+        Some(camera_raw::CLASS) => camera_raw::import_params(item).map(|p| (camera_raw::COMMAND, p)),
+        Some(displace::CLASS) => displace::import_params(item).map(|p| (displace::COMMAND, p)),
+        c => c.and_then(|c| known_params(c, fltr)),
     };
     let (command, params) = match known {
         Some((c, p)) => (c.to_string(), p),
@@ -456,6 +463,12 @@ fn fltr_for(k: &Known, p: &J) -> Result<Option<Descriptor>, String> {
 pub fn item_for_filter(f: &SmartFilter) -> Result<Descriptor, String> {
     if f.command == camera_raw::COMMAND {
         let mut d = camera_raw::export_item(&f.params)?;
+        set(&mut d, "blendOptions", blend_options(f));
+        set(&mut d, "enab", Value::Boolean(f.visible));
+        return Ok(d);
+    }
+    if f.command == displace::COMMAND {
+        let mut d = displace::export_item(&f.params)?;
         set(&mut d, "blendOptions", blend_options(f));
         set(&mut d, "enab", Value::Boolean(f.visible));
         return Ok(d);
