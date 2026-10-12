@@ -900,6 +900,42 @@ fn incremental_updates_follow_the_document() {
     check(&mut g, &d, "opacity");
 }
 
+/// A duplicate shares its source's tiles: its texture is a GPU copy of the source's, not an
+/// upload. Tiles written afterwards, to the copy or to the source in the same refresh, must not be
+/// lost to the copy or leak through it (queued writes land before the encoder's copy).
+#[test]
+fn duplicates_copy_their_source_texture() {
+    let Some(mut g) = gpu() else { return };
+    let mut d = base_doc(600, 300);
+    let mut src = noise_layer("src", PixelFormat::RGBA8, Rect::new(0, 0, 600, 300), 71, 0.0);
+    src.opacity = 0.7;
+    d.layers.push(src);
+    check(&mut g, &d, "source");
+    // A duplicate with no other change: nothing uploads.
+    let mut dup = d.layers[1].duplicate();
+    dup.blend = BlendMode::Difference;
+    d.layers.push(dup);
+    let stats = diff_rect(&mut g, &d, d.bounds(), "duplicate").unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(stats.tiles_uploaded, 0, "{stats:?}");
+    assert!(stats.tiles_shared > 0, "{stats:?}");
+    // Another duplicate, then one tile painted on it and one on its source, in the same refresh.
+    let mut dup2 = d.layers[1].duplicate();
+    dup2.blend = BlendMode::Screen;
+    dup2.surface_mut().unwrap().fill_rect(Rect::new(10, 10, 20, 20), &[1.0, 0.0, 0.0, 1.0]);
+    d.layers.push(dup2);
+    d.layers[1].surface_mut().unwrap().fill_rect(Rect::new(300, 100, 310, 110), &[0.0, 0.0, 1.0, 1.0]);
+    check(&mut g, &d, "duplicate and source painted");
+    // And a tile removed from a duplicate: it reads as transparent again.
+    let mut dup3 = d.layers[1].duplicate();
+    *dup3.surface_mut().unwrap() = {
+        let mut s = photocraft_raster::Surface::new(PixelFormat::RGBA8);
+        s.put_tiles(d.layers[1].surface().unwrap().tiles().skip(1).map(|(c, t)| (*c, t.clone())));
+        s
+    };
+    d.layers.push(dup3);
+    check(&mut g, &d, "duplicate missing a tile");
+}
+
 /// #2422: a mask whose default pixel changes without touching its tiles (Invert on a sparse mask)
 /// must re-upload the absent tiles between its stored ones, not keep the old default on the GPU.
 #[test]

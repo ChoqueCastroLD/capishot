@@ -105,6 +105,9 @@ pub struct Stats {
     pub slots: u32,
     pub tiles_uploaded: usize,
     pub bytes_uploaded: usize,
+    /// Tiles a new layer texture took from another layer's texture by a GPU copy (a duplicate
+    /// shares its source's tiles) instead of uploading them.
+    pub tiles_shared: usize,
     /// Effect layers whose shape was (re)rendered, fully or partially.
     pub fx_shapes: usize,
     /// Effect map programs run (one per effect whose maps were rebuilt).
@@ -193,6 +196,10 @@ struct Resident {
     stamp: u64,
     /// CMYK profile the texels were converted with (`CmykSpace::id`, 0 = built-in / not CMYK).
     cmyk: u64,
+    /// Its texels were copied to or from another layer texture by the encoder, so every write
+    /// to it goes through the encoder too: a queued write lands before the encoder runs, and
+    /// would be overwritten by the copy, or leak into it.
+    ordered: bool,
 }
 
 impl Resident {
@@ -1353,37 +1360,80 @@ impl Compositor {
             });
             let view = texture.create_view(&Default::default());
             let default_nonzero = default_pixel.iter().any(|v| *v != 0.0);
-            let mut r =
-                Resident { texture, view, region, kind, format, tiles: HashMap::new(), default_nonzero, default_bits, doc, last_used: 0, stamp: 0, cmyk };
+            let mut r = Resident {
+                texture,
+                view,
+                region,
+                kind,
+                format,
+                tiles: HashMap::new(),
+                default_nonzero,
+                default_bits: default_bits.clone(),
+                doc,
+                last_used: 0,
+                stamp: 0,
+                cmyk,
+                ordered: false,
+            };
             // Only the region moved (painting past a layer's tiles grows it): keep the texels the
             // old texture already holds instead of converting and uploading every tile again.
             let kept = self.residents.remove(&key).map_or(Rect::EMPTY, |old| keep_overlap(device, queue, &old, &mut r));
-            // A new texture starts zeroed: write the tiles that are present, and the default pixel
-            // where they are missing if it isn't zero. Coordinates sharing a tile (a solid fill,
-            // the default) take one upload and GPU copies (#1774). Kept tiles are brought up to
-            // date below, like those of a resident that didn't move.
-            let mut present = Vec::new();
-            let mut missing = Vec::new();
-            for c in region.tiles().filter(|c| !kept.contains_rect(&c.rect())) {
-                match surface.tile(c) {
-                    Some(t) => present.push((c, t.clone())),
-                    None if default_nonzero => missing.push(c),
-                    None => {}
+            // A new layer whose tiles another resident already holds (a duplicate shares its
+            // source's tiles) starts as a GPU copy of that texture. Duplicating a 20 MP photo
+            // converted and uploaded every tile again.
+            let shares =
+                |o: &Resident| region.tiles().filter(|c| surface.tile(*c).is_some_and(|t| o.tiles.get(c).is_some_and(|ot| Arc::ptr_eq(ot, t)))).count();
+            let donor = self
+                .residents
+                .iter()
+                .filter(|(k, o)| k.1 == key.1 && o.region == region && o.kind == kind && o.format == format && o.cmyk == cmyk && o.default_bits == default_bits)
+                .map(|(k, o)| (shares(o), *k))
+                .filter(|(n, _)| *n > 0)
+                .max_by_key(|(n, _)| *n);
+            if kept.is_empty()
+                && let Some((n, o)) = donor.and_then(|(n, k)| Some((n, self.residents.get_mut(&k)?)))
+            {
+                // Recorded in the frame's encoder, after the writes and copies that brought the
+                // donor up to date ([`keep_overlap`]'s own submission would run before those).
+                o.ordered = true;
+                encoder.copy_texture_to_texture(
+                    o.texture.as_image_copy(),
+                    r.texture.as_image_copy(),
+                    wgpu::Extent3d { width: region.width(), height: region.height(), depth_or_array_layers: 1 },
+                );
+                r.tiles = o.tiles.clone();
+                r.ordered = true;
+                stats.tiles_shared += n;
+            } else {
+                // A new texture starts zeroed: write the tiles that are present, and the default
+                // pixel where they are missing if it isn't zero. Coordinates sharing a tile (a
+                // solid fill, the default) take one upload and GPU copies (#1774). Kept tiles are
+                // brought up to date below, like those of a resident that didn't move.
+                let mut present = Vec::new();
+                let mut missing = Vec::new();
+                for c in region.tiles().filter(|c| !kept.contains_rect(&c.rect())) {
+                    match surface.tile(c) {
+                        Some(t) => present.push((c, t.clone())),
+                        None if default_nonzero => missing.push(c),
+                        None => {}
+                    }
                 }
-            }
-            if !missing.is_empty() {
-                let bytes = convert_tile(surface, None, kind, TileCoord::new(0, 0));
-                self.staged += put_tiles(device, queue, encoder, &r, &missing, &bytes);
-            }
-            let staged = &mut self.staged;
-            convert_tiles(surface, present, kind, |t, cs, bytes| {
-                *staged += put_tiles(device, queue, encoder, &r, cs, bytes);
-                for &c in cs {
-                    stats.tiles_uploaded += 1;
-                    stats.bytes_uploaded += bytes.len();
-                    r.tiles.insert(c, t.clone());
+                if !missing.is_empty() {
+                    let bytes = convert_tile(surface, None, kind, TileCoord::new(0, 0));
+                    self.staged += put_tiles(device, queue, encoder, &r, &missing, &bytes);
                 }
-            });
+                let staged = &mut self.staged;
+                convert_tiles(surface, present, kind, |t, cs, bytes| {
+                    *staged += put_tiles(device, queue, encoder, &r, cs, bytes);
+                    for &c in cs {
+                        stats.tiles_uploaded += 1;
+                        stats.bytes_uploaded += bytes.len();
+                        r.tiles.insert(c, t.clone());
+                    }
+                });
+            }
+            // Tiles the donor held that this surface doesn't, or holds differently, are fixed up
+            // by the pass over the region below.
             self.residents.insert(key, r);
         }
         // Present: inserted above when it was missing or stale.
@@ -1829,7 +1879,9 @@ const CONVERT_BATCH: usize = 64;
 /// a scratch tile and GPU copies from it: writing each one from the CPU sent 387 MB per refresh
 /// of a filled 50 MP 16-bit page (#1774).
 fn put_tiles(device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, r: &Resident, cs: &[TileCoord], bytes: &[u8]) -> u64 {
-    if let [c] = cs {
+    if let [c] = cs
+        && !r.ordered
+    {
         write_tile(queue, r, *c, bytes);
         return bytes.len() as u64;
     }
