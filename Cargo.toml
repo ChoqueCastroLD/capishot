@@ -109,6 +109,24 @@ opt-level = "z"
 [profile.wasm-release.package.photocraft-web]
 opt-level = "z"
 
+# Large crates off the per-frame and per-pixel paths: the document model, file parsers run once
+# per open/save, JSON (settings, presets, control channel), SVG parsing, and shader translation
+# (runs when a pipeline is created). "z" keeps the wasm well under the size gate.
+[profile.wasm-release.package.photocraft-doc]
+opt-level = "z"
+[profile.wasm-release.package.photocraft-psd]
+opt-level = "z"
+[profile.wasm-release.package.photocraft-format]
+opt-level = "z"
+[profile.wasm-release.package.photocraft-affinity]
+opt-level = "z"
+[profile.wasm-release.package.serde_json]
+opt-level = "z"
+[profile.wasm-release.package.usvg]
+opt-level = "z"
+[profile.wasm-release.package.naga]
+opt-level = "z"
+
 [profile.wasm-release.package.photocraft-raster]
 opt-level = 3
 [profile.wasm-release.package.photocraft-color]
