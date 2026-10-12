@@ -200,19 +200,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn export_options(settings: &photocraft_ui_egui::ExportSettings) -> photocraft_io::ExportOptions {
-    let mut opts = photocraft_io::ExportOptions::default();
-    if let Some(q) = settings.jpeg_quality {
-        opts.encode.jpeg_quality = q;
-    }
-    opts.encode.webp_lossless = settings.webp_lossless;
-    if let Some(q) = settings.webp_quality {
-        opts.encode.webp_quality = q;
-    }
-    opts.tiff_layers = settings.tiff_layers;
-    opts.xmp = if settings.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
-    opts.tga_bits = settings.tga_bits;
-    opts.image_previews = settings.image_previews;
-    opts
+    settings.io_options()
 }
 
 /// A save on a worker thread (`Services::save_file` and `Services::automation_save`, #2017):
