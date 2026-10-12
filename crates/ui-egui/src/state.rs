@@ -1033,7 +1033,7 @@ pub struct UiState {
     /// Temporary symmetry-axis editing, exposed to automation but never restored from settings.
     #[serde(default, skip_deserializing)]
     pub symmetry_transform: Option<crate::symmetry_ui::Transform>,
-    /// The Properties panel's armed Curves eyedropper on an adjustment layer (`layer_picker`),
+    /// The Properties panel's armed Levels/Curves eyedropper on an adjustment layer (`layer_picker`),
     /// exposed to automation but never restored from settings.
     #[serde(default, skip_deserializing)]
     pub layer_picker: Option<crate::layer_picker::LayerPicker>,

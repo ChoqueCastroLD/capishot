@@ -1,9 +1,10 @@
-//! The Set Black / Neutral Gray / White Point eyedroppers of a Curves adjustment layer's
-//! Properties panel (UI-217-15), as Photoshop has them next to the curve.
+//! The Set Black / Neutral Gray / White Point eyedroppers of a Levels or Curves adjustment
+//! layer's Properties panel (UI-217-15, #3116), as Photoshop has them next to the histogram or
+//! curve.
 //!
 //! Arming one turns a click on the image into one `layer.setAdjustment` with the `eyedropper`
 //! param (one undoable, recordable step, the same thing an agent sends), which samples the image
-//! the layer adjusts. Unlike the modal Image › Adjustments › Curves dialog (`adjust_dialog`), the
+//! the layer adjusts. Unlike the modal Image › Adjustments › Levels and Curves dialogs (`adjust_dialog`), the
 //! panel is not modal, so the picker stays armed until Esc, another tool, another layer, or a
 //! second click on its button.
 
@@ -30,15 +31,15 @@ fn eyedropper(point: &str) -> Option<CurvesEyedropper> {
     POINTS.iter().find(|(id, _)| *id == point).map(|(_, e)| *e)
 }
 
-/// The armed picker if it still applies: same tool, the layer still the active Curves layer, and
-/// the point supported in the document's colour mode.
+/// The armed picker if it still applies: same tool, the layer still the active Levels or Curves
+/// layer, and the point supported in the document's colour mode.
 pub fn armed(app: &PhotocraftApp) -> Option<(LayerId, &str)> {
     let picker = app.ui.layer_picker.as_ref()?;
     let st = app.session.active()?;
     let layer = LayerId(picker.layer);
-    let curves = st.doc.layer(layer).is_some_and(|l| matches!(l.content, LayerContent::Adjustment(Adjustment::Curves { .. })));
+    let tonal = st.doc.layer(layer).is_some_and(|l| matches!(l.content, LayerContent::Adjustment(Adjustment::Levels { .. } | Adjustment::Curves { .. })));
     let supported = eyedropper(&picker.point).is_some_and(|e| crate::adjust_dialog::picker_supported(st.doc.mode, e));
-    (picker.tool == app.ui.tool && st.active_layer == Some(layer) && curves && supported).then_some((layer, picker.point.as_str()))
+    (picker.tool == app.ui.tool && st.active_layer == Some(layer) && tonal && supported).then_some((layer, picker.point.as_str()))
 }
 
 /// Drops a picker that no longer applies, so returning to its tool or layer doesn't re-arm it.
@@ -67,7 +68,7 @@ pub fn sample_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
     true
 }
 
-/// The three eyedropper buttons above the Curves editor of adjustment layer `layer`.
+/// The three eyedropper buttons above the Levels or Curves editor of adjustment layer `layer`.
 pub fn controls(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: LayerId) {
     let Some(mode) = app.session.active().map(|s| s.doc.mode) else { return };
     let current = armed(app).filter(|(l, _)| *l == layer).map(|(_, p)| p.to_string());

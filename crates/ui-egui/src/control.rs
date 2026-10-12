@@ -929,7 +929,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     }
                     continue;
                 }
-                // A Properties Curves eyedropper owns the primary button the same way.
+                // A Properties Levels/Curves eyedropper owns the primary button the same way.
                 if app.ui.dialogs.is_empty() && !matches!(s("button"), Some("secondary" | "right")) && crate::layer_picker::armed(app).is_some() {
                     if matches!(ev, ToolEvent::Down { .. }) {
                         crate::layer_picker::sample_at(app, x, y);

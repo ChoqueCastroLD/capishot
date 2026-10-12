@@ -381,7 +381,7 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
             return;
         }
     }
-    // A Properties Curves eyedropper: Esc disarms it.
+    // A Properties Levels/Curves eyedropper: Esc disarms it.
     if crate::layer_picker::armed(app).is_some() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
         crate::layer_picker::cancel(app);
         return;

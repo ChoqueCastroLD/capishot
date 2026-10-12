@@ -33,25 +33,28 @@ pub(crate) fn picker_supported(mode: photocraft_doc::ColorMode, eyedropper: phot
     mode == photocraft_doc::ColorMode::Rgb || (mode == photocraft_doc::ColorMode::Grayscale && eyedropper != CurvesEyedropper::NeutralGray)
 }
 
-fn is_curves(fields: &Map<String, Value>) -> bool {
-    fields.get("__adjust").and_then(Value::as_str) == Some("curves")
+/// The kind of an adjustment dialog with Set Black/Neutral Gray/White Point eyedroppers (Levels,
+/// Curves), if `fields` are one.
+fn picker_kind(fields: &Map<String, Value>) -> Option<&str> {
+    fields.get("__adjust").and_then(Value::as_str).filter(|k| matches!(*k, "levels" | "curves"))
 }
 
-/// Whether the top modal has a supported Curves eyedropper armed.
+/// Whether the top modal has a supported Levels or Curves eyedropper armed.
 pub fn picker_armed(app: &PhotocraftApp) -> bool {
-    let Some(dialog) = app.ui.dialogs.last().filter(|d| is_curves(&d.fields)) else { return false };
+    let Some(dialog) = app.ui.dialogs.last().filter(|d| picker_kind(&d.fields).is_some()) else { return false };
     let Some(eyedropper) = picker(dialog.fields.get(CURVE_PICKER)) else { return false };
     app.session.active().is_some_and(|s| picker_supported(s.doc.mode, eyedropper))
 }
 
 /// Sample the committed merged document through the regular canvas sampler and update only the
-/// open Curves dialog. Returns true when an armed Curves picker consumed the pointer event, even
-/// if the point was outside the image or transparent.
+/// open Levels or Curves dialog. Returns true when an armed picker consumed the pointer event,
+/// even if the point was outside the image or transparent.
 pub fn sample_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
-    let Some((id, eyedropper, base)) = app.ui.dialogs.last().and_then(|dialog| {
-        let eyedropper = is_curves(&dialog.fields).then(|| picker(dialog.fields.get(CURVE_PICKER))).flatten()?;
+    let Some((id, kind, eyedropper, base)) = app.ui.dialogs.last().and_then(|dialog| {
+        let kind = picker_kind(&dialog.fields)?.to_string();
+        let eyedropper = picker(dialog.fields.get(CURVE_PICKER))?;
         let base = dialog.fields.get(CURVE_PICKER_BASE).cloned().unwrap_or_else(|| crate::filter_dialog::params_of(&dialog.fields));
-        Some((dialog.id, eyedropper, base))
+        Some((dialog.id, kind, eyedropper, base))
     }) else {
         return false;
     };
@@ -60,7 +63,7 @@ pub fn sample_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
         return true;
     }
     let Some(sample) = crate::canvas::composite_color(app, x, y) else { return true };
-    let params = match photocraft_engine::adjust_params::curves_eyedropper(&base, eyedropper, sample, mode) {
+    let params = match photocraft_engine::adjust_params::adjustment_eyedropper(&kind, &base, eyedropper, sample, mode) {
         Ok(adjustment) => photocraft_engine::adjust_params::to_params(&adjustment),
         Err(error) => {
             app.ui.status = error.to_string();
@@ -85,7 +88,7 @@ pub(crate) fn picker_button(ui: &mut egui::Ui, selected: bool, enabled: bool, to
     response
 }
 
-fn curves_picker_controls(ui: &mut egui::Ui, fields: &mut Map<String, Value>, mode: photocraft_doc::ColorMode) {
+fn picker_controls(ui: &mut egui::Ui, fields: &mut Map<String, Value>, mode: photocraft_doc::ColorMode) {
     use photocraft_engine::adjust_params::CurvesEyedropper;
     let current = picker(fields.get(CURVE_PICKER));
     let mut chosen = None;
@@ -171,8 +174,8 @@ pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, fields: &mut Map<String, Value>) {
     let kind = fields.get("__adjust").and_then(Value::as_str).unwrap_or_default().to_string();
     let mode = app.session.active().map_or(photocraft_doc::ColorMode::Rgb, |s| s.doc.mode);
-    if kind == "curves" {
-        curves_picker_controls(ui, fields, mode);
+    if matches!(kind.as_str(), "levels" | "curves") {
+        picker_controls(ui, fields, mode);
         ui.add_space(4.0);
     }
     let mut values = crate::filter_dialog::params_of(fields);
@@ -524,6 +527,21 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&st.doc, &original));
         assert_eq!(st.revision, revision);
         assert_eq!(st.history.past_len(), steps);
+    }
+
+    /// #3116: the Levels dialog's Set White Point moves each channel's input white to the sample
+    /// (#b04020) and leaves the document alone until OK.
+    #[test]
+    fn levels_white_point_eyedropper_sets_the_channel_input_whites() {
+        let mut app = app_with_image();
+        let original = app.session.active().unwrap().doc.clone();
+        let id = open(&mut app, "image.adjustments.levels").unwrap();
+        arm(&mut app, id, "white");
+        assert!(picker_armed(&app));
+        assert!(sample_at(&mut app, 8.0, 8.0));
+        let in_white = |key: &str| app.ui.dialogs.last().and_then(|d| d.fields.get(key)).and_then(|c| c.get("inWhite")).and_then(Value::as_f64);
+        assert_eq!([in_white("red"), in_white("green"), in_white("blue")], [Some(176.0), Some(64.0), Some(32.0)]);
+        assert!(std::sync::Arc::ptr_eq(&app.session.active().unwrap().doc, &original));
     }
 
     #[test]

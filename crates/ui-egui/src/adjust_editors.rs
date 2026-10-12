@@ -1485,7 +1485,7 @@ pub fn layer_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj
         dialog: false,
         dynamic_color_sliders: app.session.prefs().interface.dynamic_color_sliders,
     };
-    if kind == "curves" {
+    if matches!(kind, "levels" | "curves") {
         crate::layer_picker::controls(app, ui, id);
     }
     let e = editor(ui, kind, &mut values, &cx);

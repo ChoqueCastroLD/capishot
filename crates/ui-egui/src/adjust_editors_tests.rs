@@ -492,12 +492,22 @@ fn doc_on_screen(h: &Harness<'_, PhotocraftApp>, x: f32, y: f32) -> Pos2 {
     xf.to_screen(x, y)
 }
 
-/// UI-217-15 (#3110): the Curves layer's Properties panel has the Set Black/Neutral Gray/White
-/// Point eyedroppers. With Set White Point armed, a click on the image makes that pixel white as
-/// one history step (sampled below the layer), and Esc disarms the picker.
+/// UI-217-15 (#3110, #3116): the Properties panel of a Curves or Levels layer has the Set
+/// Black/Neutral Gray/White Point eyedroppers. With Set White Point armed, a click on the image
+/// makes that pixel white as one history step (sampled below the layer), and Esc disarms the
+/// picker.
 #[test]
 fn curves_properties_white_point_eyedropper_edits_the_layer() {
-    let mut h = app_harness("curves", "rgb", 8);
+    properties_white_point_eyedropper_edits_the_layer("curves");
+}
+
+#[test]
+fn levels_properties_white_point_eyedropper_edits_the_layer() {
+    properties_white_point_eyedropper_edits_the_layer("levels");
+}
+
+fn properties_white_point_eyedropper_edits_the_layer(kind: &str) {
+    let mut h = app_harness(kind, "rgb", 8);
     let (_, before) = layer(&h);
     let steps = h.state().session.active().unwrap().history.past_len();
     h.get_by_label("Set White Point").click();
@@ -510,8 +520,9 @@ fn curves_properties_white_point_eyedropper_edits_the_layer() {
         serde_json::from_value(h.state_mut().run("document.pixel", json!({"x": 10, "y": 10})).unwrap()).unwrap()
     };
     let px = pixel(&mut h);
-    assert!(px.iter().take(3).all(|v| *v > 0.99), "{px:?}");
-    assert_eq!(h.state().session.active().unwrap().history.past_len(), steps + 1, "one history step");
+    assert!(px.iter().take(3).all(|v| *v > 0.99), "{kind}: {px:?}");
+    assert_ne!(layer(&h).1, before, "{kind}: the layer changed");
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), steps + 1, "{kind}: one history step");
     assert!(crate::layer_picker::armed(h.state()).is_some(), "stays armed for another click");
     h.key_press(egui::Key::Escape);
     h.run_steps(2);

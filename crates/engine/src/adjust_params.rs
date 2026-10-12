@@ -704,19 +704,115 @@ fn inverse_master_target(master: &[CurvePoint], target: f32) -> f32 {
     best_input
 }
 
+/// The sample and colour modes both eyedroppers (Levels, Curves) support: RGB, and Grayscale
+/// without the Neutral Gray picker.
+fn check_eyedropper(cmd: &str, picker: CurvesEyedropper, sample: [f32; 3], mode: ColorMode) -> Result<()> {
+    if sample.iter().any(|v| !v.is_finite()) {
+        return Err(bad(cmd, "sample components must be finite"));
+    }
+    if !matches!(mode, ColorMode::Rgb | ColorMode::Grayscale) {
+        return Err(bad(cmd, "only RGB and Grayscale documents are supported"));
+    }
+    if mode == ColorMode::Grayscale && picker == CurvesEyedropper::NeutralGray {
+        return Err(bad(cmd, "Neutral Gray is unavailable for Grayscale documents"));
+    }
+    Ok(())
+}
+
+/// The smallest input range Levels allows (two levels), as the parser enforces.
+const LEVELS_MIN_RANGE: f32 = 2.0 / 255.0;
+
+/// Moves the input black (or white) of `c` to `sample`, so the sample maps to the output black
+/// (white). The other input end moves away if it would leave less than two levels between them.
+fn set_levels_input(c: &mut LevelsChannel, sample: f32, black: bool) {
+    if black {
+        c.in_black = sample.clamp(0.0, 1.0 - LEVELS_MIN_RANGE);
+        c.in_white = c.in_white.max(c.in_black + LEVELS_MIN_RANGE).min(1.0);
+    } else {
+        c.in_white = sample.clamp(LEVELS_MIN_RANGE, 1.0);
+        c.in_black = c.in_black.min(c.in_white - LEVELS_MIN_RANGE).max(0.0);
+    }
+}
+
+/// Sets the midtone gamma of `c` so `sample` maps to `target` (both 0..1). Bisection over the
+/// gamma range on the compositor's own Levels curve (monotone in gamma), so the shadow toe is
+/// accounted for. A sample at or outside the input range, or a target outside the output range,
+/// can't be reached by gamma and leaves `c` unchanged.
+fn set_levels_gamma(c: &mut LevelsChannel, sample: f32, target: f32) {
+    let u = (sample - c.in_black) / (c.in_white - c.in_black).max(1e-6);
+    let span = c.out_white - c.out_black;
+    let t = (target - c.out_black) / span;
+    if !(u > 0.0 && u < 1.0) || span.abs() < 1e-6 || !(t > 0.0 && t < 1.0) {
+        return;
+    }
+    let reached = |gamma: f32| {
+        let trial = LevelsChannel { gamma, ..c.clone() };
+        (photocraft_compose::adjust::levels(&trial, sample) - c.out_black) / span
+    };
+    let (mut lo, mut hi) = (0.01f32.ln(), 9.99f32.ln());
+    for _ in 0..40 {
+        let mid = (lo + hi) / 2.0;
+        if reached(mid.exp()) < t {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    c.gamma = ((lo + hi) / 2.0).exp().clamp(0.01, 9.99);
+}
+
+/// Photoshop's Levels eyedroppers on the Levels in `base` (params, as for `from_params`), from a
+/// colour sample of the image the Levels adjust. RGB: Set Black/White Point move each channel's
+/// input black/white to the sample's value in that channel, so the sample maps to the output
+/// black/white; Set Neutral Gray Point sets each channel's midtone gamma so the channel maps to
+/// the sample's luma, removing the cast while keeping its brightness. The composite record is
+/// kept. Grayscale: Black/White move the composite input; there is no gray picker.
+pub fn levels_eyedropper(base: &Value, picker: CurvesEyedropper, sample: [f32; 3], mode: ColorMode) -> Result<Adjustment> {
+    const CMD: &str = "levels eyedropper";
+    check_eyedropper(CMD, picker, sample, mode)?;
+    let mut adjustment = from_params("levels", base, None, mode)?;
+    let Adjustment::Levels { master, per_channel, space, .. } = &mut adjustment else {
+        return Err(bad(CMD, "expected a Levels adjustment"));
+    };
+    if *space != ToneSpace::Rgb {
+        return Err(bad(CMD, "only RGB channel Levels are supported"));
+    }
+    let sample = sample.map(|v| v.clamp(0.0, 1.0));
+    if mode == ColorMode::Grayscale {
+        set_levels_input(master, (sample[0] + sample[1] + sample[2]) / 3.0, picker == CurvesEyedropper::Black);
+        return Ok(adjustment);
+    }
+    match picker {
+        CurvesEyedropper::Black | CurvesEyedropper::White => {
+            for (c, v) in per_channel.iter_mut().zip(sample) {
+                set_levels_input(c, v, picker == CurvesEyedropper::Black);
+            }
+        }
+        CurvesEyedropper::NeutralGray => {
+            let target = rgb_luma(sample);
+            for (c, v) in per_channel.iter_mut().zip(sample) {
+                set_levels_gamma(c, v, target);
+            }
+        }
+    }
+    Ok(adjustment)
+}
+
+/// The eyedropper of adjustment `kind` ("levels" or "curves"): [`levels_eyedropper`] or
+/// [`curves_eyedropper`].
+pub fn adjustment_eyedropper(kind: &str, base: &Value, picker: CurvesEyedropper, sample: [f32; 3], mode: ColorMode) -> Result<Adjustment> {
+    match kind {
+        "levels" => levels_eyedropper(base, picker, sample, mode),
+        "curves" => curves_eyedropper(base, picker, sample, mode),
+        _ => Err(bad(EYEDROPPER, "`eyedropper` applies to Levels and Curves only")),
+    }
+}
+
 /// Resolve a merged-composite colour sample into the black, luma-preserving neutral-gray or white target.
 /// RGB uses the three channel curves. Grayscale uses the composite curve and has no gray picker.
 /// Other colour models stay unsupported until their native channel semantics can be sampled.
 pub fn curves_eyedropper(base: &Value, picker: CurvesEyedropper, sample: [f32; 3], mode: ColorMode) -> Result<Adjustment> {
-    if sample.iter().any(|v| !v.is_finite()) {
-        return Err(bad("curves eyedropper", "sample components must be finite"));
-    }
-    if !matches!(mode, ColorMode::Rgb | ColorMode::Grayscale) {
-        return Err(bad("curves eyedropper", "only RGB and Grayscale documents are supported"));
-    }
-    if mode == ColorMode::Grayscale && picker == CurvesEyedropper::NeutralGray {
-        return Err(bad("curves eyedropper", "Neutral Gray is unavailable for Grayscale documents"));
-    }
+    check_eyedropper("curves eyedropper", picker, sample, mode)?;
     // The pickers place points: a pencil-drawn curve is first fitted with points, as when
     // Photoshop leaves the pencil for point editing.
     let mut base = base.clone();
@@ -759,12 +855,13 @@ pub fn curves_eyedropper(base: &Value, picker: CurvesEyedropper, sample: [f32; 3
     Ok(adjustment)
 }
 
-/// The `eyedropper` param of the Curves commands, so agents and the CLI can drive the dialog's
-/// Set Black/Neutral Gray/White Point pickers: `{"point":"black"|"gray"|"white","at":[x,y]}`
-/// samples the merged composite at document pixel (x, y) (`"size"`: the Eyedropper's Sample
-/// Size, 1 = Point Sample), or `"color":[r,g,b]` (0–1) gives the sample directly. The rest of `p`
-/// is the curve the picker edits. `None` without the key.
-pub fn curves_eyedropper_from_params(s: &crate::Session, p: &Value) -> Result<Option<Adjustment>> {
+/// The `eyedropper` param of the Levels and Curves commands (`kind`), so agents and the CLI can
+/// drive the dialog's Set Black/Neutral Gray/White Point pickers:
+/// `{"point":"black"|"gray"|"white","at":[x,y]}` samples the merged composite at document pixel
+/// (x, y) (`"size"`: the Eyedropper's Sample Size, 1 = Point Sample), or `"color":[r,g,b]` (0–1)
+/// gives the sample directly. The rest of `p` is the adjustment the picker edits. `None` without
+/// the key.
+pub fn eyedropper_from_params(s: &crate::Session, kind: &str, p: &Value) -> Result<Option<Adjustment>> {
     let Some(e) = p.get("eyedropper") else { return Ok(None) };
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let (picker, sample) = eyedropper_sample(&d.doc, None, e)?;
@@ -772,31 +869,33 @@ pub fn curves_eyedropper_from_params(s: &crate::Session, p: &Value) -> Result<Op
     if let Some(o) = base.as_object_mut() {
         o.remove("eyedropper");
     }
-    curves_eyedropper(&base, picker, sample, d.doc.mode).map(Some)
+    adjustment_eyedropper(kind, &base, picker, sample, d.doc.mode).map(Some)
 }
 
-/// The `eyedropper` param of `layer.setAdjustment` on Curves adjustment layer `layer`: the
-/// Properties panel's Set Black/Neutral Gray/White Point pickers. `at` samples the image the
+/// The `eyedropper` param of `layer.setAdjustment` on Levels or Curves adjustment layer `layer`:
+/// the Properties panel's Set Black/Neutral Gray/White Point pickers. `at` samples the image the
 /// layer adjusts (the composite with the layer hidden, like its Properties histogram), so clicking
-/// the same pixel again maps it the same way. The picker edits the layer's curve with the other
-/// keys of `p` merged over it. `None` without the key.
-pub fn layer_curves_eyedropper(s: &crate::Session, layer: photocraft_doc::LayerId, p: &Value) -> Result<Option<Adjustment>> {
+/// the same pixel again maps it the same way. The picker edits the layer's adjustment with the
+/// other keys of `p` merged over it. `None` without the key.
+pub fn layer_eyedropper(s: &crate::Session, layer: photocraft_doc::LayerId, p: &Value) -> Result<Option<Adjustment>> {
     let Some(e) = p.get("eyedropper") else { return Ok(None) };
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let l = d.doc.layer(layer).ok_or(EngineError::NoLayer(layer))?;
-    let photocraft_doc::LayerContent::Adjustment(adj @ Adjustment::Curves { .. }) = &l.content else {
-        return Err(bad(EYEDROPPER, "`eyedropper` applies to Curves adjustment layers only"));
+    let (kind, adj) = match &l.content {
+        photocraft_doc::LayerContent::Adjustment(adj @ Adjustment::Curves { .. }) => ("curves", adj),
+        photocraft_doc::LayerContent::Adjustment(adj @ Adjustment::Levels { .. }) => ("levels", adj),
+        _ => return Err(bad(EYEDROPPER, "`eyedropper` applies to Levels and Curves adjustment layers only")),
     };
     let mut rest = p.clone();
     if let Some(o) = rest.as_object_mut() {
         o.remove("eyedropper");
     }
-    let current = if user_keys(&rest).is_empty() { adj.clone() } else { from_params("curves", &rest, Some(adj), d.doc.mode)? };
+    let current = if user_keys(&rest).is_empty() { adj.clone() } else { from_params(kind, &rest, Some(adj), d.doc.mode)? };
     let (picker, sample) = eyedropper_sample(&d.doc, Some(layer), e)?;
-    curves_eyedropper(&to_params(&current), picker, sample, d.doc.mode).map(Some)
+    adjustment_eyedropper(kind, &to_params(&current), picker, sample, d.doc.mode).map(Some)
 }
 
-const EYEDROPPER: &str = "curves eyedropper";
+const EYEDROPPER: &str = "eyedropper";
 
 /// The picker and sample of an `eyedropper` param; `at` samples `doc` with layer `hide` hidden.
 fn eyedropper_sample(doc: &photocraft_doc::Document, hide: Option<photocraft_doc::LayerId>, e: &Value) -> Result<(CurvesEyedropper, [f32; 3])> {
@@ -1378,8 +1477,61 @@ mod tests {
         for bad in [json!({"point": "black", "at": [99, 1]}), json!({"point": "black", "at": [1, 1], "size": 2}), json!({"point": "x", "at": [1, 1]})] {
             assert!(s.execute("layer.setAdjustment", json!({"eyedropper": bad})).is_err(), "{bad}");
         }
+        s.execute("layer.newAdjustmentLayer.hueSaturation", json!({})).unwrap();
+        assert!(s.execute("layer.setAdjustment", json!({"eyedropper": {"point": "white", "at": [1, 1]}})).is_err(), "Levels and Curves only");
+    }
+
+    /// #3127: on a smart object the eyedropper param records the adjustment it resolved to as
+    /// the smart filter, not the raw sample (which re-rendered as an identity).
+    #[test]
+    fn eyedropper_on_a_smart_object_records_the_resolved_adjustment() {
+        for kind in ["curves", "levels"] {
+            let mut s = crate::Session::new();
+            s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+            s.execute("edit.fill", json!({"color": [0.6, 0.5, 0.4]})).unwrap();
+            s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+            s.execute(&format!("image.adjustments.{kind}"), json!({"eyedropper": {"point": "white", "at": [2, 2]}})).unwrap();
+            let px: Vec<f32> = serde_json::from_value(s.execute("document.pixel", json!({"x": 2, "y": 2})).unwrap()).unwrap();
+            assert!(px.iter().take(3).all(|v| *v > 0.99), "{kind}: {px:?}");
+        }
+    }
+
+    /// Levels' Set White/Neutral Gray Point (#3116): the white point maps the sampled colour to
+    /// white at 8 and 16 bit, the gray point neutralises a tinted grey at its luma on a Levels
+    /// layer as one undoable step, and bad picks fail.
+    #[test]
+    fn levels_eyedroppers_set_white_and_neutral_gray() {
+        let pixel = |s: &mut crate::Session| -> Vec<f32> { serde_json::from_value(s.execute("document.pixel", json!({"x": 2, "y": 2})).unwrap()).unwrap() };
+        for depth in [8, 16] {
+            let mut s = crate::Session::new();
+            s.execute("file.new", json!({"width": 8, "height": 8, "depth": depth})).unwrap();
+            s.execute("edit.fill", json!({"color": [0.6, 0.5, 0.4]})).unwrap();
+            s.execute("image.adjustments.levels", json!({"eyedropper": {"point": "white", "at": [2, 2]}})).unwrap();
+            let px = pixel(&mut s);
+            assert!(px.iter().take(3).all(|v| *v > 0.995), "{depth}-bit: the sample becomes white: {px:?}");
+        }
+        let mut s = crate::Session::new();
+        s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+        s.execute("edit.fill", json!({"color": [0.6, 0.5, 0.4]})).unwrap();
+        let before = pixel(&mut s);
         s.execute("layer.newAdjustmentLayer.levels", json!({})).unwrap();
-        assert!(s.execute("layer.setAdjustment", json!({"eyedropper": {"point": "white", "at": [1, 1]}})).is_err(), "Curves only");
+        let steps = s.active().unwrap().history.past_len();
+        s.execute("layer.setAdjustment", json!({"eyedropper": {"point": "gray", "at": [2, 2]}})).unwrap();
+        assert_eq!(s.active().unwrap().history.past_len(), steps + 1);
+        let px = pixel(&mut s);
+        let (lo, hi) = px.iter().take(3).fold((1.0f32, 0.0f32), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+        assert!(hi - lo < 2.5 / 255.0, "neutral: {px:?}");
+        let luma = |c: &[f32]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
+        assert!((luma(&px) - luma(&before)).abs() < 2.0 / 255.0, "keeps the luma: {px:?} vs {before:?}");
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(pixel(&mut s), before);
+        for bad in [json!({"point": "gray", "at": [99, 1]}), json!({"point": "x", "at": [1, 1]}), json!({"point": "white", "color": [f64::NAN, 0, 0]})] {
+            assert!(s.execute("layer.setAdjustment", json!({"eyedropper": bad})).is_err(), "{bad}");
+            assert!(s.execute("image.adjustments.levels", json!({"eyedropper": bad})).is_err(), "{bad}");
+        }
+        s.execute("file.new", json!({"width": 8, "height": 8, "mode": "grayscale"})).unwrap();
+        assert!(s.execute("image.adjustments.levels", json!({"eyedropper": {"point": "gray", "at": [1, 1]}})).is_err(), "no gray picker in Grayscale");
+        s.execute("image.adjustments.levels", json!({"eyedropper": {"point": "black", "color": [1.0, 1.0, 1.0]}})).unwrap();
     }
 
     #[test]
