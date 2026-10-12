@@ -529,6 +529,12 @@ impl Ex {
                     let legacy_phfl = k == b"phfl" && d.starts_with(&[0, 2]) && d.len() % 4 != 0;
                     !legacy_phfl && adjust_map::ADJUSTMENT_KEYS.contains(&k) && adjust_map::parse(k, d, cged.as_deref(), channels) == *a
                 });
+                // A Gradient Map whose stops are unchanged keeps the file's own block (stops in
+                // the document's CMYK/Lab/Gray space, smoothness, method) with Reverse and Dither
+                // updated in place.
+                let keep = keep
+                    || (matches!(a, photocraft_doc::Adjustment::GradientMap { .. })
+                        && raw.iter_mut().any(|(k, d)| k == b"grdm" && adjust_map::retarget_gradient_map(d, a, channels)));
                 if !keep {
                     raw.retain(|(k, _)| !adjust_map::ADJUSTMENT_KEYS.contains(&k) && k != b"CgEd");
                     let w = adjust_map::write(a);

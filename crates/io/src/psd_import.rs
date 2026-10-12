@@ -702,7 +702,10 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
         // Capped like `build` (#2940): a group past the document's nesting cap keeps no children,
         // so no file can make this tree, or anything walking or dropping it, recurse deeper.
         let tree = file.layer_tree_max_depth(photocraft_doc::MAX_GROUP_DEPTH);
-        doc.layers = cx.build(&tree, 0);
+        // Colours stored in the document's CMYK space (Gradient Map stops…) convert through
+        // its own profile, as the compositor and the PSD writer read them.
+        let space = photocraft_compose::cmyk_space(&doc);
+        doc.layers = photocraft_color::convert::with_cmyk_space(space.as_ref(), || cx.build(&tree, 0));
         // Layer › Link Layers: resource 1026 holds one group id per layer record (0 = unlinked).
         if let Some(Ok(photocraft_psd::resources::ResourceData::LayerGroupInfo(groups))) =
             file.resources.iter().find(|r| r.id == ids::LAYER_GROUP_INFO).and_then(photocraft_psd::resources::ImageResource::parsed)
