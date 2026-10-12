@@ -80,6 +80,9 @@ async fn lists_expected_tools() {
         "doc_open",
         "doc_new",
         "doc_place",
+        "doc_export_layers",
+        "doc_export_data_sets",
+        "doc_import_data_sets",
         "doc_save",
         "doc_export",
         "doc_inspect",
@@ -647,6 +650,68 @@ async fn doc_place_is_capability_scoped() {
     let ambient = call(&client, "command_run", json!({"id": "file.placeEmbedded", "params": {"path": "inside.png"}})).await;
     assert_eq!(ambient.is_error, Some(true));
     assert!(text(&ambient).contains("ambient filesystem paths"), "{}", text(&ambient));
+    client.cancel().await.unwrap();
+    cleanup(&base);
+}
+
+/// #3216: the export half of #2810. The write root scopes both exports, the read root the CSV,
+/// and the three ambient commands keep their refusal.
+#[tokio::test(flavor = "multi_thread")]
+async fn doc_exports_and_data_set_import_are_capability_scoped() {
+    let base = tmp("export");
+    let root = base.join("workspace");
+    std::fs::create_dir_all(&root).unwrap();
+    let client = connect(headless_in(&root)).await;
+
+    json_of(&call(&client, "doc_new", json!({"width": 10, "height": 6, "background": "white", "name": "card"})).await);
+    let inspected = json_of(&call(&client, "doc_inspect", json!({})).await);
+    let layer = inspected["layers"][0]["id"].clone();
+    json_of(
+        &call(&client, "command_run", json!({"id": "image.variables.define", "params": {"defs": [{"name": "show", "layer": layer, "type": "visibility"}]}}))
+            .await,
+    );
+    json_of(
+        &call(
+            &client,
+            "command_run",
+            json!({"id": "image.variables.dataSets", "params": {"dataSets": [
+                {"name": "one", "values": [{"variable": "show", "kind": "visibility", "value": true}]},
+                {"name": "two", "values": [{"variable": "show", "kind": "visibility", "value": false}]},
+            ]}}),
+        )
+        .await,
+    );
+
+    let layers = call(&client, "doc_export_layers", json!({"dir": "layers", "prefix": "card"})).await;
+    assert_ne!(layers.is_error, Some(true), "{}", text(&layers));
+    assert_eq!(json_of(&layers)["count"], 1, "{}", text(&layers));
+    assert_eq!(std::fs::read_dir(root.join("layers")).unwrap().count(), 1);
+    let sets = call(&client, "doc_export_data_sets", json!({"dir": "sets", "format": "png"})).await;
+    assert_ne!(sets.is_error, Some(true), "{}", text(&sets));
+    assert_eq!(json_of(&sets)["count"], 2, "{}", text(&sets));
+    assert_eq!(std::fs::read_dir(root.join("sets")).unwrap().count(), 2);
+    // A colliding template is refused before any file of the batch is written.
+    let clash = call(&client, "doc_export_data_sets", json!({"dir": "clash", "naming": "{document}"})).await;
+    assert_eq!(clash.is_error, Some(true), "{}", text(&clash));
+    assert_eq!(std::fs::read_dir(root.join("clash")).unwrap().count(), 0);
+    // A CSV from the read root.
+    std::fs::write(root.join("sets.csv"), "Data Set,show\none,true\n").unwrap();
+    let imported = call(&client, "doc_import_data_sets", json!({"path": "sets.csv"})).await;
+    assert_ne!(imported.is_error, Some(true), "{}", text(&imported));
+    assert_eq!(json_of(&imported)["imported"], 1, "{}", text(&imported));
+
+    // Outside the roots nothing happens at all.
+    let escaped = call(&client, "doc_export_layers", json!({"dir": base.join("escaped").to_string_lossy()})).await;
+    assert_eq!(escaped.is_error, Some(true), "{}", text(&escaped));
+    assert!(!base.join("escaped").exists());
+    std::fs::write(base.join("outside.csv"), "Data Set,show\none,true\n").unwrap();
+    let outside = call(&client, "doc_import_data_sets", json!({"path": base.join("outside.csv").to_string_lossy()})).await;
+    assert_eq!(outside.is_error, Some(true), "{}", text(&outside));
+    for command in ["file.export.layersToFiles", "file.export.dataSetsAsFiles", "file.import.variableDataSets"] {
+        let refused = call(&client, "command_run", json!({"id": command, "params": {}})).await;
+        assert_eq!(refused.is_error, Some(true), "{command}");
+        assert!(text(&refused).contains("ambient filesystem paths"), "{}", text(&refused));
+    }
     client.cancel().await.unwrap();
     cleanup(&base);
 }

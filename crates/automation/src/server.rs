@@ -73,6 +73,60 @@ pub struct PlaceParams {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ExportLayersParams {
+    /// Directory beneath the configured automation write root: relative (forward slashes) or absolute.
+    pub dir: String,
+    /// Document index from `session_list` (default: the active document).
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// Export format (default png).
+    #[serde(default)]
+    pub format: Option<String>,
+    /// Filename prefix (default: the document name).
+    #[serde(default)]
+    pub prefix: Option<String>,
+    /// Export only the layers that are visible (default true).
+    #[serde(default, rename = "visible_only")]
+    pub visible_only: Option<bool>,
+    /// Encoder quality, 0..12, for the formats that take one.
+    #[serde(default)]
+    pub quality: Option<f64>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExportDataSetsParams {
+    /// Directory beneath the configured automation write root: relative (forward slashes) or absolute.
+    pub dir: String,
+    /// Document index from `session_list` (default: the active document).
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// Export format (default png).
+    #[serde(default)]
+    pub format: Option<String>,
+    /// Only these data sets, by name; default every one of them.
+    #[serde(default, rename = "data_sets")]
+    pub data_sets: Option<Vec<String>>,
+    /// Filename template with `{name}`, `{index}` and `{document}` (default `{name}`).
+    #[serde(default)]
+    pub naming: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportDataSetsParams {
+    /// Path beneath the configured automation read root: relative (forward slashes) or absolute.
+    pub path: String,
+    /// Document index from `session_list` (default: the active document).
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// Field delimiter (default `,`).
+    #[serde(default)]
+    pub delimiter: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct NewParams {
     #[serde(default)]
     pub width: Option<u32>,
@@ -564,6 +618,80 @@ impl PhotocraftMcp {
             return to_result(r);
         }
         self.run_command("file.placeEmbedded".into(), bridge_params, true).await
+    }
+
+    #[tool(
+        description = "Export each exported layer of the document as its own file beneath the write root (the capability-scoped Layers to Files). A file that already exists is an error, not an overwrite."
+    )]
+    async fn doc_export_layers(&self, Parameters(p): Parameters<ExportLayersParams>) -> Result<CallToolResult, McpError> {
+        let mut opts = serde_json::Map::new();
+        if let Some(v) = p.format {
+            opts.insert("format".into(), json!(v));
+        }
+        if let Some(v) = p.prefix {
+            opts.insert("prefix".into(), json!(v));
+        }
+        if let Some(v) = p.visible_only {
+            opts.insert("visibleOnly".into(), json!(v));
+        }
+        if let Some(v) = p.quality {
+            opts.insert("quality".into(), json!(v));
+        }
+        let opts = Value::Object(opts);
+        // Bridge mode runs the app on this machine, which writes its own paths like any command.
+        let mut bridge_params = opts.clone();
+        if let Some(o) = bridge_params.as_object_mut() {
+            o.insert("dir".into(), Value::String(p.dir.clone()));
+        }
+        let (dir, index) = (p.dir, p.index);
+        if let Some(r) = self.headless_op(move |h| h.export_layers(index, &dir, &opts)).await {
+            return to_result(r);
+        }
+        self.run_command("file.export.layersToFiles".into(), bridge_params, true).await
+    }
+
+    #[tool(
+        description = "Export every data set of the document as its own flattened file beneath the write root (the capability-scoped Export Data Sets). The batch is planned first, so colliding filenames are refused before any file is written."
+    )]
+    async fn doc_export_data_sets(&self, Parameters(p): Parameters<ExportDataSetsParams>) -> Result<CallToolResult, McpError> {
+        let mut opts = serde_json::Map::new();
+        if let Some(v) = p.format {
+            opts.insert("format".into(), json!(v));
+        }
+        if let Some(v) = p.data_sets {
+            opts.insert("dataSets".into(), json!(v));
+        }
+        if let Some(v) = p.naming {
+            opts.insert("naming".into(), json!(v));
+        }
+        let opts = Value::Object(opts);
+        let mut bridge_params = opts.clone();
+        if let Some(o) = bridge_params.as_object_mut() {
+            o.insert("dir".into(), Value::String(p.dir.clone()));
+        }
+        let (dir, index) = (p.dir, p.index);
+        if let Some(r) = self.headless_op(move |h| h.export_data_sets(index, &dir, &opts)).await {
+            return to_result(r);
+        }
+        self.run_command("file.export.dataSetsAsFiles".into(), bridge_params, true).await
+    }
+
+    #[tool(description = "Import a data set CSV from the read root into the document (the capability-scoped Import Variable Data Sets).")]
+    async fn doc_import_data_sets(&self, Parameters(p): Parameters<ImportDataSetsParams>) -> Result<CallToolResult, McpError> {
+        let mut opts = serde_json::Map::new();
+        if let Some(v) = p.delimiter {
+            opts.insert("delimiter".into(), json!(v));
+        }
+        let opts = Value::Object(opts);
+        let mut bridge_params = opts.clone();
+        if let Some(o) = bridge_params.as_object_mut() {
+            o.insert("path".into(), Value::String(p.path.clone()));
+        }
+        let (path, index) = (p.path, p.index);
+        if let Some(r) = self.headless_op(move |h| h.import_data_sets(index, &path, &opts)).await {
+            return to_result(r);
+        }
+        self.run_command("file.import.variableDataSets".into(), bridge_params, true).await
     }
 
     #[tool(description = "Create a new document (defaults: 1920x1080 RGB 8-bit white).")]
