@@ -882,6 +882,21 @@ pub fn form_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     egui::Grid::new("form-dialog").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
         for k in keys {
             let v = f.get(&k).cloned().unwrap_or(Value::Null);
+            if k == "quality" && f.get("__command").and_then(Value::as_str) == Some("file.automate.batch") {
+                ui.label(label(&k));
+                let mut custom = v.as_f64().is_some();
+                let mut quality = v.as_f64().or_else(|| f.get("__batchQuality").and_then(Value::as_f64)).unwrap_or(8.0).clamp(0.0, 12.0) as f32;
+                ui.horizontal(|ui| {
+                    crate::widgets::checkbox(ui, &mut custom, tl!("Custom"));
+                    ui.add_enabled_ui(custom, |ui| crate::widgets::value_field(ui, &mut quality, 0.0..=12.0, "", 74.0));
+                });
+                // None preserves the command's existing JPEG and lossless WebP defaults.
+                // The inactive custom value is shell state, never a command parameter.
+                f.insert("__batchQuality".into(), json!(quality));
+                f.insert(k, if custom { json!(quality) } else { Value::Null });
+                ui.end_row();
+                continue;
+            }
             let new = match &v {
                 Value::Array(_) | Value::Object(_) | Value::Null => continue,
                 Value::Bool(b) => {
@@ -1106,7 +1121,7 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
         "file.scripts.imageProcessor" => dialog(
             app,
             json!({"input": dir, "output": format!("{dir}/processed"), "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}),
-            json!({"format": ["jpg", "png", "psd", "tiff"]}),
+            json!({"format": ["jpg", "png", "psd", "tiff", "webp"]}),
         ),
         "file.automate.batch" => {
             let Some(action) = crate::actions::selected_action(app) else {
@@ -1116,8 +1131,8 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
             let name = action.name.clone();
             dialog(
                 app,
-                json!({"action": name, "steps": steps, "input": dir, "output": format!("{dir}/batch"), "format": "same"}),
-                json!({"format": ["same", "png", "jpg", "psd", "tiff"]}),
+                json!({"action": name, "steps": steps, "input": dir, "output": format!("{dir}/batch"), "format": "same", "quality": null, "__batchQuality": 8}),
+                json!({"format": ["same", "png", "jpg", "psd", "tiff", "webp"]}),
             )
         }
         // Channel workflow dialogs (see channels_panel.rs for the channel references).
