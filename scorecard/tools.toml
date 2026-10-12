@@ -148,9 +148,9 @@ note = "canvas_tool_menu.rs TRANSFORM_MENU: modes, Content-Aware Scale / Puppet 
 [[item]]
 id = "TOOL-214-6"
 target = "Puppet Warp mesh follows the object outline (constrained triangulation)"
-status = "missing"
+status = "done"
 issue = 214
-note = "algo/puppet.rs:136 builds a block-grid mesh"
+note = "algo/puppet.rs build_mesh: traced outline of the opaque region grown by Expansion, triangulated with a Density-spaced lattice (conforming Delaunay); separate shapes get separate meshes (#3105)"
 
 [[item]]
 id = "TOOL-214-7"
