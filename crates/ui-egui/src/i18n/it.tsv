@@ -774,20 +774,6 @@
 	Statistics…	Statistiche…
 	Refine Strokes	Tratti di perfezionamento
 @plural	{n} item|{n} items	{n} elemento|{n} elementi
-@plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	Esportato {n} campione in {file}|Esportati {n} campioni in {file}
-@plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	Importato {n} pennello da {group}|Importati {n} pennelli da {group}
-@plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	Importato {n} campione da {file}|Importati {n} campioni da {file}
-@plural	Played {n} step|Played {n} steps	Riprodotto {n} passaggio|Riprodotti {n} passaggi
-@plural	Saved for Web: {n} file|Saved for Web: {n} files	Salvato per Web: {n} file|Salvati per Web: {n} file
-@plural	Updated {n} linked smart object changed on disk|Updated {n} linked smart objects changed on disk	Aggiornato {n} oggetto avanzato collegato modificato su disco|Aggiornati {n} oggetti avanzati collegati modificati su disco
-@plural	{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.|{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.	È stato eliminato {n} livello registrato in questa composizione. Aggiorna la composizione o rimuovi l’avviso.|Sono stati eliminati {n} livelli registrati in questa composizione. Aggiorna la composizione o rimuovi l’avviso.
-@plural	{n} plane|{n} planes	{n} piano|{n} piani
-@plural	{n} preset|{n} presets	{n} predefinito|{n} predefiniti
-@plural	{n} sample point removed|{n} sample points removed	Rimosso {n} punto campione|Rimossi {n} punti campione
-@plural	{n} slice|{n} slices	{n} sezione|{n} sezioni
-@plural	{n} step|{n} steps	{n} passaggio|{n} passaggi
-@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} altro avviso di predefinito pennello)|{warning} (+{n} altri avvisi di predefiniti pennello)
-@plural	{what} with {n} warning|{what} with {n} warnings	{what} con {n} avviso|{what} con {n} avvisi
 	Auto	Automatico
 
 # Dialogs and panels
@@ -2713,3 +2699,18 @@ curves	Smooth	Leviga
 	Apply mask to layer before removing?	Applicare la maschera al livello prima di rimuoverla?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Il livello o la sua maschera è cambiato. Trascina di nuovo la maschera nel cestino.
 	Delete the vector mask?	Eliminare la maschera vettoriale?
+# Counted status messages and labels (#3454; adapted from PR #3821)
+@plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	{n} campione esportato in {file}|{n} campioni esportati in {file}
+@plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	{n} pennello importato da {group}|{n} pennelli importati da {group}
+@plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	{n} campione importato da {file}|{n} campioni importati da {file}
+@plural	Played {n} step|Played {n} steps	{n} passaggio riprodotto|{n} passaggi riprodotti
+@plural	Updated {n} linked smart object changed on disk|Updated {n} linked smart objects changed on disk	{n} oggetto avanzato collegato modificato su disco aggiornato|{n} oggetti avanzati collegati modificati su disco aggiornati
+@plural	Saved for Web: {n} file|Saved for Web: {n} files	Salvato per il Web: {n} file|Salvato per il Web: {n} file
+@plural	{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.|{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.	{n} livello registrato da questa composizione è stato eliminato. Aggiorna la composizione o cancella l'avviso.|{n} livelli registrati da questa composizione sono stati eliminati. Aggiorna la composizione o cancella l'avviso.
+@plural	{n} plane|{n} planes	{n} piano|{n} piani
+@plural	{n} preset|{n} presets	{n} predefinito|{n} predefiniti
+@plural	{n} sample point removed|{n} sample points removed	{n} punto di campionamento rimosso|{n} punti di campionamento rimossi
+@plural	{n} slice|{n} slices	{n} sezione|{n} sezioni
+@plural	{n} step|{n} steps	{n} passaggio|{n} passaggi
+@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} altro avviso sui predefiniti pennello)|{warning} (+{n} altri avvisi sui predefiniti pennello)
+@plural	{what} with {n} warning|{what} with {n} warnings	{what} con {n} avviso|{what} con {n} avvisi

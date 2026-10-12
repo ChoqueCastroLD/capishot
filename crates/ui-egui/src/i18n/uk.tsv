@@ -1786,20 +1786,6 @@
 
 # Plurals
 @plural	{n} item|{n} items	{n} елемент|{n} елементи|{n} елементів
-@plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	Експортовано {n} зразок кольору до {file}|Експортовано {n} зразки кольорів до {file}|Експортовано {n} зразків кольорів до {file}
-@plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	Імпортовано {n} пензель із {group}|Імпортовано {n} пензлі з {group}|Імпортовано {n} пензлів із {group}
-@plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	Імпортовано {n} зразок кольору з {file}|Імпортовано {n} зразки кольорів із {file}|Імпортовано {n} зразків кольорів із {file}
-@plural	Played {n} step|Played {n} steps	Відтворено {n} крок|Відтворено {n} кроки|Відтворено {n} кроків
-@plural	Saved for Web: {n} file|Saved for Web: {n} files	Збережено для Web: {n} файл|Збережено для Web: {n} файли|Збережено для Web: {n} файлів
-@plural	Updated {n} linked smart object changed on disk|Updated {n} linked smart objects changed on disk	Оновлено {n} зв’язаний смартоб’єкт, змінений на диску|Оновлено {n} зв’язані смартоб’єкти, змінені на диску|Оновлено {n} зв’язаних смартоб’єктів, змінених на диску
-@plural	{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.|{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.	Видалено {n} шар, записаний у цій композиції. Оновіть композицію або приберіть попередження.|Видалено {n} шари, записані в цій композиції. Оновіть композицію або приберіть попередження.|Видалено {n} шарів, записаних у цій композиції. Оновіть композицію або приберіть попередження.
-@plural	{n} plane|{n} planes	{n} площина|{n} площини|{n} площин
-@plural	{n} preset|{n} presets	{n} набір|{n} набори|{n} наборів
-@plural	{n} sample point removed|{n} sample points removed	Видалено {n} точку зразка|Видалено {n} точки зразка|Видалено {n} точок зразка
-@plural	{n} slice|{n} slices	{n} фрагмент|{n} фрагменти|{n} фрагментів
-@plural	{n} step|{n} steps	{n} крок|{n} кроки|{n} кроків
-@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} додаткове попередження про набір пензлів)|{warning} (+{n} додаткові попередження про набори пензлів)|{warning} (+{n} додаткових попереджень про набори пензлів)
-@plural	{what} with {n} warning|{what} with {n} warnings	{what} з {n} попередженням|{what} з {n} попередженнями|{what} з {n} попередженнями
 @plural	{n} Layer|{n} Layers	{n} Шар|{n} Шари|{n} Шарів
 @plural	{n} layer|{n} layers	{n} шар|{n} шари|{n} шарів
 @plural	Group · {n} layer|Group · {n} layers	Група · {n} шар|Група · {n} шари|Група · {n} шарів
@@ -3739,3 +3725,18 @@ curves	Smooth	Згладити
 	Apply mask to layer before removing?	Застосувати маску до шару перед видаленням?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Шар або його маска змінилися. Перетягніть маску до кошика ще раз.
 	Delete the vector mask?	Видалити векторну маску?
+# Counted status messages and labels (#3454; adapted from PR #3821)
+@plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	Експортовано {n} зразок кольору до {file}|Експортовано {n} зразки кольорів до {file}|Експортовано {n} зразків кольорів до {file}
+@plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	Імпортовано {n} пензель з {group}|Імпортовано {n} пензлі з {group}|Імпортовано {n} пензлів з {group}
+@plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	Імпортовано {n} зразок кольору з {file}|Імпортовано {n} зразки кольорів з {file}|Імпортовано {n} зразків кольорів з {file}
+@plural	Played {n} step|Played {n} steps	Відтворено {n} крок|Відтворено {n} кроки|Відтворено {n} кроків
+@plural	Updated {n} linked smart object changed on disk|Updated {n} linked smart objects changed on disk	Оновлено {n} пов'язаний смартоб'єкт, змінений на диску|Оновлено {n} пов'язані смартоб'єкти, змінені на диску|Оновлено {n} пов'язаних смартоб'єктів, змінених на диску
+@plural	Saved for Web: {n} file|Saved for Web: {n} files	Збережено для вебу: {n} файл|Збережено для вебу: {n} файли|Збережено для вебу: {n} файлів
+@plural	{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.|{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.	Видалено {n} шар, записаний у цій композиції. Оновіть композицію або скиньте попередження.|Видалено {n} шари, записані в цій композиції. Оновіть композицію або скиньте попередження.|Видалено {n} шарів, записаних у цій композиції. Оновіть композицію або скиньте попередження.
+@plural	{n} plane|{n} planes	{n} площина|{n} площини|{n} площин
+@plural	{n} preset|{n} presets	{n} набір|{n} набори|{n} наборів
+@plural	{n} sample point removed|{n} sample points removed	Вилучено {n} точку вимірювання|Вилучено {n} точки вимірювання|Вилучено {n} точок вимірювання
+@plural	{n} slice|{n} slices	{n} фрагмент|{n} фрагменти|{n} фрагментів
+@plural	{n} step|{n} steps	{n} крок|{n} кроки|{n} кроків
+@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (і ще {n} попередження щодо наборів пензлів)|{warning} (і ще {n} попередження щодо наборів пензлів)|{warning} (і ще {n} попереджень щодо наборів пензлів)
+@plural	{what} with {n} warning|{what} with {n} warnings	{what}: {n} попередження|{what}: {n} попередження|{what}: {n} попереджень
