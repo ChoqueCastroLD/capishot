@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError, Weak, mpsc};
 
 use photocraft_doc::Document;
 
-use crate::store::{self, PcraftWriter, Source};
+use crate::store::{self, ByteSource, PcraftWriter};
 use crate::{FormatError, LoadOptions, Result, SaveOptions};
 
 type SharedTiles = Arc<Mutex<HashMap<String, Weak<Tile>>>>;
@@ -303,7 +303,7 @@ struct SnapshotSource<'a> {
     manifest: &'a str,
 }
 
-impl Source for SnapshotSource<'_> {
+impl ByteSource for SnapshotSource<'_> {
     fn get(&self, path: &str, max: usize) -> Result<Vec<u8>> {
         let path = if path == store::MANIFEST { self.manifest } else { path };
         store::DirSource { root: self.root.clone() }.get(path, max)

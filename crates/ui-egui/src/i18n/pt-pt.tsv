@@ -1142,6 +1142,7 @@
 	Magenta	Magenta
 	Magenta  ·  Green	Magenta  ·  Verde
 	Maintain aspect ratio	Manter proporção
+	Maintain Aspect Ratio	Manter proporção
 	Marker Size	Tamanho do marcador
 	Mask All	Mascarar tudo
 	Mask Options	Opções de máscara
@@ -2837,6 +2838,9 @@ fontWeight	Italic	Itálico
 	Compile PSD…	Compilar PSD…
 	Compile Folder…	Compilar pasta…
 	psd-compiler on GitHub	psd-compiler no GitHub
-	Based on PhotoCraft	Baseado no PhotoCraft
+	Based on PhotoCraft	Baseado no Capishot
 	psd-compiler	psd-compiler
 	Show canvas dots	Mostrar pontos da tela
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	Apagar para histórico
+	Sample Size	Tamanho da amostra

@@ -79,6 +79,7 @@ fn glyph(h: &mut Harness<'static, PhotocraftApp>, id: LayerId, i: usize, f: f32)
         center: v.center,
         flip: app.ui.view.flip_horizontal,
         rotation: v.rotation,
+        aspect: app.ui.view.display_aspect(),
     };
     xf.to_screen(p.x as f32, p.y as f32)
 }
@@ -173,7 +174,7 @@ fn multi_clicks_select_word_line_paragraph_and_all() {
 
 /// Edit layer `id` with `range` selected (caret at its end).
 fn editing(app: &mut PhotocraftApp, id: LayerId, (anchor, caret): (usize, usize)) {
-    app.ui.text_edit = Some(TextEdit { layer: id.0, caret, anchor, session: "keys-test".into(), created: false, dragging: false, resize: None, preedit: None });
+    app.ui.text_edit = Some(TextEdit { layer: id.0, caret, anchor, session: "keys-test".into(), created: false, dragging: false, resize: None, preedit: None, mask: false });
 }
 
 fn press(h: &mut Harness<'static, PhotocraftApp>, key: Key, modifiers: Modifiers) {

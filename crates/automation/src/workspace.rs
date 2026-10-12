@@ -55,6 +55,21 @@ impl AuthorizedWorkspace {
         photocraft_format::read::read_all(&mut file, metadata.len()).map_err(|e| file_error("read", path, e))
     }
 
+    /// Load one `.pcraft` document in directory form — the native on-disk layout — below the
+    /// read root. `read` serves regular files only (the zip form), so a regular file at the
+    /// path is reported as `Ok(None)` for the caller to fall back to.
+    pub fn open_pcraft(&self, path: &str) -> Result<Option<photocraft_doc::Document>, AutomationError> {
+        let relative = request_path(path, self.read.as_ref())?;
+        let root = self.read.as_ref().ok_or_else(|| AutomationError::BadRequest(format!("{DENIED}: read authority is absent")))?;
+        let dir = match root.dir.open_dir(&relative) {
+            Ok(dir) => dir,
+            Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => return Ok(None),
+            Err(e) => return Err(file_error("read", path, e)),
+        };
+        let source = DirHandle { dir };
+        Ok(Some(photocraft_format::load_bytes_source(&source, &photocraft_format::LoadOptions::default())?))
+    }
+
     /// Create or replace one file below the configured write root, crash-safely: the bytes go to
     /// a temporary file beside the target, which is synced and renamed over it (the same steps
     /// as [`photocraft_format::atomic_write`], through the directory capability). On failure
@@ -173,6 +188,24 @@ fn path_error(path: &str, reason: &str) -> AutomationError {
     AutomationError::BadRequest(format!("automation path rejected: {reason}: `{path}`"))
 }
 
+/// A `.pcraft` directory behind the read-root capability: bounded reads, no ambient paths.
+struct DirHandle {
+    dir: Dir,
+}
+
+impl photocraft_format::ByteSource for DirHandle {
+    fn get(&self, path: &str, max: usize) -> photocraft_format::Result<Vec<u8>> {
+        let missing = || photocraft_format::FormatError::Corrupt(format!("missing `{path}`"));
+        let mut file = self.dir.open(path).map_err(|_| missing())?;
+        let metadata = file.metadata().map_err(|_| missing())?;
+        if !metadata.is_file() {
+            // A FIFO or device would block the open and stream without end.
+            return Err(photocraft_format::FormatError::Corrupt(format!("`{path}` is not a regular file")));
+        }
+        photocraft_format::read_entry(&mut file, metadata.len(), max, path)
+    }
+}
+
 fn file_error(operation: &str, path: &str, error: std::io::Error) -> AutomationError {
     let kind = error.kind();
     AutomationError::Io(format!("automation {operation} `{path}` failed ({kind:?}): {error}"))
@@ -223,6 +256,7 @@ pub fn authorize_engine_command(id: &str, params: &Value) -> Result<(), Automati
         || command_uses_ambient_path(id, params)
         || profile_command_may_read_ambient(id, params)
         || preferences_may_grant_ambient_paths(id, params)
+        || preferences_may_enable_online_fonts(id, params)
         || params_contain_ambient_path(id, params)
     {
         return Err(command_error(id));
@@ -290,6 +324,28 @@ fn preferences_may_grant_ambient_paths(id: &str, params: &Value) -> bool {
     let direct = params.get("path").and_then(Value::as_str).is_some_and(preference_uses_ambient_filesystem);
     let batch = params.get("values").and_then(Value::as_object).is_some_and(|values| values.keys().any(|path| preference_uses_ambient_filesystem(path)));
     direct || batch
+}
+
+/// Online fonts are the user's consent to network access (Preferences > Type > Allow Online
+/// Fonts): an untrusted automation client must not be able to switch it on for itself.
+fn preferences_may_enable_online_fonts(id: &str, params: &Value) -> bool {
+    if id != "prefs.set" {
+        return false;
+    }
+    let direct = params.get("path").and_then(Value::as_str).is_some_and(preference_is_online_fonts);
+    let batch = params.get("values").and_then(Value::as_object).is_some_and(|values| values.keys().any(|path| preference_is_online_fonts(path)));
+    direct || batch
+}
+
+/// `type.allowOnlineFonts`, or anything that could carry it: the whole `type` section or all
+/// preferences.
+fn preference_is_online_fonts(path: &str) -> bool {
+    let mut segments = path.split('.').filter(|segment| !segment.is_empty());
+    match (segments.next(), segments.next()) {
+        (None, _) | (Some("type"), None) => true,
+        (Some("type"), Some(key)) => key.eq_ignore_ascii_case("allowOnlineFonts"),
+        _ => false,
+    }
 }
 
 fn preference_uses_ambient_filesystem(path: &str) -> bool {
@@ -431,6 +487,45 @@ mod tests {
         assert_eq!(workspace.read("read.txt").unwrap(), b"canary");
         workspace.write("new-output.txt", b"created").unwrap();
         assert_eq!(std::fs::read(inside.join("new-output.txt")).unwrap(), b"created");
+    }
+
+    #[test]
+    fn open_pcraft_loads_a_directory_below_the_read_root() {
+        let (inside, _, workspace) = roots("pcraft-dir");
+        let doc = photocraft_doc::Document::new("Native", photocraft_doc::Size::new(16, 12), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8);
+        photocraft_format::PcraftWriter::new().save_dir(&doc, &inside.join("native.pcraft"), &photocraft_format::SaveOptions::default()).unwrap();
+        let loaded = workspace.open_pcraft("native.pcraft").unwrap().expect("the directory form loads");
+        assert_eq!(loaded.name, doc.name);
+        assert_eq!((loaded.size.width, loaded.size.height), (16, 12));
+    }
+
+    #[test]
+    fn open_pcraft_reports_zip_files_and_missing_paths_clearly() {
+        let (inside, _, workspace) = roots("pcraft-errors");
+        let doc = photocraft_doc::Document::new("Zipped", photocraft_doc::Size::new(4, 4), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8);
+        let zip = inside.join("zipped.pcraft");
+        photocraft_format::PcraftWriter::new().save_path(&doc, &zip, &photocraft_format::SaveOptions::default()).unwrap();
+        assert!(zip.is_file());
+        assert!(workspace.open_pcraft("zipped.pcraft").unwrap().is_none(), "the zip form falls back to the bytes path");
+        let error = workspace.open_pcraft("missing.pcraft").unwrap_err().to_string();
+        assert!(error.contains("failed"), "a missing path propagates its io error: {error}");
+        assert!(AuthorizedWorkspace::default().open_pcraft("x.pcraft").is_err(), "no read authority fails closed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_pcraft_rejects_non_regular_entries_and_escaping_symlinks() {
+        let (inside, _, workspace) = roots("pcraft-nonregular");
+        let bundle = inside.join("native.pcraft");
+        std::fs::create_dir_all(bundle.join("manifest.json")).unwrap();
+        let error = workspace.open_pcraft("native.pcraft").unwrap_err().to_string();
+        assert!(error.contains("not a regular file"), "a directory entry is refused, not streamed: {error}");
+
+        let (inside2, _, workspace2) = roots("pcraft-symlink");
+        let bundle2 = inside2.join("native.pcraft");
+        std::fs::create_dir(&bundle2).unwrap();
+        std::os::unix::fs::symlink("/dev/zero", bundle2.join("manifest.json")).unwrap();
+        assert!(workspace2.open_pcraft("native.pcraft").is_err(), "an escaping symlink entry is refused");
     }
 
     fn temp_files(dir: &Path) -> Vec<String> {
@@ -685,6 +780,21 @@ mod tests {
         assert!(authorize_engine_command("prefs.set", &serde_json::json!({"path": "interface.language", "value": "fr"})).is_ok());
     }
 
+    /// Allow Online Fonts is the user's consent to network access: an untrusted client cannot
+    /// switch it on (directly, in a batch, through the `type` section or the whole tree).
+    #[test]
+    fn automation_cannot_enable_online_fonts() {
+        for path in ["type.allowOnlineFonts", "type.ALLOWONLINEFONTS", ".type..allowOnlineFonts", "type", "", "."] {
+            assert!(authorize_engine_command("prefs.set", &serde_json::json!({"path": path, "value": true})).is_err(), "{path}");
+        }
+        assert!(authorize_engine_command("prefs.set", &serde_json::json!({"values": {"interface.language": "fr", "type.allowOnlineFonts": true}})).is_err());
+        // Other type preferences and unrelated sections stay settable.
+        assert!(authorize_engine_command("prefs.set", &serde_json::json!({"path": "type.smartQuotes", "value": false})).is_ok());
+        assert!(authorize_engine_command("prefs.set", &serde_json::json!({"values": {"type.fontPreview": "large"}})).is_ok());
+        // The font commands themselves are allowed (they check the preference).
+        assert!(authorize_engine_command("type.fonts.install", &serde_json::json!({"family": "Roboto"})).is_ok());
+    }
+
     #[test]
     fn registry_filesystem_path_params_are_classified() {
         let probe = serde_json::json!({
@@ -734,6 +844,8 @@ mod tests {
                 | "path.moveHandle"
                 | "path.bendSegment"
                 | "path.convertPoint"
+                | "path.addAnchor"
+                | "path.deleteAnchor"
                 | "path.clippingPath.set"
                 | "path.rename"
                 | "select.toWorkPath"

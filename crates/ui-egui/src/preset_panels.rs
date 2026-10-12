@@ -83,12 +83,6 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
     }
     let want = params.get("show").and_then(Value::as_bool);
     if let Some(tab) = color_tab(id) {
-        let panel = crate::panel_docking::PanelTab { group: crate::dock::Group::Color, tab };
-        if let Some(showing) = crate::panel_docking::visible(app, panel) {
-            let show = want.unwrap_or(!showing);
-            crate::panel_docking::set_visible(app, panel, show);
-            return Some(Ok(json!({"visible": show})));
-        }
         // A collapsed Color group counts as not showing: the item expands it (#129).
         let showing = app.ui.panels.color && app.ui.dock_tabs.color == tab && !app.ui.dock.is_collapsed(crate::dock::Group::Color);
         let show = want.unwrap_or(!showing);
@@ -106,9 +100,6 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
 
 pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
     if let Some(tab) = color_tab(id) {
-        if let Some(showing) = crate::panel_docking::visible(app, crate::panel_docking::PanelTab { group: crate::dock::Group::Color, tab }) {
-            return Some(showing);
-        }
         return Some(app.ui.panels.color && app.ui.dock_tabs.color == tab);
     }
     let mut p = app.ui.presets_ui.clone();
@@ -1015,7 +1006,7 @@ pub fn clone_source_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let (mut ox, mut oy) = (off[0] as f32, off[1] as f32);
     let (mut w, mut h) = (slot.scale[0] as f32, slot.scale[1] as f32);
     let mut rot = slot.rotation as f32;
-    egui::Grid::new("clone-src-grid").num_columns(4).spacing(vec2(6.0, 4.0)).show(ui, |ui| {
+    egui::Grid::new("clone-src-grid").num_columns(5).spacing(vec2(6.0, 4.0)).show(ui, |ui| {
         lbl(ui, "X:");
         if crate::widgets::value_field(ui, &mut ox, -30000.0..=30000.0, "px", 72.0).changed() && slot.source.is_some() {
             action = Some(json!({"offset": [ox, oy]}));
@@ -1023,6 +1014,11 @@ pub fn clone_source_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         lbl(ui, "W:");
         if crate::widgets::value_field(ui, &mut w, -1000.0..=1000.0, "%", 64.0).changed() {
             action = Some(json!({"width": w}));
+        }
+        // Maintain Aspect Ratio: W and H scale together (`cloneSource.set` "link").
+        let linked = slot.link;
+        if crate::icons::button(ui, if linked { "link" } else { "unlink" }, 22.0, linked, tl!("Maintain Aspect Ratio")).clicked() {
+            action = Some(json!({"link": !linked}));
         }
         ui.end_row();
         lbl(ui, "Y:");

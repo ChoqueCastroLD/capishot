@@ -15,6 +15,23 @@
 # Product and technology names (Capishot, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing "…" of dialog commands is kept.
 
+# Guide layout dialog
+	Rows	行
+	Number	数
+	Top:	上:
+	Left:	左:
+	Bottom:	下:
+	Right:	右:
+	Target:	対象:
+	Selected Artboards	選択したアートボード
+	Center Columns	列を中央に配置
+	Clear Existing Guides	既存のガイドを削除
+	Invalid guide layout	ガイドレイアウトが無効です
+	Leave empty for automatic size	自動サイズにするには空欄にします
+	5 Columns, 3 Rows	5列、3行
+	8 Columns	8列
+	12 Columns	12列
+
 	File	ファイル
 	Edit	編集
 	Image	画像
@@ -44,6 +61,8 @@
 	Right	右
 	Open Recent	最近使ったファイルを開く
 	Clear Recent Files	最近使ったファイルを消去
+	Remove from Recent	最近使ったファイルから削除
+	Remove {name} from Recent	{name} を最近使ったファイルから削除
 	Close	閉じる
 	Minimize	最小化
 	Maximize	最大化
@@ -268,6 +287,7 @@
 	Layer via Cut	切り取ったレイヤー
 	Layer From Background…	背景からレイヤーへ…
 	Layer from Background…	背景からレイヤーへ…
+	Background From Layer	レイヤーから背景
 	New Shape Layer	新規シェイプレイヤー
 	New Type Layer	新規文字レイヤー
 	New Fill Layer	新規塗りつぶしレイヤー
@@ -481,6 +501,12 @@
 	Color Range…	色域指定…
 	Focus Area…	焦点領域…
 	Select and Mask…	選択とマスク…
+# Select and Mask dialog labels
+	Smart Radius	スマート半径
+	Shift Edge	エッジをシフト
+	Decontaminate	混入を除去
+	Output	出力
+	Refine Edge	境界線を調整
 	Modify	選択範囲を修正
 	Border…	境界…
 	Smooth…	滑らかに…
@@ -595,6 +621,10 @@
 	100%	100%
 	200%	200%
 	75%	75%
+	80%	80%
+	85%	85%
+	90%	90%
+	95%	95%
 	125%	125%
 	150%	150%
 	175%	175%
@@ -676,10 +706,15 @@
 	New Workspace…	新規ワークスペース…
 	Delete Workspace…	ワークスペースを削除…
 	Reset Workspace	ワークスペースをリセット
+	Reset Tool	ツールをリセット
+	Reset All Tools	すべてのツールをリセット
+	Reset all tools to their default settings?	すべてのツールを初期設定に戻しますか？
 	Lock Workspace	ワークスペースをロック
 	Theme	テーマ
 	Pro Theme	プロテーマ
 	Pro Medium Gray Theme	プロ(中間グレー)テーマ
+	Pro Light Gray Theme	プロ(ライトグレー)テーマ
+	Pro Light Theme	プロ(ライト)テーマ
 	Studio Theme	スタジオテーマ
 	Studio Light Theme	スタジオ(ライト)テーマ
 	Adwaita Light Theme	Adwaita(ライト)テーマ
@@ -687,6 +722,10 @@
 	Classic Theme	クラシックテーマ
 	Solarized dark	Solarized ダーク
 	Solarized Dark Theme	Solarized ダークテーマ
+	Breeze dark	Breeze ダーク
+	Breeze Dark Theme	Breeze ダークテーマ
+	Breeze light	Breeze ライト
+	Breeze Light Theme	Breeze ライトテーマ
 	Next Theme	次のテーマ
 	Actions	アクション
 	Brush Settings	ブラシ設定
@@ -695,6 +734,7 @@
 	Character	文字
 	Character Styles	文字スタイル
 	Clone Source	コピーソース
+	Maintain Aspect Ratio	縦横比を維持
 	Color	カラー
 	Glyphs	字形
 	Gradients	グラデーション
@@ -736,6 +776,7 @@
 	Split Warp Horizontally	ワープを水平方向に分割
 	Split Warp Vertically	ワープを垂直方向に分割
 	Statistics…	統計情報…
+	Refine Strokes	調整ストローク
 @plural	{n} item|{n} items	{n} 件
 	Auto	自動
 
@@ -886,6 +927,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	クリックで拡大 · {key}+クリックで縮小 · 右/左にドラッグで拡大/縮小
 	Click with the Note tool to add a note.	注釈ツールでクリックすると注釈を追加できます。
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	クリック: 角 · ドラッグ: 滑らか · 最初の点をクリック: 閉じる · {key} 完了 · Esc キャンセル
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	クリック: 角 · ドラッグ: 滑らか · {alt}+ドラッグ: ハンドルを分割 · 最初の点をクリックまたはドラッグ: 閉じる · {key} 完了 · Esc キャンセル
 	Clip to layer below	下のレイヤーでクリッピング
 	Clipped	クリッピング済み
 	Close Style Options	スタイルオプションを閉じる
@@ -1330,6 +1372,7 @@
 	Record ● a sequence of edits, then play ▶ it on any document.	一連の編集を記録 ● し、任意のドキュメントで再生 ▶ できます。
 	Red	赤
 	Redefine style by current selection	現在の選択でスタイルを再定義
+	Refine	調整
 	Reflected Gradient	反射形グラデーション
 	Registration Marks	見当合わせマーク
 	Regular	レギュラー
@@ -1511,6 +1554,7 @@
 	White Balance: As Shot	ホワイトバランス: 撮影時の設定
 	Whites	白レベル
 	Width	幅
+	Slant	傾斜
 	Width:	幅:
 	Work Path	作業用パス
 	Yellow	イエロー
@@ -1528,6 +1572,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 移動   {key} 実行   esc 閉じる
 	Version {version}	バージョン {version}
 	New Document	新規ドキュメント
+	New Document With Mask	新規ドキュメント（マスク付き）
+	New Layer With Mask	新規レイヤー（マスク付き）
 	Saved	保存済み
 	Save Preset…	プリセットを保存…
 	Preset Name	プリセット名
@@ -1550,6 +1596,7 @@
 	Blur Tool	ぼかしツール
 	Bold	ボールド
 	Brush	ブラシ
+	Block	ブロック
 	Brush Pose	ブラシの姿勢
 	Brush Tip Shape	ブラシ先端のシェイプ
 	Brush Tool	ブラシツール
@@ -1599,6 +1646,8 @@
 	Efficiency: 100%	効率: 100%
 	Ellipse Tool	楕円形ツール
 	Elliptical Marquee Tool	楕円形選択ツール
+	Single Row Marquee Tool	一行選択ツール
+	Single Column Marquee Tool	一列選択ツール
 	Emboss	エンボス
 	Eraser	消しゴム
 	Eraser Tool	消しゴムツール
@@ -1621,6 +1670,8 @@
 	Highlights from:	ハイライトの開始:
 	History Brush Tool	ヒストリーブラシツール
 	Horizontal Type Tool	横書き文字ツール
+	Horizontal Type Mask Tool	横書き文字マスクツール
+	Vertical Type Mask Tool	縦書き文字マスクツール
 	Image Size:	画像サイズ:
 	Inches	インチ
 	Indexed	インデックス
@@ -1656,6 +1707,7 @@
 	Mobile	モバイル
 	Move Tool	移動ツール
 	Could not use the move tool because the layer is locked.	レイヤーがロックされているため、移動ツールを使用できません。
+	Could not complete the Free Transform command because the layer is locked.	レイヤーがロックされているため、自由変形コマンドを完了できません。
 	Multiply	乗算
 	My Brushes	マイブラシ
 	Neutrals	中間色系
@@ -1674,10 +1726,15 @@
 	Paints from the document's opening state	ドキュメントを開いた時点の状態から描画します
 	Path Selection Tool	パスコンポーネント選択ツール
 	Direct Selection Tool	パス選択ツール
+	Add Anchor Point Tool	アンカーポイントの追加ツール
+	Delete Anchor Point Tool	アンカーポイントの削除ツール
+	Click a segment to add an anchor point · {alt}-click an anchor to delete it	セグメントをクリックしてアンカーポイントを追加 · {alt}+クリック: アンカーポイントを削除
+	Click an anchor point to delete it · {alt}-click a segment to add one	アンカーポイントをクリックして削除 · {alt}+クリック: セグメントにアンカーポイントを追加
 	Pattern Overlay	パターンオーバーレイ
 	Pen Pressure	ペンの筆圧
 	Pen Tilt	ペンの傾き
 	Pen Tool	ペンツール
+	Convert Point Tool	アンカーポイントの変換ツール
 	Photo	写真
 	Capishot website	Capishot の Web サイト
 	Picas	パイカ
@@ -1693,6 +1750,8 @@
 	Postcard	はがき
 	Poster	ポスター
 	Pro (Dark)	プロ(ダーク)
+	Pro (Light)	プロ(ライト)
+	Pro (Light Gray)	プロ(ライトグレー)
 	Pro (Medium Gray)	プロ(中間グレー)
 	Protect Texture	テクスチャを保護
 	Purple	紫
@@ -1766,6 +1825,7 @@
 	Invalid {mode} profile	無効な {mode} プロファイル
 	Unnamed {mode} profile	名前のない {mode} プロファイル
 	{w} px x {h} px ({ppi} ppi)	{w} px × {h} px ({ppi} ppi)
+	{w} {unit} x {h} {unit} ({ppi} ppi)	{w} {unit} × {h} {unit} ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	解像度: {dpi} ピクセル/インチ
 	Doc: {w} × {h} px	ドキュメント: {w} × {h} px
 	Frame {current} / {total}	フレーム {current} / {total}
@@ -1804,6 +1864,7 @@
 	Cache tile size	キャッシュタイルのサイズ
 	Camera Raw Defaults	Camera Raw の既定値
 	Canvas border	カンバスの境界
+	Show canvas dots	カンバスのドットを表示
 	Canvas color	カンバスの色
 	Canvas custom color	カンバスのカスタム色
 	Color picker	カラーピッカー
@@ -1891,6 +1952,8 @@
 	Preserve details	ディテールを保持
 	Print resolution	印刷解像度
 	Pro	プロ
+	Pro light	プロ(ライト)
+	Pro light gray	プロ(ライトグレー)
 	Pro medium	プロ(中間)
 	Pro photo	ProPhoto
 	Quick export format	クイック書き出しの形式
@@ -1918,6 +1981,7 @@
 	Show only crosshair while painting	描画中は十字線のみ表示
 	Show slice numbers	スライス番号を表示
 	Show tooltips	ツールチップを表示
+	Show highlight on rollover	ロールオーバー時にハイライトを表示
 	Show bounding box when dragging layer	レイヤーのドラッグ中にバウンディングボックスを表示
 	System title bar	システムのタイトルバー
 	Show transformation values	変形値を表示
@@ -2025,6 +2089,7 @@
 	Create Warped Text	ワープテキストを作成
 	Rasterize Smart Object	スマートオブジェクトをラスタライズ
 	Rasterize Fill Content	塗りの内容をラスタライズ
+	Rasterize Layer Style	レイヤースタイルをラスタライズ
 	Unlock: picking a preset replaces these settings	ロック解除: プリセットを選ぶとこの設定は置き換わります
 	Lock: keep these settings when picking another preset	ロック: 別のプリセットを選んでもこの設定を保持します
 	Diameter:	直径:
@@ -2046,6 +2111,7 @@
 	Apply the pen's tilt and rotation to the tip shape	ペンの傾きと回転を先端のシェイプに適用します
 	Mixer Brush	混合ブラシ
 	Mixer Brush Tool	混合ブラシツール
+	Color Replacement Tool	色の置き換えツール
 	Wet	ウェット
 	Mix	混合
 	Wetness Jitter	ウェットのジッター
@@ -2095,7 +2161,9 @@
 	Developing {name}	{name} を現像中
 	Cancelled {label}	{label} をキャンセルしました
 	Esc to cancel	Esc キーでキャンセル
+	Opened {name}	{name} を開きました
 	Opening {name}	{name} を開いています
+	Saved {name}	{name} を保存しました
 	Saving {name}	{name} を保存しています
 	A save to {name} is still running; try again when it finishes	{name} への保存がまだ実行中です。完了してからもう一度お試しください
 	{label} is writing the file and can no longer be cancelled	{label} はファイルを書き込み中のため、キャンセルできません
@@ -2166,6 +2234,9 @@ cameraRaw	Color	カラー
 	Structure:	構造:
 	Content-Aware Move Tool	コンテンツに応じた移動ツール
 	TIFF Options	TIFF オプション
+	Targa Options	Targa オプション
+	24 bits/pixel	24 ビット/ピクセル
+	32 bits/pixel	32 ビット/ピクセル
 	Including layers will increase file size.	レイヤーを含めるとファイルサイズが大きくなります。
 	Discard Layers and Save a Copy	レイヤーを破棄してコピーを保存
 	Don't show again	次回から表示しない
@@ -2255,6 +2326,19 @@ cameraRaw	Color	カラー
 	Domed	ドーム
 	Domed (Inverted)	ドーム (反転)
 	Diagonal (Descending)	斜め (下降)
+	Contour Editor	輪郭エディター
+	Anti-aliased	アンチエイリアス
+	Corner	コーナー
+	Gloss Contour	光沢輪郭
+	Contour	輪郭
+	Cone - Inverted	円錐 - 反転
+	Cove - Deep	入り江 - 深
+	Cove - Shallow	入り江 - 浅
+	Half Round	半円
+	Ring - Double	リング - ダブル
+	Rolling Slope - Descending	ローリングスロープ - 下降
+	Rounded Steps	丸い階段
+	Sawtooth 1	のこぎり波 1
 
 	Red Eye Tool	赤目ツール
 	Red Eye	赤目
@@ -3373,6 +3457,7 @@ fontWeight	Italic	斜体
 	Color to Alpha…	カラーを透明に…
 	Transparency Threshold	透明のしきい値
 	Opacity Threshold	不透明度のしきい値
+	Capishot — Screen Color Picker	Capishot — スクリーンカラーピッカー
 
 	Rasterize svg groups deeper than	この深さを超える SVG グループをラスタライズ
 	0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized.	0 でこのしきい値は無効になります。100 階層を超えて入れ子になった SVG グループは常にラスタライズされます。
@@ -3465,8 +3550,6 @@ fontWeight	Italic	斜体
 	Appearance Settings…	外観設定…
 	Add to favorites	お気に入りに追加
 	Remove from favorites	お気に入りから削除
-	Capishot — Screen Color Picker	Capishot — スクリーンカラーピッカー
-	Float Panel	パネルを分離
 	Float Panel Group	パネルグループを分離
 	Dock Panel Group	パネルグループをドッキング
 	Use Classic Mode	クラシックモードを使用
@@ -3475,6 +3558,181 @@ fontWeight	Italic	斜体
 	Compile PSD…	PSD をコンパイル…
 	Compile Folder…	フォルダーをコンパイル…
 	psd-compiler on GitHub	GitHub の psd-compiler
-	Based on PhotoCraft	PhotoCraft がベース
+	Based on PhotoCraft	Capishot がベース
 	psd-compiler	psd-compiler
-	Show canvas dots	キャンバスのドットを表示
+	Click the first point or press {key} to close · {del} removes a point · Esc cancels	最初の点をクリックするか {key} を押して閉じる · {del} で点を削除 · Esc でキャンセル
+	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	クリックしてエッジに沿って動かす · クリックで固定ポイント · {alt}-クリックで直線セグメント · ダブルクリックで閉じる
+	Follows only edges this close to the pointer ([ and ] change it)	ポインターからこの距離内のエッジだけをたどる（[ と ] で変更）
+	Higher values follow only edges that contrast sharply with their surroundings	値を大きくすると、周囲とのコントラストが強いエッジだけをたどる
+	How often fastening points are placed by themselves	固定ポイントが自動で置かれる頻度
+# File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
+cameraData	Make	メーカー
+cameraData	Model	モデル
+cameraData	Date Taken	撮影日時
+cameraData	Exposure	露出時間
+cameraData	F-Stop	絞り値
+cameraData	ISO Speed	ISO 感度
+cameraData	Focal Length	焦点距離
+cameraData	Focal Length (35 mm)	焦点距離 (35 mm 換算)
+cameraData	Lens	レンズ
+# Shared panel docking
+	Activate Panel	パネルをアクティブにする
+	Change Panel Group	パネルグループを変更
+	Change Panel Layout	パネルレイアウトを変更
+	Close Panel	パネルを閉じる
+	Dock Panel	パネルをドッキング
+	Float Panel	パネルをフロート
+	Move Panel	パネルを移動
+	Group with	グループ化するパネル
+	Panel menu	パネルメニュー
+	Resize panel window	パネルウィンドウのサイズを変更
+	Resize panels	パネルのサイズを変更
+	W x H x Resolution	幅 x 高さ x 解像度
+	Front Image	前面の画像
+	Frame Tool	フレームツール
+	Create a new rectangular frame	新しい長方形フレームを作成
+	Create a new elliptical frame	新しい楕円形フレームを作成
+	Include in playback	再生に含める
+	Perspective Crop Tool	遠近法の切り抜きツール
+	Show Grid	グリッドを表示
+	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	ボックスをドラッグするか 4 つの角をクリック · 角を傾いた形の端までドラッグ · {commit} で確定 · Esc でキャンセル
+	Artboard Tool	アートボードツール
+	Make Portrait	縦向きにする
+	Make Landscape	横向きにする
+	Add New Artboard	新規アートボードを追加
+	Freeform Pen Tool	フリーフォームペンツール
+	Curvature Pen Tool	曲線ペンツール
+	Curve Fit:	カーブフィット:
+	Drag: draw freehand · Release on the start point: close	ドラッグ: フリーハンドで描画 · 始点で離す: 閉じる
+	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	クリック: スムーズポイント · ダブルクリック: 角 · 点をドラッグ: 移動 · 最初の点をクリック: 閉じる · {key} 完了
+	New Crop Preset…	新規切り抜きプリセット…
+	Delete Crop Preset…	切り抜きプリセットを削除…
+	Select the crop presets to delete:	削除する切り抜きプリセットを選択してください:
+	Select the crop presets to delete	削除する切り抜きプリセットを選択してください
+	Enter a name for the crop preset	切り抜きプリセットの名前を入力してください
+	There is no crop size or ratio to save	保存する切り抜きのサイズまたは比率がありません
+	Scale:	比率:
+	Snap to Origin	原点にスナップ
+	Search settings…	設定を検索…
+	No matching settings	一致する設定はありません
+	Loading fonts…	フォントを読み込み中…
+# Select and Mask view modes (#1754)
+	Onion Skin	オニオンスキン
+	Marching Ants	点線の境界
+	On Black	黒地
+	On White	白地
+	On Layers	レイヤー上
+	Show Edge	エッジを表示
+	Show Original	元の状態を表示
+	F cycles the views; hold X to see the image	F で表示を切り替え、X を押している間は画像を表示
+# Select and Mask Refine Edge Brush (#2972)
+	Refine Edge Brush (R)	境界線調整ブラシ (R)
+	Expand Detection Area	検出領域を拡張
+	Restore Original Edge	元のエッジを復元
+	Paint over hair or fur on the image; Alt paints the other mode	画像の髪や毛の上をペイントします。Alt で反対のモードでペイント
+	Clear Brush Strokes	ブラシストロークを消去
+	Show rulers	定規を表示
+
+# Color Sampler (added with the i18n coverage repair)
+	Click to place · Alt-click or drag off-canvas to remove	クリックで配置 · Alt キーを押しながらクリック、またはカンバス外へドラッグで削除
+	No document open	ドキュメントが開かれていません
+	{n} of {max} sample points	{max} 個中 {n} 個のサンプルポイント
+# Print dialog (#2697)
+	Emulsion Down	乳剤面を下
+	Functions	機能
+	Print Resolution:	プリント解像度:
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	サンプリングブラシツール
+	Sampling Area Overlay	サンプリング領域のオーバーレイ
+	Show Sampling Area	サンプリング領域を表示
+	Indicates	表示対象
+	Sampling Area	サンプリング領域
+	Excluded Area	除外された領域
+	Sampling Area Options	サンプリング領域オプション
+	Rectangular	長方形
+	Fill Settings	塗りつぶし設定
+	Rotation Adaptation	回転への適応
+	Very High	非常に高い
+	Full	フル
+	Mirror	ミラー
+	Output Settings	出力設定
+	Output To	出力先
+	Allow online fonts	オンラインフォントを許可
+	Fonts	フォント
+	Find More	もっと見つける
+	Search Google Fonts	Google Fontsを検索
+	All categories	すべてのカテゴリ
+	Sans Serif	サンセリフ
+	Serif	セリフ
+	Display	ディスプレイ
+	Handwriting	手書き
+	Monospace	等幅
+	All languages	すべての言語
+	Latin	ラテン文字
+	Japanese	日本語
+	Korean	韓国語
+	Chinese (Simplified)	中国語（簡体字）
+	Chinese (Traditional)	中国語（繁体字）
+	Cyrillic	キリル文字
+	Greek	ギリシャ文字
+	Arabic	アラビア文字
+	Hebrew	ヘブライ文字
+	Thai	タイ文字
+	Devanagari	デーヴァナーガリー
+	Vietnamese	ベトナム語
+	Variable font: only the default weight is available	可変フォント：標準のウェイトのみ利用できます
+	Installed	インストール済み
+	Download from Google Fonts	Google Fonts からダウンロード
+	Loading Google Fonts…	Google Fonts を読み込み中…
+	No fonts found	フォントが見つかりません
+	Showing {shown} of {total} fonts	{total} 件中 {shown} 件を表示
+	Download fonts from Google Fonts?	Google Fonts からフォントをダウンロードしますか？
+	Find More lists the open-source fonts of Google Fonts. The font list and the fonts you choose are downloaded from Google Fonts through jsDelivr and GitHub. Nothing is downloaded when Capishot starts, and you can turn this off at any time in Preferences › Type.	「もっと見つける」には Google Fonts のオープンソースフォントが一覧表示されます。フォントの一覧と選択したフォントは、jsDelivr と GitHub を経由して Google Fonts からダウンロードされます。Capishot の起動時には何もダウンロードされません。この設定は、環境設定 › 文字 でいつでもオフにできます。
+	Allow	許可
+	Not now	今はしない
+	Online fonts are not available in this build.	このビルドではオンラインフォントを利用できません。
+	The Google Fonts list is not set up in this build.	このビルドでは Google Fonts の一覧が設定されていません。
+	Couldn't load Google Fonts	Google Fonts を読み込めませんでした
+	Retry	再試行
+	A font named “{family}” is already available and stays in use.	「{family}」という名前のフォントはすでに利用可能なため、そちらが引き続き使用されます。
+	Downloaded {family}	{family} をダウンロードしました
+	Downloaded: {fonts}	ダウンロードしました：{fonts}
+	Manage Downloaded Fonts	ダウンロードしたフォントを管理
+	Manage downloaded fonts…	ダウンロードしたフォントを管理…
+	No downloaded fonts yet. Use the Find More tab of the font menu to get some.	ダウンロードしたフォントはまだありません。フォントメニューの「もっと見つける」タブから入手できます。
+	Family	ファミリー
+	License	ライセンス
+	Remove anyway	強制的に削除
+	Keep	残す
+	“{family}” is used by {layers} in {documents}. If you remove it, those layers will show as missing fonts.	「{family}」は {documents}の {layers} で使用されています。削除すると、それらのレイヤーは不足しているフォントとして表示されます。
+	“{family}” was removed. Affected text layers: {count}.	「{family}」を削除しました。影響を受けるテキストレイヤー：{count}
+	“{family}” was removed.	「{family}」を削除しました。
+	No fonts are missing.	不足しているフォントはありません。
+	These fonts are not installed:	次のフォントがインストールされていません：
+	Available on Google Fonts	Google Fonts で入手できます
+	Don't replace	置き換えない
+	Replace with	置き換え先
+	Allow online fonts to look for these fonts on Google Fonts.	Google Fonts でこれらのフォントを探すために、オンラインフォントを許可します。
+	Downloading…	ダウンロード中…
+@plural	{n} style|{n} styles	{n} スタイル
+@plural	{n} text layer|{n} text layers	{n} 個のテキストレイヤー
+@plural	{n} open document|{n} open documents	開いている {n} 個のドキュメント
+	Downloading missing fonts	不足しているフォントをダウンロード中
+	Loading Google Fonts	Google Fonts を読み込み中
+	Installing {family}	{family} をインストール中
+	Downloading {file}	{file} をダウンロード中
+	Downloading the licence	ライセンスをダウンロード中
+	Loading the font index	フォント一覧を読み込み中
+	Copy Layers	レイヤーをコピー
+	Paste Layers	レイヤーを貼り付け
+	Cycle Screen Mode Backwards	スクリーンモードを逆順に切り替え
+	Scroll Up One Screen	1 画面分上にスクロール
+	Scroll Down One Screen	1 画面分下にスクロール
+	Scroll Left One Screen	1 画面分左にスクロール
+	Scroll Right One Screen	1 画面分右にスクロール
+	Scroll to Upper-Left Corner	左上隅へスクロール
+	Scroll to Lower-Right Corner	右下隅へスクロール
+	Show rulers in new documents	新規ドキュメントで定規を表示
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	ヒストリーに戻す
+	Sample Size	サンプル範囲

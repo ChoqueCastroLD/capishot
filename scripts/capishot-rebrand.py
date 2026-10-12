@@ -43,7 +43,11 @@ def product_name():
                 o = s
                 for i, k in enumerate(KEEP):
                     s = s.replace(k, f'\x00K{i}\x00')
-                s = s.replace('PhotoCraft', 'Capishot')
+                if f.endswith('.tsv'):
+                    # Translations of "Based on PhotoCraft" name the upstream project: keep them.
+                    s = '\n'.join(l if '\x00K0\x00' in l else l.replace('PhotoCraft', 'Capishot') for l in s.split('\n'))
+                else:
+                    s = s.replace('PhotoCraft', 'Capishot')
                 for i, k in enumerate(KEEP):
                     s = s.replace(f'\x00K{i}\x00', k)
                 if s != o:

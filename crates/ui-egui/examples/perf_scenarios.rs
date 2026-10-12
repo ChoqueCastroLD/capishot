@@ -16,7 +16,11 @@
 use std::time::Instant;
 
 use eframe::egui_wgpu::RenderState;
+use photocraft_algo::liquify::{LiquifyField, LiquifyStroke, LiquifyTool, ProxyImage, auto_cell};
+use photocraft_color::{ColorMode, PixelFormat, SampleType};
 use photocraft_engine::Session;
+use photocraft_geom::Rect;
+use photocraft_raster::Surface;
 use photocraft_testkit::perf::{RssSampler, report, row, write_report};
 use photocraft_ui_egui::gpu_canvas::GpuCanvas;
 use serde_json::{Value, json};
@@ -107,6 +111,26 @@ impl Bench {
 
     /// The canvas refresh after an edit (`canvas::ensure_gpu`): the damage rect grown by the
     /// effect reach when the session reports one, else everything; waits for the GPU.
+    /// Re-composite only `r` of the active document (what the canvas hadn't shown yet).
+    fn refresh_rect(&self, s: &Session, r: photocraft_geom::Rect) -> Res<f64> {
+        let st = s.active().ok_or("no document")?;
+        let doc = &st.doc;
+        let r = r.intersect(&doc.bounds());
+        let t = Instant::now();
+        if !r.is_empty() {
+            match &self.gpu {
+                Some((g, rs)) => {
+                    g.refresh(doc.id.0, doc, Some(r), None);
+                    let _ = rs.device.poll(eframe::wgpu::PollType::Wait { submission_index: None, timeout: None });
+                }
+                None => {
+                    std::hint::black_box(photocraft_compose::render(doc, r));
+                }
+            }
+        }
+        Ok(ms(t))
+    }
+
     fn refresh(&self, s: &Session, full: bool) -> Res<f64> {
         let st = s.active().ok_or("no document")?;
         let doc = &st.doc;
@@ -841,6 +865,7 @@ fn algorithm_scenarios(b: &mut Bench, sz: &Sizes) {
             Err(e) => b.errors.push((names[0].into(), e)),
         }
     }
+    liquify_preview_scenario(b);
     let cmyk = "brush dab on A4 300 ppi CMYK + refresh";
     if b.wanted(cmyk) {
         let (w, h) = sz.a4;
@@ -860,4 +885,117 @@ fn algorithm_scenarios(b: &mut Bench, sz: &Sizes) {
             Ok(ms(t) + b.refresh(s, false)?)
         });
     }
+    // P32: releasing a long stroke. The canvas draws it live (untimed here); the release offers
+    // those pixels to the commit and re-composites only what the canvas hadn't shown yet.
+    let release = "brush release: 600-point stroke, 200 px soft, 24 MP";
+    if b.wanted(release) {
+        let (w, h) = sz.big_photo;
+        let mut s = Session::new();
+        if let Err(e) = exec(&mut s, "file.new", json!({"width": w, "height": h, "background": "white"}))
+            .and_then(|_| exec(&mut s, "layer.new.layer", json!({"name": "paint"})))
+        {
+            b.errors.push((release.into(), e));
+            return;
+        }
+        let _ = b.refresh(&s, true);
+        let reps = b.reps.min(5);
+        b.time(release, &mut s, reps, false, |b, s, i| {
+            use photocraft_engine::paint::StrokePoint;
+            let (fw, fh) = (f64::from(w), f64::from(h));
+            let pts: Vec<[f64; 3]> = (0..600)
+                .map(|k| {
+                    let t = k as f64 / 599.0;
+                    [fw * (0.1 + 0.8 * t), fh * (0.5 + 0.35 * (t * 12.0 + i as f64).sin()), 0.6 + 0.4 * (t * 7.0).sin().abs()]
+                })
+                .collect();
+            let mut p = json!({"points": [pts[0]], "size": 200, "hardness": 0.0, "color": "#c03020", "smoothing": 0.0});
+            let mut live = photocraft_engine::brush_cmds::LiveStroke::begin(s, &p).map_err(|e| e.to_string())?;
+            for c in pts[1..].chunks(4) {
+                let sp: Vec<StrokePoint> = c.iter().map(|q| StrokePoint::new(q[0], q[1], q[2] as f32)).collect();
+                live.push(&sp).map_err(|e| e.to_string())?;
+            }
+            p["points"] = json!(pts);
+            p["seed"] = json!(live.seed);
+            let t = Instant::now();
+            s.offer_live_stroke(live).map_err(|e| e.to_string())?;
+            let r = exec(s, "paint.stroke", p);
+            s.clear_live_stroke();
+            if r?.get("fromLive").and_then(Value::as_bool) != Some(true) {
+                return Err("the release rendered the stroke again".into());
+            }
+            // The canvas already shows every step of the stroke: nothing left to re-composite.
+            Ok(ms(t) + b.refresh_rect(s, photocraft_geom::Rect::EMPTY)?)
+        });
+    }
+}
+
+/// A source-resolution Liquify brush update on the visible part of a 3500×2200 layer.
+/// Reports the old whole-document proxy cost alongside the full-resolution cropped update.
+fn liquify_preview_scenario(b: &mut Bench) {
+    let name = "Liquify 800 px brush on 3500x2200 at full resolution";
+    if !b.wanted(name) {
+        return;
+    }
+    let canvas = Rect::new(0, 0, 3500, 2200);
+    let view = Rect::new(1150, 700, 2350, 1500);
+    let source = Surface::with_default(PixelFormat::new(ColorMode::Rgb, SampleType::U8, true), &[0.32, 0.48, 0.64, 1.0]);
+    let proxy = ProxyImage::new(&source, canvas, 1600);
+    let mut low_out = vec![[0u8; 4]; proxy.w * proxy.h];
+    let (vw, vh) = (view.width() as usize, view.height() as usize);
+    let mut full_out = vec![[0u8; 4]; vw * vh];
+    let mut source_scratch = Vec::new();
+    let mut stroke = LiquifyStroke::new(LiquifyTool::ForwardWarp, 800.0);
+    stroke.density = 100.0;
+    stroke.points = vec![vec![1470.0, 1100.0, 1.0], vec![1530.0, 1100.0, 1.0]];
+    let base = LiquifyField::new(canvas, auto_cell(canvas));
+    let update = |field: &mut LiquifyField, out: &mut [[u8; 4]], scratch: &mut Vec<[f32; 4]>, full_res: bool| -> Res<f64> {
+        let t = Instant::now();
+        let dirty = field.stroke_segment(&stroke, [1470.0, 1100.0, 1.0], [1530.0, 1100.0, 1.0]);
+        let ok = if full_res {
+            ProxyImage::render_full_resolution(&source, field, view, dirty, out, scratch)
+        } else {
+            proxy.render(field, proxy.proxy_rect(dirty), out);
+            true
+        };
+        if !ok {
+            return Err("full-resolution preview could not allocate or render its visible region".into());
+        }
+        Ok(ms(t))
+    };
+
+    // Warm both paths, then compare identical field updates. The old renderer shades a downsampled
+    // proxy; the new one produces one source pixel per preview texel at 100% zoom.
+    let mut warm_low = base.clone();
+    let _ = update(&mut warm_low, &mut low_out, &mut source_scratch, false);
+    let mut warm_full = base.clone();
+    let warm = update(&mut warm_full, &mut full_out, &mut source_scratch, true);
+    if let Err(e) = warm {
+        return b.errors.push((name.into(), e));
+    }
+
+    let mut low_samples = Vec::new();
+    let mut samples = Vec::new();
+    b.current = Some(name.into());
+    b.sampler.reset();
+    for _ in 0..b.reps.clamp(1, 5) {
+        let mut field = base.clone();
+        match update(&mut field, &mut low_out, &mut source_scratch, false) {
+            Ok(t) => low_samples.push(t),
+            Err(e) => return b.errors.push((name.into(), e)),
+        }
+        let mut field = base.clone();
+        match update(&mut field, &mut full_out, &mut source_scratch, true) {
+            Ok(t) => samples.push(t),
+            Err(e) => return b.errors.push((name.into(), e)),
+        }
+    }
+    let low_sorted = {
+        let mut v = low_samples.clone();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    if let Some(median) = low_sorted.get(low_sorted.len() / 2) {
+        println!("  existing 1600 px proxy update p50 {median:.2} ms (lower-resolution output)");
+    }
+    b.record(name, &Session::new(), &samples, Ok(()));
 }

@@ -20,12 +20,8 @@ fn harness() -> Option<Harness> {
 
 /// The app with the GPU canvas (`gpu`), or without it: the CPU fallback path.
 fn harness_with(gpu: bool) -> Option<Harness> {
-    harness_with_scale(gpu, 1.0)
-}
-
-fn harness_with_scale(gpu: bool, ppp: f32) -> Option<Harness> {
     let built = std::panic::catch_unwind(|| {
-        egui_kittest::Harness::builder().with_size(egui::vec2(1400.0, 800.0)).with_pixels_per_point(ppp).with_max_steps(64).wgpu().build_eframe(|cc| {
+        egui_kittest::Harness::builder().with_size(egui::vec2(1400.0, 800.0)).with_pixels_per_point(1.0).with_max_steps(64).wgpu().build_eframe(|cc| {
             PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
             let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
             if let Some(rs) = cc.wgpu_render_state.as_ref().filter(|_| gpu) {
@@ -241,53 +237,54 @@ fn cpu_pixel_grid_is_not_drawn_over_empty_checker() {
     }
 }
 
-#[test]
-fn pixel_grid_preserves_a_smooth_mid_gray_ramp_on_both_canvases() {
-    use photocraft_color::{ColorMode, PixelFormat, SampleType};
-    use photocraft_doc::{Document, Layer, LayerContent, Size};
-    use photocraft_geom::Rect;
-    use photocraft_raster::Surface;
-
-    for gpu in [true, false] {
-        for ppp in [1.0, 2.0] {
-            let Some(mut h) = harness_with_scale(gpu, ppp) else { return };
-            for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
-                let mut doc = Document::new("mid-gray ramp", Size::new(64, 16), ColorMode::Rgb, depth);
-                let mut surface = Surface::new(PixelFormat::new(ColorMode::Rgb, depth, true));
-                for x in 0..64 {
-                    let v = 0.5 + 0.1 * x as f32 / 63.0;
-                    surface.fill_rect(Rect::new(x, 0, x + 1, 16), &[v, v, v, 1.0]);
-                }
-                doc.layers.push(Layer::new("ramp", LayerContent::Raster(surface)));
-                let app = h.state_mut();
-                app.session.add_document(doc, None);
-                app.sync_views();
-                app.ui.view.show.pixel_grid = true;
-                for zoom in [7.119, 8.0] {
-                    control(&mut h, "ui.set", json!({"zoom": zoom, "center": [32.0, 8.0]}));
-                    assert_eq!(h.ctx.pixels_per_point(), ppp);
-                    assert_eq!(h.state().perf.gpu, gpu);
-                    let img = h.render().expect("render ramp");
-                    let center = h.state().last_canvas_rect.center() * ppp;
-                    let x0 = center.x - 32.0 * zoom;
-                    let y = (center.y + 3.5 * zoom).floor() as u32;
-                    let mut previous = 0u8;
-                    for x in 2..62 {
-                        let edge = (x0 + x as f32 * zoom).floor() as u32;
-                        // Include both pixels a subpixel-positioned line can cover.
-                        let line = (edge..=edge + 1).map(|sx| img.get_pixel(sx, y)[0]).max().expect("line");
-                        let inside = img.get_pixel((x0 + (x as f32 + 0.5) * zoom).floor() as u32, y)[0];
-                        assert!(line >= inside, "{gpu:?}/{depth:?}, scale {ppp}, zoom {zoom}, x {x}: grid darkened {inside} to {line}");
-                        if zoom == 8.0 {
-                            assert!(
-                                line.saturating_add(3) >= previous,
-                                "{gpu:?}/{depth:?}, scale {ppp}, zoom {zoom}, x {x}: false contour {previous} -> {line}"
-                            );
-                        }
-                        previous = line;
-                    }
-                }
-            }
+/// The pixel grid over a flat `grey` document at 800%: the largest difference, in 8-bit levels,
+/// between a grid line and the pixel interior beside it.
+fn grid_line_contrast_over_grey(h: &mut Harness, grey: u8) -> i32 {
+    {
+        let app = h.state_mut();
+        while app.session.active().is_some() {
+            app.run("file.close", json!({"discard": true})).expect("close");
         }
+        app.run("file.new", json!({"width": 48, "height": 48, "background": "white"})).expect("new");
+        app.run("edit.fill", json!({"color": format!("#{grey:02x}{grey:02x}{grey:02x}")})).expect("fill");
+        app.sync_views();
+        app.ui.view.show.pixel_grid = true;
+    }
+    control(h, "ui.set", json!({"zoom": 8.0, "center": [24.0, 24.0]}));
+    h.run_steps(3);
+    assert!(h.state().perf.gpu, "expected the GPU canvas");
+    let rendered = h.render().expect("render");
+    let img = Shot { w: rendered.width(), px: rendered.into_raw() };
+    let r = h.state().last_canvas_rect;
+    let (cx, cy) = (r.center().x as u32, r.center().y as u32);
+    // The median of an 8 px block is a pixel interior whichever line the block straddles.
+    let mut block: Vec<i32> = (0..64).map(|i| img.at(cx + i % 8, cy + i / 8)[0] as i32).collect();
+    block.sort_unstable();
+    let interior = block[32];
+    // Walk out to the document edge: the pasteboard is far darker than any grid line.
+    let near = |x: u32, y: u32| (img.at(x, y)[0] as i32 - interior).abs() < 50;
+    let x0 = (0..=cx).rev().take_while(|x| near(*x, cy)).last().unwrap_or(cx);
+    let y0 = (0..=cy).rev().take_while(|y| near(cx, *y)).last().unwrap_or(cy);
+    // Pixel (col, row) owns the grid line on its left and top edge, 8 screen px apart.
+    let y = y0 + 8 * 3 + 4;
+    (2..6).map(|col| (img.at(x0 + 8 * col, y)[0] as i32 - img.at(x0 + 8 * col + 4, y)[0] as i32).abs()).max().unwrap_or(0)
+}
+
+#[test]
+fn pixel_grid_does_not_flip_colour_across_mid_tones() {
+    let Some(mut h) = harness() else { return };
+    h.run_steps(4);
+    // 0x87 and 0x90 sit either side of luma 0.55, where the line used to switch from a full white
+    // line to a full black one. Both now give a faint line, so neighbouring cells match.
+    for grey in [0x87u8, 0x90] {
+        let c = grid_line_contrast_over_grey(&mut h, grey);
+        assert!(c <= 14, "grey {grey:#04x}: grid line differs from its pixel by {c} levels, want a faint line");
+    }
+    // The fade must not remove the grid where it is needed: dark and light pixels keep a clear
+    // line (white over 0x60, black over 0xd0 and white; black itself is in the unit tests, as the
+    // dark pasteboard defeats this walk to the document edge).
+    for grey in [0x60u8, 0xd0, 0xff] {
+        let c = grid_line_contrast_over_grey(&mut h, grey);
+        assert!(c >= 20, "grey {grey:#04x}: grid line differs from its pixel by only {c} levels");
     }
 }

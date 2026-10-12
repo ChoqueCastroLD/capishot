@@ -42,12 +42,12 @@ pub(crate) fn conv_sep(src: &Image, out: Rect, kx: &[f32], ky: &[f32], alpha: bo
     let win = Rect::new(out.x0 - rx, out.y0 - ry, out.x1 + rx, out.y1 + ry);
     let ww = win.width() as usize;
     let mut p = vec![0.0f32; ww * win.height() as usize * n];
-    for y in win.y0..win.y1 {
-        for x in win.x0..win.x1 {
-            let o = ((y - win.y0) as usize * ww + (x - win.x0) as usize) * n;
-            for c in 0..n {
-                p[o + c] = src.get(x, y, c);
-            }
+    // Row by row: the part inside `src` is copied, the rest stays 0 (as `Image::get` reads it).
+    let inside = win.intersect(&src.rect);
+    if !inside.is_empty() {
+        for y in inside.y0..inside.y1 {
+            let o = ((y - win.y0) as usize * ww + (inside.x0 - win.x0) as usize) * n;
+            p[o..o + inside.width() as usize * n].copy_from_slice(src.row(Rect::new(inside.x0, y, inside.x1, y + 1)));
         }
     }
     premultiply(&mut p, n, alpha);
@@ -56,24 +56,7 @@ pub(crate) fn conv_sep(src: &Image, out: Rect, kx: &[f32], ky: &[f32], alpha: bo
     for ty in 0..th {
         let row = &p[ty * ww * n..(ty + 1) * ww * n];
         let dst = &mut tmp[ty * ow * n..(ty + 1) * ow * n];
-        match n {
-            1 => conv_row::<1>(row, dst, kx),
-            2 => conv_row::<2>(row, dst, kx),
-            3 => conv_row::<3>(row, dst, kx),
-            4 => conv_row::<4>(row, dst, kx),
-            5 => conv_row::<5>(row, dst, kx),
-            _ => {
-                for ox in 0..ow {
-                    let d = &mut dst[ox * n..(ox + 1) * n];
-                    for (i, kv) in kx.iter().enumerate() {
-                        let s = &row[(ox + i) * n..(ox + i + 1) * n];
-                        for c in 0..n {
-                            d[c] += s[c] * kv;
-                        }
-                    }
-                }
-            }
-        }
+        conv_row(row, dst, kx, n);
     }
     // Vertical pass.
     let mut res = vec![0.0f32; ow * oh * n];
@@ -90,18 +73,18 @@ pub(crate) fn conv_sep(src: &Image, out: Rect, kx: &[f32], ky: &[f32], alpha: bo
     res
 }
 
-// Fixed channel counts let LLVM keep one pixel's accumulators in registers and vectorize
-// channels. The tap order is unchanged; unusual multichannel images keep the generic path.
-fn conv_row<const N: usize>(src: &[f32], dst: &mut [f32], kernel: &[f32]) {
-    let pixels = src.as_chunks::<N>().0;
-    for (x, out) in dst.as_chunks_mut::<N>().0.iter_mut().enumerate() {
-        let mut acc = [0.0f32; N];
-        for (pixel, weight) in pixels.get(x..).unwrap_or(&[]).iter().zip(kernel) {
-            for c in 0..N {
-                acc[c] += pixel[c] * weight;
-            }
+/// One row of a convolution: `dst[x] = Σ src[x + i] · kernel[i]` per `n`-channel pixel, the taps
+/// added in order starting from zero. The taps are the outer loop, so each is one multiply-add
+/// along the whole row (which vectorises across pixels) while every output sees the same sums in
+/// the same order as a per-pixel loop.
+fn conv_row(src: &[f32], dst: &mut [f32], kernel: &[f32], n: usize) {
+    dst.fill(0.0);
+    let len = dst.len();
+    for (i, w) in kernel.iter().enumerate() {
+        let Some(s) = src.get(i * n..i * n + len) else { break };
+        for (d, s) in dst.iter_mut().zip(s) {
+            *d += s * w;
         }
-        *out = acc;
     }
 }
 
@@ -232,7 +215,7 @@ fn line_passes(dst: &mut [f32], w: usize, radii: &[usize], s: &mut Scratch) {
 /// Rows of the horizontal passes handed to one worker (they share its scratch buffers).
 const ROWS_PER_TASK: usize = 8;
 /// Width in pixels of the column strips the vertical passes work on (a divisor of the tile size).
-pub(crate) const STRIP: i32 = 64;
+pub(crate) const STRIP: i32 = 32;
 
 /// Samples of a column strip of an output area.
 pub(crate) type Strip = (Rect, Vec<f32>);
@@ -831,6 +814,7 @@ mod tests {
     #[test]
     fn fixed_channel_convolution_matches_scalar_tap_order() {
         fn check<const N: usize>() {
+            let n = N;
             for width in [1, 7, 256] {
                 for radius in [0.0, 0.5, 3.0, 4.0] {
                     let k = gaussian_kernel(radius);
@@ -844,7 +828,7 @@ mod tests {
                         }
                     }
                     let mut actual = vec![0.0f32; width * N];
-                    conv_row::<N>(&src, &mut actual, &k);
+                    conv_row(&src, &mut actual, &k, n);
                     assert_eq!(actual, expected, "channels={N} width={width} radius={radius}");
                 }
             }

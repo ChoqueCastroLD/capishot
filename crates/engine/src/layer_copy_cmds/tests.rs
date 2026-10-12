@@ -155,3 +155,132 @@ fn bad_params_and_states_fail_without_changing_anything() {
     s.close(1);
     assert!(!s.is_enabled(cmd));
 }
+
+#[test]
+fn copying_linked_layers_does_not_join_an_unrelated_destination_group() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+    let src_a = LayerId(s.execute("layer.new.layer", json!({"name": "Source A"})).unwrap()["layer"].as_u64().unwrap());
+    let src_b = LayerId(s.execute("layer.new.layer", json!({"name": "Source B"})).unwrap()["layer"].as_u64().unwrap());
+    s.edit("link source", |d, _| {
+        d.layer_mut(src_a).unwrap().link_group = Some(1);
+        d.layer_mut(src_b).unwrap().link_group = Some(1);
+        Ok(())
+    })
+    .unwrap();
+
+    s.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+    let dst_a = LayerId(s.execute("layer.new.layer", json!({"name": "Destination A"})).unwrap()["layer"].as_u64().unwrap());
+    let dst_b = LayerId(s.execute("layer.new.layer", json!({"name": "Destination B"})).unwrap()["layer"].as_u64().unwrap());
+    s.edit("link destination", |d, _| {
+        d.layer_mut(dst_a).unwrap().link_group = Some(1);
+        d.layer_mut(dst_b).unwrap().link_group = Some(1);
+        Ok(())
+    })
+    .unwrap();
+    s.set_active(0);
+    let result = s.execute("layer.copyToDocument", json!({"document": 1, "layers": [src_a.0, src_b.0]})).unwrap();
+    let ids: Vec<LayerId> = result["layers"].as_array().unwrap().iter().map(|id| LayerId(id.as_u64().unwrap())).collect();
+    assert_eq!(ids.len(), 2);
+    let d = doc(&s, 1);
+    assert_eq!(d.layer(dst_a).unwrap().link_group, Some(1));
+    assert_eq!(d.layer(dst_b).unwrap().link_group, Some(1));
+    let first_group = d.layer(ids[0]).unwrap().link_group;
+    assert_eq!(first_group, d.layer(ids[1]).unwrap().link_group, "the copied pair stays linked");
+    assert!(first_group.is_some());
+    assert_ne!(first_group, Some(1), "copied links must not merge with existing ones");
+
+    assert!(s.undo());
+    assert!(doc(&s, 1).layer(ids[0]).is_none());
+    assert!(s.redo());
+    assert_eq!(doc(&s, 1).layer(ids[0]).unwrap().link_group, first_group);
+}
+
+#[test]
+fn copied_link_groups_are_distinct_from_each_other_and_destination() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+    let a = LayerId(s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap());
+    let b = LayerId(s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap());
+    s.edit("link independent source groups", |d, _| {
+        d.layer_mut(a).unwrap().link_group = Some(1);
+        d.layer_mut(b).unwrap().link_group = Some(2);
+        Ok(())
+    })
+    .unwrap();
+    s.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+    s.set_active(0);
+    let copied = s.execute("layer.copyToDocument", json!({"document": 1, "layers": [a.0, b.0]})).unwrap();
+    let ids: Vec<LayerId> = copied["layers"].as_array().unwrap().iter().map(|id| LayerId(id.as_u64().unwrap())).collect();
+    let first = doc(&s, 1).layer(ids[0]).unwrap().link_group;
+    let second = doc(&s, 1).layer(ids[1]).unwrap().link_group;
+    assert!(first.is_some() && second.is_some());
+    assert_ne!(first, second);
+}
+
+/// UI-217-23: whole layers through the layer clipboard, between documents and later on: masks,
+/// styles and type come along, converted to the destination like a drag.
+#[test]
+fn layer_clipboard_pastes_whole_layers_into_any_document() {
+    let (mut s, paint) = two_docs(40, 30, 8);
+    s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+    s.execute("layer.layerStyle.dropShadow", json!({})).unwrap();
+    assert!(!doc(&s, 0).layer(paint).unwrap().effects.items.is_empty());
+    let typed = LayerId(s.execute("type.create", json!({"x": 5, "y": 20, "text": "Hi"})).unwrap()["layer"].as_u64().unwrap());
+    s.execute("layer.select", json!({"layer": paint.0})).unwrap();
+    s.execute("layer.select", json!({"layer": typed.0, "mode": "add"})).unwrap();
+    assert!(!s.is_enabled("layer.pasteLayers"), "nothing copied yet");
+    let before = doc(&s, 0).clone();
+    let history = s.active().unwrap().history.past_len();
+    let r = s.execute("layer.copyLayers", json!({})).unwrap();
+    assert_eq!(r["layers"], 2);
+    assert_eq!(*doc(&s, 0), before, "copying leaves the document alone");
+    assert_eq!(s.active().unwrap().history.past_len(), history, "and adds no history step");
+    // Into the other document, in place, as one step.
+    s.set_active(1);
+    let r = s.execute("layer.pasteLayers", json!({})).unwrap();
+    let ids: Vec<LayerId> = r["layers"].as_array().unwrap().iter().map(|v| LayerId(v.as_u64().unwrap())).collect();
+    assert_eq!(ids.len(), 2);
+    let d = doc(&s, 1);
+    let names: Vec<&str> = d.layers.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(names, ["Background", "paint", "Hi"], "order kept, above the active layer");
+    let pasted = d.layer(ids[0]).unwrap();
+    assert!(pasted.mask.is_some(), "the mask came along");
+    assert_eq!(pasted.effects, before.layer(paint).unwrap().effects, "and the layer style");
+    assert!(matches!(d.layer(ids[1]).unwrap().content, photocraft_doc::LayerContent::Text(_)), "type stays editable");
+    assert_eq!(bounds(&s, 1, ids[0]), Rect::new(4, 6, 14, 16));
+    assert!(s.undo());
+    assert_eq!(doc(&s, 1).layers.len(), 1, "one history step");
+    // The clipboard outlives the source and pastes again (and into the source itself).
+    s.close(0);
+    s.execute("layer.pasteLayers", json!({"center": true})).unwrap();
+    assert_eq!(doc(&s, 0).layers.len(), 3);
+    s.execute("file.new", json!({"width": 20, "height": 20, "mode": "gray", "depth": 16})).unwrap();
+    let r = s.execute("layer.pasteLayers", json!({"offset": [-4, -6]})).unwrap();
+    let id = copied(&r);
+    let surf = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap();
+    assert_eq!(surf.format(), PixelFormat::new(ColorMode::Grayscale, SampleType::U16, true), "converted like a drag");
+    // Edit › Purge › Clipboard empties it.
+    s.execute("edit.purge.clipboard", json!({})).unwrap();
+    assert!(!s.is_enabled("layer.pasteLayers"));
+}
+
+#[test]
+fn layer_clipboard_bad_params_fail_without_changing_anything() {
+    let (mut s, _) = two_docs(40, 30, 8);
+    assert!(s.execute("layer.pasteLayers", json!({})).is_err(), "nothing copied");
+    for p in [json!({"layers": [999_999]}), json!({"layers": "all"}), json!({"layers": []}), json!([1]), json!("x")] {
+        assert!(s.execute("layer.copyLayers", p.clone()).is_err(), "{p}");
+        assert!(s.layer_clipboard.is_none(), "{p}");
+    }
+    s.execute("layer.copyLayers", Value::Null).unwrap();
+    let layers = doc(&s, 0).layers.len();
+    for p in [json!({"at": [1.0]}), json!({"at": [f64::MAX, 0.0]}), json!({"offset": ["a", 2]}), json!([]), json!(3)] {
+        assert!(s.execute("layer.pasteLayers", p.clone()).is_err(), "{p}");
+        assert_eq!(doc(&s, 0).layers.len(), layers, "{p}");
+    }
+    s.close(1);
+    s.close(0);
+    assert!(s.execute("layer.copyLayers", json!({})).is_err(), "no document");
+    assert!(s.execute("layer.pasteLayers", json!({})).is_err(), "no document");
+}

@@ -55,13 +55,13 @@ choice!(TypeUnit { Points = "points", Pixels = "pixels", Millimeters = "mm" } de
 choice!(PointSize { PostScript = "postScript", Traditional = "traditional" } default PostScript);
 choice!(Interpolation { BicubicAutomatic = "bicubicAutomatic", Nearest = "nearestNeighbor", Bilinear = "bilinear", Bicubic = "bicubic", BicubicSmoother = "bicubicSmoother", BicubicSharper = "bicubicSharper", PreserveDetails = "preserveDetails" } default BicubicAutomatic);
 choice!(ColorPicker { Adobe = "adobe", System = "system" } default Adobe);
-choice!(Theme { Pro = "pro", ProMedium = "proMedium", Studio = "studio", StudioLight = "studioLight", Classic = "classic", SolarizedDark = "solarizedDark", Adwaita = "adwaita", AdwaitaDark = "adwaitaDark" } default ProMedium);
+choice!(Theme { Pro = "pro", ProMedium = "proMedium", ProLightGray = "proLightGray", ProLight = "proLight", Studio = "studio", StudioLight = "studioLight", Classic = "classic", SolarizedDark = "solarizedDark", Adwaita = "adwaita", AdwaitaDark = "adwaitaDark", BreezeLight = "breezeLight", BreezeDark = "breezeDark" } default ProMedium);
 choice!(AppearanceMode { Auto = "auto", Dark = "dark", Light = "light" } default Dark);
-choice!(DarkTheme { Pro = "pro", ProMedium = "proMedium", Studio = "studio", SolarizedDark = "solarizedDark", AdwaitaDark = "adwaitaDark" } default ProMedium);
-choice!(LightTheme { StudioLight = "studioLight", Classic = "classic", Adwaita = "adwaita" } default StudioLight);
+choice!(DarkTheme { Pro = "pro", ProMedium = "proMedium", Studio = "studio", SolarizedDark = "solarizedDark", AdwaitaDark = "adwaitaDark", BreezeDark = "breezeDark" } default ProMedium);
+choice!(LightTheme { StudioLight = "studioLight", ProLightGray = "proLightGray", ProLight = "proLight", Classic = "classic", Adwaita = "adwaita", BreezeLight = "breezeLight" } default StudioLight);
 choice!(CanvasColor { Default = "default", Black = "black", DarkGray = "darkGray", MediumGray = "mediumGray", LightGray = "lightGray", Custom = "custom" } default Default);
 choice!(CanvasBorder { DropShadow = "dropShadow", Line = "line", None = "none" } default DropShadow);
-choice!(UiScale { Auto = "auto", P75 = "75", P100 = "100", P125 = "125", P150 = "150", P175 = "175", P200 = "200", P250 = "250", P300 = "300" } default Auto);
+choice!(UiScale { Auto = "auto", P75 = "75", P80 = "80", P85 = "85", P90 = "90", P95 = "95", P100 = "100", P125 = "125", P150 = "150", P175 = "175", P200 = "200", P250 = "250", P300 = "300" } default Auto);
 choice!(
     /// Graphics backend of the desktop app's window and GPU canvas (applies at next launch).
     /// `auto` lets Capishot pick (DX12 for Intel adapters on Windows); `cpu` composites on the
@@ -317,7 +317,11 @@ pub struct Tools {
     pub vary_round_brush_hardness_on_hud: bool,
     /// Round snapped vector and transform coordinates to whole pixels.
     pub snap_vector_tools_and_transforms_to_pixel_grid: bool,
+    /// The size and angle readouts beside the pointer while a marquee or crop frame is drawn,
+    /// resized or turned (off: none).
     pub show_transformation_values: bool,
+    /// Move tool with Auto-Select: outline the layer a click would pick under the pointer.
+    pub show_highlight_on_rollover: bool,
     pub overscroll: bool,
     pub double_click_layer_mask_launches_select_and_mask: bool,
     /// What the right mouse button does on the canvas with the Brush and other painting tools.
@@ -333,12 +337,14 @@ impl Default for Tools {
     fn default() -> Self {
         Self {
             show_tooltips: true,
-            use_shift_key_for_tool_switch: false,
+            // On in Photoshop: ⇧+key cycles a tool group, the plain key keeps the group's tool.
+            use_shift_key_for_tool_switch: true,
             zoom_clicked_point_to_center: false,
             enable_flick_panning: true,
             vary_round_brush_hardness_on_hud: true,
             snap_vector_tools_and_transforms_to_pixel_grid: true,
             show_transformation_values: true,
+            show_highlight_on_rollover: true,
             overscroll: true,
             double_click_layer_mask_launches_select_and_mask: true,
             right_click_with_painting_tools: RightClickPaint::BrushPicker,
@@ -471,6 +477,7 @@ pub struct FileHandling {
     pub autosave_minutes: u32,
     /// Offer to reopen recovered documents at launch.
     pub recover_on_launch: bool,
+    /// Open a file with no ICC profile as untagged even when its EXIF ColorSpace tag says sRGB.
     pub ignore_exif_profile_tag: bool,
     pub ask_before_saving_layered_tiff: bool,
     pub maximize_psd_compatibility: Ask,
@@ -694,6 +701,13 @@ pub struct UnitsAndRulers {
     pub print_resolution: f64,
     pub screen_resolution: f64,
     pub point_size: PointSize,
+    /// View › Rulers as last set: written when the user toggles the rulers and applied at
+    /// launch, so new and opened documents show them as Photoshop does. Set from the View
+    /// menu (⌘R), not from the Preferences dialog.
+    pub show_rulers: bool,
+    /// View › Rulers (⌘R) comes on for every new or opened document (UI-217-20). Off: the rulers
+    /// keep whatever state ⌘R last left them in.
+    pub show_rulers_in_new_documents: bool,
 }
 
 impl Default for UnitsAndRulers {
@@ -706,6 +720,8 @@ impl Default for UnitsAndRulers {
             print_resolution: 300.0,
             screen_resolution: 72.0,
             point_size: PointSize::PostScript,
+            show_rulers: false,
+            show_rulers_in_new_documents: false,
         }
     }
 }
@@ -808,6 +824,10 @@ pub struct TypePrefs {
     pub font_preview: FontPreview,
     pub fill_new_type_layers_with_placeholder: bool,
     pub recent_fonts: u32,
+    /// Allow downloading fonts from Google Fonts (`type.fonts.catalog`, `type.fonts.install`,
+    /// Resolve Missing Fonts' download). Off until the user (never an automation client) turns
+    /// it on; every networked font command checks it.
+    pub allow_online_fonts: bool,
 }
 
 impl Default for TypePrefs {
@@ -821,6 +841,7 @@ impl Default for TypePrefs {
             font_preview: FontPreview::Medium,
             fill_new_type_layers_with_placeholder: true,
             recent_fonts: 10,
+            allow_online_fonts: false,
         }
     }
 }
@@ -946,10 +967,10 @@ pub struct Preferences {
     /// the footer slider's card scale, saved as the user changes them and restored at launch.
     /// JSON owned by the shell.
     pub brush_picker: Value,
-    /// The brush the tool was last using (settings and bitmap references, never the bitmaps
-    /// themselves; see `brush_cmds::remembered_brush`), restored at launch so the tool starts
-    /// where it was left. JSON owned by the shell.
-    pub last_brush: Value,
+    /// The tools' options-bar settings (Move › Auto-Select, marquee Feather, tolerance, …) that
+    /// differ from their defaults, saved as the user changes them and restored at launch, as
+    /// Photoshop remembers each tool's options between sessions. JSON owned by the shell.
+    pub tool_options: Value,
     /// File › Scripts › Script Events Manager: event → script bindings.
     pub script_events: crate::automate_cmds::ScriptEvents,
 }
@@ -984,39 +1005,27 @@ pub const SECTIONS: [(&str, &str); 18] = [
 /// preference is read anywhere outside `prefs.rs`, and while an unlisted one is read nowhere.
 pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "general.colorPicker",
-    "general.beepWhenDone",
-    "general.alwaysCreateSmartObjectsWhenPlacing",
     "general.animatedZoom",
     "general.zoomResizesWindows",
     "workspace.autoCollapseIconPanels",
     "workspace.autoShowHiddenPanels",
     "workspace.enableFloatingDocumentWindowDocking",
     "workspace.enableNarrowOptionsBar",
-    "tools.enableFlickPanning",
-    "tools.varyRoundBrushHardnessOnHud",
-    "tools.showTransformationValues",
-    "fileHandling.imagePreviews",
     "fileHandling.saveInBackground",
-    "fileHandling.ignoreExifProfileTag",
     "fileHandling.maximizePsdCompatibility",
     "performance.cacheLevels",
     "performance.effectCacheMb",
     "performance.legacyCompositing",
-    "cursors.brushPreviewColor",
     "unitsAndRulers.columnWidth",
     "unitsAndRulers.gutter",
-    "unitsAndRulers.printResolution",
     "plugIns.showExtensionPanels",
     "plugIns.allowScriptsToConnect",
     "plugIns.generatorEnabled",
     "type.missingGlyphProtection",
-    "type.showFontNamesInEnglish",
     "type.textEngine",
-    "type.fontPreview",
     "type.recentFonts",
     "enhancedControls.scrubbySliderAcceleration",
     "enhancedControls.touchGestures",
-    "enhancedControls.zoomWithTrackpadPinch",
     "rawDefaults.colorSpace",
     "rawDefaults.bitDepth",
     "rawDefaults.resolution",
@@ -1390,7 +1399,7 @@ fn capitalize(s: &str) -> String {
 pub const TEMPORARY_TOOLS: &[(&str, &str, &str)] = &[
     ("tools.temporary.hand", "Hand Tool (hold)", "Space"),
     ("tools.temporary.zoomIn", "Zoom In (hold, drag to scrub)", "Cmd+Space"),
-    ("tools.temporary.zoomOut", "Zoom Out (hold)", "Cmd+Alt+Space"),
+    ("tools.temporary.zoomOut", "Zoom Out (hold)", "Alt+Space"),
 ];
 
 /// Every bindable id with its default: commands, then the temporary tools.
@@ -1487,8 +1496,8 @@ impl Session {
             && let Some(theme) = interface.get("theme").and_then(Value::as_str).and_then(Theme::parse)
         {
             let (mode, slot) = match theme {
-                Theme::Pro | Theme::ProMedium | Theme::Studio | Theme::SolarizedDark | Theme::AdwaitaDark => ("dark", "darkTheme"),
-                Theme::StudioLight | Theme::Classic | Theme::Adwaita => ("light", "lightTheme"),
+                Theme::Pro | Theme::ProMedium | Theme::Studio | Theme::SolarizedDark | Theme::AdwaitaDark | Theme::BreezeDark => ("dark", "darkTheme"),
+                Theme::StudioLight | Theme::ProLightGray | Theme::ProLight | Theme::Classic | Theme::Adwaita | Theme::BreezeLight => ("light", "lightTheme"),
             };
             interface.insert("appearanceMode".into(), json!(mode));
             interface.insert(slot.into(), json!(theme.name()));
@@ -1573,6 +1582,14 @@ impl Session {
                     next.interface.light_theme = LightTheme::StudioLight;
                     next.interface.appearance_mode = AppearanceMode::Light;
                 }
+                Theme::ProLightGray => {
+                    next.interface.light_theme = LightTheme::ProLightGray;
+                    next.interface.appearance_mode = AppearanceMode::Light;
+                }
+                Theme::ProLight => {
+                    next.interface.light_theme = LightTheme::ProLight;
+                    next.interface.appearance_mode = AppearanceMode::Light;
+                }
                 Theme::Classic => {
                     next.interface.light_theme = LightTheme::Classic;
                     next.interface.appearance_mode = AppearanceMode::Light;
@@ -1588,6 +1605,14 @@ impl Session {
                 Theme::AdwaitaDark => {
                     next.interface.dark_theme = DarkTheme::AdwaitaDark;
                     next.interface.appearance_mode = AppearanceMode::Dark;
+                }
+                Theme::BreezeDark => {
+                    next.interface.dark_theme = DarkTheme::BreezeDark;
+                    next.interface.appearance_mode = AppearanceMode::Dark;
+                }
+                Theme::BreezeLight => {
+                    next.interface.light_theme = LightTheme::BreezeLight;
+                    next.interface.appearance_mode = AppearanceMode::Light;
                 }
             }
         }
