@@ -90,6 +90,49 @@ pub struct Surface {
     tiles: BTreeMap<TileCoord, Arc<Tile>>,
 }
 
+/// Tiles of one pixel value met while moving a surface ([`Surface::translated`]): each scanned
+/// once, and one tile kept per value so the targets share it.
+#[derive(Default)]
+struct UniformTiles {
+    /// Per source tile (by address): the index of its value's tile in `canonical`, or `None`.
+    of: std::collections::HashMap<*const Tile, Option<usize>>,
+    canonical: Vec<Arc<Tile>>,
+}
+
+impl UniformTiles {
+    /// The tile to share for a target reading window `r` of `s`, when every tile under it holds
+    /// one and the same pixel value (`r` must lie on existing tiles).
+    fn window(&mut self, s: &Surface, r: Rect) -> Option<Arc<Tile>> {
+        let bpp = s.format.bytes_per_pixel();
+        let mut found = None;
+        for c in r.tiles() {
+            let t = s.tiles.get(&c)?;
+            let k = self.value_of(t, bpp)?;
+            if found.is_some_and(|f| f != k) {
+                return None;
+            }
+            found = Some(k);
+        }
+        self.canonical.get(found?).cloned()
+    }
+
+    fn value_of(&mut self, t: &Arc<Tile>, bpp: usize) -> Option<usize> {
+        if let Some(k) = self.of.get(&Arc::as_ptr(t)) {
+            return *k;
+        }
+        let mut px = t.data.chunks_exact(bpp);
+        let k = px.next().filter(|p0| px.all(|p| p == *p0)).map(|p0| match self.canonical.iter().position(|c| c.data.get(..bpp) == Some(p0)) {
+            Some(k) => k,
+            None => {
+                self.canonical.push(t.clone());
+                self.canonical.len() - 1
+            }
+        });
+        self.of.insert(Arc::as_ptr(t), k);
+        k
+    }
+}
+
 impl PartialEq for Surface {
     fn eq(&self, other: &Self) -> bool {
         self.format == other.format && self.default_pixel == other.default_pixel && self.tiles == other.tiles
@@ -693,7 +736,9 @@ impl Surface {
     }
 
     /// The surface moved by whole pixels: its encoded samples copied tile to tile (no float
-    /// round trip, no intermediate buffer); moves by whole tiles share the tiles themselves.
+    /// round trip, no intermediate buffer); moves by whole tiles share the tiles themselves, and
+    /// a target tile read entirely from tiles of one single pixel value shares one such tile (the
+    /// inside of a solid fill stays one copy-on-write tile however often it moves).
     /// `content` must hold every pixel that isn't the default one (`content_bounds`, say): only
     /// tiles it reaches are kept.
     pub fn translated(&self, dx: i32, dy: i32, content: Rect) -> Surface {
@@ -707,10 +752,24 @@ impl Surface {
         let bpp = self.format.bytes_per_pixel();
         let moved = content.translate(dx, dy);
         let targets: std::collections::BTreeSet<TileCoord> = sources().flat_map(|(c, _)| c.rect().translate(dx, dy).intersect(&moved).tiles()).collect();
+        let mut uniform = UniformTiles::default();
+        let zero = vec![0u8; bpp];
         for dc in targets {
-            let mut tile = Tile::filled(&self.format, &self.default_pixel);
             let dr = dc.rect();
             let sr = dr.translate(dx.saturating_neg(), dy.saturating_neg());
+            // Every pixel of the target comes from a source tile (none from the default pixel).
+            // `sr` must be the exact preimage: an offset of `i32::MIN` saturates its negation.
+            let covered = sr.width() == TILE_SIZE.unsigned_abs()
+                && sr.height() == TILE_SIZE.unsigned_abs()
+                && sr.translate(dx, dy) == dr
+                && content.contains_rect(&sr)
+                && sr.tiles().all(|sc| self.tiles.contains_key(&sc));
+            if covered && let Some(shared) = uniform.window(self, sr) {
+                out.tiles.insert(dc, shared);
+                continue;
+            }
+            // A covered target is overwritten whole, so skip filling it with the default pixel.
+            let mut tile = Tile::filled(&self.format, if covered { &zero } else { &self.default_pixel });
             for sc in sr.intersect(&content).tiles() {
                 let Some(st) = self.tiles.get(&sc) else { continue };
                 let part = sc.rect().intersect(&sr);
@@ -1210,6 +1269,69 @@ mod tests {
             padded.fill_rect(Rect::new(2000, 2000, 2100, 2100), &s.default_pixel());
             assert_eq!(padded.translated(5, 5, s.content_bounds()).tile_count(), s.translated(5, 5, s.content_bounds()).tile_count());
         }
+        // A solid fill moved off the tile grid keeps sharing its one tile inside, at every depth
+        // and over a non-zero default pixel, and reads exactly like the copied pixels.
+        for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F, PixelFormat::GRAY8] {
+            let mut s = Surface::with_default(fmt, &vec![0.25; fmt.channels()]);
+            let r = Rect::new(-300, -10, 1300, 1030);
+            s.fill_rect(r, &vec![0.75; fmt.channels()]);
+            let fill = s.tile(TileCoord::new(1, 1)).cloned().expect("an inner fill tile");
+            for (dx, dy) in [(10, 7), (-1, 0), (0, 300), (-257, 513)] {
+                let t = s.translated(dx, dy, s.content_bounds());
+                let moved = r.translate(dx, dy);
+                assert_eq!(t.read_region(moved.inflate(3)), s.read_region(moved.inflate(3).translate(-dx, -dy)), "{fmt:?} by ({dx}, {dy})");
+                // Targets read only from the fill's whole tiles (x -256..1280, y 0..1024).
+                let whole = Rect::new(-256, 0, 1280, 1024).translate(dx, dy);
+                let inner: Vec<_> = t.tiles().filter(|(c, _)| whole.contains_rect(&c.rect())).collect();
+                assert!(!inner.is_empty() && inner.iter().all(|(_, a)| Arc::ptr_eq(a, &fill)), "{fmt:?} by ({dx}, {dy}): inner tiles copied");
+            }
+            // Nudged back and forth, the inside keeps sharing one tile (copies of uniform edge
+            // tiles count as that value too) and the pixels stay exact.
+            let mut t = s.clone();
+            for k in 0..8 {
+                let d = if k % 2 == 0 { 10 } else { -10 };
+                t = t.translated(d, d / 2, t.content_bounds());
+            }
+            // (Targets whose last window read uniform tiles only: one tile in from the fill's whole
+            // tiles on the sides the last move came from.)
+            let inner: Vec<_> = t.tiles().filter(|(c, _)| Rect::new(-256, 0, 1024, 768).contains_rect(&c.rect())).map(|(_, a)| a).collect();
+            assert!(inner.len() >= 4 && inner.iter().all(|a| Arc::ptr_eq(a, inner[0])), "{fmt:?}: repeated moves copied the inside");
+            assert_eq!(t.read_region(r.inflate(3)), s.read_region(r.inflate(3)), "{fmt:?}: back where it started");
+        }
+        // Two solid fills of different values side by side: windows across the seam are
+        // copied (each tile is uniform, but not with the same value), the rest shared.
+        for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA32F] {
+            let mut s = Surface::new(fmt);
+            s.fill_rect(Rect::new(0, 0, 1024, 768), &vec![0.2; fmt.channels()]);
+            s.fill_rect(Rect::new(1024, 0, 2048, 768), &vec![0.9; fmt.channels()]);
+            let t = s.translated(10, 7, s.content_bounds());
+            let all = Rect::new(-20, -20, 2100, 800);
+            assert_eq!(t.read_region(all), s.read_region(all.translate(-10, -7)), "{fmt:?}: two fills");
+            let seam = t.tile(TileCoord::new(4, 1)).expect("seam tile");
+            let (left, right) = (t.tile(TileCoord::new(2, 1)).expect("left"), t.tile(TileCoord::new(6, 1)).expect("right"));
+            assert!(!Arc::ptr_eq(seam, left) && !Arc::ptr_eq(seam, right) && !Arc::ptr_eq(left, right), "{fmt:?}: seam aliased");
+        }
+        // An offset of i32::MIN saturates its negation, so the source window isn't the exact
+        // preimage: no shortcut may apply (a zero pre-fill would leak into the output).
+        let mut s = Surface::with_default(PixelFormat::GRAY8, &[0.5]);
+        s.fill_rect(Rect::new(i32::MAX - 1024, 0, i32::MAX - 512, 512), &[0.25]);
+        let (fill, default) = (s.sample_channel(i32::MAX - 600, 10, 0), s.default_pixel()[0]);
+        for (dx, dy) in [(i32::MIN, 1), (1, i32::MIN), (i32::MIN, 0)] {
+            let t = s.translated(dx, dy, s.content_bounds());
+            for (c, _) in t.tiles() {
+                assert!(t.read_region(c.rect()).iter().all(|v| *v == fill || *v == default), "({dx}, {dy}): tile {c:?} holds a pre-fill");
+            }
+        }
+        // One tile shared but not uniform: each target is copied, not aliased.
+        let mut s = Surface::new(PixelFormat::GRAY8);
+        s.write_pixel(3, 4, &[1.0]);
+        let odd = s.tile(TileCoord::new(0, 0)).cloned().expect("written tile");
+        let grid: Vec<_> = (0..9).map(|i| (TileCoord::new(i % 3, i / 3), odd.clone())).collect();
+        s.put_tiles(grid);
+        let t = s.translated(10, 7, s.content_bounds());
+        let all = Rect::new(-20, -20, 800, 800);
+        assert_eq!(t.read_region(all), s.read_region(all.translate(-10, -7)));
+        assert!(t.tiles().all(|(_, a)| !Arc::ptr_eq(a, &odd)));
         // Offsets at the limits don't panic.
         let mut s = Surface::new(PixelFormat::GRAY8);
         s.write_pixel(5, 5, &[1.0]);
