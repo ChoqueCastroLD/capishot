@@ -3028,3 +3028,5 @@ cameraData	Lens	Objectif
 	Fill with {mode}-neutral color (black)	Remplir avec la couleur neutre de {mode} (noir)
 	Fill with {mode}-neutral color (50% gray)	Remplir avec la couleur neutre de {mode} (gris 50 %)
 	(No neutral color exists for {mode} mode.)	(Il n’existe aucune couleur neutre pour le mode {mode}.)
+	Apply mask to layer before removing?	Appliquer le masque au calque avant de le supprimer ?
+	The layer or its mask changed. Drag the mask onto the Trash again.	Le calque ou son masque a changé. Faites de nouveau glisser le masque sur la corbeille.
