@@ -369,3 +369,47 @@ fn load_selection_without_alpha_channels_offers_the_composite() {
     assert_eq!(app.ui.dialog_mut(dialog).unwrap().fields["channel"], "RGB");
     crate::dialogs::confirm(&mut app, dialog).unwrap();
 }
+
+/// One frame of the shortcut handler with a plain Esc press.
+fn press_esc(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let key = egui::Key::Escape;
+    let input = egui::RawInput {
+        focused: true,
+        events: vec![egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }],
+        ..Default::default()
+    };
+    ctx.run_ui(input, |ui| crate::shortcuts::handle(app, ui.ctx())).textures_delta.clear();
+}
+
+#[test]
+fn esc_leaves_full_screen_modes_unless_something_else_owns_it() {
+    let (mut app, ctx) = app_with(1);
+    // Both full screen modes return to Standard, and the menu check follows (#4116).
+    for mode in ["fullScreen", "fullScreenWithMenuBar"] {
+        menu(&mut app, &ctx, &format!("view.screenMode.{mode}"), json!({})).unwrap();
+        press_esc(&mut app, &ctx);
+        assert_eq!(app.ui.view.screen_mode, "standard", "{mode}");
+        assert_eq!(checked(&app, "view.screenMode.standard"), Some(true));
+    }
+    // In Standard, Esc leaves the mode alone.
+    press_esc(&mut app, &ctx);
+    assert_eq!(app.ui.view.screen_mode, "standard");
+    // An open dialog takes Esc first.
+    menu(&mut app, &ctx, "view.screenMode.fullScreen", json!({})).unwrap();
+    menu(&mut app, &ctx, "image.canvasSize", json!({})).unwrap();
+    assert_eq!(app.ui.dialogs.len(), 1);
+    press_esc(&mut app, &ctx);
+    assert_eq!(app.ui.view.screen_mode, "fullScreen");
+    app.ui.dialogs.clear();
+    // So does Free Transform: Esc cancels it and the mode stays.
+    app.run("select.all", json!({})).unwrap();
+    crate::transform_tool::begin(&mut app, &ctx).unwrap();
+    assert!(app.ui.transform.is_some());
+    press_esc(&mut app, &ctx);
+    assert!(app.ui.transform.is_none());
+    assert_eq!(app.ui.view.screen_mode, "fullScreen");
+    // A selection stays while Esc leaves full screen; the next Esc deselects.
+    press_esc(&mut app, &ctx);
+    assert_eq!(app.ui.view.screen_mode, "standard");
+    assert!(app.session.active().unwrap().doc.selection.is_some());
+}
