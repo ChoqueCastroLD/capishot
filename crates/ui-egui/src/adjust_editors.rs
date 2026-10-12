@@ -115,18 +115,18 @@ pub fn editor(ui: &mut egui::Ui, kind: &str, v: &mut Value, cx: &EditorCx) -> Ed
             ui,
             v,
             &[
-                ("exposure", tl!("Exposure"), -20.0, 20.0, 0.0, ""),
-                ("offset", tl!("Offset"), -0.5, 0.5, 0.0, ""),
-                ("gamma", tl!("Gamma Correction"), 0.01, 9.99, 1.0, ""),
+                ("exposure", tl!("Exposure"), -20.0, 20.0, 0.0, "", Some(2)),
+                ("offset", tl!("Offset"), -0.5, 0.5, 0.0, "", Some(4)),
+                ("gamma", tl!("Gamma Correction"), 0.01, 9.99, 1.0, "", None),
             ],
         ),
-        "vibrance" => sliders(ui, v, &[("vibrance", "Vibrance", -100.0, 100.0, 0.0, "%"), ("saturation", "Saturation", -100.0, 100.0, 0.0, "%")]),
+        "vibrance" => sliders(ui, v, &[("vibrance", "Vibrance", -100.0, 100.0, 0.0, "%", None), ("saturation", "Saturation", -100.0, 100.0, 0.0, "%", None)]),
         "hueSaturation" => hue_saturation(ui, v, cx),
         "colorBalance" => color_balance(ui, v, cx),
         "blackWhite" => black_white(ui, v, cx),
         "photoFilter" => photo_filter(ui, v, cx),
         "channelMixer" => channel_mixer(ui, v, cx),
-        "posterize" => sliders(ui, v, &[("levels", "Levels", 2.0, 255.0, 4.0, "")]),
+        "posterize" => sliders(ui, v, &[("levels", "Levels", 2.0, 255.0, 4.0, "", None)]),
         "threshold" => threshold(ui, v, cx),
         "gradientMap" => gradient_map(ui, v, cx),
         _ => Edit::default(),
@@ -190,15 +190,31 @@ fn label(ui: &mut egui::Ui, text: &str) {
 }
 
 /// Labelled slider rows over top-level keys: (key, label, min, max, default, unit).
-fn sliders(ui: &mut egui::Ui, v: &mut Value, rows: &[(&str, &str, f32, f32, f32, &str)]) -> Edit {
+/// A row of [`sliders`]: params key, label, range, default, unit, and its decimal places (None:
+/// two for a range of 10 or less, else whole numbers).
+type SliderRow<'a> = (&'a str, &'a str, f32, f32, f32, &'a str, Option<u32>);
+
+/// The value a [`sliders`] row stores for `x`: rounded to `decimals` places, or by its range.
+pub(crate) fn row_value(x: f32, min: f32, max: f32, decimals: Option<u32>) -> f32 {
+    match decimals {
+        Some(d) => {
+            let scale = 10f32.powi(d.min(6) as i32);
+            (x * scale).round() / scale
+        }
+        None if max - min <= 10.0 => round(x, 0.01),
+        None => x.round(),
+    }
+}
+
+fn sliders(ui: &mut egui::Ui, v: &mut Value, rows: &[SliderRow]) -> Edit {
     let mut e = Edit::default();
-    for &(key, text, min, max, default, unit) in rows {
+    for &(key, text, min, max, default, unit, decimals) in rows {
         let mut x = num(v, key, default).clamp(min, max);
         // A double-click on the slider puts it back to its default (Photoshop).
         let gestures = widgets::RowGestures { reset: Some(default), wheel_step: None };
-        let r = widgets::slider_row_with(ui, text, &mut x, min..=max, unit, None, gestures);
+        let r = widgets::slider_row_prec(ui, text, &mut x, min..=max, unit, None, gestures, decimals);
         if r.changed() {
-            v[key] = json!(if max - min <= 10.0 { round(x, 0.01) } else { x.round() });
+            v[key] = json!(row_value(x, min, max, decimals));
         }
         e.add(Edit::of(&r));
     }
@@ -222,7 +238,7 @@ fn track_stops<'a>(cx: &EditorCx, stops: &'a [Color32]) -> Option<&'a [Color32]>
 fn brightness_contrast(ui: &mut egui::Ui, v: &mut Value) -> Edit {
     let legacy = flag(v, "legacy", false);
     let lo = if legacy { -100.0 } else { -50.0 };
-    let mut e = sliders(ui, v, &[("brightness", tl!("Brightness"), -150.0, 150.0, 0.0, ""), ("contrast", tl!("Contrast"), lo, 100.0, 0.0, "")]);
+    let mut e = sliders(ui, v, &[("brightness", tl!("Brightness"), -150.0, 150.0, 0.0, "", None), ("contrast", tl!("Contrast"), lo, 100.0, 0.0, "", None)]);
     let mut l = legacy;
     if widgets::checkbox(ui, &mut l, tl!("Use Legacy")).changed() {
         v["legacy"] = json!(l);
@@ -798,7 +814,7 @@ fn threshold(ui: &mut egui::Ui, v: &mut Value, cx: &EditorCx) -> Edit {
     p.line_segment([pos2(x, hr.top()), pos2(x, hr.bottom())], Stroke::new(1.0, t.accent));
     p.rect_stroke(hr, 0.0, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
     ui.add_space(4.0);
-    sliders(ui, v, &[("level", tl!("Threshold Level"), 1.0, 255.0, 128.0, "")])
+    sliders(ui, v, &[("level", tl!("Threshold Level"), 1.0, 255.0, 128.0, "", None)])
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -912,7 +928,11 @@ fn hue_saturation(ui: &mut egui::Ui, v: &mut Value, cx: &EditorCx) -> Edit {
             o["hue"] = json!(h.round());
         }
         sub.add(Edit::of(&r));
-        sub.add(sliders(ui, &mut o, &[("saturation", tl!("Saturation"), -100.0, 100.0, 0.0, "%"), ("lightness", tl!("Lightness"), -100.0, 100.0, 0.0, "%")]));
+        sub.add(sliders(
+            ui,
+            &mut o,
+            &[("saturation", tl!("Saturation"), -100.0, 100.0, 0.0, "%", None), ("lightness", tl!("Lightness"), -100.0, 100.0, 0.0, "%", None)],
+        ));
         if sub.changed {
             v[key] = o;
         }
@@ -1143,7 +1163,7 @@ fn photo_filter(ui: &mut egui::Ui, v: &mut Value, cx: &EditorCx) -> Edit {
         e.add(r);
     });
     ui.data_mut(|d| d.insert_temp(mode_id, use_color));
-    e.add(sliders(ui, v, &[("density", tl!("Density"), 0.0, 100.0, 25.0, "%")]));
+    e.add(sliders(ui, v, &[("density", tl!("Density"), 0.0, 100.0, 25.0, "%", None)]));
     let mut pl = flag(v, "preserveLuminosity", true);
     if widgets::checkbox(ui, &mut pl, tl!("Preserve Luminosity")).changed() {
         v["preserveLuminosity"] = json!(pl);

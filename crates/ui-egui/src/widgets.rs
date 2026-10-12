@@ -974,6 +974,22 @@ pub fn slider_row_with(
     gradient: Option<&[Color32]>,
     g: RowGestures,
 ) -> Response {
+    slider_row_prec(ui, label, value, range, suffix, gradient, g, None)
+}
+
+/// [`slider_row_with`] whose field shows `decimals` places instead of the one (or two, for a
+/// small range) it picks itself: Exposure's ±20 stops show two, its Offset four (#4164).
+#[allow(clippy::too_many_arguments)]
+pub fn slider_row_prec(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    suffix: &str,
+    gradient: Option<&[Color32]>,
+    g: RowGestures,
+    decimals: Option<u32>,
+) -> Response {
     let t = Tokens::get(ui.ctx());
     let mut changed_resp = None;
     ui.horizontal(|ui| {
@@ -981,7 +997,7 @@ pub fn slider_row_with(
         let l = ui.label(egui::RichText::new(tl!(label)).color(t.text_dim));
         scrub_label_within(ui, &l, f32::INFINITY);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            changed_resp = Some(value_field(ui, value, range.clone(), suffix, 74.0));
+            changed_resp = Some(value_field_in(ui, value, range.clone(), suffix, 74.0, 0.0, FieldOpts { decimals, units: None }).0);
         });
     });
     let s = slider_with(ui, value, range, gradient, g);
