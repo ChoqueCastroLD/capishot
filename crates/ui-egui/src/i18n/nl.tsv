@@ -3738,6 +3738,11 @@ cameraData	Lens	Lens
 	Amount:	Hoeveelheid:
 	Protect:	Beschermen:
 	Protect skin tones	Huidtinten beschermen
+	Edit points to modify the curve	Punten bewerken om de curve te wijzigen
+	Draw to modify the curve	Tekenen om de curve te wijzigen
+curves	Smooth	Vloeiend maken
+	Smooth the curve values	Curvewaarden vloeiend maken
+	Drag to draw the curve · {key}-click draws a straight line	Sleep om de curve te tekenen · {key}-klik tekent een rechte lijn
 # Select and Mask view modes (#1754)
 	Onion Skin	Uienschil
 	Marching Ants	Mierenmars

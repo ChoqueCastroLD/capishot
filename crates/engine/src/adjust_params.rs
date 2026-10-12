@@ -11,7 +11,7 @@
 
 use photocraft_color::ColorMode;
 use photocraft_doc::Adjustment;
-use photocraft_doc::adjust::{CurvePoint, HueRange, LevelsChannel, ToneSpace};
+use photocraft_doc::adjust::{CURVE_MAP_LEN, CurvePoint, HueRange, LevelsChannel, ToneSpace, curve_map, curve_map_outputs};
 use serde_json::{Map, Value, json};
 
 use crate::{EngineError, Result};
@@ -236,15 +236,19 @@ pub fn to_params(adj: &Adjustment) -> Value {
             }
             v
         }
-        Adjustment::Curves { master, per_channel, space, black } => {
-            let mut v = json!({"points": curve_arr(master)});
+        Adjustment::Curves { master, per_channel, space, black, pencil } => {
+            let arr = |c: &[CurvePoint]| if *pencil { map_arr(c) } else { curve_arr(c) };
+            let mut v = json!({"points": arr(master)});
             let ink = if black.len() >= 2 { black.clone() } else { identity_curve() };
             let chans = per_channel.iter().cloned().chain(std::iter::once(ink));
             for (key, c) in channel_keys(*space).iter().zip(chans) {
-                v[*key] = curve_arr(&c);
+                v[*key] = arr(&c);
             }
             if *space == ToneSpace::Lab {
-                v["points"] = curve_arr(&per_channel[0]);
+                v["points"] = arr(&per_channel[0]);
+            }
+            if *pencil {
+                v["pencil"] = json!(true);
             }
             v
         }
@@ -487,6 +491,80 @@ fn curve_arr(c: &[CurvePoint]) -> Value {
 /// Most points a curve may have (Photoshop allows 16; the PSD record holds 19).
 pub const MAX_CURVE_POINTS: usize = 19;
 
+/// Points Photoshop's "Edit points to modify the curve" places on a pencil-drawn curve at most.
+const MAX_FITTED_POINTS: usize = 16;
+
+/// Most Smooth passes one `smooth` param applies.
+pub const MAX_SMOOTH_PASSES: f32 = 10.0;
+
+/// A pencil-mode curve as params: its [`CURVE_MAP_LEN`] outputs in 0..255.
+fn map_arr(c: &[CurvePoint]) -> Value {
+    json!(curve_map_outputs(c).iter().map(|o| (o * 255.0 * CURVE_COORDINATE_PRECISION).round() / CURVE_COORDINATE_PRECISION).collect::<Vec<_>>())
+}
+
+/// `lut` (evenly spaced over 0..=1) at `x`, linearly interpolated.
+fn lut_at(lut: &[f32], x: f32) -> f32 {
+    let Some(last) = lut.len().checked_sub(1) else { return x };
+    let f = x.clamp(0.0, 1.0) * last as f32;
+    let i = (f.floor() as usize).min(last);
+    let (a, b) = (lut.get(i).copied().unwrap_or(x), lut.get((i + 1).min(last)).copied().unwrap_or(x));
+    a + (b - a) * (f - i as f32)
+}
+
+/// A point curve drawn into a pencil-mode map (Photoshop switching to "Draw to modify the curve").
+pub fn points_to_map(points: &[CurvePoint]) -> Vec<CurvePoint> {
+    let lut = photocraft_compose::adjust::curve_lut(points);
+    let last = (CURVE_MAP_LEN - 1) as f32;
+    curve_map(&(0..CURVE_MAP_LEN).map(|k| lut_at(&lut, k as f32 / last)).collect::<Vec<_>>())
+}
+
+/// A pencil-mode map turned back into a point curve (Photoshop's "Edit points to modify the
+/// curve"): the endpoints, then the worst-fitting input until the spline is within one level of
+/// the map or [`MAX_FITTED_POINTS`] are placed.
+pub fn map_to_points(map: &[CurvePoint]) -> Vec<CurvePoint> {
+    let target = curve_map_outputs(map);
+    let last = CURVE_MAP_LEN - 1;
+    let at = |k: usize| CurvePoint { input: k as f32 / last as f32, output: target.get(k).copied().unwrap_or(0.0) };
+    let mut pts = vec![at(0), at(last)];
+    while pts.len() < MAX_FITTED_POINTS {
+        let lut = photocraft_compose::adjust::curve_lut(&pts);
+        let worst = (0..CURVE_MAP_LEN)
+            .map(|k| (k, (lut_at(&lut, k as f32 / last as f32) - target.get(k).copied().unwrap_or(0.0)).abs()))
+            .max_by(|a, b| a.1.total_cmp(&b.1));
+        let Some((k, _)) = worst.filter(|w| w.1 > 1.0 / 255.0) else { break };
+        let p = at(k);
+        if pts.iter().any(|q| (q.input - p.input).abs() < CURVE_POINT_DUPLICATE_DISTANCE) {
+            break;
+        }
+        pts.push(p);
+        pts.sort_by(|a, b| a.input.total_cmp(&b.input));
+    }
+    pts
+}
+
+/// One pass of Curves' Smooth button over pencil-mode outputs (any scale): each value becomes
+/// the mean of a symmetric window of up to three neighbours a side, so straight runs and the two
+/// endpoints stay put while jagged strokes even out.
+pub fn smooth_curve_map(outputs: &mut [f32]) {
+    const RADIUS: usize = 3;
+    let src = outputs.to_vec();
+    let n = src.len();
+    for (k, out) in outputs.iter_mut().enumerate() {
+        let r = RADIUS.min(k).min(n.saturating_sub(k + 1));
+        if r == 0 {
+            continue;
+        }
+        let window = src.get(k - r..=k + r).unwrap_or_default();
+        *out = window.iter().sum::<f32>() / window.len().max(1) as f32;
+    }
+}
+
+/// Whether a pencil-mode curve maps every level to itself.
+fn is_identity_map(c: &[CurvePoint]) -> bool {
+    let last = (CURVE_MAP_LEN - 1) as f32;
+    curve_map_outputs(c).iter().enumerate().all(|(k, o)| (o - k as f32 / last).abs() < 0.5 / 255.0)
+}
+
 /// Fixed-target Curves eyedroppers. The UI keeps the sampled operation provisional; this helper
 /// only resolves a sample into an ordinary Curves adjustment that the existing command can apply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -639,7 +717,16 @@ pub fn curves_eyedropper(base: &Value, picker: CurvesEyedropper, sample: [f32; 3
     if mode == ColorMode::Grayscale && picker == CurvesEyedropper::NeutralGray {
         return Err(bad("curves eyedropper", "Neutral Gray is unavailable for Grayscale documents"));
     }
-    let mut adjustment = from_params("curves", base, None, mode)?;
+    // The pickers place points: a pencil-drawn curve is first fitted with points, as when
+    // Photoshop leaves the pencil for point editing.
+    let mut base = base.clone();
+    if let Some(o) = base.as_object_mut() {
+        o.remove("smooth");
+        if o.get("pencil").and_then(Value::as_bool) == Some(true) {
+            o.insert("pencil".into(), json!(false));
+        }
+    }
+    let mut adjustment = from_params("curves", &base, None, mode)?;
     let Adjustment::Curves { master, per_channel, .. } = &mut adjustment else {
         return Err(bad("curves eyedropper", "expected a Curves adjustment"));
     };
@@ -738,20 +825,53 @@ pub fn parse_curve(cmd: &str, key: &str, v: &Value) -> Result<Vec<CurvePoint>> {
     Ok(pts)
 }
 
+/// A pencil-mode map param: exactly [`CURVE_MAP_LEN`] outputs in 0..255.
+fn parse_map(cmd: &str, key: &str, v: &Value) -> Result<Vec<CurvePoint>> {
+    let err = || bad(cmd, format!("`{key}` must be {CURVE_MAP_LEN} output levels in 0..255 (a pencil-drawn map) or [input, output] pairs"));
+    let a = v.as_array().filter(|a| a.len() == CURVE_MAP_LEN).ok_or_else(err)?;
+    let outs =
+        a.iter().map(|x| x.as_f64().filter(|x| x.is_finite()).map(|x| (x as f32).clamp(0.0, 255.0) / 255.0)).collect::<Option<Vec<_>>>().ok_or_else(err)?;
+    Ok(curve_map(&outs))
+}
+
+/// A Curves channel param in the adjustment's mode: `[[in, out], …]` points (drawn into a map in
+/// pencil mode) or a [`CURVE_MAP_LEN`]-level map (fitted with points outside pencil mode).
+fn parse_curve_in(cmd: &str, key: &str, v: &Value, pencil: bool) -> Result<Vec<CurvePoint>> {
+    if v.as_array().and_then(|a| a.first()).is_some_and(Value::is_number) {
+        let map = parse_map(cmd, key, v)?;
+        Ok(if pencil { map } else { map_to_points(&map) })
+    } else {
+        let pts = parse_curve(cmd, key, v)?;
+        Ok(if pencil { points_to_map(&pts) } else { pts })
+    }
+}
+
 fn curves(r: &Reader<'_>, base: Option<&Adjustment>, mode: ColorMode) -> Result<Adjustment> {
-    let (mut master, mut chans, base_space) = match base {
-        Some(Adjustment::Curves { master, per_channel, space, black }) => {
-            (master.clone(), [per_channel[0].clone(), per_channel[1].clone(), per_channel[2].clone(), black.clone()], Some(*space))
+    let (mut master, mut chans, base_space, base_pencil) = match base {
+        Some(Adjustment::Curves { master, per_channel, space, black, pencil }) => {
+            (master.clone(), [per_channel[0].clone(), per_channel[1].clone(), per_channel[2].clone(), black.clone()], Some(*space), *pencil)
         }
-        _ => (identity_curve(), std::array::from_fn(|_| identity_curve()), None),
+        _ => (identity_curve(), std::array::from_fn(|_| identity_curve()), None, false),
     };
     let space = space_of(r, base_space, mode);
     if base_space.is_some_and(|b| b != space) {
         chans = std::array::from_fn(|_| identity_curve());
     }
+    let pencil = r.boolean("pencil", base_pencil)?;
+    // Every stored curve in the adjustment's mode: maps are drawn from the spline when switching
+    // to the pencil, fitted with points when switching back, and filled out to full maps.
+    let convert = |c: Vec<CurvePoint>| match (base_pencil, pencil) {
+        (false, true) => points_to_map(&c),
+        (true, false) => map_to_points(&c),
+        (true, true) if c.len() != CURVE_MAP_LEN => curve_map(&curve_map_outputs(&c)),
+        _ => c,
+    };
+    let [c0, c1, c2, k] = chans;
+    let [m, c0, c1, c2, k] = [master, c0, c1, c2, k].map(convert);
+    (master, chans) = (m, [c0, c1, c2, k]);
     let composite = r.get("points").or_else(|| r.get("gray"));
     if let Some(v) = composite {
-        let c = parse_curve(r.cmd, "points", v)?;
+        let c = parse_curve_in(r.cmd, "points", v, pencil)?;
         if space == ToneSpace::Lab {
             chans[0] = c;
         } else {
@@ -762,12 +882,25 @@ fn curves(r: &Reader<'_>, base: Option<&Adjustment>, mode: ColorMode) -> Result<
         if let Some(v) = r.get(key)
             && let Some(slot) = chans.get_mut(i)
         {
-            *slot = parse_curve(r.cmd, key, v)?;
+            *slot = parse_curve_in(r.cmd, key, v, pencil)?;
+        }
+    }
+    let passes = r.num("smooth", 0.0, 0.0, MAX_SMOOTH_PASSES)?.round() as usize;
+    if pencil {
+        // Smoothed, then held at the params' precision so `to_params` round-trips exactly.
+        let level = |o: f32| (o * 255.0 * CURVE_COORDINATE_PRECISION).round() / CURVE_COORDINATE_PRECISION / 255.0;
+        for c in std::iter::once(&mut master).chain(chans.iter_mut()) {
+            let mut outs = curve_map_outputs(c);
+            for _ in 0..passes {
+                smooth_curve_map(&mut outs);
+            }
+            *c = curve_map(&outs.into_iter().map(level).collect::<Vec<_>>());
         }
     }
     let [c0, c1, c2, black] = chans;
-    let black = if space == ToneSpace::Cmyk && !photocraft_doc::adjust::is_identity_curve(&black) { black } else { Vec::new() };
-    Ok(Adjustment::Curves { master, per_channel: [c0, c1, c2], space, black })
+    let identity = if pencil { is_identity_map(&black) } else { photocraft_doc::adjust::is_identity_curve(&black) };
+    let black = if space == ToneSpace::Cmyk && !identity { black } else { Vec::new() };
+    Ok(Adjustment::Curves { master, per_channel: [c0, c1, c2], space, black, pencil })
 }
 
 fn levels_obj(c: &LevelsChannel) -> Value {
@@ -908,6 +1041,9 @@ mod tests {
             ("curves", json!({"points": [[0, 0]]})),
             ("curves", json!({"red": [[0, 0], [1]]})),
             ("curves", json!({"points": [[5, 5], [5, 9]]})),
+            ("curves", json!({"pencil": true, "points": [1, 2, 3]})),
+            ("curves", json!({"pencil": "yes"})),
+            ("curves", json!({"points": (0..256).map(|k| if k == 9 { json!("x") } else { json!(k) }).collect::<Vec<_>>()})),
             ("levels", json!({"red": 3})),
             ("levels", json!({"inBlack": "x"})),
             ("hueSaturation", json!({"reds": {"range": [1, 2]}})),
@@ -1234,6 +1370,35 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn curves_pencil_maps_draw_smooth_and_convert_back() {
+        // A drawn inversion: 256 output levels.
+        let inverted: Vec<f32> = (0..256).rev().map(|k| k as f32).collect();
+        let a = from_params("curves", &json!({"pencil": true, "points": inverted}), None, ColorMode::Rgb).unwrap();
+        assert!(matches!(&a, Adjustment::Curves { pencil: true, master, .. } if master.len() == CURVE_MAP_LEN));
+        assert!((tone_output(&a, [0.25; 3])[0] - 0.75).abs() < 1e-3);
+        assert_eq!(from_params("curves", &to_params(&a), None, ColorMode::Rgb).unwrap(), a);
+        // Smooth evens out a hard step but keeps the endpoints.
+        let step: Vec<f32> = (0..256).map(|k| if k < 128 { 0.0 } else { 255.0 }).collect();
+        let s = from_params("curves", &json!({"red": step, "smooth": 2}), Some(&a), ColorMode::Rgb).unwrap();
+        let (_, chans) = curves_parts(&s);
+        assert!(chans[0][127].output > 0.2 && chans[0][128].output < 0.8, "{:?}", &chans[0][120..136]);
+        assert_eq!((chans[0][0].output, chans[0][255].output), (0.0, 1.0));
+        // Edit points: the map is fitted with a point curve that still inverts.
+        let pts = from_params("curves", &json!({"pencil": false}), Some(&a), ColorMode::Rgb).unwrap();
+        let (master, _) = curves_parts(&pts);
+        assert!(matches!(&pts, Adjustment::Curves { pencil: false, .. }) && master.len() <= MAX_FITTED_POINTS, "{master:?}");
+        assert!((tone_output(&pts, [0.25; 3])[0] - 0.75).abs() < 2.0 / 255.0);
+        // The command draws it at every depth.
+        for depth in [8, 16, 32] {
+            let mut s = colourful("rgb", depth);
+            let before = pixels(&s);
+            s.execute("image.adjustments.curves", to_params(&a)).unwrap();
+            let after = pixels(&s);
+            assert!((after[0][0] - (1.0 - before[0][0])).abs() < 2.0 / 255.0, "@{depth}: {after:?} vs {before:?}");
         }
     }
 

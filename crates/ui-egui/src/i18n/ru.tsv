@@ -2922,6 +2922,11 @@ cameraData	Lens	Объектив
 	Amount:	Эффект:
 	Protect:	Защитить:
 	Protect skin tones	Защищать тона кожи
+	Edit points to modify the curve	Изменять кривую по точкам
+	Draw to modify the curve	Рисовать кривую
+curves	Smooth	Сгладить
+	Smooth the curve values	Сгладить значения кривой
+	Drag to draw the curve · {key}-click draws a straight line	Перетащите, чтобы нарисовать кривую · {key}-щелчок рисует прямую линию
 # Select and Mask view modes (#1754)
 	Onion Skin	Калька
 	Marching Ants	Бегущие муравьи

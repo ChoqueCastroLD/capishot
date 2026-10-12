@@ -3669,6 +3669,11 @@ cameraData	Lens	Об'єктив
 	Amount:	Величина:
 	Protect:	Захистити:
 	Protect skin tones	Захистити тони шкіри
+	Edit points to modify the curve	Змінювати криву за точками
+	Draw to modify the curve	Малювати криву
+curves	Smooth	Згладити
+	Smooth the curve values	Згладити значення кривої
+	Drag to draw the curve · {key}-click draws a straight line	Перетягніть, щоб намалювати криву · {key}-клацання малює пряму лінію
 # Select and Mask view modes (#1754)
 	Onion Skin	Калька
 	Marching Ants	Мурашки

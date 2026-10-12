@@ -3682,6 +3682,11 @@ cameraData	Lens	Φακός
 	Amount:	Ποσότητα:
 	Protect:	Προστασία:
 	Protect skin tones	Προστασία τόνων δέρματος
+	Edit points to modify the curve	Επεξεργασία σημείων για αλλαγή της καμπύλης
+	Draw to modify the curve	Σχεδίαση για αλλαγή της καμπύλης
+curves	Smooth	Εξομάλυνση
+	Smooth the curve values	Εξομάλυνση των τιμών της καμπύλης
+	Drag to draw the curve · {key}-click draws a straight line	Σύρετε για να σχεδιάσετε την καμπύλη · {key}-κλικ σχεδιάζει ευθεία γραμμή
 # Select and Mask view modes (#1754)
 	Onion Skin	Φλούδα κρεμμυδιού
 	Marching Ants	Κινούμενο περίγραμμα

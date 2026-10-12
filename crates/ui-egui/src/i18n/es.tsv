@@ -2662,6 +2662,11 @@ cameraData	Lens	Objetivo
 	Amount:	Cantidad:
 	Protect:	Proteger:
 	Protect skin tones	Proteger tonos de piel
+	Edit points to modify the curve	Editar puntos para modificar la curva
+	Draw to modify the curve	Dibujar para modificar la curva
+curves	Smooth	Suavizar
+	Smooth the curve values	Suavizar los valores de la curva
+	Drag to draw the curve · {key}-click draws a straight line	Arrastre para dibujar la curva · {key}-clic traza una línea recta
 # Select and Mask view modes (#1754)
 	Onion Skin	Papel cebolla
 	Marching Ants	Hormigas en marcha

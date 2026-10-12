@@ -435,6 +435,36 @@ mod tests {
         assert!(harness.state().ui.dialogs.is_empty());
     }
     #[test]
+    fn curves_pencil_drag_draws_the_map_and_confirm_applies_it() {
+        let mut h = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(|ui, app| crate::dialogs::show(app, ui.ctx()), app_with_image());
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+        let steps = h.state().session.active().unwrap().history.past_len();
+        let id = open(h.state_mut(), "image.adjustments.curves").unwrap();
+        let fields = &mut h.state_mut().ui.dialog_mut(id).unwrap().fields;
+        fields.insert("pencil".into(), json!(true));
+        fields.insert("points".into(), json!((0..256).collect::<Vec<_>>()));
+        h.run_steps(4);
+        let graph = h.ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("adjust-dialog", "curves")).with("curves-graph"))).unwrap();
+        let at = |i: f32, o: f32| egui::pos2(graph.left() + i / 255.0 * graph.width(), graph.bottom() - o / 255.0 * graph.height());
+        h.hover_at(at(64.0, 200.0));
+        h.run_steps(1);
+        h.drag_at(at(64.0, 200.0));
+        h.run_steps(1);
+        for i in [100.0, 150.0, 192.0] {
+            h.hover_at(at(i, 200.0));
+            h.run_steps(1);
+        }
+        h.drop_at(at(192.0, 200.0));
+        h.run_steps(3);
+        let map = h.state().ui.dialogs[0].fields["points"].as_array().unwrap().clone();
+        assert_eq!(map.len(), 256);
+        assert!((70..185).all(|k| (map[k].as_f64().unwrap() - 200.0).abs() < 3.0), "{map:?}");
+        assert_eq!(map[20].as_f64(), Some(20.0), "outside the stroke the map is untouched");
+        crate::dialogs::confirm(h.state_mut(), id).unwrap();
+        assert_eq!(h.state().session.active().unwrap().history.past_len(), steps + 1);
+    }
+
+    #[test]
     fn curves_pointer_drag_previews_until_confirm_and_cancel_preserves_document() {
         for confirm in [false, true] {
             let mut h = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(|ui, app| crate::dialogs::show(app, ui.ctx()), app_with_image());

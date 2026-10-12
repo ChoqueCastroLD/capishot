@@ -3593,6 +3593,11 @@ cameraData	Lens	レンズ
 	Amount:	量:
 	Protect:	保護:
 	Protect skin tones	肌色を保護
+	Edit points to modify the curve	ポイントを編集してカーブを変更
+	Draw to modify the curve	描画してカーブを変更
+curves	Smooth	スムーズ
+	Smooth the curve values	カーブの値を滑らかにする
+	Drag to draw the curve · {key}-click draws a straight line	ドラッグしてカーブを描画 · {key}+クリックで直線を描画
 # Select and Mask view modes (#1754)
 	Onion Skin	オニオンスキン
 	Marching Ants	点線の境界

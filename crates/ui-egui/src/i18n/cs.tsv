@@ -3445,6 +3445,11 @@ layerLabel	No Color	Žádná barva
 	Amount:	Míra:
 	Protect:	Chránit:
 	Protect skin tones	Chránit tóny pleti
+	Edit points to modify the curve	Upravit body pro změnu křivky
+	Draw to modify the curve	Kreslit pro změnu křivky
+curves	Smooth	Vyhladit
+	Smooth the curve values	Vyhladit hodnoty křivky
+	Drag to draw the curve · {key}-click draws a straight line	Tažením nakreslíte křivku · {key}-klik nakreslí rovnou čáru
 # Select and Mask view modes (#1754)
 	Onion Skin	Cibulová slupka
 	Marching Ants	Pochodující mravenci

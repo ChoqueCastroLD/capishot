@@ -3595,6 +3595,11 @@ cameraData	Lens	Obiektyw
 	Amount:	Wartość:
 	Protect:	Chroń:
 	Protect skin tones	Chroń odcienie skóry
+	Edit points to modify the curve	Edytuj punkty, aby zmienić krzywą
+	Draw to modify the curve	Rysuj, aby zmienić krzywą
+curves	Smooth	Wygładź
+	Smooth the curve values	Wygładź wartości krzywej
+	Drag to draw the curve · {key}-click draws a straight line	Przeciągnij, aby narysować krzywą · {key}-klik rysuje linię prostą
 # Select and Mask view modes (#1754)
 	Onion Skin	Skórka cebuli
 	Marching Ants	Maszerujące mrówki

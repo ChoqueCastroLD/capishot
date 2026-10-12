@@ -2595,6 +2595,11 @@ cameraData	Lens	镜头
 	Amount:	数量：
 	Protect:	保护：
 	Protect skin tones	保护肤色
+	Edit points to modify the curve	编辑点以修改曲线
+	Draw to modify the curve	绘制以修改曲线
+curves	Smooth	平滑
+	Smooth the curve values	平滑曲线值
+	Drag to draw the curve · {key}-click draws a straight line	拖动以绘制曲线 · 按住 {key} 单击可绘制直线
 # Select and Mask view modes (#1754)
 	Onion Skin	洋葱皮
 	Marching Ants	蚂蚁线

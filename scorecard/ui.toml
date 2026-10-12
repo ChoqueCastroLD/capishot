@@ -108,7 +108,7 @@ id = "UI-217-15"
 target = "Curves: smoothing / pencil mode, black/grey/white eyedroppers, tooltips"
 status = "partial"
 issue = 217
-note = "adjust_dialog.rs adds black/gray/white eyedroppers; smoothing and pencil modes remain missing"
+note = "Curves editor (adjust_editors.rs, dialog and Properties): Edit points / Draw (pencil) buttons and Smooth, all with tooltips; pencil curves are 256-level maps (Adjustment::Curves pencil, params pencil/smooth, PSD curv map form and smart-filter Mpng; #3088). The Image > Adjustments > Curves dialog has the black/gray/white eyedroppers (adjust_dialog.rs, #873); the adjustment layer's Properties panel has none yet"
 
 [[item]]
 id = "UI-217-16"

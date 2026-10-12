@@ -2653,6 +2653,11 @@ cameraData	Lens	Obiettivo
 	Amount:	Quantità:
 	Protect:	Proteggi:
 	Protect skin tones	Proteggi toni pelle
+	Edit points to modify the curve	Modifica i punti per cambiare la curva
+	Draw to modify the curve	Disegna per modificare la curva
+curves	Smooth	Leviga
+	Smooth the curve values	Leviga i valori della curva
+	Drag to draw the curve · {key}-click draws a straight line	Trascina per disegnare la curva · {key}-clic traccia una linea retta
 # Select and Mask view modes (#1754)
 	Onion Skin	Velina
 	Marching Ants	Formiche in marcia

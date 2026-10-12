@@ -2986,6 +2986,11 @@ cameraData	Lens	Lensa
 	Amount:	Jumlah:
 	Protect:	Lindungi:
 	Protect skin tones	Lindungi warna kulit
+	Edit points to modify the curve	Edit titik untuk mengubah kurva
+	Draw to modify the curve	Gambar untuk mengubah kurva
+curves	Smooth	Haluskan
+	Smooth the curve values	Haluskan nilai kurva
+	Drag to draw the curve · {key}-click draws a straight line	Seret untuk menggambar kurva · {key}-klik menggambar garis lurus
 # Select and Mask view modes (#1754)
 	Onion Skin	Kulit Bawang
 	Marching Ants	Semut Berbaris

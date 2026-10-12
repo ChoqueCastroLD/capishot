@@ -2621,6 +2621,11 @@ cameraData	Lens	Objektiv
 	Amount:	Stärke:
 	Protect:	Schützen:
 	Protect skin tones	Hauttöne schützen
+	Edit points to modify the curve	Punkte bearbeiten, um die Kurve zu ändern
+	Draw to modify the curve	Zeichnen, um die Kurve zu ändern
+curves	Smooth	Glätten
+	Smooth the curve values	Kurvenwerte glätten
+	Drag to draw the curve · {key}-click draws a straight line	Ziehen, um die Kurve zu zeichnen · {key}-Klick zeichnet eine gerade Linie
 # Select and Mask view modes (#1754)
 	Onion Skin	Zwiebelschicht
 	Marching Ants	Laufende Ameisen
