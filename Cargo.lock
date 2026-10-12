@@ -4574,6 +4574,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "egui_kittest",
+ "epaint_default_fonts",
  "flate2",
  "log",
  "photocraft-algo",
