@@ -867,6 +867,7 @@
 	Cancel	Abbrechen
 	Reset	Zurücksetzen
 	Cancel (Esc)	Abbrechen (Esc)
+	Manage submitted jobs in the system print queue	Übermittelte Aufträge in der Druckwarteschlange des Systems verwalten
 	Cancel any current edits (Esc)	Aktuelle Bearbeitungen abbrechen (Esc)
 	Cancel current crop operation  (Esc)	Aktuelle Freistellung abbrechen  (Esc)
 	Cancel transform (Esc)	Transformation abbrechen (Esc)
@@ -2666,6 +2667,3 @@ curves	Smooth	Glätten
 	Apply mask to layer before removing?	Maske vor dem Entfernen auf die Ebene anwenden?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Die Ebene oder ihre Maske hat sich geändert. Ziehen Sie die Maske erneut in den Papierkorb.
 	Delete the vector mask?	Vektormaske löschen?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	Übermittelte Aufträge in der Druckwarteschlange des Systems verwalten

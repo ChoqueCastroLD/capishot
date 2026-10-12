@@ -889,6 +889,7 @@
 	Camera Raw isn't open	Camera Raw není otevřen
 	Cancel	Zrušit
 	Cancel (Esc)	Zrušit (Esc)
+	Manage submitted jobs in the system print queue	Spravovat odeslané úlohy v systémové tiskové frontě
 	Cancel any current edits (Esc)	Zrušit aktuální úpravy (Esc)
 	Cancel current crop operation  (Esc)	Zrušit aktuální oříznutí  (Esc)
 	Cancel transform (Esc)	Zrušit transformaci (Esc)
@@ -3656,6 +3657,3 @@ navigator	Zoom	Zvětšení
 	Apply mask to layer before removing?	Použít masku na vrstvu před odstraněním?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Vrstva nebo její maska se změnila. Přetáhněte masku do koše znovu.
 	Delete the vector mask?	Odstranit vektorovou masku?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	Spravovat odeslané úlohy v systémové tiskové frontě

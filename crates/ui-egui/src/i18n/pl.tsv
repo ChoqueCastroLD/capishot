@@ -874,6 +874,7 @@
 	Camera Raw isn't open	Camera Raw nie jest otwarty
 	Cancel	Anuluj
 	Cancel (Esc)	Anuluj (Esc)
+	Manage submitted jobs in the system print queue	Zarządzaj przesłanymi zadaniami w systemowej kolejce drukowania
 	Cancel any current edits (Esc)	Anuluj wszystkie bieżące zmiany (Esc)
 	Cancel current crop operation  (Esc)	Anuluj bieżące przycinanie  (Esc)
 	Cancel transform (Esc)	Anuluj przekształcanie (Esc)
@@ -3638,6 +3639,3 @@ curves	Smooth	Wygładź
 	Apply mask to layer before removing?	Zastosować maskę do warstwy przed usunięciem?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Warstwa lub jej maska uległa zmianie. Przeciągnij maskę ponownie do kosza.
 	Delete the vector mask?	Usunąć maskę wektorową?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	Zarządzaj przesłanymi zadaniami w systemowej kolejce drukowania

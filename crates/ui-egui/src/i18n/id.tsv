@@ -857,6 +857,7 @@
 	Camera Raw isn't open	Camera Raw tidak terbuka
 	Cancel	Batal
 	Cancel (Esc)	Batal (Esc)
+	Manage submitted jobs in the system print queue	Kelola pekerjaan yang dikirim dalam antrean cetak sistem
 	Cancel any current edits (Esc)	Batalkan semua pengeditan saat ini (Esc)
 	Cancel current crop operation  (Esc)	Batalkan operasi crop saat ini  (Esc)
 	Cancel transform (Esc)	Batalkan transformasi (Esc)
@@ -3029,6 +3030,3 @@ curves	Smooth	Haluskan
 	Apply mask to layer before removing?	Terapkan masker ke layer sebelum dihapus?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Layer atau maskernya berubah. Seret masker ke Tempat Sampah lagi.
 	Delete the vector mask?	Hapus masker vektor?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	Kelola pekerjaan yang dikirim dalam antrean cetak sistem

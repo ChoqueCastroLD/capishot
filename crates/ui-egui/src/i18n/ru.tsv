@@ -579,6 +579,7 @@
 	OK	OK
 	Cancel	Отмена
 	Cancel (Esc)	Отмена (Esc)
+	Manage submitted jobs in the system print queue	Управляйте отправленными заданиями в системной очереди печати
 	Done	Готово
 	Apply	Применить
 	Reset	Сброс
@@ -2971,6 +2972,3 @@ curves	Smooth	Сгладить
 	Apply mask to layer before removing?	Применить маску к слою перед удалением?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Слой или его маска изменились. Перетащите маску в корзину ещё раз.
 	Delete the vector mask?	Удалить векторную маску?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	Управляйте отправленными заданиями в системной очереди печати

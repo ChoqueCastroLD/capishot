@@ -557,6 +557,7 @@
 	OK	Гаразд
 	Cancel	Скасувати
 	Cancel (Esc)	Скасувати (Esc)
+	Manage submitted jobs in the system print queue	Керуйте надісланими завданнями в системній черзі друку
 	Done	Готово
 	Apply	Застосувати
 	Reset	Скинути
@@ -3724,6 +3725,3 @@ curves	Smooth	Згладити
 	Apply mask to layer before removing?	Застосувати маску до шару перед видаленням?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Шар або його маска змінилися. Перетягніть маску до кошика ще раз.
 	Delete the vector mask?	Видалити векторну маску?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	Керуйте надісланими завданнями в системній черзі друку

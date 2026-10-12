@@ -849,6 +849,7 @@
 	Cancel	취소
 	Reset	재설정
 	Cancel (Esc)	취소 (Esc)
+	Manage submitted jobs in the system print queue	제출된 작업은 시스템 인쇄 대기열에서 관리하세요
 	Cancel any current edits (Esc)	현재 편집 취소 (Esc)
 	Cancel current crop operation  (Esc)	현재 자르기 작업 취소  (Esc)
 	Cancel transform (Esc)	변형 취소 (Esc)
@@ -3211,6 +3212,3 @@ curves	Smooth	매끄럽게
 	Apply mask to layer before removing?	제거하기 전에 마스크를 레이어에 적용하시겠습니까?
 	The layer or its mask changed. Drag the mask onto the Trash again.	레이어 또는 마스크가 변경되었습니다. 마스크를 휴지통으로 다시 드래그하세요.
 	Delete the vector mask?	벡터 마스크를 삭제하시겠습니까?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	제출된 작업은 시스템 인쇄 대기열에서 관리하세요

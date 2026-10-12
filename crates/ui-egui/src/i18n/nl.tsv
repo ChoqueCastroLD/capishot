@@ -856,6 +856,7 @@
 	Cancel	Annuleren
 	Reset	Herstellen
 	Cancel (Esc)	Annuleren (Esc)
+	Manage submitted jobs in the system print queue	Beheer verzonden taken in de afdrukwachtrij van het systeem
 	Cancel any current edits (Esc)	Huidige bewerkingen annuleren (Esc)
 	Cancel current crop operation  (Esc)	Huidige bijsnijbewerking annuleren  (Esc)
 	Cancel transform (Esc)	Transformatie annuleren (Esc)
@@ -3786,6 +3787,3 @@ curves	Smooth	Vloeiend maken
 	Apply mask to layer before removing?	Masker toepassen op laag voordat het wordt verwijderd?
 	The layer or its mask changed. Drag the mask onto the Trash again.	De laag of het masker is gewijzigd. Sleep het masker opnieuw naar de prullenbak.
 	Delete the vector mask?	Het vectormasker verwijderen?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	Beheer verzonden taken in de afdrukwachtrij van het systeem

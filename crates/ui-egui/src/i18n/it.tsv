@@ -874,6 +874,7 @@
 	Cancel	Annulla
 	Reset	Ripristina
 	Cancel (Esc)	Annulla (Esc)
+	Manage submitted jobs in the system print queue	Gestisci i lavori inviati nella coda di stampa del sistema
 	Cancel any current edits (Esc)	Annulla modifiche correnti (Esc)
 	Cancel current crop operation  (Esc)	Annulla operazione ritaglio corrente (Esc)
 	Cancel transform (Esc)	Annulla trasformazione (Esc)
@@ -2698,6 +2699,3 @@ curves	Smooth	Leviga
 	Apply mask to layer before removing?	Applicare la maschera al livello prima di rimuoverla?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Il livello o la sua maschera è cambiato. Trascina di nuovo la maschera nel cestino.
 	Delete the vector mask?	Eliminare la maschera vettoriale?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	Gestisci i lavori inviati nella coda di stampa del sistema

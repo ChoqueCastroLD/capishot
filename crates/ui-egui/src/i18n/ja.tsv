@@ -876,6 +876,7 @@
 	Camera Raw isn't open	Camera Raw は開いていません
 	Cancel	キャンセル
 	Cancel (Esc)	キャンセル(Esc)
+	Manage submitted jobs in the system print queue	送信済みのジョブはシステムの印刷キューで管理してください
 	Cancel any current edits (Esc)	現在の編集をキャンセル(Esc)
 	Cancel current crop operation  (Esc)	現在の切り抜きをキャンセル(Esc)
 	Cancel transform (Esc)	変形をキャンセル(Esc)
@@ -3636,6 +3637,3 @@ curves	Smooth	スムーズ
 	Apply mask to layer before removing?	削除する前にマスクをレイヤーに適用しますか？
 	The layer or its mask changed. Drag the mask onto the Trash again.	レイヤーまたはそのマスクが変更されました。もう一度マスクをゴミ箱にドラッグしてください。
 	Delete the vector mask?	ベクトルマスクを削除しますか？
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	送信済みのジョブはシステムの印刷キューで管理してください

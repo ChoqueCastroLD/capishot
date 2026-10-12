@@ -875,6 +875,7 @@
 	Camera Raw isn't open	Camera Raw no está abierto
 	Cancel	Cancelar
 	Cancel (Esc)	Cancelar (Esc)
+	Manage submitted jobs in the system print queue	Gestionar los trabajos enviados en la cola de impresión del sistema
 	Cancel any current edits (Esc)	Cancelar las ediciones actuales (Esc)
 	Cancel current crop operation  (Esc)	Cancelar la operación de recorte actual  (Esc)
 	Cancel transform (Esc)	Cancelar transformación (Esc)
@@ -2707,6 +2708,3 @@ curves	Smooth	Suavizar
 	Apply mask to layer before removing?	¿Aplicar la máscara a la capa antes de eliminarla?
 	The layer or its mask changed. Drag the mask onto the Trash again.	La capa o su máscara ha cambiado. Arrastre de nuevo la máscara a la papelera.
 	Delete the vector mask?	¿Eliminar la máscara vectorial?
-
-# Submitted print jobs are managed by the operating system.
-	Manage submitted jobs in the system print queue	Gestionar los trabajos enviados en la cola de impresión del sistema
