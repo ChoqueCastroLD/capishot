@@ -2606,8 +2606,6 @@ fontWeight	Italic	Corsivo
 	Appearance Settings…	Impostazioni aspetto…
 	Add to favorites	Aggiungi ai preferiti
 	Remove from favorites	Rimuovi dai preferiti
-	Capishot — Screen Color Picker	Capishot — Selettore colore schermo
-	Float Panel	Sgancia pannello
 	Float Panel Group	Sgancia gruppo di pannelli
 	Dock Panel Group	Aggancia gruppo di pannelli
 	Use Classic Mode	Usa modalità classica
@@ -2618,15 +2616,11 @@ fontWeight	Italic	Corsivo
 	psd-compiler on GitHub	psd-compiler su GitHub
 	Based on PhotoCraft	Basato su Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	Mostra punti della tela
 	Click the first point or press {key} to close · {del} removes a point · Esc cancels	Fai clic sul primo punto o premi {key} per chiudere · {del} rimuove un punto · Esc annulla
 	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	Fai clic e segui un bordo · fai clic per fissare un punto · {alt}-clic per un segmento dritto · doppio clic per chiudere
 	Follows only edges this close to the pointer ([ and ] change it)	Segue solo i bordi così vicini al puntatore ([ e ] lo cambiano)
 	Higher values follow only edges that contrast sharply with their surroundings	Valori più alti seguono solo bordi molto contrastati rispetto all’intorno
 	How often fastening points are placed by themselves	Frequenza con cui i punti di ancoraggio vengono posti da soli
-	Appearance Settings…	Impostazioni aspetto…
-	Add to favorites	Aggiungi ai preferiti
-	Remove from favorites	Rimuovi dai preferiti
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 	Camera Data	Dati fotocamera
 cameraData	Make	Marca
@@ -2650,10 +2644,6 @@ cameraData	Lens	Obiettivo
 	Panel menu	Menu del pannello
 	Resize panel window	Ridimensiona finestra del pannello
 	Resize panels	Ridimensiona pannelli
-	Use Classic Mode	Usa modalità classica
-	Auto Center Preview	Centra anteprima automaticamente
-	Next Document	Documento successivo
-	Previous Document	Documento precedente
 	W x H x Resolution	L x A x Risoluzione
 	Front Image	Immagine in primo piano
 	Frame Tool	Strumento Cornice
@@ -2726,7 +2716,6 @@ cameraData	Lens	Obiettivo
 	Mirror	Rifletti
 	Output Settings	Impostazioni di output
 	Output To	Output in
-	New Layer	Nuovo livello
 	Duplicate Layer	Duplica livello
 	Contract	Contrai
 	Allow online fonts	Consenti font online

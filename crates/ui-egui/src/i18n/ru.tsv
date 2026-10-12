@@ -2816,8 +2816,6 @@ fontWeight	Italic	Курсив
 	Appearance Settings…	Настройки оформления…
 	Add to favorites	Добавить в избранное
 	Remove from favorites	Удалить из избранного
-	Capishot — Screen Color Picker	Capishot — Пипетка цвета экрана
-	Float Panel	Открепить панель
 	Float Panel Group	Открепить группу панелей
 	Dock Panel Group	Закрепить группу панелей
 	Use Classic Mode	Использовать классический режим
@@ -2828,7 +2826,6 @@ fontWeight	Italic	Курсив
 	psd-compiler on GitHub	psd-compiler на GitHub
 	Based on PhotoCraft	Основан на Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	Показывать точки холста
 	Add a layer style	Добавить стиль слоя
 	Add a mask  (from the selection; {key} inverts)	Добавить маску  (из выделения; {key} инвертирует)
 	Add an adjustment	Добавить коррекцию
@@ -2898,9 +2895,6 @@ fontWeight	Italic	Курсив
 	Tolerance	Допуск
 	Add vector mask	Добавить векторную маску
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Щелчок увеличивает  ·  {key}-щелчок уменьшает  ·  перетаскивание вправо/влево увеличивает/уменьшает
-	Appearance Settings…	Настройки оформления…
-	Add to favorites	Добавить в избранное
-	Remove from favorites	Удалить из избранного
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Производитель
 cameraData	Model	Модель
@@ -2923,10 +2917,6 @@ cameraData	Lens	Объектив
 	Panel menu	Меню панели
 	Resize panel window	Изменить размер окна панели
 	Resize panels	Изменить размер панелей
-	Use Classic Mode	Использовать классический режим
-	Auto Center Preview	Автоматически центрировать просмотр
-	Next Document	Следующий документ
-	Previous Document	Предыдущий документ
 	W x H x Resolution	Ш x В x Разрешение
 	Front Image	Изображение переднего плана
 	Frame Tool	Рамка
@@ -2999,13 +2989,8 @@ cameraData	Lens	Объектив
 	Mirror	Отражение
 	Output Settings	Параметры вывода
 	Output To	Вывод в
-	New Layer	Новый слой
 	Duplicate Layer	Дубликат слоя
 	Contract	Сжать
-	New selection	Новое выделение
-	Add to selection  ({key})	Добавить к выделению  ({key})
-	Subtract from selection  ({key})	Вычесть из выделения  ({key})
-	Intersect with selection  ({key})	Пересечь с выделением  ({key})
 	Allow online fonts	Разрешить онлайн-шрифты
 	Fonts	Шрифты
 	Find More	Найти ещё

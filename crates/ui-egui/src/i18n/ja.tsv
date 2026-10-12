@@ -3549,8 +3549,6 @@ fontWeight	Italic	斜体
 	Appearance Settings…	外観設定…
 	Add to favorites	お気に入りに追加
 	Remove from favorites	お気に入りから削除
-	Capishot — Screen Color Picker	Capishot — スクリーンカラーピッカー
-	Float Panel	パネルを分離
 	Float Panel Group	パネルグループを分離
 	Dock Panel Group	パネルグループをドッキング
 	Use Classic Mode	クラシックモードを使用
@@ -3561,15 +3559,11 @@ fontWeight	Italic	斜体
 	psd-compiler on GitHub	GitHub の psd-compiler
 	Based on PhotoCraft	Capishot がベース
 	psd-compiler	psd-compiler
-	Show canvas dots	キャンバスのドットを表示
 	Click the first point or press {key} to close · {del} removes a point · Esc cancels	最初の点をクリックするか {key} を押して閉じる · {del} で点を削除 · Esc でキャンセル
 	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	クリックしてエッジに沿って動かす · クリックで固定ポイント · {alt}-クリックで直線セグメント · ダブルクリックで閉じる
 	Follows only edges this close to the pointer ([ and ] change it)	ポインターからこの距離内のエッジだけをたどる（[ と ] で変更）
 	Higher values follow only edges that contrast sharply with their surroundings	値を大きくすると、周囲とのコントラストが強いエッジだけをたどる
 	How often fastening points are placed by themselves	固定ポイントが自動で置かれる頻度
-	Appearance Settings…	外観設定…
-	Add to favorites	お気に入りに追加
-	Remove from favorites	お気に入りから削除
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	メーカー
 cameraData	Model	モデル
@@ -3592,10 +3586,6 @@ cameraData	Lens	レンズ
 	Panel menu	パネルメニュー
 	Resize panel window	パネルウィンドウのサイズを変更
 	Resize panels	パネルのサイズを変更
-	Use Classic Mode	クラシックモードを使用
-	Auto Center Preview	プレビューを自動的に中央に配置
-	Next Document	次のドキュメント
-	Previous Document	前のドキュメント
 	W x H x Resolution	幅 x 高さ x 解像度
 	Front Image	前面の画像
 	Frame Tool	フレームツール

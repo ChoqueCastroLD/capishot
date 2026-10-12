@@ -58,7 +58,6 @@
 	Both	Ambas
 	Left	Izquierda
 	Right	Derecha
-	Open Recent	Archivos recientes
 	Open Recent	Abrir recientes
 	Clear Recent Files	Vaciar archivos recientes
 	Remove from Recent	Quitar de recientes
@@ -827,9 +826,6 @@
 	Align right edges	Alinear bordes derechos
 	Aligned	Alineado
 	All Caps	Todo en mayúsculas
-	All Slices	Todas las secciones
-	All User Slices	Todas las secciones de usuario
-	All shortcuts reset to Capishot defaults.	Se restablecieron todos los atajos a los valores predeterminados de Capishot.
 	All Slices	Todos los sectores
 	All User Slices	Todos los sectores de usuario
 	All shortcuts reset to Capishot defaults.	Se restablecieron todos los métodos abreviados a los valores predeterminados de Capishot.
@@ -1070,10 +1066,6 @@
 	Click: select anchor · Drag: move anchor, handle or segment · {shift}-click: add · {alt}-click: whole subpath	Clic: seleccionar punto · Arrastrar: mover punto, manejador o segmento · {shift}-clic: añadir · {alt}-clic: subtrazado completo
 	Draw with the Pen tool (P) or make a work path from a selection.	Dibuje con la herramienta Pluma (P) o cree un trazado de trabajo a partir de una selección.
 	Drop an image or PSD anywhere to open it.	Suelte una imagen o un PSD en cualquier lugar para abrirlo.
-	Native file drag-and-drop is unavailable	El arrastrar y soltar archivos de forma nativa no está disponible en Wayland
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	El arrastrar y soltar archivos de forma nativa aún no está disponible en Wayland. Usa Archivo › Abrir, o copia la imagen en tu gestor de archivos y pégala con {paste}.
-	To drop files, start Capishot under XWayland: `{command}`	Para soltar archivos, inicia Capishot bajo XWayland: `{command}`
-	Or set Preferences › Performance › Linux display server to X11: Capishot then always starts under XWayland.	O establece Preferencias › Rendimiento › Servidor de pantalla de Linux en X11: Capishot se iniciará siempre bajo XWayland.
 	Native file drag-and-drop is unavailable	Arrastrar y soltar archivos de forma nativa no está disponible en Wayland
 	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Arrastrar y soltar archivos de forma nativa aún no es compatible con Wayland. Use Archivo › Abrir, o copie la imagen en su gestor de archivos y péguela con {paste}.
 	To drop files, start Capishot under XWayland: `{command}`	Para soltar archivos, inicie Capishot con XWayland: `{command}`
@@ -1320,19 +1312,12 @@
 	Pause	Pausar
 	Percent	Porcentaje
 	Perceptual	Perceptual
-	Perspective Warp is not active	La deformación en perspectiva no está activa
-	Perspective Warp: draw planes along the image's perspective, then switch to Warp	Deformación en perspectiva: dibuje planos siguiendo la perspectiva de la imagen y luego cambie a Deformar
-	Photo Filter	Filtro fotográfico
 	Capishot	Capishot
 	Capishot Manages Colors	Capishot gestiona el color
 	Capishot — an open-source, native image editor written in Rust.	Capishot — un editor de imágenes nativo y de código abierto escrito en Rust.
-	Pin Depth:	Profundidad del pin:
 	Perspective Warp is not active	La deformación de perspectiva no está activa
 	Perspective Warp: draw planes along the image's perspective, then switch to Warp	Deformación de perspectiva: dibuje planos siguiendo la perspectiva de la imagen y luego cambie a Deformar
 	Photo Filter	Filtro de fotografía
-	Capishot	Capishot
-	Capishot Manages Colors	Capishot gestiona el color
-	Capishot — an open-source, native image editor written in Rust.	Capishot — un editor de imágenes nativo y de código abierto escrito en Rust.
 	Pin Depth:	Profundidad de la chincheta:
 	Pixel Length:	Longitud en píxeles:
 	Pixels/Centimeter	Píxeles/centímetro
@@ -1405,19 +1390,10 @@
 	Rename…	Cambiar nombre…
 	Resample	Remuestrear
 	Reset All to Defaults	Restablecer todo a los valores predeterminados
-	Import Shortcuts…	Importar atajos…
-	Load a keyboard shortcut set saved as .kys	Cargar un conjunto de atajos de teclado guardado como .kys
-	Imported {n} shortcuts from {file}. Click OK to keep them.	Se importaron {n} atajos de {file}. Haz clic en OK para conservarlos.
 	{n} commands are not in Capishot.	{n} comandos no existen en Capishot.
-	Keyboard shortcuts imported	Atajos de teclado importados
-	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	Tu conjunto de atajos de teclado {set} se usa aquí: {n} atajos difieren de los predeterminados. Edición › Atajos de teclado los muestra; Restablecer todo a valores predeterminados lo deshace.
-	Import keyboard shortcuts?	¿Importar atajos de teclado?
-	Capishot found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Capishot's. Import it?	Capishot encontró en este equipo tu conjunto de atajos de teclado {set} de otro editor de imágenes: {n} de sus atajos difieren de los de Capishot. ¿Importarlo?
-	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Edición › Atajos de teclado › Restablecer todo a valores predeterminados deshace una importación.
 	Import Shortcuts…	Importar métodos abreviados…
 	Load a keyboard shortcut set saved as .kys	Cargar un conjunto de métodos abreviados de teclado guardado como .kys
 	Imported {n} shortcuts from {file}. Click OK to keep them.	Se importaron {n} métodos abreviados de {file}. Haga clic en Aceptar para conservarlos.
-	{n} commands are not in Capishot.	{n} comandos no existen en Capishot.
 	Keyboard shortcuts imported	Métodos abreviados de teclado importados
 	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	Su conjunto de métodos abreviados de teclado {set} se usa aquí: {n} métodos abreviados difieren de los predeterminados. Edición › Métodos abreviados de teclado los muestra; Restablecer todo a los valores predeterminados lo deshace.
 	Import keyboard shortcuts?	¿Importar métodos abreviados de teclado?
@@ -2296,8 +2272,6 @@
 	Switched to CPU rendering	Se cambió al renderizado por CPU
 	GPU acceleration could not continue. Your documents are unchanged.	La aceleración GPU no pudo continuar. Los documentos no han cambiado.
 	Capishot is using the CPU image compositor. The window may still use your graphics adapter.	Capishot compone las imágenes en la CPU. La ventana aún puede usar el adaptador gráfico.
-	Retry GPU requires a restart. Save your work first.	Reintentar la GPU requiere reiniciar. Guarda primero tu trabajo.
-	Capishot is using the CPU image compositor. The window may still use your graphics adapter.	Capishot compone las imágenes en la CPU. La ventana aún puede usar el adaptador gráfico.
 	Retry GPU requires a restart. Save your work first.	Reintentar la GPU requiere reiniciar. Guarde primero su trabajo.
 	Keep Using CPU	Seguir usando CPU
 	Retry GPU	Reintentar GPU
@@ -2611,7 +2585,6 @@ fontWeight	Italic	Cursiva
 	Remove pair	Quitar par
 	Dash offset	Desplazamiento de guiones
 	Open paths use centered strokes	Los trazados abiertos usan trazos centrados
-	Use finite lengths and a positive pattern total	Usa longitudes finitas y un total de patrón positivo
 
 # Undo cache budgets
 	Memory budget (MiB)	Límite de memoria (MiB)
@@ -2620,7 +2593,6 @@ fontWeight	Italic	Cursiva
 	The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional.	El límite de memoria se comparte entre los píxeles del documento, los datos incrustados y el historial de deshacer. Crece según se necesita; la demás memoria de la aplicación es adicional.
 	Undo disk space grows only when needed, up to this limit. Zero disables disk caching. Scratch paths apply to the next cache session.	El espacio en disco para deshacer crece solo cuando se necesita, hasta este límite. Cero desactiva la caché en disco. Las rutas temporales se aplican a la siguiente sesión de caché.
 	This browser build keeps undo history in memory. Scratch disk settings apply to the desktop app.	Esta versión del navegador conserva el historial de deshacer en memoria. Los ajustes de disco temporal se aplican a la aplicación de escritorio.
-	No subject found — try Object Selection or the Lasso	No se encontró ningún sujeto — pruebe Selección de objeto o el Lazo
 	Use finite lengths and a positive pattern total	Use longitudes finitas y un total de patrón positivo
 	No subject found — try Object Selection or the Lasso	No se encontró ningún sujeto — pruebe Selección de objetos o el Lazo
 	Quick Selection found nothing there	Selección rápida no encontró nada ahí
@@ -2671,26 +2643,16 @@ cameraData	Lens	Objetivo
 	Reduce Noise	Reducir ruido
 	Next Document	Documento siguiente
 	Previous Document	Documento anterior
-	Appearance Settings…	Ajustes de apariencia…
-	Add to favorites	Añadir a favoritos
-	Remove from favorites	Quitar de favoritos
-	Capishot — Screen Color Picker	Capishot — Selector de color de pantalla
-	Float Panel	Separar panel
 	Float Panel Group	Separar grupo de paneles
 	Dock Panel Group	Acoplar grupo de paneles
 	Use Classic Mode	Usar modo clásico
-	Auto Center Preview	Centrar previsualización automáticamente
 # Capishot
 	Compile PSD…	Compilar PSD…
 	Compile Folder…	Compilar carpeta…
 	psd-compiler on GitHub	psd-compiler en GitHub
 	Based on PhotoCraft	Basado en Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	Mostrar puntos del lienzo
-	Use Classic Mode	Usar modo clásico
 	Auto Center Preview	Centrar vista previa automáticamente
-	Next Document	Documento siguiente
-	Previous Document	Documento anterior
 	W x H x Resolution	An. x Al. x Resolución
 	Front Image	Imagen frontal
 	Frame Tool	Herramienta Marco
@@ -2763,7 +2725,6 @@ cameraData	Lens	Objetivo
 	Mirror	Reflejar
 	Output Settings	Ajustes de salida
 	Output To	Salida a
-	New Layer	Capa nueva
 	Duplicate Layer	Duplicar capa
 	Contract	Contraer
 	Allow online fonts	Permitir fuentes en línea

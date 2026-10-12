@@ -2537,8 +2537,6 @@ fontWeight	Italic	Kurzíva
 	Appearance Settings…	Nastavení vzhledu…
 	Add to favorites	Přidat do oblíbených
 	Remove from favorites	Odebrat z oblíbených
-	Capishot — Screen Color Picker	Capishot — Výběr barvy obrazovky
-	Float Panel	Uvolnit panel
 	Float Panel Group	Uvolnit skupinu panelů
 	Dock Panel Group	Ukotvit skupinu panelů
 	Use Classic Mode	Použít klasický režim
@@ -2549,7 +2547,6 @@ fontWeight	Italic	Kurzíva
 	psd-compiler on GitHub	psd-compiler na GitHubu
 	Based on PhotoCraft	Založeno na Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	Zobrazit body plátna
 	Auto Erase	Automatické mazání
 	Click the first point or press {key} to close · {del} removes a point · Esc cancels	Klikněte na první bod nebo stiskněte {key} pro uzavření · {del} odebere bod · Esc zruší
 	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	Klikněte a veďte podél okraje · kliknutím připevníte bod · {alt}-kliknutí pro rovný úsek · dvojklik uzavře
@@ -2559,9 +2556,6 @@ fontWeight	Italic	Kurzíva
 	Scrubby Zoom	Plynulá lupa
 	{mode} Color · {bits} bit	Barva {mode} · {bits} bitů
 	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels	Tažením nakreslete ořez · tažením uvnitř posunete · okraje mění velikost ({ratio} poměr, {centre} střed) · Mezerník posouvá při kreslení · šipky posunují · X prohodí orientaci · {commit} potvrdí · Esc zruší
-	Appearance Settings…	Nastavení vzhledu…
-	Add to favorites	Přidat do oblíbených
-	Remove from favorites	Odebrat z oblíbených
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 	Camera Data	Údaje fotoaparátu
 cameraData	Make	Výrobce
@@ -2585,10 +2579,6 @@ cameraData	Lens	Objektiv
 	Panel menu	Nabídka panelu
 	Resize panel window	Změnit velikost okna panelu
 	Resize panels	Změnit velikost panelů
-	Use Classic Mode	Použít klasický režim
-	Auto Center Preview	Automaticky vystředit náhled
-	Next Document	Další dokument
-	Previous Document	Předchozí dokument
 	W x H x Resolution	Š x V x Rozlišení
 	Front Image	Přední obraz
 	Frame Tool	Nástroj rámeček
@@ -2663,7 +2653,6 @@ cameraData	Lens	Objektiv
 	Mirror	Zrcadlit
 	Output Settings	Nastavení výstupu
 	Output To	Výstup do
-	New Layer	Nová vrstva
 	Duplicate Layer	Duplikovat vrstvu
 	Contract	Zúžit
 	Allow online fonts	Povolit online písma
