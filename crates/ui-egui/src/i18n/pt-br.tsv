@@ -3901,7 +3901,6 @@ layerLabel	No Color	Sem cor
 	Downloading {file}	Baixando {file}
 	Downloading the licence	Baixando a licença
 	Loading the font index	Carregando o índice de fontes
-	Show canvas dots	Mostrar pontos da tela
 	Copy Layers	Copiar camadas
 	Paste Layers	Colar camadas
 	Cycle Screen Mode Backwards	Alternar modo de tela para trás
@@ -3912,3 +3911,5 @@ layerLabel	No Color	Sem cor
 	Scroll to Upper-Left Corner	Rolar até o canto superior esquerdo
 	Scroll to Lower-Right Corner	Rolar até o canto inferior direito
 	Show rulers in new documents	Mostrar réguas em novos documentos
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	Apagar para Histórico

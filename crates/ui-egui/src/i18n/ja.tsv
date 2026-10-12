@@ -3723,7 +3723,6 @@ cameraData	Lens	レンズ
 	Downloading {file}	{file} をダウンロード中
 	Downloading the licence	ライセンスをダウンロード中
 	Loading the font index	フォント一覧を読み込み中
-	Show canvas dots	キャンバスのドットを表示
 	Copy Layers	レイヤーをコピー
 	Paste Layers	レイヤーを貼り付け
 	Cycle Screen Mode Backwards	スクリーンモードを逆順に切り替え
@@ -3734,3 +3733,6 @@ cameraData	Lens	レンズ
 	Scroll to Upper-Left Corner	左上隅へスクロール
 	Scroll to Lower-Right Corner	右下隅へスクロール
 	Show rulers in new documents	新規ドキュメントで定規を表示
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	ヒストリーに戻す
+	Sample Size	サンプル範囲

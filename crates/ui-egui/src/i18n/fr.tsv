@@ -3129,7 +3129,6 @@ cameraData	Lens	Objectif
 	Downloading {file}	Téléchargement de {file}
 	Downloading the licence	Téléchargement de la licence
 	Loading the font index	Chargement de l'index des polices
-	Show canvas dots	Afficher les points du canevas
 	Copy Layers	Copier les calques
 	Paste Layers	Coller les calques
 	Cycle Screen Mode Backwards	Changer de mode d'écran en sens inverse
@@ -3140,3 +3139,6 @@ cameraData	Lens	Objectif
 	Scroll to Upper-Left Corner	Défiler jusqu'au coin supérieur gauche
 	Scroll to Lower-Right Corner	Défiler jusqu'au coin inférieur droit
 	Show rulers in new documents	Afficher les règles dans les nouveaux documents
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	Effacer vers l'historique
+	Sample Size	Taille de l'échantillon

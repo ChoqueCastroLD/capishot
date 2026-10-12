@@ -2722,7 +2722,6 @@ cameraData	Lens	Objektiv
 	Downloading {file}	Stahování {file}
 	Downloading the licence	Stahování licence
 	Loading the font index	Načítání rejstříku písem
-	Show canvas dots	Zobrazit body plátna
 	Copy Layers	Kopírovat vrstvy
 	Paste Layers	Vložit vrstvy
 	Cycle Screen Mode Backwards	Přepínat režimy zobrazení pozpátku
@@ -2733,3 +2732,6 @@ cameraData	Lens	Objektiv
 	Scroll to Upper-Left Corner	Posunout do levého horního rohu
 	Scroll to Lower-Right Corner	Posunout do pravého dolního rohu
 	Show rulers in new documents	Zobrazovat pravítka v nových dokumentech
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	Vymazat do historie
+	Sample Size	Velikost vzorku

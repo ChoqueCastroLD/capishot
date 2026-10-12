@@ -3727,7 +3727,6 @@ cameraData	Lens	Obiektyw
 @plural	{n} style|{n} styles	{n} styl|{n} style|{n} stylów
 @plural	{n} text layer|{n} text layers	{n} warstwa tekstowa|{n} warstwy tekstowe|{n} warstw tekstowych
 @plural	{n} open document|{n} open documents	{n} otwarty dokument|{n} otwarte dokumenty|{n} otwartych dokumentów
-	Show canvas dots	Pokaż kropki płótna
 	Copy Layers	Kopiuj warstwy
 	Paste Layers	Wklej warstwy
 	Cycle Screen Mode Backwards	Przełączaj tryby ekranu wstecz
@@ -3738,3 +3737,6 @@ cameraData	Lens	Obiektyw
 	Scroll to Upper-Left Corner	Przewiń do lewego górnego rogu
 	Scroll to Lower-Right Corner	Przewiń do prawego dolnego rogu
 	Show rulers in new documents	Pokazuj linijki w nowych dokumentach
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	Wymaż do historii
+	Sample Size	Wielkość próbki
