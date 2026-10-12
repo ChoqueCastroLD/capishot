@@ -94,7 +94,10 @@ impl DevMode {
 
     #[cfg(any(windows, test))]
     pub(crate) fn has_manual_copies(&self) -> bool {
-        self.0.get(86..88) == Some(1i16.to_le_bytes().as_slice()) && self.0.get(100..102) == Some(0i16.to_le_bytes().as_slice())
+        let fields = self.0.get(72..76).and_then(|b| <[u8; 4]>::try_from(b).ok()).map(u32::from_le_bytes);
+        fields.is_some_and(|f| f & 0x100 != 0)
+            && self.0.get(86..88) == Some(1i16.to_le_bytes().as_slice())
+            && self.0.get(100..102) == Some(0i16.to_le_bytes().as_slice())
     }
 
     /// Hex, for JSON parameters and remembered print settings.
@@ -296,6 +299,9 @@ mod tests {
         assert!(!original.has_manual_copies());
         assert_eq!(&normalized.as_bytes()[220..], &original.as_bytes()[220..]);
         assert_eq!(normalized.for_manual_copies().unwrap(), normalized);
+        let mut ignored = normalized.as_bytes().to_vec();
+        ignored[72..76].copy_from_slice(&0u32.to_le_bytes());
+        assert!(!DevMode::from_bytes(ignored).unwrap().has_manual_copies(), "a driver must advertise that it accepts dmCopies");
     }
 
     #[test]
@@ -314,5 +320,8 @@ mod tests {
         assert!(matches!(print(&job, &short, (0.0, 0.0, 10.0, 10.0)), Err(PrintError::Invalid(_))));
         let ok = RgbImage { width: 2, height: 2, data: &[0; 12] };
         assert!(matches!(print(&job, &ok, (0.0, 0.0, 0.0, 10.0)), Err(PrintError::Invalid(_))));
+        for rect in [(f64::NAN, 0.0, 10.0, 10.0), (0.0, 0.0, f64::INFINITY, 10.0)] {
+            assert!(matches!(print(&job, &ok, rect), Err(PrintError::Invalid(_))));
+        }
     }
 }
