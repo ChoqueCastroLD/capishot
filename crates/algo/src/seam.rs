@@ -36,12 +36,12 @@ pub fn energy(w: usize, h: usize, ch: usize, img: &[f32]) -> Vec<f32> {
             *v = energy_at(img, w, w, h, ch, x, y);
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         e.par_chunks_mut(w).enumerate().for_each(row);
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     e.chunks_mut(w).enumerate().for_each(row);
     e
 }
@@ -319,14 +319,14 @@ impl Carver {
                 lens[k] -= 1;
             }
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         {
             use rayon::prelude::*;
             let maps =
                 self.e.par_chunks_mut(stride).zip(self.col.par_chunks_mut(stride)).zip(self.cost.par_chunks_mut(stride)).zip(self.from.par_chunks_mut(stride));
             maps.zip(self.lay.lens.par_chunks_mut(nck).zip(seam.par_iter())).for_each(row);
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         {
             let maps = self.e.chunks_mut(stride).zip(self.col.chunks_mut(stride)).zip(self.cost.chunks_mut(stride)).zip(self.from.chunks_mut(stride));
             maps.zip(self.lay.lens.chunks_mut(nck).zip(seam)).for_each(row);
@@ -377,12 +377,12 @@ impl Carver {
             });
             *span = (lo, hi + 1);
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         {
             use rayon::prelude::*;
             self.e.par_chunks_mut(stride).enumerate().zip(self.changed.par_iter_mut()).for_each(row);
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         self.e.chunks_mut(stride).enumerate().zip(self.changed.iter_mut()).for_each(row);
     }
 
@@ -451,12 +451,12 @@ impl Carver {
                 }
             });
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         {
             use rayon::prelude::*;
             out.par_chunks_mut((cw * ch).max(1)).enumerate().for_each(row);
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         out.chunks_mut((cw * ch).max(1)).enumerate().for_each(row);
         out
     }
@@ -483,12 +483,12 @@ fn transpose(w: usize, h: usize, ch: usize, img: &[f32]) -> Vec<f32> {
             }
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         out.par_chunks_mut(T * h * ch).enumerate().for_each(band);
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     out.chunks_mut(T * h * ch).enumerate().for_each(band);
     out
 }
@@ -714,12 +714,12 @@ pub fn resize_bilinear(w: usize, h: usize, ch: usize, img: &[f32], nw: usize, nh
             }
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         out.par_chunks_mut(nw * ch).enumerate().for_each(row);
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     out.chunks_mut(nw * ch).enumerate().for_each(row);
     out
 }

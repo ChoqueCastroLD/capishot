@@ -221,12 +221,12 @@ pub fn rgba8_image(s: &Surface, area: Rect) -> Vec<[u8; 4]> {
         let y0 = area.y0 + (bi * band) as i32;
         s.read_rgba8_into(Rect::new(area.x0, y0, area.x1, y0 + (chunk.len() / w) as i32), chunk);
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         img.par_chunks_mut(w * band).enumerate().for_each(|(bi, c)| read(bi, c));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     img.chunks_mut(w * band).enumerate().for_each(|(bi, c)| read(bi, c));
     img
 }
@@ -338,12 +338,12 @@ pub fn wand_region_sampled(img: &[[u8; 4]], area: Rect, seed: (i32, i32), sample
             }
             span
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         let spans: Vec<Option<(usize, usize)>> = {
             use rayon::prelude::*;
             marks.par_chunks_mut(w).enumerate().map(|(y, row)| scan(y, row)).collect()
         };
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         let spans: Vec<Option<(usize, usize)>> = marks.chunks_mut(w).enumerate().map(|(y, row)| scan(y, row)).collect();
         for (y, sp) in spans.iter().enumerate() {
             if let Some((a, b)) = sp {
@@ -389,12 +389,12 @@ pub fn wand_region_sampled(img: &[[u8; 4]], area: Rect, seed: (i32, i32), sample
             }
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         mask.par_chunks_mut(bw).enumerate().for_each(|(yy, row)| fill_row(yy, row));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     mask.chunks_mut(bw).enumerate().for_each(|(yy, row)| fill_row(yy, row));
     let bbox = Rect::new(area.x0 + x0 as i32, area.y0 + y0 as i32, area.x0 + x1 as i32, area.y0 + y1 as i32);
     Some(Region { bbox, mask })

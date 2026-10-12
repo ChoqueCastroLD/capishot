@@ -10,9 +10,11 @@ import os
 import re
 import sys
 
-KEEP = ['Based on PhotoCraft', 'PhotoCraft contributors', 'PhotoCraft authors', 'storytold/photocraft']
+KEEP = ['Based on PhotoCraft', 'PhotoCraftCo', 'PhotoCraft contributors', 'PhotoCraft authors', 'storytold/photocraft']
 EXTS = ('.rs', '.tsv', '.html', '.toml', '.css', '.js', '.json', '.md')
 SKIP_DIRS = ('crates/cms',)
+# Byte-exact test fixtures whose lengths the tests depend on.
+SKIP_FILES = ('crates/codecs/tests/orientation.rs',)
 
 
 def sub_file(path, pairs, regex=False):
@@ -30,7 +32,7 @@ def sub_file(path, pairs, regex=False):
 
 def product_name():
     changed = 0
-    for root in ('apps', 'crates', 'xtask'):
+    for root in ('apps', 'crates', 'xtask', 'packaging/web-threads'):
         for dp, dn, fn in os.walk(root):
             dn[:] = [d for d in dn if d != 'target']
             if dp.startswith(SKIP_DIRS):
@@ -39,6 +41,8 @@ def product_name():
                 if not f.endswith(EXTS):
                     continue
                 p = os.path.join(dp, f)
+                if p in SKIP_FILES:
+                    continue
                 s = open(p, encoding='utf-8', errors='surrogateescape').read()
                 o = s
                 for i, k in enumerate(KEEP):

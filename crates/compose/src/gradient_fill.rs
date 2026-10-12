@@ -170,12 +170,12 @@ fn render_ramp<const N: usize>(f: &Fill, rect: Rect, frame: Rect, ramp: Option<R
             }
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         px.par_chunks_mut(w).enumerate().for_each(|(j, out)| row(rect.y0 + j as i32, out));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     for (j, out) in px.chunks_mut(w).enumerate() {
         row(rect.y0 + j as i32, out);
     }
