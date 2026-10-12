@@ -45,14 +45,16 @@ impl Transfer {
             t => t,
         }
     }
-    fn decode(self, v: f32) -> f32 {
+    /// Tone-encoded value → linear light.
+    pub fn decode(self, v: f32) -> f32 {
         match self {
             Transfer::Srgb => photocraft_color::convert::srgb_to_linear(v.max(0.0)),
             Transfer::Gamma(1.0) => v.max(0.0),
             Transfer::Gamma(g) => v.max(0.0).powf(g),
         }
     }
-    fn encode(self, v: f32) -> f32 {
+    /// Linear light → tone-encoded value.
+    pub fn encode(self, v: f32) -> f32 {
         match self {
             Transfer::Srgb => photocraft_color::convert::linear_to_srgb(v.max(0.0)),
             Transfer::Gamma(1.0) => v.max(0.0),
