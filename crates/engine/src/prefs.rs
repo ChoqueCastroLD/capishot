@@ -333,7 +333,8 @@ impl Default for Tools {
     fn default() -> Self {
         Self {
             show_tooltips: true,
-            use_shift_key_for_tool_switch: false,
+            // On in Photoshop: ⇧+key cycles a tool group, the plain key keeps the group's tool.
+            use_shift_key_for_tool_switch: true,
             zoom_clicked_point_to_center: false,
             enable_flick_panning: true,
             vary_round_brush_hardness_on_hud: true,
@@ -694,6 +695,9 @@ pub struct UnitsAndRulers {
     pub print_resolution: f64,
     pub screen_resolution: f64,
     pub point_size: PointSize,
+    /// View › Rulers (⌘R) comes on for every new or opened document (UI-217-20). Off: the rulers
+    /// keep whatever state ⌘R last left them in.
+    pub show_rulers_in_new_documents: bool,
 }
 
 impl Default for UnitsAndRulers {
@@ -706,6 +710,7 @@ impl Default for UnitsAndRulers {
             print_resolution: 300.0,
             screen_resolution: 72.0,
             point_size: PointSize::PostScript,
+            show_rulers_in_new_documents: false,
         }
     }
 }

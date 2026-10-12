@@ -1185,6 +1185,7 @@
 	Magenta	Magenta
 	Magenta  ·  Green	Magenta  ·  Zielony
 	Maintain aspect ratio	Zachowaj proporcje
+	Maintain Aspect Ratio	Zachowaj proporcje
 	Marker Size	Rozmiar znacznika
 	Mask All	Maskuj wszystko
 	Mask Options	Opcje maski
@@ -3478,3 +3479,13 @@ cameraRaw	Roughness	Chropowatość
 	Based on PhotoCraft	Oparty na PhotoCraft
 	psd-compiler	psd-compiler
 	Show canvas dots	Pokaż kropki płótna
+	Copy Layers	Kopiuj warstwy
+	Paste Layers	Wklej warstwy
+	Cycle Screen Mode Backwards	Przełączaj tryby ekranu wstecz
+	Scroll Up One Screen	Przewiń o ekran w górę
+	Scroll Down One Screen	Przewiń o ekran w dół
+	Scroll Left One Screen	Przewiń o ekran w lewo
+	Scroll Right One Screen	Przewiń o ekran w prawo
+	Scroll to Upper-Left Corner	Przewiń do lewego górnego rogu
+	Scroll to Lower-Right Corner	Przewiń do prawego dolnego rogu
+	Show rulers in new documents	Pokazuj linijki w nowych dokumentach

@@ -767,6 +767,22 @@ mod title_tests {
 
 // ----------------------------------------------------------------------------- options bar
 
+/// The Eraser's Mode choices (Photoshop's Block mode is not there yet).
+fn eraser_modes() -> [(String, &'static str); 2] {
+    [("brush".into(), "Brush"), ("pencil".into(), "Pencil")]
+}
+
+/// The Magic Wand's Sample Size choices (Photoshop's): the side of the averaged square.
+const WAND_SAMPLE_SIZES: [(u32, &str); 7] = [
+    (1, "Point Sample"),
+    (3, "3 by 3 Average"),
+    (5, "5 by 5 Average"),
+    (11, "11 by 11 Average"),
+    (31, "31 by 31 Average"),
+    (51, "51 by 51 Average"),
+    (101, "101 by 101 Average"),
+];
+
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     egui::Panel::top("options_bar")
@@ -801,12 +817,20 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     crate::brush_picker::settings_toggle(app, ui);
                     widgets::vline(ui, 22.0);
                 }
-                if tool == Tool::CloneStamp {
+                if matches!(tool, Tool::CloneStamp | Tool::PatternStamp) {
+                    // Photoshop's stamp options: Mode, Opacity (+ pressure), Flow, pressure for size.
+                    crate::retouch_ui::mode_dropdown(app, ui, tool);
                     let before = app.session.tools.brush.clone();
                     let mut brush = before.clone();
                     let width = if t.pro { 62.0 } else { 66.0 };
                     percent_field(ui, tl!("Opacity"), &mut brush.opacity, 1.0..=100.0, width);
+                    if icons::button(ui, "circle-dot", 24.0, brush.pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
+                        brush.pressure_opacity = !brush.pressure_opacity;
+                    }
                     percent_field(ui, tl!("Flow"), &mut brush.flow, 1.0..=100.0, width);
+                    if icons::button(ui, "circle-dot", 24.0, brush.pressure_size, tl!("Always use pressure for size")).clicked() {
+                        brush.pressure_size = !brush.pressure_size;
+                    }
                     crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &brush);
                     widgets::vline(ui, 22.0);
                 }
@@ -827,10 +851,15 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         crate::brush_picker::settings_toggle(app, ui);
                         widgets::vline(ui, 22.0);
                         opt_label(ui, tl!("Mode"));
-                        let mut mode = b.mode;
-                        let opts: Vec<(BlendMode, &str)> = BlendMode::LAYER_MODES.iter().map(|m| (*m, m.label())).collect();
-                        if widgets::dropdown(ui, "brush-mode", &mut mode, &opts, 96.0) {
-                            b.mode = mode;
+                        if app.ui.tool == Tool::Eraser {
+                            // Photoshop's Eraser Mode is the kind of tip, not a blend mode.
+                            widgets::dropdown(ui, "eraser-mode", &mut app.ui.tool_options.eraser_mode, &eraser_modes(), 96.0);
+                        } else {
+                            let mut mode = b.mode;
+                            let opts: Vec<(BlendMode, &str)> = BlendMode::LAYER_MODES.iter().map(|m| (*m, m.label())).collect();
+                            if widgets::dropdown(ui, "brush-mode", &mut mode, &opts, 96.0) {
+                                b.mode = mode;
+                            }
                         }
                         percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, 62.0);
                         if icons::button(ui, "circle-dot", 24.0, b.pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
@@ -848,7 +877,12 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         if icons::button(ui, "circle-dot", 24.0, b.pressure_size, tl!("Always use pressure for size")).clicked() {
                             b.pressure_size = !b.pressure_size;
                         }
-                        crate::symmetry_ui::menu(app, ui);
+                        if app.ui.tool == Tool::Eraser {
+                            widgets::vline(ui, 22.0);
+                            widgets::checkbox(ui, &mut app.ui.tool_options.erase_to_history, tl!("Erase to History"));
+                        } else {
+                            crate::symmetry_ui::menu(app, ui);
+                        }
                     }
                     // Pencil: Photoshop's options (no hardness or flow: the pencil is always hard).
                     Tool::Pencil => {
@@ -887,6 +921,11 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         widgets::vline(ui, 22.0);
                         widgets::toggle(ui, &mut b.pressure_size, tl!("Pressure for Size"));
                         widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
+                        if app.ui.tool == Tool::Eraser {
+                            widgets::vline(ui, 22.0);
+                            widgets::dropdown(ui, "eraser-mode", &mut app.ui.tool_options.eraser_mode, &eraser_modes(), 96.0);
+                            widgets::checkbox(ui, &mut app.ui.tool_options.erase_to_history, tl!("Erase to History"));
+                        }
                     }
                     Tool::MixerBrush => {
                         brush_preset_chip(ui, b, &mut app.ui);
@@ -989,7 +1028,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                 ),
                             );
                         } else if app.ui.tool == Tool::Lasso {
-                            hint(ui, tl!("Hold Alt while drawing for straight segments"));
+                            hint(ui, &crate::shortcuts::os_text(tl!("Hold Alt while drawing for straight segments")));
                         }
                         if app.ui.tool == Tool::MagneticLasso && app.ui.magnetic.active() {
                             hint(
@@ -1004,6 +1043,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     Tool::MagicWand => {
                         selection_mode_buttons(app, ui);
                         widgets::vline(ui, 22.0);
+                        opt_label(ui, tl!("Sample Size"));
+                        widgets::dropdown(ui, "wand-sample-size", &mut app.ui.tool_options.wand_sample_size, &WAND_SAMPLE_SIZES, 130.0);
                         opt_label(ui, tl!("Tolerance"));
                         widgets::value_field(ui, &mut app.ui.tool_options.tolerance, 0.0..=255.0, "", 58.0);
                         widgets::checkbox(ui, &mut app.ui.tool_options.anti_alias, tl!("Anti-alias"));
@@ -1024,6 +1065,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         if widgets::dropdown(ui, "bucket-src", &mut src, &[(0u8, tl!("Foreground")), (1, tl!("Pattern"))], 100.0) {
                             app.ui.tool_options.bucket_fill_pattern = src == 1;
                         }
+                        opt_label(ui, tl!("Mode"));
+                        let opts: Vec<(BlendMode, &str)> = BlendMode::LAYER_MODES.iter().map(|m| (*m, m.label())).collect();
+                        widgets::dropdown(ui, "bucket-mode", &mut app.ui.tool_options.bucket_mode, &opts, 96.0);
                         opt_label(ui, tl!("Opacity"));
                         widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
                         opt_label(ui, tl!("Tolerance"));
@@ -1234,7 +1278,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     Tool::Lasso | Tool::PolygonLasso => hint(
                         ui,
                         &crate::i18n::fmt(
-                            tl!("Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts"),
+                            &crate::shortcuts::os_text(tl!("Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts")),
                             &[("add", &crate::shortcuts::pretty("Shift")), ("sub", &crate::shortcuts::pretty("Alt"))],
                         ),
                     ),
