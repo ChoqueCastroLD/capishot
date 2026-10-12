@@ -145,6 +145,8 @@ type FaceKey = (FamilyId, FontWidth, FontStyle, FontWeight);
 
 /// Faces a managed font set added: exactly what has to be unregistered again.
 struct Managed {
+    // Compared on native re-registration only; the web build registers no font files.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     files: Vec<std::path::PathBuf>,
     faces: Vec<FaceKey>,
 }
