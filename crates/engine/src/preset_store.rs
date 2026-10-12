@@ -761,12 +761,12 @@ fn load_tiles(
             let t = decode_tip(r.as_ref().map_err(Clone::clone)?)?;
             Ok((t.width, t.height, t.preview(PREVIEW_SIDE)))
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         let made: Vec<_> = {
             use rayon::prelude::*;
             raw.par_iter().map(make).collect()
         };
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         let made: Vec<_> = raw.iter().map(make).collect();
         for (h, r) in batch.iter().zip(made) {
             match r {

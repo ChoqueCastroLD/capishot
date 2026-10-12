@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::Document;
+use photocraft_engine::Session;
 use photocraft_ui_egui::i18n;
 use photocraft_ui_egui::served_fonts;
 use photocraft_ui_egui::theme::ThemeKind;
@@ -40,6 +41,82 @@ struct ServedFonts {
 }
 
 type Served = Arc<Mutex<ServedFonts>>;
+
+/// Threads build: linking wasm-bindgen-rayon exports `initThreadPool(n)` (and the worker entry
+/// points it needs) to the page, which awaits it before calling [`start_threads`].
+#[cfg(target_feature = "atomics")]
+use wasm_bindgen_rayon as _;
+
+/// Threads build: the page calls this (as `start`) once the worker pool is up.
+#[cfg(target_feature = "atomics")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = start)]
+pub fn start_threads() {
+    start();
+}
+
+/// Parallelism diagnostic, for checking that a browser really runs Capishot's parallel code on
+/// the worker pool: a busy loop spread over rayon reports how many workers took part and how long it
+/// took (pure parallel work, so it shows the pool's scaling), then a Gaussian blur (radius 20) runs
+/// through the engine on a noisy `width`×`height` document and an image that size is encoded as
+/// PNG (deflated in parallel bands). The threads page exposes the module as `photocraftModule`, so
+/// from the console: `photocraftModule.parallelSelfTest(4000, 3000)`. Compare with the page opened as
+/// `?threads=1`, or with the single-threaded build (Trunk's page exposes it as
+/// `wasmBindings.parallelSelfTest`), where the same steps run on the page's one thread.
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = parallelSelfTest)]
+pub fn parallel_self_test(width: u32, height: u32) -> Result<String, String> {
+    use serde_json::json;
+    let spin = |i: u64| {
+        let mut x = i;
+        for _ in 0..500_000 {
+            x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        }
+        std::hint::black_box(x);
+    };
+    let t0 = js_sys::Date::now();
+    #[cfg(target_feature = "atomics")]
+    let (pool_threads, workers_used) = {
+        use rayon::prelude::*;
+        let workers: std::collections::BTreeSet<usize> = (0..1024u64)
+            .into_par_iter()
+            .filter_map(|i| {
+                spin(i);
+                rayon::current_thread_index()
+            })
+            .collect();
+        (rayon::current_num_threads(), workers.len())
+    };
+    #[cfg(not(target_feature = "atomics"))]
+    let (pool_threads, workers_used) = {
+        (0..1024u64).for_each(spin);
+        (1usize, 0usize)
+    };
+    let loop_ms = js_sys::Date::now() - t0;
+    let mut s = Session::new();
+    let err = |e: photocraft_engine::EngineError| e.to_string();
+    s.execute("file.new", json!({"width": width.clamp(1, 16_000), "height": height.clamp(1, 16_000), "background": "white"})).map_err(err)?;
+    s.execute("filter.noise.addNoise", json!({"amount": 20, "seed": 3, "distribution": "gaussian"})).map_err(err)?;
+    let t0 = js_sys::Date::now();
+    s.execute("filter.blur.gaussianBlur", json!({"radius": 20})).map_err(err)?;
+    let blur_ms = js_sys::Date::now() - t0;
+    // PNG export of a noisy RGBA image the same size (deflated in parallel bands).
+    let (w, h) = (width.clamp(1, 16_000), height.clamp(1, 16_000));
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let px: Vec<u8> = (0..w as usize * h as usize * 4)
+        .map(|i| {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            if i % 4 == 3 { 255 } else { 96 + (seed >> 59) as u8 }
+        })
+        .collect();
+    let img = Image::from_u8(w, h, ChannelLayout::Rgba, px).map_err(|e| e.to_string())?;
+    let t0 = js_sys::Date::now();
+    let png = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())?;
+    let png_ms = js_sys::Date::now() - t0;
+    Ok(json!({
+        "poolThreads": pool_threads, "workersUsed": workers_used, "loopMs": loop_ms.round(),
+        "blurMs": blur_ms.round(), "pngMs": png_ms.round(), "pngBytes": png.len(),
+    })
+    .to_string())
+}
 
 pub fn start() {
     eframe::WebLogger::init(log::LevelFilter::Info).ok();

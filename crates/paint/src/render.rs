@@ -13,7 +13,7 @@ use std::sync::Arc;
 use photocraft_color::{BlendMode, PixelFormat, SampleType};
 use photocraft_geom::Rect;
 use photocraft_raster::{Surface, from_rgba_into, to_rgba};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 use rayon::prelude::*;
 
 use crate::brush::{BrushSettings, MaskMode, Pattern, TipShape};
@@ -47,7 +47,7 @@ const SMALL_TIP_RADIUS: f32 = 3.0;
 const SUBPIXEL: [f32; 4] = [-0.375, -0.125, 0.125, 0.375];
 const NOISE_SALT: u64 = 0x006E_6F69_7365;
 /// Max dabs rasterized in one parallel batch (bounds temporary mask memory).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 const PAR_DAB_BATCH: usize = 64;
 
 #[inline]
@@ -253,7 +253,7 @@ impl BrushContext {
                     *slot = edge * falloff * alpha;
                 }
             };
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             if h >= 64 {
                 out.par_chunks_mut(w).enumerate().for_each(|(yy, row)| rasterize_simple(yy, row));
             } else {
@@ -261,7 +261,7 @@ impl BrushContext {
                     rasterize_simple(yy, &mut out[yy * w..(yy + 1) * w]);
                 }
             }
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
             for yy in 0..h {
                 rasterize_simple(yy, &mut out[yy * w..(yy + 1) * w]);
             }
@@ -365,14 +365,14 @@ impl BrushContext {
             }
         };
         // Rows are independent: large dabs fill them on all cores (the depth rows alongside).
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         let parallel = h >= 64 && w > 0;
         match depth {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             Some(dp) if parallel => {
                 out.par_chunks_mut(w).zip(dp.par_chunks_mut(w)).enumerate().for_each(|(yy, (row, drow))| rasterize_row(yy, row, Some(drow)));
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             None if parallel => out.par_chunks_mut(w).enumerate().for_each(|(yy, row)| rasterize_row(yy, row, None)),
             Some(dp) => {
                 for (yy, (row, drow)) in out.chunks_mut(w.max(1)).zip(dp.chunks_mut(w.max(1))).enumerate() {
@@ -809,7 +809,7 @@ impl StrokeRenderer {
         let mut dabs = std::mem::take(&mut self.dab_buf);
         let mut duals = std::mem::take(&mut self.dual_buf);
         let wet = self.ctx.brush.wet_edges;
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         if dabs.len() >= 4 {
             let ctx = &self.ctx;
             for chunk in dabs.chunks(PAR_DAB_BATCH) {
@@ -840,9 +840,9 @@ impl StrokeRenderer {
         } else {
             self.raster_dabs_seq(&dabs, wet);
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         self.raster_dabs_seq(&dabs, wet);
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         if duals.len() >= 4 {
             let ctx = &self.ctx;
             for chunk in duals.chunks(PAR_DAB_BATCH) {
@@ -864,7 +864,7 @@ impl StrokeRenderer {
         } else {
             self.raster_duals_seq(&duals);
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         self.raster_duals_seq(&duals);
         self.dabs_done += dabs.len();
         if let Some(all) = self.all_dabs.as_mut() {
@@ -1125,12 +1125,12 @@ impl StrokeRenderer {
             }
             (tr, region)
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         let use_par = work.len() >= 4;
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         let use_par = false;
         if use_par {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             {
                 let cmyk = photocraft_color::convert::active_cmyk_space();
                 let cmyk_ref = cmyk.as_ref();

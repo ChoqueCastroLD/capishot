@@ -562,12 +562,12 @@ impl Surface {
                 None => t.data.chunks_exact_mut(bpp).for_each(|d| d[at..].copy_from_slice(default)),
             }
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         {
             use rayon::prelude::*;
             work.par_iter_mut().for_each(fix);
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         work.iter_mut().for_each(fix);
         self.tiles.extend(work);
         self.prune();
