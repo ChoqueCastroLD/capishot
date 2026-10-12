@@ -23,6 +23,8 @@ The first request on every TCP connection must authenticate. No other method is 
 {"id": "auth", "method": "auth", "params": {"token": "<64 hexadecimal characters>"}}
 ```
 
+Authenticate once per connection. A later `auth` frame on the same connection gets `{"ok": false, "error": "already authenticated"}` and the connection keeps serving.
+
 After the successful authentication reply, each request is one JSON line:
 
 ```json
