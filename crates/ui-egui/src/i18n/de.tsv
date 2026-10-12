@@ -2574,8 +2574,6 @@ fontWeight	Italic	Kursiv
 	Appearance Settings…	Erscheinungsbild-Einstellungen…
 	Add to favorites	Zu Favoriten hinzufügen
 	Remove from favorites	Aus Favoriten entfernen
-	Capishot — Screen Color Picker	Capishot — Bildschirmfarbenauswahl
-	Float Panel	Panel lösen
 	Float Panel Group	Panelgruppe lösen
 	Dock Panel Group	Panelgruppe andocken
 	Use Classic Mode	Classic-Modus verwenden
@@ -2586,15 +2584,11 @@ fontWeight	Italic	Kursiv
 	psd-compiler on GitHub	psd-compiler auf GitHub
 	Based on PhotoCraft	Basiert auf Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	Punkte auf der Arbeitsfläche anzeigen
 	Click the first point or press {key} to close · {del} removes a point · Esc cancels	Klicke auf den ersten Punkt oder drücke {key} zum Schließen · {del} entfernt einen Punkt · Esc bricht ab
 	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	Klicke und bewege dich entlang einer Kante · Klicken setzt einen Ankerpunkt · {alt}-Klick für ein gerades Segment · Doppelklick schließt
 	Follows only edges this close to the pointer ([ and ] change it)	Folgt nur Kanten so nah am Zeiger ([ und ] ändern den Wert)
 	Higher values follow only edges that contrast sharply with their surroundings	Höhere Werte folgen nur Kanten mit starkem Kontrast zur Umgebung
 	How often fastening points are placed by themselves	Wie oft Ankerpunkte automatisch gesetzt werden
-	Appearance Settings…	Erscheinungsbild-Einstellungen…
-	Add to favorites	Zu Favoriten hinzufügen
-	Remove from favorites	Aus Favoriten entfernen
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 	Camera Data	Kameradaten
 cameraData	Make	Hersteller
@@ -2618,10 +2612,6 @@ cameraData	Lens	Objektiv
 	Panel menu	Bedienfeldmenü
 	Resize panel window	Bedienfeldfenstergröße ändern
 	Resize panels	Bedienfeldgröße ändern
-	Use Classic Mode	Classic-Modus verwenden
-	Auto Center Preview	Automatische zentrierte Vorschau
-	Next Document	Nächstes Dokument
-	Previous Document	Vorheriges Dokument
 	W x H x Resolution	B x H x Auflösung
 	Front Image	Vorderes Bild
 	Frame Tool	Rahmenwerkzeug
@@ -2694,7 +2684,6 @@ cameraData	Lens	Objektiv
 	Mirror	Spiegeln
 	Output Settings	Ausgabeeinstellungen
 	Output To	Ausgabe in
-	New Layer	Neue Ebene
 	Duplicate Layer	Ebene duplizieren
 	Contract	Verkleinern
 	Allow online fonts	Online-Schriften zulassen

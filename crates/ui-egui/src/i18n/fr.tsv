@@ -2953,8 +2953,6 @@ fontWeight	Italic	Italique
 	Appearance Settings…	Réglages d’apparence…
 	Add to favorites	Ajouter aux favoris
 	Remove from favorites	Retirer des favoris
-	Capishot — Screen Color Picker	Capishot — Sélecteur de couleur d'écran
-	Float Panel	Détacher le panneau
 	Float Panel Group	Détacher le groupe de panneaux
 	Dock Panel Group	Ancrer le groupe de panneaux
 	Use Classic Mode	Utiliser le mode classique
@@ -2965,15 +2963,11 @@ fontWeight	Italic	Italique
 	psd-compiler on GitHub	psd-compiler sur GitHub
 	Based on PhotoCraft	Basé sur Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	Afficher les points du canevas
 	Click the first point or press {key} to close · {del} removes a point · Esc cancels	Cliquez sur le premier point ou appuyez sur {key} pour fermer · {del} supprime un point · Échap annule
 	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	Cliquez, puis suivez un contour · cliquez pour fixer un point · {alt}-clic pour un segment droit · double-cliquez pour fermer
 	Follows only edges this close to the pointer ([ and ] change it)	Ne suit que les contours aussi proches du pointeur ([ et ] le modifient)
 	Higher values follow only edges that contrast sharply with their surroundings	Plus la valeur est élevée, plus seuls les contours très contrastés sont suivis
 	How often fastening points are placed by themselves	Fréquence de pose automatique des points d’ancrage
-	Appearance Settings…	Réglages d’apparence…
-	Add to favorites	Ajouter aux favoris
-	Remove from favorites	Retirer des favoris
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Marque
 cameraData	Model	Modèle
@@ -2996,10 +2990,6 @@ cameraData	Lens	Objectif
 	Panel menu	Menu du panneau
 	Resize panel window	Redimensionner la fenêtre du panneau
 	Resize panels	Redimensionner les panneaux
-	Use Classic Mode	Utiliser le mode classique
-	Auto Center Preview	Centrer automatiquement l'aperçu
-	Next Document	Document suivant
-	Previous Document	Document précédent
 	W x H x Resolution	L x H x Résolution
 	Front Image	Image de premier plan
 	Frame Tool	Outil Cadre
@@ -3070,7 +3060,6 @@ cameraData	Lens	Objectif
 	Mirror	Miroir
 	Output Settings	Paramètres de sortie
 	Output To	Sortie vers
-	New Layer	Nouveau calque
 	Duplicate Layer	Dupliquer le calque
 	Contract	Contracter
 	Allow online fonts	Autoriser les polices en ligne

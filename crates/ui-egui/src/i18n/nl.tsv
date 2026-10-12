@@ -3705,7 +3705,6 @@ cameraRaw	Whites	Witten
 	Appearance Settings…	Weergave-instellingen…
 	Add to favorites	Toevoegen aan favorieten
 	Remove from favorites	Verwijderen uit favorieten
-	Float Panel	Paneel losmaken
 	Float Panel Group	Paneelgroep losmaken
 	Dock Panel Group	Paneelgroep vastzetten
 	Use Classic Mode	Klassieke modus gebruiken
@@ -3716,10 +3715,6 @@ cameraRaw	Whites	Witten
 	psd-compiler on GitHub	psd-compiler op GitHub
 	Based on PhotoCraft	Gebaseerd op Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	Canvasstippen tonen
-	Appearance Settings…	Weergave-instellingen…
-	Add to favorites	Toevoegen aan favorieten
-	Remove from favorites	Verwijderen uit favorieten
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Merk
 cameraData	Model	Model
@@ -3742,10 +3737,6 @@ cameraData	Lens	Lens
 	Panel menu	Paneelmenu
 	Resize panel window	Paneelvenster vergroten of verkleinen
 	Resize panels	Panelen vergroten of verkleinen
-	Use Classic Mode	Klassieke modus gebruiken
-	Auto Center Preview	Voorvertoning automatisch centreren
-	Next Document	Volgend document
-	Previous Document	Vorig document
 	W x H x Resolution	B x H x Resolutie
 	Front Image	Voorste afbeelding
 	Perspective Crop Tool	Gereedschap Perspectief bijsnijden
@@ -3799,7 +3790,6 @@ cameraData	Lens	Lens
 	Emulsion Down	Emulsie omlaag
 	Functions	Functies
 	Print Resolution:	Afdrukresolutie:
-	Capishot — Screen Color Picker	Capishot — Schermkleurkiezer
 # Edit › Content-Aware Fill workspace
 	Sampling Brush Tool	Gereedschap Monsterpenseel
 	Sampling Area Overlay	Overlay van monstergebied

@@ -2548,7 +2548,6 @@ fontWeight	Italic	斜体
 	Appearance Settings…	外观设置…
 	Add to favorites	添加到收藏
 	Remove from favorites	从收藏中移除
-	Capishot — Screen Color Picker	Capishot — 屏幕取色器
 	Float Panel	浮动面板
 	Float Panel Group	浮动面板组
 	Dock Panel Group	停靠面板组
@@ -2560,7 +2559,6 @@ fontWeight	Italic	斜体
 	psd-compiler on GitHub	GitHub 上的 psd-compiler
 	Based on PhotoCraft	基于 Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	显示画布圆点
 	Auto Erase	自动抹除
 	Click the first point or press {key} to close · {del} removes a point · Esc cancels	点按第一个点或按 {key} 闭合 · {del} 删除一个点 · Esc 取消
 	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	点按，然后沿边缘移动 · 点按固定一个点 · {alt}-点按画直线段 · 双击闭合
@@ -2570,9 +2568,6 @@ fontWeight	Italic	斜体
 	Scrubby Zoom	细微缩放
 	{mode} Color · {bits} bit	{mode} 颜色 · {bits} 位
 	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels	拖移绘制裁剪框 · 在框内拖移以移动 · 拖移边缘调整大小（{ratio} 比例，{centre} 中心）· 绘制时按 Space 移动 · 方向键微移 · X 切换方向 · {commit} 确认 · Esc 取消
-	Appearance Settings…	外观设置…
-	Add to favorites	添加到收藏
-	Remove from favorites	从收藏中移除
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 	Camera Data	相机数据
 cameraData	Make	制造商
@@ -2590,16 +2585,11 @@ cameraData	Lens	镜头
 	Change Panel Layout	更改面板布局
 	Close Panel	关闭面板
 	Dock Panel	停靠面板
-	Float Panel	浮动面板
 	Move Panel	移动面板
 	Group with	与此面板分组
 	Panel menu	面板菜单
 	Resize panel window	调整面板窗口大小
 	Resize panels	调整面板大小
-	Use Classic Mode	使用经典模式
-	Auto Center Preview	自动居中预览
-	Next Document	下一个文档
-	Previous Document	上一个文档
 	W x H x Resolution	宽 x 高 x 分辨率
 	Front Image	前面的图像
 	Frame Tool	图框工具
@@ -2674,7 +2664,6 @@ cameraData	Lens	镜头
 	Mirror	镜像
 	Output Settings	输出设置
 	Output To	输出到
-	New Layer	新建图层
 	Duplicate Layer	复制图层
 	Contract	收缩
 	Allow online fonts	允许在线字体

@@ -3639,8 +3639,6 @@ fontWeight	Thin	Πολύ λεπτά
 	Appearance Settings…	Ρυθμίσεις εμφάνισης…
 	Add to favorites	Προσθήκη στα αγαπημένα
 	Remove from favorites	Αφαίρεση από τα αγαπημένα
-	Capishot — Screen Color Picker	Capishot — Επιλογή χρώματος οθόνης
-	Float Panel	Αποδέσμευση πίνακα
 	Float Panel Group	Αποδέσμευση ομάδας πινάκων
 	Dock Panel Group	Αγκύρωση ομάδας πινάκων
 	Use Classic Mode	Χρήση κλασικής λειτουργίας
@@ -3651,10 +3649,6 @@ fontWeight	Thin	Πολύ λεπτά
 	psd-compiler on GitHub	Το psd-compiler στο GitHub
 	Based on PhotoCraft	Βασισμένο στο Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	Εμφάνιση κουκκίδων καμβά
-	Appearance Settings…	Ρυθμίσεις εμφάνισης…
-	Add to favorites	Προσθήκη στα αγαπημένα
-	Remove from favorites	Αφαίρεση από τα αγαπημένα
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Κατασκευαστής
 cameraData	Model	Μοντέλο
@@ -3677,10 +3671,6 @@ cameraData	Lens	Φακός
 	Panel menu	Μενού πάνελ
 	Resize panel window	Αλλαγή μεγέθους παραθύρου πάνελ
 	Resize panels	Αλλαγή μεγέθους πάνελ
-	Use Classic Mode	Χρήση κλασικής λειτουργίας
-	Auto Center Preview	Αυτόματο κεντράρισμα προεπισκόπησης
-	Next Document	Επόμενο έγγραφο
-	Previous Document	Προηγούμενο έγγραφο
 	W x H x Resolution	Π x Υ x Ανάλυση
 	Front Image	Μπροστινή εικόνα
 	Frame Tool	Εργαλείο πλαισίου
