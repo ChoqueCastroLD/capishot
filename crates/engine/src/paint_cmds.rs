@@ -1,6 +1,6 @@
 //! Paint helpers: Paint Bucket and Gradient tool.
 
-use photocraft_algo::paint::{GradientShape, bucket_fill, bucket_fill_region_src, bucket_fill_src, paint_gradient};
+use photocraft_algo::paint::{GradientShape, bucket_fill_inks, bucket_fill_region_inks, bucket_fill_region_src, bucket_fill_src, paint_gradient};
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, blend_from_str};
@@ -61,6 +61,8 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         None
     };
+    // A foreground picked as CMYK fills a CMYK document with the picked inks (#4196).
+    let inks = s.tools.picked_cmyk([c[0], c[1], c[2]]).filter(|_| c[3] >= 1.0 && pattern.is_none());
     let filled = s.edit("Paint Bucket", |doc, active| {
         let area = doc.bounds();
         let sel = doc.selection.clone();
@@ -80,10 +82,10 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
                 bucket_fill_src(surf, area, (x, y), tol, contiguous, aa, opacity, sel.as_ref(), lock, src)
             }
         } else if let Some(region) = &region {
-            bucket_fill_region_src(surf, region, opacity, sel.as_ref(), lock, |_, _| c);
+            bucket_fill_region_inks(surf, region, opacity, sel.as_ref(), lock, |_, _| c, inks);
             true
         } else {
-            bucket_fill(surf, area, (x, y), tol, contiguous, aa, c, opacity, sel.as_ref(), lock)
+            bucket_fill_inks(surf, area, (x, y), tol, contiguous, aa, opacity, sel.as_ref(), lock, |_, _| c, inks)
         };
         surf.prune();
         Ok(ok)
@@ -328,6 +330,30 @@ mod tests {
         assert_eq!(px(&s, 15, 5), vec![1.0, 1.0, 1.0, 1.0]);
         s.execute("paint.bucket", json!({"x": 2, "y": 2, "color": "#0000ff", "contiguous": false, "antiAlias": false, "tolerance": 0})).unwrap();
         assert_eq!(px(&s, 5, 5), vec![0.0, 0.0, 1.0, 1.0]);
+    }
+
+    /// #4196: the Paint Bucket and Edit > Stroke write a CMYK pick as its inks into a CMYK document,
+    /// not as its sRGB stand-in converted back (100/0/0/0 cyan would come out as about 100/28/0/17).
+    #[test]
+    fn bucket_and_stroke_write_a_cmyk_pick_as_its_inks() {
+        let cyan = [1.0f32, 0.0, 0.0, 0.0];
+        let mut s = session();
+        s.execute("image.mode.cmyk", json!({})).unwrap();
+        let rgb = photocraft_color::convert::cmyk_to_rgb(cyan).map(|c| c.clamp(0.0, 1.0));
+        s.execute("tools.setColors", json!({"foreground": rgb, "foregroundCmyk": cyan})).unwrap();
+        let inks_at = |s: &Session, x: i32, y: i32| -> Vec<f32> {
+            let st = s.active().unwrap();
+            let surf = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
+            surf.read_region(Rect::new(x, y, x + 1, y + 1)).into_iter().take(4).collect()
+        };
+        let is_cyan = |got: &[f32]| got.iter().zip(cyan).all(|(a, b)| (a - b).abs() < 0.02);
+        s.execute("paint.bucket", json!({"x": 2, "y": 2, "antiAlias": false})).unwrap();
+        let got = inks_at(&s, 5, 5);
+        assert!(is_cyan(&got), "bucket: {got:?}");
+        s.execute("select.all", json!({})).unwrap();
+        s.execute("edit.stroke", json!({"width": 2, "location": "inside", "color": rgb})).unwrap();
+        let got = inks_at(&s, 0, 5);
+        assert!(is_cyan(&got), "stroke: {got:?}");
     }
 
     #[test]
