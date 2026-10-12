@@ -2203,3 +2203,118 @@ fn outer_glow_does_not_paint_through_a_zero_fill_layer() {
         assert!(opaque[0] > 0.9 && opaque[1] > 0.8, "{technique:?}: opaque fill disappeared: {opaque:?}");
     }
 }
+
+// Lab documents: Invert mirrors L, a and b; Threshold splits on L with a neutral result; Gradient
+// Map follows L. Rendered through the document compositor at every depth.
+#[test]
+fn lab_documents_evaluate_invert_threshold_and_gradient_map_on_lab() {
+    use photocraft_color::convert::{lab_to_srgb, srgb_to_lab};
+    let c = lab_to_srgb([30.0, 12.0, -18.0]);
+    for depth in SampleType::ALL {
+        let render = |adj: Adjustment| {
+            let mut d = Document::with_background("t", Size::new(4, 4), ColorMode::Lab, depth, Color::rgb(c[0], c[1], c[2]));
+            d.layers.push(Layer::new("adj", LayerContent::Adjustment(adj)));
+            let p = flatten(&d).px[5];
+            srgb_to_lab([p[0], p[1], p[2]])
+        };
+        let near = |got: [f32; 3], want: [f32; 3], tol: f32| got.iter().zip(want).all(|(g, w)| (g - w).abs() <= tol);
+        let inv = render(Adjustment::Invert);
+        assert!(near(inv, [70.0, -13.0, 17.0], 1.0), "{depth:?}: {inv:?}");
+        let th = render(Adjustment::Threshold { level: 0.25 });
+        assert!(near(th, [100.0, 0.0, 0.0], 0.5), "{depth:?}: L 30 is above level 64: {th:?}");
+        let gm = render(Adjustment::GradientMap { stops: vec![(0.0, [0.0; 3]), (1.0, [1.0; 3])], reverse: false, dither: false });
+        let want = srgb_to_lab([0.3; 3]);
+        assert!(near(gm, want, 1.0), "{depth:?}: L 30 → 30 % of the way: {gm:?} vs {want:?}");
+    }
+}
+
+/// `adj` over a one-colour Lab document (background `rgb`) at `depth`, read back as Lab.
+fn lab_doc_adjusted(rgb: [f32; 3], adj: Adjustment, depth: SampleType) -> [f32; 3] {
+    let mut doc = Document::with_background("lab", Size::new(4, 4), ColorMode::Lab, depth, Color::rgb(rgb[0], rgb[1], rgb[2]));
+    doc.layers.push(Layer::new("adj", LayerContent::Adjustment(adj)));
+    let p = px(&doc, 1, 1);
+    photocraft_color::convert::srgb_to_lab([p[0], p[1], p[2]])
+}
+
+fn near3(got: [f32; 3], want: [f32; 3], tol: f32, what: &str) {
+    assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() <= tol), "{what}: got {got:?}, want {want:?}");
+}
+
+/// A muted, in-gamut colour (L ≈ 46, a ≈ 10, b ≈ -20) and its Lab coordinates.
+const MUTED: [f32; 3] = [0.40, 0.42, 0.60];
+
+#[test]
+fn lab_documents_invert_and_posterize_l_a_and_b() {
+    let lab = photocraft_color::convert::srgb_to_lab(MUTED);
+    for depth in SampleType::ALL {
+        // Invert: every normalised channel n -> 1 - n, so L -> 100 - L and a, b -> their opposites
+        // (-a - 1 on the 0..255 grid).
+        let inv = lab_doc_adjusted(MUTED, Adjustment::Invert, depth);
+        near3(inv, [100.0 - lab[0], -lab[1] - 1.0, -lab[2] - 1.0], 1.0, &format!("{depth:?} invert"));
+        // An RGB invert would land elsewhere: lightness 100 - L is the Lab rule.
+        let rgb_inv = photocraft_color::convert::srgb_to_lab(MUTED.map(|v| 1.0 - v));
+        assert!((rgb_inv[0] - inv[0]).abs() > 2.0, "{depth:?}: {rgb_inv:?} vs {inv:?}");
+        // Posterize, three levels: the same steps on L, a and b (here all land on the middle
+        // step: L ≈ 50 and a, b ≈ -1, a neutral grey).
+        let post = lab_doc_adjusted(MUTED, Adjustment::Posterize { levels: 3 }, depth);
+        let n = [lab[0] / 100.0, (lab[1] + 128.0) / 255.0, (lab[2] + 128.0) / 255.0].map(|v| adjust::posterize(v, 3));
+        let want = [n[0] * 100.0, n[1] * 255.0 - 128.0, n[2] * 255.0 - 128.0];
+        assert!(want[0] > 45.0 && want[1].abs() < 2.0 && want[2].abs() < 2.0, "{want:?}");
+        near3(post, want, 1.0, &format!("{depth:?} posterize"));
+    }
+}
+
+#[test]
+fn lab_documents_brightness_contrast_moves_lightness_only() {
+    let lab = photocraft_color::convert::srgb_to_lab(MUTED);
+    for depth in SampleType::ALL {
+        for legacy in [true, false] {
+            let got = lab_doc_adjusted(MUTED, Adjustment::BrightnessContrast { brightness: 40.0, contrast: 20.0, legacy }, depth);
+            assert!(got[0] > lab[0] + 5.0, "{depth:?} legacy {legacy}: {got:?}");
+            near3([lab[0], got[1], got[2]], lab, 0.75, &format!("{depth:?} legacy {legacy}: a, b kept"));
+        }
+    }
+}
+
+#[test]
+fn lab_documents_threshold_on_lightness_with_a_neutral_result() {
+    for depth in SampleType::ALL {
+        // A saturated yellow is light (L ≈ 97): white, not a coloured result.
+        let yellow = lab_doc_adjusted([1.0, 1.0, 0.0], Adjustment::Threshold { level: 0.5 }, depth);
+        near3(yellow, [100.0, 0.0, 0.0], 0.5, &format!("{depth:?} yellow"));
+        // Pure blue has L ≈ 30: black.
+        let blue = lab_doc_adjusted([0.0, 0.0, 1.0], Adjustment::Threshold { level: 0.5 }, depth);
+        near3(blue, [0.0, 0.0, 0.0], 0.5, &format!("{depth:?} blue"));
+        // Mid grey L 53.4 against level 128 (n 0.502): Lab L decides, not RGB luminance.
+        let level = 0.52;
+        let grey = lab_doc_adjusted([0.5; 3], Adjustment::Threshold { level }, depth);
+        near3(grey, [100.0, 0.0, 0.0], 0.5, &format!("{depth:?} grey"));
+    }
+}
+
+#[test]
+fn lab_documents_gradient_map_follows_lightness() {
+    let stops = vec![(0.0, [0.0, 0.0, 1.0]), (1.0, [1.0, 1.0, 0.0])];
+    // A grey and a saturated colour of the same L map to the same colour.
+    let red = [0.9, 0.1, 0.1];
+    let l = photocraft_color::convert::srgb_to_lab(red)[0];
+    let grey = photocraft_color::convert::lab_to_srgb([l, 0.0, 0.0]);
+    for depth in SampleType::ALL {
+        for reverse in [false, true] {
+            let adj = Adjustment::GradientMap { stops: stops.clone(), reverse, dither: false };
+            let a = lab_doc_adjusted(red, adj.clone(), depth);
+            let b = lab_doc_adjusted(grey, adj.clone(), depth);
+            near3(a, b, 1.0, &format!("{depth:?} reverse {reverse}"));
+            let t = if reverse { 1.0 - l / 100.0 } else { l / 100.0 };
+            let want = photocraft_color::convert::srgb_to_lab([t, t, 1.0 - t]);
+            near3(a, want, 1.5, &format!("{depth:?} reverse {reverse}"));
+        }
+    }
+    // In RGB documents the map still follows RGB luminance: red and grey differ there.
+    let mut buf = Buffer::filled(Rect::new(0, 0, 1, 1), [red[0], red[1], red[2], 1.0]);
+    let adj = Adjustment::GradientMap { stops, reverse: false, dither: false };
+    adjust::apply_in(&adj, &mut buf, adjust::Transfer::Srgb, None, ColorMode::Rgb);
+    let mut grey_buf = Buffer::filled(Rect::new(0, 0, 1, 1), [grey[0], grey[1], grey[2], 1.0]);
+    adjust::apply_in(&adj, &mut grey_buf, adjust::Transfer::Srgb, None, ColorMode::Rgb);
+    assert!((buf.px[0][0] - grey_buf.px[0][0]).abs() > 0.05, "{:?} {:?}", buf.px[0], grey_buf.px[0]);
+}
