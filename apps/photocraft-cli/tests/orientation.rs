@@ -121,18 +121,22 @@ fn orientation_6_jpeg_converts_upright_and_rotates_back() {
     assert!(near(at(28, 12), upright_color(12, 4)), "{:?}", at(28, 12));
     assert!(near(at(4, 8), upright_color(8, 28)), "{:?}", at(4, 8));
 
-    // .pcraft save, reopen and save again: identical document and pixels.
+    // .pcraft save, reopen and save again: destination names follow Save As; other metadata and pixels match.
     let (a, b) = (d.join("a.pcraft"), d.join("b.pcraft"));
     ok(bin().arg("convert").arg(&jpg).arg(&a));
     ok(bin().arg("convert").arg(&a).arg(&b));
-    // Everything but the file's own path must match.
+    // Check destination names explicitly, then compare the remaining metadata.
     let info = |p: &Path| {
         let mut v = serde_json::from_str::<Value>(&ok(bin().arg("info").arg(p))).unwrap();
         v.as_object_mut().unwrap().remove("file");
         v
     };
-    let (ia, ib) = (info(&a), info(&b));
+    let (mut ia, mut ib) = (info(&a), info(&b));
     assert_eq!((ia["width"].as_u64(), ia["height"].as_u64()), (Some(16), Some(32)));
+    assert_eq!(ia["name"], "a.pcraft");
+    assert_eq!(ib["name"], "b.pcraft");
+    ia.as_object_mut().unwrap().remove("name");
+    ib.as_object_mut().unwrap().remove("name");
     assert_eq!(ia, ib);
     let (pa, pb) = (d.join("a.png"), d.join("b.png"));
     ok(bin().arg("convert").arg(&a).arg(&pa));
