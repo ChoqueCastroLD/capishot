@@ -311,6 +311,9 @@ fn run_cmds(a: &Args, out: &mut dyn Write, err: &mut dyn Write) -> R {
     let mut reported_fonts = std::collections::HashSet::<String>::new();
     for (id, params) in cmds {
         let r = h.command_run(&id, params).map_err(|e| format!("`{id}`: {e}"))?;
+        if let Some(e) = photocraft_engine::actions_cmds::nested_failure(&id, &r) {
+            return Err(format!("`{id}`: {e}"));
+        }
         let new_warnings: Vec<String> = h
             .session
             .active()
