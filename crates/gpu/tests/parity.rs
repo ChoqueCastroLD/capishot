@@ -1061,6 +1061,25 @@ fn small_layers_composite_over_their_bounds() {
     check(&mut g, &big, "small layers across chunks");
 }
 
+#[test]
+fn many_layers_submit_inside_one_chunk() {
+    // P12: a refresh recorded every pass of a page cell into one command buffer, and with a few
+    // hundred layers Metal ran out of command buffers (device lost, "pc_compose_uniforms is
+    // invalid"). 700 layers need well over 1000 passes in the document's only chunk.
+    let Some(mut g) = gpu() else { return };
+    let mut d = base_doc(64, 48);
+    let modes: Vec<BlendMode> = BlendMode::layer_modes().collect();
+    for (i, mode) in modes.iter().copied().cycle().take(700).enumerate() {
+        let mut l = noise_layer("l", PixelFormat::RGBA8, Rect::from_xywh(0, 0, 64, 48), 500 + i as u32, 0.0);
+        l.blend = mode;
+        l.opacity = 0.9;
+        d.layers.push(l);
+    }
+    let stats = diff_rect(&mut g, &d, d.bounds(), "700 layers").unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(stats.chunks, 1);
+    assert!(stats.flushes > 0, "{stats:?}");
+}
+
 fn blob(name: &str, fmt: PixelFormat, cx: f32, cy: f32, r: f32, color: [f32; 3]) -> Layer {
     let mut l = Layer::raster(name, fmt);
     let rect = Rect::new((cx - r - 12.0) as i32, (cy - r - 4.0) as i32, (cx + r + 14.0) as i32, (cy + r + 4.0) as i32);
