@@ -3232,6 +3232,20 @@
 @plural	Group · {n} layer|Group · {n} layers	Ομάδα · {n} επίπεδο|Ομάδα · {n} επίπεδα
 @plural	{n} Layer|{n} Layers	{n} επίπεδο|{n} επίπεδα
 @plural	{n} item|{n} items	{n} στοιχείο|{n} στοιχεία
+@plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	Εξήχθη {n} δείγμα χρώματος στο {file}|Εξήχθησαν {n} δείγματα χρωμάτων στο {file}
+@plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	Εισήχθη {n} πινέλο από το {group}|Εισήχθησαν {n} πινέλα από το {group}
+@plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	Εισήχθη {n} δείγμα χρώματος από το {file}|Εισήχθησαν {n} δείγματα χρωμάτων από το {file}
+@plural	Played {n} step|Played {n} steps	Αναπαράχθηκε {n} βήμα|Αναπαράχθηκαν {n} βήματα
+@plural	Saved for Web: {n} file|Saved for Web: {n} files	Αποθηκεύτηκε για Web: {n} αρχείο|Αποθηκεύτηκαν για Web: {n} αρχεία
+@plural	Updated {n} linked smart object changed on disk|Updated {n} linked smart objects changed on disk	Ενημερώθηκε {n} συνδεδεμένο έξυπνο αντικείμενο που άλλαξε στον δίσκο|Ενημερώθηκαν {n} συνδεδεμένα έξυπνα αντικείμενα που άλλαξαν στον δίσκο
+@plural	{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.|{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.	Διαγράφηκε {n} επίπεδο που καταγράφηκε σε αυτή τη σύνθεση. Ενημερώστε τη σύνθεση ή αφαιρέστε την προειδοποίηση.|Διαγράφηκαν {n} επίπεδα που καταγράφηκαν σε αυτή τη σύνθεση. Ενημερώστε τη σύνθεση ή αφαιρέστε την προειδοποίηση.
+@plural	{n} plane|{n} planes	{n} επίπεδο προοπτικής|{n} επίπεδα προοπτικής
+@plural	{n} preset|{n} presets	{n} προεπιλογή|{n} προεπιλογές
+@plural	{n} sample point removed|{n} sample points removed	Αφαιρέθηκε {n} σημείο δείγματος|Αφαιρέθηκαν {n} σημεία δείγματος
+@plural	{n} slice|{n} slices	{n} τμήμα εικόνας|{n} τμήματα εικόνας
+@plural	{n} step|{n} steps	{n} βήμα|{n} βήματα
+@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} ακόμη προειδοποίηση προεπιλογής πινέλου)|{warning} (+{n} ακόμη προειδοποιήσεις προεπιλογών πινέλων)
+@plural	{what} with {n} warning|{what} with {n} warnings	{what} με {n} προειδοποίηση|{what} με {n} προειδοποιήσεις
 @plural	{n} layer|{n} layers	{n} επίπεδο|{n} επίπεδα
 @plural	{n} sample|{n} samples	{n} δείγμα|{n} δείγματα
 cameraRaw	Amount	Ποσότητα

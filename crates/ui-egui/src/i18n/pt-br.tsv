@@ -761,6 +761,20 @@
 	Statistics…	Estatísticas…
 	Refine Strokes	Traços de refinamento
 @plural	{n} item|{n} items	{n} item|{n} itens
+@plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	{n} amostra exportada para {file}|{n} amostras exportadas para {file}
+@plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	{n} pincel importado de {group}|{n} pincéis importados de {group}
+@plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	{n} amostra importada de {file}|{n} amostras importadas de {file}
+@plural	Played {n} step|Played {n} steps	{n} etapa reproduzida|{n} etapas reproduzidas
+@plural	Saved for Web: {n} file|Saved for Web: {n} files	Salvo para Web: {n} arquivo|Salvo para Web: {n} arquivos
+@plural	Updated {n} linked smart object changed on disk|Updated {n} linked smart objects changed on disk	{n} objeto inteligente vinculado alterado no disco foi atualizado|{n} objetos inteligentes vinculados alterados no disco foram atualizados
+@plural	{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.|{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.	{n} camada registrada nesta composição foi excluída. Atualize a composição ou remova o aviso.|{n} camadas registradas nesta composição foram excluídas. Atualize a composição ou remova o aviso.
+@plural	{n} plane|{n} planes	{n} plano|{n} planos
+@plural	{n} preset|{n} presets	{n} predefinição|{n} predefinições
+@plural	{n} sample point removed|{n} sample points removed	{n} ponto de amostra removido|{n} pontos de amostra removidos
+@plural	{n} slice|{n} slices	{n} fatia|{n} fatias
+@plural	{n} step|{n} steps	{n} etapa|{n} etapas
+@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} aviso adicional de predefinição de pincel)|{warning} (+{n} avisos adicionais de predefinições de pincel)
+@plural	{what} with {n} warning|{what} with {n} warnings	{what} com {n} aviso|{what} com {n} avisos
 	Auto	Automático
 	(print to the printer)	(imprimir na impressora)
 	+ Add variable	+ Adicionar variável

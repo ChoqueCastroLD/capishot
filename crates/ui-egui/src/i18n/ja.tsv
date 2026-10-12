@@ -776,6 +776,20 @@
 	Statistics…	統計情報…
 	Refine Strokes	調整ストローク
 @plural	{n} item|{n} items	{n} 件
+@plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	{file} にスウォッチ {n} 個を書き出しました
+@plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	{group} からブラシ {n} 個を読み込みました
+@plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	{file} からスウォッチ {n} 個を読み込みました
+@plural	Played {n} step|Played {n} steps	{n} ステップを再生しました
+@plural	Saved for Web: {n} file|Saved for Web: {n} files	Web 用に保存: {n} ファイル
+@plural	Updated {n} linked smart object changed on disk|Updated {n} linked smart objects changed on disk	ディスク上で変更されたリンクされたスマートオブジェクト {n} 個を更新しました
+@plural	{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.|{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.	このレイヤーカンプに記録された {n} 個のレイヤーが削除されました。カンプを更新するか、警告を消去してください。
+@plural	{n} plane|{n} planes	{n} 平面
+@plural	{n} preset|{n} presets	{n} プリセット
+@plural	{n} sample point removed|{n} sample points removed	サンプルポイント {n} 個を削除しました
+@plural	{n} slice|{n} slices	{n} スライス
+@plural	{n} step|{n} steps	{n} ステップ
+@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (ほかにブラシプリセットの警告 {n} 件)
+@plural	{what} with {n} warning|{what} with {n} warnings	{what} (警告 {n} 件)
 	Auto	自動
 
 # Dialogs and panels
