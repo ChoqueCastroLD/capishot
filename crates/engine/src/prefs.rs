@@ -1051,7 +1051,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "general.colorPicker",
     "general.animatedZoom",
     "general.zoomResizesWindows",
-    "workspace.autoCollapseIconPanels",
     "workspace.autoShowHiddenPanels",
     "workspace.enableFloatingDocumentWindowDocking",
     "fileHandling.saveInBackground",
