@@ -1041,6 +1041,18 @@ async fn bridge_reports_unreachable_app() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn command_batch_description_exposes_non_atomic_semantics_when_tools_are_listed() {
+    let client = connect(PhotocraftMcp::headless()).await;
+    let tools = client.list_all_tools().await.unwrap();
+    let tool = tools.iter().find(|tool| tool.name == "command_batch").expect("command_batch tool");
+    let description = tool.description.as_deref().expect("command_batch description");
+    for contract in ["in order", "Not an atomic transaction", "first error", "stop_on_error is false", "no rollback"] {
+        assert!(description.contains(contract), "command_batch description omits `{contract}`: {description}");
+    }
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn command_batch_runs_steps_in_order() {
     let client = connect(PhotocraftMcp::headless()).await;
     json_of(&call(&client, "doc_new", json!({"width": 32, "height": 32})).await);
