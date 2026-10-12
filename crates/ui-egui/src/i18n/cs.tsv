@@ -398,6 +398,7 @@
 	Select Linked Layers	Vybrat propojené vrstvy
 	Merge Layers	Sloučit vrstvy
 	Merge Down	Sloučit dolů
+	Merge Group	Sloučit skupinu
 	Merge Visible	Sloučit viditelné
 	Stamp Visible	Otisknout viditelné
 	Select Layer Above	Vybrat vrstvu nad
@@ -889,6 +890,7 @@
 	Camera Raw isn't open	Camera Raw není otevřen
 	Cancel	Zrušit
 	Cancel (Esc)	Zrušit (Esc)
+	Manage submitted jobs in the system print queue	Spravovat odeslané úlohy v systémové tiskové frontě
 	Cancel any current edits (Esc)	Zrušit aktuální úpravy (Esc)
 	Cancel current crop operation  (Esc)	Zrušit aktuální oříznutí  (Esc)
 	Cancel transform (Esc)	Zrušit transformaci (Esc)
@@ -1979,6 +1981,7 @@
 	Show only crosshair while painting	Při malování zobrazit jen nitkový kříž
 	Show slice numbers	Zobrazit čísla řezů
 	Show tooltips	Zobrazit popisky nástrojů
+	Enable animations	Povolit animace
 	Show highlight on rollover	Zobrazit zvýraznění při přejetí
 	Show bounding box when dragging layer	Při přetahování vrstvy zobrazit ohraničovací rámeček
 	System title bar	Systémové záhlaví okna
@@ -2167,6 +2170,7 @@
 	Opening {name}	Otevírání {name}
 	Saved {name}	Uloženo: {name}
 	Saving {name}	Ukládání {name}
+	Saving {percent}	Ukládání {percent}
 	A save to {name} is still running; try again when it finishes	Ukládání do {name} stále probíhá; zkuste to znovu, až skončí
 	{label} is writing the file and can no longer be cancelled	{label} zapisuje soubor a už ho nelze zrušit
 	Opening {name}…	Otevírání {name}…
@@ -2220,6 +2224,8 @@ cameraRaw	Color	Barvy
 	Patch Tool	Nástroj záplata
 	Patch:	Záplata:
 	Lasso around an area, then drag the selection	Obtáhněte oblast lasem a pak přetáhněte výběr
+	Transform On Drop	Transformovat po upuštění
+	Scale or rotate the moved area, then press {key}	Změňte velikost nebo otočte přesunutou oblast a pak stiskněte {key}
 	Now drag the selection onto another area	Nyní přetáhněte výběr na jiné místo
 	Edit Type	Upravit text
 
@@ -2563,7 +2569,7 @@ cameraData	Lens	Objektiv
 	Freeform Pen Tool	Nástroj pero od ruky
 	Curvature Pen Tool	Nástroj pero křivosti
 	Curve Fit:	Přizpůsobení křivky:
-	Drag: draw freehand · Release on the start point: close	Tažení: kreslit od ruky · uvolnění na počátečním bodě: uzavřít
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Tažení: kreslit od ruky · {alt}+klik: rovný segment · uvolnění na počátečním bodě: uzavřít
 	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Kliknutí: hladký bod · dvojklik: roh · tažení bodu: přesunout · kliknutí na první bod: uzavřít · {key} dokončit
 	New Crop Preset…	Nová předvolba oříznutí…
 	Delete Crop Preset…	Odstranit předvolbu oříznutí…
@@ -2661,7 +2667,6 @@ cameraData	Lens	Objektiv
 	Brush Type	Typ štětce
 	Bulge	Vyboulení
 	Burlap	Pytlovina
-	Burn	Ztmavení
 	Calculations	Výpočty
 	Camera Calibration	Kalibrace fotoaparátu
 	Camera Raw	Camera Raw
@@ -2691,7 +2696,6 @@ cameraData	Lens	Objektiv
 	Clear Selection	Zrušit výběr
 	Clipping Path	Ořezová cesta
 	Clone	Klonovat
-	Clone Stamp	Klonovací razítko
 	Close Window	Zavřít okno
 	Clumped	Shlukované
 	Coarse Dots	Hrubé tečky
@@ -2788,7 +2792,6 @@ cameraData	Lens	Objektiv
 	Distribution	Rozložení
 	Documentation	Dokumentace
 	Documents	Dokumenty
-	Dodge	Zesvětlení
 	Dot	Tečka
 	Double Line	Dvojitá čára
 	Draft	Koncept
@@ -2929,7 +2932,6 @@ cameraData	Lens	Objektiv
 	Highlight Radius	Poloměr světel
 	Highlight Strength	Síla odlesku
 	Highlight Tone	Tón světel
-	History Brush	Štětec historie
 	Horizontal Only	Pouze vodorovně
 	Hotspot	Jádro světla
 	Hsb	HSB
@@ -3274,7 +3276,6 @@ cameraData	Lens	Objektiv
 	Spherize	Sférická deformace
 	Spin	Rotace
 	Spin Blur	Rotační rozostření
-	Sponge	Houba
 	Spot	Reflektor
 	Spot Color	Přímá barva
 	Spot Healing	Bodové retušování
@@ -3332,7 +3333,6 @@ cameraData	Lens	Objektiv
 	Tiny Lens	Drobné čočky
 	To Center	Ke středu
 	Tone Curve	Tónová křivka
-	Tool	Nástroj
 	Tool Options	Možnosti nástroje
 	Toolbars	Panely nástrojů
 	Torn Edges	Roztřepené okraje
@@ -3427,18 +3427,26 @@ cameraRaw	Vibrance	Živost
 cameraRaw	Whites	Bílé
 layerLabel	No Color	Žádná barva
 	Loading fonts…	Načítání písem…
-	Tool	Nástroj
 	Simulate Pressure	Simulovat přítlak
-	Stroke Path…	Vytáhnout cestu…
 	Background Eraser	Guma pozadí
-	Clone Stamp	Klonovací razítko
 	Healing Brush	Retušovací štětec
 	Spot Healing Brush	Bodový retušovací štětec
-	History Brush	Štětec historie
 	Smudge	Rozmazání
-	Dodge	Zesvětlení
-	Burn	Ztmavení
-	Sponge	Houba
+	Amount:	Míra:
+	Protect:	Chránit:
+	Protect skin tones	Chránit tóny pleti
+	Edit points to modify the curve	Upravit body pro změnu křivky
+	Draw to modify the curve	Kreslit pro změnu křivky
+curves	Smooth	Vyhladit
+	Smooth the curve values	Vyhladit hodnoty křivky
+	Drag to draw the curve · {key}-click draws a straight line	Tažením nakreslíte křivku · {key}-klik nakreslí rovnou čáru
+	Edit Plane	Upravit rovinu
+	Create Plane	Vytvořit rovinu
+	Grid Size:	Velikost mřížky:
+	Vanishing Point: click four corners to create a plane	Úběžník: klepnutím na čtyři rohy vytvoříte rovinu
+	Vanishing Point is not active	Úběžník není aktivní
+	Apply Vanishing Point ({key})	Použít úběžník ({key})
+	Fix the red plane first: its corners must form a convex quad	Nejprve opravte červenou rovinu: její rohy musí tvořit konvexní čtyřúhelník
 # Select and Mask view modes (#1754)
 	Onion Skin	Cibulová slupka
 	Marching Ants	Pochodující mravenci
@@ -3637,3 +3645,39 @@ navigator	Zoom	Zvětšení
 	Emulsion Down	Emulze dolů
 	Functions	Funkce
 	Print Resolution:	Rozlišení tisku:
+	Use Previous Layer to Create Clipping Mask	Použít předchozí vrstvu k vytvoření ořezové masky
+	Fill with {mode}-neutral color (white)	Vyplnit neutrální barvou pro režim {mode} (bílá)
+	Fill with {mode}-neutral color (black)	Vyplnit neutrální barvou pro režim {mode} (černá)
+	Fill with {mode}-neutral color (50% gray)	Vyplnit neutrální barvou pro režim {mode} (50% šedá)
+	(No neutral color exists for {mode} mode.)	(Pro režim {mode} neexistuje neutrální barva.)
+	Apply mask to layer before removing?	Použít masku na vrstvu před odstraněním?
+	The layer or its mask changed. Drag the mask onto the Trash again.	Vrstva nebo její maska se změnila. Přetáhněte masku do koše znovu.
+	Delete the vector mask?	Odstranit vektorovou masku?
+# View › Guides › New Guide… › Color
+	Light Blue	Světle modrá
+	Light Red	Světle červená
+	Medium Blue	Středně modrá
+	Remove after each stroke	Odstranit po každém tahu
+	Apply the removal ({key})	Použít odstranění ({key})
+	Strokes to remove: {n} (Enter applies, Esc cancels)	Tahy k odstranění: {n} (Enter použije, Esc zruší)
+
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	Načíst akce…
+	Save Actions…	Uložit akce…
+	{name} (Photoshop)	{name} (Photoshop)
+	{message} ({note})	{message} ({note})
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Načtena {n} akce ze souboru {file}|Načteny {n} akce ze souboru {file}|Načteno {n} akcí ze souboru {file}
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} krok zatím nemá v PhotoCraftu obdobu|{n} kroky zatím nemají v PhotoCraftu obdobu|{n} kroků zatím nemá v PhotoCraftu obdobu
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	Uložena {n} akce do souboru {file}|Uloženy {n} akce do souboru {file}|Uloženo {n} akcí do souboru {file}
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Vynechán {n} krok bez obdoby v Photoshopu|Vynechány {n} kroky bez obdoby v Photoshopu|Vynecháno {n} kroků bez obdoby v Photoshopu
+
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	Vložit zastavení…
+	Save Set…	Uložit sadu…
+	Message:	Zpráva:
+	Allow Continue	Povolit pokračování
+	Show dialog during playback	Zobrazit dialog při přehrávání
+	Select an action first	Nejprve vyberte akci
+	Action playback stopped	Přehrávání akce zastaveno
+	Step {step} is waiting for its dialog	Krok {step} čeká na svůj dialog
+@plural	{n} action|{n} actions	{n} akce|{n} akce|{n} akcí

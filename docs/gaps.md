@@ -1,6 +1,6 @@
 # Where PhotoCraft falls short of Photoshop
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Czech UI localization evidence added to G13; Tilt-Shift evidence added to G2; earlier the same day: major, every known shortfall ranked from the re-measure) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (G4: checkbox-only Brush Settings rows; stroke-quality and performance gaps unchanged; G11: Load/Save Actions `.atn` landed, AUTO-219-2 partial) · **Target:** Adobe Photoshop 2026
 
 Every known shortfall against Photoshop 2026 (27.11.0), one entry each, ranked by user impact
 on the way to beta. This is the work list agents pick from: take the highest-ranked entry that
@@ -68,8 +68,7 @@ what an agent can't finish alone.
 - **Missing:** Select and Mask workspace layout
   (TOOL-214-1, Refine Hair #2671; its view modes preview live since #1754, Refine Edge Brush #2972); Content-Aware Fill workspace with a paintable sampling area
   (TOOL-214-15); Vanishing Point plane editor (TOOL-214-14); Content-Aware Scale through the
-  transform box (TOOL-214-7); Puppet Warp mesh following the outline (TOOL-214-6); Content-Aware
-  Move's Transform On Drop (TOOL-213-4).
+  transform box (TOOL-214-7); Content-Aware Move's Transform On Drop (TOOL-213-4).
 - **Evidence:** scorecard rows above, all partial or missing.
 - **Impact:** these are the tools retouchers and compositors use daily; a slider dialog is not a
   substitute.
@@ -77,18 +76,30 @@ what an agent can't finish alone.
 
 ### G8. Type depth
 - **Missing:** type on a path (TYPE-218-1), paragraph direction UI (TYPE-218-2), complex-script
-  fallback fonts and golden tests (TYPE-218-3), variable-font axes (TYPE-218-4), OpenType panel
-  UI (TYPE-218-5), manual and optical kerning with PSD round trip (TYPE-218-6, #206), live Warp
-  Text preview (TYPE-218-7, #2689), triple/quadruple click (TYPE-218-8), "rasterize and continue"
-  for distort/perspective on type (TYPE-218-9), text free transform (#2630).
-- **Evidence:** scorecard Type: 0 done, 3 partial, 6 missing. The Type tool froze the app for
+  fallback fonts and golden tests (TYPE-218-3), OpenType Numerals and Stylistic Sets submenus
+  (TYPE-218-5; the Character panel buttons landed 2026-10-11, #3752), live Warp Text preview
+  (TYPE-218-7, #2689), "rasterize and continue" for distort/perspective on type
+  (TYPE-218-9), text free transform (#2630). Done since the re-measure: manual and optical kerning
+  with PSD round trip (TYPE-218-6, #206), variable-font axes (TYPE-218-4, #2985).
+- **Evidence:** scorecard Type: 3 done, 2 partial, 4 missing. 2026-10-11: 2/3/4/5 clicks select
+  word, line, paragraph and all text, with tests (TYPE-218-8, #3493). The Type tool froze the app for
   60 s on one macOS machine (#2518).
 - **Estimate:** 120–200 h.
 
 ### G11. Actions and scripting
-- **Missing:** document-independent action recording (AUTO-219-1), a full Actions panel with
-  step toggles and .atn import (AUTO-219-2), replay tests (AUTO-219-4), Batch recursion and
-  naming (AUTO-219-5), ExtendScript/UXP compatibility.
+- **Missing:** document-independent action recording (AUTO-219-1), Batch recursion and naming
+  (AUTO-219-5), ExtendScript/UXP compatibility. `.atn` steps outside the
+  mapped events (paths, scripts, Generative Fill, offsets in points…) load as kept Photoshop
+  steps that fail at playback by name.
+- **Done 2026-10-12:** Load/Save Actions `.atn` in the panel menu, `batch --actions set.atn`
+  and `actions.load`/`actions.save`; 108 Photoshop events map to commands both ways (Transform,
+  Apply Image, Save for Web, smart-object edits, Gradient Map, Quick Mask, polygon selections,
+  Place, Open, Image Size in percent, the Paint Bucket and Insert Conditional since the third
+  and fourth PRs), Play, Stop and conditional steps included; layer steps replay by layer name in any
+  document. The panel groups actions
+  in set folders, has the dialog toggle column (playback pauses on the step's dialog and resumes
+  on OK) and Insert Stop…; `actions.insert`, `actions.dialog`, `actions.assignSet` for agents
+  (AUTO-219-2 done).
 - **Ahead of Photoshop:** CLI, MCP and the JSON control channel drive every command.
 - **Estimate:** 120–200 h. **Human:** whether to support a JavaScript scripting dialect at all
   (AGENTS.md forbids JS in the app).
@@ -98,6 +109,10 @@ what an agent can't finish alone.
   sidecars, masking and calibration in the Camera Raw dialog, per-camera colour for non-DNG
   cameras, lens profiles.
 - **Evidence:** `crates/raw/src/lib.rs:219` (CR3), scorecard FILE-215-11/12, #50.
+- **Progress (2026-10-11):** on the embedded-JPEG rendering work in #2135, Camera Raw
+  tuning retains the fitted look and applies user gains afterwards. Three D5100 NEFs
+  establish a guarded 4928 × 3264 image area. This is an estimated rendering, not a
+  measured D5100 colour calibration; [validation](nikon-nef-development.md).
 - **Estimate:** 120–200 h.
 
 ### G15. AI and generative features
@@ -125,6 +140,9 @@ what an agent can't finish alone.
 - **Estimate:** 250–400 h (many overlap with other gaps; count each fix once).
 
 ### G4. Brush feel
+- **Progress (2026-10-12, #4283):** the five checkbox-only Brush Settings rows keep the open
+  controls selected; Smoothing can be disabled without discarding its amount or mode. This
+  closes that panel interaction gap, not the stroke-quality or performance gaps below.
 - **Missing:** lag with big brushes (#2619, #1994) and under the cursor (#2566, #1343); jumpy
   pressure on Windows (#2046) and tap sensitivity (#1933); stair-stepped line weights (#1776),
   interpolation and smoothing problems (#2138), edge falloff (#2149), pixelated cursor vs
@@ -220,7 +238,12 @@ what an agent can't finish alone.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | G4: checkbox-only Brush Settings rows preserve the open controls and Smoothing settings (#4283); no readiness percentage or estimate changed |
+| 2026-10-12 | minor | G11: Load/Save Actions `.atn` landed (AUTO-219-2 partial); remaining panel work listed |
+| 2026-10-11 | minor | D5100 image area and Camera Raw tuning validation; G14 remains open |
+| 2026-10-11 | minor | G13: Czech dynamic UI text localized; engine messages and native review remain open |
+| 2026-10-11 | minor | G8: triple/quadruple/five-click type selection done (TYPE-218-8, #3493); Type evidence recounted |
+| 2026-10-11 | minor | G8: Character panel OpenType buttons landed (TYPE-218-5, #3752); Numerals and Stylistic Sets submenus still missing |
 | 2026-10-10 | minor | G2: recorded Tilt-Shift computation/filtered-proxy measurements and limits; gap and estimate remain open |
 | 2026-10-10 | minor | Checked against the alpha gate (no alpha blockers); #2374 marked closed |
 | 2026-10-10 | major | First version, from the full re-measure against Photoshop 2026 27.11.0 and the open issues |
-| 2026-10-11 | minor | G13: Czech dynamic UI text localized; engine messages and native review remain open |

@@ -200,6 +200,7 @@ pub fn resolve_brush(s: &Session, p: &Value, cmd: &str) -> Result<BrushSettings>
         b.spacing = v.clamp(0.01, 10.0);
     }
     if let Some(v) = num(p, "smoothing") {
+        b.smoothing.enabled = true;
         b.smoothing.amount = v.clamp(0.0, 1.0);
     }
     b.color = color(p.get("color"), s.tools.foreground);
@@ -248,7 +249,7 @@ fn erase_locked(brush: &mut BrushSettings, lock: bool, bg: [f32; 4]) {
 /// The document's own CMYK profile (absent, built-in or not a CMYK document: `None`, the
 /// default conversions), which the stroke's colour conversions must honour — the compositors
 /// and composite exports enter the same scope.
-fn doc_cmyk_space(s: &Session) -> Option<std::sync::Arc<photocraft_color::convert::CmykSpace>> {
+pub(crate) fn doc_cmyk_space(s: &Session) -> Option<std::sync::Arc<photocraft_color::convert::CmykSpace>> {
     photocraft_color::convert::CmykSpace::for_profile(s.active().and_then(|d| d.doc.icc_profile.as_ref()))
 }
 
@@ -374,9 +375,18 @@ fn block_brush(b: BrushSettings, p: &Value) -> Result<BrushSettings> {
     })
 }
 
+/// Is the stroke in Photoshop's Clear painting mode (`"mode": "clear"`, #3439)? It erases with the
+/// Brush's or Pencil's own brush; unlike a blend mode it is not a layer mode, so it is not a
+/// [`photocraft_color::BlendMode`].
+fn clear_mode(p: &Value) -> bool {
+    p.get("mode").and_then(Value::as_str).is_some_and(|m| m.eq_ignore_ascii_case("clear"))
+}
+
 /// Applies the options-bar blend `mode` to a brush. `"mode"` accepts any blend-mode name
-/// (normal|multiply|screen|…). The Eraser has no blend mode in Photoshop, so it is forced to Normal.
+/// (normal|multiply|screen|…), or `clear` to erase with the brush. The Eraser has no blend mode in
+/// Photoshop, so it is forced to Normal.
 fn with_blend_mode(mut b: BrushSettings, p: &Value) -> BrushSettings {
+    b.erase |= clear_mode(p);
     if b.erase {
         b.mode = photocraft_color::BlendMode::Normal;
     } else if let Some(m) = p.get("mode").and_then(Value::as_str).and_then(crate::commands::blend_from_str) {
@@ -389,7 +399,7 @@ fn with_blend_mode(mut b: BrushSettings, p: &Value) -> BrushSettings {
 pub fn paint_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     let pts = parse_points(p, "paint.stroke")?;
     let brush = with_blend_mode(resolve_brush(s, p, "paint.stroke")?, p);
-    let label = if brush.erase { "Eraser" } else { "Brush Tool" };
+    let label = if brush.erase && !clear_mode(p) { "Eraser" } else { "Brush Tool" };
     stroke_with(s, "paint.stroke", p, label, brush, pts, false)
 }
 
@@ -406,8 +416,9 @@ pub struct LiveStroke {
     symmetry: Option<crate::symmetry_cmds::PaintingSymmetry>,
     mirrors: Vec<StrokeRenderer>,
     mirror_distinct: Vec<bool>,
-    /// Restore passes separately; their union may span an otherwise untouched document.
-    symmetry_regions: Vec<Rect>,
+    /// What the symmetric preview drew last, once a mirror differs from the stroke, and how many
+    /// passes it merged (a mirror joining redraws every tile).
+    union_live: Option<(photocraft_paint::UnionLive, usize)>,
     pre: Surface,
     sel: Option<Surface>,
     lock: bool,
@@ -499,7 +510,7 @@ impl LiveStroke {
             symmetry,
             mirrors,
             mirror_distinct,
-            symmetry_regions: Vec::new(),
+            union_live: None,
             pre,
             sel,
             lock,
@@ -527,6 +538,12 @@ impl LiveStroke {
         self.mirrors.iter().zip(&self.mirror_distinct).filter(|(_, distinct)| **distinct).fold(bounds, |b, (r, _)| b.union(&r.bounds()))
     }
 
+    /// `(brush, pointer)` document positions while smoothing holds the brush back from the
+    /// pointer: the canvas draws a line between them.
+    pub fn smoothing_string(&self) -> Option<([f64; 2], [f64; 2])> {
+        self.renderer.smoothing_string()
+    }
+
     /// Does the stroke change with time while the pointer is held still (airbrush Build-up, or
     /// smoothing still catching up)? See `photocraft_paint::dynamics::DabGenerator::wants_time`.
     pub fn wants_time(&self) -> bool {
@@ -552,33 +569,27 @@ impl LiveStroke {
             }
             let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
             if self.mirror_distinct.iter().any(|d| *d) {
-                // Merge every finished pass once, both here and on commit, including shared axes.
+                // The stroke and its distinct mirrors composite as one stroke, as the commit
+                // merges them; only the tiles that changed are redrawn.
                 let old = self.tail;
-                let mut original_preview = self.renderer.clone();
-                original_preview.finish();
-                let copies: Vec<_> = self
-                    .mirrors
-                    .iter()
-                    .zip(&self.mirror_distinct)
-                    .filter(|(_, d)| **d)
-                    .map(|(r, _)| {
-                        let mut r = r.clone();
-                        r.finish();
-                        r
-                    })
+                let passes = 1 + self.mirror_distinct.iter().filter(|d| **d).count();
+                let (mut live, full, mut dmg) = match self.union_live.take() {
+                    Some((live, merged)) => (live, merged != passes, Rect::EMPTY),
+                    None => {
+                        // Leaving the single-pass preview: take its smoothing tail back first.
+                        if !old.is_empty() {
+                            surf.write_region(old, &self.pre.read_region(old));
+                        }
+                        (photocraft_paint::UnionLive::default(), true, old)
+                    }
+                };
+                let mut renderers: Vec<&mut StrokeRenderer> = std::iter::once(&mut self.renderer)
+                    .chain(self.mirrors.iter_mut().zip(&self.mirror_distinct).filter(|(_, d)| **d).map(|(r, _)| r))
                     .collect();
-                let bounds = copies.iter().fold(original_preview.bounds().union(&old), |b, r| b.union(&r.bounds()));
-                if self.symmetry_regions.is_empty() && !old.is_empty() {
-                    surf.write_region(old, &self.pre.read_region(old));
-                }
-                for region in &self.symmetry_regions {
-                    surf.write_region(*region, &self.pre.read_region(*region));
-                }
-                self.symmetry_regions =
-                    std::iter::once(original_preview.bounds()).chain(copies.iter().map(StrokeRenderer::bounds)).filter(|r| !r.is_empty()).collect();
-                let damage = original_preview.composite_union_many(&copies, &self.pre, surf, self.sel.as_ref(), self.lock);
-                self.tail = bounds;
-                return Ok(damage.union(&bounds));
+                dmg = dmg.union(&StrokeRenderer::composite_union_live(&mut renderers, &mut live, full, &self.pre, surf, self.sel.as_ref(), self.lock));
+                self.tail = old.union(&live.bounds());
+                self.union_live = Some((live, passes));
+                return Ok(dmg);
             }
             let mut dmg = Rect::EMPTY;
             let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
@@ -601,7 +612,7 @@ impl LiveStroke {
 fn pencil(s: &mut Session, p: &Value) -> Result<Value> {
     let pts = parse_points(p, "paint.pencil")?;
     let brush = pencil_brush(s, p)?;
-    let label = if brush.erase { "Eraser" } else { "Pencil" };
+    let label = if brush.erase && !clear_mode(p) { "Eraser" } else { "Pencil" };
     stroke_with(s, "paint.pencil", p, label, brush, pts, flag(p, "autoErase", false))
 }
 
@@ -1004,7 +1015,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "paint.pencil",
             "Pencil",
-            r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…}?,"preset":name?,"size":0.5..5000 px?,"opacity":0..1?,"color":"#rrggbb"?=foreground,"mode":"normal|multiply|screen|…"="normal","erase":bool?,"block":bool=false (a hard 16×16 screen-px square, 16/zoom doc px; size, opacity, flow, hardness and dynamics ignored: the Eraser's Block mode),"zoom":view zoom=1,"autoErase":bool=false,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
+            r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…}?,"preset":name?,"size":0.5..5000 px?,"opacity":0..1?,"color":"#rrggbb"?=foreground,"mode":"normal|multiply|screen|…|clear (erases with this brush)"="normal","erase":bool?,"block":bool=false (a hard 16×16 screen-px square, 16/zoom doc px; size, opacity, flow, hardness and dynamics ignored: the Eraser's Block mode),"zoom":view zoom=1,"autoErase":bool=false,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
             has_paintable,
             pencil,
             true

@@ -218,8 +218,8 @@ pub(crate) fn import(name: &str, bytes: &[u8]) -> Result<Document> {
     Ok(r.document)
 }
 
-/// What a headless save writes beyond the format: JPEG quality, TIFF layers, Targa bits and PSD
-/// previews.
+/// What a headless save writes beyond the format: JPEG quality, TIFF layers, Targa bits, PSD
+/// previews and the PSD merged image.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SaveOpts {
     /// Photoshop's 0–12 JPEG scale.
@@ -231,25 +231,30 @@ pub(crate) struct SaveOpts {
     pub tga_bits: Option<photocraft_io::TgaBits>,
     /// PSD/PSB: embed the thumbnail resource (Preferences › File Handling › Image Previews).
     pub image_previews: bool,
+    /// PSD/PSB: write the real merged image (Preferences › File Handling › Maximize PSD and PSB
+    /// File Compatibility).
+    pub psd_maximize_compatibility: bool,
 }
 
 impl Default for SaveOpts {
     fn default() -> Self {
-        SaveOpts { quality: None, tiff_layers: false, tga_bits: None, image_previews: true }
+        SaveOpts { quality: None, tiff_layers: false, tga_bits: None, image_previews: true, psd_maximize_compatibility: true }
     }
 }
 
 impl SaveOpts {
     /// `quality`, `tiffLayers` and `tgaBits` from command `cmd`'s params (a `tgaBits` other than
-    /// 24 or 32 is an error); the image previews from the session's File Handling preferences
-    /// (Ask When Saving has no dialog here, so it saves them, as Photoshop's Save As checkbox
-    /// starts on).
+    /// 24 or 32 is an error); the image previews and the PSD merged image from the session's File
+    /// Handling preferences (Ask When Saving has no dialog here, so it saves them, as Photoshop's
+    /// Save As checkbox and its Maximize Compatibility checkbox both start on).
     pub(crate) fn from_params(s: &Session, p: &Value, cmd: &str) -> Result<Self> {
+        let file_handling = &s.prefs().file_handling;
         Ok(SaveOpts {
             quality: f64_param(p, "quality"),
             tiff_layers: p.get("tiffLayers").and_then(Value::as_bool).unwrap_or(false),
             tga_bits: tga_bits_param(p, cmd)?,
-            image_previews: s.prefs().file_handling.image_previews != crate::prefs::Ask::Never,
+            image_previews: file_handling.image_previews != crate::prefs::Ask::Never,
+            psd_maximize_compatibility: file_handling.maximize_psd_compatibility != crate::prefs::Ask::Never,
         })
     }
 
@@ -283,8 +288,16 @@ pub fn tga_bits_param(p: &Value, cmd: &str) -> Result<Option<photocraft_io::TgaB
 pub(crate) fn encode(doc: &Document, path: &str, save: impl Into<SaveOpts>) -> Result<(Vec<u8>, Vec<String>)> {
     crate::allocation::checkpoint("saving document")?;
     let save = save.into();
-    let mut opts =
-        photocraft_io::ExportOptions { tiff_layers: save.tiff_layers, tga_bits: save.tga_bits, image_previews: save.image_previews, ..Default::default() };
+    let mut opts = photocraft_io::ExportOptions {
+        tiff_layers: save.tiff_layers,
+        tga_bits: save.tga_bits,
+        image_previews: save.image_previews,
+        psd_maximize_compatibility: save.psd_maximize_compatibility,
+        ..Default::default()
+    };
+    // No quality chosen: write the file the way it was opened (a JPEG at its own quality, a WebP
+    // lossy or lossless as it was), as Photoshop's Save does.
+    photocraft_io::apply_file_encoding(doc, &mut opts.encode);
     if let Some(q) = save.quality {
         let q = (q.clamp(0.0, 12.0) / 12.0 * 99.0 + 1.0).round() as u8;
         opts.encode.jpeg_quality = q;
@@ -1032,8 +1045,10 @@ fn has_live_effects(l: &Layer) -> bool {
     l.effects.enabled && l.effects.items.iter().any(|e| e.enabled())
 }
 
-/// The layer rendered alone (keeping what `keep` says), as a surface in `fmt`.
-fn bake(l: &Layer, canvas: Rect, fmt: PixelFormat, keep_effects: bool) -> Surface {
+/// The layer rendered alone (keeping what `keep` says), as a surface in `fmt`. With `apply_mask`
+/// off the layer's pixel and vector masks are left out of the render, so a caller that keeps them
+/// live on the baked raster does not mask the pixels twice.
+fn bake(l: &Layer, canvas: Rect, fmt: PixelFormat, keep_effects: bool, apply_mask: bool) -> Surface {
     let mut tmp = l.clone();
     tmp.opacity = 1.0;
     tmp.blend = photocraft_color::BlendMode::Normal;
@@ -1042,6 +1057,10 @@ fn bake(l: &Layer, canvas: Rect, fmt: PixelFormat, keep_effects: bool) -> Surfac
     if !keep_effects {
         tmp.effects.items.clear();
         tmp.fill_opacity = 1.0;
+    }
+    if !apply_mask {
+        tmp.mask = None;
+        tmp.vector_mask = None;
     }
     // Render over the union of the canvas and the content so off-canvas pixels survive.
     let area = l.surface().map_or(canvas, |s| s.content_bounds().union(&canvas));
@@ -1063,12 +1082,12 @@ fn flatten_all_effects(s: &mut Session) -> Result<Value> {
             if !has_live_effects(l) || matches!(l.content, LayerContent::Group(_) | LayerContent::Adjustment(_)) {
                 continue;
             }
-            let px = bake(l, canvas, fmt, true);
+            // The pixel and vector masks stay on the layer (baking must not destroy them), so the
+            // pixels are baked without them and each mask then applies once to the baked raster.
+            let px = bake(l, canvas, fmt, true, false);
             let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
             l.content = LayerContent::Raster(px);
             l.effects = Default::default();
-            l.mask = None;
-            l.vector_mask = None;
             l.fill_opacity = 1.0;
             l.fill_cache = None;
             l.psd_blocks.retain(|(k, _)| !matches!(k, b"TySh" | b"SoLd" | b"PlLd" | b"SoLE" | b"vmsk" | b"vsms" | b"vogk" | b"vscg" | b"vstk"));
@@ -1096,7 +1115,7 @@ fn flatten_all_masks(s: &mut Session) -> Result<Value> {
                 skipped += 1;
                 continue;
             }
-            let px = bake(l, canvas, fmt, false);
+            let px = bake(l, canvas, fmt, false, true);
             let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
             l.content = LayerContent::Raster(px);
             l.mask = None;
@@ -1114,13 +1133,24 @@ fn flatten_all_masks(s: &mut Session) -> Result<Value> {
 fn layers_to_files(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export.layersToFiles";
     let dir = str_param(p, "dir", cmd).or_else(|_| str_param(p, "output", cmd))?.to_string();
+    let names = export_layers_with(s, p, |name, bytes| write_file(&join(&dir, name), bytes))?;
+    let files: Vec<String> = names.iter().map(|name| join(&dir, name)).collect();
+    Ok(json!({"files": files}))
+}
+
+/// The bodies of `file.export.layersToFiles`, streamed to `write` as a single-component filename
+/// plus its bytes: one file per exported layer (top to bottom, like Photoshop's numbering),
+/// encoded but never touched as a path. Automation writes exactly these bytes beneath its write
+/// root (#3216), so the two paths cannot drift. Returns the filenames written, in order.
+pub fn export_layers_with(s: &Session, p: &Value, mut write: impl FnMut(&str, &[u8]) -> Result<()>) -> Result<Vec<String>> {
+    let cmd = "file.export.layersToFiles";
     let format = p.get("format").and_then(Value::as_str).unwrap_or("png").trim_start_matches('.').to_ascii_lowercase();
     let visible_only = p.get("visibleOnly").and_then(Value::as_bool).unwrap_or(true);
     let save = SaveOpts::from_params(s, p, cmd)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let prefix = p.get("prefix").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| stem(&d.doc.name));
     let doc = d.doc.clone();
-    let mut files = Vec::new();
+    let mut written = Vec::new();
     // Top-level layers (groups export merged), top to bottom like Photoshop's numbering.
     let layers: Vec<&Layer> = doc.layers.iter().rev().filter(|l| l.visible || !visible_only).collect();
     for (i, l) in layers.iter().enumerate() {
@@ -1132,11 +1162,12 @@ fn layers_to_files(s: &mut Session, p: &Value) -> Result<Value> {
         only.visible = true;
         only.clipped = false;
         one.layers = vec![only];
-        let path = join(&dir, &format!("{}_{:04}_{}.{format}", sanitize(&prefix), i, sanitize(&l.name)));
-        save_doc(&one, &path, save)?;
-        files.push(path);
+        let name = format!("{}_{:04}_{}.{format}", sanitize(&prefix), i, sanitize(&l.name));
+        let (bytes, _warnings) = encode(&one, &name, save)?;
+        write(&name, &bytes)?;
+        written.push(name);
     }
-    Ok(json!({"files": files}))
+    Ok(written)
 }
 
 /// Adjustment layers that can be represented as an RGB-only LUT, in document stack order.
@@ -1326,6 +1357,7 @@ fn clear_canvas_guides(s: &mut Session) -> Result<Value> {
     s.edit("Clear Canvas Guides", |doc, _| {
         doc.guides.vertical.retain(|x| in_x(*x));
         doc.guides.horizontal.retain(|y| in_y(*y));
+        doc.guides.prune_colors();
         Ok(())
     })?;
     Ok(json!({"cleared": n}))

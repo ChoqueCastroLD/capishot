@@ -182,8 +182,18 @@ pub fn properties(printer: &str, current: Option<&DevMode>, parent: Option<isize
 struct Dc(HDC);
 
 impl Dc {
-    fn create(printer: &str, settings: Option<&DevMode>) -> Result<Self> {
+    fn create(printer: &str, settings: Option<&DevMode>, manual_copies: bool) -> Result<Self> {
         let name = wide(printer)?;
+        let normalized = if manual_copies {
+            let defaults = match settings {
+                Some(s) => s.clone(),
+                None => properties(printer, None, None, false)?.ok_or_else(|| PrintError::Invalid("the printer refused its default settings".into()))?,
+            };
+            Some(defaults.for_manual_copies()?)
+        } else {
+            None
+        };
+        let settings = normalized.as_ref().or(settings);
         // The driver validates and completes the settings first (DM_IN_BUFFER | DM_OUT_BUFFER, no
         // dialog). If it refuses them, that is an error: never print on the defaults instead.
         let merged = match settings {
@@ -193,6 +203,9 @@ impl Dc {
             ),
             None => None,
         };
+        if manual_copies && !merged.as_ref().is_some_and(DevMode::has_manual_copies) {
+            return Err(PrintError::Invalid("the driver refused single-copy settings; no print job was sent".into()));
+        }
         let dm = merged.as_ref().map(aligned_copy);
         let dmp: *const DEVMODEW = dm.as_ref().map_or(null(), |b| b.as_ptr().cast());
         // SAFETY: `name` is NUL-terminated; `dmp` is null or aligned settings from this
@@ -235,7 +248,7 @@ impl Drop for Dc {
 }
 
 pub fn page(printer: &str, settings: Option<&DevMode>) -> Result<Page> {
-    Dc::create(printer, settings)?.page()
+    Dc::create(printer, settings, false)?.page()
 }
 
 /// RGB rows top-down → a bottom-up 24-bit DIB (BGR, rows padded to 4 bytes).
@@ -323,7 +336,7 @@ pub fn print(job: &Job<'_>, image: &RgbImage<'_>, rect: (f64, f64, f64, f64)) ->
     if image.width > i32::MAX as u32 || image.height > i32::MAX as u32 {
         return Err(PrintError::Invalid("image too large".into()));
     }
-    let dc = Dc::create(job.printer, job.settings)?;
+    let dc = Dc::create(job.printer, job.settings, true)?;
     let page = dc.page()?;
     let (x, y, w, h) = crate::device_rect(&page, rect);
     let (bmi, bits) = dib(image)?;
@@ -338,7 +351,9 @@ pub fn print(job: &Job<'_>, image: &RgbImage<'_>, rect: (f64, f64, f64, f64)) ->
     };
     // SAFETY: a valid printer DC. ICM off: the pixels are already in the printer's space
     // (or deliberately unmanaged), so GDI must not convert them again.
-    unsafe { SetICMMode(dc.0, ICM_OFF) };
+    if unsafe { SetICMMode(dc.0, ICM_OFF) } == 0 {
+        return Err(last_error("disabling GDI color management"));
+    }
     // SAFETY: a valid DC; HALFTONE resampling needs the brush origin reset afterwards.
     unsafe {
         SetStretchBltMode(dc.0, HALFTONE);

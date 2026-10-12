@@ -916,19 +916,16 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
 }
 
 fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
-    let mut p = params(f);
-    // The Print button prints (an empty Save as PDF path means the printer).
-    if s(f, "output", "").is_empty() {
-        p["send"] = json!(true);
+    let r = app.run("file.print", params(f))?;
+    if r["pending"] != json!(true) {
+        print_status(app, &r);
     }
-    let r = app.run("file.print", p)?;
+    Ok(r)
+}
+
+pub(crate) fn print_status(app: &mut PhotocraftApp, r: &Value) {
     app.ui.status = if let Some(printer) = r["spooler"]["printer"].as_str() {
-        let template = if r["spooler"]["textSkipped"] == json!(true) {
-            "Sent to {printer} (description and label text are only in Save as PDF)"
-        } else {
-            "Sent to {printer}"
-        };
-        crate::i18n::fmt(tl!(template), &[("printer", printer)])
+        crate::i18n::fmt(tl!("Sent to {printer}"), &[("printer", printer)])
     } else if r["sent"] == json!(true) {
         let template = "Sent to the printer ({spooler})";
         crate::i18n::fmt(tl!(template), &[("spooler", r["spooler"].as_str().unwrap_or(""))])
@@ -936,7 +933,7 @@ fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Valu
         let template = "Printed to {path}";
         crate::i18n::fmt(tl!(template), &[("path", r["pdf"].as_str().unwrap_or(""))])
     };
-    Ok(r)
+    app.ui.status_error = false;
 }
 
 #[cfg(test)]
@@ -1065,6 +1062,20 @@ mod tests {
         for id in ["file.automate.contactSheetII", "file.scripts.statistics", "file.scripts.scriptEventsManager", "file.package"] {
             let r = crate::menus::invoke(&mut app, &ctx, id, json!({})).unwrap();
             assert!(r["dialog"].is_u64(), "{id}");
+        }
+    }
+
+    #[test]
+    fn print_dialog_does_not_inherit_scripted_send_override() {
+        for send in [false, true] {
+            let (mut app, ctx) = app();
+            let out = std::env::temp_dir().join(format!("pc-printui-state-{}-{send}.pdf", std::process::id())).to_string_lossy().into_owned();
+            app.session.execute("file.print", json!({"output": out, "send": send, "dryRun": true})).unwrap();
+            assert!(app.session.file_menu.last_print.as_ref().unwrap().get("send").is_none());
+            let r = crate::menus::invoke(&mut app, &ctx, "file.print", json!({})).unwrap();
+            let id = r["dialog"].as_u64().unwrap();
+            assert!(app.ui.dialog_mut(id).unwrap().fields.get("send").is_none());
+            std::fs::remove_file(out).unwrap();
         }
     }
 }

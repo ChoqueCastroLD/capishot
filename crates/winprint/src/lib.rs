@@ -78,6 +78,25 @@ impl DevMode {
         &self.0
     }
 
+    /// The application emits every copy as a page. Disable driver copies/collation too,
+    /// preserving the driver's private settings and all other public fields.
+    #[cfg(any(windows, test))]
+    pub(crate) fn for_manual_copies(&self) -> Result<Self> {
+        let mut bytes = self.0.clone();
+        let invalid = || PrintError::Invalid("printer settings are too short".into());
+        let fields: [u8; 4] = bytes.get(72..76).and_then(|b| b.try_into().ok()).ok_or_else(invalid)?;
+        let fields = u32::from_le_bytes(fields) | 0x100 | 0x8000; // DM_COPIES | DM_COLLATE
+        bytes.get_mut(72..76).ok_or_else(invalid)?.copy_from_slice(&fields.to_le_bytes());
+        bytes.get_mut(86..88).ok_or_else(invalid)?.copy_from_slice(&1i16.to_le_bytes());
+        bytes.get_mut(100..102).ok_or_else(invalid)?.copy_from_slice(&0i16.to_le_bytes());
+        Ok(Self(bytes))
+    }
+
+    #[cfg(any(windows, test))]
+    pub(crate) fn has_manual_copies(&self) -> bool {
+        self.0.get(86..88) == Some(1i16.to_le_bytes().as_slice()) && self.0.get(100..102) == Some(0i16.to_le_bytes().as_slice())
+    }
+
     /// Hex, for JSON parameters and remembered print settings.
     pub fn to_hex(&self) -> String {
         self.0.iter().map(|b| format!("{b:02x}")).collect()
@@ -122,6 +141,7 @@ pub struct Marks {
 }
 
 impl Marks {
+    #[cfg(windows)]
     pub(crate) fn any(self) -> bool {
         self.corner_crop || self.center_crop || self.registration
     }
@@ -223,7 +243,7 @@ pub fn print(job: &Job<'_>, image: &RgbImage<'_>, rect: (f64, f64, f64, f64)) ->
     if image.width == 0 || image.height == 0 || row.checked_mul(image.height as usize) != Some(image.data.len()) {
         return Err(PrintError::Invalid("nothing to print".into()));
     }
-    if !(rect.2 > 0.0 && rect.3 > 0.0) {
+    if ![rect.0, rect.1, rect.2, rect.3].iter().all(|v| v.is_finite()) || !(rect.2 > 0.0 && rect.3 > 0.0) {
         return Err(PrintError::Invalid("the print size is empty".into()));
     }
     #[cfg(windows)]
@@ -262,6 +282,20 @@ mod tests {
         for bad in ["", "abc", "zz", &"00".repeat(300)] {
             assert!(DevMode::from_hex(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn manual_copies_disable_driver_multiplication_without_losing_private_settings() {
+        let mut bytes = devmode(220, 32);
+        bytes[86..88].copy_from_slice(&7i16.to_le_bytes());
+        bytes[100..102].copy_from_slice(&1i16.to_le_bytes());
+        bytes[220..].fill(0x5a);
+        let original = DevMode::from_bytes(bytes).unwrap();
+        let normalized = original.for_manual_copies().unwrap();
+        assert!(normalized.has_manual_copies());
+        assert!(!original.has_manual_copies());
+        assert_eq!(&normalized.as_bytes()[220..], &original.as_bytes()[220..]);
+        assert_eq!(normalized.for_manual_copies().unwrap(), normalized);
     }
 
     #[test]

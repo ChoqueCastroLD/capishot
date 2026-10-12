@@ -167,6 +167,10 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::tool_reset::invoke(app, id, &params) {
         return r;
     }
+    // A filter on a type layer asks to rasterize it first (#4303).
+    if let Some(r) = crate::rasterize_prompt::intercept_filter(app, id, &params) {
+        return r;
+    }
     // A pending Pen anchor is gesture state; Edit › Undo must match the keyboard.
     if id == "edit.undo" && crate::vector_ui::pen_undo_last_point(app) {
         return Ok(Value::Null);
@@ -279,6 +283,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             }
             Ok(Value::Null)
         }
+        "layer.duplicate" if params.as_object().is_none_or(|o| o.is_empty()) => crate::duplicate_layer_ui::open(app),
         "file.new" if params.as_object().is_none_or(|o| o.is_empty()) => {
             let fields = app.new_document_fields();
             let d = app.ui.open_dialog(DialogKind::NewDocument, fields);
@@ -290,6 +295,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             } else {
                 app.open_dialog_file()
             }
+        }
+        "file.import.videoFramesToLayers" if params.get("path").and_then(Value::as_str).is_none() => {
+            app.ask_folder(|app, path| app.run("file.import.videoFramesToLayers", json!({"path": path})).map_err(|e| e.to_string()))
         }
         "file.save" => {
             // Writes back only to a layered file; a flat one goes through Save As.
@@ -339,7 +347,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             let doc = app.session.active_index().ok_or("no document")?;
             let wid = app.ui.alloc_id();
             let view = app.ui.views[doc].clone();
-            app.ui.windows.push(crate::state::DocWindow { id: wid, document: doc, view, open: true });
+            app.ui.windows.push(crate::state::DocWindow { id: wid, document: doc, view, open: true, position: None });
             Ok(json!({"window": wid}))
         }
         "window.theme.toggle" => {
@@ -392,9 +400,14 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         l if matches!(l, "layer.exportAs" | "layer.quickExportAsPng") && params.as_object().is_none_or(|o| o.is_empty()) => {
             let layer = app.session.active().and_then(|d| d.active_layer).ok_or("no active layer")?;
             if l == "layer.exportAs" {
+                // Several layers (artboards, say) selected: one file each (#3629).
+                let layers = app.session.active().map(|d| d.selected_layers()).unwrap_or_default();
+                if layers.len() > 1 {
+                    return Ok(json!({"dialog": crate::export_dialog::open_layers(app, &layers)?}));
+                }
                 Ok(json!({"dialog": crate::export_dialog::open_layer(app, layer)?}))
             } else {
-                crate::export_dialog::quick_export_layer_png(app, layer)
+                crate::export_dialog::quick_export_selected_layers_png(app)
             }
         }
         "layer.layerStyle.blendingOptions" if params.as_object().is_none_or(|o| o.is_empty()) => {
@@ -534,6 +547,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         | "edit.transform.perspective" => {
             // While a box is up, Scale / Rotate / Skew / Distort / Perspective (and Free Transform)
             // switch its mode; otherwise they start one in that mode.
+            if app.ui.transform.as_ref().is_some_and(|t| t.content_aware.is_some()) {
+                return Err(crate::transform_tool::CAS_ONLY_SCALES.into());
+            }
             if app.ui.transform.is_none() {
                 crate::transform_tool::begin(app, ctx)?;
             }
@@ -560,9 +576,12 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "edit.transform.warpGrid" if app.ui.transform.as_ref().is_some_and(|t| t.warp.is_some()) && params.get("warp").is_none() => {
             crate::transform_tool::edit_session_warp(app, id, &params).map(|_| json!({"transform": app.ui.transform}))
         }
+        // Layer › New › Layer… (⇧⌘N) asks first, as in Photoshop; with params it runs as is.
+        crate::new_layer_ui::COMMAND if params.as_object().is_none_or(|o| o.is_empty()) => Ok(json!({"dialog": crate::new_layer_ui::open(app)?})),
         sz if crate::sizing::is_sizing(sz) && params.as_object().is_none_or(|o| o.is_empty()) => {
             Ok(json!({"dialog": crate::sizing::open(app, sz).ok_or("no document")?}))
         }
+        "view.newGuide" if params.as_object().is_none_or(|o| o.is_empty()) => Ok(json!({"dialog": crate::new_guide_ui::open(app)})),
         fl if crate::filter_dialog::has_dialog(fl) && params.as_object().is_none_or(|o| o.is_empty()) => {
             Ok(json!({"dialog": crate::filter_dialog::open(app, fl)}))
         }
@@ -656,6 +675,10 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     if crate::crop_ui::blocks(app, id) {
         return false;
     }
+    // Filters stay live on a type layer: choosing one asks to rasterize it (#4303).
+    if crate::rasterize_prompt::filter_needs(app, id).is_some() {
+        return true;
+    }
     if let Some(e) = crate::workspace_ui::is_enabled(app, id) {
         return e;
     }
@@ -672,6 +695,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         return e;
     }
     if let Some(e) = crate::transform_tool::is_enabled(app, id) {
+        return e;
+    }
+    if let Some(e) = crate::crop_ui::is_enabled(app, id) {
         return e;
     }
     match id {
@@ -947,6 +973,14 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
         && let Some(item) = items.iter_mut().find(|i| i.id == "layer.layerMask.enabled")
     {
         item.label = crate::layer_menu_ui::mask_toggle_label(mask.enabled).into();
+    }
+    // Layer › Merge Layers reads Merge Group with just a group selected, as in Photoshop (#3832).
+    if let Some(st) = app.session.active()
+        && st.selected_layers().len() <= 1
+        && st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| matches!(l.content, photocraft_doc::LayerContent::Group(_)))
+        && let Some(item) = items.iter_mut().find(|i| i.id == "layer.mergeLayers")
+    {
+        item.label = "Merge Group".into();
     }
     // The File quick-export command uses the format selected in Export Preferences.
     // On the web it intentionally downloads PNG until the quick-export service supports
