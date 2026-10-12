@@ -368,7 +368,7 @@ impl BrushContext {
         let parallel = h >= 64 && w > 0;
         #[cfg(target_arch = "wasm32")]
         let parallel = false;
-        match depth.as_deref_mut() {
+        match depth {
             #[cfg(not(target_arch = "wasm32"))]
             Some(dp) if parallel => {
                 out.par_chunks_mut(w).zip(dp.par_chunks_mut(w)).enumerate().for_each(|(yy, (row, drow))| rasterize_row(yy, row, Some(drow)));
