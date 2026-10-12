@@ -254,7 +254,10 @@ fn spool_transport_streams_pdf_and_propagates_refusal() {
         assert!(s.execute("jobs.cancel", json!({"job": job.0})).unwrap_err().to_string().contains("system print queue"));
         s.execute("file.new", json!({"width": 40, "height": 10})).unwrap();
         let viewed = s.active().unwrap().doc.id;
+        let journal_before_completion = s.journal.len();
         let out = s.wait_job(job).unwrap();
+        assert_eq!(s.journal.len(), journal_before_completion + 1, "print hooks must not become duplicate recorded action steps");
+        assert_eq!(s.journal.last().unwrap().0, "file.print");
         assert_eq!(s.active().unwrap().doc.id, viewed, "completion keeps the user's tab");
         assert_eq!(s.active().unwrap().doc.size.width, 40, "print hook must not act on the newly viewed document");
         let printed = &s.documents().iter().find(|st| st.doc.id == source).unwrap().doc;
