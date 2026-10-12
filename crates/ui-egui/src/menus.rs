@@ -243,6 +243,10 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::prefs_ui::invoke(app, ctx, id, &params) {
         return r;
     }
+    // Compile PSD / Compile Folder (psd-compiler): save dialog or form; downloads on the web.
+    if let Some(r) = crate::capishot_ui::invoke(app, id, &params) {
+        return r;
+    }
     // Save for Web, Print and the other File-menu dialogs added with slices.
     if let Some(r) = crate::file_ui::invoke(app, ctx, id, &params) {
         return r;

@@ -86,7 +86,8 @@ psd-compiler matches every file the base compositor does, plus 113 more. Capisho
 everything other programs see:
 
 - the merged image of every 8-bit RGB PSD/PSB it saves;
-- `File › Export › Compile PSD…` and `File › Automate › Compile Folder…`;
+- `File › Export › Compile PSD…` and `File › Automate › Compile Folder…` (in the browser: a
+  download, and a ZIP of the PSD files you pick; type re-renders with the fonts the page has);
 - `capishot-cli compile page.psd` or `capishot-cli compile chapter/ --format webp`.
 
 Bringing the on-canvas render to psd-compiler's models is the next step (see the roadmap).
