@@ -2684,3 +2684,6 @@ cameraData	Lens	Obiettivo
 	(No neutral color exists for {mode} mode.)	(Non esiste un colore neutro per il metodo {mode}.)
 	Apply mask to layer before removing?	Applicare la maschera al livello prima di rimuoverla?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Il livello o la sua maschera è cambiato. Trascina di nuovo la maschera nel cestino.
+
+# Submitted print jobs are managed by the operating system.
+	Manage submitted jobs in the system print queue	Gestisci i lavori inviati nella coda di stampa del sistema

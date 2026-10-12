@@ -3624,3 +3624,6 @@ cameraData	Lens	レンズ
 	(No neutral color exists for {mode} mode.)	({mode} モードには中間色がありません。)
 	Apply mask to layer before removing?	削除する前にマスクをレイヤーに適用しますか？
 	The layer or its mask changed. Drag the mask onto the Trash again.	レイヤーまたはそのマスクが変更されました。もう一度マスクをゴミ箱にドラッグしてください。
+
+# Submitted print jobs are managed by the operating system.
+	Manage submitted jobs in the system print queue	送信済みのジョブはシステムの印刷キューで管理してください

@@ -3017,3 +3017,6 @@ cameraData	Lens	Lensa
 	(No neutral color exists for {mode} mode.)	(Tidak ada warna netral untuk mode {mode}.)
 	Apply mask to layer before removing?	Terapkan masker ke layer sebelum dihapus?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Layer atau maskernya berubah. Seret masker ke Tempat Sampah lagi.
+
+# Submitted print jobs are managed by the operating system.
+	Manage submitted jobs in the system print queue	Kelola pekerjaan yang dikirim dalam antrean cetak sistem

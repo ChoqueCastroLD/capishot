@@ -2652,3 +2652,6 @@ cameraData	Lens	Objektiv
 	(No neutral color exists for {mode} mode.)	(Für den Modus {mode} gibt es keine neutrale Farbe.)
 	Apply mask to layer before removing?	Maske vor dem Entfernen auf die Ebene anwenden?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Die Ebene oder ihre Maske hat sich geändert. Ziehen Sie die Maske erneut in den Papierkorb.
+
+# Submitted print jobs are managed by the operating system.
+	Manage submitted jobs in the system print queue	Übermittelte Aufträge in der Druckwarteschlange des Systems verwalten

@@ -2602,3 +2602,6 @@ cameraData	Lens	鏡頭
 	(No neutral color exists for {mode} mode.)	（{mode}模式沒有中性色。）
 	Apply mask to layer before removing?	移除之前將遮色片套用到圖層嗎？
 	The layer or its mask changed. Drag the mask onto the Trash again.	圖層或其遮色片已變更。請再次將遮色片拖曳到垃圾桶。
+
+# Submitted print jobs are managed by the operating system.
+	Manage submitted jobs in the system print queue	在系統列印佇列中管理已提交的工作
