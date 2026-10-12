@@ -27,7 +27,7 @@ XL are missing (gap G10). Remaining: 300–500 h including PSD fidelity.
 | TIFF | R/W | yes | yes | 8/16/32f, Gray/RGB/CMYK, BigTIFF, every IFD, banded parallel decode; layered TIFF both byte orders (FILE-215-7: extra alpha channels not written) |
 | JPEG | R/W | yes | yes | 8-bit Gray/RGB/CMYK, ICC/EXIF/XMP; no JPEG Options dialog (quality 0–12, baseline/progressive) (FILE-215-19) |
 | PNG | R/W | yes | yes | 8/16-bit, ICC/text; APNG first frame only; alpha channels on open (#2225) |
-| GIF | R/W | yes | yes | First frame only |
+| GIF | R/W | yes | yes | File › Open keeps the first frame; New Video Layer from File and Video Frames to Layers take every frame, with the timeline rate from the delays (#572). Per-frame delays and keeping the frames in `.pcraft` are not done |
 | BMP | R/W | yes | yes | 8-bit |
 | WebP | R/W | yes | yes | Lossless and our own lossy VP8 encoder; ICC/EXIF/XMP |
 | AVIF | R/W | no (#463) | optional feature, off by default | |

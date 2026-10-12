@@ -38,6 +38,18 @@ pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
     Ok(r)
 }
 
+/// Every frame of a GIF as a single-layer document, handed to `each` in order with its delay in
+/// milliseconds (a still GIF has one). One frame at a time becomes a document, so the caller
+/// can flatten and drop it. Returns the number of frames; stops at the first error `each` gives.
+pub fn import_gif_frames(name: &str, bytes: &[u8], each: &mut dyn FnMut(Document, u32) -> Result<(), IoError>) -> Result<usize, IoError> {
+    let frames = codecs::decode_gif_frames(bytes, &codecs::DecodeOptions::default())?;
+    let n = frames.len();
+    for f in frames {
+        each(image_to_document(name, &f.image)?.document, f.delay_ms)?;
+    }
+    Ok(n)
+}
+
 /// Photoshop opens a 32-bit Targa as an opaque Background plus an "Alpha 1" channel holding the
 /// fourth byte, even when the header declares no alpha bits, and keeps the stored colours (#2225;
 /// measured on Photoshop 27.11). Layer transparency would hide those colours and lose the channel
