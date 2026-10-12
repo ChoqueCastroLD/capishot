@@ -249,6 +249,26 @@ impl Default for ExportSettings {
     }
 }
 
+impl ExportSettings {
+    /// The `photocraft_io` export options for these settings, as the desktop and web export
+    /// services encode with. PSD/PSB keep psd-compiler's merged image (`psdc_composite`) on both.
+    pub fn io_options(&self) -> photocraft_io::ExportOptions {
+        let mut opts = photocraft_io::ExportOptions::default();
+        if let Some(q) = self.jpeg_quality {
+            opts.encode.jpeg_quality = q;
+        }
+        opts.encode.webp_lossless = self.webp_lossless;
+        if let Some(q) = self.webp_quality {
+            opts.encode.webp_quality = q;
+        }
+        opts.tiff_layers = self.tiff_layers;
+        opts.xmp = if self.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
+        opts.tga_bits = self.tga_bits;
+        opts.image_previews = self.image_previews;
+        opts
+    }
+}
+
 /// The document's lone layer when it is a plain raster a flat file keeps: visible, at full
 /// opacity, in Normal mode, with no masks, effects or blending restrictions (#2234).
 pub(crate) fn plain_raster(doc: &Document) -> Option<&photocraft_doc::Layer> {

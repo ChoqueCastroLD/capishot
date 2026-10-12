@@ -347,20 +347,9 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
         import: Some(Box::new(|name: &str, bytes: &[u8], max_svg_group_depth: usize| {
             photocraft_io::import_with_svg_group_depth(name, bytes, max_svg_group_depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
         })),
+        // The desktop's options: PSD/PSB saves carry psd-compiler's merged image here too.
         export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
-            let mut opts = photocraft_io::ExportOptions::default();
-            if let Some(q) = settings.jpeg_quality {
-                opts.encode.jpeg_quality = q;
-            }
-            opts.encode.webp_lossless = settings.webp_lossless;
-            if let Some(q) = settings.webp_quality {
-                opts.encode.webp_quality = q;
-            }
-            opts.tiff_layers = settings.tiff_layers;
-            opts.xmp = if settings.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
-            opts.tga_bits = settings.tga_bits;
-            opts.image_previews = settings.image_previews;
-            photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
+            photocraft_io::export(doc, path, &settings.io_options()).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
         file_dialog: Some(Box::new(|request, _parent, reply| match request {
             // The browser's file picker hands over the files' contents, not paths. File › Open
