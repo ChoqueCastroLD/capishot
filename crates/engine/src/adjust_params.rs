@@ -391,6 +391,9 @@ fn hue_saturation(r: &Reader<'_>, base: Option<&Adjustment>) -> Result<Adjustmen
     let colorize = r.boolean("colorize", c)?;
     // Colorize hue is 0..360, a shift is -180..180.
     let hue = if colorize { r.num("hue", h.rem_euclid(360.0), 0.0, 360.0)? } else { r.num("hue", h, -180.0, 180.0)? };
+    // Turning Colorize on starts at 25% saturation unless one is given, like the dialog's
+    // checkbox and Photoshop; an explicit 0 stays 0, which colorizes to grey (#2326).
+    let s = if colorize && !c { s.max(25.0) } else { s };
     let (saturation, lightness) = (r.num("saturation", s, if colorize { 0.0 } else { -100.0 }, 100.0)?, r.num("lightness", l, -100.0, 100.0)?);
     for (i, key) in HUE_RANGES.iter().enumerate() {
         let Some(o) = r.object(key)? else { continue };
@@ -880,6 +883,13 @@ mod tests {
         assert!(matches!(a, Adjustment::BlackWhite { weights, tint: Some(_) } if weights[0] == 120.0 && weights[1] == 60.0));
         let a = from_params("hueSaturation", &json!({"blues": {"hue": 40}}), None, ColorMode::Rgb).unwrap();
         assert!(matches!(&a, Adjustment::HueSaturation { ranges, .. } if ranges[4].hue == 40.0 && ranges[0].is_neutral()));
+        // Colorize without a saturation starts at 25%; an explicit 0 and an already colorized base are kept.
+        let a = from_params("hueSaturation", &json!({"colorize": true, "hue": 30}), None, ColorMode::Rgb).unwrap();
+        assert!(matches!(a, Adjustment::HueSaturation { colorize: true, saturation: 25.0, .. }), "{a:?}");
+        let a = from_params("hueSaturation", &json!({"colorize": true, "saturation": 0}), None, ColorMode::Rgb).unwrap();
+        assert!(matches!(a, Adjustment::HueSaturation { colorize: true, saturation: 0.0, .. }), "{a:?}");
+        let a = from_params("hueSaturation", &json!({"hue": 120}), Some(&a), ColorMode::Rgb).unwrap();
+        assert!(matches!(a, Adjustment::HueSaturation { colorize: true, saturation: 0.0, hue: 120.0, .. }), "{a:?}");
         let a = from_params("gradientMap", &json!({"stops": [[1, "#ffffff"], [0, "#000000"]], "dither": true}), None, ColorMode::Rgb).unwrap();
         assert!(matches!(&a, Adjustment::GradientMap { stops, dither: true, .. } if stops[0].0 == 0.0));
         // CMYK curves: ink channels; Lab: lightness without a composite.
@@ -1230,9 +1240,10 @@ mod tests {
     #[test]
     fn destructive_levels_dont_clip_in_32_bit() {
         // Input 15..230, gamma 1.3, output 10..245: black and white land on the output range in
-        // integer documents, but in a 32-bit document the curve runs on past it (then 0..1).
+        // integer documents, but in a 32-bit document the curve runs on past it, preserving HDR.
         let params = json!({"inBlack": 15, "inWhite": 230, "gamma": 1.3, "outBlack": 10, "outWhite": 245});
-        for (depth, low, high) in [(8, 10.0, 245.0), (16, 10.0, 245.0), (32, 0.0, 255.0)] {
+        // Independent signed-power expectations for black and white in the float document.
+        for (depth, low, high) in [(8, 10.0 / 255.0, 245.0 / 255.0), (16, 10.0 / 255.0, 245.0 / 255.0), (32, -0.0796427, 1.042158)] {
             let mut s = crate::Session::new();
             s.execute("file.new", json!({"width": 16, "height": 16, "depth": depth, "background": "white"})).unwrap();
             s.execute("select.rect", json!({"x": 0, "y": 0, "width": 8, "height": 16})).unwrap();
@@ -1240,8 +1251,12 @@ mod tests {
             s.execute("select.deselect", json!({})).unwrap();
             s.execute("image.adjustments.levels", params.clone()).unwrap();
             let px = pixels(&s);
-            assert!((px[0][0] * 255.0 - low).abs() < 0.6, "black @{depth}: {:?}", px[0]);
-            assert!((px[1][0] * 255.0 - high).abs() < 0.6, "white @{depth}: {:?}", px[1]);
+            let tolerance = if depth == 32 { 1e-5 } else { 0.6 / 255.0 };
+            if depth == 32 {
+                assert!(px[0][0] < 0.0 && px[1][0] > 1.0, "unclipped HDR: {px:?}");
+            }
+            assert!((px[0][0] - low).abs() < tolerance, "black @{depth}: {:?}", px[0]);
+            assert!((px[1][0] - high).abs() < tolerance, "white @{depth}: {:?}", px[1]);
         }
     }
 

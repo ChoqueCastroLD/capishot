@@ -121,6 +121,13 @@ impl Ctx<'_> {
         }
     }
 
+    /// [`Self::channel_plane`] without the warnings sink, so a layer's channels decode
+    /// concurrently (their RLE rows are the bulk of the open time on full-canvas layers).
+    fn channel_plane_decoded(&self, rec: &LayerRecord, id: i16) -> Option<Vec<u8>> {
+        rec.channel(id)?;
+        rec.decode_channel(id, self.file.header.depth, self.file.header.version).ok()
+    }
+
     fn record_surface(&mut self, rec: &LayerRecord, name: &str) -> Surface {
         let r = rec.rect;
         if r.is_empty() || r.size().is_err() {
@@ -128,15 +135,28 @@ impl Ctx<'_> {
         }
         let (w, h) = r.size().unwrap_or((0, 0));
         let s = self.fmt.sample;
-        let mut planes = Vec::with_capacity(self.cc + 1);
-        for c in 0..self.cc {
-            planes.push(self.channel_plane(rec, c as i16, name));
-        }
-        planes.push(self.channel_plane(rec, CHANNEL_TRANSPARENCY, name));
+        let ids: Vec<i16> = (0..self.cc as i16).chain([CHANNEL_TRANSPARENCY]).collect();
+        let planes: Vec<Option<Vec<u8>>> = if cfg!(target_arch = "wasm32") {
+            ids.iter().map(|&id| self.channel_plane(rec, id, name)).collect()
+        } else {
+            // The channels decode independently; their RLE rows are the bulk of the open
+            // time for full-canvas layers, so they run side by side and the warnings land
+            // in the same order afterwards.
+            // par_map reuses the crate's worker pool (one OS thread per channel per layer
+            // would spawn thousands on a file with many layers).
+            let decoded: Vec<Option<Vec<u8>>> = crate::pixels::par_map(ids.to_vec(), |id| self.channel_plane_decoded(rec, id));
+            let mut planes: Vec<Option<Vec<u8>>> = Vec::with_capacity(decoded.len());
+            for (&id, p) in ids.iter().zip(decoded) {
+                if p.is_none() && rec.channel(id).is_some() {
+                    self.warn(format!("layer \"{name}\": channel {id} could not be decoded; treated as empty"));
+                }
+                planes.push(p);
+            }
+            planes
+        };
         // A channel that is in the file but could not be decoded leaves the layer empty, as the
         // warning says. Filling in for it would paint an opaque black layer over the document.
-        let ids = (0..self.cc as i16).chain([CHANNEL_TRANSPARENCY]);
-        if ids.zip(&planes).any(|(id, p)| p.is_none() && rec.channel(id).is_some()) {
+        if ids.iter().zip(planes.iter()).any(|(&id, p)| p.is_none() && rec.channel(id).is_some()) {
             return Surface::new(self.fmt);
         }
         // Only decoded channel data justifies a buffer: the decoders bound their output by the
@@ -482,6 +502,15 @@ fn apply_link_groups(nodes: &[LayerNode], layers: &mut [Layer], ids: &[u16]) {
     rec(nodes, layers, ids, 0);
 }
 
+/// Rejects a file whose groups nest deeper than the document model's cap, with the actionable
+/// limit error. Nesting past the cap could never be saved (.pcraft refuses it).
+pub(crate) fn check_group_depth(file: &PsdFile) -> Result<(), crate::IoError> {
+    if group_depth(file) > photocraft_doc::MAX_GROUP_DEPTH {
+        return Err(crate::IoError::Unsupported(format!("layer groups nested deeper than {}", photocraft_doc::MAX_GROUP_DEPTH)));
+    }
+    Ok(())
+}
+
 /// Deepest group nesting of the file's layer records (a layer inside this many groups is the
 /// deepest), computed like `layer_tree`'s stack — iteratively, so no file can make it recurse.
 pub(crate) fn group_depth(file: &PsdFile) -> usize {
@@ -528,7 +557,7 @@ fn parse_guides(data: &[u8], doc: &mut Document) {
     for i in 0..count as usize {
         let at = 16 + i * 5;
         let (Some(loc), Some(&dir)) = (rd(at), data.get(at + 4)) else { break };
-        let pos = loc as i32 as f32 / 32.0;
+        let pos = f64::from(loc as i32) / 32.0;
         if dir == 1 {
             doc.guides.horizontal.push(pos);
         } else {
@@ -608,6 +637,15 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
     for b in &file.global_blocks {
         doc.metadata.psd_global_blocks.push((b.signature, b.key, Arc::new(b.data.clone())));
     }
+    // A 16/32-bit file whose layer block can't be parsed would otherwise open as a flattened
+    // file without a word (#2700). The raw block is kept, but a PSD save writes the document's
+    // own layers in its place (see `psd_export`).
+    if let Some((b, e)) = file.unreadable_layer_block() {
+        warnings.push(format!(
+            "the layers ({} block) could not be read ({e}); only the merged image was opened. Saving as PSD replaces the unreadable layer data",
+            b.key_str()
+        ));
+    }
     doc.patterns = crate::pattern_map::from_global_blocks(&doc);
     // Notes (`Anno`) and the measurement scale (resource 1074); raw data stays for verbatim export.
     doc.notes = crate::annotations_map::notes_from_blocks(&doc);
@@ -681,7 +719,9 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
             cx.warn(format!("Multichannel documents have no layers: {} layer records were not imported", file.layers().len()));
         }
     } else if layered {
-        let tree = file.layer_tree();
+        // Capped like `build` (#2940): a group past the document's nesting cap keeps no children,
+        // so no file can make this tree, or anything walking or dropping it, recurse deeper.
+        let tree = file.layer_tree_max_depth(photocraft_doc::MAX_GROUP_DEPTH);
         doc.layers = cx.build(&tree, 0);
         // Layer › Link Layers: resource 1026 holds one group id per layer record (0 = unlinked).
         if let Some(Ok(photocraft_psd::resources::ResourceData::LayerGroupInfo(groups))) =

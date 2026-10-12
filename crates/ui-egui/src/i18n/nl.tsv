@@ -8,6 +8,23 @@
 # stay as they are; the trailing "…" of dialog commands is kept. UI text addresses the user
 # informally ("je") and uses sentence case.
 
+# Guide layout dialog
+	Rows	Rijen
+	Number	Aantal
+	Top:	Boven:
+	Left:	Links:
+	Bottom:	Onder:
+	Right:	Rechts:
+	Target:	Doel:
+	Selected Artboards	Geselecteerde tekengebieden
+	Center Columns	Kolommen centreren
+	Clear Existing Guides	Bestaande hulplijnen wissen
+	Invalid guide layout	Ongeldige hulplijnindeling
+	Leave empty for automatic size	Leeg laten voor automatische grootte
+	5 Columns, 3 Rows	5 kolommen, 3 rijen
+	8 Columns	8 kolommen
+	12 Columns	12 kolommen
+
 	File	Bestand
 	Edit	Bewerken
 	Image	Afbeelding
@@ -36,6 +53,8 @@
 	Right	Rechts
 	Open Recent	Recent geopend
 	Clear Recent Files	Recente bestanden wissen
+	Remove from Recent	Verwijderen uit recente bestanden
+	Remove {name} from Recent	{name} verwijderen uit recente bestanden
 	Close	Sluiten
 	Minimize	Minimaliseren
 	Maximize	Maximaliseren
@@ -260,6 +279,7 @@
 	Layer via Cut	Laag via knippen
 	Layer From Background…	Laag uit achtergrond…
 	Layer from Background…	Laag uit achtergrond…
+	Background From Layer	Achtergrond uit laag
 	New Shape Layer	Nieuwe vormlaag
 	New Type Layer	Nieuwe tekstlaag
 	New Fill Layer	Nieuwe opvullaag
@@ -473,6 +493,11 @@
 	Color Range…	Kleurbereik…
 	Focus Area…	Scherptegebied…
 	Select and Mask…	Selecteren en maskeren…
+# Select and Mask dialog labels
+	Smart Radius	Slimme straal
+	Shift Edge	Rand verschuiven
+	Decontaminate	Verontreiniging verwijderen
+	Refine Edge	Rand verfijnen
 	Modify	Wijzigen
 	Border…	Rand…
 	Smooth…	Vloeiend maken…
@@ -662,15 +687,24 @@
 	New Workspace…	Nieuwe werkruimte…
 	Delete Workspace…	Werkruimte verwijderen…
 	Reset Workspace	Werkruimte herstellen
+	Reset Tool	Gereedschap herstellen
+	Reset All Tools	Alle gereedschappen herstellen
+	Reset all tools to their default settings?	Alle gereedschappen herstellen naar hun standaardinstellingen?
 	Lock Workspace	Werkruimte vergrendelen
 	Theme	Thema
 	Pro Theme	Pro-thema
 	Pro Medium Gray Theme	Pro-thema middelgrijs
+	Pro Light Gray Theme	Pro-thema lichtgrijs
+	Pro Light Theme	Pro-thema licht
 	Studio Theme	Studio-thema
 	Studio Light Theme	Studio-thema licht
 	Classic Theme	Klassiek thema
 	Solarized dark	Solarized donker
 	Solarized Dark Theme	Solarized-thema donker
+	Breeze dark	Breeze donker
+	Breeze Dark Theme	Breeze-thema donker
+	Breeze light	Breeze licht
+	Breeze Light Theme	Breeze-thema licht
 	Adwaita Light Theme	Adwaita-thema licht
 	Adwaita Dark Theme	Adwaita-thema donker
 	Adwaita	Adwaita
@@ -724,6 +758,7 @@
 	Split Warp Horizontally	Verbuiging horizontaal splitsen
 	Split Warp Vertically	Verbuiging verticaal splitsen
 	Statistics…	Statistieken…
+	Refine Strokes	Verfijningsstreken
 @plural	{n} item|{n} items	{n} element|{n} elementen
 	Auto	Automatisch
 	(print to the printer)	(naar de printer afdrukken)
@@ -871,6 +906,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Klik om in te zoomen  ·  {key}-klik om uit te zoomen  ·  sleep naar rechts/links om in/uit te zoomen
 	Click with the Note tool to add a note.	Klik met het notitiegereedschap om een notitie toe te voegen.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Klik: hoek · Slepen: vloeiend · Klik op eerste punt: sluiten · {key} voltooien · Esc annuleren
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Klik: hoek · Slepen: vloeiend · {alt}-slepen: greep breken · Klik of sleep op eerste punt: sluiten · {key} voltooien · Esc annuleren
 	Clip to layer below	Uitknippen naar laag eronder
 	Clipped	Uitgeknipt
 	Close Style Options	Stijlopties sluiten
@@ -1177,6 +1213,7 @@
 	Magenta	Magenta
 	Magenta  ·  Green	Magenta  ·  Groen
 	Maintain aspect ratio	Hoogte-breedteverhouding behouden
+	Maintain Aspect Ratio	Hoogte-breedteverhouding behouden
 	Marker Size	Markeringsgrootte
 	Mask All	Alles maskeren
 	Mask Options	Maskeropties
@@ -1317,6 +1354,7 @@
 	Record ● a sequence of edits, then play ▶ it on any document.	Neem ● een reeks bewerkingen op en speel deze ▶ af op elk document.
 	Red	Rood
 	Redefine style by current selection	Stijl opnieuw definiëren op basis van huidige selectie
+	Refine	Verfijnen
 	Reflected Gradient	Gespiegeld verloop
 	Registration Marks	Pastekens
 	Regular	Normaal
@@ -1497,6 +1535,7 @@
 	White Balance: As Shot	Witbalans: zoals opgenomen
 	Whites	Witten
 	Width	Breedte
+	Slant	Helling
 	Width:	Breedte:
 	Work Path	Werkpad
 	Yellow	Geel
@@ -1514,6 +1553,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navigeren   {key} uitvoeren   esc sluiten
 	Version {version}	Versie {version}
 	New Document	Nieuw document
+	New Document With Mask	Nieuw document met masker
+	New Layer With Mask	Nieuwe laag met masker
 	Save Preset…	Voorinstelling opslaan…
 	Preset Name	Naam voorinstelling
 	No saved presets yet.	Nog geen opgeslagen voorinstellingen.
@@ -1533,6 +1574,7 @@
 	Blur Tool	Vervagingsgereedschap
 	Bold	Vet
 	Brush	Penseel
+	Block	Blok
 	Brush Pose	Penseelhouding
 	Brush Tip Shape	Vorm penseelpunt
 	Brush Tool	Penseelgereedschap
@@ -1581,6 +1623,8 @@
 	Efficiency: 100%	Efficiëntie: 100%
 	Ellipse Tool	Ellipsgereedschap
 	Elliptical Marquee Tool	Ovaal selectiekader
+	Single Row Marquee Tool	Selectiekader enkele rij
+	Single Column Marquee Tool	Selectiekader enkele kolom
 	Emboss	Reliëf
 	Eraser	Gum
 	Eraser Tool	Gumgereedschap
@@ -1603,6 +1647,8 @@
 	Highlights from:	Hooglichten van:
 	History Brush Tool	Historiepenseel
 	Horizontal Type Tool	Horizontaal tekstgereedschap
+	Horizontal Type Mask Tool	Horizontaal tekstmaskergereedschap
+	Vertical Type Mask Tool	Verticaal tekstmaskergereedschap
 	Image Size:	Afbeeldingsgrootte:
 	Inches	Inch
 	Indexed	Geïndexeerd
@@ -1638,6 +1684,7 @@
 	Mobile	Mobiel
 	Move Tool	Verplaatsgereedschap
 	Could not use the move tool because the layer is locked.	Kan het verplaatsgereedschap niet gebruiken omdat de laag is vergrendeld.
+	Could not complete the Free Transform command because the layer is locked.	Kan de opdracht Vrije transformatie niet voltooien omdat de laag is vergrendeld.
 	Multiply	Vermenigvuldigen
 	My Brushes	Mijn penselen
 	Neutrals	Neutrale tinten
@@ -1656,10 +1703,15 @@
 	Paints from the document's opening state	Schildert vanuit de staat waarin het document werd geopend
 	Path Selection Tool	Padselectiegereedschap
 	Direct Selection Tool	Direct-selectiegereedschap
+	Add Anchor Point Tool	Gereedschap Ankerpunt toevoegen
+	Delete Anchor Point Tool	Gereedschap Ankerpunt verwijderen
+	Click a segment to add an anchor point · {alt}-click an anchor to delete it	Klik op een segment om een ankerpunt toe te voegen · {alt}-klik op een ankerpunt om het te verwijderen
+	Click an anchor point to delete it · {alt}-click a segment to add one	Klik op een ankerpunt om het te verwijderen · {alt}-klik op een segment om er een toe te voegen
 	Pattern Overlay	Patroonbedekking
 	Pen Pressure	Pendruk
 	Pen Tilt	Penkanteling
 	Pen Tool	Pengereedschap
+	Convert Point Tool	Punt-converteergereedschap
 	Photo	Foto
 	Capishot website	Website van Capishot
 	Picas	Pica's
@@ -1675,6 +1727,8 @@
 	Postcard	Ansichtkaart
 	Poster	Poster
 	Pro (Dark)	Pro (donker)
+	Pro (Light)	Pro (licht)
+	Pro (Light Gray)	Pro (lichtgrijs)
 	Pro (Medium Gray)	Pro (middelgrijs)
 	Protect Texture	Textuur beschermen
 	Purple	Paars
@@ -1746,6 +1800,7 @@
 	Invalid {mode} profile	Ongeldig {mode}-profiel
 	Unnamed {mode} profile	Naamloos {mode}-profiel
 	{w} px x {h} px ({ppi} ppi)	{w} px x {h} px ({ppi} ppi)
+	{w} {unit} x {h} {unit} ({ppi} ppi)	{w} {unit} x {h} {unit} ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	Resolutie: {dpi} pixels/inch
 	Doc: {w} × {h} px	Doc: {w} × {h} px
 	Frame {current} / {total}	Frame {current} / {total}
@@ -1782,6 +1837,7 @@
 	Cache tile size	Tegelgrootte cache
 	Camera Raw Defaults	Standaardwaarden Camera Raw
 	Canvas border	Canvasrand
+	Show canvas dots	Canvasstippen tonen
 	Canvas color	Canvaskleur
 	Canvas custom color	Aangepaste canvaskleur
 	Color picker	Kleurkiezer
@@ -1869,6 +1925,8 @@
 	Preserve details	Details behouden
 	Print resolution	Afdrukresolutie
 	Pro	Pro
+	Pro light	Pro licht
+	Pro light gray	Pro lichtgrijs
 	Pro medium	Pro middel
 	Pro photo	Pro Photo
 	Quick export format	Formaat snel exporteren
@@ -1896,6 +1954,7 @@
 	Show only crosshair while painting	Alleen dradenkruis tonen tijdens schilderen
 	Show slice numbers	Segmentnummers tonen
 	Show tooltips	Knopinfo tonen
+	Show highlight on rollover	Markering bij aanwijzen tonen
 	Show bounding box when dragging layer	Selectiekader tonen bij slepen van laag
 	System title bar	Titelbalk van systeem
 	Show transformation values	Transformatiewaarden tonen
@@ -1997,6 +2056,7 @@
 	Create Warped Text	Verbogen tekst maken
 	Rasterize Smart Object	Slim object rasteren
 	Rasterize Fill Content	Vulinhoud rasteren
+	Rasterize Layer Style	Laagstijl rasteren
 	Unlock: picking a preset replaces these settings	Ontgrendelen: een voorinstelling kiezen vervangt deze instellingen
 	Lock: keep these settings when picking another preset	Vergrendelen: deze instellingen behouden bij het kiezen van een andere voorinstelling
 	Diameter:	Diameter:
@@ -2018,6 +2078,7 @@
 	Apply the pen's tilt and rotation to the tip shape	Kanteling en rotatie van de pen toepassen op de vorm van de punt
 	Mixer Brush	Mengpenseel
 	Mixer Brush Tool	Mengpenseelgereedschap
+	Color Replacement Tool	Kleurvervangingsgereedschap
 	Wet	Nat
 	Mix	Mengen
 	Wetness Jitter	Nattigheidsvariatie
@@ -2069,7 +2130,9 @@
 	Developing {name}	{name} wordt ontwikkeld
 	Cancelled {label}	{label} geannuleerd
 	Esc to cancel	Esc om te annuleren
+	Opened {name}	{name} geopend
 	Opening {name}	{name} openen
+	Saved {name}	{name} opgeslagen
 	Saving {name}	{name} opslaan
 	A save to {name} is still running; try again when it finishes	Er wordt nog opgeslagen naar {name}; probeer het opnieuw zodra dat klaar is
 	{label} is writing the file and can no longer be cancelled	{label} schrijft het bestand en kan niet meer worden geannuleerd
@@ -2194,6 +2257,10 @@
 	Show Vectorscope	Vectorscoop tonen
 	Tone Histogram	Toonhistogram
 	75%	75%
+	80%	80%
+	85%	85%
+	90%	90%
+	95%	95%
 	125%	125%
 	150%	150%
 	175%	175%
@@ -2207,6 +2274,9 @@
 	Structure:	Structuur:
 	Content-Aware Move Tool	Inhoudsbewust verplaatsen
 	TIFF Options	TIFF-opties
+	Targa Options	Targa-opties
+	24 bits/pixel	24 bits/pixel
+	32 bits/pixel	32 bits/pixel
 	Including layers will increase file size.	Lagen meenemen vergroot de bestandsgrootte.
 	Discard Layers and Save a Copy	Lagen negeren en kopie opslaan
 	Don't show again	Niet meer tonen
@@ -2289,6 +2359,19 @@
 	Domed	Koepel
 	Domed (Inverted)	Koepel (omgekeerd)
 	Diagonal (Descending)	Diagonaal (aflopend)
+	Contour Editor	Contoureditor
+	Anti-aliased	Anti-aliasing
+	Corner	Hoek
+	Gloss Contour	Glanscontour
+	Contour	Contour
+	Cone - Inverted	Kegel - omgekeerd
+	Cove - Deep	Inham - diep
+	Cove - Shallow	Inham - ondiep
+	Half Round	Halfrond
+	Ring - Double	Ring - dubbel
+	Rolling Slope - Descending	Glooiende helling - aflopend
+	Rounded Steps	Afgeronde treden
+	Sawtooth 1	Zaagtand 1
 	Red Eye Tool	Rode-ogengereedschap
 	Red Eye	Rode ogen
 	Pupil Size	Pupilgrootte
@@ -3623,7 +3706,6 @@ cameraRaw	Whites	Witten
 	Appearance Settings…	Weergave-instellingen…
 	Add to favorites	Toevoegen aan favorieten
 	Remove from favorites	Verwijderen uit favorieten
-	Float Panel	Paneel losmaken
 	Float Panel Group	Paneelgroep losmaken
 	Dock Panel Group	Paneelgroep vastzetten
 	Use Classic Mode	Klassieke modus gebruiken
@@ -3632,6 +3714,173 @@ cameraRaw	Whites	Witten
 	Compile PSD…	PSD compileren…
 	Compile Folder…	Map compileren…
 	psd-compiler on GitHub	psd-compiler op GitHub
-	Based on PhotoCraft	Gebaseerd op PhotoCraft
+	Based on PhotoCraft	Gebaseerd op Capishot
 	psd-compiler	psd-compiler
-	Show canvas dots	Canvasstippen tonen
+# File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
+cameraData	Make	Merk
+cameraData	Model	Model
+cameraData	Date Taken	Opnamedatum
+cameraData	Exposure	Sluitertijd
+cameraData	F-Stop	Diafragma
+cameraData	ISO Speed	ISO-waarde
+cameraData	Focal Length	Brandpuntsafstand
+cameraData	Focal Length (35 mm)	Brandpuntsafstand (35 mm)
+cameraData	Lens	Lens
+# Shared panel docking
+	Activate Panel	Paneel activeren
+	Change Panel Group	Paneelgroep wijzigen
+	Change Panel Layout	Paneelindeling wijzigen
+	Close Panel	Paneel sluiten
+	Dock Panel	Paneel vastzetten
+	Float Panel	Zwevend paneel
+	Move Panel	Paneel verplaatsen
+	Group with	Groeperen met
+	Panel menu	Paneelmenu
+	Resize panel window	Paneelvenster vergroten of verkleinen
+	Resize panels	Panelen vergroten of verkleinen
+	W x H x Resolution	B x H x Resolutie
+	Front Image	Voorste afbeelding
+	Perspective Crop Tool	Gereedschap Perspectief bijsnijden
+	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Sleep een kader of klik op vier hoeken · sleep de hoeken naar de randen van een scheve vorm · {commit} past toe · Esc annuleert
+	Artboard Tool	Tekengebiedgereedschap
+	Make Portrait	Staand maken
+	Make Landscape	Liggend maken
+	Add New Artboard	Nieuw tekengebied toevoegen
+	Freeform Pen Tool	Pengereedschap Vrije vorm
+	Curvature Pen Tool	Pengereedschap Kromming
+	Curve Fit:	Curve aanpassen:
+	Drag: draw freehand · Release on the start point: close	Slepen: uit de vrije hand tekenen · Loslaten op beginpunt: sluiten
+	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Klik: vloeiend punt · Dubbelklik: hoek · Punt slepen: verplaatsen · Klik op eerste punt: sluiten · {key} voltooien
+	New Crop Preset…	Nieuwe uitsnijvoorinstelling…
+	Delete Crop Preset…	Uitsnijvoorinstelling verwijderen…
+	Select the crop presets to delete:	Selecteer de uitsnijvoorinstellingen die u wilt verwijderen:
+	Select the crop presets to delete	Selecteer de uitsnijvoorinstellingen die u wilt verwijderen
+	Enter a name for the crop preset	Voer een naam in voor de uitsnijvoorinstelling
+	There is no crop size or ratio to save	Er is geen uitsnijformaat of verhouding om op te slaan
+	Search settings…	Instellingen zoeken…
+	No matching settings	Geen overeenkomende instellingen
+	Capishot — Screen Color Picker	Capishot — Schermkleurkiezer
+	Loading fonts…	Lettertypen laden…
+# Select and Mask view modes (#1754)
+	Onion Skin	Uienschil
+	Marching Ants	Mierenmars
+	On Black	Op zwart
+	On White	Op wit
+	On Layers	Op lagen
+	Show Edge	Rand tonen
+	Show Original	Origineel tonen
+	F cycles the views; hold X to see the image	F wisselt de weergaven; houd X ingedrukt om de afbeelding te zien
+# Select and Mask Refine Edge Brush (#2972)
+	Refine Edge Brush (R)	Penseel Rand verfijnen (R)
+	Expand Detection Area	Detectiegebied uitbreiden
+	Restore Original Edge	Oorspronkelijke rand herstellen
+	Paint over hair or fur on the image; Alt paints the other mode	Schilder over haar of vacht in de afbeelding; Alt schildert in de andere modus
+	Clear Brush Strokes	Penseelstreken wissen
+	Show rulers	Linialen tonen
+	Frame Tool	Kadergereedschap
+	Create a new rectangular frame	Nieuw rechthoekig kader maken
+	Create a new elliptical frame	Nieuw ovaal kader maken
+	Include in playback	Opnemen in afspelen
+	Scale:	Schaal:
+	Snap to Origin	Uitlijnen op oorsprong
+
+# Color Sampler (added with the i18n coverage repair)
+	Click to place · Alt-click or drag off-canvas to remove	Klik om te plaatsen · Alt-klik of sleep buiten het canvas om te verwijderen
+	{n} of {max} sample points	{n} van {max} steekproefpunten
+# Print dialog (#2697)
+	Emulsion Down	Emulsie omlaag
+	Functions	Functies
+	Print Resolution:	Afdrukresolutie:
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Gereedschap Monsterpenseel
+	Sampling Area Overlay	Overlay van monstergebied
+	Show Sampling Area	Monstergebied tonen
+	Indicates	Geeft aan
+	Sampling Area	Monstergebied
+	Excluded Area	Uitgesloten gebied
+	Sampling Area Options	Opties voor monstergebied
+	Rectangular	Rechthoekig
+	Fill Settings	Vulinstellingen
+	Rotation Adaptation	Rotatieaanpassing
+	Very High	Zeer hoog
+	Full	Volledig
+	Mirror	Spiegelen
+	Output Settings	Uitvoerinstellingen
+	Output To	Uitvoer naar
+# Google Fonts
+	Allow online fonts	Online lettertypen toestaan
+	Fonts	Lettertypen
+	Find More	Meer zoeken
+	Search Google Fonts	Zoeken in Google Fonts
+	All categories	Alle categorieën
+	Sans Serif	Schreefloos
+	Serif	Met schreef
+	Handwriting	Handschrift
+	Monospace	Monospace
+	All languages	Alle talen
+	Latin	Latijns
+	Japanese	Japans
+	Korean	Koreaans
+	Chinese (Simplified)	Chinees (vereenvoudigd)
+	Chinese (Traditional)	Chinees (traditioneel)
+	Cyrillic	Cyrillisch
+	Greek	Grieks
+	Arabic	Arabisch
+	Hebrew	Hebreeuws
+	Thai	Thai
+	Devanagari	Devanagari
+	Vietnamese	Vietnamees
+	Variable font: only the default weight is available	Variabel lettertype: alleen het standaardgewicht is beschikbaar
+	Installed	Geïnstalleerd
+	Download from Google Fonts	Downloaden van Google Fonts
+	Loading Google Fonts…	Google Fonts laden…
+	No fonts found	Geen lettertypen gevonden
+	Showing {shown} of {total} fonts	{shown} van {total} lettertypen getoond
+	Download fonts from Google Fonts?	Lettertypen downloaden van Google Fonts?
+	Find More lists the open-source fonts of Google Fonts. The font list and the fonts you choose are downloaded from Google Fonts through jsDelivr and GitHub. Nothing is downloaded when Capishot starts, and you can turn this off at any time in Preferences › Type.	Meer zoeken toont de opensourcelettertypen van Google Fonts. De lijst met lettertypen en de lettertypen die je kiest worden via jsDelivr en GitHub van Google Fonts gedownload. Bij het starten van Capishot wordt niets gedownload en je kunt dit op elk moment uitschakelen in Voorkeuren › Tekst.
+	Allow	Toestaan
+	Not now	Niet nu
+	Online fonts are not available in this build.	Online lettertypen zijn niet beschikbaar in deze build.
+	The Google Fonts list is not set up in this build.	De lijst met Google Fonts is niet ingesteld in deze build.
+	Couldn't load Google Fonts	Google Fonts kon niet worden geladen
+	A font named “{family}” is already available and stays in use.	Een lettertype met de naam “{family}” is al beschikbaar en blijft in gebruik.
+	Downloaded {family}	{family} gedownload
+	Downloaded: {fonts}	Gedownload: {fonts}
+	Manage Downloaded Fonts	Gedownloade lettertypen beheren
+	Manage downloaded fonts…	Gedownloade lettertypen beheren…
+	No downloaded fonts yet. Use the Find More tab of the font menu to get some.	Nog geen gedownloade lettertypen. Gebruik het tabblad Meer zoeken in het lettertypemenu om er te vinden.
+	Family	Familie
+	License	Licentie
+	Remove anyway	Toch verwijderen
+	Keep	Behouden
+	“{family}” is used by {layers} in {documents}. If you remove it, those layers will show as missing fonts.	“{family}” wordt gebruikt door {layers} in {documents}. Als je het verwijdert, tonen die lagen ontbrekende lettertypen.
+	“{family}” was removed. Affected text layers: {count}.	“{family}” is verwijderd. Betrokken tekstlagen: {count}.
+	“{family}” was removed.	“{family}” is verwijderd.
+	No fonts are missing.	Er ontbreken geen lettertypen.
+	These fonts are not installed:	Deze lettertypen zijn niet geïnstalleerd:
+	Available on Google Fonts	Beschikbaar in Google Fonts
+	Don't replace	Niet vervangen
+	Replace with	Vervangen door
+	Allow online fonts to look for these fonts on Google Fonts.	Sta online lettertypen toe om deze lettertypen in Google Fonts te zoeken.
+	Downloading…	Downloaden…
+	Downloading missing fonts	Ontbrekende lettertypen downloaden
+	Loading Google Fonts	Google Fonts laden
+	Installing {family}	{family} installeren
+	Downloading {file}	{file} downloaden
+	Downloading the licence	Licentie downloaden
+	Loading the font index	Lettertype-index laden
+@plural	{n} style|{n} styles	{n} stijl|{n} stijlen
+@plural	{n} text layer|{n} text layers	{n} tekstlaag|{n} tekstlagen
+@plural	{n} open document|{n} open documents	{n} geopend document|{n} geopende documenten
+	Copy Layers	Lagen kopiëren
+	Paste Layers	Lagen plakken
+	Cycle Screen Mode Backwards	Schermmodi terug doorlopen
+	Scroll Up One Screen	Eén scherm omhoog schuiven
+	Scroll Down One Screen	Eén scherm omlaag schuiven
+	Scroll Left One Screen	Eén scherm naar links schuiven
+	Scroll Right One Screen	Eén scherm naar rechts schuiven
+	Scroll to Upper-Left Corner	Naar linkerbovenhoek schuiven
+	Scroll to Lower-Right Corner	Naar rechteronderhoek schuiven
+	Show rulers in new documents	Linialen tonen in nieuwe documenten
+# Eraser: Erase to History; Magic Wand: Sample Size.
+	Erase to History	Wissen naar historie

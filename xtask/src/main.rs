@@ -5,6 +5,7 @@
 
 mod corpus;
 mod corpus_pins;
+mod fonts_index;
 mod i18n_coverage;
 mod ico;
 mod layers;
@@ -36,7 +37,9 @@ commands:
                   --pixls (or -p raw) also fetches corpus/pixls and runs the raw corpus tests;
                   --local takes corpus/photoshop from the photocraft-corpus authoring clone
   stats [--exact] count tests and lines per crate (--exact: ask the test harness via `-- --list`)
-  parity          Photoshop menu parity; rewrites docs/parity.md
+  fonts-index --repo <google/fonts checkout> --out <file> [--commit <sha>]
+                  build the Google Fonts index (schema 1, photocraft_text::catalog) from METADATA.pb files
+  parity          Photoshop menu parity; rewrites docs/parity-checklist.md
   i18n-coverage   report stable UI translation coverage for registered languages
   perf [--quick] [--update-baseline] [--threshold PCT] [--bench NAME]... [--skip-build] [--reuse]
                   run the release benches, merge them by scenario id into target/perf/results.json,
@@ -65,6 +68,7 @@ fn main() -> ExitCode {
         Some("corpus") => corpus::cmd(&rest),
         Some("test-corpus") => corpus::test_cmd(&rest),
         Some("stats") => stats::run(&root(), rest.contains(&"--exact")),
+        Some("fonts-index") => fonts_index::cmd(&root(), &rest),
         Some("parity") => cmd_parity(),
         Some("i18n-coverage") => i18n_coverage::run(&root()),
         Some("perf") => perf::run(&root(), &rest),
@@ -153,7 +157,7 @@ fn wasm_set() -> Result<Vec<String>, String> {
     Ok(crates
         .into_iter()
         .filter(|c| match layers::classify(&c.name) {
-            Some(layers::Class::Layer(l)) => l <= 5 || layers::short_name(&c.name) == "ui-egui",
+            Some(layers::Class::Layer(l)) => l <= 5 || matches!(layers::short_name(&c.name), "ui-egui" | "fontfetch"),
             Some(layers::Class::Standalone) => true,
             _ => false,
         })
@@ -192,7 +196,7 @@ fn cmd_wasm() -> Result<(), String> {
 
 fn cmd_parity() -> Result<(), String> {
     let mut c = cargo();
-    c.args(["run", "-q", "-p", "photocraft-ui-egui", "--example", "parity", "--", "--write", "docs/parity.md"]);
+    c.args(["run", "-q", "-p", "photocraft-ui-egui", "--example", "parity", "--", "--write", "docs/parity-checklist.md"]);
     run(c, "cargo run -p photocraft-ui-egui --example parity")
 }
 

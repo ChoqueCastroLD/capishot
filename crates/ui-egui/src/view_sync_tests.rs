@@ -44,3 +44,22 @@ fn every_document_keeps_its_own_view_through_syncs() {
     assert_eq!(app.ui.views[0].zoom, 3.2, "the first document's view is untouched");
     assert_eq!(app.ui.views[1].zoom, 4.0, "the last document's view follows it to its new index");
 }
+
+/// UI-217-20: Preferences › Units & Rulers › Show Rulers in New Documents turns View › Rulers on
+/// for each new or opened document; off, the rulers keep the state ⌘R left them in.
+#[test]
+fn show_rulers_in_new_documents_preference() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
+    assert!(!app.ui.extras.rulers, "off by default");
+    app.run("prefs.set", json!({"path": "unitsAndRulers.showRulersInNewDocuments", "value": true})).unwrap();
+    assert!(!app.ui.extras.rulers, "the open document is not new");
+    app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+    assert!(app.ui.extras.rulers, "a new document shows the rulers");
+    // ⌘R still hides them; only the next new document brings them back.
+    app.ui.extras.rulers = false;
+    app.run("select.all", json!({})).unwrap();
+    assert!(!app.ui.extras.rulers);
+    app.run("file.new", json!({"width": 16, "height": 16})).unwrap();
+    assert!(app.ui.extras.rulers);
+}

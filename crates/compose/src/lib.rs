@@ -544,7 +544,9 @@ impl<'a> Ctx<'a> {
     }
 
     fn apply_adjustment(&self, adj: &photocraft_doc::Adjustment, buf: &mut Buffer) {
+        // Float documents take `apply_depth`'s unbounded paths (a 0..1 table can't hold them).
         if let photocraft_doc::Adjustment::Levels { space, .. } | photocraft_doc::Adjustment::Curves { space, .. } = adj
+            && self.depth != photocraft_color::SampleType::F32
             && let Some((_, luts)) = self.tone_luts.iter().find(|(a, _)| std::ptr::eq(*a, adj))
         {
             adjust::apply_tone(buf, *space, luts.get_or_init(|| adjust::tone_luts_depth(adj, Some(self.depth))));
@@ -820,7 +822,16 @@ fn render_content(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Buffer> {
         LayerContent::Fill(f) => match &layer.fill_cache {
             // Photoshop's own rendering, valid while the fill is unchanged.
             Some(c) if c.fill == *f => surface_to_scratch(&c.surface, rect),
-            _ => render_fill(f, rect, fill_frame(layer, cx.canvas), cx.patterns),
+            _ if cx.mode == photocraft_color::ColorMode::Cmyk => {
+                let frame = fill_frame(layer, cx.canvas);
+                let native_rect = if matches!(f, Fill::Solid(_)) { Rect::new(0, 0, 1, 1) } else { rect };
+                match gradient_fill::render_cmyk_fill(f, native_rect, frame, cx.depth) {
+                    Some(s) if matches!(f, Fill::Solid(_)) => Buffer::filled(rect, s.rgba(0, 0)),
+                    Some(s) => surface_to_buffer(&s, rect),
+                    None => render_fill(f, rect, frame, cx.patterns, adjustment_quantum(cx.depth)),
+                }
+            }
+            _ => render_fill(f, rect, fill_frame(layer, cx.canvas), cx.patterns, adjustment_quantum(cx.depth)),
         },
         LayerContent::Adjustment(_) => return None,
         LayerContent::Deep(d) => deep::render(d, rect),
@@ -907,17 +918,19 @@ pub fn fill_frame(layer: &Layer, canvas: Rect) -> Rect {
 /// compositor does) but without applying the masks: the pixels a PSD fill layer stores.
 pub fn render_fill_content(layer: &Layer, f: &Fill, canvas: Rect, patterns: &[Pattern]) -> Buffer {
     let prepared = pattern::PreparedPatterns::new(patterns, pattern::PREPARED_PATTERN_BYTES);
-    render_fill(f, canvas, fill_frame(layer, canvas), &prepared)
+    render_fill(f, canvas, fill_frame(layer, canvas), &prepared, None)
 }
 
-fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &pattern::PreparedPatterns<'_>) -> Buffer {
+/// `quantum`: the document depth's levels, which a dithered gradient is rounded to
+/// ([`gradient_fill::render_quantized`]); `None` keeps it in float.
+fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &pattern::PreparedPatterns<'_>, quantum: Option<f32>) -> Buffer {
     match f {
         Fill::Solid(c) => {
             let rgb = c.to_rgb();
             Buffer::filled(rect, [rgb[0], rgb[1], rgb[2], c.alpha])
         }
         // Gradient geometry relative to the layer's frame, independent of the render rect.
-        Fill::Gradient { .. } => Buffer { rect, px: gradient_fill::render(f, rect, canvas) },
+        Fill::Gradient { .. } => Buffer { rect, px: gradient_fill::render_quantized(f, rect, canvas, quantum) },
         // Laid out from the layer's frame when linked; transparent if the pattern is missing.
         Fill::Pattern { name, scale, id, angle, link, phase } => match patterns.get(id, name) {
             Some(tile) => Buffer { rect, px: pattern::render(&tile, &pattern::Placement::new(canvas, *link, *phase, *scale, *angle), rect) },
@@ -974,7 +987,16 @@ fn shapeless_stroke_bounds(layer: &Layer) -> Option<Rect> {
     }
 
     match &layer.content {
-        LayerContent::Raster(_) | LayerContent::Text(_) | LayerContent::Shape(_) | LayerContent::Smart(_) => layer.surface().map(bounds::content_bounds),
+        LayerContent::Raster(_) | LayerContent::Text(_) | LayerContent::Shape(_) | LayerContent::Smart(_) => {
+            let b = layer.surface().map_or(Rect::EMPTY, bounds::content_bounds);
+            // A filled shape's effects follow its outline, also where its fill is transparent (as
+            // in `layer_bounds`).
+            Some(match effect_outline(layer).and_then(|_| paint_bounds(layer)) {
+                Some(p) if !b.is_empty() => b.union(&p),
+                Some(p) => p,
+                None => b,
+            })
+        }
         _ => None,
     }
 }
@@ -1231,9 +1253,10 @@ fn composite_artboard(layer: &Layer, ab: &photocraft_doc::Artboard, clipped: &[L
 
 fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer, cx: &Ctx, scope: advanced::Scope) {
     let rect = backdrop.rect;
-    // A base that is transparent here can still have visible clipped siblings; keep the full
-    // clipping path in that case instead of using the layer-only bounds shortcut.
-    if clipped.is_empty() && empty_in(layer, rect) {
+    // A TSL-off stroke base that is transparent here can still have visible clipped siblings;
+    // keep the full clipping path for it instead of the stroke-bounds shortcut. Other bases keep
+    // the usual skip (their clipped layers vanish with them).
+    if (clipped.is_empty() || shapeless_stroke_bounds(layer).is_none()) && empty_in(layer, rect) {
         return;
     }
     let opacity = layer.opacity * layer.fill_opacity;
@@ -1736,6 +1759,18 @@ fn blend_into_fill(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity
 
 /// [`blend_into`] mixing coverage in a `gamma` space (type layers).
 fn blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, gamma: f32) {
+    // The blend space is constant in this loop. Some TLS implementations synchronise even a
+    // boolean read, so select the common Normal kernel once instead of once per pixel.
+    if mode == BlendMode::Normal && gamma == 1.0 && !psblend::LAB_MIX.with(|l| l.get()) {
+        for (i, b) in backdrop.px.iter_mut().enumerate() {
+            let s = src.px[i];
+            if s[3] <= 0.0 {
+                continue;
+            }
+            *b = psblend::composite_normal_rgb(*b, s, opacity);
+        }
+        return;
+    }
     let rect = backdrop.rect;
     let w = rect.width() as i32;
     for (i, b) in backdrop.px.iter_mut().enumerate() {

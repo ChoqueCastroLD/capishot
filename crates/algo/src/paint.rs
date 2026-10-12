@@ -200,9 +200,22 @@ pub fn bucket_fill_region_src(
     lock_transparency: bool,
     src: impl Fn(i32, i32) -> [f32; 4] + Sync,
 ) {
+    bucket_fill_region_blend(s, region, opacity, BlendMode::Normal, selection, lock_transparency, src);
+}
+
+/// [`bucket_fill_region_src`] in a blend mode (the Paint Bucket's Mode).
+pub fn bucket_fill_region_blend(
+    s: &mut Surface,
+    region: &crate::selection::Region,
+    opacity: f32,
+    blend_mode: BlendMode,
+    selection: Option<&Surface>,
+    lock_transparency: bool,
+    src: impl Fn(i32, i32) -> [f32; 4] + Sync,
+) {
     // Composite only over the filled region's box.
     let b = region.bbox;
-    composite_area(s, b, BlendMode::Normal, |x, y| region.at(x, y) * opacity * selection.map_or(1.0, |m| m.sample_channel(x, y, 0)), src, lock_transparency);
+    composite_area(s, b, blend_mode, |x, y| region.at(x, y) * opacity * selection.map_or(1.0, |m| m.sample_channel(x, y, 0)), src, lock_transparency);
 }
 
 #[cfg(test)]

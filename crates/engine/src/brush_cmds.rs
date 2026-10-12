@@ -9,9 +9,8 @@
 use photocraft_doc::LayerContent;
 use photocraft_geom::Rect;
 use photocraft_paint::mixer::{MixerSettings, apply_mixer_stroke};
-use photocraft_paint::replace::{Limits, ReplaceMode, ReplaceSettings, Sampling, apply_color_replacement};
-use photocraft_paint::tile::PREVIEW_SIDE;
-use photocraft_paint::{BrushPreset, BrushSettings, GrayTile, Pattern, StoredTile, Stroke, StrokePoint, StrokeRenderer, TipShape, render_stroke};
+use photocraft_paint::replace::{Limits, ReplaceMode, ReplaceSettings, Sampling, apply_color_replacement, color_replacement_effect};
+use photocraft_paint::{BrushPreset, BrushSettings, GrayTile, Stroke, StrokePoint, StrokeRenderer, TipShape, render_stroke};
 use photocraft_raster::Surface;
 use serde_json::{Value, json};
 
@@ -254,14 +253,23 @@ fn doc_cmyk_space(s: &Session) -> Option<std::sync::Arc<photocraft_color::conver
 }
 
 /// Stroke with a resolved brush onto the target layer (pixels or mask).
-fn stroke_with(s: &mut Session, p: &Value, label: &str, brush: BrushSettings, pts: Vec<StrokePoint>, auto_erase: bool) -> Result<Value> {
+fn stroke_with(s: &mut Session, cmd: &str, p: &Value, label: &str, brush: BrushSettings, pts: Vec<StrokePoint>, auto_erase: bool) -> Result<Value> {
     let bg = s.tools.background;
     let fg = brush.color;
     let symmetry = s.active().and_then(|st| st.symmetry.clone());
     let (id, brush, zoom) = stroke_target(s, p, brush)?;
     let cmyk = doc_cmyk_space(s);
+    // The live stroke the canvas already rendered for exactly these params: take its pixels
+    // instead of rendering the whole stroke again (the hitch at pen-up).
+    let live = s.live_commit.take().filter(|l| l.matches(s, cmd, p, &pts));
+    let from_live = live.is_some();
     let dmg = photocraft_color::convert::with_cmyk_space(cmyk.as_ref(), || {
         s.edit(label, |doc, _| {
+            if let Some(l) = live {
+                let (surf, _) = crate::channel_cmds::target_surface(doc, id, p)?;
+                *surf = l.surface;
+                return Ok(l.bounds);
+            }
             let sel = doc.selection.clone();
             let (surf, lock) = crate::channel_cmds::target_surface(doc, id, p)?;
             let mut brush = brush;
@@ -296,7 +304,11 @@ fn stroke_with(s: &mut Session, p: &Value, label: &str, brush: BrushSettings, pt
             Ok(damage)
         })
     })?;
-    Ok(damage_json(s, dmg))
+    let mut r = damage_json(s, dmg);
+    if from_live {
+        r["fromLive"] = json!(true);
+    }
+    Ok(r)
 }
 
 /// Pencil Auto Erase: a stroke that starts on a pixel of the foreground colour paints the
@@ -313,6 +325,9 @@ fn apply_auto_erase(brush: &mut BrushSettings, surf: &Surface, start: Option<&St
 /// dabs on the pixel grid), hard and at full flow, with the options-bar mode.
 fn pencil_brush(s: &Session, p: &Value) -> Result<BrushSettings> {
     let mut brush = with_blend_mode(resolve_brush(s, p, "paint.pencil")?, p);
+    if flag(p, "block", false) {
+        return block_brush(brush, p);
+    }
     brush.aliased = true;
     if num(p, "hardness").is_none() {
         brush.hardness = 1.0;
@@ -321,6 +336,42 @@ fn pencil_brush(s: &Session, p: &Value) -> Result<BrushSettings> {
         brush.flow = 1.0;
     }
     Ok(brush)
+}
+
+/// Edge of the Eraser's Block in screen pixels (Photoshop): constant on screen, so it covers
+/// `BLOCK_SCREEN_PX / zoom` document pixels.
+pub const BLOCK_SCREEN_PX: f64 = 16.0;
+
+/// The Eraser's Block edge in document pixels at view `zoom`: `16 / zoom`, rounded to whole
+/// pixels (a zoom that is not a positive number counts as 100 %).
+pub fn block_size(zoom: f64) -> f32 {
+    let zoom = if zoom.is_finite() && zoom > 0.0 { zoom } else { 1.0 };
+    (BLOCK_SCREEN_PX / zoom).round().clamp(1.0, f64::from(photocraft_paint::brush::MAX_BRUSH_SIZE)) as f32
+}
+
+/// The Eraser's Block mode (`"block": true`): a hard, aliased square of
+/// [`BLOCK_SCREEN_PX`] screen pixels at the stroke's `"zoom"`, i.e. `16 / zoom` document
+/// pixels rounded to whole pixels. Size, opacity, flow, hardness and the brush's dynamics don't
+/// apply (Photoshop); colour, erase, smoothing and the seed are the resolved brush's.
+fn block_brush(b: BrushSettings, p: &Value) -> Result<BrushSettings> {
+    let zoom = match p.get("zoom") {
+        None => 1.0,
+        Some(v) => v.as_f64().filter(|z| z.is_finite() && *z > 0.0).ok_or_else(|| bad("paint.pencil", "`zoom` must be a positive number"))?,
+    };
+    Ok(BrushSettings {
+        size: block_size(zoom),
+        aliased: true,
+        square: true,
+        pressure_size: false,
+        pressure_opacity: false,
+        spacing: 0.25,
+        color: b.color,
+        background: b.background,
+        erase: b.erase,
+        smoothing: b.smoothing,
+        seed: b.seed,
+        ..BrushSettings::default()
+    })
 }
 
 /// Applies the options-bar blend `mode` to a brush. `"mode"` accepts any blend-mode name
@@ -339,7 +390,7 @@ pub fn paint_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     let pts = parse_points(p, "paint.stroke")?;
     let brush = with_blend_mode(resolve_brush(s, p, "paint.stroke")?, p);
     let label = if brush.erase { "Eraser" } else { "Brush Tool" };
-    stroke_with(s, p, label, brush, pts, false)
+    stroke_with(s, "paint.stroke", p, label, brush, pts, false)
 }
 
 /// A `paint.stroke` rendered while it is drawn, onto a copy of the active document, so the canvas
@@ -355,8 +406,9 @@ pub struct LiveStroke {
     symmetry: Option<crate::symmetry_cmds::PaintingSymmetry>,
     mirrors: Vec<StrokeRenderer>,
     mirror_distinct: Vec<bool>,
-    /// Restore passes separately; their union may span an otherwise untouched document.
-    symmetry_regions: Vec<Rect>,
+    /// What the symmetric preview drew last, once a mirror differs from the stroke, and how many
+    /// passes it merged (a mirror joining redraws every tile).
+    union_live: Option<(photocraft_paint::UnionLive, usize)>,
     pre: Surface,
     sel: Option<Surface>,
     lock: bool,
@@ -364,9 +416,50 @@ pub struct LiveStroke {
     params: Value,
     /// Where the doc shows the stroke's end as finishing it would draw it (see `push`).
     tail: Rect,
+    push_count: u32,
+    /// The last push skipped the tail preview (throttle); `finalize_tail` redraws it.
+    tail_stale: bool,
     /// The document's CMYK profile the commit enters (`stroke_with`), so the preview shows the
     /// pixels a `paint.stroke` with `seed` will write.
     cmyk: Option<std::sync::Arc<photocraft_color::convert::CmykSpace>>,
+    /// Every point rendered so far, in order.
+    points: Vec<StrokePoint>,
+    /// The document and revision the stroke started on.
+    base: (photocraft_doc::DocId, u64),
+}
+
+/// A finished live stroke offered to its own commit ([`Session::offer_live_stroke`]): when the
+/// committing `paint.stroke` / `paint.pencil` matches it (same command, document revision, params,
+/// seed and points), the command takes these pixels instead of rendering the stroke again.
+pub struct LiveCommit {
+    cmd: String,
+    base: (photocraft_doc::DocId, u64),
+    params: Value,
+    seed: u64,
+    points: Vec<StrokePoint>,
+    surface: Surface,
+    bounds: Rect,
+}
+
+impl LiveCommit {
+    /// The params that decide the pixels, without the points and seed (compared separately).
+    fn settings(p: &Value) -> Value {
+        let mut p = p.clone();
+        if let Some(o) = p.as_object_mut() {
+            o.remove("points");
+            o.remove("seed");
+        }
+        p
+    }
+
+    fn matches(&self, s: &Session, cmd: &str, p: &Value, pts: &[StrokePoint]) -> bool {
+        let base = s.active().map(|st| (st.doc.id, st.revision));
+        self.cmd == cmd
+            && base == Some(self.base)
+            && p.get("seed").and_then(Value::as_u64) == Some(self.seed)
+            && self.points == pts
+            && Self::settings(p) == Self::settings(&self.params)
+    }
 }
 
 impl LiveStroke {
@@ -388,7 +481,9 @@ impl LiveStroke {
         let brush = if pencil { pencil_brush(s, p)? } else { with_blend_mode(resolve_brush(s, p, cmd)?, p) };
         let (seed, fg) = (brush.seed, brush.color);
         let (layer, mut brush, zoom) = stroke_target(s, p, brush)?;
-        let mut doc = (*s.active().ok_or(EngineError::NoDocument)?.doc).clone();
+        let st = s.active().ok_or(EngineError::NoDocument)?;
+        let base = (st.doc.id, st.revision);
+        let mut doc = (*st.doc).clone();
         let sel = doc.selection.clone();
         let (surf, lock) = crate::channel_cmds::target_surface(&mut doc, layer, p)?;
         erase_locked(&mut brush, lock, s.tools.background);
@@ -408,7 +503,7 @@ impl LiveStroke {
             symmetry,
             mirrors,
             mirror_distinct,
-            symmetry_regions: Vec::new(),
+            union_live: None,
             pre,
             sel,
             lock,
@@ -416,9 +511,23 @@ impl LiveStroke {
             params: p.clone(),
             tail: Rect::EMPTY,
             cmyk: doc_cmyk_space(s),
+            points: Vec::new(),
+            base,
+            push_count: 0,
+            tail_stale: false,
         };
         live.push(&pts)?;
         Ok(live)
+    }
+
+    /// The stroke as its commit would take it over (see [`LiveCommit`]).
+    pub fn into_commit(mut self) -> Result<LiveCommit> {
+        // The tail throttle may have skipped the last catch-up preview: the commit takes these
+        // pixels as they are, so bring it up to date first.
+        self.finalize_tail()?;
+        let bounds = self.bounds();
+        let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
+        Ok(LiveCommit { cmd: self.cmd, base: self.base, params: self.params, seed: self.seed, points: self.points, surface: surf.clone(), bounds })
     }
 
     /// Everything the stroke has touched so far.
@@ -440,6 +549,7 @@ impl LiveStroke {
     /// Invalid coordinates reject the whole batch without changing the preview.
     pub fn push(&mut self, pts: &[StrokePoint]) -> Result<Rect> {
         check_coords(pts, &self.cmd)?;
+        self.points.extend_from_slice(pts);
         let cmyk = self.cmyk.clone();
         photocraft_color::convert::with_cmyk_space(cmyk.as_ref(), || {
             self.renderer.push(pts);
@@ -451,48 +561,74 @@ impl LiveStroke {
             }
             let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
             if self.mirror_distinct.iter().any(|d| *d) {
-                // Merge every finished pass once, both here and on commit, including shared axes.
+                // The stroke and its distinct mirrors composite as one stroke, as the commit
+                // merges them; only the tiles that changed are redrawn.
                 let old = self.tail;
-                let mut original_preview = self.renderer.clone();
-                original_preview.finish();
-                let copies: Vec<_> = self
-                    .mirrors
-                    .iter()
-                    .zip(&self.mirror_distinct)
-                    .filter(|(_, d)| **d)
-                    .map(|(r, _)| {
-                        let mut r = r.clone();
-                        r.finish();
-                        r
-                    })
+                let passes = 1 + self.mirror_distinct.iter().filter(|d| **d).count();
+                let (mut live, full, mut dmg) = match self.union_live.take() {
+                    Some((live, merged)) => (live, merged != passes, Rect::EMPTY),
+                    None => {
+                        // Leaving the single-pass preview: take its smoothing tail back first.
+                        if !old.is_empty() {
+                            surf.write_region(old, &self.pre.read_region(old));
+                        }
+                        (photocraft_paint::UnionLive::default(), true, old)
+                    }
+                };
+                let mut renderers: Vec<&mut StrokeRenderer> = std::iter::once(&mut self.renderer)
+                    .chain(self.mirrors.iter_mut().zip(&self.mirror_distinct).filter(|(_, d)| **d).map(|(r, _)| r))
                     .collect();
-                let bounds = copies.iter().fold(original_preview.bounds().union(&old), |b, r| b.union(&r.bounds()));
-                if self.symmetry_regions.is_empty() && !old.is_empty() {
-                    surf.write_region(old, &self.pre.read_region(old));
-                }
-                for region in &self.symmetry_regions {
-                    surf.write_region(*region, &self.pre.read_region(*region));
-                }
-                self.symmetry_regions =
-                    std::iter::once(original_preview.bounds()).chain(copies.iter().map(StrokeRenderer::bounds)).filter(|r| !r.is_empty()).collect();
-                let damage = original_preview.composite_union_many(&copies, &self.pre, surf, self.sel.as_ref(), self.lock);
-                self.tail = bounds;
-                return Ok(damage.union(&bounds));
+                dmg = dmg.union(&StrokeRenderer::composite_union_live(&mut renderers, &mut live, full, &self.pre, surf, self.sel.as_ref(), self.lock));
+                self.tail = old.union(&live.bounds());
+                self.union_live = Some((live, passes));
+                return Ok(dmg);
             }
+            // Tail throttle: the smoothing catch-up tail is redrawn on the first and every second
+            // push only; `finalize_tail` brings it up to date before anything reads the pixels.
+            self.push_count = self.push_count.wrapping_add(1);
+            let update_tail = self.push_count <= 1 || self.push_count.is_multiple_of(2);
+            self.tail_stale = !update_tail;
             let mut dmg = Rect::EMPTY;
-            let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
-            if !old.is_empty() {
-                // Back to the stroke without the previous tail.
-                surf.write_region(old, &self.pre.read_region(old));
-                self.renderer.mark_dirty(old);
-                dmg = old;
+            if update_tail {
+                let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
+                if !old.is_empty() {
+                    // Back to the stroke without the previous tail.
+                    surf.write_region(old, &self.pre.read_region(old));
+                    self.renderer.mark_dirty(old);
+                    dmg = old;
+                }
             }
             dmg = dmg.union(&self.renderer.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false));
-            if let Some(mut tail) = self.renderer.tail_preview() {
+            if update_tail && let Some(mut tail) = self.renderer.tail_preview() {
                 self.tail = tail.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false);
                 dmg = dmg.union(&self.tail);
             }
             Ok(dmg)
+        })
+    }
+
+    /// Ensure the tail preview is up to date (undo the throttle skip so the surface shows the
+    /// correct smoothing catch-up). Call before reading pixels from `self.doc`.
+    pub fn finalize_tail(&mut self) -> Result<Rect> {
+        // Symmetry strokes redraw every pass on each push; only the plain path is throttled.
+        if !self.tail_stale || self.mirror_distinct.iter().any(|d| *d) {
+            return Ok(Rect::EMPTY);
+        }
+        self.tail_stale = false;
+        let cmyk = self.cmyk.clone();
+        photocraft_color::convert::with_cmyk_space(cmyk.as_ref(), || {
+            let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
+            let old = std::mem::replace(&mut self.tail, Rect::EMPTY);
+            if !old.is_empty() {
+                surf.write_region(old, &self.pre.read_region(old));
+                self.renderer.mark_dirty(old);
+            }
+            let mut dmg = self.renderer.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false);
+            if let Some(mut tail) = self.renderer.tail_preview() {
+                self.tail = tail.composite(&self.pre, surf, self.sel.as_ref(), self.lock, false);
+                dmg = dmg.union(&self.tail);
+            }
+            Ok(dmg.union(&old))
         })
     }
 }
@@ -501,7 +637,7 @@ fn pencil(s: &mut Session, p: &Value) -> Result<Value> {
     let pts = parse_points(p, "paint.pencil")?;
     let brush = pencil_brush(s, p)?;
     let label = if brush.erase { "Eraser" } else { "Pencil" };
-    stroke_with(s, p, label, brush, pts, flag(p, "autoErase", false))
+    stroke_with(s, "paint.pencil", p, label, brush, pts, flag(p, "autoErase", false))
 }
 
 fn pct(p: &Value, k: &str, d: f32) -> f32 {
@@ -555,8 +691,14 @@ fn mixer_brush(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(damage_json(s, dmg))
 }
 
-fn color_replacement(s: &mut Session, p: &Value) -> Result<Value> {
+/// `paint.colorReplacement`'s stroke and settings. The replacement colour is the brush colour
+/// (the foreground unless `color` says otherwise). It paints layer pixels only: a mask, alpha
+/// channel or Quick Mask `target` is refused rather than recolouring the layer instead.
+fn color_replacement_setup(s: &Session, p: &Value) -> Result<(Stroke, ReplaceSettings, photocraft_doc::LayerId)> {
     let cmd = "paint.colorReplacement";
+    if let Some(t) = p.get("target").filter(|t| t.as_str() != Some("pixels")) {
+        return Err(bad(cmd, format!("Color Replacement paints layer pixels only (`target` {t} is not \"pixels\")")));
+    }
     let pts = parse_points(p, cmd)?;
     let brush = resolve_brush(s, p, cmd)?;
     fn parse<T: serde::de::DeserializeOwned>(p: &Value, cmd: &str, k: &str) -> Result<Option<T>> {
@@ -572,7 +714,11 @@ fn color_replacement(s: &mut Session, p: &Value) -> Result<Value> {
         background: s.tools.background,
     };
     let id = layer_id(s, p)?;
-    let stroke = Stroke { brush, points: pts };
+    Ok((Stroke { brush, points: pts }, rs, id))
+}
+
+fn color_replacement(s: &mut Session, p: &Value) -> Result<Value> {
+    let (stroke, rs, id) = color_replacement_setup(s, p)?;
     let dmg = s.edit("Color Replacement", |doc, _| {
         let sel = doc.selection.clone();
         let lock = doc.effective_locks(id).transparency;
@@ -580,6 +726,16 @@ fn color_replacement(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(apply_color_replacement(surf, &stroke, &rs, sel.as_ref(), lock))
     })?;
     Ok(damage_json(s, dmg))
+}
+
+/// A `paint.colorReplacement` stroke shown while it is drawn: the same params, and the same
+/// recolouring per dab as the commit, so the preview at the last point is the committed result.
+pub fn live_color_replacement(s: &Session, p: &Value) -> Result<crate::retouch_cmds::LiveDab> {
+    let (stroke, rs, id) = color_replacement_setup(s, p)?;
+    crate::retouch_cmds::LiveDab::with_effect(s, "paint.colorReplacement", &json!({}), stroke, Some(id), 0, false, |pre| {
+        Ok(Box::new(color_replacement_effect(pre.clone(), rs)))
+    })?
+    .with_tail_preview()
 }
 
 fn brush_json(b: &BrushSettings) -> Value {
@@ -803,58 +959,6 @@ pub(crate) fn set_brush(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(brush_json(&s.tools.brush))
 }
 
-/// Remember the current brush in `Preferences::last_brush` (see [`remembered_brush`]): writes only
-/// on a change, so calling it every frame is cheap.
-pub fn remember_brush(s: &mut Session) {
-    let Some(now) = remembered_brush(s) else { return };
-    if s.prefs().last_brush != now {
-        s.prefs.edit(|p| p.last_brush = now);
-    }
-}
-
-/// The current brush as JSON for `Preferences::last_brush`: settings plus tip references, no full
-/// bitmap. `None` while a sampled bitmap too big to embed is current (only before the store
-/// externalizes it; see [`ref_tip`]), so the previous remembered brush stands.
-fn remembered_brush(s: &Session) -> Option<Value> {
-    let b = &s.tools.brush;
-    let (tip, dual, pattern) = (ref_tip(&b.tip)?, ref_tip(&b.dual_brush.tip)?, ref_pattern(&b.texture.pattern)?);
-    let mut c = b.clone();
-    (c.tip, c.dual_brush.tip, c.texture.pattern) = (tip, dual, pattern);
-    Some(json!({ "preset": s.tools.current_preset.clone(), "brush": serde_json::to_value(&c).ok()? }))
-}
-
-/// Restore `Preferences::last_brush` into the session at launch (a missing or malformed value
-/// keeps the default brush). Stored tips load when the preset store attaches.
-pub fn restore_brush(s: &mut Session) {
-    let v = s.prefs().last_brush.clone();
-    let Some(patch) = v.get("brush").filter(|b| b.is_object()) else { return };
-    let Ok(mut b) = merge_brush(&BrushSettings::default(), patch, "brush.restore") else { return };
-    if validate_brush(&b, "brush.restore").is_err() {
-        return;
-    }
-    let _ = s.load_brush_tips(&mut b);
-    s.tools.brush = b;
-    s.tools.current_preset = v.get("preset").and_then(Value::as_str).map(str::to_string);
-}
-
-/// A tip for remembering: a loaded stored tip drops its full bitmap (it serialises as a reference
-/// then); a sampled bitmap bigger than a preview would enter the prefs document whole.
-fn ref_tip(t: &TipShape) -> Option<TipShape> {
-    match t {
-        TipShape::Stored(r) if r.full.is_some() => Some(TipShape::Stored(StoredTile { full: None, ..r.clone() })),
-        TipShape::Sampled(g) if g.width > PREVIEW_SIDE || g.height > PREVIEW_SIDE => None,
-        t => Some(t.clone()),
-    }
-}
-
-fn ref_pattern(p: &Pattern) -> Option<Pattern> {
-    match p {
-        Pattern::Stored(r) if r.full.is_some() => Some(Pattern::Stored(StoredTile { full: None, ..r.clone() })),
-        Pattern::Tile(g) if g.width > PREVIEW_SIDE || g.height > PREVIEW_SIDE => None,
-        p => Some(p.clone()),
-    }
-}
-
 /// The brush as JSON with the bitmaps (sampled tips, pattern tiles) that `skip` names replaced by
 /// placeholders: they can be megabytes of base64, and skipped ones are equal on both sides.
 fn light_json(b: &BrushSettings, skip: (bool, bool, bool)) -> Value {
@@ -935,7 +1039,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "paint.pencil",
             "Pencil",
-            r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…}?,"preset":name?,"size":0.5..5000 px?,"opacity":0..1?,"color":"#rrggbb"?=foreground,"mode":"normal|multiply|screen|…"="normal","erase":bool?,"autoErase":bool=false,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
+            r##"{"points":[[x,y,pressure?,tiltX?,tiltY?,rotation?,timeMs?,wheel?],…],"brush":{…}?,"preset":name?,"size":0.5..5000 px?,"opacity":0..1?,"color":"#rrggbb"?=foreground,"mode":"normal|multiply|screen|…"="normal","erase":bool?,"block":bool=false (a hard 16×16 screen-px square, 16/zoom doc px; size, opacity, flow, hardness and dynamics ignored: the Eraser's Block mode),"zoom":view zoom=1,"autoErase":bool=false,"seed":u64?,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
             has_paintable,
             pencil,
             true
@@ -951,7 +1055,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "paint.colorReplacement",
             "Color Replacement",
-            r##"{"points":[…],"brush":{…}?,"size":px?,"mode":"hue|saturation|color|luminosity"="color","sampling":"continuous|once|backgroundSwatch"="continuous","limits":"contiguous|discontiguous|findEdges"="contiguous","tolerance":0..100=30,"antiAlias":bool=true,"color":"#rrggbb"?=foreground,"seed":u64?}"##,
+            r##"{"points":[…],"brush":{…}?,"size":px?,"mode":"hue|saturation|color|luminosity"="color","sampling":"continuous|once|backgroundSwatch"="continuous","limits":"contiguous|discontiguous|findEdges"="contiguous","tolerance":0..100=30,"antiAlias":bool=true,"color":"#rrggbb"?=foreground,"target":"pixels"="pixels","seed":u64?}"##,
             crate::commands::has_paintable,
             color_replacement,
             true

@@ -44,7 +44,8 @@ fn prepared_tones_match_fresh_tables_and_stay_bounded() {
                     cx.apply_adjustment(a, &mut actual);
                     assert_eq!(actual.px, expected.px);
                 }
-                assert!(cx.tone_luts[0].1.get().is_some());
+                // Float documents take apply_depth's unbounded paths (#2580 merge), never the table.
+                assert_eq!(cx.tone_luts[0].1.get().is_some(), depth != SampleType::F32, "{depth:?}");
             }
         }
     }
@@ -81,6 +82,147 @@ fn normal_layer_over_background() {
     d.layers.push(solid_layer("red", Rect::new(0, 0, 4, 8), [1.0, 0.0, 0.0, 1.0]));
     assert!(close4(px(&d, 1, 1), [1.0, 0.0, 0.0, 1.0]));
     assert!(close4(px(&d, 5, 1), [1.0; 4]));
+}
+
+// The pre-optimisation Normal formula, independent of the production helper. Its operation
+// order matters: an algebraically equivalent premultiplied mix can round differently.
+fn original_normal_rgb(backdrop: [f32; 4], source: [f32; 4], opacity: f32) -> [f32; 4] {
+    let ab = backdrop[3];
+    let as_ = source[3] * opacity;
+    if as_ <= 0.0 {
+        return backdrop;
+    }
+    let ao = as_ + ab * (1.0 - as_);
+    if ao <= 0.0 {
+        return [0.0; 4];
+    }
+    let kb = ab * (1.0 - as_);
+    let inv = 1.0 / ao;
+    [(kb * backdrop[0] + as_ * source[0]) * inv, (kb * backdrop[1] + as_ * source[1]) * inv, (kb * backdrop[2] + as_ * source[2]) * inv, ao]
+}
+
+#[test]
+fn normal_rgb_kernel_preserves_scalar_bits() {
+    let subnormal = f32::from_bits(1);
+    let backdrops = [[0.0, -0.0, 2.0, 0.0], [0.2, 0.4, 0.6, 0.5], [2.0, -0.25, 4.0, 1.0], [-1.0, 0.01, 1.0, -0.5], [1.0, -0.0, f32::MIN_POSITIVE, subnormal]];
+    let sources = [
+        [0.9, 0.1, 0.3, 1.0],
+        [0.25, 2.0, -1.0, 0.5],
+        [subnormal, 1e-20, 1.0, subnormal],
+        [0.5, 0.2, 0.7, -0.0],
+        [0.5, 0.2, 0.7, -0.5],
+        [f32::NAN, 0.2, 0.7, 0.0],
+    ];
+    for b in backdrops {
+        for s in sources {
+            for opacity in [-1.0, -0.0, 0.0, 0.5, 1.0, 2.0] {
+                let want = original_normal_rgb(b, s, opacity);
+                let got = psblend::composite_normal_rgb(b, s, opacity);
+                assert_eq!(got.map(f32::to_bits), want.map(f32::to_bits), "{b:?} / {s:?} / {opacity}");
+            }
+        }
+    }
+}
+
+fn normal_rgb_test_buffers(fmt: PixelFormat) -> (Buffer, Buffer) {
+    let rect = Rect::new(-3, -2, 5, 0);
+    let mut bottom = Surface::new(fmt);
+    let mut top = Surface::new(fmt);
+    for y in rect.y0..rect.y1 {
+        for x in rect.x0..rect.x1 {
+            let i = ((y - rect.y0) * rect.width() as i32 + x - rect.x0) as usize;
+            let t = i as f32 / 16.0;
+            let b = [2.0 * t, 0.4, -0.25 + t, [0.0, 0.25, 0.75, 1.0][i % 4]];
+            let s = [0.9 - t, 0.1 + t, 0.3, [0.0, -0.0, 0.5, 1.0][i % 4]];
+            bottom.write_pixel(x, y, &photocraft_raster::from_rgba(&fmt, b));
+            top.write_pixel(x, y, &photocraft_raster::from_rgba(&fmt, s));
+        }
+    }
+    (surface_to_buffer(&bottom, rect), surface_to_buffer(&top, rect))
+}
+
+// Keep the old buffer dispatch as an oracle for the specialised loop and all of its fallbacks.
+fn original_blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, gamma: f32) {
+    let rect = backdrop.rect;
+    let w = rect.width() as i32;
+    for (i, b) in backdrop.px.iter_mut().enumerate() {
+        let mut s = src.px[i];
+        if s[3] <= 0.0 {
+            continue;
+        }
+        let mut mode = mode;
+        if mode == BlendMode::Dissolve {
+            let x = rect.x0 + (i as i32 % w);
+            let y = rect.y0 + (i as i32 / w);
+            s[3] = if dissolve_noise(x, y) < s[3] * opacity { 1.0 } else { 0.0 };
+            mode = BlendMode::Normal;
+            *b = blend::composite(mode, *b, s, 1.0);
+            continue;
+        }
+        *b = blend::composite_gamma(mode, *b, s, opacity, gamma);
+    }
+}
+
+fn assert_buffer_bits(got: &Buffer, want: &Buffer) {
+    assert_eq!(got.rect, want.rect);
+    assert_eq!(got.px.len(), want.px.len());
+    for (i, (got, want)) in got.px.iter().zip(&want.px).enumerate() {
+        assert_eq!(got.map(f32::to_bits), want.map(f32::to_bits), "pixel {i}: {got:?} vs {want:?}");
+    }
+}
+
+#[test]
+fn normal_rgb_buffer_dispatch_and_fallbacks_preserve_bits() {
+    for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F] {
+        let (bottom, top) = normal_rgb_test_buffers(fmt);
+        for lab in [false, true] {
+            psblend::with_lab_mix(lab, || {
+                psblend::with_hdr(fmt.sample == SampleType::F32, || {
+                    for mode in BlendMode::LAYER_MODES {
+                        for gamma in [1.0, psblend::TEXT_GAMMA] {
+                            for opacity in [0.0, 0.5, 1.0] {
+                                let mut got = bottom.clone();
+                                let mut want = bottom.clone();
+                                original_blend_into_g(&mut want, &top, mode, opacity, gamma);
+                                blend_into_g(&mut got, &top, mode, opacity, gamma);
+                                assert_buffer_bits(&got, &want);
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    }
+}
+
+#[test]
+fn normal_rgb_buffer_preserves_alpha_skip_and_nested_scopes() {
+    let rect = Rect::new(-1, -1, 2, 0);
+    let bottom = Buffer::filled(rect, [-0.0, 0.4, 2.0, 0.75]);
+    let top = Buffer { rect, px: vec![[f32::NAN, 0.3, 0.1, -0.5], [0.2, 0.3, 0.1, -0.0], [0.2, 0.3, 0.1, f32::NAN]] };
+    psblend::with_lab_mix(true, || {
+        psblend::with_hdr(true, || {
+            psblend::with_lab_mix(false, || {
+                psblend::with_hdr(false, || {
+                    let mut got = bottom.clone();
+                    let mut want = bottom.clone();
+                    original_blend_into_g(&mut want, &top, BlendMode::Normal, -1.0, 1.0);
+                    blend_into_g(&mut got, &top, BlendMode::Normal, -1.0, 1.0);
+                    assert_buffer_bits(&got, &want);
+                    assert_eq!(got.px[0].map(f32::to_bits), bottom.px[0].map(f32::to_bits));
+                    assert_eq!(got.px[1].map(f32::to_bits), bottom.px[1].map(f32::to_bits));
+                });
+                assert!(psblend::HDR.with(|h| h.get()));
+            });
+            assert!(psblend::LAB_MIX.with(|l| l.get()));
+            assert!(psblend::HDR.with(|h| h.get()));
+            let mut got = bottom.clone();
+            let mut want = bottom.clone();
+            original_blend_into_g(&mut want, &top, BlendMode::Normal, 0.5, 1.0);
+            blend_into_g(&mut got, &top, BlendMode::Normal, 0.5, 1.0);
+            assert_buffer_bits(&got, &want);
+        });
+    });
 }
 
 #[test]
@@ -436,11 +578,58 @@ fn solid_and_gradient_fill_layers() {
 
     let g = Fill::gradient(vec![(0.0, Color::BLACK), (1.0, Color::WHITE)], 0.0, 1.0, photocraft_doc::GradientStyle::Linear, false);
     let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
-    let buf = render_fill(&g, Rect::new(0, 0, 10, 1), Rect::new(0, 0, 10, 1), &patterns);
+    let buf = render_fill(&g, Rect::new(0, 0, 10, 1), Rect::new(0, 0, 10, 1), &patterns, None);
     // tile independence: a 1px render of the right edge equals the full render
-    let one = render_fill(&g, Rect::new(9, 0, 10, 1), Rect::new(0, 0, 10, 1), &patterns);
+    let one = render_fill(&g, Rect::new(9, 0, 10, 1), Rect::new(0, 0, 10, 1), &patterns, None);
     assert_eq!(one.px[0], buf.px[9]);
     assert!(buf.px[0][0] < buf.px[9][0], "left dark, right light");
+}
+
+fn dithered_gradient(stops: Vec<(f32, Color)>, angle: f32) -> Fill {
+    let mut f = Fill::gradient(stops, angle, 1.0, photocraft_doc::GradientStyle::Linear, false);
+    if let Fill::Gradient { dither, .. } = &mut f {
+        *dither = true;
+    }
+    f
+}
+
+/// #2755: a dithered gradient fill under a bright Color Dodge gradient. Dodge divides by
+/// `1 − cs`, so the dither's fraction of a level, left in float, came out as speckle several
+/// levels high (a black channel lifted to 4/255: coloured fringes). On an 8-bit document the
+/// dithered pixels sit on levels, as a painted gradient's do, so a channel at 0 stays 0.
+#[test]
+fn dithered_gradient_fills_under_color_dodge_keep_black_channels() {
+    let mut d = doc_white(128, 32);
+    // Red to blue: green is 0 everywhere.
+    let bottom = dithered_gradient(vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))], 0.0);
+    d.layers.push(Layer::new("bottom", LayerContent::Fill(bottom)));
+    let top = dithered_gradient(vec![(0.0, Color::rgb(0.88, 0.88, 0.88)), (1.0, Color::rgb(0.97, 0.97, 0.97))], 90.0);
+    let mut l = Layer::new("top", LayerContent::Fill(top));
+    l.blend = BlendMode::ColorDodge;
+    d.layers.push(l);
+    for (i, p) in flatten(&d).px.iter().enumerate() {
+        assert_eq!(p[1], 0.0, "pixel {i}: green lifted off black to {} levels", p[1] * 255.0);
+    }
+}
+
+/// Dithered gradient pixels land on the depth's levels; float documents and undithered
+/// gradients keep their float values.
+#[test]
+fn dithered_gradient_fill_is_rounded_to_the_document_depth() {
+    let stops = vec![(0.0, Color::rgb(0.1, 0.4, 0.0)), (1.0, Color::rgb(0.9, 0.2, 1.0))];
+    let rect = Rect::new(0, 0, 64, 8);
+    let f = dithered_gradient(stops.clone(), 0.0);
+    for depth in [SampleType::U8, SampleType::U16] {
+        let q = adjustment_quantum(depth).unwrap();
+        for p in gradient_fill::render_quantized(&f, rect, rect, Some(q)) {
+            for v in &p[..3] {
+                assert_eq!((v * q).round() / q, *v, "{depth:?}: {v} is between levels");
+            }
+        }
+    }
+    assert_eq!(gradient_fill::render_quantized(&f, rect, rect, None), gradient_fill::render(&f, rect, rect));
+    let plain = Fill::gradient(stops, 0.0, 1.0, photocraft_doc::GradientStyle::Linear, false);
+    assert_eq!(gradient_fill::render_quantized(&plain, rect, rect, Some(255.0)), gradient_fill::render(&plain, rect, rect));
 }
 
 #[test]
@@ -1551,9 +1740,11 @@ fn levels_dont_clip_in_32_bit() {
         adjust::apply_depth(&adj, &mut b, adjust::Transfer::Srgb, Some(depth));
         (b.px[0][0] * 255.0).round()
     };
-    for (v, want) in [(0.0, 0.0), (0.0497, 3.0), (0.0976, 32.0), (0.4508, 140.0), (0.9473, 255.0), (1.0, 255.0)] {
+    for (v, want) in [(0.0497, 3.0), (0.0976, 32.0), (0.4508, 140.0), (0.9473, 255.0)] {
         assert_eq!(level(SampleType::F32, v), want, "{v}");
     }
+    assert!(level(SampleType::F32, 0.0) < 0.0);
+    assert!(level(SampleType::F32, 1.0) > 255.0);
     assert_eq!(level(SampleType::U8, 0.0), 10.0);
     assert_eq!(level(SampleType::U8, 1.0), 245.0);
 }
@@ -1583,6 +1774,99 @@ fn exposure_scales_32_bit_samples_as_stored() {
     }
     for mode in [ColorMode::Rgb, ColorMode::Grayscale] {
         assert_eq!(adjust::Transfer::for_document(mode, SampleType::F32), adjust::Transfer::Gamma(1.0));
+    }
+}
+
+#[test]
+fn float_adjustments_preserve_hdr_range() {
+    let identity = vec![photocraft_doc::adjust::CurvePoint { input: 0.0, output: 0.0 }, photocraft_doc::adjust::CurvePoint { input: 1.0, output: 1.0 }];
+    let levels = LevelsChannel { in_black: 0.25, in_white: 0.75, gamma: 2.0, out_black: -0.1, out_white: 1.5 };
+    let adjustments = [
+        (Adjustment::Exposure { exposure: 0.0, offset: 0.0, gamma: 1.0 }, [4.0, 2.0, 0.5]),
+        (Adjustment::Exposure { exposure: 1.0, offset: 0.0, gamma: 1.0 }, [8.0, 4.0, 1.0]),
+        (
+            Adjustment::Levels { master: Default::default(), per_channel: Default::default(), space: Default::default(), black: Default::default() },
+            [4.0, 2.0, 0.5],
+        ),
+        (
+            Adjustment::Levels { master: levels, per_channel: Default::default(), space: Default::default(), black: Default::default() },
+            [4.0, 2.0, 0.5].map(|v| -0.1 + ((v - 0.25_f32) / 0.5).sqrt() * 1.6),
+        ),
+        (
+            Adjustment::Curves {
+                master: identity.clone(),
+                per_channel: std::array::from_fn(|_| identity.clone()),
+                space: Default::default(),
+                black: Vec::new(),
+            },
+            [4.0, 2.0, 0.5],
+        ),
+        (Adjustment::Curves { master: Vec::new(), per_channel: Default::default(), space: Default::default(), black: Vec::new() }, [4.0, 2.0, 0.5]),
+    ];
+    for (adj, want) in adjustments {
+        let mut d = Document::new("HDR", Size::new(1, 1), ColorMode::Rgb, SampleType::F32);
+        let mut l = Layer::raster("pixels", PixelFormat::RGBA32F);
+        l.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 1, 1), &[4.0, 2.0, 0.5, 0.75]);
+        d.layers = vec![l, Layer::new("adjustment", LayerContent::Adjustment(adj.clone()))];
+        let got = px(&d, 0, 0);
+        for (a, b) in got[..3].iter().zip(want) {
+            assert!((a - b).abs() < 1e-5, "{adj:?}: {got:?} vs {want:?}");
+        }
+        assert_eq!(got[3], 0.75);
+    }
+}
+
+#[test]
+fn float_tone_adjustments_preserve_negative_and_untouched_channels() {
+    let identity = vec![photocraft_doc::adjust::CurvePoint { input: 0.0, output: 0.0 }, photocraft_doc::adjust::CurvePoint { input: 1.0, output: 1.0 }];
+    let edited = vec![photocraft_doc::adjust::CurvePoint { input: 0.0, output: 0.0 }, photocraft_doc::adjust::CurvePoint { input: 1.0, output: 0.5 }];
+    for (adj, want) in [
+        (
+            Adjustment::Levels { master: Default::default(), per_channel: Default::default(), space: Default::default(), black: Default::default() },
+            [-0.1, 4.0, 0.5],
+        ),
+        (
+            Adjustment::Curves { master: identity.clone(), per_channel: [identity.clone(), Vec::new(), edited], space: Default::default(), black: Vec::new() },
+            [-0.1, 4.0, 0.25],
+        ),
+    ] {
+        let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), [-0.1, 4.0, 0.5, 0.75]);
+        adjust::apply_depth(&adj, &mut b, adjust::Transfer::Gamma(1.0), Some(SampleType::F32));
+        for (a, b) in b.px[0][..3].iter().zip(want) {
+            assert!((a - b).abs() < 1e-5, "{adj:?}: {:?} vs {want:?}", b);
+        }
+        assert_eq!(b.px[0][3], 0.75);
+    }
+}
+
+#[test]
+fn float_exposure_stops_round_trip_without_losing_highlights() {
+    let input = [4.0, -2.0, 0.5, 0.75];
+    let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), input);
+    for exposure in [1.0, -1.0] {
+        adjust::apply_depth(&Adjustment::Exposure { exposure, offset: 0.0, gamma: 1.0 }, &mut b, adjust::Transfer::Gamma(1.0), Some(SampleType::F32));
+    }
+    assert_eq!(b.px[0], input);
+}
+
+#[test]
+fn float_exposure_preserves_signed_gamma_and_offset() {
+    let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), [-0.5, 0.0, 4.0, 0.75]);
+    adjust::apply_depth(&Adjustment::Exposure { exposure: 1.0, offset: -0.25, gamma: 2.0 }, &mut b, adjust::Transfer::Gamma(1.0), Some(SampleType::F32));
+    for (got, want) in b.px[0].iter().zip([-1.25_f32.sqrt(), -0.5, 7.75_f32.sqrt(), 0.75]) {
+        assert!((got - want).abs() < 1e-6, "{:?}", b.px[0]);
+    }
+}
+
+#[test]
+fn float_levels_apply_channel_before_master_outside_unit_range() {
+    let channel = LevelsChannel { in_black: 0.5, in_white: 1.5, ..Default::default() };
+    let master = LevelsChannel { out_black: -0.1, out_white: 1.5, ..Default::default() };
+    let adj = Adjustment::Levels { master, per_channel: std::array::from_fn(|_| channel.clone()), space: Default::default(), black: Default::default() };
+    let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), [4.0, 2.0, -0.1, 1.0]);
+    adjust::apply_depth(&adj, &mut b, adjust::Transfer::Gamma(1.0), Some(SampleType::F32));
+    for (got, want) in b.px[0].iter().zip([5.5, 2.3, -1.06, 1.0]) {
+        assert!((got - want).abs() < 1e-6, "{:?}", b.px[0]);
     }
 }
 

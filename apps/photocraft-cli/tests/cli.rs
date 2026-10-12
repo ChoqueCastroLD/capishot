@@ -265,6 +265,37 @@ fn batch_applies_actions_to_directory() {
 }
 
 #[test]
+fn batch_skips_recorded_view_and_save_steps() {
+    let d = tmp("batch-shell-steps");
+    let input = d.join("in");
+    std::fs::create_dir_all(&input).unwrap();
+    let source = input.join("a.png");
+    write_png(&source, 12, 8, 3);
+    let original = std::fs::read(&source).unwrap();
+    let recorded_save = d.join("recorded-save.psd");
+    let mut cases = Vec::new();
+    for (name, id) in [("zoom-in", "view.zoomIn"), ("zoom-out", "view.zoomOut"), ("fit", "view.fitOnScreen"), ("actual-pixels", "view.actualPixels")] {
+        cases.push((name, json!([[id, {}], ["image.imageRotation.90cw", {}]]).to_string()));
+    }
+    cases.push(("save", json!([["file.save", {}], ["image.imageRotation.90cw", {}]]).to_string()));
+    cases.push(("save-as", json!([["file.saveAs", {"path": recorded_save.to_string_lossy()}], ["image.imageRotation.90cw", {}]]).to_string()));
+
+    for (name, actions) in cases {
+        let o = batch_with(&d, &input, name, &actions, &[]);
+        let (stdout, stderr) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+        assert!(o.status.success(), "{name}: {stdout}\n{stderr}");
+        assert!(stdout.contains("1 succeeded, 0 failed"), "{name}: {stdout}");
+        let output = d.join(name).join("a.png");
+        let (info, _) = ok(bin().arg("info").arg(&output));
+        let info: Value = serde_json::from_str(&info).unwrap();
+        assert_eq!((info["width"].as_u64(), info["height"].as_u64()), (Some(8), Some(12)), "{name}: {info}");
+        assert_eq!(std::fs::read(&source).unwrap(), original, "{name} changed its input");
+        assert!(!recorded_save.exists(), "{name} wrote the recorded Save As path");
+    }
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+#[test]
 fn parse_actions_formats() {
     let a = photocraft_cli::parse_actions(r#"[{"command":"a","params":{"x":1}},{"id":"b"}]"#).unwrap();
     assert_eq!(a, vec![("a".to_string(), json!({"x":1})), ("b".to_string(), json!({}))]);
@@ -376,6 +407,32 @@ fn quality_outside_1_to_100_is_refused() {
         })
         .collect();
     assert!(sizes[0] <= sizes[1] && sizes[1] <= sizes[2], "{sizes:?}");
+}
+
+/// `--tga-bits` picks a TGA's bits per pixel (byte 16 of its header); anything but 24 or 32 is
+/// refused and nothing is written.
+#[test]
+fn tga_bits_choose_the_targa_depth() {
+    let d = tmp("tga-bits");
+    let a = d.join("a.png");
+    write_png(&a, 8, 4, 3);
+    for (bits, want) in [(None, 32), (Some("24"), 24), (Some("32"), 32)] {
+        let out = d.join("a.tga");
+        let mut convert = bin();
+        convert.arg("convert").arg(&a).arg(&out);
+        if let Some(b) = bits {
+            convert.args(["--tga-bits", b]);
+        }
+        ok(&mut convert);
+        assert_eq!(std::fs::read(&out).unwrap()[16], want, "--tga-bits {bits:?}");
+    }
+    for bad in ["16", "0", "abc", ""] {
+        let out = d.join("bad.tga");
+        let o = bin().arg("convert").arg(&a).arg(&out).args(["--tga-bits", bad]).output().unwrap();
+        assert_eq!(o.status.code(), Some(1), "--tga-bits {bad}");
+        assert!(String::from_utf8_lossy(&o.stderr).contains(&format!("bad --tga-bits `{bad}`: expected 24 or 32")), "--tga-bits {bad}");
+        assert!(!out.exists(), "--tga-bits {bad} wrote a file");
+    }
 }
 
 /// #492: an `--out` folder that is the `--in` folder, however it is spelt, is refused before

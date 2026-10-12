@@ -1,23 +1,25 @@
 # AGENTS.md: guide for AI agents and contributors
 
-PhotoCraft is an open-source, native, Photoshop-comparable image editor written in **Rust only** (no JavaScript or TypeScript). **No Tauri, Electron or webview shells:** the desktop app is native egui/eframe on wgpu, and the web build is the same Rust compiled to WebAssembly (trunk + wasm-bindgen). Never add Tauri (or any webview/JS UI framework) as a dependency, build step or packaging target. The product name is always written **PhotoCraft** (`{Function}Craft` in PascalCase, like its siblings ArtCraft, ArtCraftX, DesignCraft, VectorCraft, EffectCraft, FilmCraft, LightCraft, PdfCraft) in user-facing text: UI, window titles, About, installers, release names, docs prose. Machine names stay lowercase: crates (`photocraft-*`), binaries, file names, ids (`ai.storyteller.photocraft`). Standards and learnings shared across the crafting apps live in `../craftrules` (read its `README.md`; the repository is not public — outside contributors should ask a maintainer for the standards relevant to their change). Contribute reusable learnings there, never code; repos don't share code. The goal is 1:1 Photoshop parity (same menus, shortcuts, behaviour and file fidelity) with better performance, and every feature drivable by agents. Read this file and `docs/contributing.md` first, then use the table below to select relevant sections.
+PhotoCraft is an open-source, native, Photoshop-comparable image editor written in **Rust only** (no JavaScript or TypeScript). **No Tauri, Electron or webview shells:** the desktop app is native egui/eframe on wgpu, and the web build is the same Rust compiled to WebAssembly (trunk + wasm-bindgen). Never add Tauri (or any webview/JS UI framework) as a dependency, build step or packaging target. The product name is always written **PhotoCraft** (`{Function}Craft` in PascalCase, like its siblings ArtCraft, ArtCraftX, DesignCraft, VectorCraft, EffectCraft, FilmCraft, LightCraft, PdfCraft) in user-facing text: UI, window titles, About, installers, release names, docs prose. Machine names stay lowercase: crates (`photocraft-*`), binaries, file names, ids (`ai.storyteller.photocraft`). Standards and learnings shared across the crafting apps live in `../craftrules` (read its `README.md`; the repository is not public — outside contributors should ask a maintainer for the standards relevant to their change). Contribute reusable learnings there; shared Rust components live in [storytold/craft-libs](https://github.com/storytold/craft-libs) and are pinned by immutable git revision. UI libraries stay at L6. The goal is 1:1 Photoshop parity (same menus, shortcuts, behaviour and file fidelity) with better performance, and every feature drivable by agents. Read this file first, then `docs/`.
 
 ## 1. Orientation (5 minutes)
 
-Select sections by the behaviour or interface affected; several rows may apply. Relevant requirements remain binding, including for changes within a single crate. Revisit the selection when the task expands.
-
-| Read | Why | Read when |
-|---|---|---|
-| `docs/architecture.md` | Crate map, dependency layers, the engine/UI seam, document model | Changing dependencies, APIs or subsystem behaviour, including document state, history, rendering and file formats |
-| `docs/development.md` | Build, test, run, drive the app programmatically, debug tricks | Building, testing, benchmarking or debugging; using its tools or changing a subsystem described there |
-| `docs/contributing.md` | Rules: clean-room, tests, layering, style, commits; the "add a command" checklist | Every task |
-| `docs/control-protocol.md` | JSON control channel: how agents drive and screenshot the running app | Driving the app or changing automation APIs, including exposed commands, UI state and preferences |
-| `docs/ui-design.md` | Design tokens, themes, widgets, and how to match Photoshop's look | Changing UI, tool interaction or visual behaviour; checking the result visually |
-| `docs/roadmap.md` | Honest parity assessment (where we're lacking, where we're going), milestones, **current focus** | Choosing work or updating progress and parity claims |
-| `docs/parity.md` | Generated list of every Photoshop menu item, live or missing | Choosing work or changing commands and menu coverage |
-| `docs/scorecard.md` | Generated scorecard: performance budgets and numbers, corpus floors, per-area checklists (tools, files, UI, type, automation, reliability, distribution), settings that do nothing | Choosing work or changing measured results, checklist status, corpus floors or preferences |
-| `crates/<name>/README.md` (where present) | Public API of that crate | Working in or using that crate |
-| [photocraft-corpus](https://github.com/storytold/photocraft-corpus) + `docs/development.md` › Test corpora | Real-file test oracles (our Photoshop-authored PSDs); with psd-tools, ag-psd and PngSuite fetched into `corpus/` by `cargo xtask corpus --all` at the pins in `xtask/src/corpus_pins.rs` | Changing psd, io, codecs, compose, gpu, text or format; working on test oracles |
+| Read | Why |
+|---|---|
+| `docs/architecture.md` | Crate map, dependency layers, the engine/UI seam, document model |
+| `docs/development.md` | Build, test, run, drive the app programmatically, debug tricks |
+| `docs/contributing.md` | Rules: clean-room, tests, layering, style, commits; the "add a command" checklist |
+| `docs/control-protocol.md` | JSON control channel: how agents drive and screenshot the running app |
+| `docs/ui-design.md` | Design tokens, themes, widgets, and how to match Photoshop's look |
+| `ROADMAP.md` | One-page summary: stage, the two parity numbers, every dimension, languages, what's next |
+| `docs/target-app-parity.md` | The authoritative parity assessment against Photoshop 2026: numbers, weights, evidence, hours |
+| `docs/gaps.md` | Every known shortfall, ranked: the work list to pick from |
+| `docs/roadmap.md` | Milestones, **current focus**, what's next with estimates |
+| `docs/ui-parity.md`, `docs/brush-parity.md`, `docs/context-menu-parity.md`, `docs/file-format-parity.md`, `docs/hardware-parity.md`, `docs/localization-parity.md` | Per-dimension parity checklists |
+| `docs/parity-checklist.md` | Generated list of every Photoshop menu item, live or missing |
+| `docs/scorecard.md` | Generated scorecard: performance budgets and numbers, corpus floors, per-area checklists (tools, files, UI, type, automation, reliability, distribution), settings that do nothing |
+| `crates/<name>/README.md` (where present) | Public API of that crate |
+| [photocraft-corpus](https://github.com/storytold/photocraft-corpus) + `docs/development.md` › Test corpora | Real-file test oracles (our Photoshop-authored PSDs); with psd-tools, ag-psd and PngSuite fetched into `corpus/` by `cargo xtask corpus --all` at the pins in `xtask/src/corpus_pins.rs` |
 
 ## 2. Workspace map
 
@@ -31,13 +33,13 @@ crates/
   compose gpu format         L3 CPU compositor (the oracle), wgpu compositor, .pcraft native format
   io plugins                 L4 document <-> PSD / flat formats; sandboxed WebAssembly plug-ins
   engine                     L5 Session + command registry (every action is a command)
-  ui-egui automation         L6 egui shell (thin: all actions go through the engine); MCP server
+  ui-egui automation fontfetch  L6 egui shell (thin: all actions go through the engine); MCP server; Google Fonts HTTPS fetcher + font store
   testkit                    test helpers
 apps/
   photocraft                 desktop app (eframe/wgpu), TCP control server
   photocraft-cli             headless CLI (convert/info/run/batch/commands/mcp)
   photocraft-web             the same app in the browser (trunk + wasm-bindgen)
-xtask/                       cargo xtask layers | wasm | ci | stats | corpus | test-corpus | parity | perf | scorecard
+xtask/                       cargo xtask layers | wasm | ci | stats | corpus | test-corpus | fonts-index | parity | perf | scorecard
 ```
 
 **Layering is enforced** by `cargo xtask layers`. A crate may depend only on lower layers. `psd`, `codecs` and `cms` depend on nothing in the workspace. Nothing below `ui-egui` may use egui, eframe, winit or rfd. A new crate must be registered in `xtask/src/layers.rs`.
@@ -72,15 +74,16 @@ People trust PhotoCraft with their work, and a crash loses it. A malformed file,
 
 Priorities: important infrastructure first, then low-hanging parity, then the long tail.
 
-0. **Read `docs/roadmap.md` → "Honest parity assessment" first.** It says, dimension by dimension,
-   where PhotoCraft is lacking and the priority order of where we're going. `docs/parity.md`
-   (menu wiring) is not a measure of behaviour. When your work moves a measured number (PSD oracle,
-   round trips, workflow tests, performance), update that section with the dated figure.
+0. **Read `ROADMAP.md`, then `docs/gaps.md`.** `docs/target-app-parity.md` says, dimension by
+   dimension, where PhotoCraft is lacking; `docs/gaps.md` ranks the work. `docs/parity-checklist.md`
+   (menu wiring) is not a measure of behaviour. When your work moves a number or closes a gap,
+   update the parity doc and gap entry it belongs to, with the date, and bump their status line
+   and revision history (craftrules `standards/progress-docs.md`).
 1. **Check `docs/scorecard.md`** before picking work: each area's `missing` and `partial` rows,
    the performance scenarios that are over budget or not measurable yet, and the count of
    settings that do nothing. Its numbers are measured; prefer them to estimates.
 2. `docs/roadmap.md` → **Current focus**.
-3. `cargo xtask parity` → `docs/parity.md` lists every missing menu item, grouped by menu. Low-hanging fruit is usually a missing command whose algorithm already exists in `algo`, `paint`, `vector` or `text`.
+3. `cargo xtask parity` → `docs/parity-checklist.md` lists every missing menu item, grouped by menu. Low-hanging fruit is usually a missing command whose algorithm already exists in `algo`, `paint`, `vector` or `text`.
 4. `log/devlog.md` → the "Still open" bullets of recent entries.
 
 When parity rises, raise `FLOOR` in `crates/ui-egui/src/parity.rs` (never lower it).
@@ -92,7 +95,7 @@ cargo test -p <crates you touched>
 cargo clippy -p <crates> --all-targets -- -D warnings
 cargo xtask layers
 cargo xtask wasm            # if you touched L0–L6
-cargo xtask parity          # if you added commands; commit the regenerated docs/parity.md
+cargo xtask parity          # if you added commands; commit the regenerated docs/parity-checklist.md
 cargo test -p photocraft-engine --test panic_hunt -- --ignored   # if you added/changed commands: no panic on adversarial input (Rule 9)
 cargo xtask scorecard       # if you moved a number: flip the checklist row in scorecard/*.toml, raise a
                             # corpus floor, fix a dead preference, or meet a budget (then set enforce = true
@@ -101,7 +104,7 @@ cargo xtask perf --quick    # if you touched a hot path; `cargo xtask perf --upd
 cargo xtask test-corpus     # if you touched psd, io, codecs, compose, gpu, text or format (or: --changed decides)
 ```
 
-For new or changed heavy operations, record release timings on a 24–36 MP image (before/after where applicable) in the dev log (Rule 8), and include a short summary in the PR description.
+While iterating, run less and keep the full commands above as the final gate: `cargo test -p <crate> --lib --tests` skips the examples and doctests plain `cargo test` builds every time (ui-egui has 11 examples), and `cargo test -p <crate> --test <file>` runs one integration-test file. `cargo nextest run` runs tests in parallel across binaries; see `docs/development.md` › Faster test loops.
 
 **Test corpora.** Real-file corpora live in `corpus/` (gitignored, never committed), fetched at pinned commits and sha256-verified by `cargo xtask corpus --all`: our Photoshop-authored oracles from https://github.com/storytold/photocraft-corpus plus psd-tools, ag-psd and PngSuite from their upstreams. Pins: `xtask/src/corpus_pins.rs`. The corpus tests are opt-in (cargo feature `corpus`): plain `cargo test` skips them, and with the feature on a missing corpus fails ("run `cargo xtask corpus --all`"). `cargo xtask test-corpus` fetches and runs them all. CI always runs them (the `corpus` job, cached by pin). Never commit corpus files; new oracles go to photocraft-corpus (its `AGENTS.md`), then a pin bump here. Details: `docs/development.md` › Test corpora.
 
@@ -121,7 +124,8 @@ Then append a terse entry to `log/devlog.md` (what landed, numbers, what's still
 
 
 - `docs/roadmap.md`: milestones M0–M12, status and the current focus.
-- `docs/parity.md`: generated Photoshop menu coverage.
+- `ROADMAP.md`, `docs/target-app-parity.md`, `docs/gaps.md` and the `docs/*-parity.md` checklists: where we stand against Photoshop.
+- `docs/parity-checklist.md`: generated Photoshop menu coverage.
 - `docs/scorecard.md`: generated scorecard (sources: `scorecard/*.toml`, `perf/budgets.toml`, `perf/baseline.json`, corpus floors, prefs audit).
 - `docs/releasing.md`: cutting a release (`cargo xtask version`, the `release` branch), signing secrets, packaging scripts in `packaging/`.
 - `../craftrules/release/playbook.md`: how every storytold app builds signed release binaries (the canonical recipe; `docs/release-playbook.md` just points there); `docs/releasing.md` is PhotoCraft's specifics.

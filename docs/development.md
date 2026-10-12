@@ -2,15 +2,12 @@
 
 ## Prerequisites
 
-Run `cargo xtask doctor` to check your machine and `cargo xtask doctor --fix` to install what can be
-installed automatically. The full list — tools, rustup targets/components, data checkouts and Linux
-system libraries — is generated from the manifest in `xtask/src/prereqs.rs` into
-[docs/prerequisites.md](prerequisites.md).
-
-- Rust stable (1.95+). `cargo xtask doctor --fix` installs the `clippy`/`rustfmt` components and the
-  `wasm32-unknown-unknown` target the gates need; `cargo xtask ci` and `cargo xtask wasm` fail with
-  that hint if one is missing.
-- macOS, Windows or Linux. The Linux `lib*` packages are listed on the prerequisites page.
+- Rust stable (1.95+). Add the web target with `rustup target add wasm32-unknown-unknown`.
+- macOS, Windows or Linux. On Linux, install the windowing, GL and GTK development packages:
+  - Debian/Ubuntu: `sudo apt install libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libgtk-3-dev`
+  - Fedora/RHEL: `sudo dnf install libxkbcommon-devel wayland-devel libX11-devel libXrandr-devel libXi-devel mesa-libGL-devel gtk3-devel`
+  - Arch: `sudo pacman -S libxkbcommon wayland libx11 libxrandr libxi mesa gtk3`
+  - openSUSE: `sudo zypper install libxkbcommon-devel wayland-devel libX11-devel libXrandr-devel libXi-devel Mesa-libGL-devel gtk3-devel`
 
 ### Windows source builds
 
@@ -44,10 +41,25 @@ cargo run --release -p photocraft -- --control 7878 --control-token-file .privat
 cargo test --workspace                                     # everything
 cargo xtask ci                                             # fmt + clippy + tests + layers + wasm
 cargo xtask stats                                          # tests and lines per crate
-cargo xtask parity                                         # Photoshop menu coverage -> docs/parity.md
+cargo xtask parity                                         # Photoshop menu coverage -> docs/parity-checklist.md
 ```
 
 Image code is slow at `opt-level 0`, so the workspace profile builds dependencies at `opt-level 2`. Use `--release` for anything interactive.
+
+The dev profile builds with `debug = "line-tables-only"`: panic backtraces keep file and line, and test binaries link about twice as fast. To inspect local variables in a debugger, build with `CARGO_PROFILE_DEV_DEBUG=true`.
+
+### Faster test loops
+
+Most of a `cargo test` run is linking test binaries and running them one after another. While iterating:
+
+```sh
+cargo test -p <crate> --lib --tests        # skip examples and doctests (ui-egui has 11 examples)
+cargo test -p <crate> --test <file>        # one integration-test file
+cargo nextest run --workspace              # parallel across binaries (cargo install cargo-nextest --locked)
+cargo test --doc --workspace               # nextest does not run doctests
+```
+
+[cargo-nextest](https://nexte.st) runs each test in its own process. `.config/nextest.toml` puts the GPU tests (`photocraft-gpu`, and ui-egui's integration and canvas/GPU tests) in a group of at most 4 at a time, because each process opens its own wgpu device and the in-process `gpu_lock()` no longer serializes them. On a 32-thread Windows machine the full workspace went from 297 s (`cargo test`) to about 120 s (#2204). Ignored tests run with `cargo nextest run --run-ignored only`. CI still runs `cargo test`, and a full `cargo test` stays the final check before a PR.
 
 ## Fonts (craft-fonts)
 
@@ -66,6 +78,26 @@ CRAFT_FONTS_DIR="$PWD/../craft-fonts" cargo test --workspace     # runs the Japa
 - **UI:** the Japanese fonts (BIZ UDPGothic Regular first) are the first Japanese fallback in the lazy CJK loader (`crates/ui-egui/src/cjk_fonts.rs`), ahead of the system Japanese fonts and in the same locale script order, appended last to every egui family with the usual baseline alignment.
 - **Type tool:** the text engine registers them in `FontDb::new` (so also with no system fonts) and puts them first in the Japanese slot of the locale-ordered fallback list: BIZ UDPGothic for sans runs, Shippori Mincho / BIZ UDMincho for serif runs.
 - **Web:** the wasm32 build never embeds craft-fonts, even with `CRAFT_FONTS_DIR` set: measured on 2026-10-06, the UI face alone took the release wasm from 24.19 MB to 28.87 MB, over the 25 MiB gate in `packaging/web/package.sh`. Instead it loads fonts served next to it, on demand: `fonts/manifest.txt` beside `index.html`, in craft-fonts' manifest format (`crates/text/src/served.rs`; hosting: `packaging/web/README.md` › Fonts). `PHOTOCRAFT_WEB_FONTS_DIR="$PWD/../craft-fonts" packaging/web/package.sh` puts craft-fonts there. Served families are in the font menus and are fetched when picked or when a document's text needs them; they aren't in the script fallback list yet, so Japanese text set in a Latin font still needs a Japanese font picked (#1615).
+- **Google Fonts index:** `cargo xtask fonts-index --repo <google/fonts checkout> --out <file> [--commit <sha>]` walks `{ofl,apache,ufl}/*/METADATA.pb` and writes the JSON index (schema 1; format documented in `crates/text/src/catalog.rs`) that `photocraft_text::catalog::Catalog::parse` validates and searches. It hashes the font files and reads axes and PostScript names (including `fvar` named instances) with skrifa. Treat the checkout as untrusted data: pass it only as `--repo`, never run anything from inside it. Nothing is downloaded by this command.
+- **Try Google Fonts downloads locally:** the pinned index does not exist yet (`INDEX_URLS` in `crates/fontfetch/src/lib.rs` is empty), so point the app at a local one. Build an index from a `google/fonts` checkout (a few families are enough), then launch with it and turn the preference on:
+
+  ```sh
+  cargo xtask fonts-index --repo ../google-fonts --out /tmp/gf-index.json
+  PHOTOCRAFT_FONT_INDEX_FILE=/tmp/gf-index.json PHOTOCRAFT_CONFIG_DIR=/tmp/pc-config cargo run -p photocraft
+  # Edit > Preferences > Type > "Allow online fonts" (or: prefs.set {"values": {"type.allowOnlineFonts": true}} from the control channel's own user, not an MCP client)
+  # then: type.fonts.catalog {"query": "noto"}, type.fonts.install {"family": "Noto Sans JP"}, type.fonts.installed, type.fonts.remove
+  ```
+
+  Downloaded fonts live in `<config dir>/Fonts/Google/<slug>/` (never the OS font folders) and are registered from disk at the next start, with no network. The override file is still fully validated, and the font files are still fetched (jsDelivr, then raw.githubusercontent.com) and checked against the index's size and sha256. Headless: `photocraft-cli run ... --allow-online-fonts` (also `batch`, `mcp`, `serve`) turns the preference on for that process only; nothing is saved, and the CLI never reads or writes the preferences file. Automation clients (MCP, the control channel, `serve`) cannot enable the preference themselves: `prefs.set` of `type.allowOnlineFonts` (or of the whole `type` section) is refused for them, so only the person who runs the app or the CLI can opt in.
+- **Google Fonts in the UI** (`crates/ui-egui/src/fonts_ui.rs`): the font picker (options bar and Character panel) has two tabs, Fonts and Find More. Find More searches `type.fonts.catalog` (query, category, language/subset) and each row's cloud button starts `type.fonts.install` as a background job (progress on the row and in the status bar, Cancel on the row or Esc; the finished family is in the Fonts tab and clickable in the row at once). The first time Find More opens with `type.allowOnlineFonts` off it shows a consent card instead of the list and fetches nothing; Allow sets the preference as a user action (the automation guard still refuses it for MCP and the control channel), Not now leaves it off. Variable families say that only the default weight is available. Errors (offline, index not set up, sha mismatch, turned off) show inline with Retry. Type › Resolve Missing Fonts… opens a dialog (missing families, a Replace with picker each, Download from Google Fonts for the ones the index has, OK applies the replacements); Preferences › Type › Manage downloaded fonts… lists `type.fonts.installed` with Remove, and removing a font that open documents use asks first (counts of layers and documents, then Remove anyway; those layers become missing fonts, nothing is re-laid out). The picker's tab, query and filters are `UiState::fonts` (visible in `ui.inspect`, settable with `ui.set {"fonts": {"tab": "findMore", "query": "...", "category": "SERIF", "subset": "japanese"}}`); the two dialogs are `prefs_ui` dialogs whose fields `ui.dialog.*` can read and set. Tests use a fake fetcher and store (`crates/ui-egui/tests/support/dev_fonts.rs`, no network).
+- **See the Google Fonts UI offscreen:** `snapshot --dev-fonts` attaches that fake backend (a demo index of a few families; Oswald's download never finishes so progress shows; Anton and Karla can be installed) and `--allow-online-fonts` turns the preference on. For example, the Find More list with the picker open (use `--background-jobs` to behave like the app, `--click-wait-ms` to let jobs finish between clicks, several `--click-at X,Y` run in order):
+
+  ```sh
+  cargo run -p photocraft-ui-egui --example snapshot -- --dev-fonts --allow-online-fonts --background-jobs --click-wait-ms 300 \
+    --size 1280x720 --scale 1 --out find-more.png \
+    --script '[["engine.execute",{"command":"file.new","params":{"width":900,"height":500}}],["engine.execute",{"command":"type.create","params":{"x":60,"y":120,"text":"Hello","size":64}}],["ui.set",{"tool":"type","fonts":{"tab":"findMore"}}]]' \
+    --click-at 245,49
+  ```
 - Tests that need the fonts skip with a message when `CRAFT_FONTS` is empty; CI's Linux job runs the tests a second time with `CRAFT_FONTS_DIR` set. Desktop releases check out craft-fonts at the commit pinned in `.github/workflows/release.yml` (`CRAFT_FONTS_REF`; ci.yml pins the same commit) and ship each font's `OFL.txt` as `OFL-<family>.txt`.
 
 ## Graphics startup and device loss
@@ -147,7 +179,7 @@ cargo run -p photocraft-cli -- batch --actions actions.json --in photos/ --out d
 cargo run -p photocraft-cli -- commands --filter blur                    # the command registry
 ```
 
-`actions.json` holds the steps of a recorded action: `[["<id>", {…}], …]`, `[{"command": "<id>", "params": {…}}, …]` or bare ids, as a list or wrapped in `{"actions": …}` or `{"steps": …}`; a droplet file works too. `batch` refuses an `--out` folder that is the `--in` folder, since the results would replace the originals, unless `--in-place` is given. `run` prints one JSON line per command result.
+`actions.json` holds the steps of a recorded action: `[["<id>", {…}], …]`, `[{"command": "<id>", "params": {…}}, …]` or bare ids, as a list or wrapped in `{"actions": …}` or `{"steps": …}`; a droplet file works too. It can also be an Actions set (the Actions panel's `actions.json`, `{"actions": [{"name": …, "steps": […]}, …]}`): `--action <name>` picks the action to play (optional when the set holds one), and the whole set is loaded for each file, so a step that plays another action of the set works. `batch` refuses an `--out` folder that is the `--in` folder, since the results would replace the originals, unless `--in-place` is given. `run` prints one JSON line per command result.
 
 ## Native format (.pcraft)
 
@@ -242,7 +274,7 @@ intents, black point compensation). It ships CC0 built-in profiles, including a 
 ## Menu parity
 
 `cargo xtask parity` compares Photoshop's menu tree (`crates/ui-egui/src/menu_catalog.rs`) with
-the live command registry (`menus::is_live`) and rewrites [`docs/parity.md`](parity.md). The test
+the live command registry (`menus::is_live`) and rewrites [`docs/parity-checklist.md`](parity-checklist.md). The test
 `parity::tests::parity_does_not_regress` fails if the live count drops below `parity::FLOOR`.
 
 `cargo xtask i18n-coverage` prints the UI translation coverage for each language in the
@@ -304,7 +336,7 @@ cargo xtask perf --update-baseline   # also write perf/baseline.json from this r
   class, commit, date and load average.
 - `crates/io/tests/corpus.rs`: the corpus floors (every `Source { .. }` constant).
 - The prefs audit: `Preferences` fields that no code reads (target 0, #204), plus counts taken
-  from the tree (never-crash attribute coverage, `docs/parity.md`).
+  from the tree (never-crash attribute coverage, `docs/parity-checklist.md`).
 
 **Perf runs.** `xtask perf` builds the benches in release (`perf_scenarios`, `interactive_bench`,
 `fx_bench`, `bevel_bench`, `type_bench`, `large_image_bench`, and `layout_bench` once it exists), runs each with
@@ -340,8 +372,7 @@ trunk build --release              # writes ../../dist/web (index.html, .js glue
 trunk serve --release              # dev server on http://127.0.0.1:8765
 ```
 
-Any static file server works for `dist/web`, for example `python3 -m http.server 8765` run inside that directory. Trunk downloads the matching `wasm-bindgen` and `wasm-opt` itself. `trunk build --release` uses the `wasm-release` Cargo profile (`data-cargo-profile` in `index.html`: fat LTO, opt-level "z" except the pixel crates). The `.wasm` is about 18.8 MiB raw, 7.8 MiB gzipped and 5.6 MiB with Brotli; serve it with compression. Keep it under 24 MiB (`packaging/web/package.sh` enforces this; Cloudflare's per-file cap is 25 MiB). Pull-request CI also builds the actual browser app with the same pinned Trunk version as the release job and runs `packaging/web/package.sh`, including the relative-URL and 24 MiB checks. The `web build and wasm size gate` check runs on main and on PRs that change something the web build compiles or packages (`apps/photocraft-web`, `packaging/web`, crate sources and manifests, `Cargo.toml`/`Cargo.lock`, the CI workflow), and reports the resulting wasm size in the Actions job summary. The web build never embeds craft-fonts (see Fonts above). To see where the bytes go, run `twiggy top -n 40` on `target/wasm32-unknown-unknown/wasm-release/photocraft-web.wasm` (before wasm-opt strips the names).
-Any static file server works for `dist/web`, for example `python3 -m http.server 8765` run inside that directory. Trunk downloads the matching `wasm-bindgen` and `wasm-opt` itself. `trunk build --release` uses the `wasm-release` Cargo profile (`data-cargo-profile` in `index.html`: fat LTO, opt-level "s" except the pixel crates). The `.wasm` is about 18.8 MiB raw, 7.8 MiB gzipped and 5.6 MiB with Brotli; serve it with compression. Keep it under 25 MiB (`packaging/web/package.sh` enforces this; Cloudflare's per-file cap is 25 MiB). Pull-request CI also builds the actual browser app with the same pinned Trunk version as the release job and runs `packaging/web/package.sh`, including the relative-URL and 25 MiB checks. The `web build and wasm size gate` check runs on main and on PRs that change something the web build compiles or packages (`apps/photocraft-web`, `packaging/web`, crate sources and manifests, `Cargo.toml`/`Cargo.lock`, the CI workflow), and reports the resulting wasm size in the Actions job summary. The web build never embeds craft-fonts (see Fonts above). To see where the bytes go, run `twiggy top -n 40` on `target/wasm32-unknown-unknown/wasm-release/photocraft-web.wasm` (before wasm-opt strips the names).
+Any static file server works for `dist/web`, for example `python3 -m http.server 8765` run inside that directory. Trunk downloads the matching `wasm-bindgen` and `wasm-opt` itself. `trunk build --release` uses the `wasm-release` Cargo profile (`data-cargo-profile` in `index.html`: fat LTO, opt-level "z" for `photocraft-ui-egui` and `photocraft-engine`, "s" for other crates except pixel processing, which keeps level 3). The UI and engine overrides reduce browser code size while retaining the speed-oriented settings for the pixel-core crates. Engine-contained image preparation may trade speed for size in the browser; native profiles are unaffected. Serve the `.wasm` with compression; its raw size varies with the source and compiler. Keep it under 24 MiB (`packaging/web/package.sh` enforces this; Cloudflare's per-file cap is 25 MiB). Pull-request CI also builds the actual browser app with the same pinned Trunk version as the release job and runs `packaging/web/package.sh`, including the relative-URL and 24 MiB checks. The `web build and wasm size gate` check runs on main and on PRs that change something the web build compiles or packages (`apps/photocraft-web`, `packaging/web`, crate sources and manifests, `Cargo.toml`/`Cargo.lock`, the CI workflow), and reports the resulting wasm size in the Actions job summary. The web build never embeds craft-fonts (see Fonts above). To see where the bytes go, run `twiggy top -n 40` on `target/wasm32-unknown-unknown/wasm-release/photocraft-web.wasm` (before wasm-opt strips the names).
 
 URL flags: `?webgl` forces the WebGL2 backend, and `?cpu` forces the CPU canvas path.
 

@@ -13,7 +13,7 @@ use photocraft_ops::{ArchivedDocument, History, HistoryCheckpoint, HistoryState}
 use photocraft_raster::Tile;
 use serde::{Deserialize, Serialize};
 
-use crate::store::{self, Source, write_atomic};
+use crate::store::{self, ByteSource, write_atomic};
 use crate::{FormatError, LoadOptions, PcraftWriter, Result, SaveOptions, SaveStats};
 
 const MAX_DESCRIPTOR: u64 = 256 << 20;
@@ -478,7 +478,7 @@ struct RecoverySource {
     lease: Arc<RootLease>,
     manifest: String,
 }
-impl Source for RecoverySource {
+impl ByteSource for RecoverySource {
     fn get(&self, path: &str, max: usize) -> Result<Vec<u8>> {
         if path == store::MANIFEST {
             if self.manifest.len() > max {

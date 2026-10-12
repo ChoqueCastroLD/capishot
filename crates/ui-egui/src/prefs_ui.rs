@@ -59,6 +59,10 @@ pub struct Runtime {
     pub(crate) checker_key: Option<[[u8; 3]; 2]>,
     /// Style last sent to the GPU canvas.
     pub(crate) gpu_style: Option<crate::gpu_canvas::CanvasStyle>,
+    /// `unitsAndRulers.showRulers` as last applied to View › Rulers.
+    show_rulers: Option<bool>,
+    /// Tool options as last remembered in the preferences (see `tool_memory`).
+    pub(crate) tool_options: Option<crate::state::ToolOptions>,
 }
 
 /// Logical history changes such as Purge can occur without a document revision.
@@ -134,8 +138,11 @@ fn selected_theme(interface: &prefs::Interface, system: Option<egui::Theme>) -> 
     if light {
         match interface.light_theme {
             LightTheme::StudioLight => ThemeKind::StudioLight,
+            LightTheme::ProLightGray => ThemeKind::ProLightGray,
+            LightTheme::ProLight => ThemeKind::ProLight,
             LightTheme::Classic => ThemeKind::Classic,
             LightTheme::Adwaita => ThemeKind::Adwaita,
+            LightTheme::BreezeLight => ThemeKind::BreezeLight,
         }
     } else {
         match interface.dark_theme {
@@ -144,6 +151,7 @@ fn selected_theme(interface: &prefs::Interface, system: Option<egui::Theme>) -> 
             DarkTheme::Studio => ThemeKind::Studio,
             DarkTheme::SolarizedDark => ThemeKind::SolarizedDark,
             DarkTheme::AdwaitaDark => ThemeKind::AdwaitaDark,
+            DarkTheme::BreezeDark => ThemeKind::BreezeDark,
         }
     }
 }
@@ -164,13 +172,21 @@ pub(crate) fn cycle_appearance(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
-const LIGHT_THEME_OPTIONS: &[(&str, ThemeKind)] = &[("studioLight", ThemeKind::StudioLight), ("classic", ThemeKind::Classic), ("adwaita", ThemeKind::Adwaita)];
+const LIGHT_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
+    ("studioLight", ThemeKind::StudioLight),
+    ("proLightGray", ThemeKind::ProLightGray),
+    ("proLight", ThemeKind::ProLight),
+    ("classic", ThemeKind::Classic),
+    ("adwaita", ThemeKind::Adwaita),
+    ("breezeLight", ThemeKind::BreezeLight),
+];
 const DARK_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
     ("proMedium", ThemeKind::ProMedium),
     ("pro", ThemeKind::Pro),
     ("studio", ThemeKind::Studio),
     ("solarizedDark", ThemeKind::SolarizedDark),
     ("adwaitaDark", ThemeKind::AdwaitaDark),
+    ("breezeDark", ThemeKind::BreezeDark),
 ];
 
 fn favorite_theme_groups(favorites: &[SavedTheme]) -> (Vec<ThemeKind>, Vec<ThemeKind>) {
@@ -212,6 +228,24 @@ fn system_theme(app: &PhotocraftApp, ctx: &egui::Context) -> Option<egui::Theme>
     app.services.system_theme.as_ref().and_then(|read| read(ctx)).or_else(|| ctx.system_theme())
 }
 
+/// View › Rulers follows `unitsAndRulers.showRulers` when the preference changes (at launch, from
+/// `prefs.set` or a reset), so documents open with the rulers as last set.
+fn sync_rulers(app: &mut PhotocraftApp) {
+    let want = app.session.prefs().units_and_rulers.show_rulers;
+    if app.prefs_rt.show_rulers != Some(want) {
+        app.ui.extras.rulers = want;
+        app.prefs_rt.show_rulers = Some(want);
+    }
+}
+
+/// View › Rulers was toggled: remember it for the next launch (Photoshop keeps the last state).
+pub(crate) fn remember_rulers(app: &mut PhotocraftApp, on: bool) {
+    if app.session.prefs().units_and_rulers.show_rulers != on {
+        app.session.prefs.edit(|p| p.units_and_rulers.show_rulers = on);
+    }
+    app.prefs_rt.show_rulers = Some(on);
+}
+
 // ------------------------------------------------------------------ lifecycle
 
 /// Load saved preferences once, when the app is created. Recovery starts during frame upkeep.
@@ -227,7 +261,8 @@ pub fn load(app: &mut PhotocraftApp) {
     }
     crate::dock::restore(app);
     crate::brush_picker::restore(app);
-    crate::last_brush::restore(app);
+    sync_rulers(app);
+    crate::tool_memory::restore(app);
     app.sync_recent();
     app.prefs_rt.saved_rev = app.session.prefs.rev();
     app.prefs_rt.saved_value = Some(app.session.prefs_value());
@@ -461,30 +496,20 @@ fn presets_store(app: &mut PhotocraftApp) {
 
 /// Resolve an absolute pixels-per-point preference without multiplying the OS DPI twice.
 /// Monitor dimensions are physical pixels, independent of window size and UI zoom.
-fn display_scale(pref: prefs::UiScale, native: Option<f32>, monitor_px: Option<egui::Vec2>) -> f32 {
+fn display_scale(pref: prefs::UiScale, native: Option<f32>) -> f32 {
     let native = native.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
     match pref {
-        prefs::UiScale::Auto => {
-            // Follow the system's scale, fractional ones included (125%, 150%, 175%: #1072).
-            // Only when the system reports no scaling at all (100%) does a 4K display fall back
-            // to 200%, since unscaled 4K controls are unreadably small (#225). Overriding a scale
-            // the user picked in their desktop settings left only "too small" or "too big".
-            let unscaled = (native - 1.0).abs() < 0.01;
-            let is_4k = monitor_px.is_some_and(|s| s.x.is_finite() && s.y.is_finite() && s.x.min(s.y) >= 2160.0 && s.x.max(s.y) >= 3840.0);
-            if unscaled && is_4k { 2.0 } else { native }
-        }
+        // The system's scale, fractional ones included (125%, 150%, 175%: #1072), and 100% on a
+        // large 4K display run unscaled (#1278); 200% there is a fixed choice.
+        prefs::UiScale::Auto => native,
         fixed => fixed.name().parse::<f32>().map_or(1.0, |pct| pct / 100.0),
     }
 }
 
 fn sync_display_scale(app: &PhotocraftApp, ctx: &egui::Context) {
     let native = ctx.native_pixels_per_point();
-    // ViewportInfo uses egui points, including the current UI zoom. Converting back to
-    // physical pixels avoids oscillating between 100% and 200% on successive frames.
-    // logic() can receive new viewport DPI before InputState::pixels_per_point updates.
     let native_scale = native.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
-    let monitor_px = ctx.input(|i| i.viewport().monitor_size).map(|s| s * (native_scale * ctx.zoom_factor()));
-    let scale = display_scale(app.session.prefs().interface.ui_scale, native, monitor_px);
+    let scale = display_scale(app.session.prefs().interface.ui_scale, native);
     ctx.set_zoom_factor(scale / native_scale);
 }
 
@@ -516,6 +541,7 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         load(app);
     }
     recovery(app);
+    sync_rulers(app);
     sync_display_scale(app, ctx);
     sync_appearance(app, ctx);
     crate::theme::set_ui_font_size(ctx, app.session.prefs().interface.ui_font_size);
@@ -545,6 +571,8 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let delay = if app.prefs_rt.pending_autosaves.is_empty() && app.prefs_rt.retiring.is_empty() { 1_000 } else { 100 };
         ctx.request_repaint_after(std::time::Duration::from_millis(delay));
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    link_updates(app, ctx);
     history_log(app);
 }
 
@@ -713,6 +741,40 @@ fn retire_checkpoints(app: &mut PhotocraftApp, quitting: bool) {
     }
 }
 
+/// Linked smart objects follow their files while the document is open, as in Photoshop: every two
+/// seconds, and as soon as the window comes back to the front (after saving in another app), stamp
+/// the active document's linked files on a worker thread and re-render the layers of the ones that
+/// changed ([`photocraft_engine::link_watch`]).
+#[cfg(not(target_arch = "wasm32"))]
+fn link_updates(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    match app.session.poll_link_scan() {
+        Some(Ok(r)) => {
+            if let Some(n) = r["updated"].as_array().map(Vec::len).filter(|n| *n > 0) {
+                app.ui.status = format!("Updated {n} linked smart object(s) changed on disk");
+            }
+        }
+        Some(Err(e)) => app.ui.status = e.to_string(),
+        None => {}
+    }
+    let (last_key, focus_key) = (egui::Id::new("linkWatch.lastScan"), egui::Id::new("linkWatch.focused"));
+    let now = ctx.input(|i| i.time);
+    let focused = ctx.input(|i| i.focused);
+    let was_focused: bool = ctx.data(|d| d.get_temp(focus_key)).unwrap_or(focused);
+    ctx.data_mut(|d| d.insert_temp(focus_key, focused));
+    let has_links = app.session.active().is_some_and(|d| !photocraft_engine::link_watch::linked_files(&d.doc).is_empty());
+    if !has_links {
+        return;
+    }
+    let last: f64 = ctx.data(|d| d.get_temp(last_key)).unwrap_or(f64::NEG_INFINITY);
+    if now - last >= 2.0 || (focused && !was_focused) {
+        ctx.data_mut(|d| d.insert_temp(last_key, now));
+        app.session.start_link_scan();
+    }
+    let wait = if app.session.link_scan.is_some() { 100 } else { 2000 };
+    ctx.request_repaint_after(std::time::Duration::from_millis(wait));
+}
+
+/// Background autosave of documents with unsaved changes every N minutes (File Handling).
 fn autosave(app: &mut PhotocraftApp) {
     if app.allow_close {
         return;
@@ -998,19 +1060,9 @@ pub fn invoke(app: &mut PhotocraftApp, _ctx: &egui::Context, id: &str, params: &
             }
             dialog(d)
         }
-        "edit.contentAwareFill" => {
-            if !app.session.is_enabled(id) {
-                return Some(Err("Content-Aware Fill needs a selection on a pixel layer".into()));
-            }
-            let d = crate::filter_dialog::open(app, id);
-            if let Some(dm) = d.and_then(|d| app.ui.dialog_mut(d)) {
-                dm.fields.insert("__preview".into(), json!(true));
-                for k in ["margin", "seed", "channel"] {
-                    dm.fields.remove(k);
-                }
-            }
-            dialog(d)
-        }
+        // Photoshop's Content-Aware Fill workspace (caf_ui); the engine command with params
+        // still runs directly.
+        "edit.contentAwareFill" => Some(crate::caf_ui::open(app).map(|_| json!({"contentAwareFill": app.distort.describe()["contentAwareFill"]}))),
         "edit.contentAwareScale" => {
             let st = app.session.active()?;
             let b = match &st.doc.selection {
@@ -1045,6 +1097,11 @@ fn open_kind(app: &mut PhotocraftApp, kind: &str, label: &str, fields: Value) ->
         f.extend(m);
     }
     app.ui.open_dialog(DialogKind::Command, f)
+}
+
+/// Open one of the dialogs this module renders (also for `fonts_ui`).
+pub fn open_dialog(app: &mut PhotocraftApp, kind: &str, label: &str, fields: Value) -> u64 {
+    open_kind(app, kind, label, fields)
 }
 
 /// Is this a dialog rendered by this module?
@@ -1088,6 +1145,7 @@ pub fn width(fields: &Map<String, Value>, available: f32) -> Option<f32> {
     match fields.get("__prefsui").and_then(Value::as_str)? {
         "prefs" => Some(available.clamp(380.0, 1040.0)),
         "shortcuts" => Some(720.0),
+        "fontsManage" | "fontsMissing" => Some(520.0),
         _ => Some(460.0),
     }
 }
@@ -1166,9 +1224,14 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     match f.get("__prefsui").and_then(Value::as_str).unwrap_or("") {
         "prefs" => {
             f.insert("__gpuInfo".into(), json!(app.perf.gpu_info.lines()));
+            f.insert("__fonts".into(), json!(crate::fonts_ui::available(app)));
             let system = system_theme(app, ui.ctx());
             prefs_body(ui, f, system);
+            if f.remove("__manageFonts").is_some() {
+                crate::fonts_ui::open_manage(app);
+            }
         }
+        "fontsManage" | "fontsMissing" => crate::fonts_ui::body(app, ui, f),
         "shortcuts" => shortcuts_body(app, ui, f),
         "presets" => presets_body(app, ui, f),
         "presetsIO" => presets_io_body(ui, f),
@@ -1216,7 +1279,7 @@ fn choice_label(v: &str) -> String {
     match v {
         "cm" => "Centimeters".into(),
         "mm" => "Millimeters".into(),
-        "75" | "100" | "125" | "150" | "175" | "200" | "250" | "300" => format!("{v}%"),
+        "75" | "80" | "85" | "90" | "95" | "100" | "125" | "150" | "175" | "200" | "250" | "300" => format!("{v}%"),
         "8" => "8 Bits/Channel".into(),
         "16" => "16 Bits/Channel".into(),
         "postScript" => "PostScript (72 points/inch)".into(),
@@ -1253,6 +1316,29 @@ fn color_of(s: &str) -> Color32 {
     prefs::parse_hex(s).map_or(Color32::GRAY, |c| Color32::from_rgb(c[0], c[1], c[2]))
 }
 
+/// Search the same visible, editable preference labels used in the dialog.
+fn preference_matches(section: &str, key: &str, query: &str) -> bool {
+    let label = humanize(key);
+    format!("{section}.{key}").to_lowercase().contains(query) || label.to_lowercase().contains(query) || tl!(&label).to_lowercase().contains(query)
+}
+
+fn preference_sections(values: &Value, search: &str) -> Vec<(&'static str, &'static str)> {
+    let query = search.trim().to_lowercase();
+    SECTIONS
+        .iter()
+        .copied()
+        .filter(|(id, title)| {
+            query.is_empty()
+                || title.to_lowercase().contains(&query)
+                || tl!(title).to_lowercase().contains(&query)
+                || values
+                    .get(*id)
+                    .and_then(Value::as_object)
+                    .is_some_and(|fields| fields.keys().any(|key| !prefs::is_hidden(&format!("{id}.{key}")) && preference_matches(id, key, &query)))
+        })
+        .collect()
+}
+
 /// Preferences: section list on the left, the section's settings on the right.
 fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui::Theme>) {
     let t = Tokens::get(ui.ctx());
@@ -1260,11 +1346,24 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
     let mut values = f.get("values").cloned().unwrap_or(Value::Null);
     // The dialog follows the language being edited, so a change shows before OK.
     let lang = crate::i18n::Lang::from_pref(values.pointer("/interface/language").and_then(Value::as_str).unwrap_or("auto"));
+    let mut search = f.get("__search").and_then(Value::as_str).unwrap_or("").to_string();
+    ui.add(egui::TextEdit::singleline(&mut search).hint_text(tl!("Search settings…")).desired_width(f32::INFINITY));
+    let found = preference_sections(&values, &search);
+    if !found.iter().any(|(id, _)| *id == section)
+        && let Some((first, _)) = found.first()
+    {
+        section = (*first).to_string();
+    }
+    ui.add_space(6.0);
+    let mut manage_fonts = false;
     ui.horizontal_top(|ui| {
         // Section list.
         ui.vertical(|ui| {
             ui.set_width(170.0);
-            for (id, title) in SECTIONS {
+            if found.is_empty() {
+                ui.label(RichText::new(tl!("No matching settings")).color(t.text_dim));
+            }
+            for &(id, title) in &found {
                 let sel = section == id;
                 let empty = !has_visible_fields(&values, id);
                 let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 22.0), Sense::click());
@@ -1299,6 +1398,10 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
             ui.set_width((ui.available_width() - 12.0).max(340.0));
             let title = SECTIONS.iter().find(|(id, _)| *id == section).map_or("General", |(_, t)| *t);
             ui.label(RichText::new(tl!(&title)).font(crate::theme::semibold(14.0)).color(t.text));
+            let show_all = search.trim().is_empty()
+                || title.to_lowercase().contains(&search.trim().to_lowercase())
+                || tl!(&title).to_lowercase().contains(&search.trim().to_lowercase());
+            let filter = if show_all { "" } else { search.trim() };
             ui.add_space(6.0);
             egui::ScrollArea::vertical().max_height(content_height - 30.0).id_salt("prefs-scroll").show(ui, |ui| {
                 let order: Vec<String> =
@@ -1307,7 +1410,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
                     ui.add_space(4.0);
                     ui.label(RichText::new(tl!("These settings aren't available in Capishot yet.")).color(t.text_faint));
                 } else if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
-                    section_fields(ui, &section, obj, &order, lang, system);
+                    section_fields(ui, &section, obj, &order, lang, system, filter);
                     if section == "fileHandling" {
                         ui.label(
                             RichText::new(tl!("0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized."))
@@ -1317,9 +1420,14 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
                     if section == "performance" {
                         gpu_status_rows(ui, f.get("__gpuInfo"), obj);
                     }
+                    if section == "type" && f.get("__fonts").and_then(Value::as_bool) == Some(true) {
+                        ui.add_space(8.0);
+                        manage_fonts = crate::widgets::secondary_button(ui, tl!("Manage downloaded fonts…"), 220.0).clicked();
+                    }
                     ui.add_space(8.0);
                 }
-                if has_visible_fields(&values, &section)
+                if search.trim().is_empty()
+                    && has_visible_fields(&values, &section)
                     && crate::widgets::secondary_button(ui, tl!("Reset Section"), 110.0).clicked()
                     && let Some(def) = prefs::Preferences::default().get(&section)
                 {
@@ -1329,10 +1437,14 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
         });
     });
     f.insert("section".into(), json!(section));
+    f.insert("__search".into(), json!(search));
     f.insert("values".into(), values);
     // A colour swatch was clicked: open the Color Picker on that value (#2144).
     if let Some((path, name)) = ctx_take_pick(ui) {
         crate::color_picker_ui::request_field(f, &format!("/values/{}", path.replace('.', "/")), &crate::color_picker_ui::title_for(&name));
+    }
+    if manage_fonts {
+        f.insert("__manageFonts".into(), json!(true));
     }
 }
 
@@ -1451,7 +1563,7 @@ fn theme_card(ui: &mut egui::Ui, title: &str, active: bool, selected: &mut Strin
         .inner_margin(10.0)
         .show(ui, |ui| {
             ui.set_width(width - 20.0);
-            // Room for the longer list (five dark themes), so both cards line up.
+            // Room for the longer list (six dark themes), so both cards line up.
             ui.set_min_height(298.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new(tl!(title)).strong().color(t.text));
@@ -1533,8 +1645,6 @@ fn appearance_rows(ui: &mut egui::Ui, obj: &mut Map<String, Value>, system: Opti
     ui.add_space(12.0);
 }
 
-/// Generic editor for a section's fields: checkboxes, dropdowns for choices, colour swatches,
-/// number fields with the preference's range, text fields.
 /// Where a clicked colour swatch leaves its preference path and label for the dialog body, which
 /// holds the fields the Color Picker request goes in.
 const PICK_ID: &str = "prefs-pick-color";
@@ -1544,12 +1654,24 @@ fn ctx_take_pick(ui: &egui::Ui) -> Option<(String, String)> {
     ui.ctx().data_mut(|d| d.remove_temp::<(String, String)>(egui::Id::new(PICK_ID)))
 }
 
-fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, order: &[String], lang: crate::i18n::Lang, system: Option<egui::Theme>) {
+/// Generic editor for a section's fields: checkboxes, dropdowns for choices, colour swatches,
+/// number fields with the preference's range, text fields.
+fn section_fields(
+    ui: &mut egui::Ui,
+    section: &str,
+    obj: &mut Map<String, Value>,
+    order: &[String],
+    lang: crate::i18n::Lang,
+    system: Option<egui::Theme>,
+    search: &str,
+) {
     let t = Tokens::get(ui.ctx());
-    if section == "interface" {
+    let query = search.to_lowercase();
+    if section == "interface" && (query.is_empty() || ["appearanceMode", "darkTheme", "lightTheme"].iter().any(|key| preference_matches(section, key, &query)))
+    {
         appearance_rows(ui, obj, system);
     }
-    if section == "performance" {
+    if section == "performance" && (query.is_empty() || preference_matches(section, "renderingMode", &query)) {
         rendering_mode_row(ui, obj);
         ui.label(tl!("The memory budget is shared by document pixels, embedded data and undo history. It grows as needed; other app memory is additional."));
     }
@@ -1564,9 +1686,14 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
     egui::Grid::new(("prefs-grid", section)).num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| {
         for k in keys {
             let path = format!("{section}.{k}");
+            if !query.is_empty() && !preference_matches(section, &k, &query) {
+                continue;
+            }
             // Settings nothing reads yet stay out of the dialog (issue #204); their stored values
             // pass through untouched.
             if (section == "interface" && matches!(k.as_str(), "theme" | "appearanceMode" | "darkTheme" | "lightTheme" | "favoriteThemes"))
+                // View › Rulers (⌘R) sets it, as in Photoshop.
+                || path == "unitsAndRulers.showRulers"
                 || prefs::is_hidden(&path)
                 || (section == "performance" && matches!(k.as_str(), "useGpu" | "gpuBackend" | "renderingMode"))
                 || (section == "export" && !export_field_visible(obj, &k))
@@ -2051,6 +2178,7 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
                 })
             }
         }
+        "fontsManage" | "fontsMissing" => crate::fonts_ui::confirm(app, f),
         "mismatch" => {
             let action = f.get("action").and_then(Value::as_str).unwrap_or("preserve");
             let applied = f.get("applied").and_then(Value::as_str).unwrap_or("preserve");
@@ -2162,6 +2290,18 @@ mod tests {
     }
 
     #[test]
+    fn preferences_search_matches_editable_fields_across_sections() {
+        let values = prefs::Preferences::default().to_json();
+        let contains = |needle: &str, section: &str| preference_sections(&values, needle).iter().any(|(id, _)| *id == section);
+        assert!(contains("UI Scale", "interface"));
+        assert!(contains("placeholder", "type"));
+        assert!(contains("performance", "performance"));
+        assert!(contains("interface.uiScale", "interface"));
+        assert!(preference_sections(&values, "this setting does not exist").is_empty());
+        assert_eq!(preference_sections(&values, "").len(), SECTIONS.len());
+    }
+
+    #[test]
     fn preferences_dialog_width_follows_the_window() {
         let prefs = serde_json::json!({"__prefsui": "prefs"});
         let prefs = prefs.as_object().unwrap();
@@ -2187,6 +2327,23 @@ mod tests {
         assert_eq!(selected_theme(&interface, Some(egui::Theme::Light)), ThemeKind::Studio);
         interface.appearance_mode = AppearanceMode::Light;
         assert_eq!(selected_theme(&interface, Some(egui::Theme::Dark)), ThemeKind::Classic);
+    }
+
+    #[test]
+    fn breeze_themes_are_chosen_by_preference_and_fix_the_matching_mode() {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        for (id, kind, mode) in [("breezeLight", ThemeKind::BreezeLight, AppearanceMode::Light), ("breezeDark", ThemeKind::BreezeDark, AppearanceMode::Dark)] {
+            app.run("prefs.set", json!({"path": "interface.theme", "value": id})).unwrap();
+            tick(&mut app, &ctx);
+            let interface = app.session.prefs().interface.clone();
+            assert_eq!(interface.appearance_mode, mode, "{id}");
+            assert_eq!(selected_theme(&interface, None), kind, "{id}");
+            assert_eq!(app.ui.theme, kind, "{id}");
+        }
+        // The two slots are independent: choosing the dark one left the light choice alone.
+        assert_eq!(app.session.prefs().interface.light_theme, LightTheme::BreezeLight);
+        assert_eq!(app.session.prefs().interface.dark_theme, DarkTheme::BreezeDark);
     }
 
     #[test]
@@ -2584,28 +2741,16 @@ mod tests {
     }
 
     #[test]
-    fn auto_scale_detects_4k_and_preserves_system_scale() {
+    fn auto_scale_preserves_system_scale() {
         use prefs::UiScale::Auto;
-        for size in [vec2(3840.0, 2160.0), vec2(4096.0, 2160.0), vec2(2160.0, 3840.0)] {
-            assert_eq!(display_scale(Auto, Some(1.0), Some(size)), 2.0);
-            // A fractional system scale is the user's choice and is kept as is (#1072).
-            for dpi in [1.25, 1.5, 1.75, 2.0, 2.5] {
-                assert_eq!(display_scale(Auto, Some(dpi), Some(size)), dpi);
-            }
+        // Whatever the monitor, 4K included: an unscaled desktop stays at 100% (#1278), and a
+        // fractional or below-100% system scale is the user's choice (#1072).
+        for dpi in [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0] {
+            assert_eq!(display_scale(Auto, Some(dpi)), dpi);
         }
-        // Below 100% is a system choice too, even on 4K.
-        assert_eq!(display_scale(Auto, Some(0.75), Some(vec2(3840.0, 2160.0))), 0.75);
-        for size in [vec2(1920.0, 1080.0), vec2(2560.0, 1440.0)] {
-            for dpi in [1.25, 1.5, 1.75] {
-                assert_eq!(display_scale(Auto, Some(dpi), Some(size)), dpi);
-            }
-        }
-        assert_eq!(display_scale(Auto, Some(3.0), Some(vec2(3840.0, 2160.0))), 3.0);
-        for size in [vec2(1920.0, 1080.0), vec2(2560.0, 1440.0), vec2(3840.0, 1080.0)] {
-            assert_eq!(display_scale(Auto, Some(1.0), Some(size)), 1.0);
-        }
-        assert_eq!(display_scale(Auto, None, None), 1.0);
-        assert_eq!(display_scale(Auto, Some(f32::NAN), Some(vec2(f32::INFINITY, 2160.0))), 1.0);
+        assert_eq!(display_scale(Auto, None), 1.0);
+        assert_eq!(display_scale(Auto, Some(f32::NAN)), 1.0);
+        assert_eq!(display_scale(Auto, Some(-2.0)), 1.0);
     }
 
     #[test]
@@ -2628,15 +2773,15 @@ mod tests {
                 assert!((ctx.pixels_per_point() - expected).abs() < 1e-4);
             };
             for _ in 0..4 {
-                step(vec2(3840.0, 2160.0), 1.0, 2.0);
+                step(vec2(3840.0, 2160.0), 1.0, 1.0);
             }
             step(vec2(1920.0, 1080.0), 1.0, 1.0);
             step(vec2(3840.0, 2160.0), 1.5, 1.5);
             step(vec2(3840.0, 2160.0), 1.25, 1.25);
             step(vec2(2560.0, 1440.0), 1.75, 1.75);
-            step(vec2(3840.0, 2160.0), 1.0, 2.0);
+            step(vec2(3840.0, 2160.0), 1.0, 1.0);
         }
-        for (pref, expected) in [("200", 2.0), ("125", 1.25), ("150", 1.5), ("100", 1.0), ("auto", 1.5)] {
+        for (pref, expected) in [("200", 2.0), ("125", 1.25), ("150", 1.5), ("100", 1.0), ("95", 0.95), ("90", 0.9), ("85", 0.85), ("80", 0.8), ("auto", 1.5)] {
             app.run("prefs.set", json!({"values": {"interface.uiScale": pref}})).unwrap();
             let mut input = egui::RawInput::default();
             input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(1.5);
@@ -2731,6 +2876,33 @@ mod tests {
     }
 
     #[test]
+    fn tool_options_survive_a_restart() {
+        let (mut app, store) = app_with_store();
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        app.ui.tool_options.move_auto_select = false;
+        app.ui.tool_options.feather = 12.0;
+        crate::tool_memory::persist(&mut app, &ctx);
+        tick(&mut app, &ctx);
+        // Only what differs from the defaults is stored.
+        assert_eq!(stored(&store)["toolOptions"], json!({"move_auto_select": false, "feather": 12.0}));
+        let saved = store.lock().unwrap().clone().unwrap();
+        let (mut app2, _) = app_with_saved(Some(saved));
+        tick(&mut app2, &ctx);
+        assert!(!app2.ui.tool_options.move_auto_select);
+        assert_eq!(app2.ui.tool_options.feather, 12.0);
+        assert_eq!(app2.ui.tool_options.tolerance, crate::state::ToolOptions::default().tolerance);
+        // A hand-edited file: unreadable fields keep their defaults, the good ones still load.
+        for bad in [json!("junk"), json!({"move_auto_select": "no", "feather": 1e300, "tolerance": 5.0, "unknown": 1})] {
+            let (mut app3, _) = app_with_saved(Some(json!({"toolOptions": bad}).to_string()));
+            tick(&mut app3, &ctx);
+            let o = &app3.ui.tool_options;
+            assert!(o.move_auto_select && o.feather == 0.0, "{bad}");
+            assert_eq!(o.tolerance, if bad.is_object() { 5.0 } else { 32.0 });
+        }
+    }
+
+    #[test]
     fn show_tooltips_preferences_turn_tooltips_off() {
         let (mut app, _) = app_with_store();
         let ctx = egui::Context::default();
@@ -2758,10 +2930,13 @@ mod tests {
         assert!(!prefs::is_hidden("type.fillNewTypeLayersWithPlaceholder"));
         assert!(!prefs::is_hidden("type.useEscToCommit"));
         assert!(!prefs::is_hidden("type.smartQuotes"));
-        // Rotate View with Trackpad is live; the other Enhanced Controls rows stay hidden.
+        assert!(!prefs::is_hidden("type.showFontNamesInEnglish"));
+        assert!(!prefs::is_hidden("type.allowOnlineFonts"));
+        // Rotate View with Trackpad and the pinch zoom are live; the other Enhanced Controls rows
+        // stay hidden.
         assert!(has_visible_fields(&values, "enhancedControls"));
         assert!(!prefs::is_hidden("enhancedControls.rotateViewWithTrackpad"));
-        assert!(prefs::is_hidden("enhancedControls.zoomWithTrackpadPinch"));
+        assert!(!prefs::is_hidden("enhancedControls.zoomWithTrackpadPinch"));
         // Camera Raw Defaults shows only "Open in Camera Raw" so far.
         assert!(has_visible_fields(&values, "rawDefaults"));
         assert!(!prefs::is_hidden("rawDefaults.openInCameraRaw"));
@@ -2959,8 +3134,10 @@ mod tests {
     fn next_launch_notice_does_not_mark_unrelated_interface_preferences() {
         use egui_kittest::{Harness, kittest::Queryable};
         let obj = json!({"showTooltips": true}).as_object().unwrap().clone();
-        let mut h =
-            Harness::new_ui_state(|ui, obj: &mut Map<String, Value>| section_fields(ui, "interface", obj, &[], crate::i18n::Lang::from_pref("en"), None), obj);
+        let mut h = Harness::new_ui_state(
+            |ui, obj: &mut Map<String, Value>| section_fields(ui, "interface", obj, &[], crate::i18n::Lang::from_pref("en"), None, ""),
+            obj,
+        );
         h.run_steps(4);
         assert!(h.query_by_label("Applies at next launch.").is_none());
         h.get_by_label("Show tooltips").click();
@@ -3358,9 +3535,11 @@ mod tests {
         assert!(note.starts_with("Monitor profile in use: sRGB") && note.contains("fallback"), "{note}");
         assert!(crate::menus::invoke(&mut app, &ctx, "edit.fade", json!({})).is_err());
         app.run("select.rect", json!({"x": 4, "y": 4, "width": 8, "height": 8})).unwrap();
-        let d = crate::menus::invoke(&mut app, &ctx, "edit.contentAwareFill", json!({})).unwrap()["dialog"].as_u64().unwrap();
-        assert_eq!(app.ui.dialogs.iter().find(|x| x.id == d).unwrap().fields["__preview"], true);
-        crate::dialogs::confirm(&mut app, d).unwrap();
+        // Content-Aware Fill opens its workspace (caf_ui); OK fills.
+        let r = crate::menus::invoke(&mut app, &ctx, "edit.contentAwareFill", json!({})).unwrap();
+        assert!(r["contentAwareFill"]["window"].is_array(), "{r}");
+        crate::caf_ui::commit(&mut app);
+        assert!(app.distort.caf.is_none());
         let d = crate::menus::invoke(&mut app, &ctx, "edit.contentAwareScale", json!({})).unwrap()["dialog"].as_u64().unwrap();
         assert_eq!(app.ui.dialogs.iter().find(|x| x.id == d).unwrap().fields["width"], 8);
         let d = crate::menus::invoke(&mut app, &ctx, "edit.presets.presetManager", json!({})).unwrap()["dialog"].as_u64().unwrap();

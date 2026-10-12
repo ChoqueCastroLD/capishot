@@ -6,10 +6,8 @@
 //! The prompt is an ordinary dialog in the UI state (`ui.inspect` shows it, `ui.dialog.confirm`
 //! and `ui.dialog.cancel` answer it). OK runs the matching `layer.rasterize.*` command, then paints
 //! where the click was, so rasterizing and painting are two history states, as in Photoshop.
-//! Cancel does nothing.
-//!
-//! Edit › Transform › Distort, Perspective and Warp on a type layer ask the same question; OK
-//! rasterizes the type and starts that transform (`then`), Cancel leaves the type as it is.
+//! Cancel does nothing. (Edit › Transform › Warp keeps live type editable through Warp Text, as
+//! Photoshop does, so transforms don't ask.)
 
 use serde_json::{Map, Value, json};
 
@@ -123,56 +121,6 @@ pub fn open(app: &mut PhotocraftApp, kind: Kind, layer: photocraft_doc::LayerId,
     app.ui.open_dialog(DialogKind::Command, f)
 }
 
-/// Edit › Transform modes that need pixels: on live type Photoshop asks to rasterize first.
-pub const TRANSFORM_COMMANDS: [&str; 3] = ["edit.transform.distort", "edit.transform.perspective", "edit.transform.warp"];
-
-/// The type layer Distort / Perspective / Warp would transform, when it must be rasterized
-/// first: the active layer's own pixels are the target (not its mask, a channel or a path) and
-/// any open transform is of that layer.
-pub fn transform_needs(app: &PhotocraftApp) -> Option<photocraft_doc::LayerId> {
-    if crate::canvas::paint_target(app) != json!("pixels") {
-        return None;
-    }
-    let st = app.session.active()?;
-    let id = st.active_layer?;
-    if let Some(t) = &app.ui.transform
-        && (t.layer != id.0 || t.path.is_some() || t.target.is_some())
-    {
-        return None;
-    }
-    let locks = st.doc.effective_locks(id);
-    if locks.all || locks.position {
-        return None;
-    }
-    matches!(st.doc.layer(id)?.content, photocraft_doc::LayerContent::Text(_)).then_some(id)
-}
-
-/// Ask before Distort / Perspective / Warp (`then`) of a type layer; OK rasterizes it (an open
-/// Free Transform is applied first) and starts `then`.
-pub fn open_for_transform(app: &mut PhotocraftApp, layer: photocraft_doc::LayerId, then: &str) -> u64 {
-    if let Some(d) = app.ui.dialogs.iter().find(|d| owns(&d.fields)) {
-        return d.id;
-    }
-    let kind = Kind::Type;
-    let mut f = Map::new();
-    f.insert(MARK.into(), json!(kind.key()));
-    f.insert("__command".into(), json!(kind.command()));
-    f.insert("__label".into(), json!("Capishot"));
-    f.insert("message".into(), json!(kind.message()));
-    f.insert("layer".into(), json!(layer.0));
-    f.insert("then".into(), json!(then));
-    app.ui.open_dialog(DialogKind::Command, f)
-}
-
-/// Start the transform an answered prompt left pending (it needs the egui context).
-pub fn run_pending(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let Some(id) = app.after_rasterize.take() else { return };
-    if let Err(e) = crate::menus::invoke(app, ctx, &id, json!({})) {
-        app.ui.status = e;
-        app.ui.status_error = true;
-    }
-}
-
 /// Is this dialog the prompt?
 pub fn owns(fields: &Map<String, Value>) -> bool {
     fields.contains_key(MARK)
@@ -194,15 +142,6 @@ pub fn body(ui: &mut egui::Ui, f: &Map<String, Value>) {
 pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
     let kind = f.get(MARK).and_then(Value::as_str).and_then(Kind::from_key).ok_or("not a rasterize prompt")?;
     let layer = f.get("layer").and_then(Value::as_u64).ok_or("the prompt has no layer")?;
-    if let Some(then) = f.get("then").and_then(Value::as_str).filter(|t| TRANSFORM_COMMANDS.contains(t)) {
-        // A Free Transform of the type so far is kept: applied (still as type), then rasterized.
-        if app.ui.transform.as_ref().is_some_and(|t| t.layer == layer) {
-            crate::transform_tool::commit(app);
-        }
-        let r = app.run(kind.command(), json!({ "layer": layer }))?;
-        app.after_rasterize = Some(then.to_string());
-        return Ok(json!({ "rasterized": r, "then": then }));
-    }
     let r = app.run(kind.command(), json!({ "layer": layer }))?;
     let tool = f.get("tool").and_then(Value::as_str).and_then(Tool::from_name);
     let at: Vec<f64> = f.get("at").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();

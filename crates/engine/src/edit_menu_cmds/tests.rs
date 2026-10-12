@@ -235,6 +235,52 @@ fn content_aware_fill_samples_photoshops_window() {
 }
 
 #[test]
+fn content_aware_fill_takes_the_workspace_edits() {
+    // The plan the workspace previews: lasso edits change the fill area (and the window follows),
+    // sampling-brush strokes change what may be copied, also outside the window.
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 600, "height": 400, "background": "white"})).unwrap();
+    s.execute("select.rect", json!({"x": 275, "y": 175, "width": 50, "height": 50})).unwrap();
+    let st = s.active().unwrap();
+    let (doc, id) = (st.doc.clone(), st.active_layer.unwrap());
+    let plan = |p: Value| content_aware_plan(&doc, id, &p, "edit.contentAwareFill");
+    let count = |m: &[bool]| m.iter().filter(|v| **v).count();
+    let base = plan(json!({"sampling": "rectangular"})).unwrap();
+    assert_eq!((base.window, count(&base.hole)), (Rect::new(200, 100, 400, 300), 2500));
+    assert_eq!(count(&base.source), 200 * 200 - 2500);
+    // A lasso square added beside the selection: a bigger fill area, a window around both.
+    let p = plan(json!({"sampling": "rectangular", "fillEdits": [{"op": "add", "points": [[340, 175], [390, 175], [390, 225], [340, 225]]}]})).unwrap();
+    assert_eq!(count(&p.hole), 5000);
+    assert!(p.window.width() > 200 && p.window.contains_rect(&Rect::new(275, 175, 390, 225)), "{:?}", p.window);
+    // Expand by 2 grows the 50 px square to about 54 px (rounded corners).
+    let p = plan(json!({"sampling": "rectangular", "fillEdits": [{"op": "expand", "by": 2}]})).unwrap();
+    assert!((54 * 54 - 20..=54 * 54).contains(&count(&p.hole)), "{}", count(&p.hole));
+    // Subtracting it all leaves nothing to fill.
+    assert!(plan(json!({"fillEdits": [{"op": "subtract", "points": [[0, 0], [600, 0], [600, 400], [0, 400]]}]})).is_err());
+    // A subtracting stroke takes a band out of the sampling area; an adding one far away reaches
+    // past the window, and the plan's rectangle grows to hold it.
+    let p = plan(json!({"sampling": "rectangular", "samplingStrokes": [{"mode": "subtract", "size": 10, "points": [[210, 110], [390, 110]]}]})).unwrap();
+    assert!((count(&base.source) - count(&p.source)).abs_diff(10 * 190) < 60);
+    let p = plan(json!({"sampling": "rectangular", "samplingStrokes": [{"mode": "add", "size": 20, "points": [[540, 350], [580, 350]]}]})).unwrap();
+    assert!(p.rect.contains(560, 350) && !p.window.contains(560, 350));
+    assert!(count(&p.source) > count(&base.source) + 600);
+    // Custom from strokes alone; bad edits are errors.
+    let p = plan(json!({"sampling": "custom", "samplingStrokes": [{"mode": "add", "size": 20, "points": [[100, 100], [160, 100]]}]})).unwrap();
+    assert!((1450..1600).contains(&count(&p.source)), "a 20 px brush along 60 px: {}", count(&p.source));
+    for bad in [
+        json!({"samplingStrokes": [{"mode": "paint", "size": 10, "points": [[0, 0]]}]}),
+        json!({"samplingStrokes": [{"size": 0, "points": [[0, 0]]}]}),
+        json!({"fillEdits": [{"op": "add", "points": [[0, "x"]]}]}),
+        json!({"fillEdits": [{"op": "expand", "by": -3}]}),
+    ] {
+        assert!(plan(bad.clone()).is_err(), "{bad}");
+    }
+    // The command fills with the same plan; `layer` names the layer even when another is active.
+    let r = s.execute("edit.contentAwareFill", json!({"sampling": "rectangular", "fillEdits": [{"op": "expand", "by": 2}], "layer": id.0})).unwrap();
+    assert!(r["filled"].as_u64().unwrap() > 2800);
+}
+
+#[test]
 fn content_aware_fill_outputs_and_sampling() {
     let mut s = blob_session(8);
     let base = s.active().unwrap().active_layer.unwrap();
@@ -280,6 +326,31 @@ fn content_aware_scale_keeps_subject() {
         assert_eq!(striped.count(), 6, "depth {depth}: the striped subject survives");
         s.undo();
         assert_eq!(active(&s).surface().unwrap().content_bounds().width(), 64);
+    }
+}
+
+/// Scaling a selection down clears the part of the selection the result no longer covers (the
+/// strips right of and below it), keeps the pixels outside the selection, and fills the result.
+#[test]
+fn content_aware_scale_clears_what_it_leaves() {
+    for (to_w, to_h) in [(30, 32), (48, 20), (30, 20), (60, 40)] {
+        let mut s = session(8);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.edit("paint", |doc, active| {
+            doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap().fill_rect(Rect::new(0, 0, 64, 48), &[0.2, 0.7, 0.4, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("select.rect", json!({"x": 8, "y": 8, "width": 48, "height": 32})).unwrap();
+        s.execute("edit.contentAwareScale", json!({"width": to_w, "height": to_h})).unwrap();
+        let (sel, dst) = (Rect::new(8, 8, 56, 40), Rect::from_xywh(8, 8, to_w, to_h));
+        for y in 0..48 {
+            for x in 0..64 {
+                let a = px(&s, x, y)[3];
+                let want = if dst.contains(x, y) || !sel.contains(x, y) { 1.0 } else { 0.0 };
+                assert_eq!(a, want, "{to_w}x{to_h}: alpha at ({x}, {y})");
+            }
+        }
     }
 }
 
@@ -440,3 +511,65 @@ fn find_in_the_active_layer_finds_nothing_when_it_is_not_type() {
     let r = s.execute("edit.findAndReplaceText", json!({"find": "abc", "allLayers": false, "action": "find"})).unwrap();
     assert_eq!((r["found"]["layer"].as_u64(), r["found"]["text"].as_str()), (Some(id), Some("abc")));
 }
+
+/// The exact layer bits Content-Aware Fill leaves with a feathered selection, for every way of
+/// choosing where to sample (auto, rectangular, a custom area, a saved channel), at each depth:
+/// pinned so that reading the masks faster can't change them.
+#[test]
+fn content_aware_fill_output_bits_are_pinned() {
+    let mut got = Vec::new();
+    for depth in [8, 16, 32] {
+        let mut s = session(depth);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.edit("paint", |doc, active| {
+            let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+            for y in 0..48 {
+                for x in 0..64 {
+                    let v = |k: i32| {
+                        (((x as u32).wrapping_mul(73_856_093) ^ (y as u32).wrapping_mul(19_349_663) ^ (k as u32).wrapping_mul(83_492_791)) % 997) as f32 / 997.0
+                    };
+                    let stripe = if (x / 3) % 2 == 0 { 0.2 } else { 0.0 };
+                    surf.write_pixel(x, y, &[v(0) * 0.6 + stripe, v(1) * 0.5 + 0.2, v(2) * 0.4 + stripe, 1.0]);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+        // A saved channel covering the right half (the custom sampling mask).
+        s.execute("select.rect", json!({"x": 32, "y": 0, "width": 32, "height": 48})).unwrap();
+        s.execute("select.saveSelection", json!({"name": "right"})).unwrap();
+        s.execute("select.rect", json!({"x": 22, "y": 15, "width": 16, "height": 14, "ellipse": true})).unwrap();
+        s.execute("select.modify.feather", json!({"radius": 2})).unwrap();
+        for params in [
+            json!({}),
+            json!({"sampling": "rectangular", "seed": 3}),
+            json!({"sampling": "custom", "area": [0, 6, 30, 26], "colorAdaptation": "none"}),
+            json!({"sampling": "custom", "channel": "right", "rotationAdaptation": "low"}),
+        ] {
+            let before = active(&s).surface().unwrap().read_region(Rect::new(0, 0, 64, 48));
+            s.execute("edit.contentAwareFill", params.clone()).unwrap();
+            let surf = active(&s).surface().unwrap();
+            assert_ne!(surf.read_region(Rect::new(0, 0, 64, 48)), before, "depth {depth}, {params}: the fill changed the layer");
+            let bits = surf.read_region(Rect::new(0, 0, 64, 48)).into_iter().flat_map(|v| v.to_bits().to_le_bytes());
+            got.push(bits.fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)));
+            s.undo();
+        }
+    }
+    assert_eq!(got, CAF_PINNED);
+}
+
+// Re-pinned for the Content-Aware Fill workspace (#2376); the speed-ups leave these bits unchanged.
+const CAF_PINNED: [u64; 12] = [
+    0x079b_9699_b360_1be0,
+    0x6a3a_2ce1_1402_495e,
+    0xe5ca_3d30_2bd6_f57f,
+    0xcdfe_3a24_7fa6_117a,
+    0x627d_d242_f093_e44f,
+    0xa058_8526_bc02_4be8,
+    0x37d4_ffd4_c136_8163,
+    0x6a7a_39a9_4af2_e8cc,
+    0xf4fd_a9a7_4712_3a15,
+    0x4cf1_4261_33a2_e622,
+    0x1ef9_0fc3_294d_b100,
+    0x73ce_ceae_c4c0_8381,
+];
