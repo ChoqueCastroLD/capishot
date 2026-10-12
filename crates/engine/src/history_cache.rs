@@ -42,6 +42,7 @@ pub(crate) struct Cache {
     #[cfg(not(target_arch = "wasm32"))]
     quota_blocked: bool,
     pub(super) notice: Option<String>,
+    #[cfg(not(target_arch = "wasm32"))]
     next_document: usize,
     #[cfg(not(target_arch = "wasm32"))]
     archive: Option<HistoryArchive>,
@@ -287,6 +288,7 @@ impl Session {
         total
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn history_spill_candidate(&self, index: usize) -> Option<Arc<Document>> {
         self.history_candidate(index, true)
     }

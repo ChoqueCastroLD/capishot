@@ -47,6 +47,7 @@ const SMALL_TIP_RADIUS: f32 = 3.0;
 const SUBPIXEL: [f32; 4] = [-0.375, -0.125, 0.125, 0.375];
 const NOISE_SALT: u64 = 0x006E_6F69_7365;
 /// Max dabs rasterized in one parallel batch (bounds temporary mask memory).
+#[cfg(not(target_arch = "wasm32"))]
 const PAR_DAB_BATCH: usize = 64;
 
 #[inline]
@@ -366,8 +367,6 @@ impl BrushContext {
         // Rows are independent: large dabs fill them on all cores (the depth rows alongside).
         #[cfg(not(target_arch = "wasm32"))]
         let parallel = h >= 64 && w > 0;
-        #[cfg(target_arch = "wasm32")]
-        let parallel = false;
         match depth {
             #[cfg(not(target_arch = "wasm32"))]
             Some(dp) if parallel => {
