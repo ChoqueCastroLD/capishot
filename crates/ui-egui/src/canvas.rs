@@ -3527,6 +3527,14 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                         pipette_cursor(ui.ctx(), p)
                     }
                 }
+                // The Paint Bucket: a bucket, or the crosshair for Precise Other Cursors (#3968).
+                Tool::PaintBucket => {
+                    if app.session.prefs().cursors.other == photocraft_engine::prefs::OtherCursor::Precise {
+                        egui::CursorIcon::Crosshair
+                    } else {
+                        paint_bucket_cursor(ui.ctx(), p)
+                    }
+                }
                 // Preferences › Cursors › Other Cursors: Precise shows a crosshair for every tool.
                 Tool::Move | Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask
                     if app.session.prefs().cursors.other == photocraft_engine::prefs::OtherCursor::Precise =>
@@ -4343,6 +4351,14 @@ pub(crate) fn alt_samples(tool: Tool, mods: egui::Modifiers) -> bool {
 pub(crate) fn pipette_cursor(ctx: &egui::Context, p: Pos2) -> egui::CursorIcon {
     // The tip of the icon's pipette is at (2, 22) of its 24-unit box.
     crate::icons::cursor(ctx, "pipette", p, vec2(2.0, 22.0) / 24.0, 20.0);
+    egui::CursorIcon::None
+}
+
+/// The Paint Bucket's cursor: a bucket whose pouring corner is the filled pixel. Draws it at `p`
+/// and returns the OS cursor to set (hidden).
+pub(crate) fn paint_bucket_cursor(ctx: &egui::Context, p: Pos2) -> egui::CursorIcon {
+    // The left corner of the icon's bucket is at (2, 12) of its 24-unit box.
+    crate::icons::cursor(ctx, "paint-bucket", p, vec2(2.0, 12.0) / 24.0, 22.0);
     egui::CursorIcon::None
 }
 
