@@ -1732,6 +1732,9 @@ impl eframe::App for PhotocraftApp {
                 let _ = w.send(serde_json::json!({"ok": true, "result": null}));
             }
         }
+        // A menu or dialog can start a filter after `jobs_ui::tick` ran in this frame. Keep
+        // polling it even when the platform would otherwise put the event loop to sleep.
+        jobs_ui::keep_polling(self, &ctx);
         // Menus and buttons in this frame may have asked for a file dialog.
         self.poll_file_dialog(&ctx, Some(frame));
     }
