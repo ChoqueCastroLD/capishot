@@ -4955,7 +4955,7 @@ dependencies = [
 [[package]]
 name = "psd-compiler"
 version = "0.1.0"
-source = "git+https://github.com/ChoqueCastroLD/psd-compiler-cli?rev=cf3d3dc#cf3d3dc37c7f48c8d0c2038c51750e40a9df0b8c"
+source = "git+https://github.com/ChoqueCastroLD/psd-compiler-cli?rev=70644ac#70644acd1dee872ffa8a47834ab20ef851ede72d"
 dependencies = [
  "anyhow",
  "flate2",

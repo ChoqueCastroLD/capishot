@@ -49,7 +49,6 @@ mod pdn;
 pub mod pixels;
 mod psd_export;
 mod psd_import;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod psdc;
 pub mod psd_thumbnail;
 pub mod raw;
@@ -366,10 +365,9 @@ pub fn export(doc: &Document, name_or_ext: &str, opts: &ExportOptions) -> Result
         }
         // Never write a header the reader would refuse (e.g. a zero-sized canvas).
         file.header.validate()?;
-        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut bytes = file.to_bytes()?;
-        // Capishot's seal: the merged image comes from psd-compiler (see `psdc`).
-        #[cfg(not(target_arch = "wasm32"))]
+        // Capishot's seal: the merged image comes from psd-compiler (see `psdc`), on the desktop
+        // and in the browser alike.
         match if opts.psdc_composite { psdc::recomposite(&mut file, &bytes) } else { Ok(false) } {
             Ok(true) => bytes = file.to_bytes()?,
             Ok(false) => {}

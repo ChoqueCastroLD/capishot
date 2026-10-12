@@ -319,7 +319,9 @@ fn compile(a: &Args, out: &mut dyn Write, err: &mut dyn Write) -> R {
     };
     let output = a.get("--out").map(std::path::PathBuf::from).unwrap_or_else(|| in_path.with_extension(&ext));
     let bytes = std::fs::read(in_path).map_err(|e| format!("{input}: {e}"))?;
-    let opts = photocraft_io::psdc::CompileOptions { rerender_text: rerender, font_dirs: fonts.iter().map(Into::into).collect(), system_fonts: system };
+    let opts = photocraft_io::psdc::CompileOptions { rerender_text: rerender, font_dirs: fonts.iter().map(Into::into).collect(), system_fonts: system, ..Default::default() };
+    // The bundled and craft fonts after the user's, as the folder compile does.
+    let opts = if rerender { opts.with_app_fonts() } else { opts };
     let c = photocraft_io::psdc::compile(&bytes, &opts).map_err(|e| format!("{input}: {e}"))?;
     warn_all(err, &c.warnings);
     let encoded = c.encode(&ext, quality).map_err(|e| e.to_string())?;
