@@ -250,6 +250,8 @@ fn spool_transport_streams_pdf_and_propagates_refusal() {
             panic!("desktop printing must start on a worker");
         };
         assert!(!s.cancel_job(job), "queue side effects must not be reported as cancelled");
+        assert_eq!(s.execute("jobs.cancel", json!({})).unwrap()["cancelled"], 0);
+        assert!(s.execute("jobs.cancel", json!({"job": job.0})).unwrap_err().to_string().contains("system print queue"));
         s.execute("file.new", json!({"width": 40, "height": 10})).unwrap();
         let viewed = s.active().unwrap().doc.id;
         let out = s.wait_job(job).unwrap();

@@ -391,7 +391,7 @@ pub fn job_in_view(app: &PhotocraftApp) -> Option<JobInfo> {
 }
 
 /// Cancel job `id` (the status bar's ×, the dialog's Cancel, Esc, closing an opening tab).
-pub fn cancel(app: &mut PhotocraftApp, id: JobId) {
+pub fn cancel(app: &mut PhotocraftApp, id: JobId) -> bool {
     let label = app.session.job(id).map(|j| j.label);
     // A save that has started replacing the file runs to the end: cancelling it now would leave
     // the file written but the document marked unsaved.
@@ -400,15 +400,17 @@ pub fn cancel(app: &mut PhotocraftApp, id: JobId) {
     {
         app.ui.status = crate::i18n::fmt(tl!("{label} is writing the file and can no longer be cancelled"), &[("label", label.as_deref().unwrap_or_default())]);
         app.ui.status_error = false;
-        return;
+        return false;
     }
-    if app.session.cancel_job(id) {
+    let cancelled = app.session.cancel_job(id);
+    if cancelled {
         // The event (and its status text) arrives with the next poll; say so now as well.
         if let Some(l) = label {
             app.ui.status = crate::i18n::fmt(tl!("Cancelled {label}"), &[("label", &l)]);
             app.ui.status_error = false;
         }
     }
+    cancelled
 }
 
 fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {

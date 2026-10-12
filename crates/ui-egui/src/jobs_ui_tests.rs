@@ -615,6 +615,10 @@ fn printing_keeps_drawing_and_reports_only_the_final_spooler_result() {
         h.key_press(egui::Key::Escape);
         h.run_steps(2);
         assert!(h.state().session.job(id).is_some(), "Esc cannot retract a submitted job");
+        let (request, _) = crate::control::ControlRequest::new("jobs.cancel", json!({"job": id.0}));
+        let ctx = h.ctx.clone();
+        let crate::control::Outcome::Done(reply) = crate::control::handle(h.state_mut(), &ctx, &request) else { panic!("cancel replies immediately") };
+        assert_eq!(reply["result"]["cancelled"], 0, "control must not falsely report cancellation: {reply}");
         let st = h.state_mut().session.active_mut().unwrap();
         st.saved_revision = st.revision;
         assert!(press_window_close(h.state_mut()), "quit waits for print submission");

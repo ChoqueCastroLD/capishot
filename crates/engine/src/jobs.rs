@@ -819,11 +819,17 @@ pub fn specs() -> Vec<crate::commands::CommandSpec> {
                 None | Some(Value::Null) => {
                     let n = s.jobs.running.len();
                     s.cancel_all_jobs();
-                    Ok(json!({"cancelled": n}))
+                    Ok(json!({"cancelled": n.saturating_sub(s.jobs.running.len())}))
                 }
                 Some(v) => {
                     let id = v.as_u64().ok_or_else(|| EngineError::BadParams { cmd: "jobs.cancel".into(), msg: "`job` must be a job id".into() })?;
-                    if s.cancel_job(JobId(id)) { Ok(json!({"cancelled": 1})) } else { Err(EngineError::Other(format!("no running job {id}"))) }
+                    if s.cancel_job(JobId(id)) {
+                        Ok(json!({"cancelled": 1}))
+                    } else if s.job(JobId(id)).is_some() {
+                        Err(EngineError::Other("printing cannot be cancelled here; use the system print queue".into()))
+                    } else {
+                        Err(EngineError::Other(format!("no running job {id}")))
+                    }
                 }
             },
             journal: false,
