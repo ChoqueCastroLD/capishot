@@ -1,6 +1,6 @@
 # PhotoCraft vs Adobe Photoshop: target-app parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (Tilt-Shift measurements added; earlier the same day: major, full re-measure against Photoshop 2026 27.11.0; merged `parity-estimate.md` and the roadmap's honest assessment) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (adaptive Unsharp Mask local CPU performance evidence; headline parity unchanged) · **Target:** Adobe Photoshop 2026
 
 The authoritative answer to "how close is PhotoCraft to Photoshop, and how much work is left". The
 one-page summary is [`ROADMAP.md`](../ROADMAP.md); the ranked work list is [`gaps.md`](gaps.md);
@@ -419,6 +419,15 @@ Three alternating paired release runs also cover 36 MP RGB, 16/32-bit storage,
 and screen radii 2/8/64. All 36 complete output comparisons match exactly.
 See [method, raw timings and checks](pixelate-performance.md).
 
+2026-10-11: Native adaptive Unsharp Mask uses the same discrete Gaussian coefficients with FFT
+convolution and fewer source/edge copies. At threshold 0, 24 MP RGBA8 full CPU application improves
+19.87 s → 534 ms at radius 300 (37.22x), and 79.47 s → 778 ms at radius 1000 (102.17x), on
+Windows / Ryzen 7 9700X / eight workers. Measured u8 differences are at most one level; 16-bit
+and HDR checks pass. Positive thresholds and unstable inputs keep the exact streamed path,
+whose 220 paired outputs match byte for byte. Photoshop's Unsharp Mask rendering parity remains
+open, and these CPU results do not measure GUI latency. See
+[measurements, upstream research and limits](unsharp-mask-performance.md).
+
 2026-10-10: Native CMYK solid and gradient fills share depth-quantized samples between
 rendering and PSD export. The uncached 16-bit CMYK gradient now round-trips with zero
 rendered error; psd-tools round trips rise from 307 to 308. Mixed and Photoshop round
@@ -561,6 +570,7 @@ See [method, raw measurements and reproduction](five-algorithm-performance.md).
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-10 | minor | Added measured Tilt-Shift computation/filtered-proxy gains and inconclusive cases; parity percentages and budgets unchanged |
+| 2026-10-11 | minor | Recorded adaptive Unsharp Mask CPU speedups, rounding checks and exact fallback; headline parity and corpus floors unchanged |
 | 2026-10-10 | minor | Readiness-by-audience table: percent and hours for full, mainstream and essentials; full number confirmed as the additive weighted sum over dimensions (46%, reported ~45%) |
 | 2026-10-10 | minor | Added mainstream-practitioner (~43%) and essentials-user (~61%) numbers with written weights and discounts; full ready-for-real-work rechecked against its written weights (46%, reported ~45%), unchanged |
 | 2026-10-10 | minor | Stage checked against the core-workflow alpha gate in `roadmap.md`: passes |
