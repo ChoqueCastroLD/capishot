@@ -419,6 +419,15 @@ fn tile_coordinates_outside_the_i32_pixel_range_are_rejected() {
     }
 }
 
+#[test]
+fn an_unlimited_blob_budget_still_loads_blobs() {
+    // `max_blob_bytes + 1` overflowed (debug panic; release read zero bytes, failing every blob).
+    let doc = rich_doc(ColorMode::Rgb, SampleType::U8);
+    let bytes = save_to_bytes(&doc, &SaveOptions::default()).unwrap();
+    let opts = LoadOptions { max_blob_bytes: usize::MAX, ..LoadOptions::default() };
+    assert_eq!(load_from_bytes_with(&bytes, &opts).unwrap(), doc);
+}
+
 /// Rewrites the first pattern's declared size (its tiles stay as saved).
 fn with_pattern_size(w: u64, h: u64) -> Vec<u8> {
     rebuild(sample_cached(), |n, d| {
