@@ -2667,6 +2667,13 @@ cameraData	Lens	Objetivo
 curves	Smooth	Suavizar
 	Smooth the curve values	Suavizar los valores de la curva
 	Drag to draw the curve · {key}-click draws a straight line	Arrastre para dibujar la curva · {key}-clic traza una línea recta
+	Edit Plane	Editar plano
+	Create Plane	Crear plano
+	Grid Size:	Tamaño de rejilla:
+	Vanishing Point: click four corners to create a plane	Punto de fuga: haga clic en cuatro esquinas para crear un plano
+	Vanishing Point is not active	Punto de fuga no está activo
+	Apply Vanishing Point ({key})	Aplicar punto de fuga ({key})
+	Fix the red plane first: its corners must form a convex quad	Corrija primero el plano rojo: sus esquinas deben formar un cuadrilátero convexo
 # Select and Mask view modes (#1754)
 	Onion Skin	Papel cebolla
 	Marching Ants	Hormigas en marcha

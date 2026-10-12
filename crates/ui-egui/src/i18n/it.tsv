@@ -2658,6 +2658,13 @@ cameraData	Lens	Obiettivo
 curves	Smooth	Leviga
 	Smooth the curve values	Leviga i valori della curva
 	Drag to draw the curve · {key}-click draws a straight line	Trascina per disegnare la curva · {key}-clic traccia una linea retta
+	Edit Plane	Modifica piano
+	Create Plane	Crea piano
+	Grid Size:	Dimensione griglia:
+	Vanishing Point: click four corners to create a plane	Punto di fuga: fai clic su quattro angoli per creare un piano
+	Vanishing Point is not active	Punto di fuga non è attivo
+	Apply Vanishing Point ({key})	Applica punto di fuga ({key})
+	Fix the red plane first: its corners must form a convex quad	Correggi prima il piano rosso: i suoi angoli devono formare un quadrilatero convesso
 # Select and Mask view modes (#1754)
 	Onion Skin	Velina
 	Marching Ants	Formiche in marcia

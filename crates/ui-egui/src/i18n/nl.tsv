@@ -3743,6 +3743,11 @@ cameraData	Lens	Lens
 curves	Smooth	Vloeiend maken
 	Smooth the curve values	Curvewaarden vloeiend maken
 	Drag to draw the curve · {key}-click draws a straight line	Sleep om de curve te tekenen · {key}-klik tekent een rechte lijn
+	Grid Size:	Rastergrootte:
+	Vanishing Point: click four corners to create a plane	Verdwijnpunt: klik op vier hoeken om een vlak te maken
+	Vanishing Point is not active	Verdwijnpunt is niet actief
+	Apply Vanishing Point ({key})	Verdwijnpunt toepassen ({key})
+	Fix the red plane first: its corners must form a convex quad	Herstel eerst het rode vlak: de hoeken moeten een convexe vierhoek vormen
 # Select and Mask view modes (#1754)
 	Onion Skin	Uienschil
 	Marching Ants	Mierenmars

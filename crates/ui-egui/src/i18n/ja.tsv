@@ -3598,6 +3598,11 @@ cameraData	Lens	レンズ
 curves	Smooth	スムーズ
 	Smooth the curve values	カーブの値を滑らかにする
 	Drag to draw the curve · {key}-click draws a straight line	ドラッグしてカーブを描画 · {key}+クリックで直線を描画
+	Grid Size:	グリッドサイズ:
+	Vanishing Point: click four corners to create a plane	消点：4 つの角をクリックして面を作成します
+	Vanishing Point is not active	消点はアクティブではありません
+	Apply Vanishing Point ({key})	消点を適用({key})
+	Fix the red plane first: its corners must form a convex quad	先に赤い面を修正してください：角が凸四角形になる必要があります
 # Select and Mask view modes (#1754)
 	Onion Skin	オニオンスキン
 	Marching Ants	点線の境界

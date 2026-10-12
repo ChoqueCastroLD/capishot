@@ -3687,6 +3687,11 @@ cameraData	Lens	Φακός
 curves	Smooth	Εξομάλυνση
 	Smooth the curve values	Εξομάλυνση των τιμών της καμπύλης
 	Drag to draw the curve · {key}-click draws a straight line	Σύρετε για να σχεδιάσετε την καμπύλη · {key}-κλικ σχεδιάζει ευθεία γραμμή
+	Grid Size:	Μέγεθος πλέγματος:
+	Vanishing Point: click four corners to create a plane	Σημείο φυγής: κάντε κλικ σε τέσσερις γωνίες για να δημιουργήσετε ένα επίπεδο
+	Vanishing Point is not active	Το Σημείο φυγής δεν είναι ενεργό
+	Apply Vanishing Point ({key})	Εφαρμογή σημείου φυγής ({key})
+	Fix the red plane first: its corners must form a convex quad	Διορθώστε πρώτα το κόκκινο επίπεδο: οι γωνίες του πρέπει να σχηματίζουν κυρτό τετράπλευρο
 # Select and Mask view modes (#1754)
 	Onion Skin	Φλούδα κρεμμυδιού
 	Marching Ants	Κινούμενο περίγραμμα

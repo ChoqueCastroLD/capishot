@@ -3674,6 +3674,11 @@ cameraData	Lens	Об'єктив
 curves	Smooth	Згладити
 	Smooth the curve values	Згладити значення кривої
 	Drag to draw the curve · {key}-click draws a straight line	Перетягніть, щоб намалювати криву · {key}-клацання малює пряму лінію
+	Grid Size:	Розмір сітки:
+	Vanishing Point: click four corners to create a plane	Точка сходження: клацніть чотири кути, щоб створити площину
+	Vanishing Point is not active	Точка сходження не активна
+	Apply Vanishing Point ({key})	Застосувати точку сходження ({key})
+	Fix the red plane first: its corners must form a convex quad	Спершу виправте червону площину: її кути мають утворювати опуклий чотирикутник
 # Select and Mask view modes (#1754)
 	Onion Skin	Калька
 	Marching Ants	Мурашки

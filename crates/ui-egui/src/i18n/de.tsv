@@ -2626,6 +2626,13 @@ cameraData	Lens	Objektiv
 curves	Smooth	Glätten
 	Smooth the curve values	Kurvenwerte glätten
 	Drag to draw the curve · {key}-click draws a straight line	Ziehen, um die Kurve zu zeichnen · {key}-Klick zeichnet eine gerade Linie
+	Edit Plane	Ebene bearbeiten
+	Create Plane	Ebene erstellen
+	Grid Size:	Rastergröße:
+	Vanishing Point: click four corners to create a plane	Fluchtpunkt: Klicken Sie auf vier Ecken, um eine Ebene zu erstellen
+	Vanishing Point is not active	Fluchtpunkt ist nicht aktiv
+	Apply Vanishing Point ({key})	Fluchtpunkt anwenden ({key})
+	Fix the red plane first: its corners must form a convex quad	Korrigieren Sie zuerst die rote Ebene: Ihre Ecken müssen ein konvexes Viereck bilden
 # Select and Mask view modes (#1754)
 	Onion Skin	Zwiebelschicht
 	Marching Ants	Laufende Ameisen

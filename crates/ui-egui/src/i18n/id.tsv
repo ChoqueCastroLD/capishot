@@ -2991,6 +2991,11 @@ cameraData	Lens	Lensa
 curves	Smooth	Haluskan
 	Smooth the curve values	Haluskan nilai kurva
 	Drag to draw the curve · {key}-click draws a straight line	Seret untuk menggambar kurva · {key}-klik menggambar garis lurus
+	Grid Size:	Ukuran Grid:
+	Vanishing Point: click four corners to create a plane	Vanishing Point: klik empat sudut untuk membuat bidang
+	Vanishing Point is not active	Vanishing Point tidak aktif
+	Apply Vanishing Point ({key})	Terapkan Vanishing Point ({key})
+	Fix the red plane first: its corners must form a convex quad	Perbaiki bidang merah dulu: sudut-sudutnya harus membentuk segi empat cembung
 # Select and Mask view modes (#1754)
 	Onion Skin	Kulit Bawang
 	Marching Ants	Semut Berbaris
