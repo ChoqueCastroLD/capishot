@@ -66,9 +66,16 @@ fn slow_job(app: &mut PhotocraftApp, gate: &Arc<AtomicBool>) -> JobId {
 
 /// Step frames for `ms` of wall time; returns (frames, slowest frame in ms).
 fn frames_for(h: &mut Harness<'_, PhotocraftApp>, ms: u64) -> (u64, f64) {
+    frames_for_at_least(h, ms, 0)
+}
+
+/// Prove the frame loop advances while a gated worker stays blocked, without assuming a
+/// minimum frame rate on software-rendered CI machines. Also wait for the progress modal.
+fn frames_for_at_least(h: &mut Harness<'_, PhotocraftApp>, ms: u64, min_frames: u64) -> (u64, f64) {
     let t = Instant::now();
     let (mut n, mut worst) = (0, 0.0f64);
-    while t.elapsed() < Duration::from_millis(ms) {
+    while t.elapsed() < Duration::from_millis(ms) || n < min_frames {
+        assert!(t.elapsed() < Duration::from_secs(30), "frame observation timed out after {n} frames");
         let f = Instant::now();
         h.step();
         worst = worst.max(f.elapsed().as_secs_f64() * 1000.0);
@@ -84,7 +91,7 @@ fn the_frame_loop_keeps_running_during_a_slow_job_and_esc_cancels_it() {
     let doc_before = h.state().session.active().unwrap().doc.clone();
     let job = slow_job(h.state_mut(), &gate);
     let frame0 = h.state().frame;
-    let (n, worst) = frames_for(&mut h, 400);
+    let (n, worst) = frames_for_at_least(&mut h, 400, 10);
     assert!(h.state().frame - frame0 >= 10, "the UI kept rendering ({n} frames)");
     eprintln!("{n} frames during the job, slowest {worst:.1} ms");
     // The status bar shows the job, and after the delay the modal progress dialog.
@@ -418,7 +425,7 @@ fn saves_run_in_the_background_and_are_recorded_when_they_end() {
     assert!(h.state().saving());
 
     // The window keeps drawing; the document stays unsaved and can't be edited meanwhile.
-    let (frames, _) = frames_for(&mut h, 400);
+    let (frames, _) = frames_for_at_least(&mut h, 400, 4);
     assert!(frames >= 4, "only {frames} frames while saving");
     let st = h.state().session.active().unwrap();
     assert!(st.is_dirty() && st.path.is_none());
