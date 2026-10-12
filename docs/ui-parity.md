@@ -49,7 +49,7 @@ Triangle and Curvature Pen (minus legacy Rounded Rectangle and Targeted Adjustme
 
 | Toolbar behaviour | Status | Evidence |
 |---|---|---|
-| Letter shortcuts, ⇧+letter cycles the group, "Use Shift Key for Tool Switch" | done | `shortcuts.rs:413` |
+| Letter shortcuts, ⇧+letter cycles the group, "Use Shift Key for Tool Switch" (on by default, as in Photoshop) | done | `shortcuts.rs:413` |
 | Group remembers the last tool used | partial | L always resets to Lasso (#2608) |
 | Press-and-hold or click-drag opens the flyout | missing | right-click only (#2301) |
 | Edit Toolbar customization | done | `edit.toolbar` |
