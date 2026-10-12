@@ -278,7 +278,7 @@ fn heal_region_timing_probe() {
     for (i, v) in dst.data.iter_mut().enumerate() {
         *v = ((i * 11) % 255) as f32 / 255.0;
     }
-    let mask: Vec<bool> = (0..92 * 92).map(|i| ((i % 92) as i32 - 46).pow(2) + ((i / 92) as i32 - 46).pow(2) < 40 * 40).collect();
+    let mask: Vec<bool> = (0..92 * 92_i32).map(|i| (i % 92 - 46).pow(2) + (i / 92 - 46).pow(2) < 40 * 40).collect();
     for _ in 0..3 {
         let t = std::time::Instant::now();
         let _ = heal_region(&fmt, &src, &dst, &mask);
