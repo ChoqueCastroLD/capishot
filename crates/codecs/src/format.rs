@@ -17,6 +17,8 @@ pub enum Format {
     Pnm,
     /// ZSoft Paintbrush: 1/2/4-bit planar palettes, 8-bit indexed and 24-bit RGB.
     Pcx,
+    /// X PixMap icons (XPM3 C-string representation).
+    Xpm,
     Qoi,
     OpenExr,
     /// Radiance RGBE.
@@ -60,6 +62,7 @@ pub struct FormatCaps {
 /// Formats that are enabled but intentionally not symmetric, with the reason.
 /// The test-suite asserts that every other enabled format is read+write.
 pub const ASYMMETRIC_EXCEPTIONS: &[(Format, &str)] = &[
+    (Format::Xpm, "XPM is a legacy Unix icon interchange format. Reading existing XPM icons is supported; writing modern image assets should use PNG instead."),
     (
         Format::Pcx,
         "PCX is supported for opening legacy paint and clipart assets. New files should use PNG; writing obsolete indexed and planar variants is intentionally not provided.",
@@ -86,7 +89,7 @@ const ALL_LAYOUTS: &[ChannelLayout] = &[L::Gray, L::GrayA, L::Rgb, L::Rgba, L::C
 
 impl Format {
     /// Every format known to the crate (enabled or not).
-    pub const ALL: [Format; 17] = [
+    pub const ALL: [Format; 18] = [
         Format::Png,
         Format::Jpeg,
         Format::Tiff,
@@ -97,6 +100,7 @@ impl Format {
         Format::Ico,
         Format::Pnm,
         Format::Pcx,
+        Format::Xpm,
         Format::Qoi,
         Format::OpenExr,
         Format::Hdr,
@@ -128,6 +132,7 @@ impl Format {
             Format::Ico => "ICO",
             Format::Pnm => "Netpbm",
             Format::Pcx => "PCX",
+            Format::Xpm => "XPM",
             Format::Qoi => "QOI",
             Format::OpenExr => "OpenEXR",
             Format::Hdr => "Radiance HDR",
@@ -152,6 +157,7 @@ impl Format {
             Format::Ico => &["ico"],
             Format::Pnm => &["pnm", "pbm", "pgm", "ppm", "pam", "pfm"],
             Format::Pcx => &["pcx"],
+            Format::Xpm => &["xpm"],
             Format::Qoi => &["qoi"],
             Format::OpenExr => &["exr"],
             Format::Hdr => &["hdr"],
@@ -174,6 +180,7 @@ impl Format {
             Format::Ico => "image/x-icon",
             Format::Pnm => "image/x-portable-anymap",
             Format::Pcx => "image/x-pcx",
+            Format::Xpm => "image/x-xpixmap",
             Format::Qoi => "image/qoi",
             Format::OpenExr => "image/x-exr",
             Format::Hdr => "image/vnd.radiance",
@@ -224,6 +231,7 @@ pub fn caps(format: Format) -> FormatCaps {
         Format::Ico => FormatCaps { layouts: &[L::Rgba], ..base },
         Format::Pnm => FormatCaps { depths: &[S::U8, S::U16, S::F32], layouts: ALL_LAYOUTS, ..base },
         Format::Pcx => FormatCaps { read: true, write: false, layouts: &[L::Rgb], alpha: false, ..base },
+        Format::Xpm => FormatCaps { read: true, write: false, layouts: &[L::Rgba], ..base },
         Format::Qoi => base,
         Format::OpenExr => FormatCaps { depths: &[S::F16, S::F32], layouts: RGB_GRAY, ..base },
         Format::Hdr => FormatCaps { depths: &[S::F32], layouts: &[L::Rgb], alpha: false, lossy: true, ..base },
@@ -287,6 +295,9 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
     }
     if b.starts_with(b"SIMPLE  =") {
         return Some(Format::Fits);
+    }
+    if b.starts_with(b"/* XPM */") {
+        return Some(Format::Xpm);
     }
     if crate::codecs::pcx::looks_like_pcx(b) {
         return Some(Format::Pcx);
