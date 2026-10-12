@@ -20,6 +20,13 @@ fn app_with(kind: Kind) -> PhotocraftApp {
         Kind::Fill => app.run("layer.newFillLayer.solidColor", json!({"color": "#00ff00"})).map(|_| ()),
     }
     .unwrap();
+    if kind == Kind::Fill {
+        // A new fill layer targets its mask, as in Photoshop (#2166), and painting the mask needs
+        // no rasterizing (fill_layer_brush_paints_its_mask_without_asking): target the fill
+        // itself, as clicking its thumbnail does.
+        app.ui.mask_target = false;
+        app.sync_mask_targets();
+    }
     app.run("tools.setColors", json!({"foreground": "#0000ff"})).unwrap();
     app
 }
@@ -68,6 +75,20 @@ fn ok_rasterizes_then_paints_as_two_history_states() {
             assert_eq!(active_content(&app), kind_name(kind));
         }
     }
+}
+
+#[test]
+fn fill_layer_brush_paints_its_mask_without_asking() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    app.run("file.new", json!({"width": 120, "height": 80})).unwrap();
+    app.run("layer.newFillLayer.solidColor", json!({"color": "#00ff00"})).unwrap();
+    assert!(app.ui.mask_target, "a new fill layer targets its mask");
+    app.ui.tool = Tool::Brush;
+    let before = past(&app);
+    click(&mut app, 30.0, 20.0);
+    assert!(prompt(&app).is_none());
+    assert_eq!(active_content(&app), "Fill");
+    assert_eq!(past(&app), before + 1, "the click painted the mask");
 }
 
 fn kind_name(k: Kind) -> &'static str {

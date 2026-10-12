@@ -1169,6 +1169,7 @@
 	Magenta	Magenta
 	Magenta  ·  Green	Magenta  ·  Vert
 	Maintain aspect ratio	Conserver les proportions
+	Maintain Aspect Ratio	Conserver les proportions
 	Marker Size	Taille du marqueur
 	Mask All	Tout masquer
 	Mask Options	Options de masque
@@ -2877,3 +2878,13 @@ fontWeight	Italic	Italique
 	Based on PhotoCraft	Basé sur PhotoCraft
 	psd-compiler	psd-compiler
 	Show canvas dots	Afficher les points du canevas
+	Copy Layers	Copier les calques
+	Paste Layers	Coller les calques
+	Cycle Screen Mode Backwards	Changer de mode d'écran en sens inverse
+	Scroll Up One Screen	Défiler d'un écran vers le haut
+	Scroll Down One Screen	Défiler d'un écran vers le bas
+	Scroll Left One Screen	Défiler d'un écran vers la gauche
+	Scroll Right One Screen	Défiler d'un écran vers la droite
+	Scroll to Upper-Left Corner	Défiler jusqu'au coin supérieur gauche
+	Scroll to Lower-Right Corner	Défiler jusqu'au coin inférieur droit
+	Show rulers in new documents	Afficher les règles dans les nouveaux documents

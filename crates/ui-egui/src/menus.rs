@@ -44,6 +44,14 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("view.extras", "Extras", &["View"], Some("Cmd+H")),
     ("view.show.targetPath", "Target Path", &["View", "Show"], Some("Cmd+Shift+H")),
     ("view.screenMode.cycle", "Cycle Screen Mode", &[], Some("F")),
+    ("view.screenMode.cyclePrevious", "Cycle Screen Mode Backwards", &[], Some("Shift+F")),
+    // Keyboard scrolling (`view_scroll`).
+    ("view.scroll.pageUp", "Scroll Up One Screen", &[], Some("PageUp")),
+    ("view.scroll.pageDown", "Scroll Down One Screen", &[], Some("PageDown")),
+    ("view.scroll.pageLeft", "Scroll Left One Screen", &[], Some("Cmd+PageUp")),
+    ("view.scroll.pageRight", "Scroll Right One Screen", &[], Some("Cmd+PageDown")),
+    ("view.scroll.home", "Scroll to Upper-Left Corner", &[], Some("Home")),
+    ("view.scroll.end", "Scroll to Lower-Right Corner", &[], Some("End")),
     ("edit.freeTransformCopy", "Free Transform a Copy", &[], Some("Cmd+Alt+T")),
     ("type.editText", "Edit Type", &[], None),
     ("view.zoomIn", "Zoom In", &["View"], Some("Cmd+=")),
@@ -158,6 +166,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     // Help › GitHub, Report an Issue, psd-compiler, upstream project.
     if let Some(url) = crate::links::url_for(id) {
         return Ok(crate::links::open(app, ctx, url));
+    }
+    if crate::view_scroll::handles(id) {
+        return crate::view_scroll::run(app, id);
     }
     if id == "view.proofSetup.custom" {
         return Ok(json!({"dialog": crate::filter_dialog::open(app, "view.proofSetup")}));
@@ -628,6 +639,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     }
     if let Some(e) = crate::transform_tool::is_enabled(app, id) {
         return e;
+    }
+    if crate::view_scroll::handles(id) {
+        return app.session.active().is_some();
     }
     match id {
         "file.open" | "file.openDeep" | "file.exit" | "file.clearRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,

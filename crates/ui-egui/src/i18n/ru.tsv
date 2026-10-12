@@ -651,6 +651,7 @@
 	Constrain proportions	Сохранить пропорции
 	Link width and height	Связать ширину и высоту
 	Maintain aspect ratio	Сохранить соотношение сторон
+	Maintain Aspect Ratio	Сохранить соотношение сторон
 	Current Size	Текущий размер
 	New Size	Новый размер
 	Fit	По размеру
@@ -2742,3 +2743,13 @@ fontWeight	Italic	Курсив
 	Based on PhotoCraft	Основан на PhotoCraft
 	psd-compiler	psd-compiler
 	Show canvas dots	Показывать точки холста
+	Copy Layers	Копировать слои
+	Paste Layers	Вставить слои
+	Cycle Screen Mode Backwards	Переключить режим экрана в обратном порядке
+	Scroll Up One Screen	Прокрутить на экран вверх
+	Scroll Down One Screen	Прокрутить на экран вниз
+	Scroll Left One Screen	Прокрутить на экран влево
+	Scroll Right One Screen	Прокрутить на экран вправо
+	Scroll to Upper-Left Corner	Прокрутить в левый верхний угол
+	Scroll to Lower-Right Corner	Прокрутить в правый нижний угол
+	Show rulers in new documents	Показывать линейки в новых документах

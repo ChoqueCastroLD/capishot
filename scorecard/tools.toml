@@ -50,16 +50,16 @@ note = "fill_ui.rs dialog over edit.fill (fill_cmds.rs): all contents, mode, opa
 [[item]]
 id = "TOOL-213-7"
 target = "Live stroke preview for every brush-based retouch tool"
-status = "missing"
+status = "done"
 issue = 213
-note = "Live stroke only for Brush and Eraser (canvas.rs:1684)"
+note = "canvas.rs begin_live_stroke: Clone Stamp, Healing Brush (heals as drawn: per-step Poisson solve of the new dabs against the already-healed scratch), History Brush, Pattern Stamp (aligned; Impressionist dab by dab with the commit's seed) via LiveRetouch; Dodge/Burn/Sponge/Blur/Sharpen/Smudge via LiveDab, Sample All Layers included (composite rendered per 256 px tile on first touch, retouch_cmds/live_scratch.rs); Eraser's Erase to History. Spot Healing shows Photoshop's dark footprint and heals on release. live_tests.rs, retouch_live_tests.rs; 4000x6000 page timings in live_retouch_timings"
 
 [[item]]
 id = "TOOL-213-8"
 target = "Clone Source: W/H link, drawn overlay (opacity/blend/clip/auto-hide), Alt target cursor"
-status = "partial"
+status = "done"
 issue = 213
-note = "Clone Source overlay drawn with opacity, inversion, circular clipping and auto-hide; W/H link, custom-tip clipping and overlay blend modes remain missing"
+note = "clone_overlay.rs: overlay for Clone Stamp and Healing Brush with opacity, Normal/Darken/Lighten/Difference against the canvas, invert, Clipped to the brush (disc, or the tip's own shape for sampled/elliptical tips; unclipped = up to 1024 px of the view), Auto Hide while painting; Alt shows the target cursor; cloneSource.set link (Maintain Aspect Ratio button) scales W and H together; aligned/non-aligned and Current/Current & Below/All Layers sampling covered by alt_click_tests and retouch tests"
 
 [[item]]
 id = "TOOL-213-9"
@@ -141,9 +141,9 @@ note = "move_mods.rs covers Shift/Alt/arrows only"
 [[item]]
 id = "TOOL-214-5"
 target = "Right-click menu during Free Transform (scale, rotate, skew, warp, flip, rotate 90/180)"
-status = "missing"
+status = "done"
 issue = 214
-note = "No context menu in canvas.rs or transform_tool.rs"
+note = "canvas_tool_menu.rs TRANSFORM_MENU: Free Transform, Scale, Rotate, Skew, Distort, Perspective, Warp, Content-Aware Scale, Rotate 180/90 CW/90 CCW, Flip H/V; the turns and flips act on the open box about its reference point from the menu bar too (transform_tool::BOX_PRESETS; transform_menu_turns_and_flips_the_box)"
 
 [[item]]
 id = "TOOL-214-6"
@@ -298,3 +298,17 @@ target = "Remove tool: paint over an object (or circle it) and it is filled from
 status = "partial"
 issue = 213
 note = "paint.remove (retouch_cmds/remove.rs, background job) + Tool::Remove in the J flyout; loops close over what they enclose; fill by non-local patch completion with texture features, onion-peel start, best-patch copy and gradient-domain seam hiding (algo/nonlocal.rs, Newson et al. IPOL 2017); sparse holes in tiles (algo/remove.rs). remove_quality on 20 holes in public-domain photos: the fill keeps 0.89 of the texture it replaces (0.54 with Content-Aware Fill's completion), edge gradient 1.03 of the original's; remove_bench 24 MP: 100 px ring 120 ms, 1000 px ring 2.5 s, 3000 px line 1.7 s. Missing: generative AI mode, Remove after each stroke off, live preview of the result"
+
+[[item]]
+id = "TOOL-213-20"
+target = "Healing on flat manga art: text healed out of white bubbles and screentone leaves no seam"
+status = "done"
+issue = 213
+note = "heal_quality_tests.rs: white within 3/255; screentone P x P local mean within 0.035 of the clean tone over the stroke and its ring, dot variance 0.75..1.33 of clean, no text left; Spot Healing (Content-Aware 8/16-bit, Proximity Match), Healing Brush and the live Healing Brush"
+
+[[item]]
+id = "TOOL-213-21"
+target = "Options bars of Brush, Eraser, Clone Stamp, Healing, Spot Healing, Paint Bucket, Magic Wand match Photoshop's"
+status = "partial"
+issue = 213
+note = "Clone/Pattern Stamp: Mode, Opacity, Flow, pressure for opacity and size; Healing and Spot Healing: Mode incl. Replace; Eraser: Mode Brush/Pencil and Erase to History (its Mode was a blend list); Paint Bucket: Mode; Magic Wand: Sample Size (Point .. 101x101 Average). Missing: Eraser Block mode, Healing Brush Source: Pattern and Diffusion, airbrush on the stamps, Ignore Adjustment Layers, brush Angle field"

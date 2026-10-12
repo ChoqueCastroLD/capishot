@@ -2579,6 +2579,7 @@
 	Magenta  ·  Green	Ματζέντα · πράσινο
 	Magentas	Αποχρώσεις ματζέντα
 	Maintain aspect ratio	Διατήρηση αναλογίας διαστάσεων
+	Maintain Aspect Ratio	Διατήρηση αναλογίας διαστάσεων
 	Make	Κατασκευαστής
 	Make Default	Ορισμός ως προεπιλογής
 	Make Selection	Δημιουργία επιλογής
@@ -3565,3 +3566,13 @@ fontWeight	Thin	Πολύ λεπτά
 	Based on PhotoCraft	Βασισμένο στο PhotoCraft
 	psd-compiler	psd-compiler
 	Show canvas dots	Εμφάνιση κουκκίδων καμβά
+	Copy Layers	Αντιγραφή επιπέδων
+	Paste Layers	Επικόλληση επιπέδων
+	Cycle Screen Mode Backwards	Εναλλαγή λειτουργίας οθόνης προς τα πίσω
+	Scroll Up One Screen	Κύλιση μία οθόνη πάνω
+	Scroll Down One Screen	Κύλιση μία οθόνη κάτω
+	Scroll Left One Screen	Κύλιση μία οθόνη αριστερά
+	Scroll Right One Screen	Κύλιση μία οθόνη δεξιά
+	Scroll to Upper-Left Corner	Κύλιση στην πάνω αριστερή γωνία
+	Scroll to Lower-Right Corner	Κύλιση στην κάτω δεξιά γωνία
+	Show rulers in new documents	Εμφάνιση χαράκων σε νέα έγγραφα
