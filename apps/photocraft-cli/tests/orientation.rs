@@ -121,14 +121,15 @@ fn orientation_6_jpeg_converts_upright_and_rotates_back() {
     assert!(near(at(28, 12), upright_color(12, 4)), "{:?}", at(28, 12));
     assert!(near(at(4, 8), upright_color(8, 28)), "{:?}", at(4, 8));
 
-    // .pcraft save, reopen and save again: destination names follow Save As; other metadata and pixels match.
+    // .pcraft save, reopen and save again: identical document and pixels.
     let (a, b) = (d.join("a.pcraft"), d.join("b.pcraft"));
     ok(bin().arg("convert").arg(&jpg).arg(&a));
     ok(bin().arg("convert").arg(&a).arg(&b));
-    // Check destination names explicitly, then compare the remaining metadata.
+    // Everything but the file's own path and saved document name must match.
     let info = |p: &Path| {
         let mut v = serde_json::from_str::<Value>(&ok(bin().arg("info").arg(p))).unwrap();
         v.as_object_mut().unwrap().remove("file");
+        v.as_object_mut().unwrap().remove("path");
         v
     };
     let (mut ia, mut ib) = (info(&a), info(&b));
