@@ -1963,6 +1963,7 @@
 	Show only crosshair while painting	Mostrar solo la retícula al pintar
 	Show slice numbers	Mostrar los números de sector
 	Show tooltips	Mostrar las descripciones emergentes
+	Enable animations	Activar las animaciones
 	Show highlight on rollover	Mostrar resaltado al pasar el cursor
 	Show bounding box when dragging layer	Mostrar el cuadro delimitador al arrastrar la capa
 	System title bar	Barra de título del sistema
@@ -2661,6 +2662,18 @@ cameraData	Lens	Objetivo
 	Amount:	Cantidad:
 	Protect:	Proteger:
 	Protect skin tones	Proteger tonos de piel
+	Edit points to modify the curve	Editar puntos para modificar la curva
+	Draw to modify the curve	Dibujar para modificar la curva
+curves	Smooth	Suavizar
+	Smooth the curve values	Suavizar los valores de la curva
+	Drag to draw the curve · {key}-click draws a straight line	Arrastre para dibujar la curva · {key}-clic traza una línea recta
+	Edit Plane	Editar plano
+	Create Plane	Crear plano
+	Grid Size:	Tamaño de rejilla:
+	Vanishing Point: click four corners to create a plane	Punto de fuga: haga clic en cuatro esquinas para crear un plano
+	Vanishing Point is not active	Punto de fuga no está activo
+	Apply Vanishing Point ({key})	Aplicar punto de fuga ({key})
+	Fix the red plane first: its corners must form a convex quad	Corrija primero el plano rojo: sus esquinas deben formar un cuadrilátero convexo
 # Select and Mask view modes (#1754)
 	Onion Skin	Papel cebolla
 	Marching Ants	Hormigas en marcha
@@ -2693,6 +2706,7 @@ cameraData	Lens	Objetivo
 	(No neutral color exists for {mode} mode.)	(No existe un color neutro para el modo {mode}.)
 	Apply mask to layer before removing?	¿Aplicar la máscara a la capa antes de eliminarla?
 	The layer or its mask changed. Drag the mask onto the Trash again.	La capa o su máscara ha cambiado. Arrastre de nuevo la máscara a la papelera.
+	Delete the vector mask?	¿Eliminar la máscara vectorial?
 
 # Submitted print jobs are managed by the operating system.
 	Manage submitted jobs in the system print queue	Gestionar los trabajos enviados en la cola de impresión del sistema

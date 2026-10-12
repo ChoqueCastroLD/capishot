@@ -1468,6 +1468,7 @@
 	Show only crosshair while painting	Εμφάνιση μόνο σταυρονήματος κατά τη ζωγραφική
 	Show slice numbers	Εμφάνιση αριθμών τομών
 	Show tooltips	Εμφάνιση επεξηγήσεων
+	Enable animations	Ενεργοποίηση κινούμενων εφέ
 	Show highlight on rollover	Εμφάνιση επισήμανσης κατά την κατάδειξη
 	Show bounding box when dragging layer	Εμφάνιση πλαισίου οριοθέτησης κατά τη μετακίνηση επιπέδου
 	Show transformation values	Εμφάνιση τιμών μετασχηματισμού
@@ -3681,6 +3682,16 @@ cameraData	Lens	Φακός
 	Amount:	Ποσότητα:
 	Protect:	Προστασία:
 	Protect skin tones	Προστασία τόνων δέρματος
+	Edit points to modify the curve	Επεξεργασία σημείων για αλλαγή της καμπύλης
+	Draw to modify the curve	Σχεδίαση για αλλαγή της καμπύλης
+curves	Smooth	Εξομάλυνση
+	Smooth the curve values	Εξομάλυνση των τιμών της καμπύλης
+	Drag to draw the curve · {key}-click draws a straight line	Σύρετε για να σχεδιάσετε την καμπύλη · {key}-κλικ σχεδιάζει ευθεία γραμμή
+	Grid Size:	Μέγεθος πλέγματος:
+	Vanishing Point: click four corners to create a plane	Σημείο φυγής: κάντε κλικ σε τέσσερις γωνίες για να δημιουργήσετε ένα επίπεδο
+	Vanishing Point is not active	Το Σημείο φυγής δεν είναι ενεργό
+	Apply Vanishing Point ({key})	Εφαρμογή σημείου φυγής ({key})
+	Fix the red plane first: its corners must form a convex quad	Διορθώστε πρώτα το κόκκινο επίπεδο: οι γωνίες του πρέπει να σχηματίζουν κυρτό τετράπλευρο
 # Select and Mask view modes (#1754)
 	Onion Skin	Φλούδα κρεμμυδιού
 	Marching Ants	Κινούμενο περίγραμμα
@@ -3712,6 +3723,7 @@ cameraData	Lens	Φακός
 	(No neutral color exists for {mode} mode.)	(Δεν υπάρχει ουδέτερο χρώμα για τη λειτουργία {mode}.)
 	Apply mask to layer before removing?	Εφαρμογή της μάσκας στο επίπεδο πριν από την αφαίρεση;
 	The layer or its mask changed. Drag the mask onto the Trash again.	Το επίπεδο ή η μάσκα του άλλαξε. Σύρετε ξανά τη μάσκα στον Κάδο.
+	Delete the vector mask?	Διαγραφή της διανυσματικής μάσκας;
 
 # Submitted print jobs are managed by the operating system.
 	Manage submitted jobs in the system print queue	Διαχειριστείτε τις υποβληθείσες εργασίες στην ουρά εκτύπωσης του συστήματος

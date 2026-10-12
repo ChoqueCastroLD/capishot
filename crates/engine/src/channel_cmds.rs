@@ -579,6 +579,8 @@ fn edits_mask(id: &str) -> bool {
     id.strip_prefix("image.adjustments.").is_some_and(|kind| crate::adjust_params::default_for(kind, ColorMode::Rgb).is_ok())
         || crate::filters::params_for(id, &Value::Null).is_some()
         || id == "edit.fill"
+        // Copying a targeted mask (#2928).
+        || id == "edit.copy"
         || crate::fill_key_cmds::IDS.contains(&id)
 }
 
@@ -605,8 +607,8 @@ fn routed(id: &str) -> bool {
         || id.starts_with("image.adjustments.")
         || matches!(id, "paint.stroke" | "paint.pencil" | "paint.bucket" | "paint.gradient" | "paint.mixerBrush" | "edit.fill" | "image.applyImage")
         || crate::fill_key_cmds::IDS.contains(&id)
-        // Pasting into a targeted mask or channel (#1035).
-        || matches!(id, "edit.paste" | "edit.pasteSpecial.pasteInPlace" | "edit.pasteSpecial.pasteInto" | "edit.pasteSpecial.pasteOutside")
+        // Pasting into a targeted mask or channel (#1035); Copy takes a targeted mask (#2928).
+        || matches!(id, "edit.copy" | "edit.paste" | "edit.pasteSpecial.pasteInPlace" | "edit.pasteSpecial.pasteInto" | "edit.pasteSpecial.pasteOutside")
         // Edit › Transform › Rotate/Flip turn a targeted mask or channel (#2835).
         || matches!(
             id,

@@ -2378,6 +2378,7 @@
 	Show only crosshair while painting	Только перекрестье при рисовании
 	Show slice numbers	Показывать номера фрагментов
 	Show tooltips	Показывать подсказки
+	Enable animations	Включить анимацию
 	Show highlight on rollover	Показывать подсветку при наведении
 	Show bounding box when dragging layer	Показывать рамку при перетаскивании слоя
 	System title bar	Системная строка заголовка
@@ -2921,6 +2922,16 @@ cameraData	Lens	Объектив
 	Amount:	Эффект:
 	Protect:	Защитить:
 	Protect skin tones	Защищать тона кожи
+	Edit points to modify the curve	Изменять кривую по точкам
+	Draw to modify the curve	Рисовать кривую
+curves	Smooth	Сгладить
+	Smooth the curve values	Сгладить значения кривой
+	Drag to draw the curve · {key}-click draws a straight line	Перетащите, чтобы нарисовать кривую · {key}-щелчок рисует прямую линию
+	Grid Size:	Размер сетки:
+	Vanishing Point: click four corners to create a plane	Точка схода: щелкните четыре угла, чтобы создать плоскость
+	Vanishing Point is not active	Точка схода не активна
+	Apply Vanishing Point ({key})	Применить точку схода ({key})
+	Fix the red plane first: its corners must form a convex quad	Сначала исправьте красную плоскость: ее углы должны образовывать выпуклый четырехугольник
 # Select and Mask view modes (#1754)
 	Onion Skin	Калька
 	Marching Ants	Бегущие муравьи
@@ -2959,6 +2970,7 @@ cameraData	Lens	Объектив
 	(No neutral color exists for {mode} mode.)	(Для режима «{mode}» нет нейтрального цвета.)
 	Apply mask to layer before removing?	Применить маску к слою перед удалением?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Слой или его маска изменились. Перетащите маску в корзину ещё раз.
+	Delete the vector mask?	Удалить векторную маску?
 
 # Submitted print jobs are managed by the operating system.
 	Manage submitted jobs in the system print queue	Управляйте отправленными заданиями в системной очереди печати

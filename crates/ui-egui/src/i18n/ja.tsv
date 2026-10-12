@@ -1962,6 +1962,7 @@
 	Show only crosshair while painting	描画中は十字線のみ表示
 	Show slice numbers	スライス番号を表示
 	Show tooltips	ツールチップを表示
+	Enable animations	アニメーションを有効にする
 	Show highlight on rollover	ロールオーバー時にハイライトを表示
 	Show bounding box when dragging layer	レイヤーのドラッグ中にバウンディングボックスを表示
 	System title bar	システムのタイトルバー
@@ -3592,6 +3593,16 @@ cameraData	Lens	レンズ
 	Amount:	量:
 	Protect:	保護:
 	Protect skin tones	肌色を保護
+	Edit points to modify the curve	ポイントを編集してカーブを変更
+	Draw to modify the curve	描画してカーブを変更
+curves	Smooth	スムーズ
+	Smooth the curve values	カーブの値を滑らかにする
+	Drag to draw the curve · {key}-click draws a straight line	ドラッグしてカーブを描画 · {key}+クリックで直線を描画
+	Grid Size:	グリッドサイズ:
+	Vanishing Point: click four corners to create a plane	消点：4 つの角をクリックして面を作成します
+	Vanishing Point is not active	消点はアクティブではありません
+	Apply Vanishing Point ({key})	消点を適用({key})
+	Fix the red plane first: its corners must form a convex quad	先に赤い面を修正してください：角が凸四角形になる必要があります
 # Select and Mask view modes (#1754)
 	Onion Skin	オニオンスキン
 	Marching Ants	点線の境界
@@ -3624,6 +3635,7 @@ cameraData	Lens	レンズ
 	(No neutral color exists for {mode} mode.)	({mode} モードには中間色がありません。)
 	Apply mask to layer before removing?	削除する前にマスクをレイヤーに適用しますか？
 	The layer or its mask changed. Drag the mask onto the Trash again.	レイヤーまたはそのマスクが変更されました。もう一度マスクをゴミ箱にドラッグしてください。
+	Delete the vector mask?	ベクトルマスクを削除しますか？
 
 # Submitted print jobs are managed by the operating system.
 	Manage submitted jobs in the system print queue	送信済みのジョブはシステムの印刷キューで管理してください

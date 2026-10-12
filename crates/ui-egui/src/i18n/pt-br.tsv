@@ -1930,6 +1930,7 @@
 	Show only crosshair while painting	Mostrar apenas a mira ao pintar
 	Show slice numbers	Mostrar números das fatias
 	Show tooltips	Mostrar dicas de ferramentas
+	Enable animations	Ativar animações
 	Show highlight on rollover	Mostrar realce ao passar o mouse
 	Show transformation values	Mostrar valores de transformação
 	Slice color	Cor das fatias
@@ -3003,6 +3004,17 @@ cameraData	Lens	Lente
 	Amount:	Quantidade:
 	Protect:	Proteger:
 	Protect skin tones	Proteger tons de pele
+	Edit points to modify the curve	Editar pontos para modificar a curva
+	Draw to modify the curve	Desenhar para modificar a curva
+curves	Smooth	Suavizar
+	Smooth the curve values	Suavizar os valores da curva
+	Drag to draw the curve · {key}-click draws a straight line	Arraste para desenhar a curva · {key}-clique traça uma linha reta
+	Grid Size:	Tamanho da grade:
+	New Layer	Nova camada
+	Vanishing Point: click four corners to create a plane	Ponto de fuga: clique em quatro cantos para criar um plano
+	Vanishing Point is not active	Ponto de fuga não está ativo
+	Apply Vanishing Point ({key})	Aplicar ponto de fuga ({key})
+	Fix the red plane first: its corners must form a convex quad	Corrija primeiro o plano vermelho: seus cantos devem formar um quadrilátero convexo
 # Select and Mask view modes (#1754)
 	Onion Skin	Papel vegetal
 	Marching Ants	Formigas marchando
@@ -3069,7 +3081,6 @@ layerLabel	No Color	Sem cor
 	Workspaces	Áreas de trabalho
 	Show All	Mostrar tudo
 	Hidden	Oculto
-	New Layer	Nova camada
 	Duplicate Layer	Duplicar camada
 	Ungroup	Desagrupar
 	Lock Transparent Pixels	Bloquear pixels transparentes
@@ -3804,6 +3815,7 @@ layerLabel	No Color	Sem cor
 	(No neutral color exists for {mode} mode.)	(Não existe cor neutra para o modo {mode}.)
 	Apply mask to layer before removing?	Aplicar a máscara à camada antes de removê-la?
 	The layer or its mask changed. Drag the mask onto the Trash again.	A camada ou a máscara mudou. Arraste a máscara para a Lixeira novamente.
+	Delete the vector mask?	Excluir a máscara vetorial?
 
 # Submitted print jobs are managed by the operating system.
 	Manage submitted jobs in the system print queue	Gerencie os trabalhos enviados na fila de impressão do sistema

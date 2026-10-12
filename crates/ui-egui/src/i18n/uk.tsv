@@ -2353,6 +2353,7 @@
 	Show only crosshair while painting	Показувати лише перехрестя під час малювання
 	Show slice numbers	Показувати номери фрагментів
 	Show tooltips	Показувати підказки
+	Enable animations	Увімкнути анімацію
 	Show highlight on rollover	Показувати підсвічування під час наведення
 	Show bounding box when dragging layer	Показувати рамку під час перетягування шару
 	System title bar	Системний рядок заголовка
@@ -3668,6 +3669,16 @@ cameraData	Lens	Об'єктив
 	Amount:	Величина:
 	Protect:	Захистити:
 	Protect skin tones	Захистити тони шкіри
+	Edit points to modify the curve	Змінювати криву за точками
+	Draw to modify the curve	Малювати криву
+curves	Smooth	Згладити
+	Smooth the curve values	Згладити значення кривої
+	Drag to draw the curve · {key}-click draws a straight line	Перетягніть, щоб намалювати криву · {key}-клацання малює пряму лінію
+	Grid Size:	Розмір сітки:
+	Vanishing Point: click four corners to create a plane	Точка сходження: клацніть чотири кути, щоб створити площину
+	Vanishing Point is not active	Точка сходження не активна
+	Apply Vanishing Point ({key})	Застосувати точку сходження ({key})
+	Fix the red plane first: its corners must form a convex quad	Спершу виправте червону площину: її кути мають утворювати опуклий чотирикутник
 # Select and Mask view modes (#1754)
 	Onion Skin	Калька
 	Marching Ants	Мурашки
@@ -3712,6 +3723,7 @@ cameraData	Lens	Об'єктив
 	(No neutral color exists for {mode} mode.)	(Для режиму «{mode}» немає нейтрального кольору.)
 	Apply mask to layer before removing?	Застосувати маску до шару перед видаленням?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Шар або його маска змінилися. Перетягніть маску до кошика ще раз.
+	Delete the vector mask?	Видалити векторну маску?
 
 # Submitted print jobs are managed by the operating system.
 	Manage submitted jobs in the system print queue	Керуйте надісланими завданнями в системній черзі друку

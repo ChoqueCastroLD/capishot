@@ -1950,6 +1950,7 @@
 	Show only crosshair while painting	Beim Malen nur Fadenkreuz zeigen
 	Show slice numbers	Slice-Nummern anzeigen
 	Show tooltips	Tooltips anzeigen
+	Enable animations	Animationen aktivieren
 	Show highlight on rollover	Hervorhebung bei Rollover anzeigen
 	Show bounding box when dragging layer	Begrenzungsrahmen beim Ziehen einer Ebene anzeigen
 	System title bar	System-Titelleiste
@@ -2620,6 +2621,18 @@ cameraData	Lens	Objektiv
 	Amount:	Stärke:
 	Protect:	Schützen:
 	Protect skin tones	Hauttöne schützen
+	Edit points to modify the curve	Punkte bearbeiten, um die Kurve zu ändern
+	Draw to modify the curve	Zeichnen, um die Kurve zu ändern
+curves	Smooth	Glätten
+	Smooth the curve values	Kurvenwerte glätten
+	Drag to draw the curve · {key}-click draws a straight line	Ziehen, um die Kurve zu zeichnen · {key}-Klick zeichnet eine gerade Linie
+	Edit Plane	Ebene bearbeiten
+	Create Plane	Ebene erstellen
+	Grid Size:	Rastergröße:
+	Vanishing Point: click four corners to create a plane	Fluchtpunkt: Klicken Sie auf vier Ecken, um eine Ebene zu erstellen
+	Vanishing Point is not active	Fluchtpunkt ist nicht aktiv
+	Apply Vanishing Point ({key})	Fluchtpunkt anwenden ({key})
+	Fix the red plane first: its corners must form a convex quad	Korrigieren Sie zuerst die rote Ebene: Ihre Ecken müssen ein konvexes Viereck bilden
 # Select and Mask view modes (#1754)
 	Onion Skin	Zwiebelschicht
 	Marching Ants	Laufende Ameisen
@@ -2652,6 +2665,7 @@ cameraData	Lens	Objektiv
 	(No neutral color exists for {mode} mode.)	(Für den Modus {mode} gibt es keine neutrale Farbe.)
 	Apply mask to layer before removing?	Maske vor dem Entfernen auf die Ebene anwenden?
 	The layer or its mask changed. Drag the mask onto the Trash again.	Die Ebene oder ihre Maske hat sich geändert. Ziehen Sie die Maske erneut in den Papierkorb.
+	Delete the vector mask?	Vektormaske löschen?
 
 # Submitted print jobs are managed by the operating system.
 	Manage submitted jobs in the system print queue	Übermittelte Aufträge in der Druckwarteschlange des Systems verwalten
