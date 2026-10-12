@@ -37,6 +37,7 @@ mod camera_raw_detail_ui;
 mod camera_raw_preview_ui;
 mod camera_raw_scope_ui;
 pub mod camera_raw_ui;
+mod capishot_ui;
 pub mod canvas;
 mod canvas_popup;
 pub(crate) mod clone_overlay;

@@ -187,6 +187,36 @@ impl PhotocraftApp {
         })
     }
 
+    /// Ask for several files a command reads (the web's stand-in for a folder): `then` gets each
+    /// one's name (the full path on the desktop) and bytes. A file that can't be read fails the
+    /// whole pick with "<file name>: <why>".
+    pub(crate) fn pick_files_bytes(
+        &mut self,
+        extensions: &[&str],
+        then: impl FnOnce(&mut Self, Vec<(String, Vec<u8>)>) -> Result<Value, String> + 'static,
+    ) -> Result<Value, String> {
+        let initial_dir = last_used_dir(&self.ui.recent_files);
+        let extensions = (!extensions.is_empty()).then(|| extensions.iter().map(|s| (*s).to_string()).collect());
+        self.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions }, move |app, answer| {
+            let files = match answer {
+                FileDialogAnswer::Contents(name, bytes) => vec![(name, bytes)],
+                FileDialogAnswer::ContentsMany(files) => files,
+                FileDialogAnswer::Paths(paths) => paths
+                    .into_iter()
+                    .map(|path| {
+                        let bytes = photocraft_format::read_file(std::path::Path::new(&path)).map_err(|e| format!("{}: {e}", display_name(&path)))?;
+                        Ok((path, bytes))
+                    })
+                    .collect::<Result<_, String>>()?,
+                FileDialogAnswer::SaveTo(_) | FileDialogAnswer::Unavailable(_) => return Err(UNEXPECTED.into()),
+            };
+            if files.is_empty() {
+                return Err(CANCELLED.into());
+            }
+            then(app, files)
+        })
+    }
+
     /// Ask for a folder: `then` gets its path.
     pub(crate) fn pick_folder(&mut self, then: impl FnOnce(&mut Self, String) -> Result<Value, String> + 'static) -> Result<Value, String> {
         self.ask_file(FileDialogRequest::Folder, move |app, answer| match answer {
