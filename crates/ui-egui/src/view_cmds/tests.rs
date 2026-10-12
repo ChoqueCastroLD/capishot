@@ -60,6 +60,34 @@ fn show_snap_extras_and_screen_modes_are_state() {
 }
 
 #[test]
+fn full_screen_and_maximized_never_overlap_on_windows() {
+    use egui::ViewportCommand::{Fullscreen, Maximized};
+    // Maximized → full screen: un-maximize first, and remember it.
+    let (cmds, remember) = screen_mode_commands(true, false, true, false, "fullScreenWithMenuBar");
+    assert_eq!(cmds, vec![Maximized(false), Fullscreen(true)]);
+    assert!(remember);
+    // Full screen → the other full-screen mode: nothing about maximized changes.
+    let (cmds, remember) = screen_mode_commands(true, true, false, true, "fullScreen");
+    assert_eq!(cmds, vec![Fullscreen(true)]);
+    assert!(remember);
+    // Full screen → Standard: maximize again after leaving, then forget.
+    let (cmds, remember) = screen_mode_commands(true, true, false, true, "standard");
+    assert_eq!(cmds, vec![Fullscreen(false), Maximized(true)]);
+    assert!(!remember);
+    // A window that was not maximized goes in and out untouched.
+    let (cmds, remember) = screen_mode_commands(true, false, false, false, "fullScreen");
+    assert_eq!((cmds, remember), (vec![Fullscreen(true)], false));
+    let (cmds, remember) = screen_mode_commands(true, true, false, false, "standard");
+    assert_eq!((cmds, remember), (vec![Fullscreen(false)], false));
+    // Standard while already standard never maximizes.
+    let (cmds, _) = screen_mode_commands(true, false, false, true, "standard");
+    assert_eq!(cmds, vec![Fullscreen(false)]);
+    // Elsewhere the commands are as before.
+    let (cmds, remember) = screen_mode_commands(false, false, true, false, "fullScreen");
+    assert_eq!((cmds, remember), (vec![Fullscreen(true)], false));
+}
+
+#[test]
 fn zoom_presets_and_fit_layers() {
     let (mut app, ctx) = app_with(1);
     menu(&mut app, &ctx, "view.twoHundredPercent", json!({})).unwrap();
