@@ -937,7 +937,7 @@ fn buffer_to_image(buf: &photocraft_compose::Buffer) -> egui::ColorImage {
 
 /// A composite as monitor pixels: document profile → monitor profile (nothing to do in the
 /// common sRGB-on-sRGB case).
-fn display_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>, buf: &photocraft_compose::Buffer) -> egui::ColorImage {
+pub(crate) fn display_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>, buf: &photocraft_compose::Buffer) -> egui::ColorImage {
     match display {
         Some(d) if !d.is_identity() => {
             let img = d.to_rgba8(buf);
@@ -950,7 +950,11 @@ fn display_image(display: Option<&photocraft_engine::display_color::CanvasDispla
 /// The canvas display of `doc` on `display` (`None`: the main window's) and a key that changes
 /// with it (folded into the canvas caches' preview keys, so a monitor or profile change
 /// re-renders).
-fn canvas_display(app: &PhotocraftApp, doc: &Document, display: Option<u32>) -> (Option<std::sync::Arc<photocraft_engine::display_color::CanvasDisplay>>, u64) {
+pub(crate) fn canvas_display(
+    app: &PhotocraftApp,
+    doc: &Document,
+    display: Option<u32>,
+) -> (Option<std::sync::Arc<photocraft_engine::display_color::CanvasDisplay>>, u64) {
     match app.session.color.canvas_display_for(doc, display.or(app.session.color.main_display)) {
         Ok(d) => {
             let k = d.key;

@@ -1,4 +1,5 @@
-//! Filter dialogs generated from engine command parameter specs, with live on-canvas preview.
+//! Filter dialogs generated from engine command parameter specs, with live on-canvas preview and an
+//! in-dialog preview window (#3769).
 //!
 //! The preview runs the *same engine command* on the downsampled proxy document (pixel-sized
 //! parameters scaled by the proxy factor), so what you preview is what you get.
