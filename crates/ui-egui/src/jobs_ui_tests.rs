@@ -584,20 +584,30 @@ fn printing_keeps_drawing_and_reports_only_the_final_spooler_result() {
         let mut h = app_harness();
         let gate = Arc::new(AtomicBool::new(false));
         let worker_gate = gate.clone();
-        let Started::Job(id) = h.state_mut().session.start_job(
-            "file.print",
-            json!({}),
-            "Print",
-            false,
-            move |_| {
-                while !worker_gate.load(Ordering::Relaxed) {
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                if success { Ok(json!({"sent": true, "spooler": "request id is Office-42", "pdf": null})) }
-                else { Err(photocraft_engine::EngineError::Other("queue refused".into())) }
-            },
-            |_, result| Ok(result),
-        ).unwrap() else { panic!("must run on a worker") };
+        let Started::Job(id) = h
+            .state_mut()
+            .session
+            .start_job(
+                "file.print",
+                json!({}),
+                "Print",
+                false,
+                move |_| {
+                    while !worker_gate.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    if success {
+                        Ok(json!({"sent": true, "spooler": "request id is Office-42", "pdf": null}))
+                    } else {
+                        Err(photocraft_engine::EngineError::Other("queue refused".into()))
+                    }
+                },
+                |_, result| Ok(result),
+            )
+            .unwrap()
+        else {
+            panic!("must run on a worker")
+        };
         let frame = h.state().frame;
         h.run_steps(4);
         assert!(h.state().frame > frame);
@@ -607,7 +617,9 @@ fn printing_keeps_drawing_and_reports_only_the_final_spooler_result() {
         assert!(h.state().session.job(id).is_some(), "Esc cannot retract a submitted job");
         gate.store(true, Ordering::Relaxed);
         let deadline = Instant::now() + Duration::from_secs(10);
-        while h.state().session.has_jobs() && Instant::now() < deadline { h.step(); }
+        while h.state().session.has_jobs() && Instant::now() < deadline {
+            h.step();
+        }
         assert!(!h.state().session.has_jobs());
         if success {
             assert!(h.state().ui.status.contains("Office-42"), "{}", h.state().ui.status);
