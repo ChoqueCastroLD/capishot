@@ -317,21 +317,7 @@ impl Headless {
     }
 
     pub fn command_list(&self) -> Value {
-        Value::Array(
-            command_specs()
-                .iter()
-                .map(|c| {
-                    json!({
-                        "id": c.id,
-                        "label": c.label,
-                        "menu": c.menu,
-                        "shortcut": c.shortcut,
-                        "params": c.params,
-                        "enabled": self.session.is_enabled(c.id),
-                    })
-                })
-                .collect(),
-        )
+        Value::Array(command_specs().iter().map(|c| photocraft_engine::commands::list_entry(&self.session, c, self.session.disabled_reason(c.id))).collect())
     }
 
     pub fn command_run(&mut self, id: &str, params: Value) -> Result<Value, AutomationError> {
