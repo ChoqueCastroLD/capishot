@@ -495,6 +495,8 @@ pub struct PhotocraftApp {
     pub(crate) magnetic: magnetic_lasso_ui::Runtime,
     /// The next tool `Down` is a right-button drag that erases (see `paint_mouse`).
     secondary_erase: bool,
+    /// The Brush or Pencil erase key is held this frame (`hold_keys::erase_held`, #3439).
+    held_erase: bool,
     /// While a batch of recovered pointer samples is replayed, defer the live-stroke update to one
     /// call for the whole frame (see `canvas::canvas_view`).
     defer_live_stroke: bool,
@@ -708,6 +710,7 @@ impl PhotocraftApp {
             patch_preview: None,
             magnetic: Default::default(),
             secondary_erase: false,
+            held_erase: false,
             defer_live_stroke: false,
             press_stroke: false,
             last_stroke_end: None,
