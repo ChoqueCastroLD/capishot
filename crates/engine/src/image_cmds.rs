@@ -99,7 +99,9 @@ pub(crate) fn reidentify_copied_layers(doc: &mut Document) {
     }
 }
 
-pub(crate) fn scale_effects(fx: &mut Effects, k: f32) {
+/// Scale every size and distance of a style by `k` (Image Size's Scale Styles, Layer Style ›
+/// Scale Effects, and previews that draw a style at a reduced resolution).
+pub fn scale_effects(fx: &mut Effects, k: f32) {
     for e in &mut fx.items {
         match e {
             Effect::DropShadow(s) | Effect::InnerShadow(s) => {
