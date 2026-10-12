@@ -484,6 +484,9 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.ui.panels.brush_settings = true;
             app.ui.brush_tab = 1;
         }
+        JobOutcome::Done(ref result) if matches!(e.command.as_str(), "file.print" | "file.printOneCopy") => {
+            crate::file_ui::print_status(app, result);
+        }
         JobOutcome::Done(_) => {
             app.sync_views();
             app.ui.status = e.label;
@@ -576,12 +579,13 @@ pub fn status_progress(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let (bar_w, bar_h) = if t.pro { (120.0, 6.0) } else { (140.0, 6.0) };
     let more = app.session.jobs().len().saturating_sub(1);
     // Right to left: ×, percentage, bar, label.
-    let (xr, xresp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+    let print = matches!(j.command.as_str(), "file.print" | "file.printOneCopy");
+    let (xr, xresp) = ui.allocate_exact_size(vec2(18.0, 18.0), if print { Sense::hover() } else { Sense::click() });
     if xresp.hovered() {
         ui.painter().rect_filled(xr, t.radius_sm, t.hover);
     }
     crate::icons::paint(ui, xr, "x", 11.0, if xresp.hovered() { t.text } else { t.text_dim });
-    let xresp = xresp.on_hover_text(tl!("Cancel (Esc)"));
+    let xresp = xresp.on_hover_text(if print { tl!("Manage submitted jobs in the system print queue") } else { tl!("Cancel (Esc)") });
     ui.label(RichText::new(percent(&j)).color(t.text_dim).size(11.5).monospace());
     let (br, _) = ui.allocate_exact_size(vec2(bar_w, bar_h), Sense::hover());
     bar(ui, br, shown_fraction(&j), &t);

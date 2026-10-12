@@ -33,7 +33,7 @@ fn pdf_image(pdf: &[u8]) -> (u32, u32, String, Vec<u8>) {
 }
 
 #[test]
-fn print_dry_run_renders_a_pdf_and_reports_lp() {
+fn print_dry_run_renders_a_pdf_and_reports_the_platform_backend() {
     let dir = tmp("print");
     for depth in [8, 16, 32] {
         let mut s = session("rgb", depth);
@@ -44,7 +44,14 @@ fn print_dry_run_renders_a_pdf_and_reports_lp() {
             )
             .unwrap();
         let cmd: Vec<String> = serde_json::from_value(r["command"].clone()).unwrap();
-        assert_eq!(&cmd[..5], &["lp", "-d", "Office", "-n", "2"]);
+        #[cfg(unix)]
+        {
+            assert_eq!(&cmd[..5], &["lp", "-d", "Office", "-n", "2"]);
+            assert!(cmd.contains(&"fit-to-page=false".into()));
+            assert!(!cmd.contains(&r["pdf"].as_str().unwrap().to_string()), "PDF is streamed, not passed as a file");
+        }
+        #[cfg(windows)]
+        assert!(cmd.last().unwrap().contains("craft-print PDF spooler"));
         assert_eq!(r["sent"], false);
         let pdf = std::fs::read(r["pdf"].as_str().unwrap()).unwrap();
         assert!(pdf.starts_with(b"%PDF-1.4"));
@@ -152,13 +159,17 @@ fn printer_profile_can_be_an_installed_icc_file() {
 #[test]
 fn print_one_copy_repeats_the_last_settings() {
     let mut s = session("rgb", 8);
-    s.execute("file.print", json!({"dryRun": true, "copies": 3, "paper": "a5", "scale": 50})).unwrap();
+    let first = s.execute("file.print", json!({"dryRun": true, "copies": 3, "paper": "a5", "scale": 50})).unwrap();
+    std::fs::remove_file(first["pdf"].as_str().unwrap()).unwrap();
     let r = s.execute("file.printOneCopy", json!({"dryRun": true})).unwrap();
     assert_eq!(r["copies"], 1);
     assert_eq!(r["paper"], json!([419.53, 595.28]));
     assert_eq!(r["scale"], 50.0);
     let cmd: Vec<String> = serde_json::from_value(r["command"].clone()).unwrap();
-    assert!(!cmd.contains(&"-n".to_string()));
+    #[cfg(unix)]
+    assert_eq!(&cmd[..3], &["lp", "-n", "1"]);
+    #[cfg(windows)]
+    assert!(cmd.last().unwrap().contains("craft-print PDF spooler"));
     let _ = std::fs::remove_file(r["pdf"].as_str().unwrap());
 }
 
@@ -223,4 +234,53 @@ fn paths_export_as_illustrator_postscript() {
     let r = s.execute("file.export.pathsToIllustrator", json!({"path": format!("{dir}/p.ai"), "paths": "Shapes"})).unwrap();
     assert_eq!(r["paths"], 1);
     assert!(s.execute("file.export.pathsToIllustrator", json!({"paths": "Nope"})).is_err());
+}
+
+/// Launch the command in a subprocess with a fake CUPS binary: the parent process's PATH and
+/// parallel tests are untouched, and the real spool boundary still consumes the PDF bytes.
+#[cfg(unix)]
+#[test]
+fn spool_transport_streams_pdf_and_propagates_refusal() {
+    const CHILD: &str = "PHOTOCRAFT_TEST_PRINT_TRANSPORT";
+    if let Ok(dir) = std::env::var(CHILD) {
+        let mut s = session("rgb", 8);
+        let crate::jobs::Started::Job(job) = s.start("file.print", json!({"printer": "Office", "copies": 3, "paper": "a4", "scale": 50})).unwrap() else {
+            panic!("desktop printing must start on a worker");
+        };
+        assert!(!s.cancel_job(job), "queue side effects must not be reported as cancelled");
+        let out = s.wait_job(job).unwrap();
+        assert_eq!(out["sent"], true);
+        assert_eq!(out["spooler"], "request id is Office-42");
+        assert!(out["pdf"].is_null(), "spool-only printing leaves no diagnostic PDF");
+        let pdf = std::fs::read(format!("{dir}/received.pdf")).unwrap();
+        assert!(pdf.starts_with(b"%PDF-1.4"));
+        assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 595.28 841.89]"));
+        let args = std::fs::read_to_string(format!("{dir}/args")).unwrap();
+        assert!(args.contains("fit-to-page=false"));
+        assert!(args.contains("-n\n3\n"));
+        assert!(!args.contains(".pdf"));
+        let remembered = s.file_menu.last_print.clone();
+        let explicit = format!("{dir}/saved.pdf");
+        let err = s.execute("file.print", json!({"printer": "Refuse", "output": explicit, "send": true})).unwrap_err();
+        assert!(err.to_string().contains("queue refused"), "{err}");
+        assert!(std::fs::read(&explicit).unwrap().starts_with(b"%PDF-1.4"), "explicit export survives a spool refusal");
+        assert_eq!(s.file_menu.last_print, remembered, "failed printing does not replace repeat settings");
+        return;
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("lp");
+    std::fs::write(
+        &script,
+        b"#!/bin/sh\nif [ \"$2\" = Refuse ]; then echo 'queue refused' >&2; exit 1; fi\nprintf '%s\\n' \"$@\" > \"$PHOTOCRAFT_TEST_PRINT_TRANSPORT/args\"\n/bin/cat > \"$PHOTOCRAFT_TEST_PRINT_TRANSPORT/received.pdf\"\necho 'request id is Office-42 (0 file(s))'\n",
+    ).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "print_cmds::tests::spool_transport_streams_pdf_and_propagates_refusal", "--nocapture"])
+        .env(CHILD, dir.path())
+        .env("PATH", dir.path())
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{}\n{}", String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+    assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"), "child must select the transport test");
 }

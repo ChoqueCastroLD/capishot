@@ -527,6 +527,11 @@ impl Session {
     /// stays unchanged. The document is unlocked at once. False if no such job is running.
     pub fn cancel_job(&mut self, id: JobId) -> bool {
         let Some(i) = self.jobs.running.iter().position(|r| r.id == id) else { return false };
+        // A print worker can already have handed the job to the OS. Discarding its result
+        // would falsely report cancellation; removal belongs to the system print queue.
+        if matches!(self.jobs.running[i].command.as_str(), "file.print" | "file.printOneCopy") {
+            return false;
+        }
         let job = self.jobs.running.remove(i);
         job.ctx.cancel();
         self.end_job(&job, JobOutcome::Cancelled);

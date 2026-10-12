@@ -526,3 +526,21 @@ stroke is drawn above its clipped layers; linked effect patterns tile from the l
 reference point; stroke distances follow a 5 × 5 chamfer metric (1, √2, √5) seeded at sub-pixel
 edge offsets; interior effects keep the layer's alpha; outside strokes blend onto the backdrop with
 their own modes, an upper stroke covering lower ones.
+
+## System printing
+
+`file.print` and `file.printOneCopy` keep PDF layout, scaling, marks and ICC conversion in
+PhotoCraft and submit the rendered bytes through `craft-print` at the Git revision pinned in
+`Cargo.toml`. CUPS streams the PDF on macOS/Linux; Windows uses the shared Windows PDF backend.
+The driver receives exact physical sheet size so it does not scale PhotoCraft's layout twice.
+Windows raster printing does not establish physical-printer colour fidelity; test critical
+photo output with the actual printer and its profile.
+
+Desktop commands run composition and submission on a background worker. The UI reports success
+only when the spooler accepts the job; remove submitted jobs in the system print queue. Headless
+`Session::execute` stays synchronous. The returned `pdf` is `null` for a spool-only job, and
+`command` is a diagnostic preview, not an executable command with a PDF path. Supplying `output`
+keeps a PDF at that path and defaults `send` to false. `dryRun` renders a diagnostic PDF but never
+submits; an implicit diagnostic file is exclusively created with a random name and belongs to
+the caller, who may delete it after inspection. Shared spooler transport files are automatically
+removed on Windows; CUPS needs none.
