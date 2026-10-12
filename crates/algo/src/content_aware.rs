@@ -172,12 +172,12 @@ fn variant(src: Src, deg: f32, scale: f32, mirror: bool, ctl: &photocraft_raster
             }
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         out.img.par_chunks_mut(ow * ch.max(1)).zip(out.ok.par_chunks_mut(ow)).enumerate().for_each(row);
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     out.img.chunks_mut(ow * ch.max(1)).zip(out.ok.chunks_mut(ow)).enumerate().for_each(row);
     ctl.check()?;
     Ok(out)
@@ -266,12 +266,12 @@ pub fn fill_with(
             }
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         mimg.par_chunks_mut(mw * ch.max(1)).zip(roles.par_chunks_mut(mw)).enumerate().for_each(row);
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     mimg.chunks_mut(mw * ch.max(1)).zip(roles.chunks_mut(mw)).enumerate().for_each(row);
     ctl.check()?;
     // The completion is nearly all the work.
@@ -377,12 +377,12 @@ pub fn auto_sampling_with(
         }
         Some((planes, shole, cnt))
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     let rows: Vec<_> = {
         use rayon::prelude::*;
         (0..sh).into_par_iter().map(reduce).collect()
     };
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     let rows: Vec<_> = (0..sh).map(reduce).collect();
     ctl.check()?;
     let mut planes = vec![Vec::with_capacity(sw * sh); nc];

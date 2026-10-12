@@ -239,12 +239,12 @@ fn reduce(surf: &Surface, r: Rect, k: u32) -> Surface {
         }
     };
     let mut data = vec![0.0f32; w * h * n];
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         data.par_chunks_mut(w * n).enumerate().for_each(|(j, out)| row(j, out));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     for (j, out) in data.chunks_mut(w * n).enumerate() {
         row(j, out);
     }

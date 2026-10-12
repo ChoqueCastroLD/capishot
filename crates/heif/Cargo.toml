@@ -10,7 +10,8 @@ rust-version.workspace = true
 # Pure Rust, no unsafe, no C; HEVC output bit-exact against the HM reference decoder. Pinned
 # exactly: a young crate that parses untrusted files, so moving the pin is a reviewed change
 # (re-run the fuzz target and the heif corpus tests). Grid tiles decode in parallel with rayon on
-# native; on wasm rayon's pool falls back to the calling thread.
+# native and in the wasm threads build (`atomics`, packaging/web-threads: the Web Worker pool); in
+# the single-threaded wasm build rayon's pool falls back to the calling thread.
 heic-decoder = "=0.1.0"
 
 [lints]
