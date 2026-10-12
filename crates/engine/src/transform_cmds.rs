@@ -426,10 +426,7 @@ fn with_panel_target(s: &Session, p: &Value) -> Value {
 fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &with_panel_target(s, p);
     let st = s.active().ok_or(EngineError::NoDocument)?;
-    let id = match p.get("layer").and_then(Value::as_u64) {
-        Some(v) => Some(LayerId(v)),
-        None => st.active_layer,
-    };
+    let id = crate::commands::explicit_layer(s, p)?.or(st.active_layer);
     let lone = lone_target(&st.doc, id, p)?;
     let id = match (id, lone.is_some() && crate::channel_cmds::is_channel_target(p)) {
         (_, true) => None,
