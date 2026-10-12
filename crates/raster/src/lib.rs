@@ -81,6 +81,27 @@ impl Tile {
     pub fn bytes_mut(&mut self) -> &mut [u8] {
         &mut self.data
     }
+
+    /// Tile-local half-open bounds `(x0, y0, x1, y1)` of the pixels that differ from the encoded
+    /// pixel `dp` (one pixel of the tile's format), or `None` when every pixel equals it (or `dp`
+    /// is empty).
+    pub fn content_bounds(&self, dp: &[u8]) -> Option<(u16, u16, u16, u16)> {
+        let bpp = dp.len();
+        if bpp == 0 {
+            return None;
+        }
+        let ts = TILE_SIZE as usize;
+        let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+        for (y, row) in self.data.chunks_exact(ts * bpp).enumerate() {
+            let Some(first) = row.chunks_exact(bpp).position(|px| px != dp) else { continue };
+            let last = ts - 1 - row.chunks_exact(bpp).rev().position(|px| px != dp).unwrap_or(0);
+            x0 = x0.min(first);
+            x1 = x1.max(last + 1);
+            y0 = y0.min(y);
+            y1 = y + 1;
+        }
+        (x0 != usize::MAX).then_some((x0 as u16, y0 as u16, x1 as u16, y1 as u16))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -265,7 +286,6 @@ impl Surface {
 
     /// Exact bounds of pixels that differ from the default pixel.
     pub fn content_bounds(&self) -> Rect {
-        let bpp = self.format.bytes_per_pixel();
         if self.tiles.is_empty() {
             return Rect::EMPTY;
         }
@@ -278,25 +298,14 @@ impl Surface {
         }
         let mut order: Vec<(&TileCoord, &Arc<Tile>)> = self.tiles.iter().collect();
         order.sort_by_key(|(c, _)| (c.tx - gx0).min(gx1 - c.tx).min(c.ty - gy0).min(gy1 - c.ty));
-        let dp = &*self.default_pixel;
-        let ts = TILE_SIZE as usize;
         let mut out = Rect::EMPTY;
         for (c, t) in order {
             let origin = c.rect();
             if !out.is_empty() && out.contains_rect(&origin) {
                 continue;
             }
-            let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0usize, 0usize);
-            for (y, row) in t.data.chunks_exact(ts * bpp).enumerate() {
-                let Some(first) = row.chunks_exact(bpp).position(|px| px != dp) else { continue };
-                let last = ts - 1 - row.chunks_exact(bpp).rev().position(|px| px != dp).unwrap_or(0);
-                x0 = x0.min(first);
-                x1 = x1.max(last + 1);
-                y0 = y0.min(y);
-                y1 = y + 1;
-            }
-            if x0 != usize::MAX {
-                out = out.union(&Rect::new(x0 as i32, y0 as i32, x1 as i32, y1 as i32).translate(origin.x0, origin.y0));
+            if let Some((x0, y0, x1, y1)) = t.content_bounds(&self.default_pixel) {
+                out = out.union(&Rect::new(x0.into(), y0.into(), x1.into(), y1.into()).translate(origin.x0, origin.y0));
             }
         }
         out
@@ -1244,6 +1253,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn tile_content_bounds_scans_against_the_given_pixel() {
+        let mut s = Surface::new(PixelFormat::GRAY8);
+        s.write_pixel(3, 4, &[1.0]);
+        s.write_pixel(200, 9, &[1.0]);
+        let t = s.tile(TileCoord::new(0, 0)).expect("written tile");
+        assert_eq!(t.content_bounds(&[0]), Some((3, 4, 201, 10)));
+        assert_eq!(t.content_bounds(&[255]).map(|b| (b.0, b.1)), Some((0, 0)));
+        // A malformed pixel is no content, not a panic.
+        assert_eq!(t.content_bounds(&[]), None);
     }
 
     #[test]
