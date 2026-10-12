@@ -14,7 +14,7 @@
 //!   the page-only `blendIfChannel`; `channelNames`: the document's colour channels.
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, vec2};
-use photocraft_doc::effects::{FxPaint, StrokePosition};
+use photocraft_doc::effects::{FxPaint, GlowSource, StrokePosition};
 use photocraft_doc::{Effect, Layer};
 use serde_json::{Map, Value, json};
 
@@ -247,6 +247,9 @@ fn values_of(e: &Effect, light: f32) -> Value {
             set(&mut v, "contour", photocraft_engine::layer_style::contour_param(&g.contour));
             set(&mut v, "antiAlias", json!(g.anti_alias));
             set(&mut v, "noise", json!((g.noise * 100.0).round()));
+            if matches!(e, Effect::InnerGlow(_)) {
+                set(&mut v, "source", json!(if g.source == GlowSource::Center { "center" } else { "edge" }));
+            }
         }
         Effect::Stroke(s) => {
             set(&mut v, "blend", json!(s.common.blend.label()));
@@ -1728,6 +1731,30 @@ mod tests {
         assert_eq!(fx[0]["params"]["spread"], json!(6.0));
         assert_eq!(fx[0]["params"]["range"], json!(40.0));
         assert_eq!(fx[1]["params"]["spread"], json!(12.0));
+    }
+
+    /// OK with no edits used to turn a Center-source Inner Glow into an Edge one: the dialog never
+    /// loaded the source, so it showed the default and applied it.
+    #[test]
+    fn inner_glow_center_source_survives_ok() {
+        let mut s = session();
+        s.execute("layer.layerStyle.innerGlow", json!({"source": "center"})).unwrap();
+        let source = |s: &photocraft_engine::Session| {
+            let d = s.active().unwrap();
+            let id = d.active_layer.unwrap();
+            d.doc.layer(id).unwrap().effects.items.iter().find_map(|e| match e {
+                Effect::InnerGlow(g) => Some(g.source),
+                _ => None,
+            })
+        };
+        assert_eq!(source(&s), Some(GlowSource::Center));
+        let st = s.active().unwrap();
+        let id = st.active_layer.unwrap();
+        let f = initial_fields(st.doc.layer(id).unwrap(), None, st.doc.global_light.angle);
+        let glow = effects_of(&f).iter().find(|e| e["kind"] == json!("innerGlow")).unwrap();
+        assert_eq!(glow["params"]["source"], json!("center"), "the dialog shows the effect's source");
+        apply(&f, |cmd, p| s.execute(cmd, p).map_err(|e| e.to_string())).unwrap();
+        assert_eq!(source(&s), Some(GlowSource::Center), "OK keeps the source");
     }
 
     #[test]
