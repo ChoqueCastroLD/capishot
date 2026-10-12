@@ -478,10 +478,10 @@ pub fn content_aware_plan(doc: &Document, id: LayerId, p: &Value, cmd: &str) -> 
     });
     let er = reach.inflate(grow.saturating_add(1)).intersect(&canvas);
     let (ew, eh) = crate::fill_cmds::window_size(er)?;
-    let mut ecover = vec![0.0f32; ew * eh];
-    for (i, c) in ecover.iter_mut().enumerate() {
-        *c = sel.sample_channel(er.x0 + (i % ew) as i32, er.y0 + (i / ew) as i32, 0);
-    }
+    // The selection's first channel in one region read, not a lookup per pixel.
+    let sc = sel.channels().max(1);
+    let mut ecover: Vec<f32> = sel.read_region(er).chunks_exact(sc).map(|p| p[0]).collect();
+    ecover.resize(ew * eh, 0.0);
     let mut ehole: Vec<bool> = ecover.iter().map(|c| *c > 0.0).collect();
     for e in &edits {
         match e {
@@ -590,18 +590,19 @@ pub fn content_aware_plan(doc: &Document, id: LayerId, p: &Value, cmd: &str) -> 
                 base[(oy + y) * w + ox..(oy + y) * w + ox + ww].copy_from_slice(&area[y * ww..(y + 1) * ww]);
             }
         }
-        _ => {
-            for y in 0..h {
-                for x in 0..w {
-                    let (dx, dy) = (rect.x0 + x as i32, rect.y0 + y as i32);
-                    base[y * w + x] = match (custom_rect, custom_mask) {
-                        (Some(r), _) => r.contains(dx, dy),
-                        (None, Some(m)) => m.sample_channel(dx, dy, 0) > 0.5,
-                        _ => false,
-                    };
+        _ => match (custom_rect, custom_mask) {
+            (Some(r), _) => {
+                for (i, b) in base.iter_mut().enumerate() {
+                    *b = r.contains(rect.x0 + (i % w) as i32, rect.y0 + (i / w) as i32);
                 }
             }
-        }
+            // The mask's first channel in one region read.
+            (None, Some(m)) => {
+                let mc = m.channels().max(1);
+                base.iter_mut().zip(m.read_region(rect).chunks_exact(mc)).for_each(|(b, p)| *b = p[0] > 0.5);
+            }
+            _ => {}
+        },
     }
     base.iter_mut().zip(&hole).for_each(|(b, h)| *b &= !*h);
     let mut source = base.clone();
@@ -787,7 +788,13 @@ fn content_aware_scale(s: &mut Session, p: &Value) -> Result<Value> {
         move |s, out| {
             s.edit(label, |doc, _| {
                 let surf = writable_surface(doc, id)?;
-                crate::pixels::try_clear_surface(surf, region, None)?;
+                // Clear what the result doesn't cover (the result overwrites the rest): the strip
+                // right of it and the one below it.
+                let right = Rect::new(dst.x1, region.y0, region.x1, region.y1);
+                let below = Rect::new(region.x0, dst.y1, dst.x1.min(region.x1), region.y1);
+                for strip in [right, below].into_iter().filter(|r| !r.is_empty()) {
+                    crate::pixels::try_clear_surface(surf, strip, None)?;
+                }
                 surf.write_region(dst, &out);
                 surf.prune();
                 Ok(())

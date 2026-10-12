@@ -43,6 +43,9 @@ pub struct Graph {
     flow: f64,
 }
 
+/// Solver steps between two asks of a [`Graph::maxflow_until`] stop callback.
+pub(super) const STOP_EVERY: usize = 1024;
+
 impl Graph {
     /// A graph with `nodes` nodes and room for `edges` undirected edge pairs.
     pub fn with_capacity(nodes: usize, edges: usize) -> Self {
@@ -110,24 +113,36 @@ impl Graph {
 
     /// Computes the maximum flow (= minimum cut capacity).
     pub fn maxflow(&mut self) -> f64 {
+        self.maxflow_until(&|| false).unwrap_or(self.flow)
+    }
+
+    /// [`Graph::maxflow`] that gives up, returning `None` with the graph left mid-solve, once
+    /// `stop` says so (asked every [`STOP_EVERY`] steps). Until then it does exactly the same
+    /// work, so a finished solve gives the same flow and cut.
+    pub fn maxflow_until(&mut self, stop: &dyn Fn() -> bool) -> Option<f64> {
         if self.node_count() >= 4096 {
             let mut source = false;
             let mut sink = false;
             for &capacity in &self.tr_cap {
                 if !capacity.is_finite() {
-                    return self.maxflow_bk();
+                    return self.bk(stop);
                 }
                 source |= capacity > EPS;
                 sink |= capacity < -EPS;
             }
             if source && sink && self.r_cap.iter().all(|v| v.is_finite() && *v >= 0.0) {
-                return self.maxflow_push_relabel();
+                return self.push_relabel(stop);
             }
         }
-        self.maxflow_bk()
+        self.bk(stop)
     }
 
     pub(super) fn maxflow_bk(&mut self) -> f64 {
+        self.bk(&|| false).unwrap_or(self.flow)
+    }
+
+    /// Boykov–Kolmogorov augmenting paths; `None` if `stop` ended it early.
+    fn bk(&mut self, stop: &dyn Fn() -> bool) -> Option<f64> {
         let n = self.node_count();
         let mut queue: VecDeque<u32> = VecDeque::new();
         let mut orphans: VecDeque<u32> = VecDeque::new();
@@ -145,7 +160,12 @@ impl Graph {
             }
         }
         let mut time = 0u32;
+        let mut steps = 0usize;
         while let Some(i) = queue.pop_front() {
+            steps += 1;
+            if steps.is_multiple_of(STOP_EVERY) && stop() {
+                return None;
+            }
             let i = i as usize;
             self.active[i] = false;
             if self.parent[i] == NONE {
@@ -197,7 +217,7 @@ impl Graph {
                 self.adopt(o as usize, time, &mut queue, &mut orphans);
             }
         }
-        self.flow
+        Some(self.flow)
     }
 
     fn augment(&mut self, m: usize, orphans: &mut VecDeque<u32>) {

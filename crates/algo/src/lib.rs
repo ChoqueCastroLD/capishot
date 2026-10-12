@@ -1158,7 +1158,7 @@ fn apply_box_blur(
     let read = |r: Rect, buf: &mut Vec<f32>| surface.read_region_into(r, buf);
     // Per output column: the horizontal results for every source row, plus the final samples.
     let column_bytes = (src.height() as usize + area.height() as usize) * n * std::mem::size_of::<f32>();
-    let band = i32::try_from(RESULT_BUDGET / column_bytes.max(1)).unwrap_or(i32::MAX).max(blur::STRIP) / blur::STRIP * blur::STRIP;
+    let band = band_width(column_bytes);
     let bands: Vec<Rect> = (area.x0..area.x1).step_by(band as usize).map(|x| Rect::new(x, area.y0, x.saturating_add(band).min(area.x1), area.y1)).collect();
     for (i, b) in bands.iter().enumerate() {
         let strips = blur::box_blur(src, &read, *b, n, fmt.alpha, boxes, ctl)?;
@@ -1221,6 +1221,17 @@ fn mix_selection(data: &mut [f32], t: Rect, sel: &Surface, orig: &Image) {
 /// Bytes of float filter results held at once by [`apply_tiled`].
 const RESULT_BUDGET: usize = 256 << 20;
 
+/// Column bands of [`apply_box_blur`] are a multiple of this many pixels. The horizontal running
+/// sums start at a band's left edge, so the band edges are part of the result: keep them where
+/// they have always been (multiples of 64, the original strip width) whatever the strip width.
+const BAND_ALIGN: i32 = 64;
+const _: () = assert!(BAND_ALIGN % blur::STRIP == 0);
+
+/// Width of [`apply_box_blur`]'s column bands for columns of `column_bytes` working bytes.
+fn band_width(column_bytes: usize) -> i32 {
+    i32::try_from(RESULT_BUDGET / column_bytes.max(1)).unwrap_or(i32::MAX).max(BAND_ALIGN) / BAND_ALIGN * BAND_ALIGN
+}
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -1228,6 +1239,9 @@ mod tests_ext;
 
 #[cfg(test)]
 mod tests_mosaic;
+
+#[cfg(test)]
+mod tests_blur_pinned;
 
 /// The current upstream sampler through the identical source/selection/tile pipeline.
 #[cfg(test)]
