@@ -395,6 +395,14 @@ impl EngineStroke {
             Self::Dab(s) => s.push(pts),
         }
     }
+    /// Brings a throttled tail preview up to date (see `LiveStroke::finalize_tail`) before the
+    /// stroke is shown; the retouch strokes have no tail.
+    fn finalize(&mut self) -> photocraft_engine::Result<DRect> {
+        match self {
+            Self::Brush(s) => s.finalize_tail(),
+            Self::Retouch(_) | Self::Dab(_) => Ok(DRect::EMPTY),
+        }
+    }
     /// The jitter seed the commit must reuse (the Clone Stamp's comes from the session brush).
     fn seed(&self) -> Option<u64> {
         match self {
@@ -1003,6 +1011,16 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
         return shown;
     }
     crate::transform_tool::follow_edits(app);
+    // The brush throttles its tail preview between pointer moves; the frame shows it complete.
+    if live_stroke(app, idx).is_some()
+        && let Some(l) = app.live_stroke.as_mut()
+    {
+        match l.stroke.finalize() {
+            Ok(r) if !r.is_empty() => l.damage.push(r),
+            Ok(_) => {}
+            Err(_) => app.live_stroke = None,
+        }
+    }
     let st = &app.session.documents()[idx];
     if let Some(l) = live_stroke(app, idx) {
         return (l.stroke.doc().clone(), l.display_key());
