@@ -566,6 +566,35 @@ fn set_visible(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     Ok(Value::Null)
 }
 
+/// Layer › Hide Layers (⌘,): hide the targeted layers, or show them when every one is already
+/// hidden, as Photoshop's item does (it reads Show Layers then), so ⌘, toggles.
+fn hide_or_show(s: &mut Session, p: &Value) -> Result<Value> {
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let targets = if crate::layer_multi_cmds::multi(s, p) { crate::layer_multi_cmds::selected(s) } else { vec![layer_param(s, p)?] };
+    let all_hidden = targets.iter().all(|id| st.doc.layer(*id).is_some_and(|l| !l.visible));
+    set_visible(s, p, all_hidden)
+}
+
+/// `/`: Lock Transparent Pixels on or off for the targeted layers, as the Layers panel's first lock
+/// button does. With several layers targeted, any unlocked one means lock them all. The
+/// Background, which can't take this lock, is left out.
+fn toggle_lock_transparency(s: &mut Session, p: &Value) -> Result<Value> {
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let targets: Vec<LayerId> = if crate::layer_multi_cmds::multi(s, p) { crate::layer_multi_cmds::selected(s) } else { vec![layer_param(s, p)?] };
+    let targets: Vec<LayerId> = targets.into_iter().filter(|id| st.doc.layer(*id).is_some_and(|l| !st.doc.is_background(l.id))).collect();
+    if targets.is_empty() {
+        return Err(EngineError::Other("the Background layer can't lock transparent pixels".into()));
+    }
+    let lock = !targets.iter().all(|id| st.doc.layer(*id).is_some_and(|l| l.locks.transparency));
+    s.edit(if lock { "Lock Transparent Pixels" } else { "Unlock Transparent Pixels" }, |doc, _| {
+        for id in &targets {
+            doc.layer_mut(*id).ok_or(EngineError::NoLayer(*id))?.locks.transparency = lock;
+        }
+        Ok(())
+    })?;
+    Ok(json!({"locked": lock}))
+}
+
 /// Is the layer at `path` shown alone: it and its enclosing groups visible, every layer outside
 /// it hidden (the layers inside a group keep their own visibility)?
 fn shown_alone(doc: &Document, path: &[usize]) -> bool {
@@ -916,8 +945,25 @@ pub fn specs() -> Vec<CommandSpec> {
             },
             ungroup
         ),
-        spec!("layer.hideLayers", "Hide Layers", &["Layer"], Some("Cmd+,"), r##"{"layer":id?}"##, has_layer, |s, p| set_visible(s, p, false)),
+        spec!(
+            "layer.hideLayers",
+            "Hide Layers",
+            &["Layer"],
+            Some("Cmd+,"),
+            r##"{"layer":id?} (shows them instead when every targeted layer is already hidden, so ⌘, toggles)"##,
+            has_layer,
+            hide_or_show
+        ),
         spec!("layer.showLayers", "Show Layers", &[], None, r##"{"layer":id?}"##, has_layer, |s, p| set_visible(s, p, true)),
+        spec!(
+            "layer.toggleLockTransparency",
+            "Lock Transparent Pixels",
+            &[],
+            Some("/"),
+            r##"{"layer":id?} (toggles; several layers selected: locks them all unless every one is locked)"##,
+            has_layer,
+            toggle_lock_transparency
+        ),
         spec!(
             "layer.showOnly",
             "Show Only This Layer",
@@ -1494,6 +1540,48 @@ mod tests {
         let l = doc(&s).layer(top).unwrap();
         assert!(l.mask.is_some() && l.name != "Layer 0" && l.locks.position);
         assert_eq!(doc(&s).layers[0].name, "Background");
+    }
+
+    #[test]
+    fn hide_layers_toggles_once_every_target_is_hidden() {
+        let mut s = session(8);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        let b = active(&s).id;
+        let visible = |s: &Session| doc(s).layer(b).unwrap().visible;
+        // Select › All Layers leaves out the Background, as in Photoshop.
+        let all = |s: &Session| crate::layer_multi_cmds::selected(s).iter().map(|id| doc(s).layer(*id).unwrap().visible).collect::<Vec<_>>();
+        s.execute("layer.hideLayers", json!({})).unwrap();
+        assert!(!visible(&s));
+        s.execute("layer.hideLayers", json!({})).unwrap();
+        assert!(visible(&s), "⌘, again shows it");
+        // Several selected: any one still shown means hide them all; then they all come back.
+        s.execute("layer.hideLayers", json!({"layer": b.0})).unwrap();
+        s.execute("select.allLayers", json!({})).unwrap();
+        assert!(all(&s).len() > 1);
+        s.execute("layer.hideLayers", json!({})).unwrap();
+        assert!(all(&s).iter().all(|v| !v));
+        s.execute("layer.hideLayers", json!({})).unwrap();
+        assert!(all(&s).iter().all(|v| *v));
+    }
+
+    #[test]
+    fn slash_toggles_lock_transparent_pixels_but_not_on_the_background() {
+        let mut s = session(8);
+        let bg = doc(&s).layers[0].id;
+        assert!(doc(&s).is_background(bg));
+        s.execute("layer.new.layer", json!({})).unwrap();
+        let top = active(&s).id;
+        let locked = |s: &Session, id: LayerId| doc(s).layer(id).unwrap().locks.transparency;
+        assert_eq!(s.execute("layer.toggleLockTransparency", json!({})).unwrap()["locked"], true);
+        assert!(locked(&s, top));
+        s.execute("layer.toggleLockTransparency", json!({})).unwrap();
+        assert!(!locked(&s, top));
+        s.undo();
+        assert!(locked(&s, top), "one undoable step each");
+        let bg_locks = doc(&s).layer(bg).unwrap().locks;
+        assert!(s.execute("layer.toggleLockTransparency", json!({"layer": bg.0})).is_err());
+        assert_eq!(doc(&s).layer(bg).unwrap().locks, bg_locks, "the Background is left alone");
+        assert!(s.execute("layer.toggleLockTransparency", json!({"layer": 999_999})).is_err());
     }
 
     #[test]
