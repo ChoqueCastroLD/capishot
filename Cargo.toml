@@ -113,3 +113,7 @@ opt-level = 3
 opt-level = 3
 [profile.wasm-release.package.photocraft-paint]
 opt-level = 3
+
+# Size-focused command orchestration in the browser; pixel kernels keep their overrides above.
+[profile.wasm-release.package.photocraft-engine]
+opt-level = "z"
