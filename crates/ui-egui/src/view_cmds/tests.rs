@@ -292,6 +292,32 @@ fn lookup_export_dialog_uses_the_current_adjustment_selection() {
     assert!(direct["cube"].as_str().unwrap().contains("LUT_3D_SIZE 3"));
 }
 
+/// Float in Window takes the document and the screen position a dragged-off tab was dropped at
+/// (#3733); bad params are errors, not panics.
+#[test]
+fn float_in_window_takes_a_document_and_position() {
+    let (mut app, ctx) = app_with(3);
+    let r = menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 1, "position": [1950.0, 40.5]})).unwrap();
+    let w = app.ui.windows.last().unwrap();
+    assert_eq!(r, json!({"window": w.id}));
+    assert_eq!((w.document, w.position), (1, Some([1950.0, 40.5])));
+    assert_eq!(app.session.active_index(), Some(1));
+    menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({})).unwrap();
+    assert_eq!(app.ui.windows.last().map(|w| (w.document, w.position)), Some((1, None)), "defaults: the active document, placed by the OS");
+    for bad in [
+        json!({"document": 3}),
+        json!({"document": -1}),
+        json!({"document": "b"}),
+        json!({"position": [1.0]}),
+        json!({"position": [1.0, "x"]}),
+        json!({"position": [1.0e30, 0.0]}),
+        json!({"position": 5}),
+    ] {
+        assert!(menu(&mut app, &ctx, "window.arrange.floatInWindow", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(app.ui.windows.len(), 2, "rejected params open no window");
+}
+
 #[test]
 fn save_selection_opens_its_dialog_and_saves_on_confirm() {
     // #3713: Select › Save Selection… asks for the channel, name and operation first.

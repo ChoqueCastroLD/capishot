@@ -1762,6 +1762,7 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     let mut close = None;
     let mut tab_action = None;
     let mut tab_move = None;
+    let mut tear_off = None;
     let (mut focus_open, mut cancel_open) = (None, None);
     let focused_open = app.jobs.focus.is_some();
     // Layers dragged over a tab show its document (`layer_transfer`).
@@ -1851,18 +1852,10 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
             } else if resp.clicked() {
                 activate = Some(i);
             }
-            // Drag a tab sideways to reorder it (#217); a line shows where it will land.
-            if resp.dragged()
-                && let Some(p) = resp.interact_pointer_pos()
-            {
-                tab_drop_line(ui, &placed, p.x, &t);
-            }
-            if resp.drag_stopped() {
-                let x = resp.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.interact_pos())).map_or(r.center().x, |p| p.x);
-                let to = tab_move_target(i, tab_drop_index(&placed, x));
-                if to != i {
-                    tab_move = Some((i, to));
-                }
+            match tab_drag(ui, &resp, i, r, row, &placed, &t) {
+                Some(TabDrop::Move(to)) => tab_move = Some((i, to)),
+                Some(TabDrop::Float(at)) => tear_off = Some((i, at)),
+                None => {}
             }
             let has_path = st.path.is_some();
             resp.context_menu(|ui| {
@@ -1925,6 +1918,7 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         app.ui.status = e;
         app.ui.status_error = true;
     }
+    float_torn_off(app, ui.ctx(), tear_off);
     if let Some((id, params)) = tab_action
         && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, params)
     {
@@ -1968,6 +1962,70 @@ fn tab_context_menu(ui: &mut egui::Ui, index: usize, count: usize, has_path: boo
 
 /// Where a tab dragged to `x` would land: before the first shown tab whose middle is right of
 /// `x`, else after the last shown tab (its document index + 1), like [`TabStrip::slot`].
+/// How far (points) above or below the tab strip a dragged tab must be to tear off (#3733).
+const TEAR_OFF: f32 = 24.0;
+
+/// Whether a tab dragged to `p` has left the strip and floats into its own window, as in
+/// Photoshop; sideways drags along the strip still reorder (#217).
+fn torn_off(strip: Rect, p: egui::Pos2) -> bool {
+    p.y > strip.bottom() + TEAR_OFF || p.y < strip.top() - TEAR_OFF
+}
+
+/// What a finished document-tab drag asks for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TabDrop {
+    /// Reorder the tab to this index.
+    Move(usize),
+    /// Float the document in its own OS window at this screen position (points), when known.
+    Float(Option<[f32; 2]>),
+}
+
+/// Drag a document tab: along the strip it reorders (a line shows where it will land); off the
+/// strip it tears off into a floating window that can go anywhere, other screens included
+/// (an outline under the pointer shows it). Returns the drop once the drag ends.
+fn tab_drag(ui: &egui::Ui, resp: &egui::Response, i: usize, r: Rect, strip: Rect, placed: &[(usize, Rect)], t: &crate::theme::Tokens) -> Option<TabDrop> {
+    if resp.dragged()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        if torn_off(strip, p) {
+            let ghost = Rect::from_min_size(p - egui::vec2(40.0, 12.0), egui::vec2(240.0, 160.0));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, ui.id().with("tab-tear-off")));
+            painter.rect_filled(ghost, t.radius_sm, t.accent.gamma_multiply(0.12));
+            painter.rect_stroke(ghost, t.radius_sm, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+        } else {
+            tab_drop_line(ui, placed, p.x, t);
+        }
+    }
+    if !resp.drag_stopped() {
+        return None;
+    }
+    let p = resp.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.interact_pos()));
+    if let Some(p) = p.filter(|&p| torn_off(strip, p)) {
+        // The pointer is in this window's points; the OS wants screen coordinates. Keep the new
+        // window's title bar under the pointer, as the ghost showed.
+        let at = ui.ctx().input(|i| i.viewport().inner_rect).map(|inner| {
+            let s = inner.min + p.to_vec2() - egui::vec2(40.0, 12.0);
+            [s.x, s.y]
+        });
+        return Some(TabDrop::Float(at));
+    }
+    let to = tab_move_target(i, tab_drop_index(placed, p.map_or(r.center().x, |p| p.x)));
+    (to != i).then_some(TabDrop::Move(to))
+}
+
+/// Float a torn-off tab's document in its own window (`window.arrange.floatInWindow`).
+fn float_torn_off(app: &mut PhotocraftApp, ctx: &egui::Context, tear_off: Option<(usize, Option<[f32; 2]>)>) {
+    let Some((doc, at)) = tear_off else { return };
+    let params = match at {
+        Some(at) => json!({"document": doc, "position": at}),
+        None => json!({"document": doc}),
+    };
+    if let Err(e) = crate::menus::invoke(app, ctx, "window.arrange.floatInWindow", params) {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
 fn tab_drop_index(placed: &[(usize, Rect)], x: f32) -> usize {
     match placed.iter().find(|(_, r)| r.center().x >= x) {
         Some(&(i, _)) => i,
@@ -2051,6 +2109,7 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     let (mut activate, mut close) = (None, None);
     let mut tab_action = None;
     let mut tab_move = None;
+    let mut tear_off = None;
     let tab_count = app.session.documents().len();
     let dragging = crate::layer_transfer::pointer_if_armed(app, ui.ctx());
     let mut drag_over = None;
@@ -2111,18 +2170,10 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         } else if resp.clicked() {
             activate = Some(i);
         }
-        // Drag a tab sideways to reorder it (#217); a line shows where it will land.
-        if resp.dragged()
-            && let Some(p) = resp.interact_pointer_pos()
-        {
-            tab_drop_line(ui, &placed, p.x, &t);
-        }
-        if resp.drag_stopped() {
-            let x = resp.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.interact_pos())).map_or(r.center().x, |p| p.x);
-            let to = tab_move_target(i, tab_drop_index(&placed, x));
-            if to != i {
-                tab_move = Some((i, to));
-            }
+        match tab_drag(ui, &resp, i, r, strip, &placed, &t) {
+            Some(TabDrop::Move(to)) => tab_move = Some((i, to)),
+            Some(TabDrop::Float(at)) => tear_off = Some((i, at)),
+            None => {}
         }
         let has_path = app.session.documents().get(i).is_some_and(|d| d.path.is_some());
         resp.context_menu(|ui| {
@@ -2179,6 +2230,7 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         app.ui.status = e;
         app.ui.status_error = true;
     }
+    float_torn_off(app, ui.ctx(), tear_off);
     if let Some((id, params)) = tab_action
         && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, params)
     {
@@ -5047,7 +5099,10 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let Some(st) = app.session.documents().get(w.document) else { continue };
         let title = format!("{} — window {}", st.doc.name, w.id);
         let vid = egui::ViewportId::from_hash_of(("docwin", w.id));
-        let builder = egui::ViewportBuilder::default().with_title(title).with_inner_size([800.0, 600.0]);
+        let mut builder = egui::ViewportBuilder::default().with_title(title).with_inner_size([800.0, 600.0]);
+        if let Some([x, y]) = w.position {
+            builder = builder.with_position([x, y]);
+        }
         let mut view = w.view.clone();
         let mut close = false;
         ctx.show_viewport_immediate(vid, builder, |ui, _class| {
@@ -5701,6 +5756,49 @@ mod tests {
             h.run_steps(2);
             let names: Vec<String> = h.state().0.session.documents().iter().map(|d| d.doc.name.clone()).collect();
             assert_eq!(names, ["b", "a", "c"], "{kind:?}: the dragged tab took the dropped slot");
+        }
+    }
+
+    /// Dragging a tab off the strip floats its document in its own OS window instead of
+    /// reordering (#3733), in both strips; a short wobble below the strip still reorders.
+    #[test]
+    fn dragging_a_tab_off_the_strip_floats_it_in_a_window() {
+        use egui_kittest::kittest::Queryable;
+        let strip = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(700.0, 26.0));
+        assert!(!torn_off(strip, egui::pos2(50.0, 13.0)));
+        assert!(!torn_off(strip, egui::pos2(50.0, 26.0 + TEAR_OFF - 1.0)), "a wobble below the strip still reorders");
+        assert!(torn_off(strip, egui::pos2(50.0, 26.0 + TEAR_OFF + 1.0)));
+        assert!(torn_off(strip, egui::pos2(50.0, -TEAR_OFF - 1.0)), "dragged up, off the window's top");
+        for kind in [crate::theme::ThemeKind::Studio, crate::theme::ThemeKind::Pro] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            for name in ["a", "b", "c"] {
+                app.run("file.new", json!({"width": 8, "height": 8, "name": name})).unwrap();
+            }
+            app.sync_views();
+            let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(700.0, 300.0)).build_ui_state(
+                |ui, (app, ready): &mut (PhotocraftApp, bool)| {
+                    if *ready {
+                        tabs(app, ui);
+                    }
+                },
+                (app, false),
+            );
+            PhotocraftApp::setup_context(&h.ctx, kind);
+            h.state_mut().1 = true;
+            h.run_steps(2);
+            let b = h.get_by_label_contains("b").rect();
+            let target = egui::pos2(b.center().x, b.bottom() + 150.0);
+            h.drag_at(b.center());
+            h.run_steps(1);
+            h.hover_at(target);
+            h.run_steps(1);
+            h.drop_at(target);
+            h.run_steps(2);
+            let app = &h.state().0;
+            let names: Vec<&str> = app.session.documents().iter().map(|d| d.doc.name.as_str()).collect();
+            assert_eq!(names, ["a", "b", "c"], "{kind:?}: tearing off doesn't reorder");
+            assert_eq!(app.ui.windows.iter().map(|w| w.document).collect::<Vec<_>>(), [1], "{kind:?}: b floats in its own window");
+            assert_eq!(app.session.active_index(), Some(1), "{kind:?}: the floated document is active");
         }
     }
 
