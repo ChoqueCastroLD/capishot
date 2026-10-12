@@ -1371,7 +1371,16 @@ mod multi_layer_formatting {
         for i in 0..2 {
             let mut expected = before[i].clone();
             expected.font_family = "JetBrains Mono".into();
-            expected.postscript_name = None;
+            // #3556: the new family's installed face at the peer's weight and italic is named (no
+            // name without such a face), so a PSD names a real font.
+            expected.postscript_name = photocraft_text::shared()
+                .lock()
+                .unwrap()
+                .fonts
+                .faces("JetBrains Mono")
+                .into_iter()
+                .find(|f| f.italic == expected.italic && f.weight.round() as u16 == expected.weight)
+                .and_then(|f| f.postscript_name);
             assert_eq!(style(h.state(), ids[i], 0), expected, "family changes preserve each peer's face and metrics");
         }
         assert_eq!(style(h.state(), ids[2], 0), before[2]);
