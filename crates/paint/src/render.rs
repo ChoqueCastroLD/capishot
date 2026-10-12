@@ -649,6 +649,12 @@ impl StrokeRenderer {
         self.generator.wants_time()
     }
 
+    /// The string between the brush and the pointer while smoothing lags (see
+    /// [`Smoother::string`](crate::dynamics::Smoother::string)).
+    pub fn smoothing_string(&self) -> Option<([f64; 2], [f64; 2])> {
+        self.generator.smoothing_string()
+    }
+
     /// Feed input points (any chunking gives the same result).
     pub fn push(&mut self, pts: &[StrokePoint]) {
         self.generator.push(pts, &mut self.dab_buf, &mut self.dual_buf);

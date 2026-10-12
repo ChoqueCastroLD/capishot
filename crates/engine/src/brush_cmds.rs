@@ -536,6 +536,12 @@ impl LiveStroke {
         self.mirrors.iter().zip(&self.mirror_distinct).filter(|(_, distinct)| **distinct).fold(bounds, |b, (r, _)| b.union(&r.bounds()))
     }
 
+    /// `(brush, pointer)` document positions while smoothing holds the brush back from the
+    /// pointer: the canvas draws a line between them.
+    pub fn smoothing_string(&self) -> Option<([f64; 2], [f64; 2])> {
+        self.renderer.smoothing_string()
+    }
+
     /// Does the stroke change with time while the pointer is held still (airbrush Build-up, or
     /// smoothing still catching up)? See `photocraft_paint::dynamics::DabGenerator::wants_time`.
     pub fn wants_time(&self) -> bool {

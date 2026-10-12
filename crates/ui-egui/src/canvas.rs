@@ -4103,6 +4103,19 @@ fn draw_transform_controls(app: &mut PhotocraftApp, painter: &egui::Painter, xf:
     }
 }
 
+/// The line from the brush to the pointer while stroke smoothing lags (Pulled String Mode and
+/// Stroke Catch-up, #3479): a dark underlay and a light line stay visible on any pixels, and a dot
+/// marks the brush end.
+fn draw_smoothing_string(painter: &egui::Painter, xf: &ViewXform, (brush, pointer): ([f64; 2], [f64; 2])) {
+    let (a, b) = (xf.to_screen(brush[0] as f32, brush[1] as f32), xf.to_screen(pointer[0] as f32, pointer[1] as f32));
+    if a.distance(b) < 2.0 {
+        return;
+    }
+    painter.line_segment([a, b], Stroke::new(3.0, Color32::from_black_alpha(110)));
+    painter.line_segment([a, b], Stroke::new(1.0, Color32::WHITE));
+    painter.circle_filled(a, 2.5, Color32::WHITE);
+}
+
 fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
     draw_tool_state(app, painter, xf, painter.ctx().input(|i| i.pointer.hover_pos()));
     let Some(d) = &app.drag else {
@@ -4121,7 +4134,14 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
     match d.tool {
         // The canvas shows the live stroke itself (`LiveStroke`); a stroke that couldn't start one
         // (Sample All Layers, say) keeps the trail.
-        t if strokes_live(t) && app.live_stroke.is_some() => {}
+        t if strokes_live(t) && app.live_stroke.is_some() => {
+            // Smoothing holds the brush back from the pointer: draw the string between them.
+            if let Some(EngineStroke::Brush(l)) = app.live_stroke.as_ref().map(|l| &l.stroke)
+                && let Some(s) = l.smoothing_string()
+            {
+                draw_smoothing_string(painter, xf, s);
+            }
+        }
         t if t.is_brushlike() || t == Tool::QuickSelection => {
             // Retouching strokes preview as a translucent trail of the brush footprint: a mask,
             // not a brush-wide egui polyline (which zoomed in tessellates into wedges, #189).
@@ -6486,17 +6506,41 @@ mod tests {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         app.run("file.new", json!({"width": 120, "height": 60})).unwrap();
         app.run("tools.setBrush", json!({"brush": {"size": 30, "hardness": 0.0}})).unwrap();
+        // A smoothed stroke also draws its string line (see
+        // `smoothed_brush_drag_draws_the_string_from_brush_to_pointer`): that is no stand-in shape.
+        let overlay = |app: &mut PhotocraftApp, ctx: &egui::Context| {
+            drag_preview_shapes(app, ctx, 12.0).iter().filter(|s| !matches!(s.shape, egui::Shape::LineSegment { .. } | egui::Shape::Circle(_))).count()
+        };
         for tool in [Tool::Brush, Tool::Eraser] {
             app.ui.tool = tool;
-            let idle = drag_preview_shapes(&mut app, &ctx, 12.0).len();
+            let idle = overlay(&mut app, &ctx);
             tool_event(&mut app, ToolEvent::Down { x: 20.0, y: 30.0, pressure: 1.0 }, egui::Modifiers::NONE);
             for i in 1..40 {
                 let t = f64::from(i);
                 tool_event(&mut app, ToolEvent::Move { x: 20.0 + t, y: 30.0 + (t / 3.0).sin() * 4.0, pressure: 1.0 }, egui::Modifiers::NONE);
             }
             assert!(app.live_stroke.is_some(), "{tool:?}: the canvas shows the live stroke");
-            assert_eq!(drag_preview_shapes(&mut app, &ctx, 12.0).len(), idle, "{tool:?}: no overlay while dragging");
+            assert_eq!(overlay(&mut app, &ctx), idle, "{tool:?}: no overlay while dragging");
             tool_event(&mut app, ToolEvent::Up { x: 59.0, y: 30.0 }, egui::Modifiers::NONE);
+        }
+    }
+
+    #[test]
+    fn smoothed_brush_drag_draws_the_string_from_brush_to_pointer() {
+        // #3479: with smoothing the brush lags behind the pointer; a line joins them while drawing.
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 120, "height": 60})).unwrap();
+        app.ui.tool = Tool::Brush;
+        let lines = |app: &mut PhotocraftApp| drag_preview_shapes(app, &ctx, 4.0).iter().filter(|s| matches!(s.shape, egui::Shape::LineSegment { .. })).count();
+        for (amount, string) in [(0.0, false), (0.8, true)] {
+            app.run("tools.setBrush", json!({"brush": {"size": 10, "smoothing": {"amount": amount}}})).unwrap();
+            tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 30.0, pressure: 1.0 }, egui::Modifiers::NONE);
+            for x in [30.0, 60.0, 90.0] {
+                tool_event(&mut app, ToolEvent::Move { x, y: 30.0, pressure: 1.0 }, egui::Modifiers::NONE);
+            }
+            assert_eq!(lines(&mut app) > 0, string, "smoothing {amount}");
+            tool_event(&mut app, ToolEvent::Up { x: 90.0, y: 30.0 }, egui::Modifiers::NONE);
         }
     }
 
