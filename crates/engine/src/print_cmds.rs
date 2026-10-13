@@ -14,6 +14,8 @@
 
 use std::io::Write as _;
 
+mod windows_marks;
+
 use photocraft_color::ColorMode;
 use photocraft_doc::{Document, LayerContent, SmartSource};
 use serde_json::{Value, json};
@@ -457,13 +459,13 @@ fn printer_name(p: &Value) -> Result<String> {
     if let Some(name) = p.get("printer").and_then(Value::as_str).filter(|v| !v.trim().is_empty()) {
         return Ok(name.to_string());
     }
-    photocraft_winprint::default_printer().map_err(other)?.ok_or_else(|| other("no printer chosen and no default printer is set"))
+    craft_print::rgb::default_printer().map_err(other)?.ok_or_else(|| other("no printer chosen and no default printer is set"))
 }
 
 /// The driver settings chosen with Print Settings… (`printerSettings`, hex), when any.
-fn printer_settings(p: &Value) -> Result<Option<photocraft_winprint::DevMode>> {
+fn printer_settings(p: &Value) -> Result<Option<craft_print::rgb::DevMode>> {
     match p.get("printerSettings").and_then(Value::as_str).filter(|v| !v.is_empty()) {
-        Some(hex) => photocraft_winprint::DevMode::from_hex(hex).map(Some).map_err(|e| bad("file.print", e.to_string())),
+        Some(hex) => craft_print::rgb::DevMode::from_hex(hex).map(Some).map_err(|e| bad("file.print", e.to_string())),
         None => Ok(None),
     }
 }
@@ -503,44 +505,45 @@ pub fn page_rect_top_left(page: &PrintPage) -> (f64, f64, f64, f64) {
 fn print_windows(page: &PrintPage, p: &Value, title: &str, copies: u32) -> Result<Value> {
     let printer = printer_name(p)?;
     let settings = printer_settings(p)?;
-    let device_page = photocraft_winprint::page(&printer, settings.as_ref()).map_err(other)?;
+    let device_page = craft_print::rgb::page(&printer, settings.as_ref()).map_err(other)?;
     if (device_page.paper.0 - page.paper.0).abs() > 2.0 || (device_page.paper.1 - page.paper.1).abs() > 2.0 {
         return Err(other("the driver paper or orientation differs from the print layout; choose the matching paper in Print Settings before printing"));
     }
     let rgb = page_rgb(page)?;
-    let image = photocraft_winprint::RgbImage { width: page.image.width, height: page.image.height, data: &rgb };
-    let marks = photocraft_winprint::Marks { corner_crop: page.marks.corner_crop, center_crop: page.marks.center_crop, registration: page.marks.registration };
+    let image = craft_print::rgb::RgbImage { width: page.image.width, height: page.image.height, data: &rgb };
+    let rect = page_rect_top_left(page);
+    let primitives = windows_marks::primitives(page.marks, rect);
     let color_policy = match p.get("colorHandling").and_then(Value::as_str) {
-        Some("photocraftManages" | "photoshopManages") => photocraft_winprint::ColorPolicy::ApplicationManaged,
-        Some("noColorManagement") => photocraft_winprint::ColorPolicy::Unmanaged,
-        _ => photocraft_winprint::ColorPolicy::DriverManaged,
+        Some("photocraftManages" | "photoshopManages") => craft_print::rgb::ColorPolicy::ApplicationManaged,
+        Some("noColorManagement") => craft_print::rgb::ColorPolicy::Unmanaged,
+        _ => craft_print::rgb::ColorPolicy::DriverManaged,
     };
-    let job = photocraft_winprint::Job {
+    let job = craft_print::rgb::Job {
         printer: &printer,
         settings: settings.as_ref(),
         title,
         output_file: None,
         copies: copies.clamp(1, 999),
         color_policy,
-        marks,
+        primitives: &primitives,
     };
-    let done = photocraft_winprint::print(&job, &image, page_rect_top_left(page)).map_err(other)?;
+    let done = craft_print::rgb::print(&job, &image, rect).map_err(other)?;
     Ok(
         json!({"printer": printer, "dpi": [done.dpi.0, done.dpi.1], "deviceRect": [done.device_rect.0, done.device_rect.1, done.device_rect.2, done.device_rect.3]}),
     )
 }
 
 fn printers(_: &mut Session, _: &Value) -> Result<Value> {
-    match photocraft_winprint::printers() {
+    match craft_print::rgb::printers() {
         Ok(list) => Ok(json!({"supported": true, "printers": list.iter().map(|p| json!({"name": p.name, "default": p.default})).collect::<Vec<_>>()})),
-        Err(photocraft_winprint::PrintError::Unsupported) => Ok(json!({"supported": false, "printers": []})),
+        Err(craft_print::rgb::PrintError::Unsupported) => Ok(json!({"supported": false, "printers": []})),
         Err(e) => Err(other(e)),
     }
 }
 
 fn printer_page(_: &mut Session, p: &Value) -> Result<Value> {
     let printer = printer_name(p)?;
-    let pg = photocraft_winprint::page(&printer, printer_settings(p)?.as_ref()).map_err(other)?;
+    let pg = craft_print::rgb::page(&printer, printer_settings(p)?.as_ref()).map_err(other)?;
     Ok(
         json!({"printer": printer, "paper": [pg.paper.0, pg.paper.1], "printable": [pg.printable.0, pg.printable.1, pg.printable.2, pg.printable.3], "dpi": [pg.dpi.0, pg.dpi.1]}),
     )

@@ -52,7 +52,7 @@ fn print_dry_run_renders_a_pdf_and_reports_the_platform_backend() {
             assert!(!cmd.contains(&out), "PDF bytes are streamed instead of passing a path");
         }
         #[cfg(windows)]
-        assert!(cmd.last().unwrap().contains("craft-print PDF spooler"));
+        assert_eq!(cmd.first().map(String::as_str), Some("xps-print"));
         assert_eq!(r["sent"], false);
         assert_eq!(r["pdf"], out);
         let pdf = std::fs::read(&out).unwrap();
@@ -237,7 +237,7 @@ fn print_one_copy_repeats_the_last_settings() {
     #[cfg(unix)]
     assert_eq!(&cmd[..3], &["lp", "-n", "1"]);
     #[cfg(windows)]
-    assert!(cmd.last().unwrap().contains("craft-print PDF spooler"));
+    assert_eq!(cmd.first().map(String::as_str), Some("xps-print"));
     assert!(r["pdf"].is_null());
 }
 

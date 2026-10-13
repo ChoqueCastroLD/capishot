@@ -594,7 +594,7 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
         f.entry(k.to_string()).or_insert(v);
     }
     // Windows: the system's printers, and the paper from the chosen printer's driver settings.
-    if let Ok(list) = photocraft_winprint::printers() {
+    if let Ok(list) = craft_print::rgb::printers() {
         f.insert("__printers".into(), json!(list.iter().map(|p| p.name.clone()).collect::<Vec<_>>()));
         let known = |n: &str| list.iter().any(|p| p.name == n);
         if !known(&s(&f, "printer", "")) {
@@ -610,8 +610,8 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
 /// Takes the paper from the printer's driver settings (Windows), as Photoshop does.
 fn driver_page(f: &mut Map<String, Value>) {
     let printer = s(f, "printer", "");
-    let settings = f.get("printerSettings").and_then(Value::as_str).and_then(|h| photocraft_winprint::DevMode::from_hex(h).ok());
-    match photocraft_winprint::page(&printer, settings.as_ref()) {
+    let settings = f.get("printerSettings").and_then(Value::as_str).and_then(|h| craft_print::rgb::DevMode::from_hex(h).ok());
+    match craft_print::rgb::page(&printer, settings.as_ref()) {
         Ok(pg) => {
             f.insert("paper".into(), json!([pg.paper.0, pg.paper.1]));
             f.insert("orientation".into(), json!("portrait"));
@@ -747,8 +747,8 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                     number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
                     if ui.button(tl!("Print Settings…")).clicked() {
                         let printer = s(f, "printer", "");
-                        let current = f.get("printerSettings").and_then(Value::as_str).and_then(|h| photocraft_winprint::DevMode::from_hex(h).ok());
-                        match photocraft_winprint::settings_dialog(&printer, current.as_ref(), None) {
+                        let current = f.get("printerSettings").and_then(Value::as_str).and_then(|h| craft_print::rgb::DevMode::from_hex(h).ok());
+                        match craft_print::rgb::settings_dialog(&printer, current.as_ref(), None) {
                             Ok(Some(dm)) => {
                                 f.insert("printerSettings".into(), json!(dm.to_hex()));
                                 driver_page(f);

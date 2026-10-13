@@ -36,10 +36,9 @@ photocraft-engine = { path = "crates/engine" }
 photocraft-ui-egui = { path = "crates/ui-egui" }
 photocraft-testkit = { path = "crates/testkit" }
 photocraft-tablet = { path = "crates/tablet" }
-photocraft-winprint = { path = "crates/winprint" }
 
 # external
-craft-print = { git = "https://github.com/storytold/craft-libs", rev = "d991bf6792f8ade99c51358bf3c1d902c8cd96b5" }
+craft-print = { git = "https://github.com/storytold/craft-libs", rev = "ee70afc29a41bc50f2a55affa9aa2c62e0d28e3a" }
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
