@@ -2823,6 +2823,12 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             crate::pixel_grid::paint(app, &painter, &xf, idx, output, visible_doc_rect(&xf));
         }
 
+        // Developer tile grid (`ui.set {"tileGrid": true}`): the active layer's storage tiles.
+        // Not tied to View › Extras (⌘H), which hides only the View › Show overlays.
+        if app.ui.view.tile_grid {
+            crate::tile_overlay::paint(app, &ctx, &painter, &xf, idx, visible_doc_rect(&xf));
+        }
+
         // View › Show › Layer Edges: drawn at this depth, but only once this frame's tool events are
         // in (`layer_edges_rect`), so a press that Auto-Selects a layer outlines that layer.
         let layer_edges = painter.add(egui::Shape::Noop);

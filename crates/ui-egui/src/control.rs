@@ -131,7 +131,7 @@ pub enum Outcome {
 /// field's value is validated before the first one is applied, so a typo, an unknown field, a
 /// bad value or a bad nested key can't reply with success while nothing — or only half of it —
 /// changed (#412).
-pub const UI_SET_FIELDS: [&str; 34] = [
+pub const UI_SET_FIELDS: [&str; 35] = [
     "tool",
     "panels",
     "dock",
@@ -166,6 +166,7 @@ pub const UI_SET_FIELDS: [&str; 34] = [
     "cropShield",
     "shapeStroke",
     "camTransformOnDrop",
+    "tileGrid",
 ];
 
 /// Most clicks one `ui.click` may queue (#982). Each click is a press and a release that the app
@@ -492,6 +493,8 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 let eyedropper_ring = bool_field(p, "eyedropperRing")?;
                 // Content-Aware Move's Transform On Drop checkbox.
                 let cam_transform_on_drop = bool_field(p, "camTransformOnDrop")?;
+                // Developer overlay of the active layer's storage tiles (tile_overlay.rs).
+                let tile_grid = bool_field(p, "tileGrid")?;
                 // The Crop tool's overlay menu (#1919).
                 let crop_overlay = match p.get("cropOverlay") {
                     Some(v) => Some(v.as_str().and_then(crate::crop_overlay::CropOverlay::from_id).ok_or_else(|| {
@@ -649,6 +652,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 }
                 if let Some(on) = cam_transform_on_drop {
                     app.ui.tool_options.cam_transform_on_drop = on;
+                }
+                if let Some(on) = tile_grid {
+                    app.ui.view.tile_grid = on;
                 }
                 if let Some(k) = crop_overlay {
                     app.ui.tool_options.crop_overlay = k;
@@ -1856,6 +1862,25 @@ mod tests {
         let bad = call(&mut app, &ctx, "ui.set", json!({"gradientBlendMode": "nonsense", "gradientClassic": false}));
         assert_eq!(bad["ok"], false, "{bad}");
         assert!(app.ui.tool_options.gradient_classic, "invalid mode must not change options");
+    }
+
+    #[test]
+    fn ui_set_toggles_the_developer_tile_grid() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        assert!(!app.ui.view.tile_grid, "off by default");
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"tileGrid": true}))["ok"], true);
+        assert!(app.ui.view.tile_grid);
+        assert_eq!(call(&mut app, &ctx, "ui.inspect", json!({}))["result"]["view"]["tile_grid"], true);
+        // Not a View › Show item: Extras doesn't hide it, and Show Extras Options doesn't list it.
+        crate::menus::invoke(&mut app, &ctx, "view.extras", json!({})).unwrap();
+        assert!(!app.ui.view.extras && app.ui.view.tile_grid);
+        assert!(serde_json::to_value(app.ui.view.show).unwrap().get("tile_grid").is_none());
+        let bad = call(&mut app, &ctx, "ui.set", json!({"tileGrid": "yes"}));
+        assert_eq!(bad["ok"], false, "{bad}");
+        assert!(app.ui.view.tile_grid, "a rejected value changes nothing");
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"tileGrid": false}))["ok"], true);
+        assert!(!app.ui.view.tile_grid);
     }
 
     #[test]

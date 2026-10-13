@@ -96,6 +96,9 @@ pub struct ViewOptions {
     pub middle_eastern_composer: bool,
     /// Parameters from the last successfully applied New Guide Layout dialog.
     pub guide_layout: Value,
+    /// Developer overlay of the active layer's storage tiles (tile_overlay.rs), set with the
+    /// control channel's `ui.set {"tileGrid": true}`.
+    pub tile_grid: bool,
 }
 
 /// Factory New Guide Layout values (Alt+Reset and a fresh ViewOptions).
@@ -121,6 +124,7 @@ impl Default for ViewOptions {
             language_features: "defaultFeatures".into(),
             middle_eastern_composer: false,
             guide_layout: default_guide_layout(),
+            tile_grid: false,
         }
     }
 }

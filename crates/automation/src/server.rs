@@ -323,7 +323,8 @@ pub struct UiSetParams {
     /// auto_adjust, classic_mode and auto_center_preview), shapeStroke (an object patching width, align, cap, join, miterLimit,
     /// dashes, dashOffset and opacity; null disables the stroke). Shape stroke fields use
     /// `shape.edit` names and units; colour comes from `tools.setColors`. camTransformOnDrop (bool,
-    /// the Content-Aware Move tool's Transform On Drop). Other fields are an error.
+    /// the Content-Aware Move tool's Transform On Drop). tileGrid (bool, a developer overlay of the
+    /// active layer's storage tiles). Other fields are an error.
     pub fields: Value,
 }
 
