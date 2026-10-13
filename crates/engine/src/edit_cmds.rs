@@ -28,6 +28,9 @@ pub struct Clip {
     /// than rasterize (see [`whole_layer`]): a scratch document in the source's colour holding it.
     /// `surface` still holds its pixels, for Paste Into, masks, channels and other apps.
     pub layers: Option<Box<Document>>,
+    /// The source document's resolution (ppi): File › New from the clipboard takes it, as
+    /// Photoshop's Clipboard preset does. None for an image from another app.
+    pub resolution: Option<f32>,
 }
 
 /// Photoshop's layer-based copy (CC 2018 on): with no selection, Copy takes the active layer
@@ -148,7 +151,7 @@ fn lift(src: &Surface, sel: Option<&Surface>, canvas: Rect) -> Result<Clip> {
     };
     let mut out = Surface::new(with_alpha);
     if area.is_empty() {
-        return Ok(Clip { surface: out, bounds: Rect::EMPTY, layers: None });
+        return Ok(Clip { surface: out, bounds: Rect::EMPTY, layers: None, resolution: None });
     }
     // Only the selected area is read: converting the whole layer (a 24 MP Background gaining
     // alpha) cost about a second per Layer via Copy (#668).
@@ -186,7 +189,7 @@ fn lift(src: &Surface, sel: Option<&Surface>, canvas: Rect) -> Result<Clip> {
     out.try_write_region(area, &px).map_err(|e| EngineError::Other(format!("not enough memory while copying pixels ({e}); the document was not changed")))?;
     out.prune();
     let bounds = out.content_bounds();
-    Ok(Clip { surface: out, bounds, layers: None })
+    Ok(Clip { surface: out, bounds, layers: None, resolution: None })
 }
 
 /// Merged composite of the visible document as a surface in the document's format.
@@ -221,6 +224,7 @@ fn copy(s: &mut Session, merged: bool) -> Result<Value> {
         return Err(EngineError::Other("Could not copy: the selected area is empty".into()));
     }
     let b = clip.bounds;
+    let clip = Clip { resolution: Some(d.doc.resolution_dpi), ..clip };
     s.clipboard = Some(clip);
     Ok(json!({"bounds": [b.x0, b.y0, b.width(), b.height()]}))
 }
@@ -263,7 +267,8 @@ fn copy_mask(s: &mut Session) -> Result<Value> {
         return Err(EngineError::Other("Could not copy: the selected area is empty".into()));
     }
     let b = bounds;
-    s.clipboard = Some(Clip { surface, bounds: b, layers: None });
+    let resolution = Some(d.doc.resolution_dpi);
+    s.clipboard = Some(Clip { surface, bounds: b, layers: None, resolution });
     Ok(json!({"bounds": [b.x0, b.y0, b.width(), b.height()], "target": "mask"}))
 }
 
@@ -404,6 +409,9 @@ fn new_from_clipboard(s: &mut Session) -> Result<Value> {
     let target = PixelFormat::new(fmt.mode, fmt.sample, true);
     let moved = if b.x0 == 0 && b.y0 == 0 { clip.surface } else { photocraft_algo::resample::translate_surface(&clip.surface, -b.x0, -b.y0) };
     let mut doc = Document::new("Untitled", photocraft_geom::Size::new(w, h), fmt.mode, fmt.sample);
+    if let Some(r) = clip.resolution.filter(|r| r.is_finite() && *r > 0.0) {
+        doc.resolution_dpi = r;
+    }
     let mut l = Layer::raster(doc.next_layer_name("Layer"), target);
     *crate::pixels_mut(&mut l)? = if moved.format() == target { moved } else { moved.convert(target) };
     doc.layers.push(l);
@@ -1005,6 +1013,18 @@ mod tests {
     fn active_bounds(s: &Session) -> Rect {
         let st = s.active().unwrap();
         st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().content_bounds()
+    }
+
+    /// New from Clipboard takes the copied document's resolution (Photoshop's Clipboard preset),
+    /// so a later Image Size by resolution scales from the right size.
+    #[test]
+    fn new_from_clipboard_keeps_the_source_resolution() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 60, "height": 40, "resolution": 300})).unwrap();
+        s.execute("select.all", json!({})).unwrap();
+        s.execute("edit.copy", json!({})).unwrap();
+        s.execute("file.newFromClipboard", json!({})).unwrap();
+        assert_eq!(s.active().unwrap().doc.resolution_dpi, 300.0);
     }
 
     /// #368: the clipboard as a document of its own, from New from Clipboard or a Paste with

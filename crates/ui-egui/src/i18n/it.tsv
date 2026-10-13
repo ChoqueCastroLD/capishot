@@ -4036,6 +4036,7 @@ layerLabel	No Color	Nessun colore
 	gradients	sfumature
 @plural	Imported {n} brush from {file}|Imported {n} brushes from {file}	{n} pennello importato da {file}|{n} pennelli importati da {file}
 @plural	Imported {n} gradient from {file}|Imported {n} gradients from {file}	{n} sfumatura importata da {file}|{n} sfumature importate da {file}
+@plural	Imported {n} pattern from {file}|Imported {n} patterns from {file}	{n} pattern importato da {file}|{n} pattern importati da {file}
 	Data Set: {name}  ({index}/{total})	Set di dati: {name}  ({index}/{total})
 	(none)	(nessuno)
 navigator	Zoom	Zoom
