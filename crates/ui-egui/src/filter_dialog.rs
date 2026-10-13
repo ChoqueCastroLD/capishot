@@ -435,6 +435,10 @@ pub fn reset_fields(app: &PhotocraftApp, fields: &mut Map<String, Value>) {
         }
     }
     apply_command_defaults(app, &command, fields);
+    // The schema has no default for the Blur Gallery's pins: start again from the opening one.
+    if command == crate::blur_pins::COMMAND {
+        crate::blur_pins::reset(fields);
+    }
 }
 
 pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
@@ -454,6 +458,9 @@ pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
     }
     restore_remembered(app, command, spec.params, &mut fields);
     apply_command_defaults(app, command, &mut fields);
+    if command == crate::blur_pins::COMMAND {
+        crate::blur_pins::init(app, &mut fields);
+    }
     if parse_spec(spec.params).iter().any(|p| p.kind == Kind::Document) {
         // The document picker lists every open document (params refer to them by index).
         let names: Vec<String> = app.session.documents().iter().map(|d| d.doc.name.clone()).collect();
@@ -905,6 +912,10 @@ pub(crate) fn preview_document_for_target(
                 *v = json!(if x > 0.0 { x.max(floor) } else { minimum.map_or(x, |m| x.max(m)) });
             }
         }
+    }
+    // Blur Gallery pins carry their blur in document pixels too.
+    if command.starts_with("filter.blurGallery.") {
+        crate::blur_pins::scale_for_proxy(&mut p, run_k);
     }
     s.execute(command, p).ok()?;
     s.active().map(|d| crate::proxy::proxy_document(&d.doc, reduce_k))

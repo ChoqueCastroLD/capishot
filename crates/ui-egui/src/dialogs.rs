@@ -157,7 +157,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // effects, extends down and right instead of re-centring.
         let pinned: Option<egui::Vec2> = ctx.data(|m| m.get_temp(id));
         let place = place_id(&d);
-        let start = pinned.or_else(|| ctx.data_mut(|m| m.get_persisted::<egui::Vec2>(place)));
+        let start = pinned.or_else(|| ctx.data_mut(|m| m.get_persisted::<egui::Vec2>(place))).or_else(|| crate::blur_pins::first_place(&d.fields, ctx));
         let mut drag = egui::Vec2::ZERO;
         let mut sizing = false;
         let area = match start {
@@ -305,6 +305,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 // Image Size and Canvas Size open on Width, selected (#2329).
                 DialogKind::Command if fields.contains_key("__sizing") => first_field_focused(ui, id, |ui| crate::sizing::body(ui, &mut fields)),
                 DialogKind::Command if crate::adjust_dialog::owns(&fields) => crate::adjust_dialog::body(app, ui, &mut fields),
+                DialogKind::Command if crate::blur_pins::owns(&fields) => crate::blur_pins::body(ui, &mut fields),
                 DialogKind::Command if fields.contains_key("__filter") => {
                     // Color Settings: the monitor profile in use can change while it is open.
                     if fields.get("__command").and_then(Value::as_str) == Some("edit.colorSettings") {

@@ -2398,6 +2398,9 @@
 	Fibers…	Ίνες…
 	Field Blur	Θόλωση πεδίου
 	Field Blur…	Θόλωση πεδίου…
+# Field Blur pins (#3373)
+	No pin selected	Δεν έχει επιλεγεί καρφίτσα
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Κάντε κλικ στην εικόνα για να προσθέσετε καρφίτσα· σύρετε μια καρφίτσα για να τη μετακινήσετε ή τον δακτύλιό της για να αλλάξετε τη θόλωση. Το Delete αφαιρεί την επιλεγμένη καρφίτσα.
 	File Info	Πληροφορίες αρχείου
 	File Settings	Ρυθμίσεις αρχείου
 	Fill Path	Γέμισμα διαδρομής
