@@ -72,20 +72,24 @@
         }
         const pc = await import(`./photocraft.js?v=${version}`);
         await pc.default({ module_or_path: await wasmResponse(`./photocraft_bg.wasm.gz?v=${version}`) });
+        const moduleReady = Math.round(performance.now());
         // One worker per core but one (the UI thread spins while it waits for them), at most 16.
         // ?threads=N overrides it (1 runs every parallel step on one worker; useful to compare).
         const asked = Number(new URLSearchParams(location.search).get('threads'));
         const cores = navigator.hardwareConcurrency || 4;
         const threads = asked > 0 ? Math.min(Math.floor(asked), 64) : Math.max(1, Math.min(cores - 1, 16));
-        status.textContent = `Starting ${threads} worker thread${threads === 1 ? '' : 's'}…`;
-        await pc.initThreadPool(threads);
+        // The pool and the app start together: the app gets its graphics device, fonts and presets
+        // ready while the workers come up, and is built (the first thing to use rayon, which must
+        // not run before the pool exists) once the page calls threadPoolReady().
+        const pool = pc.initThreadPool(threads);
+        pc.start();
+        await pool;
+        pc.threadPoolReady();
         // The module, for diagnostics: photocraftModule.parallelSelfTest(4000, 3000). Not
         // `photocraft`: the app sets window.photocraft to its embedding API once it runs.
         self.photocraftModule = pc;
         self.photocraftThreads = threads;
-        console.info(`photocraft-web: rayon pool of ${threads} Web Workers`);
-        status.textContent = 'Loading Capishot…';
-        pc.start();
+        console.info(`photocraft-web: module downloaded and compiled at ${moduleReady} ms, rayon pool of ${threads} Web Workers at ${Math.round(performance.now())} ms`);
       } catch (e) {
         console.error(e);
         fail(`Capishot could not start:\n${e && e.message ? e.message : e}`);
