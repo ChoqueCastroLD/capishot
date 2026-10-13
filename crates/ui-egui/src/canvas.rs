@@ -990,18 +990,51 @@ fn checker(app: &mut PhotocraftApp, ctx: &egui::Context) -> egui::TextureId {
 }
 
 fn buffer_to_image(buf: &photocraft_compose::Buffer) -> egui::ColorImage {
-    let img = buf.to_rgba8();
-    egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels)
+    // `buf.to_rgba8()` then `color_image`, fused: one parallel pass, no intermediate image.
+    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+    let mut pixels = vec![egui::Color32::TRANSPARENT; buf.px.len()];
+    let convert = |out: &mut [egui::Color32], src: &[[f32; 4]]| {
+        for (o, p) in out.iter_mut().zip(src) {
+            *o = egui::Color32::from_rgba_unmultiplied(q(p[0]), q(p[1]), q(p[2]), q(p[3]));
+        }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        pixels.par_chunks_mut(16 * 1024).zip(buf.px.par_chunks(16 * 1024)).for_each(|(o, s)| convert(o, s));
+    }
+    #[cfg(target_arch = "wasm32")]
+    convert(&mut pixels, &buf.px);
+    egui::ColorImage::new([buf.rect.width() as usize, buf.rect.height() as usize], pixels)
+}
+
+/// `img` as an egui image: `ColorImage::from_rgba_unmultiplied`, in parallel off wasm. egui's own
+/// conversion runs on one thread and took 37 ms of a 24 MP canvas or preview update, three times
+/// the quantize before it.
+fn color_image(img: &photocraft_raster::Rgba8Image) -> egui::ColorImage {
+    let size = [img.width as usize, img.height as usize];
+    let src = img.pixels.as_chunks::<4>().0;
+    let mut pixels = vec![egui::Color32::TRANSPARENT; src.len()];
+    let convert = |out: &mut [egui::Color32], src: &[[u8; 4]]| {
+        for (o, &[r, g, b, a]) in out.iter_mut().zip(src) {
+            *o = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+        }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        pixels.par_chunks_mut(16 * 1024).zip(src.par_chunks(16 * 1024)).for_each(|(o, s)| convert(o, s));
+    }
+    #[cfg(target_arch = "wasm32")]
+    convert(&mut pixels, src);
+    egui::ColorImage::new(size, pixels)
 }
 
 /// A composite as monitor pixels: document profile → monitor profile (nothing to do in the
 /// common sRGB-on-sRGB case).
 pub(crate) fn display_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>, buf: &photocraft_compose::Buffer) -> egui::ColorImage {
     match display {
-        Some(d) if !d.is_identity() => {
-            let img = d.to_rgba8(buf);
-            egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels)
-        }
+        Some(d) if !d.is_identity() => color_image(&d.to_rgba8(buf)),
         _ => buffer_to_image(buf),
     }
 }
@@ -5718,6 +5751,33 @@ mod tabs_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn display_image_matches_egui_unmultiplied_conversion() {
+        // Several parallel pieces and a ragged one; translucent, out-of-range and NaN values.
+        let n: usize = 3 * 16 * 1024 + 77;
+        let px: Vec<[f32; 4]> = (0..n)
+            .map(|i| {
+                let v = match i % 9 {
+                    0 => f32::NAN,
+                    1 => -0.5,
+                    2 => 3.25,
+                    _ => (i % 1001) as f32 / 1000.0,
+                };
+                [v, (i % 257) as f32 / 256.0, 1.0 - (i % 113) as f32 / 112.0, (i % 6) as f32 / 5.0]
+            })
+            .collect();
+        let buf = photocraft_compose::Buffer { rect: photocraft_geom::Rect::new(0, 0, n as i32, 1), px };
+        let reference = |img: photocraft_raster::Rgba8Image| egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
+        assert_eq!(super::display_image(None, &buf).pixels, reference(buf.to_rgba8()).pixels);
+        let mut doc = photocraft_doc::Document::new("t", photocraft_geom::Size::new(1, 1), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8);
+        doc.icc_profile = Some(photocraft_cms::Builtin::AdobeRgbCompat.profile().to_bytes());
+        let mut color = photocraft_engine::color_cmds::ColorState::default();
+        color.settings.monitor_profile = "srgb".into();
+        let d = color.canvas_display(&doc).unwrap();
+        assert!(!d.is_identity());
+        assert_eq!(super::display_image(Some(&d), &buf).pixels, reference(d.to_rgba8(&buf)).pixels);
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn every_filter_previews_off_the_ui_thread_and_a_newer_value_cancels_the_old() {
