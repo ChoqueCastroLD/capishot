@@ -3287,8 +3287,12 @@ fn properties_body_inner(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         crate::mask_props_ui::vector_properties(app, ui, layer);
         return;
     }
-    // Photoshop shows the Document properties when nothing or the Background layer is selected.
+    // Photoshop shows the Document properties when nothing or the Background layer is selected,
+    // with Align and Distribute above them when the Background is one of several (#4608).
     if crate::doc_props_ui::shows_document(&st.doc, st.active_layer) {
+        if t.pro && st.selected_layers().len() > 1 {
+            crate::layer_props_ui::selection_align(app, ui);
+        }
         crate::doc_props_ui::properties(app, ui);
         return;
     }
