@@ -75,7 +75,8 @@ fn custom_titlebar(prefs_file: Option<&std::path::Path>) -> bool {
 /// The main window: 1440 × 900 (shrunk to fit the monitor, and maximized on the first frame
 /// when it still doesn't fit, `work_area::fit_window`), centred on the main monitor. Without
 /// `centered`, Windows cascades each new window from the top-left corner, so it opened at a
-/// different offset every launch (#419). Wayland compositors place windows themselves.
+/// different offset every launch (#419). A later launch restores the saved position instead
+/// (`main` turns `centered` off, #4826). Wayland compositors place windows themselves.
 fn native_options(custom_titlebar: bool) -> eframe::NativeOptions {
     eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -330,6 +331,9 @@ fn main() -> eframe::Result {
     }
     // eframe restores the saved window layout before our code runs; drop values that would crash it.
     ui_state::sanitize(options.persistence_path.as_deref());
+    // Centre only the first window: eframe centres after restoring the saved position, so a
+    // window closed on another monitor reopened in the middle of the main one (#4826).
+    options.centered = !ui_state::has_saved_position(options.persistence_path.as_deref());
     // Crash-safe GPU startup (#4): pick the backend (a marker left by a start that died in the
     // driver moves to a safer one), and lock this start's marker until the first frames render.
     let t_sentinel = std::time::Instant::now();
