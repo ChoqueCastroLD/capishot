@@ -3563,6 +3563,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 let toward = xf.to_screen((d[0] + k[0] * 16.0) as f32, (d[1] + k[1] * 16.0) as f32) - p;
                 crate::crop_ui::draw_turn_cursor(&ctx, p, toward);
             }
+        } else if let Some(c) = response.hover_pos().and_then(|p| crate::symmetry_ui::cursor(app, &xf, xf.to_doc(p))) {
+            ui.ctx().set_cursor_icon(c);
         } else if let Some(c) = response.hover_pos().and_then(|p| crate::cam_transform::cursor(app, &ctx, &xf, p)) {
             ui.ctx().set_cursor_icon(c);
         } else if let Some((r, p, c)) =

@@ -964,7 +964,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     crate::transform_tool::options_bar(app, ui);
                     return;
                 }
-                if crate::distort_ui::options_bar(app, ui) {
+                if crate::symmetry_ui::options_bar(app, ui) || crate::distort_ui::options_bar(app, ui) {
                     return;
                 }
                 let tool = app.ui.tool;
