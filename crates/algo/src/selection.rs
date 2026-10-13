@@ -166,7 +166,8 @@ fn close(a: [f32; 4], b: [f32; 4], tol: f32) -> bool {
 /// around the seed. `px` covers `area`.
 pub fn magic_wand(px: &[[f32; 4]], area: Rect, seed: (i32, i32), tolerance: f32, contiguous: bool, anti_alias: bool) -> Vec<f32> {
     let (w, h) = (area.width() as usize, area.height() as usize);
-    let mut m = vec![0.0f32; w * h];
+    let Some(n) = w.checked_mul(h).filter(|&n| n <= px.len()) else { return Vec::new() };
+    let mut m = vec![0.0f32; n];
     if !area.contains(seed.0, seed.1) {
         return m;
     }
@@ -259,6 +260,9 @@ pub fn wand_region(img: &[[u8; 4]], area: Rect, seed: (i32, i32), tolerance: f32
         return None;
     }
     let (w, h) = (area.width() as usize, area.height() as usize);
+    if w.checked_mul(h).is_none_or(|n| n > img.len()) {
+        return None;
+    }
     let target = img[(seed.1 - area.y0) as usize * w + (seed.0 - area.x0) as usize];
     let tol = (tolerance + 1e-3).floor().max(0.0) as i32;
     // Copying a selection can leave RGB under zero alpha. Those invisible colours must not
@@ -1400,6 +1404,23 @@ mod tests {
                 [v, v / 2, 255 - v, if x % 11 == 0 { 128 } else { 255 }]
             })
             .collect()
+    }
+
+    #[test]
+    fn magic_wand_rejects_incomplete_and_overflowing_pixel_inputs() {
+        let area = Rect::new(0, 0, 4, 4);
+        let short = vec![[255u8, 0, 0, 255]; 4];
+        let floats: Vec<[f32; 4]> = short.iter().map(|p| p.map(|v| f32::from(v) / 255.0)).collect();
+        assert_eq!(magic_wand(&floats, area, (1, 1), 0.0, true, false), Vec::<f32>::new());
+        assert_eq!(wand_region(&short, area, (1, 1), 0.0, true, false), None);
+
+        let huge = Rect::new(i32::MIN, i32::MIN, i32::MAX, i32::MAX);
+        assert!(magic_wand(&floats, huge, (0, 0), 0.0, false, false).is_empty());
+        assert_eq!(wand_region(&short, huge, (0, 0), 0.0, false, false), None);
+
+        let valid = Rect::new(0, 0, 2, 2);
+        assert_eq!(magic_wand(&floats, valid, (0, 0), 0.0, false, false), vec![1.0; 4]);
+        assert!(wand_region(&short, valid, (0, 0), 0.0, false, false).is_some());
     }
 
     #[test]
