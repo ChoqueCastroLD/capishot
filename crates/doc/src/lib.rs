@@ -1169,6 +1169,16 @@ impl Document {
         id
     }
 
+    /// Insert `layer` directly below the layer `below` (or at the bottom of the root if None).
+    pub fn insert_below(&mut self, below: Option<LayerId>, layer: Layer) -> LayerId {
+        let id = layer.id;
+        match below.and_then(|b| self.path_of(b)).and_then(|path| self.siblings_mut(&path)) {
+            Some((sib, idx)) => sib.insert(idx, layer),
+            None => self.layers.insert(0, layer),
+        }
+        id
+    }
+
     pub fn remove(&mut self, id: LayerId) -> Option<Layer> {
         let path = self.path_of(id)?;
         let (sib, idx) = self.siblings_mut(&path)?;
@@ -1364,6 +1374,17 @@ mod tests {
         assert!(!d.shift(b, 1));
         assert_eq!(d.remove(a).unwrap().name, "A");
         assert!(d.layer(a).is_none());
+    }
+
+    #[test]
+    fn insert_below_lands_under_the_reference() {
+        let mut d = doc();
+        let bg = d.layers[0].id;
+        let a = d.insert_above(Some(bg), Layer::raster("A", d.pixel_format()));
+        let b = d.insert_below(Some(a), Layer::raster("B", d.pixel_format()));
+        let names: Vec<_> = d.layers.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["Background", "B", "A"]);
+        assert_eq!(d.layers[1].id, b);
     }
 
     #[test]
