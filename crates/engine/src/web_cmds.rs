@@ -837,6 +837,21 @@ pub fn save_for_web_with_writer(s: &mut Session, p: &Value, write: &mut dyn FnMu
     save_for_web_impl(s, p, write, false)
 }
 
+/// Settings to seed the Save for Web dialog from on the next launch: `file_menu` is session
+/// state, so a complete export also writes the preferences' remembered dialog settings (like
+/// Fill, Liquify and the filter dialogs). The destination is per export, never remembered.
+fn remember_web_settings(s: &mut Session, cmd: &str, settings: &Value) {
+    let mut m = settings.clone();
+    if let Some(o) = m.as_object_mut() {
+        for k in ["path", "dir", "trustedSliceHtml"] {
+            o.remove(k);
+        }
+    }
+    s.prefs.edit(|p| {
+        p.dialogs.insert(cmd.to_string(), m);
+    });
+}
+
 fn save_for_web_impl(s: &mut Session, p: &Value, write: &mut dyn FnMut(&str, &[u8]) -> Result<()>, native_paths: bool) -> Result<Value> {
     let cmd = "file.export.saveForWebLegacy";
     if let Some(authorize) = s.authorize {
@@ -883,6 +898,7 @@ fn save_for_web_impl(s: &mut Session, p: &Value, write: &mut dyn FnMut(&str, &[u
     if let Some(path) = single.filter(|_| dir.is_none() && (all.len() == 1 || p.get("slices").is_none())) {
         let o = optimize(&buf.px, bw, wdoc.bounds(), &st, icc, xmp.as_deref(), dpi, false)?;
         write(path, &o.bytes)?;
+        remember_web_settings(s, cmd, &last_web);
         s.file_menu.last_web = Some(last_web);
         crate::automate_cmds::fire_event(s, "export");
         return Ok(json!({"files": [path], "bytes": o.bytes.len(), "width": o.width, "height": o.height, "colors": o.colors}));
@@ -973,6 +989,7 @@ fn save_for_web_impl(s: &mut Session, p: &Value, write: &mut dyn FnMut(&str, &[u
         write(&web_derived_path(&dir, &format!("{base}.html"), native_paths)?, page.as_bytes())?;
         html_path = Some(hp);
     }
+    remember_web_settings(s, cmd, &last_web);
     s.file_menu.last_web = Some(last_web);
     crate::automate_cmds::fire_event(s, "export");
     Ok(json!({"files": files, "html": html_path, "bytes": total, "slices": chosen.len(), "width": wdoc.size.width, "height": wdoc.size.height}))

@@ -192,8 +192,16 @@ pub fn open_web(app: &mut PhotocraftApp) -> u64 {
     f.insert("__command".into(), json!(WEB_COMMAND));
     f.insert("__label".into(), json!("Save for Web (Legacy)"));
     f.insert("__view".into(), json!("2up"));
-    // Remember encoding choices, but each document starts at its own full size.
-    let last = app.session.file_menu.last_web.clone().unwrap_or_else(|| json!({"format": "jpeg", "quality": 60}));
+    // Remember encoding choices, but each document starts at its own full size. This session's
+    // last export lives in `file_menu`; the last one before a restart comes from the
+    // preferences' remembered dialog settings (`web_cmds::remember_web_settings`).
+    let last = app
+        .session
+        .file_menu
+        .last_web
+        .clone()
+        .or_else(|| app.session.prefs().dialogs.get(WEB_COMMAND).cloned())
+        .unwrap_or_else(|| json!({"format": "jpeg", "quality": 60}));
     if let Value::Object(m) = last {
         for (k, v) in m {
             if !matches!(k.as_str(), "path" | "dir" | "width" | "height" | "percent" | "colorTable" | "colorTableEdits") {
@@ -935,6 +943,20 @@ mod tests {
         let d = app.ui.dialog_mut(r["dialog"].as_u64().unwrap()).unwrap();
         assert_eq!(d.fields["format"], "gif");
         assert!(!d.fields.contains_key("path"));
+    }
+
+    /// A fresh session's dialog seeds from the preferences: the last export before a restart is
+    /// remembered there (`web_cmds::remember_web_settings`), as `file_menu` is not saved.
+    #[test]
+    fn the_save_for_web_dialog_seeds_from_the_remembered_preferences() {
+        let (mut app, _) = app();
+        app.session.prefs.edit(|p| {
+            p.dialogs.insert(WEB_COMMAND.into(), json!({"format": "png8", "colors": 64}));
+        });
+        let id = open_web(&mut app);
+        let f = &app.ui.dialog_mut(id).unwrap().fields;
+        assert_eq!(f["format"], "png8");
+        assert_eq!(f["colors"], 64);
     }
 
     #[test]
