@@ -1,6 +1,6 @@
 # Where PhotoCraft falls short of Photoshop
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (refreshed against main: G2, G5, G7, G9, G10, G13, G14, G17 items that landed; G10: DPX read and write, #1049; G4: checkbox-only Brush Settings rows; G11: Load/Save Actions `.atn` landed, AUTO-219-2 partial; G5: hold-a-key spring-loaded tools landed, #2672) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (refreshed against main: G2, G5, G7, G9, G10, G13, G14, G17 items that landed; G10: DPX read and write, #1049; G4: checkbox-only Brush Settings rows; G11: Load/Save Actions `.atn` landed, AUTO-219-2 partial; G5: hold-a-key spring-loaded tools landed, #2672; G1: #2465 fixed) · **Target:** Adobe Photoshop 2026
 
 Every known shortfall against Photoshop 2026 (27.11.0), one entry each, ranked by user impact
 on the way to beta. This is the work list agents pick from: take the highest-ranked entry that
@@ -46,7 +46,7 @@ what an agent can't finish alone.
   oracles 133/256 (52%), io corpus 146/170 (86%), psd-tools 236/309 (76%); round trips ~100%
   within the corpus. Smart-filter re-render matches 5/30. User reports: a PSD with text layers
   re-saved unmodified would not reopen (#2374, closed 2026-10-10), Photoshop 26.6 cannot reopen our files (#1281), "PSD not
-  opening in Photoshop" (#2469), a CS2-era smart object unavailable (#2465), PSB smart object
+  opening in Photoshop" (#2469), a CS2-era smart object unavailable (#2465, fixed 2026-10-12), PSB smart object
   blank (#1764), perspective placed layers flattened (#579), PSB > 4 GB fails on Windows (#375).
   No test opens our exports in a third-party editor (FILE-216-4).
 - **Impact:** PSD is the format professionals exchange. Beta requires it to be reliable.
@@ -240,6 +240,7 @@ what an agent can't finish alone.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | G1: #2465 (CS2 `PlLd`-only smart objects) marked fixed |
 | 2026-10-12 | minor | G5: spring-loaded tool letters done (#2672) |
 | 2026-10-12 | minor | G10: DPX read and write (#1049); Cineon remains open |
 | 2026-10-12 | minor | G4: checkbox-only Brush Settings rows preserve the open controls and Smoothing settings (#4283); no readiness percentage or estimate changed |
