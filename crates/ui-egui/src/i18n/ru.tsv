@@ -1018,6 +1018,9 @@
 	Rename Brush…	Переименовать кисть…
 	Delete Brush	Удалить кисть
 	Import Brushes…	Импортировать кисти…
+	Gradient Preset Options	Параметры наборов градиентов
+	Import .GRD	Импортировать .GRD
+	Choose a gradient file (.grd).	Выберите файл градиентов (.grd).
 	Brush Name	Имя кисти
 	Brush Stroke	Мазок кисти
 	New Brush Preset…	Новый набор параметров кисти…

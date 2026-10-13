@@ -3996,3 +3996,6 @@ cameraRaw	Yellow	Sárga
 	Object Finder	Objektumkereső
 	No object found there — drag a rectangle around it	Ott nem található objektum – húzz köré egy téglalapot
 	Drag to pan · Scroll to zoom · Double-click to fit	Húzás: mozgatás · Görgetés: nagyítás · Dupla kattintás: igazítás
+	Gradient Preset Options	Színátmenet-előbeállítás beállításai
+	Import .GRD	.GRD importálása
+	Choose a gradient file (.grd).	Válasszon színátmenetfájlt (.grd).

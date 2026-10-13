@@ -1149,6 +1149,9 @@
 	Ignore All	すべて無視
 	Image Size	画像サイズ
 	Import Brushes…	ブラシを読み込み…
+	Gradient Preset Options	グラデーションプリセットのオプション
+	Import .GRD	.GRD を読み込み
+	Choose a gradient file (.grd).	グラデーションファイル (.grd) を選択してください。
 	Import brushes (.abr)	ブラシ (.abr) を読み込み
 	Import Presets	プリセットを読み込み
 	Imported	読み込み済み
