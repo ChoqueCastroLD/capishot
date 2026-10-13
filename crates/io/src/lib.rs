@@ -36,6 +36,7 @@ mod adjust_map;
 pub mod affinity;
 pub mod annotations_map;
 pub mod blocks;
+pub mod camera_raw_xmp;
 mod channel_map;
 pub mod comps_map;
 pub mod effects_map;

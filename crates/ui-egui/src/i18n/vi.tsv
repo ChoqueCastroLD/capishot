@@ -1272,6 +1272,12 @@
 	Aqua	Xanh ngọc
 	Balance	Cân bằng
 	Before (Y)	Trước (Y)
+	Save Settings…	Lưu cài đặt…
+	Load Settings…	Tải cài đặt…
+	Save these settings as a Camera Raw .xmp file	Lưu các cài đặt này thành tệp .xmp Camera Raw
+	Load settings from a Camera Raw .xmp file	Tải cài đặt từ tệp .xmp Camera Raw
+	Loaded Camera Raw settings from {file}	Đã tải cài đặt Camera Raw từ {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Đã tải cài đặt Camera Raw từ {file} ({n} không được hỗ trợ)
 	Blacks	Điểm đen
 	Blending	Pha trộn
 	Blue	Xanh dương

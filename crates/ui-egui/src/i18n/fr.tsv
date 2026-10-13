@@ -834,6 +834,12 @@
 	Baseline shift	Décalage de la ligne de base
 	Basic	De base
 	Before (Y)	Avant (Y)
+	Save Settings…	Enregistrer les paramètres…
+	Load Settings…	Charger les paramètres…
+	Save these settings as a Camera Raw .xmp file	Enregistrer ces paramètres dans un fichier .xmp Camera Raw
+	Load settings from a Camera Raw .xmp file	Charger les paramètres d’un fichier .xmp Camera Raw
+	Loaded Camera Raw settings from {file}	Paramètres Camera Raw chargés depuis {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Paramètres Camera Raw chargés depuis {file} ({n} non pris en charge)
 	Begin recording	Démarrer l'enregistrement
 	Bend:	Courbure :
 	Bicubic	Bicubique

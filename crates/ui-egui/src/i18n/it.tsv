@@ -844,6 +844,12 @@
 	Baseline shift	Scostamento linea base
 	Basic	Base
 	Before (Y)	Prima (Y)
+	Save Settings…	Salva impostazioni…
+	Load Settings…	Carica impostazioni…
+	Save these settings as a Camera Raw .xmp file	Salva queste impostazioni come file .xmp di Camera Raw
+	Load settings from a Camera Raw .xmp file	Carica le impostazioni da un file .xmp di Camera Raw
+	Loaded Camera Raw settings from {file}	Impostazioni Camera Raw caricate da {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Impostazioni Camera Raw caricate da {file} ({n} non supportate)
 	Begin recording	Inizia registrazione
 	Bend:	Curvatura:
 	Bicubic	Bicubica

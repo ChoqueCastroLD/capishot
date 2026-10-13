@@ -860,6 +860,12 @@
 	Baseline shift	Posun účaří
 	Basic	Základní
 	Before (Y)	Před (Y)
+	Save Settings…	Uložit nastavení…
+	Load Settings…	Načíst nastavení…
+	Save these settings as a Camera Raw .xmp file	Uložit toto nastavení jako soubor Camera Raw .xmp
+	Load settings from a Camera Raw .xmp file	Načíst nastavení ze souboru Camera Raw .xmp
+	Loaded Camera Raw settings from {file}	Nastavení Camera Raw načteno ze souboru {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Nastavení Camera Raw načteno ze souboru {file} (nepodporováno: {n})
 	Begin recording	Zahájit záznam
 	Bend:	Ohyb:
 	Bicubic	Bikubická

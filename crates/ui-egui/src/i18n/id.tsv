@@ -828,6 +828,12 @@
 	Baseline shift	Geser baseline
 	Basic	Dasar
 	Before (Y)	Sebelum (Y)
+	Save Settings…	Simpan Pengaturan…
+	Load Settings…	Muat Pengaturan…
+	Save these settings as a Camera Raw .xmp file	Simpan pengaturan ini sebagai berkas .xmp Camera Raw
+	Load settings from a Camera Raw .xmp file	Muat pengaturan dari berkas .xmp Camera Raw
+	Loaded Camera Raw settings from {file}	Pengaturan Camera Raw dimuat dari {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Pengaturan Camera Raw dimuat dari {file} ({n} tidak didukung)
 	Begin recording	Mulai merekam
 	Bend:	Lengkung:
 	Bicubic	Bicubic

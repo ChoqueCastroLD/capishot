@@ -1899,6 +1899,12 @@
 	Aqua	Κυανό
 	Balance	Ισορροπία
 	Before (Y)	Πριν (Y)
+	Save Settings…	Αποθήκευση ρυθμίσεων…
+	Load Settings…	Φόρτωση ρυθμίσεων…
+	Save these settings as a Camera Raw .xmp file	Αποθήκευση αυτών των ρυθμίσεων ως αρχείο Camera Raw .xmp
+	Load settings from a Camera Raw .xmp file	Φόρτωση ρυθμίσεων από αρχείο Camera Raw .xmp
+	Loaded Camera Raw settings from {file}	Φορτώθηκαν ρυθμίσεις Camera Raw από το {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Φορτώθηκαν ρυθμίσεις Camera Raw από το {file} ({n} δεν υποστηρίζονται)
 	Blending	Ανάμειξη
 	Camera Raw Filter ({layer})	Φίλτρο Camera Raw ({layer})
 	Camera Raw isn't open	Το Camera Raw δεν είναι ανοιχτό

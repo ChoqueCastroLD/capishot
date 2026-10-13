@@ -827,6 +827,12 @@
 	Baseline shift	Basislijnverschuiving
 	Basic	Basis
 	Before (Y)	Voor (Y)
+	Save Settings…	Instellingen opslaan…
+	Load Settings…	Instellingen laden…
+	Save these settings as a Camera Raw .xmp file	Deze instellingen opslaan als Camera Raw-.xmp-bestand
+	Load settings from a Camera Raw .xmp file	Instellingen laden uit een Camera Raw-.xmp-bestand
+	Loaded Camera Raw settings from {file}	Camera Raw-instellingen geladen uit {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Camera Raw-instellingen geladen uit {file} ({n} niet ondersteund)
 	Begin recording	Opname starten
 	Bend:	Buiging:
 	Bicubic	Bicubisch

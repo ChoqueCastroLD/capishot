@@ -819,6 +819,12 @@
 	Baseline shift	기준선 이동
 	Basic	기본
 	Before (Y)	이전 (Y)
+	Save Settings…	설정 저장…
+	Load Settings…	설정 불러오기…
+	Save these settings as a Camera Raw .xmp file	이 설정을 Camera Raw .xmp 파일로 저장
+	Load settings from a Camera Raw .xmp file	Camera Raw .xmp 파일에서 설정 불러오기
+	Loaded Camera Raw settings from {file}	{file}에서 Camera Raw 설정을 불러왔습니다
+	Loaded Camera Raw settings from {file} ({n} not supported)	{file}에서 Camera Raw 설정을 불러왔습니다 (미지원 {n}개)
 	Begin recording	기록 시작
 	Bend:	구부림:
 	Bicubic	쌍입방

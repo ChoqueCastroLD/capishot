@@ -847,6 +847,12 @@
 	Baseline shift	ベースラインシフト
 	Basic	基本
 	Before (Y)	補正前(Y)
+	Save Settings…	設定を保存…
+	Load Settings…	設定を読み込み…
+	Save these settings as a Camera Raw .xmp file	この設定を Camera Raw の .xmp ファイルとして保存
+	Load settings from a Camera Raw .xmp file	Camera Raw の .xmp ファイルから設定を読み込む
+	Loaded Camera Raw settings from {file}	{file} から Camera Raw の設定を読み込みました
+	Loaded Camera Raw settings from {file} ({n} not supported)	{file} から Camera Raw の設定を読み込みました（未対応: {n}）
 	Begin recording	記録を開始
 	Bend:	曲げ:
 	Bicubic	バイキュービック

@@ -3814,3 +3814,9 @@ cameraData	Lens	Lens
 	Gradient Preset Options	Gradyan Ön Ayarı Seçenekleri
 	Import .GRD	.GRD İçe Aktar
 	Choose a gradient file (.grd).	Bir gradyan dosyası (.grd) seçin.
+	Save Settings…	Ayarları Kaydet…
+	Load Settings…	Ayarları Yükle…
+	Save these settings as a Camera Raw .xmp file	Bu ayarları Camera Raw .xmp dosyası olarak kaydet
+	Load settings from a Camera Raw .xmp file	Ayarları bir Camera Raw .xmp dosyasından yükle
+	Loaded Camera Raw settings from {file}	Camera Raw ayarları {file} dosyasından yüklendi
+	Loaded Camera Raw settings from {file} ({n} not supported)	Camera Raw ayarları {file} dosyasından yüklendi ({n} desteklenmiyor)

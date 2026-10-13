@@ -848,6 +848,12 @@
 	Baseline shift	基线偏移
 	Basic	基本
 	Before (Y)	调整前（Y）
+	Save Settings…	存储设置…
+	Load Settings…	载入设置…
+	Save these settings as a Camera Raw .xmp file	将这些设置存储为 Camera Raw .xmp 文件
+	Load settings from a Camera Raw .xmp file	从 Camera Raw .xmp 文件载入设置
+	Loaded Camera Raw settings from {file}	已从 {file} 载入 Camera Raw 设置
+	Loaded Camera Raw settings from {file} ({n} not supported)	已从 {file} 载入 Camera Raw 设置（{n} 项不支持）
 	Begin recording	开始录制
 	Bend:	弯曲：
 	Bicubic	双三次

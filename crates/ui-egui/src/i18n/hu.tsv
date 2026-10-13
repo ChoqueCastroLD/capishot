@@ -4002,3 +4002,9 @@ cameraRaw	Yellow	Sárga
 	Gradient Preset Options	Színátmenet-előbeállítás beállításai
 	Import .GRD	.GRD importálása
 	Choose a gradient file (.grd).	Válasszon színátmenetfájlt (.grd).
+	Save Settings…	Beállítások mentése…
+	Load Settings…	Beállítások betöltése…
+	Save these settings as a Camera Raw .xmp file	A beállítások mentése Camera Raw .xmp-fájlként
+	Load settings from a Camera Raw .xmp file	Beállítások betöltése Camera Raw .xmp-fájlból
+	Loaded Camera Raw settings from {file}	Camera Raw-beállítások betöltve innen: {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Camera Raw-beállítások betöltve innen: {file} ({n} nem támogatott)

@@ -845,6 +845,12 @@
 	Baseline shift	Przesunięcie linii bazowej
 	Basic	Podstawowe
 	Before (Y)	Przed (Y)
+	Save Settings…	Zapisz ustawienia…
+	Load Settings…	Wczytaj ustawienia…
+	Save these settings as a Camera Raw .xmp file	Zapisz te ustawienia jako plik .xmp Camera Raw
+	Load settings from a Camera Raw .xmp file	Wczytaj ustawienia z pliku .xmp Camera Raw
+	Loaded Camera Raw settings from {file}	Wczytano ustawienia Camera Raw z pliku {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Wczytano ustawienia Camera Raw z pliku {file} (nieobsługiwane: {n})
 	Begin recording	Rozpocznij nagrywanie
 	Bend:	Zgięcie:
 	Bicubic	Dwusześcienna

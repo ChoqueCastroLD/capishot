@@ -1681,6 +1681,12 @@
 	Show in Explorer	Показать в Проводнике
 	Show in Folder	Показать в папке
 	Before (Y)	До (Y)
+	Save Settings…	Сохранить настройки…
+	Load Settings…	Загрузить настройки…
+	Save these settings as a Camera Raw .xmp file	Сохранить эти настройки в файл Camera Raw .xmp
+	Load settings from a Camera Raw .xmp file	Загрузить настройки из файла Camera Raw .xmp
+	Loaded Camera Raw settings from {file}	Настройки Camera Raw загружены из {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Настройки Camera Raw загружены из {file} (не поддерживается: {n})
 	After (X)	После (X)
 	Original	Оригинал
 	Current	Текущий
