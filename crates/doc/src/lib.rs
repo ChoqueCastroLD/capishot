@@ -99,6 +99,11 @@ pub struct Locks {
 }
 
 impl Locks {
+    /// Whether any lock is set: Photoshop then shows the lock icon on the layer's row.
+    pub fn any(self) -> bool {
+        self.transparency || self.pixels || self.position || self.artboard || self.all
+    }
+
     pub fn union(self, o: Locks) -> Locks {
         Locks {
             transparency: self.transparency || o.transparency,
@@ -1193,6 +1198,19 @@ mod tests {
 
     fn doc() -> Document {
         Document::with_background("t", Size::new(100, 50), ColorMode::Rgb, SampleType::U8, Color::WHITE)
+    }
+
+    #[test]
+    fn any_lock_counts_every_lock() {
+        assert!(!Locks::default().any());
+        let each = [
+            Locks { transparency: true, ..Locks::default() },
+            Locks { pixels: true, ..Locks::default() },
+            Locks { position: true, ..Locks::default() },
+            Locks { artboard: true, ..Locks::default() },
+            Locks { all: true, ..Locks::default() },
+        ];
+        assert!(each.iter().all(|k| k.any()));
     }
 
     #[test]

@@ -2013,9 +2013,8 @@ fn simple_lock_toggle(background: bool, l: &Layer) -> (String, Value) {
     if background {
         return ("layer.new.layerFromBackground".into(), json!({}));
     }
-    let k = &l.locks;
-    let locked = k.transparency || k.pixels || k.position || k.artboard || k.all;
-    let locks = if locked { json!({"transparency": false, "pixels": false, "position": false, "artboard": false, "all": false}) } else { json!({"all": true}) };
+    let locks =
+        if l.locks.any() { json!({"transparency": false, "pixels": false, "position": false, "artboard": false, "all": false}) } else { json!({"all": true}) };
     ("layer.setProps".into(), json!({"layer": l.id.0, "locks": locks}))
 }
 
@@ -2174,7 +2173,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 });
             }
             if !t.pro {
-                let locked = l.locks.transparency || l.locks.position || l.locks.all;
+                let locked = l.locks.any();
                 if icons::button(ui, if locked { "lock" } else { "lock-open" }, 22.0, locked, tl!("Lock layer")).clicked() {
                     actions.push(simple_lock_toggle(bg, l));
                 }
@@ -4604,7 +4603,7 @@ mod lock_tests {
         click_lock(&mut app);
         let l = &app.session.active().unwrap().doc.layers[0];
         assert_eq!(l.name, "Layer 0");
-        assert!(!(l.locks.transparency || l.locks.pixels || l.locks.position || l.locks.all));
+        assert!(!l.locks.any());
         erase_line(&mut app);
         assert!(!app.ui.status_error, "{}", app.ui.status);
         assert_eq!(app.session.active().unwrap().doc.layers[0].surface().unwrap().rgba(50, 40)[3], 0.0, "erased to transparency");
@@ -4612,8 +4611,7 @@ mod lock_tests {
         click_lock(&mut app);
         assert!(app.session.active().unwrap().doc.layers[0].locks.all);
         click_lock(&mut app);
-        let k = app.session.active().unwrap().doc.layers[0].locks;
-        assert!(!(k.transparency || k.pixels || k.position || k.artboard || k.all));
+        assert!(!app.session.active().unwrap().doc.layers[0].locks.any());
         // A layer with only transparency locked unlocks in one click.
         app.run("layer.setProps", json!({"locks": {"transparency": true}})).unwrap();
         click_lock(&mut app);
