@@ -38,6 +38,8 @@ pub const CATEGORIES: &[(&str, &[Preset])] = &[
             ("A4", 2480, 3508, 300.0),
             ("A3", 3508, 4961, 300.0),
             ("A5", 1748, 2480, 300.0),
+            ("B3", 4169, 5906, 300.0),
+            ("B4", 2953, 4169, 300.0),
         ],
     ),
     (
@@ -764,6 +766,22 @@ mod tests {
 
     /// Units & Rulers › New Document Preset Resolutions: print presets keep their inches at the
     /// Print Resolution, screen presets keep their pixels at the Screen Resolution.
+    #[test]
+    fn iso_b_paper_presets_use_correct_dimensions_and_selected_units() {
+        let presets = CATEGORIES.iter().find(|c| c.0 == "Print").unwrap().1;
+        let mut f = crate::state::UiState::new_document_fields();
+        f.insert("__unit".into(), json!("mm"));
+        for (name, w, h) in [("B3", 4169, 5906), ("B4", 2953, 4169)] {
+            let preset = presets.iter().find(|p| p.0 == name).unwrap();
+            assert_eq!((preset.1, preset.2, preset.3), (w, h, 300.0));
+            assert_eq!(preset_unit(preset, &f), "mm");
+            apply_preset(&mut f, preset, &Default::default());
+            let params = command_params(&f);
+            assert_eq!((params["width"].as_u64(), params["height"].as_u64()), (Some(u64::from(w)), Some(u64::from(h))));
+            assert_eq!(params["resolution"], 300.0);
+        }
+    }
+
     #[test]
     fn presets_follow_the_preset_resolution_preferences() {
         let find = |cat: &str, name: &str| *CATEGORIES.iter().find(|c| c.0 == cat).unwrap().1.iter().find(|p| p.0 == name).unwrap();
