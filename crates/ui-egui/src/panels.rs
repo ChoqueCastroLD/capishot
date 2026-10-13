@@ -3102,7 +3102,7 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.separator));
     }
     let mut snap_cmd = None;
-    let mut target: Option<isize> = None;
+    let mut target: Option<usize> = None;
     let all = entries.iter().map(|e| (e.clone(), false)).chain(redo.iter().map(|e| (e.clone(), true)));
     // The dock gives History a fixed height: the rows scroll above the footer.
     let footer = if t.pro { widgets::footer_height(ui) + ui.spacing().item_spacing.y } else { 0.0 };
@@ -3113,6 +3113,7 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         snap_cmd = snapshot_rows(app, ui);
         for (i, (e, is_redo)) in all.enumerate() {
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, i == current, &e));
             if i == current {
                 ui.painter().rect_filled(rect, if t.pro { 0.0 } else { t.radius_sm }, if t.pro { t.row_selected } else { t.accent_soft });
             } else if resp.hovered() {
@@ -3135,8 +3136,8 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 if is_redo { t.text_faint } else { t.icon },
             );
             ui.painter().text(pos2(rect.left() + 58.0, rect.center().y), Align2::LEFT_CENTER, &e, egui::FontId::proportional(12.0), color);
-            if resp.clicked() {
-                target = Some(i as isize - current as isize);
+            if resp.clicked() && i != current {
+                target = Some(i);
             }
         }
     });
@@ -3167,13 +3168,13 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         app.ui.status = e;
         app.ui.status_error = true;
     }
-    if let Some(delta) = target.filter(|_| app.ui.transform.is_none()) {
-        let (cmd, n) = if delta < 0 { ("edit.undo", -delta) } else { ("edit.redo", delta) };
-        for _ in 0..n {
-            if app.run(cmd, json!({})).is_err() {
-                break;
-            }
-        }
+    // One command per click (#2966): stepping with Undo/Redo once per state made the canvas
+    // recomposite the whole document.
+    if let Some(state) = target.filter(|_| app.ui.transform.is_none())
+        && let Err(e) = app.run("history.selectState", json!({ "state": state }))
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
     }
 }
 
@@ -4632,8 +4633,9 @@ mod snapshot_row_tests {
         assert_eq!(st.history.entries().len(), steps + 1);
         assert_eq!(st.history.entries().last().map(String::as_str), Some("Snapshot 1"));
         assert_eq!(top_pixel(&h), [1.0, 0.0, 0.0, 1.0], "back to red");
-        // Right-click › Rename…: type a name, Enter.
-        h.get_by_label("Snapshot 1").click_secondary();
+        // Right-click › Rename…: type a name, Enter. The new "Snapshot 1" state is listed under the
+        // snapshot rows, so the first match is the snapshot's row.
+        h.get_all_by_label("Snapshot 1").next().unwrap().click_secondary();
         h.run_steps(2);
         h.get_by_label("Rename…").click();
         h.run_steps(2);
@@ -4659,8 +4661,8 @@ mod snapshot_row_tests {
         h.run_steps(2);
         assert_eq!(snapshot_names(&h), ["Lesson start"], "Escape cancels");
         assert_eq!(h.state().session.active().unwrap().history.entries().len(), steps_now + 1, "the click selected it once");
-        // Right-click › Delete.
-        h.get_by_label("Lesson start").click_secondary();
+        // Right-click › Delete (the snapshot's row, above the state the click made).
+        h.get_all_by_label("Lesson start").next().unwrap().click_secondary();
         h.run_steps(2);
         h.get_by_label("Delete").click();
         h.run_steps(2);
@@ -6045,3 +6047,7 @@ mod properties_target_regressions {
         assert_eq!(after, before, "pending width belongs to the old document/layer");
     }
 }
+
+#[cfg(test)]
+#[path = "history_panel_select_tests.rs"]
+mod history_panel_select_tests;
