@@ -1733,8 +1733,14 @@ fn num_field(ui: &mut egui::Ui, label: &str, tip: &str, v: f32, range: std::ops:
         ui.spacing_mut().item_spacing.x = 4.0;
         let (r, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
         ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, label, crate::theme::semibold(10.0), t.text_dim);
-        crate::widgets::scrub_label(ui, &resp.on_hover_text(tip));
-        if crate::widgets::value_field(ui, &mut v, range, unit, width).changed() {
+        crate::widgets::scrub_label(ui, &resp.on_hover_text(tl!(tip)));
+        let response = crate::widgets::value_field(ui, &mut v, range, unit, width);
+        response.widget_info(|| {
+            let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), f64::from(v));
+            info.label = Some(tl!(tip).to_owned());
+            info
+        });
+        if response.changed() {
             out = Some(v);
         }
     });

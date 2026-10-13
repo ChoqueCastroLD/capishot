@@ -14,6 +14,33 @@ use super::{layout, text_layer};
 use crate::PhotocraftApp;
 use crate::canvas::ViewXform;
 
+#[test]
+fn numeric_type_fields_have_localized_accessible_names() {
+    let pt = crate::i18n::Lang::from_code("pt-br").unwrap();
+    let mut h = Harness::builder().build_ui_state(
+        move |ui, value: &mut f32| {
+            if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            crate::i18n::with_language(pt, || {
+                if let Some(next) = super::num_field(ui, "tT", "Font size", *value, 1.0..=999.0, "pt", 80.0) {
+                    *value = next;
+                }
+            });
+        },
+        24.0,
+    );
+    PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(4);
+    h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Tamanho da fonte").click();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
+    h.event(egui::Event::Text("36".into()));
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert_eq!(*h.state(), 36.0);
+}
+
 fn harness(ppp: f32, app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
     make_harness(ppp, app, false)
 }
@@ -1333,8 +1360,10 @@ mod multi_layer_formatting {
         h
     }
 
-    fn number(h: &mut Harness<'static, PhotocraftApp>, index: usize, value: &str) {
-        h.get_all_by_role(Role::SpinButton).nth(index).expect("numeric field").click();
+    fn number(h: &mut Harness<'static, PhotocraftApp>, label: &str, value: &str) {
+        // Variable-font axes add numeric fields before size/leading. Select the setting by
+        // its accessible name, so a font scan cannot shift this action onto another control.
+        h.get_by_role_and_label(Role::SpinButton, label).click();
         h.run();
         h.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
         h.event(egui::Event::Text(value.into()));
@@ -1409,16 +1438,16 @@ mod multi_layer_formatting {
         let raster = LayerId(app.run("layer.new.layer", json!({"name": "Selected raster"})).unwrap()["layer"].as_u64().unwrap());
         selected(&mut app, &[ids[0], ids[1], raster]);
         let mut h = controls(app, true);
-        number(&mut h, 0, "60");
+        number(&mut h, "Font size", "60");
         // Differ from the automatic 72 pt leading so this is an actual property change.
-        number(&mut h, 1, "84");
+        number(&mut h, "Leading (set to the font size × auto-leading when Auto)", "84");
         h.get_by_label("Faux Bold").click();
         h.run();
         h.get_by_label("Center text").click();
         h.run();
         h.get_by_label("Hyphenate").click();
         h.run();
-        number(&mut h, 6, "9");
+        number(&mut h, "Indent left margin", "9");
         for (id, scale) in [(ids[0], 2.0), (ids[1], 4.0)] {
             let c = style(h.state(), id, 0);
             assert_eq!(c.size_pt * scale, 60.0);
@@ -1435,7 +1464,7 @@ mod multi_layer_formatting {
         let peer = text(h.state(), ids[1]).char_runs();
         editing(h.state_mut(), ids[0]);
         h.run();
-        number(&mut h, 0, "40");
+        number(&mut h, "Font size", "40");
         assert_eq!((size_at(h.state(), ids[0], 0), size_at(h.state(), ids[0], 1), size_at(h.state(), ids[0], 3)), (30.0, 20.0, 30.0));
         assert_eq!(text(h.state(), ids[1]).char_runs(), peer);
     }
