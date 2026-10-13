@@ -1288,7 +1288,7 @@ impl PhotocraftApp {
         // which records the step once answered.
         if tga_bits.is_none() && targa_options_ui::wants_prompt(self, &path) {
             let copy = self.saves_copy(&path, None)?;
-            targa_options_ui::park(self, path.clone(), copy, true)?;
+            targa_options_ui::park(self, path.clone(), copy, "file.saveAs")?;
             return Ok(serde_json::json!({"path": path, "warnings": []}));
         }
         // A layered TIFF asks about its layers first (Preferences › File Handling); the save
@@ -1325,7 +1325,7 @@ impl PhotocraftApp {
         Ok(r)
     }
 
-    /// Replays a recorded `file.save` / `file.saveAs` step: no dialog or prompt, and the
+    /// Replays a recorded `file.save` / `file.saveAs` / `file.saveACopy` step: no dialog or prompt, and the
     /// recorded TIFF or Targa answer (if any) stands in for the TIFF or Targa Options prompt.
     pub(crate) fn replay_save(&mut self, id: &str, params: &Value) -> Result<Value, String> {
         if self.save_options_open() {
@@ -1344,6 +1344,11 @@ impl PhotocraftApp {
         }
         let path = params.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()).ok_or("Save As needs a `path`")?;
         let tga_bits = targa_options_ui::bits_param(params, id)?;
+        if id == "file.saveACopy" {
+            // A copy: the document keeps its own file and unsaved state, as when recorded (#4373).
+            let doc = self.session.active().ok_or("no document")?.doc.clone();
+            return crate::view_cmds::write_copy(self, &doc, path, tga_bits);
+        }
         self.save_as_step(path.to_string(), params.get("tiffLayers").and_then(Value::as_bool), tga_bits)
     }
 
