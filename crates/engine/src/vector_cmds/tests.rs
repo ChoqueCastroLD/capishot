@@ -796,6 +796,31 @@ fn shape_info_bounds_of_curved_shapes_are_exact() {
     }
 }
 
+#[test]
+fn shape_create_negative_size_rect_covers_the_ellipse_box() {
+    // Issue #4203: a rectangle with a negative width spanned x 50..70 while the ellipse and
+    // polygon with the same `rect` spanned 30..50.
+    for depth in [8, 16, 32] {
+        let mut s = session(100, 60, depth);
+        let ell = s.execute("shape.create", json!({"kind": "ellipse", "rect": [50, 10, -20, 30], "fill": "#0000ff"})).unwrap()["bounds"].clone();
+        assert_eq!(ell, json!([30, 10, 20, 30]), "{depth}-bit");
+        for params in [
+            json!({"kind": "rect", "rect": [50, 10, -20, 30], "fill": "#0000ff"}),
+            json!({"kind": "roundedRect", "rect": [50, 10, -20, 30], "radii": 5, "fill": "#0000ff"}),
+            json!({"kind": "rect", "rect": [50, 40, -20, -30], "fill": "#0000ff"}),
+        ] {
+            let r = s.execute("shape.create", params.clone()).unwrap();
+            assert_eq!(r["bounds"], ell, "{params} at {depth}-bit");
+            let sh = shape(&s, r["layer"].as_u64().unwrap());
+            let c = sh.cache.as_ref().unwrap();
+            let fmt = c.format();
+            let alpha = |x: i32, y: i32| photocraft_raster::to_rgba(&fmt, &c.read_region(photocraft_doc::Rect::from_xywh(x, y, 1, 1)))[3];
+            assert!(alpha(40, 25) > 0.99, "{params} at {depth}-bit");
+            assert!(alpha(60, 25) < 0.01, "{params} at {depth}-bit");
+        }
+    }
+}
+
 /// Two overlapping 40×40 rectangle shape layers ("Rectangle 1" black below, "Rectangle 2" grey
 /// above, overlapping by 20×20) with both selected, like the Layers panel in #2400.
 fn two_selected_rects(depth: u32) -> (Session, u64, u64) {
