@@ -629,6 +629,28 @@ fn forced_line_break_starts_a_line_in_the_same_paragraph() {
 }
 
 #[test]
+fn hyphenated_postscript_names_preserve_family_prefixes() {
+    for (ps, family, weight, italic) in
+        [("FOT-NewRodinPro-Regular", "FOT-New Rodin Pro", 400, false), ("Vendor-FamilyPro-BoldIt", "Vendor-Family Pro", 700, true)]
+    {
+        let guessed = fonts::guess_from_postscript(ps);
+        assert_eq!((guessed.family.as_str(), guessed.weight, guessed.italic), (family, weight, italic));
+    }
+}
+
+#[test]
+fn hyphenated_postscript_style_suffix_keeps_weight_and_slant() {
+    for (ps, family, weight, italic) in [
+        ("MyriadPro-Bold-It", "Myriad Pro", 700, true),
+        ("FOT-NewRodinPro-Bold-It", "FOT-New Rodin Pro", 700, true),
+        ("Vendor-Bold-Regular", "Vendor-Bold", 400, false),
+    ] {
+        let guessed = fonts::guess_from_postscript(ps);
+        assert_eq!((guessed.family.as_str(), guessed.weight, guessed.italic), (family, weight, italic));
+    }
+}
+
+#[test]
 fn postscript_names() {
     let g = fonts::guess_from_postscript("MyriadPro-BoldIt");
     assert_eq!((g.family.as_str(), g.weight, g.italic), ("Myriad Pro", 700, true));
