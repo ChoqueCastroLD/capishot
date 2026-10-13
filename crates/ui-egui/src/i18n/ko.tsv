@@ -3260,3 +3260,4 @@ curves	Smooth	매끄럽게
 	Action playback stopped	액션 재생이 중지되었습니다
 	Step {step} is waiting for its dialog	{step}단계가 대화 상자를 기다리고 있습니다
 @plural	{n} action|{n} actions	액션 {n}개
+	Auto Add/Delete	자동 추가/삭제

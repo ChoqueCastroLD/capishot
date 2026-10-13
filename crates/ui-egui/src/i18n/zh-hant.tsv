@@ -2680,3 +2680,4 @@ curves	Smooth	平滑
 	Action playback stopped	動作播放已停止
 	Step {step} is waiting for its dialog	步驟 {step} 正在等待其對話框
 @plural	{n} action|{n} actions	{n} 個動作
+	Auto Add/Delete	自動增加/刪除

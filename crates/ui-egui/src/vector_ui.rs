@@ -887,6 +887,8 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
         if let Some((_, p)) = targeted_vector_mask(app) {
             draw_path(&p, tool == Tool::PathSelection);
         }
+        // The segment the Pen's Auto Add/Delete would add an anchor to, or the anchor it would delete.
+        crate::anchor_tools::draw_pen_hover(app, painter, &to_scr, accent, painter.ctx().input(|i| i.modifiers));
     }
     // Pen path in progress, with handles of the last knot and a rubber band to the pointer.
     if let Some(pen) = &app.ui.pen {
@@ -999,6 +1001,10 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
                 o.shape_stroke = change.options;
                 o.stroke_width = enabled_stroke_width(o.stroke_width);
             }
+        }
+        if tool == Tool::Pen {
+            crate::widgets::vline(ui, 22.0);
+            crate::widgets::checkbox(ui, &mut o.pen_auto_add_delete, tl!("Auto Add/Delete"));
         }
         let enter = crate::shortcuts::pretty("Enter");
         match tool {

@@ -2695,3 +2695,4 @@ curves	Smooth	平滑
 	Action playback stopped	动作播放已停止
 	Step {step} is waiting for its dialog	步骤 {step} 正在等待其对话框
 @plural	{n} action|{n} actions	{n} 个动作
+	Auto Add/Delete	自动添加/删除
