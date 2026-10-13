@@ -1062,6 +1062,10 @@ fn inspect_reports_the_smart_source() {
     let source = |s: &Session| crate::inspect::layer(s.active().unwrap().doc.layer(s.active().unwrap().active_layer.unwrap()).unwrap())["smartSource"].clone();
     let front = source(&s);
     assert_eq!(front, json!({"kind": "linked", "path": "uuid-1"}));
+    // The document's info knows the file is embedded in the PSD (a `liFD` item) and says so,
+    // with its file name; the uuid stays its key.
+    let info = crate::inspect::document(s.active().unwrap());
+    assert_eq!(info["layers"][0]["smartSource"], json!({"kind": "embedded", "fileName": "in.png", "uuid": "uuid-1"}));
     // A duplicate shares the file; New Smart Object via Copy gets its own.
     s.execute("layer.duplicate", json!({})).unwrap();
     assert_eq!(source(&s), front, "a duplicate shares its source");
