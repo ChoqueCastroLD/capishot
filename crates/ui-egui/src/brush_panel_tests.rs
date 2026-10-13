@@ -458,7 +458,14 @@ fn drop_targets_and_actions_reorder_presets() {
     use crate::brushes_tab::{Action, apply, drop_target, group_key};
     let mut app = app();
     for (n, g) in [("A1", "Alpha"), ("A2", "Alpha"), ("A3", "Alpha"), ("B1", "Beta")] {
-        app.session.tools.presets.push(paint::BrushPreset { name: n.into(), brush: Default::default(), builtin: false, group: g.into(), folder: Vec::new() });
+        app.session.tools.presets.push(paint::BrushPreset {
+            name: n.into(),
+            brush: Default::default(),
+            builtin: false,
+            group: g.into(),
+            folder: Vec::new(),
+            captures: Default::default(),
+        });
     }
     let p = &app.session.tools.presets;
     // Dropping A1 on A3's lower half lands after A3 (index 2 once A1 is out); on its upper half, before it.
@@ -752,6 +759,7 @@ fn kit(name: &str, folder: &[&str]) -> paint::BrushPreset {
         builtin: false,
         group: "Kit".into(),
         folder: folder.iter().map(|s| s.to_string()).collect(),
+        captures: Default::default(),
     }
 }
 

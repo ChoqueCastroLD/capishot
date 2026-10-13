@@ -2126,6 +2126,11 @@
 	Rename Brush…	Přejmenovat štětec…
 	Delete Brush	Odstranit štětec
 	New Brush Preset…	Nová předvolba štětce…
+	Capture Brush Size in Preset	Zachytit velikost štětce v předvolbě
+	Include Tool Settings	Zahrnout nastavení nástroje
+	Include Color	Zahrnout barvu
+	Enter a name for the brush preset	Zadejte název předvolby štětce
+	A brush preset with this name already exists	Předvolba štětce s tímto názvem již existuje
 	Brush Preset Options	Možnosti přednastavení štětců
 	Group name	Název skupiny
 	Brush name	Název štětce

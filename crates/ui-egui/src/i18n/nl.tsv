@@ -2076,6 +2076,11 @@
 	Rename Brush…	Penseel hernoemen…
 	Delete Brush	Penseel verwijderen
 	New Brush Preset…	Nieuwe penseelvoorinstelling…
+	Capture Brush Size in Preset	Penseelgrootte vastleggen in voorinstelling
+	Include Tool Settings	Gereedschapsinstellingen opnemen
+	Include Color	Kleur opnemen
+	Enter a name for the brush preset	Voer een naam in voor de penseelvoorinstelling
+	A brush preset with this name already exists	Er bestaat al een penseelvoorinstelling met deze naam
 	Brush Preset Options	Opties penseelvoorinstelling
 	Group name	Groepsnaam
 	Brush name	Penseelnaam

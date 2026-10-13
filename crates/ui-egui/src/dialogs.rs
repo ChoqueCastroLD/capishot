@@ -263,6 +263,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     about_tab_body(app, ui, chosen);
                 }
                 DialogKind::Command if crate::guide_layout_ui::owns(&fields) => outcome = crate::guide_layout_ui::body(app, ui, &mut fields, interactive),
+                DialogKind::Command if crate::brush_preset_dialog::owns(&fields) => {
+                    outcome = crate::brush_preset_dialog::body(app, ui, &mut fields, interactive)
+                }
                 DialogKind::Command if crate::fill_ui::owns(&fields) => crate::fill_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::pattern_fill_ui::owns(&fields) => crate::pattern_fill_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::stroke_ui::owns(&fields) => crate::stroke_ui::body(ui, &mut fields),
@@ -319,8 +322,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
             }
             crate::field_tab::end(ui.ctx(), tab);
-            if crate::guide_layout_ui::owns(&fields) {
-                // This dialog owns its right-side actions and validates Enter itself.
+            if crate::guide_layout_ui::owns(&fields) || crate::brush_preset_dialog::owns(&fields) {
+                // These dialogs own their right-side actions and validate Enter themselves.
             } else if crate::color_picker_ui::owns(&fields) {
                 if interactive && outcome.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     outcome = Some(true);
@@ -543,6 +546,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
             r
         }
         DialogKind::Command if crate::guide_layout_ui::owns(&d.fields) => crate::guide_layout_ui::confirm(app, &d.fields),
+        DialogKind::Command if crate::brush_preset_dialog::owns(&d.fields) => crate::brush_preset_dialog::confirm(app, &d.fields),
         DialogKind::Command if crate::fill_ui::owns(&d.fields) => crate::fill_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::pattern_fill_ui::owns(&d.fields) => crate::pattern_fill_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::stroke_ui::owns(&d.fields) => crate::stroke_ui::confirm(app, &d.fields),

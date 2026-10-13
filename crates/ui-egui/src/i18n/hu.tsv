@@ -1174,6 +1174,11 @@
 	New Brush	Új ecset
 	New Brush Preset	Új ecset-előbeállítás
 	New Brush Preset…	Új ecset-előbeállítás…
+	Capture Brush Size in Preset	Ecsetméret rögzítése az előbeállításban
+	Include Tool Settings	Eszközbeállítások belefoglalása
+	Include Color	Szín belefoglalása
+	Enter a name for the brush preset	Adjon nevet az ecset-előbeállításnak
+	A brush preset with this name already exists	Már van ilyen nevű ecset-előbeállítás
 	New Crop Preset…	Új körbevágási előbeállítás…
 	New Tool Preset	Új eszköz-előbeállítás
 	No brush presets	Nincs ecset-előbeállítás

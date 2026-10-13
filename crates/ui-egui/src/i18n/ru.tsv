@@ -1026,6 +1026,11 @@
 	Brush Name	Имя кисти
 	Brush Stroke	Мазок кисти
 	New Brush Preset…	Новый набор параметров кисти…
+	Capture Brush Size in Preset	Сохранить размер кисти в наборе
+	Include Tool Settings	Включить настройки инструмента
+	Include Color	Включить цвет
+	Enter a name for the brush preset	Введите имя набора параметров кисти
+	A brush preset with this name already exists	Набор параметров кисти с таким именем уже существует
 	Brush Preset Options	Параметры наборов кистей
 	New Brush	Новая кисть
 	Create new brush from these settings	Создать новую кисть из этих параметров

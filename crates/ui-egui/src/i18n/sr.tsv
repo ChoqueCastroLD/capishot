@@ -2066,6 +2066,11 @@
 	Rename Brush…	Preimenuj četkicu…
 	Delete Brush	Obriši četkicu
 	New Brush Preset…	Novi šablon četkice…
+	Capture Brush Size in Preset	Sačuvaj veličinu četkice u šablonu
+	Include Tool Settings	Uključi podešavanja alatke
+	Include Color	Uključi boju
+	Enter a name for the brush preset	Unesite ime šablona četkice
+	A brush preset with this name already exists	Šablon četkice sa ovim imenom već postoji
 	Brush Preset Options	Opcije šablona četkice
 	Group name	Ime grupe
 	Brush name	Ime četkice

@@ -2109,6 +2109,11 @@
 	Rename Brush…	重新命名筆刷…
 	Delete Brush	刪除筆刷
 	New Brush Preset…	新增筆刷預設集…
+	Capture Brush Size in Preset	在預設集中擷取筆刷尺寸
+	Include Tool Settings	包含工具設定
+	Include Color	包含顏色
+	Enter a name for the brush preset	請輸入筆刷預設集的名稱
+	A brush preset with this name already exists	已有相同名稱的筆刷預設集
 	Brush Preset Options	筆刷預設集選項
 	Group name	群組名稱
 	Brush name	筆刷名稱

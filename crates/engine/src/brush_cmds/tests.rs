@@ -237,6 +237,45 @@ fn presets_save_load_delete_round_trip() {
     assert!(s.execute("brush.presets.save", json!({})).is_err());
 }
 
+/// The New Brush Preset dialog's boxes (#4490): a preset saved without Capture Brush Size or
+/// Include Tool Settings leaves the tool's size, mode, opacity, flow and pressure buttons as they
+/// are when picked; one saved with Include Color brings its colour back as the foreground. A preset
+/// saved without the boxes picks as it always did.
+#[test]
+fn presets_save_captures_size_tool_settings_and_color_as_asked() {
+    let mut s = session(10, 10);
+    s.execute("tools.setBrush", json!({"size": 40, "opacity": 0.5, "flow": 0.25, "mode": "Multiply", "pressureSize": false})).unwrap();
+    s.tools.foreground = [1.0, 0.0, 0.0, 1.0];
+    s.execute("brush.presets.save", json!({"name": "Legacy"})).unwrap();
+    s.execute("brush.presets.save", json!({"name": "Bare", "captureSize": false, "toolSettings": false})).unwrap();
+    s.execute("brush.presets.save", json!({"name": "Red", "color": true})).unwrap();
+    let caps = |n: &str| s.tools.presets.iter().find(|p| p.name == n).unwrap().captures.clone();
+    assert!(caps("Legacy").is_default(), "no boxes, the captures of any other preset");
+    assert_eq!(caps("Bare"), PresetCaptures { size: false, tool_settings: false, color: false });
+    assert!(caps("Red").color);
+
+    // Change the tool, then pick each.
+    let other = json!({"size": 9, "opacity": 1.0, "flow": 1.0, "mode": "Normal", "pressureSize": true});
+    s.execute("tools.setBrush", other.clone()).unwrap();
+    s.tools.foreground = [0.0, 0.0, 1.0, 1.0];
+    s.execute("tools.setBrush", json!({"preset": "Legacy"})).unwrap();
+    let b = &s.tools.brush;
+    assert_eq!((b.size, b.opacity, b.flow, b.mode, b.pressure_size), (40.0, 0.5, 0.25, photocraft_color::BlendMode::Multiply, false), "everything it saved");
+    assert_eq!(s.tools.foreground, [0.0, 0.0, 1.0, 1.0], "a preset without Include Color leaves the foreground");
+
+    s.execute("tools.setBrush", other.clone()).unwrap();
+    s.execute("tools.setBrush", json!({"preset": "Bare"})).unwrap();
+    let b = &s.tools.brush;
+    assert_eq!((b.size, b.opacity, b.flow, b.mode, b.pressure_size), (9.0, 1.0, 1.0, photocraft_color::BlendMode::Normal, true), "the tool's own");
+    assert_eq!(s.tools.current_preset.as_deref(), Some("Bare"));
+
+    s.execute("tools.setBrush", json!({"preset": "Red"})).unwrap();
+    assert_eq!(s.tools.foreground, [1.0, 0.0, 0.0, 1.0], "Include Color sets the foreground");
+    // A stroke naming the preset takes the same brush.
+    let r = resolve_brush(&s, &json!({"preset": "Bare"}), "paint.brush").unwrap();
+    assert_eq!(r.size, s.tools.brush.size);
+}
+
 #[test]
 fn presets_save_appends_at_the_end_and_update_overwrites_in_place() {
     let mut s = session(10, 10);

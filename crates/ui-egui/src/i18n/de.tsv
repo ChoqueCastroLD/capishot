@@ -2094,6 +2094,11 @@
 	Rename Brush…	Pinsel umbenennen…
 	Delete Brush	Pinsel löschen
 	New Brush Preset…	Neue Pinselvorgabe…
+	Capture Brush Size in Preset	Pinselgröße in Vorgabe erfassen
+	Include Tool Settings	Werkzeugeinstellungen einschließen
+	Include Color	Farbe einschließen
+	Enter a name for the brush preset	Geben Sie einen Namen für die Pinselvorgabe ein
+	A brush preset with this name already exists	Eine Pinselvorgabe mit diesem Namen ist bereits vorhanden
 	Brush Preset Options	Pinselvorgaben-Optionen
 	Group name	Gruppenname
 	Brush name	Pinselname

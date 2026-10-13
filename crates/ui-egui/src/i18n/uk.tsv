@@ -1004,6 +1004,11 @@
 	Brush Name	Назва пензля
 	Brush Stroke	Мазок пензля
 	New Brush Preset…	Новий набір пензля…
+	Capture Brush Size in Preset	Зберегти розмір пензля в наборі
+	Include Tool Settings	Включити налаштування інструмента
+	Include Color	Включити колір
+	Enter a name for the brush preset	Введіть назву набору пензля
+	A brush preset with this name already exists	Набір пензля з такою назвою вже існує
 	Brush Preset Options	Параметри набору пензля
 	New Brush	Новий пензель
 	Create new brush from these settings	Створити новий пензель із цими параметрами

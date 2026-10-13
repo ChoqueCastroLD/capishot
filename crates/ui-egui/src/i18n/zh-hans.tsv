@@ -2173,6 +2173,11 @@ cameraRaw	Blending	混合
 	Rename Brush…	重命名画笔…
 	Delete Brush	删除画笔
 	New Brush Preset…	新建画笔预设…
+	Capture Brush Size in Preset	在预设中存储画笔大小
+	Include Tool Settings	包含工具设置
+	Include Color	包含颜色
+	Enter a name for the brush preset	请输入画笔预设的名称
+	A brush preset with this name already exists	已存在同名的画笔预设
 	Brush Preset Options	画笔预设选项
 	Group name	组名称
 	Brush name	画笔名称

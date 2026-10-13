@@ -2111,6 +2111,11 @@
 	Rename Brush…	Cambiar el nombre del pincel…
 	Delete Brush	Eliminar pincel
 	New Brush Preset…	Nuevo ajuste preestablecido de pincel…
+	Capture Brush Size in Preset	Capturar tamaño del pincel en el ajuste preestablecido
+	Include Tool Settings	Incluir ajustes de herramienta
+	Include Color	Incluir color
+	Enter a name for the brush preset	Escriba un nombre para el ajuste preestablecido de pincel
+	A brush preset with this name already exists	Ya existe un ajuste preestablecido de pincel con este nombre
 	Brush Preset Options	Opciones de ajustes preestablecidos de pincel
 	Group name	Nombre del grupo
 	Brush name	Nombre del pincel

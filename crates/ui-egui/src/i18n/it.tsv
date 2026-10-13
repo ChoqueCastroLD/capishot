@@ -2108,6 +2108,11 @@
 	Rename Brush…	Rinomina pennello…
 	Delete Brush	Elimina pennello
 	New Brush Preset…	Nuovo predefinito pennello…
+	Capture Brush Size in Preset	Acquisisci dimensione pennello nel predefinito
+	Include Tool Settings	Includi impostazioni strumento
+	Include Color	Includi colore
+	Enter a name for the brush preset	Immetti un nome per il predefinito pennello
+	A brush preset with this name already exists	Esiste già un predefinito pennello con questo nome
 	Brush Preset Options	Opzioni predefiniti pennello
 	Group name	Nome gruppo
 	Brush name	Nome pennello

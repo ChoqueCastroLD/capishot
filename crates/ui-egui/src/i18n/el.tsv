@@ -1476,6 +1476,11 @@
 	Developing {name}	Επεξεργασία του {name}
 	Camera Raw ({name})	Επεξεργασία RAW ({name})
 	New Brush Preset…	Νέα προεπιλογή πινέλου…
+	Capture Brush Size in Preset	Αποθήκευση μεγέθους πινέλου στην προεπιλογή
+	Include Tool Settings	Συμπερίληψη ρυθμίσεων εργαλείου
+	Include Color	Συμπερίληψη χρώματος
+	Enter a name for the brush preset	Εισαγάγετε όνομα για την προεπιλογή πινέλου
+	A brush preset with this name already exists	Υπάρχει ήδη προεπιλογή πινέλου με αυτό το όνομα
 	Brush Preset Options	Επιλογές προεπιλογής πινέλου
 	Show font names in english	Εμφάνιση ονομάτων γραμματοσειρών στα αγγλικά
 	Show menu colors	Εμφάνιση χρωμάτων μενού

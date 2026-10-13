@@ -2058,6 +2058,11 @@
 	Rename Brush…	Fırçayı Yeniden Adlandır…
 	Delete Brush	Fırçayı Sil
 	New Brush Preset…	Yeni Fırça Ön Ayarı…
+	Capture Brush Size in Preset	Fırça Boyutunu Ön Ayara Kaydet
+	Include Tool Settings	Araç Ayarlarını Dahil Et
+	Include Color	Rengi Dahil Et
+	Enter a name for the brush preset	Fırça ön ayarı için bir ad girin
+	A brush preset with this name already exists	Bu adda bir fırça ön ayarı zaten var
 	Brush Preset Options	Fırça Ön Ayarı Seçenekleri
 	Group name	Grup adı
 	Brush name	Fırça adı

@@ -2026,6 +2026,11 @@ layers	Fill:	Độ tô:
 	Move effect layer down	Di chuyển lớp hiệu ứng xuống
 	Move effect layer up	Di chuyển lớp hiệu ứng lên
 	New Brush Preset…	Thiết lập sẵn cọ mới…
+	Capture Brush Size in Preset	Lưu kích thước cọ vào thiết lập sẵn
+	Include Tool Settings	Bao gồm thiết lập công cụ
+	Include Color	Bao gồm màu
+	Enter a name for the brush preset	Nhập tên cho thiết lập sẵn cọ
+	A brush preset with this name already exists	Đã có thiết lập sẵn cọ với tên này
 	New effect layer	Lớp hiệu ứng mới
 	New Swatch Group…	Nhóm mẫu màu mới…
 	New Swatch…	Mẫu màu mới…

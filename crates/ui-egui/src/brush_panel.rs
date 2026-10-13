@@ -388,9 +388,9 @@ fn settings_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let tex = brush_preview::stroke_texture(ui.ctx(), "settings-strip", &b, STRIP.0, STRIP.1, t.text);
         ui.painter().image(tex.id(), r, full_uv(), Color32::WHITE);
         ui.vertical(|ui| {
-            if icons::button(ui, "square-plus", 24.0, false, tl!("Create new brush from these settings")).clicked() {
-                let name = new_preset_name(&app.session.tools.presets);
-                run_or_status(app, "brush.presets.save", json!({ "name": name, "brush": serde_json::to_value(&b).unwrap_or(Value::Null) }));
+            let new = icons::button(ui, "square-plus", 24.0, false, tl!("Create new brush from these settings"));
+            if crate::brush_picker::named(new, "Create new brush from these settings").clicked() {
+                crate::brush_preset_dialog::open(app, Some(&b));
             }
             if icons::button(ui, "undo-2", 24.0, false, tl!("Reset the brush to the defaults")).clicked() {
                 b = BrushSettings { color: b.color, background: b.background, smoothing: b.smoothing.clone(), locks: b.locks.clone(), ..Default::default() };

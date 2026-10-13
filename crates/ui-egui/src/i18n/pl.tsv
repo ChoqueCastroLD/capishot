@@ -3390,6 +3390,11 @@ cameraRaw	Roughness	Chropowatość
 	Channels:	Kanały:
 	Knockout	Wycięcie
 	New Brush Preset…	Nowe ustawienie wstępne pędzla…
+	Capture Brush Size in Preset	Zapisz rozmiar pędzla w ustawieniu wstępnym
+	Include Tool Settings	Uwzględnij ustawienia narzędzia
+	Include Color	Uwzględnij kolor
+	Enter a name for the brush preset	Wpisz nazwę ustawienia wstępnego pędzla
+	A brush preset with this name already exists	Ustawienie wstępne pędzla o tej nazwie już istnieje
 	Brush Preset Options	Opcje ustawień wstępnych pędzla
 
 # Fill dialog, layer style contours and Image Size

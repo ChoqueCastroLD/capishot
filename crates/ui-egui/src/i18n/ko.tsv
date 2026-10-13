@@ -2067,6 +2067,11 @@
 	Rename Brush…	브러시 이름 바꾸기…
 	Delete Brush	브러시 삭제
 	New Brush Preset…	새 브러시 사전 설정…
+	Capture Brush Size in Preset	사전 설정에 브러시 크기 캡처
+	Include Tool Settings	도구 설정 포함
+	Include Color	색상 포함
+	Enter a name for the brush preset	브러시 사전 설정의 이름을 입력하십시오
+	A brush preset with this name already exists	이 이름의 브러시 사전 설정이 이미 있습니다
 	Brush Preset Options	브러시 사전 설정 옵션
 	Group name	그룹 이름
 	Brush name	브러시 이름
