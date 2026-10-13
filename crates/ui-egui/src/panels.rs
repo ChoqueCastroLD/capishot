@@ -264,10 +264,13 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                                 });
                                             },
                                         );
-                                        let held_release = resp.clicked() && ui.data(|d| d.get_temp::<egui::Id>(held_id)) == Some(key);
-                                        let clicked_outside =
-                                            ui.input(|i| i.pointer.any_click()) && !held_release && !area.response.hovered() && !resp.hovered();
-                                        if clicked_outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                        // Any press outside the flyout and its button closes it, as in Photoshop: a
+                                        // drag on the canvas (cropping, painting) isn't a click (#4460).
+                                        let pressed_outside = ui.input(|i| {
+                                            i.pointer.any_pressed()
+                                                && i.pointer.press_origin().is_some_and(|p| !area.response.rect.contains(p) && !resp.rect.contains(p))
+                                        });
+                                        if pressed_outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                                             ui.data_mut(|d| d.remove::<(egui::Id, Rect)>(flyout_id));
                                         }
                                     }
@@ -4825,6 +4828,53 @@ mod type_flyout_tests {
                 assert!(!texts.contains(&tip(tool)), "{tool:?} under the flyout: {texts:?}");
             }
         }
+    }
+
+    /// #4460: a press outside an open flyout closes it, even when it becomes a drag (cropping or
+    /// painting on the canvas) rather than a click; a press on the flyout keeps it for its pick.
+    #[test]
+    fn a_drag_outside_closes_the_tool_flyout() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        let index = TOOL_SECTIONS.iter().flat_map(|section| section.iter()).position(|slot| slot.contains(&Tool::Brush)).unwrap();
+        let bx = if Tokens::get(&ctx).pro { 30.0 } else { 36.0 };
+        let mut buttons: Vec<Rect> = ctx.viewport(|v| {
+            v.prev_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, w)| w.iter())
+                .filter(|w| w.rect.size() == egui::Vec2::splat(bx) && w.sense.senses_click())
+                .map(|w| w.rect)
+                .collect()
+        });
+        buttons.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        let at = buttons[index].center();
+        let flyout = |ctx: &egui::Context| ctx.data(|d| d.get_temp::<(egui::Id, Rect)>(egui::Id::new("tool-flyout"))).is_some();
+        let secondary = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Default::default() };
+        let primary = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let open = |app: &mut PhotocraftApp, t: f64| {
+            frame(app, &ctx, t, vec![egui::Event::PointerMoved(at), secondary(true)]);
+            frame(app, &ctx, t + 0.05, vec![secondary(false)]);
+            frame(app, &ctx, t + 0.1, vec![]);
+            assert!(flyout(&ctx), "right-click opens it");
+        };
+        // A press on the flyout itself keeps it open (the row picks on release).
+        open(&mut app, 1.0);
+        let menu = ctx.memory(|m| m.area_rect(egui::Id::new(("tool-slot", index)).with("flyout"))).unwrap();
+        frame(&mut app, &ctx, 1.5, vec![egui::Event::PointerMoved(menu.center()), primary(menu.center(), true)]);
+        assert!(flyout(&ctx), "a press on the flyout keeps it");
+        frame(&mut app, &ctx, 1.55, vec![primary(menu.center(), false)]);
+        // A drag far from the toolbar (the canvas) closes it as soon as it starts.
+        open(&mut app, 2.0);
+        let canvas = egui::pos2(900.0, 900.0);
+        frame(&mut app, &ctx, 2.5, vec![egui::Event::PointerMoved(canvas), primary(canvas, true)]);
+        frame(&mut app, &ctx, 2.55, vec![egui::Event::PointerMoved(canvas + vec2(80.0, 60.0))]);
+        assert!(!flyout(&ctx), "a press outside closes it, even one that becomes a drag");
+        frame(&mut app, &ctx, 2.6, vec![primary(canvas + vec2(80.0, 60.0), false)]);
+        assert!(!flyout(&ctx));
     }
 
     #[test]
