@@ -13,6 +13,10 @@
 # letters; the trailing "…" of dialog commands is kept.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Lebar kertas
+	Paper Height	Tinggi kertas
 	Rows	Baris
 	Number	Jumlah
 	Margin	Margin

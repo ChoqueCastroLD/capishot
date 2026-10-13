@@ -8,6 +8,10 @@
 # Product names and technology names retain their spelling.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	용지 너비
+	Paper Height	용지 높이
 	Columns	열
 	Rows	행
 	Number	개수

@@ -731,6 +731,10 @@ fn unit_pt(units: &str) -> f64 {
 
 /// A number field in `units` for a value kept in points; true when edited.
 fn length_field(ui: &mut egui::Ui, label: &str, pt: &mut f64, units: &str) -> bool {
+    length_field_prec(ui, label, pt, units, 0)
+}
+
+fn length_field_prec(ui: &mut egui::Ui, label: &str, pt: &mut f64, units: &str, decimals: u32) -> bool {
     let t = Tokens::get(ui.ctx());
     let k = unit_pt(units);
     let mut v = (*pt / k) as f32;
@@ -738,13 +742,60 @@ fn length_field(ui: &mut egui::Ui, label: &str, pt: &mut f64, units: &str) -> bo
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label).color(t.text_dim));
         let before = v;
-        crate::widgets::value_field(ui, &mut v, 0.0..=10000.0, units, 70.0);
+        crate::widgets::value_field_prec(ui, &mut v, 0.0..=10000.0, units, 70.0, decimals);
         if (v - before).abs() > 1e-4 && v.is_finite() {
             *pt = f64::from(v) * k;
             changed = true;
         }
     });
     changed
+}
+
+/// Unrotated paper dimensions in points, for either the current preset or a custom array.
+fn print_paper_size(value: Option<&Value>) -> (f64, f64) {
+    let default = (612.0, 792.0);
+    match value {
+        Some(Value::Array(a)) => (a.first().and_then(Value::as_f64).unwrap_or(default.0), a.get(1).and_then(Value::as_f64).unwrap_or(default.1)),
+        Some(Value::String(name)) => photocraft_engine::print_cmds::PAPERS.iter().find(|p| p.0.eq_ignore_ascii_case(name)).map_or(default, |p| (p.1, p.2)),
+        _ => default,
+    }
+}
+
+fn print_paper_controls(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
+    let previous = f.get("paper").cloned();
+    let mut selected = if previous.as_ref().is_some_and(Value::is_array) { "custom".to_string() } else { s(f, "paper", "letter") };
+    ui.horizontal(|ui| {
+        let mut papers: Vec<_> = photocraft_engine::print_cmds::PAPERS.iter().map(|p| (p.0.to_string(), p.0)).collect();
+        papers.push(("custom".to_string(), tl!("Custom")));
+        if crate::widgets::dropdown(ui, "print-paper", &mut selected, &papers, 110.0) {
+            if selected == "custom" {
+                let (w, h) = print_paper_size(f.get("__customPaper").or(previous.as_ref()));
+                f.insert("paper".into(), json!([w, h]));
+            } else {
+                if let Some(paper @ Value::Array(_)) = previous {
+                    f.insert("__customPaper".into(), paper);
+                }
+                f.insert("paper".into(), json!(selected));
+            }
+        }
+        dropdown_str(ui, "print-orient", f, "orientation", &[("portrait", tl!("Portrait")), ("landscape", tl!("Landscape"))], 110.0);
+    });
+    if f.get("paper").is_some_and(Value::is_array) {
+        let (mut w, mut h) = print_paper_size(f.get("paper"));
+        let units = s(f, "units", "cm");
+        let changed = ui
+            .horizontal(|ui| {
+                let wc = length_field_prec(ui, tl!("Paper Width"), &mut w, &units, 2);
+                let hc = length_field_prec(ui, tl!("Paper Height"), &mut h, &units, 2);
+                wc || hc
+            })
+            .inner;
+        if changed {
+            // Keep points in the command, and let the engine apply orientation and validation.
+            f.insert("paper".into(), json!([w, h]));
+            f.insert("__customPaper".into(), json!([w, h]));
+        }
+    }
 }
 
 fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
@@ -834,11 +885,7 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                 }
             });
             number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
-            ui.horizontal(|ui| {
-                let papers: Vec<(&str, &str)> = photocraft_engine::print_cmds::PAPERS.iter().map(|p| (p.0, p.0)).collect();
-                dropdown_str(ui, "print-paper", f, "paper", &papers, 110.0);
-                dropdown_str(ui, "print-orient", f, "orientation", &[("portrait", tl!("Portrait")), ("landscape", tl!("Landscape"))], 110.0);
-            });
+            print_paper_controls(ui, f);
             head(ui, tl!("Color Management"));
             dropdown_str(
                 ui,

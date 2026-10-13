@@ -12,6 +12,10 @@
 # Product and technology names retain their spelling. See docs/localization-zh-hans.md.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	纸张宽度
+	Paper Height	纸张高度
 	Columns	列
 	Rows	行
 	Number	数量

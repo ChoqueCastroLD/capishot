@@ -21,6 +21,10 @@
 
 
 # Phase 3.1 — top-level menus, File menu, Edit menu
+# Custom paper dimensions in Print Settings.
+	Paper Width	Chiều rộng giấy
+	Paper Height	Chiều cao giấy
+
 	Again	Lặp lại
 	AI Integrations…	Tích hợp AI…
 	All	Tất cả

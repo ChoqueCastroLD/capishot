@@ -16,6 +16,10 @@
 # stay as they are; the trailing "…" of dialog commands is kept.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Largura do papel
+	Paper Height	Altura do papel
 	Rows	Linhas
 	Number	Número
 	Margin	Margem

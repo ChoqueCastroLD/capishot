@@ -11,6 +11,10 @@
 # Menus
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Ширина паперу
+	Paper Height	Висота паперу
 	Rows	Рядки
 	Number	Кількість
 	Top:	Зверху:

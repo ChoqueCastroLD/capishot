@@ -16,6 +16,10 @@
 # letters; the trailing "…" of dialog commands is kept. Plural rule: one|other (n != 1 -> other).
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Papierbreite
+	Paper Height	Papierhöhe
 	Columns	Spalten
 	Rows	Zeilen
 	Number	Anzahl

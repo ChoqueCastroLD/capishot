@@ -13,6 +13,10 @@
 # letters; the trailing "…" of dialog commands is kept.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Ancho del papel
+	Paper Height	Altura del papel
 	Columns	Columnas
 	Rows	Filas
 	Number	Número

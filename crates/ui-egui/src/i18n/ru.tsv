@@ -20,6 +20,10 @@
 # Menus
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Ширина бумаги
+	Paper Height	Высота бумаги
 	Rows	Строки
 	Number	Количество
 	Margin	Поля

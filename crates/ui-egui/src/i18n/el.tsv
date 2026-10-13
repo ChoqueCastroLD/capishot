@@ -4,6 +4,10 @@
 # Covers every source label the i18n coverage check lists.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Πλάτος χαρτιού
+	Paper Height	Ύψος χαρτιού
 	Rows	Γραμμές
 	Number	Πλήθος
 	Top:	Επάνω:

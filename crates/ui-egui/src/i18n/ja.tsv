@@ -16,6 +16,10 @@
 # letters; the trailing "…" of dialog commands is kept.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	用紙の幅
+	Paper Height	用紙の高さ
 	Rows	行
 	Number	数
 	Top:	上:

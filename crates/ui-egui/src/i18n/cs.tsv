@@ -20,6 +20,10 @@
 # dialog commands is kept.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Šířka papíru
+	Paper Height	Výška papíru
 	Columns	Sloupce
 	Rows	Řádky
 	Number	Počet
