@@ -2370,6 +2370,9 @@ mod move_auto_select_tests;
 mod new_group_button_tests;
 
 #[cfg(test)]
+mod color_tab_theme_tests;
+
+#[cfg(test)]
 mod new_layer_button_tests;
 
 #[cfg(test)]

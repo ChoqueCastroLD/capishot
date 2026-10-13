@@ -1963,7 +1963,16 @@ fn empty(ui: &mut egui::Ui, s: &str) {
     ui.add_space(6.0);
 }
 
+/// The Color tab of the themes other than Photoshop's: the same spectrum field (chips, saturation
+/// and brightness field, hue strip and readout) with HSB sliders under it (#4367).
 fn color_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    color_field(app, ui);
+    ui.add_space(8.0);
+    hsb_sliders(app, ui);
+}
+
+/// Hue, Saturation and Brightness sliders for the foreground colour.
+fn hsb_sliders(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let fg = app.session.tools.foreground;
     // Keep the last edited HSB while it still gives the foreground: black and greys have no hue or
     // saturation of their own, so recomputing them from RGB would reset what was just typed to 0.
@@ -1990,16 +1999,6 @@ fn color_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.data_mut(|d| d.insert_temp(key, hsva));
         crate::type_tool::foreground_changed(app);
     }
-    ui.horizontal(|ui| {
-        let (sw, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
-        ui.painter().rect_filled(sw, 6.0, hsva_color32(hsva));
-        let mut c = app.session.tools.foreground;
-        if color_readout(ui, ui.id().with("color-panel"), &mut c) {
-            app.session.tools.foreground = c;
-            ui.data_mut(|d| d.insert_temp(key, srgb_hsva(c)));
-            crate::type_tool::foreground_changed(app);
-        }
-    });
 }
 
 // ----------------------------------------------------------------------------- layers
@@ -3358,7 +3357,9 @@ fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let strip_w = 14.0;
     // Photoshop's Color panel field fills the panel: take the height the dock offers, less the
     // hex/RGB readout (which folds onto a second line in a narrow dock). Without a dock, 120 pt.
-    let h = color_field_height(ui.data(|d| d.get_temp::<f32>(color_field_fill_id())), w);
+    // Only Photoshop's themes stretch it over the group: the other themes put sliders under it.
+    let fill = if t.pro { ui.data(|d| d.get_temp::<f32>(color_field_fill_id())) } else { None };
+    let h = color_field_height(fill, w);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let (chips, _) = ui.allocate_exact_size(vec2(38.0, h), Sense::hover());
@@ -4123,7 +4124,7 @@ mod color_tests {
         let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(
             |ui, app: &mut PhotocraftApp| {
                 if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
-                    color_picker(app, ui);
+                    hsb_sliders(app, ui);
                 }
             },
             app,
