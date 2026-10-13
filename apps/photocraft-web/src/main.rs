@@ -27,6 +27,8 @@ mod embed;
 #[cfg(any(target_arch = "wasm32", test))]
 mod embed_protocol;
 #[cfg(target_arch = "wasm32")]
+mod usage_stats;
+#[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_arch = "wasm32")]
 mod wheel_guard;

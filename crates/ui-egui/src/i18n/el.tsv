@@ -3820,3 +3820,6 @@ cameraData	Lens	Φακός
 	Show rulers in new documents	Εμφάνιση χαράκων σε νέα έγγραφα
 # Eraser: Erase to History; Magic Wand: Sample Size.
 	Erase to History	Διαγραφή στο ιστορικό
+# Anonymous usage statistics (web build): Preferences › General, About.
+	Send anonymous usage statistics	Αποστολή ανώνυμων στατιστικών χρήσης
+	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Η έκδοση web στέλνει ανώνυμα στατιστικά χρήσης (χωρίς αρχεία ή περιεχόμενο)· απενεργοποιήστε τα στις Προτιμήσεις › Γενικά.

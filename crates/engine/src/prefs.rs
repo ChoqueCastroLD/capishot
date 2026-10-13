@@ -190,6 +190,10 @@ pub struct General {
     pub zoom_resizes_windows: bool,
     pub use_legacy_free_transform: bool,
     pub auto_show_home_screen: bool,
+    /// The web build sends anonymous usage statistics (commands used, session length, coarse
+    /// device classes; never files, names or content) to its own host. On by default; the
+    /// browser's Do Not Track or Global Privacy Control turns it off regardless.
+    pub send_anonymous_usage_statistics: bool,
 }
 
 impl Default for General {
@@ -206,6 +210,7 @@ impl Default for General {
             zoom_resizes_windows: false,
             use_legacy_free_transform: false,
             auto_show_home_screen: true,
+            send_anonymous_usage_statistics: true,
         }
     }
 }
@@ -1040,8 +1045,14 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
 
 /// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
 pub fn is_hidden(path: &str) -> bool {
-    HIDDEN_UNTIL_IMPLEMENTED.contains(&path) || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
+    HIDDEN_UNTIL_IMPLEMENTED.contains(&path)
+        || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
+        || (!cfg!(target_arch = "wasm32") && WEB_ONLY.contains(&path))
 }
+
+/// Preferences that only do something in the web build; other builds don't show them. They
+/// still load, save and round-trip everywhere.
+pub const WEB_ONLY: &[&str] = &["general.sendAnonymousUsageStatistics"];
 
 /// Preferences that only do something on Linux; the dialog doesn't show them elsewhere. They
 /// still load, save and round-trip on every platform.

@@ -408,6 +408,11 @@ fn about_tab_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str) {
             });
             ui.add_space(10.0);
             ui.weak("egui · wgpu · photocraft-engine");
+            // The web build's usage statistics (`telemetry`): said where people look for it.
+            if cfg!(target_arch = "wasm32") {
+                ui.add_space(6.0);
+                ui.weak(tl!("The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General."));
+            }
         }
     }
 }

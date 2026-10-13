@@ -700,7 +700,7 @@ pub fn run(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if !crate::menus::modal_allows(app, &id) {
             continue;
         }
-        if let Err(e) = crate::menus::invoke(app, ctx, &id, serde_json::json!({})) {
+        if let Err(e) = crate::telemetry::with_source(crate::telemetry::Source::Menu, || crate::menus::invoke(app, ctx, &id, serde_json::json!({}))) {
             app.ui.status = e;
             app.ui.status_error = true;
         }
