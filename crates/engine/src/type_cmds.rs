@@ -466,17 +466,21 @@ pub fn refresh(doc: &Document, t: &mut TextLayer) {
     t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
 }
 
+/// Refuses to change a type layer under Lock All (its own or an enclosing group's), with
+/// Photoshop's message. Every command that edits a type layer's text calls it first (#3132, #4188).
+pub(crate) fn check_text_unlocked(doc: &Document, id: LayerId) -> Result<()> {
+    let layer = doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+    if doc.effective_locks(id).all {
+        return Err(EngineError::Other(format!("Could not complete your request because the layer \"{}\" is locked", layer.name)));
+    }
+    Ok(())
+}
+
 /// Runs `f` on a type layer as one undo step. `f` may set an explicit layer name (`type.edit`'s
 /// `name`), which is applied in the same step; otherwise an auto-named layer follows its text.
 fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&mut TextLayer, &Document, &mut Option<String>) -> Result<R>) -> Result<R> {
     let id = layer_id(s, p)?;
-    {
-        let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
-        let layer = doc.layer(id).ok_or(EngineError::NoLayer(id))?;
-        if doc.effective_locks(id).all {
-            return Err(EngineError::Other(format!("Could not complete your request because the layer \"{}\" is locked", layer.name)));
-        }
-    }
+    check_text_unlocked(&s.active().ok_or(EngineError::NoDocument)?.doc, id)?;
     let (r, damage) = s.edit(label, |doc, _| {
         let snapshot = doc.clone();
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;

@@ -894,6 +894,7 @@ fn find_replace(s: &mut Session, p: &Value) -> Result<Value> {
                 && let Some((id, a, b)) = cursor
                 && text_of(&doc, id).is_some_and(|t| find_matches(&t, &find, case, whole).contains(&(a, b)))
             {
+                crate::type_cmds::check_text_unlocked(&doc, id)?;
                 s.edit("Replace Text", |doc, _| {
                     let snapshot = doc.clone();
                     if let Some(LayerContent::Text(t)) = doc.layer_mut(id).map(|l| &mut l.content) {
