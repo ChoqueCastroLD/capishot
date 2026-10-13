@@ -3993,4 +3993,6 @@ cameraRaw	Yellow	Sárga
 	Action playback stopped	A művelet lejátszása leállt
 	Step {step} is waiting for its dialog	A(z) {step}. lépés a párbeszédablakára vár
 @plural	{n} action|{n} actions	{n} művelet
+	Object Finder	Objektumkereső
+	No object found there — drag a rectangle around it	Ott nem található objektum – húzz köré egy téglalapot
 	Drag to pan · Scroll to zoom · Double-click to fit	Húzás: mozgatás · Görgetés: nagyítás · Dupla kattintás: igazítás

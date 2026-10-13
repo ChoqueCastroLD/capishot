@@ -3748,6 +3748,8 @@ curves	Smooth	Згладити
 	Light Red	Світло-червоний
 	Medium Blue	Середньо-синій
 	Light Gray	Світло-сірий
+	Object Finder	Пошук об’єктів
+	No object found there — drag a rectangle around it	Там не знайдено об’єкта — обведіть його прямокутником
 	Remove after each stroke	Видаляти після кожного штриха
 	Apply the removal ({key})	Застосувати видалення ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Штрихів для видалення: {n} (Enter застосовує, Esc скасовує)

@@ -659,3 +659,24 @@ fn dump_quick_scenes() {
     save("thin_line", &line);
     save("disc_scene", &disc_scene(600, 500, 300.0, 250.0, 180.0, 4).0);
 }
+
+#[test]
+fn object_at_finds_the_disc_under_the_cursor() {
+    let (img, truth) = disc_scene(320, 240, 160.0, 120.0, 70.0, 7);
+    let s = ImageSampler { img: &img, origin: (0, 0) };
+    let canvas = Rect::new(0, 0, 320, 240);
+    let reg = grabcut::object_at(&s, canvas, 165.0, 118.0, 20_000).unwrap();
+    let v = iou(&reg, &truth, 320, 240);
+    assert!(v > 0.9, "IoU {v}");
+}
+
+#[test]
+fn object_at_on_the_background_or_off_canvas_finds_nothing() {
+    let (img, _) = disc_scene(320, 240, 160.0, 120.0, 70.0, 7);
+    let s = ImageSampler { img: &img, origin: (0, 0) };
+    let canvas = Rect::new(0, 0, 320, 240);
+    assert!(grabcut::object_at(&s, canvas, 10.0, 10.0, 20_000).is_none());
+    assert!(grabcut::object_at(&s, canvas, -5.0, 10.0, 20_000).is_none());
+    assert!(grabcut::object_at(&s, canvas, f32::NAN, 10.0, 20_000).is_none());
+    assert!(grabcut::object_at(&s, canvas, 400.0, 10.0, 0).is_none());
+}

@@ -132,6 +132,7 @@ pub mod new_guide_ui;
 pub mod new_layer_ui;
 pub mod notices;
 mod numeric_expression;
+pub mod object_finder;
 mod opacity_keys;
 pub mod outline;
 pub mod paint_mouse;
@@ -511,6 +512,8 @@ pub struct PhotocraftApp {
     pub(crate) move_preview: Option<move_ui::MovePreview>,
     /// Move tool › Show Highlight on Rollover: the last hover answer (`move_hover`).
     pub(crate) move_hover: Option<move_hover::Hover>,
+    /// Object Selection › Object Finder: the hover preview (`object_finder`).
+    pub(crate) object_finder: Option<object_finder::Finder>,
     /// A blend mode hovered in the Layers panel, shown live (`blend_preview`).
     pub(crate) blend_preview: Option<blend_preview::BlendPreview>,
     /// Patch Tool drag: the healed document at the pointer (`patch_preview`).
@@ -739,6 +742,7 @@ impl PhotocraftApp {
             menu_cache: None,
             move_preview: None,
             move_hover: None,
+            object_finder: None,
             blend_preview: None,
             patch_preview: None,
             magnetic: Default::default(),
