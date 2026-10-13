@@ -178,16 +178,20 @@ fn windows_print_image_is_rgb_mirrored_for_emulsion_down() {
 #[test]
 fn native_rgb_route_preserves_pdf_only_color_and_page_content() {
     let mut page = page_of(3, vec![0; 6], false);
-    assert!(native_rgb_compatible(&page));
+    assert!(native_rgb_compatible(&page, "printerManages"));
     page.label = Some("Print Me".into());
-    assert!(!native_rgb_compatible(&page));
+    assert!(!native_rgb_compatible(&page, "printerManages"));
     page.label = None;
     page.description = Some("Proof description".into());
-    assert!(!native_rgb_compatible(&page));
+    assert!(!native_rgb_compatible(&page, "printerManages"));
     page.description = Some(String::new());
-    assert!(native_rgb_compatible(&page));
-    assert!(!native_rgb_compatible(&page_of(4, vec![0; 8], false)));
-    assert!(native_rgb_compatible(&page_of(1, vec![0; 2], false)));
+    assert!(native_rgb_compatible(&page, "printerManages"));
+    page.image.icc = Some(vec![1, 2, 3]);
+    assert!(!native_rgb_compatible(&page, "printerManages"), "preserve embedded source ICC in the PDF route");
+    assert!(native_rgb_compatible(&page, "photocraftManages"));
+    assert!(native_rgb_compatible(&page, "photoshopManages"));
+    assert!(!native_rgb_compatible(&page_of(4, vec![0; 8], false), "photocraftManages"));
+    assert!(native_rgb_compatible(&page_of(1, vec![0; 2], false), "noColorManagement"));
 }
 
 #[test]

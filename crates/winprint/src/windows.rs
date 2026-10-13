@@ -15,9 +15,9 @@ use windows_sys::Win32::Graphics::Printing::{
     PRINTER_INFO_4W,
 };
 use windows_sys::Win32::Storage::Xps::{AbortDoc, DOCINFOW, EndDoc, EndPage, StartDocW, StartPage};
-use windows_sys::Win32::UI::ColorSystem::{ICM_OFF, SetICMMode};
+use windows_sys::Win32::UI::ColorSystem::{ICM_DONE_OUTSIDEDC, ICM_OFF, SetICMMode};
 
-use crate::{DevMode, Job, Marks, Page, PrintError, Printed, Printer, Result, RgbImage};
+use crate::{ColorPolicy, DevMode, Job, Marks, Page, PrintError, Printed, Printer, Result, RgbImage};
 
 const IDOK: i32 = 1;
 const IDCANCEL: i32 = 2;
@@ -349,11 +349,17 @@ pub fn print(job: &Job<'_>, image: &RgbImage<'_>, rect: (f64, f64, f64, f64)) ->
         lpszDatatype: null(),
         fwType: 0,
     };
-    // SAFETY: a valid printer DC. ICM off: the pixels are already in the printer's space
-    // (or deliberately unmanaged), so GDI must not convert them again.
-    if unsafe { SetICMMode(dc.0, ICM_OFF) } == 0 {
-        return Err(last_error("disabling GDI color management"));
-    }
+    let color_mode = match job.color_policy {
+        ColorPolicy::DriverManaged => ICM_OFF,
+        // ICM_OFF enables old-style halftone correction. Pixels converted by the caller
+        // need both DC conversion and that correction off (Microsoft SetICMMode contract).
+        ColorPolicy::ApplicationManaged | ColorPolicy::Unmanaged => ICM_DONE_OUTSIDEDC,
+    };
+    let set_color_mode = || {
+        // SAFETY: a valid printer DC and a documented SetICMMode value.
+        if unsafe { SetICMMode(dc.0, color_mode) } == 0 { Err(last_error("setting GDI color policy")) } else { Ok(()) }
+    };
+    set_color_mode()?;
     // SAFETY: a valid DC; HALFTONE resampling needs the brush origin reset afterwards.
     unsafe {
         SetStretchBltMode(dc.0, HALFTONE);
@@ -373,6 +379,12 @@ pub fn print(job: &Job<'_>, image: &RgbImage<'_>, rect: (f64, f64, f64, f64)) ->
         // SAFETY: inside a started document on a valid DC.
         if unsafe { StartPage(dc.0) } <= 0 {
             return Err(fail("starting a page"));
+        }
+        // StartPage saves/restores DC state. Reapply the policy for each page, before pixels.
+        if let Err(error) = set_color_mode() {
+            // SAFETY: this DC owns the document started above.
+            unsafe { AbortDoc(dc.0) };
+            return Err(error);
         }
         // SAFETY: `bits` is a bottom-up DIB exactly as `bmi` describes (24-bit, padded rows,
         // `biSizeImage` bytes); the source rectangle is the whole image.
@@ -467,7 +479,15 @@ mod tests {
         let data: Vec<u8> = (0..w * h).flat_map(|i| if (i % w) < w / 2 { [220, 30, 30] } else { [30, 30, 220] }).collect();
         let out_s = out.to_string_lossy().into_owned();
         let marks = crate::Marks { corner_crop: true, center_crop: true, registration: true };
-        let job = Job { printer: "Microsoft Print to PDF", settings: Some(&settings), title: "PhotoCraft test", output_file: Some(&out_s), copies: 2, marks };
+        let job = Job {
+            printer: "Microsoft Print to PDF",
+            settings: Some(&settings),
+            title: "PhotoCraft test",
+            output_file: Some(&out_s),
+            copies: 2,
+            color_policy: ColorPolicy::ApplicationManaged,
+            marks,
+        };
         let done = crate::print(&job, &RgbImage { width: w, height: h, data: &data }, (72.0, 72.0, 216.0, 144.0)).unwrap();
         assert_eq!(done.device_rect.2, done.dpi.0 as i32 * 3, "3 inches wide");
         let pdf = std::fs::read(&out).unwrap();

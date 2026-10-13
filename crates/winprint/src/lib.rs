@@ -151,6 +151,17 @@ impl Marks {
 }
 
 /// One print job.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorPolicy {
+    /// The driver applies its color settings to the RGB image.
+    DriverManaged,
+    /// The caller has converted the pixels into the printer's RGB space.
+    ApplicationManaged,
+    /// The caller deliberately requests no DC color correction.
+    Unmanaged,
+}
+
+/// One print job.
 pub struct Job<'a> {
     pub printer: &'a str,
     pub settings: Option<&'a DevMode>,
@@ -159,6 +170,7 @@ pub struct Job<'a> {
     /// Print to this file instead of the device (drivers that write files, and tests).
     pub output_file: Option<&'a str>,
     pub copies: u32,
+    pub color_policy: ColorPolicy,
     pub marks: Marks,
 }
 
@@ -315,7 +327,7 @@ mod tests {
 
     #[test]
     fn print_rejects_empty_or_short_images_before_any_system_call() {
-        let job = Job { printer: "x", settings: None, title: "t", output_file: None, copies: 1, marks: Marks::default() };
+        let job = Job { printer: "x", settings: None, title: "t", output_file: None, copies: 1, color_policy: ColorPolicy::Unmanaged, marks: Marks::default() };
         let short = RgbImage { width: 2, height: 2, data: &[0; 11] };
         assert!(matches!(print(&job, &short, (0.0, 0.0, 10.0, 10.0)), Err(PrintError::Invalid(_))));
         let ok = RgbImage { width: 2, height: 2, data: &[0; 12] };

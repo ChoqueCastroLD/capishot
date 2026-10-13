@@ -391,7 +391,8 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
     // Windows has no `lp`: print through the driver (GDI, ICM off) instead of spooling a PDF.
     // Sending follows the shared command contract; fuzz tests explicitly request dryRun.
     // The worker returns its result before repeat settings and hooks are applied once.
-    if cfg!(windows) && send && !dry && output.is_none() && native_rgb_compatible(&page) {
+    let handling = p.get("colorHandling").and_then(Value::as_str).unwrap_or("printerManages");
+    if cfg!(windows) && send && !dry && output.is_none() && native_rgb_compatible(&page, handling) {
         let printed = print_windows(&page, p, &doc.name, copies)?;
         return Ok(json!({
             "pdf": Value::Null, "paper": [pw, ph], "imageRect": [x, y, w, h], "emulsionDown": emulsion_down, "scale": scale * 100.0,
@@ -399,7 +400,7 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
         }));
     }
     if cfg!(windows) && send && !dry && output.is_none() && printer_settings(p)?.is_some() {
-        return Err(other("CMYK profiles and description/label text use PDF composition; these native driver settings cannot be applied. Save as PDF, or clear the driver settings to use PDF printing."));
+        return Err(other("the selected color profile or page text requires PDF printing. Save as PDF, or clear Print Settings to use PDF printing."));
     }
     let pdf = print_pdf(&page);
     let job = craft_print::Job {
@@ -432,8 +433,9 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
 
 /// Keep CMYK output profiles and page text on the existing PDF composition path. GDI currently
 /// draws RGB/gray and vector marks only; it must never silently omit requested page content.
-fn native_rgb_compatible(page: &PrintPage) -> bool {
+fn native_rgb_compatible(page: &PrintPage, handling: &str) -> bool {
     matches!(page.image.channels, 1 | 3)
+        && (page.image.icc.is_none() || matches!(handling, "photocraftManages" | "photoshopManages" | "noColorManagement"))
         && page.description.as_deref().is_none_or(str::is_empty)
         && page.label.as_deref().is_none_or(str::is_empty)
 }
@@ -508,7 +510,20 @@ fn print_windows(page: &PrintPage, p: &Value, title: &str, copies: u32) -> Resul
     let rgb = page_rgb(page)?;
     let image = photocraft_winprint::RgbImage { width: page.image.width, height: page.image.height, data: &rgb };
     let marks = photocraft_winprint::Marks { corner_crop: page.marks.corner_crop, center_crop: page.marks.center_crop, registration: page.marks.registration };
-    let job = photocraft_winprint::Job { printer: &printer, settings: settings.as_ref(), title, output_file: None, copies: copies.clamp(1, 999), marks };
+    let color_policy = match p.get("colorHandling").and_then(Value::as_str) {
+        Some("photocraftManages" | "photoshopManages") => photocraft_winprint::ColorPolicy::ApplicationManaged,
+        Some("noColorManagement") => photocraft_winprint::ColorPolicy::Unmanaged,
+        _ => photocraft_winprint::ColorPolicy::DriverManaged,
+    };
+    let job = photocraft_winprint::Job {
+        printer: &printer,
+        settings: settings.as_ref(),
+        title,
+        output_file: None,
+        copies: copies.clamp(1, 999),
+        color_policy,
+        marks,
+    };
     let done = photocraft_winprint::print(&job, &image, page_rect_top_left(page)).map_err(other)?;
     Ok(
         json!({"printer": printer, "dpi": [done.dpi.0, done.dpi.1], "deviceRect": [done.device_rect.0, done.device_rect.1, done.device_rect.2, done.device_rect.3]}),
