@@ -110,6 +110,10 @@ The D5100's measured image area is 4928 × 3264 at (8, 8) in a 4992 × 3280
 sensor plane; it removes the border without changing levels, WB or calibration.
 Measured image areas preserve an explicit file crop.
 
+For a slightly tighter camera JPEG, fitting can align the reference proxy using a bounded
+90–100% centred search on training cells. It requires a strong correlation improvement and
+retains the held-out colour gates; the developed crop and camera calibration are unchanged.
+
 Without a usable fit (no preview, an unrelated, monochrome or differently shaped one, or a fit that
 does not clearly help) the documented neutral fallback stays: the white-balanced camera channels are
 treated as linear sRGB primaries, with no tone curve (plausible but flat, greyish colours; converting
