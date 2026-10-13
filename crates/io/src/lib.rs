@@ -42,6 +42,7 @@ pub mod effects_map;
 pub mod exr_parts;
 mod flat;
 mod gradient_bake;
+pub use gradient_bake::{Method as GradientMethod, bake as bake_gradient};
 mod kra;
 pub mod linked;
 mod multichannel_map;
