@@ -430,6 +430,40 @@ pub struct Compositor {
     cmyk: u64,
     /// The device's health (see [`Compositor::set_health`]); `None` = assumed healthy.
     health: Option<DeviceHealth>,
+    /// Layers drawn from an already resident surface at an offset ([`Compositor::set_translated`]).
+    translated: Vec<Translated>,
+}
+
+/// A layer surface the document shows as another surface moved by a whole-pixel offset (a Move
+/// drag's preview): the compositor samples the source's resident pages at the offset instead of
+/// uploading the moved copy, whose tiles are all new every frame.
+#[derive(Clone, Debug)]
+pub struct Translated {
+    pub layer: LayerId,
+    /// The layer's mask rather than its content.
+    pub mask: bool,
+    /// [`surface_fingerprint`] of the surface the document holds (the moved copy): the
+    /// substitution only applies to exactly that surface.
+    pub shown: u64,
+    /// The surface before the move, as it is resident.
+    pub source: Surface,
+    /// Where `shown` is relative to `source`: `shown(x + dx, y + dy) == source(x, y)`.
+    pub offset: (i32, i32),
+}
+
+/// Identity of a surface's pixels: tile `Arc`s and coordinates, default pixel and format.
+pub fn surface_fingerprint(s: &Surface) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325 ^ s.tile_count() as u64;
+    for v in s.default_pixel() {
+        h = (h ^ u64::from(v.to_bits())).wrapping_mul(0x100_0000_01b3);
+    }
+    h = (h ^ u64::from(s.format().bytes_per_pixel() as u32)).wrapping_mul(0x100_0000_01b3);
+    let mut tiles: Vec<u64> = s.tiles().map(|(c, t)| (Arc::as_ptr(t) as usize as u64) ^ ((c.tx as u64) << 32 | c.ty as u32 as u64).rotate_left(17)).collect();
+    tiles.sort_unstable();
+    for t in tiles {
+        h = (h ^ t).wrapping_mul(0x100_0000_01b3);
+    }
+    h
 }
 
 fn tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -621,6 +655,7 @@ impl Compositor {
             effect_maps: map_error.is_none(),
             cmyk: 0,
             health: None,
+            translated: Vec::new(),
         }
         .with_texture_limit(device.limits().max_texture_dimension_2d)
     }
@@ -814,6 +849,44 @@ impl Compositor {
     /// CPU compositor instead.
     pub fn set_health(&mut self, health: DeviceHealth) {
         self.health = Some(health);
+    }
+
+    /// Layer surfaces to draw from their pre-move source at an offset (see [`Translated`]); an
+    /// empty list draws every surface as it is. Entries whose `shown` fingerprint doesn't match
+    /// the surface being drawn are ignored, so a stale list only costs the uploads it would
+    /// have saved.
+    pub fn set_translated(&mut self, translated: Vec<Translated>) {
+        self.translated = translated;
+    }
+
+    /// The source and offset to draw `surface` (layer `layer`'s content or mask) from, if it is
+    /// one of the [`Translated`] surfaces.
+    fn translation(&self, layer: LayerId, mask: bool, surface: &Surface) -> Option<(Surface, (i32, i32))> {
+        let t = self.translated.iter().find(|t| t.layer == layer && t.mask == mask)?;
+        (surface_fingerprint(surface) == t.shown && t.source.format() == surface.format() && t.source.default_pixel() == surface.default_pixel())
+            .then(|| (t.source.clone(), t.offset))
+    }
+
+    /// [`Self::sync`] of `surface` over `region`, or of its pre-move source over the region moved
+    /// back (tile aligned), reported at the offset so the shader samples the moved pixels.
+    #[allow(clippy::too_many_arguments)]
+    fn sync_shown(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        doc: DocId,
+        key: ResKey,
+        surface: &Surface,
+        region: Rect,
+        stats: &mut Stats,
+    ) -> Option<(ResKey, [i32; 4])> {
+        let Some((source, (dx, dy))) = (if self.translated.is_empty() || region.is_empty() { None } else { self.translation(key.0, key.1 == Role::Mask, surface) }) else {
+            return self.sync(device, queue, encoder, doc, key, surface, region, stats);
+        };
+        let back = tile_grid(Rect::new(region.x0.saturating_sub(dx), region.y0.saturating_sub(dy), region.x1.saturating_sub(dx), region.y1.saturating_sub(dy)));
+        let (k, [x, y, w, h]) = self.sync(device, queue, encoder, doc, key, &source, back, stats)?;
+        Some((k, [x.saturating_add(dx), y.saturating_add(dy), w, h]))
     }
 
     /// Why the device can't be used (`None` while healthy or unwatched).
@@ -1089,7 +1162,7 @@ impl Compositor {
             }
             let (ta, ma) = fr.areas.get(i).copied().unwrap_or((Rect::EMPTY, Rect::EMPTY));
             let tex =
-                p.tex.as_ref().and_then(|t| self.sync(device, queue, encoder, doc, (t.layer, t.role, cell), t.surface.get(), ta.intersect(&cr), stats)).map(
+                p.tex.as_ref().and_then(|t| self.sync_shown(device, queue, encoder, doc, (t.layer, t.role, cell), t.surface.get(), ta.intersect(&cr), stats)).map(
                     |(k, r)| {
                         keys.push(k);
                         (keys.len() - 1, r)
@@ -1098,7 +1171,7 @@ impl Compositor {
             let mask = p
                 .mask
                 .as_ref()
-                .and_then(|m| self.sync(device, queue, encoder, doc, (m.layer, Role::Mask, cell), m.surface.get(), ma.intersect(&cr), stats))
+                .and_then(|m| self.sync_shown(device, queue, encoder, doc, (m.layer, Role::Mask, cell), m.surface.get(), ma.intersect(&cr), stats))
                 .map(|(k, r)| {
                     keys.push(k);
                     (keys.len() - 1, r)

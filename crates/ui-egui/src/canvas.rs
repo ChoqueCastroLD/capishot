@@ -1314,6 +1314,8 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
     }
     let partial = present && damage.is_some();
     gpu_budget(app, &gpu, idx, partial, visible);
+    // A Move drag: the moving layers come from the pages already on the GPU, at the offset.
+    gpu.set_translated(crate::move_ui::gpu_translations(app, idx));
     let r = gpu.refresh(id.0, &doc, if partial { damage } else { None }, display.as_deref());
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
