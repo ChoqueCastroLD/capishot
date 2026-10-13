@@ -389,7 +389,8 @@ fn czech_status_notices_and_navigator_draw_translated_text() {
         });
         h.run_steps(4);
         let text = drawn_text(&h);
-        for want in ["Zvětšení", "Soubor English file.psd se nepodařilo otevřít: disk full", "Předvolby nelze uložit"] {
+        // The Navigator's own text is its tab title now: its zoom row has no label (#4840).
+        for want in ["Navigátor", "Soubor English file.psd se nepodařilo otevřít: disk full", "Předvolby nelze uložit"] {
             assert!(text.iter().any(|text| text == want), "missing {want}: {text:?}");
         }
         // Czech text must be drawable by the bundled fonts, including the new notices.

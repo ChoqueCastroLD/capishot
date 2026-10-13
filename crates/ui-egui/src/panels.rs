@@ -1925,29 +1925,38 @@ fn navigator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let c = pos2(rect.min.x + v.center[0] * s, rect.min.y + v.center[1] * s);
     let vr = Rect::from_center_size(c, vec2(vw, vh)).intersect(frame.shrink(1.0));
     ui.painter().rect_stroke(vr, 2.0, Stroke::new(1.5, Color32::from_rgb(255, 84, 84)), StrokeKind::Middle);
+    // Photoshop's one row under the preview (#4840): the zoom, typed in percent, then Zoom Out,
+    // the slider and Zoom In.
     let controls = ui.vertical(|ui| {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            label(ui, crate::i18n::tr_ctx(crate::i18n::current(), "navigator", "Zoom"));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                for (lbl, z) in [("200%", 2.0), ("100%", 1.0)] {
-                    if widgets::pill_tab(ui, lbl, (v.zoom - z).abs() < 1e-3).clicked() {
-                        app.ui.views[idx].zoom = z;
-                        app.ui.views[idx].fit_pending = false;
-                    }
-                }
-                if widgets::pill_tab(ui, tl!("Fit"), false).clicked() {
-                    app.ui.views[idx].fit_pending = true;
-                }
-            });
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let set = |app: &mut PhotocraftApp, zoom: f32| {
+                app.ui.views[idx].zoom = crate::zoom_levels::clamp(zoom, v.doc_size);
+                app.ui.views[idx].fit_pending = false;
+            };
+            let mut pct = v.zoom * 100.0;
+            let field = widgets::compact_wrapping_value_field(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[idx]), "%", vec2(64.0, NAV_ROW_H));
+            if field.changed() {
+                set(app, pct / 100.0);
+            }
+            let out = crate::brush_picker::named(icons::button(ui, "minus", NAV_ROW_H, false, tl!("Zoom Out")), "Zoom Out");
+            if out.clicked() {
+                set(app, crate::zoom_levels::step(v.zoom, -1, v.doc_size));
+            }
+            // The whole zoom range, and always the current zoom: a narrower slider would pull it back.
+            let (lo, hi) = (crate::zoom_levels::min(v.doc_size).min(v.zoom).log2(), crate::zoom_levels::MAX.max(v.zoom).log2());
+            let mut lz = v.zoom.log2();
+            let slider_w = (ui.available_width() - NAV_ROW_H - 4.0).max(60.0);
+            let slid = ui.allocate_ui(vec2(slider_w, NAV_ROW_H), |ui| lz.is_finite() && widgets::slider(ui, &mut lz, lo..=hi, None).changed()).inner;
+            if slid {
+                set(app, 2f32.powf(lz));
+            }
+            let zin = crate::brush_picker::named(icons::button(ui, "plus", NAV_ROW_H, false, tl!("Zoom In")), "Zoom In");
+            if zin.clicked() {
+                set(app, crate::zoom_levels::step(v.zoom, 1, v.doc_size));
+            }
         });
-        // The whole zoom range, and always the current zoom: a narrower slider would pull it back.
-        let (lo, hi) = (crate::zoom_levels::min(v.doc_size).min(v.zoom).log2(), crate::zoom_levels::MAX.max(v.zoom).log2());
-        let mut lz = v.zoom.log2();
-        if lz.is_finite() && widgets::slider(ui, &mut lz, lo..=hi, None).changed() {
-            app.ui.views[idx].zoom = crate::zoom_levels::clamp(2f32.powf(lz), v.doc_size);
-            app.ui.views[idx].fit_pending = false;
-        }
     });
     // From the preview's bottom, so the spacing above the controls counts too.
     let controls = Rect::from_min_max(pos2(frame.left(), frame.bottom()), pos2(frame.right(), controls.response.rect.bottom()));
@@ -1956,6 +1965,9 @@ fn navigator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         d.insert_temp(navigator_controls_rect_id(), controls);
     });
 }
+
+/// Height of the Navigator's zoom row: its field, buttons and slider.
+const NAV_ROW_H: f32 = 22.0;
 
 /// The document's `w` × `h` fitted inside the Navigator's `frame` with an 8 pt inset, centred and
 /// keeping its aspect.
@@ -2026,6 +2038,33 @@ mod navigator_wheel_tests {
         let below = last_navigator_controls(&ctx).map_or(pos2(50.0, 455.0), |r| pos2(r.left() + 4.0, r.bottom() - 2.0));
         frame(&mut app, &ctx, below, 1.0);
         assert!((app.ui.views[0].zoom - 1.0).abs() < 1e-4, "wheel outside preview leaves zoom unchanged");
+    }
+
+    /// #4840: under the preview, one row as in Photoshop: the zoom in percent, Zoom Out, the
+    /// slider and Zoom In. The buttons step the zoom like View › Zoom In / Out.
+    #[test]
+    fn navigator_zoom_row_is_one_line_and_its_buttons_step_the_zoom() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 200, "height": 100})).unwrap();
+        app.sync_views();
+        app.ui.views[0].zoom = 1.0;
+        app.ui.views[0].fit_pending = false;
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(360.0, 300.0)).build_ui_state(|ui, app: &mut PhotocraftApp| navigator(app, ui), app);
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+        h.run_steps(4);
+        let row = last_navigator_controls(&h.ctx).expect("the zoom row");
+        assert!(row.height() <= NAV_ROW_H + 14.0, "one row (with the gap above it): {row:?}");
+        let zoom = |h: &egui_kittest::Harness<'_, PhotocraftApp>| h.state().ui.views[0].zoom;
+        h.get_by_label("Zoom In").click();
+        h.run_steps(2);
+        assert!((zoom(&h) - crate::zoom_levels::step(1.0, 1, [200, 100])).abs() < 1e-4, "{}", zoom(&h));
+        h.get_by_label("Zoom Out").click();
+        h.run_steps(2);
+        h.get_by_label("Zoom Out").click();
+        h.run_steps(2);
+        assert!((zoom(&h) - crate::zoom_levels::step(1.0, -1, [200, 100])).abs() < 1e-4, "{}", zoom(&h));
+        assert!(!h.state().ui.views[0].fit_pending);
     }
 }
 
