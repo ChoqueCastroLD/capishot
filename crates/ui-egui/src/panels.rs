@@ -2389,7 +2389,14 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             ("layer.delete", "Delete layer")
         };
         let trash = icons::button(ui, "trash", 26.0, false, tl!(label));
-        if trash.clicked() {
+        // A selected smart filter row is what Delete removes, as in Photoshop (#4751).
+        let picked_filter = crate::smart_ui::selected(&ctx, &doc, active);
+        if trash.clicked()
+            && let Some(picked) = picked_filter
+        {
+            actions.push(crate::smart_ui::trash_action(picked));
+            crate::smart_ui::deselect(&ctx, doc.id);
+        } else if trash.clicked() {
             // Like Photoshop, ⌥/Alt-click deletes without asking.
             let confirm = delete == "layer.delete" && !ui.input(|i| i.modifiers.alt);
             let params = if confirm { json!({"__trash": true}) } else { json!({}) };
@@ -2844,6 +2851,7 @@ fn layer_row(
     } else if resp.clicked() && !eye_resp.clicked() && !toggled && !fx_toggled && !masks.clicked {
         let mode = select_mode(ui.input(|i| i.modifiers));
         actions.push(("layer.select".into(), json!({"layer": l.id.0, "mode": mode})));
+        crate::smart_ui::deselect(ctx, doc.id);
         // A thumbnail explicitly selects content or a mask. Selecting an adjustment/fill row
         // defaults to its mask, but clicking its content thumbnail must leave the mask target.
         let pos = resp.interact_pointer_pos();
