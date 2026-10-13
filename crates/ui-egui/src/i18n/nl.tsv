@@ -3884,3 +3884,6 @@ cameraData	Lens	Lens
 	Show rulers in new documents	Linialen tonen in nieuwe documenten
 # Eraser: Erase to History; Magic Wand: Sample Size.
 	Erase to History	Wissen naar historie
+# Anonymous usage statistics (web build): Preferences › General, About.
+	Send anonymous usage statistics	Anonieme gebruiksstatistieken verzenden
+	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	De webversie verzendt anonieme gebruiksstatistieken (geen bestanden of inhoud); uitschakelen via Voorkeuren › Algemeen.

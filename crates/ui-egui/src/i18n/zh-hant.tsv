@@ -2716,3 +2716,6 @@ cameraData	Lens	鏡頭
 # Eraser: Erase to History; Magic Wand: Sample Size.
 	Erase to History	清除至步驟記錄
 	Sample Size	取樣尺寸
+# Anonymous usage statistics (web build): Preferences › General, About.
+	Send anonymous usage statistics	傳送匿名使用統計
+	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	網頁版會傳送匿名使用統計（不含檔案或內容）；可在 偏好設定 › 一般 中關閉。
