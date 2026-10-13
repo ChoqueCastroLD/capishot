@@ -847,6 +847,9 @@
 	Appearance	外観
 	Appearance (Layer Style)	外観 (レイヤースタイル)
 	Apply Layer Mask	レイヤーマスクを適用
+	Add Mask to Selection	マスクを選択範囲に追加
+	Subtract Mask from Selection	選択範囲からマスクを削除
+	Intersect Mask with Selection	選択範囲とマスクの共通範囲
 	Apply Per Tip	先端ごとに適用
 	Apply next selected layer comp	次のレイヤーカンプを適用
 	Apply previous selected layer comp	前のレイヤーカンプを適用

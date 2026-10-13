@@ -828,6 +828,9 @@
 	Appearance	Aparência
 	Appearance (Layer Style)	Aparência (estilo de camada)
 	Apply Layer Mask	Aplicar máscara de camada
+	Add Mask to Selection	Adicionar máscara à seleção
+	Subtract Mask from Selection	Subtrair máscara da seleção
+	Intersect Mask with Selection	Fazer interseção da máscara com a seleção
 	Apply Per Tip	Aplicar por ponta
 	Apply next selected layer comp	Aplicar a próxima composição de camadas selecionada
 	Apply previous selected layer comp	Aplicar a composição de camadas selecionada anterior

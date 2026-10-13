@@ -828,6 +828,9 @@
 	Appearance	Tampilan
 	Appearance (Layer Style)	Tampilan (Gaya Layer)
 	Apply Layer Mask	Terapkan Mask Layer
+	Add Mask to Selection	Tambahkan Mask ke Seleksi
+	Subtract Mask from Selection	Kurangi Mask dari Seleksi
+	Intersect Mask with Selection	Iriskan Mask dengan Seleksi
 	Apply Per Tip	Terapkan Per Ujung
 	Apply next selected layer comp	Terapkan layer comp terpilih berikutnya
 	Apply previous selected layer comp	Terapkan layer comp terpilih sebelumnya

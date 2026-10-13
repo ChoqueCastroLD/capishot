@@ -948,6 +948,9 @@
 	Duplicate Layers…	Nhân bản các lớp…
 	Add Layer Mask	Thêm mặt nạ lớp
 	Apply Layer Mask	Áp dụng mặt nạ lớp
+	Add Mask to Selection	Thêm mặt nạ vào vùng chọn
+	Subtract Mask from Selection	Trừ mặt nạ khỏi vùng chọn
+	Intersect Mask with Selection	Giao mặt nạ với vùng chọn
 	Delete Layer Mask	Xóa mặt nạ lớp
 	Disable Layer Mask	Tắt mặt nạ lớp
 	Release Clipping Mask	Nhả mặt nạ cắt

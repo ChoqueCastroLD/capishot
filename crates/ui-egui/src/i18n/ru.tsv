@@ -206,6 +206,9 @@
 	Enable Layer Mask	Включить маску слоя
 	Disable Layer Mask	Отключить маску слоя
 	Apply Layer Mask	Применить маску слоя
+	Add Mask to Selection	Добавить маску к выделению
+	Subtract Mask from Selection	Вычесть маску из выделения
+	Intersect Mask with Selection	Пересечь маску с выделением
 	Link Layer Mask	Связать маску слоя
 	Unlink Layer Mask	Отвязать маску слоя
 	Vector Mask	Векторная маска

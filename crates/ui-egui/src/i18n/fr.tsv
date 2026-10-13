@@ -834,6 +834,9 @@
 	Appearance	Apparence
 	Appearance (Layer Style)	Apparence (style de calque)
 	Apply Layer Mask	Appliquer le masque de calque
+	Add Mask to Selection	Ajouter le masque à la sélection
+	Subtract Mask from Selection	Soustraire le masque de la sélection
+	Intersect Mask with Selection	Intersection du masque et de la sélection
 	Apply Per Tip	Appliquer par pointe
 	Apply next selected layer comp	Appliquer la composition de calques sélectionnée suivante
 	Apply previous selected layer comp	Appliquer la composition de calques sélectionnée précédente
