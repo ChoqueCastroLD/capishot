@@ -43,7 +43,7 @@ pub use crate::resolution::{exif_resolution, export_exif, export_xmp, photoshop_
 pub use crate::source_settings::{WebpEncoding, jpeg_quality, webp_encoding};
 pub use half::f16;
 
-use crate::codecs::{dpx, exr, fits, heif, jpeg, pcx, png, pnm, tiff, via_image, webp, xpm};
+use crate::codecs::{dds, dpx, exr, fits, heif, jpeg, pcx, png, pnm, tiff, via_image, webp, xpm};
 
 /// Detect the format and decode with default [`Limits`].
 pub fn decode(bytes: &[u8]) -> Result<Image, CodecError> {
@@ -76,6 +76,7 @@ pub fn decode_as_with(format: Format, bytes: &[u8], opts: &DecodeOptions) -> Res
         Format::Pnm => pnm::decode(bytes, l),
         Format::Pcx => pcx::decode(bytes, l),
         Format::Xpm => xpm::decode(bytes, l),
+        Format::Dds => dds::decode(bytes, l),
         Format::Fits => fits::decode(bytes, l),
         Format::Dpx => dpx::decode(bytes, l),
         Format::OpenExr => exr::decode(bytes, l),
@@ -227,6 +228,7 @@ pub fn encode(image: &Image, format: Format, opts: &EncodeOptions) -> Result<Vec
         Format::Pnm => pnm::encode(image, plan, opts),
         Format::Pcx => Err(CodecError::unsupported(format, "PCX is import-only; save as PNG instead")),
         Format::Xpm => Err(CodecError::unsupported(format, "XPM is import-only; save as PNG instead")),
+        Format::Dds => Err(CodecError::unsupported(format, "DDS is import-only; save as PNG instead")),
         Format::Fits => fits::encode(image, plan, opts),
         Format::Dpx => dpx::encode(image, plan, opts),
         Format::OpenExr => exr::encode(image, plan, opts),
