@@ -199,6 +199,7 @@ mod tool_cursor;
 pub mod tool_feedback;
 pub(crate) mod tool_memory;
 mod tool_reset;
+mod tool_shortcuts;
 pub mod transform_fx;
 pub mod transform_tex;
 pub mod transform_tool;

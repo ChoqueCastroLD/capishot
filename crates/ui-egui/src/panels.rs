@@ -157,8 +157,10 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                     let key = egui::Id::new(("tool-slot", *slot_index));
                                     let tool = slot_tool(ui, app.ui.tool, slot, key);
                                     let sel = slot.contains(&app.ui.tool);
-                                    let tip =
-                                        if tool.key() == '\0' { tl!(tool.label()).to_string() } else { format!("{}  ({})", tl!(tool.label()), tool.key()) };
+                                    let tip = match crate::tool_shortcuts::shortcut(app, tool) {
+                                        Some(sc) => format!("{}  ({})", tl!(tool.label()), crate::shortcuts::pretty(&sc)),
+                                        None => tl!(tool.label()).to_string(),
+                                    };
                                     let resp =
                                         icons::button_with_icon_size_tip(ui, icons::tool_icon(tool), bx, toolbar_icon_size(bx, t.pro), sel, &tip, tool_tips);
                                     if slot.len() > 1 {
@@ -247,11 +249,11 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                                             egui::FontId::proportional(12.5),
                                                             t.text,
                                                         );
-                                                        if item.key() != '\0' {
+                                                        if let Some(sc) = crate::tool_shortcuts::shortcut(app, item) {
                                                             ui.painter().text(
                                                                 pos2(r.right() - 8.0, r.center().y),
                                                                 Align2::RIGHT_CENTER,
-                                                                item.key().to_string(),
+                                                                crate::shortcuts::pretty(&sc),
                                                                 egui::FontId::proportional(12.0),
                                                                 t.text_dim,
                                                             );
