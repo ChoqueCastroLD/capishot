@@ -24,6 +24,7 @@ pub mod analysis_ui;
 pub mod anchor_tools;
 pub mod artboard_tool;
 pub mod artboard_ui;
+pub(crate) mod background_redraw;
 mod blend_keys;
 pub(crate) mod blend_preview;
 mod brand;
@@ -633,6 +634,8 @@ pub struct PhotocraftApp {
     pub(crate) filter_preview: Option<filter_dialog::FilterPreview>,
     #[cfg(not(target_arch = "wasm32"))]
     filter_preview_worker: filter_preview_worker::Worker,
+    /// Full CPU canvas redraws running in the background, by document (#4024).
+    pub(crate) redraws: std::collections::HashMap<photocraft_doc::DocId, background_redraw::Redraw>,
     /// Select › Color Range dialog preview (proxy document + mask / image textures).
     pub(crate) color_range: Option<color_range_ui::Preview>,
     /// Image › Adjustments dialog preview through a temporary clipped adjustment layer.
@@ -823,6 +826,7 @@ impl PhotocraftApp {
             filter_preview: None,
             #[cfg(not(target_arch = "wasm32"))]
             filter_preview_worker: Default::default(),
+            redraws: Default::default(),
             color_range: None,
             adjust_preview: None,
             synthetic: Vec::new(),

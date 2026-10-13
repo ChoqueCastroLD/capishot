@@ -1527,7 +1527,7 @@ pub(crate) fn effect_reach(layers: &[photocraft_doc::Layer]) -> i32 {
 /// GPU path: make sure document `idx` is current in the GPU canvas. Edits draw their damage;
 /// unchanged lower-stack composites can be reused by the compositor inside that region.
 /// Returns false if there is no GPU canvas.
-fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
+fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible: DRect) -> bool {
     let Some(gpu) = app.gpu.clone() else { return false };
     let Some((revision, last_damage, id)) = app
         .session
@@ -1559,6 +1559,8 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
         app.navigator_gpu.remove(&id);
     }
     let size = [doc.size.width, doc.size.height];
+    // A full CPU redraw running in the background: show the blocks it has finished.
+    crate::background_redraw::poll(app, &gpu, id);
     let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache {
         revision: 0,
         texture: None,
@@ -1581,22 +1583,37 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
     // Display textures for a canvas this large would not fit the GPU: the reduced CPU canvas
     // draws it (checked before the memory budget, which walks the history, every frame).
     if !gpu.fits_canvas(&doc) {
+        crate::background_redraw::cancel(app, id);
         return false;
     }
     let partial = present && damage.is_some();
     gpu_budget(app, &gpu, idx, partial, visible);
-    let r = gpu.refresh(id.0, &doc, if partial { damage } else { None }, display.as_deref());
+    let defer = crate::background_redraw::enabled(app);
+    let r = gpu.refresh_with(id.0, &doc, if partial { damage } else { None }, display.as_deref(), defer);
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
         // texture budget: draw this frame on the CPU path.
+        crate::background_redraw::cancel(app, id);
         return false;
+    }
+    if r.kind == crate::gpu_canvas::REFRESH_DEFERRED {
+        // Composited off the UI thread, the visible part first (#4024).
+        let region = if partial { damage.unwrap_or(doc.bounds()) } else { doc.bounds() };
+        crate::background_redraw::start(app, ctx, &gpu, doc.clone(), display.clone(), visible, region, r.fallback.clone());
+    } else if partial {
+        // The edit drew its damage; blocks of a running redraw still to come follow the edit.
+        crate::background_redraw::restart(app, ctx, &gpu, doc.clone(), display.clone(), visible);
+    } else {
+        crate::background_redraw::cancel(app, id);
     }
     if let Some(e) = &r.fallback
         && app.perf.gpu_fallback.as_deref() != Some(e.as_str())
     {
         log::info!("{e}; using the CPU compositor");
     }
-    app.perf.record(r.kind, r.px, r.composite_ms, r.upload_ms);
+    if r.kind != crate::gpu_canvas::REFRESH_DEFERRED {
+        app.perf.record(r.kind, r.px, r.composite_ms, r.upload_ms);
+    }
     if r.kind == "full" {
         crate::notices::slow_cpu_refresh(app, id.0, r.composite_ms + r.upload_ms, r.fallback.as_deref());
     }
@@ -1924,6 +1941,7 @@ pub(crate) fn retain_gpu_documents(app: &mut PhotocraftApp) {
         live.extend(crate::adjust_preview::gpu_keys(app));
         gpu.retain(&live);
     }
+    crate::background_redraw::retain(app);
     // Upload markers must not outlive the resources they describe: native reopen can reuse
     // both the document ID and revision before the next frame while a preview dialog stays open.
     let documents = app.session.documents();
@@ -2913,7 +2931,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 offset: [0.0, 0.0],
             };
             paint_gpu_view(&painter, rect, params, &pattern);
-        } else if gpu_ok && ensure_gpu(app, idx, visible_doc_rect(&xf)) {
+        } else if gpu_ok && ensure_gpu(app, &ctx, idx, visible_doc_rect(&xf)) {
             on_gpu = true;
             app.perf.gpu = true;
             // Shadow, checkerboard, document and pixel grid in one custom shader (gpu_canvas.rs).
