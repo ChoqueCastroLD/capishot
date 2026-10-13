@@ -2285,7 +2285,9 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         ("artboard", "scan", tl!("Prevent auto-nesting in and out of Artboards and Frames"), lk.artboard),
                         ("all", "lock", tl!("Lock all"), lk.all),
                     ] {
-                        if icons::button(ui, icon, 20.0, on, tip).clicked() {
+                        // Lock Image Pixels includes Lock Transparent Pixels, which waits for it (#4892).
+                        let enabled = key != "transparency" || !lk.pixels;
+                        if ui.add_enabled_ui(enabled, |ui| icons::button(ui, icon, 20.0, on, tip)).inner.clicked() {
                             actions.push(("layer.setProps".into(), json!({"layer": l.id.0, "locks": { key: !on }})));
                         }
                     }

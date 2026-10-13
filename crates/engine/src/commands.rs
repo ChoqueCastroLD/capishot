@@ -701,13 +701,8 @@ fn build() -> Vec<CommandSpec> {
                     if let Some(Value::Object(m)) = p.get("locks") {
                         for (k, v) in m {
                             let v = v.as_bool().unwrap_or(false);
-                            match k.as_str() {
-                                "transparency" => l.locks.transparency = v,
-                                "pixels" => l.locks.pixels = v,
-                                "position" => l.locks.position = v,
-                                "artboard" => l.locks.artboard = v,
-                                "all" => l.locks.all = v,
-                                other => return Err(bad("layer.setProps", format!("unknown lock `{other}`"))),
+                            if !l.locks.set(k, v) {
+                                return Err(bad("layer.setProps", format!("unknown lock `{k}`")));
                             }
                         }
                     }
