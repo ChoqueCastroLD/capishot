@@ -1655,6 +1655,59 @@ fn southeast_asian_fallback_candidates_cover_every_platform() {
     }
 }
 
+/// The Indic scripts of document text, with conjuncts, matras and viramas (#218).
+const INDIC: &[(&str, &str, &[&str])] = &[
+    ("Devanagari", "हिन्दी भाषा क्षत्रिय श्री", fonts::DEVANAGARI_FAMILIES),
+    ("Bengali", "বাংলা ভাষা ক্ষত্রিয় শ্রী", fonts::BENGALI_FAMILIES),
+    ("Gurmukhi", "ਪੰਜਾਬੀ ਭਾਸ਼ਾ ਸਤਿ ਸ੍ਰੀ", fonts::GURMUKHI_FAMILIES),
+    ("Gujarati", "ગુજરાતી ભાષા ક્ષત્રિય શ્રી", fonts::GUJARATI_FAMILIES),
+    ("Tamil", "தமிழ் மொழி ஸ்ரீ கொடை", fonts::TAMIL_FAMILIES),
+    ("Telugu", "తెలుగు భాష క్షత్రియ శ్రీ", fonts::TELUGU_FAMILIES),
+    ("Kannada", "ಕನ್ನಡ ಭಾಷೆ ಕ್ಷತ್ರಿಯ ಶ್ರೀ", fonts::KANNADA_FAMILIES),
+    ("Malayalam", "മലയാളം ഭാഷ ക്ഷത്രിയ ശ്രീ", fonts::MALAYALAM_FAMILIES),
+    ("Sinhala", "සිංහල භාෂාව ක්‍ෂත්‍රිය ශ්‍රී", fonts::SINHALA_FAMILIES),
+];
+
+#[test]
+fn indic_scripts_fall_back_to_installed_fonts() {
+    for (name, sample, families) in INDIC {
+        let mut e = TextEngine::with_system_fonts();
+        let Some(hit) = families.iter().find(|f| e.fonts.has_family(f)) else {
+            eprintln!("skipped: no {name}-capable font installed");
+            continue;
+        };
+        let direct = TextLayer { text: (*sample).into(), font_family: hit.to_string(), size_pt: 24.0, ..Default::default() };
+        let l = e.layout(&direct, 72.0);
+        assert!(!l.glyphs.is_empty() && l.glyphs.iter().all(|g| g.id != 0), "{hit} is installed but shapes .notdef for {name}");
+        let mixed = format!("Latin {sample}");
+        let l = e.layout(&point(&mixed, 24.0), 72.0);
+        assert!(l.glyphs.iter().all(|g| g.id != 0), "{name} in a Latin font drawn with .notdef although {hit} is installed");
+        let latin = l.glyphs.first().map(|g| g.face);
+        assert!(l.glyphs.iter().any(|g| Some(g.face) != latin), "Latin and {name} drawn with the same face");
+    }
+}
+
+#[test]
+fn indic_fallback_candidates_cover_every_platform() {
+    // Logic-level half (runs without these fonts): every script has a Windows, macOS and Linux
+    // family in the candidates, ahead of the broad last-resort fonts; the shared Nirmala UI is
+    // probed once.
+    for order in [crate::cjk::script_order(None), crate::cjk::script_order(Some("ja"))] {
+        let fb = fonts::fallback_candidates(&order);
+        let last = fb.iter().position(|f| *f == "Arial Unicode MS").unwrap();
+        assert_eq!(fb.iter().filter(|f| **f == "Nirmala UI").count(), 1, "{fb:?}");
+        for (name, _, families) in INDIC {
+            assert!(families.contains(&"Nirmala UI"), "{name}");
+            assert!(families.iter().any(|f| f.ends_with("Sangam MN") || f.starts_with("Kohinoor")), "{name}: no macOS family");
+            assert!(families.iter().any(|f| f.starts_with("Noto Sans ")), "{name}: no Linux family");
+            for fam in *families {
+                let i = fb.iter().position(|f| f == fam).unwrap_or_else(|| panic!("{fam} missing from {fb:?}"));
+                assert!(i < last, "{fam} after the last-resort fonts");
+            }
+        }
+    }
+}
+
 #[test]
 fn a_served_script_fallback_joins_the_fallback_stack_once_it_arrives() {
     let Some(cairo) = crate::CRAFT_FONTS.iter().find(|f| f.family == "Cairo") else {
