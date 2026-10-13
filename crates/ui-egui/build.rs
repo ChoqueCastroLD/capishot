@@ -30,12 +30,17 @@ fn main() {
     deflate_catalogs();
 }
 
+/// Catalogs compiled in without the `all-catalogs` feature (the web build): the languages most of
+/// its users read. The others are written empty and fetched at run time (`i18n::provide_catalog`).
+const ALWAYS_COMPILED_IN: [&str; 2] = ["es.tsv", "pt-br.tsv"];
+
 /// Deflate every `src/i18n/*.tsv` into `OUT_DIR/i18n/`. A catalog that can't be written is a
 /// build error (`include_bytes!` would fail on it anyway, with a less helpful message).
 fn deflate_catalogs() {
     use std::io::Write as _;
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/i18n");
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default()).join("i18n");
+    let all = std::env::var_os("CARGO_FEATURE_ALL_CATALOGS").is_some();
     println!("cargo::rerun-if-changed={}", src.display());
     let result = (|| -> std::io::Result<()> {
         std::fs::create_dir_all(&out)?;
@@ -43,6 +48,10 @@ fn deflate_catalogs() {
             let path = entry?.path();
             let Some(name) = path.file_name().and_then(|n| n.to_str()).filter(|n| n.ends_with(".tsv")) else { continue };
             println!("cargo::rerun-if-changed={}", path.display());
+            if !all && !ALWAYS_COMPILED_IN.contains(&name) {
+                std::fs::write(out.join(format!("{name}.deflate")), [])?;
+                continue;
+            }
             let mut z = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
             z.write_all(&std::fs::read(&path)?)?;
             std::fs::write(out.join(format!("{name}.deflate")), z.finish()?)?;

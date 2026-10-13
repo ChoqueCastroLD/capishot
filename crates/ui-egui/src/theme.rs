@@ -738,6 +738,7 @@ pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
     if let Some(mono) = mono {
         fonts.families.entry(FontFamily::Monospace).or_default().insert(0, mono);
     }
+    add_symbol_fonts(&mut fonts);
     // Named weights fall back to the default stack for missing glyphs.
     let fallback: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     for (fam, primary) in [("medium", medium), ("semibold", semibold)] {
@@ -764,6 +765,36 @@ pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
     // CJK, Thai, Arabic, Indic and other script fallback fonts (craft-fonts' Japanese ones if built in, then
     // the system's) are registered on demand (cjk_fonts.rs).
     crate::cjk_fonts::install_with(ctx, cjk);
+}
+
+/// Without egui's `default_fonts` feature (the web build: Ubuntu-Light and Hack are never drawn
+/// with, Inter and JetBrains Mono come first) the defaults are empty, so the two fonts egui's
+/// widgets and Capishot's labels take symbols from are added here, with egui's own tweaks: Noto
+/// Emoji, then the emoji icon font. Inter backs JetBrains Mono for the few arrows it lacks (`↵`).
+/// With the defaults (the desktop app) nothing changes.
+fn add_symbol_fonts(fonts: &mut FontDefinitions) {
+    use egui::FontTweak;
+    let symbols = [
+        ("NotoEmoji-Regular", epaint_default_fonts::NOTO_EMOJI_REGULAR, 0.81),
+        ("emoji-icon-font", epaint_default_fonts::EMOJI_ICON, 0.90),
+    ];
+    let had_mono_fallback = fonts.font_data.contains_key("Hack");
+    for (name, bytes, scale) in symbols {
+        if fonts.font_data.contains_key(name) {
+            continue;
+        }
+        fonts.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(bytes).tweak(FontTweak { scale, ..Default::default() })));
+        for family in [FontFamily::Proportional, FontFamily::Monospace] {
+            fonts.families.entry(family).or_default().push(name.to_owned());
+        }
+    }
+    if !had_mono_fallback && fonts.font_data.contains_key("Inter") {
+        let mono = fonts.families.entry(FontFamily::Monospace).or_default();
+        if !mono.iter().any(|f| f == "Inter") {
+            let at = usize::from(mono.first().is_some_and(|f| f == "JetBrainsMono"));
+            mono.insert(at, "Inter".to_owned());
+        }
+    }
 }
 
 /// Has [`install_fonts`]'s stack reached the active fonts? Before that (the first pass, when

@@ -9,7 +9,11 @@ rust-version.workspace = true
 [features]
 # Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
 corpus = []
-default = []
+# OpenEXR (flat, multi-part, deep, Cryptomatte) via the `exr` crate. On by default; the web build
+# leaves it out (apps/photocraft-web), where EXR files are recognised and refused with a clear
+# "not included in this build" error.
+default = ["exr"]
+exr = ["dep:exr"]
 # AVIF *encode* via ravif (pure Rust). Decoding AVIF needs dav1d (C), so AVIF
 # stays read-unsupported and therefore asymmetric; it is off by default.
 avif = ["image/avif"]
@@ -23,7 +27,7 @@ thiserror.workspace = true
 image = { workspace = true, features = ["gif", "bmp", "tga", "ico", "qoi", "hdr"] }
 png = "0.18"
 tiff = { version = "0.11", default-features = false, features = ["deflate", "lzw"] }
-exr = { version = "1.73", default-features = false }
+exr = { version = "1.73", default-features = false, optional = true }
 half = "2"
 serde_json.workspace = true
 flate2.workspace = true

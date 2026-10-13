@@ -86,6 +86,7 @@ pub mod perspective_crop_cmds;
 pub mod photo_cmds;
 pub mod pick_cmds;
 mod pixels;
+#[cfg(feature = "plugins")]
 pub mod plugin_cmds;
 pub mod prefs;
 pub mod preset_import_cmds;

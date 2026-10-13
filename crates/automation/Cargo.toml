@@ -28,5 +28,9 @@ getrandom = { workspace = true }
 cap-std = "4"
 
 [dev-dependencies]
+# EXR, camera raw and plug-ins are tested as the desktop app ships them.
+photocraft-codecs = { workspace = true, features = ["exr"] }
+photocraft-io = { workspace = true, features = ["camera-raw"] }
+photocraft-engine = { workspace = true, features = ["plugins"] }
 rmcp = { version = "3.5", default-features = false, features = ["client", "server", "macros", "transport-io"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync", "net", "io-util", "time"] }

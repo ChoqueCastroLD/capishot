@@ -182,6 +182,7 @@ pub fn apply_filter_to_surface(
         return crate::adjust_cmds::adjust_as_filter(kind, params, surf);
     }
     // WebAssembly plug-in smart filters (plugin_cmds).
+    #[cfg(feature = "plugins")]
     if id == crate::plugin_cmds::RUN {
         return crate::plugin_cmds::apply_to_surface(id, params, surf, selection, canvas);
     }
