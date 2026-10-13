@@ -2176,7 +2176,20 @@ impl PhotocraftApp {
         // identity against address reuse without retaining the document's pixel data.
         let snapshot = std::sync::Arc::downgrade(&doc);
         let show_color = self.session.prefs().interface.show_channels_in_color;
-        if !matches!(&self.channel_thumbs, Some((d, old, in_color, _)) if *d == id && old.ptr_eq(&snapshot) && *in_color == show_color) {
+        // A step that changes only the selection (a marquee, Deselect) makes a new snapshot with
+        // the same pixels: keep the thumbnails, a full composite at 56 px costs ~0.7 s on a
+        // layered 20 MP document (#4518).
+        let current = match &mut self.channel_thumbs {
+            Some((d, old, in_color, _)) if *d == id && *in_color == show_color => {
+                let same = old.ptr_eq(&snapshot) || old.upgrade().is_some_and(|prev| same_but_selection(&prev, &doc));
+                if same {
+                    *old = snapshot.clone();
+                }
+                same
+            }
+            _ => false,
+        };
+        if !current {
             let comp = photocraft_compose::thumbnail(&doc, 56);
             let (w, h) = (comp.width as usize, comp.height as usize);
             let side = w.max(h);
@@ -2189,7 +2202,7 @@ impl PhotocraftApp {
                         px[(y + oy) * side + x + ox] = f(&comp.pixels[o..o + 4]);
                     }
                 }
-                ctx.load_texture(format!("chan-{name}"), egui::ColorImage::new([side, side], px), egui::TextureOptions::LINEAR)
+                (format!("chan-{name}"), egui::ColorImage::new([side, side], px))
             };
             let fmt = doc.pixel_format();
             let colors = fmt.mode.color_channels();
@@ -2222,12 +2235,35 @@ impl PhotocraftApp {
                         px[(y + oy) * side + x + ox] = egui::Color32::from_gray((v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
                     }
                 }
-                texs.push(ctx.load_texture(format!("chan-a{i}"), egui::ColorImage::new([side, side], px), egui::TextureOptions::LINEAR));
+                texs.push((format!("chan-a{i}"), egui::ColorImage::new([side, side], px)));
             }
-            self.channel_thumbs = Some((id, snapshot, show_color, texs));
+            // Update the textures already uploaded rather than allocating new ones.
+            let mut handles = match self.channel_thumbs.take() {
+                Some((d, _, _, h)) if d == id => h,
+                _ => Vec::new(),
+            };
+            handles.truncate(texs.len());
+            for (i, (name, image)) in texs.into_iter().enumerate() {
+                match handles.get_mut(i) {
+                    Some(h) => h.set(image, egui::TextureOptions::LINEAR),
+                    None => handles.push(ctx.load_texture(name, image, egui::TextureOptions::LINEAR)),
+                }
+            }
+            self.channel_thumbs = Some((id, snapshot, show_color, handles));
         }
         self.channel_thumbs.as_ref().map(|(_, _, _, t)| t.iter().map(|t| t.id()).collect()).unwrap_or_default()
     }
+}
+
+/// Whether `new` differs from `old` at most in its selection, so every composite and channel
+/// thumbnail of it is unchanged. Tiles compare by pointer first, so this costs little.
+fn same_but_selection(old: &Document, new: &Document) -> bool {
+    if old.selection == new.selection {
+        return old == new;
+    }
+    let mut o = old.clone();
+    o.selection = new.selection.clone();
+    o == *new
 }
 
 /// Layer › Layer Mask commands that add a layer mask: Photoshop targets the new mask (#2166).

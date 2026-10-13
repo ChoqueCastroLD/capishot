@@ -483,6 +483,34 @@ mod tests {
         assert_eq!(thumbs_gray.len(), thumbs_color.len());
     }
 
+    /// A selection-only step keeps the thumbnails; a pixel edit rebuilds them into the same
+    /// textures rather than new ones (#4518).
+    #[test]
+    fn channel_thumbs_skip_selection_steps_and_reuse_textures() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
+        let ctx = egui::Context::default();
+        // Texture uploads one pass makes (new textures and updates both count).
+        let pass = |app: &mut PhotocraftApp| {
+            ctx.begin_pass(Default::default());
+            let ids = app.channel_thumbs(&ctx);
+            let mut delta = ctx.end_pass().textures_delta;
+            let n = delta.set.len();
+            delta.clear();
+            (ids, n)
+        };
+        let (first, uploads) = pass(&mut app);
+        assert!(uploads > 0);
+        app.run("select.rect", json!({"x": 4, "y": 4, "width": 20, "height": 20})).unwrap();
+        assert_eq!(pass(&mut app), (first.clone(), 0), "a marquee changes no pixels");
+        app.run("select.deselect", json!({})).unwrap();
+        assert_eq!(pass(&mut app), (first.clone(), 0), "neither does Deselect");
+        app.run("edit.fill", json!({"color": "#336699"})).unwrap();
+        let (after, uploads) = pass(&mut app);
+        assert!(uploads > 0, "a fill rebuilds them");
+        assert_eq!(after, first, "into the same textures");
+    }
+
     /// The Channels tab (the Layers card's second tab) of a 64×48 white document with a layer
     /// mask on "Masked" and one alpha channel.
     fn channels_harness() -> (egui_kittest::Harness<'static, PhotocraftApp>, u64) {
