@@ -74,6 +74,7 @@ pub mod distort_ui;
 pub mod doc_props_ui;
 pub mod dock;
 pub mod duplicate_layer_ui;
+pub mod edit_history;
 pub mod egui_fonts;
 pub mod enable_rules;
 pub mod eraser_ui;
@@ -667,6 +668,8 @@ pub struct PhotocraftApp {
     pub(crate) raw_redevelop: Option<camera_raw_ui::Redevelop>,
     /// Filter › Adaptive Wide Angle dialog (wide_angle_ui).
     pub(crate) wide_angle: Option<wide_angle_ui::WideAngleDialog>,
+    /// ⌘Z history of each open parameter dialog (edit_history).
+    pub(crate) dialog_edits: edit_history::DialogEdits,
     /// The filter a "Rasterize?" prompt answered for, run after the dialog closes, where the
     /// egui context is available again (rasterize_prompt).
     pub(crate) pending_after_prompt: Option<(String, serde_json::Value)>,
@@ -846,6 +849,7 @@ impl PhotocraftApp {
             pending_raw_open: None,
             raw_redevelop: None,
             wide_angle: None,
+            dialog_edits: Default::default(),
             pending_after_prompt: None,
             tone_hist: None,
             doc_hist: None,

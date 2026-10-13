@@ -129,6 +129,7 @@ fn show_modal<T>(
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     crate::layer_style::color_picker::prune(app);
     crate::type_panels_ui::color_picker::prune(app);
+    crate::edit_history::track_dialogs(app, ctx);
     let dialogs = app.ui.dialogs.clone();
     let top = dialogs.last().map(|d| d.id);
     let mut shown = Vec::new();
