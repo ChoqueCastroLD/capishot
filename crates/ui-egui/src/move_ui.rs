@@ -459,12 +459,17 @@ mod tests {
                 assert_eq!(t[0].shown, photocraft_gpu::surface_fingerprint(moved), "{depth}-bit");
                 assert!(t[0].source == *f.parts.piece(), "{depth}-bit: from where it was cut");
                 // The canvas shows what compositing the piece into the layer shows.
-                let want = photocraft_compose::flatten(&photocraft_engine::float_cmds::displayed(st, crate::canvas::selection_drag_delta(&app).unwrap()).unwrap());
+                let want =
+                    photocraft_compose::flatten(&photocraft_engine::float_cmds::displayed(st, crate::canvas::selection_drag_delta(&app).unwrap()).unwrap());
                 assert!(photocraft_compose::flatten(&shown) == want, "{depth}-bit: shown as composited");
                 if let Some((before, seen)) = &last {
                     for l in shown.walk().into_iter().map(|(_, _, l)| l).filter(|l| l.id != piece) {
                         let (a, b) = (l.surface(), before.layer(l.id).and_then(|l| l.surface()));
-                        assert!(a.zip(b).is_none_or(|(a, b)| photocraft_gpu::surface_fingerprint(a) == photocraft_gpu::surface_fingerprint(b)), "{depth}-bit: layer {:?} unchanged", l.id);
+                        assert!(
+                            a.zip(b).is_none_or(|(a, b)| photocraft_gpu::surface_fingerprint(a) == photocraft_gpu::surface_fingerprint(b)),
+                            "{depth}-bit: layer {:?} unchanged",
+                            l.id
+                        );
                     }
                     let r = super::damage(&app, st.doc.id, st.revision, *seen, key).expect("a bounded redraw");
                     assert!(r.width() <= 16 + 8 + 2 && r.height() <= 16 + 1 + 2, "{depth}-bit: only where the piece was and is: {r:?}");
