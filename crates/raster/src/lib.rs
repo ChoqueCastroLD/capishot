@@ -89,6 +89,43 @@ impl Tile {
     }
 }
 
+/// Regions at least this many pixels read and write their tiles in parallel (smaller ones are
+/// dabs and spans, where waking the pool costs more than it saves).
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+const PARALLEL_PIXELS: u64 = 1 << 18;
+
+/// Whether `r` is large enough, and spans more than one tile, to be worked in parallel.
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+fn parallel(r: Rect) -> bool {
+    !r.is_empty() && u64::from(r.width()) * u64::from(r.height()) >= PARALLEL_PIXELS && r.tiles().nth(1).is_some()
+}
+
+/// Run `f(band, rows)` for each tile-row band of `r` (its rows of `out`, which holds `r` row by
+/// row, `row_len` elements a row), in parallel for a large `r`. Each band is what the serial
+/// pass over `r` writes for those rows, so the result is the same.
+fn bands<T: Send>(r: Rect, out: &mut [T], row_len: usize, f: impl Fn(Rect, &mut [T]) + Sync) {
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    if parallel(r) && r.y0.div_euclid(TILE_SIZE) != (r.y1 - 1).div_euclid(TILE_SIZE) {
+        use rayon::prelude::*;
+        let mut parts = Vec::new();
+        let mut rest = out;
+        let mut y = r.y0;
+        while y < r.y1 {
+            let y1 = ((y.div_euclid(TILE_SIZE) + 1) * TILE_SIZE).min(r.y1);
+            let len = ((y1 - y) as usize * row_len).min(rest.len());
+            let (band, tail) = std::mem::take(&mut rest).split_at_mut(len);
+            parts.push((Rect::new(r.x0, y, r.x1, y1), band));
+            rest = tail;
+            y = y1;
+        }
+        parts.into_par_iter().for_each(|(b, band)| f(b, band));
+        return;
+    }
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    let _ = row_len;
+    f(r, out);
+}
+
 #[derive(Clone, Debug)]
 pub struct Surface {
     format: PixelFormat,
@@ -365,6 +402,13 @@ impl Surface {
         let w = r.width() as usize;
         out.clear();
         out.resize(w * r.height() as usize * n, 0.0);
+        bands(r, out, w * n, |b, band| self.read_region_slice(b, band));
+    }
+
+    /// [`Self::read_region_into`] into `out`, already `r`-sized.
+    fn read_region_slice(&self, r: Rect, out: &mut [f32]) {
+        let n = self.channels();
+        let w = r.width() as usize;
         let dp = self.default_samples();
         let dp = &dp[..n];
         let zero = self.default_pixel.iter().all(|&b| b == 0);
@@ -517,15 +561,34 @@ impl Surface {
         let w = r.width() as usize;
         assert_eq!(data.len(), w * r.height() as usize * n, "region data length mismatch");
         let sample = self.format.sample;
-        for tc in r.tiles() {
+        self.edit_tiles(r, |tc, t| {
             let tr = tc.rect().intersect(&r);
-            let t = self.tile_mut(tc);
             let span = tr.width() as usize * n;
             for y in tr.y0..tr.y1 {
                 let o = (((y - r.y0) as usize) * w + (tr.x0 - r.x0) as usize) * n;
                 let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (tr.x0 - tc.tx * TILE_SIZE) as usize) * n;
                 encode_span(&mut t.data, sample, base, &data[o..o + span]);
             }
+        });
+    }
+
+    /// Run `f` on every tile covering `r`, made writable as [`Self::tile_mut`] makes it (a missing
+    /// one filled with the default pixel, a shared one copied first). A large `r` runs the tiles
+    /// in parallel: they are taken out of the surface, edited and put back, which leaves exactly
+    /// what editing them one by one does.
+    fn edit_tiles(&mut self, r: Rect, f: impl Fn(TileCoord, &mut Tile) + Sync) {
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+        if parallel(r) {
+            use rayon::prelude::*;
+            let (fmt, dp) = (self.format, &self.default_pixel);
+            let mut work: Vec<(TileCoord, Arc<Tile>)> =
+                r.tiles().map(|c| (c, self.tiles.remove(&c).unwrap_or_else(|| Arc::new(Tile::filled(&fmt, dp))))).collect();
+            work.par_iter_mut().for_each(|(c, t)| f(*c, Arc::make_mut(t)));
+            self.tiles.extend(work);
+            return;
+        }
+        for tc in r.tiles() {
+            f(tc, self.tile_mut(tc));
         }
     }
 
@@ -672,16 +735,15 @@ impl Surface {
         let bpp = self.format.bytes_per_pixel();
         let w = r.width() as usize;
         assert_eq!(bytes.len(), w * r.height() as usize * bpp, "interleaved length mismatch");
-        for tc in r.tiles() {
+        self.edit_tiles(r, |tc, t| {
             let tr = tc.rect().intersect(&r);
-            let t = self.tile_mut(tc);
             let span = tr.width() as usize * bpp;
             for y in tr.y0..tr.y1 {
                 let src = (((y - r.y0) as usize) * w + (tr.x0 - r.x0) as usize) * bpp;
                 let dst = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (tr.x0 - tc.tx * TILE_SIZE) as usize) * bpp;
                 t.data[dst..dst + span].copy_from_slice(&bytes[src..src + span]);
             }
-        }
+        });
     }
 
     /// Read `r` as interleaved encoded bytes in the surface's format.
@@ -689,6 +751,14 @@ impl Surface {
         let bpp = self.format.bytes_per_pixel();
         let w = r.width() as usize;
         let mut out = vec![0u8; w * r.height() as usize * bpp];
+        bands(r, &mut out, w * bpp, |b, band| self.to_interleaved_slice(b, band));
+        out
+    }
+
+    /// [`Self::to_interleaved`] into `out`, already `r`-sized.
+    fn to_interleaved_slice(&self, r: Rect, out: &mut [u8]) {
+        let bpp = self.format.bytes_per_pixel();
+        let w = r.width() as usize;
         for tc in r.tiles() {
             let tr = tc.rect().intersect(&r);
             let span = tr.width() as usize * bpp;
@@ -707,7 +777,6 @@ impl Surface {
                 }
             }
         }
-        out
     }
 
     /// The surface moved by whole pixels: its encoded samples copied tile to tile (no float
@@ -1015,6 +1084,62 @@ mod tests {
     use super::*;
     use photocraft_color::PixelFormat;
     use proptest::prelude::*;
+
+    /// Large regions read and write their tiles in parallel (tile-row bands, tiles taken out and
+    /// put back): every value, every tile and every shared tile must be what row-by-row (serial)
+    /// calls leave, for every depth, a non-zero default pixel, missing and shared tiles.
+    #[test]
+    fn parallel_region_reads_and_writes_match_row_by_row_ones() {
+        let r = Rect::new(-37, -300, 1150, 590);
+        assert!(parallel(r));
+        for (fmt, default) in [
+            (PixelFormat::RGBA8, vec![0.0, 0.0, 0.0, 0.0]),
+            (PixelFormat::new(ColorMode::Rgb, SampleType::U16, false), vec![1.0, 0.5, 0.25]),
+            (PixelFormat::new(ColorMode::Grayscale, SampleType::F32, true), vec![0.75, 1.0]),
+        ] {
+            let n = fmt.channels();
+            let mut base = Surface::with_default(fmt, &default);
+            // Some tiles present (a patch), most missing.
+            let patch = Rect::new(100, -40, 700, 300);
+            let pv: Vec<f32> = (0..patch.width() as usize * patch.height() as usize * n).map(|i| ((i * 37) % 101) as f32 / 100.0).collect();
+            base.write_region(patch, &pv);
+            let snapshot = base.clone();
+            let before = base.read_region(patch);
+            let rows = |s: &Surface| -> Vec<f32> { (r.y0..r.y1).flat_map(|y| s.read_region(Rect::new(r.x0, y, r.x1, y + 1))).collect() };
+            let bytes = |s: &Surface| -> Vec<u8> { (r.y0..r.y1).flat_map(|y| s.to_interleaved(Rect::new(r.x0, y, r.x1, y + 1))).collect() };
+            assert_eq!(base.read_region(r), rows(&base), "{fmt:?}: parallel read");
+            assert_eq!(base.to_interleaved(r), bytes(&base), "{fmt:?}: parallel interleaved read");
+            let data: Vec<f32> = (0..r.width() as usize * r.height() as usize * n).map(|i| ((i * 7919) % 1009) as f32 / 1008.0).collect();
+            let (mut par, mut ser) = (base.clone(), base.clone());
+            par.write_region(r, &data);
+            let w = r.width() as usize * n;
+            for (k, y) in (r.y0..r.y1).enumerate() {
+                ser.write_region(Rect::new(r.x0, y, r.x1, y + 1), &data[k * w..(k + 1) * w]);
+            }
+            assert_eq!(par.tiles.keys().collect::<Vec<_>>(), ser.tiles.keys().collect::<Vec<_>>(), "{fmt:?}: same tiles");
+            for ((c, a), (_, b)) in par.tiles.iter().zip(&ser.tiles) {
+                assert_eq!(a.data, b.data, "{fmt:?}: tile {c:?}");
+            }
+            let (mut par2, mut ser2) = (base.clone(), base.clone());
+            let enc = par.to_interleaved(r);
+            par2.write_interleaved(r, &enc);
+            let bw = r.width() as usize * fmt.bytes_per_pixel();
+            for (k, y) in (r.y0..r.y1).enumerate() {
+                ser2.write_interleaved(Rect::new(r.x0, y, r.x1, y + 1), &enc[k * bw..(k + 1) * bw]);
+            }
+            for ((c, a), (_, b)) in par2.tiles.iter().zip(&ser2.tiles) {
+                assert_eq!(a.data, b.data, "{fmt:?}: interleaved tile {c:?}");
+            }
+            // The snapshot taken before the writes still has its own pixels (shared tiles copied).
+            assert!(snapshot.read_region(patch) == before && pv.len() == before.len(), "{fmt:?}: copy-on-write kept the snapshot");
+            // Tiles outside the written region stay shared with the snapshot.
+            let outside = Rect::new(-512, -1024, -256, -768);
+            let mut far = base.clone();
+            far.write_region(outside, &vec![0.5; 256 * 256 * n]);
+            far.write_region(r, &data);
+            assert!(far.tiles.iter().filter(|(c, _)| c.rect().intersect(&r).is_empty()).all(|(c, t)| base.tiles.get(c).is_none_or(|b| Arc::ptr_eq(b, t)) || c.rect() == outside));
+        }
+    }
 
     #[test]
     fn from_rgba_into_matches_from_rgba() {

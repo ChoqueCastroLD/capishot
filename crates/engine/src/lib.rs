@@ -417,6 +417,9 @@ pub struct Session {
     /// A finished live stroke offered to the `paint.stroke` / `paint.pencil` that commits it
     /// ([`Session::offer_live_stroke`]).
     pub(crate) live_commit: Option<brush_cmds::LiveCommit>,
+    /// A finished live Dodge/Burn/Sponge/Blur/Sharpen/Smudge stroke offered to the command that
+    /// commits it ([`Session::offer_live_dab`]).
+    pub(crate) live_dab: Option<retouch_cmds::DabCommit>,
     /// Google Fonts download services (fetcher, store, index), injected by the shell; `None`
     /// where online fonts are unavailable (see `font_download_cmds`).
     font_services: Option<Arc<font_download_cmds::FontServices>>,
@@ -557,9 +560,19 @@ impl Session {
         Ok(())
     }
 
+    /// Offer a finished live sequential-dab stroke (Dodge, Burn, Sponge, Blur, Sharpen, Smudge) to
+    /// the next command: its own commit with exactly the params it was drawn with takes these
+    /// pixels instead of running every dab again (its result then says `"fromLive": true`); any
+    /// other command drops the offer. History, the journal and authorization are unchanged.
+    pub fn offer_live_dab(&mut self, live: retouch_cmds::LiveDab) -> Result<()> {
+        self.live_dab = Some(live.into_commit()?);
+        Ok(())
+    }
+
     /// Withdraw an offer the command didn't take.
     pub fn clear_live_stroke(&mut self) {
         self.live_commit = None;
+        self.live_dab = None;
     }
 
     /// Is the command currently runnable? (drives menu enablement)

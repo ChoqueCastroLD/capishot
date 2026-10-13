@@ -881,6 +881,11 @@ pub struct Perf {
     /// The Memory Usage allowance (bytes) `gpu_budget_mb` was computed from.
     #[serde(skip)]
     pub gpu_budget_allowance: u64,
+    /// The document (id, revision) `gpu_budget_mb` counted the pixels of: a full refresh of the
+    /// same state (a live gradient or style preview, every frame) needs no new walk of its
+    /// history.
+    #[serde(skip)]
+    pub gpu_budget_state: Option<(u64, u64)>,
     /// Last command run through the app and its duration (ms).
     pub last_command: String,
     pub command_ms: f64,

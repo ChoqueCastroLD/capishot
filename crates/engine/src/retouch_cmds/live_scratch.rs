@@ -22,12 +22,16 @@ pub(super) struct Scratch {
 }
 
 struct Lazy {
-    pre: Arc<Document>,
-    id: Option<LayerId>,
-    which: SampleLayers,
-    /// The target's own format (composites are encoded in its channels).
-    fmt: PixelFormat,
+    source: Source,
     done: HashSet<TileCoord>,
+}
+
+/// What a lazy scratch copies its tiles from.
+enum Source {
+    /// The composite of `pre` that `which` sees, encoded in the target's format `fmt`.
+    Composite { pre: Arc<Document>, id: Option<LayerId>, which: SampleLayers, fmt: PixelFormat },
+    /// The target surface itself.
+    Surface(Surface),
 }
 
 impl Scratch {
@@ -41,7 +45,16 @@ impl Scratch {
     /// is not quantised between dabs, as the commit's in-memory region isn't.
     pub(super) fn composite(pre: Arc<Document>, id: Option<LayerId>, which: SampleLayers, fmt: PixelFormat) -> Self {
         let work = PixelFormat { sample: SampleType::F32, ..fmt };
-        Self { surf: Surface::new(work), lazy: Some(Lazy { pre, id, which, fmt, done: HashSet::new() }) }
+        Self { surf: Surface::new(work), lazy: Some(Lazy { source: Source::Composite { pre, id, which, fmt }, done: HashSet::new() }) }
+    }
+
+    /// The target surface `surf` as 32-bit floats, copied tile by tile the first time a dab
+    /// reaches it: the working pixels of a sequential-dab stroke, unquantised between dabs like
+    /// the commit's in-memory region (an 8- or 16-bit copy rounded every dab, so the live stroke
+    /// drifted from the commit by a level wherever a selection or opacity mixed it back).
+    pub(super) fn float_copy(surf: &Surface) -> Self {
+        let work = PixelFormat { sample: SampleType::F32, ..surf.format() };
+        Self { surf: Surface::new(work), lazy: Some(Lazy { source: Source::Surface(surf.clone()), done: HashSet::new() }) }
     }
 
     /// Render the tiles of `r` not rendered yet.
@@ -53,7 +66,10 @@ impl Scratch {
         for t in r.tiles() {
             if l.done.insert(t) {
                 let tr = t.rect();
-                let reg = composite_region(&l.pre, l.id, l.which, tr, l.fmt);
+                let reg = match &l.source {
+                    Source::Composite { pre, id, which, fmt } => composite_region(pre, *id, *which, tr, *fmt),
+                    Source::Surface(s) => Region::read(s, tr),
+                };
                 self.surf.write_region(tr, &reg.data);
             }
         }

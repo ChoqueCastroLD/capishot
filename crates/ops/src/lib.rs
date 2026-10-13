@@ -558,97 +558,182 @@ impl History {
 /// Managed tile and shared binary-payload bytes not already in `seen`.
 /// Metadata containers, strings, renderer caches and allocator overhead are additional memory.
 pub fn document_bytes(doc: &Document, seen: &mut HashSet<usize>) -> usize {
-    let mut add = |surface: &photocraft_doc::Surface| {
-        surface.tiles().filter(|(_, tile)| seen.insert(Arc::as_ptr(tile) as usize)).fold(0usize, |n, (_, tile)| n.saturating_add(tile.bytes().len()))
-    };
     let mut total = 0usize;
+    for_each_payload(doc, &mut |ptr, bytes| {
+        if seen.insert(ptr) {
+            total = total.saturating_add(bytes);
+        }
+    });
+    total
+}
+
+/// Every managed payload of `doc` that [`document_bytes`] counts: `f(address, bytes)` per tile and
+/// shared binary payload, in the same order, a payload shared within the document once per use.
+/// Distinct live payloads have distinct addresses (across payload types too).
+pub fn for_each_payload(doc: &Document, f: &mut dyn FnMut(usize, usize)) {
+    let mut add = |surface: &photocraft_doc::Surface| {
+        for (_, tile) in surface.tiles() {
+            f(Arc::as_ptr(tile) as usize, tile.bytes().len());
+        }
+    };
     let layers = doc.walk();
     for (_, _, layer) in &layers {
         if let Some(surface) = layer.surface() {
-            total = total.saturating_add(add(surface));
+            add(surface);
         }
         if let Some(mask) = &layer.mask {
-            total = total.saturating_add(add(&mask.surface));
+            add(&mask.surface);
         }
         if let Some(cache) = &layer.fill_cache {
-            total = total.saturating_add(add(&cache.surface));
+            add(&cache.surface);
         }
         if let photocraft_doc::LayerContent::Smart(smart) = &layer.content
             && let Some(mask) = &smart.filter_mask
         {
-            total = total.saturating_add(add(&mask.surface));
+            add(&mask.surface);
         }
         if let Some(video) = &layer.video {
             for frame in &video.frames {
-                total = total.saturating_add(add(frame));
+                add(frame);
             }
         }
     }
     for channel in doc.channels.iter().chain(&doc.quick_mask) {
-        total = total.saturating_add(add(&channel.surface));
+        add(&channel.surface);
     }
     if let Some(selection) = &doc.selection {
-        total = total.saturating_add(add(selection));
+        add(selection);
     }
     for pattern in &doc.patterns {
-        total = total.saturating_add(add(&pattern.surface));
+        add(&pattern.surface);
     }
     // Distinct live Arc allocations cannot have the same address, including across
     // payload types. A caller keeps all traversed documents alive while deduplicating.
-    let mut blob = |bytes: &Arc<Vec<u8>>| {
-        if seen.insert(Arc::as_ptr(bytes) as usize) { bytes.capacity() } else { 0 }
-    };
+    let mut blob = |bytes: &Arc<Vec<u8>>| f(Arc::as_ptr(bytes) as usize, bytes.capacity());
     for bytes in doc.icc_profile.iter().chain(doc.metadata.exif.iter()) {
-        total = total.saturating_add(blob(bytes));
+        blob(bytes);
     }
     for (_, _, bytes) in &doc.metadata.psd_resources {
-        total = total.saturating_add(blob(bytes));
+        blob(bytes);
     }
     for (_, _, bytes) in &doc.metadata.psd_global_blocks {
-        total = total.saturating_add(blob(bytes));
+        blob(bytes);
     }
     for path in &doc.paths {
         if let Some(bytes) = &path.psd_raw {
-            total = total.saturating_add(blob(bytes));
+            blob(bytes);
         }
     }
     for (_, _, layer) in &layers {
         for (_, bytes) in &layer.psd_blocks {
-            total = total.saturating_add(blob(bytes));
+            blob(bytes);
         }
         if let Some(bytes) = &layer.effects.psd_raw {
-            total = total.saturating_add(blob(bytes));
+            blob(bytes);
         }
         match &layer.content {
             photocraft_doc::LayerContent::Text(text) => {
                 if let Some(bytes) = &text.psd_raw {
-                    total = total.saturating_add(blob(bytes));
+                    blob(bytes);
                 }
             }
             photocraft_doc::LayerContent::Shape(shape) => {
                 if let Some(bytes) = &shape.psd_raw {
-                    total = total.saturating_add(blob(bytes));
+                    blob(bytes);
                 }
             }
             photocraft_doc::LayerContent::Smart(smart) => {
                 if let Some(bytes) = &smart.psd_raw {
-                    total = total.saturating_add(blob(bytes));
+                    blob(bytes);
                 }
                 if let photocraft_doc::SmartSource::Embedded { bytes, .. } = &smart.source {
-                    total = total.saturating_add(blob(bytes));
+                    blob(bytes);
                 }
             }
             _ => {}
         }
     }
     for (_, _, layer) in &layers {
-        if let photocraft_doc::LayerContent::Adjustment(photocraft_doc::Adjustment::ColorLookup { lut: Some(lut), .. }) = &layer.content
-            && seen.insert(Arc::as_ptr(lut) as usize)
-        {
-            total = total.saturating_add(lut.capacity().saturating_mul(std::mem::size_of::<f32>()));
+        if let photocraft_doc::LayerContent::Adjustment(photocraft_doc::Adjustment::ColorLookup { lut: Some(lut), .. }) = &layer.content {
+            f(Arc::as_ptr(lut) as usize, lut.capacity().saturating_mul(std::mem::size_of::<f32>()));
         }
     }
-    total
+}
+
+/// [`document_bytes`] over a set of history snapshots kept up to date between calls: a command
+/// adds one snapshot and retires another, so only those two are walked instead of every
+/// snapshot again (walking all of history after each command cost 10-50 ms on 20-layer manga
+/// pages in the browser). Snapshots must not change while counted (history states are immutable; a document
+/// changed in place is a different set member only once it is a new allocation).
+///
+/// Each snapshot is held weakly, so a dropped one is noticed (its address can't be reused while
+/// the memo remembers it) and its payloads are released by reference count.
+#[derive(Default)]
+pub struct PayloadMemo {
+    /// Counted snapshots and their distinct payload addresses.
+    states: Vec<(std::sync::Weak<Document>, Vec<usize>)>,
+    /// Payload address → (bytes, number of counted snapshots holding it).
+    counts: std::collections::HashMap<usize, (usize, u32)>,
+    total: usize,
+}
+
+impl PayloadMemo {
+    /// Count exactly `states`; returns their unique payload bytes, as [`document_bytes`] over all
+    /// of them with one `seen` set would.
+    pub fn sync(&mut self, states: &[Arc<Document>]) -> usize {
+        let want: HashSet<usize> = states.iter().map(|d| Arc::as_ptr(d) as usize).collect();
+        let mut kept = Vec::with_capacity(self.states.len());
+        for (state, payloads) in std::mem::take(&mut self.states) {
+            if state.strong_count() > 0 && want.contains(&(state.as_ptr() as usize)) {
+                kept.push((state, payloads));
+                continue;
+            }
+            for p in payloads {
+                if let std::collections::hash_map::Entry::Occupied(mut e) = self.counts.entry(p) {
+                    let (bytes, n) = e.get_mut();
+                    *n = n.saturating_sub(1);
+                    if *n == 0 {
+                        self.total = self.total.saturating_sub(*bytes);
+                        e.remove();
+                    }
+                }
+            }
+        }
+        self.states = kept;
+        let mut have: HashSet<usize> = self.states.iter().map(|(s, _)| s.as_ptr() as usize).collect();
+        for doc in states {
+            if !have.insert(Arc::as_ptr(doc) as usize) {
+                continue;
+            }
+            let (mut local, mut payloads) = (HashSet::new(), Vec::new());
+            let (counts, total) = (&mut self.counts, &mut self.total);
+            for_each_payload(doc, &mut |p, bytes| {
+                if !local.insert(p) {
+                    return;
+                }
+                payloads.push(p);
+                let e = counts.entry(p).or_insert((bytes, 0));
+                if e.1 == 0 {
+                    *total = total.saturating_add(bytes);
+                }
+                e.1 = e.1.saturating_add(1);
+            });
+            self.states.push((Arc::downgrade(doc), payloads));
+        }
+        self.total
+    }
+
+    /// Bytes of `doc`'s payloads that neither the counted snapshots nor `seen` hold (added to
+    /// `seen`): the current document on top of [`Self::sync`]'s total.
+    pub fn extra_bytes(&self, doc: &Document, seen: &mut HashSet<usize>) -> usize {
+        let mut total = 0usize;
+        for_each_payload(doc, &mut |p, bytes| {
+            if !self.counts.contains_key(&p) && seen.insert(p) {
+                total = total.saturating_add(bytes);
+            }
+        });
+        total
+    }
 }
 
 #[cfg(test)]
@@ -667,6 +752,34 @@ mod tests {
         f(&mut d);
         *cur = Arc::new(d);
         h.record(label, before, LayerTarget::default());
+    }
+
+    #[test]
+    fn payload_memo_counts_like_one_walk_and_keeps_no_snapshot_alive() {
+        let mut a = base();
+        if let Some(s) = a.layers[0].surface_mut() {
+            s.write_pixel(1, 1, &[1.0, 0.0, 0.0, 1.0]);
+        }
+        let a = Arc::new(a);
+        let mut b = (*a).clone();
+        b.insert_above(None, Layer::raster("L", b.pixel_format()));
+        if let Some(s) = b.layers[1].surface_mut() {
+            s.write_pixel(3, 3, &[0.0, 1.0, 0.0, 1.0]);
+        }
+        let b = Arc::new(b);
+        let walked = |docs: &[Arc<Document>]| {
+            let mut seen = HashSet::new();
+            docs.iter().map(|d| document_bytes(d, &mut seen)).sum::<usize>()
+        };
+        let mut memo = PayloadMemo::default();
+        assert_eq!(memo.sync(&[a.clone(), b.clone()]), walked(&[a.clone(), b.clone()]));
+        assert_eq!(memo.sync(std::slice::from_ref(&b)), walked(std::slice::from_ref(&b)), "a retired snapshot releases only its own tiles");
+        assert_eq!(memo.sync(&[a.clone(), b.clone()]), walked(&[a.clone(), b.clone()]));
+        assert_eq!(Arc::strong_count(&a), 1, "the memo holds snapshots weakly");
+        drop(a);
+        assert_eq!(memo.sync(std::slice::from_ref(&b)), walked(std::slice::from_ref(&b)), "a dropped snapshot is noticed");
+        let mut seen = HashSet::new();
+        assert_eq!(memo.extra_bytes(&b, &mut seen), 0, "everything in b is counted already");
     }
 
     #[test]

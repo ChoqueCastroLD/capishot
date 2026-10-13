@@ -335,11 +335,26 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
                     Interp::Bicubic => {
                         let (ix, iy) = (u.floor() as i32, v.floor() as i32);
                         let (wx, wy) = (catmull_rom(u - ix as f64), catmull_rom(v - iy as f64));
-                        for (j, wyj) in wy.iter().enumerate() {
-                            for (i, wxi) in wx.iter().enumerate() {
-                                let k = wxi * wyj;
-                                for (c, s) in acc.iter_mut().enumerate().take(n) {
-                                    *s += at(ix - 1 + i as i32, iy - 1 + j as i32, c) * k;
+                        if ix > foot.x0 && iy > foot.y0 && ix + 3 <= foot.x1 && iy + 3 <= foot.y1 {
+                            // The 4×4 taps are all inside the window: read them directly (the same
+                            // products, summed in the same order, as through `at`).
+                            for (j, wyj) in wy.iter().enumerate() {
+                                let row = ((iy - 1 + j as i32 - foot.y0) as usize * fw + (ix - 1 - foot.x0) as usize) * n;
+                                for (i, wxi) in wx.iter().enumerate() {
+                                    let k = wxi * wyj;
+                                    let tap = &px[row + i * n..row + i * n + n];
+                                    for (s, v) in acc.iter_mut().zip(tap) {
+                                        *s += *v as f64 * k;
+                                    }
+                                }
+                            }
+                        } else {
+                            for (j, wyj) in wy.iter().enumerate() {
+                                for (i, wxi) in wx.iter().enumerate() {
+                                    let k = wxi * wyj;
+                                    for (c, s) in acc.iter_mut().enumerate().take(n) {
+                                        *s += at(ix - 1 + i as i32, iy - 1 + j as i32, c) * k;
+                                    }
                                 }
                             }
                         }
@@ -413,6 +428,68 @@ mod tests {
             assert!(quad_to_rect(&bad, 10.0, 10.0).is_none(), "{bad:?}");
         }
         assert!(quad_to_rect(&q, 0.0, 10.0).is_none());
+    }
+
+    /// Bicubic warps read the 4×4 taps directly where they're all in the source window and
+    /// through the bounds-checked reader near its edges: every output pixel must be bit for bit
+    /// the per-tap formula over the whole (premultiplied) source.
+    #[test]
+    fn bicubic_warp_matches_the_per_tap_formula_bit_for_bit() {
+        let fmt = PixelFormat::new(photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::F32, true);
+        let (w, h) = (90i32, 70i32);
+        let src_rect = Rect::new(0, 0, w, h);
+        let mut seed = 0x9e37_79b9_u32;
+        let mut rnd = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed % 10_000) as f32 / 9_999.0
+        };
+        let data: Vec<f32> = (0..w * h * 4).map(|i| if i % 4 == 3 && i % 11 == 0 { 0.0 } else { rnd() }).collect();
+        let mut src = Surface::new(fmt);
+        src.write_region(src_rect, &data);
+        let pre: Vec<f64> = data.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, a]| [r * a, g * a, b * a, a]).map(f64::from).collect();
+        let at = |x: i32, y: i32, c: usize| if x < 0 || y < 0 || x >= w || y >= h { 0.0 } else { pre[((y * w + x) * 4) as usize + c] };
+        for quad in [
+            [[10.0, 5.0], [120.0, 12.0], [110.0, 95.0], [3.0, 80.0]],
+            [[0.0, 0.0], [135.0, 0.0], [135.0, 105.0], [0.0, 105.0]],
+            [[40.0, -20.0], [130.0, 30.0], [80.0, 120.0], [-10.0, 70.0]],
+        ] {
+            let hm = Homography::rect_to_quad([0.0, 0.0, w as f64, h as f64], quad).unwrap();
+            let out = warp_surface(&src, src_rect, &hm, Interp::Bicubic).unwrap();
+            let inv = hm.inverse().unwrap();
+            let b = out.tile_bounds();
+            let got = out.read_region(b);
+            for y in b.y0..b.y1 {
+                for x in b.x0..b.x1 {
+                    let (u, v) = inv.apply(x as f64 + 0.5, y as f64 + 0.5);
+                    let (u, v) = (u - 0.5, v - 0.5);
+                    let mut want = [0.0f32; 4];
+                    if !(u < -1.0 || v < -1.0 || u > w as f64 || v > h as f64) {
+                        let (ix, iy) = (u.floor() as i32, v.floor() as i32);
+                        let (wx, wy) = (catmull_rom(u - ix as f64), catmull_rom(v - iy as f64));
+                        let mut acc = [0.0f64; 4];
+                        for (j, wyj) in wy.iter().enumerate() {
+                            for (i, wxi) in wx.iter().enumerate() {
+                                let k = wxi * wyj;
+                                for (c, s) in acc.iter_mut().enumerate() {
+                                    *s += at(ix - 1 + i as i32, iy - 1 + j as i32, c) * k;
+                                }
+                            }
+                        }
+                        let al = acc[3].clamp(0.0, 1.0);
+                        if al > 0.0 {
+                            want =
+                                [(acc[0] / al).clamp(0.0, 1.0) as f32, (acc[1] / al).clamp(0.0, 1.0) as f32, (acc[2] / al).clamp(0.0, 1.0) as f32, al as f32];
+                        }
+                    }
+                    let i = (((y - b.y0) * b.width() as i32 + (x - b.x0)) * 4) as usize;
+                    for c in 0..4 {
+                        assert_eq!(got[i + c].to_bits(), want[c].to_bits(), "{quad:?} ({x}, {y}) channel {c}");
+                    }
+                }
+            }
+        }
     }
 
     fn rgba() -> Surface {

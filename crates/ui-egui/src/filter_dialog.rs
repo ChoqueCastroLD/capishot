@@ -713,13 +713,90 @@ pub fn preview_document_with(
     k: u32,
     cancel: Option<&photocraft_engine::jobs::JobCtx>,
 ) -> Option<Document> {
+    preview_on(doc, active, command, params, k, cancel, |run_k| crate::proxy::proxy_document(doc, run_k))
+}
+
+/// [`preview_document_with`] for the session's document `doc` at history `revision`: the reduced
+/// proxy the filter runs on is made once per document state and reused while the dialog's values
+/// change (reducing every layer of a 20-layer page took longer than the filter).
+#[allow(clippy::too_many_arguments)]
+pub fn preview_document_at(
+    doc: &Arc<Document>,
+    revision: u64,
+    active: Option<photocraft_doc::LayerId>,
+    command: &str,
+    params: &Value,
+    k: u32,
+    cancel: Option<&photocraft_engine::jobs::JobCtx>,
+) -> Option<Document> {
+    preview_on(doc, active, command, params, k, cancel, |run_k| proxy_of(doc, revision, run_k))
+}
+
+/// The last reduced proxy a preview ran on, and the document state it reduces.
+struct ProxyCache {
+    /// The source document (held weakly: it can't be another document at the same address).
+    source: std::sync::Weak<Document>,
+    revision: u64,
+    k: u32,
+    proxy: Document,
+}
+
+static PROXY: std::sync::Mutex<Option<ProxyCache>> = std::sync::Mutex::new(None);
+
+/// `doc` reduced by `k` (as `proxy::proxy_document`), from [`PROXY`] when it holds this state.
+/// The reduction runs outside the lock, so the UI thread never waits for a preview worker.
+fn proxy_of(doc: &Arc<Document>, revision: u64, k: u32) -> Document {
+    if k <= 1 {
+        return (**doc).clone();
+    }
+    let same = |c: &ProxyCache| c.k == k && c.revision == revision && c.source.strong_count() > 0 && std::ptr::eq(c.source.as_ptr(), Arc::as_ptr(doc));
+    if let Some(c) = PROXY.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().filter(|c| same(c)) {
+        return c.proxy.clone();
+    }
+    let proxy = crate::proxy::proxy_document(doc, k);
+    *PROXY.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ProxyCache { source: Arc::downgrade(doc), revision, k, proxy: proxy.clone() });
+    proxy
+}
+
+/// Whether a filter dialog with Preview on is open.
+pub(crate) fn previewing(app: &PhotocraftApp) -> bool {
+    app.ui.dialogs.iter().any(|d| d.fields.contains_key("__filter") && d.fields.get("__preview").and_then(Value::as_bool) == Some(true))
+}
+
+/// Drop the cached preview proxy (no filter dialog previews any more). Never waits: a preview
+/// worker storing one at the same moment keeps it until the next call.
+pub(crate) fn release_proxy() {
+    if let Ok(mut c) = PROXY.try_lock() {
+        *c = None;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn proxy_cached(doc: &Arc<Document>, revision: u64, k: u32) -> bool {
+    PROXY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|c| c.k == k && c.revision == revision && std::ptr::eq(c.source.as_ptr(), Arc::as_ptr(doc)))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn preview_on(
+    doc: &Document,
+    active: Option<photocraft_doc::LayerId>,
+    command: &str,
+    params: &Value,
+    k: u32,
+    cancel: Option<&photocraft_engine::jobs::JobCtx>,
+    proxy_document: impl FnOnce(u32) -> Document,
+) -> Option<Document> {
     if command == crate::select_mask_view::COMMAND {
         return crate::select_mask_view::preview_document(doc, active, params, k, cancel);
     }
     // Warp Text renders the type again from the layer model (font size, position), which a
     // reduced proxy doesn't scale: it runs at full size and the result is reduced (#218).
     let (run_k, reduce_k) = if command == "type.warpText" { (1, k) } else { (k, 1) };
-    let proxy = crate::proxy::proxy_document(doc, run_k);
+    let proxy = proxy_document(run_k);
     let mut s = photocraft_engine::Session::new();
     s.set_inline_job_ctx(cancel.cloned());
     s.add_document(proxy, None);
@@ -1167,6 +1244,42 @@ mod tests {
                 assert!(crate::i18n::has(lang, label), "{}: untranslated {label}", lang.code());
             }
         }
+    }
+
+    /// A slider drag previews the same document state again and again: the reduced proxy is made
+    /// once and reused (its tiles are shared), the result is the uncached preview's, and another
+    /// state or factor makes a new proxy.
+    #[test]
+    fn previews_of_one_document_state_reuse_its_reduced_proxy() {
+        let mut doc = Document::with_background(
+            "p",
+            photocraft_doc::Size::new(96, 64),
+            photocraft_doc::ColorMode::Rgb,
+            photocraft_doc::SampleType::U8,
+            photocraft_doc::Color::WHITE,
+        );
+        let bg = doc.layers[0].id;
+        doc.layers[0].surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(0, 0, 40, 64), &[0.1, 0.2, 0.7, 1.0]);
+        let doc = Arc::new(doc);
+        let tile = |d: &Document| d.layers[0].surface().unwrap().tiles().next().map(|(_, t)| Arc::as_ptr(t) as usize);
+        for radius in [2.0, 6.0] {
+            let params = json!({"radius": radius});
+            let cached = preview_document_at(&doc, 7, Some(bg), "filter.blur.gaussianBlur", &params, 2, None).unwrap();
+            let fresh = preview_document(&doc, Some(bg), "filter.blur.gaussianBlur", &params, 2).unwrap();
+            let (a, b) = (cached.layers[0].surface().unwrap(), fresh.layers[0].surface().unwrap());
+            assert_eq!(a.read_region(cached.bounds()), b.read_region(fresh.bounds()), "radius {radius}: same pixels as an uncached preview");
+        }
+        // Other tests may preview at the same moment (one shared cache): retry a few times.
+        let hit = (0..5).any(|_| {
+            let a = proxy_of(&doc, 7, 2);
+            let b = proxy_of(&doc, 7, 2);
+            tile(&a).is_some() && tile(&a) == tile(&b) && proxy_cached(&doc, 7, 2)
+        });
+        assert!(hit, "the second call reuses the first's proxy");
+        assert_ne!(tile(&proxy_of(&doc, 7, 2)), tile(&proxy_of(&doc, 8, 2)), "a new revision reduces again");
+        assert_ne!(tile(&proxy_of(&doc, 8, 3)), tile(&proxy_of(&doc, 8, 2)), "so does another factor");
+        assert_eq!(proxy_of(&doc, 9, 1).size, doc.size, "factor 1 is the document itself");
+        release_proxy();
     }
 
     #[test]
