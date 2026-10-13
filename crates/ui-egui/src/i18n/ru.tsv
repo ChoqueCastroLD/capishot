@@ -3005,6 +3005,7 @@ curves	Smooth	Сгладить
 	Select the crop presets to delete	Выберите наборы параметров кадрирования для удаления
 	Enter a name for the crop preset	Введите имя набора параметров кадрирования
 	There is no crop size or ratio to save	Нет размера или соотношения сторон кадрирования для сохранения
+	Presentation	Представление
 
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	Щёлкните, чтобы разместить · Alt-щелчок или перетаскивание за пределы холста для удаления

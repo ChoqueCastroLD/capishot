@@ -3669,6 +3669,7 @@ curves	Smooth	スムーズ
 	Paint over hair or fur on the image; Alt paints the other mode	画像の髪や毛の上をペイントします。Alt で反対のモードでペイント
 	Clear Brush Strokes	ブラシストロークを消去
 	Show rulers	定規を表示
+	Presentation	プレゼンテーション
 
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	クリックで配置 · Alt キーを押しながらクリック、またはカンバス外へドラッグで削除
