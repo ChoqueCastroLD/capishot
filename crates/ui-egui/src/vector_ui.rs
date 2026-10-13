@@ -564,6 +564,18 @@ pub fn takes_path_mask(id: &str) -> bool {
     id.starts_with("layer.newFillLayer.") || id.starts_with("layer.newAdjustmentLayer.")
 }
 
+/// The work or saved path explicitly selected in the Paths panel (not a layer's own path).
+pub fn selected_document_path(app: &PhotocraftApp) -> Option<String> {
+    let st = app.session.active()?;
+    let sel = app.ui.selected_path.as_deref()?;
+    let listed = path_rows(&st.doc, st.active_layer).iter().any(|r| match r.kind {
+        PathRow::Work => sel == "work",
+        PathRow::Saved => r.name == sel,
+        PathRow::Layer => false,
+    });
+    listed.then(|| sel.to_string())
+}
+
 /// New fill and adjustment layers take the path selected in the Paths panel as their vector mask,
 /// as in Photoshop (#1419): the command gets it as `"path"` unless the caller set one (`null`
 /// opts out). Only an explicitly selected work or saved path counts; deselect it by clicking the
@@ -572,16 +584,7 @@ pub fn with_active_path(app: &PhotocraftApp, id: &str, params: Value) -> Value {
     if !takes_path_mask(id) || params.get("path").is_some() {
         return params;
     }
-    let Some(st) = app.session.active() else { return params };
-    let Some(sel) = app.ui.selected_path.as_deref() else { return params };
-    let listed = path_rows(&st.doc, st.active_layer).iter().any(|r| match r.kind {
-        PathRow::Work => sel == "work",
-        PathRow::Saved => r.name == sel,
-        PathRow::Layer => false,
-    });
-    if !listed {
-        return params;
-    }
+    let Some(sel) = selected_document_path(app) else { return params };
     match params {
         Value::Object(mut m) => {
             m.insert("path".into(), json!(sel));

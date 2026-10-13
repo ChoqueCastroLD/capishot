@@ -2448,7 +2448,12 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         if mask_btn.clicked()
             && let Some(cmd) = mask_cmd
         {
-            actions.push((cmd.into(), json!({})));
+            // A path selected in the Paths panel becomes the vector mask, as in Photoshop (#4728);
+            // Alt still inverts it.
+            match crate::vector_ui::selected_document_path(app).filter(|_| cmd.starts_with("layer.vectorMask.")) {
+                Some(name) => actions.push(("layer.vectorMask.currentPath".into(), json!({"name": name, "hide": alt}))),
+                None => actions.push((cmd.into(), json!({}))),
+            }
         }
         let fx = fx_button(ui, 26.0, tl!("Add a layer style"));
         crate::press_menu::show(&fx, |ui, menu| {

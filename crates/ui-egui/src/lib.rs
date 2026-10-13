@@ -992,12 +992,17 @@ impl PhotocraftApp {
         let params = self.with_mask_target(id, params);
         let params = vector_ui::with_active_path(self, id, params);
         let path_mask = vector_ui::takes_path_mask(id) && params.get("path").is_some_and(|v| !v.is_null());
+        let on_active_layer = self
+            .session
+            .active()
+            .is_some_and(|st| st.active_layer.is_some_and(|layer| params.get("layer").and_then(Value::as_u64).is_none_or(|target| target == layer.0)));
         let creates_active_mask =
             matches!(id, "layer.layerMask.revealAll" | "layer.layerMask.hideAll" | "layer.layerMask.revealSelection" | "layer.layerMask.hideSelection")
-                && self
-                    .session
-                    .active()
-                    .is_some_and(|st| st.active_layer.is_some_and(|layer| params.get("layer").and_then(Value::as_u64).is_none_or(|target| target == layer.0)));
+                && on_active_layer;
+        let creates_active_vector_mask = matches!(
+            id,
+            "layer.vectorMask.add" | "layer.vectorMask.fromPath" | "layer.vectorMask.revealAll" | "layer.vectorMask.hideAll" | "layer.vectorMask.currentPath"
+        ) && on_active_layer;
         let r = if id == "actions.play" {
             actions::play(self, &params)
         } else if photocraft_engine::actions_cmds::shell_view_command(id) {
@@ -1037,6 +1042,15 @@ impl PhotocraftApp {
             // Adding a mask selects its thumbnail: the next brush or footer Delete targets it.
             self.ui.mask_target = true;
             self.ui.vector_mask_target = false;
+        }
+        if r.is_ok() && creates_active_vector_mask {
+            // Likewise a new vector mask (#4728): Properties shows its Density and Feather, and a
+            // mask made from a path becomes the active path.
+            self.ui.vector_mask_target = true;
+            self.ui.mask_target = false;
+            if matches!(id, "layer.vectorMask.currentPath" | "layer.vectorMask.fromPath") {
+                self.ui.selected_path = Some("layer".into());
+            }
         }
         if r.is_ok() && matches!(id, "edit.copy" | "edit.cut" | "edit.copyMerged") {
             self.clip_external = false;
