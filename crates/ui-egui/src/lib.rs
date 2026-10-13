@@ -2391,6 +2391,9 @@ mod color_tab_theme_tests;
 mod new_layer_button_tests;
 
 #[cfg(test)]
+mod smart_filter_rows_tests;
+
+#[cfg(test)]
 mod move_outline_tests;
 
 #[cfg(test)]
