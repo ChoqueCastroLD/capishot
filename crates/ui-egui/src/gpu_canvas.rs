@@ -225,7 +225,7 @@ impl GpuCanvas {
     /// Set the GPU bytes one document's display texture set may take (see [`canvas_budget`]).
     pub fn set_canvas_budget(&self, bytes: u64) {
         let mut r = self.rs.renderer.write();
-        if let Some(res) = r.callback_resources.get_mut::<Resources>() {
+        if let Some(res) = r.callback_resources.get_mut::<StoredResources>() {
             res.canvas_budget = bytes;
         }
     }
@@ -236,7 +236,7 @@ impl GpuCanvas {
         let size = [doc.size.width, doc.size.height];
         let bytes = canvas_texture_bytes(size, self.tile, texel_bytes(self.format_for(doc.depth, size)));
         let r = self.rs.renderer.read();
-        r.callback_resources.get::<Resources>().is_some_and(|res| bytes <= res.canvas_budget)
+        r.callback_resources.get::<StoredResources>().is_some_and(|res| bytes <= res.canvas_budget)
     }
 
     /// Cap lower-stack composite reuse; zero disables it for profiling the uncached path.
@@ -535,7 +535,7 @@ impl GpuCanvas {
         if !self.fits_canvas(doc) {
             // Neither compositor can fill textures that are never created: the CPU canvas draws
             // it. A set left from before the canvas grew is stale, so it goes too.
-            if let Some(res) = self.rs.renderer.write().callback_resources.get_mut::<Resources>() {
+            if let Some(res) = self.rs.renderer.write().callback_resources.get_mut::<StoredResources>() {
                 res.docs.remove(&key);
             }
             return Refresh { kind: REFRESH_OVER_BUDGET, fallback: Some(OVER_CANVAS_BUDGET.into()), ..Default::default() };
@@ -2162,6 +2162,19 @@ mod mip_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The threads web build stores the canvas resources as `SendWrapper<Resources>`, so a lookup
+    /// by `Resources` finds nothing there: `fits_canvas` answered false and every document was
+    /// drawn on the (much slower) CPU canvas in that build only. Natively the two types are the
+    /// same, so only the source can show it: every lookup goes through `StoredResources`.
+    #[test]
+    fn canvas_resources_are_looked_up_as_stored() {
+        let src = include_str!("gpu_canvas.rs");
+        let tests = src.find("#[cfg(test)]\n#[path").unwrap_or(src.len());
+        for bad in [concat!("get::<", "Resources>"), concat!("get_mut::<", "Resources>")] {
+            assert!(!src[..tests].contains(bad), "callback_resources lookup by `Resources` instead of `StoredResources`: {bad}");
+        }
+    }
 
     #[test]
     fn gpu_budget_follows_memory_usage_and_ram() {

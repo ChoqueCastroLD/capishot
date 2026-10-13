@@ -5,7 +5,7 @@
 //! allow it, then drains [`take_batch`] every 30 s and when the page hides. Until then every hook
 //! is a relaxed atomic load and nothing else.
 //!
-//! What is recorded (schema `v: 1`, see `<telemetry collector>/README.md` on the host):
+//! What is recorded (schema `v: 2`, see `<telemetry collector>/README.md` on the host):
 //! a random install id and session id, coarse environment buckets, command ids counted per
 //! batch (never their params), tool switches, open/save/export kinds with size buckets and
 //! durations, error classes (command id + kind, never the message), slow-command timings, and
