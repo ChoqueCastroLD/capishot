@@ -35,11 +35,18 @@ fn point(p: &Value, k: &str) -> Option<(f32, f32)> {
     Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32))
 }
 
+/// `opacity` (1..100 %) as a coverage in 0.01..=1, clamped like the Magic Eraser's: a value
+/// above 1 would overshoot the blend (#4167).
+fn opacity(p: &Value, cmd: &str) -> Result<f32> {
+    Ok(crate::eraser_cmds::number(p, cmd, "opacity", 100.0, 1.0..=100.0)? as f32 / 100.0)
+}
+
 fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
     let fg = s.tools.foreground;
     let c = color(p.get("color"), fg);
     let (x, y) = (f(p, "x", 0.0).floor() as i32, f(p, "y", 0.0).floor() as i32);
-    let (tol, contiguous, aa, opacity) = (f(p, "tolerance", 32.0), b(p, "contiguous", true), b(p, "antiAlias", true), f(p, "opacity", 100.0) / 100.0);
+    let (tol, contiguous, aa) = (f(p, "tolerance", 32.0), b(p, "contiguous", true), b(p, "antiAlias", true));
+    let opacity = opacity(p, "paint.bucket")?;
     let all = b(p, "sampleAllLayers", false) && crate::channel_cmds::target_of(p) == crate::channel_cmds::Target::Pixels;
     // Other visible layers can define the region, but the fill still writes only to the target.
     let region = if all {
@@ -117,7 +124,7 @@ fn gradient(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let reverse = b(p, "reverse", false);
-    let opacity = f(p, "opacity", 100.0) / 100.0;
+    let opacity = opacity(p, "paint.gradient")?;
     let blend = p.get("mode").and_then(Value::as_str).and_then(blend_from_str).unwrap_or(photocraft_color::BlendMode::Normal);
     let dither = b(p, "dither", true); // Photoshop dithers gradients by default (reduces banding).
     s.edit("Gradient", |doc, active| {
@@ -406,5 +413,60 @@ mod tests {
         assert!(smooth.iter().all(|&v| v == smooth[0]), "no dither: perfectly flat");
         let noisy = run(true);
         assert!(noisy.windows(2).any(|w| w[0] != w[1]), "dither: per-pixel variation");
+    }
+
+    /// The two commands under test, each painting #808080 over a white document.
+    fn grey_fill(cmd: &str, opacity: Value) -> Value {
+        match cmd {
+            "paint.bucket" => json!({"x": 2, "y": 2, "color": "#808080", "opacity": opacity}),
+            _ => json!({"from": [0, 0], "to": [19, 0], "colors": ["#808080", "#808080"], "dither": false, "opacity": opacity}),
+        }
+    }
+
+    fn white(depth: u32) -> Session {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 20, "height": 10, "depth": depth, "background": "white"})).unwrap();
+        s
+    }
+
+    /// Issue #4167: an opacity above 100 overshot the blend (200 painted near-black on white).
+    #[test]
+    fn bucket_and_gradient_clamp_opacity_like_the_magic_eraser() {
+        for cmd in ["paint.bucket", "paint.gradient"] {
+            for depth in [8, 16, 32] {
+                let mut full = white(depth);
+                full.execute(cmd, grey_fill(cmd, json!(100))).unwrap();
+                let expected = px(&full, 5, 5);
+                assert!((expected[0] - 128.0 / 255.0).abs() < 0.01, "{cmd} depth {depth}: 100% paints #808080, got {expected:?}");
+                for over in [200.0, 1e9] {
+                    let mut s = white(depth);
+                    s.execute(cmd, grey_fill(cmd, json!(over))).unwrap();
+                    assert_eq!(px(&s, 5, 5), expected, "{cmd} depth {depth}: opacity {over} clamps to 100");
+                }
+                let (mut low, mut one) = (white(depth), white(depth));
+                low.execute(cmd, grey_fill(cmd, json!(-50))).unwrap();
+                one.execute(cmd, grey_fill(cmd, json!(1))).unwrap();
+                assert_eq!(px(&low, 5, 5), px(&one, 5, 5), "{cmd} depth {depth}: opacity below 1 clamps to 1");
+                assert!(px(&low, 5, 5).iter().all(|v| (0.0..=1.0).contains(v)), "{cmd} depth {depth}: no overshoot");
+            }
+        }
+    }
+
+    #[test]
+    fn bucket_and_gradient_reject_non_numeric_opacity_without_editing() {
+        for cmd in ["paint.bucket", "paint.gradient"] {
+            for bad in [json!("50"), json!(true), json!([50]), json!({"v": 50})] {
+                let mut s = white(8);
+                let (before, steps) = (px(&s, 5, 5), s.active().unwrap().history.past_len());
+                let err = s.execute(cmd, grey_fill(cmd, bad.clone())).unwrap_err();
+                assert!(matches!(err, EngineError::BadParams { .. }), "{cmd} {bad}: {err:?}");
+                assert_eq!(px(&s, 5, 5), before, "{cmd} {bad}: pixels unchanged");
+                assert_eq!(s.active().unwrap().history.past_len(), steps, "{cmd} {bad}: no history step");
+            }
+            // An explicit null keeps the default (100%), like the Magic Eraser.
+            let mut s = white(8);
+            s.execute(cmd, grey_fill(cmd, Value::Null)).unwrap();
+            assert!((px(&s, 5, 5)[0] - 128.0 / 255.0).abs() < 0.01, "{cmd}: null opacity is 100%");
+        }
     }
 }
