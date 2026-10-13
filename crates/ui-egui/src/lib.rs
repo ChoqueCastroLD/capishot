@@ -2588,9 +2588,12 @@ mod clipboard_tests {
         let d = &app.session.active().unwrap().doc;
         assert_eq!((d.size.width, d.size.height, d.layers.len()), (5, 3, 1));
         assert_eq!(app.ui.views.len(), 1, "the new document has a view");
+        assert!(app.has_unsaved_work(), "closing after Paste must ask to save");
         // New from Clipboard with a document open adds another.
         crate::menus::invoke(&mut app, &ctx, "file.newFromClipboard", serde_json::json!({})).unwrap();
         assert_eq!(app.session.documents().len(), 2);
+        assert!(app.session.documents().iter().all(|d| d.is_dirty()));
+        assert!(crate::discard_ui::intercept(&mut app, "file.close", &serde_json::json!({})), "Close must ask before discarding clipboard pixels");
     }
 
     #[test]

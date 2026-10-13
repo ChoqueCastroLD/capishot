@@ -416,6 +416,10 @@ fn new_from_clipboard(s: &mut Session) -> Result<Value> {
     *crate::pixels_mut(&mut l)? = if moved.format() == target { moved } else { moved.convert(target) };
     doc.layers.push(l);
     let i = s.add_document(doc, None);
+    // Clipboard content has never been saved; closing this tab must ask before discarding it.
+    if let Some(st) = s.active_mut() {
+        st.saved_revision = 0;
+    }
     Ok(json!({"document": i, "width": w, "height": h}))
 }
 
@@ -1036,6 +1040,7 @@ mod tests {
             assert!(!s.is_enabled("file.newFromClipboard") && !s.is_enabled("edit.paste"), "nothing copied yet");
             assert!(s.execute("file.newFromClipboard", json!({})).is_err());
             s.execute("file.new", json!({"width": 100, "height": 100, "depth": depth})).unwrap();
+            assert!(!s.active().unwrap().is_dirty(), "an untouched blank document is clean");
             s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
             s.execute("select.rect", json!({"x": 10, "y": 20, "width": 30, "height": 15})).unwrap();
             s.execute("edit.copy", json!({})).unwrap();
@@ -1043,6 +1048,7 @@ mod tests {
             let r = s.execute("file.newFromClipboard", json!({})).unwrap();
             assert_eq!((r["width"].as_u64(), r["height"].as_u64()), (Some(30), Some(15)), "{r}");
             assert_eq!(s.documents().len(), 2);
+            assert!(s.active().unwrap().is_dirty(), "a document made from clipboard pixels needs saving (#4665)");
             let d = &s.active().unwrap().doc;
             assert_eq!((d.size.width, d.size.height, d.layers.len()), (30, 15, 1));
             assert_eq!(d.pixel_format().sample, s.documents()[0].doc.pixel_format().sample, "{depth}-bit kept");
@@ -1056,6 +1062,7 @@ mod tests {
             assert!(s.is_enabled("edit.paste") && !s.is_enabled("edit.pasteSpecial.pasteInPlace"));
             s.execute("edit.paste", json!({})).unwrap();
             assert_eq!(s.documents().len(), 1);
+            assert!(s.active().unwrap().is_dirty(), "Paste with no tab also needs a save prompt");
             assert_eq!(active_bounds(&s), Rect::new(0, 0, 30, 15));
             assert!(s.execute("edit.pasteSpecial.pasteInPlace", json!({})).is_ok(), "into the new document");
         }
