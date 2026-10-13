@@ -175,12 +175,23 @@ pub fn start() {
                     }
                     listen_pen(&pen_target, app.stylus.feed.clone());
                     app.set_theme(&cc.egui_ctx, ThemeKind::Pro);
+                    let mut gpu = ("cpu", "unknown");
                     if let Some(rs) = cc.wgpu_render_state.clone()
                         && !force_cpu
                     {
-                        log::info!("photocraft-web: wgpu backend {:?}", rs.adapter.get_info().backend);
+                        let info = rs.adapter.get_info();
+                        log::info!("photocraft-web: wgpu backend {:?}", info.backend);
+                        gpu = (
+                            match info.backend {
+                                eframe::wgpu::Backend::BrowserWebGpu => "webgpu",
+                                eframe::wgpu::Backend::Gl => "webgl",
+                                _ => "unknown",
+                            },
+                            photocraft_ui_egui::telemetry::gpu_vendor_class(info.vendor, &info.name),
+                        );
                         app.set_wgpu(rs);
                     }
+                    crate::usage_stats::init(gpu.0, gpu.1);
                     let unsaved = Arc::new(AtomicBool::new(false));
                     guard_unload(unsaved.clone());
                     Ok(Box::new(WebShell { app, inbox, unsaved, served, database, presets }))
@@ -392,6 +403,7 @@ impl eframe::App for WebShell {
         self.serve_fonts(ctx);
         self.app.logic(ctx, frame);
         crate::embed::process(&mut self.app);
+        crate::usage_stats::sync(&self.app, ctx);
         self.save_presets(ctx);
     }
 
@@ -428,11 +440,17 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
     Services {
         screen_pick: screen_color_service(),
         import: Some(Box::new(|name: &str, bytes: &[u8], max_svg_group_depth: usize| {
-            photocraft_io::import_with_svg_group_depth(name, bytes, max_svg_group_depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
+            let t0 = js_sys::Date::now();
+            let r = photocraft_io::import_with_svg_group_depth(name, bytes, max_svg_group_depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string());
+            crate::usage_stats::doc_open(name, bytes.len(), r.as_ref().map(|(doc, _)| doc), js_sys::Date::now() - t0);
+            r
         })),
         // The desktop's options: PSD/PSB saves carry psd-compiler's merged image here too.
         export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
-            photocraft_io::export(doc, path, &settings.io_options()).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
+            let t0 = js_sys::Date::now();
+            let r = photocraft_io::export(doc, path, &settings.io_options()).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string());
+            crate::usage_stats::doc_saved(path, doc, r.as_ref().map(|_| ()), js_sys::Date::now() - t0);
+            r
         })),
         file_dialog: Some(Box::new(|request, _parent, reply| match request {
             // The browser's file picker hands over the files' contents, not paths. File › Open

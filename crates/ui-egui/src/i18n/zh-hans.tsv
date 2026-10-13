@@ -2746,3 +2746,6 @@ cameraData	Lens	镜头
 # Eraser: Erase to History; Magic Wand: Sample Size.
 	Erase to History	抹到历史记录
 	Sample Size	取样大小
+# Anonymous usage statistics (web build): Preferences › General, About.
+	Send anonymous usage statistics	发送匿名使用统计
+	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	网页版会发送匿名使用统计（不含文件或内容）；可在 首选项 › 常规 中关闭。

@@ -246,7 +246,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             if let Some(t) = crate::state::Tool::from_name(tool) {
                 app.ui.tool = t;
             }
-        } else if let Err(e) = crate::menus::invoke(app, ctx, &id, serde_json::json!({})) {
+        } else if let Err(e) = crate::telemetry::with_source(crate::telemetry::Source::Palette, || crate::menus::invoke(app, ctx, &id, serde_json::json!({}))) {
             app.ui.status = e;
         }
     }

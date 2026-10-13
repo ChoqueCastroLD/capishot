@@ -179,6 +179,7 @@ pub mod swatches_ui;
 pub mod symmetry_ui;
 mod tab_strip;
 pub mod targa_options_ui;
+pub mod telemetry;
 pub mod text_field_menu;
 pub mod theme;
 pub mod tiff_options_ui;
@@ -898,7 +899,10 @@ impl PhotocraftApp {
         if gate.is_some() {
             self.session.authorize = gate;
         }
+        // Anonymous usage statistics (web only, opt-out): the id is counted, never the params.
+        let scope = telemetry::Scope::enter(self.automation_input);
         let result = self.run_command(id, params);
+        scope.finish(id, &result, || self.session.active().map(|st| telemetry::megapixels(st.doc.size.width, st.doc.size.height)));
         if gate.is_some() {
             self.session.authorize = None;
         }

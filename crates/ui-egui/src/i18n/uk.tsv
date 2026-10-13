@@ -3826,3 +3826,6 @@ cameraData	Lens	Об'єктив
 # Eraser: Erase to History; Magic Wand: Sample Size.
 	Erase to History	Стирати до історії
 	Sample Size	Розмір зразка
+# Anonymous usage statistics (web build): Preferences › General, About.
+	Send anonymous usage statistics	Надсилати анонімну статистику використання
+	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Веб-версія надсилає анонімну статистику використання (без файлів і вмісту); вимкнути її можна в Налаштування › Загальні.
