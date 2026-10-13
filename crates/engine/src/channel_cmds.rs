@@ -1226,7 +1226,12 @@ fn target(s: &mut Session, t: ChannelTarget) {
         let v = &mut st.channel_view;
         v.target = t;
         match t {
-            ChannelTarget::Composite | ChannelTarget::LayerMask | ChannelTarget::VectorMask => v.color_hidden.clear(),
+            // Like clicking RGB in Photoshop: the alpha overlays go away with their eyes.
+            ChannelTarget::Composite => {
+                v.color_hidden.clear();
+                v.alpha_visible.clear();
+            }
+            ChannelTarget::LayerMask | ChannelTarget::VectorMask => v.color_hidden.clear(),
             ChannelTarget::Color(k) => {
                 v.color_hidden = (0..colors).map(|c| c != k).collect();
                 v.alpha_visible.clear();
