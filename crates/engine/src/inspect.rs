@@ -98,7 +98,9 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId]) -> Value {
             }
         }
         LayerContent::Adjustment(a) => {
-            v["adjustment"] = serde_json::to_value(a).unwrap_or(Value::Null);
+            // The same kind and parameters the adjustment commands take (`inBlack` 0..255, …),
+            // not the internal model.
+            v["adjustment"] = json!({"kind": crate::commands::adjustment_kind(a), "params": crate::adjust_params::to_params(a)});
         }
         LayerContent::Smart(sm) => {
             v["smartFilters"] = Value::Array(
@@ -164,6 +166,25 @@ mod tests {
     use super::*;
     use photocraft_color::PixelFormat;
     use photocraft_doc::{LayerMask, Path, VectorMask};
+
+    #[test]
+    fn an_adjustment_layer_is_reported_with_the_params_its_command_takes() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 4, "height": 4})).unwrap();
+        s.execute("layer.newAdjustmentLayer.levels", json!({"inBlack": 10, "inWhite": 240, "gamma": 1.2})).unwrap();
+        let info = s.execute("document.inspect", json!({})).unwrap();
+        let adj = &info["layers"][0]["adjustment"];
+        assert_eq!(adj["kind"], "levels");
+        assert_eq!((adj["params"]["inBlack"].as_f64(), adj["params"]["inWhite"].as_f64()), (Some(10.0), Some(240.0)), "{adj}");
+        // Fed back to the command, the params give the same adjustment; no internal field names.
+        let model = match &s.active().unwrap().doc.layers[1].content {
+            LayerContent::Adjustment(a) => a.clone(),
+            c => panic!("{c:?}"),
+        };
+        let back = crate::adjust_params::from_params("levels", &adj["params"], None, photocraft_color::ColorMode::Rgb).unwrap();
+        assert_eq!(crate::adjust_params::to_params(&back), crate::adjust_params::to_params(&model));
+        assert!(!adj.to_string().contains('_'), "{adj}");
+    }
 
     #[test]
     fn document_inspect_reports_raster_and_vector_masks_when_nested() {
