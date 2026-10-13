@@ -46,12 +46,22 @@ pub type ControlResponse = Value;
 /// The control server's per-request reply deadline.
 pub const REPLY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// The error both timeout sites return when a request's [`REPLY_DEADLINE`] passes: the
-/// transport thread waiting for a reply, and the UI thread rejecting a request it is only
-/// now draining. Built from the same constant, so the text cannot drift from the deadline.
+/// The error the transport thread returns when a dispatched command gave no reply within
+/// [`REPLY_DEADLINE`]. It warns that the command may still apply: re-sending blindly could apply
+/// an edit twice (#3662). Built from the deadline constant, so the text cannot drift from it.
 pub fn timeout_error() -> String {
     format!(
-        "timeout: no reply in {}s — the command may still be running, or the app was not drawing frames (display asleep, window fully occluded, or a long operation blocked the frame loop)",
+        "timeout: no reply in {}s — the command may still be running and may still apply, or the app was not drawing frames (display asleep, window fully occluded, or a long operation blocked the frame loop)",
+        REPLY_DEADLINE.as_secs()
+    )
+}
+
+/// The error for a request still queued when its deadline passed, from the UI thread or the
+/// transport (see [`Dispatch`]). It was dropped before dispatch, so re-sending it is safe (#3662). Same `timeout` prefix as
+/// [`timeout_error`], which machines match on.
+pub fn expired_error() -> String {
+    format!(
+        "timeout: not run — the request was still queued when its {}s deadline passed, so it was dropped before dispatch and is safe to re-send; the app was not drawing frames (display asleep, window fully occluded, or a long operation blocked the frame loop)",
         REPLY_DEADLINE.as_secs()
     )
 }
@@ -62,12 +72,44 @@ pub struct ControlRequest {
     pub reply: Sender<ControlResponse>,
     /// Requests still queued at this instant are rejected; already dispatched work continues.
     pub deadline: Option<std::time::Instant>,
+    /// Shared with the transport, so that when it stops waiting it knows whether the command ran.
+    pub dispatch: Dispatch,
 }
 
 impl ControlRequest {
     pub fn new(method: impl Into<String>, params: Value) -> (Self, std::sync::mpsc::Receiver<ControlResponse>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        (Self { method: method.into(), params, reply: tx, deadline: None }, rx)
+        (Self { method: method.into(), params, reply: tx, deadline: None, dispatch: Dispatch::default() }, rx)
+    }
+}
+
+/// Whether a request was dispatched, settled once between the UI thread (about to run it) and
+/// the transport (giving up on its reply). The transport's clock runs out no later than the UI
+/// thread's, so without this it could only ever say the command may still apply (#3662).
+#[derive(Clone, Default)]
+pub struct Dispatch(std::sync::Arc<std::sync::atomic::AtomicU8>);
+
+const QUEUED: u8 = 0;
+const DISPATCHED: u8 = 1;
+const ABANDONED: u8 = 2;
+
+impl Dispatch {
+    /// The UI thread claims the request to run it: false once the transport gave up on it. A
+    /// request the UI thread rejects as expired stays queued, which `give_up` reads as not run.
+    pub(crate) fn start(&self) -> bool {
+        self.settle(DISPATCHED) == DISPATCHED
+    }
+
+    /// The transport stops waiting: the error to reply with, [`expired_error`] when the command
+    /// can no longer run and [`timeout_error`] when it was dispatched and may still apply.
+    pub fn give_up(&self) -> String {
+        if self.settle(ABANDONED) == DISPATCHED { timeout_error() } else { expired_error() }
+    }
+
+    /// Moves a queued request to `to`; returns the state it ends in.
+    fn settle(&self, to: u8) -> u8 {
+        use std::sync::atomic::Ordering;
+        self.0.compare_exchange(QUEUED, to, Ordering::AcqRel, Ordering::Acquire).map_or_else(|state| state, |_| to)
     }
 }
 
@@ -1565,11 +1607,54 @@ mod tests {
         retry.deadline = Some(Instant::now() + Duration::from_secs(60));
         tx.send(retry).unwrap();
         app.drain_control(&egui::Context::default());
-        assert_eq!(expired_reply.try_recv().unwrap(), json!({"ok": false, "error": super::timeout_error()}));
+        let expired_error = expired_reply.try_recv().unwrap()["error"].as_str().unwrap().to_string();
         assert_eq!(retry_reply.try_recv().unwrap()["ok"], true);
         let after = app.session.active().unwrap();
         assert_eq!(after.doc.layers.len(), layers + 1, "only the live retry adds a layer");
         assert_eq!(after.history.past_len(), steps + 1, "the expired edit adds no undo step");
+        // #3662: a caller must be able to tell this reply, safe to re-send, from the
+        // transport's, sent while the command may still apply.
+        assert!(expired_error.starts_with("timeout"), "machines match on the prefix: {expired_error}");
+        assert!(expired_error.contains("not run"), "the expired request says it never ran: {expired_error}");
+        let transport_error = super::timeout_error();
+        assert!(!transport_error.contains("not run"), "the transport can't know it didn't run: {transport_error}");
+        assert!(transport_error.contains("may still apply"), "the transport warns against a blind re-send: {transport_error}");
+    }
+
+    #[test]
+    fn a_transport_that_gives_up_learns_whether_the_command_can_still_run() {
+        // #3662: the transport's clock runs out no later than the UI thread's, so it is the
+        // one that answers; it must still tell a request that will never run from one that may.
+        use std::time::{Duration, Instant};
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let layers = app.session.active().unwrap().doc.layers.len();
+        let (tx, rx) = std::sync::mpsc::channel();
+        app = app.with_control(rx);
+        let ctx = egui::Context::default();
+        let request = |deadline: Instant| {
+            let (mut req, reply) = ControlRequest::new("engine.execute", json!({"command": "layer.new.layer"}));
+            req.deadline = Some(deadline);
+            (req.dispatch.clone(), req, reply)
+        };
+
+        let (dispatch, queued, _) = request(Instant::now() + Duration::from_secs(60));
+        tx.send(queued).unwrap();
+        assert_eq!(dispatch.give_up(), super::expired_error(), "still queued: it will not run");
+        app.drain_control(&ctx);
+        assert_eq!(app.session.active().unwrap().doc.layers.len(), layers, "a request given up on never runs");
+
+        let (dispatch, expired, _) = request(Instant::now() - Duration::from_secs(1));
+        tx.send(expired).unwrap();
+        app.drain_control(&ctx);
+        assert_eq!(dispatch.give_up(), super::expired_error(), "rejected by the UI thread: it did not run");
+
+        let (dispatch, live, reply) = request(Instant::now() + Duration::from_secs(60));
+        tx.send(live).unwrap();
+        app.drain_control(&ctx);
+        assert_eq!(reply.try_recv().unwrap()["ok"], true);
+        assert_eq!(app.session.active().unwrap().doc.layers.len(), layers + 1);
+        assert_eq!(dispatch.give_up(), super::timeout_error(), "dispatched: it may still apply");
     }
 
     #[test]
