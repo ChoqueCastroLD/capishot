@@ -81,6 +81,8 @@
 	Save	儲存
 	Save As…	另存新檔…
 	Save a Copy…	儲存拷貝…
+	{name} can't keep everything in this document	{name} 無法保留此文件中的所有內容
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	請選擇能保留全部內容的格式，例如 Photoshop (PSD)，或儲存拷貝。
 	Revert	回復
 	Export	匯出
 	Quick Export as PNG	快速匯出為 PNG

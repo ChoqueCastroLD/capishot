@@ -901,6 +901,26 @@ fn only_layered_files_save_in_place() {
     assert_eq!(extension("my.dir/name"), None);
 }
 
+/// #3806: a layered format holds a document only if it keeps everything in it.
+#[test]
+fn openraster_holds_a_document_only_when_it_drops_nothing() {
+    let mut s = session(16, 16, 8);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let plain = doc(&s).clone();
+    for p in ["a.psd", "a.psb", "a.pcraft", "a.ora", "A.ORA"] {
+        assert!(holds_at(&plain, p), "{p}");
+    }
+    for p in ["a.png", "a.tif", "a", ""] {
+        assert!(!holds_at(&plain, p), "{p}");
+    }
+    assert!(losses_at(&plain, "a.ora").is_empty());
+    s.execute("layer.newAdjustmentLayer.invert", json!({})).unwrap();
+    let adjusted = doc(&s).clone();
+    assert!(holds_at(&adjusted, "a.psd") && !holds_at(&adjusted, "a.ora"));
+    assert!(losses_at(&adjusted, "a.ora").iter().any(|l| l.contains("adjustment layers")), "{:?}", losses_at(&adjusted, "a.ora"));
+    assert!(losses_at(&adjusted, "a.psd").is_empty());
+}
+
 #[test]
 fn templates_open_untitled_without_their_path() {
     assert!(is_template("dir/card.PSDT") && !is_template("card.psd") && !is_template("psdt"));

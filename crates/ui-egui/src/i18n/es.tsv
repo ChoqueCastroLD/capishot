@@ -74,6 +74,8 @@
 	Save	Guardar
 	Save As…	Guardar como…
 	Save a Copy…	Guardar una copia…
+	{name} can't keep everything in this document	{name} no puede conservar todo lo que tiene este documento
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Elija un formato que lo conserve todo, como Photoshop (PSD), o guarde una copia.
 	Revert	Volver
 	Export	Exportar
 	Quick Export as PNG	Exportación rápida como PNG

@@ -72,6 +72,8 @@
 	Save	Simpan
 	Save As…	Simpan Sebagai…
 	Save a Copy…	Simpan Salinan…
+	{name} can't keep everything in this document	{name} tidak dapat menyimpan semua isi dokumen ini
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Pilih format yang menyimpan semuanya, seperti Photoshop (PSD), atau simpan salinan.
 	Revert	Kembalikan
 	Export	Ekspor
 	Quick Export as PNG	Ekspor Cepat ke PNG

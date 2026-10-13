@@ -64,6 +64,8 @@
 	Save	Kaydet
 	Save As…	Farklı Kaydet…
 	Save a Copy…	Bir Kopyasını Kaydet…
+	{name} can't keep everything in this document	{name} bu belgedeki her şeyi koruyamaz
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Photoshop (PSD) gibi her şeyi koruyan bir biçim seçin ya da bir kopyasını kaydedin.
 	Revert	Geri Döndür
 	Export	Dışa Aktar
 	Quick Export as PNG	PNG Olarak Hızlı Dışa Aktarma

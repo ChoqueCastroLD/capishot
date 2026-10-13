@@ -58,6 +58,8 @@
 	Save	Αποθήκευση
 	Save As…	Αποθήκευση ως…
 	Save a Copy…	Αποθήκευση αντιγράφου…
+	{name} can't keep everything in this document	Το {name} δεν μπορεί να κρατήσει όλο το περιεχόμενο αυτού του εγγράφου
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Επιλέξτε μια μορφή που τα κρατά όλα, όπως Photoshop (PSD), ή αποθηκεύστε ένα αντίγραφο.
 	Revert	Επαναφορά αποθηκευμένης έκδοσης
 	Export	Εξαγωγή
 	Quick Export as PNG	Γρήγορη εξαγωγή σε PNG

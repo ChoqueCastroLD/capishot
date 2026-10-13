@@ -74,6 +74,8 @@
 	Save	Zapisz
 	Save As…	Zapisz jako…
 	Save a Copy…	Zapisz kopię…
+	{name} can't keep everything in this document	{name} nie może zachować wszystkiego z tego dokumentu
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Wybierz format, który zachowa wszystko, na przykład Photoshop (PSD), lub zapisz kopię.
 	Revert	Przywróć ostatnio zapisany
 	Export	Eksportuj
 	Quick Export as PNG	Szybki eksport jako PNG

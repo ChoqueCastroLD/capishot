@@ -73,6 +73,8 @@
 	Save	保存
 	Save As…	另存为…
 	Save a Copy…	保存副本…
+	{name} can't keep everything in this document	{name} 无法保留此文档中的所有内容
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	请选择能保留全部内容的格式，例如 Photoshop (PSD)，或存储副本。
 	Revert	恢复
 	Export	导出
 	Quick Export as PNG	快速导出为 PNG
