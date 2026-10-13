@@ -1382,7 +1382,6 @@
 	Choose…	Вибрати…
 	Select Folder…	Вибрати теку…
 	Override Action "Save" Commands	Перевизначити команди «Зберегти» в дії
-	File Naming	Іменування файлів
 	Compatibility	Сумісність
 	Windows	Windows
 	Mac OS	Mac OS
@@ -3816,6 +3815,8 @@ curves	Smooth	Згладити
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Збережено {n} операцію до {file}|Збережено {n} операції до {file}|Збережено {n} операцій до {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Пропущено {n} крок без відповідника в Photoshop|Пропущено {n} кроки без відповідника в Photoshop|Пропущено {n} кроків без відповідника в Photoshop
 
+	File Naming	Іменування файлів
+	Starting serial	Початковий порядковий номер
 # Actions panel: set folders, dialog toggle, Insert Stop
 	Insert Stop…	Вставити зупинку…
 	Save Set…	Зберегти набір…

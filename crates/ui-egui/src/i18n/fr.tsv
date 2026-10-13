@@ -2470,7 +2470,6 @@
 	Choose…	Choisir…
 	Select Folder…	Sélectionner un dossier…
 	Override Action "Save" Commands	Ignorer les commandes « Enregistrer » de l'action
-	File Naming	Dénomination des fichiers
 	Compatibility	Compatibilité
 	Mac OS	Mac OS
 	Unix	Unix
@@ -3119,6 +3118,8 @@ curves	Smooth	Lisser
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} action enregistrée dans {file}|{n} actions enregistrées dans {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} étape sans équivalent Photoshop omise|{n} étapes sans équivalent Photoshop omises
 
+	File Naming	Dénomination des fichiers
+	Starting serial	Numéro de série initial
 # Actions panel: set folders, dialog toggle, Insert Stop
 	Insert Stop…	Insérer un arrêt…
 	Save Set…	Enregistrer l’ensemble…

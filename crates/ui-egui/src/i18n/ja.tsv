@@ -3306,7 +3306,6 @@ fontWeight	Italic	斜体
 	Exposure Program	露出プログラム
 	Extra Bold	エクストラボールド
 	Extra Light	エクストラライト
-	File Naming	ファイル名の付け方
 	Fill Light	フィルライト
 	First Color Readout	最初のカラー読み取り
 	Flash	フラッシュ
@@ -3724,6 +3723,8 @@ curves	Smooth	スムーズ
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	{file} にアクション {n} 個を保存しました
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Photoshop に対応するもののない {n} 個のステップを省きました
 
+	File Naming	ファイル名の付け方
+	Starting serial	開始番号
 # Actions panel: set folders, dialog toggle, Insert Stop
 	Insert Stop…	ストップを挿入…
 	Save Set…	セットを保存…

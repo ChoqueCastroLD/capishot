@@ -3726,6 +3726,8 @@ navigator	Zoom	Zvětšení
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Uložena {n} akce do souboru {file}|Uloženy {n} akce do souboru {file}|Uloženo {n} akcí do souboru {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Vynechán {n} krok bez obdoby v Photoshopu|Vynechány {n} kroky bez obdoby v Photoshopu|Vynecháno {n} kroků bez obdoby v Photoshopu
 
+	File Naming	Pojmenování souborů
+	Starting serial	Počáteční pořadové číslo
 # Actions panel: set folders, dialog toggle, Insert Stop
 	Insert Stop…	Vložit zastavení…
 	Save Set…	Uložit sadu…

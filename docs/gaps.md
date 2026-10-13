@@ -88,7 +88,10 @@ what an agent can't finish alone.
 - **Estimate:** 120–200 h.
 
 ### G11. Actions and scripting
-- **Missing:** document-independent action recording (AUTO-219-1), Batch recursion and naming
+- **2026-10-13 evidence:** Batch supports [output naming templates](batch-naming.md) using
+  `{name}`, `{serial}` and a captured UTC `{date}`, with a starting serial number. Colliding
+  names remain errors; custom output names cannot replace inputs. AUTO-219-5 stays partial.
+- **Missing:** document-independent action recording (AUTO-219-1), Batch recursion, open-document inputs, progress/cancel and an error-log file
   (AUTO-219-5), ExtendScript/UXP compatibility. `.atn` steps outside the
   mapped events (paths, scripts, Generative Fill, Filter Gallery effects other than Spatter,
   Duplicate Layers into a new document, Bitmap halftone screens…) load as kept Photoshop steps

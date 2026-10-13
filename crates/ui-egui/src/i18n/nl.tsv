@@ -2853,7 +2853,6 @@ cameraRaw	Color	Kleur
 	Choose…	Kiezen…
 	Select Folder…	Map selecteren…
 	Override Action "Save" Commands	Opdrachten "Opslaan" in actie negeren
-	File Naming	Bestandsnamen
 	Compatibility	Compatibiliteit
 	Include ICC Profile	ICC-profiel opnemen
 	Error File	Foutbestand
@@ -3877,6 +3876,8 @@ curves	Smooth	Vloeiend maken
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} handeling opgeslagen in {file}|{n} handelingen opgeslagen in {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} stap zonder Photoshop-equivalent weggelaten|{n} stappen zonder Photoshop-equivalent weggelaten
 
+	File Naming	Bestandsnamen
+	Starting serial	Beginnummer
 # Actions panel: set folders, dialog toggle, Insert Stop
 	Insert Stop…	Stop invoegen…
 	Save Set…	Set opslaan…

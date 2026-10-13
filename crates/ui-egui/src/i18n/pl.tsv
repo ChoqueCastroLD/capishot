@@ -2494,7 +2494,6 @@
 	Choose…	Wybierz…
 	Select Folder…	Wybierz folder…
 	Override Action "Save" Commands	Zastąp polecenia „Zapisz” w akcji
-	File Naming	Nazewnictwo plików
 	Compatibility	Zgodność
 	Mac OS	Mac OS
 	Unix	Unix
@@ -3715,6 +3714,8 @@ curves	Smooth	Wygładź
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Zapisano {n} operację do {file}|Zapisano {n} operacje do {file}|Zapisano {n} operacji do {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Pominięto {n} krok bez odpowiednika w Photoshopie|Pominięto {n} kroki bez odpowiednika w Photoshopie|Pominięto {n} kroków bez odpowiednika w Photoshopie
 
+	File Naming	Nazewnictwo plików
+	Starting serial	Początkowy numer seryjny
 # Actions panel: set folders, dialog toggle, Insert Stop
 	Insert Stop…	Wstaw zatrzymanie…
 	Save Set…	Zapisz zestaw…

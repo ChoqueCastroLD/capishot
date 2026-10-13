@@ -3014,7 +3014,6 @@ curves	Smooth	Leviga
 	Choose…	Scegli…
 	Select Folder…	Seleziona cartella…
 	Override Action "Save" Commands	Sostituisci i comandi "Salva" dell'azione
-	File Naming	Denominazione file
 	Compatibility	Compatibilità
 	Mac OS	Mac OS
 	Unix	Unix
@@ -4082,6 +4081,8 @@ navigator	Zoom	Zoom
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Salvata {n} azione in {file}|Salvate {n} azioni in {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Omesso {n} passaggio senza equivalente in Photoshop|Omessi {n} passaggi senza equivalente in Photoshop
 
+	File Naming	Denominazione file
+	Starting serial	Numero di serie iniziale
 # Actions panel: set folders, dialog toggle, Insert Stop
 	Insert Stop…	Inserisci interruzione…
 	Save Set…	Salva set…

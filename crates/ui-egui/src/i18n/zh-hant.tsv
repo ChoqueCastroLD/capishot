@@ -2711,6 +2711,8 @@ curves	Smooth	平滑
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	已將 {n} 個動作儲存到 {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	已略過 {n} 個沒有 Photoshop 對應功能的步驟
 
+	File Naming	檔案命名
+	Starting serial	起始序號
 # Actions panel: set folders, dialog toggle, Insert Stop
 	Insert Stop…	插入停止…
 	Save Set…	儲存組合…
