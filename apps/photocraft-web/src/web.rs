@@ -120,6 +120,9 @@ pub fn parallel_self_test(width: u32, height: u32) -> Result<String, String> {
 
 pub fn start() {
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
+    // The app's own timings (Window › Info's performance readout, previews that wait for a value to
+    // settle, double key presses) need a clock; `std::time` has none on the web.
+    photocraft_ui_egui::gpu_canvas::set_clock(crate::frame_perf::now_ms);
     wasm_bindgen_futures::spawn_local(async {
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
             log::error!("no document");
@@ -134,6 +137,7 @@ pub fn start() {
         let photopea = crate::embed::photopea_config();
         let embed_query = q.clone();
         let force_cpu = q.contains("cpu");
+        let perf_debug = q.split(['?', '&']).any(|kv| kv == "perf=1" || kv == "perf");
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
         if q.contains("webgl")
@@ -154,6 +158,7 @@ pub fn start() {
         // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
         crate::wheel_guard::install();
         let pen_target = canvas.clone();
+        let perf = crate::frame_perf::FramePerf::new(&canvas, perf_debug);
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
@@ -194,7 +199,7 @@ pub fn start() {
                     crate::usage_stats::init(gpu.0, gpu.1);
                     let unsaved = Arc::new(AtomicBool::new(false));
                     guard_unload(unsaved.clone());
-                    Ok(Box::new(WebShell { app, inbox, unsaved, served, database, presets }))
+                    Ok(Box::new(WebShell { app, inbox, unsaved, served, database, presets, perf }))
                 }),
             )
             .await;
@@ -325,6 +330,7 @@ struct WebShell {
     served: Served,
     database: Option<web_sys::IdbDatabase>,
     presets: crate::preset_bridge::Bridge,
+    perf: crate::frame_perf::FramePerf,
 }
 
 impl WebShell {
@@ -385,6 +391,7 @@ impl eframe::App for WebShell {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.perf.begin(frame.info().cpu_usage);
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
             let inbox = self.inbox.clone();
@@ -433,6 +440,7 @@ impl eframe::App for WebShell {
         }
         self.app.ui(ui, frame);
         self.save_presets(ui.ctx());
+        self.perf.end_update(&self.app, ui.ctx());
     }
 }
 
