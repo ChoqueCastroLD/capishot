@@ -349,3 +349,68 @@ mod archive {
         }
     }
 }
+
+mod shapes {
+    use crate::container::Limits;
+    use crate::model::{Document, Kind, Path};
+    use crate::stream::Tag;
+    use crate::synth::{self, F, Method, tag};
+
+    fn shape(id: u32, class: &[u8; 4], parameters: Vec<(Tag, F)>) -> F {
+        F::Def(
+            id,
+            vec![tag(b"ShpN")],
+            vec![(tag(b"ShpB"), F::F64s(vec![0.0, 0.0, 10.0, 20.0])), (tag(b"Shpe"), F::Def(id + 10_000, vec![tag(class)], parameters))],
+        )
+    }
+
+    /// Reads a document whose one page holds the object `top` from `definitions`, on a thread of
+    /// its own, and fails the test when reading takes more than 20 s.
+    fn read(definitions: Vec<F>, top: u32) -> Document {
+        let data = synth::stream(&[
+            (tag(b"Defs"), F::Shared(definitions)),
+            (
+                tag(b"DocR"),
+                F::Def(
+                    1,
+                    vec![tag(b"DocN")],
+                    vec![(
+                        tag(b"Chld"),
+                        F::Shared(vec![F::Def(
+                            2,
+                            vec![tag(b"Sprd")],
+                            vec![(tag(b"SprB"), F::F64s(vec![0.0, 0.0, 400.0, 300.0])), (tag(b"Chld"), F::Shared(vec![F::Ref(top)]))],
+                        )]),
+                    )],
+                ),
+            ),
+        ]);
+        let bytes = synth::container(&[("doc.dat", &data, Method::Zlib)], None);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(crate::model::read(&bytes, Limits::default())).ok());
+        rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap_or_else(|_| panic!("reading the document did not finish")).unwrap()
+    }
+
+    fn path(document: &Document) -> &Path {
+        match &document.spreads[0].nodes[0].kind {
+            Kind::Shape { path, .. } => path,
+            other => panic!("expected shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pie_angles_with_huge_finite_values_do_not_loop_or_emit_nonfinite_points() {
+        let document = read(vec![shape(100, b"ShPi", vec![(tag(b"AngS"), F::F64(1.0e308)), (tag(b"AngE"), F::F64(-1.0e308))])], 100);
+        for subpath in &path(&document).subpaths {
+            assert!(subpath.start.x.is_finite() && subpath.start.y.is_finite());
+            assert!(subpath.segments.len() <= 20);
+            assert!(subpath.segments.iter().flatten().all(|point| point.x.is_finite() && point.y.is_finite()));
+        }
+    }
+
+    #[test]
+    fn wrapped_pie_angles_keep_the_same_geometry_as_the_positive_span() {
+        let make = |end| read(vec![shape(100, b"ShPi", vec![(tag(b"AngS"), F::F64(0.0)), (tag(b"AngE"), F::F64(end))])], 100);
+        assert_eq!(path(&make(-std::f64::consts::FRAC_PI_2)), path(&make(3.0 * std::f64::consts::FRAC_PI_2)));
+    }
+}
