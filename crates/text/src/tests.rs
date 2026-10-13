@@ -13,6 +13,44 @@ fn styled(text: &str, style: CharStyle) -> TextLayer {
     TextLayer { text: text.into(), runs: vec![TextRun { len: text.len(), style }], ..Default::default() }
 }
 
+#[test]
+fn raster_preserves_hdr_and_signed_float_text_colors() {
+    let mut e = TextEngine::new();
+    for alpha in [1.0, 0.4] {
+        let color = Color::rgba(2.5, -0.25, 0.5, alpha);
+        let style = CharStyle { size_pt: 48.0, color, ..Default::default() };
+        let (_, rendered) = e.render(&styled("HDR", style), 72.0, PixelFormat::RGBA32F);
+        let pixels = rendered.surface.read_region(rendered.rect);
+        let mut covered = 0;
+        for pixel in pixels.as_chunks::<4>().0.iter().filter(|p| p[3] > 0.01) {
+            covered += 1;
+            for channel in 0..3 {
+                assert!((pixel[channel] - color.c[channel]).abs() < 1e-5, "alpha={alpha}, pixel={pixel:?}");
+            }
+            assert!(pixel[3] <= alpha + 1e-6);
+        }
+        assert!(covered > 100);
+    }
+}
+
+#[test]
+fn raster_integer_text_colors_stay_bounded() {
+    let mut e = TextEngine::new();
+    for format in [PixelFormat::RGBA8, PixelFormat::RGBA16] {
+        let style = CharStyle { size_pt: 48.0, color: Color::rgba(2.5, -0.25, 0.5, 0.4), ..Default::default() };
+        let (_, rendered) = e.render(&styled("HDR", style), 72.0, format);
+        let pixels = rendered.surface.read_region(rendered.rect);
+        let mut covered = 0;
+        for pixel in pixels.as_chunks::<4>().0.iter().filter(|p| p[3] > 0.01) {
+            covered += 1;
+            assert_eq!(&pixel[..2], &[1.0, 0.0]);
+            assert!((pixel[2] - 0.5).abs() < 1.0 / 255.0);
+            assert!(pixel[3] <= 0.4 + 1.0 / 255.0);
+        }
+        assert!(covered > 100);
+    }
+}
+
 fn with_para(mut t: TextLayer, p: ParagraphStyle) -> TextLayer {
     t.paragraphs = vec![ParagraphRun { len: t.text.len(), style: p }];
     t
