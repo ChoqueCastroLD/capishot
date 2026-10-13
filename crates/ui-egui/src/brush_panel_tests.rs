@@ -380,6 +380,26 @@ fn options_bar_edits_are_one_set_brush_per_gesture() {
 }
 
 #[test]
+fn brush_mode_dropdown_shows_outside_the_pro_themes() {
+    // #4512: only the Pro themes drew the Brush's Mode; the Pencil has it in every theme.
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let mut h = options_bar_harness(crate::state::Tool::Brush);
+    let n = h.state().session.journal.len();
+    assert!(h.query_by_label("Mode").is_some(), "the Brush's Mode label");
+    h.get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|c| c.accesskit_node().value().as_deref() == Some("Normal"))
+        .expect("the Brush's Mode dropdown")
+        .click();
+    h.run();
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(3);
+    assert_eq!(h.state().session.tools.brush.mode, photocraft_doc::BlendMode::Dissolve);
+    let j = &h.state().session.journal;
+    assert_eq!(j.len(), n + 1, "{:?}", &j[n..]);
+    assert_eq!(j[n].0, "tools.setBrush");
+}
+
+#[test]
 fn airbrush_smoothing_options_and_symmetry_buttons_work() {
     // #1177: in the default (Photoshop) theme these options-bar buttons did nothing.
     use egui_kittest::kittest::Queryable;

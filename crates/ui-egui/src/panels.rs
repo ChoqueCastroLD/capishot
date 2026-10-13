@@ -1062,6 +1062,10 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         widgets::vline(ui, 22.0);
                         if app.ui.tool == Tool::Eraser {
                             crate::eraser_ui::mode_dropdown(ui, &mut app.ui.tool_options.eraser_mode);
+                        } else {
+                            opt_label(ui, tl!("Mode"));
+                            let held = app.held_erase;
+                            paint_mode_dropdown(ui, "brush-mode", b, &mut app.ui.tool_options.brush_clear, held);
                         }
                         // A Pencil-mode Eraser is always hard and at full flow (Photoshop).
                         let fixed = block || crate::eraser_ui::pencil_mode(app, app.ui.tool);
@@ -5853,7 +5857,9 @@ mod compact_visual_regressions {
                             egui::RawInput {
                                 time: Some(f64::from(frame) * 0.1),
                                 events: vec![
-                                    egui::Event::PointerMoved(pos2(width * 0.5, 20.0)),
+                                    // Studio: above the controls, clear of the Brush's Mode dropdown, which takes the wheel
+                                    // to step through blend modes (#4512).
+                                    egui::Event::PointerMoved(if Tokens::get(&ctx).pro { pos2(width * 0.5, 20.0) } else { pos2(width * 0.5, 2.0) }),
                                     egui::Event::MouseWheel {
                                         unit: egui::MouseWheelUnit::Point,
                                         delta: vec2(-1500.0, 0.0),
