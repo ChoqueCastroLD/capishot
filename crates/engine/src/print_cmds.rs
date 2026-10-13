@@ -573,6 +573,15 @@ fn require_printing_enabled() -> Result<()> {
     }
 }
 
+/// The printers the system spooler knows (Print's Printer menu): CUPS queues and driverless
+/// destinations on macOS and Linux, `Win32_Printer` on Windows, none in the browser.
+fn system_printers(_: &mut Session, _: &Value) -> Result<Value> {
+    let list = craft_print::printers();
+    let default = list.iter().find(|p| p.default).map(|p| p.name.clone());
+    let printers: Vec<Value> = list.into_iter().map(|p| json!({"name": p.name, "default": p.default})).collect();
+    Ok(json!({"printers": printers, "default": default}))
+}
+
 fn print(s: &mut Session, p: &Value) -> Result<Value> {
     do_print(s, p, "file.print")
 }
@@ -764,6 +773,16 @@ pub fn specs() -> Vec<CommandSpec> {
             enabled: |_| Ok(()),
             journal: false,
             run: printer_page,
+        },
+        CommandSpec {
+            id: "file.printers",
+            label: "Printers",
+            menu: &[],
+            shortcut: None,
+            params: r##"{} → {printers:[{name, default}], default:name|null} (the system spooler's printers; a name is Print's "printer")"##,
+            enabled: crate::commands::always,
+            journal: false,
+            run: system_printers,
         },
         spec!(
             "file.printOneCopy",
