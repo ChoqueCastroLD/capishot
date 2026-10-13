@@ -14,6 +14,11 @@ fn rects(ctx: &egui::Context) -> Vec<egui::Rect> {
     ctx.data(|m| m.get_temp(egui::Id::new(RECTS))).unwrap_or_default()
 }
 
+/// The window drag target must not cover a dialog which has been moved into the title bar.
+pub(crate) fn titlebar_drag_area_is_clear(ctx: &egui::Context, area: egui::Rect) -> bool {
+    rects(ctx).iter().all(|dialog| !dialog.intersects(area))
+}
+
 /// With a dialog open the rest of the window is inert (egui's modal layer), but like Photoshop the
 /// image can still be panned and zoomed under it. The pointer position when it is over `canvas`
 /// and not over a dialog or one of its popups.
