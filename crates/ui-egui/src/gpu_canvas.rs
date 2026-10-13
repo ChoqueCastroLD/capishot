@@ -225,7 +225,7 @@ impl GpuCanvas {
     /// Set the GPU bytes one document's display texture set may take (see [`canvas_budget`]).
     pub fn set_canvas_budget(&self, bytes: u64) {
         let mut r = self.rs.renderer.write();
-        if let Some(res) = r.callback_resources.get_mut::<Resources>() {
+        if let Some(res) = r.callback_resources.get_mut::<StoredResources>() {
             res.canvas_budget = bytes;
         }
     }
@@ -236,7 +236,7 @@ impl GpuCanvas {
         let size = [doc.size.width, doc.size.height];
         let bytes = canvas_texture_bytes(size, self.tile, texel_bytes(self.format_for(doc.depth, size)));
         let r = self.rs.renderer.read();
-        r.callback_resources.get::<Resources>().is_some_and(|res| bytes <= res.canvas_budget)
+        r.callback_resources.get::<StoredResources>().is_some_and(|res| bytes <= res.canvas_budget)
     }
 
     /// Cap lower-stack composite reuse; zero disables it for profiling the uncached path.
@@ -247,6 +247,17 @@ impl GpuCanvas {
             if let Some(comp) = &mut res.compositor {
                 comp.set_composite_cache_budget(bytes);
             }
+        }
+    }
+
+    /// Layers the next refreshes draw from their already resident pre-move surface at an offset
+    /// (a Move drag's preview), instead of uploading the moved copy every frame. Empty: none.
+    pub fn set_translated(&self, translated: Vec<photocraft_gpu::Translated>) {
+        let mut r = self.rs.renderer.write();
+        if let Some(res) = r.callback_resources.get_mut::<StoredResources>()
+            && (!translated.is_empty() || !res.compositor_translated.is_empty())
+        {
+            res.compositor_translated = translated;
         }
     }
 
@@ -421,6 +432,7 @@ impl GpuCanvas {
             comp.set_composite_cache_budget(b);
         }
         comp.set_focus(res.compositor_focus);
+        comp.set_translated(res.compositor_translated.clone());
         let key = doc.id.0;
         let format = self.format_for(doc.depth, size);
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format);
@@ -535,7 +547,7 @@ impl GpuCanvas {
         if !self.fits_canvas(doc) {
             // Neither compositor can fill textures that are never created: the CPU canvas draws
             // it. A set left from before the canvas grew is stale, so it goes too.
-            if let Some(res) = self.rs.renderer.write().callback_resources.get_mut::<Resources>() {
+            if let Some(res) = self.rs.renderer.write().callback_resources.get_mut::<StoredResources>() {
                 res.docs.remove(&key);
             }
             return Refresh { kind: REFRESH_OVER_BUDGET, fallback: Some(OVER_CANVAS_BUDGET.into()), ..Default::default() };
@@ -814,7 +826,21 @@ pub fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
     wgpu::Limits { max_texture_dimension_2d: a.max_texture_dimension_2d, max_buffer_size: a.max_buffer_size, ..base }
 }
 
-/// Milliseconds since first call (monotonic). Always 0 on wasm, where `std::time` is unavailable.
+/// The browser shell's millisecond clock (`std::time` is unavailable on wasm), see [`set_clock`].
+#[cfg(target_arch = "wasm32")]
+static CLOCK: std::sync::OnceLock<fn() -> f64> = std::sync::OnceLock::new();
+
+/// Install the millisecond clock [`now_ms`] reads on wasm (the web shell passes the browser's
+/// high-resolution time, the same epoch on every thread). Native builds keep `Instant`.
+pub fn set_clock(clock: fn() -> f64) {
+    #[cfg(target_arch = "wasm32")]
+    let _ = CLOCK.set(clock);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = clock;
+}
+
+/// Milliseconds on a monotonic-enough clock: since first call natively; on wasm the clock the
+/// shell installed with [`set_clock`] (0 until then, as without one every interval is 0).
 pub fn now_ms() -> f64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -822,7 +848,7 @@ pub fn now_ms() -> f64 {
         START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0
     }
     #[cfg(target_arch = "wasm32")]
-    0.0
+    CLOCK.get().map_or(0.0, |clock| clock())
 }
 
 /// UI-thread timings (CPU side), exponentially smoothed.
@@ -1244,6 +1270,8 @@ struct Resources {
     compositor_budget: Option<u64>,
     compositor_cache_budget: Option<u64>,
     compositor_focus: Option<photocraft_geom::Rect>,
+    /// Layers the next refreshes draw from their resident pre-move surface (a Move drag).
+    compositor_translated: Vec<photocraft_gpu::Translated>,
     /// GPU bytes one document's display texture set may take (see [`canvas_budget`]).
     canvas_budget: u64,
     encode_bgl: wgpu::BindGroupLayout,
@@ -1511,6 +1539,7 @@ impl Resources {
             compositor_budget: None,
             compositor_cache_budget: None,
             compositor_focus: None,
+            compositor_translated: Vec::new(),
             canvas_budget: canvas_budget(physical_memory()),
             encode_bgl,
             encode_pipeline,
@@ -2148,6 +2177,19 @@ mod mip_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The threads web build stores the canvas resources as `SendWrapper<Resources>`, so a lookup
+    /// by `Resources` finds nothing there: `fits_canvas` answered false and every document was
+    /// drawn on the (much slower) CPU canvas in that build only. Natively the two types are the
+    /// same, so only the source can show it: every lookup goes through `StoredResources`.
+    #[test]
+    fn canvas_resources_are_looked_up_as_stored() {
+        let src = include_str!("gpu_canvas.rs");
+        let tests = src.find("#[cfg(test)]\n#[path").unwrap_or(src.len());
+        for bad in [concat!("get::<", "Resources>"), concat!("get_mut::<", "Resources>")] {
+            assert!(!src[..tests].contains(bad), "callback_resources lookup by `Resources` instead of `StoredResources`: {bad}");
+        }
+    }
 
     #[test]
     fn gpu_budget_follows_memory_usage_and_ram() {

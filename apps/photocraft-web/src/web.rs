@@ -116,6 +116,9 @@ pub fn parallel_self_test(width: u32, height: u32) -> Result<String, String> {
 pub fn start() {
     crate::startup::mark("start");
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
+    // The app's own timings (Window › Info's performance readout, previews that wait for a value to
+    // settle, double key presses) need a clock; `std::time` has none on the web.
+    photocraft_ui_egui::gpu_canvas::set_clock(crate::frame_perf::now_ms);
     wasm_bindgen_futures::spawn_local(async {
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
             log::error!("no document");
@@ -130,6 +133,7 @@ pub fn start() {
         let photopea = crate::embed::photopea_config();
         let embed_query = q.clone();
         let force_cpu = q.contains("cpu");
+        let perf_debug = q.split(['?', '&']).any(|kv| kv == "perf=1" || kv == "perf");
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
         if q.contains("webgl")
@@ -151,7 +155,8 @@ pub fn start() {
         // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
         crate::wheel_guard::install();
         let pen_target = canvas.clone();
-        let boot = Boot { presets, preset_warnings, database, embed_query, photopea, pen_target, force_cpu, loading: document.get_element_by_id("photocraft_loading") };
+        let perf = crate::frame_perf::FramePerf::new(&canvas, perf_debug);
+        let boot = Boot { presets, preset_warnings, database, embed_query, photopea, pen_target, force_cpu, perf, loading: document.get_element_by_id("photocraft_loading") };
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
@@ -162,7 +167,7 @@ pub fn start() {
                     crate::startup::mark("fonts and theme");
                     // The threads build may get here before its worker pool is up (the page starts
                     // both together): the app, the first thing to use rayon, is built once it is.
-                    Ok(Box::new(WebRoot::Booting(Some((boot, cc.wgpu_render_state.clone())))))
+                    Ok(Box::new(WebRoot::Booting(Some(Box::new((boot, cc.wgpu_render_state.clone()))))))
                 }),
             )
             .await;
@@ -197,13 +202,15 @@ struct Boot {
     photopea: Option<crate::embed_protocol::PhotopeaConfig>,
     pen_target: web_sys::HtmlCanvasElement,
     force_cpu: bool,
+    /// `?perf=1` frame timings (`frame_perf.rs`), watching the canvas from before the first frame.
+    perf: crate::frame_perf::FramePerf,
     /// The page's "Loading Capishot…", removed once the app is built.
     loading: Option<web_sys::Element>,
 }
 
 impl Boot {
     fn build(self, ctx: &egui::Context, wgpu: Option<eframe::egui_wgpu::RenderState>) -> WebShell {
-        let Boot { presets, mut preset_warnings, database, embed_query, photopea, pen_target, force_cpu, loading } = self;
+        let Boot { presets, mut preset_warnings, database, embed_query, photopea, pen_target, force_cpu, perf, loading } = self;
         let inbox: Inbox = Arc::default();
         let served: Served = Arc::default();
         load_font_manifest(served.clone(), ctx.clone());
@@ -244,14 +251,14 @@ impl Boot {
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, inbox, unsaved, served, database, presets, startup_frames: 0 }
+        WebShell { app, inbox, unsaved, served, database, presets, startup_frames: 0, perf }
     }
 }
 
 /// The eframe app: [`WebShell`] once built, and before that (the threads build waiting for its
 /// worker pool) an empty frame in the page's background colour, under "Loading Capishot…".
 enum WebRoot {
-    Booting(Option<(Boot, Option<eframe::egui_wgpu::RenderState>)>),
+    Booting(Option<Box<(Boot, Option<eframe::egui_wgpu::RenderState>)>>),
     Running(Box<WebShell>),
 }
 
@@ -264,7 +271,7 @@ impl WebRoot {
                 ctx.request_repaint_after(std::time::Duration::from_millis(16));
                 return None;
             }
-            let (boot, wgpu) = boot.take()?;
+            let (boot, wgpu) = *boot.take()?;
             *self = WebRoot::Running(Box::new(boot.build(ctx, wgpu)));
         }
         match self {
@@ -442,6 +449,7 @@ struct WebShell {
     presets: crate::preset_bridge::Bridge,
     /// Frames begun so far, counted up to 2 (for the startup timings).
     startup_frames: u8,
+    perf: crate::frame_perf::FramePerf,
 }
 
 impl WebShell {
@@ -510,6 +518,7 @@ impl eframe::App for WebShell {
                 crate::startup::report();
             }
         }
+        self.perf.begin(frame.info().cpu_usage);
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
             let inbox = self.inbox.clone();
@@ -559,6 +568,7 @@ impl eframe::App for WebShell {
         }
         self.app.ui(ui, frame);
         self.save_presets(ui.ctx());
+        self.perf.end_update(&self.app, ui.ctx());
     }
 }
 

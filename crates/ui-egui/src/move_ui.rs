@@ -152,6 +152,37 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
     Some((p.shown.clone()?, p.key()))
 }
 
+/// What the GPU canvas can draw of document `idx`'s Move preview from the layers' resident
+/// pages at the drag's offset (`photocraft_gpu::Translated`): the moving layers' pixels and
+/// linked masks as the document holds them, each with the copy the preview shows. Empty
+/// without a layer drag (a floating selection's preview cuts its piece, so it isn't one).
+pub(crate) fn gpu_translations(app: &PhotocraftApp, idx: usize) -> Vec<photocraft_gpu::Translated> {
+    let Some(st) = app.session.documents().get(idx) else { return Vec::new() };
+    let Some(p) = app.move_preview.as_ref().filter(|p| p.doc == st.doc.id && p.revision == st.revision && !p.floating) else { return Vec::new() };
+    let (Some(shown), Some(&offset)) = (p.shown.as_ref(), p.offsets.last()) else { return Vec::new() };
+    let mut out = Vec::new();
+    for &id in &p.moving {
+        let (Some(before), Some(after)) = (st.doc.layer(id), shown.layer(id)) else { continue };
+        if let (Some(source), Some(moved)) = (before.surface(), after.surface())
+            && source.tile_count() > 0
+        {
+            out.push(photocraft_gpu::Translated { layer: id, mask: false, shown: photocraft_gpu::surface_fingerprint(moved), source: source.clone(), offset });
+        }
+        if let (Some(source), Some(moved)) = (before.mask.as_ref().filter(|m| m.linked), after.mask.as_ref())
+            && source.surface.tile_count() > 0
+        {
+            out.push(photocraft_gpu::Translated {
+                layer: id,
+                mask: true,
+                shown: photocraft_gpu::surface_fingerprint(&moved.surface),
+                source: source.surface.clone(),
+                offset,
+            });
+        }
+    }
+    out
+}
+
 /// `ids` and every layer inside them (groups move their contents).
 fn with_descendants(doc: &Document, ids: &[LayerId]) -> Vec<LayerId> {
     let walk = doc.walk();

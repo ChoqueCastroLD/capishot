@@ -259,7 +259,8 @@ pub(crate) fn layer_shift_fits(l: &Layer, dx: i32, dy: i32) -> bool {
     let rect = |r: Rect| {
         r.is_empty() || (r.x0.checked_add(dx).is_some() && r.x1.checked_add(dx).is_some() && r.y0.checked_add(dy).is_some() && r.y1.checked_add(dy).is_some())
     };
-    let surface = |s: &photocraft_raster::Surface| rect(s.content_bounds());
+    // Cached per tile: a Move drag asks this of the same layers every frame.
+    let surface = |s: &photocraft_raster::Surface| rect(photocraft_compose::bounds::content_bounds(s));
     l.mask.as_ref().is_none_or(|m| surface(&m.surface))
         && l.fill_cache.as_ref().is_none_or(|fc| surface(&fc.surface))
         && match &l.content {
