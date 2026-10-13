@@ -1287,6 +1287,7 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) ->
                 return true;
             }
             let legacy = app.session.prefs().general.use_legacy_free_transform;
+            let unlinked = app.ui.transform_unlinked;
             let type_layer = moves_type(app, &t);
             if let (Some(g), Some(s)) = (g, app.ui.transform.as_mut())
                 && mode_allows(t.mode, g.hit)
@@ -1294,12 +1295,12 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) ->
             {
                 let (mode, mods) = if no_distort { scale_not_distort(t.mode, g.hit, mods) } else { (t.mode, mods) };
                 if t.content_aware.is_some() {
-                    let mut mods = mode_mods(mode, g.hit, legacy_mods(legacy, g.hit, mods));
+                    let mut mods = mode_mods(mode, g.hit, legacy_mods(legacy, g.hit, unlinked_mods(unlinked, legacy, g.hit, mods)));
                     // Content-Aware Scale: ⌘ neither skews nor distorts.
                     mods.command = false;
                     apply_drag(s, g, [x, y], mods);
                 } else {
-                    apply_mode_drag(s, g, [x, y], mode, type_layer, legacy_mods(legacy, g.hit, mods));
+                    apply_mode_drag(s, g, [x, y], mode, type_layer, legacy_mods(legacy, g.hit, unlinked_mods(unlinked, legacy, g.hit, mods)));
                 }
             }
         }
@@ -1338,6 +1339,16 @@ pub(crate) fn legacy_mods(legacy: bool, hit: Hit, mut mods: egui::Modifiers) -> 
             Hit::Edge(_) => mods.shift = true,
             _ => {}
         }
+    }
+    mods
+}
+
+/// The options bar's Maintain Aspect Ratio link turned off: corner and edge drags stretch freely
+/// and ⇧ keeps the proportions, as in Photoshop CC 2019 and later (#4174). The legacy preference
+/// already works that way, so it is left alone there.
+pub(crate) fn unlinked_mods(unlinked: bool, legacy: bool, hit: Hit, mut mods: egui::Modifiers) -> egui::Modifiers {
+    if unlinked && !legacy && !mods.command && matches!(hit, Hit::Corner(_) | Hit::Edge(_)) {
+        mods.shift = !mods.shift;
     }
     mods
 }
@@ -2449,11 +2460,9 @@ pub(crate) fn position_size_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, t
     let size_w = if u.unit == photocraft_engine::prefs::Unit::Percent { 66.0 } else { 84.0 };
     lbl(ui, "W:");
     let rw = crate::widgets::value_field_prec(ui, &mut w, -wlim_u..=wlim_u, suffix, size_w, places);
-    let link_id = egui::Id::new("transform-link");
-    let mut link: bool = ui.data(|d| d.get_temp(link_id)).unwrap_or(true);
+    let link = !app.ui.transform_unlinked;
     if crate::icons::button(ui, if link { "link" } else { "unlink" }, 22.0, link, tl!("Maintain aspect ratio")).clicked() {
-        link = !link;
-        ui.data_mut(|d| d.insert_temp(link_id, link));
+        app.ui.transform_unlinked = link;
     }
     lbl(ui, "H:");
     let rh = crate::widgets::value_field_prec(ui, &mut h, -hlim_u..=hlim_u, suffix, size_w, places);
@@ -3841,6 +3850,41 @@ mod tests {
                 assert_eq!((w - h).abs() < 1e-6, proportional, "legacy {legacy}, edge {at_edge}: {w} × {h}");
             }
         }
+    }
+
+    /// #4174: turning off the options bar's Maintain Aspect Ratio link frees the handles too, as in
+    /// Photoshop: a plain corner or edge drag stretches one way, ⇧ keeps the proportions. Linked
+    /// (the default) is unchanged, and so is the legacy preference.
+    #[test]
+    fn the_aspect_link_decides_whether_handle_drags_keep_proportions() {
+        let (none, shift) = (egui::Modifiers::NONE, egui::Modifiers::SHIFT);
+        for (unlinked, legacy, mods, proportional) in
+            [(false, false, none, true), (true, false, none, false), (true, false, shift, true), (true, true, none, false)]
+        {
+            for at_edge in [false, true] {
+                let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+                app.ui.extras.snap = false;
+                app.ui.transform_unlinked = unlinked;
+                app.session.prefs.edit(|p| p.general.use_legacy_free_transform = legacy);
+                begin(&mut app, &egui::Context::default()).unwrap();
+                let q0 = app.ui.transform.as_ref().unwrap().quad;
+                let from = if at_edge { [q0[1][0], (q0[1][1] + q0[2][1]) / 2.0] } else { q0[2] };
+                press_drag(&mut app, from, [from[0] + 16.0, from[1]], mods);
+                let q = app.ui.transform.as_ref().unwrap().quad;
+                let (w, h) = (q[2][0] - q[0][0], q[2][1] - q[0][1]);
+                let case = format!("unlinked {unlinked}, legacy {legacy}, shift {}, edge {at_edge}: {w} × {h}", mods.shift);
+                if legacy && at_edge {
+                    // Legacy edges always stretch their one axis.
+                    assert!((w - 32.0).abs() < 1e-6 && (h - 16.0).abs() < 1e-6, "{case}");
+                } else {
+                    assert_eq!((w - h).abs() < 1e-6, proportional, "{case}");
+                    assert!((w - 32.0).abs() < 1e-6, "{case}");
+                }
+            }
+        }
+        // ⌘ gestures (skew, distort) are left alone.
+        assert!(!unlinked_mods(true, false, Hit::Corner(0), egui::Modifiers::COMMAND).shift);
+        assert!(!unlinked_mods(true, false, Hit::Inside, none).shift);
     }
 
     #[test]
