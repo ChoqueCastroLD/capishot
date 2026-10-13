@@ -318,7 +318,9 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
     if let Some(gate) = app.services.automation_authorize {
         app.session.authorize = Some(gate);
     }
-    let outcome = dispatch(app, ctx, req);
+    // Usage statistics: commands a control or embedding request runs count as `automation`,
+    // not as the panel clicks `PhotocraftApp::run` would otherwise attribute them to.
+    let outcome = crate::telemetry::with_source(crate::telemetry::Source::Automation, || dispatch(app, ctx, req));
     app.session.authorize = saved;
     outcome
 }
@@ -1176,6 +1178,10 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
     if let Some((kind, fields)) = &app.ui.shell.dialog {
         dialogs.push(json!({"id": SHELL_DIALOG, "kind": kind, "title": crate::workspace_ui::title(kind), "fields": fields}));
     }
+    let canvas_rect = {
+        let r = crate::rulers::content_rect(app, app.last_canvas_rect);
+        [r.min.x, r.min.y, r.max.x, r.max.y]
+    };
     json!({
         "window": {"width": screen.width(), "height": screen.height(), "pixelsPerPoint": ctx.pixels_per_point()},
         "tool": app.ui.tool,
@@ -1222,6 +1228,9 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "dockingCollapsed": app.ui.docking_collapsed,
         "view": app.ui.view,
         "views": app.ui.views,
+        // The main canvas area in screen points (`[x0, y0, x1, y1]`): with a view's zoom and
+        // centre, where a document point is on screen for real pointer input.
+        "canvasRect": canvas_rect,
         "dialogs": dialogs,
         "windows": app.ui.windows,
         "theme": app.ui.theme,

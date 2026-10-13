@@ -1023,6 +1023,17 @@ impl PhotocraftApp {
         self.tool_override.unwrap_or(self.ui.tool)
     }
 
+    /// The tool working the canvas this frame, for frame-time statistics: the tool of a canvas
+    /// drag, or the active tool while a press that started on the canvas is held (Crop, Hand and
+    /// other tools that keep their own gesture state). `None` otherwise.
+    pub fn canvas_gesture_tool(&self, ctx: &egui::Context) -> Option<state::Tool> {
+        if let Some(d) = &self.drag {
+            return Some(d.tool);
+        }
+        let held = ctx.input(|i| i.pointer.primary_down() && i.pointer.press_origin().is_some_and(|p| self.last_canvas_rect.contains(p)));
+        held.then(|| self.active_tool())
+    }
+
     pub fn sync_views(&mut self) {
         type_transform::cancel_stale(self);
         crate::lasso_ui::cancel_stale(self);
