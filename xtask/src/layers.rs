@@ -46,7 +46,6 @@ pub const TABLE: &[(&str, Class)] = &[
     ("adobe-assets", Class::Standalone),
     // Pen tablet input (the one isolated `unsafe` helper: AppKit interop on macOS).
     ("tablet", Class::Standalone),
-    // Windows printing (an isolated `unsafe` helper: winspool and GDI).
     ("doc", Class::Layer(1)),
     ("ops", Class::Layer(2)),
     ("paint", Class::Layer(2)),
