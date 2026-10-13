@@ -19,6 +19,12 @@
 # ArtCraft, OpenType, Lab ...) stay as they are; RGB/CMYK read RVB/CMJN; the trailing "…" of
 # dialog commands is kept.
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Couleur de la couche
+	Color Indicates:	La couleur indique :
+	Solidity:	Solidité :
+	Ink Characteristics	Caractéristiques de l’encre
+
 # Guide layout dialog
 
 # Custom print paper (#3820)

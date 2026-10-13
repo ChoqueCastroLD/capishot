@@ -8,6 +8,12 @@
 # No proprietary translation resources were used.
 # Licensed MIT OR Apache-2.0. See LICENSE-translations.txt and ATTRIBUTION.md.
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Колір каналу
+	Color Indicates:	Кольором позначено:
+	Solidity:	Щільність:
+	Ink Characteristics	Характеристики фарби
+
 # Menus
 
 # Guide layout dialog

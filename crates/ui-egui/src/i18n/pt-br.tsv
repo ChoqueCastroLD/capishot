@@ -15,6 +15,12 @@
 # entries the same way. Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...)
 # stay as they are; the trailing "…" of dialog commands is kept.
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Cor do canal
+	Color Indicates:	A cor indica:
+	Solidity:	Solidez:
+	Ink Characteristics	Características da tinta
+
 # Guide layout dialog
 
 # Custom print paper (#3820)

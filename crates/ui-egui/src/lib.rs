@@ -46,6 +46,7 @@ pub mod canvas_autoscroll;
 mod canvas_popup;
 pub mod canvas_tool_menu;
 pub mod cas_transform;
+pub mod channel_options_ui;
 pub mod channel_view;
 pub mod channels_panel;
 pub mod chrome_ui;

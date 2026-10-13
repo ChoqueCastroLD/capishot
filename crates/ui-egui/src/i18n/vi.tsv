@@ -20,6 +20,12 @@
 # (`plural_none` in i18n/mod.rs).
 
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Màu kênh
+	Color Indicates:	Màu biểu thị:
+	Solidity:	Độ đặc:
+	Ink Characteristics	Đặc tính mực
+
 # Phase 3.1 — top-level menus, File menu, Edit menu
 # Custom paper dimensions in Print Settings.
 	Paper Width	Chiều rộng giấy

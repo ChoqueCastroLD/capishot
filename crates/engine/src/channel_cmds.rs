@@ -194,8 +194,8 @@ pub fn channel_format(doc: &Document) -> PixelFormat {
     PixelFormat::new(ColorMode::Grayscale, doc.depth, false)
 }
 
-/// Next free "Alpha N" name.
-fn next_alpha_name(doc: &Document, base: &str) -> String {
+/// Next free "`base` N" name (Alpha 1, Spot Color 2, …).
+pub fn next_alpha_name(doc: &Document, base: &str) -> String {
     // `channels.len() + 1` candidates always include a free one.
     (1..=doc.channels.len() + 1).map(|n| format!("{base} {n}")).find(|n| !doc.channels.iter().any(|c| &c.name == n)).unwrap_or_else(|| base.to_string())
 }
