@@ -78,7 +78,9 @@ export RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,+simd128$link"
 export PHOTOCRAFT_BUILD_SHA="${PHOTOCRAFT_BUILD_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}"
 export PHOTOCRAFT_BUILD_DATE="${PHOTOCRAFT_BUILD_DATE:-$(date -u +%F)}"
 
-cargo "+$TC" build --profile "$PROFILE" -p photocraft-web --bin photocraft-web --features heif \
+# PHOTOCRAFT_WEB_FEATURES: extra cargo features of photocraft-web (`full` for everything the
+# desktop app has: HEIF, OpenEXR, camera raw, plug-ins, all catalogs compiled in).
+cargo "+$TC" build --profile "$PROFILE" -p photocraft-web --bin photocraft-web ${PHOTOCRAFT_WEB_FEATURES:+--features "$PHOTOCRAFT_WEB_FEATURES"} \
   --target wasm32-unknown-unknown -Z build-std=panic_abort,std --target-dir "$TARGET_DIR"
 
 STAGE="$TARGET_DIR/bindgen"
@@ -103,6 +105,10 @@ sed -e "s/__PHOTOCRAFT_VERSION__/$version/g" -e "s|__PHOTOCRAFT_FALLBACK__|$FALL
 cp "$HERE/_headers" "$OUT/"
 
 # Cloudflare Workers/Pages reject any single file over 25 MiB; fail well before that.
+# Translation catalogs the build doesn't compile in (photocraft-ui-egui `all-catalogs`): the app
+# fetches i18n/<code>.tsv when that language is chosen.
+mkdir -p "$OUT/i18n"
+cp "$ROOT"/crates/ui-egui/src/i18n/*.tsv "$ROOT/crates/ui-egui/src/i18n/LICENSE-translations.txt" "$OUT/i18n/"
 max="${PHOTOCRAFT_WASM_MAX_BYTES:-25165824}" # 24 MiB
 size=$(wc -c <"$OUT/photocraft_bg.wasm.gz" | tr -d ' ')
 echo "photocraft_bg.wasm: $raw bytes ($((raw / 1048576)) MiB), gzipped $size bytes ($((size / 1048576)) MiB; limit $max)"

@@ -10,6 +10,13 @@ publish = false
 # Open HEIC/HEIF photos (the optional photocraft-heif crate). Not default so distributors choose
 # it; official builds (CI, packaging/, release) build with `--features heif`.
 heif = ["photocraft-codecs/heif"]
+# The browser build leaves out what a web user rarely needs and the download pays for on every
+# visit: OpenEXR (`photocraft-codecs/exr`), camera raw development (`photocraft-io/camera-raw`;
+# raws open as their embedded JPEG preview), WebAssembly filter plug-ins (`photocraft-ui-egui/plugins`),
+# HEIC/HEIF (`heif`, no longer in index.html or packaging/web-threads/build.sh), and the
+# translation catalogs other than Spanish and Brazilian Portuguese, fetched from `i18n/` when
+# chosen (`photocraft-ui-egui/all-catalogs`). `full` puts them all back.
+full = ["heif", "photocraft-codecs/exr", "photocraft-io/camera-raw", "photocraft-ui-egui/plugins", "photocraft-ui-egui/all-catalogs"]
 
 [lints]
 workspace = true
@@ -29,7 +36,7 @@ log = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `wgpu` pulls egui-wgpu's defaults: WebGPU plus the WebGL2 fallback.
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+eframe = { workspace = true, features = ["wgpu", "accesskit"] }
 rfd = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

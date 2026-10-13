@@ -26,6 +26,8 @@ mod indexed_presets;
 mod embed;
 #[cfg(any(target_arch = "wasm32", test))]
 mod embed_protocol;
+#[cfg(any(target_arch = "wasm32", test))]
+mod open_formats;
 #[cfg(target_arch = "wasm32")]
 mod usage_stats;
 #[cfg(target_arch = "wasm32")]
@@ -61,6 +63,24 @@ mod tests {
         assert!(hint.contains("failed to") && hint.contains("<a href=\"\">Reload</a>"), "{hint}");
         assert!(html.contains("animation: photocraft-stalled"), "the hint appears after a delay");
         assert!(!html.contains("<script"), "trunk injects the generated loader; the page has no script of its own");
+    }
+
+    /// Every catalog the web build doesn't compile in is shipped next to the page by both builds
+    /// (Trunk's index.html and packaging/web-threads/build.sh), where `fetch_catalogs` asks for it.
+    #[test]
+    fn both_web_builds_ship_the_catalogs_they_fetch() {
+        let html = include_str!("../index.html");
+        let threads = include_str!("../../../packaging/web-threads/build.sh");
+        assert!(threads.contains(r#"cp "$ROOT"/crates/ui-egui/src/i18n/*.tsv"#), "threads build copies the catalogs");
+        let fetched: Vec<_> = photocraft_ui_egui::i18n::LANGUAGES.iter().filter(|l| l.code != "en" && l.source.is_empty()).map(|l| l.code).collect();
+        assert!(fetched.len() >= 10, "the web build compiles few catalogs in: {fetched:?}");
+        for code in ["es", "pt-br"] {
+            assert!(!fetched.contains(&code), "{code} stays compiled in");
+        }
+        for code in fetched {
+            let link = format!(r#"href="../../crates/ui-egui/src/i18n/{code}.tsv" data-target-path="i18n""#);
+            assert!(html.contains(&link), "index.html doesn't copy {code}.tsv");
+        }
     }
 
     /// The threads build's page must install the Web Worker pool before the app first touches
