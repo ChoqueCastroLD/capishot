@@ -864,6 +864,15 @@ impl ViewXform {
         vec2((d.x * c + d.y * s) / self.sx(), -d.x * s + d.y * c)
     }
 
+    /// A document-space vector on screen: stretched, rotated, flipped and zoomed as the view
+    /// draws it (the inverse of [`Self::unmap_vec`], with the zoom).
+    pub fn map_vec(self, d: Vec2) -> Vec2 {
+        let (c, s) = self.sincos();
+        let dx = d.x * self.sx();
+        let v = vec2(dx * c - d.y * s, dx * s + d.y * c) * self.zoom;
+        if self.flip { vec2(-v.x, v.y) } else { v }
+    }
+
     pub fn to_screen(&self, x: f32, y: f32) -> Pos2 {
         let (c, s) = self.sincos();
         let dx = (x - self.center[0]) * self.sx();
@@ -3575,10 +3584,12 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                                 egui::CursorIcon::None
                             }
                             // A shaped tip (sampled bitmap, or a rotated/flattened round tip)
-                            // traces its outline; a plain round tip keeps the circle.
+                            // traces its outline, turned and flipped with the view; a plain round
+                            // tip keeps the circle.
                             _ => {
                                 let centre = brush_tip_centre(tool, alt || app.ui.shell.sticky_alt, cur.show_crosshair_in_brush_tip);
-                                crate::brush_cursor::cursor(&painter, p, brush, full, cur.painting == PaintingCursor::NormalTip, centre)
+                                let axes = crate::brush_cursor::tip_axes(&xf, brush.size);
+                                crate::brush_cursor::cursor(&painter, p, brush, full, axes, cur.painting == PaintingCursor::NormalTip, centre)
                             }
                         }
                     }
