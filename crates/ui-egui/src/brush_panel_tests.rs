@@ -599,6 +599,31 @@ fn editing_the_options_bar_amount_reenables_smoothing() {
     assert_eq!(last_journal(h.state()).unwrap().1["brush"]["smoothing"]["enabled"], true);
 }
 
+/// #4282: every name in the section list starts in the same column, Brush Tip Shape included,
+/// whether or not its row has an enable box (Photoshop indents the rows without one).
+#[test]
+fn section_names_line_up_whether_or_not_they_have_a_box() {
+    fn text_x(shape: &egui::Shape, out: &mut Vec<(String, f32)>) {
+        match shape {
+            egui::Shape::Text(text) => out.push((text.galley.job.text.clone(), text.pos.x)),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| text_x(s, out)),
+            _ => {}
+        }
+    }
+    // Shape Dynamics is shown, so its heading paints too; the list's copy is the leftmost.
+    let h = harness(0, 1);
+    let mut painted = Vec::new();
+    for shape in &h.output().shapes {
+        text_x(&shape.shape, &mut painted);
+    }
+    let left = |name: &str| painted.iter().filter(|(t, _)| t == name).map(|(_, x)| *x).reduce(f32::min);
+    let columns: Vec<(&str, f32)> = SECTIONS.iter().map(|(name, _)| (*name, left(name).unwrap_or_else(|| panic!("{name} painted")))).collect();
+    let (_, boxed) = columns[1];
+    for (name, x) in &columns {
+        assert!((x - boxed).abs() < 0.5, "{name} starts at {x}, the boxed names at {boxed}: {columns:?}");
+    }
+}
+
 #[test]
 fn preview_strip_re_renders_only_when_the_brush_changes() {
     let mut h = harness(0, 0);

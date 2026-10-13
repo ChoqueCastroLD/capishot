@@ -295,7 +295,9 @@ fn section_list(app: &mut PhotocraftApp, ui: &mut egui::Ui, b: &mut BrushSetting
                     *flag = true;
                 }
                 x += 20.0;
-            } else if i > 0 {
+            } else {
+                // No box (Brush Tip Shape): the name still starts in the names' column,
+                // as in Photoshop (#4282).
                 x += 20.0;
             }
             let color = if sel { t.text } else { t.text_dim };
