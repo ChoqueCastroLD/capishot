@@ -1853,8 +1853,14 @@ mod tests {
         let doc = crate::import("flat.psd", &file.to_bytes().unwrap()).unwrap().document;
         let bg = &doc.layers[0];
         assert!(bg.name == "Background" && bg.locks.transparency && bg.locks.position, "{:?}", bg.locks);
+        // Bitmap has no layers in Photoshop (#4814): the file is saved flat in Bitmap mode, without
+        // a layer section, and opens as a Background again.
         let out = document_to_psd(&doc);
-        assert!(out.layer_info.unwrap().layers[0].channels.iter().all(|c| c.id >= 0));
+        assert_eq!(out.header.color_mode, PsdMode::Bitmap);
+        assert!(out.layer_info.as_ref().is_none_or(|li| li.layers.is_empty()));
+        let back = crate::import("flat.psd", &out.to_bytes().unwrap()).unwrap().document;
+        let bg = &back.layers[0];
+        assert!(back.layers.len() == 1 && bg.name == "Background" && bg.locks.transparency && bg.locks.position, "{:?}", bg.locks);
     }
 
     #[test]
