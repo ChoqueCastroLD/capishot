@@ -5513,6 +5513,7 @@ fn polygon_click(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers)
         return;
     }
     if app.ui.polygon.is_empty() {
+        app.ui.polygon_doc = app.session.active().map(|st| st.doc.id);
         // ⌥ with nothing selected draws freehand; there is nothing to subtract from.
         let nothing_selected = app.session.active().is_none_or(|st| st.doc.selection.is_none());
         let intent = if nothing_selected { egui::Modifiers { alt: false, ..mods } } else { mods };
@@ -5534,6 +5535,22 @@ pub fn polygon_retract(app: &mut PhotocraftApp) -> bool {
         app.ui.polygon_mode.clear();
     }
     true
+}
+
+/// The polygon in progress belongs to the document it was started on (`UiState::polygon_doc`):
+/// once another document becomes active it is dropped, so its outline doesn't show on (or get
+/// committed to) the other document, and the selection it would have replaced is shown again.
+/// Switching tools is handled in `PhotocraftApp::sync_views`. Like the Lasso's
+/// ([`crate::lasso_ui::cancel_stale`]) and the Magnetic Lasso's ([`crate::magnetic_lasso_ui::frame`]).
+pub fn polygon_cancel_stale(app: &mut PhotocraftApp) {
+    let active = app.session.active().map(|st| st.doc.id);
+    if app.ui.polygon.is_empty() {
+        app.ui.polygon_doc = None;
+    } else if app.ui.polygon_doc.is_some_and(|d| Some(d) != active) {
+        app.ui.polygon.clear();
+        app.ui.polygon_mode.clear();
+        app.ui.polygon_doc = None;
+    }
 }
 
 /// A new-selection polygonal (or magnetic) lasso is being drawn, so the selection it will replace

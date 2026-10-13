@@ -1116,6 +1116,8 @@ impl PhotocraftApp {
             self.ui.polygon.clear();
             self.ui.polygon_mode.clear();
         }
+        // ... and to the document it was started on.
+        crate::canvas::polygon_cancel_stale(self);
         crate::crop_ui::cancel_stale(self);
         let ids: Vec<DocId> = self.session.documents().iter().map(|d| d.doc.id).collect();
         // Where the document of view `i` is now. Views not tracked yet keep their index.
