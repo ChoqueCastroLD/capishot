@@ -286,6 +286,9 @@ impl LiquifyDialog {
     fn rebuild(&mut self) {
         self.field = LiquifyField::from_strokes(self.canvas, self.cell, &self.strokes);
         self.dirty = Some([0, 0, self.proxy.w, self.proxy.h]);
+        // Undo rebuilds the whole field. The zoomed viewport is a separate buffer; leaving it
+        // clean kept the pre-undo pixels on screen until the next zoom (#4100).
+        self.view_dirty = self.view_bounds;
         self.mask_dirty = true;
         self.render_dirty();
     }
@@ -1208,6 +1211,27 @@ mod tests {
         let mut expected = vec![[0u8; 4]; d.proxy.w * d.proxy.h];
         d.proxy.render(&d.field, [0, 0, d.proxy.w, d.proxy.h], &mut expected);
         assert_eq!(d.out, expected, "dirty upload source must match the rebuilt field");
+    }
+
+    #[test]
+    fn undo_dirties_the_zoomed_preview() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_layer();
+        open(&mut app, &ctx).unwrap();
+        control(&mut app, &json!({"tool": "forwardWarp", "size": 40})).unwrap();
+        for ev in [ToolEvent::Down { x: 35.0, y: 40.0, pressure: 1.0 }, ToolEvent::Move { x: 55.0, y: 40.0, pressure: 1.0 }, ToolEvent::Up { x: 55.0, y: 40.0 }]
+        {
+            pointer(&mut app, ev, egui::Modifiers::NONE);
+        }
+        {
+            let d = app.distort.liquify.as_mut().unwrap();
+            d.zoom = 2.0;
+            d.view_bounds = Some(Rect::new(0, 0, 20, 20));
+            d.view_dirty = None;
+        }
+        control(&mut app, &json!({"undo": true})).unwrap();
+        let d = app.distort.liquify.as_ref().unwrap();
+        assert_eq!(d.view_dirty, d.view_bounds);
     }
 
     #[test]
