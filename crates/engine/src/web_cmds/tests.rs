@@ -656,3 +656,6 @@ fn overlapping_slices_keep_the_later_slice_in_html() {
     assert_eq!(area, 64 * 48);
     assert!(files.iter().any(|f| f.ends_with("images/under_01.png")), "the covered slice is cut into pieces: {files:?}");
 }
+
+#[path = "color_table_tests.rs"]
+mod color_table_tests;

@@ -2300,6 +2300,7 @@ cameraRaw	Blending	混合
 	Click to pick · Esc to cancel	按一下選取 · Esc 取消
 	Pick a screen pixel or press Esc to cancel	選取螢幕像素或按 Esc 取消
 	Scroll to zoom	捲動以縮放
+	Drag to pan · Scroll to zoom · Double-click to fit	拖曳以平移 · 捲動以縮放 · 按兩下以符合視窗
 	Show/Hide All Panels	顯示/隱藏所有面板
 	Show/Hide Panels	顯示/隱藏面板
 	Could not open	無法開啟

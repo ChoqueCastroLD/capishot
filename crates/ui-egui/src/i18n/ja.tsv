@@ -2295,6 +2295,7 @@ cameraRaw	Color	カラー
 	Click to pick · Esc to cancel	クリックで選択 · Escでキャンセル
 	Pick a screen pixel or press Esc to cancel	画面のピクセルを選択するか、Escでキャンセル
 	Scroll to zoom	スクロールしてズーム
+	Drag to pan · Scroll to zoom · Double-click to fit	ドラッグで移動 · スクロールでズーム · ダブルクリックで全体表示
 	Show/Hide All Panels	すべてのパネルを表示/非表示
 	Show/Hide Panels	パネルを表示/非表示
 	Could not open	開けませんでした

@@ -3993,3 +3993,4 @@ cameraRaw	Yellow	Sárga
 	Action playback stopped	A művelet lejátszása leállt
 	Step {step} is waiting for its dialog	A(z) {step}. lépés a párbeszédablakára vár
 @plural	{n} action|{n} actions	{n} művelet
+	Drag to pan · Scroll to zoom · Double-click to fit	Húzás: mozgatás · Görgetés: nagyítás · Dupla kattintás: igazítás
