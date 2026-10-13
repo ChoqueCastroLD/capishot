@@ -295,15 +295,12 @@ fn section_list(app: &mut PhotocraftApp, ui: &mut egui::Ui, b: &mut BrushSetting
                     });
                     resp
                 });
-                if *flag {
-                    ui.painter().rect_filled(br, 2.0, t.accent);
-                    let (a, m, c) = (br.left_center() + vec2(3.0, 0.5), br.center_bottom() + vec2(-1.0, -3.5), br.right_top() + vec2(-3.0, 3.5));
-                    ui.painter().line_segment([a, m], Stroke::new(1.6, Color32::WHITE));
-                    ui.painter().line_segment([m, c], Stroke::new(1.6, Color32::WHITE));
-                } else {
-                    ui.painter().rect_stroke(br, 2.0, Stroke::new(1.2, t.text_faint), egui::StrokeKind::Inside);
-                }
                 let on_lock = resp.interact_pointer_pos().is_some_and(|p| p.x > r.right() - 22.0);
+                // A press on the row (but not its lock) presses the box too: a release there
+                // turns the section on, or toggles a checkbox-only row (#4476).
+                let pressed = box_resp.as_ref().is_some_and(|b| b.is_pointer_button_down_on()) || (resp.is_pointer_button_down_on() && !on_lock);
+                let hovered = box_resp.as_ref().is_some_and(|b| b.hovered()) || (toggle_only && resp.hovered());
+                widgets::check_box(ui.painter(), br, *flag, hovered, pressed, &t);
                 if box_resp.is_some_and(|resp| resp.clicked()) || (toggle_only && resp.clicked() && !on_lock) {
                     *flag = !*flag;
                 } else if !toggle_only && resp.clicked() && !on_lock {

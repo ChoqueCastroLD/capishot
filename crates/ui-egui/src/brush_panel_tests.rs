@@ -1285,3 +1285,101 @@ fn brushes_button_at_top_of_brush_settings_opens_brushes_panel() {
     assert!(h.state().ui.panels.brush_settings);
     assert_eq!(h.state().ui.brush_tab, 1);
 }
+
+/// The fill painted for the check box in `rect` in the last frame (the topmost filled rect there).
+fn box_fill(h: &Harness<'_, PhotocraftApp>, rect: egui::Rect) -> Option<Color32> {
+    h.output()
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Rect(r) if (r.rect.min - rect.min).length() < 1.0 && (r.rect.max - rect.max).length() < 1.0 && r.fill != Color32::TRANSPARENT => {
+                Some(r.fill)
+            }
+            _ => None,
+        })
+        .next_back()
+}
+
+/// #4476: while the mouse is down on a section's row or its box, the box shows it's pressed, as
+/// in Photoshop: an unchecked box darkens, a checked one turns less opaque. The release then
+/// acts as before.
+#[test]
+fn section_boxes_show_a_pressed_state() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = app_harness();
+    h.key_press(egui::Key::F5);
+    h.run_steps(3);
+    let t = Tokens::get(&h.ctx);
+    let boxr = h.get_by_label("Enable Shape Dynamics").rect();
+    let row = h.get_by_label("Shape Dynamics").rect();
+    assert!(!h.state().session.tools.brush.shape_dynamics.enabled);
+    assert_eq!(box_fill(&h, boxr), Some(widgets::check_box_fill(false, false, &t)));
+    // Held on the row's name: the unchecked box darkens; the release turns the section on.
+    let at = egui::pos2(row.center().x, row.center().y);
+    h.drag_at(at);
+    h.run_steps(2);
+    assert_eq!(box_fill(&h, boxr), Some(widgets::check_box_fill(false, true, &t)), "pressed, unchecked");
+    h.drop_at(at);
+    h.run_steps(3);
+    assert!(h.state().session.tools.brush.shape_dynamics.enabled);
+    assert_eq!(box_fill(&h, boxr), Some(widgets::check_box_fill(true, false, &t)));
+    // Held on the checked box itself: less opaque, then the release turns it off.
+    h.drag_at(boxr.center());
+    h.run_steps(2);
+    assert_eq!(box_fill(&h, boxr), Some(widgets::check_box_fill(true, true, &t)), "pressed, checked");
+    h.drop_at(boxr.center());
+    h.run_steps(3);
+    assert!(!h.state().session.tools.brush.shape_dynamics.enabled);
+    // A checkbox-only row (no settings of its own) is one checkbox across the row: a press
+    // anywhere on it presses its box, and the release toggles it.
+    let wet = h.get_by_label("Wet Edges").rect();
+    let wet_box = egui::Rect::from_center_size(egui::pos2(wet.left() + 12.0, wet.center().y), vec2(13.0, 13.0));
+    let was = h.state().session.tools.brush.wet_edges;
+    h.drag_at(wet.center());
+    h.run_steps(2);
+    assert_eq!(box_fill(&h, wet_box), Some(widgets::check_box_fill(was, true, &t)), "pressed checkbox-only row");
+    h.drop_at(wet.center());
+    h.run_steps(3);
+    assert_ne!(h.state().session.tools.brush.wet_edges, was);
+    // The four looks are distinct.
+    let looks = [(false, false), (false, true), (true, false), (true, true)].map(|(on, pressed)| widgets::check_box_fill(on, pressed, &t));
+    for (i, a) in looks.iter().enumerate() {
+        assert!(looks.iter().skip(i + 1).all(|b| b != a), "{looks:?}");
+    }
+}
+
+/// The shared check box (options bars, dialogs) does the same, and pressing its label counts.
+#[test]
+fn checkboxes_show_a_pressed_state_from_their_label() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = Harness::builder().with_size(vec2(300.0, 100.0)).build_ui_state(
+        |ui, on: &mut bool| {
+            widgets::checkbox(ui, on, "Sample All Layers");
+        },
+        false,
+    );
+    h.run();
+    let t = Tokens::get(&h.ctx);
+    let label = h.get_by_label("Sample All Layers").rect();
+    let boxr = egui::Rect::from_min_size(egui::pos2(label.left() - 6.0 - 14.0, label.center().y - 7.0), vec2(14.0, 14.0));
+    let fill = |h: &Harness<'_, bool>| {
+        h.output()
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Rect(r) if (r.rect.center() - boxr.center()).length() < 1.5 && r.rect.width() < 15.0 && r.fill != Color32::TRANSPARENT => {
+                    Some(r.fill)
+                }
+                _ => None,
+            })
+            .next_back()
+    };
+    assert_eq!(fill(&h), Some(widgets::check_box_fill(false, false, &t)));
+    h.drag_at(label.center());
+    h.run();
+    assert_eq!(fill(&h), Some(widgets::check_box_fill(false, true, &t)), "pressing the label presses the box");
+    h.drop_at(label.center());
+    h.run();
+    assert!(*h.state(), "the release checks it");
+    assert_eq!(fill(&h), Some(widgets::check_box_fill(true, false, &t)));
+}
