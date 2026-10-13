@@ -1264,7 +1264,17 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         // The wheel over it steps the mode, as over the Layers panel's (#2061).
                         widgets::dropdown_wheel_hovered(ui, "gradient-blend-mode", &mut app.ui.tool_options.gradient_blend_mode, &opts, 96.0);
                         opt_label(ui, tl!("Opacity"));
-                        widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
+                        let r = widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
+                        // Live while scrubbed, one undo step per scrub (#5012).
+                        let drag_key = r.id.with("gradient-opacity-drag");
+                        if r.drag_started() {
+                            let n = ui.ctx().cumulative_pass_nr();
+                            ui.data_mut(|d| d.insert_temp(drag_key, n));
+                        }
+                        if r.changed() {
+                            let drag = if r.dragged() { ui.data(|d| d.get_temp::<u64>(drag_key)) } else { None };
+                            crate::gradient_ui::opacity_changed(app, drag);
+                        }
                         widgets::checkbox(ui, &mut app.ui.tool_options.gradient_reverse, tl!("Reverse"));
                         widgets::checkbox(ui, &mut app.ui.tool_options.gradient_dither, tl!("Dither"));
                         // Live mode: the options also change a selected gradient fill layer.
