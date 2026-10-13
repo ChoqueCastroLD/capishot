@@ -189,7 +189,14 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(0.35 - seconds));
                                     }
                                     let long_press = held_for.is_some_and(|seconds| seconds >= 0.35);
-                                    if slot.len() > 1 && (resp.secondary_clicked() || long_press) {
+                                    // Clicking the button of its open flyout again, with either button, closes
+                                    // it (#4932); the release that ends the long press that opened it doesn't.
+                                    let open_here = ui.data(|d| d.get_temp::<(egui::Id, Rect)>(flyout_id)).is_some_and(|(k, _)| k == key);
+                                    let reclicked = open_here
+                                        && (resp.secondary_clicked() || (resp.clicked() && ui.data(|d| d.get_temp::<egui::Id>(held_id)) != Some(key)));
+                                    if reclicked {
+                                        ui.data_mut(|d| d.remove::<(egui::Id, Rect)>(flyout_id));
+                                    } else if slot.len() > 1 && (resp.secondary_clicked() || long_press) {
                                         ui.data_mut(|d| {
                                             d.insert_temp(flyout_id, (key, resp.rect));
                                             if long_press {
@@ -4901,6 +4908,7 @@ mod type_flyout_tests {
 
     /// #4460: a press outside an open flyout closes it, even when it becomes a drag (cropping or
     /// painting on the canvas) rather than a click; a press on the flyout keeps it for its pick.
+    /// #4932: so does a click on its own tool button.
     #[test]
     fn a_drag_outside_closes_the_tool_flyout() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -4924,10 +4932,13 @@ mod type_flyout_tests {
         let flyout = |ctx: &egui::Context| ctx.data(|d| d.get_temp::<(egui::Id, Rect)>(egui::Id::new("tool-flyout"))).is_some();
         let secondary = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Default::default() };
         let primary = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        // A right-click on the button of an open flyout closes it (#4932), so open only a closed one.
         let open = |app: &mut PhotocraftApp, t: f64| {
-            frame(app, &ctx, t, vec![egui::Event::PointerMoved(at), secondary(true)]);
-            frame(app, &ctx, t + 0.05, vec![secondary(false)]);
-            frame(app, &ctx, t + 0.1, vec![]);
+            if !flyout(&ctx) {
+                frame(app, &ctx, t, vec![egui::Event::PointerMoved(at), secondary(true)]);
+                frame(app, &ctx, t + 0.05, vec![secondary(false)]);
+                frame(app, &ctx, t + 0.1, vec![]);
+            }
             assert!(flyout(&ctx), "right-click opens it");
         };
         // A press on the flyout itself keeps it open (the row picks on release).
@@ -4944,6 +4955,27 @@ mod type_flyout_tests {
         assert!(!flyout(&ctx), "a press outside closes it, even one that becomes a drag");
         frame(&mut app, &ctx, 2.6, vec![primary(canvas + vec2(80.0, 60.0), false)]);
         assert!(!flyout(&ctx));
+        // #4932: clicking its own tool button again closes it, with either button.
+        open(&mut app, 3.0);
+        frame(&mut app, &ctx, 3.5, vec![egui::Event::PointerMoved(at), secondary(true)]);
+        frame(&mut app, &ctx, 3.55, vec![secondary(false)]);
+        frame(&mut app, &ctx, 3.6, vec![]);
+        assert!(!flyout(&ctx), "a second right-click on the button closes it");
+        open(&mut app, 4.0);
+        app.ui.tool = Tool::Move;
+        frame(&mut app, &ctx, 4.5, vec![egui::Event::PointerMoved(at), primary(at, true)]);
+        frame(&mut app, &ctx, 4.55, vec![primary(at, false)]);
+        frame(&mut app, &ctx, 4.6, vec![]);
+        assert!(!flyout(&ctx), "a click on the button closes it");
+        assert_eq!(app.ui.tool, Tool::Brush, "and picks the tool, as any click on it does");
+        // The release that ends a long press keeps the flyout it opened.
+        frame(&mut app, &ctx, 5.0, vec![egui::Event::PointerMoved(at), primary(at, true)]);
+        frame(&mut app, &ctx, 5.2, vec![]);
+        frame(&mut app, &ctx, 5.5, vec![]);
+        assert!(flyout(&ctx), "a long press opens it");
+        frame(&mut app, &ctx, 5.55, vec![primary(at, false)]);
+        frame(&mut app, &ctx, 5.6, vec![]);
+        assert!(flyout(&ctx), "releasing the long press keeps it open");
     }
 
     #[test]
