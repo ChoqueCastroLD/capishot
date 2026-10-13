@@ -61,11 +61,8 @@ fn layers_hit(doc: &Document, x: i32, y: i32, type_bounds: bool) -> Vec<LayerId>
                 None => 0.0,
             },
         };
-        let mask = l.mask.as_ref().filter(|m| m.enabled).map_or(1.0, |m| {
-            let mut v = [0.0f32];
-            m.surface.read_pixel(x, y, &mut v);
-            v[0]
-        });
+        // As the compositor sees it: density applied, all ones when the mask is disabled.
+        let mask = l.mask.as_ref().map_or(1.0, |m| m.value(x, y));
         if alpha * mask > 0.0 {
             out.push(l.id);
         }
@@ -444,5 +441,25 @@ mod tests {
         }
         let mut empty = Session::new();
         assert!(empty.execute("layer.pickAt", json!({"x": 1, "y": 1})).is_err());
+    }
+
+    /// A hide-all mask at density 0 hides nothing (the compositor applies density through
+    /// `LayerMask::value`), so the layer stays pickable; at full density it is clicked through.
+    #[test]
+    fn mask_density_is_honoured_when_picking() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 20, "height": 20})).unwrap();
+        let bg = s.active().unwrap().doc.layers[0].id;
+        s.execute("layer.new.layer", json!({"name": "Red"})).unwrap();
+        s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        let red = s.active().unwrap().active_layer.unwrap();
+        s.execute("layer.layerMask.hideAll", json!({})).unwrap();
+        // Full density: the mask hides the layer, so the click reaches the Background.
+        assert_eq!(s.execute("layer.pickAt", json!({"x": 5, "y": 5, "select": false})).unwrap()["layer"], bg.0);
+        s.execute("layer.layerMask.edit", json!({"density": 0})).unwrap();
+        assert_eq!(s.execute("layer.pickAt", json!({"x": 5, "y": 5, "select": false})).unwrap()["layer"], red.0);
+        let list = s.execute("layer.pickAt", json!({"x": 5, "y": 5, "list": true})).unwrap();
+        let ids: Vec<_> = list["layers"].as_array().unwrap().iter().map(|l| l["layer"].clone()).collect();
+        assert_eq!(ids, vec![json!(red.0), json!(bg.0)]);
     }
 }
