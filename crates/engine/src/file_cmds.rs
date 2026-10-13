@@ -988,7 +988,7 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
     // Each result goes to the destination folder, which overrides the action's recorded Save /
     // Save As steps (Photoshop's "Override Action 'Save As' Commands"). Recorded view steps
     // (zoom, fit) don't change the output, so they are skipped (#2752).
-    steps.retain(|(id, _)| !crate::actions_cmds::shell_save_command(id) && !crate::actions_cmds::shell_view_command(id));
+    steps.retain(|(id, _)| !crate::actions_cmds::shell_save_command(id) && !crate::actions_cmds::shell_view_command(id) && id != "file.export.quickExport");
     if let Some((id, _)) = steps.iter().find(|(id, _)| crate::commands::find(id).is_none()) {
         return Err(EngineError::BadParams { cmd: cmd.into(), msg: format!("unknown command `{id}` in the action") });
     }
