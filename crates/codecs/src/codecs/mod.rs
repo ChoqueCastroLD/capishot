@@ -1,4 +1,10 @@
+#[cfg(feature = "exr")]
 pub(crate) mod deep_exr;
+#[cfg(feature = "exr")]
+pub(crate) mod exr;
+// Without the `exr` feature (the web build): the same entry points, each an "unsupported" error.
+#[cfg(not(feature = "exr"))]
+#[path = "no_exr.rs"]
 pub(crate) mod exr;
 pub(crate) mod exr_cryptomatte;
 pub(crate) mod fits;

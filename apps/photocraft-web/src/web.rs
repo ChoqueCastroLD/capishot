@@ -15,13 +15,6 @@ use wasm_bindgen::JsCast as _;
 
 type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
-/// Everything File › Open reads: Capishot, Photoshop, OpenRaster and Affinity documents, flat images, and
-/// Photoshop brushes (.abr), gradients (.grd) and swatches (.aco, .ase), which go to the preset libraries.
-const OPEN_EXTS: &[&str] = &[
-    "pcraft", "pdn", "ora", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm",
-    "ppm", "pam", "pfm", "fits", "fit", "fts", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd",
-    "svg", "svgz", "aco", "ase", "af", "afdesign", "afphoto", "afpub",
-];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 const CANVAS_ID: &str = "photocraft_canvas";
 
@@ -43,11 +36,13 @@ struct ServedFonts {
 type Served = Arc<Mutex<ServedFonts>>;
 
 /// Threads build: linking wasm-bindgen-rayon exports `initThreadPool(n)` (and the worker entry
-/// points it needs) to the page, which awaits it before calling [`start_threads`].
+/// points it needs) to the page, which starts it together with [`start_threads`] and calls
+/// [`thread_pool_ready`] when it resolves.
 #[cfg(target_feature = "atomics")]
 use wasm_bindgen_rayon as _;
 
-/// Threads build: the page calls this (as `start`) once the worker pool is up.
+/// Threads build: the page calls this (as `start`) while the worker pool starts: the graphics
+/// device, fonts and presets get ready meanwhile, and the app is built once the pool is up.
 #[cfg(target_feature = "atomics")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = start)]
 pub fn start_threads() {
@@ -119,6 +114,7 @@ pub fn parallel_self_test(width: u32, height: u32) -> Result<String, String> {
 }
 
 pub fn start() {
+    crate::startup::mark("start");
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
     wasm_bindgen_futures::spawn_local(async {
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -143,7 +139,7 @@ pub fn start() {
         }
         // Hydrate before constructing an interactive session: a late load must never undo a
         // user deletion/reorder. Storage denial or timeout still opens a usable session.
-        let (database, presets, mut preset_warnings) = match crate::indexed_presets::load().await {
+        let (database, presets, preset_warnings) = match crate::indexed_presets::load().await {
             Ok((db, bridge, warnings)) => (Some(db), bridge, warnings),
             Err(e) => {
                 let bridge = crate::preset_bridge::Bridge::default();
@@ -151,60 +147,154 @@ pub fn start() {
                 (None, bridge, Vec::new())
             }
         };
+        crate::startup::mark("presets loaded");
         // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
         crate::wheel_guard::install();
         let pen_target = canvas.clone();
+        let boot = Boot { presets, preset_warnings, database, embed_query, photopea, pen_target, force_cpu, loading: document.get_element_by_id("photocraft_loading") };
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
                 options,
                 Box::new(move |cc| {
+                    crate::startup::mark("graphics ready");
                     PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);
-                    let inbox: Inbox = Arc::default();
-                    let served: Served = Arc::default();
-                    load_font_manifest(served.clone(), cc.egui_ctx.clone());
-                    let (session, warnings) = crate::preset_bridge::session(presets.clone());
-                    preset_warnings.extend(warnings);
-                    let control = crate::embed::install(&embed_query, cc.egui_ctx.clone());
-                    let mut app = PhotocraftApp::new(session, services(inbox.clone(), photopea.clone())).with_control(control);
-                    if let Some(config) = &photopea {
-                        crate::embed::open_config_files(config);
-                    }
-                    if !preset_warnings.is_empty() {
-                        photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
-                    }
-                    listen_pen(&pen_target, app.stylus.feed.clone());
-                    app.set_theme(&cc.egui_ctx, ThemeKind::Pro);
-                    let mut gpu = ("cpu", "unknown");
-                    if let Some(rs) = cc.wgpu_render_state.clone()
-                        && !force_cpu
-                    {
-                        let info = rs.adapter.get_info();
-                        log::info!("photocraft-web: wgpu backend {:?}", info.backend);
-                        gpu = (
-                            match info.backend {
-                                eframe::wgpu::Backend::BrowserWebGpu => "webgpu",
-                                eframe::wgpu::Backend::Gl => "webgl",
-                                _ => "unknown",
-                            },
-                            photocraft_ui_egui::telemetry::gpu_vendor_class(info.vendor, &info.name),
-                        );
-                        app.set_wgpu(rs);
-                    }
-                    crate::usage_stats::init(gpu.0, gpu.1);
-                    let unsaved = Arc::new(AtomicBool::new(false));
-                    guard_unload(unsaved.clone());
-                    Ok(Box::new(WebShell { app, inbox, unsaved, served, database, presets }))
+                    crate::startup::mark("fonts and theme");
+                    // The threads build may get here before its worker pool is up (the page starts
+                    // both together): the app, the first thing to use rayon, is built once it is.
+                    Ok(Box::new(WebRoot::Booting(Some((boot, cc.wgpu_render_state.clone())))))
                 }),
             )
             .await;
-        if let Some(el) = document.get_element_by_id("photocraft_loading") {
-            match result {
-                Ok(()) => el.remove(),
-                Err(e) => el.set_inner_html(&format!("<p>Capishot failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>")),
-            }
+        if let Err(e) = result
+            && let Some(el) = document.get_element_by_id("photocraft_loading")
+        {
+            el.set_inner_html(&format!("<p>Capishot failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>"));
         }
     });
+}
+
+/// Is rayon's worker pool up? The single-threaded build has none to wait for; the threads page
+/// calls [`thread_pool_ready`] when `initThreadPool` resolves.
+static THREAD_POOL_READY: AtomicBool = AtomicBool::new(cfg!(not(target_feature = "atomics")));
+
+/// Threads build: the page calls this (as `threadPoolReady`) once `initThreadPool` has resolved.
+/// Until then nothing may touch rayon (it would build its one-thread fallback pool for good), so
+/// [`WebRoot`] holds the app back while the graphics device, fonts and presets get ready.
+#[cfg(target_feature = "atomics")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = threadPoolReady)]
+pub fn thread_pool_ready() {
+    THREAD_POOL_READY.store(true, Ordering::Release);
+    crate::startup::mark("worker pool ready");
+}
+
+/// What building the app needs, gathered before the first frame.
+struct Boot {
+    presets: crate::preset_bridge::Bridge,
+    preset_warnings: Vec<String>,
+    database: Option<web_sys::IdbDatabase>,
+    embed_query: String,
+    photopea: Option<crate::embed_protocol::PhotopeaConfig>,
+    pen_target: web_sys::HtmlCanvasElement,
+    force_cpu: bool,
+    /// The page's "Loading Capishot…", removed once the app is built.
+    loading: Option<web_sys::Element>,
+}
+
+impl Boot {
+    fn build(self, ctx: &egui::Context, wgpu: Option<eframe::egui_wgpu::RenderState>) -> WebShell {
+        let Boot { presets, mut preset_warnings, database, embed_query, photopea, pen_target, force_cpu, loading } = self;
+        let inbox: Inbox = Arc::default();
+        let served: Served = Arc::default();
+        load_font_manifest(served.clone(), ctx.clone());
+        let (session, warnings) = crate::preset_bridge::session(presets.clone());
+        preset_warnings.extend(warnings);
+        crate::startup::mark("session");
+        let control = crate::embed::install(&embed_query, ctx.clone());
+        let mut app = PhotocraftApp::new(session, services(inbox.clone(), photopea.clone())).with_control(control);
+        crate::startup::mark("app");
+        if let Some(config) = &photopea {
+            crate::embed::open_config_files(config);
+        }
+        if !preset_warnings.is_empty() {
+            photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
+        }
+        listen_pen(&pen_target, app.stylus.feed.clone());
+        app.set_theme(ctx, ThemeKind::Pro);
+        let mut gpu = ("cpu", "unknown");
+        if let Some(rs) = wgpu
+            && !force_cpu
+        {
+            let info = rs.adapter.get_info();
+            log::info!("photocraft-web: wgpu backend {:?}", info.backend);
+            gpu = (
+                match info.backend {
+                    eframe::wgpu::Backend::BrowserWebGpu => "webgpu",
+                    eframe::wgpu::Backend::Gl => "webgl",
+                    _ => "unknown",
+                },
+                photocraft_ui_egui::telemetry::gpu_vendor_class(info.vendor, &info.name),
+            );
+            app.set_wgpu(rs);
+        }
+        crate::startup::mark("canvas");
+        crate::usage_stats::init(gpu.0, gpu.1);
+        let unsaved = Arc::new(AtomicBool::new(false));
+        guard_unload(unsaved.clone());
+        if let Some(el) = loading {
+            el.remove();
+        }
+        WebShell { app, inbox, unsaved, served, database, presets, startup_frames: 0 }
+    }
+}
+
+/// The eframe app: [`WebShell`] once built, and before that (the threads build waiting for its
+/// worker pool) an empty frame in the page's background colour, under "Loading Capishot…".
+enum WebRoot {
+    Booting(Option<(Boot, Option<eframe::egui_wgpu::RenderState>)>),
+    Running(Box<WebShell>),
+}
+
+impl WebRoot {
+    /// Builds the app as soon as rayon's worker pool is up (at once in the single-threaded build).
+    fn running(&mut self, ctx: &egui::Context) -> Option<&mut WebShell> {
+        if let WebRoot::Booting(boot) = self {
+            if !THREAD_POOL_READY.load(Ordering::Acquire) {
+                // No event wakes eframe when the pool comes up: look again next frame.
+                ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                return None;
+            }
+            let (boot, wgpu) = boot.take()?;
+            *self = WebRoot::Running(Box::new(boot.build(ctx, wgpu)));
+        }
+        match self {
+            WebRoot::Running(shell) => Some(shell),
+            WebRoot::Booting(_) => None,
+        }
+    }
+}
+
+impl eframe::App for WebRoot {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if let WebRoot::Running(shell) = self {
+            shell.raw_input_hook(ctx, raw_input);
+        }
+    }
+
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if let Some(shell) = self.running(ctx) {
+            shell.logic(ctx, frame);
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        match self {
+            WebRoot::Running(shell) => shell.ui(ui, frame),
+            WebRoot::Booting(_) => {
+                egui::CentralPanel::default().frame(egui::Frame::NONE.fill(egui::Color32::from_gray(0x26))).show(ui, |_| {});
+            }
+        }
+    }
 }
 
 /// Pen pressure, tilt, twist and the eraser button from Pointer Events (eframe forwards none of them for pens) into
@@ -288,6 +378,31 @@ fn load_font_manifest(served: Served, ctx: egui::Context) {
     });
 }
 
+/// Translation catalogs not compiled into the web build (`photocraft-ui-egui/all-catalogs`) are
+/// served next to the page as `i18n/<code>.tsv`: fetched the first time the UI needs one (the
+/// language is chosen, or a preview draws in it), the UI showing English until it arrives.
+const CATALOG_DIR: &str = "i18n";
+
+fn fetch_catalogs(ctx: &egui::Context) {
+    for code in i18n::take_catalog_requests() {
+        let ctx = ctx.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let url = format!("{CATALOG_DIR}/{code}.tsv");
+            let installed = match fetch_bytes(&url, None).await {
+                Ok(bytes) => String::from_utf8(bytes).map_err(|e| e.to_string()).and_then(|text| {
+                    // A host that answers unknown paths with its HTML page (single-page app fallback).
+                    if text.trim_start().starts_with('<') { Err("not a catalog".into()) } else { i18n::provide_catalog(code, &text) }
+                }),
+                Err(e) => Err(e),
+            };
+            match installed {
+                Ok(()) => ctx.request_repaint(),
+                Err(e) => log::warn!("photocraft-web: {url}: {e}; showing English"),
+            }
+        });
+    }
+}
+
 /// The browser's preferred languages (`navigator.languages`, e.g. `["ar-EG", "en"]`).
 fn browser_languages() -> Vec<String> {
     web_sys::window().map(|w| w.navigator().languages().iter().filter_map(|l| l.as_string()).collect()).unwrap_or_default()
@@ -325,6 +440,8 @@ struct WebShell {
     served: Served,
     database: Option<web_sys::IdbDatabase>,
     presets: crate::preset_bridge::Bridge,
+    /// Frames begun so far, counted up to 2 (for the startup timings).
+    startup_frames: u8,
 }
 
 impl WebShell {
@@ -385,6 +502,14 @@ impl eframe::App for WebShell {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Startup timings: the first frame starts, and the second starts once it is drawn.
+        if self.startup_frames < 2 {
+            self.startup_frames += 1;
+            crate::startup::mark(if self.startup_frames == 1 { "first frame" } else { "first frame drawn" });
+            if self.startup_frames == 2 {
+                crate::startup::report();
+            }
+        }
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
             let inbox = self.inbox.clone();
@@ -401,6 +526,7 @@ impl eframe::App for WebShell {
             });
         }
         self.serve_fonts(ctx);
+        fetch_catalogs(ctx);
         self.app.logic(ctx, frame);
         crate::embed::process(&mut self.app);
         crate::usage_stats::sync(&self.app, ctx);
@@ -459,7 +585,7 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                 let dialog = if let Some(exts) = extensions {
                     rfd::AsyncFileDialog::new().add_filter("Supported Files", &exts)
                 } else {
-                    rfd::AsyncFileDialog::new().add_filter("All Formats", OPEN_EXTS).add_filter("SVG", SVG_EXTS)
+                    rfd::AsyncFileDialog::new().add_filter("All Formats", &crate::open_formats::open_exts()).add_filter("SVG", SVG_EXTS)
                 };
                 let answer = if multiple {
                     match dialog.pick_files().await {

@@ -24,11 +24,11 @@ path = "src/main.rs"
 
 [dependencies]
 photocraft-automation = { path = "../../crates/automation" }
-photocraft-engine = { workspace = true }
+photocraft-engine = { workspace = true, features = ["plugins"] }
 photocraft-fontfetch = { workspace = true }
-photocraft-io = { workspace = true }
+photocraft-io = { workspace = true, features = ["camera-raw"] }
 photocraft-format = { path = "../../crates/format" }
-photocraft-codecs = { workspace = true }
+photocraft-codecs = { workspace = true, features = ["exr"] }
 serde_json = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 

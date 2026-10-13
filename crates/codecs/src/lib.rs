@@ -60,8 +60,9 @@ pub fn decode_as(format: Format, bytes: &[u8]) -> Result<Image, CodecError> {
 
 /// Decode as a specific format.
 pub fn decode_as_with(format: Format, bytes: &[u8], opts: &DecodeOptions) -> Result<Image, CodecError> {
-    // HEIF without the `heif` feature: its decoder stub says what is missing from this build.
-    if !caps(format).read && format != Format::Heif {
+    // HEIF without the `heif` feature and OpenEXR without `exr`: their decoder stubs say what
+    // is missing from this build.
+    if !caps(format).read && !matches!(format, Format::Heif | Format::OpenExr) {
         return Err(CodecError::unsupported(format, "decoding is not available for this format"));
     }
     let l = &opts.limits;
@@ -179,9 +180,14 @@ pub fn decode_exr_channels(bytes: &[u8], part: usize, names: &[&str], opts: &Dec
 /// [`decode_as_with`] instead flattens a deep file into a normal [`Image`] with a
 /// [`DecodeWarning::DeepFlattened`]. `Err(Unsupported)` when the file has no deep part.
 pub fn decode_deep_exr(bytes: &[u8], limits: &Limits) -> Result<DeepImage, CodecError> {
-    let mut cur = std::io::Cursor::new(bytes);
-    let meta = ::exr::meta::MetaData::read_from_buffered(&mut cur, false).map_err(|e| CodecError::malformed(Format::OpenExr, e))?;
-    codecs::deep_exr::decode_deep(&meta, bytes, limits)
+    #[cfg(feature = "exr")]
+    {
+        let mut cur = std::io::Cursor::new(bytes);
+        let meta = ::exr::meta::MetaData::read_from_buffered(&mut cur, false).map_err(|e| CodecError::malformed(Format::OpenExr, e))?;
+        codecs::deep_exr::decode_deep(&meta, bytes, limits)
+    }
+    #[cfg(not(feature = "exr"))]
+    exr::decode_deep(bytes, limits)
 }
 
 /// Encode `image` as `format`. Conversions follow the same plan that

@@ -7,10 +7,14 @@
 //! exponent fixed away from 0/255 so no ID is denormal, infinite or NaN, read as an f32
 //! bit pattern. Everything here compares IDs by value, never by bit pattern.
 
+#[cfg(feature = "exr")]
 use std::io::Cursor;
 
+#[cfg(feature = "exr")]
 use exr::meta::MetaData;
+#[cfg(feature = "exr")]
 use exr::meta::attribute::AttributeValue;
+#[cfg(feature = "exr")]
 use exr::prelude::{ReadChannels, ReadLayers, read};
 
 use crate::Format;
@@ -23,6 +27,7 @@ const F: Format = Format::OpenExr;
 /// A Cryptomatte stream channel (`crypto_asset00.red`) splits into its stream name
 /// (`crypto_asset00`), the layer prefix without digits (`crypto_asset`), the stream index,
 /// and whether it is the coverage (green) channel instead of the ID (red).
+#[cfg(feature = "exr")]
 pub(crate) struct StreamChannel {
     pub stream: String,
     pub index: u32,
@@ -31,6 +36,7 @@ pub(crate) struct StreamChannel {
 
 /// `<name>NN` where NN is one or more digits (the reference readers match `\d+`), with a
 /// `.red`/`.r` (ID) or `.green`/`.g` (coverage) suffix.
+#[cfg(feature = "exr")]
 pub(crate) fn split_stream(channel: &str) -> Option<StreamChannel> {
     let (stream, suffix) = channel.rsplit_once('.')?;
     let coverage = match suffix {
@@ -96,6 +102,7 @@ pub fn cryptomatte_preview_color(id: f32) -> [f32; 3] {
 }
 
 /// The `cryptomatte/<key>/<field>` text attribute of a header, if present.
+#[cfg(feature = "exr")]
 fn attribute(other: &std::collections::HashMap<exr::meta::attribute::Text, AttributeValue>, key: &str, field: &str) -> Option<String> {
     let full = exr::meta::attribute::Text::new_or_none(format!("cryptomatte/{key}/{field}").as_str())?;
     match other.get(&full)? {
@@ -107,6 +114,7 @@ fn attribute(other: &std::collections::HashMap<exr::meta::attribute::Text, Attri
 /// Parse a manifest JSON (`{"object name": "<8-hex ID bits>"}`) into (ID value, name)
 /// pairs. Entries that are not strings of up to eight hex digits are skipped, like the
 /// reference readers tolerate a partially broken manifest; a broken document yields none.
+#[cfg(feature = "exr")]
 fn parse_manifest(json: &str) -> Vec<(f32, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else { return Vec::new() };
     let Some(map) = value.as_object() else { return Vec::new() };
@@ -122,6 +130,7 @@ fn parse_manifest(json: &str) -> Vec<(f32, String)> {
 /// The stream channel names of a layer (`crypto_asset00`, `crypto_asset01`, …, exactly as
 /// the file spells them), matched leniently: the channel prefix and the `name` attribute
 /// differ in case or `_`/`-` between renderers (`CryptoAsset` vs `crypto_asset`).
+#[cfg(feature = "exr")]
 fn layer_streams(header: &exr::meta::header::Header, name: &str) -> Vec<String> {
     let normalize = |s: &str| s.to_ascii_lowercase().replace(['_', '-'], "");
     let want = normalize(name);
@@ -142,6 +151,7 @@ fn layer_streams(header: &exr::meta::header::Header, name: &str) -> Vec<String> 
 
 /// Lists every Cryptomatte layer of the file from the headers alone: what a Cryptomatte
 /// picker offers. The embedded manifest (capped, JSON) is parsed into (ID, name) pairs.
+#[cfg(feature = "exr")]
 pub(crate) fn layers(bytes: &[u8], limits: &Limits) -> Result<Vec<CryptomatteLayer>, CodecError> {
     let meta = MetaData::read_from_buffered(Cursor::new(bytes), false).map_err(|e| CodecError::malformed(F, e))?;
     // Manifests can be large; bound the embedded text before parsing anything.
@@ -177,6 +187,7 @@ pub(crate) fn layers(bytes: &[u8], limits: &Limits) -> Result<Vec<CryptomatteLay
 }
 
 /// Every `cryptomatte/<key>/` key of a header, in file order, without duplicates.
+#[cfg(feature = "exr")]
 fn cryptomatte_keys(other: &std::collections::HashMap<exr::meta::attribute::Text, exr::meta::attribute::AttributeValue>) -> Vec<String> {
     let mut keys = Vec::new();
     for name in other.keys() {
@@ -194,6 +205,7 @@ fn cryptomatte_keys(other: &std::collections::HashMap<exr::meta::attribute::Text
 /// [`CryptomatteLayer::name`]): per pixel its (ID, coverage) pairs, coverage above zero,
 /// sorted by descending coverage. Refuses files that also contain deep parts, like the
 /// other flat part decoders.
+#[cfg(feature = "exr")]
 pub(crate) fn decode(bytes: &[u8], layer_name: &str, limits: &Limits) -> Result<CryptomatteBuffer, CodecError> {
     let found = layers(bytes, limits)?;
     let layer = found
@@ -246,4 +258,15 @@ pub(crate) fn decode(bytes: &[u8], layer_name: &str, limits: &Limits) -> Result<
         out.sort_by(|a, b| b.1.total_cmp(&a.1));
     }
     Ok(CryptomatteBuffer { width: w32, height: h32, pixels })
+}
+
+/// Without the `exr` feature (the web build) EXR files are recognised but not read.
+#[cfg(not(feature = "exr"))]
+pub(crate) fn layers(_bytes: &[u8], _limits: &Limits) -> Result<Vec<CryptomatteLayer>, CodecError> {
+    Err(CodecError::unsupported(F, super::exr::NOT_IN_BUILD))
+}
+
+#[cfg(not(feature = "exr"))]
+pub(crate) fn decode(_bytes: &[u8], _layer_name: &str, _limits: &Limits) -> Result<CryptomatteBuffer, CodecError> {
+    Err(CodecError::unsupported(F, super::exr::NOT_IN_BUILD))
 }

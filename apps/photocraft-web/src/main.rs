@@ -26,6 +26,10 @@ mod indexed_presets;
 mod embed;
 #[cfg(any(target_arch = "wasm32", test))]
 mod embed_protocol;
+#[cfg(any(target_arch = "wasm32", test))]
+mod open_formats;
+#[cfg(target_arch = "wasm32")]
+mod startup;
 #[cfg(target_arch = "wasm32")]
 mod usage_stats;
 #[cfg(target_arch = "wasm32")]
@@ -63,17 +67,41 @@ mod tests {
         assert!(!html.contains("<script"), "trunk injects the generated loader; the page has no script of its own");
     }
 
-    /// The threads build's page must install the Web Worker pool before the app first touches
-    /// rayon (or rayon keeps its one-thread fallback pool), and its host must send the
-    /// cross-origin isolation headers shared WebAssembly memory needs.
+    /// Every catalog the web build doesn't compile in is shipped next to the page by both builds
+    /// (Trunk's index.html and packaging/web-threads/build.sh), where `fetch_catalogs` asks for it.
+    #[test]
+    fn both_web_builds_ship_the_catalogs_they_fetch() {
+        let html = include_str!("../index.html");
+        let threads = include_str!("../../../packaging/web-threads/build.sh");
+        assert!(threads.contains(r#"cp "$ROOT"/crates/ui-egui/src/i18n/*.tsv"#), "threads build copies the catalogs");
+        // build.rs compiles only these in without `all-catalogs` (the web build); this test may
+        // run with every catalog compiled in (features unify across a workspace test run).
+        let build_rs = include_str!("../../../crates/ui-egui/build.rs");
+        assert!(build_rs.contains(r#"const ALWAYS_COMPILED_IN: [&str; 2] = ["es.tsv", "pt-br.tsv"];"#), "compiled-in catalogs changed");
+        let fetched: Vec<_> = photocraft_ui_egui::i18n::LANGUAGES.iter().map(|l| l.code).filter(|c| !matches!(*c, "en" | "es" | "pt-br")).collect();
+        assert!(fetched.len() >= 10, "{fetched:?}");
+        for code in fetched {
+            let link = format!(r#"href="../../crates/ui-egui/src/i18n/{code}.tsv" data-target-path="i18n""#);
+            assert!(html.contains(&link), "index.html doesn't copy {code}.tsv");
+        }
+    }
+
+    /// The threads build's page must start the Web Worker pool before the app can touch rayon
+    /// (or rayon keeps its one-thread fallback pool): the app starts alongside it but is built
+    /// only once the page reports the pool up (`threadPoolReady`, web.rs `WebRoot`). Its host
+    /// must send the cross-origin isolation headers shared WebAssembly memory needs.
     #[test]
     fn threads_page_starts_the_worker_pool_before_the_app() {
         let html = include_str!("../../../packaging/web-threads/index.html");
         let isolated = html.find("self.crossOriginIsolated").expect("cross-origin isolation check");
         let init = html.find("await pc.default(").expect("module instantiation");
-        let pool = html.find("await pc.initThreadPool(").expect("worker pool start");
+        let pool = html.find("pc.initThreadPool(").expect("worker pool start");
         let start = html.find("pc.start()").expect("app start");
-        assert!(isolated < init && init < pool && pool < start, "isolation check, instantiate, pool, then start");
+        let pool_up = html.find("await pool;").expect("waits for the pool");
+        let ready = html.find("pc.threadPoolReady()").expect("reports the pool up");
+        assert!(isolated < init && init < pool && pool < start && start < pool_up && pool_up < ready, "isolation check, instantiate, pool, start, then pool ready");
+        let web = include_str!("web.rs");
+        assert!(web.contains("AtomicBool::new(cfg!(not(target_feature = \"atomics\")))"), "the threads build waits for threadPoolReady");
         let headers = include_str!("../../../packaging/web-threads/_headers");
         assert!(headers.contains("Cross-Origin-Opener-Policy: same-origin"), "{headers}");
         assert!(headers.contains("Cross-Origin-Embedder-Policy: require-corp"), "{headers}");
