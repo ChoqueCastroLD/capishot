@@ -352,6 +352,27 @@ fn web_pane(app: &PhotocraftApp, ui: &mut egui::Ui, size: egui::Vec2, p: Option<
     });
 }
 
+/// Print's Printer menu: the default printer (value ""), then every printer `file.printers`
+/// listed. A saved name the spooler no longer lists stays selectable rather than vanishing.
+/// CUPS queue names stand in for spaces with `_`; the labels show the spaces.
+fn printer_options(list: Option<&Value>, current: &str) -> Vec<(String, String)> {
+    let printers: Vec<(&str, bool)> = list
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|p| Some((p.get("name")?.as_str()?, p.get("default").and_then(Value::as_bool).unwrap_or(false)))).collect())
+        .unwrap_or_default();
+    let pretty = |n: &str| n.replace('_', " ");
+    let default = match printers.iter().find(|p| p.1) {
+        Some((n, _)) => format!("{} ({})", tl!("Default printer"), pretty(n)),
+        None => tl!("Default printer").to_string(),
+    };
+    let mut opts = vec![(String::new(), default)];
+    opts.extend(printers.iter().map(|(n, _)| (n.to_string(), pretty(n))));
+    if !current.is_empty() && !printers.iter().any(|p| p.0 == current) {
+        opts.push((current.to_string(), pretty(current)));
+    }
+    opts
+}
+
 fn dropdown_str(ui: &mut egui::Ui, id: &str, f: &mut Map<String, Value>, key: &str, opts: &[(&str, &str)], w: f32) {
     let mut v = s(f, key, opts.first().map_or("", |o| o.0));
     let o: Vec<(String, &str)> = opts.iter().map(|(k, l)| (k.to_string(), *l)).collect();
@@ -689,6 +710,9 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
     let mut f = Map::new();
     f.insert("__print".into(), json!(true));
     f.insert("__label".into(), json!("PhotoCraft Print Settings"));
+    // Asked once per opening: the Printer menu lists what the spooler knows now.
+    let printers = app.session.execute("file.printers", json!({})).unwrap_or_default();
+    f.insert("__printers".into(), printers["printers"].clone());
     if let Some(Value::Object(m)) = app.session.file_menu.last_print.clone() {
         f.extend(m);
     }
@@ -880,7 +904,9 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
                 let mut pr = s(f, "printer", "");
-                if ui.add(egui::TextEdit::singleline(&mut pr).hint_text(tl!("Default printer")).desired_width(180.0)).changed() {
+                let opts = printer_options(f.get("__printers"), &pr);
+                let o: Vec<(String, &str)> = opts.iter().map(|(k, l)| (k.clone(), l.as_str())).collect();
+                if crate::widgets::dropdown(ui, "print-printer", &mut pr, &o, 240.0) {
                     f.insert("printer".into(), json!(pr));
                 }
             });
@@ -1281,6 +1307,26 @@ mod tests {
             let r = crate::menus::invoke(&mut app, &ctx, id, json!({})).unwrap();
             assert!(r["dialog"].is_u64(), "{id}");
         }
+    }
+
+    #[test]
+    fn printer_menu_lists_the_spooler_printers_after_the_default() {
+        let list = json!([{"name": "HP_OfficeJet_3830_series", "default": true}, {"name": "DNP_DP_DS620", "default": false}]);
+        let o = printer_options(Some(&list), "");
+        let keys: Vec<&str> = o.iter().map(|p| p.0.as_str()).collect();
+        assert_eq!(keys, ["", "HP_OfficeJet_3830_series", "DNP_DP_DS620"]);
+        assert!(o[0].1.ends_with("(HP OfficeJet 3830 series)"), "{}", o[0].1);
+        assert_eq!(o[2].1, "DNP DP DS620");
+        // A remembered printer that's gone stays selectable; no list still offers the default.
+        let o = printer_options(Some(&list), "Old_Queue");
+        assert_eq!(o.last().unwrap().0, "Old_Queue");
+        assert_eq!(printer_options(None, "").len(), 1);
+        // The dialog asks the engine, and the list never reaches file.print's params.
+        let (mut app, ctx) = app();
+        let id = crate::menus::invoke(&mut app, &ctx, "file.print", json!({})).unwrap()["dialog"].as_u64().unwrap();
+        let f = &app.ui.dialog_mut(id).unwrap().fields;
+        assert!(f.get("__printers").is_some_and(Value::is_array));
+        assert!(params(f).get("__printers").is_none());
     }
 
     #[test]
