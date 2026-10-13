@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use photocraft_color::PixelFormat;
 use photocraft_doc::{Document, LayerContent, LayerId};
+use photocraft_geom::Rect;
 use photocraft_raster::Surface;
 use serde_json::{Value, json};
 
@@ -31,6 +32,11 @@ pub struct CutParts {
     pub layer: LayerId,
     rest: Surface,
     piece: Surface,
+    /// `piece`'s content bounds, scanned once: a drag places the piece at a new offset every frame.
+    piece_bounds: Rect,
+    /// The piece's own layer in [`CutParts::split`] documents: one id for the whole float, so the
+    /// GPU canvas keeps its pixels resident while it moves.
+    piece_layer: LayerId,
     /// The pieces are the layer's mask (`"target":"mask"`), not its pixels.
     mask: bool,
 }
@@ -60,15 +66,23 @@ impl CutParts {
         let mut piece = Surface::new(with_alpha);
         let fill = !copy && (mask || crate::extra_cmds::is_background(l));
         // A mask's untouched pixels (its default, e.g. white) move too, so take the whole canvas.
-        let b = sel.content_bounds().intersect(&if mask { doc.bounds() } else { surf.content_bounds() });
+        // Bounds cached per tile: the canvas has usually scanned these tiles already, and a full
+        // page layer's scan was most of the cut (#578).
+        let bounds = photocraft_compose::bounds::content_bounds;
+        let b = bounds(sel).intersect(&if mask { doc.bounds() } else { bounds(surf) });
         if !b.is_empty() {
             let n = with_alpha.channels();
             let a = n - 1;
             let mut rp = full.read_region(b);
             let mut pp = rp.clone();
             let w = b.width() as usize;
+            // The selection's coverage over `b`, a row at a time (one tile lookup per run).
+            let mut cover = vec![0.0f32; w];
             for (i, (p, r)) in pp.chunks_exact_mut(n).zip(rp.chunks_exact_mut(n)).enumerate() {
-                let k = sel.sample_channel(b.x0 + (i % w) as i32, b.y0 + (i / w) as i32, 0);
+                if i % w == 0 {
+                    sel.sample_row_strided(b.y0 + (i / w) as i32, b.x0, 1, 0, &mut cover);
+                }
+                let k = cover.get(i % w).copied().unwrap_or(0.0);
                 if k <= 0.0 {
                     p.fill(0.0);
                 } else {
@@ -88,7 +102,64 @@ impl CutParts {
             piece.write_region(b, &pp);
             piece.prune();
         }
-        Ok(Self { layer, rest, piece, mask })
+        let piece_bounds = piece.content_bounds();
+        Ok(Self { layer, rest, piece, piece_bounds, piece_layer: LayerId::fresh(), mask })
+    }
+
+    /// The cut pixels where they were cut (straight alpha).
+    pub fn piece(&self) -> &Surface {
+        &self.piece
+    }
+
+    /// The id of the piece's layer in [`Self::split`] documents.
+    pub fn piece_layer(&self) -> LayerId {
+        self.piece_layer
+    }
+
+    /// The piece moved by whole pixels (dx, dy).
+    fn piece_at(&self, dx: i32, dy: i32) -> Surface {
+        self.piece.translated(dx, dy, self.piece_bounds)
+    }
+
+    /// `doc` as [`Self::moved`] shows it, but with the piece (moved by dx, dy) as a layer of its own
+    /// ([`Self::piece_layer`]) right above the cut-out layer instead of composited into it, when
+    /// the two composite exactly alike: a visible pixel layer in Normal mode at full opacity and
+    /// fill, without masks, effects, clipping, Blend If, channel or advanced blending options, and
+    /// no clipped layer above it to clip to the piece instead. The cut-out layer is then the same
+    /// surface at every offset and only the piece moves, so a canvas that keeps layer pixels
+    /// resident (the GPU canvas: `photocraft_gpu::Translated`) uploads nothing new while it is
+    /// dragged. `None` otherwise (the caller shows [`Self::moved`]).
+    pub fn split(&self, doc: &Document, dx: i32, dy: i32) -> Option<Document> {
+        if self.mask {
+            return None;
+        }
+        let path = doc.path_of(self.layer)?;
+        let l = doc.layer_at(&path)?;
+        let plain = l.visible
+            && matches!(l.content, LayerContent::Raster(_))
+            && l.blend == photocraft_color::BlendMode::Normal
+            && l.opacity >= 1.0
+            && l.fill_opacity >= 1.0
+            && !l.clipped
+            && l.mask.is_none()
+            && l.vector_mask.is_none()
+            && !photocraft_compose::effects::has_effects(l)
+            && l.excluded_channels == 0
+            && l.blend_if == photocraft_doc::BlendIf::default()
+            && l.advanced == photocraft_doc::AdvancedBlending::default()
+            && l.video.is_none();
+        let (&last, parent) = path.split_last()?;
+        let siblings = if parent.is_empty() { &doc.layers[..] } else { doc.layer_at(parent)?.children()? };
+        let clips_above = siblings.get(last + 1).is_some_and(|above| above.clipped);
+        if !plain || clips_above {
+            return None;
+        }
+        let mut d = doc.clone();
+        *d.layer_mut(self.layer)?.surface_mut()? = self.rest.clone();
+        let mut piece = photocraft_doc::Layer::new(l.name.clone(), LayerContent::Raster(self.piece_at(dx, dy)));
+        piece.id = self.piece_layer;
+        d.insert_above(Some(self.layer), piece);
+        Some(d)
     }
 
     /// `doc` with the piece moved by whole pixels (dx, dy) over the cut-out layer.
@@ -107,11 +178,13 @@ impl CutParts {
             l.surface_mut().ok_or_else(|| EngineError::Other("the layer has no pixels to move".into()))?
         };
         let mut out = self.rest.clone();
-        let piece = photocraft_algo::resample::translate_surface(&self.piece, dx, dy);
+        let piece = self.piece_at(dx, dy);
+        // The moved piece's content bounds: its scanned ones, moved.
+        let b = if self.piece_bounds.is_empty() { Rect::EMPTY } else { self.piece_bounds.translate(dx, dy) };
         if self.mask {
-            crate::fill_cmds::composite_over(&mut out, &piece, piece.content_bounds(), None)?;
+            crate::fill_cmds::composite_over(&mut out, &piece, b, None)?;
         } else {
-            crate::transform_cmds::composite_over(&mut out, &piece);
+            crate::transform_cmds::composite_over_in(&mut out, &piece, b);
         }
         *surf = out;
         Ok(())
@@ -137,6 +210,14 @@ pub fn floating(st: &DocState) -> Option<&Floating> {
 pub fn displayed(st: &DocState, extra: (i32, i32)) -> Option<Document> {
     let f = floating(st)?;
     f.parts.moved(&st.doc, f.offset.0 + extra.0, f.offset.1 + extra.1).ok()
+}
+
+/// [`displayed`] for the canvas: the piece as a layer of its own over the cut-out layer
+/// ([`CutParts::split`]) where that looks the same, so each frame of a drag only moves the piece.
+pub fn displayed_split(st: &DocState, extra: (i32, i32)) -> Option<Document> {
+    let f = floating(st)?;
+    let (dx, dy) = (f.offset.0.saturating_add(extra.0), f.offset.1.saturating_add(extra.1));
+    f.parts.split(&st.doc, dx, dy).or_else(|| f.parts.moved(&st.doc, dx, dy).ok())
 }
 
 fn int_param(p: &Value, key: &str) -> i32 {

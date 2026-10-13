@@ -154,12 +154,24 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
 
 /// What the GPU canvas can draw of document `idx`'s Move preview from the layers' resident
 /// pages at the drag's offset (`photocraft_gpu::Translated`): the moving layers' pixels and
-/// linked masks as the document holds them, each with the copy the preview shows. Empty
-/// without a layer drag (a floating selection's preview cuts its piece, so it isn't one).
+/// linked masks as the document holds them, each with the copy the preview shows; or a floating
+/// selection's piece, where the preview shows it as a layer of its own
+/// (`photocraft_engine::float_cmds::CutParts::split`), from the piece where it was cut. Empty
+/// without a Move drag or floating piece.
 pub(crate) fn gpu_translations(app: &PhotocraftApp, idx: usize) -> Vec<photocraft_gpu::Translated> {
     let Some(st) = app.session.documents().get(idx) else { return Vec::new() };
-    let Some(p) = app.move_preview.as_ref().filter(|p| p.doc == st.doc.id && p.revision == st.revision && !p.floating) else { return Vec::new() };
+    let Some(p) = app.move_preview.as_ref().filter(|p| p.doc == st.doc.id && p.revision == st.revision) else { return Vec::new() };
     let (Some(shown), Some(&offset)) = (p.shown.as_ref(), p.offsets.last()) else { return Vec::new() };
+    if p.floating {
+        let Some(f) = photocraft_engine::float_cmds::floating(st) else { return Vec::new() };
+        let id = f.parts.piece_layer();
+        let Some(moved) = shown.layer(id).and_then(|l| l.surface()) else { return Vec::new() };
+        let source = f.parts.piece();
+        if source.tile_count() == 0 {
+            return Vec::new();
+        }
+        return vec![photocraft_gpu::Translated { layer: id, mask: false, shown: photocraft_gpu::surface_fingerprint(moved), source: source.clone(), offset }];
+    }
     let mut out = Vec::new();
     for &id in &p.moving {
         let (Some(before), Some(after)) = (st.doc.layer(id), shown.layer(id)) else { continue };
@@ -210,8 +222,10 @@ pub(crate) fn floating_offset(app: &PhotocraftApp) -> Option<(i32, i32)> {
 }
 
 /// The document shown while a selection floats: the cut piece at its offset, over the cut-out
-/// layer. Only the piece's area changes between offsets, so each move costs the piece, not the
-/// layer.
+/// layer. Only the piece's area changes between offsets. Where it looks the same, the piece is a
+/// layer of its own (`float_cmds::displayed_split`): the cut-out layer then stays one surface for
+/// the whole drag and the GPU canvas draws the piece from pixels it already holds
+/// ([`gpu_translations`]), so a frame costs a copy of the piece, not a composite and an upload.
 fn floating_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u64)> {
     let offset = floating_offset(app)?;
     let st = app.session.documents().get(idx)?;
@@ -237,7 +251,7 @@ fn floating_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u
     let shown = app.move_preview.as_ref()?.offsets.last() != Some(&offset);
     if shown {
         let t0 = crate::gpu_canvas::now_ms();
-        let d = photocraft_engine::float_cmds::displayed(st, crate::canvas::selection_drag_delta(app).unwrap_or((0, 0)))?;
+        let d = photocraft_engine::float_cmds::displayed_split(st, crate::canvas::selection_drag_delta(app).unwrap_or((0, 0)))?;
         let d = photocraft_engine::mode_cmds::display_document(&d).unwrap_or(d);
         let p = app.move_preview.as_mut()?;
         p.shown = Some(Arc::new(d));
@@ -403,8 +417,9 @@ mod tests {
             let steps = app.session.active().unwrap().history.past_len();
             drag(&mut app, [50.0, 40.0], [60.0, 45.0], egui::Modifiers::NONE);
             assert_eq!(offset(&app), Some((10, 5)), "{depth}-bit: floating");
-            let shown = super::display_doc(&mut app, 0).unwrap().0;
-            let shown_alpha = |x, y| shown.layer(id).unwrap().surface().unwrap().rgba(x, y)[3];
+            // The canvas composite (the piece may be a layer of its own over the cut-out layer).
+            let shown = photocraft_compose::flatten(&super::display_doc(&mut app, 0).unwrap().0);
+            let shown_alpha = |x: i32, y: i32| shown.px[(y * 64 + x) as usize][3];
             assert!(shown_alpha(10, 10) == 0.0 && shown_alpha(30, 25) == 1.0, "{depth}-bit: shown moved");
             enter(&mut app);
             assert_eq!(offset(&app), None, "{depth}-bit: ↩ dropped it");
@@ -416,6 +431,48 @@ mod tests {
             assert_eq!((st.history.past_len(), st.history.undo_label()), (steps + 1, Some("Move")), "{depth}-bit");
             assert!(app.session.undo());
             assert!(alpha(&app, id, 10, 10) == 1.0 && alpha(&app, id, 30, 25) == 0.0, "{depth}-bit: undone");
+        }
+    }
+
+    /// A drag of the selected pixels shows the piece as a layer of its own over the cut-out layer
+    /// and hands it to the GPU canvas as a translation of the cut piece: every frame shares every
+    /// other layer's tiles with the one before (nothing to upload) and redraws only where the
+    /// piece was and is, and the canvas shows what the composited piece would.
+    #[test]
+    fn dragging_selected_pixels_moves_the_resident_piece_on_the_gpu() {
+        for depth in [8, 16, 32] {
+            let (mut app, _) = selected_pixels(depth);
+            let m = egui::Modifiers::NONE;
+            crate::canvas::tool_event(&mut app, ToolEvent::Down { x: 16.0, y: 16.0, pressure: 1.0 }, m);
+            let mut last: Option<(std::sync::Arc<photocraft_doc::Document>, u64)> = None;
+            for (i, x) in [20.0, 27.0, 35.0, 41.0].into_iter().enumerate() {
+                crate::canvas::tool_event(&mut app, ToolEvent::Move { x, y: 16.0 + i as f64, pressure: 1.0 }, m);
+                let (shown, key) = super::display_doc(&mut app, 0).unwrap();
+                let st = app.session.active().unwrap();
+                let f = photocraft_engine::float_cmds::floating(st).expect("floating");
+                let piece = f.parts.piece_layer();
+                let offset = ((x - 16.0) as i32, i as i32);
+                let t = super::gpu_translations(&app, 0);
+                assert_eq!(t.len(), 1, "{depth}-bit: the piece is drawn from its resident pixels");
+                let moved = shown.layer(piece).and_then(|l| l.surface()).expect("the piece's layer");
+                assert!(t[0].layer == piece && !t[0].mask && t[0].offset == offset, "{depth}-bit");
+                assert_eq!(t[0].shown, photocraft_gpu::surface_fingerprint(moved), "{depth}-bit");
+                assert!(t[0].source == *f.parts.piece(), "{depth}-bit: from where it was cut");
+                // The canvas shows what compositing the piece into the layer shows.
+                let want = photocraft_compose::flatten(&photocraft_engine::float_cmds::displayed(st, crate::canvas::selection_drag_delta(&app).unwrap()).unwrap());
+                assert!(photocraft_compose::flatten(&shown) == want, "{depth}-bit: shown as composited");
+                if let Some((before, seen)) = &last {
+                    for l in shown.walk().into_iter().map(|(_, _, l)| l).filter(|l| l.id != piece) {
+                        let (a, b) = (l.surface(), before.layer(l.id).and_then(|l| l.surface()));
+                        assert!(a.zip(b).is_none_or(|(a, b)| photocraft_gpu::surface_fingerprint(a) == photocraft_gpu::surface_fingerprint(b)), "{depth}-bit: layer {:?} unchanged", l.id);
+                    }
+                    let r = super::damage(&app, st.doc.id, st.revision, *seen, key).expect("a bounded redraw");
+                    assert!(r.width() <= 16 + 8 + 2 && r.height() <= 16 + 1 + 2, "{depth}-bit: only where the piece was and is: {r:?}");
+                }
+                last = Some((shown, key));
+            }
+            crate::canvas::tool_event(&mut app, ToolEvent::Up { x: 41.0, y: 19.0 }, m);
+            assert_eq!(offset(&app), Some((25, 3)), "{depth}-bit");
         }
     }
 

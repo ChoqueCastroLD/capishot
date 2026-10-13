@@ -470,7 +470,10 @@ fn cmd_drag_floats_the_selected_pixels() {
     tool_event(&mut app, ToolEvent::Down { x: 20.0, y: 20.0, pressure: 1.0 }, Modifiers::COMMAND);
     tool_event(&mut app, ToolEvent::Move { x: 35.0, y: 20.0, pressure: 1.0 }, Modifiers::COMMAND);
     let (shown, _) = crate::move_ui::display_doc(&mut app, 0).expect("the piece shows at the pointer while dragging");
-    assert!(alpha(&shown, 12, 20) == 0.0 && alpha(&shown, 40, 20) == 1.0);
+    // The canvas composite (the piece may be a layer of its own over the cut-out layer).
+    let shown = photocraft_compose::flatten(&shown);
+    let shown_alpha = |x: i32, y: i32| shown.px[(y * 80 + x) as usize][3];
+    assert!(shown_alpha(12, 20) == 0.0 && shown_alpha(40, 20) == 1.0);
     tool_event(&mut app, ToolEvent::Up { x: 35.0, y: 20.0 }, Modifiers::COMMAND);
     assert_eq!(offset(&app), Some((15, 0)));
     assert_eq!(alpha(&doc(&app), 12, 20), 1.0, "the document waits for the drop");

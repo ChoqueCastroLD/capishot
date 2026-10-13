@@ -102,3 +102,39 @@ fn fingerprints_follow_tile_identity() {
     let back = t.translated(-3, 0, t.content_bounds());
     assert_ne!(surface_fingerprint(s), surface_fingerprint(&back), "same pixels in new tiles is another surface");
 }
+
+/// A floating selection's preview (`photocraft_engine::float_cmds::CutParts::split`): the piece is
+/// a new layer over the cut-out one, drawn from its resident pixels where it was cut at each
+/// offset. The result equals compositing the moved copy, and once the piece is resident moving it
+/// uploads no tile.
+#[test]
+fn a_piece_layer_drawn_at_each_offset_uploads_nothing_once_resident() {
+    let Some((device, queue, mut comp)) = gpu() else { return };
+    let base = doc();
+    let fmt = base.pixel_format();
+    let mut piece = photocraft_raster::Surface::new(fmt);
+    piece.fill_rect(Rect::new(120, 90, 390, 330), &photocraft_raster::from_rgba(&fmt, [0.2, 0.7, 0.3, 1.0]));
+    piece.fill_rect(Rect::new(200, 150, 260, 410), &photocraft_raster::from_rgba(&fmt, [0.9, 0.9, 0.2, 0.5]));
+    let id = photocraft_doc::LayerId::fresh();
+    let below = base.layers[1].id;
+    let at = |dx: i32, dy: i32| {
+        let mut d = base.clone();
+        let mut l = Layer::new("piece", photocraft_doc::LayerContent::Raster(piece.translated(dx, dy, piece.content_bounds())));
+        l.id = id;
+        d.insert_above(Some(below), l);
+        d
+    };
+    for (i, offset) in [(0, 0), (9, 4), (130, -60), (-77, 201), (300, 0)].into_iter().enumerate() {
+        let shown = at(offset.0, offset.1);
+        let mut plain = photocraft_gpu::Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float).expect("compositor");
+        let (want, _) = photocraft_gpu::render_to_vec_stats(&mut plain, &device, &queue, &shown, shown.bounds()).expect("reference");
+        let moved = shown.layer(id).and_then(|l| l.surface()).expect("piece");
+        comp.set_translated(vec![Translated { layer: id, mask: false, shown: surface_fingerprint(moved), source: piece.clone(), offset }]);
+        let (got, stats) = photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &shown, shown.bounds()).expect("translated");
+        let worst = want.iter().zip(&got).map(|(w, g)| (0..4).map(|k| (w[k] - g[k]).abs()).fold(0.0f32, f32::max)).fold(0.0f32, f32::max);
+        assert!(worst <= 1.0 / 255.0, "offset {offset:?}: max diff {:.2}/255", worst * 255.0);
+        if i > 0 {
+            assert_eq!(stats.tiles_uploaded, 0, "offset {offset:?}: the piece and every other layer are resident");
+        }
+    }
+}
