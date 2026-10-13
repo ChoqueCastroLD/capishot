@@ -73,7 +73,9 @@ for a in --shared-memory --import-memory --max-memory=4294967296 --export=__heap
          --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base; do
   link="$link -C link-arg=$a"
 done
-export RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,+simd128$link"
+# -Zlocation-detail=none (nightly, like the std rebuild): panic messages keep their text but not
+# the source file and line, which drops every panic location's path string from the module.
+export RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,+simd128$link -Zlocation-detail=none"
 # The About dialog's "dev build" stamp, as the release workflow sets it.
 export PHOTOCRAFT_BUILD_SHA="${PHOTOCRAFT_BUILD_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}"
 export PHOTOCRAFT_BUILD_DATE="${PHOTOCRAFT_BUILD_DATE:-$(date -u +%F)}"
@@ -103,12 +105,12 @@ gzip -9 -n "$OUT/photocraft_bg.wasm"
 version=$(cat "$OUT/photocraft.js" "$OUT/photocraft_bg.wasm.gz" | sha256sum | cut -c1-16)
 sed -e "s/__PHOTOCRAFT_VERSION__/$version/g" -e "s|__PHOTOCRAFT_FALLBACK__|$FALLBACK|g" "$HERE/index.html" >"$OUT/index.html"
 cp "$HERE/_headers" "$OUT/"
-
-# Cloudflare Workers/Pages reject any single file over 25 MiB; fail well before that.
 # Translation catalogs the build doesn't compile in (photocraft-ui-egui `all-catalogs`): the app
 # fetches i18n/<code>.tsv when that language is chosen.
 mkdir -p "$OUT/i18n"
 cp "$ROOT"/crates/ui-egui/src/i18n/*.tsv "$ROOT/crates/ui-egui/src/i18n/LICENSE-translations.txt" "$OUT/i18n/"
+
+# Cloudflare Workers/Pages reject any single file over 25 MiB; fail well before that.
 max="${PHOTOCRAFT_WASM_MAX_BYTES:-25165824}" # 24 MiB
 size=$(wc -c <"$OUT/photocraft_bg.wasm.gz" | tr -d ' ')
 echo "photocraft_bg.wasm: $raw bytes ($((raw / 1048576)) MiB), gzipped $size bytes ($((size / 1048576)) MiB; limit $max)"
