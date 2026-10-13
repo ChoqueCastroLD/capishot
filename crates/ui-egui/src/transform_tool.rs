@@ -801,7 +801,7 @@ fn preview_mask(l: &photocraft_doc::Layer, b: photocraft_geom::Rect) -> Option<c
     let vector = l.vector_mask.as_ref().filter(|v| v.enabled);
     let linked_pixel = pixel.filter(|m| m.linked);
     if pixel.is_none_or(|m| m.linked)
-        && vector.is_some_and(|v| v.linked)
+        && vector.is_none_or(|v| v.linked)
         && let Some(surface) = photocraft_compose::masks::combined_mask(l, b)
     {
         return Some(PreviewMask { surface, density: 1.0 });
@@ -4550,6 +4550,32 @@ mod tests {
         let (img, _) = preview_image(&st.doc, id, Some(&lifted), b, 4096, false);
         assert_eq!(texel_alpha(&img, 2, 4), 0, "masked");
         assert_eq!(texel_alpha(&img, 10, 4), 255, "revealed");
+    }
+
+    #[test]
+    fn preview_feathers_the_linked_mask() {
+        // A feathered pixel mask without a vector mask: the compositor softens the edge at x 16,
+        // so the moving texels must be soft there too, not hard until the commit (#4560).
+        let mut app = masked_app(true);
+        app.session
+            .edit("feather", |doc, a| {
+                doc.layer_mut(a.unwrap()).unwrap().mask.as_mut().unwrap().feather = 4.0;
+                Ok(())
+            })
+            .unwrap();
+        let st = app.session.active().unwrap();
+        let id = st.active_layer.unwrap();
+        let b = photocraft_geom::Rect::new(8, 8, 24, 24);
+        let (img, _) = preview_image(&st.doc, id, None, b, 4096, false);
+        // Texel x 7 = doc x 15, just inside the hidden half; texel x 8 = doc x 16, just revealed.
+        assert!(texel_alpha(&img, 7, 4) > 0, "the feather reaches into the hidden side");
+        assert!(texel_alpha(&img, 8, 4) < 255, "the feather reaches into the revealed side");
+        // The same values the compositor masks the committed layer with.
+        let m = photocraft_compose::masks::combined_mask(st.doc.layer(id).unwrap(), b).unwrap();
+        for x in [6usize, 7, 8, 9, 15] {
+            let want = (m.sample_channel(8 + x as i32, 12, 0) * 255.0).round() as i32;
+            assert!((i32::from(texel_alpha(&img, x, 4)) - want).abs() <= 1, "texel {x}");
+        }
     }
 
     #[test]
