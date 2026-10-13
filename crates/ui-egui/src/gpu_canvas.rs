@@ -250,6 +250,17 @@ impl GpuCanvas {
         }
     }
 
+    /// Layers the next refreshes draw from their already resident pre-move surface at an offset
+    /// (a Move drag's preview), instead of uploading the moved copy every frame. Empty: none.
+    pub fn set_translated(&self, translated: Vec<photocraft_gpu::Translated>) {
+        let mut r = self.rs.renderer.write();
+        if let Some(res) = r.callback_resources.get_mut::<StoredResources>()
+            && (!translated.is_empty() || !res.compositor_translated.is_empty())
+        {
+            res.compositor_translated = translated;
+        }
+    }
+
     /// The document area the view shows: full refreshes composite it last, so its layer pages
     /// are the ones still resident for the edits that follow.
     pub fn set_focus(&self, focus: Option<photocraft_geom::Rect>) {
@@ -421,6 +432,7 @@ impl GpuCanvas {
             comp.set_composite_cache_budget(b);
         }
         comp.set_focus(res.compositor_focus);
+        comp.set_translated(res.compositor_translated.clone());
         let key = doc.id.0;
         let format = self.format_for(doc.depth, size);
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format);
@@ -1258,6 +1270,8 @@ struct Resources {
     compositor_budget: Option<u64>,
     compositor_cache_budget: Option<u64>,
     compositor_focus: Option<photocraft_geom::Rect>,
+    /// Layers the next refreshes draw from their resident pre-move surface (a Move drag).
+    compositor_translated: Vec<photocraft_gpu::Translated>,
     /// GPU bytes one document's display texture set may take (see [`canvas_budget`]).
     canvas_budget: u64,
     encode_bgl: wgpu::BindGroupLayout,
@@ -1525,6 +1539,7 @@ impl Resources {
             compositor_budget: None,
             compositor_cache_budget: None,
             compositor_focus: None,
+            compositor_translated: Vec::new(),
             canvas_budget: canvas_budget(physical_memory()),
             encode_bgl,
             encode_pipeline,
