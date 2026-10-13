@@ -17,7 +17,7 @@ pub enum Format {
     Pnm,
     /// ZSoft Paintbrush: 1/2/4-bit planar palettes, 8-bit indexed and 24-bit RGB.
     Pcx,
-    /// X PixMap icons (XPM3 C-string representation).
+    /// X PixMap icons (XPM2 plain text and XPM3 C-string arrays).
     Xpm,
     Qoi,
     OpenExr,
@@ -296,7 +296,7 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
     if b.starts_with(b"SIMPLE  =") {
         return Some(Format::Fits);
     }
-    if b.starts_with(b"/* XPM */") {
+    if b.starts_with(b"/* XPM */") || b.starts_with(b"! XPM2\n") || b.starts_with(b"! XPM2\r\n") {
         return Some(Format::Xpm);
     }
     if crate::codecs::pcx::looks_like_pcx(b) {

@@ -1,5 +1,6 @@
-//! XPM3 reader for C-source icon arrays. Supports transparency (None), RGB hex
-//! at 4/8/16 bits per channel, and common X11 colour names. Does not run C code.
+//! X PixMap reader for XPM2 plain-text icons and XPM3 C-source icon arrays.
+//! Supports transparency (None), RGB hex at 4/8/16 bits per channel and
+//! common X11 colour names. Does not execute C code.
 
 use std::collections::HashMap;
 
@@ -68,6 +69,27 @@ fn c_strings(bytes: &[u8]) -> Result<Vec<Vec<u8>>, CodecError> {
     Ok(lines)
 }
 
+/// Extract XPM2's plain-text lines without trimming pixel rows: leading and
+/// trailing spaces can be palette keys, and physical CRLF is not image data.
+fn xpm2_lines(bytes: &[u8]) -> Result<Vec<Vec<u8>>, CodecError> {
+    let mut input = bytes.split(|&b| b == b'\n');
+    let header = input.next().ok_or_else(|| bad("missing XPM2 marker"))?;
+    if header.strip_suffix(b"\r").unwrap_or(header) != b"! XPM2" {
+        return Err(bad("not an XPM2 image"));
+    }
+    let mut lines = Vec::new();
+    for raw in input {
+        let line = raw.strip_suffix(b"\r").unwrap_or(raw);
+        // The header may be preceded by comments and blank lines. After the
+        // header, a leading '!' is allowed as a palette key or pixel value.
+        if lines.is_empty() && (line.is_empty() || line.starts_with(b"!")) {
+            continue;
+        }
+        lines.push(line.to_vec());
+    }
+    Ok(lines)
+}
+
 fn channel(hex: &str) -> Option<u8> {
     let v = u32::from_str_radix(hex, 16).ok()?;
     let max = (1u32 << (hex.len() * 4)) - 1;
@@ -117,13 +139,20 @@ fn color(name: &str) -> Option<[u8; 4]> {
 }
 
 pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
-    if !bytes.starts_with(b"/* XPM */") {
-        return Err(bad("not an XPM3 image"));
-    }
     if bytes.len() > MAX_SOURCE {
         return Err(CodecError::LimitExceeded("XPM source exceeds 256 MiB".into()));
     }
-    let lines = c_strings(bytes)?;
+    let lines = if bytes.starts_with(b"/* XPM */") {
+        c_strings(bytes)?
+    } else if bytes.starts_with(b"! XPM2\n") || bytes.starts_with(b"! XPM2\r\n") {
+        xpm2_lines(bytes)?
+    } else {
+        return Err(bad("not an XPM2/XPM3 image"));
+    };
+    decode_lines(&lines, limits)
+}
+
+fn decode_lines(lines: &[Vec<u8>], limits: &Limits) -> Result<Image, CodecError> {
     let header = lines.first().ok_or_else(|| bad("missing image header"))?;
     let parts = std::str::from_utf8(header).map_err(|_| bad("non-UTF-8 XPM header"))?;
     let mut parts = parts.split_ascii_whitespace();
