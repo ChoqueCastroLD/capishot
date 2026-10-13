@@ -1047,6 +1047,11 @@ impl Document {
         (1..=path.len()).filter_map(|n| self.layer_at(path.get(..n)?)).fold(Locks::default(), |a, l| a.union(l.locks))
     }
 
+    /// Whether the layer at `path` is shown: it and every group around it are visible.
+    pub fn shown_at(&self, path: &[usize]) -> bool {
+        (1..=path.len()).all(|n| path.get(..n).and_then(|p| self.layer_at(p)).is_some_and(|l| l.visible))
+    }
+
     /// [`Self::locks_at`] for the layer `id`.
     pub fn effective_locks(&self, id: LayerId) -> Locks {
         self.path_of(id).map_or_else(Locks::default, |p| self.locks_at(&p))
