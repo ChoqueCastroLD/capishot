@@ -175,6 +175,28 @@ fn space_is_a_temporary_hand_and_gives_the_tool_back() {
 }
 
 #[test]
+fn space_while_editing_type_is_not_the_hand_tool() {
+    let mut h = harness(Tool::Type);
+    let id = h.state_mut().run("type.create", json!({"text": "ئا", "size": 20, "x": 100, "y": 100})).unwrap()["layer"].as_u64().unwrap();
+    h.state_mut().ui.text_edit = Some(crate::state::TextEdit {
+        layer: id,
+        caret: 2,
+        anchor: 2,
+        session: "t".into(),
+        created: false,
+        mask: false,
+        dragging: false,
+        resize: None,
+        preedit: None,
+    });
+    key(&mut h, Key::Space, true, Modifiers::NONE);
+    assert!(h.state().ui.text_edit.is_some(), "type session stays open");
+    assert_eq!(held_tool(h.state(), &h.ctx), None, "Space types a space while editing");
+    assert!(!reposition_held(h.state(), &h.ctx));
+    key(&mut h, Key::Space, false, Modifiers::NONE);
+}
+
+#[test]
 fn temporary_zoom_in_and_out_restore_the_tool() {
     let mut h = harness(Tool::RectMarquee);
     let z0 = h.state().ui.views[0].zoom;
