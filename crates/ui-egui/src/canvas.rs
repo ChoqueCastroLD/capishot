@@ -1119,24 +1119,55 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
             return (doc.clone(), key);
         }
     }
-    if let Some((layer, params)) = &app.live_adjust
-        && let Some(l) = st.doc.layer(*layer)
+    let snapshot = st.doc.clone();
+    if let Some((layer, params)) = app.live_adjust.clone()
+        && let Some(l) = snapshot.layer(layer)
         && let LayerContent::Adjustment(a) = &l.content
     {
-        let kind = photocraft_engine::commands::adjustment_kind(a);
-        let preview = photocraft_engine::adjust_params::from_params(kind, params, Some(a), st.doc.mode).unwrap_or_else(|_| a.clone());
-        let mut doc = (*st.doc).clone();
-        if let Some(lm) = doc.layer_mut(*layer) {
-            lm.content = LayerContent::Adjustment(preview);
-        }
         let key = 1 + params.to_string().bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
-        return (std::sync::Arc::new(doc), key);
+        let shown = memo_display(app, &snapshot, key, || {
+            let kind = photocraft_engine::commands::adjustment_kind(a);
+            let preview = photocraft_engine::adjust_params::from_params(kind, &params, Some(a), snapshot.mode).unwrap_or_else(|_| a.clone());
+            let mut doc = (*snapshot).clone();
+            if let Some(lm) = doc.layer_mut(layer) {
+                lm.content = LayerContent::Adjustment(preview);
+            }
+            Some(doc)
+        });
+        if let Some(doc) = shown {
+            return (doc, key);
+        }
     }
     // Duotone documents display through their inks.
-    if let Some(shown) = photocraft_engine::mode_cmds::display_document(&st.doc) {
-        return (std::sync::Arc::new(shown), 1 << 41);
+    if let Some(shown) = memo_display(app, &snapshot, 1 << 41, || photocraft_engine::mode_cmds::display_document(&snapshot)) {
+        return (shown, 1 << 41);
     }
-    (st.doc.clone(), 0)
+    (snapshot, 0)
+}
+
+/// `display_doc`'s live-adjust and Duotone documents, built once per document snapshot and key
+/// rather than on each of its 3–4 calls a frame (#4527): each build clones the whole document.
+fn memo_display(
+    app: &mut PhotocraftApp,
+    snapshot: &std::sync::Arc<Document>,
+    key: u64,
+    build: impl FnOnce() -> Option<Document>,
+) -> Option<std::sync::Arc<Document>> {
+    let id = snapshot.id;
+    if let Some((doc, k, shown)) = app.display_memo.get(&id)
+        && *k == key
+        && doc.ptr_eq(&std::sync::Arc::downgrade(snapshot))
+    {
+        return Some(shown.clone());
+    }
+    let Some(shown) = build().map(std::sync::Arc::new) else {
+        app.display_memo.remove(&id);
+        return None;
+    };
+    // Entries of closed documents go when another is stored.
+    app.display_memo.retain(|_, (doc, _, _)| doc.strong_count() > 0);
+    app.display_memo.insert(id, (std::sync::Arc::downgrade(snapshot), key, shown.clone()));
+    Some(shown)
 }
 
 /// Longest side of the Navigator panel's image (about twice the panel's width, for HiDPI).
@@ -7668,3 +7699,7 @@ mod rotation_preview_isolation_tests {
         assert!(ensure_filter_preview(&mut app, 0, &egui::Context::default()).is_none(), "an inactive tab must never inherit the command preview");
     }
 }
+
+#[cfg(test)]
+#[path = "canvas_display_memo_tests.rs"]
+mod display_memo_tests;

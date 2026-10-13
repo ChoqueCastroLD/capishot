@@ -3216,14 +3216,14 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
 fn adjustment_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj: &photocraft_doc::Adjustment) {
     crate::adjust_editors::layer_editor(app, ui, id, adj);
     ui.add_space(6.0);
-    let layer = app.session.active().and_then(|s| s.doc.layer(id).cloned());
-    if let Some(l) = layer {
+    let layer = app.session.active().and_then(|s| s.doc.layer(id).map(|l| (l.visible, l.clipped)));
+    if let Some((visible, clipped)) = layer {
         ui.horizontal(|ui| {
-            let mut vis = l.visible;
+            let mut vis = visible;
             if widgets::toggle(ui, &mut vis, tl!("Adjustment visible")).changed() {
                 let _ = app.run("layer.setProps", json!({"layer": id.0, "visible": vis}));
             }
-            let mut clip = l.clipped;
+            let mut clip = clipped;
             if widgets::toggle(ui, &mut clip, tl!("Clip to layer below")).changed() {
                 let _ = app.run("layer.setProps", json!({"layer": id.0, "clipped": clip}));
             }

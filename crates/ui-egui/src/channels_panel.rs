@@ -65,7 +65,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let thumbs = app.channel_thumbs(&ctx);
     // The active layer's mask (Photoshop lists it, in italics, below the colour channels).
-    let masked = active_layer.and_then(|id| doc.layer(id)).filter(|l| l.mask.is_some()).cloned();
+    let masked = active_layer.and_then(|id| doc.layer(id)).filter(|l| l.mask.is_some());
     let mask_tex = masked.as_ref().and_then(|l| Some(app.mask_thumb(&ctx, &doc, l.id, l.mask.as_ref()?)));
     let mask_targeted = masked.is_some()
         && (app.ui.mask_target || view.target == ChannelTarget::LayerMask)
