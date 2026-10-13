@@ -726,7 +726,6 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
             f.insert("printer".into(), json!(fallback));
             f.remove("printerSettings");
         }
-        driver_page(&mut f);
     }
     app.ui.open_dialog(DialogKind::Command, f)
 }
@@ -828,6 +827,22 @@ fn print_paper_controls(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
 fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     let Some(doc) = app.session.active().map(|d| d.doc.clone()) else { return };
+    // PDF exports and previews retain editable paper on Windows too. Only a real native
+    // submission takes its media from the printer; entering that mode refreshes the driver
+    // geometry after any export-only paper edits.
+    let printers: Option<Vec<String>> = if !b(f, "dryRun", false) && s(f, "output", "").is_empty() {
+        f.get("__printers").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+    } else {
+        None
+    };
+    if printers.is_some() {
+        if !b(f, "__driverPageInitialized", false) {
+            driver_page(f);
+            f.insert("__driverPageInitialized".into(), json!(true));
+        }
+    } else {
+        f.remove("__driverPageInitialized");
+    }
     let p = params(f);
     ui.horizontal_top(|ui| {
         // Page preview.
@@ -904,8 +919,6 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                 ui.label(egui::RichText::new(s).font(crate::theme::semibold(12.0)).color(t.text));
             };
             head(ui, tl!("Printer Setup"));
-            let printers: Option<Vec<String>> =
-                f.get("__printers").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect());
             if let Some(printers) = &printers {
                 // Windows: Photoshop's Printer menu and Print Settings… (the driver's own dialog).
                 ui.horizontal(|ui| {

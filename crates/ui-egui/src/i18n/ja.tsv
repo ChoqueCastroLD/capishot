@@ -3796,13 +3796,6 @@ curves	Smooth	スムーズ
 	Sent to {printer}	{printer} に送信しました
 	set in Print Settings…	印刷設定で指定…
 # Restored rows (custom print paper #3820, brush presets, Vanishing Point help, brush panel menu)
-	Paper Width	用紙の幅
-	Paper Height	用紙の高さ
-	Capture Brush Size in Preset	ブラシサイズをプリセットに保存
-	Include Tool Settings	ツール設定を含める
-	Include Color	カラーを含める
-	Enter a name for the brush preset	ブラシプリセットの名前を入力してください
-	A brush preset with this name already exists	この名前のブラシプリセットは既に存在します
 	Drag to pan · Scroll to zoom · Double-click to fit	ドラッグで移動 · スクロールでズーム · ダブルクリックで全体表示
 	Clear Brush Controls	ブラシのコントロールを消去
 	Reset All Locked Settings	ロックされた設定をすべて初期化
