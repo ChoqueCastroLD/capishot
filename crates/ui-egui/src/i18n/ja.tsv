@@ -156,6 +156,8 @@
 	Transform Again on a Copy	複製してもう一度変形
 	Scale	拡大・縮小
 	Rotate	回転
+	Set horizontal skew	水平方向の斜体を設定
+	Set vertical skew	垂直方向の斜体を設定
 	Skew	斜体
 	Distort	ゆがみ
 	Perspective	遠近法

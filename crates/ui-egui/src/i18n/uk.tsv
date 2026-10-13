@@ -1165,6 +1165,8 @@
 	Offset	Зсув
 	Reset Transform	Скинути трансформацію
 	Rotate	Повернути
+	Set horizontal skew	Задати горизонтальний скіс
+	Set vertical skew	Задати вертикальний скіс
 	Flip Horizontal	Віддзеркалити горизонтально
 	Flip Vertical	Віддзеркалити вертикально
 	Frame Sync	Синхронізація кадрів

@@ -173,6 +173,8 @@
 	Transform	Μετασχηματισμός
 	Free Transform	Ελεύθερος μετασχηματισμός
 	Rotate	Περιστροφή
+	Set horizontal skew	Ορισμός οριζόντιας λοξής παραμόρφωσης
+	Set vertical skew	Ορισμός κατακόρυφης λοξής παραμόρφωσης
 	Flip Horizontal	Οριζόντια αναστροφή
 	Flip Vertical	Κατακόρυφη αναστροφή
 	Crop	Περικοπή

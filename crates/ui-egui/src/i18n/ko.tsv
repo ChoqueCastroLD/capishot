@@ -145,6 +145,8 @@
 	Transform Again on a Copy	사본에 변형 다시 적용
 	Scale	크기 조절
 	Rotate	회전
+	Set horizontal skew	가로 기울이기 설정
+	Set vertical skew	세로 기울이기 설정
 	Skew	기울이기
 	Distort	왜곡
 	Perspective	원근

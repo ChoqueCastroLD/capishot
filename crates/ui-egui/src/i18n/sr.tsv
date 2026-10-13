@@ -159,6 +159,8 @@
 	Scale	Skaliranje
 	Rotate	Rotacija
 	Skew	Iskošenje
+	Set horizontal skew	Podesi horizontalno iskošenje
+	Set vertical skew	Podesi vertikalno iskošenje
 	Distort	Izobličenje
 	Perspective	Perspektiva
 	Warp	Krivljenje

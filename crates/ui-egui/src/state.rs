@@ -919,6 +919,10 @@ pub struct TransformSession {
     /// `edit.contentAwareScale` with these options instead of `edit.transform`.
     #[serde(default)]
     pub content_aware: Option<ContentAwareOptions>,
+    /// The options bar's V (vertical skew, degrees) last typed. Any box can be read as scale,
+    /// skew and rotation with any vertical skew, so the bar keeps showing the typed one.
+    #[serde(default)]
+    pub skew_v: f64,
 }
 
 /// Content-Aware Scale's options bar: Amount, Protect and Protect Skin Tones.
