@@ -47,6 +47,21 @@ fn registering_fonts_moves_the_generation() {
     assert!(fonts::generation() > g);
 }
 
+/// Font menus cache on the shared engine's generation: other engines registering fonts (a test's
+/// throwaway one, in parallel) must not invalidate them, or the menus re-render every frame.
+#[test]
+fn only_the_shared_database_moves_the_shared_generation() {
+    let _ = crate::shared();
+    let g = fonts::shared_generation();
+    TextEngine::new().fonts.register_font_data(fonts::INTER_REGULAR.to_vec());
+    assert_eq!(fonts::shared_generation(), g, "an unrelated engine leaves it alone");
+    let mut e = TextEngine::new();
+    e.fonts.mark_shared();
+    let g = fonts::shared_generation();
+    e.fonts.register_font_data(fonts::INTER_REGULAR.to_vec());
+    assert!(fonts::shared_generation() > g);
+}
+
 #[test]
 fn literal_psd_tabs_shape_as_whitespace_without_shifting_text_offsets() {
     let mut e = TextEngine::new();

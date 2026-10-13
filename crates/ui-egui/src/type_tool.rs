@@ -985,11 +985,11 @@ fn draw_mask_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
 }
 
 /// Font families: bundled, system, and those the host serves (`photocraft_text::served`, fetched
-/// when picked). Cached until fonts are registered or the served catalog changes.
+/// when picked). Cached until the shared engine registers fonts or the served catalog changes.
 pub fn families() -> Arc<Vec<String>> {
     type Cached = Option<((u64, u64), Arc<Vec<String>>)>;
     static FAMILIES: std::sync::Mutex<Cached> = std::sync::Mutex::new(None);
-    let key = (photocraft_text::fonts::generation(), photocraft_text::served::generation());
+    let key = (photocraft_text::fonts::shared_generation(), photocraft_text::served::generation());
     let mut cached = FAMILIES.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some((k, v)) = cached.as_ref()
         && *k == key
@@ -1027,11 +1027,11 @@ pub fn sync_font_names(ctx: &egui::Context, show_in_english: bool) {
     });
 }
 
-/// The fonts' localized family names, keyed by family. Cached until fonts are registered.
+/// The fonts' localized family names, keyed by family. Cached until the shared engine registers fonts.
 fn localized_families() -> Arc<HashMap<String, String>> {
     type Cached = Option<(u64, Arc<HashMap<String, String>>)>;
     static LOCALIZED: std::sync::Mutex<Cached> = std::sync::Mutex::new(None);
-    let key = photocraft_text::fonts::generation();
+    let key = photocraft_text::fonts::shared_generation();
     let mut cached = LOCALIZED.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some((k, v)) = cached.as_ref()
         && *k == key

@@ -1428,6 +1428,33 @@ mod multi_layer_formatting {
         assert_ne!(text(h.state(), ids[2]).antialias, AntiAlias::Sharp);
     }
 
+    /// Other engines registering fonts and the served catalog growing (tests running in parallel)
+    /// used to move the key of the font menu's preview cache, so its samples re-rendered and asked
+    /// for a repaint every pass and `Harness::run` never settled (a flaky `exceeded max_steps`).
+    /// Here both happen on every pass.
+    #[test]
+    fn the_font_menu_settles_while_other_engines_register_fonts() {
+        let (app, _) = fixture();
+        let mut pass = 0u32;
+        let mut h = Harness::builder().with_size(vec2(1100.0, 800.0)).build_ui_state(
+            move |ui, app| {
+                photocraft_text::TextEngine::new();
+                // The served catalog is process-wide: names that sort last.
+                photocraft_text::served::add_families([format!("zz Churn Test {pass:03}")]);
+                pass = pass.saturating_add(1);
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    ui.horizontal(|ui| super::super::options_bar(app, ui));
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, Default::default());
+        h.run_steps(4);
+        h.get_all_by_role(Role::ComboBox).next().unwrap().click();
+        h.run();
+        h.run();
+    }
+
     #[test]
     fn properties_edit_shown_metrics_and_paragraphs_with_a_non_type_primary() {
         let (mut app, ids) = fixture();
