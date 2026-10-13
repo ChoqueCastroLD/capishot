@@ -245,7 +245,9 @@ impl Region {
         if !self.bbox.contains(x, y) {
             return 0.0;
         }
-        self.mask[(y - self.bbox.y0) as usize * self.bbox.width() as usize + (x - self.bbox.x0) as usize] as f32 / 255.0
+        let row = (y.abs_diff(self.bbox.y0) as usize).checked_mul(self.bbox.width() as usize);
+        let value = row.and_then(|i| i.checked_add(x.abs_diff(self.bbox.x0) as usize)).and_then(|i| self.mask.get(i)).copied().unwrap_or(0);
+        f32::from(value) / 255.0
     }
 }
 
@@ -1398,6 +1400,20 @@ mod tests {
                 [v, v / 2, 255 - v, if x % 11 == 0 { 128 } else { 255 }]
             })
             .collect()
+    }
+
+    #[test]
+    fn region_coverage_outside_a_short_mask_is_zero() {
+        let region = Region { bbox: Rect::new(-2, -3, 1, -1), mask: vec![255, 128] };
+        assert_eq!(region.at(-2, -3), 1.0);
+        assert!((region.at(-1, -3) - 128.0 / 255.0).abs() < 1e-6);
+        assert_eq!(region.at(0, -3), 0.0);
+        assert_eq!(region.at(-2, -2), 0.0);
+        assert_eq!(region.at(-3, -3), 0.0);
+
+        let extreme = Region { bbox: Rect::new(i32::MIN, i32::MIN, i32::MAX, i32::MAX), mask: vec![] };
+        assert_eq!(extreme.at(i32::MAX - 1, i32::MAX - 1), 0.0);
+        assert_eq!(extreme.at(i32::MIN, i32::MIN), 0.0);
     }
 
     #[test]
