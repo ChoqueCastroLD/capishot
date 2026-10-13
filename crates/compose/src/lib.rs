@@ -1387,7 +1387,8 @@ fn split_parts(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<(Buffer, Buffer, O
 // ---------------------------------------------------------------------------------------------
 // Layer-effect map cache
 
-/// Order-independent identity of a layer's pixels, masks, effects and (for groups) children.
+/// Order-independent identity of a layer's pixels, masks, effects, Advanced Blending and Blend If
+/// and (for groups) children.
 /// Pixels are identified by their copy-on-write tile pointers; cache entries pin a clone of the
 /// layer so those tiles (and their addresses) stay alive while the entry exists.
 fn layer_identity(layer: &Layer, h: &mut std::collections::hash_map::DefaultHasher) {
@@ -1445,6 +1446,10 @@ fn layer_identity(layer: &Layer, h: &mut std::collections::hash_map::DefaultHash
         format!("{vm:?}").hash(h);
     }
     format!("{:?}", layer.effects).hash(h);
+    // Transparency Shapes Layer picks the shape (content or the whole layer); a group child's
+    // Blend If and knockout change the composite a styled group's shape comes from.
+    layer.advanced.hash(h);
+    layer.blend_if.hash(h);
     h.write_u8(0xfe);
 }
 
