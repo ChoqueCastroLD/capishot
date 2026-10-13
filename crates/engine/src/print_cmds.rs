@@ -390,17 +390,12 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
     let send = p.get("send").and_then(Value::as_bool).unwrap_or(output.is_none());
     let copies = crate::commands::int(p, "copies").unwrap_or(1).clamp(1, 999) as u32;
     let dry = p.get("dryRun").and_then(Value::as_bool).unwrap_or(false);
-    // Apply the process-wide test/fuzz guard before either native transport can reach a driver.
-    if send && !dry && printing_disabled() {
-        return Err(other(
-            "printing is disabled in this process (photocraft_engine::print_cmds::disable_printing or PHOTOCRAFT_NO_PRINT); use dryRun: true",
-        ));
-    }
     // Shared RGB transport handles compatible Windows pages; PDF-only content retains its route.
     // Sending follows the shared command contract; fuzz tests explicitly request dryRun.
     // The worker returns its result before repeat settings and hooks are applied once.
     let handling = p.get("colorHandling").and_then(Value::as_str).unwrap_or("printerManages");
     if cfg!(windows) && send && !dry && output.is_none() && native_rgb_compatible(&page, handling) {
+        require_printing_enabled()?;
         let printed = print_windows(&page, p, &doc.name, copies)?;
         return Ok(json!({
             "pdf": Value::Null, "paper": [pw, ph], "imageRect": [x, y, w, h], "emulsionDown": emulsion_down, "scale": scale * 100.0,
@@ -431,6 +426,7 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
     let mut sent = false;
     let mut spool = Value::Null;
     if send && !dry {
+        require_printing_enabled()?;
         spool = json!(craft_print::submit(&pdf, &job).map_err(other)?);
         sent = true;
     }
@@ -567,6 +563,14 @@ pub fn disable_printing() {
 /// Whether spooling is blocked by [`disable_printing`] or `PHOTOCRAFT_NO_PRINT`.
 pub fn printing_disabled() -> bool {
     PRINTING_DISABLED.load(std::sync::atomic::Ordering::Relaxed) || std::env::var_os("PHOTOCRAFT_NO_PRINT").is_some_and(|v| !v.is_empty() && v != "0")
+}
+
+fn require_printing_enabled() -> Result<()> {
+    if printing_disabled() {
+        Err(other("printing is disabled in this process (photocraft_engine::print_cmds::disable_printing or PHOTOCRAFT_NO_PRINT); use dryRun: true"))
+    } else {
+        Ok(())
+    }
 }
 
 fn print(s: &mut Session, p: &Value) -> Result<Value> {
