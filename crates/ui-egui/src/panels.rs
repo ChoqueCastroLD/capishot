@@ -198,6 +198,8 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                         });
                                     }
                                     if slot.len() > 1 && long_press {
+                                        // Holding a tool button selects the tool it shows, as a click would (#4453).
+                                        app.ui.tool = tool;
                                         ui.ctx().request_repaint();
                                     }
                                     if let Some((open_key, anchor)) = ui.data(|d| d.get_temp::<(egui::Id, Rect)>(flyout_id))
@@ -4707,9 +4709,9 @@ mod type_flyout_tests {
     }
 
     #[test]
-    fn long_press_type_button_selects_vertical_without_selecting_on_release() {
+    fn long_press_type_button_selects_type_then_vertical_from_the_flyout() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        let initial = app.ui.tool;
+        assert_ne!(app.ui.tool, Tool::Type);
         let ctx = egui::Context::default();
         PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
         frame(&mut app, &ctx, 0.0, vec![]);
@@ -4733,7 +4735,8 @@ mod type_flyout_tests {
         assert_eq!(ctx.data(|d| d.get_temp::<(egui::Id, Rect)>(egui::Id::new("tool-flyout"))).map(|(id, _)| id), Some(egui::Id::new(("tool-slot", index))));
         frame(&mut app, &ctx, 1.4, vec![pointer(at, false)]);
         frame(&mut app, &ctx, 1.45, vec![]);
-        assert_eq!(app.ui.tool, initial);
+        // The held button's tool is selected, as Photoshop does (#4453).
+        assert_eq!(app.ui.tool, Tool::Type);
         let key = egui::Id::new(("tool-slot", index));
         let menu = ctx.memory(|m| m.area_rect(key.with("flyout"))).unwrap();
         let row = egui::pos2(menu.left() + 65.0, menu.top() + 39.0 + 8.0);
