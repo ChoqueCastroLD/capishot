@@ -1190,6 +1190,7 @@ impl PhotocraftApp {
             st.source_read_only = photocraft_io::affinity::is_affinity(bytes);
         }
         self.sync_views();
+        let warnings = file_open::with_missing_fonts(self, warnings);
         self.ui.status = crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]);
         self.ui.status_error = false;
         if camera_raw_ui::wants_open_dialog(self, &warnings) {
