@@ -151,6 +151,14 @@ fn workspace_name(id: &str) -> Option<&'static str> {
 
 /// Run a command id from any source (menu, shortcut, palette, automation).
 pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
+    // Anonymous usage statistics (web only, opt-out): the id is counted, never the params.
+    let scope = crate::telemetry::Scope::enter(app.automation_input);
+    let r = invoke_counted(app, ctx, id, params);
+    scope.finish(id, &r, || app.session.active().map(|st| crate::telemetry::megapixels(st.doc.size.width, st.doc.size.height)));
+    r
+}
+
+fn invoke_counted(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
     if app.automation_input
         && let Some(authorize) = app.services.automation_command.as_ref()
     {
@@ -1214,7 +1222,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
     if let Some(id) = clicked {
         let ctx = ui.ctx().clone();
         let id = alt_click(id, ctx.input(|i| i.modifiers.alt));
-        if let Err(e) = invoke(app, &ctx, &id, json!({})) {
+        if let Err(e) = crate::telemetry::with_source(crate::telemetry::Source::Menu, || invoke(app, &ctx, &id, json!({}))) {
             app.ui.status = e;
             app.ui.status_error = true;
         }

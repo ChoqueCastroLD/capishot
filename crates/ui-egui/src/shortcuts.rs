@@ -201,7 +201,7 @@ fn nav_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
             && consume(ctx, &sc)
         {
             if crate::menus::is_enabled(app, id) {
-                let _ = crate::menus::invoke(app, ctx, id, json!({}));
+                let _ = crate::telemetry::with_source(crate::telemetry::Source::Shortcut, || crate::menus::invoke(app, ctx, id, json!({})));
             }
             return true;
         }

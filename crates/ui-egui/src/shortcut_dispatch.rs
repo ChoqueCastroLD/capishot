@@ -307,6 +307,10 @@ fn label(id: &str) -> String {
 
 /// Run a shortcut's command like its menu item (dialogs included), or say why it can't run.
 pub fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str) {
+    crate::telemetry::with_source(crate::telemetry::Source::Shortcut, || dispatch_shortcut(app, ctx, id));
+}
+
+fn dispatch_shortcut(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str) {
     let action = id.strip_prefix(crate::actions::SHORTCUT_PREFIX);
     let command_id = if action.is_some() { "actions.play" } else { id };
     let outcome = if !crate::menus::is_enabled(app, command_id) {
@@ -325,6 +329,8 @@ pub fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str) {
                 if v.get("failed").is_some_and(|f| f.is_object()) { Err(app.ui.status.clone()) } else { Ok(v) }
             })
         } else if crate::adjust_dialog::has_dialog(id) {
+            // Counted like the menu item, which opens the same dialog through `menus::invoke`.
+            crate::telemetry::with(|r| r.command(id, crate::telemetry::Source::Shortcut));
             crate::adjust_dialog::open(app, id);
             Ok(serde_json::Value::Null)
         } else {

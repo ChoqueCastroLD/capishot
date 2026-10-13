@@ -15,7 +15,8 @@
   <a href="#everything-in-the-box">Everything in the box</a> ·
   <a href="#build">Build</a> ·
   <a href="#psd-fidelity">PSD fidelity</a> ·
-  <a href="#roadmap">Roadmap</a>
+  <a href="#roadmap">Roadmap</a> ·
+  <a href="#privacy">Privacy</a>
 </p>
 
 > Capishot es un editor de imágenes libre pensado para scans: los mismos menús, herramientas y
@@ -107,6 +108,21 @@ Crates keep their `photocraft-*` names so Capishot can keep merging PhotoCraft's
 `scripts/capishot-rebrand.py` re-applies the branding after each merge.
 
 New contributors and AI agents: start with [`AGENTS.md`](AGENTS.md), then [`docs/`](docs/).
+
+## Privacy
+
+The desktop app sends nothing. The hosted web app (capichan.com/capishot and its mirrors) sends
+anonymous usage statistics to its own server, so we know how many people use it, for how long and
+which commands and tools matter: a random install id (kept in your browser) and session id, the
+command ids you run counted per batch (never their settings), tool switches, active and total
+session time, opened, saved and exported file *kinds* with coarse size buckets and timings, error
+classes (never messages), and coarse device classes (browser and OS family, GPU vendor class,
+screen size bucket, UI language, threads build). The server keeps at most the country from
+Cloudflare, never your IP address. Never sent: file names, paths, document content, text you type.
+Raw events are deleted after 180 days. Turn it off in **Preferences › General › Send anonymous
+usage statistics**; a browser that sends Do Not Track or Global Privacy Control is never counted.
+Code: `crates/ui-egui/src/telemetry.rs` (what is recorded) and
+`apps/photocraft-web/src/usage_stats.rs` (sending).
 
 ## Roadmap
 

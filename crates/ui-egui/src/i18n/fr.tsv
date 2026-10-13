@@ -3142,3 +3142,6 @@ cameraData	Lens	Objectif
 # Eraser: Erase to History; Magic Wand: Sample Size.
 	Erase to History	Effacer vers l'historique
 	Sample Size	Taille de l'échantillon
+# Anonymous usage statistics (web build): Preferences › General, About.
+	Send anonymous usage statistics	Envoyer des statistiques d’utilisation anonymes
+	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	La version web envoie des statistiques d’utilisation anonymes (aucun fichier ni contenu) ; désactivez-les dans Préférences › Général.

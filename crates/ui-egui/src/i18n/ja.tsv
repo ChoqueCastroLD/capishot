@@ -3736,3 +3736,6 @@ cameraData	Lens	レンズ
 # Eraser: Erase to History; Magic Wand: Sample Size.
 	Erase to History	ヒストリーに戻す
 	Sample Size	サンプル範囲
+# Anonymous usage statistics (web build): Preferences › General, About.
+	Send anonymous usage statistics	匿名の使用統計を送信
+	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Web 版は匿名の使用統計を送信します（ファイルや内容は送信しません）。環境設定 › 一般 でオフにできます。
