@@ -7261,6 +7261,46 @@ mod tests {
         assert!(app.style_preview.is_none());
     }
 
+    /// Layer Style opened while Free Transform is open applies the box first, as Photoshop does,
+    /// so the dialog previews on the transformed layer (#4821): a dropped file (placed in the box,
+    /// untouched) and a box opened by hand and moved.
+    #[test]
+    fn layer_style_opened_during_free_transform_applies_the_box_and_previews() {
+        for placed in [true, false] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+            app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+            app.run("layer.new.layer", json!({})).unwrap();
+            app.run("select.rect", json!({"x": 8, "y": 8, "width": 16, "height": 16})).unwrap();
+            app.run("edit.fill", json!({"color": "#0000ff"})).unwrap();
+            app.run("select.deselect", json!({})).unwrap();
+            app.sync_views();
+            let ctx = egui::Context::default();
+            let dx = if placed {
+                crate::transform_tool::begin_placed(&mut app, &ctx).unwrap();
+                0
+            } else {
+                crate::transform_tool::begin(&mut app, &ctx).unwrap();
+                app.ui.transform.as_mut().unwrap().quad = [[28.0, 8.0], [44.0, 8.0], [44.0, 24.0], [28.0, 24.0]];
+                20
+            };
+            crate::layer_style::open(&mut app, Some("dropShadow")).unwrap();
+            assert!(app.ui.transform.is_none() && app.transform_preview.is_none(), "placed {placed}: the box is applied");
+            let (shown, _) = display_doc(&mut app, 0);
+            let rect = photocraft_geom::Rect::new(0, 0, 64, 64);
+            let with = photocraft_compose::render(&shown, rect);
+            let without = photocraft_compose::render(&app.session.documents()[0].doc, rect);
+            assert!(
+                with.get(16 + dx, 16)[0] < 0.1 && with.get(16 + dx, 16)[2] > 0.9,
+                "placed {placed}: the blue block where the box left it, not the white under it"
+            );
+            // The shadow darkens the white around the block, which the document doesn't have yet.
+            let block = |x: i32, y: i32| (8 + dx..24 + dx).contains(&x) && (8..24).contains(&y);
+            let shadow =
+                (0..64).flat_map(|y| (0..64).map(move |x| (x, y))).filter(|&(x, y)| !block(x, y) && without.get(x, y)[0] - with.get(x, y)[0] > 0.05).count();
+            assert!(shadow > 20, "placed {placed}: the Drop Shadow is previewed ({shadow} px)");
+        }
+    }
+
     #[test]
     fn fill_view_covers_the_canvas_and_centres_the_document() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
