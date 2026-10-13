@@ -669,6 +669,9 @@ pub fn warps_type(app: &PhotocraftApp) -> bool {
 fn enter_type_warp(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.ui.transform.as_ref().is_some_and(|t| t.quad != corners(t.rect)) {
         commit(app);
+        if app.ui.transform.is_some() {
+            return; // refused: the box stays as it was
+        }
         if let Err(e) = begin(app, ctx) {
             app.ui.status = e;
             return;
@@ -954,7 +957,7 @@ pub fn commit(app: &mut PhotocraftApp) {
     }
     let type_layer = warps_type(app);
     let Some(t) = app.ui.transform.take() else { return };
-    app.transform_preview = None;
+    let preview = app.transform_preview.take();
     if let Some(options) = &t.content_aware {
         crate::cas_transform::commit(app, &t, options);
         return;
@@ -968,12 +971,12 @@ pub fn commit(app: &mut PhotocraftApp) {
             None => p["quad"] = json!(t.quad),
         }
         if let Err(e) = app.run("select.transformSelection", p) {
-            app.ui.status = e;
+            keep_open(app, t, preview, e);
         }
         return;
     }
-    if let Some(target) = t.path {
-        let mut p = target;
+    if let Some(target) = &t.path {
+        let mut p = target.clone();
         match &t.warp {
             Some(w) if w.is_identity() => return,
             Some(w) => p["warp"] = json!(w),
@@ -988,7 +991,7 @@ pub fn commit(app: &mut PhotocraftApp) {
             },
         }
         if let Err(e) = app.run("path.transform", p) {
-            app.ui.status = e;
+            keep_open(app, t, preview, e);
         }
         return;
     }
@@ -1004,8 +1007,8 @@ pub fn commit(app: &mut PhotocraftApp) {
             return; // untouched: nothing to do and no history step; a ⌥⌘T copy or a place stays
         }
         let mut p = json!({"layer": t.layer, "rect": t.rect, "quad": t.quad, "interpolation": t.interpolation});
-        if let Some(target) = t.target {
-            p["target"] = target;
+        if let Some(target) = &t.target {
+            p["target"] = target.clone();
         }
         app.run("edit.transform", p)
     };
@@ -1015,15 +1018,17 @@ pub fn commit(app: &mut PhotocraftApp) {
                 fold_made(app, made);
             }
         }
-        Err(e) => {
-            if made.is_some()
-                && let Some(document) = document
-            {
-                take_back_made(app, document, LayerId(t.layer));
-            }
-            app.ui.status = e;
-        }
+        Err(e) => keep_open(app, t, preview, e),
     }
+}
+
+/// A commit the engine refused (a result over the pixel budget, #3773): the box stays open as it
+/// was, with the reason in the status bar, so the transform can be changed or cancelled. A copy or
+/// a placed layer it made goes only when it is cancelled.
+fn keep_open(app: &mut PhotocraftApp, t: TransformSession, preview: Option<TransformPreview>, e: String) {
+    app.ui.transform = Some(t);
+    app.transform_preview = preview;
+    app.ui.status = e;
 }
 
 /// A transform whose layer or document went away (undo, close) ends silently; picking another tool
@@ -1055,6 +1060,10 @@ pub fn end_if_left(app: &mut PhotocraftApp) {
         || (!selection && st.active_layer.is_some_and(|active| active.0 != layer.0))
     {
         commit(app);
+        // Picking another tool or layer can't leave a refused transform open: it ends, as Esc would.
+        if app.ui.transform.is_some() {
+            cancel(app);
+        }
     }
 }
 
@@ -3411,6 +3420,30 @@ mod tests {
         let b = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().content_bounds();
         assert!(b.width().abs_diff(32) <= 2 && b.x0.abs_diff(0) <= 1, "{b:?}");
         assert!(app.ui.transform.is_none() && app.transform_preview.is_none());
+    }
+
+    /// A commit the engine refuses (here a collapsed box; a result over the pixel budget, #3773, is
+    /// refused the same way) shows the reason and keeps the box open, unchanged; picking another
+    /// tool then ends it.
+    #[test]
+    fn a_refused_commit_keeps_the_box_open() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        let (revision, steps) = (app.session.active().unwrap().revision, app.session.active().unwrap().history.past_len());
+        begin(&mut app, &ctx).unwrap();
+        if let Some(t) = app.ui.transform.as_mut() {
+            t.quad = [[16.0, 16.0]; 4];
+        }
+        commit(&mut app);
+        let t = app.ui.transform.as_ref().expect("the box stays open");
+        assert_eq!(t.quad, [[16.0, 16.0]; 4], "as the user left it");
+        assert!(app.transform_preview.is_some(), "with its preview");
+        assert!(app.ui.status.contains("collapses"), "{}", app.ui.status);
+        let st = app.session.active().unwrap();
+        assert_eq!((st.revision, st.history.past_len()), (revision, steps), "the document was not changed");
+        app.ui.tool = if app.ui.tool == Tool::Brush { Tool::Move } else { Tool::Brush };
+        end_if_left(&mut app);
+        assert!(app.ui.transform.is_none() && app.transform_preview.is_none(), "another tool ends it");
     }
 
     /// #352: ⌥⌘T transforms a copy. OK leaves the original and a moved copy as one history step;
