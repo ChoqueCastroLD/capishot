@@ -1,6 +1,6 @@
 # Where PhotoCraft falls short of Photoshop
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (adaptive Unsharp Mask CPU performance evidence added; beta gap and budget counts unchanged) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Move drag of selected pixels: GPU path and measurements added; beta gap and budget counts unchanged) · **Target:** Adobe Photoshop 2026
 
 Every known shortfall against Photoshop 2026 (27.11.0), one entry each, ranked by user impact
 on the way to beta. This is the work list agents pick from: take the highest-ranked entry that
@@ -172,6 +172,15 @@ what an agent can't finish alone.
   streamed path, whose 220 paired outputs match byte for byte. This does not close a published
   performance budget or establish GUI latency / Photoshop parity. See
   [method, upstream research and limits](unsharp-mask-performance.md).
+- **Measured progress (2026-10-13):** a Move drag of selected pixels (floating selection) cost
+  ~73 ms of main thread per frame in a user's Chrome trace (threads build, RTX 3060): the
+  piece was composited into its layer on the CPU and the whole piece area re-uploaded every
+  frame. The canvas now shows the piece as a layer of its own over the cut-out layer where that
+  composites identically, drawn from its resident GPU pixels at the offset (no uploads after
+  the first frame). Threads build, headless Chromium (SwiftShader GL), 20 layers, app update
+  per frame p50: 2000×3000 24.5 → 7.3 ms (a drag without selection: 7.2 ms), 4000×6000
+  189 → 12.4 ms; Free Transform start with a selection 775 → 169 ms at 4000×6000. Dropped
+  pixels are unchanged. GPU-side time and real-GPU latency were not measured.
 - **Missing:** 22 of 25 budgeted scenarios are over budget (baseline 2026-10-05, a heavily
   loaded machine): layer move with styles 321 ms p50 against 25 ms, opacity change 276 ms
   against 20 ms, paste 12 MP 1.2 s against 100 ms, layer move on 15000×10000 16-bit 2.7 s,
@@ -228,5 +237,6 @@ what an agent can't finish alone.
 |---|---|---|
 | 2026-10-10 | minor | G2: recorded Tilt-Shift computation/filtered-proxy measurements and limits; gap and estimate remain open |
 | 2026-10-11 | minor | G2: recorded adaptive Unsharp Mask speedups, numerical limits and exact fallback; budget counts and beta gap unchanged |
+| 2026-10-13 | minor | G2: Move drag of selected pixels on the GPU canvas (floating piece as its own resident layer) measurements; budget counts and beta gap unchanged |
 | 2026-10-10 | minor | Checked against the alpha gate (no alpha blockers); #2374 marked closed |
 | 2026-10-10 | major | First version, from the full re-measure against Photoshop 2026 27.11.0 and the open issues |

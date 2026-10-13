@@ -250,7 +250,10 @@ fn split_shows_what_the_composited_piece_shows() {
                 assert_eq!(piece.surface().unwrap().content_bounds(), f.parts.piece().content_bounds().translate(dx, dy), "{what}");
                 let cut = split.layer(id).unwrap().surface().unwrap().clone();
                 if let Some(r) = &rest {
-                    assert!(cut == *r && cut.tiles().zip(r.tiles()).all(|(a, b)| std::sync::Arc::ptr_eq(a.1, b.1)), "{what}: the cut-out layer's tiles are shared");
+                    assert!(
+                        cut == *r && cut.tiles().zip(r.tiles()).all(|(a, b)| std::sync::Arc::ptr_eq(a.1, b.1)),
+                        "{what}: the cut-out layer's tiles are shared"
+                    );
                 }
                 rest = Some(cut);
             }
@@ -268,7 +271,8 @@ fn split_shows_what_the_composited_piece_shows() {
 /// composited into the layer, as before.
 #[test]
 fn layers_that_dont_split_show_the_composited_piece() {
-    let cases: [(&str, fn(&mut Document, LayerId)); 6] = [
+    type Setup = fn(&mut Document, LayerId);
+    let cases: [(&str, Setup); 6] = [
         ("opacity", |d, id| d.layer_mut(id).unwrap().opacity = 0.5),
         ("fill", |d, id| d.layer_mut(id).unwrap().fill_opacity = 0.5),
         ("multiply", |d, id| d.layer_mut(id).unwrap().blend = photocraft_color::BlendMode::Multiply),
