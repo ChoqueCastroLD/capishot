@@ -1599,16 +1599,24 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
         let fresh = app.filter_preview.as_ref().is_some_and(|p| p.key == request);
         if !fresh && !app.filter_preview_worker.busy() {
             let doc = app.session.documents().get(idx)?.doc.clone();
+            let documents: Vec<_> = app.session.documents().iter().map(|d| d.doc.clone()).collect();
             let task = request.clone();
             if let Err(error) = app.filter_preview_worker.start(request.clone(), ctx.clone(), move |cancel| {
                 let t0 = crate::gpu_canvas::now_ms();
-                let result =
-                    crate::filter_dialog::preview_document_for_target(&doc, task.active, &task.command, &task.params, task.k, Some(cancel), task.target).map(
-                        |doc| {
-                            let buffer = photocraft_compose::flatten(&doc);
-                            (std::sync::Arc::new(doc), buffer)
-                        },
-                    );
+                let result = crate::filter_dialog::preview_document_for_target(
+                    &doc,
+                    task.active,
+                    &task.command,
+                    &task.params,
+                    task.k,
+                    Some(cancel),
+                    task.target,
+                    &documents,
+                )
+                .map(|doc| {
+                    let buffer = photocraft_compose::flatten(&doc);
+                    (std::sync::Arc::new(doc), buffer)
+                });
                 crate::filter_preview_worker::Computed { result, ms: crate::gpu_canvas::now_ms() - t0 }
             }) {
                 app.filter_preview = Some(crate::filter_dialog::FilterPreview { key: request.clone(), result: None, committing: false });
@@ -1639,10 +1647,19 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
     let _ = ctx;
     if app.filter_preview.as_ref().is_none_or(|p| p.key != request) {
         let doc = app.session.documents().get(idx)?.doc.clone();
+        let documents: Vec<_> = app.session.documents().iter().map(|d| d.doc.clone()).collect();
         let t0 = crate::gpu_canvas::now_ms();
-        let result =
-            crate::filter_dialog::preview_document_for_target(&doc, request.active, &request.command, &request.params, request.k, None, request.target)
-                .map(std::sync::Arc::new);
+        let result = crate::filter_dialog::preview_document_for_target(
+            &doc,
+            request.active,
+            &request.command,
+            &request.params,
+            request.k,
+            None,
+            request.target,
+            &documents,
+        )
+        .map(std::sync::Arc::new);
         if let Some(r) = &result {
             let buf = photocraft_compose::flatten(r);
             let t1 = crate::gpu_canvas::now_ms();
