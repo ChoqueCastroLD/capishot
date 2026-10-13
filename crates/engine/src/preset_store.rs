@@ -1125,6 +1125,11 @@ impl Session {
         }
         self.brush_presets_changed();
         self.sync_preset_store();
+        // A brush remembered from the previous run (or picked before the store loaded) may be
+        // painting with previews; load the full tips now (a missing one keeps its preview).
+        let mut brush = std::mem::take(&mut self.tools.brush);
+        let _ = self.load_brush_tips(&mut brush);
+        self.tools.brush = brush;
         if let Some(st) = self.preset_store.as_mut() {
             warnings.extend(st.take_warnings());
         }
@@ -1139,7 +1144,11 @@ impl Session {
             if st.synced_rev != Some(rev) {
                 st.sync(&mut self.tools.presets);
                 st.synced_rev = Some(rev);
-                link_stored_tips(st, &mut self.tools.brush);
+                if link_stored_tips(st, &mut self.tools.brush) {
+                    // An embedded tip became a store reference: what the last-brush
+                    // persistence would write changed without a command touching the brush.
+                    self.tools.brush_changed();
+                }
             }
             st.sync_actions(&self.actions.list, actions_rev);
         }
@@ -1172,7 +1181,7 @@ impl Session {
 /// After a sync, an embedded bitmap of the tool's brush that the store now holds (the brush was
 /// just saved as a preset) becomes the stored tile, keeping its bitmap: the brush then matches its
 /// preset (Brushes panel highlight) like a preset picked from the library.
-fn link_stored_tips(st: &PresetStore, b: &mut BrushSettings) {
+fn link_stored_tips(st: &PresetStore, b: &mut BrushSettings) -> bool {
     let link = |g: &GrayTile| -> Option<StoredTile> {
         if !g.is_valid() {
             return None;
@@ -1180,24 +1189,29 @@ fn link_stored_tips(st: &PresetStore, b: &mut BrushSettings) {
         let h = tip_hash(g);
         st.tips.contains_key(&h).then(|| StoredTile { key: h, width: g.width, height: g.height, preview: Arc::new(g.preview(PREVIEW_SIDE)), full: None })
     };
+    let mut linked = false;
     if let TipShape::Sampled(g) = &b.tip
         && let Some(r) = link(g)
         && let TipShape::Sampled(g) = std::mem::take(&mut b.tip)
     {
         b.tip = TipShape::Stored(StoredTile { full: Some(Arc::new(g)), ..r });
+        linked = true;
     }
     if let TipShape::Sampled(g) = &b.dual_brush.tip
         && let Some(r) = link(g)
         && let TipShape::Sampled(g) = std::mem::take(&mut b.dual_brush.tip)
     {
         b.dual_brush.tip = TipShape::Stored(StoredTile { full: Some(Arc::new(g)), ..r });
+        linked = true;
     }
     if let Pattern::Tile(g) = &b.texture.pattern
         && let Some(r) = link(g)
         && let Pattern::Tile(g) = std::mem::take(&mut b.texture.pattern)
     {
         b.texture.pattern = Pattern::Stored(StoredTile { full: Some(Arc::new(g)), ..r });
+        linked = true;
     }
+    linked
 }
 
 #[cfg(test)]

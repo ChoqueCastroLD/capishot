@@ -299,6 +299,13 @@ pub struct ToolState {
     /// preset stays "the current brush" so `brush.presets.update` can overwrite it); cleared when
     /// the brush is reset or the preset is gone.
     pub current_preset: Option<String>,
+    /// Bumped whenever `brush` or `current_preset` changes ([`ToolState::brush_changed`]). The
+    /// last-brush persistence watches it instead of comparing the brush itself, so an unchanged
+    /// brush costs a counter compare per frame, not a clone and serialise.
+    pub brush_rev: u64,
+    /// The revision whose value is in `Preferences::last_brush` (a restored one counts as saved):
+    /// [`brush_rev`](Self::brush_rev) == `brush_saved_rev` means there is nothing new to write.
+    pub brush_saved_rev: u64,
     /// A layer mask is the edit target ([`ToolState::target_mask`]).
     pub mask_targeted: bool,
     /// The foreground/background pair of the edit target that isn't current: the layer pixels'
@@ -333,6 +340,13 @@ impl ToolState {
     /// background (reveal-paint first).
     pub const MASK_COLORS: [[f32; 4]; 2] = [[1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]];
 
+    /// Note that `brush` or `current_preset` changed. Every setter of either (commands and the
+    /// shell's tool-switch paths) calls this; the last-brush persistence only serialises when the
+    /// revision has moved since the stored value ([`Self::brush_saved_rev`]).
+    pub fn brush_changed(&mut self) {
+        self.brush_rev = self.brush_rev.wrapping_add(1);
+    }
+
     /// Switch the edit target between layer pixels and a layer mask. Like Photoshop, the mask and
     /// the pixels keep separate app-wide foreground/background pairs: changing the target puts
     /// the current pair aside and brings back the other one, so colours picked while a mask is
@@ -365,6 +379,8 @@ impl Default for ToolState {
             mixer: Default::default(),
             brush_gesture: None,
             current_preset: None,
+            brush_rev: 0,
+            brush_saved_rev: 0,
             mask_targeted: false,
             other_colors: Self::MASK_COLORS,
             cmyk_picks: Vec::new(),

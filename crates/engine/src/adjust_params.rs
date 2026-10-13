@@ -1638,7 +1638,8 @@ mod tests {
     #[test]
     fn destructive_levels_dont_clip_in_32_bit() {
         // Input 15..230, gamma 1.3, output 10..245: integer documents stop at the output range,
-        // while float documents preserve the curve's signed and HDR values beyond it.
+        // while float documents preserve the curve's signed and HDR values beyond it (the
+        // compose-side `levels_dont_clip_in_32_bit` pins the same curve, #2592).
         let params = json!({"inBlack": 15, "inWhite": 230, "gamma": 1.3, "outBlack": 10, "outWhite": 245});
         for depth in [8, 16, 32] {
             let mut s = crate::Session::new();
