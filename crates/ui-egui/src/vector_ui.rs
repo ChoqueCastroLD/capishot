@@ -304,6 +304,12 @@ pub fn pen_grab_handle(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
     true
 }
 
+/// Would a press at `at` close the Pen path: is the pointer on the first anchor of a path that
+/// already has a segment, and no drag is under way? The canvas then shows the close cue (#4193).
+pub(crate) fn over_first_anchor(pen: &PenPath, at: [f64; 2], tol: f64) -> bool {
+    !pen.dragging && pen.moving.is_none() && pen.knots.len() >= 2 && pen.knots.first().is_some_and(|k| (k[0][0] - at[0]).hypot(k[0][1] - at[1]) < tol)
+}
+
 /// Is a close-drag in progress: does the path end in the stand-in for its first anchor?
 fn closing(pen: &PenPath) -> bool {
     pen.knots.len() >= 3 && pen.knots.first().map(|k| k[0]) == pen.knots.last().map(|k| k[0])
@@ -891,6 +897,16 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
                 }
             }
             draw_anchor(painter, c, last, accent);
+        }
+        // Hovering the first anchor: Photoshop's close cue, a small ring beside the pointer.
+        let tol = 6.0 / f64::from(app.point_zoom().max(0.01));
+        if let Some(h) = app.hover_doc
+            && over_first_anchor(pen, h, tol)
+            && let Some(first) = pen.knots.first()
+        {
+            let c = to_scr(first[0]);
+            painter.rect_filled(Rect::from_center_size(c, vec2(8.0, 8.0)), 0.0, accent);
+            painter.circle_stroke(c + vec2(11.0, 11.0), 3.5, Stroke::new(1.5, accent));
         }
     }
 }
@@ -1879,6 +1895,21 @@ mod tests {
         assert!(preview(&app, Tool::Rectangle, [10.2, 40.0]).is_none(), "too thin to draw");
         assert!(photocraft_engine::vector_cmds::shape_path(&json!({"kind": "nope", "rect": [0, 0, 5, 5]})).is_err());
         assert!(photocraft_engine::vector_cmds::shape_path(&json!({"kind": "rect"})).is_err());
+    }
+
+    #[test]
+    fn pen_shows_the_close_cue_only_over_the_first_anchor_of_a_real_segment() {
+        let mut app = app();
+        app.ui.tool = Tool::Pen;
+        pen_down(&mut app, 20.0, 20.0);
+        pen_up(&mut app);
+        let one = app.ui.pen.clone().unwrap();
+        assert!(!over_first_anchor(&one, [20.0, 20.0], 6.0), "a single anchor has nothing to close");
+        pen_down(&mut app, 120.0, 20.0);
+        pen_up(&mut app);
+        let two = app.ui.pen.clone().unwrap();
+        assert!(over_first_anchor(&two, [22.0, 21.0], 6.0));
+        assert!(!over_first_anchor(&two, [60.0, 60.0], 6.0));
     }
 
     #[test]
