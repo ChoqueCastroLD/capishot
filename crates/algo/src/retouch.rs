@@ -121,31 +121,34 @@ pub fn local_blur(data: &[f32], w: usize, h: usize, ch: usize, alpha: Option<usi
     let k: Vec<f32> = (-r..=r).map(|i| (-((i * i) as f32) / (2.0 * sigma * sigma).max(1e-6)).exp()).collect();
     let ks: f32 = k.iter().sum();
     let k: Vec<f32> = k.into_iter().map(|v| v / ks).collect();
-    let get = |x: i32, y: i32, out: &mut [f32]| {
-        let (xx, yy) = (x.clamp(0, w as i32 - 1) as usize, y.clamp(0, h as i32 - 1) as usize);
-        let i = (yy * w + xx) * ch;
-        out.copy_from_slice(&data[i..i + ch]);
-        if let Some(a) = alpha {
-            let av = out[a];
-            for (c, v) in out.iter_mut().enumerate() {
-                if c != a {
-                    *v *= av;
+    // Horizontal pass over the window rows extended vertically by r. Each source row is clamped
+    // to the image and premultiplied once into `row` (ow + 2r pixels), then convolved: the same
+    // products summed in the same order as reading (and premultiplying) every tap on its own.
+    let th = oh + 2 * r as usize;
+    let mut tmp = vec![0.0f32; ow * th * ch];
+    let rw = ow + 2 * r as usize;
+    let mut row = vec![0.0f32; rw * ch];
+    for ty in 0..th {
+        let yy = (y0 as i32 + ty as i32 - r).clamp(0, h as i32 - 1) as usize;
+        for (j, px) in row.chunks_exact_mut(ch).enumerate() {
+            let xx = (x0 as i32 + j as i32 - r).clamp(0, w as i32 - 1) as usize;
+            let i = (yy * w + xx) * ch;
+            px.copy_from_slice(&data[i..i + ch]);
+            if let Some(a) = alpha {
+                let av = px[a];
+                for (c, v) in px.iter_mut().enumerate() {
+                    if c != a {
+                        *v *= av;
+                    }
                 }
             }
         }
-    };
-    // Horizontal pass over the window rows extended vertically by r.
-    let th = oh + 2 * r as usize;
-    let mut tmp = vec![0.0f32; ow * th * ch];
-    let mut px = vec![0.0f32; ch];
-    for ty in 0..th {
-        let y = y0 as i32 + ty as i32 - r;
-        for ox in 0..ow {
-            let o = (ty * ow + ox) * ch;
+        let out = &mut tmp[ty * ow * ch..(ty + 1) * ow * ch];
+        for (ox, o) in out.chunks_exact_mut(ch).enumerate() {
             for (i, kv) in k.iter().enumerate() {
-                get(x0 as i32 + ox as i32 + i as i32 - r, y, &mut px);
+                let px = &row[(ox + i) * ch..(ox + i + 1) * ch];
                 for c in 0..ch {
-                    tmp[o + c] += px[c] * kv;
+                    o[c] += px[c] * kv;
                 }
             }
         }
@@ -222,6 +225,89 @@ pub fn local_sharpen(
 
 #[cfg(test)]
 mod tests {
+
+    /// `local_blur` as first written (every tap read, clamped and premultiplied on its own): the
+    /// row-at-a-time version must give the same bits.
+    fn local_blur_per_tap(data: &[f32], w: usize, h: usize, ch: usize, alpha: Option<usize>, win: (usize, usize, usize, usize), sigma: f32) -> Vec<f32> {
+        let (x0, y0, x1, y1) = win;
+        let (ow, oh) = (x1 - x0, y1 - y0);
+        let r = (sigma * 3.0).ceil().max(1.0) as i32;
+        let k: Vec<f32> = (-r..=r).map(|i| (-((i * i) as f32) / (2.0 * sigma * sigma).max(1e-6)).exp()).collect();
+        let ks: f32 = k.iter().sum();
+        let k: Vec<f32> = k.into_iter().map(|v| v / ks).collect();
+        let get = |x: i32, y: i32, out: &mut [f32]| {
+            let (xx, yy) = (x.clamp(0, w as i32 - 1) as usize, y.clamp(0, h as i32 - 1) as usize);
+            let i = (yy * w + xx) * ch;
+            out.copy_from_slice(&data[i..i + ch]);
+            if let Some(a) = alpha {
+                let av = out[a];
+                for (c, v) in out.iter_mut().enumerate() {
+                    if c != a {
+                        *v *= av;
+                    }
+                }
+            }
+        };
+        let th = oh + 2 * r as usize;
+        let mut tmp = vec![0.0f32; ow * th * ch];
+        let mut px = vec![0.0f32; ch];
+        for ty in 0..th {
+            let y = y0 as i32 + ty as i32 - r;
+            for ox in 0..ow {
+                let o = (ty * ow + ox) * ch;
+                for (i, kv) in k.iter().enumerate() {
+                    get(x0 as i32 + ox as i32 + i as i32 - r, y, &mut px);
+                    for c in 0..ch {
+                        tmp[o + c] += px[c] * kv;
+                    }
+                }
+            }
+        }
+        let mut out = vec![0.0f32; ow * oh * ch];
+        for oy in 0..oh {
+            for ox in 0..ow {
+                let o = (oy * ow + ox) * ch;
+                for (i, kv) in k.iter().enumerate() {
+                    let s = ((oy + i) * ow + ox) * ch;
+                    for c in 0..ch {
+                        out[o + c] += tmp[s + c] * kv;
+                    }
+                }
+                if let Some(a) = alpha {
+                    let av = out[o + a];
+                    for c in 0..ch {
+                        if c != a {
+                            out[o + c] = if av > 1e-6 { out[o + c] / av } else { data[((y0 + oy) * w + x0 + ox) * ch + c] };
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn local_blur_rows_match_the_per_tap_blur_bit_for_bit() {
+        let mut seed = 0x2545_f491_u32;
+        let mut rnd = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed % 10_000) as f32 / 9_999.0
+        };
+        for (w, h, ch, alpha) in [(37usize, 29usize, 4usize, Some(3usize)), (40, 33, 3, None), (23, 31, 2, Some(1)), (19, 17, 1, None)] {
+            let data: Vec<f32> = (0..w * h * ch).map(|i| if alpha.is_some_and(|a| i % ch == a) && i % 7 == 0 { 0.0 } else { rnd() }).collect();
+            for sigma in [0.6f32, 1.0, 2.3, 4.0] {
+                for win in [(0, 0, w, h), (3, 2, 20, 15), (w - 6, h - 5, w, h), (0, h - 1, 1, h), (10, 0, 11, 9)] {
+                    let a = local_blur(&data, w, h, ch, alpha, win, sigma);
+                    let b = local_blur_per_tap(&data, w, h, ch, alpha, win, sigma);
+                    assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()), "{w}x{h}x{ch} {alpha:?} sigma {sigma} win {win:?}");
+                    assert_eq!(a.len(), b.len());
+                }
+            }
+        }
+    }
+
     use super::*;
 
     #[test]

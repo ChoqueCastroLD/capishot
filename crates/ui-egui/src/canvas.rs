@@ -293,8 +293,8 @@ pub(crate) fn draw_readout<const N: usize>(ctx: &egui::Context, id: &str, cursor
 /// Smudge tools (and an Impressionist Pattern Stamp) run their dabs in order.
 enum EngineStroke {
     Brush(Box<photocraft_engine::brush_cmds::LiveStroke>),
-    Retouch(photocraft_engine::retouch_cmds::LiveRetouch),
-    Dab(photocraft_engine::retouch_cmds::LiveDab),
+    Retouch(Box<photocraft_engine::retouch_cmds::LiveRetouch>),
+    Dab(Box<photocraft_engine::retouch_cmds::LiveDab>),
 }
 
 impl EngineStroke {
@@ -325,7 +325,9 @@ impl EngineStroke {
         match self {
             Self::Brush(s) => s.push(pts),
             Self::Retouch(s) => s.push(pts),
-            Self::Dab(s) => s.push(pts),
+            // The sequential-dab commands take position and pressure only (their `points`), so
+            // the live stroke runs exactly the dabs its commit does and can stand in for it.
+            Self::Dab(s) => s.push(&pts.iter().map(|q| photocraft_engine::paint::StrokePoint::new(q.x, q.y, q.pressure)).collect::<Vec<_>>()),
         }
     }
     /// Brings a throttled tail preview up to date (see `LiveStroke::finalize_tail`) before the
@@ -560,12 +562,12 @@ fn begin_live_stroke(app: &PhotocraftApp) -> Option<LiveStroke> {
         // The params `retouch_ui::finish_stroke` commits.
         let mut p = crate::retouch_ui::color_replacement_params(app);
         p["points"] = json!(d.points);
-        EngineStroke::Dab(photocraft_engine::brush_cmds::live_color_replacement(&app.session, &p).ok()?)
+        EngineStroke::Dab(Box::new(photocraft_engine::brush_cmds::live_color_replacement(&app.session, &p).ok()?))
     } else if let Some((cmd, mut p)) = crate::retouch_ui::dab_params(app, d.tool) {
         // The params `retouch_ui::finish_stroke` commits.
         p["points"] = json!(d.points);
         p["target"] = paint_target(app);
-        EngineStroke::Dab(photocraft_engine::retouch_cmds::LiveDab::begin(&app.session, cmd, &p).ok()?)
+        EngineStroke::Dab(Box::new(photocraft_engine::retouch_cmds::LiveDab::begin(&app.session, cmd, &p).ok()?))
     } else if let Some(cmd) = live_retouch_command(d.tool).or_else(|| crate::eraser_ui::erases_to_history(app, d.tool).then_some("paint.historyBrush")) {
         // The params `retouch_ui::finish_stroke` (or `eraser_ui::finish_stroke`) commits.
         let first = d.points.first().copied().unwrap_or([d.start[0], d.start[1], 1.0]);
@@ -578,9 +580,9 @@ fn begin_live_stroke(app: &PhotocraftApp) -> Option<LiveStroke> {
         p["target"] = paint_target(app);
         if impressionist {
             // Impressionist jitters each dab: it runs dab by dab, with the seed the commit uses.
-            EngineStroke::Dab(photocraft_engine::retouch_cmds::LiveDab::begin(&app.session, cmd, &p).ok()?)
+            EngineStroke::Dab(Box::new(photocraft_engine::retouch_cmds::LiveDab::begin(&app.session, cmd, &p).ok()?))
         } else {
-            EngineStroke::Retouch(photocraft_engine::retouch_cmds::LiveRetouch::begin(&app.session, cmd, &p).ok()?)
+            EngineStroke::Retouch(Box::new(photocraft_engine::retouch_cmds::LiveRetouch::begin(&app.session, cmd, &p).ok()?))
         }
     } else {
         let p = stroke_params(app, d.tool, d.erase, &app.stylus.stroke_points(&d.points));
@@ -1345,27 +1347,30 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
 }
 
 /// Point the wgpu compositor at what the view shows, and size its memory budget from Memory
-/// Usage, the document's pixels and History, and physical memory: on full refreshes (pixels
-/// counted once per structural change, not per brush dab) and whenever the preference changes.
+/// Usage, the document's pixels and History, and physical memory: on full refreshes of a new
+/// document state (pixels counted once per structural change, not per brush dab or per frame of
+/// a live preview) and whenever the preference changes.
 fn gpu_budget(app: &mut PhotocraftApp, gpu: &crate::gpu_canvas::GpuCanvas, idx: usize, partial: bool, visible: DRect) {
     gpu.set_focus(Some(visible));
     let allowance = u64::from(app.session.prefs().performance.memory_usage_mb).saturating_mul(1 << 20);
-    if partial && app.perf.gpu_budget_allowance == allowance && gpu.memory_budget().is_some() {
+    let Some(st) = app.session.documents().get(idx) else { return };
+    let state = Some((st.doc.id.0, st.revision));
+    if app.perf.gpu_budget_allowance == allowance && gpu.memory_budget().is_some() && (partial || app.perf.gpu_budget_state == state) {
         return;
     }
-    let Some(st) = app.session.documents().get(idx) else { return };
     let pixels = st.history.pixel_bytes(&st.doc) as u64;
     let budget = crate::gpu_canvas::memory_budget(allowance, pixels, crate::gpu_canvas::physical_memory());
     gpu.set_memory_budget(budget);
     app.perf.gpu_budget_mb = budget >> 20;
     app.perf.gpu_budget_allowance = allowance;
+    app.perf.gpu_budget_state = state;
 }
 
 /// Live preview for an open filter dialog: run the filter on the proxy and upload it. With
-/// background jobs (the desktop app) it computes on one background worker
-/// (`filter_preview_worker`); otherwise (web, tests, `PHOTOCRAFT_INLINE_JOBS`) it keeps the
-/// deterministic inline path (#1676), which also lets headless/CPU tests inspect previews
-/// without a GPU texture.
+/// background jobs (the desktop app) and in the browser threads build it computes on one
+/// background worker (`filter_preview_worker`); otherwise (the single-threaded web build, tests,
+/// `PHOTOCRAFT_INLINE_JOBS`) it keeps the deterministic inline path (#1676), which also lets
+/// headless/CPU tests inspect previews without a GPU texture.
 pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &egui::Context) -> Option<(u32, u64, [u32; 2])> {
     if let Some(held) = committed_filter_preview(app, idx) {
         return held;
@@ -1397,11 +1402,11 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
     let request =
         crate::filter_dialog::FilterPreviewKey { doc: st.doc.id, revision: st.revision, dialog: d.id, active: st.active_layer, command: cmd, params, k };
     let key = request.doc.0 ^ (1u64 << 61);
-    // Every filter's preview computes off the UI thread in the desktop app: Gaussian Blur at
-    // 1000 px takes long enough to freeze the window. Once the slider settles, a preview still
-    // running for an older value is cancelled.
-    #[cfg(not(target_arch = "wasm32"))]
-    if app.background_jobs {
+    // Every filter's preview computes off the UI thread in the desktop app and the browser
+    // threads build: Gaussian Blur at 1000 px takes long enough to freeze the window. Once the
+    // slider settles, a preview still running for an older value is cancelled.
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    if app.background_jobs || crate::filter_preview_worker::THREADED {
         app.filter_preview_worker.supersede(&request, crate::gpu_canvas::now_ms());
         if let Some((finished, computed)) = app.filter_preview_worker.poll()
             && finished == request
@@ -1420,7 +1425,7 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
             let task = request.clone();
             if let Err(error) = app.filter_preview_worker.start(request.clone(), ctx.clone(), move |cancel| {
                 let t0 = crate::gpu_canvas::now_ms();
-                let result = crate::filter_dialog::preview_document_with(&doc, task.active, &task.command, &task.params, task.k, Some(cancel)).map(|doc| {
+                let result = crate::filter_dialog::preview_document_at(&doc, task.revision, task.active, &task.command, &task.params, task.k, Some(cancel)).map(|doc| {
                     let buffer = photocraft_compose::flatten(&doc);
                     (std::sync::Arc::new(doc), buffer)
                 });
@@ -1448,24 +1453,18 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
         let result = preview.result.as_ref()?;
         return Some((preview.key.k, key, [result.size.width, result.size.height]));
     }
-    // Web and explicitly inline sessions keep the deterministic synchronous path (#1676):
-    // computed inline, uploaded when a GPU texture exists, still inspectable without one.
+    // The single-threaded web build and explicitly inline sessions keep the deterministic
+    // synchronous path (#1676): computed inline, flattened once and uploaded (by
+    // `publish_filter_preview`) when a GPU texture exists, still inspectable without one.
     let _ = ctx;
     if app.filter_preview.as_ref().is_none_or(|p| p.key != request) {
         let doc = app.session.documents().get(idx)?.doc.clone();
         let t0 = crate::gpu_canvas::now_ms();
-        let result = crate::filter_dialog::preview_document(&doc, request.active, &request.command, &request.params, request.k).map(std::sync::Arc::new);
-        if let Some(r) = &result {
-            let buf = photocraft_compose::flatten(r);
-            let t1 = crate::gpu_canvas::now_ms();
-            let (display, _) = canvas_display(app, &doc, None);
-            if let Some(gpu) = app.gpu.as_ref() {
-                gpu.upload_buffer_full(key, &texture_buffer(display.as_deref(), &buf), doc.depth);
-            }
-            app.perf.record("filter-preview", r.size.area(), t1 - t0, crate::gpu_canvas::now_ms() - t1);
-        }
-        let buffer = result.as_ref().map(|r| photocraft_compose::flatten(r));
-        publish_filter_preview(app, idx, request, result.zip(buffer), crate::gpu_canvas::now_ms() - t0);
+        let computed = crate::filter_dialog::preview_document_at(&doc, request.revision, request.active, &request.command, &request.params, request.k, None).map(|r| {
+            let buffer = photocraft_compose::flatten(&r);
+            (std::sync::Arc::new(r), buffer)
+        });
+        publish_filter_preview(app, idx, request, computed, crate::gpu_canvas::now_ms() - t0);
     }
     let preview = app.filter_preview.as_ref()?;
     let result = preview.result.as_ref()?;
@@ -3784,6 +3783,13 @@ fn ring(outer: DRect, inner: DRect) -> Vec<DRect> {
     .collect()
 }
 
+/// The document reduced by `k` for the Crop tool's bands past the canvas (`beyond`), only when
+/// there are any: a page whose layers all lie inside the canvas needs none (reducing every layer
+/// of a 4000 × 6000 page took about a second when the tool was picked).
+fn beyond_proxy(doc: &Document, k: u32, beyond: &[DRect]) -> Option<Document> {
+    (k > 1 && !beyond.is_empty()).then(|| photocraft_compose::proxy::proxy_document(doc, k))
+}
+
 /// Crop tool, while a frame is edited (`crop_ui::shows_beyond_canvas`): like Photoshop's crop
 /// preview, the canvas grows to every layer's pixels (a crop with Delete Cropped Pixels off keeps
 /// them; a moved layer reaches past the edges) and to the frame, transparency drawn as the
@@ -3816,11 +3822,12 @@ fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
             let extent = photocraft_engine::extra_cmds::reveal_all_bounds(&doc);
             // One texel per `k` document pixels keeps every texture within MAX_TEXTURE.
             let k = extent.width().max(extent.height()).div_ceil(MAX_TEXTURE).max(1);
-            let proxy = (k > 1).then(|| photocraft_compose::proxy::proxy_document(&doc, k));
+            let beyond = ring(extent, doc.bounds());
+            let proxy = beyond_proxy(&doc, k, &beyond);
             let src = proxy.as_ref().unwrap_or(&*doc);
             let k = k as i32;
             let opts = TextureOptions { magnification: egui::TextureFilter::Nearest, ..TextureOptions::LINEAR };
-            let bands = ring(extent, doc.bounds())
+            let bands = beyond
                 .into_iter()
                 .map(|b| {
                     // The proxy pixels over `b`: document pixels / k, rounded outwards.
@@ -4855,6 +4862,26 @@ fn commit_brush_stroke(app: &mut PhotocraftApp, d: &Drag) {
     }
 }
 
+/// Offer a finished live sequential-dab stroke (`EngineStroke::Dab`) to the command that commits
+/// it, with the release frame's last points run first: the commit then takes its pixels instead of
+/// running every dab again (`Session::offer_live_dab`).
+fn offer_live_dab(app: &mut PhotocraftApp, d: &Drag, live: Option<LiveStroke>) {
+    let Some(mut l) = live else { return };
+    let current = app.session.active().is_some_and(|st| st.doc.id == l.doc && st.revision == l.revision);
+    if !current || l.fed > d.points.len() {
+        return;
+    }
+    let rest: Vec<_> = d.points.get(l.fed..).unwrap_or_default().iter().map(|q| photocraft_engine::paint::StrokePoint::new(q[0], q[1], q[2] as f32)).collect();
+    if !rest.is_empty() && l.stroke.push(&rest).is_err() {
+        return;
+    }
+    if let EngineStroke::Dab(dab) = l.stroke
+        && app.session.offer_live_dab(*dab).is_err()
+    {
+        app.session.clear_live_stroke();
+    }
+}
+
 pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
     let end = d.points.last().copied().unwrap_or([d.start[0], d.start[1], 1.0]);
     if let Some(floating) = d.sel_move {
@@ -4867,11 +4894,20 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
     {
         app.last_stroke_end = Some((st.doc.id, end));
     }
-    // A live Clone Stamp preview ends here; the commit below replaces it.
-    if live_retouch_command(d.tool).is_some() || crate::retouch_ui::dab_params(app, d.tool).is_some() || d.tool == Tool::ColorReplacement {
-        app.live_stroke = None;
+    // A live Clone Stamp preview ends here; the commit below replaces it. A Dodge, Burn, Sponge,
+    // Blur, Sharpen or Smudge stroke's live pixels are offered to its commit.
+    let dab = d.tool != Tool::ColorReplacement && crate::retouch_ui::dab_params(app, d.tool).is_some();
+    if live_retouch_command(d.tool).is_some() || dab || d.tool == Tool::ColorReplacement {
+        let live = app.live_stroke.take();
+        if dab {
+            offer_live_dab(app, &d, live);
+        }
     }
-    if crate::eraser_ui::finish_stroke(app, d.tool, &d.points) || crate::retouch_ui::finish_stroke(app, d.tool, &d.points, d.modifiers) {
+    let finished = crate::eraser_ui::finish_stroke(app, d.tool, &d.points) || crate::retouch_ui::finish_stroke(app, d.tool, &d.points, d.modifiers);
+    if dab {
+        app.session.clear_live_stroke();
+    }
+    if finished {
         return;
     }
     match d.tool {
@@ -6034,6 +6070,18 @@ mod tests {
             );
             delta.clear();
         }
+    }
+
+    #[test]
+    fn crop_reduces_the_page_only_for_pixels_past_the_canvas() {
+        let mut doc = Document::with_background("p", photocraft_doc::Size::new(64, 48), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8, photocraft_doc::Color::WHITE);
+        let inside = photocraft_engine::extra_cmds::reveal_all_bounds(&doc);
+        assert!(beyond_proxy(&doc, 2, &ring(inside, doc.bounds())).is_none(), "nothing past the canvas: no proxy");
+        doc.layers[0].surface_mut().unwrap().fill_rect(DRect::new(-20, 0, 10, 8), &[0.0, 0.0, 0.0, 1.0]);
+        let extent = photocraft_engine::extra_cmds::reveal_all_bounds(&doc);
+        let proxy = beyond_proxy(&doc, 2, &ring(extent, doc.bounds())).unwrap();
+        assert_eq!(proxy.size, photocraft_doc::Size::new(32, 24));
+        assert!(beyond_proxy(&doc, 1, &ring(extent, doc.bounds())).is_none(), "factor 1 reads the page itself");
     }
 
     #[test]

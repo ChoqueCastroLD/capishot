@@ -79,7 +79,7 @@ pub mod file_ui;
 pub mod fill_ui;
 pub mod fonts_ui;
 pub mod filter_dialog;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 mod filter_preview_worker;
 pub mod flick_pan;
 mod font_preview;
@@ -600,7 +600,7 @@ pub struct PhotocraftApp {
     /// Selection outline cache: (doc, revision, segments).
     /// Live filter preview (proxy document with the filter applied).
     pub(crate) filter_preview: Option<filter_dialog::FilterPreview>,
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     filter_preview_worker: filter_preview_worker::Worker,
     /// Select › Color Range dialog preview (proxy document + mask / image textures).
     pub(crate) color_range: Option<color_range_ui::Preview>,
@@ -771,7 +771,7 @@ impl PhotocraftApp {
             proxy_uploaded: None,
             outline_cache: None,
             filter_preview: None,
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             filter_preview_worker: Default::default(),
             color_range: None,
             adjust_preview: None,
@@ -1579,8 +1579,12 @@ impl eframe::App for PhotocraftApp {
         // shortcuts see Esc).
         if !screen_picker::tick(self, ctx) {
             jobs_ui::tick(self, ctx);
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             filter_preview_worker::discard_closed(self);
+            #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+            if !filter_dialog::previewing(self) {
+                filter_dialog::release_proxy();
+            }
             shortcuts::handle(self, ctx);
         }
         let arrived: Vec<(String, Vec<u8>)> =

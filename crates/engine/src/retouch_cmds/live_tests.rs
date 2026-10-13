@@ -285,3 +285,139 @@ fn heal_region_timing_probe() {
         println!("heal_region 92x92: {:.2} ms", t.elapsed().as_secs_f64() * 1000.0);
     }
 }
+
+/// Every pixel of every channel, exactly, of the active layer's target surface of two documents.
+fn same_pixels(a: &Document, b: &Document, what: &str) {
+    let (la, lb) = (a.walk(), b.walk());
+    assert_eq!(la.len(), lb.len(), "{what}: layer count");
+    for ((_, _, x), (_, _, y)) in la.iter().zip(&lb) {
+        for (sa, sb) in [(x.surface(), y.surface()), (x.mask.as_ref().map(|m| &m.surface), y.mask.as_ref().map(|m| &m.surface))] {
+            let (Some(sa), Some(sb)) = (sa, sb) else {
+                assert_eq!(sa.is_some(), sb.is_some(), "{what}: surfaces");
+                continue;
+            };
+            let r = a.bounds();
+            let (va, vb) = (sa.read_region(r), sb.read_region(r));
+            if let Some(i) = va.iter().zip(&vb).position(|(p, q)| p.to_bits() != q.to_bits()) {
+                let n = va.len() / (r.width() as usize * r.height() as usize);
+                let px = i / n;
+                let bad = va.iter().zip(&vb).filter(|(p, q)| p.to_bits() != q.to_bits()).count();
+                let worst = va.iter().zip(&vb).map(|(p, q)| (p - q).abs()).fold(0.0f32, f32::max);
+                panic!(
+                    "{what}: layer {} differs at ({}, {}) ch {}: {} vs {} ({bad} values, worst {worst})",
+                    x.name,
+                    px % r.width() as usize,
+                    px / r.width() as usize,
+                    i % n,
+                    va[i],
+                    vb[i]
+                );
+            }
+        }
+    }
+}
+
+/// A Dodge, Burn, Sponge, Blur, Sharpen or Smudge stroke drawn live is offered to its commit,
+/// which then takes the live pixels instead of running every dab again: bit for bit what the
+/// commit renders itself, at every depth, with a selection, a transparency lock, Sample All
+/// Layers, Finger Painting and a mask target. Different params, points or brush are not taken.
+#[test]
+fn offered_live_dab_strokes_commit_exactly_what_the_command_renders() {
+    let path: Vec<[f64; 2]> = (0..40).map(|i| [20.0 + i as f64 * 3.1, 32.0 + ((i as f64) * 0.7).sin() * 18.0]).collect();
+    let cases = [
+        ("paint.dodge", json!({})),
+        ("paint.burn", json!({"range": "shadows", "exposure": 80})),
+        ("paint.sponge", json!({"mode": "saturate"})),
+        ("paint.blur", json!({"strength": 100})),
+        ("paint.blur", json!({"sampleAllLayers": true})),
+        ("paint.sharpen", json!({})),
+        ("paint.smudge", json!({})),
+        ("paint.smudge", json!({"fingerPainting": true, "sampleAllLayers": true})),
+    ];
+    for depth in [8u64, 16, 32] {
+        for (cmd, extra) in &cases {
+            for variant in ["plain", "selection", "locked", "mask", "spacing"] {
+                let mut s = session(160, 80, depth);
+                paint_layer(&mut s, |x, y| {
+                    [((x * 7 + y * 3) % 97) as f32 / 96.0, (x % 13) as f32 / 12.0, ((x + y) % 31) as f32 / 30.0, if x > 140 { 0.5 } else { 1.0 }]
+                });
+                s.execute("tools.setColors", json!({"foreground": "#c04020"})).unwrap();
+                let mut p = json!({"size": 18, "hardness": 60, "flow": 70});
+                p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+                match variant {
+                    "selection" => {
+                        s.execute("select.rect", json!({"x": 40, "y": 10, "width": 60, "height": 50, "feather": 4})).unwrap();
+                    }
+                    "locked" => {
+                        s.execute("layer.setProps", json!({"locks": {"transparency": true}})).unwrap();
+                    }
+                    "mask" => {
+                        s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+                        p["target"] = json!("mask");
+                    }
+                    "spacing" => {
+                        p["spacing"] = json!(7);
+                    }
+                    _ => {}
+                }
+                let what = format!("{cmd} {extra} depth {depth} {variant}");
+                let begin = with_points(&p, &path[..2]);
+                let mut live = match LiveDab::begin(&s, cmd, &begin) {
+                    Ok(l) => l,
+                    Err(e) => panic!("{what}: {e}"),
+                };
+                // The canvas feeds the drag in uneven batches.
+                for chunk in path[2..].chunks(3) {
+                    live.push(&pts(chunk)).unwrap();
+                }
+                let mut fresh = Session::new();
+                fresh.add_document((*s.active().unwrap().doc).clone(), None);
+                *fresh.active_mut().unwrap() = s.active().unwrap().clone();
+                fresh.tools = s.tools.clone();
+                s.offer_live_dab(live).unwrap();
+                let full = with_points(&p, &path);
+                let r = s.execute(cmd, full.clone()).unwrap();
+                assert_eq!(r["fromLive"], true, "{what}: the commit took the live stroke");
+                let want = fresh.execute(cmd, full).unwrap();
+                assert!(want.get("fromLive").is_none(), "{what}");
+                assert_eq!(r["damage"], want["damage"], "{what}: damage");
+                same_pixels(&s.active().unwrap().doc, &fresh.active().unwrap().doc, &what);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_live_dab_offer_is_not_taken_by_a_different_stroke() {
+    let path: Vec<[f64; 2]> = (0..12).map(|i| [20.0 + i as f64 * 6.0, 30.0]).collect();
+    let mut s = session(120, 60, 8);
+    paint_layer(&mut s, |x, _| [(x % 17) as f32 / 16.0, 0.4, 0.6, 1.0]);
+    let p = json!({"size": 14});
+    let offer = |s: &mut Session| {
+        let mut live = LiveDab::begin(s, "paint.dodge", &with_points(&p, &path[..1])).unwrap();
+        live.push(&pts(&path[1..])).unwrap();
+        s.offer_live_dab(live).unwrap();
+    };
+    offer(&mut s);
+    let r = s.execute("paint.dodge", with_points(&p, &path[..11])).unwrap();
+    assert!(r.get("fromLive").is_none(), "other points");
+    s.execute("edit.undo", json!({})).unwrap();
+    offer(&mut s);
+    let r = s.execute("paint.dodge", with_points(&json!({"size": 14, "exposure": 20}), &path)).unwrap();
+    assert!(r.get("fromLive").is_none(), "other settings");
+    s.execute("edit.undo", json!({})).unwrap();
+    offer(&mut s);
+    let r = s.execute("paint.burn", with_points(&p, &path)).unwrap();
+    assert!(r.get("fromLive").is_none(), "another tool");
+    s.execute("edit.undo", json!({})).unwrap();
+    offer(&mut s);
+    s.execute("tools.setBrush", json!({"brush": {"angle": 30}})).unwrap();
+    let r = s.execute("paint.dodge", with_points(&p, &path)).unwrap();
+    assert!(r.get("fromLive").is_none(), "another session brush");
+    s.execute("edit.undo", json!({})).unwrap();
+    offer(&mut s);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    let r = s.execute("paint.dodge", with_points(&p, &path)).unwrap();
+    assert!(r.get("fromLive").is_none(), "the document changed since the stroke began");
+}

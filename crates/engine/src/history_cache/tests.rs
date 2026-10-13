@@ -286,3 +286,40 @@ fn a_large_stroke_remains_one_exact_step_between_compact_moves() {
         assert_eq!(s.active().unwrap().doc.as_ref(), painted.as_ref());
     }
 }
+
+#[test]
+fn incremental_resident_bytes_match_a_full_walk_through_edits_undo_redo_and_trims() {
+    // The memo walks only the history states that changed since the last call; every step
+    // must still report what walking every document and state gives.
+    let mut s = Session::new();
+    s.execute("prefs.set", serde_json::json!({"path": "performance.historyStates", "value": 6})).unwrap();
+    s.add_document(document("memo", SampleType::U8), None);
+    let check = |s: &Session, step: &str| assert_eq!(s.history_resident_bytes(), s.history_resident_bytes_walked(), "{step}");
+    check(&s, "open");
+    s.execute("layer.new.layer", serde_json::json!({})).unwrap();
+    check(&s, "new layer");
+    for i in 0..12 {
+        let x = (i * 37) % 480;
+        s.execute("select.rect", serde_json::json!({"x": x, "y": x / 2, "width": 40, "height": 300})).unwrap();
+        s.execute("edit.fill", serde_json::json!({"contents": "color", "color": format!("#{:02x}3366", i * 20), "opacity": 100})).unwrap();
+        check(&s, &format!("fill {i} (history trimmed past 6 states)"));
+        if i % 3 == 0 {
+            s.execute("edit.undo", serde_json::json!({})).unwrap();
+            check(&s, &format!("undo {i}"));
+            s.execute("edit.undo", serde_json::json!({})).unwrap();
+            check(&s, &format!("undo again {i}"));
+            s.execute("edit.redo", serde_json::json!({})).unwrap();
+            check(&s, &format!("redo {i}"));
+        }
+    }
+    replace_pixels(&mut s, "replaced", SampleType::U16);
+    check(&s, "replaced pixels");
+    s.add_document(document("second", SampleType::F32), None);
+    check(&s, "second document");
+    s.execute("layer.new.layer", serde_json::json!({})).unwrap();
+    check(&s, "second document edit");
+    s.execute("edit.purge.histories", serde_json::json!({})).unwrap();
+    check(&s, "after purge");
+    s.execute("file.close", serde_json::json!({})).ok();
+    check(&s, "after close");
+}

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use photocraft_doc::Document;
-use photocraft_ops::document_bytes;
+use photocraft_ops::{PayloadMemo, document_bytes};
 
 use crate::Session;
 
@@ -42,6 +42,9 @@ pub(crate) struct Cache {
     #[cfg(not(target_arch = "wasm32"))]
     quota_blocked: bool,
     pub(super) notice: Option<String>,
+    /// [`Session::history_resident_bytes`]'s count of the resident history states, updated by the
+    /// states that changed since the last call.
+    resident: std::sync::Mutex<PayloadMemo>,
     #[cfg(not(target_arch = "wasm32"))]
     next_document: usize,
     #[cfg(not(target_arch = "wasm32"))]
@@ -60,6 +63,30 @@ impl Session {
 
     /// Unique resident managed payload bytes across open documents and history, without reading disk.
     pub fn history_resident_bytes(&self) -> usize {
+        let states: Vec<Arc<Document>> = self.docs.iter().flat_map(|st| st.history.resident_states()).collect();
+        #[cfg(not(target_arch = "wasm32"))]
+        let states = {
+            let mut states = states;
+            if let Some(pending) = &self.history_cache.pending
+                && let Some(source) = &pending.source
+            {
+                states.push(source.clone());
+            }
+            states
+        };
+        let mut memo = self.history_cache.resident.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut total = memo.sync(&states);
+        // The open documents change in place between commands: always walked.
+        let mut seen = HashSet::new();
+        for st in &self.docs {
+            total = total.saturating_add(memo.extra_bytes(&st.doc, &mut seen));
+        }
+        total
+    }
+
+    /// [`Self::history_resident_bytes`] the slow way (every document walked), for tests.
+    #[cfg(test)]
+    pub(crate) fn history_resident_bytes_walked(&self) -> usize {
         let mut seen = HashSet::new();
         let mut total = 0usize;
         for st in &self.docs {
@@ -67,12 +94,6 @@ impl Session {
             for doc in st.history.resident_states() {
                 total = total.saturating_add(document_bytes(&doc, &mut seen));
             }
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(pending) = &self.history_cache.pending
-            && let Some(source) = &pending.source
-        {
-            total = total.saturating_add(document_bytes(source, &mut seen));
         }
         total
     }

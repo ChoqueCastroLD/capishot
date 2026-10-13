@@ -3,6 +3,9 @@
 //! slider moves, the running preview finishes, so the canvas keeps updating during the drag;
 //! once the dialog's values have settled, a preview still running for older ones is cancelled
 //! ([`Worker::supersede`]) so a slow one (Gaussian Blur at 1000 px) doesn't hold up the last.
+//!
+//! The desktop app computes on its own thread; the browser threads build on the rayon Web Worker
+//! pool ([`THREADED`]), so the page's main thread never runs (or spins waiting for) a filter.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 
@@ -19,6 +22,10 @@ pub(crate) struct Computed {
 /// than a pause in a drag is long; cancelling on every slider step meant no preview finished
 /// until the slider stopped.
 pub(crate) const SETTLE_MS: f64 = 150.0;
+
+/// Whether previews compute in the background without `background_jobs`: the browser threads
+/// build (wasm with `atomics`), whose rayon pool runs them off the page's main thread.
+pub(crate) const THREADED: bool = cfg!(all(target_arch = "wasm32", target_feature = "atomics"));
 
 /// The preview being computed: its request, its result channel and its cancellation.
 struct Running {
@@ -48,14 +55,12 @@ impl Worker {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let job = JobCtx::new();
         let work = job.clone();
-        std::thread::Builder::new()
-            .name("filter-preview".into())
-            .spawn(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compute(&work))).map_err(|_| "Filter preview failed".to_string());
-                let _ = tx.send(result);
-                ctx.request_repaint();
-            })
-            .map_err(|e| format!("Could not start filter preview: {e}"))?;
+        let waker = Waker::new(ctx);
+        spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compute(&work))).map_err(|_| "Filter preview failed".to_string());
+            let _ = tx.send(result);
+            waker.wake();
+        })?;
         self.running = Some(Running { key, rx, job });
         Ok(true)
     }
@@ -93,15 +98,49 @@ impl Worker {
     }
 }
 
+/// Repaints the UI when a preview lands. In the browser the egui context can't move to a worker;
+/// there the canvas asks for a frame every 16 ms while a preview runs, which polls the result.
+struct Waker(#[cfg(not(target_arch = "wasm32"))] egui::Context);
+
+impl Waker {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn new(ctx: egui::Context) -> Self {
+        Self(ctx)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn new(_: egui::Context) -> Self {
+        Self()
+    }
+
+    fn wake(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.0.request_repaint();
+    }
+}
+
+/// Run `f` off the UI thread: a named thread on the desktop, the rayon pool in the browser threads
+/// build (the single-threaded browser build has neither and computes previews inline).
+fn spawn(f: impl FnOnce() + Send + 'static) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::thread::Builder::new().name("filter-preview".into()).spawn(f).map(drop).map_err(|e| format!("Could not start filter preview: {e}"))
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    {
+        rayon::spawn(f);
+        Ok(())
+    }
+}
+
 /// Stop and release previews of closed dialogs even when their canvas is no longer being drawn.
 pub(crate) fn discard_closed(app: &mut crate::PhotocraftApp) {
-    let visible =
-        app.ui.dialogs.iter().any(|d| d.fields.contains_key("__filter") && d.fields.get("__preview").and_then(serde_json::Value::as_bool) == Some(true));
-    if !visible {
+    if !crate::filter_dialog::previewing(app) {
         if let Some(r) = &app.filter_preview_worker.running {
             r.job.cancel();
         }
         let _ = app.filter_preview_worker.poll();
+        crate::filter_dialog::release_proxy();
     }
 }
 
