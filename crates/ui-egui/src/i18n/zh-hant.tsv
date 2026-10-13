@@ -2709,3 +2709,4 @@ curves	Smooth	平滑
 	Step {step} is waiting for its dialog	步驟 {step} 正在等待其對話框
 @plural	{n} action|{n} actions	{n} 個動作
 	Auto Add/Delete	自動增加/刪除
+	ICO is limited to 256 × 256 pixels	ICO 最大為 256 × 256 像素

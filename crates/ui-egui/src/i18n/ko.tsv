@@ -3289,3 +3289,4 @@ curves	Smooth	매끄럽게
 	Step {step} is waiting for its dialog	{step}단계가 대화 상자를 기다리고 있습니다
 @plural	{n} action|{n} actions	액션 {n}개
 	Auto Add/Delete	자동 추가/삭제
+	ICO is limited to 256 × 256 pixels	ICO는 256 × 256픽셀로 제한됩니다

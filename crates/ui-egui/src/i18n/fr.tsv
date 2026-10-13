@@ -3120,3 +3120,4 @@ curves	Smooth	Lisser
 	Step {step} is waiting for its dialog	L’étape {step} attend sa boîte de dialogue
 @plural	{n} action|{n} actions	{n} action|{n} actions
 	Auto Add/Delete	Ajout/suppr. auto
+	ICO is limited to 256 × 256 pixels	Le format ICO est limité à 256 × 256 pixels

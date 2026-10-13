@@ -4083,3 +4083,4 @@ navigator	Zoom	Zoom
 	Step {step} is waiting for its dialog	Il passaggio {step} attende la sua finestra di dialogo
 @plural	{n} action|{n} actions	{n} azione|{n} azioni
 	Auto Add/Delete	Aggiungi/elimina automaticamente
+	ICO is limited to 256 × 256 pixels	ICO è limitato a 256 × 256 pixel

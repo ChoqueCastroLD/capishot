@@ -3727,3 +3727,4 @@ navigator	Zoom	Zvětšení
 	Step {step} is waiting for its dialog	Krok {step} čeká na svůj dialog
 @plural	{n} action|{n} actions	{n} akce|{n} akce|{n} akcí
 	Auto Add/Delete	Automaticky přidat/odstranit
+	ICO is limited to 256 × 256 pixels	ICO je omezen na 256 × 256 pixelů
