@@ -40,6 +40,7 @@ mod camera_raw_preview_ui;
 mod camera_raw_scope_ui;
 pub mod camera_raw_ui;
 pub mod canvas;
+pub mod canvas_autoscroll;
 mod canvas_popup;
 pub mod canvas_tool_menu;
 pub mod cas_transform;
