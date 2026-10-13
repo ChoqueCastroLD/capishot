@@ -74,11 +74,12 @@ mod tests {
         let html = include_str!("../index.html");
         let threads = include_str!("../../../packaging/web-threads/build.sh");
         assert!(threads.contains(r#"cp "$ROOT"/crates/ui-egui/src/i18n/*.tsv"#), "threads build copies the catalogs");
-        let fetched: Vec<_> = photocraft_ui_egui::i18n::LANGUAGES.iter().filter(|l| l.code != "en" && l.source.is_empty()).map(|l| l.code).collect();
-        assert!(fetched.len() >= 10, "the web build compiles few catalogs in: {fetched:?}");
-        for code in ["es", "pt-br"] {
-            assert!(!fetched.contains(&code), "{code} stays compiled in");
-        }
+        // build.rs compiles only these in without `all-catalogs` (the web build); this test may
+        // run with every catalog compiled in (features unify across a workspace test run).
+        let build_rs = include_str!("../../../crates/ui-egui/build.rs");
+        assert!(build_rs.contains(r#"const ALWAYS_COMPILED_IN: [&str; 2] = ["es.tsv", "pt-br.tsv"];"#), "compiled-in catalogs changed");
+        let fetched: Vec<_> = photocraft_ui_egui::i18n::LANGUAGES.iter().map(|l| l.code).filter(|c| !matches!(*c, "en" | "es" | "pt-br")).collect();
+        assert!(fetched.len() >= 10, "{fetched:?}");
         for code in fetched {
             let link = format!(r#"href="../../crates/ui-egui/src/i18n/{code}.tsv" data-target-path="i18n""#);
             assert!(html.contains(&link), "index.html doesn't copy {code}.tsv");
