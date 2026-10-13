@@ -944,8 +944,10 @@ pub fn doc_point_at(app: &PhotocraftApp, pos: Pos2) -> Option<[f64; 2]> {
 pub fn fit_view(view: &mut View, doc: &Document, area: Vec2, ppp: f32, aspect: f32) {
     let (w, h) = (doc.size.width as f32, doc.size.height as f32);
     let shown_w = w * if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 };
-    let points = ((area.x - 40.0) / shown_w).min((area.y - 40.0) / h).min(1.0);
-    let zoom = crate::zoom_levels::clamp(points * ppp, [doc.size.width, doc.size.height]);
+    // Fit never magnifies past 100%: one image pixel per *physical* pixel, so the cap applies
+    // after the points → device pixels conversion (a 150% display would otherwise open at 150%).
+    let fit = ((area.x - 40.0) / shown_w).min((area.y - 40.0) / h) * ppp;
+    let zoom = crate::zoom_levels::clamp(fit.min(1.0), [doc.size.width, doc.size.height]);
     view.zoom = zoom;
     view.center = [w / 2.0, h / 2.0];
     view.fit_pending = false;
@@ -7228,13 +7230,22 @@ mod tests {
         fill_view(&mut view, &doc, vec2(600.0, 600.0), 2.0, 1.0);
         assert_eq!(view.zoom, 6.0);
 
-        // Fit never magnifies past the 1 point-per-pixel cap; on a scaled display the cap is 2.
+        // Fit never magnifies past 100% = one image pixel per physical pixel, at any display
+        // scale (it used to cap at one per *point*, so a 150% display opened images at 150%).
+        for ppp in [1.0f32, 1.5, 2.0] {
+            let mut view = View { fit_pending: true, ..View::default() };
+            fit_view(&mut view, &doc, vec2(600.0, 600.0), ppp, 1.0);
+            assert_eq!(view.zoom, 1.0, "ppp {ppp}: a small image opens at 100%");
+        }
+        // A large image still shrinks to fit: 1000×500 into 440 points is 0.44 pt/px, so 0.66
+        // physical at ppp 1.5.
+        let big = {
+            app.run("file.new", json!({"width": 1000, "height": 500})).unwrap();
+            app.session.active().unwrap().doc.clone()
+        };
         let mut view = View { fit_pending: true, ..View::default() };
-        fit_view(&mut view, &doc, vec2(600.0, 600.0), 1.0, 1.0);
-        assert_eq!(view.zoom, 1.0);
-        let mut view = View { fit_pending: true, ..View::default() };
-        fit_view(&mut view, &doc, vec2(600.0, 600.0), 2.0, 1.0);
-        assert_eq!(view.zoom, 2.0);
+        fit_view(&mut view, &big, vec2(480.0, 480.0), 1.5, 1.0);
+        assert!((view.zoom - 0.66).abs() < 1e-5, "{}", view.zoom);
     }
 
     #[test]
