@@ -1222,7 +1222,7 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
         }
         "file.automate.fitImage" => {
             let (w, h, _) = doc?;
-            dialog(app, json!({"width": w, "height": h, "dontEnlarge": false}), json!({}))
+            dialog(app, json!({"width": w, "height": h, "dontEnlarge": false, "__compact": true}), json!({}))
         }
         "file.automate.conditionalModeChange" => dialog(
             app,
