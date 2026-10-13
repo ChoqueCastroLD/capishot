@@ -91,6 +91,11 @@ camera colour tables were copied.
    16 bits.
 5. Orientation.
 
+Development validates public sensor/crop/CFA metadata before allocation. The working-memory
+limit checks peak live development buffers instead of summing disjoint phases. AHD limits
+simultaneous scratch bands only when required; normal load balancing and pixels are preserved.
+The default 2 GiB limit is unchanged and excludes caller-owned sensor/document storage.
+
 Files without colour calibration (CR2, NEF, ARW, RW2, ORF, RAF…) have no camera matrix. Every one of
 them carries a JPEG the camera rendered from the same sensor data, so `fit_look` estimates the
 camera's rendering per file: both the sensor data (white-balanced as `develop` does) and the
