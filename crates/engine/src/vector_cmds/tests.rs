@@ -701,6 +701,28 @@ fn vector_mask_commands_and_compositing() {
     assert!(s.execute("layer.vectorMask.revealAll", json!({})).is_err());
 }
 
+/// #4201: the vector mask's feather takes the pixel mask's range (finite 0..=1000 px); anything
+/// else is refused before the edit, so no infinite feather can block a .pcraft save.
+#[test]
+fn vector_mask_edit_rejects_out_of_range_feather() {
+    let mut s = session(32, 32, 8);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.execute("layer.vectorMask.revealAll", json!({})).unwrap();
+    let feather = |s: &Session| doc(s).layer(id).unwrap().vector_mask.as_ref().unwrap().feather;
+    let steps = s.active().unwrap().history.past_len();
+    for bad in [json!(1e39), json!(-1), json!(1001), json!("x"), json!(null)] {
+        assert!(s.execute("layer.vectorMask.edit", json!({"feather": bad})).is_err(), "feather {bad}");
+        assert_eq!(feather(&s), 0.0, "feather {bad}");
+        assert_eq!(s.active().unwrap().history.past_len(), steps, "feather {bad}");
+    }
+    let r = s.execute("layer.vectorMask.edit", json!({"feather": 12.5})).unwrap();
+    assert_eq!(r["feather"], 12.5);
+    assert_eq!(feather(&s), 12.5);
+    s.execute("layer.vectorMask.edit", json!({"feather": 1000})).unwrap();
+    assert_eq!(feather(&s), 1000.0);
+}
+
 #[test]
 fn translate_vectors_moves_shapes_and_masks() {
     let mut s = session(100, 100, 8);
