@@ -1120,3 +1120,15 @@ fn hand_tool_offers_scale_buttons_and_requests_the_right_view() {
     assert!(h.state().ui.views[0].fill_pending);
     assert!(!h.state().ui.views[0].fit_pending);
 }
+
+#[test]
+fn brushes_button_at_top_of_brush_settings_opens_brushes_panel() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut h = harness(0, 0);
+    assert_eq!(h.state().ui.brush_tab, 0);
+    h.get_by_label("Brushes").click();
+    h.run_steps(3);
+    assert!(h.state().ui.panels.brush_settings);
+    assert_eq!(h.state().ui.brush_tab, 1);
+}
