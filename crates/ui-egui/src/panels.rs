@@ -123,6 +123,10 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if ui.input(|i| i.pointer.any_pressed()) {
                 ui.data_mut(|d| d.remove::<egui::Id>(held_id));
             }
+            // No tool tooltips over an open flyout, or while a button is held to open one (#4450):
+            // Photoshop shows none there. (The flyout is our own Area, so egui's rule for popups
+            // doesn't hide them.)
+            let tool_tips = ui.data(|d| d.get_temp::<(egui::Id, Rect)>(flyout_id)).is_none() && !ui.input(|i| i.pointer.primary_down());
             let ctx = ui.ctx().clone();
             let footer = (if t.pro { 8.0 } else { 14.0 })
                 + chips_height(t.pro, t.round_chips, t.round_chips && double)
@@ -155,7 +159,8 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                     let sel = slot.contains(&app.ui.tool);
                                     let tip =
                                         if tool.key() == '\0' { tl!(tool.label()).to_string() } else { format!("{}  ({})", tl!(tool.label()), tool.key()) };
-                                    let resp = icons::button_with_icon_size(ui, icons::tool_icon(tool), bx, toolbar_icon_size(bx, t.pro), sel, &tip);
+                                    let resp =
+                                        icons::button_with_icon_size_tip(ui, icons::tool_icon(tool), bx, toolbar_icon_size(bx, t.pro), sel, &tip, tool_tips);
                                     if slot.len() > 1 {
                                         paint_toolbar_flyout_indicator(ui, &t, &resp);
                                     }
@@ -284,18 +289,20 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
                 ui.with_layout(layout, |ui| {
                     let quick_mask = app.session.active().is_some_and(|s| s.doc.quick_mask.is_some());
-                    if icons::button(
+                    if icons::button_with_icon_size_tip(
                         ui,
                         "square-dashed",
                         bx,
+                        (bx * 0.52).round(),
                         quick_mask,
                         if quick_mask { tl!("Edit in Standard Mode  (Q)") } else { tl!("Edit in Quick Mask Mode  (Q)") },
+                        tool_tips,
                     )
                     .clicked()
                     {
                         let _ = crate::menus::invoke(app, &ctx, "select.editInQuickMaskMode", json!({}));
                     }
-                    let sm = icons::button(ui, "app-window", bx, false, tl!("Change Screen Mode  (F)"));
+                    let sm = icons::button_with_icon_size_tip(ui, "app-window", bx, (bx * 0.52).round(), false, tl!("Change Screen Mode  (F)"), tool_tips);
                     paint_toolbar_flyout_indicator(ui, &t, &sm);
 
                     // Right-click, or click and hold like the tool flyouts (#4444), lists the modes,
@@ -4750,6 +4757,74 @@ mod type_flyout_tests {
         frame(&mut app, &ctx, 4.05, vec![secondary(false)]);
         frame(&mut app, &ctx, 4.1, vec![]);
         assert!(menu_open(&ctx));
+    }
+
+    /// Every text drawn in one toolbar frame.
+    fn frame_texts(app: &mut PhotocraftApp, ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> Vec<String> {
+        fn collect(shape: &egui::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| collect(s, out)),
+                _ => {}
+            }
+        }
+        let mut out = ctx.run_ui(
+            egui::RawInput { time: Some(time), events, screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 1800.0))), ..Default::default() },
+            |ui| toolbar(app, ui),
+        );
+        out.textures_delta.clear();
+        let mut texts = Vec::new();
+        out.shapes.iter().for_each(|c| collect(&c.shape, &mut texts));
+        texts
+    }
+
+    /// #4450: no tool tooltip while a flyout is open or a tool button is held to open one, for the
+    /// held tool or any other; a plain hover still shows its tooltip.
+    #[test]
+    fn no_tooltips_over_an_open_tool_flyout() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        let bx = if Tokens::get(&ctx).pro { 30.0 } else { 36.0 };
+        let mut buttons: Vec<Rect> = ctx.viewport(|v| {
+            v.prev_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, w)| w.iter())
+                .filter(|w| w.rect.size() == egui::Vec2::splat(bx) && w.sense.senses_click())
+                .map(|w| w.rect)
+                .collect()
+        });
+        buttons.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        let slot_of = |tool: Tool| TOOL_SECTIONS.iter().flat_map(|section| section.iter()).position(|slot| slot.contains(&tool)).unwrap();
+        let (eyedropper, brush) = (buttons[slot_of(Tool::Eyedropper)].center(), buttons[slot_of(Tool::Brush)].center());
+        let tip = |tool: Tool| format!("{}  ({})", tl!(tool.label()), tool.key());
+        let pointer = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        // A plain hover shows the tooltip.
+        frame(&mut app, &ctx, 1.0, vec![egui::Event::PointerMoved(brush)]);
+        let mut texts = Vec::new();
+        for k in 1..=10 {
+            texts = frame_texts(&mut app, &ctx, 1.0 + 0.1 * f64::from(k), vec![]);
+        }
+        assert!(texts.contains(&tip(Tool::Brush)), "hovered long enough: {texts:?}");
+        // Held on the Eyedropper: no tooltip before or after its flyout opens.
+        frame(&mut app, &ctx, 3.0, vec![egui::Event::PointerMoved(eyedropper), pointer(eyedropper, true)]);
+        for k in 1..=10 {
+            let texts = frame_texts(&mut app, &ctx, 3.0 + 0.1 * f64::from(k), vec![]);
+            assert!(!texts.contains(&tip(Tool::Eyedropper)), "held {k}: {texts:?}");
+        }
+        assert!(ctx.data(|d| d.get_temp::<(egui::Id, Rect)>(egui::Id::new("tool-flyout"))).is_some(), "the flyout is open");
+        // Released, with the flyout still open: none for the held tool or another one.
+        frame(&mut app, &ctx, 4.1, vec![pointer(eyedropper, false)]);
+        for (start, at, tool) in [(4.5, eyedropper, Tool::Eyedropper), (6.0, brush, Tool::Brush)] {
+            frame(&mut app, &ctx, start, vec![egui::Event::PointerMoved(at)]);
+            for k in 1..=10 {
+                let texts = frame_texts(&mut app, &ctx, start + 0.1 * f64::from(k), vec![]);
+                assert!(!texts.contains(&tip(tool)), "{tool:?} under the flyout: {texts:?}");
+            }
+        }
     }
 
     #[test]
