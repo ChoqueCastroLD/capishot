@@ -1076,6 +1076,10 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
     if let Some(shown) = crate::patch_preview::display_doc(app, idx) {
         return shown;
     }
+    // Content-Aware Move drag or box: the result, once computed in the background.
+    if let Some(shown) = crate::cam_preview::display_doc(app, idx) {
+        return shown;
+    }
     // A blend mode hovered in the Layers panel.
     if let Some(shown) = crate::blend_preview::display_doc(app, idx) {
         return shown;
@@ -1146,7 +1150,7 @@ const NAVIGATOR_SETTLE_MS: f64 = 200.0;
 /// of document `idx` and catches up on release: each step of the drag is a new preview, and a
 /// thumbnail composite of the whole document per step makes painting lag on large images.
 fn navigator_waits_for_drag(app: &PhotocraftApp, idx: usize) -> bool {
-    crate::move_ui::showing(app) || crate::patch_preview::showing(app) || live_stroke(app, idx).is_some()
+    crate::move_ui::showing(app) || crate::patch_preview::showing(app) || crate::cam_preview::showing(app) || live_stroke(app, idx).is_some()
 }
 
 /// The Navigator panel's image of document `idx`. With the CPU canvas that is the canvas texture
@@ -3485,6 +3489,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         crate::type_tool::draw_overlay(app, &painter, &xf);
         crate::transform_tool::draw_overlay(app, &painter, &xf);
         crate::cam_transform::draw(app, &painter, &xf);
+        crate::cam_preview::wake(app, painter.ctx());
         crate::distort_ui::draw_overlay(app, &painter, &xf);
         crate::perspective_crop_ui::draw_overlay(app, &painter, &xf);
         crate::retouch_ui::draw_source_marker(app, &painter, &xf);

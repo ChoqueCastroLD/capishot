@@ -34,6 +34,7 @@ pub mod brush_preview;
 pub mod brush_resize;
 pub mod brush_sections;
 pub mod brushes_tab;
+pub(crate) mod cam_preview;
 mod cam_transform;
 mod camera_raw_detail_ui;
 mod camera_raw_preview_ui;
@@ -520,6 +521,8 @@ pub struct PhotocraftApp {
     pub(crate) blend_preview: Option<blend_preview::BlendPreview>,
     /// Patch Tool drag: the healed document at the pointer (`patch_preview`).
     pub(crate) patch_preview: Option<patch_preview::PatchPreview>,
+    /// Content-Aware Move drag or box shown with its result (`cam_preview`).
+    pub(crate) cam_preview: Option<cam_preview::CamPreview>,
     /// The pixels a Magnetic Lasso border follows (`magnetic_lasso_ui`).
     pub(crate) magnetic: magnetic_lasso_ui::Runtime,
     /// The next tool `Down` is a right-button drag that erases (see `paint_mouse`).
@@ -747,6 +750,7 @@ impl PhotocraftApp {
             object_finder: None,
             blend_preview: None,
             patch_preview: None,
+            cam_preview: None,
             magnetic: Default::default(),
             secondary_erase: false,
             held_erase: false,
