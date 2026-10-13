@@ -468,3 +468,26 @@ fn find_in_the_active_layer_finds_nothing_when_it_is_not_type() {
     let r = s.execute("edit.findAndReplaceText", json!({"find": "abc", "allLayers": false, "action": "find"})).unwrap();
     assert_eq!((r["found"]["layer"].as_u64(), r["found"]["text"].as_str()), (Some(id), Some("abc")));
 }
+
+#[test]
+fn backward_change_find_moves_past_the_replaced_text() {
+    // A backward Change/Find whose replacement still matches ("cat" -> "Cat", case-insensitive)
+    // must move on to the previous match, not find the replaced text again.
+    let mut s = session(8);
+    s.execute("type.create", json!({"text": "cat dog cat", "x": 2, "y": 12})).unwrap();
+    let p = |action: &str, forward: bool| json!({"find": "cat", "replace": "Cat", "action": action, "forward": forward, "allLayers": false});
+    let f = s.execute("edit.findAndReplaceText", p("find", false)).unwrap();
+    assert_eq!((f["found"]["start"].as_u64(), f["found"]["end"].as_u64()), (Some(8), Some(11)), "{f}");
+    let r = s.execute("edit.findAndReplaceText", p("changeFind", false)).unwrap();
+    assert_eq!((r["changed"]["start"].as_u64(), r["changed"]["end"].as_u64()), (Some(8), Some(11)), "{r}");
+    assert_eq!((r["found"]["start"].as_u64(), r["found"]["end"].as_u64()), (Some(0), Some(3)), "{r}");
+
+    // Forward is unchanged: replace the first match, then find the next one.
+    let mut s = session(8);
+    s.execute("type.create", json!({"text": "cat dog cat", "x": 2, "y": 12})).unwrap();
+    let f = s.execute("edit.findAndReplaceText", p("find", true)).unwrap();
+    assert_eq!(f["found"]["start"].as_u64(), Some(0), "{f}");
+    let r = s.execute("edit.findAndReplaceText", p("changeFind", true)).unwrap();
+    assert_eq!((r["changed"]["start"].as_u64(), r["changed"]["end"].as_u64()), (Some(0), Some(3)), "{r}");
+    assert_eq!((r["found"]["start"].as_u64(), r["found"]["end"].as_u64()), (Some(8), Some(11)), "{r}");
+}

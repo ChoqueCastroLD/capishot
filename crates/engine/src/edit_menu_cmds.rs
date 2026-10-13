@@ -903,7 +903,10 @@ fn find_replace(s: &mut Session, p: &Value) -> Result<Value> {
                     Ok(())
                 })?;
                 let end = a + replace.len();
-                s.edit_state.find_cursor = Some((id, end, end));
+                // Collapse the cursor on the side the search moves away from, so the next search
+                // skips the replaced text even when the replacement still matches.
+                let c = if forward { end } else { a };
+                s.edit_state.find_cursor = Some((id, c, c));
                 changed = Some((id, a, end));
                 if action == "change" {
                     return Ok(json!({"changed": {"layer": id.0, "start": a, "end": end}}));
