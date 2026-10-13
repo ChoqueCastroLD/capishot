@@ -1428,7 +1428,17 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
     if doc.mode == ColorMode::Multichannel {
         return crate::multichannel_map::document_to_psd(doc, opts.force_psb);
     }
+    if let Some(file) = crate::palette_map::document_to_psd(doc, opts.force_psb) {
+        return file;
+    }
     let fmt = doc.pixel_format();
+    // A Duotone keeps the inks it was imported with (their Color Mode Data is undocumented and
+    // kept verbatim) over its grey plate; Photoshop has no 32-bit Duotone.
+    let duotone_inks = doc
+        .duotone
+        .as_ref()
+        .and_then(|d| d.psd_raw.as_ref())
+        .filter(|_| doc.mode == ColorMode::Duotone && fmt.mode == ColorMode::Grayscale && fmt.sample != SampleType::F32);
     let sample = fmt.sample;
     let cc = fmt.mode.color_channels();
     let big = doc.size.width > 30_000 || doc.size.height > 30_000;
@@ -1458,7 +1468,7 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
     } else if size_exceeds_limit && !opts.force_psb {
         ex.warnings.push("estimated encoded size exceeds 2 GB; written as PSB".into());
     }
-    if fmt.mode != doc.mode {
+    if fmt.mode != doc.mode && duotone_inks.is_none() {
         ex.warnings.push(format!("{:?} document written as {:?}", doc.mode, fmt.mode));
     }
     // Assign layer ids up front (stable across round trips): keep unique
@@ -1568,7 +1578,8 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
         planes.extend(deinterleave(&bytes, 1, sample, &[false]).remove(0));
     }
     let channels = (cc + usize::from(has_alpha) + extra.len()) as u16;
-    let header = Header::new(version, doc.size.width, doc.size.height, channels, psd_depth(sample), psd_mode(fmt.mode));
+    let mode = if duotone_inks.is_some() { PsdMode::Duotone } else { psd_mode(fmt.mode) };
+    let header = Header::new(version, doc.size.width, doc.size.height, channels, psd_depth(sample), mode);
     let mcomp = if sample == SampleType::F32 { Compression::Raw } else { opts.merged_compression };
     let image_data = ImageData::encode(mcomp, &planes, &header)
         .or_else(|_| ImageData::encode(Compression::Raw, &planes, &header))
@@ -1706,7 +1717,10 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
     }
     // 32-bit files carry Photoshop's HDR toning records as Color Mode Data; Photoshop will not
     // open a 32-bit file without them (#291).
-    let color_mode_data = photocraft_psd::hdr::color_mode_data_for_depth(header.depth);
+    let color_mode_data = match duotone_inks {
+        Some(raw) => raw.to_vec(),
+        None => photocraft_psd::hdr::color_mode_data_for_depth(header.depth),
+    };
     let file = PsdFile {
         header,
         color_mode_data,
