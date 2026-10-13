@@ -567,9 +567,7 @@ pub fn printing_disabled() -> bool {
 
 fn require_printing_enabled() -> Result<()> {
     if printing_disabled() {
-        Err(other(
-            "printing is disabled in this process (photocraft_engine::print_cmds::disable_printing or PHOTOCRAFT_NO_PRINT); use dryRun: true",
-        ))
+        Err(other("printing is disabled in this process (photocraft_engine::print_cmds::disable_printing or PHOTOCRAFT_NO_PRINT); use dryRun: true"))
     } else {
         Ok(())
     }
