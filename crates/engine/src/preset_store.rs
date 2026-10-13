@@ -299,7 +299,7 @@ fn decode_tip_max(bytes: &[u8], max_side: u32) -> Result<GrayTile, String> {
     }
     let data: Vec<u16> =
         if bits == 8 { raw.iter().map(|&v| u16::from(v) * 257).collect() } else { raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect() };
-    Ok(GrayTile { width: w, height: h, data })
+    Ok(GrayTile { width: w, height: h, data: data.into() })
 }
 
 // ------------------------------------------------------------------ group files
