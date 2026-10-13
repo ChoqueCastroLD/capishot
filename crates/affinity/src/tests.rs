@@ -352,7 +352,7 @@ mod archive {
 
 mod shapes {
     use crate::container::Limits;
-    use crate::model::{Document, Kind, Path};
+    use crate::model::{Document, Kind, Path, Point, SubPath};
     use crate::stream::Tag;
     use crate::synth::{self, F, Method, tag};
 
@@ -412,5 +412,50 @@ mod shapes {
     fn wrapped_pie_angles_keep_the_same_geometry_as_the_positive_span() {
         let make = |end| read(vec![shape(100, b"ShPi", vec![(tag(b"AngS"), F::F64(0.0)), (tag(b"AngE"), F::F64(end))])], 100);
         assert_eq!(path(&make(-std::f64::consts::FRAC_PI_2)), path(&make(3.0 * std::f64::consts::FRAC_PI_2)));
+    }
+
+    /// A 10×20 rectangle (`ShNR`) with the given parameters, read back as its outline.
+    fn rectangle(parameters: Vec<(Tag, F)>) -> (SubPath, Vec<String>) {
+        let node =
+            F::Def(3, vec![tag(b"ShpN")], vec![(tag(b"ShpB"), F::F64s(vec![0.0, 0.0, 10.0, 20.0])), (tag(b"Shpe"), F::Def(4, vec![tag(b"ShNR")], parameters))]);
+        let spread = F::Def(2, vec![tag(b"Sprd")], vec![(tag(b"SprB"), F::F64s(vec![0.0, 0.0, 400.0, 300.0])), (tag(b"Chld"), F::Shared(vec![node]))]);
+        let data = synth::stream(&[(tag(b"DocR"), F::Def(1, vec![tag(b"DocN")], vec![(tag(b"Chld"), F::Shared(vec![spread]))]))]);
+        let doc = crate::read(&synth::container(&[("doc.dat", &data, Method::Zlib)], None), Limits::default()).unwrap();
+        let Kind::Shape { path, .. } = &doc.spreads[0].nodes[0].kind else { panic!("expected a shape") };
+        (path.subpaths[0].clone(), doc.warnings)
+    }
+
+    /// `CTyp`: an array of corner-type enums (top left, top right, bottom right, bottom left).
+    fn corner_types(ids: [u16; 4]) -> F {
+        let mut raw = vec![0xaa];
+        raw.extend(tag(b"CTyp").0.to_le_bytes());
+        raw.extend(4u32.to_le_bytes());
+        raw.extend(0u16.to_le_bytes());
+        raw.extend(ids.iter().flat_map(|id| id.to_le_bytes()));
+        F::Raw(raw)
+    }
+
+    #[test]
+    fn unlocked_rectangle_corners_keep_their_own_radius_and_type() {
+        let p = |x: f64, y: f64| Point { x, y };
+        // Relative radii scale by 10. Round 5, round 1, straight 3, none.
+        let corners = |lock: Option<bool>| {
+            let mut fields = vec![(tag(b"ShCR"), F::F64s(vec![0.5, 0.1, 0.3, 0.0])), (tag(b"CTyp"), corner_types([0, 0, 1, 4]))];
+            fields.extend(lock.map(|l| (tag(b"Lock"), F::Bool(l))));
+            rectangle(fields)
+        };
+
+        let (sub, warnings) = corners(Some(false));
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(sub.start, p(5.0, 0.0));
+        let ends: Vec<Point> = sub.segments.iter().map(|s| s[2]).collect();
+        assert_eq!(ends, [p(9.0, 0.0), p(10.0, 1.0), p(10.0, 17.0), p(7.0, 20.0), p(0.0, 20.0), p(0.0, 5.0), p(5.0, 0.0)]);
+        assert_eq!(sub.segments[3], [p(7.0, 20.0); 3], "the straight corner is a line");
+        assert_ne!(sub.segments[1][0], p(9.0, 0.0), "the round corner is a curve");
+
+        // Locked (the default): every corner follows the top left one.
+        let (sub, _) = corners(None);
+        assert_eq!(sub.segments.len(), 8);
+        assert_eq!(sub.segments[3][2], p(5.0, 20.0));
     }
 }
