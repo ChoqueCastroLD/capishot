@@ -3183,7 +3183,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     crate::canvas_tool_menu::open_view(app, &ctx, tool, [p.x, p.y], xf.to_doc(p));
                 }
             } else {
-                crate::canvas_tool_menu::open(app, &ctx, tool, [p.x, p.y]);
+                crate::canvas_tool_menu::open_at(app, &ctx, tool, [p.x, p.y], Some(xf.to_doc(p)));
             }
         }
         // The (temporary) Hand pans above; its gestures never reach the tool underneath. While a

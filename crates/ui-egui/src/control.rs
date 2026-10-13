@@ -366,6 +366,22 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
     outcome
 }
 
+/// The open canvas context menu's rows for `ui.state`: the spelling suggestions first (type edit
+/// menu over a misspelled word), then the menu's own rows.
+fn context_entries(app: &PhotocraftApp, menu: &crate::canvas_tool_menu::CanvasToolMenu) -> Vec<Value> {
+    use crate::canvas_tool_menu::{entry_enabled, rows, spelling_rows};
+    let spelling = spelling_rows(menu);
+    let mut entries: Vec<Value> = spelling.iter().map(|(label, id)| json!({"label": label, "id": id, "enabled": entry_enabled(app, menu, id)})).collect();
+    if !spelling.is_empty() {
+        entries.push(json!({"separator": true}));
+    }
+    entries.extend(rows(menu).iter().map(|row| match row {
+        Some((label, id)) => json!({"label": label, "id": id, "enabled": entry_enabled(app, menu, id)}),
+        None => json!({"separator": true}),
+    }));
+    entries
+}
+
 fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
     let p = &req.params;
     let s = |k: &str| p.get(k).and_then(Value::as_str);
@@ -1027,7 +1043,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     }
                     if crate::canvas_tool_menu::applies(app.ui.tool) || crate::canvas_tool_menu::editing_text(app, app.ui.tool) {
                         if down {
-                            crate::canvas_tool_menu::open(app, ctx, app.ui.tool, screen_point(app, x, y));
+                            crate::canvas_tool_menu::open_at(app, ctx, app.ui.tool, screen_point(app, x, y), Some([x, y]));
                         }
                         continue;
                     }
@@ -1259,10 +1275,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
                 "pos": menu.pos,
                 "tool": menu.tool,
                 "pasteboard": menu.pasteboard,
-                "entries": crate::canvas_tool_menu::rows(menu).iter().map(|row| match row {
-                    Some((label, id)) => json!({"label": label, "id": id, "enabled": crate::canvas_tool_menu::entry_enabled(app, menu, id)}),
-                    None => json!({"separator": true}),
-                }).collect::<Vec<_>>()
+                "entries": context_entries(app, menu)
             })
         }),
         "panels": app.ui.panels,

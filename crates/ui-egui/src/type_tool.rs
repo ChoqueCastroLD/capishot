@@ -151,6 +151,11 @@ pub fn edit_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
 }
 
 fn hit_offset(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> usize {
+    offset_at(app, id, x, y)
+}
+
+/// The character offset of the caret position nearest document point (`x`, `y`) in layer `id`.
+pub(crate) fn offset_at(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> usize {
     let Some((l, aff, text)) = layout(app, id) else { return 0 };
     let (tx, ty) = to_text(&aff, x, y);
     photocraft_text::hit_char(&l, &text, tx, ty).0
