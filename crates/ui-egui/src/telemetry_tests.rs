@@ -19,7 +19,7 @@ fn commands_are_counted_per_id_and_source_then_cleared() {
     r.command("filter.blur.gaussianBlur", Source::Shortcut);
     r.command("edit.undo", Source::Shortcut);
     let b = batch(&mut r);
-    assert_eq!(b["v"], 1);
+    assert_eq!(b["v"], SCHEMA_VERSION);
     assert_eq!(b["iid"], "a1");
     assert_eq!(b["sid"], "s1");
     assert_eq!(b["seq"], 1);
@@ -299,4 +299,64 @@ fn the_preference_is_on_by_default_and_web_only() {
         !cfg!(target_arch = "wasm32"),
         "shown only where it does something"
     );
+}
+
+/// Commands an embedding page or control client runs (`photocraft.request("engine.execute")`,
+/// `ui.menu.invoke`) count as `automation`, not as panel clicks.
+#[test]
+fn control_requests_count_as_automation() {
+    let _turn = GLOBAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    let ctx = egui::Context::default();
+    start(Recorder::new("a", "s", 0.0));
+    for (method, params) in [
+        ("engine.execute", json!({"command": "file.new", "params": {"width": 32, "height": 32, "background": "white"}})),
+        ("ui.menu.invoke", json!({"id": "layer.new.layer", "params": {"name": "x"}})),
+    ] {
+        let (req, _reply) = crate::control::ControlRequest::new(method, params);
+        let _ = crate::control::handle(&mut app, &ctx, &req);
+    }
+    // A local click afterwards is a panel's again.
+    app.run("edit.undo", json!({})).expect("undo");
+    let b: Value = serde_json::from_str(&take_batch().expect("batch")).expect("json");
+    stop();
+    let src = |id: &str| events(&b, "command").iter().filter(|e| e["id"] == id).map(|e| e["src"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>();
+    assert_eq!(src("file.new"), ["automation"], "{b}");
+    assert_eq!(src("layer.new.layer"), ["automation"], "{b}");
+    assert_eq!(src("edit.undo"), ["panel"], "{b}");
+}
+
+/// Frame times per canvas tool leave as percentiles over 1 ms buckets, with the hitches counted,
+/// and nothing past the key cap.
+#[test]
+fn frame_times_are_summarised_per_tool() {
+    let mut r = Recorder::new("a", "s", 0.0);
+    for i in 0..100 {
+        // 90 quick frames (8.x ms), 10 slow ones (60.x ms); latencies 20..
+        let ms = if i < 90 { 8.4 } else { 60.2 };
+        r.frame("tool.Brush", ms, Some(20.0 + (i % 5) as f64), Some(6.0));
+    }
+    r.frame(VIEW_FRAMES, 300.0, None, None);
+    r.frame("tool.Move", f64::NAN, None, None);
+    let b = batch(&mut r);
+    let frames = events(&b, "frames");
+    assert_eq!(frames.len(), 2, "{b}");
+    let brush = frames.iter().find(|e| e["tool"] == "tool.Brush").expect("brush");
+    assert_eq!(brush["n"], 100);
+    assert_eq!(brush["p50"], 9, "upper edge of the 8 ms bucket: {brush}");
+    assert_eq!(brush["p95"], 60, "the 60 ms bucket, capped at the maximum: {brush}");
+    assert_eq!(brush["max"], 60);
+    assert_eq!(brush["long"], 10);
+    assert_eq!(brush["lat50"], 23);
+    assert_eq!(brush["mp"], "4-12");
+    let view = frames.iter().find(|e| e["tool"] == "view").expect("view");
+    assert_eq!(view["p50"], 300, "the open last bucket reports the maximum: {view}");
+    assert!(view.get("lat50").is_none() && view.get("mp").is_none());
+    assert!(r.is_empty(), "cleared after the batch");
+
+    let mut r = Recorder::new("a", "s", 0.0);
+    for i in 0..(MAX_FRAME_KEYS + 5) {
+        r.frame(&format!("tool.T{i}"), 5.0, None, None);
+    }
+    assert_eq!(events(&batch(&mut r), "frames").len(), MAX_FRAME_KEYS);
 }

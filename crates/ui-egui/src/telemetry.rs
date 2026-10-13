@@ -8,7 +8,9 @@
 //! What is recorded (schema `v: 1`, see `<telemetry collector>/README.md` on the host):
 //! a random install id and session id, coarse environment buckets, command ids counted per
 //! batch (never their params), tool switches, open/save/export kinds with size buckets and
-//! durations, error classes (command id + kind, never the message), slow-command timings.
+//! durations, error classes (command id + kind, never the message), slow-command timings, and
+//! (schema 2) frame-time percentiles per canvas tool: how long the app took per frame while a
+//! tool was dragged on the canvas or the view zoomed/scrolled (`frames`, see [`Recorder::frame`]).
 //! Never: file names, paths, document content, typed text, error messages.
 
 use std::cell::Cell;
@@ -19,7 +21,7 @@ use std::sync::{Mutex, OnceLock};
 use serde_json::{Map, Value, json};
 
 /// Version of the batch schema the collector validates.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 /// Events queued between flushes; later ones are dropped (and counted).
 pub const MAX_EVENTS: usize = 200;
 /// Distinct (command, source) and (command, error) keys aggregated between flushes.
@@ -30,6 +32,14 @@ pub const MAX_PERF: usize = 20;
 pub const PERF_MIN_MS: f64 = 100.0;
 /// A batch's JSON stays under this (the collector accepts 64 KB; `fetch` keepalive allows 64 KB).
 pub const MAX_BATCH_BYTES: usize = 48 * 1024;
+/// Distinct frame-statistics keys (canvas tools, `view`) per batch.
+pub const MAX_FRAME_KEYS: usize = 24;
+/// Frame-time histogram resolution: one bucket per millisecond, the last one open-ended.
+const FRAME_BUCKETS: usize = 250;
+/// A frame at least this slow is a visible hitch (`long` in `frames`).
+pub const LONG_FRAME_MS: f64 = 50.0;
+/// The `frames` key of view navigation (wheel zoom and scroll, pinch) without a tool drag.
+pub const VIEW_FRAMES: &str = "view";
 /// Heartbeat period; a period counts as active when the user interacted during it.
 pub const HEARTBEAT_MS: f64 = 60_000.0;
 /// Flush period.
@@ -119,8 +129,47 @@ pub struct Recorder {
     errors: BTreeMap<(String, &'static str), u32>,
     events: Vec<Value>,
     perf_queued: usize,
+    frames: BTreeMap<String, FrameHist>,
     dropped: u32,
     ended: bool,
+}
+
+/// Frame times (and input-to-paint latencies) of one key since the last batch, as 1 ms histograms:
+/// fixed size, nothing allocated per frame.
+#[derive(Clone, Debug)]
+struct FrameHist {
+    frames: Box<[u32; FRAME_BUCKETS]>,
+    latency: Box<[u32; FRAME_BUCKETS]>,
+    n: u32,
+    latency_n: u32,
+    long: u32,
+    max_ms: f64,
+    latency_max_ms: f64,
+    mp: Option<&'static str>,
+}
+
+impl FrameHist {
+    fn new() -> Self {
+        Self { frames: Box::new([0; FRAME_BUCKETS]), latency: Box::new([0; FRAME_BUCKETS]), n: 0, latency_n: 0, long: 0, max_ms: 0.0, latency_max_ms: 0.0, mp: None }
+    }
+
+    fn bucket(ms: f64) -> usize {
+        (ms.max(0.0) as usize).min(FRAME_BUCKETS - 1)
+    }
+
+    /// The `p` quantile (0..1) of `hist` holding `n` samples, in whole milliseconds: the upper edge
+    /// of the bucket it falls in (the open last bucket reports `max`).
+    fn quantile(hist: &[u32; FRAME_BUCKETS], n: u32, p: f64, max: f64) -> u64 {
+        let want = ((n as f64 * p).ceil() as u64).max(1);
+        let mut seen = 0u64;
+        for (b, &c) in hist.iter().enumerate() {
+            seen += c as u64;
+            if seen >= want {
+                return if b + 1 == FRAME_BUCKETS { round_ms(max) } else { (b as u64 + 1).min(round_ms(max).max(1)) };
+            }
+        }
+        round_ms(max)
+    }
 }
 
 impl Recorder {
@@ -138,8 +187,44 @@ impl Recorder {
             errors: BTreeMap::new(),
             events: Vec::new(),
             perf_queued: 0,
+            frames: BTreeMap::new(),
             dropped: 0,
             ended: false,
+        }
+    }
+
+    /// One frame's time while the canvas was being worked: `key` is the tool dragged (its
+    /// [`tool_id`]) or [`VIEW_FRAMES`]; `ms` the frame's main-thread time (app update + paint);
+    /// `latency_ms` how long the oldest pointer move the frame consumed waited until the frame was
+    /// painted; `megapixels` the document's size. Summarised per key as percentiles at the batch.
+    pub fn frame(&mut self, key: &str, ms: f64, latency_ms: Option<f64>, megapixels: Option<f64>) {
+        if self.ended || !ms.is_finite() || ms < 0.0 {
+            return;
+        }
+        if !self.frames.contains_key(key) {
+            if self.frames.len() >= MAX_FRAME_KEYS {
+                return;
+            }
+            self.frames.insert(key.to_string(), FrameHist::new());
+        }
+        let Some(h) = self.frames.get_mut(key) else { return };
+        h.n = h.n.saturating_add(1);
+        if let Some(slot) = h.frames.get_mut(FrameHist::bucket(ms)) {
+            *slot = slot.saturating_add(1);
+        }
+        if ms >= LONG_FRAME_MS {
+            h.long = h.long.saturating_add(1);
+        }
+        h.max_ms = h.max_ms.max(ms.min(3_600_000.0));
+        if let Some(l) = latency_ms.filter(|l| l.is_finite() && *l >= 0.0) {
+            h.latency_n = h.latency_n.saturating_add(1);
+            h.latency_max_ms = h.latency_max_ms.max(l.min(3_600_000.0));
+            if let Some(slot) = h.latency.get_mut(FrameHist::bucket(l)) {
+                *slot = slot.saturating_add(1);
+            }
+        }
+        if let Some(mp) = megapixels {
+            h.mp = Some(mp_bucket_of(mp));
         }
     }
 
@@ -229,7 +314,7 @@ impl Recorder {
 
     /// Nothing waiting to be sent?
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty() && self.commands.is_empty() && self.errors.is_empty() && self.dropped == 0
+        self.events.is_empty() && self.commands.is_empty() && self.errors.is_empty() && self.frames.is_empty() && self.dropped == 0
     }
 
     /// Everything since the last batch as the JSON body to POST, or `None` when there is
@@ -252,6 +337,26 @@ impl Recorder {
             *slot = slot.saturating_add(n);
         }
         events.extend(errors.into_iter().map(|((id, kind), n)| json!({"e": "error", "id": id, "kind": kind, "n": n})));
+        for (key, h) in std::mem::take(&mut self.frames) {
+            if h.n == 0 {
+                continue;
+            }
+            let key = if key == VIEW_FRAMES || key.starts_with("tool.") { key } else { "other".into() };
+            let mut e = json!({
+                "e": "frames", "tool": key, "n": h.n,
+                "p50": FrameHist::quantile(&h.frames, h.n, 0.5, h.max_ms),
+                "p95": FrameHist::quantile(&h.frames, h.n, 0.95, h.max_ms),
+                "max": round_ms(h.max_ms), "long": h.long,
+            });
+            if h.latency_n > 0 {
+                e["lat50"] = json!(FrameHist::quantile(&h.latency, h.latency_n, 0.5, h.latency_max_ms));
+                e["lat95"] = json!(FrameHist::quantile(&h.latency, h.latency_n, 0.95, h.latency_max_ms));
+            }
+            if let Some(mp) = h.mp {
+                e["mp"] = json!(mp);
+            }
+            events.push(e);
+        }
         self.perf_queued = 0;
         let mut dropped = std::mem::take(&mut self.dropped);
         self.seq = self.seq.saturating_add(1);

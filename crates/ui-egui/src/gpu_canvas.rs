@@ -814,7 +814,21 @@ pub fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
     wgpu::Limits { max_texture_dimension_2d: a.max_texture_dimension_2d, max_buffer_size: a.max_buffer_size, ..base }
 }
 
-/// Milliseconds since first call (monotonic). Always 0 on wasm, where `std::time` is unavailable.
+/// The browser shell's millisecond clock (`std::time` is unavailable on wasm), see [`set_clock`].
+#[cfg(target_arch = "wasm32")]
+static CLOCK: std::sync::OnceLock<fn() -> f64> = std::sync::OnceLock::new();
+
+/// Install the millisecond clock [`now_ms`] reads on wasm (the web shell passes the browser's
+/// high-resolution time, the same epoch on every thread). Native builds keep `Instant`.
+pub fn set_clock(clock: fn() -> f64) {
+    #[cfg(target_arch = "wasm32")]
+    let _ = CLOCK.set(clock);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = clock;
+}
+
+/// Milliseconds on a monotonic-enough clock: since first call natively; on wasm the clock the
+/// shell installed with [`set_clock`] (0 until then, as without one every interval is 0).
 pub fn now_ms() -> f64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -822,7 +836,7 @@ pub fn now_ms() -> f64 {
         START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0
     }
     #[cfg(target_arch = "wasm32")]
-    0.0
+    CLOCK.get().map_or(0.0, |clock| clock())
 }
 
 /// UI-thread timings (CPU side), exponentially smoothed.
