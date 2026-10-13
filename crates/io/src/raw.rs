@@ -24,6 +24,23 @@ pub fn is_raw(bytes: &[u8]) -> bool {
     photocraft_raw::is_raw(bytes)
 }
 
+/// Why a raw opens as its embedded preview in a build without the `camera-raw` feature.
+#[cfg(not(feature = "camera-raw"))]
+pub const NOT_IN_BUILD: &str = "developing raw sensor data in this build of Capishot";
+
+/// The sensor data of a raw file. Without the `camera-raw` feature (the web build leaves the
+/// decoders and the developer out) every raw is `Unsupported`, so it opens as its embedded JPEG
+/// preview with a warning, or fails with a clear error when it has none.
+#[cfg(feature = "camera-raw")]
+fn decode_sensor(bytes: &[u8], limits: &Limits) -> Result<Sensor, RawError> {
+    photocraft_raw::decode(bytes, limits)
+}
+
+#[cfg(not(feature = "camera-raw"))]
+fn decode_sensor(_bytes: &[u8], _limits: &Limits) -> Result<Sensor, RawError> {
+    Err(RawError::Unsupported(NOT_IN_BUILD.into()))
+}
+
 /// The decode limits shared with the flat codecs.
 fn limits() -> Limits {
     let l = codecs::Limits::default();
@@ -64,7 +81,7 @@ pub fn import_raw_tuned(name: &str, bytes: &[u8], tuning: &RawTuning) -> Result<
     if !exposure.is_finite() || !(-10.0..=10.0).contains(&exposure) {
         return Err(IoError::Raw(RawError::Malformed(format!("exposure {} EV is out of range", tuning.exposure))));
     }
-    let sensor = photocraft_raw::decode(bytes, &limits()).map_err(IoError::Raw)?;
+    let sensor = decode_sensor(bytes, &limits()).map_err(IoError::Raw)?;
     let mut opts = DevelopOptions { limits: limits(), exposure, ..Default::default() };
     let wb_applied = match sensor.camera_wb {
         Some(m) => {
@@ -161,7 +178,7 @@ pub fn fit_preview_look(raw: &[u8], sensor: &Sensor, opts: &DevelopOptions) -> R
 
 /// Decodes and develops; a file without colour calibration gets a look fitted to its preview.
 fn develop_fitted(bytes: &[u8], opts: &DevelopOptions) -> Result<photocraft_raw::Developed, RawError> {
-    let sensor = photocraft_raw::decode(bytes, &opts.limits)?;
+    let sensor = decode_sensor(bytes, &opts.limits)?;
     let mut opts = Cow::Borrowed(opts);
     if opts.camera_look.is_none()
         && sensor.color.calibrations.is_empty()

@@ -15,13 +15,6 @@ use wasm_bindgen::JsCast as _;
 
 type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
-/// Everything File › Open reads: Capishot, Photoshop, OpenRaster and Affinity documents, flat images, and
-/// Photoshop brushes (.abr), gradients (.grd) and swatches (.aco, .ase), which go to the preset libraries.
-const OPEN_EXTS: &[&str] = &[
-    "pcraft", "pdn", "ora", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm",
-    "ppm", "pam", "pfm", "fits", "fit", "fts", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd",
-    "svg", "svgz", "aco", "ase", "af", "afdesign", "afphoto", "afpub",
-];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 const CANVAS_ID: &str = "photocraft_canvas";
 
@@ -288,6 +281,31 @@ fn load_font_manifest(served: Served, ctx: egui::Context) {
     });
 }
 
+/// Translation catalogs not compiled into the web build (`photocraft-ui-egui/all-catalogs`) are
+/// served next to the page as `i18n/<code>.tsv`: fetched the first time the UI needs one (the
+/// language is chosen, or a preview draws in it), the UI showing English until it arrives.
+const CATALOG_DIR: &str = "i18n";
+
+fn fetch_catalogs(ctx: &egui::Context) {
+    for code in i18n::take_catalog_requests() {
+        let ctx = ctx.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let url = format!("{CATALOG_DIR}/{code}.tsv");
+            let installed = match fetch_bytes(&url, None).await {
+                Ok(bytes) => String::from_utf8(bytes).map_err(|e| e.to_string()).and_then(|text| {
+                    // A host that answers unknown paths with its HTML page (single-page app fallback).
+                    if text.trim_start().starts_with('<') { Err("not a catalog".into()) } else { i18n::provide_catalog(code, &text) }
+                }),
+                Err(e) => Err(e),
+            };
+            match installed {
+                Ok(()) => ctx.request_repaint(),
+                Err(e) => log::warn!("photocraft-web: {url}: {e}; showing English"),
+            }
+        });
+    }
+}
+
 /// The browser's preferred languages (`navigator.languages`, e.g. `["ar-EG", "en"]`).
 fn browser_languages() -> Vec<String> {
     web_sys::window().map(|w| w.navigator().languages().iter().filter_map(|l| l.as_string()).collect()).unwrap_or_default()
@@ -401,6 +419,7 @@ impl eframe::App for WebShell {
             });
         }
         self.serve_fonts(ctx);
+        fetch_catalogs(ctx);
         self.app.logic(ctx, frame);
         crate::embed::process(&mut self.app);
         crate::usage_stats::sync(&self.app, ctx);
@@ -459,7 +478,7 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                 let dialog = if let Some(exts) = extensions {
                     rfd::AsyncFileDialog::new().add_filter("Supported Files", &exts)
                 } else {
-                    rfd::AsyncFileDialog::new().add_filter("All Formats", OPEN_EXTS).add_filter("SVG", SVG_EXTS)
+                    rfd::AsyncFileDialog::new().add_filter("All Formats", &crate::open_formats::open_exts()).add_filter("SVG", SVG_EXTS)
                 };
                 let answer = if multiple {
                     match dialog.pick_files().await {

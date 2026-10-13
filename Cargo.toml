@@ -19,7 +19,9 @@ photocraft-raster = { path = "crates/raster" }
 photocraft-doc = { path = "crates/doc" }
 photocraft-ops = { path = "crates/ops" }
 photocraft-psd = { path = "crates/psd" }
-photocraft-codecs = { path = "crates/codecs" }
+# codecs (`exr`), io (`camera-raw`), engine and ui-egui (`plugins`) have default features the web
+# build leaves out; members ask for them explicitly (the desktop app and CLI turn them all on).
+photocraft-codecs = { path = "crates/codecs", default-features = false }
 photocraft-raw = { path = "crates/raw" }
 photocraft-affinity = { path = "crates/affinity" }
 photocraft-adobe-assets = { path = "crates/adobe-assets" }
@@ -27,15 +29,15 @@ photocraft-compose = { path = "crates/compose" }
 photocraft-gpu = { path = "crates/gpu" }
 photocraft-paint = { path = "crates/paint" }
 photocraft-algo = { path = "crates/algo" }
-photocraft-io = { path = "crates/io" }
+photocraft-io = { path = "crates/io", default-features = false }
 photocraft-text = { path = "crates/text" }
 photocraft-vector = { path = "crates/vector" }
 photocraft-format = { path = "crates/format" }
 photocraft-automation = { path = "crates/automation" }
 photocraft-plugins = { path = "crates/plugins" }
-photocraft-engine = { path = "crates/engine" }
+photocraft-engine = { path = "crates/engine", default-features = false }
 photocraft-fontfetch = { path = "crates/fontfetch" }
-photocraft-ui-egui = { path = "crates/ui-egui" }
+photocraft-ui-egui = { path = "crates/ui-egui", default-features = false }
 photocraft-testkit = { path = "crates/testkit" }
 photocraft-tablet = { path = "crates/tablet" }
 
@@ -54,7 +56,8 @@ zune-core = "0.5"
 zune-jpeg = "0.5"
 proptest = "1"
 eframe = { version = "0.36", default-features = false }
-egui = "0.36"
+# No `default_fonts`: the desktop app turns them on (eframe), the web build doesn't (theme.rs).
+egui = { version = "0.36", default-features = false }
 egui_kittest = "0.36"
 rfd = "0.17"
 log = "0.4"

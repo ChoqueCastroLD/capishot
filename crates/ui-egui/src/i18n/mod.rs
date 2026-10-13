@@ -26,7 +26,8 @@ mod system;
 pub use system::system_lang;
 
 use std::cell::Cell;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex, OnceLock, PoisonError};
 
 use catalog::Catalog;
 
@@ -46,6 +47,8 @@ pub struct LangInfo {
     /// Must the catalog cover every menu string? (checked by the tests)
     pub complete_menus: bool,
     catalog: OnceLock<Catalog>,
+    /// Has [`take_catalog_requests`] been told this catalog is wanted? (Run-time catalogs only.)
+    requested: AtomicBool,
 }
 
 /// A script's reading direction.
@@ -142,28 +145,28 @@ fn inflate(source: &[u8]) -> Result<String, String> {
 
 /// The registry. English first: it is the fallback and the source language.
 pub static LANGUAGES: [LangInfo; 17] = [
-    LangInfo { code: "en", name: "English", source: b"", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
-    LangInfo { code: "ja", name: "日本語", source: catalog!("ja"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "zh-hans", name: "简体中文", source: catalog!("zh-hans"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "en", name: "English", source: b"", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "ja", name: "日本語", source: catalog!("ja"), plural: plural_none, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "zh-hans", name: "简体中文", source: catalog!("zh-hans"), plural: plural_none, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
     // Traditional Chinese in the vocabulary used in Taiwan; `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-*`
     // locales all resolve here (see `candidates`).
-    LangInfo { code: "zh-hant", name: "繁體中文", source: catalog!("zh-hant"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "es", name: "Español", source: catalog!("es"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "ru", name: "Русский", source: catalog!("ru"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "zh-hant", name: "繁體中文", source: catalog!("zh-hant"), plural: plural_none, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "es", name: "Español", source: catalog!("es"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "ru", name: "Русский", source: catalog!("ru"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
     // Ukrainian has the same one/few/many rule for integer counts.
-    LangInfo { code: "uk", name: "Українська", source: catalog!("uk"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "cs", name: "Čeština", source: catalog!("cs"), plural: plural_cs, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "fr", name: "Français", source: catalog!("fr"), plural: plural_fr, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "id", name: "Bahasa Indonesia", source: catalog!("id"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "ko", name: "한국어", source: catalog!("ko"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "pl", name: "Polski", source: catalog!("pl"), plural: plural_polish, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "de", name: "Deutsch", source: catalog!("de"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "uk", name: "Українська", source: catalog!("uk"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "cs", name: "Čeština", source: catalog!("cs"), plural: plural_cs, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "fr", name: "Français", source: catalog!("fr"), plural: plural_fr, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "id", name: "Bahasa Indonesia", source: catalog!("id"), plural: plural_none, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "ko", name: "한국어", source: catalog!("ko"), plural: plural_none, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "pl", name: "Polski", source: catalog!("pl"), plural: plural_polish, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "de", name: "Deutsch", source: catalog!("de"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
     // Brazilian Portuguese; `pt`, `pt-BR` and `pt-PT` locales all resolve here (see `candidates`).
-    LangInfo { code: "pt-br", name: "Português (Brasil)", source: catalog!("pt-br"), plural: plural_pt, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "el", name: "Ελληνικά", source: catalog!("el"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "pt-br", name: "Português (Brasil)", source: catalog!("pt-br"), plural: plural_pt, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "el", name: "Ελληνικά", source: catalog!("el"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
     // Dutch; `nl-NL` and `nl-BE` locales both resolve here.
-    LangInfo { code: "nl", name: "Nederlands", source: catalog!("nl"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
-    LangInfo { code: "it", name: "Italiano", source: catalog!("it"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "nl", name: "Nederlands", source: catalog!("nl"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
+    LangInfo { code: "it", name: "Italiano", source: catalog!("it"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new(), requested: AtomicBool::new(false) },
 ];
 
 impl LangInfo {
@@ -176,8 +179,58 @@ impl LangInfo {
     }
 
     fn catalog(&self) -> &Catalog {
+        if let Some(c) = self.catalog.get() {
+            return c;
+        }
+        if self.is_fetched() {
+            // Not compiled in (no `all-catalogs`): English until the shell installs it.
+            if !self.requested.load(Ordering::Relaxed) && !self.requested.swap(true, Ordering::Relaxed) {
+                REQUESTS.lock().unwrap_or_else(PoisonError::into_inner).push(self.code);
+            }
+            return &NO_CATALOG;
+        }
         self.catalog.get_or_init(|| Catalog::parse(&self.text()))
     }
+
+    /// Is this catalog installed at run time ([`provide_catalog`]) rather than compiled in?
+    fn is_fetched(&self) -> bool {
+        self.source.is_empty() && self.code != "en"
+    }
+}
+
+/// What a run-time catalog reads as until it arrives: nothing, so the UI shows English.
+static NO_CATALOG: LazyLock<Catalog> = LazyLock::new(Catalog::default);
+
+/// Run-time catalogs the UI has asked for and the shell hasn't fetched yet.
+static REQUESTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+/// Without the `all-catalogs` feature only Spanish and Brazilian Portuguese are compiled in (the
+/// web build: the others would add ~0.7 MB to every download). The first time the UI needs one of
+/// the others its code is queued here, once per language; the shell fetches the catalog file
+/// (`<code>.tsv`) and installs it with [`provide_catalog`]. With every catalog compiled in this
+/// is always empty.
+pub fn take_catalog_requests() -> Vec<&'static str> {
+    std::mem::take(&mut *REQUESTS.lock().unwrap_or_else(PoisonError::into_inner))
+}
+
+/// Install a run-time catalog (the text of `<code>.tsv`) fetched for [`take_catalog_requests`].
+/// A language that is compiled in or already installed keeps what it has. Malformed lines are
+/// skipped, as for bundled catalogs; the text is capped like an inflated one.
+pub fn provide_catalog(code: &str, text: &str) -> Result<(), String> {
+    let info = LANGUAGES.iter().find(|l| l.code.eq_ignore_ascii_case(code)).ok_or_else(|| format!("no language {code:?}"))?;
+    install(info, text)
+}
+
+fn install(info: &LangInfo, text: &str) -> Result<(), String> {
+    let code = info.code;
+    if !info.is_fetched() || info.catalog.get().is_some() {
+        return Ok(());
+    }
+    if text.len() as u64 > MAX_CATALOG_BYTES {
+        return Err(format!("catalog {code}: over {MAX_CATALOG_BYTES} bytes"));
+    }
+    let _ = info.catalog.set(Catalog::parse(text));
+    Ok(())
 }
 
 /// A language the UI can be shown in (a handle into [`LANGUAGES`]).
@@ -688,9 +741,38 @@ mod tests {
             plural: plural_none,
             complete_menus: false,
             catalog: OnceLock::new(),
+            requested: AtomicBool::new(false),
         }));
         assert_eq!(info.text(), "");
         assert_eq!(tr(Lang(info), "Layer"), "Layer", "falls back to English");
+    }
+
+    /// A catalog that isn't compiled in reads as English, is asked for once, and translates
+    /// once installed; compiled-in languages ignore a provided catalog.
+    #[test]
+    fn run_time_catalogs_are_requested_once_and_installed() {
+        let info: &'static LangInfo = Box::leak(Box::new(LangInfo {
+            code: "xx-fetched",
+            name: "x",
+            source: b"",
+            plural: plural_one_other,
+            complete_menus: false,
+            catalog: OnceLock::new(),
+            requested: AtomicBool::new(false),
+        }));
+        assert_eq!(tr(Lang(info), "Layer"), "Layer", "English until it arrives");
+        assert_eq!(tr(Lang(info), "Image"), "Image");
+        let asked: Vec<_> = take_catalog_requests().into_iter().filter(|c| *c == "xx-fetched").collect();
+        assert_eq!(asked, ["xx-fetched"], "asked for once");
+        install(info, "\tLayer\tCapa\n").unwrap();
+        assert_eq!(tr(Lang(info), "Layer"), "Capa");
+        assert!(!take_catalog_requests().contains(&"xx-fetched"));
+        assert!(install(info, &"x".repeat(MAX_CATALOG_BYTES as usize + 1)).is_ok(), "already installed: kept");
+        // Compiled in (this test build has every catalog): a provided one changes nothing.
+        let before = tr(Lang::from_code("ja").unwrap(), "Layer").to_string();
+        provide_catalog("ja", "\tLayer\tX\n").unwrap();
+        assert_eq!(tr(Lang::from_code("ja").unwrap(), "Layer"), before);
+        assert!(provide_catalog("tlh", "").is_err(), "unknown language");
     }
 
     /// Every bundled catalog is well-formed and consistent with its sources.

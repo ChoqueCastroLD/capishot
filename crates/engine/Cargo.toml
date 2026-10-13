@@ -10,6 +10,10 @@ workspace = true
 [features]
 # Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
 corpus = []
+# Sandboxed WebAssembly filter plug-ins (`plugin.*` commands, photocraft-plugins and its wasmi
+# interpreter). On by default; the web build leaves them out.
+default = ["plugins"]
+plugins = ["dep:photocraft-plugins"]
 
 [dependencies]
 photocraft-geom = { workspace = true }
@@ -30,7 +34,7 @@ photocraft-vector = { workspace = true }
 photocraft-io = { workspace = true }
 photocraft-psd = { workspace = true }
 photocraft-format = { workspace = true }
-photocraft-plugins = { workspace = true }
+photocraft-plugins = { workspace = true, optional = true }
 blake3 = { version = "1.8", default-features = false, features = ["pure"] }
 photocraft-codecs = { workspace = true }
 flate2 = { workspace = true }
@@ -39,6 +43,9 @@ flate2 = { workspace = true }
 roxmltree = "0.20"
 
 [dev-dependencies]
+# EXR and camera raw behaviour is tested as the desktop app ships it.
+photocraft-codecs = { workspace = true, features = ["exr"] }
+photocraft-io = { workspace = true, features = ["camera-raw"] }
 photocraft-affinity = { workspace = true, features = ["synth"] }
 # Synthetic camera raw files for the open tests.
 photocraft-raw = { workspace = true, features = ["testgen"] }

@@ -26,13 +26,13 @@ photocraft-color = { workspace = true }
 photocraft-raster = { workspace = true }
 photocraft-geom = { workspace = true }
 photocraft-compose = { workspace = true }
-photocraft-engine = { workspace = true }
+photocraft-engine = { workspace = true, features = ["plugins"] }
 photocraft-fontfetch = { workspace = true }
-photocraft-codecs = { workspace = true }
-photocraft-io = { workspace = true }
+photocraft-codecs = { workspace = true, features = ["exr"] }
+photocraft-io = { workspace = true, features = ["camera-raw"] }
 photocraft-format = { workspace = true }
 photocraft-automation = { workspace = true }
-photocraft-ui-egui = { workspace = true }
+photocraft-ui-egui = { workspace = true, features = ["plugins", "all-catalogs"] }
 # Pen tablet pressure/tilt on macOS and X11 (the workspace's one isolated unsafe helper crate).
 photocraft-tablet = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "persistence"] }
