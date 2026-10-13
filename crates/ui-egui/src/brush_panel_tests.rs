@@ -220,6 +220,61 @@ fn section_locks_round_trip_and_survive_preset_picks() {
     assert_eq!(b.tip, chalk.tip);
 }
 
+#[test]
+fn section_locks_are_always_visible_and_toggle_on_click() {
+    use egui_kittest::kittest::Queryable;
+
+    fn collect_icon_rects(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(r) if (r.rect.size() - vec2(12.0, 12.0)).length() < 0.5 => out.push(r.rect),
+            egui::Shape::Mesh(mesh) => out.push(mesh.calc_bounds()),
+            egui::Shape::Vec(shapes) => {
+                for s in shapes {
+                    collect_icon_rects(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut h = harness(0, 0);
+    let mut icons = Vec::new();
+    for clipped in &h.output().shapes {
+        collect_icon_rects(&clipped.shape, &mut icons);
+    }
+
+    // Every lockable section (1..SECTIONS.len()) paints its lock icon even when unlocked and unhovered.
+    for (name, _) in SECTIONS.iter().skip(1) {
+        let row = h.get_by_label(name).rect();
+        let lock_center = egui::pos2(row.right() - 11.0, row.center().y);
+        assert!(icons.iter().any(|r| r.contains(lock_center)), "expected lock icon at {lock_center:?} for {name}");
+    }
+
+    // Clicking the lock toggles it on and off without changing the selected section.
+    let row = h.get_by_label("Scattering").rect();
+    let lock_pos = egui::pos2(row.right() - 11.0, row.center().y);
+    assert!(!h.state().session.tools.brush.locks.scattering);
+    assert_eq!(h.state().ui.brush_section, 0);
+
+    h.hover_at(lock_pos);
+    h.run_steps(1);
+    h.drag_at(lock_pos);
+    h.run_steps(1);
+    h.drop_at(lock_pos);
+    h.run_steps(2);
+    assert!(h.state().session.tools.brush.locks.scattering);
+    assert_eq!(h.state().ui.brush_section, 0);
+
+    h.hover_at(lock_pos);
+    h.run_steps(1);
+    h.drag_at(lock_pos);
+    h.run_steps(1);
+    h.drop_at(lock_pos);
+    h.run_steps(2);
+    assert!(!h.state().session.tools.brush.locks.scattering);
+    assert_eq!(h.state().ui.brush_section, 0);
+}
+
 /// A harness that shows the options bar with `tool` in the Studio (non-pro) theme.
 fn options_bar_harness(tool: crate::state::Tool) -> Harness<'static, PhotocraftApp> {
     let mut app = app();
