@@ -36,7 +36,8 @@ pub fn transform_bounds(doc: &Document, layer: &Layer) -> Rect {
     let content =
         if content.is_empty() { layer.mask.as_ref().map_or(Rect::EMPTY, |m| photocraft_compose::bounds::content_bounds(&m.surface)) } else { content };
     match &doc.selection {
-        Some(sel) if !moves_whole(layer) => content.intersect(&sel.content_bounds()),
+        // Cached per tile: snapping asks this of every layer at the start of a drag (#578).
+        Some(sel) if !moves_whole(layer) => content.intersect(&photocraft_compose::bounds::content_bounds(sel)),
         _ => content,
     }
 }
@@ -310,7 +311,8 @@ pub fn split_selected(surf: &Surface, sel: &Surface) -> Result<(Surface, Surface
     let fmt = surf.format();
     let with_alpha = PixelFormat::new(fmt.mode, fmt.sample, true);
     let mut lifted = Surface::new(with_alpha);
-    let mut rest = surf.try_convert(with_alpha)?;
+    // Converting to the format it has would only copy every tile (Free Transform's start, #578).
+    let mut rest = if fmt == with_alpha { surf.clone() } else { surf.try_convert(with_alpha)? };
     let src = surf.content_bounds();
     if src.is_empty() {
         return Ok((lifted, rest));
@@ -328,9 +330,13 @@ pub fn split_selected(surf: &Surface, sel: &Surface) -> Result<(Surface, Surface
     if rest_clear.last().is_some_and(|a| *a > 0.0) {
         rest_clear.fill(0.0);
     }
+    // The selection's coverage, a row at a time (one tile lookup per run, not per pixel).
+    let mut cover = vec![0.0f32; w];
     for (i, (l, r)) in lp.chunks_exact_mut(n).zip(rp.chunks_exact_mut(n)).enumerate() {
-        let (x, y) = (src.x0 + (i % w) as i32, src.y0 + (i / w) as i32);
-        let k = sel.sample_channel(x, y, 0);
+        if i % w == 0 {
+            sel.sample_row_strided(src.y0 + (i / w) as i32, src.x0, 1, 0, &mut cover);
+        }
+        let k = cover.get(i % w).copied().unwrap_or(0.0);
         l[n - 1] *= k;
         r[n - 1] *= 1.0 - k;
         if r[n - 1] <= 0.0 {
@@ -358,7 +364,12 @@ pub(crate) fn refresh_text(doc: &Document, l: &mut Layer) {
 
 /// Normal-blend `top` over `dst` (both straight alpha, same format).
 pub(crate) fn composite_over(dst: &mut Surface, top: &Surface) {
-    let b = top.content_bounds();
+    composite_over_in(dst, top, top.content_bounds());
+}
+
+/// [`composite_over`] with `top`'s content bounds already known (`b`; nothing outside it is
+/// touched), so a caller that composites the same piece at many offsets scans it once.
+pub(crate) fn composite_over_in(dst: &mut Surface, top: &Surface, b: Rect) {
     if b.is_empty() {
         return;
     }
@@ -865,5 +876,65 @@ mod tests {
         s.execute("select.rect", json!({"x": 10, "y": 10, "width": 5, "height": 10})).unwrap();
         let st = s.active().unwrap();
         assert_eq!(transform_bounds(&st.doc, st.doc.layer(st.active_layer.unwrap()).unwrap()), Rect::new(10, 10, 15, 20));
+    }
+
+    /// Lifting the selected pixels gives exactly what the per-pixel code it replaced gave: for
+    /// layers with and without alpha (the Background), feathered selections, at every depth.
+    #[test]
+    fn split_selected_matches_the_per_pixel_reference() {
+        fn reference(surf: &Surface, sel: &Surface) -> (Surface, Surface) {
+            let fmt = surf.format();
+            let with_alpha = PixelFormat::new(fmt.mode, fmt.sample, true);
+            let mut lifted = Surface::new(with_alpha);
+            let mut rest = surf.try_convert(with_alpha).unwrap();
+            let src = surf.content_bounds();
+            let n = with_alpha.channels();
+            let px = rest.read_region(src);
+            let mut lp = px.clone();
+            let mut rp = px;
+            let w = src.width() as usize;
+            let mut rest_clear = rest.default_pixel();
+            if rest_clear.last().is_some_and(|a| *a > 0.0) {
+                rest_clear.fill(0.0);
+            }
+            for (i, (l, r)) in lp.chunks_exact_mut(n).zip(rp.chunks_exact_mut(n)).enumerate() {
+                let k = sel.sample_channel(src.x0 + (i % w) as i32, src.y0 + (i / w) as i32, 0);
+                l[n - 1] *= k;
+                r[n - 1] *= 1.0 - k;
+                if r[n - 1] <= 0.0 {
+                    r.iter_mut().zip(&rest_clear).for_each(|(d, c)| *d = *c);
+                }
+            }
+            lifted.write_region(src, &lp);
+            lifted.prune();
+            rest.write_region(src, &rp);
+            (lifted, rest)
+        }
+        for depth in [8, 16, 32] {
+            for background in [false, true] {
+                let mut s = Session::new();
+                s.execute("file.new", json!({"width": 300, "height": 140, "depth": depth})).unwrap();
+                if !background {
+                    s.execute("layer.new.layer", json!({})).unwrap();
+                }
+                s.edit("paint", |doc, active| {
+                    let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+                    let fmt = surf.format();
+                    for x in (0..300).step_by(3) {
+                        surf.fill_rect(Rect::new(x, 5, x + 2, 130), &photocraft_raster::from_rgba(&fmt, [x as f32 / 300.0, 0.4, 0.8, 0.75]));
+                    }
+                    Ok(())
+                })
+                .unwrap();
+                s.execute("select.rect", json!({"x": 40, "y": 20, "width": 170, "height": 90})).unwrap();
+                s.execute("select.modify.feather", json!({"radius": 6})).unwrap();
+                let st = s.active().unwrap();
+                let surf = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
+                let sel = st.doc.selection.as_ref().unwrap();
+                let (lifted, rest) = split_selected(surf, sel).unwrap();
+                let (want_lifted, want_rest) = reference(surf, sel);
+                assert!(lifted == want_lifted && rest == want_rest, "{depth}-bit background={background}");
+            }
+        }
     }
 }

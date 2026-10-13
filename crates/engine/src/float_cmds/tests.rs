@@ -189,3 +189,172 @@ fn cutting_an_untouched_part_of_the_mask_moves_it_and_leaves_the_background_colo
     assert!((mask_at(&s, 12, 12) - 0.5).abs() < 0.01, "the hole takes the background colour");
     assert_eq!(mask_at(&s, 40, 12), 0.0);
 }
+
+/// Worst channel difference between two composites of the canvas.
+fn worst(a: &Document, b: &Document) -> f32 {
+    let (a, b) = (photocraft_compose::flatten(a), photocraft_compose::flatten(b));
+    assert_eq!(a.rect, b.rect);
+    a.px.iter().zip(&b.px).map(|(p, q)| (0..4).map(|k| (p[k] - q[k]).abs()).fold(0.0f32, f32::max)).fold(0.0f32, f32::max)
+}
+
+/// A `depth`-bit document with a Background and a painted layer (a ramp, half transparent in a
+/// band) over it; (12..52)×(8..40) selected, feathered when `feather`.
+fn layered(depth: u32, feather: bool, background: bool) -> (Session, LayerId) {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 96, "height": 64, "depth": depth})).unwrap();
+    if !background {
+        s.execute("layer.new.layer", json!({})).unwrap();
+    }
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.edit("paint", |doc, _| {
+        let surf = doc.layer_mut(id).unwrap().surface_mut().unwrap();
+        for x in 0..96 {
+            surf.fill_rect(Rect::new(x, 0, x + 1, 64), &photocraft_raster::from_rgba(&surf.format(), [x as f32 / 95.0, 0.3, 1.0 - x as f32 / 95.0, 1.0]));
+        }
+        if surf.format().alpha {
+            surf.fill_rect(Rect::new(0, 20, 96, 30), &photocraft_raster::from_rgba(&surf.format(), [0.9, 0.9, 0.1, 0.5]));
+        }
+        Ok(())
+    })
+    .unwrap();
+    s.execute("select.rect", json!({"x": 12, "y": 8, "width": 40, "height": 32})).unwrap();
+    if feather {
+        s.execute("select.modify.feather", json!({"radius": 5})).unwrap();
+    }
+    (s, id)
+}
+
+/// The canvas shows a floating piece as a layer of its own over the cut-out layer: the same
+/// pixels as compositing it into the layer, at every depth, cut or copied, feathered or not, on
+/// the Background too; the cut-out layer is one surface at every offset (nothing to upload again)
+/// and only the piece's layer moves.
+#[test]
+fn split_shows_what_the_composited_piece_shows() {
+    for depth in [8, 16, 32] {
+        for (feather, copy, background) in [(false, false, false), (true, false, false), (true, true, false), (false, false, true), (true, false, true)] {
+            let what = format!("{depth}-bit feather={feather} copy={copy} background={background}");
+            let (mut s, id) = layered(depth, feather, background);
+            s.execute("select.float", json!({"dx": 0, "dy": 0, "copy": copy})).unwrap();
+            let st = s.active().unwrap();
+            let f = floating(st).unwrap();
+            let mut rest = None;
+            for (dx, dy) in [(0, 0), (7, 3), (-15, 21), (64, -2), (300, 300)] {
+                let split = f.parts.split(&st.doc, dx, dy).unwrap_or_else(|| panic!("{what}: a plain layer splits"));
+                let moved = f.parts.moved(&st.doc, dx, dy).unwrap();
+                let w = worst(&split, &moved);
+                assert!(w <= 1.0 / 255.0 + 1e-6, "{what} ({dx}, {dy}): max diff {:.3}/255", w * 255.0);
+                let piece = split.layer(f.parts.piece_layer()).unwrap_or_else(|| panic!("{what}: the piece's layer"));
+                let path = |id| split.path_of(id).unwrap();
+                let (p, l) = (path(f.parts.piece_layer()), path(id));
+                assert_eq!((p.len(), p.last().copied()), (l.len(), l.last().map(|i| i + 1)), "{what}: right above the cut-out layer");
+                assert_eq!(piece.surface().unwrap().content_bounds(), f.parts.piece().content_bounds().translate(dx, dy), "{what}");
+                let cut = split.layer(id).unwrap().surface().unwrap().clone();
+                if let Some(r) = &rest {
+                    assert!(cut == *r && cut.tiles().zip(r.tiles()).all(|(a, b)| std::sync::Arc::ptr_eq(a.1, b.1)), "{what}: the cut-out layer's tiles are shared");
+                }
+                rest = Some(cut);
+            }
+            // What the canvas shows is what the drop leaves.
+            s.execute("select.float", json!({"dx": 9, "dy": -4})).unwrap();
+            let shown = displayed_split(s.active().unwrap(), (0, 0)).unwrap();
+            s.execute("select.drop", json!({})).unwrap();
+            let w = worst(&shown, &s.active().unwrap().doc);
+            assert!(w <= 1.0 / 255.0 + 1e-6, "{what}: dropped as shown, max diff {:.3}/255", w * 255.0);
+        }
+    }
+}
+
+/// Layers whose piece wouldn't composite like a layer of its own over them show the piece
+/// composited into the layer, as before.
+#[test]
+fn layers_that_dont_split_show_the_composited_piece() {
+    let cases: [(&str, fn(&mut Document, LayerId)); 6] = [
+        ("opacity", |d, id| d.layer_mut(id).unwrap().opacity = 0.5),
+        ("fill", |d, id| d.layer_mut(id).unwrap().fill_opacity = 0.5),
+        ("multiply", |d, id| d.layer_mut(id).unwrap().blend = photocraft_color::BlendMode::Multiply),
+        ("mask", |d, id| d.layer_mut(id).unwrap().mask = Some(photocraft_doc::LayerMask::reveal_all())),
+        ("clipped", |d, id| d.layer_mut(id).unwrap().clipped = true),
+        ("clipping base", |d, id| {
+            let mut above = photocraft_doc::Layer::raster("above", d.pixel_format());
+            above.clipped = true;
+            above.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 96, 64), &[0.0, 1.0, 0.0, 1.0]);
+            d.insert_above(Some(id), above);
+        }),
+    ];
+    for (what, setup) in cases {
+        let (mut s, id) = layered(8, true, false);
+        s.edit("setup", |doc, _| {
+            setup(doc, id);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("select.float", json!({"dx": 11, "dy": 5})).unwrap();
+        let st = s.active().unwrap();
+        let f = floating(st).unwrap();
+        assert!(f.parts.split(&st.doc, 11, 5).is_none(), "{what}");
+        let shown = displayed_split(st, (0, 0)).unwrap();
+        assert!(shown.layer(f.parts.piece_layer()).is_none(), "{what}");
+        assert_eq!(worst(&shown, &displayed(st, (0, 0)).unwrap()), 0.0, "{what}");
+    }
+}
+
+/// The mask target never splits (the piece is mask values, not pixels).
+#[test]
+fn a_floating_mask_piece_does_not_split() {
+    let (mut s, id) = layered(8, false, false);
+    s.edit("mask", |doc, _| {
+        doc.layer_mut(id).unwrap().mask = Some(photocraft_doc::LayerMask::reveal_all());
+        Ok(())
+    })
+    .unwrap();
+    s.execute("select.float", json!({"dx": 4, "dy": 4, "target": "mask"})).unwrap();
+    let st = s.active().unwrap();
+    assert!(floating(st).unwrap().parts.split(&st.doc, 4, 4).is_none());
+}
+
+/// The cut and the drop leave exactly the pixels they did before the piece's bounds were cached
+/// and the selection read a row at a time: the per-pixel reference below is the old code.
+#[test]
+fn cut_and_drop_match_the_per_pixel_reference() {
+    for depth in [8, 16, 32] {
+        for (feather, copy) in [(false, false), (true, false), (true, true)] {
+            let (s, id) = layered(depth, feather, false);
+            let st = s.active().unwrap();
+            let parts = CutParts::new(&st.doc, id, copy, [1.0; 4], false).unwrap();
+            // Reference cut.
+            let sel = st.doc.selection.as_ref().unwrap();
+            let surf = st.doc.layer(id).unwrap().surface().unwrap();
+            let fmt = surf.format();
+            let mut rest = surf.clone();
+            let mut piece = Surface::new(fmt);
+            let b = sel.content_bounds().intersect(&surf.content_bounds());
+            let n = fmt.channels();
+            let mut rp = surf.read_region(b);
+            let mut pp = rp.clone();
+            let w = b.width() as usize;
+            for (i, (p, r)) in pp.chunks_exact_mut(n).zip(rp.chunks_exact_mut(n)).enumerate() {
+                let k = sel.sample_channel(b.x0 + (i % w) as i32, b.y0 + (i / w) as i32, 0);
+                if k <= 0.0 {
+                    p.fill(0.0);
+                } else {
+                    p[n - 1] *= k;
+                }
+                if !copy {
+                    r[n - 1] *= 1.0 - k;
+                }
+            }
+            rest.write_region(b, &rp);
+            rest.prune();
+            piece.write_region(b, &pp);
+            piece.prune();
+            let what = format!("{depth}-bit feather={feather} copy={copy}");
+            assert!(parts.rest == rest && parts.piece == piece, "{what}: the cut");
+            for (dx, dy) in [(0, 0), (13, -7), (-40, 25)] {
+                let mut want = rest.clone();
+                crate::transform_cmds::composite_over(&mut want, &photocraft_algo::resample::translate_surface(&piece, dx, dy));
+                let got = parts.moved(&st.doc, dx, dy).unwrap();
+                assert!(*got.layer(id).unwrap().surface().unwrap() == want, "{what} ({dx}, {dy}): the drop");
+            }
+        }
+    }
+}
