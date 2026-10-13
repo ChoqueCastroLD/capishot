@@ -1279,7 +1279,7 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
             let scope = if selected_adjustments { "selected" } else { "all" };
             dialog(app, json!({"path": format!("{dir}/{stem}.cube"), "size": 33, "title": stem, "scope": scope}), json!({"scope": ["all", "selected"]}))
         }
-        "file.scripts.loadFilesIntoStack" => dialog(app, json!({"paths": dir}), json!({})),
+        "file.scripts.loadFilesIntoStack" => Some(Ok(json!({"dialog": crate::stack_dialog::open(app)}))),
         // Photography automation (photo_cmds / lens_cmds): a folder (or the open documents).
         "file.automate.photomerge" => dialog(
             app,
