@@ -680,6 +680,10 @@ pub struct PhotocraftApp {
     pub(crate) clip_read_for_paste: bool,
     /// Pointer position over the canvas (document px), for the Info panel and status bar.
     pub(crate) hover_doc: Option<[f64; 2]>,
+    /// Layer hovered in the Layers panel, outlined on the canvas.
+    pub(crate) hover_layer: Option<photocraft_doc::LayerId>,
+    /// Layer hovered on the canvas, highlighted in the Layers panel.
+    pub(crate) canvas_hover_layer: Option<photocraft_doc::LayerId>,
     pub(crate) clone_preview: Option<crate::canvas::ClonePreviewCache>,
     /// Info panel sample cache: ((x, y, revision, Sample Size), composite RGBA).
     info_sample: Option<(InfoSampleKey, [f32; 4])>,
@@ -822,6 +826,8 @@ impl PhotocraftApp {
             crop: Default::default(),
             pcrop: Default::default(),
             hover_doc: None,
+            hover_layer: None,
+            canvas_hover_layer: None,
             clone_preview: None,
             info_sample: None,
             os_clip_sig: None,
@@ -1746,6 +1752,7 @@ impl eframe::App for PhotocraftApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.hover_layer = None;
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
         if !self.fonts_ready {
