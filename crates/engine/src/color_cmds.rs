@@ -571,20 +571,41 @@ pub fn convert_surface(s: &Surface, from: ColorMode, to: PixelFormat, t: &Transf
     let mut dpo = vec![0.0f32; ds];
     t.convert_f32(&dp, ss, &mut dpo, ds, true);
     let mut out = Surface::with_default(to, &dpo);
-    // Convert all tiles in one parallel pass into a staging buffer, then store them.
-    let tiles: Vec<_> = s.tiles().map(|(c, t)| (*c, t.clone())).collect();
+    // Convert every distinct tile once, in one parallel pass into a staging buffer, then store
+    // them. Coordinates that share a tile (a filled background) share the converted one (#4531).
+    let mut distinct: Vec<std::sync::Arc<photocraft_raster::Tile>> = Vec::new();
+    let mut slot: std::collections::HashMap<*const photocraft_raster::Tile, usize> = std::collections::HashMap::new();
+    let tiles: Vec<(photocraft_geom::TileCoord, usize)> = s
+        .tiles()
+        .map(|(c, tile)| {
+            let i = *slot.entry(std::sync::Arc::as_ptr(tile)).or_insert_with(|| {
+                distinct.push(tile.clone());
+                distinct.len() - 1
+            });
+            (*c, i)
+        })
+        .collect();
     let tile_px = (photocraft_geom::TILE_SIZE * photocraft_geom::TILE_SIZE) as usize;
     let dst_len = tile_px * to.bytes_per_pixel();
-    let mut staging = vec![0u8; dst_len * tiles.len()];
-    let jobs: Vec<(&[u8], &mut [u8])> = tiles.iter().map(|(_, t)| t.bytes()).zip(staging.chunks_mut(dst_len.max(1))).collect();
+    let mut staging = vec![0u8; dst_len * distinct.len()];
+    let jobs: Vec<(&[u8], &mut [u8])> = distinct.iter().map(|t| t.bytes()).zip(staging.chunks_mut(dst_len.max(1))).collect();
     let kind = match sf.sample {
         SampleType::U8 => SampleKind::U8,
         SampleType::U16 => SampleKind::U16,
         SampleType::F32 => SampleKind::F32,
     };
     t.convert_bytes_many(kind, jobs, ss, ds, true);
-    for ((c, _), bytes) in tiles.iter().zip(staging.chunks(dst_len.max(1))) {
-        out.tile_mut(*c).bytes_mut().copy_from_slice(bytes);
+    let mut converted: Vec<Option<std::sync::Arc<photocraft_raster::Tile>>> = vec![None; distinct.len()];
+    for (c, i) in tiles {
+        if let Some(Some(tile)) = converted.get(i) {
+            out.put_tiles([(c, tile.clone())]);
+            continue;
+        }
+        let Some(bytes) = staging.chunks(dst_len.max(1)).nth(i) else { continue };
+        out.tile_mut(c).bytes_mut().copy_from_slice(bytes);
+        if let Some(slot) = converted.get_mut(i) {
+            *slot = out.tile(c).cloned();
+        }
     }
     out
 }
@@ -1124,6 +1145,29 @@ pub fn specs() -> Vec<CommandSpec> {
 mod tests {
     use super::*;
     use photocraft_geom::Rect;
+
+    /// Image › Mode to CMYK keeps a filled background's shared tile shared (#4531): one
+    /// converted tile for the whole grid, the same colour everywhere.
+    #[test]
+    fn mode_conversion_keeps_shared_tiles_shared() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 2048, "height": 1024, "background": "white"})).unwrap();
+        let distinct = |s: &Session| {
+            let doc = &s.active().unwrap().doc;
+            let surf = doc.layers[0].surface().unwrap();
+            let mut seen: Vec<_> = surf.tiles().map(|(_, t)| std::sync::Arc::as_ptr(t)).collect();
+            seen.sort();
+            seen.dedup();
+            (seen.len(), surf.tile_count())
+        };
+        let (before, count) = distinct(&s);
+        s.execute("image.mode.cmyk", json!({})).unwrap();
+        let (after, count_after) = distinct(&s);
+        assert_eq!((after, count_after), (before, count), "{before} distinct of {count} before");
+        let doc = &s.active().unwrap().doc;
+        let surf = doc.layers[0].surface().unwrap();
+        assert_eq!(surf.pixel(5, 5), surf.pixel(2000, 1000), "the same converted white everywhere");
+    }
 
     fn session(mode: &str, depth: u32) -> Session {
         let mut s = Session::new();
