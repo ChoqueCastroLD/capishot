@@ -38,7 +38,7 @@ photocraft-testkit = { path = "crates/testkit" }
 photocraft-tablet = { path = "crates/tablet" }
 
 # external
-craft-print = { git = "https://github.com/storytold/craft-libs", rev = "6ba4d0b97ad09767c588d82ff9c988eea53f0546" }
+craft-print = { git = "https://github.com/storytold/craft-libs", rev = "d873514e8a773f02f54c34ba890e57c02c3a36f6" }
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
