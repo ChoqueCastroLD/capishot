@@ -19,6 +19,10 @@
 # Zapisz jako…), sentence case as in the English source. Quotes: „…”.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Szerokość papieru
+	Paper Height	Wysokość papieru
 	Rows	Wiersze
 	Number	Liczba
 	Top:	Góra:
@@ -107,6 +111,14 @@
 	Script Events Manager…	Menedżer zdarzeń skryptów…
 	Import	Importuj
 	Browse…	Przeglądaj…
+	Source Files	Pliki źródłowe
+	Use:	Użyj:
+	Files	Pliki
+	Folder	Folder
+	Add Open Files	Dodaj otwarte pliki
+	Sort By Name	Sortuj według nazwy
+	Attempt to Automatically Align Source Images	Spróbuj automatycznie wyrównać obrazy źródłowe
+	Create Smart Object after Loading Layers	Utwórz obiekt inteligentny po wczytaniu warstw
 	Reveal in Finder	Pokaż w Finderze
 	Show in Explorer	Pokaż w Eksploratorze
 	Show in Folder	Pokaż w folderze
@@ -146,6 +158,8 @@
 	Transform Again on a Copy	Przekształć ponownie na kopii
 	Scale	Skaluj
 	Rotate	Obróć
+	Set horizontal skew	Ustaw pochylenie poziome
+	Set vertical skew	Ustaw pochylenie pionowe
 	Skew	Pochyl
 	Distort	Zniekształć
 	Perspective	Perspektywa
@@ -831,6 +845,9 @@
 	Appearance	Wygląd
 	Appearance (Layer Style)	Wygląd (styl warstwy)
 	Apply Layer Mask	Zastosuj maskę warstwy
+	Add Mask to Selection	Dodaj maskę do zaznaczenia
+	Subtract Mask from Selection	Odejmij maskę od zaznaczenia
+	Intersect Mask with Selection	Część wspólna maski i zaznaczenia
 	Apply Per Tip	Zastosuj dla każdego odcisku
 	Apply next selected layer comp	Zastosuj następną zaznaczoną kompozycję warstw
 	Apply previous selected layer comp	Zastosuj poprzednią zaznaczoną kompozycję warstw
@@ -3380,6 +3397,11 @@ cameraRaw	Roughness	Chropowatość
 	Channels:	Kanały:
 	Knockout	Wycięcie
 	New Brush Preset…	Nowe ustawienie wstępne pędzla…
+	Capture Brush Size in Preset	Zapisz rozmiar pędzla w ustawieniu wstępnym
+	Include Tool Settings	Uwzględnij ustawienia narzędzia
+	Include Color	Uwzględnij kolor
+	Enter a name for the brush preset	Wpisz nazwę ustawienia wstępnego pędzla
+	A brush preset with this name already exists	Ustawienie wstępne pędzla o tej nazwie już istnieje
 	Brush Preset Options	Opcje ustawień wstępnych pędzla
 
 # Fill dialog, layer style contours and Image Size

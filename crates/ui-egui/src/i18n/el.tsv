@@ -4,6 +4,10 @@
 # Covers every source label the i18n coverage check lists.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Πλάτος χαρτιού
+	Paper Height	Ύψος χαρτιού
 	Rows	Γραμμές
 	Number	Πλήθος
 	Top:	Επάνω:
@@ -91,6 +95,13 @@
 	Script Events Manager…	Διαχείριση συμβάντων δεσμών ενεργειών…
 	Import	Εισαγωγή
 	Browse…	Περιήγηση…
+	Source Files	Αρχεία προέλευσης
+	Use:	Χρήση:
+	Files	Αρχεία
+	Add Open Files	Προσθήκη ανοιχτών αρχείων
+	Sort By Name	Ταξινόμηση κατά όνομα
+	Attempt to Automatically Align Source Images	Απόπειρα αυτόματης στοίχισης εικόνων προέλευσης
+	Create Smart Object after Loading Layers	Δημιουργία έξυπνου αντικειμένου μετά τη φόρτωση επιπέδων
 	Reveal in Finder	Εμφάνιση στο Finder
 	Show in Explorer	Εμφάνιση στην Εξερεύνηση αρχείων
 	Show in Folder	Εμφάνιση στον φάκελο
@@ -166,6 +177,8 @@
 	Transform	Μετασχηματισμός
 	Free Transform	Ελεύθερος μετασχηματισμός
 	Rotate	Περιστροφή
+	Set horizontal skew	Ορισμός οριζόντιας λοξής παραμόρφωσης
+	Set vertical skew	Ορισμός κατακόρυφης λοξής παραμόρφωσης
 	Flip Horizontal	Οριζόντια αναστροφή
 	Flip Vertical	Κατακόρυφη αναστροφή
 	Crop	Περικοπή
@@ -249,6 +262,9 @@
 	Add Layer Mask	Προσθήκη μάσκας επιπέδου
 	Always use pressure for opacity	Πάντα χρήση πίεσης για την αδιαφάνεια
 	Apply Layer Mask	Εφαρμογή μάσκας επιπέδου
+	Add Mask to Selection	Προσθήκη μάσκας στην επιλογή
+	Subtract Mask from Selection	Αφαίρεση μάσκας από την επιλογή
+	Intersect Mask with Selection	Τομή μάσκας με την επιλογή
 	Brush Preset picker	Επιλογή προεπιλογής πινέλου
 	Brush Reconstruct Options	Επιλογές πινέλου επαναφοράς
 	Brush Tool Options	Επιλογές πινέλου (Brush Tool)
@@ -1467,6 +1483,11 @@
 	Developing {name}	Επεξεργασία του {name}
 	Camera Raw ({name})	Επεξεργασία RAW ({name})
 	New Brush Preset…	Νέα προεπιλογή πινέλου…
+	Capture Brush Size in Preset	Αποθήκευση μεγέθους πινέλου στην προεπιλογή
+	Include Tool Settings	Συμπερίληψη ρυθμίσεων εργαλείου
+	Include Color	Συμπερίληψη χρώματος
+	Enter a name for the brush preset	Εισαγάγετε όνομα για την προεπιλογή πινέλου
+	A brush preset with this name already exists	Υπάρχει ήδη προεπιλογή πινέλου με αυτό το όνομα
 	Brush Preset Options	Επιλογές προεπιλογής πινέλου
 	Show font names in english	Εμφάνιση ονομάτων γραμματοσειρών στα αγγλικά
 	Show menu colors	Εμφάνιση χρωμάτων μενού

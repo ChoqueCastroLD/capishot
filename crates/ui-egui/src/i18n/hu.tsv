@@ -17,6 +17,10 @@
 # singular noun in Hungarian, so every @plural entry has a single form.
 
 # Plural messages and command id overrides
+# Custom paper dimensions in Print Settings.
+	Paper Width	Papír szélessége
+	Paper Height	Papír magassága
+
 @id	edit.purge.undo	Visszavonási adatok
 @id	edit.stroke	Körvonalazás…
 @id	edit.transform.scale	Méretezés
@@ -27,6 +31,7 @@
 @plural	Imported {n} brush from {file}|Imported {n} brushes from {file}	{n} ecset importálva. Forrás: {file}
 @plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	{n} ecset importálva. Csoport: {group}
 @plural	Imported {n} gradient from {file}|Imported {n} gradients from {file}	{n} színátmenet importálva. Forrás: {file}
+@plural	Imported {n} pattern from {file}|Imported {n} patterns from {file}	{n} mintázat importálva. Forrás: {file}
 @plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	{n} színminta importálva. Forrás: {file}
 @plural	Played {n} step|Played {n} steps	{n} lépés lejátszva
 @plural	Saved for Web: {n} file|Saved for Web: {n} files	Mentés webre: {n} fájl
@@ -75,6 +80,13 @@
 	Black & White…	Fekete-fehér…
 	Brightness/Contrast…	Fényerő/kontraszt…
 	Browse…	Tallózás…
+	Source Files	Forrásfájlok
+	Use:	Használat:
+	Files	Fájlok
+	Add Open Files	Megnyitott fájlok hozzáadása
+	Sort By Name	Rendezés név szerint
+	Attempt to Automatically Align Source Images	Forrásképek automatikus igazításának megkísérlése
+	Create Smart Object after Loading Layers	Intelligens objektum létrehozása a rétegek betöltése után
 	Calculations…	Számítások…
 	Canvas Size…	Vászonméret…
 	Channel Mixer…	Csatornakeverő…
@@ -199,6 +211,8 @@
 	Reveal All	Minden megjelenítése
 	Revert	Visszaállítás
 	Rotate	Forgatás
+	Set horizontal skew	Vízszintes döntés beállítása
+	Set vertical skew	Függőleges döntés beállítása
 	Rotate 180°	Forgatás 180°-kal
 	Rotate 90° Clockwise	Forgatás 90°-kal az óramutató járása szerint
 	Rotate 90° Counter Clockwise	Forgatás 90°-kal az óramutató járásával szemben
@@ -430,6 +444,9 @@
 	Appearance	Megjelenés
 	Apply Data Set	Adatkészlet alkalmazása
 	Apply Layer Mask	Rétegmaszk alkalmazása
+	Add Mask to Selection	Maszk hozzáadása a kijelöléshez
+	Subtract Mask from Selection	Maszk kivonása a kijelölésből
+	Intersect Mask with Selection	Maszk metszése a kijelöléssel
 	Artboard Guides	Rajztábla-segédvonalak
 	Artboards to Files	Rajztáblák fájlokba
 	Artboards to PDF	Rajztáblák PDF-be
@@ -1165,6 +1182,11 @@
 	New Brush	Új ecset
 	New Brush Preset	Új ecset-előbeállítás
 	New Brush Preset…	Új ecset-előbeállítás…
+	Capture Brush Size in Preset	Ecsetméret rögzítése az előbeállításban
+	Include Tool Settings	Eszközbeállítások belefoglalása
+	Include Color	Szín belefoglalása
+	Enter a name for the brush preset	Adjon nevet az ecset-előbeállításnak
+	A brush preset with this name already exists	Már van ilyen nevű ecset-előbeállítás
 	New Crop Preset…	Új körbevágási előbeállítás…
 	New Tool Preset	Új eszköz-előbeállítás
 	No brush presets	Nincs ecset-előbeállítás

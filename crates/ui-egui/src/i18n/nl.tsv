@@ -9,6 +9,10 @@
 # informally ("je") and uses sentence case.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Papierbreedte
+	Paper Height	Papierhoogte
 	Rows	Rijen
 	Number	Aantal
 	Top:	Boven:
@@ -100,6 +104,13 @@
 	Script Events Manager…	Beheer scriptgebeurtenissen…
 	Import	Importeren
 	Browse…	Bladeren…
+	Source Files	Bronbestanden
+	Use:	Gebruiken:
+	Files	Bestanden
+	Add Open Files	Geopende bestanden toevoegen
+	Sort By Name	Sorteren op naam
+	Attempt to Automatically Align Source Images	Proberen bronafbeeldingen automatisch uit te lijnen
+	Create Smart Object after Loading Layers	Slim object maken na laden van lagen
 	Reveal in Finder	Weergeven in Finder
 	Show in Explorer	Weergeven in Verkenner
 	Show in Folder	Weergeven in map
@@ -140,6 +151,8 @@
 	Transform Again on a Copy	Opnieuw transformeren op een kopie
 	Scale	Schalen
 	Rotate	Roteren
+	Set horizontal skew	Horizontale schuinte instellen
+	Set vertical skew	Verticale schuinte instellen
 	Skew	Schuintrekken
 	Distort	Vervormen
 	Perspective	Perspectief
@@ -813,6 +826,9 @@
 	Appearance	Weergave
 	Appearance (Layer Style)	Weergave (laagstijl)
 	Apply Layer Mask	Laagmasker toepassen
+	Add Mask to Selection	Masker aan selectie toevoegen
+	Subtract Mask from Selection	Masker van selectie aftrekken
+	Intersect Mask with Selection	Masker met selectie laten snijden
 	Apply Per Tip	Per punt toepassen
 	Apply next selected layer comp	Volgende geselecteerde laagcompositie toepassen
 	Apply previous selected layer comp	Vorige geselecteerde laagcompositie toepassen
@@ -2067,6 +2083,11 @@
 	Rename Brush…	Penseel hernoemen…
 	Delete Brush	Penseel verwijderen
 	New Brush Preset…	Nieuwe penseelvoorinstelling…
+	Capture Brush Size in Preset	Penseelgrootte vastleggen in voorinstelling
+	Include Tool Settings	Gereedschapsinstellingen opnemen
+	Include Color	Kleur opnemen
+	Enter a name for the brush preset	Voer een naam in voor de penseelvoorinstelling
+	A brush preset with this name already exists	Er bestaat al een penseelvoorinstelling met deze naam
 	Brush Preset Options	Opties penseelvoorinstelling
 	Group name	Groepsnaam
 	Brush name	Penseelnaam

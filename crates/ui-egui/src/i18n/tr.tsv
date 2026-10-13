@@ -7,6 +7,10 @@
 # entries the same way. Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...)
 # stay as they are; the trailing "…" of dialog commands is kept.
 #
+# Custom paper dimensions in Print Settings.
+	Paper Width	Kağıt Genişliği
+	Paper Height	Kağıt Yüksekliği
+
 	Rows	Satırlar
 	Number	Sayı
 	Top:	Üst:
@@ -97,6 +101,13 @@
 	Script Events Manager…	Komut Dosyası Olay Yöneticisi…
 	Import	İthalat
 	Browse…	Göz at…
+	Source Files	Kaynak Dosyalar
+	Use:	Kullan:
+	Files	Dosyalar
+	Add Open Files	Açık Dosyaları Ekle
+	Sort By Name	Ada Göre Sırala
+	Attempt to Automatically Align Source Images	Kaynak Görüntüleri Otomatik Hizalamayı Dene
+	Create Smart Object after Loading Layers	Katmanları Yükledikten Sonra Akıllı Nesne Oluştur
 	Reveal in Finder	Finder'da Göster
 	Show in Explorer	Explorer'da Göster
 	Show in Folder	Klasörde Göster
@@ -137,6 +148,8 @@
 	Transform Again on a Copy	Bir Kopyada Yeniden Dönüştür
 	Scale	Ölçekle
 	Rotate	Döndür
+	Set horizontal skew	Yatay eğmeyi ayarla
+	Set vertical skew	Dikey eğmeyi ayarla
 	Skew	Eğ
 	Distort	Çarpıt
 	Perspective	Perspektif
@@ -798,7 +811,7 @@
 	Alt	Alternatif
 	Always use pressure for opacity	Opaklık için her zaman baskıyı kullanın
 	Always use pressure for size	Her zaman boyuta göre baskı kullanın
-	Amount	Tutar
+	Amount	Miktar
 	Anchor:	Çapa:
 	Angle	Açı
 	Angle Gradient	Açı Gradyanı
@@ -808,6 +821,9 @@
 	Appearance	Görünüm
 	Appearance (Layer Style)	Görünüm (Katman Stili)
 	Apply Layer Mask	Katman Maskesini Uygula
+	Add Mask to Selection	Maskeyi Seçime Ekle
+	Subtract Mask from Selection	Maskeyi Seçimden Çıkar
+	Intersect Mask with Selection	Maskeyi Seçimle Kesiştir
 	Apply Per Tip	İpucu Başına Uygula
 	Apply next selected layer comp	Sonraki seçilen katman kompozisyonunu uygula
 	Apply previous selected layer comp	Önceki seçilen katman kompozisyonunu uygula
@@ -2049,6 +2065,11 @@
 	Rename Brush…	Fırçayı Yeniden Adlandır…
 	Delete Brush	Fırçayı Sil
 	New Brush Preset…	Yeni Fırça Ön Ayarı…
+	Capture Brush Size in Preset	Fırça Boyutunu Ön Ayara Kaydet
+	Include Tool Settings	Araç Ayarlarını Dahil Et
+	Include Color	Rengi Dahil Et
+	Enter a name for the brush preset	Fırça ön ayarı için bir ad girin
+	A brush preset with this name already exists	Bu adda bir fırça ön ayarı zaten var
 	Brush Preset Options	Fırça Ön Ayarı Seçenekleri
 	Group name	Grup adı
 	Brush name	Fırça adı
@@ -2678,7 +2699,7 @@ cameraRaw	Color	Renk
 	Alternative	Alternatif
 	Extra Light	Ekstra Işık
 	Extra Bold	Ekstra Kalın
-	Sharpen Amount	Keskinleştirme Tutarı
+	Sharpen Amount	Keskinleştirme Miktarı
 	Sharpen Radius	Yarıçapı Keskinleştir
 	Sharpen Detail	Detayı Keskinleştir
 	Sharpen Masking	Maskelemeyi Keskinleştir
@@ -2699,7 +2720,7 @@ cameraRaw	Color	Renk
 	Shadow Amount	Gölge Miktarı
 	Shadow Tone	Gölge Tonu
 	Shadow Radius	Gölge Yarıçapı
-	Highlight Amount	Tutarı Vurgula
+	Highlight Amount	Vurgu Miktarı
 	Highlight Tone	Vurgu Tonu
 	Highlight Radius	Yarıçapı Vurgula
 	Midtone	Orta ton
@@ -2729,7 +2750,7 @@ cameraRaw	Color	Renk
 	Leaf Color	Yaprak Rengi
 	Base Tree Type	Temel Ağaç Türü
 	Light Direction	Işık Yönü
-	Leaves Amount	Yaprak Tutarı
+	Leaves Amount	Yaprak Miktarı
 	Leaves Size	Yaprak Boyutu
 	Branches Height	Dal Yüksekliği
 	Branches Thickness	Dal Kalınlığı
@@ -3104,7 +3125,7 @@ cameraRaw	Color	Renk
 	Stroke Direction	Strok Yönü
 	Graininess	Taneciklilik
 	Glow Amount	Işıma Miktarı
-	Clear Amount	Tutarı Temizle
+	Clear Amount	Temizleme Miktarı
 	Distortion	Bozulma
 	Ripple Size	Dalgalanma Boyutu
 	Ripple Magnitude	Dalgalanma Büyüklüğü
@@ -3133,7 +3154,7 @@ cameraRaw	Color	Renk
 	Auto Scale	Otomatik Ölçeklendirme
 	Red Cyan	Kırmızı Camgöbeği
 	Blue Yellow	Mavi Sarı
-	Vignette Amount	Vinyet Tutarı
+	Vignette Amount	Vinyet Miktarı
 	Vignette Midpoint	Vinyet Orta Noktası
 	Constraints	Kısıtlamalar
 	Curve Highlights	Eğrinin Öne Çıkan Noktaları

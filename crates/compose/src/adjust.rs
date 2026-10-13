@@ -158,10 +158,11 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
             map_rgb(buf, |c| {
                 let (dh, ds, dl) = match &table {
                     Some(t) => {
-                        // Range edits follow the pixel's original hue, faded out towards grey (greys have no hue).
+                        // Range edits follow the pixel's original hue, in full however dull the colour
+                        // (Photoshop's merged images, #4089). Greys stay grey: no hue to shift, no
+                        // saturation to scale, and range Lightness moves towards a channel they share.
                         let h0 = rgb_to_hsl(c).0;
-                        let chroma = ((c[0].max(c[1]).max(c[2]) - c[0].min(c[1]).min(c[2])) * 4.0).min(1.0);
-                        (lut(&t[0], h0) * chroma, lut(&t[1], h0) * chroma, lut(&t[2], h0) * chroma)
+                        (lut(&t[0], h0), lut(&t[1], h0), lut(&t[2], h0))
                     }
                     None => (0.0, 0.0, 0.0),
                 };
@@ -1379,6 +1380,37 @@ mod tone_tests {
                 assert!((got[i] * 255.0 - want[i] as f32).abs() <= 2.5, "{input:?} channel {i}: {} vs {}", got[i] * 255.0, want[i]);
             }
         }
+    }
+
+    /// Photoshop's own render (merged image of psd-tools `adjustments/huesaturation_lightness_rgb.psd`,
+    /// layer "Hue/Saturation 1"): a dull magenta gets the whole range edit, as a vivid one does (#4089).
+    #[test]
+    fn hue_ranges_apply_in_full_to_dull_colours() {
+        let range = |lightness: f32, bounds: [f32; 4]| HueRange { hue: 0.0, saturation: 0.0, lightness, bounds };
+        let ranges = [
+            range(-11.0, [-57.0, 4.0, 82.0, 175.0]),
+            range(100.0, [12.0, 45.0, 75.0, 105.0]),
+            HueRange::neutral(2),
+            HueRange::neutral(3),
+            HueRange::neutral(4),
+            range(100.0, [-117.0, -50.0, 39.0, 104.0]),
+        ];
+        let a = Adjustment::HueSaturation { hue: 0.0, saturation: 0.0, lightness: 17.0, colorize: false, ranges };
+        let measured = [([126u8, 97, 120], [148u8, 148, 148]), ([131, 103, 125], [152, 152, 152]), ([95, 69, 90], [122, 122, 122])];
+        for (input, want) in measured {
+            let c = input.map(|v| v as f32 / 255.0);
+            let mut b = Buffer { rect: Rect::new(0, 0, 1, 1), px: vec![[c[0], c[1], c[2], 1.0]] };
+            apply(&a, &mut b);
+            for (i, w) in want.iter().enumerate() {
+                let got = b.px[0][i] * 255.0;
+                assert!((got - *w as f32).abs() <= 2.0, "{input:?} channel {i}: {got} vs {w}");
+            }
+        }
+        // Greys have no hue, so the ranges leave them alone: only the master Lightness moves them.
+        let mut b = Buffer { rect: Rect::new(0, 0, 1, 1), px: vec![[0.4, 0.4, 0.4, 1.0]] };
+        apply(&a, &mut b);
+        let p = b.px[0];
+        assert!((p[0] - p[1]).abs() < 1e-6 && (p[1] - p[2]).abs() < 1e-6 && (p[0] - (0.4 + 0.6 * 0.17)).abs() < 1e-4, "{p:?}");
     }
 
     #[test]

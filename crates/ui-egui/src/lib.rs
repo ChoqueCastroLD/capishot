@@ -30,6 +30,7 @@ mod brand;
 pub(crate) mod brush_cursor;
 pub mod brush_panel;
 pub mod brush_picker;
+pub mod brush_preset_dialog;
 pub mod brush_preview;
 pub mod brush_resize;
 pub mod brush_sections;
@@ -165,6 +166,7 @@ pub mod rotate_view;
 pub mod rulers;
 pub mod screen_picker;
 pub mod scrollbars;
+mod scrub_wrap;
 pub mod select_mask_view;
 pub mod served_fonts;
 pub mod shape_dialog;
@@ -179,6 +181,7 @@ pub mod smart_ui;
 pub mod snap_ui;
 pub(crate) mod solid_fill_ui;
 pub mod spring_tools;
+pub mod stack_dialog;
 pub mod state;
 pub mod stroke_constraint;
 pub mod stroke_trail;
@@ -1189,6 +1192,7 @@ impl PhotocraftApp {
             st.source_read_only = photocraft_io::affinity::is_affinity(bytes);
         }
         self.sync_views();
+        let warnings = file_open::with_missing_fonts(self, warnings);
         self.ui.status = crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]);
         self.ui.status_error = false;
         if camera_raw_ui::wants_open_dialog(self, &warnings) {
@@ -2172,7 +2176,20 @@ impl PhotocraftApp {
         // identity against address reuse without retaining the document's pixel data.
         let snapshot = std::sync::Arc::downgrade(&doc);
         let show_color = self.session.prefs().interface.show_channels_in_color;
-        if !matches!(&self.channel_thumbs, Some((d, old, in_color, _)) if *d == id && old.ptr_eq(&snapshot) && *in_color == show_color) {
+        // A step that changes only the selection (a marquee, Deselect) makes a new snapshot with
+        // the same pixels: keep the thumbnails, a full composite at 56 px costs ~0.7 s on a
+        // layered 20 MP document (#4518).
+        let current = match &mut self.channel_thumbs {
+            Some((d, old, in_color, _)) if *d == id && *in_color == show_color => {
+                let same = old.ptr_eq(&snapshot) || old.upgrade().is_some_and(|prev| same_but_selection(&prev, &doc));
+                if same {
+                    *old = snapshot.clone();
+                }
+                same
+            }
+            _ => false,
+        };
+        if !current {
             let comp = photocraft_compose::thumbnail(&doc, 56);
             let (w, h) = (comp.width as usize, comp.height as usize);
             let side = w.max(h);
@@ -2185,7 +2202,7 @@ impl PhotocraftApp {
                         px[(y + oy) * side + x + ox] = f(&comp.pixels[o..o + 4]);
                     }
                 }
-                ctx.load_texture(format!("chan-{name}"), egui::ColorImage::new([side, side], px), egui::TextureOptions::LINEAR)
+                (format!("chan-{name}"), egui::ColorImage::new([side, side], px))
             };
             let fmt = doc.pixel_format();
             let colors = fmt.mode.color_channels();
@@ -2218,12 +2235,35 @@ impl PhotocraftApp {
                         px[(y + oy) * side + x + ox] = egui::Color32::from_gray((v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
                     }
                 }
-                texs.push(ctx.load_texture(format!("chan-a{i}"), egui::ColorImage::new([side, side], px), egui::TextureOptions::LINEAR));
+                texs.push((format!("chan-a{i}"), egui::ColorImage::new([side, side], px)));
             }
-            self.channel_thumbs = Some((id, snapshot, show_color, texs));
+            // Update the textures already uploaded rather than allocating new ones.
+            let mut handles = match self.channel_thumbs.take() {
+                Some((d, _, _, h)) if d == id => h,
+                _ => Vec::new(),
+            };
+            handles.truncate(texs.len());
+            for (i, (name, image)) in texs.into_iter().enumerate() {
+                match handles.get_mut(i) {
+                    Some(h) => h.set(image, egui::TextureOptions::LINEAR),
+                    None => handles.push(ctx.load_texture(name, image, egui::TextureOptions::LINEAR)),
+                }
+            }
+            self.channel_thumbs = Some((id, snapshot, show_color, handles));
         }
         self.channel_thumbs.as_ref().map(|(_, _, _, t)| t.iter().map(|t| t.id()).collect()).unwrap_or_default()
     }
+}
+
+/// Whether `new` differs from `old` at most in its selection, so every composite and channel
+/// thumbnail of it is unchanged. Tiles compare by pointer first, so this costs little.
+fn same_but_selection(old: &Document, new: &Document) -> bool {
+    if old.selection == new.selection {
+        return old == new;
+    }
+    let mut o = old.clone();
+    o.selection = new.selection.clone();
+    o == *new
 }
 
 /// Layer › Layer Mask commands that add a layer mask: Photoshop targets the new mask (#2166).
@@ -2347,7 +2387,7 @@ impl PhotocraftApp {
         let r = photocraft_geom::Rect::new(0, 0, w as i32, h as i32);
         let mut surface = photocraft_raster::Surface::from_interleaved(photocraft_color::PixelFormat::RGBA8, r, &bytes);
         surface.prune();
-        self.session.clipboard = Some(photocraft_engine::edit_cmds::Clip { surface, bounds: r, layers: None });
+        self.session.clipboard = Some(photocraft_engine::edit_cmds::Clip { surface, bounds: r, layers: None, resolution: None });
         self.os_clip_sig = Some(sig);
         self.clip_external = true;
         true
@@ -2584,9 +2624,12 @@ mod clipboard_tests {
         let d = &app.session.active().unwrap().doc;
         assert_eq!((d.size.width, d.size.height, d.layers.len()), (5, 3, 1));
         assert_eq!(app.ui.views.len(), 1, "the new document has a view");
+        assert!(app.has_unsaved_work(), "closing after Paste must ask to save");
         // New from Clipboard with a document open adds another.
         crate::menus::invoke(&mut app, &ctx, "file.newFromClipboard", serde_json::json!({})).unwrap();
         assert_eq!(app.session.documents().len(), 2);
+        assert!(app.session.documents().iter().all(|d| d.is_dirty()));
+        assert!(crate::discard_ui::intercept(&mut app, "file.close", &serde_json::json!({})), "Close must ask before discarding clipboard pixels");
     }
 
     #[test]

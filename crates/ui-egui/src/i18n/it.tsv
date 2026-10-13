@@ -13,6 +13,10 @@
 # letters; the trailing … of dialog commands is kept.
 
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Larghezza della carta
+	Paper Height	Altezza della carta
 	Columns	Colonne
 	Rows	Righe
 	Number	Numero
@@ -107,6 +111,13 @@
 	Script Events Manager…	Gestore eventi script…
 	Import	Importa
 	Browse…	Sfoglia…
+	Source Files	File di origine
+	Use:	Usa:
+	Files	File
+	Add Open Files	Aggiungi file aperti
+	Sort By Name	Ordina per nome
+	Attempt to Automatically Align Source Images	Prova ad allineare automaticamente le immagini di origine
+	Create Smart Object after Loading Layers	Crea oggetto avanzato dopo il caricamento dei livelli
 	Reveal in Finder	Mostra nel Finder
 	Show in Explorer	Mostra in Esplora file
 	Show in Folder	Mostra nella cartella
@@ -147,6 +158,8 @@
 	Transform Again on a Copy	Trasforma di nuovo su una copia
 	Scale	Scala
 	Rotate	Ruota
+	Set horizontal skew	Imposta inclinazione orizzontale
+	Set vertical skew	Imposta inclinazione verticale
 	Skew	Inclina
 	Distort	Distorci
 	Perspective	Prospettiva
@@ -830,6 +843,9 @@
 	Appearance	Aspetto
 	Appearance (Layer Style)	Aspetto (stile livello)
 	Apply Layer Mask	Applica maschera di livello
+	Add Mask to Selection	Aggiungi maschera alla selezione
+	Subtract Mask from Selection	Sottrai maschera dalla selezione
+	Intersect Mask with Selection	Interseca maschera con la selezione
 	Apply Per Tip	Applica per punta
 	Apply next selected layer comp	Applica composizione livelli successiva selezionata
 	Apply previous selected layer comp	Applica composizione livelli precedente selezionata
@@ -2099,6 +2115,11 @@
 	Rename Brush…	Rinomina pennello…
 	Delete Brush	Elimina pennello
 	New Brush Preset…	Nuovo predefinito pennello…
+	Capture Brush Size in Preset	Acquisisci dimensione pennello nel predefinito
+	Include Tool Settings	Includi impostazioni strumento
+	Include Color	Includi colore
+	Enter a name for the brush preset	Immetti un nome per il predefinito pennello
+	A brush preset with this name already exists	Esiste già un predefinito pennello con questo nome
 	Brush Preset Options	Opzioni predefiniti pennello
 	Group name	Nome gruppo
 	Brush name	Nome pennello
@@ -4018,6 +4039,7 @@ layerLabel	No Color	Nessun colore
 	gradients	sfumature
 @plural	Imported {n} brush from {file}|Imported {n} brushes from {file}	{n} pennello importato da {file}|{n} pennelli importati da {file}
 @plural	Imported {n} gradient from {file}|Imported {n} gradients from {file}	{n} sfumatura importata da {file}|{n} sfumature importate da {file}
+@plural	Imported {n} pattern from {file}|Imported {n} patterns from {file}	{n} pattern importato da {file}|{n} pattern importati da {file}
 	Data Set: {name}  ({index}/{total})	Set di dati: {name}  ({index}/{total})
 	(none)	(nessuno)
 navigator	Zoom	Zoom
