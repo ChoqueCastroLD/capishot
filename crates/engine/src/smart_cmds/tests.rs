@@ -529,8 +529,18 @@ fn export_replace_and_linked_contents() {
     paint(&mut s);
     convert(&mut s);
     let out = dir.join("contents.pcraft");
-    s.execute("layer.smartObjects.exportContents", json!({"path": out.to_str().unwrap()})).unwrap();
+    let r = s.execute("layer.smartObjects.exportContents", json!({"path": out.to_str().unwrap()})).unwrap();
     assert!(photocraft_format::is_pcraft(&std::fs::read(&out).unwrap()));
+    assert_eq!(r["converted"], false);
+    // Another extension exports the contents in that format.
+    for (ext, magic) in [("png", &b"\x89PNG"[..]), ("jpeg", &b"\xFF\xD8\xFF"[..]), ("psd", &b"8BPS"[..])] {
+        let other = dir.join(format!("contents.{ext}"));
+        let r = s.execute("layer.smartObjects.exportContents", json!({"path": other.to_str().unwrap()})).unwrap();
+        assert_eq!(r["converted"], true, "{ext}");
+        assert!(std::fs::read(&other).unwrap().starts_with(magic), "{ext}");
+    }
+    let bad = dir.join("contents.nope");
+    assert!(s.execute("layer.smartObjects.exportContents", json!({"path": bad.to_str().unwrap()})).is_err());
     // Replace with a flat PNG.
     let png_doc = Document::with_background(
         "p",
