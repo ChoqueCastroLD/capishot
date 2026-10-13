@@ -5450,7 +5450,8 @@ pub fn commit_crop(app: &mut PhotocraftApp) {
     }
 }
 
-/// "mask" when the Layers panel targets (or the canvas shows) the active layer's mask, else "pixels".
+/// "mask" when the Layers panel targets (or the canvas shows) the active layer's mask, or the layer
+/// is an adjustment layer with one (it has no pixels: #4298), else "pixels".
 pub fn paint_target(app: &PhotocraftApp) -> serde_json::Value {
     use photocraft_engine::channel_cmds::ChannelTarget;
     let Some(st) = app.session.active() else { return json!("pixels") };
@@ -5464,7 +5465,8 @@ pub fn paint_target(app: &PhotocraftApp) -> serde_json::Value {
     let has_mask = st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| l.mask.is_some());
     // Viewing the mask (⌥-click its thumbnail, #196) paints the mask.
     let viewing = photocraft_engine::mask_view_cmds::current(st).is_some();
-    json!(if (app.ui.mask_target || viewing) && has_mask { "mask" } else { "pixels" })
+    let mask = app.ui.mask_target || viewing || crate::adjustment_layer_active(st);
+    json!(if mask && has_mask { "mask" } else { "pixels" })
 }
 
 #[cfg(test)]
@@ -6304,6 +6306,41 @@ mod tests {
 
         tool_event(&mut app, ToolEvent::Move { x: 30.0, y: 10.0, pressure: 1.0 }, egui::Modifiers::NONE);
         assert!(app.session.tools.foreground[1] > 0.99 && app.session.tools.foreground[0] < 0.01);
+    }
+
+    /// #4298: an adjustment layer has no pixels, so after its icon thumbnail is clicked (the
+    /// Layers panel no longer targets the mask) Fill, the fill keys and the Paint Bucket still
+    /// edit its mask, as in Photoshop, instead of failing with "not a pixel layer".
+    #[test]
+    fn fills_on_an_adjustment_layer_edit_its_mask_when_the_icon_is_targeted() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 40, "height": 20, "background": "white"})).unwrap();
+        app.run("layer.newAdjustmentLayer.curves", json!({})).unwrap();
+        // Click the Curves icon thumbnail: the panel targets the layer, not its mask.
+        app.ui.mask_target = false;
+        app.sync_mask_targets();
+        assert!(!app.ui.mask_target, "the panel's target is the icon");
+        let mask_at = |app: &PhotocraftApp| {
+            let st = app.session.active().unwrap();
+            st.doc.layer(st.active_layer.unwrap()).unwrap().mask.as_ref().unwrap().surface.sample_channel(10, 10, 0)
+        };
+        assert_eq!(paint_target(&app), json!("mask"));
+        assert!(crate::menus::is_enabled(&app, "edit.fill"), "Edit > Fill (⇧F5) is enabled");
+        assert!(crate::menus::is_enabled(&app, "edit.fillForeground"));
+        app.ui.tool = Tool::PaintBucket;
+        app.run("tools.setColors", json!({"foreground": [0.0, 0.0, 0.0, 1.0], "background": [1.0, 1.0, 1.0, 1.0]})).unwrap();
+        tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 10.0, pressure: 1.0 }, egui::Modifiers::NONE);
+        tool_event(&mut app, ToolEvent::Up { x: 10.0, y: 10.0 }, egui::Modifiers::NONE);
+        assert_eq!(mask_at(&app), 0.0, "the Paint Bucket filled the mask black");
+        app.run("edit.fill", json!({"contents": "white"})).unwrap();
+        assert_eq!(mask_at(&app), 1.0, "Edit > Fill filled the mask white");
+        assert!(!app.ui.mask_target, "filling doesn't move the panel's target");
+        // A pixel layer with an untargeted mask still paints its pixels.
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("layer.layerMask.revealAll", json!({})).unwrap();
+        app.ui.mask_target = false;
+        assert_eq!(paint_target(&app), json!("pixels"));
+        assert!(!app.layer_mask_targeted());
     }
 
     #[test]
