@@ -396,6 +396,41 @@ fn styles_change_pixels() {
     assert!(hrect.width() as f32 > prect.width() as f32 * 1.7);
 }
 
+/// #4130: Faux bold at 72 dpi looked pixelated because the offset copies were summed into one
+/// coverage buffer, saturating every antialiased edge pixel. Edges must stay antialiased and the
+/// ink must grow only by the dilation (about perimeter x radius), not by edge saturation.
+#[test]
+fn faux_bold_keeps_antialiased_edges_at_small_sizes() {
+    let mut e = TextEngine::new();
+    let base = CharStyle { size_pt: 12.0, ..Default::default() };
+    let stats = |e: &mut TextEngine, s: CharStyle| {
+        let (_, r) = e.render(&TextLayer { transform: Affine::translate(5.0, 20.0), ..styled("Bold Test", s) }, 72.0, PixelFormat::RGBA8);
+        let (w, h) = (r.rect.width() as usize, r.rect.height() as usize);
+        let mut partial = 0usize;
+        for y in 0..h {
+            for x in 0..w {
+                let a = alpha_sum(
+                    &r.surface,
+                    photocraft_geom::Rect::new(r.rect.x0 + x as i32, r.rect.y0 + y as i32, r.rect.x0 + x as i32 + 1, r.rect.y0 + y as i32 + 1),
+                );
+                if a > 0.05 && a < 0.95 {
+                    partial += 1;
+                }
+            }
+        }
+        (alpha_sum(&r.surface, r.rect), partial)
+    };
+    let (plain_ink, plain_partial) = stats(&mut e, base.clone());
+    let (bold_ink, bold_partial) = stats(&mut e, CharStyle { faux_bold: true, ..base });
+    assert!(bold_ink > plain_ink, "bold must add ink");
+    // Weight: the old summed-coverage faux bold (before #4130) measured 282.7 total ink for this
+    // text at 12 px (plain 138.0). The antialiased version must stay close to that weight.
+    const MAIN_BOLD_INK: f64 = 282.7;
+    assert!(bold_ink >= MAIN_BOLD_INK * 0.85, "stems too thin: {bold_ink} vs old {MAIN_BOLD_INK}");
+    assert!(bold_ink <= MAIN_BOLD_INK * 1.15, "stems too heavy: {bold_ink} vs old {MAIN_BOLD_INK}");
+    assert!(bold_partial * 10 >= plain_partial * 8, "edges stay antialiased: {plain_partial} -> {bold_partial}");
+}
+
 /// #3705: Faux bold dilation must scale with horizontal and vertical glyph scaling.
 #[test]
 fn faux_bold_scales_with_glyph_scaling() {
