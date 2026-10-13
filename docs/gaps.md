@@ -47,7 +47,7 @@ what an agent can't finish alone.
   within the corpus. Smart-filter re-render matches 5/30. User reports: a PSD with text layers
   re-saved unmodified would not reopen (#2374, closed 2026-10-10), Photoshop 26.6 cannot reopen our files (#1281), "PSD not
   opening in Photoshop" (#2469), a CS2-era smart object unavailable (#2465, fixed 2026-10-12), PSB smart object
-  blank (#1764), perspective placed layers flattened (#579), PSB > 4 GB fails on Windows (#375).
+  blank (#1764), perspective placed layers flattened (#579, fixed by #426), PSB > 4 GB fails on Windows (#375).
   No test opens our exports in a third-party editor (FILE-216-4).
 - **Impact:** PSD is the format professionals exchange. Beta requires it to be reliable.
 - **Estimate:** 150–250 h. **Human:** opening exports in Photoshop on the owner's Mac (or a
