@@ -567,6 +567,15 @@ impl Session {
         Ok(())
     }
 
+    /// [`Self::offer_live_stroke`] for a live Clone Stamp or History Brush stroke, taken by the
+    /// `paint.cloneStamp` / `paint.historyBrush` it was drawn for. Refused for the Healing Brush
+    /// (it blends on release) and when the brush, layer or clone source changed during the stroke.
+    pub fn offer_live_retouch(&mut self, live: retouch_cmds::LiveRetouch) -> Result<()> {
+        let commit = live.into_commit(self)?;
+        self.live_commit = Some(commit);
+        Ok(())
+    }
+
     /// Withdraw an offer the command didn't take.
     pub fn clear_live_stroke(&mut self) {
         self.live_commit = None;
