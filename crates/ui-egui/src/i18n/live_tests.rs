@@ -93,7 +93,8 @@ fn dynamic_brush_sections_have_translations_and_draw_in_the_selected_language() 
         h.state_mut().ui.panels.brush_settings = true;
         h.run_steps(4);
         let text = drawn_text(&h);
-        assert!(text.iter().filter(|text| text.as_str() == "画笔笔尖形状").count() >= 2, "both the section row and heading must be translated");
+        // The section row is the only place the name is drawn: the options pane has no heading (#3477).
+        assert_eq!(text.iter().filter(|text| text.as_str() == "画笔笔尖形状").count(), 1, "the section row must be translated");
         assert!(!text.iter().any(|text| text == "Brush Tip Shape"));
     });
 }
