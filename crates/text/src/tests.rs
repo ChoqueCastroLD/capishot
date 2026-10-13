@@ -1838,6 +1838,21 @@ fn missing_glyph_protection_can_turn_the_fallback_stack_off() {
     assert!(db.fallback_stack().any(|f| f == "Cairo"), "turning it back on restores the coverage fonts");
 }
 
+/// The shared engine's missing-glyph protection follows the setting without waiting for the
+/// system font scan (#4519). Under test the shared engine has no scan, so it applies at once;
+/// the newest setting wins.
+#[test]
+fn shared_missing_glyph_protection_follows_the_setting() {
+    let read = || crate::shared().lock().unwrap_or_else(std::sync::PoisonError::into_inner).fonts.missing_glyph_protection();
+    crate::set_shared_missing_glyph_protection(false);
+    assert!(!read());
+    crate::set_shared_missing_glyph_protection(true);
+    crate::set_shared_missing_glyph_protection(false);
+    assert!(!read(), "the newest setting wins");
+    crate::set_shared_missing_glyph_protection(true);
+    assert!(read());
+}
+
 #[test]
 fn translate_tysh_moves_only_the_translation() {
     let mut t = point("Hello!", 26.0);
