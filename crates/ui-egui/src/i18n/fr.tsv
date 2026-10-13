@@ -3059,6 +3059,9 @@ curves	Smooth	Lisser
 	Remove after each stroke	Supprimer après chaque trait
 	Apply the removal ({key})	Appliquer la suppression ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Traits à supprimer : {n} (Entrée applique, Échap annule)
+	Clear Brush Controls	Effacer les commandes de pinceau
+	Reset All Locked Settings	Réinitialiser tous les paramètres verrouillés
+	Copy Texture to Other Tools	Copier la texture dans d'autres outils
 
 # Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
 	Load Actions…	Charger des actions…

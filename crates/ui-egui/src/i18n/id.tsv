@@ -3046,6 +3046,9 @@ curves	Smooth	Haluskan
 	Remove after each stroke	Hapus setelah setiap goresan
 	Apply the removal ({key})	Terapkan penghapusan ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Goresan untuk dihapus: {n} (Enter menerapkan, Esc membatalkan)
+	Clear Brush Controls	Hapus Kontrol Kuas
+	Reset All Locked Settings	Atur Ulang Semua Pengaturan Terkunci
+	Copy Texture to Other Tools	Salin Tekstur ke Alat Lain
 
 # Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
 	Load Actions…	Muat Tindakan…

@@ -409,6 +409,92 @@ fn settings_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     commit_gesture(app, ui.ctx(), &before, &b);
 }
 
+/// Clear brush controls: turns off every section except Smoothing and resets their options
+/// to the defaults (Photoshop), keeping locked sections intact.
+pub fn clear_brush_controls(current: &BrushSettings) -> BrushSettings {
+    let mut b = current.clone();
+    let d = BrushSettings::default();
+    let l = &current.locks;
+    if !l.shape_dynamics {
+        b.shape_dynamics = d.shape_dynamics;
+    }
+    if !l.scattering {
+        b.scattering = d.scattering;
+    }
+    if !l.texture {
+        b.texture = d.texture;
+    }
+    if !l.dual_brush {
+        b.dual_brush = d.dual_brush;
+    }
+    if !l.color_dynamics {
+        b.color_dynamics = d.color_dynamics;
+    }
+    if !l.transfer {
+        b.transfer = d.transfer;
+    }
+    if !l.pose {
+        b.pose = d.pose;
+    }
+    if !l.noise {
+        b.noise = d.noise;
+    }
+    if !l.wet_edges {
+        b.wet_edges = d.wet_edges;
+    }
+    if !l.build_up {
+        b.build_up = d.build_up;
+        b.build_up_rate = d.build_up_rate;
+    }
+    if !l.protect_texture {
+        b.protect_texture = d.protect_texture;
+    }
+    b
+}
+
+/// Copy the current brush's Texture settings to other painting tools that have Texture enabled.
+pub fn copy_texture_to_other_tools(app: &mut PhotocraftApp) {
+    let texture = app.session.tools.brush.texture.clone();
+    for (_, brush) in &mut app.ui.tool_brushes {
+        if brush.texture.enabled {
+            brush.texture = texture.clone();
+        }
+    }
+}
+
+/// The Brush Settings panel menu actions (hamburger menu).
+pub fn panel_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    if ui.button(tl!("New Brush Preset…")).clicked() {
+        let name = new_preset_name(&app.session.tools.presets);
+        run_or_status(app, "brush.presets.save", json!({ "name": name }));
+        if app.session.tools.presets.iter().any(|p| p.name == name) {
+            app.ui.brushes_panel.renaming = Some(Renaming { group: false, name: name.clone(), folder: Vec::new(), text: String::new() });
+            app.ui.brush_picker_list.renaming = Some(Renaming { group: false, name, folder: Vec::new(), text: String::new() });
+        }
+        ui.close();
+    }
+    ui.separator();
+    if ui.button(tl!("Clear Brush Controls")).clicked() {
+        let before = app.session.tools.brush.clone();
+        let cleared = clear_brush_controls(&before);
+        commit(app, &before, &cleared);
+        ui.close();
+    }
+    let has_locks = app.session.tools.brush.locks != photocraft_paint::brush::SectionLocks::default();
+    if ui.add_enabled(has_locks, egui::Button::new(tl!("Reset All Locked Settings"))).clicked() {
+        let before = app.session.tools.brush.clone();
+        let mut after = before.clone();
+        after.locks = photocraft_paint::brush::SectionLocks::default();
+        commit(app, &before, &after);
+        ui.close();
+    }
+    let has_texture = app.session.tools.brush.texture.enabled;
+    if ui.add_enabled(has_texture, egui::Button::new(tl!("Copy Texture to Other Tools"))).clicked() {
+        copy_texture_to_other_tools(app);
+        ui.close();
+    }
+}
+
 pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !app.ui.panels.brush_settings {
         return;
@@ -442,6 +528,21 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     if icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
                         open = false;
                     }
+                    let menu_btn = widgets::panel_menu_button(ui);
+                    egui::Popup::menu(&menu_btn).show(|ui| {
+                        widgets::style_spectrum_popup_menu(ui);
+                        ui.set_min_width(180.0);
+                        panel_menu(app, ui);
+                        ui.separator();
+                        if ui.button(tl!("Close")).clicked() {
+                            open = false;
+                            ui.close();
+                        }
+                        if ui.button(tl!("Close Tab Group")).clicked() {
+                            open = false;
+                            ui.close();
+                        }
+                    });
                 });
             });
             ui.add_space(6.0);

@@ -1177,6 +1177,96 @@ fn hand_tool_offers_scale_buttons_and_requests_the_right_view() {
 }
 
 #[test]
+fn brush_settings_hamburger_menu_actions() {
+    use egui_kittest::kittest::Queryable;
+
+    // 1. Menu opens and offers Photoshop actions
+    let mut h = harness(0, 0);
+    h.get_by_label("Panel menu").click();
+    h.run_steps(2);
+
+    assert!(h.query_all_by_label("New Brush Preset…").count() > 0);
+    assert!(h.query_all_by_label("Clear Brush Controls").count() > 0);
+    assert!(h.query_all_by_label("Reset All Locked Settings").count() > 0);
+    assert!(h.query_all_by_label("Copy Texture to Other Tools").count() > 0);
+    assert!(h.query_all_by_label("Close").count() > 0);
+    assert!(h.query_all_by_label("Close Tab Group").count() > 0);
+
+    // 2. New Brush Preset… saves a preset
+    let count0 = h.state().session.tools.presets.len();
+    h.get_by_label("New Brush Preset…").click();
+    h.run_steps(2);
+    assert_eq!(h.state().session.tools.presets.len(), count0 + 1);
+    assert_eq!(last_journal(h.state()).unwrap().0, "brush.presets.save");
+
+    // 3. Clear Brush Controls resets dynamics, keeps locked sections and smoothing
+    let mut h = harness(0, 0);
+    h.state_mut().session.tools.brush.size = 45.0;
+    h.state_mut().session.tools.brush.scattering.enabled = true;
+    h.state_mut().session.tools.brush.texture.enabled = true;
+    h.state_mut().session.tools.brush.locks.texture = true;
+    h.state_mut().session.tools.brush.smoothing.amount = 0.5;
+    h.run_steps(1);
+
+    h.get_by_label("Panel menu").click();
+    h.run_steps(2);
+    h.get_by_label("Clear Brush Controls").click();
+    h.run_steps(2);
+
+    let b = &h.state().session.tools.brush;
+    assert!(!b.scattering.enabled, "unlocked scattering cleared");
+    assert!(b.texture.enabled, "locked texture preserved");
+    assert_eq!(b.smoothing.amount, 0.5, "smoothing preserved");
+    assert_eq!(b.size, 45.0, "tip size preserved");
+
+    // 4. Reset All Locked Settings clears all locks
+    assert!(b.locks.texture);
+    h.get_by_label("Panel menu").click();
+    h.run_steps(2);
+    h.get_by_label("Reset All Locked Settings").click();
+    h.run_steps(2);
+    assert_eq!(h.state().session.tools.brush.locks, photocraft_paint::brush::SectionLocks::default());
+
+    // 5. Copy Texture to Other Tools copies texture to other tools with texture enabled
+    let mut h = harness(0, 0);
+    h.state_mut().session.tools.brush.texture.enabled = true;
+    h.state_mut().session.tools.brush.texture.scale = 2.5;
+    let mut pencil_brush = BrushSettings::default();
+    pencil_brush.texture.enabled = true;
+    pencil_brush.texture.scale = 1.0;
+    h.state_mut().ui.tool_brushes = vec![(crate::state::Tool::Pencil, pencil_brush)];
+    h.run_steps(1);
+
+    h.get_by_label("Panel menu").click();
+    h.run_steps(2);
+    h.get_by_label("Copy Texture to Other Tools").click();
+    h.run_steps(2);
+
+    let pencil = h.state().ui.tool_brushes.iter().find(|(t, _)| *t == crate::state::Tool::Pencil).unwrap();
+    assert_eq!(pencil.1.texture.scale, 2.5);
+
+    // 6. Close closes the window
+    let mut h = harness(0, 0);
+    assert!(h.state().ui.panels.brush_settings);
+    h.get_by_label("Panel menu").click();
+    h.run_steps(2);
+    let close_buttons: Vec<_> = h.query_all_by_label("Close").collect();
+    assert!(close_buttons.len() >= 2);
+    close_buttons.last().unwrap().click();
+    h.run_steps(2);
+    assert!(!h.state().ui.panels.brush_settings);
+
+    // 7. Close Tab Group closes the window
+    let mut h = harness(0, 0);
+    assert!(h.state().ui.panels.brush_settings);
+    h.get_by_label("Panel menu").click();
+    h.run_steps(2);
+    h.get_by_label("Close Tab Group").click();
+    h.run_steps(2);
+    assert!(!h.state().ui.panels.brush_settings);
+}
+
+#[test]
 fn brushes_button_at_top_of_brush_settings_opens_brushes_panel() {
     use egui_kittest::kittest::Queryable;
 
