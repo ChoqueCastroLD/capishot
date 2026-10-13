@@ -131,6 +131,8 @@
 	Search…	Cerca…
 	Check Spelling…	Controlla ortografia…
 	Find and Replace Text…	Trova e sostituisci testo…
+	Add to Dictionary	Aggiungi al dizionario
+	No Spelling Suggestions	Nessun suggerimento ortografico
 	Fill…	Riempi…
 	Stroke…	Traccia…
 	Content-Aware Fill…	Riempimento in base al contenuto…
@@ -724,6 +726,10 @@
 	Breeze Dark Theme	Tema Breeze scuro
 	Breeze light	Breeze chiaro
 	Breeze Light Theme	Tema Breeze chiaro
+	Soft dark	Morbido scuro
+	Soft light	Morbido chiaro
+	Soft Dark Theme	Tema morbido scuro
+	Soft Light Theme	Tema morbido chiaro
 	Next Theme	Tema successivo
 	Actions	Azioni
 	Brush Settings	Impostazioni pennello
@@ -844,6 +850,12 @@
 	Baseline shift	Scostamento linea base
 	Basic	Base
 	Before (Y)	Prima (Y)
+	Save Settings…	Salva impostazioni…
+	Load Settings…	Carica impostazioni…
+	Save these settings as a Camera Raw .xmp file	Salva queste impostazioni come file .xmp di Camera Raw
+	Load settings from a Camera Raw .xmp file	Carica le impostazioni da un file .xmp di Camera Raw
+	Loaded Camera Raw settings from {file}	Impostazioni Camera Raw caricate da {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Impostazioni Camera Raw caricate da {file} ({n} non supportate)
 	Begin recording	Inizia registrazione
 	Bend:	Curvatura:
 	Bicubic	Bicubica
@@ -1147,6 +1159,9 @@
 	Ignore All	Ignora tutto
 	Image Size	Dimensione immagine
 	Import Brushes…	Importa pennelli…
+	Gradient Preset Options	Opzioni predefiniti sfumatura
+	Import .GRD	Importa .GRD
+	Choose a gradient file (.grd).	Scegli un file di sfumature (.grd).
 	Import brushes (.abr)	Importa pennelli (.abr)
 	Import Presets	Importa predefiniti
 	Imported	Importato
@@ -2395,6 +2410,7 @@ cameraRaw	Amount	Quantità
 	Click to pick · Esc to cancel	Clic per scegliere · Esc per annullare
 	Pick a screen pixel or press Esc to cancel	Scegli un pixel dello schermo o premi Esc per annullare
 	Scroll to zoom	Scorri per ingrandire
+	Drag to pan · Scroll to zoom · Double-click to fit	Trascina per spostare · Scorri per ingrandire · Doppio clic per adattare
 	Show/Hide All Panels	Mostra/nascondi tutti i pannelli
 	Show/Hide Panels	Mostra/nascondi pannelli
 	Could not open	Impossibile aprire
@@ -4013,9 +4029,14 @@ navigator	Zoom	Zoom
 	{index} of {total}	{index} di {total}
 	{shortcut} assigned.	{shortcut} assegnata.
 	{shortcut} is already in use by {commands} and will be removed from it when you click OK.	{shortcut} è già usata da {commands} e verrà rimossa quando fai clic su OK.
+	Object Finder	Ricerca oggetti
+	No object found there — drag a rectangle around it	Nessun oggetto trovato lì: trascina un rettangolo intorno
 	Remove after each stroke	Rimuovi dopo ogni tratto
 	Apply the removal ({key})	Applica la rimozione ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Tratti da rimuovere: {n} (Invio applica, Esc annulla)
+	Clear Brush Controls	Cancella controlli pennello
+	Reset All Locked Settings	Ripristina tutte le impostazioni bloccate
+	Copy Texture to Other Tools	Copia texture su altri strumenti
 
 # Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
 	Load Actions…	Carica azioni…
@@ -4037,3 +4058,4 @@ navigator	Zoom	Zoom
 	Action playback stopped	Esecuzione dell’azione interrotta
 	Step {step} is waiting for its dialog	Il passaggio {step} attende la sua finestra di dialogo
 @plural	{n} action|{n} actions	{n} azione|{n} azioni
+	Auto Add/Delete	Aggiungi/elimina automaticamente

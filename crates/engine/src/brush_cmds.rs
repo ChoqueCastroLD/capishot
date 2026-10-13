@@ -204,6 +204,7 @@ pub fn resolve_brush(s: &Session, p: &Value, cmd: &str) -> Result<BrushSettings>
         b.smoothing.amount = v.clamp(0.0, 1.0);
     }
     b.color = color(p.get("color"), s.tools.foreground);
+    b.color_cmyk = s.tools.picked_cmyk([b.color[0], b.color[1], b.color[2]]).map(|k| ([b.color[0], b.color[1], b.color[2]], k));
     b.background = s.tools.background;
     b.erase = flag(p, "erase", false);
     b.seed = match p.get("seed").and_then(Value::as_u64) {
@@ -367,6 +368,7 @@ fn block_brush(b: BrushSettings, p: &Value) -> Result<BrushSettings> {
         pressure_opacity: false,
         spacing: 0.25,
         color: b.color,
+        color_cmyk: b.color_cmyk,
         background: b.background,
         erase: b.erase,
         smoothing: b.smoothing,
@@ -435,17 +437,19 @@ pub struct LiveStroke {
     base: (photocraft_doc::DocId, u64),
 }
 
-/// A finished live stroke offered to its own commit ([`Session::offer_live_stroke`]): when the
-/// committing `paint.stroke` / `paint.pencil` matches it (same command, document revision, params,
-/// seed and points), the command takes these pixels instead of rendering the stroke again.
+/// A finished live stroke offered to its own commit ([`Session::offer_live_stroke`],
+/// [`Session::offer_live_retouch`]): when the committing command matches it (same command,
+/// document revision, params, seed and points), it takes these pixels instead of rendering the
+/// stroke again.
 pub struct LiveCommit {
-    cmd: String,
-    base: (photocraft_doc::DocId, u64),
-    params: Value,
-    seed: u64,
-    points: Vec<StrokePoint>,
-    surface: Surface,
-    bounds: Rect,
+    pub(crate) cmd: String,
+    pub(crate) base: (photocraft_doc::DocId, u64),
+    pub(crate) params: Value,
+    /// The Brush's and Pencil's seed; the retouching tools have none.
+    pub(crate) seed: Option<u64>,
+    pub(crate) points: Vec<StrokePoint>,
+    pub(crate) surface: Surface,
+    pub(crate) bounds: Rect,
 }
 
 impl LiveCommit {
@@ -459,11 +463,11 @@ impl LiveCommit {
         p
     }
 
-    fn matches(&self, s: &Session, cmd: &str, p: &Value, pts: &[StrokePoint]) -> bool {
+    pub(crate) fn matches(&self, s: &Session, cmd: &str, p: &Value, pts: &[StrokePoint]) -> bool {
         let base = s.active().map(|st| (st.doc.id, st.revision));
         self.cmd == cmd
             && base == Some(self.base)
-            && p.get("seed").and_then(Value::as_u64) == Some(self.seed)
+            && p.get("seed").and_then(Value::as_u64) == self.seed
             && self.points == pts
             && Self::settings(p) == Self::settings(&self.params)
     }
@@ -529,7 +533,7 @@ impl LiveStroke {
     pub fn into_commit(mut self) -> Result<LiveCommit> {
         let bounds = self.bounds();
         let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.layer, &self.params)?;
-        Ok(LiveCommit { cmd: self.cmd, base: self.base, params: self.params, seed: self.seed, points: self.points, surface: surf.clone(), bounds })
+        Ok(LiveCommit { cmd: self.cmd, base: self.base, params: self.params, seed: Some(self.seed), points: self.points, surface: surf.clone(), bounds })
     }
 
     /// Everything the stroke has touched so far.

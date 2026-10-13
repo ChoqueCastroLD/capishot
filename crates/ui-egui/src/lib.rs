@@ -34,12 +34,14 @@ pub mod brush_preview;
 pub mod brush_resize;
 pub mod brush_sections;
 pub mod brushes_tab;
+pub(crate) mod cam_preview;
 mod cam_transform;
 mod camera_raw_detail_ui;
 mod camera_raw_preview_ui;
 mod camera_raw_scope_ui;
 pub mod camera_raw_ui;
 pub mod canvas;
+pub mod canvas_autoscroll;
 mod canvas_popup;
 pub mod canvas_tool_menu;
 pub mod cas_transform;
@@ -131,6 +133,7 @@ pub mod new_guide_ui;
 pub mod new_layer_ui;
 pub mod notices;
 mod numeric_expression;
+pub mod object_finder;
 mod opacity_keys;
 pub mod outline;
 pub mod paint_mouse;
@@ -175,6 +178,7 @@ pub mod slice_ui;
 pub mod smart_ui;
 pub mod snap_ui;
 pub(crate) mod solid_fill_ui;
+pub mod spring_tools;
 pub mod state;
 pub mod stroke_constraint;
 pub mod stroke_trail;
@@ -188,13 +192,16 @@ pub mod targa_options_ui;
 pub mod text_field_menu;
 pub mod theme;
 pub mod tiff_options_ui;
+mod tile_overlay;
 mod timeline_ui;
 mod titlebar;
+pub use titlebar::{Caption, CaptionFamily, CaptionIcon, CaptionIcons, CaptionStyle, RenderIconFn};
 pub mod tone;
 mod tool_cursor;
 pub mod tool_feedback;
 pub(crate) mod tool_memory;
 mod tool_reset;
+mod tool_shortcuts;
 pub mod transform_fx;
 pub mod transform_tex;
 pub mod transform_tool;
@@ -373,6 +380,8 @@ pub type CapsLockFn = Box<dyn FnMut() -> bool>;
 /// Keeps an undecorated window's OS frame from offsetting its content and pointer (#2246).
 /// Called once per frame; `None` when the window is decorated or the platform needs no fixing.
 pub type WindowFrameFn = Box<dyn FnMut()>;
+/// The caption buttons' current style ([`Services::caption_style`]).
+pub type CaptionStyleFn = Box<dyn Fn(&egui::Context) -> CaptionStyle>;
 
 /// Platform services injected by the app binary (file dialogs, codecs), keeping this crate free of
 /// I/O dependencies.
@@ -449,6 +458,10 @@ pub struct Services {
     /// (Windows custom title bar, #2246). Called once per frame; `None` when the window is
     /// decorated or the platform needs no fixing.
     pub window_frame: Option<WindowFrameFn>,
+    /// How the custom title bar's caption buttons look and where they sit (Linux: the desktop's
+    /// style and button layout). Read every frame, with the context to wake when it changes;
+    /// `None` keeps Windows' buttons at the right end.
+    pub caption_style: Option<CaptionStyleFn>,
     /// The persistent brush preset store, loading in the background (desktop; see
     /// `photocraft_engine::preset_store`). Attached to the session once it arrives; without
     /// one, brush presets are session-only unless the shell attached a store before startup.
@@ -509,10 +522,14 @@ pub struct PhotocraftApp {
     pub(crate) move_preview: Option<move_ui::MovePreview>,
     /// Move tool › Show Highlight on Rollover: the last hover answer (`move_hover`).
     pub(crate) move_hover: Option<move_hover::Hover>,
+    /// Object Selection › Object Finder: the hover preview (`object_finder`).
+    pub(crate) object_finder: Option<object_finder::Finder>,
     /// A blend mode hovered in the Layers panel, shown live (`blend_preview`).
     pub(crate) blend_preview: Option<blend_preview::BlendPreview>,
     /// Patch Tool drag: the healed document at the pointer (`patch_preview`).
     pub(crate) patch_preview: Option<patch_preview::PatchPreview>,
+    /// Content-Aware Move drag or box shown with its result (`cam_preview`).
+    pub(crate) cam_preview: Option<cam_preview::CamPreview>,
     /// The pixels a Magnetic Lasso border follows (`magnetic_lasso_ui`).
     pub(crate) magnetic: magnetic_lasso_ui::Runtime,
     /// The next tool `Down` is a right-button drag that erases (see `paint_mouse`).
@@ -737,8 +754,10 @@ impl PhotocraftApp {
             menu_cache: None,
             move_preview: None,
             move_hover: None,
+            object_finder: None,
             blend_preview: None,
             patch_preview: None,
+            cam_preview: None,
             magnetic: Default::default(),
             secondary_erase: false,
             held_erase: false,
@@ -1247,7 +1266,8 @@ impl PhotocraftApp {
             return self.save_to(path, tga_bits);
         }
         let st = self.session.active().ok_or("no document")?;
-        // PDN imports default to our native format, which preserves Paint.NET's blend modes.
+        // PDN imports default to our native format, which preserves Paint.NET's blend modes;
+        // Krita imports to OpenRaster, which Krita opens with its layers.
         // Other files keep their format only when it can retain their layers. A plain raster
         // (including an unlocked transparent PNG) can keep its flat format; editable contents,
         // masks and layer appearance settings need a layered format even with just one layer.
@@ -1261,7 +1281,11 @@ impl PhotocraftApp {
             Some(p) if writable => p.clone(),
             p => {
                 let source = p.as_deref().unwrap_or(&st.doc.name);
-                let ext = if photocraft_engine::file_cmds::extension(source).as_deref() == Some("pdn") { "pcraft" } else { "psd" };
+                let ext = match photocraft_engine::file_cmds::extension(source).as_deref() {
+                    Some("pdn") => "pcraft",
+                    Some("kra" | "krz") => "ora",
+                    _ => "psd",
+                };
                 std::path::Path::new(source).with_extension(ext).to_string_lossy().into_owned()
             }
         };
@@ -1276,7 +1300,7 @@ impl PhotocraftApp {
         // which records the step once answered.
         if tga_bits.is_none() && targa_options_ui::wants_prompt(self, &path) {
             let copy = self.saves_copy(&path, None)?;
-            targa_options_ui::park(self, path.clone(), copy, true)?;
+            targa_options_ui::park(self, path.clone(), copy, "file.saveAs")?;
             return Ok(serde_json::json!({"path": path, "warnings": []}));
         }
         // A layered TIFF asks about its layers first (Preferences › File Handling); the save
@@ -1313,7 +1337,7 @@ impl PhotocraftApp {
         Ok(r)
     }
 
-    /// Replays a recorded `file.save` / `file.saveAs` step: no dialog or prompt, and the
+    /// Replays a recorded `file.save` / `file.saveAs` / `file.saveACopy` step: no dialog or prompt, and the
     /// recorded TIFF or Targa answer (if any) stands in for the TIFF or Targa Options prompt.
     pub(crate) fn replay_save(&mut self, id: &str, params: &Value) -> Result<Value, String> {
         if self.save_options_open() {
@@ -1332,6 +1356,11 @@ impl PhotocraftApp {
         }
         let path = params.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()).ok_or("Save As needs a `path`")?;
         let tga_bits = targa_options_ui::bits_param(params, id)?;
+        if id == "file.saveACopy" {
+            // A copy: the document keeps its own file and unsaved state, as when recorded (#4373).
+            let doc = self.session.active().ok_or("no document")?.doc.clone();
+            return crate::view_cmds::write_copy(self, &doc, path, tga_bits);
+        }
         self.save_as_step(path.to_string(), params.get("tiffLayers").and_then(Value::as_bool), tga_bits)
     }
 
@@ -1443,6 +1472,11 @@ impl PhotocraftApp {
                 }
                 Ok(())
             });
+            // The file the document now lives in goes to the top of Open Recent and the Home
+            // screen, as opening it does (#4400). Automation saves don't touch the user's list.
+            if hooks {
+                self.push_recent(path);
+            }
         }
         self.ui.status_error = false;
         let what = crate::i18n::fmt(tl!("Saved {name}"), &[("name", file_open::display_name(path).as_str())]);
@@ -1509,8 +1543,8 @@ impl PhotocraftApp {
         let Some(rx) = self.control_rx.take() else { return };
         while let Ok(req) = rx.try_recv() {
             let reply = req.reply.clone();
-            if req.deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
-                let _ = reply.send(serde_json::json!({"ok": false, "error": control::timeout_error()}));
+            if req.deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) || !req.dispatch.start() {
+                let _ = reply.send(serde_json::json!({"ok": false, "error": control::expired_error()}));
                 continue;
             }
             match control::handle(self, ctx, &req) {
@@ -1673,6 +1707,9 @@ impl eframe::App for PhotocraftApp {
             wheel_nav::fold_legacy_pinch(ctx, raw_input);
         }
         raw_input.events.extend(self.take_synthetic_step());
+        // A pen held still is no touch screen's press-and-hold right click (stylus.rs).
+        let pen_down = self.stylus.pen_contacts.observe(&raw_input.events);
+        stylus::pen_hold_is_no_right_click(ctx, pen_down);
         if self.custom_titlebar {
             titlebar::release_after_os_resize(ctx, raw_input);
         }
@@ -1805,6 +1842,13 @@ fn read_dropped(f: &(dyn egui::DroppedFile + Send + Sync)) -> Result<Vec<u8>, St
     f.bytes()
 }
 
+/// The active layer is an adjustment layer. It has no pixels, so painting and filling it edit its
+/// mask even when its icon thumbnail, not the mask, is the Layers panel's target, as in
+/// Photoshop (#4298).
+pub(crate) fn adjustment_layer_active(st: &photocraft_engine::DocState) -> bool {
+    st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| matches!(l.content, photocraft_doc::LayerContent::Adjustment(_)))
+}
+
 /// On the web, dropped-file bytes arrive asynchronously; the web shell handles drops itself.
 #[cfg(target_arch = "wasm32")]
 fn read_dropped(_f: &dyn egui::DroppedFile) -> Result<Vec<u8>, String> {
@@ -1829,9 +1873,9 @@ impl PhotocraftApp {
         }
     }
 
-    /// The active layer's mask is what pixel commands edit: the Layers panel targets it, or every
-    /// colour channel is off and that mask is the picture. An alpha channel or Quick Mask wins,
-    /// as the engine routes those itself.
+    /// The active layer's mask is what pixel commands edit: the Layers panel targets it, the layer
+    /// is an adjustment layer (no pixels of its own), or every colour channel is off and that mask
+    /// is the picture. An alpha channel or Quick Mask wins, as the engine routes those itself.
     pub fn layer_mask_targeted(&self) -> bool {
         let Some(st) = self.session.active() else { return false };
         let layer_mask = st.channel_view.target == photocraft_engine::channel_cmds::ChannelTarget::LayerMask;
@@ -1840,7 +1884,7 @@ impl PhotocraftApp {
         if !composite || !has_mask {
             return false;
         }
-        if self.ui.mask_target || layer_mask {
+        if self.ui.mask_target || layer_mask || adjustment_layer_active(st) {
             return true;
         }
         let colors_off = st.channel_view.visible_colors(photocraft_engine::channel_cmds::color_count(&st.doc)) == 0;
@@ -2353,7 +2397,13 @@ mod move_auto_select_tests;
 mod new_group_button_tests;
 
 #[cfg(test)]
+mod color_tab_theme_tests;
+
+#[cfg(test)]
 mod new_layer_button_tests;
+
+#[cfg(test)]
+mod smart_filter_rows_tests;
 
 #[cfg(test)]
 mod move_outline_tests;
@@ -2375,6 +2425,9 @@ mod warp_text_dialog_tests;
 
 #[cfg(test)]
 mod blend_dropdown_wheel_tests;
+
+#[cfg(test)]
+mod options_bar_mode_wheel_tests;
 
 #[cfg(test)]
 mod dropdown_press_tests;

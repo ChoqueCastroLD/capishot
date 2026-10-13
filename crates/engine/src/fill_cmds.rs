@@ -215,16 +215,22 @@ pub(crate) fn fill_color(surf: &mut Surface, area: Rect, color: [f32; 4], sel: O
 /// Reuse Edit › Fill's compositing for Edit › Stroke. The stroke's rasterized band
 /// is already a grayscale coverage mask; opacity, blend modes and alpha locking
 /// must behave identically for both commands at 8/16/32-bit depth.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn blend_color_mask(
     surf: &mut Surface,
     area: Rect,
     color: [f32; 4],
+    picked: Option<[f32; 4]>,
     coverage: &Surface,
     mode: BlendMode,
     opacity: f32,
     preserve_transparency: bool,
 ) -> Result<()> {
-    blend_into(surf, area, &Source::Color(color), Some(coverage), Blend { mode, opacity, keep_alpha: preserve_transparency, restore: false })
+    let source = match picked {
+        Some(cmyk) if color[3] >= 1.0 => Source::Cmyk { rgba: color, cmyk },
+        _ => Source::Color(color),
+    };
+    blend_into(surf, area, &source, Some(coverage), Blend { mode, opacity, keep_alpha: preserve_transparency, restore: false })
 }
 
 /// The selection filled from its surroundings (`photocraft_algo::content_aware`), as straight

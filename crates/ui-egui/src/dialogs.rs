@@ -99,6 +99,33 @@ fn older_dialog_above(ctx: &egui::Context, live: egui::LayerId, dialogs: &[Dialo
     ctx.memory(|m| m.layer_ids().skip_while(|l| *l != live).skip(1).any(|l| others.contains(&l)))
 }
 
+fn show_modal<T>(
+    modal: egui::Modal,
+    ctx: &egui::Context,
+    id: egui::Id,
+    resizable: bool,
+    interactive: bool,
+    contents: impl FnOnce(&mut egui::Ui) -> T,
+) -> egui::ModalResponse<T> {
+    modal.show(ctx, |ui| {
+        // Disable the entire older modal, including its resize grip, not just its body.
+        if !interactive {
+            ui.disable();
+        }
+        if resizable {
+            let max = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::vec2(560.0, 400.0));
+            egui::Resize::default()
+                .id(id.with("resize"))
+                .default_size(egui::vec2(960.0, 900.0).min(max))
+                .min_size(egui::vec2(560.0, 400.0))
+                .max_size(max)
+                .show(ui, contents)
+        } else {
+            contents(ui)
+        }
+    })
+}
+
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     crate::layer_style::color_picker::prune(app);
     crate::type_panels_ui::color_picker::prune(app);
@@ -147,11 +174,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // Tab / ⇧Tab walk the topmost dialog's text fields, not every widget (field_tab.rs).
         let tab = if top == Some(d.id) && !egui::Popup::is_any_open(ctx) { crate::field_tab::take_step(ctx) } else { 0 };
         // Photoshop doesn't dim the window behind dialogs: previews must be judged at true contrast.
-        let modal = modal.show(ctx, |ui| {
-            if !interactive {
-                ui.disable();
-            }
+        let web = fields.contains_key("__web");
+        let web_popup_open = web && egui::Popup::is_any_open(ctx);
+        let modal = show_modal(modal, ctx, id, web, interactive, |ui| {
             sizing = ui.is_sizing_pass();
+            let available = ui.available_size();
             ui.set_min_width(380.0);
             let wide = crate::prefs_ui::width(&d.fields, (ctx.content_rect().width() - 48.0).max(380.0));
             if let Some(w) = wide {
@@ -174,7 +201,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             } else {
                 440.0
             }));
-            if let Some(w) = crate::file_ui::dialog_width(&d.fields) {
+            if web {
+                ui.set_max_width(available.x);
+                ui.set_min_size(available);
+            } else if let Some(w) = crate::file_ui::dialog_width(&d.fields) {
                 ui.set_min_width(w);
                 ui.set_max_width(w);
             }
@@ -358,7 +388,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                             Some(ButtonRole::Cancel) => outcome = Some(false),
                             Some(ButtonRole::Apply) => apply_requested = true,
                             Some(_) => outcome = Some(true),
-                            None if interactive && can_ok && ui.input(|i| i.key_pressed(egui::Key::Enter)) => outcome = Some(true),
+                            None if interactive
+                                && can_ok
+                                && (!web || (!web_popup_open && !egui::Popup::is_any_open(ui.ctx())))
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter)) =>
+                            {
+                                outcome = Some(true)
+                            }
                             None => {}
                         }
                     }
@@ -370,7 +406,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // The picker has a larger frame margin; include that whole frame in the canvas hit guard.
         shown.push(if color_picker { modal.response.rect } else { modal.inner });
         // Pin once laid out at its real size (the first frame is an invisible sizing pass).
-        if !sizing && (pinned.is_none() || drag != egui::Vec2::ZERO) {
+        if !sizing && (web || pinned.is_none() || drag != egui::Vec2::ZERO) {
             let screen = ctx.content_rect();
             // Keep the whole dialog (and so its title bar) on screen.
             let room = (screen.size() - modal.response.rect.size()).max(egui::Vec2::ZERO);

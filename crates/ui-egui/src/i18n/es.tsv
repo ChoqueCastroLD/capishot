@@ -131,6 +131,8 @@
 	Search…	Buscar…
 	Check Spelling…	Revisar ortografía…
 	Find and Replace Text…	Buscar y reemplazar texto…
+	Add to Dictionary	Añadir al diccionario
+	No Spelling Suggestions	Sin sugerencias ortográficas
 	Fill…	Rellenar…
 	Stroke…	Contornear…
 	Content-Aware Fill…	Relleno según el contenido…
@@ -726,6 +728,10 @@
 	Breeze Dark Theme	Tema Breeze oscuro
 	Breeze light	Breeze claro
 	Breeze Light Theme	Tema Breeze claro
+	Soft dark	Suave oscuro
+	Soft light	Suave claro
+	Soft Dark Theme	Tema suave oscuro
+	Soft Light Theme	Tema suave claro
 	Next Theme	Tema siguiente
 	Actions	Acciones
 	Brush Settings	Ajustes del pincel
@@ -846,6 +852,12 @@
 	Baseline shift	Desplazamiento de línea de base
 	Basic	Básico
 	Before (Y)	Antes (Y)
+	Save Settings…	Guardar ajustes…
+	Load Settings…	Cargar ajustes…
+	Save these settings as a Camera Raw .xmp file	Guardar estos ajustes como archivo .xmp de Camera Raw
+	Load settings from a Camera Raw .xmp file	Cargar ajustes desde un archivo .xmp de Camera Raw
+	Loaded Camera Raw settings from {file}	Ajustes de Camera Raw cargados desde {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Ajustes de Camera Raw cargados desde {file} ({n} no compatibles)
 	Begin recording	Iniciar grabación
 	Bend:	Curvatura:
 	Bicubic	Bicúbica
@@ -1148,6 +1160,9 @@
 	Ignore All	Ignorar todo
 	Image Size	Tamaño de imagen
 	Import Brushes…	Importar pinceles…
+	Gradient Preset Options	Opciones de ajustes preestablecidos de degradado
+	Import .GRD	Importar .GRD
+	Choose a gradient file (.grd).	Seleccione un archivo de degradados (.grd).
 	Import brushes (.abr)	Importar pinceles (.abr)
 	Import Presets	Importar ajustes preestablecidos
 	Imported	Importado
@@ -2391,6 +2406,7 @@ cameraRaw	Amount	Cantidad
 	Click to pick · Esc to cancel	Clic para elegir · Esc para cancelar
 	Pick a screen pixel or press Esc to cancel	Elija un píxel de la pantalla o pulse Esc para cancelar
 	Scroll to zoom	Desplace para ampliar
+	Drag to pan · Scroll to zoom · Double-click to fit	Arrastre para desplazar · Desplace para ampliar · Doble clic para ajustar
 	Show/Hide All Panels	Mostrar/ocultar todos los paneles
 	Show/Hide Panels	Mostrar/ocultar paneles
 	Could not open	No se pudo abrir
@@ -2730,9 +2746,14 @@ curves	Smooth	Suavizar
 	Light Red	Rojo claro
 	Medium Blue	Azul medio
 	Light Gray	Gris claro
+	Object Finder	Buscador de objetos
+	No object found there — drag a rectangle around it	No se encontró ningún objeto ahí; arrastra un rectángulo a su alrededor
 	Remove after each stroke	Eliminar después de cada trazo
 	Apply the removal ({key})	Aplicar la eliminación ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Trazos por eliminar: {n} (Intro aplica, Esc cancela)
+	Clear Brush Controls	Borrar controles de pincel
+	Reset All Locked Settings	Restaurar todos los ajustes bloqueados
+	Copy Texture to Other Tools	Copiar textura en otras herramientas
 
 # Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
 	Load Actions…	Cargar acciones…
@@ -2754,3 +2775,4 @@ curves	Smooth	Suavizar
 	Action playback stopped	Reproducción de la acción detenida
 	Step {step} is waiting for its dialog	El paso {step} está esperando su cuadro de diálogo
 @plural	{n} action|{n} actions	{n} acción|{n} acciones
+	Auto Add/Delete	Añadir/eliminar automáticamente

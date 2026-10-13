@@ -486,6 +486,11 @@ pub struct BrushSettings {
     pub pressure_opacity: bool,
     /// Straight RGBA colour (display RGB). Commands fill it from the foreground colour.
     pub color: [f32; 4],
+    /// The inks `color` was picked as (its sRGB colour, the CMYK values), for a CMYK target: the
+    /// stroke paints exactly these, since an sRGB round trip does not give them back (#4344).
+    /// Only valid while `color` is that sRGB colour; ignored with Color Dynamics.
+    #[serde(skip)]
+    pub color_cmyk: Option<([f32; 3], [f32; 4])>,
     /// Background colour for Color Dynamics' foreground/background jitter.
     pub background: [f32; 4],
     /// Erase instead of paint.
@@ -545,6 +550,7 @@ impl Default for BrushSettings {
             pressure_size: true,
             pressure_opacity: false,
             color: [0.0, 0.0, 0.0, 1.0],
+            color_cmyk: None,
             background: [1.0, 1.0, 1.0, 1.0],
             erase: false,
             mode: BlendMode::Normal,

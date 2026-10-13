@@ -390,7 +390,13 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
     let send = p.get("send").and_then(Value::as_bool).unwrap_or(output.is_none());
     let copies = crate::commands::int(p, "copies").unwrap_or(1).clamp(1, 999) as u32;
     let dry = p.get("dryRun").and_then(Value::as_bool).unwrap_or(false);
-    // Windows has no `lp`: print through the driver (GDI, ICM off) instead of spooling a PDF.
+    // Apply the process-wide test/fuzz guard before either native transport can reach a driver.
+    if send && !dry && printing_disabled() {
+        return Err(other(
+            "printing is disabled in this process (photocraft_engine::print_cmds::disable_printing or PHOTOCRAFT_NO_PRINT); use dryRun: true",
+        ));
+    }
+    // Shared RGB transport handles compatible Windows pages; PDF-only content retains its route.
     // Sending follows the shared command contract; fuzz tests explicitly request dryRun.
     // The worker returns its result before repeat settings and hooks are applied once.
     let handling = p.get("colorHandling").and_then(Value::as_str).unwrap_or("printerManages");
@@ -547,6 +553,20 @@ fn printer_page(_: &mut Session, p: &Value) -> Result<Value> {
     Ok(
         json!({"printer": printer, "paper": [pg.paper.0, pg.paper.1], "printable": [pg.printable.0, pg.printable.1, pg.printable.2, pg.printable.3], "dpi": [pg.dpi.0, pg.dpi.1]}),
     )
+}
+
+/// Set once by test harnesses (the panic hunt) so no command in the process can reach a printer.
+static PRINTING_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Refuse to spool anything from this process from now on (tests, fuzzing). The
+/// `PHOTOCRAFT_NO_PRINT` environment variable does the same for a whole shell (CI).
+pub fn disable_printing() {
+    PRINTING_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether spooling is blocked by [`disable_printing`] or `PHOTOCRAFT_NO_PRINT`.
+pub fn printing_disabled() -> bool {
+    PRINTING_DISABLED.load(std::sync::atomic::Ordering::Relaxed) || std::env::var_os("PHOTOCRAFT_NO_PRINT").is_some_and(|v| !v.is_empty() && v != "0")
 }
 
 fn print(s: &mut Session, p: &Value) -> Result<Value> {

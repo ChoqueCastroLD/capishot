@@ -126,6 +126,8 @@
 	File Info…	Fájladatok…
 	Fill…	Kitöltés…
 	Find and Replace Text…	Szöveg keresése és cseréje…
+	Add to Dictionary	Hozzáadás a szótárhoz
+	No Spelling Suggestions	Nincs helyesírási javaslat
 	Fit Image…	Kép méretre igazítása…
 	Flatten All Layer Effects	Összes rétegeffektus egybesimítása
 	Flatten All Masks	Összes maszk egybesimítása
@@ -441,6 +443,10 @@
 	Box Blur…	Dobozelmosás…
 	Breeze Dark Theme	Breeze sötét téma
 	Breeze Light Theme	Breeze világos téma
+	Soft dark	Lágy sötét
+	Soft light	Lágy világos
+	Soft Dark Theme	Lágy sötét téma
+	Soft Light Theme	Lágy világos téma
 	Brush Preview	Ecset előnézete
 	Brush Settings	Ecsetbeállítások
 	Brushes	Ecsetek
@@ -3394,6 +3400,7 @@ cameraRaw	Yellow	Sárga
 	Photomerge	Fotóegyesítés
 	Pick a screen pixel or press Esc to cancel	Válassz egy pixelt a képernyőn, vagy nyomd meg az Esc billentyűt a megszakításhoz
 	Pick screen color	Szín kiválasztása a képernyőről
+	Pick Color From Image	Szín felvétele a képről
 	Pins	Tűk
 	Pixel Layer	Pixelréteg
 	Place Scale Marker	Méretarány-jelölő elhelyezése
@@ -3972,6 +3979,9 @@ cameraRaw	Yellow	Sárga
 	Transform On Drop	Átalakítás elengedéskor
 	Vanishing Point is not active	Az Enyészpont nem aktív
 	Vanishing Point: click four corners to create a plane	Enyészpont: sík létrehozásához kattints a négy sarokra
+	Clear Brush Controls	Ecsetvezérlők törlése
+	Reset All Locked Settings	Összes zárolt beállítás visszaállítása
+	Copy Texture to Other Tools	Textúra másolása más eszközökre
 
 # Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
 	Load Actions…	Műveletek betöltése…
@@ -3993,3 +4003,16 @@ cameraRaw	Yellow	Sárga
 	Action playback stopped	A művelet lejátszása leállt
 	Step {step} is waiting for its dialog	A(z) {step}. lépés a párbeszédablakára vár
 @plural	{n} action|{n} actions	{n} művelet
+	Object Finder	Objektumkereső
+	No object found there — drag a rectangle around it	Ott nem található objektum – húzz köré egy téglalapot
+	Drag to pan · Scroll to zoom · Double-click to fit	Húzás: mozgatás · Görgetés: nagyítás · Dupla kattintás: igazítás
+	Gradient Preset Options	Színátmenet-előbeállítás beállításai
+	Import .GRD	.GRD importálása
+	Choose a gradient file (.grd).	Válasszon színátmenetfájlt (.grd).
+	Save Settings…	Beállítások mentése…
+	Load Settings…	Beállítások betöltése…
+	Save these settings as a Camera Raw .xmp file	A beállítások mentése Camera Raw .xmp-fájlként
+	Load settings from a Camera Raw .xmp file	Beállítások betöltése Camera Raw .xmp-fájlból
+	Loaded Camera Raw settings from {file}	Camera Raw-beállítások betöltve innen: {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Camera Raw-beállítások betöltve innen: {file} ({n} nem támogatott)
+	Auto Add/Delete	Automatikus hozzáadás/törlés
