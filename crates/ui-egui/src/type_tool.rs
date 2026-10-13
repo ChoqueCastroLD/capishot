@@ -460,6 +460,135 @@ fn kern_pair(app: &mut PhotocraftApp, id: LayerId, caret: usize, by: f32) {
     let _ = app.run("type.edit", json!({"layer": id.0, "kernPair": {"at": caret, "by": by}}));
 }
 
+/// A character style the type editor's ⇧⌘ keys toggle (Photoshop: ⇧⌘K All Caps, ⇧⌘U
+/// Underline, ⇧⌘B Faux Bold, ⇧⌘I Faux Italic, ⇧⌘/ Strikethrough).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CharToggle {
+    AllCaps,
+    Underline,
+    FauxBold,
+    FauxItalic,
+    Strikethrough,
+}
+
+impl CharToggle {
+    fn is_on(self, st: &photocraft_doc::text::CharStyle) -> bool {
+        match self {
+            Self::AllCaps => st.caps == photocraft_doc::text::Caps::AllCaps,
+            Self::Underline => st.underline,
+            Self::FauxBold => st.faux_bold,
+            Self::FauxItalic => st.faux_italic,
+            Self::Strikethrough => st.strikethrough,
+        }
+    }
+
+    fn param(self, on: bool) -> (&'static str, serde_json::Value) {
+        match self {
+            Self::AllCaps => ("caps", json!(if on { "all" } else { "normal" })),
+            Self::Underline => ("underline", json!(on)),
+            Self::FauxBold => ("fauxBold", json!(on)),
+            Self::FauxItalic => ("fauxItalic", json!(on)),
+            Self::Strikethrough => ("strikethrough", json!(on)),
+        }
+    }
+}
+
+/// The byte range of characters `a..b` of `text`.
+fn byte_range(text: &str, a: usize, b: usize) -> (usize, usize) {
+    let at = |c: usize| text.char_indices().nth(c).map_or(text.len(), |(i, _)| i);
+    (at(a.min(b)), at(a.max(b)))
+}
+
+/// The character styles of the selection, or of the typing style when the text is empty. Empty
+/// when nothing is selected in non-empty text.
+fn selected_styles(t: &TextLayer, a: usize, b: usize) -> Vec<photocraft_doc::text::CharStyle> {
+    let runs = t.char_runs();
+    if t.text.is_empty() {
+        return runs.into_iter().take(1).map(|r| r.style).collect();
+    }
+    let (ba, bb) = byte_range(&t.text, a, b);
+    let mut at = 0usize;
+    let mut out = Vec::new();
+    for r in runs {
+        let (rs, re) = (at, at.saturating_add(r.len));
+        at = re;
+        if rs < bb && re > ba {
+            out.push(r.style);
+        }
+    }
+    out
+}
+
+/// The character range the type editor's formatting keys act on: the selection, or the empty
+/// text's typing style. `None` for a collapsed caret in non-empty text: Photoshop would style the
+/// next characters typed, which the document model can't hold apart from the text, so the keys
+/// do nothing there (rather than restyle a word the user didn't select).
+fn format_range(app: &PhotocraftApp, ed: &TextEdit) -> Option<(usize, usize)> {
+    let t = text_layer(&app.session.active()?.doc, LayerId(ed.layer))?;
+    let n = t.text.chars().count();
+    let (a, b) = (ed.caret.min(ed.anchor).min(n), ed.caret.max(ed.anchor).min(n));
+    (a < b || n == 0).then_some((a, b))
+}
+
+/// One `type.setStyle` step on the edited layer's `range`, kept apart from the typing session's
+/// coalesced edit so Undo takes back one key press at a time (as with kerning).
+fn set_style(app: &mut PhotocraftApp, ed: &TextEdit, range: (usize, usize), mut p: serde_json::Value) {
+    crate::type_transform::finish(app);
+    p["layer"] = json!(ed.layer);
+    p["range"] = json!([range.0, range.1]);
+    if let Err(e) = app.run("type.setStyle", p) {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
+/// ⇧⌘K/U/B/I/: flips a character style over the selection: off when every selected character
+/// already has it, else on.
+pub(crate) fn toggle_char_style(app: &mut PhotocraftApp, which: CharToggle) {
+    let Some(ed) = app.ui.text_edit.clone() else { return };
+    let Some(range) = format_range(app, &ed) else { return };
+    let Some(styles) = app.session.active().and_then(|s| text_layer(&s.doc, LayerId(ed.layer))).map(|t| selected_styles(t, range.0, range.1)) else {
+        return;
+    };
+    let on = !styles.iter().all(|st| which.is_on(st));
+    let (key, value) = which.param(on);
+    set_style(app, &ed, range, json!({ key: value }));
+}
+
+/// ⌥↑/↓ leading, ⇧⌥↑/↓ baseline shift and ⌥←/→ tracking: steps every selected character from its
+/// own value (`key` is `leadingBy`, `baselineShiftBy` or `trackingBy`).
+pub(crate) fn step_char_metric(app: &mut PhotocraftApp, key: &str, by: f32) {
+    let Some(ed) = app.ui.text_edit.clone() else { return };
+    let Some(range) = format_range(app, &ed) else { return };
+    // Leading steps in the points the Character panel shows for a scaled layer.
+    set_style(app, &ed, range, json!({ key: by, "metricsAsShown": key == "leadingBy" }));
+}
+
+/// ⌥⇧⌘H: flips Hyphenate for the paragraphs the selection (or the caret) is in: off when all of
+/// them hyphenate, else on.
+pub(crate) fn toggle_hyphenate(app: &mut PhotocraftApp) {
+    let Some(ed) = app.ui.text_edit.clone() else { return };
+    let Some(t) = app.session.active().and_then(|s| text_layer(&s.doc, LayerId(ed.layer))) else { return };
+    let n = t.text.chars().count();
+    let (a, b) = (ed.caret.min(ed.anchor).min(n), ed.caret.max(ed.anchor).min(n));
+    let (ba, bb) = byte_range(&t.text, a, b);
+    let len = t.text.len();
+    let mut at = 0usize;
+    let mut all = true;
+    let mut any = false;
+    for r in t.paragraph_runs() {
+        let (ps, pe) = (at, at.saturating_add(r.len));
+        at = pe;
+        let touches = if ba == bb { ps <= ba && (ba < pe || pe >= len) } else { ps < bb && pe > ba };
+        if touches {
+            any = true;
+            all &= r.style.hyphenate;
+        }
+    }
+    let on = !(any && all);
+    set_style(app, &ed, (a, b), json!({ "hyphenate": on }));
+}
+
 /// IME composition. The preedit text is written into the layer (so it lays out and reflows like
 /// typed text) and replaced by every update; `commit` makes the result final.
 fn ime_update(app: &mut PhotocraftApp, s: &str, commit: bool) {
@@ -677,6 +806,35 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                 use egui::Key;
                 let key = &flow_key(*key, vertical_flow);
                 match key {
+                    // Photoshop's type formatting keys act on the selected characters and win
+                    // over the global ⇧⌘K/U/B/I (Color Settings, Desaturate, Auto Color, Inverse)
+                    // while typing. Each press is one history step.
+                    Key::K | Key::U | Key::B | Key::I | Key::Slash | Key::Questionmark if m.command && m.shift && !m.alt => {
+                        let which = match key {
+                            Key::K => CharToggle::AllCaps,
+                            Key::U => CharToggle::Underline,
+                            Key::B => CharToggle::FauxBold,
+                            Key::I => CharToggle::FauxItalic,
+                            _ => CharToggle::Strikethrough,
+                        };
+                        toggle_char_style(app, which);
+                    }
+                    Key::H if m.command && m.shift && m.alt => toggle_hyphenate(app),
+                    // ⌥↑/↓ leading -/+2 pt, ⇧⌥↑/↓ baseline shift +/-2 pt (10 with ⌘/Ctrl).
+                    Key::ArrowUp | Key::ArrowDown if m.alt => {
+                        let step = if m.command { 10.0 } else { 2.0 };
+                        let up = *key == Key::ArrowUp;
+                        if m.shift {
+                            step_char_metric(app, "baselineShiftBy", if up { step } else { -step });
+                        } else {
+                            step_char_metric(app, "leadingBy", if up { -step } else { step });
+                        }
+                    }
+                    // ⌥←/→ over a selection tracks it by -/+20 (100 with ⌘/Ctrl).
+                    Key::ArrowLeft | Key::ArrowRight if m.alt && !m.shift && a != b => {
+                        let step = if m.command { 100.0 } else { 20.0 };
+                        step_char_metric(app, "trackingBy", if *key == Key::ArrowRight { step } else { -step });
+                    }
                     Key::Backspace | Key::Delete => {
                         if a == b {
                             let fwd = *key == Key::Delete;
