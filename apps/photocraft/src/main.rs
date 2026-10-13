@@ -449,23 +449,12 @@ fn main() -> eframe::Result {
                 photocraft_ui_egui::gpu_status::queue_fallback_notice(&mut app, &reason);
             }
             app.perf.span("gpuSentinel", sentinel_ms);
-            // Once the first frames rendered: clear the marker, and keep a crash fallback.
-            let remember_cpu =
-                std::env::var_os("PHOTOCRAFT_GPU_STARTUP_FAILURE").is_some() || (plan.remember && plan.backend == photocraft_engine::prefs::GpuBackend::Cpu);
-            let remember = plan.remember.then_some(plan.backend);
+            // CPU rendering after a failed GPU start is temporary. Only the
+            // recovery-dialog choice may persist it (#3483).
+            let remember = gpu_startup::backend_to_remember(&plan);
             app.on_started(move |app| {
                 if let Some(s) = started_sentinel.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
                     s.finish();
-                }
-                if remember_cpu
-                    && let Err(error) = app.run(
-                        "prefs.set",
-                        serde_json::json!({"values": {
-                            "performance.renderingMode": "cpu", "performance.useGpu": false
-                        }}),
-                    )
-                {
-                    log::warn!("couldn't remember CPU recovery: {error}");
                 }
                 if let Some(b) = remember
                     && app.session.prefs().performance.gpu_backend != b
