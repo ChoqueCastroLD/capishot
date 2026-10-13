@@ -44,6 +44,13 @@ fn page_now() -> f64 {
     web_sys::window().and_then(|w| w.performance()).map_or(0.0, |p| p.now())
 }
 
+/// A frame of the gesture being reported (`?perf=1`).
+struct GestureFrame {
+    ms: f64,
+    update_ms: f64,
+    latency_ms: Option<f64>,
+}
+
 /// One frame, from its start until eframe reports its time (in the next frame).
 #[derive(Clone, Debug)]
 struct Frame {
@@ -70,8 +77,8 @@ pub struct FramePerf {
     /// none, so an unchanged value is not counted again.
     last_cpu: Option<f32>,
     records: Rc<RefCell<Vec<serde_json::Value>>>,
-    /// The current gesture's frames (`?perf=1`): (frame ms, update ms, latency ms).
-    gesture: Vec<(f64, f64, Option<f64>)>,
+    /// The current gesture's frames (`?perf=1`).
+    gesture: Vec<GestureFrame>,
     gesture_key: Option<String>,
 }
 
@@ -145,7 +152,7 @@ impl FramePerf {
         if frame.key.is_some()
             && let Some(ms) = total_ms
         {
-            self.gesture.push((ms, frame.update_ms, latency));
+            self.gesture.push(GestureFrame { ms, update_ms: frame.update_ms, latency_ms: latency });
         }
     }
 
@@ -156,14 +163,14 @@ impl FramePerf {
         if frames.is_empty() {
             return;
         }
-        let pick = |f: fn(&(f64, f64, Option<f64>)) -> Option<f64>| {
+        let pick = |f: fn(&GestureFrame) -> Option<f64>| {
             let mut v: Vec<f64> = frames.iter().filter_map(f).collect();
             v.sort_by(f64::total_cmp);
             json!({"p50": round2(quantile(&v, 0.5)), "p95": round2(quantile(&v, 0.95)), "max": round2(v.last().copied().unwrap_or(0.0))})
         };
         let line = json!({
             "key": key, "frames": frames.len(),
-            "ms": pick(|f| Some(f.0)), "upd": pick(|f| Some(f.1)), "lat": pick(|f| f.2),
+            "ms": pick(|f| Some(f.ms)), "upd": pick(|f| Some(f.update_ms)), "lat": pick(|f| f.latency_ms),
         });
         log::info!("capishot-perf {line}");
     }
