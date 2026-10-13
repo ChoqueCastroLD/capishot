@@ -114,6 +114,21 @@
     </dict>
     <dict>
       <key>UTTypeIdentifier</key>
+      <string>ai.storyteller.photocraft.kra</string>
+      <key>UTTypeDescription</key>
+      <string>Krita Document</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>public.data</string><string>public.image</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>kra</string><string>krz</string></array>
+        <key>public.mime-type</key>
+        <array><string>application/x-krita</string></array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key>
       <string>ai.storyteller.photocraft.pdn</string>
       <key>UTTypeDescription</key>
       <string>Paint.NET Document</string>
@@ -212,6 +227,7 @@
         <string>ai.storyteller.photocraft.qoi</string>
         <string>ai.storyteller.photocraft.pdn</string>
         <string>ai.storyteller.photocraft.ora</string>
+        <string>ai.storyteller.photocraft.kra</string>
       </array>
     </dict>
   </array>
