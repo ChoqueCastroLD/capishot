@@ -1256,6 +1256,14 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     Some(tex.id())
 }
 
+/// The CPU canvas texture's sampling (#4810). Zoomed in, a full-resolution texture shows each
+/// document pixel as a crisp square, as the GPU canvas's sharp nearest filter and Photoshop do;
+/// zoomed out it is still filtered. A reduced texture (`factor` > 1) stays bilinear: its texels
+/// are averages of several pixels, and squares of them would be blocks the image doesn't have.
+fn canvas_texture_options(factor: u32) -> TextureOptions {
+    if factor > 1 { TextureOptions::LINEAR } else { TextureOptions { magnification: egui::TextureFilter::Nearest, ..TextureOptions::LINEAR } }
+}
+
 /// Make sure the canvas texture for document `idx` on `display` is current; returns (texture
 /// id, scale).
 pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, display: Option<u32>) -> Option<(egui::TextureId, f32)> {
@@ -1300,7 +1308,7 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, 
             let r = buf.rect;
             if !r.is_empty() {
                 let t1 = crate::gpu_canvas::now_ms();
-                t.set_partial([r.x0 as usize, r.y0 as usize], display_image(display.as_deref(), &buf), TextureOptions::LINEAR);
+                t.set_partial([r.x0 as usize, r.y0 as usize], display_image(display.as_deref(), &buf), canvas_texture_options(factor));
                 let px = (r.width() as u64 * r.height() as u64).saturating_mul(u64::from(factor).pow(2));
                 app.perf.record("rect", px, t1 - t0, crate::gpu_canvas::now_ms() - t1);
             }
@@ -1310,8 +1318,8 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, 
             let t1 = crate::gpu_canvas::now_ms();
             let (img, scale) = (display_image(display.as_deref(), &full), 1.0 / factor as f32);
             match cache.texture.as_mut() {
-                Some(t) if t.size() == img.size => t.set(img, TextureOptions::LINEAR),
-                _ => cache.texture = Some(ctx.load_texture(format!("canvas-{}-{}", id.0, cache_key(id, output).1), img, TextureOptions::LINEAR)),
+                Some(t) if t.size() == img.size => t.set(img, canvas_texture_options(factor)),
+                _ => cache.texture = Some(ctx.load_texture(format!("canvas-{}-{}", id.0, cache_key(id, output).1), img, canvas_texture_options(factor))),
             }
             cache.scale = scale;
             app.perf.record("full", doc.size.width as u64 * doc.size.height as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
@@ -5851,6 +5859,46 @@ mod tests {
         ensure_texture(&mut app, &ctx, 0, Some(4));
         let rev = app.session.documents()[0].revision;
         assert_eq!((app.canvases[&(id, 1)].tex_revision, app.canvases[&(id, 4)].tex_revision), (rev, rev));
+    }
+
+    #[test]
+    fn cpu_canvas_shows_crisp_pixels_when_zoomed_in() {
+        // #4810: above 100% the CPU canvas shows each pixel as a square, like the GPU canvas's
+        // sharp nearest filter; below 100% it still filters. Both the first upload and a
+        // damage-rect update carry the sampling, since the renderer takes it from each delta.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 2, "height": 2})).unwrap();
+        let ctx = egui::Context::default();
+        let tex = ensure_texture(&mut app, &ctx, 0, None).unwrap().0;
+        let uploads = |ctx: &egui::Context| {
+            let mut delta = ctx.tex_manager().write().take_delta();
+            let seen = delta.set.get(&tex).into_iter().flatten().map(|d| (d.pos.is_some(), d.options)).collect::<Vec<_>>();
+            delta.clear();
+            seen
+        };
+        let crisp = TextureOptions { magnification: egui::TextureFilter::Nearest, ..TextureOptions::LINEAR };
+        assert_eq!(uploads(&ctx), vec![(false, crisp)]);
+        app.run("select.rect", json!({"x": 0, "y": 0, "width": 1, "height": 1})).unwrap();
+        ensure_texture(&mut app, &ctx, 0, None).unwrap();
+        uploads(&ctx);
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        assert_eq!(ensure_texture(&mut app, &ctx, 0, None).unwrap().0, tex);
+        assert_eq!(uploads(&ctx), vec![(true, crisp)], "a partial update keeps the crisp sampling");
+    }
+
+    #[test]
+    fn cpu_canvas_of_a_reduced_document_stays_bilinear() {
+        // Over MAX_TEXTURE the texture holds one texel per `factor` pixels: a texel is not a
+        // document pixel, so showing it as a square would draw blocks that aren't in the image.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": MAX_TEXTURE + 1, "height": 2})).unwrap();
+        let ctx = egui::Context::default();
+        let (tex, scale) = ensure_texture(&mut app, &ctx, 0, None).unwrap();
+        assert!(scale < 1.0);
+        let mut delta = ctx.tex_manager().write().take_delta();
+        let uploads: Vec<_> = delta.set.get(&tex).into_iter().flatten().map(|d| d.options).collect();
+        delta.clear();
+        assert_eq!(uploads, vec![TextureOptions::LINEAR]);
     }
 
     #[test]
