@@ -1033,6 +1033,10 @@ pub struct UiState {
     /// one per group: the group's key brings it back, as in Photoshop (#2608).
     #[serde(default)]
     pub group_tools: Vec<Tool>,
+    /// A tool letter still held (spring-loaded tool, #2672): the tool to give back on release.
+    /// Exposed to automation, never restored from settings.
+    #[serde(default, skip_deserializing)]
+    pub spring: Option<crate::spring_tools::Spring>,
     /// Recently opened file paths, most-recent first (File › Open Recent). Capped; de-duplicated.
     #[serde(default)]
     pub recent_files: Vec<String>,
@@ -1244,6 +1248,7 @@ impl Default for UiState {
         Self {
             tool: Tool::Brush,
             group_tools: Vec::new(),
+            spring: None,
             recent_files: Vec::new(),
             text_edit: None,
             type_transform: None,

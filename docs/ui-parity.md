@@ -1,6 +1,6 @@
 # UI parity: tools, handles, modifiers and feel
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (⇧-dragged guides land on ruler ticks; layer and selection keys; tool keys) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (⇧-dragged guides land on ruler ticks; layer and selection keys; tool keys; spring-loaded tool letters) · **Target:** Adobe Photoshop 2026
 
 How PhotoCraft's direct manipulation compares with Photoshop 2026 (27.11.0): the toolbox, the
 handles and modifier keys of each gesture, nudging, snapping, numeric precision, navigation,
@@ -161,7 +161,7 @@ Triangle and Curvature Pen (minus legacy Rounded Rectangle and Targeted Adjustme
 | Behaviour | Status | Evidence |
 |---|---|---|
 | Space = Hand, ⌘Space / ⌘⌥Space = zoom in/out, spring-loaded while held | done | `hold_keys.rs` |
-| Hold any tool letter for a temporary tool | missing | #2672 |
+| Hold any tool letter for a temporary tool | done | `spring_tools.rs`: held ≥ 300 ms or used on the canvas, release gives the previous tool back; ⇧ never springs (#2672) |
 | Scrubby zoom | done | `zoom_tool.rs` |
 | Flick panning | done | `flick_pan.rs` (Preferences › Tools › Enable Flick Panning) |
 | Animated zoom | missing | unread pref; #566 |
@@ -219,3 +219,4 @@ Paragraph; the rest open as in-app floating windows.
 | 2026-10-11 | minor | ⇧-drag a guide out of a ruler lands on the nearest ruler tick (#3770) |
 | 2026-10-11 | minor | Layer and selection keys from Photoshop's shortcut set: ⌘, toggles, ⌘\, /, ⌘⌥2, ⌘⌥⌫, Tab rename-next, ⌥-click thumbnail to fit |
 | 2026-10-11 | minor | Tool keys from Photoshop's shortcut set: ← / → rotate the brush tip, ⇧-click for new type, Space+F canvas colour |
+| 2026-10-11 | minor | Spring-loaded tool letters done (#2672): holding any tool letter (Z included) past 300 ms, or using the canvas while it is down, makes the tool temporary until release |

@@ -175,6 +175,7 @@ pub mod slice_ui;
 pub mod smart_ui;
 pub mod snap_ui;
 pub(crate) mod solid_fill_ui;
+pub mod spring_tools;
 pub mod state;
 pub mod stroke_constraint;
 pub mod stroke_trail;

@@ -72,9 +72,15 @@ fn key(h: &mut Harness<'static, PhotocraftApp>, k: Key, pressed: bool, m: Modifi
     h.run_steps(1);
 }
 
+/// A quick press and release in one frame (a tool letter held across frames springs, #2672).
 fn tap(h: &mut Harness<'static, PhotocraftApp>, k: Key, m: Modifiers) {
-    key(h, k, true, m);
-    key(h, k, false, m);
+    let m = platform(m);
+    h.input_mut().events.extend([
+        Event::ModifiersChanged(m),
+        Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: m },
+        Event::Key { key: k, physical_key: None, pressed: false, repeat: false, modifiers: m },
+    ]);
+    h.run_steps(1);
     h.event(Event::ModifiersChanged(Modifiers::NONE));
     h.run_steps(1);
 }
