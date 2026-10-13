@@ -2155,6 +2155,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Aucun tracé à partir duquel créer une sélection : dessinez-en un avec l'outil Plume ou sélectionnez-en un dans le panneau Tracés.
 	Cancel opening	Annuler l'ouverture
 	Cancelled opening {name}	Ouverture de {name} annulée
+	The document “{name}” does not have an embedded {mode} profile.	Le document « {name} » n'a pas de profil {mode} incorporé.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Le document « {name} » a un profil colorimétrique incorporé qui ne correspond pas à l'espace de travail {mode} actuel.
+	Embedded: {embedded}	Incorporé : {embedded}
+	Working: {working}	Espace de travail : {working}
 	Developing {name}	Développement de {name}
 	Cancelled {label}	{label} : annulé
 	Esc to cancel	Échap pour annuler

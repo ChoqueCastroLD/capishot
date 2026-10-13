@@ -2209,6 +2209,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Není k dispozici žádná cesta, ze které by šlo vytvořit výběr: nakreslete ji nástrojem Pero nebo ji vyberte na panelu Cesty.
 	Cancel opening	Zrušit otevírání
 	Cancelled opening {name}	Otevírání {name} zrušeno
+	The document “{name}” does not have an embedded {mode} profile.	Dokument „{name}“ nemá vložený profil {mode}.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Dokument „{name}“ má vložený barevný profil, který neodpovídá aktuálnímu pracovnímu prostoru barev {mode}.
+	Embedded: {embedded}	Vložený: {embedded}
+	Working: {working}	Pracovní: {working}
 	Developing {name}	Vyvolávání {name}
 	Cancelled {label}	Zrušeno: {label}
 	Esc to cancel	Esc pro zrušení
@@ -3667,8 +3671,6 @@ curves	Smooth	Vyhladit
 	fallback	náhradní
 
 # Composed labels and Navigator zoom context
-	The document does not have an embedded colour profile. Working space: {working}.	Dokument nemá vložený barevný profil. Pracovní prostor barev: {working}.
-	The document has an embedded colour profile that does not match the working space.\nEmbedded: {embedded}\nWorking: {working}	Dokument má vložený barevný profil, který neodpovídá pracovnímu prostoru barev.\nVložený: {embedded}\nPracovní: {working}
 	Importing {what} from {file}…	Importují se {what} ze souboru {file}…
 	brushes	štětce
 	gradients	přechody

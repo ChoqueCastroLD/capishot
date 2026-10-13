@@ -2157,6 +2157,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Geen pad om een selectie van te maken: teken er een met het pengereedschap of selecteer er een in het paneel Paden.
 	Cancel opening	Openen annuleren
 	Cancelled opening {name}	Openen van {name} geannuleerd
+	The document “{name}” does not have an embedded {mode} profile.	Het document “{name}” heeft geen ingesloten {mode}-profiel.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Het document “{name}” heeft een ingesloten kleurprofiel dat niet overeenkomt met de huidige {mode}-werkruimte.
+	Embedded: {embedded}	Ingesloten: {embedded}
+	Working: {working}	Werkruimte: {working}
 	Developing {name}	{name} wordt ontwikkeld
 	Cancelled {label}	{label} geannuleerd
 	Esc to cancel	Esc om te annuleren

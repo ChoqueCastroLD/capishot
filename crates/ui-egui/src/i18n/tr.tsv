@@ -2132,6 +2132,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Seçim yapılabilecek yol yok: Kalem aracıyla bir yol çizin veya Yollar panelinden birini seçin.
 	Cancel opening	Açılışı iptal et
 	Cancelled opening {name}	{name} açılışı iptal edildi
+	The document “{name}” does not have an embedded {mode} profile.	'{name}' belgesinde gömülü bir {mode} profili yok.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	'{name}' belgesinin gömülü renk profili geçerli {mode} çalışma alanıyla eşleşmiyor.
+	Embedded: {embedded}	Gömülü: {embedded}
+	Working: {working}	Çalışma alanı: {working}
 	Developing {name}	{name} geliştiriliyor
 	Cancelled {label}	{label} iptal edildi
 	Esc to cancel	İptal etmek için Esc

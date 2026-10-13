@@ -2471,6 +2471,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Нет контура для создания выделения: нарисуйте его инструментом «Перо» или выберите на панели «Контуры».
 	Cancel opening	Отменить открытие
 	Cancelled opening {name}	Открытие {name} отменено
+	The document “{name}” does not have an embedded {mode} profile.	В документе «{name}» нет встроенного профиля {mode}.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Встроенный цветовой профиль документа «{name}» не совпадает с текущим рабочим пространством {mode}.
+	Embedded: {embedded}	Встроенный: {embedded}
+	Working: {working}	Рабочее пространство: {working}
 	Developing {name}	Обработка {name}
 	Cancelled {label}	{label}: отменено
 	Esc to cancel	Esc — отмена

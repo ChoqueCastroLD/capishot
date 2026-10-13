@@ -2444,6 +2444,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Немає контуру для створення виділення: намалюйте його пером або виберіть на панелі контурів.
 	Cancel opening	Скасувати відкриття
 	Cancelled opening {name}	Відкриття {name} скасовано
+	The document “{name}” does not have an embedded {mode} profile.	Документ «{name}» не має вбудованого профілю {mode}.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Вбудований колірний профіль документа «{name}» не відповідає поточному робочому простору {mode}.
+	Embedded: {embedded}	Вбудований: {embedded}
+	Working: {working}	Робочий простір: {working}
 	Developing {name}	Обробка {name}
 	Cancelled {label}	Скасовано: {label}
 	Esc to cancel	Esc для скасування

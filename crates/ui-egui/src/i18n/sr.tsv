@@ -2135,6 +2135,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Nema putanje od koje bi se napravila selekcija: nacrtajte je alatkom pero ili je izaberite u panelu Putanje.
 	Cancel opening	Otkaži otvaranje
 	Cancelled opening {name}	Otkazano otvaranje: {name}
+	The document “{name}” does not have an embedded {mode} profile.	Dokument „{name}“ nema ugrađeni {mode} profil.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Dokument „{name}“ ima ugrađeni profil boja koji se ne slaže sa trenutnim {mode} radnim prostorom.
+	Embedded: {embedded}	Ugrađeni: {embedded}
+	Working: {working}	Radni prostor: {working}
 	Developing {name}	Razvijanje: {name}
 	Cancelled {label}	Otkazano: {label}
 	Esc to cancel	Esc za otkazivanje

@@ -2484,6 +2484,10 @@ navigator	Zoom	Nagyítás mértéke
 	Camera Raw Filter ({layer})	Camera Raw szűrő ({layer})
 	Camera Raw isn't open	A Camera Raw nincs megnyitva
 	Cancelled opening {name}	Megnyitás megszakítva: {name}
+	The document “{name}” does not have an embedded {mode} profile.	A(z) „{name}” dokumentumnak nincs beágyazott {mode}-profilja.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	A(z) „{name}” dokumentum beágyazott színprofilja nem egyezik az aktuális {mode}-munkaszíntérrel.
+	Embedded: {embedded}	Beágyazott: {embedded}
+	Working: {working}	Munkaszíntér: {working}
 	Cancelled {label}	Megszakítva: {label}
 	Clarity	Tisztaság
 	Color Detail	Színrészletesség

@@ -1610,6 +1610,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Δεν υπάρχει διαδρομή για δημιουργία επιλογής: σχεδιάστε μία με το εργαλείο Πένα (Pen Tool) ή επιλέξτε μία στο πλαίσιο Διαδρομές.
 	Cancel opening	Ακύρωση ανοίγματος
 	Cancelled opening {name}	Ακυρώθηκε το άνοιγμα του {name}
+	The document “{name}” does not have an embedded {mode} profile.	Το έγγραφο «{name}» δεν έχει ενσωματωμένο προφίλ {mode}.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Το έγγραφο «{name}» έχει ενσωματωμένο χρωματικό προφίλ που δεν ταιριάζει με τον τρέχοντα χώρο εργασίας {mode}.
+	Embedded: {embedded}	Ενσωματωμένο: {embedded}
+	Working: {working}	Χώρος εργασίας: {working}
 	Cancelled {label}	Ακυρώθηκε: {label}
 	Esc to cancel	Esc για ακύρωση
 	Opened {name}	Άνοιξε το {name}

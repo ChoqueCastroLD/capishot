@@ -2191,6 +2191,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Nessun tracciato da cui creare selezione: disegnane uno con Penna o selezionane uno nel pannello Tracciati.
 	Cancel opening	Annulla apertura
 	Cancelled opening {name}	Apertura {name} annullata
+	The document “{name}” does not have an embedded {mode} profile.	Il documento “{name}” non ha un profilo {mode} incorporato.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Il documento “{name}” ha un profilo colore incorporato che non corrisponde allo spazio di lavoro {mode} corrente.
+	Embedded: {embedded}	Incorporato: {embedded}
+	Working: {working}	Di lavoro: {working}
 	Developing {name}	Sviluppo di {name}
 	Cancelled {label}	{label} annullato
 	Esc to cancel	Esc per annullare
@@ -4043,8 +4047,6 @@ layerLabel	No Color	Nessun colore
 	Monitor profile on {display}: {profile}	Profilo monitor su {display}: {profile}
 	manual	manuale
 	fallback	ripiego
-	The document does not have an embedded colour profile. Working space: {working}.	Il documento non ha un profilo colore incorporato. Spazio di lavoro: {working}.
-	The document has an embedded colour profile that does not match the working space.\nEmbedded: {embedded}\nWorking: {working}	Il documento ha un profilo colore incorporato che non corrisponde allo spazio di lavoro.\nIncorporato: {embedded}\nDi lavoro: {working}
 	Importing {what} from {file}…	Importazione di {what} da {file}…
 	brushes	pennelli
 	gradients	sfumature

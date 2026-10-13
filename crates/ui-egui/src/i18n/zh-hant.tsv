@@ -2195,6 +2195,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	沒有可用來建立選取範圍的路徑：請使用鋼筆工具繪製，或在路徑面板中選取一個路徑。
 	Cancel opening	取消開啟
 	Cancelled opening {name}	已取消開啟 {name}
+	The document “{name}” does not have an embedded {mode} profile.	文件「{name}」沒有嵌入的 {mode} 描述檔。
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	文件「{name}」嵌入的色彩描述檔與目前的 {mode} 工作空間不符。
+	Embedded: {embedded}	嵌入：{embedded}
+	Working: {working}	工作空間：{working}
 	Developing {name}	正在處理 {name}
 	Cancelled {label}	已取消 {label}
 	Esc to cancel	按 Esc 取消

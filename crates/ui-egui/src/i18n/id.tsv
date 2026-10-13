@@ -2148,6 +2148,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Tidak ada path untuk dibuat seleksi: gambar dengan alat Pen atau pilih salah satu di panel Path.
 	Cancel opening	Batalkan pembukaan
 	Cancelled opening {name}	Pembukaan {name} dibatalkan
+	The document “{name}” does not have an embedded {mode} profile.	Dokumen “{name}” tidak memiliki profil {mode} tertanam.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Dokumen “{name}” memiliki profil warna tertanam yang tidak cocok dengan working space {mode} saat ini.
+	Embedded: {embedded}	Tertanam: {embedded}
+	Working: {working}	Working space: {working}
 	Developing {name}	Mengembangkan {name}
 	Cancelled {label}	{label} dibatalkan
 	Esc to cancel	Esc untuk batal

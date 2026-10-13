@@ -1562,6 +1562,10 @@ cameraRaw	Shadows	Vùng tối
 	Esc to cancel	Esc để hủy
 	Cancel opening	Hủy mở tệp
 	Cancelled opening {name}	Đã hủy mở {name}
+	The document “{name}” does not have an embedded {mode} profile.	Tài liệu “{name}” không có hồ sơ {mode} nhúng.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Tài liệu “{name}” có hồ sơ màu nhúng không khớp với không gian làm việc {mode} hiện tại.
+	Embedded: {embedded}	Nhúng: {embedded}
+	Working: {working}	Không gian làm việc: {working}
 	Cancelled {label}	Đã hủy {label}
 	Cancel transform (Esc)	Hủy biến đổi (Esc)
 	Cancel warp (Esc)	Hủy biến dạng (Esc)
