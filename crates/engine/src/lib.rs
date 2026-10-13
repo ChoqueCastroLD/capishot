@@ -197,6 +197,8 @@ pub struct DocState {
     /// Increments on every change; UIs re-render when it moves.
     pub revision: u64,
     pub saved_revision: u64,
+    /// How much of `revision` came from view-only changes (channel eyes, targeting): pixel caches can ignore those.
+    pub view_revision: u64,
     /// Area changed by the latest revision (None = assume everything changed).
     pub last_damage: Option<photocraft_geom::Rect>,
     /// Coalescing key of the latest history step (see [`Session::execute`]'s `coalesce` param).
@@ -242,6 +244,7 @@ impl DocState {
             source_read_only: false,
             revision: 1,
             saved_revision: 1,
+            view_revision: 0,
             last_damage: None,
             coalesce: None,
             channel_view: Default::default(),

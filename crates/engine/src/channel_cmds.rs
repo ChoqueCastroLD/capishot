@@ -152,6 +152,7 @@ pub(crate) fn fix_view(st: &mut DocState) {
 fn touch(st: &mut DocState) {
     let clean = st.saved_revision == st.revision;
     st.revision += 1;
+    st.view_revision += 1;
     if clean {
         st.saved_revision = st.revision;
     }
