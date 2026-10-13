@@ -2512,7 +2512,7 @@ fn footer_drop(ui: &egui::Ui, button: &egui::Response, drag: Option<(u64, bool)>
 }
 
 /// While something is dragged over a footer `button`: highlights it, and is true on the release.
-fn dropped_on(ui: &egui::Ui, button: &egui::Response) -> bool {
+pub(crate) fn dropped_on(ui: &egui::Ui, button: &egui::Response) -> bool {
     let Some(p) = ui.ctx().input(|i| i.pointer.interact_pos()) else { return false };
     if !button.rect.contains(p) {
         return false;
