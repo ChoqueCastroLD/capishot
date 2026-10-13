@@ -1513,6 +1513,22 @@ fn blend_if_underlying_layer_hides_by_the_backdrop_value() {
     assert!(close4(px(&d, 6, 1), [1.0, 1.0, 1.0, 1.0]));
 }
 
+/// An 8-bit backdrop at level `k` counts as `k` for a hard Underlying black point at `k`, also
+/// over a semi-transparent backdrop, where compositing leaves the value a few millionths off the
+/// level (19.999998 for 20 before #4395); the GPU compositor agrees.
+#[test]
+fn blend_if_hard_point_includes_its_own_level() {
+    for k in 0..=255u8 {
+        let v = f32::from(k) / 255.0;
+        let mut d = Document::new("t", Size::new(2, 1), ColorMode::Rgb, SampleType::U8);
+        d.layers.push(solid_layer("under", Rect::new(0, 0, 2, 1), [v, v, v, 184.0 / 255.0]));
+        let mut l = solid_layer("top", Rect::new(0, 0, 2, 1), [1.0, 0.0, 0.0, 1.0]);
+        l.blend_if.set(1, [FULL, range([k, k], [255, 255])]);
+        d.layers.push(l);
+        assert!(close4(px(&d, 0, 0), [1.0, 0.0, 0.0, 1.0]), "level {k} is hidden by a black point at {k}");
+    }
+}
+
 #[test]
 fn blend_if_split_point_fades_like_opacity() {
     // A split black point (Alt-drag) at 50/150 shows a value-100 layer at half strength, which
