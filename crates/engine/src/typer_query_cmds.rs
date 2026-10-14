@@ -59,10 +59,17 @@ fn detect_bubble(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad(CMD, "pass {\"x\", \"y\"} or {\"layer\"}")),
     };
     let page = page_image(s)?;
-    let Some(mask) = bubble::wand(&page.img, page.area, seed, tolerance) else {
+    // A joined double bubble: the lobe holding the text (or the clicked point).
+    let at = text.as_ref().map(|(r, _)| r.center());
+    let Some((mask, outline)) = bubble::wand_bubble(&page.img, page.area, seed, tolerance, at) else {
         return Ok(hit_json(&bubble::BubbleHit::default(), Some(seed), Some("outside the page")));
     };
-    let judge = bubble::Judge { text: text.as_ref().map(|(r, sz)| (r, *sz)), seed: bubble::pixel(&page.img, page.area, seed), page: Some(page.rect()) };
+    let judge = bubble::Judge {
+        text: text.as_ref().map(|(r, sz)| (r, *sz)),
+        seed: bubble::pixel(&page.img, page.area, seed),
+        page: Some(page.rect()),
+        outline: Some(outline),
+    };
     let (hit, reason) = bubble::hit(&mask, &judge, rows);
     Ok(hit_json(&hit, Some(seed), reason))
 }
@@ -182,9 +189,11 @@ fn shape_bubble(s: &mut Session, id: LayerId, rows: usize) -> Result<ShapeBubble
     let size = crate::typer_place_cmds::layer_size_px(&doc, id);
     let page = page_image(s)?;
     let seed = bubble::seed_left_of(&ink);
-    let Some(mask) = bubble::wand(&page.img, page.area, seed, bubble::WAND_TOLERANCE) else { return Ok(Err("noSelection")) };
+    let Some((mask, outline)) = bubble::wand_bubble(&page.img, page.area, seed, bubble::WAND_TOLERANCE, Some(ink.center())) else {
+        return Ok(Err("noSelection"));
+    };
     let Some((o, r)) = bubble::body_rows(&mask, rows) else { return Ok(Err("noSelection")) };
-    let judge = bubble::Judge { text: Some((&ink, size)), seed: bubble::pixel(&page.img, page.area, seed), page: Some(page.rect()) };
+    let judge = bubble::Judge { text: Some((&ink, size)), seed: bubble::pixel(&page.img, page.area, seed), page: Some(page.rect()), outline: Some(outline) };
     Ok(match judge.verdict(&o) {
         None => Ok((o.opened, r, "wand")),
         Some(why) => Err(why),

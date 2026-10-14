@@ -14,7 +14,11 @@
 //!    `p ≥ 0.78 − 0.055·(sensitivity − 1)`.
 //! 6. Neck split: holes filled, chamfer 3-4 distance, peaks, the saddle between two peaks; a
 //!    second logistic model (`[2.2, 1.2, 1, 0.6]`, −0.4, ≥ 0.62) turns one component into two.
-//! 7. Reading order: rows of bubbles overlapping by more than half the smaller height, top to
+//! 7. Capishot keeps TypeR's stable-detector gates too: area ≥ 0.25 %/sensitivity of the page,
+//!    short side ≥ 2 % of the page's, aspect ≤ 8, fill ≥ 0.45, ≤ 1.8 runs per line, and a dark
+//!    outline around ≥ 80 % of the edge (real pages have many sealed whites in the art:
+//!    highlights next to screentone, eyes, speed-line gaps).
+//! 8. Reading order: rows of bubbles overlapping by more than half the smaller height, top to
 //!    bottom; right to left inside a row for manga.
 //!
 //! Capishot counts runs per line with the component's holes filled, so text left in a bubble (a
@@ -39,6 +43,9 @@ const CANDIDATE_MIN_SIZE: usize = 8;
 const CANDIDATE_MAX_ASPECT: f64 = 12.0;
 const OUTLINE_DARK_LUMA: f64 = 170.0;
 const OUTLINE_PROBE_DEPTH: usize = 3;
+/// Share of a bubble's edge that must meet a dark outline. TypeR's stable detector asks 55 %;
+/// on real pages, highlights next to screentone reach 55–77 % while outlined bubbles are ≥ 95 %.
+const MIN_OUTLINE_DARK: f64 = 0.8;
 /// TypeR's prior bubble model.
 pub const WEIGHTS: [f64; 6] = [0.8, 2.0, 2.5, 0.2, 0.25, 0.15];
 pub const BIAS: f64 = -1.8;
@@ -655,6 +662,26 @@ pub fn neck_split(local: &[bool], width: usize, height: usize) -> Option<NeckSpl
     best
 }
 
+/// `mask` cut to the lobe holding (`x`, `y`) when it is two bubbles joined at a neck (a
+/// confident [`neck_split`]); `None` when it isn't (or the point is outside it).
+pub fn lobe_at(mask: &Mask, x: f64, y: f64) -> Option<Mask> {
+    let (w, h) = (mask.width, mask.height);
+    let split = neck_split(&mask.px, w, h).filter(|s| s.confidence() >= SPLIT_THRESHOLD)?;
+    let (lx, ly) = (x - f64::from(mask.x0), y - f64::from(mask.y0));
+    if !(lx >= 0.0 && ly >= 0.0 && lx < w as f64 && ly < h as f64) {
+        return None;
+    }
+    let side = split.side(lx as usize, ly as usize);
+    let sil = fill_holes(&mask.px, w, h);
+    let mut out = Mask::new(mask.x0, mask.y0, w, h)?;
+    for (i, p) in mask.px.iter().enumerate() {
+        if *p && sil.get(i).copied().unwrap_or(false) && split.side(i % w, i / w) == side {
+            out.set(mask.x0 + (i % w) as i32, mask.y0 + (i / w) as i32, true);
+        }
+    }
+    Some(out)
+}
+
 /// Reading order: rows of bubbles that overlap by more than half the smaller height, top to
 /// bottom; inside a row right to left (`rtl`) or left to right. Returns indices into `boxes`.
 pub fn reading_order(boxes: &[Rect], rtl: bool) -> Vec<usize> {
@@ -708,8 +735,23 @@ pub fn detect(page: &Page, origin: (f64, f64), opts: &DetectOptions) -> Vec<Dete
     let scale = f as f64;
     let threshold = opts.confidence_threshold();
     let mut found: Vec<Detected> = Vec::new();
+    let total = (w * h) as f64;
+    // TypeR's stable detector's gates also apply to the learned one (Capishot): bubbles big
+    // enough to hold a line of text (area ≥ 0.25 %/sensitivity of the page, short side ≥ 2 % of
+    // the page's), not slivers (aspect ≤ 8), compact (fill ≥ 0.45), convex-ish (≤ 1.8 runs per
+    // line), and sealed by a dark outline (≥ 80 % of the edge, stricter than TypeR's 55 %).
+    let min_area = (total * 0.0025 / f64::from(opts.sensitivity.clamp(1, 9))).max(20.0);
+    let min_side = (w.min(h) as f64 * 0.02).max(12.0);
     for c in candidates(&img, w, h, opts) {
-        if c.confidence < threshold {
+        let (cw, ch) = (c.bounds.width() as f64, c.bounds.height() as f64);
+        if c.confidence < threshold
+            || (c.area as f64) < min_area
+            || cw.min(ch) < min_side
+            || (cw / ch).max(ch / cw) > 8.0
+            || c.fill < 0.45
+            || c.runs_per_line > 1.8
+            || c.outline_dark < MIN_OUTLINE_DARK
+        {
             continue;
         }
         let (bw, bh) = (c.bounds.width(), c.bounds.height());

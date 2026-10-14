@@ -26,6 +26,7 @@ pub mod keymap;
 mod preview;
 pub mod script_editor;
 mod settings;
+mod shaper_ui;
 pub(crate) mod style_editor;
 mod styles;
 

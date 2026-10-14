@@ -437,6 +437,16 @@ pub fn wand(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32), tole
     Mask::from_coverage(region.bbox.x0, region.bbox.y0, w, h, &region.mask)
 }
 
+/// The wand region Align centres in (WP4): the wand from `seed`, cut to the lobe holding `at`
+/// when it is a joined double bubble ([`crate::pagedetect::lobe_at`]), and the whole region's
+/// [`outline_dark`] share for the [`Judge`].
+pub fn wand_bubble(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32), tolerance: f32, at: Option<(f64, f64)>) -> Option<(Mask, f64)> {
+    let mask = wand(img, area, seed, tolerance)?;
+    let outline = outline_dark(&mask, img, area);
+    let (x, y) = at.unwrap_or((f64::from(seed.0), f64::from(seed.1)));
+    Some((crate::pagedetect::lobe_at(&mask, x, y).unwrap_or(mask), outline))
+}
+
 /// TypeR's wand seed for a text layer whose ink box is `ink`: 5 px left of it, at its middle
 /// height, clamped to the page.
 pub fn seed_left_of(ink: &Rect) -> (i32, i32) {
@@ -472,6 +482,9 @@ pub struct Judge<'a> {
     /// The page: a region touching two or more of its edges is background, not a bubble (a
     /// bubble cut by the page edge touches one).
     pub page: Option<Rect>,
+    /// Share of the region's edge that meets a dark outline ([`outline_dark`], WP4): a patch of
+    /// art the wand stopped in by tolerance has light edges, a bubble a dark outline.
+    pub outline: Option<f64>,
 }
 
 /// Bubbles are filled shapes: an ellipse fills 79 % of its box, a box with a tail ~70 %.
@@ -482,6 +495,42 @@ pub const MIN_SIDE: f64 = 16.0;
 pub const MIN_TEXT_INSIDE: f64 = 0.6;
 /// Darkest seed (Rec. 601 luma) a bubble interior may have.
 pub const MIN_SEED_LUMA: f64 = 128.0;
+/// Least share of the region's edge with a dark outline (TypeR's page detector's 55 %).
+pub const MIN_OUTLINE_DARK: f64 = 0.55;
+/// An outline pixel is darker than this (Rec. 601 luma), within 3 px of the edge.
+const OUTLINE_LUMA: f64 = 170.0;
+
+/// Share of `mask`'s edge (4-neighbour steps out of it) that meets a dark pixel of `img` (an RGBA
+/// image covering `area`) within 3 px, as TypeR's page detector probes a bubble's outline. Text
+/// left inside the region counts as outline. 1 for an empty mask.
+pub fn outline_dark(mask: &Mask, img: &[[u8; 4]], area: photocraft_geom::Rect) -> f64 {
+    let (mut samples, mut sealed) = (0usize, 0usize);
+    for y in 0..mask.height as i32 {
+        for x in 0..mask.width as i32 {
+            let (gx, gy) = (mask.x0 + x, mask.y0 + y);
+            if !mask.get(gx, gy) {
+                continue;
+            }
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                if mask.get(gx + dx, gy + dy) {
+                    continue;
+                }
+                samples += 1;
+                for depth in 1..=3 {
+                    match pixel(img, area, (gx + dx * depth, gy + dy * depth)) {
+                        Some([r, g, b, _]) if 0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b) < OUTLINE_LUMA => {
+                            sealed += 1;
+                            break;
+                        }
+                        Some(_) => {}
+                        None => break,
+                    }
+                }
+            }
+        }
+    }
+    if samples == 0 { 1.0 } else { sealed as f64 / samples as f64 }
+}
 
 impl Judge<'_> {
     /// `None` if `o` can be the bubble, else why not (TypeR's error codes: `smallSelection`,
@@ -500,6 +549,9 @@ impl Judge<'_> {
             if edges.iter().filter(|e| **e).count() >= 2 {
                 return Some("noBubble");
             }
+        }
+        if self.outline.is_some_and(|o| o < MIN_OUTLINE_DARK) {
+            return Some("noBubble");
         }
         if let Some([r, g, b, a]) = self.seed
             && a > 0
@@ -677,7 +729,7 @@ mod tests {
         let m = wand(&img, area, (60, 50), WAND_TOLERANCE).unwrap();
         let ink = Rect::new(50.0, 45.0, 20.0, 10.0);
         let page = Rect::new(0.0, 0.0, w as f64, h as f64);
-        let judge = Judge { text: Some((&ink, 5.0)), seed: pixel(&img, area, (60, 50)), page: Some(page) };
+        let judge = Judge { text: Some((&ink, 5.0)), seed: pixel(&img, area, (60, 50)), page: Some(page), outline: None };
         let (hit, why) = hit(&m, &judge, 21);
         assert!(hit.found, "{why:?}");
         assert!((hit.center.0 - 60.0).abs() <= 1.0 && (hit.center.1 - 50.0).abs() <= 1.0, "{hit:?}");

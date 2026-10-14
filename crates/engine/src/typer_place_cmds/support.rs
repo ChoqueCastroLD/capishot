@@ -486,9 +486,10 @@ pub fn layer_ink(doc: &Document, id: LayerId) -> Option<Rect> {
 /// `Err(code)` with TypeR's error code when there is none.
 pub fn bubble_for_ink(page: &PageImage, ink: &Rect, size_px: f64, tolerance: f32) -> std::result::Result<bubble::Opened, &'static str> {
     let seed = bubble::seed_left_of(ink);
-    let mask = bubble::wand(&page.img, page.area, seed, tolerance).ok_or("noSelection")?;
+    // The lobe of a double bubble that holds the text, judged with its outline (WP4).
+    let (mask, outline) = bubble::wand_bubble(&page.img, page.area, seed, tolerance, Some(ink.center())).ok_or("noSelection")?;
     let o = bubble::opened_bounds(&mask).ok_or("noSelection")?;
-    let judge = bubble::Judge { text: Some((ink, size_px)), seed: bubble::pixel(&page.img, page.area, seed), page: Some(page.rect()) };
+    let judge = bubble::Judge { text: Some((ink, size_px)), seed: bubble::pixel(&page.img, page.area, seed), page: Some(page.rect()), outline: Some(outline) };
     match judge.verdict(&o) {
         None => Ok(o),
         Some(why) => Err(why),
