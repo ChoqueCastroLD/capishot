@@ -2819,3 +2819,31 @@ cameraData	Lens	Objetivo
 	Next Style	Estilo siguiente
 	Previous Style	Estilo anterior
 	Next Size Preset	Siguiente tamaño predefinido
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Cargar fuentes…
+	Load Font Folder…	Cargar carpeta de fuentes…
+	Manage Fonts…	Administrar fuentes…
+	Manage Fonts	Administrar fuentes
+	User fonts	Fuentes propias
+	All fonts	Todas las fuentes
+	Missing fonts	Fuentes que faltan
+	Already loaded: {n}	Ya cargadas: {n}
+	Skipped {file}	Se omitió {file}
+	No fonts were found	No se encontraron fuentes
+	Fonts loaded: {n}	Fuentes cargadas: {n}
+	Not saved, usable until you close this tab: {fonts}	Sin guardar, disponibles hasta que cierre esta pestaña: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Quite fuentes en Texto › Administrar fuentes… para liberar espacio.
+	Browser storage is full	El almacenamiento del navegador está lleno
+	Fonts could not be saved	No se pudieron guardar las fuentes
+	Font files: {n} · {size}	Archivos de fuentes: {n} · {size}
+	Stored in this browser only, never uploaded.	Guardadas solo en este navegador; nunca se suben.
+	Browser storage: {used} of {quota}	Almacenamiento del navegador: {used} de {quota}
+	Kept until you remove them.	Se conservan hasta que las quite.
+	The browser may clear them when space runs low.	El navegador puede borrarlas si falta espacio.
+	Loaded for this session only.	Cargadas solo para esta sesión.
+	Browser storage is unavailable: {error}	El almacenamiento del navegador no está disponible: {error}
+	Remove All	Quitar todas
+	Remove all fonts from this browser?	¿Quitar todas las fuentes de este navegador?
+	Removed: {n}	Quitadas: {n}
+	No fonts loaded yet.	Aún no hay fuentes cargadas.
+	Not saved	Sin guardar

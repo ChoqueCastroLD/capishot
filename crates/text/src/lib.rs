@@ -31,6 +31,7 @@ pub mod scripts;
 pub mod served;
 pub mod sha256;
 pub mod spell;
+pub mod user_fonts;
 pub mod warp;
 
 use photocraft_color::PixelFormat;

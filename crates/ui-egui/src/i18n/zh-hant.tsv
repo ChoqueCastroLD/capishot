@@ -2719,3 +2719,31 @@ cameraData	Lens	鏡頭
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	傳送匿名使用統計
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	網頁版會傳送匿名使用統計（不含檔案或內容）；可在 偏好設定 › 一般 中關閉。
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	載入字型…
+	Load Font Folder…	載入字型資料夾…
+	Manage Fonts…	管理字型…
+	Manage Fonts	管理字型
+	User fonts	使用者字型
+	All fonts	所有字型
+	Missing fonts	遺失字型
+	Already loaded: {n}	已載入：{n}
+	Skipped {file}	已略過 {file}
+	No fonts were found	找不到字型
+	Fonts loaded: {n}	已載入字型：{n}
+	Not saved, usable until you close this tab: {fonts}	未儲存，關閉此分頁前可用：{fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	在 文字 › 管理字型… 中移除字型以釋出空間。
+	Browser storage is full	瀏覽器儲存空間已滿
+	Fonts could not be saved	無法儲存字型
+	Font files: {n} · {size}	字型檔案：{n} · {size}
+	Stored in this browser only, never uploaded.	僅儲存在此瀏覽器中，絕不上傳。
+	Browser storage: {used} of {quota}	瀏覽器儲存空間：{used} / {quota}
+	Kept until you remove them.	在您移除之前會一直保留。
+	The browser may clear them when space runs low.	空間不足時瀏覽器可能會清除它們。
+	Loaded for this session only.	僅在本次工作階段中載入。
+	Browser storage is unavailable: {error}	瀏覽器儲存空間無法使用：{error}
+	Remove All	全部移除
+	Remove all fonts from this browser?	要從此瀏覽器移除所有字型嗎？
+	Removed: {n}	已移除：{n}
+	No fonts loaded yet.	尚未載入任何字型。
+	Not saved	未儲存

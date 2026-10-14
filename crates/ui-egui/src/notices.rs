@@ -34,6 +34,19 @@ pub struct Notice {
     /// and is reset while the pointer rests on the stack (issue #2022). `None` until first shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shown_at: Option<f64>,
+    /// Buttons under the lines, each running a command (e.g. Load Fonts… on a missing fonts notice).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<NoticeAction>,
+    /// What the notice is about, for the code that updates or removes it (`missingFonts:<doc>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+}
+
+/// A notice's button: its (English) label and the command it runs.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NoticeAction {
+    pub label: String,
+    pub command: String,
 }
 
 impl Notice {
@@ -47,7 +60,17 @@ impl Notice {
 /// Show a notice (newest last); returns its id.
 pub fn post(app: &mut PhotocraftApp, title: impl Into<String>, lines: Vec<String>, error: bool, dismiss_pref: Option<&str>) -> u64 {
     let id = app.ui.alloc_id();
-    app.ui.notices.push(Notice { id, title: title.into(), lines, error, dismiss_pref: dismiss_pref.map(str::to_owned), args: Vec::new(), shown_at: None });
+    app.ui.notices.push(Notice {
+        id,
+        title: title.into(),
+        lines,
+        error,
+        dismiss_pref: dismiss_pref.map(str::to_owned),
+        args: Vec::new(),
+        shown_at: None,
+        actions: Vec::new(),
+        tag: None,
+    });
     cap_notices(app);
     id
 }
@@ -188,6 +211,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     let t = crate::theme::Tokens::get(ctx);
     let mut dismiss_id = None;
+    let mut run: Option<String> = None;
     // Clear the status bar (~24 px) and leave the dock's edge some air.
     let area = egui::Area::new(egui::Id::new("photocraft-notices"))
         .order(egui::Order::Foreground)
@@ -221,12 +245,29 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                             let text = crate::i18n::fmt(tl!("…and {n} more"), &[("n", &(n.lines.len() - MAX_LINES).to_string())]);
                             ui.label(egui::RichText::new(text).color(t.text_faint));
                         }
+                        if !n.actions.is_empty() {
+                            ui.add_space(4.0);
+                            ui.horizontal_wrapped(|ui| {
+                                for a in &n.actions {
+                                    if crate::widgets::secondary_button(ui, crate::i18n::t(&a.label), 0.0).clicked() {
+                                        run = Some(a.command.clone());
+                                    }
+                                }
+                            });
+                        }
                     });
                 ui.add_space(6.0);
             }
         });
     if let Some(id) = dismiss_id {
         dismiss(app, id);
+    }
+    if let Some(command) = run
+        && let Err(e) = crate::menus::invoke(app, ctx, &command, serde_json::json!({}))
+        && e != crate::file_dialog::CANCELLED
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
     }
     let (auto_hide, duration) = {
         let i = &app.session.prefs().interface;

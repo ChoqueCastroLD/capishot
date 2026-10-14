@@ -65,7 +65,9 @@ pub struct Entry {
 
 impl Entry {
     fn from_json(v: &Value) -> Option<Entry> {
-        let strings = |k: &str| -> Vec<String> { v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect()).unwrap_or_default() };
+        let strings = |k: &str| -> Vec<String> {
+            v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect()).unwrap_or_default()
+        };
         Some(Entry {
             family: v.get("family")?.as_str()?.to_string(),
             categories: strings("categories"),
@@ -354,7 +356,9 @@ pub fn on_job(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
             true
         }
         "type.resolveMissingFonts" => {
-            let mine = app.ui.dialogs.iter().any(|d| d.fields.get("__prefsui").and_then(Value::as_str) == Some("fontsMissing") && d.fields.get("job").and_then(Value::as_u64) == Some(e.id.0));
+            let mine = app.ui.dialogs.iter().any(|d| {
+                d.fields.get("__prefsui").and_then(Value::as_str) == Some("fontsMissing") && d.fields.get("job").and_then(Value::as_u64) == Some(e.id.0)
+            });
             if !mine {
                 if matches!(e.outcome, JobOutcome::Done(_)) {
                     fonts_changed();
@@ -364,7 +368,8 @@ pub fn on_job(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
             fonts_changed();
             let (message, error) = match &e.outcome {
                 JobOutcome::Done(v) => {
-                    let names: Vec<&str> = v.get("downloaded").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+                    let names: Vec<&str> =
+                        v.get("downloaded").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
                     let failed = v.get("failed").and_then(Value::as_array).and_then(|a| a.first()).and_then(|f| f.get("error")).and_then(Value::as_str);
                     match (failed, names.is_empty()) {
                         (Some(err), _) => (err.to_string(), true),
@@ -742,7 +747,7 @@ pub fn invoke(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Resul
     if id != "type.resolveMissingFonts" || params.as_object().is_some_and(|o| !o.is_empty()) {
         return None;
     }
-    let mut f = json!({"missing": [], "downloadable": [], "map": {}, "job": null, "message": "", "error": ""});
+    let mut f = json!({"missing": [], "downloadable": [], "map": {}, "offered": [], "job": null, "message": "", "error": ""});
     if let Err(e) = refresh_missing(app, &mut f) {
         return Some(Err(e));
     }
@@ -756,10 +761,27 @@ fn refresh_missing(app: &mut PhotocraftApp, f: &mut Value) -> Result<(), String>
     let v = app.session.execute("type.resolveMissingFonts", json!({})).map_err(|e| e.to_string())?;
     f["missing"] = v.get("missing").cloned().unwrap_or(json!([]));
     f["downloadable"] = v.get("downloadable").cloned().unwrap_or(json!([]));
+    // Installed families whose name or PostScript name matches a missing one are chosen up
+    // front (once each, so "Don't replace" sticks), e.g. after Load Fonts… brought them.
+    let matches = v.get("matches").and_then(Value::as_object).cloned().unwrap_or_default();
+    let mut offered: Vec<Value> = f.get("offered").and_then(Value::as_array).cloned().unwrap_or_default();
+    if !f.get("map").is_some_and(Value::is_object) {
+        f["map"] = json!({});
+    }
+    for (missing, family) in matches {
+        if offered.contains(&json!(missing)) {
+            continue;
+        }
+        if let Some(map) = f.get_mut("map").and_then(Value::as_object_mut) {
+            map.entry(missing.clone()).or_insert(family);
+        }
+        offered.push(json!(missing));
+    }
+    f["offered"] = Value::Array(offered);
     Ok(())
 }
 
-fn refresh_missing_dialogs(app: &mut PhotocraftApp) {
+pub(crate) fn refresh_missing_dialogs(app: &mut PhotocraftApp) {
     let ids: Vec<u64> = app.ui.dialogs.iter().filter(|d| kind_of(&d.fields) == MISSING).map(|d| d.id).collect();
     for id in ids {
         let Some(mut f) = app.ui.dialog_mut(id).map(|d| Value::Object(d.fields.clone())) else { continue };
@@ -777,7 +799,8 @@ fn ask_index(app: &mut PhotocraftApp) {
     if !available(app) || !allowed(app) || app.ui.fonts.index_job.is_some() || app.ui.fonts.catalog_job.is_some() {
         return;
     }
-    let had = app.ui.dialogs.iter().any(|d| kind_of(&d.fields) == MISSING && d.fields.get("downloadable").and_then(Value::as_array).is_some_and(|a| !a.is_empty()));
+    let had =
+        app.ui.dialogs.iter().any(|d| kind_of(&d.fields) == MISSING && d.fields.get("downloadable").and_then(Value::as_array).is_some_and(|a| !a.is_empty()));
     if had {
         return;
     }
@@ -789,9 +812,13 @@ fn ask_index(app: &mut PhotocraftApp) {
 
 fn missing_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
-    let missing: Vec<String> = f.get("missing").and_then(Value::as_array).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect()).unwrap_or_default();
-    let downloadable: Vec<String> =
-        f.get("downloadable").and_then(Value::as_array).map(|a| a.iter().filter_map(|d| d.get("missing").and_then(Value::as_str).map(str::to_string)).collect()).unwrap_or_default();
+    let missing: Vec<String> =
+        f.get("missing").and_then(Value::as_array).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect()).unwrap_or_default();
+    let downloadable: Vec<String> = f
+        .get("downloadable")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|d| d.get("missing").and_then(Value::as_str).map(str::to_string)).collect())
+        .unwrap_or_default();
     let mut map: Map<String, Value> = f.get("map").and_then(Value::as_object).cloned().unwrap_or_default();
     if missing.is_empty() {
         ui.label(RichText::new(tl!("No fonts are missing.")).color(t.text_dim));
@@ -812,16 +839,19 @@ fn missing_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, 
                     let shown = if cur.is_empty() { tl!("Don't replace").to_string() } else { cur.clone() };
                     let mut chosen = cur.clone();
                     ui.label(RichText::new(tl!("Replace with")).color(t.text_faint).size(11.5));
-                    egui::ComboBox::from_id_salt(("gf-replace", m)).selected_text(shown).width(160.0).height(320.0).icon(crate::widgets::chevron_icon).show_ui(ui, |ui| {
-                        if ui.selectable_label(chosen.is_empty(), tl!("Don't replace")).clicked() {
-                            chosen.clear();
-                        }
-                        for fam in crate::type_tool::families().iter() {
-                            if ui.selectable_label(*fam == chosen, fam).clicked() {
-                                chosen = fam.clone();
+                    egui::ComboBox::from_id_salt(("gf-replace", m)).selected_text(shown).width(160.0).height(320.0).icon(crate::widgets::chevron_icon).show_ui(
+                        ui,
+                        |ui| {
+                            if ui.selectable_label(chosen.is_empty(), tl!("Don't replace")).clicked() {
+                                chosen.clear();
                             }
-                        }
-                    });
+                            for fam in crate::type_tool::families().iter() {
+                                if ui.selectable_label(*fam == chosen, fam).clicked() {
+                                    chosen = fam.clone();
+                                }
+                            }
+                        },
+                    );
                     if chosen != cur {
                         if chosen.is_empty() {
                             map.remove(m);
@@ -834,6 +864,15 @@ fn missing_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, 
             }
         });
         download_row(app, ui, &t, f, !downloadable.is_empty());
+        // The user's own font files (the only way to get a font in the browser).
+        ui.add_space(8.0);
+        if crate::widgets::secondary_button(ui, tl!("Load Fonts…"), 120.0).clicked()
+            && let Err(e) = crate::menus::invoke(app, ui.ctx(), "type.loadFonts", json!({}))
+            && e != crate::file_dialog::CANCELLED
+        {
+            f.insert("message".into(), json!(e));
+            f.insert("error".into(), json!(true));
+        }
     }
     f.insert("map".into(), Value::Object(map));
     let msg = f.get("message").and_then(Value::as_str).unwrap_or("");
