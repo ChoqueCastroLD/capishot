@@ -1318,6 +1318,81 @@ mod tests {
         assert_eq!(app.session.active().unwrap().path.as_deref(), Some("out/result.psd"));
     }
 
+    /// An app with the real importer/exporter and writer whose Save dialogs answer `answers`.
+    fn disk_app(answers: Vec<Option<crate::file_dialog::FileDialogAnswer>>) -> PhotocraftApp {
+        let services = crate::Services {
+            import: Some(Box::new(|name, bytes, depth| {
+                photocraft_io::import_with_svg_group_depth(name, bytes, depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
+            })),
+            export: Some(Box::new(|doc, path, _| {
+                photocraft_io::export(doc, path, &Default::default()).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
+            })),
+            write: Some(Box::new(|path, bytes| std::fs::write(path, bytes).map_err(|e| e.to_string()))),
+            file_dialog: Some(crate::file_dialog::fake(answers).0),
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        app.background_jobs = false;
+        app
+    }
+
+    /// Records Invert + File › Save on the file `a`, then plays it on the file `b` (given a
+    /// new layer first when `layered`). Returns the played result and whether `b` / `a`
+    /// changed on disk.
+    fn record_save_on_a_play_on_b(ext: &str, layered: bool) -> (Value, bool, bool) {
+        use crate::file_dialog::FileDialogAnswer::SaveTo;
+        let dir = std::env::temp_dir().join(format!("photocraft-rec-save-{ext}-{layered}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = |n: &str| dir.join(format!("{n}.{ext}")).to_string_lossy().into_owned();
+        let (a, b) = (path("a"), path("b"));
+        // The dialog confirms the suggested name, which is the document's own file.
+        let mut app = disk_app(vec![Some(SaveTo(a.clone())), Some(SaveTo(a.clone()))]);
+        let ctx = egui::Context::default();
+        for p in [&a, &b] {
+            app.run("file.new", json!({"width": 16, "height": 16})).unwrap();
+            app.save_as(Some(p.clone())).unwrap();
+        }
+        let (before_a, before_b) = (std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
+        app.open_path(&a).unwrap();
+        app.run("actions.record", json!({})).unwrap();
+        app.run("image.adjustments.invert", json!({})).unwrap();
+        crate::menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+        app.poll_file_dialog(&ctx, None);
+        app.run("actions.stop", json!({})).unwrap();
+        std::fs::write(&a, &before_a).unwrap();
+        app.open_path(&b).unwrap();
+        if layered {
+            app.run("layer.new.layer", json!({})).unwrap();
+        }
+        let played = app.run("actions.play", json!({"action": 0})).unwrap();
+        let r = (played, std::fs::read(&b).unwrap() != before_b, std::fs::read(&a).unwrap() != before_a);
+        let _ = std::fs::remove_dir_all(&dir);
+        r
+    }
+
+    #[test]
+    fn recorded_save_overwrites_the_layered_file_the_action_is_played_on() {
+        let (played, b_changed, a_changed) = record_save_on_a_play_on_b("psd", false);
+        assert!(played.get("failed").is_none(), "{played}");
+        assert!(b_changed && !a_changed);
+    }
+
+    #[test]
+    fn recorded_save_overwrites_the_flat_file_the_action_is_played_on() {
+        let (played, b_changed, a_changed) = record_save_on_a_play_on_b("png", false);
+        assert!(played.get("failed").is_none(), "{played}");
+        assert!(b_changed, "Save did not overwrite the file the action was played on");
+        assert!(!a_changed, "Save wrote the file the action was recorded on");
+    }
+
+    #[test]
+    fn recorded_save_never_flattens_layers_over_a_flat_file() {
+        // The played-on document has layers its PNG can't keep: the step fails, nothing is written (#3806).
+        let (played, b_changed, a_changed) = record_save_on_a_play_on_b("png", true);
+        assert!(played.get("failed").is_some(), "{played}");
+        assert!(!b_changed && !a_changed);
+    }
+
     #[test]
     fn set_folders_group_actions_and_collapse() {
         use egui_kittest::{Harness, kittest::Queryable};
