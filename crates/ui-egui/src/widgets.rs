@@ -589,7 +589,11 @@ fn value_field_box(
         let v = (v * 1e4).round() / 1e4;
         // `f32::clamp` panics on a reversed or NaN range, which `DragValue::range` accepts.
         *value = if lo <= hi { v.clamp(lo, hi) } else { v };
-        ui.memory_mut(|m| m.request_focus(resp.id));
+        // Only take focus back after a typed sum gave it up: re-requesting it while held resets
+        // the field's arrow-key filter next frame, and a held arrow then moves focus away (#5474).
+        if !ui.memory(|m| m.has_focus(resp.id)) {
+            ui.memory_mut(|m| m.request_focus(resp.id));
+        }
         // The text stays selected, as in Photoshop: typing after a step replaces the value.
         crate::field_tab::select_all(ui.ctx(), resp.id, &if fine { fmt_num2(f64::from(*value)) } else { fmt_num(f64::from(*value)) });
         resp.mark_changed();
@@ -2004,6 +2008,30 @@ mod tests {
         h.run();
         assert_eq!(press(&mut h, Modifiers::NONE, Key::ArrowUp), 11.0);
         assert_eq!(press(&mut h, Modifiers::NONE, Key::ArrowDown), 10.0, "the field keeps focus");
+    }
+
+    /// #5474: a held arrow repeats on consecutive frames; every repeat steps the focused field
+    /// and none of them moves focus to the field above.
+    #[test]
+    fn held_arrow_keeps_stepping_the_focused_field() {
+        let mut h = Harness::new_ui_state(
+            |ui, s: &mut (f32, f32)| {
+                super::value_field(ui, &mut s.0, 0.0..=1000.0, "", 80.0);
+                super::value_field(ui, &mut s.1, 0.0..=1000.0, "", 80.0);
+            },
+            (10.0, 59.0),
+        );
+        h.run();
+        h.get_all_by_role(egui::accesskit::Role::SpinButton).nth(1).expect("second field").click();
+        h.run();
+        // Held down: key-down repeats on consecutive frames, no key-up in between.
+        for repeat in [false, true, true, true, true, true] {
+            h.event(egui::Event::Key { key: Key::ArrowUp, physical_key: None, pressed: true, repeat, modifiers: Modifiers::NONE });
+            h.step();
+        }
+        h.event(egui::Event::Key { key: Key::ArrowUp, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE });
+        h.run();
+        assert_eq!(*h.state(), (10.0, 65.0));
     }
 
     #[test]
