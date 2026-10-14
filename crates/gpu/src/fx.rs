@@ -203,6 +203,11 @@ impl B {
         self.fields.push((kind, reach_for(width)));
         In::Field(kind)
     }
+    /// A chiselled bevel's inside and outside fields, always asked for together ([`bevel_fields`]
+    /// computes them as one).
+    fn bevel_fields(&mut self, width: f32) -> [In; 2] {
+        [FieldKind::BevelInside, FieldKind::BevelOutside].map(|k| self.field(k, width))
+    }
     /// `Map::shifted` by whole pixels (`invert`: of `1 - a`); identity shifts of the plain map
     /// are skipped.
     fn shift(&mut self, src: In, dx: f32, dy: f32, outside: f32, invert: bool) -> In {
@@ -374,8 +379,7 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
             let mut h = if bv.technique == BevelTechnique::Smooth {
                 b.conv(In::Shape, photocraft_compose::effects::tent_kernel(g.width))
             } else {
-                let din = b.field(FieldKind::BevelInside, size);
-                let dout = b.field(FieldKind::BevelOutside, size);
+                let [din, dout] = b.bevel_fields(size);
                 let soft = g.chisel_soft > 0.0;
                 let h = b.push(stage(Kernel::MBevelH, Some(din), Some(dout), [paint(g.paint), size, f32::from(u8::from(soft)), 0.0], 0));
                 // As `effects::bevel_height`: only emboss styles blur a Chisel Soft ramp.
@@ -542,35 +546,51 @@ fn threaded_inside(kind: FieldKind) -> bool {
 /// fields run on all threads inside `distance_field`, from one window. That is also the window the CPU
 /// compositor computes them from, so a rebuilt field is exactly the one it gives.
 fn field_banded(kind: FieldKind, reach: i32, shape: &[f32], region: Rect, out: Rect, halo: i32) -> Vec<f32> {
-    if threaded_inside(kind) {
-        let win = out.inflate(halo).intersect(&region);
-        if win.is_empty() {
-            return Vec::new();
-        }
-        let f = photocraft_compose::effects::distance_field(kind, crop(shape, region, win), win.width() as usize, win.height() as usize, reach as f32);
-        return if win == out { f } else { crop(&f, win, out) };
-    }
-    let parts = par_map(bands(out, BAND.max(halo)), |band| {
-        let win = band.inflate(halo).intersect(&region);
-        let f = photocraft_compose::effects::distance_field(kind, crop(shape, region, win), win.width() as usize, win.height() as usize, reach as f32);
-        crop(&f, win, band)
+    let [f] = fields_in_windows(threaded_inside(kind), shape, region, out, halo, |s, w, h| {
+        [photocraft_compose::effects::distance_field(kind, s, w, h, reach as f32)]
     });
-    parts.concat()
+    f
 }
 
-/// [`field`] of both bevel fields over the same `out`, `[BevelInside, BevelOutside]`: one window,
-/// whose sharp edges are found once instead of once per field.
+/// [`field`] of both bevel fields over the same `out`, `[BevelInside, BevelOutside]`, with the
+/// sharp edges of each window found once (the two kinds have the same radius and threading).
 pub(crate) fn bevel_fields(reach: i32, shape: &[f32], region: Rect, out: Rect) -> [Vec<f32>; 2] {
-    let [inside, outside] = [FieldKind::BevelInside, FieldKind::BevelOutside];
-    if !threaded_inside(inside) {
-        return [inside, outside].map(|k| field(k, reach, shape, region, out));
+    let kind = FieldKind::BevelInside;
+    fields_in_windows(threaded_inside(kind), shape, region, out, field_radius(kind, reach) + 1, |s, w, h| {
+        photocraft_compose::effects::bevel_distance_fields(s, w, h, reach as f32)
+    })
+}
+
+/// The fields `compute` gives for a `w × h` window of the region-sized `shape`, over `out` (inside
+/// `region`), each window grown by `halo`: `out` as one window when `whole` (the field spreads over
+/// threads itself), else bands of it in parallel.
+fn fields_in_windows<const N: usize>(
+    whole: bool,
+    shape: &[f32],
+    region: Rect,
+    out: Rect,
+    halo: i32,
+    compute: impl Fn(Vec<f32>, usize, usize) -> [Vec<f32>; N] + Sync + Send,
+) -> [Vec<f32>; N] {
+    let part = |r: Rect| -> [Vec<f32>; N] {
+        let win = r.inflate(halo).intersect(&region);
+        if win.is_empty() {
+            return std::array::from_fn(|_| Vec::new());
+        }
+        let f = compute(crop(shape, region, win), win.width() as usize, win.height() as usize);
+        if win == r { f } else { f.map(|f| crop(&f, win, r)) }
+    };
+    if whole {
+        return part(out);
     }
-    let win = out.inflate(field_radius(inside, reach) + 1).intersect(&region);
-    if win.is_empty() {
-        return [Vec::new(), Vec::new()];
-    }
-    let f = photocraft_compose::effects::bevel_distance_fields(crop(shape, region, win), win.width() as usize, win.height() as usize, reach as f32);
-    if win == out { f } else { f.map(|f| crop(&f, win, out)) }
+    let parts = par_map(bands(out, BAND.max(halo)), part);
+    std::array::from_fn(|k| {
+        let mut f = Vec::with_capacity(parts.iter().map(|p| p[k].len()).sum());
+        for p in &parts {
+            f.extend_from_slice(&p[k]);
+        }
+        f
+    })
 }
 
 /// The layer's shape (`compose::layer_shape`) over `r`, in parallel bands.
@@ -877,6 +897,16 @@ mod tests {
                 let [inside, outside] = bevel_fields(reach, &shape, region, out);
                 assert_eq!(bits(&inside), bits(&field(FieldKind::BevelInside, reach, &shape, region, out)), "inside, reach {reach}, {out:?}");
                 assert_eq!(bits(&outside), bits(&field(FieldKind::BevelOutside, reach, &shape, region, out)), "outside, reach {reach}, {out:?}");
+                // The banded path (wasm) pairs them per band the same way.
+                let halo = field_radius(FieldKind::BevelInside, reach) + 1;
+                let banded =
+                    fields_in_windows(false, &shape, region, out, halo, |s, w, h| photocraft_compose::effects::bevel_distance_fields(s, w, h, reach as f32));
+                for (k, kind) in [FieldKind::BevelInside, FieldKind::BevelOutside].into_iter().enumerate() {
+                    let [one] = fields_in_windows(false, &shape, region, out, halo, |s, w, h| {
+                        [photocraft_compose::effects::distance_field(kind, s, w, h, reach as f32)]
+                    });
+                    assert_eq!(bits(&banded[k]), bits(&one), "banded {kind:?}, reach {reach}, {out:?}");
+                }
             }
         }
     }
