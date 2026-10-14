@@ -244,13 +244,47 @@ pub(crate) fn marquee_preview_px(o: &crate::state::ToolOptions, d: &Drag, zoom: 
     }
     let last = d.points.last().map_or(d.start, |p| [p[0], p[1]]);
     let (a, b) = marquee_corners(o, d, last);
-    let r = marquee_px(a, b);
+    let mut r = marquee_px(a, b);
+    if marquee_is_square(o, d) {
+        r = square_px(r, d.start, last);
+    }
     (r[2] > r[0] && r[3] > r[1]).then_some(r)
 }
 
 /// The pixel rectangle `[x0, y0, x1, y1]` a marquee between two corners selects.
 pub fn marquee_px(a: [f64; 2], b: [f64; 2]) -> [f64; 4] {
     [a[0].min(b[0]).floor(), a[1].min(b[1]).floor(), a[0].max(b[0]).ceil(), a[1].max(b[1]).ceil()]
+}
+
+/// Whether the marquee drag `d` is constrained to a square (or circle): ⇧ during the drag with
+/// the Normal style, or a Fixed Ratio of 1:1. Mirrors the branches of `chrome_ui::marquee_end`.
+fn marquee_is_square(o: &crate::state::ToolOptions, d: &Drag) -> bool {
+    let (w, h) = (f64::from(o.marquee_width), f64::from(o.marquee_height));
+    match o.marquee_style.as_str() {
+        "fixedSize" => false,
+        "fixedRatio" if w > 0.0 && h > 0.0 => w == h,
+        _ => d.marquee_mods().0,
+    }
+}
+
+/// A constrained square `r` (`marquee_px` of its corners) with equal sides on whole pixels.
+///
+/// The square is built in continuous coordinates, and snapping each axis to the pixel grid on
+/// its own (floor the near edge, ceil the far one) made one side a pixel longer than the other
+/// whenever the press point sat between pixels: a ⇧ drag read 101 × 102 (#5472). The shorter
+/// side grows to the longer one, away from the press point (`start`, towards `end`), so the
+/// square still covers every pixel the drag touched.
+pub fn square_px(r: [f64; 4], start: [f64; 2], end: [f64; 2]) -> [f64; 4] {
+    let [x0, y0, x1, y1] = r;
+    let (w, h) = (x1 - x0, y1 - y0);
+    let n = w.max(h);
+    let grow = |lo: f64, hi: f64, extent: f64, from: f64, to: f64| {
+        let d = (n - extent).max(0.0);
+        if to < from { (lo - d, hi) } else { (lo, hi + d) }
+    };
+    let (x0, x1) = grow(x0, x1, w, start[0], end[0]);
+    let (y0, y1) = grow(y0, y1, h, start[1], end[1]);
+    [x0, y0, x1, y1]
 }
 
 /// The one-pixel line `[x0, y0, x1, y1]` a Single Row (Single Column) Marquee at `p` selects: the
@@ -5935,6 +5969,22 @@ mod tabs_tests;
 
 #[cfg(test)]
 mod tests {
+    /// #5472: a ⇧ square pressed between pixels snapped to 101 × 102; the short side grows to
+    /// match, on the side the drag points to.
+    #[test]
+    fn square_px_equalises_the_sides_away_from_the_press_point() {
+        use super::{marquee_px, square_px};
+        // Down-right drag: the continuous square (50.3, 50.7)..(150.8, 151.2) snaps unevenly.
+        let r = marquee_px([50.3, 50.7], [150.8, 151.2]);
+        assert_eq!(r, [50.0, 50.0, 151.0, 152.0], "uneven before the fix");
+        assert_eq!(square_px(r, [50.3, 50.7], [150.8, 90.0]), [50.0, 50.0, 152.0, 152.0]);
+        // Up-left drag: the short side grows towards lower coordinates.
+        let r = marquee_px([150.8, 151.2], [50.3, 50.7]);
+        assert_eq!(square_px(r, [150.8, 151.2], [60.0, 50.7]), [49.0, 50.0, 151.0, 152.0]);
+        // Already square: unchanged.
+        assert_eq!(square_px([10.0, 20.0, 30.0, 40.0], [10.0, 20.0], [30.0, 40.0]), [10.0, 20.0, 30.0, 40.0]);
+    }
+
     #[test]
     fn display_image_matches_egui_unmultiplied_conversion() {
         // Several parallel pieces and a ragged one; translucent, out-of-range and NaN values.
