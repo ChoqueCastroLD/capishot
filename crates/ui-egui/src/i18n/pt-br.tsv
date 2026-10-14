@@ -3935,3 +3935,4 @@ layerLabel	No Color	Sem cor
 	Sent to {printer}	Enviado para {printer}
 	set in Print Settings…	definido nas configurações de impressão…
 	ICO is limited to 256 × 256 pixels	ICO é limitado a 256 × 256 pixels
+	Open color-less EXR as ACEScg	Abrir EXR sem espaço de cor como ACEScg

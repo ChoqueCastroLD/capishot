@@ -3844,3 +3844,4 @@ curves	Smooth	Згладити
 	Sent to {printer}	Надіслано на {printer}
 	set in Print Settings…	задається в параметрах друку…
 	ICO is limited to 256 × 256 pixels	ICO обмежено розміром 256 × 256 пікселів
+	Open color-less EXR as ACEScg	Відкривати EXR без колірного профілю як ACEScg

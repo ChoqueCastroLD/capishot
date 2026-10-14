@@ -2740,3 +2740,4 @@ curves	Smooth	平滑
 	Sent to {printer}	已傳送至 {printer}
 	set in Print Settings…	在列印設定中設定…
 	ICO is limited to 256 × 256 pixels	ICO 最大為 256 × 256 像素
+	Open color-less EXR as ACEScg	將無色彩空間資訊的 EXR 以 ACEScg 開啟

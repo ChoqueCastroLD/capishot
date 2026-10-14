@@ -3743,3 +3743,4 @@ curves	Smooth	Wygładź
 	Sent to {printer}	Wysłano do {printer}
 	set in Print Settings…	ustawiane w ustawieniach druku…
 	ICO is limited to 256 × 256 pixels	ICO jest ograniczony do 256 × 256 pikseli
+	Open color-less EXR as ACEScg	Otwieraj EXR bez profilu koloru jako ACEScg

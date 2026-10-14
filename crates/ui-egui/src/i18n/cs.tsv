@@ -3753,3 +3753,4 @@ navigator	Zoom	Zvětšení
 	Sent to {printer}	Odesláno do {printer}
 	set in Print Settings…	nastavuje se v nastavení tisku…
 	ICO is limited to 256 × 256 pixels	ICO je omezen na 256 × 256 pixelů
+	Open color-less EXR as ACEScg	Otevřít EXR bez údaje o barevném prostoru jako ACEScg
