@@ -2737,3 +2737,24 @@ fn shape_layer_bounds_includes_vector_bounds_clipped_to_canvas_and_preserves_eff
     assert!(!b_fx.is_empty());
     assert!(b_fx.contains_rect(&b));
 }
+
+// A pass-through group with an adjustment layer reaches the layers beneath, unless the group is
+// the base of a clipping group: then Photoshop renders it isolated, and an adjustment with no
+// content of its own in the group changes nothing (psd-tools passthrough_clipping_mask_adjustment).
+#[test]
+fn a_pass_through_clipping_base_keeps_its_adjustments_inside() {
+    let base = || {
+        let mut d = doc_white(4, 4);
+        let group = Layer::group("group", vec![Layer::new("invert", LayerContent::Adjustment(Adjustment::Invert))]);
+        d.layers.push(group);
+        d
+    };
+    // Unclipped: the invert reaches the white background.
+    assert!(close4(px(&base(), 1, 1), [0.0, 0.0, 0.0, 1.0]), "{:?}", px(&base(), 1, 1));
+    // With a layer clipped to the group: the background stays white.
+    let mut d = base();
+    let mut clip = Layer::raster("clipped", PixelFormat::RGBA8);
+    clip.clipped = true;
+    d.layers.push(clip);
+    assert!(close4(px(&d, 1, 1), [1.0, 1.0, 1.0, 1.0]), "{:?}", px(&d, 1, 1));
+}

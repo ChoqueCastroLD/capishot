@@ -2588,3 +2588,22 @@ fn the_focused_view_stays_resident_after_a_full_refresh() {
         assert!(worst_diff(&cpu.px, &out).0 <= TOL);
     }
 }
+
+// A pass-through group holding an adjustment renders isolated when layers clip to it, on the GPU
+// as on the CPU (psd-tools passthrough_clipping_mask_adjustment).
+#[test]
+fn pass_through_clipping_base_with_an_adjustment() {
+    let Some(mut g) = gpu() else { return };
+    let mut d = base_doc(32, 24);
+    d.layers.push(noise_layer("mid", PixelFormat::RGBA8, Rect::new(0, 0, 32, 24), 41, 1.0));
+    let mut grp = Layer::group(
+        "g",
+        vec![noise_layer("in", PixelFormat::RGBA8, Rect::new(4, 4, 20, 20), 42, 0.5), Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert))],
+    );
+    grp.blend = BlendMode::PassThrough;
+    d.layers.push(grp);
+    let mut clip = noise_layer("clip", PixelFormat::RGBA8, Rect::new(8, 0, 28, 16), 43, 0.3);
+    clip.clipped = true;
+    d.layers.push(clip);
+    check(&mut g, &d, "pass-through clipping base with an adjustment");
+}
