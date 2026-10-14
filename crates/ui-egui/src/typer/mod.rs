@@ -23,6 +23,7 @@
 pub(crate) mod folder_editor;
 mod font_label;
 pub mod keymap;
+pub mod pages;
 mod preview;
 pub mod script_editor;
 mod settings;
@@ -48,8 +49,12 @@ use crate::theme::Tokens;
 pub struct TyperUi {
     /// Collapsed style folders by id (`""` = Unsorted).
     pub collapsed: Vec<String>,
-    /// Height of the script editor in points; the styles list gets the rest of the panel.
-    pub script_height: f32,
+    /// The script's share of the room the script and the style list split (0.15–0.85; drag the
+    /// Styles bar between them). A share, so both grow with the dock group.
+    pub script_share: f32,
+    /// Blocks folded to their bar: `"preview"` (the line drawn in its font), `"script"`,
+    /// `"styles"`. The open ones take the room.
+    pub folded: Vec<String>,
     /// The style editor, when open.
     pub style_editor: Option<style_editor::StyleDraft>,
     /// The folder editor, when open.
@@ -62,19 +67,24 @@ pub struct TyperUi {
     pub clipboard: Option<Value>,
     /// The panel's last error, shown under the preview until the next successful action.
     pub message: String,
+    /// Page files picked in the browser, in memory (see [`pages`]); never saved.
+    #[serde(skip)]
+    pub page_files: pages::PageFiles,
 }
 
 impl Default for TyperUi {
     fn default() -> Self {
         Self {
             collapsed: Vec::new(),
-            script_height: 130.0,
+            script_share: 0.5,
+            folded: Vec::new(),
             style_editor: None,
             folder_editor: None,
             settings: None,
             confirm: None,
             clipboard: None,
             message: String::new(),
+            page_files: pages::PageFiles::default(),
         }
     }
 }
@@ -176,36 +186,74 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             });
         }
         crate::widgets::hairline(ui);
-        // The script gets its height; the styles list and the footer take the rest.
-        // What the script and the styles list share once the toolbar, splitter and footer
-        // (about 90 points with spacing) have theirs, so the footer stays in a short group.
-        let lists = (full.bottom() - ui.cursor().top() - 90.0).max(80.0);
-        let max_script = (lists - 50.0).max(40.0);
-        let script_h = app.ui.typer.script_height.clamp(40.0, max_script);
+        // What the script and the styles list share once the script's toolbar, the Styles bar
+        // and the footer (about 90 points with spacing) have theirs, so the footer stays in a
+        // short group. A folded block gives its share to the other.
+        let lists = (full.bottom() - ui.cursor().top() - 90.0).max(60.0);
+        let (script_open, styles_open) = (!is_folded(app, "script"), !is_folded(app, "styles"));
+        let script_h = match (script_open, styles_open) {
+            (true, true) => (lists * app.ui.typer.script_share.clamp(0.15, 0.85)).clamp(36.0, (lists - 30.0).max(36.0)),
+            (true, false) => lists,
+            _ => 0.0,
+        };
         script_editor::show(app, ui, script_h);
-        splitter(app, ui, max_script);
-        let styles_h = (lists - script_h).max(30.0);
-        styles::show(app, ui, styles_h);
+        styles_bar(app, ui, lists, script_open && styles_open);
+        if styles_open {
+            let styles_h = if script_open { (lists - script_h).max(30.0) } else { lists };
+            styles::show(app, ui, styles_h);
+        }
         footer_row(app, ui);
     });
 }
 
-/// The drag handle between the script and the styles.
-fn splitter(app: &mut PhotocraftApp, ui: &mut egui::Ui, max: f32) {
+/// Is the panel block `block` (`"preview"`, `"script"`, `"styles"`) folded?
+pub(crate) fn is_folded(app: &PhotocraftApp, block: &str) -> bool {
+    app.ui.typer.folded.iter().any(|b| b == block)
+}
+
+/// Fold or unfold a panel block.
+pub(crate) fn toggle_fold(app: &mut PhotocraftApp, block: &str) {
+    if is_folded(app, block) {
+        app.ui.typer.folded.retain(|b| b != block);
+    } else {
+        app.ui.typer.folded.push(block.to_string());
+    }
+}
+
+/// The chevron that folds a block to its bar (and unfolds it).
+pub(crate) fn fold_button(app: &mut PhotocraftApp, ui: &mut egui::Ui, block: &str) {
+    let folded = is_folded(app, block);
+    let (icon, tip) = if folded { ("chevron-right", tl!("Expand")) } else { ("chevron-down", tl!("Collapse")) };
+    if crate::icons::button_with_icon_size(ui, icon, 18.0, 13.0, false, tip).clicked() {
+        toggle_fold(app, block);
+    }
+}
+
+/// The Styles bar between the script and the styles: its chevron folds the style list, its
+/// label counts the styles, and dragging it (with both blocks open) moves the split.
+fn styles_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, lists: f32, draggable: bool) {
     let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::drag());
-    let hot = resp.hovered() || resp.dragged();
-    if hot {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-    }
-    let c = rect.center();
-    ui.painter().line_segment([egui::pos2(c.x - 14.0, c.y), egui::pos2(c.x + 14.0, c.y)], Stroke::new(2.0, if hot { t.accent } else { t.separator }));
-    if resp.dragged() {
-        let h = app.ui.typer.script_height + resp.drag_delta().y;
-        if h.is_finite() {
-            app.ui.typer.script_height = h.clamp(60.0, max.max(60.0));
+    ui.horizontal(|ui| {
+        fold_button(app, ui, "styles");
+        let n = app.session.typer.state.library.styles.len();
+        ui.label(RichText::new(format!("{} ({n})", tl!("Styles"))).color(t.text_dim).size(11.5));
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), if draggable { Sense::drag() } else { Sense::hover() });
+        if !draggable {
+            return;
         }
-    }
+        let hot = resp.hovered() || resp.dragged();
+        if hot {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+        let c = rect.center();
+        ui.painter().line_segment([egui::pos2(c.x - 14.0, c.y), egui::pos2(c.x + 14.0, c.y)], Stroke::new(2.0, if hot { t.accent } else { t.separator }));
+        if resp.dragged() && lists > 1.0 {
+            let share = app.ui.typer.script_share.clamp(0.15, 0.85) + resp.drag_delta().y / lists;
+            if share.is_finite() {
+                app.ui.typer.script_share = share.clamp(0.15, 0.85);
+            }
+        }
+    });
 }
 
 /// Add folder / style, import, multi-bubble, settings.
@@ -222,6 +270,7 @@ fn footer_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         if crate::icons::button_with_icon_size(ui, "upload", 24.0, 15.0, false, tl!("Import styles or settings…")).clicked() {
             settings::import(app);
         }
+        pages::footer(app, ui);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if crate::icons::button_with_icon_size(ui, "settings", 24.0, 15.0, app.ui.typer.settings.is_some(), tl!("TypeR Settings")).clicked() {
                 settings::open(app);
@@ -420,6 +469,7 @@ pub(crate) fn workspace_text(typer: &TyperSession) -> String {
 /// changes and no button is held. Only the workspace's hash is kept between checks.
 pub fn persist(app: &mut PhotocraftApp, ctx: &egui::Context) {
     capture_bubbles(app, ctx);
+    pages::sync(app, ctx);
     let id = egui::Id::new("typer-persist");
     let mut st = ctx.data(|d| d.get_temp::<PersistState>(id)).unwrap_or_default();
     let now = ctx.input(|i| i.time);

@@ -64,6 +64,15 @@ fn page_files_follow_the_cursor() {
     // The last line of page 1 now blocks a paste advance.
     s.execute("typer.line.set", json!({"index": 4})).unwrap();
     assert_eq!(s.execute("typer.line.next", json!({"add": true})).unwrap()["moved"], false);
+    let r = s.execute("typer.images.opened", json!({"image": "ch12_002.psd"})).unwrap();
+    assert_eq!((r["lastOpenedImage"].as_str(), r["pageFiles"].as_u64()), (Some("ch12_002.psd"), Some(2)));
+    assert!(s.execute("typer.images.opened", json!({"image": "other.psd"})).is_err(), "only a page file");
+    assert!(s.execute("typer.images.opened", json!({"image": 3})).is_err());
+    assert!(s.execute("typer.images.opened", json!({})).is_err());
+    assert_eq!(s.execute("typer.images.opened", json!({"image": null})).unwrap()["lastOpenedImage"], Value::Null);
+    s.execute("typer.images.opened", json!({"image": "ch12_001.psd"})).unwrap();
+    s.execute("typer.images.set", json!({"images": ["a1.psd"]})).unwrap();
+    assert_eq!(s.typer.state.last_opened_image, None, "new page files open afresh");
     s.execute("typer.images.clear", json!({})).unwrap();
     assert_eq!(s.execute("typer.state", json!({})).unwrap()["image"], Value::Null);
 }

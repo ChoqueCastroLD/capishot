@@ -4102,3 +4102,21 @@ layerLabel	No Color	Sem cor
 	Load the font with Type › Load Fonts…	Carregue a fonte com Tipo › Carregar fontes…
 	Reading the clipboard…	Lendo a área de transferência…
 	Multi-bubble mode stores one selection at a time: release Shift and select the bubbles one by one.	O modo multibalão guarda uma seleção por vez: solte o Shift e selecione os balões um a um.
+	Typesetting	Letreiramento
+	A page with unsaved changes asks first: Save, Don't Save or Cancel.	Uma página com alterações não salvas pergunta antes: Salvar, Não salvar ou Cancelar.
+	Choose page files…	Escolher arquivos de página…
+	Choose the chapter's page files (PSD, PNG, JPG)…	Escolher os arquivos de página do capítulo (PSD, PNG, JPG)…
+	Close the previous page's file when the next page opens	Fechar o arquivo da página anterior ao abrir a próxima
+	Extra page marker words	Palavras extras de marcador de página
+	No file for this page	Nenhum arquivo para esta página
+	No page files were chosen: pick the chapter's PSD, PNG or JPG files.	Nenhum arquivo de página foi escolhido: escolha os PSD, PNG ou JPG do capítulo.
+	Not loaded: choose the page files again	Não carregados: escolha os arquivos de página de novo
+	Open this page's file	Abrir o arquivo desta página
+	Page is always a marker word. Separate words with ; (case, accents and a final dot don't matter): Página 12, Pág. 12 and Pag 12 all mark page 12.	Page é sempre uma palavra de marcador. Separe as palavras com ; (maiúsculas, acentos e o ponto final não importam): Página 12, Pág. 12 e Pag 12 marcam a página 12.
+	Script	Roteiro
+	Some page files are too big to keep	Alguns arquivos de página são grandes demais para manter
+	Stop syncing page files	Parar de sincronizar arquivos de página
+	This page's file	Arquivo desta página
+	the browser keeps up to 1 GB of pages. Choose the remaining pages again when you get to them.	o navegador mantém até 1 GB de páginas. Escolha as páginas restantes de novo quando chegar a elas.
+	this page file isn't loaded any more: choose the page files again	este arquivo de página não está mais carregado: escolha os arquivos de página de novo
+@plural	{n} page|{n} pages	{n} página|{n} páginas

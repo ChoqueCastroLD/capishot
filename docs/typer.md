@@ -5,7 +5,8 @@ line by line with styled text. Capishot ports it natively. The full plan (featur
 work packages) is `capishot-typer-plan.md`, kept outside the repo; this page is the map of what is in
 the tree.
 
-Status (2026-10-14): **WP0, WP1 and WP3 done.** The script, cursor, page files, style library,
+Status (2026-10-14): **WP0, WP1 and WP3 done; WP2-B in progress** (Spanish/Portuguese page
+markers, page files and sync, Typesetting workspace). The script, cursor, page files, style library,
 TypeR JSON exchange and settings work, as commands, and so does the core typesetting loop: paste,
 apply, align, resize, multi-bubble, bubble detection. The TypeR panel (Window › TypeR) drives it.
 Line shaping (WP4) is still to come; `typer.shapeText` is a registered stub.
@@ -28,7 +29,8 @@ Line shaping (WP4) is still to come; `typer.shapeText` is a registered stub.
 ```text
 crates/typer (photocraft-typer, L2: doc, color, geom, algo, serde; no egui, no I/O, wasm-clean)
   id.rs        Id (string or number, TypeR's validId), num() (whole numbers written as 23, not 23.0)
-  pages.rs     parse_page_marker (3.0 strict rule), image_page_number / image_for_page (N4), natural_cmp
+  pages.rs     parse_page_marker (3.0 strict rule), MarkerWords (Capishot: `Página 12`, `Pág. 12`),
+               image_page_number / image_for_page (N4), natural_cmp
   script.rs    Line, parse(text, ParseContext) (S1–S8), line numbering (S3), page_of, next_usable
   markdown.rs  parse_runs (S9), format_selection (Ctrl+B/I toggle, S11), escape
   library.rs   Style (TypeR JSON, whitelisted keys), Folder, Library: normalize, tree, tag_styles
@@ -84,8 +86,9 @@ styleName, page, image, usableLines, lineCount, textScale` (plus `moved`).
 | `typer.script.set` | works | `\r\n` normalized, 8 MB cap |
 | `typer.parseScript` | works | query; `{text}` parses without changing the script |
 | `typer.line.set` / `.next` / `.previous` | works | `next {add:true}` = after a paste: records `usedLineStyles`, stops at the last line of a synced page |
-| `typer.page.next` / `.previous` | works | strict `Page N` markers |
-| `typer.images.set` / `.clear` | works | file names, natural sort, page → file by last digit run, else position |
+| `typer.page.next` / `.previous` | works | strict markers: `Page N`, plus the `pageMarkerWords` (`Página`, `Pág.`) while `extraPageMarkers` is on |
+| `typer.images.set` / `.clear` | works | file names (paths on the desktop), natural sort, page → file by last digit run, else position |
+| `typer.images.opened` | works | the shell opened this page file for the current page (`lastOpenedImage`); page sync opens a page only when it differs |
 | `typer.style.list` / `.select` / `.next` / `.previous` | works | `select {index}` = numpad, within the current folder |
 | `typer.style.nextSizePreset` / `.setSizePreset` / `.setSize` | works | L5; `now` param stamps `edited` (wasm has no clock in the engine) |
 | `typer.style.resolve` | works | the Capishot CharStyle/ParagraphStyle a style applies at the active document's dpi and width |
@@ -162,6 +165,7 @@ dialogs, collapsed folders, splitter).
 | `styles.rs` | Unsorted, then the folder tree (collapsible, bold when it holds the current style); rows with colour swatch (stroke outline), tag chip, the name in its font, size or preset chips, quick −/+ on hover, star for the default style; right-click: edit, apply style, copy / paste / duplicate, tags on/off, default style, delete; folder menu: add style, paste, edit, subfolder, duplicate, export, delete (with or without styles) |
 | `style_editor.rs` | name, folder, tags, tag colour (TypeR's 8 + custom), layer kind (`textType`), font family (installed families listed) and style, size + unit, leading, tracking, H/V scale, baseline shift, kerning, colour, faux bold/italic, caps, underline, strike, ligatures, super/subscript, diacritics (Middle Eastern mode), alignment, hyphenate, hanging punctuation, anti-aliasing, stroke, up to three size presets with default and minimum page widths (auto size by page width), Copy layer style (`psjson::text_props_from` of the active text layer) |
 | `folder_editor.rs` | name, parent (not itself or below), member styles, delete |
+| `pages.rs` | page files (N4/N5): the footer's page-file button and sync chip (dot: green = every file can open, amber = choose again), the picker (desktop paths; browser contents kept in memory per session, 1 GB cap), `sync` (every frame: activate or open the current page's file; auto-close through File › Close, so unsaved pages get the Save / Don't Save / Cancel prompt) |
 | `settings.rs` | General / Text / Behavior (a draft saved with one `typer.settings.set {values}`), Shortcuts (the keymap toggle and table), Data (import with "keep local styles?" on a full import, export all with or without settings, export one folder) |
 | `keymap.rs` | TypeR's shortcut table and the optional TypeR keymap |
 | `font_label.rs` | style names and the preview line rendered by the text engine in the style's font (cached textures), plain text when the family isn't available |
@@ -204,7 +208,21 @@ sends `keepSize`. In multi-bubble mode each new selection (its bounds changed, t
 released, ⇧ not held) is stored with `typer.multiBubble.capture`; `capture_bubbles` reads the
 selection's bounds only when the document's revision moves.
 
-**Not yet:** drag-to-reorder styles and folders, the page-file picker and page sync (N4, WP2-B),
+**Page markers in Spanish and Portuguese.** Besides TypeR's `Page N`, a marker can start with
+any word in Settings › Text › Extra page marker words (`pageMarkerWords`, default `Página; Pág.`):
+case, accents and the abbreviation's dot don't matter (`PÁGINA 3`, `pagina 3`, `Pág.3`, `Pag 3`),
+and TypeR 3.0's whole-line rule still applies (`## Página 3`, `[Pág. 3]`, `Página 3: Título`;
+not `Lee la página 3 ahora`, `Página 0`, `Página 3 notas`). Turning the setting off gives TypeR's
+rule exactly.
+
+**Layout.** Each block folds to its bar (`TyperUi::folded`): the preview's chevron leaves the line
+as one row of text, the script's chevron leaves its toolbar, and the Styles bar (between the
+two, also the splitter) folds the style list. The open blocks take the room; the script and the
+styles split it by a share (`script_share`, 0.5), so both grow with the group. In the dock, TypeR
+gives way last in a short column (`Group::squeezes_last`). **Window › Workspace › Typesetting**
+shows TypeR on top (540 pt until resized), Character and Layers; the other presets hide TypeR.
+
+**Not yet:** drag-to-reorder styles and folders,
 the multi-bubble canvas overlay (numbered outlines) and the Align preview, tabs (N6), TextShapeR
 strip (WP4), UI order/visibility toggles.
 

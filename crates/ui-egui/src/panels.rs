@@ -585,6 +585,7 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         ("Graphic and Web".to_string(), tl!("Graphic and Web")),
                         ("Pixel Art".to_string(), tl!("Pixel Art")),
                         ("Motion".to_string(), tl!("Motion")),
+                        ("Typesetting".to_string(), tl!("Typesetting")),
                     ];
                     // A narrow bar drops what is also in a menu: the theme toggle (Preferences), then search (Edit › Search), and narrows
                     // the switcher (Window › Workspace) before anything runs over.
