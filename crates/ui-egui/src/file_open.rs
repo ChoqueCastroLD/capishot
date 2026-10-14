@@ -175,7 +175,7 @@ impl PhotocraftApp {
                 continue;
             }
             if target == DropTarget::Canvas && !crate::preset_files_ui::is_preset_file(&name) {
-                self.drop_places.push_back(f);
+                self.drop_places.push_back(DropPlace::File(f));
                 continue;
             }
             match self.open_dropped_file(&f, &name, slot) {
@@ -223,11 +223,16 @@ impl PhotocraftApp {
     /// transform is in progress (so several files are placed and transformed one after another).
     pub(crate) fn place_next_dropped(&mut self, ctx: &egui::Context) {
         while self.ui.transform.is_none() {
-            let Some(f) = self.drop_places.pop_front() else { return };
-            let placed = if f.path().is_absolute() {
-                self.run("file.placeEmbedded", serde_json::json!({"path": f.path().to_string_lossy()}))
-            } else {
-                crate::read_dropped(&*f).and_then(|bytes| self.place_bytes(&dropped_name(&f), bytes, None))
+            let Some(next) = self.drop_places.pop_front() else { return };
+            let (name, placed) = match next {
+                DropPlace::File(f) if f.path().is_absolute() => {
+                    (dropped_name(&f), self.run("file.placeEmbedded", serde_json::json!({"path": f.path().to_string_lossy()})))
+                }
+                DropPlace::File(f) => (dropped_name(&f), crate::read_dropped(&*f).and_then(|bytes| self.place_bytes(&dropped_name(&f), bytes, None))),
+                DropPlace::Bytes(name, bytes) => {
+                    let r = self.place_bytes(&name, bytes, None);
+                    (name, r)
+                }
             };
             match placed {
                 Ok(_) => {
@@ -235,9 +240,28 @@ impl PhotocraftApp {
                         self.ui.status = e;
                     }
                 }
-                Err(e) => self.failed(crate::i18n::fmt(tl!("Couldn't place {name}: {error}"), &[("name", &dropped_name(&f)), ("error", &e)])),
+                Err(e) => self.failed(crate::i18n::fmt(tl!("Couldn't place {name}: {error}"), &[("name", &name), ("error", &e)])),
             }
         }
+    }
+
+    /// Does a drop at `at` land on the canvas (and so place its files rather than open them)?
+    /// For shells that read dropped files themselves (the web, where the bytes arrive later).
+    pub fn drop_places_on_canvas(&self, ctx: &egui::Context, at: Option<egui::Pos2>) -> bool {
+        self.drop_target(ctx, at) == DropTarget::Canvas
+    }
+
+    /// Place a dropped file's bytes on the active document, like a file dropped on the canvas:
+    /// each placed and Free Transformed in turn ([`Self::drop_places_on_canvas`]). Preset files
+    /// still go to their libraries.
+    pub fn place_dropped_bytes(&mut self, name: String, bytes: Vec<u8>) {
+        if crate::preset_files_ui::is_preset_file(&name) || self.session.active().is_none() {
+            if let Err(e) = self.open_bytes(&name, &bytes) {
+                self.open_failed(&name, &e);
+            }
+            return;
+        }
+        self.drop_places.push_back(DropPlace::Bytes(name, bytes));
     }
 
     /// Place a file's bytes as a smart object layer (File › Place; `linked`: Place Linked, to that
@@ -263,6 +287,13 @@ impl PhotocraftApp {
             }
         }
     }
+}
+
+/// A file dropped on the canvas, waiting to be placed: a dropped file the app reads itself, or
+/// one a shell has read already (the web).
+pub(crate) enum DropPlace {
+    File(egui::DroppedFileHandle),
+    Bytes(String, Vec<u8>),
 }
 
 /// Order names like a file browser does: runs of digits by their value (`File_2` before
