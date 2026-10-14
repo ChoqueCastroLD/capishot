@@ -32,8 +32,13 @@ impl TyperSession {
     }
 
     /// Restore from [`TyperSession::to_json`]. Errors on malformed data; nothing is applied then.
+    /// Workspaces from before tabs (and TypeR storage) get TypeR's tab migration first.
     pub fn from_json(v: &Value) -> Result<TyperSession, String> {
-        let s: TyperSession = serde_json::from_value(v.clone()).map_err(|e| format!("TypeR workspace: {e}"))?;
+        let mut v = v.clone();
+        if let Some(st) = v.get_mut("state").and_then(Value::as_object_mut) {
+            photocraft_typer::state::migrate_tabs(st);
+        }
+        let s: TyperSession = serde_json::from_value(v).map_err(|e| format!("TypeR workspace: {e}"))?;
         Ok(TyperSession { state: s.state.restored(), ..TyperSession::default() })
     }
 }
@@ -48,6 +53,7 @@ mod tests {
         let mut t = TyperSession::default();
         t.state.set_text("Page 1\nhello\nworld").unwrap();
         t.state.next_line(false);
+        t.state.ensure_tabs();
         let back = TyperSession::from_json(&t.to_json()).unwrap();
         assert_eq!(back, t);
         assert_eq!(back.state.current_line().map(|l| l.text.as_str()), Some("world"));

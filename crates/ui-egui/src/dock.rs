@@ -99,6 +99,12 @@ impl Group {
         }
     }
 
+    /// Squeezed only once the other groups above the filler are at their minimum (a short
+    /// column): TypeR's script and style list need the room more than Color or Properties.
+    pub fn squeezes_last(self) -> bool {
+        self == Group::TypeR
+    }
+
     /// The smallest height an expanded group can be dragged or squeezed to.
     pub fn min_height(self) -> f32 {
         match self {
@@ -370,8 +376,13 @@ impl DockLayout {
             }
             let used: f32 = hs.iter().sum::<f32>() + gaps;
             let mut deficit = (used + min_fill - avail).max(0.0);
-            // Squeeze the expanded groups nearest the filler first.
-            for i in (0..f).rev() {
+            // Squeeze the expanded groups nearest the filler first; groups that are only useful
+            // with room (TypeR's script and styles) give way last.
+            let squeeze_order = (0..f)
+                .rev()
+                .filter(|i| shown.get(*i).is_some_and(|g| !g.squeezes_last()))
+                .chain((0..f).rev().filter(|i| shown.get(*i).is_some_and(|g| g.squeezes_last())));
+            for i in squeeze_order {
                 if deficit <= 0.0 {
                     break;
                 }

@@ -202,8 +202,13 @@ fn apply_format(app: &mut PhotocraftApp, ctx: &egui::Context, buf: &mut String, 
 pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, height: f32) {
     let t = Tokens::get(ui.ctx());
     let ctx = ui.ctx().clone();
-    // Toolbar: B / I · import · line count.
+    // Toolbar: fold · B / I · import · line count.
+    let folded = super::is_folded(app, "script");
     ui.horizontal(|ui| {
+        super::fold_button(app, ui, "script");
+        if folded {
+            ui.label(RichText::new(tl!("Script")).color(t.text_dim).size(11.5));
+        }
         if crate::icons::button_with_icon_size(ui, "bold", 22.0, 15.0, false, &format!("{} ({})", tl!("Bold"), crate::shortcuts::pretty("Cmd+B"))).clicked() {
             ctx.data_mut(|d| d.insert_temp(pending_id(), Format::Bold));
         }
@@ -228,6 +233,9 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, height: f32) {
         });
     });
 
+    if folded {
+        return;
+    }
     // The text, taken out of the frame's memory while it is edited (no per-frame copy).
     let mut buf: String = ctx.data_mut(|d| std::mem::take(d.get_temp_mut_or_default::<String>(buffer_id())));
     if buf != app.session.typer.state.text {

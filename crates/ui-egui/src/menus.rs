@@ -151,6 +151,7 @@ fn workspace_name(id: &str) -> Option<&'static str> {
         "graphicAndWeb" => "Graphic and Web",
         "pixelArt" => "Pixel Art",
         "motion" => "Motion",
+        "typesetting" => "Typesetting",
         _ => return None,
     })
 }
@@ -1513,6 +1514,22 @@ pub fn alt_click(id: String, alt: bool) -> String {
     }
 }
 
+/// Window › Workspace › Typesetting (Capishot, for manga typesetting): TypeR on top with most of
+/// the column, then Character and Layers; the other groups hidden. TypeR gives way last in a
+/// short column ([`crate::dock::Group::squeezes_last`]).
+fn typesetting(app: &mut PhotocraftApp) {
+    use crate::dock::Group;
+    let p = &mut app.ui.panels;
+    (p.navigator, p.color, p.history, p.properties) = (false, false, false, false);
+    (p.typer, p.character, p.layers) = (true, true, true);
+    app.ui.dock.move_group(Group::TypeR, Some(Group::Color));
+    app.ui.dock.heights.insert(Group::TypeR, TYPESETTING_TYPER_HEIGHT);
+}
+
+/// TypeR's height in the Typesetting workspace (points, tab strip included) until the user
+/// resizes it: the preview, about ten script lines and ten styles.
+pub const TYPESETTING_TYPER_HEIGHT: f32 = 540.0;
+
 /// Workspace presets (Window → Workspace): which panels are visible.
 pub fn apply_workspace(app: &mut PhotocraftApp) {
     // Saved workspaces (Window › Workspace › New Workspace…) restore their own layout.
@@ -1544,6 +1561,10 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
     p.history = history;
     p.properties = props;
     p.character = app.ui.workspace == "Graphic and Web";
+    p.typer = false;
+    if app.ui.workspace == "Typesetting" {
+        typesetting(app);
+    }
     // Timeline is a floating panel, not a dock group. Showing it does not create or edit
     // a document timeline; changing away from Motion closes it just like its Close button.
     app.ui.timeline.open = app.ui.workspace == "Motion";

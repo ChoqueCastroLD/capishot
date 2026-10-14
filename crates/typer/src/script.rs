@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::Id;
 use crate::library::Library;
-use crate::pages::{js_trim, parse_page_marker};
+use crate::pages::{js_trim, parse_page_marker_with};
 use crate::settings::Settings;
 
 /// One raw line of the script.
@@ -89,6 +89,7 @@ pub fn parse(text: &str, cx: &ParseContext<'_>) -> Vec<Line> {
             }
         }
     }
+    let marker_words = cx.settings.marker_words();
     let ignore_tags: Vec<&str> = cx.settings.ignore_tags.iter().map(String::as_str).filter(|t| !t.is_empty()).collect();
 
     let mut lines: Vec<Line> = Vec::new();
@@ -120,7 +121,7 @@ pub fn parse(text: &str, cx: &ParseContext<'_>) -> Vec<Line> {
             t = remove_tags(&t, &ignore_tags);
         }
         let t = js_trim(&t).to_string();
-        let page = parse_page_marker(raw);
+        let page = parse_page_marker_with(raw, &marker_words);
         let ignore = !ignore_prefix.is_empty() || t.is_empty() || page.is_some();
         if page.is_some()
             && cx.has_images
@@ -241,6 +242,17 @@ mod tests {
         assert_eq!(lines[1].page, Some(2));
         assert_eq!(page_of(&lines, 2), Some(2));
         assert_eq!(page_of(&lines, 0), None);
+    }
+
+    #[test]
+    fn spanish_markers_unless_turned_off() {
+        let mut s = Settings::default();
+        let text = "Página 1\nhola\nPág. 2\nLee la página 3 ahora";
+        let pages: Vec<Option<u32>> = run(text, &Library::default(), &s, None).iter().map(|l| l.page).collect();
+        assert_eq!(pages, [Some(1), None, Some(2), None]);
+        s.extra_page_markers = false;
+        let lines = run(text, &Library::default(), &s, None);
+        assert!(lines.iter().all(|l| l.page.is_none() && !l.ignore), "with TypeR's rule they are dialogue");
     }
 
     #[test]

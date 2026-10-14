@@ -22,6 +22,8 @@ pub struct SettingsDraft {
     /// Ignore prefixes and tags as typed (one per line).
     pub ignore_prefixes: String,
     pub ignore_tags: String,
+    /// Extra page marker words as typed (`Página; Pág.`).
+    pub page_words: String,
     /// Data: export the settings with the styles.
     pub export_settings: bool,
     /// Data: the folder to export (its id).
@@ -44,6 +46,7 @@ pub fn open(app: &mut PhotocraftApp) {
         values: s.to_json(),
         ignore_prefixes: s.ignore_line_prefixes.join("\n"),
         ignore_tags: s.ignore_tags.join("\n"),
+        page_words: s.page_marker_words.join("; "),
         ..Default::default()
     });
 }
@@ -57,7 +60,18 @@ pub(crate) fn file_stem(name: &str) -> String {
 /// Import a TypeR export (full, library or folder). A full import over a non-empty library asks
 /// whether to keep the local styles first, as TypeR does.
 pub fn import(app: &mut PhotocraftApp) {
-    let r = app.pick_file_bytes_filtered(&["json"], |app, name, bytes| {
+    let r = app.pick_file_bytes_filtered(&["json", "tpl"], |app, name, bytes| {
+        // Photoshop tool presets: each Type tool preset becomes a style in a new folder.
+        if name.to_ascii_lowercase().ends_with(".tpl") {
+            let now = app.services.clock.map(|c| c()).filter(|n| n.is_finite() && *n > 0.0);
+            let short = crate::file_open::display_name(&name);
+            let r = photocraft_engine::typer_import_cmds::import_tpl_bytes(&mut app.session, &bytes, &short, now).map_err(|e| format!("{short}: {e}"));
+            match &r {
+                Ok(_) => app.ui.typer.message.clear(),
+                Err(e) => app.ui.typer.message = e.clone(),
+            }
+            return r;
+        }
         let text = String::from_utf8(bytes).map_err(|_| format!("{name}: {}", tl!("not a TypeR export")))?;
         let data = exchange::parse(&text).map_err(|e| {
             app.ui.typer.message = format!("{name}: {e}");
@@ -192,6 +206,11 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     hint(ui, &t, tl!("**bold**, *italic* and ***both*** in the script become faux bold and italic."));
                     flag(ui, &mut d.values, "resetLineCounterOnPage", tl!("Number lines from 1 on each page"));
                     flag(ui, &mut d.values, "longestPrefixMatch", tl!("Longest tag wins (TypeR: the first one)"));
+                    flag(ui, &mut d.values, "extraPageMarkers", tl!("Extra page marker words"));
+                    if d.values.get("extraPageMarkers").and_then(Value::as_bool).unwrap_or(true) {
+                        ui.add(egui::TextEdit::singleline(&mut d.page_words).desired_width(f32::INFINITY).hint_text("Página; Pág."));
+                    }
+                    hint(ui, &t, tl!("Page is always a marker word. Separate words with ; (case, accents and a final dot don't matter): Página 12, Pág. 12 and Pag 12 all mark page 12."));
                     flag(ui, &mut d.values, "middleEast", tl!("Middle Eastern text mode"));
                     egui::Grid::new("typer-settings-text").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                         label(ui, &t, tl!("Internal padding"));
@@ -216,6 +235,9 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     flag(ui, &mut d.values, "multiBubbleMode", tl!("Multi-bubble mode"));
                     flag(ui, &mut d.values, "openStoredSelections", tl!("Multi-bubble: centre on the bubble, as Paste does"));
                     flag(ui, &mut d.values, "showQuickStyleSize", tl!("Quick style size −/+"));
+                    flag(ui, &mut d.values, "multiTabEnabled", tl!("Work tabs (one per chapter)"));
+                    flag(ui, &mut d.values, "autoClosePSD", tl!("Close the previous page's file when the next page opens"));
+                    hint(ui, &t, tl!("A page with unsaved changes asks first: Save, Don't Save or Cancel."));
                     ui.horizontal(|ui| {
                         label(ui, &t, tl!("Style size step"));
                         number(ui, &mut d.values, "styleSizeStep", 1.0, 0.1..=100.0, "");
@@ -256,7 +278,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     if ui.button(tl!("Import styles or settings…")).clicked() {
                         run_after.push(Box::new(import));
                     }
-                    hint(ui, &t, tl!("A TypeR export (.json): a folder, a style library or a full export with settings."));
+                    hint(ui, &t, tl!("A TypeR export (.json): a folder, a style library or a full export with settings. Photoshop tool presets (.tpl): each Type tool preset becomes a style in a new folder."));
                     crate::widgets::section_label(ui, tl!("Export"));
                     ui.horizontal(|ui| {
                         crate::widgets::checkbox(ui, &mut d.export_settings, tl!("With my settings"));
@@ -310,6 +332,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let mut values = d.values.clone();
         values["ignoreLinePrefixes"] = json!(d.ignore_prefixes);
         values["ignoreTags"] = json!(d.ignore_tags);
+        values["pageMarkerWords"] = json!(d.page_words);
         // Only the keys TypeR's settings know; `set` is all-or-nothing.
         match app.run("typer.settings.set", json!({"values": values})) {
             Ok(_) => {

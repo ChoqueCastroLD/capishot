@@ -66,6 +66,12 @@ pub struct Settings {
     /// Capishot: multi paste centres on the opened bubble like Paste instead of the raw
     /// selection bounds (TypeR's behaviour, the default) (§6.6).
     pub open_stored_selections: bool,
+    /// Capishot: besides TypeR's `Page N`, page markers may start with
+    /// [`Settings::page_marker_words`] (`Página 12`, `Pág. 12`).
+    pub extra_page_markers: bool,
+    /// Capishot: the extra marker words (case and accents don't matter; a trailing `.` is
+    /// optional). Spanish and Portuguese by default.
+    pub page_marker_words: Vec<String>,
 }
 
 impl Default for Settings {
@@ -95,6 +101,8 @@ impl Default for Settings {
             dehyphenate_text_shape_r: false,
             longest_prefix_match: false,
             open_stored_selections: false,
+            extra_page_markers: true,
+            page_marker_words: crate::pages::DEFAULT_EXTRA_PAGE_WORDS.iter().map(|w| (*w).to_string()).collect(),
         }
     }
 }
@@ -173,6 +181,17 @@ impl Settings {
             "dehyphenateTextShapeR" => self.dehyphenate_text_shape_r = boolean(value)?,
             "longestPrefixMatch" => self.longest_prefix_match = boolean(value)?,
             "openStoredSelections" => self.open_stored_selections = boolean(value)?,
+            "extraPageMarkers" => self.extra_page_markers = boolean(value)?,
+            "pageMarkerWords" => {
+                let words = list(value)?;
+                if words.len() > crate::pages::MAX_PAGE_WORDS {
+                    return Err(format!("\"pageMarkerWords\" takes at most {} words", crate::pages::MAX_PAGE_WORDS));
+                }
+                if let Some(w) = words.iter().find(|w| w.chars().count() > crate::pages::MAX_PAGE_WORD_CHARS || w.chars().any(|c| c.is_ascii_digit())) {
+                    return Err(format!("\"{w}\" can't be a page marker word: at most {} characters, no digits", crate::pages::MAX_PAGE_WORD_CHARS));
+                }
+                self.page_marker_words = words.iter().map(|w| crate::pages::js_trim(w).to_string()).filter(|w| !w.is_empty()).collect();
+            }
             _ => return Err(format!("unknown TypeR setting \"{key}\"")),
         }
         Ok(())
@@ -190,6 +209,15 @@ impl Settings {
             }
         }
         Ok(applied)
+    }
+
+    /// The words page markers start with: `Page`, plus the extra words when they are on.
+    pub fn marker_words(&self) -> crate::pages::MarkerWords {
+        if self.extra_page_markers {
+            crate::pages::MarkerWords::new(self.page_marker_words.iter().map(String::as_str))
+        } else {
+            crate::pages::MarkerWords::typer()
+        }
     }
 
     /// The text scale as a ratio (1.0 = 100 %).
@@ -214,6 +242,11 @@ mod tests {
         assert_eq!(v["autoClosePSD"], false);
         assert_eq!(v["ignoreLinePrefixes"], json!(["##"]));
         assert_eq!(serde_json::from_value::<Settings>(json!({})).unwrap(), s, "missing keys take defaults");
+        assert!(s.extra_page_markers);
+        assert_eq!(v["pageMarkerWords"], json!(["Página", "Pág."]));
+        assert_eq!(crate::pages::parse_page_marker_with("Pág. 4", &s.marker_words()), Some(4));
+        let off = Settings { extra_page_markers: false, ..Settings::default() };
+        assert_eq!(crate::pages::parse_page_marker_with("Pág. 4", &off.marker_words()), None);
     }
 
     #[test]
@@ -240,6 +273,11 @@ mod tests {
         assert!(s.set("defaultStyleId", &json!({})).is_err());
         s.set("defaultStyleId", &json!("abc")).unwrap();
         assert_eq!(s.default_style_id, Some(Id::str("abc")));
+        s.set("pageMarkerWords", &json!("Página; Folha ;")).unwrap();
+        assert_eq!(s.page_marker_words, ["Página", "Folha"]);
+        assert!(s.set("pageMarkerWords", &json!(["P1"])).is_err());
+        assert!(s.set("pageMarkerWords", &json!(vec!["x"; 30])).is_err());
+        assert!(s.set("extraPageMarkers", &json!(1)).is_err());
         let applied = s.merge(json!({"ignoreTags": ["**"], "version": "3.0", "language": "es"}).as_object().unwrap()).unwrap();
         assert_eq!(applied, ["ignoreTags"]);
     }
