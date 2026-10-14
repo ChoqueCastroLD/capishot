@@ -18,6 +18,7 @@ pub mod library;
 pub mod markdown;
 pub mod pages;
 pub mod payload;
+pub mod place;
 pub mod presets;
 pub mod psjson;
 pub mod script;

@@ -102,27 +102,13 @@ pub fn handles(id: &str) -> bool {
 
 /// The engine command a panel command runs now, with its parameters.
 fn target(app: &PhotocraftApp, id: &str) -> Option<(&'static str, Value)> {
-    let typer = &app.session.typer;
-    let step = typer.state.settings.text_size_increment;
+    let step = app.session.typer.state.settings.text_size_increment;
     Some(match id {
-        // TypeR's "add": fill the stored bubbles in multi-bubble mode, else one line per selected
-        // text layer when there is no selection and several are selected, else Paste.
-        "typer.ui.paste" => {
-            let doc = app.session.active();
-            let selection = doc.is_some_and(|d| d.doc.selection.is_some());
-            let text_layers = doc.map_or(0, |d| {
-                d.selected_layers.iter().filter(|l| d.doc.layer(**l).is_some_and(|l| matches!(l.content, photocraft_doc::LayerContent::Text(_)))).count()
-            });
-            if typer.state.settings.multi_bubble_mode && !typer.stored_selections.is_empty() {
-                ("typer.pasteMany", json!({}))
-            } else if !selection && text_layers >= 2 {
-                ("typer.applyLines", json!({}))
-            } else {
-                ("typer.paste", json!({}))
-            }
-        }
+        // TypeR's "add": the engine's Paste fills the stored bubbles in multi-bubble mode, or
+        // gives one line per selected text layer with several selected and no selection.
+        "typer.ui.paste" => ("typer.paste", json!({})),
         "typer.ui.insertText" => ("typer.apply", json!({"mode": "textOnly"})),
-        "typer.ui.applyStyle" => ("typer.apply", json!({"mode": "styleOnly", "advance": false})),
+        "typer.ui.applyStyle" => ("typer.applyStyle", json!({})),
         "typer.ui.increaseSize" => ("typer.resize", json!({"delta": step})),
         "typer.ui.decreaseSize" => ("typer.resize", json!({"delta": -step})),
         _ => return None,
@@ -433,6 +419,7 @@ pub(crate) fn workspace_text(typer: &TyperSession) -> String {
 /// Restore the TypeR workspace once (the first frame), then save it about once a second while it
 /// changes and no button is held. Only the workspace's hash is kept between checks.
 pub fn persist(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    capture_bubbles(app, ctx);
     let id = egui::Id::new("typer-persist");
     let mut st = ctx.data(|d| d.get_temp::<PersistState>(id)).unwrap_or_default();
     let now = ctx.input(|i| i.time);
@@ -473,4 +460,43 @@ fn restore(app: &mut PhotocraftApp) {
             app.ui.status_error = true;
         }
     }
+}
+
+/// What [`capture_bubbles`] saw last: (document, revision) and the selection's bounds.
+#[derive(Clone, Copy, Default, PartialEq)]
+struct SeenSelection {
+    doc: Option<(photocraft_doc::DocId, u64)>,
+    bounds: Option<[i32; 4]>,
+}
+
+/// Multi-bubble mode (TypeR M1): each new selection is stored as a bubble with the current line
+/// and style (`typer.multiBubble.capture`), once the gesture that made it is over. Only a change of
+/// the selection's bounds counts, so a paste or another edit doesn't store the same bubble again;
+/// with ⇧ held (adding to a selection) nothing is stored, as in TypeR. The bounds are read only
+/// when the document's revision moves.
+fn capture_bubbles(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if !app.session.typer.state.settings.multi_bubble_mode {
+        return;
+    }
+    let id = egui::Id::new("typer-seen-selection");
+    let mut seen = ctx.data(|d| d.get_temp::<SeenSelection>(id)).unwrap_or_default();
+    let Some(st) = app.session.active() else { return };
+    let key = Some((st.doc.id, st.revision));
+    if seen.doc == key || ctx.input(|i| i.pointer.any_down()) {
+        return;
+    }
+    let bounds =
+        st.doc.selection.as_ref().map(photocraft_compose::bounds::content_bounds).filter(|r| r.x1 > r.x0 && r.y1 > r.y0).map(|r| [r.x0, r.y0, r.x1, r.y1]);
+    let first = seen.doc.is_none_or(|(doc, _)| doc != st.doc.id);
+    let changed = bounds.is_some() && bounds != seen.bounds && !first;
+    seen = SeenSelection { doc: key, bounds };
+    ctx.data_mut(|d| d.insert_temp(id, seen));
+    if !changed {
+        return;
+    }
+    if ctx.input(|i| i.modifiers.shift) {
+        app.ui.typer.message = tl!("Multi-bubble mode stores one selection at a time: release Shift and select the bubbles one by one.").into();
+        return;
+    }
+    act(app, "typer.multiBubble.capture", json!({}));
 }

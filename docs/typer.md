@@ -5,10 +5,10 @@ line by line with styled text. Capishot ports it natively. The full plan (featur
 work packages) is `capishot-typer-plan.md`, kept outside the repo; this page is the map of what is in
 the tree.
 
-Status (2026-10-14): **WP0 and WP3 done.** The script, cursor, page files, style library, TypeR
-JSON exchange and settings work, as commands, and the TypeR panel (Window › TypeR) drives them.
-Placement, bubble detection and line shaping are registered stubs for WP1, WP2-B and WP4: the
-panel's Paste, Align, Apply and size buttons show why they can't run yet.
+Status (2026-10-14): **WP0, WP1 and WP3 done.** The script, cursor, page files, style library,
+TypeR JSON exchange and settings work, as commands, and so does the core typesetting loop: paste,
+apply, align, resize, multi-bubble, bubble detection. The TypeR panel (Window › TypeR) drives it.
+Line shaping (WP4) is still to come; `typer.shapeText` is a registered stub.
 
 ## Decisions
 
@@ -26,7 +26,7 @@ panel's Paste, Align, Apply and size buttons show why they can't run yet.
 ## Architecture
 
 ```text
-crates/typer (photocraft-typer, L2: doc, color, serde; no egui, no I/O, wasm-clean)
+crates/typer (photocraft-typer, L2: doc, color, geom, algo, serde; no egui, no I/O, wasm-clean)
   id.rs        Id (string or number, TypeR's validId), num() (whole numbers written as 23, not 23.0)
   pages.rs     parse_page_marker (3.0 strict rule), image_page_number / image_for_page (N4), natural_cmp
   script.rs    Line, parse(text, ParseContext) (S1–S8), line numbering (S3), page_of, next_usable
@@ -41,13 +41,17 @@ crates/typer (photocraft-typer, L2: doc, color, serde; no egui, no I/O, wasm-cle
                export (K2) and export_folder (K3), with "schema": 1
   psjson.rs    TypeR textProps ↔ CharStyle/ParagraphStyle (§2.7): map_style (px→pt with the document
                dpi at apply time, text scale, auto size), stroke, text_props_from (reverse)
-  payload.rs   scaled_style (S14), resolve_point_text (L6), selected_layers (P9), stored_selections (M2)
-  bubble.rs    Rect, Row, BubbleHit, StoredSelection: data only, filled by WP1/WP4
+  payload.rs   scaled_style (S14), resolve_point_text (L6), selected_layers (P9), stored_selections (M2),
+               stored_selection_line (M3)
+  bubble.rs    Mask, wand (D1), fill_holes, opened_bounds (P7, TypeR 3.0 adaptive opening), rows (D3),
+               Judge (is this region a bubble?), BubbleHit, StoredSelection
+  place.rs     box_size, fit_height, fit_width, center_offset, px_to_pt (placement arithmetic)
 crates/engine/src
   typer_state.rs        TyperSession { state, stored_selections } = Session::typer; to_json/from_json
   typer_cmds.rs         session, library and settings commands (working)
-  typer_place_cmds.rs   placement and multi-bubble commands (stubs, WP1)
-  typer_query_cmds.rs   detectBubble, selectionBounds (stubs, WP1), shapeText (stub, WP4)
+  typer_place_cmds.rs   placement, multi-bubble, cleaning toggle, style from layer (WP1)
+    support.rs          page image cache, selection mask, style → type, measure/fit/centre by ink
+  typer_query_cmds.rs   detectBubble, selectionBounds (WP1), shapeText (stub, WP4)
 ```
 
 **State lives in the engine** (`Session::typer`), not in the UI, so the CLI, actions and MCP agents
@@ -89,10 +93,17 @@ styleName, page, image, usableLines, lineCount, textScale` (plus `moved`).
 | `typer.folder.save` / `.delete` / `.duplicate` / `.reorder` | works | refuses parent cycles; `delete {permanent}` = Shift+Delete |
 | `typer.library.import` / `.export` / `.exportFolder` | works | JSON text or object in, JSON out (no file paths: the UI owns files) |
 | `typer.settings.get` / `.set` | works | TypeR key names; `set` is all-or-nothing |
-| `typer.paste`, `typer.pasteMany`, `typer.apply`, `typer.applyLines`, `typer.align`, `typer.resize`, `typer.applyShape`, `typer.toggleCleaningLayers` | stub (WP1) | `enabled` reports "not implemented yet"; `journal: true` |
-| `typer.multiBubble.toggle` / `.capture` / `.removeLast` / `.clear` | stub (WP1) | stored selections go in `TyperSession::stored_selections` |
-| `typer.style.fromLayer` | stub (WP1/WP2) | use `psjson::text_props_from` |
-| `typer.detectBubble`, `typer.selectionBounds` | stub (WP1) | queries, `journal: false` |
+| `typer.paste` | works | P1+P7, one step "TypeR Paste". Without `text`/`bounds`/`style` it is TypeR's Paste key: `pasteMany` in multi-bubble mode with stored bubbles, `applyLines` with 2+ type layers selected and no selection |
+| `typer.pasteMany` | works | M2, one step "TypeR Multiple Paste"; stored bubbles (raw box, or opened with `openStoredSelections`) or explicit `entries` |
+| `typer.apply` / `typer.applyStyle` | works | P2/P3/P4 (`mode` textAndStyle/textOnly/styleOnly), selected layers, keep size; one step "TypeR Change" |
+| `typer.applyLines` | works | P9: click order, all targets validated first, nothing changes on error |
+| `typer.align` | works | P5+D1+P7, multi-layer, `resizeBox`; deselects; one step "TypeR Align" |
+| `typer.resize` | works | P6: every run's size and fixed leading ± delta (px or pt), box scaled, centre kept |
+| `typer.applyShape` | works | D4 apply: lines joined, box shrunk to the text, centre kept |
+| `typer.toggleCleaningLayers` | works | P10, per document; no default shortcut (Ctrl+H is Photoshop's) |
+| `typer.multiBubble.toggle` / `.capture` / `.removeLast` / `.clear` | works | session state (`journal: false`); capture stores raw and opened bounds with the line and style, then advances; removeLast restores the line (M3) |
+| `typer.style.fromLayer` | works | L4 "Copy layer style": new style, or `id` to update one |
+| `typer.detectBubble`, `typer.selectionBounds` | works | queries: bbox, opened, centre, rows (D3), `found` + `reason` |
 | `typer.shapeText` | stub (WP4) | |
 
 Menu: `Type › TypeR` holds Next/Previous Line, Next/Previous Page, Next/Previous Style and Next
@@ -100,17 +111,25 @@ Size Preset, with no shortcuts. Everything else has no menu item until the panel
 
 ## What the next work packages plug into
 
-- **WP1 (placement, bubbles).** Fill `typer_place_cmds.rs` and `typer_query_cmds.rs`. Replace
-  `enabled: wp1` with real checks. Put the pure mask code in `crates/typer/src/bubble.rs` and add
-  `photocraft-algo` / `photocraft-text` to `crates/typer/Cargo.toml` (write it atomically).
-  - Text and style for a paste: `state.current_line()` plus `state.current_style()`, mapped with
-    `psjson::map_style(style, &MapOptions { dpi, text_scale, page_width, direction })`.
-  - Markdown runs: `markdown::parse_runs` when `settings.interpret_markdown`.
-  - Layer kind: `payload::resolve_point_text`. Stroke: `Mapped::stroke` → `layer.layerStyle.stroke`.
-  - After success, call `state.next_line(true)`.
-  - Multi-target fills: `payload::stored_selections` / `payload::selected_layers`.
-  - Each placement must be one `Session::edit`. Return TypeR's errors (`noSelection`,
-    `smallSelection`, …) as `BadParams` with a clear message.
+- **WP1 (placement, bubbles): done.** How it works:
+  - **Bubbles** are found on the page *without its type layers*, composited once and cached until
+    a non-type layer's pixels change (`support::page_image`; placing text never invalidates it).
+    The wand is TypeR's (tolerance 20, contiguous, anti-aliased, seeded 5 px left of the text),
+    holes are filled (the text inside), then TypeR 3.0's adaptive opening removes the tail
+    (`r = min(max(4, round(0.1·min side)), floor(min side/2 − 1))`, halved until the opened box is
+    ≥ 200 px²), all as pure mask functions: the selection and history are never touched.
+  - **Not a bubble** (`bubble::Judge`, Capishot's addition: TypeR centres in any region): a wand
+    region is refused when it fills < 35 % of its box, is < 16 px across, has a dark seed
+    (luma < 128), touches two page edges, holds < 60 % of the text's ink, or is > 60× the text
+    (counted as at least 4 em square). The user's own selection is always taken as is.
+  - **Text** is centred by its rendered ink, moved by whole pixels. Box text is measured in an
+    oversized box (no clipped lines), then its height becomes `extent + size + 2`; paste boxes
+    are `0.9 × opened width − 2 × padding` (≥ 10). Styles map through `psjson::map_style` at the
+    document's dpi with the text scale; Markdown becomes faux bold/italic runs; the stroke is a
+    layer-style Stroke (outside), replacing only an existing stroke.
+  - **History:** one `Session::edit` per action; on error nothing is committed. The cursor
+    advances only after success and only when the text came from the script.
+  - Real pages (local, `CAPISHOT_TYPER_PAGES`): `typer_place_cmds::tests::typer_real_pages`.
 - **WP2 (script/library, phase B).**
   - Persist `TyperSession::to_json()` with atomic writes through the platform services. Settings
     can also mirror into prefs `typer.*`.
@@ -120,9 +139,13 @@ Size Preset, with no shortcuts. Everything else has no menu item until the panel
   - Paths go through the automation policy: a params doc mentioning "path" needs a rule in
     `crates/automation/src/workspace.rs`.
 - **WP3 (panel, shortcuts, i18n): done.** See [The panel](#the-panel) below.
-- **WP4 (hyphenation, TextShapeR, harness).** Use `typer.shapeText` and `bubble::Row`. The
-  real-page harness goes in `crates/typer/tests/real_pages.rs`, `#[ignore]`, gated by
-  `CAPISHOT_TYPER_PAGES`.
+- **WP4 (hyphenation, TextShapeR, harness).** Use `typer.shapeText`, `bubble::rows` /
+  `typer.detectBubble {layer}` (rows of the hole-filled bubble) and `typer.applyShape` (already
+  works: lines in, box shrunk, centre kept). The engine-side real-page check is
+  `typer_place_cmds::tests::typer_real_pages` (`#[ignore]`, `CAPISHOT_TYPER_PAGES`); the full
+  harness (§3.8 #4 c/d) goes in `crates/typer/tests/real_pages.rs`. Local page 15 has no speech
+  bubbles (narration and SFX over art), so it measures the "no bubble" rejection, not centring:
+  a chapter page with bubbles plus a labels file is needed for the centring floors.
 
 ## The panel
 
@@ -150,7 +173,7 @@ still at these keys:
 
 | Action | TypeR | TypeR keymap | Why |
 |---|---|---|---|
-| Paste (`typer.ui.paste`: Paste, Paste Many in multi-bubble mode, Apply Lines with ≥2 text layers and no selection) | Win+Ctrl | Ctrl+Alt+B | modifier-only chords aren't supported (and the OS/browser takes Super) |
+| Paste (`typer.ui.paste` → `typer.paste`: Paste Many in multi-bubble mode, Apply Lines with ≥2 text layers and no selection) | Win+Ctrl | Ctrl+Alt+B | modifier-only chords aren't supported (and the OS/browser takes Super) |
 | Apply (`typer.apply`) | Win+Shift | Ctrl+Alt+J | same |
 | Align (`typer.align`) | Win+Alt | Ctrl+Alt+X | same |
 | Paste text only (`typer.ui.insertText`) | Win+Shift+V | Ctrl+Alt+Shift+J | Ctrl+Alt+Shift+V is Paste Into |
@@ -175,9 +198,15 @@ beside the preferences) on the web, `<config>/TypeR/workspace.json` (atomic writ
 desktop. `edited` stamps come from `Services::clock` (the browser's `Date.now`) as the commands'
 `now` param, since the engine has no clock in wasm.
 
+**Placement.** The buttons run WP1's commands: Paste (`typer.paste`, which routes to Paste Many
+or Apply Lines itself), Align, Apply, size −/+ (`typer.resize` by the step field). Holding Alt
+sends `keepSize`. In multi-bubble mode each new selection (its bounds changed, the mouse
+released, ⇧ not held) is stored with `typer.multiBubble.capture`; `capture_bubbles` reads the
+selection's bounds only when the document's revision moves.
+
 **Not yet:** drag-to-reorder styles and folders, the page-file picker and page sync (N4, WP2-B),
-the multi-bubble canvas overlay and the Align preview (need WP1's capture and detection), tabs
-(N6), TextShapeR strip (WP4), UI order/visibility toggles.
+the multi-bubble canvas overlay (numbered outlines) and the Align preview, tabs (N6), TextShapeR
+strip (WP4), UI order/visibility toggles.
 
 ## Tests
 
@@ -198,3 +227,11 @@ the merge by `edited`, 2.5 and 3.0 export round trips, and the psjson mapping an
 Engine tests (`typer_cmds/tests.rs`) cover the CLI-style loop, page files, CRUD, import/export
 through commands, settings, stub refusals and bad params for every `typer.*` command. `panic_hunt`
 covers the new commands too.
+
+Placement tests (`typer_place_cmds/tests.rs`) run on synthetic manga pages (white ellipse bubbles
+with a black outline, some with tails, on screentone): paste/align land within 1 px of the bubble
+body's centre (the raw box with the tail is > 15 px off), rectangle selections centre exactly,
+tiny ones are `smallSelection`, box width/height rules, point text, apply keeps the centre,
+resize adds the delta to fixed leading, multi paste is one step, applyLines rolls back on a
+non-type target, keep size, text scale at 300 dpi, the cleaning toggle, style from layer, the page
+cache, and bad params. `typer_place_perf` (ignored) times a 2000×3000 page.

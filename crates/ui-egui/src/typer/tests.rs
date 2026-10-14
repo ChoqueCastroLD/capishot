@@ -345,3 +345,53 @@ fn window_menu_toggles_the_dock_group() {
     let back: crate::dock::DockLayout = serde_json::from_value(v).unwrap();
     assert!(back.order().contains(&crate::dock::Group::TypeR));
 }
+
+/// A document with a white page, so the bubble opening finds the selected area.
+fn app_with_page() -> PhotocraftApp {
+    let mut app = app();
+    app.run("file.new", json!({"width": 800, "height": 600, "background": "white"})).unwrap();
+    app.sync_views();
+    app
+}
+
+fn text_layers(app: &PhotocraftApp) -> usize {
+    let doc = &app.session.active().unwrap().doc;
+    doc.walk().into_iter().filter(|(_, _, l)| matches!(l.content, photocraft_doc::LayerContent::Text(_))).count()
+}
+
+#[test]
+fn paste_button_typesets_the_current_line_into_the_selection() {
+    let mut app = app_with_page();
+    app.run("select.rect", json!({"x": 100, "y": 100, "width": 300, "height": 200})).unwrap();
+    let mut h = harness(app, vec2(320.0, 560.0));
+    assert_eq!(text_layers(h.state()), 0);
+    h.get_by_label("Paste").click();
+    h.run_steps(3);
+    assert_eq!(text_layers(h.state()), 1, "{}", h.state().ui.typer.message);
+    assert_eq!(h.state().session.typer.state.current_line_index, 3, "Paste advances to the next line");
+}
+
+#[test]
+fn multi_bubble_mode_captures_each_new_selection() {
+    let mut app = app_with_page();
+    app.run("typer.multiBubble.toggle", json!({"on": true})).unwrap();
+    let ctx = egui::Context::default();
+    super::persist(&mut app, &ctx);
+    app.run("select.rect", json!({"x": 50, "y": 50, "width": 200, "height": 120})).unwrap();
+    super::persist(&mut app, &ctx);
+    assert_eq!(app.session.typer.stored_selections.len(), 1);
+    assert_eq!(app.session.typer.state.current_line_index, 3, "the line advances with each bubble");
+    // Another edit with the same selection stores nothing more.
+    app.run("typer.style.next", json!({})).unwrap();
+    app.run("layer.new.layer", json!({})).unwrap();
+    super::persist(&mut app, &ctx);
+    assert_eq!(app.session.typer.stored_selections.len(), 1);
+    app.run("select.rect", json!({"x": 400, "y": 300, "width": 200, "height": 120})).unwrap();
+    super::persist(&mut app, &ctx);
+    assert_eq!(app.session.typer.stored_selections.len(), 2);
+    // Off: nothing is captured.
+    app.run("typer.multiBubble.toggle", json!({"on": false})).unwrap();
+    app.run("select.rect", json!({"x": 10, "y": 10, "width": 100, "height": 100})).unwrap();
+    super::persist(&mut app, &ctx);
+    assert!(app.session.typer.stored_selections.is_empty());
+}

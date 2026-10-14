@@ -63,6 +63,27 @@ fn source_keys(root: &Path) -> Result<BTreeSet<Key>, String> {
     Ok(keys)
 }
 
+/// Keys only the TypeR panel uses (its `tl!` strings under `src/typer/` and the `typer.*` command
+/// labels): translated into es and pt only (Shoko's decision, 2026-10-12; `TYPER_LANGUAGES` in
+/// `crates/ui-egui/src/i18n/mod.rs`). Keys the rest of the app also uses are not in here.
+#[cfg(test)]
+fn typer_only_keys(root: &Path) -> Result<BTreeSet<Key>, String> {
+    let ui_sources = source_files(&root.join("crates/ui-egui/src"))?;
+    let engine_sources = source_files(&root.join("crates/engine/src"))?;
+    let is_typer =
+        |path: &Path| path.components().any(|c| c.as_os_str() == "typer") || path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("typer_"));
+    let (typer_ui, other_ui): (Vec<_>, Vec<_>) = ui_sources.into_iter().partition(|(path, _)| is_typer(path));
+    let (typer_engine, other_engine): (Vec<_>, Vec<_>) = engine_sources.into_iter().partition(|(path, _)| is_typer(path));
+    let mut typer = tl_keys(&typer_ui);
+    typer.extend(plural_keys(&typer_ui));
+    typer.extend(engine_command_labels(&typer_engine));
+    typer.insert(Key { context: String::new(), source: "TypeR".into() });
+    let mut shared = tl_keys(&other_ui);
+    shared.extend(plural_keys(&other_ui));
+    shared.extend(engine_command_labels(&other_engine));
+    Ok(typer.difference(&shared).cloned().collect())
+}
+
 fn format_report(languages: &[Language], english_keys: &BTreeSet<Key>, translations: &BTreeMap<String, BTreeSet<Key>>) -> String {
     let mut report = String::from("UI translation coverage (translated source keys / source keys)\n");
     report.push_str(&format!("{:<12} {:>12} {:>9}\n", "language", "translated", "coverage"));
@@ -560,6 +581,8 @@ mod tests {
     fn source_key_set_is_covered_by_complete_catalogs() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(Path::new("."));
         let keys = source_keys(root).unwrap_or_default();
+        let typer = typer_only_keys(root).unwrap_or_default();
+        assert!(!typer.is_empty(), "the TypeR keys were found");
         for (code, path) in [
             ("ja", "ja.tsv"),
             ("zh-hant", "zh-hant.tsv"),
@@ -576,7 +599,9 @@ mod tests {
             let catalog_path = root.join("crates/ui-egui/src/i18n").join(path);
             let text = fs::read_to_string(&catalog_path).unwrap_or_default();
             let translations = parse_catalog(&catalog_path, &text).unwrap_or_default();
-            let missing: Vec<_> = keys.difference(&translations).collect();
+            // TypeR's own strings ship in es and pt only.
+            let typer_required = matches!(code, "es" | "pt-br");
+            let missing: Vec<_> = keys.difference(&translations).filter(|k| typer_required || !typer.contains(k)).collect();
             assert!(missing.is_empty(), "{code}: missing source keys: {missing:#?}");
         }
     }
