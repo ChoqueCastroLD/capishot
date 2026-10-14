@@ -395,3 +395,156 @@ fn multi_bubble_mode_captures_each_new_selection() {
     super::persist(&mut app, &ctx);
     assert!(app.session.typer.stored_selections.is_empty());
 }
+
+/// Window › Workspace › Typesetting: TypeR on top with most of the column, Character and Layers
+/// below; the other presets (Essentials) are unchanged and hide TypeR again.
+#[test]
+fn typesetting_workspace_shows_typer_character_and_layers() {
+    use crate::dock::Group;
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    let ctx = egui::Context::default();
+    crate::menus::invoke(&mut app, &ctx, "window.workspace.essentials", json!({})).unwrap();
+    let essentials = (app.ui.panels.clone(), app.ui.dock.clone());
+    crate::menus::invoke(&mut app, &ctx, "window.workspace.typesetting", json!({})).unwrap();
+    assert_eq!(app.ui.workspace, "Typesetting");
+    assert!(crate::menus::menu_items(&app).iter().any(|i| i.id == "window.workspace.typesetting" && i.checked == Some(true)));
+    let shown: Vec<Group> = app.ui.dock.order().into_iter().filter(|g| g.shown(&app.ui.panels)).collect();
+    assert_eq!(shown, [Group::TypeR, Group::Character, Group::Layers]);
+    let hs = app.ui.dock.heights_for(&shown, 830.0, 28.0);
+    assert!(hs[0].1 >= 500.0, "TypeR gets most of a 900-pt screen's column: {hs:?}");
+    // A 900-px screen in a browser: TypeR keeps a usable height, the others give way first.
+    let hs = app.ui.dock.heights_for(&shown, 680.0, 28.0);
+    assert!(hs[0].1 >= 420.0 && hs[2].1 >= Group::Layers.min_height(), "{hs:?}");
+    // Reset brings Typesetting back; Essentials is what it was.
+    app.ui.dock.heights.insert(Group::TypeR, 200.0);
+    crate::menus::invoke(&mut app, &ctx, "window.workspace.resetWorkspace", json!({})).unwrap();
+    assert_eq!(app.ui.dock.height(Group::TypeR), crate::menus::TYPESETTING_TYPER_HEIGHT);
+    crate::menus::invoke(&mut app, &ctx, "window.workspace.essentials", json!({})).unwrap();
+    assert!(!app.ui.panels.typer);
+    assert_eq!((app.ui.panels.clone(), app.ui.dock.clone()), essentials);
+    assert!(
+        crate::menus::menu_items(&app).iter().any(|i| i.id == "window.workspace.typesetting" && i.path == ["Window", "Workspace"] && i.checked == Some(false))
+    );
+}
+
+/// TypeR shown in Essentials on a short column: Color and Properties give way before it.
+#[test]
+fn typer_group_gives_way_last_in_a_short_column() {
+    use crate::dock::{DockLayout, Group};
+    let shown = [Group::Color, Group::Properties, Group::TypeR, Group::Layers];
+    let hs = DockLayout::default().heights_for(&shown, 680.0, 28.0);
+    let h = |g: Group| hs.iter().find(|(x, _)| *x == g).map_or(0.0, |(_, h)| *h);
+    assert_eq!(h(Group::Color), Group::Color.min_height());
+    assert_eq!(h(Group::Properties), Group::Properties.min_height());
+    assert!(h(Group::TypeR) >= 340.0, "{hs:?}");
+    assert!(h(Group::Layers) >= Group::Layers.min_height());
+    let total: f32 = hs.iter().map(|(_, h)| h).sum::<f32>() + crate::dock::GAP * 3.0;
+    assert!((total - 680.0).abs() < 0.5, "{hs:?}");
+}
+
+/// Folding the script gives the style list its room, and folding the preview leaves the line as
+/// one row of text.
+#[test]
+fn panel_blocks_fold_and_give_their_room_away() {
+    let h = harness(app(), vec2(320.0, 520.0));
+    let styles_h = |h: &Harness<'static, PhotocraftApp>| h.get_by_label("Shout").rect().top();
+    let before = styles_h(&h);
+    let (_, rects) = super::script_editor::last_layout(&h.ctx).expect("the script is drawn");
+    assert!(!rects.is_empty());
+    let mut app = h.into_state();
+    super::toggle_fold(&mut app, "script");
+    super::toggle_fold(&mut app, "preview");
+    let h = harness(app, vec2(320.0, 520.0));
+    assert!(styles_h(&h) < before - 100.0, "the style list moves up: {} → {}", before, styles_h(&h));
+    h.get_by_label("Script");
+    h.get_by_label("Regular: Hello there.");
+    let mut app = h.into_state();
+    assert!(super::is_folded(&app, "script"));
+    super::toggle_fold(&mut app, "script");
+    assert!(!super::is_folded(&app, "script") && super::is_folded(&app, "preview"));
+    // The fold state is view state: it round-trips with the UI state.
+    let back: super::TyperUi = serde_json::from_value(serde_json::to_value(&app.ui.typer).unwrap()).unwrap();
+    assert_eq!(back.folded, ["preview"]);
+}
+
+/// Work tabs: + adds a tab with an empty script, a click switches back, closing a tab with a
+/// script asks first and an empty one closes at once; the last tab stays.
+#[test]
+fn tab_bar_adds_switches_and_closes() {
+    let mut h = harness(app(), vec2(360.0, 560.0));
+    h.get_by_label("Tab 1");
+    h.get_by_label("New tab").click();
+    h.run_steps(3);
+    let st = &h.state().session.typer.state;
+    assert_eq!(st.tabs.len(), 2);
+    assert!(st.text.is_empty(), "a new tab starts with an empty script");
+    let (first, second) = (st.tabs[0].id.clone(), st.tabs[1].id.clone());
+    assert_eq!(st.current_tab_id, second);
+    h.get_by_label("Tab 1").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.typer.state.text, SCRIPT);
+    let mut app = h.into_state();
+    super::tabs::close(&mut app, &first);
+    assert!(matches!(&app.ui.typer.confirm, Some(super::Confirm::CloseTab { id, .. }) if *id == first), "a tab with a script asks");
+    app.ui.typer.confirm = None;
+    super::tabs::close(&mut app, &second);
+    assert_eq!(app.session.typer.state.tabs.len(), 1, "an empty tab closes at once");
+    super::tabs::close(&mut app, &first);
+    assert_eq!(app.session.typer.state.tabs.len(), 1);
+    assert!(!app.ui.typer.message.is_empty(), "the last tab can't be closed");
+    // Renaming in place: Enter commits.
+    app.ui.typer.renaming = Some(super::tabs::Rename { id: first.clone(), name: "Capítulo 5".into() });
+    let mut h = harness(app, vec2(360.0, 560.0));
+    h.input_mut().events.push(egui::Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(h.state().session.typer.state.tabs[0].name, "Capítulo 5");
+    assert!(h.state().ui.typer.renaming.is_none());
+    h.get_by_label("Capítulo 5");
+    // Off in the settings: no tab bar.
+    let mut app = h.into_state();
+    app.run("typer.settings.set", json!({"key": "multiTabEnabled", "value": false})).unwrap();
+    let h = harness(app, vec2(360.0, 560.0));
+    assert!(h.query_by_label("Capítulo 5").is_none());
+}
+
+/// FontScanR: the open page's text layers become proposals, drawn in the dialog, and the chosen
+/// ones import into a new folder.
+#[test]
+fn fontscan_dialog_scans_and_imports_into_a_new_folder() {
+    let mut app = app_with_page();
+    let id = |app: &PhotocraftApp, name: &str| app.session.typer.state.library.styles.iter().find(|s| s.name == name).map(|s| s.id.to_value()).unwrap();
+    for (i, style) in ["Regular", "Shout", "Regular"].iter().enumerate() {
+        let y = 40 + 120 * i as i64;
+        let style = id(&app, style);
+        app.run("typer.paste", json!({"text": "Hola", "bounds": [40, y, 300, 100], "style": {"id": style}, "advance": false})).unwrap();
+    }
+    super::fontscan::open(&mut app);
+    super::fontscan::scan_documents(&mut app);
+    let d = app.ui.typer.fontscan.clone().expect("the dialog is open");
+    // "Regular" has no font of its own: its layers have no font name and make no proposal.
+    assert!(d.scanned && d.layers == 3 && d.groups.len() == 1, "{d:?}");
+    assert_eq!(d.groups[0]["fontName"], "Inter");
+    assert_eq!(d.selected.len(), 1, "every proposal starts chosen");
+    let h = harness(app, vec2(700.0, 640.0));
+    h.get_by_label("Scan open documents");
+    h.get_by_label("Import");
+    let mut app = h.into_state();
+    let mut d = app.ui.typer.fontscan.clone().unwrap();
+    assert!(super::fontscan::import(&mut app, &d).is_err(), "a new folder needs a name");
+    d.new_folder = "Capítulo 3".into();
+    let before = app.session.typer.state.library.styles.len();
+    super::fontscan::import(&mut app, &d).unwrap();
+    let lib = &app.session.typer.state.library;
+    assert_eq!(lib.styles.len(), before + 1);
+    assert!(lib.folders.iter().any(|f| f.name == "Capítulo 3"));
+}
+
+/// A short group (Essentials with TypeR on a small screen): the preview draws the line as one
+/// row so the script and the styles keep room.
+#[test]
+fn a_short_group_compacts_the_preview() {
+    let h = harness(app(), vec2(320.0, super::COMPACT_BELOW - 40.0));
+    h.get_by_label("Regular: Hello there.");
+    let h = harness(app(), vec2(320.0, super::COMPACT_BELOW + 100.0));
+    assert!(h.query_by_label("Regular: Hello there.").is_none(), "tall enough: the line in its font");
+}

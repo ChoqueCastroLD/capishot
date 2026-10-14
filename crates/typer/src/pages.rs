@@ -6,6 +6,112 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+/// Marker words Capishot recognises besides TypeR's `Page` by default: Spanish and Portuguese
+/// (`Página 12`, `Pagina 12`, `Pág. 12`, `Pag 12`). Accents and a trailing `.` are optional
+/// when matching, so these two cover every spelling.
+pub const DEFAULT_EXTRA_PAGE_WORDS: &[&str] = &["Página", "Pág."];
+
+/// Longest marker word accepted (characters), and most words in the list.
+pub const MAX_PAGE_WORD_CHARS: usize = 32;
+pub const MAX_PAGE_WORDS: usize = 24;
+
+/// The words a page marker may start with, folded once for matching (see [`fold`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MarkerWords {
+    /// Folded words, `page` first; the longest first among the rest so `pag.` is tried
+    /// before `pag`.
+    words: Vec<Word>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Word {
+    /// Folded, without a trailing `.`.
+    stem: Vec<char>,
+    /// The word ends in `.` (an abbreviation): the dot is optional and no space is needed
+    /// after it (`Pág.12`).
+    abbrev: bool,
+}
+
+impl MarkerWords {
+    /// TypeR's rule: `Page` only.
+    pub fn typer() -> MarkerWords {
+        MarkerWords::new(std::iter::empty::<&str>())
+    }
+
+    /// `Page` plus `extra` (blank entries and entries with digits are skipped).
+    pub fn new<'a>(extra: impl IntoIterator<Item = &'a str>) -> MarkerWords {
+        let mut words = vec![Word { stem: "page".chars().collect(), abbrev: false }];
+        let mut rest: Vec<Word> = Vec::new();
+        for w in extra.into_iter().take(MAX_PAGE_WORDS) {
+            let w = js_trim(w);
+            if w.is_empty() || w.chars().count() > MAX_PAGE_WORD_CHARS || w.chars().any(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let abbrev = w.ends_with('.');
+            let stem: Vec<char> = fold(w.trim_end_matches('.')).chars().collect();
+            if stem.is_empty() {
+                continue;
+            }
+            let word = Word { stem, abbrev };
+            if !words.contains(&word) && !rest.contains(&word) {
+                rest.push(word);
+            }
+        }
+        rest.sort_by(|a, b| b.stem.len().cmp(&a.stem.len()).then(b.abbrev.cmp(&a.abbrev)));
+        words.extend(rest);
+        MarkerWords { words }
+    }
+
+    /// The rest of `s` after a marker word and the space (or the abbreviation's dot) that must
+    /// follow it, else `None`.
+    fn strip<'a>(&self, s: &'a str) -> Option<&'a str> {
+        self.words.iter().find_map(|w| w.strip(s))
+    }
+}
+
+impl Word {
+    fn strip<'a>(&self, s: &'a str) -> Option<&'a str> {
+        let mut chars = s.char_indices();
+        let mut end = 0;
+        for want in &self.stem {
+            let (i, c) = chars.next()?;
+            let mut folded = fold_char(c);
+            if folded.next() != Some(*want) || folded.next().is_some() {
+                return None;
+            }
+            end = i + c.len_utf8();
+        }
+        let rest = s.get(end..)?;
+        if self.abbrev
+            && let Some(after_dot) = rest.strip_prefix('.')
+        {
+            return Some(after_dot);
+        }
+        // The word must end here: whitespace follows (`Page12` and `Páginas 3` are no markers).
+        rest.starts_with(is_js_space).then_some(rest)
+    }
+}
+
+/// Lowercase and without accents (`Página` → `pagina`), for matching marker words.
+pub fn fold(s: &str) -> String {
+    s.chars().flat_map(fold_char).collect()
+}
+
+/// One character lowercased with Latin diacritics removed (Spanish, Portuguese, French…).
+fn fold_char(c: char) -> impl Iterator<Item = char> {
+    c.to_lowercase().map(|l| match l {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' => 'a',
+        'ç' | 'ć' | 'č' => 'c',
+        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ę' | 'ě' => 'e',
+        'ì' | 'í' | 'î' | 'ï' | 'ī' => 'i',
+        'ñ' | 'ń' | 'ň' => 'n',
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ō' | 'ø' => 'o',
+        'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ů' => 'u',
+        'ý' | 'ÿ' => 'y',
+        other => other,
+    })
+}
+
 /// The page number of a `Page N` marker line (TypeR 3.0's strict rule), else `None`.
 ///
 /// The line is trimmed; a leading Markdown heading (`#`…`######` plus whitespace), trailing `#`s
@@ -13,6 +119,12 @@ use std::collections::HashMap;
 /// digits and optionally `:`/`-`/`–`/`—` followed by anything, or a single `.`. Case-insensitive.
 /// N must be a safe integer above 0. "Read Page 12 now", "Page 0", "Page 3 notes" are not markers.
 pub fn parse_page_marker(line: &str) -> Option<u32> {
+    parse_page_marker_with(line, &MarkerWords::typer())
+}
+
+/// [`parse_page_marker`] with other marker words (`Página 12`, `Pág. 12`): the same whole-line
+/// rule, case- and accent-insensitive.
+pub fn parse_page_marker_with(line: &str, words: &MarkerWords) -> Option<u32> {
     let mut h = js_trim(line);
     h = strip_heading_prefix(h);
     h = strip_heading_suffix(h);
@@ -20,11 +132,8 @@ pub fn parse_page_marker(line: &str) -> Option<u32> {
     if let Some(inner) = h.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
         h = js_trim(inner);
     }
-    let rest = strip_prefix_ignore_case(h, "page")?;
+    let rest = words.strip(h)?;
     let after_ws = rest.trim_start_matches(is_js_space);
-    if after_ws.len() == rest.len() {
-        return None; // `Page` must be followed by whitespace.
-    }
     let digits_len = after_ws.bytes().take_while(u8::is_ascii_digit).count();
     if digits_len == 0 {
         return None;
@@ -62,11 +171,6 @@ fn strip_heading_suffix(s: &str) -> &str {
     }
     let trimmed = without_hashes.trim_end_matches(is_js_space);
     if trimmed.len() == without_hashes.len() { s } else { trimmed }
-}
-
-fn strip_prefix_ignore_case<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-    let head = s.get(..prefix.len())?;
-    head.eq_ignore_ascii_case(prefix).then(|| &s[prefix.len()..])
 }
 
 /// JavaScript's `\s` / `trim()` whitespace: Unicode White_Space plus the BOM.
@@ -214,6 +318,83 @@ mod tests {
         assert_eq!(parse_page_marker(""), None);
         assert_eq!(parse_page_marker("Página 3"), None);
         assert_eq!(parse_page_marker("[ Page 5 ]"), Some(5));
+    }
+
+    fn es_pt() -> MarkerWords {
+        MarkerWords::new(DEFAULT_EXTRA_PAGE_WORDS.iter().copied())
+    }
+
+    // TypeR's accept list in Spanish and Portuguese, plus the abbreviations.
+    #[test]
+    fn spanish_and_portuguese_markers() {
+        let w = es_pt();
+        for (line, n) in [
+            ("Página 12", 12),
+            ("PÁGINA 12", 12),
+            ("pagina\t003", 3),
+            ("Pagina 12", 12),
+            ("Pág. 12", 12),
+            ("pág.12", 12),
+            ("PAG 12", 12),
+            ("Pag. 12", 12),
+            ("Pág 12", 12),
+            ("[Página 12]", 12),
+            ("[ Pág. 12 ]", 12),
+            ("## Página 12", 12),
+            ("### Pág. 12 ###", 12),
+            ("Página 12:", 12),
+            ("Página 12 : Título", 12),
+            ("Página 12 - Fin", 12),
+            ("Página 12 \u{2014} Final", 12),
+            ("Página 12.", 12),
+            ("  Página 7  ", 7),
+            ("Page 5", 5),
+            ("page 5", 5),
+        ] {
+            assert_eq!(parse_page_marker_with(line, &w), Some(n), "{line:?}");
+        }
+        for line in [
+            "Lee la página 12 ahora",
+            "Leia a página 12 agora",
+            "Read Page 12 now",
+            "Página 0",
+            "Pág. 0",
+            "Página 3 notas",
+            "Pág. 3 notas",
+            "Página 3 de 20",
+            "Página 9007199254740992",
+            "Página12",
+            "Pag12",
+            "Páginas 3",
+            "Paginación 3",
+            "Página",
+            "Pág.",
+            "Pág..3",
+            "#Página 2",
+            "####### Página 2",
+            "Página 4..",
+        ] {
+            assert_eq!(parse_page_marker_with(line, &w), None, "{line:?}");
+        }
+        // TypeR's own rule knows only "Page".
+        assert_eq!(parse_page_marker("Página 12"), None);
+        assert_eq!(parse_page_marker_with("Página 12", &MarkerWords::typer()), None);
+    }
+
+    #[test]
+    fn marker_word_lists() {
+        let w = MarkerWords::new(["  Folha ", "", "p4", "Pg.", "Página", "PÁGINA"]);
+        assert_eq!(parse_page_marker_with("Folha 3", &w), Some(3));
+        assert_eq!(parse_page_marker_with("folha 3", &w), Some(3));
+        assert_eq!(parse_page_marker_with("Pg.3", &w), Some(3));
+        assert_eq!(parse_page_marker_with("Pg 3", &w), Some(3));
+        assert_eq!(parse_page_marker_with("Page 3", &w), Some(3), "Page is always a marker word");
+        assert_eq!(parse_page_marker_with("p4 3", &w), None, "words with digits are skipped");
+        assert_eq!(w.words.len(), 4, "duplicates after folding count once");
+        assert_eq!(fold("PÁGINA Ñandú"), "pagina nandu");
+        let many: Vec<String> = (0..100).map(|i| format!("w{}", "x".repeat(i))).collect();
+        assert!(MarkerWords::new(many.iter().map(String::as_str)).words.len() <= MAX_PAGE_WORDS + 1);
+        assert_eq!(MarkerWords::new(["x".repeat(MAX_PAGE_WORD_CHARS + 1).as_str()]), MarkerWords::typer());
     }
 
     // scripts/testPageImageMapping.js

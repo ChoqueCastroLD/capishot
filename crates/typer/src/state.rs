@@ -16,6 +16,7 @@ use crate::library::Library;
 use crate::pages;
 use crate::script::{self, Line, ParseContext, UsedLineStyle};
 use crate::settings::Settings;
+use crate::tabs::{self, Tab};
 
 /// Largest script accepted (TypeR has no limit; this keeps a pasted mistake from freezing the
 /// app). 8 MB is several hundred chapters.
@@ -37,6 +38,11 @@ pub struct State {
     #[serde(with = "library_serde")]
     pub library: Library,
     pub settings: Settings,
+    /// Work tabs (TypeR 3.0). The active tab's script, page files and cursor are the fields
+    /// above; its entry here keeps only its id and name (see [`crate::tabs`]). Empty until the
+    /// first tab command (or a restore) creates "Tab 1".
+    pub tabs: Vec<Tab>,
+    pub current_tab_id: String,
     /// Derived from the fields above; rebuilt by [`State::refresh`].
     #[serde(skip)]
     lines: Vec<Line>,
@@ -55,6 +61,7 @@ impl State {
     pub fn new(library: Library, settings: Settings) -> State {
         let mut s = State { library, settings, ..State::default() };
         s.library.normalize();
+        s.ensure_tabs();
         s.refresh(false);
         s
     }
@@ -62,8 +69,139 @@ impl State {
     /// Rebuild derived data after deserializing.
     pub fn restored(mut self) -> State {
         self.library.normalize();
+        self.ensure_tabs();
         self.refresh(false);
         self
+    }
+
+    /// Create the first tab ("Tab 1") when there is none, and make sure the current tab exists
+    /// and holds no data of its own (its data is the state's fields).
+    pub fn ensure_tabs(&mut self) {
+        self.tabs.truncate(tabs::MAX_TABS);
+        if self.tabs.is_empty() {
+            let id = tabs::next_id(&self.tabs);
+            self.tabs.push(Tab { id: id.clone(), name: tabs::default_name(0), ..Tab::default() });
+            self.current_tab_id = id;
+        }
+        let i = match self.tab_index(&self.current_tab_id) {
+            Some(i) => i,
+            None => {
+                self.current_tab_id = self.tabs.first().map(|t| t.id.clone()).unwrap_or_default();
+                0
+            }
+        };
+        if let Some(t) = self.tabs.get_mut(i) {
+            // Whatever an older file left in the active entry is stale: the fields win.
+            *t = Tab { id: std::mem::take(&mut t.id), name: std::mem::take(&mut t.name), ..Tab::default() };
+        }
+    }
+
+    fn tab_index(&self, id: &str) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id == id)
+    }
+
+    /// The tabs with the active one's data filled in, for listing.
+    pub fn tab_views(&self) -> Vec<Tab> {
+        self.tabs.iter().map(|t| if t.id == self.current_tab_id { self.active_tab_data(t) } else { t.clone() }).collect()
+    }
+
+    fn active_tab_data(&self, t: &Tab) -> Tab {
+        Tab {
+            id: t.id.clone(),
+            name: t.name.clone(),
+            text: self.text.clone(),
+            images: self.images.clone(),
+            current_line_index: self.current_line_index,
+            last_opened_image: self.last_opened_image.clone(),
+            used_line_styles: self.used_line_styles.clone(),
+        }
+    }
+
+    /// Move the active tab's data from the fields into its entry.
+    fn stash_active(&mut self) {
+        let Some(i) = self.tab_index(&self.current_tab_id) else { return };
+        let data = Tab {
+            id: String::new(),
+            name: String::new(),
+            text: std::mem::take(&mut self.text),
+            images: std::mem::take(&mut self.images),
+            current_line_index: std::mem::take(&mut self.current_line_index),
+            last_opened_image: self.last_opened_image.take(),
+            used_line_styles: std::mem::take(&mut self.used_line_styles),
+        };
+        if let Some(t) = self.tabs.get_mut(i) {
+            *t = Tab { id: std::mem::take(&mut t.id), name: std::mem::take(&mut t.name), ..data };
+        }
+    }
+
+    /// Make tab `i` active: its data moves into the fields (TypeR's `loadTabIntoState`), and the
+    /// cursor's line picks its style.
+    fn load_tab(&mut self, i: usize) {
+        let Some(t) = self.tabs.get_mut(i) else { return };
+        self.current_tab_id = t.id.clone();
+        self.text = std::mem::take(&mut t.text);
+        self.images = std::mem::take(&mut t.images);
+        self.current_line_index = std::mem::take(&mut t.current_line_index);
+        self.last_opened_image = t.last_opened_image.take();
+        self.used_line_styles = std::mem::take(&mut t.used_line_styles);
+        self.refresh(true);
+    }
+
+    /// Open a new tab (TypeR's `addTab`) named `name` (default "Tab N") with `text`, and switch
+    /// to it. Errors past [`tabs::MAX_TABS`] or on a script that is too big.
+    pub fn new_tab(&mut self, name: Option<&str>, text: &str) -> Result<String, String> {
+        self.ensure_tabs();
+        if self.tabs.len() >= tabs::MAX_TABS {
+            return Err(format!("at most {} tabs", tabs::MAX_TABS));
+        }
+        if text.len() > MAX_SCRIPT_BYTES {
+            return Err(format!("the script is {} MB; the limit is {} MB", text.len() >> 20, MAX_SCRIPT_BYTES >> 20));
+        }
+        let name = name.and_then(tabs::clean_name).unwrap_or_else(|| tabs::default_name(self.tabs.len()));
+        let id = tabs::next_id(&self.tabs);
+        self.stash_active();
+        self.tabs.push(Tab { id: id.clone(), name, text: script::normalize_newlines(text), ..Tab::default() });
+        self.settings.multi_tab_enabled = true;
+        self.load_tab(self.tabs.len() - 1);
+        Ok(id)
+    }
+
+    /// Switch to tab `id`. `Moved::No` when it is already the current one.
+    pub fn switch_tab(&mut self, id: &str) -> Result<Moved, String> {
+        self.ensure_tabs();
+        let i = self.tab_index(id).ok_or_else(|| format!("no tab \"{id}\""))?;
+        if id == self.current_tab_id {
+            return Ok(Moved::No);
+        }
+        self.stash_active();
+        self.load_tab(i);
+        Ok(Moved::Yes)
+    }
+
+    /// Rename tab `id` (trimmed; an empty name is refused).
+    pub fn rename_tab(&mut self, id: &str, name: &str) -> Result<(), String> {
+        self.ensure_tabs();
+        let name = tabs::clean_name(name).ok_or("a tab needs a name")?;
+        let i = self.tab_index(id).ok_or_else(|| format!("no tab \"{id}\""))?;
+        if let Some(t) = self.tabs.get_mut(i) {
+            t.name = name;
+        }
+        Ok(())
+    }
+
+    /// Close tab `id` (TypeR's `deleteTab`): the last tab can't be closed; closing the current
+    /// one activates its neighbour (the next one, else the previous).
+    pub fn close_tab(&mut self, id: &str) -> Result<(), String> {
+        self.ensure_tabs();
+        if self.tabs.len() <= 1 {
+            return Err("the last tab can't be closed".into());
+        }
+        let i = self.tab_index(id).ok_or_else(|| format!("no tab \"{id}\""))?;
+        self.tabs.remove(i);
+        if id == self.current_tab_id {
+            self.load_tab(i.min(self.tabs.len().saturating_sub(1)));
+        }
+        Ok(())
     }
 
     pub fn lines(&self) -> &[Line] {
@@ -138,6 +276,7 @@ impl State {
         if text.len() > MAX_SCRIPT_BYTES {
             return Err(format!("the script is {} MB; the limit is {} MB", text.len() >> 20, MAX_SCRIPT_BYTES >> 20));
         }
+        self.ensure_tabs();
         let text = script::normalize_newlines(text);
         if text != self.text {
             // Recorded styles belong to the old line positions; keep the ones whose text is unchanged.
@@ -263,6 +402,7 @@ impl State {
 
     /// Set the page files (names or paths), sorted naturally.
     pub fn set_images(&mut self, mut images: Vec<String>) {
+        self.ensure_tabs();
         images.sort_by(|a, b| pages::natural_cmp(a, b));
         self.images = images;
         self.last_opened_image = None;
@@ -283,6 +423,47 @@ impl State {
         self.refresh(false);
         r
     }
+}
+
+/// Bring a stored state object (`TyperSession::to_json`'s `state`, or a TypeR storage file) to the
+/// tab schema before it is read: TypeR's tab migration ([`tabs::migrate`]), then the active tab's
+/// data goes into the state's fields and its entry keeps only id and name. Page files given as
+/// TypeR's `{path}` objects become names.
+pub fn migrate_tabs(state: &mut serde_json::Map<String, serde_json::Value>) {
+    use serde_json::Value;
+    let mut data = serde_json::Map::new();
+    for k in tabs::TAB_FIELDS.iter().copied().chain(["lastOpenedImagePath", "tabs", "currentTabId"]) {
+        if let Some(v) = state.get(k) {
+            data.insert(k.to_string(), v.clone());
+        }
+    }
+    let m = tabs::migrate(&Value::Object(data), &tabs::default_name(0), || "tab-1".to_string());
+    let mut out: Vec<Tab> = Vec::new();
+    let mut active: Option<Tab> = None;
+    for (i, t) in m.tabs.iter().enumerate() {
+        let id = t.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string).unwrap_or_else(|| format!("tab-x{i}"));
+        let name = t.get("name").and_then(Value::as_str).and_then(tabs::clean_name).unwrap_or_else(|| tabs::default_name(i));
+        // Duplicate ids would make a tab unreachable: later copies get new ids.
+        let id = if out.iter().any(|o| o.id == id) || active.as_ref().is_some_and(|a| a.id == id) { format!("{id}-{i}") } else { id };
+        let tab = Tab::from_value(id, name, t);
+        if active.is_none() && tab.id == m.current_tab_id {
+            out.push(Tab { id: tab.id.clone(), name: tab.name.clone(), ..Tab::default() });
+            active = Some(tab);
+        } else {
+            out.push(tab);
+        }
+    }
+    out.truncate(tabs::MAX_TABS);
+    if let Some(a) = active {
+        state.insert("text".into(), Value::String(a.text));
+        state.insert("images".into(), serde_json::to_value(a.images).unwrap_or(Value::Null));
+        state.insert("currentLineIndex".into(), a.current_line_index.into());
+        state.insert("lastOpenedImage".into(), a.last_opened_image.map_or(Value::Null, Value::String));
+        state.insert("usedLineStyles".into(), serde_json::to_value(a.used_line_styles).unwrap_or(Value::Null));
+        state.insert("currentTabId".into(), Value::String(a.id));
+    }
+    state.remove("lastOpenedImagePath");
+    state.insert("tabs".into(), serde_json::to_value(out).unwrap_or(Value::Null));
 }
 
 /// The library is stored as TypeR JSON (`{folders, styles}`).
@@ -436,6 +617,72 @@ mod tests {
         let back: State = serde_json::from_str::<State>(&json).unwrap().restored();
         assert_eq!(back, s);
         assert_eq!(text_of(&back), "boom");
+    }
+
+    // TypeR 3.0's tab reducer: add, switch, rename, close.
+    #[test]
+    fn tabs_keep_their_own_script_cursor_and_page_files() {
+        let mut s = State::new(lib(), Settings::default());
+        s.set_text("Page 1\nhello\nSFX: boom").unwrap();
+        s.set_images(vec!["01.psd".into()]);
+        s.next_line(true);
+        assert_eq!(s.tabs.len(), 1);
+        let first = s.current_tab_id.clone();
+        let second = s.new_tab(None, "A: other\nmore").unwrap();
+        assert_eq!(s.tabs[1].name, "Tab 2");
+        assert_eq!(s.current_tab_id, second);
+        assert_eq!(text_of(&s), "A: other", "A: belongs to folder a, the current style's folder is Unsorted");
+        assert!(s.images.is_empty() && s.used_line_styles.is_empty() && s.last_opened_image.is_none());
+        s.next_line(false);
+        assert_eq!(text_of(&s), "more");
+        // Back: the first tab's cursor, page files and used styles are where they were.
+        assert_eq!(s.switch_tab(&first).unwrap(), Moved::Yes);
+        assert_eq!(text_of(&s), "boom");
+        assert_eq!(s.images, ["01.psd"]);
+        assert_eq!(s.used_line_styles.len(), 1);
+        assert_eq!(s.switch_tab(&first).unwrap(), Moved::No);
+        assert!(s.switch_tab("nope").is_err());
+        // The active entry holds no copy; the views fill it in.
+        assert!(s.tabs[0].text.is_empty());
+        assert_eq!(s.tab_views()[0].text, s.text);
+        assert_eq!(s.tab_views()[1].text, "A: other\nmore");
+        s.rename_tab(&second, "  Ch. 13 ").unwrap();
+        assert_eq!(s.tabs[1].name, "Ch. 13");
+        assert!(s.rename_tab(&second, " ").is_err());
+        // Closing the current tab activates its neighbour; the last tab stays.
+        s.switch_tab(&second).unwrap();
+        s.close_tab(&second).unwrap();
+        assert_eq!(s.current_tab_id, first);
+        assert_eq!(text_of(&s), "boom");
+        assert!(s.close_tab(&first).is_err(), "the last tab can't be closed");
+        assert!(s.new_tab(Some("x"), &"y".repeat(MAX_SCRIPT_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn tabs_survive_a_save_and_old_files_migrate() {
+        let mut s = State::new(lib(), Settings::default());
+        s.set_text("one").unwrap();
+        s.new_tab(Some("B"), "two\nthree").unwrap();
+        s.next_line(false);
+        let mut v = serde_json::to_value(&s).unwrap();
+        assert!(v["tabs"][1]["text"].as_str().is_some_and(str::is_empty), "nothing stored twice");
+        migrate_tabs(v.as_object_mut().unwrap());
+        let back: State = serde_json::from_value::<State>(v).unwrap().restored();
+        assert_eq!(back, s);
+        // A workspace from before tabs: its script becomes "Tab 1".
+        let mut old = serde_json::json!({"text": "legacy", "images": [{"path": "p1.psd"}], "lastOpenedImagePath": "p1.psd", "currentLineIndex": 0});
+        migrate_tabs(old.as_object_mut().unwrap());
+        let back: State = serde_json::from_value::<State>(old).unwrap().restored();
+        assert_eq!((back.tabs.len(), back.tabs[0].name.as_str(), back.text.as_str()), (1, "Tab 1", "legacy"));
+        assert_eq!(back.images, ["p1.psd"]);
+        assert_eq!(back.last_opened_image.as_deref(), Some("p1.psd"));
+        // Duplicate ids and an unknown current tab are repaired.
+        let mut dup = serde_json::json!({"tabs": [{"id": "a", "name": "A", "text": "x"}, {"id": "a", "name": "B", "text": "y"}], "currentTabId": "q"});
+        migrate_tabs(dup.as_object_mut().unwrap());
+        let back: State = serde_json::from_value::<State>(dup).unwrap().restored();
+        assert_eq!(back.text, "x");
+        assert_ne!(back.tabs[0].id, back.tabs[1].id);
+        assert_eq!(back.tab_views()[1].text, "y");
     }
 
     #[test]

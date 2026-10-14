@@ -197,7 +197,7 @@ mod tests {
                 if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
                     return;
                 }
-                egui::CentralPanel::default().show(ui, |ui| super::super::preview::show(app, ui));
+                egui::CentralPanel::default().show(ui, |ui| super::super::preview::show(app, ui, false));
             },
             app,
         );
