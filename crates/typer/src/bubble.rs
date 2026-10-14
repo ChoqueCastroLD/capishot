@@ -416,6 +416,18 @@ pub fn rows(mask: &Mask, n: usize) -> Vec<Row> {
         .collect()
 }
 
+/// The bubble body TextShapeR fits lines into: holes filled and the tail removed by the
+/// accepted opening ([`opened_bounds`]), with `n` outline rows of that body normalized to its box.
+/// Without a surviving opening it is the hole-filled shape.
+pub fn body_rows(mask: &Mask, n: usize) -> Option<(Opened, Vec<Row>)> {
+    let o = opened_bounds(mask)?;
+    let mut filled = mask.cropped(1)?;
+    filled.fill_holes();
+    let body = if o.radius > 0 { filled.opened(o.radius as f32).unwrap_or(filled) } else { filled };
+    let r = rows(&body, n);
+    Some((o, r))
+}
+
 /// Magic wand on an 8-bit RGBA image covering `area` (D1): contiguous, anti-aliased, at
 /// `tolerance` (0–255), seeded at `seed`. `None` when the seed is outside the image.
 pub fn wand(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32), tolerance: f32) -> Option<Mask> {

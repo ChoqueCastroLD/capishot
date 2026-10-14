@@ -168,11 +168,8 @@ fn settings_get_and_set() {
 #[test]
 fn work_package_stubs_are_registered_and_refuse_cleanly() {
     let mut s = loaded();
-    // WP4's line shaping is still a stub.
-    match s.execute("typer.shapeText", json!({})) {
-        Err(EngineError::Disabled(_, why)) => assert!(why.contains("not implemented yet"), "{why}"),
-        other => panic!("typer.shapeText: {other:?}"),
-    }
+    // Line shaping (WP4) without a document needs text.
+    assert!(matches!(s.execute("typer.shapeText", json!({})), Err(EngineError::BadParams { .. })));
     // Placement (WP1) needs a document.
     for id in ["typer.paste", "typer.apply", "typer.align", "typer.detectBubble", "typer.style.fromLayer"] {
         match s.execute(id, json!({})) {

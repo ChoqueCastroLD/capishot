@@ -16,6 +16,7 @@ pub mod exchange;
 pub mod id;
 pub mod library;
 pub mod markdown;
+pub mod pagedetect;
 pub mod pages;
 pub mod payload;
 pub mod place;
@@ -23,7 +24,10 @@ pub mod presets;
 pub mod psjson;
 pub mod script;
 pub mod settings;
+pub mod shaper;
 pub mod state;
+#[doc(hidden)]
+pub mod synth;
 
 pub use bubble::{BubbleHit, Rect, Row, StoredSelection};
 pub use id::Id;

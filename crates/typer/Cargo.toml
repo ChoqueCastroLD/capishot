@@ -14,5 +14,6 @@ photocraft-algo = { workspace = true }
 photocraft-color = { workspace = true }
 photocraft-doc = { workspace = true }
 photocraft-geom = { workspace = true }
+photocraft-text = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
