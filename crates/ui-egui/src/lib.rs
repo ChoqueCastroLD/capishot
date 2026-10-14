@@ -58,6 +58,7 @@ pub mod color_picker_ui;
 pub mod color_range_ui;
 pub mod comps_ui;
 pub mod control;
+pub mod corner_radius;
 pub mod credits;
 pub mod crop_mode;
 pub mod crop_overlay;
