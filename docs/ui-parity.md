@@ -147,7 +147,7 @@ Triangle and Curvature Pen (minus legacy Rounded Rectangle and Targeted Adjustme
 
 | Behaviour | Status | Evidence |
 |---|---|---|
-| Snap to guides, grid, layers, document bounds and centre, selection, slices; ⌘ disables while dragging | done | `engine/src/snap.rs`, `snap_ui.rs` |
+| Snap to guides, grid, layers, document bounds and centre, selection, slices; Ctrl disables other gestures, while Distort corners snap to guides and intersections | done | `engine/src/snap.rs`, `snap_ui.rs` (actual-corner grab-offset regressions, #3632) |
 | Snap vector tools and transforms to the pixel grid | done | `snap_ui.rs:196` |
 | Smart guides (magenta alignment lines) | done | |
 | Smart guide distance and spacing labels | missing | |
@@ -225,6 +225,7 @@ Paragraph; the rest open as in-app floating windows.
 | 2026-10-13 | minor | Stale "missing tool" rows corrected against main: Color Replacement (`paint.colorReplacement`), Red Eye (`paint.redEye`) and Add/Delete Anchor Point (the P flyout cycle) are live toolbar tools, so only Art History Brush is missing; no percentage or estimate changed |
 | 2026-10-13 | minor | Smart object perspective (non-affine) corrected to done: #426 landed four-corner placements with PSD round trip; scorecard FILE-215-6 flipped |
 | 2026-10-10 | major | First version, from a source audit against Photoshop 2026 27.11.0's shortcuts file and the open issues |
+| 2026-10-12 | minor | Closed #3632: Distort and Ctrl/Cmd corner drags snap actual corners to guides and intersections; shared guide snapping respects Extras and Canvas Guides visibility, with offset, visibility and constrained-alignment regressions |
 | 2026-10-10 | minor | Fixed Crop live resize snapping feedback and outdated-camera rendering, applied ratios immediately to centred inscribed previews, and removed two-point options-bar overflow; added pointer, rendering, dropdown/Enter, Swap/X and scrolling regressions |
 | 2026-10-11 | minor | Flick panning done: releasing a moving Hand drag (tool, Space or middle button) glides and decays, gated by Enable Flick Panning |
 | 2026-10-11 | minor | History snapshots: the camera button takes one, snapshot rows return to it as a new state, rename and delete it (#2966) |

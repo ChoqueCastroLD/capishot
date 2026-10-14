@@ -275,8 +275,12 @@ presets and preferences still load. Automatic Recent configurations are separate
 With View › Snap on, tool gestures snap to the View › Snap To targets (guides and grid while they
 are shown, layer edges and centres, document bounds and centre, selection edges) within 8 screen
 pixels: Move tool drags (the moved layers' bounds), marquee, crop, shape, type-box and pen points,
-Free Transform handles and drags inside the box, and guides. Holding Ctrl disables snapping for
-the drag. With View › Show › Smart Guides on, the Move tool also snaps to other layers and draws
+Free Transform handles and drags inside the box, and guides. Distort corners snap to enabled
+guides and their intersections, using the actual corner even when its handle is grabbed off-centre.
+Guide targets are excluded when Guides, Canvas Guides or Extras is hidden, for all snapping gestures.
+Ctrl/Cmd corner distortion in Free Transform does the same with its enabled snap targets. Holding
+Ctrl disables snapping for other gestures; Ctrl used for an allowed corner distortion keeps snapping.
+With View › Show › Smart Guides on, the Move tool also snaps to other layers and draws
 magenta alignment lines. `ui.pointer` drives the same code, so agents get identical results.
 
 ## MCP bridge
