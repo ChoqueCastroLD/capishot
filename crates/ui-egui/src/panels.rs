@@ -90,18 +90,16 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .exact_size(w)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(m, 8)))
         .show(ui, |ui| {
-            if t.pro {
-                // Photoshop's toolbar header chevrons switch between one and two columns.
-                let (cr, resp) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::click());
-                // The chevrons point the way the toolbar grows or shrinks: towards the canvas.
-                let (shrink, grow) = if crate::direction::is_rtl() { ("chevrons-right", "chevrons-left") } else { ("chevrons-left", "chevrons-right") };
-                icons::paint(ui, cr, if double { shrink } else { grow }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
-                if resp.clicked() {
-                    app.ui.panels.toolbar_double = !app.ui.panels.toolbar_double;
-                }
-                ui.add_space(4.0);
+            // Toolbar width is a user preference, not a Pro-only feature.
+            // Keep the same hit target in every theme (including RTL layouts).
+            let (cr, resp) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::click());
+            let (shrink, grow) = if crate::direction::is_rtl() { ("chevrons-right", "chevrons-left") } else { ("chevrons-left", "chevrons-right") };
+            icons::paint(ui, cr, if double { shrink } else { grow }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
+            if resp.clicked() {
+                app.ui.panels.toolbar_double = !double;
             }
+            ui.add_space(4.0);
             // Subtle violet wash at the bottom of the toolbar.
             let full = ui.max_rect();
             if !t.bevel && !t.pro && t.dark() {
@@ -167,16 +165,16 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                         paint_toolbar_flyout_indicator(ui, &t, &resp);
                                     }
                                     if resp.clicked() && ui.data(|d| d.get_temp::<egui::Id>(held_id)) != Some(key) {
-                                        app.ui.tool = tool;
+                                        crate::tool_memory::select(app, tool);
                                     }
                                     // Double-clicking the Hand tool fits the image on screen (Photoshop).
                                     if resp.double_clicked() && tool == Tool::Hand {
-                                        app.ui.tool = tool;
+                                        crate::tool_memory::select(app, tool);
                                         // With no document open there is nothing to fit.
                                         let _ = app.run("view.fitOnScreen", json!({}));
                                     }
                                     if resp.double_clicked() && tool == Tool::Zoom {
-                                        app.ui.tool = tool;
+                                        crate::tool_memory::select(app, tool);
                                         let _ = app.run("view.actualPixels", json!({}));
                                     }
                                     // Right-click or long-press opens the flyout (Photoshop).
@@ -206,7 +204,7 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                     }
                                     if slot.len() > 1 && long_press {
                                         // Holding a tool button selects the tool it shows, as a click would (#4453).
-                                        app.ui.tool = tool;
+                                        crate::tool_memory::select(app, tool);
                                         ui.ctx().request_repaint();
                                     }
                                     if let Some((open_key, anchor)) = ui.data(|d| d.get_temp::<(egui::Id, Rect)>(flyout_id))
@@ -268,7 +266,7 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                                             );
                                                         }
                                                         if ir.clicked() {
-                                                            app.ui.tool = item;
+                                                            crate::tool_memory::select(app, item);
                                                             ui.data_mut(|d| d.remove::<(egui::Id, Rect)>(flyout_id));
                                                         }
                                                     }
@@ -1044,7 +1042,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         let block = crate::eraser_ui::block_mode(app, app.ui.tool);
                         ui.add_enabled_ui(!block, |ui| {
                             opt_label(ui, tl!("Size"));
-                            widgets::value_field(ui, &mut b.size, 1.0..=2500.0, "px", 76.0);
+                            widgets::value_field(ui, &mut b.size, 1.0..=photocraft_engine::paint::MAX_BRUSH_SIZE, "px", 76.0);
                         });
                         widgets::vline(ui, 22.0);
                         if app.ui.tool == Tool::Eraser {
@@ -1295,6 +1293,16 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         crate::crop_overlay::options_button(o, ui);
                         let pick_shield_color = crate::crop_shield::options_button(&mut o.crop_shield, ui);
                         widgets::checkbox(ui, &mut o.crop_delete, tl!("Delete Cropped Pixels"));
+                        // Fill: what a turned or extending crop puts where the image doesn't reach
+                        // (#3823). Generative Expand is not offered.
+                        ui.label(tl!("Fill:"));
+                        widgets::dropdown(
+                            ui,
+                            "crop-fill",
+                            &mut o.crop_content_aware,
+                            &[(false, tl!("Background (Default)")), (true, tl!("Content-Aware Fill"))],
+                            150.0,
+                        );
                         if crate::crop_ui::preset_ratio(app) != before_ratio {
                             crate::crop_ui::apply_ratio(app);
                         }
@@ -1553,8 +1561,8 @@ fn body_text_width(ui: &egui::Ui, s: &str) -> f32 {
 fn opt_label(ui: &mut egui::Ui, s: &str) {
     let t = Tokens::get(ui.ctx());
     let text = if t.pro && !s.ends_with(':') { format!("{s}:") } else { s.to_string() };
-    let label = ui.label(RichText::new(tl!(&text)).color(t.text_dim));
-    widgets::scrub_label(ui, &label);
+    let label = ui.add(egui::Label::new(RichText::new(tl!(&text)).color(t.text_dim)).selectable(false));
+    widgets::scrub_option_label(ui, &label);
 }
 
 fn percent_field(ui: &mut egui::Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, width: f32) {
@@ -1662,12 +1670,13 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ui.painter().line_segment([pos2(x, r.top() - 8.0), pos2(x, r.bottom() + 8.0)], Stroke::new(1.0, t.separator));
                 ui.spacing_mut().item_spacing.y = 4.0;
                 use crate::dock::Group;
-                let entries: [(&str, &str, Group); 5] = [
+                let entries: [(&str, &str, Group); 6] = [
                     ("sliders-horizontal", tl!("Properties"), Group::Properties),
                     ("navigation", tl!("Navigator"), Group::Navigator),
                     ("palette", tl!("Color & Swatches"), Group::Color),
                     ("layers", tl!("Layers"), Group::Layers),
                     ("clock", tl!("History"), Group::History),
+                    ("brush", tl!("Brushes"), Group::Brushes),
                 ];
                 for (icon, name, g) in entries {
                     // Studio floats Properties outside the dock.
@@ -1712,6 +1721,7 @@ fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Pan
         (Group::Navigator, p.navigator),
         (Group::History, p.history),
         (Group::Layers, p.layers),
+        (Group::Brushes, p.brushes),
     ]
     .into_iter()
     .filter_map(|(g, on)| on.then_some(g))
@@ -1753,6 +1763,7 @@ pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate
         (Group::Layers, 0) => layers(app, ui),
         (Group::Layers, 1) => channels(app, ui),
         (Group::Layers, _) => crate::vector_ui::paths_panel(app, ui),
+        (Group::Brushes, _) => crate::brushes_tab::show(app, ui),
     }
 }
 
@@ -1916,7 +1927,7 @@ fn navigator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // applying egui's smoothed wheel tail a second time.
     let pinch_zooms = app.session.prefs().enhanced_controls.zoom_with_trackpad_pinch;
     if resp.hovered()
-        && let Some(crate::wheel_nav::Wheel::Zoom(factor)) = crate::wheel_nav::read(&ctx, true, pinch_zooms)
+        && let Some(crate::wheel_nav::Wheel::Zoom(factor)) = crate::wheel_nav::read(&ctx, true, pinch_zooms, egui::Id::new("pc-navigator-wheel"), true)
     {
         let view = &mut app.ui.views[idx];
         let next = crate::zoom_levels::clamp(view.zoom * factor, view.doc_size);
@@ -2198,31 +2209,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
     let t = Tokens::get(ui.ctx());
     if t.pro {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            let (r, _) = ui.allocate_exact_size(vec2(64.0, 22.0), Sense::hover());
-            ui.painter().rect_filled(r, t.radius_sm, t.field);
-            ui.painter().rect_stroke(r, t.radius_sm, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
-            icons::paint(ui, Rect::from_center_size(r.left_center() + vec2(11.0, 0.0), vec2(14.0, 14.0)), "search", 11.0, t.text_faint);
-            ui.painter().text(r.left_center() + vec2(22.0, 0.0), Align2::LEFT_CENTER, tl!("Kind"), egui::FontId::proportional(11.5), t.text_dim);
-            ui.add_space(4.0);
-            for (kind, icon, tip) in [
-                ("pixel", "image", tl!("Filter for pixel layers")),
-                ("adjustment", "adjustment-layer", tl!("Filter for adjustment layers")),
-                ("type", "type", tl!("Filter for type layers")),
-                ("shape", "square", tl!("Filter for shape layers")),
-                ("smart", "app-window", tl!("Filter for smart objects")),
-            ] {
-                let on = app.ui.layer_filter.iter().any(|k| k == kind);
-                if icons::button(ui, icon, 22.0, on, tip).clicked() {
-                    if on {
-                        app.ui.layer_filter.retain(|k| k != kind);
-                    } else {
-                        app.ui.layer_filter.push(kind.to_string());
-                    }
-                }
-            }
-        });
+        crate::layer_filter_ui::bar(app, ui);
         ui.add_space(4.0);
     }
     if let Some(l) = active_layer {
@@ -2347,7 +2334,7 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ui.scroll_with_delta(vec2(0.0, delta));
                 ctx.request_repaint();
             }
-            let filter = app.ui.layer_filter.clone();
+            let filter = crate::layer_filter_ui::Filter::of(&app.ui);
             let fx_collapsed = app.session.active().map(|d| d.fx_collapsed.clone()).unwrap_or_default();
             crate::layer_row_ui::begin(ui.ctx());
             // The drawn rows, top to bottom (#1721): the space between them and below the last
@@ -2358,18 +2345,8 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 if !photocraft_engine::select_extra_cmds::isolation_shows(&doc, &isolated, l.id) {
                     continue;
                 }
-                if !filter.is_empty() {
-                    let kind = match &l.content {
-                        LayerContent::Raster(_) => "pixel",
-                        LayerContent::Adjustment(_) | LayerContent::Fill(_) => "adjustment",
-                        LayerContent::Text(_) => "type",
-                        LayerContent::Shape(_) => "shape",
-                        LayerContent::Smart(_) => "smart",
-                        LayerContent::Group(_) => "",
-                    };
-                    if !filter.iter().any(|k| k == kind) {
-                        continue;
-                    }
+                if !filter.shows(l) {
+                    continue;
                 }
                 let row = RowSel { selected: selection.contains(&l.id), primary: active == Some(l.id), multi: selection.len() > 1 };
                 let top = ui.cursor().top();
@@ -3056,10 +3033,11 @@ fn draw_layer_thumb(app: &mut PhotocraftApp, ctx: &egui::Context, ui: &egui::Ui,
         _ => {
             // Keep row layout and outside thumbnail decorations when the image is clipped.
             if ui.is_rect_visible(rect) {
-                // The texture is a letterboxed square: draw only the part the document fills.
-                let (fitted, uv) = layer_thumb_fit(rect, doc.size.width, doc.size.height);
+                // The texture is a letterboxed square: draw only the part its frame (the document,
+                // or the layer's bounds) fills.
+                let (tex, frame) = app.layer_thumb(ctx, doc, l);
+                let (fitted, uv) = layer_thumb_fit(rect, frame.width(), frame.height());
                 widgets::checker(p, fitted, 5.0);
-                let tex = app.layer_thumb(ctx, doc, l);
                 p.image(tex, fitted, uv, Color32::WHITE);
             }
         }
@@ -3103,7 +3081,7 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         if let Some(layer) = doc.layers.first() {
             widgets::checker(ui.painter(), thumb, 4.0);
-            let tex = app.layer_thumb(&ctx, &doc, layer);
+            let (tex, _) = app.layer_thumb(&ctx, &doc, layer);
             ui.painter().image(tex, thumb, Rect::from_min_max(egui::Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
         }
         ui.painter().rect_stroke(thumb, 0.0, Stroke::new(1.0, t.separator), StrokeKind::Outside);
@@ -5457,35 +5435,45 @@ mod toolbar_tests {
     use super::*;
     use egui_kittest::kittest::Queryable;
 
-    /// #1197: the header chevron switches the toolbar between one and two columns.
+    /// #1197 / #3469: every theme can toggle the toolbar without changing its selection.
     #[test]
-    fn header_chevron_toggles_two_columns() {
-        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        let mut h = egui_kittest::Harness::builder().with_size(vec2(800.0, 1400.0)).build_ui_state(
-            |ui, app: &mut PhotocraftApp| {
-                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
-                    toolbar(app, ui);
-                    let left = ui.available_rect_before_wrap().left();
-                    ui.data_mut(|d| d.insert_temp(egui::Id::new("toolbar-test-left"), left));
-                }
-            },
-            app,
-        );
-        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Pro);
-        h.run_steps(2);
-        let left = |h: &egui_kittest::Harness<'_, PhotocraftApp>| h.ctx.data(|d| d.get_temp::<f32>(egui::Id::new("toolbar-test-left"))).unwrap_or(0.0);
-        let single = left(&h);
-        assert!(!h.state().ui.panels.toolbar_double);
+    fn header_chevron_toggles_two_columns_in_every_layout() {
+        for theme in [
+            crate::theme::ThemeKind::Pro,
+            crate::theme::ThemeKind::Studio,
+            crate::theme::ThemeKind::StudioLight,
+            crate::theme::ThemeKind::Classic,
+            crate::theme::ThemeKind::AdwaitaDark,
+            crate::theme::ThemeKind::SolarizedDark,
+            crate::theme::ThemeKind::BreezeDark,
+        ] {
+            let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            let mut h = egui_kittest::Harness::builder().with_size(vec2(800.0, 1400.0)).build_ui_state(
+                |ui, app: &mut PhotocraftApp| {
+                    if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                        toolbar(app, ui);
+                        let left = ui.available_rect_before_wrap().left();
+                        ui.data_mut(|d| d.insert_temp(egui::Id::new("toolbar-test-left"), left));
+                    }
+                },
+                app,
+            );
+            PhotocraftApp::setup_context(&h.ctx, theme);
+            h.run_steps(2);
+            let left = |h: &egui_kittest::Harness<'_, PhotocraftApp>| h.ctx.data(|d| d.get_temp::<f32>(egui::Id::new("toolbar-test-left"))).unwrap_or(0.0);
+            let single = left(&h);
+            assert!(!h.state().ui.panels.toolbar_double, "{theme:?}");
 
-        h.get_by_label("Toolbar").click();
-        h.run_steps(2);
-        assert!(h.state().ui.panels.toolbar_double);
-        assert!(left(&h) > single + 20.0, "the toolbar did not widen: {single} -> {}", left(&h));
+            h.get_by_label("Toolbar").click();
+            h.run_steps(2);
+            assert!(h.state().ui.panels.toolbar_double, "{theme:?}");
+            assert!(left(&h) > single + 20.0, "{theme:?}: the toolbar did not widen: {single} -> {}", left(&h));
 
-        h.get_by_label("Toolbar").click();
-        h.run_steps(2);
-        assert!(!h.state().ui.panels.toolbar_double);
-        assert_eq!(left(&h), single);
+            h.get_by_label("Toolbar").click();
+            h.run_steps(2);
+            assert!(!h.state().ui.panels.toolbar_double, "{theme:?}");
+            assert_eq!(left(&h), single, "{theme:?}");
+        }
     }
 
     fn click(h: &mut egui_kittest::Harness<'_, PhotocraftApp>, p: egui::Pos2) {
