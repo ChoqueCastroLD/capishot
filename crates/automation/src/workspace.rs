@@ -826,6 +826,10 @@ mod tests {
         if matches!(id, "prefs.get" | "prefs.reset") {
             return false;
         }
+        // Lists installed ICC profiles with their paths in the result; takes no path parameter.
+        if id == "edit.installedProfiles" {
+            return false;
+        }
         // These registry descriptions refer to document vector paths, not host files.
         if matches!(
             id,
