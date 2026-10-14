@@ -192,8 +192,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             // A dialog of a few short fields (`__compact`, Fit Image) is narrower (#4673): the title
             // rule and the button row fill the width they are given, so it needs its own maximum too.
             let compact = d.fields.contains_key("__compact");
+            // The curve editor caps its graph allocation at 300 points (#5113).
+            let curves = fields.get("__adjust").and_then(Value::as_str) == Some("curves");
             if !compact {
-                ui.set_min_width(380.0);
+                ui.set_min_width(if curves { 300.0 } else { 380.0 });
             }
             let wide = crate::prefs_ui::width(&d.fields, (ctx.content_rect().width() - 48.0).max(380.0));
             if let Some(w) = wide {
@@ -215,6 +217,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 600.0
             } else if compact {
                 260.0
+            } else if curves {
+                300.0
             } else {
                 440.0
             }));
