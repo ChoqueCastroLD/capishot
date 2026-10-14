@@ -336,6 +336,10 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
                     || (doc && matches!(&i["window.arrange.".len()..], "floatAllInWindows" | "cascade" | "tile" | "tileAllVertically" | "tileAllHorizontally"))
             }
         },
+        // A file picker that hands over contents (the browser's) places them without a path:
+        // the engine's path form can't run there, the picker's can.
+        "file.placeEmbedded" => doc && (app.session.is_enabled(id) || app.services.file_dialog.is_some()),
+        "file.openAs" => app.session.is_enabled(id) || app.services.file_dialog.is_some(),
         i if wraps(i) => app.session.is_enabled(i),
         _ => true,
     })

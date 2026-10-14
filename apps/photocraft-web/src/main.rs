@@ -9,7 +9,10 @@
 //! - File → Open uses the browser file picker; bytes arrive asynchronously through
 //!   `Services::inbox`;
 //! - saving/exporting triggers a browser download;
-//! - dropped files are read asynchronously by `web::WebShell` and delivered through the inbox.
+//! - dropped files are read asynchronously by `web::WebShell` and delivered through the inbox
+//!   (opened), or placed as layers when dropped on an open document's canvas;
+//! - the system clipboard is read from the page's `paste` event (Ctrl/⌘+V) or, for Edit › Paste
+//!   from a menu, `navigator.clipboard.read()`, and copies go out as PNG (`clipboard.rs`).
 //!
 //! URL query flags: `?cpu` forces the CPU canvas path (same as `PHOTOCRAFT_CPU_CANVAS=1`);
 //! `?webgl` forces the WebGL2 backend instead of WebGPU; `?perf=1` logs frame timings per canvas
@@ -25,6 +28,10 @@ mod frame_perf;
 #[cfg(target_arch = "wasm32")]
 mod indexed_presets;
 
+#[cfg(target_arch = "wasm32")]
+mod clipboard;
+#[cfg(any(target_arch = "wasm32", test))]
+mod clipboard_data;
 #[cfg(target_arch = "wasm32")]
 mod embed;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -102,7 +109,10 @@ mod tests {
         let start = html.find("pc.start()").expect("app start");
         let pool_up = html.find("await pool;").expect("waits for the pool");
         let ready = html.find("pc.threadPoolReady()").expect("reports the pool up");
-        assert!(isolated < init && init < pool && pool < start && start < pool_up && pool_up < ready, "isolation check, instantiate, pool, start, then pool ready");
+        assert!(
+            isolated < init && init < pool && pool < start && start < pool_up && pool_up < ready,
+            "isolation check, instantiate, pool, start, then pool ready"
+        );
         let web = include_str!("web.rs");
         assert!(web.contains("AtomicBool::new(cfg!(not(target_feature = \"atomics\")))"), "the threads build waits for threadPoolReady");
         let headers = include_str!("../../../packaging/web-threads/_headers");

@@ -156,7 +156,17 @@ pub fn start() {
         crate::wheel_guard::install();
         let pen_target = canvas.clone();
         let perf = crate::frame_perf::FramePerf::new(&canvas, perf_debug);
-        let boot = Boot { presets, preset_warnings, database, embed_query, photopea, pen_target, force_cpu, perf, loading: document.get_element_by_id("photocraft_loading") };
+        let boot = Boot {
+            presets,
+            preset_warnings,
+            database,
+            embed_query,
+            photopea,
+            pen_target,
+            force_cpu,
+            perf,
+            loading: document.get_element_by_id("photocraft_loading"),
+        };
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
@@ -212,6 +222,7 @@ impl Boot {
     fn build(self, ctx: &egui::Context, wgpu: Option<eframe::egui_wgpu::RenderState>) -> WebShell {
         let Boot { presets, mut preset_warnings, database, embed_query, photopea, pen_target, force_cpu, perf, loading } = self;
         let inbox: Inbox = Arc::default();
+        let places: Inbox = Arc::default();
         let served: Served = Arc::default();
         load_font_manifest(served.clone(), ctx.clone());
         let (session, warnings) = crate::preset_bridge::session(presets.clone());
@@ -227,6 +238,8 @@ impl Boot {
             photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
         }
         listen_pen(&pen_target, app.stylus.feed.clone());
+        crate::clipboard::install(ctx);
+        listen_drag_position();
         app.set_theme(ctx, ThemeKind::Pro);
         let mut gpu = ("cpu", "unknown");
         if let Some(rs) = wgpu
@@ -251,7 +264,7 @@ impl Boot {
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, inbox, unsaved, served, database, presets, startup_frames: 0, perf }
+        WebShell { app, inbox, places, canvas: pen_target, unsaved, served, database, presets, startup_frames: 0, perf }
     }
 }
 
@@ -332,6 +345,37 @@ fn listen_pen(target: &web_sys::HtmlCanvasElement, feed: photocraft_ui_egui::sty
             cb.forget();
         }
     }
+}
+
+thread_local! {
+    /// Where the last file drag was over the page (client CSS pixels): eframe's drop event carries
+    /// no position.
+    static DRAG_AT: std::cell::Cell<Option<(f64, f64)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Track the pointer while files are dragged over the page, for where a drop lands.
+fn listen_drag_position() {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
+    let cb = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(|e: web_sys::MouseEvent| {
+        DRAG_AT.with(|d| d.set(Some((f64::from(e.client_x()), f64::from(e.client_y())))));
+    });
+    for kind in ["dragover", "drop"] {
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(kind, cb.as_ref().unchecked_ref(), &opts);
+    }
+    cb.forget();
+}
+
+/// The last drag position in egui points (the canvas fills the page; egui's points are CSS pixels
+/// divided by its zoom factor).
+fn drop_position(canvas: &web_sys::HtmlCanvasElement, ctx: &egui::Context) -> Option<egui::Pos2> {
+    let (x, y) = DRAG_AT.with(std::cell::Cell::get)?;
+    let r = canvas.get_bounding_client_rect();
+    let zoom = ctx.zoom_factor().max(0.01);
+    let p = egui::pos2(((x - r.left()) as f32) / zoom, ((y - r.top()) as f32) / zoom);
+    (p.x.is_finite() && p.y.is_finite()).then_some(p)
 }
 
 /// Closing or reloading the tab while a document has unsaved changes asks first, as closing the
@@ -442,6 +486,9 @@ async fn fetch_bytes(url: &str, integrity: Option<&str>) -> Result<Vec<u8>, Stri
 struct WebShell {
     app: PhotocraftApp,
     inbox: Inbox,
+    /// Files dropped on the canvas, read: placed as layers, like the desktop's canvas drops.
+    places: Inbox,
+    canvas: web_sys::HtmlCanvasElement,
     /// Read by the `beforeunload` listener ([`guard_unload`]).
     unsaved: Arc<AtomicBool>,
     served: Served,
@@ -505,8 +552,14 @@ impl WebShell {
 }
 
 impl eframe::App for WebShell {
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         crate::wheel_guard::restore(raw_input);
+        // The app's own hook (clipboard keys, synthetic automation input), around the browser's
+        // clipboard (clipboard.rs).
+        let typing = ctx.text_edit_focused() || self.app.ui.text_edit.is_some();
+        crate::clipboard::before_app(typing, raw_input);
+        eframe::App::raw_input_hook(&mut self.app, ctx, raw_input);
+        crate::clipboard::after_app(typing, raw_input);
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
@@ -520,8 +573,10 @@ impl eframe::App for WebShell {
         }
         self.perf.begin(frame.info().cpu_usage);
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
+        // Dropped on the canvas of an open document: placed as layers; elsewhere opened.
+        let on_canvas = !dropped.is_empty() && self.app.drop_places_on_canvas(ctx, drop_position(&self.canvas, ctx));
         for f in dropped {
-            let inbox = self.inbox.clone();
+            let inbox = if on_canvas { self.places.clone() } else { self.inbox.clone() };
             let ctx = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped".into());
@@ -533,6 +588,16 @@ impl eframe::App for WebShell {
                     Err(e) => log::error!("couldn't read dropped file {name}: {e}"),
                 }
             });
+        }
+        let placed = std::mem::take(&mut *self.places.lock().unwrap_or_else(|e| e.into_inner()));
+        for (name, bytes) in placed {
+            self.app.place_dropped_bytes(name, bytes);
+        }
+        for (title, lines, error) in crate::clipboard::take_notices() {
+            photocraft_ui_egui::notices::post(&mut self.app, i18n::t(&title), lines, error, None);
+        }
+        if crate::clipboard::take_finished() {
+            let _ = self.app.resume_clipboard_paste(ctx);
         }
         self.serve_fonts(ctx);
         fetch_catalogs(ctx);
@@ -634,6 +699,9 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
             photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())
         })),
         inbox: Some(inbox),
+        clipboard_set_image: Some(Box::new(crate::clipboard::set)),
+        clipboard_get_image: Some(Box::new(crate::clipboard::get)),
+        clipboard_refresh: Some(Box::new(crate::clipboard::refresh)),
         // Preferences live in the browser's localStorage.
         load_prefs: Some(Box::new(|| local_storage()?.get_item(PREFS_KEY).ok().flatten())),
         save_prefs: Some(Box::new(|text: &str| local_storage().ok_or("no localStorage")?.set_item(PREFS_KEY, text).map_err(|e| format!("{e:?}")))),
