@@ -5,10 +5,11 @@ line by line with styled text. Capishot ports it natively. The full plan (featur
 work packages) is `capishot-typer-plan.md`, kept outside the repo; this page is the map of what is in
 the tree.
 
-Status (2026-10-14): **WP0, WP1 and WP3 done.** The script, cursor, page files, style library,
+Status (2026-10-14): **WP0, WP1, WP3 and WP4 done.** The script, cursor, page files, style library,
 TypeR JSON exchange and settings work, as commands, and so does the core typesetting loop: paste,
 apply, align, resize, multi-bubble, bubble detection. The TypeR panel (Window › TypeR) drives it.
-Line shaping (WP4) is still to come; `typer.shapeText` is a registered stub.
+WP4 adds hyphenation in paragraph text, TextShapeR line shaping (`typer.shapeText`, the panel's
+strip) and page-wide bubble detection (`typer.detectBubbles`).
 
 ## Decisions
 
@@ -44,14 +45,19 @@ crates/typer (photocraft-typer, L2: doc, color, geom, algo, serde; no egui, no I
   payload.rs   scaled_style (S14), resolve_point_text (L6), selected_layers (P9), stored_selections (M2),
                stored_selection_line (M3)
   bubble.rs    Mask, wand (D1), fill_holes, opened_bounds (P7, TypeR 3.0 adaptive opening), rows (D3),
-               Judge (is this region a bubble?), BubbleHit, StoredSelection
+               Judge (is this region a bubble?), BubbleHit, StoredSelection; WP4: wand_bubble (the
+               lobe of a double bubble holding the text), outline_dark, body_rows
+  shaper.rs    TextShapeR (D4, textShapeR.js): Measure (TextMeasure = real layout, CharClass = TypeR's
+               estimate), presets, DP split, scoring, silhouette gates, bubble fit, hyphen splits
+  pagedetect.rs page-wide detection (D7, bubbleDetection.js f01c0d3) and the neck split (D6)
+  synth.rs     synthetic manga pages for tests (doc-hidden)
   place.rs     box_size, fit_height, fit_width, center_offset, px_to_pt (placement arithmetic)
 crates/engine/src
   typer_state.rs        TyperSession { state, stored_selections } = Session::typer; to_json/from_json
   typer_cmds.rs         session, library and settings commands (working)
   typer_place_cmds.rs   placement, multi-bubble, cleaning toggle, style from layer (WP1)
     support.rs          page image cache, selection mask, style → type, measure/fit/centre by ink
-  typer_query_cmds.rs   detectBubble, selectionBounds (WP1), shapeText (stub, WP4)
+  typer_query_cmds.rs   detectBubble, selectionBounds (WP1), shapeText, detectBubbles (WP4)
 ```
 
 **State lives in the engine** (`Session::typer`), not in the UI, so the CLI, actions and MCP agents
@@ -104,7 +110,8 @@ styleName, page, image, usableLines, lineCount, textScale` (plus `moved`).
 | `typer.multiBubble.toggle` / `.capture` / `.removeLast` / `.clear` | works | session state (`journal: false`); capture stores raw and opened bounds with the line and style, then advances; removeLast restores the line (M3) |
 | `typer.style.fromLayer` | works | L4 "Copy layer style": new style, or `id` to update one |
 | `typer.detectBubble`, `typer.selectionBounds` | works | queries: bbox, opened, centre, rows (D3), `found` + `reason` |
-| `typer.shapeText` | stub (WP4) | |
+| `typer.shapeText` | works | D4: TextShapeR variants of the active (or given) type layer's text, measured with its style, fitted to the selection or the wand bubble around it (tail removed, the lobe of a double bubble); plain `text` without a document uses TypeR's character classes |
+| `typer.detectBubbles` | works | D7: every bubble on the page in reading order (`rtl` default true), with body box, centre, rows, confidence, `split` for double-bubble lobes; `store` queues them as multi-bubble selections with consecutive script lines |
 
 Menu: `Type › TypeR` holds Next/Previous Line, Next/Previous Page, Next/Previous Style and Next
 Size Preset, with no shortcuts. Everything else has no menu item until the panel exists.
@@ -150,13 +157,39 @@ Size Preset, with no shortcuts. Everything else has no menu item until the panel
   never hyphenate), else guessed from the paragraph (ñ ¿ ¡ ã õ ç and common words; English by
   default). Left-to-right horizontal text without tabs only. Off = the old layout, unchanged.
   Pattern licences: `crates/text/LICENSE-hyphenation.txt`.
-- **WP4 (TextShapeR, harness).** Use `typer.shapeText`, `bubble::rows` /
-  `typer.detectBubble {layer}` (rows of the hole-filled bubble) and `typer.applyShape` (already
-  works: lines in, box shrunk, centre kept). The engine-side real-page check is
-  `typer_place_cmds::tests::typer_real_pages` (`#[ignore]`, `CAPISHOT_TYPER_PAGES`); the full
-  harness (§3.8 #4 c/d) goes in `crates/typer/tests/real_pages.rs`. Local page 15 has no speech
-  bubbles (narration and SFX over art), so it measures the "no bubble" rejection, not centring:
-  a chapter page with bubbles plus a labels file is needed for the centring floors.
+- **WP4 TextShapeR, detection, harness: done.**
+  - **`shaper.rs`** ports `textShapeR.js` (develop 71bc061) with TypeR's neutral tuning: the
+    four presets, the target grid (curves × shifts × biases), the DP split, the score
+    (line count, hyphens, fit, per-line, silhouette aesthetics, outline steps), the badness
+    gates, the line-count diversity pick. Widths come from a `Measure`: in the engine
+    `TextMeasure`, the layer's font at its size through `photocraft-text`; one TypeR unit is
+    the text's measured width over its character-class width, so TypeR's constants keep their
+    scale. The fit uses the leading as line height and the bubble body (opened mask) as box and
+    rows. Hyphen splits: Liang points (body ≥ 8 letters, ≥ 3 on each side, best 3 nearest the
+    middle) for es/pt/en, TypeR's French syllable rules for `fr`; at most one hyphen per variant.
+    Not ported: the learning (D5: feedback, ranker, exemplars, the shipped default tuning),
+    the manual-shape mode, the 16-entry cache.
+  - **`pagedetect.rs`** ports `bubbleDetection.js`'s learned pipeline with its prior weights:
+    page downscaled to ≤ 1500 px, white components not touching the border, TypeR's candidate
+    filters, the 6-feature logistic model (`p ≥ 0.78 − 0.055(s − 1)`), the chamfer neck split
+    with its split model (≥ 0.62), reading order (rows, RTL). Capishot also applies TypeR's
+    stable-detector gates (area ≥ 0.25 %/s, short side ≥ 2 % of the page, aspect ≤ 8,
+    fill ≥ 0.45, runs ≤ 1.8 counted with holes filled) and a dark outline on ≥ 80 % of the edge:
+    on local page 15 (no speech bubbles) false detections went from 29 to 3. Training is not
+    ported. 2000×3000: ~60 ms cached, ~190 ms with the first composite (native, opt-level 1).
+  - **Align, detectBubble, shapeText** take the lobe holding the text when the wand region is a
+    confident double bubble, and the judge refuses regions whose edge meets a dark outline
+    less than 55 % of the time (art the wand stopped in by tolerance).
+  - **Harness**: `crates/typer/tests/real_pages.rs`. `synthetic_pages` always runs (busy pages,
+    joined doubles, SFX) and asserts floors: all bubbles found, no false detections, centre
+    error ≤ 12 px, Align centred in every bubble and lobe, top TextShapeR variant fits.
+    `real_pages` (`--ignored`, `CAPISHOT_TYPER_PAGES`) reads `bounds.json` (+ optional
+    `labels.json`): page 15 es/en/pt: 31/31 texts refused (none in a speech bubble), 3 page
+    detections (none on text), human line breaks in the top 3 for 1–3 of 8 multi-line texts
+    (they are SFX and narration, shaped without an outline). A chapter page with bubbles and
+    labels is needed for real centring and shaping floors. `CAPISHOT_TYPER_DUMP=<dir>` writes
+    the composite and detections.
+  - The engine-side real-page check is still `typer_place_cmds::tests::typer_real_pages`.
 
 ## The panel
 
@@ -169,6 +202,7 @@ dialogs, collapsed folders, splitter).
 |---|---|
 | `mod.rs` | the dock body (preview, script, splitter, styles, footer), the panel commands `typer.ui.*`, the confirmation dialog, workspace persistence |
 | `preview.rs` | Paste (multi-bubble count), Align, size −/+ with the step field, keep-size badge (Alt held), multi-bubble selection count and −, ↑/↓, line/page/style, text scale %, apply arrow, the line in its style's font (click: scroll the script to it) |
+| `shaper_ui.rs` | the TextShapeR strip under the preview line: the active type layer's shapes three at a time (‹ › pages), click applies (`typer.applyShape`, one step), Shift+click also goes to the next line; red border = doesn't fit; shaped once per change of the layer's text, style or geometry (cached in egui memory, not in `TyperUi`) |
 | `script_editor.rs` | `TextEdit` with a layouter (page markers, ignored lines, tag chips in the tag colour, ignore tags and Markdown markers dimmed), gutter with numbers / `P<n>` / current-line marker; a gutter click makes a line current (a marker or note: the next usable line); ⌘B / ⌘I and the B / I buttons toggle Markdown (`claim_format_keys` takes them before the menus); Import `.txt`/`.md` |
 | `styles.rs` | Unsorted, then the folder tree (collapsible, bold when it holds the current style); rows with colour swatch (stroke outline), tag chip, the name in its font, size or preset chips, quick −/+ on hover, star for the default style; right-click: edit, apply style, copy / paste / duplicate, tags on/off, default style, delete; folder menu: add style, paste, edit, subfolder, duplicate, export, delete (with or without styles) |
 | `style_editor.rs` | name, folder, tags, tag colour (TypeR's 8 + custom), layer kind (`textType`), font family (installed families listed) and style, size + unit, leading, tracking, H/V scale, baseline shift, kerning, colour, faux bold/italic, caps, underline, strike, ligatures, super/subscript, diacritics (Middle Eastern mode), alignment, hyphenate, hanging punctuation, anti-aliasing, stroke, up to three size presets with default and minimum page widths (auto size by page width), Copy layer style (`psjson::text_props_from` of the active text layer) |
@@ -216,8 +250,8 @@ released, ⇧ not held) is stored with `typer.multiBubble.capture`; `capture_bub
 selection's bounds only when the document's revision moves.
 
 **Not yet:** drag-to-reorder styles and folders, the page-file picker and page sync (N4, WP2-B),
-the multi-bubble canvas overlay (numbered outlines) and the Align preview, tabs (N6), TextShapeR
-strip (WP4), UI order/visibility toggles.
+the multi-bubble canvas overlay (numbered outlines) and the Align preview, tabs (N6), a review
+dialog for `typer.detectBubbles` (TypeR's toggling modal), UI order/visibility toggles.
 
 ## Tests
 
@@ -231,6 +265,10 @@ strip (WP4), UI order/visibility toggles.
 - `testTextLayerPayload`
 - `testPageImageMapping`
 - the style half of `testNumpadStyleShortcuts`
+- `testTextShapeR` (neutral-tuning cases: convex blocks, hyphenation on/off, Markdown spans,
+  profiles, punctuation breaks, French syllables, the calibrated round bubble) and
+  `testBubbleDetection` (stable and learned detection, sensitivity, the peanut split, reading
+  order), plus es/pt/en hyphen splits and real-font fitting
 
 It also covers 2.5 behaviours: first-match tags, `//` and `//:`, ignore tags, the end-of-page lock,
 the merge by `edited`, 2.5 and 3.0 export round trips, and the psjson mapping and its reverse.
@@ -246,3 +284,10 @@ tiny ones are `smallSelection`, box width/height rules, point text, apply keeps 
 resize adds the delta to fixed leading, multi paste is one step, applyLines rolls back on a
 non-type target, keep size, text scale at 300 dpi, the cleaning toggle, style from layer, the page
 cache, and bad params. `typer_place_perf` (ignored) times a 2000×3000 page.
+
+Hyphenation: `crates/text/src/hyphen.rs` (words, limits, languages) and `hyphen_tests.rs`
+(layout: off changes nothing, breaks at pattern points, fit with the hyphen, centring, the zone,
+the consecutive limit, languages from the style or the text). Query commands:
+`typer_query_cmds_tests.rs` (shape and apply one step, selection wins, no bubble over dark art,
+plain text, detection count/order/store/pasteMany, bad params). Panel strip:
+`typer/shaper_ui.rs` tests (click applies, Shift+click advances).
