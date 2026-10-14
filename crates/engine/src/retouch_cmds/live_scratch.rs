@@ -81,6 +81,33 @@ impl Scratch {
         Region::read(&self.surf, r)
     }
 
+    /// The working pixels of `r` as [`Self::read`] gives them, without rendering (and keeping)
+    /// the tiles no dab has reached: those are read straight from the source. A commit reads
+    /// the stroke's whole bounding box this way, most of which the dabs never touched.
+    pub(super) fn peek(&self, r: Rect) -> Region {
+        let mut out = Region::read(&self.surf, r);
+        let Some(l) = self.lazy.as_ref() else { return out };
+        let (w, n) = (r.width() as usize, out.ch);
+        for t in r.tiles() {
+            if l.done.contains(&t) {
+                continue;
+            }
+            let part = t.rect().intersect(&r);
+            let reg = match &l.source {
+                Source::Composite { pre, id, which, fmt } => composite_region(pre, *id, *which, part, *fmt),
+                Source::Surface(s) => Region::read(s, part),
+            };
+            let pw = part.width() as usize * n;
+            for (k, y) in (part.y0..part.y1).enumerate() {
+                let o = ((y - r.y0) as usize * w + (part.x0 - r.x0) as usize) * n;
+                if let (Some(dst), Some(src)) = (out.data.get_mut(o..o + pw), reg.data.get(k * pw..(k + 1) * pw)) {
+                    dst.copy_from_slice(src);
+                }
+            }
+        }
+        out
+    }
+
     /// Store `reg` (its tiles are rendered first, so pixels around it stay the composite's).
     pub(super) fn write(&mut self, reg: &Region) {
         self.ensure(reg.rect);

@@ -421,3 +421,24 @@ fn a_live_dab_offer_is_not_taken_by_a_different_stroke() {
     let r = s.execute("paint.dodge", with_points(&p, &path)).unwrap();
     assert!(r.get("fromLive").is_none(), "the document changed since the stroke began");
 }
+
+/// The Spot Healing Brush runs as a background job when started so (the desktop, the browser
+/// threads build): the same pixels and damage as inline, and one undo step.
+#[test]
+fn spot_healing_in_the_background_heals_what_inline_does() {
+    let make = || {
+        let mut s = session(120, 80, 8);
+        paint_layer(&mut s, |x, y| [((x * 5 + y * 3) % 23) as f32 / 22.0, 0.4, ((x + 2 * y) % 17) as f32 / 16.0, 1.0]);
+        s
+    };
+    let p = json!({"points": [[30, 30], [60, 40], [80, 35]], "size": 14});
+    let mut inline = make();
+    let want = inline.execute("paint.spotHealing", p.clone()).unwrap();
+    let mut bg = make();
+    let crate::jobs::Started::Job(job) = bg.start("paint.spotHealing", p).unwrap() else { panic!("not a job") };
+    assert_eq!(bg.wait_job(job).unwrap(), want);
+    same_pixels(&inline.active().unwrap().doc, &bg.active().unwrap().doc, "spot healing");
+    assert_eq!(bg.active().unwrap().last_damage, inline.active().unwrap().last_damage);
+    bg.execute("edit.undo", json!({})).unwrap();
+    same_pixels(&make().active().unwrap().doc, &bg.active().unwrap().doc, "undone");
+}

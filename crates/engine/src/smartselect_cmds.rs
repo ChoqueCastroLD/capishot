@@ -110,12 +110,24 @@ fn quick_selection(s: &mut Session, p: &Value) -> Result<Value> {
         _ => SelectionMode::Add,
     };
     let enhance = b(p, "enhanceEdge", false);
-    let region = with_sampler(s, b(p, "sampleAllLayers", false), |smp, doc| {
-        let canvas = doc.bounds();
-        let r = quick::quick_select(smp, canvas, &pts, size)?;
-        if enhance { matting::refine_mask(smp, &matting::region_reader(&r), r.bbox, canvas, &ENHANCE) } else { Some(r) }
-    })?;
-    apply(s, "Quick Selection", region.as_ref(), m)
+    let all = b(p, "sampleAllLayers", false);
+    // A background job when started so (the desktop, the browser threads build): the graph cut
+    // runs on a worker against the document as it is; the selection lands when it ends.
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let (doc, layer) = (st.doc.clone(), st.active_layer);
+    crate::jobs::run(
+        s,
+        "Quick Selection",
+        true,
+        move |_| {
+            Ok(with_doc_sampler(&doc, layer, all, |smp, doc| {
+                let canvas = doc.bounds();
+                let r = quick::quick_select(smp, canvas, &pts, size)?;
+                if enhance { matting::refine_mask(smp, &matting::region_reader(&r), r.bbox, canvas, &ENHANCE) } else { Some(r) }
+            }))
+        },
+        move |s, region| apply(s, "Quick Selection", region.as_ref(), m),
+    )
 }
 
 fn rect_param(p: &Value) -> Option<Rect> {
@@ -481,6 +493,24 @@ mod tests {
             }
         }
         i as f32 / u.max(1) as f32
+    }
+
+    /// Quick Selection runs as a background job when started so (the desktop, the browser threads
+    /// build): the same selection as inline, one undo step, and the document locked meanwhile.
+    #[test]
+    fn quick_selection_in_the_background_selects_what_inline_does() {
+        let p = json!({"points": [[20, 50], [35, 50]], "size": 8, "enhanceEdge": true});
+        let mut inline = two_regions(8);
+        let want = inline.execute("select.quick", p.clone()).unwrap();
+        let mut bg = two_regions(8);
+        let crate::jobs::Started::Job(job) = bg.start("select.quick", p).unwrap() else { panic!("not a job") };
+        assert!(bg.execute("select.all", json!({})).is_err(), "the document is locked while it runs");
+        assert_eq!(bg.wait_job(job).unwrap(), want);
+        let (a, b) = (inline.active().unwrap().doc.selection.clone().unwrap(), bg.active().unwrap().doc.selection.clone().unwrap());
+        let r = Rect::new(0, 0, 140, 100);
+        assert_eq!(a.read_region(r), b.read_region(r));
+        bg.execute("edit.undo", json!({})).unwrap();
+        assert!(bg.active().unwrap().doc.selection.is_none());
     }
 
     #[test]
