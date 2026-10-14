@@ -1,6 +1,6 @@
 use super::*;
 use photocraft_color::{Color, ColorMode, PixelFormat, SampleType};
-use photocraft_doc::adjust::{CurvePoint, LevelsChannel};
+use photocraft_doc::adjust::{CurvePoint, LevelsChannel, ToneSpace};
 use photocraft_doc::{Adjustment, Document, Fill, Layer, LayerContent, LayerMask};
 use photocraft_geom::Size;
 
@@ -2618,6 +2618,86 @@ fn lab_documents_invert_and_posterize_l_a_and_b() {
         assert!(want[0] > 45.0 && want[1].abs() < 2.0 && want[2].abs() < 2.0, "{want:?}");
         near3(post, want, 1.0, &format!("{depth:?} posterize"));
     }
+}
+
+/// A Lab document of one opaque layer holding stored L, a, b `lab` (normalised as Lab surfaces
+/// store them), with `adjustments` above it.
+fn lab_stack(lab: [f32; 3], depth: SampleType, adjustments: Vec<Adjustment>) -> Document {
+    let mut doc = Document::new("lab", Size::new(4, 4), ColorMode::Lab, depth);
+    let fmt = doc.pixel_format();
+    let mut layer = Layer::raster("bg", fmt);
+    if let Some(s) = layer.surface_mut() {
+        s.fill_rect(Rect::new(0, 0, 4, 4), &[lab[0], lab[1], lab[2], 1.0][..fmt.channels()]);
+    }
+    doc.layers.push(layer);
+    doc.layers.extend(adjustments.into_iter().map(|a| Layer::new("adj", LayerContent::Adjustment(a))));
+    doc
+}
+
+/// Display RGB of stored Lab `n`.
+fn lab_display(n: [f32; 3]) -> [f32; 3] {
+    photocraft_color::convert::lab_to_srgb([n[0] * 100.0, n[1] * 255.0 - 128.0, n[2] * 255.0 - 128.0])
+}
+
+// A saturated purple far outside sRGB (L 60, a +90, b -90). Read through display RGB it clips,
+// so Invert and Levels on L, a and b saw the clipped colour: the photoshop corpus's lab8 and
+// lab16 invert.psd were up to 11 levels off there. Worked out on the stored values, Invert gives
+// the bytes' complements (L 153 → 102, a 218 → 37, b 38 → 217), as Photoshop does.
+#[test]
+fn lab_adjustments_work_on_the_stored_values() {
+    let byte = |v: u8| f32::from(v) / 255.0;
+    let doc = lab_stack([byte(153), byte(218), byte(38)], SampleType::U8, vec![Adjustment::Invert]);
+    let p = px(&doc, 1, 1);
+    let want = lab_display([byte(102), byte(37), byte(217)]);
+    near3([p[0], p[1], p[2]], want, 1e-4, "inverted out-of-gamut purple");
+    // Through clipped display RGB the result is another colour.
+    let clipped = photocraft_color::convert::srgb_to_lab(lab_display([byte(153), byte(218), byte(38)]));
+    let via_rgb = lab_display([1.0 - clipped[0] / 100.0, (-clipped[1] - 1.0 + 128.0) / 255.0, (-clipped[2] - 1.0 + 128.0) / 255.0]);
+    assert!(via_rgb.iter().zip(want).any(|(a, b)| (a - b).abs() > 4.0 / 255.0), "the clipped path differs: {via_rgb:?} vs {want:?}");
+    // Levels on L only (a Lab record), half masked by opacity: L 0.6 → 0.6^(1/2) mixed halfway.
+    let ch = LevelsChannel { gamma: 2.0, ..Default::default() };
+    let levels = Adjustment::Levels {
+        master: LevelsChannel::default(),
+        per_channel: [ch.clone(), LevelsChannel::default(), LevelsChannel::default()],
+        space: ToneSpace::Lab,
+        black: LevelsChannel::default(),
+    };
+    let mut doc = lab_stack([0.6, byte(218), byte(38)], SampleType::U16, vec![levels]);
+    if let Some(l) = doc.layers.last_mut() {
+        l.opacity = 0.5;
+    }
+    let p = px(&doc, 1, 1);
+    let l = 0.6 + (adjust::levels_q(&ch, 0.6, Some(32768.0)) - 0.6) * 0.5;
+    near3([p[0], p[1], p[2]], lab_display([l, byte(218), byte(38)]), 1e-3, "levels on L at half opacity");
+}
+
+// Flattening a Lab document keeps its stored values, out-of-gamut colours included (the RGB
+// compositor clipped them on the way through display RGB).
+#[test]
+fn lab_flatten_keeps_the_stored_values() {
+    let lab = [0.6, 218.0 / 255.0, 38.0 / 255.0];
+    for depth in [SampleType::U8, SampleType::U16] {
+        let doc = lab_stack(lab, depth, vec![]);
+        let s = flatten_to_surface(&doc, doc.pixel_format(), None);
+        let got = s.pixel(2, 2);
+        assert!(got.iter().zip(lab).all(|(g, w)| (g - w).abs() < 1e-3), "{depth:?}: {got:?}");
+    }
+}
+
+// Anything the stored values can't carry exactly keeps the RGB compositor.
+#[test]
+fn lab_stacks_with_other_layers_keep_the_rgb_compositor() {
+    let lab = [0.6, 0.5, 0.5];
+    assert!(native_lab::LabStack::new(&lab_stack(lab, SampleType::U8, vec![Adjustment::Invert])).is_some_and(|s| s.adjusts()));
+    let hue = Adjustment::HueSaturation { hue: 30.0, saturation: 0.0, lightness: 0.0, colorize: false, ranges: photocraft_doc::adjust::HueRange::defaults() };
+    assert!(native_lab::LabStack::new(&lab_stack(lab, SampleType::U8, vec![hue])).is_none());
+    let mut multiply = lab_stack(lab, SampleType::U8, vec![Adjustment::Invert]);
+    if let Some(l) = multiply.layers.last_mut() {
+        l.blend = photocraft_color::blend::BlendMode::Multiply;
+    }
+    assert!(native_lab::LabStack::new(&multiply).is_none());
+    let rgb = Document::with_background("rgb", Size::new(4, 4), ColorMode::Rgb, SampleType::U8, Color::rgb(0.5, 0.5, 0.5));
+    assert!(native_lab::LabStack::new(&rgb).is_none());
 }
 
 #[test]

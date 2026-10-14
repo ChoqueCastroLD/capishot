@@ -396,6 +396,49 @@ fn lab_denorm(n: [f32; 3]) -> [f32; 3] {
     lab_to_srgb([n[0] * 100.0, n[1] * 255.0 - 128.0, n[2] * 255.0 - 128.0])
 }
 
+/// Neutral a or b as Lab surfaces store it ((0 + 128) / 255).
+pub const LAB_NEUTRAL: f32 = 128.0 / 255.0;
+
+/// An adjustment Photoshop evaluates on a Lab document's own channels, as an operation on one
+/// pixel's stored L, a, b (normalised as Lab surfaces store them: L / 100, (a + 128) / 255,
+/// (b + 128) / 255) in a document of `depth`: Invert and Posterize (each channel), Threshold
+/// (split on L, neutral result), Brightness/Contrast (L) and Levels or Curves with Lab records.
+/// `None` for any other adjustment. On the stored values colours outside the display gamut keep
+/// theirs, where [`apply_in`] can only round-trip them through clipped display RGB.
+pub fn lab_stored_op(adj: &Adjustment, depth: Option<SampleType>) -> Option<LabOp<'_>> {
+    let op: LabOp<'_> = match adj {
+        Adjustment::Invert | Adjustment::Posterize { .. } => Box::new(move |ch: &mut [f32; 3]| stored_channels(adj, ColorMode::Lab, depth, ch, 0.0)),
+        Adjustment::Threshold { level } => {
+            // Split on L on the 8-bit grid, like the display path (`apply_lab`).
+            let t = (level * 255.0).round();
+            Box::new(move |ch: &mut [f32; 3]| {
+                let white = (ch[0].clamp(0.0, 1.0) * 255.0).round() >= t;
+                *ch = [if white { 1.0 } else { 0.0 }, LAB_NEUTRAL, LAB_NEUTRAL];
+            })
+        }
+        Adjustment::BrightnessContrast { brightness, contrast, legacy } => {
+            let (b, c, legacy) = (*brightness, *contrast, *legacy);
+            let legacy_curve = legacy_brightness_contrast(b, c);
+            Box::new(move |ch: &mut [f32; 3]| {
+                ch[0] = if legacy { legacy_curve(ch[0]) } else { modern_contrast(modern_brightness(ch[0], b), c).clamp(0.0, 1.0) };
+            })
+        }
+        Adjustment::Levels { space: ToneSpace::Lab, .. } | Adjustment::Curves { space: ToneSpace::Lab, .. } => {
+            let luts = tone_luts_depth(adj, depth);
+            Box::new(move |ch: &mut [f32; 3]| {
+                for (v, t) in ch.iter_mut().zip(&luts) {
+                    *v = lut(t, *v);
+                }
+            })
+        }
+        _ => return None,
+    };
+    Some(op)
+}
+
+/// One pixel's stored L, a, b through an adjustment ([`lab_stored_op`]).
+pub type LabOp<'a> = Box<dyn Fn(&mut [f32; 3]) + Send + Sync + 'a>;
+
 /// The Lab evaluation of a [`lab_channel_adjustment`] in a document of `depth` (no-op for any
 /// other adjustment).
 fn apply_lab(adj: &Adjustment, buf: &mut Buffer, depth: Option<SampleType>) {
