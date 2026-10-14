@@ -705,11 +705,18 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
         // Preferences live in the browser's localStorage.
         load_prefs: Some(Box::new(|| local_storage()?.get_item(PREFS_KEY).ok().flatten())),
         save_prefs: Some(Box::new(|text: &str| local_storage().ok_or("no localStorage")?.set_item(PREFS_KEY, text).map_err(|e| format!("{e:?}")))),
+        // The TypeR workspace (script, cursor, style library, settings) too, under its own key.
+        load_typer: Some(Box::new(|| local_storage()?.get_item(TYPER_KEY).ok().flatten())),
+        save_typer: Some(Box::new(|text: &str| local_storage().ok_or("no localStorage")?.set_item(TYPER_KEY, text).map_err(|e| format!("{e:?}")))),
+        // The engine has no clock in wasm: TypeR's `edited` stamps come from here.
+        clock: Some(js_sys::Date::now),
         ..Default::default()
     }
 }
 
 const PREFS_KEY: &str = "photocraft.preferences";
+/// localStorage key of the TypeR workspace (`photocraft_ui_egui::typer::persist`).
+const TYPER_KEY: &str = "capishot.typer.workspace";
 
 fn local_storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()

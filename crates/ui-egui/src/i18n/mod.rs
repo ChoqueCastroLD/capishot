@@ -836,9 +836,11 @@ mod tests {
             strings.extend(path.iter().copied());
             strings.insert(label);
         }
-        for &(_, label, path, _) in crate::menus::UI_COMMANDS {
-            strings.extend(path.iter().copied());
-            strings.insert(label);
+        for &(id, label, path, _) in crate::menus::UI_COMMANDS {
+            // Window › TypeR is the TypeR panel's.
+            let set = if id.contains("typer") { &mut typer } else { &mut strings };
+            set.extend(path.iter().copied());
+            set.insert(label);
         }
         for c in photocraft_engine::command_specs().iter().filter(|c| !c.menu.is_empty()) {
             let set = if c.id.starts_with("typer.") { &mut typer } else { &mut strings };

@@ -177,6 +177,11 @@ pub fn prefs_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("preferences.json"))
 }
 
+/// The TypeR workspace: script, cursor, style library and settings (`typer::persist`).
+pub fn typer_file() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("TypeR").join("workspace.json"))
+}
+
 /// The brush preset store (one file per preset group plus tip bitmaps; see
 /// `photocraft_engine::preset_store`).
 pub fn presets_dir() -> Option<PathBuf> {
@@ -396,6 +401,14 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         load_prefs: Some(Box::new(|| std::fs::read_to_string(prefs_file()?).ok())),
         photoshop_shortcuts: Some(Box::new(|| crate::photoshop_settings::live_keyboard_shortcuts(&|k| std::env::var_os(k)))),
         save_prefs: Some(Box::new(|text: &str| write_atomic(&prefs_file().ok_or("no config directory")?, text.as_bytes()))),
+        load_typer: Some(Box::new(|| std::fs::read_to_string(typer_file()?).ok())),
+        save_typer: Some(Box::new(|text: &str| {
+            let path = typer_file().ok_or("no config directory")?;
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            write_atomic(&path, text.as_bytes())
+        })),
         system_theme: crate::appearance::service(),
         append_text: Some(Box::new(|path: &str, text: &str| {
             use std::io::Write;

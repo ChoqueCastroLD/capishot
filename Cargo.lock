@@ -4677,6 +4677,7 @@ dependencies = [
  "photocraft-raw",
  "photocraft-testkit",
  "photocraft-text",
+ "photocraft-typer",
  "photocraft-vector",
  "rayon",
  "send_wrapper",

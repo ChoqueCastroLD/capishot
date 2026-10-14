@@ -5,9 +5,10 @@ line by line with styled text. Capishot ports it natively. The full plan (featur
 work packages) is `capishot-typer-plan.md`, kept outside the repo; this page is the map of what is in
 the tree.
 
-Status (2026-10-14): **WP0 done.** The script, cursor, page files, style library, TypeR JSON
-exchange and settings work, as commands. Placement, bubble detection, the panel and line shaping are
-registered stubs for WP1–WP4.
+Status (2026-10-14): **WP0 and WP3 done.** The script, cursor, page files, style library, TypeR
+JSON exchange and settings work, as commands, and the TypeR panel (Window › TypeR) drives them.
+Placement, bubble detection and line shaping are registered stubs for WP1, WP2-B and WP4: the
+panel's Paste, Align, Apply and size buttons show why they can't run yet.
 
 ## Decisions
 
@@ -118,15 +119,65 @@ Size Preset, with no shortcuts. Everything else has no menu item until the panel
     `State::current_image`) and auto-close with a prompt (N5).
   - Paths go through the automation policy: a params doc mentioning "path" needs a rule in
     `crates/automation/src/workspace.rs`.
-- **WP3 (panel, shortcuts, i18n).** Build `crates/ui-egui/src/typer/` against these commands.
-  - The script editor's highlighting comes from `typer.parseScript` (`ignorePrefix`,
-    `stylePrefix`, `page`, `index`) and `markdown::format_selection`. Tag chips use
-    `Style::prefix_color()`.
-  - The modifier-only chords and the optional TypeR keymap are off by default.
-  - Translate new strings into es, pt-br and pt-pt only (`TYPER_LANGUAGES`).
+- **WP3 (panel, shortcuts, i18n): done.** See [The panel](#the-panel) below.
 - **WP4 (hyphenation, TextShapeR, harness).** Use `typer.shapeText` and `bubble::Row`. The
   real-page harness goes in `crates/typer/tests/real_pages.rs`, `#[ignore]`, gated by
   `CAPISHOT_TYPER_PAGES`.
+
+## The panel
+
+`crates/ui-egui/src/typer/` (Window › TypeR, its own right-dock group `Group::TypeR`, above
+Navigator/History/Layers; not in the default workspace). It reads `Session::typer` to draw and
+changes it only through `typer.*` commands; its view state is `UiState::typer` (`TyperUi`:
+dialogs, collapsed folders, splitter).
+
+| File | What |
+|---|---|
+| `mod.rs` | the dock body (preview, script, splitter, styles, footer), the panel commands `typer.ui.*`, the confirmation dialog, workspace persistence |
+| `preview.rs` | Paste (multi-bubble count), Align, size −/+ with the step field, keep-size badge (Alt held), multi-bubble selection count and −, ↑/↓, line/page/style, text scale %, apply arrow, the line in its style's font (click: scroll the script to it) |
+| `script_editor.rs` | `TextEdit` with a layouter (page markers, ignored lines, tag chips in the tag colour, ignore tags and Markdown markers dimmed), gutter with numbers / `P<n>` / current-line marker; a gutter click makes a line current (a marker or note: the next usable line); ⌘B / ⌘I and the B / I buttons toggle Markdown (`claim_format_keys` takes them before the menus); Import `.txt`/`.md` |
+| `styles.rs` | Unsorted, then the folder tree (collapsible, bold when it holds the current style); rows with colour swatch (stroke outline), tag chip, the name in its font, size or preset chips, quick −/+ on hover, star for the default style; right-click: edit, apply style, copy / paste / duplicate, tags on/off, default style, delete; folder menu: add style, paste, edit, subfolder, duplicate, export, delete (with or without styles) |
+| `style_editor.rs` | name, folder, tags, tag colour (TypeR's 8 + custom), layer kind (`textType`), font family (installed families listed) and style, size + unit, leading, tracking, H/V scale, baseline shift, kerning, colour, faux bold/italic, caps, underline, strike, ligatures, super/subscript, diacritics (Middle Eastern mode), alignment, hyphenate, hanging punctuation, anti-aliasing, stroke, up to three size presets with default and minimum page widths (auto size by page width), Copy layer style (`psjson::text_props_from` of the active text layer) |
+| `folder_editor.rs` | name, parent (not itself or below), member styles, delete |
+| `settings.rs` | General / Text / Behavior (a draft saved with one `typer.settings.set {values}`), Shortcuts (the keymap toggle and table), Data (import with "keep local styles?" on a full import, export all with or without settings, export one folder) |
+| `keymap.rs` | TypeR's shortcut table and the optional TypeR keymap |
+| `font_label.rs` | style names and the preview line rendered by the text engine in the style's font (cached textures), plain text when the family isn't available |
+
+**Shortcuts.** Photoshop's keys always win; no `typer.*` command has a default. Inside the script
+editor only, ⌘B / ⌘I toggle Markdown. The TypeR keymap (Edit › Keyboard Shortcuts checkbox, or
+Settings › Shortcuts; off by default) sets these overrides, and turning it off removes the ones
+still at these keys:
+
+| Action | TypeR | TypeR keymap | Why |
+|---|---|---|---|
+| Paste (`typer.ui.paste`: Paste, Paste Many in multi-bubble mode, Apply Lines with ≥2 text layers and no selection) | Win+Ctrl | Ctrl+Alt+B | modifier-only chords aren't supported (and the OS/browser takes Super) |
+| Apply (`typer.apply`) | Win+Shift | Ctrl+Alt+J | same |
+| Align (`typer.align`) | Win+Alt | Ctrl+Alt+X | same |
+| Paste text only (`typer.ui.insertText`) | Win+Shift+V | Ctrl+Alt+Shift+J | Ctrl+Alt+Shift+V is Paste Into |
+| Next line | Ctrl+Enter | Ctrl+Alt+Enter | Ctrl+Enter commits type / loads a path as selection |
+| Previous line | Ctrl+Tab | Ctrl+Alt+Shift+Enter | Ctrl+Tab is Next Document |
+| Next page | Shift+X | Shift+X | free |
+| Text size +/− (`typer.ui.increaseSize` / `decreaseSize`) | Ctrl+Shift+Plus/Minus | Ctrl+Alt+. / Ctrl+Alt+, | Ctrl+Shift+Plus zooms (`=` matches `+`) |
+| Multi-bubble mode | Ctrl+Alt+M | Ctrl+Alt+M | free |
+| Toggle cleaning layers | Ctrl+H | Ctrl+Alt+Shift+H | Ctrl+H is Extras |
+
+(`Ctrl` is ⌘ on macOS, except `Ctrl+Alt+M`, which is the Control key everywhere, as in TypeR.)
+Apply Style, Apply Lines, Remove Last / Clear Bubbles and Next Size Preset are listed under
+Type › TypeR in Edit › Keyboard Shortcuts with no key. `typer/tests.rs` checks that the preset is
+off by default, that no preset key is in Photoshop's table (`shortcut_parity/photoshop_defaults.tsv`)
+or pressed by any Capishot default, and that it applies and reverts.
+
+**Persistence.** `typer::persist` restores `TyperSession::to_json` (library, settings, script,
+cursor, page files) on the first frame, into a session that hasn't used TypeR yet, and saves it
+about once a second while it changes (only a hash is kept between checks), through
+`Services::load_typer` / `save_typer`: the browser's localStorage (`capishot.typer.workspace`,
+beside the preferences) on the web, `<config>/TypeR/workspace.json` (atomic write) on the
+desktop. `edited` stamps come from `Services::clock` (the browser's `Date.now`) as the commands'
+`now` param, since the engine has no clock in wasm.
+
+**Not yet:** drag-to-reorder styles and folders, the page-file picker and page sync (N4, WP2-B),
+the multi-bubble canvas overlay and the Align preview (need WP1's capture and detection), tabs
+(N6), TextShapeR strip (WP4), UI order/visibility toggles.
 
 ## Tests
 
