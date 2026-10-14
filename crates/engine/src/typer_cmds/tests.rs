@@ -168,9 +168,15 @@ fn settings_get_and_set() {
 #[test]
 fn work_package_stubs_are_registered_and_refuse_cleanly() {
     let mut s = loaded();
-    for id in ["typer.paste", "typer.apply", "typer.align", "typer.detectBubble", "typer.shapeText", "typer.multiBubble.capture", "typer.style.fromLayer"] {
+    // WP4's line shaping is still a stub.
+    match s.execute("typer.shapeText", json!({})) {
+        Err(EngineError::Disabled(_, why)) => assert!(why.contains("not implemented yet"), "{why}"),
+        other => panic!("typer.shapeText: {other:?}"),
+    }
+    // Placement (WP1) needs a document.
+    for id in ["typer.paste", "typer.apply", "typer.align", "typer.detectBubble", "typer.style.fromLayer"] {
         match s.execute(id, json!({})) {
-            Err(EngineError::Disabled(_, why)) => assert!(why.contains("not implemented yet"), "{id}: {why}"),
+            Err(EngineError::Disabled(_, why)) => assert!(why.contains("no document"), "{id}: {why}"),
             other => panic!("{id}: {other:?}"),
         }
     }
