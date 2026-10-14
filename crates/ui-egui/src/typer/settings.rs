@@ -224,6 +224,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     flag(ui, &mut d.values, "multiBubbleMode", tl!("Multi-bubble mode"));
                     flag(ui, &mut d.values, "openStoredSelections", tl!("Multi-bubble: centre on the bubble, as Paste does"));
                     flag(ui, &mut d.values, "showQuickStyleSize", tl!("Quick style size −/+"));
+                    flag(ui, &mut d.values, "multiTabEnabled", tl!("Work tabs (one per chapter)"));
                     flag(ui, &mut d.values, "autoClosePSD", tl!("Close the previous page's file when the next page opens"));
                     hint(ui, &t, tl!("A page with unsaved changes asks first: Save, Don't Save or Cancel."));
                     ui.horizontal(|ui| {

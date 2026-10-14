@@ -1192,6 +1192,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::lens_cmds::specs());
     v.extend(crate::capishot_cmds::specs());
     v.extend(crate::typer_cmds::specs());
+    v.extend(crate::typer_import_cmds::specs());
     v.extend(crate::typer_place_cmds::specs());
     v.extend(crate::typer_query_cmds::specs());
     v.extend(crate::vp_cmds::specs());

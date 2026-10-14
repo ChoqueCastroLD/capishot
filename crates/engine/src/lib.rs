@@ -121,6 +121,7 @@ pub mod type_mask_cmds;
 pub mod type_spell_cmds;
 pub mod type_styles_cmds;
 pub mod typer_cmds;
+pub mod typer_import_cmds;
 mod typer_place_cmds;
 mod typer_query_cmds;
 pub mod typer_state;
