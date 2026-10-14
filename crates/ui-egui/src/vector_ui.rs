@@ -558,6 +558,11 @@ fn curvature_refresh(pen: &mut PenPath, closed: bool) {
     pen.knots = photocraft_vector::edit::curvature_knots(&anchors, &corners, closed);
 }
 
+/// The anchor of the Curvature Pen path being drawn under (x, y), for the cursor.
+pub(crate) fn curvature_anchor_at(app: &PhotocraftApp, x: f64, y: f64) -> Option<usize> {
+    curvature_hit(app, x, y)
+}
+
 /// The Curvature Pen's anchor within a few screen pixels of (x, y).
 fn curvature_hit(app: &PhotocraftApp, x: f64, y: f64) -> Option<usize> {
     let tol = 6.0 / app.point_zoom().max(0.01) as f64;
@@ -606,8 +611,14 @@ pub fn curvature_up(app: &mut PhotocraftApp) {
 }
 
 /// Curvature Pen double-click: toggle the anchor under the pointer between smooth and corner
-/// (double-clicking empty canvas therefore places a corner point, as in Photoshop).
+/// (double-clicking empty canvas therefore places a corner point, as in Photoshop). With no path
+/// being drawn, an anchor of the active path toggles the same way and its subpath reflows
+/// (`path.convertPoint` with `curvature`), so a Pen-drawn corner rounds off.
 pub fn curvature_toggle(app: &mut PhotocraftApp, x: f64, y: f64) {
+    if app.ui.pen.as_ref().is_none_or(|p| p.knots.is_empty()) {
+        crate::direct_select::curvature_toggle_active(app, [x, y]);
+        return;
+    }
     let Some(i) = curvature_hit(app, x, y) else { return };
     let Some(pen) = app.ui.pen.as_mut() else { return };
     if let Some(at) = pen.unlinked.iter().position(|&c| c == i) {
