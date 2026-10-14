@@ -392,6 +392,9 @@ pub struct Panels {
     /// Window › Character / Paragraph: the Character | Paragraph dock group (#150).
     #[serde(default)]
     pub character: bool,
+    /// Window › TypeR: the TypeR dock group (script, styles; `crate::typer`).
+    #[serde(default)]
+    pub typer: bool,
     /// The toolbar's header chevron: two columns even when one fits (#1197).
     #[serde(default)]
     pub toolbar_double: bool,
@@ -428,6 +431,7 @@ impl Default for Panels {
             status_bar: true,
             brush_settings: false,
             character: false,
+            typer: false,
             toolbar_double: false,
             dock: true,
             hidden_by_tab: None,
@@ -975,6 +979,8 @@ pub struct DockTabs {
     pub history: usize,
     /// Character | Paragraph.
     pub character: usize,
+    /// TypeR (one tab).
+    pub typer: usize,
 }
 
 /// Color panel state.
@@ -1081,6 +1087,9 @@ pub struct UiState {
     /// Character/Paragraph Styles, Glyphs and Check Spelling (see `type_panels_ui`).
     #[serde(default)]
     pub type_panels: crate::type_panels_ui::TypePanelsUi,
+    /// The TypeR panel's view state: open dialogs, collapsed folders (see `typer`).
+    #[serde(default)]
+    pub typer: crate::typer::TyperUi,
     /// The font picker's Find More tab, downloads and their state (see `fonts_ui`).
     #[serde(default)]
     pub fonts: crate::fonts_ui::FontsUi,
@@ -1227,6 +1236,7 @@ impl Default for UiState {
             layer_comp_selected: None,
             presets_ui: Default::default(),
             type_panels: Default::default(),
+            typer: Default::default(),
             fonts: Default::default(),
             analysis: Default::default(),
             timeline: Default::default(),

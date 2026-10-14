@@ -3925,3 +3925,150 @@ layerLabel	No Color	Sem cor
 	Next Style	Próximo estilo
 	Previous Style	Estilo anterior
 	Next Size Preset	Próximo tamanho predefinido
+# TypeR panel (Window › TypeR; es/pt only, see TYPER_LANGUAGES in i18n/mod.rs).
+	**bold**, *italic* and ***both*** in the script become faux bold and italic.	**negrito**, *itálico* e ***ambos*** no roteiro viram negrito e itálico falsos.
+	A TypeR export (.json): a folder, a style library or a full export with settings.	Uma exportação do TypeR (.json): uma pasta, uma biblioteca de estilos ou uma exportação completa com configurações.
+	A line starting with one of these tags picks this style; the tag isn't pasted	Uma linha que começa com uma destas tags usa este estilo; a tag não é colada
+	Add folder	Adicionar pasta
+	Add preset	Adicionar tamanho
+	Add style	Adicionar estilo
+	Add style here…	Adicionar estilo aqui…
+	Add styles to apply to the pasted text: + below, or import a TypeR library.	Adicione estilos para aplicar ao texto colado: + abaixo, ou importe uma biblioteca do TypeR.
+	Add subfolder…	Adicionar subpasta…
+	All caps	Tudo em maiúsculas
+	Alt is held: Paste and Apply keep the layer's text size	Alt pressionado: Colar e Aplicar mantêm o tamanho do texto da camada
+	Anti-aliasing	Suavização
+	Apply Style to the Current Layer	Aplicar estilo à camada atual
+	Apply style to the current layer	Aplicar estilo à camada atual
+	Apply the text and the style to the current layer	Aplicar o texto e o estilo à camada atual
+	Are you sure that you want to delete the style?	Tem certeza de que deseja excluir o estilo?
+	As in Settings	Conforme as configurações
+	Auto leading	Entrelinha automática
+	Auto size by page width	Tamanho automático pela largura da página
+	Behavior	Comportamento
+	Centre text	Centralizar texto
+	Centre the current text layer in the selected area, or in the bubble around it	Centralizar a camada de texto atual na área selecionada, ou no balão ao redor dela
+	Choose a folder	Escolha uma pasta
+	Click to scroll the script to this line	Clique para rolar o roteiro até esta linha
+	Click: make current · double-click: edit · right-click: more	Clique: tornar atual · clique duplo: editar · clique direito: mais
+	Copy layer style	Copiar estilo da camada
+	Copy the character and paragraph settings of the active text layer	Copiar as configurações de caractere e parágrafo da camada de texto ativa
+	Couldn't restore the TypeR workspace	Não foi possível restaurar o espaço de trabalho do TypeR
+	Couldn't save the TypeR workspace	Não foi possível salvar o espaço de trabalho do TypeR
+	Create a text layer from the current line in the centre of the selected area	Criar uma camada de texto com a linha atual no centro da área selecionada
+	Decrease TypeR Text Size	Diminuir tamanho do texto (TypeR)
+	Decrease the text size of the current layer	Diminuir o tamanho do texto da camada atual
+	Default style	Estilo padrão
+	Delete folder	Excluir pasta
+	Delete folder and its styles…	Excluir pasta e seus estilos…
+	Delete folder…	Excluir pasta…
+	Delete the folder and its subfolders? Their styles move to Unsorted.	Excluir a pasta e suas subpastas? Os estilos vão para Sem pasta.
+	Delete the folder, its subfolders and all their styles?	Excluir a pasta, suas subpastas e todos os seus estilos?
+	Diacritics	Diacríticos
+	Discretionary ligatures	Ligaduras discricionárias
+	Duplicate folder	Duplicar pasta
+	Edit folder	Editar pasta
+	Edit folder…	Editar pasta…
+	Edit style	Editar estilo
+	Edit style…	Editar estilo…
+	Export all styles…	Exportar todos os estilos…
+	Export folder…	Exportar pasta…
+	Faux bold	Negrito falso
+	Faux italic	Itálico falso
+	Folder name	Nome da pasta
+	Font family	Família da fonte
+	Font style	Estilo da fonte
+	From page width	A partir da largura da página
+	Hanging punctuation	Pontuação pendurada
+	Import a script (.txt)…	Importar um roteiro (.txt)…
+	Import styles	Importar estilos
+	Import styles or settings…	Importar estilos ou configurações…
+	Increase TypeR Text Size	Aumentar tamanho do texto (TypeR)
+	Increase the text size of the current layer	Aumentar o tamanho do texto da camada atual
+	Internal padding	Margem interna
+	Interpret Markdown (bold and italic)	Interpretar Markdown (negrito e itálico)
+	Keep size	Manter tamanho
+	Keep the local styles that are not in the import or were edited later?	Manter os estilos locais que não estão na importação ou que foram editados depois?
+	Layer kind	Tipo de camada
+	Left to right	Da esquerda para a direita
+	Ligatures	Ligaduras
+	Longest tag wins (TypeR: the first one)	Vence a tag mais longa (TypeR: a primeira)
+	MB OFF	MB DESL.
+	MB ON	MB LIG.
+	Make default style	Usar como estilo padrão
+	Make this line current	Tornar esta linha a atual
+	Middle Eastern text mode	Modo de texto do Oriente Médio
+	Multi-bubble mode	Modo multibalão
+	Multi-bubble mode: capture several bubbles, then paste them all at once	Modo multibalão: capture vários balões e depois cole todos de uma vez
+	Multi-bubble: centre on the bubble, as Paste does	Multibalão: centralizar no balão, como Colar
+	New folder	Nova pasta
+	New style	Novo estilo
+	Next line	Próxima linha
+	No line	Sem linha
+	No parent (top level)	Sem pasta superior (nível principal)
+	No style set	Nenhum estilo
+	No styles yet	Ainda não há estilos
+	Number lines from 1 on each page	Numerar linhas a partir de 1 em cada página
+	One per line (or separated by ;). A line starting with one of them is skipped, like an empty line.	Uma por linha (ou separadas por ;). Uma linha que começa com uma delas é pulada, como uma linha vazia.
+	Paragraph text	Texto de parágrafo
+	Parent folder	Pasta superior
+	Paste Text to the Current Layer	Colar texto na camada atual
+	Paste style	Colar estilo
+	Paste the translated script below	Cole abaixo o roteiro traduzido
+	Paste the translated script here: one line per bubble, "Page 1" lines mark pages, "##" lines are notes, "TAG:" picks a style	Cole aqui o roteiro traduzido: uma linha por balão, linhas "Page 1" marcam páginas, linhas "##" são notas, "TAG:" escolhe um estilo
+	Pasted text layer	Camada de texto colada
+	Photoshop's shortcuts always win. TypeR's Win+Ctrl, Win+Shift and Win+Alt become Ctrl+Alt keys; keys Photoshop uses (Ctrl+Enter, Ctrl+Tab, Ctrl+H) get free alternatives.	Os atalhos do Photoshop sempre vencem. Win+Ctrl, Win+Shift e Win+Alt do TypeR viram teclas Ctrl+Alt; as teclas que o Photoshop usa (Ctrl+Enter, Ctrl+Tab, Ctrl+H) ganham alternativas livres.
+	Point text	Texto de ponto
+	Previous line	Linha anterior
+	Quick style size −/+	Tamanho rápido do estilo −/+
+	Remove as default style	Remover como estilo padrão
+	Remove the last selection (right-click: clear all)	Remover a última seleção (clique direito: limpar todas)
+	Removed from the line wherever they appear; the rest of the line is kept.	São removidas da linha onde quer que apareçam; o resto da linha é mantido.
+	Resize the text box when aligning	Redimensionar a caixa de texto ao alinhar
+	Right to left	Da direita para a esquerda
+	SFX: (one per line, or separated by ;)	SFX: (uma por linha, ou separadas por ;)
+	Scroll to the selected style	Rolar até o estilo selecionado
+	Select a text layer first	Selecione primeiro uma camada de texto
+	Selections captured in multi-bubble mode; Paste fills them all	Seleções capturadas no modo multibalão; Colar preenche todas
+	Show tips	Mostrar dicas
+	Size presets	Tamanhos predefinidos
+	Small caps	Versalete
+	Style name	Nome do estilo
+	Style size step	Passo de tamanho do estilo
+	Styles in folder	Estilos na pasta
+	Tag colour	Cor da tag
+	Tags	Tags
+	Tags for ignoring lines	Tags para ignorar linhas
+	Tags of the current style's folder only	Só tags da pasta do estilo atual
+	Tags to ignore	Tags a ignorar
+	Text	Texto
+	Text colour	Cor do texto
+	Text direction	Direção do texto
+	Text scale	Escala do texto
+	Text scale: pasted text is resized without changing the styles	Escala do texto: o texto colado é redimensionado sem mudar os estilos
+	Text size step	Passo do tamanho do texto
+	Turn tags off	Desativar tags
+	Turn tags on	Ativar tags
+	Two series can use the same tags (B:, SFX:) in their own folders.	Duas séries podem usar as mesmas tags (B:, SFX:) em suas próprias pastas.
+	TypeR Align	Alinhar (TypeR)
+	TypeR Apply	Aplicar (TypeR)
+	TypeR Apply Lines	Aplicar linhas (TypeR)
+	TypeR Clear Bubbles	Limpar balões capturados (TypeR)
+	TypeR Multi-Bubble Mode	Modo multibalão (TypeR)
+	TypeR Paste	Colar (TypeR)
+	TypeR Remove Last Bubble	Remover último balão (TypeR)
+	TypeR Settings	Configurações do TypeR
+	TypeR Toggle Cleaning Layers	Mostrar ou ocultar camadas de limpeza (TypeR)
+	TypeR keymap	Atalhos do TypeR
+	TypeR keymap off. Click OK to keep it.	Atalhos do TypeR desativados. Clique em OK para manter.
+	TypeR keymap on. Click OK to keep it.	Atalhos do TypeR ativados. Clique em OK para manter.
+	TypeR's shortcuts where Photoshop leaves the key free, and Ctrl+Alt alternatives where it doesn't (Paste Ctrl+Alt+B, Apply Ctrl+Alt+J, Align Ctrl+Alt+X…)	Os atalhos do TypeR onde o Photoshop deixa a tecla livre, e alternativas Ctrl+Alt onde não (Colar Ctrl+Alt+B, Aplicar Ctrl+Alt+J, Alinhar Ctrl+Alt+X…)
+	Unsorted	Sem pasta
+	Use this size preset	Usar este tamanho predefinido
+	With my settings	Com minhas configurações
+	line	linha
+	not a TypeR export	não é uma exportação do TypeR
+	not installed	não instalada
+	page	página
+@plural	{n} selection|{n} selections	{n} seleção|{n} seleções
+@plural	{n} line|{n} lines	{n} linha|{n} linhas

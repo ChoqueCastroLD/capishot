@@ -197,6 +197,7 @@ mod type_font_preview;
 pub mod type_panels_ui;
 pub mod type_tool;
 mod type_transform;
+pub mod typer;
 mod variables_ui;
 pub mod vector_ui;
 pub mod view_cmds;
@@ -438,6 +439,13 @@ pub struct Services {
     /// the web (see `prefs_ui`).
     pub load_prefs: Option<LoadTextFn>,
     pub save_prefs: Option<SaveTextFn>,
+    /// The TypeR workspace (script, cursor, style library, settings; `typer::persist`): a file
+    /// in the config directory on native, browser storage on the web.
+    pub load_typer: Option<LoadTextFn>,
+    pub save_typer: Option<SaveTextFn>,
+    /// Wall-clock milliseconds since the Unix epoch, for timestamps the engine can't take itself
+    /// (it has no clock on wasm): the browser's `Date.now`. `None` = the engine's system clock.
+    pub clock: Option<fn() -> f64>,
     /// Photoshop's live keyboard shortcut set, imported once at first launch (`kys_import`).
     pub photoshop_shortcuts: Option<PhotoshopShortcutsFn>,
     pub system_theme: Option<SystemThemeFn>,
@@ -1716,6 +1724,7 @@ impl eframe::App for PhotocraftApp {
         preset_panels::windows(self, &ctx);
         gradient_ui::editor_window(self, &ctx);
         type_panels_ui::windows(self, &ctx);
+        typer::windows(self, &ctx);
         analysis_ui::windows(self, &ctx);
         timeline_ui::windows(self, &ctx);
         workspace_ui::windows(self, &ctx);
@@ -1743,6 +1752,8 @@ impl eframe::App for PhotocraftApp {
         brush_picker::persist(self, &ctx);
         // Tool options are remembered between launches the same way (#2814).
         tool_memory::persist(self, &ctx);
+        // The TypeR workspace: restored once at startup, saved shortly after it changes.
+        typer::persist(self, &ctx);
         self.automation_input = false;
         shape_stroke_ui::finish_frame(self, &ctx);
         native_menu::sync(self, &ctx);

@@ -82,6 +82,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.togglePanels", "Show/Hide All Panels", &[], Some("Tab")),
     ("window.toggle.dock", "Show/Hide Panels", &[], Some("Shift+Tab")),
     ("window.toggle.options", "Options", &["Window"], None),
+    // The TypeR panel (`typer`); placed after Tool Presets by `PLACE_AFTER`.
+    ("window.panel.typer", "TypeR", &["Window"], None),
     // Photoshop's Ctrl+Tab and Ctrl+Shift+Tab, on macOS too (⌘Tab belongs to the system, #2340).
     ("window.nextDocument", "Next Document", &[], Some("Ctrl+Tab")),
     ("window.previousDocument", "Previous Document", &[], Some("Ctrl+Shift+Tab")),
@@ -223,6 +225,10 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     }
     // Character/Paragraph Styles, Glyphs, Edit › Check Spelling dialog.
     if let Some(r) = crate::type_panels_ui::menu(app, id, &params) {
+        return r;
+    }
+    // TypeR panel commands that wrap an engine command with the panel's settings (size ±).
+    if let Some(r) = crate::typer::invoke(app, id, &params) {
         return r;
     }
     // Image > Variables (Define / Data Sets), Apply Data Set.
@@ -708,6 +714,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     if crate::analysis_ui::handles(id) {
         return true;
     }
+    if let Some(e) = crate::typer::is_enabled(app, id) {
+        return e;
+    }
     if crate::preset_panels::handles(id) || crate::type_panels_ui::handles(id) || crate::timeline_ui::handles(id) {
         return true;
     }
@@ -929,6 +938,7 @@ pub fn is_live(id: &str) -> bool {
         || crate::preset_panels::handles(id)
         || crate::type_panels_ui::handles(id)
         || crate::timeline_ui::handles(id)
+        || crate::typer::handles(id)
 }
 
 /// Commands outside the catalogue that belong right after a catalogue item: `(id, after)`.
@@ -939,6 +949,7 @@ const PLACE_AFTER: &[(&str, &str)] = &[
     ("filter.render.relight", "filter.render.lightingEffects"),
     ("view.resetView", "view.flipHorizontal"),
     ("filter.other.colorToAlpha", "filter.other.offset"),
+    ("window.panel.typer", "window.panel.toolPresets"),
 ];
 
 pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {

@@ -963,6 +963,11 @@ pub fn shortcut_items(app: &PhotocraftApp) -> Vec<(String, String, Vec<String>, 
     }
     let at = out.iter().rposition(|i| i.2.first().map(String::as_str) == Some("Layer")).map_or(out.len(), |i| i + 1);
     out.splice(at..at, layer);
+    // TypeR's panel commands, after the Type › TypeR menu items (no default keys: `typer::keymap`).
+    let listed: std::collections::HashSet<&str> = out.iter().map(|i| i.0.as_str()).collect();
+    let typer = crate::typer::keymap::shortcut_items(&listed);
+    let at = out.iter().rposition(|i| i.2.first().map(String::as_str) == Some("Type")).map_or(out.len(), |i| i + 1);
+    out.splice(at..at, typer);
     out.extend(tools);
     for (id, label, def) in prefs::TEMPORARY_TOOLS {
         if seen.insert(id.to_string()) {
@@ -1976,6 +1981,8 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
                 overrides.clear();
                 message = tl!("All shortcuts reset to Capishot defaults.").into();
             }
+            // The optional TypeR keymap (off by default; Photoshop's keys always win).
+            crate::typer::keymap::dialog_toggle(ui, &mut overrides, &mut message);
             // A Photoshop set (`.kys`) fills the overrides; the file arrives after this frame
             // and `kys_import` writes the dialog's fields then (#1163).
             if ui.button(tl!("Import Shortcuts…")).on_hover_text(tl!("Load a keyboard shortcut set saved as .kys")).clicked()

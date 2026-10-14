@@ -384,6 +384,8 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     }
     if focus == Focus::Text {
+        // The TypeR script editor's own ⌘B / ⌘I (Markdown bold / italic) come before the menus'.
+        crate::typer::script_editor::claim_format_keys(ctx);
         // A focused field keeps its typing and editing keys; menu shortcuts (⌘J, ⌘S, F7…) still
         // fire, as in Photoshop.
         dispatch_pressed(app, ctx, focus, false);
