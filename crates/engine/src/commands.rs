@@ -1283,6 +1283,7 @@ fn build() -> Vec<CommandSpec> {
         });
     }
     v.extend(crate::layer_style::specs());
+    v.extend(crate::layer_list_cmds::specs());
     v.extend(crate::filters::specs());
     v.extend(crate::filters_ext::specs());
     v.extend(crate::color_to_alpha_cmds::specs());
