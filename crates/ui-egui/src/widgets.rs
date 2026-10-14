@@ -1296,9 +1296,16 @@ pub fn dropdown<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, op
     dropdown_hovered(ui, id, current, options, width).0
 }
 
+/// [`dropdown`] whose option labels are shown exactly as given: names the user typed (a channel
+/// or layer name) must not be translated, unlike the built-in labels [`dropdown`] translates (#5335).
+pub fn dropdown_literal<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, options: &[(T, &str)], width: f32) -> bool {
+    let (chosen, _) = dropdown_with(ui, id, current, options, width, false, false);
+    !chosen.is_empty()
+}
+
 /// [`dropdown`], also returning the option under the pointer in its open list (live previews).
 pub fn dropdown_hovered<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, options: &[(T, &str)], width: f32) -> (bool, Option<T>) {
-    let (chosen, hovered) = dropdown_with(ui, id, current, options, width, false);
+    let (chosen, hovered) = dropdown_with(ui, id, current, options, width, false, true);
     (!chosen.is_empty(), hovered)
 }
 
@@ -1309,11 +1316,13 @@ pub fn dropdown_hovered<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &m
 /// in order (one per notch; the last is `current`) and the option under the pointer in the open
 /// list, none while the pointer rests where the wheel last stepped.
 pub fn dropdown_wheel_hovered<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, options: &[(T, &str)], width: f32) -> (Vec<T>, Option<T>) {
-    dropdown_with(ui, id, current, options, width, true)
+    dropdown_with(ui, id, current, options, width, true, true)
 }
 
-fn dropdown_with<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, options: &[(T, &str)], width: f32, wheel: bool) -> (Vec<T>, Option<T>) {
-    let label = options.iter().find(|(v, _)| v == current).map(|(_, l)| tl!(l)).unwrap_or("—");
+#[allow(clippy::too_many_arguments)]
+fn dropdown_with<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, options: &[(T, &str)], width: f32, wheel: bool, translate: bool) -> (Vec<T>, Option<T>) {
+    let shown = |l: &str| if translate { tl!(l).to_string() } else { l.to_string() };
+    let label = options.iter().find(|(v, _)| v == current).map(|(_, l)| shown(l)).unwrap_or_else(|| "—".into());
     let (mut chosen, mut hovered) = (Vec::new(), None);
     // The wheel's notches add up over the button and the open list alike.
     let wheel_id = ui.make_persistent_id(id).with("wheel");
@@ -1325,11 +1334,12 @@ fn dropdown_with<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, o
     let mut reveal = wheel && ui.data_mut(|d| d.remove_temp::<bool>(reveal_id)).unwrap_or(false);
     // The list opens on the press: press, drag onto an option and release to choose it (#2735).
     let (press, close) = crate::press_menu::PressCombo::before(ui, id);
+    let texts: Vec<String> = options.iter().map(|(_, l)| shown(l)).collect();
     let response =
         egui::ComboBox::from_id_salt(id).selected_text(label).width(width).height(420.0).icon(chevron_icon).close_behavior(close).show_ui(ui, |ui| {
-            fit_widest_option(ui, options.iter().map(|(_, l)| tl!(l)));
+            fit_widest_option(ui, texts.iter().map(|l| l.as_str()));
             // A typed letter jumps to the next option starting with it, ↩ closes the list (#1481).
-            let labels: Vec<&str> = options.iter().map(|(_, l)| tl!(l)).collect();
+            let labels: Vec<&str> = texts.iter().map(|l| l.as_str()).collect();
             let shown = options.iter().position(|(v, _)| v == current);
             if let Some((v, _)) = type_ahead::keys(ui, ui.make_persistent_id(id), shown, &labels).and_then(|i| options.get(i)) {
                 *current = v.clone();
@@ -1348,8 +1358,8 @@ fn dropdown_with<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, o
             // The row nearest the pointer, by its distance to each row.
             let pointer = ui.ctx().pointer_hover_pos().filter(|_| ui.rect_contains_pointer(ui.clip_rect()));
             let mut nearest: Option<(f32, &T)> = None;
-            for (v, l) in options {
-                let item = ui.selectable_label(v == current, tl!(l));
+            for ((v, _), text) in options.iter().zip(texts.iter()) {
+                let item = ui.selectable_label(v == current, text.as_str());
                 if reveal && v == current {
                     item.scroll_to_me(None);
                 }
