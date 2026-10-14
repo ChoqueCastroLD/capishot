@@ -1017,8 +1017,13 @@ pub fn open_shortcuts(app: &mut PhotocraftApp, tab: u64) -> u64 {
 /// Open the Embedded Profile Mismatch prompt for a file waiting to open (`open_prompt`): its
 /// `message`, the answer selected first (`action`), and `marker`, the field that routes OK and
 /// Cancel back to `open_prompt`.
-pub fn open_mismatch(app: &mut PhotocraftApp, message: &str, action: &str, missing: bool, marker: &str) -> u64 {
-    let mut fields = json!({"message": message, "action": action, "missing": missing});
+/// `names` carries the embedded and working profile names and the Color Settings policy a
+/// remembered choice is saved to (`policyKey`, null for a mode without one).
+pub fn open_mismatch(app: &mut PhotocraftApp, message: &str, action: &str, missing: bool, marker: &str, names: Value) -> u64 {
+    let mut fields = json!({"message": message, "action": action, "missing": missing, "remember": false});
+    if let (Some(f), Value::Object(n)) = (fields.as_object_mut(), names) {
+        f.extend(n);
+    }
     fields[marker] = json!(true);
     open_kind(app, "mismatch", tl!("Embedded Profile Mismatch"), fields)
 }
@@ -1941,19 +1946,28 @@ fn mismatch_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     ui.add_space(6.0);
     let mut action = f.get("action").and_then(Value::as_str).unwrap_or("preserve").to_string();
     let missing = f.get("missing").and_then(Value::as_bool).unwrap_or(false);
-    let opts: &[(&str, &str)] = if missing {
-        &[("preserve", tl!("Leave as is (don't color manage)")), ("assignWorking", tl!("Assign working space"))]
+    let name = |k: &str| f.get(k).and_then(Value::as_str).unwrap_or("?").to_string();
+    let opts: Vec<(&str, String)> = if missing {
+        vec![("preserve", tl!("Leave as is (don't color manage)").into()), ("assignWorking", tl!("Assign working space").into())]
     } else {
-        &[
-            ("preserve", tl!("Use the embedded profile (instead of the working space)")),
-            ("convert", tl!("Convert document's colors to the working space")),
-            ("discard", tl!("Discard the embedded profile (don't color manage)")),
+        vec![
+            ("preserve", crate::i18n::fmt(tl!("Use the embedded profile ({profile})"), &[("profile", &name("embedded"))])),
+            ("convert", crate::i18n::fmt(tl!("Convert to the working space ({profile})"), &[("profile", &name("working"))])),
+            ("discard", tl!("Discard the embedded profile (don't color manage)").into()),
         ]
     };
     for (v, label) in opts {
-        ui.radio_value(&mut action, v.to_string(), *label);
+        ui.radio_value(&mut action, v.to_string(), label);
     }
     f.insert("action".into(), json!(action));
+    // Remembering sets the Color Settings policy and stops asking, so it needs a mode with a policy.
+    if !missing && f.get("policyKey").is_some_and(Value::is_string) {
+        ui.add_space(8.0);
+        let mut remember = f.get("remember").and_then(Value::as_bool).unwrap_or(false);
+        crate::widgets::checkbox(ui, &mut remember, tl!("Remember this choice for future images"))
+            .on_hover_text(tl!("Turn the prompt back on with Ask On Mismatch in Edit › Color Settings."));
+        f.insert("remember".into(), json!(remember));
+    }
 }
 
 // ------------------------------------------------------------------ confirm
@@ -2024,6 +2038,9 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
         // The file it asks about opens with this answer (`open_prompt`).
         "mismatch" => {
             let action = f.get("action").and_then(Value::as_str).unwrap_or("preserve");
+            if f.get("remember").and_then(Value::as_bool) == Some(true) {
+                return crate::open_prompt::answer_remembering(app, action);
+            }
             crate::open_prompt::answer(app, Some(action))
         }
         _ => Err("unknown dialog".into()),
