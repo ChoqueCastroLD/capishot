@@ -334,9 +334,10 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.camera_raw.is_some() {
         return;
     }
-    // An open menu owns the keyboard (arrows, ↩, Esc), like a native menu; so does an open
-    // dropdown list, whose letters pick an option rather than a tool (#1481).
-    if crate::menu_nav::is_open(ctx) || crate::widgets::dropdown_list_open(ctx) {
+    // An open menu owns the keyboard (arrows, ↩, Esc), like a native menu; so does the menu bar
+    // once Alt or F10 put the keyboard on it (#4988), and an open dropdown list, whose letters
+    // pick an option rather than a tool (#1481).
+    if crate::menu_nav::is_open(ctx) || crate::menu_keys::is_focused(ctx) || crate::widgets::dropdown_list_open(ctx) {
         return;
     }
     // ⌘Z in a filter or adjustment dialog steps the dialog's settings, not the document (#4697).

@@ -127,6 +127,7 @@ mod mask_props_ui;
 pub mod mask_thumbs_ui;
 pub mod mask_trash_prompt;
 pub mod menu_catalog;
+pub mod menu_keys;
 pub mod menu_nav;
 pub mod menus;
 pub mod monitor_status;
