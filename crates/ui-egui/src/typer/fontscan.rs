@@ -200,7 +200,8 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                             }
                             let size = g["topSize"].as_f64().unwrap_or(0.0);
                             let unit = if g["textProps"]["typeUnit"] == "pointsUnit" { "pt" } else { "px" };
-                            let uses = crate::i18n::trn(crate::i18n::current(), g["usageCount"].as_u64().unwrap_or(0), "{n} layer", "{n} layers");
+                            let count = g["usageCount"].as_u64().unwrap_or(0);
+                            let uses = crate::i18n::trn(crate::i18n::current(), count, "{n} layer", "{n} layers");
                             ui.label(RichText::new(format!("{} {unit} · {uses}", photocraft_typer::id::num(size))).color(t.text_dim).size(11.0));
                             if !loaded(g)
                                 && ui
