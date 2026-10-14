@@ -24,6 +24,7 @@ pub mod analysis_ui;
 pub mod anchor_tools;
 pub mod artboard_tool;
 pub mod artboard_ui;
+mod blend_keys;
 pub(crate) mod blend_preview;
 mod brand;
 pub mod brush_panel;
@@ -37,16 +38,16 @@ mod camera_raw_detail_ui;
 mod camera_raw_preview_ui;
 mod camera_raw_scope_ui;
 pub mod camera_raw_ui;
-mod capishot_ui;
 pub mod canvas;
 mod canvas_popup;
-pub(crate) mod clone_overlay;
 pub mod canvas_tool_menu;
+mod capishot_ui;
 pub mod channel_view;
 pub mod channels_panel;
 pub mod chrome_ui;
 pub mod cjk_fonts;
 pub mod clip_line_ui;
+pub(crate) mod clone_overlay;
 pub mod color_picker_ui;
 pub mod color_range_ui;
 pub mod comps_ui;
@@ -77,12 +78,12 @@ pub mod file_dialog;
 pub mod file_open;
 pub mod file_ui;
 pub mod fill_ui;
-pub mod fonts_ui;
 pub mod filter_dialog;
 #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 mod filter_preview_worker;
 pub mod flick_pan;
 mod font_preview;
+pub mod fonts_ui;
 pub mod frame_tool;
 pub mod gallery_ui;
 pub mod gpu_canvas;
@@ -123,8 +124,6 @@ pub mod native_menu;
 pub mod new_doc_ui;
 pub mod notices;
 mod numeric_expression;
-mod blend_keys;
-mod view_scroll;
 mod opacity_keys;
 pub mod outline;
 pub mod paint_mouse;
@@ -198,9 +197,11 @@ pub mod type_panels_ui;
 pub mod type_tool;
 mod type_transform;
 pub mod typer;
+pub mod user_fonts_ui;
 mod variables_ui;
 pub mod vector_ui;
 pub mod view_cmds;
+mod view_scroll;
 pub mod warp_preview;
 pub mod wheel_nav;
 pub mod wide_angle_ui;
@@ -483,6 +484,9 @@ pub struct Services {
     pub read_displays: Option<monitor_status::ReadDisplaysFn>,
     /// The macOS menu bar, when the desktop app installed one; the in-window menus are hidden then.
     pub native_menu: Option<native_menu::NativeMenu>,
+    /// Type › Load Fonts… in the browser: the page's font file or folder picker
+    /// (see `user_fonts_ui`). Without one, the app's file dialog picks font files.
+    pub pick_fonts: Option<user_fonts_ui::PickFontsFn>,
     /// Ends the app once leaving is settled (nothing unsaved, or the prompt answered), instead of
     /// letting eframe close the window. macOS: `-[NSApplication terminate:]`. Closing the window
     /// while AppKit's run loop is still going crashes or hangs Touch Bar Macs (#1575, #1458).
@@ -574,6 +578,8 @@ pub struct PhotocraftApp {
     /// the frame the pointer leaves, so a long stationary hover never counts as elapsed time
     /// (#2022); set by `notices::show`.
     pub(crate) notices_hovered: bool,
+    /// The user's own fonts arriving (Type › Load Fonts…, store reads), see `user_fonts_ui`.
+    pub(crate) user_fonts: user_fonts_ui::UserFonts,
     /// Apply theme on first frame.
     styled: bool,
     /// Whether the window uses an integrated (transparent) macOS title bar.
@@ -769,6 +775,7 @@ impl PhotocraftApp {
             live_adjust: None,
             frame: 0,
             notices_hovered: false,
+            user_fonts: Default::default(),
             styled: false,
             integrated_titlebar: false,
             custom_titlebar: false,
@@ -1151,6 +1158,14 @@ impl PhotocraftApp {
         if let Some(r) = preset_files_ui::open(self, name, bytes) {
             return r.map(|()| Vec::new());
         }
+        // A font file (dropped on the window): loaded like Type › Load Fonts…
+        if user_fonts_ui::is_font(name) {
+            let sink = self.font_sink(None);
+            sink.file(name.to_string(), bytes.to_vec());
+            sink.done(false);
+            user_fonts_ui::tick(self, None);
+            return Ok(Vec::new());
+        }
         let name = &self.open_name(name);
         // Decoded on a worker: a tab with progress appears now, the document when it's ready
         // (warnings are shown then).
@@ -1176,6 +1191,7 @@ impl PhotocraftApp {
         } else {
             notices::io_warnings(self, &format!("Opened {name}"), &warnings);
         }
+        user_fonts_ui::after_open(self);
         // Script events bound to "Open Document".
         photocraft_engine::automate_cmds::document_opened(&mut self.session);
         self.sync_views();
@@ -1629,6 +1645,8 @@ impl eframe::App for PhotocraftApp {
             self.open_dropped(ctx, dropped, at);
         }
         self.place_next_dropped(ctx);
+        // Fonts picked, dropped or read back from the browser's store.
+        user_fonts_ui::tick(self, Some(ctx));
         // The control transport wakes the UI on arrival (ctx.request_repaint); only poll while a
         // screenshot is pending. (Polling every 50 ms here made idle apps render at 20 fps.)
         if !self.pending_screenshots.is_empty() {

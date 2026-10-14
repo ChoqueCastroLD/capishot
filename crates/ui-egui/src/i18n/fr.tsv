@@ -3145,3 +3145,31 @@ cameraData	Lens	Objectif
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Envoyer des statistiques d’utilisation anonymes
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	La version web envoie des statistiques d’utilisation anonymes (aucun fichier ni contenu) ; désactivez-les dans Préférences › Général.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Charger des polices…
+	Load Font Folder…	Charger un dossier de polices…
+	Manage Fonts…	Gérer les polices…
+	Manage Fonts	Gérer les polices
+	User fonts	Vos polices
+	All fonts	Toutes les polices
+	Missing fonts	Polices manquantes
+	Already loaded: {n}	Déjà chargées : {n}
+	Skipped {file}	Ignoré : {file}
+	No fonts were found	Aucune police trouvée
+	Fonts loaded: {n}	Polices chargées : {n}
+	Not saved, usable until you close this tab: {fonts}	Non enregistrées, utilisables jusqu'à la fermeture de cet onglet : {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Retirez des polices dans Texte › Gérer les polices… pour libérer de l'espace.
+	Browser storage is full	Le stockage du navigateur est plein
+	Fonts could not be saved	Impossible d'enregistrer les polices
+	Font files: {n} · {size}	Fichiers de polices : {n} · {size}
+	Stored in this browser only, never uploaded.	Stockées dans ce navigateur uniquement, jamais envoyées.
+	Browser storage: {used} of {quota}	Stockage du navigateur : {used} sur {quota}
+	Kept until you remove them.	Conservées jusqu'à ce que vous les retiriez.
+	The browser may clear them when space runs low.	Le navigateur peut les effacer si l'espace manque.
+	Loaded for this session only.	Chargées pour cette session uniquement.
+	Browser storage is unavailable: {error}	Le stockage du navigateur n'est pas disponible : {error}
+	Remove All	Tout retirer
+	Remove all fonts from this browser?	Retirer toutes les polices de ce navigateur ?
+	Removed: {n}	Retirées : {n}
+	No fonts loaded yet.	Aucune police chargée pour l'instant.
+	Not saved	Non enregistrée

@@ -3010,3 +3010,32 @@ fontWeight	Italic	Itálico
 	page	página
 @plural	{n} selection|{n} selections	{n} seleção|{n} seleções
 @plural	{n} line|{n} lines	{n} linha|{n} linhas
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Carregar fontes…
+	Load Font Folder…	Carregar pasta de fontes…
+	Manage Fonts…	Gerir fontes…
+	Manage Fonts	Gerir fontes
+	User fonts	Fontes próprias
+	All fonts	Todas as fontes
+	Missing fonts	Fontes em falta
+	Already loaded: {n}	Já carregadas: {n}
+	Skipped {file}	Ignorado {file}
+	No fonts were found	Não foram encontradas fontes
+	Fonts loaded: {n}	Fontes carregadas: {n}
+	Not saved, usable until you close this tab: {fonts}	Não guardadas, disponíveis até fechar este separador: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Remova fontes em Tipo › Gerir fontes… para libertar espaço.
+	Browser storage is full	O armazenamento do navegador está cheio
+	Fonts could not be saved	Não foi possível guardar as fontes
+	Font files: {n} · {size}	Ficheiros de fonte: {n} · {size}
+	Stored in this browser only, never uploaded.	Guardadas apenas neste navegador, nunca enviadas.
+	Browser storage: {used} of {quota}	Armazenamento do navegador: {used} de {quota}
+	Kept until you remove them.	Mantidas até as remover.
+	The browser may clear them when space runs low.	O navegador pode apagá-las quando faltar espaço.
+	Loaded for this session only.	Carregadas apenas nesta sessão.
+	Browser storage is unavailable: {error}	O armazenamento do navegador não está disponível: {error}
+	Remove All	Remover todas
+	Remove all fonts from this browser?	Remover todas as fontes deste navegador?
+	Removed: {n}	Removidas: {n}
+	No fonts loaded yet.	Ainda não há fontes carregadas.
+	Not saved	Não guardada
+	Load the font with Type › Load Fonts…	Carregue o tipo de letra com Tipo › Carregar fontes…

@@ -3829,3 +3829,31 @@ cameraData	Lens	Об'єктив
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Надсилати анонімну статистику використання
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Веб-версія надсилає анонімну статистику використання (без файлів і вмісту); вимкнути її можна в Налаштування › Загальні.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Завантажити шрифти…
+	Load Font Folder…	Завантажити теку шрифтів…
+	Manage Fonts…	Керування шрифтами…
+	Manage Fonts	Керування шрифтами
+	User fonts	Власні шрифти
+	All fonts	Усі шрифти
+	Missing fonts	Відсутні шрифти
+	Already loaded: {n}	Уже завантажено: {n}
+	Skipped {file}	Пропущено: {file}
+	No fonts were found	Шрифтів не знайдено
+	Fonts loaded: {n}	Завантажено шрифтів: {n}
+	Not saved, usable until you close this tab: {fonts}	Не збережено, доступні до закриття цієї вкладки: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Вилучіть шрифти в меню Текст › Керування шрифтами…, щоб звільнити місце.
+	Browser storage is full	Сховище браузера заповнене
+	Fonts could not be saved	Не вдалося зберегти шрифти
+	Font files: {n} · {size}	Файли шрифтів: {n} · {size}
+	Stored in this browser only, never uploaded.	Зберігаються лише в цьому браузері й нікуди не надсилаються.
+	Browser storage: {used} of {quota}	Сховище браузера: {used} з {quota}
+	Kept until you remove them.	Зберігаються, доки ви їх не вилучите.
+	The browser may clear them when space runs low.	Браузер може видалити їх, коли бракує місця.
+	Loaded for this session only.	Завантажено лише на цей сеанс.
+	Browser storage is unavailable: {error}	Сховище браузера недоступне: {error}
+	Remove All	Вилучити всі
+	Remove all fonts from this browser?	Вилучити всі шрифти з цього браузера?
+	Removed: {n}	Вилучено: {n}
+	No fonts loaded yet.	Шрифти ще не завантажено.
+	Not saved	Не збережено

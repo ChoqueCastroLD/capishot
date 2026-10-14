@@ -3743,3 +3743,31 @@ cameraData	Lens	Obiektyw
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Wysyłaj anonimowe statystyki użycia
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Wersja internetowa wysyła anonimowe statystyki użycia (bez plików ani treści); wyłącz je w Preferencje › Ogólne.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Wczytaj czcionki…
+	Load Font Folder…	Wczytaj folder czcionek…
+	Manage Fonts…	Zarządzaj czcionkami…
+	Manage Fonts	Zarządzaj czcionkami
+	User fonts	Własne czcionki
+	All fonts	Wszystkie czcionki
+	Missing fonts	Brakujące czcionki
+	Already loaded: {n}	Już wczytane: {n}
+	Skipped {file}	Pominięto {file}
+	No fonts were found	Nie znaleziono czcionek
+	Fonts loaded: {n}	Wczytane czcionki: {n}
+	Not saved, usable until you close this tab: {fonts}	Niezapisane, dostępne do zamknięcia tej karty: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Usuń czcionki w Tekst › Zarządzaj czcionkami…, aby zwolnić miejsce.
+	Browser storage is full	Pamięć przeglądarki jest pełna
+	Fonts could not be saved	Nie udało się zapisać czcionek
+	Font files: {n} · {size}	Pliki czcionek: {n} · {size}
+	Stored in this browser only, never uploaded.	Przechowywane tylko w tej przeglądarce, nigdy nie są wysyłane.
+	Browser storage: {used} of {quota}	Pamięć przeglądarki: {used} z {quota}
+	Kept until you remove them.	Zostają, dopóki ich nie usuniesz.
+	The browser may clear them when space runs low.	Przeglądarka może je usunąć, gdy zabraknie miejsca.
+	Loaded for this session only.	Wczytane tylko na tę sesję.
+	Browser storage is unavailable: {error}	Pamięć przeglądarki jest niedostępna: {error}
+	Remove All	Usuń wszystkie
+	Remove all fonts from this browser?	Usunąć wszystkie czcionki z tej przeglądarki?
+	Removed: {n}	Usunięto: {n}
+	No fonts loaded yet.	Nie wczytano jeszcze czcionek.
+	Not saved	Niezapisana

@@ -557,6 +557,7 @@ fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Valu
     } else {
         notices::io_warnings(app, &format!("Opened {name}"), &warnings);
     }
+    crate::user_fonts_ui::after_open(app);
     // Script events bound to "Open Document".
     photocraft_engine::automate_cmds::document_opened(&mut app.session);
     app.sync_views();
@@ -808,8 +809,7 @@ mod tests;
 mod localization_tests {
     #[test]
     fn opening_stages_follow_the_display_language() {
-        for (code, reading, decoding) in
-            [("zh-hans", "正在读取…", "正在解码…"), ("zh-hant", "正在讀取…", "正在解碼…"), ("en", "Reading…", "Decoding…")]
+        for (code, reading, decoding) in [("zh-hans", "正在读取…", "正在解码…"), ("zh-hant", "正在讀取…", "正在解碼…"), ("en", "Reading…", "Decoding…")]
         {
             crate::i18n::with_language(crate::i18n::Lang::from_code(code).unwrap(), || {
                 assert_eq!(super::open_message(""), reading);

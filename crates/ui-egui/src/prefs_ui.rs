@@ -1237,6 +1237,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             }
         }
         "fontsManage" | "fontsMissing" => crate::fonts_ui::body(app, ui, f),
+        "userFonts" => crate::user_fonts_ui::body(app, ui, f),
         "shortcuts" => shortcuts_body(app, ui, f),
         "presets" => presets_body(app, ui, f),
         "presetsIO" => presets_io_body(ui, f),
@@ -2186,6 +2187,7 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
             }
         }
         "fontsManage" | "fontsMissing" => crate::fonts_ui::confirm(app, f),
+        "userFonts" => Ok(Value::Null),
         "mismatch" => {
             let action = f.get("action").and_then(Value::as_str).unwrap_or("preserve");
             let applied = f.get("applied").and_then(Value::as_str).unwrap_or("preserve");
