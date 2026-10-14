@@ -82,7 +82,8 @@ impl Group {
             Group::Color => 130.0,
             Group::Properties => 160.0,
             Group::Character => 160.0,
-            Group::TypeR => 300.0,
+            // Preview plus a few script lines and styles.
+            Group::TypeR => 440.0,
             Group::Navigator => 140.0,
             Group::History => 130.0,
             Group::Layers => 200.0,
