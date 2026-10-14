@@ -4066,4 +4066,8 @@ cameraRaw	Yellow	Sárga
 	Ink Characteristics	Festék jellemzői
 	Solidity:	Fedőképesség:
 	Redrawing	Újrarajzolás
+# Bevel & Emboss Technique.
+	Technique	Technika
+	Chisel Hard	Kemény vésés
+	Chisel Soft	Lágy vésés
 	Open color-less EXR as ACEScg	Színinformáció nélküli EXR megnyitása ACEScg-ként

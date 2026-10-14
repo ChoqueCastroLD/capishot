@@ -3147,4 +3147,8 @@ curves	Smooth	Lisser
 	Sent to {printer}	Envoyé à {printer}
 	set in Print Settings…	défini dans les paramètres d’impression…
 	ICO is limited to 256 × 256 pixels	Le format ICO est limité à 256 × 256 pixels
+# Bevel & Emboss Technique.
+	Technique	Technique
+	Chisel Hard	Ciselage dur
+	Chisel Soft	Ciselage doux
 	Open color-less EXR as ACEScg	Ouvrir les EXR sans espace colorimétrique en ACEScg

@@ -3822,4 +3822,8 @@ curves	Smooth	スムーズ
 	Reset All Locked Settings	ロックされた設定をすべて初期化
 	Copy Texture to Other Tools	テクスチャを他のツールにコピー
 	ICO is limited to 256 × 256 pixels	ICO は 256 × 256 ピクセルまでです
+# Bevel & Emboss Technique.
+	Technique	テクニック
+	Chisel Hard	チゼルハード
+	Chisel Soft	チゼルソフト
 	Open color-less EXR as ACEScg	色空間のないEXRをACEScgとして開く

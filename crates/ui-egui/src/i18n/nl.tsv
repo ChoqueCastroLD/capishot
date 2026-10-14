@@ -3905,4 +3905,8 @@ curves	Smooth	Vloeiend maken
 	Sent to {printer}	Verzonden naar {printer}
 	set in Print Settings…	instellen in de afdrukinstellingen…
 	ICO is limited to 256 × 256 pixels	ICO is beperkt tot 256 × 256 pixels
+# Bevel & Emboss Technique.
+	Technique	Techniek
+	Chisel Hard	Beitel hard
+	Chisel Soft	Beitel zacht
 	Open color-less EXR as ACEScg	EXR zonder kleurruimte als ACEScg openen

@@ -4108,6 +4108,10 @@ navigator	Zoom	Zoom
 	Sent to {printer}	Inviato a {printer}
 	set in Print Settings…	impostato nelle impostazioni di stampa…
 	ICO is limited to 256 × 256 pixels	ICO è limitato a 256 × 256 pixel
+# Bevel & Emboss Technique.
+	Technique	Tecnica
+	Chisel Hard	Cesello duro
+	Chisel Soft	Cesello morbido
 	Open color-less EXR as ACEScg	Apri gli EXR senza spazio colore come ACEScg
 
 # Color management, Liquify, glyph group, warp and Camera Raw labels the Serbian, Vietnamese and Japanese catalogs added
