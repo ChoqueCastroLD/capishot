@@ -2,7 +2,7 @@
 //! current line with its number, style and text scale, previous / next line, and the line itself
 //! drawn in its style's font. Clicking the line scrolls the script to it.
 
-use egui::{RichText, Sense, Stroke, StrokeKind, vec2};
+use egui::{Rect, RichText, Sense, Stroke, StrokeKind, vec2};
 use serde_json::json;
 
 use super::{act, chip, font_label, icon_label_button};
@@ -10,7 +10,7 @@ use crate::PhotocraftApp;
 use crate::theme::Tokens;
 
 /// Height of the line preview.
-const LINE_H: f32 = 38.0;
+const LINE_H: f32 = 48.0;
 
 pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
@@ -53,7 +53,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let size_on = app.session.is_enabled("typer.resize");
             if ui
-                .add_enabled_ui(size_on, |ui| crate::icons::button(ui, "circle-plus", 22.0, false, tl!("Increase the text size of the current layer")))
+                .add_enabled_ui(size_on, |ui| crate::icons::button_with_icon_size(ui, "circle-plus", 22.0, 15.0, false, tl!("Increase the text size of the current layer")))
                 .inner
                 .clicked()
             {
@@ -64,7 +64,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 act(app, "typer.settings.set", json!({"key": "textSizeIncrement", "value": step}));
             }
             if ui
-                .add_enabled_ui(size_on, |ui| crate::icons::button(ui, "circle-minus", 22.0, false, tl!("Decrease the text size of the current layer")))
+                .add_enabled_ui(size_on, |ui| crate::icons::button_with_icon_size(ui, "circle-minus", 22.0, 15.0, false, tl!("Decrease the text size of the current layer")))
                 .inner
                 .clicked()
             {
@@ -95,10 +95,10 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
     // ↑ ↓ · line N, style X, scale [ ] % · apply
     ui.horizontal(|ui| {
-        if crate::icons::button(ui, "arrow-up", 22.0, false, tl!("Previous line")).clicked() {
+        if crate::icons::button_with_icon_size(ui, "arrow-up", 22.0, 15.0, false, tl!("Previous line")).clicked() {
             act(app, "typer.line.previous", json!({}));
         }
-        if crate::icons::button(ui, "arrow-down", 22.0, false, tl!("Next line")).clicked() {
+        if crate::icons::button_with_icon_size(ui, "arrow-down", 22.0, 15.0, false, tl!("Next line")).clicked() {
             act(app, "typer.line.next", json!({}));
         }
         let number = line.as_ref().filter(|l| l.index > 0).map_or_else(|| "—".to_string(), |l| l.index.to_string());
@@ -107,13 +107,11 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             info.push_str(&format!(" · {} {p}", tl!("page")));
         }
         ui.label(RichText::new(info).color(t.text_dim).size(11.5));
-        let name = style.as_ref().map_or("—", |s| s.name.as_str()).to_string();
-        ui.label(RichText::new(name).color(t.text).size(11.5).strong()).on_hover_text(tl!("Style"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let apply_on = app.session.is_enabled("typer.apply");
             let mut r = ui
                 .add_enabled_ui(apply_on, |ui| {
-                    crate::icons::button(ui, "circle-arrow-right", 22.0, false, tl!("Apply the text and the style to the current layer"))
+                    crate::icons::button_with_icon_size(ui, "circle-arrow-right", 22.0, 15.0, false, tl!("Apply the text and the style to the current layer"))
                 })
                 .inner;
             if !apply_on {
@@ -137,7 +135,16 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), LINE_H), Sense::click());
     ui.painter().rect_filled(rect, t.radius_sm, t.field);
     ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
-    let inner = rect.shrink2(vec2(8.0, 4.0));
+    // The style's name as a caption, the line below it.
+    let name = style.as_ref().map_or("—", |s| s.name.as_str());
+    ui.painter().with_clip_rect(rect).text(
+        rect.left_top() + vec2(8.0, 3.0),
+        egui::Align2::LEFT_TOP,
+        format!("{}: {name}", tl!("Style")),
+        egui::FontId::proportional(10.5),
+        t.text_faint,
+    );
+    let inner = Rect::from_min_max(rect.left_top() + vec2(8.0, 16.0), rect.right_bottom() - vec2(8.0, 3.0));
     let text = line.as_ref().map(|l| if settings.interpret_markdown { photocraft_typer::markdown::parse_runs(&l.text).text } else { l.text.clone() });
     match text.filter(|s| !s.trim().is_empty()) {
         Some(text) => {

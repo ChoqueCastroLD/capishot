@@ -68,7 +68,7 @@ impl Default for TyperUi {
     fn default() -> Self {
         Self {
             collapsed: Vec::new(),
-            script_height: 180.0,
+            script_height: 130.0,
             style_editor: None,
             folder_editor: None,
             settings: None,
@@ -191,13 +191,14 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
         crate::widgets::hairline(ui);
         // The script gets its height; the styles list and the footer take the rest.
-        let footer = 30.0;
-        let left = (full.bottom() - ui.cursor().top()).max(0.0);
-        let max_script = (left - footer - 90.0).max(60.0);
-        let script_h = app.ui.typer.script_height.clamp(60.0, max_script);
+        // What the script and the styles list share once the toolbar, splitter and footer
+        // (about 90 points with spacing) have theirs, so the footer stays in a short group.
+        let lists = (full.bottom() - ui.cursor().top() - 90.0).max(80.0);
+        let max_script = (lists - 50.0).max(40.0);
+        let script_h = app.ui.typer.script_height.clamp(40.0, max_script);
         script_editor::show(app, ui, script_h);
         splitter(app, ui, max_script);
-        let styles_h = (full.bottom() - ui.cursor().top() - footer - 8.0).max(40.0);
+        let styles_h = (lists - script_h).max(30.0);
         styles::show(app, ui, styles_h);
         footer_row(app, ui);
     });
@@ -226,17 +227,17 @@ fn footer_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     crate::widgets::hairline(ui);
     ui.horizontal(|ui| {
-        if crate::icons::button(ui, "folder-plus", 24.0, false, tl!("Add folder")).clicked() {
+        if crate::icons::button_with_icon_size(ui, "folder-plus", 24.0, 15.0, false, tl!("Add folder")).clicked() {
             folder_editor::open_new(app, None);
         }
-        if crate::icons::button(ui, "plus", 24.0, false, tl!("Add style")).clicked() {
+        if crate::icons::button_with_icon_size(ui, "plus", 24.0, 15.0, false, tl!("Add style")).clicked() {
             style_editor::open_new(app);
         }
-        if crate::icons::button(ui, "upload", 24.0, false, tl!("Import styles or settings…")).clicked() {
+        if crate::icons::button_with_icon_size(ui, "upload", 24.0, 15.0, false, tl!("Import styles or settings…")).clicked() {
             settings::import(app);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if crate::icons::button(ui, "settings", 24.0, app.ui.typer.settings.is_some(), tl!("TypeR Settings")).clicked() {
+            if crate::icons::button_with_icon_size(ui, "settings", 24.0, 15.0, app.ui.typer.settings.is_some(), tl!("TypeR Settings")).clicked() {
                 settings::open(app);
             }
             // Multi-bubble mode (TypeR's footer "MB ON/OFF").

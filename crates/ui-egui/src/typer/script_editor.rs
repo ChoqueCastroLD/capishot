@@ -204,14 +204,14 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, height: f32) {
     let ctx = ui.ctx().clone();
     // Toolbar: B / I · import · line count.
     ui.horizontal(|ui| {
-        if crate::icons::button(ui, "bold", 22.0, false, &format!("{} ({})", tl!("Bold"), crate::shortcuts::pretty("Cmd+B"))).clicked() {
+        if crate::icons::button_with_icon_size(ui, "bold", 22.0, 15.0, false, &format!("{} ({})", tl!("Bold"), crate::shortcuts::pretty("Cmd+B"))).clicked() {
             ctx.data_mut(|d| d.insert_temp(pending_id(), Format::Bold));
         }
-        if crate::icons::button(ui, "italic", 22.0, false, &format!("{} ({})", tl!("Italic"), crate::shortcuts::pretty("Cmd+I"))).clicked() {
+        if crate::icons::button_with_icon_size(ui, "italic", 22.0, 15.0, false, &format!("{} ({})", tl!("Italic"), crate::shortcuts::pretty("Cmd+I"))).clicked() {
             ctx.data_mut(|d| d.insert_temp(pending_id(), Format::Italic));
         }
         crate::widgets::vline(ui, 16.0);
-        if crate::icons::button(ui, "file-text", 22.0, false, tl!("Import a script (.txt)…")).clicked() {
+        if crate::icons::button_with_icon_size(ui, "file-text", 22.0, 15.0, false, tl!("Import a script (.txt)…")).clicked() {
             let r = app.pick_file_bytes_filtered(&["txt", "md"], |app, _name, bytes| {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 super::run(app, "typer.script.set", json!({"text": text}))
@@ -256,8 +256,8 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, height: f32) {
             };
             let out = egui::TextEdit::multiline(&mut buf)
                 .id(editor_id())
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin { left: (GUTTER + 4.0) as i8, right: 4, top: 4, bottom: 4 })
+                // The margin leaves room for the gutter (a custom frame replaces `margin`).
+                .frame(egui::Frame::NONE.inner_margin(egui::Margin { left: (GUTTER + 4.0) as i8, right: 4, top: 4, bottom: 4 }))
                 .desired_width(f32::INFINITY)
                 .desired_rows(((height - 8.0) / 16.0).max(3.0) as usize)
                 .lock_focus(true)

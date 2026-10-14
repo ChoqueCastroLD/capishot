@@ -233,11 +233,14 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                             ui.label(RichText::new(s).color(t.text_faint).size(11.0));
                         }
                         ui.end_row();
-                        for (id, name, typer, _) in super::keymap::ENTRIES {
+                        for (id, name, typer, preset) in super::keymap::ENTRIES {
                             ui.label(RichText::new(crate::i18n::tr_id(crate::i18n::current(), id, name)).color(t.text_dim).size(11.5));
                             ui.label(RichText::new(*typer).color(t.text_faint).size(11.5));
-                            let key = overrides.get(*id).filter(|k| !k.is_empty()).map_or_else(|| "—".to_string(), |k| crate::shortcuts::pretty(k));
-                            ui.label(RichText::new(key).color(t.text).size(11.5));
+                            // The key in effect, else the preset's, greyed.
+                            match overrides.get(*id).filter(|k| !k.is_empty()) {
+                                Some(k) => ui.label(RichText::new(crate::shortcuts::pretty(k)).color(t.text).size(11.5)),
+                                None => ui.label(RichText::new(format!("— ({})", crate::shortcuts::pretty(preset))).color(t.text_faint).size(11.5)),
+                            };
                             ui.end_row();
                         }
                     });
