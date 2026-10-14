@@ -1,6 +1,6 @@
 # UI parity: tools, handles, modifiers and feel
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (on-canvas corner radius widgets, TOOL-214-12; Curvature Pen edits the active path; Clip Thumbnails to Layer Bounds; Pen ⇧ 45°; last selected tool restored at launch; Layers panel filter-type dropdown with Kind, Name and Mode, #5048; Free Transform box and marching ants follow the selection, #5297; History: the trash deletes the selected snapshot, rows drag onto the trash, #5324; smart filter reordering by drag; smart object perspective row corrected to done, #426; Free Transform H/V skew fields; toolbar tool shortcuts can be reassigned; ⇧-dragged guides land on ruler ticks; layer and selection keys; tool keys; spring-loaded tool letters; type formatting keys; Pen Auto Add/Delete, #4144; smart filter rows; stale missing-tool rows corrected: Color Replacement, Red Eye and the Add/Delete Anchor Point pair are live toolbar tools, Frame landed; no percentage changed) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (Crop tool Content-Aware Fill; on-canvas corner radius widgets, TOOL-214-12; Curvature Pen edits the active path; Clip Thumbnails to Layer Bounds; Pen ⇧ 45°; last selected tool restored at launch; Layers panel filter-type dropdown with Kind, Name and Mode, #5048; Free Transform box and marching ants follow the selection, #5297; History: the trash deletes the selected snapshot, rows drag onto the trash, #5324; smart filter reordering by drag; smart object perspective row corrected to done, #426; Free Transform H/V skew fields; toolbar tool shortcuts can be reassigned; ⇧-dragged guides land on ruler ticks; layer and selection keys; tool keys; spring-loaded tool letters; type formatting keys; Pen Auto Add/Delete, #4144; smart filter rows; stale missing-tool rows corrected: Color Replacement, Red Eye and the Add/Delete Anchor Point pair are live toolbar tools, Frame landed; no percentage changed) · **Target:** Adobe Photoshop 2026
 
 How PhotoCraft's direct manipulation compares with Photoshop 2026 (27.11.0): the toolbox, the
 handles and modifier keys of each gesture, nudging, snapping, numeric precision, navigation,
@@ -142,7 +142,8 @@ Triangle and Curvature Pen (minus legacy Rounded Rectangle and Targeted Adjustme
 | Default mode: the image turns and moves behind an upright box; Auto Center Preview; Use Classic Mode | done | TOOL-214-23 |
 | W × H × Resolution with units, built-in size presets, Front Image | done | TOOL-214-9 (`crop_size.rs`) |
 | Saved custom crop presets | missing | TOOL-214-9 |
-| Content-Aware crop fill, Delete Cropped Pixels off | partial | |
+| Fill: Content-Aware Fill: a turned or extending crop fills the uncovered corners and strips from the image (each piece with its own sampling window), on the Background or else the active pixel layer, in the crop's one undo step; Generative Expand not offered | done | `tests/crop_content_aware.rs`, `crop_ui.rs::commit_passes_the_fill_choice` (#3823, 2026-10-12) |
+| Delete Cropped Pixels off | partial | |
 
 ## Snapping, guides, rulers, precision
 
@@ -240,6 +241,7 @@ Paragraph; the rest open as in-app floating windows.
 | 2026-10-12 | minor | Toolbar tool shortcuts can be reassigned, removed and reset in Keyboard Shortcuts (#4086); capture, restart, group cycling, conflict and text-focus regressions |
 | 2026-10-12 | minor | Smart filter rows can be selected, and dragged (⌥: copied) onto another smart object or onto Delete (#4271) |
 | 2026-10-12 | minor | Free Transform options bar: H and V skew fields; a sheared box reads as skew instead of a taller H |
+| 2026-10-12 | minor | Crop tool Fill › Content-Aware Fill done (#3823); Delete Cropped Pixels off split into its own row, still partial |
 | 2026-10-12 | minor | Layers panel: Clip Thumbnails to Layer Bounds frames each layer's pixels instead of the canvas (#4281) |
 | 2026-10-13 | minor | Smart filter rows can be dragged up or down their stack to reorder the filters |
 | 2026-10-13 | minor | On-canvas corner radius widgets on live rectangles (TOOL-214-12) |

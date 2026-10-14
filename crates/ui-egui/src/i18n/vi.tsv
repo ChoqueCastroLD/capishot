@@ -3620,6 +3620,7 @@ curves	Smooth	Làm mượt
 	Action playback stopped	Đã dừng phát hành động
 	Step {step} is waiting for its dialog	Bước {step} đang chờ hộp thoại của nó
 @plural	{n} action|{n} actions	{n} hành động
+	Background (Default)	Nền (mặc định)
 	Presentation	Trình bày
 # Batch / Image Processor
 	Include All Subfolders	Bao gồm tất cả thư mục con

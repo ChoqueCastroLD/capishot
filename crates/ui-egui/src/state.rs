@@ -624,6 +624,10 @@ pub struct ToolOptions {
     pub crop_custom_ratio_height: f32,
     #[serde(default = "yes")]
     pub crop_delete: bool,
+    /// Crop options bar › Fill: false = Background (Default), true = Content-Aware Fill (the area a
+    /// rotated or extending crop uncovers is filled from its surroundings, #3823).
+    #[serde(default)]
+    pub crop_content_aware: bool,
     /// Crop W x H x Resolution (`crop_ratio` = "whr", #2443): width and height as typed lengths
     /// with their unit ("4 in", "1024 px"; empty = unset), the resolution ("" = the document's)
     /// and its unit ("px/in" or "px/cm"). See `crop_size`.
@@ -823,6 +827,7 @@ impl Default for ToolOptions {
             crop_custom_ratio_width: 0.0,
             crop_custom_ratio_height: 0.0,
             crop_delete: true,
+            crop_content_aware: false,
             crop_width: String::new(),
             crop_height: String::new(),
             crop_resolution: String::new(),

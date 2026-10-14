@@ -2733,6 +2733,8 @@ curves	Smooth	平滑
 	Action playback stopped	動作播放已停止
 	Step {step} is waiting for its dialog	步驟 {step} 正在等待其對話框
 @plural	{n} action|{n} actions	{n} 個動作
+	Background (Default)	背景（預設）
+	Content-Aware Fill	內容感知填滿
 # Batch / Image Processor
 	Include All Subfolders	包含所有子資料夾
 	Auto Add/Delete	自動增加/刪除

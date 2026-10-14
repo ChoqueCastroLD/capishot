@@ -5798,6 +5798,11 @@ pub fn commit_crop(app: &mut PhotocraftApp) {
     let (w, h) = ((r[2] - r[0]).round().max(1.0), (r[3] - r[1]).round().max(1.0));
     let delete = app.ui.tool_options.crop_delete;
     let mut p = json!({"x": x, "y": y, "width": w, "height": h, "deleteCroppedPixels": delete});
+    // Fill › Content-Aware Fill (#3823): what a turned or extending frame uncovers is filled from
+    // its surroundings instead of the background colour.
+    if app.ui.tool_options.crop_content_aware {
+        p["contentAware"] = json!(true);
+    }
     // A turned frame (#1792): the document turns with it, then is cropped to it. (The untouched
     // default frame above is never turned: turning it makes it a real frame.)
     let angle = crate::crop_ui::angle(app);

@@ -3746,6 +3746,7 @@ curves	Smooth	スムーズ
 	Action playback stopped	アクションの再生を停止しました
 	Step {step} is waiting for its dialog	ステップ {step} はダイアログを待っています
 @plural	{n} action|{n} actions	アクション {n} 個
+	Background (Default)	背景（既定）
 # Batch / Image Processor
 	Include All Subfolders	すべてのサブフォルダーを含める
 
