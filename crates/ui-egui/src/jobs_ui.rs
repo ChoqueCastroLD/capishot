@@ -174,7 +174,7 @@ pub struct JobsUi {
 /// (the result is then `{"job": id, "pending": true}` and the edit lands when [`tick`] applies
 /// it), else synchronously like [`photocraft_engine::Session::execute`].
 pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, String> {
-    if !app.background_jobs {
+    if !app.background_jobs && !(POOL_THREADS && POOL_COMMANDS.contains(&id)) {
         return app.session.execute(id, params).map_err(|e| e.to_string());
     }
     match app.session.start(id, params).map_err(|e| e.to_string())? {
@@ -188,6 +188,12 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
         }
     }
 }
+
+/// The browser threads build runs these as background jobs on its Web Worker pool even without
+/// [`PhotocraftApp::background_jobs`] (the browser's default): the seconds-long fills and graph
+/// cuts at pen-up would otherwise hold the page's main thread. Their results are the same.
+const POOL_COMMANDS: [&str; 2] = ["paint.spotHealing", "select.quick"];
+const POOL_THREADS: bool = cfg!(all(target_arch = "wasm32", target_feature = "atomics"));
 
 /// Open a file in the background: a tab appears at once and shows the progress; the document
 /// replaces it when decoded. `path` is remembered for File › Save and Open Recent.
@@ -504,6 +510,12 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.ui.brush_tab = 1;
         }
         JobOutcome::Done(v) if e.command == "lut.installPack" => crate::lut_library_ui::report(app, &v),
+        // As `retouch_ui::report_smart_result` says it when Quick Selection runs inline.
+        JobOutcome::Done(v) if e.command == "select.quick" && v.get("changed").and_then(Value::as_bool) == Some(false) => {
+            app.sync_views();
+            app.ui.status = tl!("Quick Selection found nothing there").into();
+            app.ui.status_error = false;
+        }
         JobOutcome::Done(_) => {
             app.sync_views();
             app.ui.status = localize_label(&e.label);

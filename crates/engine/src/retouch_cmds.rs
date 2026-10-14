@@ -738,8 +738,33 @@ fn spot_healing(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let all = sample_all_layers(p);
     let mode = heal_mode(p, CMD)?;
-    let dmg = run_stroke(s, "Spot Healing Brush", id, p, |pre, surf, sel, lock| Ok(spot_heal_surface(surf, pre, &stroke, kind, all, sel, lock, mode)))?;
-    Ok(json!({ "damage": damage_json(dmg) }))
+    // A background job when started so (the desktop, the browser threads build): the fill runs
+    // on a worker against the document as it is, then lands as one step, as `run_stroke` edits.
+    let base = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
+    let params = p.clone();
+    let label = "Spot Healing Brush";
+    crate::jobs::run(
+        s,
+        label,
+        true,
+        move |_| {
+            let mut doc = (*base).clone();
+            let pre = doc.clone();
+            let (surf, lock) = crate::channel_cmds::target_surface(&mut doc, id, &params)?;
+            let dmg = spot_heal_surface(surf, &pre, &stroke, kind, all, pre.selection.as_ref(), lock, mode);
+            Ok((doc, dmg))
+        },
+        move |s, (doc, dmg)| {
+            s.edit(label, move |d, _| {
+                *d = doc;
+                Ok(())
+            })?;
+            if let Some(st) = s.active_mut() {
+                st.last_damage = Some(dmg);
+            }
+            Ok(json!({ "damage": damage_json(dmg) }))
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1228,7 +1253,7 @@ impl LiveDab {
         // The commit's mix: the original target and the working pixels over the whole area.
         let mut surface = self.pre_surf.clone();
         if !all.is_empty() {
-            let (orig, work) = (Region::read(&self.pre_surf, all), self.work.read(all));
+            let (orig, work) = (Region::read(&self.pre_surf, all), self.work.peek(all));
             photocraft_paint::retouch::mix_back(&mut surface, &orig, &work, all, self.opacity, self.sel.as_ref(), self.lock);
         }
         Ok(DabCommit {

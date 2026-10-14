@@ -269,8 +269,13 @@ fn read_path(path: &str) -> Result<Vec<u8>> {
     Err(EngineError::Other(format!("cannot open paths on the web: {path}")))
 }
 
+/// Whether [`Session::start`] can run work in the background: native threads, or the browser
+/// threads build's rayon Web Worker pool. The single-threaded browser build runs it inline.
+const SPAWNS: bool = cfg!(any(not(target_arch = "wasm32"), target_feature = "atomics"));
+
 /// Run a job-capable command's heavy part. `work` runs on a worker thread when the command was
-/// started with [`Session::start`] (inline otherwise, and always on wasm); `apply` then runs on
+/// started with [`Session::start`] (inline otherwise, and always in the single-threaded browser
+/// build; the browser threads build runs it on the rayon pool); `apply` then runs on
 /// the calling thread with its output and returns the command's result. With `lock_document`,
 /// the active document is locked against other edits while the job runs, and applying fails if
 /// it was edited anyway.
@@ -284,7 +289,7 @@ pub fn run<T: Send + 'static>(
     work: impl FnOnce(&JobCtx) -> Result<T> + Send + 'static,
     apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
 ) -> Result<Value> {
-    if !s.jobs.spawn || cfg!(target_arch = "wasm32") {
+    if !s.jobs.spawn || !SPAWNS {
         let t = work(&s.jobs.inline.clone().unwrap_or_default())?;
         return apply(s, t);
     }
@@ -318,9 +323,18 @@ pub fn run<T: Send + 'static>(
         });
         Some(spawned.map_err(|e| EngineError::Other(format!("could not start a background job: {e}")))?)
     };
-    #[cfg(target_arch = "wasm32")]
+    // The browser threads build: a worker of the rayon pool (no handle to join; a cancelled
+    // job's result is dropped with its channel).
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
     {
-        // Unreachable (wasm runs inline above); keep the types used.
+        let wctx = ctx.clone();
+        rayon::spawn(move || {
+            let _ = tx.send(work(&wctx).map(|t| Box::new(t) as Payload));
+        });
+    }
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    {
+        // Unreachable (the single-threaded build runs inline above); keep the types used.
         drop((work, tx));
     }
     s.jobs.pending = Some(Running {
@@ -352,7 +366,7 @@ pub fn edit_job<R: Send + 'static>(
     f: impl FnOnce(&mut Document, &mut Option<LayerId>, &JobCtx) -> Result<R> + Send + 'static,
     finish: impl FnOnce(R) -> Value + Send + 'static,
 ) -> Result<Value> {
-    if !s.jobs.spawn || cfg!(target_arch = "wasm32") {
+    if !s.jobs.spawn || !SPAWNS {
         // Inline: exactly `Session::edit`, as before jobs existed.
         let ctx = s.jobs.inline.clone().unwrap_or_default();
         let r = s.edit(label, |doc, active| f(doc, active, &ctx))?;
