@@ -558,6 +558,21 @@ fn field_banded(kind: FieldKind, reach: i32, shape: &[f32], region: Rect, out: R
     parts.concat()
 }
 
+/// [`field`] of both bevel fields over the same `out`, `[BevelInside, BevelOutside]`: one window,
+/// whose sharp edges are found once instead of once per field.
+pub(crate) fn bevel_fields(reach: i32, shape: &[f32], region: Rect, out: Rect) -> [Vec<f32>; 2] {
+    let [inside, outside] = [FieldKind::BevelInside, FieldKind::BevelOutside];
+    if !threaded_inside(inside) {
+        return [inside, outside].map(|k| field(k, reach, shape, region, out));
+    }
+    let win = out.inflate(field_radius(inside, reach) + 1).intersect(&region);
+    if win.is_empty() {
+        return [Vec::new(), Vec::new()];
+    }
+    let f = photocraft_compose::effects::bevel_distance_fields(crop(shape, region, win), win.width() as usize, win.height() as usize, reach as f32);
+    if win == out { f } else { f.map(|f| crop(&f, win, out)) }
+}
+
 /// The layer's shape (`compose::layer_shape`) over `r`, in parallel bands.
 pub(crate) fn shape(doc: &photocraft_doc::Document, layer: &Layer, r: Rect) -> Vec<f32> {
     if r.is_empty() {
@@ -840,6 +855,30 @@ mod tests {
             }
         }
         assert!(too_small_noticed, "a 2 row halo went unnoticed, so this test guards nothing");
+    }
+
+    /// Both bevel fields from one window (sharp edges found once) are bit for bit the fields
+    /// computed one at a time, over the whole region and over a part of it.
+    #[test]
+    fn paired_bevel_fields_equal_the_fields_one_at_a_time() {
+        let region = Rect::new(-20, -10, 300, 290);
+        let (w, h) = (region.width() as usize, region.height() as usize);
+        let mut shape = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let (fx, fy) = (x as f32 - 150.0, y as f32 - 140.0);
+                let r = (fx * fx + fy * fy).sqrt() + 8.0 * (fy * 0.07).sin() * (fx * 0.05).cos();
+                shape[y * w + x] = (90.0 - r).clamp(0.0, 1.0) * if (x / 13 + y / 17) % 5 == 0 { 0.6 } else { 1.0 };
+            }
+        }
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        for reach in [3, 9, 40] {
+            for out in [region, Rect::new(40, 30, 170, 120), Rect::new(-20, 200, 300, 290)] {
+                let [inside, outside] = bevel_fields(reach, &shape, region, out);
+                assert_eq!(bits(&inside), bits(&field(FieldKind::BevelInside, reach, &shape, region, out)), "inside, reach {reach}, {out:?}");
+                assert_eq!(bits(&outside), bits(&field(FieldKind::BevelOutside, reach, &shape, region, out)), "outside, reach {reach}, {out:?}");
+            }
+        }
     }
 
     /// #3646: a stroke's outer edge is the fitted 5 × 5 chamfer while it is narrow and the exact

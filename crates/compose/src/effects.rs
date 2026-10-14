@@ -2319,6 +2319,14 @@ pub fn distance_field(kind: FieldKind, alpha: Vec<f32>, w: usize, h: usize, reac
     }
 }
 
+/// Both chiselled bevel fields of `alpha`, `[BevelInside, BevelOutside]`: each is its
+/// [`distance_field`], with the sharp edges they both start from found once.
+pub fn bevel_distance_fields(alpha: Vec<f32>, w: usize, h: usize, reach: f32) -> [Vec<f32>; 2] {
+    let s = Map { w, h, v: alpha };
+    let sharp = sharp_edges(&s);
+    [bevel_dist_inside(&s, &sharp, reach), bevel_dist_outside(&s, &sharp, reach)]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1814,19 +1814,28 @@ impl Compositor {
             layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect();
         let want = field_reaches(&progs);
         e.fields.retain(|k, _| want.contains_key(k));
-        for (&kind, &reach) in &want {
+        // Each field to recompute: over which rectangle, exact up to which reach.
+        let jobs: Vec<(FieldKind, Rect, i32)> = want
+            .iter()
+            .filter_map(|(&kind, &reach)| match e.fields.get(&kind).map(|(r, _)| *r) {
+                Some(r) if r >= reach => (!damage.is_empty()).then(|| (kind, damage.inflate(fx::field_radius(kind, r)).intersect(&region), r)),
+                _ => Some((kind, region, reach)),
+            })
+            .collect();
+        // A chiselled bevel's two fields over the same rectangle share their window's sharp edges.
+        let job = |k: FieldKind| jobs.iter().find(|j| j.0 == k).map(|j| (j.1, j.2));
+        let mut bevel = match (job(FieldKind::BevelInside), job(FieldKind::BevelOutside)) {
+            (Some((out, reach)), b) if b == Some((out, reach)) => fx::bevel_fields(reach, &e.shape_cpu, region, out).map(Some),
+            _ => [None, None],
+        };
+        for (kind, out, reach) in jobs {
             let have = e.fields.get(&kind).map(|(r, _)| *r);
-            let out = match have {
-                Some(r) if r >= reach => {
-                    if damage.is_empty() {
-                        continue;
-                    }
-                    damage.inflate(fx::field_radius(kind, r)).intersect(&region)
-                }
-                _ => region,
+            let pair = match kind {
+                FieldKind::BevelInside => bevel[0].take(),
+                FieldKind::BevelOutside => bevel[1].take(),
+                _ => None,
             };
-            let reach = have.filter(|r| *r >= reach).unwrap_or(reach);
-            let v = fx::field(kind, reach, &e.shape_cpu, region, out);
+            let v = pair.unwrap_or_else(|| fx::field(kind, reach, &e.shape_cpu, region, out));
             if have.is_none_or(|r| r < reach) {
                 e.fields.insert(kind, (reach, Tex::map(device, "pc_fx_field", region, MAP32)));
             }
