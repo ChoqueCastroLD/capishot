@@ -3739,3 +3739,31 @@ cameraData	Lens	レンズ
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	匿名の使用統計を送信
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Web 版は匿名の使用統計を送信します（ファイルや内容は送信しません）。環境設定 › 一般 でオフにできます。
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	フォントを読み込む…
+	Load Font Folder…	フォントフォルダーを読み込む…
+	Manage Fonts…	フォントを管理…
+	Manage Fonts	フォントを管理
+	User fonts	ユーザーフォント
+	All fonts	すべてのフォント
+	Missing fonts	不足しているフォント
+	Already loaded: {n}	読み込み済み：{n}
+	Skipped {file}	スキップ：{file}
+	No fonts were found	フォントが見つかりません
+	Fonts loaded: {n}	読み込んだフォント：{n}
+	Not saved, usable until you close this tab: {fonts}	未保存です。このタブを閉じるまで使えます：{fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	文字 › フォントを管理…でフォントを削除して空き容量を増やしてください。
+	Browser storage is full	ブラウザーのストレージがいっぱいです
+	Fonts could not be saved	フォントを保存できませんでした
+	Font files: {n} · {size}	フォントファイル：{n} · {size}
+	Stored in this browser only, never uploaded.	このブラウザーにのみ保存され、アップロードされません。
+	Browser storage: {used} of {quota}	ブラウザーのストレージ：{used} / {quota}
+	Kept until you remove them.	削除するまで保持されます。
+	The browser may clear them when space runs low.	空き容量が少なくなると、ブラウザーが削除する場合があります。
+	Loaded for this session only.	このセッションのみ読み込まれています。
+	Browser storage is unavailable: {error}	ブラウザーのストレージを利用できません：{error}
+	Remove All	すべて削除
+	Remove all fonts from this browser?	このブラウザーからすべてのフォントを削除しますか？
+	Removed: {n}	削除しました：{n}
+	No fonts loaded yet.	読み込んだフォントはまだありません。
+	Not saved	未保存

@@ -2769,3 +2769,31 @@ cameraData	Lens	Objektiv
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Anonyme Nutzungsstatistiken senden
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Die Webversion sendet anonyme Nutzungsstatistiken (keine Dateien oder Inhalte); abschalten unter Voreinstellungen › Allgemein.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Schriften laden…
+	Load Font Folder…	Schriftordner laden…
+	Manage Fonts…	Schriften verwalten…
+	Manage Fonts	Schriften verwalten
+	User fonts	Eigene Schriften
+	All fonts	Alle Schriften
+	Missing fonts	Fehlende Schriften
+	Already loaded: {n}	Bereits geladen: {n}
+	Skipped {file}	Übersprungen: {file}
+	No fonts were found	Keine Schriften gefunden
+	Fonts loaded: {n}	Schriften geladen: {n}
+	Not saved, usable until you close this tab: {fonts}	Nicht gespeichert, nutzbar bis du diesen Tab schließt: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Entferne Schriften unter Text › Schriften verwalten…, um Platz zu schaffen.
+	Browser storage is full	Der Browserspeicher ist voll
+	Fonts could not be saved	Die Schriften konnten nicht gespeichert werden
+	Font files: {n} · {size}	Schriftdateien: {n} · {size}
+	Stored in this browser only, never uploaded.	Nur in diesem Browser gespeichert, nie hochgeladen.
+	Browser storage: {used} of {quota}	Browserspeicher: {used} von {quota}
+	Kept until you remove them.	Bleiben, bis du sie entfernst.
+	The browser may clear them when space runs low.	Der Browser kann sie bei Platzmangel löschen.
+	Loaded for this session only.	Nur für diese Sitzung geladen.
+	Browser storage is unavailable: {error}	Der Browserspeicher ist nicht verfügbar: {error}
+	Remove All	Alle entfernen
+	Remove all fonts from this browser?	Alle Schriften aus diesem Browser entfernen?
+	Removed: {n}	Entfernt: {n}
+	No fonts loaded yet.	Noch keine Schriften geladen.
+	Not saved	Nicht gespeichert

@@ -3916,3 +3916,30 @@ layerLabel	No Color	Sem cor
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Enviar estatísticas de uso anônimas
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	A versão web envia estatísticas de uso anônimas (sem arquivos nem conteúdo); desative-as em Preferências › Geral.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Carregar fontes…
+	Load Font Folder…	Carregar pasta de fontes…
+	Manage Fonts…	Gerenciar fontes…
+	Manage Fonts	Gerenciar fontes
+	User fonts	Fontes próprias
+	All fonts	Todas as fontes
+	Missing fonts	Fontes ausentes
+	Already loaded: {n}	Já carregadas: {n}
+	Skipped {file}	Ignorado {file}
+	No fonts were found	Nenhuma fonte encontrada
+	Fonts loaded: {n}	Fontes carregadas: {n}
+	Not saved, usable until you close this tab: {fonts}	Não salvas, disponíveis até você fechar esta aba: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Remova fontes em Tipo › Gerenciar fontes… para liberar espaço.
+	Browser storage is full	O armazenamento do navegador está cheio
+	Fonts could not be saved	Não foi possível salvar as fontes
+	Font files: {n} · {size}	Arquivos de fonte: {n} · {size}
+	Stored in this browser only, never uploaded.	Armazenadas apenas neste navegador, nunca enviadas.
+	Browser storage: {used} of {quota}	Armazenamento do navegador: {used} de {quota}
+	Kept until you remove them.	Mantidas até você removê-las.
+	The browser may clear them when space runs low.	O navegador pode apagá-las quando faltar espaço.
+	Loaded for this session only.	Carregadas apenas nesta sessão.
+	Browser storage is unavailable: {error}	O armazenamento do navegador não está disponível: {error}
+	Remove all fonts from this browser?	Remover todas as fontes deste navegador?
+	Removed: {n}	Removidas: {n}
+	No fonts loaded yet.	Nenhuma fonte carregada ainda.
+	Not saved	Não salva

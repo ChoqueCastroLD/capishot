@@ -282,3 +282,41 @@ fn rasterize_type_layer() {
     assert!(matches!(s.active().unwrap().doc.layer(id).unwrap().content, LayerContent::Raster(_)));
     assert!(!s.is_enabled("type.rasterizeTypeLayer"));
 }
+
+#[test]
+fn missing_fonts_know_postscript_names_and_auto_map_loose_names() {
+    let mut s = session(8);
+    let id = text_layer(&mut s, "Hi");
+    // A PSD run whose family is spelled otherwise but whose PostScript name is an installed face
+    // is drawn with that face: not missing.
+    s.execute("type.setStyle", json!({"font": "Inter Display Guess", "postscriptName": "Inter-Regular"})).unwrap();
+    assert_eq!(text(&s, id).char_runs()[0].style.font_family, "Inter Display Guess");
+    assert_eq!(missing_fonts(&s.active().unwrap().doc), Vec::<String>::new());
+    // A family spelled without its spaces maps to the installed one on its own (auto), as does
+    // the family a PostScript name guesses.
+    s.execute("type.setStyle", json!({"font": "jetbrainsmono"})).unwrap();
+    let listed = s.execute("type.resolveMissingFonts", json!({})).unwrap();
+    assert_eq!(listed["missing"], json!(["jetbrainsmono"]));
+    assert_eq!(listed["matches"], json!({"jetbrainsmono": "JetBrains Mono"}));
+    let done = s.execute("type.resolveMissingFonts", json!({"auto": true})).unwrap();
+    assert_eq!(done["replaced"], 1);
+    assert_eq!(text(&s, id).char_runs()[0].style.font_family, "JetBrains Mono");
+    assert!(s.undo(), "one history step");
+    // keepPixels: the runs change, the pixels don't (the shell redraws what it has to).
+    let before = ink(&s, id);
+    s.execute("type.setStyle", json!({"font": "jetbrainsmono"})).unwrap();
+    let fallback = ink(&s, id);
+    s.execute("type.resolveMissingFonts", json!({"auto": true, "keepPixels": true})).unwrap();
+    assert_eq!(text(&s, id).char_runs()[0].style.font_family, "JetBrains Mono");
+    assert_eq!(ink(&s, id), fallback);
+    assert!(s.undo() && s.undo());
+    assert_eq!(ink(&s, id), before);
+    s.execute("type.setStyle", json!({"font": "Gone Family", "postscriptName": "JetBrainsMono-Thin"})).unwrap();
+    let names = missing_font_names(&s.active().unwrap().doc);
+    assert_eq!(names, [("Gone Family".to_string(), vec!["JetBrainsMono-Thin".to_string()])]);
+    assert_eq!(auto_matches(&s.active().unwrap().doc).get("Gone Family"), Some(&json!("JetBrains Mono")));
+    // Nothing that matches: left for the user.
+    s.execute("type.setStyle", json!({"font": "Nowhere Sans", "postscriptName": "NowhereSans-Bold"})).unwrap();
+    assert!(auto_matches(&s.active().unwrap().doc).is_empty());
+    assert_eq!(s.execute("type.resolveMissingFonts", json!({"auto": true})).unwrap()["replaced"], 0);
+}
