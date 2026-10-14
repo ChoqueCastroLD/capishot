@@ -7,17 +7,18 @@
 #
 # GPU tests: each test is its own process here, so the in-process `gpu_lock()` mutexes no longer
 # serialize them. Too many concurrent wgpu devices time out (`PollError: ... Wait timed out`), so
-# this group caps them at 4.
+# this group caps them at 4. A ui-egui test that builds a `Harness` with `.wgpu()` has a real device:
+# name it in the filter (both copies) unless its name already says canvas, gpu, mip or type_tool.
 [test-groups]
 gpu = { max-threads = 4 }
 
 [[profile.default.overrides]]
-filter = 'package(photocraft-gpu) | (package(photocraft-ui-egui) & (kind(test) | test(/canvas|gpu|mip|type_tool/)))'
+filter = 'package(photocraft-gpu) | (package(photocraft-ui-egui) & (kind(test) | test(/canvas|gpu|mip|type_tool|background_redraw::|floating_group_titles|swap_arrow::tests::rendered_glyph/)))'
 test-group = 'gpu'
 
 # CI (`--profile ci`): the GPU tests run on WARP, the software adapter, on the Windows runner, and
 # under load one occasionally hits that same timeout (1 in ~40 runs while measuring #2933). Retry
 # them; nextest reports a test that passes on retry as FLAKY, so it stays visible.
 [[profile.ci.overrides]]
-filter = 'package(photocraft-gpu) | (package(photocraft-ui-egui) & (kind(test) | test(/canvas|gpu|mip|type_tool/)))'
+filter = 'package(photocraft-gpu) | (package(photocraft-ui-egui) & (kind(test) | test(/canvas|gpu|mip|type_tool|background_redraw::|floating_group_titles|swap_arrow::tests::rendered_glyph/)))'
 retries = 2
