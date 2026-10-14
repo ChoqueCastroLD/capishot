@@ -2529,7 +2529,8 @@
 	Image Size:	Μέγεθος εικόνας:
 	Image interpolation	Παρεμβολή εικόνας
 	Image previews	Προεπισκοπήσεις εικόνων
-	Import Brushes… (.abr)	Εισαγωγή πινέλων… (.abr)
+	Import Brushes… (.abr or image)	Εισαγωγή πινέλων… (.abr ή εικόνα)
+	Import Brush from Image…	Εισαγωγή πινέλου από εικόνα…
 	Import Presets	Εισαγωγή προεπιλογών
 	Imported	Εισήχθη
 	In	Είσοδος

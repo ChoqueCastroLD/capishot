@@ -2900,7 +2900,8 @@ fontWeight	Italic	Курсивний
 	Frame {current} / {total}	Кадр {current} / {total}
 	Create new brush from the current settings	Створити новий пензель із поточних параметрів
 	Delete brush	Видалити пензель
-	Import Brushes… (.abr)	Імпортувати пензлі… (.abr)
+	Import Brushes… (.abr or image)	Імпортувати пензлі… (.abr або зображення)
+	Import Brush from Image…	Імпортувати пензель із зображення…
 	System Info	Інформація про систему
 	Click to sample the foreground colour  ·  {key}-click for background	Клацання бере зразок переднього плану  ·  {key}+клацання для фону
 	Create Warped Text	Створити деформований текст

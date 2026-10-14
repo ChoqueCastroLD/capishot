@@ -2044,7 +2044,8 @@
 	Expand group  ({key}-click: all groups)	Expandir grupo  ({key}-clique: todos os grupos)
 	Fade steps	Etapas de atenuação
 	Hide the layer's effects  ({key}-click: all layers)	Ocultar os efeitos da camada  ({key}-clique: todas as camadas)
-	Import Brushes… (.abr)	Importar pincéis… (.abr)
+	Import Brushes… (.abr or image)	Importar pincéis… (.abr ou imagem)
+	Import Brush from Image…	Importar pincel de imagem…
 	Move Group Down	Mover grupo para baixo
 	Move Group Up	Mover grupo para cima
 	Reset the brush to the defaults	Redefinir o pincel para os padrões

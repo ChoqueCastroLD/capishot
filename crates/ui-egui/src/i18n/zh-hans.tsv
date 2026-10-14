@@ -2092,7 +2092,8 @@
 	Expand group  (⌥-click: all groups)	展开组  (⌥-单击：所有组)
 	Fade steps	渐隐步数
 	Hide the layer's effects  (⌥-click: all layers)	隐藏图层效果  (⌥-单击：所有图层)
-	Import Brushes… (.abr)	导入画笔… (.abr)
+	Import Brushes… (.abr or image)	导入画笔… (.abr 或图像)
+	Import Brush from Image…	从图像导入画笔…
 	Move Group Down	向下移动组
 	Move Group Up	向上移动组
 	Reset the brush to the defaults	将画笔重置为默认值

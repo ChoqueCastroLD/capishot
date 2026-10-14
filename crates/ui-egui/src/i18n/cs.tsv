@@ -2097,7 +2097,8 @@
 	Expand group  ({key}-click: all groups)	Rozbalit skupinu  ({key}+kliknutí: všechny skupiny)
 	Fade steps	Kroky zeslabení
 	Hide the layer's effects  ({key}-click: all layers)	Skrýt efekty vrstvy  ({key}+kliknutí: všechny vrstvy)
-	Import Brushes… (.abr)	Importovat štětce… (.abr)
+	Import Brushes… (.abr or image)	Importovat štětce… (.abr nebo obrázek)
+	Import Brush from Image…	Importovat štětec z obrázku…
 	Move Group Down	Posunout skupinu dolů
 	Move Group Up	Posunout skupinu nahoru
 	Reset the brush to the defaults	Obnovit výchozí nastavení štětce

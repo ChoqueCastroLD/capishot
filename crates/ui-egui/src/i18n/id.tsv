@@ -2043,7 +2043,8 @@
 	Expand group  ({key}-click: all groups)	Bentangkan grup  ({key}-klik: semua grup)
 	Fade steps	Langkah pudar
 	Hide the layer's effects  ({key}-click: all layers)	Sembunyikan efek layer  ({key}-klik: semua layer)
-	Import Brushes… (.abr)	Impor Kuas… (.abr)
+	Import Brushes… (.abr or image)	Impor Kuas… (.abr atau gambar)
+	Import Brush from Image…	Impor Kuas dari Gambar…
 	Move Group Down	Pindah Grup ke Bawah
 	Move Group Up	Pindah Grup ke Atas
 	Reset the brush to the defaults	Reset kuas ke default

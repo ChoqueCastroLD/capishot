@@ -2043,7 +2043,8 @@
 	Expand group  ({key}-click: all groups)	그룹 펼치기  ({key} 키를 누른 채 클릭: 모든 그룹)
 	Fade steps	약화 단계
 	Hide the layer's effects  ({key}-click: all layers)	레이어 효과 숨기기  ({key} 키를 누른 채 클릭: 모든 레이어)
-	Import Brushes… (.abr)	브러시 가져오기… (.abr)
+	Import Brushes… (.abr or image)	브러시 가져오기… (.abr 또는 이미지)
+	Import Brush from Image…	이미지에서 브러시 가져오기…
 	Move Group Down	그룹 아래로 이동
 	Move Group Up	그룹 위로 이동
 	Reset the brush to the defaults	브러시를 기본값으로 초기화

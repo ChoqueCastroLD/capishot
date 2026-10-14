@@ -2073,7 +2073,8 @@
 	Expand group  ({key}-click: all groups)	Rozwiń grupę  (kliknięcie z {key}: wszystkie grupy)
 	Fade steps	Kroki zanikania
 	Hide the layer's effects  ({key}-click: all layers)	Ukryj efekty warstwy  (kliknięcie z {key}: wszystkie warstwy)
-	Import Brushes… (.abr)	Importuj pędzle… (.abr)
+	Import Brushes… (.abr or image)	Importuj pędzle… (.abr lub obraz)
+	Import Brush from Image…	Importuj pędzel z obrazu…
 	Move Group Down	Przesuń grupę w dół
 	Move Group Up	Przesuń grupę w górę
 	Reset the brush to the defaults	Przywróć domyślne ustawienia pędzla

@@ -2049,7 +2049,8 @@
 	Expand group  ({key}-click: all groups)	Groep uitvouwen  ({key}-klik: alle groepen)
 	Fade steps	Afzwakstappen
 	Hide the layer's effects  ({key}-click: all layers)	De effecten van de laag verbergen  ({key}-klik: alle lagen)
-	Import Brushes… (.abr)	Penselen importeren… (.abr)
+	Import Brushes… (.abr or image)	Penselen importeren… (.abr of afbeelding)
+	Import Brush from Image…	Penseel uit afbeelding importeren…
 	Move Group Down	Groep omlaag
 	Move Group Up	Groep omhoog
 	Reset the brush to the defaults	Het penseel terugzetten naar de standaardwaarden

@@ -2049,7 +2049,8 @@
 	Expand group  ({key}-click: all groups)	Développer le groupe  ({key}-clic : tous les groupes)
 	Fade steps	Étapes d'estompage
 	Hide the layer's effects  ({key}-click: all layers)	Masquer les effets du calque  ({key}-clic : tous les calques)
-	Import Brushes… (.abr)	Importer des pinceaux… (.abr)
+	Import Brushes… (.abr or image)	Importer des pinceaux… (.abr ou image)
+	Import Brush from Image…	Importer un pinceau depuis une image…
 	Move Group Down	Descendre le groupe
 	Move Group Up	Monter le groupe
 	Reset the brush to the defaults	Réinitialiser le pinceau aux valeurs par défaut

@@ -85,9 +85,9 @@ note = "Global: Preferences › Tools › Pressure Curve (prefs tools.pressureCu
 [[item]]
 id = "TOOL-213-12"
 target = "Import an image file as a brush tip"
-status = "missing"
+status = "done"
 issue = 213
-note = "Only brush.defineFromSelection and brush.presets.importAbr"
+note = "brush.presets.importImage (path or data); Brushes panel and preset picker Import Brushes… take .abr or an image (#3279)"
 
 [[item]]
 id = "TOOL-213-13"

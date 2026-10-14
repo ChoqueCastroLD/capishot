@@ -2080,6 +2080,8 @@
 	Fade steps	Passi dissolvenza
 	Hide the layer's effects  ({key}-click: all layers)	Nascondi effetti livello ({key}-clic: tutti i livelli)
 	Import Brushes… (.abr)	Importa pennelli… (.abr)
+	Import Brushes… (.abr or image)	Importa pennelli… (.abr o immagine)
+	Import Brush from Image…	Importa pennello da immagine…
 	Move Group Down	Sposta gruppo giù
 	Move Group Up	Sposta gruppo su
 	Reset the brush to the defaults	Reimposta pennello ai predefiniti

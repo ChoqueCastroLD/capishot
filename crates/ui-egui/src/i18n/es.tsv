@@ -2084,7 +2084,8 @@
 	Expand group  ({key}-click: all groups)	Expandir grupo  ({key}-clic: todos los grupos)
 	Fade steps	Pasos de desvanecimiento
 	Hide the layer's effects  ({key}-click: all layers)	Ocultar los efectos de la capa  ({key}-clic: todas las capas)
-	Import Brushes… (.abr)	Importar pinceles… (.abr)
+	Import Brushes… (.abr or image)	Importar pinceles… (.abr o imagen)
+	Import Brush from Image…	Importar pincel desde imagen…
 	Move Group Down	Mover grupo abajo
 	Move Group Up	Mover grupo arriba
 	Reset the brush to the defaults	Restablecer el pincel a los valores predeterminados
