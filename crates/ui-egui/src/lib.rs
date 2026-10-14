@@ -2602,6 +2602,9 @@ mod profile_prompt_tests;
 mod input_tests;
 
 #[cfg(test)]
+mod empty_workspace_tests;
+
+#[cfg(test)]
 mod pen_variants_tests;
 
 #[cfg(test)]

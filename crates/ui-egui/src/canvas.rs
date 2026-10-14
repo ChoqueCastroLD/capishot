@@ -1993,7 +1993,9 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     if n == 0 && !opening {
         // Auto show the Home Screen is off: an empty workspace, like Photoshop.
-        paint_dots(ui, ui.available_rect_before_wrap(), app.session.prefs().interface.show_canvas_dots);
+        let area = ui.available_rect_before_wrap();
+        paint_dots(ui, area, app.session.prefs().interface.show_canvas_dots);
+        open_on_double_click(app, ui, area);
         return;
     }
     if !app.ui.view.hides_tabs() || opening {
@@ -2628,10 +2630,20 @@ pub fn mode_label(doc: &Document) -> &'static str {
     }
 }
 
+/// With no document open, double-clicking the empty workspace shows File › Open, as in Photoshop
+/// (#5367), and so does the Home screen's blank background. Registered before anything drawn over
+/// `area`, so the buttons and links there keep their own clicks; not a keyboard focus stop.
+fn open_on_double_click(app: &mut PhotocraftApp, ui: &egui::Ui, area: Rect) {
+    if app.session.documents().is_empty() && ui.interact(area, ui.id().with("empty-workspace"), Sense::CLICK).double_clicked() {
+        let _ = app.open_dialog_file();
+    }
+}
+
 fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
     let area = ui.available_rect_before_wrap();
     paint_dots(ui, area, app.session.prefs().interface.show_canvas_dots);
+    open_on_double_click(app, ui, area);
     // File › Open Recent, newest first (on the web there are no paths to reopen).
     let show_recent = app.session.prefs().interface.show_home_recent_files;
     let recent: Vec<String> =
