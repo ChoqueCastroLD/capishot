@@ -1,0 +1,16 @@
+[package]
+name = "photocraft-typer"
+description = "TypeR typesetting workflow for manga/comics: script lines, page markers, style library, TypeR JSON exchange (pure logic, no UI)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+photocraft-color = { workspace = true }
+photocraft-doc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

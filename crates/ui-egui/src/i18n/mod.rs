@@ -814,10 +814,24 @@ mod tests {
         }
     }
 
-    /// Languages that claim complete menus have an entry for every label and path segment.
+    /// TypeR scope (Shoko's decision, 2026-10-12): the TypeR panel and its `typer.*` menu items
+    /// are translated into Spanish and Portuguese only. Every other catalog falls back to English
+    /// for strings used **only** by TypeR (its `typer.*` commands and `tl!` calls under
+    /// `src/typer/`); strings TypeR shares with the rest of the app stay required everywhere.
+    /// Don't machine-translate TypeR strings into the other catalogs; add a language here instead.
+    const TYPER_LANGUAGES: &[&str] = &["es", "pt-br", "pt-pt"];
+
+    /// Is `path` TypeR panel code (`src/typer/…`)?
+    fn is_typer_source(path: &std::path::Path) -> bool {
+        path.components().any(|c| c.as_os_str() == "typer")
+    }
+
+    /// Languages that claim complete menus have an entry for every label and path segment
+    /// (TypeR-only strings: [`TYPER_LANGUAGES`]).
     #[test]
     fn complete_languages_translate_every_menu_string() {
         let mut strings = std::collections::BTreeSet::new();
+        let mut typer = std::collections::BTreeSet::new();
         for &(path, label, _, _) in crate::menu_catalog::CATALOG {
             strings.extend(path.iter().copied());
             strings.insert(label);
@@ -827,14 +841,32 @@ mod tests {
             strings.insert(label);
         }
         for c in photocraft_engine::command_specs().iter().filter(|c| !c.menu.is_empty()) {
-            strings.extend(c.menu.iter().copied());
-            strings.insert(c.label);
+            let set = if c.id.starts_with("typer.") { &mut typer } else { &mut strings };
+            set.extend(c.menu.iter().copied());
+            set.insert(c.label);
         }
         strings.remove("---");
+        assert!(!typer.is_empty(), "the TypeR menu items are gone; drop TYPER_LANGUAGES or update this test");
         for l in LANGUAGES.iter().filter(|l| l.complete_menus) {
             let cat = l.catalog();
-            let missing: Vec<_> = strings.iter().filter(|s| cat.plain(s).is_none()).collect();
+            let typer_required = TYPER_LANGUAGES.contains(&l.code);
+            let missing: Vec<_> = strings.iter().chain(typer.iter().filter(|_| typer_required)).filter(|s| cat.plain(s).is_none()).collect();
             assert!(missing.is_empty(), "{}: untranslated menu strings: {missing:#?}", l.code);
+        }
+    }
+
+    /// The TypeR catalogs translate every TypeR menu string, even where no language claims
+    /// complete menus (pt-pt is a run-time catalog).
+    #[test]
+    fn typer_languages_translate_the_typer_menu() {
+        for code in TYPER_LANGUAGES {
+            let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("src/i18n/{code}.tsv"))).unwrap_or_default();
+            let cat = Catalog::parse(&text);
+            for c in photocraft_engine::command_specs().iter().filter(|c| c.id.starts_with("typer.") && !c.menu.is_empty()) {
+                for s in c.menu.iter().copied().chain(std::iter::once(c.label)) {
+                    assert!(cat.plain(s).is_some(), "{code}: TypeR menu string {s:?} is untranslated");
+                }
+            }
         }
     }
 
@@ -885,6 +917,8 @@ mod tests {
         const KEEP_AS_IS: &[&str] = &[];
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut literals = std::collections::BTreeSet::new();
+        // `tl!` strings of the TypeR panel (`src/typer/`): required only in TYPER_LANGUAGES.
+        let mut typer_literals = std::collections::BTreeSet::new();
         let mut stack = vec![dir];
         while let Some(d) = stack.pop() {
             for entry in std::fs::read_dir(&d).into_iter().flatten().flatten() {
@@ -908,7 +942,11 @@ mod tests {
                         }
                         let lit = rest.get(..end).unwrap_or("").replace("\\\"", "\"");
                         if rest.get(end + 1..end + 2) == Some(")") {
-                            literals.insert(lit);
+                            if is_typer_source(&path) {
+                                typer_literals.insert(lit);
+                            } else {
+                                literals.insert(lit);
+                            }
                         }
                     }
                 }
@@ -917,7 +955,12 @@ mod tests {
         assert!(literals.len() > 300, "scan found only {} literals", literals.len());
         for l in LANGUAGES.iter().filter(|l| l.complete_menus) {
             let cat = l.catalog();
-            let missing: Vec<_> = literals.iter().filter(|s| !KEEP_AS_IS.contains(&s.as_str()) && cat.plain(s).is_none()).collect();
+            let typer_required = TYPER_LANGUAGES.contains(&l.code);
+            let missing: Vec<_> = literals
+                .iter()
+                .chain(typer_literals.iter().filter(|_| typer_required))
+                .filter(|s| !KEEP_AS_IS.contains(&s.as_str()) && cat.plain(s).is_none())
+                .collect();
             assert!(missing.is_empty(), "{}: untranslated tl! strings: {missing:#?}", l.code);
         }
     }
