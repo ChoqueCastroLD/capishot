@@ -97,8 +97,10 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         });
     }
 
-    // ↑ ↓ · line N, style X, scale [ ] % · apply
+    // ⌄ ↑ ↓ · line N, style X, scale [ ] % · apply
+    let folded = super::is_folded(app, "preview");
     ui.horizontal(|ui| {
+        super::fold_button(app, ui, "preview");
         if crate::icons::button_with_icon_size(ui, "arrow-up", 22.0, 15.0, false, tl!("Previous line")).clicked() {
             act(app, "typer.line.previous", json!({}));
         }
@@ -135,6 +137,21 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         });
     });
 
+    if folded {
+        // Folded: the line as plain text on one row instead of the drawing in its font.
+        let text = line.as_ref().map(|l| if settings.interpret_markdown { photocraft_typer::markdown::parse_runs(&l.text).text } else { l.text.clone() });
+        let name = style.as_ref().map_or("—", |s| s.name.as_str());
+        let shown = text.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| tl!("No line").to_string());
+        let resp = ui
+            .add(egui::Label::new(RichText::new(format!("{name}: {shown}")).color(t.text).size(12.0)).truncate().sense(Sense::click()))
+            .on_hover_text(tl!("Click to scroll the script to this line"));
+        if resp.clicked()
+            && let Some(l) = &line
+        {
+            super::script_editor::scroll_to(ui.ctx(), l.raw_index);
+        }
+        return;
+    }
     // The line in its style's font.
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), LINE_H), Sense::click());
     ui.painter().rect_filled(rect, t.radius_sm, t.field);

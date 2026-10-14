@@ -89,6 +89,13 @@ pub fn specs() -> Vec<CommandSpec> {
             images_set,
         ),
         q("typer.images.clear", "Clear TypeR Page Files", "{} → state", always, images_clear),
+        q(
+            "typer.images.opened",
+            "Mark TypeR Page File Opened",
+            r#"{"image":string|null (one of the page files: the shell opened it for the current page; null forgets it)} → state (page sync opens a page's file only when it differs from this one)"#,
+            always,
+            images_opened,
+        ),
         // Styles
         q(
             "typer.style.list",
@@ -270,6 +277,8 @@ pub fn summary(st: &State) -> Value {
         "styleName": style.map(|s| s.name.as_str()),
         "page": st.current_page(),
         "image": st.current_image().and_then(|i| st.images.get(i)),
+        "lastOpenedImage": st.last_opened_image,
+        "pageFiles": st.images.len(),
         "usableLines": usable,
         "lineCount": st.lines().len(),
         "textScale": st.settings.text_scale,
@@ -366,6 +375,19 @@ fn images_set(s: &mut Session, p: &Value) -> Result<Value> {
 fn images_clear(s: &mut Session, _: &Value) -> Result<Value> {
     s.typer.state.set_images(Vec::new());
     Ok(summary(&s.typer.state))
+}
+
+fn images_opened(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "typer.images.opened";
+    let st = &mut s.typer.state;
+    st.last_opened_image = match p.get("image") {
+        None => return Err(bad(CMD, "pass \"image\": a page file name, or null")),
+        Some(Value::Null) => None,
+        Some(Value::String(name)) if st.images.iter().any(|i| i == name) => Some(name.clone()),
+        Some(Value::String(name)) => return Err(bad(CMD, format!("\"{name}\" is not one of the page files"))),
+        Some(_) => return Err(bad(CMD, "\"image\" must be a page file name or null")),
+    };
+    Ok(summary(st))
 }
 
 fn style_json(st: &Style) -> Value {
