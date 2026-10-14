@@ -397,6 +397,19 @@ fn menus_and_toolbar_customisation_persist() {
     assert_eq!(back.toolbar.hidden, vec!["Sponge".to_string()]);
 }
 
+/// #5096: Edit › Menus can't hide the way back into itself, Preferences, Save or Exit.
+#[test]
+fn menus_refuse_to_hide_essential_items() {
+    let mut s = session();
+    for id in ["edit.menus", "edit.keyboardShortcuts", "edit.preferences.general", "file.save", "file.saveAs", "file.exit"] {
+        assert!(s.execute("edit.menus", json!({"hide": ["edit.fade", id]})).is_err(), "{id}");
+        assert!(s.prefs().menus.hidden.is_empty(), "{id}: a refused call changes nothing");
+    }
+    // A preferences file that lists them anyway still shows them.
+    let menus = MenuCustomization { hidden: vec!["file.exit".into(), "edit.fade".into()], ..Default::default() };
+    assert!(!menus.is_hidden("file.exit") && menus.is_hidden("edit.fade"));
+}
+
 #[test]
 fn preference_sections_are_commands() {
     let mut s = Session::new();
