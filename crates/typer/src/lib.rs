@@ -26,6 +26,7 @@ pub mod script;
 pub mod settings;
 pub mod state;
 pub mod tabs;
+pub mod tpl;
 
 pub use bubble::{BubbleHit, Rect, Row, StoredSelection};
 pub use id::Id;

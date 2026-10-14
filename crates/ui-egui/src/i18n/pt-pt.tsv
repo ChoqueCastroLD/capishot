@@ -2858,7 +2858,6 @@ fontWeight	Italic	Itálico
 	Next Size Preset	Tamanho predefinido seguinte
 # TypeR panel (Window › TypeR; es/pt only, see TYPER_LANGUAGES in i18n/mod.rs).
 	**bold**, *italic* and ***both*** in the script become faux bold and italic.	**negrito**, *itálico* e ***ambos*** no guião tornam-se negrito e itálico falsos.
-	A TypeR export (.json): a folder, a style library or a full export with settings.	Uma exportação do TypeR (.json): uma pasta, uma biblioteca de estilos ou uma exportação completa com definições.
 	A line starting with one of these tags picks this style; the tag isn't pasted	Uma linha que começa com uma destas etiquetas usa este estilo; a etiqueta não é colada
 	Add folder	Adicionar pasta
 	Add preset	Adicionar tamanho
@@ -3081,3 +3080,4 @@ fontWeight	Italic	Itálico
 @plural	{n} file|{n} files	{n} ficheiro|{n} ficheiros
 @plural	{n} text layer|{n} text layers	{n} camada de texto|{n} camadas de texto
 @plural	{n} font|{n} fonts	{n} tipo de letra|{n} tipos de letra
+	A TypeR export (.json): a folder, a style library or a full export with settings. Photoshop tool presets (.tpl): each Type tool preset becomes a style in a new folder.	Uma exportação do TypeR (.json): uma pasta, uma biblioteca de estilos ou uma exportação completa com definições. Predefinições de ferramenta do Photoshop (.tpl): cada predefinição da ferramenta Texto torna-se um estilo numa pasta nova.

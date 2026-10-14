@@ -2821,7 +2821,6 @@ cameraData	Lens	Objetivo
 	Next Size Preset	Siguiente tamaño predefinido
 # TypeR panel (Window › TypeR; es/pt only, see TYPER_LANGUAGES in i18n/mod.rs).
 	**bold**, *italic* and ***both*** in the script become faux bold and italic.	**negrita**, *cursiva* y ***ambas*** en el guion se convierten en negrita y cursiva falsas.
-	A TypeR export (.json): a folder, a style library or a full export with settings.	Una exportación de TypeR (.json): una carpeta, una biblioteca de estilos o una exportación completa con ajustes.
 	A line starting with one of these tags picks this style; the tag isn't pasted	Una línea que empieza con una de estas etiquetas usa este estilo; la etiqueta no se pega
 	Add folder	Añadir carpeta
 	Add preset	Añadir tamaño
@@ -3046,3 +3045,4 @@ cameraData	Lens	Objetivo
 	Choose a folder.	Elige una carpeta.
 @plural	{n} file|{n} files	{n} archivo|{n} archivos
 @plural	{n} font|{n} fonts	{n} fuente|{n} fuentes
+	A TypeR export (.json): a folder, a style library or a full export with settings. Photoshop tool presets (.tpl): each Type tool preset becomes a style in a new folder.	Una exportación de TypeR (.json): una carpeta, una biblioteca de estilos o una exportación completa con ajustes. Ajustes preestablecidos de herramienta de Photoshop (.tpl): cada ajuste de la herramienta Texto se vuelve un estilo en una carpeta nueva.
