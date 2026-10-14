@@ -213,20 +213,29 @@ pub fn downscale(page: &Page) -> Option<(Vec<[u8; 4]>, usize, usize, usize)> {
         return Some((page.px.get(..w * h)?.to_vec(), w, h, 1));
     }
     let (sw, sh) = (w.div_ceil(f), h.div_ceil(f));
-    let mut acc = vec![[0u32; 4]; sw * sh];
-    let mut count = vec![0u32; sw * sh];
-    for y in 0..h {
-        let row = (y / f) * sw;
-        for x in 0..w {
-            let i = row + x / f;
-            let (Some(a), Some(c), Some(p)) = (acc.get_mut(i), count.get_mut(i), page.px.get(y * w + x)) else { continue };
-            for k in 0..4 {
-                a[k] += u32::from(p[k]);
+    let mut out = Vec::with_capacity(sw * sh);
+    let mut acc = vec![[0u32; 4]; sw];
+    for oy in 0..sh {
+        acc.iter_mut().for_each(|a| *a = [0; 4]);
+        let rows = (oy * f)..((oy + 1) * f).min(h);
+        let n_rows = rows.len() as u32;
+        for y in rows {
+            let Some(row) = page.px.get(y * w..(y + 1) * w) else { continue };
+            for (a, chunk) in acc.iter_mut().zip(row.chunks(f)) {
+                for p in chunk {
+                    a[0] += u32::from(p[0]);
+                    a[1] += u32::from(p[1]);
+                    a[2] += u32::from(p[2]);
+                    a[3] += u32::from(p[3]);
+                }
             }
-            *c += 1;
+        }
+        for (ox, a) in acc.iter().enumerate() {
+            let cols = (w - ox * f).min(f) as u32;
+            let c = (cols * n_rows).max(1);
+            out.push([(a[0] / c) as u8, (a[1] / c) as u8, (a[2] / c) as u8, (a[3] / c) as u8]);
         }
     }
-    let out = acc.iter().zip(&count).map(|(a, c)| if *c == 0 { [0, 0, 0, 255] } else { a.map(|v| (v / c) as u8) }).collect();
     Some((out, sw, sh, f))
 }
 
