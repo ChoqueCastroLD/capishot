@@ -331,7 +331,7 @@ impl Conv {
     }
 
     fn charge_pixels(&mut self, w: usize, h: usize) -> bool {
-        let bytes = (w as u64).saturating_mul(h as u64).saturating_mul(u64::from(self.fmt.channels()) * 4);
+        let bytes = (w as u64).saturating_mul(h as u64).saturating_mul(self.fmt.channels() as u64 * 4);
         match self.pixel_budget.checked_sub(bytes) {
             Some(remaining) => {
                 self.pixel_budget = remaining;
