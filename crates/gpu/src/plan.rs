@@ -1623,10 +1623,10 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, depth: photocraf
             (4, p, None)
         }
         Adjustment::BrightnessContrast { brightness, contrast, .. } => {
-            // Modern B/C: the shader rebuilds the curves from raw slider values (see compose.wgsl
-            // `mbright`/`mcontrast`, mirroring compose::adjust::modern_brightness/modern_contrast).
-            p[0] = [*brightness, *contrast, 0.0, 0.0];
-            (5, p, None)
+            // Modern B/C: the CPU's lookup table (compose::adjust::modern_lut) on every channel,
+            // through the Levels / Curves kernel.
+            let row = to_row(&adjust::modern_lut(*brightness, *contrast));
+            (7, p, Some(vec![row; 3]))
         }
         Adjustment::Exposure { exposure, offset, gamma } => {
             p[0] = [2f32.powf(*exposure), *offset, gamma.max(0.01), transfer_exponent(transfer.for_exposure())];
