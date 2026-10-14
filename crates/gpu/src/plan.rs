@@ -1832,8 +1832,8 @@ mod tests {
             for mode in [ColorMode::Rgb, ColorMode::Grayscale] {
                 assert!(adjustment_on_gpu(adj, mode), "{adj:?} in {mode:?}");
             }
-            // CMYK documents invert, posterize and threshold their inks, on the CPU.
-            let inks = matches!(adj, Adjustment::Invert | Adjustment::Posterize { .. } | Adjustment::Threshold { .. });
+            // CMYK documents invert, posterize, threshold and brighten their inks, on the CPU.
+            let inks = !matches!(adj, Adjustment::GradientMap { .. });
             assert_eq!(adjustment_on_gpu(adj, ColorMode::Cmyk), !inks, "{adj:?} in CMYK");
         }
         // Screen-colour adjustments stay on the GPU in Lab documents.

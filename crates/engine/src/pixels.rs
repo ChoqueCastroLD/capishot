@@ -122,7 +122,14 @@ pub fn adjust_mask(s: &mut Surface, adj: &Adjustment, selection: Option<&Surface
 fn adjusted(s: &Surface, r: Rect, adj: &Adjustment, selection: Option<&Surface>, mode: photocraft_color::ColorMode) -> Vec<f32> {
     let fmt = s.format();
     if fmt.mode == mode && matches!(mode, photocraft_color::ColorMode::Lab | photocraft_color::ColorMode::Cmyk) && adjust::stored_channel_adjustment(adj) {
-        return adjusted_channels(s, r, adj, selection);
+        return adjusted_channels(s, r, selection, |ch| adjust::stored_channels(adj, fmt.mode, Some(fmt.sample), ch));
+    }
+    if let Adjustment::BrightnessContrast { brightness, contrast, legacy } = adj
+        && fmt.mode == mode
+        && mode == photocraft_color::ColorMode::Cmyk
+    {
+        let table = adjust::ink_brightness_contrast_lut(*brightness, *contrast, *legacy);
+        return adjusted_channels(s, r, selection, |ch| ch.iter_mut().for_each(|v| *v = adjust::ink_through(&table, *v)));
     }
     let n = fmt.channels();
     let raw = s.read_region(r);
@@ -135,10 +142,10 @@ fn adjusted(s: &Surface, r: Rect, adj: &Adjustment, selection: Option<&Surface>,
     mix_through_selection(&fmt, r, &orig.px, &buf.px, selection)
 }
 
-/// [`adjusted`] for an adjustment Photoshop applies to a Lab or CMYK layer's own channels
-/// (`adjust::stored_channels`): exact on the stored values, with no trip through RGB, and mixed
-/// through the selection on those values (alpha untouched).
-fn adjusted_channels(s: &Surface, r: Rect, adj: &Adjustment, selection: Option<&Surface>) -> Vec<f32> {
+/// [`adjusted`] for an adjustment Photoshop applies to a Lab or CMYK layer's own channels: `op`
+/// changes one pixel's colour channels, exact on the stored values with no trip through RGB, and
+/// the selection mixes those values (alpha untouched).
+fn adjusted_channels(s: &Surface, r: Rect, selection: Option<&Surface>, op: impl Fn(&mut [f32])) -> Vec<f32> {
     let fmt = s.format();
     let (n, colors) = (fmt.channels(), fmt.mode.color_channels());
     let mut raw = s.read_region(r);
@@ -152,13 +159,11 @@ fn adjusted_channels(s: &Surface, r: Rect, adj: &Adjustment, selection: Option<&
             if k <= 0.0 {
                 continue;
             }
-            let p = to_rgba(&fmt, px);
-            let gray = photocraft_color::convert::rgb_to_gray([p[0], p[1], p[2]]);
             let Some(ch) = px.get_mut(..colors) else { continue };
             let mut out = [0.0f32; 4];
             let Some(out) = out.get_mut(..colors) else { continue };
             out.copy_from_slice(ch);
-            adjust::stored_channels(adj, fmt.mode, Some(fmt.sample), out, gray);
+            op(out);
             for (v, o) in ch.iter_mut().zip(out.iter()) {
                 *v += (o - *v) * k;
             }

@@ -269,11 +269,16 @@ fn legacy_brightness_contrast_hdr(brightness: f32, contrast: f32) -> impl Fn(f32
 
 /// Legacy Brightness/Contrast as one channel's tone curve (see [`apply_depth`]).
 fn legacy_brightness_contrast(brightness: f32, contrast: f32) -> impl Fn(f32) -> f32 {
+    legacy_brightness_contrast_at(brightness, contrast, LEGACY_PIVOT)
+}
+
+/// [`legacy_brightness_contrast`] with contrast pivoting at `pivot`.
+fn legacy_brightness_contrast_at(brightness: f32, contrast: f32, pivot: f32) -> impl Fn(f32) -> f32 {
     let b = brightness / 255.0;
     let c = contrast.clamp(-100.0, 99.0);
     let k = if c >= 0.0 { 1.0 / (1.0 - c / 100.0) } else { 1.0 + c / 100.0 };
     let (pre, post) = if c >= 0.0 { (b, 0.0) } else { (0.0, b) };
-    move |v: f32| ((v + pre - LEGACY_PIVOT) * k + LEGACY_PIVOT + post).clamp(0.0, 1.0)
+    move |v: f32| ((v + pre - pivot) * k + pivot + post).clamp(0.0, 1.0)
 }
 
 /// Whether Threshold at `level` turns colour `c` white in a document of `depth` (`None`: unknown,
@@ -308,11 +313,16 @@ pub fn apply_in(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth: O
         apply_lab(adj, buf, depth);
     } else if mode == ColorMode::Cmyk && cmyk_channel_adjustment(adj) {
         use photocraft_color::convert::{cmyk_to_rgb, rgb_to_cmyk};
-        map_rgb(buf, |c| {
-            let mut ink = rgb_to_cmyk(c);
-            stored_channels(adj, mode, depth, &mut ink, rgb_to_gray(c));
-            cmyk_to_rgb(ink)
-        });
+        if let Adjustment::BrightnessContrast { brightness, contrast, legacy } = adj {
+            let table = ink_brightness_contrast_lut(*brightness, *contrast, *legacy);
+            map_rgb(buf, |c| cmyk_to_rgb(rgb_to_cmyk(c).map(|v| ink_through(&table, v))));
+        } else {
+            map_rgb(buf, |c| {
+                let mut ink = rgb_to_cmyk(c);
+                stored_channels(adj, mode, depth, &mut ink);
+                cmyk_to_rgb(ink)
+            });
+        }
     } else {
         apply_depth(adj, buf, transfer, depth);
     }
@@ -334,13 +344,33 @@ pub fn lab_channel_adjustment(adj: &Adjustment) -> bool {
 }
 
 /// Whether a CMYK document evaluates `adj` on its inks rather than on the screen colour: Invert
-/// and Posterize (each ink, black included, so paper inverts to 400% ink) and Threshold (paper or
-/// 100% black ink alone). Photoshop corpus cmyk8 and cmyk16 invert, posterize-4 and threshold-128
-/// follow these rules on the files' own inks on every pixel; here the inks are the screen colour
-/// separated through the document's CMYK profile, so neutrals carry the black that profile
-/// generates rather than the file's.
+/// and Posterize (each ink, black included, so paper inverts to 400% ink), Threshold (paper or
+/// 100% black ink alone) and Brightness/Contrast (each ink's stored value, 1 - ink, through the
+/// tone curve; see [`ink_through`]). Photoshop corpus cmyk8 and cmyk16 invert, posterize-4,
+/// threshold-128 and brightness-contrast(-legacy) follow these rules on the files' own inks on
+/// every pixel; here the inks are the screen colour separated through the document's CMYK
+/// profile, so neutrals carry the black that profile generates rather than the file's.
 pub fn cmyk_channel_adjustment(adj: &Adjustment) -> bool {
-    stored_channel_adjustment(adj)
+    stored_channel_adjustment(adj) || matches!(adj, Adjustment::BrightnessContrast { .. })
+}
+
+/// Brightness/Contrast as the lookup table (4096 samples over 0..1) a CMYK ink's stored value,
+/// `1 - ink`, goes through ([`ink_through`]): [`modern_lut`], or the legacy linear curve with its
+/// contrast pivoting at 128 in ink, which is 127 of 255 stored (photoshop corpus cmyk16
+/// brightness-contrast-legacy.psd sits 0.43 of a level off around 128 stored, as a one-level
+/// pivot shift times contrast +30's slope predicts).
+pub fn ink_brightness_contrast_lut(brightness: f32, contrast: f32, legacy: bool) -> Vec<f32> {
+    if !legacy {
+        return modern_lut(brightness, contrast);
+    }
+    let curve = legacy_brightness_contrast_at(brightness, contrast, 1.0 - LEGACY_PIVOT);
+    (0..LUT_SIZE).map(|k| curve(k as f32 / (LUT_SIZE - 1) as f32)).collect()
+}
+
+/// One CMYK ink (0: none) through a channel tone curve the way Photoshop applies one in CMYK: to
+/// the stored value, `1 - ink`, so raising brightness takes ink away.
+pub fn ink_through(table: &[f32], ink: f32) -> f32 {
+    1.0 - lut(table, 1.0 - ink)
 }
 
 /// Whether [`stored_channels`] evaluates `adj`: Invert, Posterize and Threshold.
@@ -350,10 +380,10 @@ pub fn stored_channel_adjustment(adj: &Adjustment) -> bool {
 
 /// Invert, Posterize or Threshold on one pixel's own channels in a Lab or CMYK document of
 /// `depth` (`None`: unknown, treated as 8-bit): `ch` holds L, a, b normalised as [`lab_norm`]
-/// gives them, or the C, M, Y, K inks (0: none); `gray` is the pixel's luma, which CMYK Threshold
-/// compares. Lab Invert turns 8-bit bytes `v` into `255 - v` (a becomes -1 - a) and mirrors a and
-/// b around neutral at 16 bits (photoshop corpus lab16 invert.psd: neutral stays neutral).
-pub fn stored_channels(adj: &Adjustment, mode: ColorMode, depth: Option<SampleType>, ch: &mut [f32], gray: f32) {
+/// gives them, or the C, M, Y, K inks (0: none). Lab Invert turns 8-bit bytes `v` into `255 - v`
+/// (a becomes -1 - a) and mirrors a and b around neutral at 16 bits (photoshop corpus lab16
+/// invert.psd: neutral stays neutral). CMYK Threshold compares [`ink_luma`].
+pub fn stored_channels(adj: &Adjustment, mode: ColorMode, depth: Option<SampleType>, ch: &mut [f32]) {
     let lab = mode == ColorMode::Lab;
     match adj {
         Adjustment::Invert => {
@@ -370,12 +400,22 @@ pub fn stored_channels(adj: &Adjustment, mode: ColorMode, depth: Option<SampleTy
                 let white = ch.first().is_some_and(|l| (l.clamp(0.0, 1.0) * 255.0).round() >= t);
                 [if white { 1.0 } else { 0.0 }, 128.0 / 255.0, 128.0 / 255.0, 0.0]
             } else {
-                [0.0, 0.0, 0.0, if (gray * 255.0).round() < t { 1.0 } else { 0.0 }]
+                let ink = |i: usize| ch.get(i).copied().unwrap_or(0.0);
+                let black = (ink_luma([ink(0), ink(1), ink(2), ink(3)]) * 255.0).round() < t;
+                [0.0, 0.0, 0.0, if black { 1.0 } else { 0.0 }]
             };
             ch.iter_mut().zip(out).for_each(|(v, o)| *v = o);
         }
         _ => {}
     }
+}
+
+/// The luma Photoshop's CMYK Threshold compares: Rec. 601 weights on the inks' plain complement,
+/// `(1 - c)(1 - k)` and so on, whatever the document's profile (photoshop corpus cmyk8 and cmyk16
+/// threshold-128.psd: every pixel on the right side of level 128).
+pub fn ink_luma(ink: [f32; 4]) -> f32 {
+    let paper = 1.0 - ink[3].clamp(0.0, 1.0);
+    rgb_to_gray([0, 1, 2].map(|i| (1.0 - ink[i].clamp(0.0, 1.0)) * paper))
 }
 
 /// Encoded sRGB → Lab normalised the way Photoshop's channels hold it: L/100, (a+128)/255,
@@ -401,7 +441,7 @@ pub const LAB_NEUTRAL: f32 = 128.0 / 255.0;
 /// theirs, where [`apply_in`] can only round-trip them through clipped display RGB.
 pub fn lab_stored_op(adj: &Adjustment, depth: Option<SampleType>) -> Option<LabOp<'_>> {
     let op: LabOp<'_> = match adj {
-        Adjustment::Invert | Adjustment::Posterize { .. } => Box::new(move |ch: &mut [f32; 3]| stored_channels(adj, ColorMode::Lab, depth, ch, 0.0)),
+        Adjustment::Invert | Adjustment::Posterize { .. } => Box::new(move |ch: &mut [f32; 3]| stored_channels(adj, ColorMode::Lab, depth, ch)),
         Adjustment::Threshold { level } => {
             // Split on L on the 8-bit grid, like the display path (`apply_lab`).
             let t = (level * 255.0).round();
@@ -440,7 +480,7 @@ fn apply_lab(adj: &Adjustment, buf: &mut Buffer, depth: Option<SampleType>) {
         // L → 100 - L and a, b mirrored about neutral; each channel posterized (see `stored_channels`).
         Adjustment::Invert | Adjustment::Posterize { .. } => map_rgb(buf, |c| {
             let mut n = lab_norm(c);
-            stored_channels(adj, ColorMode::Lab, depth, &mut n, 0.0);
+            stored_channels(adj, ColorMode::Lab, depth, &mut n);
             lab_denorm(n)
         }),
         Adjustment::Threshold { level } => {
@@ -1991,6 +2031,53 @@ mod tone_tests {
         let t = Adjustment::Threshold { level: 0.5 };
         assert!(near(in_cmyk(&t, [0.2; 3]), cmyk_to_rgb([0.0, 0.0, 0.0, 1.0]), 2e-3));
         assert!(near(in_cmyk(&t, [0.8; 3]), cmyk_to_rgb([0.0; 4]), 2e-3));
+    }
+
+    #[test]
+    fn cmyk_threshold_compares_the_inks_plain_luma() {
+        assert_eq!(ink_luma([0.0; 4]), 1.0);
+        assert_eq!(ink_luma([0.0, 0.0, 0.0, 1.0]), 0.0);
+        // Two greys either side of level 128 in photoshop corpus cmyk8 threshold-128.psd: black,
+        // then white (8-bit inks).
+        let at = |i: [f32; 4]| {
+            let mut ch = i.map(|v| v / 255.0);
+            stored_channels(&Adjustment::Threshold { level: 128.0 / 255.0 }, ColorMode::Cmyk, Some(SampleType::U8), &mut ch);
+            ch
+        };
+        assert_eq!(at([144.0, 122.0, 121.0, 35.0]), [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(at([131.0, 110.0, 110.0, 19.0]), [0.0; 4]);
+    }
+
+    #[test]
+    fn cmyk_brightness_contrast_curves_each_ink_from_paper() {
+        use photocraft_color::convert::{cmyk_to_rgb, rgb_to_cmyk};
+        // The tone curve runs on each ink's stored value, 1 - ink (photoshop corpus cmyk8
+        // brightness-contrast.psd and -legacy.psd): raising brightness takes ink away, and paper
+        // and solid ink stay put.
+        let red = [0.9, 0.2, 0.1];
+        for legacy in [false, true] {
+            let adj = Adjustment::BrightnessContrast { brightness: 25.0, contrast: 30.0, legacy };
+            let table = ink_brightness_contrast_lut(25.0, 30.0, legacy);
+            let want = cmyk_to_rgb(rgb_to_cmyk(red).map(|v| 1.0 - lut(&table, 1.0 - v)));
+            assert!(near(in_cmyk(&adj, red), want, 2e-3), "legacy {legacy}");
+            assert!(near(in_cmyk(&adj, [1.0; 3]), [1.0; 3], 2e-3), "legacy {legacy}: paper");
+            let solid = cmyk_to_rgb([1.0; 4]);
+            assert!(near(in_cmyk(&adj, solid), cmyk_to_rgb(rgb_to_cmyk(solid).map(|v| ink_through(&table, v))), 2e-3));
+        }
+        // Legacy +25 / +30 on Photoshop's own 16-bit inks (photoshop corpus cmyk16
+        // brightness-contrast-legacy.psd): contrast pivots at 128 in ink, 127 stored.
+        let legacy = ink_brightness_contrast_lut(25.0, 30.0, true);
+        for (ink, ps) in [(139.0, 108.0), (160.0, 137.99), (172.0, 155.13), (183.0, 170.85), (196.0, 189.42), (98.0, 49.42), (128.0, 92.28), (168.0, 149.42)] {
+            let got = ink_through(&legacy, ink / 255.0) * 255.0;
+            assert!((got - ps).abs() < 0.1, "ink {ink}: {got} vs Photoshop {ps}");
+        }
+        let brighter = Adjustment::BrightnessContrast { brightness: 60.0, contrast: 0.0, legacy: false };
+        let ink = ink_brightness_contrast_lut(60.0, 0.0, false);
+        assert!(ink_through(&ink, 0.5) < 0.5 && ink_through(&ink, 0.0) == 0.0 && (ink_through(&ink, 1.0) - 1.0).abs() < 1e-6);
+        // On the screen colour it would land elsewhere.
+        let mut rgb = Buffer::filled(crate::Rect::new(0, 0, 1, 1), [red[0], red[1], red[2], 1.0]);
+        apply(&brighter, &mut rgb);
+        assert!(!near(in_cmyk(&brighter, red), [rgb.px[0][0], rgb.px[0][1], rgb.px[0][2]], 0.01));
     }
 
     #[test]

@@ -349,3 +349,26 @@ fn invert_posterize_and_threshold_change_lab_and_cmyk_channels_as_stored() {
     assert_levels(&adjusted_pixel(lab8, &f([128.0, 30.0, 220.0, 255.0]), &level, None), &[255.0, 128.0, 128.0, 255.0], "Lab threshold light");
     assert_levels(&adjusted_pixel(lab16, &f([127.0, 30.0, 220.0, 255.0]), &level, None), &[0.0, 128.0, 128.0, 255.0], "Lab threshold dark");
 }
+
+/// Image › Adjustments › Brightness/Contrast on a CMYK layer curves each stored ink value
+/// (1 - ink) exactly, modern and legacy, and a selection mixes the stored inks.
+#[test]
+fn brightness_contrast_curves_cmyk_inks_as_stored() {
+    let cmyk = PixelFormat::new(ColorMode::Cmyk, SampleType::U16, true);
+    let ink = [0.2, 0.4, 0.6, 0.1, 1.0];
+    for legacy in [false, true] {
+        let adj = Adjustment::BrightnessContrast { brightness: 25.0, contrast: 30.0, legacy };
+        let table = adjust::ink_brightness_contrast_lut(25.0, 30.0, legacy);
+        let got = adjusted_pixel(cmyk, &ink, &adj, None);
+        for c in 0..4 {
+            let want = adjust::ink_through(&table, ink[c]);
+            assert!((got[c] - want).abs() < 1e-4, "legacy {legacy} ink {c}: {} vs {want}", got[c]);
+        }
+        assert_eq!(got[4], 1.0);
+        let half = adjusted_pixel(cmyk, &ink, &adj, Some(0.5));
+        for c in 0..4 {
+            let want = ink[c] + (adjust::ink_through(&table, ink[c]) - ink[c]) * 128.0 / 255.0;
+            assert!((half[c] - want).abs() < 1e-3, "legacy {legacy} ink {c} through half a selection");
+        }
+    }
+}
