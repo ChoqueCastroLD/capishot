@@ -201,7 +201,7 @@ jobs:
   windows-gate:
     name: test (windows-latest)
     needs: [platforms, test]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - env:
