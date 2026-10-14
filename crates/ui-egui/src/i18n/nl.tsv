@@ -3887,3 +3887,30 @@ cameraData	Lens	Lens
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Anonieme gebruiksstatistieken verzenden
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	De webversie verzendt anonieme gebruiksstatistieken (geen bestanden of inhoud); uitschakelen via Voorkeuren › Algemeen.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Lettertypen laden…
+	Load Font Folder…	Map met lettertypen laden…
+	Manage Fonts…	Lettertypen beheren…
+	Manage Fonts	Lettertypen beheren
+	User fonts	Eigen lettertypen
+	All fonts	Alle lettertypen
+	Missing fonts	Ontbrekende lettertypen
+	Already loaded: {n}	Al geladen: {n}
+	Skipped {file}	Overgeslagen: {file}
+	No fonts were found	Geen lettertypen gevonden
+	Fonts loaded: {n}	Lettertypen geladen: {n}
+	Not saved, usable until you close this tab: {fonts}	Niet opgeslagen, bruikbaar tot je dit tabblad sluit: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Verwijder lettertypen via Tekst › Lettertypen beheren… om ruimte vrij te maken.
+	Browser storage is full	Browseropslag is vol
+	Fonts could not be saved	De lettertypen konden niet worden opgeslagen
+	Font files: {n} · {size}	Lettertypebestanden: {n} · {size}
+	Stored in this browser only, never uploaded.	Alleen in deze browser opgeslagen, nooit geüpload.
+	Browser storage: {used} of {quota}	Browseropslag: {used} van {quota}
+	Kept until you remove them.	Blijven tot je ze verwijdert.
+	The browser may clear them when space runs low.	De browser kan ze wissen als de ruimte opraakt.
+	Loaded for this session only.	Alleen voor deze sessie geladen.
+	Browser storage is unavailable: {error}	Browseropslag is niet beschikbaar: {error}
+	Remove all fonts from this browser?	Alle lettertypen uit deze browser verwijderen?
+	Removed: {n}	Verwijderd: {n}
+	No fonts loaded yet.	Nog geen lettertypen geladen.
+	Not saved	Niet opgeslagen

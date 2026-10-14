@@ -321,7 +321,15 @@ pub(crate) fn word_at(text: &str, off: usize) -> (usize, usize) {
     let before = off.checked_sub(1).and_then(|i| chars.get(i)).filter(|c| **c != '\n');
     let probe = after.filter(|c| word(c)).or(before.filter(|c| word(c))).or(after).or(before);
     let Some(&c) = probe else { return (off, off) };
-    let class = |x: &char| if word(x) { 0 } else if x.is_whitespace() { 1 } else { 2 };
+    let class = |x: &char| {
+        if word(x) {
+            0
+        } else if x.is_whitespace() {
+            1
+        } else {
+            2
+        }
+    };
     let k = class(&c);
     let same = |x: &char| *x != '\n' && class(x) == k;
     let (mut a, mut b) = (off, off);
@@ -350,7 +358,13 @@ fn line_at(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> Option<(usiz
     let (_, ly) = l.to_line(tx, ty);
     let d = |ln: &photocraft_text::layout::LineInfo| {
         let (top, bot) = (ln.baseline - ln.ascent, ln.baseline + ln.descent);
-        if ly < top { top - ly } else if ly > bot { ly - bot } else { 0.0 }
+        if ly < top {
+            top - ly
+        } else if ly > bot {
+            ly - bot
+        } else {
+            0.0
+        }
     };
     let ln = l.lines.iter().min_by(|p, q| d(p).total_cmp(&d(q)))?;
     let ci = |b: usize| text.get(..b.min(text.len())).map_or(0, |s| s.chars().count());
@@ -1079,9 +1093,9 @@ fn draw_mask_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXfor
 /// Font families: bundled, system, and those the host serves (`photocraft_text::served`, fetched
 /// when picked). Cached until fonts are registered or the served catalog changes.
 pub fn families() -> Arc<Vec<String>> {
-    type Cached = Option<((u64, u64), Arc<Vec<String>>)>;
+    type Cached = Option<((u64, u64, u64), Arc<Vec<String>>)>;
     static FAMILIES: std::sync::Mutex<Cached> = std::sync::Mutex::new(None);
-    let key = (photocraft_text::fonts::generation(), photocraft_text::served::generation());
+    let key = (photocraft_text::fonts::generation(), photocraft_text::served::generation(), photocraft_text::user_fonts::generation());
     let mut cached = FAMILIES.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some((k, v)) = cached.as_ref()
         && *k == key
@@ -1091,6 +1105,12 @@ pub fn families() -> Arc<Vec<String>> {
     let mut v = photocraft_text::shared().lock().map(|mut e| e.fonts.families()).unwrap_or_default();
     for f in photocraft_text::served::families() {
         if !v.contains(&f) {
+            v.push(f);
+        }
+    }
+    // The user's own fonts, listed before their files are read back (`user_fonts`, lazy restore).
+    for f in photocraft_text::user_fonts::families() {
+        if !v.iter().any(|x| x.eq_ignore_ascii_case(&f)) {
             v.push(f);
         }
     }
@@ -1138,6 +1158,32 @@ fn localized_families() -> Arc<HashMap<String, String>> {
     let v = Arc::new(photocraft_text::shared().lock().map(|mut e| e.fonts.localized_family_names()).unwrap_or_default());
     *cached = Some((key, v.clone()));
     v
+}
+
+/// The user's font families (lower case), cached by the store's generation.
+fn user_family_set() -> Arc<std::collections::HashSet<String>> {
+    type Cached = Option<(u64, Arc<std::collections::HashSet<String>>)>;
+    static USER: std::sync::Mutex<Cached> = std::sync::Mutex::new(None);
+    let g = photocraft_text::user_fonts::generation();
+    let mut cached = USER.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((k, v)) = cached.as_ref()
+        && *k == g
+    {
+        return v.clone();
+    }
+    let v: Arc<std::collections::HashSet<String>> = Arc::new(photocraft_text::user_fonts::families().into_iter().map(|f| f.to_lowercase()).collect());
+    *cached = Some((g, v.clone()));
+    v
+}
+
+/// Moves the rows of `user` families (lower case) to the front, keeping each group's order.
+/// Returns how many there are.
+pub(crate) fn partition_user_rows(rows: &mut Vec<(&String, &str)>, user: &std::collections::HashSet<String>) -> usize {
+    let (mut mine, rest): (Vec<_>, Vec<_>) = rows.drain(..).partition(|(f, _)| user.contains(&f.to_lowercase()));
+    let n = mine.len();
+    mine.extend(rest);
+    *rows = mine;
+    n
 }
 
 /// The font menu's rows: each family with the label it shows (its localized name when `labels`
@@ -1329,10 +1375,16 @@ pub(crate) fn fonts_ready(ui: &mut egui::Ui, width: f32) -> bool {
 /// Searchable font-family combo box.
 fn font_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &mut String, width: f32, preview: photocraft_engine::prefs::FontPreview) -> bool {
     let list = families();
+    let mut load_fonts = false;
     // The Find More tab replaces the family list; picking a font there closes the menu.
     let mut top = |ui: &mut egui::Ui, current: &mut String| -> Option<bool> {
         crate::fonts_ui::tabs(app, ui);
         if app.ui.fonts.tab != crate::fonts_ui::PickerTab::FindMore {
+            // The user's own font files: on the web, the only fonts besides the bundled ones.
+            if ui.add(egui::Button::new(tl!("Load Fonts…")).small()).on_hover_text(tl!("User fonts")).clicked() {
+                load_fonts = true;
+                ui.close();
+            }
             return None;
         }
         let mut changed = false;
@@ -1343,7 +1395,15 @@ fn font_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &mut String,
         }
         Some(changed)
     };
-    family_picker_with(ui, "type-font", current, width, &list, preview, &mut top)
+    let changed = family_picker_with(ui, "type-font", current, width, &list, preview, &mut top);
+    if load_fonts
+        && let Err(e) = crate::menus::invoke(app, ui.ctx(), "type.loadFonts", json!({}))
+        && e != crate::file_dialog::CANCELLED
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+    changed
 }
 
 /// Maximum height of the font menu.
@@ -1424,7 +1484,10 @@ fn family_picker_with(
             d.insert_temp(search_id, q.clone());
         });
         let ql = q.to_lowercase();
-        let rows = font_menu_rows(families, labels, &ql);
+        let mut rows = font_menu_rows(families, labels, &ql);
+        // The user's own fonts first, under their own heading (Type › Load Fonts…).
+        let user = user_family_set();
+        let user_rows = if user.is_empty() { 0 } else { partition_user_rows(&mut rows, &user) };
         if down || up {
             let index = rows.iter().position(|(f, _)| *f == current);
             let next = match index {
@@ -1449,7 +1512,12 @@ fn family_picker_with(
         let row_h = preview.map_or(28.0, |(_, [_, h])| (h + 4.0).max(28.0));
 
         let mut hovered: Option<String> = None;
-        for (f, label) in rows {
+        let t = crate::theme::Tokens::get(ui.ctx());
+        for (i, (f, label)) in rows.into_iter().enumerate() {
+            if user_rows > 0 && (i == 0 || i == user_rows) {
+                let heading = if i == 0 { tl!("User fonts") } else { tl!("All fonts") };
+                ui.label(egui::RichText::new(heading).color(t.text_faint).size(11.0));
+            }
             let mut button = egui::Button::selectable(f == current, label).truncate();
             if let Some((size, [_, h])) = preview {
                 button =
