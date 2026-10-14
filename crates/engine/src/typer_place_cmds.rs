@@ -361,12 +361,7 @@ fn retext(
 }
 
 /// Run `retext` over `targets` in one edit; any failure leaves the document unchanged.
-fn retext_all(
-    s: &mut Session,
-    label: &str,
-    targets: Vec<Retext>,
-    keep_size: bool,
-) -> Result<Vec<(LayerId, Option<Rect>)>> {
+fn retext_all(s: &mut Session, label: &str, targets: Vec<Retext>, keep_size: bool) -> Result<Vec<(LayerId, Option<Rect>)>> {
     let md = s.typer.state.settings.interpret_markdown;
     let (out, damage) = s.edit(label, |doc, _| {
         let info = DocInfo::of(doc);

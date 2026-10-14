@@ -550,8 +550,9 @@ fn bad_params_fail_cleanly() {
 fn typer_place_perf() {
     // `CAPISHOT_TYPER_PERF_SCALE=2.5` times a 5000 × 7500 (37.5 MP) page.
     let k = std::env::var("CAPISHOT_TYPER_PERF_SCALE").ok().and_then(|v| v.parse::<f64>().ok()).filter(|k| (0.5..=4.0).contains(k)).unwrap_or(1.0);
-    let bubbles: Vec<B> =
-        (0..12).map(|i| B { cx: k * (300.0 + f64::from(i % 3) * 700.0), cy: k * (300.0 + f64::from(i / 3) * 700.0), rx: k * 260.0, ry: k * 180.0, tail: i % 2 == 0 }).collect();
+    let bubbles: Vec<B> = (0..12)
+        .map(|i| B { cx: k * (300.0 + f64::from(i % 3) * 700.0), cy: k * (300.0 + f64::from(i / 3) * 700.0), rx: k * 260.0, ry: k * 180.0, tail: i % 2 == 0 })
+        .collect();
     let (w, h) = ((2000.0 * k) as u32, (3000.0 * k) as u32);
     let mut s = Session::new();
     s.add_document(page(w, h, &bubbles), None);
