@@ -100,6 +100,10 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.theme.breezeDark", "Breeze Dark Theme", &["Window", "Theme"], None),
     ("window.theme.system", "Sync with system", &["Window", "Theme"], None),
     ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
+    // The user's own font files (`user_fonts_ui`): the only fonts beyond the bundled ones on the web.
+    ("type.loadFonts", "Load Fonts…", &["Type"], None),
+    ("type.loadFontFolder", "Load Font Folder…", &["Type"], None),
+    ("type.manageFonts", "Manage Fonts…", &["Type"], None),
     ("help.github", "Capishot on GitHub", &["Help"], None),
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
     ("help.psdCompiler", "psd-compiler on GitHub", &["Help"], None),
@@ -215,6 +219,10 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     }
     // Window › Gradients, Patterns, Styles, Shapes, Tool Presets, Clone Source.
     if let Some(r) = crate::preset_panels::menu(app, id, &params) {
+        return r;
+    }
+    // Type › Load Fonts…, Load Font Folder…, Manage Fonts… (the user's own font files).
+    if let Some(r) = crate::user_fonts_ui::invoke(app, id, &params) {
         return r;
     }
     // Type › Resolve Missing Fonts (with Google Fonts downloads).
@@ -728,6 +736,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         "window.panel.activate" | "window.panel.layout" => true,
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
         "file.open" | "file.openDeep" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
+        "type.loadFonts" | "type.loadFontFolder" | "type.manageFonts" => true,
         i if i.starts_with("file.openRecent.") => true,
         i if i.starts_with(DOCUMENT_ITEM) => true,
         i if crate::links::url_for(i).is_some() => true,
@@ -939,6 +948,9 @@ const PLACE_AFTER: &[(&str, &str)] = &[
     ("filter.render.relight", "filter.render.lightingEffects"),
     ("view.resetView", "view.flipHorizontal"),
     ("filter.other.colorToAlpha", "filter.other.offset"),
+    ("type.loadFonts", "type.resolveMissingFonts"),
+    ("type.loadFontFolder", "type.loadFonts"),
+    ("type.manageFonts", "type.loadFontFolder"),
 ];
 
 pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {

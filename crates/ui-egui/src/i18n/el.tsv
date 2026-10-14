@@ -3823,3 +3823,30 @@ cameraData	Lens	Φακός
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Αποστολή ανώνυμων στατιστικών χρήσης
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Η έκδοση web στέλνει ανώνυμα στατιστικά χρήσης (χωρίς αρχεία ή περιεχόμενο)· απενεργοποιήστε τα στις Προτιμήσεις › Γενικά.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Φόρτωση γραμματοσειρών…
+	Load Font Folder…	Φόρτωση φακέλου γραμματοσειρών…
+	Manage Fonts…	Διαχείριση γραμματοσειρών…
+	Manage Fonts	Διαχείριση γραμματοσειρών
+	User fonts	Δικές σας γραμματοσειρές
+	All fonts	Όλες οι γραμματοσειρές
+	Missing fonts	Γραμματοσειρές που λείπουν
+	Already loaded: {n}	Ήδη φορτωμένες: {n}
+	Skipped {file}	Παραλείφθηκε: {file}
+	No fonts were found	Δεν βρέθηκαν γραμματοσειρές
+	Fonts loaded: {n}	Φορτώθηκαν γραμματοσειρές: {n}
+	Not saved, usable until you close this tab: {fonts}	Δεν αποθηκεύτηκαν, διαθέσιμες μέχρι να κλείσετε την καρτέλα: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Αφαιρέστε γραμματοσειρές στο Κείμενο › Διαχείριση γραμματοσειρών… για να ελευθερώσετε χώρο.
+	Browser storage is full	Ο χώρος αποθήκευσης του προγράμματος περιήγησης είναι πλήρης
+	Fonts could not be saved	Δεν ήταν δυνατή η αποθήκευση των γραμματοσειρών
+	Font files: {n} · {size}	Αρχεία γραμματοσειρών: {n} · {size}
+	Stored in this browser only, never uploaded.	Αποθηκεύονται μόνο σε αυτό το πρόγραμμα περιήγησης, δεν αποστέλλονται ποτέ.
+	Browser storage: {used} of {quota}	Χώρος αποθήκευσης: {used} από {quota}
+	Kept until you remove them.	Διατηρούνται μέχρι να τις αφαιρέσετε.
+	The browser may clear them when space runs low.	Το πρόγραμμα περιήγησης μπορεί να τις διαγράψει αν λείψει χώρος.
+	Loaded for this session only.	Φορτώθηκαν μόνο για αυτή την περίοδο λειτουργίας.
+	Browser storage is unavailable: {error}	Ο χώρος αποθήκευσης δεν είναι διαθέσιμος: {error}
+	Remove all fonts from this browser?	Αφαίρεση όλων των γραμματοσειρών από αυτό το πρόγραμμα περιήγησης;
+	Removed: {n}	Αφαιρέθηκαν: {n}
+	No fonts loaded yet.	Δεν έχουν φορτωθεί γραμματοσειρές ακόμη.
+	Not saved	Δεν αποθηκεύτηκε

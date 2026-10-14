@@ -168,6 +168,14 @@ struct Managed {
     // Compared on native re-registration and handed to psd-compiler; empty on the web.
     files: Vec<std::path::PathBuf>,
     faces: Vec<FaceKey>,
+    /// The in-memory file of a user font ([`FontDb::register_user_font`]), dropped from
+    /// [`FontDb::font_data`] when it is unregistered.
+    data: Option<Arc<Vec<u8>>>,
+}
+
+/// The [`FontDb::register_managed`] key of a user font.
+fn user_key(id: &str) -> String {
+    format!("user:{id}")
 }
 
 /// Outcome of [`FontDb::register_managed`].
@@ -339,8 +347,13 @@ impl FontDb {
     pub fn families(&mut self) -> Vec<String> {
         // Private system faces (a leading '.', e.g. macOS ".SF NS") are hidden, as in Photoshop.
         let retired = &self.retired;
-        let mut v: Vec<String> =
-            self.fcx.collection.family_names().filter(|n| !is_hidden_family(n) && (retired.is_empty() || !retired.contains(&n.to_lowercase()))).map(str::to_string).collect();
+        let mut v: Vec<String> = self
+            .fcx
+            .collection
+            .family_names()
+            .filter(|n| !is_hidden_family(n) && (retired.is_empty() || !retired.contains(&n.to_lowercase())))
+            .map(str::to_string)
+            .collect();
         v.sort_by_key(|s| s.to_lowercase());
         v.dedup();
         v
@@ -412,7 +425,7 @@ impl FontDb {
             for n in &names {
                 self.retired.remove(&n.to_lowercase());
             }
-            self.managed.insert(key.to_string(), Managed { files: files.to_vec(), faces });
+            self.managed.insert(key.to_string(), Managed { files: files.to_vec(), faces, data: None });
             self.ps_cache.clear();
             self.face_cache.clear();
             self.refresh_generics();
@@ -421,10 +434,84 @@ impl FontDb {
         }
     }
 
+    /// Registers a font file the user loaded (Type › Load Fonts…) under `id` (its SHA-256), from
+    /// memory: every face of it, shared with psd-compiler ([`FontDb::font_data`]) until
+    /// [`FontDb::unregister_user_font`]. Registering an `id` again changes nothing. Returns the
+    /// families it provides (empty: not a usable font).
+    pub fn register_user_font(&mut self, id: &str, bytes: Arc<Vec<u8>>) -> Vec<String> {
+        let key = user_key(id);
+        if self.managed.contains_key(&key) {
+            return self.managed_families(&key);
+        }
+        let added = self.fcx.collection.register_fonts(Blob::new(bytes.clone()), None);
+        let mut faces = Vec::new();
+        let mut names: Vec<String> = Vec::new();
+        for (id, infos) in added {
+            for f in infos {
+                faces.push((id, f.width(), f.style(), f.weight()));
+            }
+            if let Some(n) = self.fcx.collection.family_name(id)
+                && !names.iter().any(|x| x == n)
+            {
+                names.push(n.to_string());
+            }
+        }
+        if faces.is_empty() {
+            return Vec::new();
+        }
+        names.sort_by_key(|n| (is_hidden_family(n), n.to_lowercase()));
+        for n in &names {
+            self.retired.remove(&n.to_lowercase());
+            self.forget_aliases(n);
+        }
+        self.data.push(FontData::Shared(bytes.clone()));
+        self.managed.insert(key, Managed { files: Vec::new(), faces, data: Some(bytes) });
+        self.ps_cache.clear();
+        self.face_cache.clear();
+        self.refresh_generics();
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+        names
+    }
+
+    /// Unregisters a user font ([`FontDb::register_user_font`]). Returns the families that lost
+    /// faces.
+    pub fn unregister_user_font(&mut self, id: &str) -> Vec<String> {
+        self.unregister_managed(&user_key(id))
+    }
+
+    /// Is the user font `id` registered?
+    pub fn has_user_font(&self, id: &str) -> bool {
+        self.managed.contains_key(&user_key(id))
+    }
+
+    /// Drops the exact-face aliases of `family` ([`FontDb::select_named_face`]): its faces changed.
+    fn forget_aliases(&mut self, family: &str) {
+        let mut gone = Vec::new();
+        self.face_aliases.retain(|(f, _), alias| {
+            let keep = !f.eq_ignore_ascii_case(family);
+            if !keep {
+                gone.push(alias.clone());
+            }
+            keep
+        });
+        // An alias holds the face's data: unregister it too, so a removed font's memory goes.
+        for alias in gone {
+            let Some(info) = self.fcx.collection.family_by_name(&alias) else { continue };
+            let id = info.id();
+            let faces: Vec<FaceKey> = info.fonts().iter().map(|f| (id, f.width(), f.style(), f.weight())).collect();
+            for (id, width, style, weight) in faces {
+                self.fcx.collection.unregister_font(id, width, style, weight);
+            }
+        }
+    }
+
     /// Unregisters what [`FontDb::register_managed`] added for `key` (never any other font).
     /// Returns the families that lost their faces.
     pub fn unregister_managed(&mut self, key: &str) -> Vec<String> {
         let Some(m) = self.managed.remove(key) else { return Vec::new() };
+        if let Some(bytes) = &m.data {
+            self.data.retain(|d| !matches!(d, FontData::Shared(b) if Arc::ptr_eq(b, bytes)));
+        }
         let mut names = Vec::new();
         for (id, width, style, weight) in m.faces {
             if let Some(n) = self.fcx.collection.family_name(id).map(str::to_string)
@@ -438,6 +525,9 @@ impl FontDb {
             if self.fcx.collection.family_by_name(n).is_none_or(|f| f.fonts().is_empty()) {
                 self.retired.insert(n.to_lowercase());
             }
+        }
+        for n in &names {
+            self.forget_aliases(n);
         }
         self.ps_cache.clear();
         self.face_cache.clear();
