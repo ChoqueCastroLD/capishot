@@ -243,7 +243,9 @@ claude mcp add photocraft -- "$PWD/target/release/photocraft-cli" mcp \
 `doc_inspect` (and the engine command `document.inspect`) reports the layer tree with kinds,
 bounds, masks, selection, effects (`effects.items[].kind`), smart filters (`smartFilters[]`), smart
 object sources (`smartSource`: `embedded` with its file name, or `linked` with a file path or, for a
-PSD placed layer, the `Idnt` uuid its duplicates share), type
+PSD placed layer, the `Idnt` uuid its duplicates share), shared contents (`smartContents`: an `id`
+every copy of the same contents has, and the number of `instances`; Replace Contents changes them
+all and lists them in its result), type
 text, adjustment settings, channels and history, so agents can verify what they did without a
 screenshot. `crates/automation/tests/agent_tasks.rs` is the reference: ten realistic edit tasks
 (title card, colour grade, undo/redo, editable smart blur, masks, saved selections, align,
