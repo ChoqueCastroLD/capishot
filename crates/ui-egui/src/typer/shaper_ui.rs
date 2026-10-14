@@ -1,7 +1,7 @@
 //! The TextShapeR strip under the preview line (TypeR 3.0's inline TextShapeR): the best line
 //! breakings of the active type layer, shaped like its bubble (`typer.shapeText`), three at a
 //! time. Click applies one (`typer.applyShape`, one undo step); Shift+click also moves the
-//! script to the next line. Hidden when the active layer isn't type.
+//! script to the next line. Hidden when the active layer isn't type or while it is being edited.
 
 use egui::{Rect, RichText, Sense, Stroke, StrokeKind, vec2};
 use serde_json::{Value, json};
@@ -68,6 +68,10 @@ fn target(app: &PhotocraftApp) -> Option<Key> {
 }
 
 pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    // Not while the Type tool edits text: each keystroke would reshape.
+    if app.ui.text_edit.is_some() {
+        return;
+    }
     let Some(key) = target(app) else { return };
     let ctx = ui.ctx().clone();
     let mut strip: Strip = ctx.data_mut(|d| d.get_temp::<Strip>(strip_id())).unwrap_or_default();
