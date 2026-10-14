@@ -2804,6 +2804,8 @@ fontWeight	Italic	Nghiêng
 	Never Show Overlay	Không bao giờ hiện lớp phủ
 	Auto Hide Notifications	Tự động ẩn thông báo
 	Notification Duration (seconds)	Thời lượng thông báo (giây)
+	Bundle Arrow-Key Nudges	Gộp dịch chuyển bằng phím mũi tên
+	Nudge Bundle Pause (ms)	Thời gian chờ gộp dịch chuyển (ms)
 	Dark Theme	Giao diện tối
 	Light Theme	Giao diện sáng
 	Pro Medium	Pro trung bình

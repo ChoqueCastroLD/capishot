@@ -3645,6 +3645,8 @@ cameraRaw	Whites	Beyazlar
 	Color Picker (Layer Style Color)	Renk Seçici (Katman Stili Rengi)
 	Auto Hide Notifications	Bildirimleri Otomatik Gizle
 	Notification Duration (seconds)	Bildirim Süresi (saniye)
+	Bundle Arrow-Key Nudges	Ok tuşlarıyla kaydırmaları birleştir
+	Nudge Bundle Pause (ms)	Kaydırma birleştirme duraklaması (ms)
 	Appearance Mode	Görünüm Modu
 	Presentation	Sunum
 	Next Appearance Mode	Sonraki Görünüm Modu

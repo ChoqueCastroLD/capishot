@@ -2898,6 +2898,8 @@ fontWeight	Italic	Kurziv
 	Color Picker (Layer Style Color)	Birač boja (boja stila sloja)
 	Auto Hide Notifications	Automatski sakrij obaveštenja
 	Notification Duration (seconds)	Trajanje obaveštenja (sekunde)
+	Bundle Arrow-Key Nudges	Objedini pomeranja strelicama
+	Nudge Bundle Pause (ms)	Pauza za objedinjavanje pomeranja (ms)
 	Appearance Mode	Režim izgleda
 	Presentation	Prikaz
 	Dark Theme	Tamna tema

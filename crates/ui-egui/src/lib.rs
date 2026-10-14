@@ -142,6 +142,7 @@ pub mod new_doc_ui;
 pub mod new_guide_ui;
 pub mod new_layer_ui;
 pub mod notices;
+pub mod nudge_bundle;
 mod numeric_expression;
 pub mod object_finder;
 mod opacity_keys;
@@ -701,6 +702,8 @@ pub struct PhotocraftApp {
     pub(crate) move_mods: move_mods::MoveDrag,
     /// Cached document for a modal text Style Options color preview.
     pub(crate) text_style_preview: Option<type_panels_ui::color_picker::Preview>,
+    /// The run of arrow-key nudges that share one History state (nudge_bundle).
+    pub(crate) nudge_bundle: nudge_bundle::NudgeBundle,
     /// Live Layer Style dialog preview: (key over revision + style fields, preview or validation error).
     pub(crate) style_preview: Option<(u64, Result<std::sync::Arc<Document>, String>)>,
     pub(crate) solid_fill_preview: Option<solid_fill_ui::Preview>,
@@ -901,6 +904,7 @@ impl PhotocraftApp {
             clip_read_for_paste: false,
             transform_preview: None,
             move_mods: Default::default(),
+            nudge_bundle: Default::default(),
             style_preview: None,
             text_style_preview: None,
             solid_fill_preview: None,
@@ -2676,6 +2680,9 @@ mod marquee_tests;
 
 #[cfg(test)]
 mod canvas_menu_tests;
+
+#[cfg(test)]
+mod nudge_bundle_tests;
 
 #[cfg(test)]
 mod caps_lock_tests;

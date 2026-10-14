@@ -2856,6 +2856,8 @@ cameraRaw	Yellow	Sárga
 	No saved presets yet.	Még nincs mentett előbeállítás.
 	Not a web colour: click for the nearest web colour	Nem webes szín: kattints a legközelebbi webes színért
 	Notification Duration (seconds)	Értesítés időtartama (másodperc)
+	Bundle Arrow-Key Nudges	Nyílbillentyűs mozgatások összevonása
+	Nudge Bundle Pause (ms)	Összevonási szünet (ms)
 	Number	Szám
 	OK	OK
 	Only Web Colors	Csak webes színek
