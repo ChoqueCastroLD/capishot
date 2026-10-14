@@ -1367,6 +1367,12 @@ mod tests {
         assert!(missing.is_empty(), "missing Italian dynamic labels: {missing:#?}");
     }
 
+    #[test]
+    fn spanish_covers_generated_filter_options_and_gallery_names() {
+        let missing = missing_generated_filter_labels(crate::i18n::lang_from_tag("es-ES").unwrap());
+        assert!(missing.is_empty(), "missing Spanish dynamic labels: {missing:#?}");
+    }
+
     /// The Select menu's generated dialogs (Select and Mask, Modify ▸ …) show their
     /// params, choices and title in every UI language, not just Korean.
     #[test]
