@@ -457,6 +457,10 @@ impl Layouter {
             // Drawn with a fallback for now; a host that serves this family fetches it (`served`).
             if !fonts.has_family(&s.font_family) {
                 crate::served::request(&s.font_family);
+                // A PSD names its fonts by PostScript name: a user font may provide that face.
+                if let Some(ps) = &r.style.postscript_name {
+                    crate::user_fonts::request(ps);
+                }
             }
             fonts.select_named_face(&mut s);
             out.styles.push(s);

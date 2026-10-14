@@ -419,16 +419,41 @@ fn installed_families() -> Vec<String> {
     photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).fonts.families().into_iter().map(|f| f.to_lowercase()).collect()
 }
 
-/// Font families used by type layers that the font database cannot supply.
+/// Font families used by type layers that the font database cannot supply. A run whose PSD
+/// PostScript name names an installed face exactly is drawn with it (the layout resolves it), so
+/// its family isn't missing even when the file spelled it otherwise.
 pub fn missing_fonts(doc: &Document) -> Vec<String> {
+    missing_font_names(doc).into_iter().map(|(family, _)| family).collect()
+}
+
+/// [`missing_fonts`] with the PostScript names the missing runs ask for (PSD files name faces by
+/// them), to look for in the user's own fonts.
+pub fn missing_font_names(doc: &Document) -> Vec<(String, Vec<String>)> {
     let have = installed_families();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
     for (_, _, l) in doc.walk() {
         if let LayerContent::Text(t) = &l.content {
             for r in t.char_runs() {
                 let f = r.style.font_family;
-                if !f.is_empty() && !have.contains(&f.to_lowercase()) && !out.contains(&f) {
-                    out.push(f);
+                if f.is_empty() || have.contains(&f.to_lowercase()) {
+                    continue;
+                }
+                let ps = r.style.postscript_name.filter(|ps| !ps.is_empty());
+                if ps.as_deref().is_some_and(|ps| eng.fonts.resolve_postscript(ps).exact) {
+                    continue;
+                }
+                let i = match out.iter().position(|(m, _)| *m == f) {
+                    Some(i) => i,
+                    None => {
+                        out.push((f, Vec::new()));
+                        out.len() - 1
+                    }
+                };
+                if let (Some(ps), Some((_, names))) = (ps, out.get_mut(i))
+                    && !names.contains(&ps)
+                {
+                    names.push(ps);
                 }
             }
         }
@@ -436,8 +461,39 @@ pub fn missing_fonts(doc: &Document) -> Vec<String> {
     out
 }
 
+/// A name compared loosely: lower case, without spaces, hyphens and underscores ("CC Wild Words"
+/// and "CCWildWords" are the same).
+fn loose(name: &str) -> String {
+    name.chars().filter(|c| !matches!(c, ' ' | '-' | '_')).flat_map(char::to_lowercase).collect()
+}
+
+/// Installed families the missing ones can map to without asking: the family a run's PostScript
+/// name guesses (`CCWildWords-Roman` → "CCWildWords"), or the missing name itself, compared
+/// loosely with the installed families. `{missing: installed}`; missing families without a match
+/// are left out. Resolve Missing Fonts fills its choices with these.
+pub fn auto_matches(doc: &Document) -> serde_json::Map<String, Value> {
+    let missing = missing_font_names(doc);
+    let installed = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).fonts.families();
+    let mut out = serde_json::Map::new();
+    for (family, ps) in missing {
+        let mut keys = vec![loose(&family)];
+        keys.extend(ps.iter().map(|p| loose(&photocraft_text::fonts::guess_from_postscript(p).family)));
+        keys.extend(ps.iter().map(|p| loose(p.split('-').next().unwrap_or(p))));
+        if let Some(hit) = keys.iter().find_map(|k| installed.iter().find(|f| !k.is_empty() && loose(f) == *k)) {
+            out.insert(family, json!(hit));
+        }
+    }
+    out
+}
+
 /// Replace missing families per `map` (missing → installed; unmapped ones → the default family).
 pub(crate) fn replace_fonts(s: &mut Session, map: &serde_json::Map<String, Value>, all: bool) -> Result<Value> {
+    replace_fonts_keeping(s, map, all, false)
+}
+
+/// [`replace_fonts`]; `keep_pixels` changes the model only and leaves each layer's pixels (the
+/// shell redraws the layers that showed its own layout, a PSD layer keeps Photoshop's).
+fn replace_fonts_keeping(s: &mut Session, map: &serde_json::Map<String, Value>, all: bool, keep_pixels: bool) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let missing = missing_fonts(&d.doc);
     let pick = |f: &str| -> Option<String> {
@@ -469,7 +525,9 @@ pub(crate) fn replace_fonts(s: &mut Session, map: &serde_json::Map<String, Value
                     at += r.len;
                 }
                 if changed {
-                    refresh(&snapshot, t);
+                    if !keep_pixels {
+                        refresh(&snapshot, t);
+                    }
                     n += 1;
                 }
             }
@@ -480,6 +538,13 @@ pub(crate) fn replace_fonts(s: &mut Session, map: &serde_json::Map<String, Value
 }
 
 fn resolve_missing(s: &mut Session, p: &Value) -> Result<Value> {
+    if p.get("auto").and_then(Value::as_bool) == Some(true) {
+        let matches = auto_matches(&s.active().ok_or(EngineError::NoDocument)?.doc);
+        let keep = p.get("keepPixels").and_then(Value::as_bool) == Some(true);
+        let mut out = replace_fonts_keeping(s, &matches, false, keep)?;
+        out["matches"] = Value::Object(matches);
+        return Ok(out);
+    }
     match p.get("map").and_then(Value::as_object) {
         Some(m) => replace_fonts(s, &m.clone(), false),
         None => {
@@ -489,7 +554,7 @@ fn resolve_missing(s: &mut Session, p: &Value) -> Result<Value> {
                 Some(Value::Bool(true)) => return crate::font_download_cmds::download_missing(s, missing),
                 Some(_) => return Err(EngineError::BadParams { cmd: "type.resolveMissingFonts".into(), msg: "`download` must be true or false".into() }),
             }
-            let mut out = json!({"missing": missing});
+            let mut out = json!({"missing": missing, "matches": auto_matches(&s.active().ok_or(EngineError::NoDocument)?.doc)});
             if let Some(d) = crate::font_download_cmds::downloadable(s, &missing) {
                 out["downloadable"] = d;
             }
@@ -580,7 +645,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "type.resolveMissingFonts",
             "Resolve Missing Fonts…",
             &["Type"],
-            r##"{"map":{"Missing Family":"Installed Family"}?,"download":bool=false?} (no map: list the missing families, with "downloadable":[{"missing","family"}] for those Google Fonts has once the index is loaded and Preferences > Type > Allow Online Fonts is on; download=true installs them as a background job and remaps names that differ; see type.fonts.install)"##,
+            r##"{"map":{"Missing Family":"Installed Family"}?,"auto":bool=false?,"keepPixels":bool=false?,"download":bool=false?} (auto: map each missing family to the installed one its name or PostScript name matches, keepPixels: change the runs only, not the layers' pixels; no map: list the missing families and those "matches", with "downloadable":[{"missing","family"}] for those Google Fonts has once the index is loaded and Preferences > Type > Allow Online Fonts is on; download=true installs them as a background job and remaps names that differ; see type.fonts.install)"##,
             any_text,
             resolve_missing
         ),

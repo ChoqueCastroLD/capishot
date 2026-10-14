@@ -2738,3 +2738,31 @@ cameraData	Lens	Objektiv
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Odesílat anonymní statistiky používání
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Webová verze odesílá anonymní statistiky používání (žádné soubory ani obsah); vypnete je v Předvolby › Obecné.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Načíst písma…
+	Load Font Folder…	Načíst složku písem…
+	Manage Fonts…	Spravovat písma…
+	Manage Fonts	Spravovat písma
+	User fonts	Vlastní písma
+	All fonts	Všechna písma
+	Missing fonts	Chybějící písma
+	Already loaded: {n}	Již načteno: {n}
+	Skipped {file}	Přeskočeno: {file}
+	No fonts were found	Nebyla nalezena žádná písma
+	Fonts loaded: {n}	Načtená písma: {n}
+	Not saved, usable until you close this tab: {fonts}	Neuloženo, k dispozici do zavření této karty: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Odeberte písma v nabídce Text › Spravovat písma… a uvolněte místo.
+	Browser storage is full	Úložiště prohlížeče je plné
+	Fonts could not be saved	Písma se nepodařilo uložit
+	Font files: {n} · {size}	Soubory písem: {n} · {size}
+	Stored in this browser only, never uploaded.	Uloženo jen v tomto prohlížeči, nikdy se nenahrává.
+	Browser storage: {used} of {quota}	Úložiště prohlížeče: {used} z {quota}
+	Kept until you remove them.	Zůstanou, dokud je neodeberete.
+	The browser may clear them when space runs low.	Prohlížeč je může smazat, když dochází místo.
+	Loaded for this session only.	Načteno jen pro tuto relaci.
+	Browser storage is unavailable: {error}	Úložiště prohlížeče není k dispozici: {error}
+	Remove All	Odebrat vše
+	Remove all fonts from this browser?	Odebrat všechna písma z tohoto prohlížeče?
+	Removed: {n}	Odebráno: {n}
+	No fonts loaded yet.	Zatím nejsou načtena žádná písma.
+	Not saved	Neuloženo

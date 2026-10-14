@@ -12,7 +12,7 @@ const DATABASE: &str = "photocraft.presets";
 const FILES: &str = "files";
 const TIMEOUT_MS: f64 = 10_000.0;
 
-fn js(e: JsValue) -> String {
+pub(crate) fn js(e: JsValue) -> String {
     if let Some(exception) = e.dyn_ref::<web_sys::DomException>() {
         format!("{}: {}", exception.name(), exception.message())
     } else {
@@ -22,12 +22,12 @@ fn js(e: JsValue) -> String {
 
 /// Listeners are detached even when startup or a write times out.
 type Listener = (EventTarget, &'static str, Closure<dyn FnMut(Event)>);
-struct Listeners(Vec<Listener>);
+pub(crate) struct Listeners(Vec<Listener>);
 impl Listeners {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(Vec::new())
     }
-    fn add(&mut self, target: &EventTarget, name: &'static str, f: impl FnMut(Event) + 'static) -> Result<(), JsValue> {
+    pub(crate) fn add(&mut self, target: &EventTarget, name: &'static str, f: impl FnMut(Event) + 'static) -> Result<(), JsValue> {
         let cb = Closure::<dyn FnMut(Event)>::new(f);
         target.add_event_listener_with_callback(name, cb.as_ref().unchecked_ref())?;
         self.0.push((target.clone(), name, cb));
@@ -42,12 +42,12 @@ impl Drop for Listeners {
     }
 }
 
-struct Pending {
-    promise: Promise,
+pub(crate) struct Pending {
+    pub(crate) promise: Promise,
     _listeners: Listeners,
 }
 
-fn request(request: &IdbRequest) -> Pending {
+pub(crate) fn request(request: &IdbRequest) -> Pending {
     let mut listeners = Listeners::new();
     let promise = Promise::new(&mut |resolve, reject| {
         let req = request.clone();
@@ -75,7 +75,7 @@ fn request(request: &IdbRequest) -> Pending {
 }
 
 /// A single deadline bounds the whole startup read, not ten seconds per record.
-async fn before(promise: &Promise, deadline: f64) -> Result<JsValue, String> {
+pub(crate) async fn before(promise: &Promise, deadline: f64) -> Result<JsValue, String> {
     let window = web_sys::window().ok_or("no window")?;
     let mut timer = None;
     let mut callback = None;
