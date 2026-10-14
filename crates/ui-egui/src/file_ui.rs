@@ -1445,7 +1445,8 @@ mod tests {
         let (mut app, ctx) = app();
         let id = crate::menus::invoke(&mut app, &ctx, "file.print", json!({})).unwrap()["dialog"].as_u64().unwrap();
         let f = &app.ui.dialog_mut(id).unwrap().fields;
-        assert!(f.get("__printers").is_some_and(Value::is_array));
+        assert!(f.get("__systemPrinters").is_some_and(Value::is_array));
+        assert!(params(f).get("__systemPrinters").is_none());
         assert!(params(f).get("__printers").is_none());
     }
 
