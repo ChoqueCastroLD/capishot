@@ -1004,6 +1004,45 @@ mod tests {
         assert!(lighter > redder + 0.15 && redder > 0.0, "lighter {lighter}, redder {redder}");
     }
 
+    #[test]
+    fn color_range_fuzziness_zero_selects_exact_match_only() {
+        // Sampled Colors at Fuzziness 0 selects only the exact match (TOOL-214-3, #214).
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 50, "height": 10})).unwrap();
+        s.edit("paint", |doc, _| {
+            let bg = doc.layers[0].surface_mut().unwrap();
+            let v = |c: u8| f32::from(c) / 255.0;
+            // Exact target color [200, 140, 120]
+            bg.fill_rect(Rect::new(0, 0, 10, 10), &[v(200), v(140), v(120), 1.0]);
+            // Off by 1 level in red [201, 140, 120]
+            bg.fill_rect(Rect::new(10, 0, 20, 10), &[v(201), v(140), v(120), 1.0]);
+            // Off by 1 level in green [200, 141, 120]
+            bg.fill_rect(Rect::new(20, 0, 30, 10), &[v(200), v(141), v(120), 1.0]);
+            // Off by 2 levels in blue [200, 140, 122] (crosses 8-bit Lab grid threshold)
+            bg.fill_rect(Rect::new(30, 0, 40, 10), &[v(200), v(140), v(122), 1.0]);
+            // Exact target color again at a different position
+            bg.fill_rect(Rect::new(40, 0, 50, 10), &[v(200), v(140), v(120), 1.0]);
+            Ok(())
+        })
+        .unwrap();
+
+        // Sampled via eyedropper point at [5, 5] with Fuzziness 0
+        s.execute("select.colorRange", json!({"points": [[5, 5]], "fuzziness": 0})).unwrap();
+        assert_eq!(coverage(&s, 5, 5), 1.0, "sampled pixel itself is fully selected");
+        assert_eq!(coverage(&s, 45, 5), 1.0, "identical color elsewhere on canvas is fully selected");
+        assert_eq!(coverage(&s, 15, 5), 0.0, "1 level off in red is unselected at fuzziness 0");
+        assert_eq!(coverage(&s, 25, 5), 0.0, "1 level off in green is unselected at fuzziness 0");
+        assert_eq!(coverage(&s, 35, 5), 0.0, "1 level off in blue is unselected at fuzziness 0");
+
+        // Sampled via hex color with Fuzziness 0
+        s.execute("select.colorRange", json!({"color": "#c88c78", "fuzziness": 0})).unwrap();
+        assert_eq!(coverage(&s, 5, 5), 1.0, "exact color match from hex is fully selected");
+        assert_eq!(coverage(&s, 45, 5), 1.0, "identical color elsewhere on canvas is fully selected");
+        assert_eq!(coverage(&s, 15, 5), 0.0, "1 level off in red is unselected for hex at fuzziness 0");
+        assert_eq!(coverage(&s, 25, 5), 0.0, "1 level off in green is unselected for hex at fuzziness 0");
+        assert_eq!(coverage(&s, 35, 5), 0.0, "1 level off in blue is unselected for hex at fuzziness 0");
+    }
+
     /// Red squares (from `session`), a blue square, a black and a mid-grey strip on white.
     fn session_colours() -> Session {
         let mut s = session();
