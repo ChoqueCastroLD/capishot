@@ -943,39 +943,53 @@ pub fn levels(ch: &LevelsChannel, v: f32) -> f32 {
 }
 
 /// [`levels`] on samples with `quantum` steps per unit (8-bit: 255). Photoshop works on whole
-/// levels: the input is a level, and the input-range stretch is rounded (half up) to a whole
-/// level before the midtone gamma, so a 44..214 range maps 45, 46, 47, 48 → 1.5, 3, 4.5, 6 →
-/// 2, 3, 5, 6 (psd-tools levels_grayscale, where the gamma toe magnifies the steps). In a LUT
-/// the result is a staircase that is exact at every level.
+/// levels in three steps, each rounded half up to a whole level: the input-range stretch, the
+/// midtone gamma ([`levels_gamma`]) and the output range. So a 44..214 range maps 45, 46, 47, 48
+/// → 1.5, 3, 4.5, 6 → 2, 3, 5, 6 (psd-tools levels_grayscale, where the gamma toe magnifies the
+/// steps), and an output range narrower than 0..255 maps neighbouring gamma levels to one level
+/// (psd-tools levels_rgb: 43..48 → 58 through a 0.47 channel gamma and the master's 48..255).
+/// In a LUT the result is a staircase that is exact at every level.
 pub fn levels_q(ch: &LevelsChannel, v: f32, quantum: Option<f32>) -> f32 {
     let range = (ch.in_white - ch.in_black).max(1e-6);
-    let u = match quantum.filter(|q| q.is_finite() && *q >= 1.0) {
+    let quantum = quantum.filter(|q| q.is_finite() && *q >= 1.0);
+    let whole = |x: f32| match quantum {
+        Some(q) => (x * q + 0.5).floor() / q,
+        None => x,
+    };
+    let u = match quantum {
         Some(q) => {
             let v = (v * q).round() / q;
             (((v - ch.in_black) / range).clamp(0.0, 1.0) * q + 0.5 + 1e-3).floor() / q
         }
         None => ((v - ch.in_black) / range).clamp(0.0, 1.0),
     };
-    let g = ch.gamma.max(0.01);
-    let t = if g > 1.0 {
-        // A midtone gamma > 1 lifts shadows, and a pure `u^(1/g)` has infinite slope at black —
-        // which Photoshop bounds, giving a soft shadow toe (initial slope ≈ 2^gamma, verified against
-        // the real app). Soft-min (p-norm) of the power curve with that line; reduces to the exact
-        // power curve in the body, so highlights are unchanged. gamma <= 1 is untouched. Slope and
-        // sharpness fitted on whole-level input (`levels_q`): a 0..255 ramp at gamma 2.0 and
-        // psd-tools levels_grayscale's gamma 1.78 (within one level of Photoshop on both).
-        let power = u.powf(1.0 / g);
-        let line = 0.93 * 2.0f32.powf(g) * u;
-        if power <= 1e-6 || line <= 1e-6 {
-            power.min(line)
-        } else {
-            let p = 10.0; // p-norm sharpness, fit to Photoshop ground truth
-            (power.powf(-p) + line.powf(-p)).powf(-1.0 / p)
-        }
-    } else {
-        u.powf(1.0 / g)
-    };
-    ch.out_black + t * (ch.out_white - ch.out_black)
+    let t = whole(levels_gamma(u, ch.gamma.max(0.01)));
+    whole(ch.out_black + t * (ch.out_white - ch.out_black))
+}
+
+/// Exponent of the shadow toe in [`levels_gamma`] (fitted; see there).
+const LEVELS_TOE_POWER: f32 = 2.2;
+
+/// Levels' midtone gamma `g` on `u` in 0..1: `u^(1/g)`, except that above 1, where that power
+/// curve is infinitely steep at black, Photoshop starts along a toe `a·u − b·u^q` of slope
+/// `a = 2^g` that joins the curve with the same value and slope. `q` = [`LEVELS_TOE_POWER`] is
+/// fitted on whole-level oracles at gamma 1.16, 1.22, 1.3, 1.78 and 2.0 (psd-tools levels_rgb
+/// and levels_grayscale, the photoshop corpus's rgb8 and gray8 levels.psd, a measured 0..255
+/// ramp): all but 2 of their 1118 levels exact, the others within one. Below 1 the power curve is
+/// exact (gamma 0.67 and 0.7: every level).
+pub fn levels_gamma(u: f32, g: f32) -> f32 {
+    let c = 1.0 / g;
+    if g <= 1.0 {
+        return u.powf(c);
+    }
+    let (a, q) = (2f32.powf(g), LEVELS_TOE_POWER);
+    // Where the toe meets the curve: a·u1 − b·u1^q = u1^c and a − q·b·u1^(q−1) = c·u1^(c−1).
+    let u1 = ((1.0 - c / q) / (a * (1.0 - 1.0 / q))).powf(1.0 / (1.0 - c));
+    if u >= u1 || u1 <= 0.0 {
+        return u.powf(c);
+    }
+    let b = (a * u1 - u1.powf(c)) / u1.powf(q);
+    a * u - b * u.powf(q)
 }
 
 /// [`levels`] in a 32-bit document. Neither the input is clipped to the input range nor the result
