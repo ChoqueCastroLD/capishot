@@ -18,6 +18,10 @@ pub struct TyperSession {
     /// so never persisted.
     #[serde(skip)]
     pub stored_selections: Vec<StoredSelection>,
+    /// Placement caches and per-document state (WP1): the page image bubbles are found on, the
+    /// cleaning layers hidden per document. Never persisted.
+    #[serde(skip)]
+    pub(crate) place: crate::typer_place_cmds::PlaceState,
 }
 
 impl TyperSession {
@@ -30,7 +34,7 @@ impl TyperSession {
     /// Restore from [`TyperSession::to_json`]. Errors on malformed data; nothing is applied then.
     pub fn from_json(v: &Value) -> Result<TyperSession, String> {
         let s: TyperSession = serde_json::from_value(v.clone()).map_err(|e| format!("TypeR workspace: {e}"))?;
-        Ok(TyperSession { state: s.state.restored(), stored_selections: Vec::new() })
+        Ok(TyperSession { state: s.state.restored(), ..TyperSession::default() })
     }
 }
 

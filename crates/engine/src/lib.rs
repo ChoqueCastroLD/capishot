@@ -525,6 +525,7 @@ impl Session {
         if let Some(id) = self.docs.get(index).map(|d| d.doc.id) {
             self.cancel_jobs_on(id);
             self.subject_cache.forget_doc(id);
+            typer_place_cmds::forget_doc(self, id);
         }
         let d = self.docs.remove(index);
         self.active = if self.docs.is_empty() {

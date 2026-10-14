@@ -53,7 +53,9 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let size_on = app.session.is_enabled("typer.resize");
             if ui
-                .add_enabled_ui(size_on, |ui| crate::icons::button_with_icon_size(ui, "circle-plus", 22.0, 15.0, false, tl!("Increase the text size of the current layer")))
+                .add_enabled_ui(size_on, |ui| {
+                    crate::icons::button_with_icon_size(ui, "circle-plus", 22.0, 15.0, false, tl!("Increase the text size of the current layer"))
+                })
                 .inner
                 .clicked()
             {
@@ -64,7 +66,9 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 act(app, "typer.settings.set", json!({"key": "textSizeIncrement", "value": step}));
             }
             if ui
-                .add_enabled_ui(size_on, |ui| crate::icons::button_with_icon_size(ui, "circle-minus", 22.0, 15.0, false, tl!("Decrease the text size of the current layer")))
+                .add_enabled_ui(size_on, |ui| {
+                    crate::icons::button_with_icon_size(ui, "circle-minus", 22.0, 15.0, false, tl!("Decrease the text size of the current layer"))
+                })
                 .inner
                 .clicked()
             {

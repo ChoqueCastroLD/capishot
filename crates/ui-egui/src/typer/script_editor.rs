@@ -207,7 +207,8 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, height: f32) {
         if crate::icons::button_with_icon_size(ui, "bold", 22.0, 15.0, false, &format!("{} ({})", tl!("Bold"), crate::shortcuts::pretty("Cmd+B"))).clicked() {
             ctx.data_mut(|d| d.insert_temp(pending_id(), Format::Bold));
         }
-        if crate::icons::button_with_icon_size(ui, "italic", 22.0, 15.0, false, &format!("{} ({})", tl!("Italic"), crate::shortcuts::pretty("Cmd+I"))).clicked() {
+        if crate::icons::button_with_icon_size(ui, "italic", 22.0, 15.0, false, &format!("{} ({})", tl!("Italic"), crate::shortcuts::pretty("Cmd+I"))).clicked()
+        {
             ctx.data_mut(|d| d.insert_temp(pending_id(), Format::Italic));
         }
         crate::widgets::vline(ui, 16.0);

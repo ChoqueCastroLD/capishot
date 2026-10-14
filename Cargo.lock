@@ -4639,8 +4639,10 @@ dependencies = [
 name = "photocraft-typer"
 version = "0.7.0"
 dependencies = [
+ "photocraft-algo",
  "photocraft-color",
  "photocraft-doc",
+ "photocraft-geom",
  "serde",
  "serde_json",
 ]

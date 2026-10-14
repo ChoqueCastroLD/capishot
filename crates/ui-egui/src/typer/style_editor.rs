@@ -297,7 +297,15 @@ fn finish_presets(style: &mut Value) {
     style["sizePresetDefaultIndex"] = json!(default);
 }
 
-fn fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &Tokens, d: &mut StyleDraft, lib: &photocraft_typer::Library, middle_east: bool, layer_props: Option<&Value>) {
+fn fields(
+    app: &mut PhotocraftApp,
+    ui: &mut egui::Ui,
+    t: &Tokens,
+    d: &mut StyleDraft,
+    lib: &photocraft_typer::Library,
+    middle_east: bool,
+    layer_props: Option<&Value>,
+) {
     let grid = |ui: &mut egui::Ui, id: &str, add: &mut dyn FnMut(&mut egui::Ui)| {
         egui::Grid::new(id).num_columns(2).spacing([10.0, 5.0]).show(ui, |ui| add(ui));
     };
