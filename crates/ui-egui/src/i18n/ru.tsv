@@ -3074,3 +3074,31 @@ cameraData	Lens	Объектив
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Отправлять анонимную статистику использования
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Веб-версия отправляет анонимную статистику использования (без файлов и содержимого); отключить её можно в Настройки › Основные.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Загрузить шрифты…
+	Load Font Folder…	Загрузить папку шрифтов…
+	Manage Fonts…	Управление шрифтами…
+	Manage Fonts	Управление шрифтами
+	User fonts	Свои шрифты
+	All fonts	Все шрифты
+	Missing fonts	Отсутствующие шрифты
+	Already loaded: {n}	Уже загружено: {n}
+	Skipped {file}	Пропущено: {file}
+	No fonts were found	Шрифты не найдены
+	Fonts loaded: {n}	Загружено шрифтов: {n}
+	Not saved, usable until you close this tab: {fonts}	Не сохранены, доступны до закрытия этой вкладки: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Удалите шрифты в меню Текст › Управление шрифтами…, чтобы освободить место.
+	Browser storage is full	Хранилище браузера заполнено
+	Fonts could not be saved	Не удалось сохранить шрифты
+	Font files: {n} · {size}	Файлы шрифтов: {n} · {size}
+	Stored in this browser only, never uploaded.	Хранятся только в этом браузере и никуда не отправляются.
+	Browser storage: {used} of {quota}	Хранилище браузера: {used} из {quota}
+	Kept until you remove them.	Хранятся, пока вы их не удалите.
+	The browser may clear them when space runs low.	Браузер может удалить их при нехватке места.
+	Loaded for this session only.	Загружены только на этот сеанс.
+	Browser storage is unavailable: {error}	Хранилище браузера недоступно: {error}
+	Remove All	Удалить все
+	Remove all fonts from this browser?	Удалить все шрифты из этого браузера?
+	Removed: {n}	Удалено: {n}
+	No fonts loaded yet.	Шрифты ещё не загружены.
+	Not saved	Не сохранён

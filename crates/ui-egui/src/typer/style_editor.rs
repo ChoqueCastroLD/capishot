@@ -143,52 +143,20 @@ fn color(ui: &mut egui::Ui, o: &mut Map<String, Value>, k: &str, short: bool) {
     }
 }
 
-/// Family names the font database has, cached per database generation.
-fn families(ctx: &egui::Context) -> std::sync::Arc<Vec<String>> {
-    let generation = (photocraft_text::fonts::generation(), photocraft_text::served::generation());
-    let id = egui::Id::new("typer-font-family-list");
-    if let Some((g, list)) = ctx.data(|d| d.get_temp::<((u64, u64), std::sync::Arc<Vec<String>>)>(id))
-        && g == generation
-    {
-        return list;
-    }
-    let mut list = photocraft_text::shared().lock().unwrap_or_else(std::sync::PoisonError::into_inner).fonts.families();
-    list.sort_by_key(|f| f.to_lowercase());
-    list.dedup();
-    let list = std::sync::Arc::new(list);
-    ctx.data_mut(|d| d.insert_temp(id, (generation, list.clone())));
-    list
-}
-
-/// The font family field with a list of the installed families matching what is typed.
-fn family_field(ui: &mut egui::Ui, t: &Tokens, ts: &mut Map<String, Value>) {
+/// The font family: the Character panel's picker (search, previews, the user's own fonts and
+/// Load Fonts…). A family the font database doesn't have is kept and flagged.
+fn family_field(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &Tokens, ts: &mut Map<String, Value>) {
     let mut family = get_s(ts, "fontName").to_string();
-    let r = ui.add(egui::TextEdit::singleline(&mut family).desired_width(150.0).hint_text(tl!("Font family")));
-    let list = families(ui.ctx());
-    let known = list.iter().any(|f| f.eq_ignore_ascii_case(&family));
-    if r.changed() {
-        ts.insert("fontName".into(), json!(family));
-        // The PostScript name no longer applies; the family and style name pick the face.
-        ts.insert("fontPostScriptName".into(), json!(""));
+    if crate::type_tool::fonts_ready(ui, 170.0) {
+        let preview = app.session.prefs().type_.font_preview;
+        if crate::type_tool::font_picker(app, ui, &mut family, 170.0, preview) {
+            ts.insert("fontName".into(), json!(family));
+            // The PostScript name no longer applies; the family and style name pick the face.
+            ts.insert("fontPostScriptName".into(), json!(""));
+        }
     }
-    let popup = egui::Popup::from_response(&r).open_memory(None).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-    if r.has_focus() && !family.is_empty() && !known {
-        egui::Popup::open_id(ui.ctx(), popup.get_id());
-    }
-    popup.show(|ui| {
-        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-            let needle = family.to_lowercase();
-            for f in list.iter().filter(|f| f.to_lowercase().contains(&needle)).take(80) {
-                if ui.selectable_label(false, f).clicked() {
-                    ts.insert("fontName".into(), json!(f));
-                    ts.insert("fontPostScriptName".into(), json!(""));
-                    ui.close();
-                }
-            }
-        });
-    });
-    if !family.is_empty() && !known {
-        ui.label(RichText::new(tl!("not installed")).color(t.warning).size(11.0));
+    if !family.is_empty() && !crate::type_tool::families().iter().any(|f| f.eq_ignore_ascii_case(&family)) {
+        ui.label(RichText::new(tl!("not installed")).color(t.warning).size(11.0)).on_hover_text(tl!("Load the font with Type › Load Fonts…"));
     }
 }
 
@@ -234,7 +202,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             });
             crate::widgets::hairline(ui);
             egui::ScrollArea::vertical().max_height(ctx.content_rect().height() * 0.7).show(ui, |ui| {
-                fields(ui, &t, &mut d, &lib, middle_east, layer_props.as_ref());
+                fields(app, ui, &t, &mut d, &lib, middle_east, layer_props.as_ref());
             });
             if !d.message.is_empty() {
                 ui.label(RichText::new(&d.message).color(t.warning).size(11.5));
@@ -329,7 +297,7 @@ fn finish_presets(style: &mut Value) {
     style["sizePresetDefaultIndex"] = json!(default);
 }
 
-fn fields(ui: &mut egui::Ui, t: &Tokens, d: &mut StyleDraft, lib: &photocraft_typer::Library, middle_east: bool, layer_props: Option<&Value>) {
+fn fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &Tokens, d: &mut StyleDraft, lib: &photocraft_typer::Library, middle_east: bool, layer_props: Option<&Value>) {
     let grid = |ui: &mut egui::Ui, id: &str, add: &mut dyn FnMut(&mut egui::Ui)| {
         egui::Grid::new(id).num_columns(2).spacing([10.0, 5.0]).show(ui, |ui| add(ui));
     };
@@ -410,7 +378,7 @@ fn fields(ui: &mut egui::Ui, t: &Tokens, d: &mut StyleDraft, lib: &photocraft_ty
     };
     if let Some(ts) = obj(&mut d.style, "/textProps/layerText/textStyleRange/0/textStyle") {
         grid(ui, "typer-style-char", &mut |ui| {
-            row(ui, t, tl!("Font"), |ui| family_field(ui, t, ts));
+            row(ui, t, tl!("Font"), |ui| family_field(app, ui, t, ts));
             row(ui, t, tl!("Font style"), |ui| {
                 let mut face = get_s(ts, "fontStyleName").to_string();
                 if ui.add(egui::TextEdit::singleline(&mut face).desired_width(150.0).hint_text("Regular")).changed() {

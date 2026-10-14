@@ -3132,3 +3132,31 @@ cameraData	Lens	Lensa
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Kirim statistik penggunaan anonim
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Versi web mengirim statistik penggunaan anonim (tanpa file atau konten); matikan di Preferensi › Umum.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Muat Font…
+	Load Font Folder…	Muat Folder Font…
+	Manage Fonts…	Kelola Font…
+	Manage Fonts	Kelola Font
+	User fonts	Font pengguna
+	All fonts	Semua font
+	Missing fonts	Font yang hilang
+	Already loaded: {n}	Sudah dimuat: {n}
+	Skipped {file}	Dilewati {file}
+	No fonts were found	Tidak ada font ditemukan
+	Fonts loaded: {n}	Font dimuat: {n}
+	Not saved, usable until you close this tab: {fonts}	Tidak disimpan, bisa dipakai sampai tab ini ditutup: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Hapus font di Teks › Kelola Font… untuk mengosongkan ruang.
+	Browser storage is full	Penyimpanan browser penuh
+	Fonts could not be saved	Font tidak dapat disimpan
+	Font files: {n} · {size}	File font: {n} · {size}
+	Stored in this browser only, never uploaded.	Hanya disimpan di browser ini, tidak pernah diunggah.
+	Browser storage: {used} of {quota}	Penyimpanan browser: {used} dari {quota}
+	Kept until you remove them.	Tetap ada sampai Anda menghapusnya.
+	The browser may clear them when space runs low.	Browser dapat menghapusnya saat ruang hampir habis.
+	Loaded for this session only.	Dimuat hanya untuk sesi ini.
+	Browser storage is unavailable: {error}	Penyimpanan browser tidak tersedia: {error}
+	Remove All	Hapus Semua
+	Remove all fonts from this browser?	Hapus semua font dari browser ini?
+	Removed: {n}	Dihapus: {n}
+	No fonts loaded yet.	Belum ada font yang dimuat.
+	Not saved	Tidak disimpan

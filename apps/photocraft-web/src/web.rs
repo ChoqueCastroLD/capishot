@@ -225,6 +225,8 @@ impl Boot {
         let places: Inbox = Arc::default();
         let served: Served = Arc::default();
         load_font_manifest(served.clone(), ctx.clone());
+        let user_fonts = UserFontStore::default();
+        open_user_fonts(user_fonts.clone(), ctx.clone());
         let (session, warnings) = crate::preset_bridge::session(presets.clone());
         preset_warnings.extend(warnings);
         crate::startup::mark("session");
@@ -264,7 +266,7 @@ impl Boot {
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, inbox, places, canvas: pen_target, unsaved, served, database, presets, startup_frames: 0, perf }
+        WebShell { app, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf }
     }
 }
 
@@ -400,6 +402,57 @@ fn query() -> String {
     web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
 }
 
+/// The user's font store (IndexedDB), shared with the tasks that read and write it.
+#[derive(Clone, Default)]
+struct UserFontStore(std::rc::Rc<std::cell::RefCell<UserFontState>>);
+
+#[derive(Default)]
+struct UserFontState {
+    db: Option<web_sys::IdbDatabase>,
+    /// When the index was restored (`Date.now()`): idle reads start a moment after start-up.
+    restored_at: f64,
+    /// `navigator.storage.persist()` was asked for.
+    persist_asked: bool,
+}
+
+/// Opens the user's font store and restores its index (no font bytes: those are read when a
+/// family is needed or in idle time), without holding up the first frame.
+fn open_user_fonts(store: UserFontStore, ctx: egui::Context) {
+    use photocraft_ui_egui::user_fonts_ui::user_fonts::{self, Persistence};
+    user_fonts::store().set_persistence(Persistence::Pending);
+    wasm_bindgen_futures::spawn_local(async move {
+        let opened = match crate::indexed_fonts::open().await {
+            Ok(db) => crate::indexed_fonts::read_index(&db).await.map(|index| (db, index)),
+            Err(e) => Err(e),
+        };
+        match opened {
+            Ok((db, index)) => {
+                let n = index.len();
+                let warnings = user_fonts::store().restore(index);
+                for w in warnings {
+                    log::warn!("user fonts: {w}");
+                }
+                user_fonts::store().set_persistence(Persistence::Stored);
+                {
+                    let mut st = store.0.borrow_mut();
+                    st.db = Some(db);
+                    st.restored_at = js_sys::Date::now();
+                }
+                crate::startup::mark("user fonts index");
+                log::info!("photocraft-web: {n} stored user fonts");
+                if let Ok(p) = crate::indexed_fonts::persisted().await {
+                    user_fonts::store().persisted = Some(p);
+                }
+            }
+            Err(e) => {
+                log::warn!("user fonts are session-only: {e}");
+                user_fonts::store().set_persistence(Persistence::Unavailable(e));
+            }
+        }
+        ctx.request_repaint();
+    });
+}
+
 /// Reads the served font manifest, if the host has one, and lists its families in the font menus.
 fn load_font_manifest(served: Served, ctx: egui::Context) {
     wasm_bindgen_futures::spawn_local(async move {
@@ -492,6 +545,8 @@ struct WebShell {
     /// Read by the `beforeunload` listener ([`guard_unload`]).
     unsaved: Arc<AtomicBool>,
     served: Served,
+    /// The user's fonts in IndexedDB (`indexed_fonts`), once open.
+    user_fonts: UserFontStore,
     database: Option<web_sys::IdbDatabase>,
     presets: crate::preset_bridge::Bridge,
     /// Frames begun so far, counted up to 2 (for the startup timings).
@@ -549,6 +604,79 @@ impl WebShell {
         }
         served_fonts::install(&mut self.app, arrived);
     }
+
+    /// The user's font store: writes the fonts loaded or removed, reads stored ones back when a
+    /// layout, menu or document needs them (or in idle time), and keeps the storage figures of
+    /// Manage Fonts fresh.
+    fn pump_user_fonts(&mut self, ctx: &egui::Context) {
+        use photocraft_ui_egui::user_fonts_ui::{Delivery, user_fonts};
+        let Some(db) = self.user_fonts.0.borrow().db.clone() else { return };
+        let sink = self.app.font_sink(Some(ctx));
+        let (ops, want_persist, want_estimate) = {
+            let mut s = user_fonts::store();
+            let ops = s.take_ops();
+            let persist = std::mem::take(&mut s.want_persist);
+            let estimate = std::mem::take(&mut s.want_estimate);
+            (ops, persist, estimate)
+        };
+        let wrote = !ops.is_empty();
+        for op in ops {
+            let db = db.clone();
+            let sink = sink.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match op {
+                    user_fonts::Op::Put { entry, data } => {
+                        let meta = serde_json::to_string(&entry).unwrap_or_default();
+                        let r = crate::indexed_fonts::put(&db, &entry.id, &meta, &data).await;
+                        sink.send(Delivery::Written(entry.id, r));
+                    }
+                    user_fonts::Op::Delete(id) => {
+                        if let Err(e) = crate::indexed_fonts::delete(&db, &id).await {
+                            log::error!("couldn't delete a stored font: {e}");
+                        }
+                    }
+                    user_fonts::Op::Clear => {
+                        if let Err(e) = crate::indexed_fonts::clear(&db).await {
+                            log::error!("couldn't clear the stored fonts: {e}");
+                        }
+                    }
+                }
+                user_fonts::store().want_estimate = true;
+            });
+        }
+        let ask_persist = want_persist && !std::mem::replace(&mut self.user_fonts.0.borrow_mut().persist_asked, true);
+        if ask_persist || want_estimate || wrote {
+            let ctx = ctx.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if ask_persist {
+                    match crate::indexed_fonts::persist().await {
+                        Ok(p) => user_fonts::store().persisted = Some(p),
+                        Err(e) => log::warn!("navigator.storage.persist: {e}"),
+                    }
+                }
+                if let Ok(e) = crate::indexed_fonts::estimate().await {
+                    user_fonts::store().estimate = Some(e);
+                }
+                ctx.request_repaint();
+            });
+        }
+        // Stored fonts asked for now; one at a time in idle time, a few seconds after start-up
+        // and never while the pointer is busy on the canvas.
+        let since = js_sys::Date::now() - self.user_fonts.0.borrow().restored_at;
+        let idle = since > 2500.0 && !ctx.input(|i| i.pointer.any_down());
+        for id in photocraft_ui_egui::user_fonts_ui::take_loads(idle) {
+            let db = db.clone();
+            let sink = sink.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let r = crate::indexed_fonts::get(&db, &id).await;
+                sink.send(Delivery::Stored(id, r));
+            });
+        }
+        if user_fonts::store().idle_work() {
+            // Keep idle reads going without input.
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+    }
 }
 
 impl eframe::App for WebShell {
@@ -600,6 +728,7 @@ impl eframe::App for WebShell {
             let _ = self.app.resume_clipboard_paste(ctx);
         }
         self.serve_fonts(ctx);
+        self.pump_user_fonts(ctx);
         fetch_catalogs(ctx);
         self.app.logic(ctx, frame);
         crate::embed::process(&mut self.app);
@@ -703,6 +832,8 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
         clipboard_get_image: Some(Box::new(crate::clipboard::get)),
         clipboard_refresh: Some(Box::new(crate::clipboard::refresh)),
         // Preferences live in the browser's localStorage.
+        // Type › Load Fonts…: the page's own pickers (files, or a whole folder).
+        pick_fonts: Some(Box::new(crate::font_files::pick)),
         load_prefs: Some(Box::new(|| local_storage()?.get_item(PREFS_KEY).ok().flatten())),
         save_prefs: Some(Box::new(|text: &str| local_storage().ok_or("no localStorage")?.set_item(PREFS_KEY, text).map_err(|e| format!("{e:?}")))),
         // The TypeR workspace (script, cursor, style library, settings) too, under its own key.

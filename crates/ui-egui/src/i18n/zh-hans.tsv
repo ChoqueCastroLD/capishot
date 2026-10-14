@@ -2749,3 +2749,31 @@ cameraData	Lens	镜头
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	发送匿名使用统计
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	网页版会发送匿名使用统计（不含文件或内容）；可在 首选项 › 常规 中关闭。
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	载入字体…
+	Load Font Folder…	载入字体文件夹…
+	Manage Fonts…	管理字体…
+	Manage Fonts	管理字体
+	User fonts	用户字体
+	All fonts	所有字体
+	Missing fonts	缺失字体
+	Already loaded: {n}	已载入：{n}
+	Skipped {file}	已跳过 {file}
+	No fonts were found	未找到字体
+	Fonts loaded: {n}	已载入字体：{n}
+	Not saved, usable until you close this tab: {fonts}	未保存，关闭此标签页前可用：{fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	在 文字 › 管理字体… 中移除字体以释放空间。
+	Browser storage is full	浏览器存储空间已满
+	Fonts could not be saved	无法保存字体
+	Font files: {n} · {size}	字体文件：{n} · {size}
+	Stored in this browser only, never uploaded.	仅存储在此浏览器中，绝不上传。
+	Browser storage: {used} of {quota}	浏览器存储：{used} / {quota}
+	Kept until you remove them.	在你移除之前一直保留。
+	The browser may clear them when space runs low.	空间不足时浏览器可能会清除它们。
+	Loaded for this session only.	仅在本次会话中载入。
+	Browser storage is unavailable: {error}	浏览器存储不可用：{error}
+	Remove All	全部移除
+	Remove all fonts from this browser?	要从此浏览器中移除所有字体吗？
+	Removed: {n}	已移除：{n}
+	No fonts loaded yet.	尚未载入任何字体。
+	Not saved	未保存
