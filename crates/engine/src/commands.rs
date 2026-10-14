@@ -688,6 +688,13 @@ fn build() -> Vec<CommandSpec> {
                 // Clipping and channel changes reach the layers around it: recomposite everything.
                 let local = p.get("clipped").is_none() && p.get("channels").is_none();
                 s.edit(label, |doc, _| {
+                    // The Background has no opacity, fill or blend mode: like Photoshop, setting
+                    // one that changes its look turns it into a normal layer ("Layer 0") first.
+                    let num = |k: &str| p.get(k).and_then(Value::as_f64).is_some_and(|v| v < 1.0);
+                    let blends = p.get("blend").and_then(Value::as_str).and_then(blend_from_str).is_some_and(|b| b != photocraft_color::BlendMode::Normal);
+                    if num("opacity") || num("fill") || blends {
+                        crate::extra_cmds::background_to_layer(doc, id);
+                    }
                     let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
                     if let Some(v) = p.get("name").and_then(Value::as_str) {
                         l.name = v.to_string();
