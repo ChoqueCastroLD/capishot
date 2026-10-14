@@ -31,6 +31,7 @@ photocraft-paint = { path = "crates/paint" }
 photocraft-algo = { path = "crates/algo" }
 photocraft-io = { path = "crates/io", default-features = false }
 photocraft-text = { path = "crates/text" }
+photocraft-typer = { path = "crates/typer" }
 photocraft-vector = { path = "crates/vector" }
 photocraft-format = { path = "crates/format" }
 photocraft-automation = { path = "crates/automation" }

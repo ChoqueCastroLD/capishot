@@ -7,6 +7,12 @@ Licensed under the MIT License or the Apache License, Version 2.0, at your optio
 Capishot renders PSD files with psd-compiler (https://github.com/ChoqueCastroLD/psd-compiler-cli),
 MIT License.
 
+Portions of the TypeR panel (script parsing, style-library format, placement and centring logic,
+TextShapeR line shaping, bubble detection, .tpl import) are ported from TypeR,
+https://github.com/ScanR/TypeR (master 342be99, develop 71bc061, branches f01c0d3/e820eb0, PR #209
+6acf8b2), MIT License, Copyright (c) 2017 Swirt; TypeR is maintained by Sakushi and SeanR and is
+based on TyperTools by Swirt. See crates/typer/LICENSE-TypeR.txt.
+
 The app icon in assets/app-icon/ (the Capibara capybara face) is a trademark of Capibara Traductor.
 It is not open source and is not covered by the license above; its terms are in
 assets/app-icon/LICENSE.txt.
