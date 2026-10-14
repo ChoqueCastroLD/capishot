@@ -6,7 +6,8 @@ work packages) is `capishot-typer-plan.md`, kept outside the repo; this page is 
 the tree.
 
 Status (2026-10-14): **WP0, WP1 and WP3 done; WP2-B in progress** (done: Spanish/Portuguese
-page markers, page files and sync, Typesetting workspace, work tabs, FontScanR; next: `.tpl`). The script, cursor, page files, style library,
+page markers, page files and sync, Typesetting workspace, work tabs, FontScanR, `.tpl` import).
+Profiles (K5) are not ported. The script, cursor, page files, style library,
 TypeR JSON exchange and settings work, as commands, and so does the core typesetting loop: paste,
 apply, align, resize, multi-bubble, bubble detection. The TypeR panel (Window › TypeR) drives it.
 Line shaping (WP4) is still to come; `typer.shapeText` is a registered stub.
@@ -41,6 +42,8 @@ crates/typer (photocraft-typer, L2: doc, color, geom, algo, serde; no egui, no I
                settings + work tabs. Navigation (N1, N3), style stepping (L8), refresh() = TypeR's
                reducer phases, tabs (new/switch/rename/close), migrate_tabs (load-time migration)
   tabs.rs      Tab, migrate (TypeR 3.0 tabStorage: pre-tab storage → "Tab 1", legacy fields win)
+  tpl.rs       `.tpl` tool presets (K6): ActionDescriptor reader, Type tool presets → TypeR styles
+               in one folder, TPL_* error codes
   fontscan.rs  FontScanR (F3): ScanFile/ScanLayer in, FontGroup out (group key, most-used size,
                representative variant, normalized stroke and paragraph)
   exchange.rs  validate (3.0 validator), classify/import (folder / library / full merge by `edited`),
@@ -97,6 +100,7 @@ styleName, page, image, usableLines, lineCount, textScale` (plus `moved`).
 | `typer.images.opened` | works | the shell opened this page file for the current page (`lastOpenedImage`); page sync opens a page only when it differs |
 | `typer.tab.list` / `.new` / `.switch` / `.next` / `.previous` / `.rename` / `.close` | works | TypeR 3.0 work tabs: each has its script, page files, cursor, last opened page and used line styles; library and settings are shared. Switching drops the multi-bubble selections; the last tab can't be closed |
 | `typer.fontScan` | works | FontScanR: `{documents}` (open ones, default) or `{scans}` (the shell's `scan_psd` of picked PSDs) → groups with `installed` |
+| `typer.library.importTpl` | works | Photoshop tool presets (`.tpl`, as hex): each Type tool preset becomes a style in a new folder named after the file; errors carry TypeR's `TPL_*` codes. The panel's import button reads `.tpl` files directly (`import_tpl_bytes`) |
 | `typer.fontScan.import` | works | the chosen groups as styles into `folder`, `newFolder` or Unsorted; all validated first |
 | `typer.style.list` / `.select` / `.next` / `.previous` | works | `select {index}` = numpad, within the current folder |
 | `typer.style.nextSizePreset` / `.setSizePreset` / `.setSize` | works | L5; `now` param stamps `edited` (wasm has no clock in the engine) |
@@ -258,6 +262,7 @@ strip (WP4), UI order/visibility toggles.
 - `testPageImageMapping`
 - `testTabStorage`
 - `testFontScan`
+- `testTplConverter` (the fixture writer ported too)
 - the ES/PT page marker accept/reject lists (Capishot)
 - the style half of `testNumpadStyleShortcuts`
 

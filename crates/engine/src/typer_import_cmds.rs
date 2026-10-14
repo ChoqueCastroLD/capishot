@@ -1,11 +1,13 @@
 //! TypeR imports that read other files (see `docs/typer.md`): FontScanR (`typer.fontScan`,
 //! F3), which turns the text layers of a chapter's PSDs into proposed styles, and the import of
-//! the chosen proposals into a folder. Session state only (`journal: false`).
+//! the chosen proposals into a folder; and Photoshop tool presets (`.tpl`, K6) as a folder of
+//! styles (`typer.library.importTpl`). Session state only (`journal: false`).
 //!
 //! The scan reads open documents' text layers, or [`ScanFile`]s the shell made from picked PSD
 //! files with [`scan_psd`] (the layer records and their type data only; no pixels are decoded).
 
 use photocraft_doc::{Document, Effect, FxPaint, Layer, LayerContent};
+use photocraft_typer::exchange::{ImportKind, ImportOptions};
 use photocraft_typer::fontscan::{self, ScanFile, ScanLayer};
 use photocraft_typer::{Folder, Id, Style, exchange, psjson};
 use serde_json::{Value, json};
@@ -46,6 +48,13 @@ pub fn specs() -> Vec<CommandSpec> {
             r#"{"styles":[{name,textProps,stroke}] (groups from typer.fontScan, renamed as wanted),"folder":id? (an existing folder) | "newFolder":string? (a new folder; default: Unsorted),"now":ms?} → {folder,styles:[id]}"#,
             always,
             font_scan_import,
+        ),
+        q(
+            "typer.library.importTpl",
+            "Import TypeR Styles from Tool Presets",
+            r#"{"hex":string (a Photoshop tool preset file, .tpl, as hex),"name":string? (its file name; the new folder's name),"now":ms?} → {kind,folders,styles,folderId,…} (one style per Type tool preset; errors carry TPL_INVALID_FILE, TPL_TRUNCATED_DATA, TPL_UNSUPPORTED_DATA, TPL_MISSING_TOOL_DATA or TPL_NO_TEXT_PRESETS)"#,
+            always,
+            import_tpl,
         ),
     ]
 }
@@ -243,6 +252,40 @@ fn font_scan_import(s: &mut Session, p: &Value) -> Result<Value> {
         }
     });
     Ok(json!({"folder": folder, "styles": ids}))
+}
+
+/// Hex text → bytes (whitespace ignored, as TypeR's converter does).
+fn from_hex(s: &str) -> Option<Vec<u8>> {
+    let digits: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if digits.is_empty() || !digits.len().is_multiple_of(2) {
+        return None;
+    }
+    let val = |c: u8| char::from(c).to_digit(16).and_then(|d| u8::try_from(d).ok());
+    digits.as_chunks::<2>().0.iter().map(|[a, b]| Some(val(*a)? << 4 | val(*b)?)).collect()
+}
+
+/// Import a `.tpl` file's Type tool presets as a library (a new folder named after the file).
+pub fn import_tpl_bytes(s: &mut Session, bytes: &[u8], name: &str, now: Option<f64>) -> std::result::Result<Value, String> {
+    let lib = photocraft_typer::tpl::convert(bytes, name, now).map_err(|e| e.to_string())?;
+    let opts = ImportOptions { kind: Some(ImportKind::Library), keep_local: true, now: now.map(|n| n as u64) };
+    let report = exchange::import(&mut s.typer.state, &lib, opts)?;
+    Ok(serde_json::to_value(report).unwrap_or(Value::Null))
+}
+
+fn import_tpl(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "typer.library.importTpl";
+    let hex = p.get("hex").and_then(Value::as_str).ok_or_else(|| bad(CMD, "pass \"hex\": the .tpl file's bytes as hex"))?;
+    if hex.len() > photocraft_typer::tpl::MAX_TPL_BYTES * 2 + 1024 {
+        return Err(bad(CMD, "TPL_INVALID_FILE: the file is too large"));
+    }
+    let bytes = from_hex(hex).ok_or_else(|| bad(CMD, "TPL_INVALID_FILE: the data is not hex"))?;
+    let name = match p.get("name") {
+        None | Some(Value::Null) => "TPL",
+        Some(Value::String(n)) => n.as_str(),
+        Some(_) => return Err(bad(CMD, "\"name\" must be the file name")),
+    };
+    let now = p.get("now").and_then(Value::as_f64).filter(|n| n.is_finite() && *n >= 0.0);
+    import_tpl_bytes(s, &bytes, name, now).map_err(|e| bad(CMD, e))
 }
 
 /// A style id that is neither in the library nor among `taken`.

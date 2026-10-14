@@ -3927,7 +3927,6 @@ layerLabel	No Color	Sem cor
 	Next Size Preset	Próximo tamanho predefinido
 # TypeR panel (Window › TypeR; es/pt only, see TYPER_LANGUAGES in i18n/mod.rs).
 	**bold**, *italic* and ***both*** in the script become faux bold and italic.	**negrito**, *itálico* e ***ambos*** no roteiro viram negrito e itálico falsos.
-	A TypeR export (.json): a folder, a style library or a full export with settings.	Uma exportação do TypeR (.json): uma pasta, uma biblioteca de estilos ou uma exportação completa com configurações.
 	A line starting with one of these tags picks this style; the tag isn't pasted	Uma linha que começa com uma destas tags usa este estilo; a tag não é colada
 	Add folder	Adicionar pasta
 	Add preset	Adicionar tamanho
@@ -4141,3 +4140,4 @@ layerLabel	No Color	Sem cor
 	Choose a folder.	Escolha uma pasta.
 @plural	{n} file|{n} files	{n} arquivo|{n} arquivos
 @plural	{n} font|{n} fonts	{n} fonte|{n} fontes
+	A TypeR export (.json): a folder, a style library or a full export with settings. Photoshop tool presets (.tpl): each Type tool preset becomes a style in a new folder.	Uma exportação do TypeR (.json): uma pasta, uma biblioteca de estilos ou uma exportação completa com configurações. Predefinições de ferramenta do Photoshop (.tpl): cada predefinição da ferramenta Texto vira um estilo em uma pasta nova.

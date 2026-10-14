@@ -105,3 +105,78 @@ fn proposals_import_into_a_new_or_existing_folder() {
     assert!(s.execute("typer.fontScan.import", json!({"styles": [{"name": "x"}]})).is_err());
     assert_eq!(s.typer.state.library.styles.len(), n);
 }
+
+/// A minimal `.tpl`: one Type tool preset (`Komika 30 px`) and one brush preset.
+fn tpl_bytes() -> Vec<u8> {
+    fn u32b(v: u32) -> Vec<u8> {
+        v.to_be_bytes().to_vec()
+    }
+    fn unicode(s: &str) -> Vec<u8> {
+        let units: Vec<u16> = s.encode_utf16().collect();
+        let mut out = u32b(units.len() as u32 + 1);
+        units.iter().for_each(|u| out.extend(u.to_be_bytes()));
+        out.extend([0, 0]);
+        out
+    }
+    fn id(s: &str) -> Vec<u8> {
+        let mut out = if s.len() == 4 { u32b(0) } else { u32b(s.len() as u32) };
+        out.extend(s.as_bytes());
+        out
+    }
+    fn obj(class: &str, props: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
+        let mut out = b"Objc".to_vec();
+        out.extend(unicode(""));
+        out.extend(id(class));
+        out.extend(u32b(props.len() as u32));
+        for (k, v) in props {
+            out.extend(id(k));
+            out.extend(v);
+        }
+        out
+    }
+    let mut text = b"TEXT".to_vec();
+    text.extend(unicode("Komika Display"));
+    let mut size = b"UntF#Pxl".to_vec();
+    size.extend(30.0f64.to_be_bytes());
+    let txts = obj("TxtS", vec![("FntN", text), ("Sz  ", size)]);
+    let chars = obj("textToolCharacterOptions", vec![("TxtS", txts)]);
+    let mut out = b"8BTP".to_vec();
+    out.extend([0u8; 8]);
+    out.extend(b"8BIM");
+    out.extend([0u8; 4]);
+    out.extend(b"8BIMtptp");
+    out.extend([0u8; 8]);
+    for (name, tool, props) in [("$$$/Presets=Globo", "typeCreateOrEditTool", vec![("textToolCharacterOptions", chars)]), ("Brush", "paintbrushTool", vec![])] {
+        out.extend(unicode(name));
+        out.extend([0u8; 10]);
+        out.extend(id(tool));
+        out.extend(u32b(props.len() as u32));
+        for (k, v) in props {
+            out.extend(id(k));
+            out.extend(v);
+        }
+    }
+    out
+}
+
+#[test]
+fn tool_presets_import_as_a_folder_of_styles() {
+    let mut s = Session::new();
+    let hex: String = tpl_bytes().iter().map(|b| format!("{b:02x}")).collect();
+    let r = s.execute("typer.library.importTpl", json!({"hex": hex, "name": "Mis estilos.tpl", "now": 7})).unwrap();
+    assert_eq!(r["styles"], 1, "{r}");
+    let lib = &s.typer.state.library;
+    assert_eq!(lib.folders.len(), 1);
+    assert_eq!(lib.folders[0].name, "Mis estilos");
+    let st = &lib.styles[0];
+    assert_eq!(st.name, "Globo");
+    assert_eq!(st.folder.as_ref(), Some(&lib.folders[0].id));
+    assert_eq!((st.size(), st.type_unit()), (Some(30.0), Some("pixelsUnit")));
+    // Errors carry TypeR's codes and change nothing.
+    let e = s.execute("typer.library.importTpl", json!({"hex": "6e6f7420612074706c"})).unwrap_err().to_string();
+    assert!(e.contains("TPL_INVALID_FILE"), "{e}");
+    assert!(s.execute("typer.library.importTpl", json!({"hex": "zz"})).unwrap_err().to_string().contains("TPL_INVALID_FILE"));
+    assert!(s.execute("typer.library.importTpl", json!({})).is_err());
+    assert!(s.execute("typer.library.importTpl", json!({"hex": hex, "name": 3})).is_err());
+    assert_eq!(s.typer.state.library.styles.len(), 1);
+}

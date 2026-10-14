@@ -60,7 +60,18 @@ pub(crate) fn file_stem(name: &str) -> String {
 /// Import a TypeR export (full, library or folder). A full import over a non-empty library asks
 /// whether to keep the local styles first, as TypeR does.
 pub fn import(app: &mut PhotocraftApp) {
-    let r = app.pick_file_bytes_filtered(&["json"], |app, name, bytes| {
+    let r = app.pick_file_bytes_filtered(&["json", "tpl"], |app, name, bytes| {
+        // Photoshop tool presets: each Type tool preset becomes a style in a new folder.
+        if name.to_ascii_lowercase().ends_with(".tpl") {
+            let now = app.services.clock.map(|c| c()).filter(|n| n.is_finite() && *n > 0.0);
+            let short = crate::file_open::display_name(&name);
+            let r = photocraft_engine::typer_import_cmds::import_tpl_bytes(&mut app.session, &bytes, &short, now).map_err(|e| format!("{short}: {e}"));
+            match &r {
+                Ok(_) => app.ui.typer.message.clear(),
+                Err(e) => app.ui.typer.message = e.clone(),
+            }
+            return r;
+        }
         let text = String::from_utf8(bytes).map_err(|_| format!("{name}: {}", tl!("not a TypeR export")))?;
         let data = exchange::parse(&text).map_err(|e| {
             app.ui.typer.message = format!("{name}: {e}");
@@ -267,7 +278,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     if ui.button(tl!("Import styles or settings…")).clicked() {
                         run_after.push(Box::new(import));
                     }
-                    hint(ui, &t, tl!("A TypeR export (.json): a folder, a style library or a full export with settings."));
+                    hint(ui, &t, tl!("A TypeR export (.json): a folder, a style library or a full export with settings. Photoshop tool presets (.tpl): each Type tool preset becomes a style in a new folder."));
                     crate::widgets::section_label(ui, tl!("Export"));
                     ui.horizontal(|ui| {
                         crate::widgets::checkbox(ui, &mut d.export_settings, tl!("With my settings"));
