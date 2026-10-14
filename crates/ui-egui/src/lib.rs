@@ -108,6 +108,7 @@ pub mod jobs_ui;
 pub mod kys_import;
 pub mod lasso_ui;
 pub(crate) mod last_brush;
+pub mod layer_filter_ui;
 pub mod layer_menu_ui;
 pub mod layer_pick_ui;
 pub mod layer_picker;
