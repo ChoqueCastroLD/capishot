@@ -2853,6 +2853,9 @@ curves	Smooth	Suavizar
 	Chisel Hard	Cincelar duro
 	Chisel Soft	Cincelar suave
 	Open color-less EXR as ACEScg	Abrir EXR sin espacio de color como ACEScg
+# Export As metadata and profile options
+	Color Profile	Perfil de color
+	EXIF	EXIF
 
 # View › Guides › right-click a guide
 	Edit Selected Guides	Editar guías seleccionadas

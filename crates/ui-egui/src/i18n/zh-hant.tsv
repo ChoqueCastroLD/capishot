@@ -2763,6 +2763,9 @@ curves	Smooth	平滑
 	Chisel Hard	雕刻清晰
 	Chisel Soft	雕刻柔和
 	Open color-less EXR as ACEScg	將無色彩空間資訊的 EXR 以 ACEScg 開啟
+# Export As metadata and profile options
+	Color Profile	色彩描述檔
+	EXIF	EXIF
 
 # View › Guides › right-click a guide
 	Edit Selected Guides	編輯所選參考線
