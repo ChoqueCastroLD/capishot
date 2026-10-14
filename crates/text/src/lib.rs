@@ -21,6 +21,7 @@ pub mod craft_fonts;
 pub mod engine_data;
 pub mod fonts;
 pub mod glyphs;
+pub mod hyphen;
 pub mod layout;
 pub mod optical;
 pub mod psd;
@@ -269,5 +270,7 @@ mod warm {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod hyphen_tests;
 #[cfg(test)]
 mod vertical_tests;

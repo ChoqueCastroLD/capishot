@@ -22,6 +22,9 @@ skrifa = "0.44"
 flate2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Liang hyphenation tries (TeX hyph-utf8 patterns) for paragraph-text hyphenation: English (US),
+# Spanish and Portuguese only (~42 KB of wasm). Pattern licences: `LICENSE-hyphenation.txt`.
+hypher = { version = "0.1.8", default-features = false, features = ["alloc", "english", "spanish", "portuguese"] }
 
 # ICU dictionary data for Japanese word boundaries and complex-script (Thai, Lao, Khmer, Burmese)
 # line breaking. Native only: the CJK dictionary alone is 3.8 MB of wasm, and the web build must

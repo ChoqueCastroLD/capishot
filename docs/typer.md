@@ -139,7 +139,18 @@ Size Preset, with no shortcuts. Everything else has no menu item until the panel
   - Paths go through the automation policy: a params doc mentioning "path" needs a rule in
     `crates/automation/src/workspace.rs`.
 - **WP3 (panel, shortcuts, i18n): done.** See [The panel](#the-panel) below.
-- **WP4 (hyphenation, TextShapeR, harness).** Use `typer.shapeText`, `bubble::rows` /
+- **WP4.1 hyphenation: done.** `crates/text/src/hyphen.rs` + `layout.rs::hyphenate_paragraph`.
+  Box text with `ParagraphStyle::hyphenate` breaks inside words like Photoshop's single-line
+  composer: when the next line's first word has a Liang break point (TeX hyph-utf8 en-us / es /
+  pt through the `hypher` tries, ~42 KB) whose head plus a hyphen fits, the head moves up and a
+  hyphen glyph is drawn (`LineInfo::hyphen`, counted in `x1`, not in the text). Photoshop's
+  defaults (`hyphen::Rules::PHOTOSHOP`, the model only stores on/off): words ≥ 6 letters, 2
+  before / 2 after (3 after in English, the patterns' minimum), ≤ 2 consecutive hyphenated lines,
+  36 pt zone for unjustified text. Language: `CharStyle::language` (`es*`, `pt*`, `en*`; others
+  never hyphenate), else guessed from the paragraph (ñ ¿ ¡ ã õ ç and common words; English by
+  default). Left-to-right horizontal text without tabs only. Off = the old layout, unchanged.
+  Pattern licences: `crates/text/LICENSE-hyphenation.txt`.
+- **WP4 (TextShapeR, harness).** Use `typer.shapeText`, `bubble::rows` /
   `typer.detectBubble {layer}` (rows of the hole-filled bubble) and `typer.applyShape` (already
   works: lines in, box shrunk, centre kept). The engine-side real-page check is
   `typer_place_cmds::tests::typer_real_pages` (`#[ignore]`, `CAPISHOT_TYPER_PAGES`); the full
