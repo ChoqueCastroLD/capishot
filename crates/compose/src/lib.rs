@@ -129,6 +129,10 @@ fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer 
     if u64::from(rect.width()) * u64::from(rect.height()) > MAX_RENDER_PIXELS {
         return Buffer::transparent(Rect::EMPTY);
     }
+    // A CMYK stack with adjustment layers the inks carry exactly composites on its inks.
+    if let Some(buf) = native::render_cmyk(doc, rect, tile) {
+        return buf;
+    }
     // A Lab stack with adjustment layers that work on L, a and b composites on its stored values.
     if let Some(buf) = native_lab::render_lab(doc, rect, tile) {
         return buf;

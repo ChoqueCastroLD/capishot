@@ -392,6 +392,9 @@ pub fn stored_channels(adj: &Adjustment, mode: ColorMode, depth: Option<SampleTy
                 *v = if i > 0 { mirror } else { 1.0 } - v.clamp(0.0, 1.0);
             }
         }
+        // CMYK posterizes the stored values (1 - ink), which its uneven levels make differ from
+        // posterizing the ink: psd-tools posterize_cmyk.psd (3 to 21 levels) is exact so.
+        Adjustment::Posterize { levels } if mode == ColorMode::Cmyk => ch.iter_mut().for_each(|v| *v = 1.0 - posterize_in(1.0 - *v, *levels, depth)),
         Adjustment::Posterize { levels } => ch.iter_mut().for_each(|v| *v = posterize_in(*v, *levels, depth)),
         Adjustment::Threshold { level } => {
             // On the 8-bit grid, like the RGB threshold.
@@ -2031,6 +2034,17 @@ mod tone_tests {
         let t = Adjustment::Threshold { level: 0.5 };
         assert!(near(in_cmyk(&t, [0.2; 3]), cmyk_to_rgb([0.0, 0.0, 0.0, 1.0]), 2e-3));
         assert!(near(in_cmyk(&t, [0.8; 3]), cmyk_to_rgb([0.0; 4]), 2e-3));
+    }
+
+    /// CMYK posterizes the stored value 1 - ink: with 3 levels an ink of 85 (stored 170) lands on
+    /// the middle step, 128 (stored 127), where posterizing the ink would drop it to none (psd-tools
+    /// posterize_cmyk.psd, levels 3 to 21, exact so).
+    #[test]
+    fn cmyk_posterize_works_on_the_stored_values() {
+        let mut ink = [85.0 / 255.0; 4];
+        stored_channels(&Adjustment::Posterize { levels: 3 }, ColorMode::Cmyk, Some(SampleType::U8), &mut ink);
+        assert!(ink.iter().all(|v| (v * 255.0 - 128.0).abs() < 1e-3), "{ink:?}");
+        assert_eq!(posterize(85.0 / 255.0, 3), 0.0, "posterizing the ink itself");
     }
 
     #[test]
