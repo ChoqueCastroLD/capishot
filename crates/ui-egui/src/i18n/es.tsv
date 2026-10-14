@@ -1894,6 +1894,8 @@
 	Camera Raw Defaults	Valores predeterminados de Camera Raw
 	Canvas border	Borde del lienzo
 	Show canvas dots	Mostrar puntos del lienzo
+	Clip thumbnails to layer bounds	Recortar miniaturas a los límites de la capa
+	Clip Thumbnails to Layer Bounds	Recortar miniaturas a los límites de la capa
 	Canvas color	Color del lienzo
 	Canvas custom color	Color personalizado del lienzo
 	Color picker	Selector de color

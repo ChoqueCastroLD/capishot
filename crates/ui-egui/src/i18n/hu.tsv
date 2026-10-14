@@ -3534,6 +3534,8 @@ cameraRaw	Yellow	Sárga
 	shortcut	billentyűparancs
 	Shortcut	Billentyűparancs
 	Show canvas dots	Vászonpontok megjelenítése
+	Clip thumbnails to layer bounds	Bélyegképek levágása a réteg határaira
+	Clip Thumbnails to Layer Bounds	Bélyegképek levágása a réteg határaira
 	Show channels in color	Csatornák megjelenítése színesen
 	Show crosshair in brush tip	Szálkereszt az ecsethegyben
 	Show extension panels	Bővítménypanelek megjelenítése

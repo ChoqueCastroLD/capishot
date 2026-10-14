@@ -1857,6 +1857,8 @@
 	Camera Raw Defaults	Default Camera Raw
 	Canvas border	Border kanvas
 	Show canvas dots	Tampilkan titik kanvas
+	Clip thumbnails to layer bounds	Pangkas thumbnail ke batas layer
+	Clip Thumbnails to Layer Bounds	Pangkas Thumbnail ke Batas Layer
 	Canvas color	Warna kanvas
 	Canvas custom color	Warna kustom kanvas
 	Color picker	Pemilih warna

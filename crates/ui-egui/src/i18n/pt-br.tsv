@@ -1858,6 +1858,8 @@
 	Camera Raw Defaults	Padrões do Camera Raw
 	Canvas border	Borda da tela de pintura
 	Show canvas dots	Mostrar pontos da tela de pintura
+	Clip thumbnails to layer bounds	Recortar miniaturas aos limites da camada
+	Clip Thumbnails to Layer Bounds	Recortar miniaturas aos limites da camada
 	Canvas color	Cor da tela de pintura
 	Canvas custom color	Cor personalizada da tela de pintura
 	Color picker	Seletor de cores

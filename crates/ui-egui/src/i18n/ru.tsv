@@ -2304,6 +2304,8 @@
 	Camera Raw Defaults	Значения Camera Raw по умолчанию
 	Canvas border	Рамка холста
 	Show canvas dots	Показывать точки холста
+	Clip thumbnails to layer bounds	Обрезать миниатюры по границам слоя
+	Clip Thumbnails to Layer Bounds	Обрезать миниатюры по границам слоя
 	Canvas color	Цвет холста
 	Canvas custom color	Свой цвет холста
 	Classic	Классическая

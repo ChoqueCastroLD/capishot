@@ -1839,6 +1839,8 @@
 	Camera Raw Defaults	Camera Raw Varsayılanları
 	Canvas border	Kanvas kenarlığı
 	Show canvas dots	Kanvas noktalarını göster
+	Clip thumbnails to layer bounds	Küçük resimleri katman sınırlarına kırp
+	Clip Thumbnails to Layer Bounds	Küçük resimleri katman sınırlarına kırp
 	Canvas color	Kanvas rengi
 	Canvas custom color	Kanvas özel rengi
 	Color picker	Renk seçici

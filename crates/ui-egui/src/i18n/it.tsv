@@ -1889,6 +1889,8 @@
 	Camera Raw Defaults	Predefiniti Camera Raw
 	Canvas border	Bordo quadro
 	Show canvas dots	Mostra punti del quadro
+	Clip thumbnails to layer bounds	Ritaglia le miniature ai limiti del livello
+	Clip Thumbnails to Layer Bounds	Ritaglia le miniature ai limiti del livello
 	Canvas color	Colore quadro
 	Canvas custom color	Colore personalizzato quadro
 	Color picker	Selettore colore

@@ -1904,6 +1904,8 @@
 	Camera Raw Defaults	Camera Raw 默认设置
 	Canvas border	画布边框
 	Show canvas dots	显示画布圆点
+	Clip thumbnails to layer bounds	将缩略图裁剪到图层边界
+	Clip Thumbnails to Layer Bounds	将缩略图裁剪到图层边界
 	Canvas color	画布颜色
 	Canvas custom color	画布自定颜色
 	Color picker	拾色器

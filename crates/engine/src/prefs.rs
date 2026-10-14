@@ -272,6 +272,9 @@ pub struct Interface {
     pub dynamic_color_sliders: bool,
     /// Draw menu item colours set with Edit › Menus.
     pub show_menu_colors: bool,
+    /// Layers panel thumbnails frame the layer's own pixels instead of the whole canvas, so small
+    /// objects in a large document stay visible (Photoshop's Clip Thumbnails to Layer Bounds; #4281).
+    pub clip_thumbnails_to_layer_bounds: bool,
     pub show_tooltips: bool,
     /// Menus, popups and collapsing sections fade and slide, and scroll areas glide to a new
     /// position. Off, everything changes at once (a reduced-motion mode; #1218, #3273).
@@ -309,6 +312,7 @@ impl Default for Interface {
             show_channels_in_color: false,
             dynamic_color_sliders: true,
             show_menu_colors: true,
+            clip_thumbnails_to_layer_bounds: false,
             show_tooltips: true,
             enable_animations: true,
             show_bounding_box_when_dragging_layer: false,

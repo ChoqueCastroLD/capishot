@@ -1891,6 +1891,8 @@
 	Camera Raw Defaults	Camera Raw の既定値
 	Canvas border	カンバスの境界
 	Show canvas dots	カンバスのドットを表示
+	Clip thumbnails to layer bounds	サムネールをレイヤーの境界でクリップ
+	Clip Thumbnails to Layer Bounds	サムネールをレイヤーの境界でクリップ
 	Canvas color	カンバスの色
 	Canvas custom color	カンバスのカスタム色
 	Color picker	カラーピッカー

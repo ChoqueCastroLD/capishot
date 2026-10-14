@@ -2661,6 +2661,8 @@ shape	Appearance	Diện mạo
 	Brush preview color	Màu xem trước cọ
 	Cache levels	Mức bộ nhớ đệm
 	Show canvas dots	Hiện chấm vùng vẽ
+	Clip thumbnails to layer bounds	Cắt hình thu nhỏ theo biên của lớp
+	Clip Thumbnails to Layer Bounds	Cắt hình thu nhỏ theo biên của lớp
 	Color picker	Bộ chọn màu
 	Color space	Không gian màu
 	Column width	Độ rộng cột

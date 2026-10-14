@@ -1857,6 +1857,8 @@
 	Camera Raw Defaults	Camera Raw 기본값
 	Canvas border	캔버스 테두리
 	Show canvas dots	캔버스 점 표시
+	Clip thumbnails to layer bounds	썸네일을 레이어 경계로 자르기
+	Clip Thumbnails to Layer Bounds	썸네일을 레이어 경계로 자르기
 	Canvas color	캔버스 색상
 	Canvas custom color	캔버스 사용자 정의 색상
 	Color picker	색상 피커

@@ -1863,6 +1863,8 @@
 	Camera Raw Defaults	Valeurs par défaut de Camera Raw
 	Canvas border	Bordure du canevas
 	Show canvas dots	Afficher les points du canevas
+	Clip thumbnails to layer bounds	Rogner les vignettes aux limites du calque
+	Clip Thumbnails to Layer Bounds	Rogner les vignettes aux limites du calque
 	Canvas color	Couleur du canevas
 	Canvas custom color	Couleur personnalisée du canevas
 	Color picker	Sélecteur de couleurs
