@@ -24,7 +24,9 @@
 //!   staged uploads and evicted pages stay bounded.
 //! - **Stack reuse.** A complete root stack unit can checkpoint its backdrop into bounded chunk
 //!   textures. Exact COW snapshots invalidate the lower prefix; edits above it restore those
-//!   pixels and execute only the remaining passes. Groups and clipping units stay indivisible.
+//!   pixels and execute only the remaining passes, capturing on the way the highest checkpoint
+//!   below the edit, so repeating it (a duplicate or paste and its undo) skips that much more.
+//!   Groups and clipping units stay indivisible.
 //!
 //! Vector masks (rasterised once per mask state into a combined mask texture), layers clipped to
 //! pass-through groups, stroked shapes with clipped layers (fill and stroke split once per shape
@@ -1302,7 +1304,10 @@ impl Compositor {
         if chunks.is_empty() {
             return;
         }
-        let first_pass = checkpoint.filter(|_| chunks.iter().all(|c| self.prefix.contains(*c))).map_or(0, |c| c.pass_end);
+        // Chunks may hold different checkpoints: bind from the lowest one any of them resumes at.
+        let first_pass = checkpoint
+            .and_then(|_| chunks.iter().map(|c| self.prefix.restore_point(*c).map(|r| r.pass_end)).try_fold(usize::MAX, |m, p| Some(m.min(p?))))
+            .unwrap_or(0);
         let bound = self.bind_cell(device, queue, encoder, doc, plan, paged, cell, fr, first_pass, stats);
 
         // Chunk pool.
@@ -1372,7 +1377,7 @@ impl Compositor {
 
         for (ci, c) in chunks.iter().enumerate() {
             let mut resume = 0;
-            if let Some(cp) = checkpoint
+            if let Some(cp) = checkpoint.and_then(|_| self.prefix.restore_point(*c))
                 && let Some((dst, _)) = self.pool.get(cp.slot as usize)
                 && self.prefix.copy_out(encoder, *c, dst)
             {
@@ -1397,11 +1402,12 @@ impl Compositor {
                         return;
                     }
                 }
-                if resume == 0
+                // Also after resuming from a lower checkpoint: the chunk moves up to this one.
+                if resume < i
                     && let Some(cp) = checkpoint.filter(|cp| cp.pass_end == i)
                     && let Some((src, _)) = self.pool.get(cp.slot as usize)
                 {
-                    self.prefix.capture(device, encoder, *c, src);
+                    self.prefix.capture(device, encoder, *c, src, cp);
                 }
                 let scissor = match p.clip {
                     Some(clip) => {
@@ -1467,11 +1473,11 @@ impl Compositor {
                 pass.set_bind_group(1, bg1[i].as_ref(), &[]);
                 pass.draw(0..3, 0..1);
             }
-            if resume == 0
+            if resume < plan.passes.len()
                 && let Some(cp) = checkpoint.filter(|cp| cp.pass_end == plan.passes.len())
                 && let Some((src, _)) = self.pool.get(cp.slot as usize)
             {
-                self.prefix.capture(device, encoder, *c, src);
+                self.prefix.capture(device, encoder, *c, src, cp);
             }
             let (t, v) = &self.pool[plan.root as usize];
             sink(encoder, ChunkOut { rect: *c, texture: t, view: v });
