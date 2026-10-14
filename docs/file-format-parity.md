@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-13 · **Change:** minor (Gradient Map luminosity; Photoshop-oracle floor 147/258; PSD: `Mt16`/`Mt32` merged transparency read; palette PNGs open in Indexed Color mode, #4804; earlier: CMYK Invert, Posterize and Threshold on the inks; 16-bit Lab Invert; Photoshop-oracle floor 145/258; `.atn` import maps 112 events; DDS textures open, #1327; DPX read and write, #1049; #2465 fixed: CS2 placed layers with only a `PlLd` block open their contents; Photoshop Actions `.atn` read and write; `.shc` contour files read and write; earlier the same day: indexed BMP palette mode; Save keeps a JPEG's quality and a WebP's encoding) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-13 · **Change:** minor (16-bit Posterize as Photoshop bins it; psd-tools oracle floor 241/309; Gradient Map luminosity; Photoshop-oracle floor 147/258; PSD: `Mt16`/`Mt32` merged transparency read; palette PNGs open in Indexed Color mode, #4804; earlier: CMYK Invert, Posterize and Threshold on the inks; 16-bit Lab Invert; Photoshop-oracle floor 145/258; `.atn` import maps 112 events; DDS textures open, #1327; DPX read and write, #1049; #2465 fixed: CS2 placed layers with only a `PlLd` block open their contents; Photoshop Actions `.atn` read and write; `.shc` contour files read and write; earlier the same day: indexed BMP palette mode; Save keeps a JPEG's quality and a WebP's encoding) · **Target:** Adobe Photoshop 2026
 
 Every format Photoshop 2026 (27.11.0) reads or writes, with PhotoCraft's support, fidelity and
 tests. Photoshop's list comes from its `Info.plist` `CFBundleDocumentTypes`, the PiPL read/write
@@ -142,6 +142,7 @@ remaining gaps in #1606 stay tracked with per-sample corpus ceilings.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | 16-bit Posterize bins the 16-bit sample and lands on 8-bit levels through a 16-bit step, as Photoshop does (RGB, Grayscale and the CMYK/Lab channel path): psd-tools posterize_16bits_rgb and posterize_16bits_grayscale pass; psd-tools floor → 241 of 309 (main 239) |
 | 2026-10-13 | minor | Gradient Map adjustment layers are driven by the W3C luminosity (0.3, 0.59, 0.11), not the Rec. 601 grey: rgb8 and rgb16 gradient-map.psd pass; Photoshop-oracle floor 145 → 147 of 258 |
 | 2026-10-13 | minor | PSD: a "Saving Merged Transparency" global block (`Mtrn`, `Mt16`, `Mt32`; Photoshop's 32-bit documents keep a positive layer count) marks the merged image's first extra channel as its transparency: opening such a file no longer adds a "Transparency" alpha channel, and the oracle compares psd-tools transparentbg.psd's alpha (83.7 % → 0.9 % of pixels off; its shape edges remain) |
 | 2026-10-13 | minor | Palette PNGs open in Indexed Color mode (#4804) |

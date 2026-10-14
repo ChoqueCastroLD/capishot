@@ -473,6 +473,17 @@ fn posterize(v: f32, n: f32) -> f32 {
     return floor(bin * 255.0 / (n - 1.0)) / 255.0;
 }
 
+// compose::adjust::posterize_in at 16 bits: bins of the 16-bit sample, landing on 8-bit levels
+// through a 16-bit step. Every product and sum here is a whole number below 2^24, exact in f32;
+// 16-bit layers reach the GPU as half floats, though, so a sample within their precision of a
+// bin's edge can land in the neighbouring bin (the CPU, which exports, is exact).
+fn posterize16(v: f32, n: f32) -> f32 {
+    let x = floor(clamp(v, 0.0, 1.0) * 32768.0 + 0.5);
+    let bin = min(floor(x * n / 32768.0), n - 1.0);
+    let step = floor(bin * 32768.0 / (n - 1.0));
+    return floor((step * 255.0 + 16384.0) / 32768.0) / 255.0;
+}
+
 // Document pixel being adjusted (for ordered dither).
 var<private> adj_px: vec2<i32>;
 
@@ -615,7 +626,10 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
         case 2: {                                                              // Threshold (p0.x = 8-bit level)
             return vec3(select(0.0, 1.0, round_half_up(gray(c) * 255.0) >= p0.x));
         }
-        case 3: { return vec3(posterize(c.r, p0.x), posterize(c.g, p0.x), posterize(c.b, p0.x)); }
+        case 3: {                                                              // Posterize (p0.x levels; p0.y = 1: 16-bit)
+            if p0.y > 0.5 { return vec3(posterize16(c.r, p0.x), posterize16(c.g, p0.x), posterize16(c.b, p0.x)); }
+            return vec3(posterize(c.r, p0.x), posterize(c.g, p0.x), posterize(c.b, p0.x));
+        }
         case 4: { return clamp((c + p0.x - p0.z) * p0.y + p0.z + p0.w, vec3(0.0), vec3(1.0)); }   // B/C legacy: brightness before (p0.x) or after (p0.w) contrast around compose::adjust::LEGACY_PIVOT (p0.z)
         case 5: {                                                              // B/C modern
             let b = p0.x; let ct = p0.y;

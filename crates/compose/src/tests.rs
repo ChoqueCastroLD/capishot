@@ -2530,9 +2530,9 @@ fn lab_documents_invert_and_posterize_l_a_and_b() {
         let rgb_inv = photocraft_color::convert::srgb_to_lab(MUTED.map(|v| 1.0 - v));
         assert!((rgb_inv[0] - inv[0]).abs() > 2.0, "{depth:?}: {rgb_inv:?} vs {inv:?}");
         // Posterize, three levels: the same steps on L, a and b (here all land on the middle
-        // step: L ≈ 50 and a, b ≈ -1, a neutral grey).
+        // step: L ≈ 50 and a, b ≈ -1 (0 at 16 bits, whose middle level is 128), a neutral grey).
         let post = lab_doc_adjusted(MUTED, Adjustment::Posterize { levels: 3 }, depth);
-        let n = [lab[0] / 100.0, (lab[1] + 128.0) / 255.0, (lab[2] + 128.0) / 255.0].map(|v| adjust::posterize(v, 3));
+        let n = [lab[0] / 100.0, (lab[1] + 128.0) / 255.0, (lab[2] + 128.0) / 255.0].map(|v| adjust::posterize_in(v, 3, Some(depth)));
         let want = [n[0] * 100.0, n[1] * 255.0 - 128.0, n[2] * 255.0 - 128.0];
         assert!(want[0] > 45.0 && want[1].abs() < 2.0 && want[2].abs() < 2.0, "{want:?}");
         near3(post, want, 1.0, &format!("{depth:?} posterize"));

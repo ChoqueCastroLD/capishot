@@ -1597,7 +1597,9 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, depth: photocraf
             (2, p, None)
         }
         Adjustment::Posterize { levels } => {
+            // The levels, and the 16-bit rule (compose::adjust::posterize_in).
             p[0][0] = (*levels).clamp(2, 255) as f32;
+            p[0][1] = if depth == photocraft_color::SampleType::U16 { 1.0 } else { 0.0 };
             (3, p, None)
         }
         Adjustment::BrightnessContrast { brightness, contrast, legacy: true } => {

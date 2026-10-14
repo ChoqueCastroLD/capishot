@@ -87,7 +87,7 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
                 [v; 3]
             })
         }
-        Adjustment::Posterize { levels } => map_rgb(buf, |c| c.map(|v| posterize(v, *levels))),
+        Adjustment::Posterize { levels } => map_rgb(buf, |c| c.map(|v| posterize_in(v, *levels, depth))),
         Adjustment::BrightnessContrast { brightness, contrast, legacy: true } => {
             // Legacy: contrast scales around 128/255, with brightness added before it when
             // contrast is raised and after it when contrast is lowered. Measured on Photoshop
@@ -313,7 +313,7 @@ pub fn stored_channels(adj: &Adjustment, mode: ColorMode, depth: Option<SampleTy
                 *v = if i > 0 { mirror } else { 1.0 } - v.clamp(0.0, 1.0);
             }
         }
-        Adjustment::Posterize { levels } => ch.iter_mut().for_each(|v| *v = posterize(*v, *levels)),
+        Adjustment::Posterize { levels } => ch.iter_mut().for_each(|v| *v = posterize_in(*v, *levels, depth)),
         Adjustment::Threshold { level } => {
             // On the 8-bit grid, like the RGB threshold.
             let t = (level * 255.0).round();
@@ -866,6 +866,23 @@ pub fn posterize(v: f32, levels: u32) -> f32 {
     (bin * 255.0 / (n - 1.0)).floor() / 255.0
 }
 
+/// [`posterize`] in a document of `depth` (`None`: unknown, treated as 8-bit). At 16 bits
+/// Photoshop bins the 16-bit sample (`⌊v · n / 32768⌋`) and lands on 8-bit levels through a
+/// 16-bit step: `⌊b · 32768 / (n - 1)⌋`, converted with `⌊(o · 255 + 16384) / 32768⌋`, so
+/// 127.5 comes out as 128 but 42.5 as 42 (8 bits floor them all). Exact on every sample of
+/// psd-tools posterize_16bits_rgb.psd and posterize_16bits_grayscale.psd (levels 2 to 21),
+/// which the 8-bit rule missed by up to half the range.
+pub fn posterize_in(v: f32, levels: u32, depth: Option<SampleType>) -> f32 {
+    if depth != Some(SampleType::U16) {
+        return posterize(v, levels);
+    }
+    let n = f64::from(levels.clamp(2, 255));
+    let x = (f64::from(v.clamp(0.0, 1.0)) * 32768.0).round();
+    let bin = (x * n / 32768.0).floor().min(n - 1.0);
+    let step = (bin * 32768.0 / (n - 1.0)).floor();
+    (((step * 255.0 + 16384.0) / 32768.0).floor() / 255.0) as f32
+}
+
 pub fn levels(ch: &LevelsChannel, v: f32) -> f32 {
     levels_q(ch, v, None)
 }
@@ -1205,6 +1222,21 @@ mod tone_tests {
                 assert!((got - i32::from(w)).abs() <= 1, "b {brightness} c {contrast} at {}: {got} vs Photoshop {w}", X[i]);
             }
         }
+    }
+
+    /// 16-bit sample → Photoshop's 8-bit level, from psd-tools posterize_16bits_rgb.psd: bins
+    /// split on the 16-bit sample (10794 and 10923 straddle a third of 32768), and the middle of 3
+    /// levels is 128 where 8 bits give 127, while 21 levels keep 25 for 25.5.
+    #[test]
+    fn sixteen_bit_posterize_matches_photoshop() {
+        let points: [(u32, u16, u8); 9] =
+            [(3, 10794, 0), (3, 10923, 128), (3, 21845, 128), (3, 21974, 255), (13, 2504, 0), (13, 2542, 21), (13, 7453, 42), (13, 7582, 64), (21, 3341, 25)];
+        for (levels, x, want) in points {
+            let got = posterize_in(f32::from(x) / 32768.0, levels, Some(SampleType::U16));
+            assert!((got * 255.0 - f32::from(want)).abs() < 1e-3, "{levels} levels at {x}: {} vs Photoshop {want}", got * 255.0);
+        }
+        // 8 bits keep their rule.
+        assert_eq!(posterize_in(128.0 / 255.0, 3, Some(SampleType::U8)), posterize(128.0 / 255.0, 3));
     }
 
     #[test]
