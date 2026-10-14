@@ -316,6 +316,15 @@ pub fn apply_in(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth: O
         if let Adjustment::BrightnessContrast { brightness, contrast, legacy } = adj {
             let table = ink_brightness_contrast_lut(*brightness, *contrast, *legacy);
             map_rgb(buf, |c| cmyk_to_rgb(rgb_to_cmyk(c).map(|v| ink_through(&table, v))));
+        } else if cmy_adjustment(adj) {
+            let mut inks: Vec<[f32; 4]> = buf.px.iter().map(|p| rgb_to_cmyk([p[0], p[1], p[2]])).collect();
+            apply_cmy(adj, &mut inks);
+            for (p, ink) in buf.px.iter_mut().zip(&inks) {
+                if p[3] > 0.0 {
+                    let [r, g, b] = cmyk_to_rgb(*ink);
+                    (p[0], p[1], p[2]) = (r, g, b);
+                }
+            }
         } else {
             map_rgb(buf, |c| {
                 let mut ink = rgb_to_cmyk(c);
@@ -351,7 +360,29 @@ pub fn lab_channel_adjustment(adj: &Adjustment) -> bool {
 /// every pixel; here the inks are the screen colour separated through the document's CMYK
 /// profile, so neutrals carry the black that profile generates rather than the file's.
 pub fn cmyk_channel_adjustment(adj: &Adjustment) -> bool {
-    stored_channel_adjustment(adj) || matches!(adj, Adjustment::BrightnessContrast { .. })
+    stored_channel_adjustment(adj) || cmy_adjustment(adj) || matches!(adj, Adjustment::BrightnessContrast { .. })
+}
+
+/// Whether a CMYK document evaluates `adj` on C, M and Y as the complement of an RGB colour,
+/// black kept ([`apply_cmy`]): Hue/Saturation (not Colorize, which Photoshop separates again,
+/// black and all) and Color Balance (photoshop corpus cmyk16 hue-saturation.psd follows this on
+/// every pixel within half a level, cmyk8 within two; color-balance within our RGB Color
+/// Balance's own error).
+pub fn cmy_adjustment(adj: &Adjustment) -> bool {
+    matches!(adj, Adjustment::HueSaturation { colorize: false, .. } | Adjustment::ColorBalance { .. })
+}
+
+/// A [`cmy_adjustment`] on straight inks (C, M, Y, K; 0 none): the RGB adjustment on
+/// `(1 - c, 1 - m, 1 - y)`, black left alone.
+pub fn apply_cmy(adj: &Adjustment, inks: &mut [[f32; 4]]) {
+    let width = i32::try_from(inks.len()).unwrap_or(i32::MAX);
+    let mut buf = Buffer { rect: crate::Rect::new(0, 0, width, 1), px: inks.iter().map(|i| [1.0 - i[0], 1.0 - i[1], 1.0 - i[2], 1.0]).collect() };
+    apply_depth(adj, &mut buf, Transfer::Srgb, None);
+    for (ink, p) in inks.iter_mut().zip(&buf.px) {
+        for c in 0..3 {
+            ink[c] = (1.0 - p[c]).clamp(0.0, 1.0);
+        }
+    }
 }
 
 /// Brightness/Contrast as the lookup table (4096 samples over 0..1) a CMYK ink's stored value,

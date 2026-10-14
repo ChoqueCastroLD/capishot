@@ -372,3 +372,25 @@ fn brightness_contrast_curves_cmyk_inks_as_stored() {
         }
     }
 }
+
+/// Image › Adjustments › Hue/Saturation and Color Balance on a CMYK layer work on its stored C, M
+/// and Y as inverted RGB, keep its black ink exactly, and mix through a selection.
+#[test]
+fn hue_saturation_and_color_balance_keep_a_cmyk_layers_black() {
+    let cmyk = PixelFormat::new(ColorMode::Cmyk, SampleType::U16, true);
+    let ink = [0.2, 0.7, 0.1, 0.3, 1.0];
+    let hue =
+        Adjustment::HueSaturation { hue: 40.0, saturation: 25.0, lightness: -10.0, colorize: false, ranges: photocraft_doc::adjust::HueRange::defaults() };
+    let balance =
+        Adjustment::ColorBalance { shadows: [20.0, -10.0, 0.0], midtones: [-15.0, 10.0, 30.0], highlights: [0.0, 0.0, -20.0], preserve_luminosity: true };
+    for adj in [hue, balance] {
+        let mut want = [[ink[0], ink[1], ink[2], ink[3]]];
+        adjust::apply_cmy(&adj, &mut want);
+        let got = adjusted_pixel(cmyk, &ink, &adj, None);
+        assert!((0..4).all(|c| (got[c] - want[0][c]).abs() < 1e-4), "{}: {got:?} vs {want:?}", adj.label());
+        assert!((got[3] - ink[3]).abs() < 1e-4 && got[4] == 1.0, "{}: black and alpha kept", adj.label());
+        let half = adjusted_pixel(cmyk, &ink, &adj, Some(0.5));
+        let k = 128.0 / 255.0;
+        assert!((0..4).all(|c| (half[c] - (ink[c] + (want[0][c] - ink[c]) * k)).abs() < 1e-3), "{}: half a selection", adj.label());
+    }
+}

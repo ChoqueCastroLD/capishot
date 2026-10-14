@@ -665,8 +665,8 @@ fn only_cmyk_stacks_with_ink_adjustments_render_on_their_inks() {
     assert!(native::render_cmyk(&d, r, 64).is_none(), "plain layers");
     d.layers.push(Layer::new("inv", LayerContent::Adjustment(Adjustment::Invert)));
     assert!(native::render_cmyk(&d, r, 64).is_some());
-    let hue = Adjustment::HueSaturation { hue: 30.0, saturation: 0.0, lightness: 0.0, colorize: false, ranges: photocraft_doc::adjust::HueRange::defaults() };
-    d.layers.push(Layer::new("hue", LayerContent::Adjustment(hue)));
+    let exposure = Adjustment::Exposure { exposure: 0.5, offset: 0.0, gamma: 1.0 };
+    d.layers.push(Layer::new("exposure", LayerContent::Adjustment(exposure)));
     assert!(native::render_cmyk(&d, r, 64).is_none(), "an adjustment the inks don't carry");
     d.layers.pop();
     d.layers[1].blend = BlendMode::Multiply;
@@ -679,6 +679,37 @@ fn only_cmyk_stacks_with_ink_adjustments_render_on_their_inks() {
     // Tiles render alike whatever their size.
     let whole = render_tiled(&d, d.bounds(), 64);
     assert_eq!(render_tiled(&d, d.bounds(), 1).px, whole.px);
+}
+
+/// Hue/Saturation (not Colorize) and Color Balance work on C, M and Y as inverted RGB with the
+/// black ink kept (photoshop corpus cmyk16 hue-saturation.psd: every ink within half a level).
+#[test]
+fn cmyk_hue_saturation_and_color_balance_keep_the_black_ink() {
+    use photocraft_color::convert::cmyk_to_rgb;
+    let ranges = photocraft_doc::adjust::HueRange::defaults();
+    let hue = Adjustment::HueSaturation { hue: 40.0, saturation: 25.0, lightness: -10.0, colorize: false, ranges: ranges.clone() };
+    let balance =
+        Adjustment::ColorBalance { shadows: [20.0, -10.0, 0.0], midtones: [-15.0, 10.0, 30.0], highlights: [0.0, 0.0, -20.0], preserve_luminosity: true };
+    for adj in [hue, balance] {
+        assert!(adjust::cmy_adjustment(&adj) && adjust::cmyk_channel_adjustment(&adj));
+        let mut d = cmyk_doc([0.2, 0.7, 0.1, 0.3], SampleType::U16);
+        let stored: [f32; 4] = std::array::from_fn(|c| d.layers[0].surface().unwrap().pixel(0, 0)[c]);
+        d.layers.push(Layer::new("adj", LayerContent::Adjustment(adj.clone())));
+        // The RGB adjustment on the inks' complement, black untouched.
+        let mut rgb = Buffer::filled(Rect::new(0, 0, 1, 1), [1.0 - stored[0], 1.0 - stored[1], 1.0 - stored[2], 1.0]);
+        adjust::apply(&adj, &mut rgb);
+        let want = [1.0 - rgb.px[0][0], 1.0 - rgb.px[0][1], 1.0 - rgb.px[0][2], stored[3]];
+        assert!(native::render_cmyk(&d, d.bounds(), 64).is_some(), "{}", adj.label());
+        let c = cmyk_to_rgb(want);
+        assert!(close4(px(&d, 1, 1), [c[0], c[1], c[2], 1.0]), "{}", adj.label());
+        let flat = flatten_to_surface(&d, d.pixel_format(), None);
+        let got = flat.pixel(1, 1);
+        assert!((got[3] - stored[3]).abs() < 1e-4, "{}: black kept", adj.label());
+        assert!((0..3).all(|i| (got[i] - want[i]).abs() < 1e-3), "{}: {got:?} vs {want:?}", adj.label());
+    }
+    // Colorize separates its colour again (black included), so it stays on the screen colour.
+    let colorize = Adjustment::HueSaturation { hue: -160.0, saturation: 40.0, lightness: 5.0, colorize: true, ranges };
+    assert!(!adjust::cmy_adjustment(&colorize) && !adjust::cmyk_channel_adjustment(&colorize));
 }
 
 /// Groups at full opacity without a mask are inlined: a pass-through group's adjustment reaches

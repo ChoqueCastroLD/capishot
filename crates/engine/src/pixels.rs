@@ -124,6 +124,9 @@ fn adjusted(s: &Surface, r: Rect, adj: &Adjustment, selection: Option<&Surface>,
     if fmt.mode == mode && matches!(mode, photocraft_color::ColorMode::Lab | photocraft_color::ColorMode::Cmyk) && adjust::stored_channel_adjustment(adj) {
         return adjusted_channels(s, r, selection, |ch| adjust::stored_channels(adj, fmt.mode, Some(fmt.sample), ch));
     }
+    if fmt.mode == mode && mode == photocraft_color::ColorMode::Cmyk && adjust::cmy_adjustment(adj) {
+        return adjusted_cmy(s, r, adj, selection);
+    }
     if let Adjustment::BrightnessContrast { brightness, contrast, legacy } = adj
         && fmt.mode == mode
         && mode == photocraft_color::ColorMode::Cmyk
@@ -166,6 +169,29 @@ fn adjusted_channels(s: &Surface, r: Rect, selection: Option<&Surface>, op: impl
             op(out);
             for (v, o) in ch.iter_mut().zip(out.iter()) {
                 *v += (o - *v) * k;
+            }
+        }
+    }
+    raw
+}
+
+/// [`adjusted`] for Hue/Saturation or Color Balance on a CMYK layer (`adjust::apply_cmy`): on its
+/// stored C, M and Y, black kept, the whole region at once; the selection mixes the stored inks.
+fn adjusted_cmy(s: &Surface, r: Rect, adj: &Adjustment, selection: Option<&Surface>) -> Vec<f32> {
+    let fmt = s.format();
+    let n = fmt.channels();
+    let mut raw = s.read_region(r);
+    let mut inks: Vec<[f32; 4]> = raw.chunks_exact(n).map(|p| std::array::from_fn(|c| p.get(c).copied().unwrap_or(0.0))).collect();
+    adjust::apply_cmy(adj, &mut inks);
+    let w = (r.width() as usize).max(1);
+    let mut coverage = vec![1.0f32; w];
+    for (j, (row, adjusted)) in raw.chunks_mut(w * n).zip(inks.chunks(w)).enumerate() {
+        if let Some(sel) = selection {
+            sel.sample_row_strided(r.y0.saturating_add(j as i32), r.x0, 1, 0, &mut coverage);
+        }
+        for ((px, ink), &k) in row.chunks_exact_mut(n).zip(adjusted).zip(&coverage) {
+            for (v, a) in px.iter_mut().zip(ink) {
+                *v += (a - *v) * k;
             }
         }
     }

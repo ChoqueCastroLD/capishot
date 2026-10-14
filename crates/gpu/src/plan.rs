@@ -1836,6 +1836,11 @@ mod tests {
             let inks = !matches!(adj, Adjustment::GradientMap { .. });
             assert_eq!(adjustment_on_gpu(adj, ColorMode::Cmyk), !inks, "{adj:?} in CMYK");
         }
+        // CMYK Hue/Saturation works on the inks (on the CPU); Colorize stays on the screen colour.
+        let ranges = photocraft_doc::adjust::HueRange::defaults();
+        let hue = |colorize| Adjustment::HueSaturation { hue: 30.0, saturation: 10.0, lightness: 0.0, colorize, ranges: ranges.clone() };
+        assert!(!adjustment_on_gpu(&hue(false), ColorMode::Cmyk) && adjustment_on_gpu(&hue(true), ColorMode::Cmyk));
+        assert!(adjustment_on_gpu(&hue(false), ColorMode::Rgb));
         // Screen-colour adjustments stay on the GPU in Lab documents.
         assert!(adjustment_on_gpu(&Adjustment::Exposure { exposure: 1.0, offset: 0.0, gamma: 1.0 }, ColorMode::Lab));
     }

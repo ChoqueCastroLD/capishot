@@ -9,7 +9,8 @@
 //! it does there.
 //!
 //! Plain adjustment layers that Photoshop evaluates on the inks (Invert, Posterize, Threshold,
-//! Brightness/Contrast, and Levels and Curves on CMYK channels) join such a stack too: on the
+//! Brightness/Contrast, Hue/Saturation, Color Balance, and Levels and Curves on CMYK channels)
+//! join such a stack too: on the
 //! stored inks their rules are exact, where the RGB compositor can only apply them to a separation
 //! of its RGB composite, whose black differs from the file's. Such stacks are also rendered for
 //! display this way ([`render_cmyk`]); stacks of raster layers alone keep the RGB compositor there.
@@ -55,18 +56,26 @@ enum InkOp<'a> {
     Tables([Vec<f32>; INKS]),
     /// Invert, Posterize or Threshold (`adjust::stored_channels`).
     Rules(&'a Adjustment),
+    /// Hue/Saturation or Color Balance on C, M and Y as inverted RGB (`adjust::apply_cmy`).
+    Cmy(&'a Adjustment),
 }
 
 impl InkOp<'_> {
-    fn apply(&self, ink: &mut [f32; INKS], depth: SampleType) {
+    /// The adjusted inks of each pixel of `inks` that has coverage (its fifth value).
+    fn apply(&self, inks: &[[f32; INKS + 1]], depth: SampleType) -> Vec<[f32; INKS]> {
+        let mut out: Vec<[f32; INKS]> = inks.iter().map(|d| [d[0], d[1], d[2], d[3]]).collect();
         match self {
             InkOp::Tables(t) => {
-                for (v, table) in ink.iter_mut().zip(t) {
-                    *v = adjust::ink_through(table, *v);
+                for ink in &mut out {
+                    for (v, table) in ink.iter_mut().zip(t) {
+                        *v = adjust::ink_through(table, *v);
+                    }
                 }
             }
-            InkOp::Rules(adj) => adjust::stored_channels(adj, ColorMode::Cmyk, Some(depth), ink),
+            InkOp::Rules(adj) => out.iter_mut().for_each(|ink| adjust::stored_channels(adj, ColorMode::Cmyk, Some(depth), ink)),
+            InkOp::Cmy(adj) => adjust::apply_cmy(adj, &mut out),
         }
+        out
     }
 }
 
@@ -78,6 +87,7 @@ fn ink_op(layer: &Layer, depth: SampleType) -> Option<InkOp<'_>> {
     }
     match adj {
         Adjustment::Invert | Adjustment::Posterize { .. } | Adjustment::Threshold { .. } => Some(InkOp::Rules(adj)),
+        _ if adjust::cmy_adjustment(adj) => Some(InkOp::Cmy(adj)),
         Adjustment::BrightnessContrast { brightness, contrast, legacy } => {
             let t = adjust::ink_brightness_contrast_lut(*brightness, *contrast, *legacy);
             Some(InkOp::Tables([t.clone(), t.clone(), t.clone(), t]))
@@ -205,13 +215,12 @@ impl<'a> InkStack<'a> {
                         continue;
                     }
                     masked(*mask, mv);
-                    for (d, k) in acc.iter_mut().zip(mv.iter()) {
+                    let adjusted = op.apply(acc, self.depth);
+                    for ((d, k), ink) in acc.iter_mut().zip(mv.iter()).zip(&adjusted) {
                         let mix = opacity * k.clamp(0.0, 1.0);
                         if d[INKS] <= 0.0 || mix <= 0.0 {
                             continue;
                         }
-                        let mut ink = [d[0], d[1], d[2], d[3]];
-                        op.apply(&mut ink, self.depth);
                         for (c, v) in ink.iter().enumerate() {
                             d[c] += (v - d[c]) * mix;
                         }
