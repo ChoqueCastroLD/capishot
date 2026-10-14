@@ -2135,6 +2135,71 @@ fn pattern_cache_tracks_default_pixels() {
     }
 }
 
+/// A document that paints one `side` x `side` pattern named `name`.
+fn pattern_fill_doc(name: &str, side: u32) -> Document {
+    let mut d = Document::new(name, Size::new(8, 6), ColorMode::Rgb, SampleType::U8);
+    let pat = Pattern::new(name, photocraft_raster::Surface::with_default(PixelFormat::RGBA8, &[1.0, 0.0, 0.0, 1.0]), side, side);
+    d.layers.push(Layer::new(
+        "pattern",
+        LayerContent::Fill(Fill::Pattern { name: pat.name.clone(), id: pat.id.clone(), scale: 1.0, angle: 0.0, link: true, phase: (0.0, 0.0) }),
+    ));
+    d.patterns.push(pat);
+    d
+}
+
+/// #4971: a pattern texture belongs to the document that last painted with it, and closing that
+/// document frees it. Before, pattern textures were kept until the device was lost.
+#[test]
+fn closed_documents_release_their_pattern_textures() {
+    let Some(mut g) = gpu() else { return };
+    let a = pattern_fill_doc("first", 4);
+    let mut b = pattern_fill_doc("second", 4);
+    b.id = photocraft_doc::DocId(a.id.0 + 1);
+    let one = 4 * 4 * 16;
+    assert_eq!(g.comp.pattern_cache_bytes(), 0);
+    render_to_vec(&mut g.comp, &g.device, &g.queue, &a, a.bounds()).expect("render a");
+    assert_eq!(g.comp.pattern_cache_bytes(), one, "one 4 x 4 RGBA32F texture");
+    render_to_vec(&mut g.comp, &g.device, &g.queue, &b, b.bounds()).expect("render b");
+    assert_eq!(g.comp.pattern_cache_bytes(), 2 * one);
+    g.comp.forget_doc(a.id);
+    assert_eq!(g.comp.pattern_cache_bytes(), one, "closing a document frees its pattern");
+    assert_eq!(g.comp.held_docs(), vec![b.id]);
+    g.comp.retain_docs(|_| false);
+    assert_eq!(g.comp.pattern_cache_bytes(), 0);
+    check(&mut g, &a, "the pattern is uploaded again after being forgotten");
+}
+
+/// #4971: pattern textures are bounded while their documents stay open, by a byte budget and
+/// by age. What the current frame paints with is never dropped.
+#[test]
+fn pattern_textures_are_evicted_over_budget_and_when_idle() {
+    let Some(mut g) = gpu() else { return };
+    let a = pattern_fill_doc("first", 4);
+    let mut b = pattern_fill_doc("second", 4);
+    b.id = photocraft_doc::DocId(a.id.0 + 1);
+    let mut plain = base_doc(8, 6);
+    plain.id = photocraft_doc::DocId(a.id.0 + 2);
+    let one = 4 * 4 * 16;
+    // Room for one pattern and a half: painting the second drops the first.
+    g.comp.set_pattern_budget(one + one / 2);
+    render_to_vec(&mut g.comp, &g.device, &g.queue, &a, a.bounds()).expect("render a");
+    render_to_vec(&mut g.comp, &g.device, &g.queue, &b, b.bounds()).expect("render b");
+    assert_eq!(g.comp.pattern_cache_bytes(), one, "the least recently painted pattern went");
+    // A budget below a single pattern still keeps the one being painted.
+    g.comp.set_pattern_budget(0);
+    render_to_vec(&mut g.comp, &g.device, &g.queue, &b, b.bounds()).expect("render b again");
+    assert_eq!(g.comp.pattern_cache_bytes(), one);
+    // Idle: frames that paint no pattern age it out.
+    g.comp.set_pattern_budget(photocraft_gpu::PATTERN_BUDGET);
+    for _ in 0..photocraft_gpu::PATTERN_IDLE_FRAMES - 1 {
+        render_to_vec(&mut g.comp, &g.device, &g.queue, &plain, plain.bounds()).expect("render plain");
+    }
+    assert_eq!(g.comp.pattern_cache_bytes(), one, "still within the idle limit");
+    render_to_vec(&mut g.comp, &g.device, &g.queue, &plain, plain.bounds()).expect("render plain");
+    assert_eq!(g.comp.pattern_cache_bytes(), 0, "dropped after {} idle frames", photocraft_gpu::PATTERN_IDLE_FRAMES);
+    check(&mut g, &b, "the pattern is uploaded again after being evicted");
+}
+
 #[test]
 fn pattern_cache_tracks_source_format_and_cow_tiles() {
     let Some(mut g) = gpu() else { return };

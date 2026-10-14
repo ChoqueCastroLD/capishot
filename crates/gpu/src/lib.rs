@@ -75,6 +75,11 @@ pub const FX_BUDGET: usize = 1536 << 20;
 pub const PAGE: u32 = 2048;
 /// GPU memory resident layer pages may hold before the least recently used are evicted.
 pub const RESIDENT_BUDGET: u64 = 4 << 30;
+/// GPU memory pattern textures may hold before the least recently painted are dropped (those the
+/// current frame paints with always stay).
+pub const PATTERN_BUDGET: u64 = 256 << 20;
+/// A pattern texture no frame has painted with for this many frames is dropped.
+pub const PATTERN_IDLE_FRAMES: u64 = 240;
 /// Uploads (bytes) [`Compositor::render`] stages before submitting the work recorded so far, so
 /// a refresh of a huge document never holds all its uploads in staging memory at once.
 const FLUSH_BYTES: u64 = 512 << 20;
@@ -183,6 +188,12 @@ struct CachedPattern {
     format: PixelFormat,
     default_bits: Vec<u32>,
     texture: Tex,
+    /// The document that last painted with it: closing that document frees the texture (#4971).
+    doc: DocId,
+    /// [`Compositor::frame`] when it last painted.
+    last_used: u64,
+    /// GPU bytes of the texture (RGBA32F).
+    bytes: u64,
 }
 
 struct Resident {
@@ -423,6 +434,10 @@ pub struct Compositor {
     /// The colour mode of the document being encoded: patterns paint in it
     /// (`photocraft_compose::pattern::pattern_rgba`).
     pattern_mode: photocraft_color::ColorMode,
+    /// The document being encoded, which owns the patterns it paints with.
+    pattern_doc: DocId,
+    /// GPU memory pattern textures may hold ([`PATTERN_BUDGET`] by default).
+    pattern_budget: u64,
     /// Texture side limit the paging is planned for (the device's, or smaller in tests).
     max_dim: u32,
     /// The device's real texture side limit.
@@ -670,6 +685,8 @@ impl Compositor {
             temps: Vec::new(),
             patterns: HashMap::new(),
             pattern_mode: photocraft_color::ColorMode::Rgb,
+            pattern_doc: DocId(0),
+            pattern_budget: PATTERN_BUDGET,
             max_dim: 0,
             device_max: device.limits().max_texture_dimension_2d,
             page: PAGE,
@@ -791,6 +808,17 @@ impl Compositor {
         self.residents.values().map(Resident::bytes).sum()
     }
 
+    /// GPU memory held by cached pattern textures (bytes).
+    pub fn pattern_cache_bytes(&self) -> u64 {
+        self.patterns.values().map(|p| p.bytes).sum()
+    }
+
+    /// Set the GPU memory pattern textures may hold (default [`PATTERN_BUDGET`]). It takes effect
+    /// at the end of the next refresh.
+    pub fn set_pattern_budget(&mut self, bytes: u64) {
+        self.pattern_budget = bytes;
+    }
+
     /// Whether `doc` can be composited on the GPU. Documents and layers larger than the texture
     /// limit are fine: surfaces are stored in page-sized textures and effect maps of regions
     /// larger than the limit are built per page cell.
@@ -865,14 +893,22 @@ impl Compositor {
     pub fn forget_doc(&mut self, doc: DocId) {
         self.residents.retain(|_, r| r.doc != doc);
         self.fx.retain(|_, e| e.doc != doc);
+        self.patterns.retain(|_, p| p.doc != doc);
         self.prefix.forget(doc);
     }
 
     /// [`Self::forget_doc`] for every document `keep` rejects: what the compositor holds for
     /// documents that were closed, however their canvas entry went (#4529).
     pub fn retain_docs(&mut self, keep: impl Fn(DocId) -> bool) {
-        let mut gone: Vec<DocId> =
-            self.residents.values().map(|r| r.doc).chain(self.fx.values().map(|e| e.doc)).chain(self.prefix.doc()).filter(|d| !keep(*d)).collect();
+        let mut gone: Vec<DocId> = self
+            .residents
+            .values()
+            .map(|r| r.doc)
+            .chain(self.fx.values().map(|e| e.doc))
+            .chain(self.patterns.values().map(|p| p.doc))
+            .chain(self.prefix.doc())
+            .filter(|d| !keep(*d))
+            .collect();
         gone.sort_by_key(|d| d.0);
         gone.dedup();
         for d in gone {
@@ -880,9 +916,17 @@ impl Compositor {
         }
     }
 
-    /// Documents the compositor holds pages, effect maps or a lower-stack composite for.
+    /// Documents the compositor holds pages, effect maps, pattern textures or a lower-stack
+    /// composite for.
     pub fn held_docs(&self) -> Vec<DocId> {
-        let mut docs: Vec<DocId> = self.residents.values().map(|r| r.doc).chain(self.fx.values().map(|e| e.doc)).chain(self.prefix.doc()).collect();
+        let mut docs: Vec<DocId> = self
+            .residents
+            .values()
+            .map(|r| r.doc)
+            .chain(self.fx.values().map(|e| e.doc))
+            .chain(self.patterns.values().map(|p| p.doc))
+            .chain(self.prefix.doc())
+            .collect();
         docs.sort_by_key(|d| d.0);
         docs.dedup();
         docs
@@ -994,6 +1038,7 @@ impl Compositor {
         let plan = plan(doc)?;
         self.check_fx(doc, &plan)?;
         self.pattern_mode = doc.pixel_format().mode;
+        self.pattern_doc = doc.id;
         let mut stats = Stats { passes: plan.passes.len(), slots: plan.slots, ..Default::default() };
         if region.is_empty() {
             return Ok(stats);
@@ -1093,7 +1138,29 @@ impl Compositor {
         self.fx.retain(|(id, _), e| e.doc != doc.id || e.last_used == frame || live.contains(id));
         stats.evicted += self.evict().0;
         self.temps.retain(|(_, used)| frame.saturating_sub(*used) < 240);
+        self.evict_patterns();
         Ok(stats)
+    }
+
+    /// Drop the pattern textures no frame has painted with for [`PATTERN_IDLE_FRAMES`] frames,
+    /// then the least recently painted ones over the pattern budget. Never one this frame painted
+    /// with: it would only be uploaded again on the next frame.
+    fn evict_patterns(&mut self) {
+        let frame = self.frame;
+        self.patterns.retain(|_, p| frame.saturating_sub(p.last_used) < PATTERN_IDLE_FRAMES);
+        let mut total = self.pattern_cache_bytes();
+        if total > self.pattern_budget {
+            let mut lru: Vec<(u64, String, u64)> =
+                self.patterns.iter().filter(|(_, p)| p.last_used != frame).map(|(k, p)| (p.last_used, k.clone(), p.bytes)).collect();
+            lru.sort_unstable();
+            for (_, key, bytes) in lru {
+                if total <= self.pattern_budget {
+                    break;
+                }
+                self.patterns.remove(&key);
+                total = total.saturating_sub(bytes);
+            }
+        }
     }
 
     /// Keep resident pages within the resident budget and the effect cache within
@@ -1579,11 +1646,14 @@ impl Compositor {
         let format = pat.surface.format();
         // Unstored tiles read the default pixel, interpreted in the source format.
         let default_bits: Vec<u32> = pat.surface.default_pixel().iter().map(|v| v.to_bits()).collect();
-        if let Some(cached) = self.patterns.get(&key)
+        let (doc, last_used) = (self.pattern_doc, self.frame);
+        if let Some(cached) = self.patterns.get_mut(&key)
             && cached.fingerprint == fp
             && cached.format == format
             && cached.default_bits == default_bits
         {
+            cached.doc = doc;
+            cached.last_used = last_used;
             return cached.texture.view.clone();
         }
         let (w, h) = (pat.width, pat.height);
@@ -1597,7 +1667,8 @@ impl Compositor {
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
         let v = t.view.clone();
-        self.patterns.insert(key, CachedPattern { fingerprint: fp, format, default_bits, texture: t });
+        let bytes = u64::from(w.max(1)) * u64::from(h.max(1)) * 16;
+        self.patterns.insert(key, CachedPattern { fingerprint: fp, format, default_bits, texture: t, doc, last_used, bytes });
         v
     }
 
