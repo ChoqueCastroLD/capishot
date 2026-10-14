@@ -174,4 +174,5 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     {
         super::script_editor::scroll_to(ui.ctx(), l.raw_index);
     }
+    super::shaper_ui::show(app, ui);
 }

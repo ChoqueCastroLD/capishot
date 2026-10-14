@@ -197,3 +197,31 @@ fn perf_2000x3000() {
     let d = detect(&p, (0.0, 0.0), &DetectOptions::default());
     println!("detect 2000x3000: {} bubbles in {:?}", d.len(), t.elapsed());
 }
+
+#[test]
+fn align_takes_the_lobe_holding_the_text_and_needs_an_outline() {
+    let mut p = Img::new(500, 700, 50);
+    p.ellipse(250.0, 220.0, 70.0, 78.0, 255);
+    p.ellipse(250.0, 355.0, 62.0, 82.0, 255);
+    let area = photocraft_geom::Rect::new(0, 0, 500, 700);
+    let (mask, outline) = bubble::wand_bubble(&p.px, area, (250, 360), bubble::WAND_TOLERANCE, Some((250.0, 360.0))).unwrap();
+    assert!(outline > 0.95, "{outline}");
+    let o = bubble::opened_bounds(&mask).unwrap();
+    assert!((o.opened.center().1 - 355.0).abs() < 25.0, "the lower lobe: {:?}", o.opened);
+    let (top, _) = bubble::wand_bubble(&p.px, area, (250, 210), bubble::WAND_TOLERANCE, None).unwrap();
+    assert!((bubble::opened_bounds(&top).unwrap().opened.center().1 - 220.0).abs() < 25.0);
+    // A single oval stays whole.
+    let mut oval = Img::new(500, 700, 50);
+    oval.ellipse(250.0, 290.0, 70.0, 140.0, 255);
+    assert!(lobe_at(&bubble::wand(&oval.px, area, (250, 290), 20.0).unwrap(), 250.0, 290.0).is_none());
+    // White fading into light grey: no outline, refused by the judge.
+    let mut fade = Img::new(200, 150, 90);
+    fade.rect(110, 80, 175, 130, 210);
+    fade.rect(120, 90, 165, 120, 255);
+    let area = photocraft_geom::Rect::new(0, 0, 200, 150);
+    let (m, outline) = bubble::wand_bubble(&fade.px, area, (140, 100), 20.0, None).unwrap();
+    assert!(outline < bubble::MIN_OUTLINE_DARK, "{outline}");
+    let o = bubble::opened_bounds(&m).unwrap();
+    assert_eq!(bubble::Judge { outline: Some(outline), ..Default::default() }.verdict(&o), Some("noBubble"));
+    assert_eq!(bubble::Judge { outline: Some(0.9), ..Default::default() }.verdict(&o), None);
+}

@@ -2937,6 +2937,11 @@ fontWeight	Italic	Itálico
 	Multi-bubble mode	Modo multibalão
 	Multi-bubble mode: capture several bubbles, then paste them all at once	Modo multibalão: capture vários balões e depois cole todos de uma vez
 	Multi-bubble: centre on the bubble, as Paste does	Multibalão: centrar no balão, como Colar
+	TextShapeR	TextShapeR
+	Line breaks shaped like the bubble. Click: apply · Shift+click: apply and go to the next line	Quebras de linha com a forma do balão. Clique: aplicar · Shift+clique: aplicar e passar à linha seguinte
+	No bubble around the text: shapes without an outline	Nenhum balão à volta do texto: formas sem contorno
+	Doesn't fit the bubble	Não cabe no balão
+	More shapes	Mais formas
 	New folder	Nova pasta
 	New style	Novo estilo
 	Next line	Linha seguinte

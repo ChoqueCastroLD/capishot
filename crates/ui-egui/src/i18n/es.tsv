@@ -2900,6 +2900,11 @@ cameraData	Lens	Objetivo
 	Multi-bubble mode	Modo multiglobo
 	Multi-bubble mode: capture several bubbles, then paste them all at once	Modo multiglobo: captura varios globos y luego pégalos todos a la vez
 	Multi-bubble: centre on the bubble, as Paste does	Multiglobo: centrar en el globo, como Pegar
+	TextShapeR	TextShapeR
+	Line breaks shaped like the bubble. Click: apply · Shift+click: apply and go to the next line	Saltos de línea con la forma del globo. Clic: aplicar · Mayús+clic: aplicar y pasar a la línea siguiente
+	No bubble around the text: shapes without an outline	No hay globo alrededor del texto: formas sin contorno
+	Doesn't fit the bubble	No cabe en el globo
+	More shapes	Más formas
 	New folder	Nueva carpeta
 	New style	Nuevo estilo
 	Next line	Línea siguiente

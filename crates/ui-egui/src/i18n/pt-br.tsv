@@ -4001,6 +4001,11 @@ layerLabel	No Color	Sem cor
 	Multi-bubble mode	Modo multibalão
 	Multi-bubble mode: capture several bubbles, then paste them all at once	Modo multibalão: capture vários balões e depois cole todos de uma vez
 	Multi-bubble: centre on the bubble, as Paste does	Multibalão: centralizar no balão, como Colar
+	TextShapeR	TextShapeR
+	Line breaks shaped like the bubble. Click: apply · Shift+click: apply and go to the next line	Quebras de linha no formato do balão. Clique: aplicar · Shift+clique: aplicar e ir para a próxima linha
+	No bubble around the text: shapes without an outline	Nenhum balão em volta do texto: formatos sem contorno
+	Doesn't fit the bubble	Não cabe no balão
+	More shapes	Mais formatos
 	New folder	Nova pasta
 	New style	Novo estilo
 	Next line	Próxima linha
