@@ -1270,7 +1270,7 @@ fn merge_layers(s: &mut Session) -> Result<Value> {
         let fmt = PixelFormat::new(fmt.mode, fmt.sample, true);
         let mut merged = Layer::raster(top.name.clone(), fmt);
         merged.locks = top.locks;
-        *crate::pixels_mut(&mut merged)? = crate::pixels::composite_layers(&solo, fmt, None);
+        *crate::pixels_mut(&mut merged)? = crate::pixels::composite_layers_uncropped(&solo, fmt);
         let mid = merged.id;
         // Hidden selected layers are discarded, as in Photoshop.
         for id in &ids[..ids.len() - 1] {
@@ -2049,6 +2049,37 @@ mod tests {
         // Two layers can't be distributed.
         select_all(&mut s, &[a, b]);
         assert!(!s.is_enabled("layer.distribute.leftEdges"));
+    }
+
+    #[test]
+    fn merge_keeps_pixels_outside_the_canvas() {
+        // #5067: the merged layer was cropped to the 100x80 canvas.
+        let mut s = session(8);
+        let a = rect_layer(&mut s, Rect::new(-30, -20, 10, 10));
+        let b = rect_layer(&mut s, Rect::new(90, 70, 140, 120));
+        select_all(&mut s, &[a, b]);
+        let m = LayerId(s.execute("layer.mergeLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
+        let ml = doc(&s).layer(m).unwrap();
+        assert_eq!(layer_bounds(ml).unwrap(), Rect::new(-30, -20, 140, 120));
+        assert_eq!(ml.surface().unwrap().pixel(-10, -5)[3], 1.0);
+        assert_eq!(ml.surface().unwrap().pixel(130, 110)[3], 1.0);
+    }
+
+    #[test]
+    fn merge_down_and_merge_group_keep_pixels_outside_the_canvas() {
+        let mut s = session(8);
+        let a = rect_layer(&mut s, Rect::new(-30, -20, 10, 10));
+        let b = rect_layer(&mut s, Rect::new(90, 70, 140, 120));
+        s.execute("layer.mergeDown", json!({"layer": b.0})).unwrap();
+        assert_eq!(layer_bounds(doc(&s).layer(a).unwrap()).unwrap(), Rect::new(-30, -20, 140, 120));
+
+        let mut s = session(8);
+        let a = rect_layer(&mut s, Rect::new(-30, -20, 10, 10));
+        let b = rect_layer(&mut s, Rect::new(90, 70, 140, 120));
+        select_all(&mut s, &[a, b]);
+        let g = LayerId(s.execute("layer.groupLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
+        s.execute("layer.mergeGroup", json!({"layer": g.0})).unwrap();
+        assert_eq!(layer_bounds(doc(&s).layer(g).unwrap()).unwrap(), Rect::new(-30, -20, 140, 120));
     }
 
     #[test]
