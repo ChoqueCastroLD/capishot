@@ -720,7 +720,7 @@ mod tests {
         // Any point on the object hits; the background and another target miss.
         assert!(std::sync::Arc::ptr_eq(&s.object_finder.lookup(&doc, target, 120.0, 90.0).unwrap(), &r));
         assert!(s.object_finder.lookup(&doc, target, 3.0, 3.0).is_none());
-        assert!(s.object_finder.lookup(&doc, Some(LayerId(9999)), 100.0, 80.0).is_none());
+        assert!(s.object_finder.lookup(&doc, Some(LayerId(u64::MAX)), 100.0, 80.0).is_none());
         // The click reuses it, and a selection-only edit keeps it.
         s.execute("select.object", json!({"point": [110, 70]})).unwrap();
         assert_eq!(s.object_finder.len(), 1);

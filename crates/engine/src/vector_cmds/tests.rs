@@ -924,7 +924,7 @@ fn combine_shapes_fails_gracefully() {
     let (mut s, a, _) = two_selected_rects(8);
     let before = doc(&s).clone();
     let history = s.active().unwrap().history.past_len();
-    let bad_params = [json!({"layer": 999_999}), json!({"layer": a, "subpath": 99}), json!({"subpath": 99}), json!({"tolerance": "x", "layer": 999_999})];
+    let bad_params = [json!({"layer": u64::MAX}), json!({"layer": a, "subpath": 99}), json!({"subpath": 99}), json!({"tolerance": "x", "layer": u64::MAX})];
     for cmd in [
         "layer.combineShapes.unite",
         "layer.combineShapes.subtractFrontShape",

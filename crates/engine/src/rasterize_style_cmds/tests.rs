@@ -152,7 +152,7 @@ fn disabled_and_bad_params_fail_gracefully() {
     let (mut s, id) = scene(8);
     let bg = doc(&s).layers[0].id.0;
     assert!(s.execute(ID, json!({"layer": bg})).is_err(), "the Background has no effects");
-    assert!(s.execute(ID, json!({"layer": 9999})).is_err(), "no such layer");
+    assert!(s.execute(ID, json!({"layer": u64::MAX})).is_err(), "no such layer");
     assert!(s.execute(ID, json!({"layer": u64::MAX})).is_err(), "no such layer");
     assert_eq!(layer(&s, id).effects.items.len(), 5, "a bad call changes nothing");
     s.execute("layer.layerStyle.hideAllEffects", json!({})).unwrap();

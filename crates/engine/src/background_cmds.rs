@@ -233,7 +233,7 @@ mod tests {
         assert!(s.execute(CMD, json!({"layer": bg.0})).is_err());
         // Bad params.
         let (mut s, [_, a, _]) = session(8);
-        for p in [json!({"layer": "A"}), json!({"layer": -1}), json!({"layer": 1.5}), json!({"layer": 99999}), json!({"layer": [a.0]})] {
+        for p in [json!({"layer": "A"}), json!({"layer": -1}), json!({"layer": 1.5}), json!({"layer": u64::MAX}), json!({"layer": [a.0]})] {
             assert!(s.execute(CMD, p.clone()).is_err(), "{p}");
         }
         assert!(doc(&s).background().is_none());

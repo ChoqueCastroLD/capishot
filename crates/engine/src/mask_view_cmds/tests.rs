@@ -95,7 +95,7 @@ fn bad_params_and_no_mask_fail_gracefully() {
     for p in [
         json!({"layer": bg, "mode": "gray"}),
         json!({"layer": bg}),
-        json!({"layer": 999_999, "mode": "gray"}),
+        json!({"layer": u64::MAX, "mode": "gray"}),
         json!({"layer": "x"}),
         json!({"layer": -1}),
         json!({"mode": 3}),

@@ -594,7 +594,7 @@ fn mask_view_gestures_fail_gracefully_without_a_mask() {
     h.run_steps(2);
     // A stale view (layer gone) draws nothing instead of panicking.
     h.state_mut().session.active_mut().unwrap().channel_view.layer_mask = Some(photocraft_engine::mask_view_cmds::LayerMaskView {
-        layer: photocraft_doc::LayerId(987_654),
+        layer: photocraft_doc::LayerId(u64::MAX),
         mode: photocraft_engine::mask_view_cmds::MaskViewMode::Gray,
     });
     assert!(canvas_px(&h).is_none());
