@@ -49,6 +49,24 @@ fn canvas_dot_grid_can_be_disabled_persisted_and_reset() {
     assert!(s.prefs().interface.show_canvas_dots);
 }
 
+/// UI-217-10: the Home screen's recent-files list can be switched off and the choice persists.
+#[test]
+fn home_recent_files_preference_defaults_on_persists_and_resets() {
+    let mut s = Session::new();
+    assert!(s.prefs().interface.show_home_recent_files);
+    s.execute("prefs.set", json!({"path": "interface.showHomeRecentFiles", "value": false})).unwrap();
+    assert!(!s.prefs().interface.show_home_recent_files);
+    let mut restored = Session::new();
+    restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert!(!restored.prefs().interface.show_home_recent_files);
+    let mut legacy = Session::new();
+    legacy.load_prefs_json(r#"{"interface": {"theme": "studio"}}"#).unwrap();
+    assert!(legacy.prefs().interface.show_home_recent_files);
+    assert!(s.execute("prefs.set", json!({"path": "interface.showHomeRecentFiles", "value": 3})).is_err());
+    s.execute("prefs.reset", json!({"path": "interface.showHomeRecentFiles"})).unwrap();
+    assert!(s.prefs().interface.show_home_recent_files);
+}
+
 #[test]
 fn appearance_defaults_and_legacy_theme_migrate() {
     let p = Preferences::default();

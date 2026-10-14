@@ -4072,6 +4072,7 @@ navigator	Zoom	Zoom
 	Remove after each stroke	Rimuovi dopo ogni tratto
 	Apply the removal ({key})	Applica la rimozione ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Tratti da rimuovere: {n} (Invio applica, Esc annulla)
+	Show home recent files	Mostra i file recenti nella schermata iniziale
 	Clear Brush Controls	Cancella controlli pennello
 	Reset All Locked Settings	Ripristina tutte le impostazioni bloccate
 	Copy Texture to Other Tools	Copia texture su altri strumenti
