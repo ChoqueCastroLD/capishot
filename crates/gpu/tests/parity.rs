@@ -663,6 +663,9 @@ fn adjustment_layers() {
         let pf = Adjustment::PhotoFilter { color: [0.93, 0.54, 0.0], density: 0.6, preserve_luminosity: true };
         d.layers.push(Layer::new("pf", LayerContent::Adjustment(pf)));
         check(&mut g, &d, &format!("photo filter {depth:?}"));
+        // Threshold: whole 16-bit samples against the level in 16 bits, or the float luminosity.
+        d.layers.push(Layer::new("th", LayerContent::Adjustment(Adjustment::Threshold { level: 0.5 })));
+        check(&mut g, &d, &format!("threshold {depth:?}"));
     }
     for adj in adjustments() {
         for (mode, opacity, masked) in [(BlendMode::Normal, 1.0, false), (BlendMode::Multiply, 0.7, true)] {

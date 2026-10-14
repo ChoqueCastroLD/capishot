@@ -623,8 +623,17 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
     let p3 = op.p3;
     switch op.kind {
         case 1: { return 1.0 - c; }                                            // Invert
-        case 2: {                                                              // Threshold (p0.x = 8-bit level)
-            return vec3(select(0.0, 1.0, round_half_up(gray(c) * 255.0) >= p0.x));
+        case 2: {                                                              // Threshold (compose::adjust::threshold_white)
+            // p0.x = 8-bit level; p0.y = 1: 8-bit levels, 2: 16-bit samples against p0.z, 0: float.
+            // Sums of 30 R + 59 G + 11 B over whole samples are exact in f32.
+            var white = lum(c) * 255.0 >= p0.x;
+            if p0.y > 0.5 {
+                let q = select(32768.0, 255.0, p0.y < 1.5);
+                let v = floor(clamp(c, vec3(0.0), vec3(1.0)) * q + 0.5);
+                let s = 30.0 * v.r + 59.0 * v.g + 11.0 * v.b;
+                white = select(s >= 100.0 * p0.z, s > 100.0 * p0.x - 50.0, p0.y < 1.5);
+            }
+            return vec3(select(0.0, 1.0, white));
         }
         case 3: {                                                              // Posterize (p0.x levels; p0.y = 1: 16-bit)
             if p0.y > 0.5 { return vec3(posterize16(c.r, p0.x), posterize16(c.g, p0.x), posterize16(c.b, p0.x)); }

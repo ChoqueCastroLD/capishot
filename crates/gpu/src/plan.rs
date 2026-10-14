@@ -1597,7 +1597,13 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, depth: photocraf
     match adj {
         Adjustment::Invert => (1, p, None),
         Adjustment::Threshold { level } => {
-            p[0][0] = (level * 255.0).round();
+            // The level, the depth's split (compose::adjust::threshold_white) and the level in 16 bits.
+            let t = (level * 255.0).round();
+            p[0] = match depth {
+                photocraft_color::SampleType::U8 => [t, 1.0, 0.0, 0.0],
+                photocraft_color::SampleType::U16 => [t, 2.0, (t * 32768.0 / 255.0).round(), 0.0],
+                photocraft_color::SampleType::F32 => [t, 0.0, 0.0, 0.0],
+            };
             (2, p, None)
         }
         Adjustment::Posterize { levels } => {

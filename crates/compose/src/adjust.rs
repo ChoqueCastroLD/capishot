@@ -79,14 +79,7 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
 pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth: Option<SampleType>) {
     match adj {
         Adjustment::Invert => map_rgb(buf, |c| [1.0 - c[0], 1.0 - c[1], 1.0 - c[2]]),
-        Adjustment::Threshold { level } => {
-            // Compared on the 8-bit grid like Photoshop (avoids float ties).
-            let t = (level * 255.0).round();
-            map_rgb(buf, |c| {
-                let v = if (rgb_to_gray(c) * 255.0).round() >= t { 1.0 } else { 0.0 };
-                [v; 3]
-            })
-        }
+        Adjustment::Threshold { level } => map_rgb(buf, |c| [if threshold_white(c, *level, depth) { 1.0 } else { 0.0 }; 3]),
         Adjustment::Posterize { levels } => map_rgb(buf, |c| c.map(|v| posterize_in(v, *levels, depth))),
         Adjustment::BrightnessContrast { brightness, contrast, legacy: true } => {
             // Legacy: contrast scales around 128/255, with brightness added before it when
@@ -249,6 +242,30 @@ fn legacy_brightness_contrast(brightness: f32, contrast: f32) -> impl Fn(f32) ->
     let k = if c >= 0.0 { 1.0 / (1.0 - c / 100.0) } else { 1.0 + c / 100.0 };
     let (pre, post) = if c >= 0.0 { (b, 0.0) } else { (0.0, b) };
     move |v: f32| ((v + pre - LEGACY_PIVOT) * k + LEGACY_PIVOT + post).clamp(0.0, 1.0)
+}
+
+/// Whether Threshold at `level` turns colour `c` white in a document of `depth` (`None`: unknown,
+/// treated as 8-bit). Photoshop splits on the luminosity 0.30 R + 0.59 G + 0.11 B (the blend
+/// modes' `lum`), not the Rec. 601 grey, of the document's whole sample values:
+/// - 8 bits: white when that luminosity, rounded to a level with halves down, reaches the level;
+/// - 16 bits: white when it reaches the level converted to 16 bits (128 → 16448);
+/// - 32 bits: white when it reaches the level.
+///
+/// Exact on every pixel of psd-tools threshold_rgb.psd, threshold_16bits_rgb.psd and
+/// threshold_16bits_grayscale.psd and of the photoshop corpus's rgb16 threshold-128.psd, where the
+/// Rec. 601 grey split 28 and 100 pixels of the first two the other way. The sums of
+/// `30 R + 59 G + 11 B` over whole samples are exact in f32 (at most 3 276 800).
+pub fn threshold_white(c: [f32; 3], level: f32, depth: Option<SampleType>) -> bool {
+    let t = (level * 255.0).round();
+    let sum = |q: f32| {
+        let [r, g, b] = c.map(|v| (v.clamp(0.0, 1.0) * q).round());
+        30.0 * r + 59.0 * g + 11.0 * b
+    };
+    match depth {
+        None | Some(SampleType::U8) => sum(255.0) > 100.0 * t - 50.0,
+        Some(SampleType::U16) => sum(32768.0) >= 100.0 * (t * 32768.0 / 255.0).round(),
+        Some(SampleType::F32) => (0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]) * 255.0 >= t,
+    }
 }
 
 /// Applies an adjustment in a document of colour `mode`: [`apply_depth`], except that in Lab
@@ -1222,6 +1239,33 @@ mod tone_tests {
                 assert!((got - i32::from(w)).abs() <= 1, "b {brightness} c {contrast} at {}: {got} vs Photoshop {w}", X[i]);
             }
         }
+    }
+
+    /// Pixel → Photoshop's split. 8-bit from psd-tools threshold_rgb.psd: the first three are
+    /// white though their Rec. 601 grey rounds below 60, and (131, 109, 99) sits exactly on 114.5
+    /// at level 115 (halves round down). 16-bit from threshold_16bits_rgb.psd and the photoshop
+    /// corpus's rgb16 threshold-128.psd, whose mid grey 16448 is level 128 in 16 bits.
+    #[test]
+    fn threshold_splits_on_the_luminosity_like_photoshop() {
+        let c8 = |r: u8, g: u8, b: u8| [r, g, b].map(|v| f32::from(v) / 255.0);
+        for (c, level, white) in
+            [(c8(87, 51, 31), 60u8, true), (c8(90, 49, 33), 60, true), (c8(68, 57, 50), 60, true), (c8(48, 63, 72), 60, false), (c8(131, 109, 99), 115, false)]
+        {
+            assert_eq!(threshold_white(c, f32::from(level) / 255.0, Some(SampleType::U8)), white, "8-bit {c:?} at {level}");
+        }
+        let c16 = |r: u16, g: u16, b: u16| [r, g, b].map(|v| f32::from(v) / 32768.0);
+        for (c, level, white) in [
+            (c16(8995, 7196, 6425), 60u8, false),
+            (c16(11180, 6554, 3984), 60, false),
+            (c16(16448, 16448, 16448), 128, true),
+            (c16(16447, 16447, 16447), 128, false),
+        ] {
+            assert_eq!(threshold_white(c, f32::from(level) / 255.0, Some(SampleType::U16)), white, "16-bit {c:?} at {level}");
+        }
+        // Through the adjustment: neutral black or white.
+        let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), [87.0 / 255.0, 51.0 / 255.0, 31.0 / 255.0, 1.0]);
+        apply_depth(&Adjustment::Threshold { level: 60.0 / 255.0 }, &mut b, Transfer::Srgb, Some(SampleType::U8));
+        assert_eq!(b.px[0], [1.0, 1.0, 1.0, 1.0]);
     }
 
     /// 16-bit sample → Photoshop's 8-bit level, from psd-tools posterize_16bits_rgb.psd: bins
