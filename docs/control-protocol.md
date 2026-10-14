@@ -196,9 +196,10 @@ Each element describes one command, in registry order:
 | `enabled` | boolean | Whether the command can run in the current state |
 | `disabledReason` | string or `null` | Why the command can't run now (`null` when `enabled`) |
 | `needsDocument` | boolean | `true` when it is off because no document is open (#3664) |
+| `keywords` | string, optional | Other names the command is found by (#5060), e.g. `select.rect`'s Elliptical Marquee; only present on commands that have them |
 
 Filtering narrows the same array without changing its elements: `serve`'s `engine.commands
-{filter}` and the MCP tool's `filter` keep commands whose id or label contains the text
+{filter}` and the MCP tool's `filter` keep commands whose id, label or keywords contain the text
 (case-insensitive), and the MCP tool's `enabled_only` keeps those with `enabled: true`. The
 desktop control channel's `engine.commands` takes no filter and always returns every command.
 The shape is pinned by a test in `crates/automation/src/rpc.rs` (#3684).
