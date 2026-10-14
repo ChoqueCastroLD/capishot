@@ -28,6 +28,9 @@ use crate::{ImportResult, IoError};
 pub const MAX_SIDE: u32 = 16_384;
 /// A rasterised fallback layer or a smart-object render never exceeds this many pixels.
 const MAX_RASTER_PIXELS: u64 = 24_000_000;
+/// Aggregate decoded raster memory allowed when opening one drawing. Per-element limits
+/// alone do not stop thousands of masked groups from exhausting memory.
+const MAX_PIXEL_BYTES: u64 = 1 << 30;
 /// Past this many drawable elements the whole drawing opens as one pixel layer.
 const MAX_NODES: usize = 2_000;
 /// Nesting past which a subtree is rasterised instead of walked (bounded recursion).
@@ -212,6 +215,10 @@ pub fn import_svg_with_group_depth(name: &str, bytes: &[u8], max_group_depth: us
 }
 
 fn import_parsed(name: &str, parsed: Parsed, max_group_depth: usize) -> Result<ImportResult, IoError> {
+    import_parsed_with_budget(name, parsed, max_group_depth, MAX_PIXEL_BYTES)
+}
+
+fn import_parsed_with_budget(name: &str, parsed: Parsed, max_group_depth: usize, pixel_budget: u64) -> Result<ImportResult, IoError> {
     let Parsed { tree, fontless_text } = parsed;
     let mut warnings = Vec::new();
     if fontless_text {
@@ -222,7 +229,7 @@ fn import_parsed(name: &str, parsed: Parsed, max_group_depth: usize) -> Result<I
     let fmt = doc.pixel_format();
     let global = tiny_skia::Transform::from_scale(cv.scale, cv.scale);
     let max_group_depth = (max_group_depth != 0).then_some(max_group_depth.clamp(1, MAX_GROUP_DEPTH));
-    let mut conv = Conv { fmt, canvas: doc.bounds(), global, max_group_depth, warnings, noted: Vec::new(), counts: [0; 4] };
+    let mut conv = Conv { fmt, canvas: doc.bounds(), global, max_group_depth, warnings, noted: Vec::new(), counts: [0; 4], pixel_budget };
     if count_nodes(tree.root()) > MAX_NODES {
         conv.warnings.push(format!("SVG: more than {MAX_NODES} elements; opened as one pixel layer instead of shapes"));
         let (w, h) = (cv.size.width, cv.size.height);
@@ -311,6 +318,8 @@ struct Conv {
     noted: Vec<&'static str>,
     /// Unnamed shapes, groups, images and texts so far, for "Shape 3"-style names.
     counts: [usize; 4],
+    /// Remaining budget for rasterised fallback layers, measured in f32 sample bytes.
+    pixel_budget: u64,
 }
 
 impl Conv {
@@ -318,6 +327,20 @@ impl Conv {
         if !self.noted.contains(&what) {
             self.noted.push(what);
             self.warnings.push(msg);
+        }
+    }
+
+    fn charge_pixels(&mut self, w: usize, h: usize) -> bool {
+        let bytes = (w as u64).saturating_mul(h as u64).saturating_mul(u64::from(self.fmt.channels()) * 4);
+        match self.pixel_budget.checked_sub(bytes) {
+            Some(remaining) => {
+                self.pixel_budget = remaining;
+                true
+            }
+            None => {
+                self.note("pixel-budget", "SVG: rasterised elements exceed the import's pixel memory budget; remaining elements were dropped".into());
+                false
+            }
         }
     }
 
@@ -548,7 +571,7 @@ impl Conv {
         let y0 = ((bb.y() * k).floor() as i32).max(self.canvas.y0);
         let x1 = ((bb.right() * k).ceil() as i32).min(self.canvas.x1);
         let y1 = ((bb.bottom() * k).ceil() as i32).min(self.canvas.y1);
-        if x1 <= x0 || y1 <= y0 {
+        if x1 <= x0 || y1 <= y0 || !self.charge_pixels((x1 - x0) as usize, (y1 - y0) as usize) {
             return None;
         }
         let Some(mut pixmap) = pixmap((x1 - x0) as u32, (y1 - y0) as u32) else {
@@ -766,6 +789,22 @@ mod tests {
             <g clip-path="url(#c)"><rect width="64" height="64"/><rect width="9" height="9" fill="red"/></g></svg>"##;
         let r = import_svg("t", two).unwrap();
         assert!(r.warnings.iter().any(|w| w.contains("clip-path")), "{:?}", r.warnings);
+    }
+
+
+    #[test]
+    fn rasterized_groups_stop_at_the_aggregate_pixel_budget() {
+        let mut svg = String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"256\" height=\"256\">");
+        svg.push_str("<defs><mask id=\"m\"><rect width=\"256\" height=\"256\" fill=\"white\"/></mask></defs>");
+        for i in 0..8 {
+            svg.push_str(&format!("<g id=\"g{i}\" mask=\"url(#m)\"><rect width=\"256\" height=\"256\" fill=\"#00ff00\"/></g>"));
+        }
+        svg.push_str("</svg>");
+        // Enough for one 256×256 RGBA-f32 surface, but not eight of them.
+        let budget = 256u64 * 256 * 4 * 4;
+        let result = import_parsed_with_budget("budget", parse(svg.as_bytes()).unwrap(), MAX_GROUP_DEPTH, budget).unwrap();
+        assert_eq!(result.document.layers.len(), 1, "later raster layers are omitted");
+        assert!(result.warnings.iter().any(|warning| warning.contains("pixel memory")), "{:?}", result.warnings);
     }
 
     #[test]
