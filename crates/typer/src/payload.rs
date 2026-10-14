@@ -150,6 +150,24 @@ pub fn stored_selections(
     out
 }
 
+/// The first usable line of the page holding line `current` (raw index); `current` when there
+/// is none (port of `multiBubbleHistory.js`).
+pub fn first_usable_on_page(lines: &[Line], current: usize) -> usize {
+    let Some(pos) = lines.iter().position(|l| l.raw_index == current) else { return current };
+    let start = lines.iter().take(pos + 1).rposition(|l| l.page.is_some()).map_or(0, |m| m + 1);
+    lines.iter().skip(start).take((pos + 1).saturating_sub(start)).find(|l| !l.ignore).map_or(current, |l| l.raw_index)
+}
+
+/// Where the cursor goes back to when the last stored selection is removed (M3): its captured
+/// line, but not before the first usable line of the current page.
+pub fn stored_selection_line(captured: Option<usize>, current: usize, lines: &[Line]) -> usize {
+    let Some(line) = captured else { return current };
+    if lines.is_empty() {
+        return line;
+    }
+    line.max(first_usable_on_page(lines, current))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +307,30 @@ mod tests {
         assert_eq!(partial.items[0].line_index, 2);
         assert_eq!(partial.items[0].style.as_ref().unwrap().id, Id::str("current"));
         assert_eq!(partial.next_line_index, 2);
+    }
+
+    // multiBubbleHistory.js
+    #[test]
+    fn removed_selection_restores_its_line_within_the_page() {
+        let mut ls = vec![
+            line("Page 1", true, None),
+            line("a", false, None),
+            line("b", false, None),
+            line("Page 2", true, None),
+            line("c", false, None),
+            line("d", false, None),
+        ];
+        for (i, l) in ls.iter_mut().enumerate() {
+            l.raw_index = i;
+        }
+        ls[0].page = Some(1);
+        ls[3].page = Some(2);
+        assert_eq!(first_usable_on_page(&ls, 5), 4);
+        assert_eq!(first_usable_on_page(&ls, 2), 1);
+        assert_eq!(first_usable_on_page(&ls, 99), 99);
+        assert_eq!(stored_selection_line(Some(2), 5, &ls), 4, "clamped to the current page");
+        assert_eq!(stored_selection_line(Some(5), 5, &ls), 5);
+        assert_eq!(stored_selection_line(None, 5, &ls), 5);
+        assert_eq!(stored_selection_line(Some(1), 5, &[]), 1);
     }
 }
