@@ -3396,10 +3396,17 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             crate::lasso_ui::canvas_input(app, &ctx, &xf, &response);
             (buttons.started, buttons.dragged, buttons.stopped, buttons.clicked) = (false, false, false, false);
         }
+        // Right-click on a guide where it could be dragged (the Move tool, or ⌘ with a selection
+        // tool): select it and open the guide menu, as Photoshop does.
+        let guide_menu = response.secondary_clicked()
+            && !lasso_retracted
+            && !transforming
+            && response.interact_pointer_pos().is_some_and(|p| crate::canvas_tool_menu::open_guide(app, &ctx, tool, mods, [p.x, p.y], xf.to_doc(p)));
         // Right-click with the Move tool, or ⌘/Ctrl+right-click: the layers under the pointer.
         if response.secondary_clicked()
             && !lasso_retracted
             && !transforming
+            && !guide_menu
             && crate::layer_pick_ui::is_gesture(tool, mods)
             && let Some(p) = response.interact_pointer_pos()
         {
@@ -3413,6 +3420,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if response.secondary_clicked()
             && !lasso_retracted
             && !transforming
+            && !guide_menu
             && !crate::layer_pick_ui::is_gesture(tool, mods)
             && let Some(p) = response.interact_pointer_pos()
         {
@@ -3590,6 +3598,12 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 Tool::MagneticLasso if response.double_clicked() || response.triple_clicked() => crate::magnetic_lasso_ui::close(app, mods.alt),
                 // The first click placed (or grabbed) the point; the second toggles it.
                 Tool::CurvaturePen if response.double_clicked() => crate::vector_ui::curvature_toggle(app, d[0], d[1]),
+                // Double-clicking a guide opens Preferences › Guides, Grid & Slices, as in Photoshop.
+                Tool::Move if response.double_clicked() && crate::rulers::guide_at(app, d[0], d[1]).is_some() => {
+                    if let Err(e) = crate::menus::invoke(app, &ctx, "edit.preferences.guidesGridAndSlices", json!({})) {
+                        app.ui.status = e;
+                    }
+                }
                 _ => {
                     if tool == Tool::Move && app.ui.transform.is_none() {
                         begin_transform_controls_at(app, &ctx, &xf, p);
@@ -4923,6 +4937,13 @@ fn tool_move(app: &mut PhotocraftApp, x: f64, y: f64, pressure: f32, mods: egui:
 
 /// Tool state machine. Shared by mouse input and automation.
 pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) {
+    // A press anywhere but on a guide deselects the selected guide (`guide_select`).
+    if let ToolEvent::Down { x, y, .. } = ev
+        && app.ui.selected_guide.is_some()
+        && crate::rulers::guide_at(app, x, y).is_none()
+    {
+        crate::guide_select::clear(app);
+    }
     if crate::symmetry_ui::pointer(app, ev, crate::workspace_ui::sticky_mods(app, mods)) {
         return;
     }
@@ -5024,7 +5045,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     if let ToolEvent::Down { x, y, .. } = raw
         && let Some((vertical, i)) = command_guide_at(app, app.active_tool(), [x, y], mods)
     {
-        app.guide_drag = Some(crate::rulers::GuideDrag { vertical, index: Some(i), pos: if vertical { x } else { y } });
+        app.guide_drag = Some(crate::rulers::GuideDrag::existing(vertical, i, [x, y]));
         crate::snap_ui::begin_guide(app, [x, y]);
         return;
     }
@@ -5068,7 +5089,12 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     match ev {
         ToolEvent::Down { x, y, pressure } if tool == Tool::Move => {
             if let Some((vertical, i)) = crate::rulers::guide_at(app, x, y) {
-                app.guide_drag = Some(crate::rulers::GuideDrag { vertical, index: Some(i), pos: if vertical { x } else { y } });
+                // ⌥-click turns the guide, through the point clicked, as in Photoshop.
+                if mods.alt && !mods.shift && !mods.command {
+                    crate::guide_select::flip(app, vertical, i, [x, y]);
+                    return;
+                }
+                app.guide_drag = Some(crate::rulers::GuideDrag::existing(vertical, i, [x, y]));
                 return;
             }
             // Auto-Select (or ⌘-click while it is off) picks the layer under the pointer first

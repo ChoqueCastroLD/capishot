@@ -4086,3 +4086,7 @@ cameraRaw	Yellow	Sárga
 	Chisel Hard	Kemény vésés
 	Chisel Soft	Lágy vésés
 	Open color-less EXR as ACEScg	Színinformáció nélküli EXR megnyitása ACEScg-ként
+
+# View › Guides › right-click a guide
+	Edit Selected Guides	Kijelölt segédvonalak szerkesztése
+	Clear Selected Guides	Kijelölt segédvonalak törlése

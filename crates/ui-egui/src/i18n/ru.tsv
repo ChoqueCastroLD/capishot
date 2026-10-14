@@ -3135,3 +3135,7 @@ curves	Smooth	Сгладить
 	Chisel Hard	Жесткая огранка
 	Chisel Soft	Мягкая огранка
 	Open color-less EXR as ACEScg	Открывать EXR без цветового профиля как ACEScg
+
+# View › Guides › right-click a guide
+	Edit Selected Guides	Изменить выбранные направляющие
+	Clear Selected Guides	Удалить выбранные направляющие

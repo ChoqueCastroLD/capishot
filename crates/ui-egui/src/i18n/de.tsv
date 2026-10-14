@@ -3166,3 +3166,7 @@ curves	Smooth	Glätten
 	Chisel Hard	Meißeln hart
 	Chisel Soft	Meißeln weich
 	Open color-less EXR as ACEScg	Farbangabenloses EXR als ACEScg öffnen
+
+# View › Guides › right-click a guide
+	Edit Selected Guides	Ausgewählte Hilfslinien bearbeiten
+	Clear Selected Guides	Ausgewählte Hilfslinien löschen

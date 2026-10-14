@@ -4240,3 +4240,7 @@ shape	Appearance	Izgled
 	Chisel Soft	Meko klesanje
 	Open color-less EXR as ACEScg	Otvori EXR bez podatka o bojama kao ACEScg
 	Show home recent files	Prikaži nedavne datoteke na početnom ekranu
+
+# View › Guides › right-click a guide
+	Edit Selected Guides	Uredi izabrane vodilje
+	Clear Selected Guides	Ukloni izabrane vodilje

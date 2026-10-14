@@ -3897,3 +3897,7 @@ cameraData	Lens	Lens
 	Chisel Hard	Sert Keski
 	Chisel Soft	Yumuşak Keski
 	Open color-less EXR as ACEScg	Renk bilgisi olmayan EXR'yi ACEScg olarak aç
+
+# View › Guides › right-click a guide
+	Edit Selected Guides	Seçili Kılavuzları Düzenle
+	Clear Selected Guides	Seçili Kılavuzları Temizle

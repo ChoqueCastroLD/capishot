@@ -2853,3 +2853,7 @@ curves	Smooth	Suavizar
 	Chisel Hard	Cincelar duro
 	Chisel Soft	Cincelar suave
 	Open color-less EXR as ACEScg	Abrir EXR sin espacio de color como ACEScg
+
+# View › Guides › right-click a guide
+	Edit Selected Guides	Editar guías seleccionadas
+	Clear Selected Guides	Borrar guías seleccionadas

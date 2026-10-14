@@ -500,6 +500,10 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
             return;
         }
     }
+    // A selected guide: ⌫/Delete removes it (`guide_select`), never Edit › Clear's pixels.
+    if crate::guide_select::keys(app, ctx) {
+        return;
+    }
     // Space+F (⇧Space+F backwards) cycles the pasteboard colour, as in Photoshop: F while the
     // Hand key is held, before F's own Cycle Screen Mode.
     if !matches!(focus, Focus::Text) && app.ui.text_edit.is_none() && crate::hold_keys::reposition_held(app, ctx) {

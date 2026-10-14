@@ -3866,3 +3866,7 @@ curves	Smooth	Згладити
 	Chisel Hard	Жорстке різьблення
 	Chisel Soft	М'яке різьблення
 	Open color-less EXR as ACEScg	Відкривати EXR без колірного профілю як ACEScg
+
+# View › Guides › right-click a guide
+	Edit Selected Guides	Редагувати вибрані напрямні
+	Clear Selected Guides	Очистити вибрані напрямні
