@@ -2801,3 +2801,31 @@ cameraData	Lens	Obiettivo
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Invia statistiche di utilizzo anonime
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	La versione web invia statistiche di utilizzo anonime (nessun file o contenuto); disattivale in Preferenze › Generale.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	Carica font…
+	Load Font Folder…	Carica cartella di font…
+	Manage Fonts…	Gestisci font…
+	Manage Fonts	Gestisci font
+	User fonts	Font personali
+	All fonts	Tutti i font
+	Missing fonts	Font mancanti
+	Already loaded: {n}	Già caricati: {n}
+	Skipped {file}	Saltato {file}
+	No fonts were found	Nessun font trovato
+	Fonts loaded: {n}	Font caricati: {n}
+	Not saved, usable until you close this tab: {fonts}	Non salvati, utilizzabili finché non chiudi questa scheda: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	Rimuovi font in Testo › Gestisci font… per liberare spazio.
+	Browser storage is full	L'archiviazione del browser è piena
+	Fonts could not be saved	Impossibile salvare i font
+	Font files: {n} · {size}	File di font: {n} · {size}
+	Stored in this browser only, never uploaded.	Salvati solo in questo browser, mai caricati online.
+	Browser storage: {used} of {quota}	Archiviazione del browser: {used} di {quota}
+	Kept until you remove them.	Conservati finché non li rimuovi.
+	The browser may clear them when space runs low.	Il browser può cancellarli se manca spazio.
+	Loaded for this session only.	Caricati solo per questa sessione.
+	Browser storage is unavailable: {error}	L'archiviazione del browser non è disponibile: {error}
+	Remove All	Rimuovi tutti
+	Remove all fonts from this browser?	Rimuovere tutti i font da questo browser?
+	Removed: {n}	Rimossi: {n}
+	No fonts loaded yet.	Nessun font caricato.
+	Not saved	Non salvato

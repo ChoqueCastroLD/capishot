@@ -258,6 +258,8 @@ pub fn generation() -> u64 {
 /// Asks for a family to be fetched: picked in a font menu, or needed by a layout that doesn't
 /// have it. Families the host doesn't serve are ignored; asking again is harmless.
 pub fn request(family: &str) {
+    // The user's own fonts (Type › Load Fonts…) restore lazily too: read the file now.
+    crate::user_fonts::request(family);
     let mut s = state();
     if s.families.iter().any(|f| f == family) && !s.requested.iter().any(|f| f == family) {
         s.requested.push(family.to_string());

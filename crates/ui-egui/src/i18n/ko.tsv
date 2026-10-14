@@ -3308,3 +3308,31 @@ cameraData	Lens	렌즈
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	익명 사용 통계 보내기
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	웹 버전은 익명 사용 통계를 보냅니다(파일이나 내용은 보내지 않음). 환경 설정 › 일반에서 끌 수 있습니다.
+# The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
+	Load Fonts…	글꼴 불러오기…
+	Load Font Folder…	글꼴 폴더 불러오기…
+	Manage Fonts…	글꼴 관리…
+	Manage Fonts	글꼴 관리
+	User fonts	사용자 글꼴
+	All fonts	모든 글꼴
+	Missing fonts	누락된 글꼴
+	Already loaded: {n}	이미 불러옴: {n}
+	Skipped {file}	건너뜀: {file}
+	No fonts were found	글꼴을 찾지 못했습니다
+	Fonts loaded: {n}	불러온 글꼴: {n}
+	Not saved, usable until you close this tab: {fonts}	저장되지 않음, 이 탭을 닫을 때까지 사용 가능: {fonts}
+	Remove fonts in Type › Manage Fonts… to free space.	문자 › 글꼴 관리…에서 글꼴을 제거해 공간을 확보하세요.
+	Browser storage is full	브라우저 저장소가 가득 찼습니다
+	Fonts could not be saved	글꼴을 저장하지 못했습니다
+	Font files: {n} · {size}	글꼴 파일: {n} · {size}
+	Stored in this browser only, never uploaded.	이 브라우저에만 저장되며 업로드되지 않습니다.
+	Browser storage: {used} of {quota}	브라우저 저장소: {used} / {quota}
+	Kept until you remove them.	제거할 때까지 유지됩니다.
+	The browser may clear them when space runs low.	공간이 부족하면 브라우저가 삭제할 수 있습니다.
+	Loaded for this session only.	이 세션에서만 불러왔습니다.
+	Browser storage is unavailable: {error}	브라우저 저장소를 사용할 수 없습니다: {error}
+	Remove All	모두 제거
+	Remove all fonts from this browser?	이 브라우저에서 모든 글꼴을 제거할까요?
+	Removed: {n}	제거됨: {n}
+	No fonts loaded yet.	아직 불러온 글꼴이 없습니다.
+	Not saved	저장 안 됨
