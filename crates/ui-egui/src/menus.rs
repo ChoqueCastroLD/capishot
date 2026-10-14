@@ -535,6 +535,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "edit.paste" if params.as_object().is_none_or(|o| o.is_empty()) => {
             // Photoshop: paste in place when the copied area is visible, else centred in the view;
             // images from other apps are always centred.
+            if app.wait_for_os_clipboard(id, &params) {
+                return Ok(json!({"pending": "clipboard"}));
+            }
             app.import_os_clipboard();
             app.clip_read_for_paste = true;
             let external = app.clip_external;
@@ -748,6 +751,10 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         // Clipboard need no document (with none open, Paste makes one); Paste in Place does.
         "edit.paste" | "file.newFromClipboard" => app.session.is_enabled(id) || app.services.clipboard_get_image.is_some(),
         "edit.pasteSpecial.pasteInPlace" => app.session.is_enabled(id) || (app.services.clipboard_get_image.is_some() && app.session.active().is_some()),
+        // Paste Into / Outside also need a selection to paste through.
+        "edit.pasteSpecial.pasteInto" | "edit.pasteSpecial.pasteOutside" => {
+            app.session.is_enabled(id) || (app.services.clipboard_get_image.is_some() && app.session.active().is_some_and(|d| d.doc.selection.is_some()))
+        }
         "select.selectAndMask" => app.session.is_enabled("select.refineEdge"),
         "type.editText" => app
             .session
@@ -1431,6 +1438,10 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
                 let r = match it.id.as_str() {
                     "image.mode.bits8" | "image.mode.bits16" => r.on_hover_text(crate::i18n::tr(lang, "Integer")),
                     "image.mode.bits32" => r.on_hover_text(crate::i18n::tr(lang, "Floating point")),
+                    // The browser hands over a file's contents, never a path to link to.
+                    "file.placeLinked" if cfg!(target_arch = "wasm32") => {
+                        r.on_disabled_hover_text(crate::i18n::tr(lang, "A browser can't link to files on disk: use Place Embedded"))
+                    }
                     _ => r,
                 };
                 let hit = r.clicked() || released_on(ui, &r);

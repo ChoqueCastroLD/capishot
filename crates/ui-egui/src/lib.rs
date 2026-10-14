@@ -328,6 +328,12 @@ pub type EncodePngFn = Box<dyn Fn(u32, u32, &[u8]) -> Result<Vec<u8>, String>>;
 pub type ClipboardSetFn = Box<dyn FnMut(u32, u32, &[u8]) -> Result<(), String>>;
 /// Read an RGBA8 image from the OS clipboard.
 pub type ClipboardGetFn = Box<dyn FnMut() -> Option<(u32, u32, Vec<u8>)>>;
+/// Platforms that read the OS clipboard asynchronously (the web): before a paste, start reading
+/// it. True when a read started: the paste waits for it, and the shell calls
+/// [`PhotocraftApp::resume_clipboard_paste`] once [`ClipboardGetFn`] returns what was read. False
+/// when what `clipboard_get_image` returns is already current (the page's `paste` event just
+/// delivered it) or the clipboard can't be read.
+pub type ClipboardRefreshFn = Box<dyn FnMut() -> bool>;
 /// Shared queue of (file name, bytes) delivered asynchronously.
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 /// Read the saved preferences text (`None` when there is none yet).
@@ -427,6 +433,7 @@ pub struct Services {
     /// OS clipboard images: copies go out, screenshots and images from other apps come in.
     pub clipboard_set_image: Option<ClipboardSetFn>,
     pub clipboard_get_image: Option<ClipboardGetFn>,
+    pub clipboard_refresh: Option<ClipboardRefreshFn>,
     /// Preferences persistence: the platform config directory on native, browser storage on
     /// the web (see `prefs_ui`).
     pub load_prefs: Option<LoadTextFn>,
@@ -583,7 +590,7 @@ pub struct PhotocraftApp {
     /// The document tab strip last frame: a drop there opens the file at the slot under it.
     pub(crate) tab_strip: Option<canvas::TabStrip>,
     /// Files dropped on the canvas still to place, one Free Transform at a time.
-    pub(crate) drop_places: std::collections::VecDeque<egui::DroppedFileHandle>,
+    pub(crate) drop_places: std::collections::VecDeque<file_open::DropPlace>,
     /// The document each of `ui.views` belongs to, as of the last [`Self::sync_views`].
     view_docs: Vec<DocId>,
     pub fps: f32,
@@ -652,6 +659,9 @@ pub struct PhotocraftApp {
     /// The OS clipboard was already read for the paste in flight (Edit › Paste positions it first),
     /// so `run` doesn't read it a second time.
     pub(crate) clip_read_for_paste: bool,
+    /// A paste waiting for an asynchronous read of the OS clipboard ([`ClipboardRefreshFn`]):
+    /// the command and its params, run again by [`Self::resume_clipboard_paste`].
+    clip_waiting: Option<(String, Value)>,
     /// Pointer position over the canvas (document px), for the Info panel and status bar.
     pub(crate) hover_doc: Option<[f64; 2]>,
     pub(crate) clone_preview: Option<crate::canvas::ClonePreviewCache>,
@@ -793,6 +803,7 @@ impl PhotocraftApp {
             os_clip_sig: None,
             clip_external: false,
             clip_read_for_paste: false,
+            clip_waiting: None,
             transform_preview: None,
             move_mods: Default::default(),
             style_preview: None,
@@ -932,8 +943,11 @@ impl PhotocraftApp {
         }
         let t0 = gpu_canvas::now_ms();
         // The OS clipboard is read only on an explicit paste, never in the background (privacy, CPU).
-        if matches!(id, "edit.paste" | "edit.pasteSpecial.pasteInPlace" | "file.newFromClipboard") {
+        if is_os_paste(id) {
             if !clip_read {
+                if self.wait_for_os_clipboard(id, &params) {
+                    return Ok(serde_json::json!({"pending": "clipboard"}));
+                }
                 self.import_os_clipboard();
             }
             if self.session.clipboard.is_none() && self.services.clipboard_get_image.is_some() {
@@ -2167,6 +2181,12 @@ fn channel_tint(mode: photocraft_doc::ColorMode, k: usize, byte: u8, in_color: b
     }
 }
 
+/// The commands that paste the clipboard image, and so read the OS clipboard first: an image
+/// copied in another app (a screenshot, a browser image) pastes like one copied here.
+pub(crate) fn is_os_paste(id: &str) -> bool {
+    matches!(id, "edit.paste" | "edit.pasteSpecial.pasteInPlace" | "edit.pasteSpecial.pasteInto" | "edit.pasteSpecial.pasteOutside" | "file.newFromClipboard")
+}
+
 impl PhotocraftApp {
     /// Mirror the session clipboard onto the OS clipboard (RGBA8).
     fn export_os_clipboard(&mut self) {
@@ -2211,6 +2231,40 @@ impl PhotocraftApp {
     /// Returns true when a new external image was imported. Once the OS clipboard no longer holds
     /// the image we mirrored or imported (text or a file was copied since), that image is stale:
     /// it is dropped rather than pasted.
+    /// Before an explicit paste on a platform that reads the OS clipboard asynchronously: start
+    /// the read and park `id` until it finishes (true). Automation never waits: an agent has no
+    /// user gesture to grant the read with.
+    pub(crate) fn wait_for_os_clipboard(&mut self, id: &str, params: &Value) -> bool {
+        if self.automation_input {
+            return false;
+        }
+        let Some(refresh) = self.services.clipboard_refresh.as_mut() else { return false };
+        if !refresh() {
+            return false;
+        }
+        // A second paste while the first still waits replaces it: one paste per read.
+        self.clip_waiting = Some((id.to_string(), params.clone()));
+        self.ui.status = tl!("Reading the clipboard…").into();
+        self.ui.status_error = false;
+        true
+    }
+
+    /// The asynchronous clipboard read [`Self::wait_for_os_clipboard`] started has finished: run
+    /// the paste that waited for it (None when none did).
+    pub fn resume_clipboard_paste(&mut self, ctx: &egui::Context) -> Option<Result<Value, String>> {
+        let (id, params) = self.clip_waiting.take()?;
+        if self.ui.status == tl!("Reading the clipboard…") {
+            self.ui.status.clear();
+        }
+        // Enabled on the strength of the clipboard service; the command itself reports what's wrong.
+        let r = crate::menus::invoke(self, ctx, &id, params);
+        if let Err(e) = &r {
+            self.ui.status = e.clone();
+            self.ui.status_error = true;
+        }
+        Some(r)
+    }
+
     pub(crate) fn import_os_clipboard(&mut self) -> bool {
         let Some(get) = self.services.clipboard_get_image.as_mut() else { return false };
         let image = get().filter(|(w, h, bytes)| *w > 0 && *h > 0 && bytes.len() == *w as usize * *h as usize * 4);
@@ -2467,6 +2521,135 @@ mod clipboard_tests {
         assert_eq!(app.run("edit.pasteSpecial.pasteInPlace", serde_json::json!({})).unwrap()["pasted"], serde_json::json!(false));
         assert_eq!(app.session.active().unwrap().doc.layers.len(), layers);
         assert!(!app.ui.status_error && !app.ui.status.is_empty());
+    }
+
+    /// The web reads the clipboard asynchronously (`clipboard_refresh`): a paste chosen from a
+    /// menu waits for the read and runs, with the same placement and history, once the shell
+    /// resumes it; a paste right after the page's paste event (the read already done) doesn't wait.
+    struct AsyncClip {
+        os: OsClip,
+        /// Reads started (the refresh service said "wait").
+        started: Arc<std::sync::atomic::AtomicUsize>,
+        /// The next refresh finds the clipboard already current (a paste event brought it).
+        fresh: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    fn app_with_async_clipboard() -> (PhotocraftApp, AsyncClip) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let clip = AsyncClip { os: OsClip::default(), started: Arc::default(), fresh: Arc::default() };
+        let (b, n, f) = (clip.os.clone(), clip.started.clone(), clip.fresh.clone());
+        let services = Services {
+            clipboard_get_image: Some(Box::new(move || b.lock().unwrap().clone())),
+            clipboard_refresh: Some(Box::new(move || {
+                if f.swap(false, SeqCst) {
+                    return false;
+                }
+                n.fetch_add(1, SeqCst);
+                true
+            })),
+            ..Default::default()
+        };
+        (PhotocraftApp::new(Session::new(), services), clip)
+    }
+
+    #[test]
+    fn a_menu_paste_waits_for_an_asynchronous_clipboard_read() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let ctx = egui::Context::default();
+        let (mut app, clip) = app_with_async_clipboard();
+        // Nothing open: Paste waits, then the image becomes a document of its size.
+        let r = crate::menus::invoke(&mut app, &ctx, "edit.paste", serde_json::json!({})).unwrap();
+        assert_eq!(r["pending"], "clipboard");
+        assert_eq!(clip.started.load(SeqCst), 1);
+        assert!(app.session.documents().is_empty(), "nothing happens before the read finishes");
+        *clip.os.lock().unwrap() = Some((30, 20, [0u8, 255, 0, 255].repeat(600)));
+        clip.fresh.store(true, SeqCst);
+        app.resume_clipboard_paste(&ctx).unwrap().unwrap();
+        let d = &app.session.active().unwrap().doc;
+        assert_eq!((d.size.width, d.size.height), (30, 20));
+        assert!(app.resume_clipboard_paste(&ctx).is_none(), "one resume per waiting paste");
+        assert_eq!(app.ui.status, "", "the 'Reading the clipboard' status is cleared");
+
+        // With a document: a new layer centred in the view, one undoable Paste.
+        app.session.execute("file.new", serde_json::json!({"width": 200, "height": 100})).unwrap();
+        app.sync_views();
+        app.ui.views[1].center = [100.0, 50.0];
+        assert_eq!(crate::menus::invoke(&mut app, &ctx, "edit.paste", serde_json::json!({})).unwrap()["pending"], "clipboard");
+        clip.fresh.store(true, SeqCst);
+        let r = app.resume_clipboard_paste(&ctx).unwrap().unwrap();
+        assert_eq!(r["offset"], serde_json::json!([85, 40]), "centred: {r}");
+        assert_eq!(app.session.active().unwrap().doc.layers.len(), 2);
+        let info = app.session.execute("document.inspect", serde_json::json!({})).unwrap();
+        assert_eq!(info["history"].as_array().unwrap().last().unwrap(), "Paste");
+
+        // ⌘V right after the page's paste event: the image is current, no read, no wait.
+        clip.fresh.store(true, SeqCst);
+        let r = crate::menus::invoke(&mut app, &ctx, "edit.paste", serde_json::json!({})).unwrap();
+        assert!(r.get("pending").is_none() && r.get("layer").is_some(), "{r}");
+        assert_eq!(clip.started.load(SeqCst), 2);
+
+        // Paste in Place keeps the image's origin.
+        assert_eq!(app.run("edit.pasteSpecial.pasteInPlace", serde_json::json!({})).unwrap()["pending"], "clipboard");
+        clip.fresh.store(true, SeqCst);
+        assert_eq!(app.resume_clipboard_paste(&ctx).unwrap().unwrap()["offset"], serde_json::json!([0, 0]));
+
+        // Automation never waits for a read it can't grant.
+        app.automation_input = true;
+        let r = app.run("edit.paste", serde_json::json!({})).unwrap();
+        assert!(r.get("pending").is_none(), "{r}");
+        assert_eq!(clip.started.load(SeqCst), 3);
+    }
+
+    /// Edit › Paste Special › Paste Into with a selection and an image copied in another app: a
+    /// layer of the image, masked by the selection (Photoshop's Paste Into).
+    #[test]
+    fn paste_into_takes_an_os_clipboard_image_through_the_selection() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let ctx = egui::Context::default();
+        let (mut app, clip) = app_with_async_clipboard();
+        app.session.execute("file.new", serde_json::json!({"width": 64, "height": 64})).unwrap();
+        app.sync_views();
+        assert!(!crate::menus::is_enabled(&app, "edit.pasteSpecial.pasteInto"), "Paste Into needs a selection");
+        app.run("select.rect", serde_json::json!({"x": 10, "y": 10, "width": 20, "height": 10})).unwrap();
+        assert!(crate::menus::is_enabled(&app, "edit.pasteSpecial.pasteInto") && crate::menus::is_enabled(&app, "edit.pasteSpecial.pasteOutside"));
+        *clip.os.lock().unwrap() = Some((8, 8, [255u8, 0, 0, 255].repeat(64)));
+        assert_eq!(crate::menus::invoke(&mut app, &ctx, "edit.pasteSpecial.pasteInto", serde_json::json!({})).unwrap()["pending"], "clipboard");
+        clip.fresh.store(true, SeqCst);
+        app.resume_clipboard_paste(&ctx).unwrap().unwrap();
+        let st = app.session.active().unwrap();
+        let layer = st.doc.layer(st.active_layer.unwrap()).unwrap();
+        assert!(layer.mask.is_some(), "the selection becomes the layer's mask");
+        let b = layer.surface().unwrap().content_bounds();
+        assert_eq!((b.x0, b.y0, b.width(), b.height()), (16, 11, 8, 8), "centred on the selection");
+    }
+
+    /// The web reads dropped files itself: on the canvas of an open document they are placed,
+    /// each in Free Transform in turn, like the desktop's drops; with nothing open they open.
+    #[test]
+    fn dropped_bytes_are_placed_on_the_open_document() {
+        let ctx = egui::Context::default();
+        let png = |w: u32, h: u32| {
+            let img = photocraft_codecs::Image::from_u8(w, h, photocraft_codecs::ChannelLayout::Rgba, [0u8, 0, 255, 255].repeat((w * h) as usize)).unwrap();
+            photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()
+        };
+        let import: ImportFn = Box::new(|name: &str, bytes: &[u8], depth: usize| {
+            photocraft_io::import_with_svg_group_depth(name, bytes, depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
+        });
+        let mut app = PhotocraftApp::new(Session::new(), Services { import: Some(import), ..Default::default() });
+        app.place_dropped_bytes("first.png".into(), png(10, 6));
+        assert_eq!(app.session.documents().len() + app.jobs.opens.len(), 1, "nothing open: the drop opens");
+        assert!(app.drop_places.is_empty());
+        app.session.execute("file.new", serde_json::json!({"width": 100, "height": 50})).unwrap();
+        app.sync_views();
+        app.place_dropped_bytes("big.png".into(), png(300, 100));
+        app.place_dropped_bytes("small.png".into(), png(4, 4));
+        app.place_next_dropped(&ctx);
+        let st = app.session.active().unwrap();
+        let placed = st.doc.layer(st.active_layer.unwrap()).unwrap();
+        assert_eq!(placed.name, "big");
+        assert!(matches!(placed.content, photocraft_doc::LayerContent::Smart(_)), "a smart object, like Place Embedded");
+        assert!(app.ui.transform.is_some(), "in Free Transform");
+        assert_eq!(app.drop_places.len(), 1, "the next waits for this transform");
     }
 
     #[test]
