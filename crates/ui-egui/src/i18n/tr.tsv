@@ -534,6 +534,9 @@
 	Field Blur…	Alan Bulanıklığı…
 	No pin selected	Seçili pim yok
 	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Pim eklemek için görüntüye tıklayın; taşımak için pimi, bulanıklığını değiştirmek için halkasını sürükleyin. Delete seçili pimi siler.
+	Drag the handles on the outline to resize and turn it, the square to round its corners, and the dots inside to set where the blur starts.	Yeniden boyutlandırmak ve döndürmek için dış çizgideki tutamaçları, köşeleri yuvarlamak için kareyi, bulanıklığın nerede başlayacağını belirlemek için içerideki noktaları sürükleyin.
+	Drag the pin to move the band, or its ring to change its blur. Drag the solid lines to widen the sharp band, the dashed lines to set the transition, and the dots to turn it.	Bandı taşımak için pimi, bulanıklığını değiştirmek için halkasını sürükleyin. Keskin bandı genişletmek için düz çizgileri, geçişi ayarlamak için kesikli çizgileri, döndürmek için noktaları sürükleyin.
+	Drag the handles on the outline to resize and turn it; the ring sets the blur angle.	Yeniden boyutlandırmak ve döndürmek için dış çizgideki tutamaçları sürükleyin; halka bulanıklık açısını belirler.
 	Iris Blur…	İris Bulanıklığı…
 	Tilt-Shift…	Tilt-Shift…
 	Path Blur…	Yol Bulanıklığı…
@@ -1003,6 +1006,7 @@
 	Delete Layer Mask	Katman Maskesini Sil
 	Delete Layers	Katmanları Sil
 	Delete Shortcut	Kısayolu Sil
+	Add Shortcut	Kısayol Ekle
 	Delete Timeline	Zaman Çizelgesini Sil
 	Delete Tool Preset	Araç Ön Ayarını Sil
 	Delete count group	Sayım grubunu sil
@@ -1839,6 +1843,8 @@
 	Camera Raw Defaults	Camera Raw Varsayılanları
 	Canvas border	Kanvas kenarlığı
 	Show canvas dots	Kanvas noktalarını göster
+	Clip thumbnails to layer bounds	Küçük resimleri katman sınırlarına kırp
+	Clip Thumbnails to Layer Bounds	Küçük resimleri katman sınırlarına kırp
 	Canvas color	Kanvas rengi
 	Canvas custom color	Kanvas özel rengi
 	Color picker	Renk seçici
@@ -3286,6 +3292,7 @@ cameraRaw	Color	Renk
 	Compose	Oluştur
 	Condensed	Yoğunlaştırılmış
 	Conditional Mode Change	Koşullu Mod Değişikliği
+	Background (Default)	Arka plan (varsayılan)
 	Content-Aware Fill	İçeriğe Uygun Dolgu
 	Convert Frames > Video Layers	Çerçeveleri Dönüştür > Video Katmanları
 	Convert to Linked	Bağlantılıya Dönüştür
@@ -3355,6 +3362,7 @@ cameraRaw	Color	Renk
 	How often fastening points are placed by themselves	Sabitleme noktalarının kendi başlarına ne sıklıkla yerleştirildiği
 	ISO Speed	ISO Hızı
 	Image Processor	Görüntü İşlemcisi
+	Include All Subfolders	Tüm Alt Klasörleri Dahil Et
 	In	içinde
 	Install Plug-in	Eklentiyi Yükle
 	Interpret Footage	Görüntüyü Yorumlama
@@ -3639,6 +3647,8 @@ cameraRaw	Whites	Beyazlar
 	Color Picker (Layer Style Color)	Renk Seçici (Katman Stili Rengi)
 	Auto Hide Notifications	Bildirimleri Otomatik Gizle
 	Notification Duration (seconds)	Bildirim Süresi (saniye)
+	Bundle Arrow-Key Nudges	Ok tuşlarıyla kaydırmaları birleştir
+	Nudge Bundle Pause (ms)	Kaydırma birleştirme duraklaması (ms)
 	Appearance Mode	Görünüm Modu
 	Presentation	Sunum
 	Next Appearance Mode	Sonraki Görünüm Modu
@@ -3820,6 +3830,7 @@ cameraData	Lens	Lens
 @plural	{n} step|{n} steps	{n} adım
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} fırça ön ayarı uyarısı daha)
 @plural	{what} with {n} warning|{what} with {n} warnings	{what}, {n} uyarı ile
+	Response curve	Yanıt eğrisi
 	Show home recent files	Ana ekranda son dosyaları göster
 	Clear Brush Controls	Fırça Denetimlerini Temizle
 	Reset All Locked Settings	Tüm Kilitli Ayarları Sıfırla
@@ -3890,3 +3901,7 @@ cameraData	Lens	Lens
 	Chisel Hard	Sert Keski
 	Chisel Soft	Yumuşak Keski
 	Open color-less EXR as ACEScg	Renk bilgisi olmayan EXR'yi ACEScg olarak aç
+
+# View › Guides › right-click a guide
+	Edit Selected Guides	Seçili Kılavuzları Düzenle
+	Clear Selected Guides	Seçili Kılavuzları Temizle

@@ -554,6 +554,9 @@
 # Field Blur pins (#3373)
 	No pin selected	Nessuna puntina selezionata
 	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Fai clic sull’immagine per aggiungere una puntina; trascina una puntina per spostarla o il suo anello per cambiare la sfocatura. Canc rimuove la puntina selezionata.
+	Drag the handles on the outline to resize and turn it, the square to round its corners, and the dots inside to set where the blur starts.	Trascina le maniglie sul contorno per ridimensionarlo e ruotarlo, il quadrato per arrotondarne gli angoli e i punti interni per stabilire dove inizia la sfocatura.
+	Drag the pin to move the band, or its ring to change its blur. Drag the solid lines to widen the sharp band, the dashed lines to set the transition, and the dots to turn it.	Trascina la puntina per spostare la banda o il suo anello per cambiare la sfocatura. Trascina le linee continue per allargare la banda nitida, quelle tratteggiate per la transizione e i punti per ruotarla.
+	Drag the handles on the outline to resize and turn it; the ring sets the blur angle.	Trascina le maniglie sul contorno per ridimensionarlo e ruotarlo; l’anello imposta l’angolo di sfocatura.
 	Iris Blur…	Sfocatura diaframma…
 	Tilt-Shift…	Miniatura…
 	Path Blur…	Sfocatura tracciato…
@@ -1038,6 +1041,7 @@
 	Delete Group	Elimina gruppo
 	Delete Layer Mask	Elimina maschera di livello
 	Delete Layers	Elimina livelli
+	Add Shortcut	Aggiungi scorciatoia
 	Delete Shortcut	Elimina scorciatoia
 	Delete Timeline	Elimina timeline
 	Delete Tool Preset	Elimina predefinito strumento
@@ -1889,6 +1893,8 @@
 	Camera Raw Defaults	Predefiniti Camera Raw
 	Canvas border	Bordo quadro
 	Show canvas dots	Mostra punti del quadro
+	Clip thumbnails to layer bounds	Ritaglia le miniature ai limiti del livello
+	Clip Thumbnails to Layer Bounds	Ritaglia le miniature ai limiti del livello
 	Canvas color	Colore quadro
 	Canvas custom color	Colore personalizzato quadro
 	Color picker	Selettore colore
@@ -2080,6 +2086,8 @@
 	Fade steps	Passi dissolvenza
 	Hide the layer's effects  ({key}-click: all layers)	Nascondi effetti livello ({key}-clic: tutti i livelli)
 	Import Brushes… (.abr)	Importa pennelli… (.abr)
+	Import Brushes… (.abr or image)	Importa pennelli… (.abr o immagine)
+	Import Brush from Image…	Importa pennello da immagine…
 	Move Group Down	Sposta gruppo giù
 	Move Group Up	Sposta gruppo su
 	Reset the brush to the defaults	Reimposta pennello ai predefiniti
@@ -2570,6 +2578,8 @@ fontWeight	Italic	Corsivo
 	Color Picker (Layer Style Color)	Selettore colore (colore dello stile livello)
 	Auto Hide Notifications	Nascondi automaticamente le notifiche
 	Notification Duration (seconds)	Durata della notifica (secondi)
+	Bundle Arrow-Key Nudges	Raggruppa gli spostamenti con le frecce
+	Nudge Bundle Pause (ms)	Pausa per raggruppare gli spostamenti (ms)
 	Appearance Mode	Modalità aspetto
 	Dark Theme	Tema scuro
 	Light Theme	Tema chiaro
@@ -2697,6 +2707,7 @@ cameraData	Lens	Obiettivo
 	Search settings…	Cerca impostazioni…
 	No matching settings	Nessuna impostazione corrispondente
 	Loading fonts…	Caricamento font…
+	Response curve	Curva di risposta
 	Tool	Strumento
 	Simulate Pressure	Simula pressione
 	Stroke Path…	Traccia tracciato…
@@ -4096,6 +4107,9 @@ navigator	Zoom	Zoom
 	Action playback stopped	Esecuzione dell’azione interrotta
 	Step {step} is waiting for its dialog	Il passaggio {step} attende la sua finestra di dialogo
 @plural	{n} action|{n} actions	{n} azione|{n} azioni
+	Background (Default)	Sfondo (predefinito)
+# Batch / Image Processor
+	Include All Subfolders	Includi tutte le sottocartelle
 	Auto Add/Delete	Aggiungi/elimina automaticamente
 
 # Native Windows printing qualification
@@ -4279,3 +4293,6 @@ layerLabel	Red	Rosso
 layers	Fill	Riempimento
 layers	Fill:	Riempimento:
 shape	Appearance	Aspetto
+# View › Guides › right-click a guide
+	Edit Selected Guides	Modifica guide selezionate
+	Clear Selected Guides	Cancella guide selezionate

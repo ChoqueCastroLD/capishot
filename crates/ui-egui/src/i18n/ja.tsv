@@ -556,6 +556,9 @@
 # Field Blur pins (#3373)
 	No pin selected	ピンが選択されていません
 	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	画像をクリックしてピンを追加します。ピンをドラッグして移動し、リングをドラッグしてぼかしを変更します。Delete キーで選択したピンを削除します。
+	Drag the handles on the outline to resize and turn it, the square to round its corners, and the dots inside to set where the blur starts.	輪郭上のハンドルをドラッグしてサイズ変更と回転、四角形で角の丸み、内側の点でぼかしの開始位置を設定します。
+	Drag the pin to move the band, or its ring to change its blur. Drag the solid lines to widen the sharp band, the dashed lines to set the transition, and the dots to turn it.	ピンをドラッグして帯を移動し、リングでぼかしを変更します。実線で鮮明な帯の幅、破線で移行範囲、点で回転を調整します。
+	Drag the handles on the outline to resize and turn it; the ring sets the blur angle.	輪郭上のハンドルをドラッグしてサイズ変更と回転を行います。リングでぼかしの角度を設定します。
 	Iris Blur…	虹彩絞りぼかし…
 	Tilt-Shift…	チルトシフト…
 	Path Blur…	パスぼかし…
@@ -1039,6 +1042,7 @@
 	Delete Group	グループを削除
 	Delete Layer Mask	レイヤーマスクを削除
 	Delete Layers	レイヤーを削除
+	Add Shortcut	ショートカットを追加
 	Delete Shortcut	ショートカットを削除
 	Delete Timeline	タイムラインを削除
 	Delete Tool Preset	ツールプリセットを削除
@@ -1891,6 +1895,8 @@
 	Camera Raw Defaults	Camera Raw の既定値
 	Canvas border	カンバスの境界
 	Show canvas dots	カンバスのドットを表示
+	Clip thumbnails to layer bounds	サムネールをレイヤーの境界でクリップ
+	Clip Thumbnails to Layer Bounds	サムネールをレイヤーの境界でクリップ
 	Canvas color	カンバスの色
 	Canvas custom color	カンバスのカスタム色
 	Color picker	カラーピッカー
@@ -2082,6 +2088,8 @@
 	Fade steps	フェードのステップ数
 	Hide the layer's effects  ({key}-click: all layers)	レイヤーの効果を隠す ({key}+クリック: すべてのレイヤー)
 	Import Brushes… (.abr)	ブラシを読み込み…(.abr)
+	Import Brushes… (.abr or image)	ブラシを読み込み…(.abr または画像)
+	Import Brush from Image…	画像からブラシを読み込み…
 	Move Group Down	グループを下へ移動
 	Move Group Up	グループを上へ移動
 	Reset the brush to the defaults	ブラシを既定に戻す
@@ -3514,6 +3522,8 @@ fontWeight	Italic	斜体
 	Color Picker (Layer Style Color)	カラーピッカー (レイヤースタイルの色)
 	Auto Hide Notifications	通知を自動的に隠す
 	Notification Duration (seconds)	通知の表示時間 (秒)
+	Bundle Arrow-Key Nudges	矢印キーの移動をまとめる
+	Nudge Bundle Pause (ms)	移動をまとめる間隔（ms）
 	Appearance Mode	外観モード
 	Dark Theme	ダークテーマ
 	Light Theme	ライトテーマ
@@ -3638,6 +3648,7 @@ cameraData	Lens	レンズ
 	Search settings…	設定を検索…
 	No matching settings	一致する設定はありません
 	Loading fonts…	フォントを読み込み中…
+	Response curve	応答カーブ
 	Simulate Pressure	筆圧をシミュレート
 	Stroke Path…	パスのストローク…
 	Background Eraser	背景消しゴム
@@ -3740,6 +3751,9 @@ curves	Smooth	スムーズ
 	Action playback stopped	アクションの再生を停止しました
 	Step {step} is waiting for its dialog	ステップ {step} はダイアログを待っています
 @plural	{n} action|{n} actions	アクション {n} 個
+	Background (Default)	背景（既定）
+# Batch / Image Processor
+	Include All Subfolders	すべてのサブフォルダーを含める
 
 # Liquify tool names (shown via tl!(tool.label()) in the UI, so they are not found by the static scan)
 	Forward Warp	前方ワープ
@@ -3834,3 +3848,6 @@ curves	Smooth	スムーズ
 	Chisel Hard	チゼルハード
 	Chisel Soft	チゼルソフト
 	Open color-less EXR as ACEScg	色空間のないEXRをACEScgとして開く
+# View › Guides › right-click a guide
+	Edit Selected Guides	選択したガイドを編集
+	Clear Selected Guides	選択したガイドを消去
