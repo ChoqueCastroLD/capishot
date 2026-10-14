@@ -3916,3 +3916,12 @@ layerLabel	No Color	Sem cor
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Enviar estatísticas de uso anônimas
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	A versão web envia estatísticas de uso anônimas (sem arquivos nem conteúdo); desative-as em Preferências › Geral.
+# TypeR (Type › TypeR menu; TypeR strings ship in es/pt only, see TYPER_LANGUAGES in i18n/mod.rs).
+	TypeR	TypeR
+	Next Line	Próxima linha
+	Previous Line	Linha anterior
+	Next Page	Próxima página
+	Previous Page	Página anterior
+	Next Style	Próximo estilo
+	Previous Style	Estilo anterior
+	Next Size Preset	Próximo tamanho predefinido

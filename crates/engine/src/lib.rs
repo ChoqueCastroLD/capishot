@@ -120,6 +120,10 @@ pub mod type_format_cmds;
 pub mod type_mask_cmds;
 pub mod type_spell_cmds;
 pub mod type_styles_cmds;
+pub mod typer_cmds;
+mod typer_place_cmds;
+mod typer_query_cmds;
+pub mod typer_state;
 mod variables_cmds;
 pub mod vector_cmds;
 mod video_cmds;
@@ -423,6 +427,8 @@ pub struct Session {
     /// Google Fonts download services (fetcher, store, index), injected by the shell; `None`
     /// where online fonts are unavailable (see `font_download_cmds`).
     font_services: Option<Arc<font_download_cmds::FontServices>>,
+    /// TypeR: script, cursor, style library and settings (see `typer_state`, `docs/typer.md`).
+    pub typer: typer_state::TyperSession,
 }
 
 /// Move item `i` of `v` to position `to`, clamped to the end. Returns where it went; `None` when

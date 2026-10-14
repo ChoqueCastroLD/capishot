@@ -30,6 +30,7 @@ rayon = { workspace = true }
 photocraft-paint = { workspace = true }
 photocraft-algo = { workspace = true }
 photocraft-text = { workspace = true }
+photocraft-typer = { workspace = true }
 photocraft-vector = { workspace = true }
 photocraft-io = { workspace = true }
 photocraft-psd = { workspace = true }

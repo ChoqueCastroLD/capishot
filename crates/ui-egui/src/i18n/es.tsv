@@ -2810,3 +2810,12 @@ cameraData	Lens	Objetivo
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Enviar estadísticas de uso anónimas
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	La versión web envía estadísticas de uso anónimas (sin archivos ni contenido); desactívalas en Preferencias › General.
+# TypeR (Type › TypeR menu; TypeR strings ship in es/pt only, see TYPER_LANGUAGES in i18n/mod.rs).
+	TypeR	TypeR
+	Next Line	Línea siguiente
+	Previous Line	Línea anterior
+	Next Page	Página siguiente
+	Previous Page	Página anterior
+	Next Style	Estilo siguiente
+	Previous Style	Estilo anterior
+	Next Size Preset	Siguiente tamaño predefinido
