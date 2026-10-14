@@ -59,6 +59,14 @@ fn hdr_adjustments_preserve_range_and_cpu_parity() {
             black: Vec::new(),
             pencil: false,
         },
+        // 32-bit Photoshop rules: unclipped, legacy pivot 127, the mixer's 1/1024 steps and halved constant.
+        Adjustment::BrightnessContrast { brightness: 25.0, contrast: 30.0, legacy: true },
+        Adjustment::BrightnessContrast { brightness: -20.0, contrast: -30.0, legacy: true },
+        Adjustment::ChannelMixer { matrix: [[0.8, 0.3, -0.1, 0.0], [0.1, 0.9, 0.0, 0.05], [0.0, 0.2, 0.7, 0.0]], monochrome: false },
+        Adjustment::ChannelMixer { matrix: [[0.4, 0.4, 0.2, 0.1], [0.0; 4], [0.0; 4]], monochrome: true },
+        Adjustment::PhotoFilter { color: [0.97, 0.76, 0.0], density: 0.4, preserve_luminosity: true },
+        Adjustment::PhotoFilter { color: [0.2, 0.6, 0.9], density: 0.3, preserve_luminosity: false },
+        Adjustment::BlackWhite { weights: [70.0, 20.0, 50.0, 10.0, 90.0, 30.0], tint: Some([0.9, 0.7, 0.5]) },
     ] {
         let mut d = Document::new("HDR adjustments", Size::new(3, 1), ColorMode::Rgb, SampleType::F32);
         let mut layer = Layer::raster("pixels", PixelFormat::RGBA32F);

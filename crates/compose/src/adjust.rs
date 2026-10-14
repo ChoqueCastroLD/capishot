@@ -87,8 +87,13 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
             // 27.11, brightness +40 with contrast +30 maps 128 to 185 (brightness first), while
             // the corpus's brightness -23 with contrast -26 (psd-tools) needs contrast first;
             // contrast 80 keeps 128 at 128 (a 0.5 pivot moved it to 130).
-            let f = legacy_brightness_contrast(*brightness, *contrast);
-            map_rgb(buf, |px| px.map(&f))
+            if depth == Some(SampleType::F32) {
+                let f = legacy_brightness_contrast_hdr(*brightness, *contrast);
+                map_rgb(buf, |px| px.map(&f));
+            } else {
+                let f = legacy_brightness_contrast(*brightness, *contrast);
+                map_rgb(buf, |px| px.map(&f))
+            }
         }
         Adjustment::BrightnessContrast { brightness, contrast, .. } => {
             // Modern (CS3+) Brightness/Contrast, reverse-engineered from Photoshop ground truth
@@ -168,6 +173,17 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
             let hi = if depth == Some(SampleType::F32) { f32::INFINITY } else { 1.0 };
             map_rgb(buf, |c| vibrance_px(c, v, s, transfer, hi))
         }
+        Adjustment::ChannelMixer { matrix, monochrome } if depth == Some(SampleType::F32) => {
+            // 32-bit: each source percentage is cut to 1/1024 (toward zero), the constant counts
+            // 255/512 of its value, and nothing clips (photoshop corpus rgb32 channel-mixer.psd:
+            // pure red, green, blue, black and white all exact).
+            let cut = |v: f32| (v * 1024.0).trunc() / 1024.0;
+            let m = matrix.map(|row| [cut(row[0]), cut(row[1]), cut(row[2]), row[3] * 255.0 / 512.0]);
+            map_rgb(buf, |c| {
+                let mix = |row: &[f32; 4]| row[0] * c[0] + row[1] * c[1] + row[2] * c[2] + row[3];
+                if *monochrome { [mix(&m[0]); 3] } else { [mix(&m[0]), mix(&m[1]), mix(&m[2])] }
+            })
+        }
         Adjustment::ChannelMixer { matrix, monochrome } => map_rgb(buf, |c| {
             let mix = |row: &[f32; 4]| (row[0] * c[0] + row[1] * c[1] + row[2] * c[2] + row[3]).clamp(0.0, 1.0);
             if *monochrome { [mix(&matrix[0]); 3] } else { [mix(&matrix[0]), mix(&matrix[1]), mix(&matrix[2])] }
@@ -177,20 +193,29 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
             let m = photo_filter_matrix(*color, *density, *preserve_luminosity && linear_doc);
             let set_lum = *preserve_luminosity && !linear_doc;
             map_rgb(buf, |c| {
-                let f = mat3_mul(&m, c.map(|v| transfer.decode(v))).map(|v| transfer.encode(v));
+                // 32-bit samples are linear already, and may go negative.
+                let f = if linear_doc { mat3_mul(&m, c) } else { mat3_mul(&m, c.map(|v| transfer.decode(v))).map(|v| transfer.encode(v)) };
                 let f = if set_lum { photocraft_color::blend::set_lum(f, photocraft_color::blend::lum(c)) } else { f };
-                f.map(|v| v.clamp(0.0, 1.0))
+                // 32-bit results aren't clipped (photoshop corpus rgb32 photo-filter.psd: white
+                // filters to 1.19 red).
+                if linear_doc { f } else { f.map(|v| v.clamp(0.0, 1.0)) }
             })
         }
-        Adjustment::BlackWhite { weights, tint } => map_rgb(buf, |c| {
-            let g = black_white_gray(c, weights);
-            match tint {
-                // Photoshop tints like the Color blend mode: the tint's hue and saturation at the
-                // grey's luminosity (SetLum + ClipColor), measured in Photoshop 27.11.
-                Some(t) => photocraft_color::blend::set_lum(*t, g).map(|v| v.clamp(0.0, 1.0)),
-                None => [g; 3],
-            }
-        }),
+        Adjustment::BlackWhite { weights, tint } => {
+            let hdr = depth == Some(SampleType::F32);
+            map_rgb(buf, |c| {
+                let g = black_white_gray(c, weights);
+                match tint {
+                    // Photoshop tints like the Color blend mode: the tint's hue and saturation at
+                    // the grey's luminosity (SetLum + ClipColor), measured in Photoshop 27.11. In
+                    // 32-bit documents nothing clips at 1, as with the blend mode there (photoshop
+                    // corpus rgb32 black-white-tint.psd: white tints to 1.05, 1.00, 0.87).
+                    Some(t) if hdr => photocraft_color::blend::blend_rgb_within(photocraft_color::blend::BlendMode::Color, [g; 3], *t, f32::MAX),
+                    Some(t) => photocraft_color::blend::set_lum(*t, g).map(|v| v.clamp(0.0, 1.0)),
+                    None => [g; 3],
+                }
+            })
+        }
         Adjustment::GradientMap { stops, reverse, dither } => {
             let (w, x0, y0) = (buf.rect.width().max(1) as usize, buf.rect.x0, buf.rect.y0);
             for (i, p) in buf.px.iter_mut().enumerate() {
@@ -233,6 +258,19 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
         // Not evaluated: identity (still round-trips through PSD).
         Adjustment::ColorLookup { .. } | Adjustment::Unsupported { .. } => {}
     }
+}
+
+/// Legacy Brightness/Contrast on a 32-bit document's samples: unclipped, with contrast pivoting at
+/// 127 of 255 (photoshop corpus rgb32 and gray32 brightness-contrast-legacy.psd: every pixel
+/// exact, negative and over-white values included; the 8/16-bit pivot, 128, is 0.43 of a level
+/// off there).
+fn legacy_brightness_contrast_hdr(brightness: f32, contrast: f32) -> impl Fn(f32) -> f32 {
+    const PIVOT: f32 = 127.0 / 255.0;
+    let b = brightness / 255.0;
+    let c = contrast.clamp(-100.0, 99.0);
+    let k = if c >= 0.0 { 1.0 / (1.0 - c / 100.0) } else { 1.0 + c / 100.0 };
+    let (pre, post) = if c >= 0.0 { (b, 0.0) } else { (0.0, b) };
+    move |v: f32| (v + pre - PIVOT) * k + PIVOT + post
 }
 
 /// Legacy Brightness/Contrast as one channel's tone curve (see [`apply_depth`]).
@@ -1217,6 +1255,41 @@ mod tone_tests {
 
     /// Photoshop 27.11, measured: Brightness/Contrast with Use Legacy on, over a gray ramp
     /// (x = 0, 16, …, 240, 255), one row per (brightness, contrast).
+    /// One pixel through `adj` in a 32-bit document.
+    fn hdr(adj: &Adjustment, c: [f32; 3]) -> [f32; 3] {
+        let mut b = Buffer::filled(crate::Rect::new(0, 0, 1, 1), [c[0], c[1], c[2], 1.0]);
+        apply_depth(adj, &mut b, Transfer::Gamma(1.0), Some(SampleType::F32));
+        [b.px[0][0], b.px[0][1], b.px[0][2]]
+    }
+
+    /// Photoshop's own 32-bit results (photoshop corpus rgb32): nothing clips, legacy contrast
+    /// pivots at 127, the mixer cuts its percentages to 1/1024 and counts 255/512 of the
+    /// constant, and the Black & White tint keeps values above 1.
+    #[test]
+    fn thirty_two_bit_adjustments_match_photoshop_unclipped() {
+        let near = |got: [f32; 3], want: [f32; 3], tol: f32| got.iter().zip(want).all(|(g, w)| (g - w).abs() <= tol);
+        let bc = Adjustment::BrightnessContrast { brightness: 25.0, contrast: 30.0, legacy: true };
+        // brightness-contrast-legacy.psd
+        assert!(near(hdr(&bc, [0.4910, 0.0009, 0.9301]), [0.6280, -0.0721, 1.2553], 2e-4), "{:?}", hdr(&bc, [0.4910, 0.0009, 0.9301]));
+        // channel-mixer.psd: pure red, green, blue and black, exactly.
+        let mixer = Adjustment::ChannelMixer { matrix: [[0.8, 0.3, -0.1, 0.0], [0.1, 0.9, 0.0, 0.05], [0.0, 0.2, 0.7, 0.0]], monochrome: false };
+        for (c, want) in [
+            ([1.0, 0.0, 0.0], [0.7998047, 0.1245117, 0.0]),
+            ([0.0, 1.0, 0.0], [0.2998047, 0.9243164, 0.1992188]),
+            ([0.0, 0.0, 1.0], [-0.0996094, 0.0249023, 0.6992188]),
+            ([0.0, 0.0, 0.0], [0.0, 0.0249023, 0.0]),
+        ] {
+            assert!(near(hdr(&mixer, c), want, 1e-6), "{c:?}: {:?}", hdr(&mixer, c));
+        }
+        // black-white-tint.psd: white tints past 1.
+        let bw = Adjustment::BlackWhite { weights: [40.0, 60.0, 40.0, 60.0, 20.0, 80.0], tint: Some([0.88235295, 0.827451, 0.7019608]) };
+        assert!(near(hdr(&bw, [1.0; 3]), [1.0522, 0.9973, 0.8718], 2e-4), "{:?}", hdr(&bw, [1.0; 3]));
+        // 8/16-bit documents still clip.
+        let mut b = Buffer::filled(crate::Rect::new(0, 0, 1, 1), [1.0, 1.0, 1.0, 1.0]);
+        apply_depth(&bw, &mut b, Transfer::Srgb, None);
+        assert!(b.px[0].iter().all(|v| *v <= 1.0));
+    }
+
     #[test]
     fn legacy_brightness_contrast_matches_photoshop() {
         const X: [u8; 17] = [0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 255];

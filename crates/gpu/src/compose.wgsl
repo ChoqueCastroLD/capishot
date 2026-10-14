@@ -617,6 +617,7 @@ fn mcontrast(v: f32, ct: f32) -> f32 {
 }
 
 fn adjust(c: vec3<f32>) -> vec3<f32> {
+    let hdr = (op.flags & F_HDR) != 0u;
     let p0 = op.p0;
     let p1 = op.p1;
     let p2 = op.p2;
@@ -639,7 +640,11 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             if p0.y > 0.5 { return vec3(posterize16(c.r, p0.x), posterize16(c.g, p0.x), posterize16(c.b, p0.x)); }
             return vec3(posterize(c.r, p0.x), posterize(c.g, p0.x), posterize(c.b, p0.x));
         }
-        case 4: { return clamp((c + p0.x - p0.z) * p0.y + p0.z + p0.w, vec3(0.0), vec3(1.0)); }   // B/C legacy: brightness before (p0.x) or after (p0.w) contrast around compose::adjust::LEGACY_PIVOT (p0.z)
+        case 4: {                                                              // B/C legacy: brightness before (p0.x) or after (p0.w) contrast around the pivot (p0.z); 32-bit unclipped
+            let v = (c + p0.x - p0.z) * p0.y + p0.z + p0.w;
+            if (hdr) { return v; }
+            return clamp(v, vec3(0.0), vec3(1.0));
+        }
         case 5: {                                                              // B/C modern
             let b = p0.x; let ct = p0.y;
             return vec3(mcontrast(mbright(c.r, b), ct), mcontrast(mbright(c.g, b), ct), mcontrast(mbright(c.b, b), ct));
@@ -701,13 +706,17 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             l = clamp(l, vec3(0.0), vec3(p0.w));
             return vec3(t_encode(l.r, p0.z), t_encode(l.g, p0.z), t_encode(l.b, p0.z));
         }
-        case 10: {                                                             // Channel mixer
-            let r = clamp(dot(p0.xyz, c) + p0.w, 0.0, 1.0);
+        case 10: {                                                             // Channel mixer (32-bit unclipped)
+            let lo = select(0.0, -F32_MAX, hdr);
+            let hi = select(1.0, F32_MAX, hdr);
+            let r = clamp(dot(p0.xyz, c) + p0.w, lo, hi);
             if (p3.x > 0.5) { return vec3(r); }
-            return vec3(r, clamp(dot(p1.xyz, c) + p1.w, 0.0, 1.0), clamp(dot(p2.xyz, c) + p2.w, 0.0, 1.0));
+            return vec3(r, clamp(dot(p1.xyz, c) + p1.w, lo, hi), clamp(dot(p2.xyz, c) + p2.w, lo, hi));
         }
         case 11: {                                                             // Photo filter
             // compose::adjust::photo_filter_matrix (rows p0..p2) in linear light, then SetLum.
+            // 32-bit samples are linear already and stay unclipped.
+            if (hdr) { return vec3(dot(p0.xyz, c), dot(p1.xyz, c), dot(p2.xyz, c)); }
             let g = p3.y;
             let lin = vec3(t_decode(c.r, g), t_decode(c.g, g), t_decode(c.b, g));
             var f = vec3(t_encode(dot(p0.xyz, lin), g), t_encode(dot(p1.xyz, lin), g), t_encode(dot(p2.xyz, lin), g));
@@ -726,6 +735,7 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             if (c.b <= c.r && c.b <= c.g) { secondary = 1; } else if (c.r <= c.g) { secondary = 3; }
             let g = clamp(mn + (mid - mn) * w[secondary] / 100.0 + (mx - mid) * w[primary] / 100.0, 0.0, 1.0);
             if (p1.z > 0.5) {
+                if (hdr) { return set_lum(p2.rgb, g, F32_MAX); }                // 32-bit: nothing clips at 1
                 return clamp(set_lum(p2.rgb, g, 1.0), vec3(0.0), vec3(1.0));   // Color blend of the tint
             }
             return vec3(g);
