@@ -559,6 +559,9 @@
 	No pin selected	Ningún pin seleccionado
 	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Haga clic en la imagen para añadir un pin; arrastre un pin para moverlo o su anillo para cambiar el desenfoque. Suprimir elimina el pin seleccionado.
 	Drag the handles on the outline to resize and turn it, the square to round its corners, and the dots inside to set where the blur starts.	Arrastre los manejadores del contorno para cambiar su tamaño y girarlo, el cuadrado para redondear las esquinas y los puntos interiores para fijar dónde empieza el desenfoque.
+	Drag the pin to move the band, or its ring to change its blur. Drag the solid lines to widen the sharp band, the dashed lines to set the transition, and the dots to turn it.	Arrastre el pin para mover la banda o su anillo para cambiar el desenfoque. Arrastre las líneas continuas para ensanchar la banda nítida, las discontinuas para fijar la transición y los puntos para girarla.
+	Drag the handles on the outline to resize and turn it; the ring sets the blur angle.	Arrastre los manejadores del contorno para cambiar su tamaño y girarlo; el anillo fija el ángulo de desenfoque.
+	Blur Angle	Ángulo de desenfoque
 	Iris Blur…	Desenfoque de iris…
 	Tilt-Shift…	Cambio de inclinación…
 	Path Blur…	Desenfoque de trazado…
