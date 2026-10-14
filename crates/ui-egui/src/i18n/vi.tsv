@@ -3632,6 +3632,8 @@ curves	Smooth	Làm mượt
 	Sent to {printer}	Đã gửi tới {printer}
 	set in Print Settings…	đặt trong thiết lập in…
 	ICO is limited to 256 × 256 pixels	ICO giới hạn ở 256 × 256 pixel
+	Button Mode	Chế độ nút
+	Button Mode On	Chế độ nút bật
 
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	Làm tối giao diện

@@ -3753,6 +3753,8 @@ navigator	Zoom	Zvětšení
 	Sent to {printer}	Odesláno do {printer}
 	set in Print Settings…	nastavuje se v nastavení tisku…
 	ICO is limited to 256 × 256 pixels	ICO je omezen na 256 × 256 pixelů
+	Button Mode	Režim tlačítka
+	Button Mode On	Režim tlačítka zapnutý
 
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	Ztmavit rozhraní

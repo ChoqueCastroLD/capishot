@@ -3843,6 +3843,8 @@ curves	Smooth	Εξομάλυνση
 	Sent to {printer}	Στάλθηκε στον {printer}
 	set in Print Settings…	ορίζεται στις ρυθμίσεις εκτύπωσης…
 	ICO is limited to 256 × 256 pixels	Το ICO περιορίζεται σε 256 × 256 εικονοστοιχεία
+	Button Mode	Λειτουργία κουμπιών
+	Button Mode On	Λειτουργία κουμπιών ενεργή
 
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	Σκουρότερο περιβάλλον

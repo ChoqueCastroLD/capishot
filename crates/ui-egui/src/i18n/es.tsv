@@ -2830,6 +2830,8 @@ curves	Smooth	Suavizar
 	Sent to {printer}	Enviado a {printer}
 	set in Print Settings…	se establece en Ajustes de impresión…
 	ICO is limited to 256 × 256 pixels	ICO está limitado a 256 × 256 píxeles
+	Button Mode	Modo de botón
+	Button Mode On	Modo de botón activado
 
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	Oscurecer interfaz

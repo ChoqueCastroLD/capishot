@@ -2740,6 +2740,8 @@ curves	Smooth	平滑
 	Sent to {printer}	已傳送至 {printer}
 	set in Print Settings…	在列印設定中設定…
 	ICO is limited to 256 × 256 pixels	ICO 最大為 256 × 256 像素
+	Button Mode	按鈕模式
+	Button Mode On	按鈕模式 開
 
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	介面變暗

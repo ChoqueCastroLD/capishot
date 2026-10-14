@@ -3143,6 +3143,8 @@ curves	Smooth	Glätten
 	Sent to {printer}	An {printer} gesendet
 	set in Print Settings…	in den Druckeinstellungen festlegen…
 	ICO is limited to 256 × 256 pixels	ICO ist auf 256 × 256 Pixel begrenzt
+	Button Mode	Schaltflächenmodus
+	Button Mode On	Schaltflächenmodus an
 
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	Benutzeroberfläche abdunkeln

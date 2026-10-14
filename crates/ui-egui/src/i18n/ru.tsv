@@ -3111,6 +3111,8 @@ curves	Smooth	Сгладить
 	Gray Value (Median)	Уровень серого (медиана)
 	Integrated Density	Интегральная плотность
 	Length	Длина
+	Button Mode	Режим кнопок
+	Button Mode On	Режим кнопок включён
 
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	Сделать интерфейс темнее

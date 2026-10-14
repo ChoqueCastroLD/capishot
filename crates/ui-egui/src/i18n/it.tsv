@@ -4108,6 +4108,8 @@ navigator	Zoom	Zoom
 	Sent to {printer}	Inviato a {printer}
 	set in Print Settings…	impostato nelle impostazioni di stampa…
 	ICO is limited to 256 × 256 pixels	ICO è limitato a 256 × 256 pixel
+	Button Mode	Modalità pulsante
+	Button Mode On	Modalità pulsante attiva
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	Scurisci interfaccia
 	Lighten Interface	Schiarisci interfaccia
