@@ -31,22 +31,26 @@ pub const MAX_PAGE_BYTES: usize = 1 << 30;
 /// opens that scanlation teams use for pages.
 pub const PAGE_EXTS: [&str; 8] = ["psd", "psb", "png", "jpg", "jpeg", "webp", "tif", "tiff"];
 
-/// Page files picked in the browser: contents by page file name.
+/// Page files picked in the browser: contents by work tab, then by page file name (two
+/// chapters may both have a `001.psd`). The cap is for all tabs together.
 #[derive(Clone, Default)]
 pub struct PageFiles {
-    bytes: BTreeMap<String, Arc<Vec<u8>>>,
+    by_tab: BTreeMap<String, BTreeMap<String, Arc<Vec<u8>>>>,
     total: usize,
+    /// The document each (tab, page file) opened as, so two chapters' `001.psd` stay apart.
+    claims: BTreeMap<(String, String), photocraft_doc::DocId>,
 }
 
 impl std::fmt::Debug for PageFiles {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PageFiles").field("files", &self.bytes.len()).field("total", &self.total).finish()
+        f.debug_struct("PageFiles").field("tabs", &self.by_tab.len()).field("total", &self.total).finish()
     }
 }
 
 impl PartialEq for PageFiles {
     fn eq(&self, other: &Self) -> bool {
-        self.total == other.total && self.bytes.keys().eq(other.bytes.keys())
+        self.total == other.total
+            && self.by_tab.iter().map(|(t, f)| (t, f.keys().collect::<Vec<_>>())).eq(other.by_tab.iter().map(|(t, f)| (t, f.keys().collect::<Vec<_>>())))
     }
 }
 
@@ -56,16 +60,35 @@ impl PageFiles {
         self.total
     }
 
-    /// Is the file `image` available to open (in memory, or a path on the desktop)?
-    pub fn available(&self, image: &str) -> bool {
-        self.bytes.contains_key(image) || is_local_path(image)
+    /// Is tab `tab`'s page file `image` available to open (in memory, or a path on the desktop)?
+    pub fn available(&self, tab: &str, image: &str) -> bool {
+        self.get(tab, image).is_some() || is_local_path(image)
     }
 
-    /// Keep `bytes` as page file `name` unless the store would go over `cap` bytes.
-    fn insert(&mut self, name: String, bytes: Vec<u8>, cap: usize) -> bool {
+    fn get(&self, tab: &str, image: &str) -> Option<&Arc<Vec<u8>>> {
+        self.by_tab.get(tab)?.get(image)
+    }
+
+    /// Drop tab `tab`'s files.
+    pub fn clear_tab(&mut self, tab: &str) {
+        if let Some(files) = self.by_tab.remove(tab) {
+            self.total = self.total.saturating_sub(files.values().map(|b| b.len()).sum());
+        }
+    }
+
+    /// Drop the files of tabs that are gone.
+    fn retain_tabs(&mut self, tabs: &[photocraft_typer::Tab]) {
+        let gone: Vec<String> = self.by_tab.keys().filter(|k| !tabs.iter().any(|t| &t.id == *k)).cloned().collect();
+        for k in gone {
+            self.clear_tab(&k);
+        }
+    }
+
+    /// Keep `bytes` as tab `tab`'s page file `name` unless the store would go over `cap` bytes.
+    fn insert(&mut self, tab: &str, name: String, bytes: Vec<u8>, cap: usize) -> bool {
         let Some(total) = self.total.checked_add(bytes.len()).filter(|t| *t <= cap) else { return false };
         self.total = total;
-        if let Some(old) = self.bytes.insert(name, Arc::new(bytes)) {
+        if let Some(old) = self.by_tab.entry(tab.to_string()).or_default().insert(name, Arc::new(bytes)) {
             self.total = self.total.saturating_sub(old.len());
         }
         true
@@ -118,15 +141,17 @@ fn set_files_capped(app: &mut PhotocraftApp, names: Vec<String>, mut files: Vec<
     }
     files.retain(|(n, _)| is_page_file(n));
     files.sort_by(|a, b| photocraft_typer::pages::natural_cmp(&a.0, &b.0));
-    let mut store = PageFiles::default();
+    let r = super::run(app, "typer.images.set", json!({"images": names}))?;
+    // The tab's earlier files go; the new ones fit beside the other tabs'.
+    let tab = app.session.typer.state.current_tab_id.clone();
+    let store = &mut app.ui.typer.page_files;
+    store.clear_tab(&tab);
     let mut dropped = 0usize;
     for (name, bytes) in files {
-        if !store.insert(name, bytes, cap) {
+        if !store.insert(&tab, name, bytes, cap) {
             dropped += 1;
         }
     }
-    let r = super::run(app, "typer.images.set", json!({"images": names}))?;
-    app.ui.typer.page_files = store;
     if dropped > 0 {
         app.ui.typer.message = format!(
             "{} ({dropped}): {}",
@@ -140,15 +165,32 @@ fn set_files_capped(app: &mut PhotocraftApp, names: Vec<String>, mut files: Vec<
 /// Stop syncing page files (TypeR's "Desync PSDs"); open documents stay open.
 pub fn desync(app: &mut PhotocraftApp) {
     super::act(app, "typer.images.clear", json!({}));
-    app.ui.typer.page_files = PageFiles::default();
+    let tab = app.session.typer.state.current_tab_id.clone();
+    app.ui.typer.page_files.clear_tab(&tab);
 }
 
-/// The open document showing page file `image`: the one read from that path, else one with its
-/// file name.
-fn find_doc(app: &PhotocraftApp, image: &str) -> Option<usize> {
+/// The open document showing the current tab's page file `image`: the one it opened as before,
+/// else the one read from that path, else one with its file name that no other page file claims.
+/// A match by path or name is claimed for this tab and file.
+fn find_doc(app: &mut PhotocraftApp, image: &str) -> Option<usize> {
+    let tab = app.session.typer.state.current_tab_id.clone();
+    let key = (tab, image.to_string());
     let docs = app.session.documents();
+    let files = &mut app.ui.typer.page_files;
+    files.claims.retain(|_, id| docs.iter().any(|d| d.doc.id == *id));
+    if let Some(id) = files.claims.get(&key) {
+        return docs.iter().position(|d| d.doc.id == *id);
+    }
     let name = display_name(image);
-    docs.iter().position(|d| d.path.as_deref() == Some(image)).or_else(|| docs.iter().position(|d| d.doc.name == name))
+    let claimed = |id: photocraft_doc::DocId| files.claims.iter().any(|(k, c)| *c == id && *k != key);
+    let i = docs
+        .iter()
+        .position(|d| d.path.as_deref() == Some(image) && !claimed(d.doc.id))
+        .or_else(|| docs.iter().position(|d| d.doc.name == name && !claimed(d.doc.id)))?;
+    if let Some(d) = docs.get(i) {
+        files.claims.insert(key, d.doc.id);
+    }
+    Some(i)
 }
 
 /// Bring page file `image` to the front: activate its document, else open it.
@@ -161,19 +203,29 @@ pub fn open_page(app: &mut PhotocraftApp, image: &str) -> Result<(), String> {
     if app.jobs.opens.iter().any(|o| o.name == name || o.path.as_deref() == Some(image)) {
         return Ok(());
     }
-    if let Some(bytes) = app.ui.typer.page_files.bytes.get(image).cloned() {
-        return app.open_bytes(&name, &bytes).map(|_| ());
+    let tab = app.session.typer.state.current_tab_id.clone();
+    if let Some(bytes) = app.ui.typer.page_files.get(&tab, image).cloned() {
+        app.open_bytes(&name, &bytes)?;
+    } else if is_local_path(image) {
+        app.open_path(image)?;
+    } else {
+        return Err(tl!("this page file isn't loaded any more: choose the page files again").into());
     }
-    if is_local_path(image) {
-        return app.open_path(image).map(|_| ());
+    // Opened at once (not in the background): the new document is the active one.
+    if let Some(d) = app.session.active().filter(|d| d.doc.name == name) {
+        let id = d.doc.id;
+        app.ui.typer.page_files.claims.insert((tab, image.to_string()), id);
     }
-    Err(tl!("this page file isn't loaded any more: choose the page files again").into())
+    Ok(())
 }
 
 /// Open the current page's file when the cursor reaches another page (see the module docs).
 /// Waits while a dialog or prompt is up or a button is held.
 pub fn sync(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let st = &app.session.typer.state;
+    if app.ui.typer.page_files.total > 0 {
+        app.ui.typer.page_files.retain_tabs(&st.tabs);
+    }
     if st.images.is_empty() {
         return;
     }
@@ -219,7 +271,7 @@ pub(super) fn footer(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         return;
     }
     let files = &app.ui.typer.page_files;
-    let missing = st.images.iter().filter(|i| !files.available(i)).count();
+    let missing = st.images.iter().filter(|i| !files.available(&st.current_tab_id, i)).count();
     let current = st.current_image().and_then(|i| st.images.get(i)).map(|s| display_name(s));
     let n = st.images.len();
     let label = crate::i18n::trn(crate::i18n::current(), n as u64, "{n} page", "{n} pages");

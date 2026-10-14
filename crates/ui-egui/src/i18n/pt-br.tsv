@@ -4120,3 +4120,24 @@ layerLabel	No Color	Sem cor
 	the browser keeps up to 1 GB of pages. Choose the remaining pages again when you get to them.	o navegador mantém até 1 GB de páginas. Escolha as páginas restantes de novo quando chegar a elas.
 	this page file isn't loaded any more: choose the page files again	este arquivo de página não está mais carregado: escolha os arquivos de página de novo
 @plural	{n} page|{n} pages	{n} página|{n} páginas
+	Tab	Aba
+	Rename tab	Renomear aba
+	Close tab	Fechar aba
+	New tab	Nova aba
+	The last tab can't be closed.	A última aba não pode ser fechada.
+	Click: switch · double-click: rename · right-click: more	Clique: alternar · clique duplo: renomear · clique direito: mais
+	Close the tab? Its script, cursor and page files are removed; the styles stay.	Fechar a aba? O roteiro, o cursor e os arquivos de página dela são removidos; os estilos ficam.
+	Work tabs (one per chapter)	Abas de trabalho (uma por capítulo)
+	FontScanR: styles from a chapter's fonts…	FontScanR: estilos com as fontes de um capítulo…
+	Find the fonts a chapter's text layers use and turn them into styles: the most used size wins.	Encontre as fontes que as camadas de texto de um capítulo usam e transforme-as em estilos: vence o tamanho mais usado.
+	Scan open documents	Analisar os documentos abertos
+	Choose PSD files…	Escolher arquivos PSD…
+	No text layers found.	Nenhuma camada de texto encontrada.
+	not loaded	não carregada
+	Import into	Importar em
+	Existing folder	Pasta existente
+	Choose at least one font to import.	Escolha pelo menos uma fonte para importar.
+	Name the new folder.	Dê um nome à pasta nova.
+	Choose a folder.	Escolha uma pasta.
+@plural	{n} file|{n} files	{n} arquivo|{n} arquivos
+@plural	{n} font|{n} fonts	{n} fonte|{n} fontes

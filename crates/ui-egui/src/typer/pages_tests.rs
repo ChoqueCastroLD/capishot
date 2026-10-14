@@ -98,7 +98,8 @@ fn contents_past_the_cap_are_not_kept_and_missing_files_are_reported() {
     set_files_capped(&mut app, picked.iter().map(|s| s.to_string()).collect(), files(&picked), 25).unwrap();
     assert_eq!(app.ui.typer.page_files.total(), 20, "the first pages fit");
     assert!(app.ui.typer.message.contains("(1)"), "{}", app.ui.typer.message);
-    assert!(app.ui.typer.page_files.available("p2.jpg") && !app.ui.typer.page_files.available("p3.jpg"));
+    let tab = app.session.typer.state.current_tab_id.clone();
+    assert!(app.ui.typer.page_files.available(&tab, "p2.jpg") && !app.ui.typer.page_files.available(&tab, "p3.jpg"));
     app.run("typer.page.next", json!({})).unwrap();
     app.run("typer.page.next", json!({})).unwrap();
     app.ui.typer.message.clear();
@@ -112,4 +113,24 @@ fn contents_past_the_cap_are_not_kept_and_missing_files_are_reported() {
     assert!(set_files(&mut app, vec!["a.txt".into()], Vec::new()).is_err());
     assert_eq!(app.session.typer.state.images.len(), 3);
     assert!(is_page_file("X.PSD") && is_page_file("a.tiff") && !is_page_file("psd"));
+}
+
+#[test]
+fn each_tab_keeps_its_own_page_files() {
+    let mut app = app();
+    let ctx = egui::Context::default();
+    set_files(&mut app, vec!["001.psd".into(), "002.psd".into()], files(&["001.psd", "002.psd"])).unwrap();
+    sync(&mut app, &ctx);
+    let first = app.session.typer.state.current_tab_id.clone();
+    app.run("typer.tab.new", json!({"text": "Página 1\nOtro capítulo."})).unwrap();
+    let second = app.session.typer.state.current_tab_id.clone();
+    // The same file names in another chapter: its own bytes.
+    set_files(&mut app, vec!["001.psd".into()], vec![("001.psd".into(), vec![1u8; 5])]).unwrap();
+    assert_eq!(app.ui.typer.page_files.total(), 25);
+    assert!(app.ui.typer.page_files.available(&first, "002.psd") && !app.ui.typer.page_files.available(&second, "002.psd"));
+    // Closing a tab frees its files.
+    app.run("typer.tab.close", json!({"id": second})).unwrap();
+    sync(&mut app, &ctx);
+    assert_eq!(app.ui.typer.page_files.total(), 20);
+    assert_eq!(app.session.typer.state.current_tab_id, first);
 }

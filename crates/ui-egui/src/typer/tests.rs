@@ -466,3 +466,75 @@ fn panel_blocks_fold_and_give_their_room_away() {
     let back: super::TyperUi = serde_json::from_value(serde_json::to_value(&app.ui.typer).unwrap()).unwrap();
     assert_eq!(back.folded, ["preview"]);
 }
+
+/// Work tabs: + adds a tab with an empty script, a click switches back, closing a tab with a
+/// script asks first and an empty one closes at once; the last tab stays.
+#[test]
+fn tab_bar_adds_switches_and_closes() {
+    let mut h = harness(app(), vec2(360.0, 560.0));
+    h.get_by_label("Tab 1");
+    h.get_by_label("New tab").click();
+    h.run_steps(3);
+    let st = &h.state().session.typer.state;
+    assert_eq!(st.tabs.len(), 2);
+    assert!(st.text.is_empty(), "a new tab starts with an empty script");
+    let (first, second) = (st.tabs[0].id.clone(), st.tabs[1].id.clone());
+    assert_eq!(st.current_tab_id, second);
+    h.get_by_label("Tab 1").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.typer.state.text, SCRIPT);
+    let mut app = h.into_state();
+    super::tabs::close(&mut app, &first);
+    assert!(matches!(&app.ui.typer.confirm, Some(super::Confirm::CloseTab { id, .. }) if *id == first), "a tab with a script asks");
+    app.ui.typer.confirm = None;
+    super::tabs::close(&mut app, &second);
+    assert_eq!(app.session.typer.state.tabs.len(), 1, "an empty tab closes at once");
+    super::tabs::close(&mut app, &first);
+    assert_eq!(app.session.typer.state.tabs.len(), 1);
+    assert!(!app.ui.typer.message.is_empty(), "the last tab can't be closed");
+    // Renaming in place: Enter commits.
+    app.ui.typer.renaming = Some(super::tabs::Rename { id: first.clone(), name: "Capítulo 5".into() });
+    let mut h = harness(app, vec2(360.0, 560.0));
+    h.input_mut().events.push(egui::Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(h.state().session.typer.state.tabs[0].name, "Capítulo 5");
+    assert!(h.state().ui.typer.renaming.is_none());
+    h.get_by_label("Capítulo 5");
+    // Off in the settings: no tab bar.
+    let mut app = h.into_state();
+    app.run("typer.settings.set", json!({"key": "multiTabEnabled", "value": false})).unwrap();
+    let h = harness(app, vec2(360.0, 560.0));
+    assert!(h.query_by_label("Capítulo 5").is_none());
+}
+
+/// FontScanR: the open page's text layers become proposals, drawn in the dialog, and the chosen
+/// ones import into a new folder.
+#[test]
+fn fontscan_dialog_scans_and_imports_into_a_new_folder() {
+    let mut app = app_with_page();
+    let id = |app: &PhotocraftApp, name: &str| app.session.typer.state.library.styles.iter().find(|s| s.name == name).map(|s| s.id.to_value()).unwrap();
+    for (i, style) in ["Regular", "Shout", "Regular"].iter().enumerate() {
+        let y = 40 + 120 * i as i64;
+        let style = id(&app, style);
+        app.run("typer.paste", json!({"text": "Hola", "bounds": [40, y, 300, 100], "style": {"id": style}, "advance": false})).unwrap();
+    }
+    super::fontscan::open(&mut app);
+    super::fontscan::scan_documents(&mut app);
+    let d = app.ui.typer.fontscan.clone().expect("the dialog is open");
+    // "Regular" has no font of its own: its layers have no font name and make no proposal.
+    assert!(d.scanned && d.layers == 3 && d.groups.len() == 1, "{d:?}");
+    assert_eq!(d.groups[0]["fontName"], "Inter");
+    assert_eq!(d.selected.len(), 1, "every proposal starts chosen");
+    let h = harness(app, vec2(700.0, 640.0));
+    h.get_by_label("Scan open documents");
+    h.get_by_label("Import");
+    let mut app = h.into_state();
+    let mut d = app.ui.typer.fontscan.clone().unwrap();
+    assert!(super::fontscan::import(&mut app, &d).is_err(), "a new folder needs a name");
+    d.new_folder = "Capítulo 3".into();
+    let before = app.session.typer.state.library.styles.len();
+    super::fontscan::import(&mut app, &d).unwrap();
+    let lib = &app.session.typer.state.library;
+    assert_eq!(lib.styles.len(), before + 1);
+    assert!(lib.folders.iter().any(|f| f.name == "Capítulo 3"));
+}

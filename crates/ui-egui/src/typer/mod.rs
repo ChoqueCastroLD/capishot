@@ -22,6 +22,7 @@
 
 pub(crate) mod folder_editor;
 mod font_label;
+pub(crate) mod fontscan;
 pub mod keymap;
 pub mod pages;
 mod preview;
@@ -29,6 +30,7 @@ pub mod script_editor;
 mod settings;
 pub(crate) mod style_editor;
 mod styles;
+pub(crate) mod tabs;
 
 #[cfg(test)]
 #[path = "tests.rs"]
@@ -67,6 +69,10 @@ pub struct TyperUi {
     pub clipboard: Option<Value>,
     /// The panel's last error, shown under the preview until the next successful action.
     pub message: String,
+    /// The FontScanR dialog, when open.
+    pub fontscan: Option<fontscan::FontScanDraft>,
+    /// The work tab being renamed in place.
+    pub renaming: Option<tabs::Rename>,
     /// Page files picked in the browser, in memory (see [`pages`]); never saved.
     #[serde(skip)]
     pub page_files: pages::PageFiles,
@@ -84,6 +90,8 @@ impl Default for TyperUi {
             confirm: None,
             clipboard: None,
             message: String::new(),
+            fontscan: None,
+            renaming: None,
             page_files: pages::PageFiles::default(),
         }
     }
@@ -99,6 +107,8 @@ pub enum Confirm {
     DeleteFolder { id: Value, name: String, permanent: bool },
     /// A full TypeR import: keep the local styles missing from it or edited later?
     ImportKeepLocal { json: String },
+    /// Close a work tab that has a script or page files.
+    CloseTab { id: String, name: String },
 }
 
 /// Panel commands that wrap engine commands with the panel's routing and settings (bindable in
@@ -175,6 +185,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let full = ui.available_rect_before_wrap();
     egui::Frame::NONE.inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
         ui.set_width(ui.available_width());
+        tabs::show(app, ui);
         preview::show(app, ui);
         if !app.ui.typer.message.is_empty() {
             let msg = app.ui.typer.message.clone();
@@ -270,6 +281,11 @@ fn footer_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         if crate::icons::button_with_icon_size(ui, "upload", 24.0, 15.0, false, tl!("Import styles or settings…")).clicked() {
             settings::import(app);
         }
+        if crate::icons::button_with_icon_size(ui, "scan-line", 24.0, 15.0, app.ui.typer.fontscan.is_some(), tl!("FontScanR: styles from a chapter's fonts…"))
+            .clicked()
+        {
+            fontscan::open(app);
+        }
         pages::footer(app, ui);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if crate::icons::button_with_icon_size(ui, "settings", 24.0, 15.0, app.ui.typer.settings.is_some(), tl!("TypeR Settings")).clicked() {
@@ -362,6 +378,7 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     style_editor::window(app, ctx);
     folder_editor::window(app, ctx);
     settings::window(app, ctx);
+    fontscan::window(app, ctx);
     confirm_window(app, ctx);
 }
 
@@ -398,6 +415,12 @@ fn confirm_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         Confirm::ImportKeepLocal { .. } => {
             (tl!("Import styles"), tl!("Keep the local styles that are not in the import or were edited later?").to_string(), tl!("Keep"), Some(tl!("Replace")))
         }
+        Confirm::CloseTab { name, .. } => (
+            tl!("Close tab"),
+            format!("\u{201c}{name}\u{201d}: {}", tl!("Close the tab? Its script, cursor and page files are removed; the styles stay.")),
+            tl!("Close tab"),
+            None,
+        ),
     };
     let mut answer: Option<crate::widgets::ButtonRole> = None;
     egui::Modal::new(egui::Id::new("typer-confirm")).frame(dialog_frame(&t)).show(ctx, |ui| {
@@ -439,6 +462,7 @@ fn confirm_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let p = with_now(app, json!({"json": json, "kind": "full", "keepLocal": yes}));
             act(app, "typer.library.import", p);
         }
+        Confirm::CloseTab { id, .. } => act(app, "typer.tab.close", json!({"id": id})),
     }
 }
 

@@ -208,3 +208,45 @@ fn every_typer_command_fails_gracefully_on_bad_params() {
         }
     }
 }
+
+#[test]
+fn tabs_hold_separate_chapters() {
+    let mut s = loaded();
+    s.execute("typer.images.set", json!({"images": ["ch12_001.psd", "ch12_002.psd"]})).unwrap();
+    s.execute("typer.line.next", json!({})).unwrap();
+    let list = s.execute("typer.tab.list", json!({})).unwrap();
+    assert_eq!(list["tabs"].as_array().map(Vec::len), Some(1));
+    assert_eq!(list["tabs"][0]["synced"], true);
+    let first = list["current"].as_str().unwrap().to_string();
+    let r = s.execute("typer.tab.new", json!({"name": "Capítulo 13", "text": "Página 1\nHola."})).unwrap();
+    assert_eq!((r["text"].as_str(), r["page"].as_u64(), r["pageFiles"].as_u64()), (Some("Hola."), Some(1), Some(0)));
+    let second = r["tab"].as_str().unwrap().to_string();
+    let list = s.execute("typer.tab.list", json!({})).unwrap();
+    assert_eq!(list["tabs"][1]["name"], "Capítulo 13");
+    assert_eq!(list["tabs"][1]["current"], true);
+    assert_eq!(list["tabs"][0]["lines"], SCRIPT.split('\n').count());
+    // Multi-bubble selections stay with their tab's page: switching drops them.
+    s.execute("typer.multiBubble.toggle", json!({"on": true})).unwrap();
+    s.typer.stored_selections.push(photocraft_typer::StoredSelection { bounds: Default::default(), opened: None, line_index: None, style_id: None });
+    let r = s.execute("typer.tab.switch", json!({"id": first})).unwrap();
+    assert_eq!((r["moved"].as_bool(), r["text"].as_str()), (Some(true), Some("BOOM")));
+    assert!(s.typer.stored_selections.is_empty());
+    assert_eq!(s.execute("typer.tab.next", json!({})).unwrap()["tab"], second.as_str());
+    assert_eq!(s.execute("typer.tab.next", json!({})).unwrap()["tab"], first.as_str(), "wraps");
+    assert_eq!(s.execute("typer.tab.previous", json!({})).unwrap()["tab"], second.as_str());
+    s.execute("typer.tab.rename", json!({"name": "Cap. 13"})).unwrap();
+    assert_eq!(s.execute("typer.tab.list", json!({})).unwrap()["tabs"][1]["name"], "Cap. 13");
+    let r = s.execute("typer.tab.close", json!({})).unwrap();
+    assert_eq!((r["closed"].as_str(), r["tab"].as_str()), (Some(second.as_str()), Some(first.as_str())));
+    // Bad params and the last tab.
+    assert!(matches!(s.execute("typer.tab.close", json!({})), Err(EngineError::BadParams { .. })));
+    assert!(s.execute("typer.tab.switch", json!({})).is_err());
+    assert!(s.execute("typer.tab.switch", json!({"id": 4})).is_err());
+    assert!(s.execute("typer.tab.rename", json!({"name": ""})).is_err());
+    assert!(s.execute("typer.tab.rename", json!({"id": [], "name": "x"})).is_err());
+    assert!(s.execute("typer.tab.new", json!({"text": 5})).is_err());
+    // The workspace round-trips with its tabs.
+    s.execute("typer.tab.new", json!({})).unwrap();
+    let back = crate::typer_state::TyperSession::from_json(&s.typer.to_json()).unwrap();
+    assert_eq!(back.state, s.typer.state);
+}

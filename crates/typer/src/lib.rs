@@ -13,6 +13,7 @@
 
 pub mod bubble;
 pub mod exchange;
+pub mod fontscan;
 pub mod id;
 pub mod library;
 pub mod markdown;
@@ -24,6 +25,7 @@ pub mod psjson;
 pub mod script;
 pub mod settings;
 pub mod state;
+pub mod tabs;
 
 pub use bubble::{BubbleHit, Rect, Row, StoredSelection};
 pub use id::Id;
@@ -31,6 +33,7 @@ pub use library::{Folder, Library, Style, TextType};
 pub use script::{Line, UsedLineStyle};
 pub use settings::{Direction, Settings};
 pub use state::{Moved, State};
+pub use tabs::Tab;
 
 /// Settings by their plan name (`TyperSettings`).
 pub type TyperSettings = Settings;

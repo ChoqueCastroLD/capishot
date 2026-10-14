@@ -96,6 +96,26 @@ pub fn specs() -> Vec<CommandSpec> {
             always,
             images_opened,
         ),
+        // Work tabs (TypeR 3.0)
+        q("typer.tab.list", "List TypeR Tabs", "{} → {tabs:[{id,name,current,lines,pageFiles,synced}],current}", always, tab_list),
+        q(
+            "typer.tab.new",
+            "New TypeR Tab",
+            r#"{"name":string? (default "Tab N"),"text":string? (its script)} → {tab,…state} (becomes the current tab)"#,
+            always,
+            tab_new,
+        ),
+        q("typer.tab.switch", "Switch TypeR Tab", r#"{"id":string} → {tab,moved,…state} (multi-bubble selections are dropped)"#, always, tab_switch),
+        q("typer.tab.next", "Next TypeR Tab", "{} → {tab,moved,…state} (wraps)", always, tab_next),
+        q("typer.tab.previous", "Previous TypeR Tab", "{} → {tab,moved,…state} (wraps)", always, tab_previous),
+        q("typer.tab.rename", "Rename TypeR Tab", r#"{"id":string? (default: the current tab),"name":string} → {tab,name}"#, always, tab_rename),
+        q(
+            "typer.tab.close",
+            "Close TypeR Tab",
+            r#"{"id":string? (default: the current tab)} → {closed,…state} (the last tab can't be closed; the UI asks first when it has a script or page files)"#,
+            always,
+            tab_close,
+        ),
         // Styles
         q(
             "typer.style.list",
@@ -388,6 +408,122 @@ fn images_opened(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(CMD, "\"image\" must be a page file name or null")),
     };
     Ok(summary(st))
+}
+
+fn tab_list(s: &mut Session, _: &Value) -> Result<Value> {
+    let st = &mut s.typer.state;
+    st.ensure_tabs();
+    let tabs: Vec<Value> = st
+        .tab_views()
+        .iter()
+        .map(|t| {
+            json!({
+                "id": t.id,
+                "name": t.name,
+                "current": t.id == st.current_tab_id,
+                "lines": if t.text.is_empty() { 0 } else { t.text.split('\n').count() },
+                "pageFiles": t.images.len(),
+                "synced": !t.images.is_empty(),
+            })
+        })
+        .collect();
+    Ok(json!({"tabs": tabs, "current": st.current_tab_id}))
+}
+
+fn with_tab(s: &Session, moved: Option<Moved>) -> Value {
+    let st = &s.typer.state;
+    let mut v = match moved {
+        Some(m) => with_moved(st, m),
+        None => summary(st),
+    };
+    if let Some(o) = v.as_object_mut() {
+        o.insert("tab".into(), json!(st.current_tab_id));
+    }
+    v
+}
+
+/// The `id` param, else the current tab.
+fn tab_param(s: &mut Session, p: &Value, cmd: &str) -> Result<String> {
+    s.typer.state.ensure_tabs();
+    match p.get("id") {
+        None | Some(Value::Null) => Ok(s.typer.state.current_tab_id.clone()),
+        Some(Value::String(id)) => Ok(id.clone()),
+        Some(_) => Err(bad(cmd, "\"id\" must be a tab id (a string)")),
+    }
+}
+
+fn tab_new(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "typer.tab.new";
+    let name = match p.get("name") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(n)) => Some(n.as_str()),
+        Some(_) => return Err(bad(CMD, "\"name\" must be a string")),
+    };
+    let text = match p.get("text") {
+        None | Some(Value::Null) => "",
+        Some(Value::String(t)) => t.as_str(),
+        Some(_) => return Err(bad(CMD, "\"text\" must be a string")),
+    };
+    s.typer.state.new_tab(name, text).map_err(|e| bad(CMD, e))?;
+    s.typer.stored_selections.clear();
+    Ok(with_tab(s, None))
+}
+
+fn tab_switch(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "typer.tab.switch";
+    let id = p.get("id").and_then(Value::as_str).ok_or_else(|| bad(CMD, "pass \"id\" (a tab id from typer.tab.list)"))?.to_string();
+    switch_to(s, &id, CMD)
+}
+
+fn switch_to(s: &mut Session, id: &str, cmd: &str) -> Result<Value> {
+    let moved = s.typer.state.switch_tab(id).map_err(|e| bad(cmd, e))?;
+    if moved == Moved::Yes {
+        // Stored bubbles belong to the other tab's page.
+        s.typer.stored_selections.clear();
+    }
+    Ok(with_tab(s, Some(moved)))
+}
+
+fn tab_step(s: &mut Session, forward: bool, cmd: &str) -> Result<Value> {
+    s.typer.state.ensure_tabs();
+    let st = &s.typer.state;
+    let n = st.tabs.len();
+    let cur = st.tabs.iter().position(|t| t.id == st.current_tab_id).unwrap_or(0);
+    let next = if forward { (cur + 1) % n.max(1) } else { (cur + n.max(1) - 1) % n.max(1) };
+    let id = st.tabs.get(next).map(|t| t.id.clone()).unwrap_or_default();
+    switch_to(s, &id, cmd)
+}
+
+fn tab_next(s: &mut Session, _: &Value) -> Result<Value> {
+    tab_step(s, true, "typer.tab.next")
+}
+
+fn tab_previous(s: &mut Session, _: &Value) -> Result<Value> {
+    tab_step(s, false, "typer.tab.previous")
+}
+
+fn tab_rename(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "typer.tab.rename";
+    let id = tab_param(s, p, CMD)?;
+    let name = p.get("name").and_then(Value::as_str).ok_or_else(|| bad(CMD, "pass \"name\""))?;
+    s.typer.state.rename_tab(&id, name).map_err(|e| bad(CMD, e))?;
+    let name = s.typer.state.tabs.iter().find(|t| t.id == id).map(|t| t.name.clone());
+    Ok(json!({"tab": id, "name": name}))
+}
+
+fn tab_close(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "typer.tab.close";
+    let id = tab_param(s, p, CMD)?;
+    let was_current = id == s.typer.state.current_tab_id;
+    s.typer.state.close_tab(&id).map_err(|e| bad(CMD, e))?;
+    if was_current {
+        s.typer.stored_selections.clear();
+    }
+    let mut v = with_tab(s, None);
+    if let Some(o) = v.as_object_mut() {
+        o.insert("closed".into(), json!(id));
+    }
+    Ok(v)
 }
 
 fn style_json(st: &Style) -> Value {
