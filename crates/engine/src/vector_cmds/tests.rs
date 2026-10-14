@@ -646,7 +646,6 @@ fn rasterizing_a_vector_mask_keeps_what_the_masks_show() {
             if let Some((feather, density)) = pm {
                 s.execute("select.rect", json!({"x": 0, "y": 0, "width": 40, "height": 64})).unwrap();
                 s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-                s.execute("select.deselect", json!({})).unwrap();
                 s.edit("mask settings", |doc, _| {
                     let m = doc.layer_mut(id).unwrap().mask.as_mut().unwrap();
                     (m.feather, m.density) = (feather, density);

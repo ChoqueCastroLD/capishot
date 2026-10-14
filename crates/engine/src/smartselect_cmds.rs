@@ -1007,7 +1007,6 @@ mod tests {
     fn refine_edge_works_on_layer_mask_without_selection() {
         let mut s = blurred_edge_selected();
         s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-        s.execute("select.deselect", json!({})).unwrap();
         assert!(s.active().unwrap().doc.selection.is_none());
         assert!(s.active().unwrap().doc.layers[0].mask.is_some());
         assert!(s.is_enabled("select.refineEdge"));

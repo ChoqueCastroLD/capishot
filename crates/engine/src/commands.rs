@@ -805,7 +805,10 @@ fn build() -> Vec<CommandSpec> {
             |s, p| {
                 let sel = s.active().and_then(|d| d.doc.selection.clone()).ok_or(EngineError::Other("no selection".into()))?;
                 let mask = LayerMask { surface: sel, ..LayerMask::reveal_all() };
-                set_mask(s, p, "Add Layer Mask", Some(mask))
+                // The selection becomes the mask, so Photoshop drops it (as Hide Selection does): a
+                // following Invert (⌘I) on the targeted mask then inverts all of it, not just the
+                // part inside the old selection. Same undo step as the mask.
+                set_mask_and_deselect(s, p, "Add Layer Mask", mask)
             }
         ),
         cmd!("layer.layerMask.delete", "Delete", ["Layer", "Layer Mask"], None, r##"{"layer":id?}"##, has_layer, |s, p| set_mask(
@@ -1444,6 +1447,15 @@ fn arrange(s: &mut Session, p: &Value, delta: i32) -> Result<Value> {
 /// Add (`Some`) or remove (`None`) a layer mask. Adding acts on every selected layer that can take
 /// one ([`crate::layer_multi_cmds::mask_targets`]), in one history step.
 fn set_mask(s: &mut Session, p: &Value, label: &str, mask: Option<LayerMask>) -> Result<Value> {
+    set_mask_with(s, p, label, mask, false)
+}
+
+/// [`set_mask`] that also drops the selection the mask was made from, in the same history step.
+fn set_mask_and_deselect(s: &mut Session, p: &Value, label: &str, mask: LayerMask) -> Result<Value> {
+    set_mask_with(s, p, label, Some(mask), true)
+}
+
+fn set_mask_with(s: &mut Session, p: &Value, label: &str, mask: Option<LayerMask>, deselect: bool) -> Result<Value> {
     let ids = if mask.is_some() { crate::layer_multi_cmds::mask_targets(s, p)? } else { vec![layer_param(s, p)?] };
     s.edit(label, |doc, _| {
         let mask = mask.clone().map(|mask| mask_at_depth(mask, doc.depth)).transpose()?;
@@ -1452,6 +1464,9 @@ fn set_mask(s: &mut Session, p: &Value, label: &str, mask: Option<LayerMask>) ->
                 crate::extra_cmds::background_to_layer_for_mask(doc, *id);
             }
             doc.layer_mut(*id).ok_or(EngineError::NoLayer(*id))?.mask = mask.clone();
+        }
+        if deselect {
+            doc.selection = None;
         }
         Ok(())
     })?;

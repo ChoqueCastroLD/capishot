@@ -10,7 +10,6 @@ fn session() -> (Session, u64, u64) {
     s.execute("edit.fill", json!({"contents": "color", "color": "#ff0000"})).unwrap();
     s.execute("select.rect", json!({"x": 20, "y": 0, "width": 20, "height": 20})).unwrap();
     s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-    s.execute("select.deselect", json!({})).unwrap();
     let st = s.active_mut().unwrap();
     st.saved_revision = st.revision;
     (s, masked, bg)

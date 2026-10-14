@@ -877,7 +877,6 @@ mod tests {
         let mut s = session();
         s.execute("select.rect", json!({"x": 0, "y": 0, "width": 20, "height": 20})).unwrap();
         s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-        s.execute("select.deselect", json!({})).unwrap();
         s.execute("view.layerMask", json!({"mode": "gray"})).unwrap();
         s.execute("select.magicWand", json!({"x": 7, "y": 7, "tolerance": 0, "antiAlias": false})).unwrap();
         assert_eq!(coverage(&s, 2, 2), 1.0, "gray mask view selects the mask");

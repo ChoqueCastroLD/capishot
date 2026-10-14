@@ -223,7 +223,6 @@ fn dragging_the_mask_thumbnail_to_trash_asks_to_apply_or_delete_it() {
     s.execute("layer.layerMask.delete", json!({"layer": masked})).unwrap();
     s.execute("select.rect", json!({"x": 100, "y": 0, "width": 100, "height": 100})).unwrap();
     s.execute("layer.layerMask.revealSelection", json!({"layer": masked})).unwrap();
-    s.execute("select.deselect", json!({})).unwrap();
     let mut h = harness(s, 0, 1.0, 290.0);
     let drag_mask = |h: &mut Harness<'_, PhotocraftApp>| {
         let from = recorded(&h.ctx, masked).unwrap().0.into_iter().find(|(k, _)| *k == MaskKind::Pixel).unwrap().1.center();
