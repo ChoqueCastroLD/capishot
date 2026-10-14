@@ -3843,6 +3843,10 @@ curves	Smooth	Εξομάλυνση
 	Sent to {printer}	Στάλθηκε στον {printer}
 	set in Print Settings…	ορίζεται στις ρυθμίσεις εκτύπωσης…
 	ICO is limited to 256 × 256 pixels	Το ICO περιορίζεται σε 256 × 256 εικονοστοιχεία
+
+# Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
+	Darken Interface	Σκουρότερο περιβάλλον
+	Lighten Interface	Φωτεινότερο περιβάλλον
 # Bevel & Emboss Technique.
 	Technique	Τεχνική
 	Chisel Hard	Σκληρή σμίλευση

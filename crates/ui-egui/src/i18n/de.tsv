@@ -3143,6 +3143,10 @@ curves	Smooth	Glätten
 	Sent to {printer}	An {printer} gesendet
 	set in Print Settings…	in den Druckeinstellungen festlegen…
 	ICO is limited to 256 × 256 pixels	ICO ist auf 256 × 256 Pixel begrenzt
+
+# Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
+	Darken Interface	Benutzeroberfläche abdunkeln
+	Lighten Interface	Benutzeroberfläche aufhellen
 # Bevel & Emboss Technique.
 	Technique	Technik
 	Chisel Hard	Meißeln hart

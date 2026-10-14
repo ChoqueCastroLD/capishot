@@ -4219,6 +4219,10 @@ shape	Appearance	Izgled
 	Ink Characteristics	Karakteristike mastila
 	Solidity:	Punoća:
 	Redrawing	Ponovno iscrtavanje
+
+# Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
+	Darken Interface	Zatamni interfejs
+	Lighten Interface	Posvetli interfejs
 # Bevel & Emboss Technique.
 	Technique	Tehnika
 	Chisel Hard	Tvrdo klesanje

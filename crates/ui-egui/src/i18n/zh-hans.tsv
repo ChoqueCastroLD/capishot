@@ -2755,6 +2755,10 @@ curves	Smooth	平滑
 	Sent to {printer}	已发送到 {printer}
 	set in Print Settings…	在打印设置中设置…
 	ICO is limited to 256 × 256 pixels	ICO 最大为 256 × 256 像素
+
+# Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
+	Darken Interface	界面变暗
+	Lighten Interface	界面变亮
 # Bevel & Emboss Technique.
 	Technique	方法
 	Chisel Hard	雕刻清晰

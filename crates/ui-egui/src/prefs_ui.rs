@@ -128,6 +128,26 @@ pub(crate) fn cycle_appearance(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
+/// Photoshop's four interface brightnesses, darkest first.
+const BRIGHTNESSES: [ThemeKind; 4] = [ThemeKind::Pro, ThemeKind::ProMedium, ThemeKind::ProLightGray, ThemeKind::ProLight];
+
+/// Darken Interface (⇧⌘F1, `lighter` false) and Lighten Interface (⇧⌘F2): the next of
+/// Photoshop's four brightnesses from the theme on screen, stopping at either end, as in
+/// Photoshop. Another theme steps from the nearest brightness: Medium Gray for a dark one, Light
+/// Gray for a light one. The choice is saved like picking it in Preferences › Interface.
+pub(crate) fn step_brightness(app: &mut PhotocraftApp, ctx: &egui::Context, lighter: bool) -> Result<(), String> {
+    let current = app.ui.theme;
+    let at = BRIGHTNESSES.iter().position(|k| *k == current).unwrap_or(if crate::theme::Tokens::for_kind(current).dark() { 1 } else { 2 });
+    let next = if lighter { (at + 1).min(BRIGHTNESSES.len() - 1) } else { at.saturating_sub(1) };
+    let Some(&kind) = BRIGHTNESSES.get(next) else { return Ok(()) };
+    if kind == current {
+        return Ok(());
+    }
+    app.run("prefs.set", json!({"path": "interface.theme", "value": kind.id()}))?;
+    sync_appearance(app, ctx);
+    Ok(())
+}
+
 const LIGHT_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
     ("proLight", ThemeKind::ProLight),
     ("proLightGray", ThemeKind::ProLightGray),
@@ -2167,6 +2187,65 @@ mod tests {
             assert_eq!(app.session.prefs().interface.dark_theme, DarkTheme::Studio);
             assert_eq!(app.session.prefs().interface.light_theme, LightTheme::Classic);
         }
+    }
+
+    #[test]
+    fn darken_and_lighten_interface_step_through_photoshops_brightnesses_and_stop_at_the_ends() {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        sync_appearance(&mut app, &ctx);
+        assert_eq!(app.ui.theme, ThemeKind::ProMedium, "Photoshop's default brightness");
+        let press = |app: &mut PhotocraftApp, id: &str| crate::menus::invoke(app, &ctx, id, json!({})).unwrap();
+        for expected in [ThemeKind::ProLightGray, ThemeKind::ProLight, ThemeKind::ProLight] {
+            press(&mut app, "view.lightenInterface");
+            assert_eq!(app.ui.theme, expected);
+        }
+        // Saved like a choice in Preferences › Interface: the light slot and the Light appearance.
+        let i = &app.session.prefs().interface;
+        assert_eq!((i.appearance_mode, i.light_theme), (AppearanceMode::Light, LightTheme::ProLight));
+        for expected in [ThemeKind::ProLightGray, ThemeKind::ProMedium, ThemeKind::Pro, ThemeKind::Pro] {
+            press(&mut app, "view.darkenInterface");
+            assert_eq!(app.ui.theme, expected);
+        }
+        let i = &app.session.prefs().interface;
+        assert_eq!((i.appearance_mode, i.dark_theme), (AppearanceMode::Dark, DarkTheme::Pro));
+        // Another theme steps from the nearest brightness.
+        for (theme, id, expected) in [
+            ("studio", "view.darkenInterface", ThemeKind::Pro),
+            ("studio", "view.lightenInterface", ThemeKind::ProLightGray),
+            ("classic", "view.darkenInterface", ThemeKind::ProMedium),
+            ("classic", "view.lightenInterface", ThemeKind::ProLight),
+        ] {
+            app.run("prefs.set", json!({"path": "interface.theme", "value": theme})).unwrap();
+            sync_appearance(&mut app, &ctx);
+            press(&mut app, id);
+            assert_eq!(app.ui.theme, expected, "{theme} {id}");
+        }
+    }
+
+    #[test]
+    fn ctrl_shift_f1_and_f2_darken_and_lighten_the_interface() {
+        for (id, shortcut) in [("view.darkenInterface", "Cmd+Shift+F1"), ("view.lightenInterface", "Cmd+Shift+F2")] {
+            assert_eq!(crate::shortcuts::default_shortcut(id).as_deref(), Some(shortcut), "{id}");
+        }
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        sync_appearance(&mut app, &ctx);
+        let press = |app: &mut PhotocraftApp, key| {
+            let modifiers = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+            let raw = egui::RawInput {
+                events: vec![egui::Event::ModifiersChanged(modifiers), egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }],
+                ..Default::default()
+            };
+            ctx.begin_pass(raw);
+            crate::shortcuts::handle(app, &ctx);
+            ctx.end_pass().textures_delta.clear();
+        };
+        press(&mut app, egui::Key::F1);
+        assert_eq!(app.ui.theme, ThemeKind::Pro);
+        press(&mut app, egui::Key::F2);
+        press(&mut app, egui::Key::F2);
+        assert_eq!(app.ui.theme, ThemeKind::ProLightGray);
     }
 
     fn appearance_frame(app: &mut PhotocraftApp, ctx: &egui::Context, appearance: Option<egui::Theme>) {

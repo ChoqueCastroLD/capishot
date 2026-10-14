@@ -3632,6 +3632,10 @@ curves	Smooth	Làm mượt
 	Sent to {printer}	Đã gửi tới {printer}
 	set in Print Settings…	đặt trong thiết lập in…
 	ICO is limited to 256 × 256 pixels	ICO giới hạn ở 256 × 256 pixel
+
+# Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
+	Darken Interface	Làm tối giao diện
+	Lighten Interface	Làm sáng giao diện
 # Bevel & Emboss Technique.
 	Technique	Kỹ thuật
 	Chisel Hard	Đục cứng
