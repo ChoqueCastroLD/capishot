@@ -538,3 +538,13 @@ fn fontscan_dialog_scans_and_imports_into_a_new_folder() {
     assert_eq!(lib.styles.len(), before + 1);
     assert!(lib.folders.iter().any(|f| f.name == "Capítulo 3"));
 }
+
+/// A short group (Essentials with TypeR on a small screen): the preview draws the line as one
+/// row so the script and the styles keep room.
+#[test]
+fn a_short_group_compacts_the_preview() {
+    let h = harness(app(), vec2(320.0, super::COMPACT_BELOW - 40.0));
+    h.get_by_label("Regular: Hello there.");
+    let h = harness(app(), vec2(320.0, super::COMPACT_BELOW + 100.0));
+    assert!(h.query_by_label("Regular: Hello there.").is_none(), "tall enough: the line in its font");
+}

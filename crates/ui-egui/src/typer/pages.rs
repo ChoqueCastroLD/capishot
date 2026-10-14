@@ -271,7 +271,10 @@ pub(super) fn footer(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         return;
     }
     let files = &app.ui.typer.page_files;
-    let missing = st.images.iter().filter(|i| !files.available(&st.current_tab_id, i)).count();
+    // Not missing: in memory, a path on the desktop, or already open.
+    let docs = app.session.documents();
+    let open = |i: &str| docs.iter().any(|d| d.path.as_deref() == Some(i) || d.doc.name == display_name(i));
+    let missing = st.images.iter().filter(|i| !files.available(&st.current_tab_id, i) && !open(i)).count();
     let current = st.current_image().and_then(|i| st.images.get(i)).map(|s| display_name(s));
     let n = st.images.len();
     let label = crate::i18n::trn(crate::i18n::current(), n as u64, "{n} page", "{n} pages");

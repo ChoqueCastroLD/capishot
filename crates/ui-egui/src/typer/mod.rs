@@ -186,7 +186,9 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     egui::Frame::NONE.inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         tabs::show(app, ui);
-        preview::show(app, ui);
+        // A short group (Essentials with TypeR on a small screen) shows the line as one row, so
+        // the script and the styles keep some room.
+        preview::show(app, ui, full.height() < COMPACT_BELOW);
         if !app.ui.typer.message.is_empty() {
             let msg = app.ui.typer.message.clone();
             ui.horizontal(|ui| {
@@ -216,6 +218,9 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         footer_row(app, ui);
     });
 }
+
+/// Below this group height the preview draws the line as one row of text (as when folded).
+pub const COMPACT_BELOW: f32 = 420.0;
 
 /// Is the panel block `block` (`"preview"`, `"script"`, `"styles"`) folded?
 pub(crate) fn is_folded(app: &PhotocraftApp, block: &str) -> bool {

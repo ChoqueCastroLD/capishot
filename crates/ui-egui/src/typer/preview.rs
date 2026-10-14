@@ -12,7 +12,7 @@ use crate::theme::Tokens;
 /// Height of the line preview.
 const LINE_H: f32 = 48.0;
 
-pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, compact: bool) {
     let t = Tokens::get(ui.ctx());
     let typer = &app.session.typer;
     let settings = typer.state.settings.clone();
@@ -98,7 +98,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
 
     // ⌄ ↑ ↓ · line N, style X, scale [ ] % · apply
-    let folded = super::is_folded(app, "preview");
+    let folded = compact || super::is_folded(app, "preview");
     ui.horizontal(|ui| {
         super::fold_button(app, ui, "preview");
         if crate::icons::button_with_icon_size(ui, "arrow-up", 22.0, 15.0, false, tl!("Previous line")).clicked() {
