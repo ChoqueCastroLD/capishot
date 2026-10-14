@@ -31,8 +31,11 @@ photocraft-io = { workspace = true }
 photocraft-codecs = { workspace = true }
 photocraft-doc = { workspace = true }
 photocraft-ui-egui = { workspace = true }
+photocraft-compose = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
+# Inline `data:` images in copied HTML (src/clipboard_data.rs).
+base64 = "0.22"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `wgpu` pulls egui-wgpu's defaults: WebGPU plus the WebGL2 fallback.
@@ -44,7 +47,7 @@ js-sys = "0.3"
 # The embedding API (src/embed.rs, src/embed_protocol.rs).
 photocraft-format = { workspace = true }
 serde_json = { workspace = true }
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Storage", "Event", "EventTarget", "AddEventListenerOptions", "KeyboardEvent", "WheelEvent", "MouseEvent", "PointerEvent", "BeforeUnloadEvent", "AbortController", "AbortSignal", "DomException", "Response", "IdbFactory", "IdbOpenDbRequest", "IdbDatabase", "IdbRequest", "IdbTransaction", "IdbTransactionMode", "IdbObjectStore", "IdbCursor", "IdbCursorWithValue", "RequestInit", "Navigator", "CustomEvent", "CustomEventInit", "MessageEvent", "RequestCredentials", "Performance"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Storage", "Event", "EventTarget", "AddEventListenerOptions", "KeyboardEvent", "WheelEvent", "MouseEvent", "PointerEvent", "BeforeUnloadEvent", "AbortController", "AbortSignal", "DomException", "Response", "IdbFactory", "IdbOpenDbRequest", "IdbDatabase", "IdbRequest", "IdbTransaction", "IdbTransactionMode", "IdbObjectStore", "IdbCursor", "IdbCursorWithValue", "RequestInit", "Navigator", "CustomEvent", "CustomEventInit", "MessageEvent", "RequestCredentials", "Performance", "ClipboardEvent", "DataTransfer", "DataTransferItemList", "DataTransferItem", "File", "DomRect"] }
 
 [dev-dependencies]
 photocraft-format = { workspace = true }
