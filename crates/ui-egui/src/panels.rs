@@ -1561,8 +1561,8 @@ fn body_text_width(ui: &egui::Ui, s: &str) -> f32 {
 fn opt_label(ui: &mut egui::Ui, s: &str) {
     let t = Tokens::get(ui.ctx());
     let text = if t.pro && !s.ends_with(':') { format!("{s}:") } else { s.to_string() };
-    let label = ui.label(RichText::new(tl!(&text)).color(t.text_dim));
-    widgets::scrub_label(ui, &label);
+    let label = ui.add(egui::Label::new(RichText::new(tl!(&text)).color(t.text_dim)).selectable(false));
+    widgets::scrub_option_label(ui, &label);
 }
 
 fn percent_field(ui: &mut egui::Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, width: f32) {

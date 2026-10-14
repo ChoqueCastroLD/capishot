@@ -384,6 +384,8 @@ struct LabelScrub {
     rect: Rect,
     /// How far right of the label the field may start (the whole row for a slider row).
     max_gap: f32,
+    /// Options captions defer interaction until the adjacent field bounds are known.
+    option_area: bool,
     /// Whole steps to move the value (left negative; Shift ×10, Alt a tenth as fast).
     steps: f32,
     started: bool,
@@ -402,9 +404,35 @@ pub fn scrub_label(ui: &Ui, label: &Response) -> Response {
     scrub_label_within(ui, label, 24.0)
 }
 
+/// A tool-options caption whose scrub target includes the adjacent field's outer box.
+/// Keep the original label bounds for linking; register the hit area before the numeric editor.
+pub fn scrub_option_label(ui: &Ui, label: &Response) {
+    let scrub = LabelScrub {
+        pass: ui.ctx().cumulative_pass_nr(),
+        label: label.id.with("pc-option-scrub"),
+        rect: label.rect,
+        max_gap: 24.0,
+        option_area: true,
+        steps: 0.0,
+        started: false,
+        dragging: false,
+        stopped: false,
+    };
+    ui.data_mut(|d| d.insert_temp(label_scrub_id(), scrub));
+}
+
 fn scrub_label_within(ui: &Ui, label: &Response, max_gap: f32) -> Response {
     // Drag only, not focusable: Tab goes to the value field, not to its label as well.
     let resp = label.interact(Sense::DRAG);
+    let scrub = label_scrub_response(ui, &resp, label.rect, max_gap);
+    ui.data_mut(|d| {
+        d.insert_temp(label_scrub_id(), scrub);
+        d.insert_temp(resp.id.with("pc-scrub-linked"), false);
+    });
+    resp
+}
+
+fn label_scrub_response(ui: &Ui, resp: &Response, original_rect: Rect, max_gap: f32) -> LabelScrub {
     // Whether a field took this label's drags last frame: only then is it scrubby.
     let linked = ui.data(|d| d.get_temp::<bool>(resp.id.with("pc-scrub-linked"))).unwrap_or(false);
     if linked && resp.enabled() && (resp.hovered() || resp.dragged()) {
@@ -434,21 +462,17 @@ fn scrub_label_within(ui: &Ui, label: &Response, max_gap: f32) -> Response {
         steps = acc.trunc();
         ui.data_mut(|d| d.insert_temp(acc_id, acc - steps));
     }
-    let scrub = LabelScrub {
+    LabelScrub {
         pass: ui.ctx().cumulative_pass_nr(),
         label: resp.id,
-        rect: resp.rect,
+        rect: original_rect,
         max_gap,
+        option_area: false,
         steps,
         started: resp.drag_started(),
         dragging: resp.dragged(),
         stopped: resp.drag_stopped(),
-    };
-    ui.data_mut(|d| {
-        d.insert_temp(label_scrub_id(), scrub);
-        d.insert_temp(resp.id.with("pc-scrub-linked"), false);
-    });
-    resp
+    }
 }
 
 /// The label drag left for the field at `rect` this frame, if its label is just left of it on
@@ -505,7 +529,17 @@ fn value_field_box(
     let FieldOpts { decimals, units, wrap_drag } = opts;
     let t = Tokens::get(ui.ctx());
     let (rect, slot) = ui.allocate_exact_size(size, Sense::hover());
-    let scrub = take_label_scrub(ui, rect);
+    let scrub = take_label_scrub(ui, rect).map(|s| {
+        if !s.option_area {
+            return s;
+        }
+        // A direct click+drag target avoids egui snapping the padding/suffix to the nearby
+        // numeric button. It is not focusable; the editor drawn next wins inside its bounds.
+        // Preserve a popup field's trailing arrow, and never extend outside the UI clip.
+        let hit = Rect::from_min_max(pos2(s.rect.left(), rect.top()), pos2(rect.right() - trailing, rect.bottom())).intersect(ui.clip_rect());
+        let resp = ui.interact(hit, s.label, Sense::CLICK | Sense::DRAG);
+        label_scrub_response(ui, &resp, s.rect, s.max_gap)
+    });
     let (dpi, ppi) = ui.data(|d| d.get_temp::<(f64, f64)>(field_resolution_id())).unwrap_or((72.0, 72.0));
     // Typed text loses its spaces before parsing, so a " pt" suffix reads as "pt".
     let typed_suffix = suffix.trim();
