@@ -60,13 +60,18 @@ fn no_command_panics_or_hangs_on_adversarial_params() {
         json!({"x": 1e5, "y": -1e5, "radius": 300, "amount": 300, "angle": 1e5, "opacity": -100, "scale": -5, "gamma": -1}),
         json!({"points": [], "from": [0, 0], "to": [0, 0], "stops": [], "matrix": [0, 0, 0, 0, 0, 0], "colors": [], "name": "", "mode": "", "style": ""}),
     ];
-    // Commands whose success reaches outside the process: `file.print` and `file.printOneCopy`
-    // spool to CUPS, so a fuzz run with `{}` printed a blank page on the default printer. Their
-    // params are validated like everyone else's; the spooling itself is not fuzzed.
-    const EXTERNAL: &[&str] = &["file.print", "file.printOneCopy"];
     let mut bad: Vec<String> = Vec::new();
-    for spec in command_specs().iter().filter(|spec| !EXTERNAL.contains(&spec.id)) {
+    for spec in command_specs() {
         for p in &params {
+            // Print and Print One Copy reach real printers (lp, or the Windows driver): fuzz them
+            // as dry runs so the hunt never prints a page.
+            let mut p = p.clone();
+            if spec.id.starts_with("file.print")
+                && let Some(o) = p.as_object_mut()
+            {
+                o.insert("dryRun".into(), json!(true));
+            }
+            let p = &p;
             if let Err(why) = run_guarded(spec.id, p) {
                 bad.push(format!("{} [{why}] <- {p}", spec.id));
                 break;
