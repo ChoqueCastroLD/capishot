@@ -2873,3 +2873,4 @@ cameraData	Lens	Objektiv
 	Use AI	KI verwenden
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Striche mit KI statt mit benachbarten Flicken füllen: besser bei Rastern und Strichzeichnungen. KI-Optionen… wählt Qualität und Gerät.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Löscht ausgewählten Text oder Soundeffekte und zeichnet den Hintergrund mit KI auf einer neuen Ebene neu. Beim ersten Mal wird das Modell geladen (MI-GAN 13 MB, Manga LaMa 102 MB).
+	Nothing is uploaded: it runs on this device.	Es wird nichts hochgeladen: Es läuft auf diesem Gerät.

@@ -179,6 +179,7 @@ const STRINGS: &[&str] = &[
     "Quality and device for Clean with AI and the Remove tool's AI mode.",
     "AI Options…",
     "Use AI",
+    "Nothing is uploaded: it runs on this device.",
     "Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.",
     "Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).",
 ];

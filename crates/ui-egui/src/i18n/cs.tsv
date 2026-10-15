@@ -2842,3 +2842,4 @@ cameraData	Lens	Objektiv
 	Use AI	Použít AI
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Vyplnit tahy pomocí AI místo okolních záplat: lepší na rastry a kresbu. Možnosti AI… volí kvalitu a zařízení.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Vymaže vybraný text nebo zvukové efekty a dokreslí pozadí pomocí AI na nové vrstvě. Při prvním použití se stáhne model (MI-GAN 13 MB, Manga LaMa 102 MB).
+	Nothing is uploaded: it runs on this device.	Nic se nenahrává: běží na tomto zařízení.

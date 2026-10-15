@@ -228,10 +228,8 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
     let mut keep = f.get("keepLoaded").and_then(Value::as_bool).unwrap_or(true);
     egui::Grid::new(("ai-opts-advanced", kind as u8)).num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
         ui.label(tl!("Model:"));
-        let auto = match kind {
-            Kind::Upscale => tl!("Automatic (MangaJaNai's choice)"),
-            Kind::Inpaint => tl!("Automatic"),
-        };
+        // Automatic: Quality and Device decide (MangaJaNai's page-height rules for the full model).
+        let auto = tl!("Automatic");
         let wanted = |m: &&ModelInfo| match kind {
             Kind::Upscale => matches!(m.arch, Arch::Esrgan | Arch::Compact),
             Kind::Inpaint => m.content == Content::Inpaint,

@@ -4219,3 +4219,4 @@ layerLabel	No Color	Sem cor
 	Use AI	Usar IA
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Preenche os traços com IA em vez de áreas vizinhas: melhor em retículas e arte-final. Opções de IA… escolhe a qualidade e o dispositivo.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Apaga o texto ou as onomatopeias selecionados e redesenha o fundo com IA, em uma nova camada. O primeiro uso baixa o modelo (MI-GAN 13 MB, Manga LaMa 102 MB).
+	Nothing is uploaded: it runs on this device.	Nada é enviado: tudo roda neste dispositivo.

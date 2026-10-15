@@ -3932,3 +3932,4 @@ cameraData	Lens	Об'єктив
 	Use AI	Використовувати ШІ
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Заповнює мазки за допомогою ШІ, а не сусідніми ділянками: краще на растрах і лінійній графіці. «Параметри ШІ…» вибирають якість і пристрій.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Стирає виділений текст або звукові ефекти й домальовує тло за допомогою ШІ на новому шарі. Під час першого використання завантажується модель (MI-GAN 13 МБ, Manga LaMa 102 МБ).
+	Nothing is uploaded: it runs on this device.	Нічого не вивантажується: усе працює на цьому пристрої.

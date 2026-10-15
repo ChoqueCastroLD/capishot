@@ -3411,3 +3411,4 @@ cameraData	Lens	렌즈
 	Use AI	AI 사용
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	주변 패치 대신 AI로 획을 채웁니다. 스크린톤과 선화에 더 좋습니다. 품질과 장치는 AI 옵션…에서 선택합니다.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	선택한 텍스트나 효과음을 지우고 새 레이어에 AI로 배경을 다시 그립니다. 처음 사용할 때 모델을 다운로드합니다(MI-GAN 13MB, Manga LaMa 102MB).
+	Nothing is uploaded: it runs on this device.	아무것도 업로드되지 않습니다. 이 기기에서 실행됩니다.

@@ -3842,3 +3842,4 @@ cameraData	Lens	レンズ
 	Use AI	AI を使用
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	近くのパッチではなく AI でストロークを埋めます。スクリーントーンや線画に向いています。品質とデバイスは「AI オプション…」で選びます。
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	選択したテキストや描き文字を消し、AI で背景を新しいレイヤーに描き直します。初回はモデルをダウンロードします（MI-GAN 13 MB、Manga LaMa 102 MB）。
+	Nothing is uploaded: it runs on this device.	何もアップロードされません。このデバイス上で実行されます。
