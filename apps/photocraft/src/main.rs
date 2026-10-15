@@ -71,8 +71,7 @@ mod services;
 // macOS gets one instance from LaunchServices (open-documents Apple events).
 #[cfg(any(not(target_os = "macos"), test))]
 mod single_instance;
-// Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
+// Tablet support (macOS AppKit monitor, Linux X11/Wayland, Windows barrel button).
 mod tablet;
 mod ui_state;
 mod window_frame;
@@ -627,6 +626,11 @@ fn main() -> eframe::Result {
     let tablet_monitor = std::cell::OnceCell::new();
     #[cfg(target_os = "macos")]
     let tablet_monitor = &tablet_monitor;
+    // The Windows pointer message hook; dropping it unhooks when the event loop returns.
+    #[cfg(target_os = "windows")]
+    let tablet_monitor_win = std::cell::OnceCell::new();
+    #[cfg(target_os = "windows")]
+    let tablet_monitor_win = &tablet_monitor_win;
 
     // Read the displays' ICC profiles while the window opens (colour-managed canvas; `None`
     // where the platform has no reader).
@@ -853,8 +857,13 @@ fn main() -> eframe::Result {
             if let Some(monitor) = tablet::install_macos(&app.stylus.feed) {
                 let _ = tablet_monitor.set(monitor);
             }
+            #[cfg(target_os = "windows")]
+            if let Some(monitor) = tablet::install_windows() {
+                let _ = tablet_monitor_win.set(monitor);
+            }
             #[cfg(target_os = "linux")]
             tablet::spawn_x11(&app.stylus.feed, display);
+            app.services.right_button_down = tablet::right_button_service();
             // Paths on the command line (Linux/Windows file associations, `photocraft a.psd`).
             app.open_paths(&files);
             if !unreadable_paths.is_empty() {
