@@ -8,13 +8,15 @@
 //! * **Always built** (small, no inference): the [`catalog`] of known models and the
 //!   MangaJaNai selection rules ([`mangajanai`]), the planar f32 [`Planar`] image, [`tile`]
 //!   planning with blended overlaps, [`weights`] parsing from safetensors bytes, and the
-//!   [`cache`] (verified downloads; the native disk cache). The engine and the main web bundle
-//!   use only this half.
+//!   [`cache`] (verified downloads; the native disk cache), and the device [`profile`] that picks
+//!   full or lite models and the GPU or the CPU. The engine and the main web bundle use only this
+//!   half.
 //! * **`runtime` feature** (`cpu` and/or `gpu`): burn inference. [`runtime::Runtime`] owns the
 //!   device; a model is anything implementing [`runtime::Network`] (a burn forward pass);
 //!   [`runtime::run_tiled`] runs a network over an image of any size, tile by tile, with progress
 //!   and cancellation through [`Progress`]. [`esrgan::Esrgan`] is the ESRGAN (RRDBNet) network
-//!   MangaJaNai uses; [`upscale::upscale`] is the whole MangaJaNai pipeline.
+//!   MangaJaNai uses, [`compact::Compact`] the lite Real-ESRGAN Compact; [`upscale::upscale`] is
+//!   the whole upscale pipeline.
 //!
 //! In the browser the runtime half lives in a separately loaded Web Worker module
 //! (`apps/photocraft-ai-worker`), so the main wasm doesn't grow.
