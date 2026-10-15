@@ -544,6 +544,27 @@ fn history_brush_restores_earlier_pixels() {
     }
 }
 
+/// #4961: the History Brush's coverage and its source region are both dense over the stroke's
+/// bounds, so a stroke whose box dwarfs the canvas is refused from the points and brush size
+/// alone, before the source surface is cloned or any coverage is rendered. The document is left
+/// as it was, and ordinary strokes still paint at every depth.
+#[test]
+fn history_brush_refuses_a_stroke_too_large_to_render() {
+    for depth in DEPTHS {
+        let mut s = session(40, 20, depth, "rgb");
+        s.execute("paint.stroke", json!({"points": [[0, 10], [40, 10]], "size": 12, "hardness": 1.0, "color": "#ff0000"})).unwrap();
+        let before = rgba(&s, 20, 10);
+
+        let err = s.execute("paint.historyBrush", json!({"points": [[0, 0], [60000, 60000]], "size": 6, "hardness": 100})).unwrap_err();
+        assert!(err.to_string().contains("stroke too large"), "depth {depth}: {err}");
+        assert_eq!(rgba(&s, 20, 10), before, "depth {depth}: a refused stroke leaves the pixels alone");
+
+        // The guard is sized for real work: a stroke corner to corner across the canvas still runs.
+        s.execute("paint.historyBrush", json!({"points": [[0, 0], [40, 20]], "size": 6, "hardness": 100})).unwrap();
+        assert!(rgba(&s, 20, 10).iter().all(|v| *v > 0.99), "depth {depth}: the Open snapshot is white");
+    }
+}
+
 #[test]
 fn history_brush_reads_a_source_when_its_pixels_were_locked() {
     // Given a white layer locked in history state 1, then unlocked and filled red.

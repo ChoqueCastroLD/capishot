@@ -35,6 +35,52 @@ fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
 }
 
+/// A single stroke's accumulated coverage must stay at or under this many pixels (8192², so a
+/// stroke corner to corner across a 24–36 MP canvas fits). Larger footprints return an error
+/// instead of allocating.
+const MAX_STROKE_PIXELS: u64 = 67_108_864;
+
+/// Refuse a stroke whose footprint would not fit the coverage budget, from the points and brush
+/// size alone, before the renderer allocates anything for it.
+fn reject_huge_stroke(cmd: &str, stroke: &Stroke) -> Result<()> {
+    let pad = f64::from(stroke.brush.size.max(1.0)).mul_add(0.5, 4.0);
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for q in &stroke.points {
+        min_x = min_x.min(q.x);
+        min_y = min_y.min(q.y);
+        max_x = max_x.max(q.x);
+        max_y = max_y.max(q.y);
+    }
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+        return Err(bad(cmd, "point coordinates must be finite"));
+    }
+    let w = (max_x - min_x + pad * 2.0).ceil().max(1.0);
+    let h = (max_y - min_y + pad * 2.0).ceil().max(1.0);
+    if !w.is_finite() || !h.is_finite() || w > 1.0e9 || h > 1.0e9 {
+        return Err(bad(cmd, format!("stroke too large (at most {MAX_STROKE_PIXELS} px)")));
+    }
+    let area = (w as u64).saturating_mul(h as u64);
+    if area > MAX_STROKE_PIXELS {
+        return Err(bad(cmd, format!("stroke too large ({w:.0}×{h:.0} px, at most {MAX_STROKE_PIXELS})")));
+    }
+    Ok(())
+}
+
+fn reject_bounds(cmd: &str, bounds: Rect) -> Result<()> {
+    if bounds.is_empty() {
+        return Ok(());
+    }
+    let (w, h) = (u64::from(bounds.width()), u64::from(bounds.height()));
+    let area = w.saturating_mul(h);
+    if area > MAX_STROKE_PIXELS {
+        return Err(bad(cmd, format!("stroke too large ({w}×{h} px, at most {MAX_STROKE_PIXELS})")));
+    }
+    Ok(())
+}
+
 /// A pixel layer, a layer with a mask, or a targeted alpha channel / Quick Mask (as the Brush).
 fn has_pixel_layer(s: &Session) -> std::result::Result<(), String> {
     if crate::channel_cmds::edits_channel(s) {
@@ -631,6 +677,10 @@ fn history_brush(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "paint.historyBrush";
     let (stroke, id) = parse_brush(s, p, CMD)?;
     let mode = blend_param(p, CMD)?;
+    // The coverage and the source region below are both dense over the stroke's bounds, so a
+    // thin stroke across a large canvas would still ask for the whole box. Refuse it from the
+    // points and brush size, before the source surface is cloned or anything is rendered (#4961).
+    reject_huge_stroke(CMD, &stroke)?;
     let live = s.live_commit.take().filter(|l| l.matches(s, CMD, p, &stroke.points));
     let from_live = live.is_some();
     let src_surface = history_source(s, id, p, CMD)?;
@@ -642,6 +692,7 @@ fn history_brush(s: &mut Session, p: &Value) -> Result<Value> {
         let fmt = surf.format();
         let src = if src_surface.format() == fmt { src_surface } else { src_surface.convert(fmt) };
         let (bounds, cov) = stroke_coverage(&stroke);
+        reject_bounds(CMD, bounds)?;
         let paint = Region::read(&src, bounds);
         Ok(apply_coverage(surf, bounds, &cov, stroke.brush.opacity, sel, lock, &paint, mode))
     })?;

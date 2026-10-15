@@ -13,13 +13,8 @@ use photocraft_paint::{Stroke, StrokePoint};
 use photocraft_raster::{Surface, from_rgba_into, to_rgba};
 use serde_json::{Value, json};
 
-use super::{bad, blend_param, damage_json, flag, has_pixel_layer, parse_brush};
+use super::{bad, blend_param, damage_json, flag, has_pixel_layer, parse_brush, reject_bounds, reject_huge_stroke};
 use crate::{Result, Session};
-
-/// A single stroke's accumulated coverage must stay at or under this many pixels (8192², so a
-/// stroke corner to corner across a 24–36 MP canvas fits). Larger footprints return an error
-/// instead of allocating.
-const MAX_STROKE_PIXELS: u64 = 67_108_864;
 
 const STREAM_PHASE_X: u64 = 101;
 const STREAM_PHASE_Y: u64 = 102;
@@ -121,45 +116,6 @@ fn stamp_phase(p: &Value, cmd: &str, aligned: bool, first: &StrokePoint) -> Resu
             Ok((x as f32, y as f32))
         }
     }
-}
-
-fn reject_huge_stroke(cmd: &str, stroke: &Stroke) -> Result<()> {
-    let pad = f64::from(stroke.brush.size.max(1.0)).mul_add(0.5, 4.0);
-    let mut min_x = f64::INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
-    for q in &stroke.points {
-        min_x = min_x.min(q.x);
-        min_y = min_y.min(q.y);
-        max_x = max_x.max(q.x);
-        max_y = max_y.max(q.y);
-    }
-    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
-        return Err(bad(cmd, "point coordinates must be finite"));
-    }
-    let w = (max_x - min_x + pad * 2.0).ceil().max(1.0);
-    let h = (max_y - min_y + pad * 2.0).ceil().max(1.0);
-    if !w.is_finite() || !h.is_finite() || w > 1.0e9 || h > 1.0e9 {
-        return Err(bad(cmd, format!("stroke too large (at most {MAX_STROKE_PIXELS} px)")));
-    }
-    let area = (w as u64).saturating_mul(h as u64);
-    if area > MAX_STROKE_PIXELS {
-        return Err(bad(cmd, format!("stroke too large ({w:.0}×{h:.0} px, at most {MAX_STROKE_PIXELS})")));
-    }
-    Ok(())
-}
-
-fn reject_bounds(cmd: &str, bounds: Rect) -> Result<()> {
-    if bounds.is_empty() {
-        return Ok(());
-    }
-    let (w, h) = (u64::from(bounds.width()), u64::from(bounds.height()));
-    let area = w.saturating_mul(h);
-    if area > MAX_STROKE_PIXELS {
-        return Err(bad(cmd, format!("stroke too large ({w}×{h} px, at most {MAX_STROKE_PIXELS})")));
-    }
-    Ok(())
 }
 
 fn placement(phase: (f32, f32), scale: f32, angle: f32) -> Placement {
