@@ -827,3 +827,54 @@ fn shift_key_tool_switch_is_on_by_default_and_a_stored_false_is_kept() {
     let stored: Tools = serde_json::from_value(json!({"useShiftKeyForToolSwitch": false})).unwrap();
     assert!(!stored.use_shift_key_for_tool_switch);
 }
+
+/// Shortcut exports are all or nothing (#5801): a rename that fails after the first file was
+/// moved in puts the user's files back as they were and leaves nothing staged.
+#[test]
+fn exports_are_written_all_or_nothing() {
+    use super::write_files_atomically;
+    let dir = std::env::temp_dir().join(format!("photocraft-atomic-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (a, b) = (dir.join("a.kys"), dir.join("b.html"));
+    std::fs::write(&a, "old A").unwrap();
+    std::fs::write(&b, "old B").unwrap();
+    let (pa, pb) = (a.to_str().unwrap(), b.to_str().unwrap());
+    let staged_moves = std::cell::Cell::new(0);
+    let failing = |from: &std::path::Path, to: &std::path::Path| {
+        if from.to_string_lossy().ends_with("photocraft-tmp") {
+            staged_moves.set(staged_moves.get() + 1);
+            if staged_moves.get() == 2 {
+                return Err(std::io::Error::other("disk gone"));
+            }
+        }
+        std::fs::rename(from, to)
+    };
+    assert!(write_files_atomically(&[(pa, "new A"), (pb, "new B")], &failing).is_err());
+    assert_eq!((std::fs::read_to_string(&a).unwrap(), std::fs::read_to_string(&b).unwrap()), ("old A".into(), "old B".into()));
+    let leftovers = || std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().contains(".photocraft-")).count();
+    assert_eq!(leftovers(), 0);
+    // A backup move that fails leaves no empty placeholder behind.
+    let backups = std::cell::Cell::new(0);
+    let failing_backup = |from: &std::path::Path, to: &std::path::Path| {
+        if to.to_string_lossy().ends_with("photocraft-bak") {
+            backups.set(backups.get() + 1);
+            if backups.get() == 2 {
+                return Err(std::io::Error::other("locked"));
+            }
+        }
+        std::fs::rename(from, to)
+    };
+    assert!(write_files_atomically(&[(pa, "new A"), (pb, "new B")], &failing_backup).is_err());
+    assert_eq!((std::fs::read_to_string(&a).unwrap(), std::fs::read_to_string(&b).unwrap()), ("old A".into(), "old B".into()));
+    assert_eq!(leftovers(), 0);
+    // The same target twice is refused before anything is written.
+    assert!(write_files_atomically(&[(pa, "x"), (pa, "y")], &|f, t| std::fs::rename(f, t)).is_err());
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "old A");
+    // A target named like a staging file is just a file.
+    let odd = dir.join("c.kys.photocraft-tmp");
+    std::fs::write(&odd, "old C").unwrap();
+    write_files_atomically(&[(pa, "new A"), (odd.to_str().unwrap(), "new C")], &|f, t| std::fs::rename(f, t)).unwrap();
+    assert_eq!((std::fs::read_to_string(&a).unwrap(), std::fs::read_to_string(&odd).unwrap()), ("new A".into(), "new C".into()));
+    assert_eq!(leftovers(), 1, "only c.kys.photocraft-tmp itself");
+    let _ = std::fs::remove_dir_all(&dir);
+}
