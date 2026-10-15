@@ -2,10 +2,14 @@
 //!
 //! It shows what will happen before anything runs (from [`ai_cmds::plan`]): the detected page
 //! type and the MangaJaNai / IllustrationJaNai model that goes with it, the new size, where the
-//! model runs, and, the first time, the download it needs (size, licence, author). OK then reads
-//! "Download and Upscale": clicking it is the user's consent, and the command gets
-//! `download: true`. The upscale runs as a background job (progress in the status bar, Esc
-//! cancels) and lands as one undo step or a new document.
+//! model runs, and whether that model is downloaded. Downloading is the AI Model Manager's job
+//! (Window › AI Models…): with the model missing the dialog says so, offers the Manager, and OK
+//! opens the missing-model dialog instead of running (`ai_model_gate`). The upscale runs as a
+//! background job (progress in the status bar, Esc cancels) and lands as one undo step or a new
+//! document.
+//!
+//! Detecting the page type flattens the document, so it runs once per document revision, not
+//! every frame (the dialog keeps the answer in its fields).
 
 use photocraft_ai::catalog::Content;
 use photocraft_ai::service::ModelState;
@@ -18,6 +22,9 @@ use crate::state::DialogKind;
 
 const MARK: &str = "__aiUpscale";
 const NEEDS_DOWNLOAD: &str = "__needsDownload";
+/// The page type detected for `DETECT_KEY` (document id and revision): "grayscale" or "color".
+const DETECTED: &str = "__detected";
+const DETECT_KEY: &str = "__detectKey";
 
 pub fn owns(fields: &Map<String, Value>) -> bool {
     fields.contains_key(MARK)
@@ -65,13 +72,32 @@ pub fn params_of(f: &Map<String, Value>) -> Value {
 }
 
 pub fn ok_label(f: &Map<String, Value>) -> Option<&'static str> {
-    if !owns(f) {
-        return None;
-    }
-    Some(if f.get(NEEDS_DOWNLOAD).and_then(Value::as_bool) == Some(true) { tl!("Download and Upscale") } else { tl!("Upscale") })
+    owns(f).then(|| tl!("Upscale"))
 }
 
-pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
+/// The plan for the dialog's fields, detecting the page type at most once per document revision.
+fn cached_plan(app: &PhotocraftApp, f: &mut Map<String, Value>) -> photocraft_engine::Result<ai_cmds::Plan> {
+    let mut p = params_of(f);
+    let auto = p.get("content").and_then(Value::as_str) == Some("auto") && p.get("model").and_then(Value::as_str) == Some("auto");
+    let key = app.session.active().map(|d| format!("{}:{}", d.doc.id.0, d.revision));
+    if !auto || key.is_none() {
+        return ai_cmds::plan(&app.session, &p);
+    }
+    if f.get(DETECT_KEY).and_then(Value::as_str) != key.as_deref() {
+        let plan = ai_cmds::plan(&app.session, &p)?;
+        f.insert(DETECT_KEY.into(), json!(key));
+        f.insert(DETECTED.into(), json!(if plan.grayscale { "grayscale" } else { "color" }));
+        return Ok(plan);
+    }
+    p["content"] = f.get(DETECTED).cloned().unwrap_or_else(|| json!("auto"));
+    let mut plan = ai_cmds::plan(&app.session, &p)?;
+    plan.detected = true;
+    Ok(plan)
+}
+
+/// Draws the dialog; true when it should close (the user opened the AI Model Manager).
+pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) -> bool {
+    let mut dismiss = false;
     let tokens = crate::theme::Tokens::for_kind(app.ui.theme);
     let mut scale = f.get("scale").and_then(Value::as_str).unwrap_or("2").to_string();
     let mut content = f.get("content").and_then(Value::as_str).unwrap_or("auto").to_string();
@@ -109,7 +135,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     f.insert("output".into(), json!(output));
 
     ui.add_space(10.0);
-    let plan = ai_cmds::plan(&app.session, &params_of(f));
+    let plan = cached_plan(app, f);
     let mut needs_download = false;
     match plan {
         Ok(p) => {
@@ -135,18 +161,22 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             ui.label(egui::RichText::new(runs).color(tokens.text_dim));
             match &p.state {
                 ModelState::Ready => {}
-                ModelState::NeedsDownload | ModelState::Checking => {
+                ModelState::NeedsDownload => {
                     needs_download = true;
-                    let mb = format!("{:.1}", p.model.bytes as f64 / 1e6);
                     ui.add_space(6.0);
-                    ui.label(crate::i18n::fmt(
-                        tl!("First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time."),
-                        &[("mb", &mb), ("license", p.model.license), ("author", p.model.author)],
-                    ));
-                    if p.state == ModelState::Checking {
-                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                    let mb = crate::ai_models_ui::mb(p.model.bytes);
+                    ui.colored_label(
+                        tokens.warning,
+                        crate::i18n::fmt(tl!("{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first."), &[("model", p.model.title), ("mb", &mb)]),
+                    );
+                    if crate::widgets::secondary_button(ui, tl!("AI Models…"), 0.0).clicked() {
+                        crate::ai_options_ui::save(app, Kind::Upscale, f);
+                        crate::ai_models_ui::open(app, Some(p.model));
+                        dismiss = true;
                     }
                 }
+                // The browser's cache answers asynchronously.
+                ModelState::Checking => ui.ctx().request_repaint_after(std::time::Duration::from_millis(200)),
                 ModelState::Unavailable(why) => {
                     ui.colored_label(tokens.warning, why.as_str());
                 }
@@ -160,51 +190,53 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
         }
     }
     f.insert(NEEDS_DOWNLOAD.into(), json!(needs_download));
-    crate::ai_options_ui::advanced(app, ui, Kind::Upscale, f);
+    dismiss |= crate::ai_options_ui::advanced(app, ui, Kind::Upscale, f);
+    dismiss
 }
 
 pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
     crate::ai_options_ui::save(app, Kind::Upscale, f);
-    let mut p = params_of(f);
-    // OK said "Download and Upscale" next to the size and licence: that is the consent.
-    if f.get(NEEDS_DOWNLOAD).and_then(Value::as_bool) == Some(true) {
-        p["download"] = json!(true);
-        if let Ok(plan) = ai_cmds::plan(&app.session, &p) {
-            crate::ai_download_prompt::remember(app, plan.model);
-        }
-    }
-    app.run(COMMAND, p)
+    // A model that isn't downloaded opens the missing-model dialog instead of running.
+    crate::ai_model_gate::run(app, COMMAND, params_of(f))
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
 
     use photocraft_ai::service::FakeUpscaler;
 
     use super::*;
 
-    fn app() -> PhotocraftApp {
+    fn app() -> (PhotocraftApp, Arc<FakeUpscaler>) {
         let mut s = photocraft_engine::Session::new();
         s.execute("file.new", json!({"width": 8, "height": 6})).unwrap();
         let fake = Arc::new(FakeUpscaler::default());
-        fake.download_needed.store(true, std::sync::atomic::Ordering::Relaxed);
-        s.set_ai_upscaler(Some(fake));
-        PhotocraftApp::new(s, crate::Services::default())
+        fake.download_needed.store(true, Ordering::Relaxed);
+        s.set_ai_upscaler(Some(fake.clone()));
+        (PhotocraftApp::new(s, crate::Services::default()), fake)
     }
 
     #[test]
-    fn the_menu_item_opens_the_dialog_and_ok_downloads_with_consent() {
-        let mut app = app();
+    fn the_menu_item_opens_the_dialog_and_ok_needs_the_model_downloaded() {
+        let (mut app, fake) = app();
         let r = invoke(&mut app, COMMAND, &json!({})).unwrap().unwrap();
         let id = r["dialog"].as_u64().unwrap();
         let d = app.ui.dialogs.iter().find(|d| d.id == id).unwrap().clone();
         assert!(owns(&d.fields));
         let mut f = d.fields.clone();
         f.insert("scale".into(), json!("4"));
-        f.insert(NEEDS_DOWNLOAD.into(), json!(true));
-        assert_eq!(ok_label(&f), Some("Download and Upscale"));
+        assert_eq!(ok_label(&f), Some("Upscale"));
         assert_eq!(params_of(&f)["scale"], 4);
+        // Not downloaded: OK opens the missing-model dialog, nothing runs or downloads.
+        let out = confirm(&mut app, &f).unwrap();
+        assert!(out["modelMissing"].is_string(), "{out}");
+        assert!(app.ui.dialogs.iter().any(|d| crate::ai_model_gate::owns(&d.fields)));
+        assert_eq!(app.session.active().unwrap().doc.size.width, 8);
+        assert!(fake.download_needed.load(Ordering::Relaxed), "nothing was downloaded");
+        // Downloaded: it upscales.
+        fake.download_needed.store(false, Ordering::Relaxed);
         let out = confirm(&mut app, &f).unwrap();
         assert_eq!(out["width"], 32);
         // With params the command runs without a dialog.
@@ -223,15 +255,28 @@ mod tests {
     }
 
     #[test]
-    fn the_dialog_renders() {
-        let mut app = app();
+    fn the_dialog_renders_and_detects_the_page_once_per_revision() {
+        let (mut app, _) = app();
         let r = invoke(&mut app, COMMAND, &json!({})).unwrap().unwrap();
         let id = r["dialog"].as_u64().unwrap();
         let mut f = app.ui.dialogs.iter().find(|d| d.id == id).unwrap().fields.clone();
         let ctx = egui::Context::default();
         crate::theme::install_fonts(&ctx);
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
-        ctx.run_ui(Default::default(), |ui| body(&mut app, ui, &mut f)).textures_delta.clear();
+        ctx.run_ui(Default::default(), |ui| {
+            body(&mut app, ui, &mut f);
+        })
+        .textures_delta.clear();
         assert_eq!(f.get(NEEDS_DOWNLOAD), Some(&json!(true)));
+        let key = f.get(DETECT_KEY).cloned().expect("detected once");
+        let detected = f.get(DETECTED).cloned().expect("the page type");
+        // The next frames reuse it; an edit detects again.
+        let plan = cached_plan(&app, &mut f).unwrap();
+        assert!(plan.detected);
+        assert_eq!(json!(if plan.grayscale { "grayscale" } else { "color" }), detected);
+        app.session.execute("edit.fill", json!({"color": [1.0, 0.0, 0.0]})).ok();
+        app.session.execute("select.all", json!({})).unwrap();
+        let _ = cached_plan(&app, &mut f).unwrap();
+        assert_ne!(f.get(DETECT_KEY), Some(&key));
     }
 }

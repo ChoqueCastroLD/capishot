@@ -521,7 +521,7 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.ui.status = localize_label(&e.label);
             app.ui.status_error = false;
         }
-        JobOutcome::Failed(err) if crate::ai_download_prompt::on_job_failed(app, &e.command, &err) => app.sync_views(),
+        JobOutcome::Failed(err) if crate::ai_model_gate::on_job_failed(app, &e.command, &err) => app.sync_views(),
         JobOutcome::Failed(err) => {
             app.sync_views();
             notices::error(app, format!("{}: {err}", localize_label(&e.label)));

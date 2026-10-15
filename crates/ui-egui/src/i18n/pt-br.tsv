@@ -4220,3 +4220,47 @@ layerLabel	No Color	Sem cor
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Preenche os traços com IA em vez de áreas vizinhas: melhor em retículas e arte-final. Opções de IA… escolhe a qualidade e o dispositivo.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Apaga o texto ou as onomatopeias selecionados e redesenha o fundo com IA, em uma nova camada. O primeiro uso baixa o modelo (MI-GAN 13 MB, Manga LaMa 102 MB).
 	Nothing is uploaded: it runs on this device.	Nada é enviado: tudo roda neste dispositivo.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} não está baixado
+	Open Model Manager	Abrir gerenciador de modelos
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} precisa de {model} ({mb} MB), que ainda não está neste dispositivo.
+	It is downloading now ({pct}%); try again when it is done.	Está sendo baixado agora ({pct}%); tente de novo quando terminar.
+	It is waiting in the download queue; try again when it is done.	Está aguardando na fila de downloads; tente de novo quando terminar.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Baixe-o uma vez no gerenciador de modelos de IA. Usar uma ferramenta nunca baixa nada.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Os modelos ficam neste navegador e rodam neste dispositivo: suas imagens não são enviadas.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Os modelos ficam neste computador e rodam neste dispositivo: suas imagens não são enviadas.
+	AI Models	Modelos de IA
+	AI Models…	Modelos de IA…
+	GPU or CPU (best on a GPU)	GPU ou CPU (melhor na GPU)
+	GPU or CPU (lite: fine on either)	GPU ou CPU (leve: funciona bem em ambas)
+	Not downloaded	Não baixado
+	Queued	Na fila
+	Downloading {pct}%	Baixando {pct}%
+	{time} left	faltam {time}
+	Downloaded	Baixado
+	Update available	Atualização disponível
+	Failed: {reason}	Falhou: {reason}
+	Checking…	Verificando…
+	Models on this device: {size}	Modelos neste dispositivo: {size}
+	site storage {used} of {quota}	armazenamento do site: {used} de {quota}
+	Download recommended for this device ({size})	Baixar os recomendados para este dispositivo ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Nenhuma GPU utilizável aqui: os modelos leves (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	Há uma GPU disponível: os modelos completos (Manga LaMa, MangaJaNai para suas páginas abertas, IllustrationJaNai).
+	Download all ({size})	Baixar todos ({size})
+	Delete every downloaded model?	Excluir todos os modelos baixados?
+	Delete all	Excluir todos
+	Cancel all	Cancelar tudo
+	Cleaning	Limpeza
+	Upscaling	Ampliação
+	Downloading {model} {pct}%	Baixando {model} {pct}%
+	Starting the next download…	Iniciando o próximo download…
+	Download	Baixar
+	Used by: {tools}	Usado por: {tools}
+	Runs on: {where}	Roda em: {where}
+	Licence:	Licença:
+	AI model downloads: click to open the AI Model Manager	Downloads de modelos de IA: clique para abrir o gerenciador de modelos de IA
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} MB) não está baixado. Baixe-o primeiro no gerenciador de modelos de IA.
+	Download and delete AI models	Baixar e excluir modelos de IA
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Apaga o texto ou as onomatopeias selecionados e redesenha o fundo com IA, em uma nova camada. Usa um modelo baixado (Janela › Modelos de IA…).
+@plural	{n} more queued|{n} more queued	mais {n} na fila|mais {n} na fila

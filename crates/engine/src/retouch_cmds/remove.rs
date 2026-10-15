@@ -112,9 +112,16 @@ fn hole(plan: &Plan, sel: Option<&Surface>) -> Vec<bool> {
     m
 }
 
-/// The filled window and the hole it fills, computed on `doc` (a snapshot). `None` when the
-/// layer's own window is fully transparent: nothing to remove and nothing to fill from.
-fn run_remove(doc: &mut Document, plan: &Plan, p: &Value, ctx: &crate::jobs::JobCtx, label: &str) -> Result<Option<(Region, Vec<bool>)>> {
+/// The window's pixels and the hole, read on `doc` (a snapshot) before the fill.
+struct Prepared {
+    img: Region,
+    fmt: photocraft_color::PixelFormat,
+    hole: Vec<bool>,
+}
+
+/// Reads what the fill needs. `None` when the layer's own window is fully transparent: nothing to
+/// remove and nothing to fill from.
+fn prepare(doc: &mut Document, plan: &Plan, p: &Value) -> Result<Option<Prepared>> {
     let hole = hole(plan, doc.selection.as_ref());
     if !hole.iter().any(|m| *m) {
         return Err(bad(CMD, "the stroke doesn't cover anything that can change (check the selection)"));
@@ -122,7 +129,6 @@ fn run_remove(doc: &mut Document, plan: &Plan, p: &Value, ctx: &crate::jobs::Job
     if hole.iter().all(|m| *m) {
         return Err(bad(CMD, "nothing is left around the stroke to fill it from"));
     }
-    ctx.check()?;
     let win = plan.window;
     let (img, fmt) = {
         let (surf, _) = crate::channel_cmds::target_surface(doc, plan.id, p)?;
@@ -134,25 +140,91 @@ fn run_remove(doc: &mut Document, plan: &Plan, p: &Value, ctx: &crate::jobs::Job
     if !plan.all_layers && alpha_index(&fmt).is_some_and(|a| img.data.chunks_exact(img.ch).all(|px| px.get(a).is_none_or(|v| *v <= 0.0))) {
         return Ok(None);
     }
+    Ok(Some(Prepared { img, fmt, hole }))
+}
+
+/// The filled window and the hole it fills, by patch-based completion on `doc` (a snapshot).
+fn run_remove(doc: &mut Document, plan: &Plan, p: &Value, ctx: &crate::jobs::JobCtx, label: &str) -> Result<Option<(Region, Vec<bool>)>> {
+    let Some(Prepared { img, fmt, hole }) = prepare(doc, plan, p)? else { return Ok(None) };
+    ctx.check()?;
+    let win = plan.window;
     let (w, h) = (win.width() as usize, win.height() as usize);
-    let mut data = match &plan.ai {
-        Some((svc, opts)) => crate::ai_inpaint_cmds::ai_fill_encoded(svc, ctx, &fmt, &img.data, &hole, w, h, opts)?,
-        None => ctx
-            .stage(0.0, 1.0, label, |ctl| photocraft_algo::remove::remove_with(w, h, img.ch, &img.data, &hole, SEED, ctl))
-            .map_err(|_| EngineError::Cancelled)?,
-    };
+    let mut data = ctx
+        .stage(0.0, 1.0, label, |ctl| photocraft_algo::remove::remove_with(w, h, img.ch, &img.data, &hole, SEED, ctl))
+        .map_err(|_| EngineError::Cancelled)?;
     // The fill's seam blending can step slightly past the storable range.
     clamp_samples(&fmt, &mut data);
     Ok(Some((Region { rect: win, ch: img.ch, data }, hole)))
 }
 
+/// The window with the AI's RGB `generated` in the hole (alpha kept), in the layer's format.
+fn encode_ai(prep: Prepared, rect: Rect, generated: &[f32]) -> Result<(Region, Vec<bool>)> {
+    let Prepared { img, fmt, hole } = prep;
+    let n = fmt.channels().max(1);
+    if generated.len() != hole.len() * 3 || img.data.len() != hole.len() * n {
+        return Err(EngineError::Other("AI fill: window size mismatch".into()));
+    }
+    let mut data = img.data.clone();
+    let mut enc = [0.0f32; 8];
+    for (i, m) in hole.iter().enumerate() {
+        if *m {
+            let a = to_rgba(&fmt, &img.data[i * n..(i + 1) * n])[3];
+            let g = &generated[i * 3..i * 3 + 3];
+            from_rgba_into(&fmt, [g[0], g[1], g[2], a], &mut enc);
+            data[i * n..(i + 1) * n].copy_from_slice(&enc[..n]);
+        }
+    }
+    clamp_samples(&fmt, &mut data);
+    Ok((Region { rect, ch: img.ch, data }, hole))
+}
+
+/// Applies a filled window to the live document as one undo step.
+fn apply_fill(s: &mut Session, id: Option<LayerId>, p: &Value, filled: Option<(Region, Vec<bool>)>) -> Result<Value> {
+    let Some((out, hole)) = filled else { return Ok(json!({"changed": false})) };
+    let damage = s.edit("Remove", |doc, _| replace(doc, Target { id, all_layers: false }, p, &out, &hole))?;
+    if let Some(st) = s.active_mut() {
+        st.last_damage = Some(damage);
+    }
+    Ok(json!({ "damage": damage_json(damage) }))
+}
+
 pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> {
-    let plan = plan(s, p)?;
+    let mut plan = plan(s, p)?;
     let label = "Remove";
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = d.doc.clone();
     let p = p.clone();
     let id = plan.id;
+    // The AI mode answers asynchronously (in the browser from the AI Web Worker, which can't be
+    // waited for on the page's threads): read the window here, fill it tile by tile through the
+    // inpainter, and apply when the last tile is back.
+    if let Some((svc, opts)) = plan.ai.take() {
+        let mut work = (*doc).clone();
+        let Some(prep) = prepare(&mut work, &plan, &p)? else { return Ok(json!({"changed": false})) };
+        let win = plan.window;
+        let (w, h) = (win.width() as usize, win.height() as usize);
+        let rgb = crate::ai_inpaint_cmds::to_rgb(&prep.fmt, &prep.img.data);
+        let cover: Vec<f32> = prep.hole.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
+        return crate::jobs::run_async(
+            s,
+            label,
+            true,
+            move |ctx, done| {
+                ctx.progress(0.0, label);
+                crate::ai_inpaint_cmds::ai_fill_rgb_async(
+                    svc,
+                    ctx.clone(),
+                    rgb,
+                    cover,
+                    w,
+                    h,
+                    opts,
+                    Box::new(move |r| done.finish(r.and_then(|generated| encode_ai(prep, win, &generated)).map(Some))),
+                );
+            },
+            move |s, filled| apply_fill(s, id, &p, filled),
+        );
+    }
     crate::jobs::run(
         s,
         label,
@@ -165,13 +237,6 @@ pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> {
                 run_remove(&mut work, &plan, &p, ctx, label)
             }
         },
-        move |s, filled| {
-            let Some((out, hole)) = filled else { return Ok(json!({"changed": false})) };
-            let damage = s.edit(label, |doc, _| replace(doc, Target { id, all_layers: false }, &p, &out, &hole))?;
-            if let Some(st) = s.active_mut() {
-                st.last_damage = Some(damage);
-            }
-            Ok(json!({ "damage": damage_json(damage) }))
-        },
+        move |s, filled| apply_fill(s, id, &p, filled),
     )
 }

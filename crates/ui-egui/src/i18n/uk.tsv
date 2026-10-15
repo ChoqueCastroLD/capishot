@@ -3933,3 +3933,48 @@ cameraData	Lens	Об'єктив
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Заповнює мазки за допомогою ШІ, а не сусідніми ділянками: краще на растрах і лінійній графіці. «Параметри ШІ…» вибирають якість і пристрій.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Стирає виділений текст або звукові ефекти й домальовує тло за допомогою ШІ на новому шарі. Під час першого використання завантажується модель (MI-GAN 13 МБ, Manga LaMa 102 МБ).
 	Nothing is uploaded: it runs on this device.	Нічого не вивантажується: усе працює на цьому пристрої.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} не завантажено
+	Open Model Manager	Відкрити менеджер моделей
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	Для «{tool}» потрібна модель {model} ({mb} МБ), якої ще немає на цьому пристрої.
+	It is downloading now ({pct}%); try again when it is done.	Вона зараз завантажується ({pct}%); спробуйте знову, коли завантаження завершиться.
+	It is waiting in the download queue; try again when it is done.	Вона чекає в черзі завантажень; спробуйте знову, коли завантаження завершиться.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Завантажте її один раз у менеджері моделей ШІ. Інструменти самі нічого не завантажують.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Моделі зберігаються в цьому браузері й працюють на цьому пристрої: ваші зображення нікуди не надсилаються.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Моделі зберігаються на цьому комп’ютері й працюють на цьому пристрої: ваші зображення нікуди не надсилаються.
+	AI Models	Моделі ШІ
+	AI Models…	Моделі ШІ…
+	GPU or CPU (best on a GPU)	GPU або CPU (найкраще на GPU)
+	GPU or CPU (lite: fine on either)	GPU або CPU (полегшена: добре на обох)
+	Not downloaded	Не завантажено
+	Queued	У черзі
+	Downloading {pct}%	Завантаження {pct}%
+	{time} left	залишилось {time}
+	Downloaded	Завантажено
+	Update available	Доступне оновлення
+	Failed: {reason}	Помилка: {reason}
+	Checking…	Перевірка…
+	Models on this device: {size}	Моделі на цьому пристрої: {size}
+	site storage {used} of {quota}	сховище сайту: {used} з {quota}
+	Download recommended for this device ({size})	Завантажити рекомендовані для цього пристрою ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Придатного GPU немає: полегшені моделі (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	Доступний GPU: повні моделі (Manga LaMa, MangaJaNai для відкритих сторінок, IllustrationJaNai).
+	Download all ({size})	Завантажити всі ({size})
+	Delete every downloaded model?	Видалити всі завантажені моделі?
+	Delete all	Видалити всі
+	Cancel all	Скасувати все
+	Cleaning	Очищення
+	Upscaling	Збільшення
+	Downloading {model} {pct}%	Завантаження {model} {pct}%
+	Starting the next download…	Запуск наступного завантаження…
+	Download	Завантажити
+	Update	Оновити
+	Used by: {tools}	Використовує: {tools}
+	Runs on: {where}	Працює на: {where}
+	Licence:	Ліцензія:
+	AI model downloads: click to open the AI Model Manager	Завантаження моделей ШІ: натисніть, щоб відкрити менеджер моделей ШІ
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} МБ) не завантажено. Спершу завантажте її в менеджері моделей ШІ.
+	Download and delete AI models	Завантаження й видалення моделей ШІ
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Стирає виділений текст або звуконаслідування й перемальовує фон за допомогою ШІ на новому шарі. Використовує завантажену модель (Вікно › Моделі ШІ…).
+@plural	{n} more queued|{n} more queued	ще {n} у черзі|ще {n} у черзі|ще {n} у черзі

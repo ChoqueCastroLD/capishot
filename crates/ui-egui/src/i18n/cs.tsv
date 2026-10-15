@@ -2843,3 +2843,48 @@ cameraData	Lens	Objektiv
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Vyplnit tahy pomocí AI místo okolních záplat: lepší na rastry a kresbu. Možnosti AI… volí kvalitu a zařízení.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Vymaže vybraný text nebo zvukové efekty a dokreslí pozadí pomocí AI na nové vrstvě. Při prvním použití se stáhne model (MI-GAN 13 MB, Manga LaMa 102 MB).
 	Nothing is uploaded: it runs on this device.	Nic se nenahrává: běží na tomto zařízení.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} není stažen
+	Open Model Manager	Otevřít správce modelů
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} potřebuje {model} ({mb} MB), který na tomto zařízení zatím není.
+	It is downloading now ({pct}%); try again when it is done.	Právě se stahuje ({pct} %); zkuste to znovu, až bude hotovo.
+	It is waiting in the download queue; try again when it is done.	Čeká ve frontě stahování; zkuste to znovu, až bude hotovo.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Stáhněte ho jednou ve správci modelů AI. Použití nástroje nikdy nic nestahuje.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Modely zůstávají v tomto prohlížeči a běží na tomto zařízení: vaše obrázky se nenahrávají.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Modely zůstávají v tomto počítači a běží na tomto zařízení: vaše obrázky se nenahrávají.
+	AI Models	Modely AI
+	AI Models…	Modely AI…
+	GPU or CPU (best on a GPU)	GPU nebo CPU (nejlépe na GPU)
+	GPU or CPU (lite: fine on either)	GPU nebo CPU (lehký: dobře na obou)
+	Not downloaded	Nestaženo
+	Queued	Ve frontě
+	Downloading {pct}%	Stahování {pct} %
+	{time} left	zbývá {time}
+	Downloaded	Staženo
+	Update available	Je k dispozici aktualizace
+	Failed: {reason}	Selhalo: {reason}
+	Checking…	Kontrola…
+	Models on this device: {size}	Modely v tomto zařízení: {size}
+	site storage {used} of {quota}	úložiště webu: {used} z {quota}
+	Download recommended for this device ({size})	Stáhnout doporučené pro toto zařízení ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Žádné použitelné GPU: lehké modely (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	GPU je k dispozici: plné modely (Manga LaMa, MangaJaNai pro otevřené stránky, IllustrationJaNai).
+	Download all ({size})	Stáhnout vše ({size})
+	Delete every downloaded model?	Smazat všechny stažené modely?
+	Delete all	Smazat vše
+	Cancel all	Zrušit vše
+	Cleaning	Čištění
+	Upscaling	Zvětšování
+	Downloading {model} {pct}%	Stahování {model} {pct} %
+	Starting the next download…	Spouští se další stahování…
+	Download	Stáhnout
+	Update	Aktualizovat
+	Used by: {tools}	Používá: {tools}
+	Runs on: {where}	Běží na: {where}
+	Licence:	Licence modelu:
+	AI model downloads: click to open the AI Model Manager	Stahování modelů AI: kliknutím otevřete správce modelů AI
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} MB) není stažen. Nejprve ho stáhněte ve správci modelů AI.
+	Download and delete AI models	Stahovat a mazat modely AI
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Smaže vybraný text nebo zvukové efekty a překreslí pozadí pomocí AI na nové vrstvě. Používá stažený model (Okno › Modely AI…).
+@plural	{n} more queued|{n} more queued	další {n} ve frontě|další {n} ve frontě|dalších {n} ve frontě

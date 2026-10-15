@@ -3126,3 +3126,48 @@ cameraData	Lens	Objetivo
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Rellena los trazos con IA en lugar de con parches cercanos: mejor en tramas y dibujo de líneas. Opciones de IA… elige la calidad y el dispositivo.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Borra el texto u onomatopeyas seleccionados y redibuja el fondo con IA en una capa nueva. El primer uso descarga el modelo (MI-GAN 13 MB, Manga LaMa 102 MB).
 	Nothing is uploaded: it runs on this device.	No se sube nada: se ejecuta en este dispositivo.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} no está descargado
+	Open Model Manager	Abrir gestor de modelos
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} necesita {model} ({mb} MB), que todavía no está en este dispositivo.
+	It is downloading now ({pct}%); try again when it is done.	Se está descargando ahora ({pct}%); vuelve a intentarlo cuando termine.
+	It is waiting in the download queue; try again when it is done.	Está esperando en la cola de descargas; vuelve a intentarlo cuando termine.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Descárgalo una vez en el gestor de modelos de IA. Usar una herramienta nunca descarga nada.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Los modelos se guardan en este navegador y se ejecutan en este dispositivo: tus imágenes no se suben.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Los modelos se guardan en este ordenador y se ejecutan en este dispositivo: tus imágenes no se suben.
+	AI Models	Modelos de IA
+	AI Models…	Modelos de IA…
+	GPU or CPU (best on a GPU)	GPU o CPU (mejor en GPU)
+	GPU or CPU (lite: fine on either)	GPU o CPU (ligero: va bien en ambas)
+	Not downloaded	No descargado
+	Queued	En cola
+	Downloading {pct}%	Descargando {pct}%
+	{time} left	quedan {time}
+	Downloaded	Descargado
+	Update available	Actualización disponible
+	Failed: {reason}	Error: {reason}
+	Checking…	Comprobando…
+	Models on this device: {size}	Modelos en este dispositivo: {size}
+	site storage {used} of {quota}	almacenamiento del sitio: {used} de {quota}
+	Download recommended for this device ({size})	Descargar los recomendados para este dispositivo ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Aquí no hay una GPU utilizable: los modelos ligeros (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	Hay una GPU disponible: los modelos completos (Manga LaMa, MangaJaNai para tus páginas abiertas, IllustrationJaNai).
+	Download all ({size})	Descargar todos ({size})
+	Delete every downloaded model?	¿Eliminar todos los modelos descargados?
+	Delete all	Eliminar todos
+	Cancel all	Cancelar todo
+	Cleaning	Limpieza
+	Upscaling	Escalado
+	Downloading {model} {pct}%	Descargando {model} {pct}%
+	Starting the next download…	Iniciando la siguiente descarga…
+	Download	Descargar
+	Update	Actualizar
+	Used by: {tools}	Lo usa: {tools}
+	Runs on: {where}	Se ejecuta en: {where}
+	Licence:	Licencia:
+	AI model downloads: click to open the AI Model Manager	Descargas de modelos de IA: haz clic para abrir el gestor de modelos de IA
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} MB) no está descargado. Descárgalo primero en el gestor de modelos de IA.
+	Download and delete AI models	Descargar y eliminar modelos de IA
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Borra el texto u onomatopeyas seleccionados y redibuja el fondo con IA en una capa nueva. Usa un modelo descargado (Ventana › Modelos de IA…).
+@plural	{n} more queued|{n} more queued	{n} más en cola|{n} más en cola

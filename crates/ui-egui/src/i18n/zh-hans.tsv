@@ -2854,3 +2854,48 @@ cameraData	Lens	镜头
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	用 AI 而不是附近的图块填充笔画：在网点和线稿上效果更好。“AI 选项…”可选择质量和设备。
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	擦除所选文字或拟声词，并用 AI 在新图层上重绘背景。首次使用会下载模型（MI-GAN 13 MB，Manga LaMa 102 MB）。
 	Nothing is uploaded: it runs on this device.	不会上传任何内容：在本设备上运行。
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} 尚未下载
+	Open Model Manager	打开模型管理器
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool}需要 {model}（{mb} MB），此设备上还没有。
+	It is downloading now ({pct}%); try again when it is done.	正在下载（{pct}%）；完成后请重试。
+	It is waiting in the download queue; try again when it is done.	正在下载队列中等待；完成后请重试。
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	请在 AI 模型管理器中下载一次。使用工具永远不会下载任何内容。
+	Models are kept in this browser and run on this device: your images are not uploaded.	模型保存在此浏览器中，并在此设备上运行：你的图像不会被上传。
+	Models are kept on this computer and run on this device: your images are not uploaded.	模型保存在此电脑上，并在此设备上运行：你的图像不会被上传。
+	AI Models	AI 模型
+	AI Models…	AI 模型…
+	GPU or CPU (best on a GPU)	GPU 或 CPU（GPU 上最佳）
+	GPU or CPU (lite: fine on either)	GPU 或 CPU（轻量：两者皆可）
+	Not downloaded	未下载
+	Queued	排队中
+	Downloading {pct}%	正在下载 {pct}%
+	{time} left	剩余 {time}
+	Downloaded	已下载
+	Update available	有可用更新
+	Failed: {reason}	失败：{reason}
+	Checking…	正在检查…
+	Models on this device: {size}	此设备上的模型：{size}
+	site storage {used} of {quota}	站点存储 {used} / {quota}
+	Download recommended for this device ({size})	下载此设备推荐的模型（{size}）
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	此处没有可用的 GPU：轻量模型（MI-GAN、Real-ESRGAN Compact）。
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	有可用的 GPU：完整模型（Manga LaMa、适合已打开页面的 MangaJaNai、IllustrationJaNai）。
+	Download all ({size})	全部下载（{size}）
+	Delete every downloaded model?	删除所有已下载的模型？
+	Delete all	全部删除
+	Cancel all	全部取消
+	Cleaning	清理
+	Upscaling	放大
+	Downloading {model} {pct}%	正在下载 {model} {pct}%
+	Starting the next download…	正在开始下一个下载…
+	Download	下载
+	Update	更新
+	Used by: {tools}	使用者：{tools}
+	Runs on: {where}	运行于：{where}
+	Licence:	许可证：
+	AI model downloads: click to open the AI Model Manager	AI 模型下载：点击打开 AI 模型管理器
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model}（{mb} MB）尚未下载。请先在 AI 模型管理器中下载。
+	Download and delete AI models	下载和删除 AI 模型
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	擦除所选文字或拟声词，并用 AI 在新图层上重绘背景。使用已下载的模型（窗口 › AI 模型…）。
+@plural	{n} more queued|{n} more queued	另有 {n} 个排队中

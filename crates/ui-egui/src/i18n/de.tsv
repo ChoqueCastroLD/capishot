@@ -2874,3 +2874,48 @@ cameraData	Lens	Objektiv
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Striche mit KI statt mit benachbarten Flicken füllen: besser bei Rastern und Strichzeichnungen. KI-Optionen… wählt Qualität und Gerät.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Löscht ausgewählten Text oder Soundeffekte und zeichnet den Hintergrund mit KI auf einer neuen Ebene neu. Beim ersten Mal wird das Modell geladen (MI-GAN 13 MB, Manga LaMa 102 MB).
 	Nothing is uploaded: it runs on this device.	Es wird nichts hochgeladen: Es läuft auf diesem Gerät.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} ist nicht heruntergeladen
+	Open Model Manager	Modellverwaltung öffnen
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} benötigt {model} ({mb} MB), das noch nicht auf diesem Gerät ist.
+	It is downloading now ({pct}%); try again when it is done.	Es wird gerade heruntergeladen ({pct} %); versuchen Sie es erneut, wenn es fertig ist.
+	It is waiting in the download queue; try again when it is done.	Es wartet in der Download-Warteschlange; versuchen Sie es erneut, wenn es fertig ist.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Laden Sie es einmal in der KI-Modellverwaltung herunter. Ein Werkzeug lädt nie selbst etwas herunter.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Modelle bleiben in diesem Browser und laufen auf diesem Gerät: Ihre Bilder werden nicht hochgeladen.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Modelle bleiben auf diesem Computer und laufen auf diesem Gerät: Ihre Bilder werden nicht hochgeladen.
+	AI Models	KI-Modelle
+	AI Models…	KI-Modelle…
+	GPU or CPU (best on a GPU)	GPU oder CPU (am besten auf einer GPU)
+	GPU or CPU (lite: fine on either)	GPU oder CPU (leicht: auf beiden gut)
+	Not downloaded	Nicht heruntergeladen
+	Queued	In der Warteschlange
+	Downloading {pct}%	Wird heruntergeladen: {pct} %
+	{time} left	noch {time}
+	Downloaded	Heruntergeladen
+	Update available	Aktualisierung verfügbar
+	Failed: {reason}	Fehlgeschlagen: {reason}
+	Checking…	Wird geprüft…
+	Models on this device: {size}	Modelle auf diesem Gerät: {size}
+	site storage {used} of {quota}	Speicher der Website: {used} von {quota}
+	Download recommended for this device ({size})	Für dieses Gerät empfohlene herunterladen ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Keine nutzbare GPU: die leichten Modelle (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	Eine GPU ist verfügbar: die vollen Modelle (Manga LaMa, MangaJaNai für Ihre offenen Seiten, IllustrationJaNai).
+	Download all ({size})	Alle herunterladen ({size})
+	Delete every downloaded model?	Alle heruntergeladenen Modelle löschen?
+	Delete all	Alle löschen
+	Cancel all	Alle abbrechen
+	Cleaning	Bereinigen
+	Upscaling	Hochskalieren
+	Downloading {model} {pct}%	{model} wird heruntergeladen: {pct} %
+	Starting the next download…	Nächster Download startet…
+	Download	Herunterladen
+	Update	Aktualisieren
+	Used by: {tools}	Verwendet von: {tools}
+	Runs on: {where}	Läuft auf: {where}
+	Licence:	Lizenz:
+	AI model downloads: click to open the AI Model Manager	KI-Modell-Downloads: Klicken, um die KI-Modellverwaltung zu öffnen
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} MB) ist nicht heruntergeladen. Laden Sie es zuerst in der KI-Modellverwaltung herunter.
+	Download and delete AI models	KI-Modelle herunterladen und löschen
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Löscht ausgewählten Text oder Soundeffekte und zeichnet den Hintergrund mit KI auf einer neuen Ebene neu. Verwendet ein heruntergeladenes Modell (Fenster › KI-Modelle…).
+@plural	{n} more queued|{n} more queued	{n} weiteres in der Warteschlange|{n} weitere in der Warteschlange

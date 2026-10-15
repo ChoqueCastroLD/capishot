@@ -3990,3 +3990,47 @@ cameraData	Lens	Lens
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Vult streken met AI in plaats van nabije stukken: beter bij rasters en lijnwerk. AI-opties… kiest kwaliteit en apparaat.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Wist de geselecteerde tekst of geluidseffecten en tekent de achtergrond met AI opnieuw op een nieuwe laag. Bij het eerste gebruik wordt het model gedownload (MI-GAN 13 MB, Manga LaMa 102 MB).
 	Nothing is uploaded: it runs on this device.	Er wordt niets geüpload: het draait op dit apparaat.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} is niet gedownload
+	Open Model Manager	Modelbeheer openen
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} heeft {model} ({mb} MB) nodig, dat nog niet op dit apparaat staat.
+	It is downloading now ({pct}%); try again when it is done.	Het wordt nu gedownload ({pct}%); probeer het opnieuw als het klaar is.
+	It is waiting in the download queue; try again when it is done.	Het staat in de downloadwachtrij; probeer het opnieuw als het klaar is.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Download het één keer in AI-modelbeheer. Een gereedschap downloadt nooit zelf iets.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Modellen blijven in deze browser en draaien op dit apparaat: je afbeeldingen worden niet geüpload.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Modellen blijven op deze computer en draaien op dit apparaat: je afbeeldingen worden niet geüpload.
+	AI Models	AI-modellen
+	AI Models…	AI-modellen…
+	GPU or CPU (best on a GPU)	GPU of CPU (het best op een GPU)
+	GPU or CPU (lite: fine on either)	GPU of CPU (licht: goed op beide)
+	Not downloaded	Niet gedownload
+	Queued	In wachtrij
+	Downloading {pct}%	Downloaden {pct}%
+	{time} left	nog {time}
+	Downloaded	Gedownload
+	Update available	Update beschikbaar
+	Failed: {reason}	Mislukt: {reason}
+	Checking…	Controleren…
+	Models on this device: {size}	Modellen op dit apparaat: {size}
+	site storage {used} of {quota}	opslag van de site: {used} van {quota}
+	Download recommended for this device ({size})	Aanbevolen voor dit apparaat downloaden ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Geen bruikbare GPU hier: de lichte modellen (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	Er is een GPU beschikbaar: de volledige modellen (Manga LaMa, MangaJaNai voor je open pagina's, IllustrationJaNai).
+	Download all ({size})	Alles downloaden ({size})
+	Delete every downloaded model?	Alle gedownloade modellen verwijderen?
+	Delete all	Alles verwijderen
+	Cancel all	Alles annuleren
+	Cleaning	Opschonen
+	Upscaling	Opschalen
+	Downloading {model} {pct}%	{model} downloaden {pct}%
+	Starting the next download…	Volgende download starten…
+	Download	Downloaden
+	Used by: {tools}	Gebruikt door: {tools}
+	Runs on: {where}	Draait op: {where}
+	Licence:	Licentie:
+	AI model downloads: click to open the AI Model Manager	Downloads van AI-modellen: klik om AI-modelbeheer te openen
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} MB) is niet gedownload. Download het eerst in AI-modelbeheer.
+	Download and delete AI models	AI-modellen downloaden en verwijderen
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Wist de geselecteerde tekst of geluidseffecten en tekent de achtergrond opnieuw met AI, op een nieuwe laag. Gebruikt een gedownload model (Venster › AI-modellen…).
+@plural	{n} more queued|{n} more queued	nog {n} in wachtrij|nog {n} in wachtrij

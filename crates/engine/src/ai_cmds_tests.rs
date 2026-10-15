@@ -101,7 +101,7 @@ fn downloads_need_consent() {
     let (mut s, fake) = with_fake(session(4, 4, gray));
     fake.download_needed.store(true, Ordering::Relaxed);
     let e = s.execute(COMMAND, json!({})).unwrap_err().to_string();
-    assert!(e.contains("download") && e.contains("MB") && e.contains("CC-BY-NC-4.0"), "{e}");
+    assert!(e.contains("isn't downloaded") && e.contains("MB") && e.contains("AI Models"), "{e}");
     s.execute(COMMAND, json!({"download": true, "output": "replace"})).unwrap();
     assert_eq!(s.active().unwrap().doc.size.width, 8);
 }

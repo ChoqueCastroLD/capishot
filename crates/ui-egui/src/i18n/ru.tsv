@@ -3179,3 +3179,48 @@ cameraData	Lens	Объектив
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Заполняет мазки с помощью ИИ, а не соседними участками: лучше на растрах и линейной графике. «Параметры ИИ…» выбирают качество и устройство.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Стирает выделенный текст или звуковые эффекты и дорисовывает фон с помощью ИИ на новом слое. При первом использовании загружается модель (MI-GAN 13 МБ, Manga LaMa 102 МБ).
 	Nothing is uploaded: it runs on this device.	Ничего не загружается в сеть: всё работает на этом устройстве.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} не загружена
+	Open Model Manager	Открыть менеджер моделей
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	Для «{tool}» нужна модель {model} ({mb} МБ), которой ещё нет на этом устройстве.
+	It is downloading now ({pct}%); try again when it is done.	Она сейчас загружается ({pct}%); попробуйте снова, когда загрузка закончится.
+	It is waiting in the download queue; try again when it is done.	Она ждёт в очереди загрузок; попробуйте снова, когда загрузка закончится.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Загрузите её один раз в менеджере моделей ИИ. Инструменты сами ничего не загружают.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Модели хранятся в этом браузере и работают на этом устройстве: ваши изображения никуда не отправляются.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Модели хранятся на этом компьютере и работают на этом устройстве: ваши изображения никуда не отправляются.
+	AI Models	Модели ИИ
+	AI Models…	Модели ИИ…
+	GPU or CPU (best on a GPU)	GPU или CPU (лучше на GPU)
+	GPU or CPU (lite: fine on either)	GPU или CPU (облегчённая: подходит для обоих)
+	Not downloaded	Не загружена
+	Queued	В очереди
+	Downloading {pct}%	Загрузка {pct}%
+	{time} left	осталось {time}
+	Downloaded	Загружена
+	Update available	Доступно обновление
+	Failed: {reason}	Ошибка: {reason}
+	Checking…	Проверка…
+	Models on this device: {size}	Модели на этом устройстве: {size}
+	site storage {used} of {quota}	хранилище сайта: {used} из {quota}
+	Download recommended for this device ({size})	Загрузить рекомендуемые для этого устройства ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Подходящего GPU нет: облегчённые модели (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	Доступен GPU: полные модели (Manga LaMa, MangaJaNai для открытых страниц, IllustrationJaNai).
+	Download all ({size})	Загрузить все ({size})
+	Delete every downloaded model?	Удалить все загруженные модели?
+	Delete all	Удалить все
+	Cancel all	Отменить все
+	Cleaning	Очистка
+	Upscaling	Увеличение
+	Downloading {model} {pct}%	Загрузка {model} {pct}%
+	Starting the next download…	Запуск следующей загрузки…
+	Download	Загрузить
+	Update	Обновить
+	Used by: {tools}	Используется: {tools}
+	Runs on: {where}	Работает на: {where}
+	Licence:	Лицензия:
+	AI model downloads: click to open the AI Model Manager	Загрузки моделей ИИ: нажмите, чтобы открыть менеджер моделей ИИ
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} МБ) не загружена. Сначала загрузите её в менеджере моделей ИИ.
+	Download and delete AI models	Загрузка и удаление моделей ИИ
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Стирает выделенный текст или звукоподражания и перерисовывает фон с помощью ИИ на новом слое. Использует загруженную модель (Окно › Модели ИИ…).
+@plural	{n} more queued|{n} more queued	ещё {n} в очереди|ещё {n} в очереди|ещё {n} в очереди

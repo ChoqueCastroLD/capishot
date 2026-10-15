@@ -10,8 +10,9 @@
 //! The result lands like Image Size, as one undo step (`output: "replace"`: the document becomes
 //! a single layer at the new size), or opens as a new document (`"newDocument"`, the default for
 //! documents with more than one layer, like Photoshop's Super Zoom). It runs as a background job
-//! with progress and cancellation. A model that isn't cached yet needs `download: true`: the
-//! dialog asks the user first, showing its size and licence.
+//! with progress and cancellation. A model that isn't downloaded fails with "… isn't downloaded"
+//! (the UI shows its missing-model dialog; models are downloaded with `ai.models.*`, the AI Model
+//! Manager); an agent may pass `download: true` to fetch it as part of the run.
 //!
 //! `quality` (auto, fast, best) and `device` (auto, gpu, cpu) pick between the full models and
 //! the lite one (Real-ESRGAN Compact, for phones, weak machines and CPUs) through
@@ -314,18 +315,10 @@ fn upscale_ai(s: &mut Session, p: &Value) -> Result<Value> {
     match &plan.state {
         ModelState::Ready => {}
         ModelState::NeedsDownload if download => {}
-        ModelState::NeedsDownload => {
-            return Err(EngineError::Other(format!(
-                "{} needs a one-time download of {:.1} MB ({} licence, by {}); run again with \"download\": true to agree",
-                m.title,
-                m.bytes as f64 / 1e6,
-                m.license,
-                m.author
-            )));
-        }
-        // The browser's cache answers asynchronously; with consent the worker finds out itself.
-        ModelState::Checking if download => {}
-        ModelState::Checking => return Err(EngineError::Other("still checking whether the model is downloaded; try again in a moment".into())),
+        ModelState::NeedsDownload => return Err(EngineError::Other(crate::ai_models_cmds::not_downloaded(m.title, m.bytes, "download"))),
+        // The browser's cache answers asynchronously: run, and a missing model fails the run
+        // with the same "isn't downloaded" error.
+        ModelState::Checking => {}
         ModelState::Unavailable(why) => return Err(EngineError::Other(why.clone())),
     }
     let (nw, nh) = (plan.new_width(), plan.new_height());
@@ -452,7 +445,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Upscale with AI…",
         menu: &["Image"],
         shortcut: None,
-        params: r##"{"scale":2|4=2,"model":"auto|<id from photocraft_ai::catalog>"="auto","quality":"auto|fast|best"="auto" (fast: the lite Real-ESRGAN Compact; auto: full models on a capable GPU, lite on the CPU, phones and weak machines),"device":"auto|gpu|cpu"="auto","tile":32..1024 (input pixels per tile; default the model's),"overlap":0..128=16,"threads":0..64=0 (CPU threads, 0 = one per core),"keepLoaded":bool=true,"content":"auto|grayscale|color"="auto","autoLevels":bool=true (grayscale only, as MangaJaNai),"output":"auto|replace|newDocument"="auto" (auto: replace a single-layer document, else open a new one),"download":bool=false (agree to download the model's weights when they aren't cached)} → {width,height,model,scale,content,document?} (a background job: MangaJaNai for grayscale pages by page height, IllustrationJaNai for colour)"##,
+        params: r##"{"scale":2|4=2,"model":"auto|<id from photocraft_ai::catalog>"="auto","quality":"auto|fast|best"="auto" (fast: the lite Real-ESRGAN Compact; auto: full models on a capable GPU, lite on the CPU, phones and weak machines),"device":"auto|gpu|cpu"="auto","tile":32..1024 (input pixels per tile; default the model's),"overlap":0..128=16,"threads":0..64=0 (CPU threads, 0 = one per core),"keepLoaded":bool=true,"content":"auto|grayscale|color"="auto","autoLevels":bool=true (grayscale only, as MangaJaNai),"output":"auto|replace|newDocument"="auto" (auto: replace a single-layer document, else open a new one),"download":bool=false (agents: fetch the model's weights when they aren't downloaded; the UI downloads with ai.models.download)} → {width,height,model,scale,content,document?} (a background job: MangaJaNai for grayscale pages by page height, IllustrationJaNai for colour)"##,
         enabled,
         run: upscale_ai,
         journal: true,

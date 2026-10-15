@@ -84,6 +84,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.toggle.options", "Options", &["Window"], None),
     // The TypeR panel (`typer`); placed after Tool Presets by `PLACE_AFTER`.
     ("window.panel.typer", "TypeR", &["Window"], None),
+    // The AI Model Manager (`ai_models_ui`); placed after TypeR by `PLACE_AFTER`.
+    ("window.aiModels", "AI Models…", &["Window"], None),
     // Photoshop's Ctrl+Tab and Ctrl+Shift+Tab, on macOS too (⌘Tab belongs to the system, #2340).
     ("window.nextDocument", "Next Document", &[], Some("Ctrl+Tab")),
     ("window.previousDocument", "Previous Document", &[], Some("Ctrl+Shift+Tab")),
@@ -271,13 +273,17 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::capishot_ui::invoke(app, id, &params) {
         return r;
     }
-    // Image › Upscale with AI… (model, size and download consent before the job).
+    // Window › AI Models… (the AI Model Manager).
+    if let Some(r) = crate::ai_models_ui::invoke(app, id, &params) {
+        return r;
+    }
+    // Image › Upscale with AI… (model, size and whether it is downloaded, before the job).
     if let Some(r) = crate::ai_upscale_ui::invoke(app, id, &params) {
         return r;
     }
-    // Clean with AI, the Remove tool's AI mode, Upscale with AI with params: ask before a
-    // model download, wait for the browser's cache check.
-    if let Some(r) = crate::ai_download_prompt::invoke(app, id, &params) {
+    // Clean with AI, the Remove tool's AI mode, Upscale with AI with params: a model that isn't
+    // downloaded opens the missing-model dialog instead of running.
+    if let Some(r) = crate::ai_model_gate::invoke(app, id, &params) {
         return r;
     }
     // Save for Web, Print and the other File-menu dialogs added with slices.
@@ -756,6 +762,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
         "file.open" | "file.openDeep" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
         "type.loadFonts" | "type.loadFontFolder" | "type.manageFonts" => true,
+        crate::ai_models_ui::COMMAND => true,
         i if i.starts_with("file.openRecent.") => true,
         i if i.starts_with(DOCUMENT_ITEM) => true,
         i if crate::links::url_for(i).is_some() => true,
@@ -969,6 +976,7 @@ const PLACE_AFTER: &[(&str, &str)] = &[
     ("view.resetView", "view.flipHorizontal"),
     ("filter.other.colorToAlpha", "filter.other.offset"),
     ("window.panel.typer", "window.panel.toolPresets"),
+    ("window.aiModels", "window.panel.typer"),
     ("type.loadFonts", "type.resolveMissingFonts"),
     ("type.loadFontFolder", "type.loadFonts"),
     ("type.manageFonts", "type.loadFontFolder"),

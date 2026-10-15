@@ -6956,6 +6956,7 @@ dependencies = [
  "photocraft-ai",
  "photocraft-ai-lama",
  "rayon",
+ "sha2",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-rayon",

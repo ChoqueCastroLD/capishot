@@ -154,8 +154,8 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
     p["points"] = pts;
     // The layer mask, an alpha channel or the Quick Mask when targeted, as the Brush paints.
     p["target"] = crate::canvas::paint_target(app);
-    // The AI mode asks before downloading Manga LaMa (and re-runs this stroke with consent).
-    match crate::ai_download_prompt::run(app, cmd, p) {
+    // The AI mode runs only with its model downloaded (else the missing-model dialog).
+    match crate::ai_model_gate::run(app, cmd, p) {
         Ok(r) if matches!(tool, Tool::Healing | Tool::CloneStamp) => {
             // Aligned: keep the offset for later strokes; non-aligned: every stroke restarts at the source.
             app.ui.clone_offset = r.get("offset").and_then(|v| serde_json::from_value(v.clone()).ok()).filter(|_| o.clone_aligned);
@@ -387,9 +387,9 @@ fn clean_selection_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let r = ui
         .add_enabled_ui(enabled, |ui| crate::widgets::secondary_button(ui, tl!("Clean Selection with AI"), 0.0))
         .inner
-        .on_hover_text(tl!("Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB)."));
+        .on_hover_text(tl!("Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…)."));
     if r.clicked()
-        && let Err(e) = crate::ai_download_prompt::run(app, photocraft_engine::ai_inpaint_cmds::ID, json!({}))
+        && let Err(e) = crate::ai_model_gate::run(app, photocraft_engine::ai_inpaint_cmds::ID, json!({}))
     {
         app.ui.status = e;
         app.ui.status_error = true;

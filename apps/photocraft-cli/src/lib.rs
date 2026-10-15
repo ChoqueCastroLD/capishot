@@ -177,6 +177,9 @@ fn with_fonts_in(mut h: Headless, allow_online: bool, config_dir: Option<PathBuf
         // Image › Upscale with AI (`image.upscaleAi`), in-process (the `ai` feature).
         #[cfg(feature = "ai")]
         h.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(&dir))));
+        // `ai.models.*`: downloads into the same cache.
+        #[cfg(feature = "ai")]
+        h.session.set_ai_models(Some(std::sync::Arc::new(photocraft_ai::native_store::NativeModelStore::from_env(&dir))));
     }
     if allow_online {
         h.session.edit_prefs(|p| p.type_.allow_online_fonts = true);

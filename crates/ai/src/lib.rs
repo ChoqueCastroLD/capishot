@@ -9,8 +9,9 @@
 //!   MangaJaNai selection rules ([`mangajanai`]), the planar f32 [`Planar`] image, [`tile`]
 //!   planning with blended overlaps, [`weights`] parsing from safetensors bytes, and the
 //!   [`cache`] (verified downloads; the native disk cache), and the device [`profile`] that picks
-//!   full or lite models and the GPU or the CPU. The engine and the main web bundle use only this
-//!   half.
+//!   full or lite models and the GPU or the CPU, and the download service ([`models`]: the
+//!   AI Model Manager's queue and the [`models::ModelStore`] seam; natively
+//!   `native_store::NativeModelStore`). The engine and the main web bundle use only this half.
 //! * **`runtime` feature** (`cpu` and/or `gpu`): burn inference. [`runtime::Runtime`] owns the
 //!   device; a model is anything implementing [`runtime::Network`] (a burn forward pass);
 //!   [`runtime::run_tiled`] runs a network over an image of any size, tile by tile, with progress
@@ -35,6 +36,9 @@ pub mod cache;
 pub mod catalog;
 pub mod image;
 pub mod mangajanai;
+pub mod models;
+#[cfg(not(target_family = "wasm"))]
+pub mod native_store;
 pub mod profile;
 pub mod service;
 pub mod tile;
