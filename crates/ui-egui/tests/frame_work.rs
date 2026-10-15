@@ -261,3 +261,37 @@ fn thumbnails_are_built_a_few_per_frame() {
     h.step();
     assert_eq!(counter(&h, "thumbs"), settled, "then nothing more to build");
 }
+
+/// A Move drag's preview copies only the moving layers each frame (the last frame's document is
+/// reused), and the release lands the layer where the pointer went, as one step.
+#[test]
+fn a_move_drag_reuses_its_preview_document() {
+    let (mut h, mid) = app(60);
+    h.state_mut().run("layer.select", json!({"layer": mid.0})).expect("select");
+    h.state_mut().ui.tool = Tool::Move;
+    h.state_mut().ui.tool_options.move_auto_select = false;
+    h.state_mut().ui.extras.snap = false;
+    let _ = h.try_run();
+    let bounds =
+        |h: &H| photocraft_engine::layer_multi_cmds::layer_bounds(h.state().session.active().expect("doc").doc.layer(mid).expect("layer")).expect("bounds");
+    let before = bounds(&h);
+    let zoom = f64::from(h.state().ui.views[0].zoom);
+    let from = [f64::from(before.x0 + 10), 120.0];
+    let p0 = screen(&h, from[0], from[1]);
+    h.event(Event::PointerMoved(p0));
+    h.step();
+    h.event(Event::PointerButton { pos: p0, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.step();
+    let reused = counter(&h, "move_preview_reused");
+    for i in 1..=20 {
+        h.event(Event::PointerMoved(screen(&h, from[0] + f64::from(i) * 3.0 / zoom.max(0.01), from[1])));
+        h.step();
+    }
+    assert!(counter(&h, "move_preview_reused") - reused >= 15, "preview reused on {} of 20 frames", counter(&h, "move_preview_reused") - reused);
+    let p1 = screen(&h, from[0] + 60.0 / zoom.max(0.01), from[1]);
+    h.event(Event::PointerButton { pos: p1, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    let after = bounds(&h);
+    assert_eq!(after.y0, before.y0);
+    assert!(after.x0 > before.x0, "moved right: {before:?} -> {after:?}");
+}
