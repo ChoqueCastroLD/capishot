@@ -544,10 +544,10 @@ fn history_brush_restores_earlier_pixels() {
     }
 }
 
-/// #4961: the History Brush's coverage and its source region are both dense over the stroke's
-/// bounds, so a stroke whose box dwarfs the canvas is refused from the points and brush size
-/// alone, before the source surface is cloned or any coverage is rendered. The document is left
-/// as it was, and ordinary strokes still paint at every depth.
+/// #4961 and #6110: every retouch stroke renders its coverage densely over the stroke's bounds
+/// and reads a source region over the same box, so a stroke whose box dwarfs the canvas is
+/// refused from the points and brush size alone, before anything is cloned or rendered. The
+/// document is left as it was, and ordinary strokes still paint at every depth.
 #[test]
 fn history_brush_refuses_a_stroke_too_large_to_render() {
     for depth in DEPTHS {
@@ -563,6 +563,45 @@ fn history_brush_refuses_a_stroke_too_large_to_render() {
         s.execute("paint.historyBrush", json!({"points": [[0, 0], [40, 20]], "size": 6, "hardness": 100})).unwrap();
         assert!(rgba(&s, 20, 10).iter().all(|v| *v > 0.99), "depth {depth}: the Open snapshot is white");
     }
+}
+
+/// #6110: Pattern Stamp already refused a stroke it could not render; every other retouch stroke
+/// reached the same dense conversion unguarded. Each command refuses the oversized stroke and
+/// leaves the pixels alone, and a stroke across the whole canvas still works.
+#[test]
+fn every_retouch_stroke_refuses_a_box_it_cannot_render() {
+    let huge = json!([[0, 0], [900_000, 900_000]]);
+    let ok = json!([[0, 0], [40, 20]]);
+    let cases: [(&str, Value); 5] = [
+        ("paint.cloneStamp", json!({"offset": [4, 0], "size": 8, "hardness": 100})),
+        ("paint.healingBrush", json!({"offset": [4, 0], "size": 8, "hardness": 100})),
+        ("paint.spotHealing", json!({"size": 8, "hardness": 100})),
+        ("paint.historyBrush", json!({"size": 8, "hardness": 100})),
+        ("paint.patternStamp", json!({"size": 8, "hardness": 100})),
+    ];
+    for (cmd, base) in cases {
+        let mut s = session(40, 20, 8, "rgb");
+        s.execute("paint.stroke", json!({"points": [[0, 10], [40, 10]], "size": 12, "hardness": 1.0, "color": "#ff0000"})).unwrap();
+        let before = rgba(&s, 20, 10);
+        let with = |points: &Value| {
+            let mut v = base.clone();
+            if let Some(o) = v.as_object_mut() {
+                o.insert("points".into(), points.clone());
+            }
+            v
+        };
+        let err = s.execute(cmd, with(&huge)).unwrap_err().to_string();
+        assert!(err.contains("stroke too large"), "{cmd}: {err}");
+        assert_eq!(rgba(&s, 20, 10), before, "{cmd}: a refused stroke leaves the pixels alone");
+        // The allowance still covers a stroke across the whole canvas.
+        let across = s.execute(cmd, with(&ok));
+        assert!(across.is_ok() || !format!("{across:?}").contains("stroke too large"), "{cmd}: {across:?}");
+    }
+
+    // Remove takes a list of strokes; each one is charged as it is parsed.
+    let mut s = session(40, 20, 8, "rgb");
+    let err = s.execute("paint.remove", json!({"strokes": [[[0, 0], [900_000, 900_000]]], "size": 8})).unwrap_err().to_string();
+    assert!(err.contains("stroke too large"), "paint.remove: {err}");
 }
 
 #[test]

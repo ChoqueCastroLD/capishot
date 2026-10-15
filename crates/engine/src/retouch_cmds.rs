@@ -358,6 +358,7 @@ fn clamp_samples(fmt: &PixelFormat, data: &mut [f32]) {
 fn clone_stamp(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "paint.cloneStamp";
     let (stroke, id) = parse_brush(s, p, CMD)?;
+    reject_huge_stroke(CMD, &stroke)?;
     let which = sample_layers(p, CMD)?;
     let mode = blend_param(p, CMD)?;
     let aligned = flag(p, "aligned", true);
@@ -383,6 +384,7 @@ fn clone_stamp(s: &mut Session, p: &Value) -> Result<Value> {
                     .draw(bounds, &stroke.brush, &stroke.points, |r| clone_sample(pre, id, &before, which, r, &map, true, CMD));
             }
             let (bounds, cov) = stroke_coverage(&stroke);
+            reject_bounds(CMD, bounds)?;
             // Samples come from the pre-stroke state, so pixels painted earlier in the stroke are never re-cloned.
             let paint = clone_sample(pre, id, surf, which, bounds, &map, flag(p, "wrap", false), CMD)?;
             Ok(apply_coverage(surf, bounds, &cov, stroke.brush.opacity, sel, lock, &paint, mode))
@@ -638,6 +640,7 @@ fn heal_region(fmt: &PixelFormat, src: &Region, dst: &Region, mask: &[bool]) -> 
 fn healing_brush(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "paint.healingBrush";
     let (stroke, id) = parse_brush(s, p, CMD)?;
+    reject_huge_stroke(CMD, &stroke)?;
     let which = sample_layers(p, CMD)?;
     let mode = blend_param(p, CMD)?;
     let aligned = flag(p, "aligned", true);
@@ -645,6 +648,7 @@ fn healing_brush(s: &mut Session, p: &Value) -> Result<Value> {
     let off = map.offset();
     let dmg = run_stroke(s, "Healing Brush", id, p, |pre, surf, sel, lock| {
         let (bounds, cov) = stroke_coverage(&stroke);
+        reject_bounds(CMD, bounds)?;
         let (g, cov) = pad_coverage(bounds, &cov, 2);
         let fmt = surf.format();
         let src = clone_sample(pre, id, surf, which, g, &map, false, CMD)?;
@@ -821,6 +825,7 @@ fn spot_heal_surface(surf: &mut Surface, pre: &Document, stroke: &Stroke, kind: 
 fn spot_healing(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "paint.spotHealing";
     let (stroke, id) = parse_brush(s, p, CMD)?;
+    reject_huge_stroke(CMD, &stroke)?;
     let kind = match string(p, "type", "contentAware") {
         "contentAware" => SpotType::ContentAware,
         "createTexture" => SpotType::CreateTexture,

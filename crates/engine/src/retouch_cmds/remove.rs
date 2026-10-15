@@ -71,6 +71,7 @@ fn stroke_bounds(stroke: &Stroke) -> Rect {
 fn parse_strokes(s: &Session, p: &Value) -> Result<(Vec<Stroke>, Option<LayerId>)> {
     let Some(list) = p.get("strokes") else {
         let (stroke, id) = parse_brush(s, p, CMD)?;
+        reject_huge_stroke(CMD, &stroke)?;
         return Ok((vec![stroke], id));
     };
     let list = list.as_array().ok_or_else(|| bad(CMD, "`strokes` is a list of point lists"))?;
@@ -86,6 +87,7 @@ fn parse_strokes(s: &Session, p: &Value) -> Result<(Vec<Stroke>, Option<LayerId>
             o.insert("points".into(), points.clone());
         }
         let (stroke, layer) = parse_brush(s, &one, CMD)?;
+        reject_huge_stroke(CMD, &stroke)?;
         strokes.push(stroke);
         id = layer;
     }
