@@ -1970,7 +1970,7 @@ impl eframe::App for PhotocraftApp {
         notices::show(self, &ctx);
         gpu_status::show_fallback(self, &ctx);
         kys_import::show_offer(self, &ctx);
-        if chrome && self.ui.panels.menu_bar && self.custom_titlebar && !self.ui.dialogs.is_empty() {
+        if self.titlebar_modal_drag(chrome) {
             titlebar::modal_drag_overlay(&ctx);
         }
         if self.custom_titlebar {
@@ -2041,6 +2041,14 @@ fn read_dropped(_f: &dyn egui::DroppedFile) -> Result<Vec<u8>, String> {
 }
 
 impl PhotocraftApp {
+    /// Whether the title bar's free gap gets the drag overlay this frame: the app draws its title
+    /// strip (`chrome`: not hidden by the screen mode) and a dialog's modal layer covers it. Not
+    /// only with the custom title bar: on macOS the strip under the traffic lights is the window's
+    /// title bar too, and an open dialog (Embedded Profile Mismatch…) left it undraggable (#5826).
+    pub(crate) fn titlebar_modal_drag(&self, chrome: bool) -> bool {
+        chrome && self.ui.panels.menu_bar && !self.ui.dialogs.is_empty()
+    }
+
     /// `params` aimed at the active layer's mask (`"target":"mask"`) when the Layers panel targets
     /// it and command `id` edits the target (adjustments, filters, fills) without naming one:
     /// ⌘I then inverts the mask, as in Photoshop (#780). A targeted alpha channel or Quick Mask
