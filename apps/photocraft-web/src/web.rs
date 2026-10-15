@@ -154,6 +154,7 @@ pub fn start() {
         crate::startup::mark("presets loaded");
         // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
         crate::wheel_guard::install();
+        cap_pixel_density();
         let pen_target = canvas.clone();
         let perf = crate::frame_perf::FramePerf::new(&canvas, perf_debug);
         let boot = Boot {
@@ -247,6 +248,7 @@ impl Boot {
             photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
         }
         listen_pen(&pen_target, app.stylus.feed.clone());
+        reject_palms();
         crate::clipboard::install(ctx);
         listen_drag_position();
         app.set_theme(ctx, ThemeKind::Pro);
@@ -354,6 +356,111 @@ fn listen_pen(target: &web_sys::HtmlCanvasElement, feed: photocraft_ui_egui::sty
             cb.forget();
         }
     }
+}
+
+/// Preferences › Performance › Max Pixel Density (read from the saved preferences, so it applies
+/// from the first frame; a change applies at next launch): the page reports a device pixel ratio
+/// of at most the cap, so eframe sizes the canvas's backing store and egui draws at it, and the
+/// browser scales the canvas up. A 3× phone then draws 2.25 times fewer pixels a frame.
+fn cap_pixel_density() {
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::{JsCast as _, JsValue};
+    let saved = local_storage().and_then(|s| s.get_item(PREFS_KEY).ok().flatten());
+    let density = saved
+        .and_then(|t| serde_json::from_str::<photocraft_engine::prefs::Preferences>(&t).ok())
+        .map(|p| p.performance.max_pixel_density)
+        .unwrap_or_default();
+    let Some(cap) = density.cap() else { return };
+    let Some(window) = web_sys::window() else { return };
+    let key = JsValue::from_str("devicePixelRatio");
+    let Some(real) = js_sys::Reflect::get(&js_sys::Object::get_own_property_descriptor(&window, &key), &JsValue::from_str("get"))
+        .ok()
+        .and_then(|g| g.dyn_into::<js_sys::Function>().ok())
+    else {
+        return;
+    };
+    let this = window.clone();
+    let getter = Closure::<dyn Fn() -> f64>::new(move || {
+        let dpr = real.call0(&this).ok().and_then(|v| v.as_f64()).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
+        dpr.min(cap)
+    });
+    let desc = js_sys::Object::new();
+    let set = |k: &str, v: &JsValue| js_sys::Reflect::set(&desc, &JsValue::from_str(k), v).is_ok();
+    if !(set("get", getter.as_ref()) && set("configurable", &JsValue::TRUE) && set("enumerable", &JsValue::TRUE)) {
+        return;
+    }
+    if js_sys::Reflect::define_property(&window, &key, &desc).unwrap_or(false) {
+        getter.forget();
+        // eframe measures the canvas in real device pixels when the browser offers them
+        // (`devicePixelContentBoxSize`); without it, it takes CSS pixels × the ratio above.
+        if let Ok(entry) = js_sys::Reflect::get(&window, &JsValue::from_str("ResizeObserverEntry"))
+            && let Ok(proto) = js_sys::Reflect::get(&entry, &JsValue::from_str("prototype"))
+            && let Some(proto) = proto.dyn_ref::<js_sys::Object>()
+        {
+            let _ = js_sys::Reflect::delete_property(proto, &JsValue::from_str("devicePixelContentBoxSize"));
+        }
+        log::info!("photocraft-web: drawing at most {cap}× device pixels per CSS pixel");
+    }
+}
+
+/// While a pen is in use, fingers resting on the screen are ignored.
+const PALM_WINDOW_MS: f64 = 1000.0;
+
+thread_local! {
+    /// When a pen last touched or hovered the page (`Event.timeStamp`), and whether it is down.
+    static PEN_SEEN: std::cell::Cell<(f64, bool)> = const { std::cell::Cell::new((f64::NEG_INFINITY, false)) };
+}
+
+/// Palm rejection: a finger (not a stylus) that touches or moves on the page while a pen is down
+/// or was used within [`PALM_WINDOW_MS`] never reaches eframe, so a hand resting on a tablet
+/// doesn't paint, pan or click. Ends and cancels always pass, so egui never keeps a touch it saw
+/// start. Listeners on the window in the capture phase run before eframe's.
+fn reject_palms() {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
+    opts.set_passive(false);
+    let pen = Closure::<dyn FnMut(web_sys::PointerEvent)>::new(|e: web_sys::PointerEvent| {
+        if e.pointer_type() == "pen" {
+            let down = match e.type_().as_str() {
+                "pointerdown" => true,
+                "pointerup" | "pointercancel" => false,
+                _ => e.buttons() != 0,
+            };
+            PEN_SEEN.with(|p| p.set((e.time_stamp(), down)));
+        } else if e.pointer_type() == "touch" && e.type_() == "pointerdown" && palm_time(e.time_stamp()) {
+            e.stop_immediate_propagation();
+        }
+    });
+    for kind in ["pointerdown", "pointermove", "pointerup", "pointercancel"] {
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(kind, pen.as_ref().unchecked_ref(), &opts);
+    }
+    pen.forget();
+    let touch = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(|e: web_sys::TouchEvent| {
+        if !palm_time(e.time_stamp()) {
+            return;
+        }
+        let changed = e.changed_touches();
+        // An Apple Pencil arrives as touches too, of type "stylus": those are the pen's.
+        let stylus = (0..changed.length()).filter_map(|i| changed.get(i)).any(|t| {
+            js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("touchType")).ok().and_then(|v| v.as_string()).as_deref() == Some("stylus")
+        });
+        if !stylus {
+            e.stop_immediate_propagation();
+            e.prevent_default();
+        }
+    });
+    for kind in ["touchstart", "touchmove"] {
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(kind, touch.as_ref().unchecked_ref(), &opts);
+    }
+    touch.forget();
+}
+
+/// Whether a finger at `now` (`Event.timeStamp`) counts as a palm: the pen is down or was just used.
+fn palm_time(now: f64) -> bool {
+    let (seen, down) = PEN_SEEN.with(std::cell::Cell::get);
+    down || (now - seen).abs() < PALM_WINDOW_MS
 }
 
 thread_local! {
