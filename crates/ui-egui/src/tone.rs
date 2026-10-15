@@ -262,7 +262,20 @@ pub fn histogram_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     })
                     .is_ok()
             };
-            #[cfg(target_arch = "wasm32")]
+            // The browser threads build: on the rayon pool (a worker can't wake egui; the panel
+            // polls while the job runs, below).
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            let spawned = {
+                let doc = st.doc.clone();
+                let tx = tx.clone();
+                rayon::spawn(move || {
+                    let t0 = crate::gpu_canvas::now_ms();
+                    let h = Arc::new(compute_histograms(&doc, HistSource::BelowLayer(LayerId(u64::MAX)), ToneSpace::Rgb));
+                    let _ = tx.send((doc.id, crate::gpu_canvas::now_ms() - t0, h));
+                });
+                true
+            };
+            #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
             let spawned = false;
             if !spawned {
                 let t0 = crate::gpu_canvas::now_ms();
@@ -278,6 +291,9 @@ pub fn histogram_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // overwriting a newer one. A worker that died without sending clears the job so the next
     // frame schedules a new one.
     if let Some((jd, jr, rx)) = &app.hist_job {
+        if cfg!(target_arch = "wasm32") {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        }
         match rx.try_recv() {
             Ok((_, ms, h)) => {
                 app.perf.span("histogram", ms);

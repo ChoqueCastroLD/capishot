@@ -229,3 +229,35 @@ fn the_repainted_chrome_matches_the_built_one() {
     h.event(Event::PointerButton { pos: screen(&h, 130.0, 100.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
     h.run_steps(2);
 }
+
+/// Jumping to another part of a long Layers panel builds at most
+/// `THUMBS_PER_FRAME` thumbnails a frame; the next frames finish the rest.
+#[test]
+fn thumbnails_are_built_a_few_per_frame() {
+    let (mut h, _) = app(200);
+    let _ = h.try_run();
+    // Scroll far down the rows in one wheel step.
+    let row = h.state().last_canvas_rect.right() + 150.0;
+    h.event(Event::PointerMoved(egui::pos2(row, 600.0)));
+    h.step();
+    let (thumbs, deferred) = (counter(&h, "thumbs"), counter(&h, "thumbs_deferred"));
+    h.input_mut().events.push(Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -4000.0),
+        modifiers: Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    });
+    let mut per_frame = Vec::new();
+    for _ in 0..12 {
+        let before = counter(&h, "thumbs");
+        h.step();
+        per_frame.push(counter(&h, "thumbs") - before);
+    }
+    assert!(per_frame.iter().all(|n| *n <= u64::from(photocraft_ui_egui::THUMBS_PER_FRAME)), "{per_frame:?}");
+    assert!(counter(&h, "thumbs") > thumbs, "the rows scrolled into view got thumbnails");
+    assert!(counter(&h, "thumbs_deferred") > deferred, "some waited for a later frame: {per_frame:?}");
+    let _ = h.try_run();
+    let settled = counter(&h, "thumbs");
+    h.step();
+    assert_eq!(counter(&h, "thumbs"), settled, "then nothing more to build");
+}

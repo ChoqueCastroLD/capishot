@@ -20,6 +20,8 @@ pub struct PerfCounters {
     pub navigator: u64,
     /// Histogram panel recomputes.
     pub histogram: u64,
+    /// Snap target sets built from the document (drag starts on a changed document).
+    pub snap_builds: u64,
     /// Frames that repainted the chrome from its last shapes during a canvas gesture.
     pub chrome_reused: u64,
     /// Frames run.
@@ -37,6 +39,7 @@ impl PerfCounters {
             ("rows_skipped", self.rows_skipped),
             ("navigator", self.navigator),
             ("histogram", self.histogram),
+            ("snap_builds", self.snap_builds),
             ("chrome_reused", self.chrome_reused),
             ("frames", self.frames),
         ]
