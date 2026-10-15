@@ -493,6 +493,8 @@ pub const AI_MODELS: &[(&str, &str, &str, &str)] = &[
     ("MangaJaNai and IllustrationJaNai", "the-database", "CC BY-NC 4.0", "https://github.com/the-database/MangaJaNai"),
     ("Manga LaMa (AnimeMangaInpainting)", "dreMaz", "MIT", "https://huggingface.co/dreMaz/AnimeMangaInpainting"),
     ("LaMa", "Suvorov et al. (Samsung AI)", "Apache-2.0", ""),
+    ("MI-GAN (lite inpainting)", "Picsart AI Research", "MIT", "https://github.com/Picsart-AI-Research/MI-GAN"),
+    ("Real-ESRGAN Compact, realesr-animevideov3 (lite upscaling)", "Xintao Wang et al.", "BSD-3-Clause", "https://github.com/xinntao/Real-ESRGAN"),
     ("burn", "", "MIT/Apache-2.0", ""),
 ];
 

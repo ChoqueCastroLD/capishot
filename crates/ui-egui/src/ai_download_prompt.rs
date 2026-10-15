@@ -49,8 +49,8 @@ struct Target {
 
 fn target(app: &PhotocraftApp, id: &str, params: &Value) -> Option<Target> {
     match id {
-        ai_inpaint_cmds::ID => lama(app),
-        "paint.remove" if params.get("ai").and_then(Value::as_bool) == Some(true) => lama(app),
+        ai_inpaint_cmds::ID => inpaint(app, params),
+        "paint.remove" if params.get("ai").and_then(Value::as_bool) == Some(true) => inpaint(app, params),
         ai_cmds::COMMAND => {
             use photocraft_ai::service::ModelState as M;
             let plan = ai_cmds::plan(&app.session, params).ok()?;
@@ -66,11 +66,12 @@ fn target(app: &PhotocraftApp, id: &str, params: &Value) -> Option<Target> {
     }
 }
 
-fn lama(app: &PhotocraftApp) -> Option<Target> {
+/// The inpainting model these params run (Manga LaMa, or the lite MI-GAN that Quality / Device
+/// choose on this machine), so the prompt names the model that will really download.
+fn inpaint(app: &PhotocraftApp, params: &Value) -> Option<Target> {
     use photocraft_ai_lama::service::ModelState as M;
-    let svc = app.session.inpainter()?;
-    let model = catalog::model(catalog::LAMA_ID)?;
-    let state = match svc.model_state() {
+    let (model, state) = ai_inpaint_cmds::model_state(&app.session, params)?;
+    let state = match state {
         M::Ready => State::Ready,
         M::NeedsDownload { .. } => State::NeedsDownload,
         M::Checking => State::Checking,

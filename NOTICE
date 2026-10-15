@@ -39,4 +39,6 @@ needs them, after the user agrees, and kept in the browser's cache (or on disk).
 MangaJaNai and IllustrationJaNai by the-database — CC BY-NC 4.0 — https://github.com/the-database/MangaJaNai
 Manga LaMa (AnimeMangaInpainting) by dreMaz — MIT — https://huggingface.co/dreMaz/AnimeMangaInpainting
 LaMa by Suvorov et al. (Samsung AI) — Apache-2.0
+MI-GAN by Picsart AI Research — MIT — https://github.com/Picsart-AI-Research/MI-GAN
+Real-ESRGAN Compact (realesr-animevideov3) by Xintao Wang et al. — BSD-3-Clause — https://github.com/xinntao/Real-ESRGAN
 burn — MIT/Apache-2.0

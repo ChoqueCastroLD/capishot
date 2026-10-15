@@ -35,6 +35,9 @@ impl Inpainter for Lama {
     fn model_state(&self) -> ModelState {
         self.state.lock().unwrap().clone().unwrap_or(ModelState::Ready)
     }
+    fn model_state_of(&self, _model: &str) -> ModelState {
+        self.model_state()
+    }
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
         let allowed = req.allow_download;
         self.consents.lock().unwrap().push(allowed);
@@ -207,6 +210,24 @@ fn a_stale_cached_answer_asks_instead_of_showing_the_error() {
     assert!(on_job_failed(&mut app, ID, "Clean with AI: Manga LaMa isn't downloaded yet"));
     assert_eq!(lama.consents(), vec![true]);
     assert!(!on_job_failed(&mut app, ID, "device lost"));
+}
+
+/// Without a GPU the automatic choice is the lite MI-GAN: the prompt names it (and its size), not
+/// Manga LaMa, and consent is remembered for it.
+#[test]
+fn the_prompt_names_the_lite_model_the_device_profile_picks() {
+    use photocraft_ai::profile::{DeviceProfile, GpuClass};
+    let lama = Lama::needs();
+    let mut app = app_with(&lama);
+    let up = photocraft_ai::service::FakeUpscaler { profile: Mutex::new(DeviceProfile { gpu: GpuClass::None, ..Default::default() }), ..Default::default() };
+    app.session.set_ai_upscaler(Some(Arc::new(up)));
+    invoke(&mut app, ID, &json!({})).unwrap().unwrap();
+    let d = prompt(&app).expect("asks first");
+    assert_eq!(d.fields.get("model").and_then(Value::as_str), Some(catalog::MIGAN_ID));
+    // Best quality asks for Manga LaMa instead.
+    app.ui.dialogs.clear();
+    invoke(&mut app, ID, &json!({"quality": "best"})).unwrap().unwrap();
+    assert_eq!(prompt(&app).unwrap().fields.get("model").and_then(Value::as_str), Some(catalog::LAMA_ID));
 }
 
 #[test]
