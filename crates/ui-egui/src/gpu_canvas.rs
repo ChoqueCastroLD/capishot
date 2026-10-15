@@ -110,6 +110,59 @@ pub struct GpuCanvas {
     tile: u32,
     high: HighPolicy,
     health: photocraft_gpu::DeviceHealth,
+    /// Paces [`GpuCanvas::catch_up`]'s full-size refinement by GPU completion.
+    refine: RefinePacer,
+}
+
+/// One refinement piece in flight at a time; the work per piece (output pixels × passes) adapts
+/// to the GPU time the last piece took, aiming for about [`REFINE_TARGET_MS`].
+#[derive(Clone)]
+struct RefinePacer {
+    /// Milliseconds the last piece took from submit to completion (`f64` bits; `u64::MAX`
+    /// while it runs, `u64::MAX - 1` before the first).
+    last: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    work: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// GPU time one refinement piece aims for (ms).
+pub const REFINE_TARGET_MS: f64 = 8.0;
+
+impl RefinePacer {
+    const RUNNING: u64 = u64::MAX;
+    const IDLE: u64 = u64::MAX - 1;
+
+    fn new() -> Self {
+        Self { last: std::sync::Arc::new(Self::IDLE.into()), work: std::sync::Arc::new(REFINE_WORK.into()) }
+    }
+
+    /// Whether a piece is still on the GPU, and the work the next may take.
+    fn next_work(&self) -> (bool, u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let last = self.last.load(Relaxed);
+        let mut work = self.work.load(Relaxed);
+        if last == Self::RUNNING {
+            return (true, work);
+        }
+        if last != Self::IDLE {
+            let ms = f64::from_bits(last);
+            // Towards the target, at most halving or doubling per piece.
+            let k = (REFINE_TARGET_MS / ms.max(0.25)).clamp(0.5, 2.0);
+            work = ((work as f64 * k) as u64).clamp(REFINE_WORK / 64, REFINE_WORK * 4);
+            self.work.store(work, Relaxed);
+            self.last.store(Self::IDLE, Relaxed);
+        }
+        (false, work)
+    }
+
+    /// Mark a piece submitted; the returned callback (for `on_submitted_work_done`) records how
+    /// long it took.
+    fn start(&self) -> impl FnOnce() + Send + 'static {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.last.store(Self::RUNNING, Relaxed);
+        let last = self.last.clone();
+        let t0 = now_ms();
+        move || last.store((now_ms() - t0).max(0.0).to_bits(), Relaxed)
+    }
 }
 
 /// Can `adapter` use `Rgba16Float` as a sampled, filtered, render-target and copy texture?
@@ -144,7 +197,17 @@ impl GpuCanvas {
         res.separate_mip_targets = rs.adapter.get_info().backend == wgpu::Backend::Dx12;
         rs.renderer.write().callback_resources.insert(stored(res));
         log::info!("gpu canvas: target {:?}, max texture {max}, tile {tile}, 16F canvas {high:?}", rs.target_format);
-        Self { rs: rs.clone(), tile, high, health }
+        Self { rs: rs.clone(), tile, high, health, refine: RefinePacer::new() }
+    }
+
+    /// Run `done` once the GPU has finished everything submitted so far. False once the device
+    /// is lost.
+    pub fn on_done(&self, done: impl FnOnce() + Send + 'static) -> bool {
+        if !self.health.is_ok() {
+            return false;
+        }
+        self.rs.queue.on_submitted_work_done(done);
+        true
     }
 
     /// The device's health flag (shared with the wgpu compositor and the paint callback).
@@ -396,6 +459,21 @@ impl GpuCanvas {
         region: photocraft_geom::Rect,
         encode_srgb: bool,
     ) -> Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> {
+        self.composite_lod(doc, region, encode_srgb, 0, false)
+    }
+
+    /// [`GpuCanvas::composite`] at mip level `level` (`photocraft_gpu::Compositor::render_lod`):
+    /// the region's finer levels are then out of date until a full-size refresh (see
+    /// [`GpuCanvas::catch_up`]). `partial`: a new texture set gets only `region` (the rest is
+    /// marked deferred) instead of the whole document.
+    pub fn composite_lod(
+        &self,
+        doc: &photocraft_doc::Document,
+        region: photocraft_geom::Rect,
+        encode_srgb: bool,
+        level: u32,
+        partial: bool,
+    ) -> Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> {
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let size = [doc.size.width, doc.size.height];
         if size[0] == 0 || size[1] == 0 {
@@ -436,7 +514,7 @@ impl GpuCanvas {
         let key = doc.id.0;
         let format = self.format_for(doc.depth, size);
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format);
-        let region = if fresh { doc.bounds() } else { region.intersect(&doc.bounds()) };
+        let region = if fresh && !partial { doc.bounds() } else { region.intersect(&doc.bounds()) };
         // Checked before allocating a new canvas texture only: `render` plans (and refuses) itself.
         if fresh && let Err(e) = comp.supports(doc) {
             res.compositor = Some(comp);
@@ -464,12 +542,21 @@ impl GpuCanvas {
         let bgl = &res.encode_bgl;
         // A float canvas keeps values above 1.0 (32-bit documents, for the 32-bit preview).
         let keep_hdr = i32::from(format == FORMAT_HIGH);
+        // Every tile must have the level (tiny edge tiles have short mip chains), and tiles must
+        // start on whole reduced pixels.
+        let mut level = level.min(d.max_level()).min(photocraft_gpu::MAX_LOD);
+        while level > 0 && d.tiles.iter().any(|t| t.rect[0] % (1 << level) != 0 || t.rect[1] % (1 << level) != 0) {
+            level -= 1;
+        }
         // Last-resort guard: a wgpu panic (e.g. polling a device lost mid-refresh) marks the
         // device lost instead of taking the app and its documents down.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            comp.render(device, queue, doc, region, |enc, out| {
+            comp.render_lod(device, queue, doc, region, level, |enc, out| {
                 for t in &d.tiles {
-                    let [tx, ty, tw, th] = t.rect.map(|v| v as i32);
+                    let l = out.level;
+                    let Some(target) = t.levels.get(l as usize) else { continue };
+                    // The tile at the chunk's level (tile origins are multiples of the tile side).
+                    let [tx, ty, tw, th] = [t.rect[0] >> l, t.rect[1] >> l, (t.rect[2] >> l).max(1), (t.rect[3] >> l).max(1)].map(|v| v as i32);
                     let r = out.rect.intersect(&photocraft_geom::Rect::from_xywh(tx, ty, tw as u32, th as u32));
                     if r.is_empty() {
                         continue;
@@ -487,7 +574,7 @@ impl GpuCanvas {
                     let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("pc_encode"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &t.levels[0],
+                            view: target,
                             resolve_target: None,
                             depth_slice: None,
                             ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
@@ -515,7 +602,7 @@ impl GpuCanvas {
             None => result,
         };
         if result.is_ok() {
-            d.regenerate_mips(device, queue, res, [region.x0 as u32, region.y0 as u32, region.x1 as u32, region.y1 as u32]);
+            d.regenerate_mips_from(device, queue, res, [region.x0 as u32, region.y0 as u32, region.x1 as u32, region.y1 as u32], level);
             if std::env::var_os("PHOTOCRAFT_GPU_SYNC").is_some() {
                 // Benchmarking: wait for the GPU so callers can time the whole refresh.
                 #[cfg(not(target_arch = "wasm32"))]
@@ -539,6 +626,22 @@ impl GpuCanvas {
         doc: &photocraft_doc::Document,
         damage: Option<photocraft_geom::Rect>,
         display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+    ) -> Refresh {
+        self.refresh_for(key, doc, damage, display, None)
+    }
+
+    /// [`GpuCanvas::refresh`] for a view that shows `need`: on the wgpu compositor only the part
+    /// of the change near what the view shows is composited now, at the view's mip level when
+    /// it is zoomed out and the change is large ([`LOD_MIN_PX`]); the rest is marked out of
+    /// date and brought up to date by [`GpuCanvas::catch_up`] (when the view needs it, or at
+    /// full size once the edits pause).
+    pub fn refresh_for(
+        &self,
+        key: u64,
+        doc: &photocraft_doc::Document,
+        damage: Option<photocraft_geom::Rect>,
+        display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+        need: Option<ViewNeed>,
     ) -> Refresh {
         if let Some(f) = self.fault() {
             // Nothing reaches the GPU any more; the app switches to the CPU canvas.
@@ -565,11 +668,35 @@ impl GpuCanvas {
         }
         let region = damage.unwrap_or(bounds);
         let encode_srgb = display.is_some_and(|d| d.encode_srgb);
-        let gpu = if key == doc.id.0 { self.composite(doc, region, encode_srgb) } else { Err(photocraft_gpu::Unsupported("preview texture".into())) };
+        let gpu = if key != doc.id.0 {
+            Err(photocraft_gpu::Unsupported("preview texture".into()))
+        } else if let Some(n) = need {
+            let near = near_view(n.visible, bounds);
+            let now = region.intersect(&near);
+            let later = subtract(region, near);
+            let level = if area(now) >= LOD_MIN_PX { n.level } else { 0 };
+            let r = self.composite_lod(doc, now, encode_srgb, level, true);
+            if let Ok(stats) = &r {
+                self.with_doc(key, |res, d| {
+                    let mut stale = d.stale();
+                    for p in &later {
+                        stale.defer(*p);
+                    }
+                    if stats.level > 0 || !later.is_empty() {
+                        res.reduced_at = now_ms();
+                    }
+                    res.last_passes = stats.passes;
+                });
+            }
+            r
+        } else {
+            self.composite(doc, region, encode_srgb)
+        };
         match gpu {
             Ok(stats) => {
                 out.kind = if damage.is_some() { "gpu-rect" } else { "gpu-full" };
-                out.px = region.width() as u64 * region.height() as u64;
+                out.px = stats.pixels;
+                out.level = stats.level;
                 out.composite_ms = now_ms() - t0;
                 out.uploads = stats.tiles_uploaded as u64;
                 return out;
@@ -596,6 +723,91 @@ impl GpuCanvas {
         out.px = bounds.width() as u64 * bounds.height() as u64;
         out.composite_ms = now_ms() - t0;
         out
+    }
+
+    /// Bring what view `need` shows of document `key` up to date (regions an earlier
+    /// [`GpuCanvas::refresh_for`] deferred or composited at a coarser level than the view now
+    /// samples), then, when `idle` and no reduced refresh happened for [`REFINE_DELAY_MS`], one
+    /// piece of the remaining out-of-date regions at full size ([`REFINE_WORK`]). Call it on
+    /// frames where the document didn't change; repaint again after [`CatchUp::again_ms`].
+    pub fn catch_up(
+        &self,
+        key: u64,
+        doc: &photocraft_doc::Document,
+        display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+        need: ViewNeed,
+        idle: bool,
+    ) -> CatchUp {
+        let mut out = CatchUp::default();
+        if key != doc.id.0 || self.fault().is_some() || !self.has(key, [doc.size.width, doc.size.height]) {
+            return out;
+        }
+        let bounds = doc.bounds();
+        let near = near_view(need.visible, bounds);
+        let Some((urgent, reduced_at, passes)) = self.with_doc(key, |res, d| (d.stale().needed(near, need.level), res.reduced_at, res.last_passes)) else {
+            return out;
+        };
+        let encode_srgb = display.is_some_and(|d| d.encode_srgb);
+        let t0 = now_ms();
+        for r in urgent {
+            let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
+            match self.composite_lod(doc, r, encode_srgb, level, true) {
+                Ok(st) => out.px += st.pixels,
+                Err(_) => {
+                    // Not on the GPU any more: the next refresh redraws the document.
+                    self.forget_doc(key);
+                    return out;
+                }
+            }
+        }
+        let wait = REFINE_DELAY_MS - (now_ms() - reduced_at);
+        // One refinement piece on the GPU at a time, sized from how long the last one took
+        // there (submit to completion): the frames stay short on a slow GPU, pieces grow on a
+        // fast one.
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = self.rs.device.poll(wgpu::PollType::Poll);
+        let (busy, work) = self.refine.next_work();
+        if idle && wait <= 0.0 && !busy {
+            let budget = (work / passes.max(1) as u64).max(128 * 128);
+            if let Some(piece) = self.with_doc(key, |_, d| d.stale().next_piece(need.visible, budget)).flatten() {
+                match self.composite_lod(doc, piece, encode_srgb, 0, true) {
+                    Ok(st) => {
+                        out.px += st.pixels;
+                        out.refined = true;
+                        let timer = self.refine.start();
+                        self.rs.queue.on_submitted_work_done(timer);
+                    }
+                    Err(_) => {
+                        self.forget_doc(key);
+                        return out;
+                    }
+                }
+            }
+        }
+        out.composite_ms = now_ms() - t0;
+        let pending = self.with_doc(key, |_, d| !d.stale().is_empty()).unwrap_or(false);
+        out.again_ms = pending.then_some(if wait > 0.0 { wait } else if busy { 4.0 } else { 0.0 });
+        out
+    }
+
+    /// Whether document `key`'s texture has out-of-date regions (tests and diagnostics).
+    pub fn has_stale(&self, key: u64) -> bool {
+        self.with_doc(key, |_, d| !d.stale().is_empty()).unwrap_or(false)
+    }
+
+    fn with_doc<T>(&self, key: u64, f: impl FnOnce(&mut Resources, &DocTextures) -> T) -> Option<T> {
+        let mut r = self.rs.renderer.write();
+        let res: &mut Resources = r.callback_resources.get_mut::<StoredResources>()?;
+        let d = res.docs.remove(&key)?;
+        let out = f(res, &d);
+        res.docs.insert(key, d);
+        Some(out)
+    }
+
+    fn forget_doc(&self, key: u64) {
+        if let Some(res) = self.rs.renderer.write().callback_resources.get_mut::<StoredResources>() {
+            res.docs.remove(&key);
+        }
     }
 
     /// Composite the whole of `doc` with the CPU compositor into document `key`'s texture, band by
@@ -714,6 +926,12 @@ impl GpuCanvas {
     /// and debugging.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn read_texels(&self, key: u64) -> Option<(wgpu::TextureFormat, [u32; 2], Vec<[f32; 4]>)> {
+        self.read_texels_level(key, 0)
+    }
+
+    /// [`GpuCanvas::read_texels`] of mip level `level` (its size is the level's).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn read_texels_level(&self, key: u64, level: u32) -> Option<(wgpu::TextureFormat, [u32; 2], Vec<[f32; 4]>)> {
         if !self.health.is_ok() {
             return None;
         }
@@ -721,10 +939,13 @@ impl GpuCanvas {
         let renderer = self.rs.renderer.read();
         let d = renderer.callback_resources.get::<StoredResources>()?.docs.get(&key)?;
         let bpp = texel_bytes(d.format);
-        let (w, h) = (d.size[0] as usize, d.size[1] as usize);
+        let (w, h) = ((d.size[0] >> level).max(1) as usize, (d.size[1] >> level).max(1) as usize);
         let mut out = vec![[0.0f32; 4]; w.checked_mul(h)?];
         for t in &d.tiles {
-            let [tx, ty, tw, th] = t.rect;
+            if level as usize >= t.levels.len() {
+                return None;
+            }
+            let [tx, ty, tw, th] = [t.rect[0] >> level, t.rect[1] >> level, (t.rect[2] >> level).max(1), (t.rect[3] >> level).max(1)];
             let row = (tw as u64 * bpp).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64);
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("pc_canvas_readback"),
@@ -734,7 +955,7 @@ impl GpuCanvas {
             });
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_canvas_readback") });
             enc.copy_texture_to_buffer(
-                t.texture.as_image_copy(),
+                wgpu::TexelCopyTextureInfo { texture: &t.texture, mip_level: level, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
                 wgpu::TexelCopyBufferInfo {
                     buffer: &buf,
                     layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row as u32), rows_per_image: Some(th) },
@@ -756,7 +977,7 @@ impl GpuCanvas {
                 }
             }
         }
-        Some((d.format, d.size, out))
+        Some((d.format, [w as u32, h as u32], out))
     }
 
     /// Add the paint callback drawing `params` into `rect` (clipped by the painter's clip rect).
@@ -788,8 +1009,33 @@ pub struct Refresh {
     pub upload_ms: f64,
     /// Layer tiles the wgpu compositor uploaded.
     pub uploads: u64,
+    /// Mip level the wgpu compositor composited at (0: full size).
+    pub level: u32,
     /// Why the wgpu compositor wasn't used.
     pub fallback: Option<String>,
+}
+
+/// What a [`GpuCanvas::catch_up`] did.
+#[derive(Clone, Debug, Default)]
+pub struct CatchUp {
+    /// Pixels composited (at their level).
+    pub px: u64,
+    pub composite_ms: f64,
+    /// A piece was brought to full size.
+    pub refined: bool,
+    /// Out-of-date regions remain: call again after this many milliseconds.
+    pub again_ms: Option<f64>,
+}
+
+fn area(r: photocraft_geom::Rect) -> u64 {
+    u64::from(r.width()) * u64::from(r.height())
+}
+
+/// The document area composited for a view showing `visible`: it, grown by a quarter of its
+/// size on each side (at least 128 px) so a short pan finds current pixels, within `bounds`.
+fn near_view(visible: photocraft_geom::Rect, bounds: photocraft_geom::Rect) -> photocraft_geom::Rect {
+    let m = (visible.width().max(visible.height()) / 4).max(128) as i32;
+    visible.inflate(m).intersect(&bounds)
 }
 
 /// How the app creates its wgpu device: egui's defaults, except that the texture and buffer size
@@ -1139,6 +1385,113 @@ fn texel_to_f32(format: wgpu::TextureFormat, b: &[u8]) -> [f32; 4] {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Level of detail and deferred regions
+
+/// What a view needs of a document's display texture this frame: the document area it shows
+/// and the coarsest mip level it can sample there ([`lod_level`] of its zoom).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewNeed {
+    pub visible: photocraft_geom::Rect,
+    pub level: u32,
+}
+
+/// Edits smaller than this (document pixels) composite at full size even when zoomed out: a
+/// brush dab costs little either way, and its pixels then never need a second pass.
+pub const LOD_MIN_PX: u64 = 512 * 512;
+
+/// Work (output pixels × passes) of the first full-size refinement piece; later pieces adapt to
+/// the GPU time the previous one took (`RefinePacer`).
+pub const REFINE_WORK: u64 = 32 << 20;
+
+/// How long after the last reduced or deferred refresh full-size refinement starts (ms): a
+/// slider scrub or a Move drag keeps producing frames, and refining between them would only
+/// redo work the next frame replaces.
+pub const REFINE_DELAY_MS: f64 = 120.0;
+
+/// The coarsest mip level a view at `scale` device pixels per document pixel samples
+/// (`filter_mode`: trilinear between `floor(lod)` and the level above, `lod = -log2(scale)`):
+/// every level at or above it must be current. 0 at 100% and closer.
+pub fn lod_level(scale: f32) -> u32 {
+    if !scale.is_finite() || scale >= 0.999 || scale <= 0.0 {
+        return 0;
+    }
+    ((-scale.log2()).floor().max(0.0) as u32).min(photocraft_gpu::MAX_LOD)
+}
+
+/// `a` minus `b`: up to four disjoint rectangles.
+fn subtract(a: photocraft_geom::Rect, b: photocraft_geom::Rect) -> Vec<photocraft_geom::Rect> {
+    use photocraft_geom::Rect;
+    let i = a.intersect(&b);
+    if i.is_empty() {
+        return if a.is_empty() { Vec::new() } else { vec![a] };
+    }
+    [
+        Rect::new(a.x0, a.y0, a.x1, i.y0),
+        Rect::new(a.x0, i.y1, a.x1, a.y1),
+        Rect::new(a.x0, i.y0, i.x0, i.y1),
+        Rect::new(i.x1, i.y0, a.x1, i.y1),
+    ]
+    .into_iter()
+    .filter(|r| !r.is_empty())
+    .collect()
+}
+
+/// Regions of a display texture whose finer mip levels are out of date: each holds the first
+/// level that is current there (`u32::MAX`: none, the region was deferred). Disjoint.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Stale {
+    regions: Vec<(photocraft_geom::Rect, u32)>,
+}
+
+impl Stale {
+    const MAX_REGIONS: usize = 48;
+
+    /// `r` now holds current pixels at `level` and the levels above it.
+    pub(crate) fn mark(&mut self, r: photocraft_geom::Rect, level: u32) {
+        if r.is_empty() {
+            return;
+        }
+        let mut out = Vec::with_capacity(self.regions.len() + 4);
+        for &(e, l) in &self.regions {
+            out.extend(subtract(e, r).into_iter().map(|p| (p, l)));
+        }
+        if level > 0 {
+            out.push((r, level));
+        }
+        self.regions = out;
+        if self.regions.len() > Self::MAX_REGIONS {
+            // Conservative: one region, as stale as the stalest part.
+            let all = self.regions.iter().map(|e| e.0).reduce(|a, b| a.union(&b)).unwrap_or(r);
+            let level = self.regions.iter().map(|e| e.1).max().unwrap_or(level);
+            self.regions = vec![(all, level)];
+        }
+    }
+
+    /// Nothing at all is current in `r` (it was not composited).
+    pub(crate) fn defer(&mut self, r: photocraft_geom::Rect) {
+        self.mark(r, u32::MAX);
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.regions.is_empty()
+    }
+
+    /// Parts of `area` a view sampling `level` and above would show out of date.
+    pub(crate) fn needed(&self, area: photocraft_geom::Rect, level: u32) -> Vec<photocraft_geom::Rect> {
+        self.regions.iter().filter(|e| e.1 > level).map(|e| e.0.intersect(&area)).filter(|r| !r.is_empty()).collect()
+    }
+
+    /// The next piece to bring to full size: of a region the view shows first, at most about
+    /// `px` pixels (whole rows).
+    pub(crate) fn next_piece(&self, visible: photocraft_geom::Rect, px: u64) -> Option<photocraft_geom::Rect> {
+        let r = self.regions.iter().map(|e| e.0).max_by_key(|r| (!r.intersect(&visible).is_empty(), std::cmp::Reverse(r.y0)))?;
+        let r = if r.intersect(&visible).is_empty() { r } else { r.intersect(&visible) };
+        let rows = (px / u64::from(r.width().max(1))).clamp(16, u64::from(r.height())) as i32;
+        Some(photocraft_geom::Rect::new(r.x0, r.y0, r.x1, r.y0.saturating_add(rows).min(r.y1)))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // GPU resources
 
 /// Floor of the compositor's memory budget: enough for a viewport's pages of a dozen layers.
@@ -1279,6 +1632,10 @@ struct Resources {
     compositor_translated: Vec<photocraft_gpu::Translated>,
     /// GPU bytes one document's display texture set may take (see [`canvas_budget`]).
     canvas_budget: u64,
+    /// When the last reduced or partly deferred refresh happened ([`now_ms`]).
+    reduced_at: f64,
+    /// Passes of the last plan the compositor ran (sizes refinement pieces).
+    last_passes: usize,
     encode_bgl: wgpu::BindGroupLayout,
     encode_pipeline: wgpu::RenderPipeline,
     lut_bgl: wgpu::BindGroupLayout,
@@ -1352,6 +1709,8 @@ struct DocTextures {
     size: [u32; 2],
     format: wgpu::TextureFormat,
     tiles: Vec<Tile>,
+    /// What isn't current at every mip level (reduced or deferred refreshes).
+    stale: std::sync::Mutex<Stale>,
 }
 
 struct Tile {
@@ -1546,6 +1905,8 @@ impl Resources {
             compositor_focus: None,
             compositor_translated: Vec::new(),
             canvas_budget: canvas_budget(physical_memory()),
+            reduced_at: f64::NEG_INFINITY,
+            last_passes: 1,
             encode_bgl,
             encode_pipeline,
         }
@@ -1621,7 +1982,18 @@ impl DocTextures {
                 tiles.push(Tile { rect: [tx, ty, w, h], texture, levels, bind_group, _uniform: uniform });
             }
         }
-        Some(Self { size, format, tiles })
+        let mut stale = Stale::default();
+        stale.defer(photocraft_geom::Rect::new(0, 0, size[0] as i32, size[1] as i32));
+        Some(Self { size, format, tiles, stale: std::sync::Mutex::new(stale) })
+    }
+
+    fn stale(&self) -> std::sync::MutexGuard<'_, Stale> {
+        self.stale.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The coarsest mip level every tile has.
+    fn max_level(&self) -> u32 {
+        self.tiles.iter().map(|t| t.levels.len() as u32).min().unwrap_or(1).saturating_sub(1)
     }
 
     /// Write `size` pixels at document `origin` from `texels` (in the texture format, row stride
@@ -1652,6 +2024,13 @@ impl DocTextures {
 
     /// Rebuild the mip chain inside document rect `r` (x0, y0, x1, y1) with 2×2 box filtering.
     fn regenerate_mips(&self, device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, r: [u32; 4]) {
+        self.regenerate_mips_from(device, queue, res, r, 0);
+    }
+
+    /// Rebuild the mip levels above `from` inside document rect `r` from level `from`, which
+    /// was just written there; levels below `from` are left as they are (marked out of date).
+    fn regenerate_mips_from(&self, device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, r: [u32; 4], from: u32) {
+        self.stale().mark(photocraft_geom::Rect::new(r[0] as i32, r[1] as i32, r[2] as i32, r[3] as i32), from);
         let Some(mip_pipeline) = res.mip_pipeline(self.format) else { return };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_mips") });
         for t in &self.tiles {
@@ -1661,7 +2040,13 @@ impl DocTextures {
                 continue;
             }
             (x0, y0, x1, y1) = (x0 - tx, y0 - ty, x1 - tx, y1 - ty);
-            for level in 1..t.levels.len() {
+            // The written level's rect (rounded out like the compositor's `level_rect`).
+            if from > 0 {
+                let s = 1u32 << from;
+                let (lw, lh) = ((tw >> from).max(1), (th >> from).max(1));
+                (x0, y0, x1, y1) = (x0 / s, y0 / s, x1.div_ceil(s).min(lw), y1.div_ceil(s).min(lh));
+            }
+            for level in (from as usize + 1)..t.levels.len() {
                 let (lw, lh) = ((tw >> level).max(1), (th >> level).max(1));
                 // Damage at this level, padded by one texel for odd-size rounding.
                 (x0, y0) = ((x0 / 2).saturating_sub(1), (y0 / 2).saturating_sub(1));
