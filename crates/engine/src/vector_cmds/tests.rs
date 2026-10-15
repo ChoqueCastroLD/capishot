@@ -335,7 +335,6 @@ fn path_to_selection_matches_analytic_shape() {
     assert!(m[100 * 200 + 160] > 0.2 && m[100 * 200 + 160] < 0.8);
 }
 
-
 #[test]
 fn path_make_selection_rejects_invalid_options_without_changing_history() {
     let mut s = session(80, 80, 8);
