@@ -28,9 +28,10 @@ use crate::{ImportResult, IoError};
 pub const MAX_SIDE: u32 = 16_384;
 /// A rasterised fallback layer or a smart-object render never exceeds this many pixels.
 const MAX_RASTER_PIXELS: u64 = 24_000_000;
-/// Aggregate decoded raster memory allowed when opening one drawing. Per-element limits
-/// alone do not stop thousands of masked groups from exhausting memory.
+/// Aggregate memory for retained fallback surfaces in the document's pixel format.
 const MAX_PIXEL_BYTES: u64 = 1 << 30;
+/// Estimated peak during raster conversion (retained surfaces + RGBA8 pixmap + f32 staging + tiles).
+const MAX_PEAK_PIXEL_BYTES: u64 = 3 << 29;
 /// Past this many drawable elements the whole drawing opens as one pixel layer.
 const MAX_NODES: usize = 2_000;
 /// Nesting past which a subtree is rasterised instead of walked (bounded recursion).
@@ -229,7 +230,7 @@ fn import_parsed_with_budget(name: &str, parsed: Parsed, max_group_depth: usize,
     let fmt = doc.pixel_format();
     let global = tiny_skia::Transform::from_scale(cv.scale, cv.scale);
     let max_group_depth = (max_group_depth != 0).then_some(max_group_depth.clamp(1, MAX_GROUP_DEPTH));
-    let mut conv = Conv { fmt, canvas: doc.bounds(), global, max_group_depth, warnings, noted: Vec::new(), counts: [0; 4], pixel_budget };
+    let mut conv = Conv { fmt, canvas: doc.bounds(), global, max_group_depth, warnings, noted: Vec::new(), counts: [0; 4], pixel_budget, retained_pixel_bytes: 0 };
     if count_nodes(tree.root()) > MAX_NODES {
         conv.warnings.push(format!("SVG: more than {MAX_NODES} elements; opened as one pixel layer instead of shapes"));
         let (w, h) = (cv.size.width, cv.size.height);
@@ -318,8 +319,10 @@ struct Conv {
     noted: Vec<&'static str>,
     /// Unnamed shapes, groups, images and texts so far, for "Shape 3"-style names.
     counts: [usize; 4],
-    /// Remaining budget for rasterised fallback layers, measured in f32 sample bytes.
+    /// Remaining budget for retained rasterised surfaces, in actual sample bytes.
     pixel_budget: u64,
+    /// Successfully retained raster surface memory; rejected nodes are never counted.
+    retained_pixel_bytes: u64,
 }
 
 impl Conv {
@@ -330,18 +333,21 @@ impl Conv {
         }
     }
 
-    fn charge_pixels(&mut self, w: usize, h: usize) -> bool {
-        let bytes = (w as u64).saturating_mul(h as u64).saturating_mul(self.fmt.channels() as u64 * 4);
-        match self.pixel_budget.checked_sub(bytes) {
-            Some(remaining) => {
-                self.pixel_budget = remaining;
-                true
-            }
-            None => {
-                self.note("pixel-budget", "SVG: rasterised elements exceed the import's pixel memory budget; remaining elements were dropped".into());
-                false
-            }
+    /// Check both retained and transient memory before rendering; charge only retained output.
+    fn can_retain_pixels(&mut self, pixels: u64) -> bool {
+        let bytes = pixels.saturating_mul(self.fmt.bytes_per_pixel() as u64);
+        if bytes > self.pixel_budget {
+            self.note("pixel-budget", "SVG: some rasterised elements were omitted because they exceeded the remaining pixel memory budget".into());
+            return false;
         }
+        // surface() converts the RGBA8 pixmap into f32 scratch space before writing
+        // sample-format tiles. All three buffers briefly coexist with retained layers.
+        let temporary = pixels.saturating_mul(4 + self.fmt.channels() as u64 * 4 + self.fmt.bytes_per_pixel() as u64);
+        if self.retained_pixel_bytes.saturating_add(temporary) > MAX_PEAK_PIXEL_BYTES {
+            self.note("pixel-peak", "SVG: some rasterised elements were omitted to bound temporary conversion memory".into());
+            return false;
+        }
+        true
     }
 
     /// The element's `id`, or a numbered name by kind (0 shape, 1 group, 2 image, 3 text).
@@ -571,11 +577,21 @@ impl Conv {
         let y0 = ((bb.y() * k).floor() as i32).max(self.canvas.y0);
         let x1 = ((bb.right() * k).ceil() as i32).min(self.canvas.x1);
         let y1 = ((bb.bottom() * k).ceil() as i32).min(self.canvas.y1);
-        if x1 <= x0 || y1 <= y0 || !self.charge_pixels((x1 - x0) as usize, (y1 - y0) as usize) {
+        if x1 <= x0 || y1 <= y0 {
             return None;
         }
-        let Some(mut pixmap) = pixmap((x1 - x0) as u32, (y1 - y0) as u32) else {
+        let (w, h) = ((x1 - x0) as u32, (y1 - y0) as u32);
+        let pixels = u64::from(w) * u64::from(h);
+        // Preflight the pixmap limit first, without charging the shared allowance.
+        if pixels > MAX_RASTER_PIXELS {
             self.note("raster-size", "SVG: an element too large to rasterise was dropped".to_string());
+            return None;
+        }
+        if !self.can_retain_pixels(pixels) {
+            return None;
+        }
+        let Some(mut pixmap) = pixmap(w, h) else {
+            self.note("raster-alloc", "SVG: a rasterised element could not be allocated".to_string());
             return None;
         };
         // resvg renders the node in its parent's space after shifting its absolute bounding box
@@ -584,7 +600,11 @@ impl Conv {
         let canvas = tiny_skia::Transform::from_row(k, 0.0, 0.0, k, -(x0 as f32), -(y0 as f32));
         let ts = canvas.pre_concat(parent).pre_translate(bb.x(), bb.y());
         resvg::render_node(node, ts, &mut pixmap.as_mut())?;
-        Some(Layer::new(name, LayerContent::Raster(surface(&pixmap, Rect::new(x0, y0, x1, y1), self.fmt))))
+        let layer = Layer::new(name, LayerContent::Raster(surface(&pixmap, Rect::new(x0, y0, x1, y1), self.fmt)));
+        let bytes = pixels * self.fmt.bytes_per_pixel() as u64;
+        self.pixel_budget -= bytes;
+        self.retained_pixel_bytes += bytes;
+        Some(layer)
     }
 }
 
@@ -791,7 +811,6 @@ mod tests {
         assert!(r.warnings.iter().any(|w| w.contains("clip-path")), "{:?}", r.warnings);
     }
 
-
     #[test]
     fn rasterized_groups_stop_at_the_aggregate_pixel_budget() {
         let mut svg = String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"256\" height=\"256\">");
@@ -800,11 +819,49 @@ mod tests {
             svg.push_str(&format!("<g id=\"g{i}\" mask=\"url(#m)\"><rect width=\"256\" height=\"256\" fill=\"#00ff00\"/></g>"));
         }
         svg.push_str("</svg>");
-        // Enough for one 256×256 RGBA-f32 surface, but not eight of them.
-        let budget = 256u64 * 256 * 4 * 4;
+        // Enough for one retained 256×256 RGBA8 surface, not eight of them.
+        let budget = 256u64 * 256 * 4;
         let result = import_parsed_with_budget("budget", parse(svg.as_bytes()).unwrap(), MAX_GROUP_DEPTH, budget).unwrap();
-        assert_eq!(result.document.layers.len(), 1, "later raster layers are omitted");
+        assert_eq!(result.document.layers.len(), 1, "one U8 surface fills the retained-byte allowance");
+        assert_eq!(result.document.layers[0].name, "g0");
         assert!(result.warnings.iter().any(|warning| warning.contains("pixel memory")), "{:?}", result.warnings);
+    }
+
+    #[test]
+    fn oversized_raster_does_not_consume_budget_for_later_layers() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="5100" height="4800">
+            <defs>
+              <mask id="big" maskUnits="userSpaceOnUse" x="0" y="0" width="5100" height="4800">
+                <rect width="5100" height="4800" fill="white"/>
+              </mask>
+              <mask id="small-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+                <rect width="32" height="32" fill="white"/>
+              </mask>
+            </defs>
+            <g id="oversized" mask="url(#big)"><rect width="5100" height="4800" fill="red"/></g>
+            <g id="small" mask="url(#small-mask)"><rect width="32" height="32" fill="blue"/></g>
+        </svg>"##;
+        let result = import_parsed_with_budget("budget", parse(svg).unwrap(), MAX_GROUP_DEPTH, 64 * 64 * 4).unwrap();
+        assert_eq!(result.document.layers.len(), 1, "the oversized group must not debit the budget");
+        assert_eq!(result.document.layers[0].name, "small");
+        assert!(result.warnings.iter().any(|w| w.contains("too large to rasterise")), "{:?}", result.warnings);
+        assert!(!result.warnings.iter().any(|w| w.contains("pixel memory budget")), "{:?}", result.warnings);
+    }
+
+    #[test]
+    fn skipped_expensive_raster_does_not_hide_a_smaller_one() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">
+            <defs>
+              <mask id="big"><rect width="256" height="256" fill="white"/></mask>
+              <mask id="little"><rect width="16" height="16" fill="white"/></mask>
+            </defs>
+            <g id="large" mask="url(#big)"><rect width="256" height="256" fill="red"/></g>
+            <g id="small" mask="url(#little)"><rect width="16" height="16" fill="blue"/></g>
+        </svg>"##;
+        let result = import_parsed_with_budget("budget", parse(svg).unwrap(), MAX_GROUP_DEPTH, 32 * 32 * 4).unwrap();
+        assert_eq!(result.document.layers.len(), 1);
+        assert_eq!(result.document.layers[0].name, "small");
+        assert!(result.warnings.iter().any(|w| w.contains("some rasterised elements were omitted")), "{:?}", result.warnings);
     }
 
     #[test]
