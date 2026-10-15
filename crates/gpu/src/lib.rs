@@ -94,6 +94,9 @@ const FLUSH_WORK: u64 = 1 << 30;
 /// 2^`level` for a reduced render) at the texture's origin.
 pub struct ChunkOut<'a> {
     pub rect: Rect,
+    /// Where `rect`'s first pixel sits in the texture (the chunk may have been rendered larger,
+    /// to fill the lower-stack cache).
+    pub origin: [u32; 2],
     /// Level of detail: 0 full size, `n` one pixel per 2ⁿ × 2ⁿ document pixels (the display
     /// texture's mip level `n`).
     pub level: u32,
@@ -1121,11 +1124,25 @@ impl Compositor {
             // At a level of detail the cell's part shrinks; pages are a power of two at least
             // 2^MAX_LOD, so cells never share a reduced pixel.
             let lpart = level_rect(part, level).intersect(&lbounds);
-            let chunks = grid_rects(lpart, self.chunk);
+            let outs = grid_rects(lpart, self.chunk);
+            let mut chunks = outs.clone();
+            if checkpoint.is_some() {
+                // A damage rect the lower-stack cache doesn't hold yet (a brush dab moving on):
+                // render its whole chunk once, so the cache holds all of it and the dabs that
+                // follow there skip the lower stack.
+                let step = self.chunk as i32;
+                let canvas_cell = cr.intersect(&canvas);
+                for c in &mut chunks {
+                    if !self.prefix.contains(*c) {
+                        let (x0, y0) = (c.x0.div_euclid(step) * step, c.y0.div_euclid(step) * step);
+                        *c = Rect::new(x0, y0, x0 + step, y0 + step).intersect(&canvas_cell);
+                    }
+                }
+            }
             stats.chunks += chunks.len();
             stats.pixels += lpart.width() as u64 * lpart.height() as u64;
             work += lpart.width() as u64 * lpart.height() as u64 * plan.passes.len() as u64;
-            self.run_cell(device, queue, encoder, doc.id, &plan, &paged, cell, &fr, &chunks, checkpoint, level, &mut stats, sink);
+            self.run_cell(device, queue, encoder, doc.id, &plan, &paged, cell, &fr, &chunks, &outs, checkpoint, level, &mut stats, sink);
             let (evicted, bytes) = self.evict();
             stats.evicted += evicted;
             freed += bytes;
@@ -1340,6 +1357,7 @@ impl Compositor {
         cell: Cell,
         fr: &FrameRes,
         chunks: &[Rect],
+        outs: &[Rect],
         checkpoint: Option<plan::Checkpoint>,
         level: u32,
         stats: &mut Stats,
@@ -1544,7 +1562,9 @@ impl Compositor {
                 self.prefix.capture(device, encoder, *c, src);
             }
             let (t, v) = &pool[plan.root as usize];
-            sink(encoder, ChunkOut { rect: *c, level, texture: t, view: v });
+            let out = outs.get(ci).copied().unwrap_or(*c);
+            let origin = [(out.x0 - c.x0).max(0) as u32, (out.y0 - c.y0).max(0) as u32];
+            sink(encoder, ChunkOut { rect: out, origin, level, texture: t, view: v });
         }
         self.pools.insert(side, pool);
     }
@@ -2386,7 +2406,12 @@ pub fn render_to_vec_lod(
             mapped_at_creation: false,
         });
         enc.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo { texture: out.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo {
+                texture: out.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: out.origin[0], y: out.origin[1], z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
             wgpu::TexelCopyBufferInfo {
                 buffer: &buf,
                 layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(out.rect.height()) },
