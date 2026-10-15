@@ -127,7 +127,8 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             }
             let device = app.session.ai_upscaler().map(|u| u.device()).unwrap_or_default();
             let runs = if device.is_empty() {
-                tl!("Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.").to_string()
+                // Where it runs is in the line above; say only that nothing leaves the device.
+                tl!("Nothing is uploaded: it runs on this device.").to_string()
             } else {
                 crate::i18n::fmt(tl!("Runs on this device ({device}); nothing is uploaded."), &[("device", &device)])
             };

@@ -3925,3 +3925,4 @@ cameraData	Lens	Φακός
 	Use AI	Χρήση AI
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Γέμισμα πινελιών με AI αντί για κοντινά μπαλώματα: καλύτερο σε ράστερ και γραμμικό σχέδιο. Οι Επιλογές AI… ορίζουν ποιότητα και συσκευή.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Σβήνει το επιλεγμένο κείμενο ή τα ηχητικά εφέ και ξαναζωγραφίζει το φόντο με AI σε νέο επίπεδο. Η πρώτη χρήση κατεβάζει το μοντέλο (MI-GAN 13 MB, Manga LaMa 102 MB).
+	Nothing is uploaded: it runs on this device.	Τίποτα δεν ανεβαίνει: εκτελείται σε αυτή τη συσκευή.

@@ -3236,3 +3236,4 @@ cameraData	Lens	Lensa
 	Use AI	Gunakan AI
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Isi goresan dengan AI, bukan tambalan di sekitarnya: lebih baik untuk screentone dan line art. Opsi AI… memilih kualitas dan perangkat.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Hapus teks atau SFX yang dipilih dan gambar ulang latar dengan AI di lapisan baru. Penggunaan pertama mengunduh model (MI-GAN 13 MB, Manga LaMa 102 MB).
+	Nothing is uploaded: it runs on this device.	Tidak ada yang diunggah: berjalan di perangkat ini.

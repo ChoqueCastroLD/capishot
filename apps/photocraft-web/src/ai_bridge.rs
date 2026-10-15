@@ -49,6 +49,9 @@ struct Shared {
     profile: DeviceProfile,
     /// Bytes in the models' Cache Storage, last time we asked.
     storage: Option<u64>,
+    /// When we last asked (ms since the epoch): the UI asks every frame, Cache Storage at most
+    /// every two seconds.
+    storage_asked_ms: f64,
     /// The threads variant failed to start: use the plain worker for everything.
     mt_broken: bool,
     models_base: Option<String>,
@@ -223,8 +226,19 @@ impl Upscaler for WebUpscaler {
     }
 
     fn storage_used(&self) -> Option<u64> {
-        refresh_storage(self.shared.clone());
-        self.lock().storage
+        let now = js_sys::Date::now();
+        let (stale, used) = {
+            let mut s = self.lock();
+            let stale = now - s.storage_asked_ms > 2000.0;
+            if stale {
+                s.storage_asked_ms = now;
+            }
+            (stale, s.storage)
+        };
+        if stale {
+            refresh_storage(self.shared.clone());
+        }
+        used
     }
 
     fn clear_downloads(&self) -> photocraft_ai::Result<()> {

@@ -3989,3 +3989,4 @@ cameraData	Lens	Lens
 	Use AI	AI gebruiken
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Vult streken met AI in plaats van nabije stukken: beter bij rasters en lijnwerk. AI-opties… kiest kwaliteit en apparaat.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Wist de geselecteerde tekst of geluidseffecten en tekent de achtergrond met AI opnieuw op een nieuwe laag. Bij het eerste gebruik wordt het model gedownload (MI-GAN 13 MB, Manga LaMa 102 MB).
+	Nothing is uploaded: it runs on this device.	Er wordt niets geüpload: het draait op dit apparaat.

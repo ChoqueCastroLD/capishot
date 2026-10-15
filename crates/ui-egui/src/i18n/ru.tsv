@@ -3178,3 +3178,4 @@ cameraData	Lens	Объектив
 	Use AI	Использовать ИИ
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Заполняет мазки с помощью ИИ, а не соседними участками: лучше на растрах и линейной графике. «Параметры ИИ…» выбирают качество и устройство.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Стирает выделенный текст или звуковые эффекты и дорисовывает фон с помощью ИИ на новом слое. При первом использовании загружается модель (MI-GAN 13 МБ, Manga LaMa 102 МБ).
+	Nothing is uploaded: it runs on this device.	Ничего не загружается в сеть: всё работает на этом устройстве.

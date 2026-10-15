@@ -2853,3 +2853,4 @@ cameraData	Lens	镜头
 	Use AI	使用 AI
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	用 AI 而不是附近的图块填充笔画：在网点和线稿上效果更好。“AI 选项…”可选择质量和设备。
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	擦除所选文字或拟声词，并用 AI 在新图层上重绘背景。首次使用会下载模型（MI-GAN 13 MB，Manga LaMa 102 MB）。
+	Nothing is uploaded: it runs on this device.	不会上传任何内容：在本设备上运行。
