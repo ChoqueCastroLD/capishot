@@ -18,8 +18,10 @@ default = []
 runtime = ["dep:burn", "dep:pollster"]
 # CPU inference (burn-flex: gemm, SIMD; rayon threads natively and in the threads web build).
 cpu = ["runtime", "burn/flex", "burn/rayon", "burn/simd"]
-# GPU inference through wgpu: Vulkan/Metal/DX12 natively, WebGPU in the browser.
-gpu = ["runtime", "burn/wgpu", "burn/autotune"]
+# GPU inference through wgpu: Vulkan/Metal/DX12 natively, WebGPU in the browser. No burn autotune:
+# its kernel trials can hit shaders a WebGPU implementation rejects (SwiftShader), which poisons
+# the device for every later model.
+gpu = ["runtime", "burn/wgpu"]
 # Native model downloads (blocking HTTPS, rustls) for `native::NativeUpscaler`.
 download = ["dep:ureq"]
 
