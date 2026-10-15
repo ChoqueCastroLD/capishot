@@ -163,7 +163,12 @@ pub fn fill_fields(app: &PhotocraftApp, kind: Kind, f: &mut Map<String, Value>) 
 }
 
 fn mb(m: &ModelInfo) -> String {
-    let v = m.bytes as f64 / 1e6;
+    mb_of(m.bytes)
+}
+
+/// Megabytes for the UI: one decimal under 10 MB.
+fn mb_of(bytes: u64) -> String {
+    let v = bytes as f64 / 1e6;
     if v < 10.0 { format!("{v:.1}") } else { format!("{v:.0}") }
 }
 
@@ -288,7 +293,7 @@ fn storage_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         let used = up.storage_used();
         let text = match used {
-            Some(b) => crate::i18n::fmt(tl!("Downloaded models: {mb} MB"), &[("mb", &format!("{:.0}", b as f64 / 1e6))]),
+            Some(b) => crate::i18n::fmt(tl!("Downloaded models: {mb} MB"), &[("mb", &mb_of(b))]),
             None => tl!("Downloaded models: unknown").to_string(),
         };
         ui.label(text);
