@@ -112,15 +112,26 @@ impl Inpainter for NativeInpainter {
         if hooks.cancelled() {
             return done(Err(LamaError::Cancelled));
         }
-        let result = self.model().and_then(|m| {
-            if hooks.cancelled() {
-                return Err(LamaError::Cancelled);
+        // burn panics on device failures (out of memory, a lost GPU): report it as an error and
+        // drop the model so the next request loads it again.
+        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.model().and_then(|m| {
+                if hooks.cancelled() {
+                    return Err(LamaError::Cancelled);
+                }
+                let t = &req.tile;
+                m.generate(&t.rgb, &t.mask, t.w, t.h)
+            })
+        }));
+        let result = match run {
+            Ok(r) => r,
+            Err(panic) => {
+                *self.model.lock().unwrap_or_else(PoisonError::into_inner) = None;
+                let why = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
+                Err(LamaError::Device(format!("the inference backend failed: {why}")))
             }
-            let t = &req.tile;
-            let out = m.generate(&t.rgb, &t.mask, t.w, t.h);
-            hooks.progress(1.0, "");
-            out
-        });
+        };
+        hooks.progress(1.0, "");
         done(result);
     }
 }
