@@ -66,7 +66,22 @@ pub struct TileCanvas {
     frame: u64,
     /// Level of the last frame (tests and the perf readout).
     pub(crate) level: u32,
+    /// Tiles being composited on the worker pool, off the UI thread (threads build, desktop).
+    pending: Option<Pending>,
 }
+
+/// Missing tiles composited in the background: the canvas keeps drawing (other levels stand in)
+/// while they are, so zooming and panning a heavy document never waits for the compositor.
+struct Pending {
+    /// The (revision, preview key) and level they were composited for.
+    state: (u64, u64),
+    level: u32,
+    rx: std::sync::mpsc::Receiver<Vec<(TileKey, DRect, egui::ColorImage)>>,
+}
+
+/// Whether missing tiles are composited off the UI thread. Tests composite in the frame, so they
+/// see the result at once.
+const ASYNC_TILES: bool = cfg!(all(not(test), any(not(target_arch = "wasm32"), target_feature = "atomics")));
 
 impl std::fmt::Debug for TileCanvas {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -202,17 +217,19 @@ pub(crate) fn tiles_in(visible: DRect, level: u32, size: [u32; 2]) -> Vec<TileKe
     v
 }
 
-/// Budget for tile textures: the Memory Usage allowance's share, at most 192 MB (at 256² RGBA8
-/// tiles, a 4K screen at 100% is about 35 MB).
+/// Budget for tile textures: a share of the Memory Usage allowance and of the device's memory,
+/// 24–192 MB (at 256² RGBA8 tiles, a 4K screen at 100% is about 35 MB, a phone's about 13 MB).
 fn texture_budget(app: &PhotocraftApp) -> usize {
-    let allowance = app.session.prefs().performance.memory_usage_mb as usize;
-    (allowance << 20).saturating_div(16).clamp(24 << 20, 192 << 20)
+    let allowance = app.session.prefs().performance.history_budget_bytes();
+    let device = crate::gpu_canvas::physical_memory().map_or(usize::MAX, |b| usize::try_from(b / 64).unwrap_or(usize::MAX));
+    (allowance / 16).min(device).clamp(24 << 20, 192 << 20)
 }
 
 /// Budget for reduced layer tiles.
 fn mip_budget(app: &PhotocraftApp) -> usize {
-    let allowance = app.session.prefs().performance.memory_usage_mb as usize;
-    (allowance << 20).saturating_div(8).clamp(32 << 20, 512 << 20)
+    let allowance = app.session.prefs().performance.history_budget_bytes();
+    let device = crate::gpu_canvas::physical_memory().map_or(usize::MAX, |b| usize::try_from(b / 32).unwrap_or(usize::MAX));
+    (allowance / 8).min(device).clamp(32 << 20, 512 << 20)
 }
 
 /// Monitor RGBA8, premultiplied as egui stores textures.
@@ -226,6 +243,23 @@ fn tile_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>,
         _ => buf.to_premultiplied_rgba8(),
     };
     egui::ColorImage::new(size, px.into_iter().map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])).collect())
+}
+
+/// Composite `rects` (level pixels at factor `f`) from `source` (the reduced document), or
+/// without one by reducing the full-resolution composite of `doc`.
+fn render_level(doc: &Document, source: Option<&Document>, f: i64, rects: &[DRect]) -> Vec<photocraft_compose::Buffer> {
+    match source {
+        Some(src) => photocraft_compose::render_rects(src, rects),
+        None => rects
+            .iter()
+            .map(|r| {
+                let d = scale_rect(*r, f).intersect(&doc.bounds());
+                let mut b = photocraft_compose::render_reduced_rect(doc, d, r.width(), r.height());
+                b.rect = *r;
+                b
+            })
+            .collect(),
+    }
 }
 
 /// What to draw for one tile.
@@ -261,6 +295,25 @@ pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Paint
     if tc.shown != Some(now) {
         tc.invalidate(if tc.shown.is_some() { damage } else { None });
         tc.shown = Some(now);
+    }
+    // Tiles the worker pool finished for this state: in place of what stood in for them.
+    if let Some(p) = &tc.pending {
+        match p.rx.try_recv() {
+            Ok(done) => {
+                if p.state == now && p.level == level {
+                    for (k, held, img) in done {
+                        if tc.tiles.get(&k).is_some_and(|t| t.dirty.is_none() && t.held == held) {
+                            continue;
+                        }
+                        let tex = ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", id.0, key.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR);
+                        tc.tiles.insert(k, TileTex { tex, held, dirty: None, used: frame });
+                    }
+                }
+                tc.pending = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => tc.pending = None,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
     }
     // Work for the tiles in view.
     let want = tiles_in(visible.intersect(&doc.bounds()), level, size);
@@ -305,7 +358,7 @@ pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Paint
         let jobs = match batches.pop() {
             Some(j) => j,
             None => {
-                if rest.peek().is_none() || (!first && crate::gpu_canvas::now_ms() - t0 > FRAME_BUDGET_MS) {
+                if ASYNC_TILES || rest.peek().is_none() || (!first && crate::gpu_canvas::now_ms() - t0 > FRAME_BUDGET_MS) {
                     break;
                 }
                 first = false;
@@ -323,18 +376,7 @@ pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Paint
             let faithful = level == 0 || photocraft_compose::proxy::proxy_faithful(&doc);
             faithful.then(|| tc.reduced(&doc, level))
         });
-        let bufs = match source {
-            Some(src) => photocraft_compose::render_rects(src, &rects),
-            None => rects
-                .iter()
-                .map(|r| {
-                    let d = scale_rect(*r, f).intersect(&doc.bounds());
-                    let mut b = photocraft_compose::render_reduced_rect(&doc, d, r.width(), r.height());
-                    b.rect = *r;
-                    b
-                })
-                .collect(),
-        };
+        let bufs = render_level(&doc, source.as_deref(), f, &rects);
         let c1 = crate::gpu_canvas::now_ms();
         composite_ms += c1 - c0;
         for (job, buf) in jobs.into_iter().zip(bufs) {
@@ -367,7 +409,34 @@ pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Paint
         }
         upload_ms += crate::gpu_canvas::now_ms() - c1;
     }
-    let more = rest.peek().is_some();
+    // Missing tiles left: composited on the worker pool while the frame goes on.
+    if ASYNC_TILES && rest.peek().is_some() && tc.pending.is_none() {
+        let jobs: Vec<(TileKey, DRect)> = rest
+            .by_ref()
+            .take(batch * 2)
+            .filter_map(|j| match j {
+                Job::Full(k, held) => Some((k, held)),
+                Job::Part(..) => None,
+            })
+            .collect();
+        let source = source.get_or_insert_with(|| {
+            let faithful = level == 0 || photocraft_compose::proxy::proxy_faithful(&doc);
+            faithful.then(|| tc.reduced(&doc, level))
+        });
+        let (tx, rx) = std::sync::mpsc::channel();
+        tc.pending = Some(Pending { state: now, level, rx });
+        let (doc, source, display, ctx) = (doc.clone(), source.clone(), display.clone(), ctx.clone());
+        spawn(move || {
+            let rects: Vec<DRect> = jobs.iter().map(|(_, r)| *r).collect();
+            let bufs = render_level(&doc, source.as_deref(), f, &rects);
+            let done = jobs.into_iter().zip(bufs).map(|((k, held), b)| (k, held, tile_image(display.as_deref(), &b))).collect();
+            if tx.send(done).is_ok() {
+                ctx.request_repaint();
+            }
+        });
+    }
+    // The worker pool asks for the frame that shows its tiles; without it, the next batch.
+    let more = !ASYNC_TILES && rest.peek().is_some();
     if px > 0 {
         app_perf(app, key, px, composite_ms, upload_ms);
     }
@@ -394,7 +463,7 @@ pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Paint
             draw_tile(painter, xf, &t.tex, t.held, f, own);
         }
     }
-    if more || shown < want.len() {
+    if more || (shown < want.len() && tc.pending.is_none()) {
         ctx.request_repaint();
     }
     // Memory: least recently drawn tiles beyond the budget go; reduced layers past theirs.
@@ -426,6 +495,17 @@ impl TileCanvas {
 
 fn app_perf(app: &mut PhotocraftApp, _key: (photocraft_doc::DocId, u32), px: u64, composite_ms: f64, upload_ms: f64) {
     app.perf.record("tiles", px, composite_ms, upload_ms);
+}
+
+/// Run `f` on the worker pool.
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+fn spawn(f: impl FnOnce() + Send + 'static) {
+    rayon::spawn(f);
+}
+
+#[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+fn spawn(f: impl FnOnce() + Send + 'static) {
+    f();
 }
 
 /// Tiles composited per batch: one per worker in the threads build, a few otherwise.

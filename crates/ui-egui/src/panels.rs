@@ -1591,12 +1591,31 @@ pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 // ----------------------------------------------------------------------------- dock
 
+/// Below this screen width (points: phones, small tablets in portrait) the dock doesn't keep
+/// its column: at 250 points or more it left a phone's canvas a sliver. It opens from the icon
+/// rail (tap a panel's icon) and closes with the same icon.
+pub(crate) const NARROW_SCREEN: f32 = 720.0;
+
+fn narrow_dock_id() -> egui::Id {
+    egui::Id::new("narrow-screen-dock-open")
+}
+
+/// On a narrow screen ([`NARROW_SCREEN`]): whether the dock is open. `None` on a wide screen.
+pub(crate) fn narrow_dock_open(ctx: &egui::Context) -> Option<bool> {
+    (ctx.content_rect().width() < NARROW_SCREEN).then(|| ctx.data(|d| d.get_temp::<bool>(narrow_dock_id())).unwrap_or(false))
+}
+
 pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // Even legacy destinations must discard gestures captured by an earlier workspace.
     let customized = crate::panel_docking::show(app, ui);
     let t = Tokens::get(ui.ctx());
     let p = app.ui.panels.clone();
-    if t.pro && !customized {
+    let narrow = if customized { None } else { narrow_dock_open(ui.ctx()) };
+    let dock_shown = narrow != Some(false);
+    if !dock_shown {
+        crate::dock::forget_rects(ui.ctx());
+    }
+    if t.pro && !customized && dock_shown {
         dock_panels(app, ui, &p, &t);
     }
     // Narrow icon rail, unless an embedding app hides it: shows, expands or collapses panel groups.
@@ -1623,10 +1642,18 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 for (icon, name, g) in entries {
                     // Studio floats Properties outside the dock.
                     let docked = t.pro || g != Group::Properties;
-                    let on = if customized { crate::panel_docking::rail_on(app, g) } else { g.shown(&p) && !(docked && app.ui.dock.is_collapsed(g)) };
+                    let on = if customized { crate::panel_docking::rail_on(app, g) } else { dock_shown && g.shown(&p) && !(docked && app.ui.dock.is_collapsed(g)) };
                     if icons::rail_button(ui, icon, rb, on, name).clicked() {
                         if customized {
                             crate::panel_docking::rail_click(app, g);
+                        } else if narrow.is_some() {
+                            // Narrow screen: the icon opens the dock on its panel, and closes it
+                            // when that panel is what it shows.
+                            let open = !on;
+                            if open {
+                                crate::dock::reveal(app, g);
+                            }
+                            ui.ctx().data_mut(|d| d.insert_temp(narrow_dock_id(), open));
                         } else {
                             crate::dock::rail_click(app, g, docked);
                         }
@@ -1634,7 +1661,7 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
             });
     }
-    if !t.pro && !customized {
+    if !t.pro && !customized && dock_shown {
         dock_panels(app, ui, &p, &t);
     }
     crate::dock::persist(app, ui.ctx());

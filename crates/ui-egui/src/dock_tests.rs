@@ -1082,3 +1082,34 @@ fn a_tab_dragged_off_the_strip_moves_the_group_and_locking_stops_reordering() {
     drag(&mut h, paths.center(), paths.center() + vec2(0.0, 500.0));
     assert_eq!(h.state().ui.dock.order(), order);
 }
+
+/// Phones: the dock leaves the canvas the screen and opens from the icon rail.
+#[test]
+fn a_narrow_screen_opens_the_dock_from_the_rail() {
+    use egui_kittest::kittest::Queryable;
+    let (app, _, _) = app_with_layers();
+    let mut h = harness(app, vec2(400.0, 800.0), ThemeKind::Pro);
+    assert!(last_rects(&h.ctx).iter().all(|(g, _)| *g != Group::Layers), "no dock column on a phone");
+    // The rail's "Layers" is its square icon button (the open dock's tab is another).
+    let rail = |h: &Harness<'static, PhotocraftApp>| h.query_all_by_label("Layers").map(|n| n.rect()).find(|r| r.width() <= 40.0 && r.height() <= 40.0).unwrap().center();
+    let click = |h: &mut Harness<'static, PhotocraftApp>, p: Pos2| {
+        h.event(egui::Event::PointerMoved(p));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            h.run_steps(1);
+        }
+    };
+    let at = rail(&h);
+    click(&mut h, at);
+    h.run_steps(3);
+    assert!(last_rects(&h.ctx).iter().any(|(g, _)| *g == Group::Layers), "the rail opens it");
+    let at = rail(&h);
+    click(&mut h, at);
+    h.run_steps(3);
+    assert!(last_rects(&h.ctx).iter().all(|(g, _)| *g != Group::Layers), "and closes it");
+    // A wide screen keeps its column.
+    let (app, _, _) = app_with_layers();
+    let h = harness(app, vec2(1200.0, 800.0), ThemeKind::Pro);
+    assert!(last_rects(&h.ctx).iter().any(|(g, _)| *g == Group::Layers));
+}

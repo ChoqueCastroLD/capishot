@@ -595,10 +595,30 @@ impl Performance {
         self.rendering_mode.unwrap_or_else(|| if !self.use_gpu || self.gpu_backend == GpuBackend::Cpu { RenderingMode::Cpu } else { RenderingMode::Auto })
     }
 
-    /// Shared managed-pixel RAM target (Memory Usage), in bytes.
+    /// Shared managed-pixel RAM target (Memory Usage), in bytes, within the platform's cap
+    /// ([`set_memory_cap`]).
     pub fn history_budget_bytes(&self) -> usize {
-        (self.memory_usage_mb as usize).saturating_mul(1 << 20)
+        capped_budget((self.memory_usage_mb as usize).saturating_mul(1 << 20), memory_cap())
     }
+}
+
+/// The platform's cap on Memory Usage (bytes; `u64::MAX`: none).
+static MEMORY_CAP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// Cap Memory Usage for this process, whatever the preference says: a browser tab (above all on a
+/// phone) is killed long before the desktop default of 4 GB of undo history, so the web shell sets
+/// a cap from the device's memory at start-up. The preference keeps its value.
+pub fn set_memory_cap(bytes: u64) {
+    MEMORY_CAP.store(bytes.max(256 << 20), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The cap [`set_memory_cap`] set (`u64::MAX` when none).
+pub fn memory_cap() -> u64 {
+    MEMORY_CAP.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn capped_budget(pref: usize, cap: u64) -> usize {
+    pref.min(usize::try_from(cap).unwrap_or(usize::MAX))
 }
 
 impl Default for Performance {
@@ -1983,3 +2003,13 @@ pub fn specs() -> Vec<CommandSpec> {
 #[cfg(test)]
 #[path = "prefs/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod memory_cap_tests {
+    #[test]
+    fn the_platform_cap_bounds_the_history_budget() {
+        assert_eq!(super::capped_budget(4096 << 20, u64::MAX), 4096 << 20);
+        assert_eq!(super::capped_budget(4096 << 20, 768 << 20), 768 << 20);
+        assert_eq!(super::capped_budget(512 << 20, 768 << 20), 512 << 20);
+    }
+}

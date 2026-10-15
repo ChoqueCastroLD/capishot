@@ -444,6 +444,11 @@ pub fn last_rects(ctx: &egui::Context) -> Vec<(Group, Rect)> {
     ctx.data(|d| d.get_temp::<Vec<(Group, Rect)>>(rects_id())).unwrap_or_default()
 }
 
+/// The dock isn't drawn (a narrow screen's closed dock): no group rectangles are current.
+pub(crate) fn forget_rects(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<Vec<(Group, Rect)>>(rects_id()));
+}
+
 fn rects_id() -> egui::Id {
     egui::Id::new("dock-group-rects")
 }

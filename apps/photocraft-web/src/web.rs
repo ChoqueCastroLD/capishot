@@ -155,6 +155,7 @@ pub fn start() {
         // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
         crate::wheel_guard::install();
         cap_pixel_density();
+        cap_memory();
         let pen_target = canvas.clone();
         let perf = crate::frame_perf::FramePerf::new(&canvas, perf_debug);
         let boot = Boot {
@@ -356,6 +357,29 @@ fn listen_pen(target: &web_sys::HtmlCanvasElement, feed: photocraft_ui_egui::sty
             cb.forget();
         }
     }
+}
+
+/// A browser tab's memory: `navigator.deviceMemory` (GB, Chrome and Edge, at most 8) tells the
+/// canvas caches what the device has; Memory Usage (undo history and caches) is capped to a quarter
+/// of it, and where the browser doesn't say, to 1 GB on touch devices and 2 GB elsewhere (a wasm32
+/// tab can't address more than 4 GB, and mobile browsers kill tabs well before that).
+fn cap_memory() {
+    use wasm_bindgen::JsValue;
+    let Some(window) = web_sys::window() else { return };
+    let nav = window.navigator();
+    let gb = js_sys::Reflect::get(&nav, &JsValue::from_str("deviceMemory")).ok().and_then(|v| v.as_f64()).filter(|v| v.is_finite() && *v > 0.0);
+    let touch = nav.max_touch_points() > 0;
+    let cap = match gb {
+        Some(gb) => {
+            let bytes = (gb * f64::from(1u32 << 30)) as u64;
+            photocraft_ui_egui::gpu_canvas::set_physical_memory(bytes);
+            (bytes / 4).clamp(384 << 20, 2048 << 20)
+        }
+        None if touch => 1024 << 20,
+        None => 2048 << 20,
+    };
+    photocraft_engine::prefs::set_memory_cap(cap);
+    log::info!("photocraft-web: memory {} GB, Memory Usage capped at {} MB", gb.map_or("unknown".to_string(), |g| g.to_string()), cap >> 20);
 }
 
 /// Preferences › Performance › Max Pixel Density (read from the saved preferences, so it applies

@@ -1832,18 +1832,59 @@ fn blend_into_fill(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity
     }
 }
 
+/// Normal blending of `src` over `backdrop` at `opacity`: [`psblend::composite_normal_rgb`]
+/// per pixel (bit for bit), written without branches so the loop compiles to SIMD lanes.
+fn normal_rows(backdrop: &mut [[f32; 4]], src: &[[f32; 4]], opacity: f32) {
+    for (b, s) in backdrop.iter_mut().zip(src) {
+        let as_ = s[3] * opacity;
+        let ab = b[3];
+        let ao = as_ + ab * (1.0 - as_);
+        let kb = ab * (1.0 - as_);
+        let inv = 1.0 / ao;
+        let out = [(kb * b[0] + as_ * s[0]) * inv, (kb * b[1] + as_ * s[1]) * inv, (kb * b[2] + as_ * s[2]) * inv, ao];
+        let keep = s[3] <= 0.0 || as_ <= 0.0;
+        let clear = ao <= 0.0;
+        *b = if keep {
+            *b
+        } else if clear {
+            [0.0; 4]
+        } else {
+            out
+        };
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn branch_free_normal_matches_the_scalar_composite_bit_for_bit() {
+    let mut seed = 0x1234_5678u32;
+    let mut r = || {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        // Exact 0 and 1 often, as layers have them.
+        match seed >> 28 {
+            0..=2 => 0.0,
+            3..=5 => 1.0,
+            _ => (seed >> 8) as f32 / (1u32 << 24) as f32,
+        }
+    };
+    let px: Vec<([f32; 4], [f32; 4])> = (0..20_000).map(|_| ([r(), r(), r(), r()], [r(), r(), r(), r()])).collect();
+    for opacity in [0.0, 0.3, 1.0] {
+        let (bs, ss): (Vec<_>, Vec<_>) = px.iter().copied().unzip();
+        let mut got = bs.clone();
+        normal_rows(&mut got, &ss, opacity);
+        for ((g, b), s) in got.iter().zip(&bs).zip(&ss) {
+            let want = if s[3] <= 0.0 { *b } else { psblend::composite_normal_rgb(*b, *s, opacity) };
+            assert_eq!(g.map(f32::to_bits), want.map(f32::to_bits), "{b:?} {s:?} {opacity}");
+        }
+    }
+}
+
 /// [`blend_into`] mixing coverage in a `gamma` space (type layers).
 fn blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, gamma: f32) {
     // The blend space is constant in this loop. Some TLS implementations synchronise even a
     // boolean read, so select the common Normal kernel once instead of once per pixel.
     if mode == BlendMode::Normal && gamma == 1.0 && !psblend::LAB_MIX.with(|l| l.get()) {
-        for (i, b) in backdrop.px.iter_mut().enumerate() {
-            let s = src.px[i];
-            if s[3] <= 0.0 {
-                continue;
-            }
-            *b = psblend::composite_normal_rgb(*b, s, opacity);
-        }
+        normal_rows(&mut backdrop.px, &src.px, opacity);
         return;
     }
     let rect = backdrop.rect;
