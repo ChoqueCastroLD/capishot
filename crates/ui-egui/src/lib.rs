@@ -1839,6 +1839,9 @@ impl eframe::App for PhotocraftApp {
         if !dropped.is_empty() {
             let at = self.services.cursor_pos.as_mut().and_then(|f| f(ctx));
             self.open_dropped(ctx, dropped, at);
+            // Files dragged in from another app's window: PhotoCraft comes to the front and takes
+            // the keyboard, as Photoshop does, instead of staying behind the source (#5687).
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         self.place_next_dropped(ctx);
         // The control transport wakes the UI on arrival (ctx.request_repaint); only poll while a
