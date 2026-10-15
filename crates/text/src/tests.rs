@@ -2008,3 +2008,27 @@ fn hyphenless_postscript_names_split_trailing_styles() {
         assert_eq!((r.family.as_str(), r.weight, r.italic), (family, weight, italic), "{ps}");
     }
 }
+
+#[test]
+fn text_rebuild_preserves_imported_font_metadata() {
+    use crate::engine_data::Value as E;
+    let layer = point("Original", 24.0);
+    let mut template = crate::psd::build_engine_data(&layer, None, 72.0);
+    for key in ["ResourceDict", "DocumentResources"] {
+        let fonts = template.get_mut(key).unwrap().get_mut("FontSet").unwrap();
+        let E::Array(fonts) = fonts else { panic!("font array") };
+        for font in fonts.iter_mut() {
+            font.set("Script", E::Int(4));
+            font.set("FontType", E::Int(2));
+            font.set("Synthetic", E::Int(3));
+            font.set("PrivateFontFlag", E::Int(17));
+        }
+    }
+    let expected = template.path(&["ResourceDict", "FontSet"]).unwrap().clone();
+    let mut edited = layer;
+    edited.text = "Edited".into();
+    let rebuilt = crate::psd::build_engine_data(&edited, Some(template), 72.0);
+    for key in ["ResourceDict", "DocumentResources"] {
+        assert_eq!(rebuilt.path(&[key, "FontSet"]), Some(&expected), "existing font metadata must survive a text edit");
+    }
+}
