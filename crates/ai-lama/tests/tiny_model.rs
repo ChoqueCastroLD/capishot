@@ -158,3 +158,43 @@ fn bad_weights_and_sizes_are_errors() {
     let out = model.generate(&nan, &mask, W, H).unwrap();
     assert!(out.iter().all(|v| v.is_finite()));
 }
+
+struct NoHooks;
+impl photocraft_ai_lama::service::Hooks for NoHooks {
+    fn progress(&self, _: f32, _: &str) {}
+    fn cancelled(&self) -> bool {
+        false
+    }
+}
+
+fn run_native(i: &photocraft_ai_lama::native::NativeInpainter) -> photocraft_ai_lama::Result<Vec<f32>> {
+    use photocraft_ai_lama::service::{Inpainter, Request};
+    let (rgb, mask) = tiny_input();
+    let tile = photocraft_ai_lama::tiles::TileInput { rgb, mask, w: W, h: H };
+    let (tx, rx) = std::sync::mpsc::channel();
+    i.run(Request { tile, allow_download: false }, std::sync::Arc::new(NoHooks), Box::new(move |r| tx.send(r).unwrap()));
+    rx.recv().unwrap()
+}
+
+#[test]
+fn native_inpainter_reports_missing_weights_and_runs_a_file() {
+    use photocraft_ai_lama::native::NativeInpainter;
+    use photocraft_ai_lama::service::{Inpainter, ModelState};
+    // Built with `flex` alone (as the test commands here do), the device is the CPU.
+    let dir = std::env::temp_dir().join(format!("lama-native-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let missing = NativeInpainter::new(dir.join("nope.safetensors"));
+    assert!(matches!(missing.model_state(), ModelState::Unavailable(_)));
+    assert!(run_native(&missing).is_err());
+    let garbage = dir.join("garbage.safetensors");
+    std::fs::write(&garbage, b"not a model").unwrap();
+    assert!(run_native(&NativeInpainter::new(garbage)).is_err());
+    let good = dir.join("tiny.safetensors");
+    std::fs::write(&good, tiny_safetensors("lama-ffc")).unwrap();
+    let i = NativeInpainter::new(good);
+    assert_eq!(i.model_state(), ModelState::Ready);
+    let out = run_native(&i).unwrap();
+    assert_eq!(out.len(), W * H * 3);
+    assert!(!i.device().is_empty());
+    std::fs::remove_dir_all(&dir).ok();
+}
