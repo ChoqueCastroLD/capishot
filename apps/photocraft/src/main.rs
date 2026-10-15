@@ -408,6 +408,9 @@ fn main() -> eframe::Result {
                 // Image › Upscale with AI, in-process (the `ai` feature).
                 #[cfg(feature = "ai")]
                 app.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(&dir))));
+                // Window › AI Models… and `ai.models.*`: downloads into the same cache.
+                #[cfg(feature = "ai")]
+                app.session.set_ai_models(Some(std::sync::Arc::new(photocraft_ai::native_store::NativeModelStore::from_env(&dir))));
             }
             // Edit › Clean with AI: Manga LaMa on this machine (feature `ai`).
             #[cfg(feature = "ai")]

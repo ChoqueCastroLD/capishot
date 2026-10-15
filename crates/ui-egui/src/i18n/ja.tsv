@@ -3843,3 +3843,48 @@ cameraData	Lens	レンズ
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	近くのパッチではなく AI でストロークを埋めます。スクリーントーンや線画に向いています。品質とデバイスは「AI オプション…」で選びます。
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	選択したテキストや描き文字を消し、AI で背景を新しいレイヤーに描き直します。初回はモデルをダウンロードします（MI-GAN 13 MB、Manga LaMa 102 MB）。
 	Nothing is uploaded: it runs on this device.	何もアップロードされません。このデバイス上で実行されます。
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} はダウンロードされていません
+	Open Model Manager	モデルマネージャーを開く
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} には {model}（{mb} MB）が必要ですが、このデバイスにはまだありません。
+	It is downloading now ({pct}%); try again when it is done.	現在ダウンロード中です（{pct}%）。完了してからもう一度お試しください。
+	It is waiting in the download queue; try again when it is done.	ダウンロード待ちの列に入っています。完了してからもう一度お試しください。
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	AI モデルマネージャーで一度ダウンロードしてください。ツールを使うだけでダウンロードされることはありません。
+	Models are kept in this browser and run on this device: your images are not uploaded.	モデルはこのブラウザーに保存され、このデバイスで動作します。画像がアップロードされることはありません。
+	Models are kept on this computer and run on this device: your images are not uploaded.	モデルはこのコンピューターに保存され、このデバイスで動作します。画像がアップロードされることはありません。
+	AI Models	AI モデル
+	AI Models…	AI モデル…
+	GPU or CPU (best on a GPU)	GPU または CPU（GPU 推奨）
+	GPU or CPU (lite: fine on either)	GPU または CPU（軽量: どちらでも快適）
+	Not downloaded	未ダウンロード
+	Queued	待機中
+	Downloading {pct}%	ダウンロード中 {pct}%
+	{time} left	残り {time}
+	Downloaded	ダウンロード済み
+	Update available	アップデートあり
+	Failed: {reason}	失敗: {reason}
+	Checking…	確認中…
+	Models on this device: {size}	このデバイスのモデル: {size}
+	site storage {used} of {quota}	サイトの使用容量 {used} / {quota}
+	Download recommended for this device ({size})	このデバイスにおすすめのモデルをダウンロード（{size}）
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	使える GPU がありません: 軽量モデル（MI-GAN、Real-ESRGAN Compact）。
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	GPU が使えます: フルモデル（Manga LaMa、開いているページ用の MangaJaNai、IllustrationJaNai）。
+	Download all ({size})	すべてダウンロード（{size}）
+	Delete every downloaded model?	ダウンロード済みのモデルをすべて削除しますか？
+	Delete all	すべて削除
+	Cancel all	すべてキャンセル
+	Cleaning	クリーンアップ
+	Upscaling	アップスケール
+	Downloading {model} {pct}%	{model} をダウンロード中 {pct}%
+	Starting the next download…	次のダウンロードを開始しています…
+	Download	ダウンロード
+	Update	アップデート
+	Used by: {tools}	使用するツール: {tools}
+	Runs on: {where}	実行環境: {where}
+	Licence:	ライセンス:
+	AI model downloads: click to open the AI Model Manager	AI モデルのダウンロード: クリックで AI モデルマネージャーを開きます
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model}（{mb} MB）はダウンロードされていません。先に AI モデルマネージャーでダウンロードしてください。
+	Download and delete AI models	AI モデルのダウンロードと削除
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	選択したテキストや効果音を消し、AI で背景を描き直して新しいレイヤーに配置します。ダウンロード済みのモデルを使います（ウィンドウ › AI モデル…）。
+@plural	{n} more queued|{n} more queued	ほか {n} 件待機中

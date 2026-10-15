@@ -59,6 +59,7 @@ pub mod image_cmds;
 pub mod inspect;
 pub mod installed_profiles;
 pub mod ai_inpaint_cmds;
+pub mod ai_models_cmds;
 pub mod jobs;
 pub mod kys;
 pub mod layer_copy_cmds;
@@ -438,6 +439,9 @@ pub struct Session {
     /// Runs Manga LaMa for `edit.inpaintAi` and the Remove tool's AI mode, injected by the shell;
     /// `None` where it is unavailable (see `ai_inpaint_cmds`).
     inpainter: Option<std::sync::Arc<dyn photocraft_ai_lama::service::Inpainter>>,
+    /// Downloads and deletes AI model weights (`ai.models.*`, the AI Model Manager), injected by
+    /// the shell; `None` where downloads are unavailable (see `ai_models_cmds`).
+    ai_models: Option<Arc<dyn photocraft_ai::models::ModelStore>>,
 }
 
 /// Move item `i` of `v` to position `to`, clamped to the end. Returns where it went; `None` when

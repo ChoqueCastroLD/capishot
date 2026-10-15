@@ -7,7 +7,7 @@
 //! quality is never lowered without saying so. **Advanced…** reveals the real settings: the exact
 //! model, tile size and overlap (upscale) or the largest working side (inpaint), precision, CPU
 //! threads, keeping the model in memory, and the downloaded models' storage with a button that
-//! clears it.
+//! opens the AI Model Manager (where models are downloaded and deleted).
 //!
 //! The choices are remembered in `prefs.dialogs["ai.upscale"]` / `["ai.inpaint"]` (only the
 //! values that differ from the defaults) and every UI run of the commands gets them
@@ -34,8 +34,6 @@ pub enum Kind {
 const MARK: &str = "__aiInpaintOptions";
 /// The dialog field that keeps Advanced open.
 pub const ADVANCED: &str = "__aiAdvanced";
-/// The `prefs.dialogs` key prefix of download consents (cleared with the downloads).
-const CONSENT_PREFIX: &str = "aiModelDownload.";
 
 impl Kind {
     /// The command family of a UI run, if it is an AI one.
@@ -215,8 +213,9 @@ pub fn simple_rows(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     f.insert("device".into(), json!(device));
 }
 
-/// The Advanced… toggle and, when open, the Advanced settings.
-pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut Map<String, Value>) {
+/// The Advanced… toggle and, when open, the Advanced settings. True when the dialog should
+/// close (the user opened the AI Model Manager).
+pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut Map<String, Value>) -> bool {
     let open = f.get(ADVANCED).and_then(Value::as_bool).unwrap_or(false);
     ui.add_space(6.0);
     let label = if open { tl!("Hide Advanced") } else { tl!("Advanced…") };
@@ -224,7 +223,7 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
         f.insert(ADVANCED.into(), json!(!open));
     }
     if !open {
-        return;
+        return false;
     }
     ui.add_space(6.0);
     let tokens = crate::theme::Tokens::for_kind(app.ui.theme);
@@ -283,46 +282,33 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
     f.insert("model".into(), json!(model));
     f.insert("threads".into(), json!(threads as u64));
     f.insert("keepLoaded".into(), json!(keep));
-    storage_row(app, ui);
-}
-
-/// Downloaded models' size and the button that clears them.
-fn storage_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let Some(up) = app.session.ai_upscaler() else { return };
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        let used = up.storage_used();
-        let text = match used {
-            Some(b) => crate::i18n::fmt(tl!("Downloaded models: {mb} MB"), &[("mb", &mb_of(b))]),
-            None => tl!("Downloaded models: unknown").to_string(),
-        };
-        ui.label(text);
-        let any = used != Some(0);
-        if ui.add_enabled_ui(any, |ui| crate::widgets::secondary_button(ui, tl!("Clear Downloaded Models"), 0.0)).inner.clicked() {
-            clear_downloads(app);
-        }
-    });
-    // The browser answers the size asynchronously.
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
-}
-
-/// Deletes the downloaded models and forgets the download consents (the next use asks again).
-pub fn clear_downloads(app: &mut PhotocraftApp) {
-    let Some(up) = app.session.ai_upscaler() else { return };
-    match up.clear_downloads() {
-        Ok(()) => {
-            app.session.edit_prefs(|p| p.dialogs.retain(|k, _| !k.starts_with(CONSENT_PREFIX)));
-            if let Err(e) = crate::prefs_ui::save_preferences(app) {
-                log::warn!("couldn't save the preferences: {e}");
-            }
-            app.ui.status = tl!("Downloaded models cleared; they download again (after asking) when next used.").to_string();
-            app.ui.status_error = false;
-        }
-        Err(e) => {
-            app.ui.status = e.to_string();
-            app.ui.status_error = true;
-        }
+    let manager = storage_row(app, ui);
+    if manager {
+        save(app, kind, f);
     }
+    manager
+}
+
+/// Downloaded models' size and the button that opens the AI Model Manager (true when clicked).
+fn storage_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> bool {
+    let Some(store) = app.session.ai_models() else { return false };
+    ui.add_space(6.0);
+    let clicked = ui
+        .horizontal(|ui| {
+            let text = match store.storage().models {
+                Some(b) => crate::i18n::fmt(tl!("Downloaded models: {mb} MB"), &[("mb", &mb_of(b))]),
+                None => tl!("Downloaded models: unknown").to_string(),
+            };
+            ui.label(text);
+            crate::widgets::secondary_button(ui, tl!("AI Models…"), 0.0).on_hover_text(tl!("Download and delete AI models")).clicked()
+        })
+        .inner;
+    if clicked {
+        crate::ai_models_ui::open(app, None);
+    }
+    // The browser answers the sizes asynchronously.
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+    clicked
 }
 
 // ------------------------------------------------------------------ AI Options… (inpaint)
@@ -340,7 +326,8 @@ pub fn open_inpaint_options(app: &mut PhotocraftApp) -> u64 {
     app.ui.open_dialog(DialogKind::Command, f)
 }
 
-pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
+/// Draws AI Options…; true when it should close (the user opened the AI Model Manager).
+pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) -> bool {
     let tokens = crate::theme::Tokens::for_kind(app.ui.theme);
     ui.label(egui::RichText::new(tl!("Quality and device for Clean with AI and the Remove tool's AI mode.")).color(tokens.text_dim));
     ui.add_space(8.0);
@@ -355,7 +342,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             ui.colored_label(tokens.warning, e.to_string());
         }
     }
-    advanced(app, ui, Kind::Inpaint, f);
+    advanced(app, ui, Kind::Inpaint, f)
 }
 
 pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {

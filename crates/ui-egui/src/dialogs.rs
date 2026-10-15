@@ -231,9 +231,18 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::stroke_ui::owns(&fields) => crate::stroke_ui::body(ui, &mut fields),
                 DialogKind::Command if crate::shape_dialog::owns(&fields) => crate::shape_dialog::body(app, ui, &mut fields),
                 DialogKind::Command if crate::delete_layer_prompt::owns(&fields) => crate::delete_layer_prompt::body(ui, &mut fields),
-                DialogKind::Command if crate::ai_upscale_ui::owns(&fields) => crate::ai_upscale_ui::body(app, ui, &mut fields),
-                DialogKind::Command if crate::ai_options_ui::owns(&fields) => crate::ai_options_ui::body(app, ui, &mut fields),
-                DialogKind::Command if crate::ai_download_prompt::owns(&fields) => crate::ai_download_prompt::body(ui, &fields),
+                DialogKind::Command if crate::ai_upscale_ui::owns(&fields) => {
+                    // "AI Models…" closes the dialog (it is modal) and opens the Manager.
+                    if crate::ai_upscale_ui::body(app, ui, &mut fields) {
+                        outcome = Some(false);
+                    }
+                }
+                DialogKind::Command if crate::ai_options_ui::owns(&fields) => {
+                    if crate::ai_options_ui::body(app, ui, &mut fields) {
+                        outcome = Some(false);
+                    }
+                }
+                DialogKind::Command if crate::ai_model_gate::owns(&fields) => crate::ai_model_gate::body(app, ui, &fields),
                 DialogKind::Command if crate::rasterize_prompt::owns(&fields) => crate::rasterize_prompt::body(ui, &fields),
                 DialogKind::Command if crate::tool_reset::owns(&fields) => crate::tool_reset::body(ui),
                 DialogKind::Command if crate::crop_presets::owns(&fields) => crate::crop_presets::body(app, ui, &mut fields),
@@ -304,7 +313,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         } else {
                             crate::file_ui::ok_label(&d.fields)
                                 .or_else(|| crate::ai_upscale_ui::ok_label(&d.fields))
-                                .or_else(|| crate::ai_download_prompt::ok_label(&d.fields))
+                                .or_else(|| crate::ai_model_gate::ok_label(&d.fields))
                                 .unwrap_or(tl!("OK"))
                         };
                         // Dialogs that need an input first (a preset name, a selection) grey OK out.
@@ -483,7 +492,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
         DialogKind::Command if crate::delete_layer_prompt::owns(&d.fields) => crate::delete_layer_prompt::confirm(app, &d.fields),
         DialogKind::Command if crate::ai_upscale_ui::owns(&d.fields) => crate::ai_upscale_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::ai_options_ui::owns(&d.fields) => crate::ai_options_ui::confirm(app, &d.fields),
-        DialogKind::Command if crate::ai_download_prompt::owns(&d.fields) => crate::ai_download_prompt::confirm(app, &d.fields),
+        DialogKind::Command if crate::ai_model_gate::owns(&d.fields) => crate::ai_model_gate::confirm(app, &d.fields),
         DialogKind::Command if crate::rasterize_prompt::owns(&d.fields) => crate::rasterize_prompt::confirm(app, &d.fields),
         DialogKind::Command if crate::tool_reset::owns(&d.fields) => crate::tool_reset::confirm(app),
         DialogKind::Command if crate::crop_presets::owns(&d.fields) => crate::crop_presets::confirm(app, &d.fields),

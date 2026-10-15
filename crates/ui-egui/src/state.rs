@@ -1099,6 +1099,9 @@ pub struct UiState {
     /// Ruler/Count/Note tools, Measurement Log and Notes panels (see `analysis_ui`).
     #[serde(default)]
     pub analysis: crate::analysis_ui::AnalysisUi,
+    /// Window › AI Models… (see `ai_models_ui`).
+    #[serde(default)]
+    pub ai_models: crate::ai_models_ui::ModelsUi,
     pub timeline: crate::timeline_ui::TimelineUi,
     /// Slice and Slice Select tools (see `slice_ui`).
     #[serde(default)]
@@ -1242,6 +1245,7 @@ impl Default for UiState {
             typer: Default::default(),
             fonts: Default::default(),
             analysis: Default::default(),
+            ai_models: Default::default(),
             timeline: Default::default(),
             slices: Default::default(),
             frame_tool: Default::default(),

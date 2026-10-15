@@ -17,9 +17,17 @@
 //!   (`rgb` interleaved, `mask` 0/1, both `Float32Array`s, transferred); the reply's `data`
 //!   is the interleaved RGB output (`channels` 3). `unload` frees the model after the run.
 //!
+//! * `{type: "download", model, base}`: downloads catalog model `model`'s weight file from
+//!   `base` into Cache Storage (streamed, hashed as it arrives, verified, then stored with an
+//!   `x-capishot-sha256` header), for the AI Model Manager. The page runs downloads in a worker
+//!   of their own (one at a time), so they go on while models run and cancelling one is
+//!   `Worker.terminate()`.
+//!
 //! Worker → main thread:
 //! * `{type: "ready"}` once loaded;
-//! * `{type: "progress", id, fraction, status, device}`;
+//! * `{type: "progress", id, fraction, status, device}` (at most ten a second);
+//! * `{type: "dl-progress", model, done, total}` (at most ten a second), then
+//!   `{type: "dl-done", model}` or `{type: "dl-error", model, message}`;
 //! * `{type: "done", id, width, height, channels, data, device}` (`data` transferred);
 //! * `{type: "error", id, message}`;
 //! * `{type: "panic", message}` just before the module aborts (the worker is then dead).
@@ -32,6 +40,7 @@ use std::rc::Rc;
 
 use js_sys::{Array, Float32Array, Object, Reflect, Uint8Array};
 use photocraft_ai::cache::{WEB_CACHE, verify};
+use photocraft_ai::models::Throttle;
 use photocraft_ai::catalog::{self, ModelInfo};
 use photocraft_ai::runtime::Runtime;
 use photocraft_ai::upscale::{Loaded, default_tiles, upscale};
@@ -39,7 +48,7 @@ use photocraft_ai::{AiError, Planar, Progress, Result};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Cache, DedicatedWorkerGlobalScope, MessageEvent, ReadableStreamDefaultReader, Response};
+use web_sys::{Blob, Cache, DedicatedWorkerGlobalScope, MessageEvent, ReadableStreamDefaultReader, Response};
 
 #[derive(Default)]
 struct State {
@@ -110,6 +119,7 @@ pub fn start() {
         match get(&data, "type").as_string().as_deref() {
             Some("run") => wasm_bindgen_futures::spawn_local(run(data)),
             Some("inpaint") => wasm_bindgen_futures::spawn_local(inpaint(data)),
+            Some("download") => wasm_bindgen_futures::spawn_local(download(data)),
             _ => {}
         }
     });
@@ -123,10 +133,26 @@ struct Posting {
     lo: f32,
     status: String,
     device: String,
+    /// At most ten messages a second; a new status always goes.
+    throttle: RefCell<(Throttle, String)>,
 }
 
 impl Posting {
+    fn new(id: f64) -> Self {
+        Self { id, lo: 0.0, status: String::new(), device: String::new(), throttle: RefCell::new((Throttle::default(), String::new())) }
+    }
+
     fn send(&self, fraction: f32, status: &str) {
+        {
+            let mut t = self.throttle.borrow_mut();
+            let changed = t.1 != status;
+            if !t.0.ready(now_ms()) && !changed {
+                return;
+            }
+            if changed {
+                status.clone_into(&mut t.1);
+            }
+        }
         post(
             &obj(&[
                 ("type", "progress".into()),
@@ -145,6 +171,14 @@ impl Progress for Posting {
         let f = if total == 0 { 0.0 } else { done as f32 / total as f32 };
         self.send(self.lo + (1.0 - self.lo) * f, &self.status);
     }
+}
+
+/// Milliseconds on the worker's clock.
+fn now_ms() -> f64 {
+    js_sys::Reflect::get(&js_sys::global(), &"performance".into())
+        .ok()
+        .and_then(|p| p.dyn_into::<web_sys::Performance>().ok())
+        .map_or_else(js_sys::Date::now, |p| p.now())
 }
 
 async fn run(msg: JsValue) {
@@ -181,7 +215,7 @@ async fn run_inner(msg: &JsValue, id: f64) -> Result<(Planar, String)> {
     let (w, h, c) = (dim("width")?, dim("height")?, dim("channels")?);
     let data: Float32Array = get(msg, "data").dyn_into().map_err(|_| AiError::Image("no pixel data".into()))?;
     let input = Planar::new(w, h, c, data.to_vec())?;
-    let mut p = Posting { id, lo: 0.0, status: String::new(), device: String::new() };
+    let mut p = Posting::new(id);
     let bytes = weights(model, &base, download, &p).await?;
     p.send(0.12, "Preparing the model");
     let rt = runtime(cpu).await?;
@@ -297,7 +331,8 @@ async fn has_adapter() -> bool {
     matches!(JsFuture::from(p).await, Ok(a) if !a.is_null() && !a.is_undefined())
 }
 
-/// The verified weights: from Cache Storage, else downloaded (with consent) and cached.
+/// The verified weights: from Cache Storage, else downloaded (with consent, for agents; the
+/// editor's UI downloads in the AI Model Manager instead) and cached.
 async fn weights(model: &'static ModelInfo, base: &str, download: bool, p: &Posting) -> Result<Vec<u8>> {
     let url = model.url(base);
     let cache = open_cache().await;
@@ -317,26 +352,21 @@ async fn weights(model: &'static ModelInfo, base: &str, download: bool, p: &Post
         let _ = JsFuture::from(cache.delete_with_str(&url)).await;
     }
     if !download {
-        return Err(AiError::Download(format!("{} isn't downloaded yet", model.title)));
+        return Err(AiError::Download(format!("{} isn't downloaded", model.title)));
     }
     if base.is_empty() {
         return Err(AiError::Download("model downloads are not configured on this site".into()));
     }
-    let bytes = fetch(&url, model, p).await?;
-    verify(model, &bytes)?;
-    if let Some(cache) = &cache {
-        let arr = Uint8Array::from(bytes.as_slice());
-        match Response::new_with_opt_buffer_source(Some(&arr)) {
-            Ok(resp) => {
-                if let Err(e) = JsFuture::from(cache.put_with_str(&url, &resp)).await {
-                    // Out of quota, private mode: it still runs, it just downloads next time.
-                    web_sys::console::warn_1(&format!("AI worker: couldn't cache {}: {}", model.file, js_err(e)).into());
-                }
-            }
-            Err(e) => web_sys::console::warn_1(&js_err(e).into()),
-        }
+    let status = format!("Downloading {} ({:.0} MB)", model.title, model.bytes as f64 / 1e6);
+    let blob = fetch_verified(&url, model, &mut |done, total| p.send(0.12 * done as f32 / total.max(1) as f32, &status)).await?;
+    if let Some(cache) = &cache
+        && let Err(e) = store(cache, &url, model, &blob).await
+    {
+        // Out of quota, private mode: it still runs, it just downloads next time.
+        web_sys::console::warn_1(&format!("AI worker: couldn't cache {}: {e}", model.file).into());
     }
-    Ok(bytes)
+    let buf = JsFuture::from(blob.array_buffer()).await.map_err(|e| AiError::Download(js_err(e)))?;
+    Ok(Uint8Array::new(&buf).to_vec())
 }
 
 async fn open_cache() -> Option<Cache> {
@@ -344,8 +374,12 @@ async fn open_cache() -> Option<Cache> {
     JsFuture::from(caches.open(WEB_CACHE)).await.ok()?.dyn_into::<Cache>().ok()
 }
 
-/// Streams `url` with progress, never reading more than the model's size.
-async fn fetch(url: &str, model: &ModelInfo, p: &Posting) -> Result<Vec<u8>> {
+/// Streams `url`, never reading more than the model's size, hashing each chunk as it arrives
+/// (no second pass over 100 MB) and keeping the chunks on the JavaScript side (no copy into the
+/// module's memory); `progress(done, total)` is called at most ten times a second. The result
+/// is verified (size and sha256).
+async fn fetch_verified(url: &str, model: &ModelInfo, progress: &mut dyn FnMut(u64, u64)) -> Result<Blob> {
+    use sha2::Digest;
     let err = |e: String| AiError::Download(format!("{url}: {e}"));
     let resp: Response = JsFuture::from(scope().fetch_with_str(url)).await.map_err(|e| err(js_err(e)))?.dyn_into().map_err(|_| err("not a response".into()))?;
     if !resp.ok() {
@@ -353,26 +387,82 @@ async fn fetch(url: &str, model: &ModelInfo, p: &Posting) -> Result<Vec<u8>> {
     }
     let body = resp.body().ok_or_else(|| err("no body".into()))?;
     let reader: ReadableStreamDefaultReader = body.get_reader().dyn_into().map_err(|_| err("no reader".into()))?;
-    let mut out: Vec<u8> = Vec::with_capacity(usize::try_from(model.bytes).unwrap_or(0));
-    let status = format!("Downloading {} ({:.0} MB)", model.title, model.bytes as f64 / 1e6);
+    let chunks = Array::new();
+    let mut hash = sha2::Sha256::new();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut done = 0u64;
+    let mut throttle = Throttle::default();
     loop {
         let chunk = JsFuture::from(reader.read()).await.map_err(|e| err(js_err(e)))?;
         if get(&chunk, "done").as_bool().unwrap_or(true) {
             break;
         }
         let v: Uint8Array = get(&chunk, "value").dyn_into().map_err(|_| err("bad chunk".into()))?;
-        if out.len() as u64 + u64::from(v.length()) > model.bytes {
+        let n = v.length() as usize;
+        done = done.saturating_add(n as u64);
+        if done > model.bytes {
             let _ = reader.cancel();
             return Err(err("larger than expected".into()));
         }
-        let at = out.len();
-        out.resize(at + v.length() as usize, 0);
-        if let Some(dst) = out.get_mut(at..) {
-            v.copy_to(dst);
+        buf.resize(n, 0);
+        v.copy_to(&mut buf);
+        hash.update(&buf);
+        chunks.push(&v);
+        if throttle.ready(now_ms()) {
+            progress(done, model.bytes);
         }
-        p.send(0.12 * out.len() as f32 / model.bytes.max(1) as f32, &status);
     }
-    Ok(out)
+    progress(done, model.bytes);
+    let actual: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if done != model.bytes {
+        return Err(AiError::Checksum { expected: format!("{} bytes", model.bytes), actual: format!("{done} bytes") });
+    }
+    if actual != model.sha256 {
+        return Err(AiError::Checksum { expected: model.sha256.to_string(), actual });
+    }
+    Blob::new_with_u8_array_sequence(&chunks).map_err(|e| err(js_err(e)))
+}
+
+/// Puts a verified file in Cache Storage, with its checksum in a header (the page reads it to
+/// tell an outdated file from the catalog's).
+async fn store(cache: &Cache, url: &str, model: &ModelInfo, blob: &Blob) -> std::result::Result<(), String> {
+    let headers = web_sys::Headers::new().map_err(js_err)?;
+    for (k, v) in [("content-type", "application/octet-stream".to_string()), ("content-length", model.bytes.to_string()), (photocraft_ai::cache::WEB_SHA_HEADER, model.sha256.to_string())] {
+        headers.set(k, &v).map_err(js_err)?;
+    }
+    let init = web_sys::ResponseInit::new();
+    init.set_headers(&headers);
+    let resp = Response::new_with_opt_blob_and_init(Some(blob), &init).map_err(js_err)?;
+    JsFuture::from(cache.put_with_str(url, &resp)).await.map(|_| ()).map_err(js_err)
+}
+
+/// The AI Model Manager's download (see the protocol in the module docs).
+async fn download(msg: JsValue) {
+    let name = get(&msg, "model").as_string().unwrap_or_default();
+    let reply = |ty: &str, extra: &[(&str, JsValue)]| {
+        let mut fields = vec![("type", JsValue::from(ty)), ("model", JsValue::from(name.as_str()))];
+        fields.extend(extra.iter().cloned());
+        post(&obj(&fields), None);
+    };
+    let r = async {
+        let model = catalog::model(&name).ok_or_else(|| AiError::UnknownModel(name.clone()))?;
+        let base = get(&msg, "base").as_string().unwrap_or_default();
+        if base.is_empty() {
+            return Err(AiError::Download("model downloads are not configured on this site".into()));
+        }
+        let cache = open_cache().await.ok_or_else(|| AiError::Cache("this browser can't store models here (Cache Storage is unavailable, as in some private windows)".into()))?;
+        let url = model.url(&base);
+        let blob = fetch_verified(&url, model, &mut |done, total| {
+            reply("dl-progress", &[("done", (done as f64).into()), ("total", (total as f64).into())]);
+        })
+        .await?;
+        store(&cache, &url, model, &blob).await.map_err(|e| AiError::Cache(format!("couldn't store {} ({e}); free some space or allow this site more storage", model.title)))
+    }
+    .await;
+    match r {
+        Ok(()) => reply("dl-done", &[]),
+        Err(e) => reply("dl-error", &[("message", e.to_string().into())]),
+    }
 }
 
 async fn inpaint(msg: JsValue) {
@@ -408,7 +498,7 @@ async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>,
     let (w, h) = (dim("width")?, dim("height")?);
     let arr = |k: &str| get(msg, k).dyn_into::<Float32Array>().map(|a| a.to_vec()).map_err(|_| format!("no {k}"));
     let (rgb, mask) = (arr("rgb")?, arr("mask")?);
-    let mut p = Posting { id, lo: 0.0, status: String::new(), device: String::new() };
+    let mut p = Posting::new(id);
     let reuse = STATE.with(|s| s.borrow().inpaint.clone()).filter(|(i, _)| *i == model.id);
     let lama = match reuse {
         Some((_, l)) => l,

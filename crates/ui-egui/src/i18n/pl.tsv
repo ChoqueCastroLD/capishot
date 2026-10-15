@@ -3847,3 +3847,48 @@ cameraData	Lens	Obiektyw
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Wypełnia pociągnięcia za pomocą AI zamiast pobliskich łatek: lepsze na rastrach i rysunku liniowym. Opcje AI… wybierają jakość i urządzenie.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Usuwa zaznaczony tekst lub efekty dźwiękowe i odtwarza tło za pomocą AI na nowej warstwie. Przy pierwszym użyciu pobierany jest model (MI-GAN 13 MB, Manga LaMa 102 MB).
 	Nothing is uploaded: it runs on this device.	Nic nie jest wysyłane: działa na tym urządzeniu.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} nie jest pobrany
+	Open Model Manager	Otwórz menedżera modeli
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} wymaga modelu {model} ({mb} MB), którego jeszcze nie ma na tym urządzeniu.
+	It is downloading now ({pct}%); try again when it is done.	Trwa pobieranie ({pct}%); spróbuj ponownie po zakończeniu.
+	It is waiting in the download queue; try again when it is done.	Czeka w kolejce pobierania; spróbuj ponownie po zakończeniu.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Pobierz go raz w menedżerze modeli AI. Użycie narzędzia nigdy niczego nie pobiera.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Modele są przechowywane w tej przeglądarce i działają na tym urządzeniu: Twoje obrazy nie są wysyłane.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Modele są przechowywane na tym komputerze i działają na tym urządzeniu: Twoje obrazy nie są wysyłane.
+	AI Models	Modele AI
+	AI Models…	Modele AI…
+	GPU or CPU (best on a GPU)	GPU lub CPU (najlepiej na GPU)
+	GPU or CPU (lite: fine on either)	GPU lub CPU (lekki: dobrze na obu)
+	Not downloaded	Nie pobrano
+	Queued	W kolejce
+	Downloading {pct}%	Pobieranie {pct}%
+	{time} left	pozostało {time}
+	Downloaded	Pobrano
+	Update available	Dostępna aktualizacja
+	Failed: {reason}	Błąd: {reason}
+	Checking…	Sprawdzanie…
+	Models on this device: {size}	Modele na tym urządzeniu: {size}
+	site storage {used} of {quota}	pamięć witryny: {used} z {quota}
+	Download recommended for this device ({size})	Pobierz zalecane dla tego urządzenia ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Brak użytecznego GPU: lekkie modele (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	GPU jest dostępne: pełne modele (Manga LaMa, MangaJaNai dla otwartych stron, IllustrationJaNai).
+	Download all ({size})	Pobierz wszystkie ({size})
+	Delete every downloaded model?	Usunąć wszystkie pobrane modele?
+	Delete all	Usuń wszystkie
+	Cancel all	Anuluj wszystko
+	Cleaning	Czyszczenie
+	Upscaling	Powiększanie
+	Downloading {model} {pct}%	Pobieranie {model} {pct}%
+	Starting the next download…	Rozpoczynanie następnego pobierania…
+	Download	Pobierz
+	Update	Aktualizuj
+	Used by: {tools}	Używany przez: {tools}
+	Runs on: {where}	Działa na: {where}
+	Licence:	Licencja:
+	AI model downloads: click to open the AI Model Manager	Pobieranie modeli AI: kliknij, aby otworzyć menedżera modeli AI
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} MB) nie jest pobrany. Najpierw pobierz go w menedżerze modeli AI.
+	Download and delete AI models	Pobieraj i usuwaj modele AI
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Usuwa zaznaczony tekst lub efekty dźwiękowe i odrysowuje tło za pomocą AI na nowej warstwie. Używa pobranego modelu (Okno › Modele AI…).
+@plural	{n} more queued|{n} more queued	jeszcze {n} w kolejce|jeszcze {n} w kolejce|jeszcze {n} w kolejce

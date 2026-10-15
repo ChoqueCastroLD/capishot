@@ -2,11 +2,12 @@
 //! calling thread (the engine's job worker) on the GPU through wgpu when there is a real one,
 //! else on the CPU.
 //!
-//! The weights come from local files: `CAPISHOT_LAMA_WEIGHTS`, else
+//! The weights come from local files: the AI Model Manager's downloads
+//! (`<config dir>/ai-models/`, `photocraft-ai`'s cache) first, else `CAPISHOT_LAMA_WEIGHTS` or
 //! `<config dir>/models/manga-lama-f16.safetensors`; MI-GAN from `CAPISHOT_MIGAN_WEIGHTS`, else
-//! [`MIGAN_FILE`] next to LaMa's. Downloading them is the shared AI runtime's
-//! job (`photocraft-ai`'s cache); until that is wired, a missing file reports
-//! [`ModelState::Unavailable`] with the path to put it at.
+//! [`MIGAN_FILE`] next to LaMa's. A missing file reports [`ModelState::NeedsDownload`] when
+//! there is a downloads folder (the Manager fetches it), else [`ModelState::Unavailable`] with
+//! the path to put it at.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -20,6 +21,9 @@ use crate::{Generator, LamaError, Result};
 pub const WEIGHTS_FILE: &str = "manga-lama-f16.safetensors";
 /// MI-GAN's file name in the models folder.
 pub const MIGAN_FILE: &str = "migan-512-places2-f16.safetensors";
+/// Download sizes of the weight files (as `photocraft_ai::catalog`; the engine's tests check).
+pub const LAMA_BYTES: u64 = 101_904_726;
+pub const MIGAN_BYTES: u64 = 13_198_644;
 /// Larger files are refused before reading (the f32 file is 204 MB).
 const MAX_WEIGHTS_BYTES: u64 = 512 << 20;
 
@@ -27,6 +31,8 @@ const MAX_WEIGHTS_BYTES: u64 = 512 << 20;
 pub struct NativeInpainter {
     path: PathBuf,
     migan: Option<PathBuf>,
+    /// The AI Model Manager's downloads folder, searched first.
+    downloads: Option<PathBuf>,
     /// The loaded model: its id, whether it is on the CPU, the generator.
     model: Mutex<Option<(&'static str, bool, Arc<Generator>)>>,
     device_name: Mutex<String>,
@@ -35,7 +41,7 @@ pub struct NativeInpainter {
 impl NativeInpainter {
     /// An inpainter loading LaMa from `path` on first use (MI-GAN: [`NativeInpainter::with_migan`]).
     pub fn new(path: PathBuf) -> Self {
-        Self { path, migan: None, model: Mutex::new(None), device_name: Mutex::new(String::new()) }
+        Self { path, migan: None, downloads: None, model: Mutex::new(None), device_name: Mutex::new(String::new()) }
     }
 
     /// Also offers MI-GAN, loaded from `path`.
@@ -44,10 +50,28 @@ impl NativeInpainter {
         self
     }
 
-    fn path_of(&self, model: &str) -> Option<&Path> {
+    /// Also looks in `dir` (the AI Model Manager's downloads), before the other paths.
+    pub fn with_downloads(mut self, dir: PathBuf) -> Self {
+        self.downloads = Some(dir);
+        self
+    }
+
+    fn file_of(model: &str) -> Option<(&'static str, u64)> {
         match model {
-            LAMA => Some(&self.path),
-            MIGAN => self.migan.as_deref(),
+            LAMA => Some((WEIGHTS_FILE, LAMA_BYTES)),
+            MIGAN => Some((MIGAN_FILE, MIGAN_BYTES)),
+            _ => None,
+        }
+    }
+
+    fn path_of(&self, model: &str) -> Option<PathBuf> {
+        let (file, _) = Self::file_of(model)?;
+        if let Some(p) = self.downloads.as_ref().map(|d| d.join(file)).filter(|p| p.is_file()) {
+            return Some(p);
+        }
+        match model {
+            LAMA => Some(self.path.clone()),
+            MIGAN => self.migan.clone(),
             _ => None,
         }
     }
@@ -63,7 +87,11 @@ impl NativeInpainter {
             Some(p) => PathBuf::from(p),
             None => path.with_file_name(MIGAN_FILE),
         };
-        Some(Self::new(path).with_migan(migan))
+        let s = Self::new(path).with_migan(migan);
+        Some(match config_dir {
+            Some(c) => s.with_downloads(c.join("ai-models")),
+            None => s,
+        })
     }
 
     /// The weights file this inpainter reads.
@@ -110,6 +138,7 @@ impl NativeInpainter {
         }
         *slot = None;
         let path = self.path_of(id).ok_or_else(|| LamaError::Unavailable(format!("{id} isn't available here")))?;
+        let path = path.as_path();
         let len = std::fs::metadata(path).map_err(|e| LamaError::Unavailable(format!("{id} weights not found at {}: {e}", path.display())))?.len();
         if len > MAX_WEIGHTS_BYTES {
             return Err(LamaError::Weights(format!("{} is {len} bytes, more than any inpainting model", path.display())));
@@ -133,6 +162,7 @@ impl Inpainter for NativeInpainter {
         match self.path_of(model) {
             _ if loaded => ModelState::Ready,
             Some(p) if p.is_file() => ModelState::Ready,
+            Some(_) if self.downloads.is_some() => ModelState::NeedsDownload { bytes: Self::file_of(model).map_or(0, |(_, b)| b) },
             Some(p) => {
                 let (file, var) = if model == MIGAN { (MIGAN_FILE, "CAPISHOT_MIGAN_WEIGHTS") } else { (WEIGHTS_FILE, "CAPISHOT_LAMA_WEIGHTS") };
                 ModelState::Unavailable(format!("{model} weights not found: put {file} at {} (or set {var})", p.display()))

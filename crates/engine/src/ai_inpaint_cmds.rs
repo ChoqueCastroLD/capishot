@@ -20,7 +20,6 @@
 //! settings, like `maxSide` and `margin`.
 
 use std::sync::Arc;
-use std::sync::mpsc;
 
 use photocraft_ai::catalog::{self, ModelInfo};
 use photocraft_ai_lama::LamaError;
@@ -32,6 +31,7 @@ use photocraft_geom::Rect;
 use photocraft_raster::{from_rgba_into, to_rgba};
 use serde_json::{Value, json};
 
+use crate::ai_models_cmds::not_downloaded;
 use crate::commands::CommandSpec;
 use crate::jobs::JobCtx;
 use crate::{EngineError, Result, Session};
@@ -132,13 +132,10 @@ pub(crate) fn ready_inpainter(s: &Session, opts: &AiOptions) -> Result<Arc<dyn I
     match svc.model_state_of(opts.model.id) {
         ModelState::Ready => Ok(svc),
         ModelState::NeedsDownload { .. } if allow_download => Ok(svc),
-        // The browser's cache answers asynchronously; with consent the worker finds out itself.
-        ModelState::Checking if allow_download => Ok(svc),
-        ModelState::NeedsDownload { bytes } => Err(EngineError::Other(format!(
-            "{title} needs a one-time download of {} MB first (run again with \"allowDownload\": true)",
-            bytes.div_ceil(1 << 20)
-        ))),
-        ModelState::Checking => Err(EngineError::Other(format!("still checking for the {title} model; try again in a moment"))),
+        // The browser's cache answers asynchronously: run, and a missing model fails the run
+        // with the same "isn't downloaded" error.
+        ModelState::Checking => Ok(svc),
+        ModelState::NeedsDownload { bytes } => Err(EngineError::Other(not_downloaded(title, bytes, "allowDownload"))),
         ModelState::Unavailable(why) => Err(EngineError::Other(why)),
     }
 }
@@ -168,72 +165,12 @@ impl Hooks for JobHooks {
     }
 }
 
-/// Runs one request and waits for its `done` (the job's worker thread may block; the
-/// single-threaded browser build can't, so there only a synchronous answer works).
-fn run_blocking(svc: &Arc<dyn Inpainter>, req: Request, hooks: Arc<JobHooks>) -> Result<Vec<f32>> {
-    let ctx = hooks.ctx.clone();
-    let (tx, rx) = mpsc::channel();
-    svc.run(req, hooks, Box::new(move |r| drop(tx.send(r))));
-    if cfg!(all(target_arch = "wasm32", not(target_feature = "atomics"))) {
-        return match rx.try_recv() {
-            Ok(r) => r.map_err(lama_err),
-            Err(_) => Err(EngineError::Other(format!("{UNAVAILABLE} (it needs the multithreaded web build)"))),
-        };
-    }
-    let mut waited_cancelled = 0u32;
-    loop {
-        match rx.recv_timeout(std::time::Duration::from_millis(50)) {
-            Ok(r) => return r.map_err(lama_err),
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Err(EngineError::Other("Manga LaMa: the AI service dropped the request".into())),
-            Err(mpsc::RecvTimeoutError::Timeout) if ctx.cancelled() => {
-                // The service should answer Cancelled promptly; don't hang on one that doesn't.
-                waited_cancelled += 1;
-                if waited_cancelled > 40 {
-                    return Err(EngineError::Cancelled);
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-        }
-    }
-}
-
-/// The AI fill of a `w×h` region: `rgb` interleaved RGB 0..=1, `cover` the hole's coverage.
-/// Returns the generated RGB for every pixel (equal to `rgb` outside the hole), with job progress
-/// over `lo..hi`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn ai_fill_rgb(
-    svc: &Arc<dyn Inpainter>,
-    ctx: &JobCtx,
-    rgb: &[f32],
-    cover: &[f32],
-    w: usize,
-    h: usize,
-    opts: &AiOptions,
-    (lo, hi): (f32, f32),
-) -> Result<Vec<f32>> {
-    let plan = tiles::plan(cover, w, h, &opts.tiles).map_err(|e| bad(e.to_string()))?;
-    if plan.is_empty() {
-        return Err(bad("nothing to clean: the area is empty"));
-    }
-    let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
-    let mut generated = rgb.to_vec();
-    let n = plan.len() as f32;
-    for (i, t) in plan.iter().enumerate() {
-        ctx.check()?;
-        let input = tiles::extract(rgb, cover, w, h, t).map_err(|e| bad(e.to_string()))?;
-        let (a, b) = (lo + (hi - lo) * i as f32 / n, lo + (hi - lo) * (i + 1) as f32 / n);
-        let status = if plan.len() > 1 { format!("{LABEL} ({} of {})", i + 1, plan.len()) } else { LABEL.to_string() };
-        let hooks = Arc::new(JobHooks { ctx: ctx.clone(), lo: a, hi: b, status });
-        let out = run_blocking(svc, opts.request(input), hooks)?;
-        tiles::paste(&mut generated, &binary, w, h, t, &out).map_err(lama_err)?;
-        ctx.progress(b, "");
-    }
-    Ok(generated)
-}
-
-/// [`ai_fill_rgb`] without blocking: each tile's request starts from the previous one's `done`,
-/// and `finish` gets the generated RGB. Works with an inpainter that answers later (the
-/// browser's AI worker), so `edit.inpaintAi` runs everywhere through `jobs::run_async`.
+/// The AI fill of a `w×h` region (`rgb` interleaved RGB 0..=1, `cover` the hole's coverage),
+/// without blocking: each tile's request starts from the previous one's `done`, and `finish`
+/// gets the generated RGB for every pixel (equal to `rgb` outside the hole). Works with an
+/// inpainter that answers later (the browser's AI worker, which no thread of the page may wait
+/// for), so `edit.inpaintAi` and the Remove tool's AI mode run everywhere through
+/// `jobs::run_async`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_fill_rgb_async(
     svc: Arc<dyn Inpainter>,
@@ -306,39 +243,6 @@ fn fill_step(mut st: FillState) {
             fill_step(st);
         }),
     );
-}
-
-/// The Remove tool's AI mode: fills the `hole` of a `w×h` window whose pixels `data` are in
-/// `fmt`, returning the window in `fmt` with only hole pixels changed (alpha kept).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn ai_fill_encoded(
-    svc: &Arc<dyn Inpainter>,
-    ctx: &JobCtx,
-    fmt: &PixelFormat,
-    data: &[f32],
-    hole: &[bool],
-    w: usize,
-    h: usize,
-    opts: &AiOptions,
-) -> Result<Vec<f32>> {
-    let n = fmt.channels().max(1);
-    if data.len() != w * h * n || hole.len() != w * h {
-        return Err(EngineError::Other("AI fill: window size mismatch".into()));
-    }
-    let rgb = to_rgb(fmt, data);
-    let cover: Vec<f32> = hole.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
-    let generated = ai_fill_rgb(svc, ctx, &rgb, &cover, w, h, opts, (0.0, 1.0))?;
-    let mut out = data.to_vec();
-    let mut enc = [0.0f32; 8];
-    for (i, m) in hole.iter().enumerate() {
-        if *m {
-            let a = to_rgba(fmt, &data[i * n..(i + 1) * n])[3];
-            let g = &generated[i * 3..i * 3 + 3];
-            from_rgba_into(fmt, [g[0], g[1], g[2], a], &mut enc);
-            out[i * n..(i + 1) * n].copy_from_slice(&enc[..n]);
-        }
-    }
-    Ok(out)
 }
 
 /// Interleaved RGB (0..=1) of pixels in `fmt`.

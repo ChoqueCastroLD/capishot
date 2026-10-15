@@ -15,6 +15,7 @@ fn app(profile: DeviceProfile) -> (PhotocraftApp, Arc<FakeUpscaler>) {
     let up = Arc::new(FakeUpscaler { profile: Mutex::new(profile), ..Default::default() });
     s.set_ai_upscaler(Some(up.clone()));
     s.set_inpainter(Some(Arc::new(FakeInpainter::default())));
+    s.set_ai_models(Some(Arc::new(photocraft_ai::models::FakeStore::default())));
     (PhotocraftApp::new(s, crate::Services::default()), up)
 }
 
@@ -99,7 +100,7 @@ fn the_options_dialog_shows_simple_choices_and_advanced_on_demand() {
     assert!(h.query_by_label_contains("CPU threads:").is_none(), "Advanced is closed by default");
     h.get_by_label("Advanced…").click();
     h.run_steps(4);
-    for want in ["Model:", "Max working side:", "Precision:", "CPU threads:", "Keep the model in memory between runs", "Downloaded models:", "Clear Downloaded Models", "Hide Advanced"] {
+    for want in ["Model:", "Max working side:", "Precision:", "CPU threads:", "Keep the model in memory between runs", "Downloaded models:", "AI Models…", "Hide Advanced"] {
         assert!(h.query_by_label_contains(want).is_some(), "{want}");
     }
     let d = h.state_mut().ui.dialogs.iter_mut().find(|d| owns(&d.fields)).unwrap();
@@ -118,18 +119,16 @@ fn the_options_dialog_shows_simple_choices_and_advanced_on_demand() {
 }
 
 #[test]
-fn clearing_downloads_forgets_consents_and_reports() {
-    let (mut app, up) = app(gpu());
-    app.session.edit_prefs(|p| {
-        p.dialogs.insert("aiModelDownload.manga-lama".into(), json!(true));
-        p.dialogs.insert("ai.inpaint".into(), json!({"quality": "fast"}));
-    });
-    clear_downloads(&mut app);
-    assert!(!app.ui.status_error, "{}", app.ui.status);
-    let d = &app.session.prefs().dialogs;
-    assert!(!d.contains_key("aiModelDownload.manga-lama"), "asks again next time");
-    assert!(d.contains_key("ai.inpaint"), "settings stay");
-    assert!(up.download_needed.load(std::sync::atomic::Ordering::Relaxed));
+fn advanced_opens_the_model_manager_and_closes_the_dialog() {
+    let _lang = crate::i18n::language_scope(crate::i18n::Lang::EN);
+    let mut h = harness(no_gpu());
+    let id = open_inpaint_options(h.state_mut());
+    h.state_mut().ui.dialogs.iter_mut().find(|d| d.id == id).unwrap().fields.insert(ADVANCED.into(), json!(true));
+    h.run_steps(4);
+    h.get_by_label("AI Models…").click();
+    h.run_steps(4);
+    assert!(h.state().ui.ai_models.open, "the Manager opened");
+    assert!(!h.state().ui.dialogs.iter().any(|d| owns(&d.fields)), "AI Options closed");
 }
 
 #[test]
@@ -173,13 +172,13 @@ const STRINGS: &[&str] = &[
     "Keep the model in memory between runs",
     "Downloaded models: {mb} MB",
     "Downloaded models: unknown",
-    "Clear Downloaded Models",
-    "Downloaded models cleared; they download again (after asking) when next used.",
+    "AI Models…",
+    "Download and delete AI models",
     "AI Cleaning Options",
     "Quality and device for Clean with AI and the Remove tool's AI mode.",
     "AI Options…",
     "Use AI",
     "Nothing is uploaded: it runs on this device.",
     "Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.",
-    "Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).",
+    "Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).",
 ];

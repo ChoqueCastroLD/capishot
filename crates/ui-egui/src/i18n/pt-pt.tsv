@@ -3134,3 +3134,49 @@ fontWeight	Italic	Itálico
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Preenche os traços com IA em vez de zonas vizinhas: melhor em tramas e arte de linha. Opções de IA… escolhe a qualidade e o dispositivo.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Apaga o texto ou as onomatopeias selecionados e redesenha o fundo com IA, numa nova camada. A primeira utilização transfere o modelo (MI-GAN 13 MB, Manga LaMa 102 MB).
 	Nothing is uploaded: it runs on this device.	Nada é enviado: tudo é executado neste dispositivo.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} não está transferido
+	Open Model Manager	Abrir gestor de modelos
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} precisa de {model} ({mb} MB), que ainda não está neste dispositivo.
+	It is downloading now ({pct}%); try again when it is done.	Está a ser transferido agora ({pct}%); tente novamente quando terminar.
+	It is waiting in the download queue; try again when it is done.	Está à espera na fila de transferências; tente novamente quando terminar.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Transfira-o uma vez no gestor de modelos de IA. Usar uma ferramenta nunca transfere nada.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Os modelos ficam guardados neste navegador e são executados neste dispositivo: as suas imagens não são enviadas.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Os modelos ficam guardados neste computador e são executados neste dispositivo: as suas imagens não são enviadas.
+	AI Models	Modelos de IA
+	AI Models…	Modelos de IA…
+	GPU or CPU (best on a GPU)	GPU ou CPU (melhor na GPU)
+	GPU or CPU (lite: fine on either)	GPU ou CPU (leve: funciona bem em ambas)
+	Not downloaded	Não transferido
+	Queued	Em fila
+	Downloading {pct}%	A transferir {pct}%
+	{time} left	faltam {time}
+	Downloaded	Transferido
+	Update available	Atualização disponível
+	Failed: {reason}	Falhou: {reason}
+	Checking…	A verificar…
+	Models on this device: {size}	Modelos neste dispositivo: {size}
+	site storage {used} of {quota}	armazenamento do site: {used} de {quota}
+	Download recommended for this device ({size})	Transferir os recomendados para este dispositivo ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Nenhuma GPU utilizável aqui: os modelos leves (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	Há uma GPU disponível: os modelos completos (Manga LaMa, MangaJaNai para as suas páginas abertas, IllustrationJaNai).
+	Download all ({size})	Transferir todos ({size})
+	Delete every downloaded model?	Eliminar todos os modelos transferidos?
+	Delete all	Eliminar todos
+	Cancel all	Cancelar tudo
+	Cleaning	Limpeza
+	Upscaling	Ampliação
+	Downloading {model} {pct}%	A transferir {model} {pct}%
+	Starting the next download…	A iniciar a próxima transferência…
+	Retry	Tentar novamente
+	Download	Transferir
+	Update	Atualizar
+	Used by: {tools}	Usado por: {tools}
+	Runs on: {where}	Executa em: {where}
+	Licence:	Licença:
+	AI model downloads: click to open the AI Model Manager	Transferências de modelos de IA: clique para abrir o gestor de modelos de IA
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} MB) não está transferido. Transfira-o primeiro no gestor de modelos de IA.
+	Download and delete AI models	Transferir e eliminar modelos de IA
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Apaga o texto ou as onomatopeias selecionados e redesenha o fundo com IA, numa nova camada. Usa um modelo transferido (Janela › Modelos de IA…).
+@plural	{n} more queued|{n} more queued	mais {n} em fila|mais {n} em fila

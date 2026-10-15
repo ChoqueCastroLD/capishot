@@ -13,6 +13,10 @@ use crate::{AiError, Result};
 /// The browser's Cache Storage cache holding model files (keyed by their URL).
 pub const WEB_CACHE: &str = "capishot-ai-models-v1";
 
+/// The response header holding a cached file's sha256 (written by the AI worker's downloads;
+/// files cached before it existed have none).
+pub const WEB_SHA_HEADER: &str = "x-capishot-sha256";
+
 /// Lowercase hex sha256 of `bytes`.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let d = Sha256::digest(bytes);

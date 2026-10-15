@@ -3926,3 +3926,47 @@ cameraData	Lens	Φακός
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Γέμισμα πινελιών με AI αντί για κοντινά μπαλώματα: καλύτερο σε ράστερ και γραμμικό σχέδιο. Οι Επιλογές AI… ορίζουν ποιότητα και συσκευή.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Σβήνει το επιλεγμένο κείμενο ή τα ηχητικά εφέ και ξαναζωγραφίζει το φόντο με AI σε νέο επίπεδο. Η πρώτη χρήση κατεβάζει το μοντέλο (MI-GAN 13 MB, Manga LaMa 102 MB).
 	Nothing is uploaded: it runs on this device.	Τίποτα δεν ανεβαίνει: εκτελείται σε αυτή τη συσκευή.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	Το {model} δεν έχει ληφθεί
+	Open Model Manager	Άνοιγμα διαχείρισης μοντέλων
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	Το «{tool}» χρειάζεται το {model} ({mb} MB), που δεν υπάρχει ακόμη σε αυτή τη συσκευή.
+	It is downloading now ({pct}%); try again when it is done.	Γίνεται λήψη τώρα ({pct}%)· δοκιμάστε ξανά όταν ολοκληρωθεί.
+	It is waiting in the download queue; try again when it is done.	Περιμένει στην ουρά λήψεων· δοκιμάστε ξανά όταν ολοκληρωθεί.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Κάντε λήψη μία φορά στη διαχείριση μοντέλων AI. Η χρήση ενός εργαλείου δεν κατεβάζει ποτέ τίποτα.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Τα μοντέλα φυλάσσονται σε αυτό το πρόγραμμα περιήγησης και εκτελούνται σε αυτή τη συσκευή: οι εικόνες σας δεν αποστέλλονται.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Τα μοντέλα φυλάσσονται σε αυτόν τον υπολογιστή και εκτελούνται σε αυτή τη συσκευή: οι εικόνες σας δεν αποστέλλονται.
+	AI Models	Μοντέλα AI
+	AI Models…	Μοντέλα AI…
+	GPU or CPU (best on a GPU)	GPU ή CPU (καλύτερα σε GPU)
+	GPU or CPU (lite: fine on either)	GPU ή CPU (ελαφρύ: καλό και στα δύο)
+	Not downloaded	Δεν έχει ληφθεί
+	Queued	Σε αναμονή
+	Downloading {pct}%	Λήψη {pct}%
+	{time} left	απομένουν {time}
+	Downloaded	Έχει ληφθεί
+	Update available	Διαθέσιμη ενημέρωση
+	Failed: {reason}	Απέτυχε: {reason}
+	Checking…	Έλεγχος…
+	Models on this device: {size}	Μοντέλα σε αυτή τη συσκευή: {size}
+	site storage {used} of {quota}	αποθηκευτικός χώρος του ιστότοπου: {used} από {quota}
+	Download recommended for this device ({size})	Λήψη των προτεινόμενων για αυτή τη συσκευή ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Δεν υπάρχει αξιοποιήσιμη GPU: τα ελαφριά μοντέλα (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	Υπάρχει διαθέσιμη GPU: τα πλήρη μοντέλα (Manga LaMa, MangaJaNai για τις ανοιχτές σελίδες, IllustrationJaNai).
+	Download all ({size})	Λήψη όλων ({size})
+	Delete every downloaded model?	Διαγραφή όλων των μοντέλων που έχουν ληφθεί;
+	Delete all	Διαγραφή όλων
+	Cancel all	Ακύρωση όλων
+	Cleaning	Καθαρισμός
+	Upscaling	Μεγέθυνση
+	Downloading {model} {pct}%	Λήψη {model} {pct}%
+	Starting the next download…	Έναρξη της επόμενης λήψης…
+	Download	Λήψη
+	Used by: {tools}	Χρησιμοποιείται από: {tools}
+	Runs on: {where}	Εκτελείται σε: {where}
+	Licence:	Άδεια:
+	AI model downloads: click to open the AI Model Manager	Λήψεις μοντέλων AI: κάντε κλικ για να ανοίξει η διαχείριση μοντέλων AI
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	Το {model} ({mb} MB) δεν έχει ληφθεί. Κάντε πρώτα λήψη στη διαχείριση μοντέλων AI.
+	Download and delete AI models	Λήψη και διαγραφή μοντέλων AI
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Σβήνει το επιλεγμένο κείμενο ή τα ηχητικά εφέ και ξανασχεδιάζει το φόντο με AI σε νέο επίπεδο. Χρησιμοποιεί ένα μοντέλο που έχει ληφθεί (Παράθυρο › Μοντέλα AI…).
+@plural	{n} more queued|{n} more queued	ακόμη {n} σε αναμονή|ακόμη {n} σε αναμονή

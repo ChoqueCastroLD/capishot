@@ -22,7 +22,9 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 # burn's rand needs a randomness source on wasm32-unknown-unknown (wgpu enables it otherwise).
 getrandom = { version = "0.4", features = ["wasm_js"] }
-web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "WorkerGlobalScope", "WorkerNavigator", "MessageEvent", "CacheStorage", "Cache", "Request", "Response", "ResponseInit", "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Headers", "console"] }
+# Downloads are hashed chunk by chunk as they arrive.
+sha2 = "0.10"
+web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "WorkerGlobalScope", "WorkerNavigator", "MessageEvent", "CacheStorage", "Cache", "Request", "Response", "ResponseInit", "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Headers", "Blob", "Performance", "console"] }
 
 # The plain worker: WebGPU, else the CPU on one thread (SIMD128).
 [target.'cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))'.dependencies]

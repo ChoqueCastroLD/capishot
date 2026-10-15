@@ -3237,3 +3237,48 @@ cameraData	Lens	Lensa
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Isi goresan dengan AI, bukan tambalan di sekitarnya: lebih baik untuk screentone dan line art. Opsi AI… memilih kualitas dan perangkat.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Hapus teks atau SFX yang dipilih dan gambar ulang latar dengan AI di lapisan baru. Penggunaan pertama mengunduh model (MI-GAN 13 MB, Manga LaMa 102 MB).
 	Nothing is uploaded: it runs on this device.	Tidak ada yang diunggah: berjalan di perangkat ini.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} belum diunduh
+	Open Model Manager	Buka Pengelola Model
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} memerlukan {model} ({mb} MB), yang belum ada di perangkat ini.
+	It is downloading now ({pct}%); try again when it is done.	Sedang diunduh ({pct}%); coba lagi setelah selesai.
+	It is waiting in the download queue; try again when it is done.	Sedang menunggu di antrean unduhan; coba lagi setelah selesai.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Unduh sekali di Pengelola Model AI. Memakai alat tidak pernah mengunduh apa pun.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Model disimpan di browser ini dan berjalan di perangkat ini: gambar Anda tidak diunggah.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Model disimpan di komputer ini dan berjalan di perangkat ini: gambar Anda tidak diunggah.
+	AI Models	Model AI
+	AI Models…	Model AI…
+	GPU or CPU (best on a GPU)	GPU atau CPU (terbaik di GPU)
+	GPU or CPU (lite: fine on either)	GPU atau CPU (ringan: baik di keduanya)
+	Not downloaded	Belum diunduh
+	Queued	Dalam antrean
+	Downloading {pct}%	Mengunduh {pct}%
+	{time} left	sisa {time}
+	Downloaded	Sudah diunduh
+	Update available	Pembaruan tersedia
+	Failed: {reason}	Gagal: {reason}
+	Checking…	Memeriksa…
+	Models on this device: {size}	Model di perangkat ini: {size}
+	site storage {used} of {quota}	penyimpanan situs {used} dari {quota}
+	Download recommended for this device ({size})	Unduh yang disarankan untuk perangkat ini ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Tidak ada GPU yang dapat dipakai: model ringan (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	GPU tersedia: model lengkap (Manga LaMa, MangaJaNai untuk halaman yang terbuka, IllustrationJaNai).
+	Download all ({size})	Unduh semua ({size})
+	Delete every downloaded model?	Hapus semua model yang sudah diunduh?
+	Delete all	Hapus semua
+	Cancel all	Batalkan semua
+	Cleaning	Pembersihan
+	Upscaling	Pembesaran
+	Downloading {model} {pct}%	Mengunduh {model} {pct}%
+	Starting the next download…	Memulai unduhan berikutnya…
+	Download	Unduh
+	Update	Perbarui
+	Used by: {tools}	Dipakai oleh: {tools}
+	Runs on: {where}	Berjalan di: {where}
+	Licence:	Lisensi:
+	AI model downloads: click to open the AI Model Manager	Unduhan model AI: klik untuk membuka Pengelola Model AI
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} MB) belum diunduh. Unduh dulu di Pengelola Model AI.
+	Download and delete AI models	Unduh dan hapus model AI
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Menghapus teks atau SFX yang dipilih dan menggambar ulang latar dengan AI di layer baru. Memakai model yang sudah diunduh (Jendela › Model AI…).
+@plural	{n} more queued|{n} more queued	{n} lagi dalam antrean

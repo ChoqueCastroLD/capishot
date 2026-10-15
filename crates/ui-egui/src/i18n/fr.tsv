@@ -3250,3 +3250,48 @@ cameraData	Lens	Objectif
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Remplit les traits avec l'IA plutôt qu'avec des zones voisines : meilleur sur les trames et le dessin au trait. Options IA… choisit la qualité et l'appareil.
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Efface le texte ou les onomatopées sélectionnés et redessine le fond avec l'IA, sur un nouveau calque. La première utilisation télécharge le modèle (MI-GAN 13 Mo, Manga LaMa 102 Mo).
 	Nothing is uploaded: it runs on this device.	Rien n'est envoyé : tout s'exécute sur cet appareil.
+
+# AI Model Manager (Window › AI Models…) and the missing-model dialog
+	{model} isn't downloaded	{model} n'est pas téléchargé
+	Open Model Manager	Ouvrir le gestionnaire de modèles
+	{tool} needs {model} ({mb} MB), which isn't on this device yet.	{tool} a besoin de {model} ({mb} Mo), qui n'est pas encore sur cet appareil.
+	It is downloading now ({pct}%); try again when it is done.	Il est en cours de téléchargement ({pct} %) ; réessayez une fois terminé.
+	It is waiting in the download queue; try again when it is done.	Il attend dans la file de téléchargement ; réessayez une fois terminé.
+	Download it once in the AI Model Manager. Using a tool never downloads anything.	Téléchargez-le une fois dans le gestionnaire de modèles IA. Utiliser un outil ne télécharge jamais rien.
+	Models are kept in this browser and run on this device: your images are not uploaded.	Les modèles sont conservés dans ce navigateur et s'exécutent sur cet appareil : vos images ne sont pas envoyées.
+	Models are kept on this computer and run on this device: your images are not uploaded.	Les modèles sont conservés sur cet ordinateur et s'exécutent sur cet appareil : vos images ne sont pas envoyées.
+	AI Models	Modèles IA
+	AI Models…	Modèles IA…
+	GPU or CPU (best on a GPU)	GPU ou CPU (meilleur sur GPU)
+	GPU or CPU (lite: fine on either)	GPU ou CPU (léger : convient aux deux)
+	Not downloaded	Non téléchargé
+	Queued	En attente
+	Downloading {pct}%	Téléchargement {pct} %
+	{time} left	{time} restant
+	Downloaded	Téléchargé
+	Update available	Mise à jour disponible
+	Failed: {reason}	Échec : {reason}
+	Checking…	Vérification…
+	Models on this device: {size}	Modèles sur cet appareil : {size}
+	site storage {used} of {quota}	stockage du site : {used} sur {quota}
+	Download recommended for this device ({size})	Télécharger les modèles recommandés pour cet appareil ({size})
+	No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).	Aucun GPU utilisable ici : les modèles légers (MI-GAN, Real-ESRGAN Compact).
+	A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).	Un GPU est disponible : les modèles complets (Manga LaMa, MangaJaNai pour vos pages ouvertes, IllustrationJaNai).
+	Download all ({size})	Tout télécharger ({size})
+	Delete every downloaded model?	Supprimer tous les modèles téléchargés ?
+	Delete all	Tout supprimer
+	Cancel all	Tout annuler
+	Cleaning	Nettoyage
+	Upscaling	Agrandissement
+	Downloading {model} {pct}%	Téléchargement de {model} {pct} %
+	Starting the next download…	Démarrage du téléchargement suivant…
+	Download	Télécharger
+	Update	Mettre à jour
+	Used by: {tools}	Utilisé par : {tools}
+	Runs on: {where}	S'exécute sur : {where}
+	Licence:	Licence :
+	AI model downloads: click to open the AI Model Manager	Téléchargements de modèles IA : cliquez pour ouvrir le gestionnaire de modèles IA
+	{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.	{model} ({mb} Mo) n'est pas téléchargé. Téléchargez-le d'abord dans le gestionnaire de modèles IA.
+	Download and delete AI models	Télécharger et supprimer des modèles IA
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Efface le texte ou les onomatopées sélectionnés et redessine le fond avec l'IA, sur un nouveau calque. Utilise un modèle téléchargé (Fenêtre › Modèles IA…).
+@plural	{n} more queued|{n} more queued	{n} autre en attente|{n} autres en attente

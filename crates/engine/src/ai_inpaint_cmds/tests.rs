@@ -150,7 +150,10 @@ fn model_states_and_failures_are_reported() {
     let needs = || FakeInpainter { state: Some(ModelState::NeedsDownload { bytes: 101_904_726 }), ..Default::default() };
     let mut s = with_fake(page(8), needs());
     let err = s.execute(ID, json!({})).unwrap_err().to_string();
-    assert!(err.contains("98 MB") && err.contains("allowDownload"), "{err}");
+    assert!(err.contains("isn't downloaded") && err.contains("101.9 MB") && err.contains("allowDownload"), "{err}");
+    // Still checking (the browser's cache): it runs, and a missing model fails the run instead.
+    let mut s = with_fake(page(8), FakeInpainter { state: Some(ModelState::Checking), ..Default::default() });
+    s.execute(ID, json!({})).unwrap();
     let mut s = with_fake(page(8), needs());
     s.execute(ID, json!({"allowDownload": true})).unwrap();
 
@@ -184,6 +187,54 @@ fn remove_tool_ai_mode_uses_the_service() {
     s.execute("paint.remove", stroke).unwrap();
     assert!(!is_red(&layer_px(&s, id, 32, 22)));
     assert!(s.execute("paint.remove", json!({"points": [[28, 22]], "size": 10, "ai": true, "maxSide": 7})).is_err());
+}
+
+/// An inpainter that answers later, from another thread (as the browser's AI worker answers
+/// from a later event): `done` is called after `run` returned.
+struct LaterInpainter(FakeInpainter);
+
+impl Inpainter for LaterInpainter {
+    fn model_state(&self) -> ModelState {
+        ModelState::Ready
+    }
+    fn model_state_of(&self, _: &str) -> ModelState {
+        ModelState::Ready
+    }
+    fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: photocraft_ai_lama::service::Done) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.0.run(req, hooks, Box::new(move |r| drop(tx.send(r))));
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            if let Ok(r) = rx.recv() {
+                done(r);
+            }
+        });
+    }
+}
+
+/// The Remove tool's AI mode never waits for the inpainter on the calling thread (the browser
+/// can't: the threads build panicked in `recv_timeout`, "time not implemented on this
+/// platform"): with an inpainter that answers later the stroke runs as a job and applies.
+#[test]
+fn remove_tool_ai_mode_works_with_an_inpainter_that_answers_later() {
+    let mut s = page(8);
+    s.execute("select.deselect", json!({})).unwrap();
+    s.set_inpainter(Some(Arc::new(LaterInpainter(FakeInpainter::default()))));
+    let id = active_id(&s);
+    let past = s.active().unwrap().history.past_len();
+    let started = s.start("paint.remove", json!({"points": [[28, 22], [36, 22]], "size": 10, "ai": true})).unwrap();
+    let crate::jobs::Started::Job(job) = started else { panic!("expected a background job") };
+    let t = std::time::Instant::now();
+    let event = loop {
+        if let Some(e) = s.poll_jobs().into_iter().find(|e| e.id == job) {
+            break e;
+        }
+        assert!(t.elapsed() < std::time::Duration::from_secs(30), "the job never finished");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    };
+    assert!(matches!(event.outcome, crate::jobs::JobOutcome::Done(_)), "{event:?}");
+    assert!(!is_red(&layer_px(&s, id, 32, 22)));
+    assert_eq!(s.active().unwrap().history.past_len(), past + 1, "one undo step");
 }
 
 /// Quality / Device pick Manga LaMa or the lite MI-GAN from the shell's device profile, and the

@@ -22,14 +22,23 @@
 //! is unavailable; without a models URL only models already in the browser's Cache Storage run. The worker is a module worker started from a one-line
 //! `blob:` bootstrap that imports the wasm-bindgen glue; it stays alive between runs (the model
 //! stays on the GPU) and is terminated to cancel. Messages: see the worker's module docs.
+//!
+//! Downloads (the AI Model Manager, `ai.models.*`) are separate from runs: [`WebModelStore`]
+//! queues them and hands them, one at a time, to a second instance of the plain worker (the
+//! downloader), which fetches, hashes, verifies and writes Cache Storage; the page only gets
+//! a progress message at most ten times a second. Cancelling terminates the downloader; it is
+//! also terminated when the queue is empty. At startup one Cache Storage listing tells which
+//! models are already here (and, from the checksum header the downloader writes, which are
+//! outdated), so the tools know at once whether their model is downloaded.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use js_sys::{Array, Float32Array, Object, Reflect};
-use photocraft_ai::cache::WEB_CACHE;
-use photocraft_ai::catalog::ModelInfo;
+use photocraft_ai::cache::{WEB_CACHE, WEB_SHA_HEADER};
+use photocraft_ai::catalog::{MODELS, ModelInfo};
+use photocraft_ai::models::{Cancelled, ModelStore, Queue, Status, Storage};
 use photocraft_ai::profile::{DeviceProfile, GpuClass};
 use photocraft_ai::service::{Done, Hooks, ModelState, Request, Upscaler};
 use photocraft_ai::{AiError, Planar};
@@ -61,6 +70,14 @@ struct Shared {
     device: String,
     /// The worker crashed while starting WebGPU: run on the CPU from now on.
     cpu_only: bool,
+    /// Files in Cache Storage with another checksum than the catalog's (an older release).
+    outdated: HashSet<&'static str>,
+    /// The AI Model Manager's downloads.
+    queue: Queue,
+    /// `navigator.storage.estimate()`: the origin's usage and quota, last time we asked.
+    estimate: Option<(u64, u64)>,
+    /// When we last asked (ms since the epoch).
+    estimate_asked_ms: f64,
 }
 
 /// See the module docs.
@@ -73,15 +90,65 @@ pub struct WebInpainter {
     up: WebUpscaler,
 }
 
-/// The upscaler and the inpainter for this page, if it names an AI worker (one worker runs both).
-pub fn from_page() -> Option<(Arc<dyn Upscaler>, Arc<dyn photocraft_ai_lama::service::Inpainter>)> {
+/// The AI services this page offers.
+pub struct Services {
+    pub upscaler: Arc<dyn Upscaler>,
+    pub inpainter: Arc<dyn photocraft_ai_lama::service::Inpainter>,
+    pub models: Arc<dyn ModelStore>,
+}
+
+/// The upscaler, the inpainter and the model store for this page, if it names an AI worker (one
+/// worker runs both; downloads use a second instance).
+pub fn from_page() -> Option<Services> {
     let worker_url = meta_url("capishot-ai-worker")?;
     let models_base = meta_url("capishot-ai-models").map(|u| if u.ends_with('/') { u } else { format!("{u}/") });
     let isolated = Reflect::get(&js_sys::global(), &"crossOriginIsolated".into()).ok().and_then(|v| v.as_bool()).unwrap_or(false);
     let worker_mt_url = if isolated { meta_url("capishot-ai-worker-threads") } else { None };
     let shared = Arc::new(Mutex::new(Shared { worker_url: Some(worker_url), worker_mt_url, models_base, ..Default::default() }));
     probe(shared.clone(), worker_mt_url_present(&shared));
-    Some((Arc::new(WebUpscaler { shared: shared.clone() }), Arc::new(WebInpainter { up: WebUpscaler { shared } })))
+    scan(shared.clone());
+    Some(Services {
+        upscaler: Arc::new(WebUpscaler { shared: shared.clone() }),
+        inpainter: Arc::new(WebInpainter { up: WebUpscaler { shared: shared.clone() } }),
+        models: Arc::new(WebModelStore { shared }),
+    })
+}
+
+/// Which models are already in Cache Storage (one listing at startup; entries under another
+/// models URL don't count: the worker looks files up by URL).
+fn scan(shared: Arc<Mutex<Shared>>) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let base = shared.lock().unwrap_or_else(PoisonError::into_inner).models_base.clone();
+        let Some(base) = base else { return };
+        let found = async {
+            let caches = web_sys::window()?.caches().ok()?;
+            let cache: web_sys::Cache = JsFuture::from(caches.open(WEB_CACHE)).await.ok()?.dyn_into().ok()?;
+            let keys: Array = JsFuture::from(cache.keys()).await.ok()?.dyn_into().ok()?;
+            let mut found: Vec<(&'static str, bool)> = Vec::new();
+            for k in keys.iter() {
+                let url = Reflect::get(&k, &"url".into()).ok().and_then(|u| u.as_string()).unwrap_or_default();
+                let Some(m) = MODELS.iter().find(|m| m.url(&base) == url) else { continue };
+                // The checksum header (written by the downloader); older entries have none.
+                let sha = async {
+                    let r: web_sys::Response = JsFuture::from(cache.match_with_str(&url)).await.ok()?.dyn_into().ok()?;
+                    r.headers().get(WEB_SHA_HEADER).ok()?
+                }
+                .await;
+                found.push((m.file, sha.is_some_and(|h| h != m.sha256)));
+            }
+            Some(found)
+        }
+        .await
+        .unwrap_or_default();
+        let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        for m in MODELS {
+            let hit = found.iter().find(|(f, _)| *f == m.file);
+            s.cached.insert(m.id, hit.is_some_and(|(_, outdated)| !outdated));
+            if hit.is_some_and(|(_, outdated)| *outdated) {
+                s.outdated.insert(m.file);
+            }
+        }
+    });
 }
 
 fn worker_mt_url_present(shared: &Arc<Mutex<Shared>>) -> bool {
@@ -248,17 +315,25 @@ impl Upscaler for WebUpscaler {
             return Err(AiError::Cache("an AI run is in progress".into()));
         }
         kill(AiError::Cancelled);
+        kill_downloader();
         let shared = self.shared.clone();
         {
             let mut s = self.lock();
-            s.cached.clear();
+            s.queue.cancel(None);
+            for m in MODELS {
+                s.cached.insert(m.id, false);
+            }
+            s.outdated.clear();
             s.storage = Some(0);
         }
         wasm_bindgen_futures::spawn_local(async move {
             if let Some(caches) = web_sys::window().and_then(|w| w.caches().ok()) {
                 let _ = JsFuture::from(caches.delete(WEB_CACHE)).await;
             }
-            shared.lock().unwrap_or_else(PoisonError::into_inner).cached.clear();
+            let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            for m in MODELS {
+                s.cached.insert(m.id, false);
+            }
         });
         Ok(())
     }
@@ -511,6 +586,28 @@ fn post(worker: &web_sys::Worker, (msg, buffer): (Object, JsValue)) {
 /// glue's URL directly: it must call its `init`). The threads variant then starts from
 /// `startAi(threads)` (0: one rayon worker per core).
 fn spawn(url: &str, threads: bool, pool: usize) -> Result<(), String> {
+    RETIRED.with(|r| r.borrow_mut().clear());
+    let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(|e: web_sys::MessageEvent| on_message(e.data()));
+    let on_error = Closure::<dyn FnMut(web_sys::ErrorEvent)>::new(|e: web_sys::ErrorEvent| {
+        e.prevent_default();
+        crashed(&format!("the AI worker stopped: {}", e.message()));
+    });
+    let worker = module_worker(url, pool, &on_message, &on_error)?;
+    let tick = Closure::<dyn FnMut()>::new(poll_cancel);
+    LIVE.with(|l| {
+        *l.borrow_mut() = Some(Live { worker, threads, pool, ready: false, queued: None, run: None, timer: None, _on_message: on_message, _on_error: on_error, _tick: tick });
+    });
+    Ok(())
+}
+
+/// A module worker running the wasm-bindgen glue at `url` (`pool`: the threads variant's rayon
+/// pool size), with its handlers.
+fn module_worker(
+    url: &str,
+    pool: usize,
+    on_message: &Closure<dyn FnMut(web_sys::MessageEvent)>,
+    on_error: &Closure<dyn FnMut(web_sys::ErrorEvent)>,
+) -> Result<web_sys::Worker, String> {
     let js = |e: JsValue| format!("{e:?}");
     let src = format!("const m = await import({});\nawait m.default();\nif (m.startAi) m.startAi({pool});\n", serde_json::Value::String(url.to_string()));
     let parts = Array::of1(&JsValue::from_str(&src));
@@ -520,21 +617,11 @@ fn spawn(url: &str, threads: bool, pool: usize) -> Result<(), String> {
     let blob_url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js)?;
     let wopts = web_sys::WorkerOptions::new();
     wopts.set_type(web_sys::WorkerType::Module);
-    RETIRED.with(|r| r.borrow_mut().clear());
     let worker = web_sys::Worker::new_with_options(&blob_url, &wopts).map_err(js)?;
     let _ = web_sys::Url::revoke_object_url(&blob_url);
-    let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(|e: web_sys::MessageEvent| on_message(e.data()));
-    let on_error = Closure::<dyn FnMut(web_sys::ErrorEvent)>::new(|e: web_sys::ErrorEvent| {
-        e.prevent_default();
-        crashed(&format!("the AI worker stopped: {}", e.message()));
-    });
-    let tick = Closure::<dyn FnMut()>::new(poll_cancel);
     worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
     worker.set_onerror(Some(on_error.as_ref().unchecked_ref()));
-    LIVE.with(|l| {
-        *l.borrow_mut() = Some(Live { worker, threads, pool, ready: false, queued: None, run: None, timer: None, _on_message: on_message, _on_error: on_error, _tick: tick });
-    });
-    Ok(())
+    Ok(worker)
 }
 
 fn get(v: &JsValue, k: &str) -> JsValue {
@@ -587,7 +674,15 @@ fn on_message(data: JsValue) {
         }
         "error" => {
             let message = get(&data, "message").as_string().unwrap_or_else(|| "the AI worker failed".into());
-            end_run(|run| run.finish(Err(AiError::Inference(message))));
+            end_run(|run| {
+                // The model wasn't in Cache Storage after all (cleared since the startup scan).
+                if message.contains("isn't downloaded")
+                    && let Some(m) = photocraft_ai::catalog::model(run.model)
+                {
+                    set_cached(&mut run.shared.lock().unwrap_or_else(PoisonError::into_inner), m.file, false);
+                }
+                run.finish(Err(AiError::Inference(message)));
+            });
         }
         "panic" => {
             let message = get(&data, "message").as_string().unwrap_or_default();
@@ -662,5 +757,290 @@ fn poll_cancel() {
     let cancelled = LIVE.with(|l| l.borrow().as_ref().and_then(|l| l.run.as_ref()).is_some_and(|r| (r.cancelled)()));
     if cancelled {
         kill(AiError::Cancelled);
+    }
+}
+
+// ------------------------------------------------------------------ downloads (ai.models.*)
+
+/// The AI Model Manager's store: Cache Storage, filled by the downloader worker (see the module
+/// docs). Its methods act on the page's main thread (they return an error elsewhere).
+pub struct WebModelStore {
+    shared: Arc<Mutex<Shared>>,
+}
+
+impl WebModelStore {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Shared> {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Marks every catalog entry using `file` as cached or not.
+fn set_cached(s: &mut Shared, file: &str, cached: bool) {
+    for m in MODELS.iter().filter(|m| m.file == file) {
+        s.cached.insert(m.id, cached);
+    }
+    if cached {
+        s.outdated.retain(|f| *f != file);
+    }
+}
+
+/// Asks `navigator.storage.estimate()` (at most every two seconds).
+fn refresh_estimate(shared: &Arc<Mutex<Shared>>, force: bool) {
+    let now = js_sys::Date::now();
+    {
+        let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        if !force && now - s.estimate_asked_ms < 2000.0 {
+            return;
+        }
+        s.estimate_asked_ms = now;
+    }
+    let shared = shared.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let est = async {
+            let storage = Reflect::get(&web_sys::window()?.navigator(), &"storage".into()).ok().filter(|v| !v.is_undefined() && !v.is_null())?;
+            let f: js_sys::Function = Reflect::get(&storage, &"estimate".into()).ok()?.dyn_into().ok()?;
+            let p: js_sys::Promise = f.call0(&storage).ok()?.dyn_into().ok()?;
+            let e = JsFuture::from(p).await.ok()?;
+            let num = |k: &str| Reflect::get(&e, &k.into()).ok().and_then(|v| v.as_f64()).filter(|v| v.is_finite() && *v >= 0.0).map(|v| v as u64);
+            Some((num("usage")?, num("quota")?))
+        }
+        .await;
+        shared.lock().unwrap_or_else(PoisonError::into_inner).estimate = est;
+    });
+}
+
+impl ModelStore for WebModelStore {
+    fn available(&self) -> Result<(), String> {
+        let s = self.lock();
+        if s.models_base.is_none() {
+            return Err("AI models are not hosted on this site yet".into());
+        }
+        if s.worker_url.is_none() {
+            return Err(NO_WORKER.into());
+        }
+        Ok(())
+    }
+
+    fn status(&self, model: &ModelInfo) -> Status {
+        let s = self.lock();
+        if let Some(st) = s.queue.status(model) {
+            return st;
+        }
+        if s.models_base.is_none() {
+            return Status::Unavailable("AI models are not hosted on this site yet".into());
+        }
+        if s.outdated.contains(model.file) {
+            return Status::UpdateAvailable;
+        }
+        match s.cached.get(model.id) {
+            Some(true) => Status::Downloaded,
+            Some(false) => Status::NotDownloaded,
+            None => Status::Checking,
+        }
+    }
+
+    fn download(&self, model: &'static ModelInfo) -> photocraft_ai::Result<()> {
+        self.available().map_err(AiError::Download)?;
+        if web_sys::window().is_none() {
+            return Err(AiError::Download("downloads start from the page's main thread".into()));
+        }
+        self.lock().queue.enqueue(model);
+        pump(&self.shared);
+        Ok(())
+    }
+
+    fn cancel(&self, model: Option<&ModelInfo>) {
+        let c = self.lock().queue.cancel(model);
+        if c == Cancelled::Active {
+            kill_downloader();
+        }
+        if web_sys::window().is_some() {
+            pump(&self.shared);
+        }
+    }
+
+    fn delete(&self, model: &ModelInfo) -> photocraft_ai::Result<()> {
+        if web_sys::window().is_none() {
+            return Err(AiError::Cache("models are deleted from the page's main thread".into()));
+        }
+        self.cancel(Some(model));
+        let url = {
+            let mut s = self.lock();
+            s.queue.clear_failure(model.file);
+            set_cached(&mut s, model.file, false);
+            s.outdated.retain(|f| *f != model.file);
+            s.models_base.clone().map(|b| model.url(&b))
+        };
+        let Some(url) = url else { return Ok(()) };
+        let shared = self.shared.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Some(caches) = web_sys::window().and_then(|w| w.caches().ok())
+                && let Ok(c) = JsFuture::from(caches.open(WEB_CACHE)).await
+                && let Ok(c) = c.dyn_into::<web_sys::Cache>()
+            {
+                let _ = JsFuture::from(c.delete_with_str(&url)).await;
+            }
+            refresh_estimate(&shared, true);
+        });
+        Ok(())
+    }
+
+    fn storage(&self) -> Storage {
+        if web_sys::window().is_some() {
+            refresh_estimate(&self.shared, false);
+        }
+        let s = self.lock();
+        let models = photocraft_ai::models::files().iter().filter(|m| s.cached.get(m.id) == Some(&true)).map(|m| m.bytes).sum();
+        Storage { models: Some(models), used: s.estimate.map(|e| e.0), quota: s.estimate.map(|e| e.1) }
+    }
+}
+
+/// The downloader worker (main thread only).
+struct Downloader {
+    worker: web_sys::Worker,
+    ready: bool,
+    /// The download message waiting for `ready`.
+    queued: Option<Object>,
+    _on_message: Closure<dyn FnMut(web_sys::MessageEvent)>,
+    _on_error: Closure<dyn FnMut(web_sys::ErrorEvent)>,
+}
+
+thread_local! {
+    static DOWNLOADER: RefCell<Option<Downloader>> = const { RefCell::new(None) };
+    /// Handlers of terminated downloaders, dropped when the next one starts (never from inside
+    /// one of their own invocations).
+    static DL_RETIRED: RefCell<Vec<Downloader>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Terminates the downloader (a cancelled download, an empty queue).
+fn kill_downloader() {
+    let d = DOWNLOADER.with(|d| d.borrow_mut().take());
+    if let Some(d) = d {
+        d.worker.set_onmessage(None);
+        d.worker.set_onerror(None);
+        d.worker.terminate();
+        DL_RETIRED.with(|r| r.borrow_mut().push(d));
+    }
+}
+
+/// Starts the next queued download when none runs (and frees the downloader when none is left).
+fn pump(shared: &Arc<Mutex<Shared>>) {
+    loop {
+        let next = {
+            let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            if s.queue.active().is_some() {
+                return;
+            }
+            s.queue.start_next().map(|file| (file, s.worker_url.clone(), s.models_base.clone()))
+        };
+        let Some((file, url, base)) = next else {
+            kill_downloader();
+            return;
+        };
+        let Some(model) = MODELS.iter().find(|m| m.file == file) else { continue };
+        let (Some(url), Some(base)) = (url, base) else {
+            shared.lock().unwrap_or_else(PoisonError::into_inner).queue.finish(file, Err("model downloads are not configured on this site".into()));
+            continue;
+        };
+        let msg = Object::new();
+        for (k, v) in [("type", JsValue::from("download")), ("model", model.id.into()), ("base", base.into())] {
+            let _ = Reflect::set(&msg, &k.into(), &v);
+        }
+        match send_download(shared, &url, msg) {
+            Ok(()) => return,
+            Err(e) => {
+                log::error!("AI downloader: {e}");
+                shared.lock().unwrap_or_else(PoisonError::into_inner).queue.finish(file, Err(format!("couldn't start the download: {e}")));
+            }
+        }
+    }
+}
+
+/// Sends a download message, starting the downloader first if needed.
+fn send_download(shared: &Arc<Mutex<Shared>>, url: &str, msg: Object) -> Result<(), String> {
+    if DOWNLOADER.with(|d| d.borrow().is_none()) {
+        DL_RETIRED.with(|r| r.borrow_mut().clear());
+        let (s1, s2) = (shared.clone(), shared.clone());
+        let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |e: web_sys::MessageEvent| on_download_message(&s1, e.data()));
+        let on_error = Closure::<dyn FnMut(web_sys::ErrorEvent)>::new(move |e: web_sys::ErrorEvent| {
+            e.prevent_default();
+            downloader_failed(&s2, &format!("the download stopped: {}", e.message()));
+        });
+        let worker = module_worker(url, 0, &on_message, &on_error)?;
+        DOWNLOADER.with(|d| *d.borrow_mut() = Some(Downloader { worker, ready: false, queued: None, _on_message: on_message, _on_error: on_error }));
+    }
+    let send = DOWNLOADER.with(|d| {
+        let mut d = d.borrow_mut();
+        let d = d.as_mut()?;
+        if d.ready {
+            Some(d.worker.clone())
+        } else {
+            d.queued = Some(msg.clone());
+            None
+        }
+    });
+    if let Some(w) = send {
+        w.post_message(&msg).map_err(|e| format!("{e:?}"))?;
+    }
+    Ok(())
+}
+
+/// The active download failed outside the worker's own error reply (a crash): end it, go on.
+fn downloader_failed(shared: &Arc<Mutex<Shared>>, why: &str) {
+    log::error!("AI downloader: {why}");
+    {
+        let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(f) = s.queue.active() {
+            s.queue.finish(f, Err(why.to_string()));
+        }
+    }
+    kill_downloader();
+    pump(shared);
+}
+
+fn on_download_message(shared: &Arc<Mutex<Shared>>, data: JsValue) {
+    let ty = get(&data, "type").as_string().unwrap_or_default();
+    let file = get(&data, "model").as_string().and_then(|id| photocraft_ai::catalog::model(&id)).map(|m| m.file);
+    match ty.as_str() {
+        "ready" => {
+            let send = DOWNLOADER.with(|d| {
+                let mut d = d.borrow_mut();
+                let d = d.as_mut()?;
+                d.ready = true;
+                d.queued.take().map(|m| (d.worker.clone(), m))
+            });
+            if let Some((w, m)) = send
+                && let Err(e) = w.post_message(&m)
+            {
+                downloader_failed(shared, &format!("{e:?}"));
+            }
+        }
+        "dl-progress" => {
+            let n = |k: &str| get(&data, k).as_f64().filter(|v| v.is_finite() && *v >= 0.0).map_or(0, |v| v as u64);
+            if let Some(f) = file {
+                shared.lock().unwrap_or_else(PoisonError::into_inner).queue.progress(f, n("done"), n("total"), js_sys::Date::now());
+            }
+        }
+        "dl-done" => {
+            if let Some(f) = file {
+                let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                s.queue.finish(f, Ok(()));
+                set_cached(&mut s, f, true);
+            }
+            refresh_estimate(shared, true);
+            pump(shared);
+        }
+        "dl-error" => {
+            let message = get(&data, "message").as_string().unwrap_or_else(|| "the download failed".into());
+            if let Some(f) = file {
+                shared.lock().unwrap_or_else(PoisonError::into_inner).queue.finish(f, Err(message));
+            }
+            pump(shared);
+        }
+        "panic" => {
+            let message = get(&data, "message").as_string().unwrap_or_default();
+            downloader_failed(shared, &format!("the downloader crashed: {message}"));
+        }
+        _ => {}
     }
 }
