@@ -79,6 +79,8 @@ browser's Cache Storage (or on disk). Help › About › Models lists the same l
 | MangaJaNai and IllustrationJaNai | Image › Upscale with AI (`image.upscaleAi`) | the-database | <https://github.com/the-database/MangaJaNai> | CC BY-NC 4.0 |
 | Manga LaMa (AnimeMangaInpainting) | Edit › Clean with AI (`edit.inpaintAi`), the Remove tool's AI mode | dreMaz | <https://huggingface.co/dreMaz/AnimeMangaInpainting> | MIT |
 | LaMa (the architecture Manga LaMa is trained on) | as above | Suvorov et al. (Samsung AI) | <https://github.com/advimman/lama> | Apache-2.0 |
+| MI-GAN 512 Places2 (lite inpainting: Quality Fast, or Auto without a capable GPU) | as Manga LaMa | Picsart AI Research (Sargsyan et al.) | <https://github.com/Picsart-AI-Research/MI-GAN> | MIT (code and weights) |
+| Real-ESRGAN Compact `realesr-animevideov3` (lite upscaling) | Image › Upscale with AI | Xintao Wang et al. (Real-ESRGAN) | <https://github.com/xinntao/Real-ESRGAN> | BSD-3-Clause |
 | burn (inference runtime, compiled in) | both | Tracel AI and the burn contributors | <https://github.com/tracel-ai/burn> | MIT/Apache-2.0 |
 
 ## Documentation and README
