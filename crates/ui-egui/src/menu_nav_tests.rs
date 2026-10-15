@@ -284,10 +284,13 @@ fn help_search_keeps_the_arrows_and_space_that_edit_it() {
     key(&mut h, egui::Key::ArrowLeft);
     typing(&mut h, "e");
     assert_eq!(text(&h), "levels", "← moved the cursor");
+    // The cursor sits at `leve|ls`: two → take it to the end.
     key(&mut h, egui::Key::ArrowRight);
     assert!(h.query_by_label_contains("About PhotoCraft").is_some(), "→ keeps Help open");
+    key(&mut h, egui::Key::ArrowRight);
     // The pointer resting on a result lights it; a space typed then is text, not a click.
-    let levels = h.get_by_label_contains("› Levels").rect().center();
+    // "levels" finds both Image › Adjustments › Levels… and the Levels adjustment layer.
+    let levels = h.get_all_by_label_contains("› Levels").next().expect("a Levels result").rect().center();
     h.hover_at(levels);
     h.run_steps(3);
     assert!(Nav::current(&h.ctx).highlighted(0).is_some(), "a result is lit");
