@@ -129,6 +129,10 @@ what an agent can't finish alone.
   tuning retains the fitted look and applies user gains afterwards. Three D5100 NEFs
   establish a guarded 4928 × 3264 image area. This is an estimated rendering, not a
   measured D5100 colour calibration; [validation](nikon-nef-development.md).
+- **Progress (2026-10-13):** the D90's image area (4288 × 2848 at (10, 10) in a
+  4352 × 2868 plane) is measured by aligning the decoded plane with the camera's own
+  JPEG, so a D90 NEF opens on the camera's frame instead of the uncropped sensor plane;
+  `crates/raw/src/cameras.rs` (`IMAGE_AREAS`).
 - **Estimate:** 120–200 h.
 
 ### G15. AI and generative features
@@ -263,6 +267,7 @@ what an agent can't finish alone.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | G14: D90 image area measured (4288 × 2848 at (10, 10)); gap remains open |
 | 2026-10-14 | minor | Corpus floors raised to the measured results of the CMYK, Lab, 32-bit, Levels, Threshold, Posterize, feather and pass-through fixes landed together: Photoshop-authored 165 → 185 of 258, io 146 → 148 of 170, psd-tools 242 → 249 of 309 |
 | 2026-10-13 | minor | G1: CMYK Hue/Saturation and Color Balance work on C, M and Y as inverted RGB with black kept, as Photoshop does; cmyk hue-saturation 100% → 0.4–0.7% bad pixels, color-balance 74% → 25%; floor unchanged |
 | 2026-10-13 | minor | G1: CMYK Posterize works on the stored values (1 − ink); psd-tools posterize_cmyk passes; psd-tools floor → 242 of 309 |

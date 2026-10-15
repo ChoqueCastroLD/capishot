@@ -66,7 +66,7 @@ supports many more, including CR3).
 | DNG (incl. LJPEG and JPEG XL tiles) | yes; lossy DNG no | FILE-215-11 |
 | Canon CR2 | yes | |
 | Canon CR3 | detected, unsupported | `crates/raw/src/lib.rs:219` |
-| Nikon NEF/NRW (lossless, lossy) | yes; "lossy after split" no | #50; D5100 image area measured on three 14-bit lossy NEFs; [validation](nikon-nef-development.md) |
+| Nikon NEF/NRW (lossless, lossy) | yes; "lossy after split" no | #50; D5100 and D90 image areas measured (14-bit NEFs); [validation](nikon-nef-development.md) |
 | Sony ARW/SR2/SRF (incl. compressed) | yes | |
 | Panasonic RW2, Pentax PEF | yes | |
 | Olympus ORF | uncompressed only | |
