@@ -30,6 +30,7 @@ pub mod color_cmds;
 pub mod color_to_alpha_cmds;
 pub mod commands;
 pub mod comps_cmds;
+mod crop_fill;
 pub mod cutout_cmds;
 pub mod display_color;
 pub mod distort_cmds;
@@ -37,6 +38,7 @@ pub mod document_preset_cmds;
 pub mod edit_cmds;
 pub mod edit_menu_cmds;
 pub mod eraser_cmds;
+pub mod export_preset_cmds;
 pub mod exr_cmds;
 pub mod extra_cmds;
 pub mod file_cmds;
@@ -62,6 +64,7 @@ pub mod jobs;
 pub mod kys;
 pub mod layer_copy_cmds;
 pub mod layer_label_cmds;
+pub mod layer_list_cmds;
 pub mod layer_mask_props_cmds;
 pub mod layer_menu_cmds;
 pub mod layer_multi_cmds;
@@ -100,6 +103,7 @@ pub mod sample_cmds;
 pub mod sampler_cmds;
 pub mod select_extra_cmds;
 pub mod selection_cmds;
+pub mod shortcut_sets;
 pub mod slice_cmds;
 pub mod smart_cmds;
 pub mod smartselect_cmds;
@@ -231,6 +235,20 @@ pub struct DocState {
 }
 
 impl DocState {
+    /// Trim the history to its budget, counting the tiles only History panel snapshots hold
+    /// against it too (#4530). Returns how many states were dropped.
+    pub fn trim_history(&mut self) -> usize {
+        let snaps: Vec<&Document> = self.snapshots.iter().map(|s| &*s.doc).collect();
+        self.history.trim_with(&self.doc, &snaps)
+    }
+
+    /// Pixel bytes of the document, the tiles only its history holds and the tiles only its
+    /// History panel snapshots hold.
+    pub fn memory_bytes(&self) -> usize {
+        let snaps: Vec<&Document> = self.snapshots.iter().map(|s| &*s.doc).collect();
+        self.history.pixel_bytes(&self.doc).saturating_add(self.history.extra_bytes(&self.doc, &snaps))
+    }
+
     pub fn new(doc: Document, path: Option<String>) -> Self {
         let active_layer = doc.top_layer();
         let mut history = History::default();
@@ -388,6 +406,21 @@ impl Default for ToolState {
     }
 }
 
+/// Layer › Layer Style › Copy Layer Style: the effects and the Blending Options, as Photoshop
+/// copies them (Paste Layer Style puts them all on each target).
+#[derive(Clone, Debug)]
+pub struct CopiedStyle {
+    pub effects: photocraft_doc::Effects,
+    pub blend: photocraft_color::BlendMode,
+    pub fill: f32,
+    pub advanced: photocraft_doc::AdvancedBlending,
+    pub blend_if: photocraft_doc::BlendIf,
+    pub excluded_channels: u32,
+    /// The colour mode it was copied in: Blend If's channel ranges and the channel restrictions
+    /// only carry over to a document in the same mode.
+    pub mode: photocraft_color::ColorMode,
+}
+
 #[derive(Default)]
 pub struct Session {
     docs: Vec<DocState>,
@@ -399,9 +432,9 @@ pub struct Session {
     coalesce_request: Option<String>,
     /// Pixels copied with Edit › Copy / Cut (shared by all documents, like Photoshop).
     pub clipboard: Option<edit_cmds::Clip>,
-    /// Layer › Layer Style › Copy Layer Style: effects, blend mode, fill opacity and the Advanced
-    /// Blending switches.
-    pub style_clipboard: Option<(photocraft_doc::Effects, photocraft_color::BlendMode, f32, photocraft_doc::AdvancedBlending)>,
+    /// Layer › Layer Style › Copy Layer Style: the effects and the Blending Options
+    /// ([`CopiedStyle`]: blend mode, fill opacity, Advanced Blending, Blend If, channels).
+    pub style_clipboard: Option<CopiedStyle>,
     /// Shape path context menu: copied vector fill and stroke styles.
     pub path_fill_clipboard: Option<photocraft_doc::Fill>,
     pub path_stroke_clipboard: Option<photocraft_doc::ShapeStroke>,
@@ -739,7 +772,7 @@ impl Session {
         if key.is_none() || st.coalesce != key || !st.history.can_undo() {
             st.history.set_current_layers(prior);
             st.history.record(label, before, layers);
-            st.history.trim(&st.doc);
+            st.trim_history();
         } else {
             st.history.set_current_layers(layers);
         }
