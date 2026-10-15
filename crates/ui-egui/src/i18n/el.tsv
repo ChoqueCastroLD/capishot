@@ -189,6 +189,11 @@
 
 # Consolidated Greek localization additions
 	Content-Aware Fill…	Γέμισμα βάσει περιεχομένου…
+	Clean with AI	Καθαρισμός με AI
+	Use AI (Manga LaMa)	Χρήση AI (Manga LaMa)
+	Clean Selection with AI	Καθαρισμός επιλογής με AI
+	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Γεμίζει τις πινελιές με το Manga LaMa αντί για γειτονικά τμήματα: καλύτερο σε ράστερ και γραμμικό σχέδιο. Η πρώτη χρήση κατεβάζει το μοντέλο (περίπου 100 MB).
+	Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB).	Σβήνει το επιλεγμένο κείμενο ή ηχητικά εφέ και ξανασχεδιάζει το φόντο με το Manga LaMa σε νέο επίπεδο. Η πρώτη χρήση κατεβάζει το μοντέλο (περίπου 100 MB).
 	Content-Aware Scale	Κλιμάκωση βάσει περιεχομένου
 	Puppet Warp	Παραμόρφωση με σημεία ελέγχου
 	Auto-Align Layers…	Αυτόματη στοίχιση επιπέδων…

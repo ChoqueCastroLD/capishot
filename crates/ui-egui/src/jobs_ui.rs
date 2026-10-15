@@ -192,7 +192,7 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
 /// The browser threads build runs these as background jobs on its Web Worker pool even without
 /// [`PhotocraftApp::background_jobs`] (the browser's default): the seconds-long fills and graph
 /// cuts at pen-up would otherwise hold the page's main thread. Their results are the same.
-const POOL_COMMANDS: [&str; 2] = ["paint.spotHealing", "select.quick"];
+const POOL_COMMANDS: [&str; 4] = ["paint.spotHealing", "select.quick", "paint.remove", photocraft_engine::ai_inpaint_cmds::ID];
 const POOL_THREADS: bool = cfg!(all(target_arch = "wasm32", target_feature = "atomics"));
 
 /// Open a file in the background: a tab appears at once and shows the progress; the document

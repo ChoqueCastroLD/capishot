@@ -41,6 +41,8 @@ photocraft-fontfetch = { path = "crates/fontfetch" }
 photocraft-ui-egui = { path = "crates/ui-egui", default-features = false }
 photocraft-testkit = { path = "crates/testkit" }
 photocraft-tablet = { path = "crates/tablet" }
+# Manga LaMa inpainting; without features only its tiling half (the model runs elsewhere).
+photocraft-ai-lama = { path = "crates/ai-lama", default-features = false }
 
 # external
 # Capishot's PSD renderer (MIT): writes the merged image of PSDs and powers File › Export › Compile.

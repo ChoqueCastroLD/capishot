@@ -7,7 +7,8 @@
 //! editor's main module can use it while the model runs elsewhere (a worker module or a thread).
 //!
 //! Like lama-cleaner's "crop" strategy, each blob's bounding box grows by a margin; boxes that then
-//! overlap merge. A tile whose crop fits within `max_side` runs at full resolution, padded on the
+//! overlap merge as long as the merged crop still fits `max_side` (neighbouring tiles may share
+//! context; each masked pixel is written by exactly one tile, its blob's). A tile whose crop fits within `max_side` runs at full resolution, padded on the
 //! right and bottom by mirroring (`numpy.pad(mode="symmetric")`, as the reference does) up to a
 //! multiple of 8; a larger crop is resized down to fit and its result resized back up.
 
@@ -180,7 +181,8 @@ pub fn plan(mask: &[f32], w: usize, h: usize, opts: &TileOptions) -> Result<Vec<
             (b, expand(&b, m, w, h))
         })
         .collect();
-    // Merge overlapping crops until none overlap.
+    // Merge overlapping crops while the union still runs at full resolution (a downscaled tile
+    // blurs screentone), and always when the cores overlap (each pixel has one owner).
     let mut merged = true;
     while merged {
         merged = false;
@@ -188,7 +190,9 @@ pub fn plan(mask: &[f32], w: usize, h: usize, opts: &TileOptions) -> Result<Vec<
         while i < groups.len() {
             let mut j = i + 1;
             while j < groups.len() {
-                if groups[i].1.overlaps(&groups[j].1) {
+                let (a, b) = (&groups[i], &groups[j]);
+                let u = a.1.union(&b.1);
+                if a.0.overlaps(&b.0) || (a.1.overlaps(&b.1) && u.w.max(u.h) <= opts.max_side) {
                     let (core, crop) = groups.swap_remove(j);
                     groups[i] = (groups[i].0.union(&core), groups[i].1.union(&crop));
                     merged = true;
@@ -413,16 +417,34 @@ mod tests {
     }
 
     #[test]
-    fn near_blobs_merge_and_big_crops_resize() {
+    fn near_blobs_merge_while_they_fit_and_big_crops_resize() {
         let (w, h) = (2000, 1500);
-        let a = Rect { x: 100, y: 100, w: 400, h: 300 };
-        let b = Rect { x: 520, y: 120, w: 500, h: 300 };
-        let tiles = plan(&mask_with(w, h, &[a, b]), w, h, &TileOptions::default()).unwrap();
+        let o = TileOptions::default();
+        // Two words 40 px apart: one full-resolution tile.
+        let a = Rect { x: 100, y: 100, w: 120, h: 40 };
+        let b = Rect { x: 260, y: 100, w: 100, h: 40 };
+        let tiles = plan(&mask_with(w, h, &[a, b]), w, h, &o).unwrap();
         assert_eq!(tiles.len(), 1);
-        let t = tiles[0];
+        assert_eq!((tiles[0].fit, tiles[0].core), (Fit::Pad, a.union(&b)));
+        // Two big blocks whose union would need downscaling stay separate tiles.
+        let a = Rect { x: 100, y: 100, w: 300, h: 200 };
+        let b = Rect { x: 420, y: 120, w: 300, h: 200 };
+        let tiles = plan(&mask_with(w, h, &[a, b]), w, h, &o).unwrap();
+        assert_eq!(tiles.len(), 2);
+        assert!(tiles.iter().all(|t| t.fit == Fit::Pad));
+        // One blob larger than max_side is resized.
+        let big = Rect { x: 100, y: 100, w: 900, h: 300 };
+        let t = plan(&mask_with(w, h, &[big]), w, h, &o).unwrap()[0];
         assert_eq!(t.fit, Fit::Resize);
-        assert_eq!(t.core, a.union(&b));
         assert!(t.work_w <= 512 && t.work_h <= 512 && t.work_w.is_multiple_of(8) && t.work_h.is_multiple_of(8));
+        // A dot inside an L-shaped blob's bounding box: the cores overlap, so they merge even
+        // though the union needs downscaling.
+        let l1 = Rect { x: 100, y: 100, w: 600, h: 20 };
+        let l2 = Rect { x: 100, y: 100, w: 20, h: 600 };
+        let dot = Rect { x: 400, y: 400, w: 10, h: 10 };
+        let tiles = plan(&mask_with(w, h, &[l1, l2, dot]), w, h, &o).unwrap();
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(tiles[0].core, l1.union(&l2));
     }
 
     #[test]

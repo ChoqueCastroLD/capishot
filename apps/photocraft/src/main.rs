@@ -406,6 +406,11 @@ fn main() -> eframe::Result {
             if let Some(dir) = services::config_dir() {
                 photocraft_fontfetch::attach(&mut app.session, &dir);
             }
+            // Edit › Clean with AI: Manga LaMa on this machine (feature `ai`).
+            #[cfg(feature = "ai")]
+            if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(services::config_dir().as_deref()) {
+                app.session.set_inpainter(Some(std::sync::Arc::new(i)));
+            }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;
             // Only the title bar's free gap drags the window, never the menus (mac_window.rs).

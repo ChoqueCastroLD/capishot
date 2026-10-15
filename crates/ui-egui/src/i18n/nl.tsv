@@ -128,6 +128,11 @@
 	Fill…	Vullen…
 	Stroke…	Omlijnen…
 	Content-Aware Fill…	Inhoudsbewust vullen…
+	Clean with AI	Opschonen met AI
+	Use AI (Manga LaMa)	AI gebruiken (Manga LaMa)
+	Clean Selection with AI	Selectie opschonen met AI
+	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Vult streken met Manga LaMa in plaats van nabije stukken: beter op rasters en lijnwerk. Bij het eerste gebruik wordt het model gedownload (ongeveer 100 MB).
+	Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB).	Wist de geselecteerde tekst of geluidseffecten en tekent de achtergrond opnieuw met Manga LaMa op een nieuwe laag. Bij het eerste gebruik wordt het model gedownload (ongeveer 100 MB).
 	Delete and Fill Selection	Selectie verwijderen en vullen
 	Content-Aware Scale	Inhoudsbewust schalen
 	Puppet Warp	Marionetvervorming

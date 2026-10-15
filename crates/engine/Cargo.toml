@@ -34,6 +34,8 @@ photocraft-typer = { workspace = true }
 photocraft-vector = { workspace = true }
 photocraft-io = { workspace = true }
 photocraft-psd = { workspace = true }
+# `edit.inpaintAi`: tiling only; the model runs behind the injected `Inpainter` service.
+photocraft-ai-lama = { workspace = true }
 photocraft-format = { workspace = true }
 photocraft-plugins = { workspace = true, optional = true }
 blake3 = { version = "1.8", default-features = false, features = ["pure"] }

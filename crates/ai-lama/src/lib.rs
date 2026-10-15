@@ -23,10 +23,13 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod dft;
+pub mod service;
 pub mod tiles;
 
 #[cfg(feature = "model")]
 mod model;
+#[cfg(all(feature = "model", not(target_family = "wasm")))]
+pub mod native;
 #[cfg(feature = "model")]
 mod weights;
 
@@ -49,6 +52,9 @@ pub enum LamaError {
     /// The device failed while running or reading back the model.
     #[error("inference failed: {0}")]
     Device(String),
+    /// The model can't run here (weights missing, no device, not in this build).
+    #[error("{0}")]
+    Unavailable(String),
     /// The caller cancelled the work.
     #[error("cancelled")]
     Cancelled,

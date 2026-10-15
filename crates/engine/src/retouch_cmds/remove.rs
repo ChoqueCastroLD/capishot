@@ -43,6 +43,8 @@ struct Plan {
     window: Rect,
     close_loops: bool,
     all_layers: bool,
+    /// `ai`: fill with Manga LaMa through the injected service instead of patch completion.
+    ai: Option<(std::sync::Arc<dyn photocraft_ai_lama::service::Inpainter>, crate::ai_inpaint_cmds::AiOptions)>,
 }
 
 /// The stroke's bounding box (points ± the brush radius), before any coverage is rendered.
@@ -72,7 +74,13 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
     let window = area.inflate(sampling_margin(area).min(MAX_MARGIN)).intersect(&canvas);
     let close_loops = flag(p, "closeLoops", true);
     let all_layers = flag(p, "sampleAllLayers", false) && targets_pixels(p);
-    Ok(Plan { id, stroke, window, close_loops, all_layers })
+    let ai = if flag(p, "ai", false) {
+        let opts = crate::ai_inpaint_cmds::ai_options(p, CMD)?;
+        Some((crate::ai_inpaint_cmds::ready_inpainter(s, opts.allow_download)?, opts))
+    } else {
+        None
+    };
+    Ok(Plan { id, stroke, window, close_loops, all_layers, ai })
 }
 
 /// The hole over the plan's window: the stroke's footprint, its enclosed areas and a margin,
@@ -127,9 +135,12 @@ fn run_remove(doc: &mut Document, plan: &Plan, p: &Value, ctx: &crate::jobs::Job
         return Ok(None);
     }
     let (w, h) = (win.width() as usize, win.height() as usize);
-    let mut data = ctx
-        .stage(0.0, 1.0, label, |ctl| photocraft_algo::remove::remove_with(w, h, img.ch, &img.data, &hole, SEED, ctl))
-        .map_err(|_| EngineError::Cancelled)?;
+    let mut data = match &plan.ai {
+        Some((svc, opts)) => crate::ai_inpaint_cmds::ai_fill_encoded(svc, ctx, &fmt, &img.data, &hole, w, h, opts)?,
+        None => ctx
+            .stage(0.0, 1.0, label, |ctl| photocraft_algo::remove::remove_with(w, h, img.ch, &img.data, &hole, SEED, ctl))
+            .map_err(|_| EngineError::Cancelled)?,
+    };
     // The fill's seam blending can step slightly past the storable range.
     clamp_samples(&fmt, &mut data);
     Ok(Some((Region { rect: win, ch: img.ch, data }, hole)))

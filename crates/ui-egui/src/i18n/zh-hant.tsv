@@ -142,6 +142,11 @@
 	Fill…	填滿…
 	Stroke…	筆畫…
 	Content-Aware Fill…	內容感知填滿…
+	Clean with AI	AI 清理
+	Use AI (Manga LaMa)	使用 AI (Manga LaMa)
+	Clean Selection with AI	以 AI 清理選取範圍
+	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	以 Manga LaMa 而非附近的圖塊填滿筆畫：更適合網點和線稿。首次使用會下載模型（約 100 MB）。
+	Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB).	清除所選文字或狀聲詞，並以 Manga LaMa 在新圖層上重繪背景。首次使用會下載模型（約 100 MB）。
 	Delete and Fill Selection	刪除並填滿選取範圍
 	Content-Aware Scale	內容感知縮放
 	Puppet Warp	操控彎曲
