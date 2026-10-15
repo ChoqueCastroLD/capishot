@@ -111,6 +111,15 @@ impl Upscaler for FakeUpscaler {
         self.profile.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
+    fn storage_used(&self) -> Option<u64> {
+        Some(if self.download_needed.load(std::sync::atomic::Ordering::Relaxed) { 0 } else { 1 })
+    }
+
+    fn clear_downloads(&self) -> Result<()> {
+        self.download_needed.store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
         *self.last_opts.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(req.opts);
         if hooks.cancelled() {

@@ -2835,3 +2835,41 @@ cameraData	Lens	Objektiv
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Es wird auf diesem Computer gespeichert, nur einmal. Es läuft auf diesem Gerät: Ihre Bilder werden nicht hochgeladen.
 	AI models	KI-Modelle
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	Werden bei Bedarf heruntergeladen, wenn eine Funktion sie zum ersten Mal braucht; nicht in der App enthalten.
+	Your GPU runs the full model: {model} ({mb} MB).	Deine GPU führt das volle Modell aus: {model} ({mb} MB).
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	Volles Modell: {model} ({mb} MB), auf der GPU, wenn vorhanden, sonst auf der CPU.
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Keine GPU verfügbar: das leichte Modell {model} ({mb} MB) auf der CPU. Für volle Qualität „Beste“ wählen (langsamer).
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Nur eine Software-GPU: das leichte Modell {model} ({mb} MB) auf der CPU. Für volle Qualität „Beste“ wählen (langsamer).
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	Smartphone oder Tablet: das leichte Modell {model} ({mb} MB), schneller und sparsamer. Für volle Qualität „Beste“ wählen.
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	Wenig Speicher oder wenige Kerne: das leichte Modell {model} ({mb} MB). Für volle Qualität „Beste“ wählen.
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	Schnell: das leichte Modell {model} ({mb} MB); geringere Qualität als das volle Modell.
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	Beste auf der CPU: das volle Modell {model} ({mb} MB); das kann Minuten pro Seite dauern.
+	Best: the full model {model} ({mb} MB).	Beste: das volle Modell {model} ({mb} MB).
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU: das leichte Modell {model} ({mb} MB). Für volle Qualität „Beste“ wählen (langsamer).
+	Model chosen in Advanced: {model} ({mb} MB).	In „Erweitert“ gewähltes Modell: {model} ({mb} MB).
+	Quality:	Qualität:
+	Fast (lite)	Schnell (leicht)
+	Best (full)	Beste (voll)
+	Device:	Gerät:
+	CPU	CPU
+	Hide Advanced	Erweitert ausblenden
+	Advanced…	Erweitert…
+	Tile size:	Kachelgröße:
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	Eingabepixel pro Kachel; 0 = automatisch. Größere Kacheln sind schneller, brauchen aber mehr Speicher.
+	Overlap:	Überlappung:
+	Max working side:	Max. Arbeitsseite:
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	Größere Bereiche werden für das Modell auf diese Größe verkleinert; 0 = automatisch (512, bei MI-GAN höchstens 512).
+	Precision:	Genauigkeit:
+	f32 (weights downloaded as f16; int8 isn't available)	f32 (Gewichte als f16 geladen; int8 ist nicht verfügbar)
+	CPU threads:	CPU-Threads:
+	0 = one per core.	0 = einer pro Kern.
+	Keep the model in memory between runs	Modell zwischen Durchläufen im Speicher behalten
+	Downloaded models: {mb} MB	Geladene Modelle: {mb} MB
+	Downloaded models: unknown	Geladene Modelle: unbekannt
+	Clear Downloaded Models	Geladene Modelle löschen
+	Downloaded models cleared; they download again (after asking) when next used.	Geladene Modelle gelöscht; beim nächsten Gebrauch werden sie (nach Rückfrage) erneut geladen.
+	AI Cleaning Options	Optionen für KI-Bereinigung
+	Quality and device for Clean with AI and the Remove tool's AI mode.	Qualität und Gerät für „Mit KI bereinigen“ und den KI-Modus des Entfernen-Werkzeugs.
+	AI Options…	KI-Optionen…
+	Use AI	KI verwenden
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Striche mit KI statt mit benachbarten Flicken füllen: besser bei Rastern und Strichzeichnungen. KI-Optionen… wählt Qualität und Gerät.
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Löscht ausgewählten Text oder Soundeffekte und zeichnet den Hintergrund mit KI auf einer neuen Ebene neu. Beim ersten Mal wird das Modell geladen (MI-GAN 13 MB, Manga LaMa 102 MB).

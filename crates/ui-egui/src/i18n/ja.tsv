@@ -3804,3 +3804,41 @@ cameraData	Lens	レンズ
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	このコンピューターに一度だけ保存されます。このデバイス上で動作し、画像はアップロードされません。
 	AI models	AI モデル
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	機能が初めて必要としたときにダウンロードされます。アプリには同梱されていません。
+	Your GPU runs the full model: {model} ({mb} MB).	GPU でフルモデルを実行します: {model}（{mb} MB）。
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	フルモデル: {model}（{mb} MB）。GPU があれば GPU で、なければ CPU で実行します。
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	GPU がありません: 軽量モデル {model}（{mb} MB）を CPU で実行します。フル品質には「最高」を選んでください（低速）。
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	ソフトウェア GPU のみ: 軽量モデル {model}（{mb} MB）を CPU で実行します。フル品質には「最高」を選んでください（低速）。
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	スマートフォン・タブレット: 軽量モデル {model}（{mb} MB）で高速・省メモリに実行します。フル品質には「最高」を選んでください。
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	メモリまたはコア数が少ないため: 軽量モデル {model}（{mb} MB）。フル品質には「最高」を選んでください。
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	高速: 軽量モデル {model}（{mb} MB）。フルモデルより品質は下がります。
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	CPU で最高品質: フルモデル {model}（{mb} MB）。1 ページに数分かかることがあります。
+	Best: the full model {model} ({mb} MB).	最高: フルモデル {model}（{mb} MB）。
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU: 軽量モデル {model}（{mb} MB）。フル品質には「最高」を選んでください（低速）。
+	Model chosen in Advanced: {model} ({mb} MB).	詳細設定で選んだモデル: {model}（{mb} MB）。
+	Quality:	品質:
+	Fast (lite)	高速（軽量）
+	Best (full)	最高（フル）
+	Device:	デバイス:
+	CPU	CPU
+	Hide Advanced	詳細設定を隠す
+	Advanced…	詳細設定…
+	Tile size:	タイルサイズ:
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	タイルあたりの入力ピクセル数。0 = 自動。大きいタイルは速くなりますが、より多くのメモリを使います。
+	Overlap:	オーバーラップ:
+	Max working side:	最大作業サイズ:
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	これより大きい範囲はモデル用にこのサイズまで縮小されます。0 = 自動（512。MI-GAN は最大 512）。
+	Precision:	精度:
+	f32 (weights downloaded as f16; int8 isn't available)	f32（重みは f16 でダウンロード。int8 は利用できません）
+	CPU threads:	CPU スレッド数:
+	0 = one per core.	0 = コアごとに 1 つ。
+	Keep the model in memory between runs	実行の間もモデルをメモリに保持する
+	Downloaded models: {mb} MB	ダウンロード済みモデル: {mb} MB
+	Downloaded models: unknown	ダウンロード済みモデル: 不明
+	Clear Downloaded Models	ダウンロード済みモデルを削除
+	Downloaded models cleared; they download again (after asking) when next used.	ダウンロード済みモデルを削除しました。次に使うときに（確認のうえ）再ダウンロードされます。
+	AI Cleaning Options	AI クリーンのオプション
+	Quality and device for Clean with AI and the Remove tool's AI mode.	「AIでクリーンアップ」と削除ツールの AI モードの品質とデバイス。
+	AI Options…	AI オプション…
+	Use AI	AI を使用
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	近くのパッチではなく AI でストロークを埋めます。スクリーントーンや線画に向いています。品質とデバイスは「AI オプション…」で選びます。
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	選択したテキストや描き文字を消し、AI で背景を新しいレイヤーに描き直します。初回はモデルをダウンロードします（MI-GAN 13 MB、Manga LaMa 102 MB）。

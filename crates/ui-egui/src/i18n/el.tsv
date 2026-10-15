@@ -3887,3 +3887,41 @@ cameraData	Lens	Φακός
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Αποθηκεύεται σε αυτόν τον υπολογιστή, μόνο μία φορά. Εκτελείται σε αυτή τη συσκευή: οι εικόνες σας δεν αποστέλλονται.
 	AI models	Μοντέλα AI
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	Λαμβάνονται κατ’ απαίτηση την πρώτη φορά που τα χρειάζεται μια λειτουργία· δεν περιλαμβάνονται στην εφαρμογή.
+	Your GPU runs the full model: {model} ({mb} MB).	Η GPU σας εκτελεί το πλήρες μοντέλο: {model} ({mb} MB).
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	Πλήρες μοντέλο: {model} ({mb} MB), στη GPU αν υπάρχει, αλλιώς στη CPU.
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Δεν υπάρχει διαθέσιμη GPU: το ελαφρύ μοντέλο {model} ({mb} MB) στη CPU. Επιλέξτε Καλύτερη για πλήρη ποιότητα (πιο αργό).
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Μόνο GPU λογισμικού: το ελαφρύ μοντέλο {model} ({mb} MB) στη CPU. Επιλέξτε Καλύτερη για πλήρη ποιότητα (πιο αργό).
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	Τηλέφωνο ή tablet: το ελαφρύ μοντέλο {model} ({mb} MB), πιο γρήγορο και ελαφρύ. Επιλέξτε Καλύτερη για πλήρη ποιότητα.
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	Λίγη μνήμη ή λίγοι πυρήνες: το ελαφρύ μοντέλο {model} ({mb} MB). Επιλέξτε Καλύτερη για πλήρη ποιότητα.
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	Γρήγορη: το ελαφρύ μοντέλο {model} ({mb} MB)· χαμηλότερη ποιότητα από το πλήρες μοντέλο.
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	Καλύτερη στη CPU: το πλήρες μοντέλο {model} ({mb} MB)· μπορεί να χρειαστούν λεπτά ανά σελίδα.
+	Best: the full model {model} ({mb} MB).	Καλύτερη: το πλήρες μοντέλο {model} ({mb} MB).
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU: το ελαφρύ μοντέλο {model} ({mb} MB). Επιλέξτε Καλύτερη για πλήρη ποιότητα (πιο αργό).
+	Model chosen in Advanced: {model} ({mb} MB).	Μοντέλο από τις Σύνθετες: {model} ({mb} MB).
+	Quality:	Ποιότητα:
+	Fast (lite)	Γρήγορη (ελαφριά)
+	Best (full)	Καλύτερη (πλήρης)
+	Device:	Συσκευή:
+	CPU	CPU
+	Hide Advanced	Απόκρυψη σύνθετων
+	Advanced…	Σύνθετες…
+	Tile size:	Μέγεθος πλακιδίου:
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	Pixel εισόδου ανά πλακίδιο· 0 = αυτόματο. Μεγαλύτερα πλακίδια είναι ταχύτερα αλλά θέλουν περισσότερη μνήμη.
+	Overlap:	Επικάλυψη:
+	Max working side:	Μέγ. πλευρά εργασίας:
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	Μεγαλύτερες περιοχές σμικρύνονται σε αυτό το μέγεθος για το μοντέλο· 0 = αυτόματο (512, έως 512 για το MI-GAN).
+	Precision:	Ακρίβεια:
+	f32 (weights downloaded as f16; int8 isn't available)	f32 (τα βάρη λαμβάνονται ως f16· το int8 δεν είναι διαθέσιμο)
+	CPU threads:	Νήματα CPU:
+	0 = one per core.	0 = ένα ανά πυρήνα.
+	Keep the model in memory between runs	Διατήρηση του μοντέλου στη μνήμη μεταξύ εκτελέσεων
+	Downloaded models: {mb} MB	Ληφθέντα μοντέλα: {mb} MB
+	Downloaded models: unknown	Ληφθέντα μοντέλα: άγνωστο
+	Clear Downloaded Models	Διαγραφή ληφθέντων μοντέλων
+	Downloaded models cleared; they download again (after asking) when next used.	Τα ληφθέντα μοντέλα διαγράφηκαν· θα ληφθούν ξανά (αφού ερωτηθείτε) στην επόμενη χρήση.
+	AI Cleaning Options	Επιλογές καθαρισμού με AI
+	Quality and device for Clean with AI and the Remove tool's AI mode.	Ποιότητα και συσκευή για τον Καθαρισμό με AI και τη λειτουργία AI του εργαλείου Αφαίρεση.
+	AI Options…	Επιλογές AI…
+	Use AI	Χρήση AI
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Γέμισμα πινελιών με AI αντί για κοντινά μπαλώματα: καλύτερο σε ράστερ και γραμμικό σχέδιο. Οι Επιλογές AI… ορίζουν ποιότητα και συσκευή.
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Σβήνει το επιλεγμένο κείμενο ή τα ηχητικά εφέ και ξαναζωγραφίζει το φόντο με AI σε νέο επίπεδο. Η πρώτη χρήση κατεβάζει το μοντέλο (MI-GAN 13 MB, Manga LaMa 102 MB).

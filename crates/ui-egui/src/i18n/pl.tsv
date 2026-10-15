@@ -3808,3 +3808,41 @@ cameraData	Lens	Obiektyw
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Jest przechowywany na tym komputerze, tylko raz. Działa na tym urządzeniu: Twoje obrazy nie są wysyłane.
 	AI models	Modele AI
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	Pobierane na żądanie, gdy funkcja pierwszy raz ich potrzebuje; nie są dołączone do aplikacji.
+	Your GPU runs the full model: {model} ({mb} MB).	Twój GPU uruchamia pełny model: {model} ({mb} MB).
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	Pełny model: {model} ({mb} MB), na GPU, jeśli jest dostępny, w przeciwnym razie na CPU.
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Brak GPU: lekki model {model} ({mb} MB) na CPU. Wybierz Najlepsza, aby uzyskać pełną jakość (wolniej).
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Tylko programowy GPU: lekki model {model} ({mb} MB) na CPU. Wybierz Najlepsza, aby uzyskać pełną jakość (wolniej).
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	Telefon lub tablet: lekki model {model} ({mb} MB), szybszy i lżejszy. Wybierz Najlepsza, aby uzyskać pełną jakość.
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	Mało pamięci lub rdzeni: lekki model {model} ({mb} MB). Wybierz Najlepsza, aby uzyskać pełną jakość.
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	Szybka: lekki model {model} ({mb} MB); niższa jakość niż pełny model.
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	Najlepsza na CPU: pełny model {model} ({mb} MB); może to zająć kilka minut na stronę.
+	Best: the full model {model} ({mb} MB).	Najlepsza: pełny model {model} ({mb} MB).
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU: lekki model {model} ({mb} MB). Wybierz Najlepsza, aby uzyskać pełną jakość (wolniej).
+	Model chosen in Advanced: {model} ({mb} MB).	Model wybrany w zaawansowanych: {model} ({mb} MB).
+	Quality:	Jakość:
+	Fast (lite)	Szybka (lekka)
+	Best (full)	Najlepsza (pełna)
+	Device:	Urządzenie:
+	CPU	CPU
+	Hide Advanced	Ukryj zaawansowane
+	Advanced…	Zaawansowane…
+	Tile size:	Rozmiar kafelka:
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	Piksele wejściowe na kafelek; 0 = automatycznie. Większe kafelki są szybsze, ale wymagają więcej pamięci.
+	Overlap:	Nakładanie:
+	Max working side:	Maks. bok roboczy:
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	Większe obszary są zmniejszane do tego rozmiaru dla modelu; 0 = automatycznie (512, dla MI-GAN najwyżej 512).
+	Precision:	Precyzja:
+	f32 (weights downloaded as f16; int8 isn't available)	f32 (wagi pobierane jako f16; int8 jest niedostępny)
+	CPU threads:	Wątki CPU:
+	0 = one per core.	0 = jeden na rdzeń.
+	Keep the model in memory between runs	Trzymaj model w pamięci między uruchomieniami
+	Downloaded models: {mb} MB	Pobrane modele: {mb} MB
+	Downloaded models: unknown	Pobrane modele: nieznane
+	Clear Downloaded Models	Usuń pobrane modele
+	Downloaded models cleared; they download again (after asking) when next used.	Usunięto pobrane modele; przy następnym użyciu zostaną pobrane ponownie (po pytaniu).
+	AI Cleaning Options	Opcje czyszczenia AI
+	Quality and device for Clean with AI and the Remove tool's AI mode.	Jakość i urządzenie dla Wyczyść za pomocą AI oraz trybu AI narzędzia Usuń.
+	AI Options…	Opcje AI…
+	Use AI	Użyj AI
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Wypełnia pociągnięcia za pomocą AI zamiast pobliskich łatek: lepsze na rastrach i rysunku liniowym. Opcje AI… wybierają jakość i urządzenie.
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Usuwa zaznaczony tekst lub efekty dźwiękowe i odtwarza tło za pomocą AI na nowej warstwie. Przy pierwszym użyciu pobierany jest model (MI-GAN 13 MB, Manga LaMa 102 MB).

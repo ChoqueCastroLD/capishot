@@ -3140,3 +3140,41 @@ cameraData	Lens	Объектив
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Модель сохраняется на этом компьютере, только один раз. Работает на этом устройстве: ваши изображения не отправляются.
 	AI models	Модели ИИ
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	Загружаются по запросу, когда функции они впервые нужны; не входят в состав приложения.
+	Your GPU runs the full model: {model} ({mb} MB).	Ваш GPU запускает полную модель: {model} ({mb} МБ).
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	Полная модель: {model} ({mb} МБ), на GPU, если он есть, иначе на CPU.
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	GPU нет: облегчённая модель {model} ({mb} МБ) на CPU. Для полного качества выберите «Лучшее» (медленнее).
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Только программный GPU: облегчённая модель {model} ({mb} МБ) на CPU. Для полного качества выберите «Лучшее» (медленнее).
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	Телефон или планшет: облегчённая модель {model} ({mb} МБ), быстрее и легче. Для полного качества выберите «Лучшее».
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	Мало памяти или ядер: облегчённая модель {model} ({mb} МБ). Для полного качества выберите «Лучшее».
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	Быстро: облегчённая модель {model} ({mb} МБ); качество ниже, чем у полной модели.
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	Лучшее на CPU: полная модель {model} ({mb} МБ); это может занять минуты на страницу.
+	Best: the full model {model} ({mb} MB).	Лучшее: полная модель {model} ({mb} МБ).
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU: облегчённая модель {model} ({mb} МБ). Для полного качества выберите «Лучшее» (медленнее).
+	Model chosen in Advanced: {model} ({mb} MB).	Модель, выбранная в расширенных: {model} ({mb} МБ).
+	Quality:	Качество:
+	Fast (lite)	Быстро (облегчённая)
+	Best (full)	Лучшее (полная)
+	Device:	Устройство:
+	CPU	CPU
+	Hide Advanced	Скрыть расширенные
+	Advanced…	Расширенные…
+	Tile size:	Размер плитки:
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	Входные пиксели на плитку; 0 = автоматически. Большие плитки быстрее, но требуют больше памяти.
+	Overlap:	Перекрытие:
+	Max working side:	Макс. рабочая сторона:
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	Большие области уменьшаются до этого размера для модели; 0 = автоматически (512, для MI-GAN не более 512).
+	Precision:	Точность:
+	f32 (weights downloaded as f16; int8 isn't available)	f32 (веса загружаются в f16; int8 недоступен)
+	CPU threads:	Потоки CPU:
+	0 = one per core.	0 = по одному на ядро.
+	Keep the model in memory between runs	Хранить модель в памяти между запусками
+	Downloaded models: {mb} MB	Загруженные модели: {mb} МБ
+	Downloaded models: unknown	Загруженные модели: неизвестно
+	Clear Downloaded Models	Удалить загруженные модели
+	Downloaded models cleared; they download again (after asking) when next used.	Загруженные модели удалены; при следующем использовании они загрузятся снова (после запроса).
+	AI Cleaning Options	Параметры очистки с ИИ
+	Quality and device for Clean with AI and the Remove tool's AI mode.	Качество и устройство для «Очистить с ИИ» и режима ИИ инструмента «Удаление».
+	AI Options…	Параметры ИИ…
+	Use AI	Использовать ИИ
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Заполняет мазки с помощью ИИ, а не соседними участками: лучше на растрах и линейной графике. «Параметры ИИ…» выбирают качество и устройство.
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Стирает выделенный текст или звуковые эффекты и дорисовывает фон с помощью ИИ на новом слое. При первом использовании загружается модель (MI-GAN 13 МБ, Manga LaMa 102 МБ).

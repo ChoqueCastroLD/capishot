@@ -2804,3 +2804,41 @@ cameraData	Lens	Objektiv
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Uloží se v tomto počítači, jen jednou. Běží na tomto zařízení: vaše obrázky se nenahrávají.
 	AI models	Modely AI
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	Stahují se na vyžádání, když je funkce poprvé potřebuje; nejsou součástí aplikace.
+	Your GPU runs the full model: {model} ({mb} MB).	Grafický procesor spustí plný model: {model} ({mb} MB).
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	Plný model: {model} ({mb} MB), na grafickém procesoru, pokud je k dispozici, jinak na CPU.
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Grafický procesor není k dispozici: odlehčený model {model} ({mb} MB) na CPU. Pro plnou kvalitu zvolte Nejlepší (pomalejší).
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Jen softwarový grafický procesor: odlehčený model {model} ({mb} MB) na CPU. Pro plnou kvalitu zvolte Nejlepší (pomalejší).
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	Telefon nebo tablet: odlehčený model {model} ({mb} MB), rychlejší a úspornější. Pro plnou kvalitu zvolte Nejlepší.
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	Málo paměti nebo jader: odlehčený model {model} ({mb} MB). Pro plnou kvalitu zvolte Nejlepší.
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	Rychlá: odlehčený model {model} ({mb} MB); nižší kvalita než plný model.
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	Nejlepší na CPU: plný model {model} ({mb} MB); může to trvat minuty na stránku.
+	Best: the full model {model} ({mb} MB).	Nejlepší: plný model {model} ({mb} MB).
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU: odlehčený model {model} ({mb} MB). Pro plnou kvalitu zvolte Nejlepší (pomalejší).
+	Model chosen in Advanced: {model} ({mb} MB).	Model zvolený v pokročilých: {model} ({mb} MB).
+	Quality:	Kvalita:
+	Fast (lite)	Rychlá (odlehčená)
+	Best (full)	Nejlepší (plná)
+	Device:	Zařízení:
+	CPU	CPU
+	Hide Advanced	Skrýt pokročilé
+	Advanced…	Pokročilé…
+	Tile size:	Velikost dlaždice:
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	Vstupní pixely na dlaždici; 0 = automaticky. Větší dlaždice jsou rychlejší, ale potřebují více paměti.
+	Overlap:	Překryv:
+	Max working side:	Max. pracovní strana:
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	Větší oblasti se pro model zmenší na tuto velikost; 0 = automaticky (512, pro MI-GAN nejvýše 512).
+	Precision:	Přesnost:
+	f32 (weights downloaded as f16; int8 isn't available)	f32 (váhy se stahují jako f16; int8 není k dispozici)
+	CPU threads:	Vlákna CPU:
+	0 = one per core.	0 = jedno na jádro.
+	Keep the model in memory between runs	Ponechat model v paměti mezi spuštěními
+	Downloaded models: {mb} MB	Stažené modely: {mb} MB
+	Downloaded models: unknown	Stažené modely: neznámo
+	Clear Downloaded Models	Vymazat stažené modely
+	Downloaded models cleared; they download again (after asking) when next used.	Stažené modely byly vymazány; při dalším použití se znovu stáhnou (po dotazu).
+	AI Cleaning Options	Možnosti čištění pomocí AI
+	Quality and device for Clean with AI and the Remove tool's AI mode.	Kvalita a zařízení pro Vyčistit pomocí AI a režim AI nástroje odstranění.
+	AI Options…	Možnosti AI…
+	Use AI	Použít AI
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Vyplnit tahy pomocí AI místo okolních záplat: lepší na rastry a kresbu. Možnosti AI… volí kvalitu a zařízení.
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Vymaže vybraný text nebo zvukové efekty a dokreslí pozadí pomocí AI na nové vrstvě. Při prvním použití se stáhne model (MI-GAN 13 MB, Manga LaMa 102 MB).
