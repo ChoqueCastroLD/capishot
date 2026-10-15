@@ -164,7 +164,7 @@ impl Lama {
     }
 }
 
-fn to_vec(data: TensorData, n: usize) -> Result<Vec<f32>> {
+pub(crate) fn to_vec(data: TensorData, n: usize) -> Result<Vec<f32>> {
     let v = data.try_into_vec::<f32>().map_err(|e| LamaError::Device(format!("read-back: {e:?}")))?;
     if v.len() != n {
         return Err(LamaError::Device(format!("read back {} values, expected {n}", v.len())));

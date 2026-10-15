@@ -1,8 +1,10 @@
-//! [`NativeInpainter`]: the desktop/CLI [`Inpainter`], running LaMa in the calling thread (the
-//! engine's job worker) on the GPU through wgpu when there is a real one, else on the CPU.
+//! [`NativeInpainter`]: the desktop/CLI [`Inpainter`], running LaMa (or the lite MI-GAN) in the
+//! calling thread (the engine's job worker) on the GPU through wgpu when there is a real one,
+//! else on the CPU.
 //!
-//! The weights come from a local file: `CAPISHOT_LAMA_WEIGHTS`, else
-//! `<config dir>/models/manga-lama-f16.safetensors`. Downloading them is the shared AI runtime's
+//! The weights come from local files: `CAPISHOT_LAMA_WEIGHTS`, else
+//! `<config dir>/models/manga-lama-f16.safetensors`; MI-GAN from `CAPISHOT_MIGAN_WEIGHTS`, else
+//! [`MIGAN_FILE`] next to LaMa's. Downloading them is the shared AI runtime's
 //! job (`photocraft-ai`'s cache); until that is wired, a missing file reports
 //! [`ModelState::Unavailable`] with the path to put it at.
 
@@ -11,25 +13,43 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use burn::tensor::Device;
 
-use crate::service::{Done, Hooks, Inpainter, ModelState, Request};
-use crate::{Lama, LamaError, Result};
+use crate::service::{Done, Hooks, Inpainter, LAMA, MIGAN, ModelState, Request};
+use crate::{Generator, LamaError, Result};
 
 /// The weights' file name in the models folder.
 pub const WEIGHTS_FILE: &str = "manga-lama-f16.safetensors";
+/// MI-GAN's file name in the models folder.
+pub const MIGAN_FILE: &str = "migan-512-places2-f16.safetensors";
 /// Larger files are refused before reading (the f32 file is 204 MB).
 const MAX_WEIGHTS_BYTES: u64 = 512 << 20;
 
 /// See the module docs.
 pub struct NativeInpainter {
     path: PathBuf,
-    model: Mutex<Option<Arc<Lama>>>,
+    migan: Option<PathBuf>,
+    /// The loaded model: its id, whether it is on the CPU, the generator.
+    model: Mutex<Option<(&'static str, bool, Arc<Generator>)>>,
     device_name: Mutex<String>,
 }
 
 impl NativeInpainter {
-    /// An inpainter loading `path` on first use.
+    /// An inpainter loading LaMa from `path` on first use (MI-GAN: [`NativeInpainter::with_migan`]).
     pub fn new(path: PathBuf) -> Self {
-        Self { path, model: Mutex::new(None), device_name: Mutex::new(String::new()) }
+        Self { path, migan: None, model: Mutex::new(None), device_name: Mutex::new(String::new()) }
+    }
+
+    /// Also offers MI-GAN, loaded from `path`.
+    pub fn with_migan(mut self, path: PathBuf) -> Self {
+        self.migan = Some(path);
+        self
+    }
+
+    fn path_of(&self, model: &str) -> Option<&Path> {
+        match model {
+            LAMA => Some(&self.path),
+            MIGAN => self.migan.as_deref(),
+            _ => None,
+        }
     }
 
     /// `CAPISHOT_LAMA_WEIGHTS`, else `<config_dir>/models/` + [`WEIGHTS_FILE`]; `None` when
@@ -39,7 +59,11 @@ impl NativeInpainter {
             Some(p) => PathBuf::from(p),
             None => config_dir?.join("models").join(WEIGHTS_FILE),
         };
-        Some(Self::new(path))
+        let migan = match std::env::var_os("CAPISHOT_MIGAN_WEIGHTS") {
+            Some(p) => PathBuf::from(p),
+            None => path.with_file_name(MIGAN_FILE),
+        };
+        Some(Self::new(path).with_migan(migan))
     }
 
     /// The weights file this inpainter reads.
@@ -49,8 +73,8 @@ impl NativeInpainter {
 
     /// GPU through wgpu unless it is a software adapter (lavapipe/llvmpipe are far slower than
     /// the CPU backend) or `CAPISHOT_AI_DEVICE=cpu`; else the CPU backend.
-    fn pick_device() -> Result<(Device, String)> {
-        let force_cpu = std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"));
+    fn pick_device(cpu: bool) -> Result<(Device, String)> {
+        let force_cpu = cpu || std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"));
         #[cfg(feature = "wgpu")]
         if !force_cpu {
             // The wgpu runtime may panic deep inside on a broken driver; keep that a fallback.
@@ -76,31 +100,44 @@ impl NativeInpainter {
         }))
     }
 
-    fn model(&self) -> Result<Arc<Lama>> {
+    fn model(&self, id: &'static str, cpu: bool) -> Result<Arc<Generator>> {
         let mut slot = self.model.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(m) = slot.as_ref() {
+        if let Some((i, c, m)) = slot.as_ref()
+            && *i == id
+            && *c == cpu
+        {
             return Ok(m.clone());
         }
-        let len =
-            std::fs::metadata(&self.path).map_err(|e| LamaError::Unavailable(format!("Manga LaMa weights not found at {}: {e}", self.path.display())))?.len();
+        *slot = None;
+        let path = self.path_of(id).ok_or_else(|| LamaError::Unavailable(format!("{id} isn't available here")))?;
+        let len = std::fs::metadata(path).map_err(|e| LamaError::Unavailable(format!("{id} weights not found at {}: {e}", path.display())))?.len();
         if len > MAX_WEIGHTS_BYTES {
-            return Err(LamaError::Weights(format!("{} is {len} bytes, more than any LaMa", self.path.display())));
+            return Err(LamaError::Weights(format!("{} is {len} bytes, more than any inpainting model", path.display())));
         }
-        let bytes = std::fs::read(&self.path).map_err(|e| LamaError::Unavailable(format!("{}: {e}", self.path.display())))?;
-        let (device, name) = Self::pick_device()?;
-        let m = Arc::new(Lama::from_safetensors(&bytes, &device)?);
+        let bytes = std::fs::read(path).map_err(|e| LamaError::Unavailable(format!("{}: {e}", path.display())))?;
+        let (device, name) = Self::pick_device(cpu)?;
+        let m = Arc::new(Generator::from_safetensors(&bytes, &device)?);
         *self.device_name.lock().unwrap_or_else(PoisonError::into_inner) = name;
-        *slot = Some(m.clone());
+        *slot = Some((id, cpu, m.clone()));
         Ok(m)
     }
 }
 
 impl Inpainter for NativeInpainter {
     fn model_state(&self) -> ModelState {
-        if self.model.lock().unwrap_or_else(PoisonError::into_inner).is_some() || self.path.is_file() {
-            ModelState::Ready
-        } else {
-            ModelState::Unavailable(format!("Manga LaMa weights not found: put {WEIGHTS_FILE} at {} (or set CAPISHOT_LAMA_WEIGHTS)", self.path.display()))
+        self.model_state_of(LAMA)
+    }
+
+    fn model_state_of(&self, model: &str) -> ModelState {
+        let loaded = self.model.lock().unwrap_or_else(PoisonError::into_inner).as_ref().is_some_and(|(i, _, _)| *i == model);
+        match self.path_of(model) {
+            _ if loaded => ModelState::Ready,
+            Some(p) if p.is_file() => ModelState::Ready,
+            Some(p) => {
+                let (file, var) = if model == MIGAN { (MIGAN_FILE, "CAPISHOT_MIGAN_WEIGHTS") } else { (WEIGHTS_FILE, "CAPISHOT_LAMA_WEIGHTS") };
+                ModelState::Unavailable(format!("{model} weights not found: put {file} at {} (or set {var})", p.display()))
+            }
+            None => ModelState::Unavailable(format!("{model} isn't available here")),
         }
     }
 
@@ -115,12 +152,16 @@ impl Inpainter for NativeInpainter {
         // burn panics on device failures (out of memory, a lost GPU): report it as an error and
         // drop the model so the next request loads it again.
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.model().and_then(|m| {
+            self.model(req.model, req.cpu).and_then(|m| {
                 if hooks.cancelled() {
                     return Err(LamaError::Cancelled);
                 }
                 let t = &req.tile;
-                m.generate(&t.rgb, &t.mask, t.w, t.h)
+                let out = m.generate(&t.rgb, &t.mask, t.w, t.h);
+                if req.unload {
+                    *self.model.lock().unwrap_or_else(PoisonError::into_inner) = None;
+                }
+                out
             })
         }));
         let result = match run {

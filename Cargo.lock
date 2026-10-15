@@ -6928,6 +6928,7 @@ dependencies = [
  "image",
  "photocraft-ai",
  "pollster 1.0.1",
+ "rayon",
  "serde",
  "serde_json",
  "sha2",
@@ -6950,11 +6951,14 @@ dependencies = [
 name = "photocraft-ai-worker"
 version = "0.7.0"
 dependencies = [
+ "getrandom 0.4.3",
  "js-sys",
  "photocraft-ai",
  "photocraft-ai-lama",
+ "rayon",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-bindgen-rayon",
  "web-sys",
 ]
 

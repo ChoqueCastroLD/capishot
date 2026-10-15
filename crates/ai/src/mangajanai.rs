@@ -136,7 +136,7 @@ pub fn select(height: usize, scale: u32, content: Content) -> Result<&'static Mo
     let want = match content {
         Content::Grayscale => Some(height_bin(height)),
         Content::Color => None,
-        Content::Inpaint => return Err(AiError::UnknownModel("inpainting models don't upscale".into())),
+        Content::Inpaint | Content::Any => return Err(AiError::UnknownModel(format!("{content:?} isn't a MangaJaNai content"))),
     };
     MODELS
         .iter()

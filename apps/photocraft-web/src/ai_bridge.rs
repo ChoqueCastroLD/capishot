@@ -10,8 +10,16 @@
 //! <meta name="capishot-ai-models" content="https://example.com/capishot/models/">
 //! ```
 //!
-//! Without the worker the command is unavailable; without a models URL only models already in
-//! the browser's Cache Storage run. The worker is a module worker started from a one-line
+//! A cross-origin isolated page (the threads build) also names the worker's threads variant,
+//! which runs the CPU kernels on a rayon pool of nested Web Workers (CPU only: no WebGPU in it):
+//!
+//! ```html
+//! <meta name="capishot-ai-worker-threads" content="ai/<hash>/photocraft_ai_worker_mt.js">
+//! ```
+//!
+//! Runs go to the plain worker when WebGPU may be used and to the threads variant when the run is
+//! on the CPU (no WebGPU adapter on this page, or WebGPU failed). Without the worker the command
+//! is unavailable; without a models URL only models already in the browser's Cache Storage run. The worker is a module worker started from a one-line
 //! `blob:` bootstrap that imports the wasm-bindgen glue; it stays alive between runs (the model
 //! stays on the GPU) and is terminated to cancel. Messages: see the worker's module docs.
 
@@ -22,6 +30,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use js_sys::{Array, Float32Array, Object, Reflect};
 use photocraft_ai::cache::WEB_CACHE;
 use photocraft_ai::catalog::ModelInfo;
+use photocraft_ai::profile::{DeviceProfile, GpuClass};
 use photocraft_ai::service::{Done, Hooks, ModelState, Request, Upscaler};
 use photocraft_ai::{AiError, Planar};
 use wasm_bindgen::prelude::*;
@@ -32,6 +41,16 @@ use wasm_bindgen_futures::JsFuture;
 #[derive(Default)]
 struct Shared {
     worker_url: Option<String>,
+    /// The threads variant (only on cross-origin isolated pages).
+    worker_mt_url: Option<String>,
+    /// Does this page have a WebGPU adapter (`None`: not known yet)?
+    gpu: Option<bool>,
+    /// The machine, as the page sees it (filled by `probe`).
+    profile: DeviceProfile,
+    /// Bytes in the models' Cache Storage, last time we asked.
+    storage: Option<u64>,
+    /// The threads variant failed to start: use the plain worker for everything.
+    mt_broken: bool,
     models_base: Option<String>,
     /// Model id → is it in Cache Storage.
     cached: HashMap<&'static str, bool>,
@@ -55,8 +74,88 @@ pub struct WebInpainter {
 pub fn from_page() -> Option<(Arc<dyn Upscaler>, Arc<dyn photocraft_ai_lama::service::Inpainter>)> {
     let worker_url = meta_url("capishot-ai-worker")?;
     let models_base = meta_url("capishot-ai-models").map(|u| if u.ends_with('/') { u } else { format!("{u}/") });
-    let shared = Arc::new(Mutex::new(Shared { worker_url: Some(worker_url), models_base, ..Default::default() }));
+    let isolated = Reflect::get(&js_sys::global(), &"crossOriginIsolated".into()).ok().and_then(|v| v.as_bool()).unwrap_or(false);
+    let worker_mt_url = if isolated { meta_url("capishot-ai-worker-threads") } else { None };
+    let shared = Arc::new(Mutex::new(Shared { worker_url: Some(worker_url), worker_mt_url, models_base, ..Default::default() }));
+    probe(shared.clone(), worker_mt_url_present(&shared));
     Some((Arc::new(WebUpscaler { shared: shared.clone() }), Arc::new(WebInpainter { up: WebUpscaler { shared } })))
+}
+
+fn worker_mt_url_present(shared: &Arc<Mutex<Shared>>) -> bool {
+    shared.lock().unwrap_or_else(PoisonError::into_inner).worker_mt_url.is_some()
+}
+
+/// The device profile: the WebGPU adapter (once), `navigator.deviceMemory`,
+/// `hardwareConcurrency` and a mobile user agent; CPU runs go to the threads variant when there
+/// is no adapter.
+fn probe(shared: Arc<Mutex<Shared>>, cpu_threads: bool) {
+    let nav = web_sys::window().map(|w| w.navigator());
+    let num = |k: &str| nav.as_ref().and_then(|n| Reflect::get(n, &k.into()).ok()).and_then(|v| v.as_f64()).filter(|v| v.is_finite() && *v > 0.0);
+    let ua = nav.as_ref().and_then(|n| n.user_agent().ok()).unwrap_or_default();
+    // userAgentData.mobile where the browser has it (Chromium), else the user agent string.
+    let ua_mobile = nav
+        .as_ref()
+        .and_then(|n| Reflect::get(n, &"userAgentData".into()).ok())
+        .filter(|d| !d.is_undefined() && !d.is_null())
+        .and_then(|d| Reflect::get(&d, &"mobile".into()).ok())
+        .and_then(|m| m.as_bool());
+    {
+        let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        s.profile.memory_gb = num("deviceMemory").map(|m| m as f32);
+        s.profile.cores = num("hardwareConcurrency").map(|c| c as usize);
+        s.profile.mobile = ua_mobile.unwrap_or(false) || photocraft_ai::profile::mobile_user_agent(&ua);
+        s.profile.cpu_threads = cpu_threads;
+    }
+    wasm_bindgen_futures::spawn_local(async move {
+        let found = async {
+            let gpu = Reflect::get(&web_sys::window()?.navigator(), &"gpu".into()).ok().filter(|g| !g.is_undefined() && !g.is_null())?;
+            let f: js_sys::Function = Reflect::get(&gpu, &"requestAdapter".into()).ok()?.dyn_into().ok()?;
+            let p: js_sys::Promise = f.call0(&gpu).ok()?.dyn_into().ok()?;
+            let a = JsFuture::from(p).await.ok()?;
+            if a.is_null() || a.is_undefined() {
+                return Some((GpuClass::None, String::new()));
+            }
+            let info = Reflect::get(&a, &"info".into()).ok().filter(|i| !i.is_undefined() && !i.is_null());
+            let field = |k: &str| info.as_ref().and_then(|i| Reflect::get(i, &k.into()).ok()).and_then(|v| v.as_string()).unwrap_or_default();
+            let fallback = info
+                .as_ref()
+                .and_then(|i| Reflect::get(i, &"isFallbackAdapter".into()).ok())
+                .and_then(|v| v.as_bool())
+                .or_else(|| Reflect::get(&a, &"isFallbackAdapter".into()).ok().and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            let (vendor, arch, desc) = (field("vendor"), field("architecture"), field("description"));
+            let class = GpuClass::from_adapter(fallback, &vendor, &arch, &desc);
+            let name = [desc, vendor, arch].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" ");
+            Some((class, name))
+        }
+        .await
+        .unwrap_or((GpuClass::None, String::new()));
+        let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        s.gpu.get_or_insert(found.0.usable());
+        s.profile.gpu = found.0;
+        s.profile.gpu_name = found.1;
+    });
+}
+
+/// Refreshes the Cache Storage size (`navigator.storage.estimate()` covers the whole origin, so
+/// the models' entries are summed instead).
+fn refresh_storage(shared: Arc<Mutex<Shared>>) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let total = async {
+            let caches = web_sys::window()?.caches().ok()?;
+            let cache: web_sys::Cache = JsFuture::from(caches.open(WEB_CACHE)).await.ok()?.dyn_into().ok()?;
+            let keys: Array = JsFuture::from(cache.keys()).await.ok()?.dyn_into().ok()?;
+            let mut sum = 0u64;
+            for k in keys.iter() {
+                let url = Reflect::get(&k, &"url".into()).ok().and_then(|u| u.as_string()).unwrap_or_default();
+                let file = url.rsplit('/').next().unwrap_or_default();
+                sum += photocraft_ai::catalog::MODELS.iter().find(|m| m.file == file).map_or(0, |m| m.bytes);
+            }
+            Some(sum)
+        }
+        .await;
+        shared.lock().unwrap_or_else(PoisonError::into_inner).storage = total;
+    });
 }
 
 fn meta_url(name: &str) -> Option<String> {
@@ -119,9 +218,40 @@ impl Upscaler for WebUpscaler {
         self.lock().device.clone()
     }
 
+    fn profile(&self) -> DeviceProfile {
+        self.lock().profile.clone()
+    }
+
+    fn storage_used(&self) -> Option<u64> {
+        refresh_storage(self.shared.clone());
+        self.lock().storage
+    }
+
+    fn clear_downloads(&self) -> photocraft_ai::Result<()> {
+        // A live worker keeps its model in memory; it goes too.
+        let busy = LIVE.with(|l| l.borrow().as_ref().is_some_and(|l| l.run.is_some()));
+        if busy {
+            return Err(AiError::Cache("an AI run is in progress".into()));
+        }
+        kill(AiError::Cancelled);
+        let shared = self.shared.clone();
+        {
+            let mut s = self.lock();
+            s.cached.clear();
+            s.storage = Some(0);
+        }
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Some(caches) = web_sys::window().and_then(|w| w.caches().ok()) {
+                let _ = JsFuture::from(caches.delete(WEB_CACHE)).await;
+            }
+            shared.lock().unwrap_or_else(PoisonError::into_inner).cached.clear();
+        });
+        Ok(())
+    }
+
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
-        let Some((url, base, cpu)) = self.target() else { return done(Err(AiError::Device(NO_WORKER.into()))) };
-        let msg = run_message(&req, &base, cpu);
+        let Some(t) = self.target(req.opts.cpu, req.opts.threads) else { return done(Err(AiError::Device(NO_WORKER.into()))) };
+        let msg = run_message(&req, &t.base, t.cpu);
         let (h2, h3) = (hooks.clone(), hooks);
         let run = Run {
             model: req.model.id,
@@ -131,7 +261,7 @@ impl Upscaler for WebUpscaler {
             shared: self.shared.clone(),
             started_gpu: false,
         };
-        if let Err(e) = start(&url, msg, run) {
+        if let Err(e) = start(&t, msg, run) {
             log::error!("AI worker: {e}");
         }
     }
@@ -139,20 +269,45 @@ impl Upscaler for WebUpscaler {
 
 const NO_WORKER: &str = "the AI worker isn't available here (it runs on the page's main thread, in builds that include it)";
 
+/// Where a run goes.
+struct Target {
+    url: String,
+    base: String,
+    /// Skip WebGPU.
+    cpu: bool,
+    /// The threads variant.
+    threads: bool,
+    /// Its rayon pool size (0: one per core).
+    pool: usize,
+}
+
 impl WebUpscaler {
-    /// The worker URL, models base and CPU flag; `None` off the main thread (the threads build's
-    /// pool workers can't own the page's AI worker) or without a worker.
-    fn target(&self) -> Option<(String, String, bool)> {
+    /// Which worker runs the next request (`cpu`: the user chose the CPU; `pool`: CPU threads,
+    /// 0 = one per core); `None` off the main thread (the threads build's pool workers can't own
+    /// the page's AI worker) or without a worker.
+    fn target(&self, cpu: bool, pool: usize) -> Option<Target> {
         web_sys::window()?;
         let s = self.lock();
-        Some((s.worker_url.clone()?, s.models_base.clone().unwrap_or_default(), s.cpu_only))
+        let base = s.models_base.clone().unwrap_or_default();
+        let cpu = cpu || s.cpu_only || s.gpu == Some(false);
+        if cpu
+            && !s.mt_broken
+            && let Some(url) = s.worker_mt_url.clone()
+        {
+            return Some(Target { url, base, cpu, threads: true, pool });
+        }
+        Some(Target { url: s.worker_url.clone()?, base, cpu, threads: false, pool: 0 })
     }
 }
 
 impl photocraft_ai_lama::service::Inpainter for WebInpainter {
     fn model_state(&self) -> photocraft_ai_lama::service::ModelState {
+        self.model_state_of(photocraft_ai::catalog::LAMA_ID)
+    }
+
+    fn model_state_of(&self, id: &str) -> photocraft_ai_lama::service::ModelState {
         use photocraft_ai_lama::service::ModelState as M;
-        let Some(m) = photocraft_ai::catalog::model(photocraft_ai::catalog::LAMA_ID) else { return M::Unavailable("Manga LaMa isn't in the catalog".into()) };
+        let Some(m) = photocraft_ai::catalog::model(id) else { return M::Unavailable(format!("{id} isn't in the catalog")) };
         match self.up.model_state(m) {
             ModelState::Ready => M::Ready,
             ModelState::NeedsDownload => M::NeedsDownload { bytes: m.bytes },
@@ -167,7 +322,9 @@ impl photocraft_ai_lama::service::Inpainter for WebInpainter {
 
     fn run(&self, req: photocraft_ai_lama::service::Request, hooks: Arc<dyn photocraft_ai_lama::service::Hooks>, done: photocraft_ai_lama::service::Done) {
         use photocraft_ai_lama::LamaError;
-        let Some((url, base, cpu)) = self.up.target() else { return done(Err(LamaError::Unavailable(NO_WORKER.into()))) };
+        let Some(model) = photocraft_ai::catalog::model(req.model) else { return done(Err(LamaError::Unavailable(format!("{} isn't in the catalog", req.model)))) };
+        let Some(target) = self.up.target(req.cpu, req.threads) else { return done(Err(LamaError::Unavailable(NO_WORKER.into()))) };
+        let (base, cpu) = (target.base.clone(), target.cpu);
         let t = &req.tile;
         let rgb = Float32Array::from(t.rgb.as_slice());
         let mask = Float32Array::from(t.mask.as_slice());
@@ -175,6 +332,8 @@ impl photocraft_ai_lama::service::Inpainter for WebInpainter {
         for (k, v) in [
             ("type", JsValue::from("inpaint")),
             ("id", 1.into()),
+            ("model", model.id.into()),
+            ("unload", req.unload.into()),
             ("base", base.into()),
             ("download", req.allow_download.into()),
             ("cpu", cpu.into()),
@@ -188,14 +347,14 @@ impl photocraft_ai_lama::service::Inpainter for WebInpainter {
         let _ = Reflect::set(&o, &"rgb".into(), &rgb.into());
         let (h2, h3) = (hooks.clone(), hooks);
         let run = Run {
-            model: photocraft_ai::catalog::LAMA_ID,
+            model: model.id,
             reply: Some(Reply::Inpaint(done)),
             progress: Box::new(move |f, s| h2.progress(f, s)),
             cancelled: Box::new(move || h3.cancelled()),
             shared: self.up.shared.clone(),
             started_gpu: false,
         };
-        if let Err(e) = start(&url, (o, buffer), run) {
+        if let Err(e) = start(&target, (o, buffer), run) {
             log::error!("AI worker: {e}");
         }
     }
@@ -218,6 +377,11 @@ fn run_message(req: &Request, base: &str, cpu: bool) -> (Object, JsValue) {
     set("width", (req.input.width as f64).into());
     set("height", (req.input.height as f64).into());
     set("channels", (req.input.channels as f64).into());
+    set("unload", req.opts.unload.into());
+    if let Some(t) = req.opts.tiles {
+        set("tile", (t.tile as f64).into());
+        set("overlap", (t.overlap as f64).into());
+    }
     let buffer: JsValue = data.buffer().into();
     set("data", data.into());
     (o, buffer)
@@ -261,6 +425,9 @@ impl Run {
 /// The live worker, its handlers and the run it serves (main thread only).
 struct Live {
     worker: web_sys::Worker,
+    /// The threads variant.
+    threads: bool,
+    pool: usize,
     ready: bool,
     /// The run message waiting for `ready`.
     queued: Option<(Object, JsValue)>,
@@ -278,15 +445,20 @@ thread_local! {
     static RETIRED: RefCell<Vec<Live>> = const { RefCell::new(Vec::new()) };
 }
 
-fn start(url: &str, msg: (Object, JsValue), run: Run) -> Result<(), String> {
+fn start(target: &Target, msg: (Object, JsValue), run: Run) -> Result<(), String> {
     let busy = LIVE.with(|l| l.borrow().as_ref().is_some_and(|l| l.run.is_some()));
     if busy {
         let mut run = run;
         run.finish(Err(AiError::Inference("another AI upscale is still running".into())));
         return Ok(());
     }
+    // The other variant (or another pool size) is alive: it goes (models stay in Cache Storage).
+    let other = LIVE.with(|l| l.borrow().as_ref().is_some_and(|l| l.threads != target.threads || l.pool != target.pool));
+    if other {
+        kill(AiError::Cancelled);
+    }
     let exists = LIVE.with(|l| l.borrow().is_some());
-    if !exists && let Err(e) = spawn(url) {
+    if !exists && let Err(e) = spawn(&target.url, target.threads, target.pool) {
         let mut run = run;
         run.finish(Err(AiError::Device(e.clone())));
         return Err(e);
@@ -322,10 +494,11 @@ fn post(worker: &web_sys::Worker, (msg, buffer): (Object, JsValue)) {
 }
 
 /// Starts the worker module from a `blob:` bootstrap (a module worker can't take the wasm-bindgen
-/// glue's URL directly: it must call its `init`).
-fn spawn(url: &str) -> Result<(), String> {
+/// glue's URL directly: it must call its `init`). The threads variant then starts from
+/// `startAi(threads)` (0: one rayon worker per core).
+fn spawn(url: &str, threads: bool, pool: usize) -> Result<(), String> {
     let js = |e: JsValue| format!("{e:?}");
-    let src = format!("import init from {};\nawait init();\n", serde_json::Value::String(url.to_string()));
+    let src = format!("const m = await import({});\nawait m.default();\nif (m.startAi) m.startAi({pool});\n", serde_json::Value::String(url.to_string()));
     let parts = Array::of1(&JsValue::from_str(&src));
     let opts = web_sys::BlobPropertyBag::new();
     opts.set_type("text/javascript");
@@ -345,7 +518,7 @@ fn spawn(url: &str) -> Result<(), String> {
     worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
     worker.set_onerror(Some(on_error.as_ref().unchecked_ref()));
     LIVE.with(|l| {
-        *l.borrow_mut() = Some(Live { worker, ready: false, queued: None, run: None, timer: None, _on_message: on_message, _on_error: on_error, _tick: tick });
+        *l.borrow_mut() = Some(Live { worker, threads, pool, ready: false, queued: None, run: None, timer: None, _on_message: on_message, _on_error: on_error, _tick: tick });
     });
     Ok(())
 }
@@ -377,7 +550,12 @@ fn on_message(data: JsValue) {
                     run.started_gpu = true;
                 }
                 if !device.is_empty() {
-                    run.shared.lock().unwrap_or_else(PoisonError::into_inner).device = device.clone();
+                    let mut s = run.shared.lock().unwrap_or_else(PoisonError::into_inner);
+                    // The plain worker found no usable WebGPU: CPU runs go to the threads variant.
+                    if device.starts_with("CPU (") {
+                        s.gpu = Some(false);
+                    }
+                    s.device = device.clone();
                 }
                 (run.progress)(fraction, &status);
             });
@@ -447,6 +625,16 @@ fn kill(why: AiError) {
 
 fn crashed(message: &str) {
     log::error!("{message}");
+    // The threads variant didn't come up (no nested workers, no memory): plain worker from now on.
+    let mt = LIVE.with(|l| l.borrow().as_ref().map(|l| (l.threads, l.ready)));
+    if let Some((true, ready)) = mt {
+        with_run(|run| {
+            let mut s = run.shared.lock().unwrap_or_else(PoisonError::into_inner);
+            if !ready || s.device.is_empty() {
+                s.mt_broken = true;
+            }
+        });
+    }
     with_run(|run| {
         // Crashed while bringing up WebGPU: use the CPU from now on.
         if run.started_gpu && run.shared.lock().unwrap_or_else(PoisonError::into_inner).device.is_empty() {

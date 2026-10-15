@@ -14,6 +14,10 @@ pub enum Arch {
     Esrgan,
     /// LaMa (big-lama, Fast Fourier Convolutions), run by `photocraft-ai-lama`.
     Lama,
+    /// Real-ESRGAN Compact (SRVGGNetCompact): the lite upscaler ([`crate::compact`]).
+    Compact,
+    /// MI-GAN: the lite inpainter, run by `photocraft-ai-lama`.
+    Migan,
 }
 
 /// What a model is for.
@@ -26,6 +30,8 @@ pub enum Content {
     Color,
     /// Inpainting: fills masked areas (text, SFX) with background and screentone.
     Inpaint,
+    /// Upscaling of any page, grayscale or colour (the lite upscaler).
+    Any,
 }
 
 /// One downloadable model.
@@ -51,6 +57,9 @@ pub struct ModelInfo {
     pub author: &'static str,
     /// Where the original release lives.
     pub source: &'static str,
+    /// A lite model: much less work than the full one for the same job, for phones, weak
+    /// machines and CPUs (lower quality; the UI says so).
+    pub lite: bool,
 }
 
 impl ModelInfo {
@@ -81,6 +90,29 @@ macro_rules! mj {
             license: LICENSE,
             author: AUTHOR,
             source: MJ_SRC,
+            lite: false,
+        }
+    };
+}
+
+/// The lite upscaler: one weight file (`realesr-animevideov3`, the ×4 network) for both scales;
+/// ×2 runs it and box-downsamples.
+macro_rules! compact {
+    ($id:expr, $title:literal, $scale:literal) => {
+        ModelInfo {
+            id: $id,
+            title: $title,
+            file: "realesr-animevideov3-f16.safetensors",
+            arch: Arch::Compact,
+            scale: $scale,
+            content: Content::Any,
+            height: None,
+            bytes: 1_247_200,
+            sha256: "a0b2c646562345be46efbb2f863c5f4f873c0c2b18a86186cebd3ec2bf3ff777",
+            license: "BSD-3-Clause",
+            author: "Xintao Wang (Real-ESRGAN)",
+            source: "https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0",
+            lite: true,
         }
     };
 }
@@ -226,6 +258,7 @@ pub const MODELS: &[ModelInfo] = &[
         license: LICENSE,
         author: AUTHOR,
         source: MJ_SRC,
+        lite: false,
     },
     ModelInfo {
         id: "illustrationjanai-v1-4x",
@@ -240,6 +273,7 @@ pub const MODELS: &[ModelInfo] = &[
         license: LICENSE,
         author: AUTHOR,
         source: MJ_SRC,
+        lite: false,
     },
     ModelInfo {
         id: LAMA_ID,
@@ -254,8 +288,33 @@ pub const MODELS: &[ModelInfo] = &[
         license: "MIT",
         author: "dreMaz (AnimeMangaInpainting)",
         source: "https://huggingface.co/dreMaz/AnimeMangaInpainting",
+        lite: false,
+    },
+    compact!(COMPACT_4X_ID, "Real-ESRGAN Compact 4x (lite)", 4),
+    compact!(COMPACT_2X_ID, "Real-ESRGAN Compact 2x (lite)", 2),
+    ModelInfo {
+        id: MIGAN_ID,
+        title: "MI-GAN (lite)",
+        file: "migan-512-places2-f16.safetensors",
+        arch: Arch::Migan,
+        scale: 1,
+        content: Content::Inpaint,
+        height: None,
+        bytes: 13_198_644,
+        sha256: "76a73c53825e975c3aca4fcb1cf81521a92ca068117ff3a05ae54e7c109b8c68",
+        license: "MIT",
+        author: "Picsart AI Research (MI-GAN)",
+        source: "https://github.com/Picsart-AI-Research/MI-GAN",
+        lite: true,
     },
 ];
+
+
+/// The lite upscaler's ids.
+pub const COMPACT_4X_ID: &str = "realesr-compact-4x";
+pub const COMPACT_2X_ID: &str = "realesr-compact-2x";
+/// The id of the MI-GAN (lite) inpainting model.
+pub const MIGAN_ID: &str = "migan-512";
 
 /// The id of the Manga LaMa inpainting model.
 pub const LAMA_ID: &str = "manga-lama";
@@ -279,7 +338,10 @@ mod tests {
             }
             for b in &MODELS[i + 1..] {
                 assert_ne!(a.id, b.id);
-                assert_ne!(a.file, b.file);
+                // Entries may share a file (the lite upscaler's two scales), then all of it.
+                if a.file == b.file {
+                    assert_eq!((a.sha256, a.bytes, a.arch), (b.sha256, b.bytes, b.arch));
+                }
             }
         }
         assert_eq!(model("mangajanai-v1-4x-1200p").map(|m| m.scale), Some(4));

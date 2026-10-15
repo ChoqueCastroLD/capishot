@@ -13,10 +13,16 @@
 //! step: by default on a new layer above (masked pixels only, alpha = selection coverage; the
 //! original stays untouched), or on the layer itself (`output: "current"`). Only pixels the
 //! selection covers change; soft selection edges blend.
+//!
+//! `quality` (auto, fast, best) and `device` (auto, gpu, cpu) choose between Manga LaMa and the
+//! lite MI-GAN (512 px tiles, a fraction of the work: phones, weak machines, CPUs), as
+//! `image.upscaleAi` does; `model` names one explicitly. `threads` and `keepLoaded` are Advanced
+//! settings, like `maxSide` and `margin`.
 
 use std::sync::Arc;
 use std::sync::mpsc;
 
+use photocraft_ai::catalog::{self, ModelInfo};
 use photocraft_ai_lama::LamaError;
 use photocraft_ai_lama::service::{Hooks, Inpainter, ModelState, Request};
 use photocraft_ai_lama::tiles::{self, TileOptions};
@@ -54,46 +60,85 @@ impl Session {
     }
 }
 
-/// Validated `maxSide`, `margin` and `allowDownload`.
+/// Validated model, device, `maxSide`, `margin`, `threads`, `keepLoaded` and `allowDownload`.
 #[derive(Clone)]
 pub(crate) struct AiOptions {
     pub tiles: TileOptions,
     pub allow_download: bool,
+    pub model: &'static ModelInfo,
+    pub run: crate::ai_cmds::RunChoice,
+    pub threads: usize,
+    pub unload: bool,
 }
 
-pub(crate) fn ai_options(p: &Value, cmd: &str) -> Result<AiOptions> {
-    let bad = |m: String| EngineError::BadParams { cmd: cmd.into(), msg: m };
-    let uint = |k: &str, d: u64, lo: u64, hi: u64| -> Result<u64> {
-        match p.get(k) {
-            None | Some(Value::Null) => Ok(d),
-            Some(v) => v.as_u64().filter(|x| (lo..=hi).contains(x)).ok_or_else(|| bad(format!("`{k}` must be an integer in {lo}..={hi}"))),
+impl AiOptions {
+    fn request(&self, tile: tiles::TileInput) -> Request {
+        Request { tile, allow_download: self.allow_download, model: self.model.id, cpu: self.run.choice.cpu, threads: self.threads, unload: self.unload }
+    }
+}
+
+/// The inpainting model these params choose: `model` (an inpainting catalog id), else Manga
+/// LaMa or, when `quality`/`device` resolve to lite, MI-GAN.
+pub fn model_for(s: &Session, p: &Value, cmd: &str) -> Result<(&'static ModelInfo, crate::ai_cmds::RunChoice)> {
+    let run = crate::ai_cmds::run_choice(s, p, cmd)?;
+    let id = match p.get("model").and_then(Value::as_str).unwrap_or("auto") {
+        "auto" | "" => {
+            if run.choice.lite {
+                catalog::MIGAN_ID
+            } else {
+                catalog::LAMA_ID
+            }
         }
+        id => id,
     };
-    let max_side = uint("maxSide", 512, 64, 2048)?;
+    let model = catalog::model(id)
+        .filter(|m| m.content == catalog::Content::Inpaint)
+        .ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: format!("unknown inpainting model `{id}` ({} or {})", catalog::LAMA_ID, catalog::MIGAN_ID) })?;
+    Ok((model, run))
+}
+
+/// The model these params choose and whether it can run now (the UI's download prompt).
+pub fn model_state(s: &Session, p: &Value) -> Option<(&'static ModelInfo, ModelState)> {
+    let (model, _) = model_for(s, p, ID).ok()?;
+    Some((model, s.inpainter.as_ref()?.model_state_of(model.id)))
+}
+
+pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str) -> Result<AiOptions> {
+    let bad = |m: String| EngineError::BadParams { cmd: cmd.into(), msg: m };
+    let (model, run) = model_for(s, p, cmd)?;
+    let uint = |k: &str, d: u64, lo: u64, hi: u64| -> Result<u64> { Ok(crate::ai_cmds::uint_param(p, k, lo, hi, cmd)?.unwrap_or(d)) };
+    // MI-GAN works on at most 512 × 512; LaMa takes smaller crops on machines with little memory.
+    let lite = model.arch == catalog::Arch::Migan;
+    let default_side = if lite || !run.choice.small_tiles { 512 } else { 384 };
+    let max_side = uint("maxSide", default_side, 64, 2048)?;
     if !max_side.is_multiple_of(8) {
         return Err(bad("`maxSide` must be a multiple of 8".into()));
     }
+    let max_side = if lite { max_side.min(512) } else { max_side };
     let margin = uint("margin", 64, 0, 1024)?;
     let allow_download = match p.get("allowDownload") {
         None | Some(Value::Null) => false,
         Some(v) => v.as_bool().ok_or_else(|| bad("`allowDownload` must be true or false".into()))?,
     };
-    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize }, allow_download })
+    let threads = uint("threads", 0, 0, 64)? as usize;
+    let unload = !crate::ai_cmds::keep_loaded(p, cmd)?;
+    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize }, allow_download, model, run, threads, unload })
 }
 
-/// The service, if it can run now (else the reason, for the user).
-pub(crate) fn ready_inpainter(s: &Session, allow_download: bool) -> Result<Arc<dyn Inpainter>> {
+/// The service, if it can run `opts.model` now (else the reason, for the user).
+pub(crate) fn ready_inpainter(s: &Session, opts: &AiOptions) -> Result<Arc<dyn Inpainter>> {
     let svc = s.inpainter.clone().ok_or_else(|| EngineError::Other(UNAVAILABLE.into()))?;
-    match svc.model_state() {
+    let (title, allow_download) = (opts.model.title, opts.allow_download);
+    match svc.model_state_of(opts.model.id) {
         ModelState::Ready => Ok(svc),
         ModelState::NeedsDownload { .. } if allow_download => Ok(svc),
         // The browser's cache answers asynchronously; with consent the worker finds out itself.
         ModelState::Checking if allow_download => Ok(svc),
         ModelState::NeedsDownload { bytes } => Err(EngineError::Other(format!(
-            "Manga LaMa needs a one-time download of {} MB first (run again with \"allowDownload\": true)",
+            "{title} needs a one-time download of {} MB first (run again with \"allowDownload\": true)",
             bytes.div_ceil(1 << 20)
         ))),
-        ModelState::Checking => Err(EngineError::Other("still checking for the Manga LaMa model; try again in a moment".into())),
+        ModelState::Checking => Err(EngineError::Other(format!("still checking for the {title} model; try again in a moment"))),
         ModelState::Unavailable(why) => Err(EngineError::Other(why)),
     }
 }
@@ -179,7 +224,7 @@ pub(crate) fn ai_fill_rgb(
         let (a, b) = (lo + (hi - lo) * i as f32 / n, lo + (hi - lo) * (i + 1) as f32 / n);
         let status = if plan.len() > 1 { format!("{LABEL} ({} of {})", i + 1, plan.len()) } else { LABEL.to_string() };
         let hooks = Arc::new(JobHooks { ctx: ctx.clone(), lo: a, hi: b, status });
-        let out = run_blocking(svc, Request { tile: input, allow_download: opts.allow_download }, hooks)?;
+        let out = run_blocking(svc, opts.request(input), hooks)?;
         tiles::paste(&mut generated, &binary, w, h, t, &out).map_err(lama_err)?;
         ctx.progress(b, "");
     }
@@ -207,7 +252,7 @@ pub(crate) fn ai_fill_rgb_async(
     };
     let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
     let generated = rgb.clone();
-    let state = FillState { svc, ctx, rgb, cover, binary, generated, w, h, allow_download: opts.allow_download, plan, next: 0, finish };
+    let state = FillState { svc, ctx, rgb, cover, binary, generated, w, h, opts, plan, next: 0, finish };
     fill_step(state);
 }
 
@@ -220,7 +265,7 @@ struct FillState {
     generated: Vec<f32>,
     w: usize,
     h: usize,
-    allow_download: bool,
+    opts: AiOptions,
     plan: Vec<tiles::Tile>,
     next: usize,
     finish: Box<dyn FnOnce(Result<Vec<f32>>) + Send>,
@@ -244,7 +289,7 @@ fn fill_step(mut st: FillState) {
     let status = if st.plan.len() > 1 { format!("{LABEL} ({} of {})", i + 1, st.plan.len()) } else { LABEL.to_string() };
     let hooks = Arc::new(JobHooks { ctx: st.ctx.clone(), lo: a, hi: b, status });
     let svc = st.svc.clone();
-    let req = Request { tile: input, allow_download: st.allow_download };
+    let req = st.opts.request(input);
     svc.run(
         req,
         hooks,
@@ -354,7 +399,7 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
         Some("current") => false,
         Some(o) => return Err(bad(format!("unknown `output` {o:?} (new|current)"))),
     };
-    let opts = ai_options(p, ID)?;
+    let opts = ai_options(s, p, ID)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = &d.doc;
     let canvas = doc.bounds();
@@ -390,7 +435,8 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
 
 fn inpaint_ai(s: &mut Session, p: &Value) -> Result<Value> {
     let plan = plan(s, p)?;
-    let svc = ready_inpainter(s, plan.opts.allow_download)?;
+    let svc = ready_inpainter(s, &plan.opts)?;
+    let model = plan.opts.model;
     let device = svc.device();
     crate::jobs::run_async(
         s,
@@ -412,11 +458,11 @@ fn inpaint_ai(s: &mut Session, p: &Value) -> Result<Value> {
                 Box::new(move |r| done.finish(r.map(|generated| (plan, generated, svc2.device())))),
             );
         },
-        move |s, (plan, generated, dev)| apply(s, plan, &generated, if dev.is_empty() { device } else { dev }),
+        move |s, (plan, generated, dev)| apply(s, plan, &generated, if dev.is_empty() { device } else { dev }, model),
     )
 }
 
-fn apply(s: &mut Session, plan: Plan, generated: &[f32], device: String) -> Result<Value> {
+fn apply(s: &mut Session, plan: Plan, generated: &[f32], device: String, model: &ModelInfo) -> Result<Value> {
     let Plan { layer: id, fmt, region, layer_px, cover, new_layer, .. } = plan;
     let n = fmt.channels();
     let count = cover.iter().filter(|c| **c > 0.0).count();
@@ -465,6 +511,8 @@ fn apply(s: &mut Session, plan: Plan, generated: &[f32], device: String) -> Resu
         "pixels": count,
         "region": [region.x0, region.y0, region.width(), region.height()],
         "device": device,
+        "model": model.id,
+        "lite": model.lite,
     }))
 }
 
@@ -474,7 +522,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Clean with AI",
         menu: &["Edit"],
         shortcut: None,
-        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the Manga LaMa weights, about 100 MB, when not cached; default false)} -> {"layer", "pixels", "region": [x,y,w,h], "device"}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa. Background job, one undo step."#,
+        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu", "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite"}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
         enabled,
         run: inpaint_ai,
         journal: true,

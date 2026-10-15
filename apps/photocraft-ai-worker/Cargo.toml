@@ -17,9 +17,24 @@ path = "src/main.rs"
 # Everything is wasm-only: natively this is an empty binary, so workspace builds don't compile
 # the inference stack for it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-photocraft-ai = { workspace = true, features = ["gpu", "cpu"] }
-photocraft-ai-lama = { workspace = true, features = ["wgpu", "flex", "rayon"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "WorkerGlobalScope", "MessageEvent", "CacheStorage", "Cache", "Request", "Response", "ResponseInit", "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Headers", "console"] }
+# burn's rand needs a randomness source on wasm32-unknown-unknown (wgpu enables it otherwise).
+getrandom = { version = "0.4", features = ["wasm_js"] }
+web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "WorkerGlobalScope", "WorkerNavigator", "MessageEvent", "CacheStorage", "Cache", "Request", "Response", "ResponseInit", "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Headers", "console"] }
+
+# The plain worker: WebGPU, else the CPU on one thread (SIMD128).
+[target.'cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))'.dependencies]
+photocraft-ai = { workspace = true, features = ["gpu", "cpu"] }
+photocraft-ai-lama = { workspace = true, features = ["wgpu", "flex", "rayon"] }
+
+# The threads variant (packaging/web-ai/build.sh, for cross-origin isolated pages): CPU only
+# (wgpu's WebGPU objects aren't Send, so it doesn't build with shared memory), with a rayon pool
+# of nested Web Workers for the kernels. The AI worker is not the page's main thread, so rayon
+# may block here (no `web_spin_lock`).
+[target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
+photocraft-ai = { workspace = true, features = ["cpu"] }
+photocraft-ai-lama = { workspace = true, features = ["flex", "rayon"] }
+rayon = { workspace = true }
+wasm-bindgen-rayon = { version = "1.3", features = ["no-bundler"] }

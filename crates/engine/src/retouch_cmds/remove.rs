@@ -75,8 +75,8 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
     let close_loops = flag(p, "closeLoops", true);
     let all_layers = flag(p, "sampleAllLayers", false) && targets_pixels(p);
     let ai = if flag(p, "ai", false) {
-        let opts = crate::ai_inpaint_cmds::ai_options(p, CMD)?;
-        Some((crate::ai_inpaint_cmds::ready_inpainter(s, opts.allow_download)?, opts))
+        let opts = crate::ai_inpaint_cmds::ai_options(s, p, CMD)?;
+        Some((crate::ai_inpaint_cmds::ready_inpainter(s, &opts)?, opts))
     } else {
         None
     };

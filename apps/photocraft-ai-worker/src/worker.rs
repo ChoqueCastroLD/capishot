@@ -10,10 +10,12 @@
 //! Main thread → worker:
 //! * `{type: "run", id, model, base, download, grayscale, cpu, width, height, channels, data}`:
 //!   upscale `data` (a `Float32Array`, planar, transferred) with catalog model `model`, fetching
-//!   its weights from `base` when not cached and `download` is true; `cpu` skips WebGPU.
-//! * `{type: "inpaint", id, base, download, cpu, width, height, rgb, mask}`: Manga LaMa on one
-//!   tile (`rgb` interleaved, `mask` 0/1, both `Float32Array`s, transferred); the reply's `data`
-//!   is the interleaved RGB output (`channels` 3).
+//!   its weights from `base` when not cached and `download` is true; `cpu` skips WebGPU;
+//!   optional `tile` and `overlap` override the model's tiling; `unload` frees the model after.
+//! * `{type: "inpaint", id, model, base, download, cpu, width, height, rgb, mask}`: an
+//!   inpainting model (`model`: a catalog id, Manga LaMa by default, or MI-GAN) on one tile
+//!   (`rgb` interleaved, `mask` 0/1, both `Float32Array`s, transferred); the reply's `data`
+//!   is the interleaved RGB output (`channels` 3). `unload` frees the model after the run.
 //!
 //! Worker → main thread:
 //! * `{type: "ready"}` once loaded;
@@ -42,9 +44,17 @@ use web_sys::{Cache, DedicatedWorkerGlobalScope, MessageEvent, ReadableStreamDef
 #[derive(Default)]
 struct State {
     rt: Option<Runtime>,
+    /// Threads variant: the rayon pool size asked for by the page (0: one per core).
+    #[cfg(target_feature = "atomics")]
+    threads: usize,
+    /// Threads variant: the pool is up (started with the CPU runtime, never before: rayon would
+    /// otherwise build its one-thread fallback pool for good).
+    #[cfg(target_feature = "atomics")]
+    pool: usize,
     device: String,
     loaded: Option<Rc<Loaded>>,
-    lama: Option<Rc<photocraft_ai_lama::Lama>>,
+    /// The loaded inpainting model and its catalog id.
+    inpaint: Option<(&'static str, Rc<photocraft_ai_lama::Generator>)>,
 }
 
 thread_local! {
@@ -79,6 +89,15 @@ fn js_err(e: JsValue) -> String {
 
 fn get(msg: &JsValue, k: &str) -> JsValue {
     Reflect::get(msg, &k.into()).unwrap_or(JsValue::UNDEFINED)
+}
+
+/// Threads variant: the bootstrap calls this after loading the module, with the rayon pool size
+/// it wants (0: one per core). The pool itself starts with the first CPU run.
+#[cfg(target_feature = "atomics")]
+#[wasm_bindgen(js_name = startAi)]
+pub fn start_ai(threads: u32) {
+    STATE.with(|s| s.borrow_mut().threads = threads as usize);
+    start();
 }
 
 /// Installs the message handler and announces itself.
@@ -180,26 +199,49 @@ async fn run_inner(msg: &JsValue, id: f64) -> Result<(Planar, String)> {
     drop(bytes);
     p.lo = 0.15;
     p.status = format!("Upscaling with {} ({})", model.title, p.device);
-    let out = upscale(&rt, &loaded, &input, default_tiles(model), &p).await?;
-    Ok((out, p.device))
+    let mut tiles = default_tiles(model);
+    let n = |k: &str| get(msg, k).as_f64().filter(|v| v.is_finite() && *v >= 0.0).map(|v| v as usize);
+    if let Some(t) = n("tile").filter(|t| (32..=1024).contains(t)) {
+        tiles.tile = t;
+    }
+    if let Some(o) = n("overlap").filter(|o| o * 2 < tiles.tile) {
+        tiles.overlap = o;
+    }
+    let out = upscale(&rt, &loaded, &input, tiles, &p).await;
+    if get(msg, "unload").as_bool().unwrap_or(false) {
+        STATE.with(|s| s.borrow_mut().loaded = None);
+    }
+    Ok((out?, p.device))
 }
 
 /// The device: WebGPU when the browser offers an adapter (checked first, so a missing one is a
-/// clean fallback, not a failure inside the runtime), else the CPU.
+/// clean fallback, not a failure inside the runtime), else the CPU. The threads variant is
+/// CPU-only.
 async fn runtime(cpu: bool) -> Result<Runtime> {
     if let Some(rt) = STATE.with(|s| s.borrow().rt.clone()) {
         return Ok(rt);
     }
-    let (rt, device) = if !cpu && has_adapter().await {
+    #[cfg(not(target_feature = "atomics"))]
+    let gpu = if !cpu && has_adapter().await {
         match Runtime::gpu().await {
-            Ok(rt) => (rt, "WebGPU".to_string()),
+            Ok(rt) => Ok(rt),
             Err(e) => {
                 web_sys::console::warn_1(&format!("AI worker: WebGPU failed ({e}); using the CPU").into());
-                (Runtime::cpu(), "CPU (WebGPU failed)".to_string())
+                Err(" (WebGPU failed)")
             }
         }
     } else {
-        (Runtime::cpu(), if cpu { "CPU".to_string() } else { "CPU (no WebGPU)".to_string() })
+        Err(if cpu { "" } else { " (no WebGPU)" })
+    };
+    #[cfg(target_feature = "atomics")]
+    let gpu: std::result::Result<Runtime, &str> = Err(if cpu { "" } else { " (no WebGPU)" });
+    let (rt, device) = match gpu {
+        Ok(rt) => (rt, "WebGPU".to_string()),
+        Err(why) => {
+            let threads = cpu_pool().await;
+            let what = if threads > 1 { format!("CPU, {threads} threads") } else { "CPU".to_string() };
+            (Runtime::cpu(), format!("{what}{why}"))
+        }
     };
     STATE.with(|s| {
         let mut s = s.borrow_mut();
@@ -209,6 +251,41 @@ async fn runtime(cpu: bool) -> Result<Runtime> {
     Ok(rt)
 }
 
+/// Starts the CPU kernels' rayon pool (threads variant) and returns its size; 1 without threads.
+async fn cpu_pool() -> usize {
+    #[cfg(target_feature = "atomics")]
+    {
+        let (asked, up) = STATE.with(|s| (s.borrow().threads, s.borrow().pool));
+        if up > 0 {
+            return up;
+        }
+        let n = pool_size(asked, scope().navigator().hardware_concurrency());
+        match JsFuture::from(wasm_bindgen_rayon::init_thread_pool(n)).await {
+            Ok(_) => {
+                STATE.with(|s| s.borrow_mut().pool = n);
+                n
+            }
+            Err(e) => {
+                // No nested workers (or no memory for them): one thread, as before.
+                web_sys::console::warn_1(&format!("AI worker: no thread pool ({}); one CPU thread", js_err(e)).into());
+                STATE.with(|s| s.borrow_mut().pool = 1);
+                1
+            }
+        }
+    }
+    #[cfg(not(target_feature = "atomics"))]
+    1
+}
+
+/// The pool size: what the page asked for, else one per core; at most 16 (more workers than
+/// that cost memory and startup time for little gain on 512 px tiles).
+#[cfg(target_feature = "atomics")]
+fn pool_size(asked: usize, cores: f64) -> usize {
+    let cores = if cores.is_finite() && cores >= 1.0 { cores as usize } else { 4 };
+    if asked > 0 { asked.min(64) } else { cores.clamp(1, 16) }
+}
+
+#[cfg(not(target_feature = "atomics"))]
 async fn has_adapter() -> bool {
     let gpu = get(&get(&js_sys::global(), "navigator"), "gpu");
     if gpu.is_undefined() || gpu.is_null() {
@@ -322,7 +399,8 @@ async fn inpaint(msg: JsValue) {
 }
 
 async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>, usize, usize, String), String> {
-    let model = catalog::model(catalog::LAMA_ID).ok_or("Manga LaMa isn't in the catalog")?;
+    let name = get(msg, "model").as_string().unwrap_or_else(|| catalog::LAMA_ID.to_string());
+    let model = catalog::model(&name).filter(|m| m.content == catalog::Content::Inpaint).ok_or_else(|| format!("{name} isn't an inpainting model"))?;
     let base = get(msg, "base").as_string().unwrap_or_default();
     let download = get(msg, "download").as_bool().unwrap_or(false);
     let cpu = get(msg, "cpu").as_bool().unwrap_or(false);
@@ -331,19 +409,24 @@ async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>,
     let arr = |k: &str| get(msg, k).dyn_into::<Float32Array>().map(|a| a.to_vec()).map_err(|_| format!("no {k}"));
     let (rgb, mask) = (arr("rgb")?, arr("mask")?);
     let mut p = Posting { id, lo: 0.0, status: String::new(), device: String::new() };
-    let lama = match STATE.with(|s| s.borrow().lama.clone()) {
-        Some(l) => l,
+    let reuse = STATE.with(|s| s.borrow().inpaint.clone()).filter(|(i, _)| *i == model.id);
+    let lama = match reuse {
+        Some((_, l)) => l,
         None => {
+            STATE.with(|s| s.borrow_mut().inpaint = None);
             let bytes = weights(model, &base, download, &p).await.map_err(|e| e.to_string())?;
             p.send(0.12, "Preparing the model");
             let rt = runtime(cpu).await.map_err(|e| e.to_string())?;
-            let l = Rc::new(photocraft_ai_lama::Lama::from_safetensors(&bytes, rt.device()).map_err(|e| e.to_string())?);
-            STATE.with(|s| s.borrow_mut().lama = Some(l.clone()));
+            let l = Rc::new(photocraft_ai_lama::Generator::from_safetensors(&bytes, rt.device()).map_err(|e| e.to_string())?);
+            STATE.with(|s| s.borrow_mut().inpaint = Some((model.id, l.clone())));
             l
         }
     };
     p.device = STATE.with(|s| s.borrow().device.clone());
-    p.send(0.2, &format!("Cleaning with Manga LaMa ({})", p.device));
-    let out = lama.generate_async(&rgb, &mask, w, h).await.map_err(|e| e.to_string())?;
-    Ok((out, w, h, p.device))
+    p.send(0.2, &format!("Cleaning with {} ({})", model.title, p.device));
+    let out = lama.generate_async(&rgb, &mask, w, h).await.map_err(|e| e.to_string());
+    if get(msg, "unload").as_bool().unwrap_or(false) {
+        STATE.with(|s| s.borrow_mut().inpaint = None);
+    }
+    Ok((out?, w, h, p.device))
 }

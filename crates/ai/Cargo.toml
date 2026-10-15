@@ -17,7 +17,7 @@ default = []
 # parsing and the cache: small enough for the main web bundle.
 runtime = ["dep:burn", "dep:pollster"]
 # CPU inference (burn-flex: gemm, SIMD; rayon threads natively and in the threads web build).
-cpu = ["runtime", "burn/flex", "burn/rayon", "burn/simd"]
+cpu = ["runtime", "burn/flex", "burn/rayon", "burn/simd", "dep:rayon"]
 # GPU inference through wgpu: Vulkan/Metal/DX12 natively, WebGPU in the browser. No burn autotune:
 # its kernel trials can hit shaders a WebGPU implementation rejects (SwiftShader), which poisons
 # the device for every later model.
@@ -33,6 +33,7 @@ half = "2"
 sha2 = "0.10"
 burn = { version = "0.22", default-features = false, features = ["std"], optional = true }
 pollster = { version = "1", optional = true }
+rayon = { workspace = true, optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }

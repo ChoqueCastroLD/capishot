@@ -37,6 +37,26 @@ pub struct Request {
     pub tile: TileInput,
     /// The user agreed to download the weights if they aren't cached.
     pub allow_download: bool,
+    /// The model's catalog id (`photocraft_ai::catalog`): [`LAMA`] or [`MIGAN`].
+    pub model: &'static str,
+    /// Skip the GPU.
+    pub cpu: bool,
+    /// CPU threads; 0: one per core.
+    pub threads: usize,
+    /// Free the model after the run instead of keeping it loaded.
+    pub unload: bool,
+}
+
+/// Catalog id of Manga LaMa (as `photocraft_ai::catalog::LAMA_ID`).
+pub const LAMA: &str = "manga-lama";
+/// Catalog id of MI-GAN (as `photocraft_ai::catalog::MIGAN_ID`).
+pub const MIGAN: &str = "migan-512";
+
+impl Request {
+    /// Manga LaMa on `tile`, automatic device.
+    pub fn lama(tile: TileInput, allow_download: bool) -> Self {
+        Self { tile, allow_download, model: LAMA, cpu: false, threads: 0, unload: false }
+    }
 }
 
 /// Progress and cancellation from the caller's job.
@@ -52,8 +72,12 @@ pub type Done = Box<dyn FnOnce(Result<Vec<f32>>) + Send>;
 
 /// Runs LaMa (see the module docs).
 pub trait Inpainter: Send + Sync {
-    /// Whether a request can run now.
+    /// Whether a Manga LaMa request can run now.
     fn model_state(&self) -> ModelState;
+    /// Whether a request for catalog model `model` ([`LAMA`], [`MIGAN`]) can run now.
+    fn model_state_of(&self, model: &str) -> ModelState {
+        if model == LAMA { self.model_state() } else { ModelState::Unavailable(format!("{model} isn't available here")) }
+    }
     /// Where the model runs, for the UI ("WebGPU", "Vulkan", "CPU"); empty until known.
     fn device(&self) -> String {
         String::new()
@@ -70,6 +94,8 @@ pub struct FakeInpainter {
     pub fail: Option<String>,
     /// Report this state instead of `Ready`.
     pub state: Option<ModelState>,
+    /// The last request's model id and CPU flag.
+    pub last: std::sync::Mutex<Option<(&'static str, bool)>>,
 }
 
 impl Inpainter for FakeInpainter {
@@ -77,18 +103,23 @@ impl Inpainter for FakeInpainter {
         self.state.clone().unwrap_or(ModelState::Ready)
     }
 
+    fn model_state_of(&self, _model: &str) -> ModelState {
+        self.model_state()
+    }
+
     fn device(&self) -> String {
         "test".into()
     }
 
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
+        *self.last.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((req.model, req.cpu));
         if hooks.cancelled() {
             return done(Err(LamaError::Cancelled));
         }
         if let Some(e) = &self.fail {
             return done(Err(LamaError::Device(e.clone())));
         }
-        if let ModelState::NeedsDownload { .. } = self.model_state()
+        if let ModelState::NeedsDownload { .. } = self.model_state_of(req.model)
             && !req.allow_download
         {
             return done(Err(LamaError::Unavailable("the model needs a download".into())));

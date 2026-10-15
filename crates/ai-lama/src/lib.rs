@@ -27,6 +27,10 @@ pub mod service;
 pub mod tiles;
 
 #[cfg(feature = "model")]
+mod generator;
+#[cfg(feature = "model")]
+mod migan;
+#[cfg(feature = "model")]
 mod model;
 #[cfg(all(feature = "model", not(target_family = "wasm")))]
 pub mod native;
@@ -35,6 +39,10 @@ mod weights;
 
 #[cfg(feature = "model")]
 pub use burn;
+#[cfg(feature = "model")]
+pub use generator::Generator;
+#[cfg(feature = "model")]
+pub use migan::Migan;
 #[cfg(feature = "model")]
 pub use model::Lama;
 #[cfg(feature = "model")]

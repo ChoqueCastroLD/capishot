@@ -7,6 +7,7 @@
 
 use std::time::Instant;
 
+use photocraft_ai::compact::Compact;
 use photocraft_ai::esrgan::Esrgan;
 use photocraft_ai::runtime::{Network, Runtime, block_on, run_tiled};
 use photocraft_ai::tile::TileOptions;
@@ -27,6 +28,16 @@ fn runtime(kind: &str) -> Runtime {
     }
 }
 
+/// ESRGAN or Compact, by the file's `arch` metadata.
+fn load(rt: &Runtime, w: &Weights, gray: bool) -> Box<dyn Network> {
+    if w.metadata.get("arch").map(String::as_str) == Some("compact") {
+        let scale = std::env::var("SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(Compact::config(w).expect("config").upscale);
+        Box::new(Compact::load(rt, w, scale, gray).expect("load"))
+    } else {
+        Box::new(Esrgan::load(rt, w, gray).expect("load"))
+    }
+}
+
 fn read_f32(path: &str) -> Vec<f32> {
     let b = std::fs::read(path).expect(path);
     b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect()
@@ -44,7 +55,7 @@ fn main() {
             let inp = Planar::new(s, s, 3, read_f32(&format!("{}.in.bin", a[3]))).expect("input");
             let reference = read_f32(&format!("{}.out.bin", a[3]));
             let t0 = Instant::now();
-            let net = Esrgan::load(&rt, &w, gray).expect("load");
+            let net = load(&rt, &w, gray);
             let load = t0.elapsed();
             let input = if gray { inp.crop(0, 0, s, s).with_channels(1) } else { inp };
             let input = photocraft_ai::runtime::reflect_pad(
@@ -99,9 +110,9 @@ fn main() {
             };
             let input = if gray && a.iter().any(|x| x == "levels") { photocraft_ai::mangajanai::auto_levels(&input) } else { input };
             let tile = a.get(7).and_then(|t| t.parse().ok()).unwrap_or(128);
-            let net = Esrgan::load(&rt, &w, gray).expect("load");
+            let net = load(&rt, &w, gray);
             let t0 = Instant::now();
-            let out = block_on(run_tiled(&rt, &net, &input, TileOptions { tile, overlap: 16 }, &Print)).expect("run");
+            let out = block_on(run_tiled(&rt, net.as_ref(), &input, TileOptions { tile, overlap: 16 }, &Print)).expect("run");
             let dt = t0.elapsed();
             eprintln!();
             println!("{iw}x{ih} -> {}x{} in {:.1}s ({} tile {tile})", out.width, out.height, dt.as_secs_f64(), a[5]);

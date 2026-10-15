@@ -45,6 +45,8 @@ struct Inner {
     rt: Option<Runtime>,
     device: String,
     loaded: Option<Loaded>,
+    /// `loaded` lives on the CPU runtime (a CPU request), not `rt`.
+    loaded_cpu: bool,
 }
 
 impl NativeUpscaler {
@@ -92,17 +94,55 @@ impl NativeUpscaler {
             return Err(AiError::Cancelled);
         }
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        let rt = self.runtime(&mut inner)?;
-        let reuse = inner.loaded.as_ref().is_some_and(|l| l.id == req.model.id && l.grayscale == req.grayscale);
+        let cpu = req.opts.cpu || self.choice == DeviceChoice::Cpu;
+        let rt = if req.opts.cpu { cpu_runtime()? } else { self.runtime(&mut inner)? };
+        let device = if req.opts.cpu { "CPU".to_string() } else { inner.device.clone() };
+        let reuse = inner.loaded.as_ref().is_some_and(|l| l.id == req.model.id && l.grayscale == req.grayscale) && inner.loaded_cpu == req.opts.cpu;
         if !reuse {
             inner.loaded = None;
             inner.loaded = Some(Loaded::new(&rt, req.model, &bytes, req.grayscale)?);
+            inner.loaded_cpu = req.opts.cpu;
         }
         let loaded = inner.loaded.as_ref().ok_or_else(|| AiError::Inference("model not loaded".into()))?;
-        let status = format!("Upscaling with {title} ({})", inner.device);
+        let status = format!("Upscaling with {title} ({device})");
         let progress = TileHooks { hooks, lo: 0.1, status };
-        block_on(upscale(&rt, loaded, &req.input, default_tiles(req.model), &progress))
+        let tiles = req.opts.tiles.unwrap_or_else(|| default_tiles(req.model));
+        let threads = req.opts.threads;
+        let run = || block_on(upscale(&rt, loaded, &req.input, tiles, &progress));
+        // CPU threads: a pool of that size for this run (0: rayon's global pool, one per core).
+        let out = match (cpu, threads) {
+            (true, n) if n > 0 => with_threads(n, run),
+            _ => run(),
+        };
+        if req.opts.unload {
+            inner.loaded = None;
+        }
+        out
     }
+}
+
+#[cfg(feature = "cpu")]
+fn cpu_runtime() -> Result<Runtime> {
+    Ok(Runtime::cpu())
+}
+
+#[cfg(not(feature = "cpu"))]
+fn cpu_runtime() -> Result<Runtime> {
+    Err(AiError::Device("this build has no CPU backend".into()))
+}
+
+/// Runs `f` on a rayon pool of `n` threads (the CPU kernels use rayon's current pool).
+#[cfg(feature = "cpu")]
+fn with_threads<T: Send>(n: usize, f: impl FnOnce() -> T + Send) -> T {
+    match rayon::ThreadPoolBuilder::new().num_threads(n).build() {
+        Ok(pool) => pool.install(f),
+        Err(_) => f(),
+    }
+}
+
+#[cfg(not(feature = "cpu"))]
+fn with_threads<T: Send>(_: usize, f: impl FnOnce() -> T + Send) -> T {
+    f()
 }
 
 /// Picks the device for `choice`, with a name for the UI.
@@ -168,6 +208,38 @@ impl Upscaler for NativeUpscaler {
 
     fn device(&self) -> String {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner).device.clone()
+    }
+
+    fn profile(&self) -> crate::profile::DeviceProfile {
+        use crate::profile::{DeviceProfile, GpuClass};
+        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        // Known once the runtime came up (bringing a GPU up just to ask would cost seconds).
+        let gpu = match (&inner.rt, self.choice) {
+            (_, DeviceChoice::Cpu) => GpuClass::None,
+            (Some(rt), _) if rt.accel() == crate::runtime::Accel::Gpu => GpuClass::Integrated,
+            (Some(_), _) => GpuClass::None,
+            (None, _) => GpuClass::Unknown,
+        };
+        DeviceProfile {
+            gpu,
+            gpu_name: if gpu == GpuClass::Integrated { inner.device.clone() } else { String::new() },
+            memory_gb: None,
+            cores: std::thread::available_parallelism().ok().map(|n| n.get()),
+            mobile: false,
+            cpu_threads: true,
+        }
+    }
+
+    fn storage_used(&self) -> Option<u64> {
+        let mut files: Vec<(&str, u64)> = crate::catalog::MODELS.iter().filter(|m| self.cache.contains(m)).map(|m| (m.file, m.bytes)).collect();
+        files.sort_unstable();
+        files.dedup();
+        Some(files.iter().map(|(_, b)| b).sum())
+    }
+
+    fn clear_downloads(&self) -> Result<()> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner).loaded = None;
+        self.cache.clear()
     }
 
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {

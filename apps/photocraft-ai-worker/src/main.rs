@@ -4,7 +4,9 @@
 mod worker;
 
 fn main() {
-    #[cfg(target_arch = "wasm32")]
+    // The threads variant starts from its bootstrap (`startAi`) instead: `main` also runs in
+    // every rayon pool worker that instantiates the module.
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     worker::start();
     #[cfg(not(target_arch = "wasm32"))]
     eprintln!("photocraft-ai-worker runs only in a browser, as a Web Worker of Capishot's web build");
