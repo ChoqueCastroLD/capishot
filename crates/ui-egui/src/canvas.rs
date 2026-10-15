@@ -3312,7 +3312,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             primary && app.ui.dialogs.last().is_some_and(|d| crate::select_mask_view::owns(&d.fields) && crate::select_mask_view::brush_on(&d.fields));
         // Field Blur's pins are placed and dragged on the image (`blur_pins`).
         let pinning = primary && app.ui.dialogs.last().is_some_and(|d| crate::blur_pins::owns(&d.fields));
-        let hand = app.ui.tool == Tool::Hand && !picking && !range_picking && !refine_brushing && !pinning;
+        // Layer Style on a Drop or Inner Shadow page: a drag on the image moves the shadow (#5701).
+        let shadow_drag =
+            !picking && app.ui.dialogs.last().is_some_and(|d| d.kind == crate::state::DialogKind::LayerStyle && crate::layer_style::drags_shadow(&d.fields));
+        let hand = app.ui.tool == Tool::Hand && !picking && !range_picking && !refine_brushing && !pinning && !shadow_drag;
         if let Some(d) = crate::dialogs::pan_delta(&ctx, rect, hand) {
             let d = xf.unmap_vec(d) / (view.zoom / ppp);
             view.center[0] -= d.x;
@@ -3320,6 +3323,15 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             ctx.set_cursor_icon(crate::tool_cursor::hand(&ctx, true));
         } else if free_hover && (space_pan || hand) {
             ctx.set_cursor_icon(crate::tool_cursor::hand(&ctx, false));
+        } else if shadow_drag && !middle && crate::dialogs::free_pointer_over(&ctx, rect).is_some() {
+            ctx.set_cursor_icon(egui::CursorIcon::Move);
+            if let Some(p) = crate::dialogs::free_press(&ctx, rect) {
+                let (start, origin) = ctx.input(|i| (i.pointer.primary_pressed(), i.pointer.press_origin().unwrap_or(p)));
+                let total = xf.unmap_vec(p - origin) / (view.zoom / ppp);
+                if let Some(d) = app.ui.dialogs.last_mut() {
+                    crate::layer_style::drag_shadow(&mut d.fields, start, [f64::from(total.x), f64::from(total.y)]);
+                }
+            }
         } else if picking && let Some(p) = crate::dialogs::free_pointer_over(&ctx, rect) {
             if app.session.prefs().cursors.other == photocraft_engine::prefs::OtherCursor::Precise {
                 ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
