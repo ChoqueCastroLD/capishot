@@ -136,6 +136,7 @@ pub fn select(height: usize, scale: u32, content: Content) -> Result<&'static Mo
     let want = match content {
         Content::Grayscale => Some(height_bin(height)),
         Content::Color => None,
+        Content::Inpaint => return Err(AiError::UnknownModel("inpainting models don't upscale".into())),
     };
     MODELS
         .iter()

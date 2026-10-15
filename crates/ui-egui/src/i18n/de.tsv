@@ -138,6 +138,11 @@
 	Fill…	Füllen…
 	Stroke…	Nachziehen…
 	Content-Aware Fill…	Inhaltsbasiert füllen…
+	Clean with AI	Mit KI bereinigen
+	Use AI (Manga LaMa)	KI verwenden (Manga LaMa)
+	Clean Selection with AI	Auswahl mit KI bereinigen
+	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Füllt Striche mit Manga LaMa statt mit benachbarten Bereichen: besser bei Rastern und Linienzeichnungen. Bei der ersten Verwendung wird das Modell heruntergeladen (etwa 100 MB).
+	Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB).	Löscht den ausgewählten Text oder Soundeffekte und zeichnet den Hintergrund mit Manga LaMa auf einer neuen Ebene neu. Bei der ersten Verwendung wird das Modell heruntergeladen (etwa 100 MB).
 	Delete and Fill Selection	Auswahl löschen und füllen
 	Content-Aware Scale	Inhaltsbasiert skalieren
 	Puppet Warp	Marionetten-Verkrümmung

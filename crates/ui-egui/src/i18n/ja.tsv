@@ -136,6 +136,11 @@
 	Fill…	塗りつぶし…
 	Stroke…	境界線を描く…
 	Content-Aware Fill…	コンテンツに応じた塗りつぶし…
+	Clean with AI	AIでクリーンアップ
+	Use AI (Manga LaMa)	AIを使用 (Manga LaMa)
+	Clean Selection with AI	選択範囲をAIでクリーンアップ
+	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	近くのパッチの代わりに Manga LaMa でストロークを塗りつぶします。スクリーントーンや線画に適しています。初回はモデル（約 100 MB）をダウンロードします。
+	Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB).	選択したテキストや描き文字を消去し、Manga LaMa で背景を新規レイヤーに描き直します。初回はモデル（約 100 MB）をダウンロードします。
 	Delete and Fill Selection	選択範囲を削除して塗りつぶし
 	Content-Aware Scale	コンテンツに応じた拡大・縮小
 	Puppet Warp	パペットワープ

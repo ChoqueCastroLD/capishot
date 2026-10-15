@@ -166,6 +166,12 @@ fn with_fonts(h: Headless, a: &Args) -> Headless {
 }
 
 fn with_fonts_in(mut h: Headless, allow_online: bool, config_dir: Option<PathBuf>) -> Headless {
+    // `edit.inpaintAi` and the Remove tool's AI mode: Manga LaMa on this machine's GPU or CPU,
+    // weights from CAPISHOT_LAMA_WEIGHTS or <config>/models (feature `ai`).
+    #[cfg(feature = "ai")]
+    if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(config_dir.as_deref()) {
+        h.session.set_inpainter(Some(std::sync::Arc::new(i)));
+    }
     if let Some(dir) = config_dir {
         photocraft_fontfetch::attach(&mut h.session, &dir);
         // Image › Upscale with AI (`image.upscaleAi`), in-process (the `ai` feature).

@@ -18,6 +18,7 @@ path = "src/main.rs"
 # the inference stack for it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 photocraft-ai = { workspace = true, features = ["gpu", "cpu"] }
+photocraft-ai-lama = { workspace = true, features = ["wgpu", "flex", "rayon"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

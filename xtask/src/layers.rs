@@ -48,6 +48,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("tablet", Class::Standalone),
     // Local AI runtime (model catalog, tiling, weights, cache; burn inference behind features).
     ("ai", Class::Standalone),
+    // Manga LaMa inpainting: crop/paste tiling (always) and the generator on burn (feature `model`).
+    ("ai-lama", Class::Standalone),
     ("doc", Class::Layer(1)),
     ("ops", Class::Layer(2)),
     ("paint", Class::Layer(2)),

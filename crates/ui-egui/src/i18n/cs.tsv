@@ -142,6 +142,11 @@
 	Fill…	Vyplnit…
 	Stroke…	Tah…
 	Content-Aware Fill…	Výplň s ohledem na obsah…
+	Clean with AI	Vyčistit pomocí AI
+	Use AI (Manga LaMa)	Použít AI (Manga LaMa)
+	Clean Selection with AI	Vyčistit výběr pomocí AI
+	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Vyplní tahy pomocí Manga LaMa místo okolních záplat: lepší na rastry a kresbu. Při prvním použití se stáhne model (asi 100 MB).
+	Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB).	Vymaže vybraný text nebo zvukové efekty a překreslí pozadí pomocí Manga LaMa do nové vrstvy. Při prvním použití se stáhne model (asi 100 MB).
 	Delete and Fill Selection	Odstranit a vyplnit výběr
 	Content-Aware Scale	Změna velikosti s ohledem na obsah
 	Puppet Warp	Loutková deformace

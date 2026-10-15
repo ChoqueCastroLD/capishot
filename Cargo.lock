@@ -6876,6 +6876,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "open",
  "photocraft-ai",
+ "photocraft-ai-lama",
  "photocraft-automation",
  "photocraft-codecs",
  "photocraft-color",
@@ -6935,11 +6936,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "photocraft-ai-lama"
+version = "0.7.0"
+dependencies = [
+ "burn",
+ "half",
+ "image",
+ "safetensors 0.8.0",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "photocraft-ai-worker"
 version = "0.7.0"
 dependencies = [
  "js-sys",
  "photocraft-ai",
+ "photocraft-ai-lama",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -6985,6 +6998,7 @@ name = "photocraft-cli"
 version = "0.7.0"
 dependencies = [
  "photocraft-ai",
+ "photocraft-ai-lama",
  "photocraft-automation",
  "photocraft-codecs",
  "photocraft-engine",
@@ -7068,6 +7082,7 @@ dependencies = [
  "flate2",
  "photocraft-affinity",
  "photocraft-ai",
+ "photocraft-ai-lama",
  "photocraft-algo",
  "photocraft-cms",
  "photocraft-codecs",
@@ -7381,6 +7396,7 @@ dependencies = [
  "js-sys",
  "log",
  "photocraft-ai",
+ "photocraft-ai-lama",
  "photocraft-codecs",
  "photocraft-compose",
  "photocraft-doc",

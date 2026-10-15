@@ -28,6 +28,7 @@ impl Loaded {
         let w = Weights::from_safetensors(bytes)?;
         let net = match model.arch {
             Arch::Esrgan => Esrgan::load(rt, &w, grayscale)?,
+            Arch::Lama => return Err(crate::AiError::UnknownModel(format!("{} is not an upscaler", model.id))),
         };
         Ok(Self { id: model.id, grayscale, net })
     }

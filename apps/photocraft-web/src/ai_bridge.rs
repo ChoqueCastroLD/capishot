@@ -46,12 +46,17 @@ pub struct WebUpscaler {
     shared: Arc<Mutex<Shared>>,
 }
 
-/// The upscaler for this page, if it names an AI worker.
-pub fn from_page() -> Option<Arc<dyn Upscaler>> {
+/// Manga LaMa (`edit.inpaintAi`, the Remove tool's AI mode) through the same worker.
+pub struct WebInpainter {
+    up: WebUpscaler,
+}
+
+/// The upscaler and the inpainter for this page, if it names an AI worker (one worker runs both).
+pub fn from_page() -> Option<(Arc<dyn Upscaler>, Arc<dyn photocraft_ai_lama::service::Inpainter>)> {
     let worker_url = meta_url("capishot-ai-worker")?;
     let models_base = meta_url("capishot-ai-models").map(|u| if u.ends_with('/') { u } else { format!("{u}/") });
-    let shared = Shared { worker_url: Some(worker_url), models_base, ..Default::default() };
-    Some(Arc::new(WebUpscaler { shared: Arc::new(Mutex::new(shared)) }))
+    let shared = Arc::new(Mutex::new(Shared { worker_url: Some(worker_url), models_base, ..Default::default() }));
+    Some((Arc::new(WebUpscaler { shared: shared.clone() }), Arc::new(WebInpainter { up: WebUpscaler { shared } })))
 }
 
 fn meta_url(name: &str) -> Option<String> {
@@ -115,14 +120,82 @@ impl Upscaler for WebUpscaler {
     }
 
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
-        let (url, base, cpu) = {
-            let s = self.lock();
-            (s.worker_url.clone(), s.models_base.clone().unwrap_or_default(), s.cpu_only)
-        };
-        let Some(url) = url else { return done(Err(AiError::Device("the AI worker isn't part of this build".into()))) };
+        let Some((url, base, cpu)) = self.target() else { return done(Err(AiError::Device(NO_WORKER.into()))) };
         let msg = run_message(&req, &base, cpu);
-        let run = Run { model: req.model.id, done: Some(done), hooks, shared: self.shared.clone(), started_gpu: false };
+        let (h2, h3) = (hooks.clone(), hooks);
+        let run = Run {
+            model: req.model.id,
+            reply: Some(Reply::Upscale(done)),
+            progress: Box::new(move |f, s| h2.progress(f, s)),
+            cancelled: Box::new(move || h3.cancelled()),
+            shared: self.shared.clone(),
+            started_gpu: false,
+        };
         if let Err(e) = start(&url, msg, run) {
+            log::error!("AI worker: {e}");
+        }
+    }
+}
+
+const NO_WORKER: &str = "the AI worker isn't available here (it runs on the page's main thread, in builds that include it)";
+
+impl WebUpscaler {
+    /// The worker URL, models base and CPU flag; `None` off the main thread (the threads build's
+    /// pool workers can't own the page's AI worker) or without a worker.
+    fn target(&self) -> Option<(String, String, bool)> {
+        web_sys::window()?;
+        let s = self.lock();
+        Some((s.worker_url.clone()?, s.models_base.clone().unwrap_or_default(), s.cpu_only))
+    }
+}
+
+impl photocraft_ai_lama::service::Inpainter for WebInpainter {
+    fn model_state(&self) -> photocraft_ai_lama::service::ModelState {
+        use photocraft_ai_lama::service::ModelState as M;
+        let Some(m) = photocraft_ai::catalog::model(photocraft_ai::catalog::LAMA_ID) else { return M::Unavailable("Manga LaMa isn't in the catalog".into()) };
+        match self.up.model_state(m) {
+            ModelState::Ready => M::Ready,
+            ModelState::NeedsDownload => M::NeedsDownload { bytes: m.bytes },
+            ModelState::Checking => M::Checking,
+            ModelState::Unavailable(why) => M::Unavailable(why),
+        }
+    }
+
+    fn device(&self) -> String {
+        self.up.device()
+    }
+
+    fn run(&self, req: photocraft_ai_lama::service::Request, hooks: Arc<dyn photocraft_ai_lama::service::Hooks>, done: photocraft_ai_lama::service::Done) {
+        use photocraft_ai_lama::LamaError;
+        let Some((url, base, cpu)) = self.up.target() else { return done(Err(LamaError::Unavailable(NO_WORKER.into()))) };
+        let t = &req.tile;
+        let rgb = Float32Array::from(t.rgb.as_slice());
+        let mask = Float32Array::from(t.mask.as_slice());
+        let o = Object::new();
+        for (k, v) in [
+            ("type", JsValue::from("inpaint")),
+            ("id", 1.into()),
+            ("base", base.into()),
+            ("download", req.allow_download.into()),
+            ("cpu", cpu.into()),
+            ("width", (t.w as f64).into()),
+            ("height", (t.h as f64).into()),
+            ("mask", mask.into()),
+        ] {
+            let _ = Reflect::set(&o, &k.into(), &v);
+        }
+        let buffer: JsValue = rgb.buffer().into();
+        let _ = Reflect::set(&o, &"rgb".into(), &rgb.into());
+        let (h2, h3) = (hooks.clone(), hooks);
+        let run = Run {
+            model: photocraft_ai::catalog::LAMA_ID,
+            reply: Some(Reply::Inpaint(done)),
+            progress: Box::new(move |f, s| h2.progress(f, s)),
+            cancelled: Box::new(move || h3.cancelled()),
+            shared: self.up.shared.clone(),
+            started_gpu: false,
+        };
+        if let Err(e) = start(&url, (o, buffer), run) {
             log::error!("AI worker: {e}");
         }
     }
@@ -150,11 +223,21 @@ fn run_message(req: &Request, base: &str, cpu: bool) -> (Object, JsValue) {
     (o, buffer)
 }
 
+/// Where a run's result goes.
+enum Reply {
+    Upscale(Done),
+    Inpaint(photocraft_ai_lama::service::Done),
+}
+
+/// Reports a run's progress (`0..=1`, status).
+type ProgressFn = Box<dyn Fn(f32, &str)>;
+
 /// The run in flight.
 struct Run {
     model: &'static str,
-    done: Option<Done>,
-    hooks: Arc<dyn Hooks>,
+    reply: Option<Reply>,
+    progress: ProgressFn,
+    cancelled: Box<dyn Fn() -> bool>,
     shared: Arc<Mutex<Shared>>,
     /// The worker reported it was starting the device (a crash after this is a GPU problem).
     started_gpu: bool,
@@ -162,8 +245,15 @@ struct Run {
 
 impl Run {
     fn finish(&mut self, r: photocraft_ai::Result<Planar>) {
-        if let Some(done) = self.done.take() {
-            done(r);
+        use photocraft_ai_lama::LamaError;
+        match self.reply.take() {
+            Some(Reply::Upscale(done)) => done(r),
+            Some(Reply::Inpaint(done)) => done(match r {
+                Ok(p) => Ok(p.data),
+                Err(AiError::Cancelled) => Err(LamaError::Cancelled),
+                Err(e) => Err(LamaError::Device(e.to_string())),
+            }),
+            None => {}
         }
     }
 }
@@ -285,7 +375,7 @@ fn on_message(data: JsValue) {
                 if !device.is_empty() {
                     run.shared.lock().unwrap_or_else(PoisonError::into_inner).device = device.clone();
                 }
-                run.hooks.progress(fraction, &status);
+                (run.progress)(fraction, &status);
             });
         }
         "done" => {
@@ -359,7 +449,7 @@ fn crashed(message: &str) {
 }
 
 fn poll_cancel() {
-    let cancelled = LIVE.with(|l| l.borrow().as_ref().and_then(|l| l.run.as_ref()).is_some_and(|r| r.hooks.cancelled()));
+    let cancelled = LIVE.with(|l| l.borrow().as_ref().and_then(|l| l.run.as_ref()).is_some_and(|r| (r.cancelled)()));
     if cancelled {
         kill(AiError::Cancelled);
     }
