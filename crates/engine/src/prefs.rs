@@ -1557,7 +1557,7 @@ impl Session {
         for st in &mut self.docs {
             st.history.max_states = n;
             st.history.max_bytes = bytes;
-            st.history.trim(&st.doc);
+            st.trim_history();
         }
         photocraft_compose::set_effect_cache_budget(budget << 20);
         // Without waiting for the system font scan: this runs on the UI thread at launch.
