@@ -314,8 +314,12 @@ pub fn open_editor(app: &mut PhotocraftApp, ctx: &egui::Context, layer: u64, sm:
 /// filter (`layer.smartFilter.setParams`, see [`confirm_command`]) instead of adding another.
 fn edit_filter(app: &mut PhotocraftApp, id: u64, layer: u64, index: usize, params: &Value) {
     if let Some(d) = app.ui.dialog_mut(id) {
-        // The live preview would stack a second copy of the filter on the smart object.
-        d.fields.remove("__preview");
+        // A filter's live preview runs `layer.smartFilter.setParams` on the proxy, as OK does
+        // (`canvas::ensure_filter_preview`, #6324). An adjustment's previews on the layer and
+        // would stack a second copy of it on the smart object.
+        if d.fields.contains_key("__adjust") {
+            d.fields.remove("__preview");
+        }
         d.fields.insert("__smartFilter".into(), json!({"layer": layer, "index": index}));
         if let Value::Object(p) = params {
             for (k, v) in p {
@@ -451,5 +455,45 @@ mod tests {
         assert_eq!(sm.smart_filters.len(), 1, "no filter was stacked");
         assert_eq!(sm.smart_filters[0].params.get("brightness").and_then(Value::as_f64), Some(40.0));
         assert_eq!(sm.smart_filters[0].params.get("contrast").and_then(Value::as_f64), Some(-10.0));
+    }
+
+    /// #6324: a smart filter opened for editing previews, and its preview replaces the filter in
+    /// the stack (as OK does) instead of stacking a second one.
+    #[test]
+    fn an_edited_smart_filter_previews_what_ok_gives() {
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 64, "height": 48, "background": "#ffffff"})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.execute("select.all", json!({})).unwrap();
+        s.execute("edit.stroke", json!({"width": 4, "color": "#000000", "location": "inside"})).unwrap();
+        s.execute("select.deselect", json!({})).unwrap();
+        let id = s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap()["layer"].as_u64().unwrap();
+        s.execute("filter.blur.gaussianBlur", json!({"radius": 1.0})).unwrap();
+        let mut app = PhotocraftApp::new(s, crate::Services::default());
+        app.background_jobs = false;
+        let smart = |app: &PhotocraftApp, doc: &Document| match &doc.layer(LayerId(id)).unwrap().content {
+            LayerContent::Smart(sm) => sm.clone(),
+            other => panic!("expected a smart object, got {other:?} ({})", app.ui.status),
+        };
+        let sm = smart(&app, &app.session.active().unwrap().doc);
+        open_editor(&mut app, &egui::Context::default(), id, &sm, 0);
+        let d = app.ui.dialogs.last_mut().expect("the filter's dialog opened");
+        assert_eq!(d.fields.get("__preview"), Some(&json!(true)), "the dialog previews");
+        d.fields.insert("radius".into(), json!(6.0));
+        let dialog = d.id;
+
+        crate::canvas::ensure_filter_preview(&mut app, 0, &egui::Context::default()).expect("a preview");
+        let preview = app.filter_preview.as_ref().unwrap();
+        assert_eq!(preview.key.command, "layer.smartFilter.setParams");
+        let shown = preview.result.clone().expect("the preview's document");
+        let filters = smart(&app, &shown).smart_filters;
+        assert_eq!(filters.len(), 1, "the edited filter is replaced, not stacked");
+        assert_eq!(filters[0].params.get("radius").and_then(Value::as_f64), Some(6.0));
+        assert_eq!(smart(&app, &app.session.active().unwrap().doc).smart_filters[0].params["radius"], json!(1.0), "the document is untouched");
+
+        crate::dialogs::confirm(&mut app, dialog).unwrap();
+        let doc = &app.session.active().unwrap().doc;
+        assert_eq!(smart(&app, doc).smart_filters.len(), 1);
+        assert!(photocraft_compose::flatten(&shown).px == photocraft_compose::flatten(doc).px, "OK gives what the preview showed");
     }
 }
