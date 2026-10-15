@@ -1642,7 +1642,8 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 for (icon, name, g) in entries {
                     // Studio floats Properties outside the dock.
                     let docked = t.pro || g != Group::Properties;
-                    let on = if customized { crate::panel_docking::rail_on(app, g) } else { dock_shown && g.shown(&p) && !(docked && app.ui.dock.is_collapsed(g)) };
+                    let on =
+                        if customized { crate::panel_docking::rail_on(app, g) } else { dock_shown && g.shown(&p) && !(docked && app.ui.dock.is_collapsed(g)) };
                     if icons::rail_button(ui, icon, rb, on, name).clicked() {
                         if customized {
                             crate::panel_docking::rail_click(app, g);
