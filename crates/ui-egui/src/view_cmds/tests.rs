@@ -510,9 +510,14 @@ fn esc_leaves_full_screen_modes_unless_something_else_owns_it() {
 #[test]
 fn creating_a_selection_restores_hidden_extras() {
     let mut hidden = Vec::new();
-    for (command, params) in
-        [("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})), ("select.loadSelection", json!({"channel": "transparency"}))]
-    {
+    for (command, params) in [
+        ("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})),
+        ("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20, "ellipse": true})),
+        ("select.lasso", json!({"points": [[10,10], [30,10], [20,30]]})),
+        ("select.magicWand", json!({"x": 10, "y": 10})),
+        ("select.loadSelection", json!({"channel": "transparency"})),
+        ("select.loadLuminosity", json!({})),
+    ] {
         let (mut app, ctx) = app_with(1);
         app.run("edit.fill", json!({"color": "#cc4422"})).unwrap();
         menu(&mut app, &ctx, "view.extras", json!({})).unwrap();
@@ -538,4 +543,16 @@ fn failed_selection_and_unrelated_edits_keep_extras_hidden() {
     assert!(!app.ui.view.extras, "painting an existing hidden selection keeps it hidden");
     app.run("select.deselect", json!({})).unwrap();
     assert!(!app.ui.view.extras, "deselecting has no new outline to reveal");
+}
+
+#[test]
+fn new_selection_preserves_individual_show_preferences() {
+    let (mut app, ctx) = app_with(1);
+    app.ui.view.show.selection_edges = false;
+    app.ui.view.show.grid = false;
+    menu(&mut app, &ctx, "view.extras", json!({})).unwrap();
+    app.run("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap();
+    assert!(app.ui.view.extras);
+    assert!(!app.ui.view.show.selection_edges);
+    assert!(!app.ui.view.show.grid);
 }
