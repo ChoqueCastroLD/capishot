@@ -45,7 +45,9 @@ pub(crate) fn window(app: &PhotocraftApp, dialog: u64, ui: &mut egui::Ui, f: &mu
     let filtered: Option<(FilterPreviewKey, std::sync::Arc<Document>)> = app.filter_preview.as_ref().and_then(|p| {
         // An edited smart filter previews as `layer.smartFilter.setParams` (#6324).
         let previewed = crate::smart_ui::preview_command(f, &cmd);
-        (preview_on && p.key.dialog == dialog && p.key.doc == doc_id && p.key.command == previewed).then(|| p.result.clone().map(|r| (p.key.clone(), r))).flatten()
+        (preview_on && p.key.dialog == dialog && p.key.doc == doc_id && p.key.command == previewed)
+            .then(|| p.result.clone().map(|r| (p.key.clone(), r)))
+            .flatten()
     });
     // The proxy factor the preview runs at (the filtered key's when it exists, else the request's).
     let base_k = filtered.as_ref().map(|(k, _)| k.k).unwrap_or_else(|| {
