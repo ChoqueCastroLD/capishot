@@ -11,6 +11,10 @@
 //! durations, error classes (command id + kind, never the message), slow-command timings, and
 //! (schema 2) frame-time percentiles per canvas tool: how long the app took per frame while a
 //! tool was dragged on the canvas or the view zoomed/scrolled (`frames`, see [`Recorder::frame`]).
+//! Schema 3 adds the device class and memory bucket to `session_start`, and to `frames` the true
+//! frame rate (intervals between painted frames), dropped frames, the layer-count bucket, the
+//! number of gestures and the split of the worst frame (input wait, app logic, UI layout, paint
+//! and GPU submission; see [`FrameSample`]).
 //! Never: file names, paths, document content, typed text, error messages.
 
 use std::cell::Cell;
@@ -21,7 +25,7 @@ use std::sync::{Mutex, OnceLock};
 use serde_json::{Map, Value, json};
 
 /// Version of the batch schema the collector validates.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 /// Events queued between flushes; later ones are dropped (and counted).
 pub const MAX_EVENTS: usize = 200;
 /// Distinct (command, source) and (command, error) keys aggregated between flushes.
@@ -92,6 +96,10 @@ pub struct Environment {
     pub screen: (u32, u32),
     /// UI language code (`es`, `pt-br`, …).
     pub language: String,
+    /// [`device_class`]: `mobile`, `tablet`, `desktop` or `unknown`.
+    pub device: &'static str,
+    /// `navigator.deviceMemory` in GB (0 = not reported), bucketed with [`memory_bucket`].
+    pub memory_gb: f64,
 }
 
 /// The `session_start` event for `env`.
@@ -111,7 +119,69 @@ pub fn session_start_event(env: &Environment) -> Value {
         "os": os_family(&env.user_agent),
         "screen": screen_bucket(env.screen.0, env.screen.1),
         "lang": sanitize_token(&env.language, 12).unwrap_or_else(|| "other".into()),
+        "device": if matches!(env.device, "mobile" | "tablet" | "desktop") { env.device } else { "unknown" },
+        "mem": memory_bucket(env.memory_gb),
     })
+}
+
+/// The device class from the user agent, the number of touch points and the screen's shorter
+/// side in CSS pixels: phones say `Mobi` (or are iPhones); tablets are touch devices that don't
+/// (Android tablets, iPads, which also pose as a Mac with touch points).
+pub fn device_class(ua: &str, max_touch_points: u32, screen_short_side: u32) -> &'static str {
+    if ua.is_empty() {
+        return "unknown";
+    }
+    if ua.contains("iPhone") || ua.contains("iPod") || (ua.contains("Mobi") && !ua.contains("iPad")) {
+        return "mobile";
+    }
+    let ipad = ua.contains("iPad") || (ua.contains("Macintosh") && max_touch_points > 1);
+    let android_tablet = ua.contains("Android");
+    if ipad || android_tablet || ua.contains("Tablet") {
+        return if screen_short_side > 0 && screen_short_side < 480 { "mobile" } else { "tablet" };
+    }
+    "desktop"
+}
+
+/// `navigator.deviceMemory` (GB, rounded down to a power of two by the browser) as a bucket.
+pub fn memory_bucket(gb: f64) -> &'static str {
+    match gb {
+        g if !g.is_finite() || g <= 0.0 => "unknown",
+        g if g < 1.0 => "<1",
+        g if g < 2.0 => "1",
+        g if g < 4.0 => "2",
+        g if g < 8.0 => "4",
+        _ => "8+",
+    }
+}
+
+/// Where a frame's main-thread time went (ms): `input` how long the oldest input it consumed had
+/// waited when it started, `logic` the app's logic (tools, commands, canvas refresh), `ui` the
+/// panels' and canvas's layout, `paint` tessellation, painting and GPU submission.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameParts {
+    pub input: f64,
+    pub logic: f64,
+    pub ui: f64,
+    pub paint: f64,
+}
+
+/// One frame of a canvas gesture for [`Recorder::frame_sample`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FrameSample<'a> {
+    /// The tool dragged ([`tool_id`]) or [`VIEW_FRAMES`].
+    pub key: &'a str,
+    /// The frame's main-thread time (logic + layout + paint).
+    pub ms: f64,
+    /// How long the oldest pointer move it consumed waited until the frame was painted.
+    pub latency_ms: Option<f64>,
+    /// Since the previous painted frame (the display's frame rate while the gesture runs).
+    pub interval_ms: Option<f64>,
+    pub megapixels: Option<f64>,
+    /// Layers in the document (groups count).
+    pub layers: Option<usize>,
+    /// The first frame of a gesture (a press, or the first wheel step).
+    pub gesture_start: bool,
+    pub parts: Option<FrameParts>,
 }
 
 /// The queue and aggregates of one session. Pure data: the platform shell owns the clock and
@@ -132,7 +202,15 @@ pub struct Recorder {
     frames: BTreeMap<String, FrameHist>,
     dropped: u32,
     ended: bool,
+    /// The display's frame period as observed (the shortest interval between painted frames
+    /// seen, at least [`MIN_VSYNC_MS`]): what a dropped frame is measured against.
+    vsync_ms: f64,
 }
+
+/// Intervals shorter than this are back-to-back event frames, not the display's period.
+const MIN_VSYNC_MS: f64 = 5.5;
+/// The period assumed until a shorter one is seen (60 Hz).
+const DEFAULT_VSYNC_MS: f64 = 1000.0 / 60.0;
 
 /// Frame times (and input-to-paint latencies) of one key since the last batch, as 1 ms histograms:
 /// fixed size, nothing allocated per frame.
@@ -146,11 +224,39 @@ struct FrameHist {
     max_ms: f64,
     latency_max_ms: f64,
     mp: Option<&'static str>,
+    /// Intervals between painted frames (schema 3).
+    intervals: Box<[u32; FRAME_BUCKETS]>,
+    interval_n: u32,
+    interval_sum_ms: f64,
+    interval_max_ms: f64,
+    /// Display frames missed (an interval of k periods misses k − 1).
+    missed: u32,
+    gestures: u32,
+    layers: Option<&'static str>,
+    /// The slowest frame's split.
+    worst: Option<FrameParts>,
 }
 
 impl FrameHist {
     fn new() -> Self {
-        Self { frames: Box::new([0; FRAME_BUCKETS]), latency: Box::new([0; FRAME_BUCKETS]), n: 0, latency_n: 0, long: 0, max_ms: 0.0, latency_max_ms: 0.0, mp: None }
+        Self {
+            frames: Box::new([0; FRAME_BUCKETS]),
+            latency: Box::new([0; FRAME_BUCKETS]),
+            n: 0,
+            latency_n: 0,
+            long: 0,
+            max_ms: 0.0,
+            latency_max_ms: 0.0,
+            mp: None,
+            intervals: Box::new([0; FRAME_BUCKETS]),
+            interval_n: 0,
+            interval_sum_ms: 0.0,
+            interval_max_ms: 0.0,
+            missed: 0,
+            gestures: 0,
+            layers: None,
+            worst: None,
+        }
     }
 
     fn bucket(ms: f64) -> usize {
@@ -190,6 +296,7 @@ impl Recorder {
             frames: BTreeMap::new(),
             dropped: 0,
             ended: false,
+            vsync_ms: DEFAULT_VSYNC_MS,
         }
     }
 
@@ -198,9 +305,23 @@ impl Recorder {
     /// `latency_ms` how long the oldest pointer move the frame consumed waited until the frame was
     /// painted; `megapixels` the document's size. Summarised per key as percentiles at the batch.
     pub fn frame(&mut self, key: &str, ms: f64, latency_ms: Option<f64>, megapixels: Option<f64>) {
+        self.frame_sample(&FrameSample { key, ms, latency_ms, megapixels, ..Default::default() });
+    }
+
+    /// One frame of a canvas gesture with everything schema 3 reports (see [`FrameSample`]).
+    pub fn frame_sample(&mut self, f: &FrameSample<'_>) {
+        let (key, ms, latency_ms, megapixels) = (f.key, f.ms, f.latency_ms, f.megapixels);
         if self.ended || !ms.is_finite() || ms < 0.0 {
             return;
         }
+        // The display's period: the shortest interval between painted frames seen so far.
+        let interval = f.interval_ms.filter(|i| i.is_finite() && *i > 0.0 && *i < 1000.0 && !f.gesture_start);
+        if let Some(i) = interval
+            && i >= MIN_VSYNC_MS
+        {
+            self.vsync_ms = self.vsync_ms.min(i);
+        }
+        let vsync = self.vsync_ms;
         if !self.frames.contains_key(key) {
             if self.frames.len() >= MAX_FRAME_KEYS {
                 return;
@@ -225,6 +346,29 @@ impl Recorder {
         }
         if let Some(mp) = megapixels {
             h.mp = Some(mp_bucket_of(mp));
+        }
+        if let Some(n) = f.layers {
+            h.layers = Some(layers_bucket(n));
+        }
+        if f.gesture_start {
+            h.gestures = h.gestures.saturating_add(1);
+        }
+        if let Some(i) = interval {
+            h.interval_n = h.interval_n.saturating_add(1);
+            h.interval_sum_ms += i;
+            h.interval_max_ms = h.interval_max_ms.max(i);
+            if let Some(slot) = h.intervals.get_mut(FrameHist::bucket(i)) {
+                *slot = slot.saturating_add(1);
+            }
+            let periods = (i / vsync).round();
+            if periods >= 2.0 {
+                h.missed = h.missed.saturating_add((periods - 1.0).min(1000.0) as u32);
+            }
+        }
+        if let Some(parts) = f.parts
+            && h.max_ms <= ms.min(3_600_000.0)
+        {
+            h.worst = Some(parts);
         }
     }
 
@@ -354,6 +498,23 @@ impl Recorder {
             }
             if let Some(mp) = h.mp {
                 e["mp"] = json!(mp);
+            }
+            if h.interval_n > 0 && h.interval_sum_ms > 0.0 {
+                e["fps"] = json!(((1000.0 * f64::from(h.interval_n) / h.interval_sum_ms).round() as u64).min(1000));
+                e["int95"] = json!(FrameHist::quantile(&h.intervals, h.interval_n, 0.95, h.interval_max_ms));
+                e["drop"] = json!(h.missed);
+            }
+            if let Some(l) = h.layers {
+                e["layers"] = json!(l);
+            }
+            if h.gestures > 0 {
+                e["g"] = json!(h.gestures);
+            }
+            if let Some(w) = h.worst {
+                e["w_in"] = json!(round_ms(w.input));
+                e["w_logic"] = json!(round_ms(w.logic));
+                e["w_ui"] = json!(round_ms(w.ui));
+                e["w_paint"] = json!(round_ms(w.paint));
             }
             events.push(e);
         }

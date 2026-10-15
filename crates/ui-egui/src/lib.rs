@@ -134,6 +134,7 @@ pub mod paint_mouse;
 pub mod palette;
 mod panel_docking;
 pub mod panels;
+pub mod perf_counters;
 pub mod parity;
 pub mod patch_preview;
 pub(crate) mod pattern_fill_ui;
@@ -715,6 +716,8 @@ pub struct PhotocraftApp {
     started: Option<gpu_status::StartedHook>,
     /// Frame and canvas-upload timings (exposed via `ui.inspect`).
     pub perf: gpu_canvas::Perf,
+    /// Work counters (thumbnails, rows, panel recomputes): see `perf_counters`.
+    pub perf_counters: perf_counters::PerfCounters,
     /// Preferences, autosave and snapping runtime state (see `prefs_ui`, `snap_ui`).
     pub(crate) prefs_rt: prefs_ui::Runtime,
     /// Close, Revert or Exit parked behind the unsaved-changes prompt (see `discard_ui`).
@@ -845,6 +848,7 @@ impl PhotocraftApp {
             gpu: None,
             started: None,
             perf: Default::default(),
+            perf_counters: Default::default(),
             prefs_rt: Default::default(),
             discard: None,
             file_dialog: None,
@@ -1585,6 +1589,7 @@ impl eframe::App for PhotocraftApp {
             self.fonts_ready = true;
         }
         self.frame += 1;
+        self.perf_counters.frames += 1;
         let now = ctx.input(|i| i.time);
         let dt = (now - self.last_frame_time) as f32;
         if dt > 0.0 {
@@ -1943,6 +1948,7 @@ impl PhotocraftApp {
         {
             return tex.id();
         }
+        self.perf_counters.thumbs += 1;
         let mut px = [0.0f32; 8];
         let img = thumb_image(doc, 64, |x, y| {
             let Some(s) = layer.surface() else { return [0.0; 4] };
@@ -1961,6 +1967,7 @@ impl PhotocraftApp {
         {
             return tex.id();
         }
+        self.perf_counters.mask_thumbs += 1;
         let mut v = [0.0f32; 1];
         let img = thumb_image(doc, 64, |x, y| {
             mask.surface.read_pixel(x, y, &mut v);
