@@ -139,10 +139,12 @@ jobs:
 
       # `--features heif`: official builds open HEIC photos via the optional photocraft-heif crate.
       # nextest doesn't run doctests, so `cargo test --doc` does, with the same selection.
+      # Separate native commands into steps so Windows reports either command's failure.
       - name: Test
-        run: |
-          cargo nextest run --workspace --locked --features heif --profile ci
-          cargo test --doc --workspace --locked --features heif
+        run: cargo nextest run --workspace --locked --features heif --profile ci
+
+      - name: Doctests
+        run: cargo test --doc --workspace --locked --features heif
 
       # The same codecs without the optional decoder: HEIC must stay a clear "not in this build"
       # error for distributors who leave it out.
