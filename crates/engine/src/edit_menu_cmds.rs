@@ -107,14 +107,14 @@ fn always(_: &Session) -> std::result::Result<(), String> {
     Ok(())
 }
 
-fn pixel_layer(s: &Session) -> std::result::Result<LayerId, String> {
+pub(crate) fn pixel_layer(s: &Session) -> std::result::Result<LayerId, String> {
     let d = s.active().ok_or("no document open")?;
     let id = d.active_layer.ok_or("no active layer")?;
     pixel_layer_id(s, id)
 }
 
 /// `id` if it is an unlocked pixel layer of the active document.
-fn pixel_layer_id(s: &Session, id: LayerId) -> std::result::Result<LayerId, String> {
+pub(crate) fn pixel_layer_id(s: &Session, id: LayerId) -> std::result::Result<LayerId, String> {
     let d = s.active().ok_or("no document open")?;
     let l = d.doc.layer(id).ok_or("no active layer")?;
     if !matches!(l.content, LayerContent::Raster(_)) {
@@ -127,7 +127,7 @@ fn pixel_layer_id(s: &Session, id: LayerId) -> std::result::Result<LayerId, Stri
     Ok(id)
 }
 
-fn writable_surface(doc: &mut Document, id: LayerId) -> Result<&mut Surface> {
+pub(crate) fn writable_surface(doc: &mut Document, id: LayerId) -> Result<&mut Surface> {
     let locks = doc.effective_locks(id);
     let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
     if locks.all || locks.pixels {

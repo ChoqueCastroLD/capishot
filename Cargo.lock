@@ -6875,6 +6875,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "open",
+ "photocraft-ai-lama",
  "photocraft-automation",
  "photocraft-codecs",
  "photocraft-color",
@@ -6967,6 +6968,7 @@ dependencies = [
 name = "photocraft-cli"
 version = "0.7.0"
 dependencies = [
+ "photocraft-ai-lama",
  "photocraft-automation",
  "photocraft-codecs",
  "photocraft-engine",
@@ -7049,6 +7051,7 @@ dependencies = [
  "exr",
  "flate2",
  "photocraft-affinity",
+ "photocraft-ai-lama",
  "photocraft-algo",
  "photocraft-cms",
  "photocraft-codecs",

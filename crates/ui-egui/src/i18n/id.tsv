@@ -133,6 +133,11 @@
 	Fill…	Isi…
 	Stroke…	Stroke…
 	Content-Aware Fill…	Isi Content-Aware…
+	Clean with AI	Bersihkan dengan AI
+	Use AI (Manga LaMa)	Gunakan AI (Manga LaMa)
+	Clean Selection with AI	Bersihkan Seleksi dengan AI
+	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Isi goresan dengan Manga LaMa, bukan tambalan di sekitarnya: lebih baik untuk screentone dan line art. Penggunaan pertama mengunduh model (sekitar 100 MB).
+	Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB).	Hapus teks atau SFX yang dipilih dan gambar ulang latar dengan Manga LaMa di layer baru. Penggunaan pertama mengunduh model (sekitar 100 MB).
 	Delete and Fill Selection	Hapus dan Isi Seleksi
 	Content-Aware Scale	Skala Content-Aware
 	Puppet Warp	Puppet Warp

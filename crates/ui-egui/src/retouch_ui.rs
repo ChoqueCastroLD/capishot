@@ -116,6 +116,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
     let pts = json!(points);
     let (cmd, mut p): (&str, Value) = match tool {
         Tool::SpotHealing => ("paint.spotHealing", json!({"type": o.spot_type, "sampleAllLayers": o.sample_all_layers, "mode": o.spot_mode})),
+        Tool::Remove if o.remove_ai => ("paint.remove", json!({"sampleAllLayers": o.sample_all_layers, "ai": true, "allowDownload": true})),
         Tool::Remove => ("paint.remove", json!({"sampleAllLayers": o.sample_all_layers})),
         Tool::MixerBrush => ("paint.mixerBrush", json!({})),
         Tool::ColorReplacement => ("paint.colorReplacement", color_replacement_params(app)),
@@ -378,6 +379,22 @@ fn pct(ui: &mut egui::Ui, label: &str, v: &mut f32) {
     crate::widgets::value_field(ui, v, 1.0..=100.0, "%", 58.0);
 }
 
+/// "Clean Selection with AI" (`edit.inpaintAi`): the scanlation cleaner's one click, next to the
+/// Remove tool's options. Enabled with a selection on a pixel layer.
+fn clean_selection_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let enabled = app.session.is_enabled(photocraft_engine::ai_inpaint_cmds::ID);
+    let r = ui
+        .add_enabled_ui(enabled, |ui| crate::widgets::secondary_button(ui, tl!("Clean Selection with AI"), 0.0))
+        .inner
+        .on_hover_text(tl!("Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB)."));
+    if r.clicked()
+        && let Err(e) = app.run(photocraft_engine::ai_inpaint_cmds::ID, json!({"allowDownload": true}))
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
 /// Options bar for the retouching and smart-selection tools. Returns false for other tools.
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bool {
     if !tool.is_brushlike() && !matches!(tool, Tool::QuickSelection | Tool::ObjectSelection | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye)
@@ -404,6 +421,12 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
         }
         Tool::Remove => {
             crate::widgets::checkbox(ui, &mut o.sample_all_layers, tl!("Sample All Layers"));
+            crate::widgets::vline(ui, 22.0);
+            // Photoshop's Remove tool has a Generative AI mode here; ours is Manga LaMa, local.
+            crate::widgets::checkbox(ui, &mut o.remove_ai, tl!("Use AI (Manga LaMa)"))
+                .on_hover_text(tl!("Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB)."));
+            crate::widgets::vline(ui, 22.0);
+            clean_selection_button(app, ui);
         }
         Tool::Patch => {
             // Photoshop's options bar: Patch: Normal (Source / Destination) or Content-Aware

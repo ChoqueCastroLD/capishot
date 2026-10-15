@@ -1431,7 +1431,7 @@ pub fn specs() -> Vec<CommandSpec> {
             menu: &[],
             shortcut: None,
             params: brush_params!(
-                r#","closeLoops":bool=true (a stroke around an object removes what it encloses),"sampleAllLayers":bool=false → {"damage"} (a background job)"#
+                r#","closeLoops":bool=true (a stroke around an object removes what it encloses),"sampleAllLayers":bool=false,"ai":bool=false (fill with Manga LaMa, like edit.inpaintAi; with its "maxSide","margin","allowDownload") → {"damage"} (a background job)"#
             ),
             enabled: has_pixel_layer,
             run: remove::remove,
