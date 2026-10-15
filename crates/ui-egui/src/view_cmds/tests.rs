@@ -506,3 +506,22 @@ fn esc_leaves_full_screen_modes_unless_something_else_owns_it() {
     assert_eq!(app.ui.view.screen_mode, "standard");
     assert!(app.session.active().unwrap().doc.selection.is_some());
 }
+
+#[test]
+fn creating_a_selection_restores_hidden_extras() {
+    let mut hidden = Vec::new();
+    for (command, params) in
+        [("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})), ("select.loadSelection", json!({"channel": "transparency"}))]
+    {
+        let (mut app, ctx) = app_with(1);
+        app.run("edit.fill", json!({"color": "#cc4422"})).unwrap();
+        menu(&mut app, &ctx, "view.extras", json!({})).unwrap();
+        assert!(!app.ui.view.extras, "explicit hide remains effective before a new selection");
+        app.run(command, params).unwrap();
+        assert!(app.session.active().unwrap().doc.selection.is_some(), "{command} creates a selection");
+        if !app.ui.view.shows(app.ui.view.show.selection_edges) || checked(&app, "view.extras") != Some(true) {
+            hidden.push(command);
+        }
+    }
+    assert!(hidden.is_empty(), "new selections stayed hidden after Extras was disabled: {hidden:?}");
+}
