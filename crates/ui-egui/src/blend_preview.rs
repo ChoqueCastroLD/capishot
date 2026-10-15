@@ -91,6 +91,9 @@ pub(crate) fn clip_damage(app: &mut PhotocraftApp, doc: DocId, revision: u64, ke
         return region;
     }
     let shown = region.intersect(&visible);
+    // `covered` records only this refresh, including an empty intersection; it is not cumulative.
+    // Keep `region` so `uncovered` can recompute the next visible area. Forgetting older coverage
+    // can cause a redundant refresh, but cannot skip newly exposed pixels for this key.
     p.covered = Some((key, region, shown));
     shown
 }
