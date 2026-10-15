@@ -31,3 +31,12 @@ Builds made with craft-fonts (CRAFT_FONTS_DIR; all official releases) also embed
 https://github.com/storytold/craft-fonts/blob/main/ATTRIBUTION.md (today BIZ UDPGothic, Shippori Mincho and
 BIZ UDMincho; not the web build), under the SIL Open Font License 1.1. Their licence texts
 ship with the package as OFL-<family>.txt.
+
+AI models (downloaded on demand, not bundled)
+
+The model weights are not part of this distribution: they are downloaded the first time a feature
+needs them, after the user agrees, and kept in the browser's cache (or on disk).
+MangaJaNai and IllustrationJaNai by the-database — CC BY-NC 4.0 — https://github.com/the-database/MangaJaNai
+Manga LaMa (AnimeMangaInpainting) by dreMaz — MIT — https://huggingface.co/dreMaz/AnimeMangaInpainting
+LaMa by Suvorov et al. (Samsung AI) — Apache-2.0
+burn — MIT/Apache-2.0

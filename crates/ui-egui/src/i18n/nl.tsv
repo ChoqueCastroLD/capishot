@@ -3943,3 +3943,11 @@ cameraData	Lens	Lens
 	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai is gemaakt voor zwart-witpagina's; kleur gaat verloren.
 	Download and Upscale	Downloaden en vergroten
 	Upscale	Vergroten
+	Download {model}?	{model} downloaden?
+	Download and Clean	Downloaden en opschonen
+	{model} needs a one-time download of {mb} MB before it can run.	{model} heeft eenmalig een download van {mb} MB nodig voordat het kan werken.
+	Licence {license}, by {author}.	Licentie {license}, door {author}.
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	Het wordt in deze browser opgeslagen, maar één keer. Het draait op dit apparaat: je afbeeldingen worden niet geüpload.
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Het wordt op deze computer opgeslagen, maar één keer. Het draait op dit apparaat: je afbeeldingen worden niet geüpload.
+	AI models	AI-modellen
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	Op aanvraag gedownload wanneer een functie ze voor het eerst nodig heeft; niet meegeleverd met de app.

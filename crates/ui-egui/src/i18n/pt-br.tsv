@@ -4173,3 +4173,11 @@ layerLabel	No Color	Sem cor
 	MangaJaNai is made for black-and-white pages; colour is lost.	O MangaJaNai é feito para páginas em preto e branco; a cor se perde.
 	Download and Upscale	Baixar e ampliar
 	Upscale	Ampliar
+	Download {model}?	Baixar {model}?
+	Download and Clean	Baixar e limpar
+	{model} needs a one-time download of {mb} MB before it can run.	{model} precisa de um download único de {mb} MB antes de poder ser usado.
+	Licence {license}, by {author}.	Licença {license}, de {author}.
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	Fica guardado neste navegador, uma única vez. Roda neste dispositivo: suas imagens não são enviadas.
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Fica guardado neste computador, uma única vez. Roda neste dispositivo: suas imagens não são enviadas.
+	AI models	Modelos de IA
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	Baixados sob demanda na primeira vez que um recurso precisa deles; não vêm incluídos no aplicativo.
