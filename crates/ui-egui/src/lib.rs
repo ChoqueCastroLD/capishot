@@ -687,8 +687,11 @@ pub struct PhotocraftApp {
     /// The filter a "Rasterize?" prompt answered for, run after the dialog closes, where the
     /// egui context is available again (rasterize_prompt).
     pub(crate) pending_after_prompt: Option<(String, serde_json::Value)>,
-    /// Signature of the image we last put on the OS clipboard (to tell ours from other apps').
+    /// Last mirrored or imported OS image; this can predate the current internal copy.
     os_clip_sig: Option<u64>,
+    /// The session copy, if any, need not track the OS clipboard. An older OS signature is kept
+    /// to recognize unchanged system contents when exporting a newer copy failed or was disabled.
+    clip_unmirrored: bool,
     /// The session clipboard currently holds an image imported from the OS clipboard: it has no
     /// original position, so Paste centres it (see `menus` "edit.paste").
     pub(crate) clip_external: bool,
@@ -856,6 +859,7 @@ impl PhotocraftApp {
             clone_preview: None,
             info_sample: None,
             os_clip_sig: None,
+            clip_unmirrored: true,
             clip_external: false,
             clip_read_for_paste: false,
             transform_preview: None,
@@ -2418,6 +2422,7 @@ fn channel_tint(mode: photocraft_doc::ColorMode, k: usize, byte: u8, in_color: b
 impl PhotocraftApp {
     /// Mirror the session clipboard onto the OS clipboard (RGBA8).
     fn export_os_clipboard(&mut self) {
+        self.clip_unmirrored = true;
         if !self.session.prefs().general.export_clipboard {
             return;
         }
@@ -2431,6 +2436,7 @@ impl PhotocraftApp {
         let bytes: Vec<u8> = px.into_iter().flatten().collect();
         if set(b.width(), b.height(), &bytes).is_ok() {
             self.os_clip_sig = Some(clip_signature(b.width(), b.height(), &bytes));
+            self.clip_unmirrored = false;
         }
     }
 
@@ -2460,14 +2466,21 @@ impl PhotocraftApp {
     /// clipboard (so ⌘V pastes screenshots and images copied in other apps, like Photoshop).
     /// Returns `Ok(true)` when a new external image was imported. Once the OS clipboard no longer holds
     /// the image we mirrored or imported (text or a file was copied since), that image is stale:
-    /// it is dropped rather than pasted.
+    /// it is dropped rather than pasted. Unexported internal copies survive unavailable or empty
+    /// system clipboards.
     pub(crate) fn import_os_clipboard(&mut self) -> Result<bool, String> {
         let Some(get) = self.services.clipboard_get_image.as_mut() else { return Ok(false) };
         // A read failure says nothing about the clipboard contents. Keep our editable copy and
-        // its signature, and abort this paste rather than treating the failure as an empty image.
+        // its signature rather than treating the failure as an empty image.
         let image = match get() {
             Ok(image) => image,
             Err(error) => {
+                // An unexported copy remains usable without an OS clipboard (for example, in
+                // a Wayland sandbox). Mirrored/imported copies still require a successful read
+                // before pasting, because their system contents may have changed.
+                if self.clip_unmirrored && !self.clip_external && self.session.clipboard.is_some() {
+                    return Ok(false);
+                }
                 self.ui.status = error.clone();
                 self.ui.status_error = true;
                 return Err(error);
@@ -2475,9 +2488,10 @@ impl PhotocraftApp {
         };
         let image = image.filter(|(w, h, bytes)| *w > 0 && *h > 0 && bytes.len() == *w as usize * *h as usize * 4);
         let Some((w, h, bytes)) = image else {
-            if self.os_clip_sig.take().is_some() {
+            if self.os_clip_sig.take().is_some() && !self.clip_unmirrored {
                 self.session.clipboard = None;
                 self.clip_external = false;
+                self.clip_unmirrored = true;
             }
             return Ok(false);
         };
@@ -2491,6 +2505,7 @@ impl PhotocraftApp {
         self.session.clipboard = Some(photocraft_engine::edit_cmds::Clip { surface, bounds: r, layers: None, resolution: None });
         self.os_clip_sig = Some(sig);
         self.clip_external = true;
+        self.clip_unmirrored = false;
         Ok(true)
     }
 }
@@ -2678,14 +2693,20 @@ mod clipboard_tests {
         use std::sync::atomic::{AtomicBool, Ordering};
         let busy = Arc::new(AtomicBool::new(true));
         let unavailable = busy.clone();
+        let os = OsClip::default();
+        let (write, read) = (os.clone(), os);
         let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_max_steps(64).wgpu().build_eframe(move |cc| {
             PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
             let services = Services {
+                clipboard_set_image: Some(Box::new(move |w, h, bytes| {
+                    *write.lock().unwrap() = Some((w, h, bytes.to_vec()));
+                    Ok(())
+                })),
                 clipboard_get_image: Some(Box::new(move || {
                     if unavailable.load(Ordering::SeqCst) {
                         Err("The native clipboard is not accessible due to being held by another party.".into())
                     } else {
-                        Ok(None)
+                        Ok(read.lock().unwrap().clone())
                     }
                 })),
                 ..Default::default()
@@ -2764,6 +2785,158 @@ mod clipboard_tests {
             let state = app.session.active().unwrap();
             assert!(matches!(state.doc.layer(state.active_layer.unwrap()).unwrap().content, photocraft_doc::LayerContent::Shape(_)));
             assert!(!app.ui.status_error);
+        }
+    }
+
+    #[test]
+    fn internal_only_clipboard_remains_usable_when_native_access_fails() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        for export in [true, false] {
+            for id in ["edit.paste", "edit.pasteSpecial.pasteInPlace", "file.newFromClipboard"] {
+                let os = OsClip::default();
+                let unavailable = Arc::new(AtomicBool::new(true));
+                let (read, failed) = (os.clone(), unavailable.clone());
+                let services = Services {
+                    clipboard_set_image: Some(Box::new(|_, _, _| Err("clipboard unavailable".into()))),
+                    clipboard_get_image: Some(Box::new(move || {
+                        if failed.load(Ordering::SeqCst) { Err("clipboard unavailable".into()) } else { Ok(read.lock().unwrap().clone()) }
+                    })),
+                    ..Default::default()
+                };
+                let mut app = PhotocraftApp::new(Session::new(), services);
+                app.session.edit_prefs(|prefs| prefs.general.export_clipboard = export);
+                app.run("file.new", serde_json::json!({"width": 80, "height": 60})).unwrap();
+                app.run("shape.create", serde_json::json!({"kind": "rect", "rect": [10, 10, 40, 20], "fill": "#ff0000"})).unwrap();
+                app.run("edit.copy", serde_json::json!({})).unwrap();
+                app.run("file.new", serde_json::json!({"width": 80, "height": 60})).unwrap();
+                assert!(app.os_clip_sig.is_none() && !app.clip_external);
+                let bounds = app.session.clipboard.as_ref().unwrap().bounds;
+                assert_eq!(app.new_document_fields()["__preset"], "Clipboard");
+                crate::menus::invoke(&mut app, &egui::Context::default(), id, serde_json::json!({})).unwrap();
+                assert!(app.session.clipboard.as_ref().unwrap().layers.is_some());
+                assert!(!app.ui.status_error);
+                if id == "file.newFromClipboard" {
+                    assert_eq!(app.session.documents().len(), 3);
+                    let doc = &app.session.active().unwrap().doc;
+                    assert_eq!((doc.size.width, doc.size.height), (bounds.width(), bounds.height()));
+                } else {
+                    assert_eq!(app.session.documents().len(), 2);
+                    let state = app.session.active().unwrap();
+                    assert!(matches!(state.doc.layer(state.active_layer.unwrap()).unwrap().content, photocraft_doc::LayerContent::Shape(_)));
+                }
+                app.run("edit.purge.clipboard", serde_json::json!({})).unwrap();
+                assert!(app.session.clipboard.is_none());
+                assert!(app.run("edit.paste", serde_json::json!({})).is_err(), "purged content must not be a fallback");
+                // The fallback is only for failed reads: a later successful external image wins.
+                *os.lock().unwrap() = Some((3, 2, [0u8, 0, 255, 255].repeat(6)));
+                unavailable.store(false, Ordering::SeqCst);
+                app.run("edit.paste", serde_json::json!({})).unwrap();
+                assert!(app.clip_external && app.os_clip_sig.is_some());
+                let clip = app.session.clipboard.as_ref().unwrap();
+                assert!(clip.layers.is_none());
+                assert_eq!((clip.bounds.width(), clip.bounds.height()), (3, 2));
+            }
+        }
+    }
+
+    #[test]
+    fn newer_unexported_copies_do_not_track_an_older_os_signature() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        for imported in [true, false] {
+            for disable_export in [true, false] {
+                for copy_id in ["edit.copy", "edit.cut", "edit.copyMerged"] {
+                    let os = OsClip::default();
+                    let write_fails = Arc::new(AtomicBool::new(false));
+                    let read_fails = Arc::new(AtomicBool::new(false));
+                    let (write, read, failed_write, failed_read) = (os.clone(), os.clone(), write_fails.clone(), read_fails.clone());
+                    let services = Services {
+                        clipboard_set_image: Some(Box::new(move |w, h, bytes| {
+                            if failed_write.load(Ordering::SeqCst) {
+                                return Err("clipboard unavailable".into());
+                            }
+                            *write.lock().unwrap() = Some((w, h, bytes.to_vec()));
+                            Ok(())
+                        })),
+                        clipboard_get_image: Some(Box::new(move || {
+                            if failed_read.load(Ordering::SeqCst) { Err("clipboard unavailable".into()) } else { Ok(read.lock().unwrap().clone()) }
+                        })),
+                        ..Default::default()
+                    };
+                    let mut app = PhotocraftApp::new(Session::new(), services);
+                    app.run("file.new", serde_json::json!({"width": 8, "height": 8})).unwrap();
+                    if imported {
+                        *os.lock().unwrap() = Some((2, 2, [255u8, 0, 0, 255].repeat(4)));
+                        assert!(app.import_os_clipboard().unwrap());
+                    } else {
+                        app.run("edit.fill", serde_json::json!({"color": "#ff0000"})).unwrap();
+                        app.run("edit.copy", serde_json::json!({})).unwrap();
+                    }
+                    let old_signature = app.os_clip_sig;
+                    assert!(old_signature.is_some() && !app.clip_unmirrored);
+                    app.run("file.new", serde_json::json!({"width": 8, "height": 8})).unwrap();
+                    app.run("edit.fill", serde_json::json!({"color": "#0000ff"})).unwrap();
+                    write_fails.store(true, Ordering::SeqCst);
+                    app.session.edit_prefs(|prefs| prefs.general.export_clipboard = !disable_export);
+                    app.run(copy_id, serde_json::json!({})).unwrap();
+                    let copied = app.session.clipboard.clone().unwrap();
+                    assert!(app.clip_unmirrored && !app.clip_external);
+                    assert_eq!(app.os_clip_sig, old_signature);
+                    assert_eq!(copied.surface.rgba(0, 0), [0.0, 0.0, 1.0, 1.0]);
+                    // An old successful export/import must not block the newer internal copy.
+                    read_fails.store(true, Ordering::SeqCst);
+                    app.run("edit.pasteSpecial.pasteInPlace", serde_json::json!({})).unwrap();
+                    assert_eq!(app.os_clip_sig, old_signature);
+                    assert!(app.clip_unmirrored && !app.clip_external);
+                    read_fails.store(false, Ordering::SeqCst);
+                    assert!(!app.import_os_clipboard().unwrap(), "unchanged old OS image must not overwrite the newer copy");
+                    assert_eq!(app.session.clipboard.as_ref().unwrap().surface.rgba(0, 0), copied.surface.rgba(0, 0));
+                    *os.lock().unwrap() = None;
+                    assert!(!app.import_os_clipboard().unwrap(), "empty OS clipboard must not discard an unexported copy");
+                    assert!(app.os_clip_sig.is_none() && app.clip_unmirrored);
+                    assert_eq!(app.session.clipboard.as_ref().unwrap().surface.rgba(0, 0), copied.surface.rgba(0, 0));
+                    // A different external image supersedes the internal copy and disables fallback.
+                    *os.lock().unwrap() = Some((3, 2, [0u8, 255, 0, 255].repeat(6)));
+                    assert!(app.import_os_clipboard().unwrap());
+                    assert!(app.clip_external && !app.clip_unmirrored);
+                    let clip = app.session.clipboard.as_ref().unwrap();
+                    assert_eq!((clip.bounds.width(), clip.bounds.height()), (3, 2));
+                    read_fails.store(true, Ordering::SeqCst);
+                    assert!(app.run("edit.paste", serde_json::json!({})).is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn failed_clipboard_reads_do_not_paste_an_external_or_missing_copy() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        for external in [true, false] {
+            let unavailable = Arc::new(AtomicBool::new(false));
+            let failed = unavailable.clone();
+            let services = Services {
+                clipboard_get_image: Some(Box::new(move || {
+                    if failed.load(Ordering::SeqCst) { Err("clipboard unavailable".into()) } else { Ok(Some((3, 2, [255u8, 0, 0, 255].repeat(6)))) }
+                })),
+                ..Default::default()
+            };
+            let mut app = PhotocraftApp::new(Session::new(), services);
+            app.run("file.new", serde_json::json!({"width": 80, "height": 60})).unwrap();
+            if external {
+                assert!(app.import_os_clipboard().unwrap());
+            }
+            let signature = app.os_clip_sig;
+            let before = app.session.active().unwrap().doc.walk().len();
+            unavailable.store(true, Ordering::SeqCst);
+            for id in ["edit.paste", "edit.pasteSpecial.pasteInPlace", "file.newFromClipboard"] {
+                let result = crate::menus::invoke(&mut app, &egui::Context::default(), id, serde_json::json!({}));
+                assert_eq!(result.unwrap_err(), "clipboard unavailable", "{id}");
+                assert!(app.ui.status_error);
+                assert_eq!(app.session.documents().len(), 1);
+                assert_eq!(app.session.active().unwrap().doc.walk().len(), before);
+                assert_eq!(app.os_clip_sig, signature);
+                assert_eq!(app.session.clipboard.is_some(), external);
+                assert_eq!(app.clip_external, external);
+            }
         }
     }
 
