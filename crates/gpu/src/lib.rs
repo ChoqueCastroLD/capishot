@@ -65,8 +65,15 @@ const MAP16: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
 /// Side of the square chunks the canvas is processed in.
 pub const CHUNK: u32 = 1024;
 const STRIDE: u64 = 256;
-const CHUNK_UNIFORM: u64 = 16;
+const CHUNK_UNIFORM: u64 = 32;
+/// Coarsest level of detail [`Compositor::render_lod`] composites at (1/16 of the side).
+pub const MAX_LOD: u32 = 4;
 const OP_UNIFORM: u64 = 176;
+/// The member records of a [`Kernel::Layers`] pass (`array<Op, 4>`) and their uniform stride.
+const MEMBERS_UNIFORM: u64 = OP_UNIFORM * plan::MAX_MEMBERS as u64;
+const MEMBERS_STRIDE: u64 = MEMBERS_UNIFORM.next_multiple_of(STRIDE);
+/// Texture bindings of [`Kernel::Layers`]: the backdrop, then a layer and its mask per member.
+const LAYERS_BINDINGS: [u32; 9] = [0, 2, 3, 8, 9, 10, 11, 12, 13];
 /// GPU memory the effect-map cache may hold before evicting layers not drawn this frame.
 pub const FX_BUDGET: usize = 1536 << 20;
 /// Largest side of the square pages layer surfaces are stored in on the GPU (smaller when the
@@ -83,10 +90,13 @@ const FLUSH_BYTES: u64 = 512 << 20;
 /// reset the GPU.
 const FLUSH_WORK: u64 = 1 << 30;
 
-/// A finished chunk: straight-alpha RGBA32F pixels of `rect` (document coordinates) at the
-/// texture's origin.
+/// A finished chunk: straight-alpha RGBA32F pixels of `rect` (document coordinates, divided by
+/// 2^`level` for a reduced render) at the texture's origin.
 pub struct ChunkOut<'a> {
     pub rect: Rect,
+    /// Level of detail: 0 full size, `n` one pixel per 2ⁿ × 2ⁿ document pixels (the display
+    /// texture's mip level `n`).
+    pub level: u32,
     pub texture: &'a wgpu::Texture,
     pub view: &'a wgpu::TextureView,
 }
@@ -115,6 +125,25 @@ pub struct Stats {
     pub prefix_hits: usize,
     /// Planned prefix passes skipped, summed over the reused chunks.
     pub prefix_passes_skipped: usize,
+    /// Level of detail rendered at (see [`ChunkOut::level`]).
+    pub level: u32,
+    /// Output pixels composited (at the level of detail).
+    pub pixels: u64,
+}
+
+/// `r` (document pixels) at level of detail `level`: rounded out to whole reduced pixels.
+pub fn level_rect(r: Rect, level: u32) -> Rect {
+    if level == 0 || r.is_empty() {
+        return r;
+    }
+    let s = 1i32 << level.min(MAX_LOD);
+    Rect::new(r.x0.div_euclid(s), r.y0.div_euclid(s), r.x1.saturating_add(s - 1).div_euclid(s), r.y1.saturating_add(s - 1).div_euclid(s))
+}
+
+/// The pixels of a `canvas` document at level of detail `level` (the size of mip level `level`).
+pub fn level_bounds(canvas: Rect, level: u32) -> Rect {
+    let l = level.min(MAX_LOD);
+    Rect::new(0, 0, (canvas.width() >> l).max(1) as i32, (canvas.height() >> l).max(1) as i32)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,6 +326,9 @@ struct Kit {
     pipelines: HashMap<(Kernel, wgpu::TextureFormat), wgpu::RenderPipeline>,
     bgl0: wgpu::BindGroupLayout,
     bgl1: wgpu::BindGroupLayout,
+    /// [`Kernel::Layers`]: uniforms (chunk, op, member ops) and textures ([`LAYERS_BINDINGS`]).
+    bgl0m: wgpu::BindGroupLayout,
+    bgl1m: wgpu::BindGroupLayout,
     dummy: wgpu::TextureView,
 }
 
@@ -384,6 +416,18 @@ fn uniform_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, ubuf: &w
     })
 }
 
+fn layers_uniform_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, ubuf: &wgpu::Buffer) -> wgpu::BindGroup {
+    let entry = |binding: u32, size: u64| wgpu::BindGroupEntry {
+        binding,
+        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: ubuf, offset: 0, size: NonZeroU64::new(size) }),
+    };
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("pc_compose_layers_uniforms"),
+        layout,
+        entries: &[entry(0, CHUNK_UNIFORM), entry(1, OP_UNIFORM), entry(2, MEMBERS_UNIFORM)],
+    })
+}
+
 fn texture_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, views: &[&wgpu::TextureView]) -> wgpu::BindGroup {
     let e: Vec<wgpu::BindGroupEntry> =
         views.iter().enumerate().map(|(b, v)| wgpu::BindGroupEntry { binding: b as u32, resource: wgpu::BindingResource::TextureView(v) }).collect();
@@ -393,13 +437,18 @@ fn texture_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, views: &
 /// GPU compositor. Create once per device; call [`Compositor::render`] per refresh.
 pub struct Compositor {
     kit: Kit,
-    pool: Vec<(wgpu::Texture, wgpu::TextureView)>,
+    /// Accumulator slots by side: a refresh smaller than a chunk (a brush dab) works in small
+    /// textures, so render passes never load and store more than it needs (tiled mobile GPUs
+    /// move the whole attachment through tile memory on every pass).
+    pools: HashMap<u32, Vec<(wgpu::Texture, wgpu::TextureView)>>,
     residents: HashMap<ResKey, Resident>,
     fx: HashMap<FxKey, FxEntry>,
     prefix: prefix::Prefix,
     /// Effect temporaries (R32F, region sized) and the frame they were last used.
     temps: Vec<(Tex, u64)>,
     patterns: HashMap<String, (u64, Tex)>,
+    /// LUT textures by content hash, and the frame that last used them.
+    lut_cache: HashMap<u64, ((wgpu::Texture, wgpu::TextureView), u64)>,
     /// The colour mode of the document being encoded: patterns paint in it
     /// (`photocraft_compose::pattern::pattern_rgba`).
     pattern_mode: photocraft_color::ColorMode,
@@ -495,6 +544,8 @@ pub const SHADER: &str = include_str!("compose.wgsl");
 /// maps (view and region) per pass.
 struct Bound {
     views: Vec<(Option<ResidentRef>, Option<ResidentRef>)>,
+    /// [`Kernel::Layers`] passes: the pages of each member.
+    member_views: Vec<Vec<(Option<ResidentRef>, Option<ResidentRef>)>>,
     keys: Vec<ResKey>,
     maps: Vec<Option<(wgpu::TextureView, Rect)>>,
 }
@@ -503,6 +554,8 @@ struct Bound {
 struct FrameRes {
     /// Tile area of each pass's (texture, mask) surface within the canvas tile grid.
     areas: Vec<(Rect, Rect)>,
+    /// The same for the members of [`Kernel::Layers`] passes.
+    member_areas: Vec<Vec<(Rect, Rect)>>,
     luts: Vec<Option<(wgpu::Texture, wgpu::TextureView)>>,
     patterns: Vec<Option<wgpu::TextureView>>,
 }
@@ -600,12 +653,25 @@ impl Compositor {
             bind_group_layouts: &[Some(&bgl0), Some(&bgl1)],
             immediate_size: 0,
         });
+        let bgl0m = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pc_compose_layers_uniforms"),
+            entries: &[uniform_entry(0, CHUNK_UNIFORM), uniform_entry(1, OP_UNIFORM), uniform_entry(2, MEMBERS_UNIFORM)],
+        });
+        let bgl1m = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pc_compose_layers_textures"),
+            entries: &LAYERS_BINDINGS.map(tex_entry),
+        });
+        let layout_m = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pc_compose_layers"),
+            bind_group_layouts: &[Some(&bgl0m), Some(&bgl1m)],
+            immediate_size: 0,
+        });
         // `None` only for kernels without a fragment entry point, which are never drawn.
         let pipeline = |k: Kernel, format: wgpu::TextureFormat| {
             let entry = k.entry()?;
             Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(entry),
-                layout: Some(&layout),
+                layout: Some(if k == Kernel::Layers { &layout_m } else { &layout }),
                 vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
@@ -633,13 +699,14 @@ impl Compositor {
         }
         let dummy = Tex::new(device, "pc_compose_dummy", 1, 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING).view;
         Self {
-            kit: Kit { pipelines, bgl0, bgl1, dummy },
-            pool: Vec::new(),
+            kit: Kit { pipelines, bgl0, bgl1, bgl0m, bgl1m, dummy },
+            pools: HashMap::new(),
             residents: HashMap::new(),
             fx: HashMap::new(),
             prefix: prefix::Prefix::default(),
             temps: Vec::new(),
             patterns: HashMap::new(),
+            lut_cache: HashMap::new(),
             pattern_mode: photocraft_color::ColorMode::Rgb,
             max_dim: 0,
             device_max: device.limits().max_texture_dimension_2d,
@@ -678,7 +745,7 @@ impl Compositor {
         self.page = page;
         self.chunk = CHUNK.min(page);
         self.prefix.set_step(self.chunk);
-        self.pool.clear();
+        self.pools.clear();
         self.residents.clear();
         self.fx.clear();
         self.temps.clear();
@@ -734,7 +801,7 @@ impl Compositor {
             .fold(Rect::EMPTY, |a, c| if a.is_empty() { c } else { a.union(&c) });
         let mut seen = std::collections::HashSet::new();
         let mut total = 0u64;
-        for p in &plan.passes {
+        for p in plan.passes.iter().flat_map(|p| std::iter::once(p).chain(&p.members)) {
             let sources = [p.tex.as_ref().map(|t| (t.layer, t.role, t.surface.get())), p.mask.as_ref().map(|m| (m.layer, Role::Mask, m.surface.get()))];
             for (layer, role, s) in sources.into_iter().flatten() {
                 if seen.insert((layer, role)) {
@@ -905,10 +972,30 @@ impl Compositor {
         queue: &wgpu::Queue,
         doc: &Document,
         region: Rect,
+        sink: impl FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
+    ) -> Result<Stats, Unsupported> {
+        self.render_lod(device, queue, doc, region, 0, sink)
+    }
+
+    /// [`Self::render`] at a level of detail: `region` (document pixels) is composited at one
+    /// pixel per 2^`level` × 2^`level` document pixels (at most [`MAX_LOD`]), for a view that
+    /// shows the document that far zoomed out, so a refresh costs about 1/4^`level` of the
+    /// full-size one. Layer pixels and masks are box filtered (up to 4 × 4 taps per output
+    /// pixel: exact through level 2, a regular subsample above); effect maps, fills and patterns are sampled at the pixel's centre. The result
+    /// differs from the mip-mapped full-size composite only by that resampling. The chunks
+    /// handed to `sink` are in the level's coordinates ([`level_rect`] of the region, clipped
+    /// to [`level_bounds`]). Lower-stack reuse applies at full size only.
+    pub fn render_lod(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        doc: &Document,
+        region: Rect,
+        level: u32,
         mut sink: impl FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
     ) -> Result<Stats, Unsupported> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_compose") });
-        let stats = match self.encode_inner(device, queue, &mut encoder, doc, region, &mut sink, true) {
+        let stats = match self.encode_inner(device, queue, &mut encoder, doc, region, level.min(MAX_LOD), &mut sink, true) {
             Ok(stats) => stats,
             Err(error) => {
                 self.prefix.clear();
@@ -929,7 +1016,7 @@ impl Compositor {
         region: Rect,
         sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
     ) -> Result<Stats, Unsupported> {
-        self.encode_inner(device, queue, encoder, doc, region, sink, false)
+        self.encode_inner(device, queue, encoder, doc, region, 0, sink, false)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -940,6 +1027,7 @@ impl Compositor {
         encoder: &mut wgpu::CommandEncoder,
         doc: &Document,
         region: Rect,
+        level: u32,
         sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
         flush: bool,
     ) -> Result<Stats, Unsupported> {
@@ -949,7 +1037,7 @@ impl Compositor {
         // CMYK layers convert through the document's own CMYK profile (uploads and plan colours).
         let space = photocraft_compose::cmyk_space(doc);
         self.cmyk = space.as_ref().map_or(0, |s| s.id);
-        photocraft_color::convert::with_cmyk_space(space.as_ref(), || self.encode_scoped(device, queue, encoder, doc, region, sink, flush))
+        photocraft_color::convert::with_cmyk_space(space.as_ref(), || self.encode_scoped(device, queue, encoder, doc, region, level, sink, flush))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -960,6 +1048,7 @@ impl Compositor {
         encoder: &mut wgpu::CommandEncoder,
         doc: &Document,
         region: Rect,
+        level: u32,
         sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
         flush: bool,
     ) -> Result<Stats, Unsupported> {
@@ -968,7 +1057,8 @@ impl Compositor {
         let plan = plan(doc)?;
         self.check_fx(doc, &plan)?;
         self.pattern_mode = doc.pixel_format().mode;
-        let mut stats = Stats { passes: plan.passes.len(), slots: plan.slots, ..Default::default() };
+        let mut stats = Stats { passes: plan.passes.len(), slots: plan.slots, level, ..Default::default() };
+        let lbounds = level_bounds(canvas, level);
         if region.is_empty() {
             return Ok(stats);
         }
@@ -983,7 +1073,7 @@ impl Compositor {
 
         // Only render owns submission. A caller may discard encode's command buffer, so it
         // cannot establish (or consume) a checkpoint whose GPU copy might never execute.
-        let checkpoint = if flush { self.prefix.prepare(doc, &plan) } else { None };
+        let checkpoint = if flush && level == 0 { self.prefix.prepare(doc, &plan) } else { None };
 
         // Effect maps of whole regions first (they may render group shapes through sub-plans);
         // regions larger than the limit are built per cell below.
@@ -1028,10 +1118,14 @@ impl Compositor {
                 let window = pf.inflate(aprons.get(i).copied().unwrap_or(0)).intersect(&f.region);
                 self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, Some(cell)), window, &mut stats);
             }
-            let chunks = grid_rects(part, self.chunk);
+            // At a level of detail the cell's part shrinks; pages are a power of two at least
+            // 2^MAX_LOD, so cells never share a reduced pixel.
+            let lpart = level_rect(part, level).intersect(&lbounds);
+            let chunks = grid_rects(lpart, self.chunk);
             stats.chunks += chunks.len();
-            work += part.width() as u64 * part.height() as u64 * plan.passes.len() as u64;
-            self.run_cell(device, queue, encoder, doc.id, &plan, &paged, cell, &fr, &chunks, checkpoint, &mut stats, sink);
+            stats.pixels += lpart.width() as u64 * lpart.height() as u64;
+            work += lpart.width() as u64 * lpart.height() as u64 * plan.passes.len() as u64;
+            self.run_cell(device, queue, encoder, doc.id, &plan, &paged, cell, &fr, &chunks, checkpoint, level, &mut stats, sink);
             let (evicted, bytes) = self.evict();
             stats.evicted += evicted;
             freed += bytes;
@@ -1072,6 +1166,8 @@ impl Compositor {
         self.fx.retain(|(id, _), e| e.doc != doc.id || e.last_used == frame || live.contains(id));
         stats.evicted += self.evict().0;
         self.temps.retain(|(_, used)| frame.saturating_sub(*used) < 240);
+        let lut_age = if self.lut_cache.len() > 64 { 1 } else { 240 };
+        self.lut_cache.retain(|_, (_, used)| frame.saturating_sub(*used) < lut_age);
         Ok(stats)
     }
 
@@ -1125,14 +1221,24 @@ impl Compositor {
     fn frame_res(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, canvas: Rect, plan: &Plan<'_>) -> FrameRes {
         let grid = tile_grid(canvas);
         let area = |s: &Surface| s.tile_bounds().intersect(&grid);
-        let areas = plan
+        let pass_areas = |p: &plan::Pass<'_>| (p.tex.as_ref().map_or(Rect::EMPTY, |t| area(t.surface.get())), p.mask.as_ref().map_or(Rect::EMPTY, |m| area(m.surface.get())));
+        let areas = plan.passes.iter().map(pass_areas).collect();
+        let member_areas = plan.passes.iter().map(|p| p.members.iter().map(pass_areas).collect()).collect();
+        let frame = self.frame;
+        let luts = plan
             .passes
             .iter()
-            .map(|p| (p.tex.as_ref().map_or(Rect::EMPTY, |t| area(t.surface.get())), p.mask.as_ref().map_or(Rect::EMPTY, |m| area(m.surface.get()))))
+            .map(|p| {
+                let rows = p.lut.as_ref()?;
+                // The same table (an unchanged Curves or gradient) is uploaded once, not per frame.
+                let key = rows.iter().flat_map(|r| r.iter()).fold(0xcbf2_9ce4_8422_2325u64 ^ rows.len() as u64, |h, v| (h ^ u64::from(v.to_bits())).wrapping_mul(0x100_0000_01b3));
+                let entry = self.lut_cache.entry(key).or_insert_with(|| (lut_texture(device, queue, rows), frame));
+                entry.1 = frame;
+                Some(entry.0.clone())
+            })
             .collect();
-        let luts = plan.passes.iter().map(|p| p.lut.as_ref().map(|rows| lut_texture(device, queue, rows))).collect();
         let patterns = plan.passes.iter().map(|p| p.pattern.map(|pat| self.pattern_view(device, queue, pat))).collect();
-        FrameRes { areas, luts, patterns }
+        FrameRes { areas, member_areas, luts, patterns }
     }
 
     /// Bring the pages of `cell` that `plan` samples up to date and resolve its effect maps.
@@ -1152,31 +1258,30 @@ impl Compositor {
     ) -> Bound {
         let cr = cell_rect(cell, self.page);
         let mut views: Vec<(Option<ResidentRef>, Option<ResidentRef>)> = Vec::with_capacity(plan.passes.len());
+        let mut member_views = Vec::with_capacity(plan.passes.len());
         let mut keys: Vec<ResKey> = Vec::new();
         let mut maps = Vec::with_capacity(plan.passes.len());
+        let none = (Rect::EMPTY, Rect::EMPTY);
         for (i, p) in plan.passes.iter().enumerate() {
             if i < first_pass {
                 views.push((None, None));
+                member_views.push(Vec::new());
                 maps.push(None);
                 continue;
             }
-            let (ta, ma) = fr.areas.get(i).copied().unwrap_or((Rect::EMPTY, Rect::EMPTY));
-            let tex =
-                p.tex.as_ref().and_then(|t| self.sync_shown(device, queue, encoder, doc, (t.layer, t.role, cell), t.surface.get(), ta.intersect(&cr), stats)).map(
-                    |(k, r)| {
-                        keys.push(k);
-                        (keys.len() - 1, r)
-                    },
-                );
-            let mask = p
-                .mask
-                .as_ref()
-                .and_then(|m| self.sync_shown(device, queue, encoder, doc, (m.layer, Role::Mask, cell), m.surface.get(), ma.intersect(&cr), stats))
-                .map(|(k, r)| {
-                    keys.push(k);
-                    (keys.len() - 1, r)
-                });
-            views.push((tex, mask));
+            let areas = fr.areas.get(i).copied().unwrap_or(none);
+            views.push(self.sync_views(device, queue, encoder, doc, p, areas, cell, cr, &mut keys, stats));
+            let member_areas = fr.member_areas.get(i);
+            let mv = p
+                .members
+                .iter()
+                .enumerate()
+                .map(|(m, mp)| {
+                    let areas = member_areas.and_then(|a| a.get(m)).copied().unwrap_or(none);
+                    self.sync_views(device, queue, encoder, doc, mp, areas, cell, cr, &mut keys, stats)
+                })
+                .collect();
+            member_views.push(mv);
             maps.push(p.map.and_then(|m| {
                 let f = plan.fx.get(m.fx)?;
                 let key = (f.layer.id, paged.get(m.fx).copied().unwrap_or(false).then_some(cell));
@@ -1188,7 +1293,37 @@ impl Compositor {
                 Some((t.view.clone(), e.region))
             }));
         }
-        Bound { views, keys, maps }
+        Bound { views, member_views, keys, maps }
+    }
+
+    /// The resident pages of pass `p`'s texture and mask in `cell` (uploading what changed),
+    /// as indices into `keys`.
+    #[allow(clippy::too_many_arguments)]
+    fn sync_views(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        doc: DocId,
+        p: &plan::Pass<'_>,
+        (ta, ma): (Rect, Rect),
+        cell: Cell,
+        cr: Rect,
+        keys: &mut Vec<ResKey>,
+        stats: &mut Stats,
+    ) -> (Option<ResidentRef>, Option<ResidentRef>) {
+        let tex = p.tex.as_ref().and_then(|t| self.sync_shown(device, queue, encoder, doc, (t.layer, t.role, cell), t.surface.get(), ta.intersect(&cr), stats)).map(|(k, r)| {
+            keys.push(k);
+            (keys.len() - 1, r)
+        });
+        let mask =
+            p.mask.as_ref().and_then(|m| self.sync_shown(device, queue, encoder, doc, (m.layer, Role::Mask, cell), m.surface.get(), ma.intersect(&cr), stats)).map(
+                |(k, r)| {
+                    keys.push(k);
+                    (keys.len() - 1, r)
+                },
+            );
+        (tex, mask)
     }
 
     /// Run `plan` over the `chunks` of one page cell (document rects, at most a chunk square),
@@ -1206,20 +1341,25 @@ impl Compositor {
         fr: &FrameRes,
         chunks: &[Rect],
         checkpoint: Option<plan::Checkpoint>,
+        level: u32,
         stats: &mut Stats,
         sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
     ) {
         if chunks.is_empty() {
             return;
         }
+        // Pass clips at the level of detail (rounded out, the same for every pass).
+        let clips: Vec<Option<Rect>> = plan.passes.iter().map(|p| p.clip.map(|c| level_rect(c, level))).collect();
         let first_pass = checkpoint.filter(|_| chunks.iter().all(|c| self.prefix.contains(*c))).map_or(0, |c| c.pass_end);
         let bound = self.bind_cell(device, queue, encoder, doc, plan, paged, cell, fr, first_pass, stats);
 
-        // Chunk pool.
-        while self.pool.len() < plan.slots as usize {
+        // Chunk pool of the smallest side that holds every chunk of this cell.
+        let side = chunks.iter().map(|c| c.width().max(c.height())).max().unwrap_or(1).next_power_of_two().clamp(64, self.chunk.max(64));
+        let mut pool = self.pools.remove(&side).unwrap_or_default();
+        while pool.len() < plan.slots as usize {
             let t = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("pc_compose_chunk"),
-                size: wgpu::Extent3d { width: self.chunk, height: self.chunk, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -1231,14 +1371,24 @@ impl Compositor {
                 view_formats: &[],
             });
             let v = t.create_view(&Default::default());
-            self.pool.push((t, v));
+            pool.push((t, v));
         }
 
-        // Uniforms: chunk records, then one record per pass.
+        // Uniforms: chunk records, one record per pass, then the member records of fused passes.
         let op_base = chunks.len() as u64 * STRIDE;
-        let mut data = vec![0u8; (op_base + plan.passes.len() as u64 * STRIDE) as usize];
+        let members_base = op_base + plan.passes.len() as u64 * STRIDE;
+        let mut member_slot = vec![None; plan.passes.len()];
+        let mut fused = 0u64;
+        for (i, p) in plan.passes.iter().enumerate() {
+            if i >= first_pass && p.kernel == Kernel::Layers {
+                member_slot[i] = Some(members_base + fused * MEMBERS_STRIDE);
+                fused += 1;
+            }
+        }
+        let len = members_base + fused * MEMBERS_STRIDE;
+        let mut data = vec![0u8; len.max(if fused > 0 { MEMBERS_STRIDE } else { 0 }) as usize];
         for (i, c) in chunks.iter().enumerate() {
-            let w = words(&[I(c.x0), I(c.y0), I(c.width() as i32), I(c.height() as i32)]);
+            let w = words(&[I(c.x0), I(c.y0), I(c.width() as i32), I(c.height() as i32), I(level as i32)]);
             data[i * STRIDE as usize..][..w.len()].copy_from_slice(&w);
         }
         for (i, p) in plan.passes.iter().enumerate() {
@@ -1250,6 +1400,14 @@ impl Compositor {
             let w = op_words(p, tex.map(|t| t.1), mask.map(|m| m.1), map);
             let off = (op_base + i as u64 * STRIDE) as usize;
             data[off..][..w.len()].copy_from_slice(&w);
+            if let Some(base) = member_slot[i] {
+                for (m, mp) in p.members.iter().enumerate() {
+                    let (tex, mask) = bound.member_views.get(i).and_then(|v| v.get(m)).copied().unwrap_or((None, None));
+                    let w = op_words(mp, tex.map(|t| t.1), mask.map(|m| m.1), None);
+                    let off = (base + m as u64 * OP_UNIFORM) as usize;
+                    data[off..][..w.len()].copy_from_slice(&w);
+                }
+            }
         }
         let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("pc_compose_uniforms"),
@@ -1259,6 +1417,7 @@ impl Compositor {
         });
         queue.write_buffer(&ubuf, 0, &data);
         let bg0 = uniform_group(device, &self.kit.bgl0, &ubuf);
+        let bg0m = (fused > 0).then(|| layers_uniform_group(device, &self.kit.bgl0m, &ubuf));
 
         // Per-pass texture bind groups (chunk-independent: pool slots are reused per chunk).
         let dummy = &self.kit.dummy;
@@ -1269,7 +1428,19 @@ impl Compositor {
                 bg1.push(None);
                 continue;
             }
-            let slot = |s: Option<u32>| s.map_or(dummy, |s| &self.pool[s as usize].1);
+            let slot = |s: Option<u32>| s.map_or(dummy, |s| &pool[s as usize].1);
+            if p.kernel == Kernel::Layers {
+                let mut views = vec![slot(p.a)];
+                for m in 0..plan::MAX_MEMBERS {
+                    let (tex, mask) = bound.member_views.get(i).and_then(|v| v.get(m)).copied().unwrap_or((None, None));
+                    views.push(tex.map_or(dummy, |(k, _)| resident_views[k]));
+                    views.push(mask.map_or(dummy, |(k, _)| resident_views[k]));
+                }
+                let entries: Vec<wgpu::BindGroupEntry> =
+                    LAYERS_BINDINGS.iter().zip(&views).map(|(&b, v)| wgpu::BindGroupEntry { binding: b, resource: wgpu::BindingResource::TextureView(v) }).collect();
+                bg1.push(Some(device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("pc_compose_layers"), layout: &self.kit.bgl1m, entries: &entries })));
+                continue;
+            }
             let (tex, mask) = &bound.views[i];
             let tv = tex.map_or(slot(p.d), |(k, _)| resident_views[k]);
             let mv = mask.map_or(dummy, |(k, _)| resident_views[k]);
@@ -1282,7 +1453,7 @@ impl Compositor {
         for (ci, c) in chunks.iter().enumerate() {
             let mut resume = 0;
             if let Some(cp) = checkpoint
-                && let Some((dst, _)) = self.pool.get(cp.slot as usize)
+                && let Some((dst, _)) = pool.get(cp.slot as usize)
                 && self.prefix.copy_out(encoder, *c, dst)
             {
                 resume = cp.pass_end;
@@ -1295,11 +1466,11 @@ impl Compositor {
                 }
                 if resume == 0
                     && let Some(cp) = checkpoint.filter(|cp| cp.pass_end == i)
-                    && let Some((src, _)) = self.pool.get(cp.slot as usize)
+                    && let Some((src, _)) = pool.get(cp.slot as usize)
                 {
                     self.prefix.capture(device, encoder, *c, src);
                 }
-                let scissor = match p.clip {
+                let scissor = match clips.get(i).copied().flatten() {
                     Some(clip) => {
                         let r = clip.intersect(c);
                         if r.is_empty() {
@@ -1313,8 +1484,8 @@ impl Compositor {
                     Kernel::CopyRect | Kernel::CopyFull => {
                         // The planner always gives copies a source.
                         let Some(a) = p.a else { continue };
-                        let src = &self.pool[a as usize].0;
-                        let dst = &self.pool[p.dst as usize].0;
+                        let src = &pool[a as usize].0;
+                        let dst = &pool[p.dst as usize].0;
                         encoder.copy_texture_to_texture(
                             wgpu::TexelCopyTextureInfo {
                                 texture: src,
@@ -1334,7 +1505,7 @@ impl Compositor {
                     }
                     _ => {}
                 }
-                let target = &self.pool[p.dst as usize].1;
+                let target = &pool[p.dst as usize].1;
                 let clear = p.kernel == Kernel::Clear;
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("pc_compose_pass"),
@@ -1357,19 +1528,25 @@ impl Compositor {
                 }
                 pass.set_pipeline(&self.kit.pipelines[&(p.kernel, self.acc_format)]);
                 pass.set_scissor_rect(scissor.x0 as u32, scissor.y0 as u32, scissor.width(), scissor.height());
-                pass.set_bind_group(0, &bg0, &[(ci as u64 * STRIDE) as u32, (op_base + i as u64 * STRIDE) as u32]);
+                match (member_slot[i], &bg0m) {
+                    (Some(members), Some(bg)) => {
+                        pass.set_bind_group(0, bg, &[(ci as u64 * STRIDE) as u32, (op_base + i as u64 * STRIDE) as u32, members as u32]);
+                    }
+                    _ => pass.set_bind_group(0, &bg0, &[(ci as u64 * STRIDE) as u32, (op_base + i as u64 * STRIDE) as u32]),
+                }
                 pass.set_bind_group(1, bg1[i].as_ref(), &[]);
                 pass.draw(0..3, 0..1);
             }
             if resume == 0
                 && let Some(cp) = checkpoint.filter(|cp| cp.pass_end == plan.passes.len())
-                && let Some((src, _)) = self.pool.get(cp.slot as usize)
+                && let Some((src, _)) = pool.get(cp.slot as usize)
             {
                 self.prefix.capture(device, encoder, *c, src);
             }
-            let (t, v) = &self.pool[plan.root as usize];
-            sink(encoder, ChunkOut { rect: *c, texture: t, view: v });
+            let (t, v) = &pool[plan.root as usize];
+            sink(encoder, ChunkOut { rect: *c, level, texture: t, view: v });
         }
+        self.pools.insert(side, pool);
     }
 
     /// Upload changed tiles of `surface` within `region` (its tile area inside one page cell);
@@ -2179,10 +2356,26 @@ pub fn render_to_vec_stats(
     doc: &Document,
     rect: Rect,
 ) -> Result<(Vec<[f32; 4]>, Stats), Unsupported> {
-    let rect = rect.intersect(&doc.bounds());
+    render_to_vec_lod(comp, device, queue, doc, rect, 0)
+}
+
+/// [`render_to_vec_stats`] at a level of detail ([`Compositor::render_lod`]): the pixels of
+/// [`level_rect`] of `rect`, within [`level_bounds`], row-major.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn render_to_vec_lod(
+    comp: &mut Compositor,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    doc: &Document,
+    rect: Rect,
+    level: u32,
+) -> Result<(Vec<[f32; 4]>, Stats), Unsupported> {
+    let level = level.min(MAX_LOD);
+    let doc_rect = rect.intersect(&doc.bounds());
+    let rect = level_rect(doc_rect, level).intersect(&level_bounds(doc.bounds(), level));
     let mut staging: Vec<(Rect, wgpu::Buffer, u32)> = Vec::new();
     let mut bpp = 16u32;
-    let stats = comp.render(device, queue, doc, rect, |enc, out| {
+    let stats = comp.render_lod(device, queue, doc, doc_rect, level, |enc, out| {
         // Bytes per pixel of the accumulation format (Rgba32Float = 16, Rgba16Float = 8).
         bpp = if out.texture.format() == wgpu::TextureFormat::Rgba32Float { 16 } else { 8 };
         let row = (out.rect.width() * bpp).div_ceil(256) * 256;
