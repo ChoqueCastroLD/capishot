@@ -273,6 +273,9 @@ struct Live {
 
 thread_local! {
     static LIVE: RefCell<Option<Live>> = const { RefCell::new(None) };
+    /// Handlers of killed workers: dropped only when the next worker starts, never from inside
+    /// one of their own invocations (or while queued events of the old worker still arrive).
+    static RETIRED: RefCell<Vec<Live>> = const { RefCell::new(Vec::new()) };
 }
 
 fn start(url: &str, msg: (Object, JsValue), run: Run) -> Result<(), String> {
@@ -330,6 +333,7 @@ fn spawn(url: &str) -> Result<(), String> {
     let blob_url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js)?;
     let wopts = web_sys::WorkerOptions::new();
     wopts.set_type(web_sys::WorkerType::Module);
+    RETIRED.with(|r| r.borrow_mut().clear());
     let worker = web_sys::Worker::new_with_options(&blob_url, &wopts).map_err(js)?;
     let _ = web_sys::Url::revoke_object_url(&blob_url);
     let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(|e: web_sys::MessageEvent| on_message(e.data()));
@@ -428,11 +432,15 @@ fn end_run(f: impl FnOnce(&mut Run)) {
 fn kill(why: AiError) {
     let live = LIVE.with(|l| l.borrow_mut().take());
     let Some(mut live) = live else { return };
+    live.worker.set_onmessage(None);
+    live.worker.set_onerror(None);
     live.worker.terminate();
     if let (Some(t), Some(w)) = (live.timer.take(), web_sys::window()) {
         w.clear_interval_with_handle(t);
     }
-    if let Some(mut run) = live.run.take() {
+    let run = live.run.take();
+    RETIRED.with(|r| r.borrow_mut().push(live));
+    if let Some(mut run) = run {
         run.finish(Err(why));
     }
 }

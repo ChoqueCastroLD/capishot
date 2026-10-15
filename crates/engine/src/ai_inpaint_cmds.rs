@@ -87,6 +87,8 @@ pub(crate) fn ready_inpainter(s: &Session, allow_download: bool) -> Result<Arc<d
     match svc.model_state() {
         ModelState::Ready => Ok(svc),
         ModelState::NeedsDownload { .. } if allow_download => Ok(svc),
+        // The browser's cache answers asynchronously; with consent the worker finds out itself.
+        ModelState::Checking if allow_download => Ok(svc),
         ModelState::NeedsDownload { bytes } => Err(EngineError::Other(format!(
             "Manga LaMa needs a one-time download of {} MB first (run again with \"allowDownload\": true)",
             bytes.div_ceil(1 << 20)
