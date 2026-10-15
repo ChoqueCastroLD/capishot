@@ -551,12 +551,12 @@ fn failed_selection_and_unrelated_edits_keep_extras_hidden() {
 fn new_selection_preserves_individual_show_preferences() {
     let (mut app, ctx) = app_with(1);
     app.ui.view.show.selection_edges = false;
-    app.ui.view.show.grid = false;
+    app.ui.view.show.pixel_grid = false;
     menu(&mut app, &ctx, "view.extras", json!({})).unwrap();
     app.run("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap();
     assert!(app.ui.view.extras);
     assert!(!app.ui.view.show.selection_edges);
-    assert!(!app.ui.view.show.grid);
+    assert!(!app.ui.view.show.pixel_grid);
 }
 
 #[test]
