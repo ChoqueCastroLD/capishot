@@ -1019,6 +1019,52 @@ mod tests {
         assert_eq!(mover_bounds(&app).x0, 300);
     }
 
+    /// #5751: a Rectangle drawn on a 1080 px canvas, then resized with Free Transform under the
+    /// Move tool. With Snap Vector Tools and Transforms to Pixel Grid on (the default) the box's
+    /// edges stay on whole pixels: the grab offset and a proportional scale used to leave them at
+    /// 20.6 and 1040.4. Off, the box follows the pointer exactly.
+    #[test]
+    fn free_transform_of_a_shape_keeps_whole_pixels() {
+        for grid in [true, false] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            app.run("file.new", json!({"width": 1080, "height": 1080, "resolution": 72})).unwrap();
+            app.run("prefs.set", json!({"path": "tools.snapVectorToolsAndTransformsToPixelGrid", "value": grid})).unwrap();
+            app.sync_views();
+            app.ui.views[0].zoom = 0.6;
+            app.ui.views[0].fit_pending = false;
+            app.ui.tool = Tool::Rectangle;
+            let m = egui::Modifiers::NONE;
+            crate::canvas::tool_event(&mut app, ToolEvent::Down { x: 40.0, y: 31.0, pressure: 1.0 }, m);
+            crate::canvas::tool_event(&mut app, ToolEvent::Move { x: 300.0, y: 700.0, pressure: 1.0 }, m);
+            crate::canvas::tool_event(&mut app, ToolEvent::Up { x: 481.0, y: 1000.0 }, m);
+            app.ui.tool = Tool::Move;
+            crate::menus::invoke(&mut app, &egui::Context::default(), "edit.freeTransform", json!({})).unwrap();
+            let whole = |q: [[f64; 2]; 4]| q.iter().flatten().all(|v| v.fract() == 0.0);
+            // The left edge handle, grabbed 1.3 px inside, dropped away from any snap target.
+            let q = app.ui.transform.as_ref().unwrap().quad;
+            let mid_y = (q[0][1] + q[3][1]) / 2.0;
+            crate::canvas::tool_event(&mut app, ToolEvent::Down { x: q[0][0] + 1.3, y: mid_y, pressure: 1.0 }, m);
+            crate::canvas::tool_event(&mut app, ToolEvent::Move { x: 60.0, y: mid_y, pressure: 1.0 }, m);
+            crate::canvas::tool_event(&mut app, ToolEvent::Up { x: 80.6, y: mid_y }, m);
+            let q = app.ui.transform.as_ref().unwrap().quad;
+            assert_eq!(whole(q), grid, "grid {grid}: left edge {q:?}");
+            // The bottom-right corner scaled proportionally (the default), off any snap target.
+            crate::canvas::tool_event(&mut app, ToolEvent::Down { x: q[2][0], y: q[2][1], pressure: 1.0 }, m);
+            crate::canvas::tool_event(&mut app, ToolEvent::Up { x: 450.4, y: 900.1 }, m);
+            let q = app.ui.transform.as_ref().unwrap().quad;
+            assert_eq!(whole(q), grid, "grid {grid}: corner {q:?}");
+            crate::transform_tool::commit(&mut app);
+            let st = app.session.active().unwrap();
+            let photocraft_doc::LayerContent::Shape(sh) = &st.doc.layer(st.active_layer.unwrap()).unwrap().content else { panic!("a shape layer") };
+            let (x0, y0, x1, y1) = sh.path.control_bounds().unwrap();
+            if grid {
+                for v in [x0, y0, x1, y1] {
+                    assert!((v - v.round()).abs() < 1e-6, "committed shape {:?}", (x0, y0, x1, y1));
+                }
+            }
+        }
+    }
+
     #[test]
     fn guides_snap_to_layer_edges() {
         let mut app = app_with_box();

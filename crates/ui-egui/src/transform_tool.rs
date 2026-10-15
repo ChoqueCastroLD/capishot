@@ -1435,11 +1435,46 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) ->
                 } else {
                     apply_mode_drag(s, g, [x, y], mode, type_layer, mods);
                 }
+                round_to_pixel_grid(app);
             }
         }
     }
     crate::snap_ui::retain_transform_lines(app, mods);
     true
+}
+
+/// Preferences › Tools › Snap Vector Tools and Transforms to Pixel Grid (#5751): while a shape
+/// layer or a path is moved or scaled (the box still an upright rectangle), its edges stay on
+/// whole pixels, whatever the tool. Rounding the pointer alone left the edges off by the grab
+/// offset, and a proportional scale off by its ratio: a shape dragged to 540 px came out 539.6.
+/// Rotated, skewed and distorted boxes are left as dragged.
+fn round_to_pixel_grid(app: &mut PhotocraftApp) {
+    if !app.session.prefs().tools.snap_vector_tools_and_transforms_to_pixel_grid {
+        return;
+    }
+    let Some(t) = app.ui.transform.as_ref() else { return };
+    if t.selection || t.warp.is_some() || t.content_aware.is_some() || t.target.is_some() {
+        return;
+    }
+    let vector =
+        t.path.is_some() || app.session.active().and_then(|st| st.doc.layer(LayerId(t.layer))).is_some_and(|l| matches!(l.content, LayerContent::Shape(_)));
+    if !vector || !upright(&t.quad) {
+        return;
+    }
+    let q = t.quad.map(|p| p.map(f64::round));
+    // A box narrower than a pixel keeps its size rather than collapsing.
+    if (q[1][0] - q[0][0]).abs() < 1.0 || (q[3][1] - q[0][1]).abs() < 1.0 || q.iter().flatten().any(|v| !v.is_finite()) {
+        return;
+    }
+    if let Some(s) = app.ui.transform.as_mut() {
+        s.quad = q;
+    }
+}
+
+/// Whether corners clockwise from top-left form an axis-aligned rectangle (flips included).
+fn upright(q: &[[f64; 2]; 4]) -> bool {
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+    near(q[0][1], q[1][1]) && near(q[2][1], q[3][1]) && near(q[0][0], q[3][0]) && near(q[1][0], q[2][0])
 }
 
 /// The same effective modifiers drive the geometry and decide whether Ctrl is a distortion
