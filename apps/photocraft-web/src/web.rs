@@ -436,7 +436,8 @@ thread_local! {
 /// Palm rejection: a finger (not a stylus) that touches or moves on the page while a pen is down
 /// or was used within [`PALM_WINDOW_MS`] never reaches eframe, so a hand resting on a tablet
 /// doesn't paint, pan or click. Ends and cancels always pass, so egui never keeps a touch it saw
-/// start. Listeners on the window in the capture phase run before eframe's.
+/// start. Fingers reach eframe through their touch events only (not their pointer events too).
+/// Listeners on the window in the capture phase run before eframe's.
 fn reject_palms() {
     use wasm_bindgen::closure::Closure;
     let Some(window) = web_sys::window() else { return };
@@ -451,7 +452,9 @@ fn reject_palms() {
                 _ => e.buttons() != 0,
             };
             PEN_SEEN.with(|p| p.set((e.time_stamp(), down)));
-        } else if e.pointer_type() == "touch" && e.type_() == "pointerdown" && palm_time(e.time_stamp()) {
+        } else if e.pointer_type() == "touch" && matches!(e.type_().as_str(), "pointerdown" | "pointerup") {
+            // eframe takes a finger's press and release from its touch events too: passed on,
+            // each tap was two presses, so a menu title that opens on the press closed again.
             e.stop_immediate_propagation();
         }
     });
