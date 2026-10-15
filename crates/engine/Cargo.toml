@@ -35,6 +35,8 @@ photocraft-vector = { workspace = true }
 photocraft-io = { workspace = true }
 photocraft-psd = { workspace = true }
 photocraft-format = { workspace = true }
+# Image › Upscale with AI: catalog, selection rules and the upscaler seam (no inference).
+photocraft-ai = { workspace = true }
 photocraft-plugins = { workspace = true, optional = true }
 blake3 = { version = "1.8", default-features = false, features = ["pure"] }
 photocraft-codecs = { workspace = true }

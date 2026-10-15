@@ -3051,3 +3051,26 @@ cameraData	Lens	Objetivo
 @plural	{n} file|{n} files	{n} archivo|{n} archivos
 @plural	{n} font|{n} fonts	{n} fuente|{n} fuentes
 	A TypeR export (.json): a folder, a style library or a full export with settings. Photoshop tool presets (.tpl): each Type tool preset becomes a style in a new folder.	Una exportación de TypeR (.json): una carpeta, una biblioteca de estilos o una exportación completa con ajustes. Ajustes preestablecidos de herramienta de Photoshop (.tpl): cada ajuste de la herramienta Texto se vuelve un estilo en una carpeta nueva.
+	Upscale with AI…	Escalar con IA…
+	Automatic (MangaJaNai's choice)	Automático (elección de MangaJaNai)
+	Image type:	Tipo de imagen:
+	Detect	Detectar
+	Black-and-white manga	Manga en blanco y negro
+	Colour	Color
+	Model:	Modelo:
+	Auto levels (black-and-white pages)	Niveles automáticos (páginas en blanco y negro)
+	Result:	Resultado:
+	Replace this image (flattens)	Reemplazar esta imagen (acopla)
+	New document	Documento nuevo
+	Detected a black-and-white page	Página en blanco y negro detectada
+	Detected a colour image	Imagen a color detectada
+	Black-and-white page	Página en blanco y negro
+	Colour image	Imagen a color
+	New size: {w} × {h} px	Tamaño nuevo: {w} × {h} px
+	The image becomes one layer at the new size (Undo restores it).	La imagen pasa a ser una capa al tamaño nuevo (Deshacer la restaura).
+	Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.	Se ejecuta en este dispositivo (tu GPU si el navegador ofrece WebGPU); no se sube nada.
+	Runs on this device ({device}); nothing is uploaded.	Se ejecuta en este dispositivo ({device}); no se sube nada.
+	First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time.	El primer uso descarga el modelo: {mb} MB. Licencia {license} ({author}). Se guarda para la próxima vez.
+	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai es para páginas en blanco y negro; se pierde el color.
+	Download and Upscale	Descargar y escalar
+	Upscale	Escalar

@@ -8,6 +8,8 @@
 //!
 //! `--system-theme light|dark|none` supplies a deterministic OS appearance for theme captures.
 //!
+//! `--fake-ai` injects a stand-in AI upscaler (models "need a download") for Upscale with AI….
+//!
 //! `--safe-gpu` draws the canvas on the CPU path, like the app's `--safe-gpu` launch.
 //! `--wayland-notice` previews the native file drag-and-drop guidance shown in Wayland sessions.
 //! `--custom-titlebar` draws the Windows/Linux title bar (caption buttons in the top bar).
@@ -98,6 +100,7 @@ fn main() {
     let background_jobs = args.iter().any(|a| a == "--background-jobs");
     let custom_titlebar = args.iter().any(|a| a == "--custom-titlebar");
     let dev_fonts = args.iter().any(|a| a == "--dev-fonts");
+    let fake_ai = args.iter().any(|a| a == "--fake-ai");
     let allow_online_fonts = args.iter().any(|a| a == "--allow-online-fonts");
     // `--settle-ms N`: keep rendering frames for N ms before the capture (e.g. mid-job).
     let click_wait_ms: u64 = arg(&args, "--click-wait-ms").and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -128,6 +131,13 @@ fn main() {
             }
             if allow_online_fonts {
                 session.edit_prefs(|p| p.type_.allow_online_fonts = true);
+            }
+            // `--fake-ai`: a stand-in model runner whose models need a download, so Image › Upscale
+            // with AI…'s dialog can be captured with its consent text.
+            if fake_ai {
+                let fake = photocraft_ai::service::FakeUpscaler::default();
+                fake.download_needed.store(true, std::sync::atomic::Ordering::Relaxed);
+                session.set_ai_upscaler(Some(std::sync::Arc::new(fake)));
             }
             let mut app = PhotocraftApp::new(session, services);
             app.background_jobs = background_jobs;

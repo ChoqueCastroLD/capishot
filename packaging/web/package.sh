@@ -18,6 +18,10 @@ fi
 
 SITE="$ROOT/dist/web"
 [ -f "$SITE/index.html" ] || { echo "error: $SITE/index.html missing; run without --skip-build" >&2; exit 1; }
+# Image › Upscale with AI: the AI Web Worker module, loaded on demand (PHOTOCRAFT_WEB_AI=0 skips).
+if [ "${1:-}" != "--skip-build" ] && [ "${PHOTOCRAFT_WEB_AI:-1}" != "0" ]; then
+  "$ROOT/packaging/web-ai/build.sh" "$SITE"
+fi
 # Paths must be relative so the site works under any prefix (public_url = "./" in Trunk.toml).
 if grep -Eq '(src|href)="/[^/]' "$SITE/index.html"; then
   echo "error: $SITE/index.html has root-absolute URLs; it would break when served from a sub-path" >&2

@@ -32,6 +32,8 @@ photocraft-codecs = { workspace = true }
 photocraft-doc = { workspace = true }
 photocraft-ui-egui = { workspace = true }
 photocraft-compose = { workspace = true }
+# Image › Upscale with AI: the upscaler seam the AI worker bridge implements (no inference here).
+photocraft-ai = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 # Inline `data:` images in copied HTML (src/clipboard_data.rs).
@@ -47,7 +49,7 @@ js-sys = "0.3"
 # The embedding API (src/embed.rs, src/embed_protocol.rs).
 photocraft-format = { workspace = true }
 serde_json = { workspace = true }
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Storage", "Event", "EventTarget", "AddEventListenerOptions", "KeyboardEvent", "WheelEvent", "MouseEvent", "PointerEvent", "BeforeUnloadEvent", "AbortController", "AbortSignal", "DomException", "Response", "IdbFactory", "IdbOpenDbRequest", "IdbDatabase", "IdbRequest", "IdbTransaction", "IdbTransactionMode", "IdbObjectStore", "IdbCursor", "IdbCursorWithValue", "RequestInit", "Navigator", "CustomEvent", "CustomEventInit", "MessageEvent", "RequestCredentials", "Performance", "ClipboardEvent", "DataTransfer", "DataTransferItemList", "DataTransferItem", "File", "DomRect", "HtmlInputElement", "FileList", "DomStringList"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Storage", "Event", "EventTarget", "AddEventListenerOptions", "KeyboardEvent", "WheelEvent", "MouseEvent", "PointerEvent", "BeforeUnloadEvent", "AbortController", "AbortSignal", "DomException", "Response", "IdbFactory", "IdbOpenDbRequest", "IdbDatabase", "IdbRequest", "IdbTransaction", "IdbTransactionMode", "IdbObjectStore", "IdbCursor", "IdbCursorWithValue", "RequestInit", "Navigator", "CustomEvent", "CustomEventInit", "MessageEvent", "RequestCredentials", "Performance", "ClipboardEvent", "DataTransfer", "DataTransferItemList", "DataTransferItem", "File", "DomRect", "HtmlInputElement", "FileList", "DomStringList", "Worker", "WorkerOptions", "WorkerType", "ErrorEvent", "CacheStorage", "Cache"] }
 
 [dev-dependencies]
 photocraft-format = { workspace = true }

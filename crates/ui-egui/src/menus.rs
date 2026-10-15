@@ -271,6 +271,10 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::capishot_ui::invoke(app, id, &params) {
         return r;
     }
+    // Image › Upscale with AI… (model, size and download consent before the job).
+    if let Some(r) = crate::ai_upscale_ui::invoke(app, id, &params) {
+        return r;
+    }
     // Save for Web, Print and the other File-menu dialogs added with slices.
     if let Some(r) = crate::file_ui::invoke(app, ctx, id, &params) {
         return r;
@@ -963,6 +967,7 @@ const PLACE_AFTER: &[(&str, &str)] = &[
     ("type.loadFonts", "type.resolveMissingFonts"),
     ("type.loadFontFolder", "type.loadFonts"),
     ("type.manageFonts", "type.loadFontFolder"),
+    ("image.upscaleAi", "image.imageSize"),
 ];
 
 pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {

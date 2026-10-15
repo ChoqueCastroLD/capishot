@@ -2799,3 +2799,26 @@ cameraData	Lens	Objektiv
 	Not saved	Nicht gespeichert
 	Reading the clipboard…	Zwischenablage wird gelesen…
 	Typesetting	Lettering
+	Upscale with AI…	Mit KI hochskalieren…
+	Automatic (MangaJaNai's choice)	Automatisch (Auswahl von MangaJaNai)
+	Image type:	Bildtyp:
+	Detect	Erkennen
+	Black-and-white manga	Schwarzweiß-Manga
+	Colour	Farbe
+	Model:	Modell:
+	Auto levels (black-and-white pages)	Automatische Tonwerte (Schwarzweißseiten)
+	Result:	Ergebnis:
+	Replace this image (flattens)	Dieses Bild ersetzen (reduziert auf eine Ebene)
+	New document	Neues Dokument
+	Detected a black-and-white page	Schwarzweißseite erkannt
+	Detected a colour image	Farbbild erkannt
+	Black-and-white page	Schwarzweißseite
+	Colour image	Farbbild
+	New size: {w} × {h} px	Neue Größe: {w} × {h} px
+	The image becomes one layer at the new size (Undo restores it).	Das Bild wird zu einer Ebene in der neuen Größe (Rückgängig stellt es wieder her).
+	Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.	Läuft auf diesem Gerät (auf Ihrer GPU, wenn der Browser WebGPU bietet); es wird nichts hochgeladen.
+	Runs on this device ({device}); nothing is uploaded.	Läuft auf diesem Gerät ({device}); es wird nichts hochgeladen.
+	First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time.	Bei der ersten Verwendung wird das Modell heruntergeladen: {mb} MB. Lizenz {license} ({author}). Es wird für das nächste Mal aufbewahrt.
+	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai ist für Schwarzweißseiten gedacht; die Farbe geht verloren.
+	Download and Upscale	Herunterladen und hochskalieren
+	Upscale	Hochskalieren

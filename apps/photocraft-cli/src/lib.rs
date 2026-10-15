@@ -168,6 +168,9 @@ fn with_fonts(h: Headless, a: &Args) -> Headless {
 fn with_fonts_in(mut h: Headless, allow_online: bool, config_dir: Option<PathBuf>) -> Headless {
     if let Some(dir) = config_dir {
         photocraft_fontfetch::attach(&mut h.session, &dir);
+        // Image › Upscale with AI (`image.upscaleAi`), in-process (the `ai` feature).
+        #[cfg(feature = "ai")]
+        h.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(&dir))));
     }
     if allow_online {
         h.session.edit_prefs(|p| p.type_.allow_online_fonts = true);

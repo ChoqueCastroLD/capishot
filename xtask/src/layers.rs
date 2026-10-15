@@ -46,6 +46,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("adobe-assets", Class::Standalone),
     // Pen tablet input (the one isolated `unsafe` helper: AppKit interop on macOS).
     ("tablet", Class::Standalone),
+    // Local AI runtime (model catalog, tiling, weights, cache; burn inference behind features).
+    ("ai", Class::Standalone),
     ("doc", Class::Layer(1)),
     ("ops", Class::Layer(2)),
     ("paint", Class::Layer(2)),
@@ -73,6 +75,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("photocraft", Class::Exempt),
     ("cli", Class::Exempt),
     ("web", Class::Exempt),
+    // The AI Web Worker (a second wasm module the web build loads on demand).
+    ("ai-worker", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 

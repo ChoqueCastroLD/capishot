@@ -1,0 +1,24 @@
+[package]
+name = "photocraft-ai-worker"
+description = "Capishot's AI Web Worker: a separately loaded wasm module that runs photocraft-ai models on WebGPU (CPU fallback), downloads and caches their weights"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "photocraft-ai-worker"
+path = "src/main.rs"
+
+# Everything is wasm-only: natively this is an empty binary, so workspace builds don't compile
+# the inference stack for it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+photocraft-ai = { workspace = true, features = ["gpu", "cpu"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "WorkerGlobalScope", "MessageEvent", "CacheStorage", "Cache", "Request", "Response", "ResponseInit", "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Headers", "console"] }
