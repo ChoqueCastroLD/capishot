@@ -883,8 +883,17 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         spec!("layer.layerStyle.copyLayerStyle", "Copy Layer Style", &["Layer", "Layer Style"], None, r##"{"layer":id?}"##, has_layer, |s, p| {
             let id = layer_param(s, p)?;
-            let l = s.active().and_then(|d| d.doc.layer(id)).ok_or(EngineError::NoLayer(id))?;
-            let style = (l.effects.clone(), l.blend, l.fill_opacity, l.advanced);
+            let d = s.active().ok_or(EngineError::NoDocument)?;
+            let l = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+            let style = crate::CopiedStyle {
+                effects: l.effects.clone(),
+                blend: l.blend,
+                fill: l.fill_opacity,
+                advanced: l.advanced,
+                blend_if: l.blend_if.clone(),
+                excluded_channels: l.excluded_channels,
+                mode: d.doc.mode,
+            };
             s.style_clipboard = Some(style);
             Ok(Value::Null)
         }),
@@ -900,17 +909,32 @@ pub fn specs() -> Vec<CommandSpec> {
             },
             |s, p| {
                 let ids = style_targets(s, p, |_| true)?;
-                let (mut fx, blend, fill, advanced) = s.style_clipboard.clone().ok_or(EngineError::Other("no layer style has been copied".into()))?;
+                let style = s.style_clipboard.clone().ok_or(EngineError::Other("no layer style has been copied".into()))?;
+                let mut fx = style.effects;
                 s.edit("Paste Layer Style", |doc, _| {
                     // A style copied from a document in another mode takes this one's colours.
                     let mode = doc.mode;
                     fx.items = std::mem::take(&mut fx.items).into_iter().map(|e| e.in_mode(mode)).collect();
+                    // Blend If's Gray range carries over to any mode; its channel ranges and the
+                    // channel restrictions only to the mode they were set in.
+                    let same_mode = style.mode == mode;
+                    let blend_if = if same_mode {
+                        style.blend_if.clone()
+                    } else {
+                        // Through `set`, which keeps the normalised form (no trailing full
+                        // entries), so a full Gray range pastes as the default.
+                        let mut gray = photocraft_doc::BlendIf::default();
+                        gray.set(0, style.blend_if.get(0));
+                        gray
+                    };
                     for id in ids {
                         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
                         l.effects = fx.clone();
-                        l.blend = blend;
-                        l.fill_opacity = fill;
-                        l.advanced = advanced;
+                        l.blend = style.blend;
+                        l.fill_opacity = style.fill;
+                        l.advanced = style.advanced;
+                        l.blend_if = blend_if.clone();
+                        l.excluded_channels = if same_mode { style.excluded_channels } else { 0 };
                     }
                     Ok(())
                 })?;
