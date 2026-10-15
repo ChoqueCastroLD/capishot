@@ -32,7 +32,62 @@ pub fn downsample(s: &Surface, k: u32) -> Surface {
     out
 }
 
+/// Scale what a layer measures in document pixels outside its surfaces by `1 / k`: its effects'
+/// sizes, distances and pattern scales, its effects' reference point and its vector mask, so a
+/// proxy draws them at the proxy's scale.
+fn shrink_vectors(l: &mut Layer, k: f32) {
+    use photocraft_doc::effects::{Effect, FxPaint};
+    let paint = |p: &mut FxPaint| {
+        if let FxPaint::Pattern { scale, .. } = p {
+            *scale /= k;
+        }
+    };
+    for e in &mut l.effects.items {
+        match e {
+            Effect::DropShadow(s) | Effect::InnerShadow(s) => {
+                s.distance /= k;
+                s.size /= k;
+            }
+            Effect::OuterGlow(g) | Effect::InnerGlow(g) => {
+                g.size /= k;
+                paint(&mut g.paint);
+            }
+            Effect::Stroke(st) => {
+                st.size /= k;
+                paint(&mut st.paint);
+            }
+            Effect::PatternOverlay { scale, phase, .. } => {
+                *scale /= k;
+                *phase = (phase.0 / k, phase.1 / k);
+            }
+            Effect::Satin(s) => {
+                s.distance /= k;
+                s.size /= k;
+            }
+            Effect::BevelEmboss(b) => {
+                b.size /= k;
+                b.soften /= k;
+                if let Some(t) = &mut b.texture {
+                    t.scale /= k;
+                    t.phase = (t.phase.0 / k, t.phase.1 / k);
+                }
+            }
+            Effect::ColorOverlay { .. } | Effect::GradientOverlay { .. } => {}
+        }
+    }
+    let kd = f64::from(k);
+    if let Some((x, y)) = &mut l.effects.reference {
+        *x /= kd;
+        *y /= kd;
+    }
+    if let Some(v) = &mut l.vector_mask {
+        v.path = v.path.transform(&photocraft_geom::Affine::scale(1.0 / kd));
+        v.feather /= k;
+    }
+}
+
 fn shrink_layer(l: &mut Layer, k: u32, fmt: photocraft_color::PixelFormat, shrink: &mut dyn FnMut(&Surface) -> Surface) {
+    shrink_vectors(l, k as f32);
     if let Some(m) = &mut l.mask {
         m.surface = shrink(&m.surface);
     }
@@ -97,6 +152,13 @@ pub fn proxy_document_with(doc: &Document, k: u32, shrink: &mut dyn FnMut(&Surfa
     p
 }
 
+/// Whether a proxy composite approximates `doc`'s composite at its scale (zoomed-out canvas
+/// views): effects and vector masks are scaled with it ([`proxy_document_with`]); a stroked shape
+/// layer's vector stroke is drawn from its path in document pixels at render time, so it is not.
+pub fn lod_faithful(doc: &Document) -> bool {
+    doc.walk().iter().all(|(_, _, l)| !matches!(&l.content, LayerContent::Shape(sh) if sh.stroke.is_some()))
+}
+
 /// Whether a proxy composite is a faithful reduction of `doc`: layer effects (whose sizes are in
 /// document pixels) and vector masks (paths in document coordinates) would not scale with it.
 pub fn proxy_faithful(doc: &Document) -> bool {
@@ -136,6 +198,40 @@ mod tests {
         assert_eq!(p.layers[0].id, doc.layers[0].id);
         assert_eq!(p.layers[0].surface().unwrap().pixel(999, 749), vec![1.0; 4]);
         assert!(proxy_faithful(&doc));
+    }
+
+    #[test]
+    fn proxy_scales_effects_and_vector_masks() {
+        use photocraft_doc::effects::{Effect, FxCommon, Shadow};
+        let mut doc = Document::with_background("d", Size::new(400, 400), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        let shadow = Shadow {
+            common: FxCommon::new(photocraft_color::blend::BlendMode::Multiply, 0.75),
+            color: Color::BLACK,
+            angle: 120.0,
+            use_global_light: false,
+            distance: 20.0,
+            spread: 0.1,
+            size: 8.0,
+            contour: Default::default(),
+            anti_alias: false,
+            noise: 0.0,
+            knocks_out: true,
+        };
+        doc.layers[0].effects.items.push(Effect::DropShadow(shadow));
+        doc.layers[0].effects.reference = Some((40.0, 80.0));
+        doc.layers[0].vector_mask =
+            Some(photocraft_doc::VectorMask::new(photocraft_doc::vector::Path::new(vec![photocraft_doc::vector::Subpath::polygon(&[
+                (0.0, 0.0),
+                (200.0, 0.0),
+                (200.0, 100.0),
+            ])])));
+        let p = proxy_document(&doc, 4);
+        let Effect::DropShadow(s) = &p.layers[0].effects.items[0] else { panic!() };
+        assert_eq!((s.distance, s.size, s.spread), (5.0, 2.0, 0.1));
+        assert_eq!(p.layers[0].effects.reference, Some((10.0, 20.0)));
+        let knot = &p.layers[0].vector_mask.as_ref().unwrap().path.subpaths[0].knots[2];
+        assert_eq!((knot.anchor.x, knot.anchor.y), (50.0, 25.0));
+        assert!(lod_faithful(&doc));
     }
 
     #[test]

@@ -1091,7 +1091,9 @@ fn a_narrow_screen_opens_the_dock_from_the_rail() {
     let mut h = harness(app, vec2(400.0, 800.0), ThemeKind::Pro);
     assert!(last_rects(&h.ctx).iter().all(|(g, _)| *g != Group::Layers), "no dock column on a phone");
     // The rail's "Layers" is its square icon button (the open dock's tab is another).
-    let rail = |h: &Harness<'static, PhotocraftApp>| h.query_all_by_label("Layers").map(|n| n.rect()).find(|r| r.width() <= 40.0 && r.height() <= 40.0).unwrap().center();
+    let rail = |h: &Harness<'static, PhotocraftApp>| {
+        h.query_all_by_label("Layers").map(|n| n.rect()).find(|r| r.width() <= 40.0 && r.height() <= 40.0).unwrap().center()
+    };
     let click = |h: &mut Harness<'static, PhotocraftApp>, p: Pos2| {
         h.event(egui::Event::PointerMoved(p));
         h.run_steps(1);

@@ -514,6 +514,42 @@ mod tests {
     }
 
     #[test]
+    fn layer_effects_scale_with_the_level() {
+        use photocraft_doc::effects::{Effect, FxCommon, FxPaint, Shadow, StrokeFx, StrokePosition};
+        let mut doc = page();
+        let ink = &mut doc.layers[2];
+        ink.effects.enabled = true;
+        ink.effects.items.push(Effect::DropShadow(Shadow {
+            common: FxCommon::new(photocraft_color::blend::BlendMode::Multiply, 0.75),
+            color: Color::BLACK,
+            angle: 120.0,
+            use_global_light: false,
+            distance: 24.0,
+            spread: 0.0,
+            size: 12.0,
+            contour: Default::default(),
+            anti_alias: false,
+            noise: 0.0,
+            knocks_out: false,
+        }));
+        ink.effects.items.push(Effect::Stroke(StrokeFx {
+            common: FxCommon::new(photocraft_color::blend::BlendMode::Normal, 1.0),
+            size: 8.0,
+            position: StrokePosition::Outside,
+            paint: FxPaint::Color(Color::rgb(1.0, 1.0, 1.0)),
+        }));
+        assert!(crate::effects::has_effects(&doc.layers[2]));
+        let mut cache = MipCache::default();
+        let small = cache.document(&doc, 2);
+        let got = crate::render(&small, small.bounds());
+        let want = crate::render_reduced(&doc, small.size.width, small.size.height);
+        let diff: Vec<f32> = got.px.iter().zip(&want.px).map(|(a, b)| (0..4).map(|c| (a[c] - b[c]).abs()).fold(0.0, f32::max)).collect();
+        let mean = diff.iter().sum::<f32>() / diff.len() as f32;
+        // Effects drawn at the level's scale differ from the reduced full-size ones at their edges.
+        assert!(mean < 4.0 / 255.0, "mean {mean}");
+    }
+
+    #[test]
     fn hostile_buffers_do_not_panic() {
         let mut out = vec![0u8; 16];
         reduce_into(PixelFormat::RGBA8, &[0; 4], [Some(&[1, 2, 3][..]), None, None, None], &mut out);

@@ -10,9 +10,10 @@
 //! until they are. Level 0 is the exact composite (`photocraft_compose::render`), so 100% and
 //! closer show the same pixels as before.
 //!
-//! Documents whose reduced layers would not composite like the reduced canvas (layer effects,
-//! vector masks: [`photocraft_compose::proxy::proxy_faithful`]) take their zoomed-out tiles from
-//! the full-resolution composite of the tile's area instead.
+//! Layer effects and vector masks are scaled with the level ([`photocraft_compose::proxy`]); a
+//! document with a stroked shape layer, whose vector stroke is drawn at render time in document
+//! pixels ([`photocraft_compose::proxy::lod_faithful`]), takes its zoomed-out tiles from the
+//! full-resolution composite of the tile's area instead.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -398,7 +399,7 @@ pub fn paint(
             .collect();
         let c0 = crate::gpu_canvas::now_ms();
         let source = source.get_or_insert_with(|| {
-            let faithful = level == 0 || photocraft_compose::proxy::proxy_faithful(&doc);
+            let faithful = level == 0 || photocraft_compose::proxy::lod_faithful(&doc);
             faithful.then(|| tc.reduced(&doc, level))
         });
         let bufs = render_level(&doc, source.as_deref(), f, &rects);
@@ -445,7 +446,7 @@ pub fn paint(
             })
             .collect();
         // A level not built yet for this document is reduced on the worker too.
-        let faithful = level == 0 || photocraft_compose::proxy::proxy_faithful(&doc);
+        let faithful = level == 0 || photocraft_compose::proxy::lod_faithful(&doc);
         let ready = source.clone().flatten();
         let (tx, rx) = std::sync::mpsc::channel();
         tc.pending = Some(Pending { state: now, level, rx });

@@ -1200,11 +1200,18 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
             let ui = mirrored.as_mut().unwrap_or(ui);
             ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
             nav.bar_bottom = Some(ui.max_rect().bottom());
-            let mut buttons = Vec::with_capacity(TOP_MENUS.len());
-            for top in TOP_MENUS {
+            // A phone-width screen: one ☰ title holding the menus as submenus (`COMPACT_MENU`).
+            let compact = compact_menus(ui.ctx());
+            let tops: &[&str] = if compact { &[COMPACT_MENU] } else { &TOP_MENUS };
+            let mut buttons = Vec::with_capacity(tops.len());
+            for &top in tops {
                 // egui's menu_button toggles on release; these titles open on the press (one
                 // gesture can press, drag to an item and release), so each drives its popup.
-                let title = ui.add(egui::Button::new(egui::RichText::new(crate::i18n::tr(lang, top)).color(t.text_dim)));
+                let title = if compact {
+                    hamburger(ui, t.text_dim, crate::i18n::tr(lang, "Menu"))
+                } else {
+                    ui.add(egui::Button::new(egui::RichText::new(crate::i18n::tr(lang, top)).color(t.text_dim)))
+                };
                 // The bar's close behaviour and style, as a menu (not bar) config so submenus inside
                 // render as submenus.
                 let bar = egui::containers::menu::MenuConfig::find(ui);
@@ -1237,7 +1244,21 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                                 ItemCache { state, items }
                             })
                             .items;
-                        let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
+                        // The compact title holds every menu: the same items, one level down.
+                        let nested: Vec<MenuItem> = if compact {
+                            items
+                                .iter()
+                                .map(|i| {
+                                    let mut i = i.clone();
+                                    i.path.insert(0, COMPACT_MENU.to_string());
+                                    i
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+                        let source = if compact { nested.as_slice() } else { items.as_slice() };
+                        let mine: Vec<&MenuItem> = source.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
                         ui.set_min_width(220.0);
                         if mine.is_empty() {
                             ui.weak(crate::i18n::tr(lang, "(coming soon)"));
@@ -1280,6 +1301,30 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
         }
     }
     edge
+}
+
+/// The one menu title on a phone-width screen.
+const COMPACT_MENU: &str = "☰";
+
+/// Whether the menu bar collapses into [`COMPACT_MENU`] and menu rows grow to finger size: a
+/// phone-width screen, where ten titles overflow the bar.
+pub(crate) fn compact_menus(ctx: &egui::Context) -> bool {
+    ctx.content_rect().width() < COMPACT_MENU_WIDTH
+}
+
+/// Below this width (points) the ten menu titles don't fit beside the title bar's other controls.
+const COMPACT_MENU_WIDTH: f32 = 600.0;
+
+/// The compact menu's title: three bars, labelled `label` for screen readers and agents.
+fn hamburger(ui: &mut egui::Ui, color: egui::Color32, label: &str) -> egui::Response {
+    let r = ui.add(egui::Button::new("").min_size(egui::vec2(40.0, 28.0)));
+    let c = r.rect.center();
+    for dy in [-6.0, 0.0, 6.0] {
+        ui.painter().line_segment([c + egui::vec2(-9.0, dy), c + egui::vec2(9.0, dy)], egui::Stroke::new(1.8, color));
+    }
+    let label = label.to_string();
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+    r
 }
 
 fn press_gesture_id() -> egui::Id {
@@ -1451,6 +1496,10 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
     ui.spacing_mut().item_spacing.y = 0.0;
     // Secondary menus use the exact same Spectrum hover contrast and spacing.
     crate::widgets::style_spectrum_popup_menu(ui);
+    // A phone: rows a finger can hit (about 34 points instead of 20).
+    if compact_menus(ui.ctx()) {
+        ui.spacing_mut().button_padding.y = ui.spacing().button_padding.y.max(9.0);
+    }
     // Walk in Photoshop order: leaves and separators at this depth; a submenu appears at the position
     // of its first child.
     let mut shown_subs: Vec<&str> = Vec::new();
@@ -1694,6 +1743,38 @@ mod tests {
         assert!(items[c2a].enabled, "the Background becomes a layer when the filter runs");
         let others: Vec<_> = items.iter().filter(|i| i.path.first().is_some_and(|p| p == "Filter") && i.path.len() == 2).map(|i| &i.path[1]).collect();
         assert!(!others.iter().any(|p| p.as_str() == "Other"), "no duplicate Other submenu: {others:?}");
+    }
+
+    #[test]
+    fn a_phone_width_screen_folds_the_menus_into_one_title() {
+        use egui_kittest::kittest::Queryable;
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(400.0, 600.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                menu_bar(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, Default::default());
+        h.run_steps(2);
+        assert!(h.query_by_label("File").is_none(), "no row of titles on a phone");
+        h.get_by_label("Menu").click();
+        h.run_steps(3);
+        for top in TOP_MENUS {
+            let row = h.get_by_label(&format!("{top} ⏵")).rect();
+            assert!(row.height() >= 30.0, "{top}: finger-sized rows ({})", row.height());
+        }
+        // A desktop width keeps the titles.
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 600.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                menu_bar(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, Default::default());
+        h.run_steps(2);
+        assert!(h.query_by_label("File").is_some() && h.query_by_label("Menu").is_none());
     }
 
     #[test]
