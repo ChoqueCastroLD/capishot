@@ -243,6 +243,7 @@ pub fn histogram_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         // "cached data" warning until the worker delivers.
         let pending = app.hist_job.as_ref().is_some_and(|(d, r, _)| *d == doc_id && *r == rev);
         if !pending {
+            app.perf_counters.histogram += 1;
             let (tx, rx) = std::sync::mpsc::channel();
             // No threads on the web (and a spawn can fail natively): compute inline then, and
             // deliver through the same channel so one receive path lands both.

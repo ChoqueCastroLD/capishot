@@ -218,8 +218,12 @@ fn session_start_holds_classes_not_the_user_agent() {
         user_agent: "Mozilla/5.0 (Windows NT 10.0) Chrome/141.0 Safari/537.36 unique-fingerprint-123".into(),
         screen: (2560, 1440),
         language: "pt-br".into(),
+        device: "tablet",
+        memory_gb: 4.0,
     };
     let e = session_start_event(&env);
+    assert_eq!(e["device"], "tablet");
+    assert_eq!(e["mem"], "4");
     assert_eq!(e["e"], "session_start");
     assert_eq!(e["browser"], "chrome");
     assert_eq!(e["browser_major"], 141);
@@ -359,4 +363,88 @@ fn frame_times_are_summarised_per_tool() {
         r.frame(&format!("tool.T{i}"), 5.0, None, None);
     }
     assert_eq!(events(&batch(&mut r), "frames").len(), MAX_FRAME_KEYS);
+}
+
+/// Schema 3: the device class and memory bucket are coarse classes from a fixed list.
+#[test]
+fn device_class_and_memory_are_buckets() {
+    let iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1";
+    let pixel = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/141.0 Mobile Safari/537.36";
+    let tab = "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 Chrome/141.0 Safari/537.36";
+    let ipad_as_mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15";
+    let windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141.0 Safari/537.36";
+    assert_eq!(device_class(iphone, 5, 390), "mobile");
+    assert_eq!(device_class(pixel, 5, 412), "mobile");
+    assert_eq!(device_class(tab, 10, 800), "tablet");
+    assert_eq!(device_class(ipad_as_mac, 5, 820), "tablet", "iPadOS poses as a Mac with touch points");
+    assert_eq!(device_class(ipad_as_mac, 0, 900), "desktop");
+    assert_eq!(device_class(windows, 0, 1080), "desktop");
+    assert_eq!(device_class(windows, 10, 1080), "desktop", "a touch laptop is a desktop");
+    assert_eq!(device_class("", 0, 0), "unknown");
+    for (gb, b) in [(0.0, "unknown"), (f64::NAN, "unknown"), (0.5, "<1"), (1.0, "1"), (2.0, "2"), (4.0, "4"), (8.0, "8+"), (32.0, "8+")] {
+        assert_eq!(memory_bucket(gb), b, "{gb}");
+    }
+    let mut env = Environment { device: "phablet-x", ..Default::default() };
+    assert_eq!(session_start_event(&env)["device"], "unknown", "only known classes leave");
+    env.device = "mobile";
+    assert_eq!(session_start_event(&env)["device"], "mobile");
+}
+
+/// Schema 3 frames: the display's frame rate and missed frames from the intervals between painted
+/// frames, the gestures, the layer-count bucket and the worst frame's split.
+#[test]
+fn frames_carry_rate_drops_layers_and_the_worst_split() {
+    let mut r = Recorder::new("a", "s", 0.0);
+    let parts = |ms: f64| FrameParts { input: 1.0, logic: ms - 4.0, ui: 2.0, paint: 1.0 };
+    for g in 0..3 {
+        for i in 0..20 {
+            // 60 Hz with a 3-period interval (two missed frames) in each gesture; the gesture's
+            // first frame has no meaningful interval.
+            let interval = if i == 10 { 50.0 } else { 16.7 };
+            let ms = if g == 1 && i == 10 { 40.0 } else { 6.0 };
+            r.frame_sample(&FrameSample {
+                key: "tool.Eraser",
+                ms,
+                latency_ms: None,
+                interval_ms: Some(if i == 0 { 900.0 } else { interval }),
+                megapixels: Some(24.0),
+                layers: Some(150),
+                gesture_start: i == 0,
+                parts: Some(parts(ms)),
+            });
+        }
+    }
+    let b = batch(&mut r);
+    let e = events(&b, "frames")[0];
+    assert_eq!(e["g"], 3, "{e}");
+    assert_eq!(e["drop"], 6, "two missed frames per gesture: {e}");
+    assert_eq!(e["layers"], "100+");
+    assert_eq!(e["mp"], "24-50");
+    let fps = e["fps"].as_u64().expect("fps");
+    assert!((50..=58).contains(&fps), "57 intervals of 16.7 ms and 3 of 50 ms: {e}");
+    assert_eq!(e["int95"], 50, "3 of 57 intervals (over 5 %) are 50 ms: {e}");
+    assert_eq!((e["w_logic"].as_u64(), e["w_in"].as_u64(), e["w_ui"].as_u64(), e["w_paint"].as_u64()), (Some(36), Some(1), Some(2), Some(1)), "the 40 ms frame's split: {e}");
+    // Frames without the schema 3 data leave none of its fields.
+    let mut r = Recorder::new("a", "s", 0.0);
+    r.frame("tool.Brush", 5.0, None, None);
+    let b = batch(&mut r);
+    let e = events(&b, "frames")[0];
+    for k in ["fps", "int95", "drop", "layers", "g", "w_in", "w_logic", "w_ui", "w_paint"] {
+        assert!(e.get(k).is_none(), "{k}: {e}");
+    }
+}
+
+/// A 120 Hz display: once the 8.3 ms period has been seen, a 16.7 ms interval is a missed frame.
+#[test]
+fn missed_frames_follow_the_display_period() {
+    let mut r = Recorder::new("a", "s", 0.0);
+    let f = |r: &mut Recorder, i: f64| r.frame_sample(&FrameSample { key: "view", ms: 3.0, interval_ms: Some(i), ..Default::default() });
+    for _ in 0..10 {
+        f(&mut r, 8.3);
+    }
+    f(&mut r, 16.6);
+    f(&mut r, 2.0);
+    let b = batch(&mut r);
+    let e = events(&b, "frames")[0];
+    assert_eq!(e["drop"], 1, "{e}");
 }

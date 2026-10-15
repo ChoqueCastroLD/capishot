@@ -741,6 +741,7 @@ impl eframe::App for WebShell {
         crate::embed::process(&mut self.app);
         crate::usage_stats::sync(&self.app, ctx);
         self.save_presets(ctx);
+        self.perf.end_logic();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
