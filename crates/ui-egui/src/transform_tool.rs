@@ -4952,6 +4952,32 @@ mod tests {
         assert!(app.ui.transform.as_ref().unwrap().warp.is_none());
     }
 
+    #[test]
+    fn a_thin_layer_scaled_then_warped_commits_the_curve() {
+        // #5793: a 3 px column stretched wide, switched to Warp and pulled down in the middle.
+        // The commit came out straight: the warp's grid was one cell across the 3 source pixels.
+        let mut app = app_with_square(128, photocraft_geom::Rect::new(40, 20, 43, 60));
+        let ctx = egui::Context::default();
+        begin(&mut app, &ctx).unwrap();
+        scale_about_pivot(&mut app, 30.0, 1.0);
+        enter_warp(&mut app, &ctx);
+        warp_pointer(&mut app, ToolEvent::Down { x: 41.5, y: 40.0, pressure: 1.0 }, 2.0, egui::Modifiers::NONE);
+        warp_pointer(&mut app, ToolEvent::Move { x: 41.5, y: 70.0, pressure: 1.0 }, 2.0, egui::Modifiers::NONE);
+        warp_pointer(&mut app, ToolEvent::Up { x: 41.5, y: 70.0 }, 2.0, egui::Modifiers::NONE);
+        commit(&mut app);
+        assert!(app.ui.transform.is_none(), "{}", app.ui.status);
+        let st = app.session.active().unwrap();
+        let s = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
+        let alpha = |x: i32, y: i32| {
+            let mut p = [0.0f32; 4];
+            s.read_pixel(x, y, &mut p);
+            p[3]
+        };
+        // The middle sags below the band's old bottom edge (y 60); the ends stay put.
+        assert!(alpha(41, 70) > 0.99, "middle {}", alpha(41, 70));
+        assert!(alpha(15, 70) < 0.01 && alpha(15, 40) > 0.99, "end {} {}", alpha(15, 70), alpha(15, 40));
+    }
+
     fn warping_square() -> PhotocraftApp {
         let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 32, 32));
         begin_warp(&mut app, &egui::Context::default()).unwrap();
