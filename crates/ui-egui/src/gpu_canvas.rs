@@ -125,6 +125,10 @@ struct RefinePacer {
     /// while it runs, `u64::MAX - 1` before the first).
     last: std::sync::Arc<std::sync::atomic::AtomicU64>,
     work: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// When the GPU finished what was queued before the current piece ([`now_ms`] bits): the
+    /// piece's own time starts there (or at its submit, if the GPU was idle), not behind the
+    /// frames queued before it.
+    before: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// GPU time one refinement piece aims for (ms).
@@ -135,7 +139,7 @@ impl RefinePacer {
     const IDLE: u64 = u64::MAX - 1;
 
     fn new() -> Self {
-        Self { last: std::sync::Arc::new(Self::IDLE.into()), work: std::sync::Arc::new(REFINE_WORK.into()) }
+        Self { last: std::sync::Arc::new(Self::IDLE.into()), work: std::sync::Arc::new(REFINE_WORK.into()), before: std::sync::Arc::new(0u64.into()) }
     }
 
     /// Whether a piece is still on the GPU, and the work the next may take.
@@ -157,14 +161,27 @@ impl RefinePacer {
         (false, work)
     }
 
+    /// Before a piece is recorded: the returned callback (for `on_submitted_work_done`) notes
+    /// when the work queued so far is done.
+    fn before(&self) -> impl FnOnce() + Send + 'static {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.before.store(f64::NAN.to_bits(), Relaxed);
+        let before = self.before.clone();
+        move || before.store(now_ms().to_bits(), Relaxed)
+    }
+
     /// Mark a piece submitted; the returned callback (for `on_submitted_work_done`) records how
-    /// long it took.
+    /// long the GPU spent on it.
     fn start(&self) -> impl FnOnce() + Send + 'static {
         use std::sync::atomic::Ordering::Relaxed;
         self.last.store(Self::RUNNING, Relaxed);
-        let last = self.last.clone();
+        let (last, before) = (self.last.clone(), self.before.clone());
         let t0 = now_ms();
-        move || last.store((now_ms() - t0).max(0.0).to_bits(), Relaxed)
+        move || {
+            let b = f64::from_bits(before.load(Relaxed));
+            let from = if b.is_finite() { b.max(t0) } else { t0 };
+            last.store((now_ms() - from).max(0.0).to_bits(), Relaxed);
+        }
     }
 }
 
@@ -774,6 +791,7 @@ impl GpuCanvas {
         if idle && wait <= 0.0 && !busy {
             let budget = (work / passes.max(1) as u64).max(128 * 128);
             if let Some(piece) = self.with_doc(key, |_, d| d.stale().next_piece(need.visible, budget)).flatten() {
+                self.rs.queue.on_submitted_work_done(self.refine.before());
                 match self.composite_lod(doc, piece, encode_srgb, 0, true) {
                     Ok(st) => {
                         out.px += st.pixels;
