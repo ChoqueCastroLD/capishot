@@ -570,3 +570,20 @@ fn object_selection_finding_nothing_keeps_extras_hidden() {
     assert!(app.session.active().unwrap().doc.selection.is_some());
     assert!(!app.ui.view.extras, "finding no object must not reveal an old selection");
 }
+
+#[test]
+fn object_selection_restores_extras_when_it_finds_an_object() {
+    let (mut app, ctx) = app_with(0);
+    app.run("file.new", json!({"width": 200, "height": 160})).unwrap();
+    app.run("edit.fill", json!({"color": "#4073b3"})).unwrap();
+    app.run("select.rect", json!({"x": 55, "y": 35, "width": 90, "height": 90, "ellipse": true})).unwrap();
+    app.run("edit.fill", json!({"color": "#e64d26"})).unwrap();
+    app.run("select.deselect", json!({})).unwrap();
+    menu(&mut app, &ctx, "view.extras", json!({})).unwrap();
+    assert!(!app.ui.view.extras);
+    let result = app.run("select.object", json!({"rect": [45,25,110,110]})).unwrap();
+    assert_eq!(result["changed"], true, "the fixture must produce a new object selection");
+    let selection = app.session.active().unwrap().doc.selection.as_ref().unwrap();
+    assert!(selection.sample_channel(100, 80, 0) > 0.5, "the central object is selected");
+    assert!(app.ui.view.shows(app.ui.view.show.selection_edges));
+}
