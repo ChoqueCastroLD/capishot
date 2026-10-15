@@ -525,3 +525,17 @@ fn creating_a_selection_restores_hidden_extras() {
     }
     assert!(hidden.is_empty(), "new selections stayed hidden after Extras was disabled: {hidden:?}");
 }
+
+#[test]
+fn failed_selection_and_unrelated_edits_keep_extras_hidden() {
+    let (mut app, ctx) = app_with(1);
+    app.run("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap();
+    menu(&mut app, &ctx, "view.extras", json!({})).unwrap();
+    assert!(!app.ui.view.extras);
+    assert!(app.run("select.rect", json!({"x": "invalid"})).is_err());
+    assert!(!app.ui.view.extras, "failed selection must not change the view");
+    app.run("edit.fill", json!({"color": "#cc4422"})).unwrap();
+    assert!(!app.ui.view.extras, "painting an existing hidden selection keeps it hidden");
+    app.run("select.deselect", json!({})).unwrap();
+    assert!(!app.ui.view.extras, "deselecting has no new outline to reveal");
+}
