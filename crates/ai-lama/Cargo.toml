@@ -1,0 +1,41 @@
+[package]
+name = "photocraft-ai-lama"
+description = "LaMa (Fast Fourier Convolution) inpainting for manga and scanlation cleaning, on burn (WebGPU/wgpu or CPU)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "photocraft_ai_lama"
+path = "src/lib.rs"
+
+[features]
+# Without features only the tiling half is built (`tiles`, `dft`): no ML dependency, so the
+# editor's main module can plan and paste tiles without linking burn.
+default = []
+# The generator (`Lama`) on burn; pick a backend below.
+model = ["dep:burn", "dep:safetensors", "dep:half"]
+# Pure-Rust CPU backend (burn-flex): runs everywhere, wasm included.
+flex = ["model", "burn/flex", "burn/simd"]
+# GPU through wgpu: Vulkan/Metal/DX12 natively, WebGPU in the browser.
+wgpu = ["model", "burn/wgpu"]
+# Multithreaded CPU kernels (native, or the wasm threads build).
+rayon = ["model", "burn/rayon"]
+
+[dependencies]
+burn = { version = "0.22.0", default-features = false, features = ["std"], optional = true }
+safetensors = { version = "0.8", default-features = false, features = ["alloc"], optional = true }
+half = { version = "2", optional = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+image = { workspace = true, features = ["png"] }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "lama"
+required-features = ["model"]

@@ -508,6 +508,8 @@ pub struct ToolOptions {
     pub contiguous: bool,
     pub anti_alias: bool,
     pub sample_all_layers: bool,
+    /// Remove tool: fill the stroke with Manga LaMa (`paint.remove` `ai`) instead of patches.
+    pub remove_ai: bool,
     pub feather: f32,
     /// linear | radial | angle | reflected | diamond
     pub gradient_style: String,
@@ -747,6 +749,7 @@ impl Default for ToolOptions {
             contiguous: true,
             anti_alias: true,
             sample_all_layers: false,
+            remove_ai: false,
             feather: 0.0,
             gradient_style: "linear".into(),
             gradient_reverse: false,

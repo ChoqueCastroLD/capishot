@@ -233,7 +233,10 @@ impl Boot {
         let control = crate::embed::install(&embed_query, ctx.clone());
         let mut app = PhotocraftApp::new(session, services(inbox.clone(), photopea.clone())).with_control(control);
         // Image › Upscale with AI…: the AI worker module, loaded on first use (ai_bridge.rs).
-        app.session.set_ai_upscaler(crate::ai_bridge::from_page());
+        if let Some((upscaler, inpainter)) = crate::ai_bridge::from_page() {
+            app.session.set_ai_upscaler(Some(upscaler));
+            app.session.set_inpainter(Some(inpainter));
+        }
         crate::startup::mark("app");
         if let Some(config) = &photopea {
             crate::embed::open_config_files(config);

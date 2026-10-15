@@ -12,6 +12,8 @@
 pub enum Arch {
     /// ESRGAN RRDBNet (23 RRDB blocks, 64 filters). 2x models pixel-unshuffle their input.
     Esrgan,
+    /// LaMa (big-lama, Fast Fourier Convolutions), run by `photocraft-ai-lama`.
+    Lama,
 }
 
 /// What a model is for.
@@ -22,6 +24,8 @@ pub enum Content {
     Grayscale,
     /// Colour pages, covers and illustrations (IllustrationJaNai).
     Color,
+    /// Inpainting: fills masked areas (text, SFX) with background and screentone.
+    Inpaint,
 }
 
 /// One downloadable model.
@@ -237,7 +241,24 @@ pub const MODELS: &[ModelInfo] = &[
         author: AUTHOR,
         source: MJ_SRC,
     },
+    ModelInfo {
+        id: LAMA_ID,
+        title: "Manga LaMa",
+        file: "manga-lama-f16.safetensors",
+        arch: Arch::Lama,
+        scale: 1,
+        content: Content::Inpaint,
+        height: None,
+        bytes: 101_904_726,
+        sha256: "969b3abd517fadeb7ae92164f0bf364766924b6550da0e9a509fd9742d449733",
+        license: "MIT",
+        author: "dreMaz (AnimeMangaInpainting)",
+        source: "https://huggingface.co/dreMaz/AnimeMangaInpainting",
+    },
 ];
+
+/// The id of the Manga LaMa inpainting model.
+pub const LAMA_ID: &str = "manga-lama";
 
 /// The model with this id.
 pub fn model(id: &str) -> Option<&'static ModelInfo> {
@@ -253,7 +274,9 @@ mod tests {
         for (i, a) in MODELS.iter().enumerate() {
             assert_eq!(a.sha256.len(), 64);
             assert!(a.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
-            assert!(a.file.starts_with(&format!("{}x_", a.scale)));
+            if a.arch == Arch::Esrgan {
+                assert!(a.file.starts_with(&format!("{}x_", a.scale)));
+            }
             for b in &MODELS[i + 1..] {
                 assert_ne!(a.id, b.id);
                 assert_ne!(a.file, b.file);

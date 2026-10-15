@@ -8,9 +8,12 @@
 //! ## Protocol (plain objects through `postMessage`)
 //!
 //! Main thread → worker:
-//! `{type: "run", id, model, base, download, grayscale, cpu, width, height, channels, data}`:
-//! upscale `data` (a `Float32Array`, planar, transferred) with catalog model `model`, fetching
-//! its weights from `base` when not cached and `download` is true; `cpu` skips WebGPU.
+//! * `{type: "run", id, model, base, download, grayscale, cpu, width, height, channels, data}`:
+//!   upscale `data` (a `Float32Array`, planar, transferred) with catalog model `model`, fetching
+//!   its weights from `base` when not cached and `download` is true; `cpu` skips WebGPU.
+//! * `{type: "inpaint", id, base, download, cpu, width, height, rgb, mask}`: Manga LaMa on one
+//!   tile (`rgb` interleaved, `mask` 0/1, both `Float32Array`s, transferred); the reply's `data`
+//!   is the interleaved RGB output (`channels` 3).
 //!
 //! Worker → main thread:
 //! * `{type: "ready"}` once loaded;
@@ -41,6 +44,7 @@ struct State {
     rt: Option<Runtime>,
     device: String,
     loaded: Option<Rc<Loaded>>,
+    lama: Option<Rc<photocraft_ai_lama::Lama>>,
 }
 
 thread_local! {
@@ -84,8 +88,10 @@ pub fn start() {
     }));
     let on = Closure::<dyn FnMut(MessageEvent)>::new(|e: MessageEvent| {
         let data = e.data();
-        if get(&data, "type").as_string().as_deref() == Some("run") {
-            wasm_bindgen_futures::spawn_local(run(data));
+        match get(&data, "type").as_string().as_deref() {
+            Some("run") => wasm_bindgen_futures::spawn_local(run(data)),
+            Some("inpaint") => wasm_bindgen_futures::spawn_local(inpaint(data)),
+            _ => {}
         }
     });
     scope().set_onmessage(Some(on.as_ref().unchecked_ref()));
@@ -290,4 +296,54 @@ async fn fetch(url: &str, model: &ModelInfo, p: &Posting) -> Result<Vec<u8>> {
         p.send(0.12 * out.len() as f32 / model.bytes.max(1) as f32, &status);
     }
     Ok(out)
+}
+
+async fn inpaint(msg: JsValue) {
+    let id = get(&msg, "id").as_f64().unwrap_or(0.0);
+    match inpaint_inner(&msg, id).await {
+        Ok((out, w, h, device)) => {
+            let data = Float32Array::from(out.as_slice());
+            let buffer: JsValue = data.buffer().into();
+            post(
+                &obj(&[
+                    ("type", "done".into()),
+                    ("id", id.into()),
+                    ("width", (w as f64).into()),
+                    ("height", (h as f64).into()),
+                    ("channels", 3.0.into()),
+                    ("data", data.into()),
+                    ("device", device.into()),
+                ]),
+                Some(&buffer),
+            );
+        }
+        Err(e) => post(&obj(&[("type", "error".into()), ("id", id.into()), ("message", e.into())]), None),
+    }
+}
+
+async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>, usize, usize, String), String> {
+    let model = catalog::model(catalog::LAMA_ID).ok_or("Manga LaMa isn't in the catalog")?;
+    let base = get(msg, "base").as_string().unwrap_or_default();
+    let download = get(msg, "download").as_bool().unwrap_or(false);
+    let cpu = get(msg, "cpu").as_bool().unwrap_or(false);
+    let dim = |k: &str| get(msg, k).as_f64().filter(|v| v.is_finite() && *v >= 1.0).map(|v| v as usize).ok_or_else(|| format!("bad {k}"));
+    let (w, h) = (dim("width")?, dim("height")?);
+    let arr = |k: &str| get(msg, k).dyn_into::<Float32Array>().map(|a| a.to_vec()).map_err(|_| format!("no {k}"));
+    let (rgb, mask) = (arr("rgb")?, arr("mask")?);
+    let mut p = Posting { id, lo: 0.0, status: String::new(), device: String::new() };
+    let lama = match STATE.with(|s| s.borrow().lama.clone()) {
+        Some(l) => l,
+        None => {
+            let bytes = weights(model, &base, download, &p).await.map_err(|e| e.to_string())?;
+            p.send(0.12, "Preparing the model");
+            let rt = runtime(cpu).await.map_err(|e| e.to_string())?;
+            let l = Rc::new(photocraft_ai_lama::Lama::from_safetensors(&bytes, rt.device()).map_err(|e| e.to_string())?);
+            STATE.with(|s| s.borrow_mut().lama = Some(l.clone()));
+            l
+        }
+    };
+    p.device = STATE.with(|s| s.borrow().device.clone());
+    p.send(0.2, &format!("Cleaning with Manga LaMa ({})", p.device));
+    let out = lama.generate_async(&rgb, &mask, w, h).await.map_err(|e| e.to_string())?;
+    Ok((out, w, h, p.device))
 }

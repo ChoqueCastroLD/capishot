@@ -58,6 +58,7 @@ pub mod history_cmds;
 pub mod image_cmds;
 pub mod inspect;
 pub mod installed_profiles;
+pub mod ai_inpaint_cmds;
 pub mod jobs;
 pub mod kys;
 pub mod layer_copy_cmds;
@@ -434,6 +435,9 @@ pub struct Session {
     ai_upscaler: Option<Arc<dyn photocraft_ai::service::Upscaler>>,
     /// TypeR: script, cursor, style library and settings (see `typer_state`, `docs/typer.md`).
     pub typer: typer_state::TyperSession,
+    /// Runs Manga LaMa for `edit.inpaintAi` and the Remove tool's AI mode, injected by the shell;
+    /// `None` where it is unavailable (see `ai_inpaint_cmds`).
+    inpainter: Option<std::sync::Arc<dyn photocraft_ai_lama::service::Inpainter>>,
 }
 
 /// Move item `i` of `v` to position `to`, clamped to the end. Returns where it went; `None` when

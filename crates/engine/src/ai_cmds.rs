@@ -106,7 +106,7 @@ pub fn plan(s: &Session, p: &Value) -> Result<Plan> {
     let model_param = p.get("model").and_then(Value::as_str).unwrap_or("auto");
     let manual = match model_param {
         "auto" | "" => None,
-        id => Some(catalog::model(id).ok_or_else(|| bad(format!("unknown model `{id}`; the models are {}", ids())))?),
+        id => Some(catalog::model(id).filter(|m| m.arch == catalog::Arch::Esrgan).ok_or_else(|| bad(format!("unknown model `{id}`; the models are {}", ids())))?),
     };
     let scale = match p.get("scale") {
         None | Some(Value::Null) => manual.map_or(2, |m| m.scale),
@@ -150,7 +150,7 @@ pub fn plan(s: &Session, p: &Value) -> Result<Plan> {
 }
 
 fn ids() -> String {
-    catalog::MODELS.iter().map(|m| m.id).collect::<Vec<_>>().join(", ")
+    catalog::MODELS.iter().filter(|m| m.arch == catalog::Arch::Esrgan).map(|m| m.id).collect::<Vec<_>>().join(", ")
 }
 
 /// The composite flattened over white, as RGB.

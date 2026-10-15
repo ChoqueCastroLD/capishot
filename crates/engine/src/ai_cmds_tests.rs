@@ -114,6 +114,7 @@ fn bad_params_are_errors_not_panics() {
         json!({"scale": "big"}),
         json!({"scale": -1}),
         json!({"model": "nope"}),
+        json!({"model": "manga-lama"}),
         json!({"model": "mangajanai-v1-4x-1200p", "scale": 2}),
         json!({"content": "sepia"}),
         json!({"output": "printer"}),

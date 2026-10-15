@@ -36,7 +36,12 @@ impl Runtime {
     /// Initialise once per process and clone the runtime.
     #[cfg(feature = "gpu")]
     pub async fn gpu() -> Result<Self> {
-        let device = Device::wgpu_options().init_async().await.map_err(|e| AiError::Device(e.to_string()))?;
+        let device = match Device::wgpu_options().init_async().await {
+            Ok(d) => d,
+            // Another model (the LaMa inpainter) already brought the runtime up: share it.
+            Err(burn::tensor::wgpu::WgpuInitError::Registration { .. }) => Device::wgpu(burn::tensor::DeviceKind::DefaultDevice),
+            Err(e) => return Err(AiError::Device(e.to_string())),
+        };
         Ok(Self { device, accel: Accel::Gpu })
     }
 
@@ -50,7 +55,12 @@ impl Runtime {
     /// `IntegratedGpu(0)`… Fails when there is none.
     #[cfg(all(feature = "gpu", not(target_family = "wasm")))]
     pub fn gpu_kind_blocking(kind: burn::tensor::DeviceKind) -> Result<Self> {
-        let device = Device::wgpu_options().device_kind(kind).init().map_err(|e| AiError::Device(e.to_string()))?;
+        let device = match Device::wgpu_options().device_kind(kind.clone()).init() {
+            Ok(d) => d,
+            // Already brought up (by another model in this process): share it.
+            Err(burn::tensor::wgpu::WgpuInitError::Registration { .. }) => Device::wgpu(kind),
+            Err(e) => return Err(AiError::Device(e.to_string())),
+        };
         Ok(Self { device, accel: Accel::Gpu })
     }
 

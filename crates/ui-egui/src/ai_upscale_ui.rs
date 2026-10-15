@@ -71,7 +71,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     let mut levels = f.get("autoLevels").and_then(Value::as_bool).unwrap_or(true);
     let mut output = f.get("output").and_then(Value::as_str).unwrap_or("auto").to_string();
     let models: Vec<(String, String)> = std::iter::once(("auto".to_string(), tl!("Automatic (MangaJaNai's choice)").to_string()))
-        .chain(MODELS.iter().map(|m| (m.id.to_string(), m.title.to_string())))
+        .chain(MODELS.iter().filter(|m| m.arch == photocraft_ai::catalog::Arch::Esrgan).map(|m| (m.id.to_string(), m.title.to_string())))
         .collect();
     let model_opts: Vec<(String, &str)> = models.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
     egui::Grid::new("ai-upscale-form").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {

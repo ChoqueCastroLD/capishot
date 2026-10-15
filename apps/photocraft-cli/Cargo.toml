@@ -10,9 +10,10 @@ build = "build.rs"
 # Open HEIC/HEIF photos (the optional photocraft-heif crate). Not default so distributors choose
 # it; official builds (CI, packaging/, release) build with `--features heif`.
 heif = ["photocraft-codecs/heif"]
-# Image › Upscale with AI in-process (photocraft-ai with burn: wgpu GPU, CPU fallback, downloads).
-# Opt-in: it adds the inference stack to the build.
-ai = ["dep:photocraft-ai", "photocraft-ai/gpu", "photocraft-ai/cpu", "photocraft-ai/download"]
+# Image › Upscale with AI (photocraft-ai) and Edit › Clean with AI / the Remove tool's AI mode
+# (photocraft-ai-lama) in-process: wgpu GPU, else the CPU. Opt-in: it adds burn to the build.
+# LaMa weights: CAPISHOT_LAMA_WEIGHTS or <config dir>/models/manga-lama-f16.safetensors.
+ai = ["dep:photocraft-ai", "photocraft-ai/gpu", "photocraft-ai/cpu", "photocraft-ai/download", "dep:photocraft-ai-lama"]
 
 [lints]
 workspace = true
@@ -27,6 +28,7 @@ path = "src/main.rs"
 
 [dependencies]
 photocraft-ai = { workspace = true, optional = true }
+photocraft-ai-lama = { workspace = true, optional = true, features = ["flex", "wgpu", "rayon"] }
 photocraft-automation = { path = "../../crates/automation" }
 photocraft-engine = { workspace = true, features = ["plugins"] }
 photocraft-fontfetch = { workspace = true }

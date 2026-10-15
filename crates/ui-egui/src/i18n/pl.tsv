@@ -136,6 +136,11 @@
 	Fill…	Wypełnij…
 	Stroke…	Obrys…
 	Content-Aware Fill…	Wypełnienie z uwzględnieniem zawartości…
+	Clean with AI	Wyczyść za pomocą AI
+	Use AI (Manga LaMa)	Użyj AI (Manga LaMa)
+	Clean Selection with AI	Wyczyść zaznaczenie za pomocą AI
+	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Wypełnia pociągnięcia za pomocą Manga LaMa zamiast pobliskich łat: lepsze na rastrach i lineartach. Przy pierwszym użyciu pobierany jest model (ok. 100 MB).
+	Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB).	Usuwa zaznaczony tekst lub efekty dźwiękowe i odrysowuje tło za pomocą Manga LaMa na nowej warstwie. Przy pierwszym użyciu pobierany jest model (ok. 100 MB).
 	Content-Aware Scale	Skalowanie z uwzględnieniem zawartości
 	Puppet Warp	Wypaczenie marionetkowe
 	Perspective Warp	Wypaczenie perspektywy

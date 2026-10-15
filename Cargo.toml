@@ -43,6 +43,8 @@ photocraft-testkit = { path = "crates/testkit" }
 photocraft-tablet = { path = "crates/tablet" }
 # Local AI runtime; the engine and the main web bundle use only its core (no features).
 photocraft-ai = { path = "crates/ai" }
+# Manga LaMa inpainting; without features only its tiling half (the model runs elsewhere).
+photocraft-ai-lama = { path = "crates/ai-lama", default-features = false }
 
 # external
 # Capishot's PSD renderer (MIT): writes the merged image of PSDs and powers File › Export › Compile.
