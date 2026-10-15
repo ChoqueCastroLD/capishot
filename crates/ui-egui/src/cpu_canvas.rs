@@ -425,17 +425,19 @@ pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Paint
         });
         let (tx, rx) = std::sync::mpsc::channel();
         tc.pending = Some(Pending { state: now, level, rx });
-        let (doc, source, display, ctx) = (doc.clone(), source.clone(), display.clone(), ctx.clone());
+        let (doc, source, display) = (doc.clone(), source.clone(), display.clone());
         spawn(move || {
             let rects: Vec<DRect> = jobs.iter().map(|(_, r)| *r).collect();
             let bufs = render_level(&doc, source.as_deref(), f, &rects);
             let done = jobs.into_iter().zip(bufs).map(|((k, held), b)| (k, held, tile_image(display.as_deref(), &b))).collect();
-            if tx.send(done).is_ok() {
-                ctx.request_repaint();
-            }
+            let _ = tx.send(done);
         });
     }
-    // The worker pool asks for the frame that shows its tiles; without it, the next batch.
+    // Look for the worker pool's tiles in a moment (the egui context can't be woken from a
+    // worker on the web); without it, the next batch at once.
+    if tc.pending.is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(20));
+    }
     let more = !ASYNC_TILES && rest.peek().is_some();
     if px > 0 {
         app_perf(app, key, px, composite_ms, upload_ms);
