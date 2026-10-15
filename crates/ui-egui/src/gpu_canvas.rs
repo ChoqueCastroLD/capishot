@@ -86,6 +86,9 @@ pub struct ViewParams {
     /// document, a whole number of widths and heights for a View › Pattern Preview copy (#1067).
     /// A copy samples the same texture, so nothing is composited again.
     pub offset: [f32; 2],
+    /// Sample no finer mip level than this (trilinear): set while what the view shows was
+    /// composited reduced and is waiting for full size (see [`GpuCanvas::view_floor`]).
+    pub min_lod: f32,
 }
 
 /// When high-bit documents get an `Rgba16Float` canvas texture.
@@ -145,9 +148,9 @@ impl RefinePacer {
         }
         if last != Self::IDLE {
             let ms = f64::from_bits(last);
-            // Towards the target, at most halving or doubling per piece.
-            let k = (REFINE_TARGET_MS / ms.max(0.25)).clamp(0.5, 2.0);
-            work = ((work as f64 * k) as u64).clamp(REFINE_WORK / 64, REFINE_WORK * 4);
+            // Towards the target: down at once on a slow GPU, up at most doubling per piece.
+            let k = (REFINE_TARGET_MS / ms.max(0.25)).clamp(1.0 / 16.0, 2.0);
+            work = ((work as f64 * k) as u64).clamp(REFINE_WORK / 64, REFINE_WORK * 16);
             self.work.store(work, Relaxed);
             self.last.store(Self::IDLE, Relaxed);
         }
@@ -737,6 +740,7 @@ impl GpuCanvas {
         display: Option<&photocraft_engine::display_color::CanvasDisplay>,
         need: ViewNeed,
         idle: bool,
+        ctx: &egui::Context,
     ) -> CatchUp {
         let mut out = CatchUp::default();
         if key != doc.id.0 || self.fault().is_some() || !self.has(key, [doc.size.width, doc.size.height]) {
@@ -775,7 +779,18 @@ impl GpuCanvas {
                         out.px += st.pixels;
                         out.refined = true;
                         let timer = self.refine.start();
-                        self.rs.queue.on_submitted_work_done(timer);
+                        // The next piece goes when this one is done (no frames in between: they
+                        // would only queue more GPU work behind it).
+                        // The browser runs the callback on the main thread, where the context
+                        // lives (the threads build needs the wrapper to call it Send).
+                        #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+                        let wake = send_wrapper::SendWrapper::new(ctx.clone());
+                        #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+                        let wake = ctx.clone();
+                        self.rs.queue.on_submitted_work_done(move || {
+                            timer();
+                            wake.request_repaint();
+                        });
                     }
                     Err(_) => {
                         self.forget_doc(key);
@@ -786,8 +801,17 @@ impl GpuCanvas {
         }
         out.composite_ms = now_ms() - t0;
         let pending = self.with_doc(key, |_, d| !d.stale().is_empty()).unwrap_or(false);
-        out.again_ms = pending.then_some(if wait > 0.0 { wait } else if busy { 4.0 } else { 0.0 });
+        // While a piece runs, its completion asks for the next frame.
+        let running = out.refined || busy;
+        out.again_ms = (pending && !running).then_some(wait.max(0.0));
         out
+    }
+
+    /// The finest mip level current everywhere in `visible` (0: all of it), for
+    /// [`ViewParams::min_lod`]. Deferred regions (nothing current) don't count: the view
+    /// catches up on them before it draws.
+    pub fn view_floor(&self, key: u64, visible: photocraft_geom::Rect) -> f32 {
+        self.with_doc(key, |_, d| d.stale().floor(visible)).unwrap_or(0) as f32
     }
 
     /// Whether document `key`'s texture has out-of-date regions (tests and diagnostics).
@@ -1023,7 +1047,8 @@ pub struct CatchUp {
     pub composite_ms: f64,
     /// A piece was brought to full size.
     pub refined: bool,
-    /// Out-of-date regions remain: call again after this many milliseconds.
+    /// Out-of-date regions remain: call again after this many milliseconds (`None` with a piece
+    /// on the GPU: its completion requests the repaint).
     pub again_ms: Option<f64>,
 }
 
@@ -1401,7 +1426,7 @@ pub const LOD_MIN_PX: u64 = 512 * 512;
 
 /// Work (output pixels × passes) of the first full-size refinement piece; later pieces adapt to
 /// the GPU time the previous one took (`RefinePacer`).
-pub const REFINE_WORK: u64 = 32 << 20;
+pub const REFINE_WORK: u64 = 8 << 20;
 
 /// How long after the last reduced or deferred refresh full-size refinement starts (ms): a
 /// slider scrub or a Move drag keeps producing frames, and refining between them would only
@@ -1430,6 +1455,14 @@ pub fn lod_level(scale: f32) -> u32 {
         return 0;
     }
     ((-scale.log2()).floor().max(0.0) as u32).min(photocraft_gpu::MAX_LOD)
+}
+
+/// The level a view at `scale` composites large edits at while they happen: [`lod_level`], but
+/// at least 1 below 100% (a view between 50% and 100% then shows level 1 until the edits pause
+/// and the full-size refinement lands; [`ViewParams::min_lod`] keeps it off the out-of-date
+/// level 0).
+pub fn interactive_level(scale: f32) -> u32 {
+    if scale.is_finite() && scale > 0.0 && scale < 0.999 { lod_level(scale).max(1) } else { 0 }
 }
 
 /// `a` minus `b`: up to four disjoint rectangles.
@@ -1488,6 +1521,11 @@ impl Stale {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.regions.is_empty()
+    }
+
+    /// The finest level current everywhere in `area`, ignoring deferred regions.
+    pub(crate) fn floor(&self, area: photocraft_geom::Rect) -> u32 {
+        self.regions.iter().filter(|e| e.1 != u32::MAX && !e.0.intersect(&area).is_empty()).map(|e| e.1).max().unwrap_or(0)
     }
 
     /// Parts of `area` a view sampling `level` and above would show out of date.
@@ -2195,7 +2233,11 @@ impl CanvasCallback {
     fn uniforms(&self, screen: [u32; 2], ppp: f32, out_linear: bool, style: &CanvasStyle) -> [f32; VIEW_FLOATS] {
         let p = &self.params;
         let (origin, scale) = self.placement(ppp);
-        let (mode, lod) = filter_mode(scale);
+        let (mut mode, mut lod) = filter_mode(scale);
+        if p.min_lod.is_finite() && p.min_lod > lod {
+            // Reduced pixels only above level `min_lod` for now: trilinear from there.
+            (mode, lod) = (0.0, p.min_lod);
+        }
         // The pixel grid shows above 500% (the constants are shared with the CPU path,
         // pixel_grid.rs). `p.zoom` is screen points per document pixel; the shared threshold is
         // in device pixels, so scale by the display's pixels per point.
