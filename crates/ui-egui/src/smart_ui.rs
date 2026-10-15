@@ -331,6 +331,12 @@ fn edit_filter(app: &mut PhotocraftApp, id: u64, layer: u64, index: usize, param
     }
 }
 
+/// The command a filter dialog's live preview runs ([`confirm_command`]'s): `layer.smartFilter.setParams`
+/// while it edits a smart filter (#6324), else `command`.
+pub fn preview_command<'a>(fields: &serde_json::Map<String, Value>, command: &'a str) -> &'a str {
+    if fields.contains_key("__smartFilter") { "layer.smartFilter.setParams" } else { command }
+}
+
 /// The command a confirmed filter dialog runs: smart-filter edits update the recorded filter.
 pub fn confirm_command(fields: &serde_json::Map<String, Value>, command: String, params: Value) -> (String, Value) {
     match fields.get("__smartFilter") {
@@ -485,6 +491,10 @@ mod tests {
         crate::canvas::ensure_filter_preview(&mut app, 0, &egui::Context::default()).expect("a preview");
         let preview = app.filter_preview.as_ref().unwrap();
         assert_eq!(preview.key.command, "layer.smartFilter.setParams");
+        // The dialog's own preview window matches it to the dialog by that command.
+        let fields = &app.ui.dialogs.last().unwrap().fields;
+        assert_eq!(preview_command(fields, "filter.blur.gaussianBlur"), preview.key.command);
+        assert_eq!(preview_command(&serde_json::Map::new(), "filter.blur.gaussianBlur"), "filter.blur.gaussianBlur");
         let shown = preview.result.clone().expect("the preview's document");
         let filters = smart(&app, &shown).smart_filters;
         assert_eq!(filters.len(), 1, "the edited filter is replaced, not stacked");
