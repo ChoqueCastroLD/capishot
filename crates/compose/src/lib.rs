@@ -26,6 +26,7 @@ pub mod gradient_fill;
 pub mod masks;
 pub mod multichannel;
 pub mod pattern;
+pub mod mip;
 pub mod proxy;
 pub mod psblend;
 pub mod shape_split;
@@ -58,12 +59,27 @@ impl Buffer {
     }
     pub fn to_rgba8(&self) -> Rgba8Image {
         let mut img = Rgba8Image::new(self.rect.width(), self.rect.height());
-        for (o, p) in img.pixels.as_chunks_mut::<4>().0.iter_mut().zip(&self.px) {
-            for (dst, v) in o.iter_mut().zip(p) {
-                *dst = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-            }
+        // One flat pass (no per-pixel chunking), so it compiles to SIMD lanes.
+        for (dst, v) in img.pixels.iter_mut().zip(self.px.as_flattened()) {
+            *dst = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         }
         img
+    }
+    /// [`Self::to_rgba8`] premultiplied the way an egui texture stores colours ([`premultiply_px`]),
+    /// in one branch-free pass.
+    pub fn to_premultiplied_rgba8(&self) -> Vec<[u8; 4]> {
+        let mut out = vec![[0u8; 4]; self.px.len()];
+        for (o, p) in out.iter_mut().zip(&self.px) {
+            let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u32;
+            let a = q(p[3]);
+            // `premultiply_px`'s rounding, which is the identity at a = 255 and 0 at a = 0.
+            let m = |v: u32| {
+                let x = v * a + 128;
+                ((x + (x >> 8)) >> 8) as u8
+            };
+            *o = [m(q(p[0])), m(q(p[1])), m(q(p[2])), a as u8];
+        }
+        out
     }
     /// Flatten over an opaque background colour.
     pub fn over_background(&self, bg: [f32; 3]) -> Buffer {
@@ -77,6 +93,28 @@ impl Buffer {
         }
         out
     }
+}
+
+/// Straight-alpha RGBA8 → premultiplied, rounding as egui's `Color32::from_rgba_unmultiplied`
+/// does (gamma-space `c·a/255`), so a canvas texture built from it is the one egui would build.
+#[inline]
+pub fn premultiply_px(p: [u8; 4]) -> [u8; 4] {
+    match p[3] {
+        0 => [0; 4],
+        255 => p,
+        a => {
+            let m = |v: u8| {
+                let x = u16::from(v) * u16::from(a) + 128;
+                ((x + (x >> 8)) >> 8) as u8
+            };
+            [m(p[0]), m(p[1]), m(p[2]), a]
+        }
+    }
+}
+
+/// [`premultiply_px`] over interleaved RGBA8 pixels.
+pub fn premultiply_rgba8(px: &[[u8; 4]]) -> Vec<[u8; 4]> {
+    px.iter().map(|p| premultiply_px(*p)).collect()
 }
 
 /// Tile size for parallel rendering (tile results are independent).
@@ -233,6 +271,43 @@ fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer 
         }
     }
     out
+}
+
+/// Composite each of `rects` (one buffer per rectangle, in order), sharing one preparation
+/// (patterns, tone tables, effect maps over their union) and, in the threads build and natively,
+/// rendering them in parallel. Each buffer equals [`render`] of its rectangle: a tiled canvas
+/// renders the tiles a frame needs with this.
+pub fn render_rects(doc: &Document, rects: &[Rect]) -> Vec<Buffer> {
+    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES).in_mode(doc.pixel_format().mode);
+    let cx = Ctx::for_doc(doc, &patterns);
+    let union = rects.iter().filter(|r| !r.is_empty()).fold(Rect::EMPTY, |u, r| if u.is_empty() { *r } else { u.union(r) });
+    if union.is_empty() {
+        return rects.iter().map(|r| Buffer::transparent(*r)).collect();
+    }
+    let lab = doc.mode == photocraft_color::ColorMode::Lab;
+    let hdr = doc.depth == photocraft_color::SampleType::F32;
+    let cmyk = cmyk_space(doc);
+    let cmyk = cmyk.as_ref();
+    cx.set_fx_clip(union);
+    prepare_effects(&doc.layers, union, &cx, |f| {
+        photocraft_color::convert::with_cmyk_space(cmyk, || in_blend_space(lab, hdr, f));
+    });
+    let run = |t: &Rect| {
+        if t.is_empty() {
+            return Buffer::transparent(*t);
+        }
+        photocraft_color::convert::with_cmyk_space(cmyk, || {
+            let mut b = multichannel::backdrop(doc, *t);
+            in_blend_space(lab, hdr, || composite_stack_at(&doc.layers, &mut b, &cx, advanced::Scope::ROOT));
+            b
+        })
+    };
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    if rects.len() > 1 {
+        use rayon::prelude::*;
+        return rects.par_iter().map(run).collect();
+    }
+    rects.iter().map(run).collect()
 }
 
 /// Runs `f` with this thread's document blend flags set ([`psblend::LAB_MIX`], [`psblend::HDR`]),

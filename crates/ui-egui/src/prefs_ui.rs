@@ -1295,6 +1295,8 @@ fn choice_label(v: &str) -> String {
         "metal" => "Metal".into(),
         "gl" => "OpenGL".into(),
         "cpu" => "CPU (no GPU acceleration)".into(),
+        "native" => "Display's own".into(),
+        "1" | "1.5" | "2" => format!("{v}×"),
         v => humanize(v),
     }
 }
