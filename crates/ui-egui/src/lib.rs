@@ -616,6 +616,10 @@ pub struct PhotocraftApp {
     pub fps: f32,
     last_frame_time: f64,
     thumbs: HashMap<(photocraft_doc::LayerId, u8), (u64, egui::TextureHandle)>,
+    /// Thumbnails rebuilt this frame: (frame, count), for [`THUMBS_PER_FRAME`].
+    thumb_frame: (u64, u32),
+    /// A transparent stand-in for a thumbnail not built yet.
+    blank_thumb: Option<egui::TextureHandle>,
     /// Snapshots whose live layer/mask keys were last used to prune thumbnail handles.
     thumb_documents: Vec<(DocId, std::sync::Weak<Document>)>,
     /// Content bounds cached per (key, revision): scanning a 36 MP layer every frame cost ~77 ms.
@@ -802,6 +806,8 @@ impl PhotocraftApp {
             fps: 0.0,
             last_frame_time: 0.0,
             thumbs: HashMap::new(),
+            thumb_frame: (0, 0),
+            blank_thumb: None,
             thumb_documents: Vec::new(),
             bounds_cache: HashMap::new(),
             proxy: None,
@@ -1957,6 +1963,12 @@ impl PhotocraftApp {
         {
             return tex.id();
         }
+        if !self.thumb_budget(ctx) {
+            return match self.thumbs.get(&key).map(|(_, tex)| tex.id()) {
+                Some(id) => id,
+                None => self.blank_thumb(ctx),
+            };
+        }
         self.perf_counters.thumbs += 1;
         let mut px = [0.0f32; 8];
         let img = thumb_image(doc, 64, |x, y| {
@@ -1976,6 +1988,12 @@ impl PhotocraftApp {
         {
             return tex.id();
         }
+        if !self.thumb_budget(ctx) {
+            return match self.thumbs.get(&key).map(|(_, tex)| tex.id()) {
+                Some(id) => id,
+                None => self.blank_thumb(ctx),
+            };
+        }
         self.perf_counters.mask_thumbs += 1;
         let mut v = [0.0f32; 1];
         let img = thumb_image(doc, 64, |x, y| {
@@ -1983,6 +2001,26 @@ impl PhotocraftApp {
             [v[0], v[0], v[0], 1.0]
         });
         self.store_thumb(ctx, key, rev, img)
+    }
+
+    /// Whether another thumbnail may be rebuilt this frame: at most [`THUMBS_PER_FRAME`], so
+    /// scrolling a long Layers panel or an edit touching many layers spreads the work over frames
+    /// (the rest keep their previous image, or none yet, and the next frame continues).
+    fn thumb_budget(&mut self, ctx: &egui::Context) -> bool {
+        if self.thumb_frame.0 != self.frame {
+            self.thumb_frame = (self.frame, 0);
+        }
+        if self.thumb_frame.1 >= THUMBS_PER_FRAME {
+            self.perf_counters.thumbs_deferred += 1;
+            ctx.request_repaint();
+            return false;
+        }
+        self.thumb_frame.1 += 1;
+        true
+    }
+
+    fn blank_thumb(&mut self, ctx: &egui::Context) -> egui::TextureId {
+        self.blank_thumb.get_or_insert_with(|| ctx.load_texture("thumb-blank", egui::ColorImage::new([1, 1], vec![egui::Color32::TRANSPARENT]), egui::TextureOptions::LINEAR)).id()
     }
 
     fn store_thumb(&mut self, ctx: &egui::Context, key: (photocraft_doc::LayerId, u8), rev: u64, img: egui::ColorImage) -> egui::TextureId {
@@ -2001,6 +2039,9 @@ impl PhotocraftApp {
         }
     }
 }
+
+/// Layer and mask thumbnails rebuilt per frame at most (see `PhotocraftApp::thumb_budget`).
+pub const THUMBS_PER_FRAME: u32 = 8;
 
 /// Cheap identity of a surface's pixels: its default (untouched) pixel, tile coordinates and
 /// `Arc` pointers. The default pixel matters: inverting or filling a tile-less mask only changes
