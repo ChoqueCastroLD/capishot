@@ -55,7 +55,7 @@ fn settle(g: &GpuCanvas, doc: &Document, need: ViewNeed) -> usize {
     let mut frames = 0;
     std::thread::sleep(std::time::Duration::from_millis(gpu_canvas::REFINE_DELAY_MS as u64 + 20));
     while g.has_stale(doc.id.0) {
-        if g.catch_up(doc.id.0, doc, None, need, true).refined {
+        if g.catch_up(doc.id.0, doc, None, need, true, &egui::Context::default()).refined {
             frames += 1;
         } else {
             // The last piece is still on the GPU.
@@ -111,6 +111,7 @@ fn reduced_and_deferred_refreshes_end_like_a_full_refresh() {
     assert_eq!(r.level, 2, "{r:?}");
     assert!(r.px <= (1536 / 4 + 1) * (1100 / 4 + 1), "{} px at level 2", r.px);
     assert!(g.has_stale(key));
+    assert_eq!(g.view_floor(key, doc.bounds()), 2.0, "the view stays on level 2 until refined");
     // The reference: the same edit refreshed at full size.
     let exact_doc = copy(&doc);
     g.refresh(exact_doc.id.0, &exact_doc, None, None);
@@ -123,13 +124,14 @@ fn reduced_and_deferred_refreshes_end_like_a_full_refresh() {
     let (_, _, exact) = g.read_texels(exact_doc.id.0).unwrap();
     // A view zoomed back in needs full size where it looks: that much is composited at once.
     let zoomed = ViewNeed { visible: Rect::new(600, 400, 900, 600), level: 0 };
-    let c = g.catch_up(key, &doc, None, zoomed, false);
+    let c = g.catch_up(key, &doc, None, zoomed, false, &egui::Context::default());
     assert!(c.px > 0 && !c.refined);
     let (_, _, now) = g.read_texels(key).unwrap();
     for y in 400..600 {
         assert_eq!(max_diff(&now[y * w + 600..y * w + 900], &exact[y * w + 600..y * w + 900]), 0.0, "row {y} after zooming in");
     }
     settle(&g, &doc, fit);
+    assert_eq!(g.view_floor(key, doc.bounds()), 0.0);
     assert_eq!(max_diff(&g.read_texels(key).unwrap().2, &exact), 0.0, "settled reduced refresh");
     assert_eq!(max_diff(&g.read_texels_level(key, 2).unwrap().2, &reference), 0.0, "mips rebuilt");
 
@@ -154,4 +156,9 @@ fn view_levels_follow_the_zoom() {
     assert_eq!(gpu_canvas::lod_level(0.001), photocraft_gpu::MAX_LOD);
     assert_eq!(gpu_canvas::lod_level(f32::NAN), 0);
     assert_eq!(gpu_canvas::lod_level(0.0), 0);
+    // While edits happen, a view between 50% and 100% shows level 1.
+    assert_eq!(gpu_canvas::interactive_level(0.7), 1);
+    assert_eq!(gpu_canvas::interactive_level(0.2), 2);
+    assert_eq!(gpu_canvas::interactive_level(1.0), 0);
+    assert_eq!(gpu_canvas::interactive_level(3.0), 0);
 }

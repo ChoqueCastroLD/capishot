@@ -1315,7 +1315,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
         }
         // Regions composited reduced or left for later: what the view shows now, then (once the
         // edits pause) the rest at full size, a piece per frame.
-        let c = gpu.catch_up(id.0, &doc, display.as_deref(), need, true);
+        let c = gpu.catch_up(id.0, &doc, display.as_deref(), need, true, ctx);
         if c.px > 0 {
             app.perf.record(if c.refined { "gpu-refine" } else { "gpu-catch-up" }, c.px, c.composite_ms, 0.0);
         }
@@ -2606,9 +2606,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 output: output.unwrap_or(0),
                 hdr: hdr_preview(app, &doc),
                 offset: [0.0, 0.0],
+                min_lod: 0.0,
             };
             paint_gpu_view(&painter, rect, params, &pattern);
-        } else if gpu_ok && ensure_gpu(app, idx, visible_doc_rect(&xf), crate::gpu_canvas::lod_level(view.zoom), &ctx) {
+        } else if gpu_ok && ensure_gpu(app, idx, visible_doc_rect(&xf), crate::gpu_canvas::interactive_level(view.zoom), &ctx) {
             on_gpu = true;
             app.perf.gpu = true;
             // Shadow, checkerboard, document and pixel grid in one custom shader (gpu_canvas.rs).
@@ -2628,6 +2629,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 output: output.unwrap_or(0),
                 hdr: hdr_preview(app, &doc),
                 offset: [0.0, 0.0],
+                min_lod: app.gpu.as_ref().map_or(0.0, |g| g.view_floor(doc.id.0, visible_doc_rect(&xf))),
             };
             paint_gpu_view(&painter, rect, params, &pattern);
         } else {

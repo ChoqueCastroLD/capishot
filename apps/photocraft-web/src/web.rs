@@ -188,7 +188,13 @@ pub fn start() {
         if let Err(e) = result
             && let Some(el) = document.get_element_by_id("photocraft_loading")
         {
-            el.set_inner_html(&format!("<p>Capishot failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>"));
+            // No WebGPU adapter and no WebGL2 context (no GPU and the browser refuses software
+            // WebGL, or hardware acceleration is off): nothing can draw the interface.
+            el.set_inner_html(&format!(
+                "<p>Capishot failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required. If this computer has no graphics \
+                 acceleration, turn on hardware acceleration in the browser settings (Chrome: Settings › System › Use graphics \
+                 acceleration) or try another browser.</p>"
+            ));
         }
     });
 }
