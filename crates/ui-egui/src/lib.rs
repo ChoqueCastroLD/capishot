@@ -1086,6 +1086,10 @@ impl PhotocraftApp {
             id,
             "layer.vectorMask.add" | "layer.vectorMask.fromPath" | "layer.vectorMask.revealAll" | "layer.vectorMask.hideAll" | "layer.vectorMask.currentPath"
         ) && on_active_layer;
+        // A draft Pen path belongs to the current document, not the one about to be created.
+        if id == "file.new" && self.ui.pen.is_some() {
+            vector_ui::pen_commit(self, false);
+        }
         let r = if id == "actions.play" {
             actions::play(self, &params)
         } else if photocraft_engine::actions_cmds::shell_view_command(id) {
