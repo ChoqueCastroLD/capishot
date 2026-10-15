@@ -2551,6 +2551,11 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
     });
     for (id, p) in actions {
+        // A row click commits even when it selects the layer already being edited (#5584).
+        // Finish before selection changes so the existing type session keeps its own target.
+        if id == "layer.select" && app.ui.text_edit.is_some() {
+            crate::type_tool::commit(app);
+        }
         if id == "ui.maskTarget" {
             app.ui.mask_target = p.as_bool().unwrap_or(false);
             app.ui.vector_mask_target = false;
@@ -6311,6 +6316,114 @@ mod properties_target_regressions {
 #[cfg(test)]
 #[path = "history_panel_select_tests.rs"]
 mod history_panel_select_tests;
+#[cfg(test)]
+mod layer_click_type_commit_tests {
+    use super::*;
+    use egui_kittest::{Harness, kittest::Queryable};
+
+    fn harness(kind: theme::ThemeKind) -> (Harness<'static, PhotocraftApp>, LayerId, LayerId) {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 200, "height": 200})).unwrap();
+        let text = LayerId(app.run("type.create", json!({"text": "Before", "size": 24, "x": 20, "y": 80})).unwrap()["layer"].as_u64().unwrap());
+        app.run("layer.setProps", json!({"layer": text.0, "name": "Edited type"})).unwrap();
+        let other = LayerId(app.run("layer.new.layer", json!({"name": "Other pixels"})).unwrap()["layer"].as_u64().unwrap());
+        app.run("layer.select", json!({"layer": text.0})).unwrap();
+        crate::type_tool::edit_active(&mut app).unwrap();
+        let session = app.ui.text_edit.as_ref().unwrap().session.clone();
+        app.run("type.edit", json!({"layer": text.0, "text": "Preserved edit", "coalesce": session})).unwrap();
+        let mut ready = false;
+        let mut h = Harness::builder().with_size(vec2(360.0, 650.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            move |ui, app: &mut PhotocraftApp| {
+                if !ready {
+                    PhotocraftApp::setup_context(ui.ctx(), kind);
+                    ready = true;
+                    return;
+                }
+                layers(app, ui);
+            },
+            app,
+        );
+        h.run_steps(4);
+        (h, text, other)
+    }
+
+    fn click(h: &mut Harness<'_, PhotocraftApp>, at: Pos2, modifiers: egui::Modifiers) {
+        h.event(egui::Event::ModifiersChanged(modifiers));
+        h.hover_at(at);
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers });
+            h.run_steps(1);
+        }
+    }
+
+    fn preserved(app: &PhotocraftApp, id: LayerId) {
+        let layer = app.session.active().unwrap().doc.layer(id).unwrap();
+        let LayerContent::Text(text) = &layer.content else { panic!("type must remain editable") };
+        assert_eq!(text.text, "Preserved edit");
+    }
+
+    #[test]
+    fn layer_name_and_thumbnail_clicks_commit_same_or_other_type_selection() {
+        for kind in theme::ThemeKind::ALL {
+            for same in [true, false] {
+                for thumbnail in [true, false] {
+                    let (mut h, text, other) = harness(kind);
+                    let label = if same { "Edited type" } else { "Other pixels" };
+                    let row = h.get_by_label(label).rect();
+                    let at = pos2(row.left() + if thumbnail { 43.0 } else { 120.0 }, row.center().y);
+                    click(&mut h, at, egui::Modifiers::NONE);
+                    assert!(h.state().ui.text_edit.is_none(), "{kind:?}, same={same}, thumbnail={thumbnail}");
+                    assert_eq!(h.state().session.active().unwrap().active_layer, Some(if same { text } else { other }));
+                    preserved(h.state(), text);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn layer_click_commits_without_breaking_modifier_selection_or_double_click_editing() {
+        for kind in theme::ThemeKind::ALL {
+            let (mut h, text, other) = harness(kind);
+            let row = h.get_by_label("Other pixels").rect();
+            click(&mut h, pos2(row.left() + 120.0, row.center().y), egui::Modifiers { command: true, ..Default::default() });
+            assert!(h.state().ui.text_edit.is_none());
+            let selected = h.state().session.active().unwrap().selected_layers();
+            assert!(selected.contains(&text) && selected.contains(&other));
+            preserved(h.state(), text);
+
+            let (mut h, text, _) = harness(kind);
+            let row = h.get_by_label("Edited type").rect();
+            let thumb = pos2(row.left() + 43.0, row.center().y);
+            click(&mut h, thumb, egui::Modifiers::NONE);
+            assert!(h.state().ui.text_edit.is_none());
+            click(&mut h, thumb, egui::Modifiers::NONE);
+            assert_eq!(h.state().ui.text_edit.as_ref().map(|ed| ed.layer), Some(text.0));
+            preserved(h.state(), text);
+        }
+    }
+
+    #[test]
+    #[ignore = "offscreen visual evidence for #5584"]
+    fn layer_click_synthetic_visual_evidence() {
+        let (h, text, _) = harness(theme::ThemeKind::ProMedium);
+        let mut app = h.into_state();
+        app.ui.tool = Tool::Type;
+        let mut h = Harness::builder().with_size(vec2(1280.0, 900.0)).with_step_dt(1.0 / 60.0).with_max_steps(64).wgpu().build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, theme::ThemeKind::ProMedium);
+            app
+        });
+        h.run_steps(4);
+        assert!(h.state().ui.text_edit.is_some());
+        h.render().unwrap().save("5584-before.png").unwrap();
+        let row = h.get_by_label("Other pixels").rect();
+        click(&mut h, pos2(row.left() + 120.0, row.center().y), egui::Modifiers::NONE);
+        assert!(h.state().ui.text_edit.is_none());
+        preserved(h.state(), text);
+        h.run_steps(4);
+        h.render().unwrap().save("5584-after.png").unwrap();
+    }
+}
 
 #[cfg(test)]
 mod sampler_readout_tests {
