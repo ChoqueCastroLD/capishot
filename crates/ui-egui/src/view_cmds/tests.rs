@@ -514,7 +514,9 @@ fn creating_a_selection_restores_hidden_extras() {
         ("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})),
         ("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20, "ellipse": true})),
         ("select.lasso", json!({"points": [[10,10], [30,10], [20,30]]})),
+        ("select.magneticLasso", json!({"points": [[10,10], [30,10], [20,30]], "trace": false})),
         ("select.magicWand", json!({"x": 10, "y": 10})),
+        ("select.quick", json!({"points": [[10,10]], "size": 8})),
         ("select.loadSelection", json!({"channel": "transparency"})),
         ("select.loadLuminosity", json!({})),
     ] {
@@ -555,4 +557,16 @@ fn new_selection_preserves_individual_show_preferences() {
     assert!(app.ui.view.extras);
     assert!(!app.ui.view.show.selection_edges);
     assert!(!app.ui.view.show.grid);
+}
+
+#[test]
+fn object_selection_finding_nothing_keeps_extras_hidden() {
+    let (mut app, ctx) = app_with(1);
+    app.run("edit.fill", json!({"color": "#ffffff"})).unwrap();
+    app.run("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap();
+    menu(&mut app, &ctx, "view.extras", json!({})).unwrap();
+    let result = app.run("select.object", json!({"point": [3,3]})).unwrap();
+    assert_eq!(result["changed"], false);
+    assert!(app.session.active().unwrap().doc.selection.is_some());
+    assert!(!app.ui.view.extras, "finding no object must not reveal an old selection");
 }

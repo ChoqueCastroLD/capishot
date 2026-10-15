@@ -352,3 +352,16 @@ fn thumbnail_selection_after_hiding_extras_restores_outline() {
     assert!(h.state().ui.view.shows(h.state().ui.view.show.selection_edges), "Ctrl-clicking the thumbnail reveals the new selection");
     assert_eq!(h.state().session.active().unwrap().active_layer, Some(photocraft_doc::LayerId(active)));
 }
+
+#[test]
+fn loading_a_path_after_hiding_extras_restores_outline() {
+    let mut h = harness();
+    h.state_mut().run("path.set", json!({"name": "work", "path": rect_path(10.0, 10.0, 50.0, 40.0)})).unwrap();
+    h.state_mut().ui.tool = Tool::Pen;
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(h.state_mut(), &ctx, "view.extras", json!({})).unwrap();
+    assert!(!h.state().ui.view.extras);
+    press(&mut h, Key::Enter, command());
+    assert_eq!(selection(&h), Some([10, 10, 50, 40]));
+    assert!(h.state().ui.view.shows(h.state().ui.view.show.selection_edges));
+}
