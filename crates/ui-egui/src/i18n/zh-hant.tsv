@@ -2749,3 +2749,26 @@ cameraData	Lens	鏡頭
 	Not saved	未儲存
 	Reading the clipboard…	正在讀取剪貼簿…
 	Typesetting	嵌字
+	Upscale with AI…	以 AI 放大…
+	Automatic (MangaJaNai's choice)	自動（MangaJaNai 的選擇）
+	Image type:	影像類型:
+	Detect	偵測
+	Black-and-white manga	黑白漫畫
+	Colour	彩色
+	Model:	模型:
+	Auto levels (black-and-white pages)	自動色階（黑白頁面）
+	Result:	結果:
+	Replace this image (flattens)	取代此影像（會合併圖層）
+	New document	新增文件
+	Detected a black-and-white page	偵測到黑白頁面
+	Detected a colour image	偵測到彩色影像
+	Black-and-white page	黑白頁面
+	Colour image	彩色影像
+	New size: {w} × {h} px	新尺寸: {w} × {h} 像素
+	The image becomes one layer at the new size (Undo restores it).	影像會成為新尺寸的單一圖層（可用「還原」復原）。
+	Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.	在此裝置上執行（瀏覽器支援 WebGPU 時使用您的 GPU）；不會上傳任何內容。
+	Runs on this device ({device}); nothing is uploaded.	在此裝置上執行（{device}）；不會上傳任何內容。
+	First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time.	首次使用會下載模型: {mb} MB。授權 {license}（{author}）。下載後會保留供下次使用。
+	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai 專為黑白頁面設計；色彩會遺失。
+	Download and Upscale	下載並放大
+	Upscale	放大

@@ -3773,3 +3773,25 @@ cameraData	Lens	Obiektyw
 	Not saved	Niezapisana
 	Reading the clipboard…	Odczytywanie schowka…
 	Typesetting	Liternictwo
+	Upscale with AI…	Powiększ za pomocą AI…
+	Automatic (MangaJaNai's choice)	Automatycznie (wybór MangaJaNai)
+	Image type:	Typ obrazu:
+	Detect	Wykryj
+	Black-and-white manga	Czarno-biała manga
+	Colour	Kolor
+	Model:	Model:
+	Auto levels (black-and-white pages)	Automatyczne poziomy (strony czarno-białe)
+	Result:	Wynik:
+	Replace this image (flattens)	Zastąp ten obraz (spłaszcza)
+	Detected a black-and-white page	Wykryto czarno-białą stronę
+	Detected a colour image	Wykryto kolorowy obraz
+	Black-and-white page	Strona czarno-biała
+	Colour image	Obraz kolorowy
+	New size: {w} × {h} px	Nowy rozmiar: {w} × {h} px
+	The image becomes one layer at the new size (Undo restores it).	Obraz stanie się jedną warstwą w nowym rozmiarze (Cofnij go przywraca).
+	Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.	Działa na tym urządzeniu (na Twoim GPU, gdy przeglądarka oferuje WebGPU); nic nie jest wysyłane.
+	Runs on this device ({device}); nothing is uploaded.	Działa na tym urządzeniu ({device}); nic nie jest wysyłane.
+	First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time.	Przy pierwszym użyciu pobierany jest model: {mb} MB. Licencja {license} ({author}). Zostaje zachowany na następny raz.
+	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai jest przeznaczony dla stron czarno-białych; kolor zostanie utracony.
+	Download and Upscale	Pobierz i powiększ
+	Upscale	Powiększ

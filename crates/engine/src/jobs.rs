@@ -357,6 +357,92 @@ pub fn run<T: Send + 'static>(
     Ok(json!({"job": id.0}))
 }
 
+/// Delivers the result of an [`run_async`] job's work. Call [`Completion::finish`] once, from
+/// any thread or browser event; dropping it unfinished fails the job ("stopped unexpectedly").
+pub struct Completion<T> {
+    tx: std::sync::mpsc::Sender<Result<Payload>>,
+    _t: std::marker::PhantomData<fn(T)>,
+}
+
+impl<T: Send + 'static> Completion<T> {
+    pub fn finish(self, r: Result<T>) {
+        // The receiver is gone when the job was cancelled: nothing to report.
+        let _ = self.tx.send(r.map(|t| Box::new(t) as Payload));
+    }
+}
+
+/// [`run`] for work that completes asynchronously: `work` starts it and hands the
+/// [`Completion`] to whatever finishes it (the AI Web Worker's reply in the browser, which can't
+/// block on WebGPU). `apply` then runs on the UI thread as for [`run`].
+///
+/// Natively, started with [`Session::start`], `work` runs on a worker thread; run inline it is
+/// waited for. In the browser it is always a background job, even from [`Session::execute`]
+/// (which then returns `{"job": id, "pending": true}`): `work` must return at once there.
+pub fn run_async<T: Send + 'static>(
+    s: &mut Session,
+    label: &str,
+    lock_document: bool,
+    work: impl FnOnce(&JobCtx, Completion<T>) + Send + 'static,
+    apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
+) -> Result<Value> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<Payload>>();
+    let done = Completion { tx, _t: std::marker::PhantomData };
+    #[cfg(not(target_arch = "wasm32"))]
+    if !s.jobs.spawn {
+        work(&s.jobs.inline.clone().unwrap_or_default(), done);
+        let r = rx.recv().unwrap_or_else(|_| Err(EngineError::Other(format!("`{label}` stopped unexpectedly"))))?;
+        let t = r.downcast::<T>().map_err(|_| EngineError::Other("internal error: job result type mismatch".into()))?;
+        return apply(s, *t);
+    }
+    if s.jobs.pending.is_some() {
+        return Err(EngineError::Other(format!("`{label}` started a second background job in one command")));
+    }
+    let (doc, snapshot) = match (lock_document, s.active()) {
+        (true, Some(st)) => (Some(st.doc.id), Some(Arc::downgrade(&st.doc))),
+        (true, None) => return Err(EngineError::NoDocument),
+        (false, _) => (None, None),
+    };
+    let ctx = JobCtx::new();
+    let erased: Apply = Box::new(move |s, any| {
+        let t = any.downcast::<T>().map_err(|_| EngineError::Other("internal error: job result type mismatch".into()))?;
+        apply(s, *t)
+    });
+    s.jobs.next += 1;
+    let id = JobId(s.jobs.next);
+    #[cfg(not(target_arch = "wasm32"))]
+    let handle = {
+        let wctx = ctx.clone();
+        let fail = done.tx.clone();
+        let label_w = label.to_string();
+        let spawned = std::thread::Builder::new().name(format!("photocraft-job-{}", id.0)).spawn(move || {
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&wctx, done))).is_err() {
+                let _ = fail.send(Err(EngineError::Other(format!("`{label_w}` failed with an internal error (logged); the document is unchanged"))));
+            }
+        });
+        Some(spawned.map_err(|e| EngineError::Other(format!("could not start a background job: {e}")))?)
+    };
+    #[cfg(target_arch = "wasm32")]
+    work(&ctx, done);
+    s.jobs.pending = Some(Running {
+        id,
+        command: String::new(),
+        label: label.to_string(),
+        params: Value::Null,
+        journal: true,
+        doc,
+        snapshot,
+        ctx,
+        started_ms: now_ms(),
+        coalesce: s.coalesce_request.clone(),
+        color_restrict: s.color_restrict,
+        rx,
+        apply: Some(erased),
+        #[cfg(not(target_arch = "wasm32"))]
+        handle,
+    });
+    Ok(json!({"job": id.0}))
+}
+
 /// A document edit whose body is the job: like [`Session::edit`] (one undo step named `label`),
 /// but `f` runs on a worker against a copy of the active document when started in the
 /// background. `finish` turns `f`'s output into the command's result.

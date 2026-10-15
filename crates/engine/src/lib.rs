@@ -10,6 +10,7 @@
 pub mod actions_cmds;
 pub mod adjust_cmds;
 pub mod adjust_params;
+pub mod ai_cmds;
 pub mod align_cmds;
 mod allocation;
 pub mod analysis_cmds;
@@ -428,6 +429,9 @@ pub struct Session {
     /// Google Fonts download services (fetcher, store, index), injected by the shell; `None`
     /// where online fonts are unavailable (see `font_download_cmds`).
     font_services: Option<Arc<font_download_cmds::FontServices>>,
+    /// The model runner for `image.upscaleAi` (photocraft-ai), injected by the shell; `None`
+    /// where AI upscaling is unavailable (see `ai_cmds`).
+    ai_upscaler: Option<Arc<dyn photocraft_ai::service::Upscaler>>,
     /// TypeR: script, cursor, style library and settings (see `typer_state`, `docs/typer.md`).
     pub typer: typer_state::TyperSession,
 }
@@ -554,7 +558,11 @@ impl Session {
     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value> {
         match self.dispatch(id, params, false)? {
             jobs::Started::Done(v) => Ok(v),
-            // Not reached: inline dispatch never starts a job. Waiting is still correct.
+            // Only `jobs::run_async` work starts a job inline, and only in the browser, which
+            // can't block for it: the caller polls (`poll_jobs`) like for `start`.
+            #[cfg(target_arch = "wasm32")]
+            jobs::Started::Job(j) => Ok(serde_json::json!({"job": j.0, "pending": true})),
+            #[cfg(not(target_arch = "wasm32"))]
             jobs::Started::Job(j) => self.wait_job(j),
         }
     }

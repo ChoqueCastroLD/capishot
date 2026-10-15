@@ -3769,3 +3769,25 @@ cameraData	Lens	レンズ
 	Not saved	未保存
 	Reading the clipboard…	クリップボードを読み込み中…
 	Typesetting	写植
+	Upscale with AI…	AI でアップスケール…
+	Automatic (MangaJaNai's choice)	自動（MangaJaNai の選択）
+	Image type:	画像の種類:
+	Detect	自動判別
+	Black-and-white manga	白黒マンガ
+	Colour	カラー
+	Model:	モデル:
+	Auto levels (black-and-white pages)	自動レベル補正（白黒ページ）
+	Result:	結果:
+	Replace this image (flattens)	この画像を置き換え（統合されます）
+	Detected a black-and-white page	白黒ページを検出しました
+	Detected a colour image	カラー画像を検出しました
+	Black-and-white page	白黒ページ
+	Colour image	カラー画像
+	New size: {w} × {h} px	新しいサイズ: {w} × {h} px
+	The image becomes one layer at the new size (Undo restores it).	画像は新しいサイズの 1 つのレイヤーになります（取り消しで元に戻せます）。
+	Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.	このデバイスで実行します（ブラウザーが WebGPU に対応していれば GPU を使用）。何もアップロードされません。
+	Runs on this device ({device}); nothing is uploaded.	このデバイスで実行します（{device}）。何もアップロードされません。
+	First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time.	初回はモデルをダウンロードします: {mb} MB。ライセンス {license}（{author}）。次回のために保存されます。
+	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai は白黒ページ用です。色は失われます。
+	Download and Upscale	ダウンロードしてアップスケール
+	Upscale	アップスケール

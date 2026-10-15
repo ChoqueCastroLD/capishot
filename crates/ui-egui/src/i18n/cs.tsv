@@ -2768,3 +2768,26 @@ cameraData	Lens	Objektiv
 	Not saved	Neuloženo
 	Reading the clipboard…	Čtení schránky…
 	Typesetting	Sazba textu
+	Upscale with AI…	Zvětšit pomocí AI…
+	Automatic (MangaJaNai's choice)	Automaticky (volba MangaJaNai)
+	Image type:	Typ obrazu:
+	Detect	Rozpoznat
+	Black-and-white manga	Černobílá manga
+	Colour	Barva
+	Model:	Model:
+	Auto levels (black-and-white pages)	Automatické úrovně (černobílé stránky)
+	Result:	Výsledek:
+	Replace this image (flattens)	Nahradit tento obraz (sloučí vrstvy)
+	New document	Nový dokument
+	Detected a black-and-white page	Rozpoznána černobílá stránka
+	Detected a colour image	Rozpoznán barevný obraz
+	Black-and-white page	Černobílá stránka
+	Colour image	Barevný obraz
+	New size: {w} × {h} px	Nová velikost: {w} × {h} px
+	The image becomes one layer at the new size (Undo restores it).	Obraz se stane jednou vrstvou v nové velikosti (Zpět jej obnoví).
+	Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.	Běží na tomto zařízení (na vaší GPU, pokud prohlížeč nabízí WebGPU); nic se nenahrává.
+	Runs on this device ({device}); nothing is uploaded.	Běží na tomto zařízení ({device}); nic se nenahrává.
+	First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time.	Při prvním použití se stáhne model: {mb} MB. Licence {license} ({author}). Uchová se pro příště.
+	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai je určena pro černobílé stránky; barva se ztratí.
+	Download and Upscale	Stáhnout a zvětšit
+	Upscale	Zvětšit

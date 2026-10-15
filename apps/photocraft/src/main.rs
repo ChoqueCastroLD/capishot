@@ -405,6 +405,9 @@ fn main() -> eframe::Result {
             // disk (no network at startup; downloads need Preferences > Type > Allow Online Fonts).
             if let Some(dir) = services::config_dir() {
                 photocraft_fontfetch::attach(&mut app.session, &dir);
+                // Image › Upscale with AI, in-process (the `ai` feature).
+                #[cfg(feature = "ai")]
+                app.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(&dir))));
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;

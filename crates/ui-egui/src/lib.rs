@@ -19,6 +19,7 @@ pub mod adjust_dialog;
 pub mod adjust_editors;
 pub mod adjust_preview;
 pub mod adjust_ui;
+pub mod ai_upscale_ui;
 mod alt_grab;
 pub mod analysis_ui;
 pub mod anchor_tools;

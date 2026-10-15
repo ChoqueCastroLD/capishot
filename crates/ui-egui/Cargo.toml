@@ -26,6 +26,8 @@ photocraft-ops = { workspace = true }
 photocraft-compose = { workspace = true }
 photocraft-gpu = { workspace = true }
 photocraft-engine = { workspace = true }
+# Image › Upscale with AI…: the model catalog and the upscaler seam (no inference).
+photocraft-ai = { workspace = true }
 # The TypeR panel reads the session's TypeR state (script lines, style library) to draw it.
 photocraft-typer = { workspace = true }
 photocraft-io = { workspace = true }

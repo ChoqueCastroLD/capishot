@@ -4146,3 +4146,25 @@ layerLabel	No Color	Sem cor
 @plural	{n} file|{n} files	{n} arquivo|{n} arquivos
 @plural	{n} font|{n} fonts	{n} fonte|{n} fontes
 	A TypeR export (.json): a folder, a style library or a full export with settings. Photoshop tool presets (.tpl): each Type tool preset becomes a style in a new folder.	Uma exportação do TypeR (.json): uma pasta, uma biblioteca de estilos ou uma exportação completa com configurações. Predefinições de ferramenta do Photoshop (.tpl): cada predefinição da ferramenta Texto vira um estilo em uma pasta nova.
+	Upscale with AI…	Ampliar com IA…
+	Automatic (MangaJaNai's choice)	Automático (escolha do MangaJaNai)
+	Image type:	Tipo de imagem:
+	Detect	Detectar
+	Black-and-white manga	Mangá em preto e branco
+	Colour	Cor
+	Model:	Modelo:
+	Auto levels (black-and-white pages)	Níveis automáticos (páginas em preto e branco)
+	Result:	Resultado:
+	Replace this image (flattens)	Substituir esta imagem (achata)
+	Detected a black-and-white page	Página em preto e branco detectada
+	Detected a colour image	Imagem colorida detectada
+	Black-and-white page	Página em preto e branco
+	Colour image	Imagem colorida
+	New size: {w} × {h} px	Novo tamanho: {w} × {h} px
+	The image becomes one layer at the new size (Undo restores it).	A imagem vira uma camada no novo tamanho (Desfazer a restaura).
+	Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.	Roda neste dispositivo (sua GPU quando o navegador oferece WebGPU); nada é enviado.
+	Runs on this device ({device}); nothing is uploaded.	Roda neste dispositivo ({device}); nada é enviado.
+	First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time.	O primeiro uso baixa o modelo: {mb} MB. Licença {license} ({author}). Ele fica guardado para a próxima vez.
+	MangaJaNai is made for black-and-white pages; colour is lost.	O MangaJaNai é feito para páginas em preto e branco; a cor se perde.
+	Download and Upscale	Baixar e ampliar
+	Upscale	Ampliar

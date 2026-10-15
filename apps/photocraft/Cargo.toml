@@ -11,6 +11,9 @@ build = "build.rs"
 # Open HEIC/HEIF photos (the optional photocraft-heif crate). Not default so distributors choose
 # it; official builds (CI, packaging/, release) build with `--features heif`.
 heif = ["photocraft-codecs/heif"]
+# Image › Upscale with AI in-process (photocraft-ai with burn: wgpu GPU, CPU fallback, downloads).
+# Opt-in: it adds the inference stack to the build.
+ai = ["dep:photocraft-ai", "photocraft-ai/gpu", "photocraft-ai/cpu", "photocraft-ai/download"]
 
 [[bin]]
 name = "capishot"
@@ -20,6 +23,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+photocraft-ai = { workspace = true, optional = true }
 photocraft-doc = { workspace = true }
 photocraft-ops = { workspace = true }
 photocraft-color = { workspace = true }

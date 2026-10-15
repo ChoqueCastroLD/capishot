@@ -33,6 +33,8 @@ mod indexed_fonts;
 mod indexed_presets;
 
 #[cfg(target_arch = "wasm32")]
+mod ai_bridge;
+#[cfg(target_arch = "wasm32")]
 mod clipboard;
 #[cfg(any(target_arch = "wasm32", test))]
 mod clipboard_data;

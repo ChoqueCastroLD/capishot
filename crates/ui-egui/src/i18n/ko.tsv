@@ -3338,3 +3338,25 @@ cameraData	Lens	렌즈
 	Not saved	저장 안 됨
 	Reading the clipboard…	클립보드 읽는 중…
 	Typesetting	식자
+	Upscale with AI…	AI로 업스케일…
+	Automatic (MangaJaNai's choice)	자동(MangaJaNai의 선택)
+	Image type:	이미지 유형:
+	Detect	감지
+	Black-and-white manga	흑백 만화
+	Colour	컬러
+	Model:	모델:
+	Auto levels (black-and-white pages)	자동 레벨(흑백 페이지)
+	Result:	결과:
+	Replace this image (flattens)	이 이미지 바꾸기(병합됨)
+	Detected a black-and-white page	흑백 페이지를 감지했습니다
+	Detected a colour image	컬러 이미지를 감지했습니다
+	Black-and-white page	흑백 페이지
+	Colour image	컬러 이미지
+	New size: {w} × {h} px	새 크기: {w} × {h} px
+	The image becomes one layer at the new size (Undo restores it).	이미지가 새 크기의 레이어 하나가 됩니다(실행 취소로 복원).
+	Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.	이 기기에서 실행됩니다(브라우저가 WebGPU를 지원하면 GPU 사용). 아무것도 업로드되지 않습니다.
+	Runs on this device ({device}); nothing is uploaded.	이 기기에서 실행됩니다({device}). 아무것도 업로드되지 않습니다.
+	First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time.	처음 사용할 때 모델을 내려받습니다: {mb} MB. 라이선스 {license}({author}). 다음에 쓸 수 있도록 보관됩니다.
+	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai는 흑백 페이지용이며 색이 사라집니다.
+	Download and Upscale	내려받고 업스케일
+	Upscale	업스케일

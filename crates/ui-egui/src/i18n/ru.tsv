@@ -3104,3 +3104,26 @@ cameraData	Lens	Объектив
 	Not saved	Не сохранён
 	Reading the clipboard…	Чтение буфера обмена…
 	Typesetting	Леттеринг
+	Upscale with AI…	Увеличить с помощью ИИ…
+	Automatic (MangaJaNai's choice)	Автоматически (выбор MangaJaNai)
+	Image type:	Тип изображения:
+	Detect	Определить
+	Black-and-white manga	Чёрно-белая манга
+	Colour	Цвет
+	Model:	Модель:
+	Auto levels (black-and-white pages)	Автоуровни (чёрно-белые страницы)
+	Result:	Результат:
+	Replace this image (flattens)	Заменить это изображение (сводит слои)
+	New document	Новый документ
+	Detected a black-and-white page	Обнаружена чёрно-белая страница
+	Detected a colour image	Обнаружено цветное изображение
+	Black-and-white page	Чёрно-белая страница
+	Colour image	Цветное изображение
+	New size: {w} × {h} px	Новый размер: {w} × {h} пикс.
+	The image becomes one layer at the new size (Undo restores it).	Изображение станет одним слоем нового размера (Отменить вернёт его).
+	Runs on this device (your GPU when the browser offers WebGPU); nothing is uploaded.	Выполняется на этом устройстве (на вашем GPU, если браузер поддерживает WebGPU); ничего не загружается в сеть.
+	Runs on this device ({device}); nothing is uploaded.	Выполняется на этом устройстве ({device}); ничего не загружается в сеть.
+	First use downloads the model: {mb} MB. Licence {license} ({author}). It is kept for next time.	При первом использовании загружается модель: {mb} МБ. Лицензия {license} ({author}). Она сохраняется для следующего раза.
+	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai создана для чёрно-белых страниц; цвет будет потерян.
+	Download and Upscale	Загрузить и увеличить
+	Upscale	Увеличить

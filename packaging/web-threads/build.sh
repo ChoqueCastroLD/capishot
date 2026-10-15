@@ -110,6 +110,11 @@ cp "$HERE/_headers" "$OUT/"
 mkdir -p "$OUT/i18n"
 cp "$ROOT"/crates/ui-egui/src/i18n/*.tsv "$ROOT/crates/ui-egui/src/i18n/LICENSE-translations.txt" "$OUT/i18n/"
 
+# Image › Upscale with AI: the AI Web Worker module, loaded on demand (PHOTOCRAFT_WEB_AI=0 skips).
+if [ "${PHOTOCRAFT_WEB_AI:-1}" != "0" ]; then
+  "$ROOT/packaging/web-ai/build.sh" "$OUT"
+fi
+
 # Cloudflare Workers/Pages reject any single file over 25 MiB; fail well before that.
 max="${PHOTOCRAFT_WASM_MAX_BYTES:-25165824}" # 24 MiB
 size=$(wc -c <"$OUT/photocraft_bg.wasm.gz" | tr -d ' ')

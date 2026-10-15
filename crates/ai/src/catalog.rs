@@ -1,0 +1,266 @@
+//! The models Capishot knows: what they are, where their weights come from, how big they are.
+//!
+//! Weight files are the original releases converted to fp16 safetensors with new-arch ESRGAN key
+//! names (`conv_first`, `body.N.rdbM.convK`, `conv_body`, `conv_up1`, `conv_up2`, `conv_hr`,
+//! `conv_last`); conversion is lossless (the releases are fp16). They are downloaded on first use
+//! from [`ModelInfo::url`] under a base URL the shell configures, verified against
+//! [`ModelInfo::sha256`] and cached.
+
+/// The network architecture of a model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Arch {
+    /// ESRGAN RRDBNet (23 RRDB blocks, 64 filters). 2x models pixel-unshuffle their input.
+    Esrgan,
+}
+
+/// What a model is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Content {
+    /// Black-and-white manga pages (MangaJaNai).
+    Grayscale,
+    /// Colour pages, covers and illustrations (IllustrationJaNai).
+    Color,
+}
+
+/// One downloadable model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    /// Stable id used in command params, caches and URLs.
+    pub id: &'static str,
+    /// Shown in menus.
+    pub title: &'static str,
+    /// The weight file name (under the models base URL).
+    pub file: &'static str,
+    pub arch: Arch,
+    pub scale: u32,
+    pub content: Content,
+    /// The page height the model was trained for (MangaJaNai), if any.
+    pub height: Option<u32>,
+    /// Size of the weight file in bytes.
+    pub bytes: u64,
+    pub sha256: &'static str,
+    /// SPDX licence of the weights.
+    pub license: &'static str,
+    pub author: &'static str,
+    /// Where the original release lives.
+    pub source: &'static str,
+}
+
+impl ModelInfo {
+    /// The download URL under `base` (with or without a trailing slash).
+    pub fn url(&self, base: &str) -> String {
+        format!("{}/{}", base.trim_end_matches('/'), self.file)
+    }
+}
+
+const MJ_SRC: &str = "https://github.com/the-database/MangaJaNai/releases/tag/1.0.0";
+const LICENSE: &str = "CC-BY-NC-4.0";
+const AUTHOR: &str = "the-database";
+const B2: u64 = 33_472_214;
+const B4: u64 = 33_461_846;
+
+macro_rules! mj {
+    ($id:literal, $title:literal, $file:literal, $scale:literal, $h:literal, $bytes:expr, $sha:literal) => {
+        ModelInfo {
+            id: $id,
+            title: $title,
+            file: $file,
+            arch: Arch::Esrgan,
+            scale: $scale,
+            content: Content::Grayscale,
+            height: Some($h),
+            bytes: $bytes,
+            sha256: $sha,
+            license: LICENSE,
+            author: AUTHOR,
+            source: MJ_SRC,
+        }
+    };
+}
+
+/// Every known model.
+pub const MODELS: &[ModelInfo] = &[
+    mj!(
+        "mangajanai-v1-2x-1200p",
+        "MangaJaNai 2x (1200p)",
+        "2x_MangaJaNai_1200p_V1_ESRGAN_70k.safetensors",
+        2,
+        1200,
+        B2,
+        "77d3274d9e0bbf72f3675d0eaf1e8aea79b4124623a022603dda93f87d80a74f"
+    ),
+    mj!(
+        "mangajanai-v1-2x-1300p",
+        "MangaJaNai 2x (1300p)",
+        "2x_MangaJaNai_1300p_V1_ESRGAN_75k.safetensors",
+        2,
+        1300,
+        B2,
+        "e440654f3ac435539fcccbac86cf2813b50ac533cf7c0dbeceaf61eefffc5e13"
+    ),
+    mj!(
+        "mangajanai-v1-2x-1400p",
+        "MangaJaNai 2x (1400p)",
+        "2x_MangaJaNai_1400p_V1_ESRGAN_70k.safetensors",
+        2,
+        1400,
+        B2,
+        "717f0248d56ffe2f41f1cf40326c811cc187abb7e74e6c9477ae7ede90d9b2a6"
+    ),
+    mj!(
+        "mangajanai-v1-2x-1500p",
+        "MangaJaNai 2x (1500p)",
+        "2x_MangaJaNai_1500p_V1_ESRGAN_90k.safetensors",
+        2,
+        1500,
+        B2,
+        "711bcc0b6b7d00bb068886695efeae0a7f14a41f7086833d92480f7819e75a7c"
+    ),
+    mj!(
+        "mangajanai-v1-2x-1600p",
+        "MangaJaNai 2x (1600p)",
+        "2x_MangaJaNai_1600p_V1_ESRGAN_90k.safetensors",
+        2,
+        1600,
+        B2,
+        "d69ed784b0296792cd0a8876cf4a8162e7fe714ade0d061a7eb6ecf8a3047273"
+    ),
+    mj!(
+        "mangajanai-v1-2x-1920p",
+        "MangaJaNai 2x (1920p)",
+        "2x_MangaJaNai_1920p_V1_ESRGAN_70k.safetensors",
+        2,
+        1920,
+        B2,
+        "5f8af7ce3caa2b8db60ad8f80248868568aa34969bd76c2626cef39a6764f86a"
+    ),
+    mj!(
+        "mangajanai-v1-2x-2048p",
+        "MangaJaNai 2x (2048p)",
+        "2x_MangaJaNai_2048p_V1_ESRGAN_95k.safetensors",
+        2,
+        2048,
+        B2,
+        "3c03f46781ae68230a13e731f07d98216b0ff9354f04d4ff0ef11e7e434a55d6"
+    ),
+    mj!(
+        "mangajanai-v1-4x-1200p",
+        "MangaJaNai 4x (1200p)",
+        "4x_MangaJaNai_1200p_V1_ESRGAN_70k.safetensors",
+        4,
+        1200,
+        B4,
+        "393dd063f4fca32c226439a3ac664eaec9154a230094e0a526f31111db6770e7"
+    ),
+    mj!(
+        "mangajanai-v1-4x-1300p",
+        "MangaJaNai 4x (1300p)",
+        "4x_MangaJaNai_1300p_V1_ESRGAN_75k.safetensors",
+        4,
+        1300,
+        B4,
+        "8d1cb08e0a4c20e3521cdd0709e9e2ddaf7866ef11a997b63f6f422f2171fe9d"
+    ),
+    mj!(
+        "mangajanai-v1-4x-1400p",
+        "MangaJaNai 4x (1400p)",
+        "4x_MangaJaNai_1400p_V1_ESRGAN_105k.safetensors",
+        4,
+        1400,
+        B4,
+        "5709956bc9cd5574a470f8cb6c4bdfd3c60dc63b32b30ca73a3b332d4f3d0fe1"
+    ),
+    mj!(
+        "mangajanai-v1-4x-1500p",
+        "MangaJaNai 4x (1500p)",
+        "4x_MangaJaNai_1500p_V1_ESRGAN_105k.safetensors",
+        4,
+        1500,
+        B4,
+        "9802b24ed638b60427e9a6ce3b013b0f4235dedfdc6d4408fbe83a14a20383fe"
+    ),
+    mj!(
+        "mangajanai-v1-4x-1600p",
+        "MangaJaNai 4x (1600p)",
+        "4x_MangaJaNai_1600p_V1_ESRGAN_70k.safetensors",
+        4,
+        1600,
+        B4,
+        "c3d4f844e61fec52ac229ff3ee6ed2b0ec3bdaed5d89e6fbb9675d9a04a87580"
+    ),
+    mj!(
+        "mangajanai-v1-4x-1920p",
+        "MangaJaNai 4x (1920p)",
+        "4x_MangaJaNai_1920p_V1_ESRGAN_105k.safetensors",
+        4,
+        1920,
+        B4,
+        "07018e68fa9bc52d9bd9be1bc7ab5247b62134058118074286169790f7fd2e95"
+    ),
+    mj!(
+        "mangajanai-v1-4x-2048p",
+        "MangaJaNai 4x (2048p)",
+        "4x_MangaJaNai_2048p_V1_ESRGAN_70k.safetensors",
+        4,
+        2048,
+        B4,
+        "6bfee445b00d823de29425fc08ef946ec503e8c9cc7dcc6c588db8bcfa8a9122"
+    ),
+    ModelInfo {
+        id: "illustrationjanai-v1-2x",
+        title: "IllustrationJaNai 2x (colour)",
+        file: "2x_IllustrationJaNai_V1_ESRGAN_120k.safetensors",
+        arch: Arch::Esrgan,
+        scale: 2,
+        content: Content::Color,
+        height: None,
+        bytes: B2,
+        sha256: "b824f999f1339848dfae86c7749af278007afdab4221546e06b9b8fa498e740a",
+        license: LICENSE,
+        author: AUTHOR,
+        source: MJ_SRC,
+    },
+    ModelInfo {
+        id: "illustrationjanai-v1-4x",
+        title: "IllustrationJaNai 4x (colour)",
+        file: "4x_IllustrationJaNai_V1_ESRGAN_135k.safetensors",
+        arch: Arch::Esrgan,
+        scale: 4,
+        content: Content::Color,
+        height: None,
+        bytes: B4,
+        sha256: "a4f1925603df5d8151b80d31e5ab5adcf5a37fa91dd2c7450862797fa6dc2b4e",
+        license: LICENSE,
+        author: AUTHOR,
+        source: MJ_SRC,
+    },
+];
+
+/// The model with this id.
+pub fn model(id: &str) -> Option<&'static ModelInfo> {
+    MODELS.iter().find(|m| m.id == id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_and_files_are_unique_and_hashes_well_formed() {
+        for (i, a) in MODELS.iter().enumerate() {
+            assert_eq!(a.sha256.len(), 64);
+            assert!(a.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
+            assert!(a.file.starts_with(&format!("{}x_", a.scale)));
+            for b in &MODELS[i + 1..] {
+                assert_ne!(a.id, b.id);
+                assert_ne!(a.file, b.file);
+            }
+        }
+        assert_eq!(model("mangajanai-v1-4x-1200p").map(|m| m.scale), Some(4));
+        assert!(model("nope").is_none());
+        assert_eq!(MODELS[0].url("https://x/models/"), "https://x/models/2x_MangaJaNai_1200p_V1_ESRGAN_70k.safetensors");
+    }
+}
