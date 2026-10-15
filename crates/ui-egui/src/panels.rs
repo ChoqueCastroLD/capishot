@@ -1797,6 +1797,13 @@ fn info_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .hover_doc
         .map(|p| (p[0].floor() as i32, p[1].floor() as i32))
         .filter(|(x, y)| *x >= 0 && *y >= 0 && *x < size.width as i32 && *y < size.height as i32);
+    // While a guide is dragged (#5728), the Info panel shows its position in one axis only, even
+    // when the pointer is outside the canvas (ruler drags do not update `hover_doc` there).
+    let (guide_x, guide_y) = match app.guide_drag {
+        Some(d) if d.vertical => (Some(d.pos), None),
+        Some(d) => (None, Some(d.pos)),
+        None => (None, None),
+    };
     // The readout averages the Eyedropper's Sample Size, as in Photoshop (#1649).
     let sample_size = app.ui.tool_options.eyedropper_size;
     let rgba = pos.and_then(|(x, y)| {
@@ -1835,8 +1842,8 @@ fn info_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.columns(2, |cols| {
         let dash = || "—".to_string();
         // Measured from the rulers' zero point (#2955).
-        row(&mut cols[0], "X:", pos.map_or_else(dash, |p| fx(p.0 as f64 - origin[0])));
-        row(&mut cols[0], "Y:", pos.map_or_else(dash, |p| fy(p.1 as f64 - origin[1])));
+        row(&mut cols[0], "X:", guide_x.map(|p| fx(p - origin[0])).or_else(|| pos.map(|p| fx(p.0 as f64 - origin[0]))).unwrap_or_else(dash));
+        row(&mut cols[0], "Y:", guide_y.map(|p| fy(p - origin[1])).or_else(|| pos.map(|p| fy(p.1 as f64 - origin[1]))).unwrap_or_else(dash));
         row(&mut cols[1], "W:", sel.map_or_else(dash, |r| fx(r.width() as f64)));
         row(&mut cols[1], "H:", sel.map_or_else(dash, |r| fy(r.height() as f64)));
     });
