@@ -3796,3 +3796,11 @@ cameraData	Lens	レンズ
 	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai は白黒ページ用です。色は失われます。
 	Download and Upscale	ダウンロードしてアップスケール
 	Upscale	アップスケール
+	Download {model}?	{model} をダウンロードしますか？
+	Download and Clean	ダウンロードしてクリーン
+	{model} needs a one-time download of {mb} MB before it can run.	{model} を使うには、最初に一度だけ {mb} MB のダウンロードが必要です。
+	Licence {license}, by {author}.	ライセンス {license}、作者 {author}。
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	このブラウザーに一度だけ保存されます。このデバイス上で動作し、画像はアップロードされません。
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	このコンピューターに一度だけ保存されます。このデバイス上で動作し、画像はアップロードされません。
+	AI models	AI モデル
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	機能が初めて必要としたときにダウンロードされます。アプリには同梱されていません。

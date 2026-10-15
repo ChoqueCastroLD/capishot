@@ -19,6 +19,7 @@ pub mod adjust_dialog;
 pub mod adjust_editors;
 pub mod adjust_preview;
 pub mod adjust_ui;
+pub mod ai_download_prompt;
 pub mod ai_upscale_ui;
 mod alt_grab;
 pub mod analysis_ui;
@@ -634,6 +635,10 @@ pub struct PhotocraftApp {
     /// makes shortcut- and dialog-triggered commands pass the same policy as
     /// direct control calls.
     pub(crate) automation_input: bool,
+    /// An AI run waiting for the browser's model cache check (`ai_download_prompt::tick`).
+    pub(crate) ai_download_wait: Option<ai_download_prompt::Waiting>,
+    /// The last AI run sent without download consent (the model looked cached): command, params.
+    pub(crate) ai_download_last: Option<(String, serde_json::Value)>,
     /// Levels/Curves histogram cache: (document, adjustment layer, revision it is valid for).
     pub(crate) tone_hist: Option<(DocId, photocraft_doc::LayerId, u64, std::sync::Arc<tone::Histograms>)>,
     /// Histogram panel cache: (document, revision, computed at ms, histograms).
@@ -803,6 +808,8 @@ impl PhotocraftApp {
             adjust_preview: None,
             synthetic: Vec::new(),
             automation_input: false,
+            ai_download_wait: None,
+            ai_download_last: None,
             channel_thumbs: None,
             channel_views: HashMap::new(),
             type_layout: None,
@@ -1618,6 +1625,7 @@ impl eframe::App for PhotocraftApp {
         // shortcuts see Esc).
         if !screen_picker::tick(self, ctx) {
             jobs_ui::tick(self, ctx);
+            ai_download_prompt::tick(self, ctx);
             #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             filter_preview_worker::discard_closed(self);
             #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]

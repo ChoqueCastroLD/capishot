@@ -3132,3 +3132,11 @@ cameraData	Lens	Объектив
 	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai создана для чёрно-белых страниц; цвет будет потерян.
 	Download and Upscale	Загрузить и увеличить
 	Upscale	Увеличить
+	Download {model}?	Загрузить {model}?
+	Download and Clean	Загрузить и очистить
+	{model} needs a one-time download of {mb} MB before it can run.	Для работы {model} нужна однократная загрузка {mb} МБ.
+	Licence {license}, by {author}.	Лицензия {license}, автор: {author}.
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	Модель сохраняется в этом браузере, только один раз. Работает на этом устройстве: ваши изображения не отправляются.
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Модель сохраняется на этом компьютере, только один раз. Работает на этом устройстве: ваши изображения не отправляются.
+	AI models	Модели ИИ
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	Загружаются по запросу, когда функции они впервые нужны; не входят в состав приложения.

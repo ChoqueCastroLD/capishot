@@ -2796,3 +2796,11 @@ cameraData	Lens	Objektiv
 	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai je určena pro černobílé stránky; barva se ztratí.
 	Download and Upscale	Stáhnout a zvětšit
 	Upscale	Zvětšit
+	Download {model}?	Stáhnout {model}?
+	Download and Clean	Stáhnout a vyčistit
+	{model} needs a one-time download of {mb} MB before it can run.	{model} potřebuje před spuštěním jednorázově stáhnout {mb} MB.
+	Licence {license}, by {author}.	Licence {license}, autor {author}.
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	Uloží se v tomto prohlížeči, jen jednou. Běží na tomto zařízení: vaše obrázky se nenahrávají.
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Uloží se v tomto počítači, jen jednou. Běží na tomto zařízení: vaše obrázky se nenahrávají.
+	AI models	Modely AI
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	Stahují se na vyžádání, když je funkce poprvé potřebuje; nejsou součástí aplikace.

@@ -2777,3 +2777,11 @@ cameraData	Lens	鏡頭
 	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai 專為黑白頁面設計；色彩會遺失。
 	Download and Upscale	下載並放大
 	Upscale	放大
+	Download {model}?	下載 {model}？
+	Download and Clean	下載並清理
+	{model} needs a one-time download of {mb} MB before it can run.	{model} 首次執行前需要一次性下載 {mb} MB。
+	Licence {license}, by {author}.	授權 {license}，作者 {author}。
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	僅儲存一次，存放在此瀏覽器中。在此裝置上執行：不會上傳你的影像。
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	僅儲存一次，存放在此電腦上。在此裝置上執行：不會上傳你的影像。
+	AI models	AI 模型
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	在功能首次需要時按需下載；不隨應用程式附帶。
