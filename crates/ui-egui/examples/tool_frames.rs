@@ -99,7 +99,7 @@ fn page(w: u32, h: u32, n: usize) -> Page {
         } else {
             let mut l = Layer::raster(format!("L{i}"), fmt);
             let surf = l.surface_mut().expect("raster");
-            if i % 5 == 0 {
+            if i.is_multiple_of(5) {
                 // A screentone covering the page.
                 let c = 0.6 + rnd(k) * 0.3;
                 surf.fill_rect(Rect::new(0, 0, wi, hi), &[c, c, c, 1.0]);
@@ -133,13 +133,13 @@ fn page(w: u32, h: u32, n: usize) -> Page {
                     Effect::default_drop_shadow()
                 }];
             }
-            if pixel.is_none() && i >= n / 2 && i % 5 != 0 && l.mask.is_none() {
+            if pixel.is_none() && i >= n / 2 && !i.is_multiple_of(5) && l.mask.is_none() {
                 pixel = Some(l.id);
             }
-            if linked.is_none() && i >= n / 3 && i % 5 != 0 {
+            if linked.is_none() && i >= n / 3 && !i.is_multiple_of(5) {
                 l.link_group = Some(77);
                 linked = Some(l.id);
-            } else if linked.is_some_and(|_| i % 5 != 0)
+            } else if linked.is_some_and(|_| !i.is_multiple_of(5))
                 && !leaves.iter().chain(out.iter()).any(|x| x.link_group == Some(77) && x.id != linked.unwrap_or(LayerId(0)))
             {
                 l.link_group = Some(77);
@@ -152,7 +152,7 @@ fn page(w: u32, h: u32, n: usize) -> Page {
         if leaves.len() == 9 && i < n {
             groups += 1;
             let mut g = Layer::group(format!("Panel group {groups}"), std::mem::take(&mut leaves));
-            if groups % 5 == 0
+            if groups.is_multiple_of(5)
                 && let Some(prev) = out.pop()
             {
                 // Nest the previous group inside this one.

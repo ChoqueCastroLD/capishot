@@ -430,6 +430,7 @@ pub(crate) fn strokes_live(tool: Tool) -> bool {
         Tool::Brush
             | Tool::Pencil
             | Tool::Eraser
+            | Tool::BackgroundEraser
             | Tool::ColorReplacement
             | Tool::Blur
             | Tool::Sharpen
@@ -558,7 +559,11 @@ fn begin_live_stroke(app: &PhotocraftApp) -> Option<LiveStroke> {
     let st = app.session.active()?;
     let d = app.drag.as_ref()?;
     let impressionist = d.tool == Tool::PatternStamp && app.ui.tool_options.pattern_stamp_impressionist;
-    let stroke = if d.tool == Tool::ColorReplacement {
+    let stroke = if d.tool == Tool::BackgroundEraser {
+        // The params `eraser_ui::finish_stroke` commits; the commit takes these pixels.
+        let p = crate::eraser_ui::background_params(app, &d.points);
+        EngineStroke::Dab(Box::new(photocraft_engine::eraser_cmds::live_background_eraser(&app.session, &p).ok()?))
+    } else if d.tool == Tool::ColorReplacement {
         // The params `retouch_ui::finish_stroke` commits.
         let mut p = crate::retouch_ui::color_replacement_params(app);
         p["points"] = json!(d.points);
@@ -896,7 +901,11 @@ pub(crate) fn display_image(display: Option<&photocraft_engine::display_color::C
 /// The canvas display of `doc` on `display` (`None`: the main window's) and a key that changes
 /// with it (folded into the canvas caches' preview keys, so a monitor or profile change
 /// re-renders).
-pub(crate) fn canvas_display(app: &PhotocraftApp, doc: &Document, display: Option<u32>) -> (Option<std::sync::Arc<photocraft_engine::display_color::CanvasDisplay>>, u64) {
+pub(crate) fn canvas_display(
+    app: &PhotocraftApp,
+    doc: &Document,
+    display: Option<u32>,
+) -> (Option<std::sync::Arc<photocraft_engine::display_color::CanvasDisplay>>, u64) {
     match app.session.color.canvas_display_for(doc, display.or(app.session.color.main_display)) {
         Ok(d) => {
             let k = d.key;
@@ -1426,10 +1435,11 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
             let task = request.clone();
             if let Err(error) = app.filter_preview_worker.start(request.clone(), ctx.clone(), move |cancel| {
                 let t0 = crate::gpu_canvas::now_ms();
-                let result = crate::filter_dialog::preview_document_at(&doc, task.revision, task.active, &task.command, &task.params, task.k, Some(cancel)).map(|doc| {
-                    let buffer = photocraft_compose::flatten(&doc);
-                    (std::sync::Arc::new(doc), buffer)
-                });
+                let result = crate::filter_dialog::preview_document_at(&doc, task.revision, task.active, &task.command, &task.params, task.k, Some(cancel))
+                    .map(|doc| {
+                        let buffer = photocraft_compose::flatten(&doc);
+                        (std::sync::Arc::new(doc), buffer)
+                    });
                 crate::filter_preview_worker::Computed { result, ms: crate::gpu_canvas::now_ms() - t0 }
             }) {
                 app.filter_preview = Some(crate::filter_dialog::FilterPreview { key: request.clone(), result: None, committing: false });
@@ -1461,10 +1471,11 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
     if app.filter_preview.as_ref().is_none_or(|p| p.key != request) {
         let doc = app.session.documents().get(idx)?.doc.clone();
         let t0 = crate::gpu_canvas::now_ms();
-        let computed = crate::filter_dialog::preview_document_at(&doc, request.revision, request.active, &request.command, &request.params, request.k, None).map(|r| {
-            let buffer = photocraft_compose::flatten(&r);
-            (std::sync::Arc::new(r), buffer)
-        });
+        let computed = crate::filter_dialog::preview_document_at(&doc, request.revision, request.active, &request.command, &request.params, request.k, None)
+            .map(|r| {
+                let buffer = photocraft_compose::flatten(&r);
+                (std::sync::Arc::new(r), buffer)
+            });
         publish_filter_preview(app, idx, request, computed, crate::gpu_canvas::now_ms() - t0);
     }
     let preview = app.filter_preview.as_ref()?;
@@ -4897,7 +4908,7 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
     }
     // A live Clone Stamp preview ends here; the commit below replaces it. A Dodge, Burn, Sponge,
     // Blur, Sharpen or Smudge stroke's live pixels are offered to its commit.
-    let dab = d.tool != Tool::ColorReplacement && crate::retouch_ui::dab_params(app, d.tool).is_some();
+    let dab = (d.tool != Tool::ColorReplacement && crate::retouch_ui::dab_params(app, d.tool).is_some()) || d.tool == Tool::BackgroundEraser;
     if live_retouch_command(d.tool).is_some() || dab || d.tool == Tool::ColorReplacement {
         let live = app.live_stroke.take();
         if dab {
@@ -6075,7 +6086,13 @@ mod tests {
 
     #[test]
     fn crop_reduces_the_page_only_for_pixels_past_the_canvas() {
-        let mut doc = Document::with_background("p", photocraft_doc::Size::new(64, 48), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8, photocraft_doc::Color::WHITE);
+        let mut doc = Document::with_background(
+            "p",
+            photocraft_doc::Size::new(64, 48),
+            photocraft_doc::ColorMode::Rgb,
+            photocraft_doc::SampleType::U8,
+            photocraft_doc::Color::WHITE,
+        );
         let inside = photocraft_engine::extra_cmds::reveal_all_bounds(&doc);
         assert!(beyond_proxy(&doc, 2, &ring(inside, doc.bounds())).is_none(), "nothing past the canvas: no proxy");
         doc.layers[0].surface_mut().unwrap().fill_rect(DRect::new(-20, 0, 10, 8), &[0.0, 0.0, 0.0, 1.0]);
@@ -6471,6 +6488,43 @@ mod tests {
             assert_eq!(drag_preview_shapes(&mut app, &ctx, 12.0).len(), idle, "{tool:?}: no overlay while dragging");
             tool_event(&mut app, ToolEvent::Up { x: 59.0, y: 30.0 }, egui::Modifiers::NONE);
         }
+    }
+
+    /// The Background Eraser draws its stroke live (no trail, no work at release): the release
+    /// commits the live pixels ("fromLive"), the same pixels the command erases from scratch.
+    #[test]
+    fn background_eraser_drags_live_and_commits_the_shown_pixels() {
+        let setup = || {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+            app.run("file.new", json!({"width": 120, "height": 60, "background": "white"})).unwrap();
+            app.run("select.rect", json!({"x": 30, "y": 10, "width": 30, "height": 40})).unwrap();
+            app.run("edit.fill", json!({"color": "#204080"})).unwrap();
+            app.run("select.deselect", json!({})).unwrap();
+            app.run("tools.setBrush", json!({"brush": {"size": 18, "hardness": 0.5}})).unwrap();
+            app
+        };
+        let pts: Vec<[f64; 3]> = (0..40).map(|i| [15.0 + f64::from(i) * 2.0, 30.0 + (f64::from(i) / 4.0).sin() * 6.0, 1.0]).collect();
+        let mut app = setup();
+        app.ui.tool = Tool::BackgroundEraser;
+        let steps = app.session.active().unwrap().history.past_len();
+        tool_event(&mut app, ToolEvent::Down { x: pts[0][0], y: pts[0][1], pressure: 1.0 }, egui::Modifiers::NONE);
+        for q in &pts[1..] {
+            tool_event(&mut app, ToolEvent::Move { x: q[0], y: q[1], pressure: 1.0 }, egui::Modifiers::NONE);
+        }
+        assert!(app.live_stroke.is_some(), "the canvas shows the live stroke");
+        let points = app.drag.as_ref().unwrap().points.clone();
+        tool_event(&mut app, ToolEvent::Up { x: pts[39][0], y: pts[39][1] }, egui::Modifiers::NONE);
+        assert_eq!(app.session.active().unwrap().history.past_len(), steps + 1, "one step");
+        let live = app.session.active().unwrap().doc.layers[0].surface().unwrap().clone();
+        // The command from scratch, with the params the release committed.
+        let mut twin = setup();
+        let p = crate::eraser_ui::background_params(&twin, &points);
+        let r = twin.run("paint.backgroundEraser", p).unwrap();
+        assert!(r.get("fromLive").is_none());
+        let want = twin.session.active().unwrap().doc.layers[0].surface().unwrap().clone();
+        let all = photocraft_geom::Rect::new(0, 0, 120, 60);
+        assert_eq!(live.read_region(all), want.read_region(all), "the live commit erased what the command erases");
+        assert!(live.rgba(45, 30)[3] < 0.5, "the stroke erased the blue it started on");
     }
 
     #[test]

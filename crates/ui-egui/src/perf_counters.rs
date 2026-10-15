@@ -20,6 +20,8 @@ pub struct PerfCounters {
     pub navigator: u64,
     /// Histogram panel recomputes.
     pub histogram: u64,
+    /// Frames that repainted the chrome from its last shapes during a canvas gesture.
+    pub chrome_reused: u64,
     /// Frames run.
     pub frames: u64,
 }
@@ -35,6 +37,7 @@ impl PerfCounters {
             ("rows_skipped", self.rows_skipped),
             ("navigator", self.navigator),
             ("histogram", self.histogram),
+            ("chrome_reused", self.chrome_reused),
             ("frames", self.frames),
         ]
     }

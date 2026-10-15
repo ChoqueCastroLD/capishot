@@ -48,6 +48,7 @@ pub mod canvas_tool_menu;
 mod capishot_ui;
 pub mod channel_view;
 pub mod channels_panel;
+pub mod chrome_freeze;
 pub mod chrome_ui;
 pub mod cjk_fonts;
 pub mod clip_line_ui;
@@ -718,6 +719,8 @@ pub struct PhotocraftApp {
     pub perf: gpu_canvas::Perf,
     /// Work counters (thumbnails, rows, panel recomputes): see `perf_counters`.
     pub perf_counters: perf_counters::PerfCounters,
+    /// The chrome's last shapes, repainted during canvas gestures (`chrome_freeze`).
+    pub(crate) chrome_freeze: chrome_freeze::State,
     /// Preferences, autosave and snapping runtime state (see `prefs_ui`, `snap_ui`).
     pub(crate) prefs_rt: prefs_ui::Runtime,
     /// Close, Revert or Exit parked behind the unsaved-changes prompt (see `discard_ui`).
@@ -849,6 +852,7 @@ impl PhotocraftApp {
             started: None,
             perf: Default::default(),
             perf_counters: Default::default(),
+            chrome_freeze: Default::default(),
             prefs_rt: Default::default(),
             discard: None,
             file_dialog: None,
@@ -1729,24 +1733,29 @@ impl eframe::App for PhotocraftApp {
         if !chrome && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = menus::invoke(self, &ctx, "view.screenMode.standard", serde_json::json!({}));
         }
-        if chrome && self.ui.panels.menu_bar {
-            panels::title_bar(self, ui);
-        }
-        if chrome && self.ui.panels.options_bar {
-            panels::options_bar(self, ui);
-        }
-        if chrome && self.ui.panels.status_bar {
-            panels::status_bar(self, ui);
-        }
-        if chrome && self.ui.panels.toolbar {
-            panels::toolbar(self, ui);
-        }
-        if chrome && self.ui.panels.dock {
-            panels::right_dock(self, ui);
-        }
+        // While a tool is dragged on the canvas the chrome repaints last frame's shapes instead of
+        // being laid out again (chrome_freeze).
+        let area = chrome_freeze::show(self, ui, chrome, |app, ui| {
+            if chrome && app.ui.panels.menu_bar {
+                panels::title_bar(app, ui);
+            }
+            if chrome && app.ui.panels.options_bar {
+                panels::options_bar(app, ui);
+            }
+            if chrome && app.ui.panels.status_bar {
+                panels::status_bar(app, ui);
+            }
+            if chrome && app.ui.panels.toolbar {
+                panels::toolbar(app, ui);
+            }
+            if chrome && app.ui.panels.dock {
+                panels::right_dock(app, ui);
+            }
+        });
         let t = theme::Tokens::get(&ctx);
         let backdrop = if chrome { prefs_ui::pasteboard_color(self).unwrap_or(t.canvas) } else { egui::Color32::BLACK };
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(ui, |ui| {
+        let mut canvas_ui = chrome_freeze::canvas_ui(ui, area);
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(&mut canvas_ui, |ui| {
             canvas::document_area(self, ui);
         });
         panels::properties_window(self, &ctx);
@@ -2073,7 +2082,8 @@ impl PhotocraftApp {
         {
             return *b;
         }
-        let b = surface.content_bounds();
+        // Per-tile cached: after an edit only the tiles it changed are scanned again.
+        let b = photocraft_compose::bounds::content_bounds(surface);
         if self.bounds_cache.len() > 256 {
             self.bounds_cache.clear();
         }

@@ -804,7 +804,9 @@ impl Surface {
         } else {
             Vec::new()
         };
-        for dc in targets {
+        // Each target tile is built independently: in parallel where threads exist (a Move drag
+        // shifts the moving layers every frame).
+        let build = |dc: TileCoord| -> (TileCoord, Arc<Tile>) {
             let mut tile = Tile { data: vec![0u8; (TILE_SIZE * TILE_SIZE) as usize * bpp].into_boxed_slice() };
             let (tx0, ty0) = (i64::from(dc.tx) * i64::from(TILE_SIZE), i64::from(dc.ty) * i64::from(TILE_SIZE));
             let row_len = TILE_SIZE as usize * bpp;
@@ -882,7 +884,17 @@ impl Surface {
                     x = span_end;
                 }
             }
-            out.tiles.insert(dc, Arc::new(tile));
+            (dc, Arc::new(tile))
+        };
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+        {
+            use rayon::prelude::*;
+            let targets: Vec<TileCoord> = targets.into_iter().collect();
+            out.tiles = targets.into_par_iter().map(build).collect::<Vec<_>>().into_iter().collect();
+        }
+        #[cfg(not(any(not(target_arch = "wasm32"), target_feature = "atomics")))]
+        {
+            out.tiles = targets.into_iter().map(build).collect();
         }
         out
     }
@@ -1137,7 +1149,12 @@ mod tests {
             let mut far = base.clone();
             far.write_region(outside, &vec![0.5; 256 * 256 * n]);
             far.write_region(r, &data);
-            assert!(far.tiles.iter().filter(|(c, _)| c.rect().intersect(&r).is_empty()).all(|(c, t)| base.tiles.get(c).is_none_or(|b| Arc::ptr_eq(b, t)) || c.rect() == outside));
+            assert!(
+                far.tiles
+                    .iter()
+                    .filter(|(c, _)| c.rect().intersect(&r).is_empty())
+                    .all(|(c, t)| base.tiles.get(c).is_none_or(|b| Arc::ptr_eq(b, t)) || c.rect() == outside)
+            );
         }
     }
 
