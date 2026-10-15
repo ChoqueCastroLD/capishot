@@ -522,11 +522,16 @@ fn delete_where(s: &mut Session, label: &str, pred: fn(&Layer) -> bool) -> Resul
             n
         }
         let backup = doc.layers.clone();
+        // The clip groups of the doomed layers, read before they go (clip_group rule 3: layers
+        // clipped to a deleted base are released).
+        let doomed: Vec<LayerId> = doc.walk().into_iter().filter(|(_, _, l)| pred(l)).map(|(_, _, l)| l.id).collect();
+        let before = crate::clip_group::Before::read(doc, &doomed);
         let n = rec(&mut doc.layers, pred);
         if doc.layers.is_empty() {
             doc.layers = backup;
             return Err(EngineError::Other("a document must keep at least one layer".into()));
         }
+        crate::clip_group::settle(doc, &[], &before, false);
         if active.is_none_or(|id| doc.layer(id).is_none()) {
             *active = doc.top_layer();
         }
