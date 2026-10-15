@@ -3951,3 +3951,41 @@ cameraData	Lens	Lens
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Het wordt op deze computer opgeslagen, maar één keer. Het draait op dit apparaat: je afbeeldingen worden niet geüpload.
 	AI models	AI-modellen
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	Op aanvraag gedownload wanneer een functie ze voor het eerst nodig heeft; niet meegeleverd met de app.
+	Your GPU runs the full model: {model} ({mb} MB).	Je GPU draait het volledige model: {model} ({mb} MB).
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	Volledig model: {model} ({mb} MB), op je GPU als die er is, anders op de CPU.
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Geen GPU beschikbaar: het lichte model {model} ({mb} MB) op de CPU. Kies Beste voor volledige kwaliteit (trager).
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Alleen een software-GPU: het lichte model {model} ({mb} MB) op de CPU. Kies Beste voor volledige kwaliteit (trager).
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	Telefoon of tablet: het lichte model {model} ({mb} MB), sneller en lichter. Kies Beste voor volledige kwaliteit.
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	Weinig geheugen of weinig kernen: het lichte model {model} ({mb} MB). Kies Beste voor volledige kwaliteit.
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	Snel: het lichte model {model} ({mb} MB); lagere kwaliteit dan het volledige model.
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	Beste op de CPU: het volledige model {model} ({mb} MB); dit kan minuten per pagina duren.
+	Best: the full model {model} ({mb} MB).	Beste: het volledige model {model} ({mb} MB).
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU: het lichte model {model} ({mb} MB). Kies Beste voor volledige kwaliteit (trager).
+	Model chosen in Advanced: {model} ({mb} MB).	Model gekozen bij Geavanceerd: {model} ({mb} MB).
+	Quality:	Kwaliteit:
+	Fast (lite)	Snel (licht)
+	Best (full)	Beste (volledig)
+	Device:	Apparaat:
+	CPU	CPU
+	Hide Advanced	Geavanceerd verbergen
+	Advanced…	Geavanceerd…
+	Tile size:	Tegelgrootte:
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	Invoerpixels per tegel; 0 = automatisch. Grotere tegels zijn sneller maar gebruiken meer geheugen.
+	Overlap:	Overlapping:
+	Max working side:	Max. werkzijde:
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	Grotere gebieden worden voor het model naar deze grootte verkleind; 0 = automatisch (512, maximaal 512 voor MI-GAN).
+	Precision:	Precisie:
+	f32 (weights downloaded as f16; int8 isn't available)	f32 (gewichten gedownload als f16; int8 is niet beschikbaar)
+	CPU threads:	CPU-threads:
+	0 = one per core.	0 = één per kern.
+	Keep the model in memory between runs	Model tussen runs in het geheugen houden
+	Downloaded models: {mb} MB	Gedownloade modellen: {mb} MB
+	Downloaded models: unknown	Gedownloade modellen: onbekend
+	Clear Downloaded Models	Gedownloade modellen wissen
+	Downloaded models cleared; they download again (after asking) when next used.	Gedownloade modellen gewist; ze worden bij het volgende gebruik (na een vraag) opnieuw gedownload.
+	AI Cleaning Options	Opties voor opschonen met AI
+	Quality and device for Clean with AI and the Remove tool's AI mode.	Kwaliteit en apparaat voor Opschonen met AI en de AI-modus van het verwijdergereedschap.
+	AI Options…	AI-opties…
+	Use AI	AI gebruiken
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Vult streken met AI in plaats van nabije stukken: beter bij rasters en lijnwerk. AI-opties… kiest kwaliteit en apparaat.
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Wist de geselecteerde tekst of geluidseffecten en tekent de achtergrond met AI opnieuw op een nieuwe laag. Bij het eerste gebruik wordt het model gedownload (MI-GAN 13 MB, Manga LaMa 102 MB).

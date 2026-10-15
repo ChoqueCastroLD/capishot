@@ -387,7 +387,7 @@ fn clean_selection_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let r = ui
         .add_enabled_ui(enabled, |ui| crate::widgets::secondary_button(ui, tl!("Clean Selection with AI"), 0.0))
         .inner
-        .on_hover_text(tl!("Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB)."));
+        .on_hover_text(tl!("Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB)."));
     if r.clicked()
         && let Err(e) = crate::ai_download_prompt::run(app, photocraft_engine::ai_inpaint_cmds::ID, json!({}))
     {
@@ -424,10 +424,14 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
             crate::widgets::checkbox(ui, &mut o.sample_all_layers, tl!("Sample All Layers"));
             crate::widgets::vline(ui, 22.0);
             // Photoshop's Remove tool has a Generative AI mode here; ours is Manga LaMa, local.
-            crate::widgets::checkbox(ui, &mut o.remove_ai, tl!("Use AI (Manga LaMa)"))
-                .on_hover_text(tl!("Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB)."));
+            crate::widgets::checkbox(ui, &mut o.remove_ai, tl!("Use AI"))
+                .on_hover_text(tl!("Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device."));
             crate::widgets::vline(ui, 22.0);
             clean_selection_button(app, ui);
+            // Quality / Device (+ Advanced) for both AI actions here.
+            if crate::widgets::secondary_button(ui, tl!("AI Options…"), 0.0).clicked() {
+                crate::ai_options_ui::open_inpaint_options(app);
+            }
         }
         Tool::Patch => {
             // Photoshop's options bar: Patch: Normal (Source / Destination) or Content-Aware

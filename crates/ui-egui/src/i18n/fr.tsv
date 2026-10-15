@@ -3211,3 +3211,41 @@ cameraData	Lens	Objectif
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Il est stocké sur cet ordinateur, une seule fois. Il s’exécute sur cet appareil : vos images ne sont pas envoyées.
 	AI models	Modèles d’IA
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	Téléchargés à la demande la première fois qu’une fonction en a besoin ; non inclus dans l’application.
+	Your GPU runs the full model: {model} ({mb} MB).	Votre GPU exécute le modèle complet : {model} ({mb} Mo).
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	Modèle complet : {model} ({mb} Mo), sur votre GPU s'il y en a un, sinon sur le processeur.
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Aucun GPU disponible : le modèle léger {model} ({mb} Mo) sur le processeur. Choisissez Meilleure pour la qualité complète (plus lent).
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Seulement un GPU logiciel : le modèle léger {model} ({mb} Mo) sur le processeur. Choisissez Meilleure pour la qualité complète (plus lent).
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	Téléphone ou tablette : le modèle léger {model} ({mb} Mo), plus rapide et plus léger. Choisissez Meilleure pour la qualité complète.
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	Peu de mémoire ou peu de cœurs : le modèle léger {model} ({mb} Mo). Choisissez Meilleure pour la qualité complète.
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	Rapide : le modèle léger {model} ({mb} Mo) ; qualité inférieure au modèle complet.
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	Meilleure sur le processeur : le modèle complet {model} ({mb} Mo) ; cela peut prendre des minutes par page.
+	Best: the full model {model} ({mb} MB).	Meilleure : le modèle complet {model} ({mb} Mo).
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	Processeur : le modèle léger {model} ({mb} Mo). Choisissez Meilleure pour la qualité complète (plus lent).
+	Model chosen in Advanced: {model} ({mb} MB).	Modèle choisi dans Avancé : {model} ({mb} Mo).
+	Quality:	Qualité :
+	Fast (lite)	Rapide (léger)
+	Best (full)	Meilleure (complet)
+	Device:	Appareil :
+	CPU	Processeur
+	Hide Advanced	Masquer les options avancées
+	Advanced…	Avancé…
+	Tile size:	Taille des tuiles :
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	Pixels d'entrée par tuile ; 0 = automatique. Les grandes tuiles sont plus rapides mais demandent plus de mémoire.
+	Overlap:	Chevauchement :
+	Max working side:	Côté de travail max. :
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	Les zones plus grandes sont réduites à cette taille pour le modèle ; 0 = automatique (512, au plus 512 pour MI-GAN).
+	Precision:	Précision :
+	f32 (weights downloaded as f16; int8 isn't available)	f32 (poids téléchargés en f16 ; int8 n'est pas disponible)
+	CPU threads:	Threads du processeur :
+	0 = one per core.	0 = un par cœur.
+	Keep the model in memory between runs	Garder le modèle en mémoire entre les exécutions
+	Downloaded models: {mb} MB	Modèles téléchargés : {mb} Mo
+	Downloaded models: unknown	Modèles téléchargés : inconnu
+	Clear Downloaded Models	Effacer les modèles téléchargés
+	Downloaded models cleared; they download again (after asking) when next used.	Modèles téléchargés effacés ; ils seront de nouveau téléchargés (après confirmation) à la prochaine utilisation.
+	AI Cleaning Options	Options de nettoyage par IA
+	Quality and device for Clean with AI and the Remove tool's AI mode.	Qualité et appareil pour Nettoyer avec l'IA et le mode IA de l'outil Retirer.
+	AI Options…	Options IA…
+	Use AI	Utiliser l'IA
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Remplit les traits avec l'IA plutôt qu'avec des zones voisines : meilleur sur les trames et le dessin au trait. Options IA… choisit la qualité et l'appareil.
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Efface le texte ou les onomatopées sélectionnés et redessine le fond avec l'IA, sur un nouveau calque. La première utilisation télécharge le modèle (MI-GAN 13 Mo, Manga LaMa 102 Mo).

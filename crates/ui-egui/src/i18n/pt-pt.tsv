@@ -3095,3 +3095,41 @@ fontWeight	Italic	Itálico
 	AI models	Modelos de IA
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	Transferidos a pedido na primeira vez que uma funcionalidade precisa deles; não vêm incluídos na aplicação.
 	Download and Upscale	Transferir e ampliar
+	Your GPU runs the full model: {model} ({mb} MB).	A sua GPU executa o modelo completo: {model} ({mb} MB).
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	Modelo completo: {model} ({mb} MB), na sua GPU se existir; caso contrário, no CPU.
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Nenhuma GPU disponível: o modelo leve {model} ({mb} MB) no CPU. Escolha Máxima para a qualidade completa (mais lento).
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Só existe uma GPU por software: o modelo leve {model} ({mb} MB) no CPU. Escolha Máxima para a qualidade completa (mais lento).
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	Telemóvel ou tablet: o modelo leve {model} ({mb} MB), mais rápido e leve. Escolha Máxima para a qualidade completa.
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	Pouca memória ou poucos núcleos: o modelo leve {model} ({mb} MB). Escolha Máxima para a qualidade completa.
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	Rápida: o modelo leve {model} ({mb} MB); qualidade inferior à do modelo completo.
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	Máxima no CPU: o modelo completo {model} ({mb} MB); pode demorar minutos por página.
+	Best: the full model {model} ({mb} MB).	Máxima: o modelo completo {model} ({mb} MB).
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU: o modelo leve {model} ({mb} MB). Escolha Máxima para a qualidade completa (mais lento).
+	Model chosen in Advanced: {model} ({mb} MB).	Modelo escolhido em Avançado: {model} ({mb} MB).
+	Quality:	Qualidade:
+	Fast (lite)	Rápida (leve)
+	Best (full)	Máxima (completa)
+	Device:	Dispositivo:
+	CPU	CPU
+	Hide Advanced	Ocultar avançado
+	Advanced…	Avançado…
+	Tile size:	Tamanho do bloco:
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	Píxeis de entrada por bloco; 0 = automático. Blocos maiores são mais rápidos, mas usam mais memória.
+	Overlap:	Sobreposição:
+	Max working side:	Lado máximo de trabalho:
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	Áreas maiores são reduzidas para este tamanho para o modelo; 0 = automático (512, no máximo 512 no MI-GAN).
+	Precision:	Precisão:
+	f32 (weights downloaded as f16; int8 isn't available)	f32 (os pesos são transferidos em f16; int8 não está disponível)
+	CPU threads:	Threads do CPU:
+	0 = one per core.	0 = um por núcleo.
+	Keep the model in memory between runs	Manter o modelo em memória entre utilizações
+	Downloaded models: {mb} MB	Modelos transferidos: {mb} MB
+	Downloaded models: unknown	Modelos transferidos: desconhecido
+	Clear Downloaded Models	Apagar modelos transferidos
+	Downloaded models cleared; they download again (after asking) when next used.	Modelos transferidos apagados; serão transferidos de novo (após perguntar) na próxima utilização.
+	AI Cleaning Options	Opções de limpeza com IA
+	Quality and device for Clean with AI and the Remove tool's AI mode.	Qualidade e dispositivo para Limpar com IA e o modo IA da ferramenta Remover.
+	AI Options…	Opções de IA…
+	Use AI	Usar IA
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Preenche os traços com IA em vez de zonas vizinhas: melhor em tramas e arte de linha. Opções de IA… escolhe a qualidade e o dispositivo.
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Apaga o texto ou as onomatopeias selecionados e redesenha o fundo com IA, numa nova camada. A primeira utilização transfere o modelo (MI-GAN 13 MB, Manga LaMa 102 MB).

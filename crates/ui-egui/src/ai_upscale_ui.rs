@@ -7,12 +7,13 @@
 //! `download: true`. The upscale runs as a background job (progress in the status bar, Esc
 //! cancels) and lands as one undo step or a new document.
 
-use photocraft_ai::catalog::{Content, MODELS};
+use photocraft_ai::catalog::Content;
 use photocraft_ai::service::ModelState;
 use photocraft_engine::ai_cmds::{self, COMMAND, Output};
 use serde_json::{Map, Value, json};
 
 use crate::PhotocraftApp;
+use crate::ai_options_ui::Kind;
 use crate::state::DialogKind;
 
 const MARK: &str = "__aiUpscale";
@@ -32,9 +33,11 @@ pub fn invoke(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Resul
     f.insert(MARK.into(), json!(true));
     f.insert("__command".into(), json!(COMMAND));
     f.insert("__label".into(), json!(label));
-    for (k, v) in [("scale", json!("2")), ("content", json!("auto")), ("model", json!("auto")), ("autoLevels", json!(true)), ("output", json!("auto"))] {
+    for (k, v) in [("scale", json!("2")), ("content", json!("auto")), ("autoLevels", json!(true)), ("output", json!("auto"))] {
         f.insert(k.into(), v);
     }
+    // Quality, Device and Advanced (model, tiles, threads…) as last chosen.
+    crate::ai_options_ui::fill_fields(app, Kind::Upscale, &mut f);
     Some(Ok(json!({"dialog": app.ui.open_dialog(DialogKind::Command, f)})))
 }
 
@@ -53,6 +56,11 @@ pub fn params_of(f: &Map<String, Value>) -> Value {
     if p["model"] != "auto" {
         p.as_object_mut().map(|o| o.remove("scale"));
     }
+    if let Some(o) = p.as_object_mut() {
+        for (k, v) in crate::ai_options_ui::params_of(Kind::Upscale, f) {
+            o.entry(k).or_insert(v);
+        }
+    }
     p
 }
 
@@ -67,13 +75,9 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     let tokens = crate::theme::Tokens::for_kind(app.ui.theme);
     let mut scale = f.get("scale").and_then(Value::as_str).unwrap_or("2").to_string();
     let mut content = f.get("content").and_then(Value::as_str).unwrap_or("auto").to_string();
-    let mut model = f.get("model").and_then(Value::as_str).unwrap_or("auto").to_string();
+    let model = f.get("model").and_then(Value::as_str).unwrap_or("auto").to_string();
     let mut levels = f.get("autoLevels").and_then(Value::as_bool).unwrap_or(true);
     let mut output = f.get("output").and_then(Value::as_str).unwrap_or("auto").to_string();
-    let models: Vec<(String, String)> = std::iter::once(("auto".to_string(), tl!("Automatic (MangaJaNai's choice)").to_string()))
-        .chain(MODELS.iter().filter(|m| m.arch == photocraft_ai::catalog::Arch::Esrgan).map(|m| (m.id.to_string(), m.title.to_string())))
-        .collect();
-    let model_opts: Vec<(String, &str)> = models.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
     egui::Grid::new("ai-upscale-form").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
         ui.label(tl!("Scale:"));
         ui.add_enabled_ui(model == "auto", |ui| {
@@ -86,9 +90,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             crate::widgets::dropdown(ui, "ai-upscale-content", &mut content, &opts, 200.0);
         });
         ui.end_row();
-        ui.label(tl!("Model:"));
-        crate::widgets::dropdown(ui, "ai-upscale-model", &mut model, &model_opts, 260.0);
-        ui.end_row();
+        crate::ai_options_ui::simple_rows(ui, f);
         ui.label("");
         ui.checkbox(&mut levels, tl!("Auto levels (black-and-white pages)"));
         ui.end_row();
@@ -103,7 +105,6 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     });
     f.insert("scale".into(), json!(scale));
     f.insert("content".into(), json!(content));
-    f.insert("model".into(), json!(model));
     f.insert("autoLevels".into(), json!(levels));
     f.insert("output".into(), json!(output));
 
@@ -119,6 +120,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                 (false, false) => tl!("Colour image"),
             };
             ui.label(format!("{kind}: {}", p.model.title));
+            ui.label(crate::ai_options_ui::explanation(p.model, &p.run));
             ui.label(crate::i18n::fmt(tl!("New size: {w} × {h} px"), &[("w", &p.new_width().to_string()), ("h", &p.new_height().to_string())]));
             if p.output == Output::Replace && output == "auto" {
                 ui.label(egui::RichText::new(tl!("The image becomes one layer at the new size (Undo restores it).")).color(tokens.text_dim));
@@ -157,9 +159,11 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
         }
     }
     f.insert(NEEDS_DOWNLOAD.into(), json!(needs_download));
+    crate::ai_options_ui::advanced(app, ui, Kind::Upscale, f);
 }
 
 pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
+    crate::ai_options_ui::save(app, Kind::Upscale, f);
     let mut p = params_of(f);
     // OK said "Download and Upscale" next to the size and licence: that is the consent.
     if f.get(NEEDS_DOWNLOAD).and_then(Value::as_bool) == Some(true) {

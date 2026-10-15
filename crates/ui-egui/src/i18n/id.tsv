@@ -3198,3 +3198,41 @@ cameraData	Lens	Lensa
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Disimpan di komputer ini, hanya sekali. Berjalan di perangkat ini: gambar Anda tidak diunggah.
 	AI models	Model AI
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	Diunduh sesuai kebutuhan saat pertama kali sebuah fitur memerlukannya; tidak disertakan dalam aplikasi.
+	Your GPU runs the full model: {model} ({mb} MB).	GPU Anda menjalankan model lengkap: {model} ({mb} MB).
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	Model lengkap: {model} ({mb} MB), di GPU Anda bila ada, jika tidak di CPU.
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Tidak ada GPU: model ringan {model} ({mb} MB) di CPU. Pilih Terbaik untuk kualitas penuh (lebih lambat).
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	Hanya GPU perangkat lunak: model ringan {model} ({mb} MB) di CPU. Pilih Terbaik untuk kualitas penuh (lebih lambat).
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	Ponsel atau tablet: model ringan {model} ({mb} MB), lebih cepat dan ringan. Pilih Terbaik untuk kualitas penuh.
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	Memori atau inti sedikit: model ringan {model} ({mb} MB). Pilih Terbaik untuk kualitas penuh.
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	Cepat: model ringan {model} ({mb} MB); kualitas lebih rendah dari model lengkap.
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	Terbaik di CPU: model lengkap {model} ({mb} MB); bisa memakan beberapa menit per halaman.
+	Best: the full model {model} ({mb} MB).	Terbaik: model lengkap {model} ({mb} MB).
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU: model ringan {model} ({mb} MB). Pilih Terbaik untuk kualitas penuh (lebih lambat).
+	Model chosen in Advanced: {model} ({mb} MB).	Model yang dipilih di Lanjutan: {model} ({mb} MB).
+	Quality:	Kualitas:
+	Fast (lite)	Cepat (ringan)
+	Best (full)	Terbaik (lengkap)
+	Device:	Perangkat:
+	CPU	CPU
+	Hide Advanced	Sembunyikan lanjutan
+	Advanced…	Lanjutan…
+	Tile size:	Ukuran ubin:
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	Piksel masukan per ubin; 0 = otomatis. Ubin lebih besar lebih cepat tetapi butuh memori lebih banyak.
+	Overlap:	Tumpang tindih:
+	Max working side:	Sisi kerja maks.:
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	Area yang lebih besar diperkecil ke ukuran ini untuk model; 0 = otomatis (512, maksimal 512 untuk MI-GAN).
+	Precision:	Presisi:
+	f32 (weights downloaded as f16; int8 isn't available)	f32 (bobot diunduh sebagai f16; int8 tidak tersedia)
+	CPU threads:	Thread CPU:
+	0 = one per core.	0 = satu per inti.
+	Keep the model in memory between runs	Simpan model di memori di antara proses
+	Downloaded models: {mb} MB	Model yang diunduh: {mb} MB
+	Downloaded models: unknown	Model yang diunduh: tidak diketahui
+	Clear Downloaded Models	Hapus model yang diunduh
+	Downloaded models cleared; they download again (after asking) when next used.	Model yang diunduh telah dihapus; akan diunduh lagi (setelah bertanya) saat dipakai berikutnya.
+	AI Cleaning Options	Opsi pembersihan AI
+	Quality and device for Clean with AI and the Remove tool's AI mode.	Kualitas dan perangkat untuk Bersihkan dengan AI dan mode AI alat Hapus.
+	AI Options…	Opsi AI…
+	Use AI	Gunakan AI
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Isi goresan dengan AI, bukan tambalan di sekitarnya: lebih baik untuk screentone dan line art. Opsi AI… memilih kualitas dan perangkat.
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	Hapus teks atau SFX yang dipilih dan gambar ulang latar dengan AI di lapisan baru. Penggunaan pertama mengunduh model (MI-GAN 13 MB, Manga LaMa 102 MB).

@@ -120,13 +120,19 @@ fn is_download_refusal(e: &str) -> bool {
 pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, String> {
     match invoke(app, id, &params) {
         Some(r) => r,
-        None => app.run(id, params),
+        None => {
+            let p = crate::ai_options_ui::with_saved(app, id, &params);
+            app.run(id, p)
+        }
     }
 }
 
 /// The consent gate for menu, palette and shortcut runs; `None` for other commands (or a run
 /// that already carries consent).
 pub fn invoke(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+    // Quality, Device and the Advanced settings the user chose (AI Options…, the upscale dialog).
+    let with_settings = crate::ai_options_ui::with_saved(app, id, params);
+    let params = &with_settings;
     let t = target(app, id, params)?;
     if params.get(t.key).and_then(Value::as_bool) == Some(true) {
         return None;

@@ -2815,3 +2815,41 @@ cameraData	Lens	镜头
 	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	仅保存一次，存放在此电脑上。在此设备上运行：不会上传你的图像。
 	AI models	AI 模型
 	Downloaded on demand the first time a feature needs them; not bundled with the app.	在功能首次需要时按需下载；不随应用捆绑。
+	Your GPU runs the full model: {model} ({mb} MB).	由 GPU 运行完整模型：{model}（{mb} MB）。
+	Full model: {model} ({mb} MB), on your GPU when there is one, else on the CPU.	完整模型：{model}（{mb} MB），有 GPU 时在 GPU 上运行，否则在 CPU 上运行。
+	No GPU available: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	没有可用的 GPU：在 CPU 上运行轻量模型 {model}（{mb} MB）。要完整质量请选择“最佳”（较慢）。
+	Only a software GPU: the lite model {model} ({mb} MB) on the CPU. Choose Best for full quality (slower).	只有软件 GPU：在 CPU 上运行轻量模型 {model}（{mb} MB）。要完整质量请选择“最佳”（较慢）。
+	Phone or tablet: the lite model {model} ({mb} MB), faster and lighter. Choose Best for full quality.	手机或平板：使用更快更轻的轻量模型 {model}（{mb} MB）。要完整质量请选择“最佳”。
+	Little memory or few cores: the lite model {model} ({mb} MB). Choose Best for full quality.	内存或核心较少：使用轻量模型 {model}（{mb} MB）。要完整质量请选择“最佳”。
+	Fast: the lite model {model} ({mb} MB); lower quality than the full model.	快速：轻量模型 {model}（{mb} MB），质量低于完整模型。
+	Best on the CPU: the full model {model} ({mb} MB); this can take minutes per page.	在 CPU 上使用最佳：完整模型 {model}（{mb} MB），每页可能需要数分钟。
+	Best: the full model {model} ({mb} MB).	最佳：完整模型 {model}（{mb} MB）。
+	CPU: the lite model {model} ({mb} MB). Choose Best for full quality (slower).	CPU：轻量模型 {model}（{mb} MB）。要完整质量请选择“最佳”（较慢）。
+	Model chosen in Advanced: {model} ({mb} MB).	在高级设置中选择的模型：{model}（{mb} MB）。
+	Quality:	质量：
+	Fast (lite)	快速（轻量）
+	Best (full)	最佳（完整）
+	Device:	设备：
+	CPU	CPU
+	Hide Advanced	隐藏高级设置
+	Advanced…	高级…
+	Tile size:	分块大小：
+	Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory.	每个分块的输入像素；0 = 自动。分块越大越快，但需要更多内存。
+	Overlap:	重叠：
+	Max working side:	最大工作边长：
+	Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN).	更大的区域会缩小到此尺寸供模型使用；0 = 自动（512，MI-GAN 最多 512）。
+	Precision:	精度：
+	f32 (weights downloaded as f16; int8 isn't available)	f32（权重以 f16 下载；不支持 int8）
+	CPU threads:	CPU 线程：
+	0 = one per core.	0 = 每个核心一个。
+	Keep the model in memory between runs	在两次运行之间将模型保留在内存中
+	Downloaded models: {mb} MB	已下载的模型：{mb} MB
+	Downloaded models: unknown	已下载的模型：未知
+	Clear Downloaded Models	清除已下载的模型
+	Downloaded models cleared; they download again (after asking) when next used.	已清除下载的模型；下次使用时会（询问后）重新下载。
+	AI Cleaning Options	AI 清理选项
+	Quality and device for Clean with AI and the Remove tool's AI mode.	“AI 清理”和移除工具 AI 模式的质量与设备。
+	AI Options…	AI 选项…
+	Use AI	使用 AI
+	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	用 AI 而不是附近的图块填充笔画：在网点和线稿上效果更好。“AI 选项…”可选择质量和设备。
+	Erase the selected text or SFX and redraw the background with AI, on a new layer. The first use downloads the model (MI-GAN 13 MB, Manga LaMa 102 MB).	擦除所选文字或拟声词，并用 AI 在新图层上重绘背景。首次使用会下载模型（MI-GAN 13 MB，Manga LaMa 102 MB）。
