@@ -92,7 +92,9 @@ fn page(w: u32, h: u32, n: usize) -> Page {
     let mut linked = None;
     while i < n {
         let k = i as u64;
-        let l = if i % 7 == 6 && let Some(t) = text_iter.next() {
+        let l = if i % 7 == 6
+            && let Some(t) = text_iter.next()
+        {
             t
         } else {
             let mut l = Layer::raster(format!("L{i}"), fmt);
@@ -121,7 +123,12 @@ fn page(w: u32, h: u32, n: usize) -> Page {
             }
             if i % 8 == 5 {
                 l.effects.items = vec![if i % 16 == 5 {
-                    Effect::Stroke(StrokeFx { common: FxCommon::new(BlendMode::Normal, 1.0), size: 6.0, position: StrokePosition::Outside, paint: FxPaint::Color(Color::rgb(0.0, 0.0, 0.0)) })
+                    Effect::Stroke(StrokeFx {
+                        common: FxCommon::new(BlendMode::Normal, 1.0),
+                        size: 6.0,
+                        position: StrokePosition::Outside,
+                        paint: FxPaint::Color(Color::rgb(0.0, 0.0, 0.0)),
+                    })
                 } else {
                     Effect::default_drop_shadow()
                 }];
@@ -132,7 +139,9 @@ fn page(w: u32, h: u32, n: usize) -> Page {
             if linked.is_none() && i >= n / 3 && i % 5 != 0 {
                 l.link_group = Some(77);
                 linked = Some(l.id);
-            } else if linked.is_some_and(|_| i % 5 != 0) && !leaves.iter().chain(out.iter()).any(|x| x.link_group == Some(77) && x.id != linked.unwrap_or(LayerId(0))) {
+            } else if linked.is_some_and(|_| i % 5 != 0)
+                && !leaves.iter().chain(out.iter()).any(|x| x.link_group == Some(77) && x.id != linked.unwrap_or(LayerId(0)))
+            {
                 l.link_group = Some(77);
             }
             l
@@ -325,11 +334,13 @@ fn scenario(h: &mut H, pg: &Page, name: &str, moves: usize, per_frame: usize) ->
         "idle" => (0..60).map(|_| frame(h)).collect(),
         "hover" => {
             set_tool(h, Tool::Brush);
-            (0..60).map(|i| {
-                let p = screen(h, w * (0.3 + 0.004 * i as f64), hh * 0.5);
-                h.event(Event::PointerMoved(p));
-                frame(h)
-            }).collect()
+            (0..60)
+                .map(|i| {
+                    let p = screen(h, w * (0.3 + 0.004 * i as f64), hh * 0.5);
+                    h.event(Event::PointerMoved(p));
+                    frame(h)
+                })
+                .collect()
         }
         n if n.starts_with("eraser") || n.starts_with("brush") || n.starts_with("pencil") => {
             // eraser-<size>-<hard|soft>[-block|-pencil], brush-<size>-<hard|soft>
@@ -416,7 +427,13 @@ fn scenario(h: &mut H, pg: &Page, name: &str, moves: usize, per_frame: usize) ->
                 eprintln!("free transform: {e}");
             }
             settle(h, 3);
-            let b = h.state().session.active().and_then(|s| s.doc.layer(pg.pixel)).and_then(photocraft_engine::layer_multi_cmds::layer_bounds).unwrap_or(Rect::new(0, 0, 10, 10));
+            let b = h
+                .state()
+                .session
+                .active()
+                .and_then(|s| s.doc.layer(pg.pixel))
+                .and_then(photocraft_engine::layer_multi_cmds::layer_bounds)
+                .unwrap_or(Rect::new(0, 0, 10, 10));
             let c = [f64::from(b.x0 + b.x1) / 2.0, f64::from(b.y0 + b.y1) / 2.0];
             let pts: Vec<[f64; 2]> = (0..moves).map(|i| [c[0] + i as f64 * 2.0, c[1] + (i as f64 / 10.0).sin() * 40.0]).collect();
             let f = drag(h, &pts, per_frame, Modifiers::NONE);
@@ -434,7 +451,13 @@ fn scenario(h: &mut H, pg: &Page, name: &str, moves: usize, per_frame: usize) ->
         "type" => {
             select(h, pg.text);
             set_tool(h, Tool::Type);
-            let b = h.state().session.active().and_then(|s| s.doc.layer(pg.text)).and_then(photocraft_engine::layer_multi_cmds::layer_bounds).unwrap_or(Rect::new(0, 0, 10, 10));
+            let b = h
+                .state()
+                .session
+                .active()
+                .and_then(|s| s.doc.layer(pg.text))
+                .and_then(photocraft_engine::layer_multi_cmds::layer_bounds)
+                .unwrap_or(Rect::new(0, 0, 10, 10));
             let p = screen(h, f64::from(b.x0 + b.x1) / 2.0, f64::from(b.y0 + b.y1) / 2.0);
             h.event(Event::PointerMoved(p));
             frame(h);
@@ -442,10 +465,13 @@ fn scenario(h: &mut H, pg: &Page, name: &str, moves: usize, per_frame: usize) ->
             frame(h);
             h.event(Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
             settle(h, 3);
-            let f = "Typing on a busy page!!".chars().map(|c| {
-                h.event(Event::Text(c.to_string()));
-                frame(h)
-            }).collect();
+            let f = "Typing on a busy page!!"
+                .chars()
+                .map(|c| {
+                    h.event(Event::Text(c.to_string()));
+                    frame(h)
+                })
+                .collect();
             h.key_press(egui::Key::Escape);
             settle(h, 3);
             set_tool(h, Tool::Move);
@@ -455,7 +481,11 @@ fn scenario(h: &mut H, pg: &Page, name: &str, moves: usize, per_frame: usize) ->
             // Ten painted strokes, undone and redone one per frame.
             select(h, pg.pixel);
             for k in 0..10 {
-                run(h, "paint.stroke", json!({"points": [[w * 0.2, hh * (0.2 + k as f64 * 0.05), 1], [w * 0.8, hh * (0.25 + k as f64 * 0.05), 1]], "size": 30, "color": "#202020"}));
+                run(
+                    h,
+                    "paint.stroke",
+                    json!({"points": [[w * 0.2, hh * (0.2 + k as f64 * 0.05), 1], [w * 0.8, hh * (0.25 + k as f64 * 0.05), 1]], "size": 30, "color": "#202020"}),
+                );
             }
             settle(h, 3);
             let mut f = Vec::new();
@@ -488,7 +518,12 @@ fn scenario(h: &mut H, pg: &Page, name: &str, moves: usize, per_frame: usize) ->
             (0..60)
                 .map(|i| {
                     let dy = if i < 30 { -40.0 } else { 40.0 };
-                    h.input_mut().events.push(Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, dy), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move });
+                    h.input_mut().events.push(Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, dy),
+                        modifiers: Modifiers::NONE,
+                        phase: egui::TouchPhase::Move,
+                    });
                     frame(h)
                 })
                 .collect()
@@ -578,7 +613,8 @@ const ALL: &[&str] = &[
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let (w, hh) = arg(&args, "--size").and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).unwrap_or((2000u32, 3000u32));
+    let (w, hh) =
+        arg(&args, "--size").and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).unwrap_or((2000u32, 3000u32));
     let n: usize = arg(&args, "--layers").and_then(|v| v.parse().ok()).unwrap_or(100);
     let moves: usize = arg(&args, "--moves").and_then(|v| v.parse().ok()).unwrap_or(120);
     let per_frame: usize = arg(&args, "--per-frame").and_then(|v| v.parse().ok()).unwrap_or(2);

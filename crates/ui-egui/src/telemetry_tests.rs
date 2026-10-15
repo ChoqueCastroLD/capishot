@@ -423,7 +423,11 @@ fn frames_carry_rate_drops_layers_and_the_worst_split() {
     let fps = e["fps"].as_u64().expect("fps");
     assert!((50..=58).contains(&fps), "57 intervals of 16.7 ms and 3 of 50 ms: {e}");
     assert_eq!(e["int95"], 50, "3 of 57 intervals (over 5 %) are 50 ms: {e}");
-    assert_eq!((e["w_logic"].as_u64(), e["w_in"].as_u64(), e["w_ui"].as_u64(), e["w_paint"].as_u64()), (Some(36), Some(1), Some(2), Some(1)), "the 40 ms frame's split: {e}");
+    assert_eq!(
+        (e["w_logic"].as_u64(), e["w_in"].as_u64(), e["w_ui"].as_u64(), e["w_paint"].as_u64()),
+        (Some(36), Some(1), Some(2), Some(1)),
+        "the 40 ms frame's split: {e}"
+    );
     // Frames without the schema 3 data leave none of its fields.
     let mut r = Recorder::new("a", "s", 0.0);
     r.frame("tool.Brush", 5.0, None, None);

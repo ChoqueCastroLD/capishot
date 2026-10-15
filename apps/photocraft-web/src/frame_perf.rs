@@ -142,7 +142,8 @@ impl FramePerf {
         }
         let interval = self.last_start.map(|t| start - t);
         self.last_start = Some(start);
-        self.current = Some(Frame { start, interval, update_ms: 0.0, logic_ms: 0.0, input: self.pending_input.take(), key: None, megapixels: None, layers: None });
+        self.current =
+            Some(Frame { start, interval, update_ms: 0.0, logic_ms: 0.0, input: self.pending_input.take(), key: None, megapixels: None, layers: None });
     }
 
     /// End of the app's logic (`App::logic`).
