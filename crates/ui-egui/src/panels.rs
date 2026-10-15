@@ -546,10 +546,18 @@ fn color_chips(app: &mut PhotocraftApp, ui: &mut egui::Ui, two_columns: bool) {
     }
     s.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Swap colours (X)")));
     if s.on_hover_text(tl!("Swap colours (X)")).clicked() {
-        let _ = app.run("tools.swapColors", json!({}));
+        chip_command(app, "tools.swapColors");
     }
     if d.is_some_and(|d| d.on_hover_text(tl!("Default colours (D)")).clicked()) {
-        let _ = app.run("tools.defaultColors", json!({}));
+        chip_command(app, "tools.defaultColors");
+    }
+}
+
+/// Run Switch Colors or Default Colors from the chips. As in Photoshop, characters highlighted
+/// in the type layer being edited take the new foreground colour, like picking one (#5690).
+fn chip_command(app: &mut PhotocraftApp, id: &str) {
+    if app.run(id, json!({})).is_ok() {
+        crate::type_tool::foreground_changed(app);
     }
 }
 
@@ -4305,6 +4313,64 @@ mod color_tests {
             h.run_steps(2);
             assert_eq!(h.state().session.tools.foreground, [0.0, 0.0, 0.0, 1.0], "{kind:?}");
             assert_eq!(h.state().session.tools.background, [1.0, 1.0, 1.0, 1.0], "{kind:?}");
+        }
+    }
+
+    /// While characters are highlighted in a type layer being edited, the Switch Colors and
+    /// Default Colors buttons recolour them with the new foreground (#5690); without a selection
+    /// they only change the tool colours, as before.
+    #[test]
+    fn swap_and_default_colors_recolour_selected_type() {
+        use egui_kittest::kittest::Queryable;
+        use photocraft_doc::LayerId;
+        let rgb = |app: &PhotocraftApp, id: LayerId, ci: usize| {
+            let doc = &app.session.active().unwrap().doc;
+            let photocraft_doc::LayerContent::Text(t) = &doc.layer(id).unwrap().content else { panic!("not a type layer") };
+            let b = t.text.char_indices().nth(ci).map_or(t.text.len(), |(b, _)| b);
+            let mut at = 0;
+            for r in t.char_runs() {
+                if b < at + r.len {
+                    return r.style.color.to_rgba8();
+                }
+                at += r.len;
+            }
+            [0; 4]
+        };
+        for selected in [true, false] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
+            let made = app.run("type.create", json!({"text": "Hello world", "size": 40, "x": 50, "y": 150, "color": "#000000"})).unwrap();
+            let id = LayerId(made["layer"].as_u64().unwrap());
+            app.run("tools.setColors", json!({"foreground": "#ff0000", "background": "#0000ff"})).unwrap();
+            let anchor = if selected { 6 } else { 11 };
+            app.ui.text_edit = Some(crate::state::TextEdit {
+                layer: id.0,
+                caret: 11,
+                anchor,
+                session: "s".into(),
+                created: false,
+                mask: false,
+                dragging: false,
+                resize: None,
+                preedit: None,
+            });
+            let mut h =
+                egui_kittest::Harness::builder().with_size(vec2(80.0, 120.0)).build_ui_state(|ui, app: &mut PhotocraftApp| color_chips(app, ui, false), app);
+            PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+            h.run_steps(2);
+            h.get_by_label("Swap colours (X)").click();
+            h.run_steps(2);
+            assert_eq!(h.state().session.tools.foreground, [0.0, 0.0, 1.0, 1.0]);
+            assert_eq!(h.state().session.tools.background, [1.0, 0.0, 0.0, 1.0]);
+            let blue = if selected { [0, 0, 255, 255] } else { [0, 0, 0, 255] };
+            assert_eq!(rgb(h.state(), id, 0), [0, 0, 0, 255], "unselected characters keep their colour");
+            assert_eq!((rgb(h.state(), id, 6), rgb(h.state(), id, 10)), (blue, blue), "selected: {selected}");
+            // Default Colors: the selection takes black, the new foreground.
+            h.state_mut().run("tools.setColors", json!({"foreground": "#00ff00"})).unwrap();
+            h.get_by_label("Default colours (D)").click();
+            h.run_steps(2);
+            assert_eq!(h.state().session.tools.foreground, [0.0, 0.0, 0.0, 1.0]);
+            assert_eq!(rgb(h.state(), id, 6), [0, 0, 0, 255], "selected: {selected}");
         }
     }
 
