@@ -33,13 +33,26 @@ struct Entry {
     used: u64,
 }
 
+/// A whole surface's reduction, kept so an unchanged layer of the next document state (a stroke
+/// changes one layer) costs a pointer comparison instead of a walk over its tiles.
+struct Memo {
+    sources: Vec<(TileCoord, Weak<Tile>)>,
+    out: Surface,
+    used: u64,
+}
+
 /// Reduced tiles by the tiles they were reduced from (see the module docs).
 #[derive(Default)]
 pub struct MipCache {
     entries: HashMap<Key, Entry>,
+    /// By (fingerprint of the source's tiles, format and default; level).
+    memos: HashMap<(u64, u32), Memo>,
     epoch: u64,
     bytes: usize,
 }
+
+/// Most whole-surface reductions kept.
+const MAX_MEMOS: usize = 4096;
 
 impl MipCache {
     /// Bytes of reduced tiles held.
@@ -65,6 +78,11 @@ impl MipCache {
     /// then the least recently used. Entries used by the current epoch stay.
     pub fn trim(&mut self, max_bytes: usize) {
         let epoch = self.epoch;
+        // Memos hold their reduced tiles: they go with the sources they were made from.
+        self.memos.retain(|_, m| m.used == epoch || m.sources.iter().all(|(_, w)| w.strong_count() > 0));
+        if self.memos.len() > MAX_MEMOS || self.bytes > max_bytes {
+            self.memos.retain(|_, m| m.used == epoch);
+        }
         let before = self.entries.len();
         self.entries.retain(|_, e| e.used == epoch || e.children.iter().flatten().all(|w| w.strong_count() > 0));
         if self.entries.len() != before {
@@ -88,11 +106,31 @@ impl MipCache {
     /// Drop everything.
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.memos.clear();
         self.bytes = 0;
     }
 
     /// `s` reduced to `level` (`s` itself at 0).
     pub fn surface(&mut self, s: &Surface, level: u32) -> Surface {
+        if level == 0 || s.tile_count() == 0 {
+            return self.reduce(s, level);
+        }
+        let fp = fingerprint(s);
+        let epoch = self.epoch;
+        if let Some(m) = self.memos.get_mut(&(fp, level))
+            && m.sources.len() == s.tile_count()
+            && m.sources.iter().zip(s.tiles()).all(|((c, w), (c2, t))| c == c2 && w.upgrade().is_some_and(|w| Arc::ptr_eq(&w, t)))
+        {
+            m.used = epoch;
+            return m.out.clone();
+        }
+        let out = self.reduce(s, level);
+        let sources = s.tiles().map(|(c, t)| (*c, Arc::downgrade(t))).collect();
+        self.memos.insert((fp, level), Memo { sources, out: out.clone(), used: epoch });
+        out
+    }
+
+    fn reduce(&mut self, s: &Surface, level: u32) -> Surface {
         let mut cur = s.clone();
         for _ in 0..level.min(MAX_LEVEL) {
             if cur.tile_count() == 0 {
@@ -160,6 +198,16 @@ impl MipCache {
         out.put_tiles(found);
         out
     }
+}
+
+/// Identity of a surface's pixels: its tile pointers and coordinates, format and default pixel.
+fn fingerprint(s: &Surface) -> u64 {
+    let mut h = format_tag(s.format(), s.default_bytes()) ^ s.tile_count() as u64;
+    for (c, t) in s.tiles() {
+        let v = (Arc::as_ptr(t) as usize as u64) ^ (u64::from(c.tx as u32) << 32 | u64::from(c.ty as u32)).rotate_left(17);
+        h = (h ^ v).wrapping_mul(0x100_0000_01b3);
+    }
+    h
 }
 
 fn same_children(held: &[Option<Weak<Tile>>; 4], now: &[Option<&Arc<Tile>>; 4]) -> bool {
@@ -363,6 +411,21 @@ mod tests {
         cache.begin();
         cache.trim(0);
         assert_eq!((cache.len(), cache.bytes()), (0, 0));
+    }
+
+    #[test]
+    fn an_unchanged_surface_reuses_its_whole_reduction() {
+        let mut s = Surface::new(PixelFormat::RGBA8);
+        noise(&mut s, Rect::new(0, 0, 700, 600), 4);
+        let mut cache = MipCache::default();
+        let a = cache.surface(&s, 2);
+        let b = cache.surface(&s.clone(), 2);
+        assert!(a.tiles().zip(b.tiles()).all(|((_, x), (_, y))| Arc::ptr_eq(x, y)));
+        let mut edited = s.clone();
+        edited.write_pixel(10, 10, &[1.0, 0.0, 0.0, 1.0]);
+        let c = cache.surface(&edited, 2);
+        assert_ne!(c.rgba(2, 2), a.rgba(2, 2), "an edit is not served from the old memo");
+        assert_eq!(c.rgba(150, 120), a.rgba(150, 120));
     }
 
     #[test]
