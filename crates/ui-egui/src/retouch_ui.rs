@@ -116,7 +116,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
     let pts = json!(points);
     let (cmd, mut p): (&str, Value) = match tool {
         Tool::SpotHealing => ("paint.spotHealing", json!({"type": o.spot_type, "sampleAllLayers": o.sample_all_layers, "mode": o.spot_mode})),
-        Tool::Remove if o.remove_ai => ("paint.remove", json!({"sampleAllLayers": o.sample_all_layers, "ai": true, "allowDownload": true})),
+        Tool::Remove if o.remove_ai => ("paint.remove", json!({"sampleAllLayers": o.sample_all_layers, "ai": true})),
         Tool::Remove => ("paint.remove", json!({"sampleAllLayers": o.sample_all_layers})),
         Tool::MixerBrush => ("paint.mixerBrush", json!({})),
         Tool::ColorReplacement => ("paint.colorReplacement", color_replacement_params(app)),
@@ -154,7 +154,8 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
     p["points"] = pts;
     // The layer mask, an alpha channel or the Quick Mask when targeted, as the Brush paints.
     p["target"] = crate::canvas::paint_target(app);
-    match app.run(cmd, p) {
+    // The AI mode asks before downloading Manga LaMa (and re-runs this stroke with consent).
+    match crate::ai_download_prompt::run(app, cmd, p) {
         Ok(r) if matches!(tool, Tool::Healing | Tool::CloneStamp) => {
             // Aligned: keep the offset for later strokes; non-aligned: every stroke restarts at the source.
             app.ui.clone_offset = r.get("offset").and_then(|v| serde_json::from_value(v.clone()).ok()).filter(|_| o.clone_aligned);
@@ -388,7 +389,7 @@ fn clean_selection_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .inner
         .on_hover_text(tl!("Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB)."));
     if r.clicked()
-        && let Err(e) = app.run(photocraft_engine::ai_inpaint_cmds::ID, json!({"allowDownload": true}))
+        && let Err(e) = crate::ai_download_prompt::run(app, photocraft_engine::ai_inpaint_cmds::ID, json!({}))
     {
         app.ui.status = e;
         app.ui.status_error = true;

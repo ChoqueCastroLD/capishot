@@ -275,6 +275,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::ai_upscale_ui::invoke(app, id, &params) {
         return r;
     }
+    // Clean with AI, the Remove tool's AI mode, Upscale with AI with params: ask before a
+    // model download, wait for the browser's cache check.
+    if let Some(r) = crate::ai_download_prompt::invoke(app, id, &params) {
+        return r;
+    }
     // Save for Web, Print and the other File-menu dialogs added with slices.
     if let Some(r) = crate::file_ui::invoke(app, ctx, id, &params) {
         return r;

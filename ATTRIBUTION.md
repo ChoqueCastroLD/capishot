@@ -67,6 +67,20 @@ The other built-in ICC profiles and the generated LUT looks are produced by code
 (`crates/cms/src/builtin.rs`, `crates/cms/src/lutfile.rs`) and dedicated to the public domain
 (CC0-1.0); they are not separate files.
 
+## AI models (downloaded on demand, not bundled)
+
+The weights are not in this repository or in the app: the web build downloads them from the
+site's models folder (`capishot-ai-models`), and the desktop build from its configured location,
+the first time a feature needs them and only after the user agrees; they are then kept in the
+browser's Cache Storage (or on disk). Help › About › Models lists the same lines.
+
+| Model | Used by | Author | Source | License |
+|---|---|---|---|---|
+| MangaJaNai and IllustrationJaNai | Image › Upscale with AI (`image.upscaleAi`) | the-database | <https://github.com/the-database/MangaJaNai> | CC BY-NC 4.0 |
+| Manga LaMa (AnimeMangaInpainting) | Edit › Clean with AI (`edit.inpaintAi`), the Remove tool's AI mode | dreMaz | <https://huggingface.co/dreMaz/AnimeMangaInpainting> | MIT |
+| LaMa (the architecture Manga LaMa is trained on) | as above | Suvorov et al. (Samsung AI) | <https://github.com/advimman/lama> | Apache-2.0 |
+| burn (inference runtime, compiled in) | both | Tracel AI and the burn contributors | <https://github.com/tracel-ai/burn> | MIT/Apache-2.0 |
+
 ## Documentation and README
 
 | Path | Title | Author | Source | License |
