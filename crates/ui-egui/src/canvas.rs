@@ -1340,7 +1340,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
     gpu_budget(app, &gpu, idx, partial, visible);
     // A Move drag: the moving layers come from the pages already on the GPU, at the offset.
     gpu.set_translated(crate::move_ui::gpu_translations(app, idx));
-    let r = gpu.refresh_for(id.0, &doc, if partial { damage } else { None }, display.as_deref(), Some(need));
+    let r = gpu.refresh_for(id.0, &doc, if partial { damage } else { None }, display.as_deref(), crate::gpu_canvas::reduced_refreshes().then_some(need));
     if gpu.has_stale(id.0) {
         // What was left out of date is brought up to date on the following frames.
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(crate::gpu_canvas::REFINE_DELAY_MS / 1000.0));

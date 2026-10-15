@@ -561,7 +561,7 @@ impl GpuCanvas {
                     if r.is_empty() {
                         continue;
                     }
-                    let offset = [out.rect.x0 - tx, out.rect.y0 - ty, i32::from(encode_srgb), keep_hdr];
+                    let offset = [out.rect.x0 - tx - out.origin[0] as i32, out.rect.y0 - ty - out.origin[1] as i32, i32::from(encode_srgb), keep_hdr];
                     let ubuf = init_buffer(device, "pc_encode", &offset.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(), wgpu::BufferUsages::UNIFORM);
                     let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("pc_encode"),
@@ -1407,6 +1407,20 @@ pub const REFINE_WORK: u64 = 32 << 20;
 /// slider scrub or a Move drag keeps producing frames, and refining between them would only
 /// redo work the next frame replaces.
 pub const REFINE_DELAY_MS: f64 = 120.0;
+
+static REDUCED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Turn pass fusion and level-of-detail / deferred refreshes off (or back on, the default):
+/// measurements compare both in one build (the web app's `?gpuopt=0`).
+pub fn set_reduced_refreshes(on: bool) {
+    REDUCED.store(on, std::sync::atomic::Ordering::Relaxed);
+    photocraft_gpu::plan::set_fusion(on);
+}
+
+/// Whether [`set_reduced_refreshes`] left them on.
+pub fn reduced_refreshes() -> bool {
+    REDUCED.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// The coarsest mip level a view at `scale` device pixels per document pixel samples
 /// (`filter_mode`: trilinear between `floor(lod)` and the level above, `lod = -log2(scale)`):

@@ -134,6 +134,10 @@ pub fn start() {
         let embed_query = q.clone();
         let force_cpu = q.contains("cpu");
         let perf_debug = q.split(['?', '&']).any(|kv| kv == "perf=1" || kv == "perf");
+        if q.split(['?', '&']).any(|kv| kv == "gpuopt=0") {
+            // Measurements: the GPU canvas as before pass fusion and level-of-detail refreshes.
+            photocraft_ui_egui::gpu_canvas::set_reduced_refreshes(false);
+        }
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
         if q.contains("webgl")
