@@ -1248,6 +1248,8 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                         let nested: Vec<MenuItem> = if compact {
                             items
                                 .iter()
+                                // Commands without a menu (shortcuts only) have no path.
+                                .filter(|i| i.path.first().is_some_and(|t| TOP_MENUS.contains(&t.as_str())))
                                 .map(|i| {
                                     let mut i = i.clone();
                                     i.path.insert(0, COMPACT_MENU.to_string());
@@ -1764,6 +1766,7 @@ mod tests {
             let row = h.get_by_label(&format!("{top} ⏵")).rect();
             assert!(row.height() >= 30.0, "{top}: finger-sized rows ({})", row.height());
         }
+        assert!(h.query_by_label("Reset Tool").is_none(), "only the menus, not shortcut-only commands");
         // A desktop width keeps the titles.
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 600.0)).build_ui_state(
