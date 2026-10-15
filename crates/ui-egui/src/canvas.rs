@@ -1371,7 +1371,8 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
 /// a live preview) and whenever the preference changes.
 fn gpu_budget(app: &mut PhotocraftApp, gpu: &crate::gpu_canvas::GpuCanvas, idx: usize, partial: bool, visible: DRect) {
     gpu.set_focus(Some(visible));
-    let allowance = u64::from(app.session.prefs().performance.memory_usage_mb).saturating_mul(1 << 20);
+    // Memory Usage within the platform's cap (a browser tab's, `prefs::set_memory_cap`).
+    let allowance = app.session.prefs().performance.history_budget_bytes() as u64;
     let Some(st) = app.session.documents().get(idx) else { return };
     let state = Some((st.doc.id.0, st.revision));
     if app.perf.gpu_budget_allowance == allowance && gpu.memory_budget().is_some() && (partial || app.perf.gpu_budget_state == state) {
