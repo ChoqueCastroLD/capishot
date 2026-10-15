@@ -2053,6 +2053,8 @@ fn font_metadata_survives_tysh_and_named_style_rewrites() {
     }
     let raw = crate::psd::write_tysh(&tysh);
     let mut imported = crate::psd::text_layer_from_tysh(&raw, 72.0).unwrap();
+    // The IO importer retains the raw block separately from the parsed text model.
+    imported.psd_raw = Some(raw.into());
     imported.text = "Edited".into();
     let rebuilt = crate::psd::build_tysh(&imported, 72.0, None);
     let styled = crate::psd_styles::write_style_sheets(&rebuilt, &imported, &photocraft_doc::TextStyles::default(), 72.0).unwrap();
