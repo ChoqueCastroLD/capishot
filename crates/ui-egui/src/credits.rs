@@ -488,6 +488,44 @@ pub fn models_ui(ui: &mut egui::Ui) {
     models_in(ui, MODELS, TOTAL_COMMITS);
 }
 
+/// The AI models Capishot runs (downloaded on demand, not bundled): name, author, licence, link.
+pub const AI_MODELS: &[(&str, &str, &str, &str)] = &[
+    ("MangaJaNai and IllustrationJaNai", "the-database", "CC BY-NC 4.0", "https://github.com/the-database/MangaJaNai"),
+    ("Manga LaMa (AnimeMangaInpainting)", "dreMaz", "MIT", "https://huggingface.co/dreMaz/AnimeMangaInpainting"),
+    ("LaMa", "Suvorov et al. (Samsung AI)", "Apache-2.0", ""),
+    ("burn", "", "MIT/Apache-2.0", ""),
+];
+
+/// One [`AI_MODELS`] line as shown: "name by author — licence — link".
+pub fn ai_model_line(&(name, author, license, url): &(&str, &str, &str, &str)) -> String {
+    let mut s = if author.is_empty() { name.to_string() } else { format!("{name} by {author}") };
+    for part in [license, url] {
+        if !part.is_empty() {
+            s.push_str(" — ");
+            s.push_str(part);
+        }
+    }
+    s
+}
+
+/// The About window's "AI models" section (under the Models tab): the models' authors and
+/// licences.
+pub fn ai_models_ui(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(tl!("AI models")).font(crate::theme::semibold(13.0)));
+    ui.label(egui::RichText::new(tl!("Downloaded on demand the first time a feature needs them; not bundled with the app.")).color(t.text_dim));
+    ui.add_space(4.0);
+    for m in AI_MODELS {
+        let line = ai_model_line(m);
+        if m.3.is_empty() {
+            ui.label(line);
+        } else if ui.add(egui::Link::new(line)).clicked() {
+            crate::links::open(app, ui.ctx(), m.3);
+        }
+    }
+}
+
 /// Share of all commits, whole percent; a model with any commits never reads "0%".
 fn percent(commits: u64, total: u64) -> String {
     let p = 100.0 * commits as f64 / total.max(1) as f64;

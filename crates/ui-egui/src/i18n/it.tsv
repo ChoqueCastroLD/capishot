@@ -2859,3 +2859,11 @@ cameraData	Lens	Obiettivo
 	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai è pensato per pagine in bianco e nero; il colore va perso.
 	Download and Upscale	Scarica e ingrandisci
 	Upscale	Ingrandisci
+	Download {model}?	Scaricare {model}?
+	Download and Clean	Scarica e pulisci
+	{model} needs a one-time download of {mb} MB before it can run.	{model} richiede un download una tantum di {mb} MB prima di poter funzionare.
+	Licence {license}, by {author}.	Licenza {license}, di {author}.
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	Viene salvato in questo browser, una sola volta. Funziona su questo dispositivo: le tue immagini non vengono caricate.
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Viene salvato su questo computer, una sola volta. Funziona su questo dispositivo: le tue immagini non vengono caricate.
+	AI models	Modelli di IA
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	Scaricati su richiesta la prima volta che una funzione ne ha bisogno; non inclusi nell’app.

@@ -3086,3 +3086,12 @@ fontWeight	Italic	Itálico
 @plural	{n} text layer|{n} text layers	{n} camada de texto|{n} camadas de texto
 @plural	{n} font|{n} fonts	{n} tipo de letra|{n} tipos de letra
 	A TypeR export (.json): a folder, a style library or a full export with settings. Photoshop tool presets (.tpl): each Type tool preset becomes a style in a new folder.	Uma exportação do TypeR (.json): uma pasta, uma biblioteca de estilos ou uma exportação completa com definições. Predefinições de ferramenta do Photoshop (.tpl): cada predefinição da ferramenta Texto torna-se um estilo numa pasta nova.
+	Download {model}?	Transferir {model}?
+	Download and Clean	Transferir e limpar
+	{model} needs a one-time download of {mb} MB before it can run.	{model} precisa de uma transferência única de {mb} MB antes de poder ser utilizado.
+	Licence {license}, by {author}.	Licença {license}, de {author}.
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	Fica guardado neste navegador, uma única vez. É executado neste dispositivo: as suas imagens não são enviadas.
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Fica guardado neste computador, uma única vez. É executado neste dispositivo: as suas imagens não são enviadas.
+	AI models	Modelos de IA
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	Transferidos a pedido na primeira vez que uma funcionalidade precisa deles; não vêm incluídos na aplicação.
+	Download and Upscale	Transferir e ampliar

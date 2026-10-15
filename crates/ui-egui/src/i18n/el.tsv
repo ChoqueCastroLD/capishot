@@ -3879,3 +3879,11 @@ cameraData	Lens	Φακός
 	MangaJaNai is made for black-and-white pages; colour is lost.	Το MangaJaNai είναι για ασπρόμαυρες σελίδες· το χρώμα χάνεται.
 	Download and Upscale	Λήψη και μεγέθυνση
 	Upscale	Μεγέθυνση
+	Download {model}?	Λήψη του {model};
+	Download and Clean	Λήψη και καθαρισμός
+	{model} needs a one-time download of {mb} MB before it can run.	Το {model} χρειάζεται μια εφάπαξ λήψη {mb} MB πριν μπορέσει να λειτουργήσει.
+	Licence {license}, by {author}.	Άδεια {license}, από {author}.
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	Αποθηκεύεται σε αυτό το πρόγραμμα περιήγησης, μόνο μία φορά. Εκτελείται σε αυτή τη συσκευή: οι εικόνες σας δεν αποστέλλονται.
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Αποθηκεύεται σε αυτόν τον υπολογιστή, μόνο μία φορά. Εκτελείται σε αυτή τη συσκευή: οι εικόνες σας δεν αποστέλλονται.
+	AI models	Μοντέλα AI
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	Λαμβάνονται κατ’ απαίτηση την πρώτη φορά που τα χρειάζεται μια λειτουργία· δεν περιλαμβάνονται στην εφαρμογή.

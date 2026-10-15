@@ -2827,3 +2827,11 @@ cameraData	Lens	Objektiv
 	MangaJaNai is made for black-and-white pages; colour is lost.	MangaJaNai ist für Schwarzweißseiten gedacht; die Farbe geht verloren.
 	Download and Upscale	Herunterladen und hochskalieren
 	Upscale	Hochskalieren
+	Download {model}?	{model} herunterladen?
+	Download and Clean	Herunterladen und bereinigen
+	{model} needs a one-time download of {mb} MB before it can run.	{model} muss einmalig {mb} MB herunterladen, bevor es laufen kann.
+	Licence {license}, by {author}.	Lizenz {license}, von {author}.
+	It is stored in this browser, only once. It runs on this device: your images are not uploaded.	Es wird in diesem Browser gespeichert, nur einmal. Es läuft auf diesem Gerät: Ihre Bilder werden nicht hochgeladen.
+	It is stored on this computer, only once. It runs on this device: your images are not uploaded.	Es wird auf diesem Computer gespeichert, nur einmal. Es läuft auf diesem Gerät: Ihre Bilder werden nicht hochgeladen.
+	AI models	KI-Modelle
+	Downloaded on demand the first time a feature needs them; not bundled with the app.	Werden bei Bedarf heruntergeladen, wenn eine Funktion sie zum ersten Mal braucht; nicht in der App enthalten.

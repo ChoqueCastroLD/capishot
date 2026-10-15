@@ -164,6 +164,9 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
     // OK said "Download and Upscale" next to the size and licence: that is the consent.
     if f.get(NEEDS_DOWNLOAD).and_then(Value::as_bool) == Some(true) {
         p["download"] = json!(true);
+        if let Ok(plan) = ai_cmds::plan(&app.session, &p) {
+            crate::ai_download_prompt::remember(app, plan.model);
+        }
     }
     app.run(COMMAND, p)
 }
