@@ -8,6 +8,9 @@
 use photocraft_ai_lama::burn::tensor::Device;
 use photocraft_ai_lama::{Generator, Migan};
 
+#[cfg(feature = "wgpu")]
+mod gpu;
+
 const RES: usize = 32;
 
 struct Lcg(u64);
@@ -138,6 +141,21 @@ fn tiny_migan_matches_pytorch() {
     }
     let mean = out.iter().sum::<f32>() / out.len() as f32;
     assert!((mean - EXPECTED_MEAN).abs() < 1e-5, "mean {mean} vs {EXPECTED_MEAN}");
+}
+
+/// Within WebGPU's workgroup memory (see `tiny_model`): the same output as the CPU. Skipped
+/// without a GPU adapter.
+#[cfg(feature = "wgpu")]
+#[test]
+fn runs_on_a_gpu_with_little_workgroup_memory() {
+    let (rgb, mask) = tiny_input(RES, RES);
+    let want = Generator::from_safetensors(&tiny_safetensors(), &Device::flex()).unwrap().generate(&rgb, &mask, RES, RES).unwrap();
+    for limit in gpu::LIMITS {
+        let Some(device) = gpu::limited(limit) else { return eprintln!("no GPU adapter: skipped") };
+        let got = Generator::from_safetensors(&tiny_safetensors(), &device).unwrap().generate(&rgb, &mask, RES, RES).unwrap();
+        let d = gpu::max_diff(&want, &got);
+        assert!(d < 1e-3, "{limit} B: off by {d}");
+    }
 }
 
 #[test]

@@ -269,6 +269,30 @@ mod tests {
         Weights::from_safetensors(&to_safetensors(&refs, false, &[("shuffle", shuffle)])).unwrap()
     }
 
+    /// Within WebGPU's workgroup memory (16 KiB guaranteed, 32 KiB on most GPUs; 4 KiB too,
+    /// so a 64-wide subgroup's tiling would show up on a software GPU's 8-wide one): the same
+    /// output as the CPU. Skipped without a GPU adapter (lavapipe: `VK_ICD_FILENAMES`).
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn runs_on_a_gpu_with_little_workgroup_memory() {
+        let cpu = Runtime::cpu();
+        let img = crate::Planar::new(16, 12, 3, (0..16 * 12 * 3).map(|i| (i % 23) as f32 / 23.0).collect()).unwrap();
+        for bytes in [4096, 16384, 32768] {
+            let Some(gpu) = Runtime::gpu_limited_blocking(bytes).unwrap() else { return eprintln!("no GPU adapter: skipped") };
+            for (inc, sh) in [(3, "1"), (12, "2")] {
+                let w = tiny(inc, sh);
+                let run = |rt: &Runtime| {
+                    let net = Esrgan::load(rt, &w, false).unwrap();
+                    crate::runtime::block_on(rt.read(net.forward(rt.image(&img).unwrap()))).unwrap()
+                };
+                let (a, b) = (run(&cpu), run(&gpu));
+                assert_eq!((a.width, a.height), (b.width, b.height));
+                let max = a.data.iter().zip(&b.data).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max);
+                assert!(max < 1e-3, "{bytes} B, shuffle {sh}: off by {max}");
+            }
+        }
+    }
+
     #[test]
     fn config_from_shapes() {
         let c = Esrgan::config(&tiny(3, "1")).unwrap();

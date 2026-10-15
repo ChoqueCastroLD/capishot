@@ -29,7 +29,8 @@
 //! * `{type: "dl-progress", model, done, total}` (at most ten a second), then
 //!   `{type: "dl-done", model}` or `{type: "dl-error", model, message}`;
 //! * `{type: "done", id, width, height, channels, data, device}` (`data` transferred);
-//! * `{type: "error", id, message}`;
+//! * `{type: "error", id, message, gpu}`: `gpu` when it failed on the GPU (loading or running
+//!   the model on WebGPU), so the page can run it again on the CPU;
 //! * `{type: "panic", message}` just before the module aborts (the worker is then dead).
 //!
 //! Cancelling is `Worker.terminate()`: immediate even inside a GPU tile; the next run starts a
@@ -42,7 +43,7 @@ use js_sys::{Array, Float32Array, Object, Reflect, Uint8Array};
 use photocraft_ai::cache::{WEB_CACHE, verify};
 use photocraft_ai::models::Throttle;
 use photocraft_ai::catalog::{self, ModelInfo};
-use photocraft_ai::runtime::Runtime;
+use photocraft_ai::runtime::{Accel, Runtime};
 use photocraft_ai::upscale::{Loaded, default_tiles, upscale};
 use photocraft_ai::{AiError, Planar, Progress, Result};
 use wasm_bindgen::prelude::*;
@@ -200,7 +201,22 @@ async fn run(msg: JsValue) {
                 Some(&buffer),
             );
         }
-        Err(e) => post(&obj(&[("type", "error".into()), ("id", id.into()), ("message", e.to_string().into())]), None),
+        Err(e) => {
+            let (message, gpu) = match e {
+                AiError::Gpu(m) => (m, true),
+                e => (e.to_string(), false),
+            };
+            post(&obj(&[("type", "error".into()), ("id", id.into()), ("message", message.into()), ("gpu", gpu.into())]), None);
+        }
+    }
+}
+
+/// An error loading or running a model on `rt`: a GPU failure when `rt` is the GPU (the page
+/// then runs it again on the CPU), else as is.
+fn on_device(rt: &Runtime, e: AiError) -> AiError {
+    match e {
+        AiError::Inference(m) | AiError::Device(m) if rt.accel() == Accel::Gpu => AiError::Gpu(m),
+        e => e,
     }
 }
 
@@ -225,7 +241,7 @@ async fn run_inner(msg: &JsValue, id: f64) -> Result<(Planar, String)> {
         Some(l) => l,
         None => {
             STATE.with(|s| s.borrow_mut().loaded = None);
-            let l = Rc::new(Loaded::new(&rt, model, &bytes, grayscale)?);
+            let l = Rc::new(Loaded::new(&rt, model, &bytes, grayscale).map_err(|e| on_device(&rt, e))?);
             STATE.with(|s| s.borrow_mut().loaded = Some(l.clone()));
             l
         }
@@ -241,7 +257,7 @@ async fn run_inner(msg: &JsValue, id: f64) -> Result<(Planar, String)> {
     if let Some(o) = n("overlap").filter(|o| o * 2 < tiles.tile) {
         tiles.overlap = o;
     }
-    let out = upscale(&rt, &loaded, &input, tiles, &p).await;
+    let out = upscale(&rt, &loaded, &input, tiles, &p).await.map_err(|e| on_device(&rt, e));
     if get(msg, "unload").as_bool().unwrap_or(false) {
         STATE.with(|s| s.borrow_mut().loaded = None);
     }
@@ -253,7 +269,16 @@ async fn run_inner(msg: &JsValue, id: f64) -> Result<(Planar, String)> {
 /// CPU-only.
 async fn runtime(cpu: bool) -> Result<Runtime> {
     if let Some(rt) = STATE.with(|s| s.borrow().rt.clone()) {
-        return Ok(rt);
+        if !cpu || rt.accel() == Accel::Cpu {
+            return Ok(rt);
+        }
+        // A CPU run after GPU ones (the GPU failed): models loaded there go too.
+        STATE.with(|s| {
+            let mut s = s.borrow_mut();
+            s.rt = None;
+            s.loaded = None;
+            s.inpaint = None;
+        });
     }
     #[cfg(not(target_feature = "atomics"))]
     let gpu = if !cpu && has_adapter().await {
@@ -484,37 +509,54 @@ async fn inpaint(msg: JsValue) {
                 Some(&buffer),
             );
         }
-        Err(e) => post(&obj(&[("type", "error".into()), ("id", id.into()), ("message", e.into())]), None),
+        Err((e, gpu)) => post(&obj(&[("type", "error".into()), ("id", id.into()), ("message", e.into()), ("gpu", gpu.into())]), None),
     }
 }
 
-async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>, usize, usize, String), String> {
+/// A failure of the device (not of the weights or the input).
+fn is_device(e: &photocraft_ai_lama::LamaError) -> bool {
+    matches!(e, photocraft_ai_lama::LamaError::Device(_) | photocraft_ai_lama::LamaError::Gpu(_))
+}
+
+/// The message of a failed inpainting run and whether it failed on the GPU.
+type InpaintError = (String, bool);
+
+async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>, usize, usize, String), InpaintError> {
+    let plain = |e: String| (e, false);
     let name = get(msg, "model").as_string().unwrap_or_else(|| catalog::LAMA_ID.to_string());
-    let model = catalog::model(&name).filter(|m| m.content == catalog::Content::Inpaint).ok_or_else(|| format!("{name} isn't an inpainting model"))?;
+    let model = catalog::model(&name).filter(|m| m.content == catalog::Content::Inpaint).ok_or_else(|| plain(format!("{name} isn't an inpainting model")))?;
     let base = get(msg, "base").as_string().unwrap_or_default();
     let download = get(msg, "download").as_bool().unwrap_or(false);
     let cpu = get(msg, "cpu").as_bool().unwrap_or(false);
-    let dim = |k: &str| get(msg, k).as_f64().filter(|v| v.is_finite() && *v >= 1.0).map(|v| v as usize).ok_or_else(|| format!("bad {k}"));
+    let dim = |k: &str| get(msg, k).as_f64().filter(|v| v.is_finite() && *v >= 1.0).map(|v| v as usize).ok_or_else(|| plain(format!("bad {k}")));
     let (w, h) = (dim("width")?, dim("height")?);
-    let arr = |k: &str| get(msg, k).dyn_into::<Float32Array>().map(|a| a.to_vec()).map_err(|_| format!("no {k}"));
+    let arr = |k: &str| get(msg, k).dyn_into::<Float32Array>().map(|a| a.to_vec()).map_err(|_| plain(format!("no {k}")));
     let (rgb, mask) = (arr("rgb")?, arr("mask")?);
     let mut p = Posting::new(id);
+    let mut rt = STATE.with(|s| s.borrow().rt.clone());
+    // A CPU run after GPU ones: switch first (it drops the model loaded on the GPU).
+    if cpu && rt.as_ref().is_some_and(|r| r.accel() == Accel::Gpu) {
+        rt = Some(runtime(true).await.map_err(|e| plain(e.to_string()))?);
+    }
     let reuse = STATE.with(|s| s.borrow().inpaint.clone()).filter(|(i, _)| *i == model.id);
-    let lama = match reuse {
-        Some((_, l)) => l,
-        None => {
+    let lama = match (reuse, rt) {
+        (Some((_, l)), Some(rt)) => (l, rt),
+        _ => {
             STATE.with(|s| s.borrow_mut().inpaint = None);
-            let bytes = weights(model, &base, download, &p).await.map_err(|e| e.to_string())?;
+            let bytes = weights(model, &base, download, &p).await.map_err(|e| plain(e.to_string()))?;
             p.send(0.12, "Preparing the model");
-            let rt = runtime(cpu).await.map_err(|e| e.to_string())?;
-            let l = Rc::new(photocraft_ai_lama::Generator::from_safetensors(&bytes, rt.device()).map_err(|e| e.to_string())?);
+            let rt = runtime(cpu).await.map_err(|e| plain(e.to_string()))?;
+            let gpu = rt.accel() == Accel::Gpu;
+            let l = Rc::new(photocraft_ai_lama::Generator::from_safetensors(&bytes, rt.device()).map_err(|e| (e.to_string(), gpu && is_device(&e)))?);
             STATE.with(|s| s.borrow_mut().inpaint = Some((model.id, l.clone())));
-            l
+            (l, rt)
         }
     };
+    let (lama, rt) = lama;
     p.device = STATE.with(|s| s.borrow().device.clone());
     p.send(0.2, &format!("Cleaning with {} ({})", model.title, p.device));
-    let out = lama.generate_async(&rgb, &mask, w, h).await.map_err(|e| e.to_string());
+    let gpu = rt.accel() == Accel::Gpu;
+    let out = lama.generate_async(&rgb, &mask, w, h).await.map_err(|e| (e.to_string(), gpu && is_device(&e)));
     if get(msg, "unload").as_bool().unwrap_or(false) {
         STATE.with(|s| s.borrow_mut().inpaint = None);
     }
