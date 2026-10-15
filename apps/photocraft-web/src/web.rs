@@ -390,10 +390,8 @@ fn cap_pixel_density() {
     use wasm_bindgen::closure::Closure;
     use wasm_bindgen::{JsCast as _, JsValue};
     let saved = local_storage().and_then(|s| s.get_item(PREFS_KEY).ok().flatten());
-    let density = saved
-        .and_then(|t| serde_json::from_str::<photocraft_engine::prefs::Preferences>(&t).ok())
-        .map(|p| p.performance.max_pixel_density)
-        .unwrap_or_default();
+    let density =
+        saved.and_then(|t| serde_json::from_str::<photocraft_engine::prefs::Preferences>(&t).ok()).map(|p| p.performance.max_pixel_density).unwrap_or_default();
     let Some(cap) = density.cap() else { return };
     let Some(window) = web_sys::window() else { return };
     let key = JsValue::from_str("devicePixelRatio");
@@ -467,9 +465,9 @@ fn reject_palms() {
         }
         let changed = e.changed_touches();
         // An Apple Pencil arrives as touches too, of type "stylus": those are the pen's.
-        let stylus = (0..changed.length()).filter_map(|i| changed.get(i)).any(|t| {
-            js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("touchType")).ok().and_then(|v| v.as_string()).as_deref() == Some("stylus")
-        });
+        let stylus = (0..changed.length())
+            .filter_map(|i| changed.get(i))
+            .any(|t| js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("touchType")).ok().and_then(|v| v.as_string()).as_deref() == Some("stylus"));
         if !stylus {
             e.stop_immediate_propagation();
             e.prevent_default();

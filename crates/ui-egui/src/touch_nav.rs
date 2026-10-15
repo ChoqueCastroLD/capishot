@@ -55,7 +55,15 @@ const LONG_PRESS_SLOP: f32 = 8.0;
 pub fn long_press(ctx: &Context, id: Id, area: egui::Rect) -> Option<egui::Pos2> {
     let fired_id = id.with("long-press");
     let (touching, multi, down, origin, start, now, pos) = ctx.input(|i| {
-        (i.any_touches(), i.multi_touch().is_some(), i.pointer.primary_down(), i.pointer.press_origin(), i.pointer.press_start_time(), i.time, i.pointer.latest_pos())
+        (
+            i.any_touches(),
+            i.multi_touch().is_some(),
+            i.pointer.primary_down(),
+            i.pointer.press_origin(),
+            i.pointer.press_start_time(),
+            i.time,
+            i.pointer.latest_pos(),
+        )
     });
     if !touching {
         ctx.data_mut(|d| d.remove::<bool>(fired_id));
@@ -140,7 +148,11 @@ mod tests {
             out
         };
         let p = Pos2::new(100.0, 100.0);
-        let press = vec![touch(1, TouchPhase::Start, 100.0, 100.0), Event::PointerMoved(p), Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }];
+        let press = vec![
+            touch(1, TouchPhase::Start, 100.0, 100.0),
+            Event::PointerMoved(p),
+            Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+        ];
         assert_eq!(step(press, 1.0).0, None);
         assert_eq!(step(vec![touch(1, TouchPhase::Move, 102.0, 101.0), Event::PointerMoved(Pos2::new(102.0, 101.0))], 1.3).0, None);
         let (lp, _) = step(vec![], 1.6);
@@ -148,7 +160,10 @@ mod tests {
         let (lp, nav) = step(vec![], 1.9);
         assert_eq!(lp, None, "once per press");
         assert!(nav.is_some(), "the tools sit out the rest of the press");
-        let up = vec![touch(1, TouchPhase::End, 102.0, 101.0), Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }];
+        let up = vec![
+            touch(1, TouchPhase::End, 102.0, 101.0),
+            Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+        ];
         assert_eq!(step(up, 2.0), (None, None));
     }
 
@@ -164,7 +179,8 @@ mod tests {
             if k == 0 {
                 events.push(Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
             }
-            let mut full = ctx.run_ui(RawInput { events, time: Some(t), ..Default::default() }, |ui| fired |= long_press(ui.ctx(), Id::new("m"), area).is_some());
+            let mut full =
+                ctx.run_ui(RawInput { events, time: Some(t), ..Default::default() }, |ui| fired |= long_press(ui.ctx(), Id::new("m"), area).is_some());
             full.textures_delta.clear();
         }
         assert!(!fired);

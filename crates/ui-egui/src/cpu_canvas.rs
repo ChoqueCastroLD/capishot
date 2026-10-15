@@ -60,9 +60,9 @@ pub struct TileCanvas {
     shown: Option<(u64, u64)>,
     size: [u32; 2],
     tiles: HashMap<TileKey, TileTex>,
-    mips: MipCache,
-    /// Reduced documents of the document last drawn, by level.
-    reduced: Vec<(u32, Weak<Document>, Arc<Document>)>,
+    /// The reduced layers and documents, shared with the worker pool (which builds a level the
+    /// view zooms to while the frame goes on).
+    levels: Arc<std::sync::Mutex<Levels>>,
     frame: u64,
     /// Level of the last frame (tests and the perf readout).
     pub(crate) level: u32,
@@ -112,7 +112,7 @@ impl TileCanvas {
 
     /// Bytes of reduced layer tiles held.
     pub fn mip_bytes(&self) -> usize {
-        self.mips.bytes()
+        self.levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner).mips.bytes()
     }
 
     #[cfg(test)]
@@ -141,19 +141,32 @@ impl TileCanvas {
     }
 
     /// Document `doc` reduced to `level` (cached for the document state).
-    fn reduced(&mut self, doc: &Arc<Document>, level: u32) -> Arc<Document> {
-        if level == 0 {
-            return doc.clone();
-        }
-        if let Some((_, _, r)) = self.reduced.iter().find(|(l, w, _)| *l == level && w.upgrade().is_some_and(|d| Arc::ptr_eq(&d, doc))) {
-            return r.clone();
-        }
-        self.mips.begin();
-        let r = Arc::new(self.mips.document(doc, level));
-        self.reduced.retain(|(l, w, _)| *l != level && w.upgrade().is_some_and(|d| Arc::ptr_eq(&d, doc)));
-        self.reduced.push((level, Arc::downgrade(doc), r.clone()));
-        r
+    fn reduced(&self, doc: &Arc<Document>, level: u32) -> Arc<Document> {
+        reduced(&self.levels, doc, level)
     }
+}
+
+/// Reduced layers ([`MipCache`]) and the reduced documents of the document last drawn, by level.
+#[derive(Default)]
+struct Levels {
+    mips: MipCache,
+    docs: Vec<(u32, Weak<Document>, Arc<Document>)>,
+}
+
+/// Document `doc` reduced to `level`, from the shared [`Levels`] (the UI thread or a worker).
+fn reduced(levels: &std::sync::Mutex<Levels>, doc: &Arc<Document>, level: u32) -> Arc<Document> {
+    if level == 0 {
+        return doc.clone();
+    }
+    let mut l = levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, _, r)) = l.docs.iter().find(|(lv, w, _)| *lv == level && w.upgrade().is_some_and(|d| Arc::ptr_eq(&d, doc))) {
+        return r.clone();
+    }
+    l.mips.begin();
+    let r = Arc::new(l.mips.document(doc, level));
+    l.docs.retain(|(lv, w, _)| *lv != level && w.upgrade().is_some_and(|d| Arc::ptr_eq(&d, doc)));
+    l.docs.push((level, Arc::downgrade(doc), r.clone()));
+    r
 }
 
 /// Document rect `r` (level pixels) in document pixels at factor `f`.
@@ -273,7 +286,16 @@ enum Job {
 /// Draw document `idx`'s CPU canvas: tiles in view at the zoom's level, composited as needed.
 /// `zoom` is device pixels per document pixel (`View::zoom`).
 #[allow(clippy::too_many_arguments)]
-pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Painter, xf: &ViewXform, idx: usize, output: Option<u32>, zoom: f32, visible: DRect) {
+pub fn paint(
+    app: &mut PhotocraftApp,
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    xf: &ViewXform,
+    idx: usize,
+    output: Option<u32>,
+    zoom: f32,
+    visible: DRect,
+) {
     let Some(target) = crate::canvas::cpu_target(app, idx, output) else { return };
     let crate::canvas::CpuTarget { doc, revision, preview_key, display, display_key, damage, id } = target;
     let size = [doc.size.width, doc.size.height];
@@ -368,9 +390,12 @@ pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Paint
         if jobs.is_empty() {
             continue;
         }
-        let rects: Vec<DRect> = jobs.iter().map(|j| match j {
-            Job::Full(_, r) | Job::Part(_, r) => *r,
-        }).collect();
+        let rects: Vec<DRect> = jobs
+            .iter()
+            .map(|j| match j {
+                Job::Full(_, r) | Job::Part(_, r) => *r,
+            })
+            .collect();
         let c0 = crate::gpu_canvas::now_ms();
         let source = source.get_or_insert_with(|| {
             let faithful = level == 0 || photocraft_compose::proxy::proxy_faithful(&doc);
@@ -419,14 +444,14 @@ pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Paint
                 Job::Part(..) => None,
             })
             .collect();
-        let source = source.get_or_insert_with(|| {
-            let faithful = level == 0 || photocraft_compose::proxy::proxy_faithful(&doc);
-            faithful.then(|| tc.reduced(&doc, level))
-        });
+        // A level not built yet for this document is reduced on the worker too.
+        let faithful = level == 0 || photocraft_compose::proxy::proxy_faithful(&doc);
+        let ready = source.clone().flatten();
         let (tx, rx) = std::sync::mpsc::channel();
         tc.pending = Some(Pending { state: now, level, rx });
-        let (doc, source, display) = (doc.clone(), source.clone(), display.clone());
+        let (doc, display, levels) = (doc.clone(), display.clone(), tc.levels.clone());
         spawn(move || {
+            let source = if faithful { Some(ready.unwrap_or_else(|| reduced(&levels, &doc, level))) } else { None };
             let rects: Vec<DRect> = jobs.iter().map(|(_, r)| *r).collect();
             let bufs = render_level(&doc, source.as_deref(), f, &rects);
             let done = jobs.into_iter().zip(bufs).map(|((k, held), b)| (k, held, tile_image(display.as_deref(), &b))).collect();
@@ -470,7 +495,11 @@ pub fn paint(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Paint
     }
     // Memory: least recently drawn tiles beyond the budget go; reduced layers past theirs.
     tc.evict(tex_budget);
-    tc.mips.trim(mip_budget);
+    if tc.pending.is_none()
+        && let Ok(mut l) = tc.levels.try_lock()
+    {
+        l.mips.trim(mip_budget);
+    }
 }
 
 impl TileCanvas {
@@ -593,7 +622,12 @@ mod tests {
     fn frame(app: &mut PhotocraftApp, ctx: &egui::Context, zoom: f32, center: [f32; 2]) -> Uploads {
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
             let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 800.0)), zoom, center, flip: false, rotation: 0.0, aspect: 1.0 };
-            let visible = DRect::new((center[0] - 500.0 / zoom) as i32, (center[1] - 400.0 / zoom) as i32, (center[0] + 500.0 / zoom) as i32 + 1, (center[1] + 400.0 / zoom) as i32 + 1);
+            let visible = DRect::new(
+                (center[0] - 500.0 / zoom) as i32,
+                (center[1] - 400.0 / zoom) as i32,
+                (center[0] + 500.0 / zoom) as i32 + 1,
+                (center[1] + 400.0 / zoom) as i32 + 1,
+            );
             paint(app, ui.ctx(), ui.painter(), &xf, 0, None, zoom, visible);
         });
         // Only the canvas's own textures (not egui's font atlas).
