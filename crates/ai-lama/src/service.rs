@@ -92,6 +92,9 @@ pub trait Inpainter: Send + Sync {
 pub struct FakeInpainter {
     /// Fail every request with this message.
     pub fail: Option<String>,
+    /// Fail every request that may use the GPU (not `cpu`) with [`LamaError::Gpu`] and this
+    /// message.
+    pub gpu_fail: Option<String>,
     /// Report this state instead of `Ready`.
     pub state: Option<ModelState>,
     /// The last request's model id and CPU flag.
@@ -118,6 +121,9 @@ impl Inpainter for FakeInpainter {
         }
         if let Some(e) = &self.fail {
             return done(Err(LamaError::Device(e.clone())));
+        }
+        if let Some(e) = self.gpu_fail.as_ref().filter(|_| !req.cpu) {
+            return done(Err(LamaError::Gpu(e.clone())));
         }
         if let ModelState::NeedsDownload { .. } = self.model_state_of(req.model)
             && !req.allow_download

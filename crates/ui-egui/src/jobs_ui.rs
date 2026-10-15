@@ -500,6 +500,15 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     if crate::fonts_ui::on_job(app, &e) {
         return;
     }
+    // Failed background jobs, and the notices of ones that succeeded anyway, count in the usage
+    // statistics by class (never the message).
+    match &e.outcome {
+        JobOutcome::Failed(err) => {
+            crate::telemetry::with(|r| r.error(&e.command, err));
+        }
+        JobOutcome::Done(v) => job_notices(app, &e.command, v),
+        JobOutcome::Cancelled => {}
+    }
     match e.outcome {
         JobOutcome::Done(v) if e.command == "brush.presets.importAbr" => {
             let n = v.get("count").and_then(Value::as_u64).unwrap_or(0);
@@ -530,6 +539,27 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.ui.status = crate::i18n::fmt(tl!("Cancelled {label}"), &[("label", &localize_label(&e.label))]);
             app.ui.status_error = false;
         }
+    }
+}
+
+/// A finished job's `notices` ([`JobCtx::notice`]): each one on screen, and its cause's class in
+/// the usage statistics.
+fn job_notices(app: &mut PhotocraftApp, command: &str, v: &Value) {
+    let Some(list) = v.get("notices").and_then(Value::as_array) else { return };
+    for n in list {
+        let field = |k: &str| n.get(k).and_then(Value::as_str).unwrap_or_default();
+        let text = match field("class") {
+            photocraft_engine::ai_cmds::GPU_FALLBACK_CLASS => tl!("GPU couldn't run this model; used the CPU instead").to_string(),
+            _ => crate::i18n::t(field("text")).to_string(),
+        };
+        if text.is_empty() {
+            continue;
+        }
+        let cause = field("cause");
+        if !cause.is_empty() {
+            crate::telemetry::with(|r| r.error(command, cause));
+        }
+        notices::post(app, text, Vec::new(), false, None);
     }
 }
 

@@ -78,6 +78,18 @@ pub(crate) fn run_choice(s: &Session, p: &Value, cmd: &str) -> Result<RunChoice>
     Ok(RunChoice { quality, device, choice, profile })
 }
 
+/// The notice when a run fell back to the CPU after the GPU failed ([`crate::jobs::JobCtx::notice`]).
+pub const GPU_FALLBACK_NOTICE: &str = "GPU couldn't run this model; used the CPU instead";
+/// Its class.
+pub const GPU_FALLBACK_CLASS: &str = "ai.gpuFallback";
+
+/// After the GPU failed: the same Quality on the CPU (Auto then means the lite model, as for any
+/// CPU run; Best keeps the full one).
+pub(crate) fn on_cpu(run: &RunChoice) -> RunChoice {
+    let choice = profile::choose(&run.profile, run.quality, DevicePref::Cpu);
+    RunChoice { device: DevicePref::Cpu, choice, ..run.clone() }
+}
+
 /// An optional integer param in `lo..=hi`.
 pub(crate) fn uint_param(p: &Value, k: &str, lo: u64, hi: u64, cmd: &str) -> Result<Option<u64>> {
     match p.get(k) {
@@ -306,6 +318,50 @@ impl Hooks for JobHooks {
 struct Upscaled {
     image: Planar,
     alpha: Option<Vec<f32>>,
+    /// The model that ran (the lite one after a GPU failure, see [`run_upscale`]).
+    model: &'static ModelInfo,
+}
+
+/// Receives the upscaled image and the model that made it.
+type UpscaleDone = Box<dyn FnOnce(photocraft_ai::Result<(Planar, &'static ModelInfo)>) + Send>;
+
+/// What a GPU run needs to run again on the CPU.
+struct CpuRetry {
+    input: Planar,
+    run: RunChoice,
+    /// The params named the model: keep it.
+    pinned: bool,
+}
+
+/// Runs `req`; when the GPU couldn't run it and `retry` is given, runs it again on the CPU with
+/// the model the user's Quality picks there (Auto: the lite one, when it is here or may be
+/// downloaded; else the same model), and says so ([`GPU_FALLBACK_NOTICE`]).
+fn run_upscale(svc: Arc<dyn Upscaler>, ctx: JobCtx, req: Request, retry: Option<CpuRetry>, finish: UpscaleDone) {
+    let model = req.model;
+    let (grayscale, allow_download, opts) = (req.grayscale, req.allow_download, req.opts);
+    let again = svc.clone();
+    let hooks = Arc::new(JobHooks(ctx.clone()));
+    svc.run(
+        req,
+        hooks,
+        Box::new(move |r| match (r, retry) {
+            (Err(AiError::Gpu(why)), Some(retry)) => {
+                let run = on_cpu(&retry.run);
+                let mut m = model;
+                if !retry.pinned
+                    && run.choice.lite
+                    && let Ok(l) = lite(model.scale)
+                    && (allow_download || again.model_state(l) == ModelState::Ready)
+                {
+                    m = l;
+                }
+                ctx.notice(GPU_FALLBACK_CLASS, GPU_FALLBACK_NOTICE, &why);
+                let req = Request { model: m, input: retry.input, grayscale, allow_download, opts: RunOptions { cpu: true, ..opts } };
+                run_upscale(again, ctx, req, None, finish);
+            }
+            (r, _) => finish(r.map(|image| (image, model))),
+        }),
+    );
 }
 
 fn upscale_ai(s: &mut Session, p: &Value) -> Result<Value> {
@@ -349,30 +405,32 @@ fn upscale_ai(s: &mut Session, p: &Value) -> Result<Value> {
     let label = format!("Upscale with AI ({}x)", m.scale);
     let content = if grayscale { "grayscale" } else { "color" };
     let opts = plan.opts;
+    let run = plan.run.clone();
+    let pinned = !matches!(p.get("model").and_then(Value::as_str).unwrap_or("auto"), "auto" | "");
     jobs::run_async(
         s,
         &label,
         output == Output::Replace,
         move |ctx, done| {
             ctx.progress(0.0, &format!("Starting {}", m.title));
+            // A GPU run keeps the input for a CPU retry.
+            let retry = (!opts.cpu).then(|| CpuRetry { input: input.clone(), run, pinned });
             let req = Request { model: m, input, grayscale, allow_download: download, opts };
-            svc.run(
-                req,
-                Arc::new(JobHooks(ctx.clone())),
-                Box::new(move |r| {
-                    done.finish(r.map(|image| Upscaled { image, alpha: alpha.map(|a| upscale_plane(&a, w, h, scale)) }).map_err(|e| match e {
-                        AiError::Cancelled => EngineError::Cancelled,
-                        e => EngineError::Other(e.to_string()),
-                    }))
-                }),
-            );
+            let finish: UpscaleDone = Box::new(move |r| {
+                done.finish(r.map(|(image, model)| Upscaled { image, alpha: alpha.map(|a| upscale_plane(&a, w, h, scale)), model }).map_err(|e| match e {
+                    AiError::Cancelled => EngineError::Cancelled,
+                    e => EngineError::Other(e.to_string()),
+                }))
+            });
+            run_upscale(svc, ctx.clone(), req, retry, finish);
         },
-        move |s, up: Upscaled| apply(s, up, m, output, content),
+        move |s, up: Upscaled| apply(s, up, output, content),
     )
 }
 
 /// Puts the upscaled image in the document (one undo step) or a new document.
-fn apply(s: &mut Session, up: Upscaled, m: &'static ModelInfo, output: Output, content: &str) -> Result<Value> {
+fn apply(s: &mut Session, up: Upscaled, output: Output, content: &str) -> Result<Value> {
+    let m = up.model;
     let img = &up.image;
     let (w, h) = (img.width, img.height);
     let st = s.active().ok_or(EngineError::NoDocument)?;
