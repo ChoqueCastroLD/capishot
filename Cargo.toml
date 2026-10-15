@@ -129,3 +129,51 @@ opt-level = 3
 opt-level = 3
 [profile.wasm-release.package.photocraft-paint]
 opt-level = 3
+
+# The AI Web Worker (packaging/web-ai/build.sh): loaded only when a model runs and cached. The
+# CPU kernels (burn-flex, gemm, macerator, pulp) and the networks are built for speed, opt-level 3
+# (15-20 % faster on one thread than wasm-release's "z"); the rest (the WebGPU stack: wgpu, cubecl's kernel
+# generators) for size, so the plain worker stays under the 24 MiB per-file limit.
+[profile.wasm-ai]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.wasm-ai.package."*"]
+opt-level = "s"
+[profile.wasm-ai.package.burn-flex]
+opt-level = 3
+[profile.wasm-ai.package.gemm]
+opt-level = 3
+[profile.wasm-ai.package.gemm-common]
+opt-level = 3
+[profile.wasm-ai.package.gemm-f32]
+opt-level = 3
+[profile.wasm-ai.package.gemm-f16]
+opt-level = 3
+[profile.wasm-ai.package.pulp]
+opt-level = 3
+[profile.wasm-ai.package.macerator]
+opt-level = 3
+[profile.wasm-ai.package.burn-backend]
+opt-level = 3
+[profile.wasm-ai.package.burn-std]
+opt-level = 3
+[profile.wasm-ai.package.burn-tensor]
+opt-level = 3
+[profile.wasm-ai.package.burn-dispatch]
+opt-level = 3
+[profile.wasm-ai.package.rayon]
+opt-level = 3
+[profile.wasm-ai.package.rayon-core]
+opt-level = 3
+[profile.wasm-ai.package.half]
+opt-level = 3
+[profile.wasm-ai.package.photocraft-ai]
+opt-level = 3
+[profile.wasm-ai.package.photocraft-ai-lama]
+opt-level = 3
+[profile.wasm-ai.package.photocraft-ai-worker]
+opt-level = 3

@@ -67,13 +67,24 @@ pub(crate) struct Weights {
 const MAX_NGF: usize = 256;
 const MAX_BLOCKS: usize = 64;
 
-struct Reader<'a> {
-    st: SafeTensors<'a>,
-    device: Device,
+pub(crate) struct Reader<'a> {
+    pub st: SafeTensors<'a>,
+    pub device: Device,
 }
 
-impl Reader<'_> {
-    fn floats(&self, name: &str, shape: &[usize]) -> Result<Vec<f32>> {
+impl<'a> Reader<'a> {
+    /// Parses the header (no tensor is read yet).
+    pub fn new(bytes: &'a [u8], device: &Device) -> Result<Self> {
+        let st = SafeTensors::deserialize(bytes).map_err(|e| LamaError::Weights(format!("not a safetensors file: {e}")))?;
+        Ok(Self { st, device: device.clone() })
+    }
+
+    /// The shape of a tensor, if present.
+    pub fn shape(&self, name: &str) -> Option<Vec<usize>> {
+        self.st.tensor(name).ok().map(|t| t.shape().to_vec())
+    }
+
+    pub fn floats(&self, name: &str, shape: &[usize]) -> Result<Vec<f32>> {
         let t = self.st.tensor(name).map_err(|_| LamaError::Weights(format!("missing tensor `{name}`")))?;
         if t.shape() != shape {
             return Err(LamaError::Weights(format!("`{name}` has shape {:?}, expected {shape:?}", t.shape())));
@@ -94,12 +105,12 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn t4(&self, name: &str, shape: [usize; 4]) -> Result<Tensor<4>> {
+    pub fn t4(&self, name: &str, shape: [usize; 4]) -> Result<Tensor<4>> {
         let v = self.floats(name, &shape)?;
         Ok(Tensor::from_data(TensorData::new(v, shape), &self.device))
     }
 
-    fn t1(&self, name: &str, len: usize) -> Result<Tensor<1>> {
+    pub fn t1(&self, name: &str, len: usize) -> Result<Tensor<1>> {
         let v = self.floats(name, &[len])?;
         Ok(Tensor::from_data(TensorData::new(v, [len]), &self.device))
     }

@@ -180,3 +180,34 @@ fn bilinear_alpha_plane() {
     assert!((up[0]).abs() < 1e-6 && (up[3] - 1.0).abs() < 1e-6 && up[1] > 0.0 && up[1] < up[2]);
     assert!(upscale_plane(&[], 0, 0, 2).is_empty());
 }
+
+/// Quality / Device pick MangaJaNai or the lite Real-ESRGAN Compact; Advanced settings reach the
+/// upscaler.
+#[test]
+fn quality_device_and_advanced_settings() {
+    use photocraft_ai::profile::{DeviceProfile, GpuClass, Reason};
+    let (s, fake) = with_fake(session(8, 6, gray));
+    *fake.profile.lock().unwrap() = DeviceProfile { gpu: GpuClass::None, cores: Some(8), ..Default::default() };
+    let p = plan(&s, &json!({"scale": 4})).unwrap();
+    assert_eq!((p.model.id, p.model.lite, p.run.choice.reason, p.opts.cpu), ("realesr-compact-4x", true, Reason::NoGpu, true));
+    assert!(p.grayscale, "the lite model runs one channel on gray pages too");
+    let p = plan(&s, &json!({"scale": 2, "quality": "best"})).unwrap();
+    assert_eq!((p.model.id, p.opts.cpu), ("mangajanai-v1-2x-1200p", true));
+    *fake.profile.lock().unwrap() = DeviceProfile { gpu: GpuClass::Discrete, memory_gb: Some(8.0), cores: Some(8), ..Default::default() };
+    let p = plan(&s, &json!({"scale": 2})).unwrap();
+    assert_eq!((p.model.id, p.opts.cpu, p.run.choice.reason), ("mangajanai-v1-2x-1200p", false, Reason::Gpu));
+    let p = plan(&s, &json!({"scale": 2, "quality": "fast", "tile": 192, "overlap": 8, "threads": 3, "keepLoaded": false})).unwrap();
+    assert_eq!(p.model.id, "realesr-compact-2x");
+    assert_eq!(p.opts.tiles, Some(TileOptions { tile: 192, overlap: 8 }));
+    assert_eq!((p.opts.threads, p.opts.unload), (3, true));
+    let p = plan(&s, &json!({"model": "realesr-compact-4x", "scale": 4})).unwrap();
+    assert!(p.model.lite && p.detected);
+    for bad in [json!({"quality": "max"}), json!({"device": "tpu"}), json!({"tile": 8}), json!({"tile": 64, "overlap": 32}), json!({"threads": -1})] {
+        assert!(plan(&s, &bad).is_err(), "{bad}");
+    }
+    // The run carries the options.
+    let (mut s, fake) = with_fake(session(8, 6, gray));
+    let r = s.execute(COMMAND, json!({"quality": "fast", "device": "cpu", "output": "newDocument"})).unwrap();
+    assert_eq!((r["model"].as_str(), r["lite"].as_bool()), (Some("realesr-compact-2x"), Some(true)));
+    assert_eq!(fake.last_opts.lock().unwrap().map(|o| o.cpu), Some(true));
+}

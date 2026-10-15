@@ -9,7 +9,23 @@
 use std::sync::Arc;
 
 use crate::catalog::ModelInfo;
+use crate::profile::DeviceProfile;
+use crate::tile::TileOptions;
 use crate::{AiError, Planar, Result};
+
+/// How a request runs: the dialog's choices (Device) and Advanced settings; the defaults are
+/// automatic.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RunOptions {
+    /// Skip the GPU.
+    pub cpu: bool,
+    /// Tiling; `None`: the model's default ([`crate::tile::default_tiles`]).
+    pub tiles: Option<TileOptions>,
+    /// CPU threads; 0: one per core.
+    pub threads: usize,
+    /// Free the model after the run instead of keeping it loaded for the next one.
+    pub unload: bool,
+}
 
 /// Whether a model can run right now.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +50,7 @@ pub struct Request {
     pub grayscale: bool,
     /// The user agreed to download the weights if they aren't cached.
     pub allow_download: bool,
+    pub opts: RunOptions,
 }
 
 /// Progress and cancellation from the caller's job.
@@ -53,6 +70,19 @@ pub trait Upscaler: Send + Sync {
     fn device(&self) -> String {
         String::new()
     }
+    /// What the shell knows about the machine, for the automatic model and device choice
+    /// ([`crate::profile::choose`]).
+    fn profile(&self) -> DeviceProfile {
+        DeviceProfile::default()
+    }
+    /// Bytes of downloaded model weights on this device, if the shell can tell.
+    fn storage_used(&self) -> Option<u64> {
+        None
+    }
+    /// Deletes every downloaded model (they download again, with consent, when next used).
+    fn clear_downloads(&self) -> Result<()> {
+        Err(AiError::Cache("clearing downloaded models isn't supported here".into()))
+    }
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done);
 }
 
@@ -62,6 +92,10 @@ pub trait Upscaler: Send + Sync {
 pub struct FakeUpscaler {
     pub download_needed: std::sync::atomic::AtomicBool,
     pub fail: Option<String>,
+    /// What [`Upscaler::profile`] reports.
+    pub profile: std::sync::Mutex<DeviceProfile>,
+    /// The last request's options.
+    pub last_opts: std::sync::Mutex<Option<RunOptions>>,
 }
 
 impl Upscaler for FakeUpscaler {
@@ -73,7 +107,12 @@ impl Upscaler for FakeUpscaler {
         "test".into()
     }
 
+    fn profile(&self) -> DeviceProfile {
+        self.profile.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
+        *self.last_opts.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(req.opts);
         if hooks.cancelled() {
             return done(Err(AiError::Cancelled));
         }

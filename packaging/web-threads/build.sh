@@ -112,7 +112,7 @@ cp "$ROOT"/crates/ui-egui/src/i18n/*.tsv "$ROOT/crates/ui-egui/src/i18n/LICENSE-
 
 # Image › Upscale with AI: the AI Web Worker module, loaded on demand (PHOTOCRAFT_WEB_AI=0 skips).
 if [ "${PHOTOCRAFT_WEB_AI:-1}" != "0" ]; then
-  "$ROOT/packaging/web-ai/build.sh" "$OUT"
+  "$ROOT/packaging/web-ai/build.sh" "$OUT" --threads
 fi
 
 # Cloudflare Workers/Pages reject any single file over 25 MiB; fail well before that.

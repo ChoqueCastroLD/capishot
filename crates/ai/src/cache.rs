@@ -93,6 +93,14 @@ impl DiskCache {
         })
     }
 
+    /// Deletes every catalog model's file from the cache folder (not the extra folders').
+    pub fn clear(&self) -> Result<()> {
+        for m in crate::catalog::MODELS {
+            self.remove(m)?;
+        }
+        Ok(())
+    }
+
     /// Deletes a cached file (not the extra folders'). Missing files are not an error.
     pub fn remove(&self, model: &ModelInfo) -> Result<()> {
         match std::fs::remove_file(self.dir.join(model.file)) {
@@ -122,6 +130,7 @@ mod tests {
             license: "MIT",
             author: "",
             source: "",
+            lite: false,
         }
     }
 

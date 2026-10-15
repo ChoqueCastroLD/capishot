@@ -39,3 +39,7 @@ workspace = true
 [[example]]
 name = "lama"
 required-features = ["model"]
+
+[[example]]
+name = "inpaint_compare"
+required-features = ["model"]

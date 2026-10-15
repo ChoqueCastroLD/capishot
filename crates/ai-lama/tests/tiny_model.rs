@@ -172,7 +172,7 @@ fn run_native(i: &photocraft_ai_lama::native::NativeInpainter) -> photocraft_ai_
     let (rgb, mask) = tiny_input();
     let tile = photocraft_ai_lama::tiles::TileInput { rgb, mask, w: W, h: H };
     let (tx, rx) = std::sync::mpsc::channel();
-    i.run(Request { tile, allow_download: false }, std::sync::Arc::new(NoHooks), Box::new(move |r| tx.send(r).unwrap()));
+    i.run(Request::lama(tile, false), std::sync::Arc::new(NoHooks), Box::new(move |r| tx.send(r).unwrap()));
     rx.recv().unwrap()
 }
 

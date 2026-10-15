@@ -24,6 +24,17 @@ impl Default for TileOptions {
     }
 }
 
+/// The default tiling for a model: 128 input pixels for 4x models, 256 for 2x ones (which run
+/// at half resolution), so the largest activation (64 channels at the output size) stays at
+/// 64 MiB, under WebGPU's default 128 MiB storage binding limit. 16 pixels of context, as
+/// MangaJaNaiConverterGui uses.
+/// The lite Compact network keeps only 64 channels at the input size, so it takes 256-pixel tiles
+/// at either scale.
+pub fn default_tiles(model: &crate::catalog::ModelInfo) -> TileOptions {
+    let tile = if model.arch == crate::catalog::Arch::Compact || model.scale == 2 { 256 } else { 128 };
+    TileOptions { tile, overlap: 16 }
+}
+
 /// One tile: the input rectangle to run (`x0..x1`, `y0..y1`, context included) and where its
 /// seams with the neighbouring tiles are (input coordinates).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

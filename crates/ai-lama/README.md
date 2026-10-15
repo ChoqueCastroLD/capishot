@@ -13,7 +13,9 @@ pure-Rust CPU backend (`flex`, wasm included). No Python, no ONNX Runtime.
 | `service::{Inpainter, Hooks, ModelState, Request, FakeInpainter}` | none | The engine ↔ runner seam (callback-based like `photocraft_ai::service::Upscaler`). |
 | `dft::Dft2` | none | The real 2-D DFT matrices (see below). |
 | `Lama::{from_safetensors, generate, generate_async, check_size, arch}` | `model` (`flex` / `wgpu`) | The generator. |
-| `native::NativeInpainter` | `model`, not wasm | Desktop/CLI runner: weights from `CAPISHOT_LAMA_WEIGHTS` or `<config>/models/manga-lama-f16.safetensors`; wgpu unless the adapter is software (or `CAPISHOT_AI_DEVICE=cpu`), else CPU. |
+| `Migan::{from_safetensors, generate, generate_async, resolution}` | `model` | The lite generator (MI-GAN, below): tiles up to 512 px a side, mirror-padded to a multiple of 128. |
+| `Generator` | `model` | Either one, picked by the file's `arch` metadata (`lama-ffc`, `migan`). |
+| `native::NativeInpainter` | `model`, not wasm | Desktop/CLI runner: weights from `CAPISHOT_LAMA_WEIGHTS` or `<config>/models/manga-lama-f16.safetensors` (MI-GAN: `CAPISHOT_MIGAN_WEIGHTS` or `migan-512-places2-f16.safetensors` beside it); wgpu unless the adapter is software, `CAPISHOT_AI_DEVICE=cpu` or the request asks for the CPU, else CPU. |
 
 Without features the crate has no ML dependency: the engine (and the main web bundle) uses only
 the tiling and service halves.
@@ -68,3 +70,30 @@ Run it:
 cargo run --release -p photocraft-ai-lama --features flex,rayon,wgpu --example lama -- \
     manga-lama-f16.safetensors page.png mask.png out [flex|wgpu] [raw|tiles] [max_side]
 ```
+
+## Lite model: MI-GAN
+
+For phones, weak machines and the CPU path, `edit.inpaintAi` (Quality: Fast, or Auto without a
+capable GPU) runs **MI-GAN** ("MI-GAN: A Simple Baseline for Image Inpainting on Mobile
+Devices", Sargsyan et al., ICCV 2023), Picsart AI Research, code and weights **MIT**
+(`LICENSE-WEIGHTS` in github.com/Picsart-AI-Research/MI-GAN). Weights: `migan_512_places2.pt`
+from the repository's official Google Drive folder (sha256 `1d6087ee…124a466a`), 6.6 M
+parameters. It is trained on Places2, not manga: it fills large areas less convincingly than
+Manga LaMa but is ~14× cheaper (512² tile: ~28 GFLOP vs ~400).
+
+Conversion (`convert_lite.py migan`, reference venv): keys kept as upstream
+(`encoder.b512.fromrgb`, `….conv1.conv1` depthwise, `….conv2` pointwise, `synthesis.bN.…`,
+`noise_const`, `noise_strength`); the fixed `[1,3,3,1]` FIR filters and `filter_const` zero-
+insertion patterns are asserted and dropped (rebuilt in `migan.rs`). fp16: 13.2 MB
+(`migan-512-places2-f16.safetensors`, sha256 `76a73c53…7c109b8c68`).
+
+Verification (native CPU, same input through the official `Generator` loaded with the release
+weights, `ref_migan.py` + `examples/inpaint_compare.rs`):
+
+| Weights | 512² | 256² (noise maps cropped, as the port does) |
+|---|---|---|
+| f32 | max 1.3e-5, 8-bit max 1/255 (20 values), PSNR 133 dB | — |
+| f16 (shipped) | max 0.015, 8-bit max 4/255, PSNR 71 dB | max 0.006, 8-bit max 2/255, PSNR 71 dB |
+
+`tests/tiny_migan.rs` checks a tiny random MI-GAN against an independent eager PyTorch
+implementation (`tests/tiny_migan_reference.py`) to 2e-5, plus padding of odd tile sizes.

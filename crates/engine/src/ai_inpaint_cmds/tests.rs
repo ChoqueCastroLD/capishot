@@ -147,17 +147,17 @@ fn bad_params_are_errors() {
 
 #[test]
 fn model_states_and_failures_are_reported() {
-    let needs = || FakeInpainter { state: Some(ModelState::NeedsDownload { bytes: 101_904_726 }), fail: None };
+    let needs = || FakeInpainter { state: Some(ModelState::NeedsDownload { bytes: 101_904_726 }), ..Default::default() };
     let mut s = with_fake(page(8), needs());
     let err = s.execute(ID, json!({})).unwrap_err().to_string();
     assert!(err.contains("98 MB") && err.contains("allowDownload"), "{err}");
     let mut s = with_fake(page(8), needs());
     s.execute(ID, json!({"allowDownload": true})).unwrap();
 
-    let mut s = with_fake(page(8), FakeInpainter { state: Some(ModelState::Unavailable("no GPU and no CPU backend".into())), fail: None });
+    let mut s = with_fake(page(8), FakeInpainter { state: Some(ModelState::Unavailable("no GPU and no CPU backend".into())), ..Default::default() });
     assert!(s.execute(ID, json!({})).unwrap_err().to_string().contains("no GPU"));
 
-    let mut s = with_fake(page(8), FakeInpainter { fail: Some("device lost".into()), state: None });
+    let mut s = with_fake(page(8), FakeInpainter { fail: Some("device lost".into()), ..Default::default() });
     let past = s.active().unwrap().history.past_len();
     let err = s.execute(ID, json!({})).unwrap_err().to_string();
     assert!(err.contains("device lost"), "{err}");
@@ -184,4 +184,40 @@ fn remove_tool_ai_mode_uses_the_service() {
     s.execute("paint.remove", stroke).unwrap();
     assert!(!is_red(&layer_px(&s, id, 32, 22)));
     assert!(s.execute("paint.remove", json!({"points": [[28, 22]], "size": 10, "ai": true, "maxSide": 7})).is_err());
+}
+
+/// Quality / Device pick Manga LaMa or the lite MI-GAN from the shell's device profile, and the
+/// result says which ran.
+#[test]
+fn quality_and_device_choose_lama_or_migan() {
+    use photocraft_ai::profile::{DeviceProfile, GpuClass};
+    use photocraft_ai::service::FakeUpscaler;
+    let run = |profile: DeviceProfile, params: Value| {
+        let fake = Arc::new(FakeInpainter::default());
+        let mut s = page(8);
+        s.set_inpainter(Some(fake.clone()));
+        let up = FakeUpscaler { profile: std::sync::Mutex::new(profile), ..Default::default() };
+        s.set_ai_upscaler(Some(Arc::new(up)));
+        let r = s.execute(ID, params).unwrap();
+        let last = *fake.last.lock().unwrap();
+        (r, last.unwrap())
+    };
+    let gpu = DeviceProfile { gpu: GpuClass::Discrete, memory_gb: Some(8.0), cores: Some(8), ..Default::default() };
+    let none = DeviceProfile { gpu: GpuClass::None, cores: Some(8), ..Default::default() };
+    let (r, last) = run(gpu.clone(), json!({}));
+    assert_eq!((r["model"].as_str(), r["lite"].as_bool(), last), (Some("manga-lama"), Some(false), ("manga-lama", false)));
+    let (r, last) = run(none.clone(), json!({}));
+    assert_eq!((r["model"].as_str(), last), (Some("migan-512"), ("migan-512", true)), "no GPU: lite on the CPU");
+    let (_, last) = run(none, json!({"quality": "best"}));
+    assert_eq!(last, ("manga-lama", true), "Best on the CPU when the user asks");
+    let (_, last) = run(gpu.clone(), json!({"quality": "fast"}));
+    assert_eq!(last, ("migan-512", false));
+    let (_, last) = run(gpu.clone(), json!({"device": "cpu"}));
+    assert_eq!(last, ("migan-512", true));
+    let (_, last) = run(gpu, json!({"model": "manga-lama", "device": "cpu"}));
+    assert_eq!(last, ("manga-lama", true));
+    let mut s = with_fake(page(8), FakeInpainter::default());
+    for bad in [json!({"quality": "max"}), json!({"device": "npu"}), json!({"model": "mangajanai-v1-2x-1200p"}), json!({"threads": 99}), json!({"keepLoaded": 1})] {
+        assert!(s.execute(ID, bad.clone()).is_err(), "{bad}");
+    }
 }

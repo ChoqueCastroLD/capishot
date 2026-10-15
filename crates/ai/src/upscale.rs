@@ -1,25 +1,58 @@
-//! The MangaJaNai upscale on a [`Runtime`]: load a catalog model, run it tiled, clamp.
+//! The upscale on a [`Runtime`]: load a catalog model (MangaJaNai's ESRGAN or the lite Compact),
+//! run it tiled, clamp.
+
+use burn::tensor::Tensor;
 
 use crate::catalog::{Arch, ModelInfo};
+use crate::compact::Compact;
 use crate::esrgan::Esrgan;
 use crate::runtime::{Network, Runtime, run_tiled};
 use crate::tile::TileOptions;
 use crate::weights::Weights;
 use crate::{Planar, Progress, Result};
 
-/// The default tiling for a model: 128 input pixels for 4x models, 256 for 2x ones (which run
-/// at half resolution), so the largest activation (64 channels at the output size) stays at
-/// 64 MiB, under WebGPU's default 128 MiB storage binding limit. 16 pixels of context, as
-/// MangaJaNaiConverterGui uses.
-pub fn default_tiles(model: &ModelInfo) -> TileOptions {
-    TileOptions { tile: if model.scale == 2 { 256 } else { 128 }, overlap: 16 }
+pub use crate::tile::default_tiles;
+
+/// A loaded upscaling network (one per worker: the size difference doesn't matter).
+#[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
+pub enum Net {
+    Esrgan(Esrgan),
+    Compact(Compact),
+}
+
+impl Net {
+    fn get(&self) -> &dyn Network {
+        match self {
+            Self::Esrgan(n) => n,
+            Self::Compact(n) => n,
+        }
+    }
+}
+
+impl Network for Net {
+    fn scale(&self) -> usize {
+        self.get().scale()
+    }
+    fn in_channels(&self) -> usize {
+        self.get().in_channels()
+    }
+    fn out_channels(&self) -> usize {
+        self.get().out_channels()
+    }
+    fn multiple_of(&self) -> usize {
+        self.get().multiple_of()
+    }
+    fn forward(&self, x: Tensor<4>) -> Tensor<4> {
+        self.get().forward(x)
+    }
 }
 
 /// A network loaded from a catalog model's weight file.
 pub struct Loaded {
     pub id: &'static str,
     pub grayscale: bool,
-    pub net: Esrgan,
+    pub net: Net,
 }
 
 impl Loaded {
@@ -27,8 +60,9 @@ impl Loaded {
     pub fn new(rt: &Runtime, model: &'static ModelInfo, bytes: &[u8], grayscale: bool) -> Result<Self> {
         let w = Weights::from_safetensors(bytes)?;
         let net = match model.arch {
-            Arch::Esrgan => Esrgan::load(rt, &w, grayscale)?,
-            Arch::Lama => return Err(crate::AiError::UnknownModel(format!("{} is not an upscaler", model.id))),
+            Arch::Esrgan => Net::Esrgan(Esrgan::load(rt, &w, grayscale)?),
+            Arch::Compact => Net::Compact(Compact::load(rt, &w, model.scale as usize, grayscale)?),
+            Arch::Lama | Arch::Migan => return Err(crate::AiError::UnknownModel(format!("{} is not an upscaler", model.id))),
         };
         Ok(Self { id: model.id, grayscale, net })
     }

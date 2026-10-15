@@ -33,10 +33,13 @@ pub mod cache;
 pub mod catalog;
 pub mod image;
 pub mod mangajanai;
+pub mod profile;
 pub mod service;
 pub mod tile;
 pub mod weights;
 
+#[cfg(feature = "runtime")]
+pub mod compact;
 #[cfg(feature = "runtime")]
 pub mod esrgan;
 #[cfg(all(feature = "runtime", not(target_family = "wasm")))]

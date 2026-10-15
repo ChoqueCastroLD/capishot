@@ -12,12 +12,20 @@
 //! documents with more than one layer, like Photoshop's Super Zoom). It runs as a background job
 //! with progress and cancellation. A model that isn't cached yet needs `download: true`: the
 //! dialog asks the user first, showing its size and licence.
+//!
+//! `quality` (auto, fast, best) and `device` (auto, gpu, cpu) pick between the full models and
+//! the lite one (Real-ESRGAN Compact, for phones, weak machines and CPUs) through
+//! [`photocraft_ai::profile::choose`] on the shell's device profile; the plan carries the
+//! reason, so the dialog says why. `tile`, `overlap`, `threads` and `keepLoaded` are the
+//! dialog's Advanced settings.
 
 use std::sync::Arc;
 
 use photocraft_ai::catalog::{self, Content, ModelInfo};
 use photocraft_ai::mangajanai;
-use photocraft_ai::service::{Hooks, ModelState, Request, Upscaler};
+use photocraft_ai::profile::{self, Choice, DevicePref, DeviceProfile, Quality};
+use photocraft_ai::service::{Hooks, ModelState, Request, RunOptions, Upscaler};
+use photocraft_ai::tile::TileOptions;
 use photocraft_ai::{AiError, Planar};
 use photocraft_color::ColorMode;
 use photocraft_doc::{Layer, LayerContent, Size};
@@ -42,6 +50,51 @@ impl Session {
     pub fn ai_upscaler(&self) -> Option<Arc<dyn Upscaler>> {
         self.ai_upscaler.clone()
     }
+
+    /// What the AI runtime knows about this machine (unknown without an upscaler).
+    pub fn ai_profile(&self) -> DeviceProfile {
+        self.ai_upscaler.as_ref().map(|u| u.profile()).unwrap_or_default()
+    }
+}
+
+/// The user's Quality and Device choices and what they resolve to on this machine.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RunChoice {
+    pub quality: Quality,
+    pub device: DevicePref,
+    pub choice: Choice,
+    pub profile: DeviceProfile,
+}
+
+/// Reads `quality` and `device` (both default `auto`) for `cmd`.
+pub(crate) fn run_choice(s: &Session, p: &Value, cmd: &str) -> Result<RunChoice> {
+    let bad = |m: String| EngineError::BadParams { cmd: cmd.into(), msg: m };
+    let text = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("auto");
+    let quality = Quality::parse(text("quality")).ok_or_else(|| bad("`quality` must be auto, fast or best".into()))?;
+    let device = DevicePref::parse(text("device")).ok_or_else(|| bad("`device` must be auto, gpu or cpu".into()))?;
+    let profile = s.ai_profile();
+    let choice = profile::choose(&profile, quality, device);
+    Ok(RunChoice { quality, device, choice, profile })
+}
+
+/// An optional integer param in `lo..=hi`.
+pub(crate) fn uint_param(p: &Value, k: &str, lo: u64, hi: u64, cmd: &str) -> Result<Option<u64>> {
+    match p.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .filter(|x| (lo..=hi).contains(x))
+            .map(Some)
+            .ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: format!("`{k}` must be an integer in {lo}..={hi}") }),
+    }
+}
+
+/// `keepLoaded` (default true).
+pub(crate) fn keep_loaded(p: &Value, cmd: &str) -> Result<bool> {
+    match p.get("keepLoaded") {
+        None | Some(Value::Null) => Ok(true),
+        Some(v) => v.as_bool().ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: "`keepLoaded` must be true or false".into() }),
+    }
 }
 
 /// Where the result goes.
@@ -64,6 +117,10 @@ pub struct Plan {
     pub height: u32,
     pub output: Output,
     pub state: ModelState,
+    /// Quality and Device, resolved.
+    pub run: RunChoice,
+    /// The Advanced settings (device included).
+    pub opts: RunOptions,
 }
 
 impl Plan {
@@ -103,10 +160,11 @@ pub fn plan(s: &Session, p: &Value) -> Result<Plan> {
     let svc = s.ai_upscaler.clone().ok_or_else(|| EngineError::Other(UNAVAILABLE.into()))?;
     supported_mode(st.doc.mode)?;
     let doc = &st.doc;
+    let run = run_choice(s, p, COMMAND)?;
     let model_param = p.get("model").and_then(Value::as_str).unwrap_or("auto");
     let manual = match model_param {
         "auto" | "" => None,
-        id => Some(catalog::model(id).filter(|m| m.arch == catalog::Arch::Esrgan).ok_or_else(|| bad(format!("unknown model `{id}`; the models are {}", ids())))?),
+        id => Some(catalog::model(id).filter(|m| is_upscaler(m)).ok_or_else(|| bad(format!("unknown model `{id}`; the models are {}", ids())))?),
     };
     let scale = match p.get("scale") {
         None | Some(Value::Null) => manual.map_or(2, |m| m.scale),
@@ -122,7 +180,10 @@ pub fn plan(s: &Session, p: &Value) -> Result<Plan> {
     }
     let gray_doc = doc.pixel_format().mode == ColorMode::Grayscale;
     let (grayscale, detected) = match (manual, p.get("content").and_then(Value::as_str).unwrap_or("auto")) {
-        (Some(m), _) => (m.content == Content::Grayscale, false),
+        (Some(m), _) if m.content != Content::Any => (m.content == Content::Grayscale, false),
+        (Some(_), "grayscale") => (true, false),
+        (Some(_), "color") => (false, false),
+        (Some(_), _) => (gray_doc || mangajanai::is_grayscale(&composite_rgb(doc), mangajanai::GRAYSCALE_THRESHOLD), true),
         (None, "grayscale") => (true, false),
         (None, "color") => (false, false),
         (None, "auto") => (gray_doc || mangajanai::is_grayscale(&composite_rgb(doc), mangajanai::GRAYSCALE_THRESHOLD), true),
@@ -130,6 +191,7 @@ pub fn plan(s: &Session, p: &Value) -> Result<Plan> {
     };
     let model = match manual {
         Some(m) => m,
+        None if run.choice.lite => lite(scale)?,
         None => mangajanai::select(doc.size.height as usize, scale, if grayscale { Content::Grayscale } else { Content::Color })
             .map_err(|e| EngineError::Other(e.to_string()))?,
     };
@@ -146,11 +208,38 @@ pub fn plan(s: &Session, p: &Value) -> Result<Plan> {
         other => return Err(bad(format!("`output` must be auto, replace or newDocument, not `{other}`"))),
     };
     let auto_levels = grayscale && p.get("autoLevels").and_then(Value::as_bool).unwrap_or(true);
-    Ok(Plan { model, grayscale, detected, auto_levels, width: doc.size.width, height: doc.size.height, output, state: svc.model_state(model) })
+    let opts = run_options(p, &run, model)?;
+    Ok(Plan { model, grayscale, detected, auto_levels, width: doc.size.width, height: doc.size.height, output, state: svc.model_state(model), run, opts })
+}
+
+fn is_upscaler(m: &ModelInfo) -> bool {
+    matches!(m.arch, catalog::Arch::Esrgan | catalog::Arch::Compact)
+}
+
+/// The lite upscaler for `scale`.
+pub fn lite(scale: u32) -> Result<&'static ModelInfo> {
+    let id = if scale <= 2 { catalog::COMPACT_2X_ID } else { catalog::COMPACT_4X_ID };
+    catalog::model(id).ok_or_else(|| EngineError::Other(format!("{id} isn't in the catalog")))
+}
+
+/// The Advanced settings: `tile` (32..=1024 input pixels; default the model's, halved on
+/// machines with very little memory), `overlap` (0..=128, default 16), `threads` (0..=64, 0 =
+/// one per core) and `keepLoaded`.
+fn run_options(p: &Value, run: &RunChoice, model: &ModelInfo) -> Result<RunOptions> {
+    let d = photocraft_ai::tile::default_tiles(model);
+    let default_tile = if run.choice.small_tiles { (d.tile / 2).max(64) } else { d.tile };
+    let tile = uint_param(p, "tile", 32, 1024, COMMAND)?.map_or(default_tile, |t| t as usize);
+    let overlap = uint_param(p, "overlap", 0, 128, COMMAND)?.map_or(d.overlap, |o| o as usize);
+    if overlap * 2 >= tile {
+        return Err(bad(format!("`overlap` {overlap} must be less than half the tile ({tile})")));
+    }
+    let threads = uint_param(p, "threads", 0, 64, COMMAND)?.unwrap_or(0) as usize;
+    let tiles = (tile != d.tile || overlap != d.overlap).then_some(TileOptions { tile, overlap });
+    Ok(RunOptions { cpu: run.choice.cpu, tiles, threads, unload: !keep_loaded(p, COMMAND)? })
 }
 
 fn ids() -> String {
-    catalog::MODELS.iter().filter(|m| m.arch == catalog::Arch::Esrgan).map(|m| m.id).collect::<Vec<_>>().join(", ")
+    catalog::MODELS.iter().filter(|m| is_upscaler(m)).map(|m| m.id).collect::<Vec<_>>().join(", ")
 }
 
 /// The composite flattened over white, as RGB.
@@ -266,13 +355,14 @@ fn upscale_ai(s: &mut Session, p: &Value) -> Result<Value> {
     let output = plan.output;
     let label = format!("Upscale with AI ({}x)", m.scale);
     let content = if grayscale { "grayscale" } else { "color" };
+    let opts = plan.opts;
     jobs::run_async(
         s,
         &label,
         output == Output::Replace,
         move |ctx, done| {
             ctx.progress(0.0, &format!("Starting {}", m.title));
-            let req = Request { model: m, input, grayscale, allow_download: download };
+            let req = Request { model: m, input, grayscale, allow_download: download, opts };
             svc.run(
                 req,
                 Arc::new(JobHooks(ctx.clone())),
@@ -316,7 +406,7 @@ fn apply(s: &mut Session, up: Upscaled, m: &'static ModelInfo, output: Output, c
     surf.prune();
     let k = f64::from(m.scale);
     let affine = photocraft_geom::Affine { m: [k, 0.0, 0.0, k, 0.0, 0.0] };
-    let result = json!({"width": nw, "height": nh, "model": m.id, "scale": m.scale, "content": content});
+    let result = json!({"width": nw, "height": nh, "model": m.id, "scale": m.scale, "content": content, "lite": m.lite});
     match output {
         Output::Replace => {
             s.set_sampler_map(affine);
@@ -362,7 +452,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Upscale with AI…",
         menu: &["Image"],
         shortcut: None,
-        params: r##"{"scale":2|4=2,"model":"auto|<id from photocraft_ai::catalog>"="auto","content":"auto|grayscale|color"="auto","autoLevels":bool=true (grayscale only, as MangaJaNai),"output":"auto|replace|newDocument"="auto" (auto: replace a single-layer document, else open a new one),"download":bool=false (agree to download the model's weights when they aren't cached)} → {width,height,model,scale,content,document?} (a background job: MangaJaNai for grayscale pages by page height, IllustrationJaNai for colour)"##,
+        params: r##"{"scale":2|4=2,"model":"auto|<id from photocraft_ai::catalog>"="auto","quality":"auto|fast|best"="auto" (fast: the lite Real-ESRGAN Compact; auto: full models on a capable GPU, lite on the CPU, phones and weak machines),"device":"auto|gpu|cpu"="auto","tile":32..1024 (input pixels per tile; default the model's),"overlap":0..128=16,"threads":0..64=0 (CPU threads, 0 = one per core),"keepLoaded":bool=true,"content":"auto|grayscale|color"="auto","autoLevels":bool=true (grayscale only, as MangaJaNai),"output":"auto|replace|newDocument"="auto" (auto: replace a single-layer document, else open a new one),"download":bool=false (agree to download the model's weights when they aren't cached)} → {width,height,model,scale,content,document?} (a background job: MangaJaNai for grayscale pages by page height, IllustrationJaNai for colour)"##,
         enabled,
         run: upscale_ai,
         journal: true,
