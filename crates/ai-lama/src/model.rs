@@ -21,12 +21,36 @@ pub struct Lama {
     device: Device,
 }
 
-/// Device-side DFT matrices for one bottleneck size.
+/// Device-side DFT matrices for one bottleneck size, transposed into 1×1 convolution weights
+/// (`[out, in, 1, 1]`).
+///
+/// The transforms run as 1×1 convolutions, not matmuls: burn's matmul picks its tiling from the
+/// GPU's subgroup size alone and can ask for more workgroup memory than the device has (35840 of
+/// 32768 bytes on 64-wide GPUs), which burn turns into a panic. The direct convolution uses no
+/// workgroup memory, so the Fourier unit runs on any WebGPU device.
 struct DftT {
-    fw: Tensor<2>,
-    fh: Tensor<2>,
-    ih: Tensor<2>,
-    iw: Tensor<2>,
+    fw: Tensor<4>,
+    fh: Tensor<4>,
+    ih: Tensor<4>,
+    iw: Tensor<4>,
+}
+
+/// A 1×1 convolution without bias: the channel axis times `w` (`[out, in, 1, 1]`).
+fn mix(x: Tensor<4>, w: &Tensor<4>) -> Tensor<4> {
+    conv2d(x, w.clone(), None, ConvOptions::new([1, 1], [0, 0], [1, 1], 1))
+}
+
+/// `m` (`rows × cols`, row-major) transposed into `[cols, rows, 1, 1]` conv weights.
+fn transposed(m: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut t = vec![0f32; rows * cols];
+    for r in 0..rows {
+        for c in 0..cols {
+            if let (Some(d), Some(v)) = (t.get_mut(c * rows + r), m.get(r * cols + c)) {
+                *d = *v;
+            }
+        }
+    }
+    t
 }
 
 fn conv(x: Tensor<4>, c: &Conv, stride: usize, pad: usize) -> Tensor<4> {
@@ -84,27 +108,30 @@ impl Lama {
     fn dft(&self, h: usize, w: usize) -> Result<DftT> {
         let d = Dft2::new(h, w).ok_or_else(|| LamaError::Input(format!("bottleneck {w}x{h} out of range")))?;
         let wc = d.wc();
-        let t = |v: Vec<f32>, r: usize, c: usize| Tensor::<2>::from_data(TensorData::new(v, [r, c]), &self.device);
-        Ok(DftT { fw: t(d.fw, w, 2 * wc), fh: t(d.fh, 2 * h, 2 * h), ih: t(d.ih, 2 * h, 2 * h), iw: t(d.iw, 2 * wc, w) })
+        // A `rows × cols` matrix (in × out) as `[cols, rows, 1, 1]` weights.
+        let t = |v: &[f32], r: usize, c: usize| Tensor::<4>::from_data(TensorData::new(transposed(v, r, c), [c, r, 1, 1]), &self.device);
+        Ok(DftT { fw: t(&d.fw, w, 2 * wc), fh: t(&d.fh, 2 * h, 2 * h), ih: t(&d.ih, 2 * h, 2 * h), iw: t(&d.iw, 2 * wc, w) })
     }
 
-    /// Fourier unit: rfft2 (ortho) → 1×1 conv + ReLU on `[re, im]` channels → irfft2.
+    /// Fourier unit: rfft2 (ortho) → 1×1 conv + ReLU on `[re, im]` channels → irfft2. Each
+    /// transform contracts one axis, moved to the channels for a 1×1 convolution ([`DftT`]).
     fn fourier(z: Tensor<4>, fu: &Conv, d: &DftT) -> Tensor<4> {
         let [b, c, h, w] = z.dims();
         let wc = w / 2 + 1;
-        // Rows: (b·c·h, w) · (w, 2wc) → [A | B]
-        let y = z.reshape([b * c * h, w]).matmul(d.fw.clone());
-        // → (b, c, wc, 2, h) → (b·c·wc, 2h) = [Aᵀ | Bᵀ]; columns: · fh → [Reᵀ | Imᵀ]
-        let y: Tensor<5> = y.reshape([b, c, h, 2, wc]).permute([0, 1, 4, 3, 2]);
-        let y = y.reshape([b * c * wc, 2 * h]).matmul(d.fh.clone());
+        // Rows: x along w → [A | B] (part, kx) as channels: (b, 2wc, c, h).
+        let y = mix(z.permute([0, 3, 1, 2]), &d.fw);
+        // Columns: (part, y) as channels → [Re | Im] (reim, ky): (b, 2h, c, wc).
+        let y: Tensor<5> = y.reshape([b, 2, wc, c, h]).permute([0, 1, 4, 3, 2]);
+        let y = mix(y.reshape([b, 2 * h, c, wc]), &d.fh);
         // Channels as [re(c) …, im(c) …] (the converter reordered the conv to match).
-        let y: Tensor<5> = y.reshape([b, c, wc, 2, h]).permute([0, 3, 1, 2, 4]);
-        let y = y.reshape([b, 2 * c, wc, h]);
-        let y = relu(conv2d(y, fu.w.clone(), fu.b.clone(), ConvOptions::new([1, 1], [0, 0], [1, 1], 1)));
-        let y: Tensor<5> = y.reshape([b, 2, c, wc, h]).permute([0, 2, 3, 1, 4]);
-        let y = y.reshape([b * c * wc, 2 * h]).matmul(d.ih.clone());
-        let y: Tensor<5> = y.reshape([b, c, wc, 2, h]).permute([0, 1, 4, 3, 2]);
-        y.reshape([b * c * h, 2 * wc]).matmul(d.iw.clone()).reshape([b, c, h, w])
+        let y: Tensor<5> = y.reshape([b, 2, h, c, wc]).permute([0, 1, 3, 2, 4]);
+        let y = relu(conv2d(y.reshape([b, 2 * c, h, wc]), fu.w.clone(), fu.b.clone(), ConvOptions::new([1, 1], [0, 0], [1, 1], 1)));
+        // Inverse columns: (reim, ky) → (part, y).
+        let y: Tensor<5> = y.reshape([b, 2, c, h, wc]).permute([0, 1, 3, 2, 4]);
+        let y = mix(y.reshape([b, 2 * h, c, wc]), &d.ih);
+        // Inverse rows: (part, kx) → x.
+        let y: Tensor<5> = y.reshape([b, 2, h, c, wc]).permute([0, 1, 4, 3, 2]);
+        mix(y.reshape([b, 2 * wc, c, h]), &d.iw).permute([0, 2, 3, 1])
     }
 
     fn ffc(xl: Tensor<4>, xg: Tensor<4>, f: &Ffc, d: &DftT) -> (Tensor<4>, Tensor<4>) {
