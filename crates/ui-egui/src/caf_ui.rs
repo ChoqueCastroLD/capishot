@@ -1634,6 +1634,26 @@ mod tests {
         assert!(px(&app, top, 100, 80)[3] > 0.99, "the new layer holds the fill");
     }
 
+    /// #5092: the workspace left open does not follow the user to another document, and closing
+    /// the document it was opened on closes it.
+    #[test]
+    fn the_workspace_is_dropped_when_another_document_becomes_active() {
+        let mut app = app_with_selection();
+        open(&mut app).unwrap();
+        crate::distort_ui::drop_foreign(&mut app);
+        assert!(app.distort.caf.is_some());
+        app.session.execute("file.new", json!({"width": 32, "height": 32, "depth": 8})).unwrap();
+        crate::distort_ui::drop_foreign(&mut app);
+        assert!(app.distort.caf.is_none());
+        assert!(app.session.set_active(0));
+        open(&mut app).unwrap();
+        crate::distort_ui::drop_foreign(&mut app);
+        assert!(app.distort.caf.is_some());
+        assert!(app.session.close(0).is_some());
+        crate::distort_ui::drop_foreign(&mut app);
+        assert!(app.distort.caf.is_none());
+    }
+
     #[test]
     fn settings_are_remembered_and_the_menu_opens_the_workspace() {
         let ctx = egui::Context::default();
