@@ -422,8 +422,10 @@ pub struct CopiedStyle {
     pub mode: photocraft_color::ColorMode,
 }
 
-/// The commands whose [`Session::precheck`] is complete: it accepts exactly what `execute` does
-/// (Free Transform applies its box before these, and only when they will run). Layer via Copy and
+/// The commands whose [`Session::precheck`] is complete: it accepts what `execute` does (Free
+/// Transform applies its box before these, and only when they will run), but for the group
+/// nesting limit ([`photocraft_doc::MAX_GROUP_DEPTH`]): grouping layers already that deep is
+/// refused only as the edit is made. Layer via Copy and
 /// Cut aren't: whether they have anything to copy (a selection over transparent pixels, a group
 /// or fill layer) is known only when they run.
 pub const PRECHECKED: &[&str] = &["layer.new.layer", "layer.new.group", "layer.new.groupFromLayers", "layer.new.layerFromBackground"];
@@ -671,8 +673,8 @@ impl Session {
     /// something first only when the command will go through: Free Transform applies its box
     /// before a new layer is made.
     ///
-    /// Complete for the commands in [`PRECHECKED`]: there it accepts exactly what `execute`
-    /// accepts (a test holds the two together). For others it checks only what they share.
+    /// Complete for the commands in [`PRECHECKED`]: there it accepts what `execute` accepts, but
+    /// for the group nesting limit (a test holds the two together). For others it checks only what they share.
     pub fn precheck(&mut self, id: &str, params: &Value) -> Result<()> {
         let spec = crate::commands::find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         if !(params.is_object() || params.is_null()) {
@@ -777,6 +779,9 @@ impl Session {
 
     /// Apply an undoable edit to the active document.
     pub fn edit<R>(&mut self, label: &str, f: impl FnOnce(&mut Document, &mut Option<LayerId>) -> Result<R>) -> Result<R> {
+        // Every mutation path (linked-file refresh, transform, place) re-renders smart objects
+        // through this entry; the requesting session's authority must reach those renders.
+        let _authorization = crate::jobs::render_authorization_scope(self.authorize);
         let restrict = self.color_restrict;
         let sampler_map = self.sampler_map.take();
         let st = self.active_mut().ok_or(EngineError::NoDocument)?;
