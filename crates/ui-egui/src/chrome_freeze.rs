@@ -71,9 +71,20 @@ fn may_reuse(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
     if app.canvas_gesture_tool(ctx).is_none() || app.ui.transform.is_some() || app.ui.text_edit.is_some() {
         return false;
     }
+    // Only a gesture that started on the canvas of an open document: a press on the chrome
+    // (menus, toolbar, panels) must keep its widgets laid out every frame until the release,
+    // or egui loses the pressed widget and the click never happens (a real mouse moves a few
+    // pixels between press and release).
+    if app.session.active().is_none() {
+        return false;
+    }
     let canvas = app.last_canvas_rect;
+    if !canvas.is_finite() || canvas.width() <= 0.0 || canvas.height() <= 0.0 {
+        return false;
+    }
     ctx.input(|i| {
         i.pointer.primary_down()
+            && i.pointer.press_origin().is_some_and(|p| canvas.contains(p))
             && i.pointer.latest_pos().is_some_and(|p| canvas.contains(p))
             && i.events.iter().all(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_)))
     }) && !ctx.any_popup_open()
