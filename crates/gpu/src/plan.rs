@@ -33,6 +33,12 @@ pub enum Kernel {
     Content,
     Mask,
     Blend,
+    /// A layer's own pixels (as `Content`) blended straight onto A (as `Blend`): the two fused
+    /// into one pass, so the layer never round-trips through an accumulator slot.
+    LayerBlend,
+    /// Up to [`MAX_MEMBERS`] consecutive `LayerBlend`s ([`Pass::members`]) in one pass: the
+    /// backdrop is read and written once for all of them.
+    Layers,
     Atop,
     Adjust,
     AdjMix,
@@ -72,6 +78,8 @@ impl Kernel {
             Kernel::Content => "fs_content",
             Kernel::Mask => "fs_mask",
             Kernel::Blend => "fs_blend",
+            Kernel::LayerBlend => "fs_layerblend",
+            Kernel::Layers => "fs_layers",
             Kernel::Atop => "fs_atop",
             Kernel::Adjust => "fs_adjust",
             Kernel::AdjMix => "fs_adjmix",
@@ -110,10 +118,12 @@ impl Kernel {
     }
 
     /// Every kernel with a pipeline.
-    pub const DRAWN: [Kernel; 21] = [
+    pub const DRAWN: [Kernel; 23] = [
         Kernel::Content,
         Kernel::Mask,
         Kernel::Blend,
+        Kernel::LayerBlend,
+        Kernel::Layers,
         Kernel::Atop,
         Kernel::Adjust,
         Kernel::AdjMix,
@@ -197,7 +207,14 @@ pub struct Pass<'a> {
     /// Only pixels inside this rect (document coordinates) are computed; the pass is skipped for
     /// chunks it misses. Consumers of the slot must be clipped alike.
     pub clip: Option<Rect>,
+    /// [`Kernel::Layers`]: the fused `LayerBlend` passes, bottom first (each with its own clip,
+    /// outside which it leaves the backdrop alone).
+    pub members: Vec<Pass<'a>>,
 }
+
+/// Most layers one [`Kernel::Layers`] pass blends (its texture bindings: a layer and a mask
+/// each).
+pub const MAX_MEMBERS: usize = 4;
 
 /// Pixels a pass samples: a surface of the document, or one derived from it on the CPU (a
 /// combined pixel × vector mask, a shape's fill or stroke alone).
@@ -248,6 +265,7 @@ impl<'a> Pass<'a> {
             map: None,
             pattern: None,
             clip: None,
+            members: Vec::new(),
         }
     }
 }
@@ -336,7 +354,267 @@ pub fn plan(doc: &Document) -> Result<Plan<'_>, Unsupported> {
     // layers below can't change the result, so they cost no passes or uploads.
     let start = doc.layers.iter().rposition(|l| photocraft_compose::occludes_below(l, doc.mode)).unwrap_or(0);
     let root = p.stack_inner(doc.layers.get(start..).unwrap_or(&doc.layers), root, Some(start))?;
-    Ok(p.finish(root))
+    let mut plan = p.finish(root);
+    if FUSE.load(std::sync::atomic::Ordering::Relaxed) {
+        fuse_layer_blends(&mut plan);
+        fuse_layer_runs(&mut plan);
+    }
+    Ok(plan)
+}
+
+static FUSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Turn pass fusion ([`Kernel::LayerBlend`]) off or on (default on): benchmarks compare both in
+/// one binary.
+pub fn set_fusion(on: bool) {
+    FUSE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether nothing after pass `i` reads slot `s` before it is written again.
+fn dead_after(passes: &[Pass<'_>], i: usize, s: Slot, root: Slot) -> bool {
+    match passes.get(i + 1..).unwrap_or(&[]).iter().find(|p| reads(p, s) || p.dst == s) {
+        Some(p) => p.dst == s && !reads(p, s),
+        // Untouched to the end: dead unless it is the result.
+        None => s != root,
+    }
+}
+
+/// A `LayerBlend` [`Kernel::Layers`] can take: one plain layer read from its own pixels.
+fn member_ok(p: &Pass<'_>) -> bool {
+    p.kernel == Kernel::LayerBlend
+        && p.b.is_none()
+        && p.c.is_none()
+        && p.d.is_none()
+        && !p.gradient
+        && p.lut.is_none()
+        && p.map.is_none()
+        && p.pattern.is_none()
+}
+
+/// The layer at pass `i` continuing the backdrop `chain`: a whole-canvas `LayerBlend` (one
+/// pass; the backdrop moves to its output), or a clipped one and its in-place copy back (two
+/// passes; the backdrop stays). Returns the passes it spans and the backdrop after it.
+fn member_at(plan: &Plan<'_>, i: usize, chain: Slot) -> Option<(usize, Slot, bool)> {
+    let p = plan.passes.get(i)?;
+    if !member_ok(p) || p.a != Some(chain) {
+        return None;
+    }
+    match p.clip {
+        None => dead_after(&plan.passes, i, chain, plan.root).then_some((1, p.dst, false)),
+        Some(clip) => {
+            let back = plan.passes.get(i + 1)?;
+            (back.kernel == Kernel::CopyRect
+                && back.a == Some(p.dst)
+                && back.dst == chain
+                && back.clip == Some(clip)
+                && dead_after(&plan.passes, i + 1, p.dst, plan.root))
+            .then_some((2, chain, true))
+        }
+    }
+}
+
+/// A run of fusable layers: first pass, end pass, members (pass, clipped), backdrop in and out.
+type Run = (usize, usize, Vec<(usize, bool)>, Slot, Slot);
+
+/// Fuse runs of consecutive plain layers (`LayerBlend`, see [`fuse_layer_blends`]) on the same
+/// backdrop into [`Kernel::Layers`] passes of up to [`MAX_MEMBERS`]: per run the accumulator is
+/// read and written once instead of once per layer, and the copies back of small layers go.
+/// A run with a whole-canvas layer composites everywhere; a run of small layers only over the
+/// union of their bounds (copied back once) while that union stays about as small as the layers
+/// themselves. Each layer still blends only inside its own bounds, in the same order with the
+/// same arithmetic, so the result doesn't change. Checkpoints inside a run are dropped
+/// (lower-stack reuse resumes before it).
+fn fuse_layer_runs(plan: &mut Plan<'_>) {
+    let area = |r: Rect| u64::from(r.width()) * u64::from(r.height());
+    let mut runs: Vec<Run> = Vec::new();
+    let mut i = 0;
+    while i < plan.passes.len() {
+        let Some(chain0) = plan.passes[i].a.filter(|_| member_ok(&plan.passes[i])) else {
+            i += 1;
+            continue;
+        };
+        let (mut chain, mut j) = (chain0, i);
+        let mut members: Vec<(usize, bool)> = Vec::new();
+        let (mut union, mut sum) = (Rect::EMPTY, 0u64);
+        while members.len() < MAX_MEMBERS {
+            let Some((span, next, clipped)) = member_at(plan, j, chain) else { break };
+            if !clipped && next == chain0 {
+                // A recycled slot: the run would write the backdrop it reads. End it here.
+                break;
+            }
+            if members.iter().all(|m| m.1) && clipped {
+                // Small layers only so far: their union is composited and copied back, so it
+                // must not cover much more than they do.
+                let c = plan.passes[j].clip.unwrap_or(Rect::EMPTY);
+                let u = if union.is_empty() { c } else { union.union(&c) };
+                if !members.is_empty() && area(u) > 2 * (sum + area(c)) + 65_536 {
+                    break;
+                }
+                union = u;
+                sum += area(c);
+            }
+            members.push((j, clipped));
+            chain = next;
+            j += span;
+        }
+        if members.len() < 2 || plan.checkpoints.iter().any(|c| c.pass_end > i && c.pass_end < j && !members.iter().any(|m| m.0 == c.pass_end)) {
+            // A checkpoint may fall between two layers of a run (it is dropped), never inside one.
+            i += 1;
+            continue;
+        }
+        runs.push((i, j, members, chain0, chain));
+        i = j;
+    }
+    if runs.is_empty() {
+        return;
+    }
+    let n = plan.passes.len();
+    let mut taken: Vec<Option<Pass<'_>>> = std::mem::take(&mut plan.passes).into_iter().map(Some).collect();
+    let mut out: Vec<Pass<'_>> = Vec::with_capacity(n);
+    // Old pass boundary -> new one; boundaries strictly inside a run.
+    let mut map = vec![0usize; n + 1];
+    let mut inside = vec![false; n + 1];
+    let mut runs = runs.into_iter().peekable();
+    let mut k = 0;
+    while k < n {
+        map[k] = out.len();
+        if let Some((start, end, members, chain0, chain)) = runs.next_if(|r| r.0 == k) {
+            let all_clipped = members.iter().all(|m| m.1);
+            let mut fused = Pass::new(Kernel::Layers, 0);
+            fused.a = Some(chain0);
+            let mut union = Rect::EMPTY;
+            for (m, _) in members {
+                let Some(mut p) = taken.get_mut(m).and_then(Option::take) else { continue };
+                if let Some(c) = p.clip {
+                    union = if union.is_empty() { c } else { union.union(&c) };
+                }
+                fused.flags |= p.flags & (F_LAB | F_HDR);
+                p.a = None;
+                if let Some(c) = p.clip {
+                    // The member blends only inside its bounds (`fs_layers`).
+                    p.params[0] = [c.x0 as f32, c.y0 as f32, c.x1 as f32, c.y1 as f32];
+                    p.flags |= F_MEMBER_CLIP;
+                }
+                fused.members.push(p);
+            }
+            // `fs_layers` reads the member count from the pass's `kind`.
+            fused.adjust_kind = fused.members.len() as i32;
+            // The copies back of the small layers are replaced.
+            for t in taken.iter_mut().take(end).skip(start) {
+                *t = None;
+            }
+            if all_clipped {
+                // Over the union of the small layers into the first one's scratch slot, copied
+                // back into the backdrop.
+                let tmp = fused.members.first().map_or(chain0, |p| p.dst);
+                fused.dst = tmp;
+                fused.clip = Some(union);
+                out.push(fused);
+                let mut back = Pass::new(Kernel::CopyRect, chain0);
+                back.a = Some(tmp);
+                back.clip = Some(union);
+                out.push(back);
+            } else {
+                fused.dst = chain;
+                out.push(fused);
+            }
+            for b in start + 1..end {
+                inside[b] = true;
+                map[b] = out.len();
+            }
+            k = end;
+            continue;
+        }
+        if let Some(p) = taken.get_mut(k).and_then(Option::take) {
+            out.push(p);
+        }
+        k += 1;
+    }
+    map[n] = out.len();
+    plan.passes = out;
+    plan.checkpoints.retain(|c| !inside.get(c.pass_end).copied().unwrap_or(false));
+    for c in &mut plan.checkpoints {
+        c.pass_end = map.get(c.pass_end).copied().unwrap_or(plan.passes.len());
+    }
+}
+
+/// Whether a pass reads slot `s`.
+fn reads(p: &Pass<'_>, s: Slot) -> bool {
+    [p.a, p.b, p.c, p.d].contains(&Some(s))
+}
+
+/// Fuse every `Content` pass whose only consumer is the `Blend` right after it into one
+/// [`Kernel::LayerBlend`]: the layer's pixels (texture, colour or gradient, times its mask) are
+/// computed in the blend itself instead of being written to an accumulator slot and read back.
+/// Per plain layer that is one pass and two accumulator transfers (write + read, 32 bytes per
+/// pixel at `Rgba32Float`) fewer; the arithmetic is the same, so results don't change.
+/// Checkpoints are renumbered; they never fall between the two passes (a unit holds both).
+fn fuse_layer_blends(plan: &mut Plan<'_>) {
+    let mut removed = vec![false; plan.passes.len()];
+    let mut i = 0;
+    while i + 1 < plan.passes.len() {
+        let (c, b) = (&plan.passes[i], &plan.passes[i + 1]);
+        let s = c.dst;
+        let fusable = c.kernel == Kernel::Content
+            && b.kernel == Kernel::Blend
+            && b.b == Some(s)
+            && b.a != Some(s)
+            && b.c.is_none()
+            && b.d.is_none()
+            && b.tex.is_none()
+            && b.mask.is_none()
+            && b.lut.is_none()
+            && !b.gradient
+            && c.a.is_none()
+            && c.b.is_none()
+            && c.c.is_none()
+            && c.d.is_none()
+            && c.map.is_none()
+            && c.pattern.is_none()
+            && (c.clip.is_none() || c.clip == b.clip)
+            // Nothing after the blend reads the content slot before it is written again.
+            && dead_after(&plan.passes, i + 1, s, plan.root)
+            && !plan.checkpoints.iter().any(|cp| cp.pass_end == i + 1);
+        if !fusable {
+            i += 1;
+            continue;
+        }
+        let content = std::mem::replace(&mut plan.passes[i], Pass::new(Kernel::Clear, 0));
+        let blend = &mut plan.passes[i + 1];
+        blend.kernel = Kernel::LayerBlend;
+        blend.b = None;
+        blend.tex = content.tex;
+        blend.mask = content.mask;
+        blend.color = content.color;
+        blend.gradient = content.gradient;
+        blend.lut = content.lut;
+        blend.params = content.params;
+        blend.flags |= content.flags;
+        removed[i] = true;
+        i += 2;
+    }
+    if !removed.iter().any(|r| *r) {
+        return;
+    }
+    // New index of every old pass boundary.
+    let mut shift = Vec::with_capacity(removed.len() + 1);
+    let mut n = 0;
+    for r in &removed {
+        shift.push(n);
+        if !r {
+            n += 1;
+        }
+    }
+    shift.push(n);
+    for cp in &mut plan.checkpoints {
+        cp.pass_end = shift.get(cp.pass_end).copied().unwrap_or(n);
+    }
+    let mut k = 0;
+    plan.passes.retain(|_| {
+        let keep = !removed[k];
+        k += 1;
+        keep
+    });
 }
 
 struct Planner<'a> {
@@ -389,6 +667,8 @@ pub const F_QUANT: u32 = 32768;
 pub const F_ADD_DIFF: u32 = 16384;
 /// Blend / Atop / FxMerge of a type layer: coverage mixed at `psblend::TEXT_GAMMA`.
 pub const F_TEXT_GAMMA: u32 = 8192;
+/// A [`Kernel::Layers`] member blends only inside its bounds (`p0`: x0, y0, x1, y1).
+pub const F_MEMBER_CLIP: u32 = 524288;
 
 /// `F_TEXT_GAMMA` for type layers while text gamma blending is on; the gamma goes in `p4.w`.
 fn gamma_flag(layer: &Layer) -> u32 {
@@ -1836,15 +2116,27 @@ mod tests {
             d.layers.push(Layer::raster(format!("l{i}"), d.pixel_format()));
         }
         let p = plan(&d).unwrap();
-        // Empty layers draw nothing.
-        assert_eq!(p.passes.len(), 1 + 2);
+        // Empty layers draw nothing; the background is one fused content + blend pass.
+        assert_eq!(p.passes.len(), 1 + 1);
+        assert_eq!(p.passes[1].kernel, Kernel::LayerBlend);
         for (i, l) in d.layers.iter_mut().skip(1).enumerate() {
             l.surface_mut().unwrap().fill_rect(Rect::new(i as i32 % 4, 0, 4, 8), &[0.0, 0.0, 1.0, 1.0]);
         }
         let p = plan(&d).unwrap();
         assert!(p.slots <= 3, "{} slots", p.slots);
-        // The background, then each small layer over its bounds and copied back.
-        assert_eq!(p.passes.len(), 1 + 2 + 10 * 3);
+        // The background and the small layers in runs of four: the first with the background
+        // everywhere, the others over the small layers' bounds and copied back once.
+        assert_eq!(p.passes.iter().map(|p| p.kernel).collect::<Vec<_>>(), [
+            Kernel::Clear,
+            Kernel::Layers,
+            Kernel::Layers,
+            Kernel::CopyRect,
+            Kernel::Layers,
+            Kernel::CopyRect
+        ]);
+        assert_eq!(p.passes.iter().map(|p| p.members.len()).sum::<usize>(), 11);
+        assert_eq!(p.passes[1].clip, None);
+        assert_eq!(p.passes[2].clip, Some(Rect::new(0, 0, 4, 8)));
     }
 
     #[test]
@@ -1858,7 +2150,7 @@ mod tests {
         let p = plan(&d).unwrap();
         let r = Rect::new(10, 12, 20, 30);
         // The group's content, its blend and the copy back are all limited to the layer.
-        assert!(p.passes.iter().filter(|p| matches!(p.kernel, Kernel::Content | Kernel::Blend)).skip(2).all(|p| p.clip == Some(r)), "{:?}", p.passes);
+        assert!(p.passes.iter().filter(|p| matches!(p.kernel, Kernel::Content | Kernel::Blend | Kernel::LayerBlend)).skip(1).all(|p| p.clip == Some(r)), "{:?}", p.passes);
         let last = p.passes.last().unwrap();
         assert_eq!((last.kernel, last.dst, last.clip), (Kernel::CopyRect, p.root, Some(r)));
         // A layer that covers most of the canvas composites everywhere.
@@ -1901,10 +2193,12 @@ mod tests {
         top.clipped = true;
         d.layers.push(top);
         // Clear, then the fill and its clipped layer: the background and four rasters are skipped.
-        let skipped = plan(&d).unwrap().passes.len();
+        // Passes and fused layers both count.
+        let work = |p: Plan<'_>| p.passes.len() + p.passes.iter().map(|p| p.members.len()).sum::<usize>();
+        let skipped = work(plan(&d).unwrap());
         let mut alone = d.clone();
         alone.layers.drain(..5);
-        assert_eq!(skipped, plan(&alone).unwrap().passes.len());
+        assert_eq!(skipped, work(plan(&alone).unwrap()));
         // Anything that lets the layers below show through keeps them.
         let see_through: [fn(&mut Layer); 6] = [
             |l| l.opacity = 0.99,
@@ -1921,7 +2215,7 @@ mod tests {
         for (k, f) in see_through.iter().enumerate() {
             let mut d2 = d.clone();
             f(&mut d2.layers[5]);
-            assert!(plan(&d2).unwrap().passes.len() > skipped, "case {k}: the layers below are planned");
+            assert!(work(plan(&d2).unwrap()) > skipped, "case {k}: the layers below are planned");
             assert!(!photocraft_compose::occludes_below(&d2.layers[5], ColorMode::Rgb), "case {k}");
         }
         let mut translucent = d.clone();

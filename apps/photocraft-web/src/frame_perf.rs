@@ -16,10 +16,16 @@
 //! records its split (`in`: how long its oldest pointer move waited before the frame started,
 //! `logic`, `ui`, `paint`); `?perf=1` also counts the app's work per gesture (thumbnails rebuilt,
 //! Layers panel rows laid out, panel recomputes: `photocraft_ui_egui::perf_counters`) and exposes
-//! the counters as `photocraftPerf.counters()`.
+//! the counters as `photocraftPerf.counters()`. With `?perf=1`, `gpu` is how long the GPU still
+//! worked after the update (submit to `onSubmittedWorkDone` of everything queued by then: the
+//! frame's document refresh and the previous frame's paint): a GPU-bound page shows it next to
+//! long `int` (`requestAnimationFrame` interval) and dropped frames.
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::telemetry;
@@ -56,8 +62,16 @@ struct GestureFrame {
     update_ms: f64,
     latency_ms: Option<f64>,
     interval_ms: Option<f64>,
+    gpu_ms: Option<f64>,
     parts: telemetry::FrameParts,
 }
+
+/// Frames a record waits for its GPU completion before it is written without one.
+const GPU_WAIT_FRAMES: u8 = 8;
+
+/// Milliseconds from the end of a frame's update until the GPU finished what was queued then
+/// (`f64` bits; `u64::MAX` while pending).
+type GpuFence = Arc<AtomicU64>;
 
 /// One frame, from its start until eframe reports its time (in the next frame).
 #[derive(Clone, Debug)]
@@ -76,6 +90,8 @@ struct Frame {
     key: Option<String>,
     megapixels: Option<f64>,
     layers: Option<usize>,
+    /// `?perf=1`: GPU completion of the work queued by the end of the update.
+    gpu: Option<GpuFence>,
 }
 
 pub struct FramePerf {
@@ -96,6 +112,8 @@ pub struct FramePerf {
     /// The app's work counters at the start of the current gesture, and now (`?perf=1`).
     counters_at_start: Vec<(&'static str, u64)>,
     counters: Rc<RefCell<Vec<(&'static str, u64)>>>,
+    /// Finished frames waiting for their GPU completion (`?perf=1`), with eframe's time and age.
+    awaiting_gpu: VecDeque<(Frame, Option<f64>, u8)>,
 }
 
 impl FramePerf {
@@ -129,6 +147,7 @@ impl FramePerf {
             prev_key: None,
             counters_at_start: Vec::new(),
             counters,
+            awaiting_gpu: VecDeque::new(),
         }
     }
 
@@ -138,12 +157,29 @@ impl FramePerf {
         let fresh = cpu_usage.filter(|c| Some(*c) != self.last_cpu);
         self.last_cpu = cpu_usage.or(self.last_cpu);
         if let Some(frame) = self.last.take() {
-            self.finish(frame, fresh.map(|s| f64::from(s) * 1000.0));
+            let total = fresh.map(|s| f64::from(s) * 1000.0);
+            if frame.gpu.is_some() {
+                self.awaiting_gpu.push_back((frame, total, 0));
+            } else {
+                self.finish(frame, total, None);
+            }
+        }
+        // Frames in order, once their GPU work is done (or it took too long to wait for).
+        for f in &mut self.awaiting_gpu {
+            f.2 = f.2.saturating_add(1);
+        }
+        while let Some((frame, _, age)) = self.awaiting_gpu.front() {
+            let gpu = frame.gpu.as_ref().map(|g| g.load(Ordering::Relaxed)).filter(|b| *b != u64::MAX).map(f64::from_bits);
+            if gpu.is_none() && *age < GPU_WAIT_FRAMES {
+                break;
+            }
+            let Some((frame, total, _)) = self.awaiting_gpu.pop_front() else { break };
+            self.finish(frame, total, gpu);
         }
         let interval = self.last_start.map(|t| start - t);
         self.last_start = Some(start);
         self.current =
-            Some(Frame { start, interval, update_ms: 0.0, logic_ms: 0.0, input: self.pending_input.take(), key: None, megapixels: None, layers: None });
+            Some(Frame { start, interval, update_ms: 0.0, logic_ms: 0.0, input: self.pending_input.take(), key: None, megapixels: None, layers: None, gpu: None });
     }
 
     /// End of the app's logic (`App::logic`).
@@ -164,11 +200,17 @@ impl FramePerf {
         }
         if self.debug {
             *self.counters.borrow_mut() = app.perf_counters.snapshot();
+            let fence: GpuFence = Arc::new(AtomicU64::new(u64::MAX));
+            let done = fence.clone();
+            let t0 = page_now();
+            if app.on_gpu_done(move || done.store((page_now() - t0).max(0.0).to_bits(), Ordering::Relaxed)) {
+                frame.gpu = Some(fence);
+            }
         }
         self.last = Some(frame);
     }
 
-    fn finish(&mut self, frame: Frame, total_ms: Option<f64>) {
+    fn finish(&mut self, frame: Frame, total_ms: Option<f64>, gpu_ms: Option<f64>) {
         // The oldest move waited from its event until this frame's paint was submitted.
         let latency = frame.input.zip(total_ms).map(|(t, ms)| (frame.start + ms - t).max(0.0));
         let parts = telemetry::FrameParts {
@@ -204,6 +246,7 @@ impl FramePerf {
                 "t": round2(frame.start), "int": frame.interval.map(round2), "upd": round2(frame.update_ms),
                 "ms": total_ms.map(round2), "lat": latency.map(round2), "key": frame.key,
                 "in": round2(parts.input), "logic": round2(parts.logic), "ui": round2(parts.ui), "paint": round2(parts.paint),
+                "gpu": gpu_ms.map(round2),
             }));
         }
         if frame.key != self.gesture_key {
@@ -215,7 +258,7 @@ impl FramePerf {
             && let Some(ms) = total_ms
         {
             let interval_ms = frame.interval.filter(|_| !gesture_start);
-            self.gesture.push(GestureFrame { ms, update_ms: frame.update_ms, latency_ms: latency, interval_ms, parts });
+            self.gesture.push(GestureFrame { ms, update_ms: frame.update_ms, latency_ms: latency, interval_ms, gpu_ms, parts });
         }
     }
 
@@ -251,6 +294,7 @@ impl FramePerf {
             "key": key, "frames": frames.len(),
             "ms": pick(|f| Some(f.ms)), "upd": pick(|f| Some(f.update_ms)), "lat": pick(|f| f.latency_ms),
             "fps": fps, "dropped": missed, "worst": worst, "work": work,
+            "gpu": pick(|f| f.gpu_ms), "int": pick(|f| f.interval_ms),
         });
         log::info!("capishot-perf {line}");
     }
