@@ -476,6 +476,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
                     || (doc && matches!(&i["window.arrange.".len()..], "floatAllInWindows" | "cascade" | "tile" | "tileAllVertically" | "tileAllHorizontally"))
             }
         },
+        // Batch's dialog is built from an Actions-panel action. Keep it disabled until one
+        // exists instead of opening a menu item that can only report "record an action".
+        "file.automate.batch" => crate::actions::selected_action(app).is_some(),
         i if wraps(i) => app.session.is_enabled(i),
         _ => true,
     })

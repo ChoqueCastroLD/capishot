@@ -208,6 +208,20 @@ fn type_menu_checkmarks_follow_the_layer() {
 }
 
 #[test]
+fn batch_menu_requires_a_recorded_action() {
+    let (mut app, ctx) = app_with(1);
+    assert!(!crate::menus::is_enabled(&app, "file.automate.batch"));
+
+    app.run("actions.record", json!({"name": "Invert"})).unwrap();
+    app.run("image.adjustments.invert", json!({})).unwrap();
+    app.run("actions.stop", json!({})).unwrap();
+
+    assert!(crate::menus::is_enabled(&app, "file.automate.batch"));
+    let dialog = menu(&mut app, &ctx, "file.automate.batch", json!({})).unwrap()["dialog"].as_u64().unwrap();
+    assert_eq!(app.ui.dialog_mut(dialog).unwrap().fields["action"], "Invert");
+}
+
+#[test]
 fn engine_commands_open_their_dialogs() {
     let (mut app, ctx) = app_with(2);
     let d = menu(&mut app, &ctx, "file.automate.fitImage", json!({})).unwrap()["dialog"].as_u64().unwrap();
