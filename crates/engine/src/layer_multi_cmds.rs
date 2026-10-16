@@ -394,22 +394,6 @@ pub fn move_targets(doc: &Document, roots: &[LayerId]) -> Vec<LayerId> {
 /// copying the moving pixels only.
 pub fn moved(doc: &Document, ids: &[LayerId], dx: i32, dy: i32) -> Result<Document> {
     let mut out = doc.clone();
-    shift_into(doc, &mut out, ids, dx, dy)?;
-    Ok(out)
-}
-
-/// [`moved`] into `out`, an earlier result of [`moved`] (or [`moved_into`]) of the same `doc` and
-/// `ids` at another offset: only the moving layers are copied again (from `doc`) and shifted, so
-/// a drag frame doesn't copy every other layer of a big stack too.
-pub fn moved_into(doc: &Document, out: &mut Document, ids: &[LayerId], dx: i32, dy: i32) -> Result<()> {
-    for &id in ids {
-        let l = doc.layer(id).ok_or(EngineError::NoLayer(id))?.clone();
-        *out.layer_mut(id).ok_or(EngineError::NoLayer(id))? = l;
-    }
-    shift_into(doc, out, ids, dx, dy)
-}
-
-fn shift_into(doc: &Document, out: &mut Document, ids: &[LayerId], dx: i32, dy: i32) -> Result<()> {
     for &id in ids {
         let locks = doc.effective_locks(id);
         let l = out.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
@@ -421,7 +405,7 @@ fn shift_into(doc: &Document, out: &mut Document, ids: &[LayerId], dx: i32, dy: 
         }
         shift_shown(doc, l, dx, dy);
     }
-    Ok(())
+    Ok(out)
 }
 
 /// `photocraft_algo::resample::translate_surface` with the content scan cached per tile (a Move

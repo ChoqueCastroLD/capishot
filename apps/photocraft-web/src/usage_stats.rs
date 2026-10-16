@@ -211,18 +211,13 @@ fn environment(window: &web_sys::Window, gpu: &'static str, gpu_vendor: &'static
     let number = |v: Option<JsValue>| v.and_then(|v| v.as_f64()).filter(|n| n.is_finite() && *n >= 0.0).map_or(0, |n| n.min(100_000.0) as u32);
     let screen = get(window, "screen");
     let (w, h) = screen.map_or((0, 0), |s| (number(get(&s, "width")), number(get(&s, "height"))));
-    let user_agent = navigator.user_agent().unwrap_or_default();
-    let touch_points = number(get(&navigator, "maxTouchPoints"));
-    let memory_gb = get(&navigator, "deviceMemory").and_then(|v| v.as_f64()).filter(|n| n.is_finite() && *n > 0.0).unwrap_or(0.0);
     Environment {
-        device: telemetry::device_class(&user_agent, touch_points, w.min(h)),
-        memory_gb,
         threads: cfg!(target_feature = "atomics"),
         cross_origin_isolated: get(window, "crossOriginIsolated").and_then(|v| v.as_bool()) == Some(true),
         cores: number(get(&navigator, "hardwareConcurrency")),
         gpu,
         gpu_vendor,
-        user_agent,
+        user_agent: navigator.user_agent().unwrap_or_default(),
         screen: (w, h),
         language: String::new(),
     }

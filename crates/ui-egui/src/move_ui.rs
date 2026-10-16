@@ -134,24 +134,11 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
     }
     if p.offsets.last() != Some(&offset) {
         let t0 = crate::gpu_canvas::now_ms();
-        // The last frame's preview, when nothing else holds it, is reused: only the moving layers
-        // are copied again (`moved_into`), not the whole stack. Duotone previews are converted
-        // documents, so they start over.
-        let duotone = doc.mode == photocraft_color::ColorMode::Duotone;
-        let mut reused = p.shown.take().filter(|_| !duotone);
-        let result = match reused.as_mut().and_then(Arc::get_mut) {
-            Some(d) => {
-                app.perf_counters.move_preview_reused += 1;
-                photocraft_engine::layer_multi_cmds::moved_into(&doc, d, &p.ids, offset.0, offset.1).map(|()| reused.take())
-            }
-            None => photocraft_engine::layer_multi_cmds::moved(&doc, &p.ids, offset.0, offset.1).map(|d| {
+        match photocraft_engine::layer_multi_cmds::moved(&doc, &p.ids, offset.0, offset.1) {
+            Ok(d) => {
                 // Duotone documents display through their inks.
-                Some(Arc::new(photocraft_engine::mode_cmds::display_document(&d).unwrap_or(d)))
-            }),
-        };
-        match result {
-            Ok(shown) => {
-                p.shown = shown;
+                let d = photocraft_engine::mode_cmds::display_document(&d).unwrap_or(d);
+                p.shown = Some(Arc::new(d));
                 p.offsets.push(offset);
             }
             Err(_) => {

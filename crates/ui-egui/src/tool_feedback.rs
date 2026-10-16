@@ -89,7 +89,7 @@ pub fn selection_mode(tool: Tool, bar: u8, m: egui::Modifiers) -> &'static str {
 /// only draws a marquee from its centre). An options-bar Subtract or Intersect is kept (#1106).
 pub fn document_selection_mode(app: &PhotocraftApp, tool: Tool, m: egui::Modifiers) -> &'static str {
     let mode = selection_mode(tool, app.ui.selection_mode, m);
-    let selected = app.session.active().and_then(|st| st.doc.selection.as_ref()).is_some_and(|s| !photocraft_compose::bounds::content_bounds(s).is_empty());
+    let selected = app.session.active().and_then(|st| st.doc.selection.as_ref()).is_some_and(|s| !s.content_bounds().is_empty());
     if m.alt && !selected && matches!(mode, "subtract" | "intersect") && selection_mode(tool, app.ui.selection_mode, egui::Modifiers::NONE) == "replace" {
         "replace"
     } else {

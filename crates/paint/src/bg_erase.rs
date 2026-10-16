@@ -49,37 +49,16 @@ fn dist(a: &[f32], b: &[f32]) -> f32 {
 /// the selection limits the effect. Returns the damaged rectangle; empty when the surface has no
 /// alpha channel.
 pub fn apply_background_eraser(target: &mut Surface, stroke: &Stroke, bs: &BgEraseSettings, selection: Option<&Surface>) -> Rect {
-    let Some(effect) = background_eraser_effect(&target.format(), bs) else { return Rect::EMPTY };
-    apply_dab_stroke(target, &background_eraser_stroke(stroke), selection, false, 0, effect)
-}
-
-/// The stroke [`apply_background_eraser`] runs its dabs along: full opacity (the tool has none),
-/// painting (the effect lowers alpha itself).
-pub fn background_eraser_stroke(stroke: &Stroke) -> Stroke {
-    let mut stroke = stroke.clone();
-    stroke.brush.opacity = 1.0;
-    stroke.brush.erase = false;
-    stroke
-}
-
-/// The Background Eraser's effect at one dab (run in order along the stroke, as
-/// `retouch::apply_dab_stroke` does): sample the colour under the hotspot and lower the alpha of
-/// similar pixels in the footprint. `None` for a format without alpha. Shared by the command and
-/// the live stroke shown while it is drawn, so both erase the same pixels.
-pub fn background_eraser_effect(
-    fmt: &photocraft_color::PixelFormat,
-    bs: &BgEraseSettings,
-) -> Option<impl FnMut(&mut Region, &crate::retouch::Footprint) + use<>> {
-    let a = alpha_index(fmt)?;
+    let fmt = target.format();
+    let Some(a) = alpha_index(&fmt) else { return Rect::EMPTY };
     let nc = a;
     let tol = if bs.tolerance.is_finite() { bs.tolerance.clamp(0.0, 1.0) } else { 0.0 };
     let soft = bs.limits != Limits::FindEdges;
-    let native = |c: [f32; 4]| -> Vec<f32> { from_rgba(fmt, [c[0], c[1], c[2], 1.0])[..nc].to_vec() };
+    let native = |c: [f32; 4]| -> Vec<f32> { from_rgba(&fmt, [c[0], c[1], c[2], 1.0])[..nc].to_vec() };
     let swatch = native(bs.background);
     let fg = native(bs.foreground);
-    let (sampling, limits, protect_foreground) = (bs.sampling, bs.limits, bs.protect_foreground);
     let mut once: Option<Option<Vec<f32>>> = None;
-    let match_w = move |d: f32| -> f32 {
+    let match_w = |d: f32| -> f32 {
         if d > tol {
             0.0
         } else if soft && tol > 0.0 {
@@ -89,7 +68,10 @@ pub fn background_eraser_effect(
             1.0
         }
     };
-    Some(move |work: &mut Region, fp: &crate::retouch::Footprint| {
+    let mut stroke = stroke.clone();
+    stroke.brush.opacity = 1.0;
+    stroke.brush.erase = false;
+    apply_dab_stroke(target, &stroke, selection, false, 0, |work: &mut Region, fp| {
         let r = fp.rect.intersect(&work.rect);
         if r.is_empty() {
             return;
@@ -103,7 +85,7 @@ pub fn background_eraser_effect(
             let p = work.px(cx, cy);
             (p[a] > 0.0).then(|| p[..nc].to_vec())
         };
-        let sampled = match sampling {
+        let sampled = match bs.sampling {
             Sampling::Continuous => hotspot(work),
             Sampling::Once => once.get_or_insert_with(|| hotspot(work)).clone(),
             Sampling::BackgroundSwatch => Some(swatch.clone()),
@@ -123,13 +105,13 @@ pub fn background_eraser_effect(
                     continue;
                 }
                 let c = &p[..nc];
-                if protect_foreground && dist(c, &fg) <= tol {
+                if bs.protect_foreground && dist(c, &fg) <= tol {
                     continue;
                 }
                 weight[(y - r.y0) as usize * w + (x - r.x0) as usize] = match_w(dist(c, &sampled));
             }
         }
-        if limits != Limits::Discontiguous {
+        if bs.limits != Limits::Discontiguous {
             keep_connected(&mut weight, w, h, (cx.clamp(r.x0, r.x1 - 1) - r.x0) as usize, (cy.clamp(r.y0, r.y1 - 1) - r.y0) as usize);
         }
         for y in r.y0..r.y1 {

@@ -131,9 +131,11 @@ fn live_healing_samples_all_layers_onto_an_empty_layer() {
 #[test]
 fn live_pattern_stamp_matches_the_commit() {
     let all = [[20.0, 20.0], [40.0, 26.0], [60.0, 22.0], [80.0, 30.0]];
-    for (extra, impressionist) in
-        [(json!({"aligned": true}), false), (json!({"aligned": false, "scale": 150, "angle": 20}), false), (json!({"impressionist": true, "seed": 7}), true)]
-    {
+    for (extra, impressionist) in [
+        (json!({"aligned": true}), false),
+        (json!({"aligned": false, "scale": 150, "angle": 20}), false),
+        (json!({"impressionist": true, "seed": 7}), true),
+    ] {
         let mut s = session(100, 50, 32);
         paint_layer(&mut s, |x, y| [0.2 + x as f32 / 400.0, 0.3, 0.4 + y as f32 / 200.0, 1.0]);
         let mut p = json!({"size": 16, "hardness": 60, "opacity": 80, "pattern": "Checkerboard"});

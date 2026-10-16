@@ -55,9 +55,6 @@ pub struct Runtime {
     pub(crate) snap: Option<crate::snap_ui::ActiveSnap>,
     pub(crate) snap_lines: Vec<SnapLine>,
     pub(crate) guide_targets: Option<((DocId, u64), SnapTargets)>,
-    /// Snap targets built for drags (`snap_ui::build`), by what they were built from: a drag
-    /// starting on an unchanged document reuses them instead of asking every layer its bounds.
-    pub(crate) snap_cache: Vec<(u64, SnapTargets)>,
     /// Checkerboard colours the cached CPU checker texture was built with.
     pub(crate) checker_key: Option<[[u8; 3]; 2]>,
     /// Style last sent to the GPU canvas.
