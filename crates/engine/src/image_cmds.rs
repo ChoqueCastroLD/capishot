@@ -944,11 +944,7 @@ mod tests {
         }
     }
 
-    /// The canvas border stays opaque after Image Size (it used to fade into transparency, so a
-    /// Background or a 200 % export got a translucent frame), and a full selection stays full.
-    /// #1544: 64 x 48 to 300000 x 300000 (90 billion pixels) started allocating resampled bands
-    /// without a budget. It is refused before any allocation and the document is untouched; a
-    /// change of resolution only, and an ordinary resize, still work.
+    /// #6019: Image Size on an Indexed Color document makes no colours the colour table doesn't have.
     #[test]
     fn image_size_resamples_indexed_color_with_nearest_neighbor() {
         let mut s = Session::new();
@@ -970,6 +966,11 @@ mod tests {
         }
     }
 
+    /// The canvas border stays opaque after Image Size (it used to fade into transparency, so a
+    /// Background or a 200 % export got a translucent frame), and a full selection stays full.
+    /// #1544: 64 x 48 to 300000 x 300000 (90 billion pixels) started allocating resampled bands
+    /// without a budget. It is refused before any allocation and the document is untouched; a
+    /// change of resolution only, and an ordinary resize, still work.
     #[test]
     fn image_size_refuses_a_raster_past_the_budget() {
         let mut s = Session::new();

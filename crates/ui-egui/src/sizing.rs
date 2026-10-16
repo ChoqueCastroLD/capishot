@@ -525,8 +525,7 @@ mod tests {
         assert!(app.ui.dialogs.iter().any(|x| x.id == id), "reset leaves the dialog open");
     }
 
-    /// The dialog starts on Preferences › General › Image Interpolation: Bicubic Automatic opens
-    /// as Automatic and the others as themselves (Bicubic Sharper used to open as Lanczos).
+    /// #6019: on an Indexed Color document the dialog opens on, and offers only, Automatic and Nearest Neighbor.
     #[test]
     fn indexed_color_resamples_with_nearest_neighbor_only() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -555,6 +554,8 @@ mod tests {
         }
     }
 
+    /// The dialog starts on Preferences › General › Image Interpolation: Bicubic Automatic opens
+    /// as Automatic and the others as themselves (Bicubic Sharper used to open as Lanczos).
     #[test]
     fn resample_follows_the_interpolation_preference() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
