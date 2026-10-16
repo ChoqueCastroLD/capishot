@@ -449,9 +449,11 @@ fn superscript_and_subscript_shrink_and_shift_the_run() {
     let plain = rect(&mut e, FontBaseline::Normal);
     let sup = rect(&mut e, FontBaseline::Superscript);
     let sub = rect(&mut e, FontBaseline::Subscript);
-    let ratio = |r: &photocraft_geom::Rect| r.height() as f32 / plain.height() as f32;
+    // Scripts render at 58.3% of the size. The pixel-snapped bounds of the antialiased glyph land
+    // within 2 px of the exact scaled height (measured: +2.2 / +1.2 px at 46 px plain height).
+    let expect = plain.height() as f32 * 0.583;
     for r in [&sup, &sub] {
-        assert!((ratio(r) - 0.583).abs() < 0.06, "plain {plain:?}, scripted {r:?}");
+        assert!((r.height() as f32 - expect).abs() <= 2.5, "plain {plain:?}, scripted {r:?}");
     }
     // The cap's foot sits on the shifted baseline: 20 px (33.3% of 60) above or below.
     assert!((plain.y1 - sup.y1 - 20).abs() <= 2, "plain {plain:?}, superscript {sup:?}");
