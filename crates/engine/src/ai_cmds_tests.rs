@@ -211,3 +211,34 @@ fn quality_device_and_advanced_settings() {
     assert_eq!((r["model"].as_str(), r["lite"].as_bool()), (Some("realesr-compact-2x"), Some(true)));
     assert_eq!(fake.last_opts.lock().unwrap().map(|o| o.cpu), Some(true));
 }
+
+/// The GPU couldn't run the model: the same request runs on the CPU, with the lite model on
+/// Quality Auto (the full one on Best, the named one when the params name it), and the result
+/// says so in `notices`.
+#[test]
+fn a_gpu_failure_runs_again_on_the_cpu() {
+    use photocraft_ai::profile::{DeviceProfile, GpuClass};
+    let run = |params: serde_json::Value| {
+        let gpu = DeviceProfile { gpu: GpuClass::Discrete, memory_gb: Some(8.0), cores: Some(8), ..Default::default() };
+        let fake = Arc::new(FakeUpscaler { gpu_fail: Some("Shared memory budget exceeded".into()), profile: std::sync::Mutex::new(gpu), ..Default::default() });
+        let mut s = session(4, 4, gray);
+        s.set_ai_upscaler(Some(fake.clone()));
+        let r = s.execute(COMMAND, params).unwrap();
+        let last = (fake.last_model.lock().unwrap().unwrap(), fake.last_opts.lock().unwrap().unwrap().cpu);
+        (r, last)
+    };
+    let (r, last) = run(json!({"output": "replace"}));
+    assert_eq!(last, (catalog::COMPACT_2X_ID, true), "Auto: the lite model on the CPU");
+    assert_eq!((r["model"].as_str(), r["lite"].as_bool(), r["width"].as_u64()), (Some(catalog::COMPACT_2X_ID), Some(true), Some(8)));
+    let n = &r["notices"][0];
+    assert_eq!((n["class"].as_str(), n["text"].as_str()), (Some(GPU_FALLBACK_CLASS), Some(GPU_FALLBACK_NOTICE)));
+    assert!(n["cause"].as_str().unwrap().contains("Shared memory"));
+    let (r, last) = run(json!({"output": "replace", "quality": "best"}));
+    assert_eq!((last.0, last.1, r["lite"].as_bool()), ("mangajanai-v1-2x-1200p", true, Some(false)), "Best keeps the full model");
+    let (_, last) = run(json!({"output": "replace", "model": "mangajanai-v1-2x-1200p"}));
+    assert_eq!(last, ("mangajanai-v1-2x-1200p", true), "a named model stays");
+    // Already on the CPU: an error is an error.
+    let (mut s, _) = with_fake(session(4, 4, gray));
+    s.set_ai_upscaler(Some(Arc::new(FakeUpscaler { fail: Some("out of memory".into()), ..Default::default() })));
+    assert!(s.execute(COMMAND, json!({"device": "cpu"})).is_err());
+}

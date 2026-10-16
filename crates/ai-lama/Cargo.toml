@@ -32,6 +32,8 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 image = { workspace = true, features = ["png"] }
+# The GPU-limit tests (feature `wgpu`) bring a device up by hand.
+pollster = "1"
 
 [lints]
 workspace = true

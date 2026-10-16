@@ -3282,3 +3282,4 @@ cameraData	Lens	Lensa
 	Download and delete AI models	Unduh dan hapus model AI
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Menghapus teks atau SFX yang dipilih dan menggambar ulang latar dengan AI di layer baru. Memakai model yang sudah diunduh (Jendela › Model AI…).
 @plural	{n} more queued|{n} more queued	{n} lagi dalam antrean
+	GPU couldn't run this model; used the CPU instead	GPU tidak dapat menjalankan model ini; CPU digunakan sebagai gantinya

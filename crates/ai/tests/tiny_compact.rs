@@ -68,3 +68,21 @@ fn tiny_compact_matches_pytorch() {
         }
     }
 }
+
+/// Within WebGPU's workgroup memory (4, 16 and 32 KiB; see `esrgan`'s test): the same output as
+/// the CPU, ×4 and ×2 (the box downsampling is a reduction). Skipped without a GPU adapter.
+#[cfg(feature = "gpu")]
+#[test]
+fn runs_on_a_gpu_with_little_workgroup_memory() {
+    let w = Weights::from_safetensors(&tiny_bytes()).unwrap();
+    let cpu = Runtime::cpu();
+    for bytes in [4096, 16384, 32768] {
+        let Some(gpu) = Runtime::gpu_limited_blocking(bytes).unwrap() else { return eprintln!("no GPU adapter: skipped") };
+        for scale in [4, 2] {
+            let run = |rt: &Runtime| block_on(rt.read(Compact::load(rt, &w, scale, false).unwrap().forward(rt.image(&input()).unwrap()))).unwrap();
+            let (a, b) = (run(&cpu), run(&gpu));
+            let max = a.data.iter().zip(&b.data).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max);
+            assert!(a.data.len() == b.data.len() && max < 1e-3, "{bytes} B, ×{scale}: off by {max}");
+        }
+    }
+}

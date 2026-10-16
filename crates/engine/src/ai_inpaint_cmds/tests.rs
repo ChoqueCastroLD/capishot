@@ -272,3 +272,34 @@ fn quality_and_device_choose_lama_or_migan() {
         assert!(s.execute(ID, bad.clone()).is_err(), "{bad}");
     }
 }
+
+/// The GPU couldn't run the model (the live report: burn's matmul over WebGPU's workgroup
+/// memory): the job runs on the CPU with the model the Quality picks there, says so in
+/// `notices`, and the document gets the result.
+#[test]
+fn a_gpu_failure_runs_again_on_the_cpu() {
+    use photocraft_ai::profile::{DeviceProfile, GpuClass};
+    use photocraft_ai::service::FakeUpscaler;
+    let run = |params: Value| {
+        let fake = Arc::new(FakeInpainter { gpu_fail: Some("Shared memory budget exceeded".into()), ..Default::default() });
+        let mut s = page(8);
+        s.set_inpainter(Some(fake.clone()));
+        let gpu = DeviceProfile { gpu: GpuClass::Discrete, memory_gb: Some(8.0), cores: Some(8), ..Default::default() };
+        s.set_ai_upscaler(Some(Arc::new(FakeUpscaler { profile: std::sync::Mutex::new(gpu), ..Default::default() })));
+        let r = s.execute(ID, params).unwrap();
+        let last = fake.last.lock().unwrap().unwrap();
+        (s, r, last)
+    };
+    let (s, r, last) = run(json!({}));
+    assert_eq!(last, ("migan-512", true), "Auto: MI-GAN on the CPU");
+    assert_eq!((r["model"].as_str(), r["lite"].as_bool()), (Some("migan-512"), Some(true)));
+    let n = &r["notices"][0];
+    assert_eq!(n["class"].as_str(), Some(crate::ai_cmds::GPU_FALLBACK_CLASS));
+    assert!(n["cause"].as_str().unwrap().contains("Shared memory"));
+    let layer = LayerId(r["layer"].as_u64().unwrap());
+    assert!(!is_red(&layer_px(&s, layer, 31, 22)), "the text is cleaned");
+    let (_, r, last) = run(json!({"quality": "best"}));
+    assert_eq!((last, r["model"].as_str()), (("manga-lama", true), Some("manga-lama")), "Best keeps LaMa");
+    let (_, _, last) = run(json!({"model": "manga-lama"}));
+    assert_eq!(last, ("manga-lama", true), "a named model stays");
+}

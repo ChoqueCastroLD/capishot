@@ -8,6 +8,9 @@
 use photocraft_ai_lama::Lama;
 use photocraft_ai_lama::burn::tensor::Device;
 
+#[cfg(feature = "wgpu")]
+mod gpu;
+
 const NGF: usize = 8;
 const BLOCKS: usize = 2;
 const W: usize = 72;
@@ -134,6 +137,23 @@ fn tiny_model_matches_pytorch() {
     }
     let mean = out.iter().sum::<f32>() / out.len() as f32;
     assert!((mean - EXPECTED_MEAN).abs() < 1e-5, "mean {mean} vs {EXPECTED_MEAN}");
+}
+
+/// The Fourier unit's transforms within WebGPU's workgroup memory: before they were 1×1
+/// convolutions, burn's matmul asked for more than the device had and panicked. Skipped without
+/// a GPU adapter (lavapipe: `VK_ICD_FILENAMES`).
+#[cfg(feature = "wgpu")]
+#[test]
+fn runs_on_a_gpu_with_little_workgroup_memory() {
+    let bytes = tiny_safetensors("lama-ffc");
+    let (rgb, mask) = tiny_input();
+    let want = Lama::from_safetensors(&bytes, &Device::flex()).unwrap().generate(&rgb, &mask, W, H).unwrap();
+    for limit in gpu::LIMITS {
+        let Some(device) = gpu::limited(limit) else { return eprintln!("no GPU adapter: skipped") };
+        let got = Lama::from_safetensors(&bytes, &device).unwrap().generate(&rgb, &mask, W, H).unwrap();
+        let d = gpu::max_diff(&want, &got);
+        assert!(d < 1e-3, "{limit} B: off by {d}");
+    }
 }
 
 #[test]

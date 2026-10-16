@@ -4264,3 +4264,4 @@ layerLabel	No Color	Sem cor
 	Download and delete AI models	Baixar e excluir modelos de IA
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Apaga o texto ou as onomatopeias selecionados e redesenha o fundo com IA, em uma nova camada. Usa um modelo baixado (Janela › Modelos de IA…).
 @plural	{n} more queued|{n} more queued	mais {n} na fila|mais {n} na fila
+	GPU couldn't run this model; used the CPU instead	A GPU não conseguiu executar este modelo; a CPU foi usada no lugar
