@@ -403,7 +403,17 @@ fn round_ms(ms: f64) -> u64 {
 pub fn error_kind(message: &str) -> &'static str {
     let m = message.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| m.contains(w));
-    if has(&["cancel"]) {
+    // AI runs on the GPU first: a WebGPU limit the kernel needed more of, a lost device, a
+    // crashed AI worker, another GPU failure (`AiError::Gpu`).
+    if has(&["shared memory budget", "hardware allows", "required feature is unavailable", "max_compute_workgroup", "maxcomputeworkgroup"]) {
+        "ai.gpu_limit"
+    } else if has(&["device lost", "device was lost", "devicelost"]) {
+        "ai.gpu_lost"
+    } else if has(&["ai worker crashed", "ai worker stopped"]) {
+        "ai.worker_crash"
+    } else if has(&["gpu couldn't run", "webgpu", "wgpu"]) {
+        "ai.gpu"
+    } else if has(&["cancel"]) {
         "cancelled"
     } else if has(&["not available", "disabled"]) {
         "disabled"

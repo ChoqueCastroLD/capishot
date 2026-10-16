@@ -76,6 +76,10 @@ pub enum AiError {
     Device(String),
     #[error("inference failed: {0}")]
     Inference(String),
+    /// The GPU couldn't run the model (a WebGPU limit, a lost device, a crash in the GPU
+    /// runtime). The same request can run on the CPU; callers retry there.
+    #[error("the GPU couldn't run the model: {0}")]
+    Gpu(String),
     #[error("cancelled")]
     Cancelled,
 }

@@ -92,6 +92,11 @@ pub trait Upscaler: Send + Sync {
 pub struct FakeUpscaler {
     pub download_needed: std::sync::atomic::AtomicBool,
     pub fail: Option<String>,
+    /// Fail every request that may use the GPU (not `opts.cpu`) with [`AiError::Gpu`] and this
+    /// message.
+    pub gpu_fail: Option<String>,
+    /// The last request's model id.
+    pub last_model: std::sync::Mutex<Option<&'static str>>,
     /// What [`Upscaler::profile`] reports.
     pub profile: std::sync::Mutex<DeviceProfile>,
     /// The last request's options.
@@ -122,11 +127,15 @@ impl Upscaler for FakeUpscaler {
 
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
         *self.last_opts.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(req.opts);
+        *self.last_model.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(req.model.id);
         if hooks.cancelled() {
             return done(Err(AiError::Cancelled));
         }
         if let Some(e) = &self.fail {
             return done(Err(AiError::Inference(e.clone())));
+        }
+        if let Some(e) = self.gpu_fail.as_ref().filter(|_| !req.opts.cpu) {
+            return done(Err(AiError::Gpu(e.clone())));
         }
         if self.model_state(req.model) == ModelState::NeedsDownload {
             if !req.allow_download {

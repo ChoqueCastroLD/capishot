@@ -3295,3 +3295,4 @@ cameraData	Lens	Objectif
 	Download and delete AI models	Télécharger et supprimer des modèles IA
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Efface le texte ou les onomatopées sélectionnés et redessine le fond avec l'IA, sur un nouveau calque. Utilise un modèle téléchargé (Fenêtre › Modèles IA…).
 @plural	{n} more queued|{n} more queued	{n} autre en attente|{n} autres en attente
+	GPU couldn't run this model; used the CPU instead	Le GPU n'a pas pu exécuter ce modèle ; le CPU a été utilisé à la place

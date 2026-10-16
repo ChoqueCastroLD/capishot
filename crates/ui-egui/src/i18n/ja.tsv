@@ -3888,3 +3888,4 @@ cameraData	Lens	レンズ
 	Download and delete AI models	AI モデルのダウンロードと削除
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	選択したテキストや効果音を消し、AI で背景を描き直して新しいレイヤーに配置します。ダウンロード済みのモデルを使います（ウィンドウ › AI モデル…）。
 @plural	{n} more queued|{n} more queued	ほか {n} 件待機中
+	GPU couldn't run this model; used the CPU instead	GPU でこのモデルを実行できなかったため、CPU を使用しました

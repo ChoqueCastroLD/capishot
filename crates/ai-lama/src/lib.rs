@@ -60,6 +60,10 @@ pub enum LamaError {
     /// The device failed while running or reading back the model.
     #[error("inference failed: {0}")]
     Device(String),
+    /// The GPU couldn't run the model (a WebGPU limit, a lost device, a crash in the GPU
+    /// runtime). The same request can run on the CPU; callers retry there.
+    #[error("the GPU couldn't run the model: {0}")]
+    Gpu(String),
     /// The model can't run here (weights missing, no device, not in this build).
     #[error("{0}")]
     Unavailable(String),
