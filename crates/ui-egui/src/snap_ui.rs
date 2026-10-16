@@ -70,33 +70,13 @@ fn snap_on(app: &PhotocraftApp) -> bool {
     app.ui.extras.snap
 }
 
-/// Targets of the active document (smart = layer alignments only), cached per document
-/// revision, options and excluded layers: every drag start would otherwise ask every layer for
-/// its bounds again.
-fn build(app: &mut PhotocraftApp, exclude: &[LayerId], smart: bool) -> SnapTargets {
+/// Targets of the active document (smart = layer alignments only).
+fn build(app: &PhotocraftApp, exclude: &[LayerId], smart: bool) -> SnapTargets {
     let Some(st) = app.session.active() else { return SnapTargets::default() };
     let opts =
         if smart { SnapOptions { guides: false, grid: false, layers: true, document: true, selection: false, grid_step: [0.0; 2] } } else { options(app) };
-    let key = {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        (st.doc.id.0, st.revision, smart).hash(&mut h);
-        exclude.iter().for_each(|l| l.0.hash(&mut h));
-        format!("{opts:?}").hash(&mut h);
-        h.finish()
-    };
-    if let Some((_, t)) = app.prefs_rt.snap_cache.iter().find(|(k, _)| *k == key) {
-        return t.clone();
-    }
     let t = SnapTargets::from_document(&st.doc, &opts, exclude);
-    app.perf_counters.snap_builds += 1;
-    let t = if smart { t.filtered(SnapKind::is_smart) } else { t };
-    let cache = &mut app.prefs_rt.snap_cache;
-    if cache.len() >= 4 {
-        cache.remove(0);
-    }
-    cache.push((key, t.clone()));
-    t
+    if smart { t.filtered(SnapKind::is_smart) } else { t }
 }
 
 /// What a move with `tool` in effect drags: the selection's bounds where its pixels float
@@ -113,7 +93,7 @@ fn moving_rect(app: &PhotocraftApp, tool: Tool) -> Option<[f64; 4]> {
 fn selection_rect(app: &PhotocraftApp) -> Option<[f64; 4]> {
     let st = app.session.active()?;
     let (dx, dy) = photocraft_engine::float_cmds::floating(st).map_or((0, 0), |f| f.offset);
-    let r = photocraft_compose::bounds::content_bounds(st.doc.selection.as_ref()?).translate(dx, dy);
+    let r = st.doc.selection.as_ref()?.content_bounds().translate(dx, dy);
     (!r.is_empty()).then(|| [r.x0, r.y0, r.x1, r.y1].map(f64::from))
 }
 
@@ -518,31 +498,6 @@ mod tests {
             }
             assert_eq!(app.session.active().unwrap().history.past_len(), history);
         }
-    }
-
-    /// A drag starting on an unchanged document reuses the snap targets the last one built; an
-    /// edit (a new revision) builds them again.
-    #[test]
-    fn snap_targets_are_built_once_per_document_revision() {
-        let mut app = app_with_box();
-        app.ui.tool = Tool::Move;
-        let builds = |app: &PhotocraftApp| app.perf_counters.snap_builds;
-        let drag = |app: &mut PhotocraftApp| {
-            filter_event(app, ToolEvent::Down { x: 30.0, y: 30.0, pressure: 1.0 }, egui::Modifiers::NONE);
-            filter_event(app, ToolEvent::Move { x: 34.0, y: 31.0, pressure: 1.0 }, egui::Modifiers::NONE);
-            filter_event(app, ToolEvent::Up { x: 34.0, y: 31.0 }, egui::Modifiers::NONE);
-        };
-        drag(&mut app);
-        let first = builds(&app);
-        assert!(first > 0, "the first drag builds its targets");
-        for _ in 0..3 {
-            drag(&mut app);
-        }
-        assert_eq!(builds(&app), first, "unchanged document: reused");
-        // Any edit (here the moving layer's opacity) is a new revision.
-        app.run("layer.setProps", serde_json::json!({"opacity": 0.9})).unwrap();
-        drag(&mut app);
-        assert!(builds(&app) > first, "a new revision builds them again");
     }
 
     #[test]

@@ -2588,10 +2588,8 @@ fn layer_row(
     // otherwise lay out names, icons and thumbnails every frame. Group rows stay whole: their
     // disclosure triangle is a widget (accessibility, scroll-to).
     if !ui.is_rect_visible(rect) && !l.is_group() && !resp.context_menu_opened() && crate::layer_row_ui::renaming(ctx) != Some(l.id.0) {
-        app.perf_counters.rows_skipped += 1;
         return rect;
     }
-    app.perf_counters.rows_drawn += 1;
     let painter = ui.painter_at(rect.expand(1.0));
     if t.pro {
         if selected {
