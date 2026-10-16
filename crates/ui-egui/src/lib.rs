@@ -354,6 +354,13 @@ pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 /// [`jobs_ui::SaveCtl::commit`] right before replacing the file, and write nothing if that fails.
 pub type SaveFileFn = std::sync::Arc<dyn Fn(&Document, &str, &ExportSettings, &jobs_ui::SaveCtl) -> Result<Vec<String>, String> + Send + Sync>;
 
+/// The revision a document counts as saved at after `written` went to its writer: that one when
+/// the writer confirms the bytes were stored, else still `previous`, so the document stays
+/// unsaved. A browser download is only a request the user can cancel (#4962).
+pub(crate) fn saved_revision_after_write(confirmed: bool, written: u64, previous: u64) -> u64 {
+    if confirmed { written } else { previous }
+}
+
 /// Who a finished save serves.
 #[derive(Clone, Copy)]
 pub(crate) enum SaveKind {
@@ -446,6 +453,10 @@ pub struct Services {
     pub file_dialog: Option<FileDialogFn>,
     /// Write bytes to a path (native) or trigger a download (web).
     pub write: Option<WriteFn>,
+    /// `write` only asks for the bytes to be kept (a browser download, which the user can
+    /// cancel and which reports nothing back), so a save through it names the document but
+    /// leaves its changes unsaved and the leave-page guard armed (#4962).
+    pub write_unconfirmed: bool,
     /// Encode and write in one step on a worker thread, so a large save doesn't freeze the
     /// window (#2017). With background jobs on, saves use it instead of `export` and `write`.
     pub save_file: Option<SaveFileFn>,
@@ -1592,11 +1603,12 @@ impl PhotocraftApp {
             return jobs_ui::start_save(self, path, settings.clone(), copy, save, false);
         }
         let st = self.session.active().ok_or("no document")?;
-        let (doc, revision) = (st.doc.id, st.revision);
+        let (doc, written, previous) = (st.doc.id, st.revision, st.saved_revision);
         let export = self.services.export.as_ref().ok_or("no exporter configured")?;
         let (bytes, warnings) = export(&st.doc, &path, settings)?;
         let write = self.services.write.as_mut().ok_or("no writer configured")?;
         write(&path, &bytes)?;
+        let revision = saved_revision_after_write(!self.services.write_unconfirmed, written, previous);
         self.saved(doc, revision, &path, &warnings, copy);
         Ok(Some((path, warnings)))
     }
