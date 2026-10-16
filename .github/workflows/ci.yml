@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       fuzz:
@@ -39,6 +40,7 @@ jobs:
   # platform: the app shell, UI, text and fonts, GPU, pen input, build scripts or the lockfile.
   # macOS is tested only by release.yml.
   platforms:
+    timeout-minutes: 10
     name: select platforms
     runs-on: ubuntu-latest
     outputs:
@@ -71,7 +73,7 @@ jobs:
           # The browser build (a fat-LTO wasm build) runs only when something it compiles or
           # packages changed: the web app and its packaging, crate sources and manifests (the web
           # build compiles nearly every crate), the workspace manifests and this workflow.
-          if git diff --name-only "$BASE" HEAD | grep -Eq '^(apps/photocraft-web/|packaging/web/|packaging/env\.sh$|crates/[^/]+/(src/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|rust-toolchain(\.toml)?$|\.github/workflows/ci\.yml$)'; then
+          if git diff --name-only "$BASE" HEAD | grep -Eq '^(apps/photocraft-web(-boot)?/|packaging/web/|packaging/env\.sh$|crates/[^/]+/(src/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|rust-toolchain(\.toml)?$|\.github/workflows/ci\.yml$)'; then
             echo "web=true" >> "$GITHUB_OUTPUT"
           else
             echo "web=false" >> "$GITHUB_OUTPUT"
@@ -83,6 +85,7 @@ jobs:
           fi
 
   test:
+    timeout-minutes: 100
     name: test (${{ matrix.os }}${{ matrix.part != 'all' && format(', {0}', matrix.part) || '' }})
     needs: platforms
     runs-on: ${{ matrix.os }}
@@ -148,37 +151,7 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
 
-      # nextest runs the test binaries in parallel (cargo test runs them one at a time), with the
-      # GPU tests capped by the `gpu` group in .config/nextest.toml (#2204).
-      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
-        with:
-          tool: cargo-nextest@0.9.146
-
-      # `--features heif`: official builds open HEIC photos via the optional photocraft-heif crate.
-      # `--lib --bins --tests` leaves out the examples, which cargo test would build and link but
-      # never run (Clippy's `--all-targets` still checks they compile). nextest skips doctests, so
-      # they get their own step.
-      #
-      # On Windows the unit leg runs `--lib --bins` and the integration leg `--test '*'` (every
-      # integration-test target); the feature selection stays the same, so both legs share the
-      # dependency cache. The `ci` profile retries the GPU tests
-      # (.config/nextest.toml).
-      - name: Test
-        env:
-          PART: ${{ matrix.part }}
-        run: |
-          case "$PART" in
-            unit) targets=(--lib --bins) ;;
-            integration) targets=(--test '*') ;;
-            *) targets=(--lib --bins --tests) ;;
-          esac
-          cargo nextest run --profile ci --workspace --locked --features heif "${targets[@]}" --no-fail-fast
-        shell: bash
-
-      - name: Doctests
-        if: matrix.part == 'all' || matrix.part == 'unit'
-        run: cargo test --workspace --locked --features heif --doc
-
+      # Keep formatting, strict Clippy, layering and scorecard checks ahead of tests.
       - name: Clippy
         if: matrix.part == 'all' || matrix.part == 'integration'
         run: cargo clippy --workspace --all-targets --locked --features heif -- -D warnings
@@ -193,29 +166,63 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo xtask scorecard --check
 
+      # nextest runs the test binaries in parallel (cargo test runs them one at a time), with the
+      # GPU tests capped by the `gpu` group in .config/nextest.toml (#2204).
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-nextest@0.9.146
+
+      # `--features heif`: official builds open HEIC photos via the optional photocraft-heif crate.
+      # `--lib --bins --tests` leaves out the examples, which cargo test would build and link but
+      # never run (Clippy's `--all-targets` still checks they compile). nextest skips doctests, so
+      # they get their own step.
+      #
+      # On Windows the unit leg runs `--lib --bins` and the integration leg `--test '*'` (every
+      # integration-test target); the feature selection stays the same, so both legs share the
+      # dependency cache. The `ci` profile fails fast and terminates hung tests
+      # (.config/nextest.toml); assertion failures are not retried.
+      - name: Test
+        env:
+          PART: ${{ matrix.part }}
+        run: |
+          case "$PART" in
+            unit) targets=(--lib --bins) ;;
+            integration) targets=(--test '*') ;;
+            *) targets=(--lib --bins --tests) ;;
+          esac
+          cargo nextest run --profile ci --workspace --locked --features heif "${targets[@]}"
+        shell: bash
+
+      - name: Doctests
+        if: matrix.part == 'all' || matrix.part == 'unit'
+        run: cargo test --workspace --locked --features heif --doc
+
   # The Windows tests used to be one job named `test (windows-latest)`; they're now legs named
   # `test (windows-latest, unit)` and `test (windows-latest, integration)`. This job keeps the old
   # name reporting, so a required status check on it (none today) would keep working. It fails
-  # unless the whole test matrix passed, Linux included, since `needs` reports one result for all
-  # legs; when a PR runs no Windows legs it passes along the Linux result.
+  # unless the whole test matrix and both Linux variants passed. `needs` reports one result
+  # for all matrix legs; when a PR runs no Windows legs it still checks every Linux result.
   windows-gate:
+    timeout-minutes: 5
     name: test (windows-latest)
-    needs: [platforms, test]
+    needs: [platforms, test, test-variants]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - env:
           PLATFORMS: ${{ needs.platforms.result }}
           TEST: ${{ needs.test.result }}
+          VARIANTS: ${{ needs.test-variants.result }}
         run: |
-          echo "platforms: $PLATFORMS, test: $TEST"
-          [ "$PLATFORMS" = success ] && [ "$TEST" = success ]
+          echo "platforms: $PLATFORMS, test: $TEST, variants: $VARIANTS"
+          [ "$PLATFORMS" = success ] && [ "$TEST" = success ] && [ "$VARIANTS" = success ]
 
   # The two other builds of the Linux tests, in parallel with the test job instead of after it (they
   # added ~10 min to its critical path). Each restores the test job's cache (`shared-key: test` is
   # that job's key) and saves none: the dependencies are the same, and the 10 GB cache budget is
   # tight (#2688).
   test-variants:
+    timeout-minutes: 100
     name: test (${{ matrix.variant }})
     runs-on: ubuntu-latest
     strategy:
@@ -241,8 +248,7 @@ jobs:
           shared-key: test
           save-if: false
 
-      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
-        if: matrix.variant == 'with craft-fonts'
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-nextest@0.9.146
 
@@ -250,11 +256,12 @@ jobs:
       # error for distributors who leave it out.
       - name: Test without heif
         if: matrix.variant == 'without heif'
-        run: cargo test -p photocraft-heif -p photocraft-codecs -p photocraft-io --locked
+        run: cargo nextest run -p photocraft-heif -p photocraft-codecs -p photocraft-io --locked --profile ci
 
       # The tests built with the optional craft-fonts input (crates/text/build.rs), so the Japanese
       # font tests that skip without it run. Keep the test job's exact `--workspace --features heif
       # --lib --bins --tests`, so the restored dependencies match and only the workspace rebuilds.
+      # Filter execution to the three crates that read the optional font input (#6127).
       - name: Check out craft-fonts
         if: matrix.variant == 'with craft-fonts'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -268,9 +275,12 @@ jobs:
         env:
           CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
           CRAFT_FONTS_REQUIRED: "1"
-        run: cargo nextest run --profile ci --workspace --locked --features heif --lib --bins --tests --no-fail-fast
+        run: >-
+          cargo nextest run --profile ci --workspace --locked --features heif --lib --bins --tests
+          -E 'package(photocraft-text) | package(photocraft-io) | package(photocraft-ui-egui)'
 
   corpus:
+    timeout-minutes: 30
     # Real-file corpus tests (cargo feature `corpus`), on every PR and on main. The corpora are
     # pinned in xtask/src/corpus_pins.rs and sha256-verified (xtask/*.sha256) after both a cache
     # restore and a download; a missing corpus fails the tests. The cache key changes only when a
@@ -303,6 +313,7 @@ jobs:
         run: cargo xtask test-corpus
 
   wasm:
+    timeout-minutes: 30
     name: wasm32 check
     runs-on: ubuntu-latest
     steps:
@@ -319,6 +330,7 @@ jobs:
         run: cargo xtask wasm
 
   web:
+    timeout-minutes: 60
     name: web build and wasm size gate
     # PRs run it only when web-relevant files change (see `platforms`); main always does.
     needs: platforms
@@ -342,8 +354,8 @@ jobs:
           curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
             | tar -xz -C "$HOME/.cargo/bin" trunk
           trunk --version
-      # package.sh runs Trunk's release build, validates relative URLs, checks the 24 MiB
-      # wasm limit and exercises the same packaging step used by release.yml.
+      # package.sh runs Trunk's release builds, validates relative URLs, cuts the wasm into
+      # parts, checks the 24 MiB per-file limit and exercises the packaging step release.yml uses.
       - name: Build and verify browser release
         run: packaging/web/package.sh
       - name: Report wasm size
@@ -354,15 +366,19 @@ jobs:
             echo
             echo "| File | Bytes | MiB | Limit |"
             echo "| --- | ---: | ---: | ---: |"
+            row() { echo "| $1 | $2 | $(awk -v n="$2" 'BEGIN { printf "%.2f", n / 1048576 }') | $3 |"; }
+            # The app's wasm as built; it ships gzipped in parts, so only the download grows with it.
             for wasm in dist/web/*.wasm; do
               [ -f "$wasm" ] || continue
-              bytes=$(wc -c < "$wasm" | tr -d ' ')
-              mib=$(awk -v n="$bytes" 'BEGIN { printf "%.2f", n / 1048576 }')
-              echo "| $(basename "$wasm") | $bytes | $mib | 24 MiB |"
+              row "$(basename "$wasm")" "$(wc -c < "$wasm" | tr -d ' ')" "none"
             done
+            # What a host sees: the largest file of the packaged site.
+            largest=$(find target/web-package -type f -printf '%s %f\n' | sort -n | tail -1)
+            row "largest file in the site: ${largest#* }" "${largest%% *}" "24 MiB"
           } >> "$GITHUB_STEP_SUMMARY"
 
   fuzz:
+    timeout-minutes: 60
     name: fuzz (${{ matrix.target.crate }}/${{ matrix.target.name }})
     # Placeholder: manual trigger only until a nightly schedule is enabled.
     if: github.event_name == 'workflow_dispatch' && inputs.fuzz
