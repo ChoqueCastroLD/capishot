@@ -3978,3 +3978,9 @@ cameraData	Lens	Об'єктив
 	Download and delete AI models	Завантаження й видалення моделей ШІ
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Стирає виділений текст або звуконаслідування й перемальовує фон за допомогою ШІ на новому шарі. Використовує завантажену модель (Вікно › Моделі ШІ…).
 @plural	{n} more queued|{n} more queued	ще {n} у черзі|ще {n} у черзі|ще {n} у черзі
+	Generative Fill	Генеративна заливка
+	Generative Fill…	Генеративна заливка…
+	Terms of Use…	Умови використання…
+	Variants:	Варіанти:
+	Describe what to add (optional)	Опишіть, що додати (необов’язково)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Англійська, іспанська або португальська; порожній запит заповнює фоном. Працює на цьому пристрої; генеруючи, ви приймаєте Умови використання.

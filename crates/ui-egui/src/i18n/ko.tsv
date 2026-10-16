@@ -3457,3 +3457,9 @@ cameraData	Lens	렌즈
 	Download and delete AI models	AI 모델 다운로드 및 삭제
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	선택한 텍스트나 효과음을 지우고 AI로 배경을 다시 그려 새 레이어에 놓습니다. 다운로드한 모델을 사용합니다(창 › AI 모델…).
 @plural	{n} more queued|{n} more queued	{n}개 더 대기 중
+	Generative Fill	생성형 채우기
+	Generative Fill…	생성형 채우기…
+	Terms of Use…	이용 약관…
+	Variants:	변형:
+	Describe what to add (optional)	추가할 내용을 설명하세요(선택 사항)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	영어, 스페인어, 포르투갈어를 지원합니다. 비워 두면 배경으로 채웁니다. 이 기기에서 실행되며, 생성하면 이용 약관에 동의하는 것입니다.

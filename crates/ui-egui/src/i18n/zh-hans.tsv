@@ -2899,3 +2899,9 @@ cameraData	Lens	镜头
 	Download and delete AI models	下载和删除 AI 模型
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	擦除所选文字或拟声词，并用 AI 在新图层上重绘背景。使用已下载的模型（窗口 › AI 模型…）。
 @plural	{n} more queued|{n} more queued	另有 {n} 个排队中
+	Generative Fill	创成式填充
+	Generative Fill…	创成式填充…
+	Terms of Use…	使用条款…
+	Variants:	变体：
+	Describe what to add (optional)	描述要添加的内容（可选）
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	支持英语、西班牙语或葡萄牙语；留空则用背景填充。在本设备上运行，生成即表示你接受使用条款。

@@ -1,0 +1,775 @@
+# Spanish -> English visual vocabulary for Generative Fill prompts (Capishot's own list).
+# key|english|pos   pos: n noun (default), a adjective, x other (empty english = dropped)
+el||x
+la||x
+los||x
+las||x
+lo||x
+un||x
+una||x
+unos|some|x
+unas|some|x
+al|to the|x
+del|of the|x
+de|of|x
+con|with|x
+sin|without|x
+en|in|x
+sobre|on|x
+encima de|on top of|x
+debajo de|under|x
+bajo|under|x
+detras de|behind|x
+delante de|in front of|x
+frente a|in front of|x
+junto a|next to|x
+al lado de|next to|x
+entre|between|x
+cerca de|near|x
+lejos|far|x
+dentro de|inside|x
+fuera de|outside|x
+alrededor de|around|x
+hacia|towards|x
+por|by|x
+para|for|x
+y|and|x
+o|or|x
+pero|but|x
+muy|very|x
+mas|more|x
+menos|less|x
+que||x
+como|like|x
+mucho|many|a
+muchos|many|a
+muchas|many|a
+poco|few|a
+pocos|few|a
+algunos|some|a
+varios|several|a
+todo|all|a
+cada|each|a
+otro|another|a
+otros|other|a
+mismo|same|a
+este||x
+esta||x
+ese||x
+esa||x
+su|its|x
+sus|its|x
+mi|my|x
+uno|one|a
+dos|two|a
+tres|three|a
+cuatro|four|a
+cinco|five|a
+seis|six|a
+siete|seven|a
+ocho|eight|a
+nueve|nine|a
+diez|ten|a
+cien|hundred|a
+mil|thousand|a
+primero|first|a
+segundo|second|a
+ultimo|last|a
+de noche|at night|x
+de dia|during the day|x
+al atardecer|at sunset|x
+al amanecer|at dawn|x
+bajo la lluvia|in the rain|x
+en el fondo|in the background|x
+de fondo|in the background|x
+a lo lejos|in the distance|x
+en primer plano|in the foreground|x
+primer plano|close-up
+luz de luna|moonlight
+luz del sol|sunlight
+puesta de sol|sunset
+salida del sol|sunrise
+cielo nocturno|night sky
+cielo estrellado|starry sky
+via lactea|milky way
+arco iris|rainbow
+arcoiris|rainbow
+fuegos artificiales|fireworks
+copo de nieve|snowflake
+copos de nieve|snowflakes
+hojas secas|dry leaves
+flor de cerezo|cherry blossom
+flores de cerezo|cherry blossoms
+sakura|cherry blossoms
+torre de tokio|tokyo tower
+monte fuji|mount fuji
+paso de cebra|crosswalk
+semaforo|traffic light
+farola|street lamp
+poste de luz|utility pole
+cables electricos|power lines
+maquina expendedora|vending machine
+tienda de conveniencia|convenience store
+estacion de tren|train station
+parada de autobus|bus stop
+salon de clases|classroom
+sala de estar|living room
+pelo largo|long hair
+pelo corto|short hair
+cabello largo|long hair
+cabello corto|short hair
+ojos azules|blue eyes
+ojos rojos|red eyes
+ojos verdes|green eyes
+blanco y negro|black and white
+estilo anime|anime style
+estilo manga|manga style
+alta calidad|high quality
+muy detallado|highly detailed
+tramas|screentone
+trama|screentone
+lineas de velocidad|speed lines
+lineas de accion|action lines
+burbuja de dialogo|speech bubble
+globo de texto|speech bubble
+vineta|panel
+viñeta|panel
+cielo|sky
+nube|cloud
+sol|sun
+luna|moon
+estrella|star
+lluvia|rain
+nieve|snow
+niebla|fog
+neblina|mist
+bruma|haze
+tormenta|storm
+rayo|lightning
+relampago|lightning
+viento|wind
+arcoiris|rainbow
+atardecer|sunset
+amanecer|dawn
+anochecer|dusk
+crepusculo|twilight
+noche|night
+dia|day
+manana|morning
+tarde|afternoon
+invierno|winter
+verano|summer
+otono|autumn
+primavera|spring
+luz|light
+sombra|shadow
+sombras|shadows
+oscuridad|darkness
+reflejo|reflection
+brillo|glow
+resplandor|glow
+destello|sparkle
+humo|smoke
+fuego|fire
+llama|flame
+llamas|flames
+chispa|spark
+explosion|explosion
+polvo|dust
+vapor|steam
+burbuja|bubble
+agua|water
+mar|sea
+oceano|ocean
+ola|wave
+playa|beach
+arena|sand
+costa|coast
+isla|island
+rio|river
+lago|lake
+estanque|pond
+cascada|waterfall
+fuente|fountain
+charco|puddle
+hielo|ice
+montana|mountain
+montaña|mountain
+colina|hill
+valle|valley
+volcan|volcano
+cueva|cave
+roca|rock
+piedra|stone
+acantilado|cliff
+desierto|desert
+selva|jungle
+bosque|forest
+campo|field
+pradera|meadow
+jardin|garden
+parque|park
+camino|path
+sendero|trail
+carretera|road
+calle|street
+callejon|alley
+avenida|avenue
+puente|bridge
+tunel|tunnel
+ciudad|city
+pueblo|town
+aldea|village
+barrio|neighborhood
+plaza|square
+mercado|market
+tienda|shop
+edificio|building
+rascacielos|skyscraper
+torre|tower
+castillo|castle
+palacio|palace
+templo|temple
+santuario|shrine
+iglesia|church
+catedral|cathedral
+ruinas|ruins
+casa|house
+hogar|home
+cabana|cabin
+cabaña|cabin
+granja|farm
+escuela|school
+colegio|school
+universidad|university
+hospital|hospital
+oficina|office
+fabrica|factory
+estacion|station
+aeropuerto|airport
+puerto|harbor
+muelle|pier
+faro|lighthouse
+tejado|roof
+techo|ceiling
+azotea|rooftop
+pared|wall
+muro|wall
+valla|fence
+cerca|fence
+puerta|door
+portal|gate
+ventana|window
+balcon|balcony
+escalera|stairs
+escaleras|stairs
+pasillo|hallway
+habitacion|room
+cuarto|room
+dormitorio|bedroom
+cocina|kitchen
+bano|bathroom
+baño|bathroom
+salon|hall
+aula|classroom
+biblioteca|library
+suelo|floor
+piso|floor
+alfombra|carpet
+cortina|curtain
+cortinas|curtains
+mesa|table
+escritorio|desk
+silla|chair
+sofa|sofa
+cama|bed
+almohada|pillow
+manta|blanket
+estanteria|bookshelf
+libro|book
+libros|books
+lampara|lamp
+vela|candle
+reloj|clock
+espejo|mirror
+cuadro|painting
+foto|photo
+fotografia|photograph
+pantalla|screen
+televisor|television
+ordenador|computer
+computadora|computer
+telefono|phone
+movil|phone
+celular|phone
+taza|cup
+vaso|glass
+botella|bottle
+plato|plate
+comida|food
+pan|bread
+pastel|cake
+fruta|fruit
+manzana|apple
+naranja|orange
+fresa|strawberry
+platano|banana
+uva|grape
+sandia|watermelon
+arroz|rice
+sushi|sushi
+ramen|ramen
+cafe|coffee
+te|tea
+caja|box
+bolsa|bag
+mochila|backpack
+paraguas|umbrella
+sombrilla|parasol
+llave|key
+cadena|chain
+cuerda|rope
+papel|paper
+carta|letter
+mapa|map
+bandera|flag
+cartel|sign
+letrero|sign
+anuncio|billboard
+farol|lantern
+linterna|flashlight
+farolillo|paper lantern
+campana|bell
+espada|sword
+katana|katana
+escudo|shield
+arco|bow
+flecha|arrow
+pistola|gun
+arma|weapon
+lanza|spear
+armadura|armor
+casco|helmet
+corona|crown
+anillo|ring
+collar|necklace
+joya|jewel
+gema|gem
+cristal|crystal
+diamante|diamond
+oro|gold
+plata|silver
+moneda|coin
+tesoro|treasure
+coche|car
+carro|car
+auto|car
+moto|motorcycle
+motocicleta|motorcycle
+bicicleta|bicycle
+bici|bike
+autobus|bus
+camion|truck
+tren|train
+metro|subway
+avion|airplane
+helicoptero|helicopter
+barco|boat
+bote|boat
+velero|sailboat
+nave|ship
+nave espacial|spaceship
+cohete|rocket
+robot|robot
+mecha|mecha
+maquina|machine
+arbol|tree
+arboles|trees
+rama|branch
+hoja|leaf
+hojas|leaves
+raiz|root
+tronco|trunk
+flor|flower
+rosa|rose
+girasol|sunflower
+tulipan|tulip
+lirio|lily
+loto|lotus
+cerezo|cherry tree
+pino|pine tree
+bambu|bamboo
+palmera|palm tree
+cesped|grass
+hierba|grass
+pasto|grass
+musgo|moss
+arbusto|bush
+seto|hedge
+enredadera|vine
+hongo|mushroom
+seta|mushroom
+semilla|seed
+animal|animal
+perro|dog
+perrito|puppy
+cachorro|puppy
+gato|cat
+gatito|kitten
+pajaro|bird
+ave|bird
+paloma|pigeon
+cuervo|crow
+aguila|eagle
+buho|owl
+lechuza|owl
+pato|duck
+cisne|swan
+gallina|chicken
+pez|fish
+peces|fish
+tiburon|shark
+ballena|whale
+delfin|dolphin
+pulpo|octopus
+medusa|jellyfish
+tortuga|turtle
+rana|frog
+serpiente|snake
+lagarto|lizard
+dragon|dragon
+caballo|horse
+vaca|cow
+cerdo|pig
+oveja|sheep
+cabra|goat
+conejo|rabbit
+raton|mouse
+ardilla|squirrel
+zorro|fox
+lobo|wolf
+oso|bear
+panda|panda
+tigre|tiger
+leon|lion
+elefante|elephant
+jirafa|giraffe
+mono|monkey
+ciervo|deer
+mariposa|butterfly
+abeja|bee
+hormiga|ant
+arana|spider
+araña|spider
+insecto|insect
+libelula|dragonfly
+luciernaga|firefly
+pluma|feather
+ala|wing
+alas|wings
+cuerno|horn
+cuernos|horns
+garra|claw
+persona|person
+personas|people
+gente|people
+hombre|man
+hombres|men
+mujer|woman
+mujeres|women
+chico|boy
+chica|girl
+muchacho|young man
+muchacha|young woman
+joven|young
+anciano|old man
+anciana|old woman
+abuelo|grandfather
+abuela|grandmother
+familia|family
+pareja|couple
+amigo|friend
+amigos|friends
+soldado|soldier
+guerrero|warrior
+caballero|knight
+samurai|samurai
+ninja|ninja
+mago|wizard
+bruja|witch
+princesa|princess
+principe|prince
+rey|king
+reina|queen
+angel|angel
+demonio|demon
+fantasma|ghost
+monstruo|monster
+zombi|zombie
+vampiro|vampire
+hada|fairy
+sirena|mermaid
+estudiante|student
+profesor|teacher
+maestro|teacher
+policia|police officer
+medico|doctor
+enfermera|nurse
+cocinero|cook
+camarero|waiter
+idol|idol
+cantante|singer
+multitud|crowd
+cara|face
+rostro|face
+cabeza|head
+pelo|hair
+cabello|hair
+ojo|eye
+ojos|eyes
+boca|mouth
+sonrisa|smile
+lagrima|tear
+lagrimas|tears
+nariz|nose
+oreja|ear
+orejas|ears
+mano|hand
+manos|hands
+brazo|arm
+pierna|leg
+dedo|finger
+cuerpo|body
+espalda|back
+silueta|silhouette
+ropa|clothes
+vestido|dress
+falda|skirt
+camisa|shirt
+camiseta|t-shirt
+chaqueta|jacket
+abrigo|coat
+sudadera|hoodie
+pantalon|pants
+pantalones|pants
+zapatos|shoes
+botas|boots
+sombrero|hat
+gorra|cap
+bufanda|scarf
+guantes|gloves
+gafas|glasses
+lentes|glasses
+uniforme|uniform
+uniforme escolar|school uniform
+kimono|kimono
+yukata|yukata
+traje|suit
+corbata|tie
+lazo|ribbon
+cinta|ribbon
+mascara|mask
+capa|cape
+capucha|hood
+delantal|apron
+rojo|red|a
+azul|blue|a
+verde|green|a
+amarillo|yellow|a
+naranja|orange
+morado|purple|a
+violeta|violet|a
+purpura|purple|a
+rosado|pink|a
+blanco|white|a
+negro|black|a
+gris|gray|a
+marron|brown|a
+dorado|golden|a
+plateado|silver|a
+celeste|light blue|a
+turquesa|turquoise|a
+beige|beige|a
+claro|light|a
+oscuro|dark|a
+brillante|bright|a
+palido|pale|a
+colorido|colorful|a
+multicolor|multicolored|a
+monocromo|monochrome|a
+monocromatico|monochrome|a
+transparente|transparent|a
+grande|big|a
+gran|great|a
+enorme|huge|a
+gigante|giant|a
+pequeno|small|a
+pequeño|small|a
+diminuto|tiny|a
+alto|tall|a
+largo|long|a
+corto|short|a
+ancho|wide|a
+estrecho|narrow|a
+grueso|thick|a
+delgado|thin|a
+fino|thin|a
+gordo|fat|a
+redondo|round|a
+cuadrado|square|a
+puntiagudo|pointy|a
+nuevo|new|a
+viejo|old|a
+antiguo|ancient|a
+moderno|modern|a
+futurista|futuristic|a
+tradicional|traditional|a
+japones|japanese|a
+chino|chinese|a
+coreano|korean|a
+europeo|european|a
+medieval|medieval|a
+victoriano|victorian|a
+bonito|pretty|a
+hermoso|beautiful|a
+lindo|cute|a
+precioso|beautiful|a
+feo|ugly|a
+tierno|cute|a
+kawaii|cute|a
+elegante|elegant|a
+sencillo|simple|a
+simple|simple|a
+limpio|clean|a
+sucio|dirty|a
+roto|broken|a
+abandonado|abandoned|a
+destruido|destroyed|a
+vacio|empty|a
+lleno|full|a
+abierto|open|a
+cerrado|closed|a
+mojado|wet|a
+seco|dry|a
+caliente|hot|a
+frio|cold|a
+calido|warm|a
+tranquilo|calm|a
+pacifico|peaceful|a
+triste|sad|a
+feliz|happy|a
+alegre|cheerful|a
+enfadado|angry|a
+enojado|angry|a
+serio|serious|a
+asustado|scared|a
+sorprendido|surprised|a
+cansado|tired|a
+dormido|sleeping|a
+despierto|awake|a
+solitario|lonely|a
+misterioso|mysterious|a
+magico|magical|a
+mistico|mystical|a
+fantastico|fantasy|a
+epico|epic|a
+dramatico|dramatic|a
+romantico|romantic|a
+aterrador|scary|a
+oscuro|dark|a
+siniestro|sinister|a
+luminoso|luminous|a
+soleado|sunny|a
+nublado|cloudy|a
+lluvioso|rainy|a
+nevado|snowy|a
+nevando|snowing|a
+lloviendo|raining|a
+ventoso|windy|a
+brumoso|misty|a
+humedo|humid|a
+iluminado|lit|a
+brillando|glowing|a
+flotando|floating|a
+volando|flying|a
+corriendo|running|a
+caminando|walking|a
+sentado|sitting|a
+sentada|sitting|a
+de pie|standing|x
+parado|standing|a
+acostado|lying|a
+tumbado|lying|a
+saltando|jumping|a
+bailando|dancing|a
+cantando|singing|a
+leyendo|reading|a
+escribiendo|writing|a
+comiendo|eating|a
+bebiendo|drinking|a
+durmiendo|sleeping|a
+llorando|crying|a
+riendo|laughing|a
+sonriendo|smiling|a
+mirando|looking|a
+peleando|fighting|a
+nadando|swimming|a
+cayendo|falling|a
+ardiendo|burning|a
+de madera|wooden|a
+de piedra|stone|a
+de metal|metal|a
+de cristal|glass|a
+de vidrio|glass|a
+de papel|paper|a
+madera|wood
+metal|metal
+vidrio|glass
+hierro|iron
+acero|steel
+ladrillo|brick
+ladrillos|bricks
+hormigon|concrete
+cemento|concrete
+tela|fabric
+seda|silk
+cuero|leather
+estilo|style
+dibujo|drawing
+ilustracion|illustration
+pintura|painting
+acuarela|watercolor
+oleo|oil painting
+boceto|sketch
+grabado|engraving
+tinta|ink
+lineas|lines
+linea|line
+textura|texture
+patron|pattern
+degradado|gradient
+fondo|background
+escena|scene
+paisaje|landscape
+retrato|portrait
+vista|view
+panorama|panorama
+horizonte|horizon
+detalle|detail
+detallado|detailed|a
+realista|realistic|a
+fotorrealista|photorealistic|a
+cinematografico|cinematic|a
+calidad|quality
+obra maestra|masterpiece
+anime|anime
+manga|manga
+historieta|comic
+comic|comic
+caricatura|cartoon
+personaje|character
+nada|nothing
+liso|plain|a
+
+cola de caballo|ponytail
+coletas|twin tails

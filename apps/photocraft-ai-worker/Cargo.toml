@@ -30,6 +30,7 @@ web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "WorkerGl
 [target.'cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))'.dependencies]
 photocraft-ai = { workspace = true, features = ["gpu", "cpu"] }
 photocraft-ai-lama = { workspace = true, features = ["wgpu", "flex", "rayon"] }
+photocraft-ai-sd = { workspace = true, features = ["wgpu", "flex"] }
 
 # The threads variant (packaging/web-ai/build.sh, for cross-origin isolated pages): CPU only
 # (wgpu's WebGPU objects aren't Send, so it doesn't build with shared memory), with a rayon pool

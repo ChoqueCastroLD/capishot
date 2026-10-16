@@ -18,6 +18,9 @@ pub enum Arch {
     Compact,
     /// MI-GAN: the lite inpainter, run by `photocraft-ai-lama`.
     Migan,
+    /// A Generative Fill file (Stable Diffusion 1.5 inpainting parts, TAESD, few-step LoRA), run
+    /// by `photocraft-ai-sd`.
+    Generative,
 }
 
 /// What a model is for.
@@ -32,6 +35,8 @@ pub enum Content {
     Inpaint,
     /// Upscaling of any page, grayscale or colour (the lite upscaler).
     Any,
+    /// Generative Fill: creates new content from a prompt.
+    Generative,
 }
 
 /// One downloadable model.
@@ -113,6 +118,31 @@ macro_rules! compact {
             author: "Xintao Wang (Real-ESRGAN)",
             source: "https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0",
             lite: true,
+        }
+    };
+}
+
+const DS8_SRC: &str = "https://huggingface.co/Lykon/dreamshaper-8-inpainting";
+const OPENRAIL: &str = "CreativeML-OpenRAIL-M";
+const DS8_AUTHOR: &str = "Lykon (DreamShaper 8) on Stable Diffusion 1.5 (CompVis, Runway, Stability AI)";
+
+/// One Generative Fill file.
+macro_rules! genfill_file {
+    ($id:expr, $title:literal, $file:literal, $bytes:expr, $sha:literal, $license:expr, $author:expr, $source:expr) => {
+        ModelInfo {
+            id: $id,
+            title: $title,
+            file: $file,
+            arch: Arch::Generative,
+            scale: 1,
+            content: Content::Generative,
+            height: None,
+            bytes: $bytes,
+            sha256: $sha,
+            license: $license,
+            author: $author,
+            source: $source,
+            lite: false,
         }
     };
 }
@@ -307,6 +337,96 @@ pub const MODELS: &[ModelInfo] = &[
         source: "https://github.com/Picsart-AI-Research/MI-GAN",
         lite: true,
     },
+    genfill_file!(
+        "genfill-text",
+        "Generative Fill: text encoder",
+        "sd15-text-ds8-f16.safetensors",
+        246_669_099,
+        "20776b79c17e88dfa2384ef314954053fc6a29695aaee5e8f3197ade701c4b83",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        "genfill-vae-enc",
+        "Generative Fill: image encoder",
+        "sd15-vae-enc-ds8-f16.safetensors",
+        68_339_472,
+        "5390a6166e2b6edaa86f4ad6953aea49de738cfb2a4546234104ceeb65fbc296",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        "genfill-vae-dec",
+        "Generative Fill: image decoder",
+        "sd15-vae-dec-ds8-f16.safetensors",
+        98_996_014,
+        "0a603b02b954887eea1c470809650f65d4fb59af0808abf174770e6ad82dcda3",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        "genfill-taesd",
+        "Generative Fill: preview decoder (TAESD)",
+        "taesd-f16.safetensors",
+        4_902_382,
+        "1b0880ab864b309eba0a5fb5ca4c7bec74f87fd20122e310995cfd46da6efdf6",
+        "MIT",
+        "madebyollin (TAESD)",
+        "https://github.com/madebyollin/taesd"
+    ),
+    genfill_file!(
+        "genfill-unet-1",
+        "Generative Fill: model, part 1 of 4",
+        "ds8-inpaint-unet-f16.part0of4.safetensors",
+        437_056_840,
+        "29db50b5252ce1cf4e1df2b6ad295bd03f0f91a070905ffbf2d93ac3ad5c9543",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        "genfill-unet-2",
+        "Generative Fill: model, part 2 of 4",
+        "ds8-inpaint-unet-f16.part1of4.safetensors",
+        447_271_648,
+        "29f20ed6691dc31d85dfe8841318df04ee4d3e173a978b50bc9a4259a196b1f6",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        "genfill-unet-3",
+        "Generative Fill: model, part 3 of 4",
+        "ds8-inpaint-unet-f16.part2of4.safetensors",
+        444_583_672,
+        "f8647c228b0af5335fe71d6b8a7b017020c8a0f4264caead44045956bc596f86",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        "genfill-unet-4",
+        "Generative Fill: model, part 4 of 4",
+        "ds8-inpaint-unet-f16.part3of4.safetensors",
+        390_242_232,
+        "7e5c0d02e5c848a4f530dddae9b5a71747c05b02a487c97824f0da64b7c86a5e",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        GENFILL_FAST_LORA_ID,
+        "Generative Fill: few-step sampler (TCD)",
+        "tcd-sd15-lora-f16.safetensors",
+        134_576_208,
+        "877f74eb282991d8a05dc9ab191c2f9a2ea081a65b0455fa4cf791e68dbe66fd",
+        "MIT",
+        "Jianbin Zheng et al. (TCD)",
+        "https://huggingface.co/h1t/TCD-SD15-LoRA"
+    ),
 ];
 
 
@@ -315,6 +435,22 @@ pub const COMPACT_4X_ID: &str = "realesr-compact-4x";
 pub const COMPACT_2X_ID: &str = "realesr-compact-2x";
 /// The id of the MI-GAN (lite) inpainting model.
 pub const MIGAN_ID: &str = "migan-512";
+
+/// The few-step LoRA of Generative Fill's Standard tier.
+pub const GENFILL_FAST_LORA_ID: &str = "genfill-tcd";
+
+/// The files of Generative Fill's Standard tier, in load order (smallest first, the UNet last).
+pub const GENFILL_STANDARD: &[&str] = &[
+    "genfill-text",
+    "genfill-taesd",
+    "genfill-vae-enc",
+    "genfill-vae-dec",
+    "genfill-unet-1",
+    "genfill-unet-2",
+    "genfill-unet-3",
+    "genfill-unet-4",
+    GENFILL_FAST_LORA_ID,
+];
 
 /// The id of the Manga LaMa inpainting model.
 pub const LAMA_ID: &str = "manga-lama";
