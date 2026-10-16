@@ -8,6 +8,9 @@
 struct Chunk {
     origin: vec2<i32>,
     size: vec2<i32>,
+    // x: level of detail: one pixel per 2^x × 2^x document pixels (`Compositor::render_lod`);
+    // `origin` and `size` are then in the level's pixels. Effect-map kernels: always 0.
+    lod: vec4<i32>,
 };
 
 struct Op {
@@ -52,6 +55,7 @@ const F_HDR: u32 = 262144u;     // 32-bit float document: HDR blends and Exposur
 const F_QUANT: u32 = 32768u;    // lerp: A rounded to p0.x steps (adjustment results, integer docs)
 const F_ADD_DIFF: u32 = 16384u;  // lerp: A + (B - C) premultiplied (clips on pass-through groups)
 const F_TEXT_GAMMA: u32 = 8192u; // blend / atop / fx merge: type layer, mix coverage at gamma p4.w
+const F_MEMBER_CLIP: u32 = 524288u; // fs_layers member: blends only inside p0 (x0, y0, x1, y1)
 
 @group(0) @binding(0) var<uniform> chunk: Chunk;
 @group(0) @binding(1) var<uniform> op: Op;
@@ -63,6 +67,15 @@ const F_TEXT_GAMMA: u32 = 8192u; // blend / atop / fx merge: type layer, mix cov
 @group(1) @binding(5) var tex_c: texture_2d<f32>;
 @group(1) @binding(6) var map_tex: texture_2d<f32>;
 @group(1) @binding(7) var pat_tex: texture_2d<f32>;
+// fs_layers only (its own layout): the member records, and members 1-3's layers and masks
+// (member 0 uses layer_tex and mask_tex).
+@group(0) @binding(2) var<uniform> ops: array<Op, 4>;
+@group(1) @binding(8) var layer_tex1: texture_2d<f32>;
+@group(1) @binding(9) var mask_tex1: texture_2d<f32>;
+@group(1) @binding(10) var layer_tex2: texture_2d<f32>;
+@group(1) @binding(11) var mask_tex2: texture_2d<f32>;
+@group(1) @binding(12) var layer_tex3: texture_2d<f32>;
+@group(1) @binding(13) var mask_tex3: texture_2d<f32>;
 
 struct VOut { @builtin(position) pos: vec4<f32> };
 
@@ -73,7 +86,12 @@ fn vs(@builtin(vertex_index) vi: u32) -> VOut {
 }
 
 fn local(pos: vec4<f32>) -> vec2<i32> { return vec2<i32>(floor(pos.xy)); }
-fn doc_px(p: vec2<i32>) -> vec2<i32> { return chunk.origin + p; }
+// The document pixel a chunk pixel stands for: itself at full size, the centre of its block at
+// a level of detail.
+fn doc_px(p: vec2<i32>) -> vec2<i32> {
+    let s = 1 << u32(chunk.lod.x);
+    return (chunk.origin + p) * s + vec2(s / 2);
+}
 
 fn inside(p: vec2<i32>, size: vec2<i32>) -> bool {
     return p.x >= 0 && p.y >= 0 && p.x < size.x && p.y < size.y;
@@ -311,6 +329,11 @@ fn fill_is_special(mode: i32) -> bool {
 // colour (Hard Mix: (cb - f(1 - cs)) / (1 - f)) at `opacity`, Fill staying coverage over
 // transparency. Lab documents mix Normal in CIELAB; type layers mix in the text gamma space.
 fn composite_fill(mode: i32, b: vec4<f32>, s: vec4<f32>, opacity: f32, fill: f32, gamma_on: bool) -> vec4<f32> {
+    return composite_fill_g(mode, b, s, opacity, fill, gamma_on, op.p4.w);
+}
+
+// composite_fill with the text gamma `g` given (fs_layers members carry their own).
+fn composite_fill_g(mode: i32, b: vec4<f32>, s: vec4<f32>, opacity: f32, fill: f32, gamma_on: bool, g: f32) -> vec4<f32> {
     let f = clamp(fill, 0.0, 1.0);
     let special = f < 1.0 && fill_is_special(mode);
     let ab = b.a;
@@ -335,7 +358,6 @@ fn composite_fill(mode: i32, b: vec4<f32>, s: vec4<f32>, opacity: f32, fill: f32
     let wbs = ab * over / ao;
     let ws = (1.0 - ab) * alone / ao;
     if (!gamma_on) { return vec4(wb * b.rgb + wbs * bl + ws * s.rgb, ao); }
-    let g = op.p4.w;
     return vec4(text_dec(wb * text_enc(b.rgb, g) + wbs * text_enc(bl, g) + ws * text_enc(s.rgb, g), g), ao);
 }
 
@@ -783,15 +805,40 @@ fn layer_texel(d: vec2<i32>) -> vec4<f32> {
     return op.color;
 }
 
+// The layer's pixels times its mask at chunk pixel `p` (straight alpha). At a level of detail
+// the block is box filtered (premultiplied) over a grid of up to 4 × 4 taps: exact for 2 × 2 and
+// 4 × 4 blocks, a regular subsample of larger ones.
+fn layer_px(p: vec2<i32>) -> vec4<f32> {
+    if (chunk.lod.x == 0) {
+        let d = chunk.origin + p;
+        var c = layer_texel(d);
+        c.a = c.a * mask_value(d);
+        return c;
+    }
+    let s = 1 << u32(chunk.lod.x);
+    let n = min(s, 4);
+    let step = s / n;
+    let base = (chunk.origin + p) * s + vec2(step / 2);
+    var acc = vec4(0.0);
+    for (var j = 0; j < n; j++) {
+        for (var i = 0; i < n; i++) {
+            let d = base + vec2(i, j) * step;
+            let c = layer_texel(d);
+            let a = c.a * mask_value(d);
+            acc += vec4(c.rgb * a, a);
+        }
+    }
+    acc = acc / f32(n * n);
+    if (acc.a <= 0.0) { return vec4(0.0); }
+    return vec4(acc.rgb / acc.a, acc.a);
+}
+
 // ---- passes ---------------------------------------------------------------------------------
 
 // A layer's own pixels (raster / fill), times its mask.
 @fragment
 fn fs_content(in: VOut) -> @location(0) vec4<f32> {
-    let d = doc_px(local(in.pos));
-    var c = layer_texel(d);
-    c.a = c.a * mask_value(d);
-    return c;
+    return layer_px(local(in.pos));
 }
 
 // Multiply alpha of A by the mask (isolated group content).
@@ -815,6 +862,111 @@ fn fs_blend(in: VOut) -> @location(0) vec4<f32> {
         return composite(M_NORMAL, b, s, 1.0);
     }
     return composite_fill(op.mode, b, s, op.opacity, op.fill, (op.flags & F_TEXT_GAMMA) != 0u);
+}
+
+// fs_content then fs_blend in one pass: the layer's own pixels (times its mask) blended onto
+// the backdrop A without a round trip through an accumulator slot (`plan::fuse_layer_blends`).
+@fragment
+fn fs_layerblend(in: VOut) -> @location(0) vec4<f32> {
+    let p = local(in.pos);
+    let d = doc_px(p);
+    let b = textureLoad(tex_a, p, 0);
+    var s = layer_px(p);
+    if (s.a <= 0.0) { return b; }
+    if (op.mode == M_DISSOLVE) {
+        s.a = select(0.0, 1.0, dissolve_noise(d) < s.a * op.opacity * op.fill);
+        return composite(M_NORMAL, b, s, 1.0);
+    }
+    return composite_fill(op.mode, b, s, op.opacity, op.fill, (op.flags & F_TEXT_GAMMA) != 0u);
+}
+
+// ---- fs_layers: up to four plain layers blended in one pass ---------------------------------
+
+fn member_layer(k: i32, q: vec2<i32>) -> vec4<f32> {
+    switch k {
+        case 1: { return textureLoad(layer_tex1, q, 0); }
+        case 2: { return textureLoad(layer_tex2, q, 0); }
+        case 3: { return textureLoad(layer_tex3, q, 0); }
+        default: { return textureLoad(layer_tex, q, 0); }
+    }
+}
+
+fn member_mask(k: i32, q: vec2<i32>) -> f32 {
+    switch k {
+        case 1: { return textureLoad(mask_tex1, q, 0).r; }
+        case 2: { return textureLoad(mask_tex2, q, 0).r; }
+        case 3: { return textureLoad(mask_tex3, q, 0).r; }
+        default: { return textureLoad(mask_tex, q, 0).r; }
+    }
+}
+
+// layer_texel × mask_value for member `k` (no gradients: those stay single passes).
+fn member_texel(o: Op, k: i32, d: vec2<i32>) -> vec4<f32> {
+    var c = o.color;
+    if ((o.flags & F_TEX) != 0u) {
+        let q = d - o.tex_origin;
+        if (inside(q, o.tex_size)) { c = member_layer(k, q); }
+    }
+    if ((o.flags & F_MASK) != 0u) {
+        var v = o.mask_default;
+        if ((o.flags & F_MASK_TEX) != 0u) {
+            let m = d - o.mask_origin;
+            if (inside(m, o.mask_size)) { v = member_mask(k, m); }
+        }
+        c.a = c.a * (1.0 - o.mask_density * (1.0 - v));
+    }
+    return c;
+}
+
+// layer_px for member `k`.
+fn member_px(o: Op, k: i32, p: vec2<i32>) -> vec4<f32> {
+    if (chunk.lod.x == 0) {
+        return member_texel(o, k, chunk.origin + p);
+    }
+    let s = 1 << u32(chunk.lod.x);
+    let n = min(s, 4);
+    let step = s / n;
+    let base = (chunk.origin + p) * s + vec2(step / 2);
+    var acc = vec4(0.0);
+    for (var j = 0; j < n; j++) {
+        for (var i = 0; i < n; i++) {
+            let c = member_texel(o, k, base + vec2(i, j) * step);
+            acc += vec4(c.rgb * c.a, c.a);
+        }
+    }
+    acc = acc / f32(n * n);
+    if (acc.a <= 0.0) { return vec4(0.0); }
+    return vec4(acc.rgb / acc.a, acc.a);
+}
+
+// `op.kind` consecutive plain layers (`plan::fuse_layer_runs`), each exactly as fs_layerblend
+// would blend it, onto the backdrop A; a member with F_MEMBER_CLIP leaves pixels outside its
+// bounds (rounded out to the level of detail) alone, as its own clipped pass would.
+@fragment
+fn fs_layers(in: VOut) -> @location(0) vec4<f32> {
+    let p = local(in.pos);
+    var b = textureLoad(tex_a, p, 0);
+    let lp = chunk.origin + p;
+    let lod = u32(chunk.lod.x);
+    let sz = 1 << lod;
+    for (var k = 0; k < min(op.kind, 4); k++) {
+        let o = ops[k];
+        if ((o.flags & F_MEMBER_CLIP) != 0u) {
+            let c = vec4<i32>(o.p0);
+            let lo = c.xy >> vec2(lod);
+            let hi = (c.zw + vec2(sz - 1)) >> vec2(lod);
+            if (lp.x < lo.x || lp.y < lo.y || lp.x >= hi.x || lp.y >= hi.y) { continue; }
+        }
+        var s = member_px(o, k, p);
+        if (s.a <= 0.0) { continue; }
+        if (o.mode == M_DISSOLVE) {
+            s.a = select(0.0, 1.0, dissolve_noise(doc_px(p)) < s.a * o.opacity * o.fill);
+            b = composite(M_NORMAL, b, s, 1.0);
+            continue;
+        }
+        b = composite_fill_g(o.mode, b, s, o.opacity, o.fill, (o.flags & F_TEXT_GAMMA) != 0u, o.p4.w);
+    }
+    return b;
 }
 
 // composite_atop(base = A, src = B): blend as if the base were opaque, keep its alpha.

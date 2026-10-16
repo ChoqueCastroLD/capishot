@@ -10,10 +10,16 @@
 //!
 //! A frame's time is eframe's own measure (`frame.info().cpu_usage`: the app's update, egui's
 //! tessellation and the painter, i.e. the WebGL/WebGPU command submission), reported one frame
-//! later; `upd` splits off the app's update (`logic` + `ui`).
+//! later; `upd` splits off the app's update (`logic` + `ui`). With `?perf=1`, `gpu` is how long
+//! the GPU still worked after the update (submit to `onSubmittedWorkDone` of everything queued
+//! by then: the frame's document refresh and the previous frame's paint): a GPU-bound page
+//! shows it next to long `int` (`requestAnimationFrame` interval) and dropped frames.
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::telemetry;
@@ -49,7 +55,19 @@ struct GestureFrame {
     ms: f64,
     update_ms: f64,
     latency_ms: Option<f64>,
+    gpu_ms: Option<f64>,
+    interval_ms: Option<f64>,
 }
+
+/// One display refresh at 60 Hz (dropped frames are counted against it).
+const VSYNC_MS: f64 = 1000.0 / 60.0;
+
+/// Frames a record waits for its GPU completion before it is written without one.
+const GPU_WAIT_FRAMES: u8 = 8;
+
+/// Milliseconds from the end of a frame's update until the GPU finished what was queued then
+/// (`f64` bits; `u64::MAX` while pending).
+type GpuFence = Arc<AtomicU64>;
 
 /// One frame, from its start until eframe reports its time (in the next frame).
 #[derive(Clone, Debug)]
@@ -65,6 +83,8 @@ struct Frame {
     /// What the canvas was doing: a tool id (`tool.Brush`) or `view`.
     key: Option<String>,
     megapixels: Option<f64>,
+    /// `?perf=1`: GPU completion of the work queued by the end of the update.
+    gpu: Option<GpuFence>,
 }
 
 pub struct FramePerf {
@@ -80,6 +100,8 @@ pub struct FramePerf {
     /// The current gesture's frames (`?perf=1`).
     gesture: Vec<GestureFrame>,
     gesture_key: Option<String>,
+    /// Finished frames waiting for their GPU completion (`?perf=1`), with eframe's time and age.
+    awaiting_gpu: VecDeque<(Frame, Option<f64>, u8)>,
 }
 
 impl FramePerf {
@@ -99,7 +121,18 @@ impl FramePerf {
             expose(records.clone());
             log::info!("photocraft-web: frame timing on (?perf=1): photocraftPerf.take()");
         }
-        Self { debug, pending_input, current: None, last: None, last_start: None, last_cpu: None, records, gesture: Vec::new(), gesture_key: None }
+        Self {
+            debug,
+            pending_input,
+            current: None,
+            last: None,
+            last_start: None,
+            last_cpu: None,
+            records,
+            gesture: Vec::new(),
+            gesture_key: None,
+            awaiting_gpu: VecDeque::new(),
+        }
     }
 
     /// Start of a frame (`App::logic`); `cpu_usage` is eframe's time of the previous frame.
@@ -108,11 +141,28 @@ impl FramePerf {
         let fresh = cpu_usage.filter(|c| Some(*c) != self.last_cpu);
         self.last_cpu = cpu_usage.or(self.last_cpu);
         if let Some(frame) = self.last.take() {
-            self.finish(frame, fresh.map(|s| f64::from(s) * 1000.0));
+            let total = fresh.map(|s| f64::from(s) * 1000.0);
+            if frame.gpu.is_some() {
+                self.awaiting_gpu.push_back((frame, total, 0));
+            } else {
+                self.finish(frame, total, None);
+            }
+        }
+        // Frames in order, once their GPU work is done (or it took too long to wait for).
+        for f in &mut self.awaiting_gpu {
+            f.2 = f.2.saturating_add(1);
+        }
+        while let Some((frame, _, age)) = self.awaiting_gpu.front() {
+            let gpu = frame.gpu.as_ref().map(|g| g.load(Ordering::Relaxed)).filter(|b| *b != u64::MAX).map(f64::from_bits);
+            if gpu.is_none() && *age < GPU_WAIT_FRAMES {
+                break;
+            }
+            let Some((frame, total, _)) = self.awaiting_gpu.pop_front() else { break };
+            self.finish(frame, total, gpu);
         }
         let interval = self.last_start.map(|t| start - t);
         self.last_start = Some(start);
-        self.current = Some(Frame { start, interval, update_ms: 0.0, input: self.pending_input.take(), key: None, megapixels: None });
+        self.current = Some(Frame { start, interval, update_ms: 0.0, input: self.pending_input.take(), key: None, megapixels: None, gpu: None });
     }
 
     /// End of the app's update (`App::ui`): what the canvas was doing this frame.
@@ -123,10 +173,18 @@ impl FramePerf {
         if frame.key.is_some() {
             frame.megapixels = app.session.active().map(|st| telemetry::megapixels(st.doc.size.width, st.doc.size.height));
         }
+        if self.debug {
+            let fence: GpuFence = Arc::new(AtomicU64::new(u64::MAX));
+            let done = fence.clone();
+            let t0 = page_now();
+            if app.on_gpu_done(move || done.store((page_now() - t0).max(0.0).to_bits(), Ordering::Relaxed)) {
+                frame.gpu = Some(fence);
+            }
+        }
         self.last = Some(frame);
     }
 
-    fn finish(&mut self, frame: Frame, total_ms: Option<f64>) {
+    fn finish(&mut self, frame: Frame, total_ms: Option<f64>, gpu_ms: Option<f64>) {
         // The oldest move waited from its event until this frame's paint was submitted.
         let latency = frame.input.zip(total_ms).map(|(t, ms)| (frame.start + ms - t).max(0.0));
         if let (Some(key), Some(ms)) = (&frame.key, total_ms) {
@@ -142,7 +200,7 @@ impl FramePerf {
             }
             records.push(json!({
                 "t": round2(frame.start), "int": frame.interval.map(round2), "upd": round2(frame.update_ms),
-                "ms": total_ms.map(round2), "lat": latency.map(round2), "key": frame.key,
+                "ms": total_ms.map(round2), "lat": latency.map(round2), "key": frame.key, "gpu": gpu_ms.map(round2),
             }));
         }
         if frame.key != self.gesture_key {
@@ -152,7 +210,7 @@ impl FramePerf {
         if frame.key.is_some()
             && let Some(ms) = total_ms
         {
-            self.gesture.push(GestureFrame { ms, update_ms: frame.update_ms, latency_ms: latency });
+            self.gesture.push(GestureFrame { ms, update_ms: frame.update_ms, latency_ms: latency, gpu_ms, interval_ms: frame.interval });
         }
     }
 
@@ -168,9 +226,12 @@ impl FramePerf {
             v.sort_by(f64::total_cmp);
             json!({"p50": round2(quantile(&v, 0.5)), "p95": round2(quantile(&v, 0.95)), "max": round2(v.last().copied().unwrap_or(0.0))})
         };
+        // Display refreshes without a new frame, between the gesture's frames.
+        let dropped: f64 = frames.iter().skip(1).filter_map(|f| f.interval_ms).filter(|i| *i < 1000.0).map(|i| ((i / VSYNC_MS).round() - 1.0).max(0.0)).sum();
         let line = json!({
             "key": key, "frames": frames.len(),
             "ms": pick(|f| Some(f.ms)), "upd": pick(|f| Some(f.update_ms)), "lat": pick(|f| f.latency_ms),
+            "gpu": pick(|f| f.gpu_ms), "int": pick(|f| f.interval_ms), "dropped": dropped,
         });
         log::info!("capishot-perf {line}");
     }
