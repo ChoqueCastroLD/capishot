@@ -201,7 +201,7 @@ fn main() {
         .sum();
     let ram = photocraft_ui_egui::gpu_canvas::physical_memory();
     let vram = g.video_memory();
-    let budget = photocraft_ui_egui::gpu_canvas::memory_budget(allowance, pixels, ram, vram);
+    let budget = photocraft_ui_egui::gpu_canvas::memory_budget(allowance, pixels, ram, vram, 0);
     g.set_memory_budget(budget);
     println!(
         "RAM {} MB, VRAM {} MB, document pixels {} MB, Memory Usage {} MB -> GPU budget {} MB",
