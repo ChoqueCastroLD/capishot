@@ -145,3 +145,83 @@ fn psd_saves_embed_only_followed_links() {
     let packaged = warnings(s.execute("file.package", json!({"dir": d.join("pkg").to_string_lossy(), "format": "psd"})).unwrap());
     assert!(packaged.iter().any(|w| w.contains("is not opened: the path is on another computer")), "{packaged:?}");
 }
+
+/// The pixels of the active document after its smart object `id` re-renders with its first smart
+/// filter's params set to `params`.
+fn replayed(s: &mut Session, id: LayerId, params: serde_json::Value) -> Vec<[f32; 4]> {
+    s.edit("Params", |doc, _| {
+        if let Some(LayerContent::Smart(sm)) = doc.layer_mut(id).map(|l| &mut l.content) {
+            sm.smart_filters[0].params = params;
+        }
+        crate::smart_cmds::refresh(doc, id).map(|_| ())
+    })
+    .unwrap();
+    let doc = &s.active().unwrap().doc;
+    photocraft_compose::render(doc, doc.bounds()).px
+}
+
+#[test]
+fn smart_filters_reread_only_followed_files() {
+    let d = dir("filters");
+    png(&d.join("ramp.png"), |x| [(x * 8) as u8, 0, 0]);
+    png(&d.join("map.png"), |_| [255, 255, 255]);
+    // An inverting look: corner (r, g, b) of the cube maps to (1-r, 1-g, 1-b), red fastest.
+    let corners = (0..8).map(|i| format!("{} {} {}\n", 1 - (i & 1), 1 - ((i >> 1) & 1), 1 - ((i >> 2) & 1))).collect::<String>();
+    std::fs::write(d.join("invert.cube"), format!("LUT_3D_SIZE 2\n{corners}")).unwrap();
+    let path = |name: &str| d.join(name).to_string_lossy().into_owned();
+
+    // Displace re-reads its `mapPath`.
+    let (mut s, id) = document(&d, &d.join("ramp.png"));
+    s.execute("filter.distort.displace", json!({"layer": id.0, "mapPath": path("map.png"), "horizontal": 50, "vertical": 0})).unwrap();
+    let displaced = replayed(&mut s, id, json!({"mapPath": path("map.png"), "horizontal": 50, "vertical": 0}));
+    let unfiltered = replayed(&mut s, id, json!({"mapPath": REMOTE, "horizontal": 50, "vertical": 0}));
+    assert_ne!(displaced, unfiltered, "the map moves the pixels");
+    assert_eq!(replayed(&mut s, id, json!({"mapPath": "map.png", "horizontal": 50, "vertical": 0})), displaced, "a relative map next to the document");
+    #[cfg(unix)]
+    assert_eq!(replayed(&mut s, id, json!({"mapPath": network_alias(&d.join("map.png")), "horizontal": 50, "vertical": 0})), unfiltered);
+
+    // Color Lookup re-reads its LUT `file`.
+    let (mut s, id) = document(&d, &d.join("ramp.png"));
+    s.execute("image.adjustments.colorLookup", json!({"layer": id.0, "lut": "none"})).unwrap();
+    let inverted = replayed(&mut s, id, json!({"file": path("invert.cube")}));
+    let unfiltered = replayed(&mut s, id, json!({"file": REMOTE}));
+    assert_ne!(inverted, unfiltered, "the look changes the pixels");
+    assert_eq!(replayed(&mut s, id, json!({"file": "invert.cube"})), inverted, "a relative look next to the document");
+    #[cfg(unix)]
+    assert_eq!(replayed(&mut s, id, json!({"file": network_alias(&d.join("invert.cube"))})), unfiltered);
+}
+
+#[test]
+fn data_sets_and_footage_read_only_followed_files() {
+    let d = dir("datasets");
+    png(&d.join("blue.png"), |_| [0, 0, 255]);
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 32, "height": 32, "background": "#ff0000"})).unwrap();
+    s.active_mut().unwrap().path = Some(d.join("doc.pcraft").to_string_lossy().into_owned());
+    let layer = s.active().unwrap().active_layer.unwrap();
+    s.execute("image.variables.define", json!({"defs": [{"name": "img", "layer": layer.0, "type": "pixelReplacement", "method": "conform"}]})).unwrap();
+    let set = |name: &str, path: &str| json!({"name": name, "values": [{"variable": "img", "kind": "pixels", "value": path}]});
+    s.execute("image.variables.dataSets", json!({"dataSets": [set("remote", REMOTE), set("relative", "blue.png")]})).unwrap();
+    let err = s.execute("image.applyDataSet", json!({"name": "remote"})).unwrap_err().to_string();
+    assert!(err.contains("is not opened: the path is on another computer"), "{err}");
+    assert_eq!(centre(&s), RED);
+    s.execute("image.applyDataSet", json!({"name": "relative"})).unwrap();
+    assert_eq!(centre(&s), BLUE);
+
+    // Reload Frame re-reads the video layer's footage.
+    s.execute("layer.videoLayers.newVideoLayerFromFile", json!({"path": d.join("blue.png").to_string_lossy()})).unwrap();
+    let footage = |s: &mut Session, path: &str| {
+        let id = s.active().unwrap().active_layer.unwrap();
+        s.edit("Footage", |doc, _| {
+            if let Some(v) = doc.layer_mut(id).and_then(|l| l.video.as_mut()) {
+                v.source = photocraft_doc::VideoSource::File { path: path.into() };
+            }
+            Ok(())
+        })
+        .unwrap();
+        s.execute("layer.videoLayers.reloadFrame", json!({})).map_err(|e| e.to_string())
+    };
+    let err = footage(&mut s, REMOTE).unwrap_err();
+    assert!(err.contains("is not opened: the path is on another computer"), "{err}");
+    footage(&mut s, "blue.png").unwrap();
+}
