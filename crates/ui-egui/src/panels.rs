@@ -3134,6 +3134,7 @@ fn properties_body_inner(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             ui.add_space(6.0);
         }
         layer_controls(app, ui, layer);
+        crate::genfill_ui::properties(app, ui, layer.id);
         if matches!(layer.content, LayerContent::Text(_)) {
             crate::type_tool::type_properties(app, ui);
         }

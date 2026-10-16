@@ -90,10 +90,16 @@ pub struct WebInpainter {
     up: WebUpscaler,
 }
 
+/// Generative Fill (`edit.generativeFill`) through the same worker (WebGPU only).
+pub struct WebGenFill {
+    up: WebUpscaler,
+}
+
 /// The AI services this page offers.
 pub struct Services {
     pub upscaler: Arc<dyn Upscaler>,
     pub inpainter: Arc<dyn photocraft_ai_lama::service::Inpainter>,
+    pub genfill: Arc<dyn photocraft_ai_sd::service::GenFill>,
     pub models: Arc<dyn ModelStore>,
 }
 
@@ -110,6 +116,7 @@ pub fn from_page() -> Option<Services> {
     Some(Services {
         upscaler: Arc::new(WebUpscaler { shared: shared.clone() }),
         inpainter: Arc::new(WebInpainter { up: WebUpscaler { shared: shared.clone() } }),
+        genfill: Arc::new(WebGenFill { up: WebUpscaler { shared: shared.clone() } }),
         models: Arc::new(WebModelStore { shared }),
     })
 }
@@ -449,6 +456,83 @@ impl photocraft_ai_lama::service::Inpainter for WebInpainter {
     }
 }
 
+impl photocraft_ai_sd::service::GenFill for WebGenFill {
+    fn model_state(&self, tier: photocraft_ai_sd::service::Tier) -> photocraft_ai_sd::service::ModelState {
+        use photocraft_ai_sd::service::ModelState as M;
+        let Some(files) = photocraft_ai_sd::files::tier(tier) else { return M::Unavailable(format!("the {} tier isn't available yet", tier.id())) };
+        let (mut missing, mut checking) = (0u64, false);
+        for &f in &files.files {
+            match self.up.model_state(f) {
+                ModelState::Ready => {}
+                ModelState::NeedsDownload => missing += f.bytes,
+                ModelState::Checking => checking = true,
+                ModelState::Unavailable(why) => return M::Unavailable(why),
+            }
+        }
+        if checking {
+            M::Checking
+        } else if missing > 0 {
+            M::NeedsDownload { bytes: missing }
+        } else {
+            M::Ready
+        }
+    }
+
+    fn device(&self) -> String {
+        self.up.device()
+    }
+
+    fn run(&self, req: photocraft_ai_sd::service::Request, hooks: Arc<dyn photocraft_ai_sd::service::Hooks>, done: photocraft_ai_sd::service::Done) {
+        use photocraft_ai_sd::SdError;
+        let Some(first) = photocraft_ai_sd::files::tier(req.tier).and_then(|f| f.files.first().copied()) else {
+            return done(Err(SdError::Unavailable(format!("the {} tier isn't available yet", req.tier.id()))));
+        };
+        // WebGPU only: always the plain worker.
+        let Some(mut target) = self.up.target(false, 0) else { return done(Err(SdError::Unavailable(NO_WORKER.into()))) };
+        if target.threads {
+            target.threads = false;
+        }
+        let rgb = Float32Array::from(req.rgb.as_slice());
+        let mask = Float32Array::from(req.mask.as_slice());
+        let o = Object::new();
+        for (k, v) in [
+            ("type", JsValue::from("genfill")),
+            ("id", 1.into()),
+            ("tier", req.tier.id().into()),
+            ("unload", req.unload.into()),
+            ("base", target.base.clone().into()),
+            ("download", req.allow_download.into()),
+            ("cpu", req.cpu.into()),
+            ("width", (req.width as f64).into()),
+            ("height", (req.height as f64).into()),
+            ("prompt", req.prompt.as_str().into()),
+            ("negative", req.negative.as_str().into()),
+            ("variants", (req.variants as f64).into()),
+            ("seed", (req.seed as f64).into()),
+            ("steps", (req.steps as f64).into()),
+            ("strength", req.strength.into()),
+            ("guidance", f64::from(req.guidance).into()),
+            ("mask", mask.into()),
+        ] {
+            let _ = Reflect::set(&o, &k.into(), &v);
+        }
+        let buffer: JsValue = rgb.buffer().into();
+        let _ = Reflect::set(&o, &"rgb".into(), &rgb.into());
+        let (h2, h3) = (hooks.clone(), hooks);
+        let run = Run {
+            model: first.id,
+            reply: Some(Reply::GenFill(done)),
+            progress: Box::new(move |f, s| h2.progress(f, s)),
+            cancelled: Box::new(move || h3.cancelled()),
+            shared: self.up.shared.clone(),
+            started_gpu: false,
+        };
+        if let Err(e) = start(&target, (o, buffer), run) {
+            log::error!("AI worker: {e}");
+        }
+    }
+}
+
 /// The `run` message (the pixels are transferred, not copied again).
 fn run_message(req: &Request, base: &str, cpu: bool) -> (Object, JsValue) {
     let data = Float32Array::from(req.input.data.as_slice());
@@ -480,6 +564,16 @@ fn run_message(req: &Request, base: &str, cpu: bool) -> (Object, JsValue) {
 enum Reply {
     Upscale(Done),
     Inpaint(photocraft_ai_lama::service::Done),
+    GenFill(photocraft_ai_sd::service::Done),
+}
+
+fn sd_err(e: AiError) -> photocraft_ai_sd::SdError {
+    use photocraft_ai_sd::SdError;
+    match e {
+        AiError::Cancelled => SdError::Cancelled,
+        AiError::Inference(m) if m.contains("isn't downloaded") => SdError::Unavailable(m),
+        other => SdError::Device(other.to_string()),
+    }
 }
 
 /// Reports a run's progress (`0..=1`, status).
@@ -506,6 +600,22 @@ impl Run {
                 Err(AiError::Cancelled) => Err(LamaError::Cancelled),
                 Err(e) => Err(LamaError::Device(e.to_string())),
             }),
+            Some(Reply::GenFill(done)) => done(match r {
+                Ok(p) => Ok(vec![p.data]),
+                Err(e) => Err(sd_err(e)),
+            }),
+            None => {}
+        }
+    }
+
+    /// Generative Fill's variants.
+    fn finish_variants(&mut self, r: photocraft_ai::Result<Vec<Vec<f32>>>) {
+        match self.reply.take() {
+            Some(Reply::GenFill(done)) => done(r.map_err(sd_err)),
+            Some(other) => {
+                self.reply = Some(other);
+                self.finish(Err(AiError::Inference("unexpected Generative Fill reply".into())));
+            }
             None => {}
         }
     }
@@ -670,6 +780,22 @@ fn on_message(data: JsValue) {
                     run.shared.lock().unwrap_or_else(PoisonError::into_inner).cached.insert(run.model, true);
                 }
                 run.finish(result);
+            });
+        }
+        "gf-done" => {
+            let variants: Vec<Vec<f32>> = get(&data, "variants")
+                .dyn_into::<Array>()
+                .map(|a| a.iter().filter_map(|v| v.dyn_into::<Float32Array>().ok()).map(|a| a.to_vec()).collect())
+                .unwrap_or_default();
+            let device = get(&data, "device").as_string().unwrap_or_default();
+            end_run(|run| {
+                {
+                    let mut s = run.shared.lock().unwrap_or_else(PoisonError::into_inner);
+                    if !device.is_empty() {
+                        s.device = device.clone();
+                    }
+                }
+                run.finish_variants(if variants.is_empty() { Err(AiError::Inference("Generative Fill returned nothing".into())) } else { Ok(variants) });
             });
         }
         "error" => {

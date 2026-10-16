@@ -112,6 +112,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
     ("help.psdCompiler", "psd-compiler on GitHub", &["Help"], None),
     ("help.upstream", "Based on PhotoCraft", &["Help"], None),
+    ("help.terms", "Terms of Use…", &["Help"], None),
     ("help.systemInfo", "System Info…", &["Help"], None),
     ("help.about", "About Capishot", &["Help"], None),
 ];
@@ -281,6 +282,10 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::ai_upscale_ui::invoke(app, id, &params) {
         return r;
     }
+    // Edit › Generative Fill… (the prompt dialog).
+    if let Some(r) = crate::genfill_ui::invoke(app, id, &params) {
+        return r;
+    }
     // Clean with AI, the Remove tool's AI mode, Upscale with AI with params: a model that isn't
     // downloaded opens the missing-model dialog instead of running.
     if let Some(r) = crate::ai_model_gate::invoke(app, id, &params) {
@@ -448,6 +453,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             Ok(Value::Null)
         }
         "help.about" => Ok(json!({"dialog": app.ui.open_dialog(DialogKind::About, Default::default())})),
+        "help.terms" => Ok(json!({"dialog": crate::genfill_ui::open_terms(app)})),
         "help.systemInfo" => {
             let mut fields = serde_json::Map::new();
             fields.insert("systemInfo".into(), json!(true));
@@ -760,7 +766,8 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     match id {
         "window.panel.activate" | "window.panel.layout" => true,
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
-        "file.open" | "file.openDeep" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
+        "file.open" | "file.openDeep" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.terms" | "help.systemInfo"
+        | "edit.search" => true,
         "type.loadFonts" | "type.loadFontFolder" | "type.manageFonts" => true,
         crate::ai_models_ui::COMMAND => true,
         i if i.starts_with("file.openRecent.") => true,

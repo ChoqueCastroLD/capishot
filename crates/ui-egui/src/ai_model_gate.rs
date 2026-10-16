@@ -16,7 +16,7 @@
 
 use photocraft_ai::catalog::{self, ModelInfo};
 use photocraft_ai::models::Status;
-use photocraft_engine::{ai_cmds, ai_inpaint_cmds, ai_models_cmds};
+use photocraft_engine::{ai_cmds, ai_inpaint_cmds, ai_models_cmds, genfill_cmds};
 use serde_json::{Map, Value, json};
 
 use crate::PhotocraftApp;
@@ -76,6 +76,37 @@ fn inpaint(app: &PhotocraftApp, params: &Value) -> Option<Target> {
     Some(Target { model, key: "allowDownload", state })
 }
 
+/// Generative Fill: its tier's files are several; the dialog names the first missing one (the
+/// Manager's Generative Fill group downloads them all).
+fn genfill(app: &mut PhotocraftApp, params: &Value) -> Option<Result<Value, String>> {
+    use photocraft_ai_sd::service::ModelState as M;
+    if params.get("allowDownload").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let first_missing = |app: &PhotocraftApp, tier| -> Option<&'static ModelInfo> {
+        let store = app.session.ai_models()?;
+        photocraft_ai_sd::files::tier(tier)?.files.iter().copied().find(|m| !store.status(m).is_downloaded())
+    };
+    let (tier, state) = genfill_cmds::model_state(&app.session, params)?;
+    if let M::NeedsDownload { .. } = state
+        && let Some(m) = first_missing(app, tier)
+    {
+        return Some(Ok(open(app, genfill_cmds::ID, m)));
+    }
+    app.ai_model_last = Some(genfill_cmds::ID.to_string());
+    Some(match app.run(genfill_cmds::ID, params.clone()) {
+        Err(e) if is_missing_error(&e) => match first_missing(app, tier) {
+            Some(m) => {
+                app.ui.status.clear();
+                app.ui.status_error = false;
+                Ok(open(app, genfill_cmds::ID, m))
+            }
+            None => Err(e),
+        },
+        r => r,
+    })
+}
+
 /// The engine's (or the AI worker's) "model not downloaded" error.
 fn is_missing_error(e: &str) -> bool {
     e.contains(ai_models_cmds::NOT_DOWNLOADED)
@@ -95,6 +126,9 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
 /// The gate for menu, palette, shortcut and tool runs; `None` for other commands (or a run that
 /// carries an agent's download consent).
 pub fn invoke(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+    if id == genfill_cmds::ID {
+        return genfill(app, params);
+    }
     Kind::of(id, params)?;
     forget_old_consents(app);
     // Quality, Device and the Advanced settings the user chose (AI Options…, the upscale dialog).
@@ -156,6 +190,7 @@ pub fn tool_name(id: &str) -> String {
     match id {
         "paint.remove" => tl!("Remove Tool").to_string(),
         ai_cmds::COMMAND => tl!("Upscale with AI…").trim_end_matches('…').trim_end_matches("...").to_string(),
+        genfill_cmds::ID => tl!("Generative Fill").to_string(),
         _ => tl!("Clean with AI").to_string(),
     }
 }

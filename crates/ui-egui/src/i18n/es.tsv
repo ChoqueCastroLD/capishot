@@ -3171,3 +3171,9 @@ cameraData	Lens	Objetivo
 	Download and delete AI models	Descargar y eliminar modelos de IA
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Borra el texto u onomatopeyas seleccionados y redibuja el fondo con IA en una capa nueva. Usa un modelo descargado (Ventana › Modelos de IA…).
 @plural	{n} more queued|{n} more queued	{n} más en cola|{n} más en cola
+	Generative Fill	Relleno generativo
+	Generative Fill…	Relleno generativo…
+	Terms of Use…	Términos de uso…
+	Variants:	Variantes:
+	Describe what to add (optional)	Describe qué añadir (opcional)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Inglés, español o portugués; vacío rellena con fondo. Se ejecuta en este dispositivo y al generar aceptas los Términos de uso.

@@ -17,6 +17,9 @@
 //!   (`rgb` interleaved, `mask` 0/1, both `Float32Array`s, transferred); the reply's `data`
 //!   is the interleaved RGB output (`channels` 3). `unload` frees the model after the run.
 //!
+//! * `{type: "genfill", …}`: Generative Fill (see [`genfill`]); the tier's files are streamed
+//!   from Cache Storage into GPU buffers (never whole in the module's memory) and stay loaded.
+//!
 //! * `{type: "download", model, base}`: downloads catalog model `model`'s weight file from
 //!   `base` into Cache Storage (streamed, hashed as it arrives, verified, then stored with an
 //!   `x-capishot-sha256` header), for the AI Model Manager. The page runs downloads in a worker
@@ -120,6 +123,7 @@ pub fn start() {
             Some("run") => wasm_bindgen_futures::spawn_local(run(data)),
             Some("inpaint") => wasm_bindgen_futures::spawn_local(inpaint(data)),
             Some("download") => wasm_bindgen_futures::spawn_local(download(data)),
+            Some("genfill") => wasm_bindgen_futures::spawn_local(genfill(data)),
             _ => {}
         }
     });
@@ -519,4 +523,197 @@ async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>,
         STATE.with(|s| s.borrow_mut().inpaint = None);
     }
     Ok((out?, w, h, p.device))
+}
+
+// ------------------------------------------------------------------ Generative Fill
+
+// Generative Fill models loaded on the device, and the tier they serve.
+#[cfg(not(target_feature = "atomics"))]
+thread_local! {
+    static GENFILL: RefCell<Option<(photocraft_ai_sd::service::Tier, Rc<photocraft_ai_sd::runner::Models>)>> = const { RefCell::new(None) };
+}
+
+/// `{type: "genfill", id, tier, base, download, cpu, unload, width, height, rgb, mask, prompt,
+/// negative, variants, seed, steps, strength, guidance}` → `{type: "gf-done", id, width, height,
+/// variants: [Float32Array…], device}` (interleaved RGB per variant, transferred) or `error`.
+async fn genfill(msg: JsValue) {
+    let id = get(&msg, "id").as_f64().unwrap_or(0.0);
+    #[cfg(not(target_feature = "atomics"))]
+    let r = genfill_inner(&msg, id).await;
+    #[cfg(target_feature = "atomics")]
+    let r: std::result::Result<(Vec<Vec<f32>>, usize, usize, String), String> = Err("Generative Fill runs on WebGPU, not in the CPU threads worker".into());
+    match r {
+        Ok((outs, w, h, device)) => {
+            let arr = Array::new();
+            let transfer = Array::new();
+            for o in &outs {
+                let a = Float32Array::from(o.as_slice());
+                transfer.push(&a.buffer());
+                arr.push(&a);
+            }
+            let o = obj(&[
+                ("type", "gf-done".into()),
+                ("id", id.into()),
+                ("width", (w as f64).into()),
+                ("height", (h as f64).into()),
+                ("variants", arr.into()),
+                ("device", device.into()),
+            ]);
+            if let Err(e) = scope().post_message_with_transfer(&o, &transfer) {
+                web_sys::console::error_2(&"AI worker: postMessage failed".into(), &e);
+            }
+        }
+        Err(e) => post(&obj(&[("type", "error".into()), ("id", id.into()), ("message", e.into())]), None),
+    }
+}
+
+#[cfg(not(target_feature = "atomics"))]
+async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f32>>, usize, usize, String), String> {
+    use photocraft_ai_sd::runner::{Loader, generate, precision};
+    use photocraft_ai_sd::service::Tier;
+    let tier = get(msg, "tier").as_string().and_then(|t| Tier::from_id(&t)).ok_or("bad tier")?;
+    let files = photocraft_ai_sd::files::tier(tier).ok_or_else(|| format!("the {} tier isn't available yet", tier.id()))?;
+    let base = get(msg, "base").as_string().unwrap_or_default();
+    let download = get(msg, "download").as_bool().unwrap_or(false);
+    let cpu = get(msg, "cpu").as_bool().unwrap_or(false);
+    let num = |k: &str| get(msg, k).as_f64().filter(|v| v.is_finite() && *v >= 0.0);
+    let dim = |k: &str| num(k).filter(|v| *v >= 1.0).map(|v| v as usize).ok_or_else(|| format!("bad {k}"));
+    let (w, h) = (dim("width")?, dim("height")?);
+    let arr = |k: &str| get(msg, k).dyn_into::<Float32Array>().map(|a| a.to_vec()).map_err(|_| format!("no {k}"));
+    let (rgb, mask) = (arr("rgb")?, arr("mask")?);
+    let text = |k: &str| get(msg, k).as_string().unwrap_or_default();
+    let mut p = Posting::new(id);
+    let reuse = GENFILL.with(|g| g.borrow().clone()).filter(|(t, _)| *t == tier);
+    let models = match reuse {
+        Some((_, m)) => m,
+        None => {
+            GENFILL.with(|g| *g.borrow_mut() = None);
+            let rt = runtime(cpu).await.map_err(|e| e.to_string())?;
+            if rt.accel() != photocraft_ai::runtime::Accel::Gpu {
+                return Err("Generative Fill needs WebGPU (no usable GPU here); use Clean with AI instead".into());
+            }
+            let dtype = precision(rt.device(), false);
+            let mut loader = Loader::new(rt.device(), dtype).map_err(|e| e.to_string())?;
+            let total: u64 = files.bytes().max(1);
+            let mut done = 0u64;
+            for &f in &files.files {
+                if download && !is_cached(f, &base).await {
+                    let status = format!("Downloading {}", f.title);
+                    let start = done;
+                    let url = f.url(&base);
+                    let blob =
+                        fetch_verified(&url, f, &mut |d, _| p.send(0.15 * (start + d) as f32 / total as f32, &status)).await.map_err(|e| e.to_string())?;
+                    if let Some(cache) = open_cache().await {
+                        store(&cache, &url, f, &blob).await.map_err(|e| format!("couldn't store {}: {e}", f.title))?;
+                    }
+                }
+                let start = done;
+                stream_into(&mut loader, f, &base, &mut |d| p.send(0.15 * (start + d) as f32 / total as f32, "Loading Generative Fill")).await?;
+                done += f.bytes;
+            }
+            p.send(0.16, "Preparing Generative Fill");
+            let m = Rc::new(loader.finish().map_err(|e| e.to_string())?);
+            GENFILL.with(|g| *g.borrow_mut() = Some((tier, m.clone())));
+            m
+        }
+    };
+    p.device = STATE.with(|s| s.borrow().device.clone());
+    let req = photocraft_ai_sd::service::Request {
+        rgb,
+        mask,
+        width: w,
+        height: h,
+        prompt: text("prompt"),
+        negative: text("negative"),
+        variants: num("variants").map_or(1, |v| v as usize),
+        seed: num("seed").map_or(0, |v| v as u64),
+        steps: num("steps").map_or(0, |v| v as usize),
+        strength: num("strength").unwrap_or(1.0),
+        guidance: num("guidance").unwrap_or(0.0) as f32,
+        tier,
+        allow_download: download,
+        cpu,
+        threads: 0,
+        unload: false,
+    };
+    let params = photocraft_ai_sd::runner::params(&req, &models);
+    let total = params.steps.max(1) as f32;
+    let status = format!("Generating ({})", p.device);
+    p.send(0.18, &status);
+    let out = generate(&models, &params, &mut |d, _| {
+        p.send(0.18 + 0.8 * d as f32 / total, &status);
+        true
+    })
+    .await
+    .map_err(|e| e.to_string());
+    if get(msg, "unload").as_bool().unwrap_or(false) {
+        GENFILL.with(|g| *g.borrow_mut() = None);
+    }
+    Ok((out?, w, h, p.device))
+}
+
+/// Whether `model`'s file is in Cache Storage.
+#[cfg(not(target_feature = "atomics"))]
+async fn is_cached(model: &ModelInfo, base: &str) -> bool {
+    let Some(cache) = open_cache().await else { return false };
+    matches!(JsFuture::from(cache.match_with_str(&model.url(base))).await, Ok(v) if !v.is_undefined() && !v.is_null())
+}
+
+/// Streams one cached file into `loader` chunk by chunk (never whole in the wasm heap), hashing
+/// it on the way; a file whose checksum doesn't match is deleted and reported.
+#[cfg(not(target_feature = "atomics"))]
+async fn stream_into(
+    loader: &mut photocraft_ai_sd::runner::Loader,
+    model: &'static ModelInfo,
+    base: &str,
+    progress: &mut dyn FnMut(u64),
+) -> std::result::Result<(), String> {
+    use sha2::Digest;
+    let url = model.url(base);
+    let missing = || format!("{} isn't downloaded", model.title);
+    let cache = open_cache().await.ok_or_else(missing)?;
+    let resp: Response = JsFuture::from(cache.match_with_str(&url)).await.ok().and_then(|r| r.dyn_into().ok()).ok_or_else(missing)?;
+    let body = resp.body().ok_or_else(missing)?;
+    let reader: ReadableStreamDefaultReader = body.get_reader().dyn_into().map_err(|_| "no reader".to_string())?;
+    let mut parser = photocraft_ai_sd::stream::StreamParser::new();
+    let mut sink: Option<photocraft_ai_sd::runner::FileSink> = None;
+    let mut hash = sha2::Sha256::new();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut done = 0u64;
+    let mut throttle = Throttle::default();
+    loop {
+        let chunk = JsFuture::from(reader.read()).await.map_err(js_err)?;
+        if get(&chunk, "done").as_bool().unwrap_or(true) {
+            break;
+        }
+        let v: Uint8Array = get(&chunk, "value").dyn_into().map_err(|_| "bad chunk".to_string())?;
+        buf.resize(v.length() as usize, 0);
+        v.copy_to(&mut buf);
+        done = done.saturating_add(buf.len() as u64);
+        if done > model.bytes {
+            let _ = reader.cancel();
+            break;
+        }
+        hash.update(&buf);
+        let ts = parser.push(&buf).map_err(|e| e.to_string())?;
+        if sink.is_none() && !parser.metadata().is_empty() {
+            sink = Some(loader.open(parser.metadata()).map_err(|e| e.to_string())?);
+        }
+        if let Some(s) = sink.as_mut() {
+            for t in &ts {
+                s.tensor(t).map_err(|e| e.to_string())?;
+            }
+        }
+        if throttle.ready(now_ms()) {
+            progress(done);
+        }
+    }
+    let actual: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if done != model.bytes || actual != model.sha256 || !parser.finished() {
+        let _ = JsFuture::from(cache.delete_with_str(&url)).await;
+        return Err(format!("{} is damaged; download it again in Window › AI Models…", model.title));
+    }
+    let sink = sink.ok_or_else(|| format!("{} isn't a Generative Fill file", model.title))?;
+    loader.close(sink).map_err(|e| e.to_string())?;
+    Ok(())
 }
