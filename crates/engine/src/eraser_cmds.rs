@@ -128,7 +128,55 @@ fn magic_eraser(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// `paint.backgroundEraser`: a stroke erasing colours similar to the sampled one.
 fn background_eraser(s: &mut Session, p: &Value) -> Result<Value> {
-    const CMD: &str = "paint.backgroundEraser";
+    let (stroke, bs, id) = background_eraser_stroke(s, p)?;
+    // The live stroke drawn on the canvas offered its pixels: take them instead of running every
+    // dab again (the hitch at pen-up).
+    let as_drawn = photocraft_paint::bg_erase::background_eraser_stroke(&stroke);
+    if let Some(live) = s.live_dab.take().filter(|l| l.matches(s, BG_CMD, p, &as_drawn)) {
+        let (pixels, bounds) = live.into_parts();
+        let dmg = s.edit("Background Eraser", |doc, _| {
+            let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+            unlock_background(l);
+            let surf = l.surface_mut().ok_or_else(|| bad(BG_CMD, "not a pixel layer"))?;
+            *surf = pixels;
+            Ok(bounds)
+        })?;
+        let mut v = damage(s, dmg, true);
+        v["fromLive"] = json!(true);
+        return Ok(v);
+    }
+    let dmg = s.edit("Background Eraser", |doc, _| {
+        let selection = doc.selection.clone();
+        let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+        unlock_background(l);
+        let surf = l.surface_mut().ok_or_else(|| bad(BG_CMD, "not a pixel layer"))?;
+        Ok(apply_background_eraser(surf, &stroke, &bs, selection.as_ref()))
+    })?;
+    Ok(damage(s, dmg, true))
+}
+
+const BG_CMD: &str = "paint.backgroundEraser";
+
+/// A Background Eraser stroke shown while it is drawn (`retouch_cmds::LiveDab`): the same dabs
+/// and effect as the command, on a working copy; offered to the commit on release
+/// (`Session::offer_live_dab`), which then takes its pixels. `p` are the command's params.
+pub fn live_background_eraser(s: &Session, p: &Value) -> Result<crate::retouch_cmds::LiveDab> {
+    let (stroke, bs, id) = background_eraser_stroke(s, p)?;
+    let fmt = s.active().and_then(|d| d.doc.layer(id)).and_then(|l| l.surface()).map(|s| s.format()).ok_or_else(|| bad(BG_CMD, "not a pixel layer"))?;
+    if photocraft_paint::retouch::alpha_index(&fmt).is_none() {
+        return Err(bad(BG_CMD, "the layer has no transparency"));
+    }
+    let live_stroke = photocraft_paint::bg_erase::background_eraser_stroke(&stroke);
+    crate::retouch_cmds::LiveDab::with_effect_lock(s, BG_CMD, p, live_stroke, Some(id), 0, false, false, |pre| {
+        let effect = photocraft_paint::bg_erase::background_eraser_effect(&pre.format(), &bs).ok_or_else(|| bad(BG_CMD, "the layer has no transparency"))?;
+        Ok(Box::new(effect) as crate::retouch_cmds::DabEffect)
+    })
+}
+
+/// The Background Eraser's stroke, settings and layer from its params, after the checks that
+/// refuse it.
+fn background_eraser_stroke(s: &Session, p: &Value) -> Result<(Stroke, BgEraseSettings, LayerId)> {
+    const CMD: &str = BG_CMD;
     let pts = crate::brush_cmds::parse_points(p, CMD)?;
     if pts.iter().any(|q| !q.x.is_finite() || !q.y.is_finite() || q.x.abs() > 1e7 || q.y.abs() > 1e7) {
         return Err(bad(CMD, "`points` must be finite canvas coordinates"));
@@ -153,15 +201,7 @@ fn background_eraser(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(EngineError::Other(format!("Could not use the Background Eraser because the transparency of layer \"{}\" is locked", l.name)));
         }
     }
-    let stroke = Stroke { brush, points: pts };
-    let dmg = s.edit("Background Eraser", |doc, _| {
-        let selection = doc.selection.clone();
-        let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-        unlock_background(l);
-        let surf = l.surface_mut().ok_or_else(|| bad(CMD, "not a pixel layer"))?;
-        Ok(apply_background_eraser(surf, &stroke, &bs, selection.as_ref()))
-    })?;
-    Ok(damage(s, dmg, true))
+    Ok((Stroke { brush, points: pts }, bs, id))
 }
 
 /// Eraser-group command specs.
