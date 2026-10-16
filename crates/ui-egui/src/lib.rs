@@ -905,6 +905,12 @@ impl PhotocraftApp {
         self.gpu.as_ref().map(|g| g.health().clone())
     }
 
+    /// Run `done` once the GPU has finished all work submitted so far (frame timing: submit to
+    /// completion). False without a GPU canvas.
+    pub fn on_gpu_done(&self, done: impl FnOnce() + Send + 'static) -> bool {
+        self.gpu.as_ref().is_some_and(|g| g.on_done(done))
+    }
+
     /// Run `hook` once the app has rendered its first frames (and a document opened at launch
     /// has drawn): the desktop app clears its crash-safe GPU startup marker there.
     pub fn on_started(&mut self, hook: impl FnOnce(&mut PhotocraftApp) + 'static) {
