@@ -2086,7 +2086,6 @@ fn font_metadata_append_reorder_and_duplicate_indices() {
     }
 }
 
-
 /// A word wider than its paragraph box wraps at the box edge instead of running past it (#6694);
 /// a normal break opportunity still wins, and a box that fits the word lays out exactly as before.
 #[test]
