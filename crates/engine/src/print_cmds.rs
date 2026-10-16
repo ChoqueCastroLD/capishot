@@ -447,7 +447,9 @@ fn require_windows_pdf() -> Result<()> {
     if windows_pdf_installed(std::path::Path::new(&root)) {
         Ok(())
     } else {
-        Err(other("printing this page needs the Windows PDF component (Windows.Data.Pdf.dll), which is not installed. Save as PDF and print it from another app, or clear Print Settings to print directly."))
+        Err(other(
+            "printing this page needs the Windows PDF component (Windows.Data.Pdf.dll), which is not installed. Save as PDF and print it from another app, or clear Print Settings to print directly.",
+        ))
     }
 }
 
