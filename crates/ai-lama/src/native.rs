@@ -194,12 +194,16 @@ impl Inpainter for NativeInpainter {
                 out
             })
         }));
+        // On the GPU, a failure is the GPU's: the caller runs the request again on the CPU.
+        let on_gpu = !req.cpu && self.model.lock().unwrap_or_else(PoisonError::into_inner).as_ref().is_none_or(|(_, cpu, _)| !*cpu) && self.device() != "CPU";
         let result = match run {
+            Ok(Err(LamaError::Device(e))) if on_gpu => Err(LamaError::Gpu(e)),
             Ok(r) => r,
             Err(panic) => {
                 *self.model.lock().unwrap_or_else(PoisonError::into_inner) = None;
                 let why = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
-                Err(LamaError::Device(format!("the inference backend failed: {why}")))
+                let why = format!("the inference backend failed: {why}");
+                Err(if on_gpu { LamaError::Gpu(why) } else { LamaError::Device(why) })
             }
         };
         hooks.progress(1.0, "");
