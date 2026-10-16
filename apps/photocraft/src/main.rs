@@ -149,10 +149,113 @@ fn parse_control_port(value: &str, source: &str) -> Result<u16, String> {
     value.trim().parse().map_err(|_| format!("{source}: `{value}` is not a valid port (expected a number from 0 to 65535)"))
 }
 
-/// Process exit status for the collected `--control` / `PHOTOCRAFT_CONTROL_PORT` errors: `None`
-/// when there are none, else 2 (a command-line usage error), never 0.
+/// Process exit status for the collected control/automation argument errors: `None` when there
+/// are none, else 2 (a command-line usage error), never 0.
 fn control_args_exit_code(errors: &[String]) -> Option<i32> {
     if errors.is_empty() { None } else { Some(2) }
+}
+
+/// Everything the desktop launcher takes from the command line, on top of the environment
+/// defaults handed in to `parse_launch_args`.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct LaunchArgs {
+    control_port: Option<u16>,
+    control_token: Option<String>,
+    control_token_file: Option<std::path::PathBuf>,
+    automation_read_root: Option<std::path::PathBuf>,
+    automation_write_root: Option<std::path::PathBuf>,
+    files: Vec<String>,
+    /// Arguments that are not valid Unicode (issue #1108): a file manager can hand over a Latin-1
+    /// file name on Linux, and `std::env::args()` would panic before any window opened. Paths are
+    /// reported in a notice once the app is up; a control token is a usage error like a bad port.
+    unreadable_paths: Vec<String>,
+    safe_gpu: bool,
+    new_instance: bool,
+    /// Options that apply only to the process they're given to; a launch with any keeps its own.
+    launch_options: Vec<&'static str>,
+    present_mode_arg: Option<String>,
+    frame_latency_arg: Option<String>,
+    stroke_trace_arg: Option<String>,
+    in_window_menus: bool,
+    version: bool,
+    /// Usage errors in the control/automation flags; a non-empty list fails the launch (issue #701).
+    errors: Vec<String>,
+}
+
+/// Parse the desktop launch arguments over the environment defaults in `out`. A control or
+/// automation flag with no value is a usage error naming the flag (issue #6429), never a silent
+/// fall back to a generated token or to no root: like `--control` with a bad port, it exits 2.
+fn parse_launch_args(args: impl Iterator<Item = std::ffi::OsString>, mut out: LaunchArgs) -> LaunchArgs {
+    let mut args = args;
+    while let Some(a) = args.next() {
+        match a.to_str() {
+            Some("--control") => match args.next() {
+                Some(value) => match parse_control_port(&value.to_string_lossy(), "--control") {
+                    Ok(port) => out.control_port = Some(port),
+                    Err(error) => out.errors.push(error),
+                },
+                None => out.errors.push("--control: missing port value (expected `--control <port>`)".to_string()),
+            },
+            Some("--control-token") => match args.next().map(std::ffi::OsString::into_string) {
+                Some(Ok(token)) => out.control_token = Some(token),
+                Some(Err(raw)) => out.errors.push(format!("--control-token: value is not valid Unicode (`{}`)", raw.to_string_lossy())),
+                None => out.errors.push("--control-token: missing token value (expected `--control-token <token>`)".to_string()),
+            },
+            Some("--control-token-file") => match args.next() {
+                Some(value) => out.control_token_file = Some(std::path::PathBuf::from(value)),
+                None => out.errors.push("--control-token-file: missing file path value (expected `--control-token-file <path>`)".to_string()),
+            },
+            Some("--automation-read-root") => {
+                out.launch_options.push("--automation-read-root");
+                match args.next() {
+                    Some(value) => out.automation_read_root = Some(std::path::PathBuf::from(value)),
+                    None => out.errors.push("--automation-read-root: missing directory value (expected `--automation-read-root <dir>`)".to_string()),
+                }
+            }
+            Some("--automation-write-root") => {
+                out.launch_options.push("--automation-write-root");
+                match args.next() {
+                    Some(value) => out.automation_write_root = Some(std::path::PathBuf::from(value)),
+                    None => out.errors.push("--automation-write-root: missing directory value (expected `--automation-write-root <dir>`)".to_string()),
+                }
+            }
+            Some("--safe-gpu") => {
+                out.launch_options.push("--safe-gpu");
+                out.safe_gpu = true;
+            }
+            Some(flag @ ("--present-mode" | "--frame-latency" | "--stroke-trace")) => {
+                out.launch_options.push(match flag {
+                    "--present-mode" => "--present-mode",
+                    "--frame-latency" => "--frame-latency",
+                    _ => "--stroke-trace",
+                });
+                let flag = flag.to_string();
+                match args.next().map(std::ffi::OsString::into_string) {
+                    Some(Ok(v)) => match flag.as_str() {
+                        "--present-mode" => out.present_mode_arg = Some(v),
+                        "--frame-latency" => out.frame_latency_arg = Some(v),
+                        _ => out.stroke_trace_arg = Some(v),
+                    },
+                    // A bad value is reported and ignored; it never fails the launch.
+                    _ => eprintln!("photocraft: {flag}: missing or unreadable value; ignored"),
+                }
+            }
+            Some("--in-window-menus") => {
+                out.launch_options.push("--in-window-menus");
+                out.in_window_menus = true;
+            }
+            Some("--new-instance") => out.new_instance = true,
+            Some("--version") => {
+                out.version = true;
+                break;
+            }
+            // Old macOS passes a process serial number when launched from Finder.
+            Some(s) if s.starts_with("-psn_") => {}
+            Some(s) => out.files.push(s.to_owned()),
+            None => out.unreadable_paths.push(a.to_string_lossy().into_owned()),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -184,105 +287,120 @@ mod control_port_tests {
     }
 }
 
+#[cfg(test)]
+mod launch_args_tests {
+    use super::{control_args_exit_code, parse_launch_args, LaunchArgs};
+    use std::ffi::OsString;
+
+    fn parse(values: &[&str]) -> LaunchArgs {
+        parse_launch_args(values.iter().map(OsString::from), LaunchArgs::default())
+    }
+
+    #[test]
+    fn flags_without_a_value_are_usage_errors() {
+        // Issue #6429: a missing value must fail the launch, not silently fall back to a
+        // generated token or to no root.
+        for flag in ["--control", "--control-token", "--control-token-file", "--automation-read-root", "--automation-write-root"] {
+            let parsed = parse(&[flag]);
+            assert_eq!(parsed.errors.len(), 1, "{flag}: {:?}", parsed.errors);
+            assert!(parsed.errors[0].starts_with(flag), "{}", parsed.errors[0]);
+            assert!(parsed.errors[0].contains("missing"), "{}", parsed.errors[0]);
+            assert_eq!(control_args_exit_code(&parsed.errors), Some(2));
+        }
+    }
+
+    #[test]
+    fn missing_value_does_not_clear_an_environment_default() {
+        // `--automation-read-root` with no value must not drop a root set through the env var.
+        let defaults = LaunchArgs {
+            automation_read_root: Some("/env/read".into()),
+            automation_write_root: Some("/env/write".into()),
+            ..Default::default()
+        };
+        let parsed = parse_launch_args(["--automation-read-root"].iter().map(OsString::from), defaults);
+        assert_eq!(parsed.automation_read_root.as_deref(), Some(std::path::Path::new("/env/read")));
+        assert_eq!(parsed.automation_write_root.as_deref(), Some(std::path::Path::new("/env/write")));
+        assert_eq!(parsed.errors.len(), 1, "{:?}", parsed.errors);
+    }
+
+    #[test]
+    fn values_are_parsed_and_no_errors_remain() {
+        let parsed = parse(&["--control", "50494", "--control-token", "abcd", "--control-token-file", "/tmp/token", "--automation-read-root", "/r", "--automation-write-root", "/w", "--safe-gpu", "--in-window-menus", "--new-instance", "--present-mode", "mailbox", "photo.psd"]);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        assert_eq!(parsed.control_port, Some(50494));
+        assert_eq!(parsed.control_token.as_deref(), Some("abcd"));
+        assert_eq!(parsed.control_token_file.as_deref(), Some(std::path::Path::new("/tmp/token")));
+        assert_eq!(parsed.automation_read_root.as_deref(), Some(std::path::Path::new("/r")));
+        assert_eq!(parsed.automation_write_root.as_deref(), Some(std::path::Path::new("/w")));
+        assert!(parsed.safe_gpu);
+        assert!(parsed.in_window_menus);
+        assert!(parsed.new_instance);
+        assert_eq!(parsed.present_mode_arg.as_deref(), Some("mailbox"));
+        assert_eq!(parsed.launch_options, vec!["--automation-read-root", "--automation-write-root", "--safe-gpu", "--in-window-menus", "--present-mode"]);
+        assert_eq!(parsed.files, vec!["photo.psd".to_string()]);
+    }
+
+    #[test]
+    fn version_stops_parsing() {
+        let parsed = parse(&["--version", "--control"]);
+        assert!(parsed.version);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    }
+}
+
 fn main() -> eframe::Result {
     // First, so the panic hook and every start-up warning are recorded (`logging`).
     let logger = logging::install();
     crash_guard::install_hook();
     // The system font scan can take seconds (minutes on some Macs): run it off the UI thread.
     photocraft_ui_egui::type_tool::warm_fonts();
-    let mut control_port: Option<u16> = None;
-    let mut control_arg_errors: Vec<String> = Vec::new();
+    let mut launch = LaunchArgs {
+        automation_read_root: std::env::var_os("PHOTOCRAFT_AUTOMATION_READ_ROOT").map(std::path::PathBuf::from),
+        automation_write_root: std::env::var_os("PHOTOCRAFT_AUTOMATION_WRITE_ROOT").map(std::path::PathBuf::from),
+        in_window_menus: std::env::var_os("PHOTOCRAFT_IN_WINDOW_MENUS").is_some_and(|v| !v.is_empty() && v != "0"),
+        ..Default::default()
+    };
     if let Some(value) = std::env::var("PHOTOCRAFT_CONTROL_PORT").ok().filter(|v| !v.trim().is_empty()) {
         match parse_control_port(&value, "PHOTOCRAFT_CONTROL_PORT") {
-            Ok(port) => control_port = Some(port),
-            Err(error) => control_arg_errors.push(error),
+            Ok(port) => launch.control_port = Some(port),
+            Err(error) => launch.errors.push(error),
         }
     }
-    let mut control_token = None;
-    let mut control_token_file = None;
-    let mut automation_read_root = std::env::var_os("PHOTOCRAFT_AUTOMATION_READ_ROOT").map(std::path::PathBuf::from);
-    let mut automation_write_root = std::env::var_os("PHOTOCRAFT_AUTOMATION_WRITE_ROOT").map(std::path::PathBuf::from);
-    let mut files = Vec::new();
-    // Arguments that are not valid Unicode (issue #1108): a file manager can hand over a Latin-1
-    // file name on Linux, and `std::env::args()` would panic before any window opened. Paths are
-    // reported in a notice once the app is up; a control token is a usage error like a bad port.
-    let mut unreadable_paths: Vec<String> = Vec::new();
-    let mut safe_gpu = false;
-    let mut new_instance = false;
-    // Options that apply only to the process they're given to; a launch with any keeps its own.
-    let mut launch_options: Vec<&'static str> = Vec::new();
-    let (mut present_mode_arg, mut frame_latency_arg, mut stroke_trace_arg): (Option<String>, Option<String>, Option<String>) = (None, None, None);
-    let mut in_window_menus = std::env::var_os("PHOTOCRAFT_IN_WINDOW_MENUS").is_some_and(|v| !v.is_empty() && v != "0");
-    let mut args = std::env::args_os().skip(1);
-    while let Some(a) = args.next() {
-        match a.to_str() {
-            Some("--control") => match args.next() {
-                Some(value) => match parse_control_port(&value.to_string_lossy(), "--control") {
-                    Ok(port) => control_port = Some(port),
-                    Err(error) => control_arg_errors.push(error),
-                },
-                None => control_arg_errors.push("--control: missing port value (expected `--control <port>`)".to_string()),
-            },
-            Some("--control-token") => match args.next().map(std::ffi::OsString::into_string) {
-                Some(Ok(token)) => control_token = Some(token),
-                Some(Err(raw)) => control_arg_errors.push(format!("--control-token: value is not valid Unicode (`{}`)", raw.to_string_lossy())),
-                None => control_token = None,
-            },
-            Some("--control-token-file") => control_token_file = args.next().map(std::path::PathBuf::from),
-            Some("--automation-read-root") => {
-                launch_options.push("--automation-read-root");
-                automation_read_root = args.next().map(std::path::PathBuf::from);
-            }
-            Some("--automation-write-root") => {
-                launch_options.push("--automation-write-root");
-                automation_write_root = args.next().map(std::path::PathBuf::from);
-            }
-            Some("--safe-gpu") => {
-                launch_options.push("--safe-gpu");
-                safe_gpu = true;
-            }
-            Some(flag @ ("--present-mode" | "--frame-latency" | "--stroke-trace")) => {
-                launch_options.push(match flag {
-                    "--present-mode" => "--present-mode",
-                    "--frame-latency" => "--frame-latency",
-                    _ => "--stroke-trace",
-                });
-                let flag = flag.to_string();
-                match args.next().map(std::ffi::OsString::into_string) {
-                    Some(Ok(v)) => match flag.as_str() {
-                        "--present-mode" => present_mode_arg = Some(v),
-                        "--frame-latency" => frame_latency_arg = Some(v),
-                        _ => stroke_trace_arg = Some(v),
-                    },
-                    // A bad value is reported and ignored; it never fails the launch.
-                    _ => eprintln!("photocraft: {flag}: missing or unreadable value; ignored"),
-                }
-            }
-            Some("--in-window-menus") => {
-                launch_options.push("--in-window-menus");
-                in_window_menus = true;
-            }
-            Some("--new-instance") => new_instance = true,
-            Some("--version") => {
-                println!("photocraft {}", photocraft_engine::build_info::long_version());
-                return Ok(());
-            }
-            // Old macOS passes a process serial number when launched from Finder.
-            Some(s) if s.starts_with("-psn_") => {}
-            Some(s) => files.push(s.to_owned()),
-            None => unreadable_paths.push(a.to_string_lossy().into_owned()),
-        }
+    launch = parse_launch_args(std::env::args_os().skip(1), launch);
+    if launch.version {
+        println!("photocraft {}", photocraft_engine::build_info::long_version());
+        return Ok(());
     }
 
-    // A malformed control port must not silently drop the control server (issue #701): name the
-    // bad value and fail the launch, like `photocraft-cli serve --port` does for the same typo.
-    // Exit status 2 is the usual command-line usage error, so a launcher sees the failure.
-    if let Some(code) = control_args_exit_code(&control_arg_errors) {
-        for error in &control_arg_errors {
+    // A malformed control port must not silently drop the control server (issue #701), and a
+    // control or automation flag without its value must not silently fall back to a generated
+    // token or to no root (issue #6429): name the flag and fail the launch, like
+    // `photocraft-cli serve --port` does for the same typo. Exit status 2 is the usual
+    // command-line usage error, so a launcher sees the failure.
+    if let Some(code) = control_args_exit_code(&launch.errors) {
+        for error in &launch.errors {
             eprintln!("photocraft: {error}");
         }
         std::process::exit(code);
     }
+    let LaunchArgs {
+        control_port,
+        control_token,
+        control_token_file,
+        automation_read_root,
+        automation_write_root,
+        files,
+        unreadable_paths,
+        safe_gpu,
+        new_instance,
+        launch_options,
+        present_mode_arg,
+        frame_latency_arg,
+        stroke_trace_arg,
+        in_window_menus,
+        version: _,
+        errors: _,
+    } = launch;
 
     // The log file lives under the settings directory; opened after the arguments, so `--version`
     // and usage errors leave no file behind. Records logged until now are written to it first.
