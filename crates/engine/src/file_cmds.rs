@@ -340,6 +340,8 @@ pub(crate) fn encode(doc: &Document, path: &str, save: impl Into<SaveOpts>) -> R
         tga_bits: save.tga_bits,
         image_previews: save.image_previews,
         psd_maximize_compatibility: save.psd_maximize_compatibility,
+        // Linked files a PSD embeds are resolved against the document being worked on.
+        document_path: crate::doc_path::current(),
         ..Default::default()
     };
     // No quality chosen: write the file the way it was opened (a JPEG at its own quality, a WebP

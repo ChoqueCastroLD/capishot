@@ -127,3 +127,21 @@ fn package_copies_only_followed_links() {
     assert_eq!(links.len(), 1);
     assert!(links[0].as_str().unwrap().ends_with("red.png"), "{links:?}");
 }
+
+#[test]
+fn psd_saves_embed_only_followed_links() {
+    let d = dir("psd");
+    png(&d.join("red.png"), |_| [255, 0, 0]);
+    let (mut s, id) = document(&d, &d.join("red.png"));
+    relink(&mut s, id, "red.png");
+    s.execute("file.placeLinked", json!({"path": d.join("red.png").to_string_lossy()})).unwrap();
+    let other = s.active().unwrap().active_layer.unwrap();
+    relink(&mut s, other, REMOTE);
+    let warnings = |r: serde_json::Value| r["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let saved = warnings(s.execute("file.saveACopy", json!({"path": d.join("copy.psd").to_string_lossy()})).unwrap());
+    assert!(saved.iter().any(|w| w.contains("red.png was embedded")), "{saved:?}");
+    assert!(saved.iter().any(|w| w.contains("is not opened: the path is on another computer")), "{saved:?}");
+    // Package as PSD writes the copy of the document, whose remote link stays as it was.
+    let packaged = warnings(s.execute("file.package", json!({"dir": d.join("pkg").to_string_lossy(), "format": "psd"})).unwrap());
+    assert!(packaged.iter().any(|w| w.contains("is not opened: the path is on another computer")), "{packaged:?}");
+}
