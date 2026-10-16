@@ -115,6 +115,45 @@ pub struct GpuCanvas {
     health: photocraft_gpu::DeviceHealth,
     /// Paces [`GpuCanvas::catch_up`]'s full-size refinement by GPU completion.
     refine: RefinePacer,
+    /// Composites submitted and completed (see [`GpuCanvas::busy`]).
+    pace: CompositePacer,
+}
+
+/// At most one document composite queued on the GPU: while one runs, the next frame's edit is
+/// left for later ([`GpuCanvas::defer`]) instead of queueing behind it, so the frame that does
+/// composite shows the latest input (a GPU-bound page otherwise falls frames behind the pointer).
+#[derive(Clone, Default)]
+struct CompositePacer {
+    submitted: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    done: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// When the last one was submitted ([`now_ms`] bits).
+    at: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Whether the canvas leaves an edit for the next frame while the last composite still runs
+/// (`CompositePacer`): in the browser, where a GPU-bound page otherwise queues frames behind
+/// the pointer. The desktop app composites every frame (its frames wait for presentation).
+pub const PACE_COMPOSITES: bool = cfg!(target_arch = "wasm32");
+
+/// How long a composite may stay unfinished before the next goes anyway (a lost completion
+/// callback never stalls the canvas).
+pub const BUSY_LIMIT_MS: f64 = 250.0;
+
+impl CompositePacer {
+    fn submitted(&self, queue: &wgpu::Queue) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let token = self.submitted.fetch_add(1, Relaxed) + 1;
+        self.at.store(now_ms().to_bits(), Relaxed);
+        let done = self.done.clone();
+        queue.on_submitted_work_done(move || {
+            done.fetch_max(token, Relaxed);
+        });
+    }
+
+    fn busy(&self) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.done.load(Relaxed) < self.submitted.load(Relaxed) && now_ms() - f64::from_bits(self.at.load(Relaxed)) < BUSY_LIMIT_MS
+    }
 }
 
 /// One refinement piece in flight at a time; the work per piece (output pixels × passes) adapts
@@ -217,7 +256,7 @@ impl GpuCanvas {
         res.separate_mip_targets = rs.adapter.get_info().backend == wgpu::Backend::Dx12;
         rs.renderer.write().callback_resources.insert(stored(res));
         log::info!("gpu canvas: target {:?}, max texture {max}, tile {tile}, 16F canvas {high:?}", rs.target_format);
-        Self { rs: rs.clone(), tile, high, health, refine: RefinePacer::new() }
+        Self { rs: rs.clone(), tile, high, health, refine: RefinePacer::new(), pace: CompositePacer::default() }
     }
 
     /// Run `done` once the GPU has finished everything submitted so far. False once the device
@@ -623,6 +662,7 @@ impl GpuCanvas {
         };
         if result.is_ok() {
             d.regenerate_mips_from(device, queue, res, [region.x0 as u32, region.y0 as u32, region.x1 as u32, region.y1 as u32], level);
+            self.pace.submitted(queue);
             if std::env::var_os("PHOTOCRAFT_GPU_SYNC").is_some() {
                 // Benchmarking: wait for the GPU so callers can time the whole refresh.
                 #[cfg(not(target_arch = "wasm32"))]
@@ -770,6 +810,11 @@ impl GpuCanvas {
         };
         let encode_srgb = display.is_some_and(|d| d.encode_srgb);
         let t0 = now_ms();
+        if PACE_COMPOSITES && !urgent.is_empty() && self.busy() {
+            // Wait for the composite on the GPU (its completion asks for the frame).
+            self.wake_when_done(ctx);
+            return out;
+        }
         for r in urgent {
             let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
             match self.composite_lod(doc, r, encode_srgb, level, true) {
@@ -830,6 +875,29 @@ impl GpuCanvas {
     /// catches up on them before it draws.
     pub fn view_floor(&self, key: u64, visible: photocraft_geom::Rect) -> f32 {
         self.with_doc(key, |_, d| d.stale().floor(visible)).unwrap_or(0) as f32
+    }
+
+    /// Whether a document composite is still running on the GPU (submitted less than
+    /// [`BUSY_LIMIT_MS`] ago and not finished): callers then [`GpuCanvas::defer`] the next edit.
+    pub fn busy(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = self.rs.device.poll(wgpu::PollType::Poll);
+        self.pace.busy()
+    }
+
+    /// Leave `r` of document `key`'s texture out of date: [`GpuCanvas::catch_up`] composites it
+    /// on a later frame (at once where the view shows it).
+    pub fn defer(&self, key: u64, r: photocraft_geom::Rect) {
+        self.with_doc(key, |_, d| d.stale().defer(r));
+    }
+
+    /// Ask `ctx` for a frame once the GPU has finished everything queued so far.
+    pub fn wake_when_done(&self, ctx: &egui::Context) {
+        #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+        let wake = send_wrapper::SendWrapper::new(ctx.clone());
+        #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+        let wake = ctx.clone();
+        self.on_done(move || wake.request_repaint());
     }
 
     /// Whether document `key`'s texture has out-of-date regions (tests and diagnostics).

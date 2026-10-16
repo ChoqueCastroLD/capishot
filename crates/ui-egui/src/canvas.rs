@@ -1337,6 +1337,22 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
         return false;
     }
     let partial = present && damage.is_some();
+    if partial
+        && crate::gpu_canvas::PACE_COMPOSITES
+        && crate::gpu_canvas::reduced_refreshes()
+        && let Some(r) = damage.filter(|r| !r.is_empty())
+        && gpu.busy()
+    {
+        // The last composite is still on the GPU: this edit waits for it (catch_up draws it on
+        // the frame after), so frames don't queue up behind the pointer.
+        gpu.defer(id.0, r);
+        gpu.wake_when_done(ctx);
+        if let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) {
+            cache.revision = revision;
+            cache.preview_key = preview_key;
+        }
+        return true;
+    }
     gpu_budget(app, &gpu, idx, partial, visible);
     // A Move drag: the moving layers come from the pages already on the GPU, at the offset.
     gpu.set_translated(crate::move_ui::gpu_translations(app, idx));
