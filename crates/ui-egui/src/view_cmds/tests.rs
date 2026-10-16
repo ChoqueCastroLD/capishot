@@ -523,13 +523,19 @@ fn arranged_documents_keep_their_tiles() {
         assert!(shown.windows(2).all(|w| w[0].1.left() < w[1].1.left()), "document 0 on the left");
     }
     app.ui.view.arrange = "twoUpVertical".into();
+    // As `documents` draws them: the shown run is kept from frame to frame.
     let docs = |app: &mut PhotocraftApp, active: usize| {
         app.session.set_active(active);
-        crate::canvas::arranged_cells(app, rect).unwrap().iter().map(|(d, _)| *d).collect::<Vec<_>>()
+        let shown: Vec<usize> = crate::canvas::arranged_cells(app, rect).unwrap().iter().map(|(d, _)| *d).collect();
+        app.arrange_start = shown[0];
+        shown
     };
     assert_eq!(docs(&mut app, 0), vec![0, 1]);
     assert_eq!(docs(&mut app, 1), vec![0, 1], "the second tile's document stays on the right");
     assert_eq!(docs(&mut app, 2), vec![1, 2], "the third document slides in next to the second");
+    assert_eq!(docs(&mut app, 1), vec![1, 2], "a click into the visible document 1 leaves the tiles as they are");
+    assert_eq!(docs(&mut app, 0), vec![0, 1], "a hidden document slides in from the left");
+    assert_eq!(docs(&mut app, 1), vec![0, 1]);
 }
 
 /// #6017: rulers showed in the active tile only; the other tile had none and no room for them.

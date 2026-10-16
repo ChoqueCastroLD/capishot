@@ -2058,9 +2058,10 @@ pub(crate) fn arranged_cells(app: &PhotocraftApp, rect: Rect) -> Option<Vec<(usi
     let n = app.session.documents().len();
     let cells = crate::view_cmds::cells(&app.ui.view.arrange, rect, n)?;
     // Each document keeps its tile: a click into another one activates it where it is (#6017; it
-    // used to move to the first tile). With more documents than tiles, the shown run slides
-    // only as far as it must to include the active one.
-    let start = (idx + 1).saturating_sub(cells.len());
+    // used to move to the first tile). With more documents than tiles, the shown run stays put
+    // while the active document is in it, and otherwise slides only as far as it must.
+    let start = app.arrange_start.min(n.saturating_sub(cells.len()));
+    let start = if idx < start { idx } else { start.max((idx + 1).saturating_sub(cells.len())) };
     Some((start..n).zip(cells).collect())
 }
 
@@ -2107,6 +2108,7 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // Window › Arrange: tiled / n-up layouts show several documents side by side; the active one
     // takes input, a click elsewhere activates that document.
     if let Some(shown) = arranged_cells(app, rect) {
+        app.arrange_start = shown.first().map_or(0, |(d, _)| *d);
         let t = crate::theme::Tokens::get(ui.ctx());
         for (d, cell) in shown {
             let cell = cell.shrink(1.0);
