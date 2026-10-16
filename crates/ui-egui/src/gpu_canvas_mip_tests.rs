@@ -51,6 +51,7 @@ fn read_mips(gpu: &GpuCanvas, key: u64) -> Vec<Vec<[f32; 4]>> {
 
 #[test]
 fn canvas_mips_preserve_opaque_pixels_and_partial_updates() {
+    let _gpu = photocraft_testkit::gpu_lock();
     let rs = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| egui_kittest::wgpu::create_render_state(wgpu_setup(), Default::default())));
     let Ok(rs) = rs else {
         eprintln!("skipping mip readback: no GPU adapter");
@@ -78,9 +79,10 @@ fn canvas_textures_the_gpu_refuses_leave_it_working(gpu: &GpuCanvas) {
     {
         let mut renderer = gpu.rs.renderer.write();
         let res = renderer.callback_resources.get_mut::<Resources>().unwrap();
-        res.canvas_budget = u64::MAX;
+        res.canvas_budget.store(u64::MAX, Ordering::Relaxed);
         assert!(DocTextures::new(&gpu.rs.device, res, size, tile, FORMAT).is_none());
-        assert!(res.canvas_budget < bytes, "{} >= {bytes}", res.canvas_budget);
+        let budget = res.canvas_budget.load(Ordering::Relaxed);
+        assert!(budget < bytes, "{budget} >= {bytes}");
     }
     assert!(gpu.health.is_ok(), "{:?}", gpu.fault());
     // Smaller canvases still get GPU textures.
