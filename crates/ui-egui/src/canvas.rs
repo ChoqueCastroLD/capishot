@@ -1266,7 +1266,12 @@ pub(crate) fn effect_reach(layers: &[photocraft_doc::Layer]) -> i32 {
 /// GPU path: make sure document `idx` is current in the GPU canvas. Edits draw their damage;
 /// unchanged lower-stack composites can be reused by the compositor inside that region.
 /// Returns false if there is no GPU canvas.
-fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
+///
+/// `level` is the coarsest mip level the view samples (`gpu_canvas::lod_level` of its zoom):
+/// large edits while zoomed out composite at that level, edits away from `visible` wait until
+/// the view gets there, and both are brought to full size once the edits pause (`catch_up`,
+/// which asks `ctx` for the frames it needs).
+fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, ctx: &egui::Context) -> bool {
     let Some(gpu) = app.gpu.clone() else { return false };
     let Some((revision, last_damage, id)) = app
         .session
@@ -1301,11 +1306,28 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
         grid: None,
     });
     let present = cache.on_gpu && gpu.has(id.0, size);
+    let need = crate::gpu_canvas::ViewNeed { visible, level };
     if present && cache.revision == revision && cache.preview_key == preview_key {
         // An adjustment preview composited where the view was: catch up where it moved to.
         if let Some(r) = crate::adjust_preview::uncovered(app, id, raw_key, visible) {
             let r = gpu.refresh(id.0, &doc, Some(r), display.as_deref());
             app.perf.record(r.kind, r.px, r.composite_ms, r.upload_ms);
+        }
+        // Regions composited reduced or left for later: what the view shows now, then (once the
+        // edits pause) the rest at full size, a piece per frame.
+        let c = gpu.catch_up(id.0, &doc, display.as_deref(), need, true, ctx);
+        if c.px > 0 {
+            app.perf.record(if c.refined { "gpu-refine" } else { "gpu-catch-up" }, c.px, c.composite_ms, 0.0);
+        }
+        if let Some(ms) = c.again_ms {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(ms.max(0.0) / 1000.0));
+        }
+        if !gpu.has(id.0, size)
+            && let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT))
+        {
+            // The catch-up failed and dropped the texture: redraw it next frame.
+            cache.on_gpu = false;
+            ctx.request_repaint();
         }
         return true;
     }
@@ -1318,7 +1340,11 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
     gpu_budget(app, &gpu, idx, partial, visible);
     // A Move drag: the moving layers come from the pages already on the GPU, at the offset.
     gpu.set_translated(crate::move_ui::gpu_translations(app, idx));
-    let r = gpu.refresh(id.0, &doc, if partial { damage } else { None }, display.as_deref());
+    let r = gpu.refresh_for(id.0, &doc, if partial { damage } else { None }, display.as_deref(), crate::gpu_canvas::reduced_refreshes().then_some(need));
+    if gpu.has_stale(id.0) {
+        // What was left out of date is brought up to date on the following frames.
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(crate::gpu_canvas::REFINE_DELAY_MS / 1000.0));
+    }
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
         // texture budget: draw this frame on the CPU path.
@@ -2580,9 +2606,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 output: output.unwrap_or(0),
                 hdr: hdr_preview(app, &doc),
                 offset: [0.0, 0.0],
+                min_lod: 0.0,
             };
             paint_gpu_view(&painter, rect, params, &pattern);
-        } else if gpu_ok && ensure_gpu(app, idx, visible_doc_rect(&xf)) {
+        } else if gpu_ok && ensure_gpu(app, idx, visible_doc_rect(&xf), crate::gpu_canvas::interactive_level(view.zoom), &ctx) {
             on_gpu = true;
             app.perf.gpu = true;
             // Shadow, checkerboard, document and pixel grid in one custom shader (gpu_canvas.rs).
@@ -2602,6 +2629,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 output: output.unwrap_or(0),
                 hdr: hdr_preview(app, &doc),
                 offset: [0.0, 0.0],
+                min_lod: app.gpu.as_ref().map_or(0.0, |g| g.view_floor(doc.id.0, visible_doc_rect(&xf))),
             };
             paint_gpu_view(&painter, rect, params, &pattern);
         } else {

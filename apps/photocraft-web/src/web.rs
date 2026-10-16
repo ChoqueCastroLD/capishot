@@ -134,6 +134,10 @@ pub fn start() {
         let embed_query = q.clone();
         let force_cpu = q.contains("cpu");
         let perf_debug = q.split(['?', '&']).any(|kv| kv == "perf=1" || kv == "perf");
+        if q.split(['?', '&']).any(|kv| kv == "gpuopt=0") {
+            // Measurements: the GPU canvas as before pass fusion and level-of-detail refreshes.
+            photocraft_ui_egui::gpu_canvas::set_reduced_refreshes(false);
+        }
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
         if q.contains("webgl")
@@ -184,7 +188,13 @@ pub fn start() {
         if let Err(e) = result
             && let Some(el) = document.get_element_by_id("photocraft_loading")
         {
-            el.set_inner_html(&format!("<p>Capishot failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>"));
+            // No WebGPU adapter and no WebGL2 context (no GPU and the browser refuses software
+            // WebGL, or hardware acceleration is off): nothing can draw the interface.
+            el.set_inner_html(&format!(
+                "<p>Capishot failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required. If this computer has no graphics \
+                 acceleration, turn on hardware acceleration in the browser settings (Chrome: Settings › System › Use graphics \
+                 acceleration) or try another browser.</p>"
+            ));
         }
     });
 }
