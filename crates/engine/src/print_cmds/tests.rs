@@ -434,3 +434,13 @@ fn printers_lists_the_spooler_destinations_without_a_document() {
         None => assert!(list.iter().all(|p| p["default"] == false)),
     }
 }
+
+#[test]
+fn windows_pdf_component_is_detected_by_its_dll() {
+    // #5884: a Windows image without Windows.Data.Pdf.dll reports an error instead of aborting.
+    let dir = tempfile::tempdir().unwrap();
+    assert!(!windows_pdf_installed(dir.path()));
+    std::fs::create_dir(dir.path().join("System32")).unwrap();
+    std::fs::write(dir.path().join("System32").join("Windows.Data.Pdf.dll"), b"MZ").unwrap();
+    assert!(windows_pdf_installed(dir.path()));
+}

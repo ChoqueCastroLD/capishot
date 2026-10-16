@@ -427,12 +427,32 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
     let mut spool = Value::Null;
     if send && !dry {
         require_printing_enabled()?;
+        require_windows_pdf()?;
         spool = json!(craft_print::submit(&pdf, &job).map_err(other)?);
         sent = true;
     }
     Ok(
         json!({"pdf": pdf_path, "bytes": pdf.len(), "paper": [pw, ph], "imageRect": [x, y, w, h], "emulsionDown": emulsion_down, "scale": scale * 100.0, "copies": copies, "command": command, "sent": sent, "spooler": spool, "color": color}),
     )
+}
+
+/// Windows prints a PDF through Windows.Data.Pdf.dll, which the apps delay-load (see their
+/// `build.rs`) so a Windows image without it still starts. Calling into it when it is missing
+/// would abort the process, so check that it is installed first (#5884).
+fn require_windows_pdf() -> Result<()> {
+    if !cfg!(windows) {
+        return Ok(());
+    }
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows"));
+    if windows_pdf_installed(std::path::Path::new(&root)) {
+        Ok(())
+    } else {
+        Err(other("printing this page needs the Windows PDF component (Windows.Data.Pdf.dll), which is not installed. Save as PDF and print it from another app, or clear Print Settings to print directly."))
+    }
+}
+
+fn windows_pdf_installed(system_root: &std::path::Path) -> bool {
+    system_root.join("System32").join("Windows.Data.Pdf.dll").is_file()
 }
 
 /// Keep CMYK output profiles and page text on the existing PDF composition path. GDI currently
