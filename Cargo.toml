@@ -39,6 +39,7 @@ photocraft-tablet = { path = "crates/tablet" }
 
 # external
 craft-print = { git = "https://github.com/storytold/craft-libs", rev = "3d37da389a3618ab9b76109da11416e9ca4ea719" }
+craft-docpath = { path = "../secfix-craft-libs/crates/docpath" }
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

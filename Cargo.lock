@@ -1223,6 +1223,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-docpath"
+version = "0.1.0"
+
+[[package]]
 name = "craft-print"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=3d37da389a3618ab9b76109da11416e9ca4ea719#3d37da389a3618ab9b76109da11416e9ca4ea719"
@@ -4869,6 +4873,7 @@ name = "photocraft-io"
 version = "0.9.0"
 dependencies = [
  "blake3",
+ "craft-docpath",
  "crc32fast",
  "flate2",
  "photocraft-affinity",
