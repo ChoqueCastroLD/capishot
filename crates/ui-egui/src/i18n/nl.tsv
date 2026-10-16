@@ -4035,3 +4035,6 @@ cameraData	Lens	Lens
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Wist de geselecteerde tekst of geluidseffecten en tekent de achtergrond opnieuw met AI, op een nieuwe laag. Gebruikt een gedownload model (Venster › AI-modellen…).
 @plural	{n} more queued|{n} more queued	nog {n} in wachtrij|nog {n} in wachtrij
 	GPU couldn't run this model; used the CPU instead	De GPU kon dit model niet uitvoeren; in plaats daarvan is de CPU gebruikt
+	Menu	Menu
+	Max pixel density	Maximale pixeldichtheid
+	Display's own	Die van het scherm

@@ -3893,3 +3893,6 @@ cameraData	Lens	Obiektyw
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Usuwa zaznaczony tekst lub efekty dźwiękowe i odrysowuje tło za pomocą AI na nowej warstwie. Używa pobranego modelu (Okno › Modele AI…).
 @plural	{n} more queued|{n} more queued	jeszcze {n} w kolejce|jeszcze {n} w kolejce|jeszcze {n} w kolejce
 	GPU couldn't run this model; used the CPU instead	GPU nie mógł uruchomić tego modelu; użyto procesora
+	Menu	Menu
+	Max pixel density	Maksymalna gęstość pikseli
+	Display's own	Gęstość ekranu

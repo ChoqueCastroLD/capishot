@@ -3979,3 +3979,6 @@ cameraData	Lens	Об'єктив
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Стирає виділений текст або звуконаслідування й перемальовує фон за допомогою ШІ на новому шарі. Використовує завантажену модель (Вікно › Моделі ШІ…).
 @plural	{n} more queued|{n} more queued	ще {n} у черзі|ще {n} у черзі|ще {n} у черзі
 	GPU couldn't run this model; used the CPU instead	GPU не зміг запустити цю модель; натомість використано CPU
+	Menu	Меню
+	Max pixel density	Максимальна щільність пікселів
+	Display's own	Як у екрана

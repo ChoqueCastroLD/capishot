@@ -2952,3 +2952,6 @@ cameraData	Lens	Obiettivo
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Cancella il testo o le onomatopee selezionati e ridisegna lo sfondo con l'IA, su un nuovo livello. Usa un modello scaricato (Finestra › Modelli IA…).
 @plural	{n} more queued|{n} more queued	altro {n} in coda|altri {n} in coda
 	GPU couldn't run this model; used the CPU instead	La GPU non è riuscita a eseguire questo modello; è stata usata la CPU
+	Menu	Menu
+	Max pixel density	Densità di pixel massima
+	Display's own	Quella dello schermo
