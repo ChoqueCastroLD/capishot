@@ -289,7 +289,7 @@ mod control_port_tests {
 
 #[cfg(test)]
 mod launch_args_tests {
-    use super::{control_args_exit_code, parse_launch_args, LaunchArgs};
+    use super::{LaunchArgs, control_args_exit_code, parse_launch_args};
     use std::ffi::OsString;
 
     fn parse(values: &[&str]) -> LaunchArgs {
@@ -312,11 +312,7 @@ mod launch_args_tests {
     #[test]
     fn missing_value_does_not_clear_an_environment_default() {
         // `--automation-read-root` with no value must not drop a root set through the env var.
-        let defaults = LaunchArgs {
-            automation_read_root: Some("/env/read".into()),
-            automation_write_root: Some("/env/write".into()),
-            ..Default::default()
-        };
+        let defaults = LaunchArgs { automation_read_root: Some("/env/read".into()), automation_write_root: Some("/env/write".into()), ..Default::default() };
         let parsed = parse_launch_args(["--automation-read-root"].iter().map(OsString::from), defaults);
         assert_eq!(parsed.automation_read_root.as_deref(), Some(std::path::Path::new("/env/read")));
         assert_eq!(parsed.automation_write_root.as_deref(), Some(std::path::Path::new("/env/write")));
@@ -325,7 +321,24 @@ mod launch_args_tests {
 
     #[test]
     fn values_are_parsed_and_no_errors_remain() {
-        let parsed = parse(&["--control", "50494", "--control-token", "abcd", "--control-token-file", "/tmp/token", "--automation-read-root", "/r", "--automation-write-root", "/w", "--safe-gpu", "--in-window-menus", "--new-instance", "--present-mode", "mailbox", "photo.psd"]);
+        let parsed = parse(&[
+            "--control",
+            "50494",
+            "--control-token",
+            "abcd",
+            "--control-token-file",
+            "/tmp/token",
+            "--automation-read-root",
+            "/r",
+            "--automation-write-root",
+            "/w",
+            "--safe-gpu",
+            "--in-window-menus",
+            "--new-instance",
+            "--present-mode",
+            "mailbox",
+            "photo.psd",
+        ]);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
         assert_eq!(parsed.control_port, Some(50494));
         assert_eq!(parsed.control_token.as_deref(), Some("abcd"));
