@@ -44,7 +44,7 @@ pub const MAX_EDGE: u32 = 8192;
 /// Most brushes read from one file.
 pub const MAX_BRUSHES: usize = 20_000;
 /// Cap on decoded sample bytes over the whole file.
-pub const MAX_TOTAL_BYTES: usize = 512 << 20;
+pub const MAX_TOTAL_BYTES: usize = 1 << 30;
 
 /// A sampled tip: one grayscale plane where the maximum value is full paint.
 #[derive(Debug, Clone, PartialEq)]

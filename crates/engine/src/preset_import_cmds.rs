@@ -27,12 +27,19 @@ fn always(_: &Session) -> std::result::Result<(), String> {
 
 /// Largest accepted file (Photoshop's biggest bundled sets are well under this).
 pub const MAX_FILE_BYTES: u64 = 512 << 20;
+/// Largest accepted `.abr` file: brush libraries of large sampled tips outgrow [`MAX_FILE_BYTES`].
+pub const MAX_ABR_FILE_BYTES: u64 = 1 << 30;
 
 /// File bytes from `data` (base64) or `path`, plus a default group name.
 pub(crate) fn file_bytes(p: &Value, cmd: &str, what: &str) -> Result<(Vec<u8>, String)> {
+    file_bytes_within(p, cmd, what, MAX_FILE_BYTES)
+}
+
+/// [`file_bytes`] with a size cap of `max` bytes.
+fn file_bytes_within(p: &Value, cmd: &str, what: &str, max: u64) -> Result<(Vec<u8>, String)> {
     if let Some(d) = p.get("data") {
         let s = d.as_str().ok_or_else(|| bad(cmd, "`data` must be a base64 string"))?;
-        if s.len() as u64 > MAX_FILE_BYTES / 3 * 4 + 4 {
+        if s.len() as u64 > max / 3 * 4 + 4 {
             return Err(bad(cmd, "`data` is too large"));
         }
         let bytes = photocraft_paint::tile::b64_decode(s).ok_or_else(|| bad(cmd, "`data` is not valid base64"))?;
@@ -41,7 +48,7 @@ pub(crate) fn file_bytes(p: &Value, cmd: &str, what: &str) -> Result<(Vec<u8>, S
     let path =
         p.get("path").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).ok_or_else(|| bad(cmd, format!("give `path` ({what}) or `data` (base64)")))?;
     let len = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?.len();
-    if len > MAX_FILE_BYTES {
+    if len > max {
         return Err(bad(cmd, format!("{path}: file too large ({len} bytes)")));
     }
     let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -72,7 +79,7 @@ fn import_abr(s: &mut Session, p: &Value) -> Result<Value> {
         move |ctx| {
             ctx.progress(0.0, "Importing brushes");
             let p = &params;
-            let (bytes, stem) = file_bytes(p, cmd, ".abr file")?;
+            let (bytes, stem) = file_bytes_within(p, cmd, ".abr file", MAX_ABR_FILE_BYTES)?;
             let group = match p.get("group") {
                 Some(v) => v.as_str().map(str::trim).filter(|g| !g.is_empty()).ok_or_else(|| bad(cmd, "`group` must be a non-empty string"))?.to_string(),
                 None if !stem.is_empty() => stem,
@@ -524,6 +531,28 @@ mod tests {
             assert!(s.execute("brush.presets.importImage", p.clone()).is_err(), "{p}");
         }
         assert_eq!(s.tools.presets.len(), n, "a failed import adds nothing");
+    }
+
+    #[test]
+    fn abr_files_get_a_larger_size_cap() {
+        // The decoder must not refuse what the reader accepts.
+        const _: () = assert!(MAX_ABR_FILE_BYTES == 1 << 30 && photocraft_psd::abr::MAX_TOTAL_BYTES as u64 == MAX_ABR_FILE_BYTES);
+        let dir = std::env::temp_dir().join(format!("pc-abr-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cap.abr");
+        std::fs::write(&path, [0u8; 10]).unwrap();
+        let p = json!({"path": path.to_string_lossy()});
+        assert!(file_bytes_within(&p, "t", "f", 10).is_ok());
+        assert!(file_bytes_within(&p, "t", "f", 9).is_err(), "a file over the cap is refused before reading");
+        // A sparse file between the two caps: refused as a .grd, which is checked before reading.
+        let big = dir.join("big.grd");
+        std::fs::File::create(&big).unwrap().set_len(MAX_FILE_BYTES + 1).unwrap();
+        let err = Session::new().execute("gradient.presets.importGrd", json!({"path": big.to_string_lossy()})).unwrap_err();
+        assert!(err.to_string().contains("too large"), "{err}");
+        let data = json!({"data": "A".repeat(16)});
+        assert!(file_bytes_within(&data, "t", "f", 12).is_ok());
+        assert!(file_bytes_within(&data, "t", "f", 8).is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
