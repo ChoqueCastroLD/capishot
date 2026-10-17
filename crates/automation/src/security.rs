@@ -404,7 +404,7 @@ mod tests {
     fn an_uppercase_token_file_authenticates_its_exact_contents() {
         let path = std::env::temp_dir().join(format!("photocraft-control-token-upper-{}-{}.txt", std::process::id(), generate_token().unwrap()));
         let contents = generate_token().unwrap().to_ascii_uppercase();
-        std::fs::write(&path, format!("{contents}\n")).unwrap();
+        create_token_file(&path, &contents).unwrap();
         let expected = server_token(None, Some(&path));
         std::fs::remove_file(&path).unwrap();
         let (reply, authenticated) = authentication_reply(&auth_line(&contents), &expected.unwrap());
