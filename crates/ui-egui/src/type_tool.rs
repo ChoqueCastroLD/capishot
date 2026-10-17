@@ -2732,7 +2732,7 @@ mod tests {
                 draw_overlay(app, &painter, &xf);
             });
             out.textures_delta.clear();
-            out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if (stroke.width - 1.5).abs() < 1e-4))
+            out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if CARET_STROKES.contains(stroke)))
         };
 
         // Before resetting, the caret is in the off phase at t = 10.5 s (10500 / 530 = 19, odd phase)
