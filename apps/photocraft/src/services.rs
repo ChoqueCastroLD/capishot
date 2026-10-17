@@ -244,7 +244,7 @@ fn path_of(file: &rfd::FileHandle) -> String {
 }
 
 /// Runs `future` to completion on this thread, sleeping until it is woken.
-fn block_on<T>(future: impl Future<Output = T>) -> T {
+pub(crate) fn block_on<T>(future: impl Future<Output = T>) -> T {
     struct Unpark(std::thread::Thread);
     impl std::task::Wake for Unpark {
         fn wake(self: Arc<Self>) {

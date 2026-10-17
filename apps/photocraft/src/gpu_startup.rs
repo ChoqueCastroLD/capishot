@@ -12,8 +12,10 @@
 //! - macOS: Metal → CPU
 //!
 //! The choice that worked is remembered in `performance.gpuBackend` (Preferences › Performance,
-//! where it can be reset). With `auto`, Intel adapters on Windows use DX12. `WGPU_BACKEND` still
-//! overrides everything, and `--safe-gpu` forces the CPU path for one launch.
+//! where it can be reset). With `auto`, Intel adapters on Windows use DX12, and when DXGI lists an
+//! Intel adapter the instance leaves Vulkan out, so the first start doesn't load the Intel Vulkan
+//! driver either. `WGPU_BACKEND` still overrides everything, and `--safe-gpu` forces the CPU path
+//! for one launch.
 //!
 //! "CPU" composites on the CPU and draws the window with a software adapter where the platform
 //! has one (WARP on Windows, llvmpipe over GL elsewhere). On Linux a GL adapter that can't present
@@ -204,6 +206,28 @@ pub fn backends(plan: &Plan, os: Os) -> Option<wgpu::Backends> {
     })
 }
 
+/// Instance backends for `auto` on Windows (no `WGPU_BACKEND`) when `dx12_vendors`, the PCI vendor
+/// ids of the DX12 adapters, includes Intel: DX12, with GL as the last resort (see [`rank`]). An
+/// instance with Vulkan loads the Intel Vulkan driver before the adapter selector runs, and #4's
+/// crash is in that driver. `dx12_vendors` is called only for that plan; `None` keeps [`backends`]'
+/// choice.
+pub fn windows_auto_backends(plan: &Plan, os: Os, dx12_vendors: impl FnOnce() -> Vec<u32>) -> Option<wgpu::Backends> {
+    let auto = plan.env.is_none() && plan.backend == GpuBackend::Auto && os == Os::Windows;
+    (auto && dx12_vendors().contains(&INTEL)).then_some(wgpu::Backends::DX12 | wgpu::Backends::GL)
+}
+
+/// The PCI vendor ids of the DX12 adapters, from a DX12-only instance (DXGI, no Vulkan driver)
+/// with `desc`'s flags and backend options (the shader compiler from [`dx12_compiler`]).
+fn dx12_vendors(desc: &wgpu::InstanceDescriptor) -> Vec<u32> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::DX12,
+        flags: desc.flags,
+        backend_options: desc.backend_options.clone(),
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
+    });
+    crate::services::block_on(instance.enumerate_adapters(wgpu::Backends::DX12)).iter().map(|a| a.get_info().vendor).collect()
+}
+
 /// The DX12 shader compiler (#712). wgpu's default loads `dxcompiler.dll` by name, and the
 /// Windows DLL search falls through to the current directory and `PATH`, so another program's DXC
 /// build (a browser's, an SDK's) got loaded and failed device creation or crashed the first shader
@@ -265,13 +289,14 @@ pub fn pick(adapters: &[Candidate], backend: GpuBackend, os: Os) -> Option<usize
 }
 
 /// Whether picking `chosen` applied the Intel-on-Windows DX12 default (a Vulkan adapter of the
-/// same vendor was available).
-pub fn intel_dx12_applied(adapters: &[Candidate], chosen: usize, os: Os) -> bool {
+/// same vendor was available, or `vulkan_left_out`: [`windows_auto_backends`] left Vulkan out of
+/// the instance).
+pub fn intel_dx12_applied(adapters: &[Candidate], chosen: usize, os: Os, vulkan_left_out: bool) -> bool {
     let Some(c) = adapters.get(chosen) else { return false };
     os == Os::Windows
         && c.vendor == INTEL
         && c.backend == wgpu::Backend::Dx12
-        && adapters.iter().any(|a| a.vendor == INTEL && a.backend == wgpu::Backend::Vulkan)
+        && (vulkan_left_out || adapters.iter().any(|a| a.vendor == INTEL && a.backend == wgpu::Backend::Vulkan))
 }
 
 /// wgpu compiles indirect-call validation shaders inside `request_device`; Metal's compiler
@@ -298,6 +323,11 @@ pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, sentinel
             let env = std::env::var("WGPU_DX12_COMPILER").ok();
             create.instance_descriptor.backend_options.dx12.shader_compiler = dx12_compiler(env.as_deref(), exe.as_deref().and_then(Path::parent));
         }
+        let without_vulkan = windows_auto_backends(plan, os, || dx12_vendors(&create.instance_descriptor));
+        if let Some(b) = without_vulkan {
+            create.instance_descriptor.backends = b;
+        }
+        let vulkan_left_out = without_vulkan.is_some();
         let select = plan.env.is_none() && (plan.backend == GpuBackend::Cpu || (plan.backend == GpuBackend::Auto && os == Os::Windows));
         if select {
             let backend = plan.backend;
@@ -319,7 +349,7 @@ pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, sentinel
                     *note.lock().unwrap_or_else(PoisonError::into_inner) =
                         Some("CPU image rendering; no software graphics adapter is available, so the window uses hardware graphics".into());
                 }
-                if backend == GpuBackend::Auto && intel_dx12_applied(&cands, i, os) {
+                if backend == GpuBackend::Auto && intel_dx12_applied(&cands, i, os, vulkan_left_out) {
                     *note.lock().unwrap_or_else(PoisonError::into_inner) =
                         Some("Intel graphics on Windows: using DirectX 12 (the Intel Vulkan driver is known to crash)".into());
                 }
@@ -613,13 +643,13 @@ mod tests {
         let intel = [cand(INTEL, T::IntegratedGpu, B::Vulkan), cand(INTEL, T::IntegratedGpu, B::Dx12), cand(INTEL, T::IntegratedGpu, B::Gl)];
         let i = pick(&intel, Auto, Os::Windows).unwrap();
         assert_eq!(intel[i].backend, B::Dx12);
-        assert!(intel_dx12_applied(&intel, i, Os::Windows));
+        assert!(intel_dx12_applied(&intel, i, Os::Windows, false));
         // Elsewhere (and for other vendors) Vulkan stays first.
         assert_eq!(intel[pick(&intel, Auto, Os::Other).unwrap()].backend, B::Vulkan);
         let nv = [cand(0x10de, T::DiscreteGpu, B::Dx12), cand(0x10de, T::DiscreteGpu, B::Vulkan)];
         let i = pick(&nv, Auto, Os::Windows).unwrap();
         assert_eq!(nv[i].backend, B::Vulkan);
-        assert!(!intel_dx12_applied(&nv, i, Os::Windows));
+        assert!(!intel_dx12_applied(&nv, i, Os::Windows, false));
         // Intel iGPU + discrete GPU: the discrete one wins (high performance), on Vulkan.
         let hybrid = [intel[0], intel[1], nv[1]];
         assert_eq!(pick(&hybrid, Auto, Os::Windows), Some(2));
@@ -628,6 +658,45 @@ mod tests {
         only[0].surface_ok = false;
         assert_eq!(pick(&only, Auto, Os::Windows), Some(1));
         assert_eq!(pick(&[], Auto, Os::Windows), None);
+    }
+
+    /// #4: an instance with Vulkan loads the Intel Vulkan driver, which crashed at startup, before
+    /// the selector picks Intel's DX12 adapter. With an Intel adapter in the DX12 list, `auto` on
+    /// Windows creates the instance without Vulkan.
+    #[test]
+    fn auto_on_windows_with_an_intel_adapter_leaves_vulkan_out_of_the_instance() {
+        use wgpu::{Backend as B, DeviceType as T};
+        const NVIDIA: u32 = 0x10de;
+        const AMD: u32 = 0x1002;
+        const WARP: u32 = 0x1414;
+        let auto = plan(Auto, None, None, false, Os::Windows);
+        let dx12_gl = Some(wgpu::Backends::DX12 | wgpu::Backends::GL);
+        assert_eq!(windows_auto_backends(&auto, Os::Windows, || vec![INTEL, WARP]), dx12_gl);
+        // Intel iGPU + discrete GPU: the discrete GPU is then used on DX12.
+        assert_eq!(windows_auto_backends(&auto, Os::Windows, || vec![NVIDIA, INTEL, WARP]), dx12_gl);
+        // No Intel adapter: egui's default backends, Vulkan included.
+        assert_eq!(windows_auto_backends(&auto, Os::Windows, || vec![NVIDIA, WARP]), None);
+        assert_eq!(windows_auto_backends(&auto, Os::Windows, || vec![AMD]), None);
+        assert_eq!(windows_auto_backends(&auto, Os::Windows, Vec::new), None);
+        // `WGPU_BACKEND`, `--safe-gpu`, a chosen backend, a crash fallback and other platforms
+        // don't list the DX12 adapters at all.
+        let not_listed = || -> Vec<u32> { panic!("DX12 adapters listed") };
+        for (p, os) in [
+            (plan(Auto, None, Some("vulkan"), false, Os::Windows), Os::Windows),
+            (plan(Auto, None, None, true, Os::Windows), Os::Windows),
+            (plan(Vulkan, None, None, false, Os::Windows), Os::Windows),
+            (plan(Auto, Some(&crashed("auto", "vulkan")), None, false, Os::Windows), Os::Windows),
+            (plan(Auto, None, None, false, Os::Other), Os::Other),
+            (plan(Auto, None, None, false, Os::Mac), Os::Mac),
+        ] {
+            assert_eq!(windows_auto_backends(&p, os, not_listed), None, "{p:?}");
+        }
+        // Without Vulkan adapters to compare with, System Info still names the Intel default.
+        let listed = [cand(INTEL, T::IntegratedGpu, B::Dx12), cand(WARP, T::Cpu, B::Dx12), cand(INTEL, T::IntegratedGpu, B::Gl)];
+        let i = pick(&listed, Auto, Os::Windows).unwrap();
+        assert_eq!(i, 0);
+        assert!(intel_dx12_applied(&listed, i, Os::Windows, true));
+        assert!(!intel_dx12_applied(&listed, i, Os::Windows, false));
     }
 
     #[test]
