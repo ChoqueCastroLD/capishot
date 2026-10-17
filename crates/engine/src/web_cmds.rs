@@ -1358,10 +1358,15 @@ fn asset_output_path(dir: &str, relative: &str) -> Result<(String, String)> {
 }
 
 /// Exports every asset named by `doc`'s layers into `dir`. Returns (files, errors).
+///
+/// Each file is written once per run (#6614): when two layers (or two default variants) name the
+/// same file, the one higher in the Layers panel keeps it and the other is reported in `errors`.
+/// Names are compared ignoring case, as `Logo.png` and `logo.png` are one file on Windows and
+/// macOS.
 pub fn generate_assets(doc: &Document, dir: &str) -> (Vec<String>, Vec<Value>) {
     let dpi = f64::from(doc.resolution_dpi.max(1.0));
     let mut defaults: Option<Vec<AssetDefault>> = None;
-    let mut jobs: Vec<(LayerId, AssetSpec)> = Vec::new();
+    let mut by_layer: Vec<Vec<(LayerId, AssetSpec)>> = Vec::new();
     for (_, _, l) in doc.walk() {
         if let Some(d) = parse_defaults(&l.name, dpi) {
             defaults = Some(d);
@@ -1370,22 +1375,26 @@ pub fn generate_assets(doc: &Document, dir: &str) -> (Vec<String>, Vec<Value>) {
         if matches!(l.content, LayerContent::Adjustment(_)) {
             continue;
         }
-        for spec in parse_asset_name(&l.name, dpi) {
-            jobs.push((l.id, spec));
-        }
+        by_layer.push(parse_asset_name(&l.name, dpi).into_iter().map(|spec| (l.id, spec)).collect());
     }
+    // Top layer first, as the Layers panel lists them (`walk` goes bottom to top).
+    let jobs: Vec<(LayerId, AssetSpec)> = by_layer.into_iter().rev().flatten().collect();
     let variants: Vec<AssetDefault> = match defaults {
         Some(d) if !d.is_empty() => d,
         _ => vec![AssetDefault::default()],
     };
     let mut files = Vec::new();
     let mut errors = Vec::new();
+    let mut written = std::collections::HashSet::new();
     for (id, spec) in &jobs {
         for v in &variants {
             let r = (|| -> Result<String> {
                 let (name_stem, ext) = spec.file.rsplit_once('.').unwrap_or((spec.file.as_str(), "png"));
                 let rel = format!("{}{}{}.{ext}", v.folder, name_stem, v.suffix);
-                asset_path_components(&rel)?;
+                let key = asset_path_components(&rel)?.join("/").to_lowercase();
+                if written.contains(&key) {
+                    return Err(other(format!("{rel}: another layer already writes this file; rename one of the layers")));
+                }
                 let mut one = crate::layer_menu_cmds::layer_document(doc, *id)?;
                 one.metadata = Default::default();
                 let (w0, h0) = (f64::from(one.size.width), f64::from(one.size.height));
@@ -1413,12 +1422,14 @@ pub fn generate_assets(doc: &Document, dir: &str) -> (Vec<String>, Vec<Value>) {
                 if spec.format == "webp" {
                     let (out, reported) = asset_output_path(dir, &rel)?;
                     crate::file_cmds::save_doc(&wdoc, &out, None)?;
+                    written.insert(key);
                     return Ok(reported);
                 }
                 let buf = photocraft_compose::flatten(&wdoc);
                 let o = optimize(&buf.px, wdoc.size.width as usize, wdoc.bounds(), &st, None, None, wdoc.resolution_dpi, false)?;
                 let (out, reported) = asset_output_path(dir, &rel)?;
                 write_file(&out, &o.bytes)?;
+                written.insert(key);
                 Ok(reported)
             })();
             match r {

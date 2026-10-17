@@ -594,6 +594,47 @@ fn image_assets_are_generated_now_and_on_save() {
     assert_eq!(decode(&files[0]).dimensions(), (128, 80));
 }
 
+/// #6614: two layers, or two default variants, naming one file never overwrite each other: the
+/// layer higher in the Layers panel keeps the file, whatever the case of its name, and the
+/// others are reported.
+#[test]
+fn image_assets_never_write_one_file_twice() {
+    let dir = tmp("asset-collisions");
+    let mut s = session(8);
+    s.edit("paint", |doc, active| {
+        let fmt = doc.pixel_format();
+        let mut l = Layer::raster("Top", fmt);
+        l.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 4, 4), &photocraft_raster::from_rgba(&fmt, [0.0, 0.0, 1.0, 1.0]));
+        let id = doc.insert_above(None, l);
+        *active = Some(id);
+        Ok(())
+    })
+    .unwrap();
+    let mut d = (*s.active().unwrap().doc).clone();
+    let id = |d: &photocraft_doc::Document, name: &str| d.walk().into_iter().find(|(_, _, l)| l.name == name).unwrap().2.id;
+    let (top, logo) = (id(&d, "Top"), id(&d, "Logo"));
+    d.layer_mut(top).unwrap().name = "Logo.PNG".into();
+    d.layer_mut(logo).unwrap().name = "logo.png, logo.png".into();
+    let (files, errors) = generate_assets(&d, &dir);
+    assert_eq!(files.iter().map(|p| std::path::PathBuf::from(p.as_str())).collect::<Vec<_>>(), vec![std::path::Path::new(&dir).join("Logo.png")]);
+    assert_eq!(decode(&files[0]).dimensions(), (4, 4), "the top layer keeps the file");
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert!(errors.iter().all(|e| e["error"].as_str().unwrap().contains("another layer already writes this file")), "{errors:?}");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "one file, not a second one under another case");
+
+    // Two default variants that land on one name: the first keeps it.
+    let dir = tmp("asset-variant-collisions");
+    d.layer_mut(top).unwrap().name = "icon.png".into();
+    d.layer_mut(logo).unwrap().name = "Logo".into();
+    d.layers
+        .push(Layer::new("default 50% + 200% + 200% @2x", LayerContent::Group(photocraft_doc::Group { children: vec![], expanded: false, artboard: None })));
+    let (files, errors) = generate_assets(&d, &dir);
+    let names: Vec<_> = files.iter().map(|p| std::path::Path::new(p).file_name().unwrap().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["icon.png", "icon@2x.png"]);
+    assert_eq!(decode(&files[0]).dimensions(), (2, 2), "the 50% variant keeps icon.png");
+    assert_eq!(errors.len(), 1, "{errors:?}");
+}
+
 #[test]
 fn image_assets_reject_traversal_from_names_and_defaults() {
     let base = tmp("asset-path-guard");
