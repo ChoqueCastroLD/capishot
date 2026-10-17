@@ -435,12 +435,28 @@ fn printers_lists_the_spooler_destinations_without_a_document() {
     }
 }
 
+#[cfg(target_os = "windows")]
 #[test]
-fn windows_pdf_component_is_detected_by_its_dll() {
-    // #5884: a Windows image without Windows.Data.Pdf.dll reports an error instead of aborting.
+fn windows_pdf_component_is_detected_by_loading_its_dll() {
+    // #5884: a Windows image without a loadable Windows.Data.Pdf.dll reports an error instead of
+    // aborting at the delay-load stub.
     let dir = tempfile::tempdir().unwrap();
-    assert!(!windows_pdf_installed(dir.path()));
+    let dll = windows_pdf_dll(dir.path());
+    assert!(!windows_pdf_loads(&dll));
+    // Present but not loadable counts as missing.
     std::fs::create_dir(dir.path().join("System32")).unwrap();
-    std::fs::write(dir.path().join("System32").join("Windows.Data.Pdf.dll"), b"MZ").unwrap();
-    assert!(windows_pdf_installed(dir.path()));
+    std::fs::write(&dll, b"MZ").unwrap();
+    assert!(!windows_pdf_loads(&dll));
+    let root = std::env::var_os("SystemRoot").unwrap();
+    let system = windows_pdf_dll(std::path::Path::new(&root));
+    if system.is_file() {
+        assert!(windows_pdf_loads(&system));
+        assert!(require_windows_pdf().is_ok());
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn the_windows_pdf_check_is_a_no_op_elsewhere() {
+    assert!(require_windows_pdf().is_ok());
 }
