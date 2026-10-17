@@ -82,6 +82,15 @@ fn rotate_arbitrary_other_modes() {
 }
 
 #[test]
+fn rotate_arbitrary_keeps_the_background_opaque_with_a_translucent_background_colour() {
+    let mut s = session(40, 20, 8, "rgb");
+    s.execute("tools.setColors", json!({"background": "#00ff0080"})).unwrap();
+    s.execute("image.rotation.arbitrary", json!({"angle": 30})).unwrap();
+    let corner = doc(&s).layers[0].surface().unwrap().rgba(0, 0);
+    assert_eq!(corner, [0.0, 1.0, 0.0, 1.0], "the uncovered corner is opaque background colour");
+}
+
+#[test]
 fn rotate_arbitrary_rotates_grouped_locked_children_and_preserves_lock() {
     let mut s = Session::new();
     s.execute("file.new", json!({"width": 16, "height": 16, "background": "white"})).unwrap();
