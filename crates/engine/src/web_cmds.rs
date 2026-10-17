@@ -1024,27 +1024,48 @@ fn export_preferences(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"section": "export", "values": s.prefs().get("export").unwrap_or(Value::Null)}))
 }
 
+/// The Quick Export format's extension (Export Preferences › Format).
+fn quick_export_ext(s: &Session) -> String {
+    serde_json::to_value(s.prefs().export.quick_export_format).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| "png".into())
+}
+
+/// Where Quick Export writes the active document with no `path` given: `<name>.<format>` beside
+/// its file, when Export Preferences › Location is Same Folder and the document has a file.
+pub fn quick_export_target(s: &Session) -> Option<String> {
+    let same = s.prefs().export.quick_export_location == crate::prefs::ExportLocation::SameFolder;
+    let dp = s.active()?.path.as_deref().filter(|_| same)?;
+    let dir = std::path::Path::new(dp).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+    Some(join(&dir, &format!("{}.{}", stem(dp), quick_export_ext(s))))
+}
+
+/// Whether [`quick_export_target`] is the active document's own file (a document opened from
+/// `photo.png` and exported as PNG), which Quick Export must not replace without asking (#6599).
+pub fn quick_export_target_is_own_file(s: &Session) -> bool {
+    let own = s.active().and_then(|d| d.path.as_deref());
+    quick_export_target(s).zip(own).is_some_and(|(target, own)| crate::file_cmds::same_file(&target, own))
+}
+
 /// File › Export › Quick Export as <format>: the format, quality, metadata, colour space and
 /// location from Export Preferences. `path` overrides the location ("ask" needs one).
 fn quick_export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export.quickExport";
     let prefs = s.prefs().export.clone();
-    let fmt = serde_json::to_value(prefs.quick_export_format).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| "png".into());
-    let d = s.active().ok_or(EngineError::NoDocument)?;
-    let doc = d.doc.clone();
+    let fmt = quick_export_ext(s);
     let path = match p.get("path").and_then(Value::as_str).filter(|v| !v.is_empty()) {
         Some(v) => v.to_string(),
         None => {
-            let same = serde_json::to_value(prefs.quick_export_location).ok().and_then(|v| v.as_str().map(str::to_string)).is_some_and(|v| v == "sameFolder");
-            match (&d.path, same) {
-                (Some(dp), true) => {
-                    let dir = std::path::Path::new(dp).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
-                    join(&dir, &format!("{}.{fmt}", stem(dp)))
-                }
-                _ => return Err(bad(cmd, "missing `path` (Export Preferences › Location is \"ask\", or the document was never saved)")),
+            let Some(target) = quick_export_target(s) else {
+                return Err(bad(cmd, "missing `path` (Export Preferences › Location is \"ask\", or the document was never saved)"));
+            };
+            // The document's own file is never replaced by an export the user didn't name (#6599).
+            if quick_export_target_is_own_file(s) {
+                return Err(bad(cmd, format!("the export would replace the document's own file {target}; give a `path`")));
             }
+            target
         }
     };
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let doc = d.doc.clone();
     let metadata = serde_json::to_value(prefs.metadata).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
     let mut o = serde_json::Map::new();
     o.insert(
