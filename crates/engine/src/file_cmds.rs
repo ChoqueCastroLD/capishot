@@ -363,6 +363,8 @@ pub(crate) fn encode(doc: &Document, path: &str, save: impl Into<SaveOpts>) -> R
         tga_bits: save.tga_bits,
         image_previews: save.image_previews,
         psd_maximize_compatibility: save.psd_maximize_compatibility,
+        // Linked files a PSD embeds are resolved against the document being worked on.
+        document_path: crate::doc_path::current(),
         ..Default::default()
     };
     // No quality chosen: write the file the way it was opened (a JPEG at its own quality, a WebP
@@ -601,7 +603,16 @@ fn place(s: &mut Session, p: &Value, linked: bool) -> Result<Value> {
     let cmd = if linked { "file.placeLinked" } else { "file.placeEmbedded" };
     let path = str_param(p, "path", cmd)?.to_string();
     let bytes = read_file(&path)?;
-    place_bytes(s, &path, bytes, linked.then(|| path.clone()), p)
+    // The link is stored absolute: a relative one would later be taken from the document's
+    // folder (`doc_path`), not the working directory the path was given in.
+    let link = linked.then(|| {
+        if std::path::Path::new(&path).is_relative() {
+            std::path::absolute(&path).map_or_else(|_| path.clone(), |a| a.to_string_lossy().into_owned())
+        } else {
+            path.clone()
+        }
+    });
+    place_bytes(s, &path, bytes, link, p)
 }
 
 // ---------- File Info (XMP) ----------

@@ -283,6 +283,9 @@ pub struct ExportSettings {
     /// Embed EXIF, resolution and other non-XMP metadata when the format supports it. Export As
     /// turns this off for Metadata: None; Save As leaves it on.
     pub embed_metadata: bool,
+    /// The path of the document's own file, which linked smart objects that PSD/PSB embed are
+    /// resolved against ([`photocraft_io::ExportOptions::document_path`]).
+    pub document_path: Option<std::path::PathBuf>,
 }
 
 impl Default for ExportSettings {
@@ -298,6 +301,7 @@ impl Default for ExportSettings {
             psd_maximize_compatibility: true,
             embed_icc: true,
             embed_metadata: true,
+            document_path: None,
         }
     }
 }
@@ -321,6 +325,7 @@ impl ExportSettings {
         opts.tga_bits = self.tga_bits;
         opts.image_previews = self.image_previews;
         opts.psd_maximize_compatibility = self.psd_maximize_compatibility;
+        opts.document_path = self.document_path.clone();
         opts
     }
 }
@@ -1574,6 +1579,7 @@ impl PhotocraftApp {
             settings.jpeg_quality = e.jpeg_quality.map(|q| q.clamp(1, 100));
             settings.webp_lossless = e.webp_lossless.unwrap_or(settings.webp_lossless);
             settings.webp_quality = e.webp_quality.map(|q| q.min(100));
+            settings.document_path = st.path.as_deref().map(std::path::PathBuf::from);
         }
         settings
     }
