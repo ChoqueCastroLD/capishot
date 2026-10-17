@@ -506,6 +506,11 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         save_file: Some(Arc::new(save_file)),
         file_dialog: Some(Box::new(show_file_dialog)),
         write: Some(Box::new(|path: &str, bytes: &[u8]| write_atomic(Path::new(path), bytes))),
+        file_stamp: Some(Box::new(|path: &str| {
+            // Follows a symlink, as Save writes through it to the file it points at.
+            let meta = std::fs::metadata(path).ok()?;
+            Some(photocraft_ui_egui::FileStamp { len: meta.len(), modified: meta.modified().ok() })
+        })),
         automation_read,
         automation_write,
         automation_open_pcraft,
