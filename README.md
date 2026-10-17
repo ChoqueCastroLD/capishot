@@ -295,6 +295,11 @@ tar -xzf photocraft-<version>-freebsd-x86_64.tar.gz --strip-components 1 -C /usr
 photocraft
 ```
 
+Maintainers: [`docs/releasing.md`](docs/releasing.md) explains how releases are built, signed and published.
+
+> [!IMPORTANT]
+> **Status:** PhotoCraft is in early alpha, and we want to be straight about where it stands: much of Photoshop's feature surface exists in some form, but **it is not yet a Photoshop replacement for daily professional work**. The biggest gaps are AI/generative features, 15 missing tools, depth in typography and pro workflows, and plug-in compatibility. Every Photoshop menu item is wired to a command ([`docs/parity-checklist.md`](docs/parity-checklist.md)), but that measures wiring, not behaviour. The honest, dimension-by-dimension picture and where we're going next are in the [roadmap](ROADMAP.md) and [parity assessment](docs/target-app-parity.md). Expect rough edges, and please file issues (include your OS, document size, layer count and a screenshot). You can also tell us what broke on [Discord](https://discord.gg/artcraft).
+
 ## Community packages
 
 These installers are maintained by community members, not by the PhotoCraft team.
@@ -307,11 +312,6 @@ emaint sync -r snakebyte
 echo 'media-gfx/photocraft-bin ~amd64' >> /etc/portage/package.accept_keywords/photocraft
 emerge --ask media-gfx/photocraft-bin
 ```
-
-Maintainers: [`docs/releasing.md`](docs/releasing.md) explains how releases are built, signed and published.
-
-> [!IMPORTANT]
-> **Status:** PhotoCraft is in early alpha, and we want to be straight about where it stands: much of Photoshop's feature surface exists in some form, but **it is not yet a Photoshop replacement for daily professional work**. The biggest gaps are AI/generative features, 15 missing tools, depth in typography and pro workflows, and plug-in compatibility. Every Photoshop menu item is wired to a command ([`docs/parity-checklist.md`](docs/parity-checklist.md)), but that measures wiring, not behaviour. The honest, dimension-by-dimension picture and where we're going next are in the [roadmap](ROADMAP.md) and [parity assessment](docs/target-app-parity.md). Expect rough edges, and please file issues (include your OS, document size, layer count and a screenshot). You can also tell us what broke on [Discord](https://discord.gg/artcraft).
 
 ## Documentation
 
