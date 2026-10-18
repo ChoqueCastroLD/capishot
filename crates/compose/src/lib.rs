@@ -193,14 +193,15 @@ fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer 
                 }
             });
         } else {
-            // Few, wide bands: the tiles of each band in parallel.
-            for (i, band) in out.px.chunks_mut(band_len).enumerate() {
+            // Few, wide bands: the tiles of each band in parallel, and the bands too, so a band's
+            // slowest tile doesn't leave the other cores idle until the next band starts.
+            out.px.par_chunks_mut(band_len).enumerate().for_each(|(i, band)| {
                 let y0 = rect.y0 + i as i32 * tile;
                 let parts: Vec<Buffer> = band_tiles(y0).into_par_iter().map(run).collect();
                 for part in &parts {
                     put(band, y0, part);
                 }
-            }
+            });
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -1350,6 +1351,38 @@ fn composite_artboard(layer: &Layer, ab: &photocraft_doc::Artboard, clipped: &[L
     }
 }
 
+/// The surface `render_content` reads `layer`'s pixels from, when that is all it draws.
+fn pixel_surface(layer: &Layer) -> Option<&Surface> {
+    if matches!(layer.content, LayerContent::Group(_) | LayerContent::Fill(_) | LayerContent::Adjustment(_)) {
+        return None;
+    }
+    layer.surface()
+}
+
+/// A pixel layer (nothing clipped to it) onto `backdrop`, read from its tiles a row at a time:
+/// the same arithmetic as `render_content` + `blend_into_fill`, without a tile-sized copy of the
+/// layer (a megabyte per 256² render tile).
+fn composite_pixel_layer(layer: &Layer, surf: &Surface, backdrop: &mut Buffer, cx: &Ctx) {
+    let rect = backdrop.rect;
+    let w = rect.width() as usize;
+    if w == 0 {
+        return;
+    }
+    let mv = mask_vals(layer, rect, cx);
+    let gamma = text_gamma(layer);
+    let mut row = vec![[0.0f32; 4]; w];
+    for (ry, dst) in backdrop.px.chunks_exact_mut(w).enumerate() {
+        let y = rect.y0 + ry as i32;
+        surf.read_rgba_into(Rect::new(rect.x0, y, rect.x1, y + 1), &mut row);
+        if let Some(m) = mv.as_ref().and_then(|m| m.get(ry * w..(ry + 1) * w)) {
+            for (p, k) in row.iter_mut().zip(m) {
+                p[3] *= k;
+            }
+        }
+        blend_span_fill(dst, &row, rect.x0, y, layer.blend, layer.opacity, layer.fill_opacity, gamma);
+    }
+}
+
 fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer, cx: &Ctx, scope: advanced::Scope) {
     let rect = backdrop.rect;
     // A TSL-off stroke base that is transparent here can still have visible clipped siblings;
@@ -1467,6 +1500,11 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
         }
         blend_into_fill(backdrop, &content, layer.blend, layer.opacity, layer.fill_opacity, 1.0);
         return;
+    }
+    if clipped.is_empty()
+        && let Some(surf) = pixel_surface(layer)
+    {
+        return composite_pixel_layer(layer, surf, backdrop, cx);
     }
     let Some(mut content) = render_content(layer, rect, cx) else { return };
     advanced::composite_clipped(clipped, &mut content, cx);
@@ -1853,44 +1891,51 @@ fn blend_into(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32
 /// [`blend_into_g`] for a layer's own `opacity` and `fill`: Fill is part of the blend for
 /// Photoshop's special eight ([`psblend::composite_fill`]), plain coverage otherwise.
 fn blend_into_fill(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, fill: f32, gamma: f32) {
-    if fill >= 1.0 || !psblend::fill_is_special(mode) {
-        return blend_into_g(backdrop, src, mode, opacity * fill, gamma);
+    for_rows(backdrop, src, |dst, s, x0, y| blend_span_fill(dst, s, x0, y, mode, opacity, fill, gamma));
+}
+
+/// [`blend_into`] mixing coverage in a `gamma` space (type layers).
+fn blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, gamma: f32) {
+    for_rows(backdrop, src, |dst, s, x0, y| blend_span_g(dst, s, x0, y, mode, opacity, gamma));
+}
+
+/// Runs `f(backdrop row, src row, x0, y)` over the rows of two buffers covering the same rect.
+fn for_rows(backdrop: &mut Buffer, src: &Buffer, mut f: impl FnMut(&mut [[f32; 4]], &[[f32; 4]], i32, i32)) {
+    let rect = backdrop.rect;
+    let w = (rect.width() as usize).max(1);
+    for (ry, (dst, s)) in backdrop.px.chunks_mut(w).zip(src.px.chunks(w)).enumerate() {
+        f(dst, s, rect.x0, rect.y0 + ry as i32);
     }
-    for (b, s) in backdrop.px.iter_mut().zip(&src.px) {
+}
+
+/// [`blend_into_fill`] of one row: `dst` and `src` start at pixel (`x0`, `y`).
+#[allow(clippy::too_many_arguments)]
+fn blend_span_fill(dst: &mut [[f32; 4]], src: &[[f32; 4]], x0: i32, y: i32, mode: BlendMode, opacity: f32, fill: f32, gamma: f32) {
+    if fill >= 1.0 || !psblend::fill_is_special(mode) {
+        return blend_span_g(dst, src, x0, y, mode, opacity * fill, gamma);
+    }
+    for (b, s) in dst.iter_mut().zip(src) {
         if s[3] > 0.0 {
             *b = psblend::composite_fill(mode, *b, *s, opacity, fill, gamma);
         }
     }
 }
 
-/// [`blend_into`] mixing coverage in a `gamma` space (type layers).
-fn blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, gamma: f32) {
+/// [`blend_into_g`] of one row: `dst` and `src` start at pixel (`x0`, `y`).
+fn blend_span_g(dst: &mut [[f32; 4]], src: &[[f32; 4]], x0: i32, y: i32, mode: BlendMode, opacity: f32, gamma: f32) {
     // The blend space is constant in this loop. Some TLS implementations synchronise even a
     // boolean read, so select the common Normal kernel once instead of once per pixel.
     if mode == BlendMode::Normal && gamma == 1.0 && !psblend::LAB_MIX.with(|l| l.get()) {
-        for (i, b) in backdrop.px.iter_mut().enumerate() {
-            let s = src.px[i];
-            if s[3] <= 0.0 {
-                continue;
-            }
-            *b = psblend::composite_normal_rgb(*b, s, opacity);
-        }
-        return;
+        return psblend::composite_normal_rgb_span(dst, src, opacity);
     }
-    let rect = backdrop.rect;
-    let w = rect.width() as i32;
-    for (i, b) in backdrop.px.iter_mut().enumerate() {
-        let mut s = src.px[i];
+    for (x, (b, s)) in (x0..).zip(dst.iter_mut().zip(src)) {
+        let mut s = *s;
         if s[3] <= 0.0 {
             continue;
         }
-        let mut mode = mode;
         if mode == BlendMode::Dissolve {
-            let x = rect.x0 + (i as i32 % w);
-            let y = rect.y0 + (i as i32 / w);
             s[3] = if dissolve_noise(x, y) < s[3] * opacity { 1.0 } else { 0.0 };
-            mode = BlendMode::Normal;
-            *b = blend::composite(mode, *b, s, 1.0);
+            *b = blend::composite(BlendMode::Normal, *b, s, 1.0);
             continue;
         }
         *b = blend::composite_gamma(mode, *b, s, opacity, gamma);
