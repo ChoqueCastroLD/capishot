@@ -2496,13 +2496,23 @@ const STUDIO_TAB_PAD: f32 = 48.0;
 const STUDIO_TAB_GAP: f32 = 4.0;
 
 /// Photoshop's tab title: "name @ 50% (Layer 1, RGB/8)", "(Layer 1, Layer Mask/8)" when the mask
-/// is targeted; the Background layer's name is omitted.
+/// is targeted, "(Quick Mask/8)" in Quick Mask mode; the Background layer's name is omitted.
 fn pro_tab_title(app: &PhotocraftApp, i: usize) -> String {
+    use photocraft_engine::channel_cmds::ChannelTarget;
     let Some(st) = app.session.documents().get(i) else { return String::new() };
     let zoom = app.ui.views.get(i).map_or(100.0, |v| v.zoom * 100.0);
-    let active_layer = st.active_layer.and_then(|id| st.doc.layer(id)).filter(|l| !st.doc.is_background(l.id));
+    // Quick Mask mode targets the mask, not the layer (see `paint_target`): painting and Free
+    // Transform change the red overlay, so the tab says so, as Photoshop's does.
+    let quick_mask = st.doc.quick_mask.is_some() && st.channel_view.target == ChannelTarget::Composite;
+    let active_layer = st.active_layer.and_then(|id| st.doc.layer(id)).filter(|l| !quick_mask && !st.doc.is_background(l.id));
     let mask = app.session.active_index() == Some(i) && app.ui.mask_target && active_layer.is_some_and(|l| l.mask.is_some());
-    let model = if mask { tl!("Layer Mask").to_string() } else { mode_label(&st.doc).to_string() };
+    let model = if quick_mask {
+        tl!("Quick Mask").to_string()
+    } else if mask {
+        tl!("Layer Mask").to_string()
+    } else {
+        mode_label(&st.doc).to_string()
+    };
     let layer = active_layer.map(|l| format!("{}, ", l.name)).unwrap_or_default();
     // A save in progress: "name @ 100% (Layer 1, RGB/16) - Saving 45%", as Photoshop does (#3389).
     let saving = crate::jobs_ui::save_progress(app, st.doc.id).map(|s| format!(" - {s}")).unwrap_or_default();
