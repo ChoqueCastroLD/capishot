@@ -1577,7 +1577,12 @@ fn close_from(d: &Descriptor) -> Mapped {
     if get_enum(d, "Svng").as_deref() == Some("Ys") { steps(vec![("file.save", json!({})), ("file.close", json!({}))]) } else { none("file.close") }
 }
 
-fn close_to(_: &str, _: &Value) -> Option<Descriptor> {
+/// A Close of an explicit document has no mapping here: written as a plain Close it would
+/// close the active document on playback, so it is left to `skipUnsupported`.
+fn close_to(_: &str, p: &Value) -> Option<Descriptor> {
+    if p.get("document").is_some_and(|d| !d.is_null()) {
+        return None;
+    }
     Some(desc("null").with("Svng", enm("YsN ", "N   ")))
 }
 

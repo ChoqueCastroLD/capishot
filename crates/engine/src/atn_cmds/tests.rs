@@ -1005,3 +1005,18 @@ fn remove_white_clears_the_targeted_layer_not_the_converted_background() {
     assert!(!st.doc.is_background(bottom.id), "the Background became a normal layer");
     assert!(bottom.surface().unwrap().sample_channel(2, 2, 1) > 0.99, "and kept its pixels");
 }
+
+/// Photoshop's Close has no document target: a Close of a specific document must not be
+/// exported as a plain Close, which would close the active document on playback.
+#[test]
+fn close_with_document_target_is_not_exported_as_plain_close() {
+    let targeted = Action { name: "Probe".into(), steps: vec![("file.close".into(), json!({"document": 0}))], ..Default::default() };
+    assert!(export("Audit4", &[&targeted], &[], false).is_err());
+    let (_, skipped) = export("Audit4", &[&targeted], &[], true).unwrap();
+    assert_eq!(skipped, vec![Skipped { action: "Probe".into(), step: 0, id: "file.close".into() }]);
+    let plain = Action { name: "Plain".into(), steps: vec![("file.close".into(), json!({}))], ..Default::default() };
+    let (bytes, skipped) = export("Audit4", &[&plain], &[], false).unwrap();
+    assert!(skipped.is_empty());
+    let imported = import(&bytes).unwrap();
+    assert_eq!(imported.actions[0].steps, vec![("file.close".to_string(), json!({}))]);
+}
