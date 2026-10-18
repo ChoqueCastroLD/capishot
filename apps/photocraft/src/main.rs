@@ -767,6 +767,19 @@ fn main() -> eframe::Result {
     result
 }
 
+/// Tests that spawn child processes hold this for reading, tests that check who holds a file lock
+/// for writing ([`no_child_spawns`]): until its `exec`, a child holds a copy of every open file,
+/// `flock`s included, so a spawn in another test could keep a lock this process just dropped held
+/// for a moment.
+#[cfg(test)]
+pub(crate) static CHILD_SPAWNS: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// Held by a test that checks who holds a file lock: no other test spawns a child meanwhile.
+#[cfg(test)]
+pub(crate) fn no_child_spawns() -> std::sync::RwLockWriteGuard<'static, ()> {
+    CHILD_SPAWNS.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
