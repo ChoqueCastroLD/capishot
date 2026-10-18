@@ -4968,6 +4968,9 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
                 Tool::QuickSelection => Color32::from_white_alpha(40),
                 // The Remove Tool tints what it will remove, like Photoshop's.
                 Tool::Remove => crate::theme::Tokens::get(painter.ctx()).danger.gamma_multiply(0.45),
+                // Photoshop paints the area to heal in half-opaque dark grey; a faint white trail
+                // barely showed on light pixels (#7342).
+                Tool::SpotHealing => Color32::from_black_alpha(128),
                 _ => Color32::from_white_alpha(60),
             };
             let Some(st) = app.session.active() else { return };
