@@ -90,6 +90,7 @@ fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -
             return app(sp);
         }
         if let Some(name) = system_spooler() {
+            require_windows_pdf()?;
             return craft_print::submit(&job.pdf, lp).map(|m| (m, name.to_string())).map_err(other);
         }
     }
