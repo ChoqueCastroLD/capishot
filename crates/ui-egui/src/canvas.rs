@@ -3438,7 +3438,21 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // Layer Style on a Drop or Inner Shadow page: a drag on the image moves the shadow (#5701).
         let shadow_drag =
             !picking && app.ui.dialogs.last().is_some_and(|d| d.kind == crate::state::DialogKind::LayerStyle && crate::layer_style::drags_shadow(&d.fields));
-        let hand = app.ui.tool == Tool::Hand && !picking && !range_picking && !refine_brushing && !pinning && !shadow_drag;
+        // ⌘/Ctrl-click with Curves open: a point at the pixel's tone (#7325), whatever the tool. The
+        // press's own modifiers decide, and only the press adds: a drag would add one per frame.
+        let curve_point_press = (primary && !middle && crate::adjust_dialog::curves_on_top(app))
+            .then(|| {
+                ctx.input(|i| {
+                    i.events.iter().rev().find_map(|e| match e {
+                        egui::Event::PointerButton { button: PointerButton::Primary, pressed: true, modifiers, .. } => Some(*modifiers),
+                        _ => None,
+                    })
+                })
+            })
+            .flatten()
+            .map(|m| crate::workspace_ui::sticky_mods(app, m))
+            .filter(|m| m.command);
+        let hand = app.ui.tool == Tool::Hand && !picking && !range_picking && !refine_brushing && !pinning && !shadow_drag && curve_point_press.is_none();
         if let Some(d) = crate::dialogs::pan_delta(&ctx, rect, hand) {
             let d = xf.unmap_vec(d) / (view.zoom / ppp);
             view.center[0] -= d.x;
@@ -3483,6 +3497,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         {
             let press = crate::dialogs::free_press(&ctx, rect).map(|q| xf.to_doc(q));
             crate::select_mask_view::canvas_brush(app, &painter, p, press, xf.zoom_x());
+        } else if let Some(mods) = curve_point_press
+            && let Some(p) = crate::dialogs::free_press(&ctx, rect)
+        {
+            let d = xf.to_doc(p);
+            crate::adjust_dialog::add_point_at(app, &ctx, d[0], d[1], mods.shift);
         } else if primary
             && !middle
             && let Some(p) = crate::dialogs::free_pointer_over(&ctx, rect).filter(|p| img_rect.contains(*p))
