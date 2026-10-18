@@ -93,8 +93,8 @@ mod xattrs {
         assert_eq!(get(&p, TAG), Some(value));
     }
 
-    /// Copying the mode must not get in the way of copying the attributes: a read-only file is
-    /// still writable to us *before* its mode lands on the temporary file, and only then.
+    /// A read-only file is refused outright (#6600), so a save never reaches the metadata copy and
+    /// the file keeps everything it had. The writable cases above cover the copy itself.
     #[test]
     fn a_read_only_file_keeps_its_attributes_and_its_mode() {
         use std::os::unix::fs::PermissionsExt;
@@ -106,9 +106,13 @@ mod xattrs {
         }
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o444)).unwrap();
 
-        atomic_write(&p, b"second, longer").unwrap();
+        // #6600: a read-only file is refused before anything is written, so the question this test
+        // asks — does a replace keep the attributes and the mode — is answered by the save not
+        // happening. The writable case above covers attributes surviving a replace.
+        let e = atomic_write(&p, b"second, longer").expect_err("a read-only file is refused");
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
 
-        assert_eq!(std::fs::read(&p).unwrap(), b"second, longer");
+        assert_eq!(std::fs::read(&p).unwrap(), b"first", "the original was left alone");
         assert_eq!(get(&p, TAG).as_deref(), Some(&b"tagged"[..]), "a read-only file lost its attribute");
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o444);
     }
