@@ -1613,14 +1613,17 @@ fn transform_from(d: &Descriptor) -> Mapped {
     if d.get("Skew").is_some() || d.get("Usng").is_some() {
         return unsupported;
     }
-    let geometry_only = p.keys().all(|k| k == "dx" || k == "dy");
+    // A whole-pixel move is a plain `layer.translate`; a fractional one needs `edit.transform`
+    // to keep its sub-pixel placement and interpolation.
+    let whole_pixels = ["dx", "dy"].iter().all(|k| p.get(*k).and_then(Value::as_f64).is_none_or(|v| v.fract() == 0.0));
+    let geometry_only = p.keys().all(|k| k == "dx" || k == "dy") && whole_pixels;
     match (ref_class(r).as_deref(), target(r)) {
         (Some("Chnl"), Target::Property(prop)) if prop == "fsel" => step("select.transformSelection", Value::Object(p)),
         (Some("Lyr"), _) => {
             let Some(mut lp) = layer_target(r) else { return unsupported };
             if geometry_only {
-                lp.insert("dx".into(), p.get("dx").and_then(Value::as_f64).unwrap_or(0.0).round().into());
-                lp.insert("dy".into(), p.get("dy").and_then(Value::as_f64).unwrap_or(0.0).round().into());
+                lp.insert("dx".into(), p.get("dx").and_then(Value::as_f64).unwrap_or(0.0).into());
+                lp.insert("dy".into(), p.get("dy").and_then(Value::as_f64).unwrap_or(0.0).into());
                 return step("layer.translate", Value::Object(lp));
             }
             lp.extend(p);
