@@ -1882,12 +1882,13 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
     }
     // Web and explicitly inline sessions keep the deterministic synchronous path (#1676):
     // computed inline, uploaded when a GPU texture exists, still inspectable without one.
+    // Flattened once, as the background worker does; `publish_filter_preview` uploads it (#7490).
     let _ = ctx;
     if app.filter_preview.as_ref().is_none_or(|p| p.key != request) {
         let doc = app.session.documents().get(idx)?.doc.clone();
         let documents: Vec<_> = app.session.documents().iter().map(|d| d.doc.clone()).collect();
         let t0 = crate::gpu_canvas::now_ms();
-        let result = crate::filter_dialog::preview_document_for_target(
+        let computed = crate::filter_dialog::preview_document_for_target(
             &doc,
             request.active,
             &request.command,
@@ -1898,19 +1899,11 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
             &documents,
             &app.session.color.settings,
         )
-        .map(std::sync::Arc::new);
-        if let Some(r) = &result {
-            let buf = photocraft_compose::flatten(r);
-            let t1 = crate::gpu_canvas::now_ms();
-            // The preview's own profile: Assign and Convert to Profile change it (see `publish_filter_preview`).
-            let (display, _) = canvas_display(app, r, None);
-            if let Some(gpu) = app.gpu.as_ref() {
-                gpu.upload_buffer_full(key, &texture_buffer(display.as_deref(), &buf), doc.depth);
-            }
-            app.perf.record("filter-preview", r.size.area(), t1 - t0, crate::gpu_canvas::now_ms() - t1);
-        }
-        let buffer = result.as_ref().map(|r| photocraft_compose::flatten(r));
-        publish_filter_preview(app, idx, request, result.zip(buffer), crate::gpu_canvas::now_ms() - t0);
+        .map(|doc| {
+            let buffer = photocraft_compose::flatten(&doc);
+            (std::sync::Arc::new(doc), buffer)
+        });
+        publish_filter_preview(app, idx, request, computed, crate::gpu_canvas::now_ms() - t0);
     }
     let preview = app.filter_preview.as_ref()?;
     let result = preview.result.as_ref()?;
@@ -6204,6 +6197,26 @@ mod tests {
         let d = color.canvas_display(&doc).unwrap();
         assert!(!d.is_identity());
         assert_eq!(super::display_image(Some(&d), &buf).pixels, reference(d.to_rgba8(&buf)).pixels);
+    }
+
+    /// #7490: the inline (web) preview path composites and uploads each changed preview once, as
+    /// the background worker does. It used to flatten and upload it twice and record it twice,
+    /// so the frame's refresh time counted the preview twice.
+    #[test]
+    fn inline_filter_preview_is_composited_and_recorded_once() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.background_jobs = false;
+        app.run("file.new", json!({"width": 320, "height": 240})).unwrap();
+        crate::filter_dialog::open(&mut app, "filter.stylize.solarize").unwrap();
+        app.perf.frame_refresh_ms = 0.0;
+        let (_, _, size) = ensure_filter_preview(&mut app, 0, &egui::Context::default()).expect("a preview");
+        assert_eq!(size, [320, 240]);
+        assert_eq!(app.perf.last_refresh, "filter-preview");
+        assert_eq!(app.perf.last_refresh_px, 320 * 240);
+        assert_eq!(app.perf.frame_refresh_ms, app.perf.composite_ms + app.perf.upload_ms, "one record per preview");
+        // Unchanged request: nothing is recomputed or recorded again.
+        ensure_filter_preview(&mut app, 0, &egui::Context::default()).expect("the same preview");
+        assert_eq!(app.perf.frame_refresh_ms, app.perf.composite_ms + app.perf.upload_ms);
     }
 
     /// #6326: a filter's live preview is never coarser than the screen. On a document big enough
