@@ -70,7 +70,7 @@ const MAP16: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
 pub const CHUNK: u32 = 1024;
 const STRIDE: u64 = 256;
 const CHUNK_UNIFORM: u64 = 16;
-const OP_UNIFORM: u64 = 176;
+const OP_UNIFORM: u64 = 256;
 /// GPU memory the effect-map cache may hold before evicting layers not drawn this frame.
 pub const FX_BUDGET: usize = 1536 << 20;
 /// Largest side of the square pages layer surfaces are stored in on the GPU (smaller when the
@@ -139,6 +139,10 @@ pub struct Stats {
     pub prefix_hits: usize,
     /// Planned prefix passes skipped, summed over the reused chunks.
     pub prefix_passes_skipped: usize,
+    /// Plain layers blended inside another layer's pass (`fs_layerbatch`), summed over chunks.
+    pub layers_batched: usize,
+    /// Batched passes drawn with Normal's code alone (`fs_layerbatch_normal`), summed over chunks.
+    pub normal_batches: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1405,6 +1409,8 @@ impl Compositor {
             .and_then(|_| chunks.iter().map(|c| self.prefix.restore_point(*c).map(|r| r.pass_end)).try_fold(usize::MAX, |m, p| Some(m.min(p?))))
             .unwrap_or(0);
         let bound = self.bind_cell(device, queue, encoder, doc, plan, paged, cell, fr, first_pass, stats);
+        // Runs of plain layers drawn as one pass each (`fs_layerbatch`).
+        let runs = batch_runs(plan, checkpoint.map(|c| c.pass_end));
 
         // Chunk pool.
         while self.pool.len() < plan.slots as usize {
@@ -1439,7 +1445,13 @@ impl Compositor {
             }
             let (tex, mask) = bound.views[i];
             let map = bound.maps[i].as_ref().map(|(_, r)| *r);
-            let w = op_words(p, tex.map(|t| t.1), mask.map(|m| m.1), map);
+            let run = runs.get(i).copied().unwrap_or(1);
+            let w = if run > 1 {
+                let extras: Vec<_> = (i + 1..i + run).filter_map(|j| Some((plan.passes.get(j)?, bound.views.get(j).and_then(|v| v.0).map(|t| t.1)))).collect();
+                batch_op_words(p, tex.map(|t| t.1), mask.map(|m| m.1), &extras)
+            } else {
+                op_words(p, tex.map(|t| t.1), mask.map(|m| m.1), map)
+            };
             let off = (op_base + i as u64 * STRIDE) as usize;
             data[off..][..w.len()].copy_from_slice(&w);
         }
@@ -1468,6 +1480,13 @@ impl Compositor {
             let lv = fr.luts.get(i).and_then(Option::as_ref).map_or(dummy, |(_, v)| v);
             let map = bound.maps[i].as_ref().map_or(dummy, |(v, _)| v);
             let pat = fr.patterns.get(i).and_then(Option::as_ref).unwrap_or(dummy);
+            let run = runs.get(i).copied().unwrap_or(1);
+            if run > 1 {
+                // The extra layers' pixels in tex_b, tex_c and map_tex (`batch_layer`).
+                let extra = |e: usize| bound.views.get(i + e).and_then(|v| v.0).map_or(dummy, |(k, _)| resident_views[k]);
+                bg1.push(Some(texture_group(device, &self.kit.bgl1, &[slot(p.a), extra(1), tv, mv, lv, extra(2), extra(3), pat])));
+                continue;
+            }
             bg1.push(Some(texture_group(device, &self.kit.bgl1, &[slot(p.a), slot(p.b), tv, mv, lv, slot(p.c), map, pat])));
         }
 
@@ -1481,8 +1500,10 @@ impl Compositor {
                 stats.prefix_hits = stats.prefix_hits.saturating_add(1);
                 stats.prefix_passes_skipped = stats.prefix_passes_skipped.saturating_add(resume);
             }
+            // Passes drawn inside the previous `fs_layerbatch` pass.
+            let mut batched_to = 0;
             for (i, p) in plan.passes.iter().enumerate() {
-                if i < resume {
+                if i < resume || i < batched_to {
                     continue;
                 }
                 // Chunk textures, uniforms and bind groups outlive the submit, and the queue
@@ -1542,7 +1563,21 @@ impl Compositor {
                     _ => {}
                 }
                 self.recorded += 1;
-                let target = &self.pool[p.dst as usize].1;
+                // A run draws as one pass into the slot its last layer writes.
+                let run = runs.get(i).copied().unwrap_or(1);
+                let (kernel, dst) = match plan.passes.get(i + run - 1) {
+                    Some(last) if run > 1 => {
+                        batched_to = i + run;
+                        stats.layers_batched = stats.layers_batched.saturating_add(run - 1);
+                        let kernel = plan.passes.get(i..i + run).map_or(Kernel::LayerBatch, batch_kernel);
+                        if kernel == Kernel::LayerBatchNormal {
+                            stats.normal_batches = stats.normal_batches.saturating_add(1);
+                        }
+                        (kernel, last.dst)
+                    }
+                    _ => (p.kernel, p.dst),
+                };
+                let target = &self.pool[dst as usize].1;
                 let clear = p.kernel == Kernel::Clear;
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("pc_compose_pass"),
@@ -1563,7 +1598,7 @@ impl Compositor {
                 if clear {
                     continue;
                 }
-                pass.set_pipeline(&self.kit.pipelines[&(p.kernel, self.acc_format)]);
+                pass.set_pipeline(&self.kit.pipelines[&(kernel, self.acc_format)]);
                 pass.set_scissor_rect(scissor.x0 as u32, scissor.y0 as u32, scissor.width(), scissor.height());
                 pass.set_bind_group(0, &bg0, &[(ci as u64 * STRIDE) as u32, (op_base + i as u64 * STRIDE) as u32]);
                 pass.set_bind_group(1, bg1[i].as_ref(), &[]);
@@ -2046,6 +2081,38 @@ fn web_time_now() -> Option<std::time::Instant> {
 
 /// The uniform record of a pass.
 fn op_words(p: &plan::Pass<'_>, tex: Option<[i32; 4]>, mask: Option<[i32; 4]>, map: Option<Rect>) -> Vec<u8> {
+    words(&op_values(p, tex, mask, map))
+}
+
+/// The uniform record of the `fs_layerbatch` pass that draws `p` (whose texture and mask cover
+/// `tex` and `mask`) and then `extras`, each an unmasked plain layer's `LayerBlend` pass with the
+/// area its texture covers. Layout: see `batch_layer` in compose.wgsl.
+fn batch_op_words(p: &plan::Pass<'_>, tex: Option<[i32; 4]>, mask: Option<[i32; 4]>, extras: &[(&plan::Pass<'_>, Option<[i32; 4]>)]) -> Vec<u8> {
+    let mut v = op_values(p, tex, mask, None);
+    // Word offsets of the record's vec4s holding the extra layers, three each: p0, p1, p2 | p3,
+    // q0, q1 | q2, q3, q4.
+    const AT: [usize; 9] = [20, 24, 28, 32, 44, 48, 52, 56, 60];
+    if let Some(kind) = v.get_mut(1) {
+        *kind = I(extras.len().min(AT.len() / 3) as i32);
+    }
+    for (e, (x, area)) in extras.iter().take(AT.len() / 3).enumerate() {
+        let r = area.unwrap_or([0; 4]);
+        let geo = [r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32];
+        let prm = [x.opacity, x.fill, plan::mode_index(x.mode) as f32, if area.is_some() { 1.0 } else { 0.0 }];
+        for (k, vals) in [geo, x.color, prm].into_iter().enumerate() {
+            let at = AT[e * 3 + k];
+            for (c, f) in vals.into_iter().enumerate() {
+                if let Some(w) = v.get_mut(at + c) {
+                    *w = F(f);
+                }
+            }
+        }
+    }
+    words(&v)
+}
+
+/// The words of a pass's uniform record (`Op` in compose.wgsl).
+fn op_values(p: &plan::Pass<'_>, tex: Option<[i32; 4]>, mask: Option<[i32; 4]>, map: Option<Rect>) -> Vec<W> {
     let mut flags = p.flags;
     let (mut to, mut ts, mut mo, mut ms) = ([0; 2], [0; 2], [0; 2], [0; 2]);
     if let Some(r) = tex {
@@ -2092,7 +2159,67 @@ fn op_words(p: &plan::Pass<'_>, tex: Option<[i32; 4]>, mask: Option<[i32; 4]>, m
     }
     v.extend([I(mpo[0]), I(mpo[1]), I(mps[0]), I(mps[1])]);
     v.extend(p.extra.iter().map(|f| F(*f)));
-    words(&v)
+    // q0..q4: only `fs_layerbatch` reads them (`batch_op_words`).
+    v.extend((0..20).map(|_| F(0.0)));
+    v
+}
+
+/// Most layers one `fs_layerbatch` pass blends: its own and the three more its record holds.
+const BATCH: usize = 4;
+
+/// For each pass, how many passes from it on the executor draws as one `fs_layerbatch` pass
+/// (1: the pass alone). A run starts at a `LayerBlend` pass over the whole chunk (no clip) that
+/// isn't a gradient (whose parameters use the words the extra layers go in), and continues while
+/// the next pass is a `LayerBlend` of an unmasked plain layer (no text gamma, no Dissolve) onto
+/// exactly what the previous pass wrote, a slot nothing else reads before it is written again.
+/// A run doesn't cross `capture`, the pass where this render captures its prefix checkpoint, and
+/// never ends in the slot it reads from.
+fn batch_runs(plan: &Plan<'_>, capture: Option<usize>) -> Vec<usize> {
+    let passes = &plan.passes;
+    let n = passes.len();
+    let reads = |p: &plan::Pass<'_>, s: plan::Slot| [p.a, p.b, p.c, p.d].contains(&Some(s));
+    // feeds_next[i]: what pass i writes is read by pass i + 1 alone.
+    let feeds_next: Vec<bool> = (0..n)
+        .map(|i| {
+            let (Some(this), Some(next)) = (passes.get(i), passes.get(i + 1)) else { return false };
+            let dst = this.dst;
+            if next.a != Some(dst) || [next.b, next.c, next.d].contains(&Some(dst)) {
+                return false;
+            }
+            for later in passes.iter().skip(i + 2) {
+                // A copy into a slot keeps what lies outside its rect: that is a read too.
+                if reads(later, dst) || (later.dst == dst && later.kernel == Kernel::CopyRect) {
+                    return false;
+                }
+                if later.dst == dst {
+                    return true;
+                }
+            }
+            dst != plan.root
+        })
+        .collect();
+    let lead = |p: &plan::Pass<'_>| p.kernel == Kernel::LayerBlend && p.clip.is_none() && !p.gradient;
+    let extra = |p: &plan::Pass<'_>| lead(p) && p.mask.is_none() && p.flags & plan::F_TEXT_GAMMA == 0 && p.mode != photocraft_color::BlendMode::Dissolve;
+    (0..n)
+        .map(|i| {
+            let Some(first) = passes.get(i).filter(|p| lead(p)) else { return 1 };
+            let (mut k, mut best) = (1, 1);
+            while k < BATCH && feeds_next.get(i + k - 1).copied().unwrap_or(false) && passes.get(i + k).is_some_and(extra) && capture != Some(i + k) {
+                k += 1;
+                if passes.get(i + k - 1).is_some_and(|p| Some(p.dst) != first.a) {
+                    best = k;
+                }
+            }
+            best
+        })
+        .collect()
+}
+
+/// The pipeline that draws `run` (passes `batch_runs` joined): `fs_layerbatch_normal` when every
+/// layer blends Normal without text gamma outside Lab documents, else `fs_layerbatch`.
+fn batch_kernel(run: &[plan::Pass<'_>]) -> Kernel {
+    let normal = |p: &plan::Pass<'_>| p.mode == photocraft_color::BlendMode::Normal && p.flags & (plan::F_TEXT_GAMMA | plan::F_LAB) == 0;
+    if run.iter().all(normal) { Kernel::LayerBatchNormal } else { Kernel::LayerBatch }
 }
 
 /// Canvas rounded out to whole tiles.
@@ -2536,6 +2663,96 @@ pub fn render_to_vec_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A run joins `LayerBlend` passes that only feed each other, at most `BATCH` of them, and
+    /// never ends in the slot it reads from.
+    fn check_runs(p: &Plan<'_>, capture: Option<usize>) -> Vec<usize> {
+        let runs = batch_runs(p, capture);
+        assert_eq!(runs.len(), p.passes.len());
+        for (i, &k) in runs.iter().enumerate() {
+            assert!((1..=BATCH).contains(&k), "pass {i}: run {k}");
+            if k > 1 {
+                assert_ne!(Some(p.passes[i + k - 1].dst), p.passes[i].a, "run at {i} renders into its input");
+                for j in i + 1..i + k {
+                    assert_eq!(p.passes[j].kernel, Kernel::LayerBlend);
+                    assert_eq!(p.passes[j].a, Some(p.passes[j - 1].dst), "run at {i}: pass {j} doesn't read the one before");
+                    assert!(p.passes[j].mask.is_none() && p.passes[j].mode != photocraft_color::BlendMode::Dissolve, "run at {i}: pass {j}");
+                    assert_ne!(capture, Some(j), "run at {i} skips the captured checkpoint");
+                }
+            }
+        }
+        runs
+    }
+
+    #[test]
+    fn plain_layers_batch_and_runs_stop_where_a_pass_must_stand_alone() {
+        use photocraft_color::{BlendMode, Color, ColorMode, SampleType};
+        use photocraft_doc::{Document, Layer, LayerMask};
+        let mut d = Document::with_background("t", photocraft_geom::Size::new(8, 8), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        for i in 0..12 {
+            let mut l = Layer::raster(format!("l{i}"), d.pixel_format());
+            l.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 8, 8), &[0.2, 0.4, 0.6, 0.5]);
+            d.layers.push(l);
+        }
+        let p = plan::plan(&d).unwrap();
+        let runs = check_runs(&p, None);
+        assert!(runs.iter().any(|k| *k >= 3), "{runs:?}");
+        // A run stops at the checkpoint this render captures, wherever that is.
+        for cp in &p.checkpoints {
+            check_runs(&p, Some(cp.pass_end));
+        }
+        // A masked or Dissolve layer, or a clipped one, never joins a run as an extra layer.
+        d.layers[3].mask = Some(LayerMask::hide_all());
+        d.layers[6].blend = BlendMode::Dissolve;
+        d.layers[9].clipped = true;
+        check_runs(&plan::plan(&d).unwrap(), None);
+        // Nothing to batch: a lone layer.
+        d.layers.truncate(1);
+        assert_eq!(check_runs(&plan::plan(&d).unwrap(), None), vec![1; plan::plan(&d).unwrap().passes.len()]);
+    }
+
+    #[test]
+    fn batch_records_hold_three_extra_layers_in_the_spare_words() {
+        let lead = plan::Pass::new(Kernel::LayerBlend, 0);
+        let mut x = plan::Pass::new(Kernel::LayerBlend, 1);
+        x.opacity = 0.25;
+        x.fill = 0.5;
+        x.color = [0.1, 0.2, 0.3, 0.4];
+        let w = batch_op_words(&lead, None, None, &[(&x, Some([1, 2, 3, 4])), (&x, None), (&x, None), (&x, None)]);
+        assert_eq!(w.len() as u64, OP_UNIFORM);
+        let word = |i: usize| <[u8; 4]>::try_from(&w[i * 4..i * 4 + 4]).unwrap();
+        let f = |i: usize| f32::from_le_bytes(word(i));
+        // At most three extras; the first's geometry, colour and parameters in p0, p1, p2.
+        assert_eq!(i32::from_le_bytes(word(1)), 3);
+        assert_eq!([f(20), f(21), f(22), f(23)], [1.0, 2.0, 3.0, 4.0]);
+        assert_eq!([f(24), f(25), f(26), f(27)], [0.1, 0.2, 0.3, 0.4]);
+        assert_eq!([f(28), f(29), f(31)], [0.25, 0.5, 1.0]);
+        // The third's parameters in q4; one without pixels says so.
+        assert_eq!([f(60), f(61), f(63)], [0.25, 0.5, 0.0]);
+        // Other passes leave the batch words zero.
+        let plain = op_words(&x, None, None, None);
+        assert!(plain[44 * 4..].iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn runs_of_normal_layers_draw_with_normal_code_alone() {
+        use photocraft_color::BlendMode;
+        let pass = |mode: BlendMode, flags: u32| {
+            let mut p = plan::Pass::new(Kernel::LayerBlend, 0);
+            p.mode = mode;
+            p.flags = flags;
+            p
+        };
+        let normal = pass(BlendMode::Normal, plan::F_HDR);
+        assert_eq!(batch_kernel(&[normal.clone(), pass(BlendMode::Normal, 0)]), Kernel::LayerBatchNormal);
+        // Any other mode, text gamma or a Lab document anywhere in the run takes the full shader.
+        for other in
+            [pass(BlendMode::Multiply, 0), pass(BlendMode::Dissolve, 0), pass(BlendMode::Normal, plan::F_TEXT_GAMMA), pass(BlendMode::Normal, plan::F_LAB)]
+        {
+            assert_eq!(batch_kernel(&[normal.clone(), other.clone()]), Kernel::LayerBatch);
+            assert_eq!(batch_kernel(&[other, normal.clone()]), Kernel::LayerBatch);
+        }
+    }
 
     #[test]
     fn uniform_buffer_sizes_are_checked_before_allocation() {

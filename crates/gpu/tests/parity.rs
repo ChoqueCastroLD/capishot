@@ -1220,19 +1220,101 @@ fn small_layers_composite_over_their_bounds() {
 fn many_layers_submit_inside_one_chunk() {
     // P12: a refresh recorded every pass of a page cell into one command buffer, and with a few
     // hundred layers Metal ran out of command buffers (device lost, "pc_compose_uniforms is
-    // invalid"). 700 layers need well over 1000 passes in the document's only chunk.
+    // invalid"). 1200 layers need well over 1000 passes in the document's only chunk: each is
+    // masked, so it is drawn in a pass of its own rather than batched with its neighbours.
     let Some(mut g) = gpu() else { return };
     let mut d = base_doc(64, 48);
     let modes: Vec<BlendMode> = BlendMode::layer_modes().collect();
-    for (i, mode) in modes.iter().copied().cycle().take(700).enumerate() {
+    for (i, mode) in modes.iter().copied().cycle().take(1200).enumerate() {
         let mut l = noise_layer("l", PixelFormat::RGBA8, Rect::from_xywh(0, 0, 64, 48), 500 + i as u32, 0.0);
         l.blend = mode;
         l.opacity = 0.9;
+        l.mask = Some(mask(Rect::from_xywh(0, 0, 64, 48), 3000 + i as u32, 1.0));
         d.layers.push(l);
     }
-    let stats = diff_rect(&mut g, &d, d.bounds(), "700 layers").unwrap_or_else(|e| panic!("{e}"));
+    let stats = diff_rect(&mut g, &d, d.bounds(), "1200 layers").unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(stats.layers_batched, 0, "{stats:?}");
     assert_eq!(stats.chunks, 1);
     assert!(stats.flushes > 0, "{stats:?}");
+}
+
+#[test]
+fn runs_of_plain_layers_blend_in_one_pass() {
+    // Consecutive plain layers are drawn several to a pass (`fs_layerbatch`). Every layer mode at
+    // varied opacity and fill (the fill-special modes included), solid fills, layers that end
+    // inside the canvas, and the layers that end a run: masked, Dissolve, small (clipped to their
+    // bounds) and clipping groups. Then an edit in the middle, so the prefix cache resumes
+    // part-way up the stack and runs start at its checkpoint.
+    let Some(mut g) = gpu() else { return };
+    let mut d = base_doc(96, 64);
+    let modes: Vec<BlendMode> = BlendMode::layer_modes().collect();
+    for (i, mode) in modes.iter().copied().cycle().take(90).enumerate() {
+        let i32_ = i as i32;
+        let rect = if i % 5 == 2 { Rect::from_xywh(-8, 10, 70, 40) } else { Rect::from_xywh(0, 0, 96, 64) };
+        let mut l = noise_layer("l", PixelFormat::RGBA8, rect, 900 + i as u32, 0.0);
+        l.blend = mode;
+        l.opacity = 0.35 + 0.05 * (i % 13) as f32;
+        l.fill_opacity = if i % 4 == 1 { 0.6 } else { 1.0 };
+        if i % 11 == 7 {
+            l.mask = Some(mask(Rect::from_xywh(i32_ % 30, 0, 50, 64), 70 + i as u32, 0.0));
+        }
+        if i % 23 == 9 {
+            l.clipped = true;
+        }
+        d.layers.push(l);
+        if i % 9 == 4 {
+            let mut f = Layer::new("fill", LayerContent::Fill(Fill::Solid(Color::rgba(0.3, 0.6, 0.2, 0.4))));
+            f.blend = modes[i % modes.len()];
+            d.layers.push(f);
+        }
+        if i % 17 == 8 {
+            d.layers.push(noise_layer("small", PixelFormat::RGBA8, Rect::from_xywh(20, 20, 6, 5), 40 + i as u32, 0.5));
+        }
+    }
+    let stats = diff_rect(&mut g, &d, d.bounds(), "plain layer runs").unwrap_or_else(|e| panic!("{e}"));
+    assert!(stats.layers_batched > 0, "no layers were batched: {stats:?}");
+    let mid = d.layers.len() / 2;
+    d.layers[mid].opacity = 0.5;
+    let stats = diff_rect(&mut g, &d, d.bounds(), "plain layer runs, edited in the middle").unwrap_or_else(|e| panic!("{e}"));
+    assert!(stats.layers_batched > 0, "{stats:?}");
+}
+
+#[test]
+fn runs_of_normal_layers_blend_with_normal_code_alone() {
+    // Runs whose layers all blend Normal draw with `fs_layerbatch_normal`: varied opacity and fill
+    // over a partly transparent backdrop, masked layers leading runs, solid fills and layers that
+    // end inside the canvas, at every depth. Lab documents mix Normal in CIELAB, so their runs
+    // keep the full shader.
+    let Some(mut g) = gpu() else { return };
+    for (mode, depth) in
+        [(ColorMode::Rgb, SampleType::U8), (ColorMode::Rgb, SampleType::U16), (ColorMode::Rgb, SampleType::F32), (ColorMode::Lab, SampleType::U8)]
+    {
+        let mut d = Document::new("normal", Size::new(96, 64), mode, depth);
+        let fmt = d.pixel_format();
+        d.layers.push(noise_layer("bg", fmt, Rect::from_xywh(0, 0, 96, 64), 5, 0.0));
+        for i in 0..40u32 {
+            let rect = if i % 5 == 3 { Rect::from_xywh(-6, 9, 70, 44) } else { Rect::from_xywh(0, 0, 96, 64) };
+            let mut l = noise_layer("n", fmt, rect, 600 + i, if i % 3 == 0 { 0.0 } else { 0.4 });
+            l.opacity = 0.2 + 0.07 * (i % 11) as f32;
+            l.fill_opacity = [1.0, 0.55, 0.0, 0.8][i as usize % 4];
+            if i % 7 == 2 {
+                l.mask = Some(mask(Rect::from_xywh(i as i32 % 25, 0, 60, 64), 50 + i, 0.0));
+            }
+            d.layers.push(l);
+            if i % 6 == 4 {
+                let mut f = Layer::new("fill", LayerContent::Fill(Fill::Solid(Color::rgba(0.7, 0.2, 0.5, 0.6))));
+                f.opacity = 0.45;
+                d.layers.push(f);
+            }
+        }
+        let what = format!("normal runs {mode:?} {depth:?}");
+        let stats = diff_rect(&mut g, &d, d.bounds(), &what).unwrap_or_else(|e| panic!("{e}"));
+        if mode == ColorMode::Lab {
+            assert!(stats.layers_batched > 0 && stats.normal_batches == 0, "{what}: {stats:?}");
+        } else {
+            assert!(stats.normal_batches > 0, "{what}: {stats:?}");
+        }
+    }
 }
 
 fn blob(name: &str, fmt: PixelFormat, cx: f32, cy: f32, r: f32, color: [f32; 3]) -> Layer {
@@ -1568,6 +1650,60 @@ fn layer_effects_every_kind() {
         }
     }
     assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+}
+
+#[test]
+fn exterior_effects_merge_from_the_shape_at_any_fill() {
+    // Drop shadows and outer glows alone: the merge builds the layer from its shape (fill inside
+    // it, times its alpha) instead of passes of its own. Fill from 0 to 1, opacity, modes
+    // (including one that blends with the knocked-out shadow), both depths, a layer covering the
+    // canvas (no copy back), and the layer clipped onto a base (merged atop it).
+    let Some(mut g) = gpu() else { return };
+    let mut ds = shadow(BlendMode::Multiply, 0.75, 120.0, 6.0, 8.0, 0.0);
+    let mut ds_through = shadow(BlendMode::Normal, 0.9, 45.0, 4.0, 5.0, 0.2);
+    ds_through.knocks_out = false;
+    let og = glow(FxPaint::Color(Color::rgb(1.0, 0.9, 0.2)), GlowTechnique::Softer, 10.0, 0.3, GlowSource::Edge);
+    ds.use_global_light = true;
+    let stacks = [
+        ("drop shadow", vec![Effect::DropShadow(ds.clone())]),
+        ("drop shadow, not knocked out", vec![Effect::DropShadow(ds_through)]),
+        ("outer glow", vec![Effect::OuterGlow(og.clone())]),
+        ("shadow and glow", vec![Effect::OuterGlow(og), Effect::DropShadow(ds)]),
+    ];
+    for depth in [SampleType::U8, SampleType::U16] {
+        for (name, fx) in &stacks {
+            for (opacity, fill, blend) in [
+                (1.0, 1.0, BlendMode::Normal),
+                (0.8, 0.6, BlendMode::Normal),
+                (1.0, 0.0, BlendMode::Normal),
+                (0.7, 0.35, BlendMode::Multiply),
+                (1.0, 0.5, BlendMode::Screen),
+            ] {
+                let what = format!("{name} {depth:?} opacity {opacity} fill {fill} {blend:?}");
+                let mut d = fx_doc(96, 80, depth);
+                let mut l = blob("fx", d.pixel_format(), 46.0, 40.0, 22.0, [0.2, 0.6, 0.9]);
+                l.effects.items = fx.clone();
+                (l.opacity, l.fill_opacity, l.blend) = (opacity, fill, blend);
+                d.layers.push(l.clone());
+                fx_check(&mut g, &d, &what);
+                // The same layer clipped onto a base.
+                let mut base = blob("base", d.pixel_format(), 40.0, 44.0, 30.0, [0.9, 0.8, 0.3]);
+                base.effects.items.clear();
+                d.layers.pop();
+                d.layers.push(base);
+                l.clipped = true;
+                d.layers.push(l.clone());
+                fx_check(&mut g, &d, &format!("{what}, clipped"));
+                // A partly transparent layer over the whole canvas.
+                let mut d = fx_doc(64, 48, depth);
+                let mut full = noise_layer("full", d.pixel_format(), Rect::from_xywh(0, 0, 64, 48), 7, 0.2);
+                full.effects.items = fx.clone();
+                (full.opacity, full.fill_opacity, full.blend) = (opacity, fill, blend);
+                d.layers.push(full);
+                fx_check(&mut g, &d, &format!("{what}, full canvas"));
+            }
+        }
+    }
 }
 
 #[test]
