@@ -239,6 +239,88 @@ fn arrows_apply_fonts_without_closing_and_enter_accepts() {
     assert!(popup_rect(&h).is_none());
 }
 
+/// #7407: as in Photoshop, the field keeps the focus once a font is picked (click or Enter),
+/// and ↑ / ↓ on it step through the families with the menu closed. Escape ends it.
+#[test]
+fn arrows_on_the_field_step_through_the_families_after_a_pick() {
+    let mut h = harness();
+    open(&mut h);
+    h.get_by_label("Family 03").click();
+    h.run();
+    assert_eq!(h.state().current, "Family 03");
+    assert!(popup_rect(&h).is_none(), "picking closes the menu");
+    let button = h.state().button;
+    assert!(h.ctx.memory(|m| m.has_focus(button)), "the field keeps the focus");
+    let press = |h: &mut Harness<'static, State>, key: Key| {
+        h.key_press(key);
+        h.run();
+        assert!(popup_rect(h).is_none(), "{key:?} leaves the menu closed");
+        assert!(h.ctx.memory(|m| m.has_focus(button)), "{key:?} keeps the focus on the field");
+        h.state().current.clone()
+    };
+    assert_eq!(press(&mut h, Key::ArrowDown), "Family 04");
+    assert_eq!(press(&mut h, Key::ArrowDown), "Family 05");
+    assert_eq!(press(&mut h, Key::ArrowUp), "Family 04");
+    // Enter in the open menu is a pick too.
+    open(&mut h);
+    h.key_press(Key::ArrowDown);
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(h.state().current, "Family 05");
+    assert_eq!(press(&mut h, Key::ArrowDown), "Family 06");
+    // Escape takes the focus away; the arrows then leave the font alone.
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(!h.ctx.memory(|m| m.has_focus(button)));
+    h.key_press(Key::ArrowDown);
+    h.run();
+    assert_eq!(h.state().current, "Family 06");
+}
+
+/// The first arrow right after a pick (in the very next frame) steps the font and keeps the
+/// focus on the field, also between focusable widgets: the field's lock filter only holds from
+/// the frame after it got the focus, and egui would read that arrow as a move to "Below".
+#[test]
+fn the_first_arrow_after_a_pick_keeps_the_focus_between_neighbours() {
+    for (enter, picked, stepped) in [(false, "Family 05", "Family 06"), (true, "Family 04", "Family 05")] {
+        let families: Vec<String> = (0..20).map(|i| format!("Family {i:02}")).collect();
+        let state = State { current: "Family 03".into(), families, button: egui::Id::NULL, popup: egui::Id::NULL, preview: FontPreview::Off };
+        let mut h = Harness::builder().with_size(vec2(600.0, 900.0)).build_ui_state(
+            |ui, s: &mut State| {
+                let _ = ui.button("Above");
+                s.button = ui.make_persistent_id(egui::IdSalt::new("type-font"));
+                s.popup = s.button.with("popup");
+                let fams = s.families.clone();
+                font_picker_in(ui, &mut s.current, 170.0, &fams, s.preview);
+                let _ = ui.button("Below");
+            },
+            state,
+        );
+        h.run();
+        open(&mut h);
+        if enter {
+            h.key_press(Key::ArrowDown);
+            h.key_press(Key::Enter);
+        } else {
+            h.get_by_label("Family 05").click();
+        }
+        // Frame by frame up to the pick, then the arrow in the next frame.
+        for _ in 0..8 {
+            if h.state().current == picked && popup_rect(&h).is_none() {
+                break;
+            }
+            h.step();
+        }
+        assert_eq!(h.state().current, picked, "enter: {enter}");
+        h.key_press(Key::ArrowDown);
+        h.step();
+        h.run();
+        assert_eq!(h.state().current, stepped, "enter: {enter}");
+        let button = h.state().button;
+        assert!(h.ctx.memory(|m| m.has_focus(button)), "enter: {enter}: the arrow moved the focus off the field");
+    }
+}
+
 #[test]
 fn arrows_follow_the_filtered_list_and_handle_no_matches() {
     let mut h = harness();
