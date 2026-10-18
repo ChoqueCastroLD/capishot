@@ -585,6 +585,33 @@ fn save_writes_the_file_and_the_set_of_the_selected_action() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// #7290: saving over an existing ATN must replace it atomically (a temporary file renamed over
+/// it), never truncate and rewrite it in place, so a write that fails partway (a full disk)
+/// leaves the previously valid file readable. A handle opened on the old file still sees the old
+/// bytes after an atomic replacement; an in-place rewrite changes them under it.
+#[cfg(unix)]
+#[test]
+fn save_over_an_existing_file_never_rewrites_it_in_place() {
+    use std::io::Read;
+    let mut s = Session::new();
+    s.actions.list.push(Action::new("Owned", vec![("select.all".into(), json!({}))]));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Owned.atn");
+    let p = path.to_string_lossy().to_string();
+    s.execute("actions.save", json!({"path": p})).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let mut old = std::fs::File::open(&path).unwrap();
+    s.actions.list.push(Action::new("Second", vec![("select.all".into(), json!({}))]));
+    s.execute("actions.save", json!({"path": p})).unwrap();
+    let mut seen = Vec::new();
+    old.read_to_end(&mut seen).unwrap();
+    assert_eq!(seen, before, "the existing ATN was rewritten in place");
+    let after = atn::parse(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(after.actions.len(), 2);
+    let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(names, vec![std::ffi::OsString::from("Owned.atn")], "no temporary file is left behind");
+}
+
 #[test]
 fn layer_param_accepts_a_name() {
     let mut s = Session::new();
