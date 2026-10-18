@@ -115,6 +115,8 @@ pub fn menu(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Val
         "filter.liquify" if empty => Some(crate::liquify_ui::open(app, ctx).map(|_| json!({"liquify": app.distort.describe()["liquify"]}))),
         "filter.liquify" if ui.is_some() && app.distort.liquify.is_some() => Some(crate::liquify_ui::control(app, ui.unwrap_or(&Value::Null))),
         "edit.contentAwareFill" if ui.is_some() && app.distort.caf.is_some() => Some(crate::caf_ui::control(app, ui.unwrap_or(&Value::Null))),
+        // `ui` addresses the workspace: closed, that is an error, not a fill with the defaults.
+        "edit.contentAwareFill" if ui.is_some() => Some(Err("Content-Aware Fill is not open".into())),
         "edit.puppetWarp" | "layer.smartObjects.puppetWarp" if empty => {
             Some(crate::puppet_ui::begin(app, ctx, id).map(|_| json!({"puppet": app.distort.describe()["puppet"]})))
         }
