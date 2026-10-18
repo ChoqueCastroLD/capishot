@@ -164,4 +164,4 @@ id = "UI-217-23"
 target = "Layer clipboard: copy/paste whole layers (masks, styles, type) between documents"
 status = "partial"
 issue = 217
-note = "layer.copyToDocument copies layers into another open document keeping names, content, masks, styles and blending, converting to the destination's profile and depth, as one history step (layer_copy_cmds.rs, #589). It is the command a drag between documents dispatches; there is still no copy/paste layer clipboard"
+note = "Edit › Copy with no pixel selection takes layers whole and Paste recreates them in this or another open document, converted to its profile and depth, as one history step (edit_cmds.rs takes_whole, paste_layers): smart objects (#2428), type, shape and group layers (#2670), fill and adjustment layers (#2344), and several selected layers with their masks and styles (#2478). layer.copyToDocument is the drag between documents (layer_copy_cmds.rs, #589). Missing: a single pixel layer copies its pixels only, leaving its mask and styles behind"
