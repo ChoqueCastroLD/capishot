@@ -1517,7 +1517,11 @@ pub(crate) fn family_picker_in(
 
         let mut hovered: Option<String> = None;
         for (f, label) in rows {
-            let mut button = egui::Button::selectable(f == current, label).truncate();
+            // Highlighted by its fill alone, as Photoshop's font menu is. A selectable button lays
+            // out its frame's stroke only once hovered or selected, so with the theme's stroke the
+            // row under the pointer (and the selected one) grew and pushed the rows below down:
+            // the list jumped as the pointer moved (#7406).
+            let mut button = egui::Button::selectable(f == current, label).truncate().stroke(egui::Stroke::NONE);
             if let Some((size, [_, h])) = preview {
                 button =
                     button.right_text(egui::Atom::custom(ui.id().with(("font-sample", f)), egui::vec2(crate::font_preview::slot_width(ui.ctx(), f, size), h)));

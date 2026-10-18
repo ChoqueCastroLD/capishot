@@ -83,6 +83,35 @@ fn hovering_a_font_row_sets_preview_and_leaving_clears_it() {
     assert!(h.ctx.data(|d| d.get_temp::<String>(hover_id)).is_none());
 }
 
+/// #7406: hovering a font highlights its row without moving anything: the other rows keep
+/// their place, the menu its width, and every row (the selected one too) takes one height.
+#[test]
+fn hovering_a_font_row_moves_no_other_row() {
+    let mut h = harness();
+    // The app's theme: its hovered and selected buttons draw a stroke (egui's default style
+    // would hide the jump).
+    crate::PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+    h.run();
+    open(&mut h);
+    let rows = |h: &Harness<'static, State>| -> Vec<Rect> { (0..8).map(|i| h.get_by_label(&format!("Family {i:02}")).rect()).collect() };
+    let before = rows(&h);
+    let width = popup_rect(&h).expect("font menu open").width();
+    let tops: Vec<f32> = before.windows(2).map(|w| w[1].top() - w[0].top()).collect();
+    assert!(tops.windows(2).all(|t| (t[0] - t[1]).abs() < 0.01), "rows are evenly spaced, the selected Family 00 included: {tops:?}");
+    for hovered in [2, 5] {
+        h.hover_at(before[hovered].center());
+        h.run_steps(2);
+        let after = rows(&h);
+        for (i, (b, a)) in before.iter().zip(&after).enumerate() {
+            if i != hovered {
+                assert_eq!(b, a, "hovering Family {hovered:02} moved Family {i:02}");
+            }
+        }
+        assert_eq!(after[hovered].center(), before[hovered].center(), "the hovered row stays centred where it was");
+        assert_eq!(popup_rect(&h).map(|r| r.width()), Some(width), "the menu keeps its width");
+    }
+}
+
 #[test]
 fn clearing_the_query_restores_the_menu_height() {
     let mut h = harness();
