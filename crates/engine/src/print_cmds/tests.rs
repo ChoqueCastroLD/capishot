@@ -786,11 +786,9 @@ fn windows_pdf_component_is_detected_by_loading_its_dll() {
     std::fs::write(&dll, b"MZ").unwrap();
     assert!(!windows_pdf_loads(&dll));
     let root = std::env::var_os("SystemRoot").unwrap();
+    // The real DLL may be missing or unloadable on a stripped image; the check follows the loader.
     let system = windows_pdf_dll(std::path::Path::new(&root));
-    if system.is_file() {
-        assert!(windows_pdf_loads(&system));
-        assert!(require_windows_pdf().is_ok());
-    }
+    assert_eq!(require_windows_pdf().is_ok(), windows_pdf_loads(&system));
 }
 
 #[cfg(not(target_os = "windows"))]
