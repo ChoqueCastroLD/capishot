@@ -230,17 +230,8 @@ fn import_parsed_with_budget(name: &str, parsed: Parsed, max_group_depth: usize,
     let fmt = doc.pixel_format();
     let global = tiny_skia::Transform::from_scale(cv.scale, cv.scale);
     let max_group_depth = (max_group_depth != 0).then_some(max_group_depth.clamp(1, MAX_GROUP_DEPTH));
-    let mut conv = Conv {
-        fmt,
-        canvas: doc.bounds(),
-        global,
-        max_group_depth,
-        warnings,
-        noted: Vec::new(),
-        counts: [0; 4],
-        pixel_budget,
-        retained_pixel_bytes: 0,
-    };
+    let mut conv =
+        Conv { fmt, canvas: doc.bounds(), global, max_group_depth, warnings, noted: Vec::new(), counts: [0; 4], pixel_budget, retained_pixel_bytes: 0 };
     if count_nodes(tree.root()) > MAX_NODES {
         conv.warnings.push(format!("SVG: more than {MAX_NODES} elements; opened as one pixel layer instead of shapes"));
         let (w, h) = (cv.size.width, cv.size.height);

@@ -215,7 +215,11 @@ fn save(app: &mut PhotocraftApp, ctx: &egui::Context, doc: DocId) -> bool {
     match saved {
         // A Save Document script may have edited the document after it was written: still dirty.
         // A write the platform can't confirm (a web download) leaves it dirty too, and counts.
-        Ok(_) => !app.save_options_open() && !app.saving() && index_of(app, doc).is_some_and(|i| app.services.write_unconfirmed || !app.session.documents()[i].is_dirty()),
+        Ok(_) => {
+            !app.save_options_open()
+                && !app.saving()
+                && index_of(app, doc).is_some_and(|i| app.services.write_unconfirmed || !app.session.documents()[i].is_dirty())
+        }
         // Backing out of the file dialog is the user's choice, not an error.
         Err(e) if e == crate::file_dialog::CANCELLED => false,
         Err(e) => {
