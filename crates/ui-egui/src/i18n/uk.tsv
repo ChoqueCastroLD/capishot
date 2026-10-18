@@ -3926,3 +3926,7 @@ curves	Smooth	Згладити
 	Replace	Замінити
 	{name} was changed by another app after it was opened or saved here.	Файл {name} змінила інша програма після того, як його тут відкрили або зберегли.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Замініть його цим документом або скасуйте й скористайтеся Файл › Зберегти як, щоб зберегти обидва.
+	Decrease Brush Size	Зменшити розмір пензля
+	Increase Brush Size	Збільшити розмір пензля
+	Decrease Brush Hardness	Зменшити жорсткість пензля
+	Increase Brush Hardness	Збільшити жорсткість пензля
