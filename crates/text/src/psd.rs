@@ -964,8 +964,10 @@ pub fn needs_txt2(objects: &[(i32, &TextLayer)]) -> bool {
 /// unchanged — keeps everything the file held beyond the two regenerated keys (its model's text
 /// and style runs): Photoshop stores glyph pen positions under `/21 /1` there, and a save with
 /// no text edit must not drop them. Its own style runs keep every style key too: only their
-/// auto-kern mode is set (split where a mode changes inside a run). A changed text invalidates
-/// those extras along with the old runs, so they are dropped rather than left stale. Everything
+/// auto-kern mode is set (split where a mode changes inside a run). An edited object — the
+/// file's object at that slot, its text changed — keeps the object too, with its text replaced
+/// and its run arrays refitted to the new text (#6968: a bare stub crashed Photoshop); only its
+/// glyph pen positions, which belong to the old text, are dropped. Everything
 /// else the file's block held — the other keys beside the text objects, objects no layer names —
 /// is kept, and a block whose content comes out unchanged is returned byte for byte (#2374:
 /// Photoshop refused files whose `Txt2` an unedited save had stripped).
@@ -981,9 +983,15 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
         let modes = txt2_mode_runs(layer);
         let at = *index as usize;
         let kept = prev_objects.get(at).filter(|o| o.get("0").and_then(|m| m.get("0")).and_then(E::as_str) == Some(text.as_str()));
-        let mut object = kept.cloned().unwrap_or_else(E::dict);
+        // An edited object (#6968): the file's object at this slot with its text changed. It keeps
+        // the file's structure — paragraph runs, the view naming its frame, the rest — with every
+        // run array refitted to the new text. A bare `<< /0 << /0 text /6 runs >> >>` stub in
+        // Photoshop's block (no paragraph runs, no view) made Photoshop quit while opening the file.
+        let edited = kept.is_none().then(|| prev_objects.get(at).and_then(|o| edited_object(o, &text))).flatten();
+        let reuse = kept.is_some() || edited.is_some();
+        let mut object = kept.cloned().or(edited).unwrap_or_else(E::dict);
         let mut model = object.get("0").cloned().filter(|m| matches!(m, E::Dict(_))).unwrap_or_else(E::dict);
-        let file_runs = kept.and_then(|_| model.path(&["6", "0"]).and_then(E::as_array)).and_then(|runs| with_modes(runs, &modes));
+        let file_runs = reuse.then(|| model.path(&["6", "0"]).and_then(E::as_array)).flatten().and_then(|runs| with_modes(runs, &modes));
         let runs = file_runs.unwrap_or_else(|| {
             modes
                 .iter()
@@ -1026,6 +1034,77 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
         // Unreachable: `parse_txt2` and the fallback above both yield a dictionary.
         _ => ed::write_bare(&[]),
     }
+}
+
+/// The file's `Txt2` text object `object` (`<< /0 model /1 view … >>`) for the changed engine
+/// text `text` (`\r` breaks, trailing `\r`): the model's text replaced, its paragraph runs (`/5`)
+/// one per paragraph of the new text (each keeping the style of the file's paragraph at that
+/// position, else its last), and every other run array of the model (style runs `/6`, …) cut or
+/// extended at its end to the new length. The view and the other keys are kept, except the glyph
+/// pen positions (`/21`), which belong to the old text. `None` when the object or one of its run
+/// arrays isn't shaped as Photoshop writes it: the caller writes a fresh object instead.
+fn edited_object(object: &E, text: &str) -> Option<E> {
+    let mut object = object.clone();
+    let E::Dict(items) = &mut object else { return None };
+    items.retain(|(k, _)| k != "21");
+    let model = object.get_mut("0").filter(|m| matches!(m, E::Dict(_)))?;
+    let total = utf16_len(text) as usize;
+    let paragraphs: Vec<usize> = text.split_inclusive('\r').map(|p| p.encode_utf16().count()).collect();
+    let E::Dict(entries) = model else { return None };
+    for (key, value) in entries.iter_mut() {
+        if key.as_str() == "0" {
+            *value = E::String(text.to_string());
+            continue;
+        }
+        let Some(runs) = value.get("0").and_then(E::as_array).filter(|r| r.iter().all(|x| matches!(x, E::Dict(_)) && x.get("1").is_some())) else {
+            continue;
+        };
+        let fitted = if key.as_str() == "5" { runs_per(runs, &paragraphs)? } else { runs_to_length(runs, total)? };
+        value.set("0", E::Array(fitted));
+    }
+    Some(object)
+}
+
+/// `runs` (`<< … /1 length >>`) remade with the lengths `lens`: run i keeps the content of the
+/// file's run i, else of its last one. `None` for an empty `runs`.
+fn runs_per(runs: &[E], lens: &[usize]) -> Option<Vec<E>> {
+    let last = runs.last()?;
+    lens.iter()
+        .enumerate()
+        .map(|(i, &len)| {
+            let mut r = runs.get(i).unwrap_or(last).clone();
+            r.set("1", E::Int(i64::try_from(len).ok()?));
+            Some(r)
+        })
+        .collect()
+}
+
+/// `runs` (`<< … /1 length >>`) covering `total` UTF-16 units: the leading runs as they were, cut
+/// where `total` ends, the last kept run extended when `total` is longer. Empty runs are dropped.
+/// `None` when `runs` is empty or a length isn't a count.
+fn runs_to_length(runs: &[E], total: usize) -> Option<Vec<E>> {
+    let mut out: Vec<(E, usize)> = Vec::new();
+    let mut left = total;
+    for r in runs {
+        let len = r.get("1").and_then(E::as_i64).and_then(|l| usize::try_from(l).ok())?;
+        let take = len.min(left);
+        if take > 0 {
+            out.push((r.clone(), take));
+            left -= take;
+        }
+    }
+    if left > 0 {
+        match out.last_mut() {
+            Some(last) => last.1 = last.1.checked_add(left)?,
+            None => out.push((runs.last()?.clone(), left)),
+        }
+    }
+    out.into_iter()
+        .map(|(mut r, len)| {
+            r.set("1", E::Int(i64::try_from(len).ok()?));
+            Some(r)
+        })
+        .collect()
 }
 
 /// The file's own `Txt2` style runs `runs` with the auto-kern modes `modes` (`(mode, UTF-16

@@ -1097,6 +1097,56 @@ fn edited_txt2_keeps_the_files_styles_and_objects() {
     assert_eq!(modes, vec![(1, Kerning::Optical), (2, Kerning::Metrics)]);
 }
 
+/// #6968: editing the text of a Photoshop type layer keeps its `Txt2` object — paragraph runs,
+/// the view naming its frame, the model's other run arrays and its style keys — refitted to the
+/// new text. It was replaced by a bare `<< /0 << /0 text /6 runs >> >>` stub, and Photoshop quit
+/// while opening the file.
+#[test]
+fn edited_text_keeps_the_files_txt2_object() {
+    use crate::engine_data::Value as E;
+    let run = |extra: &str, len: usize| format!("<< /0 << /0 << /0 (\u{fe}\u{ff}) /5 << /7 1.2 >> /6 << /0 0 /1 12.0 {extra} >> >> >> /1 {len} >> ");
+    // "AB\rCD\r": two paragraphs, two style runs, a kern run, a view and pen positions.
+    let prev = format!(
+        "\n\n/98 << /0 7 >> /0 << /8 << /0 [ << /0 << /2 << /2 [ 1.0 0.0 0.0 1.0 5.0 6.0 ] >> >> >> ] >> >> /1 << /0 << /0 1 >> /1 [ << /0 << /0 (\u{fe}\u{ff}\0A\0B\0\r\0C\0D\0\r) /5 << /0 [ {}{}] >> /6 << /0 [ {}{}] >> /7 << /0 [ << /0 << >> /1 6 >> ] >> >> /1 << /0 [ << /0 0 >> ] /2 [ << /99 /PC >> ] >> /21 << /1 [ 1.0 ] >> >> ] /2 << /0 7 >> >>",
+        run("", 3),
+        run("", 3),
+        run("/11 1", 2),
+        run("/11 1 /53 (red)", 4)
+    );
+    // Every character above is below U+0100: one raw byte each (the BOM `FE FF` included).
+    let prev: Vec<u8> = prev.chars().map(|c| c as u32 as u8).collect();
+    let before = crate::psd::parse_txt2(&prev).unwrap();
+    let before_object = before.path(&["1", "1"]).and_then(E::as_array).unwrap()[0].clone();
+    assert_eq!(before_object.path(&["0", "0"]).and_then(E::as_str), Some("AB\rCD\r"));
+    let lens = |o: &E, key: &str| -> Vec<i64> {
+        o.path(&["0", key, "0"]).and_then(E::as_array).unwrap().iter().map(|r| r.get("1").and_then(E::as_i64).unwrap()).collect()
+    };
+    for (text, paragraphs, styles) in
+        [("Bevex\nCD", vec![6, 3], vec![2, 7]), ("AB\nCD\nEFG", vec![3, 3, 4], vec![2, 8]), ("X", vec![2], vec![2]), ("AB\nCZ", vec![3, 3], vec![2, 4])]
+    {
+        let t = runs_of(text, &[(text.len(), CharStyle::default())]);
+        let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &t)], Some(&prev))).unwrap();
+        for key in [&["0"][..], &["98"], &["1", "0"], &["1", "2"]] {
+            assert_eq!(out.path(key), before.path(key), "{text:?}: /{} survives", key.join(" /"));
+        }
+        let object = &out.path(&["1", "1"]).and_then(E::as_array).unwrap()[0];
+        let engine = format!("{}\r", text.replace('\n', "\r"));
+        let total = engine.encode_utf16().count() as i64;
+        assert_eq!(object.path(&["0", "0"]).and_then(E::as_str), Some(engine.as_str()));
+        assert_eq!(object.get("1"), before_object.get("1"), "{text:?}: the view (its frame) is kept");
+        assert!(object.get("21").is_none(), "{text:?}: pen positions of the old text are dropped");
+        assert_eq!(lens(object, "5"), paragraphs, "{text:?}: one paragraph run per paragraph");
+        assert_eq!(lens(object, "6"), styles, "{text:?}: style runs cover the new text");
+        assert_eq!(lens(object, "7"), vec![total], "{text:?}: other run arrays cover the new text");
+        for r in object.path(&["0", "5", "0"]).and_then(E::as_array).unwrap() {
+            assert_eq!(r.path(&["0", "0", "5", "7"]).and_then(E::as_f64), Some(1.2), "{text:?}: paragraph style survives");
+        }
+        for r in object.path(&["0", "6", "0"]).and_then(E::as_array).unwrap() {
+            assert_eq!(r.path(&["0", "0", "6", "1"]).and_then(E::as_f64), Some(12.0), "{text:?}: the font size survives");
+        }
+    }
+}
+
 /// The file's style runs are only reused when they cover the text: runs of another length (or
 /// hostile lengths) fall back to generated runs, without panicking.
 #[test]
