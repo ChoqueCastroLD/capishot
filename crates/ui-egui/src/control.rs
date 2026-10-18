@@ -1093,7 +1093,10 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                         }
                         continue;
                     }
-                    if crate::canvas_tool_menu::applies(app.ui.tool) || crate::canvas_tool_menu::editing_text(app, app.ui.tool) {
+                    if crate::canvas_tool_menu::applies(app.ui.tool)
+                        || crate::canvas_tool_menu::editing_text(app, app.ui.tool)
+                        || crate::canvas_tool_menu::type_layer_at(app, app.ui.tool, [x, y]).is_some()
+                    {
                         if down {
                             crate::canvas_tool_menu::open_at(app, ctx, app.ui.tool, screen_point(app, x, y), Some([x, y]));
                         }
