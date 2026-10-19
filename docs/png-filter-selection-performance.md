@@ -1,35 +1,31 @@
 # PNG filter selection
 
-Only adaptive PNG filter selection changes: stop evaluating filters when their partial cost cannot win, and stop after a zero-cost winner. The kernel processes 4000 rows of 6000 RGBA8 pixels (24 MP) for zero, identical and varied rows; deflate is outside the timer.
+Stop evaluating PNG filters when their partial cost cannot win. Filter choice and encoded bytes must remain identical.
 
-Measured on 2026-10-19 against `d95fdf3181c01ad41e95456091a394b105a9afb2` on an Apple M4 Max
-(16 CPUs, 128 GiB), macOS arm64, rustc 1.99.1. Each branch starts directly at that
-base; none of the other performance splits is applied. Release uses optimization
-level 3, LTO off, 16 codegen units, debug info off and incremental compilation off.
-Builds ran at nice 10 with APFS-cloned warm caches; measurements ran at normal
-priority with no concurrent builds. Timings are medians of five samples after one
-warm-up, except the compositor's ten Criterion samples. These synthetic workloads
-are reproducible checks of this change, not a representative image corpus.
+Photo PNG encoding improves, with identical streams. The small designs show little change because they use the existing serial PNG encoder. The previous filter-kernel percentages are not end-to-end results.
 
-| Workload | Main ms | This change ms | Time change |
-|---|---:|---:|---:|
-| zero | 448.138 | 5.734 | -98.7% |
-| identical | 447.020 | 59.819 | -86.6% |
-| varied | 450.469 | 277.254 | -38.5% |
+Measured on 2026-10-19 against main `d95fdf3181c01ad41e95456091a394b105a9afb2`, independently of the other splits. Apple M4 Max, 16 CPUs, 128 GiB, macOS arm64, rustc 1.99.1; release O3, LTO off, 16 codegen units, debug off. Builds used nice 10 and warm APFS-cloned caches; measurements used default priority without concurrent builds or profiling. Five alternating paired samples follow a warmup; confirmation and fix runs use nine pairs. Time change compares the two medians; intervals resample paired ratios. Negative time change means faster. Small differences are not automatically established improvements or regressions.
 
-These are serial filter-kernel timings, not end-to-end PNG encoding timings.
+The full-resolution CC0 Pixls photographs are P1000475.RW2 (24 MP foliage centre crop, no resampling) and IMG_4059.CR2 (12 MP city), each converted to U8/U16/F32 with the ProPhoto RGB profile. F32 derives from 16-bit development, not HDR capture. MIT psd-tools masks.psd supplies a 640 x 1394 web layout with 22 imported layers and three masks; mask-index.psd supplies a 1000 x 867 illustrated card with a mask. The sources and hashes are pinned by the existing corpus. These are the available authored layered files, not a large layered-photo corpus. No generated noise, repeating ramps, enlarged charts or duplicated photo layers are used.
 
-The committed oracle is the previous main-branch filter function. The unit test compares exact output bytes, including the selected filter/tie order, across six bytes-per-pixel layouts, 32 patterns and absent/identical/shifted previous rows. Existing encoder round trips and deterministic worker-count tests remain in place.
+The shared harness times in-memory operations. Input loading, image conversion, thumbnail rendering, hashes and equivalence checks are outside timers. Every save uses a fresh PcraftWriter and a real rendered thumbnail. Common reads use main-encoded files; own-output reads are separate. PSD exports use ZIP merged images at U8/U16, Raw merged images at F32, and normal RLE layer channels at U8/U16 / ZIP prediction at F32. Results do not measure filesystem throughput or browser performance.
 
-Reproduce with the same release profile environment:
+| Document | Operation | Main ms | Branch ms | Time change | Paired 95% interval | Main / branch bytes |
+|---|---|---:|---:|---:|---:|---:|
+| panasonic-8 | png-encode | 358.725 | 346.020 | -3.5% | -7.0..-0.9% | 24,569,965 / 24,569,965 |
+| panasonic-16 | png-encode | 338.106 | 296.860 | -12.2% | -12.3..-9.7% | 111,583,441 / 111,583,441 |
+| canon-8 | png-encode | 178.675 | 169.289 | -5.3% | -35.0..-2.7% | 13,720,268 / 13,720,268 |
+| canon-16 | png-encode | 162.107 | 145.356 | -10.3% | -12.2..+4.6% | 58,279,529 / 58,279,529 |
+| layout-masks | png-encode | 4.037 | 3.986 | -1.3% | -3.3..+1.9% | 42,842 / 42,842 |
+| layout-mask-index | png-encode | 11.343 | 11.404 | +0.5% | -0.0..+2.2% | 115,229 / 115,229 |
 
-```sh
-CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_INCREMENTAL=0 nice -n 10 cargo test --release -p photocraft-codecs --lib --no-run
-# Run the printed executable at normal priority:
-<printed-executable> benchmark_filter_selection --ignored --nocapture --test-threads=1
-```
+The real-image PNG streams match main byte for byte and decode to identical pixels. The committed previous-filter oracle also covers bytes-per-pixel layouts, early exits, zero-cost rows and ties.
 
-## Local validation
+Local raw evidence and the shared harness: `.local/perf-real-261019/` in the repository checkout (ignored). This comparison supersedes the earlier synthetic performance table. Small synthetic unit fixtures remain correctness checks; ignored synthetic timing tests were not run.
+
+## Earlier split validation
+
+These checks passed when the split was prepared; they were not all rerun for this benchmark review. Current affected checks are listed above where production code changed.
 
 - `cargo test -p photocraft-codecs --locked`: passed (782 passed, 4 ignored).
 - `cargo clippy -p photocraft-codecs --locked --all-targets -- -D warnings`: passed.
