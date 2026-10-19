@@ -282,6 +282,16 @@ pub fn wanted_missed(adapters: &[Candidate], wanted: Option<&str>) -> bool {
     wanted.is_some() && !adapters.iter().any(|a| a.surface_ok && a.wanted)
 }
 
+/// Choosing an adapter is Linux-only for now: Windows has its own Intel/DX12 selection and macOS a
+/// single Metal path, and neither is tested with a requested adapter.
+pub const ADAPTER_CHOICE: bool = cfg!(target_os = "linux");
+
+/// The adapter request that applies to this launch: none off Linux (`linux`), and none in CPU mode,
+/// which wants a software adapter whatever the preference says.
+pub fn applicable_adapter(wanted: Option<String>, backend: GpuBackend, linux: bool) -> Option<String> {
+    wanted.filter(|_| linux && backend != GpuBackend::Cpu)
+}
+
 /// The adapter to ask for: `PHOTOCRAFT_GPU_ADAPTER` when set (for one launch), else
 /// `performance.gpuAdapter`; `None` is automatic.
 pub fn wanted_adapter(env: Option<&str>, pref: &str) -> Option<String> {
@@ -322,8 +332,7 @@ pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, wanted: 
             let env = std::env::var("WGPU_DX12_COMPILER").ok();
             create.instance_descriptor.backend_options.dx12.shader_compiler = dx12_compiler(env.as_deref(), exe.as_deref().and_then(Path::parent));
         }
-        // CPU mode wants a software adapter, whatever the preference says.
-        let wanted = wanted.filter(|_| plan.backend != GpuBackend::Cpu);
+        let wanted = applicable_adapter(wanted, plan.backend, ADAPTER_CHOICE);
         let select = wanted.is_some() || (plan.env.is_none() && (plan.backend == GpuBackend::Cpu || (plan.backend == GpuBackend::Auto && os == Os::Windows)));
         if select {
             let backend = plan.backend;
@@ -667,6 +676,16 @@ mod tests {
         let mut gl = [cand(0x10de, T::DiscreteGpu, B::Gl), cand(0x10de, T::DiscreteGpu, B::Vulkan)];
         gl.iter_mut().for_each(|c| c.wanted = true);
         assert_eq!(pick(&gl, Auto, Os::Other), Some(1));
+    }
+
+    #[test]
+    fn an_adapter_request_applies_on_linux_outside_cpu_mode() {
+        let w = || Some("nvidia".to_string());
+        assert_eq!(applicable_adapter(w(), Auto, true), w());
+        assert_eq!(applicable_adapter(w(), Vulkan, true), w());
+        assert_eq!(applicable_adapter(w(), Cpu, true), None);
+        assert_eq!(applicable_adapter(w(), Auto, false), None, "Windows and macOS keep their own selection");
+        assert_eq!(applicable_adapter(None, Auto, true), None);
     }
 
     #[test]

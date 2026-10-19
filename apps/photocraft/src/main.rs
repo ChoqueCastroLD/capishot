@@ -517,7 +517,7 @@ fn main() -> eframe::Result {
     }
 
     // An adapter named in the environment is chosen at startup, which a forwarded launch never reaches.
-    if std::env::var("PHOTOCRAFT_GPU_ADAPTER").is_ok_and(|v| !v.trim().is_empty()) {
+    if gpu_startup::ADAPTER_CHOICE && std::env::var("PHOTOCRAFT_GPU_ADAPTER").is_ok_and(|v| !v.trim().is_empty()) {
         launch_options.push("PHOTOCRAFT_GPU_ADAPTER");
     }
     // One PhotoCraft per user (#3708): files opened from Explorer or a file manager while it runs
