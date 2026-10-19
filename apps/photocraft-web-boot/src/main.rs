@@ -353,7 +353,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Inflater, MARKER, parts};
+    use super::{HEAD, Inflater, MARKER, Payload, parts, payload};
 
     fn gzip(bytes: &[u8]) -> Vec<u8> {
         let mut z = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -410,6 +410,22 @@ mod tests {
         assert!(run(&damaged).is_err(), "a changed byte");
         assert!(run(b"<!DOCTYPE html><html>not gzip</html>").is_err(), "a web page");
         assert!(run(b"").is_err(), "nothing at all");
+    }
+
+    /// A server that recognises the gzip (Apache's `mod_mime_magic`) sends it with
+    /// `Content-Encoding: x-gzip`, and the browser inflates it on the way (#7639). The joined parts
+    /// are then the app's WebAssembly, which must start as it is, not be inflated a second time.
+    #[test]
+    fn the_first_bytes_tell_gzip_from_wasm_the_browser_already_inflated() {
+        let mut wasm = b"\0asm\x01\0\0\0".to_vec();
+        wasm.extend(sample());
+        let packed = gzip(&wasm);
+        assert_eq!(payload(&packed[..HEAD]), Some(Payload::Gzip), "as packaged");
+        assert_eq!(payload(&wasm[..HEAD]), Some(Payload::Wasm), "inflated by the browser");
+        assert_eq!(payload(&packed[..2]), Some(Payload::Gzip), "a download shorter than HEAD");
+        assert_eq!(payload(b"<!DOCTYPE html>"), None, "a web page");
+        assert_eq!(payload(b"\0as"), None, "a cut-off wasm header");
+        assert_eq!(payload(b""), None, "nothing at all");
     }
 
     #[test]
