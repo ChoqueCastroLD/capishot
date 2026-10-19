@@ -267,12 +267,7 @@ fn rank(a: &Candidate, backend: GpuBackend, os: Os) -> (u8, u8, u8) {
 pub fn pick(adapters: &[Candidate], backend: GpuBackend, os: Os) -> Option<usize> {
     let usable = |a: &&Candidate| a.surface_ok;
     let any_wanted = adapters.iter().filter(usable).any(|a| a.wanted);
-    adapters
-        .iter()
-        .enumerate()
-        .filter(|(_, a)| a.surface_ok && (a.wanted || !any_wanted))
-        .min_by_key(|(i, a)| (rank(a, backend, os), *i))
-        .map(|(i, _)| i)
+    adapters.iter().enumerate().filter(|(_, a)| a.surface_ok && (a.wanted || !any_wanted)).min_by_key(|(i, a)| (rank(a, backend, os), *i)).map(|(i, _)| i)
 }
 
 /// Whether an adapter called `name` is the one the user asked for: `wanted` is a case-insensitive
@@ -290,7 +285,7 @@ pub fn wanted_missed(adapters: &[Candidate], wanted: Option<&str>) -> bool {
 /// The adapter to ask for: `PHOTOCRAFT_GPU_ADAPTER` when set (for one launch), else
 /// `performance.gpuAdapter`; `None` is automatic.
 pub fn wanted_adapter(env: Option<&str>, pref: &str) -> Option<String> {
-    [env.unwrap_or(""), pref].iter().map(|s| s.trim()).find(|s| !s.is_empty()).map(str::to_string)
+    [env.unwrap_or(""), pref].iter().map(|s| s.trim()).find(|s| !s.is_empty()).map(|s| s.chars().take(256).collect())
 }
 
 /// Whether picking `chosen` applied the Intel-on-Windows DX12 default (a Vulkan adapter of the
@@ -684,6 +679,7 @@ mod tests {
         assert_eq!(wanted_adapter(None, ""), None);
         assert_eq!(wanted_adapter(Some("  "), "iris"), Some("iris".into()));
         assert_eq!(wanted_adapter(Some("nvidia"), "iris"), Some("nvidia".into()));
+        assert_eq!(wanted_adapter(Some(&"x".repeat(1000)), "").map(|w| w.len()), Some(256));
     }
 
     #[test]
