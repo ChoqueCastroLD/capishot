@@ -721,6 +721,13 @@ fn content_aware_fill_as(s: &mut Session, p: &Value, cmd: &'static str, label: &
             let cancel = || ctx.cancelled();
             let plan = content_aware_plan_with(&doc, id, &p, cmd, &photocraft_raster::Interrupt::cancel_only(&cancel))?;
             let CafPlan { layer, rect, fmt, img, layer_px, cover, hole, source, opts, output, .. } = plan;
+            // Patches come only from the sampling area outside the fill area. With none (a
+            // Rectangular `margin` of 0, a Custom area inside the selection or off the canvas)
+            // the fill would be black (#6532), so refuse instead. The workspace's preview builds
+            // the same plan and may show an empty area while the Sampling Brush adds to it.
+            if !source.iter().any(|s| *s) {
+                return Err(bad(cmd, "nothing to sample from: the sampling area has no pixels outside the fill area"));
+            }
             let (w, h) = (rect.width() as usize, rect.height() as usize);
             let n = fmt.channels();
             // The fill changes only the fill area: keep the layer's pixels and the coverage over
