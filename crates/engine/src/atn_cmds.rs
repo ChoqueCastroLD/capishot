@@ -3227,6 +3227,7 @@ fn load(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "actions.save";
+    crate::actions_cmds::flush_recording(s)?;
     let skip = match p.get("skipUnsupported") {
         None | Some(Value::Null) => false,
         Some(Value::Bool(b)) => *b,

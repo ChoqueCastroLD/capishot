@@ -1033,6 +1033,26 @@ fn remove_white_clears_the_targeted_layer_not_the_converted_background() {
     assert!(bottom.surface().unwrap().sample_channel(2, 2, 1) > 0.99, "and kept its pixels");
 }
 
+#[test]
+fn save_while_recording_includes_pending_steps() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+    s.execute("actions.record", json!({"name": "Pending"})).unwrap();
+    s.execute("layer.new.layer", json!({"name": "Recorded"})).unwrap();
+
+    // While still recording (without calling actions.stop), save the action.
+    let saved = s.execute("actions.save", json!({"action": "Pending"})).unwrap();
+    assert_eq!(saved["steps"], 1, "pending steps must be flushed and included in save");
+    assert_eq!(saved["skipped"], json!([]));
+
+    // After save, recording continues and additional steps are flushed on stop without duplication.
+    s.execute("layer.new.layer", json!({"name": "Second"})).unwrap();
+    s.execute("actions.stop", json!({})).unwrap();
+
+    let action = s.execute("actions.get", json!({"action": "Pending"})).unwrap();
+    assert_eq!(action["steps"].as_array().unwrap().len(), 2, "both steps must be present without duplication");
+}
+
 /// Photoshop's Close has no document target: a Close of a specific document must not be
 /// exported as a plain Close, which would close the active document on playback.
 #[test]
