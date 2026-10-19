@@ -1,27 +1,36 @@
 # PNG filter selection
 
-Stop evaluating PNG filters when their partial cost cannot win. Filter choice and encoded bytes must remain identical.
+The final inner loop stops as soon as candidate cost reaches `best`. Costs cannot decrease, and only a strict improvement replaces the winning filter, preserving tie order. The previous-filter oracle now also checks an immediate tie against Sub.
 
-Photo PNG encoding improves, with identical streams. The small designs show little change because they use the existing serial PNG encoder. The previous filter-kernel percentages are not end-to-end results.
+Measured on 2026-10-19 against frozen main `d95fdf3181c01ad41e95456091a394b105a9afb2`, independently for each branch. Apple M4 Max, 16 CPUs, 128 GiB, macOS arm64, rustc 1.99.1. Release O3, LTO off, 16 codegen units, debug off; builds/tests at nice 10 with warm caches. Timed operations run at normal priority without concurrent builds or profiling. Persistent processes alternate execution order after a warmup. Time change compares the two medians; paired bootstrap intervals from these small samples describe variation, not guarantees.
 
-Measured on 2026-10-19 against main `d95fdf3181c01ad41e95456091a394b105a9afb2`, independently of the other splits. Apple M4 Max, 16 CPUs, 128 GiB, macOS arm64, rustc 1.99.1; release O3, LTO off, 16 codegen units, debug off. Builds used nice 10 and warm APFS-cloned caches; measurements used default priority without concurrent builds or profiling. Five alternating paired samples follow a warmup; confirmation and fix runs use nine pairs. Time change compares the two medians; intervals resample paired ratios. Negative time change means faster. Small differences are not automatically established improvements or regressions.
+CC0 Pixls P1000475.RW2 supplies a 6000 x 4000 centre crop (24 MP, no resampling); IMG_4059.CR2 supplies the native 4000 x 3000 city photograph. U8/U16/F32 documents retain ProPhoto RGB; F32 derives from 16-bit development and is not native HDR. No generated noise, repeated ramps, enlarged charts or duplicated photo layers are timed. Source pins and attribution remain in the existing corpus.
 
-The full-resolution CC0 Pixls photographs are P1000475.RW2 (24 MP foliage centre crop, no resampling) and IMG_4059.CR2 (12 MP city), each converted to U8/U16/F32 with the ProPhoto RGB profile. F32 derives from 16-bit development, not HDR capture. MIT psd-tools masks.psd supplies a 640 x 1394 web layout with 22 imported layers and three masks; mask-index.psd supplies a 1000 x 867 illustrated card with a mask. The sources and hashes are pinned by the existing corpus. These are the available authored layered files, not a large layered-photo corpus. No generated noise, repeating ramps, enlarged charts or duplicated photo layers are used.
+Nine alternating samples compare main, the previous split and the final cutoff implementation. The four photo cases use the parallel encoder; the two MIT psd-tools designs use the unchanged serial encoder. The illustrated card has a separate nine-pair confirmation, shown in the table. Input conversion, hashes and decoded-pixel checks are outside timers. Every PNG is byte-identical to main and decodes to identical pixels.
 
-The shared harness times in-memory operations. Input loading, image conversion, thumbnail rendering, hashes and equivalence checks are outside timers. Every save uses a fresh PcraftWriter and a real rendered thumbnail. Common reads use main-encoded files; own-output reads are separate. PSD exports use ZIP merged images at U8/U16, Raw merged images at F32, and normal RLE layer channels at U8/U16 / ZIP prediction at F32. Results do not measure filesystem throughput or browser performance.
+| Document | Operation | Main ms | Branch ms | Change | Paired 95% interval |
+|---|---|---:|---:|---:|---:|
+| panasonic-8 | png-encode | 358.588 | 337.725 | -5.8% | -6.6..-5.2% |
+| panasonic-16 | png-encode | 334.253 | 301.130 | -9.9% | -10.8..-9.3% |
+| canon-8 | png-encode | 179.462 | 168.651 | -6.0% | -8.4..-4.0% |
+| canon-16 | png-encode | 168.310 | 150.325 | -10.7% | -17.5..-9.4% |
+| layout-masks | png-encode | 4.035 | 4.020 | -0.4% | -1.4..+0.8% |
+| layout-mask-index | png-encode (confirm) | 10.808 | 10.674 | -1.2% | -2.5..+0.7% |
 
-| Document | Operation | Main ms | Branch ms | Time change | Paired 95% interval | Main / branch bytes |
-|---|---|---:|---:|---:|---:|---:|
-| panasonic-8 | png-encode | 358.725 | 346.020 | -3.5% | -7.0..-0.9% | 24,569,965 / 24,569,965 |
-| panasonic-16 | png-encode | 338.106 | 296.860 | -12.2% | -12.3..-9.7% | 111,583,441 / 111,583,441 |
-| canon-8 | png-encode | 178.675 | 169.289 | -5.3% | -35.0..-2.7% | 13,720,268 / 13,720,268 |
-| canon-16 | png-encode | 162.107 | 145.356 | -10.3% | -12.2..+4.6% | 58,279,529 / 58,279,529 |
-| layout-masks | png-encode | 4.037 | 3.986 | -1.3% | -3.3..+1.9% | 42,842 / 42,842 |
-| layout-mask-index | png-encode | 11.343 | 11.404 | +0.5% | -0.0..+2.2% | 115,229 / 115,229 |
+| Document | Previous split ms | Final ms | Cutoff-only change |
+|---|---:|---:|---:|
+| panasonic-8 | 339.785 | 337.725 | -0.6% |
+| panasonic-16 | 300.287 | 301.130 | +0.3% |
+| canon-8 | 172.739 | 168.651 | -2.4% |
+| canon-16 | 150.183 | 150.325 | +0.1% |
+| layout-masks | 4.019 | 4.020 | +0.0% |
+| layout-mask-index | 10.674 | 10.674 | -0.0% |
 
-The real-image PNG streams match main byte for byte and decode to identical pixels. The committed previous-filter oracle also covers bytes-per-pixel layouts, early exits, zero-cost rows and ties.
+The cutoff-only photo intervals cross zero: these complete-image measurements do not establish an additional speedup over the previous split. The serial card initially measured +2.1% against the previous split; its independent confirmation is neutral (-0.0%, interval -1.1..+1.2%). The updated table reports the final implementation against main without relying on the earlier kernel-only promise.
 
-Local raw evidence and the shared harness: `.local/perf-real-261019/` in the repository checkout (ignored). This comparison supersedes the earlier synthetic performance table. Small synthetic unit fixtures remain correctness checks; ignored synthetic timing tests were not run.
+Current affected checks: seven PNG unit tests passed, one ignored manual benchmark; strict all-target codec Clippy, affected codec WASM check and formatting passed. No synthetic timing test was run.
+
+Harness, raw observations, exact inputs and binary hashes: `.local/perf-followup-261019/` (ignored local evidence). Previous flat-photo and authored-design results remain in `.local/perf-real-261019/`. Nothing was pushed and no PR was changed.
 
 ## Earlier split validation
 

@@ -523,6 +523,9 @@ fn filter_row(row: &[u8], prev: Option<&[u8]>, bpp: usize, scratch: &mut [u8], o
                 _ => x.wrapping_sub(paeth(left(i), up(i), ul(i))),
             };
             c += u64::from((scratch[i] as i8).unsigned_abs());
+            if c >= best {
+                break;
+            }
         }
         if c < best {
             best = c;
@@ -751,6 +754,9 @@ mod parallel_tests {
         let mut out = Vec::new();
         filter_row(&[0; 16], None, 4, &mut [0; 16], &mut out);
         assert_eq!(out, vec![0; 17]);
+        out.clear();
+        filter_row(&[1; 16], Some(&[0; 16]), 1, &mut [0; 16], &mut out);
+        assert_eq!(out, [vec![1, 1], vec![0; 15]].concat());
     }
 
     #[test]
