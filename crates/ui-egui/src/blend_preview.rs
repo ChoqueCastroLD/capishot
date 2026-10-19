@@ -29,8 +29,8 @@ pub(crate) struct BlendPreview {
     area: Option<Rect>,
     /// The document shown for `mode`, with its key.
     shown: Option<(u64, Arc<Document>)>,
-    /// GPU preview key, affected region (including effects), and the area last refreshed.
-    covered: Option<(u64, Rect, Rect)>,
+    /// GPU preview key, affected region (including effects), and rectangles already refreshed.
+    covered: Option<(u64, Rect, Vec<Rect>)>,
 }
 
 /// The Layers panel, each frame it draws `layer`'s blend-mode dropdown: the mode under the
@@ -106,26 +106,31 @@ pub(crate) fn clip_damage(app: &mut PhotocraftApp, doc: DocId, revision: u64, ke
         return region;
     }
     let shown = region.intersect(&visible);
-    // `covered` records only this refresh, including an empty intersection; it is not cumulative.
-    // Keep `region` so `uncovered` can recompute the next visible area. Forgetting older coverage
-    // can cause a redundant refresh, but cannot skip newly exposed pixels for this key.
-    p.covered = Some((key, region, shown));
+    p.covered = Some((key, region, vec![shown]));
     shown
 }
 
 /// A pan or zoom can expose pixels not yet rendered for the current preview key.
 pub(crate) fn uncovered(app: &mut PhotocraftApp, doc: DocId, revision: u64, key: u64, visible: Rect) -> Option<Rect> {
     let p = app.blend_preview.as_mut().filter(|p| p.doc == doc && p.revision == revision)?;
-    let (covered_key, region, covered) = p.covered?;
-    if covered_key != key {
+    let (covered_key, region, covered) = p.covered.as_mut()?;
+    if *covered_key != key {
         return None;
     }
     let want = region.intersect(&visible);
-    if want.is_empty() || covered.contains_rect(&want) {
+    if want.is_empty() || covered.iter().any(|r| r.contains_rect(&want)) {
         return None;
     }
-    p.covered = Some((key, region, want));
-    Some(want)
+    // Keep disjoint views without marking the unrendered gaps between them as covered.
+    // Bound bookkeeping during long pans: after eight rectangles, render the whole affected
+    // region once. A different mode/revision resets coverage through `clip_damage`.
+    covered.retain(|r| !want.contains_rect(r));
+    let refresh = if covered.len() < 8 { want } else { *region };
+    if refresh == *region {
+        covered.clear();
+    }
+    covered.push(refresh);
+    Some(refresh)
 }
 
 fn is_preview_key(key: u64) -> bool {

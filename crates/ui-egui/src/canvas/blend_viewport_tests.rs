@@ -31,6 +31,50 @@ fn blend_hover_multiple_layers_tracks_visible_canvas() {
 }
 
 #[test]
+fn blend_hover_pattern_tiles_and_multiple_views_reuse_current_pixels() {
+    let _guard = photocraft_testkit::gpu_lock();
+    let Some(rs) = render_state() else { return };
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    app.set_wgpu(rs);
+    app.run("file.new", json!({"width":1024,"height":768,"background":"#336699"})).unwrap();
+    let layer = app.run("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+    app.run("edit.fill", json!({"color":"#cc8844"})).unwrap();
+    let ctx = egui::Context::default();
+    let a = DRect::new(724, 200, 1324, 500);
+    let b = DRect::new(0, 200, 300, 500);
+    assert!(ensure_gpu(&mut app, &ctx, 0, a));
+    app.ui.view.pattern_preview = true;
+    crate::blend_preview::hover(&mut app, &[photocraft_doc::LayerId(layer)], Some(BlendMode::Multiply));
+    assert!(ensure_gpu(&mut app, &ctx, 0, a));
+    assert_visible_pixels(&mut app, b);
+    let bounds = app.session.active().unwrap().doc.bounds();
+    assert_visible_pixels(&mut app, bounds);
+    crate::blend_preview::hover(&mut app, &[photocraft_doc::LayerId(layer)], None);
+    assert!(ensure_gpu(&mut app, &ctx, 0, a));
+    assert_visible_pixels(&mut app, bounds);
+
+    app.ui.view.pattern_preview = false;
+    for mode in [BlendMode::Multiply, BlendMode::Screen] {
+        crate::blend_preview::hover(&mut app, &[photocraft_doc::LayerId(layer)], Some(mode));
+        assert!(ensure_gpu(&mut app, &ctx, 0, a));
+        assert!(ensure_gpu(&mut app, &ctx, 0, b));
+        for visible in [a, b, a, b] {
+            app.perf.last_refresh_px = 0;
+            assert!(ensure_gpu(&mut app, &ctx, 0, visible));
+            assert_eq!(app.perf.last_refresh_px, 0, "unchanged views must retain coverage together");
+            assert_visible_pixels(&mut app, visible.intersect(&bounds));
+        }
+    }
+    // Enabling periodic display during an existing hover must catch up the unseen gap too.
+    app.ui.view.pattern_preview = true;
+    assert!(ensure_gpu(&mut app, &ctx, 0, a));
+    assert_visible_pixels(&mut app, bounds);
+    crate::blend_preview::hover(&mut app, &[photocraft_doc::LayerId(layer)], None);
+    assert!(ensure_gpu(&mut app, &ctx, 0, a));
+    assert_visible_pixels(&mut app, bounds);
+}
+
+#[test]
 fn blend_hover_during_background_redraw_restores_committed_pixels() {
     let _guard = photocraft_testkit::gpu_lock();
     let Some(rs) = render_state() else { return };

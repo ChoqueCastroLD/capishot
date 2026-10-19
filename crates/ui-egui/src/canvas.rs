@@ -1575,12 +1575,15 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
     };
     let (doc, raw_key) = display_doc(app, idx);
     let (display, _) = canvas_display(app, &doc, None);
+    // Repeated pattern tiles sample the same texture, including pixels outside the unwrapped
+    // viewport. Refresh the affected document region while Pattern Preview is enabled.
+    let blend_visible = if app.ui.view.pattern_preview { doc.bounds() } else { visible };
     // The texture is shared by every display: only what it stores counts, not the monitor.
     let display_key = texture_key(display.as_deref());
     let seen = app.canvases.get(&(id, GPU_OUTPUT)).map(|c| (c.revision, c.preview_key));
     let mut damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, raw_key), display_key, last_damage));
     if let Some(region) = damage {
-        damage = Some(crate::blend_preview::clip_damage(app, id, revision, raw_key, region, visible));
+        damage = Some(crate::blend_preview::clip_damage(app, id, revision, raw_key, region, blend_visible));
     }
     // To an adjustment dialog's preview: only what the view shows now (the rest as it moves there).
     if damage.is_some()
@@ -1619,7 +1622,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
         }
         // Blend previews keep offscreen pixels untouched until the view reaches them.
         // Use the normal refresh path so CPU fallback and pending redraws stay synchronized.
-        damage = crate::blend_preview::uncovered(app, id, revision, raw_key, visible);
+        damage = crate::blend_preview::uncovered(app, id, revision, raw_key, blend_visible);
         if damage.is_none() {
             return true;
         }
