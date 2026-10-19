@@ -82,7 +82,7 @@ fn normal_rgb_kernel_preserves_scalar_bits() {
 
 /// The vectorized row kernel against the scalar loop it replaced, over row lengths that cover
 /// whole blocks, tails and both, with samples full of NaN, signed zeros, infinities, subnormals
-/// and values outside 0..1.
+/// and values outside 0..1: the same bits, except that a NaN only has to stay NaN.
 #[test]
 fn normal_rgb_span_preserves_scalar_bits() {
     let specials = [0.0, -0.0, 1.0, 0.5, 0.03, -0.5, 2.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::from_bits(1), f32::MIN_POSITIVE, 1e-30];
@@ -111,8 +111,11 @@ fn normal_rgb_span_preserves_scalar_bits() {
             }
             let mut got = backdrop;
             psblend::composite_normal_rgb_span(&mut got, &source, opacity);
+            // IEEE 754 leaves open which operand's NaN an operation passes on (x86 and the
+            // vector units differ in its sign), so any NaN counts as the same NaN.
+            let bits = |p: &[f32; 4]| p.map(|v| if v.is_nan() { u32::MAX } else { v.to_bits() });
             for (i, (g, w)) in got.iter().zip(&want).enumerate() {
-                assert_eq!(g.map(f32::to_bits), w.map(f32::to_bits), "len {len}, pixel {i}, opacity {opacity}: {g:?} vs {w:?}");
+                assert_eq!(bits(g), bits(w), "len {len}, pixel {i}, opacity {opacity}: {g:?} vs {w:?}");
             }
         }
     }

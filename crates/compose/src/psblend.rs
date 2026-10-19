@@ -238,7 +238,7 @@ pub(crate) fn composite_normal_rgb(backdrop: [f32; 4], source: [f32; 4], opacity
     normal_rgb(backdrop, source, as_, ao)
 }
 
-/// [`composite_normal_rgb`] over a row, bit for bit, in blocks the compiler vectorizes (see
+/// [`composite_normal_rgb`] over a row, with the same bits, in blocks the compiler vectorizes (see
 /// [`normal_lanes`]); the tail that doesn't fill a block goes through the scalar kernel.
 pub(crate) fn composite_normal_rgb_span(dst: &mut [[f32; 4]], src: &[[f32; 4]], opacity: f32) {
     let n = dst.len().min(src.len());
@@ -262,7 +262,8 @@ const LANES: usize = 8;
 /// [`composite_normal_rgb`] (after the caller's `source alpha > 0` test) on one block of pixels,
 /// without branches: one array per channel, fixed-length loops the compiler vectorizes, and a
 /// select per pixel between the backdrop, zero and the mix. Same operations in the same order
-/// (Rust never fuses them into multiply-adds) and the same tests, NaN included: bit-identical.
+/// (Rust never fuses them into multiply-adds) and the same tests: the same bits, except that a
+/// NaN's sign and payload may differ (IEEE 754 doesn't fix which operand's NaN is passed on).
 #[inline]
 #[allow(clippy::needless_range_loop)] // lanes index several arrays in lockstep
 fn normal_lanes(b: &mut [[f32; 4]; LANES], s: &[[f32; 4]; LANES], opacity: f32) {
