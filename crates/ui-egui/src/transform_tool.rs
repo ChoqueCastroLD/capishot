@@ -793,7 +793,7 @@ fn preview_image(
         _ => {
             let mut solo = doc.clone();
             if layer.is_some() {
-                show_preview_target(&mut solo.layers, id);
+                solo_layer(&mut solo.layers, id);
             } else {
                 // Keep the previous fallback for an invalid id: render the document, with only
                 // top-level clipping disabled. Production callers get ids from this document.
@@ -991,7 +991,9 @@ fn show_only(layers: &mut [photocraft_doc::Layer], keep: &[LayerId]) {
 
 /// Leave only `id`, its descendants and the groups holding it visible. Every layer on that path
 /// is detached from its clipping base because the base is hidden in this isolated render (#5239).
-fn show_preview_target(layers: &mut [photocraft_doc::Layer], id: LayerId) {
+/// Hide every layer but `id` and the groups holding it, and unclip those, so a render shows that
+/// layer alone (the Free Transform preview, Liquify's one-layer backdrop).
+pub(crate) fn solo_layer(layers: &mut [photocraft_doc::Layer], id: LayerId) {
     for l in layers {
         if l.id == id {
             l.clipped = false;
@@ -1000,7 +1002,7 @@ fn show_preview_target(layers: &mut [photocraft_doc::Layer], id: LayerId) {
         match &mut l.content {
             LayerContent::Group(g) if g.children.iter().any(|c| contains(c, id)) => {
                 l.clipped = false;
-                show_preview_target(&mut g.children, id);
+                solo_layer(&mut g.children, id);
             }
             _ => l.visible = false,
         }
