@@ -8,7 +8,10 @@
 //! one part, however large the app grows.
 //!
 //! The browser inflates the parts (`DecompressionStream`: Safari 16.4, Firefox 113, Chrome 80).
-//! In one that can't, this module inflates them itself, a little slower.
+//! In one that can't, this module inflates them itself, a little slower. Some servers recognise
+//! the gzip in a part and send it with `Content-Encoding: gzip` (Apache's `mod_mime_magic`
+//! labels it `x-gzip`), so the browser has inflated it already: the joined download is then
+//! taken as it is, by its first bytes.
 //!
 //! A download that fails is tried again, the later tries past the browser's cache (a bad copy
 //! there would otherwise fail forever). When every try fails the page says so and offers a reload.
@@ -34,6 +37,34 @@ fn parts(list: &str) -> Option<Vec<String>> {
     let parts: Vec<String> = lines.map(str::to_owned).collect();
     let plain = |p: &String| !p.starts_with('.') && !p.contains(['/', '\\', '?', '#', ':', '%']);
     (!parts.is_empty() && parts.iter().all(plain)).then_some(parts)
+}
+
+/// What the joined parts hold, told by their first bytes.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Payload {
+    /// The gzip packaging made, still to be inflated.
+    Gzip,
+    /// The app's WebAssembly: the server sent the gzip with a `Content-Encoding` the browser
+    /// already undid.
+    Wasm,
+}
+
+/// Enough leading bytes to tell the payloads apart.
+#[cfg(any(target_arch = "wasm32", test))]
+const HEAD: usize = 4;
+
+/// What a download starting with `head` (at least `HEAD` bytes, or all there were) holds, or
+/// `None` when it is neither, such as a web page or nothing at all.
+#[cfg(any(target_arch = "wasm32", test))]
+fn payload(head: &[u8]) -> Option<Payload> {
+    if head.starts_with(&[0x1f, 0x8b]) {
+        Some(Payload::Gzip)
+    } else if head.starts_with(b"\0asm") {
+        Some(Payload::Wasm)
+    } else {
+        None
+    }
 }
 
 /// Gzip inflated a chunk at a time, for browsers that can't do it themselves.
@@ -69,11 +100,11 @@ mod boot {
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::{JsFuture, spawn_local};
     use web_sys::{
-        Headers, ReadableStream, ReadableWritablePair, RequestCache, RequestInit, Response, ResponseInit, StreamPipeOptions, TransformStream,
-        TransformStreamDefaultController, Transformer, WritableStream,
+        Headers, ReadableStream, ReadableStreamDefaultReader, ReadableWritablePair, RequestCache, RequestInit, Response, ResponseInit, StreamPipeOptions,
+        TransformStream, TransformStreamDefaultController, Transformer, WritableStream, WritableStreamDefaultWriter,
     };
 
-    use super::Inflater;
+    use super::{HEAD, Inflater, Payload};
 
     /// Where packaging puts the app, next to this module's own files.
     const PARTS: &str = "./app/parts.txt";
@@ -172,11 +203,71 @@ mod boot {
         Ok(compressed.pipe_through(&pair))
     }
 
+    /// The next chunk `reader` gives, or `None` at the end of the stream.
+    async fn read(reader: &ReadableStreamDefaultReader) -> Result<Option<js_sys::Uint8Array>, JsValue> {
+        let result = JsFuture::from(reader.read()).await?;
+        if js_sys::Reflect::get(&result, &JsValue::from_str("done"))?.is_truthy() {
+            return Ok(None);
+        }
+        Ok(Some(js_sys::Reflect::get(&result, &JsValue::from_str("value"))?.dyn_into()?))
+    }
+
+    /// Writes `chunk` into `writer`. When nothing will read it any more (the app's loader gave up
+    /// on its stream), the download from `reader` is cancelled too, so it doesn't stay pending.
+    async fn write(chunk: &js_sys::Uint8Array, reader: &ReadableStreamDefaultReader, writer: &WritableStreamDefaultWriter) -> Result<(), JsValue> {
+        if let Err(e) = JsFuture::from(writer.write_with_chunk(chunk)).await {
+            let _ = reader.cancel_with_reason(&e);
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Writes the `held` chunks, then the rest of `reader`'s stream, into `writer`, then closes it.
+    async fn pass_on(held: Vec<js_sys::Uint8Array>, reader: &ReadableStreamDefaultReader, writer: &WritableStreamDefaultWriter) -> Result<(), JsValue> {
+        for chunk in &held {
+            write(chunk, reader, writer).await?;
+        }
+        while let Some(chunk) = read(reader).await? {
+            write(&chunk, reader, writer).await?;
+        }
+        JsFuture::from(writer.close()).await?;
+        Ok(())
+    }
+
+    /// The app's WebAssembly from the `joined` parts: inflated, unless its first bytes show the
+    /// browser has already done that.
+    async fn unpacked(joined: &ReadableStream) -> Result<ReadableStream, JsValue> {
+        let reader: ReadableStreamDefaultReader = joined.get_reader().unchecked_into();
+        let (mut head, mut held) = (Vec::with_capacity(HEAD), Vec::new());
+        while head.len() < HEAD {
+            let Some(chunk) = read(&reader).await? else { break };
+            let wanted = u32::try_from(HEAD - head.len()).unwrap_or(u32::MAX).min(chunk.length());
+            head.extend(chunk.subarray(0, wanted).to_vec());
+            held.push(chunk);
+        }
+        let Some(payload) = super::payload(&head) else {
+            let e = JsValue::from_str("the download is not PhotoCraft's WebAssembly");
+            // Stops the rest of the download, which nothing will read.
+            let _ = reader.cancel_with_reason(&e);
+            return Err(e);
+        };
+        let rest = TransformStream::new()?;
+        let writer = rest.writable().get_writer()?;
+        spawn_local(async move {
+            if let Err(e) = pass_on(held, &reader, &writer).await {
+                let _ = writer.abort_with_reason(&e);
+            }
+        });
+        match payload {
+            Payload::Gzip => inflated(&rest.readable()),
+            Payload::Wasm => Ok(rest.readable()),
+        }
+    }
+
     async fn run(fresh: bool) -> Result<(), JsValue> {
         let list = JsFuture::from(fetch(PARTS, fresh).await?.text()?).await?.as_string().unwrap_or_default();
         let parts = super::parts(&list).ok_or_else(|| JsValue::from_str("app/parts.txt is not a parts list"))?;
         let joined = TransformStream::new()?;
-        let wasm = inflated(&joined.readable())?;
         // Why the download stopped: the app's loader only reports that its stream broke.
         let cause = Rc::new(RefCell::new(None));
         let failed = cause.clone();
@@ -187,6 +278,10 @@ mod boot {
                 failed.replace(Some(e));
             }
         });
+        let wasm = match unpacked(&joined.readable()).await {
+            Ok(wasm) => wasm,
+            Err(e) => return Err(cause.take().unwrap_or(e)),
+        };
         let headers = Headers::new()?;
         headers.set("Content-Type", "application/wasm")?;
         let init = ResponseInit::new();
