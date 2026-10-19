@@ -964,6 +964,33 @@ fn temporary_type_transform_free_scale_center_scale_move_skew_and_rotation() {
     }
 }
 
+/// Editing paragraph text, a click inside the box but off the glyphs moves the caret to the
+/// nearest offset, as in Photoshop; a click outside the box still commits.
+#[test]
+fn click_inside_the_paragraph_box_off_the_glyphs_moves_the_caret() {
+    use crate::canvas::{ToolEvent, tool_event};
+    // The box is 240 × 180; the two 32 pt lines only fill its top.
+    let (mut app, id) = transform_app(true, false, Affine::translate(400.0, 350.0));
+    let (bx, by, _, h) = super::box_shape(&app, id).unwrap();
+    let (l, aff, _) = layout(&mut app, id).unwrap();
+    let click = |app: &mut PhotocraftApp, tx: f32, ty: f32| {
+        let p = aff.apply(Point::new(f64::from(tx), f64::from(ty)));
+        tool_event(app, ToolEvent::Down { x: p.x, y: p.y, pressure: 1.0 }, Modifiers::NONE);
+        tool_event(app, ToolEvent::Up { x: p.x, y: p.y }, Modifiers::NONE);
+    };
+    let layers = app.session.active().unwrap().doc.layers.len();
+    // Near the bottom of the box, just right of its left edge.
+    assert!(!photocraft_text::text_point_inside(&l, bx + 8.0, by + h - 8.0, 6.0), "the point is off the glyphs");
+    click(&mut app, bx + 8.0, by + h - 8.0);
+    let ed = app.ui.text_edit.clone().expect("still editing");
+    // "Hello é世界\n" is 10 characters: the start of the second line.
+    assert_eq!((ed.layer, ed.caret, ed.anchor), (id.0, 10, 10));
+    // Outside the box the edit commits, without starting new text.
+    click(&mut app, bx - 40.0, by + h - 8.0);
+    assert!(app.ui.text_edit.is_none());
+    assert_eq!(app.session.active().unwrap().doc.layers.len(), layers);
+}
+
 #[test]
 fn temporary_type_transform_noop_cancel_and_stale_capture() {
     use crate::canvas::{ToolEvent, tool_event};
