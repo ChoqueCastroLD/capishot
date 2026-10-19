@@ -293,3 +293,70 @@ fn a_lost_window_device_saves_unsaved_work_for_recovery_and_closes() {
     assert_eq!(upload(&h), (0, true), "a frame with shapes panics inside egui-wgpu on a lost device");
     assert_eq!(h.state().session.documents().len(), 1, "the document stays until the app closes");
 }
+
+/// #6464 review: when the recovery save fails (a full disk, say), closing would lose the work, so
+/// the app stays open with the document and tries again until the write succeeds, then closes.
+#[test]
+fn a_lost_window_device_closes_only_once_unsaved_work_is_saved() {
+    let _gpu = gpu_lock();
+    let disk_full = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (full, tries) = (disk_full.clone(), attempts.clone());
+    let pending = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(u64, u64)>::new()));
+    let queued = pending.clone();
+    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        egui_kittest::Harness::builder().with_size(egui::vec2(1000.0, 700.0)).with_max_steps(16).wgpu().build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            let services = photocraft_ui_egui::Services {
+                autosave: Some(Box::new(move |doc: &std::sync::Arc<Document>, revision: u64, _: Option<&str>| {
+                    queued.lock().unwrap().push((doc.id.0, revision));
+                    Ok(())
+                })),
+                autosave_results: Some(Box::new(Vec::new)),
+                flush_autosaves: Some(Box::new(move || {
+                    tries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let outcome = if full.load(std::sync::atomic::Ordering::SeqCst) { Err("disk full".to_string()) } else { Ok(()) };
+                    pending.lock().unwrap().drain(..).map(|(id, revision)| (id, revision, outcome.clone())).collect()
+                })),
+                ..Default::default()
+            };
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+            if let Some(rs) = cc.wgpu_render_state.as_ref() {
+                app.set_wgpu(rs.clone());
+            }
+            app.run("file.new", json!({"width": 320, "height": 240})).unwrap();
+            app.run("layer.new.layer", json!({})).unwrap();
+            app
+        })
+    }));
+    let Ok(mut h) = built else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    h.run_steps(4);
+    assert!(h.state_mut().destroy_window_device());
+    for _ in 0..120 {
+        h.run_steps(1);
+        if h.state().window_lost() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    assert!(h.state().window_lost(), "the loss was noticed");
+    let tries = || attempts.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(tries(), 1);
+    assert!(h.state().has_unsaved_work(), "a failed recovery save doesn't let the app close");
+    // Each step is 0.25 s: no new attempt before the retry interval.
+    h.run_steps(4);
+    assert_eq!(tries(), 1, "waits before trying again");
+    h.run_steps(5);
+    assert_eq!(tries(), 2, "tries again");
+    assert!(h.state().has_unsaved_work());
+    disk_full.store(false, std::sync::atomic::Ordering::SeqCst);
+    h.run_steps(9);
+    assert_eq!(tries(), 3);
+    assert!(!h.state().has_unsaved_work(), "closes once the work is saved");
+    h.run_steps(9);
+    assert_eq!(tries(), 3, "saved once, not again");
+    assert_eq!(h.state().session.documents().len(), 1, "the document stays until the app closes");
+}

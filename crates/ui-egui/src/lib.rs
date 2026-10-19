@@ -820,8 +820,11 @@ pub struct PhotocraftApp {
     /// The device the window itself draws with, and its health flag: the GPU canvas's, or one
     /// watched for the CPU canvas (see `gpu_status::check_window`).
     window_device: Option<(eframe::wgpu::Device, photocraft_gpu::DeviceHealth)>,
-    /// That device was lost: frames draw nothing and the app is closing (#3438).
+    /// That device was lost: frames draw nothing and the app closes once its work is saved (#3438).
     window_lost: bool,
+    /// When (in `egui::InputState::time`) to try saving unsaved work for recovery again after a
+    /// failed attempt; the app closes only once it succeeded.
+    window_recovery_retry: Option<f64>,
     /// Run once the first frames have rendered (see [`Self::on_started`]).
     started: Option<gpu_status::StartedHook>,
     /// Frame and canvas-upload timings (exposed via `ui.inspect`).
@@ -987,6 +990,7 @@ impl PhotocraftApp {
             gpu: None,
             window_device: None,
             window_lost: false,
+            window_recovery_retry: None,
             started: None,
             perf: Default::default(),
             stroke_trace: stroke_trace::StrokeTrace::from_env(),
@@ -1062,8 +1066,8 @@ impl PhotocraftApp {
         self.window_device = Some((device.clone(), photocraft_gpu::DeviceHealth::watch(device)));
     }
 
-    /// Whether the window's graphics device was lost, so the app saved its documents for
-    /// recovery and is closing (#3438).
+    /// Whether the window's graphics device was lost, so the app saves its documents for
+    /// recovery and closes once they are saved (#3438).
     pub fn window_lost(&self) -> bool {
         self.window_lost
     }
@@ -2069,6 +2073,7 @@ impl eframe::App for PhotocraftApp {
                 }
             });
             self.automation_input = false;
+            gpu_status::check_window(self, &ctx);
             return;
         }
         if screen_picker::busy(&ctx) {

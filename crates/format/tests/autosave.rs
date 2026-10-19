@@ -204,7 +204,13 @@ fn flush_writes_every_queued_autosave_before_returning() {
     let docs = recovered(&RecoveryStore::new(&dir));
     assert_eq!(docs.len(), 2);
     assert!(docs.values().any(|d| *d == same(a.clone())) && docs.values().any(|d| *d == same(b.clone())));
-    assert!(store.autosave_checked(&Arc::new(a), 5, None).is_err(), "the workers stopped");
+    // A later autosave (trying a failed write again) starts a new worker on the same entry.
+    let newer = version(1, 4, ColorMode::Rgb);
+    store.autosave_checked(&Arc::new(newer.clone()), 5, None).unwrap();
+    assert_eq!(store.flush(), vec![(1, 5, Ok(()))]);
+    let docs = recovered(&RecoveryStore::new(&dir));
+    assert_eq!(docs.len(), 2, "the same entry, not a new one");
+    assert!(docs.values().any(|d| *d == same(newer.clone())) && !docs.values().any(|d| *d == same(a.clone())));
     drop(store);
     std::fs::remove_dir_all(dir).unwrap();
 }

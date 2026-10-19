@@ -299,13 +299,16 @@ impl RecoveryStore {
 
     /// Finish every queued autosave and wait for it, then return the outcomes as
     /// [`take_completed`](Self::take_completed) does. For a session that ends without asking,
-    /// e.g. because the window's graphics device was lost (#3438). The workers stop, so later
-    /// autosaves of the same documents report a stopped worker.
+    /// e.g. because the window's graphics device was lost (#3438). The workers stop; a later
+    /// autosave of the same document starts a new one on the same entry, so a failed write can be
+    /// tried again.
     pub fn flush(&mut self) -> Vec<(u64, u64, std::result::Result<(), String>)> {
         for saver in self.savers.values_mut() {
             saver.shutdown();
         }
-        self.take_completed()
+        let done = self.take_completed();
+        self.savers.clear();
+        done
     }
 
     /// Document `doc_id` was saved or closed: remove its recovery data, both its own autosaves
