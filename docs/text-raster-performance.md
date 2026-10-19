@@ -25,8 +25,10 @@ reads and writes only its own slots.
 
 ## What runs in parallel now
 
-`composite`, `unpremultiply` and the tile conversion of `write_region` run on all cores (rayon,
-native only; the web build keeps the serial loops, since wasm has no threads). Nothing about them
+`composite`, `unpremultiply` and the tile conversion run on all cores (rayon, native only; the web
+build keeps the serial loops, since wasm has no threads). The rasterizer writes its tiles with
+`Surface::write_region_par`; `Surface::write_region` stays serial, because mask builds call it inside
+a `OnceLock` initializer, which must not enter rayon. Nothing about them
 is order-dependent, so each pixel still sees the same operations on the same inputs — the pixels
 are identical, not merely close.
 
@@ -37,7 +39,8 @@ are identical, not merely close.
 `crates/text/src/tests.rs::parallel_raster_matches_a_single_thread` renders the shapes the pipeline
 can take (plain, faux bold italic, no antialias, wide gamut, a wrapping paragraph box; 8/16/32-bit)
 on a one-thread pool and on the default pool and compares the surfaces; `crates/raster`'s existing
-region proptests compare `write_region` against its serial reference implementation, tile for tile.
+`region_writes_match_scalar_bytes_for_every_format` compares `write_region` and `write_region_par`
+against a scalar reference implementation, tile for tile.
 
 ## What stays on one thread, and why
 

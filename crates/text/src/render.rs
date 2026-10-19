@@ -283,7 +283,7 @@ pub fn rasterize_warped(layout: &TextLayout, transform: &Affine, format: PixelFo
     }
     // Unpremultiply.
     unpremultiply(&mut acc, n, stride, format.sample);
-    surface.write_region(rect, &acc);
+    surface.write_region_par(rect, &acc);
     surface.prune();
     Rendered { surface, rect }
 }

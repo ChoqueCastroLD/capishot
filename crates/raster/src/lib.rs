@@ -641,16 +641,34 @@ impl Surface {
         out
     }
 
-    /// Write interleaved normalised floats into a rectangle.
+    /// Write interleaved normalised floats into a rectangle, on the calling thread.
+    ///
+    /// This never enters Rayon, so it is safe inside a `OnceLock` initializer or any other
+    /// section that must not run another Rayon job on its stack. [`Surface::write_region_par`]
+    /// writes the same bytes on all cores.
     pub fn write_region(&mut self, r: Rect, data: &[f32]) {
         let n = self.channels();
         let w = r.width() as usize;
         assert_eq!(data.len(), w * r.height() as usize * n, "region data length mismatch");
         let sample = self.format.sample;
-        // Each tile's own span of `data` is converted on its own: the tiles are disjoint, so
-        // converting them in any order (and on any thread) writes exactly the same bytes.
-        // `take_tiles` reserves the whole result before removing anything, and gives the missing
-        // tiles as one shared default-filled tile, copied per tile by `Arc::make_mut` below.
+        for tc in r.tiles() {
+            write_tile(self.tile_mut(tc), tc, r, data, w, n, sample);
+        }
+    }
+
+    /// [`Surface::write_region`] with the tiles converted on all cores (serially on the web).
+    ///
+    /// This enters Rayon: while it waits for its tiles, the calling worker may run any other
+    /// queued Rayon job. Callers inside a `OnceLock` initializer or another section that must
+    /// not do that use [`Surface::write_region`].
+    pub fn write_region_par(&mut self, r: Rect, data: &[f32]) {
+        let n = self.channels();
+        let w = r.width() as usize;
+        assert_eq!(data.len(), w * r.height() as usize * n, "region data length mismatch");
+        let sample = self.format.sample;
+        // The tiles are disjoint, so converting them in any order (and on any thread) writes
+        // exactly the same bytes. `take_tiles` gives the missing tiles as one shared
+        // default-filled tile, copied per tile by `Arc::make_mut` in `convert_tiles`.
         let mut tiles = self.take_tiles(r);
         convert_tiles(&mut tiles, r, data, w, n, sample);
         self.put_tiles(tiles);
@@ -1310,17 +1328,50 @@ mod tests {
                             .collect();
                         let snapshot = actual.clone();
                         let snapshot_bytes = snapshot.to_interleaved(rect.inflate(1));
+                        let mut par = actual.clone();
                         actual.write_region(rect, &data);
+                        par.write_region_par(rect, &data);
                         write_region_reference(&mut expected, rect, &data);
                         assert_eq!(actual, expected, "{fmt:?}, {rect:?}");
+                        assert_eq!(par, expected, "parallel {fmt:?}, {rect:?}");
                         assert_eq!(snapshot.to_interleaved(rect.inflate(1)), snapshot_bytes, "COW snapshot changed");
                         // Repeat against already materialised, unshared tiles too.
                         actual.write_region(rect, &data);
+                        par.write_region_par(rect, &data);
                         assert_eq!(actual, expected);
+                        assert_eq!(par, expected);
                     }
                 }
             }
         }
+    }
+
+    /// Mask builds call `write_region` inside a `OnceLock` initializer, where entering Rayon can
+    /// run another tile's job that waits on the same lock. With every global worker held, a write
+    /// that queued work on Rayon could not finish.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn write_region_does_not_enter_rayon() {
+        use std::sync::{Barrier, mpsc};
+        let workers = rayon::current_num_threads();
+        let held = Arc::new(Barrier::new(workers + 1));
+        let release = Arc::new(Barrier::new(workers + 1));
+        let (h, rel) = (held.clone(), release.clone());
+        rayon::spawn_broadcast(move |_| {
+            h.wait();
+            rel.wait();
+        });
+        held.wait();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let r = Rect::new(0, 0, 2 * TILE_SIZE, 2 * TILE_SIZE);
+            let mut s = Surface::new(PixelFormat::RGBA8);
+            s.write_region(r, &vec![0.5; (r.width() * r.height() * 4) as usize]);
+            tx.send(()).ok();
+        });
+        let done = rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok();
+        release.wait();
+        assert!(done, "write_region waited on the Rayon pool");
     }
 
     #[test]
