@@ -307,7 +307,11 @@ impl RecoveryStore {
             saver.shutdown();
         }
         let done = self.take_completed();
-        self.savers.clear();
+        // Keep each entry's key, so a later autosave writes the same entry and a discard (the
+        // document was saved or closed meanwhile) still removes it.
+        for (id, saver) in self.savers.drain() {
+            self.adopted.entry(id).or_insert(saver.key.clone());
+        }
         done
     }
 

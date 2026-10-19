@@ -215,6 +215,29 @@ fn flush_writes_every_queued_autosave_before_returning() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// #6464 review: a document saved or closed after a flush (the app stayed open because a recovery
+/// write failed) still has its entry removed, so it doesn't come back at the next launch.
+#[test]
+fn discard_after_flush_removes_the_entry() {
+    let dir = temp_dir("discard-after-flush");
+    let mut store = RecoveryStore::new(&dir);
+    store.autosave_checked(&Arc::new(version(1, 3, ColorMode::Rgb)), 4, None).unwrap();
+    assert_eq!(store.flush(), vec![(1, 4, Ok(()))]);
+    assert_eq!(list_recovery(&dir).len(), 1);
+    store.discard(1).unwrap();
+    assert!(list_recovery(&dir).is_empty(), "the flushed document's entry is gone");
+    // And after a retry wrote the entry again through a new worker.
+    store.autosave_checked(&Arc::new(version(2, 5, ColorMode::Rgb)), 6, None).unwrap();
+    store.flush();
+    store.autosave_checked(&Arc::new(version(2, 6, ColorMode::Rgb)), 7, None).unwrap();
+    store.flush();
+    assert_eq!(list_recovery(&dir).len(), 1, "one entry per document");
+    store.discard(2).unwrap();
+    assert!(list_recovery(&dir).is_empty());
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn new_documents_never_overwrite_surviving_entries() {
     let dir = temp_dir("collision");
