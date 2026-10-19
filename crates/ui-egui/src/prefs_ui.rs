@@ -233,11 +233,15 @@ pub fn load(app: &mut PhotocraftApp) {
         return;
     }
     app.prefs_rt.loaded = true;
-    if let Some(text) = app.services.load_prefs.as_mut().and_then(|f| f())
-        && let Err(e) = app.session.load_prefs_json(&text)
-    {
-        let template = "Preferences were reset: {error}";
-        app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
+    let mut invalid = Vec::new();
+    if let Some(text) = app.services.load_prefs.as_mut().and_then(|f| f()) {
+        match app.session.load_prefs_json(&text) {
+            Ok(found) => invalid = found,
+            Err(e) => {
+                let template = "Preferences were reset: {error}";
+                app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
+            }
+        }
     }
     crate::dock::restore(app);
     crate::brush_picker::restore(app);
@@ -248,6 +252,37 @@ pub fn load(app: &mut PhotocraftApp) {
     app.sync_recent();
     app.prefs_rt.saved_rev = app.session.prefs.rev();
     app.prefs_rt.saved_value = Some(app.session.prefs_value());
+    if !invalid.is_empty() {
+        repair_invalid(app, &invalid);
+    }
+}
+
+/// Some saved values couldn't be read and took their defaults (#6611): say which, and write
+/// the defaults over them on the next save so the next launch reads a clean file. The save
+/// base holds the unreadable values, so the three-way merge sees them as changed here and
+/// replaces (or removes) exactly those, keeping everything else in the stored file.
+fn repair_invalid(app: &mut PhotocraftApp, invalid: &[prefs::InvalidPref]) {
+    if let Some(base) = app.prefs_rt.saved_value.as_mut() {
+        for bad in invalid {
+            let Some((key, parent)) = bad.keys.split_last() else {
+                continue;
+            };
+            if let Some(obj) = parent.iter().try_fold(&mut *base, |cur, k| cur.get_mut(k.as_str())).and_then(Value::as_object_mut) {
+                obj.insert(key.clone(), bad.value.clone());
+            }
+        }
+    }
+    app.session.prefs.edit(|_| ());
+    let paths = invalid.iter().map(prefs::InvalidPref::path).collect::<Vec<_>>().join(", ");
+    let (title, line) = (
+        "Some preferences were reset",
+        "The preferences file held values PhotoCraft can't read for {paths}. Those settings are back to their defaults; the rest of your preferences loaded.",
+    );
+    // Notices keep their English source and are translated when drawn.
+    let id = crate::notices::post(app, title, vec![line.into()], false, None);
+    if let Some(notice) = app.ui.notices.iter_mut().find(|n| n.id == id) {
+        notice.args.push(("paths".into(), paths));
+    }
 }
 
 /// Discover recovery entries after construction, then decode one at a time without blocking
@@ -3094,6 +3129,39 @@ mod tests {
 
     fn stored(store: &Arc<Mutex<Option<String>>>) -> Value {
         serde_json::from_str(store.lock().unwrap().as_deref().unwrap_or("null")).unwrap()
+    }
+
+    #[test]
+    fn a_wrongly_typed_value_resets_only_itself_and_is_repaired_on_disk() {
+        // #6611: one bad value used to reset every preference, on every launch.
+        let saved = json!({
+            "fileHandling": {"recentFileCount": "ten", "autosaveMinutes": 5},
+            "performance": {"historyStates": 12},
+            "shortcuts": {"edit.fill": "Cmd+Shift+F", "file.open": 7},
+            "futureSection": {"kept": true},
+        });
+        let (mut app, store) = app_with_saved(Some(saved.to_string()));
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        let p = app.session.prefs();
+        assert_eq!((p.file_handling.recent_file_count, p.file_handling.autosave_minutes, p.performance.history_states), (20, 5, 12));
+        assert!(!app.ui.status.contains("reset"), "{}", app.ui.status);
+        let notice = app.ui.notices.iter().find(|n| n.title == "Some preferences were reset").expect("a notice names the bad values");
+        let text = notice.text(&notice.lines[0]);
+        assert!(text.contains("fileHandling.recentFileCount, shortcuts.file.open"), "{text}");
+        // The file now holds the default in its place and keeps everything else.
+        let v = stored(&store);
+        assert_eq!(v["fileHandling"]["recentFileCount"], 20);
+        assert_eq!(v["fileHandling"]["autosaveMinutes"], 5);
+        assert_eq!(v["performance"]["historyStates"], 12);
+        assert_eq!(v["shortcuts"]["edit.fill"], "Cmd+Shift+F");
+        assert!(v["shortcuts"].get("file.open").is_none());
+        assert_eq!(v["futureSection"]["kept"], true, "keys this version doesn't know survive");
+        // So the next launch loads cleanly.
+        let (mut next, _) = app_with_saved(store.lock().unwrap().clone());
+        tick(&mut next, &ctx);
+        assert!(next.ui.notices.iter().all(|n| n.title != "Some preferences were reset"));
+        assert_eq!(next.session.prefs().file_handling.autosave_minutes, 5);
     }
 
     #[test]
