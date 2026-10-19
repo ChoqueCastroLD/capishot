@@ -288,11 +288,20 @@ impl Surface {
         decode_pixel(&self.format, &self.default_pixel)
     }
 
+    /// Decode the default pixel into fixed storage without allocating.
+    fn default_samples(&self) -> [f32; 8] {
+        let mut px = [0.0; 8];
+        for (i, v) in px.iter_mut().enumerate().take(self.channels()) {
+            *v = read_sample(&self.default_pixel, self.format.sample, i);
+        }
+        px
+    }
+
     /// Mutable access to a tile, allocating it (filled with the default pixel) or un-sharing it.
     pub fn tile_mut(&mut self, c: TileCoord) -> &mut Tile {
         let fmt = self.format;
-        let dp = self.default_pixel.clone();
-        let arc = self.tiles.entry(c).or_insert_with(|| Arc::new(Tile::filled(&fmt, &dp)));
+        let dp = &self.default_pixel;
+        let arc = self.tiles.entry(c).or_insert_with(|| Arc::new(Tile::filled(&fmt, dp)));
         Arc::make_mut(arc)
     }
 
@@ -368,9 +377,9 @@ impl Surface {
 
     /// Drop tiles that are entirely the default pixel.
     pub fn prune(&mut self) {
-        let dp = self.default_pixel.clone();
+        let dp = self.default_pixel.as_ref();
         let bpp = dp.len();
-        self.tiles.retain(|_, t| t.data.chunks_exact(bpp).any(|px| px != &*dp));
+        self.tiles.retain(|_, t| t.data.chunks_exact(bpp).any(|px| px != dp));
     }
 
     #[inline]
@@ -460,14 +469,26 @@ impl Surface {
         let w = r.width() as usize;
         out.clear();
         out.resize(w * r.height() as usize * n, 0.0);
-        let dp = self.default_pixel();
+        self.read_samples_into(r, out);
+    }
+
+    /// Copy samples into a zero-initialized buffer sized for `r`.
+    fn read_samples_into(&self, r: Rect, out: &mut [f32]) {
+        let n = self.channels();
+        let w = r.width() as usize;
+        let dp = self.default_samples();
+        let dp = &dp[..n];
+        let zero = self.default_pixel.iter().all(|&b| b == 0);
         for tc in r.tiles() {
             let tr = tc.rect().intersect(&r);
             let tile = self.tiles.get(&tc);
+            if tile.is_none() && zero {
+                continue;
+            }
             for y in tr.y0..tr.y1 {
                 let o = (((y - r.y0) as usize) * w + (tr.x0 - r.x0) as usize) * n;
                 let span = tr.width() as usize * n;
-                let dst = &mut out[o..o + span];
+                let Some(dst) = out.get_mut(o..o + span) else { continue };
                 match tile {
                     Some(t) => {
                         let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (tr.x0 - tc.tx * TILE_SIZE) as usize) * n;
@@ -475,9 +496,10 @@ impl Surface {
                             *d = read_sample(&t.data, self.format.sample, base + i);
                         }
                     }
+                    None if n == 1 => dst.fill(dp[0]),
                     None => {
                         for px in dst.chunks_exact_mut(n) {
-                            px.copy_from_slice(&dp);
+                            px.copy_from_slice(dp);
                         }
                     }
                 }
@@ -494,7 +516,7 @@ impl Surface {
         debug_assert_eq!(out.len(), w * r.height() as usize);
         let fmt = self.format;
         let n = fmt.channels();
-        let dp = to_rgba(&fmt, &self.default_pixel());
+        let dp = to_rgba(&fmt, &self.default_samples());
         for tc in r.tiles() {
             let tr = tc.rect().intersect(&r);
             let tile = self.tiles.get(&tc);
@@ -559,7 +581,7 @@ impl Surface {
         let fmt = self.format;
         let rgba8 = matches!((fmt.mode, fmt.sample, fmt.alpha), (ColorMode::Rgb, SampleType::U8, true));
         let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-        let dp = to_rgba(&fmt, &self.default_pixel());
+        let dp = to_rgba(&fmt, &self.default_samples());
         let dp8 = [q(dp[0]), q(dp[1]), q(dp[2]), q(dp[3])];
         let mut row = Vec::new();
         for tc in r.tiles() {
@@ -600,25 +622,7 @@ impl Surface {
         let n = self.channels();
         let w = r.width() as usize;
         let mut out = vec![0.0f32; w * r.height() as usize * n];
-        let dp = self.default_pixel();
-        for tc in r.tiles() {
-            let tr = tc.rect().intersect(&r);
-            let tile = self.tiles.get(&tc);
-            for y in tr.y0..tr.y1 {
-                for x in tr.x0..tr.x1 {
-                    let o = (((y - r.y0) as usize) * w + (x - r.x0) as usize) * n;
-                    match tile {
-                        Some(t) => {
-                            let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (x - tc.tx * TILE_SIZE) as usize) * n;
-                            for i in 0..n {
-                                out[o + i] = read_sample(&t.data, self.format.sample, base + i);
-                            }
-                        }
-                        None => out[o..o + n].copy_from_slice(&dp),
-                    }
-                }
-            }
-        }
+        self.read_samples_into(r, &mut out);
         out
     }
 
@@ -1126,6 +1130,60 @@ pub fn is_hdr(sample: SampleType) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    /// Manually compare allocating reads with the previous implementation.
+    #[test]
+    #[ignore = "manual 24 MP release benchmark"]
+    fn benchmark_sparse_reads() {
+        use std::{hint::black_box, time::Instant};
+        let rect = Rect::new(0, 0, 6000, 4000);
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            for default in [0.0, 0.25] {
+                let mut s = Surface::with_default(PixelFormat::GRAY8.with_sample(depth), &[default]);
+                s.fill_rect(Rect::new(257, 257, 266, 266), &[0.75]);
+                assert_eq!(s.read_region(rect), previous_read_region(&s, rect));
+                for trial in 0..6 {
+                    let mut paths = [("main", previous_read_region as fn(&Surface, Rect) -> Vec<f32>), ("split", Surface::read_region)];
+                    if trial % 2 == 1 {
+                        paths.reverse();
+                    }
+                    for (name, path) in paths {
+                        let t = Instant::now();
+                        let out = black_box(path)(&s, rect);
+                        let elapsed = t.elapsed().as_secs_f64() * 1000.0;
+                        black_box(&out);
+                        println!("sparse,{depth:?}-{default},{trial},{name},{elapsed:.6}");
+                    }
+                }
+            }
+        }
+    }
+    /// Previous allocating read path, retained as the bitwise-equivalence oracle.
+    fn previous_read_region(surface: &Surface, r: Rect) -> Vec<f32> {
+        let n = surface.channels();
+        let w = r.width() as usize;
+        let mut out = vec![0.0f32; w * r.height() as usize * n];
+        let dp = surface.default_pixel();
+        for tc in r.tiles() {
+            let tr = tc.rect().intersect(&r);
+            let tile = surface.tiles.get(&tc);
+            for y in tr.y0..tr.y1 {
+                for x in tr.x0..tr.x1 {
+                    let o = (((y - r.y0) as usize) * w + (x - r.x0) as usize) * n;
+                    match tile {
+                        Some(t) => {
+                            let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (x - tc.tx * TILE_SIZE) as usize) * n;
+                            for i in 0..n {
+                                out[o + i] = read_sample(&t.data, surface.format.sample, base + i);
+                            }
+                        }
+                        None => out[o..o + n].copy_from_slice(&dp),
+                    }
+                }
+            }
+        }
+        out
+    }
     /// Distinct tile allocations in `s`.
     fn distinct_tiles(s: &Surface) -> usize {
         let mut seen: Vec<*const Tile> = s.tiles().map(|(_, t)| Arc::as_ptr(t)).collect();
@@ -1259,29 +1317,50 @@ mod tests {
         }
     }
 
+    /// Compare sparse reads and converted accessors with the previous allocating path.
     #[test]
     fn zero_alloc_accessors_match_read_region() {
-        for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F, PixelFormat::GRAYA8, PixelFormat::CMYKA8, PixelFormat::GRAY8] {
-            let mut s = Surface::with_default(fmt, &vec![0.25; fmt.channels()]);
+        for (fmt, default) in [
+            PixelFormat::RGBA8,
+            PixelFormat::RGBA16,
+            PixelFormat::RGBA32F,
+            PixelFormat::GRAYA8,
+            PixelFormat::CMYKA8,
+            PixelFormat::GRAY8,
+            PixelFormat::GRAY8.with_sample(SampleType::F32),
+            PixelFormat::new(ColorMode::Lab, SampleType::U16, true),
+        ]
+        .into_iter()
+        .flat_map(|fmt| [0.0, 0.25, -0.0].map(|default| (fmt, default)))
+        {
+            let mut s = Surface::with_default(fmt, &vec![default; fmt.channels()]);
             let r = Rect::new(-300, -20, 300, 40);
             for (i, (x, y)) in [(-299, -19), (0, 0), (255, 39), (256, 10), (299, 0)].into_iter().enumerate() {
                 let px: Vec<f32> = (0..fmt.channels()).map(|c| ((i * 3 + c) % 5) as f32 / 4.0).collect();
                 s.write_pixel(x, y, &px);
             }
             let region = s.read_region(r);
+            assert!(region.iter().map(|v| v.to_bits()).eq(previous_read_region(&s, r).into_iter().map(f32::to_bits)));
             let mut into = vec![9.0; 3];
             s.read_region_into(r, &mut into);
             assert_eq!(region, into);
             let mut rgba = vec![[0.0; 4]; (r.width() * r.height()) as usize];
             s.read_rgba_into(r, &mut rgba);
+            let mut rgba8 = vec![[0; 4]; rgba.len()];
+            s.read_rgba8_into(r, &mut rgba8);
             let n = fmt.channels();
             for (i, p) in region.chunks_exact(n).enumerate() {
                 let want = to_rgba(&fmt, p);
+                assert_eq!(rgba8[i], want.map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8));
                 for c in 0..4 {
                     assert!((rgba[i][c] - want[c]).abs() < 1e-6, "{fmt:?} px {i}");
                 }
                 let (x, y) = (r.x0 + (i % r.width() as usize) as i32, r.y0 + (i / r.width() as usize) as i32);
-                assert_eq!(s.sample_channel(x, y, 0), p[0]);
+                for c in 0..n {
+                    let bits = s.sample_channel(x, y, c).to_bits();
+                    assert_eq!(bits, p[c].to_bits());
+                    assert_eq!(bits, into[i * n + c].to_bits());
+                }
             }
             assert!(s.has_tiles_in(Rect::new(0, 0, 1, 1)));
             assert!(!s.has_tiles_in(Rect::new(1000, 1000, 1001, 1001)));
