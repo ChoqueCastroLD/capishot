@@ -2119,8 +2119,61 @@ fn font_metadata_append_reorder_and_duplicate_indices() {
     assert_eq!(fonts[3], crate::psd::font_entry("New"));
     let reordered = crate::psd::font_set(&["B".into(), "A".into()], Some(&original));
     assert_eq!(reordered, E::Array(vec![entries[2].clone(), entries[1].clone()]));
+    // A non-positional duplicate uses the first matching record, not the last map insertion.
+    let fallback = crate::psd::font_set(&["New".into(), "B".into(), "A".into()], Some(&original));
+    assert_eq!(fallback, E::Array(vec![crate::psd::font_entry("New"), entries[2].clone(), entries[0].clone()]));
+    let empty = record("", 9);
+    assert_eq!(crate::psd::font_set(&["".into()], Some(&E::Array(vec![E::Int(0), empty.clone()]))), E::Array(vec![empty]));
     for malformed in [None, Some(&E::Int(0))] {
         assert_eq!(crate::psd::font_set(&["New".into()], malformed), E::Array(vec![crate::psd::font_entry("New")]));
+    }
+}
+
+#[test]
+fn font_metadata_large_nameless_lists_rebuild_after_edit() {
+    use crate::engine_data::Value as E;
+    let mut layer = point("Original", 24.0);
+    let mut template = crate::psd::build_engine_data(&layer, None, 72.0);
+    for key in ["ResourceDict", "DocumentResources"] {
+        template.get_mut(key).unwrap().set("FontSet", E::Array(vec![E::Int(0); 10_000]));
+    }
+    layer.text = "Edited".into();
+    let rebuilt = crate::psd::build_engine_data(&layer, Some(template), 72.0);
+    for key in ["ResourceDict", "DocumentResources"] {
+        let fonts = rebuilt.path(&[key, "FontSet"]).unwrap().as_array().unwrap();
+        assert!(fonts.len() >= 10_000);
+        assert!(fonts[..10_000].iter().all(|font| *font == crate::psd::font_entry("")));
+    }
+}
+
+/// Same-runner release probe: compare the original and repaired source, not a wall-clock CI limit.
+#[test]
+#[ignore = "release performance measurement for large imported FontSets"]
+fn font_metadata_large_lists_timing() {
+    use crate::engine_data::Value as E;
+    for reordered in [false, true] {
+        let mut layer = point("Original", 24.0);
+        let mut template = crate::psd::build_engine_data(&layer, None, 72.0);
+        let n = 100_000;
+        for key in ["ResourceDict", "DocumentResources"] {
+            let entries = if reordered {
+                (0..n).map(|i| crate::psd::font_entry(&format!("Font{}", if key == "DocumentResources" { n - 1 - i } else { i }))).collect()
+            } else {
+                vec![E::Int(0); n]
+            };
+            template.get_mut(key).unwrap().set("FontSet", E::Array(entries));
+        }
+        layer.text = "Edited".into();
+        let mut times = Vec::new();
+        for _ in 0..3 {
+            let input = template.clone();
+            let start = std::time::Instant::now();
+            let result = crate::psd::build_engine_data(&layer, Some(input), 72.0);
+            std::hint::black_box(&result);
+            times.push(start.elapsed().as_secs_f64());
+        }
+        times.sort_by(f64::total_cmp);
+        println!("FONT_LOOKUP reordered={reordered} n={n} median_seconds={}", times[1]);
     }
 }
 

@@ -905,13 +905,21 @@ pub(crate) fn font_entry(name: &str) -> E {
 /// the normal defaults; same-name duplicates retain their own positional records.
 pub(crate) fn font_set(names: &[String], original: Option<&E>) -> E {
     let entries = original.and_then(E::as_array).unwrap_or_default();
+    // Resolve fallback names once, retaining the first match just as the original scan did.
+    // Missing names and reordered resource dictionaries must not rescan all entries per font.
+    let mut first_by_name = std::collections::HashMap::new();
+    for entry in entries {
+        if let Some(name) = entry.get("Name").and_then(E::as_str) {
+            first_by_name.entry(name).or_insert(entry);
+        }
+    }
     E::Array(
         names
             .iter()
             .enumerate()
             .map(|(i, name)| {
                 let matches = |entry: &&E| entry.get("Name").and_then(E::as_str) == Some(name.as_str());
-                entries.get(i).filter(matches).or_else(|| entries.iter().find(matches)).cloned().unwrap_or_else(|| font_entry(name))
+                entries.get(i).filter(matches).or_else(|| first_by_name.get(name.as_str()).copied()).cloned().unwrap_or_else(|| font_entry(name))
             })
             .collect(),
     )
