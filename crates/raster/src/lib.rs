@@ -239,6 +239,7 @@ impl Surface {
         decode_pixel(&self.format, &self.default_pixel)
     }
 
+    /// Decode the default pixel into fixed storage without allocating.
     fn default_samples(&self) -> [f32; 8] {
         let mut px = [0.0; 8];
         for (i, v) in px.iter_mut().enumerate().take(self.channels()) {
@@ -422,6 +423,7 @@ impl Surface {
         self.read_samples_into(r, out);
     }
 
+    /// Copy samples into a zero-initialized buffer sized for `r`.
     fn read_samples_into(&self, r: Rect, out: &mut [f32]) {
         let n = self.channels();
         let w = r.width() as usize;
@@ -1105,6 +1107,7 @@ pub fn is_hdr(sample: SampleType) -> bool {
 #[cfg(test)]
 mod tests {
 
+    /// Manually compare allocating reads with the previous implementation.
     #[test]
     #[ignore = "manual 24 MP release benchmark"]
     fn benchmark_sparse_reads() {
@@ -1131,6 +1134,7 @@ mod tests {
             }
         }
     }
+    /// Previous allocating read path, retained as the bitwise-equivalence oracle.
     fn previous_read_region(surface: &Surface, r: Rect) -> Vec<f32> {
         let n = surface.channels();
         let w = r.width() as usize;
@@ -1289,6 +1293,7 @@ mod tests {
         }
     }
 
+    /// Compare sparse reads and converted accessors with the previous allocating path.
     #[test]
     fn zero_alloc_accessors_match_read_region() {
         for (fmt, default) in [
