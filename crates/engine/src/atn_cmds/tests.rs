@@ -1239,6 +1239,23 @@ fn add_noise_with_mask_target_is_not_exported_as_pixel_filter() {
     }
 }
 
+/// A Play Action that starts the called action at a later step must not export as a call of the
+/// whole action: that would replay the steps the recording deliberately skipped.
+#[test]
+fn partial_play_action_is_not_exported_as_whole_action_call() {
+    let partial = Action { name: "Parent".into(), steps: vec![("actions.play".into(), json!({"action": "Child", "from": 1}))], ..Default::default() };
+    assert!(export("Set", &[&partial], &[], false).is_err());
+    let (_, skipped) = export("Set", &[&partial], &[], true).unwrap();
+    assert_eq!(skipped, vec![Skipped { action: "Parent".into(), step: 0, id: "actions.play".into() }]);
+    for params in [json!({"action": "Child"}), json!({"action": "Child", "from": 0})] {
+        let whole = Action { name: "Parent".into(), steps: vec![("actions.play".into(), params)], ..Default::default() };
+        let (bytes, skipped) = export("Set", &[&whole], &[], false).unwrap();
+        assert!(skipped.is_empty());
+        let imported = import(&bytes).unwrap();
+        assert_eq!(imported.actions[0].steps, vec![("actions.play".to_string(), json!({"action": "Child"}))]);
+    }
+}
+
 /// #7646: an action's function key keeps Photoshop's Shift and Command options through
 /// `.atn` load and save, as `Shift+F5`, `Cmd+F5` and `Cmd+Shift+F5` shortcuts.
 #[test]

@@ -1984,6 +1984,10 @@ fn play_from(d: &Descriptor) -> Mapped {
 
 fn play_to(_: &str, p: &Value) -> Option<Descriptor> {
     let name = jstr(p, "action")?;
+    // The Play Action descriptor written here carries no starting step, so a call from a later step is not a whole call.
+    if p.get("from").is_some_and(|v| !v.is_null() && v.as_f64() != Some(0.0)) {
+        return None;
+    }
     let mut items = vec![ReferenceItem::Name { class: class("Actn"), name: UnicodeString::new_nul(name) }];
     if let Some(set) = jstr(p, "set") {
         items.push(ReferenceItem::Name { class: class("ASet"), name: UnicodeString::new_nul(set) });
