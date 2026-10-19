@@ -1579,6 +1579,14 @@ mod multi_layer_formatting {
     }
 
     #[test]
+    fn hyphenate_is_not_shown_while_layout_does_not_hyphenate() {
+        // #6710: layout never hyphenates; the control must stay hidden until it does.
+        let (app, _) = fixture();
+        let h = controls(app, true);
+        assert!(h.query_by_label("Hyphenate").is_none());
+    }
+
+    #[test]
     fn properties_edit_shown_metrics_and_paragraphs_with_a_non_type_primary() {
         let (mut app, ids) = fixture();
         let untouched = style(&app, ids[2], 0);
@@ -1595,8 +1603,6 @@ mod multi_layer_formatting {
         h.run();
         h.get_by_label("Center text").click();
         h.run();
-        h.get_by_label("Hyphenate").click();
-        h.run();
         number(&mut h, "Indent left margin", "9");
         for (id, scale) in [(ids[0], 2.0), (ids[1], 4.0)] {
             let c = style(h.state(), id, 0);
@@ -1605,7 +1611,6 @@ mod multi_layer_formatting {
             assert!(c.faux_bold);
             let p = text(h.state(), id).paragraph_runs()[0].style.clone();
             assert_eq!(p.align, TextAlign::Center);
-            assert!(p.hyphenate);
             assert_eq!(p.start_indent_pt, 9.0);
         }
         assert_eq!(style(h.state(), ids[2], 0), untouched);
