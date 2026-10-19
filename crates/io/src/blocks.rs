@@ -446,12 +446,17 @@ pub fn fill_from_desc(key: &[u8; 4], d: &Descriptor) -> Option<Fill> {
                 opacity_stops.clear();
             }
             if stops.is_empty() {
-                if let Some(grad) = gradient.filter(|g| enum_of(g, "GrdF") == Some(b"ClNs")) {
-                    let color = constant_rgb_noise_color(grad)?;
-                    stops = vec![(0.0, color), (1.0, color)];
-                } else {
-                    stops = vec![(0.0, Color::BLACK), (1.0, Color::WHITE)];
-                }
+                // A provably constant-RGB noise gradient renders one exact colour. Any other
+                // noise gradient (variable ranges, transparency, other models) has no stops to
+                // read: keep the placeholder ramp rather than failing the whole fill — the
+                // layer stays a fill layer, Photoshop's own pixels ride along as `fill_cache`,
+                // and the raw `GdFl` block survives the round trip byte for byte. Failing
+                // here would import the layer as pixels and drop `GdFl` on save (#6272).
+                stops = gradient
+                    .filter(|g| enum_of(g, "GrdF") == Some(b"ClNs"))
+                    .and_then(constant_rgb_noise_color)
+                    .map(|color| vec![(0.0, color), (1.0, color)])
+                    .unwrap_or_else(|| vec![(0.0, Color::BLACK), (1.0, Color::WHITE)]);
             }
             let pct = |o: &Descriptor, k: &str| num(o.get(k)).map_or(0.0, |v| v as f32 / 100.0);
             let offset = get_desc(d, "Ofst").map_or((0.0, 0.0), |o| (pct(o, "Hrzn"), pct(o, "Vrtc")));
@@ -811,9 +816,15 @@ mod tests {
     }
 
     #[test]
-    fn variable_or_transparent_noise_fill_is_not_fabricated_as_a_black_to_white_ramp() {
+    fn variable_or_transparent_noise_stays_a_fill_with_the_placeholder_ramp() {
+        use photocraft_doc::Fill;
+        // Photoshop's default Noise gradient (min 0, max 100) and a transparent variant: no
+        // exact colour is provable, but the fill must parse — the layer keeps its type, its
+        // stored pixels (`fill_cache`) and its raw `GdFl` block. Only the uncached preview
+        // shows the placeholder ramp.
         for descriptor in [noise_gradient_fill([0, 0, 0, 0], [100, 100, 100, 100], false), noise_gradient_fill([50, 25, 0, 0], [50, 25, 0, 100], true)] {
-            assert!(fill_from_desc(b"GdFl", &descriptor).is_none());
+            let Some(Fill::Gradient { stops, .. }) = fill_from_desc(b"GdFl", &descriptor) else { panic!("variable noise gradient must stay a fill layer") };
+            assert_eq!(stops, vec![(0.0, Color::BLACK), (1.0, Color::WHITE)]);
         }
     }
 
