@@ -772,6 +772,34 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
     app.ui.open_dialog(DialogKind::Command, f)
 }
 
+/// Whether the driver's paper, as `driver_page` took it, is wider than tall: the Orientation
+/// buttons show landscape then.
+fn driver_paper_is_wide(f: &Map<String, Value>) -> bool {
+    let side = |i: usize| f.get("paper").and_then(Value::as_array).and_then(|a| a.get(i)).and_then(Value::as_f64);
+    matches!((side(0), side(1)), (Some(w), Some(h)) if w > h)
+}
+
+/// The Orientation buttons: the driver settings (or the printer's own) turned portrait or
+/// landscape through `file.print.page`, then the paper taken from the driver again. An error stays
+/// on the dialog, with the settings left as they were.
+fn turn_driver(app: &mut PhotocraftApp, f: &mut Map<String, Value>, landscape: bool) {
+    let mut q = json!({"printer": s(f, "printer", ""), "orientation": if landscape { "landscape" } else { "portrait" }});
+    if let (Some(h), Some(o)) = (f.get("printerSettings").cloned(), q.as_object_mut()) {
+        o.insert("printerSettings".into(), h);
+    }
+    match app.session.execute("file.print.page", q) {
+        Ok(r) => {
+            if let Some(h) = r.get("printerSettings").cloned() {
+                f.insert("printerSettings".into(), h);
+                driver_page(f);
+            }
+        }
+        Err(e) => {
+            f.insert("__pageError".into(), json!(e.to_string()));
+        }
+    }
+}
+
 /// Takes the paper from the printer's driver settings (Windows), as Photoshop does.
 fn driver_page(f: &mut Map<String, Value>) {
     let printer = s(f, "printer", "");
@@ -1003,6 +1031,17 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                             Err(e) => {
                                 f.insert("__pageError".into(), json!(e.to_string()));
                             }
+                        }
+                    }
+                });
+                // Photoshop's Layout: Portrait / Landscape turn the driver settings, so the paper
+                // and the preview turn with them without opening Print Settings….
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Orientation")).color(t.text_dim));
+                    let wide = driver_paper_is_wide(f);
+                    for (landscape, label) in [(false, "Portrait"), (true, "Landscape")] {
+                        if crate::widgets::pill_tab(ui, label, wide == landscape).clicked() && wide != landscape {
+                            turn_driver(app, f, landscape);
                         }
                     }
                 });
@@ -1529,6 +1568,32 @@ mod tests {
             assert!(app.ui.dialog_mut(id).unwrap().fields.get("send").is_none());
             std::fs::remove_file(out).unwrap();
         }
+    }
+
+    /// The Orientation buttons show the driver paper's shape: landscape when it is wider than tall.
+    #[test]
+    fn orientation_follows_the_driver_paper() {
+        let with = |paper: Value| {
+            let mut f = Map::new();
+            f.insert("paper".into(), paper);
+            f
+        };
+        assert!(driver_paper_is_wide(&with(json!([1191.14, 842.29]))));
+        assert!(!driver_paper_is_wide(&with(json!([842.29, 1191.14]))));
+        assert!(!driver_paper_is_wide(&with(json!("a3"))), "a named paper is not a driver page");
+        assert!(!driver_paper_is_wide(&Map::new()));
+    }
+
+    /// Turning a printer whose driver can't be asked keeps its settings and says why on the dialog.
+    #[test]
+    fn turning_without_a_driver_keeps_the_settings_and_shows_the_error() {
+        let (mut app, _) = app();
+        let mut f = Map::new();
+        f.insert("printer".into(), json!("photocraft-no-such-printer"));
+        f.insert("printerSettings".into(), json!("00ff"));
+        turn_driver(&mut app, &mut f, true);
+        assert_eq!(f.get("printerSettings"), Some(&json!("00ff")));
+        assert!(f.get("__pageError").is_some());
     }
 }
 
