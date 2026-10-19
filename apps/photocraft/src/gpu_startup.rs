@@ -292,6 +292,13 @@ pub fn applicable_adapter(wanted: Option<String>, backend: GpuBackend, linux: bo
     wanted.filter(|_| linux && backend != GpuBackend::Cpu)
 }
 
+/// Whether `PHOTOCRAFT_GPU_ADAPTER` makes this launch its own process: only when startup will act
+/// on it (a non-empty value, on Linux, outside CPU mode). Otherwise it changes nothing, and the
+/// launch may still be forwarded to the running window.
+pub fn adapter_override_is_process_specific(env: Option<&str>, mode: RenderingMode, linux: bool) -> bool {
+    env.is_some_and(|v| !v.trim().is_empty()) && linux && mode != RenderingMode::Cpu
+}
+
 /// The adapter to ask for: `PHOTOCRAFT_GPU_ADAPTER` when set (for one launch), else
 /// `performance.gpuAdapter`; `None` is automatic.
 pub fn wanted_adapter(env: Option<&str>, pref: &str) -> Option<String> {
@@ -686,6 +693,17 @@ mod tests {
         assert_eq!(applicable_adapter(w(), Cpu, true), None);
         assert_eq!(applicable_adapter(w(), Auto, false), None, "Windows and macOS keep their own selection");
         assert_eq!(applicable_adapter(None, Auto, true), None);
+    }
+
+    #[test]
+    fn an_adapter_override_keeps_its_own_process_only_when_it_applies() {
+        let on = |env, mode, linux| adapter_override_is_process_specific(env, mode, linux);
+        assert!(on(Some("nvidia"), RenderingMode::Auto, true));
+        assert!(on(Some("nvidia"), RenderingMode::Gpu, true));
+        assert!(!on(Some("nvidia"), RenderingMode::Cpu, true), "ignored in CPU mode");
+        assert!(!on(Some("nvidia"), RenderingMode::Auto, false), "ignored off Linux");
+        assert!(!on(Some("  "), RenderingMode::Auto, true));
+        assert!(!on(None, RenderingMode::Auto, true));
     }
 
     #[test]

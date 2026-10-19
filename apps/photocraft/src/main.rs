@@ -517,7 +517,8 @@ fn main() -> eframe::Result {
     }
 
     // An adapter named in the environment is chosen at startup, which a forwarded launch never reaches.
-    if gpu_startup::ADAPTER_CHOICE && std::env::var("PHOTOCRAFT_GPU_ADAPTER").is_ok_and(|v| !v.trim().is_empty()) {
+    let rendering_mode = gpu_startup::read_rendering_prefs(services::prefs_file().as_deref()).1;
+    if gpu_startup::adapter_override_is_process_specific(std::env::var("PHOTOCRAFT_GPU_ADAPTER").ok().as_deref(), rendering_mode, gpu_startup::ADAPTER_CHOICE) {
         launch_options.push("PHOTOCRAFT_GPU_ADAPTER");
     }
     // One PhotoCraft per user (#3708): files opened from Explorer or a file manager while it runs
@@ -783,7 +784,13 @@ fn main() -> eframe::Result {
                 app.perf.gpu_info.set_available(&rs.available_adapters);
                 let software_window = rs.adapter.get_info().device_type == eframe::wgpu::DeviceType::Cpu;
                 if software_window && mode != photocraft_engine::prefs::RenderingMode::Cpu {
-                    app.perf.gpu_info.fallback = Some("No compatible hardware graphics adapter; using software graphics.".into());
+                    // Keep an earlier note, such as a requested adapter that couldn't be used.
+                    let software = "No compatible hardware graphics adapter; using software graphics.";
+                    let fallback = &mut app.perf.gpu_info.fallback;
+                    *fallback = Some(match fallback.take() {
+                        Some(earlier) => format!("{earlier}. {software}"),
+                        None => software.into(),
+                    });
                 }
                 if !software_window
                     && plan.backend != photocraft_engine::prefs::GpuBackend::Cpu
