@@ -1566,7 +1566,7 @@ fn field_visible(section: &str, obj: &Map<String, Value>, k: &str, query: &str) 
     let drawn_elsewhere = (section == "interface" && matches!(k, "theme" | "appearanceMode" | "darkTheme" | "lightTheme" | "favoriteThemes"))
         // View › Rulers (⌘R) sets it, as in Photoshop.
         || path == "unitsAndRulers.showRulers"
-        || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "renderingMode"))
+        || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "renderingMode" | "memoryUsageMb"))
         // The browser presents frames itself: Low-Latency Drawing does nothing there.
         || (cfg!(target_arch = "wasm32") && path == "performance.lowLatencyDrawing")
         || (section == "export" && !export_field_visible(obj, k))
@@ -1598,8 +1598,35 @@ fn section_fields(
     if section == "performance" && (query.is_empty() || preference_matches(section, "renderingMode", &query)) {
         rendering_mode_row(ui, obj);
     }
+    if section == "performance" && (query.is_empty() || preference_matches(section, "memoryUsageMb", &query)) {
+        memory_usage_row(ui, obj);
+    }
     keys.retain(|k| field_visible(section, obj, k, &query));
     egui::Grid::new(("prefs-grid", section)).num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| field_rows(ui, section, obj, keys, lang));
+}
+
+/// Explain the per-document RAM limit separately from the graphics-memory preference.
+fn memory_usage_row(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
+    let t = Tokens::get(ui.ctx());
+    ui.group(|ui| {
+        ui.label(RichText::new(tl!("Memory Usage")).strong());
+        let mut mb = obj.get("memoryUsageMb").and_then(Value::as_u64).unwrap_or(8192);
+        ui.horizontal(|ui| {
+            ui.label(tl!("Per-document RAM limit (MB)"));
+            if ui.add(egui::DragValue::new(&mut mb).range(256..=1_048_576).suffix(" MB")).changed() {
+                obj.insert("memoryUsageMb".into(), json!(mb));
+            }
+        });
+        if let Some(ram) = crate::gpu_canvas::physical_memory().filter(|n| *n > 0) {
+            let installed = ram / (1 << 20);
+            let percent = mb as f64 * 100.0 / (ram as f64 / (1 << 20) as f64);
+            ui.label(crate::i18n::fmt(tl!("Installed RAM: {ram} MB; this limit: {percent}%"), &[("ram", &installed.to_string()), ("percent", &format!("{percent:.1}"))]));
+        }
+        ui.label(RichText::new(tl!("Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.")).color(t.text_dim));
+        ui.label(RichText::new(tl!("Applies immediately when saved. Memory is not reserved in advance.")).color(t.text_dim));
+        ui.label(RichText::new(tl!("With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.")).color(t.text_dim));
+    });
+    ui.add_space(8.0);
 }
 
 /// One grid row per setting in `keys` (already filtered by `field_visible`).
@@ -2486,6 +2513,22 @@ mod shortcut_set_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn memory_usage_has_a_dedicated_explanation_and_keeps_its_value() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let values = json!({"memoryUsageMb":50000}).as_object().unwrap().clone();
+        assert!(!field_visible("performance", &values, "memoryUsageMb", ""));
+        let mut h = Harness::builder()
+            .with_size(vec2(680.0, 350.0))
+            .build_ui_state(|ui, values| section_fields(ui, "performance", values, &["memoryUsageMb".into()], crate::i18n::Lang::EN, None, ""), values);
+        h.run_steps(2);
+        h.get_by_label("Memory Usage");
+        h.get_by_label("Per-document RAM limit (MB)");
+        h.get_by_label("Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.");
+        h.get_by_label("Applies immediately when saved. Memory is not reserved in advance.");
+        assert_eq!(h.state()["memoryUsageMb"], 50000);
+    }
+
     #[test]
     fn colour_preferences_take_a_typed_hex_value() {
         // #668: the canvas colour (and every colour preference) showed its hex but couldn't take one.

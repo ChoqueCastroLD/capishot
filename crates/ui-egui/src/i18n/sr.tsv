@@ -4304,6 +4304,12 @@ shape	Appearance	Izgled
 	Increase Brush Size	Povećaj veličinu četkice
 	Decrease Brush Hardness	Smanji tvrdoću četkice
 	Increase Brush Hardness	Povećaj tvrdoću četkice
+	Memory Usage	Upotreba memorije
+	Per-document RAM limit (MB)	RAM limit po dokumentu (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	Instalisan RAM: {ram} MB; ovaj limit: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Ograničava piksele plus Istoriju svakog otvorenog dokumenta. Najstarija stanja opoziva se odbacuju kad se prekorači limit.
+	Applies immediately when saved. Memory is not reserved in advance.	Važi odmah po čuvanju. Memorija se unapred ne rezerviše.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Kad je GPU memorija Automatski, ograničava i GPU budžet. Plafon je četvrtina RAM-a i, ako je poznato, tri osmine memorije kartice, najmanje 512 MB. Veći limit ne povećava GPU budžet.
 	Use	Koristi
 	In Front	Ispred
 	Behind	Iza

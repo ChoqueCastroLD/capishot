@@ -4150,6 +4150,12 @@ cameraRaw	Yellow	Sárga
 	Increase Brush Size	Ecsetméret növelése
 	Decrease Brush Hardness	Ecsetkeménység csökkentése
 	Increase Brush Hardness	Ecsetkeménység növelése
+	Memory Usage	Memóriahasználat
+	Per-document RAM limit (MB)	Dokumentumonkénti RAM-korlát (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	Telepített RAM: {ram} MB; ez a korlát: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Minden nyitott dokumentum pixeljeit és előzményeit korlátozza. A legrégebbi visszavonási állapotok törlődnek a korlát túllépésekor.
+	Applies immediately when saved. Memory is not reserved in advance.	Mentéskor azonnal érvényes. A memória nincs előre lefoglalva.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Automatikus GPU-memóriánál a GPU-rétegkeretet is korlátozza. Felső határ a RAM negyede és, ha ismert, a kártyamemória háromnyolcada, minimum 512 MB. Magasabb korlát a GPU-keretet nem növeli.
 	Use	Használat
 	In Front	Elöl
 	Behind	Mögött
