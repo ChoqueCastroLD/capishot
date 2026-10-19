@@ -510,6 +510,16 @@ fn gpu_adapter_round_trips_and_defaults_to_automatic() {
 }
 
 #[test]
+fn gpu_adapter_names_match_by_word_ignoring_case() {
+    let arc = "Intel(R) Arc(tm) A370M Graphics (DG2)";
+    assert!(gpu_adapter_matches("NVIDIA GeForce RTX 5060 Ti", "nvidia"));
+    assert!(gpu_adapter_matches(arc, " ARC A370M "));
+    assert!(!gpu_adapter_matches(arc, "arc a380"));
+    assert!(!gpu_adapter_matches(arc, ""));
+    assert!(!gpu_adapter_matches(arc, "   "));
+}
+
+#[test]
 fn gpu_backend_round_trips_and_validates() {
     let mut s = session();
     assert_eq!(s.prefs().performance.gpu_backend, GpuBackend::Auto);

@@ -496,7 +496,7 @@ fn main() -> eframe::Result {
         unreadable_paths,
         safe_gpu,
         new_instance,
-        launch_options,
+        mut launch_options,
         present_mode_arg,
         frame_latency_arg,
         stroke_trace_arg,
@@ -516,6 +516,10 @@ fn main() -> eframe::Result {
         }
     }
 
+    // An adapter named in the environment is chosen at startup, which a forwarded launch never reaches.
+    if std::env::var("PHOTOCRAFT_GPU_ADAPTER").is_ok_and(|v| !v.trim().is_empty()) {
+        launch_options.push("PHOTOCRAFT_GPU_ADAPTER");
+    }
     // One PhotoCraft per user (#3708): files opened from Explorer or a file manager while it runs
     // become tabs in its window. Only with the per-user settings folder (a portable copy's may be
     // shared between users), and not for automation, `--new-instance` or per-process options.

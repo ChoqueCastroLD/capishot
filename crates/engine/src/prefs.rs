@@ -1067,6 +1067,15 @@ pub fn is_hidden(path: &str) -> bool {
 /// still load, save and round-trip on every platform.
 pub const LINUX_ONLY: &[&str] = &["performance.linuxDisplayServer", "performance.gpuAdapter"];
 
+/// Whether a graphics adapter called `name` is the one `performance.gpuAdapter` (`wanted`) asks
+/// for: every whitespace-separated word of `wanted` appears in the name, ignoring case ("nvidia",
+/// "arc a370m"). An empty `wanted` matches nothing. Startup and Preferences share this.
+pub fn gpu_adapter_matches(name: &str, wanted: &str) -> bool {
+    let name = name.to_lowercase();
+    let mut words = wanted.split_whitespace().peekable();
+    words.peek().is_some() && words.all(|w| name.contains(&w.to_lowercase()))
+}
+
 /// Choices of an enumerated preference (dotted path, e.g. `"cursors.painting"`).
 pub fn choices(path: &str) -> Option<&'static [&'static str]> {
     Some(match path {

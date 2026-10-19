@@ -279,9 +279,7 @@ pub fn pick(adapters: &[Candidate], backend: GpuBackend, os: Os) -> Option<usize
 /// piece of its name ("nvidia"), or several words that each appear in it ("arc a370m" finds
 /// "Intel(R) Arc(tm) A370M Graphics"). An empty `wanted` matches nothing.
 pub fn adapter_matches(name: &str, wanted: &str) -> bool {
-    let name = name.to_lowercase();
-    let mut words = wanted.split_whitespace().peekable();
-    words.peek().is_some() && words.all(|w| name.contains(&w.to_lowercase()))
+    photocraft_engine::prefs::gpu_adapter_matches(name, wanted)
 }
 
 /// The user asked for an adapter and none of `adapters` that can present is it.

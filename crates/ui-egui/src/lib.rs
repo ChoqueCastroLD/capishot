@@ -1013,6 +1013,8 @@ impl PhotocraftApp {
         let tile = self.session.prefs().performance.cache_tile_size;
         // Escaped driver/setup panics must leave the session and CPU canvas alive.
         self.perf.gpu_info.set_adapter(&rs.adapter.get_info());
+        // The browser has no adapter list (egui-wgpu only has it natively).
+        #[cfg(not(target_arch = "wasm32"))]
         self.perf.gpu_info.set_available(&rs.available_adapters);
         let gpu = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gpu_canvas::GpuCanvas::with_tile(&rs, Some(tile)))) {
             Ok(gpu) => gpu,

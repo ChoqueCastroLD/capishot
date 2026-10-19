@@ -1344,8 +1344,11 @@ fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, adapters: Option<&Va
 fn graphics_adapter_row(ui: &mut egui::Ui, adapters: Option<&Value>, obj: &mut Map<String, Value>) {
     let mut current = obj.get("gpuAdapter").and_then(Value::as_str).unwrap_or("").to_string();
     let mut names: Vec<String> = adapters.and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-    let missing = !current.is_empty() && !names.contains(&current);
-    if missing {
+    // A saved name fragment ("nvidia") isn't an adapter's full name but still selects one; only a
+    // value no listed adapter matches is marked.
+    let kept = !current.is_empty() && !names.contains(&current);
+    let missing = kept && !names.iter().any(|n| prefs::gpu_adapter_matches(n, &current));
+    if kept {
         names.push(current.clone());
     }
     let automatic = tl!("Automatic");
