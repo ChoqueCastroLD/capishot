@@ -117,6 +117,16 @@ pub struct Surface {
     tiles: BTreeMap<TileCoord, Arc<Tile>>,
 }
 
+/// Use stack storage when it fits, otherwise reuse a dynamically sized sample buffer.
+fn sample_buffer<'a>(channels: usize, stack: &'a mut [f32], heap: &'a mut Vec<f32>) -> &'a mut [f32] {
+    if let Some(samples) = stack.get_mut(..channels) {
+        samples
+    } else {
+        heap.resize(channels, 0.0);
+        heap
+    }
+}
+
 /// Tiles of one pixel value met while moving a surface ([`Surface::translated`]): each scanned
 /// once, and one tile kept per value so the targets share it.
 #[derive(Default)]
@@ -288,10 +298,10 @@ impl Surface {
         decode_pixel(&self.format, &self.default_pixel)
     }
 
-    /// Decode the default pixel into fixed storage without allocating.
-    fn default_samples(&self) -> [f32; 8] {
-        let mut px = [0.0; 8];
-        for (i, v) in px.iter_mut().enumerate().take(self.channels()) {
+    /// Decode the default pixel, using dynamic storage only when the stack buffer is too small.
+    fn default_samples<'a>(&self, stack: &'a mut [f32], heap: &'a mut Vec<f32>) -> &'a mut [f32] {
+        let px = sample_buffer(self.channels(), stack, heap);
+        for (i, v) in px.iter_mut().enumerate() {
             *v = read_sample(&self.default_pixel, self.format.sample, i);
         }
         px
@@ -476,8 +486,9 @@ impl Surface {
     fn read_samples_into(&self, r: Rect, out: &mut [f32]) {
         let n = self.channels();
         let w = r.width() as usize;
-        let dp = self.default_samples();
-        let dp = &dp[..n];
+        let mut stack = [0.0; 8];
+        let mut heap = Vec::new();
+        let dp = self.default_samples(&mut stack, &mut heap);
         let zero = self.default_pixel.iter().all(|&b| b == 0);
         for tc in r.tiles() {
             let tr = tc.rect().intersect(&r);
@@ -516,7 +527,10 @@ impl Surface {
         debug_assert_eq!(out.len(), w * r.height() as usize);
         let fmt = self.format;
         let n = fmt.channels();
-        let dp = to_rgba(&fmt, &self.default_samples());
+        let mut stack = [0.0; 8];
+        let mut heap = Vec::new();
+        let px = self.default_samples(&mut stack, &mut heap);
+        let dp = to_rgba(&fmt, px);
         for tc in r.tiles() {
             let tr = tc.rect().intersect(&r);
             let tile = self.tiles.get(&tc);
@@ -560,12 +574,11 @@ impl Surface {
                         }
                     }
                     _ => {
-                        let mut px = [0.0f32; 8];
                         for (i, d) in dst.iter_mut().enumerate() {
-                            for (c, v) in px.iter_mut().enumerate().take(n) {
+                            for (c, v) in px.iter_mut().enumerate() {
                                 *v = read_sample(&t.data, fmt.sample, base + i * n + c);
                             }
-                            *d = to_rgba(&fmt, &px[..n]);
+                            *d = to_rgba(&fmt, px);
                         }
                     }
                 }
@@ -581,7 +594,9 @@ impl Surface {
         let fmt = self.format;
         let rgba8 = matches!((fmt.mode, fmt.sample, fmt.alpha), (ColorMode::Rgb, SampleType::U8, true));
         let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-        let dp = to_rgba(&fmt, &self.default_samples());
+        let mut stack = [0.0; 8];
+        let mut heap = Vec::new();
+        let dp = to_rgba(&fmt, self.default_samples(&mut stack, &mut heap));
         let dp8 = [q(dp[0]), q(dp[1]), q(dp[2]), q(dp[3])];
         let mut row = Vec::new();
         for tc in r.tiles() {
@@ -1317,6 +1332,24 @@ mod tests {
         }
     }
 
+    /// Sample counts above the stack capacity use writable storage without truncating channels.
+    #[test]
+    fn sample_buffer_keeps_stack_fast_path_and_supports_dynamic_channels() {
+        for channels in [1, 8, 9, 32] {
+            let mut stack = [0.0; 8];
+            let mut heap = Vec::new();
+            let samples = sample_buffer(channels, &mut stack, &mut heap);
+            assert_eq!(samples.len(), channels);
+            samples.fill(0.25);
+            if channels <= stack.len() {
+                assert!(heap.is_empty());
+                assert_eq!(&stack[..channels], vec![0.25; channels]);
+            } else {
+                assert_eq!(heap, vec![0.25; channels]);
+            }
+        }
+    }
+
     /// Compare sparse reads and converted accessors with the previous allocating path.
     #[test]
     fn zero_alloc_accessors_match_read_region() {
@@ -1334,6 +1367,12 @@ mod tests {
         .flat_map(|fmt| [0.0, 0.25, -0.0].map(|default| (fmt, default)))
         {
             let mut s = Surface::with_default(fmt, &vec![default; fmt.channels()]);
+            let mut stack = [0.0; 8];
+            let mut heap = Vec::new();
+            for capacity in [0, stack.len()] {
+                let decoded = s.default_samples(&mut stack[..capacity], &mut heap);
+                assert!(decoded.iter().map(|v| v.to_bits()).eq(s.default_pixel().into_iter().map(f32::to_bits)));
+            }
             let r = Rect::new(-300, -20, 300, 40);
             for (i, (x, y)) in [(-299, -19), (0, 0), (255, 39), (256, 10), (299, 0)].into_iter().enumerate() {
                 let px: Vec<f32> = (0..fmt.channels()).map(|c| ((i * 3 + c) % 5) as f32 / 4.0).collect();
