@@ -1147,6 +1147,66 @@ fn edited_text_keeps_the_files_txt2_object() {
     }
 }
 
+/// A type layer the file's `Txt2` has no object for (one added before the save, #7698) gets an
+/// object shaped like the file's own, with a view naming its own frame and a frame in `/0 /8 /0`,
+/// instead of a bare stub: Photoshop and Photopea refused the file when the frames ran out.
+#[test]
+fn new_text_layer_gets_a_txt2_object_and_frame() {
+    use crate::engine_data::Value as E;
+    let run = |len: usize| format!("<< /0 << /0 << /0 (\u{fe}\u{ff}) /5 << /7 1.2 >> /6 << /0 0 /1 12.0 >> >> >> /1 {len} >> ");
+    let prev = format!(
+        "\n\n/98 << /0 7 >> /0 << /8 << /0 [ << /0 << /2 << /2 [ 1.0 0.0 0.0 1.0 5.0 6.0 ] >> >> >> ] >> >> /1 << /0 << /0 1 >> /1 [ << /0 << /0 (\u{fe}\u{ff}\0A\0B\0\r\0C\0D\0\r) /5 << /0 [ {}{}] >> /6 << /0 [ {}] >> >> /1 << /0 [ << /0 0 >> ] /1 << /0 [ << /0 << /1 1 >> /1 3 >> << /0 << /1 1 >> /1 3 >> ] >> /2 [ << /99 /PC >> ] >> /21 << /1 [ 1.0 ] >> >> ] /2 << /0 7 >> >>",
+        run(3),
+        run(3),
+        run(6)
+    );
+    // The same block after an earlier save wrote a bare stub for "v1.0" (the file in #7698).
+    let stub = "<< /0 << /0 (\u{fe}\u{ff}\0v\x001\0.\x000\0\r) /6 << /0 [ << /0 << /0 << /0 () /6 << /0 0 /11 1 >> >> >> /1 5 >> ] >> >> >> ";
+    let broken = prev.replace(" >> ] /2 << /0 7 >>", &format!(" >> {stub}] /2 << /0 7 >>"));
+    let broken: Vec<u8> = broken.chars().map(|c| c as u32 as u8).collect();
+    let prev: Vec<u8> = prev.chars().map(|c| c as u32 as u8).collect();
+    let before = crate::psd::parse_txt2(&prev).unwrap();
+    let old = runs_of("AB\nCD", &[(5, CharStyle::default())]);
+    let new = runs_of("v1.0", &[(4, CharStyle::default())]);
+    let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &new)], Some(&prev))).unwrap();
+    let objects = out.path(&["1", "1"]).and_then(E::as_array).unwrap();
+    assert_eq!(objects.len(), 2);
+    let kept = &before.path(&["1", "1"]).and_then(E::as_array).unwrap()[0];
+    assert_eq!(objects[0].get("1"), kept.get("1"), "the file's object keeps its view");
+    assert_eq!(objects[0].path(&["0", "5"]), kept.path(&["0", "5"]), "the file's object keeps its paragraphs");
+    let frames = out.path(&["0", "8", "0"]).and_then(E::as_array).unwrap();
+    assert_eq!(frames.len(), 2, "one frame per object");
+    let object = &objects[1];
+    assert_eq!(object.path(&["0", "0"]).and_then(E::as_str), Some("v1.0\r"));
+    assert_eq!(object.path(&["1", "0"]), Some(&E::Array(vec![E::Dict(vec![("0".into(), E::Int(1))])])), "the view names its own frame");
+    assert!(object.get("21").is_none());
+    let lens =
+        |path: &[&str]| -> Vec<i64> { object.path(path).and_then(E::as_array).unwrap().iter().map(|r| r.get("1").and_then(E::as_i64).unwrap()).collect() };
+    assert_eq!(lens(&["0", "5", "0"]), vec![5]);
+    assert_eq!(lens(&["0", "6", "0"]), vec![5]);
+    assert_eq!(lens(&["1", "1", "0"]), vec![5], "view runs follow the new paragraphs");
+
+    // Re-saving the file with the stub repairs it: the stub is replaced like a missing object.
+    assert_eq!(crate::psd::parse_txt2(&broken).unwrap().path(&["1", "1"]).and_then(E::as_array).unwrap().len(), 2);
+    let repaired = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &new)], Some(&broken))).unwrap();
+    assert_eq!(repaired, out, "a stub from an earlier save is replaced");
+
+    // No object to take the shape from: the fresh object as before, with the frames still padded.
+    let bare = b"\n\n/98 << /0 7 >> /0 << /8 << /0 [ << /0 1 >> ] >> >> /1 << /1 [ << >> ] >> ";
+    let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(1, &new)], Some(bare))).unwrap();
+    assert_eq!(out.path(&["1", "1"]).and_then(E::as_array).unwrap().len(), 2);
+    assert_eq!(out.path(&["0", "8", "0"]).and_then(E::as_array).unwrap().len(), 2);
+
+    // An oversized object is never the template (it would be copied once per new layer).
+    let filler = "0 ".repeat(5000);
+    let big = prev.iter().map(|&b| b as char).collect::<String>().replace("/2 [ << /99 /PC >> ]", &format!("/2 [ << /99 /PC >> ] /9 [ {filler}]"));
+    let big: Vec<u8> = big.chars().map(|c| c as u32 as u8).collect();
+    let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &new)], Some(&big))).unwrap();
+    let object = &out.path(&["1", "1"]).and_then(E::as_array).unwrap()[1];
+    assert!(object.get("1").is_none(), "no copy of an oversized template");
+    assert_eq!(out.path(&["0", "8", "0"]).and_then(E::as_array).unwrap().len(), 2);
+}
+
 /// The file's style runs are only reused when they cover the text: runs of another length (or
 /// hostile lengths) fall back to generated runs, without panicking.
 #[test]

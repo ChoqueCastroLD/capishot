@@ -975,6 +975,11 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
     let prev = previous.and_then(parse_txt2);
     let prev_objects: &[E] = prev.as_ref().and_then(|p| p.path(&["1", "1"]).and_then(E::as_array)).unwrap_or(&[]);
     let mut slots: Vec<E> = prev_objects.to_vec();
+    // Looked up once per save, not per layer: a crafted block with many objects must not cost
+    // a pass over all of them for every type layer.
+    let all_stubs = prev_objects.iter().all(is_stub);
+    // A template is copied once per new layer, so a large one is skipped (the stub is written).
+    let template = prev_objects.iter().rev().find(|o| names_one_frame(o) && fits(o, &mut { TEMPLATE_NODES }) && edited_object(o, "\r").is_some());
     for (index, layer) in objects {
         if !(0..=MAX_TEXT_INDEX).contains(index) {
             continue;
@@ -988,8 +993,15 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
         // run array refitted to the new text. A bare `<< /0 << /0 text /6 runs >> >>` stub in
         // Photoshop's block (no paragraph runs, no view) made Photoshop quit while opening the file.
         let edited = kept.is_none().then(|| prev_objects.get(at).and_then(|o| edited_object(o, &text))).flatten();
-        let reuse = kept.is_some() || edited.is_some();
-        let mut object = kept.cloned().or(edited).unwrap_or_else(E::dict);
+        // A new object (#7698): a layer the file's block has no object for (a type layer added
+        // here) takes the shape of one of the file's own objects, refitted the same way, with its
+        // view naming its own frame. A bare stub beside Photoshop's objects, its slot without a
+        // frame in `/0 /8 /0`, made Photoshop and Photopea refuse the file. A stub an earlier save
+        // wrote is replaced the same way, so re-saving such a file repairs it.
+        let kept = kept.filter(|o| !is_stub(o) || all_stubs);
+        let fresh = (kept.is_none() && edited.is_none()).then(|| template.and_then(|t| new_object(t, at, &text))).flatten();
+        let reuse = kept.is_some() || edited.is_some() || fresh.is_some();
+        let mut object = kept.cloned().or(edited).or(fresh).unwrap_or_else(E::dict);
         let mut model = object.get("0").cloned().filter(|m| matches!(m, E::Dict(_))).unwrap_or_else(E::dict);
         let file_runs = reuse.then(|| model.path(&["6", "0"]).and_then(E::as_array)).flatten().and_then(|runs| with_modes(runs, &modes));
         let runs = file_runs.unwrap_or_else(|| {
@@ -1019,6 +1031,7 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
     // The outer dictionary keeps whatever the block held (`/98` version, block extras, …), and
     // `/1` whatever it holds beside the text objects.
     let mut outer = prev.clone().unwrap_or_else(|| E::Dict(vec![("98".into(), E::Dict(vec![("0".into(), E::Int(14))])), ("0".into(), E::dict())]));
+    pad_frames(&mut outer, slots.len());
     match outer.get_mut("1") {
         Some(objs @ E::Dict(_)) => objs.set("1", E::Array(slots)),
         _ => outer.set("1", E::Dict(vec![("1".into(), E::Array(slots))])),
@@ -1033,6 +1046,66 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
         E::Dict(items) => ed::write_bare(&items),
         // Unreachable: `parse_txt2` and the fallback above both yield a dictionary.
         _ => ed::write_bare(&[]),
+    }
+}
+
+/// The most values a `Txt2` object may hold to serve as the template for new objects. Photoshop's
+/// own objects hold a few hundred (611 at most in the file from #7698).
+const TEMPLATE_NODES: usize = 4096;
+
+/// Whether `v` holds at most `budget` values, counting down `budget` (stops at the first one over).
+fn fits(v: &E, budget: &mut usize) -> bool {
+    let Some(left) = budget.checked_sub(1) else { return false };
+    *budget = left;
+    match v {
+        E::Dict(items) => items.iter().all(|(_, x)| fits(x, budget)),
+        E::Array(items) => items.iter().all(|x| fits(x, budget)),
+        _ => true,
+    }
+}
+
+/// Whether the text object `object` has a view naming one frame (`/1 /0 [ << /0 n >> ]`), as
+/// Photoshop writes it.
+fn names_one_frame(object: &E) -> bool {
+    object.path(&["1", "0"]).and_then(E::as_array).is_some_and(|f| f.len() == 1 && f.first().and_then(|x| x.get("0")).is_some())
+}
+
+/// A text object for the slot `at`, which the file's block has none for: the file's object
+/// `template` refitted to `text` by [`edited_object`], its view now naming frame `at` and its view
+/// runs (`/1 /1 /0`, one per paragraph) remade for the new paragraphs. `None` when the template
+/// can't be refitted.
+fn new_object(template: &E, at: usize, text: &str) -> Option<E> {
+    let paragraphs: Vec<usize> = text.split_inclusive('\r').map(|p| p.encode_utf16().count()).collect();
+    let mut object = edited_object(template, text)?;
+    let view = object.get_mut("1")?;
+    view.set("0", E::Array(vec![E::Dict(vec![("0".into(), E::Int(i64::try_from(at).ok()?))])]));
+    if let Some(runs) = view.path(&["1", "0"]).and_then(E::as_array) {
+        let fitted = runs_per(runs, &paragraphs)?;
+        view.get_mut("1")?.set("0", E::Array(fitted));
+    }
+    Some(object)
+}
+
+/// Whether `object` is the bare `<< /0 << /0 text /6 runs >> >>` object [`build_txt2`] writes
+/// when it has nothing to take a shape from: no view, no paragraph runs.
+fn is_stub(object: &E) -> bool {
+    let only = |v: &E, keys: &[&str]| matches!(v, E::Dict(items) if items.iter().all(|(k, _)| keys.contains(&k.as_str())));
+    only(object, &["0"]) && object.get("0").is_some_and(|m| only(m, &["0", "6"]))
+}
+
+/// Gives the block `outer` a frame (`/0 /8 /0`) for each of its `count` text objects: Photoshop
+/// writes one per object, and a reader indexes them by object number. Missing frames are the
+/// small point-text frame Photoshop writes (`<< /0 << /2 << /6 [ -1.0 -1.0 ] /11 << /4 -1 /7
+/// false >> >> >> >>`), never copies of a file's frame: the slot count reaches
+/// [`MAX_TEXT_INDEX`], and a large frame copied that often would blow up the save. A block
+/// without a frame list is left as it is.
+fn pad_frames(outer: &mut E, count: usize) {
+    let Some(E::Array(frames)) = outer.get_mut("0").and_then(|v| v.get_mut("8")).and_then(|v| v.get_mut("0")) else { return };
+    if frames.len() < count {
+        let kind = E::Dict(vec![("4".into(), E::Int(-1)), ("7".into(), E::Bool(false))]);
+        let data = E::Dict(vec![("6".into(), E::Array(vec![E::Real(-1.0), E::Real(-1.0)])), ("11".into(), kind)]);
+        let frame = E::Dict(vec![("0".into(), E::Dict(vec![("2".into(), data)]))]);
+        frames.resize(count, frame);
     }
 }
 
