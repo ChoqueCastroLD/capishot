@@ -419,6 +419,12 @@ impl Surface {
         let w = r.width() as usize;
         out.clear();
         out.resize(w * r.height() as usize * n, 0.0);
+        self.read_samples_into(r, out);
+    }
+
+    fn read_samples_into(&self, r: Rect, out: &mut [f32]) {
+        let n = self.channels();
+        let w = r.width() as usize;
         let dp = self.default_samples();
         let dp = &dp[..n];
         let zero = self.default_pixel.iter().all(|&b| b == 0);
@@ -431,7 +437,7 @@ impl Surface {
             for y in tr.y0..tr.y1 {
                 let o = (((y - r.y0) as usize) * w + (tr.x0 - r.x0) as usize) * n;
                 let span = tr.width() as usize * n;
-                let dst = &mut out[o..o + span];
+                let Some(dst) = out.get_mut(o..o + span) else { continue };
                 match tile {
                     Some(t) => {
                         let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (tr.x0 - tc.tx * TILE_SIZE) as usize) * n;
@@ -565,31 +571,7 @@ impl Surface {
         let n = self.channels();
         let w = r.width() as usize;
         let mut out = vec![0.0f32; w * r.height() as usize * n];
-        let dp = self.default_samples();
-        let dp = &dp[..n];
-        let zero = self.default_pixel.iter().all(|&b| b == 0);
-        for tc in r.tiles() {
-            let tr = tc.rect().intersect(&r);
-            let tile = self.tiles.get(&tc);
-            if tile.is_none() && zero {
-                continue;
-            }
-            for y in tr.y0..tr.y1 {
-                for x in tr.x0..tr.x1 {
-                    let o = (((y - r.y0) as usize) * w + (x - r.x0) as usize) * n;
-                    match tile {
-                        Some(t) => {
-                            let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (x - tc.tx * TILE_SIZE) as usize) * n;
-                            for i in 0..n {
-                                out[o + i] = read_sample(&t.data, self.format.sample, base + i);
-                            }
-                        }
-                        None if n == 1 => out[o] = dp[0],
-                        None => out[o..o + n].copy_from_slice(dp),
-                    }
-                }
-            }
-        }
+        self.read_samples_into(r, &mut out);
         out
     }
 
