@@ -158,7 +158,6 @@ pub fn zero_sample(s: SampleType) -> Vec<u8> {
 }
 
 /// Quantizes a normalized value to big-endian bytes.
-#[inline]
 pub fn encode_be(v: f32, s: SampleType, out: &mut Vec<u8>) {
     match s {
         SampleType::U8 => out.push((v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8),
