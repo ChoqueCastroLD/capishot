@@ -2135,7 +2135,11 @@ fn rotate_from(d: &Descriptor) -> Mapped {
     } else if targets_layer(d) {
         return Mapped::Unsupported { harmless: false };
     } else {
-        return step("image.rotation.arbitrary", json!({"angle": angle.abs(), "direction": if angle < 0.0 { "ccw" } else { "cw" }}));
+        let mut p = json!({"angle": angle.abs(), "direction": if angle < 0.0 { "ccw" } else { "cw" }});
+        if let Some(i) = get_enum(d, "Intr").and_then(|i| lookup(INTERPOLATION, &i)).filter(|i| matches!(*i, "bicubic" | "bilinear" | "nearest")) {
+            p["interpolation"] = i.into();
+        }
+        return step("image.rotation.arbitrary", p);
     };
     none(if targets_layer(d) { layer } else { doc })
 }
@@ -2155,7 +2159,20 @@ fn rotate_to(id: &str, p: &Value) -> Option<Descriptor> {
     if layer {
         d = d.with("null", target_ref("Lyr "));
     }
-    Some(d.with("Angl", ang(angle)))
+    d = d.with("Angl", ang(angle));
+    if id == "image.rotation.arbitrary"
+        && let Some(i) = p.get("interpolation")
+    {
+        // The command resamples with nearest, bilinear or bicubic; any other value can't be
+        // carried faithfully, so refuse rather than replay with a different interpolation.
+        let i = match i.as_str()? {
+            "nearestNeighbor" => "nearest",
+            i @ ("bicubic" | "bilinear" | "nearest") => i,
+            _ => return None,
+        };
+        d = d.with("Intr", enm("Intp", lookup_back(INTERPOLATION, i)?));
+    }
+    Some(d)
 }
 
 fn flip_from(d: &Descriptor) -> Mapped {

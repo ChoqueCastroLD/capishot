@@ -1199,6 +1199,25 @@ fn fractional_translation_only_transform_keeps_offset_and_interpolation() {
     assert_eq!(steps[0].1.get("interpolation"), Some(&json!("bilinear")));
 }
 
+/// Arbitrary canvas rotation must keep its interpolation through a strict export: dropping it
+/// silently replays the rotation with the default bicubic resampling.
+#[test]
+fn arbitrary_rotation_keeps_interpolation_through_atn() {
+    for params in [
+        json!({"angle": 17, "direction": "ccw", "interpolation": "nearest"}),
+        json!({"angle": 17, "direction": "ccw", "interpolation": "bilinear"}),
+        json!({"angle": 17, "direction": "ccw", "interpolation": "bicubic"}),
+        json!({"angle": 17, "direction": "ccw"}),
+    ] {
+        let a = Action { name: "Rot".into(), steps: vec![("image.rotation.arbitrary".into(), params.clone())], ..Default::default() };
+        let (bytes, skipped) = export("Rot", &[&a], &[], false).unwrap();
+        assert!(skipped.is_empty());
+        let imported = import(&bytes).unwrap();
+        assert!(imported.unsupported.is_empty());
+        assert_eq!(imported.actions[0].steps, vec![("image.rotation.arbitrary".to_string(), params)]);
+    }
+}
+
 /// A filter recorded against a layer mask must not export as a plain filter that edits the
 /// layer's pixels on replay: Photoshop's descriptor has no field for PhotoCraft's `target`.
 #[test]
