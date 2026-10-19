@@ -2365,7 +2365,16 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
         let cw = cell_width(full, items.len());
         // Justification needs a paragraph box: on point text Photoshop greys the four justify
         // buttons (#7713).
-        let point = target(app).is_some_and(|(layer, _)| box_shape(app, LayerId(layer)).is_none());
+        // The panel formats the layer being typed in, else every selected type layer.
+        let point = match formatting_params(app) {
+            Some(p) => p.get("layers").and_then(serde_json::Value::as_array).map_or_else(
+                || p.get("layer").and_then(serde_json::Value::as_u64).into_iter().collect::<Vec<_>>(),
+                |ids| ids.iter().filter_map(serde_json::Value::as_u64).collect(),
+            ),
+            None => Vec::new(),
+        }
+        .into_iter()
+        .any(|layer| box_shape(app, LayerId(layer)).is_none());
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for (key, tip, a) in items {
