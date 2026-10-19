@@ -602,7 +602,14 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
             }
-            let title = app.session.active().map(|d| format!("{}{}", d.doc.name, if d.is_dirty() { "  •" } else { "" })).unwrap_or_else(|| "PhotoCraft".into());
+            // Preferences › Interface › Show File Name In Title: with it off the bar keeps the
+            // app name and the unsaved dot, since the tabs already name the file (#5037).
+            let show_name = app.session.prefs().interface.show_file_name_in_title;
+            let title = app
+                .session
+                .active()
+                .map(|d| format!("{}{}", if show_name { d.doc.name.as_str() } else { "PhotoCraft" }, if d.is_dirty() { "  •" } else { "" }))
+                .unwrap_or_else(|| "PhotoCraft".into());
             // The menus and the far-end controls are laid out first; the title is centred in
             // whatever room is left between them (`free`, left to right: menus then controls, or
             // controls then menus in a right-to-left UI), shortened or dropped rather than drawn
@@ -728,8 +735,12 @@ pub fn system_title_bar(app: &PhotocraftApp) -> bool {
 
 /// The OS window title: the active document's name suffixed with the app name (a `*` prefix
 /// marks unsaved changes, like the `•` in the app-drawn title), or just the app name with no
-/// document open.
+/// document open. With Preferences › Interface › Show File Name In Title off, the file name
+/// drops out and only the app name (and the `*`) remains (#5037).
 pub fn window_title(app: &PhotocraftApp) -> String {
+    if !app.session.prefs().interface.show_file_name_in_title {
+        return format!("{}PhotoCraft", if app.session.active().is_some_and(|d| d.is_dirty()) { "*" } else { "" });
+    }
     app.session.active().map(|d| format!("{}{} \u{2014} PhotoCraft", if d.is_dirty() { "*" } else { "" }, d.doc.name)).unwrap_or_else(|| "PhotoCraft".into())
 }
 
@@ -818,6 +829,40 @@ mod title_tests {
             st.revision += 1;
         }
         assert_eq!(window_title(&app), "*foo.psd \u{2014} PhotoCraft");
+    }
+
+    #[test]
+    fn hiding_the_file_name_keeps_the_app_name_and_the_dirty_mark() {
+        let mut app = app(true);
+        open_named(&mut app, "foo.psd");
+        app.session.prefs.edit(|p| p.interface.show_file_name_in_title = false);
+        assert_eq!(window_title(&app), "PhotoCraft");
+        if let Some(st) = app.session.active_mut() {
+            st.revision += 1;
+        }
+        assert_eq!(window_title(&app), "*PhotoCraft");
+    }
+
+    #[test]
+    fn hidden_file_name_leaves_the_app_name_in_the_drawn_title() {
+        let mut app = app(true);
+        open_named(&mut app, "foo.psd");
+        let texts = |app: &mut crate::PhotocraftApp| {
+            let ctx = egui::Context::default();
+            crate::PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::title_bar(app, ui));
+            out.textures_delta.clear();
+            let mut texts = Vec::new();
+            for shape in &out.shapes {
+                collect_text(&shape.shape, &mut texts);
+            }
+            texts
+        };
+        assert!(texts(&mut app).iter().any(|t| t.contains("foo.psd")), "shown by default");
+        app.session.prefs.edit(|p| p.interface.show_file_name_in_title = false);
+        let hidden = texts(&mut app);
+        assert!(!hidden.iter().any(|t| t.contains("foo.psd")), "file name hidden: {hidden:?}");
+        assert!(hidden.iter().any(|t| t.contains("PhotoCraft")), "app name kept: {hidden:?}");
     }
 
     #[test]
