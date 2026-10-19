@@ -2853,3 +2853,6 @@ curves	Smooth	平滑
 	Increase Brush Size	增大画笔大小
 	Decrease Brush Hardness	减小画笔硬度
 	Increase Brush Hardness	增大画笔硬度
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU 适配器

@@ -3990,3 +3990,6 @@ curves	Smooth	Vloeiend maken
 	Increase Brush Size	Penseelgrootte vergroten
 	Decrease Brush Hardness	Penseelhardheid verlagen
 	Increase Brush Hardness	Penseelhardheid verhogen
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU-adapter

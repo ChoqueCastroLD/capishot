@@ -4303,3 +4303,6 @@ shape	Appearance	Izgled
 	Increase Brush Size	Povećaj veličinu četkice
 	Decrease Brush Hardness	Smanji tvrdoću četkice
 	Increase Brush Hardness	Povećaj tvrdoću četkice
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU adapter

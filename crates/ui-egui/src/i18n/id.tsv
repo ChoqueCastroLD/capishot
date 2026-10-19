@@ -3225,3 +3225,6 @@ curves	Smooth	Haluskan
 	Increase Brush Size	Perbesar ukuran kuas
 	Decrease Brush Hardness	Kurangi kekerasan kuas
 	Increase Brush Hardness	Tambah kekerasan kuas
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Adaptor GPU

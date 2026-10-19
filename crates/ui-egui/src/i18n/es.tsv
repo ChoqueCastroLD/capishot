@@ -4192,3 +4192,6 @@ navigator	Zoom	Zoom
 	Increase Brush Size	Aumentar tamaño del pincel
 	Decrease Brush Hardness	Reducir dureza del pincel
 	Increase Brush Hardness	Aumentar dureza del pincel
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Adaptador de GPU

@@ -3838,3 +3838,6 @@ navigator	Zoom	Zvětšení
 	Increase Brush Size	Zvětšit velikost štětce
 	Decrease Brush Hardness	Snížit tvrdost štětce
 	Increase Brush Hardness	Zvýšit tvrdost štětce
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Adaptér GPU

@@ -3930,3 +3930,6 @@ curves	Smooth	Εξομάλυνση
 	Increase Brush Size	Αύξηση μεγέθους πινέλου
 	Decrease Brush Hardness	Μείωση σκληρότητας πινέλου
 	Increase Brush Hardness	Αύξηση σκληρότητας πινέλου
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Προσαρμογέας GPU

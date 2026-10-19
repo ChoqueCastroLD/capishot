@@ -4149,3 +4149,6 @@ cameraRaw	Yellow	Sárga
 	Increase Brush Size	Ecsetméret növelése
 	Decrease Brush Hardness	Ecsetkeménység csökkentése
 	Increase Brush Hardness	Ecsetkeménység növelése
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU-adapter

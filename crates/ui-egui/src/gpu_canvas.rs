@@ -1058,6 +1058,9 @@ pub struct GpuInfo {
     pub video_memory_mb: Option<u64>,
     /// `performance.gpuBackend` at launch.
     pub preference: String,
+    /// Every graphics adapter the window could have used, by name (Preferences › Performance ›
+    /// Graphics Adapter lists them). Empty in hosts that don't set it.
+    pub adapters: Vec<String>,
     /// The backend startup chose ("auto", "dx12", "cpu", …, or "env" for `WGPU_BACKEND`).
     pub selected: String,
     /// Why startup didn't use the preference as is (previous start crashed, `--safe-gpu`,
@@ -1073,6 +1076,17 @@ pub struct GpuInfo {
 }
 
 impl GpuInfo {
+    /// Record the adapters the instance found, without duplicates (one GPU shows up once per backend).
+    pub fn set_available(&mut self, adapters: &[wgpu::Adapter]) {
+        self.adapters.clear();
+        for a in adapters {
+            let name = a.get_info().name;
+            if !name.is_empty() && !self.adapters.contains(&name) {
+                self.adapters.push(name);
+            }
+        }
+    }
+
     /// Fill the adapter fields from `info`.
     pub fn set_adapter(&mut self, info: &wgpu::AdapterInfo) {
         self.adapter = info.name.clone();
