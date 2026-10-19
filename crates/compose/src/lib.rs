@@ -194,13 +194,16 @@ fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer 
             });
         } else {
             // Few, wide bands: the tiles of each band in parallel, and the bands too, so a band's
-            // slowest tile doesn't leave the other cores idle until the next band starts.
+            // slowest tile doesn't leave the other cores idle until the next band starts. Each
+            // tile is written as soon as it is done, so only the tiles in flight are held.
             out.px.par_chunks_mut(band_len).enumerate().for_each(|(i, band)| {
                 let y0 = rect.y0 + i as i32 * tile;
-                let parts: Vec<Buffer> = band_tiles(y0).into_par_iter().map(run).collect();
-                for part in &parts {
-                    put(band, y0, part);
-                }
+                let band = std::sync::Mutex::new(band);
+                band_tiles(y0).into_par_iter().for_each(|t| {
+                    let part = run(t);
+                    let mut band = band.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    put(&mut band, y0, &part);
+                });
             });
         }
     }
