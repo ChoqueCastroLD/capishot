@@ -1190,6 +1190,12 @@ fn new_text_layer_gets_a_txt2_object_and_frame() {
     assert_eq!(crate::psd::parse_txt2(&broken).unwrap().path(&["1", "1"]).and_then(E::as_array).unwrap().len(), 2);
     let repaired = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &new)], Some(&broken))).unwrap();
     assert_eq!(repaired, out, "a stub from an earlier save is replaced");
+    // Also when the stub's layer is edited before the re-save.
+    let edited = runs_of("v2.0", &[(4, CharStyle::default())]);
+    let repaired = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &edited)], Some(&broken))).unwrap();
+    let object = &repaired.path(&["1", "1"]).and_then(E::as_array).unwrap()[1];
+    assert_eq!(object.path(&["0", "0"]).and_then(E::as_str), Some("v2.0\r"));
+    assert_eq!(object.path(&["1", "0"]), Some(&E::Array(vec![E::Dict(vec![("0".into(), E::Int(1))])])), "an edited stub is replaced too");
 
     // No object to take the shape from: the fresh object as before, with the frames still padded.
     let bare = b"\n\n/98 << /0 7 >> /0 << /8 << /0 [ << /0 1 >> ] >> >> /1 << /1 [ << >> ] >> ";

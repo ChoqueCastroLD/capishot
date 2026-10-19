@@ -987,18 +987,20 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
         let text = format!("{}\r", layer.text.replace('\n', "\r"));
         let modes = txt2_mode_runs(layer);
         let at = *index as usize;
-        let kept = prev_objects.get(at).filter(|o| o.get("0").and_then(|m| m.get("0")).and_then(E::as_str) == Some(text.as_str()));
+        // A stub an earlier save wrote beside Photoshop's objects counts as no object at all, so
+        // it is replaced like a missing one (below) and re-saving such a file repairs it, whether
+        // or not the layer's text changed.
+        let slot = prev_objects.get(at).filter(|o| !is_stub(o) || all_stubs);
+        let kept = slot.filter(|o| o.get("0").and_then(|m| m.get("0")).and_then(E::as_str) == Some(text.as_str()));
         // An edited object (#6968): the file's object at this slot with its text changed. It keeps
         // the file's structure — paragraph runs, the view naming its frame, the rest — with every
         // run array refitted to the new text. A bare `<< /0 << /0 text /6 runs >> >>` stub in
         // Photoshop's block (no paragraph runs, no view) made Photoshop quit while opening the file.
-        let edited = kept.is_none().then(|| prev_objects.get(at).and_then(|o| edited_object(o, &text))).flatten();
+        let edited = kept.is_none().then(|| slot.and_then(|o| edited_object(o, &text))).flatten();
         // A new object (#7698): a layer the file's block has no object for (a type layer added
         // here) takes the shape of one of the file's own objects, refitted the same way, with its
         // view naming its own frame. A bare stub beside Photoshop's objects, its slot without a
-        // frame in `/0 /8 /0`, made Photoshop and Photopea refuse the file. A stub an earlier save
-        // wrote is replaced the same way, so re-saving such a file repairs it.
-        let kept = kept.filter(|o| !is_stub(o) || all_stubs);
+        // frame in `/0 /8 /0`, made Photoshop and Photopea refuse the file.
         let fresh = (kept.is_none() && edited.is_none()).then(|| template.and_then(|t| new_object(t, at, &text))).flatten();
         let reuse = kept.is_some() || edited.is_some() || fresh.is_some();
         let mut object = kept.cloned().or(edited).or(fresh).unwrap_or_else(E::dict);
