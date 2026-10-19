@@ -1219,3 +1219,31 @@ fn add_noise_with_mask_target_is_not_exported_as_pixel_filter() {
         assert_eq!(imported.actions[0].steps, vec![("filter.noise.addNoise".to_string(), json!({"amount": 75, "seed": 123}))]);
     }
 }
+
+/// #7646: an action's function key keeps Photoshop's Shift and Command options through
+/// `.atn` load and save, as `Shift+F5`, `Cmd+F5` and `Cmd+Shift+F5` shortcuts.
+#[test]
+fn function_keys_keep_shift_and_command() {
+    let mut file = sample();
+    file.actions[1].function_key = 5;
+    file.actions[1].shift = true;
+    file.actions[1].command = true;
+    file.actions[0].shift = true;
+    let mut s = Session::new();
+    let r = s.execute("actions.load", json!({"data": b64(&atn::write(&file).unwrap())})).unwrap();
+    assert_eq!(r["functionKeys"], json!([{"action": "Soften", "key": "Shift+F3"}, {"action": "Finish", "key": "Cmd+Shift+F5"}]));
+    let shortcuts = &s.prefs().shortcuts;
+    assert_eq!(shortcuts.get("actions.play:Soften").map(String::as_str), Some("Shift+F3"));
+    assert_eq!(shortcuts.get("actions.play:Finish").map(String::as_str), Some("Cmd+Shift+F5"));
+    let r = s.execute("actions.save", json!({"set": "Test Set"})).unwrap();
+    let saved = atn::parse(&photocraft_paint::tile::b64_decode(r["data"].as_str().unwrap()).unwrap()).unwrap();
+    let keys: Vec<_> = saved.actions.iter().map(|a| (a.function_key, a.shift, a.command)).collect();
+    assert_eq!(keys, [(3, true, false), (5, true, true)]);
+
+    assert_eq!(super::parse_function_key("Cmd+F12"), Some((12, false, true)));
+    assert_eq!(super::parse_function_key("Shift+Cmd+F2"), Some((2, true, true)));
+    for bad in ["F16", "F0", "Alt+F2", "Cmd+Cmd+F2", "Shift+", "Cmd+K", ""] {
+        assert_eq!(super::parse_function_key(bad), None, "{bad}");
+    }
+    assert_eq!(super::function_key_name(7, false, false), "F7");
+}

@@ -3123,8 +3123,8 @@ pub fn import(bytes: &[u8]) -> std::result::Result<Imported, String> {
     let mut out = Imported { set: set.clone(), warnings: file.warnings.clone(), ..Default::default() };
     for a in &file.actions {
         let action = convert_action(a, &set, &mut out.unsupported);
-        if a.function_key > 0 && !a.shift && !a.command {
-            out.function_keys.push((action.name.clone(), format!("F{}", a.function_key)));
+        if a.function_key > 0 {
+            out.function_keys.push((action.name.clone(), function_key_name(a.function_key, a.shift, a.command)));
         }
         out.actions.push(action);
     }
@@ -3163,8 +3163,32 @@ fn export_item(id: &str, params: &Value, set: &str) -> Option<AtnItem> {
     Some(AtnItem { event, dictionary: e.label.to_string(), descriptor: Some(descriptor), ..Default::default() })
 }
 
+/// An action's key as a shortcut string: `F5`, with Photoshop's Shift and Command options
+/// `Shift+F5`, `Cmd+F5` or `Cmd+Shift+F5` (#7646).
+pub fn function_key_name(key: u16, shift: bool, command: bool) -> String {
+    format!("{}{}F{key}", if command { "Cmd+" } else { "" }, if shift { "Shift+" } else { "" })
+}
+
+/// The `.atn` function key (1…15), Shift and Command of a shortcut string, or `None` for
+/// anything else.
+pub fn parse_function_key(key: &str) -> Option<(u16, bool, bool)> {
+    let (mut shift, mut command) = (false, false);
+    let mut rest = key;
+    loop {
+        if let Some(r) = rest.strip_prefix("Cmd+").filter(|_| !command) {
+            (command, rest) = (true, r);
+        } else if let Some(r) = rest.strip_prefix("Shift+").filter(|_| !shift) {
+            (shift, rest) = (true, r);
+        } else {
+            break;
+        }
+    }
+    let n = rest.strip_prefix('F')?.parse::<u16>().ok().filter(|n| (1..=15).contains(n))?;
+    Some((n, shift, command))
+}
+
 /// The `.atn` bytes of `actions` as the set `set`. `function_keys` gives each action's key
-/// (`F1`…`F15`). Steps with no Photoshop equivalent are an error unless `skip_unsupported`.
+/// (`F1`…`F15`, with `Shift+` and `Cmd+` as [`function_key_name`] writes them). Steps with no Photoshop equivalent are an error unless `skip_unsupported`.
 pub fn export(
     set: &str,
     actions: &[&Action],
@@ -3175,11 +3199,8 @@ pub fn export(
     let mut file = AtnFile { name: UnicodeString::new_nul(set), expanded: true, actions: Vec::new(), warnings: Vec::new() };
     for a in actions {
         let mut out = AtnAction { name: UnicodeString::new_nul(&a.name), expanded: false, ..Default::default() };
-        if let Some((_, key)) = function_keys.iter().find(|(n, _)| n == &a.name)
-            && let Some(n) = key.strip_prefix('F').and_then(|n| n.parse::<u16>().ok())
-            && (1..=15).contains(&n)
-        {
-            out.function_key = n;
+        if let Some((n, shift, command)) = function_keys.iter().find(|(n, _)| n == &a.name).and_then(|(_, key)| parse_function_key(key)) {
+            (out.function_key, out.shift, out.command) = (n, shift, command);
         }
         for (i, (id, params)) in a.steps.iter().enumerate() {
             let Some(mut item) = export_item(id, params, set) else {
