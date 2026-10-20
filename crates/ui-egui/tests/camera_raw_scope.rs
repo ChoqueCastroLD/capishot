@@ -51,6 +51,9 @@ fn settle(h: &mut Harness<'_, PhotocraftApp>) {
         std::thread::sleep(std::time::Duration::from_millis(2));
         h.run_steps(1);
     }
+    // A failed worker develop also clears `previewPending`, without a new frame.
+    let app = control::inspect(h.state(), &h.ctx);
+    assert_ne!(app["statusError"], true, "the Camera Raw preview worker failed: {}", app["status"]);
     // The frame that picked up the result also rebuilt the scope; let it go quiet.
     h.run_steps(2);
 }
