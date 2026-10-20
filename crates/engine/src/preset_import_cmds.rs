@@ -28,7 +28,9 @@ fn always(_: &Session) -> std::result::Result<(), String> {
 /// Largest accepted file (Photoshop's biggest bundled sets are well under this).
 pub const MAX_FILE_BYTES: u64 = 512 << 20;
 /// Largest accepted `.abr` file: brush libraries of large sampled tips outgrow [`MAX_FILE_BYTES`].
-pub const MAX_ABR_FILE_BYTES: u64 = 1 << 30;
+/// Tied to the decoder's sample budget (1 GiB, 512 MiB on 32-bit targets) so it never refuses
+/// what this accepts.
+pub const MAX_ABR_FILE_BYTES: u64 = photocraft_psd::abr::MAX_TOTAL_BYTES as u64;
 
 /// File bytes from `data` (base64) or `path`, plus a default group name.
 pub(crate) fn file_bytes(p: &Value, cmd: &str, what: &str) -> Result<(Vec<u8>, String)> {
@@ -597,8 +599,9 @@ mod tests {
 
     #[test]
     fn abr_files_get_a_larger_size_cap() {
-        // The decoder must not refuse what the reader accepts.
-        const _: () = assert!(MAX_ABR_FILE_BYTES == 1 << 30 && photocraft_psd::abr::MAX_TOTAL_BYTES as u64 == MAX_ABR_FILE_BYTES);
+        // 1 GiB on 64-bit; 32-bit (wasm) keeps 512 MiB so a big file fails cleanly instead of aborting.
+        const WANT: u64 = if cfg!(target_pointer_width = "64") { 1 << 30 } else { 512 << 20 };
+        const _: () = assert!(MAX_ABR_FILE_BYTES == WANT && MAX_ABR_FILE_BYTES >= MAX_FILE_BYTES);
         let dir = std::env::temp_dir().join(format!("pc-abr-cap-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("cap.abr");
