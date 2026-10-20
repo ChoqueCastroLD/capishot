@@ -1149,7 +1149,8 @@ pub(crate) fn process_tree(inputs: &[BatchInput], output: &str, format: &str, sa
 /// every file). Those are saved as PSD, the format Photoshop's Save As offers for a raw. An input
 /// whose file name has no extension (a dot in a folder name doesn't count) is saved as PNG.
 fn same_format(path: &str) -> String {
-    const IMPORT_ONLY: &[&str] = &["pdn", "kra", "krz", "af", "afdesign", "afphoto", "afpub"];
+    const IMPORT_ONLY: &[&str] =
+        &["pdn", "kra", "krz", "af", "afdesign", "afphoto", "afpub", "heic", "heif", "hif", "svg", "svgz", "cin", "pcx", "xpm"];
     let ext = extension(path).unwrap_or_else(|| "png".into());
     if photocraft_io::raw::EXTENSIONS.contains(&ext.as_str()) || IMPORT_ONLY.contains(&ext.as_str()) { "psd".into() } else { ext }
 }
@@ -1160,6 +1161,9 @@ fn same_format_takes_the_file_names_extension() {
     assert_eq!(same_format("/in/a.PNG"), "png");
     assert_eq!(same_format("/in/IMG_0001.ARW"), "psd");
     assert_eq!(same_format("/in/a.kra"), "psd");
+    assert_eq!(same_format("/in/IMG_0001.HEIC"), "psd");
+    assert_eq!(same_format("/in/logo.svg"), "psd");
+    assert_eq!(same_format("/in/scan.cin"), "psd");
     // No extension in the file name: PNG, not the path after a dot in a folder name.
     assert_eq!(same_format("/in/v1.2/scan"), "png");
     assert_eq!(same_format("C:\\in.d\\scan"), "png");
