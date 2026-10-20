@@ -3060,56 +3060,6 @@ mod clipboard_tests {
     type OsClip = Arc<Mutex<Option<(u32, u32, Vec<u8>)>>>;
 
     #[test]
-    #[ignore = "renders clipboard error and retry evidence with a GPU adapter"]
-    fn clipboard_error_and_retry_visual_evidence() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        let busy = Arc::new(AtomicBool::new(true));
-        let unavailable = busy.clone();
-        let os = OsClip::default();
-        let (write, read) = (os.clone(), os);
-        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_max_steps(64).wgpu().build_eframe(move |cc| {
-            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
-            let services = Services {
-                clipboard_set_image: Some(Box::new(move |w, h, bytes| {
-                    *write.lock().unwrap() = Some((w, h, bytes.to_vec()));
-                    Ok(())
-                })),
-                clipboard_get_image: Some(Box::new(move || {
-                    if unavailable.load(Ordering::SeqCst) {
-                        Err("The native clipboard is not accessible due to being held by another party.".into())
-                    } else {
-                        Ok(read.lock().unwrap().clone())
-                    }
-                })),
-                ..Default::default()
-            };
-            let mut app = PhotocraftApp::new(Session::new(), services);
-            app.run("file.new", serde_json::json!({"width": 400, "height": 300, "background": "white"})).unwrap();
-            app.run("shape.create", serde_json::json!({"kind": "rect", "rect": [80, 60, 200, 120], "fill": "#3070c0"})).unwrap();
-            app.run("edit.copy", serde_json::json!({})).unwrap();
-            app.run("file.new", serde_json::json!({"width": 400, "height": 300, "background": "white"})).unwrap();
-            app
-        });
-        let out = std::path::PathBuf::from(std::env::var_os("PHOTOCRAFT_CLIPBOARD_EVIDENCE").expect("evidence directory"));
-        std::fs::create_dir_all(&out).unwrap();
-        h.run_steps(8);
-        let ctx = h.ctx.clone();
-        assert!(crate::menus::invoke(h.state_mut(), &ctx, "edit.paste", serde_json::json!({})).is_err());
-        h.run_steps(2);
-        assert!(h.state().ui.status_error);
-        h.render().unwrap().save(out.join("clipboard-busy.png")).unwrap();
-        busy.store(false, Ordering::SeqCst);
-        crate::menus::invoke(h.state_mut(), &ctx, "edit.paste", serde_json::json!({})).unwrap();
-        h.run_steps(3);
-        assert!(!h.state().ui.status_error);
-        assert!(h.state().ui.status.is_empty(), "retry clears the clipboard error: {}", h.state().ui.status);
-        // Direct harness mutations need a repaint after the command has cleared the error.
-        h.ctx.request_repaint();
-        h.run_steps(2);
-        h.render().unwrap().save(out.join("clipboard-retry.png")).unwrap();
-    }
-
-    #[test]
     fn failed_clipboard_reads_preserve_editable_contents_until_retry() {
         use std::sync::atomic::{AtomicBool, Ordering};
         for id in ["edit.paste", "edit.pasteSpecial.pasteInPlace", "file.newFromClipboard"] {
