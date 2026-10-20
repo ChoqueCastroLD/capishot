@@ -543,7 +543,7 @@ pub fn parse_placed_warp(key: &[u8; 4], data: &[u8]) -> Option<photocraft_geom::
 /// record's corners) as a warp: `Some(None)` for no warp (`warpNone`, or a warp that moves
 /// nothing), `None` when it can't be read (an unknown style, missing bounds, a mesh that is
 /// neither one 4 × 4 patch nor a consistent quilt grid).
-fn warp_of(w: &Descriptor) -> Option<Option<photocraft_geom::warp::Warp>> {
+pub(crate) fn warp_of(w: &Descriptor) -> Option<Option<photocraft_geom::warp::Warp>> {
     use photocraft_geom::warp::{BezierMesh, Warp, WarpStyle};
     let style = enum_of(w, "warpStyle").and_then(|v| WarpStyle::parse(&String::from_utf8_lossy(v)))?;
     if style == WarpStyle::None {
@@ -594,44 +594,46 @@ fn quilt_mesh(w: &Descriptor, env: &Descriptor, points: Vec<[f64; 2]>) -> Option
     if (cols - 1) % 3 != 0 || (rows - 1) % 3 != 0 || points.len() != cols.checked_mul(rows)? {
         return None;
     }
+    let us = quilt_knots(env, "quiltSliceX", (cols - 1) / 3)?;
+    let vs = quilt_knots(env, "quiltSliceY", (rows - 1) / 3)?;
+    Some(photocraft_geom::warp::BezierMesh { us, vs, points })
+}
+
+/// The knots of a quilt's patch boundaries `key` (`quiltSliceX` or `quiltSliceY` in its
+/// `customEnvelopeWarp`): `patches + 1` strictly increasing slices, mapped onto `0..=1` with the
+/// first and last at the ends. `None` for anything else.
+pub(crate) fn quilt_knots(env: &Descriptor, key: &str, patches: usize) -> Option<Vec<f64>> {
     // Stored as an object array holding one unit-float list under the same key; a plain list
     // of numbers is taken too.
-    let slices = |k: &str| -> Option<Vec<f64>> {
-        match env.get(k)? {
-            Value::ObjectArray(arr) => match arr.body.get(k)? {
-                Value::UnitFloats { values, .. } => Some(values.clone()),
-                Value::List(l) => l.iter().map(|v| num(Some(v))).collect(),
-                _ => None,
-            },
-            Value::List(l) => l.iter().map(|v| num(Some(v))).collect(),
-            _ => None,
-        }
+    let s: Vec<f64> = match env.get(key)? {
+        Value::ObjectArray(arr) => match arr.body.get(key)? {
+            Value::UnitFloats { values, .. } => values.clone(),
+            Value::List(l) => l.iter().map(|v| num(Some(v))).collect::<Option<_>>()?,
+            _ => return None,
+        },
+        Value::List(l) => l.iter().map(|v| num(Some(v))).collect::<Option<_>>()?,
+        _ => return None,
     };
-    let knots = |s: Vec<f64>, patches: usize| -> Option<Vec<f64>> {
-        let (first, last) = (*s.first()?, *s.last()?);
-        let span = last - first;
-        if s.len() != patches + 1 || !(span.is_finite() && span > 0.0) || !s.windows(2).all(|p| p[1] > p[0]) {
-            return None;
-        }
-        let n = s.len() - 1;
-        Some(
-            s.iter()
-                .enumerate()
-                .map(|(i, v)| {
-                    if i == 0 {
-                        0.0
-                    } else if i == n {
-                        1.0
-                    } else {
-                        (v - first) / span
-                    }
-                })
-                .collect(),
-        )
-    };
-    let us = knots(slices("quiltSliceX")?, (cols - 1) / 3)?;
-    let vs = knots(slices("quiltSliceY")?, (rows - 1) / 3)?;
-    Some(photocraft_geom::warp::BezierMesh { us, vs, points })
+    let (first, last) = (*s.first()?, *s.last()?);
+    let span = last - first;
+    if s.len() != patches + 1 || !(span.is_finite() && span > 0.0) || !s.windows(2).all(|p| p[1] > p[0]) {
+        return None;
+    }
+    let n = s.len() - 1;
+    Some(
+        s.iter()
+            .enumerate()
+            .map(|(i, v)| {
+                if i == 0 {
+                    0.0
+                } else if i == n {
+                    1.0
+                } else {
+                    (v - first) / span
+                }
+            })
+            .collect(),
+    )
 }
 
 /// Text content and transform from a `TySh` block (best effort).
