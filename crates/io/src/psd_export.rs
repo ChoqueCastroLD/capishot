@@ -1513,7 +1513,7 @@ pub(crate) fn estimate_psd_size(doc: &Document) -> Option<u64> {
 /// The signature a kept tagged block is written with. `8B64` exists only in PSB files: a PSD
 /// with an `8B64` block (kept from a PSB source, e.g. its global `FMsk` or `cinf`) is refused by
 /// Photoshop as "not compatible with this version" (measured in Photoshop 27.11).
-fn block_signature(sig: [u8; 4], version: Version) -> [u8; 4] {
+pub(crate) fn block_signature(sig: [u8; 4], version: Version) -> [u8; 4] {
     if version == Version::Psd && sig == *b"8B64" { *b"8BIM" } else { sig }
 }
 
