@@ -579,13 +579,16 @@ pub(crate) fn warp_of(w: &Descriptor) -> Option<Option<photocraft_geom::warp::Wa
     Some((!warp.is_identity()).then_some(warp))
 }
 
+/// The most patches a `quiltWarp` is read with along each side.
+pub(crate) const QUILT_MAX_PATCHES: usize = 64;
+
 /// The control-point grid of a split ("quilt") custom warp. `deformNumCols` × `deformNumRows`
 /// control points, three per patch side plus one, in row-major order; `quiltSliceX` and
 /// `quiltSliceY` are the patch boundaries in the mesh's own units, first and last at its edges,
 /// which become the knots on the unit square. `None` for anything inconsistent.
 fn quilt_mesh(w: &Descriptor, env: &Descriptor, points: Vec<[f64; 2]>) -> Option<photocraft_geom::warp::BezierMesh> {
     // Photoshop's split grid tops out far below this; it only bounds what a file can claim.
-    const MAX_SIDE: usize = 3 * 64 + 1;
+    const MAX_SIDE: usize = 3 * QUILT_MAX_PATCHES + 1;
     let count = |k: &str| -> Option<usize> {
         let n = num(w.get(k))?;
         (n.is_finite() && n >= 4.0 && n <= MAX_SIDE as f64 && n.fract() == 0.0).then_some(n as usize)
