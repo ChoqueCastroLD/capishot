@@ -78,21 +78,29 @@ fn hdr_adjustments_preserve_range_and_cpu_parity() {
     }
 }
 
+/// The default adapter, or the one wgpu's `WGPU_BACKEND` and `WGPU_DX12_COMPILER` choose: e.g.
+/// `WGPU_BACKEND=dx12 WGPU_DX12_COMPILER=fxc` tests D3D12 with FXC, the app's default on Windows,
+/// where the default adapter may be Vulkan. A backend asked for that can't run the tests fails
+/// them rather than skipping.
 fn gpu() -> Option<Gpu> {
     let lock = GPU_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let instance = wgpu::Instance::default();
+    let required = std::env::var_os("WGPU_BACKEND").is_some();
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
     let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) {
         Ok(a) => a,
         Err(e) => {
+            assert!(!required, "WGPU_BACKEND is set but has no adapter: {e}");
             eprintln!("skipping GPU parity tests: no adapter ({e})");
             return None;
         }
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
-    eprintln!("GPU parity backend: {:?}", adapter.get_info().backend);
+    let info = adapter.get_info();
+    eprintln!("GPU parity backend: {:?} ({}, {:?})", info.backend, info.name, info.device_type);
     // Exact parity needs 32-bit float targets. Adapters without them (e.g. GL software
     // rasterizers) use the CPU compositor in the app, so there is nothing to compare there.
     if Compositor::preferred_acc_format(&adapter) != wgpu::TextureFormat::Rgba32Float {
+        assert!(!required, "WGPU_BACKEND is set but {} can't render Rgba32Float", info.name);
         eprintln!("skipping GPU parity tests: adapter can't render Rgba32Float");
         return None;
     }
