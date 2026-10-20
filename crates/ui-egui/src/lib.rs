@@ -48,6 +48,7 @@ pub mod canvas_tool_menu;
 mod capishot_ui;
 pub mod channel_view;
 pub mod channels_panel;
+pub mod chrome_freeze;
 pub mod chrome_ui;
 pub mod cjk_fonts;
 pub mod clip_line_ui;
@@ -136,6 +137,7 @@ pub mod paint_mouse;
 pub mod palette;
 mod panel_docking;
 pub mod panels;
+pub mod perf_counters;
 pub mod parity;
 pub mod patch_preview;
 pub(crate) mod pattern_fill_ui;
@@ -617,6 +619,10 @@ pub struct PhotocraftApp {
     pub fps: f32,
     last_frame_time: f64,
     thumbs: HashMap<(photocraft_doc::LayerId, u8), (u64, egui::TextureHandle)>,
+    /// Thumbnails rebuilt this frame: (frame, count), for [`THUMBS_PER_FRAME`].
+    thumb_frame: (u64, u32),
+    /// A transparent stand-in for a thumbnail not built yet.
+    blank_thumb: Option<egui::TextureHandle>,
     /// Snapshots whose live layer/mask keys were last used to prune thumbnail handles.
     thumb_documents: Vec<(DocId, std::sync::Weak<Document>)>,
     /// Content bounds cached per (key, revision): scanning a 36 MP layer every frame cost ~77 ms.
@@ -718,6 +724,10 @@ pub struct PhotocraftApp {
     started: Option<gpu_status::StartedHook>,
     /// Frame and canvas-upload timings (exposed via `ui.inspect`).
     pub perf: gpu_canvas::Perf,
+    /// Work counters (thumbnails, rows, panel recomputes): see `perf_counters`.
+    pub perf_counters: perf_counters::PerfCounters,
+    /// The chrome's last shapes, repainted during canvas gestures (`chrome_freeze`).
+    pub(crate) chrome_freeze: chrome_freeze::State,
     /// Preferences, autosave and snapping runtime state (see `prefs_ui`, `snap_ui`).
     pub(crate) prefs_rt: prefs_ui::Runtime,
     /// Close, Revert or Exit parked behind the unsaved-changes prompt (see `discard_ui`).
@@ -799,6 +809,8 @@ impl PhotocraftApp {
             fps: 0.0,
             last_frame_time: 0.0,
             thumbs: HashMap::new(),
+            thumb_frame: (0, 0),
+            blank_thumb: None,
             thumb_documents: Vec::new(),
             bounds_cache: HashMap::new(),
             proxy: None,
@@ -848,6 +860,8 @@ impl PhotocraftApp {
             gpu: None,
             started: None,
             perf: Default::default(),
+            perf_counters: Default::default(),
+            chrome_freeze: Default::default(),
             prefs_rt: Default::default(),
             discard: None,
             file_dialog: None,
@@ -1594,6 +1608,7 @@ impl eframe::App for PhotocraftApp {
             self.fonts_ready = true;
         }
         self.frame += 1;
+        self.perf_counters.frames += 1;
         let now = ctx.input(|i| i.time);
         let dt = (now - self.last_frame_time) as f32;
         if dt > 0.0 {
@@ -1733,24 +1748,29 @@ impl eframe::App for PhotocraftApp {
         if !chrome && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = menus::invoke(self, &ctx, "view.screenMode.standard", serde_json::json!({}));
         }
-        if chrome && self.ui.panels.menu_bar {
-            panels::title_bar(self, ui);
-        }
-        if chrome && self.ui.panels.options_bar {
-            panels::options_bar(self, ui);
-        }
-        if chrome && self.ui.panels.status_bar {
-            panels::status_bar(self, ui);
-        }
-        if chrome && self.ui.panels.toolbar {
-            panels::toolbar(self, ui);
-        }
-        if chrome && self.ui.panels.dock {
-            panels::right_dock(self, ui);
-        }
+        // While a tool is dragged on the canvas the chrome repaints last frame's shapes instead of
+        // being laid out again (chrome_freeze).
+        let area = chrome_freeze::show(self, ui, chrome, |app, ui| {
+            if chrome && app.ui.panels.menu_bar {
+                panels::title_bar(app, ui);
+            }
+            if chrome && app.ui.panels.options_bar {
+                panels::options_bar(app, ui);
+            }
+            if chrome && app.ui.panels.status_bar {
+                panels::status_bar(app, ui);
+            }
+            if chrome && app.ui.panels.toolbar {
+                panels::toolbar(app, ui);
+            }
+            if chrome && app.ui.panels.dock {
+                panels::right_dock(app, ui);
+            }
+        });
         let t = theme::Tokens::get(&ctx);
         let backdrop = if chrome { prefs_ui::pasteboard_color(self).unwrap_or(t.canvas) } else { egui::Color32::BLACK };
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(ui, |ui| {
+        let mut canvas_ui = chrome_freeze::canvas_ui(ui, area);
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(&mut canvas_ui, |ui| {
             canvas::document_area(self, ui);
         });
         panels::properties_window(self, &ctx);
@@ -1952,6 +1972,13 @@ impl PhotocraftApp {
         {
             return tex.id();
         }
+        if !self.thumb_budget(ctx) {
+            return match self.thumbs.get(&key).map(|(_, tex)| tex.id()) {
+                Some(id) => id,
+                None => self.blank_thumb(ctx),
+            };
+        }
+        self.perf_counters.thumbs += 1;
         let mut px = [0.0f32; 8];
         let img = thumb_image(doc, 64, |x, y| {
             let Some(s) = layer.surface() else { return [0.0; 4] };
@@ -1970,12 +1997,39 @@ impl PhotocraftApp {
         {
             return tex.id();
         }
+        if !self.thumb_budget(ctx) {
+            return match self.thumbs.get(&key).map(|(_, tex)| tex.id()) {
+                Some(id) => id,
+                None => self.blank_thumb(ctx),
+            };
+        }
+        self.perf_counters.mask_thumbs += 1;
         let mut v = [0.0f32; 1];
         let img = thumb_image(doc, 64, |x, y| {
             mask.surface.read_pixel(x, y, &mut v);
             [v[0], v[0], v[0], 1.0]
         });
         self.store_thumb(ctx, key, rev, img)
+    }
+
+    /// Whether another thumbnail may be rebuilt this frame: at most [`THUMBS_PER_FRAME`], so
+    /// scrolling a long Layers panel or an edit touching many layers spreads the work over frames
+    /// (the rest keep their previous image, or none yet, and the next frame continues).
+    fn thumb_budget(&mut self, ctx: &egui::Context) -> bool {
+        if self.thumb_frame.0 != self.frame {
+            self.thumb_frame = (self.frame, 0);
+        }
+        if self.thumb_frame.1 >= THUMBS_PER_FRAME {
+            self.perf_counters.thumbs_deferred += 1;
+            ctx.request_repaint();
+            return false;
+        }
+        self.thumb_frame.1 += 1;
+        true
+    }
+
+    fn blank_thumb(&mut self, ctx: &egui::Context) -> egui::TextureId {
+        self.blank_thumb.get_or_insert_with(|| ctx.load_texture("thumb-blank", egui::ColorImage::new([1, 1], vec![egui::Color32::TRANSPARENT]), egui::TextureOptions::LINEAR)).id()
     }
 
     fn store_thumb(&mut self, ctx: &egui::Context, key: (photocraft_doc::LayerId, u8), rev: u64, img: egui::ColorImage) -> egui::TextureId {
@@ -1994,6 +2048,9 @@ impl PhotocraftApp {
         }
     }
 }
+
+/// Layer and mask thumbnails rebuilt per frame at most (see `PhotocraftApp::thumb_budget`).
+pub const THUMBS_PER_FRAME: u32 = 8;
 
 /// Cheap identity of a surface's pixels: its default (untouched) pixel, tile coordinates and
 /// `Arc` pointers. The default pixel matters: inverting or filling a tile-less mask only changes
@@ -2075,7 +2132,8 @@ impl PhotocraftApp {
         {
             return *b;
         }
-        let b = surface.content_bounds();
+        // Per-tile cached: after an edit only the tiles it changed are scanned again.
+        let b = photocraft_compose::bounds::content_bounds(surface);
         if self.bounds_cache.len() > 256 {
             self.bounds_cache.clear();
         }
