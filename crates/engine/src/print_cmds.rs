@@ -90,6 +90,7 @@ fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -
             return app(sp);
         }
         if let Some(name) = system_spooler() {
+            require_windows_pdf()?;
             return craft_print::submit(&job.pdf, lp).map(|m| (m, name.to_string())).map_err(other);
         }
     }
@@ -643,6 +644,34 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spool
     Ok(
         json!({"pdf": pdf_path, "bytes": pdf_len, "paper": [pw, ph], "imageRect": [x, y, w, h], "emulsionDown": emulsion_down, "scale": scale * 100.0, "copies": copies, "command": command, "sent": sent, "spooler": spool, "backend": backend, "color": color}),
     )
+}
+
+/// Windows prints a PDF through Windows.Data.Pdf.dll, which the apps delay-load (see their
+/// `build.rs`) so a Windows image without it still starts. Calling into it when it cannot load
+/// would abort the process, so check that it loads first (#5884).
+fn require_windows_pdf() -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows"));
+        if !windows_pdf_loads(&windows_pdf_dll(std::path::Path::new(&root))) {
+            return Err(other(
+                "printing this page needs the Windows PDF component (Windows.Data.Pdf.dll), which is missing or cannot load. Save as PDF and print it from another app, or print an RGB image without page text or labels to print directly.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_pdf_dll(system_root: &std::path::Path) -> std::path::PathBuf {
+    system_root.join("System32").join("Windows.Data.Pdf.dll")
+}
+
+/// Loads the DLL rather than checking the file exists: one that is present but cannot load (a
+/// dependency stripped too) would still abort at the delay-load stub.
+#[cfg(target_os = "windows")]
+fn windows_pdf_loads(dll: &std::path::Path) -> bool {
+    dll.to_str().is_some_and(|p| winsafe::HINSTANCE::LoadLibrary(p).is_ok())
 }
 
 /// Keep CMYK output profiles and page text on the existing PDF composition path. GDI currently
