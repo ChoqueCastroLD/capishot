@@ -252,6 +252,8 @@ pub struct Candidate {
     pub backend: wgpu::Backend,
     /// Can present to the window.
     pub surface_ok: bool,
+    /// Its name matches the adapter the user asked for ([`adapter_matches`]).
+    pub wanted: bool,
 }
 
 /// Rank of an adapter (lower is better): high-performance device types first (egui's power
@@ -283,9 +285,48 @@ fn rank(a: &Candidate, backend: GpuBackend, os: Os) -> (u8, u8, u8) {
     (fallback, ty, be)
 }
 
-/// The adapter to use among `adapters` (`None` when there is none).
+/// The adapter to use among `adapters` (`None` when there is none). Adapters the user asked for
+/// win over the rest when any of them can present; otherwise the ranking decides (see
+/// [`wanted_missed`]).
 pub fn pick(adapters: &[Candidate], backend: GpuBackend, os: Os) -> Option<usize> {
-    adapters.iter().enumerate().filter(|(_, a)| a.surface_ok).min_by_key(|(i, a)| (rank(a, backend, os), *i)).map(|(i, _)| i)
+    let usable = |a: &&Candidate| a.surface_ok;
+    let any_wanted = adapters.iter().filter(usable).any(|a| a.wanted);
+    adapters.iter().enumerate().filter(|(_, a)| a.surface_ok && (a.wanted || !any_wanted)).min_by_key(|(i, a)| (rank(a, backend, os), *i)).map(|(i, _)| i)
+}
+
+/// Whether an adapter called `name` is the one the user asked for: `wanted` is a case-insensitive
+/// piece of its name ("nvidia"), or several words that each appear in it ("arc a370m" finds
+/// "Intel(R) Arc(tm) A370M Graphics"). An empty `wanted` matches nothing.
+pub fn adapter_matches(name: &str, wanted: &str) -> bool {
+    photocraft_engine::prefs::gpu_adapter_matches(name, wanted)
+}
+
+/// The user asked for an adapter and none of `adapters` that can present is it.
+pub fn wanted_missed(adapters: &[Candidate], wanted: Option<&str>) -> bool {
+    wanted.is_some() && !adapters.iter().any(|a| a.surface_ok && a.wanted)
+}
+
+/// Choosing an adapter is Linux-only for now: Windows has its own Intel/DX12 selection and macOS a
+/// single Metal path, and neither is tested with a requested adapter.
+pub const ADAPTER_CHOICE: bool = cfg!(target_os = "linux");
+
+/// The adapter request that applies to this launch: none off Linux (`linux`), and none in CPU mode,
+/// which wants a software adapter whatever the preference says.
+pub fn applicable_adapter(wanted: Option<String>, backend: GpuBackend, linux: bool) -> Option<String> {
+    wanted.filter(|_| linux && backend != GpuBackend::Cpu)
+}
+
+/// Whether `PHOTOCRAFT_GPU_ADAPTER` makes this launch its own process: only when startup will act
+/// on it (a non-empty value, on Linux, outside CPU mode). Otherwise it changes nothing, and the
+/// launch may still be forwarded to the running window.
+pub fn adapter_override_is_process_specific(env: Option<&str>, mode: RenderingMode, linux: bool) -> bool {
+    env.is_some_and(|v| !v.trim().is_empty()) && linux && mode != RenderingMode::Cpu
+}
+
+/// The adapter to ask for: `PHOTOCRAFT_GPU_ADAPTER` when set (for one launch), else
+/// `performance.gpuAdapter`; `None` is automatic.
+pub fn wanted_adapter(env: Option<&str>, pref: &str) -> Option<String> {
+    [env.unwrap_or(""), pref].iter().map(|s| s.trim()).find(|s| !s.is_empty()).map(|s| s.chars().take(256).collect())
 }
 
 /// Whether picking `chosen` applied the Intel-on-Windows DX12 default (a Vulkan adapter of the
@@ -310,7 +351,7 @@ fn skips_indirect_validation(os: Os, intel: bool) -> bool {
 /// Configure eframe's wgpu setup for `plan`: instance backends, the DX12 shader compiler, adapter
 /// selection (Intel on Windows, software adapters for `cpu`) and the marker update once the
 /// adapter is chosen. `note` receives a remark for System Info (e.g. the Intel default).
-pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, sentinel: SharedSentinel, note: Arc<Mutex<Option<String>>>) {
+pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, wanted: Option<String>, sentinel: SharedSentinel, note: Arc<Mutex<Option<String>>>) {
     if let egui_wgpu::WgpuSetup::CreateNew(create) = setup {
         if let Some(b) = backends(plan, os) {
             create.instance_descriptor.backends = b;
@@ -328,7 +369,8 @@ pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, sentinel
             create.instance_descriptor.backends = b;
         }
         let vulkan_left_out = without_vulkan.is_some();
-        let select = plan.env.is_none() && (plan.backend == GpuBackend::Cpu || (plan.backend == GpuBackend::Auto && os == Os::Windows));
+        let wanted = applicable_adapter(wanted, plan.backend, ADAPTER_CHOICE);
+        let select = wanted.is_some() || (plan.env.is_none() && (plan.backend == GpuBackend::Cpu || (plan.backend == GpuBackend::Auto && os == Os::Windows)));
         if select {
             let backend = plan.backend;
             create.native_adapter_selector = Some(Arc::new(move |adapters: &[wgpu::Adapter], surface: Option<&wgpu::Surface<'_>>| {
@@ -341,10 +383,15 @@ pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, sentinel
                             device_type: i.device_type,
                             backend: i.backend,
                             surface_ok: surface.is_none_or(|s| a.is_surface_supported(s)),
+                            wanted: wanted.as_deref().is_some_and(|w| adapter_matches(&i.name, w)),
                         }
                     })
                     .collect();
                 let i = pick(&cands, backend, os).ok_or_else(|| "no graphics adapter found".to_string())?;
+                if let Some(w) = wanted.as_deref().filter(|_| wanted_missed(&cands, wanted.as_deref())) {
+                    *note.lock().unwrap_or_else(PoisonError::into_inner) =
+                        Some(format!("No graphics adapter named \"{w}\" can draw the window; using the automatic choice"));
+                }
                 if backend == GpuBackend::Cpu && cands.get(i).is_some_and(|c| c.device_type != wgpu::DeviceType::Cpu) {
                     *note.lock().unwrap_or_else(PoisonError::into_inner) =
                         Some("CPU image rendering; no software graphics adapter is available, so the window uses hardware graphics".into());
@@ -471,6 +518,13 @@ pub fn read_display_server(path: Option<&Path>) -> photocraft_engine::prefs::Lin
         .and_then(|p| serde_json::from_value::<photocraft_engine::prefs::Performance>(p.clone()).ok())
         .map(|performance| performance.linux_display_server)
         .unwrap_or_default()
+}
+
+/// Preferences › Performance › Graphics Adapter (`performance.gpuAdapter`), read before the window
+/// opens; empty (automatic) when the file or value is missing.
+pub fn read_gpu_adapter(path: Option<&Path>) -> String {
+    let v: Value = path.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    v.get("performance").and_then(|p| p.get("gpuAdapter")).and_then(Value::as_str).unwrap_or("").chars().take(256).collect()
 }
 
 /// Preferences › Performance › Low-Latency Drawing (`performance.lowLatencyDrawing`, off unless
@@ -634,7 +688,82 @@ mod tests {
     }
 
     fn cand(vendor: u32, device_type: wgpu::DeviceType, backend: wgpu::Backend) -> Candidate {
-        Candidate { vendor, device_type, backend, surface_ok: true }
+        Candidate { vendor, device_type, backend, surface_ok: true, wanted: false }
+    }
+
+    #[test]
+    fn a_requested_adapter_beats_the_automatic_ranking() {
+        use wgpu::{Backend as B, DeviceType as T};
+        // The order Vulkan lists this machine's GPUs in: iGPU, dGPU, eGPU.
+        let mut a = [cand(INTEL, T::IntegratedGpu, B::Vulkan), cand(INTEL, T::DiscreteGpu, B::Vulkan), cand(0x10de, T::DiscreteGpu, B::Vulkan)];
+        assert_eq!(pick(&a, Auto, Os::Other), Some(1), "automatic takes the first discrete adapter, the Arc");
+        a[2].wanted = true;
+        assert_eq!(pick(&a, Auto, Os::Other), Some(2));
+        a[2].wanted = false;
+        a[0].wanted = true;
+        assert_eq!(pick(&a, Auto, Os::Other), Some(0), "even the iGPU, when asked for");
+        // A wanted adapter that can't present is skipped, not an error.
+        a[0].surface_ok = false;
+        assert_eq!(pick(&a, Auto, Os::Other), Some(1));
+        assert!(wanted_missed(&a, Some("iris")));
+        assert!(!wanted_missed(&a, None));
+        a[0].surface_ok = true;
+        assert!(!wanted_missed(&a, Some("iris")));
+        // Among several wanted ones (same GPU on Vulkan and GL) the usual ranking decides.
+        let mut gl = [cand(0x10de, T::DiscreteGpu, B::Gl), cand(0x10de, T::DiscreteGpu, B::Vulkan)];
+        gl.iter_mut().for_each(|c| c.wanted = true);
+        assert_eq!(pick(&gl, Auto, Os::Other), Some(1));
+    }
+
+    #[test]
+    fn an_adapter_request_applies_on_linux_outside_cpu_mode() {
+        let w = || Some("nvidia".to_string());
+        assert_eq!(applicable_adapter(w(), Auto, true), w());
+        assert_eq!(applicable_adapter(w(), Vulkan, true), w());
+        assert_eq!(applicable_adapter(w(), Cpu, true), None);
+        assert_eq!(applicable_adapter(w(), Auto, false), None, "Windows and macOS keep their own selection");
+        assert_eq!(applicable_adapter(None, Auto, true), None);
+    }
+
+    #[test]
+    fn an_adapter_override_keeps_its_own_process_only_when_it_applies() {
+        let on = |env, mode, linux| adapter_override_is_process_specific(env, mode, linux);
+        assert!(on(Some("nvidia"), RenderingMode::Auto, true));
+        assert!(on(Some("nvidia"), RenderingMode::Gpu, true));
+        assert!(!on(Some("nvidia"), RenderingMode::Cpu, true), "ignored in CPU mode");
+        assert!(!on(Some("nvidia"), RenderingMode::Auto, false), "ignored off Linux");
+        assert!(!on(Some("  "), RenderingMode::Auto, true));
+        assert!(!on(None, RenderingMode::Auto, true));
+    }
+
+    #[test]
+    fn adapter_names_match_loosely_and_the_environment_wins() {
+        assert!(adapter_matches("NVIDIA GeForce RTX 5060 Ti", "nvidia"));
+        assert!(adapter_matches("Intel(R) Arc(tm) A370M Graphics (DG2)", " ARC A370M "));
+        assert!(!adapter_matches("Intel(R) Iris(R) Xe Graphics (ADL GT2)", "arc"));
+        assert!(!adapter_matches("anything", ""));
+        assert!(!adapter_matches("anything", "   "));
+        assert_eq!(wanted_adapter(None, ""), None);
+        assert_eq!(wanted_adapter(Some("  "), "iris"), Some("iris".into()));
+        assert_eq!(wanted_adapter(Some("nvidia"), "iris"), Some("nvidia".into()));
+        assert_eq!(wanted_adapter(Some(&"x".repeat(1000)), "").map(|w| w.len()), Some(256));
+    }
+
+    #[test]
+    fn gpu_adapter_is_read_before_the_window_opens() {
+        let dir = std::env::temp_dir().join(format!("photocraft-gpu-adapter-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("preferences.json");
+        let read = |json: &str| {
+            std::fs::write(&file, json).unwrap();
+            read_gpu_adapter(Some(&file))
+        };
+        assert_eq!(read(r#"{"performance":{"gpuAdapter":"nvidia"}}"#), "nvidia");
+        assert_eq!(read(r#"{"performance":{"gpuAdapter":7}}"#), "");
+        assert_eq!(read(r#"{"performance":{}}"#), "");
+        assert_eq!(read("not json"), "");
+        assert_eq!(read_gpu_adapter(None), "");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -963,7 +1092,7 @@ mod tests {
         // The app's setup replaces wgpu's default (`Auto`: DXC by name from the search path).
         let mut setup = egui_wgpu::WgpuSetup::without_display_handle();
         let plan = plan(Auto, None, None, false, Os::Windows);
-        configure(&mut setup, &plan, Os::Windows, Arc::new(Mutex::new(None)), Arc::default());
+        configure(&mut setup, &plan, Os::Windows, None, Arc::new(Mutex::new(None)), Arc::default());
         let egui_wgpu::WgpuSetup::CreateNew(create) = &setup else { panic!("a new instance") };
         if std::env::var_os("WGPU_DX12_COMPILER").is_none() {
             let safe = match &create.instance_descriptor.backend_options.dx12.shader_compiler {
@@ -987,13 +1116,13 @@ mod tests {
             let mut setup = egui_wgpu::WgpuSetup::without_display_handle();
             let egui_wgpu::WgpuSetup::CreateNew(before) = &setup else { panic!("a new instance") };
             let before = before.instance_descriptor.flags;
-            configure(&mut setup, &plan(Auto, None, None, safe_gpu, os), os, Arc::new(Mutex::new(None)), Arc::default());
+            configure(&mut setup, &plan(Auto, None, None, safe_gpu, os), os, None, Arc::new(Mutex::new(None)), Arc::default());
             let egui_wgpu::WgpuSetup::CreateNew(create) = &setup else { panic!("a new instance") };
             assert_eq!(create.instance_descriptor.flags, before, "{os:?}: flags untouched");
         }
         if cfg!(target_arch = "x86_64") && std::env::var_os("WGPU_VALIDATION_INDIRECT_CALL").is_none() {
             let mut setup = egui_wgpu::WgpuSetup::without_display_handle();
-            configure(&mut setup, &plan(Auto, None, None, false, Os::Mac), Os::Mac, Arc::new(Mutex::new(None)), Arc::default());
+            configure(&mut setup, &plan(Auto, None, None, false, Os::Mac), Os::Mac, None, Arc::new(Mutex::new(None)), Arc::default());
             let egui_wgpu::WgpuSetup::CreateNew(create) = &setup else { panic!("a new instance") };
             assert!(!create.instance_descriptor.flags.contains(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL));
         }

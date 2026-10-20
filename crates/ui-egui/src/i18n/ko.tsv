@@ -3436,3 +3436,6 @@ curves	Smooth	매끄럽게
 	DDS Options	DDS 옵션
 	Compression	압축
 	Generate Mipmaps	밉맵 생성
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU 어댑터

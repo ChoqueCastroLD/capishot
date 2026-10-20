@@ -2863,3 +2863,6 @@ curves	Smooth	平滑
 	DDS Options	DDS 選項
 	Compression	壓縮
 	Generate Mipmaps	產生 Mipmap
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU 介面卡

@@ -4215,3 +4215,6 @@ navigator	Zoom	Zoom
 # DDS Options (#1327)
 	DDS Options	Opciones de DDS
 	Generate Mipmaps	Generar mipmaps
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Adaptador de GPU

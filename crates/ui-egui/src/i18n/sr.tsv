@@ -4326,3 +4326,6 @@ shape	Appearance	Izgled
 # DDS Options (#1327)
 	DDS Options	DDS opcije
 	Generate Mipmaps	Generiši mipmape
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU adapter

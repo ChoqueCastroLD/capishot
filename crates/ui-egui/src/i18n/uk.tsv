@@ -3962,3 +3962,6 @@ curves	Smooth	Згладити
 	DDS Options	Параметри DDS
 	Compression	Стиснення
 	Generate Mipmaps	Створити MIP-карти
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Адаптер GPU

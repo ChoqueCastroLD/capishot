@@ -3262,3 +3262,6 @@ curves	Smooth	Lisser
 	DDS Options	Options DDS
 	Compression	Compression
 	Generate Mipmaps	Générer les mipmaps
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Adaptateur GPU

@@ -3853,3 +3853,6 @@ curves	Smooth	Wygładź
 	DDS Options	Opcje DDS
 	Compression	Kompresja
 	Generate Mipmaps	Generuj mipmapy
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Karta GPU

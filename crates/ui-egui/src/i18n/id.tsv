@@ -3249,3 +3249,6 @@ curves	Smooth	Haluskan
 	DDS Options	Opsi DDS
 	Compression	Kompresi
 	Generate Mipmaps	Buat mipmap
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Adaptor GPU

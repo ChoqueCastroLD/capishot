@@ -3741,3 +3741,6 @@ curves	Smooth	Làm mượt
 	DDS Options	Tùy chọn DDS
 	Compression	Nén
 	Generate Mipmaps	Tạo mipmap
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Bộ điều hợp GPU

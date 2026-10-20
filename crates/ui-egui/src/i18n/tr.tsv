@@ -3983,3 +3983,6 @@ cameraData	Lens	Lens
 # DDS Options (#1327)
 	DDS Options	DDS Seçenekleri
 	Generate Mipmaps	Mipmap oluştur
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU bağdaştırıcısı

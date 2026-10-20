@@ -3953,3 +3953,6 @@ curves	Smooth	Εξομάλυνση
 # DDS Options (#1327)
 	DDS Options	Επιλογές DDS
 	Generate Mipmaps	Δημιουργία mipmap
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Προσαρμογέας GPU
