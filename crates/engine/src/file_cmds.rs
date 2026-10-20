@@ -1149,8 +1149,7 @@ pub(crate) fn process_tree(inputs: &[BatchInput], output: &str, format: &str, sa
 /// every file). Those are saved as PSD, the format Photoshop's Save As offers for a raw. An input
 /// whose file name has no extension (a dot in a folder name doesn't count) is saved as PNG.
 fn same_format(path: &str) -> String {
-    const IMPORT_ONLY: &[&str] =
-        &["pdn", "kra", "krz", "af", "afdesign", "afphoto", "afpub", "heic", "heif", "hif", "svg", "svgz", "cin", "pcx", "xpm"];
+    const IMPORT_ONLY: &[&str] = &["pdn", "kra", "krz", "af", "afdesign", "afphoto", "afpub", "heic", "heif", "hif", "svg", "svgz", "cin", "pcx", "xpm"];
     let ext = extension(path).unwrap_or_else(|| "png".into());
     if photocraft_io::raw::EXTENSIONS.contains(&ext.as_str()) || IMPORT_ONLY.contains(&ext.as_str()) { "psd".into() } else { ext }
 }
