@@ -1740,8 +1740,8 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
     // writes its empty `<< /0 << >> >>` stub — readers such as Photopea reject it (#3514). Keep the
     // block when the file had one (round-trip its pen positions/extras) or a layer is Optical (the
     // one mode EngineData can't carry; #1348).
-    let txt2 =
-        (previous.is_some() || photocraft_text::psd::needs_txt2(&text_layers)).then(|| photocraft_text::psd::build_txt2(&text_layers, previous.as_deref()));
+    let txt2 = (previous.is_some() || photocraft_text::psd::needs_txt2(&text_layers))
+        .then(|| photocraft_text::psd::build_txt2_at(&text_layers, previous.as_deref(), ex.dpi));
     for (sig, key, data) in preserved {
         if txt2.is_some() && key == *b"Txt2" {
             continue;

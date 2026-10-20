@@ -1122,7 +1122,7 @@ fn edited_text_keeps_the_files_txt2_object() {
         o.path(&["0", key, "0"]).and_then(E::as_array).unwrap().iter().map(|r| r.get("1").and_then(E::as_i64).unwrap()).collect()
     };
     for (text, paragraphs, styles) in
-        [("Bevex\nCD", vec![6, 3], vec![2, 7]), ("AB\nCD\nEFG", vec![3, 3, 4], vec![2, 8]), ("X", vec![2], vec![2]), ("AB\nCZ", vec![3, 3], vec![2, 4])]
+        [("Bevex\nCD", vec![6, 3], vec![9]), ("AB\nCD\nEFG", vec![3, 3, 4], vec![10]), ("X", vec![2], vec![2]), ("AB\nCZ", vec![3, 3], vec![6])]
     {
         let t = runs_of(text, &[(text.len(), CharStyle::default())]);
         let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &t)], Some(&prev))).unwrap();
@@ -1136,13 +1136,16 @@ fn edited_text_keeps_the_files_txt2_object() {
         assert_eq!(object.get("1"), before_object.get("1"), "{text:?}: the view (its frame) is kept");
         assert!(object.get("21").is_none(), "{text:?}: pen positions of the old text are dropped");
         assert_eq!(lens(object, "5"), paragraphs, "{text:?}: one paragraph run per paragraph");
+        // Photoshop reads the character style from these runs: they follow the layer's own runs
+        // (one here), built on the file's first run.
         assert_eq!(lens(object, "6"), styles, "{text:?}: style runs cover the new text");
         assert_eq!(lens(object, "7"), vec![total], "{text:?}: other run arrays cover the new text");
         for r in object.path(&["0", "5", "0"]).and_then(E::as_array).unwrap() {
             assert_eq!(r.path(&["0", "0", "5", "7"]).and_then(E::as_f64), Some(1.2), "{text:?}: paragraph style survives");
         }
         for r in object.path(&["0", "6", "0"]).and_then(E::as_array).unwrap() {
-            assert_eq!(r.path(&["0", "0", "6", "1"]).and_then(E::as_f64), Some(12.0), "{text:?}: the font size survives");
+            assert_eq!(r.path(&["0", "0", "6", "1"]).and_then(E::as_f64), Some(f64::from(CharStyle::default().size_pt)), "{text:?}: the layer's font size");
+            assert_eq!(r.path(&["0", "0", "5", "7"]).and_then(E::as_f64), Some(1.2), "{text:?}: the file's run keeps its other keys");
         }
     }
 }
@@ -1216,6 +1219,19 @@ fn new_text_layer_gets_a_txt2_object_and_frame() {
     let object = &out.path(&["1", "1"]).and_then(E::as_array).unwrap()[1];
     assert!(object.get("1").is_none(), "no copy of an oversized template");
     assert_eq!(out.path(&["0", "8", "0"]).and_then(E::as_array).unwrap().len(), 2);
+}
+
+/// The frame padding is bounded like the slots a layer can name: a crafted block of many empty
+/// objects and no frames must not make the save write a frame for each of them.
+#[test]
+fn txt2_frame_padding_is_bounded() {
+    use crate::engine_data::Value as E;
+    let objects = "<< >> ".repeat(70_000);
+    let prev = format!("\n\n/98 << /0 7 >> /0 << /8 << /0 [ ] >> >> /1 << /1 [ {objects}] >> ");
+    let t = runs_of("AV", &[(2, CharStyle::default())]);
+    let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &t)], Some(prev.as_bytes()))).unwrap();
+    let frames = out.path(&["0", "8", "0"]).and_then(E::as_array).unwrap().len();
+    assert_eq!(frames, crate::psd::MAX_TEXT_INDEX as usize + 1);
 }
 
 /// The file's style runs are only reused when they cover the text: runs of another length (or
