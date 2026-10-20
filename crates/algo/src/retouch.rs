@@ -7,7 +7,6 @@
 //! "Protect Tones" works on luminance (scaling RGB so hue and saturation are kept, with gamut
 //! compression instead of per-channel clipping).
 
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Tonal range targeted by Dodge/Burn.
@@ -130,35 +129,43 @@ pub fn local_blur(data: &[f32], w: usize, h: usize, ch: usize, alpha: Option<usi
     let th = oh + 2 * r as usize;
     let stride = ow * ch;
     let mut tmp = vec![0.0f32; stride * th];
-    tmp.par_chunks_mut(stride).enumerate().for_each_init(
-        || vec![0.0f32; (ow + 2 * r as usize) * ch],
-        |row, (ty, dst)| {
-            let y = (y0 as i32 + ty as i32 - r).clamp(0, h as i32 - 1) as usize;
-            // Clamp and premultiply each source pixel once, rather than once for every kernel tap.
-            for (rx, px) in row.chunks_exact_mut(ch).enumerate() {
-                let x = (x0 as i32 + rx as i32 - r).clamp(0, w as i32 - 1) as usize;
-                let i = (y * w + x) * ch;
-                px.copy_from_slice(&data[i..i + ch]);
-                if let Some(a) = alpha {
-                    let av = px[a];
-                    for (c, v) in px.iter_mut().enumerate() {
-                        if c != a {
-                            *v *= av;
-                        }
+    let scratch = || vec![0.0f32; (ow + 2 * r as usize) * ch];
+    let horizontal = |row: &mut Vec<f32>, (ty, dst): (usize, &mut [f32])| {
+        let y = (y0 as i32 + ty as i32 - r).clamp(0, h as i32 - 1) as usize;
+        // Clamp and premultiply each source pixel once, rather than once for every kernel tap.
+        for (rx, px) in row.chunks_exact_mut(ch).enumerate() {
+            let x = (x0 as i32 + rx as i32 - r).clamp(0, w as i32 - 1) as usize;
+            let i = (y * w + x) * ch;
+            px.copy_from_slice(&data[i..i + ch]);
+            if let Some(a) = alpha {
+                let av = px[a];
+                for (c, v) in px.iter_mut().enumerate() {
+                    if c != a {
+                        *v *= av;
                     }
                 }
             }
-            // Contiguous accumulation can be vectorized for any channel layout. Each output still
-            // sums the same products in the same kernel order as the scalar convolution.
-            for (i, kv) in k.iter().enumerate() {
-                for (d, s) in dst.iter_mut().zip(&row[i * ch..i * ch + stride]) {
-                    *d += s * kv;
-                }
+        }
+        // Contiguous accumulation can be vectorized for any channel layout. Each output still
+        // sums the same products in the same kernel order as the scalar convolution.
+        for (i, kv) in k.iter().enumerate() {
+            for (d, s) in dst.iter_mut().zip(&row[i * ch..i * ch + stride]) {
+                *d += s * kv;
             }
-        },
-    );
+        }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        tmp.par_chunks_mut(stride).enumerate().for_each_init(scratch, horizontal);
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut row = scratch();
+        tmp.chunks_mut(stride).enumerate().for_each(|item| horizontal(&mut row, item));
+    }
     let mut out = vec![0.0f32; ow * oh * ch];
-    out.par_chunks_mut(stride).enumerate().for_each(|(oy, dst)| {
+    let vertical = |(oy, dst): (usize, &mut [f32])| {
         for (i, kv) in k.iter().enumerate() {
             for (d, s) in dst.iter_mut().zip(&tmp[(oy + i) * stride..(oy + i + 1) * stride]) {
                 *d += s * kv;
@@ -174,7 +181,16 @@ pub fn local_blur(data: &[f32], w: usize, h: usize, ch: usize, alpha: Option<usi
                 }
             }
         }
-    });
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        out.par_chunks_mut(stride).enumerate().for_each(vertical);
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        out.chunks_mut(stride).enumerate().for_each(vertical);
+    }
     out
 }
 
