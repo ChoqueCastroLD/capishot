@@ -1165,7 +1165,17 @@ impl Compositor {
 
         // Only render owns submission. A caller may discard encode's command buffer, so it
         // cannot establish (or consume) a checkpoint whose GPU copy might never execute.
-        let checkpoint = if flush { self.prefix.prepare(doc, &plan) } else { None };
+        // Runs of plain layers drawn as one pass each (`fs_layerbatch`). The grouping is the same
+        // for every render of this plan, so a layer's bits don't depend on the cache: renders
+        // capture and resume only where a run starts.
+        let runs = batch_runs(&plan);
+        let checkpoint = if flush {
+            let starts = run_starts(&runs);
+            let resumable: Vec<_> = plan.checkpoints.iter().filter(|c| starts.get(c.pass_end).copied().unwrap_or(false)).copied().collect();
+            self.prefix.prepare(doc, &resumable)
+        } else {
+            None
+        };
 
         // Effect maps of whole regions first (they may render group shapes through sub-plans);
         // regions larger than the limit are built per cell below.
@@ -1210,7 +1220,7 @@ impl Compositor {
             stats.chunks += chunks.len();
             work += part.width() as u64 * part.height() as u64 * plan.passes.len() as u64;
             let mut batch = flush.then_some(&mut last_submit);
-            self.run_cell(device, queue, encoder, doc.id, &plan, &paged, cell, &fr, &chunks, checkpoint, &mut stats, sink, &mut batch);
+            self.run_cell(device, queue, encoder, doc.id, &plan, &runs, &paged, cell, &fr, &chunks, checkpoint, &mut stats, sink, &mut batch);
             // The device was lost in a submit inside the cell: issue no more work.
             if let Some(f) = self.fault() {
                 return Err(Unsupported(f.to_string()));
@@ -1381,8 +1391,8 @@ impl Compositor {
         Bound { views, keys, maps }
     }
 
-    /// Run `plan` over the `chunks` of one page cell (document rects, at most a chunk square),
-    /// handing each finished chunk to `sink`.
+    /// Run `plan` (drawn as `runs`, its `batch_runs`) over the `chunks` of one page cell
+    /// (document rects, at most a chunk square), handing each finished chunk to `sink`.
     #[allow(clippy::too_many_arguments)]
     fn run_cell(
         &mut self,
@@ -1391,6 +1401,7 @@ impl Compositor {
         encoder: &mut wgpu::CommandEncoder,
         doc: DocId,
         plan: &Plan<'_>,
+        runs: &[usize],
         paged: &[bool],
         cell: Cell,
         fr: &FrameRes,
@@ -1409,8 +1420,6 @@ impl Compositor {
             .and_then(|_| chunks.iter().map(|c| self.prefix.restore_point(*c).map(|r| r.pass_end)).try_fold(usize::MAX, |m, p| Some(m.min(p?))))
             .unwrap_or(0);
         let bound = self.bind_cell(device, queue, encoder, doc, plan, paged, cell, fr, first_pass, stats);
-        // Runs of plain layers drawn as one pass each (`fs_layerbatch`).
-        let runs = batch_runs(plan, checkpoint.map(|c| c.pass_end));
 
         // Chunk pool.
         while self.pool.len() < plan.slots as usize {
@@ -2172,9 +2181,12 @@ const BATCH: usize = 4;
 /// isn't a gradient (whose parameters use the words the extra layers go in), and continues while
 /// the next pass is a `LayerBlend` of an unmasked plain layer (no text gamma, no Dissolve) onto
 /// exactly what the previous pass wrote, a slot nothing else reads before it is written again.
-/// A run doesn't cross `capture`, the pass where this render captures its prefix checkpoint, and
-/// never ends in the slot it reads from.
-fn batch_runs(plan: &Plan<'_>, capture: Option<usize>) -> Vec<usize> {
+/// A run never ends in the slot it reads from.
+///
+/// The runs depend on the plan alone, never on the prefix cache: a compiler may give a layer
+/// other bits batched than drawn alone (FXC on D3D12 does), and reusing a prefix must stay exact
+/// (#5286). The cache captures and resumes only at `run_starts` instead.
+fn batch_runs(plan: &Plan<'_>) -> Vec<usize> {
     let passes = &plan.passes;
     let n = passes.len();
     let reads = |p: &plan::Pass<'_>, s: plan::Slot| [p.a, p.b, p.c, p.d].contains(&Some(s));
@@ -2204,7 +2216,7 @@ fn batch_runs(plan: &Plan<'_>, capture: Option<usize>) -> Vec<usize> {
         .map(|i| {
             let Some(first) = passes.get(i).filter(|p| lead(p)) else { return 1 };
             let (mut k, mut best) = (1, 1);
-            while k < BATCH && feeds_next.get(i + k - 1).copied().unwrap_or(false) && passes.get(i + k).is_some_and(extra) && capture != Some(i + k) {
+            while k < BATCH && feeds_next.get(i + k - 1).copied().unwrap_or(false) && passes.get(i + k).is_some_and(extra) {
                 k += 1;
                 if passes.get(i + k - 1).is_some_and(|p| Some(p.dst) != first.a) {
                     best = k;
@@ -2213,6 +2225,18 @@ fn batch_runs(plan: &Plan<'_>, capture: Option<usize>) -> Vec<usize> {
             best
         })
         .collect()
+}
+
+/// For each pass and the end of the plan, whether the executor draws `runs` (`batch_runs`) so
+/// that a pass starts there rather than inside a run.
+fn run_starts(runs: &[usize]) -> Vec<bool> {
+    let mut starts = vec![false; runs.len() + 1];
+    let mut i = 0;
+    while let Some(s) = starts.get_mut(i) {
+        *s = true;
+        i += runs.get(i).copied().unwrap_or(1).max(1);
+    }
+    starts
 }
 
 /// The pipeline that draws `run` (passes `batch_runs` joined): `fs_layerbatch_normal` when every
@@ -2666,8 +2690,8 @@ mod tests {
 
     /// A run joins `LayerBlend` passes that only feed each other, at most `BATCH` of them, and
     /// never ends in the slot it reads from.
-    fn check_runs(p: &Plan<'_>, capture: Option<usize>) -> Vec<usize> {
-        let runs = batch_runs(p, capture);
+    fn check_runs(p: &Plan<'_>) -> Vec<usize> {
+        let runs = batch_runs(p);
         assert_eq!(runs.len(), p.passes.len());
         for (i, &k) in runs.iter().enumerate() {
             assert!((1..=BATCH).contains(&k), "pass {i}: run {k}");
@@ -2677,7 +2701,6 @@ mod tests {
                     assert_eq!(p.passes[j].kernel, Kernel::LayerBlend);
                     assert_eq!(p.passes[j].a, Some(p.passes[j - 1].dst), "run at {i}: pass {j} doesn't read the one before");
                     assert!(p.passes[j].mask.is_none() && p.passes[j].mode != photocraft_color::BlendMode::Dissolve, "run at {i}: pass {j}");
-                    assert_ne!(capture, Some(j), "run at {i} skips the captured checkpoint");
                 }
             }
         }
@@ -2695,20 +2718,30 @@ mod tests {
             d.layers.push(l);
         }
         let p = plan::plan(&d).unwrap();
-        let runs = check_runs(&p, None);
+        let runs = check_runs(&p);
         assert!(runs.iter().any(|k| *k >= 3), "{runs:?}");
-        // A run stops at the checkpoint this render captures, wherever that is.
-        for cp in &p.checkpoints {
-            check_runs(&p, Some(cp.pass_end));
+        // The cache resumes only where a run starts, so a cached render draws the passes above
+        // its checkpoint in the same runs as an uncached one; checkpoints inside a run are
+        // skipped, but a stack of plain layers keeps some to resume at.
+        let starts = run_starts(&runs);
+        assert_eq!(starts.len(), runs.len() + 1);
+        assert!(starts[0] && starts[runs.len()]);
+        let (mut at, mut i) = (Vec::new(), 0);
+        while i < runs.len() {
+            at.push(i);
+            i += runs[i];
         }
+        assert_eq!(starts.iter().enumerate().filter(|(_, s)| **s).map(|(i, _)| i).collect::<Vec<_>>(), [at, vec![runs.len()]].concat());
+        let resumable = p.checkpoints.iter().filter(|c| c.pass_end > 1 && starts[c.pass_end]).count();
+        assert!(resumable >= 2 && resumable < p.checkpoints.len(), "{resumable} of {:?}", p.checkpoints);
         // A masked or Dissolve layer, or a clipped one, never joins a run as an extra layer.
         d.layers[3].mask = Some(LayerMask::hide_all());
         d.layers[6].blend = BlendMode::Dissolve;
         d.layers[9].clipped = true;
-        check_runs(&plan::plan(&d).unwrap(), None);
+        check_runs(&plan::plan(&d).unwrap());
         // Nothing to batch: a lone layer.
         d.layers.truncate(1);
-        assert_eq!(check_runs(&plan::plan(&d).unwrap(), None), vec![1; plan::plan(&d).unwrap().passes.len()]);
+        assert_eq!(check_runs(&plan::plan(&d).unwrap()), vec![1; plan::plan(&d).unwrap().passes.len()]);
     }
 
     #[test]

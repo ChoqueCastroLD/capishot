@@ -159,6 +159,14 @@ fn mask(rect: Rect, seed: u32, default: f32) -> LayerMask {
     m
 }
 
+/// `l` with a mask that reveals everything, so the executor draws it in a pass of its own rather
+/// than batched with the layer below: prefix tests resume at any layer (only where a batch run
+/// starts, `batch_runs`).
+fn alone(mut l: Layer) -> Layer {
+    l.mask = Some(LayerMask::reveal_all());
+    l
+}
+
 fn base_doc(w: u32, h: u32) -> Document {
     let mut d = Document::new("t", Size::new(w, h), ColorMode::Rgb, SampleType::U8);
     d.layers.push(noise_layer("bg", PixelFormat::RGBA8, Rect::from_xywh(0, 0, w, h), 1, 0.3));
@@ -240,7 +248,7 @@ fn stack_prefix_reuse_matches_uncached_gpu_and_cpu_at_every_depth() {
     for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
         let mut doc = Document::new("reuse", Size::new(300, 70), ColorMode::Rgb, depth);
         for seed in 1..=4 {
-            doc.layers.push(noise_layer("layer", doc.pixel_format(), doc.bounds(), seed, 0.2));
+            doc.layers.push(alone(noise_layer("layer", doc.pixel_format(), doc.bounds(), seed, 0.2)));
         }
         check(&mut g, &doc, "populate prefix");
         for (opacity, fill, blend, visible) in [
@@ -278,22 +286,31 @@ fn stack_prefix_reuse_matches_uncached_gpu_and_cpu_at_every_depth() {
 /// Duplicating a layer high in the stack, undoing and redoing it (#5286): the render resumes
 /// from the lower cached prefix and moves the cache up to just below the copy, so the undo and
 /// the redo skip more passes. Every render matches an uncached compositor bit for bit, at every
-/// depth.
+/// depth, also when plain layers are drawn several to a pass and the cache can only resume where
+/// a batch starts.
 #[test]
 fn prefix_follows_an_edit_up_the_stack_and_stays_exact() {
     let Some(mut g) = gpu() else { return };
     let mut uncached = Compositor::new(&g.device);
     uncached.set_composite_cache_budget(0);
-    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+    for (depth, batched) in [SampleType::U8, SampleType::U16, SampleType::F32].into_iter().flat_map(|d| [(d, false), (d, true)]) {
         let mut doc = Document::new("follow", Size::new(300, 70), ColorMode::Rgb, depth);
         for seed in 1..=6 {
-            doc.layers.push(noise_layer("layer", doc.pixel_format(), doc.bounds(), seed, 0.2));
+            let l = noise_layer("layer", doc.pixel_format(), doc.bounds(), seed, 0.2);
+            doc.layers.push(if batched { l } else { alone(l) });
         }
         let mut exact = |g: &mut Gpu, doc: &Document, what: &str| -> photocraft_gpu::Stats {
             let stats = diff_rect(g, doc, doc.bounds(), what).unwrap_or_else(|e| panic!("{e}"));
             let cached = render_to_vec(&mut g.comp, &g.device, &g.queue, doc, doc.bounds()).unwrap();
-            let cold = render_to_vec(&mut uncached, &g.device, &g.queue, doc, doc.bounds()).unwrap();
-            assert_eq!(cached, cold, "{depth:?} {what}: reuse preserves the GPU accumulator exactly");
+            let (cold, cold_stats) = photocraft_gpu::render_to_vec_stats(&mut uncached, &g.device, &g.queue, doc, doc.bounds()).unwrap();
+            assert_eq!(cached, cold, "{depth:?} batched {batched} {what}: reuse preserves the GPU accumulator exactly");
+            // Batched and single-layer draws needn't give the same bits on every backend (FXC
+            // on D3D12): a render that captures the prefix groups the layers as an uncached one
+            // does, wherever its checkpoint is.
+            if stats.prefix_hits == 0 {
+                assert_eq!(stats.layers_batched, cold_stats.layers_batched, "{depth:?} {what}: capturing changed the batches");
+            }
+            assert_eq!(cold_stats.layers_batched > 0, batched, "{depth:?} {what}");
             stats
         };
         exact(&mut g, &doc, "populate");
@@ -304,15 +321,17 @@ fn prefix_follows_an_edit_up_the_stack_and_stays_exact() {
         let copy = doc.layers[4].duplicate();
         doc.layers.insert(5, copy);
         let first = exact(&mut g, &doc, "duplicate");
-        assert!(first.prefix_hits > 0, "{depth:?} the duplicate resumes from the low prefix");
         let undo = exact(&mut g, &low, "undo");
-        assert!(undo.prefix_hits > 0, "{depth:?}");
-        assert!(undo.prefix_passes_skipped > first.prefix_passes_skipped, "{depth:?} the cache moved up: {first:?} {undo:?}");
+        assert!(undo.prefix_hits > 0, "{depth:?} batched {batched}");
+        if !batched {
+            assert!(first.prefix_hits > 0, "{depth:?} the duplicate resumes from the low prefix");
+            assert!(undo.prefix_passes_skipped > first.prefix_passes_skipped, "{depth:?} the cache moved up: {first:?} {undo:?}");
+        }
         let redo = exact(&mut g, &doc, "redo");
-        assert_eq!(redo.prefix_passes_skipped, undo.prefix_passes_skipped, "{depth:?}");
+        assert_eq!(redo.prefix_passes_skipped, undo.prefix_passes_skipped, "{depth:?} batched {batched}");
         // An edit below the moved cache still invalidates it.
         doc.layers[2].opacity = 0.4;
-        assert_eq!(exact(&mut g, &doc, "lower edit").prefix_hits, 0, "{depth:?}");
+        assert_eq!(exact(&mut g, &doc, "lower edit").prefix_hits, 0, "{depth:?} batched {batched}");
     }
 }
 
@@ -327,7 +346,7 @@ fn chunks_keep_their_own_checkpoint_after_a_partial_refresh() {
     uncached.set_composite_cache_budget(0);
     let mut doc = base_doc(600, 300);
     for seed in 2..=5 {
-        doc.layers.push(noise_layer("layer", PixelFormat::RGBA8, doc.bounds(), seed, 0.2));
+        doc.layers.push(alone(noise_layer("layer", PixelFormat::RGBA8, doc.bounds(), seed, 0.2)));
     }
     let mut render = |g: &mut Gpu, doc: &Document, rect: Rect, what: &str| -> photocraft_gpu::Stats {
         let (cached, stats) = photocraft_gpu::render_to_vec_stats(&mut g.paged, &g.device, &g.queue, doc, rect).unwrap();
@@ -443,8 +462,8 @@ fn disjoint_partial_damages_admit_whole_chunks_not_damage_rects() {
 fn prefix_partial_damage_context_occlusion_and_budget_are_conservative() {
     let Some(mut g) = gpu() else { return };
     let mut doc = base_doc(600, 300);
-    doc.layers.push(noise_layer("middle", PixelFormat::RGBA8, doc.bounds(), 2, 0.2));
-    doc.layers.push(noise_layer("top", PixelFormat::RGBA8, doc.bounds(), 3, 0.2));
+    doc.layers.push(alone(noise_layer("middle", PixelFormat::RGBA8, doc.bounds(), 2, 0.2)));
+    doc.layers.push(alone(noise_layer("top", PixelFormat::RGBA8, doc.bounds(), 3, 0.2)));
     check(&mut g, &doc, "full prefix");
     // A partial rectangle inside an already-covered whole chunk is served as a sub-rect copy —
     // after a full render every in-bounds rectangle is covered, which is the point of whole
