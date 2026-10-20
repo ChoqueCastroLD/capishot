@@ -416,6 +416,13 @@ pub struct Panels {
     /// floating window rather than a modal so the canvas stays usable while a gradient is edited.
     #[serde(default)]
     pub gradient_editor: bool,
+    /// Floating panels docked into the right dock (`crate::floaters`, by group key): they open
+    /// there until floated again. Saved with the workspace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dock_home: Vec<String>,
+    /// The docked panels that are open this frame (`crate::floaters::sync_docked`).
+    #[serde(skip)]
+    pub docked_open: Vec<String>,
 }
 
 impl Default for Panels {
@@ -438,6 +445,8 @@ impl Default for Panels {
             rail: true,
             menu_bar: true,
             gradient_editor: false,
+            dock_home: Vec::new(),
+            docked_open: Vec::new(),
         }
     }
 }
@@ -984,6 +993,8 @@ pub struct DockTabs {
     pub character: usize,
     /// TypeR (one tab).
     pub typer: usize,
+    /// The docked floating panels (`crate::floaters`; one tab each).
+    pub floater: usize,
 }
 
 /// Color panel state.

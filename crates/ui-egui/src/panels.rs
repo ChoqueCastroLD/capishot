@@ -1608,6 +1608,8 @@ pub(crate) fn narrow_dock_open(ctx: &egui::Context) -> Option<bool> {
 pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // Even legacy destinations must discard gestures captured by an earlier workspace.
     let customized = crate::panel_docking::show(app, ui);
+    // Floating panels docked or floated by their headers or a window dropped on the dock.
+    crate::floaters::frame(app, ui.ctx());
     let t = Tokens::get(ui.ctx());
     let p = app.ui.panels.clone();
     let narrow = if customized { None } else { narrow_dock_open(ui.ctx()) };
@@ -1694,6 +1696,8 @@ fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Pan
         (Group::Layers, p.layers),
     ]
     .into_iter()
+    // Docked floating panels (`crate::floaters`).
+    .chain(Group::FLOATERS.into_iter().map(|g| (g, g.shown(p))))
     .filter_map(|(g, on)| on.then_some(g))
     .collect();
     if shown.is_empty() {
@@ -1706,6 +1710,7 @@ fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Pan
     }
     panel.frame(egui::Frame::NONE.fill(t.dock).inner_margin(egui::Margin::same(margin))).show(ui, |ui| {
         // Groups keep their heights whatever they show (#88): see `dock`.
+        crate::floaters::note_dock_area(ui.ctx(), ui.max_rect());
         crate::dock::show(app, ui, &shown, dock_body);
     });
 }
@@ -1713,6 +1718,11 @@ fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Pan
 /// One dock group's tab content; `dock` bounds it and scrolls it when it's taller.
 pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate::dock::Group, tab: usize) {
     use crate::dock::Group;
+    // A docked floating panel draws itself over this area later in the frame.
+    if group.is_floater() {
+        crate::floaters::reserve(ui, group);
+        return;
+    }
     let pro = Tokens::get(ui.ctx()).pro;
     match (group, tab) {
         (Group::Color, 2) => crate::preset_panels::gradients_panel(app, ui),
@@ -1734,6 +1744,8 @@ pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate
         (Group::Layers, 0) => layers(app, ui),
         (Group::Layers, 1) => channels(app, ui),
         (Group::Layers, _) => crate::vector_ui::paths_panel(app, ui),
+        // Docked floating panels returned above.
+        _ => {}
     }
 }
 

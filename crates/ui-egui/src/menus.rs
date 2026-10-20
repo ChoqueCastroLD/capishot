@@ -696,6 +696,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 _ => return Err(format!("unknown panel in {t}")),
             };
             *slot = !*slot;
+            // A docked floating panel (Brush Settings) shows in the dock as its flag says.
+            crate::floaters::sync_docked(app);
             if let Some(g) = crate::dock::Group::from_key(&t["window.toggle.".len()..]).filter(|g| g.shown(&app.ui.panels)) {
                 crate::dock::reveal(app, g);
             }
