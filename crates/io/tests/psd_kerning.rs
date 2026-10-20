@@ -144,6 +144,35 @@ fn duplicate_preserved_text_indices_get_distinct_txt2_objects() {
     }
 }
 
+/// A type layer added below preserved ones takes a number past theirs: claiming the next free
+/// number on the way up renumbered every layer above it onto its neighbour's `Txt2` object
+/// (#7773, 70 of 74 layers on the #7698 file).
+#[test]
+fn new_text_layer_below_keeps_the_preserved_text_indices() {
+    let mut doc = Document::new("k", photocraft_geom::Size::new(64, 32), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
+    for (i, text) in ["AV", "BC"].into_iter().enumerate() {
+        let mut t = layer(text, &[(2, Kerning::Optical, 0.0)]);
+        photocraft_text::TextEngine::new().render_layer(&mut t, doc.resolution_dpi, doc.pixel_format());
+        let raw = photocraft_text::psd::build_tysh(&t, doc.resolution_dpi, None);
+        t.psd_raw = Some(std::sync::Arc::new(photocraft_text::psd::set_text_index(&raw, i as i32).unwrap()));
+        doc.layers.push(Layer::new(text, LayerContent::Text(t)));
+    }
+    let mut t = layer("new", &[(3, Kerning::Metrics, 0.0)]);
+    photocraft_text::TextEngine::new().render_layer(&mut t, doc.resolution_dpi, doc.pixel_format());
+    doc.layers.insert(0, Layer::new("new", LayerContent::Text(t)));
+    let bytes = photocraft_io::export(&doc, "k.psd", &Default::default()).unwrap().bytes;
+    let back = photocraft_io::import("k.psd", &bytes).unwrap().document;
+    let indices: Vec<_> = back
+        .layers
+        .iter()
+        .map(|l| {
+            let LayerContent::Text(t) = &l.content else { panic!("not text") };
+            (l.name.as_str(), t.psd_raw.as_deref().and_then(|d| photocraft_text::psd::text_index(d)))
+        })
+        .collect();
+    assert_eq!(indices, [("new", Some(2)), ("AV", Some(0)), ("BC", Some(1))]);
+}
+
 /// A file-controlled `TextIndex` must not size the save: `i32::MAX` is ignored (the regenerated
 /// `Txt2` is sized by real text objects, never by a file's numbers) and the document still saves
 /// and reopens with its text.
