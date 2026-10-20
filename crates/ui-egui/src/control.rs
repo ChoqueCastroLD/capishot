@@ -1963,7 +1963,8 @@ mod tests {
         }
         // A bad `fonts` value is validated up front too, so it applies nothing else.
         let fonts_before = serde_json::to_value(&app.ui.fonts).unwrap_or_default();
-        for params in [json!({"tool": "move", "fonts": {"tab": "bogus"}}), json!({"tool": "move", "fonts": {"nope": 1}}), json!({"tool": "move", "fonts": "x"})] {
+        for params in [json!({"tool": "move", "fonts": {"tab": "bogus"}}), json!({"tool": "move", "fonts": {"nope": 1}}), json!({"tool": "move", "fonts": "x"})]
+        {
             let r = call(&mut app, &ctx, "ui.set", params.clone());
             assert_eq!(r["ok"], false, "{params}: {r}");
             assert_eq!(app.ui.tool, before, "{params}: a rejected call applies none of its fields");

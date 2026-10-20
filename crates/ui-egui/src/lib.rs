@@ -137,11 +137,11 @@ pub mod paint_mouse;
 pub mod palette;
 mod panel_docking;
 pub mod panels;
-pub mod perf_counters;
 pub mod parity;
 pub mod patch_preview;
 pub(crate) mod pattern_fill_ui;
 pub mod pattern_preview;
+pub mod perf_counters;
 pub mod perspective_crop_ui;
 pub mod perspective_ui;
 pub mod pixel_grid;
@@ -1766,6 +1766,10 @@ impl eframe::App for PhotocraftApp {
             if chrome && app.ui.panels.dock {
                 panels::right_dock(app, ui);
             }
+            // The panel column beside the toolbar (after the right dock, which settles drops).
+            if chrome {
+                panels::left_dock(app, ui);
+            }
         });
         let t = theme::Tokens::get(&ctx);
         let backdrop = if chrome { prefs_ui::pasteboard_color(self).unwrap_or(t.canvas) } else { egui::Color32::BLACK };
@@ -1774,6 +1778,9 @@ impl eframe::App for PhotocraftApp {
             canvas::document_area(self, ui);
         });
         panels::properties_window(self, &ctx);
+        if chrome {
+            panels::floating_groups(self, &ctx);
+        }
         brush_panel::window(self, &ctx);
         preset_panels::windows(self, &ctx);
         gradient_ui::editor_window(self, &ctx);
@@ -2029,7 +2036,11 @@ impl PhotocraftApp {
     }
 
     fn blank_thumb(&mut self, ctx: &egui::Context) -> egui::TextureId {
-        self.blank_thumb.get_or_insert_with(|| ctx.load_texture("thumb-blank", egui::ColorImage::new([1, 1], vec![egui::Color32::TRANSPARENT]), egui::TextureOptions::LINEAR)).id()
+        self.blank_thumb
+            .get_or_insert_with(|| {
+                ctx.load_texture("thumb-blank", egui::ColorImage::new([1, 1], vec![egui::Color32::TRANSPARENT]), egui::TextureOptions::LINEAR)
+            })
+            .id()
     }
 
     fn store_thumb(&mut self, ctx: &egui::Context, key: (photocraft_doc::LayerId, u8), rev: u64, img: egui::ColorImage) -> egui::TextureId {

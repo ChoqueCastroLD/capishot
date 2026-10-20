@@ -377,9 +377,11 @@ fn double_clicking_a_tab_collapses_and_dragging_a_strip_reorders() {
     // Drag the Layers tab strip (right of its tabs) above Color.
     let layers = rect_of(&h, Group::Layers);
     let strip = Pos2::new(layers.right() - 60.0, layers.top() + 13.0);
-    let to = rect_of(&h, Group::Color).left_top() + vec2(120.0, 10.0);
+    // Above Color's strip (onto the strip itself would stack the two, as in Photoshop).
+    let to = rect_of(&h, Group::Color).left_top() + vec2(120.0, -5.0);
     drag(&mut h, strip, to);
     assert_eq!(h.state().ui.dock.order().first(), Some(&Group::Layers));
+    assert!(h.state().ui.dock.guests.is_empty());
     // A locked workspace keeps the order.
     h.state_mut().session.prefs.edit(|p| p.workspace_locked = true);
     let layers = rect_of(&h, Group::Layers);
@@ -1158,4 +1160,130 @@ fn a_docked_floating_panel_draws_in_its_group_and_floats_back() {
     assert!(last_rects(&h.ctx).iter().all(|(g, _)| *g != Group::BrushSettings), "floated out of the dock");
     assert!(h.state().ui.panels.brush_settings && h.state().ui.panels.dock_home.is_empty(), "still open, in its window");
     assert!(h.query_by_label("Dock to the Panels").is_some(), "its window offers docking again");
+}
+
+/// Photoshop's columns: groups dock beside the toolbar or on the right, stack as tabs, float
+/// and dock back, and all of it survives the workspace's JSON.
+#[test]
+fn groups_move_between_columns_stacks_and_floats_and_round_trip() {
+    let mut l = DockLayout::default();
+    l.place(Group::TypeR, DropAt::Column(Side::Left, None), Vec2::ZERO);
+    assert_eq!(l.side(Group::TypeR), Side::Left);
+    assert_eq!(l.side(Group::Layers), Side::Right);
+    l.place(Group::Navigator, DropAt::Tab(Group::Layers), Vec2::ZERO);
+    assert_eq!((l.host(Group::Navigator), l.guests_of(Group::Layers)), (Group::Layers, vec![Group::Navigator]));
+    assert_eq!(l.front.get(&Group::Layers), Some(&Group::Navigator), "the dropped group shows in front");
+    l.place(Group::History, DropAt::Float(pos2(300.0, 200.0)), vec2(20.0, 10.0));
+    assert_eq!(l.floating.get(&Group::History), Some(&[280.0, 190.0]));
+    // Stacked onto a stack: joins its host.
+    l.place(Group::Color, DropAt::Tab(Group::Navigator), Vec2::ZERO);
+    assert_eq!(l.host(Group::Color), Group::Layers);
+    let back: DockLayout = serde_json::from_value(serde_json::to_value(&l).unwrap()).unwrap();
+    assert_eq!(back, l);
+    // Back into a column: out of the stack, out of the float.
+    l.place(Group::Navigator, DropAt::Column(Side::Left, Some(Group::TypeR)), Vec2::ZERO);
+    l.place(Group::History, DropAt::Column(Side::Right, Some(Group::Layers)), Vec2::ZERO);
+    assert_eq!(l.host(Group::Navigator), Group::Navigator);
+    assert!(l.floating.is_empty());
+    let left: Vec<Group> = l.order().into_iter().filter(|g| l.side(*g) == Side::Left).collect();
+    assert_eq!(left, vec![Group::Navigator, Group::TypeR]);
+    // A host leaving its stack hands its guests to the next one.
+    l.place(Group::Layers, DropAt::Float(pos2(10.0, 10.0)), Vec2::ZERO);
+    assert_eq!(l.host(Group::Color), Group::Color);
+    assert!(!l.floating.contains_key(&Group::Color), "the guest stays in the column");
+    // A cycle in a hand-edited layout doesn't hang.
+    l.guests.insert(Group::Shapes, Group::Styles);
+    l.guests.insert(Group::Styles, Group::Shapes);
+    let _ = l.host(Group::Styles);
+}
+
+/// The column beside the toolbar, a column collapsed to icons and its flyout, and a floating
+/// group, in the real chrome.
+#[test]
+fn left_column_icon_strip_and_floating_group_draw() {
+    use egui_kittest::kittest::Queryable;
+    let (mut app, _, _) = app_with_layers();
+    app.ui.panels.typer = true;
+    app.ui.panels.history = true;
+    app.ui.dock.place(Group::TypeR, DropAt::Column(Side::Left, None), Vec2::ZERO);
+    app.ui.dock.place(Group::History, DropAt::Float(pos2(400.0, 300.0)), Vec2::ZERO);
+    let mut h = Harness::builder().with_size(vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            let ctx = ui.ctx().clone();
+            if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            crate::panels::toolbar(app, ui);
+            crate::panels::right_dock(app, ui);
+            crate::panels::left_dock(app, ui);
+            egui::CentralPanel::default().show(ui, |_| {});
+            crate::panels::floating_groups(app, &ctx);
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, ThemeKind::Pro);
+    h.state_mut().ui.theme = ThemeKind::Pro;
+    h.run_steps(4);
+    let typer = rect_of(&h, Group::TypeR);
+    let layers = rect_of(&h, Group::Layers);
+    assert!(typer.right() < 500.0 && layers.left() > 900.0, "TypeR beside the toolbar {typer:?}, Layers right {layers:?}");
+    assert!(typer.height() > 600.0, "a lone group fills its column: {typer:?}");
+    let history = rect_of(&h, Group::History);
+    assert!(history.left() > 390.0 && history.left() < 420.0, "floating where it was put: {history:?}");
+    // » collapses the right column to icons; an icon opens its group beside the strip.
+    let collapse = h.query_all_by_label("Collapse to Icons").map(|n| n.rect().center()).max_by(|a, b| a.x.total_cmp(&b.x)).unwrap();
+    click(&mut h, collapse);
+    h.run_steps(2);
+    assert!(h.state().ui.dock.iconic.contains(&Side::Right));
+    assert!(last_rects(&h.ctx).iter().all(|(g, _)| *g != Group::Layers), "only icons");
+    let icon = h.query_all_by_label("Layers").map(|n| n.rect()).find(|r| r.width() <= 40.0 && r.left() > 1200.0).unwrap().center();
+    click(&mut h, icon);
+    h.run_steps(2);
+    let fly = rect_of(&h, Group::Layers);
+    assert!(fly.right() <= icon.x && fly.height() > 200.0, "the flyout opens beside the icons: {fly:?}");
+    click(&mut h, pos2(700.0, 450.0));
+    h.run_steps(2);
+    assert!(last_rects(&h.ctx).iter().all(|(g, _)| *g != Group::Layers), "a click elsewhere closes it");
+    let expand = h.get_by_label("Expand Panels").rect().center();
+    click(&mut h, expand);
+    h.run_steps(2);
+    assert!(!h.state().ui.dock.iconic.contains(&Side::Right) && last_rects(&h.ctx).iter().any(|(g, _)| *g == Group::Layers));
+}
+
+/// A press with a little hand jitter (down, four 1–2 pt moves, up) is still a click on a panel's
+/// menu button and on the column header, and doesn't move, float or stack the group.
+#[test]
+fn jittery_clicks_on_dock_chrome_are_clicks() {
+    let (app, _, _) = app_with_layers();
+    let mut h = harness(app, vec2(1200.0, 800.0), ThemeKind::Pro);
+    let before = h.state().ui.dock.clone();
+    let menu = last_strips(&h.ctx).into_iter().find(|s| s.group == Group::Layers).unwrap().menu.center();
+    jitter_click(&mut h, menu);
+    h.run_steps(2);
+    assert!(h.ctx.any_popup_open(), "the panel menu opened");
+    assert_eq!(h.state().ui.dock.floating, before.floating);
+    assert_eq!(h.state().ui.dock.guests, before.guests);
+    assert_eq!(h.state().ui.dock.order(), before.order());
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    let strip = last_strips(&h.ctx).into_iter().find(|s| s.group == Group::Color).unwrap().area.right_center() - vec2(30.0, 0.0);
+    jitter_click(&mut h, strip);
+    h.run_steps(2);
+    assert_eq!(h.state().ui.dock.order(), before.order(), "a jittery click on a strip moves nothing");
+    assert!(h.state().ui.dock.floating.is_empty());
+}
+
+fn jitter_click(h: &mut Harness<'static, PhotocraftApp>, p: Pos2) {
+    h.event(egui::Event::PointerMoved(p));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(1);
+    let mut at = p;
+    for d in [vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(-1.0, 1.0), vec2(1.0, -1.0)] {
+        at += d;
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(1);
+    }
+    h.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(1);
 }

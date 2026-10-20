@@ -1490,15 +1490,10 @@ fn subtract(a: photocraft_geom::Rect, b: photocraft_geom::Rect) -> Vec<photocraf
     if i.is_empty() {
         return if a.is_empty() { Vec::new() } else { vec![a] };
     }
-    [
-        Rect::new(a.x0, a.y0, a.x1, i.y0),
-        Rect::new(a.x0, i.y1, a.x1, a.y1),
-        Rect::new(a.x0, i.y0, i.x0, i.y1),
-        Rect::new(i.x1, i.y0, a.x1, i.y1),
-    ]
-    .into_iter()
-    .filter(|r| !r.is_empty())
-    .collect()
+    [Rect::new(a.x0, a.y0, a.x1, i.y0), Rect::new(a.x0, i.y1, a.x1, a.y1), Rect::new(a.x0, i.y0, i.x0, i.y1), Rect::new(i.x1, i.y0, a.x1, i.y1)]
+        .into_iter()
+        .filter(|r| !r.is_empty())
+        .collect()
 }
 
 /// Regions of a display texture whose finer mip levels are out of date: each holds the first

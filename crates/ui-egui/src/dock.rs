@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use egui::{Pos2, Rect, Sense, Stroke, pos2, vec2};
+use egui::{Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -291,6 +291,53 @@ pub struct DockLayout {
     /// follow it in their default order. Anything unreadable falls back to the defaults.
     #[serde(rename = "tabOrder", alias = "tab_order", deserialize_with = "lenient_tab_order")]
     pub tab_order: BTreeMap<Group, Vec<String>>,
+    /// Groups docked in the column beside the toolbar (Photoshop's second panel column); the
+    /// rest of the docked groups are in the right column.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub left: Vec<Group>,
+    /// Columns collapsed to an icon strip (« » in the column header).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub iconic: Vec<Side>,
+    /// Dock groups floated out of the dock: where their window is (screen points).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub floating: BTreeMap<Group, [f32; 2]>,
+    /// Groups stacked as tabs onto another group's strip: guest → host.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub guests: BTreeMap<Group, Group>,
+    /// The member whose tabs a host group shows in front (host → member).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub front: BTreeMap<Group, Group>,
+}
+
+/// A dock column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Side {
+    /// Beside the toolbar.
+    Left,
+    /// The right dock.
+    Right,
+}
+
+/// Where [`show`] draws groups.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    Column(Side),
+    /// A group floated out of the dock, in its own window.
+    Floating,
+    /// A group opened from a column collapsed to icons.
+    Flyout(Side),
+}
+
+/// Where a dragged group lands ([`drop_target`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DropAt {
+    /// On another group's tab strip: stack as tabs with that (host) group.
+    Tab(Group),
+    /// In a column, before that group (or last).
+    Column(Side, Option<Group>),
+    /// Anywhere else: float there.
+    Float(Pos2),
 }
 
 /// Read `tabOrder` keeping what makes sense: unknown groups, non-list values and non-string names
@@ -311,6 +358,80 @@ pub const GAP: f32 = 6.0;
 const MAX_HEIGHT: f32 = 4000.0;
 
 impl DockLayout {
+    /// The column `g` docks in.
+    pub fn side(&self, g: Group) -> Side {
+        if self.left.contains(&g) { Side::Left } else { Side::Right }
+    }
+
+    /// The group whose strip shows `g`'s tabs (`g` itself unless stacked onto another).
+    pub fn host(&self, g: Group) -> Group {
+        let mut h = g;
+        // Guards against a cycle in a hand-edited layout.
+        for _ in 0..4 {
+            match self.guests.get(&h) {
+                Some(next) if *next != h => h = *next,
+                _ => break,
+            }
+        }
+        h
+    }
+
+    /// The groups stacked onto `host`, in order.
+    pub fn guests_of(&self, host: Group) -> Vec<Group> {
+        Group::EVERY.into_iter().filter(|g| *g != host && self.guests.get(g) == Some(&host)).collect()
+    }
+
+    /// Take `g` out of any stack, column and float (before it lands somewhere else).
+    fn detach(&mut self, g: Group) {
+        self.guests.remove(&g);
+        self.floating.remove(&g);
+        self.front.remove(&g);
+        self.front.retain(|_, m| *m != g);
+        // Its own guests stay together: the first takes over as their host.
+        let mine = self.guests_of(g);
+        if let Some((&first, rest)) = mine.split_first() {
+            self.guests.remove(&first);
+            for r in rest {
+                self.guests.insert(*r, first);
+            }
+            if self.left.contains(&g) && !self.left.contains(&first) {
+                self.left.push(first);
+            } else if !self.left.contains(&g) {
+                self.left.retain(|x| *x != first);
+            }
+            self.move_group(first, Some(g));
+        }
+    }
+
+    /// Put `g` where a drag dropped it.
+    pub fn place(&mut self, g: Group, at: DropAt, float_offset: Vec2) {
+        match at {
+            DropAt::Tab(host) => {
+                let host = self.host(host);
+                if host == g {
+                    return;
+                }
+                self.detach(g);
+                self.guests.insert(g, host);
+                self.front.insert(host, g);
+            }
+            DropAt::Column(side, before) => {
+                self.detach(g);
+                self.left.retain(|x| *x != g);
+                if side == Side::Left {
+                    self.left.push(g);
+                }
+                self.move_group(g, before.filter(|b| *b != g));
+                self.set_collapsed(g, false);
+            }
+            DropAt::Float(p) => {
+                self.detach(g);
+                let p = p - float_offset;
+                self.floating.insert(g, [p.x, p.y]);
+            }
+        }
+    }
+
     /// Every tab of `group` in the user's order (#2272), with its original index (the one
     /// `dockTabs`, commands and panel bodies use).
     pub fn ordered_tabs(&self, group: Group, pro: bool) -> Vec<(usize, &'static str)> {
@@ -542,8 +663,12 @@ pub(crate) fn set_shown(app: &mut PhotocraftApp, g: Group, on: bool) {
 
 /// Per-group interactions collected while drawing, applied afterwards.
 enum Action {
-    /// A docked floating panel goes back to its window.
-    Float(Group),
+    /// Float a dock group (Float Panel Group) at that point.
+    FloatGroup(Group, Pos2),
+    /// Dock a floating group back into its column.
+    DockGroup(Group),
+    /// A group's drag ended at that point (the grab offset in the group, where it was drawn).
+    Drop(Group, Pos2, Vec2, Place),
     ToggleCollapse(Group),
     Close(Group),
     CloseTab(Group, usize),
@@ -579,24 +704,170 @@ pub struct StripRects {
     pub chevron: Option<Rect>,
 }
 
-/// The tab strips drawn last frame.
+/// The tab strips drawn last frame (every column, floating group and flyout).
 pub fn last_strips(ctx: &egui::Context) -> Vec<StripRects> {
-    ctx.data(|d| d.get_temp::<Vec<StripRects>>(strips_id())).unwrap_or_default()
+    ctx.data(|d| d.get_temp::<(u64, Vec<StripRects>)>(strips_id())).map(|(_, v)| v).unwrap_or_default()
 }
 
 fn strips_id() -> egui::Id {
     egui::Id::new("dock-strip-rects")
 }
 
-/// Draw the `shown` groups (any order; the layout decides) filling `ui`. `body` draws one
-/// group's tab content.
-pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut body: impl FnMut(&mut PhotocraftApp, &mut egui::Ui, Group, usize)) {
+/// Add this frame's `rects` and `strips` to what the frame drew so far (several places draw
+/// groups: the two columns, floating groups and a flyout).
+fn note_drawn(ctx: &egui::Context, rects: Vec<(Group, Rect)>, strips: Vec<StripRects>) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| {
+        let r = d.get_temp_mut_or_default::<(u64, Vec<(Group, Rect)>)>(rects_frame_id());
+        if r.0 != frame {
+            *r = (frame, Vec::new());
+        }
+        r.1.extend(rects);
+        let all = r.1.clone();
+        let st = d.get_temp_mut_or_default::<(u64, Vec<StripRects>)>(strips_id());
+        if st.0 != frame {
+            *st = (frame, Vec::new());
+        }
+        st.1.extend(strips);
+        d.insert_temp(rects_id(), all);
+    });
+}
+
+fn rects_frame_id() -> egui::Id {
+    egui::Id::new("dock-group-rects-frame")
+}
+
+fn columns_id() -> egui::Id {
+    egui::Id::new("dock-columns")
+}
+
+/// A column's area this frame, and its groups' rects (for drops from elsewhere).
+pub(crate) fn note_column(ctx: &egui::Context, side: Side, area: Rect) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| {
+        let c = d.get_temp_mut_or_default::<(u64, Vec<(Side, Rect)>)>(columns_id());
+        if c.0 != frame {
+            // Last frame's stay until this frame draws them again (drops resolve during drawing).
+            c.0 = frame;
+            c.1.retain(|(s, _)| *s != side);
+        }
+        c.1.retain(|(s, _)| *s != side);
+        c.1.push((side, area));
+    });
+}
+
+/// The columns' areas as last drawn.
+pub fn columns(ctx: &egui::Context) -> Vec<(Side, Rect)> {
+    ctx.data(|d| d.get_temp::<(u64, Vec<(Side, Rect)>)>(columns_id())).map(|(_, v)| v).unwrap_or_default()
+}
+
+fn drag_id() -> egui::Id {
+    egui::Id::new("dock-group-drag")
+}
+
+/// The group being dragged by its strip or window (drop zones show while it is).
+pub fn dragging(ctx: &egui::Context) -> Option<Group> {
+    ctx.data(|d| d.get_temp::<(u64, Group)>(drag_id())).filter(|(f, _)| *f + 1 >= ctx.cumulative_frame_nr()).map(|(_, g)| g)
+}
+
+pub(crate) fn note_dragging(ctx: &egui::Context, g: Group) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(drag_id(), (frame, g)));
+}
+
+/// Where group `g` lands when its drag ends at `p`: another group's strip stacks it there, a
+/// column (or the empty column's slot beside the toolbar) docks it, anywhere else floats it.
+pub fn drop_target(app: &PhotocraftApp, ctx: &egui::Context, g: Group, p: Pos2) -> DropAt {
+    let layout = &app.ui.dock;
+    for s in last_strips(ctx) {
+        let host = layout.host(s.group);
+        if host != layout.host(g) && s.group != g && s.area.expand2(vec2(0.0, 2.0)).contains(p) {
+            return DropAt::Tab(host);
+        }
+    }
+    let rects = last_rects(ctx);
+    for (side, area) in columns(ctx) {
+        if area.contains(p) {
+            let order: Vec<Group> = layout.order().into_iter().filter(|x| layout.side(*x) == side).collect();
+            let col: Vec<(Group, Rect)> = rects.iter().copied().filter(|(x, r)| order.contains(x) && area.intersects(*r)).collect();
+            return DropAt::Column(side, drop_before(&order, &col, g, p.y));
+        }
+    }
+    if let Some(slot) = left_slot(ctx)
+        && slot.contains(p)
+    {
+        return DropAt::Column(Side::Left, None);
+    }
+    DropAt::Float(p)
+}
+
+fn left_slot_id() -> egui::Id {
+    egui::Id::new("dock-left-slot")
+}
+
+/// Where an empty left column accepts a drop: a strip of the canvas beside the toolbar.
+pub(crate) fn note_left_slot(ctx: &egui::Context, slot: Option<Rect>) {
+    ctx.data_mut(|d| match slot {
+        Some(r) => {
+            d.insert_temp(left_slot_id(), r);
+        }
+        None => {
+            d.remove::<Rect>(left_slot_id());
+        }
+    });
+}
+
+fn left_slot(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|d| d.get_temp::<Rect>(left_slot_id()))
+}
+
+/// The drop zones while a group is dragged: the stack, column and empty-column targets under the
+/// pointer, highlighted above everything.
+pub fn paint_drop_hint(app: &PhotocraftApp, ctx: &egui::Context) {
+    let Some(g) = dragging(ctx) else { return };
+    let Some(p) = ctx.pointer_latest_pos() else { return };
+    let t = Tokens::get(ctx);
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("dock-drop-hint")));
+    let fill = t.accent.gamma_multiply(0.25);
+    let stroke = Stroke::new(2.0, t.accent);
+    if let Some(slot) = left_slot(ctx) {
+        painter.rect_stroke(slot, 2.0, Stroke::new(1.0, t.accent.gamma_multiply(0.6)), egui::StrokeKind::Inside);
+    }
+    match drop_target(app, ctx, g, p) {
+        DropAt::Tab(host) => {
+            if let Some(s) = last_strips(ctx).into_iter().find(|s| s.group == host) {
+                painter.rect(s.area, 2.0, fill, stroke, egui::StrokeKind::Inside);
+            }
+        }
+        DropAt::Column(side, before) => {
+            let area = columns(ctx).into_iter().find(|(s, _)| *s == side).map(|(_, r)| r).or_else(|| left_slot(ctx).filter(|_| side == Side::Left));
+            if let Some(area) = area {
+                let rects = last_rects(ctx);
+                let y = match before.and_then(|b| rects.iter().find(|(x, r)| *x == b && area.intersects(*r))) {
+                    Some((_, r)) => r.top() - GAP / 2.0,
+                    None => rects.iter().filter(|(_, r)| area.intersects(*r)).map(|(_, r)| r.bottom()).fold(area.top(), f32::max) + GAP / 2.0,
+                };
+                painter.rect_filled(area, 0.0, t.accent.gamma_multiply(0.08));
+                painter.line_segment([pos2(area.left(), y), pos2(area.right(), y)], Stroke::new(3.0, t.accent));
+            }
+        }
+        DropAt::Float(_) => {}
+    }
+}
+
+/// Draw the `shown` groups (any order; the layout decides) filling `ui` at `place`. A group with
+/// guests ([`DockLayout::guests`]) shows their tabs on its strip too. `body` draws one group's
+/// tab content.
+pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[Group], mut body: impl FnMut(&mut PhotocraftApp, &mut egui::Ui, Group, usize)) {
     let t = Tokens::get(ui.ctx());
     let strip = if t.pro { 28.0 } else { 40.0 };
-    let order: Vec<Group> = app.ui.dock.order().into_iter().filter(|g| shown.contains(g)).collect();
+    // Guests draw on their host's strip.
+    let order: Vec<Group> = app.ui.dock.order().into_iter().filter(|g| shown.contains(g) && app.ui.dock.host(*g) == *g).collect();
     let area = ui.available_rect_before_wrap();
     let heights = app.ui.dock.heights_for(&order, area.height(), strip);
     let locked = app.session.prefs().workspace_locked;
+    // The classic dock arranges groups itself; a customized layout (`panel_docking`) owns them.
+    let classic = app.ui.docking.is_none() && !crate::panel_docking::legacy_owns_drag(ui.ctx());
     let rects = rects_after_layout(&heights, area);
     let mut actions: Vec<Action> = Vec::new();
     let mut tab_drops: Vec<(Group, usize, Pos2)> = Vec::new();
@@ -607,33 +878,37 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
         let mut child = ui.new_child(egui::UiBuilder::new().id_salt(("dock-group", g.key())).max_rect(rect));
         child.set_clip_rect(rect.intersect(ui.clip_rect()));
         child.spacing_mut().item_spacing.y = if t.pro { 0.0 } else { 6.0 };
-        let before = *g.tab_mut(&mut app.ui.dock_tabs);
-        let visible = app.ui.dock.visible_tabs(g, t.pro);
-        if visible.is_empty() {
+        // The tabs on the strip: the group's own, then its guests' (member, original index, name).
+        let members: Vec<Group> = std::iter::once(g).chain(app.ui.dock.guests_of(g).into_iter().filter(|m| shown.contains(m))).collect();
+        let entries: Vec<(Group, usize, &'static str)> =
+            members.iter().flat_map(|m| app.ui.dock.visible_tabs(*m, t.pro).into_iter().map(move |(i, n)| (*m, i, n))).collect();
+        if entries.is_empty() {
             continue;
         }
-        let indices: Vec<usize> = visible.iter().map(|(i, _)| *i).collect();
-        let tabs: Vec<&str> = visible.iter().map(|(_, name)| *name).collect();
-        let mut sel = indices.iter().position(|i| *i == before).unwrap_or(0);
+        let front = app.ui.dock.front.get(&g).copied().filter(|m| members.contains(m)).unwrap_or(g);
+        let before = *front.tab_mut(&mut app.ui.dock_tabs);
+        let tabs: Vec<&str> = entries.iter().map(|(_, _, name)| *name).collect();
+        let mut sel =
+            entries.iter().position(|(m, i, _)| *m == front && *i == before).or_else(|| entries.iter().position(|(m, _, _)| *m == front)).unwrap_or(0);
         let resp = widgets::card_ex(&mut child, g.key(), &tabs, &mut sel, collapsed, !locked, |ui, shown_tab| {
-            let Some(&tab) = indices.get(shown_tab) else { return };
+            let Some(&(m, tab, _)) = entries.get(shown_tab) else { return };
             let inner = ui.available_height().max(0.0);
-            if g.scrolls_itself(tab) {
+            if m.scrolls_itself(tab) {
                 ui.set_min_height(inner);
-                body(app, ui, g, tab);
+                body(app, ui, m, tab);
             } else {
                 // The pro Color field stretches to the group's height instead of a fixed 120 pt.
-                if t.pro && g == Group::Color && tab == 0 {
+                if t.pro && m == Group::Color && tab == 0 {
                     ui.data_mut(|d| d.insert_temp(crate::panels::color_field_fill_id(), inner));
                 }
                 // No scroll fade: it darkens real colours, swatches and previews at the edge
                 // (#2726); the scroll bar already shows there is more.
                 ui.spacing_mut().scroll.fade.strength = 0.0;
                 egui::ScrollArea::vertical()
-                    .id_salt(("dock-scroll", g.key(), tab))
+                    .id_salt(("dock-scroll", m.key(), tab))
                     .max_height(inner)
                     .auto_shrink([false, false])
-                    .show(ui, |ui| body(app, ui, g, tab));
+                    .show(ui, |ui| body(app, ui, m, tab));
             }
         });
         for (index, response) in &resp.responses {
@@ -644,75 +919,106 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
         strips.push(StripRects {
             group: g,
             area: Rect::from_min_max(pos2(rect.left(), resp.menu.rect.top()), pos2(resp.menu.rect.left(), resp.menu.rect.bottom())),
-            tabs: resp.tabs.iter().filter_map(|(i, r)| indices.get(*i).map(|original| (*original, *r))).collect(),
+            // Original indices of the group's own tabs (guests' tabs are positions past them).
+            tabs: resp.tabs.iter().filter_map(|(i, r)| entries.get(*i).filter(|(m, _, _)| *m == g).map(|(_, original, _)| (*original, *r))).collect(),
             menu: resp.menu.rect,
             chevron: resp.chevron,
         });
-        // The strip uses visible indices; dockTabs and the panel bodies use original indices.
-        if let Some(&picked) = indices.get(sel)
-            && picked != before
+        // The strip uses entry positions; dockTabs and the panel bodies use original indices.
+        if let Some(&(m, picked, _)) = entries.get(sel)
+            && (m != front || picked != before)
         {
-            *g.tab_mut(&mut app.ui.dock_tabs) = picked;
+            *m.tab_mut(&mut app.ui.dock_tabs) = picked;
+            if m == g {
+                app.ui.dock.front.remove(&g);
+            } else {
+                app.ui.dock.front.insert(g, m);
+            }
         }
         if let Some(context) = resp.tab_context {
             match context {
                 crate::tab_strip::TabContextAction::Close(i) => {
-                    if let Some(&tab) = indices.get(i) {
-                        actions.push(Action::CloseTab(g, tab));
+                    if let Some(&(m, tab, _)) = entries.get(i) {
+                        actions.push(Action::CloseTab(m, tab));
                     }
                 }
-                crate::tab_strip::TabContextAction::CloseGroup => actions.push(Action::Close(g)),
+                crate::tab_strip::TabContextAction::CloseGroup => {
+                    for m in &members {
+                        actions.push(Action::Close(*m));
+                    }
+                }
             }
         }
         if resp.strip.double_clicked() || resp.tab_double_clicked || (collapsed && resp.tab_clicked) {
             actions.push(Action::ToggleCollapse(g));
         }
-        // The strip uses visible indices; reorder in original ones.
+        // Reorder within one member's own tabs.
         if !locked
             && let Some((from, before)) = resp.tab_reorder
-            && let Some(&tab) = indices.get(from)
+            && let Some(&(m, tab, _)) = entries.get(from)
         {
-            actions.push(Action::MoveTab(g, tab, before.and_then(|b| indices.get(b).copied())));
+            let to = before.and_then(|b| entries.get(b)).filter(|(bm, _, _)| *bm == m).map(|(_, i, _)| *i);
+            actions.push(Action::MoveTab(m, tab, to));
         }
         // A tab dragged off its strip moves the whole group, as the strip itself does.
-        if !locked && app.ui.docking.is_none() && (resp.strip.dragged() || resp.tab_dragging_out.is_some()) {
+        if !locked && classic && (resp.strip.dragged() || resp.tab_dragging_out.is_some()) {
             dragging = Some(g);
+            note_dragging(ui.ctx(), g);
+            // A floating group's window follows its strip.
+            if place == Place::Floating && resp.strip.dragged() {
+                let d = resp.strip.drag_delta();
+                if let Some(at) = app.ui.dock.floating.get_mut(&g) {
+                    at[0] += d.x;
+                    at[1] += d.y;
+                }
+            }
         }
+        let grab = resp.strip.interact_pointer_pos().map(|p| p - rect.min).unwrap_or(vec2(20.0, 10.0));
         if !locked
-            && app.ui.docking.is_none()
+            && classic
             && resp.strip.drag_stopped()
             && let Some(p) = ui.ctx().pointer_interact_pos().or_else(|| ui.ctx().pointer_latest_pos())
         {
-            actions.push(Action::Move(g, drop_before(&order, &rects, g, p.y)));
+            actions.push(Action::Drop(g, p, grab, place));
         }
         if !locked
-            && app.ui.docking.is_none()
+            && classic
             && let Some(shown_tab) = resp.tab_dropped_out
-            // The strip uses visible indices; the drop resolves the panel by its original one.
-            && let Some(&tab) = indices.get(shown_tab)
+            && let Some(&(m, tab, _)) = entries.get(shown_tab)
             && let Some(p) = ui.ctx().pointer_interact_pos().or_else(|| ui.ctx().pointer_latest_pos())
         {
-            tab_drops.push((g, tab, p));
+            if m == g {
+                tab_drops.push((g, tab, p));
+            } else {
+                // A guest's tab dragged off the strip takes the guest with it.
+                actions.push(Action::Drop(m, p, vec2(20.0, 10.0), place));
+            }
         }
         if dragging == Some(g) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         }
+        let front_label = tabs.get(sel).copied();
         egui::Popup::menu(&resp.menu).show(|ui| {
             crate::widgets::style_spectrum_popup_menu(ui);
             ui.set_min_width(170.0);
-            if tabs.get(sel) == Some(&"Layers") {
+            if front_label == Some("Layers") {
                 crate::layer_row_ui::panel_menu(app, ui);
                 ui.separator();
             }
-            if tabs.get(sel) == Some(&"Swatches") {
+            if front_label == Some("Swatches") {
                 crate::swatches_ui::panel_menu(app, ui);
                 ui.separator();
             }
-            if let Some(label) = tabs.get(sel) {
+            if let Some(label) = front_label {
                 crate::panel_docking::legacy_menu(app, ui, label);
             }
-            if g.is_floater() && ui.add_enabled(!locked, egui::Button::new(tl!("Float Panel"))).clicked() {
-                actions.push(Action::Float(g));
+            let m = entries.get(sel).map_or(g, |(m, _, _)| *m);
+            if classic && place != Place::Floating && ui.add_enabled(!locked, egui::Button::new(tl!("Float Panel Group"))).clicked() {
+                actions.push(Action::FloatGroup(m, rect.min + vec2(-280.0, 0.0)));
+                ui.close();
+            }
+            if classic && place == Place::Floating && ui.add_enabled(!locked, egui::Button::new(tl!("Dock Panel Group"))).clicked() {
+                actions.push(Action::DockGroup(g));
                 ui.close();
             }
             if ui.button(if collapsed { tl!("Expand Panel Group") } else { tl!("Collapse Panel Group") }).clicked() {
@@ -730,7 +1036,9 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
             }
             ui.separator();
             if ui.button(tl!("Close Tab Group")).clicked() {
-                actions.push(Action::Close(g));
+                for m in &members {
+                    actions.push(Action::Close(*m));
+                }
                 ui.close();
             }
         });
@@ -749,7 +1057,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
     }
     let mut panel_moves = Vec::new();
     for (from, tab, position) in tab_drops {
-        let target = strips.iter().find(|strip| strip.group != from && strip.area.contains(position));
+        let target = last_strips(ui.ctx()).into_iter().chain(strips.iter().cloned()).find(|strip| strip.group != from && strip.area.contains(position));
         if let Some(target) = target {
             let pro = t.pro;
             let source = from.tabs(pro).get(tab).and_then(|label| crate::panel_docking::normalize(label));
@@ -757,26 +1065,29 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
             let before = slot.and_then(|slot| target.tabs.get(slot).map(|(index, _)| *index));
             let anchor = before.or_else(|| target.tabs.first().map(|(index, _)| *index));
             let destination = anchor.and_then(|index| target.group.tabs(pro).get(index).and_then(|label| crate::panel_docking::normalize(label)));
-            if let (Some(source), Some(destination)) = (source, destination) {
-                panel_moves.push((source, destination, before.is_some()));
+            match (source, destination) {
+                (Some(source), Some(destination)) => panel_moves.push((source, destination, before.is_some())),
+                // A panel the shared layout doesn't know (a docked floating panel): stack groups.
+                _ => actions.push(Action::Drop(from, position, vec2(20.0, 10.0), place)),
             }
         } else {
-            actions.push(Action::Move(from, drop_before(&order, &rects, from, position.y)));
+            actions.push(Action::Drop(from, position, vec2(20.0, 10.0), place));
         }
     }
-    // Drop indicator while a group is dragged by its tab strip.
-    if let (Some(g), Some(p)) = (dragging, ui.ctx().pointer_interact_pos()) {
+    // Drop indicator while a group is dragged by its tab strip, in its own column.
+    if let (Some(g), Some(p), Place::Column(side)) = (dragging, ui.ctx().pointer_interact_pos(), place)
+        && area.contains(p)
+        && !last_strips(ui.ctx()).iter().any(|s| s.group != g && s.area.contains(p))
+    {
         let before = drop_before(&order, &rects, g, p.y);
         let line_y = match before.and_then(|b| rects.iter().find(|(x, _)| *x == b)) {
             Some((_, r)) => r.top() - GAP / 2.0,
             None => rects.last().map_or(area.top(), |(_, r)| r.bottom() + GAP / 2.0),
         };
+        let _ = side;
         ui.painter().line_segment([pos2(area.left(), line_y), pos2(area.right(), line_y)], Stroke::new(3.0, t.accent));
     }
-    ui.ctx().data_mut(|d| {
-        d.insert_temp(rects_id(), rects);
-        d.insert_temp(strips_id(), strips);
-    });
+    note_drawn(ui.ctx(), rects, strips);
     ui.advance_cursor_after_rect(area);
     for a in actions {
         match a {
@@ -785,9 +1096,25 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
                 app.ui.dock.set_collapsed(g, on);
             }
             Action::Close(g) => set_shown(app, g, false),
-            Action::Float(g) => {
-                if let Some(f) = crate::floaters::Floater::of(g) {
-                    crate::floaters::float(app, f);
+            Action::FloatGroup(g, at) => land(app, ui.ctx(), g, DropAt::Float(at.max(pos2(8.0, 40.0))), Vec2::ZERO),
+            Action::DockGroup(g) => {
+                let side = app.ui.dock.side(g);
+                land(app, ui.ctx(), g, DropAt::Column(side, None), Vec2::ZERO);
+            }
+            Action::Drop(g, p, grab, from) => {
+                let at = drop_target(app, ui.ctx(), g, p);
+                match (at, from) {
+                    // Dragged around its window: it stays where it was moved.
+                    (DropAt::Float(_), Place::Floating) => {}
+                    // A short drag in a flyout or column that left it there.
+                    (DropAt::Column(side, before), Place::Column(here))
+                        if side == here && app.ui.dock.host(g) == g && !app.ui.dock.floating.contains_key(&g) =>
+                    {
+                        if before != Some(g) {
+                            app.ui.dock.move_group(g, before);
+                        }
+                    }
+                    _ => land(app, ui.ctx(), g, at, grab),
                 }
             }
             Action::CloseTab(g, tab) => {
@@ -819,6 +1146,22 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
             app.ui.status = error;
         }
     }
+}
+
+/// Put group `g` where a drop landed: a floating panel (`crate::floaters`) docks into the
+/// column or stack, or floats as its own window; a dock group docks, stacks or floats.
+pub(crate) fn land(app: &mut PhotocraftApp, _ctx: &egui::Context, g: Group, at: DropAt, grab: Vec2) {
+    if let Some(f) = crate::floaters::Floater::of(g) {
+        match at {
+            DropAt::Float(_) => {
+                app.ui.dock.place(g, DropAt::Column(app.ui.dock.side(g), None), Vec2::ZERO);
+                crate::floaters::float(app, f);
+                return;
+            }
+            _ => crate::floaters::dock(app, f),
+        }
+    }
+    app.ui.dock.place(g, at, grab);
 }
 
 fn rects_after_layout(heights: &[(Group, f32)], area: Rect) -> Vec<(Group, Rect)> {

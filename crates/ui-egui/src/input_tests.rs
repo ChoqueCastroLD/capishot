@@ -588,10 +588,15 @@ fn type_tool_alt_arrows_kern_the_pair() {
     let tracking = |h: &Harness<'static, PhotocraftApp>, b: usize| {
         let t = text(h);
         let mut end = 0;
-        t.char_runs().into_iter().find(|r| {
-            end += r.len;
-            b < end
-        }).unwrap().style.tracking
+        t.char_runs()
+            .into_iter()
+            .find(|r| {
+                end += r.len;
+                b < end
+            })
+            .unwrap()
+            .style
+            .tracking
     };
     assert_eq!((tracking(&h, 2), tracking(&h, 3), tracking(&h, 5)), (0.0, 40.0, 40.0));
     assert_eq!(steps(&h), s0 + 4);

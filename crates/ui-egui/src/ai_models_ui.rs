@@ -176,85 +176,86 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         .default_height(560.0)
         .default_pos(egui::pos2((canvas.center().x - 300.0).max(canvas.left() + 8.0), canvas.top() + 40.0));
     host.show(ctx, egui::Id::new("ai-models-window"), window, |ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| host.header_button(ui));
-            if let Err(why) = &available {
-                ui.colored_label(t.warning, why.as_str());
-                ui.add_space(4.0);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| host.header_button(ui));
+        if let Err(why) = &available {
+            ui.colored_label(t.warning, why.as_str());
+            ui.add_space(4.0);
+        }
+        // Storage.
+        let mut line = crate::i18n::fmt(tl!("Models on this device: {size}"), &[("size", &size(storage.models.unwrap_or(0)))]);
+        if let (Some(used), Some(quota)) = (storage.used, storage.quota) {
+            line.push_str(" · ");
+            line.push_str(&crate::i18n::fmt(tl!("site storage {used} of {quota}"), &[("used", &size(used)), ("quota", &size(quota))]));
+        }
+        ui.label(egui::RichText::new(line).color(t.text_dim));
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            let ok = available.is_ok();
+            let rec_label = crate::i18n::fmt(tl!("Download recommended for this device ({size})"), &[("size", &size(rec_missing))]);
+            let hint = if lite {
+                tl!("No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).")
+            } else {
+                tl!("A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).")
+            };
+            if ui.add_enabled_ui(ok && rec_missing > 0, |ui| crate::widgets::primary_button(ui, &rec_label, 0.0)).inner.on_hover_text(hint).clicked() {
+                action = Some(Action::Recommended);
             }
-            // Storage.
-            let mut line = crate::i18n::fmt(tl!("Models on this device: {size}"), &[("size", &size(storage.models.unwrap_or(0)))]);
-            if let (Some(used), Some(quota)) = (storage.used, storage.quota) {
-                line.push_str(" · ");
-                line.push_str(&crate::i18n::fmt(tl!("site storage {used} of {quota}"), &[("used", &size(used)), ("quota", &size(quota))]));
+            let all_label = crate::i18n::fmt(tl!("Download all ({size})"), &[("size", &size(all_missing))]);
+            if ui.add_enabled_ui(ok && all_missing > 0, |ui| crate::widgets::secondary_button(ui, &all_label, 0.0)).inner.clicked() {
+                action = Some(Action::All);
             }
-            ui.label(egui::RichText::new(line).color(t.text_dim));
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                let ok = available.is_ok();
-                let rec_label = crate::i18n::fmt(tl!("Download recommended for this device ({size})"), &[("size", &size(rec_missing))]);
-                let hint = if lite {
-                    tl!("No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).")
-                } else {
-                    tl!("A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).")
-                };
-                if ui.add_enabled_ui(ok && rec_missing > 0, |ui| crate::widgets::primary_button(ui, &rec_label, 0.0)).inner.on_hover_text(hint).clicked() {
-                    action = Some(Action::Recommended);
+            if confirm_all {
+                ui.label(tl!("Delete every downloaded model?"));
+                if crate::widgets::secondary_button(ui, tl!("Delete all"), 0.0).clicked() {
+                    action = Some(Action::DeleteAll);
+                    confirm_all = false;
                 }
-                let all_label = crate::i18n::fmt(tl!("Download all ({size})"), &[("size", &size(all_missing))]);
-                if ui.add_enabled_ui(ok && all_missing > 0, |ui| crate::widgets::secondary_button(ui, &all_label, 0.0)).inner.clicked() {
-                    action = Some(Action::All);
+                if crate::widgets::secondary_button(ui, tl!("Keep"), 0.0).clicked() {
+                    confirm_all = false;
                 }
-                if confirm_all {
-                    ui.label(tl!("Delete every downloaded model?"));
-                    if crate::widgets::secondary_button(ui, tl!("Delete all"), 0.0).clicked() {
-                        action = Some(Action::DeleteAll);
-                        confirm_all = false;
-                    }
-                    if crate::widgets::secondary_button(ui, tl!("Keep"), 0.0).clicked() {
-                        confirm_all = false;
-                    }
-                } else if ui.add_enabled_ui(any_downloaded || busy, |ui| crate::widgets::secondary_button(ui, tl!("Delete all"), 0.0)).inner.clicked() {
-                    confirm_all = true;
-                }
-            });
-            if busy {
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(queue_text(&rows)).color(t.text_dim));
-                    if crate::widgets::secondary_button(ui, tl!("Cancel all"), 0.0).clicked() {
-                        action = Some(Action::Cancel(None));
-                    }
-                });
+            } else if ui.add_enabled_ui(any_downloaded || busy, |ui| crate::widgets::secondary_button(ui, tl!("Delete all"), 0.0)).inner.clicked() {
+                confirm_all = true;
             }
-            ui.add_space(6.0);
-            crate::widgets::hairline(ui);
-            egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
-                for (group, title) in [(Group::Cleaning, tl!("Cleaning")), (Group::Upscaling, tl!("Upscaling"))] {
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new(title).font(crate::theme::semibold(13.0)));
-                    ui.add_space(2.0);
-                    for (m, status) in rows.iter().filter(|(m, _)| models::group(m) == group) {
-                        let lit = highlight.as_deref() == Some(m.file);
-                        let frame = egui::Frame::NONE
-                            .inner_margin(egui::Margin::symmetric(8, 6))
-                            .corner_radius(t.radius_sm)
-                            .fill(if lit { t.accent.gamma_multiply(0.18) } else { egui::Color32::TRANSPARENT });
-                        let r = frame.show(ui, |ui| row(ui, &t, m, status, &mut action)).response;
-                        if lit && !scrolled {
-                            r.scroll_to_me(Some(egui::Align::Center));
-                            scrolled = true;
-                        }
-                    }
-                }
-                ui.add_space(6.0);
-                let note = if cfg!(target_arch = "wasm32") {
-                    tl!("Models are kept in this browser and run on this device: your images are not uploaded.")
-                } else {
-                    tl!("Models are kept on this computer and run on this device: your images are not uploaded.")
-                };
-                ui.label(egui::RichText::new(note).color(t.text_faint).size(11.5));
-            });
         });
+        if busy {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(queue_text(&rows)).color(t.text_dim));
+                if crate::widgets::secondary_button(ui, tl!("Cancel all"), 0.0).clicked() {
+                    action = Some(Action::Cancel(None));
+                }
+            });
+        }
+        ui.add_space(6.0);
+        crate::widgets::hairline(ui);
+        egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+            for (group, title) in [(Group::Cleaning, tl!("Cleaning")), (Group::Upscaling, tl!("Upscaling"))] {
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(title).font(crate::theme::semibold(13.0)));
+                ui.add_space(2.0);
+                for (m, status) in rows.iter().filter(|(m, _)| models::group(m) == group) {
+                    let lit = highlight.as_deref() == Some(m.file);
+                    let frame = egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 6)).corner_radius(t.radius_sm).fill(if lit {
+                        t.accent.gamma_multiply(0.18)
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    });
+                    let r = frame.show(ui, |ui| row(ui, &t, m, status, &mut action)).response;
+                    if lit && !scrolled {
+                        r.scroll_to_me(Some(egui::Align::Center));
+                        scrolled = true;
+                    }
+                }
+            }
+            ui.add_space(6.0);
+            let note = if cfg!(target_arch = "wasm32") {
+                tl!("Models are kept in this browser and run on this device: your images are not uploaded.")
+            } else {
+                tl!("Models are kept on this computer and run on this device: your images are not uploaded.")
+            };
+            ui.label(egui::RichText::new(note).color(t.text_faint).size(11.5));
+        });
+    });
     let m = &mut app.ui.ai_models;
     m.open = open;
     m.scrolled = scrolled;

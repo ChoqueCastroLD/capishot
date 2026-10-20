@@ -28,6 +28,13 @@ pub struct State {
     reused: u32,
 }
 
+impl State {
+    /// This frame repaints the chrome from its snapshot (a canvas gesture is under way).
+    pub fn is_frozen(&self) -> bool {
+        self.reused > 0
+    }
+}
+
 struct Snapshot {
     key: u64,
     layer: LayerId,

@@ -111,16 +111,20 @@ pub fn sync_docked(app: &mut PhotocraftApp) {
 /// Once per frame before the dock is drawn: what the panels' headers and window drags asked for
 /// last frame ([`Host::header_button`], a window dropped on the dock), then [`sync_docked`].
 pub fn frame(app: &mut PhotocraftApp, ctx: &Context) {
-    let requests = ctx.data_mut(|d| d.remove_temp::<Vec<(Group, bool)>>(requests_id())).unwrap_or_default();
-    for (g, dock_it) in requests {
+    let requests = ctx.data_mut(|d| d.remove_temp::<Vec<(Group, Request)>>(requests_id())).unwrap_or_default();
+    for (g, req) in requests {
         let Some(f) = Floater::of(g) else { continue };
         if app.session.prefs().workspace_locked {
             break;
         }
-        if dock_it {
-            dock(app, f);
-        } else {
-            float(app, f);
+        match req {
+            Request::Dock => dock(app, f),
+            Request::Float => float(app, f),
+            // Its window dropped on a column or another group's strip.
+            Request::Drop(p) => match crate::dock::drop_target(app, ctx, g, p) {
+                crate::dock::DropAt::Float(_) => {}
+                at => crate::dock::land(app, ctx, g, at, egui::Vec2::ZERO),
+            },
         }
     }
     sync_docked(app);
@@ -130,22 +134,20 @@ fn requests_id() -> Id {
     Id::new("floaters-requests")
 }
 
-fn request(ctx: &Context, g: Group, dock_it: bool) {
-    ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<(Group, bool)>>(requests_id()).push((g, dock_it)));
+#[derive(Clone, Copy, Debug)]
+enum Request {
+    Dock,
+    Float,
+    /// The panel's window was dropped there.
+    Drop(egui::Pos2),
+}
+
+fn request(ctx: &Context, g: Group, req: Request) {
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<(Group, Request)>>(requests_id()).push((g, req)));
 }
 
 fn reserved_id(g: Group) -> Id {
     Id::new(("floater-docked-area", g.key()))
-}
-
-fn dock_area_id() -> Id {
-    Id::new("floaters-dock-area")
-}
-
-/// The dock's column this frame (where a dragged floating window docks when dropped).
-pub fn note_dock_area(ctx: &Context, area: Rect) {
-    let frame = ctx.cumulative_frame_nr();
-    ctx.data_mut(|d| d.insert_temp(dock_area_id(), (frame, area)));
 }
 
 /// In the dock: take the group's content area for docked panel `g`, which draws itself there
@@ -156,7 +158,12 @@ pub fn reserve(ui: &mut Ui, g: Group) {
     let frame = ui.ctx().cumulative_frame_nr();
     // The visible part only: a group partly scrolled or clipped doesn't spill over its neighbours.
     let r = r.intersect(ui.clip_rect());
-    ui.ctx().data_mut(|d| d.insert_temp(reserved_id(g), (frame, r)));
+    // Above the window or flyout holding the group, when it isn't the dock itself.
+    let above = match ui.layer_id().order {
+        egui::Order::Background => None,
+        o => Some(o),
+    };
+    ui.ctx().data_mut(|d| d.insert_temp(reserved_id(g), (frame, r, above)));
 }
 
 /// Where a floating panel draws this frame.
@@ -164,8 +171,8 @@ pub fn reserve(ui: &mut Ui, g: Group) {
 pub enum Host {
     /// In its own window.
     Window(Group),
-    /// Over its dock group's content area.
-    Docked(Group, Rect),
+    /// Over its dock group's content area (and above the window or flyout holding it).
+    Docked(Group, Rect, Option<egui::Order>),
     /// Docked, but its group isn't drawn this frame (collapsed, or the dock is hidden).
     Hidden,
 }
@@ -179,9 +186,21 @@ impl Host {
             return Host::Window(g);
         }
         let frame = ctx.cumulative_frame_nr();
-        match ctx.data(|d| d.get_temp::<(u64, Rect)>(reserved_id(g))) {
-            Some((at, r)) if at == frame && r.is_positive() => Host::Docked(g, r),
+        // While a canvas gesture holds the chrome still (`chrome_freeze`), the dock isn't laid
+        // out: its groups stay where they were.
+        let fresh = |at: u64| at == frame || (app.chrome_freeze.is_frozen() && frame.saturating_sub(at) <= u64::from(crate::chrome_freeze::REFRESH_FRAMES) + 1);
+        match ctx.data(|d| d.get_temp::<(u64, Rect, Option<egui::Order>)>(reserved_id(g))) {
+            Some((at, r, above)) if fresh(at) && r.is_positive() => Host::Docked(g, r, above),
             _ => Host::Hidden,
+        }
+    }
+
+    /// The width a panel laid out at `w` points gets: `w` in its window, at most its dock
+    /// group's width when docked.
+    pub fn width(&self, w: f32) -> f32 {
+        match *self {
+            Host::Docked(_, r, _) => w.min((r.width() - 14.0).max(80.0)),
+            _ => w,
         }
     }
 
@@ -195,30 +214,40 @@ impl Host {
         match *self {
             Host::Window(g) => {
                 let shown = window.show(ctx, add)?;
-                // Dropped on the dock: dock it.
+                // Dragged: the dock's drop zones show; dropped on one, it docks there.
+                if shown.response.dragged() {
+                    crate::dock::note_dragging(ctx, g);
+                }
                 if shown.response.drag_stopped()
                     && let Some(p) = ctx.pointer_interact_pos().or_else(|| ctx.pointer_latest_pos())
-                    && let Some((at, area)) = ctx.data(|d| d.get_temp::<(u64, Rect)>(dock_area_id()))
-                    && at == ctx.cumulative_frame_nr()
-                    && area.contains(p)
                 {
-                    request(ctx, g, true);
+                    request(ctx, g, Request::Drop(p));
                 }
                 shown.inner
             }
-            Host::Docked(g, r) => Some(
+            Host::Docked(g, r, above) => Some(
                 egui::Area::new(id.with("docked"))
-                .fixed_pos(r.min)
-                .order(egui::Order::Middle)
-                .constrain(false)
-                .show(ctx, |ui| {
-                    ui.set_clip_rect(r);
-                    ui.set_min_size(r.size());
-                    ui.set_max_size(r.size());
-                    egui::ScrollArea::both().id_salt(("floater-docked-scroll", g.key())).max_height(r.height()).max_width(r.width()).auto_shrink([false, false]).show(ui, add).inner
-                })
+                    .fixed_pos(r.min)
+                    .order(above.unwrap_or(egui::Order::Middle))
+                    .constrain(false)
+                    .show(ctx, |ui| {
+                        ui.set_clip_rect(r);
+                        ui.set_min_size(r.size());
+                        ui.set_max_size(r.size());
+                        egui::ScrollArea::vertical()
+                            .id_salt(("floater-docked-scroll", g.key()))
+                            .max_height(r.height())
+                            .auto_shrink([false, false])
+                            .show(ui, add)
+                            .inner
+                    })
                     .inner,
-            ),
+            )
+            .inspect(|_| {
+                if let Some(order) = above {
+                    ctx.move_to_top(egui::LayerId::new(order, id.with("docked")));
+                }
+            }),
             Host::Hidden => None,
         }
     }
@@ -228,7 +257,7 @@ impl Host {
     pub fn header_button(&self, ui: &mut Ui) {
         let (g, docked) = match *self {
             Host::Window(g) => (g, false),
-            Host::Docked(g, _) => (g, true),
+            Host::Docked(g, ..) => (g, true),
             Host::Hidden => return,
         };
         if !g.is_floater() {
@@ -236,7 +265,7 @@ impl Host {
         }
         let (icon, tip) = if docked { ("app-window", tl!("Float Panel")) } else { ("panel-right", tl!("Dock to the Panels")) };
         if crate::icons::button(ui, icon, 20.0, false, tip).clicked() {
-            request(ui.ctx(), g, !docked);
+            request(ui.ctx(), g, if docked { Request::Float } else { Request::Dock });
         }
     }
 }
@@ -303,7 +332,7 @@ mod tests {
         });
         out.textures_delta.clear();
         assert_eq!(hosts[0], Host::Hidden, "not reserved yet");
-        assert!(matches!(hosts[1], Host::Docked(Group::Notes, r) if r.is_positive()));
+        assert!(matches!(hosts[1], Host::Docked(Group::Notes, r, _) if r.is_positive()));
         assert_eq!(hosts[2], Host::Window(Group::Styles));
         // Next frame without the dock drawing it (collapsed, hidden): nowhere.
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| hosts.push(Host::of(&app, ui.ctx(), Group::Notes)));
