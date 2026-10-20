@@ -80,6 +80,108 @@ fn normal_rgb_kernel_preserves_scalar_bits() {
     }
 }
 
+/// The vectorized row kernel against the scalar loop it replaced, over row lengths that cover
+/// whole blocks, tails and both, with samples full of NaN, signed zeros, infinities, subnormals
+/// and values outside 0..1: the same bits, except that a NaN only has to stay NaN.
+#[test]
+fn normal_rgb_span_preserves_scalar_bits() {
+    let specials = [0.0, -0.0, 1.0, 0.5, 0.03, -0.5, 2.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::from_bits(1), f32::MIN_POSITIVE, 1e-30];
+    let mut seed = 0x9e37_79b9u32;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed
+    };
+    let mut value = || {
+        let r = next();
+        if r % 3 == 0 { specials[(r / 3) as usize % specials.len()] } else { (r % 1000) as f32 / 999.0 }
+    };
+    for len in 0..41 {
+        for _ in 0..40 {
+            let backdrop: Vec<[f32; 4]> = (0..len).map(|_| [value(), value(), value(), value()]).collect();
+            let source: Vec<[f32; 4]> = (0..len).map(|_| [value(), value(), value(), value()]).collect();
+            let opacity = value();
+            let mut want = backdrop.clone();
+            for (b, s) in want.iter_mut().zip(&source) {
+                if s[3] <= 0.0 {
+                    continue;
+                }
+                *b = original_normal_rgb(*b, *s, opacity);
+            }
+            let mut got = backdrop;
+            psblend::composite_normal_rgb_span(&mut got, &source, opacity);
+            // IEEE 754 leaves open which operand's NaN an operation passes on (x86 and the
+            // vector units differ in its sign), so any NaN counts as the same NaN.
+            let bits = |p: &[f32; 4]| p.map(|v| if v.is_nan() { u32::MAX } else { v.to_bits() });
+            for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+                assert_eq!(bits(g), bits(w), "len {len}, pixel {i}, opacity {opacity}: {g:?} vs {w:?}");
+            }
+        }
+    }
+}
+
+/// A pixel layer read and blended a row at a time gives exactly what blending a tile-sized copy
+/// of it gave, across depths, modes (Dissolve's per-pixel noise and the fill-special modes
+/// included), fill, masks (feathered too) and a rect that is not tile-aligned and runs off the
+/// layer's pixels.
+#[test]
+fn pixel_layer_rows_match_tile_copy() {
+    let rect = Rect::new(-3, 2, 37, 21);
+    let modes = [
+        BlendMode::Normal,
+        BlendMode::Multiply,
+        BlendMode::Dissolve,
+        BlendMode::Overlay,
+        BlendMode::ColorBurn,
+        BlendMode::LinearBurn,
+        BlendMode::VividLight,
+        BlendMode::Difference,
+        BlendMode::Hue,
+    ];
+    for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F] {
+        let mut l = Layer::raster("p", fmt);
+        for y in 0..20 {
+            for x in 0..30 {
+                let t = (x * 7 + y * 13) as f32 / 400.0;
+                let a = [0.0, 0.03, 0.5, 1.0][(x + y) as usize % 4];
+                l.surface_mut().unwrap().write_pixel(x, y, &photocraft_raster::from_rgba(&fmt, [t.fract(), 1.0 - t.fract(), 0.3, a]));
+            }
+        }
+        let mut sharp = LayerMask::reveal_all();
+        sharp.surface.fill_rect(Rect::new(5, 0, 12, 30), &[0.25]);
+        let mut feathered = sharp.clone();
+        feathered.feather = 2.5;
+        for mask in [None, Some(sharp), Some(feathered)] {
+            l.mask = mask;
+            for mode in modes {
+                for fill in [1.0, 0.4] {
+                    l.blend = mode;
+                    l.opacity = 0.8;
+                    l.fill_opacity = fill;
+                    let mut doc = doc_white(40, 30);
+                    doc.layers.push(l.clone());
+                    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES).in_mode(doc.pixel_format().mode);
+                    let cx = Ctx::for_doc(&doc, &patterns);
+                    let layer = &doc.layers[1];
+                    let backdrop = Buffer {
+                        rect,
+                        px: (0..rect.width() * rect.height())
+                            .map(|i| [(i % 11) as f32 / 10.0, (i % 5) as f32 / 4.0, 0.6, [1.0, 0.5, 0.0][i as usize % 3]])
+                            .collect(),
+                    };
+                    let mut want = backdrop.clone();
+                    let content = render_content(layer, rect, &cx).unwrap();
+                    blend_into_fill(&mut want, &content, layer.blend, layer.opacity, layer.fill_opacity, text_gamma(layer));
+                    let mut got = backdrop;
+                    composite_pixel_layer(layer, pixel_surface(layer).unwrap(), &mut got, &cx);
+                    assert_buffer_bits(&got, &want);
+                }
+            }
+        }
+    }
+}
+
 fn normal_rgb_test_buffers(fmt: PixelFormat) -> (Buffer, Buffer) {
     let rect = Rect::new(-3, -2, 5, 0);
     let mut bottom = Surface::new(fmt);
