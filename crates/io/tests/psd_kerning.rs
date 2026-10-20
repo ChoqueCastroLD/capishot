@@ -192,12 +192,15 @@ fn photoshop_txt2(objects: &[(&str, &str)]) -> Vec<u8> {
     format!("\n\n/98 << /0 7 >> /0 << /1 << /0 [ << /0 << /99 /CoolTypeFont /0 << /0 ({bom}{font}) /2 1 >> >> >> ] >> /8 << /0 [ {frames}] >> >> /1 << /0 << /0 1 >> /1 [ {body}] /2 << /0 7 >> >>").chars().map(|c| c as u32 as u8).collect()
 }
 
+/// A reopened type layer: its name, `TextIndex` and font features.
+type Reopened = (String, Option<i32>, Vec<String>);
+
 /// A Photoshop file whose `Txt2` holds `objects` and whose type layers are `kept` (text and
 /// `TextIndex`, bottom first), with a type layer "Hi" made the way the Type tool makes one
 /// (`build_tysh`, no index of its own) inserted at `at`, saved and reopened: each layer's
 /// index and font features (but `calt`, on by default and written on as Photoshop does), and
 /// "Hi"'s style run in the saved `Txt2`.
-fn add_type_layer(objects: &[(&str, &str)], kept: &[(&str, i32)], at: usize) -> (Vec<(String, Option<i32>, Vec<String>)>, E) {
+fn add_type_layer(objects: &[(&str, &str)], kept: &[(&str, i32)], at: usize) -> (Vec<Reopened>, E) {
     let mut doc = Document::new("k", photocraft_geom::Size::new(64, 32), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
     for (text, index) in kept {
         let mut t = layer(text, &[(text.len(), Kerning::Metrics, 0.0)]);
@@ -231,7 +234,7 @@ fn add_type_layer(objects: &[(&str, &str)], kept: &[(&str, i32)], at: usize) -> 
 }
 
 /// The layer `name` in `add_type_layer`'s result.
-fn named<'a>(layers: &'a [(String, Option<i32>, Vec<String>)], name: &str) -> &'a (String, Option<i32>, Vec<String>) {
+fn named<'a>(layers: &'a [Reopened], name: &str) -> &'a Reopened {
     layers.iter().find(|l| l.0 == name).unwrap()
 }
 

@@ -944,9 +944,10 @@ fn txt2_mode_runs(layer: &TextLayer) -> Vec<(i64, usize)> {
 /// a missing font is appended to), size (`/1`), faux bold and italic, leading, scales and tracking
 /// (`/2`–`/8`, EngineData's order), fill colour (`/53`), the OpenType keys and the auto-kern mode
 /// (`/11`). Photoshop reads the character style from here rather than from EngineData, and quit
-/// on a run holding only the auto-kern mode. `None` when `base` has no style dictionary.
+/// on a run holding only the auto-kern mode. `None` when `base` has no style dictionary or is
+/// larger than a template may be (it is copied once per run).
 fn txt2_style_runs(layer: &TextLayer, base: &E, fonts: &mut Vec<E>, dpi: f32) -> Option<Vec<E>> {
-    if !matches!(base.path(&["0", "0", "6"]), Some(E::Dict(_))) {
+    if !matches!(base.path(&["0", "0", "6"]), Some(E::Dict(_))) || !fits(base, &mut { TEMPLATE_NODES }) {
         return None;
     }
     let k = if dpi.is_finite() && dpi > 0.0 { dpi / 72.0 } else { 1.0 };
@@ -967,9 +968,10 @@ fn txt2_style_runs(layer: &TextLayer, base: &E, fonts: &mut Vec<E>, dpi: f32) ->
     }
     let default = CharStyle::default();
     let mut out = Vec::with_capacity(spans.len());
+    let mut looked_up = std::collections::HashMap::new();
     for (ri, n) in spans {
         let s = runs.get(ri).map_or(&default, |r| &r.style);
-        let font = txt2_font(fonts, &postscript_for(s));
+        let font = *looked_up.entry(postscript_for(s)).or_insert_with_key(|name| txt2_font(fonts, name));
         let mut run = base.clone();
         let style = run.get_mut("0")?.get_mut("0")?.get_mut("6")?;
         if let Some(font) = font {
