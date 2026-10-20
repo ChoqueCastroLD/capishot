@@ -94,8 +94,15 @@ fn gpu() -> Option<Gpu> {
             return None;
         }
     };
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
     let info = adapter.get_info();
+    let (device, queue) = match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())) {
+        Ok(d) => d,
+        Err(e) => {
+            assert!(!required, "WGPU_BACKEND is set but {} has no device: {e}", info.name);
+            eprintln!("skipping GPU parity tests: no device ({e})");
+            return None;
+        }
+    };
     eprintln!("GPU parity backend: {:?} ({}, {:?})", info.backend, info.name, info.device_type);
     // Exact parity needs 32-bit float targets. Adapters without them (e.g. GL software
     // rasterizers) use the CPU compositor in the app, so there is nothing to compare there.
@@ -104,14 +111,16 @@ fn gpu() -> Option<Gpu> {
         eprintln!("skipping GPU parity tests: adapter can't render Rgba32Float");
         return None;
     }
-    let comp = match Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float) {
-        Ok(c) => c,
+    let compositor = || match Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float) {
+        Ok(c) => Some(c),
         Err(e) => {
+            assert!(!required, "WGPU_BACKEND is set but {} can't build the compositor: {e}", info.name);
             eprintln!("skipping GPU parity tests: {e}");
-            return None;
+            None
         }
     };
-    let mut paged = Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float).ok()?;
+    let comp = compositor()?;
+    let mut paged = compositor()?;
     paged.set_texture_limit(PAGED_LIMIT);
     Some(Gpu { device, queue, comp, paged, _lock: lock })
 }
