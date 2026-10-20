@@ -62,3 +62,65 @@ pub(crate) fn palette(b: &[u8]) -> Option<(Vec<[u8; 3]>, Option<u8>)> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::palette;
+
+    /// A GIF up to its first image: `global` table entries, optional GCE transparency, optional
+    /// local table.
+    fn gif(global: &[[u8; 3]], transparent: Option<u8>, local: Option<&[[u8; 3]]>) -> Vec<u8> {
+        let size_bits = |n: usize| (n.max(2).next_power_of_two().trailing_zeros() - 1) as u8;
+        let mut b = b"GIF89a".to_vec();
+        b.extend([4, 0, 4, 0]);
+        b.push(if global.is_empty() { 0 } else { 0x80 | size_bits(global.len()) });
+        b.extend([0, 0]);
+        let pad = |b: &mut Vec<u8>, t: &[[u8; 3]]| {
+            let n = 2usize << size_bits(t.len());
+            for k in 0..n {
+                b.extend(t.get(k).copied().unwrap_or([0, 0, 0]));
+            }
+        };
+        if !global.is_empty() {
+            pad(&mut b, global);
+        }
+        // A comment extension first, to skip.
+        b.extend([0x21, 0xFE, 3, b'h', b'i', b'!', 0]);
+        if let Some(i) = transparent {
+            b.extend([0x21, 0xF9, 4, 0x01, 0, 0, i, 0]);
+        }
+        b.extend([0x2C, 0, 0, 0, 0, 4, 0, 4, 0]);
+        match local {
+            Some(t) => {
+                b.push(0x80 | size_bits(t.len()));
+                pad(&mut b, t);
+            }
+            None => b.push(0),
+        }
+        b.extend([2, 2, 0x4C, 0x01, 0, 0x3B]);
+        b
+    }
+
+    #[test]
+    fn the_first_frames_table_and_transparent_entry() {
+        let g = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]];
+        assert_eq!(palette(&gif(&g, None, None)), Some((g.to_vec(), None)));
+        assert_eq!(palette(&gif(&g, Some(2), None)), Some((g.to_vec(), Some(2))));
+        // A local table wins over the global one.
+        let l = [[1, 2, 3], [4, 5, 6]];
+        assert_eq!(palette(&gif(&g, Some(1), Some(&l))), Some((l.to_vec(), Some(1))));
+        // A transparent index past the table is no transparent entry.
+        assert_eq!(palette(&gif(&l, Some(9), None)), Some((l.to_vec(), None)));
+    }
+
+    #[test]
+    fn no_table_or_not_a_gif_is_none() {
+        assert_eq!(palette(&gif(&[], None, None)), None, "no table at all");
+        assert_eq!(palette(b"\x89PNG\r\n\x1a\n"), None);
+        assert_eq!(palette(b""), None);
+        let whole = gif(&[[9, 9, 9], [8, 8, 8]], Some(0), None);
+        for cut in 0..whole.len() - 6 {
+            // Cut short anywhere before the image descriptor's fields: never a panic.
+            let _ = palette(&whole[..cut]);
+        }
+    }
+}
