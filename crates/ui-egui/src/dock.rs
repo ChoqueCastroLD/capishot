@@ -973,7 +973,8 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
                 }
             }
         }
-        let grab = resp.strip.interact_pointer_pos().map(|p| p - rect.min).unwrap_or(vec2(20.0, 10.0));
+        // Where in the group the drag took hold: a floated group appears under the pointer there.
+        let grab = ui.input(|i| i.pointer.press_origin()).filter(|o| rect.contains(*o)).map_or(vec2(20.0, 10.0), |o| o - rect.min);
         if !locked
             && classic
             && resp.strip.drag_stopped()
@@ -991,7 +992,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
                 tab_drops.push((g, tab, p));
             } else {
                 // A guest's tab dragged off the strip takes the guest with it.
-                actions.push(Action::Drop(m, p, vec2(20.0, 10.0), place));
+                actions.push(Action::Drop(m, p, grab, place));
             }
         }
         if dragging == Some(g) {
@@ -1068,10 +1069,10 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
             match (source, destination) {
                 (Some(source), Some(destination)) => panel_moves.push((source, destination, before.is_some())),
                 // A panel the shared layout doesn't know (a docked floating panel): stack groups.
-                _ => actions.push(Action::Drop(from, position, vec2(20.0, 10.0), place)),
+                _ => actions.push(Action::Drop(from, position, vec2(40.0, 12.0), place)),
             }
         } else {
-            actions.push(Action::Drop(from, position, vec2(20.0, 10.0), place));
+            actions.push(Action::Drop(from, position, vec2(40.0, 12.0), place));
         }
     }
     // Drop indicator while a group is dragged by its tab strip, in its own column.

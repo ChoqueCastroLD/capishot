@@ -1621,7 +1621,9 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         dock_column(app, ui, crate::dock::Side::Right, narrow.is_some(), &t);
     }
     // Narrow icon rail, unless an embedding app hides it: shows, expands or collapses panel groups.
-    if p.rail {
+    // A right column collapsed to icons is that strip itself.
+    let iconic = !customized && narrow.is_none() && app.ui.dock.iconic.contains(&crate::dock::Side::Right);
+    if p.rail && !iconic {
         let (rw, rb) = if t.pro { (36.0, 28.0) } else { (44.0, 32.0) };
         crate::direction::end_panel("rail")
             .resizable(false)

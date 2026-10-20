@@ -187,10 +187,21 @@ fn merged_object<T: serde::Serialize + serde::de::DeserializeOwned>(current: &T,
 /// unknown nested keys are rejected like [`merged_object`] does, but the value replaces the
 /// state instead of merging into it.
 fn whole_object<T: serde::Serialize + serde::de::DeserializeOwned>(current: &T, v: Option<&Value>, field: &str) -> std::result::Result<Option<T>, String> {
+    whole_object_with(current, v, field, &[])
+}
+
+/// [`whole_object`] that also knows `optional` fields (left out of `current`'s JSON while empty).
+fn whole_object_with<T: serde::Serialize + serde::de::DeserializeOwned>(
+    current: &T,
+    v: Option<&Value>,
+    field: &str,
+    optional: &[&str],
+) -> std::result::Result<Option<T>, String> {
     let Some(v) = v else { return Ok(None) };
     let Some(patch) = v.as_object() else { return Err(format!("{field} must be an object")) };
     let cur = serde_json::to_value(current).map_err(|e| e.to_string())?;
-    let known: std::collections::HashSet<&str> = cur.as_object().map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
+    let mut known: std::collections::HashSet<&str> = cur.as_object().map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
+    known.extend(optional);
     for k in patch.keys() {
         if !known.contains(k.as_str()) {
             return Err(format!("unknown {field} field `{k}`"));
@@ -483,7 +494,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 let vector_mask_target = bool_field(p, "vectorMaskTarget")?;
                 let selection_mode = uint_field(p, "selectionMode")?;
                 let dock_tabs = merged_object(&app.ui.dock_tabs, p.get("dockTabs"), "dockTabs")?;
-                let dock = whole_object(&app.ui.dock, p.get("dock"), "dock")?;
+                let dock = whole_object_with(&app.ui.dock, p.get("dock"), "dock", &["hidden_tabs", "left", "iconic", "floating", "guests", "front"])?;
                 // Which chip the Color panel edits.
                 let color_panel = whole_object(&app.ui.color_panel, p.get("colorPanel"), "colorPanel")?;
                 let dock_width = num_field(p, "dockWidth")?;
@@ -1223,6 +1234,11 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "panels": app.ui.panels,
         "dockTabs": app.ui.dock_tabs,
         "dock": app.ui.dock,
+        // Where the dock groups and their tab strips were drawn (columns, floating, flyout):
+        // `[x0, y0, x1, y1]` screen points, for agents dragging panels.
+        "dockGroups": crate::dock::last_rects(ctx).iter().map(|(g, r)| json!({"group": g, "rect": [r.min.x, r.min.y, r.max.x, r.max.y]})).collect::<Vec<_>>(),
+        "dockColumns": crate::dock::columns(ctx).iter().map(|(side, r)| json!({"side": side, "rect": [r.min.x, r.min.y, r.max.x, r.max.y]})).collect::<Vec<_>>(),
+        "dockStrips": crate::dock::last_strips(ctx).iter().map(|s| json!({"group": s.group, "rect": [s.area.min.x, s.area.min.y, s.area.max.x, s.area.max.y], "menu": [s.menu.min.x, s.menu.min.y, s.menu.max.x, s.menu.max.y]})).collect::<Vec<_>>(),
         "docking": app.ui.docking,
         "dockingHidden": app.ui.docking_hidden,
         "dockingCollapsed": app.ui.docking_collapsed,
