@@ -87,6 +87,7 @@ pub mod filter_dialog;
 #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 mod filter_preview_worker;
 pub mod flick_pan;
+pub mod floaters;
 mod font_preview;
 pub mod fonts_ui;
 pub mod frame_tool;

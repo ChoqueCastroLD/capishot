@@ -42,11 +42,70 @@ pub enum Group {
     History,
     /// Layers | Channels | Paths.
     Layers,
+    // Panels that float by default and can be docked (`crate::floaters`): one tab each, the
+    // panel's own content (with its own tabs, if any) below it.
+    BrushSettings,
+    GradientEditor,
+    TypeStyles,
+    Glyphs,
+    AiModels,
+    Styles,
+    Shapes,
+    ToolPresets,
+    CloneSource,
+    MeasurementLog,
+    Notes,
+    ModifierKeys,
 }
 
 impl Group {
     /// Photoshop Essentials order, top to bottom.
     pub const ALL: [Group; 7] = [Group::Color, Group::Properties, Group::Character, Group::TypeR, Group::Navigator, Group::History, Group::Layers];
+
+    /// The panels that float until docked (`crate::floaters`).
+    pub const FLOATERS: [Group; 12] = [
+        Group::BrushSettings,
+        Group::GradientEditor,
+        Group::TypeStyles,
+        Group::Glyphs,
+        Group::AiModels,
+        Group::Styles,
+        Group::Shapes,
+        Group::ToolPresets,
+        Group::CloneSource,
+        Group::MeasurementLog,
+        Group::Notes,
+        Group::ModifierKeys,
+    ];
+
+    /// Every group in default dock order: a docked floating panel goes above Navigator, History
+    /// and Layers, so Layers stays the group that fills the column.
+    pub const EVERY: [Group; 19] = [
+        Group::Color,
+        Group::Properties,
+        Group::Character,
+        Group::TypeR,
+        Group::BrushSettings,
+        Group::GradientEditor,
+        Group::TypeStyles,
+        Group::Glyphs,
+        Group::AiModels,
+        Group::Styles,
+        Group::Shapes,
+        Group::ToolPresets,
+        Group::CloneSource,
+        Group::MeasurementLog,
+        Group::Notes,
+        Group::ModifierKeys,
+        Group::Navigator,
+        Group::History,
+        Group::Layers,
+    ];
+
+    /// A panel that floats until docked (`crate::floaters`).
+    pub fn is_floater(self) -> bool {
+        Group::FLOATERS.contains(&self)
+    }
 
     pub fn key(self) -> &'static str {
         match self {
@@ -57,6 +116,18 @@ impl Group {
             Group::Navigator => "navigator",
             Group::History => "history",
             Group::Layers => "layers",
+            Group::BrushSettings => "brushSettings",
+            Group::GradientEditor => "gradientEditor",
+            Group::TypeStyles => "typeStyles",
+            Group::Glyphs => "glyphs",
+            Group::AiModels => "aiModels",
+            Group::Styles => "styles",
+            Group::Shapes => "shapes",
+            Group::ToolPresets => "toolPresets",
+            Group::CloneSource => "cloneSource",
+            Group::MeasurementLog => "measurementLog",
+            Group::Notes => "notes",
+            Group::ModifierKeys => "modifierKeys",
         }
     }
 
@@ -72,6 +143,11 @@ impl Group {
             Group::Navigator => 210.0,
             Group::History => 200.0,
             Group::Layers => 320.0,
+            Group::BrushSettings | Group::AiModels => 420.0,
+            Group::GradientEditor | Group::Glyphs | Group::TypeStyles => 320.0,
+            Group::Styles | Group::Shapes | Group::ToolPresets | Group::Notes => 230.0,
+            Group::CloneSource | Group::MeasurementLog => 260.0,
+            Group::ModifierKeys => 120.0,
         }
     }
 
@@ -87,6 +163,7 @@ impl Group {
             Group::Navigator => 140.0,
             Group::History => 130.0,
             Group::Layers => 200.0,
+            g => g.default_height().min(160.0),
         }
     }
 
@@ -124,13 +201,26 @@ impl Group {
             Group::Navigator => &["Navigator", "Histogram", "Info"],
             Group::History => &["History", "Actions", "Layer Comps"],
             Group::Layers => &["Layers", "Channels", "Paths"],
+            Group::BrushSettings => &["Brush Settings"],
+            Group::GradientEditor => &["Gradient Editor"],
+            Group::TypeStyles => &["Type Styles"],
+            Group::Glyphs => &["Glyphs"],
+            Group::AiModels => &["AI Models"],
+            Group::Styles => &["Styles"],
+            Group::Shapes => &["Shapes"],
+            Group::ToolPresets => &["Tool Presets"],
+            Group::CloneSource => &["Clone Source"],
+            Group::MeasurementLog => &["Measurement Log"],
+            Group::Notes => &["Notes"],
+            Group::ModifierKeys => &["Modifier Keys"],
         }
     }
 
     /// Tabs that lay out their own scrolling list and footer, or size themselves to the group
     /// (the Navigator's preview grows with it, as in Photoshop: #2726).
     pub fn scrolls_itself(self, tab: usize) -> bool {
-        matches!((self, tab), (Group::Layers, 0) | (Group::History, 0) | (Group::Navigator, 0) | (Group::TypeR, 0))
+        // A docked floating panel lays itself out over its group (`crate::floaters`).
+        self.is_floater() || matches!((self, tab), (Group::Layers, 0) | (Group::History, 0) | (Group::Navigator, 0) | (Group::TypeR, 0))
     }
 
     pub(crate) fn tab_mut(self, tabs: &mut DockTabs) -> &mut usize {
@@ -142,12 +232,14 @@ impl Group {
             Group::Navigator => &mut tabs.navigator,
             Group::History => &mut tabs.history,
             Group::Layers => &mut tabs.layers,
+            // One tab each.
+            _ => &mut tabs.floater,
         }
     }
 
     /// The group for a `panels` / `dockTabs` key ("color", "properties", …).
     pub fn from_key(key: &str) -> Option<Group> {
-        Group::ALL.into_iter().find(|g| g.key() == key)
+        Group::EVERY.into_iter().find(|g| g.key() == key)
     }
 
     pub fn shown(self, panels: &Panels) -> bool {
@@ -159,11 +251,15 @@ impl Group {
             Group::Navigator => panels.navigator,
             Group::History => panels.history,
             Group::Layers => panels.layers,
+            // Open and docked (`crate::floaters::sync`).
+            g => panels.docked_open.iter().any(|k| k == g.key()),
         }
     }
 
-    pub(crate) fn shown_mut(self, panels: &mut Panels) -> &mut bool {
-        match self {
+    /// The visibility flag of a dock group (`None` for a floating panel, which `set_shown` opens
+    /// or closes through `crate::floaters`).
+    pub(crate) fn shown_mut(self, panels: &mut Panels) -> Option<&mut bool> {
+        Some(match self {
             Group::Color => &mut panels.color,
             Group::Properties => &mut panels.properties,
             Group::Character => &mut panels.character,
@@ -171,7 +267,8 @@ impl Group {
             Group::Navigator => &mut panels.navigator,
             Group::History => &mut panels.history,
             Group::Layers => &mut panels.layers,
-        }
+            _ => return None,
+        })
     }
 }
 
@@ -281,7 +378,7 @@ impl DockLayout {
 
     /// Every group once, in display order.
     pub fn order(&self) -> Vec<Group> {
-        let mut out: Vec<Group> = Vec::with_capacity(Group::ALL.len());
+        let mut out: Vec<Group> = Vec::with_capacity(Group::EVERY.len());
         for g in &self.order {
             if !out.contains(g) {
                 out.push(*g);
@@ -289,11 +386,11 @@ impl DockLayout {
         }
         // Missing groups slot in below their default predecessor, so a group new to an old
         // saved layout (Character) never lands below Layers and takes over as the filler.
-        for (i, g) in Group::ALL.iter().enumerate() {
+        for (i, g) in Group::EVERY.iter().enumerate() {
             if out.contains(g) {
                 continue;
             }
-            let prev = Group::ALL.iter().take(i).rev().find_map(|p| out.iter().position(|x| x == p));
+            let prev = Group::EVERY.iter().take(i).rev().find_map(|p| out.iter().position(|x| x == p));
             match prev {
                 Some(at) => out.insert(at + 1, *g),
                 None => out.push(*g),
@@ -408,7 +505,7 @@ impl DockLayout {
 /// Show `g` and expand it (Window › <panel>, the icon rail): a panel asked for is always
 /// brought back, whatever state it was left in (#129).
 pub fn reveal(app: &mut PhotocraftApp, g: Group) {
-    *g.shown_mut(&mut app.ui.panels) = true;
+    set_shown(app, g, true);
     let selected = *g.tab_mut(&mut app.ui.dock_tabs);
     let pro = app.ui.theme.is_pro();
     app.ui.dock.show_tab(g, selected, pro);
@@ -423,15 +520,30 @@ pub fn rail_click(app: &mut PhotocraftApp, g: Group, docked: bool) {
     if !g.shown(&app.ui.panels) {
         reveal(app, g);
     } else if !docked {
-        *g.shown_mut(&mut app.ui.panels) = false;
+        set_shown(app, g, false);
     } else {
         let collapse = !app.ui.dock.is_collapsed(g);
         app.ui.dock.set_collapsed(g, collapse);
     }
 }
 
+/// Show or hide group `g`: a dock group's flag, or a floating panel opened or closed.
+pub(crate) fn set_shown(app: &mut PhotocraftApp, g: Group, on: bool) {
+    match g.shown_mut(&mut app.ui.panels) {
+        Some(flag) => *flag = on,
+        None => {
+            if let Some(f) = crate::floaters::Floater::of(g) {
+                f.set_open(app, on);
+                crate::floaters::sync_docked(app);
+            }
+        }
+    }
+}
+
 /// Per-group interactions collected while drawing, applied afterwards.
 enum Action {
+    /// A docked floating panel goes back to its window.
+    Float(Group),
     ToggleCollapse(Group),
     Close(Group),
     CloseTab(Group, usize),
@@ -599,6 +711,10 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
             if let Some(label) = tabs.get(sel) {
                 crate::panel_docking::legacy_menu(app, ui, label);
             }
+            if g.is_floater() && ui.add_enabled(!locked, egui::Button::new(tl!("Float Panel"))).clicked() {
+                actions.push(Action::Float(g));
+                ui.close();
+            }
             if ui.button(if collapsed { tl!("Expand Panel Group") } else { tl!("Collapse Panel Group") }).clicked() {
                 actions.push(Action::ToggleCollapse(g));
                 ui.close();
@@ -668,13 +784,18 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
                 let on = !app.ui.dock.is_collapsed(g);
                 app.ui.dock.set_collapsed(g, on);
             }
-            Action::Close(g) => *g.shown_mut(&mut app.ui.panels) = false,
+            Action::Close(g) => set_shown(app, g, false),
+            Action::Float(g) => {
+                if let Some(f) = crate::floaters::Floater::of(g) {
+                    crate::floaters::float(app, f);
+                }
+            }
             Action::CloseTab(g, tab) => {
                 let shown_before = app.ui.dock.visible_tabs(g, t.pro);
                 app.ui.dock.hide_tab(g, tab, t.pro);
                 let remaining = app.ui.dock.visible_tabs(g, t.pro);
                 if remaining.is_empty() {
-                    *g.shown_mut(&mut app.ui.panels) = false;
+                    set_shown(app, g, false);
                 } else if *g.tab_mut(&mut app.ui.dock_tabs) == tab {
                     // Prefer the next tab on the strip, or the previous one when closing the last.
                     let at = shown_before.iter().position(|(i, _)| *i == tab).unwrap_or(0);

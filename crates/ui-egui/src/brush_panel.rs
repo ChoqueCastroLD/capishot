@@ -381,13 +381,15 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         .inner_margin(egui::Margin::same(10));
     let canvas = app.last_canvas_rect;
     let mut open = true;
-    egui::Window::new(tl!("Brush Settings"))
+    // Its own window, or docked (`crate::floaters`).
+    let host = crate::floaters::Host::of(app, ctx, crate::dock::Group::BrushSettings);
+    let window = egui::Window::new(tl!("Brush Settings"))
         .id(egui::Id::new("brush-settings"))
         .title_bar(false)
         .resizable(false)
         .frame(frame)
-        .default_pos(egui::pos2((canvas.right() - WIDTH - 30.0).max(canvas.left() + 8.0), canvas.top() + 24.0))
-        .show(ctx, |ui| {
+        .default_pos(egui::pos2((canvas.right() - WIDTH - 30.0).max(canvas.left() + 8.0), canvas.top() + 24.0));
+    host.show(ctx, egui::Id::new("brush-settings"), window, |ui| {
             ui.set_width(WIDTH);
             ui.horizontal(|ui| {
                 let mut tab = app.ui.brush_tab;
@@ -401,6 +403,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     if icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
                         open = false;
                     }
+                    host.header_button(ui);
                 });
             });
             ui.add_space(6.0);

@@ -165,15 +165,18 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let mut open = true;
     let mut action: Option<Action> = None;
     let canvas = app.last_canvas_rect;
-    egui::Window::new(tl!("AI Models"))
+    // Its own window, or docked (`crate::floaters`).
+    let host = crate::floaters::Host::of(app, ctx, crate::dock::Group::AiModels);
+    let window = egui::Window::new(tl!("AI Models"))
         .id(egui::Id::new("ai-models-window"))
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
         .default_width(600.0)
         .default_height(560.0)
-        .default_pos(egui::pos2((canvas.center().x - 300.0).max(canvas.left() + 8.0), canvas.top() + 40.0))
-        .show(ctx, |ui| {
+        .default_pos(egui::pos2((canvas.center().x - 300.0).max(canvas.left() + 8.0), canvas.top() + 40.0));
+    host.show(ctx, egui::Id::new("ai-models-window"), window, |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| host.header_button(ui));
             if let Err(why) = &available {
                 ui.colored_label(t.warning, why.as_str());
                 ui.add_space(4.0);

@@ -9,6 +9,11 @@ use crate::theme::ThemeKind;
 
 const ESSENTIALS: [Group; 3] = [Group::Color, Group::Properties, Group::Layers];
 
+/// The dock's own groups of an order (without the floating panels, which dock on request).
+fn classic(order: Vec<Group>) -> Vec<Group> {
+    order.into_iter().filter(|g| !g.is_floater()).collect()
+}
+
 #[test]
 fn last_expanded_group_fills_the_column() {
     let l = DockLayout::default();
@@ -48,7 +53,7 @@ fn short_columns_squeeze_groups_down_to_their_minimum_and_never_go_negative() {
 #[test]
 fn bad_stored_values_are_sanitised() {
     let mut l = DockLayout { order: vec![Group::Layers, Group::Layers, Group::Color], ..Default::default() };
-    assert_eq!(l.order(), vec![Group::Layers, Group::Color, Group::Properties, Group::Character, Group::TypeR, Group::Navigator, Group::History]);
+    assert_eq!(classic(l.order()), vec![Group::Layers, Group::Color, Group::Properties, Group::Character, Group::TypeR, Group::Navigator, Group::History]);
     for bad in [f32::NAN, -10.0, f32::INFINITY, 1e12] {
         l.heights.insert(Group::Color, bad);
         let h = l.height(Group::Color);
@@ -56,7 +61,7 @@ fn bad_stored_values_are_sanitised() {
     }
     // Unknown fields, wrong types and old UI state all load.
     let back: DockLayout = serde_json::from_value(json!({"order": ["layers"], "bogus": 1})).unwrap();
-    assert_eq!(back.order(), vec![Group::Layers, Group::Color, Group::Properties, Group::Character, Group::TypeR, Group::Navigator, Group::History]);
+    assert_eq!(classic(back.order()), vec![Group::Layers, Group::Color, Group::Properties, Group::Character, Group::TypeR, Group::Navigator, Group::History]);
     let mut ui = serde_json::to_value(crate::state::UiState::default()).unwrap();
     ui.as_object_mut().unwrap().remove("dock");
     let ui: crate::state::UiState = serde_json::from_value(ui).unwrap();
@@ -763,9 +768,9 @@ fn window_character_opens_its_own_group_and_keeps_properties() {
     }
     // A layout saved before the group existed keeps Layers last.
     let old = DockLayout { order: vec![Group::Color, Group::Properties, Group::Navigator, Group::History, Group::Layers], ..Default::default() };
-    assert_eq!(old.order(), Group::ALL.to_vec());
+    assert_eq!(classic(old.order()), Group::ALL.to_vec());
     let moved = DockLayout { order: vec![Group::Layers, Group::Color], ..Default::default() };
-    assert_eq!(moved.order(), vec![Group::Layers, Group::Color, Group::Properties, Group::Character, Group::TypeR, Group::Navigator, Group::History]);
+    assert_eq!(classic(moved.order()), vec![Group::Layers, Group::Color, Group::Properties, Group::Character, Group::TypeR, Group::Navigator, Group::History]);
 }
 
 type StripProbe = Option<(Vec<(usize, Rect)>, Rect, Option<Rect>, Rect)>;
@@ -1114,4 +1119,43 @@ fn a_narrow_screen_opens_the_dock_from_the_rail() {
     let (app, _, _) = app_with_layers();
     let h = harness(app, vec2(1200.0, 800.0), ThemeKind::Pro);
     assert!(last_rects(&h.ctx).iter().any(|(g, _)| *g == Group::Layers));
+}
+
+/// A floating panel docked into the dock draws inside its group, and its header floats it back.
+#[test]
+fn a_docked_floating_panel_draws_in_its_group_and_floats_back() {
+    use egui_kittest::kittest::Queryable;
+    let (mut app, _, _) = app_with_layers();
+    app.ui.panels.brush_settings = true;
+    crate::floaters::dock(&mut app, crate::floaters::Floater::of(Group::BrushSettings).unwrap());
+    let mut h = Harness::builder().with_size(vec2(1200.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            let ctx = ui.ctx().clone();
+            if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            crate::panels::right_dock(app, ui);
+            egui::CentralPanel::default().show(ui, |_| {});
+            crate::brush_panel::window(app, &ctx);
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, ThemeKind::Pro);
+    h.state_mut().ui.theme = ThemeKind::Pro;
+    h.run_steps(4);
+    let group = rect_of(&h, Group::BrushSettings);
+    let brushes = h.query_all_by_label_contains("Brush").map(|n| n.rect().center()).collect::<Vec<_>>();
+    assert!(brushes.iter().any(|p| group.contains(*p)), "the panel's own tabs are in its dock group {group:?}: {brushes:?}");
+    assert!(rect_of(&h, Group::Layers).top() > group.top(), "Layers stays below and fills the column");
+    let float = h.get_by_label("Float Panel").rect().center();
+    h.event(egui::Event::PointerMoved(float));
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: float, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+    }
+    h.run_steps(3);
+    assert!(last_rects(&h.ctx).iter().all(|(g, _)| *g != Group::BrushSettings), "floated out of the dock");
+    assert!(h.state().ui.panels.brush_settings && h.state().ui.panels.dock_home.is_empty(), "still open, in its window");
+    assert!(h.query_by_label("Dock to the Panels").is_some(), "its window offers docking again");
 }

@@ -626,13 +626,18 @@ fn float_window(
         .inner_margin(egui::Margin::same(8));
     let canvas = canvas_drop_rect(app);
     let mut close = false;
-    egui::Window::new(title)
+    // Its own window, or docked (`crate::floaters`; the key is the dock group's).
+    let host = match crate::dock::Group::from_key(key) {
+        Some(g) => crate::floaters::Host::of(app, ctx, g),
+        None => crate::floaters::Host::Window(crate::dock::Group::Layers),
+    };
+    let window = egui::Window::new(title)
         .id(egui::Id::new(("preset-window", key)))
         .title_bar(false)
         .resizable(false)
         .frame(frame)
-        .default_pos(pos2((canvas.right() - width - 16.0 - offset).max(canvas.left() + 8.0), canvas.top() + 40.0))
-        .show(ctx, |ui| {
+        .default_pos(pos2((canvas.right() - width - 16.0 - offset).max(canvas.left() + 8.0), canvas.top() + 40.0));
+    host.show(ctx, egui::Id::new(("preset-window", key)), window, |ui| {
             ui.set_width(width);
             // Photoshop-style tab header with a close box.
             ui.horizontal(|ui| {
@@ -641,6 +646,7 @@ fn float_window(
                     if crate::icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
                         close = true;
                     }
+                    host.header_button(ui);
                 });
             });
             crate::widgets::hairline(ui);
