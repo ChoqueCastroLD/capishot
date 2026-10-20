@@ -1078,9 +1078,20 @@ fn names_one_frame(object: &E) -> bool {
 /// can't be refitted.
 fn new_object(template: &E, at: usize, text: &str) -> Option<E> {
     let paragraphs: Vec<usize> = text.split_inclusive('\r').map(|p| p.encode_utf16().count()).collect();
+    let frame = template.path(&["1", "0"]).and_then(E::as_array).and_then(|f| f.first()).and_then(|f| f.get("0")).cloned();
+    let at = i64::try_from(at).ok()?;
     let mut object = edited_object(template, text)?;
     let view = object.get_mut("1")?;
-    view.set("0", E::Array(vec![E::Dict(vec![("0".into(), E::Int(i64::try_from(at).ok()?))])]));
+    view.set("0", E::Array(vec![E::Dict(vec![("0".into(), E::Int(at))])]));
+    // The rendered strikes' frame strike (`/F`) names the template's frame too.
+    if let Some(E::Array(strikes)) = view.get_mut("2") {
+        for s in strikes.iter_mut() {
+            let Some(E::Array(parts)) = s.get_mut("6") else { continue };
+            for p in parts.iter_mut().filter(|p| p.get("99").and_then(E::as_str) == Some("F") && p.get("10") == frame.as_ref()) {
+                p.set("10", E::Int(at));
+            }
+        }
+    }
     if let Some(runs) = view.path(&["1", "0"]).and_then(E::as_array) {
         let fitted = runs_per(runs, &paragraphs)?;
         view.get_mut("1")?.set("0", E::Array(fitted));

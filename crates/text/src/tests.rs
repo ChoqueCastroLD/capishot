@@ -1155,7 +1155,7 @@ fn new_text_layer_gets_a_txt2_object_and_frame() {
     use crate::engine_data::Value as E;
     let run = |len: usize| format!("<< /0 << /0 << /0 (\u{fe}\u{ff}) /5 << /7 1.2 >> /6 << /0 0 /1 12.0 >> >> >> /1 {len} >> ");
     let prev = format!(
-        "\n\n/98 << /0 7 >> /0 << /8 << /0 [ << /0 << /2 << /2 [ 1.0 0.0 0.0 1.0 5.0 6.0 ] >> >> >> ] >> >> /1 << /0 << /0 1 >> /1 [ << /0 << /0 (\u{fe}\u{ff}\0A\0B\0\r\0C\0D\0\r) /5 << /0 [ {}{}] >> /6 << /0 [ {}] >> >> /1 << /0 [ << /0 0 >> ] /1 << /0 [ << /0 << /1 1 >> /1 3 >> << /0 << /1 1 >> /1 3 >> ] >> /2 [ << /99 /PC >> ] >> /21 << /1 [ 1.0 ] >> >> ] /2 << /0 7 >> >>",
+        "\n\n/98 << /0 7 >> /0 << /8 << /0 [ << /0 << /2 << /2 [ 1.0 0.0 0.0 1.0 5.0 6.0 ] >> >> >> ] >> >> /1 << /0 << /0 1 >> /1 [ << /0 << /0 (\u{fe}\u{ff}\0A\0B\0\r\0C\0D\0\r) /5 << /0 [ {}{}] >> /6 << /0 [ {}] >> >> /1 << /0 [ << /0 0 >> ] /1 << /0 [ << /0 << /1 1 >> /1 3 >> << /0 << /1 1 >> /1 3 >> ] >> /2 [ << /99 /PC /6 [ << /99 /F /10 0 >> ] >> ] >> /21 << /1 [ 1.0 ] >> >> ] /2 << /0 7 >> >>",
         run(3),
         run(3),
         run(6)
@@ -1180,6 +1180,11 @@ fn new_text_layer_gets_a_txt2_object_and_frame() {
     assert_eq!(object.path(&["0", "0"]).and_then(E::as_str), Some("v1.0\r"));
     assert_eq!(object.path(&["1", "0"]), Some(&E::Array(vec![E::Dict(vec![("0".into(), E::Int(1))])])), "the view names its own frame");
     assert!(object.get("21").is_none());
+    assert_eq!(
+        object.path(&["1", "2"]).and_then(E::as_array).and_then(|s| s[0].get("6")).and_then(E::as_array).and_then(|f| f[0].get("10")),
+        Some(&E::Int(1)),
+        "the frame strike names its own frame"
+    );
     let lens =
         |path: &[&str]| -> Vec<i64> { object.path(path).and_then(E::as_array).unwrap().iter().map(|r| r.get("1").and_then(E::as_i64).unwrap()).collect() };
     assert_eq!(lens(&["0", "5", "0"]), vec![5]);
@@ -1205,7 +1210,7 @@ fn new_text_layer_gets_a_txt2_object_and_frame() {
 
     // An oversized object is never the template (it would be copied once per new layer).
     let filler = "0 ".repeat(5000);
-    let big = prev.iter().map(|&b| b as char).collect::<String>().replace("/2 [ << /99 /PC >> ]", &format!("/2 [ << /99 /PC >> ] /9 [ {filler}]"));
+    let big = prev.iter().map(|&b| b as char).collect::<String>().replace("/2 [ << /99 /PC", &format!("/9 [ {filler}] /2 [ << /99 /PC"));
     let big: Vec<u8> = big.chars().map(|c| c as u32 as u8).collect();
     let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &new)], Some(&big))).unwrap();
     let object = &out.path(&["1", "1"]).and_then(E::as_array).unwrap()[1];
