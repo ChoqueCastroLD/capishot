@@ -39,12 +39,11 @@ pub fn install_windows() -> Option<photocraft_tablet::windows::Monitor> {
     photocraft_tablet::windows::Monitor::install().map_err(|e| log::warn!("{e}")).ok()
 }
 
-/// Physical right mouse button or stylus barrel button down check (Windows).
+/// Stylus barrel button down check (Windows). The right mouse button is left to egui, which
+/// reports the logical secondary button (swapped buttons included) for the app's own window only.
 #[cfg(target_os = "windows")]
 pub fn right_button_service() -> Option<photocraft_ui_egui::RightButtonDownFn> {
-    Some(Box::new(|| {
-        photocraft_tablet::windows::is_barrel_button_down() || winsafe::GetAsyncKeyState(winsafe::co::VK::RBUTTON)
-    }))
+    Some(Box::new(photocraft_tablet::windows::is_barrel_button_down))
 }
 
 #[cfg(not(target_os = "windows"))]
