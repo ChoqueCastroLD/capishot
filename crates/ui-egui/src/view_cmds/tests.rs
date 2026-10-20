@@ -508,7 +508,7 @@ fn video_menu_commands_open_pickers_and_dialogs() {
     let (mut app, ctx) = app_with(1);
     app.services.file_dialog = Some(Box::new(|_, _, _| {}));
 
-    for id in ["layer.videoLayers.newVideoLayerFromFile", "file.import.videoFramesToLayers", "layer.videoLayers.replaceFootage"] {
+    for id in ["layer.videoLayers.newVideoLayerFromFile", "layer.videoLayers.replaceFootage"] {
         assert!(is_live(id), "{id}");
         assert_eq!(menu(&mut app, &ctx, id, json!({})).unwrap(), json!({"fileDialog": "open"}), "{id}");
         app.file_dialog = None;
@@ -519,13 +519,6 @@ fn video_menu_commands_open_pickers_and_dialogs() {
     assert_eq!(fields["__command"], "layer.videoLayers.interpretFootage");
     assert_eq!(fields["fps"], 30.0);
     app.ui.close_dialog(interpret);
-
-    let render = menu(&mut app, &ctx, "file.export.renderVideo", json!({})).unwrap()["dialog"].as_u64().unwrap();
-    let fields = &app.ui.dialog_mut(render).unwrap().fields;
-    assert_eq!(fields["__command"], "file.export.renderVideo");
-    assert_eq!(fields["format"], "gif");
-    assert_eq!(fields["__choices"]["format"], json!(["gif", "png", "jpg", "webp", "bmp", "tiff"]));
-    app.ui.close_dialog(render);
 }
 
 /// One frame of the shortcut handler with a plain Esc press.

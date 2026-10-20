@@ -615,8 +615,6 @@ fn wraps(id: &str) -> bool {
             | "layer.videoLayers.newVideoLayerFromFile"
             | "layer.videoLayers.replaceFootage"
             | "layer.videoLayers.interpretFootage"
-            | "file.import.videoFramesToLayers"
-            | "file.export.renderVideo"
     )
 }
 
@@ -1256,7 +1254,7 @@ fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value)
                 app.with_document(doc, |app| app.run("layer.smartObjects.convertToLinked", json!({"layer": layer.0, "path": path})))
             }))
         }
-        "layer.videoLayers.newVideoLayerFromFile" | "file.import.videoFramesToLayers" | "layer.videoLayers.replaceFootage" => {
+        "layer.videoLayers.newVideoLayerFromFile" | "layer.videoLayers.replaceFootage" => {
             let doc = match app.active_doc_id() {
                 Ok(doc) => doc,
                 Err(e) => return Some(Err(e)),
@@ -1278,10 +1276,6 @@ fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value)
             let id_layer = st.active_layer?;
             let fps = st.doc.layer(id_layer).and_then(|l| l.video.as_ref()).map_or(30.0, |v| v.fps);
             dialog(app, json!({"fps": fps}), json!({}))
-        }
-        "file.export.renderVideo" => {
-            let _ = doc?;
-            dialog(app, json!({"dir": dir, "format": "gif"}), json!({"format": ["gif", "png", "jpg", "webp", "bmp", "tiff"]}))
         }
         "file.fileInfo" => {
             let info = app.session.execute("file.fileInfo", json!({})).ok()?;
