@@ -72,6 +72,8 @@ pub struct CameraRawDialog {
     raw_curve: Option<std::sync::Arc<Vec<[f32; 2]>>>,
     /// The proxy develop running on a worker ([`Self::request_render`]).
     pending: Option<std::sync::mpsc::Receiver<Result<ProxyFrame, String>>>,
+    /// The last worker failure the status bar shows, with the preview revision it failed on.
+    preview_error: Option<(String, u64)>,
     /// Settings before each finished edit, so Ctrl+Z works inside the dialog (#4100).
     undo: Vec<CameraRaw>,
     redo: Vec<CameraRaw>,
@@ -753,6 +755,7 @@ fn open_pixels(
         raw_open: None,
         raw_curve: None,
         pending: None,
+        preview_error: None,
         undo: Vec::new(),
         redo: Vec::new(),
         edit_origin: None,
@@ -1184,10 +1187,22 @@ fn draw(app: &mut PhotocraftApp, ctx: &egui::Context, own_window: bool) {
         d.curve_rect = None;
         d.scope.vectorscope_rect = None;
         if let Err(e) = d.poll_render(ctx) {
+            d.preview_error = Some((e.clone(), d.preview_revision));
             app.ui.status = e;
             app.ui.status_error = true;
         }
         d.request_render(ctx);
+        // A newer frame means the failure is over: take its message down, unless something else
+        // has reported since.
+        if let Some((e, revision)) = &d.preview_error
+            && *revision != d.preview_revision
+        {
+            if app.ui.status_error && app.ui.status == *e {
+                app.ui.status.clear();
+                app.ui.status_error = false;
+            }
+            d.preview_error = None;
+        }
         let (full, _) = ui.allocate_exact_size(screen.size(), Sense::click());
         let painter = ui.painter().clone();
         painter.rect_filled(full, 0.0, t.chrome);
@@ -1610,6 +1625,50 @@ mod tests {
         assert!(!d.dirty);
         frame(&mut app);
         assert!(!app.ui.status_error, "{}", app.ui.status);
+    }
+
+    /// A failed worker develop shows its error until a later frame is published, and never takes
+    /// down an error something else reported meanwhile.
+    #[test]
+    fn a_worker_failure_is_reported_until_the_next_frame() {
+        let (mut app, ctx) = worker_app();
+        PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::Pro);
+        let frame = |app: &mut PhotocraftApp| {
+            ctx.run_ui(egui::RawInput::default(), |ui| show(app, ui.ctx())).textures_delta.clear();
+        };
+        let fail = |app: &mut PhotocraftApp| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(Err("Camera Raw preview failed".to_string())).unwrap();
+            let d = app.camera_raw.as_mut().unwrap();
+            d.pending = Some(rx);
+            d.dirty = false;
+        };
+        let edit = |app: &mut PhotocraftApp, exposure: f32| {
+            let d = app.camera_raw.as_mut().unwrap();
+            d.params.exposure = exposure;
+            d.dirty = true;
+        };
+        frame(&mut app);
+        fail(&mut app);
+        frame(&mut app);
+        assert!(app.ui.status_error && app.ui.status == "Camera Raw preview failed", "{}", app.ui.status);
+        // No new frame yet: the error stays.
+        frame(&mut app);
+        assert!(app.ui.status_error);
+        edit(&mut app, 0.5);
+        frame(&mut app);
+        finish_worker(app.camera_raw.as_mut().unwrap(), &ctx);
+        frame(&mut app);
+        assert!(!app.ui.status_error && app.ui.status.is_empty(), "{}", app.ui.status);
+
+        fail(&mut app);
+        frame(&mut app);
+        app.ui.status = "something else failed".into();
+        edit(&mut app, 1.0);
+        frame(&mut app);
+        finish_worker(app.camera_raw.as_mut().unwrap(), &ctx);
+        frame(&mut app);
+        assert!(app.ui.status_error && app.ui.status == "something else failed", "{}", app.ui.status);
     }
 
     #[test]
