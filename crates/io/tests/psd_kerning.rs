@@ -173,6 +173,61 @@ fn new_text_layer_below_keeps_the_preserved_text_indices() {
     assert_eq!(indices, [("new", Some(2)), ("AV", Some(0)), ("BC", Some(1))]);
 }
 
+/// A Photoshop-shaped `Txt2` block: one object per `(text, style keys)` pair, each with its view
+/// naming its own frame.
+fn photoshop_txt2(objects: &[(&str, &str)]) -> Vec<u8> {
+    let bom = "\u{fe}\u{ff}";
+    let frame = "<< /0 << /2 << /2 [ 1.0 0.0 0.0 1.0 5.0 6.0 ] >> >> >> ";
+    let mut frames = String::new();
+    let mut body = String::new();
+    for (i, (text, style)) in objects.iter().enumerate() {
+        let utf16: String = format!("{text}\r").chars().flat_map(|c| ['\0', c]).collect();
+        let len = text.len() + 1;
+        frames.push_str(frame);
+        body.push_str(&format!(
+            "<< /0 << /0 ({bom}{utf16}) /5 << /0 [ << /0 << /0 << /0 ({bom}) /5 << /7 1.2 >> >> >> /1 {len} >> ] >> /6 << /0 [ << /0 << /0 << /0 ({bom}) /6 << /0 0 /11 1 {style} >> >> >> /1 {len} >> ] >> >> /1 << /0 [ << /0 {i} >> ] /1 << /0 [ << /0 << /1 1 >> /1 {len} >> ] >> /2 [ << /99 /PC /6 [ << /99 /F /10 {i} >> ] >> ] >> >> "
+        ));
+    }
+    format!("\n\n/98 << /0 7 >> /0 << /8 << /0 [ {frames}] >> >> /1 << /0 << /0 1 >> /1 [ {body}] /2 << /0 7 >> >>").chars().map(|c| c as u32 as u8).collect()
+}
+
+/// The preserved type layers "AV" (`TextIndex` 0) and "BC" (1) of a Photoshop file whose `Txt2`
+/// holds `objects`, plus a new type layer "Hi" on top, saved and reopened: "Hi"'s index and the
+/// font features it comes back with.
+fn add_layer_beside(objects: &[(&str, &str)]) -> (Option<i32>, Vec<String>) {
+    let mut doc = Document::new("k", photocraft_geom::Size::new(64, 32), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
+    for (i, text) in ["AV", "BC"].into_iter().enumerate() {
+        let mut t = layer(text, &[(2, Kerning::Metrics, 0.0)]);
+        photocraft_text::TextEngine::new().render_layer(&mut t, doc.resolution_dpi, doc.pixel_format());
+        let raw = photocraft_text::psd::build_tysh(&t, doc.resolution_dpi, None);
+        t.psd_raw = Some(std::sync::Arc::new(photocraft_text::psd::set_text_index(&raw, i as i32).unwrap()));
+        doc.layers.push(Layer::new(text, LayerContent::Text(t)));
+    }
+    doc.metadata.psd_global_blocks = vec![(*b"8BIM", *b"Txt2", std::sync::Arc::new(photoshop_txt2(objects)))];
+    let mut t = layer("Hi", &[(2, Kerning::Metrics, 0.0)]);
+    photocraft_text::TextEngine::new().render_layer(&mut t, doc.resolution_dpi, doc.pixel_format());
+    doc.layers.push(Layer::new("Hi", LayerContent::Text(t)));
+    let bytes = photocraft_io::export(&doc, "k.psd", &Default::default()).unwrap().bytes;
+    let back = photocraft_io::import("k.psd", &bytes).unwrap().document;
+    let LayerContent::Text(t) = &back.layers[2].content else { panic!("not text") };
+    let features = t.char_runs().iter().flat_map(|r| r.style.features.iter().map(|f| f.tag.clone())).collect();
+    (t.psd_raw.as_deref().and_then(|d| photocraft_text::psd::text_index(d)), features)
+}
+
+/// A new type layer takes the structure of one of the file's objects but not its style: the
+/// template's style runs carried its font features (here `salt` and `ss01`) into the new layer.
+#[test]
+fn new_text_layer_takes_no_style_from_the_txt2_template() {
+    assert_eq!(add_layer_beside(&[("AV", ""), ("BC", "/28 true /85 1")]), (Some(2), vec![]));
+}
+
+/// A new type layer is numbered past the file's `Txt2` objects, not only past the kept indices:
+/// the object of a deleted type layer ("Gone", index 2) is not reused with its style.
+#[test]
+fn new_text_layer_skips_a_deleted_layers_txt2_object() {
+    assert_eq!(add_layer_beside(&[("AV", ""), ("BC", ""), ("Gone", "/28 true")]), (Some(3), vec![]));
+}
+
 /// A file-controlled `TextIndex` must not size the save: `i32::MAX` is ignored (the regenerated
 /// `Txt2` is sized by real text objects, never by a file's numbers) and the document still saves
 /// and reopens with its text.
@@ -215,6 +270,9 @@ fn txt2_extras_survive_a_resave_of_unchanged_text() {
         let mut doc = Document::new("k", photocraft_geom::Size::new(64, 32), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
         let mut r = t.clone();
         photocraft_text::TextEngine::new().render_layer(&mut r, doc.resolution_dpi, doc.pixel_format());
+        // The file's layer: its `TySh` names object 0.
+        let raw = photocraft_text::psd::build_tysh(&r, doc.resolution_dpi, None);
+        r.psd_raw = Some(std::sync::Arc::new(photocraft_text::psd::set_text_index(&raw, 0).unwrap()));
         doc.layers.push(Layer::new("kept", LayerContent::Text(r)));
         doc.metadata.psd_global_blocks.push((*b"8BIM", *b"Txt2", std::sync::Arc::new(prev.clone())));
         let bytes = photocraft_io::export(&doc, "k.psd", &Default::default()).unwrap().bytes;

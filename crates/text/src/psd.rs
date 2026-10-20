@@ -1002,7 +1002,8 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
         // view naming its own frame. A bare stub beside Photoshop's objects, its slot without a
         // frame in `/0 /8 /0`, made Photoshop and Photopea refuse the file.
         let fresh = (kept.is_none() && edited.is_none()).then(|| template.and_then(|t| new_object(t, at, &text))).flatten();
-        let reuse = kept.is_some() || edited.is_some() || fresh.is_some();
+        // A new object keeps the template's structure, not its style: its style runs are generated.
+        let reuse = kept.is_some() || edited.is_some();
         let mut object = kept.cloned().or(edited).or(fresh).unwrap_or_else(E::dict);
         let mut model = object.get("0").cloned().filter(|m| matches!(m, E::Dict(_))).unwrap_or_else(E::dict);
         let file_runs = reuse.then(|| model.path(&["6", "0"]).and_then(E::as_array)).flatten().and_then(|runs| with_modes(runs, &modes));
@@ -1248,6 +1249,13 @@ pub fn text_index(tysh: &[u8]) -> Option<i32> {
         Some(D::Integer(i)) if (0..=MAX_TEXT_INDEX).contains(i) => Some(*i),
         _ => None,
     }
+}
+
+/// How many text objects the document `Txt2` block `data` holds (`/1 /1`), named by a layer or
+/// not; 0 when it doesn't parse. PSD export numbers new type layers past them, so a new layer
+/// never lands on a deleted layer's object.
+pub fn txt2_object_count(data: &[u8]) -> usize {
+    parse_txt2(data).and_then(|t| t.path(&["1", "1"]).and_then(E::as_array).map(<[E]>::len)).unwrap_or(0)
 }
 
 /// Rewrites a `TySh`'s `TextIndex`: the layer's text-object number in the document's `Txt2`

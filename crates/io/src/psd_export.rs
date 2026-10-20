@@ -1582,9 +1582,10 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
         ex.used_ids = used;
         // Text objects' number in the generated `Txt2` (#1348): a preserved `TySh` keeps the
         // number it already names — its `Txt2` object must sit at that slot for `apply_txt2` —
-        // and new layers get numbers past every kept one. Kept numbers are claimed first: a layer
-        // added below others must not take a number a layer above it keeps, or each of those
-        // would be renumbered onto its neighbour's object and take its style (#7773).
+        // and new layers get numbers past every kept one and every object in the file's `Txt2`.
+        // Kept numbers are claimed first: a layer added below others must not take a number a
+        // layer above it keeps, or each of those would be renumbered onto its neighbour's object
+        // and take its style (#7773); nor may it land on a deleted layer's object.
         let mut used_txt = std::collections::HashSet::new();
         ex.text_index = Default::default();
         let mut fresh = Vec::new();
@@ -1599,7 +1600,9 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
                 _ => fresh.push(l.id),
             }
         }
-        let mut next_txt = used_txt.iter().max().map_or(0, |m| m + 1);
+        let objects =
+            doc.metadata.psd_global_blocks.iter().find(|(_, key, _)| key == b"Txt2").map_or(0, |(_, _, d)| photocraft_text::psd::txt2_object_count(d));
+        let mut next_txt = used_txt.iter().max().map_or(0, |m| m + 1).max(i32::try_from(objects).unwrap_or(i32::MAX));
         if next_txt.saturating_add(fresh.len() as i32) > photocraft_text::psd::MAX_TEXT_INDEX + 1 {
             next_txt = 0;
         }
