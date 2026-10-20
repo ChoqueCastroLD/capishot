@@ -316,17 +316,23 @@ fn settings_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let before = app.session.tools.brush.clone();
     let mut b = before.clone();
     let section = app.ui.brush_section.min(SECTIONS.len() - 1);
-    ui.horizontal_top(|ui| {
+    // Docked in a panel column (`crate::floaters`) the section list sits above the options.
+    let narrow = ui.available_width() < WIDTH - 20.0;
+    let detail = if narrow { ui.available_width() } else { WIDTH - 190.0 };
+    let layout = if narrow { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Min) };
+    ui.with_layout(layout, |ui| {
         section_list(app, ui, &mut b);
-        widgets::vline(ui, 482.0);
+        if !narrow {
+            widgets::vline(ui, 482.0);
+        }
         ui.vertical(|ui| {
-            ui.set_width(WIDTH - 190.0);
+            ui.set_width(detail);
             let name = SECTIONS.get(section).map_or("Brush Tip Shape", |entry| entry.0);
             ui.label(RichText::new(tl!(name)).font(theme::semibold(12.5)).color(t.text));
             ui.add_space(6.0);
             let on = section_flag(&mut b, section).is_none_or(|f| *f);
             egui::ScrollArea::vertical().id_salt(("brush-section", section)).max_height(450.0).auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_width(WIDTH - 204.0);
+                ui.set_width(detail - 14.0);
                 // A section that's off shows its options greyed out (Photoshop). A tip picked in
                 // the grid copies the tip fields only — the dynamics sections stay (Photoshop).
                 // The picked preset is recorded by name (`brush.presets.setCurrent`, identity, so
@@ -390,31 +396,31 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         .frame(frame)
         .default_pos(egui::pos2((canvas.right() - WIDTH - 30.0).max(canvas.left() + 8.0), canvas.top() + 24.0));
     host.show(ctx, egui::Id::new("brush-settings"), window, |ui| {
-            ui.set_width(WIDTH);
-            ui.horizontal(|ui| {
-                let mut tab = app.ui.brush_tab;
-                for (i, name) in [tl!("Brush Settings"), tl!("Brushes")].iter().enumerate() {
-                    if widgets::pill_tab(ui, name, tab == i).clicked() {
-                        tab = i;
-                    }
+        ui.set_width(host.width(WIDTH));
+        ui.horizontal(|ui| {
+            let mut tab = app.ui.brush_tab;
+            for (i, name) in [tl!("Brush Settings"), tl!("Brushes")].iter().enumerate() {
+                if widgets::pill_tab(ui, name, tab == i).clicked() {
+                    tab = i;
                 }
-                app.ui.brush_tab = tab;
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
-                        open = false;
-                    }
-                    host.header_button(ui);
-                });
-            });
-            ui.add_space(6.0);
-            widgets::hairline(ui);
-            ui.add_space(6.0);
-            if app.ui.brush_tab == 1 {
-                crate::brushes_tab::show(app, ui);
-            } else {
-                settings_tab(app, ui);
             }
+            app.ui.brush_tab = tab;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
+                    open = false;
+                }
+                host.header_button(ui);
+            });
         });
+        ui.add_space(6.0);
+        widgets::hairline(ui);
+        ui.add_space(6.0);
+        if app.ui.brush_tab == 1 {
+            crate::brushes_tab::show(app, ui);
+        } else {
+            settings_tab(app, ui);
+        }
+    });
     if !open {
         app.ui.panels.brush_settings = false;
     }

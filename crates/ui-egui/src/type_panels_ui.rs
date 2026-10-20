@@ -152,29 +152,29 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
             .frame(float_frame(&t))
             .default_pos(pos2((canvas.right() - 314.0).max(canvas.left() + 8.0), canvas.top() + 40.0));
         host.show(ctx, egui::Id::new("type-styles-window"), window, |ui| {
-                ui.set_width(290.0);
-                ui.horizontal(|ui| {
-                    let mut tab = app.ui.type_panels.styles_tab;
-                    for (i, name) in [tl!("Character Styles"), tl!("Paragraph Styles")].iter().enumerate() {
-                        if crate::widgets::pill_tab(ui, name, tab == i).clicked() {
-                            tab = i;
-                        }
+            ui.set_width(host.width(290.0));
+            ui.horizontal(|ui| {
+                let mut tab = app.ui.type_panels.styles_tab;
+                for (i, name) in [tl!("Character Styles"), tl!("Paragraph Styles")].iter().enumerate() {
+                    if crate::widgets::pill_tab(ui, name, tab == i).clicked() {
+                        tab = i;
                     }
-                    if tab != app.ui.type_panels.styles_tab {
-                        app.ui.type_panels.styles_tab = tab;
-                        app.ui.type_panels.options = None;
+                }
+                if tab != app.ui.type_panels.styles_tab {
+                    app.ui.type_panels.styles_tab = tab;
+                    app.ui.type_panels.options = None;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if crate::icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
+                        close = true;
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if crate::icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
-                            close = true;
-                        }
-                        host.header_button(ui);
-                    });
+                    host.header_button(ui);
                 });
-                crate::widgets::hairline(ui);
-                ui.add_space(4.0);
-                styles_panel(app, ui, app.ui.type_panels.styles_tab == 1);
             });
+            crate::widgets::hairline(ui);
+            ui.add_space(4.0);
+            styles_panel(app, ui, app.ui.type_panels.styles_tab == 1);
+        });
         if close {
             app.ui.type_panels.styles = false;
         }
@@ -189,20 +189,20 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
             .frame(float_frame(&t))
             .default_pos(pos2((canvas.right() - 314.0 - 372.0).max(canvas.left() + 8.0), canvas.top() + 40.0));
         host.show(ctx, egui::Id::new("glyphs-window"), window, |ui| {
-                ui.set_width(340.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(tl!("Glyphs")).color(t.text).size(12.0).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if crate::icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
-                            close = true;
-                        }
-                        host.header_button(ui);
-                    });
+            ui.set_width(host.width(340.0));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(tl!("Glyphs")).color(t.text).size(12.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if crate::icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
+                        close = true;
+                    }
+                    host.header_button(ui);
                 });
-                crate::widgets::hairline(ui);
-                ui.add_space(4.0);
-                glyphs_panel(app, ui);
             });
+            crate::widgets::hairline(ui);
+            ui.add_space(4.0);
+            glyphs_panel(app, ui);
+        });
         if close {
             app.ui.type_panels.glyphs = false;
         }

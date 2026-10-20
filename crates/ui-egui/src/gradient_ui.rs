@@ -614,7 +614,8 @@ pub fn editor_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let layer = selected_gradient(app);
     // Its own window, or docked (`crate::floaters`).
     let host = crate::floaters::Host::of(app, ctx, crate::dock::Group::GradientEditor);
-    let window = egui::Window::new(tl!("Gradient Editor")).id(egui::Id::new("gradient-editor")).open(&mut open).collapsible(false).resizable(true).default_width(330.0);
+    let window =
+        egui::Window::new(tl!("Gradient Editor")).id(egui::Id::new("gradient-editor")).open(&mut open).collapsible(false).resizable(true).default_width(330.0);
     host.show(ctx, egui::Id::new("gradient-editor"), window, |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| host.header_button(ui));
         match &layer {

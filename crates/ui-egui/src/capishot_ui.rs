@@ -95,13 +95,9 @@ fn folder_form(app: &mut PhotocraftApp) -> u64 {
     f.insert("__label".into(), json!(label));
     f.insert("__form".into(), json!(true));
     f.insert("__choices".into(), json!({"format": ["png", "jpg", "webp", "tif"]}));
-    for (k, v) in [
-        ("input", json!(dir)),
-        ("output", json!(format!("{dir}/compiled"))),
-        ("format", json!("png")),
-        ("rerenderText", json!(true)),
-        ("quality", json!(90)),
-    ] {
+    for (k, v) in
+        [("input", json!(dir)), ("output", json!(format!("{dir}/compiled"))), ("format", json!("png")), ("rerenderText", json!(true)), ("quality", json!(90))]
+    {
         f.insert(k.into(), v);
     }
     app.ui.open_dialog(DialogKind::Command, f)

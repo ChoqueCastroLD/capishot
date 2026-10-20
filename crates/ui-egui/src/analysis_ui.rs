@@ -664,6 +664,7 @@ pub(crate) fn panel_window(app: &PhotocraftApp, ctx: &egui::Context, id: &str, t
         .max_width(width)
         .frame(float_frame(&t))
         .default_pos(pos2((canvas.right() - width - 16.0 + offset.x).max(canvas.left() + 8.0), canvas.top() + offset.y));
+    let width = host.map_or(width, |h| h.width(width));
     let add = |ui: &mut egui::Ui| {
         ui.set_width(width);
         ui.set_max_width(width);
