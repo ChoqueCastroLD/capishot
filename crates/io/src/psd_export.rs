@@ -1597,26 +1597,36 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
         ex.used_ids = used;
         // Text objects' number in the generated `Txt2` (#1348): a preserved `TySh` keeps the
         // number it already names — its `Txt2` object must sit at that slot for `apply_txt2` —
-        // and new layers get the next free number.
+        // and new layers get numbers past every kept one and every object in the file's `Txt2`.
+        // Kept numbers are claimed first: a layer added below others must not take a number a
+        // layer above it keeps, or each of those would be renumbered onto its neighbour's object
+        // and take its style (#7773); nor may it land on a deleted layer's object.
         let mut used_txt = std::collections::HashSet::new();
-        let mut next_txt = 0i32;
         ex.text_index = Default::default();
+        let mut fresh = Vec::new();
         for (_, _, l) in &walk {
             let LayerContent::Text(t) = &l.content else {
                 continue;
             };
-            let kept = t.psd_raw.as_deref().and_then(|d| photocraft_text::psd::text_index(d));
-            let index = match kept {
-                Some(i) if used_txt.insert(i) => i,
-                _ => {
-                    while used_txt.contains(&next_txt) {
-                        next_txt += 1;
-                    }
-                    used_txt.insert(next_txt);
-                    next_txt
+            match t.psd_raw.as_deref().and_then(|d| photocraft_text::psd::text_index(d)) {
+                Some(i) if used_txt.insert(i) => {
+                    ex.text_index.insert(l.id, i);
                 }
-            };
-            ex.text_index.insert(l.id, index);
+                _ => fresh.push(l.id),
+            }
+        }
+        let objects =
+            doc.metadata.psd_global_blocks.iter().find(|(_, key, _)| key == b"Txt2").map_or(0, |(_, _, d)| photocraft_text::psd::txt2_object_count(d));
+        let mut next_txt = used_txt.iter().max().map_or(0, |m| m + 1).max(i32::try_from(objects).unwrap_or(i32::MAX));
+        if next_txt.saturating_add(fresh.len() as i32) > photocraft_text::psd::MAX_TEXT_INDEX + 1 {
+            next_txt = 0;
+        }
+        for id in fresh {
+            while used_txt.contains(&next_txt) {
+                next_txt += 1;
+            }
+            used_txt.insert(next_txt);
+            ex.text_index.insert(id, next_txt);
         }
     }
     // Progress: one unit per layer record, then the merged composite (#3389).
@@ -1745,8 +1755,8 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
     // writes its empty `<< /0 << >> >>` stub — readers such as Photopea reject it (#3514). Keep the
     // block when the file had one (round-trip its pen positions/extras) or a layer is Optical (the
     // one mode EngineData can't carry; #1348).
-    let txt2 =
-        (previous.is_some() || photocraft_text::psd::needs_txt2(&text_layers)).then(|| photocraft_text::psd::build_txt2(&text_layers, previous.as_deref()));
+    let txt2 = (previous.is_some() || photocraft_text::psd::needs_txt2(&text_layers))
+        .then(|| photocraft_text::psd::build_txt2_at(&text_layers, previous.as_deref(), ex.dpi));
     for (sig, key, data) in preserved {
         if txt2.is_some() && key == *b"Txt2" {
             continue;

@@ -1129,6 +1129,143 @@ fn edited_txt2_keeps_the_files_styles_and_objects() {
     assert_eq!(modes, vec![(1, Kerning::Optical), (2, Kerning::Metrics)]);
 }
 
+/// #6968: editing the text of a Photoshop type layer keeps its `Txt2` object — paragraph runs,
+/// the view naming its frame, the model's other run arrays and its style keys — refitted to the
+/// new text. It was replaced by a bare `<< /0 << /0 text /6 runs >> >>` stub, and Photoshop quit
+/// while opening the file.
+#[test]
+fn edited_text_keeps_the_files_txt2_object() {
+    use crate::engine_data::Value as E;
+    let run = |extra: &str, len: usize| format!("<< /0 << /0 << /0 (\u{fe}\u{ff}) /5 << /7 1.2 >> /6 << /0 0 /1 12.0 {extra} >> >> >> /1 {len} >> ");
+    // "AB\rCD\r": two paragraphs, two style runs, a kern run, a view and pen positions.
+    let prev = format!(
+        "\n\n/98 << /0 7 >> /0 << /8 << /0 [ << /0 << /2 << /2 [ 1.0 0.0 0.0 1.0 5.0 6.0 ] >> >> >> ] >> >> /1 << /0 << /0 1 >> /1 [ << /0 << /0 (\u{fe}\u{ff}\0A\0B\0\r\0C\0D\0\r) /5 << /0 [ {}{}] >> /6 << /0 [ {}{}] >> /7 << /0 [ << /0 << >> /1 6 >> ] >> >> /1 << /0 [ << /0 0 >> ] /2 [ << /99 /PC >> ] >> /21 << /1 [ 1.0 ] >> >> ] /2 << /0 7 >> >>",
+        run("", 3),
+        run("", 3),
+        run("/11 1", 2),
+        run("/11 1 /53 (red)", 4)
+    );
+    // Every character above is below U+0100: one raw byte each (the BOM `FE FF` included).
+    let prev: Vec<u8> = prev.chars().map(|c| c as u32 as u8).collect();
+    let before = crate::psd::parse_txt2(&prev).unwrap();
+    let before_object = before.path(&["1", "1"]).and_then(E::as_array).unwrap()[0].clone();
+    assert_eq!(before_object.path(&["0", "0"]).and_then(E::as_str), Some("AB\rCD\r"));
+    let lens = |o: &E, key: &str| -> Vec<i64> {
+        o.path(&["0", key, "0"]).and_then(E::as_array).unwrap().iter().map(|r| r.get("1").and_then(E::as_i64).unwrap()).collect()
+    };
+    for (text, paragraphs, styles) in
+        [("Bevex\nCD", vec![6, 3], vec![9]), ("AB\nCD\nEFG", vec![3, 3, 4], vec![10]), ("X", vec![2], vec![2]), ("AB\nCZ", vec![3, 3], vec![6])]
+    {
+        let t = runs_of(text, &[(text.len(), CharStyle::default())]);
+        let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &t)], Some(&prev))).unwrap();
+        for key in [&["0"][..], &["98"], &["1", "0"], &["1", "2"]] {
+            assert_eq!(out.path(key), before.path(key), "{text:?}: /{} survives", key.join(" /"));
+        }
+        let object = &out.path(&["1", "1"]).and_then(E::as_array).unwrap()[0];
+        let engine = format!("{}\r", text.replace('\n', "\r"));
+        let total = engine.encode_utf16().count() as i64;
+        assert_eq!(object.path(&["0", "0"]).and_then(E::as_str), Some(engine.as_str()));
+        assert_eq!(object.get("1"), before_object.get("1"), "{text:?}: the view (its frame) is kept");
+        assert!(object.get("21").is_none(), "{text:?}: pen positions of the old text are dropped");
+        assert_eq!(lens(object, "5"), paragraphs, "{text:?}: one paragraph run per paragraph");
+        // Photoshop reads the character style from these runs: they follow the layer's own runs
+        // (one here), built on the file's first run.
+        assert_eq!(lens(object, "6"), styles, "{text:?}: style runs cover the new text");
+        assert_eq!(lens(object, "7"), vec![total], "{text:?}: other run arrays cover the new text");
+        for r in object.path(&["0", "5", "0"]).and_then(E::as_array).unwrap() {
+            assert_eq!(r.path(&["0", "0", "5", "7"]).and_then(E::as_f64), Some(1.2), "{text:?}: paragraph style survives");
+        }
+        for r in object.path(&["0", "6", "0"]).and_then(E::as_array).unwrap() {
+            assert_eq!(r.path(&["0", "0", "6", "1"]).and_then(E::as_f64), Some(f64::from(CharStyle::default().size_pt)), "{text:?}: the layer's font size");
+            assert_eq!(r.path(&["0", "0", "5", "7"]).and_then(E::as_f64), Some(1.2), "{text:?}: the file's run keeps its other keys");
+        }
+    }
+}
+
+/// A type layer the file's `Txt2` has no object for (one added before the save, #7698) gets an
+/// object shaped like the file's own, with a view naming its own frame and a frame in `/0 /8 /0`,
+/// instead of a bare stub: Photoshop and Photopea refused the file when the frames ran out.
+#[test]
+fn new_text_layer_gets_a_txt2_object_and_frame() {
+    use crate::engine_data::Value as E;
+    let run = |len: usize| format!("<< /0 << /0 << /0 (\u{fe}\u{ff}) /5 << /7 1.2 >> /6 << /0 0 /1 12.0 >> >> >> /1 {len} >> ");
+    let prev = format!(
+        "\n\n/98 << /0 7 >> /0 << /8 << /0 [ << /0 << /2 << /2 [ 1.0 0.0 0.0 1.0 5.0 6.0 ] >> >> >> ] >> >> /1 << /0 << /0 1 >> /1 [ << /0 << /0 (\u{fe}\u{ff}\0A\0B\0\r\0C\0D\0\r) /5 << /0 [ {}{}] >> /6 << /0 [ {}] >> >> /1 << /0 [ << /0 0 >> ] /1 << /0 [ << /0 << /1 1 >> /1 3 >> << /0 << /1 1 >> /1 3 >> ] >> /2 [ << /99 /PC /6 [ << /99 /F /10 0 >> ] >> ] >> /21 << /1 [ 1.0 ] >> >> ] /2 << /0 7 >> >>",
+        run(3),
+        run(3),
+        run(6)
+    );
+    // The same block after an earlier save wrote a bare stub for "v1.0" (the file in #7698).
+    let stub = "<< /0 << /0 (\u{fe}\u{ff}\0v\x001\0.\x000\0\r) /6 << /0 [ << /0 << /0 << /0 () /6 << /0 0 /11 1 >> >> >> /1 5 >> ] >> >> >> ";
+    let broken = prev.replace(" >> ] /2 << /0 7 >>", &format!(" >> {stub}] /2 << /0 7 >>"));
+    let broken: Vec<u8> = broken.chars().map(|c| c as u32 as u8).collect();
+    let prev: Vec<u8> = prev.chars().map(|c| c as u32 as u8).collect();
+    let before = crate::psd::parse_txt2(&prev).unwrap();
+    let old = runs_of("AB\nCD", &[(5, CharStyle::default())]);
+    let new = runs_of("v1.0", &[(4, CharStyle::default())]);
+    let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &new)], Some(&prev))).unwrap();
+    let objects = out.path(&["1", "1"]).and_then(E::as_array).unwrap();
+    assert_eq!(objects.len(), 2);
+    let kept = &before.path(&["1", "1"]).and_then(E::as_array).unwrap()[0];
+    assert_eq!(objects[0].get("1"), kept.get("1"), "the file's object keeps its view");
+    assert_eq!(objects[0].path(&["0", "5"]), kept.path(&["0", "5"]), "the file's object keeps its paragraphs");
+    let frames = out.path(&["0", "8", "0"]).and_then(E::as_array).unwrap();
+    assert_eq!(frames.len(), 2, "one frame per object");
+    let object = &objects[1];
+    assert_eq!(object.path(&["0", "0"]).and_then(E::as_str), Some("v1.0\r"));
+    assert_eq!(object.path(&["1", "0"]), Some(&E::Array(vec![E::Dict(vec![("0".into(), E::Int(1))])])), "the view names its own frame");
+    assert!(object.get("21").is_none());
+    assert_eq!(
+        object.path(&["1", "2"]).and_then(E::as_array).and_then(|s| s[0].get("6")).and_then(E::as_array).and_then(|f| f[0].get("10")),
+        Some(&E::Int(1)),
+        "the frame strike names its own frame"
+    );
+    let lens =
+        |path: &[&str]| -> Vec<i64> { object.path(path).and_then(E::as_array).unwrap().iter().map(|r| r.get("1").and_then(E::as_i64).unwrap()).collect() };
+    assert_eq!(lens(&["0", "5", "0"]), vec![5]);
+    assert_eq!(lens(&["0", "6", "0"]), vec![5]);
+    assert_eq!(lens(&["1", "1", "0"]), vec![5], "view runs follow the new paragraphs");
+
+    // Re-saving the file with the stub repairs it: the stub is replaced like a missing object.
+    assert_eq!(crate::psd::parse_txt2(&broken).unwrap().path(&["1", "1"]).and_then(E::as_array).unwrap().len(), 2);
+    let repaired = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &new)], Some(&broken))).unwrap();
+    assert_eq!(repaired, out, "a stub from an earlier save is replaced");
+    // Also when the stub's layer is edited before the re-save.
+    let edited = runs_of("v2.0", &[(4, CharStyle::default())]);
+    let repaired = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &edited)], Some(&broken))).unwrap();
+    let object = &repaired.path(&["1", "1"]).and_then(E::as_array).unwrap()[1];
+    assert_eq!(object.path(&["0", "0"]).and_then(E::as_str), Some("v2.0\r"));
+    assert_eq!(object.path(&["1", "0"]), Some(&E::Array(vec![E::Dict(vec![("0".into(), E::Int(1))])])), "an edited stub is replaced too");
+
+    // No object to take the shape from: the fresh object as before, with the frames still padded.
+    let bare = b"\n\n/98 << /0 7 >> /0 << /8 << /0 [ << /0 1 >> ] >> >> /1 << /1 [ << >> ] >> ";
+    let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(1, &new)], Some(bare))).unwrap();
+    assert_eq!(out.path(&["1", "1"]).and_then(E::as_array).unwrap().len(), 2);
+    assert_eq!(out.path(&["0", "8", "0"]).and_then(E::as_array).unwrap().len(), 2);
+
+    // An oversized object is never the template (it would be copied once per new layer).
+    let filler = "0 ".repeat(5000);
+    let big = prev.iter().map(|&b| b as char).collect::<String>().replace("/2 [ << /99 /PC", &format!("/9 [ {filler}] /2 [ << /99 /PC"));
+    let big: Vec<u8> = big.chars().map(|c| c as u32 as u8).collect();
+    let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &old), (1, &new)], Some(&big))).unwrap();
+    let object = &out.path(&["1", "1"]).and_then(E::as_array).unwrap()[1];
+    assert!(object.get("1").is_none(), "no copy of an oversized template");
+    assert_eq!(out.path(&["0", "8", "0"]).and_then(E::as_array).unwrap().len(), 2);
+}
+
+/// The frame padding is bounded like the slots a layer can name: a crafted block of many empty
+/// objects and no frames must not make the save write a frame for each of them.
+#[test]
+fn txt2_frame_padding_is_bounded() {
+    use crate::engine_data::Value as E;
+    let objects = "<< >> ".repeat(70_000);
+    let prev = format!("\n\n/98 << /0 7 >> /0 << /8 << /0 [ ] >> >> /1 << /1 [ {objects}] >> ");
+    let t = runs_of("AV", &[(2, CharStyle::default())]);
+    let out = crate::psd::parse_txt2(&crate::psd::build_txt2(&[(0, &t)], Some(prev.as_bytes()))).unwrap();
+    let frames = out.path(&["0", "8", "0"]).and_then(E::as_array).unwrap().len();
+    assert_eq!(frames, crate::psd::MAX_TEXT_INDEX as usize + 1);
+}
+
 /// The file's style runs are only reused when they cover the text: runs of another length (or
 /// hostile lengths) fall back to generated runs, without panicking.
 #[test]
