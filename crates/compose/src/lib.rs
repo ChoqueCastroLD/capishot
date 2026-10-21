@@ -97,6 +97,59 @@ impl Buffer {
 /// Tile size for parallel rendering (tile results are independent).
 pub const RENDER_TILE: i32 = 256;
 
+// One tile of scratch per worker; nested rendering takes its own buffer.
+thread_local! {
+    static SCRATCH: std::cell::RefCell<Vec<[f32; 4]>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn scratch_buffer(rect: Rect) -> Buffer {
+    if rect.width() as usize * rect.height() as usize > (RENDER_TILE * RENDER_TILE) as usize {
+        return Buffer::transparent(rect);
+    }
+    let mut px = SCRATCH.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+    px.resize(rect.width() as usize * rect.height() as usize, [0.0; 4]);
+    Buffer { rect, px }
+}
+
+fn recycle_buffer(buf: Buffer) {
+    if buf.px.capacity() <= (RENDER_TILE * RENDER_TILE) as usize {
+        SCRATCH.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.capacity() < buf.px.capacity() {
+                *slot = buf.px;
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn scratch_reuse_preserves_pixels_and_bounds_retention() {
+    SCRATCH.with(|slot| slot.borrow_mut().clear());
+    let rect = Rect::new(-2, -3, 18, 11);
+    for fmt in [photocraft_color::PixelFormat::RGBA8, photocraft_color::PixelFormat::RGBA16, photocraft_color::PixelFormat::RGBA32F] {
+        let s = Surface::with_default(fmt, &[0.2, 0.4, 0.6, 0.8]);
+        let buf = surface_to_scratch(&s, rect);
+        assert_eq!(buf, surface_to_buffer(&s, rect));
+        let ptr = buf.px.as_ptr();
+        recycle_buffer(buf);
+        let reused = surface_to_scratch(&Surface::new(fmt), rect);
+        assert_eq!(reused.px.as_ptr(), ptr);
+        assert!(reused.px.iter().all(|p| p == &[0.0; 4]));
+        let nested = scratch_buffer(rect);
+        assert_ne!(nested.px.as_ptr(), reused.px.as_ptr());
+        recycle_buffer(nested);
+        recycle_buffer(reused);
+    }
+    let cached = SCRATCH.with(|slot| slot.borrow().as_ptr());
+    let huge = scratch_buffer(Rect::new(0, 0, RENDER_TILE + 1, RENDER_TILE));
+    recycle_buffer(huge);
+    SCRATCH.with(|slot| {
+        assert_eq!(slot.borrow().as_ptr(), cached);
+        assert!(slot.borrow().capacity() <= (RENDER_TILE * RENDER_TILE) as usize);
+    });
+}
+
 /// Composite the whole document over `rect`, in parallel 256² tiles on
 /// native targets (single-threaded on wasm).
 pub fn render(doc: &Document, rect: Rect) -> Buffer {
@@ -194,14 +247,18 @@ fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx) -> Buffer 
                 }
             });
         } else {
-            // Few, wide bands: the tiles of each band in parallel.
-            for (i, band) in out.px.chunks_mut(band_len).enumerate() {
+            // Few, wide bands: the tiles of each band in parallel, and the bands too, so a band's
+            // slowest tile doesn't leave the other cores idle until the next band starts. Each
+            // tile is written as soon as it is done, so only the tiles in flight are held.
+            out.px.par_chunks_mut(band_len).enumerate().for_each(|(i, band)| {
                 let y0 = rect.y0 + i as i32 * tile;
-                let parts: Vec<Buffer> = band_tiles(y0).into_par_iter().map(run).collect();
-                for part in &parts {
-                    put(band, y0, part);
-                }
-            }
+                let band = std::sync::Mutex::new(band);
+                band_tiles(y0).into_par_iter().for_each(|t| {
+                    let part = run(t);
+                    let mut band = band.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    put(&mut band, y0, &part);
+                });
+            });
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -342,6 +399,7 @@ pub fn render_layer(layer: &Layer, rect: Rect) -> Buffer {
             vector_masks: RenderVectorMasks::default(),
             fx_maps: Default::default(),
             fx_clip: Default::default(),
+            tone_luts: prepare_tones(std::slice::from_ref(layer), 0),
             doc: None,
             layer_keys: Default::default(),
         },
@@ -682,6 +740,8 @@ struct Ctx<'a> {
     /// The document's colour mode (channel restrictions name its channels).
     mode: photocraft_color::ColorMode,
     depth: photocraft_color::SampleType,
+    /// At most 1 MiB of tone tables, initialized once and shared by this render's tiles and bands.
+    tone_luts: Vec<(&'a photocraft_doc::Adjustment, std::sync::OnceLock<[Vec<f32>; 4]>)>,
     vector_masks: RenderVectorMasks,
     /// Effect maps used by this render, by cache key: built before the parallel tiles (see
     /// [`prepare_effects`]) and held for the whole render (or band, for maps clipped to it: the
@@ -761,6 +821,7 @@ impl<'a> Ctx<'a> {
             fx_maps: Default::default(),
             fx_clip: Default::default(),
             layer_keys: Default::default(),
+            tone_luts: prepare_tones(&doc.layers, 0),
         }
     }
 
@@ -772,9 +833,41 @@ impl<'a> Ctx<'a> {
             self.fx_maps.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, (_, clipped)| !*clipped);
         }
     }
+
+    fn apply_adjustment(&self, adj: &photocraft_doc::Adjustment, buf: &mut Buffer) {
+        if let photocraft_doc::Adjustment::Levels { space, .. } | photocraft_doc::Adjustment::Curves { space, .. } = adj
+            && !matches!(adj, photocraft_doc::Adjustment::Levels { space: photocraft_doc::adjust::ToneSpace::Rgb, .. } if self.depth == photocraft_color::SampleType::F32)
+            && let Some((_, luts)) = self.tone_luts.iter().find(|(a, _)| std::ptr::eq(*a, adj))
+        {
+            let identity = adjust::float_tone_identity(adj, Some(self.depth));
+            if identity == [true; 3] {
+                return;
+            }
+            adjust::apply_tone(buf, *space, luts.get_or_init(|| adjust::tone_luts_depth(adj, Some(self.depth))), identity);
+        } else {
+            adjust::apply_in(adj, buf, self.transfer, Some(self.depth), self.mode);
+        }
+    }
 }
 
-/// Deepest group nesting [`prepare_effects`] walks (deeper layers build their maps on demand).
+fn prepare_tones(layers: &[Layer], depth: u32) -> Vec<(&photocraft_doc::Adjustment, std::sync::OnceLock<[Vec<f32>; 4]>)> {
+    let mut out = Vec::new();
+    for layer in layers.iter().filter(|l| l.visible) {
+        if out.len() == 16 {
+            break;
+        }
+        match &layer.content {
+            LayerContent::Adjustment(a @ (photocraft_doc::Adjustment::Levels { .. } | photocraft_doc::Adjustment::Curves { .. })) => {
+                out.push((a, Default::default()))
+            }
+            LayerContent::Group(g) if depth < PREPARE_DEPTH => out.extend(prepare_tones(&g.children, depth + 1).into_iter().take(16 - out.len())),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Deepest group nesting preparation walks (deeper layers prepare on demand).
 const PREPARE_DEPTH: u32 = 64;
 
 /// Build the effect maps of every visible layer in `layers` (groups included) that can reach
@@ -1098,7 +1191,7 @@ fn render_content(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Buffer> {
         }
         LayerContent::Fill(f) => match &layer.fill_cache {
             // Photoshop's own rendering, valid while the fill is unchanged.
-            Some(c) if c.fill == *f => surface_to_buffer(&c.surface, rect),
+            Some(c) if c.fill == *f => surface_to_scratch(&c.surface, rect),
             _ if cx.mode == photocraft_color::ColorMode::Cmyk => {
                 let frame = fill_frame(layer, cx.canvas);
                 let native_rect = if matches!(f, Fill::Solid(_)) { Rect::new(0, 0, 1, 1) } else { rect };
@@ -1112,7 +1205,7 @@ fn render_content(layer: &Layer, rect: Rect, cx: &Ctx) -> Option<Buffer> {
         },
         LayerContent::Adjustment(_) => return None,
         _ => match layer.surface() {
-            Some(s) => surface_to_buffer(s, rect),
+            Some(s) => surface_to_scratch(s, rect),
             None => Buffer::transparent(rect),
         },
     };
@@ -1151,6 +1244,12 @@ pub fn surface_to_buffer(s: &Surface, rect: Rect) -> Buffer {
     let mut px = vec![[0.0f32; 4]; rect.width() as usize * rect.height() as usize];
     s.read_rgba_into(rect, &mut px);
     Buffer { rect, px }
+}
+
+fn surface_to_scratch(s: &Surface, rect: Rect) -> Buffer {
+    let mut buf = scratch_buffer(rect);
+    s.read_rgba_into(rect, &mut buf.px);
+    buf
 }
 
 /// The frame a fill layer's gradient is laid out in ("Align with layer", Photoshop's default):
@@ -1533,6 +1632,38 @@ fn composite_artboard(layer: &Layer, ab: &photocraft_doc::Artboard, clipped: &[L
     }
 }
 
+/// The surface `render_content` reads `layer`'s pixels from, when that is all it draws.
+fn pixel_surface(layer: &Layer) -> Option<&Surface> {
+    if matches!(layer.content, LayerContent::Group(_) | LayerContent::Fill(_) | LayerContent::Adjustment(_)) {
+        return None;
+    }
+    layer.surface()
+}
+
+/// A pixel layer (nothing clipped to it) onto `backdrop`, read from its tiles a row at a time:
+/// the same arithmetic as `render_content` + `blend_into_fill`, without a tile-sized copy of the
+/// layer (a megabyte per 256² render tile).
+fn composite_pixel_layer(layer: &Layer, surf: &Surface, backdrop: &mut Buffer, cx: &Ctx) {
+    let rect = backdrop.rect;
+    let w = rect.width() as usize;
+    if w == 0 {
+        return;
+    }
+    let mv = mask_vals(layer, rect, cx);
+    let gamma = text_gamma(layer);
+    let mut row = vec![[0.0f32; 4]; w];
+    for (ry, dst) in backdrop.px.chunks_exact_mut(w).enumerate() {
+        let y = rect.y0 + ry as i32;
+        surf.read_rgba_into(Rect::new(rect.x0, y, rect.x1, y + 1), &mut row);
+        if let Some(m) = mv.as_ref().and_then(|m| m.get(ry * w..(ry + 1) * w)) {
+            for (p, k) in row.iter_mut().zip(m) {
+                p[3] *= k;
+            }
+        }
+        blend_span_fill(dst, &row, rect.x0, y, layer.blend, layer.opacity, layer.fill_opacity, gamma);
+    }
+}
+
 fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer, cx: &Ctx, scope: advanced::Scope) {
     let rect = backdrop.rect;
     // A TSL-off stroke base that is transparent here can still have visible clipped siblings;
@@ -1608,11 +1739,15 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
 
     // Adjustment layers transform the backdrop, then blend the result back in.
     if let LayerContent::Adjustment(adj) = &layer.content {
-        let mut adjusted = backdrop.clone();
-        adjust::apply_in(adj, &mut adjusted, cx.transfer, Some(cx.depth), cx.mode);
+        let mv = mask_vals(layer, rect, cx);
+        if mv.as_ref().is_some_and(|values| values.iter().all(|&value| opacity * value <= 0.0)) {
+            return;
+        }
+        let mut adjusted = scratch_buffer(rect);
+        adjusted.px.copy_from_slice(&backdrop.px);
+        cx.apply_adjustment(adj, &mut adjusted);
         // Clipped layers onto an adjustment are uncommon; they composite atop the adjusted result.
         advanced::composite_clipped(clipped, &mut adjusted, cx);
-        let mv = mask_vals(layer, rect, cx);
         for y in rect.y0..rect.y1 {
             for x in rect.x0..rect.x1 {
                 let i = ((y - rect.y0) as usize) * rect.width() as usize + (x - rect.x0) as usize;
@@ -1627,6 +1762,7 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
                 backdrop.px[i] = [b[0] + (blended[0] - b[0]) * k, b[1] + (blended[1] - b[1]) * k, b[2] + (blended[2] - b[2]) * k, b[3]];
             }
         }
+        recycle_buffer(adjusted);
         return;
     }
 
@@ -1651,9 +1787,15 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
         blend_into_fill(backdrop, &content, layer.blend, layer.opacity, layer.fill_opacity, 1.0);
         return;
     }
+    if clipped.is_empty()
+        && let Some(surf) = pixel_surface(layer)
+    {
+        return composite_pixel_layer(layer, surf, backdrop, cx);
+    }
     let Some(mut content) = render_content(layer, rect, cx) else { return };
     advanced::composite_clipped(clipped, &mut content, cx);
     blend_into_fill(backdrop, &content, layer.blend, layer.opacity, layer.fill_opacity, text_gamma(layer));
+    recycle_buffer(content);
 }
 
 /// A layer with effects (and its clipping group) onto `backdrop`.
@@ -1955,7 +2097,7 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
     let rect = base.rect;
     if let LayerContent::Adjustment(adj) = &layer.content {
         let mut adjusted = base.clone();
-        adjust::apply_in(adj, &mut adjusted, cx.transfer, Some(cx.depth), cx.mode);
+        cx.apply_adjustment(adj, &mut adjusted);
         let mv = mask_vals(layer, rect, cx);
         for (i, p) in base.px.iter_mut().enumerate() {
             let k = layer.opacity * layer.fill_opacity * mask_k(&mv, i);
@@ -2020,44 +2162,51 @@ fn blend_into(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32
 /// [`blend_into_g`] for a layer's own `opacity` and `fill`: Fill is part of the blend for
 /// Photoshop's special eight ([`psblend::composite_fill`]), plain coverage otherwise.
 fn blend_into_fill(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, fill: f32, gamma: f32) {
-    if fill >= 1.0 || !psblend::fill_is_special(mode) {
-        return blend_into_g(backdrop, src, mode, opacity * fill, gamma);
+    for_rows(backdrop, src, |dst, s, x0, y| blend_span_fill(dst, s, x0, y, mode, opacity, fill, gamma));
+}
+
+/// [`blend_into`] mixing coverage in a `gamma` space (type layers).
+fn blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, gamma: f32) {
+    for_rows(backdrop, src, |dst, s, x0, y| blend_span_g(dst, s, x0, y, mode, opacity, gamma));
+}
+
+/// Runs `f(backdrop row, src row, x0, y)` over the rows of two buffers covering the same rect.
+fn for_rows(backdrop: &mut Buffer, src: &Buffer, mut f: impl FnMut(&mut [[f32; 4]], &[[f32; 4]], i32, i32)) {
+    let rect = backdrop.rect;
+    let w = (rect.width() as usize).max(1);
+    for (ry, (dst, s)) in backdrop.px.chunks_mut(w).zip(src.px.chunks(w)).enumerate() {
+        f(dst, s, rect.x0, rect.y0 + ry as i32);
     }
-    for (b, s) in backdrop.px.iter_mut().zip(&src.px) {
+}
+
+/// [`blend_into_fill`] of one row: `dst` and `src` start at pixel (`x0`, `y`).
+#[allow(clippy::too_many_arguments)]
+fn blend_span_fill(dst: &mut [[f32; 4]], src: &[[f32; 4]], x0: i32, y: i32, mode: BlendMode, opacity: f32, fill: f32, gamma: f32) {
+    if fill >= 1.0 || !psblend::fill_is_special(mode) {
+        return blend_span_g(dst, src, x0, y, mode, opacity * fill, gamma);
+    }
+    for (b, s) in dst.iter_mut().zip(src) {
         if s[3] > 0.0 {
             *b = psblend::composite_fill(mode, *b, *s, opacity, fill, gamma);
         }
     }
 }
 
-/// [`blend_into`] mixing coverage in a `gamma` space (type layers).
-fn blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, gamma: f32) {
+/// [`blend_into_g`] of one row: `dst` and `src` start at pixel (`x0`, `y`).
+fn blend_span_g(dst: &mut [[f32; 4]], src: &[[f32; 4]], x0: i32, y: i32, mode: BlendMode, opacity: f32, gamma: f32) {
     // The blend space is constant in this loop. Some TLS implementations synchronise even a
     // boolean read, so select the common Normal kernel once instead of once per pixel.
     if mode == BlendMode::Normal && gamma == 1.0 && !psblend::LAB_MIX.with(|l| l.get()) {
-        for (i, b) in backdrop.px.iter_mut().enumerate() {
-            let s = src.px[i];
-            if s[3] <= 0.0 {
-                continue;
-            }
-            *b = psblend::composite_normal_rgb(*b, s, opacity);
-        }
-        return;
+        return psblend::composite_normal_rgb_span(dst, src, opacity);
     }
-    let rect = backdrop.rect;
-    let w = rect.width() as i32;
-    for (i, b) in backdrop.px.iter_mut().enumerate() {
-        let mut s = src.px[i];
+    for (x, (b, s)) in (x0..).zip(dst.iter_mut().zip(src)) {
+        let mut s = *s;
         if s[3] <= 0.0 {
             continue;
         }
-        let mut mode = mode;
         if mode == BlendMode::Dissolve {
-            let x = rect.x0 + (i as i32 % w);
-            let y = rect.y0 + (i as i32 / w);
             s[3] = if dissolve_noise(x, y) < s[3] * opacity { 1.0 } else { 0.0 };
-            mode = BlendMode::Normal;
-            *b = blend::composite(mode, *b, s, 1.0);
+            *b = blend::composite(BlendMode::Normal, *b, s, 1.0);
             continue;
         }
         *b = blend::composite_gamma(mode, *b, s, opacity, gamma);

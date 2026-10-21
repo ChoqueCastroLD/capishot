@@ -14,6 +14,93 @@ fn doc_white(w: u32, h: u32) -> Document {
     Document::with_background("t", Size::new(w, h), ColorMode::Rgb, SampleType::U8, Color::WHITE)
 }
 
+#[test]
+fn prepared_tones_match_fresh_tables_and_stay_bounded() {
+    use photocraft_doc::adjust::ToneSpace;
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        for space in [ToneSpace::Rgb, ToneSpace::Cmyk, ToneSpace::Lab] {
+            for (mut adj, edited) in [
+                (Adjustment::identity_levels(), false),
+                (Adjustment::identity_levels(), true),
+                (Adjustment::identity_curves(), false),
+                (Adjustment::identity_curves(), true),
+            ] {
+                match &mut adj {
+                    Adjustment::Levels { master, space: s, .. } => {
+                        if edited {
+                            master.gamma = 1.4;
+                        }
+                        *s = space;
+                    }
+                    Adjustment::Curves { master, space: s, .. } => {
+                        if edited {
+                            master[1].output = 0.8;
+                        }
+                        *s = space;
+                    }
+                    _ => {}
+                }
+                let mut doc = Document::new("tones", Size::new(3, 1), ColorMode::Rgb, depth);
+                doc.layers.push(Layer::group("group", vec![Layer::new("tone", LayerContent::Adjustment(adj.clone()))]));
+                let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
+                let cx = Ctx::for_doc(&doc, &patterns);
+                let cached_adj = cx.tone_luts[0].0;
+                let input = Buffer { rect: doc.bounds(), px: vec![[0.2, 0.4, 0.7, 0.6], [2.0, -0.2, 0.5, 0.5], [2.0, -0.2, 0.5, 0.0]] };
+                let mut expected = input.clone();
+                adjust::apply_depth(&adj, &mut expected, cx.transfer, Some(depth));
+                for a in [cached_adj, cached_adj, &adj] {
+                    let mut actual = input.clone();
+                    cx.apply_adjustment(a, &mut actual);
+                    assert_eq!(actual.px, expected.px);
+                }
+                let direct = depth == SampleType::F32 && matches!(adj, Adjustment::Levels { space: ToneSpace::Rgb, .. });
+                let identity = adjust::float_tone_identity(&adj, Some(depth)) == [true; 3];
+                assert_eq!(cx.tone_luts[0].1.get().is_none(), direct || identity);
+            }
+        }
+    }
+    let mut layers: Vec<_> = (0..20).map(|_| Layer::new("tone", LayerContent::Adjustment(Adjustment::identity_levels()))).collect();
+    layers[0].visible = false;
+    let tables = prepare_tones(&layers, 0);
+    assert_eq!(tables.len(), 16);
+    assert!(tables.iter().all(|(_, cell)| cell.get().is_none()));
+    assert!(matches!(&layers[1].content, LayerContent::Adjustment(a) if std::ptr::eq(tables[0].0, a)));
+    assert!(prepare_tones(&[Layer::group("deep", layers)], PREPARE_DEPTH).is_empty());
+}
+
+#[test]
+fn prepared_adjustments_keep_document_channel_semantics() {
+    for mode in [ColorMode::Rgb, ColorMode::Cmyk, ColorMode::Lab] {
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let doc = Document::new("channels", Size::new(1, 1), mode, depth);
+            let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
+            let cx = Ctx::for_doc(&doc, &patterns);
+            for adj in [Adjustment::Invert, Adjustment::BrightnessContrast { brightness: 20.0, contrast: 30.0, legacy: false }] {
+                let mut actual = Buffer::filled(doc.bounds(), [0.2, 0.4, 0.7, 0.6]);
+                let mut expected = actual.clone();
+                adjust::apply_in(&adj, &mut expected, cx.transfer, Some(depth), mode);
+                cx.apply_adjustment(&adj, &mut actual);
+                assert_eq!(actual.px, expected.px);
+            }
+        }
+    }
+}
+
+#[test]
+fn identity_float_curves_match_previous_mapping_bits() {
+    let adj = Adjustment::identity_curves();
+    let input = Buffer {
+        rect: Rect::new(0, 0, 4, 1),
+        px: vec![[2.0, -0.0, -0.2, 1.0], [f32::from_bits(0x7fc01234), f32::INFINITY, f32::NEG_INFINITY, 0.6], [0.7, -0.0, 1.5, 0.0], [0.1; 4]],
+    };
+    let mut previous = input.clone();
+    adjust::apply_tone(&mut previous, ToneSpace::Rgb, &adjust::tone_luts_depth(&adj, Some(SampleType::F32)), [true; 3]);
+    let mut actual = input.clone();
+    adjust::apply_depth(&adj, &mut actual, adjust::Transfer::Gamma(1.0), Some(SampleType::F32));
+    assert_buffer_bits(&actual, &previous);
+    assert_buffer_bits(&actual, &input);
+}
+
 fn solid_layer(name: &str, rect: Rect, rgba: [f32; 4]) -> Layer {
     let mut l = Layer::raster(name, PixelFormat::RGBA8);
     l.surface_mut().unwrap().fill_rect(rect, &rgba);
@@ -75,6 +162,108 @@ fn normal_rgb_kernel_preserves_scalar_bits() {
                 let want = original_normal_rgb(b, s, opacity);
                 let got = psblend::composite_normal_rgb(b, s, opacity);
                 assert_eq!(got.map(f32::to_bits), want.map(f32::to_bits), "{b:?} / {s:?} / {opacity}");
+            }
+        }
+    }
+}
+
+/// The vectorized row kernel against the scalar loop it replaced, over row lengths that cover
+/// whole blocks, tails and both, with samples full of NaN, signed zeros, infinities, subnormals
+/// and values outside 0..1: the same bits, except that a NaN only has to stay NaN.
+#[test]
+fn normal_rgb_span_preserves_scalar_bits() {
+    let specials = [0.0, -0.0, 1.0, 0.5, 0.03, -0.5, 2.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::from_bits(1), f32::MIN_POSITIVE, 1e-30];
+    let mut seed = 0x9e37_79b9u32;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed
+    };
+    let mut value = || {
+        let r = next();
+        if r % 3 == 0 { specials[(r / 3) as usize % specials.len()] } else { (r % 1000) as f32 / 999.0 }
+    };
+    for len in 0..41 {
+        for _ in 0..40 {
+            let backdrop: Vec<[f32; 4]> = (0..len).map(|_| [value(), value(), value(), value()]).collect();
+            let source: Vec<[f32; 4]> = (0..len).map(|_| [value(), value(), value(), value()]).collect();
+            let opacity = value();
+            let mut want = backdrop.clone();
+            for (b, s) in want.iter_mut().zip(&source) {
+                if s[3] <= 0.0 {
+                    continue;
+                }
+                *b = original_normal_rgb(*b, *s, opacity);
+            }
+            let mut got = backdrop;
+            psblend::composite_normal_rgb_span(&mut got, &source, opacity);
+            // IEEE 754 leaves open which operand's NaN an operation passes on (x86 and the
+            // vector units differ in its sign), so any NaN counts as the same NaN.
+            let bits = |p: &[f32; 4]| p.map(|v| if v.is_nan() { u32::MAX } else { v.to_bits() });
+            for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+                assert_eq!(bits(g), bits(w), "len {len}, pixel {i}, opacity {opacity}: {g:?} vs {w:?}");
+            }
+        }
+    }
+}
+
+/// A pixel layer read and blended a row at a time gives exactly what blending a tile-sized copy
+/// of it gave, across depths, modes (Dissolve's per-pixel noise and the fill-special modes
+/// included), fill, masks (feathered too) and a rect that is not tile-aligned and runs off the
+/// layer's pixels.
+#[test]
+fn pixel_layer_rows_match_tile_copy() {
+    let rect = Rect::new(-3, 2, 37, 21);
+    let modes = [
+        BlendMode::Normal,
+        BlendMode::Multiply,
+        BlendMode::Dissolve,
+        BlendMode::Overlay,
+        BlendMode::ColorBurn,
+        BlendMode::LinearBurn,
+        BlendMode::VividLight,
+        BlendMode::Difference,
+        BlendMode::Hue,
+    ];
+    for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F] {
+        let mut l = Layer::raster("p", fmt);
+        for y in 0..20 {
+            for x in 0..30 {
+                let t = (x * 7 + y * 13) as f32 / 400.0;
+                let a = [0.0, 0.03, 0.5, 1.0][(x + y) as usize % 4];
+                l.surface_mut().unwrap().write_pixel(x, y, &photocraft_raster::from_rgba(&fmt, [t.fract(), 1.0 - t.fract(), 0.3, a]));
+            }
+        }
+        let mut sharp = LayerMask::reveal_all();
+        sharp.surface.fill_rect(Rect::new(5, 0, 12, 30), &[0.25]);
+        let mut feathered = sharp.clone();
+        feathered.feather = 2.5;
+        for mask in [None, Some(sharp), Some(feathered)] {
+            l.mask = mask;
+            for mode in modes {
+                for fill in [1.0, 0.4] {
+                    l.blend = mode;
+                    l.opacity = 0.8;
+                    l.fill_opacity = fill;
+                    let mut doc = doc_white(40, 30);
+                    doc.layers.push(l.clone());
+                    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES).in_mode(doc.pixel_format().mode);
+                    let cx = Ctx::for_doc(&doc, &patterns);
+                    let layer = &doc.layers[1];
+                    let backdrop = Buffer {
+                        rect,
+                        px: (0..rect.width() * rect.height())
+                            .map(|i| [(i % 11) as f32 / 10.0, (i % 5) as f32 / 4.0, 0.6, [1.0, 0.5, 0.0][i as usize % 3]])
+                            .collect(),
+                    };
+                    let mut want = backdrop.clone();
+                    let content = render_content(layer, rect, &cx).unwrap();
+                    blend_into_fill(&mut want, &content, layer.blend, layer.opacity, layer.fill_opacity, text_gamma(layer));
+                    let mut got = backdrop;
+                    composite_pixel_layer(layer, pixel_surface(layer).unwrap(), &mut got, &cx);
+                    assert_buffer_bits(&got, &want);
+                }
             }
         }
     }
@@ -3343,4 +3532,95 @@ fn concurrent_effect_identity_misses_compute_once() {
         assert!(ids.iter().all(|id| *id == ids[0]));
     });
     assert_eq!(keys.built.load(std::sync::atomic::Ordering::Relaxed), 1, "concurrent cache misses must compute one memoized identity");
+}
+
+#[test]
+fn reused_render_matches_previous_allocating_stack() {
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        let mut doc = Document::new("equivalence", Size::new(513, 7), ColorMode::Rgb, depth);
+        let rect = doc.bounds();
+        for (name, color) in [("bottom", [0.2, 0.4, 0.8, 1.0]), ("top", [1.5, -0.25, 0.6, 0.5])] {
+            let mut layer = Layer::raster(name, doc.pixel_format());
+            layer.surface_mut().unwrap().fill_rect(rect, &color);
+            doc.layers.push(layer);
+        }
+        let mut levels = Adjustment::identity_levels();
+        if let Adjustment::Levels { master, .. } = &mut levels {
+            master.gamma = 1.4;
+        }
+        for adj in [levels, Adjustment::identity_curves()] {
+            let mut layer = Layer::new("tone", LayerContent::Adjustment(adj));
+            layer.opacity = 0.6;
+            doc.layers.push(layer);
+        }
+        let mut previous = Buffer::transparent(rect);
+        in_blend_space(false, depth == SampleType::F32, || {
+            for layer in &doc.layers {
+                if let LayerContent::Adjustment(adj) = &layer.content {
+                    let mut adjusted = previous.clone();
+                    adjust::apply_in(adj, &mut adjusted, adjust::Transfer::for_document(doc.mode, depth), Some(depth), doc.mode);
+                    for (b, a) in previous.px.iter_mut().zip(&adjusted.px) {
+                        let blended = blend::blend_rgb(layer.blend, [b[0], b[1], b[2]], [a[0], a[1], a[2]]);
+                        *b = [
+                            b[0] + (blended[0] - b[0]) * layer.opacity,
+                            b[1] + (blended[1] - b[1]) * layer.opacity,
+                            b[2] + (blended[2] - b[2]) * layer.opacity,
+                            b[3],
+                        ];
+                    }
+                    if let Some(q) = adjustment_quantum(depth) {
+                        quantize(&mut previous, q);
+                    }
+                } else {
+                    let content = surface_to_buffer(layer.surface().unwrap(), rect);
+                    blend_into_fill(&mut previous, &content, layer.blend, layer.opacity, layer.fill_opacity, 1.0);
+                }
+            }
+        });
+        for tile in [1, 127, 256, 1024] {
+            assert_buffer_bits(&render_tiled(&doc, rect, tile), &previous);
+        }
+    }
+}
+
+#[test]
+fn fully_masked_adjustment_tiles_preserve_output_and_skip_tone_work() {
+    let rect = Rect::new(-1, -1, 2, 1);
+    for depth in SampleType::ALL {
+        for partial in [false, true] {
+            let mut doc = Document::new("masked", Size::new(3, 2), ColorMode::Rgb, depth);
+            let mut adj = Adjustment::identity_curves();
+            if let Adjustment::Curves { master, .. } = &mut adj {
+                master[1].output = 0.8;
+            }
+            let mut layer = Layer::new("curves", LayerContent::Adjustment(adj.clone()));
+            layer.opacity = 0.6;
+            let mut mask = LayerMask::hide_all();
+            if partial {
+                mask.surface.write_pixel(0, 0, &[0.75]);
+            }
+            layer.mask = Some(mask);
+            doc.layers.push(layer);
+            let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
+            let cx = Ctx::for_doc(&doc, &patterns);
+            let before = Buffer::filled(rect, [0.2, -0.0, 0.7, 0.6]);
+            let mut adjusted = before.clone();
+            adjust::apply_in(&adj, &mut adjusted, cx.transfer, Some(depth), doc.mode);
+            let mv = mask_vals(&doc.layers[0], rect, &cx);
+            let mut expected = before.clone();
+            for (i, (b, a)) in expected.px.iter_mut().zip(&adjusted.px).enumerate() {
+                let k = 0.6 * mask_k(&mv, i);
+                if k > 0.0 {
+                    for c in 0..3 {
+                        b[c] += (a[c] - b[c]) * k;
+                    }
+                }
+            }
+            let clipped = if partial { vec![] } else { vec![solid_layer("clipped", rect, [0.9, 0.1, 0.2, 1.0])] };
+            let mut actual = before;
+            composite_layer_plain(&doc.layers[0], &clipped, &mut actual, &cx, advanced::Scope::ROOT);
+            assert_buffer_bits(&actual, &expected);
+            assert_eq!(cx.tone_luts[0].1.get().is_some(), partial);
+        }
+    }
 }
