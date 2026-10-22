@@ -2964,3 +2964,4 @@ cameraData	Lens	Objektiv
 	Good fills with a smaller download.	Gute Füllungen mit kleinerem Download.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Detaillierte Füllungen nach Beschreibung, drei Varianten in Sekunden auf der GPU.
 	Needs a GPU	Braucht GPU
+	The most detail: many steps with guidance, slow, for a strong GPU.	Die meisten Details: viele Schritte mit Führung, langsam, für eine starke GPU.

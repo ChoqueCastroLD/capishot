@@ -505,6 +505,11 @@ pub const GENFILL_STANDARD: &[&str] = &[
 /// The files of Generative Fill's Ultra-light tier (CPUs, phones): 277 MB.
 pub const GENFILL_ULTRA: &[&str] = &["genfill-text-q4", "genfill-taesd", "genfill-ultra-unet"];
 
+/// The files of Generative Fill's High tier: Standard's without the few-step LoRA (the base
+/// model, many steps with guidance).
+pub const GENFILL_HIGH: &[&str] =
+    &["genfill-text", "genfill-taesd", "genfill-vae-enc", "genfill-vae-dec", "genfill-unet-1", "genfill-unet-2", "genfill-unet-3", "genfill-unet-4"];
+
 /// The files of Generative Fill's Fast tier (TCD fused offline, 8-bit, TAESD): 1.05 GB.
 pub const GENFILL_FAST: &[&str] = &["genfill-text-q8", "genfill-taesd", "genfill-fast-unet-1", "genfill-fast-unet-2"];
 

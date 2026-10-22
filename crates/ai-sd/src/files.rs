@@ -44,7 +44,7 @@ pub fn tier(tier: Tier) -> Option<&'static TierFiles> {
         Tier::Ultra => Some(ULTRA.get_or_init(|| list(catalog::GENFILL_ULTRA))),
         Tier::Fast => Some(FAST.get_or_init(|| list(catalog::GENFILL_FAST))),
         // The Standard files without the few-step LoRA: the base model, many steps, guidance.
-        Tier::High => Some(HIGH.get_or_init(|| list(&catalog::GENFILL_STANDARD.iter().copied().filter(|id| *id != catalog::GENFILL_FAST_LORA_ID).collect::<Vec<_>>()))),
+        Tier::High => Some(HIGH.get_or_init(|| list(catalog::GENFILL_HIGH))),
     }
 }
 
