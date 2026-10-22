@@ -2889,3 +2889,9 @@ cameraData	Lens	Objektiv
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Smaže vybraný text nebo zvukové efekty a překreslí pozadí pomocí AI na nové vrstvě. Používá stažený model (Okno › Modely AI…).
 @plural	{n} more queued|{n} more queued	další {n} ve frontě|další {n} ve frontě|dalších {n} ve frontě
 	GPU couldn't run this model; used the CPU instead	GPU tento model nedokázala spustit; použil se procesor
+	Menu	Nabídka
+	Max pixel density	Maximální hustota pixelů
+	Display's own	Vlastní hodnota displeje
+	Collapse to Icons	Sbalit na ikony
+	Expand Panels	Rozbalit panely
+	Dock to the Panels	Ukotvit do panelů

@@ -3458,3 +3458,9 @@ cameraData	Lens	렌즈
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	선택한 텍스트나 효과음을 지우고 AI로 배경을 다시 그려 새 레이어에 놓습니다. 다운로드한 모델을 사용합니다(창 › AI 모델…).
 @plural	{n} more queued|{n} more queued	{n}개 더 대기 중
 	GPU couldn't run this model; used the CPU instead	GPU에서 이 모델을 실행할 수 없어 CPU를 사용했습니다
+	Menu	메뉴
+	Max pixel density	최대 픽셀 밀도
+	Display's own	디스플레이 기본값
+	Collapse to Icons	아이콘으로 축소
+	Expand Panels	패널 확장
+	Dock to the Panels	패널에 도킹

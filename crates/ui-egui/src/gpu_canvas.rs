@@ -1490,15 +1490,10 @@ fn subtract(a: photocraft_geom::Rect, b: photocraft_geom::Rect) -> Vec<photocraf
     if i.is_empty() {
         return if a.is_empty() { Vec::new() } else { vec![a] };
     }
-    [
-        Rect::new(a.x0, a.y0, a.x1, i.y0),
-        Rect::new(a.x0, i.y1, a.x1, a.y1),
-        Rect::new(a.x0, i.y0, i.x0, i.y1),
-        Rect::new(i.x1, i.y0, a.x1, i.y1),
-    ]
-    .into_iter()
-    .filter(|r| !r.is_empty())
-    .collect()
+    [Rect::new(a.x0, a.y0, a.x1, i.y0), Rect::new(a.x0, i.y1, a.x1, a.y1), Rect::new(a.x0, i.y0, i.x0, i.y1), Rect::new(i.x1, i.y0, a.x1, i.y1)]
+        .into_iter()
+        .filter(|r| !r.is_empty())
+        .collect()
 }
 
 /// Regions of a display texture whose finer mip levels are out of date: each holds the first
@@ -1619,6 +1614,10 @@ pub fn canvas_texture_bytes(size: [u32; 2], tile: u32, bpp: u64) -> u64 {
 /// Physical memory of this machine in bytes, if known. `PHOTOCRAFT_RAM_MB` overrides it (to
 /// simulate a smaller machine).
 pub fn physical_memory() -> Option<u64> {
+    let told = TOLD_RAM.load(std::sync::atomic::Ordering::Relaxed);
+    if told > 0 {
+        return Some(told);
+    }
     static RAM: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     *RAM.get_or_init(|| {
         if let Some(mb) = std::env::var("PHOTOCRAFT_RAM_MB").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
@@ -1626,6 +1625,15 @@ pub fn physical_memory() -> Option<u64> {
         }
         detect_physical_memory()
     })
+}
+
+/// Memory the platform told the app it has (bytes; 0: none told): the web shell reads
+/// `navigator.deviceMemory`, as a browser offers nothing better.
+static TOLD_RAM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Tell [`physical_memory`] how much memory the device has (the web shell, at start-up).
+pub fn set_physical_memory(bytes: u64) {
+    TOLD_RAM.store(bytes, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[cfg(target_os = "macos")]

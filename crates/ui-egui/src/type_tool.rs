@@ -1373,7 +1373,13 @@ pub(crate) fn fonts_ready(ui: &mut egui::Ui, width: f32) -> bool {
 }
 
 /// Searchable font-family combo box.
-pub(crate) fn font_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &mut String, width: f32, preview: photocraft_engine::prefs::FontPreview) -> bool {
+pub(crate) fn font_picker(
+    app: &mut PhotocraftApp,
+    ui: &mut egui::Ui,
+    current: &mut String,
+    width: f32,
+    preview: photocraft_engine::prefs::FontPreview,
+) -> bool {
     let list = families();
     let mut load_fonts = false;
     // The Find More tab replaces the family list; picking a font there closes the menu.

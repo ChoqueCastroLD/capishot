@@ -1,9 +1,9 @@
 use std::sync::{Arc, Mutex};
 
+use egui_kittest::kittest::Queryable;
 use photocraft_ai::profile::{DeviceProfile, GpuClass};
 use photocraft_ai::service::FakeUpscaler;
 use photocraft_ai_lama::service::FakeInpainter;
-use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
 use super::*;
@@ -100,7 +100,16 @@ fn the_options_dialog_shows_simple_choices_and_advanced_on_demand() {
     assert!(h.query_by_label_contains("CPU threads:").is_none(), "Advanced is closed by default");
     h.get_by_label("Advanced…").click();
     h.run_steps(4);
-    for want in ["Model:", "Max working side:", "Precision:", "CPU threads:", "Keep the model in memory between runs", "Downloaded models:", "AI Models…", "Hide Advanced"] {
+    for want in [
+        "Model:",
+        "Max working side:",
+        "Precision:",
+        "CPU threads:",
+        "Keep the model in memory between runs",
+        "Downloaded models:",
+        "AI Models…",
+        "Hide Advanced",
+    ] {
         assert!(h.query_by_label_contains(want).is_some(), "{want}");
     }
     let d = h.state_mut().ui.dialogs.iter_mut().find(|d| owns(&d.fields)).unwrap();
