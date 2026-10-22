@@ -3283,3 +3283,9 @@ cameraData	Lens	Lensa
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Menghapus teks atau SFX yang dipilih dan menggambar ulang latar dengan AI di layer baru. Memakai model yang sudah diunduh (Jendela › Model AI…).
 @plural	{n} more queued|{n} more queued	{n} lagi dalam antrean
 	GPU couldn't run this model; used the CPU instead	GPU tidak dapat menjalankan model ini; CPU digunakan sebagai gantinya
+	Menu	Menu
+	Max pixel density	Kepadatan piksel maksimum
+	Display's own	Sesuai layar
+	Collapse to Icons	Ciutkan ke ikon
+	Expand Panels	Bentangkan panel
+	Dock to the Panels	Tambatkan ke panel

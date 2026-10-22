@@ -3181,3 +3181,12 @@ fontWeight	Italic	Itálico
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Apaga o texto ou as onomatopeias selecionados e redesenha o fundo com IA, numa nova camada. Usa um modelo transferido (Janela › Modelos de IA…).
 @plural	{n} more queued|{n} more queued	mais {n} em fila|mais {n} em fila
 	GPU couldn't run this model; used the CPU instead	A GPU não conseguiu executar este modelo; foi usado o CPU
+	Menu	Menu
+	Max pixel density	Densidade máxima de píxeis
+	Display's own	A do ecrã
+	Collapse to Icons	Recolher em ícones
+	Expand Panels	Expandir painéis
+	Dock to the Panels	Ancorar nos painéis
+	Float Panel	Painel flutuante
+	Float Panel Group	Destacar grupo de painéis
+	Dock Panel Group	Ancorar grupo de painéis

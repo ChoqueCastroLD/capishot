@@ -167,7 +167,10 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                     let mb = crate::ai_models_ui::mb(p.model.bytes);
                     ui.colored_label(
                         tokens.warning,
-                        crate::i18n::fmt(tl!("{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first."), &[("model", p.model.title), ("mb", &mb)]),
+                        crate::i18n::fmt(
+                            tl!("{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first."),
+                            &[("model", p.model.title), ("mb", &mb)],
+                        ),
                     );
                     if crate::widgets::secondary_button(ui, tl!("AI Models…"), 0.0).clicked() {
                         crate::ai_options_ui::save(app, Kind::Upscale, f);
@@ -266,7 +269,8 @@ mod tests {
         ctx.run_ui(Default::default(), |ui| {
             body(&mut app, ui, &mut f);
         })
-        .textures_delta.clear();
+        .textures_delta
+        .clear();
         assert_eq!(f.get(NEEDS_DOWNLOAD), Some(&json!(true)));
         let key = f.get(DETECT_KEY).cloned().expect("detected once");
         let detected = f.get(DETECTED).cloned().expect("the page type");

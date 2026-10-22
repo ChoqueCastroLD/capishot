@@ -82,6 +82,7 @@ fn legacy_layout(app: &PhotocraftApp, all: bool) -> Layout<String> {
             Group::Navigator => app.ui.dock_tabs.navigator,
             Group::History => app.ui.dock_tabs.history,
             Group::Layers => app.ui.dock_tabs.layers,
+            _ => app.ui.dock_tabs.floater,
         };
         let active = labels.get(selected).and_then(|label| normalize(label)).and_then(|id| panels.iter().position(|p| p == id)).unwrap_or(0);
         if group == Group::Properties && !pro {
@@ -492,6 +493,13 @@ pub(crate) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> bool {
     true
 }
 
+/// Whether the shared layout owns the pointer gesture under way (a tab dragged out of the dock
+/// into it, or one a workspace change cancelled): the classic dock leaves its drop alone.
+pub(crate) fn legacy_owns_drag(ctx: &egui::Context) -> bool {
+    let area = egui::Id::new("photocraft-panel-docking");
+    ctx.data(|data| data.get_temp::<LegacyDrag>(area.with("legacy-origin")).is_some() || data.get_temp::<bool>(area.with("legacy-suppressed")).unwrap_or(false))
+}
+
 pub(crate) fn legacy_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, panel: &str, response: &egui::Response) {
     let suppressed = egui::Id::new("photocraft-panel-docking").with("legacy-suppressed");
     if ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary)) {
@@ -501,6 +509,15 @@ pub(crate) fn legacy_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, panel: &str
         return;
     }
     let Some(panel) = normalize(panel) else { return };
+    // A group showing one tab moves as a whole in the dock's own columns (beside the toolbar,
+    // stacked, floating): `dock::show` handles its drag.
+    let pro = matches!(app.ui.theme, crate::theme::ThemeKind::Pro | crate::theme::ThemeKind::ProMedium);
+    if app.ui.docking.is_none()
+        && let Some((_, _, group)) = PANELS.iter().find(|p| p.0 == panel)
+        && app.ui.dock.visible_tabs(*group, pro).len() + app.ui.dock.guests_of(*group).len() <= 1
+    {
+        return;
+    }
     // Native tab reordering and vertical whole-group moves stay in the dock.
     // Crossing the dock column horizontally detaches through the shared layout.
     let strip = egui::Rect::from_min_max(egui::pos2(ui.max_rect().left(), response.rect.top()), egui::pos2(ui.max_rect().right(), response.rect.bottom()));
@@ -792,6 +809,7 @@ pub(crate) fn prepare_legacy_update(
                 Group::Navigator => tabs.navigator,
                 Group::History => tabs.history,
                 Group::Layers => tabs.layers,
+                _ => tabs.floater,
             };
             let id = group.tabs(pro).get(index).and_then(|label| normalize(label)).ok_or("dockTabs index is outside the panel group")?;
             if visibility == Some(false) {
@@ -925,7 +943,9 @@ pub(crate) fn sync_visibility(app: &mut PhotocraftApp) {
         }
         let pro = matches!(app.ui.theme, crate::theme::ThemeKind::Pro | crate::theme::ThemeKind::ProMedium);
         for group in Group::ALL {
-            *group.shown_mut(&mut app.ui.panels) = PANELS.iter().filter(|p| p.2 == group).any(|p| layout.contains(&p.0.to_owned()));
+            if let Some(shown) = group.shown_mut(&mut app.ui.panels) {
+                *shown = PANELS.iter().filter(|p| p.2 == group).any(|p| layout.contains(&p.0.to_owned()));
+            }
             for (index, label) in group.tabs(pro).iter().enumerate() {
                 if let Some(id) = normalize(label) {
                     if layout.contains(&id.to_owned()) {

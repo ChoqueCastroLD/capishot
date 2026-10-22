@@ -774,10 +774,7 @@ pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
 /// With the defaults (the desktop app) nothing changes.
 fn add_symbol_fonts(fonts: &mut FontDefinitions) {
     use egui::FontTweak;
-    let symbols = [
-        ("NotoEmoji-Regular", epaint_default_fonts::NOTO_EMOJI_REGULAR, 0.81),
-        ("emoji-icon-font", epaint_default_fonts::EMOJI_ICON, 0.90),
-    ];
+    let symbols = [("NotoEmoji-Regular", epaint_default_fonts::NOTO_EMOJI_REGULAR, 0.81), ("emoji-icon-font", epaint_default_fonts::EMOJI_ICON, 0.90)];
     let had_mono_fallback = fonts.font_data.contains_key("Hack");
     for (name, bytes, scale) in symbols {
         if fonts.font_data.contains_key(name) {

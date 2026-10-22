@@ -2920,3 +2920,9 @@ cameraData	Lens	Objektiv
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Löscht ausgewählten Text oder Soundeffekte und zeichnet den Hintergrund mit KI auf einer neuen Ebene neu. Verwendet ein heruntergeladenes Modell (Fenster › KI-Modelle…).
 @plural	{n} more queued|{n} more queued	{n} weiteres in der Warteschlange|{n} weitere in der Warteschlange
 	GPU couldn't run this model; used the CPU instead	Die GPU konnte dieses Modell nicht ausführen; stattdessen wurde die CPU verwendet
+	Menu	Menü
+	Max pixel density	Maximale Pixeldichte
+	Display's own	Wie das Display
+	Collapse to Icons	Auf Symbole reduzieren
+	Expand Panels	Bedienfelder erweitern
+	Dock to the Panels	An Bedienfelder andocken

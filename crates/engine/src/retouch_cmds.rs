@@ -1093,10 +1093,28 @@ impl LiveDab {
         all: bool,
         effect: impl FnOnce(&Surface) -> Result<DabEffect>,
     ) -> Result<Self> {
+        Self::with_effect_lock(s, cmd, p, stroke, id, halo, all, true, effect)
+    }
+
+    /// [`Self::with_effect`]; `honour_lock` false mixes back without Lock Transparent Pixels (the
+    /// Background Eraser, whose commit unlocks the Background first).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn with_effect_lock(
+        s: &Session,
+        cmd: &str,
+        p: &Value,
+        stroke: Stroke,
+        id: Option<LayerId>,
+        halo: i32,
+        all: bool,
+        honour_lock: bool,
+        effect: impl FnOnce(&Surface) -> Result<DabEffect>,
+    ) -> Result<Self> {
         let pre = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
         let mut doc = (*pre).clone();
         let sel = doc.selection.clone();
         let (surf, lock) = crate::channel_cmds::target_surface(&mut doc, id, p)?;
+        let lock = lock && honour_lock;
         let pre_surf = surf.clone();
         let effect = effect(&pre_surf)?;
         let base = (pre.id, s.active().map_or(0, |st| st.revision));
@@ -1293,7 +1311,12 @@ impl DabCommit {
         p
     }
 
-    fn matches(&self, s: &Session, cmd: &str, p: &Value, stroke: &Stroke) -> bool {
+    /// The stroke's pixels for the target and the area they changed.
+    pub(crate) fn into_parts(self) -> (Surface, Rect) {
+        (self.surface, self.bounds)
+    }
+
+    pub(crate) fn matches(&self, s: &Session, cmd: &str, p: &Value, stroke: &Stroke) -> bool {
         let base = s.active().map(|st| (st.doc.id, st.revision));
         self.cmd == cmd
             && base == Some(self.base)
