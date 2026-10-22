@@ -31,6 +31,10 @@ struct State {
     /// Set to stop the running download.
     abort: Option<Arc<AtomicBool>>,
     worker: bool,
+    /// The running download is being paused (its bytes stay), not cancelled.
+    pausing: bool,
+    /// Partial files found on disk were reported once.
+    scanned: bool,
 }
 
 impl NativeModelStore {
@@ -66,6 +70,11 @@ impl NativeModelStore {
     }
 }
 
+/// An unfinished download's bytes.
+fn part_path(dir: &Path, model: &ModelInfo) -> PathBuf {
+    dir.join(format!(".{}.part", model.file))
+}
+
 fn sidecar(dir: &Path, model: &ModelInfo) -> PathBuf {
     dir.join(format!("{}.sha256", model.file))
 }
@@ -88,6 +97,7 @@ fn worker(shared: &Shared) {
             .unwrap_or_else(|_| Err(AiError::Download("the download failed with an internal error".into())));
         let mut st = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
         st.abort = None;
+        st.pausing = false;
         match r {
             // Cancelled: the queue already dropped it.
             Err(AiError::Cancelled) => {}
@@ -112,24 +122,60 @@ fn fetch_to_cache(shared: &Shared, model: &'static ModelInfo, abort: &AtomicBool
         .user_agent("Photocraft-dev")
         .build()
         .into();
-    let mut resp = agent.get(&url).call().map_err(|e| err(&e))?;
+    let tmp = part_path(dir, model);
+    // Resume: hash what is already there, then ask for the rest (HTTP Range).
+    let mut hash = Sha256::new();
+    let mut done = 0u64;
+    if let Ok(mut f) = std::fs::File::open(&tmp) {
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let n = f.read(&mut buf).map_err(|e| AiError::Cache(e.to_string()))?;
+            if n == 0 {
+                break;
+            }
+            hash.update(buf.get(..n).unwrap_or(&[]));
+            done = done.saturating_add(n as u64);
+        }
+        if done > model.bytes {
+            let _ = std::fs::remove_file(&tmp);
+            hash = Sha256::new();
+            done = 0;
+        }
+    }
+    let req = agent.get(&url);
+    let req = if done > 0 { req.header("Range", &format!("bytes={done}-")) } else { req };
+    let mut resp = req.call().map_err(|e| err(&e))?;
+    if done > 0 && resp.status().as_u16() != 206 {
+        // The server ignored the range: start over.
+        hash = Sha256::new();
+        done = 0;
+    }
     let mut reader = resp.body_mut().with_config().limit(model.bytes.saturating_add(1)).reader();
-    let tmp = dir.join(format!(".{}.part", model.file));
-    let mut out = std::fs::File::create(&tmp).map_err(|e| AiError::Cache(format!("{}: {e}", tmp.display())))?;
+    let mut out = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(done > 0)
+        .truncate(done == 0)
+        .open(&tmp)
+        .map_err(|e| AiError::Cache(format!("{}: {e}", tmp.display())))?;
     let cleanup = |e: AiError| {
         let _ = std::fs::remove_file(&tmp);
         e
     };
-    let mut hash = Sha256::new();
     let mut buf = vec![0u8; 1 << 16];
-    let mut done = 0u64;
     let started = std::time::Instant::now();
     let mut throttle = crate::models::Throttle::default();
     loop {
         if abort.load(Ordering::Relaxed) {
+            // Cancelled: the bytes go; paused: they stay for the resume.
+            if shared.state.lock().unwrap_or_else(PoisonError::into_inner).pausing {
+                let _ = out.flush();
+                return Err(AiError::Cancelled);
+            }
             return Err(cleanup(AiError::Cancelled));
         }
-        let n = reader.read(&mut buf).map_err(|e| cleanup(err(&e)))?;
+        // A network error keeps the bytes (the download resumes); a bad file doesn't.
+        let n = reader.read(&mut buf).map_err(|e| err(&e))?;
         if n == 0 {
             break;
         }
@@ -174,8 +220,19 @@ impl ModelStore for NativeModelStore {
     }
 
     fn status(&self, model: &ModelInfo) -> Status {
-        if let Some(s) = self.lock().queue.status(model) {
-            return s;
+        {
+            let mut st = self.lock();
+            if !st.scanned {
+                st.scanned = true;
+                for m in files() {
+                    if let Ok(meta) = part_path(&self.shared.cache.dir, m).metadata() {
+                        st.queue.mark_partial(m.file, meta.len().min(m.bytes));
+                    }
+                }
+            }
+            if let Some(s) = st.queue.status(model) {
+                return s;
+            }
         }
         let cache = &self.shared.cache;
         let path = cache.dir.join(model.file);
@@ -203,6 +260,12 @@ impl ModelStore for NativeModelStore {
 
     fn cancel(&self, model: Option<&ModelInfo>) {
         let mut st = self.lock();
+        // Paused bytes go too.
+        for m in files().into_iter().filter(|m| model.is_none_or(|x| x.file == m.file)) {
+            if matches!(st.queue.status(m), Some(Status::Paused { .. })) {
+                let _ = std::fs::remove_file(part_path(&self.shared.cache.dir, m));
+            }
+        }
         if st.queue.cancel(model) == Cancelled::Active
             && let Some(a) = st.abort.take()
         {
@@ -210,8 +273,19 @@ impl ModelStore for NativeModelStore {
         }
     }
 
+    fn pause(&self, model: Option<&ModelInfo>) {
+        let mut st = self.lock();
+        if st.queue.pause(model) == Cancelled::Active
+            && let Some(a) = st.abort.take()
+        {
+            st.pausing = true;
+            a.store(true, Ordering::Relaxed);
+        }
+    }
+
     fn delete(&self, model: &ModelInfo) -> Result<()> {
         self.cancel(Some(model));
+        let _ = std::fs::remove_file(part_path(&self.shared.cache.dir, model));
         self.lock().queue.clear_failure(model.file);
         let _ = std::fs::remove_file(sidecar(&self.shared.cache.dir, model));
         self.shared.cache.remove(model)

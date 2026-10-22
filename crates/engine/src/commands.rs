@@ -701,8 +701,11 @@ fn build() -> Vec<CommandSpec> {
                         s
                     };
                     if feather > 0.0 {
-                        let m = sel::feather(&sel::mask_from_surface(Some(&shape), area), area.width() as usize, area.height() as usize, feather);
-                        doc.selection = sel::combine(doc.selection.as_ref(), &m, area, sel::SelectionMode::parse(&mode));
+                        // Only the shape's bounds grown by the feather's reach (not the canvas).
+                        let corners = [(r.x0 as f32, r.y0 as f32), (r.x1 as f32, r.y1 as f32)];
+                        let b = crate::selection_cmds::shape_bounds(&corners, feather).intersect(&area);
+                        let m = sel::feather(&sel::mask_from_surface(Some(&shape), b), b.width() as usize, b.height() as usize, feather);
+                        doc.selection = sel::combine_bounded(doc.selection.as_ref(), &m, b, sel::SelectionMode::parse(&mode));
                         return Ok(());
                     }
                     let old = doc.selection.take();

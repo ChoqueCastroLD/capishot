@@ -4210,3 +4210,35 @@ navigator	Zoom	Zvětšení
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptér GPU
+	Ultra-light (any device, 280 MB)	Ultralehké (jakékoli zařízení, 280 MB)
+	Fast (1 GB)	Rychlé (1 GB)
+	Standard (GPU, 2.3 GB)	Standardní (GPU, 2,3 GB)
+	High (GPU, slow)	Vysoká (GPU, pomalé)
+	Ultra-light	Ultralehké
+	Fast	Rychlé
+	Show files	Zobrazit soubory
+	Recommended for this device	Doporučeno pro toto zařízení
+	Generative Fill - {tier}	Generativní výplň - {tier}
+	Clean	Čištění
+	Erase text and objects.	Maže text a objekty.
+	Enlarge pages without blur.	Zvětšuje stránky bez rozmazání.
+	Draw new content from a prompt.	Kreslí nový obsah podle zadání.
+	Speed	Rychlost
+	No GPU needed	Bez GPU
+	Precision	Přesnost
+	Memory	Paměť
+	GPU memory	Paměť GPU
+	Resume	Pokračovat
+	Paused	Pozastaveno
+	Ready	Připraveno
+	Downloading	Stahování
+	Pause all	Pozastavit vše
+	Erases text and SFX and redraws screentone and lines.	Maže text a zvuky, dokreslí rastr a linky.
+	A small cleaner for phones and computers without a GPU.	Malý čistič pro telefony a počítače bez GPU.
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	Ostré zvětšení černobílých stran mangy 2× a 4×.
+	2× and 4× upscaling of colour pages and covers.	Zvětšení barevných stran a obálek 2× a 4×.
+	Fast upscaling that runs well on any device.	Rychlé zvětšení pro každé zařízení.
+	Rough fills on any device, even without a GPU.	Hrubé výplně na každém zařízení, i bez GPU.
+	Good fills with a smaller download.	Dobré výplně s menším stahováním.
+	Detailed fills from a prompt, three variants in seconds on a GPU.	Detailní výplně podle zadání, tři varianty za pár sekund na GPU.
+	Needs a GPU	Vyžaduje GPU

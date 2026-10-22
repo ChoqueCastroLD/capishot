@@ -4278,3 +4278,33 @@ curves	Smooth	スムーズ
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU アダプター
+	Ultra-light (any device, 280 MB)	超軽量（どの端末でも、280 MB）
+	Fast (1 GB)	高速（1 GB）
+	Standard (GPU, 2.3 GB)	標準（GPU、2.3 GB）
+	High (GPU, slow)	高品質（GPU、低速）
+	Ultra-light	超軽量
+	Show files	ファイルを表示
+	Recommended for this device	この端末におすすめ
+	Generative Fill - {tier}	生成塗りつぶし - {tier}
+	Clean	クリーン
+	Erase text and objects.	文字や物を消します。
+	Enlarge pages without blur.	ぼかさずにページを拡大します。
+	Draw new content from a prompt.	プロンプトから新しい内容を描きます。
+	No GPU needed	GPU不要
+	Precision	精度
+	Memory	メモリ
+	GPU memory	GPUメモリ
+	Resume	再開
+	Paused	一時停止中
+	Ready	準備完了
+	Downloading	ダウンロード中
+	Pause all	すべて一時停止
+	Erases text and SFX and redraws screentone and lines.	文字や効果音を消し、トーンと線を描き直します。
+	A small cleaner for phones and computers without a GPU.	スマホやGPUなしのPC向けの小型クリーナー。
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	白黒マンガのページを2倍・4倍に鮮明に拡大。
+	2× and 4× upscaling of colour pages and covers.	カラーページや表紙を2倍・4倍に拡大。
+	Fast upscaling that runs well on any device.	どの端末でも軽快な高速拡大。
+	Rough fills on any device, even without a GPU.	GPUがなくても、どの端末でも簡易な塗りつぶし。
+	Good fills with a smaller download.	小さなダウンロードで良好な塗りつぶし。
+	Detailed fills from a prompt, three variants in seconds on a GPU.	プロンプトから詳細に塗りつぶし、GPUなら数秒で3案。
+	Needs a GPU	GPUが必要

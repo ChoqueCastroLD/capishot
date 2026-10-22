@@ -156,6 +156,17 @@ pub fn combine(old: Option<&Surface>, new: &[f32], area: Rect, mode: SelectionMo
     (s.tile_count() > 0).then_some(s)
 }
 
+/// [`combine`] of a coverage mask that is zero outside `bounds` (`mask` row-major over `bounds`):
+/// only `bounds` is read, quantized and written, so a lasso or marquee costs its own size, not the
+/// canvas's. Same result as `combine` over the whole canvas with the mask zero outside `bounds`.
+pub fn combine_bounded(old: Option<&Surface>, mask: &[f32], bounds: Rect, mode: SelectionMode) -> Option<Surface> {
+    if bounds.is_empty() || mask.len() != bounds.width() as usize * bounds.height() as usize {
+        return combine_region(old, None, mode);
+    }
+    let bytes: Vec<u8> = mask.iter().map(|v| coverage8(*v)).collect();
+    combine_region(old, Some(&Region { bbox: bounds, mask: bytes }), mode)
+}
+
 fn close(a: [f32; 4], b: [f32; 4], tol: f32) -> bool {
     (a[3] == 0.0 && b[3] == 0.0) || (0..4).all(|c| (a[c] - b[c]).abs() * 255.0 <= tol + 1e-3)
 }
@@ -852,74 +863,50 @@ pub fn polygon(points: &[(f32, f32)], area: Rect, anti_alias: bool) -> Vec<f32> 
         return m;
     }
     let sub = if anti_alias { 4 } else { 1 };
-    let sample_y = |py: usize, s: usize| area.y0 as f32 + py as f32 + (s as f32 + 0.5) / sub as f32;
-    // A sub-row at y crosses the edge a→b iff top <= y < bottom; horizontal and NaN edges
-    // never cross one.
-    struct Edge {
-        top: f32,
-        bottom: f32,
-        a: (f32, f32),
-        b: (f32, f32),
-    }
-    let mut edges: Vec<Edge> = points
-        .iter()
-        .zip(points.iter().cycle().skip(1))
-        .filter_map(|(&a, &b)| {
-            if a.1 < b.1 {
-                Some(Edge { top: a.1, bottom: b.1, a, b })
-            } else if b.1 < a.1 {
-                Some(Edge { top: b.1, bottom: a.1, a, b })
-            } else {
-                None
-            }
-        })
-        .collect();
-    edges.sort_by(|p, q| p.top.total_cmp(&q.top));
-    const BAND: usize = 64;
-    par_rows(&mut m, w, BAND, |bi, rows| {
-        let py0 = bi * BAND;
-        let (first, last) = (sample_y(py0, 0), sample_y(py0 + rows.len() / w - 1, sub - 1));
-        let reach = edges.partition_point(|e| e.top <= last);
-        let band_edges = edges.get(..reach).unwrap_or_default();
-        let mut pending = band_edges.iter().filter(|e| e.bottom > first).peekable();
-        let mut active: Vec<&Edge> = Vec::new();
+    // Each pixel row is independent: rows in parallel where threads exist (a lasso's release).
+    let fill_row = |py: usize, row: &mut [f32]| {
         let mut xs: Vec<f32> = Vec::new();
-        for (r, row) in rows.chunks_exact_mut(w).enumerate() {
-            for s in 0..sub {
-                // Sub-row ys never decrease, so an edge whose bottom is passed stays out.
-                let y = sample_y(py0 + r, s);
-                while let Some(e) = pending.next_if(|e| e.top <= y) {
-                    active.push(e);
+        for s in 0..sub {
+            let y = area.y0 as f32 + py as f32 + (s as f32 + 0.5) / sub as f32;
+            xs.clear();
+            for i in 0..points.len() {
+                let (a, b) = (points[i], points[(i + 1) % points.len()]);
+                if (a.1 <= y && b.1 > y) || (b.1 <= y && a.1 > y) {
+                    xs.push(a.0 + (y - a.1) / (b.1 - a.1) * (b.0 - a.0));
                 }
-                active.retain(|e| e.bottom > y);
-                if active.is_empty() {
+            }
+            xs.sort_by(|a, b| a.total_cmp(b));
+            for span in xs.as_chunks::<2>().0 {
+                let (x0, x1) = ((span[0] - area.x0 as f32).max(0.0), (span[1] - area.x0 as f32).min(w as f32));
+                if x1 <= x0 {
                     continue;
                 }
-                xs.clear();
-                xs.extend(active.iter().map(|&&Edge { a, b, .. }| a.0 + (y - a.1) / (b.1 - a.1) * (b.0 - a.0)));
-                xs.sort_by(|a, b| a.total_cmp(b));
-                for span in xs.as_chunks::<2>().0 {
-                    let (x0, x1) = ((span[0] - area.x0 as f32).max(0.0), (span[1] - area.x0 as f32).min(w as f32));
-                    if x1 <= x0 {
-                        continue;
-                    }
-                    let (c0, c1) = (x0.floor() as usize, (x1.ceil() as usize).min(w));
-                    for (cx, v) in row.iter_mut().enumerate().take(c1).skip(c0) {
-                        let cov = if anti_alias {
-                            ((cx + 1) as f32).min(x1) - (cx as f32).max(x0)
-                        } else {
-                            let c = cx as f32 + 0.5;
-                            if c >= x0 && c < x1 { 1.0 } else { 0.0 }
-                        };
+                let (c0, c1) = (x0.floor() as usize, (x1.ceil() as usize).min(w));
+                for cx in c0..c1 {
+                    let cov = if anti_alias {
+                        ((cx + 1) as f32).min(x1) - (cx as f32).max(x0)
+                    } else {
+                        let c = cx as f32 + 0.5;
+                        if c >= x0 && c < x1 { 1.0 } else { 0.0 }
+                    };
+                    if let Some(v) = row.get_mut(cx) {
                         *v += cov.max(0.0) / sub as f32;
                     }
                 }
             }
         }
-        for v in rows {
+        for v in row.iter_mut() {
             *v = v.min(1.0);
         }
-    });
+    };
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    {
+        use rayon::prelude::*;
+        m.par_chunks_mut(w).enumerate().for_each(|(py, row)| fill_row(py, row));
+    }
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    m.chunks_mut(w).enumerate().for_each(|(py, row)| fill_row(py, row));
+    let _ = h;
     m
 }
 
@@ -929,6 +916,32 @@ mod tests {
 
     fn img(w: usize, h: usize, f: impl Fn(usize, usize) -> [f32; 4]) -> Vec<[f32; 4]> {
         (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| f(x, y)).collect()
+    }
+
+    /// Combining over the shape's bounds gives the selection combining over the whole canvas
+    /// gives, in every mode, with and without a previous selection.
+    #[test]
+    fn combine_bounded_matches_combine_over_the_canvas() {
+        let area = Rect::new(0, 0, 300, 200);
+        let pts = [(40.5f32, 30.2f32), (180.0, 50.7), (150.3, 170.0), (60.0, 120.0)];
+        let mut prev = Surface::new(PixelFormat::GRAY8);
+        prev.fill_rect(Rect::new(100, 20, 280, 120), &[0.6]);
+        prev.fill_rect(Rect::new(10, 150, 60, 190), &[1.0]);
+        for aa in [false, true] {
+            let full = polygon(&pts, area, aa);
+            let b = Rect::new(39, 29, 182, 172);
+            let part = polygon(&pts, b, aa);
+            for mode in [SelectionMode::Replace, SelectionMode::Add, SelectionMode::Subtract, SelectionMode::Intersect] {
+                for old in [None, Some(&prev)] {
+                    let want = combine(old, &full, area, mode);
+                    let got = combine_bounded(old, &part, b, mode);
+                    assert_eq!(want.is_some(), got.is_some(), "{mode:?} {aa} {}", old.is_some());
+                    if let (Some(w), Some(g)) = (want, got) {
+                        assert_eq!(mask_from_surface(Some(&w), area), mask_from_surface(Some(&g), area), "{mode:?} aa {aa} old {}", old.is_some());
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -1572,7 +1585,13 @@ mod tests {
         let img: Vec<[u8; 4]> = (0..200)
             .map(|i| {
                 let (x, y) = (i % 20, i / 20);
-                let v = if x >= 15 { 0 } else if (x + y) % 2 == 0 { 100 } else { 140 };
+                let v = if x >= 15 {
+                    0
+                } else if (x + y) % 2 == 0 {
+                    100
+                } else {
+                    140
+                };
                 [v, v, v, 255]
             })
             .collect();
