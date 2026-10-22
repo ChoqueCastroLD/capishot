@@ -140,6 +140,7 @@ pub fn recommended_cards(s: &Session) -> Vec<&'static str> {
     if let Ok(t) = crate::genfill_cmds::tier_for(s, &json!({})) {
         v.push(match t {
             photocraft_ai_sd::service::Tier::Ultra => cards::GENFILL_ULTRA_CARD,
+            photocraft_ai_sd::service::Tier::Fast => cards::GENFILL_FAST_CARD,
             _ => cards::GENFILL_STANDARD_CARD,
         });
     }
