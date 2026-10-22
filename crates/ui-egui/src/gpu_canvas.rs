@@ -1182,6 +1182,24 @@ pub struct Perf {
     pub spans: std::collections::BTreeMap<&'static str, f64>,
     #[serde(skip)]
     max_decay: f64,
+    /// Whether the active document's layers fit the GPU layer budget (upstream's "GPU Memory
+    /// Full"). Capishot's compositor pages layers through its own budget, so this stays `None`.
+    #[serde(skip)]
+    pub gpu_layer_fit: Option<LayerFit>,
+}
+
+/// GPU memory the layers of document `doc` need and the budget leaves them (bytes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LayerFit {
+    pub doc: u64,
+    pub needed: u64,
+    pub budget: u64,
+}
+
+impl LayerFit {
+    pub fn fits(&self) -> bool {
+        self.needed <= self.budget
+    }
 }
 
 /// What the app renders with and why (Help › System Info, Preferences › Performance, the `perf`

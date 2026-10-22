@@ -375,6 +375,7 @@ pub fn set_stroke(l: &mut Layer, stroke: Option<&psjson::Stroke>, mode: photocra
         size: (st.size as f32).clamp(0.0, 250.0),
         position: StrokePosition::Outside,
         paint: FxPaint::Color(color),
+        overprint: false,
     })
     .in_mode(mode);
     l.effects.enabled = true;

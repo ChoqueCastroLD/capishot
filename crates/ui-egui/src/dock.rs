@@ -56,11 +56,14 @@ pub enum Group {
     MeasurementLog,
     Notes,
     ModifierKeys,
+    /// Brushes presets.
+    Brushes,
 }
 
 impl Group {
     /// Photoshop Essentials order, top to bottom.
-    pub const ALL: [Group; 7] = [Group::Color, Group::Properties, Group::Character, Group::TypeR, Group::Navigator, Group::History, Group::Layers];
+    pub const ALL: [Group; 8] =
+        [Group::Color, Group::Properties, Group::Character, Group::TypeR, Group::Brushes, Group::Navigator, Group::History, Group::Layers];
 
     /// The panels that float until docked (`crate::floaters`).
     pub const FLOATERS: [Group; 12] = [
@@ -80,7 +83,7 @@ impl Group {
 
     /// Every group in default dock order: a docked floating panel goes above Navigator, History
     /// and Layers, so Layers stays the group that fills the column.
-    pub const EVERY: [Group; 19] = [
+    pub const EVERY: [Group; 20] = [
         Group::Color,
         Group::Properties,
         Group::Character,
@@ -97,6 +100,7 @@ impl Group {
         Group::MeasurementLog,
         Group::Notes,
         Group::ModifierKeys,
+        Group::Brushes,
         Group::Navigator,
         Group::History,
         Group::Layers,
@@ -128,6 +132,7 @@ impl Group {
             Group::MeasurementLog => "measurementLog",
             Group::Notes => "notes",
             Group::ModifierKeys => "modifierKeys",
+            Group::Brushes => "brushes",
         }
     }
 
@@ -148,6 +153,7 @@ impl Group {
             Group::Styles | Group::Shapes | Group::ToolPresets | Group::Notes => 230.0,
             Group::CloneSource | Group::MeasurementLog => 260.0,
             Group::ModifierKeys => 120.0,
+            Group::Brushes => 200.0,
         }
     }
 
@@ -163,6 +169,7 @@ impl Group {
             Group::Navigator => 140.0,
             Group::History => 130.0,
             Group::Layers => 200.0,
+            Group::Brushes => 150.0,
             g => g.default_height().min(160.0),
         }
     }
@@ -172,6 +179,7 @@ impl Group {
     pub fn preferred_fill(self) -> f32 {
         match self {
             Group::Layers => 500.0,
+            Group::Brushes => 100.0,
             g => g.min_height(),
         }
     }
@@ -186,6 +194,7 @@ impl Group {
     pub fn min_height(self) -> f32 {
         match self {
             Group::Layers => 140.0,
+            Group::Brushes => 100.0,
             _ => 80.0,
         }
     }
@@ -213,6 +222,7 @@ impl Group {
             Group::MeasurementLog => &["Measurement Log"],
             Group::Notes => &["Notes"],
             Group::ModifierKeys => &["Modifier Keys"],
+            Group::Brushes => &["Brushes"],
         }
     }
 
@@ -220,7 +230,7 @@ impl Group {
     /// (the Navigator's preview grows with it, as in Photoshop: #2726).
     pub fn scrolls_itself(self, tab: usize) -> bool {
         // A docked floating panel lays itself out over its group (`crate::floaters`).
-        self.is_floater() || matches!((self, tab), (Group::Layers, 0) | (Group::History, 0) | (Group::Navigator, 0) | (Group::TypeR, 0))
+        self.is_floater() || matches!((self, tab), (Group::Layers, 0) | (Group::History, 0) | (Group::History, 1) | (Group::Navigator, 0) | (Group::TypeR, 0))
     }
 
     pub(crate) fn tab_mut(self, tabs: &mut DockTabs) -> &mut usize {
@@ -232,6 +242,7 @@ impl Group {
             Group::Navigator => &mut tabs.navigator,
             Group::History => &mut tabs.history,
             Group::Layers => &mut tabs.layers,
+            Group::Brushes => &mut tabs.brushes,
             // One tab each.
             _ => &mut tabs.floater,
         }
@@ -251,6 +262,7 @@ impl Group {
             Group::Navigator => panels.navigator,
             Group::History => panels.history,
             Group::Layers => panels.layers,
+            Group::Brushes => panels.brushes,
             // Open and docked (`crate::floaters::sync`).
             g => panels.docked_open.iter().any(|k| k == g.key()),
         }
@@ -267,6 +279,7 @@ impl Group {
             Group::Navigator => &mut panels.navigator,
             Group::History => &mut panels.history,
             Group::Layers => &mut panels.layers,
+            Group::Brushes => &mut panels.brushes,
             _ => return None,
         })
     }
@@ -661,6 +674,24 @@ pub(crate) fn set_shown(app: &mut PhotocraftApp, g: Group, on: bool) {
     }
 }
 
+/// A tab strip's Close: hide `tab` of `g`, and the group with its last tab. When the selected
+/// tab closes, the next one on the strip (or the previous one, for the last) is selected.
+pub(crate) fn close_tab(app: &mut PhotocraftApp, g: Group, tab: usize, pro: bool) {
+    let shown_before = app.ui.dock.visible_tabs(g, pro);
+    app.ui.dock.hide_tab(g, tab, pro);
+    let remaining = app.ui.dock.visible_tabs(g, pro);
+    if remaining.is_empty() {
+        set_shown(app, g, false);
+    } else if *g.tab_mut(&mut app.ui.dock_tabs) == tab {
+        // Prefer the next tab on the strip, or the previous one when closing the last.
+        let at = shown_before.iter().position(|(i, _)| *i == tab).unwrap_or(0);
+        let next = shown_before.iter().skip(at + 1).find(|x| remaining.contains(x)).or_else(|| remaining.last());
+        if let Some(&(next, _)) = next {
+            *g.tab_mut(&mut app.ui.dock_tabs) = next;
+        }
+    }
+}
+
 /// Per-group interactions collected while drawing, applied afterwards.
 enum Action {
     /// Float a dock group (Float Panel Group) at that point.
@@ -688,6 +719,26 @@ pub(crate) fn forget_rects(ctx: &egui::Context) {
 
 fn rects_id() -> egui::Id {
     egui::Id::new("dock-group-rects")
+}
+
+/// The group expanded from its collapsed tab strip (see [`show`]), if any: with Preferences ▸
+/// Workspace ▸ Auto-Collapse Iconic Panels on, the first click outside it collapses it again.
+fn peek_id() -> egui::Id {
+    egui::Id::new("dock-peek")
+}
+
+fn auto_collapse_peek(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let Some(g) = ctx.data(|d| d.get_temp::<Option<Group>>(peek_id())).flatten() else { return };
+    let Some(p) = ctx.input(|i| i.pointer.any_pressed().then(|| i.pointer.press_origin()).flatten()) else {
+        return;
+    };
+    let inside = last_rects(ctx).into_iter().find(|(x, _)| *x == g).is_some_and(|(_, r)| r.contains(p));
+    if !inside {
+        app.ui.dock.set_collapsed(g, true);
+        ctx.data_mut(|d| {
+            d.insert_temp(peek_id(), None::<Group>);
+        });
+    }
 }
 
 /// A group's tab strip as drawn last frame (screen points), for tests and automation.
@@ -860,6 +911,14 @@ pub fn paint_drop_hint(app: &PhotocraftApp, ctx: &egui::Context) {
 /// tab content.
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[Group], mut body: impl FnMut(&mut PhotocraftApp, &mut egui::Ui, Group, usize)) {
     let t = Tokens::get(ui.ctx());
+    let auto_collapse = app.session.prefs().workspace.auto_collapse_icon_panels;
+    if auto_collapse {
+        auto_collapse_peek(app, ui.ctx());
+    } else {
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(peek_id(), None::<Group>);
+        });
+    }
     let strip = if t.pro { 28.0 } else { 40.0 };
     // Guests draw on their host's strip.
     let order: Vec<Group> = app.ui.dock.order().into_iter().filter(|g| shown.contains(g) && app.ui.dock.host(*g) == *g).collect();
@@ -870,6 +929,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
     let classic = app.ui.docking.is_none() && !crate::panel_docking::legacy_owns_drag(ui.ctx());
     let rects = rects_after_layout(&heights, area);
     let mut actions: Vec<Action> = Vec::new();
+    let mut peek_after: Option<Group> = None;
     let mut tab_drops: Vec<(Group, usize, Pos2)> = Vec::new();
     let mut dragging: Option<Group> = None;
     let mut strips: Vec<StripRects> = Vec::with_capacity(rects.len());
@@ -897,10 +957,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
                 ui.set_min_height(inner);
                 body(app, ui, m, tab);
             } else {
-                // The pro Color field stretches to the group's height instead of a fixed 120 pt.
-                if t.pro && m == Group::Color && tab == 0 {
-                    ui.data_mut(|d| d.insert_temp(crate::panels::color_field_fill_id(), inner));
-                }
+                crate::panels::offer_color_field_fill(ui, t.pro, m, tab);
                 // No scroll fade: it darkens real colours, swatches and previews at the edge
                 // (#2726); the scroll bar already shows there is more.
                 ui.spacing_mut().scroll.fade.strength = 0.0;
@@ -951,6 +1008,11 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
         }
         if resp.strip.double_clicked() || resp.tab_double_clicked || (collapsed && resp.tab_clicked) {
             actions.push(Action::ToggleCollapse(g));
+            // A single click on a collapsed strip's tab expands the group as a peek: the next
+            // click outside closes it again, with Auto-Collapse Iconic Panels on.
+            if collapsed && resp.tab_clicked && !resp.tab_double_clicked && auto_collapse {
+                peek_after = Some(g);
+            }
         }
         // Reorder within one member's own tabs.
         if !locked
@@ -1010,6 +1072,18 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
                 crate::swatches_ui::panel_menu(app, ui);
                 ui.separator();
             }
+            if front_label == Some("History") {
+                crate::history_menu_ui::panel_menu(app, ui);
+                ui.separator();
+            }
+            if front_label == Some("Brush Settings") {
+                crate::brush_panel::panel_menu(app, ui);
+                ui.separator();
+            }
+            if front_label == Some("Actions") {
+                crate::actions::panel_menu(app, ui);
+                ui.separator();
+            }
             if let Some(label) = front_label {
                 crate::panel_docking::legacy_menu(app, ui, label);
             }
@@ -1036,6 +1110,12 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
                 ui.close();
             }
             ui.separator();
+            if ui.button(tl!("Close")).clicked() {
+                if let Some(&(m, tab, _)) = entries.get(sel) {
+                    actions.push(Action::CloseTab(m, tab));
+                }
+                ui.close();
+            }
             if ui.button(tl!("Close Tab Group")).clicked() {
                 for m in &members {
                     actions.push(Action::Close(*m));
@@ -1118,21 +1198,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
                     _ => land(app, ui.ctx(), g, at, grab),
                 }
             }
-            Action::CloseTab(g, tab) => {
-                let shown_before = app.ui.dock.visible_tabs(g, t.pro);
-                app.ui.dock.hide_tab(g, tab, t.pro);
-                let remaining = app.ui.dock.visible_tabs(g, t.pro);
-                if remaining.is_empty() {
-                    set_shown(app, g, false);
-                } else if *g.tab_mut(&mut app.ui.dock_tabs) == tab {
-                    // Prefer the next tab on the strip, or the previous one when closing the last.
-                    let at = shown_before.iter().position(|(i, _)| *i == tab).unwrap_or(0);
-                    let next = shown_before.iter().skip(at + 1).find(|x| remaining.contains(x)).or_else(|| remaining.last());
-                    if let Some(&(next, _)) = next {
-                        *g.tab_mut(&mut app.ui.dock_tabs) = next;
-                    }
-                }
-            }
+            Action::CloseTab(g, tab) => close_tab(app, g, tab, t.pro),
             Action::MoveTab(g, tab, before) => app.ui.dock.move_tab(g, tab, before, t.pro),
             Action::Move(g, before) => {
                 if before != Some(g) {
@@ -1140,6 +1206,13 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
                 }
             }
         }
+    }
+    if let Some(g) = peek_after
+        && !app.ui.dock.is_collapsed(g)
+    {
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(peek_id(), Some(g));
+        });
     }
     for (panel, anchor, before) in panel_moves {
         let params = if before { json!({"panel":panel,"anchor":anchor,"before":anchor}) } else { json!({"panel":panel,"anchor":anchor}) };
@@ -1259,6 +1332,10 @@ pub fn restore(app: &mut PhotocraftApp) {
     }
     let saved = app.session.prefs().panel_layout.clone();
     apply(app, &saved);
+    // The floating Brush Settings window is transient, not a dock panel: remembering the
+    // workspace must not leave it open on a fresh launch, especially with no document.
+    // Explicit workspace switches still use `apply` and keep their stored panel visibility.
+    app.ui.panels.brush_settings = false;
     if let Some(ws) = saved.get("workspace").and_then(Value::as_str) {
         app.ui.workspace = ws.to_string();
     }

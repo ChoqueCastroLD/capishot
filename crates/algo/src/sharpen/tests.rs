@@ -56,7 +56,7 @@ pub(super) fn apply_reference(
         };
         let mut data = reference::unsharp(&src, *t, &ctx, amount, radius, threshold);
         if let Some(sel) = sel {
-            crate::mix_selection(&mut data, *t, sel, &src);
+            crate::mix_selection(&mut data, *t, sel, &src, fmt.alpha);
         }
         let done = finished.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         ctl.progress(0.98 * done as f32 / tiles.len().max(1) as f32);
