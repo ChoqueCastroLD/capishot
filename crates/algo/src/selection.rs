@@ -156,6 +156,17 @@ pub fn combine(old: Option<&Surface>, new: &[f32], area: Rect, mode: SelectionMo
     (s.tile_count() > 0).then_some(s)
 }
 
+/// [`combine`] of a coverage mask that is zero outside `bounds` (`mask` row-major over `bounds`):
+/// only `bounds` is read, quantized and written, so a lasso or marquee costs its own size, not the
+/// canvas's. Same result as `combine` over the whole canvas with the mask zero outside `bounds`.
+pub fn combine_bounded(old: Option<&Surface>, mask: &[f32], bounds: Rect, mode: SelectionMode) -> Option<Surface> {
+    if bounds.is_empty() || mask.len() != bounds.width() as usize * bounds.height() as usize {
+        return combine_region(old, None, mode);
+    }
+    let bytes: Vec<u8> = mask.iter().map(|v| coverage8(*v)).collect();
+    combine_region(old, Some(&Region { bbox: bounds, mask: bytes }), mode)
+}
+
 fn close(a: [f32; 4], b: [f32; 4], tol: f32) -> bool {
     (a[3] == 0.0 && b[3] == 0.0) || (0..4).all(|c| (a[c] - b[c]).abs() * 255.0 <= tol + 1e-3)
 }
@@ -849,6 +860,32 @@ mod tests {
         (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| f(x, y)).collect()
     }
 
+    /// Combining over the shape's bounds gives the selection combining over the whole canvas
+    /// gives, in every mode, with and without a previous selection.
+    #[test]
+    fn combine_bounded_matches_combine_over_the_canvas() {
+        let area = Rect::new(0, 0, 300, 200);
+        let pts = [(40.5f32, 30.2f32), (180.0, 50.7), (150.3, 170.0), (60.0, 120.0)];
+        let mut prev = Surface::new(PixelFormat::GRAY8);
+        prev.fill_rect(Rect::new(100, 20, 280, 120), &[0.6]);
+        prev.fill_rect(Rect::new(10, 150, 60, 190), &[1.0]);
+        for aa in [false, true] {
+            let full = polygon(&pts, area, aa);
+            let b = Rect::new(39, 29, 182, 172);
+            let part = polygon(&pts, b, aa);
+            for mode in [SelectionMode::Replace, SelectionMode::Add, SelectionMode::Subtract, SelectionMode::Intersect] {
+                for old in [None, Some(&prev)] {
+                    let want = combine(old, &full, area, mode);
+                    let got = combine_bounded(old, &part, b, mode);
+                    assert_eq!(want.is_some(), got.is_some(), "{mode:?} {aa} {}", old.is_some());
+                    if let (Some(w), Some(g)) = (want, got) {
+                        assert_eq!(mask_from_surface(Some(&w), area), mask_from_surface(Some(&g), area), "{mode:?} aa {aa} old {}", old.is_some());
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn wand_contiguous_vs_global() {
         // Two separate red squares on white.
@@ -1325,7 +1362,13 @@ mod tests {
         let img: Vec<[u8; 4]> = (0..200)
             .map(|i| {
                 let (x, y) = (i % 20, i / 20);
-                let v = if x >= 15 { 0 } else if (x + y) % 2 == 0 { 100 } else { 140 };
+                let v = if x >= 15 {
+                    0
+                } else if (x + y) % 2 == 0 {
+                    100
+                } else {
+                    140
+                };
                 [v, v, v, 255]
             })
             .collect();
