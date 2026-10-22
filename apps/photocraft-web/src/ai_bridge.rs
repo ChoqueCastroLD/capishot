@@ -531,11 +531,11 @@ impl photocraft_ai_sd::service::GenFill for WebGenFill {
         let Some(first) = photocraft_ai_sd::files::tier(req.tier).and_then(|f| f.files.first().copied()) else {
             return done(Err(SdError::Unavailable(format!("the {} tier isn't available yet", req.tier.id()))));
         };
-        // WebGPU only: always the plain worker.
-        let Some(mut target) = self.up.target(false, 0) else { return done(Err(SdError::Unavailable(NO_WORKER.into()))) };
-        if target.threads {
-            target.threads = false;
-        }
+        // Standard and up: WebGPU, the plain worker. Ultra-light also runs on the CPU (the threads
+        // worker on cross-origin isolated pages).
+        let ultra = req.tier == photocraft_ai_sd::service::Tier::Ultra;
+        let target = if ultra { self.up.target(req.cpu, req.threads) } else { self.up.target(false, 0).map(|t| Target { threads: false, pool: 0, ..t }) };
+        let Some(target) = target else { return done(Err(SdError::Unavailable(NO_WORKER.into()))) };
         let rgb = Float32Array::from(req.rgb.as_slice());
         let mask = Float32Array::from(req.mask.as_slice());
         let o = Object::new();
@@ -546,7 +546,7 @@ impl photocraft_ai_sd::service::GenFill for WebGenFill {
             ("unload", req.unload.into()),
             ("base", target.base.clone().into()),
             ("download", req.allow_download.into()),
-            ("cpu", req.cpu.into()),
+            ("cpu", target.cpu.into()),
             ("width", (req.width as f64).into()),
             ("height", (req.height as f64).into()),
             ("prompt", req.prompt.as_str().into()),
@@ -571,7 +571,7 @@ impl photocraft_ai_sd::service::GenFill for WebGenFill {
             cancelled: Box::new(move || h3.cancelled()),
             shared: self.up.shared.clone(),
             started_gpu: false,
-            gpu: true,
+            gpu: !target.cpu && !target.threads,
         };
         if let Err(e) = start(&target, (o, buffer), run) {
             log::error!("AI worker: {e}");

@@ -30,6 +30,9 @@ pub struct Store {
     bytes: u64,
     /// Parts of block-quantized tensors still waiting for their companions.
     pending: HashMap<String, QuantParts>,
+    /// Block-quantized weights as `[out, fan_in]` (blocks along `fan_in`), with their shapes;
+    /// dequantized per layer at use ([`Weight`]).
+    quant: HashMap<String, (Vec<usize>, Tensor<2>)>,
 }
 
 /// A block-quantized tensor as the quantizer writes it: `name.q4` (two signed 4-bit values per
@@ -51,7 +54,7 @@ impl Store {
         if !matches!(dtype, DType::F16 | DType::F32) {
             return Err(SdError::Input(format!("unsupported compute precision {dtype:?}")));
         }
-        Ok(Self { device: device.clone(), dtype, map: HashMap::new(), metadata: HashMap::new(), bytes: 0, pending: HashMap::new() })
+        Ok(Self { device: device.clone(), dtype, map: HashMap::new(), metadata: HashMap::new(), bytes: 0, pending: HashMap::new(), quant: HashMap::new() })
     }
 
     pub fn device(&self) -> &Device {
@@ -132,10 +135,12 @@ impl Store {
         let (Some((bits, raw)), Some(scales), Some(shape)) = (p.values, p.scales, p.shape) else {
             return Err(SdError::Weights(format!("quantized tensor `{name}` is incomplete")));
         };
-        let n = shape.iter().try_fold(1usize, |a, &d| a.checked_mul(d)).filter(|&n| n > 0 && n <= MAX_TENSOR && n.is_multiple_of(QUANT_BLOCK));
-        let Some(n) = n else {
+        let n = shape.iter().try_fold(1usize, |a, &d| a.checked_mul(d)).filter(|&n| n > 0 && n <= MAX_TENSOR);
+        let rows = shape.first().copied().unwrap_or(0);
+        let Some(n) = n.filter(|&n| shape.len() >= 2 && rows > 0 && (n / rows).is_multiple_of(QUANT_BLOCK)) else {
             return Err(SdError::Weights(format!("`{name}` has unsupported shape {shape:?}")));
         };
+        let fan_in = n / rows;
         let values: Vec<i8> = if bits == 4 {
             if raw.len() * 2 != n {
                 return Err(SdError::Weights(format!("`{name}`: {} packed bytes for {n} values", raw.len())));
@@ -150,14 +155,25 @@ impl Store {
         if scales.len() * QUANT_BLOCK != n || scales.iter().any(|s| !s.is_finite()) {
             return Err(SdError::Weights(format!("`{name}`: {} scales for {n} values", scales.len())));
         }
-        // The CPU keeps one int8 per value; GPUs pack them in u32 words.
-        let store = if is_cpu(&self.device) { QuantStore::Native } else { QuantStore::PackedU32(0) };
+        // GPUs get dense weights in the compute precision (dequantized here: burn's packed
+        // WebGPU dequantization fails on some drivers, and a GPU has the memory); the CPU keeps
+        // one int8 per value and dequantizes each layer when it runs.
+        if !is_cpu(&self.device) {
+            let dense: Vec<f32> = values.iter().enumerate().map(|(i, &v)| f32::from(v) * scales.get(i / QUANT_BLOCK).copied().unwrap_or(0.0)).collect();
+            let td = TensorData::new(dense, [n]);
+            let td = if self.dtype == DType::F16 { td.convert_dtype(DType::F16) } else { td };
+            let t = Tensor::<1>::from_data(td, TensorCreationOptions::new(self.device.clone()).with_dtype(self.dtype));
+            self.bytes = self.bytes.saturating_add((n * if self.dtype == DType::F16 { 2 } else { 4 }) as u64);
+            self.map.insert(name, (shape, t));
+            return Ok(());
+        }
+        let store = QuantStore::Native;
         let value = if bits == 4 { QuantValue::Q4S } else { QuantValue::Q8S };
         let scheme = QuantScheme::default().with_value(value).with_store(store).per_block([QUANT_BLOCK as u8], burn::tensor::quantization::ScaleDtype::F32);
-        let td = TensorData::quantized(values, [n], scheme, &scales, None);
-        let t = Tensor::<1>::from_data(td, &self.device);
-        self.bytes = self.bytes.saturating_add((n * usize::from(bits) / 8 + scales.len() * 4) as u64);
-        self.map.insert(name, (shape, t));
+        let td = TensorData::quantized(values, [rows, fan_in], scheme, &scales, None);
+        let t = Tensor::<2>::from_data(td, &self.device);
+        self.bytes = self.bytes.saturating_add((n + scales.len() * 4) as u64);
+        self.quant.insert(name, (shape, t));
         Ok(())
     }
 
@@ -207,6 +223,7 @@ impl Store {
         self.bytes = self.bytes.saturating_add(other.bytes);
         self.metadata.extend(other.metadata);
         self.map.extend(other.map);
+        self.quant.extend(other.quant);
     }
 
     /// Tensor names (unordered).
@@ -216,16 +233,31 @@ impl Store {
 
     /// Whether a tensor is present.
     pub fn has(&self, name: &str) -> bool {
-        self.map.contains_key(name)
+        self.map.contains_key(name) || self.quant.contains_key(name)
     }
 
     /// The shape of a tensor, if present.
     pub fn shape(&self, name: &str) -> Option<&[usize]> {
-        self.map.get(name).map(|(s, _)| s.as_slice())
+        self.map.get(name).map(|(s, _)| s.as_slice()).or_else(|| self.quant.get(name).map(|(s, _)| s.as_slice()))
+    }
+
+    /// A weight, kept quantized when it is.
+    pub fn weight<const D: usize>(&self, name: &str, shape: [usize; D]) -> Result<Weight<D>> {
+        match self.quant.get(name) {
+            Some((s, q)) if s.as_slice() == shape.as_slice() => Ok(Weight::Quant(q.clone(), shape, self.dtype)),
+            Some((s, _)) => Err(SdError::Weights(format!("`{name}` has shape {s:?}, expected {shape:?}"))),
+            None => Ok(Weight::Dense(self.get(name, shape)?)),
+        }
     }
 
     /// A tensor with exactly this shape.
     pub fn get<const D: usize>(&self, name: &str, shape: [usize; D]) -> Result<Tensor<D>> {
+        if let Some((s, q)) = self.quant.get(name) {
+            if s.as_slice() != shape.as_slice() {
+                return Err(SdError::Weights(format!("`{name}` has shape {s:?}, expected {shape:?}")));
+            }
+            return Ok(q.clone().dequantize().cast(self.dtype).reshape(shape));
+        }
         let (s, t) = self.map.get(name).ok_or_else(|| SdError::Weights(format!("missing tensor `{name}`")))?;
         if s.as_slice() != shape.as_slice() {
             return Err(SdError::Weights(format!("`{name}` has shape {s:?}, expected {shape:?}")));
@@ -267,20 +299,20 @@ impl Store {
 
     pub fn linear(&self, name: &str, d_in: usize, d_out: usize, bias: bool) -> Result<Linear> {
         // Stored PyTorch-style [out, in]; burn's matmul wants [in, out].
-        let w = self.get(&format!("{name}.weight"), [d_out, d_in])?.transpose();
+        let w = self.weight(&format!("{name}.weight"), [d_out, d_in])?;
         let b = if bias { Some(self.get(&format!("{name}.bias"), [d_out])?) } else { None };
         Ok(Linear { w, b })
     }
 
     pub fn conv(&self, name: &str, c_in: usize, c_out: usize, k: usize) -> Result<Conv> {
-        let w = self.get(&format!("{name}.weight"), [c_out, c_in, k, k])?;
+        let w = self.weight(&format!("{name}.weight"), [c_out, c_in, k, k])?;
         let b = Some(self.get(&format!("{name}.bias"), [c_out])?);
         Ok(Conv { w, b, pad: k / 2 })
     }
 
     /// A convolution without bias.
     pub fn conv_nobias(&self, name: &str, c_in: usize, c_out: usize, k: usize) -> Result<Conv> {
-        let w = self.get(&format!("{name}.weight"), [c_out, c_in, k, k])?;
+        let w = self.weight(&format!("{name}.weight"), [c_out, c_in, k, k])?;
         Ok(Conv { w, b: None, pad: k / 2 })
     }
 
@@ -325,35 +357,60 @@ fn floats(name: &str, dtype: Dtype, data: &[u8], n: usize) -> Result<Vec<f32>> {
     Ok(v)
 }
 
-/// `x·W + b` over the last dimension.
+/// A layer's weight: dense, or block-quantized `[out, fan_in]` dequantized at each use (the
+/// light tiers keep 4/8-bit weights in memory; the transient f32 copy is one layer).
+#[derive(Debug, Clone)]
+pub enum Weight<const D: usize> {
+    Dense(Tensor<D>),
+    Quant(Tensor<2>, [usize; D], DType),
+}
+
+impl<const D: usize> Weight<D> {
+    /// The dense weight (PyTorch layout).
+    pub fn get(&self) -> Tensor<D> {
+        match self {
+            Self::Dense(t) => t.clone(),
+            Self::Quant(q, shape, dt) => q.clone().dequantize().cast(*dt).reshape(*shape),
+        }
+    }
+
+    pub fn dims(&self) -> [usize; D] {
+        match self {
+            Self::Dense(t) => t.dims(),
+            Self::Quant(_, shape, _) => *shape,
+        }
+    }
+}
+
+/// `x·Wᵀ + b` over the last dimension (`W` stored PyTorch-style `[out, in]`).
 #[derive(Debug, Clone)]
 pub struct Linear {
-    pub w: Tensor<2>,
+    pub w: Weight<2>,
     pub b: Option<Tensor<1>>,
 }
 
 impl Linear {
     pub fn forward<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
-        burn::tensor::module::linear(x, self.w.clone(), self.b.clone())
+        burn::tensor::module::linear(x, self.w.get().transpose(), self.b.clone())
     }
 }
 
 /// A square convolution, stride 1, "same" zero padding.
 #[derive(Debug, Clone)]
 pub struct Conv {
-    pub w: Tensor<4>,
+    pub w: Weight<4>,
     pub b: Option<Tensor<1>>,
     pub pad: usize,
 }
 
 impl Conv {
     pub fn forward(&self, x: Tensor<4>) -> Tensor<4> {
-        conv2d(x, self.w.clone(), self.b.clone(), ConvOptions::new([1, 1], [self.pad, self.pad], [1, 1], 1))
+        conv2d(x, self.w.get(), self.b.clone(), ConvOptions::new([1, 1], [self.pad, self.pad], [1, 1], 1))
     }
 
     /// Stride 2 with the given padding (UNet: 1 on every side).
     pub fn forward_stride2(&self, x: Tensor<4>, pad: usize) -> Tensor<4> {
-        conv2d(x, self.w.clone(), self.b.clone(), ConvOptions::new([2, 2], [pad, pad], [1, 1], 1))
+        conv2d(x, self.w.get(), self.b.clone(), ConvOptions::new([2, 2], [pad, pad], [1, 1], 1))
     }
 }
 

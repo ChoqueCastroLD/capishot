@@ -570,7 +570,6 @@ async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>,
 // ------------------------------------------------------------------ Generative Fill
 
 // Generative Fill models loaded on the device, and the tier they serve.
-#[cfg(not(target_feature = "atomics"))]
 thread_local! {
     static GENFILL: RefCell<Option<(photocraft_ai_sd::service::Tier, Rc<photocraft_ai_sd::runner::Models>)>> = const { RefCell::new(None) };
 }
@@ -580,10 +579,7 @@ thread_local! {
 /// variants: [Float32Array…], device}` (interleaved RGB per variant, transferred) or `error`.
 async fn genfill(msg: JsValue) {
     let id = get(&msg, "id").as_f64().unwrap_or(0.0);
-    #[cfg(not(target_feature = "atomics"))]
     let r = genfill_inner(&msg, id).await;
-    #[cfg(target_feature = "atomics")]
-    let r: std::result::Result<(Vec<Vec<f32>>, usize, usize, String), String> = Err("Generative Fill runs on WebGPU, not in the CPU threads worker".into());
     match r {
         Ok((outs, w, h, device)) => {
             let arr = Array::new();
@@ -609,7 +605,6 @@ async fn genfill(msg: JsValue) {
     }
 }
 
-#[cfg(not(target_feature = "atomics"))]
 async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f32>>, usize, usize, String), String> {
     use photocraft_ai_sd::runner::{Loader, generate, precision};
     use photocraft_ai_sd::service::Tier;
@@ -630,13 +625,15 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
         None => {
             GENFILL.with(|g| *g.borrow_mut() = None);
             let rt = runtime(cpu).await.map_err(|e| e.to_string())?;
-            if rt.accel() != photocraft_ai::runtime::Accel::Gpu {
-                return Err("Generative Fill needs WebGPU (no usable GPU here); use Clean with AI instead".into());
+            let on_gpu = rt.accel() == photocraft_ai::runtime::Accel::Gpu;
+            // The light tier runs on the CPU (4-bit weights dequantized per layer); the others need WebGPU.
+            if !on_gpu && tier != Tier::Ultra {
+                return Err("Generative Fill (Standard) needs WebGPU (no usable GPU here); choose Quality: Ultra-light, or use Clean with AI".into());
             }
-            let force_f32 = get(msg, "f32").as_bool().unwrap_or(false);
+            let force_f32 = get(msg, "f32").as_bool().unwrap_or(false) || !on_gpu;
             let dtype = if force_f32 { photocraft_ai_sd::burn::tensor::DType::F32 } else { precision(rt.device(), false) };
             // f32 weights would need 4.5 GB of GPU memory: refuse unless asked for (Advanced).
-            if dtype != photocraft_ai_sd::burn::tensor::DType::F16 && !force_f32 {
+            if dtype != photocraft_ai_sd::burn::tensor::DType::F16 && !force_f32 && tier != Tier::Ultra {
                 return Err("Generative Fill needs a GPU with 16-bit float shaders (WebGPU shader-f16), which this browser or GPU doesn't offer; use Clean with AI instead".into());
             }
             let mut loader = Loader::new(rt.device(), dtype).map_err(|e| e.to_string())?;
@@ -692,7 +689,6 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
 
 /// Streams one cached file into `loader` chunk by chunk (never whole in the wasm heap), hashing
 /// it on the way; a file whose checksum doesn't match is deleted and reported.
-#[cfg(not(target_feature = "atomics"))]
 async fn stream_into(
     loader: &mut photocraft_ai_sd::runner::Loader,
     model: &'static ModelInfo,

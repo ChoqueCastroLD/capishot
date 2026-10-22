@@ -34,10 +34,10 @@ pub const VARIANT_ID: &str = "edit.generativeFillVariant";
 const LABEL: &str = "Generative Fill";
 /// Why the command fails in a build without the service.
 pub const UNAVAILABLE: &str = "Generative Fill is not available in this build";
-/// Why it can't run on this device (phones, no GPU) until the light tiers land.
-pub const NEEDS_GPU: &str = "Generative Fill needs a desktop GPU with WebGPU for now; on this device use Edit › Clean with AI to remove things";
 /// Why it can't run with little memory.
-pub const LOW_MEMORY: &str = "Not enough memory for Generative Fill on this device (it needs about 8 GB); use Edit › Clean with AI to remove things";
+pub const LOW_MEMORY: &str = "Not enough memory for Generative Fill on this device (the light model needs about 1 GB free); use Edit › Clean with AI to remove things";
+/// Why Standard (and up) can't run on a phone or with little memory.
+pub const LOW_MEMORY_STANDARD: &str = "Not enough memory for this Generative Fill quality on this device (it needs about 8 GB); choose Quality: Ultra-light";
 /// How much an empty-prompt fill re-draws Manga LaMa's result (variants differ, the background
 /// stays) and the smooth pre-fill when LaMa isn't downloaded.
 const LAMA_STRENGTH: f64 = 0.5;
@@ -88,20 +88,31 @@ pub fn tier_for(s: &Session, p: &Value) -> Result<Tier> {
     if !["auto", "gpu", "cpu"].contains(&device) {
         return Err(bad("`device` must be auto, gpu or cpu"));
     }
-    if q != "auto" {
-        return Tier::from_id(q).ok_or_else(|| bad("`quality` must be auto, ultra, fast, standard or high"));
-    }
     let profile = s.ai_profile();
-    // `navigator.deviceMemory` stops at 8: 8 means "8 GB or more". The model alone is 2.3 GB.
-    if profile.mobile || profile.memory_gb.is_some_and(|m| m < 7.5) {
+    // `navigator.deviceMemory` stops at 8: 8 means "8 GB or more". Standard's model alone is
+    // 2.3 GB; Ultra-light runs in about 1 GB.
+    let mem = profile.memory_gb;
+    let small = profile.mobile || mem.is_some_and(|m| m < 7.5);
+    if mem.is_some_and(|m| m < 1.5) {
         return Err(EngineError::Other(LOW_MEMORY.into()));
     }
-    let gpu = device != "cpu" && !matches!(profile.gpu, GpuClass::None | GpuClass::Software);
-    if gpu {
-        return Ok(Tier::Standard);
+    let tier = match q {
+        "auto" => {
+            let gpu = device != "cpu" && !matches!(profile.gpu, GpuClass::None | GpuClass::Software);
+            if gpu && !small { Tier::Standard } else { Tier::Ultra }
+        }
+        q => Tier::from_id(q).ok_or_else(|| bad("`quality` must be auto, ultra, fast, standard or high"))?,
+    };
+    if small && tier != Tier::Ultra {
+        return Err(EngineError::Other(LOW_MEMORY_STANDARD.into()));
     }
-    // The light tiers (Fast, Ultra) aren't shipped yet: say why instead of running for minutes.
-    Err(EngineError::Other(NEEDS_GPU.into()))
+    Ok(tier)
+}
+
+/// The working size: the tier's, smaller on phones and devices with little memory.
+fn default_side(s: &Session, tier: Tier) -> usize {
+    let p = s.ai_profile();
+    if tier == Tier::Ultra && (p.mobile || p.memory_gb.is_some_and(|m| m <= 4.0)) { 256 } else { tier.side() }
 }
 
 /// The tier these params choose and whether it can run now (the UI's download prompt).
@@ -134,6 +145,8 @@ struct Plan {
     english: String,
     /// Pre-fill the hole with Manga LaMa first (empty prompt).
     lama: bool,
+    /// The inpainting model of that pre-fill.
+    cleaner: Option<&'static str>,
 }
 
 fn opt_bool(p: &Value, k: &str, d: bool) -> Result<bool> {
@@ -173,7 +186,7 @@ fn plan(s: &mut Session, p: &Value) -> Result<Plan> {
         Some(_) => Some(opt_f64(p, "strength", 1.0, 0.05, 1.0)?),
     };
     let guidance = opt_f64(p, "guidance", 0.0, 0.0, 30.0)? as f32;
-    let side = crate::ai_cmds::uint_param(p, "side", 256, 1024, ID)?.unwrap_or(tier.side() as u64) as usize;
+    let side = crate::ai_cmds::uint_param(p, "side", 256, 1024, ID)?.unwrap_or(default_side(s, tier) as u64) as usize;
     if !side.is_multiple_of(64) {
         return Err(bad("`side` must be a multiple of 64"));
     }
@@ -234,9 +247,18 @@ fn plan(s: &mut Session, p: &Value) -> Result<Plan> {
     // downloaded, else a smooth pull–push fill now) and let the model re-draw it partly, so it
     // continues the background instead of inventing an object.
     let background = typed.is_empty();
-    let lama = background
-        && user_strength.is_none()
-        && s.inpainter().is_some_and(|i| i.model_state_of(photocraft_ai_lama::service::LAMA) == photocraft_ai_lama::service::ModelState::Ready);
+    // Manga LaMa, or the lite MI-GAN on the light tier, when downloaded.
+    let ready = |id: &str| s.inpainter().is_some_and(|i| i.model_state_of(id) == photocraft_ai_lama::service::ModelState::Ready);
+    let cleaner = if !background || user_strength.is_some() {
+        None
+    } else if ready(photocraft_ai_lama::service::LAMA) {
+        Some(photocraft_ai_lama::service::LAMA)
+    } else if tier == Tier::Ultra && ready(photocraft_ai_lama::service::MIGAN) {
+        Some(photocraft_ai_lama::service::MIGAN)
+    } else {
+        None
+    };
+    let lama = cleaner.is_some();
     if background && !lama {
         crgb = crop::prefill(&crgb, &cmask, c.work_w, c.work_h);
     }
@@ -274,7 +296,7 @@ fn plan(s: &mut Session, p: &Value) -> Result<Plan> {
         unload,
         f32,
     };
-    Ok(Plan { layer: id, fmt, region: region_doc, crop: c, gray, req, prompt: typed, english, lama })
+    Ok(Plan { layer: id, fmt, region: region_doc, crop: c, gray, req, prompt: typed, english, lama, cleaner })
 }
 
 /// The service, if it can run `tier` now (else the reason, for the user).
@@ -352,6 +374,7 @@ fn generative_fill(s: &mut Session, p: &Value) -> Result<Value> {
                 );
             };
             let Some(lama) = inpainter else { return generate(plan, done, hooks) };
+            let cleaner_device = lama.device();
             // Manga LaMa first (the background), then the model re-draws it partly.
             ctx.progress(0.0, "Clean with AI");
             let binary: Vec<f32> = plan.req.mask.iter().map(|m| if *m >= 0.5 { 1.0 } else { 0.0 }).collect();
@@ -359,7 +382,7 @@ fn generative_fill(s: &mut Session, p: &Value) -> Result<Value> {
             let lreq = photocraft_ai_lama::service::Request {
                 tile,
                 allow_download: false,
-                model: photocraft_ai_lama::service::LAMA,
+                model: plan.cleaner.unwrap_or(photocraft_ai_lama::service::LAMA),
                 cpu: plan.req.cpu,
                 threads: plan.req.threads,
                 unload: false,
@@ -370,6 +393,12 @@ fn generative_fill(s: &mut Session, p: &Value) -> Result<Value> {
                 Box::new(move |r| {
                     let mut plan = plan;
                     match r {
+                        // The light tier keeps the cleaner's background as is: on a CPU a re-draw
+                        // costs more than it adds.
+                        Ok(filled) if filled.len() == plan.req.rgb.len() && plan.req.tier == Tier::Ultra => {
+                            let image = finish_image(&plan.crop, &filled, plan.gray);
+                            return done.finish(Ok((plan, vec![image], cleaner_device)));
+                        }
                         Ok(filled) if filled.len() == plan.req.rgb.len() => plan.req.rgb = filled,
                         // LaMa failed: the smooth pre-fill, with the stronger re-draw.
                         _ => {

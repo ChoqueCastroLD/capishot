@@ -47,5 +47,7 @@ Stable Diffusion 1.5 inpainting by CompVis, Runway and Stability AI — Creative
   restrictions in Help › Terms of Use…)
 CLIP ViT-L/14 text encoder by OpenAI — MIT — https://github.com/openai/CLIP
 TCD-SD15-LoRA by Jianbin Zheng et al. — MIT — https://huggingface.co/h1t/TCD-SD15-LoRA
+SDXS-512-DreamShaper by IDKiro — CreativeML OpenRAIL++-M — https://huggingface.co/IDKiro/sdxs-512-dreamshaper
+  (modified by Capishot: 4-bit block quantization)
 TAESD by madebyollin — MIT — https://github.com/madebyollin/taesd
 burn — MIT/Apache-2.0

@@ -158,7 +158,7 @@ pub fn terms_body(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 }
 
 const TERMS_EN: &str = "Capishot Terms of Use: AI features\n\n\
-Generative Fill runs Stable Diffusion 1.5 inpainting models (DreamShaper 8 by Lykon; Stable Diffusion by CompVis, Runway and Stability AI), with TCD (MIT) and TAESD (MIT), on your own device. The models are licensed under the CreativeML OpenRAIL-M licence, and your use of them through Capishot is subject to its use restrictions, which are part of these terms and which you agree to follow.\n\n\
+Generative Fill runs Stable Diffusion 1.5 inpainting models (DreamShaper 8 by Lykon; Stable Diffusion by CompVis, Runway and Stability AI), with TCD (MIT) and TAESD (MIT), and on light devices SDXS-512-DreamShaper by IDKiro, on your own device. The models are licensed under the CreativeML OpenRAIL-M licence (SDXS: CreativeML OpenRAIL++-M, with the same restrictions), and your use of them through Capishot is subject to its use restrictions, which are part of these terms and which you agree to follow.\n\n\
 You agree not to use the models, or anything made with them:\n\
 • in any way that violates any applicable national, federal, state, local or international law or regulation;\n\
 • to exploit, harm or attempt to exploit or harm minors in any way;\n\
@@ -174,7 +174,7 @@ You agree not to use the models, or anything made with them:\n\
 Capishot refuses prompts asking for sexual content involving minors or clearly illegal material. You are responsible for what you create and how you use it. The model files were converted by Capishot (16-bit floats, split into parts, the TCD adapter fused at load time); the licensors may update or restrict them. The full licence text:";
 
 const TERMS_ES: &str = "Términos de uso de Capishot: funciones de IA\n\n\
-Relleno generativo ejecuta modelos de inpainting de Stable Diffusion 1.5 (DreamShaper 8 de Lykon; Stable Diffusion de CompVis, Runway y Stability AI), con TCD (MIT) y TAESD (MIT), en tu propio dispositivo. Los modelos tienen la licencia CreativeML OpenRAIL-M y su uso a través de Capishot está sujeto a sus restricciones de uso, que forman parte de estos términos y que aceptas cumplir.\n\n\
+Relleno generativo ejecuta modelos de inpainting de Stable Diffusion 1.5 (DreamShaper 8 de Lykon; Stable Diffusion de CompVis, Runway y Stability AI), con TCD (MIT) y TAESD (MIT), y en equipos ligeros SDXS-512-DreamShaper de IDKiro, en tu propio dispositivo. Los modelos tienen la licencia CreativeML OpenRAIL-M (SDXS: CreativeML OpenRAIL++-M, con las mismas restricciones) y su uso a través de Capishot está sujeto a sus restricciones de uso, que forman parte de estos términos y que aceptas cumplir.\n\n\
 Aceptas no usar los modelos, ni nada creado con ellos:\n\
 • de ninguna forma que infrinja leyes o normas nacionales, federales, estatales, locales o internacionales;\n\
 • para explotar o dañar, o intentar explotar o dañar, a menores de cualquier forma;\n\
@@ -190,7 +190,7 @@ Aceptas no usar los modelos, ni nada creado con ellos:\n\
 Capishot rechaza las indicaciones que piden contenido sexual con menores o material claramente ilegal. Eres responsable de lo que creas y de cómo lo usas. Capishot convirtió los archivos del modelo (números de 16 bits, divididos en partes, el adaptador TCD se fusiona al cargarlo); los licenciantes pueden actualizarlos o restringirlos. El texto completo de la licencia (en inglés):";
 
 const TERMS_PT: &str = "Termos de uso do Capishot: recursos de IA\n\n\
-O Preenchimento generativo executa modelos de inpainting do Stable Diffusion 1.5 (DreamShaper 8 de Lykon; Stable Diffusion de CompVis, Runway e Stability AI), com TCD (MIT) e TAESD (MIT), no seu próprio dispositivo. Os modelos são licenciados sob a licença CreativeML OpenRAIL-M, e o uso deles pelo Capishot está sujeito às suas restrições de uso, que fazem parte destes termos e que você concorda em seguir.\n\n\
+O Preenchimento generativo executa modelos de inpainting do Stable Diffusion 1.5 (DreamShaper 8 de Lykon; Stable Diffusion de CompVis, Runway e Stability AI), com TCD (MIT) e TAESD (MIT), e em aparelhos leves SDXS-512-DreamShaper de IDKiro, no seu próprio dispositivo. Os modelos são licenciados sob a licença CreativeML OpenRAIL-M (SDXS: CreativeML OpenRAIL++-M, com as mesmas restrições), e o uso deles pelo Capishot está sujeito às suas restrições de uso, que fazem parte destes termos e que você concorda em seguir.\n\n\
 Você concorda em não usar os modelos, nem nada criado com eles:\n\
 • de nenhuma forma que viole leis ou regulamentos nacionais, federais, estaduais, locais ou internacionais;\n\
 • para explorar ou prejudicar, ou tentar explorar ou prejudicar, menores de qualquer forma;\n\
