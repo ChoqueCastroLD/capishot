@@ -138,3 +138,50 @@ fn a_piece_layer_drawn_at_each_offset_uploads_nothing_once_resident() {
         }
     }
 }
+
+/// A Move drag drawn from the unmoved layer (`Translated::in_place`): the document keeps its
+/// pixels where they are, the plan places the layer's bounds at the offset, and every frame of
+/// the drag equals compositing the moved copy, with nothing uploaded once resident and the
+/// lower-stack cache never serving the moving layer's old place.
+#[test]
+fn in_place_moves_draw_like_the_moved_copy() {
+    let Some((device, queue, mut comp)) = gpu() else { return };
+    let mut base = doc();
+    // More stack above, so the lower-stack cache has a checkpoint above the moving layer.
+    let fmt = base.pixel_format();
+    let mut top = Layer::raster("top", fmt);
+    top.surface_mut().expect("raster").fill_rect(Rect::new(500, 20, 690, 200), &photocraft_raster::from_rgba(&fmt, [0.3, 0.3, 0.9, 0.5]));
+    base.layers.push(top);
+    let l = &base.layers[1];
+    let (id, content, mask) = (l.id, l.surface().expect("raster").clone(), l.mask.as_ref().expect("mask").surface.clone());
+    photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &base, base.bounds()).expect("resident");
+    for (i, offset) in [(0, 0), (37, -23), (40, -20), (-256, 512), (5, 0), (-400, -300)].into_iter().enumerate() {
+        let shown = moved(&base, offset.0, offset.1);
+        let mut plain = photocraft_gpu::Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float).expect("compositor");
+        let (want, _) = photocraft_gpu::render_to_vec_stats(&mut plain, &device, &queue, &shown, shown.bounds()).expect("reference");
+        comp.set_translated(vec![Translated::in_place(id, false, &content, offset), Translated::in_place(id, true, &mask, offset)]);
+        let (got, stats) = photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &base, base.bounds()).expect("in place");
+        let worst = want.iter().zip(&got).map(|(w, g)| (0..4).map(|k| (w[k] - g[k]).abs()).fold(0.0f32, f32::max)).fold(0.0f32, f32::max);
+        assert!(worst <= 1.0 / 255.0, "offset {offset:?}: max diff {:.2}/255", worst * 255.0);
+        if i > 0 {
+            assert_eq!(stats.tiles_uploaded, 0, "offset {offset:?}: everything is resident");
+        }
+        // A damage rect of the move (old and new place) alone matches too.
+        let r = Rect::new(30, 20, 430, 360).union(&Rect::new(30, 20, 430, 360).translate(offset.0, offset.1)).intersect(&base.bounds());
+        let (part, _) = photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &base, r).expect("damage");
+        let w = base.size.width as usize;
+        for y in 0..r.height() as usize {
+            for x in 0..r.width() as usize {
+                let (a, b) = (part[y * r.width() as usize + x], want[(r.y0 as usize + y) * w + r.x0 as usize + x]);
+                assert!((0..4).all(|k| (a[k] - b[k]).abs() <= 1.0 / 255.0), "offset {offset:?} damage at {x},{y}");
+            }
+        }
+    }
+    // A layer with effects is built from where it is: refused, not drawn wrong.
+    let mut fx = base.clone();
+    fx.layers[1].effects.items.push(photocraft_doc::Effect::default_drop_shadow());
+    comp.set_translated(vec![Translated::in_place(id, false, &content, (10, 10))]);
+    assert!(photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &fx, fx.bounds()).is_err());
+    assert!(!photocraft_gpu::plan::movable_in_place(&fx.layers[1]));
+    assert!(photocraft_gpu::plan::movable_in_place(&base.layers[1]));
+}

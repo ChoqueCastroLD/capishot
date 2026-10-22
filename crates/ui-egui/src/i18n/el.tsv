@@ -4319,3 +4319,4 @@ curves	Smooth	Εξομάλυνση
 	Good fills with a smaller download.	Καλές πληρώσεις με μικρότερη λήψη.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Λεπτομερείς πληρώσεις από περιγραφή, τρεις παραλλαγές σε δευτερόλεπτα σε GPU.
 	Needs a GPU	Χρειάζεται GPU
+	The most detail: many steps with guidance, slow, for a strong GPU.	Η μέγιστη λεπτομέρεια: πολλά βήματα με καθοδήγηση, αργό, για ισχυρή GPU.

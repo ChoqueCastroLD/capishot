@@ -4226,3 +4226,4 @@ curves	Smooth	Wygładź
 	Good fills with a smaller download.	Dobre wypełnienia przy mniejszym pobieraniu.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Szczegółowe wypełnienia z opisu, trzy warianty w kilka sekund na GPU.
 	Needs a GPU	Wymaga GPU
+	The most detail: many steps with guidance, slow, for a strong GPU.	Najwięcej szczegółów: wiele kroków z prowadzeniem, wolno, dla mocnego GPU.

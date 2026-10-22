@@ -3639,3 +3639,4 @@ curves	Smooth	Lisser
 	Good fills with a smaller download.	De bons remplissages pour un téléchargement plus léger.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Remplissages détaillés à partir d’un texte, trois variantes en secondes sur GPU.
 	Needs a GPU	GPU requis
+	The most detail: many steps with guidance, slow, for a strong GPU.	Le plus de détails : beaucoup d’étapes guidées, lent, pour un GPU puissant.

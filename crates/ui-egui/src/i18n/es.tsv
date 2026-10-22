@@ -4804,3 +4804,4 @@ navigator	Zoom	Zoom
 	Good fills with a smaller download.	Buenos rellenos con una descarga menor.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Rellenos detallados a partir de un texto: tres variantes en segundos con GPU.
 	Needs a GPU	Requiere GPU
+	The most detail: many steps with guidance, slow, for a strong GPU.	El máximo detalle: muchos pasos con guía, lento, para una GPU potente.

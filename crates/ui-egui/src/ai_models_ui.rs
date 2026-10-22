@@ -157,6 +157,7 @@ fn card_title(c: &Card) -> &'static str {
         cards::GENFILL_ULTRA_CARD => tier_name(Tier::Ultra),
         cards::GENFILL_FAST_CARD => tier_name(Tier::Fast),
         cards::GENFILL_STANDARD_CARD => tier_name(Tier::Standard),
+        cards::GENFILL_HIGH_CARD => tier_name(Tier::High),
         _ => c.title,
     }
 }
@@ -172,6 +173,7 @@ fn card_text(c: &Card) -> &'static str {
         cards::GENFILL_ULTRA_CARD => tl!("Rough fills on any device, even without a GPU."),
         cards::GENFILL_FAST_CARD => tl!("Good fills with a smaller download."),
         cards::GENFILL_STANDARD_CARD => tl!("Detailed fills from a prompt, three variants in seconds on a GPU."),
+        cards::GENFILL_HIGH_CARD => tl!("The most detail: many steps with guidance, slow, for a strong GPU."),
         _ => c.description,
     }
 }

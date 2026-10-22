@@ -319,3 +319,37 @@ fn the_spot_healing_trail_is_a_dark_half_opaque_tint() {
         h.run_steps(2);
     }
 }
+
+/// A Move drag on the GPU canvas draws the layer from its own pixels at the offset (no moved
+/// copy, `Translated::in_place`): mid-drag the red square shows where the pointer took it and
+/// not where it was, and release leaves the same picture.
+#[test]
+fn move_drag_shows_the_layer_at_the_pointer() {
+    let Some(mut h) = harness(1.0) else { return };
+    setup(&mut h, "white", "move");
+    {
+        let app = h.state_mut();
+        app.run("layer.new.layer", json!({"name": "red"})).expect("layer");
+        app.run("select.rect", json!({"x": 40, "y": 40, "width": 60, "height": 60})).expect("select");
+        app.run("edit.fill", json!({"contents": "color", "color": "#ff0000", "opacity": 100})).expect("fill");
+        app.run("select.deselect", json!({})).expect("deselect");
+    }
+    h.run_steps(4);
+    let red = |img: &Image, x: f32, y: f32, h: &Harness| {
+        let p = screen(h, x, y);
+        let i = (p.y.round() as usize * img.w as usize + p.x.round() as usize) * 4;
+        img.px.get(i..i + 3).is_some_and(|q| q[0] > 200 && q[1] < 60 && q[2] < 60)
+    };
+    let start = render(&mut h);
+    assert!(red(&start, 50.0, 50.0, &h), "the square is drawn before the drag");
+    drag_to(&mut h, [70.0, 70.0], [270.0, 170.0]);
+    h.run_steps(3);
+    let mid = render(&mut h);
+    // Away from the pointer (its cursor is drawn there): the square spans 240..300 × 140..200.
+    assert!(red(&mid, 250.0, 190.0, &h), "the square shows at the pointer while dragging");
+    assert!(!red(&mid, 50.0, 50.0, &h), "and not where it was");
+    button(&mut h, 270.0, 170.0, false);
+    h.run_steps(4);
+    let done = render(&mut h);
+    assert!(red(&done, 250.0, 190.0, &h) && !red(&done, 50.0, 50.0, &h), "release keeps it there");
+}

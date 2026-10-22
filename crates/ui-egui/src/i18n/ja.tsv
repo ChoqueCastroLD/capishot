@@ -4308,3 +4308,4 @@ curves	Smooth	スムーズ
 	Good fills with a smaller download.	小さなダウンロードで良好な塗りつぶし。
 	Detailed fills from a prompt, three variants in seconds on a GPU.	プロンプトから詳細に塗りつぶし、GPUなら数秒で3案。
 	Needs a GPU	GPUが必要
+	The most detail: many steps with guidance, slow, for a strong GPU.	最も精細：ガイダンス付きで多くのステップ、低速、高性能GPU向け。

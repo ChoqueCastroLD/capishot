@@ -4242,3 +4242,4 @@ navigator	Zoom	Zvětšení
 	Good fills with a smaller download.	Dobré výplně s menším stahováním.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Detailní výplně podle zadání, tři varianty za pár sekund na GPU.
 	Needs a GPU	Vyžaduje GPU
+	The most detail: many steps with guidance, slow, for a strong GPU.	Nejvíc detailů: mnoho kroků s vedením, pomalé, pro silné GPU.
