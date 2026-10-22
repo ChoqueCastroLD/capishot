@@ -14,6 +14,26 @@ use crate::PhotocraftApp;
 use crate::state::DialogKind;
 
 const MARK: &str = "__genfill";
+/// The remembered Quality (`prefs.dialogs`).
+const QUALITY_PREF: &str = "ai.genfill.quality";
+const QUALITIES: [&str; 5] = ["auto", "ultra", "fast", "standard", "high"];
+
+/// The Quality the user chose last ("auto" by default).
+pub fn saved_quality(app: &PhotocraftApp) -> String {
+    app.session.prefs().dialogs.get(QUALITY_PREF).and_then(Value::as_str).filter(|q| QUALITIES.contains(q)).unwrap_or("auto").to_string()
+}
+
+fn save_quality(app: &mut PhotocraftApp, q: &str) {
+    if saved_quality(app) == q {
+        return;
+    }
+    app.session.edit_prefs(|p| {
+        p.dialogs.insert(QUALITY_PREF.into(), json!(q));
+    });
+    if let Err(e) = crate::prefs_ui::save_preferences(app) {
+        log::warn!("couldn't save the Generative Fill quality: {e}");
+    }
+}
 /// The About-dialog field that shows the Terms of Use instead of the tabs.
 pub const TERMS_FIELD: &str = "terms";
 /// The full licence of the Stable Diffusion weights (CreativeML OpenRAIL-M).
@@ -51,15 +71,21 @@ pub fn open(app: &mut PhotocraftApp, prompt: &str) -> u64 {
     f.insert("__command".into(), json!(ID));
     f.insert("__label".into(), json!(tl!("Generative Fill")));
     f.insert("prompt".into(), json!(prompt));
-    f.insert("variants".into(), json!("3"));
+    f.insert("variants".into(), json!("auto"));
+    f.insert("quality".into(), json!(saved_quality(app)));
     app.ui.open_dialog(DialogKind::Command, f)
 }
 
 /// The command params the dialog's fields stand for.
 pub fn params_of(f: &Map<String, Value>) -> Value {
     let prompt = f.get("prompt").and_then(Value::as_str).unwrap_or_default().trim().to_string();
-    let variants: u64 = f.get("variants").and_then(Value::as_str).and_then(|v| v.parse().ok()).unwrap_or(3).clamp(1, 4);
-    json!({"prompt": prompt, "variants": variants})
+    let quality = f.get("quality").and_then(Value::as_str).filter(|q| QUALITIES.contains(q)).unwrap_or("auto");
+    let mut p = json!({"prompt": prompt, "quality": quality});
+    // "auto": the tier's default (3 on a GPU, 1 on the light tiers).
+    if let Some(v) = f.get("variants").and_then(Value::as_str).and_then(|v| v.parse::<u64>().ok()) {
+        p["variants"] = json!(v.clamp(1, 4));
+    }
+    p
 }
 
 pub fn ok_label(f: &Map<String, Value>) -> Option<&'static str> {
@@ -100,13 +126,24 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     f.insert("__focused".into(), json!(true));
     f.insert("prompt".into(), json!(prompt));
     ui.add_space(6.0);
-    let mut variants = f.get("variants").and_then(Value::as_str).unwrap_or("3").to_string();
+    let mut variants = f.get("variants").and_then(Value::as_str).unwrap_or("auto").to_string();
+    let mut quality = f.get("quality").and_then(Value::as_str).unwrap_or("auto").to_string();
     ui.horizontal(|ui| {
+        ui.label(tl!("Quality:"));
+        let opts = [
+            ("auto".to_string(), tl!("Automatic")),
+            ("ultra".to_string(), tl!("Ultra-light (any device, 280 MB)")),
+            ("fast".to_string(), tl!("Fast (1 GB)")),
+            ("standard".to_string(), tl!("Standard (GPU, 2.3 GB)")),
+            ("high".to_string(), tl!("High (GPU, slow)")),
+        ];
+        crate::widgets::dropdown(ui, "genfill-quality", &mut quality, &opts, 220.0);
         ui.label(tl!("Variants:"));
-        let opts: Vec<(String, &str)> = ["1", "2", "3", "4"].iter().map(|v| ((*v).to_string(), *v)).collect();
-        crate::widgets::dropdown(ui, "genfill-variants", &mut variants, &opts, 60.0);
+        let opts: Vec<(String, &str)> = std::iter::once(("auto".to_string(), tl!("Automatic"))).chain(["1", "2", "3", "4"].iter().map(|v| ((*v).to_string(), *v))).collect();
+        crate::widgets::dropdown(ui, "genfill-variants", &mut variants, &opts, 90.0);
     });
     f.insert("variants".into(), json!(variants));
+    f.insert("quality".into(), json!(quality));
     ui.add_space(6.0);
     notes(app, ui);
     let _ = enter;
@@ -120,6 +157,7 @@ pub fn can_confirm(app: &PhotocraftApp, f: &Map<String, Value>) -> bool {
 
 pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
     let p = params_of(f);
+    save_quality(app, p["quality"].as_str().unwrap_or("auto"));
     app.ui.genfill.prompt = p["prompt"].as_str().unwrap_or_default().to_string();
     run(app, p)
 }
@@ -264,7 +302,7 @@ pub fn prompt_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     let enter = prompt_field(ui, "genfill-bar-prompt", &mut prompt, 240.0, false);
                     app.ui.genfill.prompt = prompt;
                     if ui.button(tl!("Generate")).clicked() || enter {
-                        action = Some(json!({"prompt": app.ui.genfill.prompt.trim(), "variants": 3}));
+                        action = Some(json!({"prompt": app.ui.genfill.prompt.trim(), "quality": saved_quality(app)}));
                     }
                 }
                 if ui.small_button("×").on_hover_text(tl!("Close")).clicked() {

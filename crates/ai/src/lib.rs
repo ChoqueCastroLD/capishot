@@ -33,6 +33,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod cache;
+pub mod cards;
 pub mod catalog;
 pub mod image;
 pub mod mangajanai;
