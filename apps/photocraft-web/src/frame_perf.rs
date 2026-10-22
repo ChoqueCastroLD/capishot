@@ -62,16 +62,23 @@ struct GestureFrame {
     update_ms: f64,
     latency_ms: Option<f64>,
     interval_ms: Option<f64>,
-    gpu_ms: Option<f64>,
+    /// Filled in once the frame's GPU work is done (`?perf=1`).
+    gpu_ms: Rc<Cell<Option<f64>>>,
     parts: telemetry::FrameParts,
 }
 
-/// Frames a record waits for its GPU completion before it is written without one.
+/// Frames a record's GPU completion is waited for before it is left without one.
 const GPU_WAIT_FRAMES: u8 = 8;
 
 /// Milliseconds from the end of a frame's update until the GPU finished what was queued then
 /// (`f64` bits; `u64::MAX` while pending).
 type GpuFence = Arc<AtomicU64>;
+
+/// A recorded frame waiting for its GPU completion: fence, record, gesture slot, age (frames).
+type PendingGpu = (GpuFence, Rc<RefCell<serde_json::Value>>, Rc<Cell<Option<f64>>>, u8);
+
+/// The `?perf=1` frame records, each shared with its pending GPU completion.
+type Records = Rc<RefCell<Vec<Rc<RefCell<serde_json::Value>>>>>;
 
 /// One frame, from its start until eframe reports its time (in the next frame).
 #[derive(Clone, Debug)]
@@ -103,7 +110,7 @@ pub struct FramePerf {
     /// eframe's last reported frame time: a frame whose logic ran in an event handler reports
     /// none, so an unchanged value is not counted again.
     last_cpu: Option<f32>,
-    records: Rc<RefCell<Vec<serde_json::Value>>>,
+    records: Records,
     /// The current gesture's frames (`?perf=1`).
     gesture: Vec<GestureFrame>,
     gesture_key: Option<String>,
@@ -112,8 +119,10 @@ pub struct FramePerf {
     /// The app's work counters at the start of the current gesture, and now (`?perf=1`).
     counters_at_start: Vec<(&'static str, u64)>,
     counters: Rc<RefCell<Vec<(&'static str, u64)>>>,
-    /// Finished frames waiting for their GPU completion (`?perf=1`), with eframe's time and age.
-    awaiting_gpu: VecDeque<(Frame, Option<f64>, u8)>,
+    /// Recorded frames whose GPU completion is still pending (`?perf=1`): the fence, the record
+    /// and gesture slot to fill in, and the age in frames. Frames are recorded at once (a page
+    /// that goes idle runs no frame that could flush them), and get their `gpu` when it lands.
+    awaiting_gpu: VecDeque<PendingGpu>,
 }
 
 impl FramePerf {
@@ -128,7 +137,7 @@ impl FramePerf {
         if canvas.add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref()).is_ok() {
             cb.forget();
         }
-        let records: Rc<RefCell<Vec<serde_json::Value>>> = Rc::default();
+        let records: Records = Rc::default();
         let counters: Rc<RefCell<Vec<(&'static str, u64)>>> = Rc::default();
         if debug {
             expose(records.clone(), counters.clone());
@@ -157,29 +166,33 @@ impl FramePerf {
         let fresh = cpu_usage.filter(|c| Some(*c) != self.last_cpu);
         self.last_cpu = cpu_usage.or(self.last_cpu);
         if let Some(frame) = self.last.take() {
-            let total = fresh.map(|s| f64::from(s) * 1000.0);
-            if frame.gpu.is_some() {
-                self.awaiting_gpu.push_back((frame, total, 0));
-            } else {
-                self.finish(frame, total, None);
+            self.finish(frame, fresh.map(|s| f64::from(s) * 1000.0));
+        }
+        // GPU completions that landed fill in their records; old ones stop being waited for.
+        self.awaiting_gpu.retain_mut(|(fence, record, slot, age)| {
+            *age = age.saturating_add(1);
+            let done = fence.load(Ordering::Relaxed);
+            if done == u64::MAX {
+                return *age < GPU_WAIT_FRAMES;
             }
-        }
-        // Frames in order, once their GPU work is done (or it took too long to wait for).
-        for f in &mut self.awaiting_gpu {
-            f.2 = f.2.saturating_add(1);
-        }
-        while let Some((frame, _, age)) = self.awaiting_gpu.front() {
-            let gpu = frame.gpu.as_ref().map(|g| g.load(Ordering::Relaxed)).filter(|b| *b != u64::MAX).map(f64::from_bits);
-            if gpu.is_none() && *age < GPU_WAIT_FRAMES {
-                break;
-            }
-            let Some((frame, total, _)) = self.awaiting_gpu.pop_front() else { break };
-            self.finish(frame, total, gpu);
-        }
+            let ms = f64::from_bits(done);
+            slot.set(Some(ms));
+            record.borrow_mut()["gpu"] = json!(round2(ms));
+            false
+        });
         let interval = self.last_start.map(|t| start - t);
         self.last_start = Some(start);
-        self.current =
-            Some(Frame { start, interval, update_ms: 0.0, logic_ms: 0.0, input: self.pending_input.take(), key: None, megapixels: None, layers: None, gpu: None });
+        self.current = Some(Frame {
+            start,
+            interval,
+            update_ms: 0.0,
+            logic_ms: 0.0,
+            input: self.pending_input.take(),
+            key: None,
+            megapixels: None,
+            layers: None,
+            gpu: None,
+        });
     }
 
     /// End of the app's logic (`App::logic`).
@@ -210,7 +223,7 @@ impl FramePerf {
         self.last = Some(frame);
     }
 
-    fn finish(&mut self, frame: Frame, total_ms: Option<f64>, gpu_ms: Option<f64>) {
+    fn finish(&mut self, frame: Frame, total_ms: Option<f64>) {
         // The oldest move waited from its event until this frame's paint was submitted.
         let latency = frame.input.zip(total_ms).map(|(t, ms)| (frame.start + ms - t).max(0.0));
         let parts = telemetry::FrameParts {
@@ -237,17 +250,22 @@ impl FramePerf {
         if !self.debug {
             return;
         }
+        let record = Rc::new(RefCell::new(json!({
+            "t": round2(frame.start), "int": frame.interval.map(round2), "upd": round2(frame.update_ms),
+            "ms": total_ms.map(round2), "lat": latency.map(round2), "key": frame.key,
+            "in": round2(parts.input), "logic": round2(parts.logic), "ui": round2(parts.ui), "paint": round2(parts.paint),
+            "gpu": null,
+        })));
         {
             let mut records = self.records.borrow_mut();
             if records.len() >= MAX_RECORDS {
                 records.drain(..MAX_RECORDS / 4);
             }
-            records.push(json!({
-                "t": round2(frame.start), "int": frame.interval.map(round2), "upd": round2(frame.update_ms),
-                "ms": total_ms.map(round2), "lat": latency.map(round2), "key": frame.key,
-                "in": round2(parts.input), "logic": round2(parts.logic), "ui": round2(parts.ui), "paint": round2(parts.paint),
-                "gpu": gpu_ms.map(round2),
-            }));
+            records.push(record.clone());
+        }
+        let gpu_ms: Rc<Cell<Option<f64>>> = Rc::default();
+        if let Some(fence) = frame.gpu.clone() {
+            self.awaiting_gpu.push_back((fence, record, gpu_ms.clone(), 0));
         }
         if frame.key != self.gesture_key {
             self.report_gesture();
@@ -294,7 +312,7 @@ impl FramePerf {
             "key": key, "frames": frames.len(),
             "ms": pick(|f| Some(f.ms)), "upd": pick(|f| Some(f.update_ms)), "lat": pick(|f| f.latency_ms),
             "fps": fps, "dropped": missed, "worst": worst, "work": work,
-            "gpu": pick(|f| f.gpu_ms), "int": pick(|f| f.interval_ms),
+            "gpu": pick(|f| f.gpu_ms.get()), "int": pick(|f| f.interval_ms),
         });
         log::info!("capishot-perf {line}");
     }
@@ -335,10 +353,13 @@ fn round2(v: f64) -> f64 {
 
 /// `photocraftPerf.take()` on the page: the recorded frames since the last call, as JSON;
 /// `photocraftPerf.counters()`: the app's work counters (monotonic), as JSON.
-fn expose(records: Rc<RefCell<Vec<serde_json::Value>>>, counters: Rc<RefCell<Vec<(&'static str, u64)>>>) {
+fn expose(records: Records, counters: Rc<RefCell<Vec<(&'static str, u64)>>>) {
     let Some(window) = web_sys::window() else { return };
     let api = js_sys::Object::new();
-    let take = Closure::<dyn Fn() -> String>::new(move || serde_json::Value::Array(std::mem::take(&mut *records.borrow_mut())).to_string());
+    let take = Closure::<dyn Fn() -> String>::new(move || {
+        let taken = std::mem::take(&mut *records.borrow_mut());
+        serde_json::Value::Array(taken.iter().map(|r| r.borrow().clone()).collect()).to_string()
+    });
     let read = Closure::<dyn Fn() -> String>::new(move || {
         let map: serde_json::Map<String, serde_json::Value> = counters.borrow().iter().map(|(k, v)| ((*k).to_string(), json!(v))).collect();
         serde_json::Value::Object(map).to_string()
