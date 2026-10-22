@@ -90,3 +90,21 @@ streaming): select 100×90, prompt "una manzana roja" → "red apple", 1 variant
 | `jobs.cancel` (Esc) | worker stopped in 24 ms, document unchanged |
 
 Native CPU (burn-flex f32, 4 threads): 2 variants, 448×512, 4 TCD steps: 70–125 s; load 9–12 s.
+
+## Ultra-light tier (2026-10-22)
+
+SDXS-512-DreamShaper UNet (316 M, 1 step) + the CLIP text encoder, both 4-bit (block 32, f16
+scales, round to nearest; first/last convs, time embedding, cross-attention k/v and the token
+table at 8-bit), TAESD f16: 277 MB. The CPU keeps one int8 per weight and dequantizes each layer
+when it runs; GPUs get dense weights at load. 4-channel UNet: blended latents (the original,
+re-noised, outside the mask each step).
+
+| | |
+|---|---|
+| Native CPU, 4 threads, 384×320, 2 variants, f16 file / q8 / q4 | 3.9 s / 7.3 s / 7.2 s; peak RSS 2.46 / 1.06 / 1.00 GB |
+| q8 / q4 vs f16 (8-bit crop PSNR) | 41.5 dB / 16.7 dB (q4 draws a different but plausible result) |
+| wgpu (lavapipe), 256 px, q4 | 7.5 s |
+| Browser e2e, plain worker on the CPU (one thread, SIMD128), 384 px, 1 variant | 28 s incl. loading; Chromium peak RSS 2.23 GB (1.45 GB before the run); longest frame gap 41 ms |
+
+Empty prompt on this tier: Manga LaMa (or MI-GAN) alone when downloaded, else a smooth
+pre-fill re-drawn at strength 0.5.
