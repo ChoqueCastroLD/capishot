@@ -131,9 +131,9 @@ struct CompositePacer {
 }
 
 /// Whether the canvas leaves an edit for the next frame while the last composite still runs
-/// (`CompositePacer`): in the browser, where a GPU-bound page otherwise queues frames behind
-/// the pointer. The desktop app composites every frame (its frames wait for presentation).
-pub const PACE_COMPOSITES: bool = cfg!(target_arch = "wasm32");
+/// (`CompositePacer`). Off: on WebGL the completion callbacks arrive late, and deferring stalled
+/// brush strokes for seconds (headless SwiftShader: 2 frames per stroke instead of 10).
+pub const PACE_COMPOSITES: bool = false;
 
 /// How long a composite may stay unfinished before the next goes anyway (a lost completion
 /// callback never stalls the canvas).
