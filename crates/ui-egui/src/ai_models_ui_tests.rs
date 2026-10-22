@@ -115,7 +115,9 @@ fn download_all_queues_everything_one_at_a_time_and_delete_all_asks_first() {
     h.run_steps(4);
     h.get_by_label_contains("Download all").click();
     h.run_steps(4);
-    let files = photocraft_ai::models::files();
+    // "Download all" is every tool's model; Generative Fill (2 GB) has its own button.
+    let files: Vec<_> =
+        photocraft_ai::models::files().into_iter().filter(|m| photocraft_ai::models::group(m) != photocraft_ai::models::Group::Generative).collect();
     let downloading = files.iter().filter(|m| matches!(store.status(m), Status::Downloading { .. })).count();
     let queued = files.iter().filter(|m| store.status(m) == Status::Queued).count();
     assert_eq!((downloading, queued), (1, files.len() - 1), "one at a time");

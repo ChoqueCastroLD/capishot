@@ -1,0 +1,55 @@
+[package]
+name = "photocraft-ai-sd"
+description = "Generative Fill: Stable Diffusion 1.5 inpainting (CLIP text encoder, 9-channel UNet, VAE) with few-step LCM/TCD sampling, on burn (WebGPU/wgpu or CPU)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "photocraft_ai_sd"
+path = "src/lib.rs"
+
+[features]
+# Without features: the tokenizer, the schedulers, the noise generator and the crop/paste
+# planning (no ML dependency), so the engine and the main web bundle can use them.
+default = []
+# The networks on burn; pick a backend below.
+model = ["dep:burn", "dep:safetensors", "dep:half"]
+# Pure-Rust CPU backend (burn-flex).
+flex = ["model", "burn/flex", "burn/simd"]
+# GPU through wgpu: Vulkan/Metal/DX12 natively, WebGPU in the browser.
+wgpu = ["model", "burn/wgpu"]
+# Multithreaded CPU kernels.
+rayon = ["model", "burn/rayon"]
+# The desktop/CLI runner (blocks on the device).
+native = ["model", "dep:pollster"]
+
+[dependencies]
+burn = { version = "0.22.0", default-features = false, features = ["std"], optional = true }
+safetensors = { version = "0.8", default-features = false, features = ["alloc"], optional = true }
+half = { version = "2", optional = true }
+pollster = { version = "1", optional = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+# The service seam (`ModelState`, `Hooks`) and the resampler; no ML dependency without features.
+photocraft-ai-lama = { workspace = true }
+# The model catalog (file names, sizes, checksums); no ML dependency without features.
+photocraft-ai = { workspace = true }
+
+[dev-dependencies]
+image = { workspace = true, features = ["png", "jpeg"] }
+pollster = "1"
+safetensors = { version = "0.8", default-features = false, features = ["alloc"] }
+
+[[example]]
+name = "sd_fill"
+required-features = ["flex", "wgpu"]
+
+[[example]]
+name = "sd_compare"
+required-features = ["flex", "wgpu"]
+
+[lints]
+workspace = true
