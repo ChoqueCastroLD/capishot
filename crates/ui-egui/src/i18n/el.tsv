@@ -3983,3 +3983,31 @@ cameraData	Lens	Φακός
 	Collapse to Icons	Σύμπτυξη σε εικονίδια
 	Expand Panels	Ανάπτυξη πλαισίων
 	Dock to the Panels	Αγκύρωση στα πλαίσια
+	Ultra-light (any device, 280 MB)	Εξαιρετικά ελαφριά (κάθε συσκευή, 280 MB)
+	Fast (1 GB)	Γρήγορη (1 GB)
+	Standard (GPU, 2.3 GB)	Τυπική (GPU, 2,3 GB)
+	High (GPU, slow)	Υψηλή (GPU, αργή)
+	Ultra-light	Εξαιρετικά ελαφριά
+	Show files	Εμφάνιση αρχείων
+	Recommended for this device	Προτείνεται για αυτή τη συσκευή
+	Generative Fill - {tier}	Παραγωγική πλήρωση - {tier}
+	Clean	Καθαρισμός
+	Erase text and objects.	Σβήνει κείμενα και αντικείμενα.
+	Enlarge pages without blur.	Μεγεθύνει σελίδες χωρίς θόλωμα.
+	Draw new content from a prompt.	Σχεδιάζει νέο περιεχόμενο από περιγραφή.
+	No GPU needed	Χωρίς GPU
+	Precision	Ακρίβεια
+	Memory	Μνήμη
+	GPU memory	Μνήμη GPU
+	Paused	Σε παύση
+	Downloading	Λήψη
+	Pause all	Παύση όλων
+	Erases text and SFX and redraws screentone and lines.	Σβήνει κείμενα και ηχοποιίες, ξανασχεδιάζει ράστερ και γραμμές.
+	A small cleaner for phones and computers without a GPU.	Μικρό εργαλείο για κινητά και υπολογιστές χωρίς GPU.
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	Καθαρή μεγέθυνση 2× και 4× ασπρόμαυρων σελίδων manga.
+	2× and 4× upscaling of colour pages and covers.	Μεγέθυνση 2× και 4× έγχρωμων σελίδων και εξωφύλλων.
+	Fast upscaling that runs well on any device.	Γρήγορη μεγέθυνση που τρέχει σε κάθε συσκευή.
+	Rough fills on any device, even without a GPU.	Απλές πληρώσεις σε κάθε συσκευή, ακόμη και χωρίς GPU.
+	Good fills with a smaller download.	Καλές πληρώσεις με μικρότερη λήψη.
+	Detailed fills from a prompt, three variants in seconds on a GPU.	Λεπτομερείς πληρώσεις από περιγραφή, τρεις παραλλαγές σε δευτερόλεπτα σε GPU.
+	Needs a GPU	Χρειάζεται GPU

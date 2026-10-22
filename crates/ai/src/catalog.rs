@@ -438,6 +438,36 @@ pub const MODELS: &[ModelInfo] = &[
         "https://huggingface.co/IDKiro/sdxs-512-dreamshaper"
     ),
     genfill_file!(
+        "genfill-text-q8",
+        "Generative Fill (fast): text encoder, 8-bit",
+        "sd15-text-ds8-q8.safetensors",
+        131_486_235,
+        "0ca253799dcc5ac82427da4d8fef79f0720f0a3b8d3fe58695c5b867a3ab5f87",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        "genfill-fast-unet-1",
+        "Generative Fill (fast): model, 8-bit, part 1 of 2",
+        "ds8-inpaint-tcd-unet-q8.part0of2.safetensors",
+        470_068_272,
+        "46e6132af61b3fd398f25168184642188f79c904c73519bbf007098623c86e8e",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        "genfill-fast-unet-2",
+        "Generative Fill (fast): model, 8-bit, part 2 of 2",
+        "ds8-inpaint-tcd-unet-q8.part1of2.safetensors",
+        443_782_016,
+        "e4910db498098f056617ef8752f5660642f9eb0582491c3d1c164b147b85b78f",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
         GENFILL_FAST_LORA_ID,
         "Generative Fill: few-step sampler (TCD)",
         "tcd-sd15-lora-f16.safetensors",
@@ -474,6 +504,9 @@ pub const GENFILL_STANDARD: &[&str] = &[
 
 /// The files of Generative Fill's Ultra-light tier (CPUs, phones): 277 MB.
 pub const GENFILL_ULTRA: &[&str] = &["genfill-text-q4", "genfill-taesd", "genfill-ultra-unet"];
+
+/// The files of Generative Fill's Fast tier (TCD fused offline, 8-bit, TAESD): 1.05 GB.
+pub const GENFILL_FAST: &[&str] = &["genfill-text-q8", "genfill-taesd", "genfill-fast-unet-1", "genfill-fast-unet-2"];
 
 /// The id of the Manga LaMa inpainting model.
 pub const LAMA_ID: &str = "manga-lama";

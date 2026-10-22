@@ -22,6 +22,9 @@ pub enum Sampler {
     /// Trajectory Consistency Distillation's strategic stochastic sampling; `gamma` (diffusers'
     /// `eta`) in `0..=1`: 0 is deterministic, the paper's default is 0.3.
     Tcd { gamma: f64 },
+    /// DDIM, deterministic (η = 0), diffusers' "leading" spacing with `steps_offset = 1`: the
+    /// base model's sampler for many steps with classifier-free guidance (High).
+    Ddim,
 }
 
 /// One denoising step: `x_next = a·x + b·ε + c·z`, `ε` the UNet's noise prediction at
@@ -102,7 +105,16 @@ impl Schedule {
         {
             return Err(ScheduleError::Gamma);
         }
-        let all = timesteps(steps)?;
+        if steps == 0 || steps > MAX_STEPS {
+            return Err(ScheduleError::Steps(steps));
+        }
+        let all = match sampler {
+            Sampler::Ddim => {
+                let ratio = TRAIN_STEPS / steps;
+                (0..steps).rev().map(|i| u32::try_from(i * ratio + 1).unwrap_or(0)).collect()
+            }
+            _ => timesteps(steps)?,
+        };
         let ac = alphas_cumprod();
         let alpha = |t: u32| ac.get(t as usize).copied().unwrap_or(1.0);
         // get_timesteps: init = min(floor(n·strength), n), start = n − init.
@@ -132,6 +144,14 @@ impl Schedule {
                         let s = ap.sqrt();
                         Step { timestep: t, a: s * da, b: s * db, c: (1.0 - ap).sqrt(), next_a: s, next_b: (1.0 - ap).sqrt() }
                     }
+                }
+                Sampler::Ddim => {
+                    let ratio = (TRAIN_STEPS / steps) as i64;
+                    let prev = i64::from(t) - ratio;
+                    let ap = if prev >= 0 { alpha(u32::try_from(prev).unwrap_or(0)) } else { ac.first().copied().unwrap_or(1.0) };
+                    // x' = √ᾱp·x0 + √(1−ᾱp)·ε
+                    let (a, b) = ((ap / at).sqrt(), (1.0 - ap).sqrt() - ap.sqrt() * sb / sa);
+                    Step { timestep: t, a, b, c: 0.0, next_a: ap.sqrt(), next_b: 0.0 }
                 }
                 Sampler::Tcd { gamma } => {
                     let prev = if last { 0 } else { all.get(i + 1).copied().unwrap_or(0) };
@@ -198,6 +218,17 @@ mod tests {
     }
 
     #[test]
+    fn ddim_matches_diffusers() {
+        // DDIMScheduler(DreamShaper config: leading, offset 1).set_timesteps(4), eta 0.
+        let want = [(751, 2.221590, -1.307340), (501, 1.563393, -0.758601), (251, 1.218698, -0.656524), (1, 1.000428, -0.012142)];
+        let s = Schedule::new(Sampler::Ddim, 4, 1.0).unwrap_or_else(|e| panic!("{e}"));
+        for (got, (t, a, b)) in s.steps.iter().zip(want) {
+            assert_eq!(got.timestep, t);
+            assert!((got.a - a).abs() < 2e-5 && (got.b - b).abs() < 2e-5, "t={t}: {} {} vs {a} {b}", got.a, got.b);
+        }
+    }
+
+    #[test]
     fn strength_cuts_the_head() {
         let s = Schedule::new(Sampler::Lcm, 4, 0.5).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(s.steps.iter().map(|s| s.timestep).collect::<Vec<_>>(), vec![499, 259]);
@@ -207,5 +238,6 @@ mod tests {
         assert!(Schedule::new(Sampler::Lcm, 4, 0.0).is_err());
         assert!(Schedule::new(Sampler::Lcm, 4, f64::NAN).is_err());
         assert!(Schedule::new(Sampler::Tcd { gamma: 2.0 }, 4, 1.0).is_err());
+        assert!(Schedule::new(Sampler::Ddim, 0, 1.0).is_err());
     }
 }

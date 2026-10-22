@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use photocraft_ai::cards::{self, Card, CardState};
 use photocraft_ai::catalog::ModelInfo;
 use photocraft_ai::models::{self, ModelStore, Status};
 use serde_json::{Value, json};
@@ -40,6 +41,7 @@ pub const STATUS: &str = "ai.models.status";
 pub const DOWNLOAD: &str = "ai.models.download";
 pub const CANCEL: &str = "ai.models.cancel";
 pub const DELETE: &str = "ai.models.delete";
+pub const PAUSE: &str = "ai.models.pause";
 
 impl Session {
     /// Injects (or removes) the model download service.
@@ -130,13 +132,56 @@ pub fn queue_summary(store: &dyn ModelStore) -> Value {
     json!({"active": active, "queued": queued, "done": done.min(total), "total": total, "busy": !active.is_null() || queued > 0})
 }
 
+/// The cards "Download recommended" points at: the full or lite cleaner and upscalers as the
+/// device profile picks them, and the Generative Fill tier auto mode would run.
+pub fn recommended_cards(s: &Session) -> Vec<&'static str> {
+    let lite = recommended(s).first().is_some_and(|m| m.lite);
+    let mut v = if lite { vec!["migan", "realesr-compact"] } else { vec!["manga-lama", "mangajanai", "illustrationjanai"] };
+    if let Ok(t) = crate::genfill_cmds::tier_for(s, &json!({})) {
+        v.push(match t {
+            photocraft_ai_sd::service::Tier::Ultra => cards::GENFILL_ULTRA_CARD,
+            photocraft_ai_sd::service::Tier::Fast => cards::GENFILL_FAST_CARD,
+            _ => cards::GENFILL_STANDARD_CARD,
+        });
+    }
+    v
+}
+
+/// A card's row: what it is and its state over all its files.
+pub fn card_entry(st: &dyn ModelStore, c: &'static Card, recommended: bool) -> Value {
+    let files = c.models();
+    let state = CardState::of(&files.iter().map(|m| (m.bytes, st.status(m))).collect::<Vec<_>>());
+    let mut v = json!({
+        "id": c.id, "section": c.section, "title": c.title, "description": c.description, "bytes": c.bytes(),
+        "quality": c.quality, "speed": c.speed, "gpu": c.gpu, "precision": c.precision, "memoryMb": c.memory_mb,
+        "files": files.iter().map(|m| m.id).collect::<Vec<_>>(), "recommended": recommended, "state": state.id(),
+    });
+    match state {
+        CardState::Downloading { done, total, bytes_per_sec } => {
+            v["done"] = json!(done);
+            v["total"] = json!(total);
+            v["bytesPerSec"] = json!(bytes_per_sec);
+        }
+        CardState::Paused { done, total } => {
+            v["done"] = json!(done);
+            v["total"] = json!(total);
+        }
+        CardState::Error(e) | CardState::Unavailable(e) => v["error"] = json!(e),
+        _ => {}
+    }
+    v
+}
+
 fn list(s: &mut Session, _: &Value) -> Result<Value> {
     let st = store(s)?;
     let rows: Vec<Value> = models::files().into_iter().map(|m| entry(m, &st.status(m))).collect();
     let storage = st.storage();
     let available = st.available();
     let recommended: Vec<&str> = recommended(s).iter().map(|m| m.id).collect();
+    let rc = recommended_cards(s);
+    let card_rows: Vec<Value> = cards::CARDS.iter().map(|c| card_entry(st.as_ref(), c, rc.contains(&c.id))).collect();
     Ok(json!({
+        "cards": card_rows,
         "available": available.is_ok(),
         "reason": available.err(),
         "storage": storage,
@@ -169,7 +214,9 @@ fn download(s: &mut Session, p: &Value) -> Result<Value> {
             Some(v) => v.as_bool().ok_or_else(|| bad(DOWNLOAD, format!("`{k}` must be true or false"))),
         }
     };
-    let wanted: Vec<&'static ModelInfo> = if let Some(m) = model_param(p, DOWNLOAD)? {
+    let wanted: Vec<&'static ModelInfo> = if let Some(c) = card_param(p, DOWNLOAD)? {
+        c.models()
+    } else if let Some(m) = model_param(p, DOWNLOAD)? {
         vec![m]
     } else if let Some(ids) = p.get("ids") {
         let ids = ids.as_array().ok_or_else(|| bad(DOWNLOAD, "`ids` must be a list of model ids"))?;
@@ -207,9 +254,37 @@ fn download(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn cancel(s: &mut Session, p: &Value) -> Result<Value> {
     let st = store(s)?;
+    if let Some(c) = card_param(p, CANCEL)? {
+        for m in c.models() {
+            st.cancel(Some(m));
+        }
+        return Ok(json!({"cancelled": c.id, "queue": queue_summary(st.as_ref())}));
+    }
     let m = model_param(p, CANCEL)?;
     st.cancel(m);
     Ok(json!({"cancelled": m.map_or("all", |m| m.id), "queue": queue_summary(st.as_ref())}))
+}
+
+fn pause(s: &mut Session, p: &Value) -> Result<Value> {
+    let st = store(s)?;
+    if let Some(c) = card_param(p, PAUSE)? {
+        for m in c.models() {
+            st.pause(Some(m));
+        }
+        return Ok(json!({"paused": c.id, "queue": queue_summary(st.as_ref())}));
+    }
+    let m = model_param(p, PAUSE)?;
+    st.pause(m);
+    Ok(json!({"paused": m.map_or("all", |m| m.id), "queue": queue_summary(st.as_ref())}))
+}
+
+/// One card by `card` id.
+fn card_param(p: &Value, cmd: &str) -> Result<Option<&'static Card>> {
+    match p.get("card") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(id)) => cards::card(id).map(Some).ok_or_else(|| bad(cmd, format!("unknown card `{id}`; `{LIST}` lists them"))),
+        Some(_) => Err(bad(cmd, "`card` must be a card id")),
+    }
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -218,6 +293,19 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => false,
         Some(v) => v.as_bool().ok_or_else(|| bad(DELETE, "`all` must be true or false"))?,
     };
+    if let Some(c) = card_param(p, DELETE)? {
+        // Files another installed card still uses (TAESD) stay.
+        let installed = |o: &Card| o.models().iter().all(|m| st.status(m).is_downloaded());
+        let mut deleted = Vec::new();
+        for m in cards::deletable(c, &installed) {
+            let was = st.status(m);
+            st.delete(m).map_err(|e| EngineError::Other(e.to_string()))?;
+            if matches!(was, Status::Downloaded | Status::UpdateAvailable) {
+                deleted.push(m.id);
+            }
+        }
+        return Ok(json!({"deleted": deleted, "card": c.id, "storage": st.storage()}));
+    }
     let targets: Vec<&'static ModelInfo> = match (model_param(p, DELETE)?, all) {
         (Some(m), _) => vec![m],
         (None, true) => {
@@ -244,7 +332,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "List AI Models",
             menu: &[],
             shortcut: None,
-            params: r#"{} -> {"available", "reason"?, "storage": {"models", "used", "quota"}, "queue": {"active", "queued", "done", "total", "busy"}, "recommended": [id], "models": [{"id", "ids", "file", "title", "group": "cleaning"|"upscaling"|"generative", "tools": [command id], "runs": "bestOnGpu"|"both", "lite", "bytes", "license", "author", "source", "status": "notDownloaded"|"queued"|"downloading"|"downloaded"|"updateAvailable"|"failed"|"checking"|"unavailable", "done"?, "total"?, "bytesPerSec"?, "etaSecs"?, "error"?}]} (one row per weight file)"#,
+            params: r#"{} -> {"available", "reason"?, "storage": {"models", "used", "quota"}, "queue": {"active", "queued", "done", "total", "busy"}, "recommended": [id], "models": [{"id", "ids", "file", "title", "group": "cleaning"|"upscaling"|"generative", "tools": [command id], "runs": "bestOnGpu"|"both", "lite", "bytes", "license", "author", "source", "status": "notDownloaded"|"queued"|"downloading"|"paused"|"downloaded"|"updateAvailable"|"failed"|"checking"|"unavailable", "done"?, "total"?, "bytesPerSec"?, "etaSecs"?, "error"?}]} (one row per weight file), "cards": [{"id", "section": "clean"|"upscale"|"generative", "title", "description", "bytes", "quality", "speed", "gpu", "precision", "memoryMb", "files": [id], "recommended", "state": "notDownloaded"|"downloading"|"paused"|"ready"|"error"|"checking"|"unavailable", "done"?, "total"?, "bytesPerSec"?, "error"?}]"#,
             enabled,
             run: list,
             journal: false,
@@ -264,7 +352,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Download AI Models",
             menu: &[],
             shortcut: None,
-            params: r#"{"id": model id or file} | {"ids": [id]} | {"all": true} | {"recommended": true} -> {"queued": [id], "skipped": [id] (already downloaded or queued), "queue"}. Downloads run in the background, one at a time; poll ai.models.status."#,
+            params: r#"{"id": model id or file} | {"ids": [id]} | {"card": card id (every file of a card or Generative Fill tier)} | {"all": true} | {"recommended": true} -> {"queued": [id], "skipped": [id] (already downloaded or queued), "queue"}. Downloads run in the background, one at a time, and resume where a pause or an interruption left them; poll ai.models.status."#,
             enabled,
             run: download,
             journal: false,
@@ -274,9 +362,19 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Cancel AI Model Download",
             menu: &[],
             shortcut: None,
-            params: r#"{"id"?: model id or file (default: every queued and running download)} -> {"cancelled", "queue"}"#,
+            params: r#"{"id"?: model id or file | "card"?: card id (default: every queued and running download)} -> {"cancelled", "queue"}. The bytes downloaded so far are dropped (`ai.models.pause` keeps them)."#,
             enabled,
             run: cancel,
+            journal: false,
+        },
+        CommandSpec {
+            id: PAUSE,
+            label: "Pause AI Model Download",
+            menu: &[],
+            shortcut: None,
+            params: r#"{"id"?: model id or file | "card"?: card id (default: every download)} -> {"paused", "queue"}. Keeps what was downloaded; `ai.models.download` resumes it (status "paused")."#,
+            enabled,
+            run: pause,
             journal: false,
         },
         CommandSpec {
@@ -284,7 +382,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Delete AI Models",
             menu: &[],
             shortcut: None,
-            params: r#"{"id": model id or file} | {"all": true} -> {"deleted": [id], "storage"}. Cancels the model's download first."#,
+            params: r#"{"id": model id or file} | {"card": card id (keeps files another installed card uses)} | {"all": true} -> {"deleted": [id], "storage"}. Cancels the model's download first."#,
             enabled,
             run: delete,
             journal: false,
@@ -308,7 +406,7 @@ mod tests {
     #[test]
     fn without_a_store_every_command_fails_cleanly() {
         let mut s = Session::new();
-        for id in [LIST, STATUS, DOWNLOAD, CANCEL, DELETE] {
+        for id in [LIST, STATUS, DOWNLOAD, CANCEL, PAUSE, DELETE] {
             let e = s.execute(id, json!({"id": LAMA_ID})).unwrap_err().to_string();
             assert!(e.contains("not available"), "{id}: {e}");
         }
@@ -389,5 +487,27 @@ mod tests {
         fake.inner.lock().unwrap().unavailable = Some("offline".into());
         assert!(s.execute(DOWNLOAD, json!({"id": LAMA_ID})).unwrap_err().to_string().contains("offline"));
         assert_eq!(s.execute(LIST, json!({})).unwrap()["reason"], "offline");
+    }
+
+    #[test]
+    fn cards_download_pause_resume_and_delete_keeps_shared_files() {
+        let (mut s, fake) = session();
+        let v = s.execute(DOWNLOAD, json!({"card": cards::GENFILL_ULTRA_CARD})).unwrap();
+        assert_eq!(v["queued"].as_array().unwrap().len(), 3);
+        fake.step();
+        let v = s.execute(PAUSE, json!({"card": cards::GENFILL_ULTRA_CARD})).unwrap();
+        assert_eq!(v["paused"], cards::GENFILL_ULTRA_CARD);
+        let list = s.execute(LIST, json!({})).unwrap();
+        let card = |l: &Value, id: &str| l["cards"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap().clone();
+        assert_eq!(card(&list, cards::GENFILL_ULTRA_CARD)["state"], "paused");
+        s.execute(DOWNLOAD, json!({"card": cards::GENFILL_ULTRA_CARD})).unwrap();
+        while fake.step() {}
+        assert_eq!(card(&s.execute(LIST, json!({})).unwrap(), cards::GENFILL_ULTRA_CARD)["state"], "ready");
+        s.execute(DOWNLOAD, json!({"card": cards::GENFILL_STANDARD_CARD})).unwrap();
+        while fake.step() {}
+        let v = s.execute(DELETE, json!({"card": cards::GENFILL_ULTRA_CARD})).unwrap();
+        assert!(!v["deleted"].as_array().unwrap().iter().any(|i| i == "genfill-taesd"), "the Standard tier still uses TAESD");
+        assert_eq!(card(&s.execute(LIST, json!({})).unwrap(), cards::GENFILL_STANDARD_CARD)["state"], "ready");
+        assert!(s.execute(DOWNLOAD, json!({"card": "nope"})).is_err());
     }
 }
