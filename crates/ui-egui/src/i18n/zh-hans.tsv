@@ -2900,3 +2900,9 @@ cameraData	Lens	镜头
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	擦除所选文字或拟声词，并用 AI 在新图层上重绘背景。使用已下载的模型（窗口 › AI 模型…）。
 @plural	{n} more queued|{n} more queued	另有 {n} 个排队中
 	GPU couldn't run this model; used the CPU instead	GPU 无法运行此模型，已改用 CPU
+	Menu	菜单
+	Max pixel density	最大像素密度
+	Display's own	跟随显示器
+	Collapse to Icons	折叠为图标
+	Expand Panels	展开面板
+	Dock to the Panels	停靠到面板

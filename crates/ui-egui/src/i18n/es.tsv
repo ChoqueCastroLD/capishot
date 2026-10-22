@@ -3172,3 +3172,9 @@ cameraData	Lens	Objetivo
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Borra el texto u onomatopeyas seleccionados y redibuja el fondo con IA en una capa nueva. Usa un modelo descargado (Ventana › Modelos de IA…).
 @plural	{n} more queued|{n} more queued	{n} más en cola|{n} más en cola
 	GPU couldn't run this model; used the CPU instead	La GPU no pudo ejecutar este modelo; se usó la CPU
+	Menu	Menú
+	Max pixel density	Densidad de píxeles máxima
+	Display's own	La de la pantalla
+	Collapse to Icons	Contraer a iconos
+	Expand Panels	Expandir paneles
+	Dock to the Panels	Acoplar a los paneles

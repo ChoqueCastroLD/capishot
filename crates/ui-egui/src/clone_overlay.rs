@@ -85,7 +85,9 @@ pub(crate) fn draw(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXf
     let tip = if overlay.clipped { tip_mask(&app.session.tools.brush, at) } else { None };
     let rect = match (&tip, overlay.clipped) {
         (Some((r, _)), _) => *r,
-        (None, true) => DRect::new((at[0] - radius).floor() as i32, (at[1] - radius).floor() as i32, (at[0] + radius).ceil() as i32, (at[1] + radius).ceil() as i32),
+        (None, true) => {
+            DRect::new((at[0] - radius).floor() as i32, (at[1] - radius).floor() as i32, (at[0] + radius).ceil() as i32, (at[1] + radius).ceil() as i32)
+        }
         // Unclipped: what of the view lies around the pointer, up to the overlay budget.
         (None, false) => {
             let h = UNCLIPPED_SIDE / 2.0;
@@ -235,7 +237,14 @@ mod tests {
     #[test]
     fn the_overlay_follows_the_panel_options_for_both_clone_tools() {
         let ctx = egui::Context::default();
-        let xf = ViewXform { rect: egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(200.0, 200.0)), zoom: 1.0, center: [128.0, 128.0], flip: false, rotation: 0.0, aspect: 1.0 };
+        let xf = ViewXform {
+            rect: egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(200.0, 200.0)),
+            zoom: 1.0,
+            center: [128.0, 128.0],
+            flip: false,
+            rotation: 0.0,
+            aspect: 1.0,
+        };
         for tool in [Tool::CloneStamp, Tool::Healing] {
             let mut app = overlay_app();
             app.ui.tool = tool;
@@ -265,7 +274,14 @@ mod tests {
     #[test]
     fn a_clipped_overlay_takes_a_non_round_tip_shape() {
         let ctx = egui::Context::default();
-        let xf = ViewXform { rect: egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(200.0, 200.0)), zoom: 1.0, center: [128.0, 128.0], flip: false, rotation: 0.0, aspect: 1.0 };
+        let xf = ViewXform {
+            rect: egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(200.0, 200.0)),
+            zoom: 1.0,
+            center: [128.0, 128.0],
+            flip: false,
+            rotation: 0.0,
+            aspect: 1.0,
+        };
         let mut app = overlay_app();
         app.ui.tool = Tool::CloneStamp;
         app.session.tools.brush.size = 30.0;

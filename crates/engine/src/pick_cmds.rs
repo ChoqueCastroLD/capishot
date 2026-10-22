@@ -50,8 +50,9 @@ fn layers_hit(doc: &Document, x: i32, y: i32, type_bounds: bool) -> Vec<LayerId>
         let alpha = match &l.content {
             // Fill layers cover the canvas (their mask limits them).
             LayerContent::Fill(_) => 1.0,
-            // The text's pixel bounds (in document space, so they follow the layer's transform).
-            LayerContent::Text(t) if type_bounds && t.cache.as_ref().is_some_and(|c| c.content_bounds().contains(x, y)) => 1.0,
+            // The text's pixel bounds (in document space, so they follow the layer's transform),
+            // cached per tile: a hover over the canvas asks again after every edit.
+            LayerContent::Text(t) if type_bounds && t.cache.as_ref().is_some_and(|c| photocraft_compose::bounds::content_bounds(c).contains(x, y)) => 1.0,
             _ => match l.surface() {
                 Some(s) => {
                     let mut px = [[0.0f32; 4]; 1];

@@ -133,9 +133,12 @@ fn consent_blocks_fetching_until_allow_and_not_now_leaves_it_off() {
 fn an_automation_click_cannot_grant_consent() {
     let (mut app, _fonts) = app_with(&[], "guard", false, false);
     app.automation_input = true;
-    app.services.automation_command = Some(Box::new(|id, params| {
-        if id == "prefs.set" && params.to_string().contains("allowOnlineFonts") { Err("refused for automation".into()) } else { Ok(()) }
-    }));
+    app.services.automation_command =
+        Some(Box::new(
+            |id, params| {
+                if id == "prefs.set" && params.to_string().contains("allowOnlineFonts") { Err("refused for automation".into()) } else { Ok(()) }
+            },
+        ));
     assert!(allow(&mut app).is_err());
     assert!(!allowed(&app));
 }
@@ -276,7 +279,9 @@ fn cancelling_an_install_stops_it_and_leaves_nothing_on_disk() {
     pump(&mut h, |a| !a.ui.fonts.results.is_empty());
     install(h.state_mut(), "Zqbfa");
     // Progress shows once the first file is in.
-    pump(&mut h, |a| a.ui.fonts.installing.first().and_then(|i| i.job).and_then(|j| a.session.job(photocraft_engine::jobs::JobId(j))).is_some_and(|j| j.progress > 0.0));
+    pump(&mut h, |a| {
+        a.ui.fonts.installing.first().and_then(|i| i.job).and_then(|j| a.session.job(photocraft_engine::jobs::JobId(j))).is_some_and(|j| j.progress > 0.0)
+    });
     h.run_steps(2);
     h.get_by_label("Cancel").click();
     pump(&mut h, |a| a.ui.fonts.installing.is_empty());
