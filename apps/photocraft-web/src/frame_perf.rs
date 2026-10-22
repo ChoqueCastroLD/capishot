@@ -118,7 +118,7 @@ pub struct FramePerf {
     prev_key: Option<String>,
     /// The app's work counters at the start of the current gesture, and now (`?perf=1`).
     counters_at_start: Vec<(&'static str, u64)>,
-    counters: Rc<RefCell<Vec<(&'static str, u64)>>>,
+    counters: Rc<RefCell<photocraft_ui_egui::perf_counters::PerfCounters>>,
     /// Recorded frames whose GPU completion is still pending (`?perf=1`): the fence, the record
     /// and gesture slot to fill in, and the age in frames. Frames are recorded at once (a page
     /// that goes idle runs no frame that could flush them), and get their `gpu` when it lands.
@@ -138,9 +138,11 @@ impl FramePerf {
             cb.forget();
         }
         let records: Records = Rc::default();
-        let counters: Rc<RefCell<Vec<(&'static str, u64)>>> = Rc::default();
+        let counters: Rc<RefCell<photocraft_ui_egui::perf_counters::PerfCounters>> = Rc::default();
+        // The counters are always readable (a copy of a few integers per frame); frame records
+        // only with `?perf=1`.
+        expose(records.clone(), counters.clone(), debug);
         if debug {
-            expose(records.clone(), counters.clone());
             log::info!("photocraft-web: frame timing on (?perf=1): photocraftPerf.take(), photocraftPerf.counters()");
         }
         Self {
@@ -211,8 +213,8 @@ impl FramePerf {
             frame.megapixels = app.session.active().map(|st| telemetry::megapixels(st.doc.size.width, st.doc.size.height));
             frame.layers = app.session.active().map(|st| layer_count(&st.doc.layers));
         }
+        self.counters.borrow_mut().clone_from(&app.perf_counters);
         if self.debug {
-            *self.counters.borrow_mut() = app.perf_counters.snapshot();
             let fence: GpuFence = Arc::new(AtomicU64::new(u64::MAX));
             let done = fence.clone();
             let t0 = page_now();
@@ -270,7 +272,7 @@ impl FramePerf {
         if frame.key != self.gesture_key {
             self.report_gesture();
             self.gesture_key = frame.key.clone();
-            self.counters_at_start = self.counters.borrow().clone();
+            self.counters_at_start = self.counters.borrow().snapshot();
         }
         if frame.key.is_some()
             && let Some(ms) = total_ms
@@ -300,7 +302,7 @@ impl FramePerf {
         let worst = frames.iter().max_by(|a, b| a.ms.total_cmp(&b.ms)).map(|f| {
             json!({"ms": round2(f.ms), "in": round2(f.parts.input), "logic": round2(f.parts.logic), "ui": round2(f.parts.ui), "paint": round2(f.parts.paint)})
         });
-        let now = self.counters.borrow().clone();
+        let now = self.counters.borrow().snapshot();
         let work: serde_json::Map<String, serde_json::Value> = now
             .iter()
             .filter_map(|(k, v)| {
@@ -352,17 +354,24 @@ fn round2(v: f64) -> f64 {
 }
 
 /// `photocraftPerf.take()` on the page: the recorded frames since the last call, as JSON;
-/// `photocraftPerf.counters()`: the app's work counters (monotonic), as JSON.
-fn expose(records: Records, counters: Rc<RefCell<Vec<(&'static str, u64)>>>) {
+/// `photocraftPerf.counters()`: the app's work counters (monotonic) as an object, always (also
+/// without `?perf=1`, where `take()` returns no frames).
+fn expose(records: Records, counters: Rc<RefCell<photocraft_ui_egui::perf_counters::PerfCounters>>, debug: bool) {
     let Some(window) = web_sys::window() else { return };
     let api = js_sys::Object::new();
     let take = Closure::<dyn Fn() -> String>::new(move || {
+        if !debug {
+            return "[]".to_string();
+        }
         let taken = std::mem::take(&mut *records.borrow_mut());
         serde_json::Value::Array(taken.iter().map(|r| r.borrow().clone()).collect()).to_string()
     });
-    let read = Closure::<dyn Fn() -> String>::new(move || {
-        let map: serde_json::Map<String, serde_json::Value> = counters.borrow().iter().map(|(k, v)| ((*k).to_string(), json!(v))).collect();
-        serde_json::Value::Object(map).to_string()
+    let read = Closure::<dyn Fn() -> JsValue>::new(move || {
+        let out = js_sys::Object::new();
+        for (k, v) in counters.borrow().snapshot() {
+            let _ = js_sys::Reflect::set(&out, &JsValue::from_str(k), &JsValue::from_f64(v as f64));
+        }
+        out.into()
     });
     if js_sys::Reflect::set(&api, &JsValue::from_str("take"), &take.into_js_value()).is_ok()
         && js_sys::Reflect::set(&api, &JsValue::from_str("counters"), &read.into_js_value()).is_ok()
