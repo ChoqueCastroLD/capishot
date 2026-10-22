@@ -3820,3 +3820,4 @@ curves	Smooth	매끄럽게
 	Good fills with a smaller download.	더 작은 다운로드로 좋은 채우기.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	프롬프트로 정밀하게 채우기, GPU에서 몇 초 만에 3가지.
 	Needs a GPU	GPU 필요
+	The most detail: many steps with guidance, slow, for a strong GPU.	가장 정밀함: 가이던스와 많은 단계, 느림, 강력한 GPU용.

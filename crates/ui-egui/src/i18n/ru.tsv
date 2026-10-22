@@ -3608,3 +3608,4 @@ curves	Smooth	Сгладить
 	Good fills with a smaller download.	Хорошие заливки при меньшей загрузке.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Детальные заливки по запросу: три варианта за секунды на GPU.
 	Needs a GPU	Нужен GPU
+	The most detail: many steps with guidance, slow, for a strong GPU.	Максимум деталей: много шагов с подсказкой, медленно, для мощного GPU.

@@ -115,6 +115,45 @@ pub struct GpuCanvas {
     health: photocraft_gpu::DeviceHealth,
     /// Paces [`GpuCanvas::catch_up`]'s full-size refinement by GPU completion.
     refine: RefinePacer,
+    /// Composites submitted and completed (see [`GpuCanvas::busy`]).
+    pace: CompositePacer,
+}
+
+/// At most one document composite queued on the GPU: while one runs, the next frame's edit is
+/// left for later ([`GpuCanvas::defer`]) instead of queueing behind it, so the frame that does
+/// composite shows the latest input (a GPU-bound page otherwise falls frames behind the pointer).
+#[derive(Clone, Default)]
+struct CompositePacer {
+    submitted: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    done: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// When the last one was submitted ([`now_ms`] bits).
+    at: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Whether the canvas leaves an edit for the next frame while the last composite still runs
+/// (`CompositePacer`). Off: on WebGL the completion callbacks arrive late, and deferring stalled
+/// brush strokes for seconds (headless SwiftShader: 2 frames per stroke instead of 10).
+pub const PACE_COMPOSITES: bool = false;
+
+/// How long a composite may stay unfinished before the next goes anyway (a lost completion
+/// callback never stalls the canvas).
+pub const BUSY_LIMIT_MS: f64 = 250.0;
+
+impl CompositePacer {
+    fn submitted(&self, queue: &wgpu::Queue) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let token = self.submitted.fetch_add(1, Relaxed) + 1;
+        self.at.store(now_ms().to_bits(), Relaxed);
+        let done = self.done.clone();
+        queue.on_submitted_work_done(move || {
+            done.fetch_max(token, Relaxed);
+        });
+    }
+
+    fn busy(&self) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.done.load(Relaxed) < self.submitted.load(Relaxed) && now_ms() - f64::from_bits(self.at.load(Relaxed)) < BUSY_LIMIT_MS
+    }
 }
 
 /// One refinement piece in flight at a time; the work per piece (output pixels × passes) adapts
@@ -217,7 +256,7 @@ impl GpuCanvas {
         res.separate_mip_targets = rs.adapter.get_info().backend == wgpu::Backend::Dx12;
         rs.renderer.write().callback_resources.insert(stored(res));
         log::info!("gpu canvas: target {:?}, max texture {max}, tile {tile}, 16F canvas {high:?}", rs.target_format);
-        Self { rs: rs.clone(), tile, high, health, refine: RefinePacer::new() }
+        Self { rs: rs.clone(), tile, high, health, refine: RefinePacer::new(), pace: CompositePacer::default() }
     }
 
     /// Run `done` once the GPU has finished everything submitted so far. False once the device
@@ -623,6 +662,7 @@ impl GpuCanvas {
         };
         if result.is_ok() {
             d.regenerate_mips_from(device, queue, res, [region.x0 as u32, region.y0 as u32, region.x1 as u32, region.y1 as u32], level);
+            self.pace.submitted(queue);
             if std::env::var_os("PHOTOCRAFT_GPU_SYNC").is_some() {
                 // Benchmarking: wait for the GPU so callers can time the whole refresh.
                 #[cfg(not(target_arch = "wasm32"))]
@@ -770,6 +810,11 @@ impl GpuCanvas {
         };
         let encode_srgb = display.is_some_and(|d| d.encode_srgb);
         let t0 = now_ms();
+        if PACE_COMPOSITES && !urgent.is_empty() && self.busy() {
+            // Wait for the composite on the GPU (its completion asks for the frame).
+            self.wake_when_done(ctx);
+            return out;
+        }
         for r in urgent {
             let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
             match self.composite_lod(doc, r, encode_srgb, level, true) {
@@ -830,6 +875,29 @@ impl GpuCanvas {
     /// catches up on them before it draws.
     pub fn view_floor(&self, key: u64, visible: photocraft_geom::Rect) -> f32 {
         self.with_doc(key, |_, d| d.stale().floor(visible)).unwrap_or(0) as f32
+    }
+
+    /// Whether a document composite is still running on the GPU (submitted less than
+    /// [`BUSY_LIMIT_MS`] ago and not finished): callers then [`GpuCanvas::defer`] the next edit.
+    pub fn busy(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = self.rs.device.poll(wgpu::PollType::Poll);
+        self.pace.busy()
+    }
+
+    /// Leave `r` of document `key`'s texture out of date: [`GpuCanvas::catch_up`] composites it
+    /// on a later frame (at once where the view shows it).
+    pub fn defer(&self, key: u64, r: photocraft_geom::Rect) {
+        self.with_doc(key, |_, d| d.stale().defer(r));
+    }
+
+    /// Ask `ctx` for a frame once the GPU has finished everything queued so far.
+    pub fn wake_when_done(&self, ctx: &egui::Context) {
+        #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+        let wake = send_wrapper::SendWrapper::new(ctx.clone());
+        #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+        let wake = ctx.clone();
+        self.on_done(move || wake.request_repaint());
     }
 
     /// Whether document `key`'s texture has out-of-date regions (tests and diagnostics).
@@ -1462,7 +1530,7 @@ pub const LOD_MIN_PX: u64 = 512 * 512;
 
 /// Work (output pixels × passes) of the first full-size refinement piece; later pieces adapt to
 /// the GPU time the previous one took (`RefinePacer`).
-pub const REFINE_WORK: u64 = 8 << 20;
+pub const REFINE_WORK: u64 = 2 << 20;
 
 /// How long after the last reduced or deferred refresh full-size refinement starts (ms): a
 /// slider scrub or a Move drag keeps producing frames, and refining between them would only
@@ -1569,7 +1637,8 @@ impl Stale {
     pub(crate) fn next_piece(&self, visible: photocraft_geom::Rect, px: u64) -> Option<photocraft_geom::Rect> {
         let r = self.regions.iter().map(|e| e.0).max_by_key(|r| (!r.intersect(&visible).is_empty(), std::cmp::Reverse(r.y0)))?;
         let r = if r.intersect(&visible).is_empty() { r } else { r.intersect(&visible) };
-        let rows = (px / u64::from(r.width().max(1))).clamp(16, u64::from(r.height())) as i32;
+        // At least 16 rows, at most the region's (clamp would panic on a region under 16 rows).
+        let rows = (px / u64::from(r.width().max(1))).max(16).min(u64::from(r.height()).max(1)) as i32;
         Some(photocraft_geom::Rect::new(r.x0, r.y0, r.x1, r.y0.saturating_add(rows).min(r.y1)))
     }
 }
@@ -2741,6 +2810,22 @@ mod tests {
         let (x0, y0, x1, y1) = tile_screen_aabb(origin, scale, center, 1.0, 0.0, [0.0, 0.0, 10.0, 4.0]);
         assert!((x0 - origin[0]).abs() < 1e-4 && (y0 - origin[1]).abs() < 1e-4);
         assert!((x1 - (origin[0] + 20.0)).abs() < 1e-4 && (y1 - (origin[1] + 8.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn stale_pieces_of_thin_regions() {
+        use photocraft_geom::Rect;
+        let mut s = Stale::default();
+        // A region shorter than the minimum piece (16 rows) panicked in `clamp`.
+        s.mark(Rect::new(0, 0, 3000, 5), 2);
+        s.mark(Rect::new(10, 100, 11, 2000), 1);
+        let v = Rect::new(0, 0, 3000, 3000);
+        for _ in 0..10 {
+            let Some(p) = s.next_piece(v, 1 << 20) else { break };
+            assert!(!p.is_empty() && p.height() <= 1900, "{p:?}");
+            s.mark(p, 0);
+        }
+        assert!(s.is_empty());
     }
 
     #[test]

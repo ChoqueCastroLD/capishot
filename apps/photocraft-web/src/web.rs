@@ -138,6 +138,9 @@ pub fn start() {
             // Measurements: the GPU canvas as before pass fusion and level-of-detail refreshes.
             photocraft_ui_egui::gpu_canvas::set_reduced_refreshes(false);
         }
+        if q.split(['?', '&']).any(|kv| kv == "movecopy=1") {
+            photocraft_ui_egui::move_ui::set_move_in_place(false);
+        }
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
         if q.contains("webgl")

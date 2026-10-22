@@ -68,6 +68,10 @@ pub(crate) struct MovePreview {
     shown: Option<Arc<Document>>,
     /// Shows a floating selection (`select.float`): offsets are the piece's, from where it was cut.
     floating: bool,
+    /// `shown` is the unmoved document and the GPU canvas draws the moving layers at the offset
+    /// from their own pixels (`photocraft_gpu::Translated::in_place`): no per-frame copy of the
+    /// moved layers. Off for the CPU canvas, and for good once the GPU canvas fell back.
+    in_place: bool,
 }
 
 impl MovePreview {
@@ -137,13 +141,21 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
         let canvas = doc.bounds();
         let moving = with_descendants(&doc, &ids);
         let bounds = bounds.map(|b| moving.iter().filter_map(|id| shape_reach(doc.layer(*id)?, canvas)).fold(b, |acc, r| acc.union(&r)));
-        app.move_preview = Some(MovePreview { doc: doc_id, revision, ids, moving, bounds, canvas, offsets: Vec::new(), shown: None, floating: false });
+        let in_place = in_place_ok(app, &doc, &moving);
+        app.move_preview = Some(MovePreview { doc: doc_id, revision, ids, moving, bounds, canvas, offsets: Vec::new(), shown: None, floating: false, in_place });
     }
     let p = app.move_preview.as_mut()?;
     if offset == (0, 0) && p.offsets.is_empty() {
         return None;
     }
-    if p.offsets.last() != Some(&offset) {
+    if p.in_place && p.offsets.last() != Some(&offset) {
+        // The document as it is: the GPU canvas moves the layers (`gpu_translations`).
+        if p.shown.is_none() {
+            p.shown = Some(doc);
+        }
+        p.offsets.push(offset);
+        app.perf_counters.move_preview_reused += 1;
+    } else if p.offsets.last() != Some(&offset) {
         let t0 = crate::gpu_canvas::now_ms();
         // The last frame's preview, when nothing else holds it, is reused: only the moving layers
         // are copied again (`moved_into`), not the whole stack. Duotone previews are converted
@@ -176,6 +188,52 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
     Some((p.shown.clone()?, p.key()))
 }
 
+static IN_PLACE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Draw Move previews on the GPU canvas from the unmoved layers (default) or, off, from a moved
+/// copy every frame (measurements: the web app's `?movecopy=1`).
+pub fn set_move_in_place(on: bool) {
+    IN_PLACE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a Move drag of `moving` can be drawn from the unmoved layers: on the GPU canvas
+/// (not fallen back), not Duotone (displayed through its inks), every moving layer a raster
+/// layer the GPU can move in place (`photocraft_gpu::plan::movable_in_place`).
+fn in_place_ok(app: &PhotocraftApp, doc: &Document, moving: &[LayerId]) -> bool {
+    app.gpu_active()
+        && !app.move_in_place_off
+        // Debugging and A/B: moved copies as before.
+        && IN_PLACE.load(std::sync::atomic::Ordering::Relaxed)
+        && std::env::var_os("PHOTOCRAFT_MOVE_COPY").is_none()
+        && crate::gpu_canvas::reduced_refreshes()
+        && doc.mode != photocraft_color::ColorMode::Duotone
+        && !moving.is_empty()
+        // An unlinked mask stays where it is while the pixels move: drawn as a moved copy.
+        && moving.iter().all(|id| doc.layer(*id).is_some_and(|l| photocraft_gpu::plan::movable_in_place(l) && l.mask.as_ref().is_none_or(|m| m.linked)))
+}
+
+/// The GPU canvas didn't draw an in-place Move preview (it fell back to the CPU, which draws the
+/// document as it is): stop drawing previews in place and rebuild this one as a moved copy.
+/// Returns whether there was one to rebuild.
+pub(crate) fn in_place_failed(app: &mut PhotocraftApp) -> bool {
+    app.move_in_place_off = true;
+    match app.move_preview.as_mut() {
+        Some(p) if p.in_place => {
+            p.in_place = false;
+            p.shown = None;
+            p.offsets.clear();
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Whether document `idx`'s Move preview is drawn in place (see [`in_place_failed`]).
+pub(crate) fn drawn_in_place(app: &PhotocraftApp, idx: usize) -> bool {
+    let Some(st) = app.session.documents().get(idx) else { return false };
+    app.move_preview.as_ref().is_some_and(|p| p.in_place && p.doc == st.doc.id && p.revision == st.revision && !p.offsets.is_empty())
+}
+
 /// What the GPU canvas can draw of document `idx`'s Move preview from the layers' resident
 /// pages at the drag's offset (`photocraft_gpu::Translated`): the moving layers' pixels and
 /// linked masks as the document holds them, each with the copy the preview shows; or a floating
@@ -197,6 +255,18 @@ pub(crate) fn gpu_translations(app: &PhotocraftApp, idx: usize) -> Vec<photocraf
         return vec![photocraft_gpu::Translated { layer: id, mask: false, shown: photocraft_gpu::surface_fingerprint(moved), source: source.clone(), offset }];
     }
     let mut out = Vec::new();
+    if p.in_place {
+        for &id in &p.moving {
+            let Some(l) = st.doc.layer(id) else { continue };
+            if let Some(s) = l.surface() {
+                out.push(photocraft_gpu::Translated::in_place(id, false, s, offset));
+            }
+            if let Some(m) = l.mask.as_ref().filter(|m| m.linked) {
+                out.push(photocraft_gpu::Translated::in_place(id, true, &m.surface, offset));
+            }
+        }
+        return out;
+    }
     for &id in &p.moving {
         let (Some(before), Some(after)) = (st.doc.layer(id), shown.layer(id)) else { continue };
         if let (Some(source), Some(moved)) = (before.surface(), after.surface())
@@ -278,6 +348,7 @@ fn floating_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u
             offsets: Vec::new(),
             shown: None,
             floating: true,
+            in_place: false,
         });
     }
     if offset == (0, 0) && app.move_preview.as_ref().is_none_or(|p| p.offsets.is_empty()) {

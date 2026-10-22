@@ -715,6 +715,8 @@ pub struct PhotocraftApp {
     pub(crate) menu_cache: Option<menus::ItemCache>,
     /// Move tool drag shown live (`move_ui`).
     pub(crate) move_preview: Option<move_ui::MovePreview>,
+    /// The GPU canvas fell back while drawing a Move preview in place: draw moved copies.
+    pub(crate) move_in_place_off: bool,
     /// Move tool › Show Highlight on Rollover: the last hover answer (`move_hover`).
     pub(crate) move_hover: Option<move_hover::Hover>,
     /// Smart Guides distances shown with ⌘ held over the canvas: the last answer (`move_distance`).
@@ -1017,6 +1019,7 @@ impl PhotocraftApp {
             remove_trail: None,
             menu_cache: None,
             move_preview: None,
+            move_in_place_off: false,
             move_hover: None,
             move_distance: None,
             object_finder: None,

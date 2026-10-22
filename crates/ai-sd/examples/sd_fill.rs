@@ -25,7 +25,11 @@ fn main() {
     let get = |k: &str, d: &str| kv.get(k).cloned().unwrap_or_else(|| d.to_string());
     let sampler_name = get("sampler", "tcd");
     let gamma: f64 = get("gamma", "0.3").parse().unwrap();
-    let sampler = if sampler_name == "lcm" { Sampler::Lcm } else { Sampler::Tcd { gamma } };
+    let sampler = match sampler_name.as_str() {
+        "lcm" => Sampler::Lcm,
+        "ddim" => Sampler::Ddim,
+        _ => Sampler::Tcd { gamma },
+    };
     let lora = get("lora", &sampler_name);
     let (w, h) = (img.width() as usize, img.height() as usize);
     let rgb: Vec<f32> = img.as_raw().iter().map(|&v| f32::from(v) / 255.0).collect();

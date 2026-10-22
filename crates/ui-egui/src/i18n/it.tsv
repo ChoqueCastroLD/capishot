@@ -4758,3 +4758,4 @@ shape	Appearance	Aspetto
 	Good fills with a smaller download.	Buoni riempimenti con un download più piccolo.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Riempimenti dettagliati da un testo, tre varianti in pochi secondi su GPU.
 	Needs a GPU	Richiede GPU
+	The most detail: many steps with guidance, slow, for a strong GPU.	Il massimo dettaglio: molti passi con guida, lento, per una GPU potente.
