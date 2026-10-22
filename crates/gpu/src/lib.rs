@@ -1018,7 +1018,7 @@ impl Compositor {
     /// pixel: exact through level 2, a regular subsample above); effect maps, fills and patterns are sampled at the pixel's centre. The result
     /// differs from the mip-mapped full-size composite only by that resampling. The chunks
     /// handed to `sink` are in the level's coordinates ([`level_rect`] of the region, clipped
-    /// to [`level_bounds`]). Lower-stack reuse applies at full size only.
+    /// to [`level_bounds`]). Lower-stack reuse works per level (a change of level starts over).
     pub fn render_lod(
         &mut self,
         device: &wgpu::Device,
@@ -1111,7 +1111,8 @@ impl Compositor {
         // Moving layers change what the stack shows without changing the document: nothing at or
         // above their root unit may come from the lower-stack cache.
         let moved_root = (!moved.is_empty()).then(|| doc.layers.iter().position(|l| plan::layer_or_inside(l, &|k| moved.contains_key(&k.id)))).flatten();
-        let checkpoint = if flush && level == 0 { self.prefix.prepare(doc, &plan, moved_root) } else { None };
+        // Per level of detail: a drag composited reduced reuses the reduced lower stack too.
+        let checkpoint = if flush { self.prefix.prepare(doc, &plan, moved_root, level) } else { None };
 
         // Effect maps of whole regions first (they may render group shapes through sub-plans);
         // regions larger than the limit are built per cell below.
@@ -1166,7 +1167,7 @@ impl Compositor {
                 // render its whole chunk once, so the cache holds all of it and the dabs that
                 // follow there skip the lower stack.
                 let step = self.chunk as i32;
-                let canvas_cell = cr.intersect(&canvas);
+                let canvas_cell = level_rect(cr.intersect(&canvas), level).intersect(&lbounds);
                 for c in &mut chunks {
                     if !self.prefix.contains(*c) {
                         let (x0, y0) = (c.x0.div_euclid(step) * step, c.y0.div_euclid(step) * step);

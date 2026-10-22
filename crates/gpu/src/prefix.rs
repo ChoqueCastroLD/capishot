@@ -31,11 +31,13 @@ pub(crate) struct Prefix {
     bytes: u64,
     budget: u64,
     step: i32,
+    /// Level of detail the chunks are at (their rects are in its pixels).
+    level: u32,
 }
 
 impl Default for Prefix {
     fn default() -> Self {
-        Self { context: None, layers: Vec::new(), checkpoint: None, chunks: HashMap::new(), bytes: 0, budget: MAX_BYTES, step: 512 }
+        Self { context: None, layers: Vec::new(), checkpoint: None, chunks: HashMap::new(), bytes: 0, budget: MAX_BYTES, step: 512, level: 0 }
     }
 }
 
@@ -87,9 +89,14 @@ impl Prefix {
 
     /// The checkpoint to reuse or fill for `plan`; none at or above root layer `limit` (layers
     /// drawn moved from their unmoved pixels change the result without changing the document).
-    pub(crate) fn prepare(&mut self, doc: &Document, plan: &Plan<'_>, limit: Option<usize>) -> Option<Checkpoint> {
+    pub(crate) fn prepare(&mut self, doc: &Document, plan: &Plan<'_>, limit: Option<usize>, level: u32) -> Option<Checkpoint> {
         if self.budget == 0 {
             return None;
+        }
+        if level != self.level {
+            // Chunks of another level of detail: start over at this one.
+            self.clear();
+            self.level = level;
         }
         // Keeping every non-layer field makes new document inputs invalidate automatically.
         // Tile data is Arc-shared; shared Tile equality does not scan its pixel bytes.
