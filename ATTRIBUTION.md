@@ -115,6 +115,7 @@ restrictions bind every user (Help › Terms of Use…, with the licence text).
 | `docs/images/photocraft-*.jpg` | PhotoCraft screenshots | PhotoCraft contributors (UI) | Rendered offscreen with the `snapshot` example | MIT OR Apache-2.0 (UI); the artwork in each is public domain, listed below |
 | `docs/images/actions-layer-name.png` | Named Select Layer action step (synthetic blank document) | Willy Foo / PhotoCraft contributors | Rendered offscreen with the `snapshot` example | MIT OR Apache-2.0 |
 | `docs/images/preferences-apply-*.png` | Preferences before and after adding Apply (no artwork) | PhotoCraft contributors | PhotoCraft control-channel capture and offscreen `snapshot` example | MIT OR Apache-2.0 |
+| `docs/images/cpu-pixel-alignment/*.png` | CPU canvas pixel alignment, before and after #8321 | PhotoCraft contributors | Original synthetic noise rendered with the offscreen `snapshot` example; see the adjacent README | MIT OR Apache-2.0, adjacent `LICENSE-MIT` and `LICENSE-APACHE` |
 
 | `docs/images/undo-*-preferences.png` | Undo cache memory and scratch preferences | PhotoCraft contributors | Original offscreen app captures, blank document workspace | MIT OR Apache-2.0, adjacent `docs/images/LICENSE-MIT` and `LICENSE-APACHE` |
 | `docs/images/recovery/*.png` | PhotoCraft recovery validation screenshots (synthetic document) | PhotoCraft contributors | Original offscreen rendering, `snapshot` example | MIT OR Apache-2.0, adjacent license files |
