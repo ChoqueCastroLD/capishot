@@ -36,6 +36,8 @@ const LABEL: &str = "Generative Fill";
 pub const UNAVAILABLE: &str = "Generative Fill is not available in this build";
 /// Why it can't run on this device (phones, no GPU) until the light tiers land.
 pub const NEEDS_GPU: &str = "Generative Fill needs a desktop GPU with WebGPU for now; on this device use Edit › Clean with AI to remove things";
+/// Why it can't run with little memory.
+pub const LOW_MEMORY: &str = "Not enough memory for Generative Fill on this device (it needs about 8 GB); use Edit › Clean with AI to remove things";
 /// How much an empty-prompt fill re-draws Manga LaMa's result (variants differ, the background
 /// stays) and the smooth pre-fill when LaMa isn't downloaded.
 const LAMA_STRENGTH: f64 = 0.5;
@@ -90,8 +92,12 @@ pub fn tier_for(s: &Session, p: &Value) -> Result<Tier> {
         return Tier::from_id(q).ok_or_else(|| bad("`quality` must be auto, ultra, fast, standard or high"));
     }
     let profile = s.ai_profile();
+    // `navigator.deviceMemory` stops at 8: 8 means "8 GB or more". The model alone is 2.3 GB.
+    if profile.mobile || profile.memory_gb.is_some_and(|m| m < 7.5) {
+        return Err(EngineError::Other(LOW_MEMORY.into()));
+    }
     let gpu = device != "cpu" && !matches!(profile.gpu, GpuClass::None | GpuClass::Software);
-    if gpu && !profile.mobile {
+    if gpu {
         return Ok(Tier::Standard);
     }
     // The light tiers (Fast, Ultra) aren't shipped yet: say why instead of running for minutes.
@@ -173,6 +179,11 @@ fn plan(s: &mut Session, p: &Value) -> Result<Plan> {
     }
     let allow_download = opt_bool(p, "allowDownload", false)?;
     let unload = !crate::ai_cmds::keep_loaded(p, ID)?;
+    let f32 = match p.get("precision").and_then(Value::as_str) {
+        None | Some("auto") => false,
+        Some("f32") => true,
+        Some(_) => return Err(bad("`precision` must be auto or f32")),
+    };
     let cpu = p.get("device").and_then(Value::as_str) == Some("cpu");
     let threads = crate::ai_cmds::uint_param(p, "threads", 0, 64, ID)?.unwrap_or(0) as usize;
     let seed = match crate::ai_cmds::uint_param(p, "seed", 0, u64::from(u32::MAX), ID)? {
@@ -261,6 +272,7 @@ fn plan(s: &mut Session, p: &Value) -> Result<Plan> {
         cpu,
         threads,
         unload,
+        f32,
     };
     Ok(Plan { layer: id, fmt, region: region_doc, crop: c, gray, req, prompt: typed, english, lama })
 }
@@ -270,7 +282,20 @@ fn ready(s: &Session, tier: Tier, allow_download: bool) -> Result<Arc<dyn GenFil
     let svc = s.genfill.clone().ok_or_else(|| EngineError::Other(UNAVAILABLE.into()))?;
     match svc.model_state(tier) {
         ModelState::Ready | ModelState::Checking => Ok(svc),
-        ModelState::NeedsDownload { .. } if allow_download => Ok(svc),
+        // Downloads go through the AI Model Manager's queue (one file at a time, cancellable):
+        // `allowDownload` queues the tier's missing files there and asks to run again after.
+        ModelState::NeedsDownload { bytes } if allow_download => {
+            let store = s.ai_models().ok_or_else(|| EngineError::Other(not_downloaded(LABEL, bytes, "allowDownload")))?;
+            let files = photocraft_ai_sd::files::tier(tier).map(|f| f.files.clone()).unwrap_or_default();
+            for f in files.into_iter().filter(|f| !store.status(f).is_downloaded() && !store.status(f).is_pending()) {
+                store.download(f).map_err(|e| EngineError::Other(format!("{LABEL}: {e}")))?;
+            }
+            Err(EngineError::Other(format!(
+                "{LABEL} {} ({:.1} MB): its files are queued in Window › AI Models…; run it again when they are done",
+                crate::ai_models_cmds::NOT_DOWNLOADED,
+                bytes as f64 / 1e6
+            )))
+        }
         ModelState::NeedsDownload { bytes } => Err(EngineError::Other(not_downloaded(LABEL, bytes, "allowDownload"))),
         ModelState::Unavailable(why) => Err(EngineError::Other(why)),
     }
@@ -469,7 +494,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Generative Fill…",
             menu: &["Edit"],
             shortcut: None,
-            params: r#"{"prompt"?: text (English, Spanish or Portuguese; empty = fill with background), "negative"?: text, "variants"?: 1..4 (default 3), "seed"?: 0..4294967295 (default: new each run), "steps"?: 1..50 (default: the tier's), "strength"?: 0.05..1 (1 = ignore what is under the selection), "guidance"?: 0..30 (0 = the tier's), "quality"?: "auto"|"ultra"|"fast"|"standard"|"high", "device"?: "auto"|"gpu"|"cpu", "side"?: 256..1024 working size (multiple of 64), "layer"?: layer id, "allowDownload"?: bool (fetch the model files, about 2.2 GB, when missing), "keepLoaded"?: bool, "threads"?: 0..64} -> {"layer", "variants", "selected", "region": [x,y,w,h], "prompt", "english", "seed", "tier", "device"}. Fills the selection with new content on a new masked layer. Background job, one undo step. Refuses sexual content involving minors and clearly illegal requests."#,
+            params: r#"{"prompt"?: text (English, Spanish or Portuguese; empty = fill with background), "negative"?: text, "variants"?: 1..4 (default 3), "seed"?: 0..4294967295 (default: new each run), "steps"?: 1..50 (default: the tier's), "strength"?: 0.05..1 (1 = ignore what is under the selection), "guidance"?: 0..30 (0 = the tier's), "quality"?: "auto"|"ultra"|"fast"|"standard"|"high", "device"?: "auto"|"gpu"|"cpu", "side"?: 256..1024 working size (multiple of 64), "layer"?: layer id, "allowDownload"?: bool (queue the missing model files, about 2.3 GB, in the AI Model Manager; run again when done), "keepLoaded"?: bool, "threads"?: 0..64, "precision"?: "auto"|"f32" (f32: run without GPU 16-bit float support, about 4.5 GB of GPU memory)} -> {"layer", "variants", "selected", "region": [x,y,w,h], "prompt", "english", "seed", "tier", "device"}. Fills the selection with new content on a new masked layer. Background job, one undo step. Refuses sexual content involving minors and clearly illegal requests."#,
             enabled,
             run: generative_fill,
             journal: true,

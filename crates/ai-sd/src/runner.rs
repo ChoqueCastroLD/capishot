@@ -228,15 +228,31 @@ pub async fn generate(m: &Models, p: &Params, step: &mut dyn FnMut(usize, usize)
         (Some(d), None) => Decoder::Full(d),
         (None, None) => return Err(SdError::Weights("no image decoder loaded".into())),
     };
-    let img = decode(decoder, g.latents())?;
-    let [b, c, h, w] = img.dims();
-    let data = img.cast(DType::F32).permute([0, 2, 3, 1]).into_data_async().await.map_err(|e| SdError::Device(format!("{e:?}")))?;
-    let v = data.try_into_vec::<f32>().map_err(|e| SdError::Device(format!("read-back: {e:?}")))?;
-    let n = h * w * c;
-    if v.len() != b * n {
-        return Err(SdError::Device(format!("read back {} values, expected {}", v.len(), b * n)));
+    let lat = g.latents();
+    let [b, _, lh, lw] = lat.dims();
+    let mut out = Vec::with_capacity(b);
+    for i in 0..b {
+        let one = lat.clone().slice([i..i + 1, 0..crate::LATENT_CHANNELS, 0..lh, 0..lw]);
+        let img = decode(decoder_ref(&decoder), one)?;
+        let [_, c, h, w] = img.dims();
+        let data = img.cast(DType::F32).permute([0, 2, 3, 1]).into_data_async().await.map_err(|e| SdError::Device(format!("{e:?}")))?;
+        let v = data.try_into_vec::<f32>().map_err(|e| SdError::Device(format!("read-back: {e:?}")))?;
+        if v.len() != h * w * c {
+            return Err(SdError::Device(format!("read back {} values, expected {}", v.len(), h * w * c)));
+        }
+        out.push(v);
+        if !step(total, total) {
+            return Err(SdError::Cancelled);
+        }
     }
-    Ok(v.chunks_exact(n).map(<[f32]>::to_vec).collect())
+    Ok(out)
+}
+
+fn decoder_ref<'a>(d: &Decoder<'a>) -> Decoder<'a> {
+    match d {
+        Decoder::Full(x) => Decoder::Full(x),
+        Decoder::Tiny(x) => Decoder::Tiny(x),
+    }
 }
 
 async fn sync(t: Tensor<4>) -> Result<()> {

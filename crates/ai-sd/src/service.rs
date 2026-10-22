@@ -88,6 +88,9 @@ pub struct Request {
     pub cpu: bool,
     pub threads: usize,
     pub unload: bool,
+    /// Compute in 32-bit floats on the GPU even without `shader-f16` support (Advanced; needs
+    /// about 4.5 GB of GPU memory).
+    pub f32: bool,
 }
 
 /// Receives one interleaved RGB image (`width·height·3`, 0..=1) per variant.

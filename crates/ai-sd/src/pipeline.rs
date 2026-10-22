@@ -154,11 +154,16 @@ impl Generation {
         if !schedule.from_noise || blended {
             images.push(store.tensor(full, [1, 3, h, w])?);
         }
-        let imgs = Tensor::cat(images, 0);
-        let lat_all = match encoder {
-            Encoder::Full(e) => e.forward(imgs)?,
-            Encoder::Tiny(e) => e.forward(imgs)?,
-        };
+        // One image at a time: a 512 px image's first VAE level is 128 MB in f16, at the edge of
+        // WebGPU's default storage-binding limit.
+        let mut lats = Vec::with_capacity(images.len());
+        for img in images {
+            lats.push(match &encoder {
+                Encoder::Full(e) => e.forward(img)?,
+                Encoder::Tiny(e) => e.forward(img)?,
+            });
+        }
+        let lat_all = Tensor::cat(lats, 0);
         let masked_lat = lat_all.clone().slice([0..1, 0..LATENT_CHANNELS, 0..lh, 0..lw]);
         let mask_t = store.tensor(m, [1, 1, h, w])?;
         let mask_lat = interpolate(mask_t, InterpolateOptions::new(InterpolateMode::Nearest).with_output_size([lh, lw]));
@@ -256,7 +261,8 @@ fn images_len(t: &Tensor<4>) -> usize {
     t.dims()[0]
 }
 
-/// Decodes latents to `[B, 3, H, W]` images in 0..1 (clamped).
+/// Decodes latents to `[B, 3, H, W]` images in 0..1 (clamped). Callers decode one variant at a
+/// time on the GPU (the full VAE's last level is 64 MB per 512 px image in f16).
 pub fn decode(decoder: Decoder<'_>, latents: Tensor<4>) -> Result<Tensor<4>> {
     let img = match decoder {
         Decoder::Full(d) => (d.forward(latents)? + 1.0) / 2.0,

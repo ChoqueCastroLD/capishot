@@ -575,7 +575,7 @@ thread_local! {
     static GENFILL: RefCell<Option<(photocraft_ai_sd::service::Tier, Rc<photocraft_ai_sd::runner::Models>)>> = const { RefCell::new(None) };
 }
 
-/// `{type: "genfill", id, tier, base, download, cpu, unload, width, height, rgb, mask, prompt,
+/// `{type: "genfill", id, tier, base, cpu, unload, width, height, rgb, mask, prompt,
 /// negative, variants, seed, steps, strength, guidance}` → `{type: "gf-done", id, width, height,
 /// variants: [Float32Array…], device}` (interleaved RGB per variant, transferred) or `error`.
 async fn genfill(msg: JsValue) {
@@ -616,7 +616,6 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
     let tier = get(msg, "tier").as_string().and_then(|t| Tier::from_id(&t)).ok_or("bad tier")?;
     let files = photocraft_ai_sd::files::tier(tier).ok_or_else(|| format!("the {} tier isn't available yet", tier.id()))?;
     let base = get(msg, "base").as_string().unwrap_or_default();
-    let download = get(msg, "download").as_bool().unwrap_or(false);
     let cpu = get(msg, "cpu").as_bool().unwrap_or(false);
     let num = |k: &str| get(msg, k).as_f64().filter(|v| v.is_finite() && *v >= 0.0);
     let dim = |k: &str| num(k).filter(|v| *v >= 1.0).map(|v| v as usize).ok_or_else(|| format!("bad {k}"));
@@ -625,7 +624,7 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
     let (rgb, mask) = (arr("rgb")?, arr("mask")?);
     let text = |k: &str| get(msg, k).as_string().unwrap_or_default();
     let mut p = Posting::new(id);
-    let reuse = GENFILL.with(|g| g.borrow().clone()).filter(|(t, _)| *t == tier);
+    let reuse = GENFILL.with(|g| g.borrow().clone()).filter(|(t, m)| *t == tier && m.scratch.dtype() == if get(msg, "f32").as_bool().unwrap_or(false) { photocraft_ai_sd::burn::tensor::DType::F32 } else { m.scratch.dtype() });
     let models = match reuse {
         Some((_, m)) => m,
         None => {
@@ -634,21 +633,17 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
             if rt.accel() != photocraft_ai::runtime::Accel::Gpu {
                 return Err("Generative Fill needs WebGPU (no usable GPU here); use Clean with AI instead".into());
             }
-            let dtype = precision(rt.device(), false);
+            let force_f32 = get(msg, "f32").as_bool().unwrap_or(false);
+            let dtype = if force_f32 { photocraft_ai_sd::burn::tensor::DType::F32 } else { precision(rt.device(), false) };
+            // f32 weights would need 4.5 GB of GPU memory: refuse unless asked for (Advanced).
+            if dtype != photocraft_ai_sd::burn::tensor::DType::F16 && !force_f32 {
+                return Err("Generative Fill needs a GPU with 16-bit float shaders (WebGPU shader-f16), which this browser or GPU doesn't offer; use Clean with AI instead".into());
+            }
             let mut loader = Loader::new(rt.device(), dtype).map_err(|e| e.to_string())?;
             let total: u64 = files.bytes().max(1);
             let mut done = 0u64;
+            // Files come from Cache Storage only (the AI Model Manager downloads them).
             for &f in &files.files {
-                if download && !is_cached(f, &base).await {
-                    let status = format!("Downloading {}", f.title);
-                    let start = done;
-                    let url = f.url(&base);
-                    let blob =
-                        fetch_verified(&url, f, &mut |d, _| p.send(0.15 * (start + d) as f32 / total as f32, &status)).await.map_err(|e| e.to_string())?;
-                    if let Some(cache) = open_cache().await {
-                        store(&cache, &url, f, &blob).await.map_err(|e| format!("couldn't store {}: {e}", f.title))?;
-                    }
-                }
                 let start = done;
                 stream_into(&mut loader, f, &base, &mut |d| p.send(0.15 * (start + d) as f32 / total as f32, "Loading Generative Fill")).await?;
                 done += f.bytes;
@@ -673,10 +668,11 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
         strength: num("strength").unwrap_or(1.0),
         guidance: num("guidance").unwrap_or(0.0) as f32,
         tier,
-        allow_download: download,
+        allow_download: false,
         cpu,
         threads: 0,
         unload: false,
+        f32: false,
     };
     let params = photocraft_ai_sd::runner::params(&req, &models);
     let total = params.steps.max(1) as f32;
@@ -692,13 +688,6 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
         GENFILL.with(|g| *g.borrow_mut() = None);
     }
     Ok((out?, w, h, p.device))
-}
-
-/// Whether `model`'s file is in Cache Storage.
-#[cfg(not(target_feature = "atomics"))]
-async fn is_cached(model: &ModelInfo, base: &str) -> bool {
-    let Some(cache) = open_cache().await else { return false };
-    matches!(JsFuture::from(cache.match_with_str(&model.url(base))).await, Ok(v) if !v.is_undefined() && !v.is_null())
 }
 
 /// Streams one cached file into `loader` chunk by chunk (never whole in the wasm heap), hashing
