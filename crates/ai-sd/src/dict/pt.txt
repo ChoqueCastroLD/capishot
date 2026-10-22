@@ -1,0 +1,723 @@
+# Portuguese -> English visual vocabulary for Generative Fill prompts (Capishot's own list).
+# key|english|pos   pos: n noun (default), a adjective, x other (empty english = dropped)
+o||x
+os||x
+as||x
+um||x
+uma||x
+uns|some|x
+umas|some|x
+ao|to the|x
+do|of the|x
+da|of the|x
+dos|of the|x
+das|of the|x
+de|of|x
+com|with|x
+sem|without|x
+em|in|x
+no|in the|x
+na|in the|x
+nos|in the|x
+nas|in the|x
+num|in a|x
+numa|in a|x
+sobre|on|x
+em cima de|on top of|x
+embaixo de|under|x
+debaixo de|under|x
+sob|under|x
+atras de|behind|x
+na frente de|in front of|x
+ao lado de|next to|x
+entre|between|x
+perto de|near|x
+longe|far|x
+dentro de|inside|x
+fora de|outside|x
+ao redor de|around|x
+para|for|x
+pelo|through the|x
+pela|through the|x
+e|and|x
+ou|or|x
+mas|but|x
+muito|very|x
+muitos|many|a
+muitas|many|a
+mais|more|x
+menos|less|x
+que||x
+como|like|x
+alguns|some|a
+algumas|some|a
+varios|several|a
+todo|all|a
+cada|each|a
+outro|another|a
+seu|its|x
+sua|its|x
+dois|two|a
+duas|two|a
+tres|three|a
+quatro|four|a
+cinco|five|a
+seis|six|a
+sete|seven|a
+oito|eight|a
+nove|nine|a
+dez|ten|a
+cem|hundred|a
+mil|thousand|a
+a noite|at night|x
+de noite|at night|x
+de dia|during the day|x
+ao por do sol|at sunset|x
+ao amanhecer|at dawn|x
+na chuva|in the rain|x
+no fundo|in the background|x
+ao fundo|in the background|x
+ao longe|in the distance|x
+em primeiro plano|in the foreground|x
+primeiro plano|close-up
+luz da lua|moonlight
+luz do sol|sunlight
+por do sol|sunset
+nascer do sol|sunrise
+ceu noturno|night sky
+ceu estrelado|starry sky
+via lactea|milky way
+arco iris|rainbow
+fogos de artificio|fireworks
+floco de neve|snowflake
+flocos de neve|snowflakes
+folhas secas|dry leaves
+flor de cerejeira|cherry blossom
+flores de cerejeira|cherry blossoms
+torre de toquio|tokyo tower
+monte fuji|mount fuji
+faixa de pedestres|crosswalk
+semaforo|traffic light
+poste de luz|street lamp
+fios eletricos|power lines
+maquina de venda|vending machine
+loja de conveniencia|convenience store
+estacao de trem|train station
+ponto de onibus|bus stop
+sala de aula|classroom
+sala de estar|living room
+cabelo longo|long hair
+cabelo comprido|long hair
+cabelo curto|short hair
+olhos azuis|blue eyes
+olhos vermelhos|red eyes
+olhos verdes|green eyes
+preto e branco|black and white
+estilo anime|anime style
+estilo manga|manga style
+alta qualidade|high quality
+muito detalhado|highly detailed
+retícula|screentone
+reticula|screentone
+linhas de velocidade|speed lines
+linhas de acao|action lines
+balao de fala|speech bubble
+quadrinho|panel
+rabo de cavalo|ponytail
+maria chiquinha|twin tails
+ceu|sky
+nuvem|cloud
+sol|sun
+lua|moon
+estrela|star
+chuva|rain
+neve|snow
+nevoa|fog
+neblina|mist
+bruma|haze
+tempestade|storm
+raio|lightning
+relampago|lightning
+vento|wind
+arco-iris|rainbow
+entardecer|sunset
+amanhecer|dawn
+anoitecer|dusk
+crepusculo|twilight
+noite|night
+dia|day
+manha|morning
+tarde|afternoon
+inverno|winter
+verao|summer
+outono|autumn
+primavera|spring
+luz|light
+sombra|shadow
+escuridao|darkness
+reflexo|reflection
+brilho|glow
+faisca|spark
+fumaca|smoke
+fogo|fire
+chama|flame
+explosao|explosion
+poeira|dust
+vapor|steam
+bolha|bubble
+agua|water
+mar|sea
+oceano|ocean
+onda|wave
+praia|beach
+areia|sand
+costa|coast
+ilha|island
+rio|river
+lago|lake
+lagoa|pond
+cachoeira|waterfall
+cascata|waterfall
+fonte|fountain
+chafariz|fountain
+poca|puddle
+gelo|ice
+montanha|mountain
+morro|hill
+colina|hill
+vale|valley
+vulcao|volcano
+caverna|cave
+gruta|cave
+rocha|rock
+pedra|stone
+penhasco|cliff
+deserto|desert
+selva|jungle
+floresta|forest
+mata|woods
+campo|field
+prado|meadow
+jardim|garden
+parque|park
+caminho|path
+trilha|trail
+estrada|road
+rua|street
+beco|alley
+avenida|avenue
+ponte|bridge
+tunel|tunnel
+cidade|city
+vila|village
+aldeia|village
+bairro|neighborhood
+praca|square
+mercado|market
+loja|shop
+predio|building
+edificio|building
+arranha-ceu|skyscraper
+arranha ceu|skyscraper
+torre|tower
+castelo|castle
+palacio|palace
+templo|temple
+santuario|shrine
+igreja|church
+catedral|cathedral
+ruinas|ruins
+casa|house
+lar|home
+cabana|cabin
+fazenda|farm
+escola|school
+universidade|university
+hospital|hospital
+escritorio|office
+fabrica|factory
+estacao|station
+aeroporto|airport
+porto|harbor
+cais|pier
+farol|lighthouse
+telhado|roof
+teto|ceiling
+terraco|rooftop
+parede|wall
+muro|wall
+cerca|fence
+porta|door
+portao|gate
+janela|window
+varanda|balcony
+sacada|balcony
+escada|stairs
+corredor|hallway
+quarto|bedroom
+cozinha|kitchen
+banheiro|bathroom
+salao|hall
+biblioteca|library
+chao|floor
+piso|floor
+tapete|carpet
+cortina|curtain
+mesa|table
+escrivaninha|desk
+cadeira|chair
+sofa|sofa
+cama|bed
+travesseiro|pillow
+cobertor|blanket
+estante|bookshelf
+livro|book
+abajur|lamp
+lampada|lamp
+luminaria|lamp
+vela|candle
+relogio|clock
+espelho|mirror
+quadro|painting
+foto|photo
+fotografia|photograph
+tela|screen
+televisao|television
+computador|computer
+telefone|phone
+celular|phone
+xicara|cup
+copo|glass
+garrafa|bottle
+prato|plate
+comida|food
+pao|bread
+bolo|cake
+fruta|fruit
+maca|apple
+laranja|orange
+morango|strawberry
+banana|banana
+uva|grape
+melancia|watermelon
+arroz|rice
+cafe|coffee
+cha|tea
+caixa|box
+bolsa|bag
+mochila|backpack
+guarda-chuva|umbrella
+guarda chuva|umbrella
+sombrinha|parasol
+chave|key
+corrente|chain
+corda|rope
+papel|paper
+carta|letter
+mapa|map
+bandeira|flag
+placa|sign
+cartaz|poster
+outdoor|billboard
+lanterna|lantern
+lanterna de papel|paper lantern
+sino|bell
+espada|sword
+escudo|shield
+arco|bow
+flecha|arrow
+arma|weapon
+lanca|spear
+armadura|armor
+capacete|helmet
+coroa|crown
+anel|ring
+colar|necklace
+joia|jewel
+gema|gem
+cristal|crystal
+diamante|diamond
+ouro|gold
+prata|silver
+moeda|coin
+tesouro|treasure
+carro|car
+moto|motorcycle
+motocicleta|motorcycle
+bicicleta|bicycle
+onibus|bus
+caminhao|truck
+trem|train
+metro|subway
+aviao|airplane
+helicoptero|helicopter
+barco|boat
+veleiro|sailboat
+navio|ship
+nave espacial|spaceship
+foguete|rocket
+robo|robot
+maquina|machine
+arvore|tree
+galho|branch
+folha|leaf
+raiz|root
+tronco|trunk
+flor|flower
+rosa|rose
+girassol|sunflower
+tulipa|tulip
+lirio|lily
+lotus|lotus
+cerejeira|cherry tree
+pinheiro|pine tree
+bambu|bamboo
+palmeira|palm tree
+grama|grass
+relva|grass
+capim|grass
+musgo|moss
+arbusto|bush
+cerca viva|hedge
+trepadeira|vine
+cogumelo|mushroom
+semente|seed
+animal|animal
+cachorro|dog
+cao|dog
+filhote|puppy
+gato|cat
+gatinho|kitten
+passaro|bird
+ave|bird
+pombo|pigeon
+corvo|crow
+aguia|eagle
+coruja|owl
+pato|duck
+cisne|swan
+galinha|chicken
+peixe|fish
+tubarao|shark
+baleia|whale
+golfinho|dolphin
+polvo|octopus
+agua-viva|jellyfish
+tartaruga|turtle
+sapo|frog
+ra|frog
+cobra|snake
+serpente|snake
+lagarto|lizard
+dragao|dragon
+cavalo|horse
+vaca|cow
+porco|pig
+ovelha|sheep
+cabra|goat
+coelho|rabbit
+rato|mouse
+esquilo|squirrel
+raposa|fox
+lobo|wolf
+urso|bear
+panda|panda
+tigre|tiger
+leao|lion
+elefante|elephant
+girafa|giraffe
+macaco|monkey
+cervo|deer
+veado|deer
+borboleta|butterfly
+abelha|bee
+formiga|ant
+aranha|spider
+inseto|insect
+libelula|dragonfly
+vagalume|firefly
+pena|feather
+asa|wing
+cauda|tail
+rabo|tail
+chifre|horn
+garra|claw
+pessoa|person
+pessoas|people
+gente|people
+homem|man
+homens|men
+mulher|woman
+mulheres|women
+rapaz|young man
+moca|young woman
+garoto|boy
+garota|girl
+jovem|young
+idoso|old man
+idosa|old woman
+avo|grandparent
+familia|family
+casal|couple
+amigo|friend
+soldado|soldier
+guerreiro|warrior
+cavaleiro|knight
+samurai|samurai
+ninja|ninja
+mago|wizard
+bruxa|witch
+princesa|princess
+principe|prince
+rei|king
+rainha|queen
+anjo|angel
+demonio|demon
+fantasma|ghost
+monstro|monster
+zumbi|zombie
+vampiro|vampire
+fada|fairy
+sereia|mermaid
+estudante|student
+professor|teacher
+policial|police officer
+medico|doctor
+enfermeira|nurse
+cozinheiro|cook
+garcom|waiter
+cantor|singer
+multidao|crowd
+rosto|face
+cara|face
+cabeca|head
+cabelo|hair
+olho|eye
+boca|mouth
+sorriso|smile
+lagrima|tear
+nariz|nose
+orelha|ear
+mao|hand
+braco|arm
+perna|leg
+pe|foot
+dedo|finger
+corpo|body
+costas|back
+silhueta|silhouette
+roupa|clothes
+roupas|clothes
+vestido|dress
+saia|skirt
+camisa|shirt
+camiseta|t-shirt
+jaqueta|jacket
+casaco|coat
+moletom|hoodie
+calca|pants
+sapato|shoe
+bota|boot
+chapeu|hat
+cachecol|scarf
+luva|glove
+oculos|glasses
+uniforme|uniform
+uniforme escolar|school uniform
+quimono|kimono
+terno|suit
+gravata|tie
+laco|ribbon
+fita|ribbon
+mascara|mask
+capa|cape
+capuz|hood
+avental|apron
+vermelho|red|a
+azul|blue|a
+verde|green|a
+amarelo|yellow|a
+laranja|orange
+roxo|purple|a
+violeta|violet|a
+lilas|lilac|a
+rosa claro|light pink|a
+rosado|pink|a
+branco|white|a
+preto|black|a
+negro|black|a
+cinza|gray|a
+cinzento|gray|a
+marrom|brown|a
+castanho|brown|a
+dourado|golden|a
+prateado|silver|a
+azul claro|light blue|a
+turquesa|turquoise|a
+bege|beige|a
+claro|light|a
+escuro|dark|a
+brilhante|bright|a
+palido|pale|a
+colorido|colorful|a
+monocromatico|monochrome|a
+transparente|transparent|a
+grande|big|a
+enorme|huge|a
+gigante|giant|a
+pequeno|small|a
+minusculo|tiny|a
+alto|tall|a
+baixo|short|a
+longo|long|a
+comprido|long|a
+curto|short|a
+largo|wide|a
+estreito|narrow|a
+grosso|thick|a
+fino|thin|a
+magro|thin|a
+gordo|fat|a
+redondo|round|a
+quadrado|square|a
+pontudo|pointy|a
+novo|new|a
+velho|old|a
+antigo|ancient|a
+moderno|modern|a
+futurista|futuristic|a
+tradicional|traditional|a
+japones|japanese|a
+chines|chinese|a
+coreano|korean|a
+europeu|european|a
+medieval|medieval|a
+vitoriano|victorian|a
+bonito|pretty|a
+lindo|beautiful|a
+belo|beautiful|a
+fofo|cute|a
+feio|ugly|a
+elegante|elegant|a
+simples|simple|a
+limpo|clean|a
+sujo|dirty|a
+quebrado|broken|a
+abandonado|abandoned|a
+destruido|destroyed|a
+vazio|empty|a
+cheio|full|a
+aberto|open|a
+fechado|closed|a
+molhado|wet|a
+seco|dry|a
+quente|hot|a
+frio|cold|a
+calmo|calm|a
+tranquilo|peaceful|a
+triste|sad|a
+feliz|happy|a
+alegre|cheerful|a
+bravo|angry|a
+zangado|angry|a
+serio|serious|a
+assustado|scared|a
+surpreso|surprised|a
+cansado|tired|a
+dormindo|sleeping|a
+acordado|awake|a
+solitario|lonely|a
+misterioso|mysterious|a
+magico|magical|a
+mistico|mystical|a
+fantastico|fantasy|a
+epico|epic|a
+dramatico|dramatic|a
+romantico|romantic|a
+assustador|scary|a
+sinistro|sinister|a
+luminoso|luminous|a
+ensolarado|sunny|a
+nublado|cloudy|a
+chuvoso|rainy|a
+nevado|snowy|a
+nevando|snowing|a
+chovendo|raining|a
+brilhando|glowing|a
+flutuando|floating|a
+voando|flying|a
+correndo|running|a
+andando|walking|a
+caminhando|walking|a
+sentado|sitting|a
+em pe|standing|x
+deitado|lying|a
+pulando|jumping|a
+dancando|dancing|a
+cantando|singing|a
+lendo|reading|a
+escrevendo|writing|a
+comendo|eating|a
+bebendo|drinking|a
+chorando|crying|a
+rindo|laughing|a
+sorrindo|smiling|a
+olhando|looking|a
+lutando|fighting|a
+nadando|swimming|a
+caindo|falling|a
+queimando|burning|a
+de madeira|wooden|a
+de pedra|stone|a
+de metal|metal|a
+de vidro|glass|a
+de papel|paper|a
+madeira|wood
+metal|metal
+vidro|glass
+ferro|iron
+aco|steel
+tijolo|brick
+concreto|concrete
+cimento|concrete
+tecido|fabric
+seda|silk
+couro|leather
+estilo|style
+desenho|drawing
+ilustracao|illustration
+pintura|painting
+aquarela|watercolor
+oleo|oil painting
+esboco|sketch
+rascunho|sketch
+gravura|engraving
+tinta|ink
+linhas|lines
+linha|line
+textura|texture
+padrao|pattern
+degrade|gradient
+fundo|background
+cena|scene
+paisagem|landscape
+retrato|portrait
+vista|view
+panorama|panorama
+horizonte|horizon
+detalhe|detail
+detalhado|detailed|a
+realista|realistic|a
+fotorrealista|photorealistic|a
+cinematografico|cinematic|a
+qualidade|quality
+obra-prima|masterpiece
+obra prima|masterpiece
+anime|anime
+manga|manga
+quadrinhos|comic
+historia em quadrinhos|comic
+desenho animado|cartoon
+personagem|character
+nada|nothing
+liso|plain|a

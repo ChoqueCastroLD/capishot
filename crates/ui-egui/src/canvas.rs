@@ -3320,6 +3320,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         crate::layer_pick_ui::show(app, &ctx);
         let shown = app.ui.views.get(idx).cloned();
         crate::canvas_tool_menu::show(app, &ctx);
+        if app.session.active_index() == Some(idx) {
+            crate::genfill_ui::prompt_bar(app, &ctx);
+        }
         // A view menu row (Zoom In, Fit on Screen…) changed the camera: it wins over this
         // frame's copy, which is written back at the end.
         if let Some(now) = app.ui.views.get(idx)

@@ -2919,6 +2919,12 @@ cameraData	Lens	Objektiv
 	Download and delete AI models	KI-Modelle herunterladen und löschen
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Löscht ausgewählten Text oder Soundeffekte und zeichnet den Hintergrund mit KI auf einer neuen Ebene neu. Verwendet ein heruntergeladenes Modell (Fenster › KI-Modelle…).
 @plural	{n} more queued|{n} more queued	{n} weiteres in der Warteschlange|{n} weitere in der Warteschlange
+	Generative Fill	Generative Füllung
+	Generative Fill…	Generative Füllung…
+	Terms of Use…	Nutzungsbedingungen…
+	Variants:	Varianten:
+	Describe what to add (optional)	Beschreiben, was hinzukommen soll (optional)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Englisch, Spanisch oder Portugiesisch; leer füllt mit Hintergrund. Läuft auf diesem Gerät; mit dem Generieren akzeptieren Sie die Nutzungsbedingungen.
 	GPU couldn't run this model; used the CPU instead	Die GPU konnte dieses Modell nicht ausführen; stattdessen wurde die CPU verwendet
 	Menu	Menü
 	Max pixel density	Maximale Pixeldichte
