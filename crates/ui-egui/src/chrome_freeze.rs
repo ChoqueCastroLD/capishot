@@ -40,7 +40,9 @@ struct Snapshot {
     layer: LayerId,
     /// What the chrome's panels left for the canvas.
     area: Rect,
-    shapes: Vec<ClippedShape>,
+    /// What the chrome painted, per layer: its own `Ui`'s and every area it showed (toolbar and
+    /// dock flyouts, menus).
+    shapes: Vec<(LayerId, Vec<ClippedShape>)>,
     /// Textures the chrome loaded through egui's loaders (icons): asked for again on every
     /// repainted frame, or the texture loader frees the ones no frame used.
     loads: Vec<Load>,
@@ -74,7 +76,7 @@ fn key(app: &PhotocraftApp, ctx: &egui::Context, ui: &egui::Ui, chrome: bool) ->
 
 /// Whether this frame may repaint the chrome from its snapshot: a gesture on the canvas with
 /// the pointer over it, and nothing but pointer moves as input.
-fn may_reuse(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
+fn may_reuse(app: &PhotocraftApp, ctx: &egui::Context, layer: LayerId) -> bool {
     if app.canvas_gesture_tool(ctx).is_none() || app.ui.transform.is_some() || app.ui.text_edit.is_some() {
         return false;
     }
@@ -94,7 +96,12 @@ fn may_reuse(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
             && i.pointer.press_origin().is_some_and(|p| canvas.contains(p))
             && i.pointer.latest_pos().is_some_and(|p| canvas.contains(p))
             && i.events.iter().all(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_)))
-    }) && !ctx.any_popup_open()
+    }) && ctx
+        .input(|i| i.pointer.press_origin())
+        // The press landed on the chrome's own layer (the canvas), not on an area over it (a
+        // toolbar or dock flyout).
+        .is_some_and(|p| ctx.layer_id_at(p).is_none_or(|l| l == layer))
+        && !ctx.any_popup_open()
         && !ctx.text_edit_focused()
 }
 
@@ -105,7 +112,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, chrome: bool, draw: impl
     let ctx = ui.ctx().clone();
     let key = key(app, &ctx, ui, chrome);
     let layer = ui.layer_id();
-    if may_reuse(app, &ctx)
+    if may_reuse(app, &ctx, layer)
         && app.chrome_freeze.reused < REFRESH_FRAMES
         && let Some(s) = app.chrome_freeze.snap.as_ref().filter(|s| s.key == key && s.layer == layer)
     {
@@ -115,23 +122,45 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, chrome: bool, draw: impl
             let _ = ctx.try_load_texture(uri, *options, *hint);
         }
         ctx.graphics_mut(|g| {
-            let list = g.entry(layer);
-            for c in shapes {
-                list.add(c.clip_rect, c.shape);
+            for (id, shapes) in shapes {
+                let list = g.entry(id);
+                for c in shapes {
+                    list.add(c.clip_rect, c.shape);
+                }
             }
         });
         app.chrome_freeze.reused += 1;
         app.perf_counters.chrome_reused += 1;
         return area;
     }
-    let start = ctx.graphics(|g| g.get(layer).map_or(0, |l| l.all_entries().len()));
+    // Every layer the chrome may paint: its own and the areas it shows (known to egui from earlier
+    // frames, or added while it draws).
+    let layers = |ctx: &egui::Context| -> Vec<LayerId> {
+        let mut v: Vec<LayerId> = ctx.memory(|m| m.layer_ids().collect());
+        if !v.contains(&layer) {
+            v.push(layer);
+        }
+        v
+    };
+    let before = layers(&ctx);
+    let starts: Vec<(LayerId, usize)> = ctx.graphics(|g| before.into_iter().map(|l| (l, g.get(l).map_or(0, |p| p.all_entries().len()))).collect());
     install_recorder(&ctx);
     recording(|r| *r = Some(Vec::new()));
     draw(app, ui);
     let mut loads = recording(Option::take).unwrap_or_default();
     loads.sort_by(|a, b| a.0.cmp(&b.0));
     loads.dedup();
-    let shapes: Vec<ClippedShape> = ctx.graphics(|g| g.get(layer).map(|l| l.all_entries().skip(start).cloned().collect()).unwrap_or_default());
+    let after = layers(&ctx);
+    let shapes: Vec<(LayerId, Vec<ClippedShape>)> = ctx.graphics(|g| {
+        after
+            .into_iter()
+            .filter_map(|l| {
+                let start = starts.iter().find(|s| s.0 == l).map_or(0, |s| s.1);
+                let new: Vec<ClippedShape> = g.get(l)?.all_entries().skip(start).cloned().collect();
+                (!new.is_empty()).then_some((l, new))
+            })
+            .collect()
+    });
     app.chrome_freeze.reused = 0;
     let area = ui.available_rect_before_wrap();
     app.chrome_freeze.snap = Some(Snapshot { key, layer, area, shapes, loads });
