@@ -3363,6 +3363,12 @@ curves	Smooth	Сгладить
 	Download and delete AI models	Загрузка и удаление моделей ИИ
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Стирает выделенный текст или звукоподражания и перерисовывает фон с помощью ИИ на новом слое. Использует загруженную модель (Окно › Модели ИИ…).
 @plural	{n} more queued|{n} more queued	ещё {n} в очереди|ещё {n} в очереди|ещё {n} в очереди
+	Generative Fill	Генеративная заливка
+	Generative Fill…	Генеративная заливка…
+	Terms of Use…	Условия использования…
+	Variants:	Варианты:
+	Describe what to add (optional)	Опишите, что добавить (необязательно)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Английский, испанский или португальский; пустой запрос заполняет фоном. Работает на этом устройстве; генерируя, вы принимаете Условия использования.
 	GPU couldn't run this model; used the CPU instead	GPU не смог запустить эту модель; вместо него использован CPU
 	Menu	Меню
 	Max pixel density	Максимальная плотность пикселей

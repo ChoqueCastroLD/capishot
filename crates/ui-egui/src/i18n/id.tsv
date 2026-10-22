@@ -3418,6 +3418,12 @@ curves	Smooth	Haluskan
 	Download and delete AI models	Unduh dan hapus model AI
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Menghapus teks atau SFX yang dipilih dan menggambar ulang latar dengan AI di layer baru. Memakai model yang sudah diunduh (Jendela › Model AI…).
 @plural	{n} more queued|{n} more queued	{n} lagi dalam antrean
+	Generative Fill	Isian Generatif
+	Generative Fill…	Isian Generatif…
+	Terms of Use…	Ketentuan Penggunaan…
+	Variants:	Varian:
+	Describe what to add (optional)	Jelaskan apa yang ditambahkan (opsional)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Bahasa Inggris, Spanyol, atau Portugis; kosong berarti diisi latar. Berjalan di perangkat ini, dan dengan membuat Anda menerima Ketentuan Penggunaan.
 	GPU couldn't run this model; used the CPU instead	GPU tidak dapat menjalankan model ini; CPU digunakan sebagai gantinya
 	Menu	Menu
 	Max pixel density	Kepadatan piksel maksimum

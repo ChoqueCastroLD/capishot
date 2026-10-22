@@ -174,6 +174,7 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
             app.ui.status_error = true;
         }
     }
+    crate::genfill_ui::properties(app, ui, layer.id);
     match &layer.content {
         LayerContent::Text(_) => crate::type_tool::type_properties(app, ui),
         LayerContent::Shape(_) => {

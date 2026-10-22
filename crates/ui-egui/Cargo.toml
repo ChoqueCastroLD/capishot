@@ -31,6 +31,7 @@ photocraft-engine = { workspace = true }
 photocraft-ai = { workspace = true }
 # Clean with AI: Manga LaMa's model state, for the download consent prompt (no inference).
 photocraft-ai-lama = { workspace = true }
+photocraft-ai-sd = { workspace = true }
 # The TypeR panel reads the session's TypeR state (script lines, style library) to draw it.
 photocraft-typer = { workspace = true }
 photocraft-io = { workspace = true }

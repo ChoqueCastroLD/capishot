@@ -287,6 +287,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         outcome = Some(true);
                     }
                 }
+                DialogKind::About if fields.get(crate::genfill_ui::TERMS_FIELD).and_then(Value::as_bool) == Some(true) => {
+                    crate::genfill_ui::terms_body(app, ui)
+                }
                 DialogKind::About if fields.get("systemInfo").and_then(Value::as_bool) == Some(true) => {
                     let lines = crate::gpu_status::system_info_ui(app);
                     for l in &lines {
@@ -326,6 +329,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::channel_options_ui::owns_new_spot(&fields) => crate::channel_options_ui::new_spot_body(ui, &mut fields),
                 DialogKind::Command if crate::shape_dialog::owns(&fields) => crate::shape_dialog::body(app, ui, &mut fields),
                 DialogKind::Command if crate::delete_layer_prompt::owns(&fields) => crate::delete_layer_prompt::body(ui, &mut fields),
+                DialogKind::Command if crate::genfill_ui::owns(&fields) => {
+                    if crate::genfill_ui::body(app, ui, &mut fields) {
+                        outcome = Some(false);
+                    }
+                }
                 DialogKind::Command if crate::ai_upscale_ui::owns(&fields) => {
                     // "AI Models…" closes the dialog (it is modal) and opens the Manager.
                     if crate::ai_upscale_ui::body(app, ui, &mut fields) {
@@ -442,11 +450,12 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         } else {
                             crate::file_ui::ok_label(&d.fields)
                                 .or_else(|| crate::ai_upscale_ui::ok_label(&d.fields))
+                                .or_else(|| crate::genfill_ui::ok_label(&d.fields))
                                 .or_else(|| crate::ai_model_gate::ok_label(&d.fields))
                                 .unwrap_or(tl!("OK"))
                         };
                         // Dialogs that need an input first (a preset name, a selection) grey OK out.
-                        let can_ok = crate::crop_presets::can_confirm(app, &fields) && crate::stack_dialog::can_confirm(&fields);
+                        let can_ok = crate::crop_presets::can_confirm(app, &fields) && crate::stack_dialog::can_confirm(&fields) && crate::genfill_ui::can_confirm(app, &fields);
                         let ok = DialogButton::new(ButtonRole::Default, ok_label, 84.0).enabled(can_ok);
                         // Photoshop: holding Alt turns Cancel into Reset (the dialog stays open).
                         // Dialogs opt in via `dialog_alt_reset::supported` (per marker).
@@ -660,6 +669,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
         DialogKind::Command if crate::shape_dialog::owns(&d.fields) => crate::shape_dialog::confirm(app, &d.fields),
         DialogKind::Command if crate::delete_layer_prompt::owns(&d.fields) => crate::delete_layer_prompt::confirm(app, &d.fields),
         DialogKind::Command if crate::ai_upscale_ui::owns(&d.fields) => crate::ai_upscale_ui::confirm(app, &d.fields),
+        DialogKind::Command if crate::genfill_ui::owns(&d.fields) => crate::genfill_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::ai_options_ui::owns(&d.fields) => crate::ai_options_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::ai_model_gate::owns(&d.fields) => crate::ai_model_gate::confirm(app, &d.fields),
         DialogKind::Command if crate::disk_change_prompt::owns(&d.fields) => crate::disk_change_prompt::confirm(app, &d.fields),

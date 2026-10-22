@@ -45,6 +45,8 @@ photocraft-tablet = { path = "crates/tablet" }
 photocraft-ai = { path = "crates/ai" }
 # Manga LaMa inpainting; without features only its tiling half (the model runs elsewhere).
 photocraft-ai-lama = { path = "crates/ai-lama", default-features = false }
+# Generative Fill (SD 1.5 inpainting); without features only its prompt, crop, schedulers and service seam.
+photocraft-ai-sd = { path = "crates/ai-sd", default-features = false }
 
 # external
 # Capishot's PSD renderer (MIT): writes the merged image of PSDs and powers File › Export › Compile.

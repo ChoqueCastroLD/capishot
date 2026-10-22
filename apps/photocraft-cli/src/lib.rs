@@ -181,6 +181,10 @@ fn with_fonts_in(mut h: Headless, allow_online: bool, config_dir: Option<PathBuf
     if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(config_dir.as_deref()) {
         h.session.set_inpainter(Some(std::sync::Arc::new(i)));
     }
+    // `edit.generativeFill`: Stable Diffusion inpainting on this machine (feature `ai`), files from
+    // <config>/ai-models or CAPISHOT_SD_DIR.
+    #[cfg(feature = "ai")]
+    h.session.set_genfill(Some(std::sync::Arc::new(photocraft_ai_sd::native::NativeGenFill::locate(config_dir.as_deref()))));
     if let Some(dir) = config_dir {
         photocraft_fontfetch::attach(&mut h.session, &dir);
         // Image › Upscale with AI (`image.upscaleAi`), in-process (the `ai` feature).

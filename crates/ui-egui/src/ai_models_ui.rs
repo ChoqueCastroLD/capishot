@@ -136,6 +136,8 @@ enum Action {
     Recommended,
     All,
     DeleteAll,
+    /// Every missing file of a group (Generative Fill's parts).
+    Group(Vec<&'static str>),
 }
 
 /// Draws the window when it is open.
@@ -156,7 +158,10 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let missing = |list: &[&'static ModelInfo]| -> u64 {
         list.iter().filter(|m| rows.iter().any(|(r, s)| r.file == m.file && !s.is_downloaded() && !s.is_pending())).map(|m| m.bytes).sum()
     };
-    let (rec_missing, all_missing) = (missing(&recommended), missing(&models::files()));
+    // "Download all" means the tools' models; Generative Fill (2 GB) has its own button.
+    let tool_files: Vec<&'static ModelInfo> = models::files().into_iter().filter(|m| models::group(m) != Group::Generative).collect();
+    let gen_files: Vec<&'static ModelInfo> = models::files().into_iter().filter(|m| models::group(m) == Group::Generative).collect();
+    let (rec_missing, all_missing, gen_missing) = (missing(&recommended), missing(&tool_files), missing(&gen_files));
     let any_downloaded = rows.iter().any(|(_, s)| matches!(s, Status::Downloaded | Status::UpdateAvailable));
     let busy = rows.iter().any(|(_, s)| s.is_pending());
     let highlight = app.ui.ai_models.highlight.clone();
@@ -229,9 +234,22 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         ui.add_space(6.0);
         crate::widgets::hairline(ui);
         egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
-            for (group, title) in [(Group::Cleaning, tl!("Cleaning")), (Group::Upscaling, tl!("Upscaling"))] {
+            for (group, title) in [(Group::Cleaning, tl!("Cleaning")), (Group::Upscaling, tl!("Upscaling")), (Group::Generative, tl!("Generative Fill"))] {
                 ui.add_space(8.0);
-                ui.label(egui::RichText::new(title).font(crate::theme::semibold(13.0)));
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(title).font(crate::theme::semibold(13.0)));
+                    if group == Group::Generative && gen_missing > 0 && available.is_ok() {
+                        let label = format!("{} ({})", tl!("Download"), size(gen_missing));
+                        if crate::widgets::secondary_button(ui, &label, 0.0).clicked() {
+                            let ids = gen_files
+                                .iter()
+                                .filter(|m| rows.iter().any(|(r, s)| r.file == m.file && !s.is_downloaded() && !s.is_pending()))
+                                .map(|m| m.id)
+                                .collect();
+                            action = Some(Action::Group(ids));
+                        }
+                    }
+                });
                 ui.add_space(2.0);
                 for (m, status) in rows.iter().filter(|(m, _)| models::group(m) == group) {
                     let lit = highlight.as_deref() == Some(m.file);
@@ -265,7 +283,11 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         Some(Action::Cancel(id)) => act(app, ai_models_cmds::CANCEL, json!({"id": id})),
         Some(Action::Delete(id)) => act(app, ai_models_cmds::DELETE, json!({"id": id})),
         Some(Action::Recommended) => act(app, ai_models_cmds::DOWNLOAD, json!({"recommended": true})),
-        Some(Action::All) => act(app, ai_models_cmds::DOWNLOAD, json!({"all": true})),
+        Some(Action::All) => {
+            let ids: Vec<&str> = models::files().into_iter().filter(|m| models::group(m) != Group::Generative).map(|m| m.id).collect();
+            act(app, ai_models_cmds::DOWNLOAD, json!({"ids": ids}))
+        }
+        Some(Action::Group(ids)) => act(app, ai_models_cmds::DOWNLOAD, json!({"ids": ids})),
         Some(Action::DeleteAll) => act(app, ai_models_cmds::DELETE, json!({"all": true})),
         None => {}
     }
