@@ -1619,7 +1619,8 @@ impl Stale {
     pub(crate) fn next_piece(&self, visible: photocraft_geom::Rect, px: u64) -> Option<photocraft_geom::Rect> {
         let r = self.regions.iter().map(|e| e.0).max_by_key(|r| (!r.intersect(&visible).is_empty(), std::cmp::Reverse(r.y0)))?;
         let r = if r.intersect(&visible).is_empty() { r } else { r.intersect(&visible) };
-        let rows = (px / u64::from(r.width().max(1))).clamp(16, u64::from(r.height())) as i32;
+        // At least 16 rows, at most the region's (clamp would panic on a region under 16 rows).
+        let rows = (px / u64::from(r.width().max(1))).max(16).min(u64::from(r.height()).max(1)) as i32;
         Some(photocraft_geom::Rect::new(r.x0, r.y0, r.x1, r.y0.saturating_add(rows).min(r.y1)))
     }
 }
@@ -2791,6 +2792,22 @@ mod tests {
         let (x0, y0, x1, y1) = tile_screen_aabb(origin, scale, center, 1.0, 0.0, [0.0, 0.0, 10.0, 4.0]);
         assert!((x0 - origin[0]).abs() < 1e-4 && (y0 - origin[1]).abs() < 1e-4);
         assert!((x1 - (origin[0] + 20.0)).abs() < 1e-4 && (y1 - (origin[1] + 8.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn stale_pieces_of_thin_regions() {
+        use photocraft_geom::Rect;
+        let mut s = Stale::default();
+        // A region shorter than the minimum piece (16 rows) panicked in `clamp`.
+        s.mark(Rect::new(0, 0, 3000, 5), 2);
+        s.mark(Rect::new(10, 100, 11, 2000), 1);
+        let v = Rect::new(0, 0, 3000, 3000);
+        for _ in 0..10 {
+            let Some(p) = s.next_piece(v, 1 << 20) else { break };
+            assert!(!p.is_empty() && p.height() <= 1900, "{p:?}");
+            s.mark(p, 0);
+        }
+        assert!(s.is_empty());
     }
 
     #[test]
