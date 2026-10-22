@@ -188,6 +188,22 @@ pub struct Params {
 /// Generates `variants` images (interleaved RGB 0..=1 at the working size). `step(done, total)`
 /// is called after every UNet step (the device has finished it) and returns `false` to cancel.
 pub async fn generate(m: &Models, p: &Params, step: &mut dyn FnMut(usize, usize) -> bool) -> Result<Vec<Vec<f32>>> {
+    // With guidance the batch doubles: run the variants one by one (same seeds, same results)
+    // to keep activations within GPU buffer limits.
+    if p.guidance > 1.0 && p.variants > 1 {
+        let n = p.variants;
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let one = Params { variants: 1, seed: p.seed.wrapping_add(i as u64), ..p.clone() };
+            let mut sub = |d: usize, t: usize| step(i * t + d, n * t);
+            out.extend(generate_batch(m, &one, &mut sub).await?);
+        }
+        return Ok(out);
+    }
+    generate_batch(m, p, step).await
+}
+
+async fn generate_batch(m: &Models, p: &Params, step: &mut dyn FnMut(usize, usize) -> bool) -> Result<Vec<Vec<f32>>> {
     let (prompt, truncated) = m.tokenizer.encode_padded(&p.prompt);
     let _ = truncated;
     let negative = if p.guidance > 1.0 { Some(m.tokenizer.encode_padded(&p.negative).0) } else { None };
@@ -267,12 +283,13 @@ pub fn params(req: &crate::service::Request, m: &Models) -> Params {
     if req.strength < 1.0 && req.strength > 0.0 && (steps as f64 * req.strength).floor() < 1.0 {
         steps = ((1.0 / req.strength).ceil() as usize).min(crate::scheduler::MAX_STEPS);
     }
+    // Distilled models (fused TCD, SDXS) run without classifier-free guidance; High uses it.
     let guidance = if req.guidance > 0.0 {
         req.guidance
-    } else if m.lora {
-        1.0
-    } else {
+    } else if req.tier == crate::service::Tier::High && !m.lora {
         7.0
+    } else {
+        1.0
     };
     Params {
         prompt: req.prompt.clone(),
