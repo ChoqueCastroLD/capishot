@@ -139,6 +139,18 @@ pub const CARDS: &[Card] = &[
         memory_mb: 1000,
     },
     Card {
+        id: GENFILL_FAST_CARD,
+        section: Section::Generative,
+        title: "Fast",
+        description: "Good fills with a smaller download.",
+        files: catalog::GENFILL_FAST,
+        quality: 4,
+        speed: 3,
+        gpu: false,
+        precision: "8-bit",
+        memory_mb: 2500,
+    },
+    Card {
         id: GENFILL_STANDARD_CARD,
         section: Section::Generative,
         title: "Standard",
@@ -256,10 +268,7 @@ mod tests {
         }
         let shown: Vec<&str> = CARDS.iter().flat_map(|c| c.models()).map(|m| m.file).collect();
         for m in crate::models::files() {
-            // The Fast tier's files wait for its card.
-            if !m.id.starts_with("genfill-fast") && !m.id.ends_with("-q8") {
-                assert!(shown.contains(&m.file), "{} has no card", m.id);
-            }
+            assert!(shown.contains(&m.file), "{} has no card", m.id);
         }
     }
 
