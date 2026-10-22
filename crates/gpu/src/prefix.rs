@@ -31,11 +31,13 @@ pub(crate) struct Prefix {
     bytes: u64,
     budget: u64,
     step: i32,
+    /// Level of detail the chunks are at (their rects are in its pixels).
+    level: u32,
 }
 
 impl Default for Prefix {
     fn default() -> Self {
-        Self { context: None, layers: Vec::new(), checkpoint: None, chunks: HashMap::new(), bytes: 0, budget: MAX_BYTES, step: 512 }
+        Self { context: None, layers: Vec::new(), checkpoint: None, chunks: HashMap::new(), bytes: 0, budget: MAX_BYTES, step: 512, level: 0 }
     }
 }
 
@@ -85,9 +87,16 @@ impl Prefix {
         }
     }
 
-    pub(crate) fn prepare(&mut self, doc: &Document, plan: &Plan<'_>) -> Option<Checkpoint> {
+    /// The checkpoint to reuse or fill for `plan`; none at or above root layer `limit` (layers
+    /// drawn moved from their unmoved pixels change the result without changing the document).
+    pub(crate) fn prepare(&mut self, doc: &Document, plan: &Plan<'_>, limit: Option<usize>, level: u32) -> Option<Checkpoint> {
         if self.budget == 0 {
             return None;
+        }
+        if level != self.level {
+            // Chunks of another level of detail: start over at this one.
+            self.clear();
+            self.level = level;
         }
         // Keeping every non-layer field makes new document inputs invalidate automatically.
         // Tile data is Arc-shared; shared Tile equality does not scan its pixel bytes.
@@ -95,12 +104,17 @@ impl Prefix {
         let mut layers = std::mem::take(&mut context.layers);
         let same_context = self.context.as_ref() == Some(&context);
         let changed = self.layers.iter().zip(&layers).position(|(a, b)| a != b).or_else(|| (layers.len() < self.layers.len()).then_some(layers.len()));
-        let old = self.checkpoint.filter(|c| same_context && changed.is_none() && plan.checkpoints.contains(c));
+        let below = |c: &Checkpoint| limit.is_none_or(|l| c.layer_end <= l);
+        let old = self.checkpoint.filter(|c| same_context && changed.is_none() && plan.checkpoints.contains(c) && below(c));
+        let changed = match (changed, limit) {
+            (Some(c), Some(l)) => Some(c.min(l)),
+            (c, l) => c.or(l.filter(|_| same_context)),
+        };
         let checkpoint = old.or_else(|| {
             if same_context && let Some(changed) = changed {
                 plan.checkpoints.iter().rev().find(|c| c.layer_end <= changed && c.pass_end > 1).copied()
             } else {
-                let mut useful = plan.checkpoints.iter().rev().filter(|c| c.pass_end > 1);
+                let mut useful = plan.checkpoints.iter().rev().filter(|c| c.pass_end > 1 && below(c));
                 let last = useful.next().copied();
                 useful.next().copied().or(last)
             }

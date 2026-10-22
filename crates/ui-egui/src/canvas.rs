@@ -1333,9 +1333,13 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
     }
     let preview_key = raw_key ^ display_key;
     let size = [doc.size.width, doc.size.height];
+    // A Move drag: the moving layers come from the pages already on the GPU, at the offset (set
+    // every frame: catch-up and deferred refreshes draw with the current offset too).
+    gpu.set_translated(crate::move_ui::gpu_translations(app, idx));
     let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache { scale: 1.0, ..Default::default() });
     let present = cache.on_gpu && gpu.has(id.0, size);
     let need = crate::gpu_canvas::ViewNeed { visible, level };
+
     if present && cache.revision == revision && cache.preview_key == preview_key {
         // An adjustment preview composited where the view was: catch up where it moved to.
         if let Some(r) = crate::adjust_preview::uncovered(app, id, raw_key, visible) {
@@ -1366,13 +1370,36 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
         return false;
     }
     let partial = present && damage.is_some();
+    if partial
+        && crate::gpu_canvas::PACE_COMPOSITES
+        && crate::gpu_canvas::reduced_refreshes()
+        && let Some(r) = damage.filter(|r| !r.is_empty())
+        && gpu.busy()
+    {
+        // The last composite is still on the GPU: this edit waits for it (catch_up draws it on
+        // the frame after), so frames don't queue up behind the pointer.
+        gpu.defer(id.0, r);
+        gpu.wake_when_done(ctx);
+        if let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) {
+            cache.revision = revision;
+            cache.preview_key = preview_key;
+        }
+        return true;
+    }
     gpu_budget(app, &gpu, idx, partial, visible);
-    // A Move drag: the moving layers come from the pages already on the GPU, at the offset.
-    gpu.set_translated(crate::move_ui::gpu_translations(app, idx));
     let r = gpu.refresh_for(id.0, &doc, if partial { damage } else { None }, display.as_deref(), crate::gpu_canvas::reduced_refreshes().then_some(need));
     if gpu.has_stale(id.0) {
         // What was left out of date is brought up to date on the following frames.
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(crate::gpu_canvas::REFINE_DELAY_MS / 1000.0));
+    }
+    if !r.kind.starts_with("gpu") && crate::move_ui::drawn_in_place(app, idx) && crate::move_ui::in_place_failed(app) {
+        // The CPU drew the document as it is, without the move: draw this frame (and the rest of
+        // the drag) from a moved copy instead.
+        ctx.request_repaint();
+        if let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) {
+            cache.on_gpu = false;
+        }
+        return false;
     }
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
