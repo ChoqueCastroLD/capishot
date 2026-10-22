@@ -73,3 +73,20 @@ The tokenizer matches Hugging Face's `CLIPTokenizer` on 13 prompts (`tests/token
 UNet 803 GFLOP per step (batch 1); VAE encoder 1.12 TFLOP; VAE decoder 2.51 TFLOP; text
 encoder 13 GFLOP. Attention is computed in query chunks so the f32 scores of one chunk stay
 under 128 MB (a 64 × 64 latent's self-attention is 4096² per head).
+
+## Browser check (2026-10-22)
+
+Headless Chromium, SwiftShader WebGPU (software, no `shader-f16`, so `precision: "f32"`),
+single-threaded web build + AI worker (`packaging/web-ai/build.sh`), files from the local models
+folder through the AI Model Manager (`ai.models.download`, Cache Storage, sha256 while
+streaming): select 100×90, prompt "una manzana roja" → "red apple", 1 variant, 256 px, 1 step.
+
+| | |
+|---|---|
+| Download of the 9 files (2.27 GB, local server) | 24 s |
+| Load (stream into GPU buffers, TCD fusion) + generate | 436 s (SwiftShader runs WebGPU on the CPU) |
+| Peak RSS, all Chromium processes (f32 weights: 4.5 GB) | 9.4 GB |
+| Longest main-thread frame gap during the job | 50 ms |
+| `jobs.cancel` (Esc) | worker stopped in 24 ms, document unchanged |
+
+Native CPU (burn-flex f32, 4 threads): 2 variants, 448×512, 4 TCD steps: 70–125 s; load 9–12 s.
