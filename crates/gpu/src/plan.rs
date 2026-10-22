@@ -327,7 +327,13 @@ pub struct DocCtx<'a> {
     pub depth: photocraft_color::SampleType,
     /// The document (effect geometry the CPU computes, e.g. gradient stroke frames).
     pub doc: &'a Document,
+    /// Layers drawn moved from where the document holds them ([`plan_moved`]).
+    pub moved: Option<&'a Moved>,
 }
+
+/// Layers the compositor draws at an offset from where the document holds them (a Move drag's
+/// preview drawn from the unmoved layers, `crate::Translated::in_place`), by layer.
+pub type Moved = std::collections::HashMap<LayerId, (i32, i32)>;
 
 impl<'a> DocCtx<'a> {
     pub fn of(doc: &'a Document) -> Self {
@@ -339,16 +345,40 @@ impl<'a> DocCtx<'a> {
             mode: doc.mode,
             depth: doc.depth,
             doc,
+            moved: None,
         }
     }
 }
 
 /// Build the pass list for `doc`.
 pub fn plan(doc: &Document) -> Result<Plan<'_>, Unsupported> {
+    plan_moved(doc, None)
+}
+
+/// Whether a layer can be drawn moved from its unmoved pixels ([`plan_moved`]): a raster layer
+/// without layer effects or a vector mask (those are built from where the layer is).
+pub fn movable_in_place(layer: &Layer) -> bool {
+    matches!(layer.content, LayerContent::Raster(_)) && !has_effects(layer) && layer.vector_mask.is_none()
+}
+
+/// [`plan`] with the layers in `moved` drawn at their offsets: their bounds (and the bounds of
+/// the groups around them) are planned where they show. Only [`movable_in_place`] layers can
+/// move this way; any other is refused (the caller draws a moved copy instead).
+pub fn plan_moved<'a>(doc: &'a Document, moved: Option<&'a Moved>) -> Result<Plan<'a>, Unsupported> {
     if doc.mode == photocraft_color::ColorMode::Multichannel {
         return Err(Unsupported("Multichannel inks (printed on the CPU)".into()));
     }
-    let mut p = Planner::new(DocCtx::of(doc));
+    if let Some(m) = moved.filter(|m| !m.is_empty()) {
+        for (_, _, l) in doc.walk() {
+            let moved_inside = || has_effects(l) && l.children().is_some_and(|c| walk_any(c, &|k| m.contains_key(&k.id)));
+            if (m.contains_key(&l.id) && !movable_in_place(l)) || moved_inside() {
+                return Err(Unsupported(format!("`{}` can't be drawn moved from its unmoved pixels", l.name)));
+            }
+        }
+    }
+    let mut cx = DocCtx::of(doc);
+    cx.moved = moved.filter(|m| !m.is_empty());
+    let mut p = Planner::new(cx);
     let root = p.clear();
     // Start at the topmost layer that hides everything beneath it (an opaque fill layer): the
     // layers below can't change the result, so they cost no passes or uploads.
@@ -368,6 +398,19 @@ static FUSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(
 /// one binary.
 pub fn set_fusion(on: bool) {
     FUSE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether `f` holds for `layer` or any layer inside it.
+pub fn layer_or_inside(layer: &Layer, f: &dyn Fn(&Layer) -> bool) -> bool {
+    walk_any(std::slice::from_ref(layer), f)
+}
+
+/// Whether `f` holds for any of `layers` or the layers inside them (bounded depth).
+fn walk_any(layers: &[Layer], f: &dyn Fn(&Layer) -> bool) -> bool {
+    fn go(layers: &[Layer], f: &dyn Fn(&Layer) -> bool, depth: usize) -> bool {
+        depth < 64 && layers.iter().any(|l| f(l) || l.children().is_some_and(|c| go(c, f, depth + 1)))
+    }
+    go(layers, f, 0)
 }
 
 /// Whether nothing after pass `i` reads slot `s` before it is written again.
@@ -1028,7 +1071,20 @@ impl<'a> Planner<'a> {
     /// the canvas (beyond that, compositing everywhere costs less than the copy back).
     fn local_clip(&self, layer: &Layer) -> Option<Rect> {
         let canvas = self.cx.canvas;
-        let b = bounds::composite_bounds(layer, canvas)?;
+        let b = match self.cx.moved {
+            Some(m) => {
+                if let Some(&(dx, dy)) = m.get(&layer.id) {
+                    // Where it shows: its bounds within the canvas moved back, moved there.
+                    bounds::composite_bounds(layer, canvas.translate(-dx, -dy))?.translate(dx, dy).intersect(&canvas)
+                } else if layer.children().is_some_and(|c| walk_any(c, &|l| m.contains_key(&l.id))) {
+                    // A group with moved layers inside: everywhere (its bounds are where they were).
+                    return None;
+                } else {
+                    bounds::composite_bounds(layer, canvas)?
+                }
+            }
+            None => bounds::composite_bounds(layer, canvas)?,
+        };
         (b.width() as u64 * b.height() as u64 * 2 <= canvas.width() as u64 * canvas.height() as u64).then_some(b)
     }
 
