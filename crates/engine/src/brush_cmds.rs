@@ -172,7 +172,9 @@ fn normalize_brush_patch(patch: &Value, schema: &Value, cmd: &str, path: &str) -
                 (Value::Object(s), Value::Object(p)) if s.len() != 1 || p.len() != 1 || s.keys().next() == p.keys().next() => {
                     out.insert(k.clone(), normalize_brush_patch(v, sv, cmd, &here)?);
                 }
-                _ => out.insert(k.clone(), v.clone()),
+                _ => {
+                    out.insert(k.clone(), v.clone());
+                }
             }
         } else {
             out.insert(k.clone(), v.clone());
