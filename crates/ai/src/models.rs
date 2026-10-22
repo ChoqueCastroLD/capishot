@@ -28,6 +28,9 @@ pub enum Status {
     Queued,
     /// Downloading now: `done` of `total` bytes, at `bytes_per_sec` (0 until measured).
     Downloading { done: u64, total: u64, bytes_per_sec: f64 },
+    /// Stopped part-way (paused, or the page closed): `done` bytes are kept and the download
+    /// resumes from there.
+    Paused { done: u64, total: u64 },
     /// On this device and verified.
     Downloaded,
     /// A file is there but it isn't the catalog's (an older release): download it again.
@@ -47,6 +50,7 @@ impl Status {
             Self::NotDownloaded => "notDownloaded",
             Self::Queued => "queued",
             Self::Downloading { .. } => "downloading",
+            Self::Paused { .. } => "paused",
             Self::Downloaded => "downloaded",
             Self::UpdateAvailable => "updateAvailable",
             Self::Failed(_) => "failed",
@@ -96,8 +100,14 @@ pub trait ModelStore: Send + Sync {
     fn status(&self, model: &ModelInfo) -> Status;
     /// Adds `model`'s file to the download queue (nothing when it is queued or downloading).
     fn download(&self, model: &'static ModelInfo) -> Result<()>;
-    /// Cancels `model`'s download (queued or running), or every download with `None`.
+    /// Cancels `model`'s download (queued or running), or every download with `None`; what was
+    /// downloaded so far is thrown away.
     fn cancel(&self, model: Option<&ModelInfo>);
+    /// Pauses `model`'s download (queued or running), or every download with `None`, keeping
+    /// what was downloaded: [`ModelStore::download`] resumes it. Stores that can't resume cancel.
+    fn pause(&self, model: Option<&ModelInfo>) {
+        self.cancel(model);
+    }
     /// Deletes `model`'s file from this device (cancelling its download first).
     fn delete(&self, model: &ModelInfo) -> Result<()>;
     /// Storage used by models and the quota.
@@ -249,6 +259,8 @@ pub struct Queue {
     waiting: VecDeque<&'static str>,
     active: Option<Active>,
     failed: HashMap<&'static str, String>,
+    /// Paused (or interrupted) downloads: bytes kept.
+    paused: HashMap<&'static str, u64>,
 }
 
 impl Queue {
@@ -263,13 +275,48 @@ impl Queue {
         true
     }
 
+    /// Pauses `model`'s download, or all of them, remembering the bytes done; like
+    /// [`Queue::cancel`] says whether the running one must be stopped.
+    pub fn pause(&mut self, model: Option<&ModelInfo>) -> Cancelled {
+        let mut what = Cancelled::Nothing;
+        let keep: Vec<&'static str> = self.waiting.iter().copied().filter(|f| model.is_some_and(|m| m.file != *f)).collect();
+        for f in self.waiting.iter().copied().filter(|f| !keep.contains(f)).collect::<Vec<_>>() {
+            self.paused.entry(f).or_insert(0);
+            what = Cancelled::Queued;
+        }
+        self.waiting.retain(|f| keep.contains(f));
+        if let Some(a) = self.active.take_if(|a| model.is_none_or(|m| m.file == a.file)) {
+            self.paused.insert(a.file, a.done);
+            what = Cancelled::Active;
+        }
+        what
+    }
+
+    /// Records `bytes` already on this device for `file` (an interrupted download found at start).
+    pub fn mark_partial(&mut self, file: &'static str, bytes: u64) {
+        if self.active.as_ref().is_none_or(|a| a.file != file) && !self.waiting.contains(&file) {
+            self.paused.insert(file, bytes);
+        }
+    }
+
+    /// Forgets a pause (the partial bytes were deleted).
+    pub fn clear_pause(&mut self, file: &str) {
+        self.paused.remove(file);
+    }
+
     /// Cancels `model`'s download, or all of them.
     pub fn cancel(&mut self, model: Option<&ModelInfo>) -> Cancelled {
         let mut what = Cancelled::Nothing;
         let before = self.waiting.len();
         match model {
-            Some(m) => self.waiting.retain(|f| *f != m.file),
-            None => self.waiting.clear(),
+            Some(m) => {
+                self.waiting.retain(|f| *f != m.file);
+                self.paused.remove(m.file);
+            }
+            None => {
+                self.waiting.clear();
+                self.paused.clear();
+            }
         }
         if self.waiting.len() != before {
             what = Cancelled::Queued;
@@ -288,7 +335,8 @@ impl Queue {
         }
         let file = self.waiting.pop_front()?;
         let total = MODELS.iter().find(|m| m.file == file).map_or(0, |m| m.bytes);
-        self.active = Some(Active { file, done: 0, total, speed: 0.0, sample: None });
+        let done = self.paused.remove(file).unwrap_or(0);
+        self.active = Some(Active { file, done, total, speed: 0.0, sample: None });
         Some(file)
     }
 
@@ -340,7 +388,10 @@ impl Queue {
         if self.waiting.contains(&f) {
             return Some(Status::Queued);
         }
-        self.failed.get(f).map(|e| Status::Failed(e.clone()))
+        if let Some(e) = self.failed.get(f) {
+            return Some(Status::Failed(e.clone()));
+        }
+        self.paused.get(f).map(|d| Status::Paused { done: *d, total: model.bytes })
     }
 
     /// Files waiting (not counting the active one).
@@ -453,6 +504,12 @@ impl ModelStore for FakeStore {
         g.queue.start_next();
     }
 
+    fn pause(&self, model: Option<&ModelInfo>) {
+        let mut g = self.lock();
+        g.queue.pause(model);
+        g.queue.start_next();
+    }
+
     fn delete(&self, model: &ModelInfo) -> Result<()> {
         let mut g = self.lock();
         g.queue.cancel(Some(model));
@@ -476,6 +533,26 @@ mod tests {
 
     fn m(id: &str) -> &'static ModelInfo {
         model(id).unwrap()
+    }
+
+    #[test]
+    fn pause_keeps_bytes_and_resume_starts_there() {
+        let mut q = Queue::default();
+        let lama = catalog::model(catalog::LAMA_ID).unwrap();
+        let migan = catalog::model(catalog::MIGAN_ID).unwrap();
+        q.enqueue(lama);
+        q.enqueue(migan);
+        q.start_next();
+        q.progress(lama.file, 500, lama.bytes, 0.0);
+        assert_eq!(q.pause(None), Cancelled::Active);
+        assert_eq!(q.status(lama), Some(Status::Paused { done: 500, total: lama.bytes }));
+        assert_eq!(q.status(migan), Some(Status::Paused { done: 0, total: migan.bytes }));
+        assert!(q.idle());
+        q.enqueue(lama);
+        assert_eq!(q.start_next(), Some(lama.file));
+        assert_eq!(q.status(lama), Some(Status::Downloading { done: 500, total: lama.bytes, bytes_per_sec: 0.0 }));
+        q.cancel(Some(migan));
+        assert_eq!(q.status(migan), None);
     }
 
     #[test]

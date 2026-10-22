@@ -122,12 +122,16 @@ pub fn from_page() -> Option<Services> {
     })
 }
 
+/// The query the downloader puts on the cache keys of an unfinished download's parts.
+const PART_QUERY: &str = "?capishot-part=";
+
 /// Which models are already in Cache Storage (one listing at startup; entries under another
 /// models URL don't count: the worker looks files up by URL).
 fn scan(shared: Arc<Mutex<Shared>>) {
     wasm_bindgen_futures::spawn_local(async move {
         let base = shared.lock().unwrap_or_else(PoisonError::into_inner).models_base.clone();
         let Some(base) = base else { return };
+        let mut partial: Vec<(&'static str, u64)> = Vec::new();
         let found = async {
             let caches = web_sys::window()?.caches().ok()?;
             let cache: web_sys::Cache = JsFuture::from(caches.open(WEB_CACHE)).await.ok()?.dyn_into().ok()?;
@@ -135,6 +139,20 @@ fn scan(shared: Arc<Mutex<Shared>>) {
             let mut found: Vec<(&'static str, bool)> = Vec::new();
             for k in keys.iter() {
                 let url = Reflect::get(&k, &"url".into()).ok().and_then(|u| u.as_string()).unwrap_or_default();
+                // A part kept from an unfinished download: it resumes from there.
+                if let Some((file_url, _)) = url.split_once(PART_QUERY) {
+                    if let Some(m) = MODELS.iter().find(|m| m.url(&base) == file_url) {
+                        let size = async {
+                            let r: web_sys::Response = JsFuture::from(cache.match_with_str(&url)).await.ok()?.dyn_into().ok()?;
+                            let b: web_sys::Blob = JsFuture::from(r.blob().ok()?).await.ok()?.dyn_into().ok()?;
+                            Some(b.size() as u64)
+                        }
+                        .await
+                        .unwrap_or(0);
+                        partial.push((m.file, size));
+                    }
+                    continue;
+                }
                 let Some(m) = MODELS.iter().find(|m| m.url(&base) == url) else { continue };
                 // The checksum header (written by the downloader); older entries have none.
                 let sha = async {
@@ -149,6 +167,15 @@ fn scan(shared: Arc<Mutex<Shared>>) {
         .await
         .unwrap_or_default();
         let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut sums: HashMap<&'static str, u64> = HashMap::new();
+        for (f, n) in partial.drain(..) {
+            *sums.entry(f).or_default() += n;
+        }
+        for (f, n) in sums {
+            if !found.iter().any(|(x, _)| *x == f) {
+                s.queue.mark_partial(f, n);
+            }
+        }
         for m in MODELS {
             let hit = found.iter().find(|(f, _)| *f == m.file);
             s.cached.insert(m.id, hit.is_some_and(|(_, outdated)| !outdated));
@@ -533,7 +560,7 @@ impl photocraft_ai_sd::service::GenFill for WebGenFill {
         };
         // Standard and up: WebGPU, the plain worker. Ultra-light also runs on the CPU (the threads
         // worker on cross-origin isolated pages).
-        let ultra = req.tier == photocraft_ai_sd::service::Tier::Ultra;
+        let ultra = matches!(req.tier, photocraft_ai_sd::service::Tier::Ultra | photocraft_ai_sd::service::Tier::Fast);
         let target = if ultra { self.up.target(req.cpu, req.threads) } else { self.up.target(false, 0).map(|t| Target { threads: false, pool: 0, ..t }) };
         let Some(target) = target else { return done(Err(SdError::Unavailable(NO_WORKER.into()))) };
         let rgb = Float32Array::from(req.rgb.as_slice());
@@ -1048,8 +1075,28 @@ impl ModelStore for WebModelStore {
     }
 
     fn cancel(&self, model: Option<&ModelInfo>) {
-        let c = self.lock().queue.cancel(model);
+        let (c, urls) = {
+            let mut s = self.lock();
+            // What was kept of these downloads goes too.
+            let urls: Vec<String> = match &s.models_base {
+                Some(b) => MODELS.iter().filter(|m| model.is_none_or(|x| x.file == m.file)).map(|m| m.url(b)).collect(),
+                None => Vec::new(),
+            };
+            (s.queue.cancel(model), urls)
+        };
         if c == Cancelled::Active {
+            kill_downloader();
+        }
+        if web_sys::window().is_some() {
+            drop_parts(urls);
+            pump(&self.shared);
+        }
+    }
+
+    fn pause(&self, model: Option<&ModelInfo>) {
+        let c = self.lock().queue.pause(model);
+        if c == Cancelled::Active {
+            // The downloader keeps the bytes in Cache Storage as they arrive.
             kill_downloader();
         }
         if web_sys::window().is_some() {
@@ -1091,6 +1138,26 @@ impl ModelStore for WebModelStore {
         let models = photocraft_ai::models::files().iter().filter(|m| s.cached.get(m.id) == Some(&true)).map(|m| m.bytes).sum();
         Storage { models: Some(models), used: s.estimate.map(|e| e.0), quota: s.estimate.map(|e| e.1) }
     }
+}
+
+/// Deletes the kept parts of unfinished downloads of `urls` (in the background).
+fn drop_parts(urls: Vec<String>) {
+    if urls.is_empty() {
+        return;
+    }
+    wasm_bindgen_futures::spawn_local(async move {
+        let Some(caches) = web_sys::window().and_then(|w| w.caches().ok()) else { return };
+        let Ok(c) = JsFuture::from(caches.open(WEB_CACHE)).await else { return };
+        let Ok(c) = c.dyn_into::<web_sys::Cache>() else { return };
+        let Ok(keys) = JsFuture::from(c.keys()).await else { return };
+        let Ok(keys) = keys.dyn_into::<Array>() else { return };
+        for k in keys.iter() {
+            let url = Reflect::get(&k, &"url".into()).ok().and_then(|u| u.as_string()).unwrap_or_default();
+            if url.split_once(PART_QUERY).is_some_and(|(f, _)| urls.iter().any(|u| u == f)) {
+                let _ = JsFuture::from(c.delete_with_str(&url)).await;
+            }
+        }
+    });
 }
 
 /// The downloader worker (main thread only).

@@ -3295,3 +3295,34 @@ cameraData	Lens	Lensa
 	Collapse to Icons	Ciutkan ke ikon
 	Expand Panels	Bentangkan panel
 	Dock to the Panels	Tambatkan ke panel
+	Ultra-light (any device, 280 MB)	Ultra-ringan (perangkat apa pun, 280 MB)
+	Fast (1 GB)	Cepat (1 GB)
+	Standard (GPU, 2.3 GB)	Standar (GPU, 2,3 GB)
+	High (GPU, slow)	Tinggi (GPU, lambat)
+	Ultra-light	Ultra-ringan
+	Show files	Tampilkan file
+	Recommended for this device	Disarankan untuk perangkat ini
+	Generative Fill - {tier}	Isian Generatif - {tier}
+	Clean	Bersihkan
+	Erase text and objects.	Menghapus teks dan objek.
+	Enlarge pages without blur.	Memperbesar halaman tanpa buram.
+	Draw new content from a prompt.	Menggambar konten baru dari perintah.
+	Speed	Kecepatan
+	No GPU needed	Tanpa GPU
+	Precision	Presisi
+	Memory	Memori
+	GPU memory	Memori GPU
+	Resume	Lanjutkan
+	Paused	Dijeda
+	Ready	Siap
+	Downloading	Mengunduh
+	Pause all	Jeda semua
+	Erases text and SFX and redraws screentone and lines.	Menghapus teks dan SFX, menggambar ulang screentone dan garis.
+	A small cleaner for phones and computers without a GPU.	Pembersih kecil untuk ponsel dan komputer tanpa GPU.
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	Pembesaran tajam 2× dan 4× halaman manga hitam putih.
+	2× and 4× upscaling of colour pages and covers.	Pembesaran 2× dan 4× halaman berwarna dan sampul.
+	Fast upscaling that runs well on any device.	Pembesaran cepat yang lancar di perangkat apa pun.
+	Rough fills on any device, even without a GPU.	Isian kasar di perangkat apa pun, bahkan tanpa GPU.
+	Good fills with a smaller download.	Isian bagus dengan unduhan lebih kecil.
+	Detailed fills from a prompt, three variants in seconds on a GPU.	Isian detail dari perintah, tiga varian dalam detik di GPU.
+	Needs a GPU	Perlu GPU
