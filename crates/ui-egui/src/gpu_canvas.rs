@@ -1512,7 +1512,7 @@ pub const LOD_MIN_PX: u64 = 512 * 512;
 
 /// Work (output pixels × passes) of the first full-size refinement piece; later pieces adapt to
 /// the GPU time the previous one took (`RefinePacer`).
-pub const REFINE_WORK: u64 = 8 << 20;
+pub const REFINE_WORK: u64 = 2 << 20;
 
 /// How long after the last reduced or deferred refresh full-size refinement starts (ms): a
 /// slider scrub or a Move drag keeps producing frames, and refining between them would only
