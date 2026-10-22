@@ -52,6 +52,14 @@ impl Tier {
         }
     }
 
+    /// Default number of variants (one on the light tiers: each costs a full run there).
+    pub fn variants(self) -> usize {
+        match self {
+            Self::Ultra | Self::Fast => 1,
+            Self::Standard | Self::High => 3,
+        }
+    }
+
     /// Default sampling steps.
     pub fn steps(self) -> usize {
         match self {

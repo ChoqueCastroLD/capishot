@@ -3190,3 +3190,31 @@ fontWeight	Italic	Itálico
 	Float Panel	Painel flutuante
 	Float Panel Group	Destacar grupo de painéis
 	Dock Panel Group	Ancorar grupo de painéis
+	Ultra-light	Ultraleve
+	Show files	Mostrar ficheiros
+	Recommended for this device	Recomendado para este dispositivo
+	Generative Fill - {tier}	Preenchimento generativo - {tier}
+	Clean	Limpar
+	Upscale	Ampliar
+	Erase text and objects.	Apaga textos e objetos.
+	Enlarge pages without blur.	Amplia páginas sem desfocar.
+	Draw new content from a prompt.	Desenha conteúdo novo a partir de um texto.
+	Speed	Velocidade
+	No GPU needed	Sem GPU
+	Precision	Precisão
+	Memory	Memória
+	GPU memory	Memória da GPU
+	Resume	Retomar
+	Paused	Em pausa
+	Ready	Pronto
+	Downloading	A transferir
+	Pause all	Pausar tudo
+	Erases text and SFX and redraws screentone and lines.	Apaga textos e onomatopeias e redesenha retícula e linhas.
+	A small cleaner for phones and computers without a GPU.	Um limpador pequeno para telemóveis e PCs sem GPU.
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	Amplia 2× e 4× páginas de manga a preto e branco com nitidez.
+	2× and 4× upscaling of colour pages and covers.	Amplia 2× e 4× páginas a cores e capas.
+	Fast upscaling that runs well on any device.	Ampliação rápida que corre bem em qualquer dispositivo.
+	Rough fills on any device, even without a GPU.	Preenchimentos simples em qualquer dispositivo, mesmo sem GPU.
+	Good fills with a smaller download.	Bons preenchimentos com uma transferência menor.
+	Detailed fills from a prompt, three variants in seconds on a GPU.	Preenchimentos detalhados a partir de um texto, três variações em segundos na GPU.
+	Needs a GPU	Requer GPU
